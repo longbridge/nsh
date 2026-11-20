@@ -25,6 +25,8 @@ mod focus_selection;
 #[cfg(target_os = "macos")]
 mod fps_collapse;
 #[cfg(target_os = "macos")]
+mod hover_cursor;
+#[cfg(target_os = "macos")]
 mod ime;
 #[cfg(target_os = "macos")]
 mod input_focus;
@@ -133,6 +135,8 @@ fn main() {
                 embedded_scroll::run();
             } else if std::env::var_os("NSH_CANVAS_BOUNDS_CHECK_ONLY").is_some() {
                 canvas_bounds::run();
+            } else if std::env::var_os("NSH_HOVER_CURSOR_CHECK_ONLY").is_some() {
+                hover_cursor::run();
             } else if std::env::var_os("NSH_PRESS_MOMENTUM_CHECK_ONLY").is_some() {
                 press_momentum::run();
             } else {
@@ -144,6 +148,7 @@ fn main() {
                 modal_fade::run();
                 modal_focus::run();
                 navigation_unmount::run();
+                hover_cursor::run();
                 #[cfg(feature = "shader")]
                 shader_content::run();
                 canvas_bounds::run();
