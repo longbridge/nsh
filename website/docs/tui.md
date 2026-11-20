@@ -214,7 +214,7 @@ accent. The app's focus styles still apply on top.
 | Component | In the terminal |
 |---|---|
 | `Checkbox` | `[✓]`, `[ ]` or `[–]`, then its label |
-| `Radio` | `(●)` or `( )`, then its label |
+| `Radio` | `[●]` or `[ ]`, then its label |
 | `Switch` | `[✓]` on, `[ ]` off, as a checkbox |
 | `Slider` | a row of `─`, filled with `━` up to the value, a `●` per thumb |
 | `Progress` | a heavy line `━` in the indicator's color, then a light `─` in the line color |
