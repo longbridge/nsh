@@ -2186,10 +2186,10 @@ pub struct ContextMenuProps {
     /// motion), on Android the system's popup menu by the trigger, in
     /// place of the children; a chosen item comes back as
     /// `onSelect({ id })`. `MenuButton`'s items: ids, labels, SF Symbols
-    /// (SVG icons on Android), checks, disabled and destructive items,
-    /// submenus and sections. On every other platform `items`, `title` and
-    /// `onSelect` are not used: the children are the menu, drawn as
-    /// without `items`.
+    /// (SVG icons on Android), checks, single choices, disabled and
+    /// destructive items, submenus and sections. On every other platform
+    /// `items`, `title` and `onSelect` are not used: the children are the
+    /// menu, drawn as without `items`.
     #[prop(default)]
     pub items: Prop<Vec<MenuButtonItem>>,
     /// iOS and Android: the system's menu's title, above its items

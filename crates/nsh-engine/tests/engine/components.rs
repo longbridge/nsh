@@ -1106,11 +1106,10 @@ setTimeout(async () => {
 mount(() => <Text>{shown()}</Text>);
 "#;
 
-/// A terminal decodes no images: `Image.getSize` and `prefetch` reject at
-/// once, coded, and no request reaches the platform (whose answer would
-/// never come).
+/// A terminal draws images: `Image.getSize` and `prefetch` ask it, as they
+/// ask every platform.
 #[test]
-fn image_queries_reject_at_once_in_a_terminal() {
+fn image_queries_reach_a_terminal() {
     let (_engine, rx) = start_in(
         IMAGE_IN_A_TERMINAL,
         Environment {
@@ -1118,23 +1117,26 @@ fn image_queries_reject_at_once_in_a_terminal() {
             ..Environment::default()
         },
     );
-    let wanted = "Error ERR_FEATURE_UNAVAILABLE_ON_PLATFORM | \
-                  Error ERR_FEATURE_UNAVAILABLE_ON_PLATFORM";
-    let mut asked = false;
-    let batches = until(&rx, |batch| {
-        asked |= batch.items.iter().any(|i| {
-            matches!(
-                i,
-                MountItem::Command {
-                    command: Command::ImageInfo { .. },
-                    ..
-                }
-            )
-        });
-        shows(batch, wanted)
+    let asked = |batch: &MountBatch| {
+        batch
+            .items
+            .iter()
+            .filter(|i| {
+                matches!(
+                    i,
+                    MountItem::Command {
+                        command: Command::ImageInfo { .. },
+                        ..
+                    }
+                )
+            })
+            .count()
+    };
+    let mut count = 0;
+    until(&rx, |batch| {
+        count += asked(batch);
+        count == 2
     });
-    assert!(batches.iter().any(|b| shows(b, wanted)));
-    assert!(!asked, "an image query reached a terminal");
 }
 
 const MEASURE: &str = r#"import { mount, signal, Scroll, Text, View, type ViewRef } from "nsh";
@@ -12379,7 +12381,7 @@ mount(() => <Window id="main"><View>
   <MenuButton accessibilityLabel="Account" title="me@example.com"
     items={[
       { id: "settings", label: "Settings", icon: "gearshape" },
-      { id: "", label: "Appearance", inline: true, items: [
+      { id: "", label: "Appearance", inline: true, singleSelection: true, items: [
         { id: "light", label: "Light", checked: !dark() },
         { id: "dark", label: "Dark", checked: dark() },
       ] },
@@ -12394,7 +12396,7 @@ mount(() => <Window id="main"><View>
 /// `nsh/base`'s `MenuButton` covers its content with the system's button on
 /// iOS and Android: the menu's items, title and label reach it as data, a
 /// chosen item comes back as `onSelect({ id })`, and the new checks reach
-/// the same button.
+/// the same button. A section of one choice says so.
 #[test]
 fn the_menu_button_gives_the_mobile_systems_their_menu_and_reports_the_choice() {
     use nsh_core::platform::{MENU_BUTTON_COMPONENT, Os};
@@ -12416,7 +12418,7 @@ fn the_menu_button_gives_the_mobile_systems_their_menu_and_reports_the_choice() 
         let appearance = |dark: bool| {
             serde_json::json!([
                 { "id": "settings", "label": "Settings", "icon": "gearshape" },
-                { "id": "", "label": "Appearance", "inline": true, "items": [
+                { "id": "", "label": "Appearance", "inline": true, "singleSelection": true, "items": [
                     { "id": "light", "label": "Light", "checked": !dark },
                     { "id": "dark", "label": "Dark", "checked": dark },
                 ] },

@@ -17,6 +17,7 @@ use anyhow::{Context as _, bail};
 use serde::Deserialize;
 
 use crate::{
+    android,
     apple::{
         ActivationPolicy, AppleConfig, ApplePlatform, IOS_MINIMUM, MACOS_MINIMUM, MacosConfig,
     },
@@ -708,6 +709,7 @@ pub(crate) struct PackageOptions<'a> {
 /// (`{ "macos": "icon-mac.png", "windows": "icon-win.png" }`) since their
 /// conventions differ (macOS draws its artwork inset on a transparent
 /// canvas, Windows edge to edge). A platform left out gets no icon.
+/// Android's may also be an adaptive icon ([`PlatformIcon::Adaptive`]).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(untagged)]
 pub(crate) enum AppIcon {
@@ -715,7 +717,43 @@ pub(crate) enum AppIcon {
     All(PathBuf),
     /// The icons by platform: `macos`, `windows`, `linux`, `ios`, `android`,
     /// `web` ([`AppIcon::PLATFORMS`]).
-    Platforms(std::collections::BTreeMap<String, PathBuf>),
+    Platforms(std::collections::BTreeMap<String, PlatformIcon>),
+}
+
+/// One platform's icon in [`AppIcon::Platforms`].
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(from = "serde_json::Value")]
+pub(crate) enum PlatformIcon {
+    /// A PNG.
+    Image(PathBuf),
+    /// Android: the layers of an adaptive icon (`{ "foreground": ..,
+    /// "background": .., "monochrome": .. }`).
+    Adaptive(android::AdaptiveIcon),
+    /// A value that is neither, with why: [`read_config`] warns of it and
+    /// leaves the platform without an icon, as it does an adaptive icon
+    /// given for another platform than Android. Read here rather than
+    /// failing, which would drop the whole `icon`.
+    Invalid(String),
+}
+
+impl From<serde_json::Value> for PlatformIcon {
+    fn from(value: serde_json::Value) -> Self {
+        match value {
+            serde_json::Value::String(path) => PlatformIcon::Image(path.into()),
+            serde_json::Value::Object(_) => {
+                let mut unknown = Vec::new();
+                match serde_ignored::deserialize::<_, _, android::AdaptiveIcon>(&value, |key| {
+                    unknown.push(key.to_string())
+                }) {
+                    Ok(icon) => PlatformIcon::Adaptive(android::AdaptiveIcon { unknown, ..icon }),
+                    Err(e) => PlatformIcon::Invalid(e.to_string()),
+                }
+            }
+            _ => PlatformIcon::Invalid(
+                "expected the path of a PNG, or (Android) an adaptive icon's layers".into(),
+            ),
+        }
+    }
 }
 
 impl AppIcon {
@@ -723,7 +761,7 @@ impl AppIcon {
     const PLATFORMS: [&str; 6] = ["macos", "windows", "linux", "ios", "android", "web"];
 
     /// The icon of `target`'s platform.
-    pub(crate) fn of(&self, target: PackageTarget) -> Option<&Path> {
+    pub(crate) fn of(&self, target: PackageTarget) -> Option<android::Icon<'_>> {
         let platform = match target {
             PackageTarget::Ios | PackageTarget::IosSimulator => "ios",
             PackageTarget::Android => "android",
@@ -734,16 +772,29 @@ impl AppIcon {
             PackageTarget::Gpui => return None,
         };
         match self {
-            AppIcon::All(icon) => Some(icon),
-            AppIcon::Platforms(icons) => icons.get(platform).map(PathBuf::as_path),
+            AppIcon::All(icon) => Some(android::Icon::Image(icon)),
+            AppIcon::Platforms(icons) => match icons.get(platform)? {
+                PlatformIcon::Image(icon) => Some(android::Icon::Image(icon)),
+                PlatformIcon::Adaptive(icon) => Some(android::Icon::Adaptive(icon)),
+                PlatformIcon::Invalid(_) => None,
+            },
         }
     }
 }
 
 impl AppConfig {
-    /// The app's icon for `target` (`nsh.json` `"icon"`, or `--icon`).
+    /// The app's icon for `target` (`nsh.json` `"icon"`, or `--icon`): a
+    /// PNG. Android's may be adaptive instead ([`AppConfig::android_icon`]).
     pub(crate) fn icon(&self, target: PackageTarget) -> Option<&Path> {
-        self.icon.as_ref()?.of(target)
+        match self.icon.as_ref()?.of(target)? {
+            android::Icon::Image(icon) => Some(icon),
+            android::Icon::Adaptive(_) => None,
+        }
+    }
+
+    /// The app's Android launcher icon: a PNG or an adaptive icon.
+    pub(crate) fn android_icon(&self) -> Option<android::Icon<'_>> {
+        self.icon.as_ref()?.of(PackageTarget::Android)
     }
 
     /// The macOS development host's arguments for the app (`nsh run`,
@@ -859,14 +910,34 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
         Some(AppIcon::Platforms(icons)) => Some(AppIcon::Platforms(
             icons
                 .into_iter()
-                .filter(|(platform, _)| {
-                    let known = AppIcon::PLATFORMS.contains(&platform.as_str());
-                    if !known {
+                .filter_map(|(platform, icon)| {
+                    if !AppIcon::PLATFORMS.contains(&platform.as_str()) {
                         ignored.push(format!("unknown key `icon.{platform}`"));
+                        return None;
                     }
-                    known
+                    let icon = match icon {
+                        PlatformIcon::Image(path) => PlatformIcon::Image(dir.join(path)),
+                        PlatformIcon::Adaptive(icon) if platform == "android" => {
+                            ignored.extend(
+                                icon.unknown
+                                    .iter()
+                                    .map(|key| format!("unknown key `icon.android.{key}`")),
+                            );
+                            PlatformIcon::Adaptive(icon.relative_to(dir))
+                        }
+                        PlatformIcon::Adaptive(_) => {
+                            ignored.push(format!(
+                                "icon.{platform}: an adaptive icon is Android's only; give the path of a PNG"
+                            ));
+                            return None;
+                        }
+                        PlatformIcon::Invalid(why) => {
+                            ignored.push(format!("icon.{platform}: {why}"));
+                            return None;
+                        }
+                    };
+                    Some((platform, icon))
                 })
-                .map(|(platform, icon)| (platform, dir.join(icon)))
                 .collect(),
         )),
         None => None,
@@ -1568,7 +1639,7 @@ fn package_android(
             dark: config.appearance.as_deref() == Some("dark"),
             runtime: &runtime,
             abis: &abis,
-            icon: config.icon(PackageTarget::Android),
+            icon: config.android_icon(),
             assets,
             sounds: android_sounds(config, built),
             signing,
@@ -3345,11 +3416,88 @@ mod tests {
             config.icon,
             Some(AppIcon::Platforms(
                 [
-                    ("macos".to_owned(), dir.join("mac.png")),
-                    ("windows".to_owned(), dir.join("win.png")),
+                    ("macos".to_owned(), PlatformIcon::Image(dir.join("mac.png"))),
+                    (
+                        "windows".to_owned(),
+                        PlatformIcon::Image(dir.join("win.png"))
+                    ),
                 ]
                 .into()
             ))
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn nsh_json_android_icon_may_be_adaptive() {
+        let dir =
+            std::env::temp_dir().join(format!("nsh-adaptive-icon-config-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let entry = dir.join("app.tsx");
+        fs::write(
+            dir.join("nsh.json"),
+            r##"{ "icon": {
+                "ios": "ios.png",
+                "android": { "foreground": "fg.png", "background": "#ffffff", "monochrome": "mono.png", "inset": 1 },
+                "macos": { "foreground": "fg.png", "background": "#ffffff" }
+            } }"##,
+        )
+        .unwrap();
+        let config = read_config(&entry).unwrap();
+        let Some(android::Icon::Adaptive(icon)) = config.android_icon() else {
+            panic!("{:?}", config.icon);
+        };
+        assert_eq!(icon.foreground, dir.join("fg.png"));
+        assert_eq!(
+            icon.background,
+            android::IconBackground::Color(crate::apple::Color([255, 255, 255, 255]))
+        );
+        assert_eq!(icon.monochrome, Some(dir.join("mono.png")));
+        // No PNG for the targets that take one.
+        assert_eq!(config.icon(PackageTarget::Android), None);
+        // Android's only: macOS gets none, the other platforms keep theirs.
+        assert_eq!(config.icon(PackageTarget::Macos), None);
+        assert_eq!(
+            config.icon(PackageTarget::Ios),
+            Some(dir.join("ios.png").as_path())
+        );
+
+        // A background image is relative to `nsh.json`; a malformed color
+        // leaves Android without an icon, the other platforms with theirs.
+        fs::write(
+            dir.join("nsh.json"),
+            r##"{ "icon": { "android": { "foreground": "fg.png", "background": "bg.png" } } }"##,
+        )
+        .unwrap();
+        let config = read_config(&entry).unwrap();
+        let Some(android::Icon::Adaptive(icon)) = config.android_icon() else {
+            panic!("{:?}", config.icon);
+        };
+        assert_eq!(
+            icon.background,
+            android::IconBackground::Image(dir.join("bg.png"))
+        );
+        fs::write(
+            dir.join("nsh.json"),
+            r##"{ "icon": { "ios": "ios.png", "android": { "foreground": "fg.png", "background": "#fff" } } }"##,
+        )
+        .unwrap();
+        let config = read_config(&entry).unwrap();
+        assert!(config.android_icon().is_none());
+        assert_eq!(
+            config.icon(PackageTarget::Ios),
+            Some(dir.join("ios.png").as_path())
+        );
+
+        // One PNG for Android stays one.
+        fs::write(
+            dir.join("nsh.json"),
+            r#"{ "icon": { "android": "icon.png" } }"#,
+        )
+        .unwrap();
+        let config = read_config(&entry).unwrap();
+        assert!(
+            matches!(config.android_icon(), Some(android::Icon::Image(path)) if path == dir.join("icon.png"))
         );
         fs::remove_dir_all(&dir).unwrap();
     }

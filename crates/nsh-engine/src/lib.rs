@@ -900,39 +900,181 @@ impl nsh_core::runtime::UpdaterHost for UpdaterOverNetwork {
         Ok(version)
     }
 
-    fn get(&self, url: &str, sink: nsh_core::runtime::UpdaterSink<'_>) -> Result<(), String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let events: FetchEvents = Box::new(move |event| {
-            let _ = tx.send(event);
-        });
-        let task = self.network.fetch(HttpRequest::new("GET", url), events);
-        let mut total = None;
-        let result = loop {
-            match rx.recv() {
-                Ok(FetchEvent::Head(head)) => {
-                    if !(200..300).contains(&head.status) {
-                        break Err(format!("HTTP {}", head.status));
-                    }
-                    total = head
-                        .headers
-                        .iter()
-                        .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
-                        .and_then(|(_, value)| value.parse().ok());
-                }
-                Ok(FetchEvent::Data(chunk)) => {
-                    if let Err(e) = sink(&chunk, total) {
-                        break Err(e);
-                    }
-                }
-                Ok(FetchEvent::End) => return Ok(()),
-                Ok(FetchEvent::Failed(e)) => break Err(e),
-                Ok(FetchEvent::BodyWanted) => {}
-                Err(_) => break Err("the network stack went away".to_owned()),
+    fn get(
+        &self,
+        url: &str,
+        from: u64,
+        sink: nsh_core::runtime::UpdaterSink<'_>,
+    ) -> Result<(), String> {
+        const MAX_REDIRECTS: usize = 20;
+        let mut current = url.to_owned();
+        for hops in 0..=MAX_REDIRECTS {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let events: FetchEvents = Box::new(move |event| {
+                let _ = tx.send(event);
+            });
+            // Disable transparent compression so byte offsets match the raw
+            // asset bytes hashed by the manifest on every platform HTTP stack.
+            let mut request =
+                HttpRequest::new("GET", &current).header("Accept-Encoding", "identity");
+            if from > 0 {
+                request = request.header("Range", format!("bytes={from}-"));
             }
-        };
-        task.cancel();
-        result
+            // Follow redirects here so `Range` and `Accept-Encoding` survive
+            // cross-origin redirects (e.g. GitHub Releases -> asset CDN) on
+            // every platform stack and every hop stays HTTPS (or loopback).
+            request.follow_redirects = false;
+            let task = self.network.fetch(request, events);
+
+            let mut expected_body: Option<u64> = None;
+            let mut received_body: u64 = 0;
+            let mut redirect_to: Option<String> = None;
+            // Where the next piece starts in the resource, and its size.
+            let mut at = 0u64;
+            let mut total: Option<u64> = None;
+
+            let outcome = loop {
+                match rx.recv() {
+                    Ok(FetchEvent::Head(head)) => {
+                        if matches!(head.status, 301 | 302 | 303 | 307 | 308)
+                            && let Some(location) = updater_header(&head.headers, "location")
+                        {
+                            if hops == MAX_REDIRECTS {
+                                break Err("too many redirects".to_owned());
+                            }
+                            let base = if head.url.is_empty() {
+                                current.as_str()
+                            } else {
+                                head.url.as_str()
+                            };
+                            let next = nsh_core::access::resolve_reference(base, location.trim());
+                            if !is_updater_url(&next) {
+                                break Err(format!("redirect to non-HTTPS URL {next:?}"));
+                            }
+                            redirect_to = Some(next);
+                            break Ok(());
+                        }
+                        let content_length = updater_header(&head.headers, "content-length")
+                            .and_then(|value| value.trim().parse::<u64>().ok());
+                        if from > 0 && head.status == 206 {
+                            let valid = updater_header(&head.headers, "content-range")
+                                .and_then(parse_content_range)
+                                .filter(|range| {
+                                    range.start == from
+                                        && content_length.is_none_or(|cl| cl == range.len)
+                                });
+                            match valid {
+                                Some(range) => {
+                                    expected_body = Some(range.len);
+                                    at = range.start;
+                                    total = range.total;
+                                }
+                                // Not the range asked for: no pieces.
+                                None => break Ok(()),
+                            }
+                        } else if from > 0 && head.status == 416 {
+                            break Ok(());
+                        } else if head.status == 200 {
+                            expected_body = content_length;
+                            total = content_length;
+                        } else {
+                            break Err(format!("HTTP {}", head.status));
+                        }
+                    }
+                    Ok(FetchEvent::Data(chunk)) => {
+                        if chunk.is_empty() {
+                            continue;
+                        }
+                        received_body = received_body.saturating_add(chunk.len() as u64);
+                        if let Err(e) = sink(at, &chunk, total) {
+                            break Err(e);
+                        }
+                        at = at.saturating_add(chunk.len() as u64);
+                    }
+                    Ok(FetchEvent::End) => {
+                        if let Some(expected) = expected_body
+                            && received_body < expected
+                        {
+                            break Err(format!(
+                                "truncated response ({received_body} of {expected} bytes)"
+                            ));
+                        }
+                        break Ok(());
+                    }
+                    Ok(FetchEvent::Failed(e)) => break Err(e),
+                    Ok(FetchEvent::BodyWanted) => {}
+                    Err(_) => break Err("the network stack went away".to_owned()),
+                }
+            };
+            task.cancel();
+            outcome?;
+            if let Some(next) = redirect_to {
+                current = next;
+                continue;
+            }
+            return Ok(());
+        }
+        Err("too many redirects".to_owned())
     }
+}
+
+/// First value of header `target` (ASCII case-insensitive).
+fn updater_header<'a>(headers: &'a [(String, String)], target: &str) -> Option<&'a str> {
+    headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(target))
+        .map(|(_, value)| value.as_str())
+}
+
+/// A parsed RFC 9110 `Content-Range: bytes <start>-<end>/<total|*>` header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ContentRange {
+    start: u64,
+    len: u64,
+    total: Option<u64>,
+}
+
+fn parse_content_range(value: &str) -> Option<ContentRange> {
+    let parse_digits = |s: &str| -> Option<u64> {
+        (!s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+            .then(|| s.parse().ok())
+            .flatten()
+    };
+    let (unit, rest) = value.trim().split_once(' ')?;
+    if !unit.eq_ignore_ascii_case("bytes") {
+        return None;
+    }
+    let (range, total) = rest.trim_start().split_once('/')?;
+    let (start, end) = range.split_once('-')?;
+    let start = parse_digits(start)?;
+    let end = parse_digits(end)?;
+    if start > end {
+        return None;
+    }
+    let len = end.checked_sub(start)?.checked_add(1)?;
+    let total = if total == "*" {
+        None
+    } else {
+        let total = parse_digits(total)?;
+        if end >= total {
+            return None;
+        }
+        Some(total)
+    };
+    Some(ContentRange { start, len, total })
+}
+
+/// HTTPS only, or plain HTTP to loopback (local tests), matching `nsh-updater`.
+fn is_updater_url(url: &str) -> bool {
+    let Some(parts) = nsh_core::access::parse_url(url) else {
+        return false;
+    };
+    parts.scheme == "https"
+        || (parts.scheme == "http"
+            && matches!(
+                parts.host.as_str(),
+                "127.0.0.1" | "localhost" | "::1" | "[::1]"
+            ))
 }
 
 /// The platform's HTTP stack, used by JS `fetch`.
@@ -4712,5 +4854,404 @@ mod download_cleanup_tests {
             );
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
+    }
+}
+
+#[cfg(test)]
+mod updater_range_tests {
+    use std::sync::Mutex;
+
+    use nsh_core::runtime::UpdaterHost as _;
+
+    use super::*;
+
+    #[test]
+    fn parses_content_range_headers() {
+        assert_eq!(
+            parse_content_range("bytes 0-9/10"),
+            Some(ContentRange {
+                start: 0,
+                len: 10,
+                total: Some(10),
+            })
+        );
+        assert_eq!(
+            parse_content_range("BYTES 100-199/500"),
+            Some(ContentRange {
+                start: 100,
+                len: 100,
+                total: Some(500),
+            })
+        );
+        assert_eq!(
+            parse_content_range("  bytes 5-9/*  "),
+            Some(ContentRange {
+                start: 5,
+                len: 5,
+                total: None,
+            })
+        );
+        for bad in [
+            "",
+            "bytes */10",
+            "items 0-9/10",
+            "bytes 10-5/20",
+            "bytes 0-10/10",
+            "bytes +0-9/10",
+            "bytes 0-9/10, 12-15/10",
+            "bytes 0-18446744073709551615/*",
+        ] {
+            assert_eq!(parse_content_range(bad), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn updater_urls_allow_https_and_loopback_only() {
+        assert!(is_updater_url(
+            "https://objects.githubusercontent.com/a.tar.gz"
+        ));
+        assert!(is_updater_url("http://127.0.0.1:8080/a.tar.gz"));
+        assert!(is_updater_url("http://localhost/a.tar.gz"));
+        assert!(is_updater_url("http://[::1]:8080/a.tar.gz"));
+        assert!(!is_updater_url("http://example.com/a.tar.gz"));
+        assert!(!is_updater_url("http://localhost.evil.dev/a.tar.gz"));
+        assert!(!is_updater_url("file:///etc/passwd"));
+    }
+
+    struct NoopTask;
+    impl FetchTask for NoopTask {
+        fn send(&mut self, _: Vec<u8>) {}
+        fn finish(&mut self) {}
+        fn pause(&mut self, _: bool) {}
+        fn cancel(self: Box<Self>) {}
+    }
+
+    type MockHandler = Box<dyn Fn(&HttpRequest) -> Vec<FetchEvent> + Send + Sync>;
+
+    struct MockNetwork {
+        seen: Mutex<Vec<HttpRequest>>,
+        handler: MockHandler,
+    }
+
+    impl Network for MockNetwork {
+        fn fetch(&self, request: HttpRequest, mut events: FetchEvents) -> Box<dyn FetchTask> {
+            self.seen.lock().unwrap().push(request.clone());
+            for event in (self.handler)(&request) {
+                events(event);
+            }
+            Box::new(NoopTask)
+        }
+    }
+
+    fn host_with(
+        handler: impl Fn(&HttpRequest) -> Vec<FetchEvent> + Send + Sync + 'static,
+    ) -> (Arc<MockNetwork>, UpdaterOverNetwork) {
+        let net = Arc::new(MockNetwork {
+            seen: Mutex::new(Vec::new()),
+            handler: Box::new(handler),
+        });
+        let host = UpdaterOverNetwork {
+            network: net.clone(),
+            assets: None,
+            config: None,
+            running: None,
+        };
+        (net, host)
+    }
+
+    fn collect(
+        host: &UpdaterOverNetwork,
+        url: &str,
+        from: u64,
+    ) -> Result<(Vec<String>, Vec<u8>), String> {
+        let mut events = Vec::new();
+        let mut body = Vec::new();
+        let mut next_at: Option<u64> = None;
+        host.get(url, from, &mut |at, bytes, total| {
+            assert!(!bytes.is_empty());
+            if let Some(expected) = next_at {
+                assert_eq!(at, expected);
+            } else {
+                let kind = if at == 0 { "full" } else { "partial" };
+                events.push(format!("{kind}:{total:?}"));
+            }
+            next_at = Some(at + bytes.len() as u64);
+            body.extend_from_slice(bytes);
+            Ok(())
+        })?;
+        if body.is_empty() && from > 0 {
+            events.push("unsatisfiable".into());
+        }
+        Ok((events, body))
+    }
+
+    #[test]
+    fn updater_over_network_follows_redirects_and_validates_ranges() {
+        let (net, host) = host_with(|req| match req.url.as_str() {
+            "https://github.com/o/r/releases/latest/download/a.tar.gz" => vec![
+                FetchEvent::Head(HttpHead {
+                    status: 302,
+                    url: req.url.clone(),
+                    headers: vec![(
+                        "Location".into(),
+                        "https://cdn.example.com/assets/a.tar.gz".into(),
+                    )],
+                    ..Default::default()
+                }),
+                FetchEvent::End,
+            ],
+            "https://cdn.example.com/assets/a.tar.gz" => {
+                let range = updater_header(&req.headers, "range");
+                if range == Some("bytes=4-") {
+                    vec![
+                        FetchEvent::Head(HttpHead {
+                            status: 206,
+                            url: req.url.clone(),
+                            headers: vec![
+                                ("Content-Range".into(), "bytes 4-9/10".into()),
+                                ("Content-Length".into(), "6".into()),
+                            ],
+                            ..Default::default()
+                        }),
+                        FetchEvent::Data(Vec::new()),
+                        FetchEvent::Data(b"45".to_vec()),
+                        FetchEvent::Data(b"6789".to_vec()),
+                        FetchEvent::End,
+                    ]
+                } else {
+                    vec![
+                        FetchEvent::Head(HttpHead {
+                            status: 200,
+                            url: req.url.clone(),
+                            headers: vec![("Content-Length".into(), "10".into())],
+                            ..Default::default()
+                        }),
+                        FetchEvent::Data(b"0123456789".to_vec()),
+                        FetchEvent::End,
+                    ]
+                }
+            }
+            "https://downgrade.example.com/a" => vec![
+                FetchEvent::Head(HttpHead {
+                    status: 302,
+                    url: req.url.clone(),
+                    headers: vec![("Location".into(), "http://insecure.example.com/a".into())],
+                    ..Default::default()
+                }),
+                FetchEvent::End,
+            ],
+            "https://bad-range.example.com/wrong-start" => vec![
+                FetchEvent::Head(HttpHead {
+                    status: 206,
+                    url: req.url.clone(),
+                    headers: vec![
+                        ("Content-Range".into(), "bytes 0-9/10".into()),
+                        ("Content-Length".into(), "10".into()),
+                    ],
+                    ..Default::default()
+                }),
+                FetchEvent::Data(b"0123456789".to_vec()),
+                FetchEvent::End,
+            ],
+            "https://bad-range.example.com/416" => vec![
+                FetchEvent::Head(HttpHead {
+                    status: 416,
+                    url: req.url.clone(),
+                    headers: vec![("Content-Range".into(), "bytes */10".into())],
+                    ..Default::default()
+                }),
+                FetchEvent::End,
+            ],
+            "https://bad-range.example.com/truncated" => vec![
+                FetchEvent::Head(HttpHead {
+                    status: 206,
+                    url: req.url.clone(),
+                    headers: vec![
+                        ("Content-Range".into(), "bytes 4-9/10".into()),
+                        ("Content-Length".into(), "6".into()),
+                    ],
+                    ..Default::default()
+                }),
+                FetchEvent::Data(b"45".to_vec()),
+                FetchEvent::End,
+            ],
+            "https://bad-range.example.com/204" => vec![
+                FetchEvent::Head(HttpHead {
+                    status: 204,
+                    url: req.url.clone(),
+                    ..Default::default()
+                }),
+                FetchEvent::End,
+            ],
+            _ => vec![FetchEvent::Failed("unexpected url".into())],
+        });
+
+        // Cross-origin redirect preserves `Range` and `Accept-Encoding: identity`.
+        let (events, body) = collect(
+            &host,
+            "https://github.com/o/r/releases/latest/download/a.tar.gz",
+            4,
+        )
+        .unwrap();
+        assert_eq!(events, ["partial:Some(10)"]);
+        assert_eq!(body, b"456789");
+        let seen = net.seen.lock().unwrap().clone();
+        assert_eq!(seen.len(), 2);
+        for req in &seen {
+            assert!(!req.follow_redirects);
+            assert_eq!(
+                updater_header(&req.headers, "accept-encoding"),
+                Some("identity")
+            );
+            assert_eq!(updater_header(&req.headers, "range"), Some("bytes=4-"));
+        }
+
+        // `from == 0` omits `Range` and sends `Accept-Encoding: identity`.
+        net.seen.lock().unwrap().clear();
+        let (events, body) = collect(&host, "https://cdn.example.com/assets/a.tar.gz", 0).unwrap();
+        assert_eq!(events, ["full:Some(10)"]);
+        assert_eq!(body, b"0123456789");
+        let seen = net.seen.lock().unwrap();
+        assert_eq!(updater_header(&seen[0].headers, "range"), None);
+        assert_eq!(
+            updater_header(&seen[0].headers, "accept-encoding"),
+            Some("identity")
+        );
+        drop(seen);
+
+        // Redirect downgrade from HTTPS to plain HTTP is refused.
+        let err = collect(&host, "https://downgrade.example.com/a", 4).unwrap_err();
+        assert!(err.contains("non-HTTPS"), "{err}");
+
+        // `206` with wrong starting offset reports `Unsatisfiable` and delivers no bytes.
+        let (events, body) =
+            collect(&host, "https://bad-range.example.com/wrong-start", 4).unwrap();
+        assert_eq!(events, ["unsatisfiable"]);
+        assert!(body.is_empty());
+
+        // `416` reports `Unsatisfiable`.
+        let (events, body) = collect(&host, "https://bad-range.example.com/416", 10).unwrap();
+        assert_eq!(events, ["unsatisfiable"]);
+        assert!(body.is_empty());
+
+        // Premature EOF with fewer bytes than `Content-Range` returns an error (preserving `.part`).
+        let err = collect(&host, "https://bad-range.example.com/truncated", 4).unwrap_err();
+        assert!(err.contains("truncated"), "{err}");
+
+        // `204` is rejected as an HTTP error rather than wiping a kept `.part`.
+        let err = collect(&host, "https://bad-range.example.com/204", 4).unwrap_err();
+        assert_eq!(err, "HTTP 204");
+    }
+
+    #[cfg(all(feature = "net", not(target_arch = "wasm32")))]
+    #[test]
+    fn updater_over_network_resumes_over_ureq_across_redirect() {
+        use std::{
+            io::{BufRead as _, BufReader, Write as _},
+            net::TcpListener,
+        };
+
+        let payload = b"0123456789abcdefghijklmnopqrstuvwxyz".to_vec();
+        let asset_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let asset_port = asset_listener.local_addr().unwrap().port();
+        let redirect_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let redirect_port = redirect_listener.local_addr().unwrap().port();
+
+        let served = payload.clone();
+        std::thread::spawn(move || {
+            for stream in asset_listener.incoming() {
+                let Ok(stream) = stream else { return };
+                let mut reader = BufReader::new(stream);
+                let mut line = String::new();
+                if reader.read_line(&mut line).is_err() {
+                    continue;
+                }
+                let mut range_header = None;
+                let mut accept_encoding = None;
+                loop {
+                    let mut h = String::new();
+                    if reader.read_line(&mut h).is_err() || h.trim().is_empty() {
+                        break;
+                    }
+                    if let Some((k, v)) = h.split_once(':') {
+                        if k.trim().eq_ignore_ascii_case("range") {
+                            range_header = Some(v.trim().to_owned());
+                        } else if k.trim().eq_ignore_ascii_case("accept-encoding") {
+                            accept_encoding = Some(v.trim().to_owned());
+                        }
+                    }
+                }
+                assert_eq!(accept_encoding.as_deref(), Some("identity"));
+                let s = reader.get_mut();
+                if let Some(start) = range_header
+                    .as_deref()
+                    .and_then(|r| r.strip_prefix("bytes="))
+                    .and_then(|r| r.strip_suffix('-'))
+                    .and_then(|r| r.parse::<usize>().ok())
+                {
+                    if start >= served.len() {
+                        let _ = write!(
+                            s,
+                            "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */{}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                            served.len()
+                        );
+                    } else {
+                        let slice = &served[start..];
+                        let _ = write!(
+                            s,
+                            "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes {start}-{}/{}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            served.len() - 1,
+                            served.len(),
+                            slice.len()
+                        );
+                        let _ = s.write_all(slice);
+                    }
+                } else {
+                    let _ = write!(
+                        s,
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        served.len()
+                    );
+                    let _ = s.write_all(&served);
+                }
+            }
+        });
+
+        std::thread::spawn(move || {
+            for stream in redirect_listener.incoming() {
+                let Ok(stream) = stream else { return };
+                let mut reader = BufReader::new(stream);
+                let mut line = String::new();
+                if reader.read_line(&mut line).is_err() {
+                    continue;
+                }
+                loop {
+                    let mut h = String::new();
+                    if reader.read_line(&mut h).is_err() || h.trim().is_empty() {
+                        break;
+                    }
+                }
+                let _ = write!(
+                    reader.get_mut(),
+                    "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:{asset_port}/app.tar.gz\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                );
+            }
+        });
+
+        let host = UpdaterOverNetwork {
+            network: crate::net::network(),
+            assets: None,
+            config: None,
+            running: None,
+        };
+        let url = format!("http://127.0.0.1:{redirect_port}/latest/app.tar.gz");
+
+        let (events, body) = collect(&host, &url, 10).unwrap();
+        assert_eq!(events, [format!("partial:Some({})", payload.len())]);
+        assert_eq!(body, &payload[10..]);
+
+        let (events, body) = collect(&host, &url, payload.len() as u64).unwrap();
+        assert_eq!(events, ["unsatisfiable"]);
+        assert!(body.is_empty());
     }
 }

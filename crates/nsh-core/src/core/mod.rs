@@ -26,11 +26,6 @@ mod views;
 mod watch;
 mod web_evaluation;
 
-/// Why an image's size cannot be known in a terminal, which decodes no
-/// images (`Image.getSize` / `prefetch` reject with
-/// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` there, `runtime/image.rs`).
-pub(crate) const NO_IMAGES_IN_A_TERMINAL: &str = "a terminal decodes no images";
-
 /// The most network image checks [`Core`] remembers for its canvases; past
 /// it, it starts over.
 const CANVAS_IMAGES: usize = 1024;
@@ -635,6 +630,10 @@ struct Node {
     /// (`ElementRef::hover_at`): its classes and the `group-hover:`
     /// classes inside it read it with its own states.
     passed_hover: bool,
+    /// In a terminal, its fill as it rests, while an interaction state
+    /// (hover, press, focus) styles another: the terminal's layout reads
+    /// this one, so a hover's fill never moves what is around it.
+    resting_fill: Option<Color>,
     /// The `data-*` attributes it shows as a part of a component
     /// (`Prop::ProjectedData`), sorted: its `data-*:` classes read them,
     /// and the `group-data-*:` classes inside it.
@@ -978,6 +977,7 @@ impl Node {
             },
             projected: 0,
             passed_hover: false,
+            resting_fill: None,
             data: Box::default(),
             parts: None,
             positional_children: false,
@@ -3101,6 +3101,7 @@ impl<M: TextEngine> Core<M> {
                     .insert(id, WindowRecord::opened(options.attributes.clone(), size));
                 self.window_ids
                     .insert(options.id.clone(), (id, options.restore_bounds));
+                self.key_ancestry_dirty = true;
                 self.commands.push((
                     id,
                     Command::Desktop(Box::new(DesktopCommand::OpenWindow(open))),
@@ -3458,6 +3459,7 @@ impl<M: TextEngine> Core<M> {
         self.sync_overlays();
         if std::mem::take(&mut self.key_ancestry_dirty) {
             self.sync_key_parents();
+            self.sync_key_contents();
         }
         // The rows holding the focus or an open overlay stay rendered,
         // before the lists update their windows.
@@ -4113,7 +4115,7 @@ impl<M: TextEngine> Core<M> {
             worded,
             clamped,
             radius,
-            fill: view.background_color,
+            fill: node.resting_fill.unwrap_or(view.background_color),
             interactive: {
                 let events = self.nodes[key as usize].events;
                 pressable(events) || HANDLED.iter().any(|&e| events.contains(e))
@@ -6914,6 +6916,7 @@ impl<M: TextEngine> Core<M> {
             self.key_ancestry_dirty = true;
         }
         self.nodes[parent as usize].children.insert(pos, child);
+        self.key_content_changed(parent);
         self.rank_noted(child);
         self.tree_order_changed |= self.track_tree_order;
         self.tab_places_stale = true;
@@ -7054,6 +7057,7 @@ impl<M: TextEngine> Core<M> {
             .position(|&c| c == key)
             .expect("child of parent");
         siblings.remove(pos);
+        self.key_content_changed(parent);
         self.tree_order_changed |= self.track_tree_order;
         self.tab_places_stale = true;
         if let Some(list) = self.nodes[parent as usize].list.as_mut() {
@@ -7983,8 +7987,10 @@ impl<M: TextEngine> Core<M> {
                 self.mount.push(MountItem::Gestures { id, values });
             }
             if flags & dirty::VIEW_PROPS != 0 {
-                let props = node.mounted_props();
-                self.mount.push(MountItem::ViewProps { id, props });
+                self.mount.push(MountItem::ViewProps {
+                    id,
+                    props: node.mounted_props(),
+                });
             } else if flags & dirty::LABEL != 0 {
                 let label = node
                     .props

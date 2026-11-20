@@ -2166,6 +2166,67 @@ impl Screen {
         }
     }
 
+    /// The selectable view a press on view `id` selects in: the outermost
+    /// view around it (or itself) that is one, unless `id` is a text kept
+    /// out (`selectable={false}`).
+    pub(crate) fn selection_area(&self, id: NodeId) -> Option<NodeId> {
+        let kept_out = self
+            .nodes
+            .get(&id)
+            .and_then(|v| v.attributed.as_ref())
+            .is_some_and(|t| t.selectable == Some(false));
+        if kept_out {
+            return None;
+        }
+        let mut found = None;
+        let mut at = Some(id);
+        while let Some(view) = at.and_then(|id| self.nodes.get(&id)) {
+            if view.selectable_view {
+                found = at;
+            }
+            at = view.parent;
+        }
+        found
+    }
+
+    /// The texts of selectable view `area` that take part in its selection,
+    /// in document order: each text view, its text and its content box in
+    /// `area`'s points. Hidden views and texts kept out
+    /// (`selectable={false}`) are left out.
+    pub(crate) fn area_texts(
+        &self,
+        area: NodeId,
+    ) -> Vec<(NodeId, Arc<nsh_core::AttributedText>, Bounds<Points>)> {
+        let mut out = Vec::new();
+        let Some(origin) = self.bounds_in_root(area).map(|b| b.origin) else {
+            return out;
+        };
+        let mut stack = vec![area];
+        while let Some(id) = stack.pop() {
+            let Some(view) = self.nodes.get(&id) else {
+                continue;
+            };
+            if view.hidden {
+                continue;
+            }
+            if let Some(text) = &view.attributed
+                && text.selectable != Some(false)
+                && let Some(bounds) = self.bounds_in_root(id)
+            {
+                let content = view.text_content;
+                out.push((
+                    id,
+                    Arc::clone(text),
+                    Bounds::new(bounds.origin - origin + content.origin, content.size),
+                ));
+            }
+            if let Some(children) = self.children.get(&id) {
+                stack.extend(children.iter().rev());
+            }
+        }
+        out
+    }
+
     /// Whether the view `selector` names is selected (its accessibility
     /// state, or a canvas node's `selected`); an error when none or several
     /// match.

@@ -5499,9 +5499,11 @@ impl<M: TextEngine> Core<M> {
     /// root, or the dialog's content) and bubbles from it, as a browser
     /// reports it at `document.body` (#2362). Any other node starts at
     /// itself.
-    fn key_start(&self, key: Key) -> Key {
+    pub(super) fn key_start(&self, key: Key) -> Key {
         let node = &self.nodes[key as usize];
-        if node.id != crate::ROOT_ID && self.key_window(key) != node.id {
+        if node.id != crate::ROOT_ID
+            && (node.kind != Kind::Modal || self.key_window(key) != node.id)
+        {
             return key;
         }
         node.children
@@ -5509,6 +5511,16 @@ impl<M: TextEngine> Core<M> {
             .copied()
             .find(|&child| !matches!(self.nodes[child as usize].kind, Kind::Overlay | Kind::Modal))
             .unwrap_or(key)
+    }
+
+    /// A window's staged keyboard target follows its logical children.
+    pub(super) fn key_content_changed(&mut self, parent: Key) {
+        let node = &self.nodes[parent as usize];
+        if node.id == crate::ROOT_ID
+            || (node.kind == Kind::Modal && self.key_window(parent) == node.id)
+        {
+            self.key_ancestry_dirty = true;
+        }
     }
 
     /// The root of the window `key` is in, `key` itself when it is one.
@@ -6328,15 +6340,6 @@ impl<M: TextEngine> Core<M> {
             Action::TextContent(id, answer) => self.components.text_contents.push((id, answer)),
             Action::PressAt(id, press, answer) => self.components.presses.push((id, press, answer)),
             Action::HoverAt(id, mouse) => self.components.hovers.push((id, mouse)),
-            // A terminal decodes no images: the answer is at once, and no
-            // request goes to the platform.
-            Action::ImageInfo(_, answer)
-                if self.components.environment.idiom == crate::platform::Idiom::Terminal =>
-            {
-                answer
-                    .borrow_mut()
-                    .deliver(Err(super::NO_IMAGES_IN_A_TERMINAL.into()));
-            }
             Action::ImageInfo(uri, answer) => {
                 let id = self.components.next_image_info;
                 self.components.next_image_info += 1;

@@ -44,6 +44,7 @@ mod live;
 mod menus;
 mod net;
 mod pointer;
+mod selection;
 mod speech;
 mod windows;
 
@@ -352,6 +353,8 @@ pub struct Headless {
     focus_before: Vec<(NodeId, Option<NodeId>)>,
     /// The finger a `dragAndHold` left down, until `drop()`.
     finger: Option<pointer::Finger>,
+    /// The selection of the selectable view the mouse last pressed in.
+    selection: Option<selection::AreaSelection>,
     screen: Screen,
     animator: Animator,
     dialogs: Dialogs,
@@ -507,6 +510,7 @@ impl Headless {
             held: nsh_core::keymap::Modifiers::default(),
             focus_before: Vec::new(),
             finger: None,
+            selection: None,
             screen,
             animator: Animator::new(clock.clone()),
             dialogs: Dialogs::Default,

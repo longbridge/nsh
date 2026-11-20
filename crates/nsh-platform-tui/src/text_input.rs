@@ -303,7 +303,12 @@ impl Field {
                 );
                 leave = config.submit() == SubmitBehavior::BlurAndSubmit;
             }
-            Leave => leave = true,
+            // Reported before the field gives up the focus, as the
+            // desktops report it: C-g is the Key scheme's Escape.
+            Leave => {
+                key_press(id, control, "Escape");
+                leave = true;
+            }
         }
         self.report(id, control, changed);
         leave
