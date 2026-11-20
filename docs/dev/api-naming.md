@@ -981,3 +981,12 @@ and `Input`'s React Native names follow the rules as well.
 | `gpui-component` `AvatarGroup::limit` (default 3), `child` / `children` | `limit` (default 3), the children | `avatar/avatar_group.rs` | Avatars past the limit stay out of the tree (`children_each`), not only out of the render |
 | `gpui-component` `AvatarGroup::ellipsis()` (a "⋯" avatar) | not followed: slot `overflow`, parts `overflowClass` / `overflowStyle`, `overflowAccessibilityLabel`; `total` (new) | `avatar/avatar_group.rs` | `ellipsis` is a flag after which the group draws a "⋯" avatar of its own; here the group draws nothing, so the flag becomes the app's content, and that content is the count of the people not shown ("+5", what avatar groups show: shadcn's, Material's, GitHub's), which a prop named `ellipsis` would misname. `overflow` names the part by what it stands for, whatever the app writes in it ("⋯" included). Screen readers read its content, or `overflowAccessibilityLabel` ("5 more people") in its place, the app's words as every string; `total` lets a long list pass only the avatars shown |
 | `gpui-component` `AvatarGroup`'s `flex_row_reverse` and negative margin | the app's `class` on the group and the avatars | `avatar/avatar_group.rs` | The overlap and stacking order are look; the group sets no direction |
+
+## Test drag timing
+
+`nsh/test` uses `DragOptions.hold` for the total rest before movement, matching the existing native agent's
+`long_press(..., hold)` vocabulary. It is milliseconds as in `app.wait`, with the released 100 ms default. The
+options object leaves `DragBy` as a displacement and allows both `drag` and `dragAndHold` to share timing. Rust's
+`nsh_testing::DragOptions` mirrors it as the last parameter of `Headless::drag` / `drag_and_hold` and the agents'
+`Native::drag` / `drag_and_hold`, with `hold: Option<Duration>`, so each gesture keeps one entry point in both
+languages. This is a test-driver extension without a corresponding GPUI control API.

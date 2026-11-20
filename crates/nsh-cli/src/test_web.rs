@@ -366,7 +366,13 @@ impl Native for WebNative {
         }
     }
 
-    fn drag(&self, from: Point<Points>, to: Point<Points>) {
+    fn drag(
+        &self,
+        from: Point<Points>,
+        to: Point<Points>,
+        options: nsh_testing::DragOptions,
+    ) -> Result<(), String> {
+        nsh_testing::agent::refuse_custom_drag("drag", options)?;
         self.mouse("mouseMoved", from, 0);
         self.mouse("mousePressed", from, 1);
         std::thread::sleep(nsh_testing::agent::LANDING);
@@ -377,6 +383,7 @@ impl Native for WebNative {
             last = at;
         }
         self.mouse("mouseReleased", last, 0);
+        Ok(())
     }
 
     fn mouse(&self) -> bool {

@@ -672,3 +672,5 @@ fn input_targets_report_document_values_and_do_not_edit_covering_fields() {
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
 }
+
+mod drag;

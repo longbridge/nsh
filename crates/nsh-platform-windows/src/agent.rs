@@ -195,7 +195,13 @@ impl Native for WindowsNative {
         }
     }
 
-    fn drag(&self, from: Point<Points>, to: Point<Points>) {
+    fn drag(
+        &self,
+        from: Point<Points>,
+        to: Point<Points>,
+        options: nsh_testing::DragOptions,
+    ) -> Result<(), String> {
+        nsh_testing::agent::refuse_custom_drag("drag", options)?;
         let (x, y) = (from.x.0, from.y.0);
         self.in_target(move |s| {
             synth::pointer(s, PointerKind::Move, x, y, 0, 0);
@@ -212,6 +218,7 @@ impl Native for WindowsNative {
         }
         let (x, y) = (last.x.0, last.y.0);
         self.in_target(move |s| synth::pointer(s, PointerKind::Up, x, y, 0, 0));
+        Ok(())
     }
 
     fn type_text(&self, text: &str) {

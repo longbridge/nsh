@@ -1390,6 +1390,7 @@ impl Headless {
 
     /// Applies the batches that came, without waiting.
     fn drain(&mut self) -> bool {
+        self.tick_held_press();
         let mut applied = false;
         while let Ok(batch) = self.batches.try_recv() {
             self.apply(&batch);
@@ -1405,6 +1406,7 @@ impl Headless {
     /// the next check.
     fn pump(&mut self, deadline: Instant) -> Pumped {
         loop {
+            self.tick_held_press();
             if self.exited {
                 return Pumped::Exited;
             }
@@ -1418,6 +1420,12 @@ impl Headless {
                 _ if framed => Instant::now(),
                 Some(frame) if !self.clock.is_manual() => frame.min(deadline),
                 _ => deadline,
+            };
+            let wake = if !self.clock.is_manual() {
+                self.held_press_timeout()
+                    .map_or(wake, |after| wake.min(Instant::now() + after))
+            } else {
+                wake
             };
             let timeout = wake.saturating_duration_since(Instant::now());
             crossbeam_channel::select_biased! {
@@ -2825,6 +2833,7 @@ mod tests {
     };
 
     use super::*;
+    use crate::DragOptions;
 
     /// A paragraph with a link and a marked word.
     #[component]
@@ -4058,19 +4067,28 @@ mod tests {
         let mut app = Headless::start(EngineConfig::new(crate::windowed_root::<Drags>())).unwrap();
         app.first_render().unwrap();
         // A pan follows the finger to the end.
-        app.drag("id:card", point(px(120.0), px(-30.0))).unwrap();
+        app.drag(
+            "id:card",
+            point(px(120.0), px(-30.0)),
+            DragOptions::default(),
+        )
+        .unwrap();
         app.wait_for("Pan 120 -30").unwrap();
         // A finger moving off a button cancels its press: up, no press.
-        app.drag("Button", point(px(0.0), px(40.0))).unwrap();
+        app.drag("Button", point(px(0.0), px(40.0)), DragOptions::default())
+            .unwrap();
         app.wait_for("Presses 0 ups 1").unwrap();
         // A small slip still presses it.
-        app.drag("Button", point(px(0.0), px(4.0))).unwrap();
+        app.drag("Button", point(px(0.0), px(4.0)), DragOptions::default())
+            .unwrap();
         app.wait_for("Presses 1 ups 2").unwrap();
         // The views listening to touches hear the finger down, moving, up.
-        app.drag("id:pad", point(px(0.0), px(30.0))).unwrap();
+        app.drag("id:pad", point(px(0.0), px(30.0)), DragOptions::default())
+            .unwrap();
         assert!(!app.shows("Touches 0"));
         // A list pulled down past its top refreshes; dragged up, it scrolls.
-        app.drag("Row 2", point(px(0.0), px(300.0))).unwrap();
+        app.drag("Row 2", point(px(0.0), px(300.0)), DragOptions::default())
+            .unwrap();
         app.wait_for("Refreshes 1").unwrap();
         let Pick::One(list) = app
             .screen()
@@ -4081,13 +4099,18 @@ mod tests {
         assert_eq!(app.screen().scroll(list).map(|s| s.y), Some(Points::ZERO));
         // It takes the drag over once the finger passed the slop, a frame
         // in, and follows it from there, as the platforms' scroll views do.
-        app.drag("Row 2", point(px(0.0), px(-200.0))).unwrap();
+        app.drag("Row 2", point(px(0.0), px(-200.0)), DragOptions::default())
+            .unwrap();
         assert_eq!(app.screen().scroll(list).map(|s| s.y), Some(px(190.0)));
         // A short pull does not.
-        app.drag("Row 6", point(px(0.0), px(-40.0))).unwrap();
-        app.drag("Row 6", point(px(0.0), px(100.0))).unwrap();
+        app.drag("Row 6", point(px(0.0), px(-40.0)), DragOptions::default())
+            .unwrap();
+        app.drag("Row 6", point(px(0.0), px(100.0)), DragOptions::default())
+            .unwrap();
         assert!(app.shows("Refreshes 1"));
-        let error = app.drag("Nothing", point(px(1.0), px(1.0))).unwrap_err();
+        let error = app
+            .drag("Nothing", point(px(1.0), px(1.0)), DragOptions::default())
+            .unwrap_err();
         assert!(error.starts_with("no view matches `Nothing`"), "{error}");
     }
 
@@ -4114,9 +4137,11 @@ mod tests {
             Headless::start(EngineConfig::new(crate::windowed_root::<FarPull>())).unwrap();
         app.first_render().unwrap();
         // 150 points of finger rubber-band to less than 100 (past 64).
-        app.drag("Row 2", point(px(0.0), px(150.0))).unwrap();
+        app.drag("Row 2", point(px(0.0), px(150.0)), DragOptions::default())
+            .unwrap();
         assert!(app.shows("Refreshes 0"));
-        app.drag("Row 2", point(px(0.0), px(1000.0))).unwrap();
+        app.drag("Row 2", point(px(0.0), px(1000.0)), DragOptions::default())
+            .unwrap();
         app.wait_for("Refreshes 1").unwrap();
     }
 
