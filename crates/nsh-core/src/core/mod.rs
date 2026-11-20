@@ -9905,6 +9905,7 @@ impl<M: TextEngine> Core<M> {
                         id,
                         &text_layout,
                         &text,
+                        &cx.spacers,
                     );
                 }
                 if !text.attachments.is_empty() {
@@ -9943,6 +9944,7 @@ impl<M: TextEngine> Core<M> {
                             id,
                             &layout,
                             &cx.text,
+                            &cx.spacers,
                         );
                     }
                     layout
@@ -11288,11 +11290,12 @@ fn keep_geometry(
     id: NodeId,
     layout: &TextLayout,
     text: &Arc<AttributedText>,
+    spacers: &[u32],
 ) {
     if let Some(engine) = engine.as_ref().filter(|_| id % 2 == 1) {
         geometries.insert(
             id,
-            crate::text::TextGeometry::new(engine.clone(), layout.clone(), text.clone()),
+            crate::text::TextGeometry::new(engine.clone(), layout.clone(), text.clone(), spacers),
         );
     }
 }
