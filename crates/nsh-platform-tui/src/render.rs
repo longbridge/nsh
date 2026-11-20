@@ -40,9 +40,9 @@
 //! - **Scroll bars** ([`crate::scrollbar`]): a dim track `│` with a thumb
 //!   `┃` in the default color over the inner right (bottom) edge, only when
 //!   the content overflows.
-//! - **Unsupported** content is left out: images, video, web views,
-//!   native components without a terminal rendering and icon-sized
-//!   canvases take no Cells in the layout (the mounter logs each content
+//! - **Unsupported** content is left out: icon-sized videos, web views
+//!   and canvases take no Cells in the layout, larger ones and native
+//!   components without a terminal rendering keep their box blank (the mounter logs each content
 //!   kind once). A control whose content is all left out (an icon button)
 //!   draws its accessibility label as its label.
 //! - **Clipping**: a text draws inside its own view's box; a view that
@@ -465,6 +465,16 @@ impl Painter<'_> {
                 .unwrap_or(view.style.opacity)
                 .clamp(0.0, 1.0);
         if view.concealed || view.style.hidden || opacity < INVISIBLE_OPACITY {
+            // A transparent picture still loads once it has Cells, as it
+            // does once it has a frame elsewhere: an avatar's waits,
+            // transparent, for its own `onLoad` before it shows.
+            if !view.concealed && view.image.is_some() {
+                let at = origin + view.frame.origin + translation(view);
+                let bounds = CellBounds::new(Bounds::new(at, view.frame.size), cells, area);
+                if let Some(image) = &mut view.image {
+                    crate::image::prepare(image, &mut self.tree.images, id, bounds, cells);
+                }
+            }
             return;
         }
         let at = origin + view.frame.origin + translation(view);
@@ -632,8 +642,16 @@ impl Painter<'_> {
             && bounds.bottom - bounds.top == 1
             && fill.0 & 255 == 255
             && holds_field;
+        // A select's trigger (a combobox holding no field) is a field the
+        // user picks from: the same raised band, so it reads as one to
+        // press, as a combobox's does.
+        let picker = view.props.accessibility.role == AccessibilityRole::Combobox
+            && view.input.is_none()
+            && !layer.field_group
+            && !page
+            && bounds.bottom - bounds.top == 1;
         if let Some(ramp) = parent.ramp
-            && (view.input.is_some() && !layer.field_group || group)
+            && (view.input.is_some() && !layer.field_group || group || picker)
             && filled == Surface::None
             && !edges.any()
             && !hidden
@@ -784,8 +802,9 @@ impl Painter<'_> {
         // overlay's own box is its frame instead, and a field keeps its
         // underline. A swatch is its color at any size.
         let small = bounds.bottom - bounds.top < i32::from(CONTAINER_ROWS);
+        let picture = view.props.accessibility.role == AccessibilityRole::Image;
         let bandless = parent.ramp.is_none()
-            && (small || swatch.is_some())
+            && (small || picture)
             && !page
             && !dot
             && !hidden
@@ -793,7 +812,14 @@ impl Painter<'_> {
             && !edges.any()
             && !(layer.overlay && !layer.boxed);
         let bandless_fill = bandless
-            .then(|| palette::bandless_fill(fill, parent))
+            .then(|| {
+                // A swatch's Cells keep their own colors, as with surfaces.
+                if picture {
+                    palette::bandless_swatch(fill, parent)
+                } else {
+                    palette::bandless_fill(fill, parent)
+                }
+            })
             .flatten();
         let bandless_reversed = bandless
             && small
@@ -1462,6 +1488,7 @@ impl Painter<'_> {
                 ),
                 popup: popup_item,
                 lined_group: layer.lined_group,
+                pointer_focus: self.tree.pointer_focus,
             };
             match ground.ramp {
                 Some(ramp) => mark_surface(
@@ -1477,6 +1504,7 @@ impl Painter<'_> {
                     popup_item,
                     layer.modal,
                     layer.pane,
+                    self.tree.pointer_focus,
                 ),
                 None => mark_state(
                     self.buffer,
@@ -2694,6 +2722,21 @@ struct Marks {
     /// The view is inside an input group that draws its line
     /// ([`Layer::lined_group`]).
     lined_group: bool,
+    /// The pointer moved the focus (`Mounter::pointer_focus`).
+    pointer_focus: bool,
+}
+
+/// The states a view's marks show: its own and those projected on it as
+/// a part of its control. A control the pointer focused shows no focus of
+/// its own (a paragraph pressed for one of its links, a button clicked),
+/// as CSS's `:focus-visible`; a field, which edits, does.
+fn shown_states(view: &NshView, pointer_focus: bool) -> u16 {
+    let own = if pointer_focus && view.input.is_none() {
+        view.states & !state::FOCUSED
+    } else {
+        view.states
+    };
+    own | view.projected
 }
 
 /// Draws the view's state over its drawn Cells (its subtree's included):
@@ -2709,7 +2752,7 @@ fn mark_state(
 ) {
     // A part shows its control's states as its own (a list's highlighted
     // option is focused while the keys stay in the search field).
-    let flags = view.states | view.projected;
+    let flags = shown_states(view, marks.pointer_focus);
     let disabled = view.props.accessibility.state.disabled || flags & state::DISABLED != 0;
     let selected = banded(view);
     let field = view.input.is_some();
@@ -2875,10 +2918,11 @@ fn mark_surface(
     popup: bool,
     dialog: bool,
     pane: bool,
+    pointer_focus: bool,
 ) {
     // A part shows its control's states as its own (a list's highlighted
     // option is focused while the keys stay in the search field).
-    let flags = view.states | view.projected;
+    let flags = shown_states(view, pointer_focus);
     let disabled = view.props.accessibility.state.disabled || flags & state::DISABLED != 0;
     let selected = banded(view);
     let field = view.input.is_some();
@@ -3107,13 +3151,17 @@ fn mark_surface(
     if framed {
         // The line shows it.
     } else if focused && container {
-        // A step up alone reads as one more raised surface: an accent
-        // rail down its leading column marks it, as a focused pane's
-        // line does, or its label without a free column for one.
-        if !selected {
-            band(buffer, visible, step(HOVER), own);
-        }
-        if !focus_rail(buffer, visible, inner) {
+        // A pane the keys move within (a sidebar's list, an editor) shows
+        // its focus by what is focused in it (its highlighted item, the
+        // caret), no mark of its own: a band and a rail over a whole pane
+        // only weigh it down. A container that takes presses itself (a
+        // card that is a button) has nothing else to show it: an accent
+        // rail down its leading column, or its label without a free
+        // column for one, never a band, which would read as one more
+        // raised surface.
+        if (pressable(view) || nsh_core::input::has_tap(view.events))
+            && !focus_rail(buffer, visible, inner)
+        {
             drawn(buffer, inner, |cell| {
                 cell.modifier.insert(Modifier::BOLD | Modifier::UNDERLINED)
             });

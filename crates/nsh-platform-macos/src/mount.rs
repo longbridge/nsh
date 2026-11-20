@@ -771,6 +771,11 @@ impl Mounter {
             Command::SetJsResponder { .. } | Command::ClearJsResponder => {
                 crate::input::command(surface, id, command);
             }
+            Command::ClearSelection => {
+                if let Some(view) = view {
+                    surface.selection.area.clear_in(surface, view);
+                }
+            }
             Command::Reload
             | Command::GoBack
             | Command::GoForward

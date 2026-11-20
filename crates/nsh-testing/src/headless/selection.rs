@@ -253,6 +253,17 @@ impl Headless {
         }
     }
 
+    /// `ref.clearSelection()` on view `id`: clears the selection when its
+    /// selectable view is `id`, inside it or around it.
+    pub(super) fn clear_selection_in(&mut self, id: NodeId) {
+        let Some(area) = self.selection.as_ref().map(|s| s.area) else {
+            return;
+        };
+        if self.screen.within(area, id) || self.screen.within(id, area) {
+            self.clear_selection();
+        }
+    }
+
     /// Clears the selection; its view hears it if it heard of one.
     fn clear_selection(&mut self) {
         let Some(selection) = self.selection.take() else {
