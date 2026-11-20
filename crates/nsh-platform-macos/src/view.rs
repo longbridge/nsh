@@ -657,7 +657,10 @@ define_class!(
         fn view_will_start_live_resize(&self) {
             // SAFETY: NSView's own notification.
             unsafe { msg_send![super(self), viewWillStartLiveResize] }
-            if let Some(surface) = self.ivars().surface.borrow().upgrade() {
+            if let Some(surface) = self
+                .surface()
+                .or_else(|| self.ivars().window.borrow().upgrade())
+            {
                 surface.live_resize(true);
             }
         }
@@ -666,7 +669,10 @@ define_class!(
         fn view_did_end_live_resize(&self) {
             // SAFETY: NSView's own notification.
             unsafe { msg_send![super(self), viewDidEndLiveResize] }
-            if let Some(surface) = self.ivars().surface.borrow().upgrade() {
+            if let Some(surface) = self
+                .surface()
+                .or_else(|| self.ivars().window.borrow().upgrade())
+            {
                 surface.live_resize(false);
             }
         }

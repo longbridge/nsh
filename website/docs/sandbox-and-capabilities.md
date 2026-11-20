@@ -226,6 +226,11 @@ embeds the origin of the document that made it, so it is allowed when that origi
 blob of a host the page may not show — or an opaque one (`blob:null/…`) — is not. Every platform checks this
 the same way.
 
+A download from a host follows the same rule: a download whose response comes from a host not in `hosts` is not
+saved, and `onDownload` reports it `failed` with `code` `"ERR_ACCESS_DENIED"`. On iOS, macOS and Linux this holds
+wherever its redirects lead, and on iOS and macOS a redirect to such a host is cancelled before it is requested. A
+download of the page's own content (`data:` and `blob:` URLs) comes from no host and is saved as before.
+
 `input` is separate from `hosts` because trusted input carries user activation, which `injectJavaScript` never gets:
 the page may then open windows, write the clipboard, open the system's file panel, start WebAuthn or permission prompts
 and press any button that checks `isTrusted`. Without it the core drops `sendInput` and logs which key to add.
