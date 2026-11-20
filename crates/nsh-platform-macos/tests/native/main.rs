@@ -15,6 +15,8 @@
 #[cfg(target_os = "macos")]
 mod canvas_bounds;
 #[cfg(target_os = "macos")]
+mod deleted_scroll;
+#[cfg(target_os = "macos")]
 mod embedded_scroll;
 #[cfg(target_os = "macos")]
 mod focus_selection;
@@ -117,6 +119,8 @@ fn main() {
             } else if std::env::var_os("NSH_KEYBOARD_CHECK_ONLY").is_some() {
                 window_press::run();
                 keyboard::run();
+            } else if std::env::var_os("NSH_DELETED_SCROLL_CHECK_ONLY").is_some() {
+                deleted_scroll::run();
             } else if std::env::var_os("NSH_EMBEDDED_SCROLL_CHECK_ONLY").is_some() {
                 embedded_scroll::run();
             } else if std::env::var_os("NSH_CANVAS_BOUNDS_CHECK_ONLY").is_some() {
@@ -144,6 +148,7 @@ fn main() {
                 fps_collapse::run();
                 scaled_input::run();
                 zoom::run();
+                deleted_scroll::run();
                 mount::run();
                 // Last: it makes the process an accessory app.
                 embedded_scroll::run();

@@ -127,6 +127,10 @@ belong to the app, which owns retention and its storage budget.
   `identifier`, so their holders conservatively keep scanning, as do holders of hosted views.
   A subtree a batch deletes leaves the window with its root, in one `removeFromSuperview`: a deleted view whose
   parent the same batch deletes stays in it (`Mounter::begin_batch`), except a modal or header item, shown elsewhere.
+  A deleted view's frame callbacks end with it (`scroll::deleted`, `shader::deleted`, and `transition::deleted` unless
+  a removal animation runs first): a deleted scroll view's refresh spinner stops turning, as the core never ends a
+  deleted view's refresh, so its frame callback ends with the motion it has left and the view is freed
+  (`release_later`) and the display link can rest (`tests/native/deleted_scroll.rs`, `NSH_DELETED_SCROLL_CHECK_ONLY=1`).
 - **Web views and videos are views among the others**, so window composition needs no surfaces of its own (unlike
   Windows' child windows): a `WKWebView` is a layer-backed subview of its node's view, and the layer WebKit's process
   draws into is composited by Core Animation with the rest. What is above it in the view tree draws over it (later
