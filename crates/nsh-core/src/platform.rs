@@ -944,6 +944,7 @@ impl AppInfo {
     /// From the JSON `appInfo()` reports (`{"id", "name", "version",
     /// "build", "development"}`): a key that is missing, `null` or of
     /// another type is left unknown, and other keys are ignored.
+    #[doc(hidden)]
     pub fn from_json(value: &crate::JsonValue) -> AppInfo {
         let text = |key: &str| value.get(key).and_then(|v| v.as_str()).map(str::to_owned);
         AppInfo {

@@ -663,6 +663,7 @@ impl Root {
     }
 
     /// The app as it was built ([`Root::app_info`]).
+    #[doc(hidden)]
     pub fn app_info_ref(&self) -> Option<&crate::platform::AppInfo> {
         self.app_info.as_ref()
     }
