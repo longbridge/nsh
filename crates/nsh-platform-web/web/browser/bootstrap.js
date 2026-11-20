@@ -5949,7 +5949,8 @@
 					url,
 					headers,
 					body,
-					request.redirect === "follow"
+					request.redirect === "follow",
+					request.cache
 				]);
 				const entry = {
 					resolve,

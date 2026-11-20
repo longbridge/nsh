@@ -3873,6 +3873,7 @@ dependencies = [
  "futures-util",
  "gif",
  "httpdate",
+ "image",
  "imagesize",
  "libc",
  "log",

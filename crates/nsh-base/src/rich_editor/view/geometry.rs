@@ -103,8 +103,8 @@ pub(crate) struct TextGeo {
     /// The box the frame is in (the block's own, else a node view's
     /// content slot).
     pub(crate) owner: Option<u64>,
-    /// The box of each inline view and image in its text (in the text's
-    /// box, where the text engine placed it), by its offset in the
+    /// The box of each inline view, image and widget in its text (in the
+    /// text's box, where the text engine placed it), by its offset in the
     /// textblock's content: what its attachment character stands for on a
     /// line. Relative to the block, so an edit in another block leaves
     /// them in place.
@@ -380,20 +380,32 @@ impl Geometry {
         if x >= self.line_end(line, &widths) {
             return line.end;
         }
-        let mut best = (line.start, Points(f32::MAX));
         let mut units = 0u32;
         let mut boundaries = vec![0u32];
         for g in line.text.graphemes(true) {
             units += g.encode_utf16().count() as u32;
             boundaries.push(units);
         }
-        for u in boundaries {
-            let d = Points((self.x_at(line, &widths, u) - x).0.abs());
-            if d < best.1 {
-                best = (line.start + u, d);
+        // The x of the boundaries grows along the line, so the nearest one
+        // is next to the first at or past `x`: a binary search measures
+        // O(log n) of them, where trying each would shape the line's
+        // prefixes O(n) times on every pointer move of a drag.
+        let x_of = |u: u32| self.x_at(line, &widths, u);
+        let (mut lo, mut hi) = (0usize, boundaries.len() - 1);
+        while lo < hi {
+            let mid = (lo + hi) / 2;
+            if x_of(boundaries[mid]) < x {
+                lo = mid + 1;
+            } else {
+                hi = mid;
             }
         }
-        best.0.min(line.end)
+        let after = boundaries[lo];
+        let best = match lo.checked_sub(1).map(|i| boundaries[i]) {
+            Some(before) if (x - x_of(before)).0 <= (x_of(after) - x).0 => before,
+            _ => after,
+        };
+        (line.start + best).min(line.end)
     }
 
     /// The x of text offset `t` in a line (from the line's left).
@@ -778,6 +790,72 @@ mod tests {
         match geo.hit(Point::new(px(60.0), px(8.0))) {
             Some(Hit::Text(pos, _)) => assert!(pos == 5 || pos == 6, "{pos}"),
             other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_point_on_a_long_line_measures_logarithmically_many_prefixes() {
+        use std::cell::Cell;
+        let calls = Rc::new(Cell::new(0usize));
+        let counted = calls.clone();
+        let n = 400usize;
+        let text: String = "a".repeat(n);
+        let mut geo = Geometry {
+            measure: Some(Rc::new(move |_: &str, t: &str| {
+                counted.set(counted.get() + 1);
+                px(10.0 * t.chars().count() as f32)
+            })),
+            ..Geometry::default()
+        };
+        let width = px(10.0 * n as f32);
+        geo.frames.insert(
+            7,
+            (
+                Some(DOC),
+                Bounds::new(Point::default(), Size::new(width, px(17.0))),
+            ),
+        );
+        geo.texts.insert(
+            7,
+            TextGeo {
+                start: 1,
+                map: InlineMap {
+                    runs: vec![Run {
+                        doc: 0,
+                        doc_len: n,
+                        text: 0,
+                        text_len: n as u32,
+                        side: 0,
+                    }],
+                    size: n,
+                    len: n as u32,
+                },
+                lines: vec![TextLine {
+                    text,
+                    start: 0,
+                    end: n as u32,
+                    width,
+                    height: px(17.0),
+                    ..TextLine::default()
+                }],
+                frame: Bounds::new(Point::default(), Size::new(width, px(17.0))),
+                owner: None,
+                widths: HashMap::new(),
+            },
+        );
+        for (x, want) in [
+            (1234.0, 124),
+            (1236.0, 125),
+            (3.0, 1),
+            (6.0, 2),
+            (3998.0, 401),
+        ] {
+            calls.set(0);
+            match geo.hit(Point::new(px(x), px(5.0))) {
+                Some(Hit::Text(pos, _)) => assert_eq!(pos, want, "at {x}"),
+                other => panic!("{other:?}"),
+            }
+            assert!(calls.get() <= 40, "{} measures at {x}", calls.get());
         }
     }
 
