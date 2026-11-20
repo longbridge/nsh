@@ -37,6 +37,7 @@ signal 保存一个值。调用它会读取该值；如果处在追踪作用域�
 
 ```tsx
 import { mount, signal, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
 
 function Counter() {
   const count = signal(0);
@@ -48,7 +49,7 @@ function Counter() {
   );
 }
 
-mount(Counter);
+mount(() => <Window id="main"><Counter /></Window>);
 ```
 
 默认情况下，写入与当前值 `===` 相等的值不会产生任何效果。传入 `equals: false` 可以让每次写入都通知订阅者（适合原地修改对象后再次写入同一个对象的场景），也可以传入自定义比较函数：
@@ -157,6 +158,7 @@ interface Context<T> extends Accessor<T> {
 
 ```tsx
 import { context, mount, signal, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
 
 const Theme = context<"light" | "dark">("light");
 
@@ -176,7 +178,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 ## mount
@@ -185,9 +191,22 @@ mount(App);
 function mount<P extends object>(app: Component<P>, props?: P): () => void;
 ```
 
-把 `app` 渲染到界面上（窗口，或嵌入应用时的 `NshAppView` / `NshView`），返回一个用于移除它的函数。每个应用的入口文件都以 `mount(App)` 结尾。
+把 `app` 渲染到应用根（app root），返回一个用于移除它的函数。每个应用的入口文件都以 `mount(App)` 结尾。
+
+在桌面平台上，应用根本身没有界面：它持有应用状态、事件和窗口注册表，它的顶层子节点是 `<Window>` 场景。应用声明的每个窗口都要显式写出，包括第一个；如果应用根返回普通视图，或没有任何顶层 `<Window>`，会抛出说明这一点的错误。第一个窗口继承 nsh.json 的 [`window`](../modules/nsh-desktop.md#应用宿主与第一个窗口) 启动默认值。在非桌面平台（手机、网页、嵌入的 `NshAppView`），`<Window>` 把内容显示在唯一的界面里，所以同一个应用也能在这些平台运行。
 
 ```tsx
+import { mount } from "nsh";
+import { Window } from "nsh/desktop";
+
+function App() {
+  return (
+    <Window id="main" title="Counter">
+      <Counter />
+    </Window>
+  );
+}
+
 mount(App);
 ```
 
@@ -440,6 +459,7 @@ pub fn App() -> impl IntoElement {
 ```tsx tabs
 import { mount, Text, View } from "nsh";
 import { createAnimatedValue } from "nsh";
+import { Window } from "nsh/desktop";
 
 function App() {
   const x = createAnimatedValue(0);
@@ -456,7 +476,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 > [!NOTE]
@@ -1245,7 +1269,7 @@ const shadow = platform.select({
 const pixelRatio: Accessor<number>;
 ```
 
-每个点对应的设备像素数（大多数 iPhone 上为 `3`）。响应式：窗口移动到另一种像素密度的屏幕上时（Mac Catalyst、桌面系统或外接显示器），以及 Android 的显示大小设置改变像素密度时，它会变化。Rust：`pixel_ratio() -> f32`，取整到设备像素的长度用 `round_to_nearest_pixel(points)`；在 TSX 中这个长度是 `Math.round(x * pixelRatio()) / pixelRatio()`。
+每个点对应的设备像素数（大多数 iPhone 上为 `3`）。响应式：surface 移动到另一种像素密度的屏幕上时（Mac Catalyst 或外接显示器），以及 Android 的显示大小设置改变像素密度时，它会变化。桌面平台上它是宿主显示器的缩放比例；窗口自己的比例在 `currentWindow().state()?.scaleFactor` 中。Rust：`pixel_ratio() -> f32`，取整到设备像素的长度用 `round_to_nearest_pixel(points)`；在 TSX 中这个长度是 `Math.round(x * pixelRatio()) / pixelRatio()`。
 
 ```rust tabs
 let hairline = move || px(1.0 / pixel_ratio());
@@ -1393,6 +1417,7 @@ pub fn App() -> impl IntoElement {
 ```tsx tabs
 import { mount, signal, View } from "nsh";
 import { PanResponder } from "nsh";
+import { Window } from "nsh/desktop";
 
 function App() {
   const pos = signal({ x: 0, y: 0 });
@@ -1419,7 +1444,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 ### 回调
@@ -2806,6 +2835,7 @@ pub fn App() -> impl IntoElement {
 
 ```tsx tabs
 import { effect, mount, signal, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
 import { Storage } from "nsh";
 
 const count = signal(0);
@@ -2819,9 +2849,11 @@ effect(() => {
 });
 
 mount(() => (
-  <View onPress={() => count.update((n) => n + 1)}>
-    <Text>按了 {count()} 次</Text>
-  </View>
+  <Window id="main">
+    <View onPress={() => count.update((n) => n + 1)}>
+      <Text>按了 {count()} 次</Text>
+    </View>
+  </Window>
 ));
 ```
 
@@ -2932,7 +2964,11 @@ player.hostEvent("loginChanged", { signedIn: true });
 
 ```tsx
 const conversation = host.params.conversation as string | undefined;
-mount(() => (conversation ? <Conversation id={conversation} /> : <Inbox />));
+mount(() => (
+  <Window id="main">
+    {conversation ? <Conversation id={conversation} /> : <Inbox />}
+  </Window>
+));
 ```
 
 
@@ -3011,6 +3047,7 @@ const keymap: {
 };
 
 interface KeyBindingOptions {
+  scope?: "window" | "app";
   when?: "always" | "notEditing";
   repeat?: boolean;
   passThrough?: boolean;
@@ -3021,11 +3058,11 @@ interface KeyBindingOptions {
 | TS | Rust |
 |---|---|
 | `keymap.bind(keystroke, handler)` | `on_key(keystroke, handler)` |
-| `keymap.bind(keystroke, handler, { when, repeat, passThrough, forFocus })` | `on_key_with(keystroke, KeyOptions { when, repeat, pass_through, for_focus }, handler)`；`when` 是 `nsh_core::keymap::When`（`Auto`、`Always`、`NotEditing`） |
+| `keymap.bind(keystroke, handler, { scope, when, repeat, passThrough, forFocus })` | `on_key_with(keystroke, KeyOptions { scope, when, repeat, pass_through, for_focus }, handler)`；`scope` 是 `KeyScope::Window`（默认）或 `KeyScope::App`；`when` 是 `nsh_core::keymap::When`（`Auto`、`Always`、`NotEditing`） |
 | `keymap.bind({ … })` | 每个按键组合一次 `on_key` |
 | `keymap.label(keystroke)` | `key_label(keystroke)` |
 
-Rust 绑定与创建它的组件（所有者）同生命周期；处理函数收到的是你写下的按键组合。
+在 `<Window>` 内创建的绑定是窗口作用域：只有该窗口有焦点时才触发。在应用根创建的绑定是应用级；`scope: "app"` 明确表示这一点，而在应用根写 `scope: "window"` 会报错（没有可作用的窗口）。Rust 绑定与创建它的组件（所有者）同生命周期；处理函数收到的是你写下的按键组合。
 
 快捷键在 macOS、Windows、Linux 和浏览器中可用（浏览器自己的按键，比如 Ctrl+T 或 Cmd+W，不会传给页面），在接了硬件键盘的 iOS 和 Android 上也可用：iPad 的键盘、在 Mac 上运行的 iPad 应用、平板或 Chromebook 的键盘，以及模拟器的键盘。同一份代码在所有平台上运行；没有键盘时，不会有按键触发这些绑定。
 
@@ -3052,12 +3089,13 @@ pub fn App() -> impl IntoElement {
 ```tsx tabs
 import { mount, signal, Text } from "nsh";
 import { keymap } from "nsh";
+import { Window } from "nsh/desktop";
 
 const open = signal(false);
-keymap.bind("mod+k", () => open.set(true));
-keymap.bind("escape", () => open.set(false));
+keymap.bind("mod+k", () => open.set(true), { scope: "app" });
+keymap.bind("escape", () => open.set(false), { scope: "app" });
 
-mount(() => <Text>{open() ? "搜索…" : "按 ⌘K"}</Text>);
+mount(() => <Window id="main"><Text>{open() ? "搜索…" : "按 ⌘K"}</Text></Window>);
 ```
 
 传入一个对象可以一次绑定多个按键组合；返回的函数会把它们全部移除。在 Rust 中，每个按键组合调用一次 `on_key`：
@@ -3312,6 +3350,7 @@ pub fn App() -> impl IntoElement {
 ```tsx tabs
 import { mount, type NativeComponentRef, signal, View } from "nsh";
 import { nativeComponent } from "nsh";
+import { Window } from "nsh/desktop";
 
 const Badge = nativeComponent<{ text: string; color?: string }, { tap: { count: number } }>("embed.badge", {
   props: ["text", "color"],
@@ -3337,7 +3376,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 ### nativeModule

@@ -72,10 +72,15 @@ pub(crate) fn rule_line() -> View {
     line_colored(rule, Some(|| crate::theme::theme().border))
 }
 
-/// A column of [`QUOTE_BAR`]s as tall as the view its parent stretches it
-/// to (a row's height): one glyph a row, in the [`ACCENT`].
-/// By itself it is one Cell, so it never makes its row taller.
-pub(crate) fn quote_bar() -> View {
+/// A column of `glyph` (a line and the blanks around it) as tall as the
+/// view its parent stretches it to (a row's height): the glyph on every
+/// row, in `color`. By itself it is one row, so it never makes its row
+/// taller: a quote's bar, a table's sides beside cells that wrap.
+pub(crate) fn glyph_column(
+    glyph: impl Into<SharedString>,
+    color: impl IntoReactive<AdaptiveColor>,
+) -> View {
+    let glyph: SharedString = glyph.into();
     let cell = cell_height();
     let rows = signal(0usize);
     view()
@@ -87,19 +92,24 @@ pub(crate) fn quote_bar() -> View {
                 rows.set(n);
             }
         })
-        .child(text(" "))
+        // Its width: the glyph's on one row, blank.
+        .child(text(" ".repeat(glyph.chars().count())))
         .child(
-            text(move || {
-                SharedString::from(vec![QUOTE_BAR.to_string(); rows.get().max(1)].join("\n"))
-            })
-            .absolute()
-            .top(px(0.0))
-            .left(px(0.0))
-            .bottom(px(0.0))
-            .text_overflow(EllipsizeMode::Clip)
-            .pointer_events(PointerEvents::None)
-            .text_color(ACCENT),
+            text(move || SharedString::from(vec![glyph.as_ref(); rows.get().max(1)].join("\n")))
+                .absolute()
+                .top(px(0.0))
+                .left(px(0.0))
+                .bottom(px(0.0))
+                .text_overflow(EllipsizeMode::Clip)
+                .pointer_events(PointerEvents::None)
+                .text_color(color),
         )
+}
+
+/// A column of [`QUOTE_BAR`]s down a quote, in the [`ACCENT`]
+/// ([`glyph_column`]).
+pub(crate) fn quote_bar() -> View {
+    glyph_column(QUOTE_BAR.to_string(), ACCENT)
 }
 
 /// `content` after a [`quote_bar`] down its left side and a Cell's gap: a

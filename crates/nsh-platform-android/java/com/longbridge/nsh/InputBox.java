@@ -51,6 +51,11 @@ final class InputBox extends FrameLayout implements Node {
     private int submit = SUBMIT_AND_BLUR;
     private boolean applying;
     private boolean configured;
+
+    /** It has had its first props (an `autoFocus` then focuses it). */
+    boolean isConfigured() {
+        return configured;
+    }
     /** The composition last seen (`onCompositionChange` reports its changes). */
     private boolean inComposition;
     private String composed = "";
@@ -307,7 +312,7 @@ final class InputBox extends FrameLayout implements Node {
     void configure(float fontSizeDp, int weight, boolean italic, int color, String family, float letterSpacingDp,
                    int align, String placeholder, boolean hasPlaceholderColor, int placeholderColor,
                    boolean secure, int keyboard, int returnKey, int capitalize, boolean autoCorrect,
-                   boolean multiline, int maxLength, boolean editable, boolean autoFocus,
+                   boolean multiline, int maxLength, boolean editable, boolean autoFocus, boolean selectOnFocus,
                    boolean hasSelectionColor, int selectionColor, boolean hasCaretColor, int caretColor,
                    int submit, boolean rtl, int fontVariant) {
         boolean restart = this.submit != submit && multiline && configured;
@@ -354,7 +359,7 @@ final class InputBox extends FrameLayout implements Node {
         } else if (secure && (type & InputType.TYPE_MASK_CLASS) == InputType.TYPE_CLASS_NUMBER) {
             type |= InputType.TYPE_NUMBER_VARIATION_PASSWORD;
         }
-        int selection = edit.getSelectionEnd();
+        int selectionStart = edit.getSelectionStart(), selectionEnd = edit.getSelectionEnd();
         // Before the input type: setSingleLine replaces a password's
         // transformation (the text would show).
         edit.setSingleLine(!multiline);
@@ -362,7 +367,11 @@ final class InputBox extends FrameLayout implements Node {
         edit.setInputType(type);
         // After the input type: password types reset the typeface to monospace.
         edit.setTypeface(TextLayouts.typeface(family, weight, italic));
-        if (selection >= 0 && selection <= edit.length()) edit.setSelection(selection);
+        // The whole selection, not only its end: an update while the text is
+        // selected (`selectTextOnFocus`, then a prop set from `onFocus`) keeps it.
+        if (selectionStart >= 0 && selectionEnd >= 0 && Math.max(selectionStart, selectionEnd) <= edit.length()) {
+            edit.setSelection(selectionStart, selectionEnd);
+        }
         int ime;
         switch (returnKey) {
             case 1: ime = EditorInfo.IME_ACTION_DONE; break;
@@ -396,6 +405,9 @@ final class InputBox extends FrameLayout implements Node {
                 }
             });
         }
+        // TextView's own `selectAllOnFocus`: any focus (a tap, a key, `requestFocus`) selects the text; a tap that
+        // focuses keeps that selection rather than placing the caret, and one on the focused field places it.
+        edit.setSelectAllOnFocus(selectOnFocus);
         edit.setHighlightColor(hasSelectionColor ? (selectionColor & 0x00ffffff) | 0x55000000 : 0x5533b5e5);
         tintHandles(hasSelectionColor ? selectionColor : null);
         boolean first = !configured;

@@ -85,6 +85,7 @@ fn app() -> impl IntoElement {
 ```tsx tabs
 import { mount, Text, View } from "nsh";
 import { Button, createNavStack, NavPage, NavStack } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 type Route = { name: "home" } | { name: "detail"; id: number };
 
@@ -136,7 +137,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 On iOS and Android the page shows the system header with `title` and a back button; on the desktops and the web it

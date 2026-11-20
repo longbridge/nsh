@@ -913,6 +913,9 @@ fn input_json(c: &InputConfig) -> String {
     if c.replaced {
         s.push_str(",\"replaced\":true");
     }
+    if c.select_text_on_focus {
+        s.push_str(",\"selectTextOnFocus\":true");
+    }
     s.push('}');
     s
 }

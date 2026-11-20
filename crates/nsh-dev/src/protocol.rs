@@ -348,6 +348,10 @@ pub enum ServerMessage {
         /// JSON): `nsh_engine::Bundle::with_main_window` reads them.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         window: Option<String>,
+        /// The app's lifecycle (`nsh.json` `"application"`, JSON):
+        /// `nsh_engine::Bundle::with_application` reads it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        application: Option<String>,
         /// The VM limits to run the app with, as an embedding app would
         /// set them (`nsh run --limits`, in `nsh_core::js::HostLimits`'
         /// syntax: `memory=128MB,call=500ms`; empty: the embedding
@@ -681,6 +685,9 @@ pub enum TestStep {
     },
     /// Closes the app: the host exits.
     Quit,
+    /// The ids of the app's open windows, in opening order
+    /// (`app.windowIds()`): an array of strings. Desktops.
+    WindowIds,
     /// The state of the app's window `id` as the platform reports it
     /// (`app.window(id).state()`): a `WindowState` object, `null` while it
     /// is not open. Desktops.
@@ -1100,6 +1107,7 @@ mod tests {
             capabilities: None,
             app_id: None,
             window: None,
+            application: None,
             limits: None,
         };
         // No declaration: the field is left out (older hosts read the same).

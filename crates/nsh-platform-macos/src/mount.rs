@@ -225,6 +225,8 @@ impl Mounter {
             view.set_stale(false);
             if self.alive(&view) {
                 view.redraw();
+                // A picture taken while drawing was deferred lacks this content.
+                crate::shader::ui_changed(&view);
                 crate::shader::shown(&view);
             }
         }
@@ -735,10 +737,10 @@ impl Mounter {
                     crate::text_input::set_selection(view, *start, *end);
                 }
             }
-            // Not carried out on this platform yet: the app's paste is lost,
-            // so say so.
-            Command::InsertText(_) => {
-                log::warn!("insertText is not supported on macOS yet; nothing inserted")
+            Command::InsertText(text) => {
+                if let Some(view) = view {
+                    crate::text_input::insert_text(view, text);
+                }
             }
             Command::ScrollTo { y, animated, .. }
                 if view.is_some_and(|v| v.kind() == ViewKind::Input) =>
@@ -783,6 +785,8 @@ impl Mounter {
             | Command::SendInput(_)
             | Command::Load(_)
             | Command::WebViewRequest(_)
+            | Command::Evaluate { .. }
+            | Command::CancelEvaluate { .. }
             | Command::Seek(_)
             | Command::Native { .. } => {
                 if let Some(view) = view {

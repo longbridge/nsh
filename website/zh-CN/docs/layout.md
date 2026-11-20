@@ -227,7 +227,7 @@ const width = signal(0);
 </View>
 ```
 
-frame 的单位是点：Rust 中是 `Bounds<Points>`，TSX 中是 `{ bounds }`，其值是一个 `Bounds`（`{ origin: { x, y }, size: { width, height } }`）。要获取整个窗口的大小，在 Rust 中读取 `window()`，在 TSX 中读取 [`nsh` 的设备 API](../modules/nsh.md#device) 的 `windowSize()`；两者都跟随旋转和窗口缩放变化，读取它们的样式会随窗口改变：
+frame 的单位是点：Rust 中是 `Bounds<Points>`，TSX 中是 `{ bounds }`，其值是一个 `Bounds`（`{ origin: { x, y }, size: { width, height } }`）。要获取整个 surface 的大小，在 Rust 中读取 `window()`，在 TSX 中读取 [`nsh` 的设备 API](../modules/nsh.md#device) 的 `windowSize()`；两者都跟随旋转和缩放变化，读取它们的样式会随 surface 改变。桌面平台上宿主不可见：窗口自己的尺寸是它的 `WindowRef.state()?.contentBounds`（Rust 为 `WindowRef::state()`），跟随该窗口缩放：
 
 ```rust tabs
 view().style_when(|| window().width > px(600.0), |s| s.flex_row())

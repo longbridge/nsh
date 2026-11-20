@@ -8,7 +8,9 @@
 //! features.
 //!
 //! ```ignore
-//! let mut app = nsh_testing::Headless::start(EngineConfig::new(Root::of::<my_app::App>())).unwrap();
+//! let mut app =
+//!     nsh_testing::Headless::start(EngineConfig::new(nsh_testing::windowed_root::<my_app::App>()))
+//!         .unwrap();
 //! app.wait_for("Count: 0")?;
 //! app.press("Tap")?;
 //! app.wait_for("Count: 1")?;
@@ -41,6 +43,7 @@ pub mod menu;
 mod module;
 #[cfg(feature = "js")]
 mod page_host;
+pub mod root;
 #[cfg(feature = "js")]
 mod run;
 #[cfg(feature = "js")]
@@ -90,6 +93,7 @@ pub use self::{
 };
 pub use self::{
     failure::{SCREEN_TEXT_LIMIT, screen_texts},
+    root::{RootProps, WindowedRoot, WindowedRootWith, windowed_root, windowed_root_with},
     screen::{LayoutNode, LayoutScroll, LayoutText, Pick, Screen},
     storage::MemoryStorage,
 };
@@ -150,7 +154,8 @@ fn build(
         // The schemes it claims and its main window's launch options, as a
         // packaged app's runner reads them.
         .with_url_schemes(bundle.url_schemes)
-        .with_main_window(bundle.main_window.as_deref());
+        .with_main_window(bundle.main_window.as_deref())
+        .with_application(bundle.application.as_deref());
     Ok((app, bundle.source_map, bundle.asset_root))
 }
 

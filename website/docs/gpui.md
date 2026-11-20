@@ -131,9 +131,14 @@ URIs resolve (`AssetBase::Directory` or `AssetBase::Http`). Bytecode bundles (`b
 `unsafe { Bundle::bytecode(bytes) }` (or `Bundle::read_trusted(path)`, unsafe too): QuickJS bytecode is trusted input,
 so only load it from your own app's files.
 
-- `open_app_window(source, options, cx)` opens a window with one `AppView` in a running GPUI app, with the app's
-  nsh.json `window` settings. With `"defaultVisible": false` it opens hidden on macOS and Windows and shows when the
-  app shows it ([The main window](../modules/nsh-desktop.md#the-main-window)); on Linux GPUI shows it as it opens.
+- `open_app_window(source, options, cx)` opens a host window with one `AppView` in a running GPUI app, with the app's
+  nsh.json `window` settings applied before its first frame. The app must declare at least one top-level `<Window>`
+  (the shared v2 mount check rejects a plain root); its windows are native GPUI windows
+  ([The app host and the first window](../modules/nsh-desktop.md#the-app-host-and-the-first-window)). GPUI's host
+  window still follows the old main-window model: it is not a v2 hidden host (on Linux it still shows as it opens),
+  and the legacy `"defaultVisible"` key no longer affects it, since the shared launch policy reports the host hidden;
+  the app's `<Window>` windows are the ones it shows. The AppView embedding example is not migrated and does not run
+  as written. The backend is 待平台验证.
 - `run_app(source, options)` starts GPUI and runs one app in a window until it closes (what the development host does).
 - `AppView::register_component(name, factory)` registers a native component of yours before loading
   ([Native components](./native-components.md)).

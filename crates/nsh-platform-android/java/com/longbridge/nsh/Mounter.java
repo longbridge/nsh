@@ -81,9 +81,31 @@ final class Mounter {
     final int[] dialogColors = new int[10];
     /** The alerts shown and not answered yet, by dialog id: what {@link SystemUi#closeDialog} takes back. */
     final SparseArray<android.app.AlertDialog> dialogs = new SparseArray<>();
-    /** The status bar the app asked for last (style, hidden), applied again when the appearance changes. */
+    /**
+     * The status bar the app asked for last (style, hidden; -1: never), applied again when the app's or the system's
+     * appearance changes.
+     */
     private int barStyle = -1;
     private boolean barHidden;
+    /**
+     * The activity's system bars are the app's (an app on its own, {@link NshView#ownSystemBars}): their default
+     * follows the app's appearance. Embedded in another app's activity, its bars stay the host's until the app asks.
+     */
+    boolean ownsSystemBars;
+
+    /**
+     * Sets the system bars the app has: the status bar it asked for last, else, where it owns the bars, the default,
+     * whose icons contrast with the appearance shown, as the navigation bar's. Run again when the app's or the
+     * system's appearance changes: the default depends on both, and the activity's own bar setup reads only the
+     * system's.
+     */
+    void applySystemBars() {
+        int style = Math.max(barStyle, 0);
+        boolean night = night();
+        if (ownsSystemBars) DevActivity.systemBars(SystemUi.activity(context), night);
+        if (barStyle >= 0 || ownsSystemBars) SystemUi.statusBar(context, style, barHidden, night);
+        for (ModalHost m : shownModals) m.systemBars(style, barHidden, night);
+    }
 
     /** Dark appearance as shown: the app's, else the system's. */
     boolean night() {
@@ -355,6 +377,7 @@ final class Mounter {
                 case INSERT: insert(b.getInt(), b.getInt(), b.getInt()); break;
                 case REMOVE: {
                     int id = b.getInt();
+                    noteKeyboardLeaving(views.get(id));
                     if (!removeHosted(id)) remove(id);
                     break;
                 }
@@ -497,10 +520,7 @@ final class Mounter {
                         }
                         if (v instanceof StackBox.ScreenBox) ((StackBox.ScreenBox) v).appearanceChanged();
                     }
-                    if (barStyle == 0) {
-                        SystemUi.statusBar(context, barStyle, barHidden, night());
-                        for (ModalHost m : shownModals) m.statusBar(barStyle, barHidden, night());
-                    }
+                    applySystemBars();
                     break;
                 }
                 case LAYOUT_DIRECTION: {
@@ -715,6 +735,7 @@ final class Mounter {
         // batch that pushes it finds the page placed only now, so it is
         // focused before the frame draws.
         if (pendingFocus.id() != 0) retryFocus();
+        settleKeyboardLeaving();
         outputs(Native.afterBatch(handle(), seq));
     }
 
@@ -945,6 +966,8 @@ final class Mounter {
     }
 
     private void insert(int parentId, int childId, int beforeId) {
+        // Moved, not removed: the keyboard is not its to hide.
+        if (keyboardLeaving != null && views.get(childId) == keyboardLeaving) forgetKeyboardLeaving();
         if (insertHosted(parentId, childId, beforeId)) return;
         View parent = views.get(parentId), child = views.get(childId);
         ViewGroup group = container(parent);
@@ -1057,6 +1080,9 @@ final class Mounter {
 
     private void delete(int id) {
         View v = views.get(id);
+        // Still in the tree: a subtree released at once comes as deletes
+        // without a remove, and each detaches its view here.
+        if (v != null && v.getParent() != null) noteKeyboardLeaving(v);
         if (id == pendingFocus.id()) {
             dropPendingFocus();
             android.util.Log.w("nsh", "focus(): view " + id + " was removed before it was shown; the request is dropped");
@@ -2061,7 +2087,7 @@ final class Mounter {
                 modal.show();
                 shownModals.remove(modal);
                 shownModals.add(modal);
-                if (barStyle >= 0) modal.statusBar(barStyle, barHidden, night());
+                modal.statusBar(Math.max(barStyle, 0), barHidden, night());
             } else {
                 modal.dismiss();
                 shownModals.remove(modal);
@@ -2071,11 +2097,14 @@ final class Mounter {
         updateBack();
     }
 
-    /** Reports every mounted screen's insets again, after the view's safe area changed. */
+    /** Pads every mounted screen's toolbar and reports its insets again, after the view's safe area changed. */
     void reportAllScreenInsets() {
         for (int i = 0; i < screenOptions.size(); i++) {
             int id = screenOptions.keyAt(i);
-            if (views.get(id) instanceof StackBox.ScreenBox) reportScreenInsets(id, screenOptions.valueAt(i));
+            View v = views.get(id);
+            if (!(v instanceof StackBox.ScreenBox)) continue;
+            ((StackBox.ScreenBox) v).padToolbar();
+            reportScreenInsets(id, screenOptions.valueAt(i));
         }
     }
 
@@ -2293,7 +2322,8 @@ final class Mounter {
         int keyboard = b.getInt(), returnKey = b.getInt(), capitalize = b.getInt();
         boolean autoCorrect = b.getInt() != 0, multiline = b.getInt() != 0;
         int maxLength = b.getInt();
-        boolean editable = b.getInt() != 0, autoFocus = b.getInt() != 0, hasSelection = b.getInt() != 0;
+        boolean editable = b.getInt() != 0, autoFocus = b.getInt() != 0, selectOnFocus = b.getInt() != 0;
+        boolean hasSelection = b.getInt() != 0;
         int selection = b.getInt();
         boolean hasCaret = b.getInt() != 0;
         int caret = b.getInt();
@@ -2305,6 +2335,7 @@ final class Mounter {
         boolean scrollbarVisible = b.getInt() != 0, replaced = b.getInt() != 0;
         int fontVariant = b.getInt();
         if (!(v instanceof InputBox)) return;
+        if (autoFocus && !((InputBox) v).isConfigured()) focusAsked = true;
         ((InputBox) v).pasteInserts = pasteInserts;
         ((InputBox) v).setScrollbar(scrollbarVisible, replaced);
         ((InputBox) v).edit.setCursorVisible(!caretHidden);
@@ -2313,8 +2344,69 @@ final class Mounter {
         String family = familyIndex >= 0 ? (String) objects[familyIndex] : null;
         ((InputBox) v).configure(size, weight, italic, color, family, spacing, align, placeholder,
                 hasPlaceholderColor, placeholderColor, secure, keyboard, returnKey, capitalize, autoCorrect,
-                multiline, maxLength, editable, autoFocus, hasSelection, selection, hasCaret, caret, submit,
+                multiline, maxLength, editable, autoFocus, selectOnFocus, hasSelection, selection, hasCaret, caret, submit,
                 inputRtl, fontVariant);
+    }
+
+    /**
+     * The view removed or deleted in this batch with the text field that has the keyboard inside it, and that
+     * field's window: once detached, the view no longer finds its focus. Settled when the batch ends, never kept
+     * across batches.
+     */
+    private View keyboardLeaving, keyboardWindow;
+    private android.os.IBinder keyboardToken;
+    /** A field asked for the focus in this batch (`focus()`, or a new field's `autoFocus`): the keyboard is its. */
+    private boolean focusAsked;
+
+    private void noteKeyboardLeaving(View v) {
+        View f = v == null ? null : v.findFocus();
+        if (f == null || !f.onCheckIsTextEditor()) return;
+        keyboardLeaving = v;
+        keyboardWindow = f.getRootView();
+        keyboardToken = f.getWindowToken();
+    }
+
+    private void forgetKeyboardLeaving() {
+        keyboardLeaving = null;
+        keyboardWindow = null;
+        keyboardToken = null;
+    }
+
+    /**
+     * The field with the keyboard was removed or deleted in this batch and not put back: the keyboard hides with
+     * it, as when a page or dialog leaves ({@link #hideKeyboardIn}), unless a field takes it: one asked for the
+     * focus in the batch, waits for it, or has it once the batch's own posted focus requests ran.
+     */
+    private void settleKeyboardLeaving() {
+        View window = keyboardWindow;
+        android.os.IBinder token = keyboardToken;
+        boolean asked = focusAsked;
+        focusAsked = false;
+        forgetKeyboardLeaving();
+        if (window == null || asked) return;
+        host.post(() -> {
+            if (pendingFocus.id() != 0) return;
+            View now = window.findFocus();
+            if (now != null && now.onCheckIsTextEditor()) return;
+            InputMethodManager imm = (InputMethodManager) context.getSystemService(Context.INPUT_METHOD_SERVICE);
+            imm.hideSoftInputFromWindow(token, 0);
+            focusWindowRoot(window);
+        });
+    }
+
+    /** Leaves the focus at the root of {@code window}, where the keyboard's field was: the host's or a dialog's. */
+    private void focusWindowRoot(View window) {
+        if (window == host.getRootView()) {
+            host.requestFocus();
+            return;
+        }
+        for (int i = 0; i < modals.size(); i++) {
+            ModalHost modal = modals.valueAt(i);
+            if (modal.window() == window) {
+                modal.focusRoot();
+                return;
+            }
+        }
     }
 
     /**
@@ -3110,6 +3202,7 @@ final class Mounter {
 
     /** `Command::Focus`: the latest request wins over one still waiting. */
     private void focus(int id, View v) {
+        focusAsked = true;
         dropPendingFocus();
         // A field not shown yet waits on its own and reports that wait
         // (`inputFocusWaits`), so a newer request or a blur ends it.

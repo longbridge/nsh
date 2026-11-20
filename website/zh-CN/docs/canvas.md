@@ -40,6 +40,7 @@ pub fn App() -> impl IntoElement {
 
 ```tsx tabs
 import { Canvas, mount, View } from "nsh";
+import { Window } from "nsh/desktop";
 
 function App() {
   return (
@@ -60,7 +61,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 画布接受[视图](../elements/view.md)的一切（样式、类、触摸事件、无障碍、ref），再加上它的绘制。它需要从样式或布局中得到尺寸；它的内容就是绘制结果。坐标以点为单位，原点在左上角。
@@ -407,6 +412,7 @@ pub fn ring() -> impl IntoElement {
 ```tsx tabs
 import { Canvas, mount, signal, Text, View } from "nsh";
 import { createAnimatedValue, Easing } from "nsh";
+import { Window } from "nsh/desktop";
 
 function Ring() {
   const progress = createAnimatedValue(0.3);
@@ -446,7 +452,11 @@ function Ring() {
   );
 }
 
-mount(Ring);
+mount(() => (
+  <Window id="main">
+    <Ring />
+  </Window>
+));
 ```
 
 圆弧的终止角是 `progress.mul(2π).sub(π/2)`：它是一个节点，所以进度环会在 900 毫秒内以原生方式扫过，而绘制只录制了一次（标签读取了 signal，因此再录制一次）。时钟的秒针也是同样的做法：`rotate(seconds.mul(π / 30))`，其中 `seconds` 做线性动画。

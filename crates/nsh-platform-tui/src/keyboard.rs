@@ -298,6 +298,19 @@ impl Keyboard {
         tree: &mut Mounter,
         control: &EngineControl,
     ) {
+        self.focus_field(id, tree, control, true);
+    }
+
+    /// Focuses `id`; a field that takes the focus selects its whole text
+    /// (`selectTextOnFocus`) unless `select` is false: a Shift-press keeps
+    /// the selection it extends.
+    pub(crate) fn focus_field(
+        &mut self,
+        id: Option<NodeId>,
+        tree: &mut Mounter,
+        control: &EngineControl,
+        select: bool,
+    ) {
         let old = self.focused;
         let left = self.left;
         let old_span = tree.focused_span.filter(|&span| Some(span) == old);
@@ -315,11 +328,18 @@ impl Keyboard {
             {
                 field.focused = false;
             }
-            if let Some(field) = id
-                .and_then(|id| tree.get_mut(id))
-                .and_then(|v| v.field.as_mut())
+            if let Some(view) = id.and_then(|id| tree.get_mut(id))
+                && let Some(field) = view.field.as_mut()
             {
                 field.focused = true;
+                if select
+                    && view
+                        .input
+                        .as_ref()
+                        .is_some_and(|config| config.select_text_on_focus)
+                {
+                    field.select_all();
+                }
                 field.report(id.unwrap(), control, false);
             }
         }
