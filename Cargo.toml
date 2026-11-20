@@ -142,7 +142,7 @@ getrandom = "0.3"
 slab = "0.4"
 percent-encoding = "2.3"
 url = "2.5"
-ureq = { version = "3.1", features = ["platform-verifier"] }
+ureq = { version = "~3.5.2", features = ["platform-verifier"] }
 ring = "0.17"
 regex = "1"
 # The text of `nsh-base`'s `Editor`: a rope, and its grapheme and word boundaries.
