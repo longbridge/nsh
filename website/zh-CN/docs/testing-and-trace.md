@@ -398,7 +398,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `await app.keyboard.down(keys)` / `up(keys)` | 按住修饰键（`"mod"`、`"shift"`、`"alt"`、`"ctrl"`、`"meta"`，用 `+` 连接）直到 `up`：期间的按压、拖动和悬停都带着这些键，如同 Mod 加点击或 Shift 加拖动。目前在 headless 和 Linux 上可用。 |
 | `await app.dragAndHold(selector, by)` / `app.drop()` | 像 `drag` 一样拖动，但手指一直按着，直到 `drop()` 在当前位置抬起：其间的步骤可以查看拖动中的画面（拖动预览、放置线）。目前在 headless 和 Linux 上可用。 |
 | `await app.dropFiles(selector, uris)` | 把本地文件（`file:` URL，如同从文件管理器拖来）放到视图中央：它或外层最近一个监听的视图收到 `onFileDrop`。桌面平台，目前在 headless、Linux 和 macOS 上可用。 |
-| `await app.drag(selector, { x, y })` | 手指落在视图中央，停留 100 ms，再移动 `x`、`y` 点（每帧 10 点）后抬起，由平台的输入系统处理：pan 跟随手指（`pan={{ x, y }}`、`onPanStart`，以及带松手速度的 `onPanEnd`），监听触摸的视图会收到触摸事件（`onTouchStart`、`PanResponder`），滚动视图随手指滚动，拉过顶部足够远时触发刷新（`onRefresh`），手指移开后其下的按压会被取消。在桌面和 web 上由鼠标完成。 |
+| `await app.drag(selector, { x, y })` | 手指落在视图中央，停留 100 ms，再移动 `x`、`y` 点（每帧 10 点）后抬起，由平台的输入系统处理：pan 跟随手指（`pan={{ x, y }}`、`onPanStart`，以及带松手速度的 `onPanEnd`），监听触摸的视图会收到触摸事件（`onTouchStart`、`PanResponder`），滚动视图随手指滚动，拉过顶部足够远时触发刷新（`onRefresh`），手指移开后其下的按压会被取消。在桌面和 web 上由鼠标完成：从可选择视图（`View selectable`、设置了 `selectable` 的 `TextView`）里开始的拖动会跨视图里的文字选择，该视图收到 `onSelectionChange`（复制会得到的文字、它的起始位置和外框）；从别处开始的拖动会清除选区。 |
 | `await app.wait(ms)` | 让应用运行 `ms` 毫秒：定时器、动画、请求。在手动时钟上，把时钟推进 `ms`（`app.clock.runFor`）。 |
 | `await app.waitFor(selector, options?)` | 有视图匹配时 resolve；传 `{ state: "gone" }` 时，等到没有视图匹配才 resolve；`timeout` 毫秒（5000）后 reject。在手动时钟上，等待时每次把时钟推进一个显示帧，最多推进 `timeout`。 |
 | `await app.waitUntil(condition, options?)` | 应用每发生一次变化就重新检查，`condition()` 返回 true 时 resolve：用于选择器表达不了的条件（`() => app.storage().note === "Milk"`）。在手动时钟上，两次检查之间把时钟推进一个显示帧，最多推进 `timeout`。 |
@@ -438,10 +438,14 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `await app.wake()` | 让系统从睡眠中唤醒，就像用户打开笔记本的盖子：`wakeCount()` 加一，`lifecycle()` 保持不变。仅限 headless 运行。 |
 | `await app.setLocaleSettings(settings)` | 修改 `settings` 中列出的语言与地区设置（`{ hourCycle: "h23", timeZone: "Asia/Tokyo" }`；还有 `languages`、`firstDayOfWeek`、`measurementSystem` 和 `temperatureUnit`，与 `open` 的 `localeSettings` 相同），就像用户修改系统设置或出行时那样；其余不变（`localeSettings()`）。仅限 headless 运行。 |
 | `await app.screenshot(path?)` | 应用截图（`Uint8Array`）：图形平台返回应用窗口的 PNG，`tui` 返回 UTF-8 Cell JSON；给出 `path` 时同时保存到本机的这个路径（相对当前目录）。只有真实平台会绘制应用：见[在真实平台上运行](#在真实平台上运行)。 |
-| `app.window(id)` | 桌面上应用的一个窗口，按应用给它的 id 找（`"main"`：主窗口）。headless 运行模拟桌面的窗口：一块显示器，每个窗口在它要求的位置打开，除非是面板或要求不获得焦点，否则获得焦点。 |
+| `app.windowIds()` | 应用已打开窗口的 id，按打开顺序；非桌面平台或没有窗口时为空。 |
+| `app.window(id)` | 桌面上应用的一个窗口，按应用给它的 id 找（`"main"`：约定的首窗口 id）。headless 运行模拟桌面的窗口：一块显示器，每个窗口在它要求的位置打开，除非是面板或要求不获得焦点，否则获得焦点。 |
 | `app.window(id).state()` | 平台报告给应用的窗口状态（`WindowState`：`mode`、`minimized`、`visible`、`focused`、`bounds`、`contentBounds`、`display`），窗口未打开时为 `null`。 |
 | `await app.window(id).pressClose()` | 像用户那样按下窗口的关闭按钮：窗口报告这次按下（`onClosePress`，reason 为 `"closeButton"`），`closeOnPress` 允许时关闭。 |
-| `await app.window(id).screenshot(path?)` | 窗口内容的截图（`Uint8Array`，PNG），与 `app.screenshot` 截取主窗口一样；给出 `path` 时同时保存。只有真实平台会绘制应用。 |
+| `await app.window(id).screenshot(path?)` | 窗口内容的截图（`Uint8Array`，PNG），与 `app.screenshot` 截取应用界面一样；给出 `path` 时同时保存。只有真实平台会绘制应用。 |
+| `await app.reopen()` | 向应用发送系统的 reopen 事件，就像 Dock/Finder 重新打开或再次启动那样（`Application.on("reopen")`）。仅限 headless 运行。 |
+| `await app.quitRequest()` | 像 Quit 菜单项那样请求退出：运行 `Application.on("quitRequest")`，应用只有调用 `Application.quit()` 才会退出。仅限 headless 运行。 |
+| `app.quit()` | 应用是否已退出（`Application.quit()`、Quit 菜单项或最后窗口策略）。退出后后续步骤会报告应用已停止。 |
 
 步骤会等到应用连续 100 ms 没有渲染、并且没有正在运行的、会自行结束的原生动画（对一直在渲染的应用最多等 2 s；在手动时钟上，同时最多等应用时间的 2 s）后才 resolve，所以下一行
 代码运行时，这一步带来的变化已经在屏幕上；之后才出现的内容（响应、定时器）用 `waitFor` 等待。在手动时钟上，步骤不等这

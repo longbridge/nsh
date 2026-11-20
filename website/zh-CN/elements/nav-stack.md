@@ -81,6 +81,7 @@ fn app() -> impl IntoElement {
 ```tsx tabs
 import { mount, Text, View } from "nsh";
 import { Button, createNavStack, NavPage, NavStack } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 type Route = { name: "home" } | { name: "detail"; id: number };
 
@@ -132,7 +133,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 在 iOS 和 Android 上，页面显示带 `title` 和返回按钮的系统标题栏；在桌面平台和 Web 上，它显示 `header`。只面向手机的应用可以省略 `header`；只面向桌面的应用可以省略系统标题栏的选项。[导航指南](../docs/navigation.md)讲解一个完整应用的导航：栈的状态、对话框、Android 返回键和标签页。

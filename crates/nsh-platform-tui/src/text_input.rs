@@ -82,6 +82,11 @@ impl Field {
         self.goal_column = None;
     }
 
+    pub(crate) fn select_all(&mut self) {
+        self.model.select_all();
+        self.goal_column = None;
+    }
+
     pub(crate) fn report(&mut self, id: NodeId, control: &EngineControl, changed: bool) {
         if changed {
             self.layout_key = None;
@@ -298,7 +303,12 @@ impl Field {
                 );
                 leave = config.submit() == SubmitBehavior::BlurAndSubmit;
             }
-            Leave => leave = true,
+            // Reported before the field gives up the focus, as the
+            // desktops report it: C-g is the Key scheme's Escape.
+            Leave => {
+                key_press(id, control, "Escape");
+                leave = true;
+            }
         }
         self.report(id, control, changed);
         leave

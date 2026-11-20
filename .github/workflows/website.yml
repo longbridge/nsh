@@ -150,6 +150,9 @@ jobs:
       - name: Test emoji measurement against what Chrome draws
         run: node --test --test-name-pattern emoji crates/nsh-platform-web/web/text-browser.test.mjs
 
+      - name: Test the web crate on the host
+        run: cargo test -p nsh-platform-web
+
       - name: Check the generated classic browser bootstrap
         run: cargo run -p nsh-bundler --example browser_bootstrap -- --check
 

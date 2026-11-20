@@ -368,6 +368,7 @@ pub(crate) fn serve(entry: &Path, options: &HostOptions) -> Result<DevServer, St
             capabilities,
             id: crate::package::app_id(entry).ok(),
             window: crate::package::window_json(entry),
+            application: crate::package::application_json(entry),
         },
         None,
         built.ui_sets,

@@ -116,7 +116,8 @@ pub struct DockPanel {
     pub id: PanelId,
 }
 
-/// A tab, as `renderTab` and `renderDragPreview` render it.
+/// A tab, as `renderTab`, `renderDragPreview` and `renderToolbar` render
+/// it.
 #[derive(Clone, Debug, Default, PartialEq, JsObject)]
 #[non_exhaustive]
 pub struct DockTab {
@@ -274,6 +275,9 @@ pub struct DockAreaProps {
     /// the tab, so a row of a title and a close button is a `flex-row` view
     /// of them.
     pub render_tab: Prop<Option<Renderer<DockTab>>>,
+    /// The toolbar at the end of a tab group's tab bar, given its displayed
+    /// tab: that panel's actions (as a GPUI dock panel's toolbar buttons).
+    pub render_toolbar: Prop<Option<Renderer<DockTab>>>,
     /// What shows where a drag would land, placed over the part of the
     /// group it would take.
     pub render_drop_indicator: Prop<Option<Renderer<DockDropIndicator>>>,

@@ -138,8 +138,10 @@ pub(crate) fn press(surface: &Rc<Surface>, vk: u16, modifiers: Modifiers) {
     }
 }
 
-/// Resizes the window so that its client area is `w` x `h` points.
-pub(crate) fn resize(surface: &Rc<Surface>, w: f32, h: f32) {
+/// Resizes the window the test acts on so that its client area is `w` x `h`
+/// points: the targeted window, else the focused one, else the first open
+/// one, else the host.
+pub(crate) fn resize(surface: &Rc<Surface>, target: NodeId, w: f32, h: f32) {
     use windows::Win32::{
         Foundation::RECT,
         UI::{
@@ -150,7 +152,20 @@ pub(crate) fn resize(surface: &Rc<Surface>, w: f32, h: f32) {
             },
         },
     };
-    let hwnd = surface.hwnd();
+    // A desktop test step resizes the window the user is in, as the user
+    // would; the host is never a user window. A background host focuses no
+    // window, so the first open one stands in (as the headless model does).
+    let first_open = || {
+        crate::app_window::ids(surface)
+            .first()
+            .and_then(|&id| crate::app_window::hwnd_of(surface, id))
+    };
+    let hwnd = if target != nsh_core::ROOT_ID {
+        crate::app_window::hwnd_of(surface, target)
+    } else {
+        crate::app_window::focused_hwnd(surface).or_else(first_open)
+    }
+    .unwrap_or_else(|| surface.hwnd());
     let dpi = crate::window::dpi(hwnd);
     let s = dpi as f32 / 96.0;
     let mut rect = RECT {

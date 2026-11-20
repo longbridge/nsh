@@ -597,6 +597,8 @@ struct Slot {
     /// Its `UIScrollEdgeElementContainerInteraction`, while it names the
     /// scroll view it floats over (`crate::scroll_edge`).
     edge_element: Option<Retained<objc2::runtime::AnyObject>>,
+    /// The scroll view and edge it names, counted in `Mounter::soft_edges`.
+    edge_named: Option<(NodeId, nsh_core::ScrollEdge)>,
 }
 
 impl Slot {
@@ -651,6 +653,7 @@ impl Slot {
             states: 0,
             styled: false,
             edge_element: None,
+            edge_named: None,
         }
     }
 }
@@ -709,6 +712,9 @@ pub(crate) struct Mounter {
     created: Vec<NodeId>,
     /// Views fading out before their removal.
     disappearing: rustc_hash::FxHashSet<NodeId>,
+    /// The scroll view edges views name (`ios={{ scrollEdgeElement }}`),
+    /// with how many name each: soft while any does (`crate::scroll_edge`).
+    soft_edges: Vec<(NodeId, nsh_core::ScrollEdge, u32)>,
     /// One-shot display link for `requestAnimationFrame`.
     frame_link: Retained<objc2_quartz_core::CADisplayLink>,
     /// Parents of screens, header items and modals (which are not
@@ -860,6 +866,7 @@ impl Mounter {
             layout_animation: None,
             created: Vec::new(),
             disappearing: Default::default(),
+            soft_edges: Vec::new(),
             frame_link: crate::animation::frame_link(&target_for_link),
             shaders,
             text_colors: crate::interaction::TextColors::new(&target_for_link),
@@ -1316,6 +1323,9 @@ impl Mounter {
                     self.areas.remove(i).1.delete();
                 }
                 if let Some(mut s) = self.views.get_mut(id as usize).and_then(Option::take) {
+                    // The scroll view edge it named, or its own named edges,
+                    // go back to their automatic style.
+                    self.edges_deleted(id, s.edge_named);
                     // A modal deleted while presented (the app closed it and
                     // released it, or released its subtree without a
                     // remove) goes away too, as on Android: through its
@@ -2144,10 +2154,7 @@ impl Mounter {
             (Command::SetSelection { start, end }, Native::Input(input)) => {
                 input.select(start, end)
             }
-            // Not carried out on iOS yet: the app's paste is lost, so say so.
-            (Command::InsertText(_), _) => {
-                log::warn!("insertText is not supported on iOS yet; nothing inserted")
-            }
+            (Command::InsertText(text), Native::Input(input)) => input.insert_text(&text),
             (Command::OpenEditMenu { bounds, actions }, Native::Input(input)) => {
                 let view = input.editor_view();
                 let rect = CGRect::new(
@@ -5023,19 +5030,88 @@ impl Mounter {
             Some(Slot {
                 native: Native::Scroll(scroll),
                 ..
-            }) => Some((scroll.clone(), e.edge)),
+            }) => Some((e.scroll_view, scroll.clone(), e.edge)),
             _ => None,
         });
+        let named = scroll.as_ref().map(|&(node, _, edge)| (node, edge));
         let Some(s) = self.slot_mut(id) else { return };
-        if scroll.is_none() && s.edge_element.is_none() {
+        if named == s.edge_named {
             return;
         }
+        let old = std::mem::replace(&mut s.edge_named, named);
         let view = s.native.view().retain();
         crate::scroll_edge::set(
             &view,
             &mut s.edge_element,
-            scroll.as_ref().map(|(scroll, edge)| (&**scroll, *edge)),
+            scroll.as_ref().map(|(_, scroll, edge)| (&**scroll, *edge)),
         );
+        if let Some((node, edge)) = old {
+            self.unname_edge(node, edge);
+        }
+        if let Some((node, edge)) = named {
+            self.name_edge(node, edge);
+        }
+    }
+
+    /// One more view names `edge` of scroll view `node`: the first makes it
+    /// soft.
+    fn name_edge(&mut self, node: NodeId, edge: nsh_core::ScrollEdge) {
+        if let Some(named) = self
+            .soft_edges
+            .iter_mut()
+            .find(|(n, e, _)| (*n, *e) == (node, edge))
+        {
+            named.2 += 1;
+            return;
+        }
+        self.soft_edges.push((node, edge, 1));
+        if let Some(Slot {
+            native: Native::Scroll(scroll),
+            ..
+        }) = self.slot(node)
+        {
+            crate::scroll_edge::set_style(scroll, edge, true);
+        }
+    }
+
+    /// A view stops naming `edge` of scroll view `node`: once none does,
+    /// the edge gets its automatic style back.
+    fn unname_edge(&mut self, node: NodeId, edge: nsh_core::ScrollEdge) {
+        let Some(i) = self
+            .soft_edges
+            .iter()
+            .position(|(n, e, _)| (*n, *e) == (node, edge))
+        else {
+            return;
+        };
+        self.soft_edges[i].2 -= 1;
+        if self.soft_edges[i].2 > 0 {
+            return;
+        }
+        self.soft_edges.swap_remove(i);
+        if let Some(Slot {
+            native: Native::Scroll(scroll),
+            ..
+        }) = self.slot(node)
+        {
+            crate::scroll_edge::set_style(scroll, edge, false);
+        }
+    }
+
+    /// Deleted node `id` no longer names an edge, and nothing names the
+    /// edges of it any more (a new view may take its id).
+    fn edges_deleted(&mut self, id: NodeId, named: Option<(NodeId, nsh_core::ScrollEdge)>) {
+        if let Some((node, edge)) = named {
+            self.unname_edge(node, edge);
+        }
+        if self.soft_edges.iter().any(|(n, ..)| *n == id) {
+            self.soft_edges.retain(|(n, ..)| *n != id);
+            for s in self.views.iter_mut().flatten() {
+                if s.edge_named.is_some_and(|(n, _)| n == id) {
+                    s.edge_named = None;
+                }
+            }
+        }
     }
 
     /// Only the label of the view's props changed.

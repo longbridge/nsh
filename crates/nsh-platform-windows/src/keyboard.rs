@@ -136,7 +136,12 @@ fn window_root(surface: &Surface, view: &NshView) -> bool {
 /// parents; only this interest/capture walk follows the override.
 fn walk_keyboard(surface: &Surface, view: &NshView, mut f: impl FnMut(&NshView) -> bool) -> bool {
     let window = window_of(surface, view);
-    let mut current = Some(view.clone());
+    let content = view.state().props.key_content;
+    let mut current = Some(
+        content
+            .and_then(|id| surface.view(id))
+            .unwrap_or_else(|| view.clone()),
+    );
     // Bounded: a routing override is core's, but a broken one must not hang
     // the window.
     for _ in 0..1024 {
@@ -491,6 +496,7 @@ fn key_name(event: &KeyEvent) -> SharedString {
         0xB5 => Some("LaunchMediaPlayer"),
         0xB6 => Some("LaunchApplication1"),
         0xB7 => Some("LaunchApplication2"),
+        0xFA => Some("MediaPlay"),
         _ => None,
     };
     if let Some(named) = named {
@@ -1179,6 +1185,8 @@ mod tests {
             (0x11, "Control"),
             (0x12, "Alt"),
             (0x5B, "Meta"),
+            (0xB3, "MediaPlayPause"),
+            (0xFA, "MediaPlay"),
             (0x70, "F1"),
             (0x74, "F5"),
             (0x87, "F24"),
