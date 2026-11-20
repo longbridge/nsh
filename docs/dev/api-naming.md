@@ -334,7 +334,7 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | Image `onLoad(size: PixelSize)` | `onLoad({ size }: { size: PixelSize })` | Payloads | 2026-10-27, as Video's `onLoad({ duration, size })` |
 | Input `onContentSizeChange(size: Size)` | `onContentSizeChange({ size }: { size: Size })` | Payloads | 2026-10-27 |
 | `PanEvent` `translationX` / `translationY`, `velocityX` / `velocityY`, `valueX` / `valueY` | `translation: Point`, `velocity: Point`, `value?: Partial<Point>` | Points | 2026-10-27: `e.velocity.x`, `e.value?.y`; `cancelled` stays |
-| `onPress`, `onLongPress`, `onPressDown`, `onPressUp` `(e?: PressEvent)` | `(e: PressEvent)` | Payloads | 2026-10-27: always passed; where the backend does not know the pointer, at the view's origin with no keys and one click |
+| `onPress`, `onLongPress`, `onPressDown`, `onPressUp` `(e?: PressEvent)` | `(e: PressEvent)` | Payloads | 2026-10-27: always passed; where the backend does not know the pointer, at the view's origin with no keys and one click; 2026-11-19 (#2506): `clickCount` 0 instead, as the DOM's `detail` for keyboard and assistive technology activations |
 | `keymap.bind` handlers `(keystroke: string)` | `({ keystroke }: { keystroke: string })` | Payloads | 2026-10-27: one object, as every event |
 | **Image** | | | |
 | `src: string \| ImageAsset \| { uri }` | `src: string \| ImageAsset` | Addresses | |
@@ -472,13 +472,14 @@ and `Input`'s React Native names follow the rules as well.
 | `placeholderTextColor` | style key `placeholderColor`, class `placeholder:text-*` | *guides* `value` vs `presentation`; CSS `::placeholder` | |
 | `selectionColor` (Input, Text) | style key `selectionColor` (the highlight), class `selection:text-*` | CSS `::selection` | |
 | `cursorColor` (Input) | style key `caretColor`, class `caret-*` | CSS `caret-color` | |
+| Switch `trackColor` (on) (`nsh/mobile`'s system switch) | style key `accentColor`, class `accent-*` | CSS `accent-color` | A color of a part is a style key. Set on the control (not inherited); the system's segmented control and tab bar could read it later |
 | `editable` | `readonly` (`editable={false}` = `readonly`) | *guides* "readonly"; `gpui-component` `Input::readonly` | `disabled` (no focus, `disabled:` classes) stays separate |
 | `onChangeText(text)` | `onChange({ value })` (was `onChange(text)` until 2026-10-27) | `InputEvent::Change`; `on_change` observes (*guides*) | |
 | `onSubmitEditing` | `onSubmit` | `InputEvent::PressEnter` (not followed) | The return key, whatever `returnKeyType` shows: on a phone it says Done / Search / Go, not Enter; HTML's `submit` |
 | `secureTextEntry` | `masked` | `gpui-component` `Input::masked` | |
 | `multiline` | unchanged | `Input::multi_line` (not followed) | One word, as `readonly` |
 | `selection` | `selectedRange` | `Input::selected_range` | `onSelectionChange` stays |
-| `autoFocus`, `maxLength`, `keyboardType`, `returnKeyType`, `submitBehavior`, `autoCapitalize`, `autoCorrect`, `autoComplete`, `caretHidden`, `onKeyPress`, `onContentSizeChange`, `allowFontScaling`, `maxFontSizeMultiplier`, `ios.textContentType` | unchanged | none | No `gpui-kit` term differs; `textContentType` stays iOS's |
+| `autoFocus`, `selectTextOnFocus`, `maxLength`, `keyboardType`, `returnKeyType`, `submitBehavior`, `autoCapitalize`, `autoCorrect`, `autoComplete`, `caretHidden`, `onKeyPress`, `onContentSizeChange`, `allowFontScaling`, `maxFontSizeMultiplier`, `ios.textContentType` | unchanged | none | No `gpui-kit` term differs; `textContentType` stays iOS's |
 | **View** | | | |
 | `accessibilityRole` | (dropped; `role` stays) | GPUI `.role(Role::…)`; `Button::role` | |
 | (new) roles `group`, `region`, `navigation`, `tree`, `treeitem`, `menuitemcheckbox`, `menuitemradio` | ARIA's names, as `role`'s others (`columnheader`, `rowgroup`) | GPUI `Role::Group`, `Region`, `Navigation`, `Tree`, `TreeItem`, `MenuItemCheckBox`, `MenuItemRadio` (`accordion.rs`, `toolbar.rs`, `pagination.rs`, `tree.rs`) | One lowercase word each, as ARIA and the existing roles write them |

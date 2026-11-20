@@ -252,11 +252,18 @@ while it is pressed and while the pointer is over its slot. For a mark of your o
 three Cells wide and one Cell high (24 × 16 points at the default size) with the glyph centered. With `controlsRight`,
 `NumberInput` sets its steppers side by side in a terminal, the decrement first (` −  + `).
 
-**Media elements keep their space in the layout.** An `Image`, `Video`, `WebView` or shader view larger than an icon
-keeps its box, so the text and controls around it stay where the design puts them; the terminal shows text and
-lines, so the box is blank Cells. Images, videos, web views, shaders and canvases of icon size (48 × 48 points or
-smaller) give their room to the content around them. With surfaces, a view in the image role whose background is a color (a color
-swatch) shows that color.
+**Images show their pictures.** An `Image` larger than an icon draws its picture in its box, fitted with its
+`objectFit` and `objectPosition` and tinted with its `tintColor`. In kitty and Ghostty the picture is shown at the
+terminal's own pixels, through the kitty graphics protocol; elsewhere, at 256 colors or more, each Cell shows two
+pixels in half blocks (`▀`), including inside tmux. PNG, JPEG, GIF, WebP and SVG files, assets, remote URLs and `data:` /
+`blob:` sources load as on the other platforms, `onLoad`, `onError` and the other load events report, and
+`Image.getSize` and `Image.prefetch` answer. An animated image shows its first frame. With 16 colors or none the box
+stays blank.
+
+**Other media keep their space in the layout.** A `Video`, `WebView` or shader view larger than an icon keeps its
+box, so the text and controls around it stay where the design puts them; the box is blank Cells. Images, videos, web
+views, shaders and canvases of icon size (48 × 48 points or smaller) give their room to the content around them. With
+surfaces, a view in the image role whose background is a color (a color swatch) shows that color.
 
 ## Laying out for the terminal
 

@@ -13,10 +13,10 @@ mod component;
 mod dev;
 mod dev_port;
 mod entry;
-mod extensions;
 mod init;
 mod logger;
 mod native_features;
+mod nshm;
 mod package;
 mod platforms;
 mod play;
@@ -336,18 +336,18 @@ enum Command {
         #[arg(value_enum)]
         channel: Option<self_update::Channel>,
     },
-    /// Add a third-party extension to the app in this directory: a Rust
+    /// Add an nshm (NSH module) to the app in this directory: a Rust
     /// crate with components, modules and classes for its Rust and TSX
     /// code, from crates.io (`nsh add acme-ui[@1.2]`), Git (`nsh add
     /// https://github.com/acme/ui`) or a directory (`nsh add --path
-    /// ../ui`). Listed in `nsh.json` `"extensions"`, the version or commit
+    /// ../ui`). Listed in `nsh.json` `"modules"`, the version or commit
     /// it resolved to pinned in `nsh.lock`.
     Add {
         /// A crate name (with `@<version>`), `github:<owner>/<repo>` (with
         /// `@<tag>`) or a Git repository URL.
         #[arg(required_unless_present = "path", conflicts_with = "path")]
         source: Option<String>,
-        /// A local directory with the extension.
+        /// A local directory with the nshm.
         #[arg(long)]
         path: Option<String>,
         /// The tag to take from Git (default: the default branch).
@@ -1072,9 +1072,9 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             path,
             tag,
             rev,
-        } => extensions::add(
+        } => nshm::add(
             &std::env::current_dir()?,
-            extensions::Source::parse(source, path, tag, rev)?,
+            nshm::Source::parse(source, path, tag, rev)?,
         ),
         Command::Component { action } => match action {
             ComponentAction::List => component::list(),

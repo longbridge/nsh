@@ -179,6 +179,10 @@ mod tests {
         assert!(elements.contains(
             "export type MacOsBackdropState = \"followsWindowActiveState\" | \"active\" | \"inactive\";"
         ));
+        assert!(elements.contains(
+            "export interface ScrollEdgeElement {\n  scrollView: ViewRef;\n  edge?: ScrollEdge;\n}"
+        ));
+        assert!(elements.contains("export type ScrollEdge = \"top\" | \"bottom\";"));
         for (interface, prop) in [
             ("HostProps", "  onPress?: (e: PressEvent) => void;"),
             ("HostProps", "  onLongPress?: (e: PressEvent) => void;"),
@@ -188,6 +192,7 @@ mod tests {
             ("HostProps", "  onLayout?: (e: { bounds: Bounds }) => void;"),
             ("AndroidHostProps", "  elevation?: number;"),
             ("IOSHostProps", "  backdropMaterial?: BackdropMaterial;"),
+            ("IOSHostProps", "  scrollEdgeElement?: ScrollEdgeElement;"),
             ("MacOSHostProps", "  backdrop?: MacOsBackdrop;"),
             ("InputHostProps", "  keyboardType?: KeyboardType;"),
             (

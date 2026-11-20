@@ -19,6 +19,7 @@ import BaseDataTable from "./base-data-table";
 import BaseDiff from "./base-diff";
 import BaseDock from "./base-dock";
 import BaseDockTabScroll from "./base-dock-tab-scroll";
+import BaseDockRenderHandle from "./base-dock-render-handle";
 import BaseSplitView from "./base-split-view";
 import BaseEditor from "./base-editor";
 import BaseHoverCard from "./base-hover-card";
@@ -64,6 +65,7 @@ import BaseToast from "./base-toast";
 import BaseToggle from "./base-toggle";
 import BaseToolbar from "./base-toolbar";
 import BaseTree from "./base-tree";
+import BaseTreeSlots from "./base-tree-slots";
 import BaseToken from "./base-token";
 import BaseSetTheme from "./base-set-theme";
 import BaseTransitionShader from "./base-transition-shader";
@@ -81,6 +83,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-diff": BaseDiff,
   "base-dock": BaseDock,
   "base-dock-tab-scroll": BaseDockTabScroll,
+  "base-dock-render-handle": BaseDockRenderHandle,
   "base-split-view": BaseSplitView,
   "base-editor": BaseEditor,
   "base-hover-card": BaseHoverCard,
@@ -115,6 +118,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-toggle": BaseToggle,
   "base-toolbar": BaseToolbar,
   "base-tree": BaseTree,
+  "base-tree-slots": BaseTreeSlots,
   "base-collapsible": BaseCollapsible,
   "base-color-picker": BaseColorPicker,
   "base-collapsible-reveal": BaseCollapsibleReveal,

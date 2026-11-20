@@ -201,6 +201,8 @@ public class NshView extends FrameLayout {
         super(context);
         density = getResources().getDisplayMetrics().density;
         TextLayouts.cacheDir = context.getCacheDir();
+        // Rust code's permission requests ask through the activity in front.
+        Permissions.track(context);
         mounter = new Mounter(this, new Images(this::readAsset));
         root = mounter.root;
         addView(root, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
@@ -233,6 +235,12 @@ public class NshView extends FrameLayout {
         // ... and the images they download in <cacheDir>/<app id>/images: nsh
         // in the cache directory.
         handle = Native.create(this, density, trace, dataDir.getPath(), cacheDir.getPath());
+        String[] rustComponents = Native.componentNames(handle);
+        if (rustComponents != null) {
+            for (String name : rustComponents) {
+                mounter.components.put(name, c -> new RustComponent(this, handle, c, name));
+            }
+        }
     }
 
     /**
@@ -288,6 +296,14 @@ public class NshView extends FrameLayout {
     /** Runs the apps loaded from now on as apps on their own, without limits (nsh's own activities). */
     void useStandaloneLimits() {
         Native.setStandaloneLimits(handle);
+    }
+
+    /**
+     * The activity's system bars are this app's (an app on its own): their default icons follow the app's
+     * appearance, not only the system's. An embedding host keeps its bars unless the app asks for the status bar.
+     */
+    void ownSystemBars() {
+        mounter.ownsSystemBars = true;
     }
 
     /**
@@ -531,6 +547,7 @@ public class NshView extends FrameLayout {
             return;
         }
         mounter.components.put(name, factory);
+        if (handle != 0) Native.componentJavaRegistered(handle, name);
     }
 
     /** Hears a scroll view the host watches ({@link #watchScroll}) come and go, on the UI thread. */
