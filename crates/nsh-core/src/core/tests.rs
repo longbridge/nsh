@@ -41031,6 +41031,27 @@ mod terminal_layout {
     }
 
     #[test]
+    fn a_box_holding_a_growing_scroll_view_keeps_its_explicit_height() {
+        // A picker 160pt tall: a search row, then its grid in a scroll view
+        // growing into what is left, which has no rows of its content.
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("alignSelf", V::Str("flex-start")),
+                ("height", V::Number(160.0)),
+            ],
+        );
+        ops.extend(text(3, 2, "Search"));
+        ops.extend(node(4, Tag::Scroll, 2, &[("flexGrow", V::Number(1.0))]));
+        ops.extend(text(5, 4, "Grid"));
+        let batch = laid_out(ops);
+        // Ten rows: one for the search, nine for the grid.
+        assert_eq!(frame_of(&batch, 2).map(|f| f.size.height.0), Some(160.0));
+        assert_eq!(frame_of(&batch, 4).map(|f| f.size.height.0), Some(144.0));
+    }
+
+    #[test]
     fn a_chart_sized_canvas_keeps_its_size_in_cells() {
         let batch = laid_out(node(
             2,

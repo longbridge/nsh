@@ -59,7 +59,9 @@
 //!   `Length`, its minimum and maximum `Min` and `Max`; a `flexBasis` is
 //!   a `Length` along the main axis either way. An explicit height
 //!   counts only on boxes without content (charts, spacers), on scroll
-//!   views (as a maximum) and on a clip of no height (a closed reveal);
+//!   views (as a maximum), on a box holding a scroll view that grows into
+//!   what is left (a picker's grid under its search field) and on a clip
+//!   of no height (a closed reveal);
 //!   a box with content is its content's height. A box without content
 //!   or an image with one side and an `aspectRatio` takes the other side
 //!   from it in points (a photo filling its tile's width).
@@ -788,6 +790,10 @@ fn kind(tree: &impl Tree, node: NodeId) -> Kind {
     // went), and states no height or aspect ratio (an image filling a
     // card): it gives no rows.
     let mut fillers = true;
+    // A scroll view in flow that grows into what is left and states no
+    // height (an emoji picker's grid under its search field): it has no
+    // rows of its content, so the box's explicit height is what it fills.
+    let mut growing_scroll = false;
     for i in 0..count {
         let child = tree.child(node, i);
         if hidden(tree, child) {
@@ -796,6 +802,9 @@ fn kind(tree: &impl Tree, node: NodeId) -> Kind {
         visible = true;
         if !tree.style(child).position.is_out_of_flow() {
             in_flow = true;
+            growing_scroll |= tree.role(child).scroll
+                && tree.style(child).flex_grow > 0.0
+                && length(tree.style(child).size.height.into_raw()).is_none();
             fillers &= (tree.role(child).sized || overlaid(tree, child))
                 && length(tree.style(child).size.height.into_raw()).is_none()
                 && tree.style(child).aspect_ratio.is_none();
@@ -829,12 +838,14 @@ fn kind(tree: &impl Tree, node: NodeId) -> Kind {
         // cells, a row of them) has no rows of content to size it: its
         // explicit height is what its children are placed in.
         // So does one whose content in flow only fills it (a photo's card
-        // around its image): what it holds is as tall as it is.
+        // around its image): what it holds is as tall as it is; and one
+        // holding a scroll view that grows into what is left.
         honors_height: empty
             || anchor
             || shut
             || (visible && !in_flow)
             || (in_flow && fillers)
+            || growing_scroll
             || role.scroll
             || role.root
             || role.fills
