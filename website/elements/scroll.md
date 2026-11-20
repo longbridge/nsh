@@ -51,6 +51,7 @@ are methods of the `Scrollable` trait, which lists share.
 | `scrollable` | `.scrollable(..)` | `boolean` | `true` | The user can scroll it. |
 | `scrollbar` | `.scrollbar(..)` | `boolean \| ScrollbarTheme` | `true` | The scroll indicator shows: the platform's, or the app's [built-in bar](./scrollbar.md#built-in-bars) once it set a theme; an object is a theme of the view's own. |
 | `bounces` | `.bounces(..)` | `boolean` | `true` | Overscroll past the edges. |
+| `smoothWheel` | `.smooth_wheel(..)` | `boolean` | `false` | A notched mouse wheel scrolls as browsers do: 40-point lines eased in and out over 100–200 ms, instead of the platform's own step (macOS, whose own lines land at once; elsewhere ignored). |
 | `pagingEnabled` | `.paging(..)` | `boolean` | `false` | Stops at multiples of the viewport. |
 | `snapToInterval` | `.snap_interval(px(..))` | `number` | `0` | Stops at multiples of this length (0: off). |
 | `snapToOffsets` | `.snap_offsets(..)` | `number[]` | | Stops at these offsets. |

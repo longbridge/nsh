@@ -2820,6 +2820,50 @@ fn scrolls_to_top_reaches_the_scroll_behavior() {
     assert_eq!(behavior(&batch).map(|b| b.scrolls_to_top), Some(true));
 }
 
+/// `smoothWheel` reaches the scroll view's mounted behavior (macOS glides
+/// mouse wheels from it): off by default, on when the app says so, and off
+/// again.
+#[test]
+fn smooth_wheel_reaches_the_scroll_behavior() {
+    fn behavior(batch: &MountBatch) -> Option<ScrollBehavior> {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::ScrollBehavior { id: 2, behavior } => Some((**behavior).clone()),
+            _ => None,
+        })
+    }
+    assert!(!ScrollBehavior::default().smooth_wheel);
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Scroll,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Scroll(ScrollProp::SmoothWheel(true)),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(behavior(&batch).map(|b| b.smooth_wheel), Some(true));
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::Scroll(ScrollProp::SmoothWheel(false)),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(behavior(&batch).map(|b| b.smooth_wheel), Some(false));
+}
+
 /// `scrollbarInset` reaches the scroll view's mounted behavior (the platforms
 /// keep their indicators within it), negative edges as none, and leaves the
 /// content inset alone.

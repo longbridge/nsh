@@ -5795,6 +5795,7 @@ impl<M: TextEngine> Core<M> {
                         ScrollProp::Deceleration(r) => b.deceleration = r,
                         ScrollProp::Bounces(on) => b.bounces = on,
                         ScrollProp::ScrollsToTop(on) => b.scrolls_to_top = on,
+                        ScrollProp::SmoothWheel(on) => b.smooth_wheel = on,
                         ScrollProp::ContentInset(i) => b.content_inset = i,
                         ScrollProp::ScrollbarInset(i) => {
                             // Negative insets count as none.

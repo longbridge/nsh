@@ -46,6 +46,7 @@ scroll().flex_1().child(
 | `scrollable` | `.scrollable(..)` | `boolean` | `true` | 用户可以滚动。 |
 | `scrollbar` | `.scrollbar(..)` | `boolean \| ScrollbarTheme` | `true` | 显示滚动条：平台的滚动指示器，或应用设置主题后的[内置滚动条](./scrollbar.md#内置滚动条)；对象是该视图自己的主题。 |
 | `bounces` | `.bounces(..)` | `boolean` | `true` | 允许越过边缘回弹。 |
+| `smoothWheel` | `.smooth_wheel(..)` | `boolean` | `false` | 带格的鼠标滚轮像浏览器那样滚：每行 40 点，100–200 ms 内先加速后减速滑到位，代替平台自己的步长（macOS，系统自己的滚轮一格直接到位；其他平台忽略）。 |
 | `pagingEnabled` | `.paging(..)` | `boolean` | `false` | 停在视口尺寸的整数倍处。 |
 | `snapToInterval` | `.snap_interval(px(..))` | `number` | `0` | 停在该长度的整数倍处（0 表示关闭）。 |
 | `snapToOffsets` | `.snap_offsets(..)` | `number[]` | | 停在这些偏移量处。 |

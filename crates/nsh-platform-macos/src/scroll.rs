@@ -67,6 +67,11 @@ use crate::{
     wheel_glide::Glide,
 };
 
+/// Points a `smoothWheel` view's mouse wheel line scrolls, as browsers on
+/// macOS take one (WebKit's `pixelsPerLineStep`, Chromium's
+/// `kScrollbarPixelsPerCocoaTick`): with AppKit's 10 a slow notch
+/// (`scrollingDeltaY` ~0.1) would glide one point.
+const SMOOTH_WHEEL_LINE: f32 = 40.0;
 /// A wheel without a gesture (a mouse) has settled after this many ms.
 const WHEEL_IDLE: f64 = 150.0;
 /// After a trackpad gesture ends, the system's momentum begins within this
@@ -2271,8 +2276,17 @@ pub(crate) fn wheel_begin(surface: &Rc<Surface>, view: &NshView) {
 
 /// A wheel or trackpad scroll by `(dx, dy)` points (positive: the content
 /// moves up / left). Without [`wheel_begin`] it is a mouse wheel, which
-/// settles by itself once it stops.
-pub(crate) fn wheel(surface: &Rc<Surface>, view: &NshView, dx: f32, dy: f32, time: f64) {
+/// settles by itself once it stops; a `notched` one on a `smoothWheel`
+/// view glides there as Chromium's does ([`crate::wheel_glide`]), others
+/// land at once as AppKit's.
+pub(crate) fn wheel(
+    surface: &Rc<Surface>,
+    view: &NshView,
+    dx: f32,
+    dy: f32,
+    notched: bool,
+    time: f64,
+) {
     if !enabled(view) {
         return;
     }
@@ -2290,11 +2304,18 @@ pub(crate) fn wheel(surface: &Rc<Surface>, view: &NshView, dx: f32, dy: f32, tim
         }
     };
     let at = now();
-    let (pos, total, raw) = {
+    let (pos, total, raw, smooth) = {
         let state = view.state();
         let Some(s) = &state.scroll else { return };
         let (min, max) = limits(&state);
-        let d = wheel_delta(s, dx, dy);
+        let smooth = notched && !gesture && s.behavior.smooth_wheel;
+        // Browsers' lines are longer than AppKit's.
+        let k = if smooth {
+            SMOOTH_WHEEL_LINE / crate::input::WHEEL_LINE
+        } else {
+            1.0
+        };
+        let d = wheel_delta(s, dx * k, dy * k);
         let total = total + d.along(s.horizontal);
         if gesture {
             // Trackpads stretch past the edges, as macOS does.
@@ -2314,19 +2335,20 @@ pub(crate) fn wheel(surface: &Rc<Surface>, view: &NshView, dx: f32, dy: f32, tim
                 stretch(raw.x, min.x, max.x, true),
                 stretch(raw.y, min.y, max.y, false),
             );
-            (to, total, raw)
+            (to, total, raw, false)
         } else {
-            // Steps add up from where the last one pointed, not from where
-            // its glide has got to. Past an edge (the refresh space) wheels
-            // only move back.
-            let to = stop_at_edges(prev, d, (min, max));
-            (to, total, to)
+            // A smooth wheel's steps add up from where the last one
+            // pointed, not from where its glide has got to. Past an edge
+            // (the refresh space) wheels only move back.
+            let from = if smooth { prev } else { pos(s) };
+            let to = stop_at_edges(from, d, (min, max));
+            (to, total, to, smooth)
         }
     };
-    // A mouse wheel glides there, in the frames ([`tick`]): on from the
-    // glide in flight, or anew from where it is
+    // A smooth wheel glides there, in the frames ([`tick`]): on from the
+    // glide in flight, or anew from where it is.
     let glide = match glide {
-        _ if gesture => Glide::default(),
+        _ if !smooth => Glide::default(),
         Some(g) if at < g.end() => g.retargeted(prev, raw, at),
         _ => Glide::new(current(view), raw, at),
     };
@@ -2342,6 +2364,8 @@ pub(crate) fn wheel(surface: &Rc<Surface>, view: &NshView, dx: f32, dy: f32, tim
     );
     if gesture {
         feed(surface, view, pos, time);
+    } else if !smooth {
+        moved_to(surface, view, pos);
     }
     ensure_ticking(surface, view);
 }

@@ -1800,6 +1800,12 @@ pub enum ScrollProp {
     /// UIKit does it: elsewhere ignored).
     #[prop(js = "scrollsToTop", default = true, on = SCROLLING)]
     ScrollsToTop(bool),
+    /// `smoothWheel`: a notched mouse wheel scrolls as browsers do, 40-point
+    /// lines eased in and out over 100–200 ms, instead of the platform's
+    /// own step (default false; macOS, where AppKit's lines land at once:
+    /// elsewhere ignored).
+    #[prop(js = "smoothWheel", on = SCROLLING)]
+    SmoothWheel(bool),
     /// `contentInset`: room around the content.
     #[prop(js = "contentInset", on = SCROLLING)]
     ContentInset(EdgeInsets),

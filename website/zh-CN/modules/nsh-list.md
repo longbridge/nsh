@@ -122,6 +122,7 @@ interface ViewabilityConfig {
 | `scrollbar` | `boolean \| ScrollbarTheme` | `true` | 显示滚动条：平台的滚动指示器，或应用的[内置滚动条](../elements/scrollbar.md#内置滚动条)；对象是该视图自己的主题。 |
 | `scrollable` | `boolean` | `true` | 用户可以滚动。 |
 | `bounces` | `boolean` | `true` | 允许越过边缘回弹。 |
+| `smoothWheel` | `boolean` | `false` | 带格的鼠标滚轮像浏览器那样滚，每行 40 点、缓动到位（macOS）。 |
 | `pagingEnabled` | `boolean` | `false` | 按视口长度的整数倍停靠。 |
 | `snapToInterval` | `number` | `0` | 按该长度的整数倍停靠（0：关闭）。 |
 | `snapToOffsets` | `number[]` | | 停靠在这些偏移位置。 |

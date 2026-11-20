@@ -123,6 +123,7 @@ interface ViewabilityConfig {
 | `scrollbar` | `boolean \| ScrollbarTheme` | `true` | The scroll indicator shows: the platform's, or the app's [built-in bar](../elements/scrollbar.md#built-in-bars); an object is a theme of the view's own. |
 | `scrollable` | `boolean` | `true` | The user can scroll it. |
 | `bounces` | `boolean` | `true` | Overscroll past the edges. |
+| `smoothWheel` | `boolean` | `false` | A notched mouse wheel scrolls as browsers do, eased 40-point lines (macOS). |
 | `pagingEnabled` | `boolean` | `false` | Stops at multiples of the viewport. |
 | `snapToInterval` | `number` | `0` | Stops at multiples of this length (0: off). |
 | `snapToOffsets` | `number[]` | | Stops at these offsets. |
