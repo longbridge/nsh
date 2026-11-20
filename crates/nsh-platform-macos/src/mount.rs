@@ -335,7 +335,8 @@ impl Mounter {
                 // lays out with Auto Layout, AppKit gives a view that
                 // translates its autoresizing mask constraints, anchors and
                 // layout storage that nothing here reads: hundreds of bytes
-                // per view. The root keeps them: the host places it.
+                // per view. The host root keeps them, and app windows re-enable
+                // them in `window::open_window`.
                 view.ns()
                     .setTranslatesAutoresizingMaskIntoConstraints(false);
                 crate::access::created(&view);
@@ -403,6 +404,7 @@ impl Mounter {
                     crate::text_input::deleted(&view);
                     crate::native::deleted(surface, &view);
                     crate::shader::deleted(surface, &view);
+                    crate::scroll::deleted(&view);
                     // A view whose parent the batch deletes too stays in it:
                     // the subtree leaves the window with its root, in one
                     // `removeFromSuperview`, not one per view while still
@@ -430,8 +432,9 @@ impl Mounter {
                         self.detach(surface, &view);
                     }
                     // After the detach: a dialog closing through its shader
-                    // has read it.
-                    crate::navigation::deleted(surface, &view);
+                    // has read it. Navigation lets go of it too, as the
+                    // release below assumes.
+                    crate::navigation::deleted(surface, &view, inside);
                     // Out of its window and of every table: what is left is
                     // freeing it, which waits ([`release_later`]).
                     self.released.borrow_mut().push(view);

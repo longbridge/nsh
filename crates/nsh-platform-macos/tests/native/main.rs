@@ -15,6 +15,10 @@
 #[cfg(target_os = "macos")]
 mod canvas_bounds;
 #[cfg(target_os = "macos")]
+mod deleted_scroll;
+#[cfg(target_os = "macos")]
+mod download_redirect;
+#[cfg(target_os = "macos")]
 mod embedded_scroll;
 #[cfg(target_os = "macos")]
 mod focus_selection;
@@ -38,6 +42,8 @@ mod modal_fade;
 mod modal_focus;
 #[cfg(target_os = "macos")]
 mod mount;
+#[cfg(target_os = "macos")]
+mod navigation_unmount;
 #[cfg(target_os = "macos")]
 mod press_momentum;
 #[cfg(target_os = "macos")]
@@ -80,6 +86,8 @@ fn main() {
                 modal_fade::run();
             } else if std::env::var_os("NSH_MODAL_FOCUS_CHECK_ONLY").is_some() {
                 modal_focus::run();
+            } else if std::env::var_os("NSH_NAVIGATION_UNMOUNT_CHECK_ONLY").is_some() {
+                navigation_unmount::run();
             } else if std::env::var_os("NSH_SHADER_CONTENT_CHECK_ONLY").is_some() {
                 #[cfg(feature = "shader")]
                 shader_content::run();
@@ -117,6 +125,10 @@ fn main() {
             } else if std::env::var_os("NSH_KEYBOARD_CHECK_ONLY").is_some() {
                 window_press::run();
                 keyboard::run();
+            } else if std::env::var_os("NSH_DELETED_SCROLL_CHECK_ONLY").is_some() {
+                deleted_scroll::run();
+            } else if std::env::var_os("NSH_DOWNLOAD_REDIRECT_CHECK_ONLY").is_some() {
+                download_redirect::run();
             } else if std::env::var_os("NSH_EMBEDDED_SCROLL_CHECK_ONLY").is_some() {
                 embedded_scroll::run();
             } else if std::env::var_os("NSH_CANVAS_BOUNDS_CHECK_ONLY").is_some() {
@@ -131,6 +143,7 @@ fn main() {
                 window_dialog::run();
                 modal_fade::run();
                 modal_focus::run();
+                navigation_unmount::run();
                 #[cfg(feature = "shader")]
                 shader_content::run();
                 canvas_bounds::run();
@@ -144,6 +157,8 @@ fn main() {
                 fps_collapse::run();
                 scaled_input::run();
                 zoom::run();
+                deleted_scroll::run();
+                download_redirect::run();
                 mount::run();
                 // Last: it makes the process an accessory app.
                 embedded_scroll::run();

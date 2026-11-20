@@ -67,7 +67,7 @@ pub use nsh_core::{
     main_thread::MainThreadTask,
     platform::{
         ColorScheme, Environment, FetchEvent, FetchOp, HostEnvironment, HourCycle, HttpBody,
-        HttpHead, HttpRequest, Idiom, Languages, Lifecycle, Locale, LocaleSettings,
+        HttpCache, HttpHead, HttpRequest, Idiom, Languages, Lifecycle, Locale, LocaleSettings,
         MeasurementSystem, Os, TemperatureUnit, TimeZone, Weekday,
     },
     storage::{StorageBackend, StorageChange},
@@ -3869,6 +3869,9 @@ impl<M: TextEngine> State<M> {
                         script.stop(match err {
                             ApplyError::TooManyNodes(max) => {
                                 format!("the app created more than {max} nodes and was stopped")
+                            }
+                            ApplyError::TooDeep(max) => {
+                                format!("the app nested views more than {max} deep and was stopped")
                             }
                             other => {
                                 format!("the app sent an invalid op ({other:?}) and was stopped")

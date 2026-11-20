@@ -398,7 +398,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `await app.keyboard.down(keys)` / `up(keys)` | 按住修饰键（`"mod"`、`"shift"`、`"alt"`、`"ctrl"`、`"meta"`，用 `+` 连接）直到 `up`：期间的按压、拖动和悬停都带着这些键，如同 Mod 加点击或 Shift 加拖动。目前在 headless 和 Linux 上可用。 |
 | `await app.dragAndHold(selector, by)` / `app.drop()` | 像 `drag` 一样拖动，但手指一直按着，直到 `drop()` 在当前位置抬起：其间的步骤可以查看拖动中的画面（拖动预览、放置线）。目前在 headless 和 Linux 上可用。 |
 | `await app.dropFiles(selector, uris)` | 把本地文件（`file:` URL，如同从文件管理器拖来）放到视图中央：它或外层最近一个监听的视图收到 `onFileDrop`。桌面平台，目前在 headless、Linux 和 macOS 上可用。 |
-| `await app.drag(selector, { x, y })` | 手指落在视图中央，停留 100 ms，再移动 `x`、`y` 点（每帧 10 点）后抬起，由平台的输入系统处理：pan 跟随手指（`pan={{ x, y }}`、`onPanStart`，以及带松手速度的 `onPanEnd`），监听触摸的视图会收到触摸事件（`onTouchStart`、`PanResponder`），滚动视图随手指滚动，拉过顶部足够远时触发刷新（`onRefresh`），手指移开后其下的按压会被取消。在桌面和 web 上由鼠标完成：从可选择视图（`View selectable`、设置了 `selectable` 的 `TextView`）里开始的拖动会跨视图里的文字选择，该视图收到 `onSelectionChange`（复制会得到的文字、它的起始位置和外框）；从别处开始的拖动会清除选区。 |
+| `await app.drag(selector, { x, y })` | 手指落在视图中央，停留 100 ms，再移动 `x`、`y` 点（每帧 10 点）后抬起，由平台的输入系统处理：pan 跟随手指（`pan={{ x, y }}`、`onPanStart`，以及带松手速度的 `onPanEnd`），监听触摸的视图会收到触摸事件（`onTouchStart`、`PanResponder`），滚动视图随手指滚动，拉过顶部足够远时触发刷新（`onRefresh`），手指移开后其下的按压会被取消。在桌面和 web 上由鼠标完成，无头测试里也一样：触摸事件的 `pointerType` 是 `"mouse"`，滚动视图不随它滚动，和这些平台上一样。从可选择视图（`View selectable`、设置了 `selectable` 的 `TextView`）里开始的拖动会跨视图里的文字选择，该视图收到 `onSelectionChange`（复制会得到的文字、它的起始位置和外框）；从别处开始的拖动会清除选区。 |
 | `await app.wait(ms)` | 让应用运行 `ms` 毫秒：定时器、动画、请求。在手动时钟上，把时钟推进 `ms`（`app.clock.runFor`）。 |
 | `await app.waitFor(selector, options?)` | 有视图匹配时 resolve；传 `{ state: "gone" }` 时，等到没有视图匹配才 resolve；`timeout` 毫秒（5000）后 reject。在手动时钟上，等待时每次把时钟推进一个显示帧，最多推进 `timeout`。 |
 | `await app.waitUntil(condition, options?)` | 应用每发生一次变化就重新检查，`condition()` 返回 true 时 resolve：用于选择器表达不了的条件（`() => app.storage().note === "Milk"`）。在手动时钟上，两次检查之间把时钟推进一个显示帧，最多推进 `timeout`。 |
@@ -568,7 +568,7 @@ nsh test --target macos                       # 在 macOS 窗口里运行应用�
 nsh test --target linux                       # 在 GTK 窗口里运行（没有显示器的机器上用 xvfb-run -a …）
 nsh test --target windows                     # 在 Win32 窗口里运行
 nsh test --target ios                         # 在 iOS 模拟器里运行
-nsh test --target android                     # 在 adb 列出的第一个 Android 设备或模拟器上运行
+nsh test --target android                     # 在 Android 设备或模拟器上运行（--device <serial>，否则第一台）
 nsh test --target gpui                        # 在 GPUI 窗口里运行（macOS、Windows、Linux）
 nsh test --target web                         # 在 headless 的 Chrome、Edge 或 Chromium 里运行
 nsh test --target tui                         # 在内存终端里运行
@@ -608,7 +608,8 @@ UIKit 收到它们的方式与在设备上相同。`setColorScheme` 切换模拟
 `nsh test` 环境中由应用在 `capabilities.process.env` 里声明的变量，会传给模拟器中的应用，与桌面上一样（`nsh run --target ios` 也会传递）；
 `HOME`、`TMPDIR` 和 `PATH` 是模拟器为应用设置的路径。
 
-在 Android 上，应用运行在 `adb devices` 列出的第一个设备或模拟器上的开发 host 中，并拥有独立的存储。步骤是手指的触摸和键盘的按键，
+在 Android 上，应用运行在设备或模拟器上的开发 host 中：使用 `--device` 指定的那台（按序列号），否则使用 `ANDROID_SERIAL`
+指定的那台，否则使用 `adb devices` 列出的第一台；并拥有独立的存储。步骤是手指的触摸和键盘的按键，
 应用的视图收到它们的方式与在设备上相同；`back` 是系统的返回。`setColorScheme` 切换设备的深色主题，`nsh test` 会在应用结束后把它恢复原样。
 `nsh test` 环境中由应用在 `capabilities.process.env` 里声明的变量，会传给设备上的应用，与桌面上一样（`nsh run --target android`
 运行 TSX 应用时也会传递）；`PATH`、`HOME`、`TMPDIR` 以及 Android 为每个应用设置的其他路径保持设备上的值。打包的应用

@@ -1,6 +1,6 @@
-//! The pointer's steps: `drag(<selector>, <x>, <y>)`, a finger that lands
-//! on a view, moves and lifts, and `hover(<selector>)`, the mouse coming
-//! over a view; the app hears what a platform's pointer input makes of
+//! The pointer's steps: `drag(<selector>, <x>, <y>)`, a finger (the mouse
+//! on a desktop or the web) that lands on a view, moves and lifts, and
+//! `hover(<selector>)`, the mouse coming over a view; the app hears what a platform's pointer input makes of
 //! them. The decisions are nsh-core's `input`, the desktop backends' own:
 //! the views listening to touches hear them (the JS responder), a pan or a
 //! scroll view takes the drag once it passes the slop, unless the
@@ -41,8 +41,11 @@ enum Mode {
     Select(NodeId),
 }
 
-/// The finger.
+/// The finger, or the mouse with its button down.
 pub(super) struct Finger {
+    /// What it is ([`Headless::pointer`]): its touches say so, and only a
+    /// finger drags a scroll view.
+    pointer: nsh_core::PointerType,
     start: Point<Points>,
     at: Point<Points>,
     /// Milliseconds since the drag began.
@@ -64,13 +67,16 @@ impl Headless {
     /// The step `drag(<selector>, <by>)`: a finger lands on the middle of
     /// the view `selector` names, rests there for 100 ms, moves by `by`
     /// points, 10 points per display frame, and lifts at once (still
-    /// moving). What takes the drag
+    /// moving). On a desktop or the web it is the mouse, with its button
+    /// down ([`Self::pointer`]). What takes the drag
     /// is what a platform's input would give it to (nsh-core `input`): the
-    /// views listening to touches hear `onTouch` (the JS responder system),
-    /// a pan hears `onPanStart` and `onPanEnd` and moves its `pan` values,
-    /// a scroll view scrolls with the finger and refreshes when it is
-    /// pulled far enough past its top, and the press under the finger is
-    /// cancelled once it moves away (`onPressUp`, no `onPress`).
+    /// views listening to touches hear `onTouch` (the JS responder system,
+    /// `pointerType` `"touch"`, or `"mouse"`), a pan hears `onPanStart` and
+    /// `onPanEnd` and moves its `pan` values, a scroll view scrolls with a
+    /// finger (not with the mouse, as on the desktop backends and the web)
+    /// and refreshes when it is pulled far enough past its top, and the
+    /// press under the pointer is cancelled once it moves away
+    /// (`onPressUp`, no `onPress`).
     pub fn drag(&mut self, selector: &str, by: Point<Points>) -> Result<(), String> {
         self.step(format!("drag({selector}, {}, {})", by.x, by.y));
         self.drag_from(selector, by, false)
@@ -113,7 +119,8 @@ impl Headless {
         // A finger going down ends what a responder held before.
         self.screen.reset_js_block();
         let mut grab = Grab::default();
-        let options = GrabOptions::new(true, false, false, true);
+        let pointer = self.pointer();
+        let options = GrabOptions::new(pointer != nsh_core::PointerType::Mouse, false, false, true);
         for &id in &chain {
             if let Some(link) = self.screen.link(id) {
                 grab.add(&id, &link, options);
@@ -133,6 +140,7 @@ impl Headless {
             false => None,
         };
         let mut finger = Finger {
+            pointer,
             start,
             at: start,
             time: 0.0,
@@ -152,9 +160,9 @@ impl Headless {
             self.touch(TouchPhase::Start, &finger, None);
         }
         // Inside a scroll view a touch presses only once it rests: a drag
-        // moves away before. A desktop's mouse presses at once (a drag
-        // selects text there rather than scrolling).
-        let mut press_due = if in_scroll && !self.environment.desktop() {
+        // moves away before. The mouse presses at once (a drag selects text
+        // there rather than scrolling).
+        let mut press_due = if in_scroll && pointer != nsh_core::PointerType::Mouse {
             Some(SCROLL_PRESS_DELAY as f64)
         } else {
             self.press_in(&mut finger);
@@ -357,7 +365,7 @@ impl Headless {
                 page: finger.at,
                 location: point(finger.at.x - finger.origin.x, finger.at.y - finger.origin.y),
                 changed: true,
-                pointer_type: nsh_core::PointerType::Touch,
+                pointer_type: finger.pointer,
                 pressure: nsh_core::TouchPoint::default_pressure(phase, true),
                 tilt_x: 0.0,
                 tilt_y: 0.0,
@@ -474,6 +482,20 @@ impl Headless {
         }
     }
 
+    /// What drags (`drag`, `dragAndHold`): the mouse where there is one (a
+    /// desktop, and the web at any width, as `hover` has), else a finger.
+    /// The desktop backends and the web report the mouse's touches as
+    /// `"mouse"`, and a mouse drags no scroll view ([`GrabOptions::touch`]).
+    ///
+    /// [`GrabOptions::touch`]: nsh_core::input::GrabOptions::touch
+    fn pointer(&self) -> nsh_core::PointerType {
+        if self.environment.desktop() || self.environment.os == nsh_core::platform::Os::Web {
+            nsh_core::PointerType::Mouse
+        } else {
+            nsh_core::PointerType::Touch
+        }
+    }
+
     /// The step `hover(<selector>)`: the mouse comes over the middle of the
     /// view `selector` names, as on a desktop (`open`'s `platform`): the
     /// views under it that it left hear `onMouseLeave` (from the inside
@@ -489,7 +511,7 @@ impl Headless {
     pub fn hover(&mut self, selector: &str) -> Result<(), String> {
         let parsed = Selector::parse(selector)?;
         self.step(format!("hover({selector})"));
-        if !self.environment.desktop() && self.environment.os != nsh_core::platform::Os::Web {
+        if self.pointer() != nsh_core::PointerType::Mouse {
             return Err(
                 "a phone has no mouse to hover with: open the app as a desktop or the web (`platform`)"
                     .into(),

@@ -435,7 +435,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `await app.keyboard.down(keys)` / `up(keys)` | Holds modifier keys (`"mod"`, `"shift"`, `"alt"`, `"ctrl"`, `"meta"`, joined by `+`) down until `up`: the presses, drags and hovers meanwhile carry them, as a Mod-click or a Shift-drag does. Headless and on Linux for now. |
 | `await app.dragAndHold(selector, by)` / `app.drop()` | Drags as `drag` does and keeps the finger down until `drop()`, which lifts it where it is: the steps between look at the screen mid-drag (a drag preview, a drop line). Headless and on Linux for now. |
 | `await app.dropFiles(selector, uris)` | Drops local files (`file:` URLs, as a file manager drags them) on the middle of the view: it, or the nearest view around it listening, hears `onFileDrop`. Desktops, headless, on Linux and on macOS for now. |
-| `await app.drag(selector, { x, y })` | A finger lands on the middle of the view, rests for 100 ms, moves by `x`, `y` points, 10 per frame, and lifts, as the platform's input takes it: a pan follows it (`pan={{ x, y }}`, `onPanStart`, `onPanEnd` with the release velocity), the views listening to touches hear it (`onTouchStart`, `PanResponder`), a scroll view scrolls with it and, pulled far enough past its top, refreshes (`onRefresh`), and a press under it is cancelled once it moves away. On the desktops and the web it is the mouse: started in a selectable view (`View selectable`, a `selectable` `TextView`), it selects across the view's texts, which hears `onSelectionChange` (the selected text as Copy gives it, where it starts and its box); started elsewhere, it clears the selection. |
+| `await app.drag(selector, { x, y })` | A finger lands on the middle of the view, rests for 100 ms, moves by `x`, `y` points, 10 per frame, and lifts, as the platform's input takes it: a pan follows it (`pan={{ x, y }}`, `onPanStart`, `onPanEnd` with the release velocity), the views listening to touches hear it (`onTouchStart`, `PanResponder`), a scroll view scrolls with it and, pulled far enough past its top, refreshes (`onRefresh`), and a press under it is cancelled once it moves away. On the desktops and the web it is the mouse, headless too: the touches say `pointerType: "mouse"` and no scroll view scrolls with it, as on those platforms. Started in a selectable view (`View selectable`, a `selectable` `TextView`), it selects across the view's texts, which hears `onSelectionChange` (the selected text as Copy gives it, where it starts and its box); started elsewhere, it clears the selection. |
 | `await app.wait(ms)` | Lets the app run for `ms` milliseconds: timers, animations, requests. On a manual clock, moves it by `ms` (`app.clock.runFor`). |
 | `await app.waitFor(selector, options?)` | Resolves once a view matches, or with `{ state: "gone" }` once none does; rejects after `timeout` ms (5000). On a manual clock, moves it a display frame at a time while it waits, by `timeout` at most. |
 | `await app.waitUntil(condition, options?)` | Resolves once `condition()` returns true, looking again after each change of the app: for what no selector says (`() => app.storage().note === "Milk"`). On a manual clock, moves it a display frame between two looks, by `timeout` at most. |
@@ -627,7 +627,7 @@ nsh test --target macos                       # the app's tests in macOS windows
 nsh test --target linux                       # in GTK windows (xvfb-run -a … on a machine without a display)
 nsh test --target windows                     # in Win32 windows
 nsh test --target ios                         # in an iOS simulator
-nsh test --target android                     # on the Android device or emulator adb lists first
+nsh test --target android                     # on an Android device or emulator (--device <serial>, else the first)
 nsh test --target gpui                        # in GPUI windows (macOS, Windows, Linux)
 nsh test --target web                         # in a headless Chrome, Edge or Chromium
 nsh test --target tui                         # in an in-memory terminal
@@ -681,7 +681,8 @@ keyboard's typing, as UIKit gets them from the device. `setColorScheme` switches
 environment that the app declares in `capabilities.process.env` reach the app in the simulator, as on the desktops
 (`nsh run --target ios` passes them too); `HOME`, `TMPDIR` and `PATH` hold the simulator's paths for the app.
 
-On Android, the apps run in the development host on the first device or emulator `adb devices` lists, with storage
+On Android, the apps run in the development host on a device or emulator: the one `--device` names (by its serial),
+else the one `ANDROID_SERIAL` names, else the first one `adb devices` lists, with storage
 of their own. The steps are a finger's touches and a keyboard's keys, as the app's views get them from the device;
 `back` is the system's back. `setColorScheme` switches the device's dark theme, which `nsh test` sets back after the
 app. The variables of `nsh test`'s environment that the app declares in `capabilities.process.env` reach the app on

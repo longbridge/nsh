@@ -91,6 +91,14 @@ The cancellation path therefore retains cleanup ownership until stopping is esta
 arriving after the UI node is released. A completed destination is never removed by a late cancellation.
 Removing the last download listener cancels in-flight sessions with `NoListener` while keeping the WebView mounted.
 The commit's final event mask decides this: removing and readding a listener within one turn does not cancel it.
+An offer whose URL the app's `webview` grant does not allow (`Access::allows_webview`, skipped for an unrestricted
+app and for the page's own content, `data:` and `blob:`, which reaches no host) is refused when it reaches the core:
+nothing is staged or offered, the transfer is cancelled and the app hears `Failed` with `ERR_ACCESS_DENIED`. Backends
+therefore report the URL of the response actually downloaded, after redirects: the Apple transport (`response.URL`)
+and Linux (`offer_of`, the response's URI) do, and the Apple transport also refuses such a redirect before WebKit
+requests it. Windows reports `ICoreWebView2DownloadOperation::Uri`, not checked to be the URL after redirects, and a
+web view with neither download listener nor `defer_downloads` leaves its downloads to WebView2's own download UI, which
+the core never sees.
 
 `DownloadDestination` is an absolute file path with an existing parent; overwrite is opt-in. The core allocates an
 owned private sibling staging directory with a nonexistent leaf, accommodating engines that create their output
@@ -261,7 +269,7 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   swallow them. `focusable={false}` keeps a pressable out: a backdrop that closes a popover, rows a list moves between
   with the arrow keys. A disabled view is never a stop; inputs that edit always are. A stop hears `onFocus` /
   `onBlur` (`EventKind::Focus` / `Blur`, as inputs do) when the keyboard focus reaches and leaves it: AppKit's first
-  responder, the browser's `:focus-visible`; the headless driver's Tab moves it the same way there. Return and Space
+  responder, the browser's `:focus-visible`; the headless driver's Tab moves it the same way there. Any view hears `onFocusIn` / `onFocusOut` (`EventKind::FocusIn` / `FocusOut`, raised by the core as the view enters and leaves `focus-within`; Rust's `ElementRef::on_focus_in` / `on_focus_out`) when the focus comes into it from outside and leaves it, not as it moves between the views inside: a panel notes where its focus was and puts it back later with `ref.focus()`. Return and Space
   press the focused stop only when it takes presses; a stop that takes none hears its keys through the keymap (`on_key`
   / `on_key_with`, bound while it is focused, as `DataTable`'s controller does), Return and Space included. On a stop
   that takes presses, plain Return and Space fire only the focus' own bindings (`KeyOptions::for_focus`, TS's `forFocus`: a

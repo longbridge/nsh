@@ -50,7 +50,7 @@ fn case() -> String {
 /// The app's one window: the app root is the invisible host.
 #[component]
 fn App() -> impl IntoElement {
-    window().id("main").content(Guarded)
+    window().id("main").content(guarded)
 }
 
 #[component]

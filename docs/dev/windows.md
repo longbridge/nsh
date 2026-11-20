@@ -329,7 +329,15 @@ through NSH's hit testing to web views, as real input does):
 - a screenshot is what the window shows, web views and their layers included, at the window's scale: `PrintWindow`
   with `PW_RENDERFULLCONTENT`, which composes the window's swap chain and DirectComposition content as DWM does,
   whatever covers the window (drawn offscreen with Direct2D when the window cannot be captured: no pages then); the
-  appearance is the system's, simulated; the size is the client area's.
+  appearance is the system's, simulated; the size is the client area's;
+- the agent's pointer is the test window's only one (as on macOS and Linux): while a test model is set
+  (`Surface::testing`), the window's procedure leaves the user's pointer to the system's default handling
+  (`window::users_pointer`: the mouse's moves and leaves in the client area and over the frame, its buttons and wheels
+  in the client area, touches and pens), so the user's mouse moving over the window or resting on it never changes what
+  a test hovers or presses. Windows sends these with no motion too: a `WM_MOUSEMOVE` to the window under the resting
+  pointer when a window above it closes, a `WM_MOUSELEAVE` once another opens over it, which with several apps under
+  test on one desktop moved or ended a test's hover and came between a press's down and up. A press on the frame still
+  moves, sizes and closes the window. Keys still reach the app.
 
 `dev.rs` hands the model to the surface on the server's test session (posted messages keep their order, so it comes
 before the first bundle).

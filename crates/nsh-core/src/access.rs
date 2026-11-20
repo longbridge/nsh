@@ -2534,6 +2534,19 @@ pub fn resolve_reference(base: &str, location: &str) -> String {
     }
 }
 
+/// Whether URLs `a` and `b` have the same origin (scheme, host and port,
+/// a scheme's default port included), as WHATWG's parser reads them. A URL
+/// it cannot read, or one with an opaque origin, shares none.
+pub fn is_same_origin(a: &str, b: &str) -> bool {
+    match (url::Url::parse(a), url::Url::parse(b)) {
+        (Ok(a), Ok(b)) => {
+            let origin = a.origin();
+            origin.is_tuple() && origin == b.origin()
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

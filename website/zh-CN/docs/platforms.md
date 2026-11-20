@@ -51,6 +51,8 @@ nsh package App.tsx --target macos
 
 ## 嵌入原生应用
 
+各平台的分步指引见[嵌入现有应用](./embedding.md)。
+
 | 平台 | 宿主视图 | 运行 | 发布形式 | 宿主语言 |
 |---|---|---|---|---|
 | macOS | `AppView`（一个 `NSView`） | Rust 根组件、TSX bundle | `nsh-platform-macos` crate | Rust |

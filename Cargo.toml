@@ -302,6 +302,7 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = [
   "NSTimer",
   "NSURL",
   "NSURLError",
+  "NSURLCache",
   "NSURLRequest",
   "NSURLResponse",
   "NSURLSession",

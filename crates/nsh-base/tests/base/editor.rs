@@ -732,3 +732,99 @@ fn the_carets_blink_for_good_on_macos() {
     app.run_for(Duration::from_secs(11)).unwrap();
     assert!(items_over(&mut app, &items, 3) > 0);
 }
+
+#[test]
+fn auto_focus_focuses_the_caret_sink_on_mount() {
+    #[component]
+    fn AutoFocused() -> impl IntoElement {
+        let value = signal(String::new());
+        let focused = signal(0u32);
+        view()
+            .w(px(400.0))
+            .h(px(200.0))
+            .child(
+                editor()
+                    .auto_focus(true)
+                    .default_value("")
+                    .on_focus(move || focused.update(|n| *n += 1))
+                    .on_change(move |text: &SharedString| value.set(text.to_string()))
+                    .size_full(),
+            )
+            .child(text(move || format!("Focused {}", focused.get())))
+            .child(text(move || format!("Value {:?}", value.get())))
+    }
+
+    let mut config = EngineConfig {
+        viewport: Size::new(px(400.0), px(250.0)),
+        clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
+        ..EngineConfig::new(nsh_testing::windowed_root::<AutoFocused>())
+    };
+    config.environment.os = Os::Linux;
+    config.environment.idiom = Idiom::Desktop;
+    let mut app = Headless::start(config).expect("the engine starts");
+    let auto_focused_inputs = Arc::new(Mutex::new(0usize));
+    let seen = auto_focused_inputs.clone();
+    app.observe(move |_, batch| {
+        for item in &batch.items {
+            if let MountItem::Input { config, .. } = item
+                && config.auto_focus
+            {
+                *seen.lock().unwrap() += 1;
+            }
+        }
+    });
+    app.first_render().unwrap();
+    assert_eq!(
+        *auto_focused_inputs.lock().unwrap(),
+        1,
+        "autoFocus should configure the caret sink input on first mount"
+    );
+    app.press_key("a").unwrap();
+    see(&mut app, &value("a"));
+    see(&mut app, "Focused 1");
+}
+
+#[test]
+fn auto_focus_cancelled_before_mount_does_not_focus() {
+    #[component]
+    fn ToggledBeforeMount() -> impl IntoElement {
+        let auto = signal(true);
+        let value = signal(String::new());
+        let ed = editor()
+            .auto_focus(move || auto.get())
+            .default_value("")
+            .on_change(move |text: &SharedString| value.set(text.to_string()))
+            .size_full();
+        auto.set(false);
+        view()
+            .w(px(400.0))
+            .h(px(200.0))
+            .child(ed)
+            .child(text(move || format!("Value {:?}", value.get())))
+    }
+
+    let mut config = EngineConfig {
+        viewport: Size::new(px(400.0), px(250.0)),
+        clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
+        ..EngineConfig::new(nsh_testing::windowed_root::<ToggledBeforeMount>())
+    };
+    config.environment.os = Os::Linux;
+    config.environment.idiom = Idiom::Desktop;
+    let mut app = Headless::start(config).expect("the engine starts");
+    let auto_focused_inputs = Arc::new(Mutex::new(0usize));
+    let seen = auto_focused_inputs.clone();
+    app.observe(move |_, batch| {
+        for item in &batch.items {
+            if let MountItem::Input { config, .. } = item
+                && config.auto_focus
+            {
+                *seen.lock().unwrap() += 1;
+            }
+        }
+    });
+    app.first_render().unwrap();
+    app.run_for(Duration::from_millis(50)).unwrap();
+    assert_eq!(*auto_focused_inputs.lock().unwrap(), 0);
+    app.press_key("a").unwrap();
+    see(&mut app, &value(""));
+}
