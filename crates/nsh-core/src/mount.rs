@@ -6,9 +6,10 @@ use crate::{
     animation::{AnimationOp, AnimationProp},
     geometry::{Bounds, Points, Size},
     ops::{
-        AutoCapitalize, Command, EventMask, ImageSource, KeyboardAppearance, KeyboardDismissMode,
-        KeyboardTaps, KeyboardType, ModalAnimation, ModalPresentation, NodeId, PasteBehavior,
-        ResizeMode, ReturnKeyType, ScreenAnimation, SnapAlignment, SubmitBehavior, WebSource,
+        AutoCapitalize, Command, EventMask, HeaderTitleAlign, ImageSource, KeyboardAppearance,
+        KeyboardDismissMode, KeyboardTaps, KeyboardType, ModalAnimation, ModalPresentation, NodeId,
+        PasteBehavior, ResizeMode, ReturnKeyType, ScreenAnimation, SnapAlignment, SubmitBehavior,
+        WebSource,
     },
     props::{EdgeInsets, GestureValues, LayoutAnimation, ViewProps},
     style::{Color, TextAlign, ViewStyle},
@@ -419,6 +420,9 @@ pub struct ScreenConfig {
     pub header_transparent: bool,
     /// The hairline under the header (iOS).
     pub header_shadow_visible: bool,
+    /// Where the title sits (Android; iOS's system bar always centers it and
+    /// ignores this).
+    pub title_align: HeaderTitleAlign,
     /// A transparent header shows its background once the content scrolls
     /// under it (iOS).
     pub header_background_on_scroll: bool,
@@ -484,6 +488,7 @@ impl Default for ScreenConfig {
             large_title: false,
             header_transparent: false,
             header_shadow_visible: true,
+            title_align: HeaderTitleAlign::Left,
             header_background_on_scroll: false,
             hides_bottom_bar_when_pushed: false,
             tint_color: None,
@@ -630,6 +635,9 @@ pub struct InputConfig {
     pub paste_behavior: PasteBehavior,
     /// Focus once on screen.
     pub auto_focus: bool,
+    /// Select the whole text when the input takes the focus
+    /// (`selectTextOnFocus`).
+    pub select_text_on_focus: bool,
     /// Selection highlight color (on iOS also the caret's, unless
     /// [`InputConfig::caret_color`] is set: UIKit tints both with one).
     pub selection_color: Option<Color>,
@@ -703,6 +711,7 @@ impl Default for InputConfig {
             submit_behavior: None,
             paste_behavior: PasteBehavior::Insert,
             auto_focus: false,
+            select_text_on_focus: false,
             selection_color: None,
             caret_color: None,
             auto_fill: crate::ops::AutoFill::Default,

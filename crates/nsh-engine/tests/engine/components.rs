@@ -1092,11 +1092,10 @@ setTimeout(async () => {
 mount(() => <Text>{shown()}</Text>);
 "#;
 
-/// A terminal decodes no images: `Image.getSize` and `prefetch` reject at
-/// once, coded, and no request reaches the platform (whose answer would
-/// never come).
+/// A terminal draws images: `Image.getSize` and `prefetch` ask it, as they
+/// ask every platform.
 #[test]
-fn image_queries_reject_at_once_in_a_terminal() {
+fn image_queries_reach_a_terminal() {
     let (_engine, rx) = start_in(
         IMAGE_IN_A_TERMINAL,
         Environment {
@@ -1104,23 +1103,26 @@ fn image_queries_reject_at_once_in_a_terminal() {
             ..Environment::default()
         },
     );
-    let wanted = "Error ERR_FEATURE_UNAVAILABLE_ON_PLATFORM | \
-                  Error ERR_FEATURE_UNAVAILABLE_ON_PLATFORM";
-    let mut asked = false;
-    let batches = until(&rx, |batch| {
-        asked |= batch.items.iter().any(|i| {
-            matches!(
-                i,
-                MountItem::Command {
-                    command: Command::ImageInfo { .. },
-                    ..
-                }
-            )
-        });
-        shows(batch, wanted)
+    let asked = |batch: &MountBatch| {
+        batch
+            .items
+            .iter()
+            .filter(|i| {
+                matches!(
+                    i,
+                    MountItem::Command {
+                        command: Command::ImageInfo { .. },
+                        ..
+                    }
+                )
+            })
+            .count()
+    };
+    let mut count = 0;
+    until(&rx, |batch| {
+        count += asked(batch);
+        count == 2
     });
-    assert!(batches.iter().any(|b| shows(b, wanted)));
-    assert!(!asked, "an image query reached a terminal");
 }
 
 const MEASURE: &str = r#"import { mount, signal, Scroll, Text, View, type ViewRef } from "nsh";
@@ -12334,7 +12336,7 @@ mount(() => <View>
   <MenuButton accessibilityLabel="Account" title="me@example.com"
     items={[
       { id: "settings", label: "Settings", icon: "gearshape" },
-      { id: "", label: "Appearance", inline: true, items: [
+      { id: "", label: "Appearance", inline: true, singleSelection: true, items: [
         { id: "light", label: "Light", checked: !dark() },
         { id: "dark", label: "Dark", checked: dark() },
       ] },
@@ -12347,90 +12349,90 @@ mount(() => <View>
 "#;
 
 /// `nsh/base`'s `MenuButton` covers its content with the system's button on
-/// iOS: the menu's items, title and label reach it as data, a chosen item
-/// comes back as `onSelect({ id })`, and the new checks reach the same
-/// button.
+/// iOS and Android: the menu's items, title and label reach it as data, a
+/// chosen item comes back as `onSelect({ id })`, and the new checks reach
+/// the same button. A section of one choice says so.
 #[test]
-fn the_menu_button_gives_ios_its_menu_and_reports_the_choice() {
+fn the_menu_button_gives_the_mobile_systems_their_menu_and_reports_the_choice() {
     use nsh_core::platform::{MENU_BUTTON_COMPONENT, Os};
 
-    let (engine, rx) = start_in(
-        MENU_BUTTON,
-        Environment {
-            os: Os::Ios,
-            ..Environment::default()
-        },
-    );
-    let initial = until(&rx, |batch| shows(batch, "Chosen: none"));
-    assert!(
-        initial.iter().any(|batch| shows(batch, "Account")),
-        "the content shows"
-    );
-    let button = component_id(&initial, MENU_BUTTON_COMPONENT).expect("the system's button");
-    let appearance = |dark: bool| {
-        serde_json::json!([
-            { "id": "settings", "label": "Settings", "icon": "gearshape" },
-            { "id": "", "label": "Appearance", "inline": true, "items": [
-                { "id": "light", "label": "Light", "checked": !dark },
-                { "id": "dark", "label": "Dark", "checked": dark },
-            ] },
-        ])
-    };
-    assert_eq!(
-        component_prop(&initial, button, "items"),
-        Some(appearance(false))
-    );
-    assert_eq!(
-        component_prop(&initial, button, "title"),
-        Some(serde_json::json!("me@example.com"))
-    );
-    assert_eq!(
-        component_prop(&initial, button, "accessibilityLabel"),
-        Some(serde_json::json!("Account"))
-    );
-    engine.control().dispatch_event(
-        button,
-        EventKind::NativeEvent,
-        EventPayload::Native {
-            name: "select".into(),
-            data: serde_json::json!("dark"),
-        },
-    );
-    let updates = until(&rx, |batch| shows(batch, "Chosen: dark"));
-    assert_eq!(
-        component_prop(&updates, button, "items"),
-        Some(appearance(true))
-    );
-}
-
-/// On the desktops and Android the content is a button of its own (the
-/// desktops show the items as the platform's context menu when it is
-/// pressed): no iOS component.
-#[test]
-fn the_menu_button_is_a_plain_button_off_ios() {
-    use nsh_core::platform::{MENU_BUTTON_COMPONENT, Os};
-
-    for os in [Os::MacOs, Os::Android] {
-        let (_engine, rx) = start_in(
+    for os in [Os::Ios, Os::Android] {
+        let (engine, rx) = start_in(
             MENU_BUTTON,
             Environment {
                 os,
                 ..Environment::default()
             },
         );
-        let batches = until(&rx, |batch| shows(batch, "Chosen: none"));
+        let initial = until(&rx, |batch| shows(batch, "Chosen: none"));
         assert!(
-            batches.iter().any(|batch| shows(batch, "Account")),
-            "{os:?}"
+            initial.iter().any(|batch| shows(batch, "Account")),
+            "the content shows"
         );
-        assert!(
-            !batches.iter().any(|b| b
-                .items
-                .iter()
-                .any(|i| is_component(i, MENU_BUTTON_COMPONENT))),
-            "{os:?}"
+        let button = component_id(&initial, MENU_BUTTON_COMPONENT).expect("the system's button");
+        let appearance = |dark: bool| {
+            serde_json::json!([
+                { "id": "settings", "label": "Settings", "icon": "gearshape" },
+                { "id": "", "label": "Appearance", "inline": true, "singleSelection": true, "items": [
+                    { "id": "light", "label": "Light", "checked": !dark },
+                    { "id": "dark", "label": "Dark", "checked": dark },
+                ] },
+            ])
+        };
+        assert_eq!(
+            component_prop(&initial, button, "items"),
+            Some(appearance(false))
+        );
+        assert_eq!(
+            component_prop(&initial, button, "title"),
+            Some(serde_json::json!("me@example.com"))
+        );
+        assert_eq!(
+            component_prop(&initial, button, "accessibilityLabel"),
+            Some(serde_json::json!("Account"))
+        );
+        engine.control().dispatch_event(
+            button,
+            EventKind::NativeEvent,
+            EventPayload::Native {
+                name: "select".into(),
+                data: serde_json::json!("dark"),
+            },
+        );
+        let updates = until(&rx, |batch| shows(batch, "Chosen: dark"));
+        assert_eq!(
+            component_prop(&updates, button, "items"),
+            Some(appearance(true))
         );
     }
+}
+
+/// On the desktops the content is a button of its own (the items show as
+/// the platform's context menu when it is pressed): no system component.
+#[test]
+fn the_menu_button_is_a_plain_button_on_the_desktops() {
+    use nsh_core::platform::{MENU_BUTTON_COMPONENT, Os};
+
+    let os = Os::MacOs;
+    let (_engine, rx) = start_in(
+        MENU_BUTTON,
+        Environment {
+            os,
+            ..Environment::default()
+        },
+    );
+    let batches = until(&rx, |batch| shows(batch, "Chosen: none"));
+    assert!(
+        batches.iter().any(|batch| shows(batch, "Account")),
+        "{os:?}"
+    );
+    assert!(
+        !batches.iter().any(|b| b
+            .items
+            .iter()
+            .any(|i| is_component(i, MENU_BUTTON_COMPONENT))),
+        "{os:?}"
+    );
 }
 
 const SYSTEM_CONTEXT_MENU: &str = r#"import { mount, signal, Text, View } from "nsh";
@@ -12455,81 +12457,82 @@ mount(() => <View>
 "#;
 
 /// `nsh/base`'s `ContextMenu` given `items` is the system's context menu on
-/// iOS: the items and title reach its component as data, its openings and
+/// iOS and Android: the items and title reach its component as data, its openings and
 /// the chosen item come back as `onOpenChange` and `onSelect({ id })`, and
 /// the new checks reach the same component.
 #[test]
-fn a_context_menu_with_items_gives_ios_its_menu_and_reports_the_choice() {
+fn a_context_menu_with_items_gives_the_mobile_systems_their_menu_and_reports_the_choice() {
     use nsh_core::platform::{CONTEXT_MENU_COMPONENT, Os};
 
-    let (engine, rx) = start_in(
-        SYSTEM_CONTEXT_MENU,
-        Environment {
-            os: Os::Ios,
-            ..Environment::default()
-        },
-    );
-    let initial = until(&rx, |batch| shows(batch, "Chosen: none"));
-    assert!(
-        initial.iter().any(|batch| shows(batch, "Note row")),
-        "the trigger shows"
-    );
-    let menu = component_id(&initial, CONTEXT_MENU_COMPONENT).expect("the system's menu");
-    let items = |pinned: bool| {
-        serde_json::json!([
-            { "id": "pin", "label": "Pin", "icon": "pin", "checked": pinned },
-            { "id": "", "label": "", "inline": true, "items": [
-                { "id": "delete", "label": "Delete", "icon": "trash", "destructive": true },
-            ] },
-        ])
-    };
-    assert_eq!(component_prop(&initial, menu, "items"), Some(items(false)));
-    assert_eq!(
-        component_prop(&initial, menu, "title"),
-        Some(serde_json::json!("Notes.txt"))
-    );
-    let native = |name: &str, data: serde_json::Value| {
-        engine.control().dispatch_event(
-            menu,
-            EventKind::NativeEvent,
-            EventPayload::Native {
-                name: name.into(),
-                data,
-            },
-        );
-    };
-    native("open", serde_json::json!("touch"));
-    until(&rx, |batch| shows(batch, "Chosen: true longPress"));
-    native("select", serde_json::json!("pin"));
-    let updates = until(&rx, |batch| shows(batch, "Chosen: pin"));
-    assert_eq!(component_prop(&updates, menu, "items"), Some(items(true)));
-}
-
-/// Elsewhere a context menu's items are not used: its children are the
-/// menu, and no iOS component is made.
-#[test]
-fn a_context_menu_draws_its_children_off_ios() {
-    use nsh_core::platform::{CONTEXT_MENU_COMPONENT, Os};
-
-    for os in [Os::MacOs, Os::Android] {
-        let (_engine, rx) = start_in(
+    for os in [Os::Ios, Os::Android] {
+        let (engine, rx) = start_in(
             SYSTEM_CONTEXT_MENU,
             Environment {
                 os,
                 ..Environment::default()
             },
         );
-        let batches = until(&rx, |batch| shows(batch, "Chosen: none"));
+        let initial = until(&rx, |batch| shows(batch, "Chosen: none"));
         assert!(
-            batches.iter().any(|batch| shows(batch, "Note row")),
-            "{os:?}"
+            initial.iter().any(|batch| shows(batch, "Note row")),
+            "the trigger shows"
         );
-        assert!(
-            !batches.iter().any(|b| b
-                .items
-                .iter()
-                .any(|i| is_component(i, CONTEXT_MENU_COMPONENT))),
-            "{os:?}"
+        let menu = component_id(&initial, CONTEXT_MENU_COMPONENT).expect("the system's menu");
+        let items = |pinned: bool| {
+            serde_json::json!([
+                { "id": "pin", "label": "Pin", "icon": "pin", "checked": pinned },
+                { "id": "", "label": "", "inline": true, "items": [
+                    { "id": "delete", "label": "Delete", "icon": "trash", "destructive": true },
+                ] },
+            ])
+        };
+        assert_eq!(component_prop(&initial, menu, "items"), Some(items(false)));
+        assert_eq!(
+            component_prop(&initial, menu, "title"),
+            Some(serde_json::json!("Notes.txt"))
         );
+        let native = |name: &str, data: serde_json::Value| {
+            engine.control().dispatch_event(
+                menu,
+                EventKind::NativeEvent,
+                EventPayload::Native {
+                    name: name.into(),
+                    data,
+                },
+            );
+        };
+        native("open", serde_json::json!("touch"));
+        until(&rx, |batch| shows(batch, "Chosen: true longPress"));
+        native("select", serde_json::json!("pin"));
+        let updates = until(&rx, |batch| shows(batch, "Chosen: pin"));
+        assert_eq!(component_prop(&updates, menu, "items"), Some(items(true)));
     }
+}
+
+/// On the desktops a context menu's items are not used: its children are
+/// the menu, and no system component is made.
+#[test]
+fn a_context_menu_draws_its_children_on_the_desktops() {
+    use nsh_core::platform::{CONTEXT_MENU_COMPONENT, Os};
+
+    let os = Os::MacOs;
+    let (_engine, rx) = start_in(
+        SYSTEM_CONTEXT_MENU,
+        Environment {
+            os,
+            ..Environment::default()
+        },
+    );
+    let batches = until(&rx, |batch| shows(batch, "Chosen: none"));
+    assert!(
+        batches.iter().any(|batch| shows(batch, "Note row")),
+        "{os:?}"
+    );
+    assert!(
+        !batches.iter().any(|b| b
+            .items
+            .iter()
+            .any(|i| is_component(i, CONTEXT_MENU_COMPONENT))),
+        "{os:?}"
+    );
 }

@@ -33,20 +33,20 @@ use objc2::{
     runtime::{AnyClass, AnyObject, ProtocolObject},
     sel,
 };
-use objc2_core_foundation::{CGFloat, CGSize};
+use objc2_core_foundation::{CGFloat, CGPoint, CGRect, CGSize};
 use objc2_foundation::{NSArray, NSObject, NSObjectProtocol, NSString};
 use objc2_quartz_core::{CAMediaTiming, CATransition};
 use objc2_ui_kit::{
     NSDirectionalRectEdge, NSForegroundColorAttributeName, UIAction,
     UIAdaptivePresentationControllerDelegate, UIBarButtonItem, UIBarButtonItemStyle,
     UIBarButtonSystemItem, UIBehavioralStyle, UIColor, UIEdgeInsets, UIGestureRecognizer,
-    UIGestureRecognizerDelegate, UIImage, UIInterfaceOrientationMask, UILabel, UIMenu,
-    UIMenuElement, UIMenuElementAttributes, UIMenuElementState, UIMenuOptions,
-    UIModalPresentationStyle, UIModalTransitionStyle, UINavigationBar, UINavigationBarAppearance,
-    UINavigationController, UINavigationControllerDelegate, UINavigationItem,
-    UINavigationItemLargeTitleDisplayMode, UIPresentationController, UIResponder, UIScrollView,
-    UISheetPresentationController, UISheetPresentationControllerDelegate,
-    UISheetPresentationControllerDetent, UISheetPresentationControllerDetentIdentifierLarge,
+    UIGestureRecognizerDelegate, UIImage, UIInterfaceOrientationMask, UIMenu, UIMenuElement,
+    UIMenuElementAttributes, UIMenuElementState, UIMenuOptions, UIModalPresentationStyle,
+    UIModalTransitionStyle, UINavigationBar, UINavigationBarAppearance, UINavigationController,
+    UINavigationControllerDelegate, UINavigationItem, UINavigationItemLargeTitleDisplayMode,
+    UIPresentationController, UIResponder, UIScrollView, UISheetPresentationController,
+    UISheetPresentationControllerDelegate, UISheetPresentationControllerDetent,
+    UISheetPresentationControllerDetentIdentifierLarge,
     UISheetPresentationControllerDetentIdentifierMedium,
     UISheetPresentationControllerDetentResolutionContext, UIView, UIViewAutoresizing,
     UIViewController, UIViewControllerTransitionCoordinator,
@@ -785,7 +785,9 @@ fn size_screens(nav: &UINavigationController) {
 /// stays behind) that subtraction hands the overshoot straight back, and every
 /// later pass arrives at the same wrong number again. Taken from geometry and
 /// written to both sides every time, it is idempotent, and leaves nothing
-/// behind on the side the bar left.
+/// behind on the side the bar left. The stack's frame is its untransformed
+/// place: a container's transform moves the picture of the stack, not the
+/// part of the window it covers (see [`hold_safe_area`]).
 fn clip_side_safe_area(nav: &UINavigationController) {
     let Some(view) = nav.viewIfLoaded() else {
         return;
@@ -797,7 +799,10 @@ fn clip_side_safe_area(nav: &UINavigationController) {
     };
     let safe = window.safeAreaInsets();
     let bounds = window.bounds();
-    let frame = view.convertRect_toView(view.bounds(), Some(&window));
+    let frame = match untransformed_place(&view) {
+        Some((above, frame)) => above.convertRect_toView(frame, Some(&window)),
+        None => view.convertRect_toView(view.bounds(), Some(&window)),
+    };
     let (stack_min, stack_max) = (frame.min().x, frame.max().x);
     let covered = |min: CGFloat, max: CGFloat| (stack_max.min(max) - stack_min.max(min)).max(0.0);
     let left = covered(bounds.min().x, bounds.min().x + safe.left) - safe.left;
@@ -813,6 +818,106 @@ fn clip_side_safe_area(nav: &UINavigationController) {
             ..current
         });
     }
+}
+
+/// The superview of the outermost transformed layer between `view` (itself
+/// included) and its window, with `view`'s bounds where they sit in it when
+/// no transform applies; `None` when no layer on the way has a transform.
+fn untransformed_place(view: &UIView) -> Option<(Retained<UIView>, CGRect)> {
+    let size = view.bounds().size;
+    let (mut x, mut y) = (0.0, 0.0);
+    let mut place = None;
+    let mut v = view.retain();
+    while let Some(parent) = v.superview() {
+        let layer = v.layer();
+        let (center, bounds, anchor) = (v.center(), v.bounds(), layer.anchorPoint());
+        // Where `view` sits in `parent`'s bounds, which a scroll view moves
+        // by its offset: the rectangle is kept in those coordinates.
+        x += center.x - bounds.size.width * anchor.x;
+        y += center.y - bounds.size.height * anchor.y;
+        if !layer.transform().is_identity() {
+            place = Some((parent.clone(), CGRect::new(CGPoint::new(x, y), size)));
+        }
+        let offset = parent.bounds().origin;
+        x -= offset.x;
+        y -= offset.y;
+        v = parent;
+    }
+    place
+}
+
+/// Keeps the safe area UIKit measures through a transform from falling short
+/// of what the stack's untransformed place is owed.
+///
+/// UIKit measures a controller's safe area through the transforms around it,
+/// on its own layout passes only: a pass while a container shows the stack
+/// scaled or moved (a drawer that shrinks the page into a card) hands it the
+/// insets of that picture, and they stay after the transform goes, since a
+/// transform starts no pass. What the stack is owed comes from the safe area
+/// of the view just above the outermost transform (the window's insets and
+/// whatever a host or an outer stack adds there), against the stack's
+/// untransformed place in that view; what falls short goes into the stack's
+/// `additionalSafeAreaInsets`. Insets added inside the transformed views (a
+/// host's tab bar when the host scales its tab controller) are measured by
+/// UIKit in the same picture and stay as they are: nothing here takes away
+/// from what UIKit granted. With no transform around, nothing is added.
+fn hold_safe_area(nav: &UINavigationController) {
+    let Some(view) = nav.viewIfLoaded() else {
+        return;
+    };
+    if view.window().is_none() {
+        return;
+    }
+    let current = nav.additionalSafeAreaInsets();
+    let wanted = match untransformed_place(&view) {
+        None => UIEdgeInsets {
+            top: 0.0,
+            left: 0.0,
+            bottom: 0.0,
+            right: 0.0,
+        },
+        Some((above, frame)) => {
+            let (bounds, area) = (above.bounds(), above.safeAreaInsets());
+            let safe = view.safeAreaInsets();
+            // What is added is never negative, so UIKit's floor at zero
+            // never cuts the sum: less what was added, the safe area is
+            // exactly what UIKit granted.
+            let short = |owed: CGFloat, safe: CGFloat, added: CGFloat| {
+                (owed.max(0.0) - (safe - added)).max(0.0)
+            };
+            UIEdgeInsets {
+                top: short(
+                    bounds.min().y + area.top - frame.min().y,
+                    safe.top,
+                    current.top,
+                ),
+                left: short(
+                    bounds.min().x + area.left - frame.min().x,
+                    safe.left,
+                    current.left,
+                ),
+                bottom: short(
+                    frame.max().y - bounds.max().y + area.bottom,
+                    safe.bottom,
+                    current.bottom,
+                ),
+                right: short(
+                    frame.max().x - bounds.max().x + area.right,
+                    safe.right,
+                    current.right,
+                ),
+            }
+        }
+    };
+    let near = |a: CGFloat, b: CGFloat| (a - b).abs() < 0.01;
+    if near(current.top, wanted.top)
+        && near(current.left, wanted.left)
+        && near(current.bottom, wanted.bottom)
+        && near(current.right, wanted.right)
+    {
+        return;
+    }
+    nav.setAdditionalSafeAreaInsets(wanted);
 }
 
 /// Gives the bar of `nav` the height of the large title its top screen asks
@@ -899,6 +1004,7 @@ define_class!(
             let _: () = unsafe { msg_send![super(self), viewDidLayoutSubviews] };
             size_screens(self);
             clip_side_safe_area(self);
+            hold_safe_area(self);
             // A column of a split (or its compact stack): the core lays the
             // column's pages out at the size the split gives it.
             let ivars = self.ivars();
@@ -916,6 +1022,7 @@ define_class!(
             // SAFETY: calling the superclass implementation.
             let _: () = unsafe { msg_send![super(self), viewSafeAreaInsetsDidChange] };
             clip_side_safe_area(self);
+            hold_safe_area(self);
         }
     }
 );
@@ -1953,9 +2060,6 @@ pub(crate) struct ScreenHost {
     /// Trailing `ios.headerRightItems`: rebuilt when the description
     /// changes (a menu item's `checked` or `title` included).
     right_items: RefCell<Option<RightItemsBar>>,
-    /// The invisible title of an untitled header that shows its background
-    /// on scroll ([`ScreenHost::edge_title`]), kept while it is needed.
-    edge_title: RefCell<Option<Retained<UILabel>>>,
     /// The screen's root view, placed by the core.
     pub(crate) view: Retained<NshView>,
     pub(crate) config: ScreenConfig,
@@ -1976,46 +2080,7 @@ impl ScreenHost {
             left_system: RefCell::new(None),
             right_system: RefCell::new(None),
             right_items: RefCell::new(None),
-            edge_title: RefCell::new(None),
         }
-    }
-
-    /// The title view of a header that shows its background on scroll
-    /// (`headerBackgroundOnScroll`) and has no title: an invisible label.
-    ///
-    /// From iOS 26 the scroll edge effect under a bar takes its shape from
-    /// what the bar shows (its title, its buttons). With only buttons at the
-    /// sides it reaches no lower than the status bar between them, and the
-    /// content scrolled under the header stays sharp there; the label gives
-    /// it the reach of a title, so the header shows its background as a
-    /// titled one does. Earlier versions draw the background in full.
-    fn edge_title(&self, c: &ScreenConfig) -> Option<Retained<UIView>> {
-        let untitled = c.title.as_deref().is_none_or(str::is_empty);
-        // `UIScrollEdgeElementContainerInteraction` came with the edge
-        // effect (iOS 26).
-        if !(c.header_transparent && c.header_background_on_scroll && untitled && !c.large_title)
-            || AnyClass::get(c"UIScrollEdgeElementContainerInteraction").is_none()
-        {
-            self.edge_title.take();
-            return None;
-        }
-        let mtm = self.controller.mtm();
-        let label = self
-            .edge_title
-            .borrow_mut()
-            .get_or_insert_with(|| {
-                let label = UILabel::new(mtm);
-                // Blank text the width of a short title: an empty label has
-                // no size, and a label without one shapes nothing.
-                label.setText(Some(&NSString::from_str(&"\u{2003}".repeat(6))));
-                // SAFETY: a plain setter.
-                unsafe { label.setTextColor(Some(&UIColor::clearColor())) };
-                // SAFETY: UIAccessibility's property on the label.
-                let _: () = unsafe { msg_send![&*label, setIsAccessibilityElement: false] };
-                label
-            })
-            .clone();
-        Some(Retained::into_super(label))
     }
 
     /// Applies the header options; `item` returns the view of a header item.
@@ -2030,7 +2095,7 @@ impl ScreenHost {
         let c = &self.config;
         let nav_item = self.controller.navigationItem();
         nav_item.setTitle(c.title.as_deref().map(NSString::from_str).as_deref());
-        let title_view = c.title_view.and_then(&item).or_else(|| self.edge_title(c));
+        let title_view = c.title_view.and_then(&item);
         nav_item.setTitleView(title_view.as_deref());
         let custom = |id: Option<NodeId>| {
             id.and_then(&item)

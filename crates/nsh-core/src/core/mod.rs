@@ -26,11 +26,6 @@ mod views;
 mod watch;
 mod web_evaluation;
 
-/// Why an image's size cannot be known in a terminal, which decodes no
-/// images (`Image.getSize` / `prefetch` reject with
-/// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` there, `runtime/image.rs`).
-pub(crate) const NO_IMAGES_IN_A_TERMINAL: &str = "a terminal decodes no images";
-
 /// The most network image checks [`Core`] remembers for its canvases; past
 /// it, it starts over.
 const CANVAS_IMAGES: usize = 1024;
@@ -635,6 +630,10 @@ struct Node {
     /// (`ElementRef::hover_at`): its classes and the `group-hover:`
     /// classes inside it read it with its own states.
     passed_hover: bool,
+    /// In a terminal, its fill as it rests, while an interaction state
+    /// (hover, press, focus) styles another: the terminal's layout reads
+    /// this one, so a hover's fill never moves what is around it.
+    resting_fill: Option<Color>,
     /// The `data-*` attributes it shows as a part of a component
     /// (`Prop::ProjectedData`), sorted: its `data-*:` classes read them,
     /// and the `group-data-*:` classes inside it.
@@ -978,6 +977,7 @@ impl Node {
             },
             projected: 0,
             passed_hover: false,
+            resting_fill: None,
             data: Box::default(),
             parts: None,
             positional_children: false,
@@ -1511,6 +1511,9 @@ pub struct Core<M: TextEngine> {
     /// focus does, restyled when it starts or stops showing
     /// (`classes::styled_states`).
     projected_focus: Vec<(Key, NodeId)>,
+    /// Short completed presses whose `PRESSED` state is held until a
+    /// deadline so same-turn tap-to-click gestures still render `:active`.
+    pressed_impulses: Vec<(Key, NodeId, crate::time::Instant)>,
     /// The views a pointer passed on into an element is over
     /// (`ElementRef::hover_at`), by element, innermost first.
     passed_hovers: rustc_hash::FxHashMap<NodeId, Vec<NodeId>>,
@@ -1755,6 +1758,7 @@ impl<M: TextEngine> Core<M> {
             focus_visible_on: None,
             focus_visible_moved: false,
             projected_focus: Vec::new(),
+            pressed_impulses: Vec::new(),
             passed_hovers: Default::default(),
             fixed_changed: Vec::new(),
             zero_advances: Default::default(),
@@ -2040,6 +2044,16 @@ impl<M: TextEngine> Core<M> {
     /// gives; `None`: it has none.
     pub fn set_data_dir(&mut self, dir: Option<std::path::PathBuf>) {
         self.components.runtime.set_data_dir(dir);
+    }
+
+    /// What Rust code checks for updates with
+    /// ([`crate::runtime::prompt_for_update`]); `None`: the app does not
+    /// update. A JS app's VM gets its own ([`crate::element::System`]).
+    pub fn set_updater(
+        &mut self,
+        updater: Option<std::sync::Arc<dyn crate::runtime::UpdaterHost>>,
+    ) {
+        self.components.runtime.set_updater(updater);
     }
 
     /// Logs (once) that the app was refused `what`.
@@ -3010,6 +3024,7 @@ impl<M: TextEngine> Core<M> {
                     .insert(id, WindowRecord::opened(options.attributes.clone(), size));
                 self.window_ids
                     .insert(options.id.clone(), (id, options.restore_bounds));
+                self.key_ancestry_dirty = true;
                 self.commands.push((
                     id,
                     Command::Desktop(Box::new(DesktopCommand::OpenWindow(open))),
@@ -3348,6 +3363,7 @@ impl<M: TextEngine> Core<M> {
         self.sync_overlays();
         if std::mem::take(&mut self.key_ancestry_dirty) {
             self.sync_key_parents();
+            self.sync_key_contents();
         }
         // The rows holding the focus or an open overlay stay rendered,
         // before the lists update their windows.
@@ -4003,7 +4019,7 @@ impl<M: TextEngine> Core<M> {
             worded,
             clamped,
             radius,
-            fill: view.background_color,
+            fill: node.resting_fill.unwrap_or(view.background_color),
             interactive: {
                 let events = self.nodes[key as usize].events;
                 pressable(events) || HANDLED.iter().any(|&e| events.contains(e))
@@ -5501,6 +5517,10 @@ impl<M: TextEngine> Core<M> {
                 self.set_relation(key, relations::Relation::DescribedBy, target);
                 return Ok(());
             }
+            Prop::ScrollEdgeElement(target) => {
+                self.set_scroll_edge(key, target);
+                return Ok(());
+            }
             // A described view's own description waits for the element
             // describing it to go.
             Prop::Accessibility(AccessibilityProp::Description(description))
@@ -5909,7 +5929,13 @@ impl<M: TextEngine> Core<M> {
             Prop::SelectionColor(color) if node.input.is_none() => {
                 if node.paragraph.selection_color != color {
                     node.paragraph.selection_color = color;
-                    self.mark_text_block(key);
+                    if node.kind == Kind::Text {
+                        self.mark_text_block(key);
+                    } else {
+                        // A view's: the texts and inputs inside take it
+                        // (`inherited_text_props`).
+                        self.mark_inheriting_text(key);
+                    }
                 }
             }
             Prop::AdjustsFontSizeToFit(_) | Prop::MinimumFontScale(_) => {
@@ -6271,6 +6297,7 @@ impl<M: TextEngine> Core<M> {
                         ScreenProp::HeaderLargeTitle(v) => c.large_title = v,
                         ScreenProp::HeaderTransparent(v) => c.header_transparent = v,
                         ScreenProp::HeaderShadowVisible(v) => c.header_shadow_visible = v,
+                        ScreenProp::HeaderTitleAlign(v) => c.title_align = v,
                         ScreenProp::HeaderBackgroundOnScroll(v) => {
                             c.header_background_on_scroll = v
                         }
@@ -6573,6 +6600,10 @@ impl<M: TextEngine> Core<M> {
                         c.auto_focus = on;
                         false
                     }
+                    Prop::SelectTextOnFocus(on) => {
+                        c.select_text_on_focus = on;
+                        false
+                    }
                     Prop::Caret(on) => {
                         c.caret_hidden = !on;
                         false
@@ -6789,6 +6820,7 @@ impl<M: TextEngine> Core<M> {
             self.key_ancestry_dirty = true;
         }
         self.nodes[parent as usize].children.insert(pos, child);
+        self.key_content_changed(parent);
         self.rank_noted(child);
         self.tree_order_changed |= self.track_tree_order;
         self.tab_places_stale = true;
@@ -6929,6 +6961,7 @@ impl<M: TextEngine> Core<M> {
             .position(|&c| c == key)
             .expect("child of parent");
         siblings.remove(pos);
+        self.key_content_changed(parent);
         self.tree_order_changed |= self.track_tree_order;
         self.tab_places_stale = true;
         if let Some(list) = self.nodes[parent as usize].list.as_mut() {
@@ -7858,8 +7891,10 @@ impl<M: TextEngine> Core<M> {
                 self.mount.push(MountItem::Gestures { id, values });
             }
             if flags & dirty::VIEW_PROPS != 0 {
-                let props = node.mounted_props();
-                self.mount.push(MountItem::ViewProps { id, props });
+                self.mount.push(MountItem::ViewProps {
+                    id,
+                    props: node.mounted_props(),
+                });
             } else if flags & dirty::LABEL != 0 {
                 let label = node
                     .props
@@ -8139,12 +8174,17 @@ impl<M: TextEngine> Core<M> {
     /// says, set for its lines' wrapping, its selection and the
     /// selection's highlight: `whitespace-*` and `select-*` inherit, as
     /// CSS's `white-space` and `user-select: auto` do, and `selection:bg-*`
-    /// reaches the texts inside (Tailwind's `& *::selection`). One walk up.
+    /// reaches the texts inside (Tailwind's `& *::selection`), as a view's
+    /// own color does (Rust's `Element::selection_color`, over its
+    /// classes'). One walk up.
     fn inherited_text_props(&self, key: Key) -> (Option<bool>, Option<bool>, Option<Color>) {
         let (mut no_wrap, mut selectable, mut highlight) = (None, None, None);
         let mut k = key;
         while k != NO_KEY && (no_wrap.is_none() || selectable.is_none() || highlight.is_none()) {
             let node = &self.nodes[k as usize];
+            if !matches!(node.kind, Kind::Text | Kind::Input) {
+                highlight = highlight.or(node.paragraph.selection_color);
+            }
             if let Some(c) = node.class_props.as_deref() {
                 no_wrap = no_wrap.or(c.no_wrap);
                 selectable = selectable.or(c.selectable);

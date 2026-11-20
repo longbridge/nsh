@@ -89,6 +89,10 @@ pub struct NativeUse {
     /// `scrollbar` as a key, a member or a string (`<ScrollView
     /// scrollbar={theme}>`). `nsh/base`'s core part draws such bars.
     pub scrollbar_theme: bool,
+    /// It may make a web view: it spells `webview`, the tag the compiled
+    /// `<WebView>` passes to `nsh:rt`'s `element`, in a string or a
+    /// template. Linux's runner leaves WebKitGTK out without one (#2377).
+    pub web_view: bool,
 }
 
 impl NativeUse {
@@ -245,6 +249,9 @@ impl<F> Finder<'_, F> {
         }
         if value == "scrollbar" {
             self.uses.scrollbar_theme = true;
+        }
+        if value == "webview" {
+            self.uses.web_view = true;
         }
     }
 

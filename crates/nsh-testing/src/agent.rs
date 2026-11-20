@@ -1517,6 +1517,16 @@ fn anchor(misses: usize, to_start: bool) -> Option<f32> {
     [0.5, roomy, other].get(misses).copied()
 }
 
+/// Whether [`Agent::settled_unless_still`] can skip [`Agent::settled`]
+/// because nothing changed since the last settled step: `settled` matches
+/// `activity.batches`, the last batch arrived at least [`QUIET`] ago, and no
+/// finite native animation is running.
+fn is_still(settled: Option<u64>, activity: Activity, animating: bool) -> bool {
+    settled == Some(activity.batches)
+        && activity.since_last.is_some_and(|since| since >= QUIET)
+        && !animating
+}
+
 /// Takes test steps on a host's app ([`Model`], [`Native`]).
 pub struct Agent {
     scene: std::sync::Arc<dyn Scene>,
@@ -1525,6 +1535,10 @@ pub struct Agent {
     viewport: Mutex<Option<Size<Points>>>,
     /// Where a `dragAndHold` left the pointer down.
     held: Mutex<Option<Point<Points>>>,
+    /// The batches the app had applied when a step last ended with it quiet
+    /// ([`Agent::settled`]): a step that looks for a view next finds the app
+    /// as quiet as it left it when no batch came since.
+    quiet: Mutex<Option<u64>>,
 }
 
 impl Agent {
@@ -1535,6 +1549,7 @@ impl Agent {
             native,
             viewport: Mutex::new(None),
             held: Mutex::new(None),
+            quiet: Mutex::new(None),
         }
     }
 
@@ -1614,6 +1629,7 @@ impl Agent {
             TestStep::Back => done(self.native.back().and_then(|()| self.settled())),
             TestStep::Forward => done(self.native.forward().and_then(|()| self.settled())),
             TestStep::Wait { ms } => {
+                self.clear_quiet();
                 std::thread::sleep(Duration::from_millis(ms));
                 done(self.check())
             }
@@ -1626,12 +1642,14 @@ impl Agent {
                 gone,
             } => done(self.wait_for(&selector, Duration::from_millis(timeout_ms), gone)),
             TestStep::NextChange { timeout_ms } => {
+                self.clear_quiet();
                 let seen = self.scene.activity()?.batches;
                 self.scene
                     .wait_for_batch(seen, Duration::from_millis(timeout_ms));
                 done(self.check())
             }
             TestStep::NextFrame { ms } => {
+                self.clear_quiet();
                 let seen = self.scene.activity()?.batches;
                 let left = Duration::from_millis(ms);
                 if self.scene.manual_clock() {
@@ -1844,7 +1862,7 @@ impl Agent {
         target: PickTarget,
     ) -> Result<(NodeId, Point<Points>), String> {
         Selector::parse(selector)?;
-        self.settled()?;
+        self.settled_unless_still()?;
         let picked = self.scene.pick(selector, target)?;
         let id = self.picked(picked, selector, what)?;
         // The pointer acts in the window the view is in.
@@ -2032,6 +2050,7 @@ impl Agent {
             } else {
                 Point::new(Points(0.0), Points(step))
             };
+            self.clear_quiet();
             self.native.scroll(middle, delta);
             self.stopped(id)?;
             before = Some(at);
@@ -2348,6 +2367,7 @@ impl Agent {
             if holds {
                 return Ok(());
             }
+            self.clear_quiet();
             // The clock moves by the timeout at most; then the wait goes on
             // for what comes from outside the app, until as much real time
             // passed.
@@ -2383,15 +2403,37 @@ impl Agent {
         Ok(Duration::from_millis(ms))
     }
 
+    fn clear_quiet(&self) {
+        *self.quiet.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
+    /// [`Agent::settled`], but not again for an app that has not changed
+    /// since the last step left it quiet: no batch came, nothing animates, and
+    /// the last one is older than [`QUIET`] (on a manual clock, `WaitFor` and
+    /// `NextFrame` advance the clock with 2 ms waits without calling
+    /// `settled()`, so the wait is never skipped).
+    fn settled_unless_still(&self) -> Result<(), String> {
+        let settled = *self.quiet.lock().unwrap_or_else(|e| e.into_inner());
+        if settled.is_some() && !self.scene.manual_clock() {
+            let activity = self.scene.activity()?;
+            if is_still(settled, activity, self.native.animating()) {
+                return self.check();
+            }
+        }
+        self.settled()
+    }
+
     /// Waits until the app is quiet ([`QUIET`], no native animation that
     /// ends by itself), [`SETTLE`] at most, then fails if it threw
     /// meanwhile.
     fn settled(&self) -> Result<(), String> {
+        self.clear_quiet();
         let start = Instant::now();
         // When an animation last ran: what it ends with (a screen popped
         // once it slid out) comes after it.
         let mut moved = start;
         let mut first = None;
+        let quiet_batches;
         loop {
             let activity = self.scene.activity()?;
             let first = *first.get_or_insert(activity.batches);
@@ -2405,9 +2447,11 @@ impl Agent {
                 .map_or(start.elapsed(), |d| d.min(start.elapsed()))
                 .min(moved.elapsed());
             if since >= QUIET {
+                quiet_batches = Some(activity.batches);
                 break;
             }
             if start.elapsed() >= SETTLE {
+                quiet_batches = None;
                 // The step goes on all the same; why it waited this long
                 // tells why a run is slow.
                 log::info!(
@@ -2420,7 +2464,9 @@ impl Agent {
             }
             self.scene.wait_for_batch(activity.batches, POLL);
         }
-        self.check()
+        self.check()?;
+        *self.quiet.lock().unwrap_or_else(|e| e.into_inner()) = quiet_batches;
+        Ok(())
     }
 
     /// Waits until view `id` stops moving after a gesture scrolled it: its
@@ -3252,5 +3298,294 @@ mod tests {
         // Focused: typed where its caret is.
         assert_eq!(agent.take(step("Y")), ok);
         assert_eq!(*did.lock().unwrap(), ["press", "type A", "type Y"]);
+    }
+
+    struct CountingScene {
+        inner: Arc<Model>,
+        waits: std::sync::atomic::AtomicUsize,
+        manual_clock: bool,
+    }
+
+    impl CountingScene {
+        fn new(inner: Arc<Model>, manual_clock: bool) -> Self {
+            Self {
+                inner,
+                waits: std::sync::atomic::AtomicUsize::new(0),
+                manual_clock,
+            }
+        }
+
+        fn take_waits(&self) -> usize {
+            self.waits.swap(0, std::sync::atomic::Ordering::Relaxed)
+        }
+    }
+
+    impl Scene for CountingScene {
+        fn activity(&self) -> Result<Activity, String> {
+            self.inner.activity()
+        }
+        fn wait_for_batch(&self, seen: u64, timeout: Duration) {
+            self.waits
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.inner.wait_for_batch(seen, timeout);
+        }
+        fn take_errors(&self) -> Result<Vec<String>, String> {
+            self.inner.take_errors()
+        }
+        fn input_value_text(&self, selector: &str) -> Result<Option<String>, String> {
+            self.inner.input_value_text(selector)
+        }
+        fn pick(&self, selector: &str, target: PickTarget) -> Result<Pick, String> {
+            self.inner.pick(selector, target)
+        }
+        fn scroll_ancestors(&self, id: NodeId) -> Result<Vec<(NodeId, bool)>, String> {
+            self.inner.scroll_ancestors(id)
+        }
+        fn drag_takers(&self, id: NodeId) -> Result<Vec<NodeId>, String> {
+            self.inner.drag_takers(id)
+        }
+        fn long_press_delay(&self, id: NodeId) -> Result<Option<f32>, String> {
+            self.inner.long_press_delay(id)
+        }
+        fn horizontal(&self, id: NodeId) -> Result<bool, String> {
+            self.inner.horizontal(id)
+        }
+        fn texts(&self) -> Result<Vec<String>, String> {
+            self.inner.texts()
+        }
+        fn count(&self, selector: &str) -> Result<usize, String> {
+            self.inner.count(selector)
+        }
+        fn matches(&self, selector: &str) -> Result<bool, String> {
+            self.inner.matches(selector)
+        }
+        fn enabled(&self, selector: &str) -> Result<bool, String> {
+            self.inner.enabled(selector)
+        }
+        fn span_style(&self, selector: &str) -> Result<SpanStyle, String> {
+            self.inner.span_style(selector)
+        }
+        fn view_style(&self, selector: &str) -> Result<Option<ViewStyle>, String> {
+            self.inner.view_style(selector)
+        }
+        fn input_id(&self, selector: &str) -> Result<Option<NodeId>, String> {
+            self.inner.input_id(selector)
+        }
+        fn dialogs(&self) -> Result<Vec<nsh_core::Dialog>, String> {
+            self.inner.dialogs()
+        }
+        fn pending_dialog(&self) -> Result<Option<nsh_core::Dialog>, String> {
+            self.inner.pending_dialog()
+        }
+        fn answered(&self) -> Result<(), String> {
+            self.inner.answered()
+        }
+        fn menu(&self) -> Result<Option<Vec<nsh_core::desktop::MenuItem>>, String> {
+            self.inner.menu()
+        }
+        fn menu_closed(&self) -> Result<(), String> {
+            self.inner.menu_closed()
+        }
+        fn clipboard(&self) -> Result<Option<String>, String> {
+            self.inner.clipboard()
+        }
+        fn storage(&self) -> Result<std::collections::BTreeMap<String, String>, String> {
+            self.inner.storage()
+        }
+        fn set_viewport(&self, size: Size<Points>) -> Result<(), String> {
+            self.inner.set_viewport(size)
+        }
+        fn span(&self, id: NodeId) -> Result<Option<(NodeId, u32, u32)>, String> {
+            self.inner.span(id)
+        }
+        fn canvas_node(&self, selector: &str) -> Result<Option<(NodeId, Point<Points>)>, String> {
+            self.inner.canvas_node(selector)
+        }
+        fn match_inside(&self, selector: &str, id: NodeId) -> Result<Option<NodeId>, String> {
+            self.inner.match_inside(selector, id)
+        }
+        fn move_clock(&self, change: nsh_dev::protocol::ClockChange) -> Result<(), String> {
+            self.inner.move_clock(change)
+        }
+        fn manual_clock(&self) -> bool {
+            self.manual_clock
+        }
+        fn send_host_event(&self, name: &str, data: serde_json::Value) -> Result<(), String> {
+            self.inner.send_host_event(name, data)
+        }
+        fn opened_urls(&self) -> Result<Vec<String>, String> {
+            Scene::opened_urls(&*self.inner)
+        }
+        fn window_root(&self, id: &str) -> Result<Option<NodeId>, String> {
+            self.inner.window_root(id)
+        }
+        fn window_of(&self, id: NodeId) -> Result<NodeId, String> {
+            self.inner.window_of(id)
+        }
+    }
+
+    #[test]
+    fn consecutive_steps_on_a_still_app_skip_redundant_settle() {
+        let (engine, batches) = crate::start(EngineConfig::new(Root::of::<Tally>())).unwrap();
+        let model = Arc::new(Model::default());
+        let feeding = model.clone();
+        std::thread::spawn(move || {
+            while let Ok(batch) = batches.recv() {
+                feeding.apply(&batch);
+            }
+        });
+        let scene = Arc::new(CountingScene::new(model.clone(), false));
+        let typed = Arc::new(Mutex::new(Vec::new()));
+        let agent = Agent::new(
+            scene.clone(),
+            Box::new(Fake(engine.control(), typed, Some(model.clone()))),
+        );
+        let ok = StepOutcome::Done {
+            value: serde_json::Value::Null,
+        };
+        assert_eq!(agent.take(TestStep::Ready { timeout_ms: 5000 }), ok);
+
+        // Immediately after `Ready`, `find()` skips `settled()` with 0 waits.
+        scene.take_waits();
+        agent
+            .find("Add", "pressable view", PickTarget::Pressable)
+            .unwrap();
+        assert_eq!(scene.take_waits(), 0);
+
+        for _ in 0..10 {
+            assert_eq!(
+                agent.take(TestStep::Press {
+                    selector: "Add".into(),
+                }),
+                ok
+            );
+            scene.take_waits();
+            agent
+                .find("Add", "pressable view", PickTarget::Pressable)
+                .unwrap();
+            assert_eq!(scene.take_waits(), 0);
+        }
+        assert_eq!(
+            agent.take(TestStep::Texts),
+            StepOutcome::Done {
+                value: serde_json::json!(["Count: 10", "Add"])
+            }
+        );
+        assert!(agent.quiet.lock().unwrap().is_some());
+
+        // `WaitFor` that already matches on the first check keeps `quiet`.
+        assert_eq!(
+            agent.take(TestStep::WaitFor {
+                selector: "Count: 10".into(),
+                timeout_ms: 50,
+                gone: false,
+            }),
+            ok
+        );
+        scene.take_waits();
+        agent
+            .find("Add", "pressable view", PickTarget::Pressable)
+            .unwrap();
+        assert_eq!(scene.take_waits(), 0);
+
+        // `WaitFor` that waits past the first failed check clears `quiet`.
+        assert!(matches!(
+            agent.take(TestStep::WaitFor {
+                selector: "No such view".into(),
+                timeout_ms: 5,
+                gone: false,
+            }),
+            StepOutcome::Failed { .. }
+        ));
+        assert_eq!(*agent.quiet.lock().unwrap(), None);
+        scene.take_waits();
+        agent
+            .find("Add", "pressable view", PickTarget::Pressable)
+            .unwrap();
+        assert!(scene.take_waits() > 0);
+        assert!(agent.quiet.lock().unwrap().is_some());
+
+        // Time-advancing wait steps that do not settle at the end clear `quiet`
+        // so the next action settles again.
+        assert_eq!(agent.take(TestStep::Wait { ms: 1 }), ok);
+        assert_eq!(*agent.quiet.lock().unwrap(), None);
+        scene.take_waits();
+        agent
+            .find("Add", "pressable view", PickTarget::Pressable)
+            .unwrap();
+        assert!(scene.take_waits() > 0);
+        assert!(agent.quiet.lock().unwrap().is_some());
+
+        // An intervening batch between steps invalidates the still state, so
+        // the next `find()` still waits for `QUIET`.
+        model.apply(&MountBatch { items: Vec::new() });
+        scene.take_waits();
+        agent
+            .find("Add", "pressable view", PickTarget::Pressable)
+            .unwrap();
+        assert!(scene.take_waits() > 0);
+
+        // On a manual clock, `settled_unless_still` never skips `settled()`.
+        let manual_scene = Arc::new(CountingScene::new(model.clone(), true));
+        let manual_agent = Agent::new(
+            manual_scene.clone(),
+            Box::new(Fake(
+                engine.control(),
+                Arc::new(Mutex::new(Vec::new())),
+                Some(model),
+            )),
+        );
+        assert_eq!(manual_agent.take(TestStep::Ready { timeout_ms: 5000 }), ok);
+        assert!(manual_agent.quiet.lock().unwrap().is_some());
+        manual_scene.take_waits();
+        manual_agent
+            .find("Add", "pressable view", PickTarget::Pressable)
+            .unwrap();
+        assert!(manual_scene.take_waits() > 0);
+
+        drop(engine);
+    }
+
+    #[test]
+    fn still_skip_decision_checks_every_branch() {
+        let quiet = Activity {
+            batches: 5,
+            since_last: Some(QUIET),
+        };
+        assert!(is_still(Some(5), quiet, false));
+
+        // Previous settle timed out at `SETTLE` (or cleared by `Wait`).
+        assert!(!is_still(None, quiet, false));
+
+        // A new batch arrived since the previous settle finished.
+        assert!(!is_still(
+            Some(5),
+            Activity {
+                batches: 6,
+                since_last: Some(QUIET),
+            },
+            false,
+        ));
+
+        // Not enough quiet time since the last batch, or no batch yet.
+        assert!(!is_still(
+            Some(5),
+            Activity {
+                batches: 5,
+                since_last: Some(QUIET.saturating_sub(Duration::from_millis(1))),
+            },
+            false,
+        ));
+        assert!(!is_still(
+            Some(5),
+            Activity {
+                batches: 5,
+                since_last: None,
+            },
+            false,
+        ));
+
+        // A finite native animation is running.
+        assert!(!is_still(Some(5), quiet, true));
     }
 }

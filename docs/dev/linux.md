@@ -179,7 +179,8 @@ report nothing: the key being handled is kept until the main loop is idle, and `
 `keyboard.rs` adds hardware key notifications to the existing focus path in `key_focus.rs`.
 An app-rendered view can observe the source's logical key, its physical code, repeats and releases through
 `Interactive::on_key_down` and `on_key_up`. These are asynchronous observations; `capture_keys` mounts a reactive
-`KeyCapture` rule so GTK can consume a key without waiting for the engine. Omitting the rule on a retained view
+`KeyCapture` rule so GTK can consume a key without waiting for the engine. An unfocused window uses its app
+content's root for listener and capture lookup, following the logical tree. Omitting the rule on a retained view
 restores `KeyCapture::None`.
 
 The logical key comes from GDK's keyval, so Shift's case (`"K"`) and a non-US layout's character are reported as the

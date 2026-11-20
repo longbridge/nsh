@@ -395,6 +395,38 @@ test('the command end fallback waits while a smooth scroll moves', (t) => {
   assert.deepEqual(ends, [400]);
 });
 
+test('the anchoring scroll of a list does not stop the smooth scroll beside it', (t) => {
+  t.mock.method(performance, 'now', () => clock);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { p, el } = scroller();
+  p.call = () => {};
+  el.scrollTop = 2000;
+  // A browser that takes a smooth scroll's target and glides there over
+  // its own frames, and stops gliding when an offset is set.
+  let target = null;
+  el.scrollTo = ({ top, behavior }) => {
+    if (behavior === 'smooth') target = top;
+    else (target = null), (el.scrollTop = top);
+  };
+  const glide = (to) => { el.scrollTop = to; p.scrolled(el); };
+  // The commit that loads a page of rows above an inverted list: it keeps
+  // what shows in place, then scrolls to one of the rows it loaded.
+  p.op_sb(['sb', 1, 0, 1200]);
+  p.op_cmd(['cmd', 1, 'scrollTo', 0, 0, true]);
+  assert.equal(target, 0);
+  // The browser's `scrollend` for the anchoring scroll arrives once the
+  // smooth scroll beside it is on its way: not its end.
+  p.scrollEnded(el);
+  assert.deepEqual(el._smooth, [0, 0]);
+  glide(2600);
+  // So the next commit's anchoring moves the target along, rather than
+  // setting the offset, which would stop the browser's scroll.
+  p.op_sb(['sb', 1, 0, 400]);
+  assert.equal(el.scrollTop, 2600);
+  assert.deepEqual(el._smooth, [0, 400]);
+  assert.equal(target, 400);
+});
+
 test('a glide whose frames stop ends where it was going, once', (t) => {
   t.mock.method(performance, 'now', () => clock);
   t.mock.timers.enable({ apis: ['setTimeout'] });
