@@ -86,8 +86,11 @@ use crate::{
 };
 
 /// Points a mouse wheel line scrolls (`scrollingDeltaY` counts lines for
-/// mice, accelerated by the system), as `NSScrollView`'s line scroll.
-const WHEEL_LINE: f32 = 10.0;
+/// mice, accelerated by the system: ~0.1 for a slow notch, several for a
+/// quick run), as browsers on macOS take one (WebKit's `pixelsPerLineStep`,
+/// Chromium's `kScrollbarPixelsPerCocoaTick`). `NSScrollView`'s 10 made a
+/// slow notch move one point.
+const WHEEL_LINE: f32 = 40.0;
 /// Movement in points before a window press becomes a native drag.
 const WINDOW_DRAG_SLOP: f64 = 3.0;
 /// The mouse's middle button (`buttonNumber`).
