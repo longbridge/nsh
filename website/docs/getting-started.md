@@ -233,7 +233,8 @@ runner, or the development host) into it. `--device` picks a simulator by name o
 nsh run my-app --target android
 ```
 
-Start an emulator or connect a device first (`adb devices` lists them; NSH uses the first one). `nsh` installs the app
+Start an emulator or connect a device first (`adb devices` lists them). NSH uses the one `--device <serial>` or
+`ANDROID_SERIAL` names, else the first one, and names the one it uses when several are connected. `nsh` installs the app
 on it: a Rust app's own `libnsh.so`, or a development host APK (rebuilt only when the runtime changes) whose dev server
 port is forwarded to the device with `adb reverse`, so it works over USB without a shared network.
 

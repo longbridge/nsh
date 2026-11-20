@@ -627,7 +627,7 @@ nsh test --target macos                       # the app's tests in macOS windows
 nsh test --target linux                       # in GTK windows (xvfb-run -a … on a machine without a display)
 nsh test --target windows                     # in Win32 windows
 nsh test --target ios                         # in an iOS simulator
-nsh test --target android                     # on the Android device or emulator adb lists first
+nsh test --target android                     # on an Android device or emulator (--device <serial>, else the first)
 nsh test --target gpui                        # in GPUI windows (macOS, Windows, Linux)
 nsh test --target web                         # in a headless Chrome, Edge or Chromium
 nsh test --target tui                         # in an in-memory terminal
@@ -681,7 +681,8 @@ keyboard's typing, as UIKit gets them from the device. `setColorScheme` switches
 environment that the app declares in `capabilities.process.env` reach the app in the simulator, as on the desktops
 (`nsh run --target ios` passes them too); `HOME`, `TMPDIR` and `PATH` hold the simulator's paths for the app.
 
-On Android, the apps run in the development host on the first device or emulator `adb devices` lists, with storage
+On Android, the apps run in the development host on a device or emulator: the one `--device` names (by its serial),
+else the one `ANDROID_SERIAL` names, else the first one `adb devices` lists, with storage
 of their own. The steps are a finger's touches and a keyboard's keys, as the app's views get them from the device;
 `back` is the system's back. `setColorScheme` switches the device's dark theme, which `nsh test` sets back after the
 app. The variables of `nsh test`'s environment that the app declares in `capabilities.process.env` reach the app on
