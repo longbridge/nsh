@@ -539,7 +539,6 @@ impl<M: TextEngine> Core<M> {
     /// ancestry must still hear keys. Runs when a key rule or an overlay
     /// changed, not per key; an ordinary app's overlays keep `None`.
     pub(super) fn sync_key_parents(&mut self) {
-        self.key_ancestry_dirty = false;
         for index in 0..self.overlays.len() {
             let key = self.overlays[index];
             let logical = self.nodes[key as usize].parent;
@@ -550,6 +549,36 @@ impl<M: TextEngine> Core<M> {
                 continue;
             }
             self.nodes[key as usize].key_parent = desired;
+            self.mark(key, super::dirty::VIEW_PROPS);
+        }
+    }
+
+    /// Publishes an unfocused key target only when its path has a listener or
+    /// capture rule. With neither, the backend can use the window root.
+    pub(super) fn sync_key_contents(&mut self) {
+        let changes: Vec<_> = std::iter::once(self.root)
+            .chain(
+                self.window_ids
+                    .values()
+                    .filter_map(|&(id, _)| self.key(id).ok()),
+            )
+            .filter_map(|key| {
+                let start = self.key_start(key);
+                let desired = (start != key)
+                    .then(|| self.nodes[start as usize].id)
+                    .filter(|&id| self.logical_key_interest(id));
+                let mounted = self.nodes[key as usize]
+                    .props
+                    .as_ref()
+                    .and_then(|props| props.key_content);
+                (mounted != desired).then_some((key, desired))
+            })
+            .collect();
+        for (key, desired) in changes {
+            self.nodes[key as usize]
+                .props
+                .get_or_insert_default()
+                .key_content = desired;
             self.mark(key, super::dirty::VIEW_PROPS);
         }
     }

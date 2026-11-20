@@ -3,6 +3,7 @@
 // `id:case-<case>` (a one-point view over the corner, out of the layout);
 // the steps after it are that case's.
 import { type JSX, View, mount, signal } from "nsh";
+import { Window } from "nsh/desktop";
 import EventsComposition from "./events-composition";
 import EventsContextMenu from "./events-context-menu";
 import EventsGestures from "./events-gestures";
@@ -30,7 +31,7 @@ const cases: Record<string, () => JSX.Element> = {
 };
 const shown = signal("");
 
-mount(() => (
+mount(() => <Window id="main">{() => (
   <>
     {() => {
       const Case = cases[shown()];
@@ -42,4 +43,4 @@ mount(() => (
       ))}
     </View>
   </>
-));
+)}</Window>);

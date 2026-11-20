@@ -1096,10 +1096,10 @@ fn engine_config(options: &AppOptions, app: App) -> EngineConfig {
         trace: options.trace,
         content_culling: true,
         // Without `net`, `fetch` rejects and remote images fail.
-            #[cfg(feature = "net")]
-            network: Some(nsh_engine::net::network()),
-            #[cfg(not(feature = "net"))]
-            network: None,
+        #[cfg(feature = "net")]
+        network: Some(nsh_engine::net::network()),
+        #[cfg(not(feature = "net"))]
+        network: None,
         websocket: None,
         refuse_connections: None,
         filesystem: None,

@@ -226,6 +226,12 @@ pub(crate) struct InputState {
     pasting: Cell<bool>,
     /// Focus as last reported.
     focused: Cell<bool>,
+    /// A button or finger is down on the editor: `Some(true)` when what
+    /// it does keeps the selection (Shift held, not the primary button).
+    press: Cell<Option<bool>>,
+    /// The press that focused the editor ends by selecting all its text
+    /// (`selectTextOnFocus`), unless it made a selection itself.
+    select_on_release: Cell<bool>,
     /// Selection as last reported (UTF-16).
     selection: Cell<(u32, u32)>,
     /// The caret as last reported, in the view.
@@ -551,6 +557,68 @@ impl Ctx {
             EventKind::Blur
         };
         self.send(kind, || EventPayload::None);
+        input.select_on_release.set(false);
+        if !focused {
+            // A release the editor never saw (a menu took the grab).
+            input.press.set(None);
+        } else if input.config.borrow().select_text_on_focus {
+            match input.press.get() {
+                // A click focuses before GTK places the caret or selects
+                // where it pressed; its release decides.
+                Some(keeps) => input.select_on_release.set(!keeps),
+                // Keyboard, `focus()` and `autoFocus`: whatever GTK's
+                // `gtk-entry-select-on-focus` did, the whole text.
+                None => {
+                    let editor = input.editor.borrow().clone();
+                    editor.select(0, -1);
+                }
+            }
+        }
+    }
+
+    /// A press or release on the editor (`selectTextOnFocus`).
+    fn pointer(&self, event: &gtk::gdk::Event) {
+        use gtk::gdk::EventType as T;
+        let Some(input) = self.input.upgrade() else {
+            return;
+        };
+        match event.event_type() {
+            // Touches are seen as touches: their emulated buttons would
+            // press twice.
+            T::ButtonPress | T::ButtonRelease if event.is_pointer_emulated() => {}
+            T::ButtonPress | T::TouchBegin => {
+                let primary = event
+                    .downcast_ref::<gtk::gdk::ButtonEvent>()
+                    .is_none_or(|b| b.button() == gtk::gdk::BUTTON_PRIMARY);
+                let shift = event
+                    .modifier_state()
+                    .contains(gtk::gdk::ModifierType::SHIFT_MASK);
+                input.press.set(Some(shift || !primary));
+            }
+            T::ButtonRelease | T::TouchEnd | T::TouchCancel => {
+                input.press.set(None);
+                if !input.select_on_release.take() {
+                    return;
+                }
+                // After GTK's own release and drag end, which may still
+                // move the caret (a press inside an old selection). A drag
+                // that selected keeps its range; a double click's second
+                // press selects for itself afterwards.
+                let weak = self.input.clone();
+                glib::idle_add_local_once(move || {
+                    let Some(input) = weak.upgrade() else { return };
+                    let editor = input.editor.borrow().clone();
+                    let (start, end) = editor.selection();
+                    if input.focused.get()
+                        && start == end
+                        && input.config.borrow().select_text_on_focus
+                    {
+                        editor.select(0, -1);
+                    }
+                });
+            }
+            _ => {}
+        }
     }
 
     /// Return submitted the input (`submitBehavior` `submit` or
@@ -700,6 +768,8 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
         pasting: Cell::new(false),
         pending: Cell::new(false),
         focused: Cell::new(false),
+        press: Cell::new(None),
+        select_on_release: Cell::new(false),
         selection: Cell::new((0, 0)),
         caret: Cell::new(Bounds::default()),
         composition: RefCell::new(None),
@@ -867,6 +937,17 @@ fn attach(cx: &Ctx, editor: &Editor, input: &InputState) {
     // while the window is active.
     let c = cx.clone();
     widget.connect_map(move |w| c.watch_window(w));
+
+    // Whether a focus arrives with a press (`selectTextOnFocus`): seen
+    // before the editor's own gestures, which focus it.
+    let presses = gtk::EventControllerLegacy::new();
+    presses.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let c = cx.clone();
+    presses.connect_event(move |_, event| {
+        c.pointer(event);
+        glib::Propagation::Proceed
+    });
+    widget.add_controller(presses);
 
     // Backspace in an empty input deletes nothing, so no deletion reports
     // it. A return that submits a multiline input is taken here, before the

@@ -587,20 +587,16 @@ impl Host {
                         })
                     }
                     // Presses always pass their event: where the backend
-                    // does not know the pointer, at the view's origin.
+                    // does not know the pointer (a keyboard or assistive
+                    // technology activation), at the view's origin with
+                    // no clicks, as the DOM's `detail` of 0.
                     (
                         EventKind::Press
                         | EventKind::LongPress
                         | EventKind::PressDown
                         | EventKind::PressUp,
                         EventPayload::None,
-                    ) => payload_object(
-                        &cx,
-                        &EventPayload::Press(nsh_core::PressEvent {
-                            clicks: 1,
-                            ..Default::default()
-                        }),
-                    ),
+                    ) => payload_object(&cx, &EventPayload::Press(nsh_core::PressEvent::default())),
                     // A video's `onLoad`: `{ duration, size }` of the
                     // platforms' `duration`, `width` and `height`.
                     (EventKind::Load, EventPayload::Map(fields))
@@ -2196,6 +2192,32 @@ const report = (v) => text(String(v));
             assert!(!modifiers.get::<_, bool>("shift").unwrap());
             assert_eq!(obj.get::<_, u32>("clickCount").unwrap(), 2);
         });
+    }
+
+    #[test]
+    fn a_pointerless_press_has_no_clicks() {
+        // A keyboard or assistive technology activation (#2506) must not
+        // read as a click at the origin: `clickCount` 0, as the DOM's
+        // `detail`, while a real click keeps 1.
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"import { element, prop } from "nsh:rt";
+            globalThis.counts = [];
+            const view = element("view");
+            prop(view, "onPress", (e) => globalThis.counts.push(e.clickCount));"#,
+        )
+        .unwrap();
+        host.dispatch_event(2, EventKind::Press, &EventPayload::None);
+        host.dispatch_event(
+            2,
+            EventKind::Press,
+            &EventPayload::Press(nsh_core::PressEvent {
+                clicks: 1,
+                ..Default::default()
+            }),
+        );
+        let counts: Vec<u32> = host.cx.with(|cx| cx.eval("globalThis.counts").unwrap());
+        assert_eq!(counts, vec![0, 1]);
     }
 
     #[test]

@@ -121,6 +121,13 @@ const BAR_THICK = 4;
 const BAR_MARGIN = 2;
 const BAR_GRAB = 12;
 const BAR_HOLD = 700;
+/** How long (ms) an animated scroll command of the core's takes here, the
+ * length its own animation runs for on the other platforms (`nsh-core`'s
+ * `scroll::ANIMATION`, eased out cubically): the browser's
+ * `behavior: "smooth"` takes about a second over a long distance, and
+ * starts over every time a command retargets it, which a list does as it
+ * measures the rows the scroll passes. */
+const SCROLL_MS = 300;
 
 /* Keyframe animations (animate-spin, -ping, -pulse, -bounce) run with
    animation-composition: add: their transforms follow the view's own (as the
@@ -2511,8 +2518,8 @@ class Player {
       el._applied = 0;
       el.addEventListener("scroll", () => this.scrolled(el), { passive: true });
       el.addEventListener("scrollend", () => this.scrollEnded(el));
-      // The user takes over a smooth scroll of the core's (`op_sb`).
-      const takeOver = () => { el._smooth = null; };
+      // The user takes over a scroll animation of the core's.
+      const takeOver = () => this.endScrollAnimation(el, false);
       for (const type of ["wheel", "pointerdown", "touchstart", "keydown"]) el.addEventListener(type, takeOver, { passive: true });
     }
     if (kind === "screen") el.classList.add("nsh-screen");
@@ -2546,11 +2553,22 @@ class Player {
     // Appended children stay under a border drawn over them.
     const last = host._borderOver && host._border?.parentNode === host ? host._border : null;
     this.placeChild(host, child, before && before.parentNode === host ? before : last);
+    if (this.leftPlaying?.size) this.videosBack(child);
     this.showHosted(child);
     this.readingChanged(host);
     if (parent._kind === "stack") {
       this.changedStacks.add(parent);
       this.stackChanged(parent, child);
+    }
+  }
+
+  /** `<Video>`s the browser paused as they left the document, back with
+   * `el`: those the app has not paused since play on. */
+  videosBack(el) {
+    for (const v of this.leftPlaying) {
+      if (!el.contains(v)) continue;
+      this.leftPlaying.delete(v);
+      if (v._paused === false && v._src && v._video.paused && v.isConnected) this.playVideo(v, v._video);
     }
   }
 
@@ -2646,6 +2664,7 @@ class Player {
     this.wheelTracked.delete(id);
     if (el._shader) this.dropShader(el);
     if (el._video) {
+      this.leftPlaying?.delete(el);
       // A removed media element keeps playing until it is collected.
       clearInterval(el._progressTimer);
       el._video.pause();
@@ -2986,7 +3005,7 @@ class Player {
     for (const span of [...el.querySelectorAll(":scope > .nsh-run, :scope > .nsh-run-bg")]) span.remove();
     el.insertBefore(frag, el.firstChild);
     this.lineBreaks(el);
-    if (spans.some((l) => l.events.has("onMouseEnter") || l.events.has("onMouseLeave"))) {
+    if (!el._linkHoverListeners && spans.some((l) => l.events.has("onMouseEnter") || l.events.has("onMouseLeave"))) {
       this.installLinkHover(el);
     }
   }
@@ -3000,8 +3019,7 @@ class Player {
    * listeners read the spans the runs have now.
    */
   installLinkHover(el) {
-    if (el._linkHover !== undefined) return;
-    el._linkHover = null;
+    el._linkHoverListeners = true;
     const follow = (e) => {
       if (e.pointerType !== "mouse") return;
       const link = e.type === "pointerleave" ? null : (e.target?._link ?? null);
@@ -3089,11 +3107,14 @@ class Player {
     // The focus is reported whatever is tracked (the core works out
     // `focus-within` from it): it stays; the rest is forgotten.
     el._states = (el._states || 0) & FOCUSED;
-    if (states & HOVERED && !el._hoverListeners) {
-      el._hoverListeners = true;
-      el.addEventListener("pointerenter", (e) => e.pointerType === "mouse" && this.setState(el, HOVERED, true));
-      el.addEventListener("pointerleave", () => this.setState(el, HOVERED, false));
-    }
+    if (states & HOVERED && !el._hoverListeners) this.installHover(el);
+  }
+
+  /** `hover:` of view `el` (`op_ts`), from the mouse's pointer events. */
+  installHover(el) {
+    el._hoverListeners = true;
+    el.addEventListener("pointerenter", (e) => e.pointerType === "mouse" && this.setState(el, HOVERED, true));
+    el.addEventListener("pointerleave", () => this.setState(el, HOVERED, false));
   }
 
   /** Tells the core the input modality (0 the keyboard, 1 a pointer);
@@ -3138,9 +3159,9 @@ class Player {
   /**
    * The view drawn as the HTML element `elementTag` gives it (`h1`, `a`,
    * `p`, `nav`, ...), else a `div`: the element is replaced by one of that
-   * tag carrying its attributes, children and fields, so search engines
-   * and the page's markup see the document's structure while the layout,
-   * styles and events stay the view's. Views whose element holds a
+   * tag carrying its attributes, children, fields and listeners, so search
+   * engines and the page's markup see the document's structure while the
+   * layout, styles and events stay the view's. Views whose element holds a
    * control of its own (images, scroll views, canvases, ...) keep theirs.
    */
   retag(el, tag) {
@@ -3154,10 +3175,13 @@ class Player {
     next.append(...el.childNodes);
     el.replaceWith(next);
     this.views.set(el._id, next);
-    if (el._mouseEvents) {
-      next._mouseEvents = false;
-      this.installMouse(next);
-    }
+    // Listeners stay with the element they were added to, and a new view's
+    // tracked states and events come before the props that name its tag
+    // (a `Link`'s `href`): the flags copied above say which to add again.
+    if (el._mouseEvents) this.installMouse(next);
+    if (el._hoverListeners) this.installHover(next);
+    if (el._focusListeners) this.installFocus(next);
+    if (el._linkHoverListeners) this.installLinkHover(next);
     if (tag === "a") next.draggable = false;
     return next;
   }
@@ -3225,22 +3249,25 @@ class Player {
     // No longer a stop with the focus on it: it leaves, as on macOS (browsers
     // move it without a `blur`, which would leave `focus:` on).
     if (!focusable && !el._a11yFocus && document.activeElement === el) el.blur();
-    if (focusable && !el._focusListeners) {
-      el._focusListeners = true;
-      // `focus:` classes and `onFocus` follow the keyboard focus (the
-      // browser draws a ring only then), not the focus a click would give.
-      el.addEventListener("focus", () => {
-        if (!el._focusCall && !el.matches(":focus-visible")) return;
-        this.keyFocus(el);
-      });
-      el.addEventListener("blur", () => {
-        this.setState(el, FOCUSED, false);
-        if (!el._keyFocus) return;
-        el._keyFocus = false;
-        this.event(el._id, "onBlur");
-      });
-    }
+    if (focusable && !el._focusListeners) this.installFocus(el);
     this.updateAria(el);
+  }
+
+  /** `focus:` classes, `onFocus` and `onBlur` of Tab stop `el`
+   * (`updateFocusable`): they follow the keyboard focus (the browser draws
+   * a ring only then), not the focus a click would give. */
+  installFocus(el) {
+    el._focusListeners = true;
+    el.addEventListener("focus", () => {
+      if (!el._focusCall && !el.matches(":focus-visible")) return;
+      this.keyFocus(el);
+    });
+    el.addEventListener("blur", () => {
+      this.setState(el, FOCUSED, false);
+      if (!el._keyFocus) return;
+      el._keyFocus = false;
+      this.event(el._id, "onBlur");
+    });
   }
 
   /** Whether the keyboard reaches view `el` (a Tab stop, an input's
@@ -4608,12 +4635,15 @@ class Player {
     const el = this.view(id);
     if (!el) return;
     el._applied++;
-    // A smooth scroll of the core's in flight moves with it, as on the
-    // native backends: setting the offset would stop it.
-    if (el._smooth) {
-      el._smooth = [el._smooth[0] + dx, el._smooth[1] + dy];
-      el.scrollTo({ left: el._smooth[0], top: el._smooth[1], behavior: "smooth" });
-      return;
+    // A scroll animation of the core's in flight moves with the content,
+    // as on the native backends (`nsh-core`'s `shifted`): it goes on from
+    // the content it was on.
+    const s = el._smooth;
+    if (s) {
+      s.fromX += dx;
+      s.fromY += dy;
+      s.x += dx;
+      s.y += dy;
     }
     // So does a glide of the wheel's or the keys' (`scrollSmoothly`):
     // its next frame would put the offset back.
@@ -4963,7 +4993,9 @@ class Player {
   scrollEnded(el) {
     clearTimeout(el._commandEnd);
     el._commandEnd = 0;
-    el._smooth = null;
+    // A scroll animation of the core's (`animateScroll`) is driven here:
+    // every frame of it sets the offset, and the `scrollend` the frame
+    // before it drew is not its end. It ends on its own last frame.
     if (el._driven || el._touchDrag) return;
     // The browser's end of a scroll that ended here (`ownEnd`).
     const own = el._ownEnd;
@@ -5703,11 +5735,38 @@ class Player {
         if (submit === "blurAndSubmit") field.blur();
       }
     });
+    // `selectTextOnFocus`: focus selects the whole text, however it comes. A
+    // press that focuses the field places the caret after the focus (on
+    // its mousedown or its mouseup, by browser), so the press's mouseup
+    // selects it again unless the press made its own selection: a drag's
+    // range, a Shift-click's extension, or a second click on the focused
+    // field (a double click's word).
+    field.addEventListener("pointerdown", (e) => {
+      if (document.activeElement === field) field._selectOnUp = false;
+      else field._shiftPress = e.shiftKey;
+    });
+    const pressEnded = () => { field._shiftPress = false; };
+    field.addEventListener("pointerup", pressEnded);
+    field.addEventListener("pointercancel", pressEnded);
+    field.addEventListener("mouseup", (e) => {
+      if (!field._selectOnUp) return;
+      field._selectOnUp = false;
+      if (field.selectionStart !== field.selectionEnd) return;
+      e.preventDefault();
+      field.setSelectionRange(0, field.value.length);
+      this.selectionChanged(el, field);
+    });
     field.addEventListener("focus", () => {
       this.setState(el, FOCUSED, true);
       this.event(el._id, "onFocus");
+      if (el._config?.selectTextOnFocus && !field._shiftPress) {
+        field.setSelectionRange(0, field.value.length);
+        field._selectOnUp = true;
+        this.selectionChanged(el, field);
+      }
     });
     field.addEventListener("blur", () => {
+      field._selectOnUp = false;
       this.setState(el, FOCUSED, false);
       this.event(el._id, "onBlur");
     });
@@ -7064,6 +7123,11 @@ class Player {
     const video = el?._video;
     if (!video) return;
     const url = src ? this.asset(src) : "";
+    // `paused` is acted on when it changes (or for a new source): `play()`
+    // on a video that ended starts it over, and one its controls paused
+    // would play on, whenever another prop (the volume, say) changed.
+    const toggled = url !== el._src || paused !== el._paused;
+    el._paused = paused;
     if (url !== el._src) {
       el._src = url;
       if (url) video.src = url;
@@ -7076,16 +7140,24 @@ class Player {
     video.loop = repeat;
     video.controls = controls;
     video.className = `nsh-fill nsh-fit-${fit}`;
+    if (!toggled) return;
     if (paused) video.pause();
-    else if (url && video.paused) {
-      video.play().catch((err) => {
-        // Browsers only start sound on their own after a user gesture.
-        if (err?.name === "NotAllowedError" && !el._autoplayWarned) {
-          el._autoplayWarned = true;
-          console.warn("[nsh] the browser did not let the video play before a user gesture (muted videos can)");
-        }
-      });
-    }
+    else if (url && video.paused) this.playVideo(el, video);
+  }
+
+  /** Plays `<Video>` `el`'s media element `video`, as its props say. */
+  playVideo(el, video) {
+    const src = el._src;
+    video.play().catch((err) => {
+      if (err?.name !== "NotAllowedError") return;
+      // Browsers only start sound on their own after a user gesture: the
+      // next update tries again, though `paused` did not change.
+      if (el._src === src && el._paused === false) el._paused = null;
+      if (!el._autoplayWarned) {
+        el._autoplayWarned = true;
+        console.warn("[nsh] the browser did not let the video play before a user gesture (muted videos can)");
+      }
+    });
   }
 
   /** `<Video>`'s events from the media element's. */
@@ -7115,6 +7187,9 @@ class Player {
     video.addEventListener("pause", () => {
       stopProgress();
       progress();
+      // Out of the document, the browser paused it: one the app has not
+      // paused plays on when it is back (`op_i`).
+      if (!video.isConnected && el._paused === false) (this.leftPlaying ??= new Set()).add(el);
     });
     video.addEventListener("waiting", () => buffer(true));
     video.addEventListener("canplay", () => buffer(false));
@@ -7145,6 +7220,15 @@ class Player {
         if (el?._field) el._field.blur();
         else document.activeElement?.blur?.();
         break;
+      case "clearSelection": {
+        // The selection of the selectable view `el` is, is in or holds:
+        // `selectionchange` then reports `""`.
+        const sel = getSelection();
+        const anchor = sel?.rangeCount ? sel.anchorNode : null;
+        const area = anchor && this.areaOf(anchor.nodeType === 1 ? anchor : anchor.parentElement);
+        if (el && area && (el.contains(area) || area.contains(el))) sel.removeAllRanges();
+        break;
+      }
       case "setSelection": el?._field?.setSelectionRange(args[0], args[1]); break;
       case "insertText": {
         // As the user's typing: the browser's undo history keeps it and
@@ -7170,17 +7254,12 @@ class Player {
           el._field.scrollTo({ top: args[1], behavior: args[2] ? "smooth" : "instant" });
           break;
         }
-        el._applied++;
-        this.stopGlide(el, args[0], args[1]);
-        el._smooth = args[2] ? [args[0], args[1]] : null;
-        el.scrollTo({ left: args[0], top: args[1], behavior: args[2] ? "smooth" : "instant" });
+        this.scrollCommand(el, args[0], args[1], args[2]);
         break;
       case "scrollToEnd": {
         if (!el) break;
-        el._applied++;
         const [x, y] = el._horizontal ? [el.scrollWidth, 0] : [0, el.scrollHeight];
-        this.stopGlide(el, x, y);
-        el.scrollTo({ left: x, top: y, behavior: args[0] ? "smooth" : "instant" });
+        this.scrollCommand(el, x, y, args[0]);
         break;
       }
       case "zoomTo": if (el) this.zoomCommand(el, ...args); break;
@@ -7210,7 +7289,16 @@ class Player {
           console.warn(`[nsh] web view: ${name} only reaches HTML sources (a page of another site is the browser's own)`);
         }
         break;
-      case "seek": if (el?._video) el._video.currentTime = args[0]; break;
+      case "seek": {
+        const video = el?._video;
+        if (!video) break;
+        const ended = video.ended;
+        video.currentTime = args[0];
+        // The browser paused it at its end: one the app has not paused
+        // plays on from where it was sought, as on the other platforms.
+        if (ended && el._paused === false && !video.loop) this.playVideo(el, video);
+        break;
+      }
       case "notificationPermission": this.notificationPermission(args[0], args[1]); break;
       case "showNotification": this.showNotification(args[0], args[1], args[2], args[3], args[4]); break;
       case "closeNotification": this.notifications?.get(args[0])?.close(); break;
@@ -9507,16 +9595,8 @@ class Player {
    * the view where it is moves nothing, and no `scrollend` follows, so its
    * `onScrollEnd` is sent here. */
   stopGlide(el, x, y) {
-    const a = el._glide;
-    if (!a) return;
-    cancelAnimationFrame(a.frame);
-    clearTimeout(a.timer);
-    clearTimeout(a.watch);
-    el._glide = null;
-    this.drive(el, -1);
-    // Browsers clamp the offsets of scrolls.
-    const stays = (to, at, max) => Math.min(Math.max(to, 0), max) === at;
-    if (stays(x, el.scrollLeft, el.scrollWidth - el.clientWidth) && stays(y, el.scrollTop, el.scrollHeight - el.clientHeight)) {
+    if (!this.cancelGlide(el)) return;
+    if (this.scrolledTo(el, x, y)) {
       this.ownEnd(el);
     } else {
       // A fractional destination may round back to the current offset,
@@ -9524,6 +9604,98 @@ class Player {
       // keep this fallback waiting through their scroll events.
       this.waitCommandEnd(el);
     }
+  }
+
+  /** Stops `el`'s glide where it is, for something that takes it over;
+   * whether there was one. */
+  cancelGlide(el) {
+    const a = el._glide;
+    if (!a) return false;
+    cancelAnimationFrame(a.frame);
+    clearTimeout(a.timer);
+    clearTimeout(a.watch);
+    el._glide = null;
+    this.drive(el, -1);
+    return true;
+  }
+
+  /** `ScrollTo` and `ScrollToEnd` of the core: puts `el` at (`x`, `y`),
+   * animating it over `SCROLL_MS` when `animated`. */
+  scrollCommand(el, x, y, animated) {
+    el._applied++;
+    if (!animated) {
+      this.endScrollAnimation(el, false);
+      this.stopGlide(el, x, y);
+      el.scrollTo({ left: x, top: y, behavior: "instant" });
+      return;
+    }
+    // The animation below ends the scroll it takes over, so the glide
+    // only stops.
+    this.cancelGlide(el);
+    this.animateScroll(el, x, y);
+  }
+
+  /** Moves `el` to (`x`, `y`) over `SCROLL_MS`, eased out cubically, as
+   * the core animates a scroll of its own on the other platforms. A
+   * command that retargets one in flight carries on from where it is, as
+   * the core's `animate_to` does. */
+  animateScroll(el, x, y) {
+    let a = el._smooth;
+    if (!a) {
+      a = el._smooth = { fromX: 0, fromY: 0, x: 0, y: 0, start: 0, frame: 0, step: null, watch: 0 };
+      a.step = (now) => this.stepScroll(el, a, now);
+      this.drive(el, 1);
+    }
+    a.fromX = el.scrollLeft;
+    a.fromY = el.scrollTop;
+    a.x = x;
+    a.y = y;
+    a.start = performance.now();
+    // Its frames stopped (a hidden tab): it is where it was going, and
+    // ends there, as a glide's do (`scrollSmoothly`). One timer an
+    // animation, not one a frame.
+    clearTimeout(a.watch);
+    a.watch = setTimeout(() => {
+      el.scrollLeft = a.x;
+      el.scrollTop = a.y;
+      this.endScrollAnimation(el, true);
+    }, SCROLL_MS + 200);
+    if (!a.frame) a.frame = requestAnimationFrame(a.step);
+  }
+
+  /** One frame of `el`'s scroll animation (`animateScroll`). */
+  stepScroll(el, a, now) {
+    const t = Math.min((now - a.start) / SCROLL_MS, 1);
+    const k = 1 - (1 - t) ** 3;
+    el.scrollLeft = a.fromX + (a.x - a.fromX) * k;
+    el.scrollTop = a.fromY + (a.y - a.fromY) * k;
+    if (t < 1) {
+      a.frame = requestAnimationFrame(a.step);
+      return;
+    }
+    a.frame = 0;
+    this.endScrollAnimation(el, true);
+  }
+
+  /** `el`'s scroll animation is over: `reached` when it ran to its target,
+   * which ends the scroll, rather than being taken over by input or a
+   * command that does not animate. */
+  endScrollAnimation(el, reached) {
+    const a = el._smooth;
+    if (!a) return;
+    cancelAnimationFrame(a.frame);
+    clearTimeout(a.watch);
+    el._smooth = null;
+    this.drive(el, -1);
+    if (reached) this.ownEnd(el);
+  }
+
+  /** Whether `el` is where a scroll to (`x`, `y`) leaves it: browsers
+   * clamp the offsets of scrolls. A fractional destination they round
+   * away from lands elsewhere, and ends on the fallback below. */
+  scrolledTo(el, x, y) {
+    const at = (to, pos, max) => Math.min(Math.max(to, 0), max) === pos;
+    return at(x, el.scrollLeft, el.scrollWidth - el.clientWidth) && at(y, el.scrollTop, el.scrollHeight - el.clientHeight);
   }
 
   /** Ends a command rounded to the current offset when no browser event

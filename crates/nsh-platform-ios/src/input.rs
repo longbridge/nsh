@@ -75,6 +75,9 @@ pub(crate) struct InputIvars {
     edit_menu: RefCell<Option<(Vec<EditAction>, CGRect)>>,
     /// `UIEditMenuInteraction` (iOS 16), made on first use.
     edit_interaction: RefCell<Option<Retained<AnyObject>>>,
+    /// The whole text is selected when the input takes the focus
+    /// (`selectTextOnFocus`).
+    select_on_focus: Cell<bool>,
 }
 
 impl Default for InputIvars {
@@ -98,6 +101,7 @@ impl Default for InputIvars {
             target: RefCell::default(),
             edit_menu: RefCell::new(None),
             edit_interaction: RefCell::new(None),
+            select_on_focus: Cell::new(false),
         }
     }
 }
@@ -565,22 +569,7 @@ fn paste_text(view: &UIView, board: &objc2_ui_kit::UIPasteboard) {
         return;
     };
     let range = NSRange::new(start as usize, (end - start) as usize);
-    let current = view
-        .downcast_ref::<Field>()
-        .and_then(|f| f.text())
-        .or_else(|| view.downcast_ref::<Area>().map(|a| a.text()))
-        .unwrap_or_default();
-    let room = max_length(view).map_or(usize::MAX, |max| {
-        (max as usize).saturating_sub(kept_chars(&current, range))
-    });
-    // A text of no more UTF-16 units than there is room for characters
-    // fits as it is.
-    let text = if room < text.length() {
-        let units = utf16(&text, NSRange::new(0, text.length()));
-        NSString::from_str(clip_chars(&String::from_utf16_lossy(&units), room))
-    } else {
-        text
-    };
+    let text = clipped_paste(view, range, text);
     if text.length() == 0 {
         return;
     }
@@ -599,6 +588,26 @@ fn paste_text(view: &UIView, board: &objc2_ui_kit::UIPasteboard) {
     if allows.as_bool() {
         // SAFETY: UIKeyInput's method, which both input classes implement.
         let _: () = unsafe { msg_send![view, insertText: &*text] };
+    }
+}
+
+/// The part of a paste that fits after replacing the native UTF-16 selection.
+fn clipped_paste(view: &UIView, range: NSRange, text: Retained<NSString>) -> Retained<NSString> {
+    let current = view
+        .downcast_ref::<Field>()
+        .and_then(|f| f.text())
+        .or_else(|| view.downcast_ref::<Area>().map(|a| a.text()))
+        .unwrap_or_default();
+    let room = max_length(view).map_or(usize::MAX, |max| {
+        (max as usize).saturating_sub(kept_chars(&current, range))
+    });
+    // A text of no more UTF-16 units than there is room for characters
+    // fits as it is.
+    if room < text.length() {
+        let units = utf16(&text, NSRange::new(0, text.length()));
+        NSString::from_str(clip_chars(&String::from_utf16_lossy(&units), room))
+    } else {
+        text
     }
 }
 
@@ -855,6 +864,38 @@ pub(crate) fn target_of(view: &UIView) -> Option<Retained<EventTarget>> {
     ivars.target.borrow().load()
 }
 
+/// Input `view` took the focus (its delegate's did-begin-editing): with
+/// `selectTextOnFocus` its whole text is selected, however the focus came.
+///
+/// UIKit calls did-begin-editing from `becomeFirstResponder`, before the tap
+/// that focused the input places its caret, so the text is selected on the
+/// next main-queue turn. A selection the focusing gesture made by then (a
+/// drag, a Shift-click) is the user's and stays.
+pub(crate) fn began_editing(view: &UIView) {
+    if !ivars_of(view).is_some_and(|i| i.select_on_focus.get()) {
+        return;
+    }
+    let began = selection(view);
+    let mtm = MainThreadMarker::from(view);
+    let weak = dispatch2::MainThreadBound::new(Weak::from(view), mtm);
+    dispatch2::DispatchQueue::main().exec_async(move || {
+        let mtm = MainThreadMarker::new().expect("main queue");
+        let Some(view) = weak.into_inner(mtm).load() else {
+            return;
+        };
+        // Blurred meanwhile, or the prop was turned off.
+        if !view.isFirstResponder() || !ivars_of(&view).is_some_and(|i| i.select_on_focus.get()) {
+            return;
+        }
+        let now = selection(&view);
+        if now != began && now.is_some_and(|(start, end)| start != end) {
+            return;
+        }
+        // Reported as any other selection change, by the delegate.
+        set_selection(&view, 0, u32::MAX);
+    });
+}
+
 /// Selects `start..end` (UTF-16 units, clamped to the text).
 fn set_selection(view: &UIView, start: u32, end: u32) {
     // SAFETY: UITextField and UITextView adopt UITextInput.
@@ -1032,6 +1073,29 @@ impl Input {
         &self.container
     }
 
+    /// Applies an app-accepted paste through UITextInput's selected range.
+    pub(crate) fn insert_text(&self, text: &str) {
+        let view = self.editor_view();
+        let Some(config) = &self.config else { return };
+        if !config.editable || marked_text(view).is_some() {
+            return;
+        }
+        let Some((start, end)) = selection(view) else {
+            return;
+        };
+        let text = nsh_core::text_edit::pasted(text, config.multiline);
+        let range = NSRange::new(start as usize, (end - start) as usize);
+        let text = clipped_paste(view, range, NSString::from_str(&text));
+        // UITextInput's replacement applies one edit without interpreting a
+        // pasted newline as the Return key. Both editor classes adopt it.
+        unsafe {
+            let selected: Option<Retained<AnyObject>> = msg_send![view, selectedTextRange];
+            if let Some(selected) = selected {
+                let _: () = msg_send![view, replaceRange: &*selected, withText: &*text];
+            }
+        }
+    }
+
     /// The view that edits (first responder).
     pub(crate) fn editor_view(&self) -> &UIView {
         match &self.editor {
@@ -1178,6 +1242,9 @@ impl Input {
                 // Reported again once the configuration is applied.
                 view.ivars().scroll_reported.set(None);
             }
+        }
+        if let Some(ivars) = ivars_of(self.editor_view()) {
+            ivars.select_on_focus.set(config.select_text_on_focus);
         }
         crate::mount::mirror(self.editor_view(), config.rtl);
         set_paste(
