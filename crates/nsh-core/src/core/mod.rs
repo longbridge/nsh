@@ -10714,13 +10714,6 @@ impl<M: TextEngine> Core<M> {
 /// How far out of sight unbound list cells are moved.
 const HIDDEN: f32 = 1.0e6;
 
-/// The content box (inside padding and border) of a laid-out node.
-/// Taffy's rounding of a coordinate, to the nearest device pixel of
-/// `ratio` pixels per point rather than to whole points: on a display whose
-/// ratio is not a whole number (Android's 2.625) whole points fall between
-/// pixels, so the platform rounding each view's frame to pixels in its parent
-/// would make a child a pixel taller than its parent (a scroll view then cuts
-/// its last row of pixels off).
 /// Where `x` is in `items`, looked for from both ends at once, and how
 /// many items were looked at: few for an item near either end.
 fn position_from_ends<T: PartialEq>(items: &[T], x: &T) -> Option<(usize, usize)> {
@@ -10760,6 +10753,13 @@ fn position_near<T: PartialEq>(items: &[T], x: &T, near: usize) -> Option<(usize
     None
 }
 
+/// The content box (inside padding and border) of a laid-out node.
+/// Taffy's rounding of a coordinate, to the nearest device pixel of
+/// `ratio` pixels per point rather than to whole points: on a display whose
+/// ratio is not a whole number (Android's 2.625) whole points fall between
+/// pixels, so the platform rounding each view's frame to pixels in its parent
+/// would make a child a pixel taller than its parent (a scroll view then cuts
+/// its last row of pixels off).
 fn round(value: f32, ratio: f32) -> f32 {
     (pixel(value, ratio) / f64::from(ratio)) as f32
 }
