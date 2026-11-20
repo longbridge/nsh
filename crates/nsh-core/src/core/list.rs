@@ -1563,6 +1563,28 @@ impl ListState {
         }
     }
 
+    /// Records the size of item `i` when it has none yet, without
+    /// scrolling: for a cell the window just bound to the row it already
+    /// shows (a cell that took back the row now at its index after the
+    /// items changed, [`Self::adopt_orphans`]). No render lays it out
+    /// again, so it is measured where it is placed, in the same commit, and
+    /// the rows after it move with it. The window was set from the
+    /// estimate: the list updates again in the next commit.
+    pub(super) fn measured_unknown(&mut self, i: u32, size: f32) {
+        let idx = i as usize;
+        if !self.sizes.get(idx).is_some_and(|s| s.is_nan()) {
+            return;
+        }
+        let row = self.row_of(i);
+        let before = self.row_size(row);
+        self.sizes[idx] = size;
+        let delta = self.row_size(row) - before;
+        if delta != 0.0 {
+            self.rows.add(row as usize, delta as f64);
+        }
+        self.dirty = true;
+    }
+
     /// Records the size of an extra cell; returns the anchoring change as
     /// [`ListState::measured`] does.
     pub(super) fn measured_extra(&mut self, kind: ExtraKind, size: f32) -> f32 {
