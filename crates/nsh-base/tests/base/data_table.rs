@@ -675,7 +675,6 @@ fn a_wheel_over_the_empty_state_scrolls_the_columns() {
     app.wait_for("First column 1").unwrap();
 }
 
-
 /// Wide columns between one fixed at each side.
 #[component]
 fn WideFixed() -> impl IntoElement {
