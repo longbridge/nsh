@@ -1689,6 +1689,7 @@ impl RustApp {
             !rest.starts_with("target")
                 && !rest.starts_with(".nsh")
                 && !rest.starts_with(".git")
+                && !crate::dev::in_nested_checkout(dir, path)
                 && (rest.starts_with("assets")
                     || path.extension().is_some_and(|e| e == "rs")
                     || path.file_name().is_some_and(|n| n == "Cargo.toml"))
