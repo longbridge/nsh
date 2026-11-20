@@ -14,6 +14,10 @@ pub(crate) struct Mounter {
     pub(crate) components: HashMap<String, ComponentFactory>,
     pub(crate) appearance: Option<Appearance>,
     pub(crate) exit: bool,
+    /// The last input was the pointer's (a press): the focus it moved
+    /// to a control shows no mark, as CSS's `:focus-visible`; the next
+    /// key shows it again.
+    pub(crate) pointer_focus: bool,
     /// The app turned the performance line on or off
     /// (`setFpsEnabled`), for the app to apply.
     pub(crate) perf_monitor: Option<bool>,
@@ -58,6 +62,7 @@ impl Default for Mounter {
             components: HashMap::new(),
             appearance: None,
             exit: false,
+            pointer_focus: false,
             perf_monitor: None,
             keymap: Default::default(),
             scrolled: Vec::new(),
