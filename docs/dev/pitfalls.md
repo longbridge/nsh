@@ -479,6 +479,13 @@ Things that were found the hard way. Read the section of the area you change bef
   child sees it, with the same slop as `ZScroll`, so the pager took every horizontal drag of a zoomed image. `ZScroll`
   asks its parents not to intercept from the down (`requestDisallowInterceptTouchEvent`) while it has content to pan and
   gives that back when the drag has nothing to move or pushes past an edge a scroll view around can go on from.
+- **Android, moving a scroll view during its fling**: `ScrollView` / `HorizontalScrollView` keep their fling's
+  `OverScroller` private, and `computeScroll` sets the position the curve reached every frame, so a `scrollTo` during a
+  fling lasts one frame: the core's anchoring `ScrollBy` (rows above a list's viewport measured mid-fling) was undone
+  and the visible rows jumped by it, while a slow drag over the same rows kept them still. `VScroll` and `HScroll` run
+  their flings themselves (`ScrollBox.Glide`: the platform's `OverScroller.fling` arguments, plus the shifts
+  `scrollByPx` applied). Starting a new fling from the moved position instead goes farther than the rest of the curve:
+  repeated over a run of measured rows it sped the fling up and ran it far past its end.
 - **Android, safe area**: `NshView` reports only the parts of the system bars / keyboard that overlap it (like UIKit's
   `safeAreaInsets`), so embedded views below a toolbar get no top inset. Overlays use the same overlap (`topInset()`).
 - **Android, dev assets come over plain HTTP**, which apps block by default (API 28+): the dev host APK and `nsh-dev.aar` set

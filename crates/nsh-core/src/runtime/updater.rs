@@ -2280,19 +2280,35 @@ mod native {
 mod native {
     use super::*;
 
+    /// Fails when the app ships an update configuration a native runtime
+    /// without the feature cannot act on: saying so beats reporting "no
+    /// update" forever. Without one (a development run, an app without
+    /// `"updater"`) there is nothing to check, as with the feature.
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn configured(sys: &System) -> Result<(), JsError> {
+        let Some(host) = sys.updater.clone() else {
+            return Ok(());
+        };
+        if super::super::fs::blocking(move || Ok(host.config().is_some())).await? {
+            return Err(JsError::Error(
+                "this runtime was built without the NSH platform crate's feature `updater`".into(),
+            )
+            .with_code(codes::UNAVAILABLE));
+        }
+        Ok(())
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    async fn configured(_: &System) -> Result<(), JsError> {
+        Ok(())
+    }
+
     pub(super) async fn check(
-        _: System,
+        sys: System,
         _: Option<String>,
         _: Option<String>,
     ) -> Result<Option<AppUpdate>, JsError> {
-        // A native app built without the feature cannot update; saying so
-        // beats reporting "no update" forever.
-        #[cfg(not(target_arch = "wasm32"))]
-        return Err(JsError::Error(
-            "this runtime was built without the NSH platform crate's feature `updater`".into(),
-        )
-        .with_code(codes::UNAVAILABLE));
-        #[cfg(target_arch = "wasm32")]
+        configured(&sys).await?;
         Ok(None)
     }
 
@@ -2316,9 +2332,10 @@ mod native {
     }
 
     pub(super) async fn check_package(
-        _: System,
+        sys: System,
         _: Option<String>,
     ) -> Result<Option<PackageUpdate>, JsError> {
+        configured(&sys).await?;
         Ok(None)
     }
 
@@ -2331,5 +2348,50 @@ mod native {
 
     pub(super) async fn restart_to_package(_: System) -> Result<(), JsError> {
         Err(no_package())
+    }
+
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    mod tests {
+        use std::sync::Arc;
+
+        use super::*;
+
+        struct Host(Option<&'static str>);
+
+        impl UpdaterHost for Host {
+            fn config(&self) -> Option<Vec<u8>> {
+                self.0.map(|config| config.as_bytes().to_vec())
+            }
+
+            fn get(&self, _: &str, _: u64, _: UpdaterSink<'_>) -> Result<(), String> {
+                Err("offline".into())
+            }
+        }
+
+        #[test]
+        fn only_a_configured_app_learns_the_feature_is_off() {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap();
+            let with = |host: Option<Host>| {
+                System::default()
+                    .with_updater(host.map(|host| Arc::new(host) as Arc<dyn UpdaterHost>))
+            };
+            // A development run or an app without `"updater"`: no update.
+            for sys in [with(None), with(Some(Host(None)))] {
+                assert!(
+                    rt.block_on(check(sys.clone(), None, None))
+                        .unwrap()
+                        .is_none()
+                );
+                assert!(rt.block_on(check_package(sys, None)).unwrap().is_none());
+            }
+            // An app that ships a configuration hears why it cannot update.
+            let sys = with(Some(Host(Some("{}"))));
+            let err = rt.block_on(check(sys.clone(), None, None)).unwrap_err();
+            assert_eq!(err.code(), Some(codes::UNAVAILABLE));
+            let err = rt.block_on(check_package(sys, None)).unwrap_err();
+            assert_eq!(err.code(), Some(codes::UNAVAILABLE));
+        }
     }
 }

@@ -875,6 +875,9 @@ pub struct WireRequest {
     /// Follow redirects.
     #[serde(default)]
     pub follow_redirects: bool,
+    /// The Fetch cache mode (`"no-store"`, ...; empty: `"default"`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub cache: String,
 }
 
 /// What a test answers to an app's request ([`ServerMessage::Fetch`]).

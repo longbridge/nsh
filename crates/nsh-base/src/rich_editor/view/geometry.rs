@@ -103,8 +103,8 @@ pub(crate) struct TextGeo {
     /// The box the frame is in (the block's own, else a node view's
     /// content slot).
     pub(crate) owner: Option<u64>,
-    /// The box of each inline view and image in its text (in the text's
-    /// box, where the text engine placed it), by its offset in the
+    /// The box of each inline view, image and widget in its text (in the
+    /// text's box, where the text engine placed it), by its offset in the
     /// textblock's content: what its attachment character stands for on a
     /// line. Relative to the block, so an edit in another block leaves
     /// them in place.

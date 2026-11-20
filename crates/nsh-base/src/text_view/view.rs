@@ -1738,6 +1738,17 @@ impl Cx {
                 };
                 self.part(span, Part::Highlight).into_element()
             }
+            // A span in the document's color, which the app's `textStyle`
+            // part can override (a theme's own colors in dark appearance).
+            Inline::TextStyle { content, color } => {
+                let color = color.as_deref().and_then(|c| c.trim().parse::<Hsla>().ok());
+                let span = self.span(content, key);
+                let span = match color {
+                    Some(c) => span.text_color(c),
+                    None => span,
+                };
+                self.part(span, Part::TextStyle).into_element()
+            }
             Inline::Superscript { content } => self
                 .part(
                     self.span(content, key).text_size(rems(0.75)),

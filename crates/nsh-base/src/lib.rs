@@ -194,7 +194,8 @@ pub use crate::{
     },
     navigation::{dialog, nav_page, nav_stack},
     number_input::{
-        NumberInput, NumberInputElement, NumberInputEvent, NumberInputProps, number_input,
+        NumberInput, NumberInputApi, NumberInputElement, NumberInputEvent, NumberInputProps,
+        number_input,
     },
     otp_input::{
         OtpInput, OtpInputApi, OtpInputCompleteEvent, OtpInputElement, OtpInputEvent,

@@ -261,7 +261,7 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   swallow them. `focusable={false}` keeps a pressable out: a backdrop that closes a popover, rows a list moves between
   with the arrow keys. A disabled view is never a stop; inputs that edit always are. A stop hears `onFocus` /
   `onBlur` (`EventKind::Focus` / `Blur`, as inputs do) when the keyboard focus reaches and leaves it: AppKit's first
-  responder, the browser's `:focus-visible`; the headless driver's Tab moves it the same way there. Return and Space
+  responder, the browser's `:focus-visible`; the headless driver's Tab moves it the same way there. Any view hears `onFocusIn` / `onFocusOut` (`EventKind::FocusIn` / `FocusOut`, raised by the core as the view enters and leaves `focus-within`; Rust's `ElementRef::on_focus_in` / `on_focus_out`) when the focus comes into it from outside and leaves it, not as it moves between the views inside: a panel notes where its focus was and puts it back later with `ref.focus()`. Return and Space
   press the focused stop only when it takes presses; a stop that takes none hears its keys through the keymap (`on_key`
   / `on_key_with`, bound while it is focused, as `DataTable`'s controller does), Return and Space included. On a stop
   that takes presses, plain Return and Space fire only the focus' own bindings (`KeyOptions::for_focus`, TS's `forFocus`: a
