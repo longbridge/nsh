@@ -404,7 +404,11 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `PanActivation::decide`: a fail offset passed first fails, an active offset passed activates; no active offsets: 10
   points in any direction). iOS: a `PanGate` recognizer on the view (`touch.rs`); the pans of the scroll views around
   it must wait for it to fail (`shouldBeRequiredToFailByGestureRecognizer:`), so a vertical drag scrolls once it passes
-  `failOffsetY` and a horizontal one never scrolls. Android: the root's `TouchTracker` decides on each move before the
+  `failOffsetY` and a horizontal one never scrolls. The scroll views inside it that cannot scroll along its one axis
+  (`PanActivation::axis`; content and `alwaysBounce…`) wait too: UIScrollView's pan begins after its slop along the
+  finger's path, so it would take a 1.5:1 diagonal before the gate saw 10 points sideways. The gate judges each move
+  along the line from the previous one, so the offset passed first decides even when one move (UIKit's are several
+  points apart) passes both. Android: the root's `TouchTracker` decides on each move before the
   views below see it and, on activation, blocks the `ScrollBox`es around (`gateBlocked`) and disallows their
   interception; a scroll view that intercepts first (past its touch slop) wins as before. The gated `Box` takes the
   touches that go down on it, so a scroll view it lies over (a sibling under it) never gets them, and hands a tap
