@@ -60,8 +60,9 @@ video = ["dep:gstreamer", "dep:gstreamer-app", "dep:gstreamer-video"]
 websocket = ["nsh-core/websocket"]
 # App self-updates (`nsh/updater`). Without it a check finds no update.
 updater = ["nsh-core/updater"]
-# SVG images (resvg). Without it an SVG is recognized and shows nothing.
-svg = ["nsh-core/svg"]
+# Kept so feature lists naming `svg` still build: SVG images are always on
+# (an app that turned it off lost every SVG without a build error).
+svg = []
 # HTTP: `fetch` and remote images (ureq, rustls).
 net = ["nsh-core/loader", "nsh-engine/net"]
 
@@ -70,7 +71,7 @@ log.workspace = true
 
 # Empty off the desktop (like the other platform crates off their targets).
 [target.'cfg(any(target_os = "linux", target_os = "macos", windows))'.dependencies]
-nsh-core = { workspace = true, features = ["animation"] }
+nsh-core = { workspace = true, features = ["animation", "svg"] }
 nsh-engine.workspace = true
 nsh-base.workspace = true
 gpui.workspace = true

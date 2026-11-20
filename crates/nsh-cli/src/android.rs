@@ -799,6 +799,16 @@ pub(crate) fn device_abis(sdk: &Sdk, serial: &str) -> anyhow::Result<Vec<String>
         .collect())
 }
 
+/// The ABI to build an app for device `serial`, whose ABIs are `device`
+/// (preferred first): the first one NSH builds for.
+pub(crate) fn preferred_abi(serial: &str, device: &[String]) -> anyhow::Result<String> {
+    device
+        .iter()
+        .find(|abi| ABIS.contains(&abi.as_str()))
+        .cloned()
+        .with_context(|| format!("{serial} runs none of {}", ABIS.join(", ")))
+}
+
 /// A port of the device forwarded to this machine (`adb reverse`), removed
 /// when dropped, however the command ends (Ctrl-C too: it is
 /// [`ui::Stoppable`] meanwhile): a dev host left on the device would
@@ -855,6 +865,24 @@ pub(crate) fn adb(sdk: &Sdk, serial: &str, args: &[&str]) -> anyhow::Result<Stri
 
 #[cfg(test)]
 mod tests {
+    /// An app is built for the device's preferred ABI that NSH builds for;
+    /// a device that runs none of them is an error.
+    #[test]
+    fn an_app_is_built_for_the_devices_preferred_abi() {
+        let abi = |list: &[&str]| {
+            let device: Vec<String> = list.iter().map(|abi| abi.to_string()).collect();
+            super::preferred_abi("emulator-5554", &device).ok()
+        };
+        assert_eq!(
+            abi(&["arm64-v8a", "armeabi-v7a", "armeabi"]).as_deref(),
+            Some("arm64-v8a")
+        );
+        assert_eq!(abi(&["x86_64", "arm64-v8a"]).as_deref(), Some("x86_64"));
+        assert_eq!(abi(&["x86", "armeabi-v7a"]).as_deref(), Some("armeabi-v7a"));
+        assert_eq!(abi(&["x86"]), None);
+        assert_eq!(abi(&[]), None);
+    }
+
     fn apk(rust: bool, notifications: bool) -> super::Apk<'static> {
         super::Apk {
             package: "com.example.app",

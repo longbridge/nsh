@@ -436,6 +436,8 @@ final class StackBox extends FrameLayout implements Node {
          */
         private final android.widget.TextView centerTitle;
         private final Mounter mounter;
+        /** The toolbar's gap above the bar (the status bar's height, in px), kept for a safe-area change. */
+        private int barTop;
         /** The header's colors as configured (0: the theme's), kept for an appearance change. */
         private int tint, background, titleColor;
         private boolean transparent;
@@ -528,6 +530,20 @@ final class StackBox extends FrameLayout implements Node {
             toolbar.layout(0, 0, r - l, toolbar.getMeasuredHeight());
         }
 
+        /**
+         * Pads the toolbar: the gap above the bar, and at the sides the view's
+         * safe area, the insets the screen reports to its page. A navigation
+         * bar or display cutout at a side (a phone in landscape with
+         * three-button navigation) then does not cover the up arrow, the
+         * title or the items, while the toolbar's background still spans the
+         * full width. Called again when the safe area changes.
+         */
+        void padToolbar() {
+            float d = mounter.density;
+            toolbar.setPadding(Math.round(mounter.host.safeLeft() * d), barTop,
+                    Math.round(mounter.host.safeRight() * d), 0);
+        }
+
         /** Applies `encode.rs` `screen_config`. */
         void configure(Mounter m, String title, boolean shown, boolean transparent, int tint, int background,
                        int titleColor, boolean backVisible, boolean gesture, boolean preventBack, int animation,
@@ -544,7 +560,8 @@ final class StackBox extends FrameLayout implements Node {
             toolbar.setTitle(titleView >= 0 || leadTitled || centerTitled ? null : title);
             int height = Math.round(headerHeight * d);
             int bar = Math.round(56 * d);
-            toolbar.setPadding(0, Math.max(0, height - bar), 0, 0);
+            barTop = Math.max(0, height - bar);
+            padToolbar();
             ViewGroup.LayoutParams p = toolbar.getLayoutParams();
             p.height = height;
             toolbar.setLayoutParams(p);
