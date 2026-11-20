@@ -2645,7 +2645,7 @@ test("UrlScheme.setUrl gives its address to the entry of the page pushed with it
     let depth = 0;
     const player = Object.create(Player.prototype);
     Object.assign(player, {
-      history: true, historyDepth: 0, historyIndex: 0, historyDepths: [0], ignoredPops: 0, historySession: "s", pageUrl: null,
+      history: true, historyDepth: 0, historyIndex: 0, historyDepths: [0], historyUrls: ["https://a.test/debugger/"], ignoredPops: 0, historySession: "s", pageUrl: null,
       backDepth: () => depth, syncHistorySoon() {}, showError: (m) => calls.push(["error", m]),
     });
     // A page pushed and its address set in one turn: the entry first.
@@ -2695,7 +2695,7 @@ test("the main window's title titles the page once the turn's entries exist, und
     let depth = 0;
     const player = Object.create(Player.prototype);
     Object.assign(player, {
-      history: true, historyDepth: 0, historyIndex: 0, historyDepths: [0], ignoredPops: 0, historySession: "s", pageUrl: null,
+      history: true, historyDepth: 0, historyIndex: 0, historyDepths: [0], historyUrls: ["https://a.test/inbox"], ignoredPops: 0, historySession: "s", pageUrl: null,
       views: new Map(), backDepth: () => depth, tellAddress() {}, showError: (m) => calls.push(["error", m]),
     });
     // A page pushed and the title set in one turn, the title's command
@@ -2758,7 +2758,7 @@ test("the browser's back gives the core the entry's address with no open, and a 
     let lets = true;
     const player = Object.create(Player.prototype);
     Object.assign(player, {
-      history: true, historyDepth: 1, historyIndex: 1, historyDepths: [0, 1], ignoredPops: 0, historySession: "s", pageUrl: null,
+      history: true, historyDepth: 1, historyIndex: 1, historyDepths: [0, 1], historyUrls: ["https://a.test/inbox", "https://a.test/inbox?message=a"], ignoredPops: 0, historySession: "s", pageUrl: null,
       shownUrl: "https://a.test/inbox?message=a",
       backDepth: () => depth, showError: (m) => calls.push(["error", m]),
       back: () => lets && (depth--, true),
@@ -2858,7 +2858,7 @@ test("an address the app sets while the browser's back pops its page wins over t
     let depth = 1;
     const player = Object.create(Player.prototype);
     Object.assign(player, {
-      history: true, historyDepth: 1, historyIndex: 1, historyDepths: [0, 1], ignoredPops: 0, historySession: "s", pageUrl: null,
+      history: true, historyDepth: 1, historyIndex: 1, historyDepths: [0, 1], historyUrls: ["https://a.test/inbox?message=42", "https://a.test/inbox?message=42"], ignoredPops: 0, historySession: "s", pageUrl: null,
       backDepth: () => depth, showError: (m) => calls.push(["error", m]),
       event: (id, name, payload) => calls.push(["event", name, payload]),
     });
@@ -2924,7 +2924,7 @@ test("a forward the app shows goes on from the entry the browser is at", () => {
     let depth = 0;
     const player = Object.create(Player.prototype);
     Object.assign(player, {
-      history: true, historyDepth: 0, historyIndex: 0, historyDepths: [0], ignoredPops: 0, historySession: "s", pageUrl: null,
+      history: true, historyDepth: 0, historyIndex: 0, historyDepths: [0], historyUrls: ["https://a.test/inbox"], ignoredPops: 0, historySession: "s", pageUrl: null,
       backDepth: () => depth, showError: (m) => calls.push(["error", m]),
       // The app takes the link: its stack shows the page again.
       event: (id, name, payload) => { calls.push(["event", name, payload]); if (!payload.quiet) depth = 1; },
@@ -3187,8 +3187,8 @@ test("a push in the turn that pushes a page gives the page's entry its address, 
   assert.deepEqual(calls.splice(0), [["push", 1, 1], ["replace", 1, 1, "https://a.test/inbox?message=42"]]);
 });
 
-test("a push in the turn that pops a page waits for the back over its entry, then makes its own", (t) => {
-  const { player, calls, app, at } = historyPlayer(t);
+test("a push in the turn that pops a page takes the page's entry over: nothing goes back, no entry of its own", (t) => {
+  const { player, calls, app, at, entries, user } = historyPlayer(t);
   app.depth = 1;
   player.syncHistory();
   calls.splice(0);
@@ -3196,9 +3196,82 @@ test("a push in the turn that pops a page waits for the back over its entry, the
     app.depth = 0;
     player.setPageUrl("?tab=all", true);
   });
-  assert.deepEqual(calls.splice(0), [["go", -1], ["push", 0, 1, "https://a.test/inbox?tab=all"]]);
+  // The entry under it is not left again, so a browser's picture of it is the one taken as the page came.
+  assert.deepEqual(calls.splice(0), [["replace", 0, 1, "https://a.test/inbox?tab=all"]]);
   assert.equal(at(), 1);
+  assert.equal(entries().length, 2);
   assert.equal(player.historyDepth, 0);
+  assert.deepEqual(player.historyDepths, [0, 0]);
+  // Back from it goes to the entry under, as from an entry of its own.
+  user(-1);
+  assert.deepEqual(calls.splice(0), [["event", "onUrlScheme", { url: "https://a.test/inbox", page: true, change: "back" }]]);
+  user(1);
+  assert.deepEqual(calls.splice(0), [["event", "onUrlScheme", { url: "https://a.test/inbox?tab=all", page: true, change: "forward" }]]);
+});
+
+test("a push in the turn that pops a page with an address of its own takes its entry over, unless the address is the entry under it's", (t) => {
+  const { player, calls, app, at, entries } = historyPlayer(t);
+  inOneTurn(player, () => {
+    app.depth = 1;
+    player.setPageUrl("?sheet=1", true);
+  });
+  calls.splice(0);
+  // Back to its opener's address: the back lands on the opener's entry and the push makes nothing.
+  inOneTurn(player, () => {
+    app.depth = 0;
+    player.setPageUrl("/inbox", true);
+  });
+  assert.deepEqual(calls.splice(0), [["go", -1], ["replace", 0, 0, "https://a.test/inbox"]]);
+  assert.equal(at(), 0);
+  assert.deepEqual(entries().map((e) => e.url), ["https://a.test/inbox", "https://a.test/inbox?sheet=1"]);
+  inOneTurn(player, () => {
+    app.depth = 1;
+    player.setPageUrl("?sheet=1", true);
+  });
+  calls.splice(0);
+  inOneTurn(player, () => {
+    app.depth = 0;
+    player.setPageUrl("?tab=all", true);
+  });
+  assert.deepEqual(calls.splice(0), [["replace", 0, 1, "https://a.test/inbox?tab=all"]]);
+  inOneTurn(player, () => {
+    app.depth = 1;
+    player.setPageUrl("?sheet=2", true);
+  });
+  calls.splice(0);
+  // To the address of the entry under it, not its opener's first one: the same.
+  inOneTurn(player, () => {
+    app.depth = 0;
+    player.setPageUrl("?tab=all", true);
+  });
+  assert.deepEqual(calls.splice(0), [["go", -1], ["replace", 0, 1, "https://a.test/inbox?tab=all"]]);
+  assert.equal(at(), 1);
+  assert.deepEqual(entries().map((e) => e.url), ["https://a.test/inbox", "https://a.test/inbox?tab=all", "https://a.test/inbox?sheet=2"]);
+});
+
+test("a push in the turn that pops two pages, or one the user went back onto, waits for the back over their entries, then makes its own", (t) => {
+  const { player, calls, app, at, user } = historyPlayer(t);
+  app.depth = 2;
+  player.syncHistory();
+  calls.splice(0);
+  inOneTurn(player, () => {
+    app.depth = 0;
+    player.setPageUrl("?tab=all", true);
+  });
+  assert.deepEqual(calls.splice(0), [["go", -2], ["push", 0, 1, "https://a.test/inbox?tab=all"]]);
+  assert.equal(at(), 1);
+  // A page whose entry has one after it (the user went back onto it): the push drops that one.
+  player.setPageUrl("?tab=live", true);
+  app.depth = 1;
+  player.syncHistory();
+  player.setPageUrl("?tab=mine", true);
+  user(-1);
+  calls.splice(0);
+  inOneTurn(player, () => {
+    app.depth = 0;
+    player.setPageUrl("?tab=new", true);
+  });
+  assert.deepEqual(calls.splice(0)[0], ["go", -1]);
 });
 
 test("a push drops the browser's forward entries, and the address shown makes none", (t) => {

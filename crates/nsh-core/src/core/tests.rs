@@ -34207,6 +34207,105 @@ fn padded_text_as_wide_as_its_content_keeps_its_line_at_fractional_ratios() {
     }
 }
 
+/// One line at `.0` points or wider, two in anything narrower; its layout
+/// keeps the width it was typeset in.
+struct BorderlineEngine(f32);
+
+impl TextEngine for BorderlineEngine {
+    type Prepared = ();
+
+    fn prepare(&self, _: &AttributedText) {}
+
+    fn measure(&self, _: &(), max_width: Option<Points>) -> Size<Points> {
+        match max_width {
+            Some(max) if max.0 + 0.01 < self.0 => size_pt(max.0, 32.0),
+            _ => size_pt(self.0, 16.0),
+        }
+    }
+
+    fn layout(&self, _: &(), size: Size<Points>) -> TextLayout {
+        TextLayout(Arc::new(size.width.0))
+    }
+}
+
+#[test]
+fn stretched_text_is_typeset_in_the_width_it_was_measured_in() {
+    // A paragraph stretched across a list item's content, 21 points in
+    // (57.75 pixels at 2.75): its box rounds to a pixel narrower than the
+    // 299 points Taffy measured it in. A last word that fit by less than
+    // that pixel wrapped onto a line the box had no height for, drawn over
+    // the item after it.
+    for ratio in [2.75, 3.5, 2.625, 1.1, 1.0] {
+        for inset in [21.0, 10.5, 14.3] {
+            let measured = 320.0 - inset;
+            let mut c = Core::new(BorderlineEngine(measured - 0.005), size_pt(320.0, 480.0));
+            at_ratio(&mut c, ratio);
+            apply(
+                &mut c,
+                vec![
+                    Op::Create {
+                        id: 2,
+                        tag: Tag::View,
+                    },
+                    Op::Create {
+                        id: 3,
+                        tag: Tag::Text,
+                    },
+                    Op::CreateText {
+                        id: 4,
+                        text: "paragraph".into(),
+                    },
+                    Op::Insert {
+                        parent: 3,
+                        child: 4,
+                        before: None,
+                    },
+                    Op::Insert {
+                        parent: 2,
+                        child: 3,
+                        before: None,
+                    },
+                    style_op(2, &[("paddingLeft", StyleValue::Number(inset))]),
+                    Op::Insert {
+                        parent: ROOT_ID,
+                        child: 2,
+                        before: None,
+                    },
+                ],
+            );
+            let batch = c.commit().unwrap();
+            let (layout, content) = batch
+                .items
+                .iter()
+                .find_map(|i| match i {
+                    MountItem::Text {
+                        id: 3,
+                        layout,
+                        content,
+                        ..
+                    } => Some((layout.clone(), *content)),
+                    _ => None,
+                })
+                .expect("text layout");
+            let typeset = *layout.downcast::<f32>().expect("typeset width");
+            // Measured in one line.
+            assert!(
+                content.size.height.0 < 24.0,
+                "at {ratio}, inset {inset}: {content:?}"
+            );
+            assert!(
+                typeset + 0.01 >= measured - 0.005,
+                "at {ratio}, inset {inset}: typeset in {typeset}, measured in {measured}, box {content:?}"
+            );
+            // Never further than a pixel from its box.
+            assert!(
+                ((typeset - content.size.width.0) * ratio).abs() < 1.0,
+                "at {ratio}, inset {inset}: typeset in {typeset}, box {content:?}"
+            );
+        }
+    }
+}
+
 #[test]
 fn frames_stay_on_device_pixels_at_fractional_ratios() {
     // A view 4 points down (10.5 pixels at 2.625) holding a child as tall as
@@ -36965,6 +37064,94 @@ fn drain_paced_without(c: &mut Core<FakeEngine>, view: NodeId) {
         }
     }
     panic!("views still wait");
+}
+
+#[test]
+fn a_scroll_view_in_a_list_cell_makes_its_content_when_the_cell_is_placed() {
+    // A chat row with a code block: a cell holding a scroll view, which
+    // culls its content (`cull.rs`). The list gives the scroll view its
+    // frame as it places the cell, after culling looked at it in that
+    // round. Nothing lays the row out or scrolls again: its content is
+    // made all the same (it stayed empty until the next layout, as after
+    // a fling that ends on the row).
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::List,
+            },
+            style_op(2, &[("height", StyleValue::Number(400.0))]),
+            Op::SetProp {
+                id: 2,
+                prop: Prop::EstimatedItemSize(px(100.0)),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Count(2),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    c.commit();
+    let mut binds = Vec::new();
+    c.take_list_binds(&mut binds);
+    c.take_paced_list_binds(usize::MAX, &mut binds);
+    let mut ops = Vec::new();
+    let mut contents = Vec::new();
+    for (slot, index) in binds.iter().flat_map(|b| b.binds.iter().copied()) {
+        let cell = 100 + slot * 100;
+        let (scroll, content) = (cell + 1, cell + 2);
+        contents.push(content);
+        ops.extend([
+            Op::Create {
+                id: cell,
+                tag: Tag::Cell,
+            },
+            Op::SetProp {
+                id: cell,
+                prop: Prop::Slot(CellSlot::Item(slot)),
+            },
+            Op::Insert {
+                parent: 2,
+                child: cell,
+                before: None,
+            },
+            Op::Create {
+                id: scroll,
+                tag: Tag::Scroll,
+            },
+            style_op(scroll, &[("height", StyleValue::Number(100.0))]),
+            Op::Insert {
+                parent: cell,
+                child: scroll,
+                before: None,
+            },
+        ]);
+        ops.extend(child_view(content, scroll, 40.0, &[]));
+        ops.push(Op::SetProp {
+            id: cell,
+            prop: Prop::CellIndex(index),
+        });
+    }
+    assert_eq!(contents.len(), 2);
+    apply(&mut c, ops);
+    let mut made = Vec::new();
+    for _ in 0..20 {
+        let Some(batch) = c.commit() else { break };
+        made.extend(created_in(&batch));
+    }
+    for content in contents {
+        assert!(
+            made.contains(&content),
+            "the content of the scroll view in a cell: {content}"
+        );
+    }
 }
 
 #[test]

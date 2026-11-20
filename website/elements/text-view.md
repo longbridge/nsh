@@ -121,7 +121,8 @@ The content is one of three props, read in this order:
   URL ends where CJK text or a curly quote starts: `https://example.com。下一句` links `https://example.com`. A URL
   written in angle brackets (`<https://zh.wikipedia.org/wiki/中文>`) or as a link keeps every character.
   A tag that names no HTML element and no `tag` extension (`<US tech>`, `<公司名>`) shows as written.
-- **`html`**: HTML as a reader shows it. Text, structure and inline formatting come through; scripts, styles, form
+- **`html`**: HTML as a reader shows it. Text, structure and inline formatting come through, text colors too (a
+  `<span style="color: …">` or a `<font color="…">` is a `textStyle` in its color); scripts, styles, form
   controls and hidden elements stay out. A fragment or a whole page both work (a page shows its body).
 - **`document`**: blocks the app builds or keeps: plain objects in TSX, `nsh_base::text_view::Document` in Rust
   ([The document model](#the-document-model)).
@@ -253,6 +254,7 @@ Some nodes are several parts, which apply in order: a level 2 heading is `headin
 | `strikethrough` | `Strikethrough` | Struck-through text. |
 | `underline` | `Underline` | Underlined text (`<u>`, `<ins>`). |
 | `highlight` | `Highlight` | Highlighted text (`<mark>`, on a rounded yellow). |
+| `textStyle` | `TextStyle` | Text in the document's colors (`<span style="color: …">`, `<font color>`, a `textStyle` node), the same in both appearances. Its classes and styles win over them, so an app can keep its own colors: `classes={{ textStyle: "dark:text-foreground" }}` shows that text in the text's color in dark appearance. |
 | `superscript`, `subscript` | `Superscript`, `Subscript` | Superscript and subscript (smaller). |
 | `link` | `Link` | Links (in the theme's `primary` color, underlined). |
 | `image` | `Image` | Images. |
@@ -658,6 +660,7 @@ the types of `nsh_base::text_view` (`Document`, `Block`, `Inline`, `CodeBlock`, 
 |---|---|
 | `text` | `text` |
 | `strong`, `emphasis`, `strikethrough`, `underline`, `highlight`, `superscript`, `subscript` | `content` |
+| `textStyle` | `content`, `color?` (a CSS color: `"#e54545"`, `"rgb(229 69 69)"`, `"red"`) |
 | `code` | `code` |
 | `keyboard` | `text` |
 | `link` | `url`, `title?`, `content` |

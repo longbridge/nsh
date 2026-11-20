@@ -82,6 +82,8 @@ unsafe extern "C" {
         body_len: usize,
         body_kind: u32,
         follow: u32,
+        cache: *const u8,
+        cache_len: usize,
     );
     #[link_name = "fetch_send"]
     fn js_fetch_send(id: u32, chunk: *const u8, len: usize);
@@ -312,7 +314,8 @@ pub(crate) const BODY_BYTES: u32 = 1;
 /// [`fetch_finish`]).
 pub(crate) const BODY_STREAM: u32 = 2;
 
-/// Starts request `id` (`headers`: JSON `[name, value]` pairs); what
+/// Starts request `id` (`headers`: JSON `[name, value]` pairs; `cache`:
+/// the Fetch cache mode); what
 /// happens to it comes back through the `nsh_fetch_*` exports.
 pub(crate) fn fetch_start(
     id: u32,
@@ -322,6 +325,7 @@ pub(crate) fn fetch_start(
     body: &[u8],
     body_kind: u32,
     follow: bool,
+    cache: &str,
 ) {
     // SAFETY: the slices are valid for the call; JS copies them.
     unsafe {
@@ -337,6 +341,8 @@ pub(crate) fn fetch_start(
             body.len(),
             body_kind,
             follow as u32,
+            cache.as_ptr(),
+            cache.len(),
         )
     }
 }

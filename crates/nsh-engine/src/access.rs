@@ -157,6 +157,7 @@ mod tests {
             headers: vec![("Content-Type".into(), "text/plain".into())],
             body: HttpBody::Bytes(b"x".to_vec()),
             follow_redirects: true,
+            cache: crate::HttpCache::Default,
         };
         let mut followed = Followed { request, hops: 0 };
         let redirect = |status, location: &str| HttpHead {

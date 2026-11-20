@@ -194,6 +194,7 @@ impl nsh_dev::protocol::TestNetwork for HostRoutes {
                 HttpBody::Bytes(request.body)
             },
             follow_redirects: request.follow_redirects,
+            cache: nsh_engine::HttpCache::parse(&request.cache).unwrap_or_default(),
         };
         if self.live {
             self.requests.record(request);
