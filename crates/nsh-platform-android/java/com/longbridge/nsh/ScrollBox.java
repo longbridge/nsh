@@ -482,6 +482,12 @@ final class ScrollBox extends FrameLayout implements Node {
         }
 
         @Override
+        public void requestDisallowInterceptTouchEvent(boolean disallow) {
+            childClaimed = disallow;
+            super.requestDisallowInterceptTouchEvent(disallow);
+        }
+
+        @Override
         public boolean dispatchTouchEvent(MotionEvent e) {
             // A touch ends a glide, as it ends the platform's fling, and is a drag rather than a tap on what is under
             // it: the platform decides that from its own scroller, which a zero fling sets running (as `stop`)
@@ -563,6 +569,12 @@ final class ScrollBox extends FrameLayout implements Node {
         }
 
         @Override
+        public void requestDisallowInterceptTouchEvent(boolean disallow) {
+            childClaimed = disallow;
+            super.requestDisallowInterceptTouchEvent(disallow);
+        }
+
+        @Override
         public boolean dispatchTouchEvent(MotionEvent e) {
             // A touch ends a glide, as it ends the platform's fling, and is a drag rather than a tap on what is under
             // it: the platform decides that from its own scroller, which a zero fling sets running (as `stop`)
@@ -637,6 +649,11 @@ final class ScrollBox extends FrameLayout implements Node {
     /** Where the touch that {@link #claim} is deciding went down; deciding while true. */
     private float claimX, claimY;
     private boolean claiming, yielded, owning;
+    /**
+     * A view inside asked this one not to intercept the touch going on (an inner scroll view
+     * claiming it): this view then gives up deciding, without ending the touch under it.
+     */
+    private boolean childClaimed;
     /** Owning the drag: where the last move was, to tell when it reaches an edge. */
     private float lastX, lastY;
 
@@ -663,6 +680,7 @@ final class ScrollBox extends FrameLayout implements Node {
                 claimX = e.getX();
                 claimY = e.getY();
                 owning = false;
+                childClaimed = false;
                 claiming = enabled && !jsBlocked && !gateBlocked && (horizontal
                         ? scroller.canScrollHorizontally(1) || scroller.canScrollHorizontally(-1)
                         : scroller.canScrollVertically(1) || scroller.canScrollVertically(-1));
@@ -691,6 +709,9 @@ final class ScrollBox extends FrameLayout implements Node {
                 int slop = ViewConfiguration.get(scroller.getContext()).getScaledTouchSlop();
                 if (Math.abs(dx) <= slop && Math.abs(dy) <= slop) break;
                 claiming = false;
+                // An inner scroll view claimed this touch on its down: it decides, and ending the touch
+                // here would cancel it under the finger (a horizontal pager in a vertical list).
+                if (childClaimed) break;
                 if (!scrolls(dx, dy) && aroundTakes(dx, dy)) {
                     parent.requestDisallowInterceptTouchEvent(false);
                     yielded = true;
