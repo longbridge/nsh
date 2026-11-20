@@ -492,7 +492,8 @@ mean that): with surfaces its fill is its own color blended over its ground, at 
 the Cells of its tracks are such views, inside the control that takes the press, so hover and focus bands leave
 the color alone. A run with its own background (a
 highlight, inline code) is a band the same way. A text field without a
-line or a fill of its own is a raised band (a search field); an input group, a one-row box of an opaque fill
+line or a fill of its own is a raised band (a search field), and so is a one-row select trigger (a combobox holding
+no field), so it reads as one to press; an input group, a one-row box of an opaque fill
 holding a field with something beside it (a prefix or suffix, chips, a clear button, a chevron), is that band as
 a whole, the field raised with it rather than a step of its own (`input_group`). Bandless, a fill is the standard
 colors' (above).
@@ -502,7 +503,8 @@ A view's gradient over no fill of its own is a fill of its first stop, a band as
 **Images** (`image.rs`) load through the core's shared loader and decoded images (`docs/dev/images.md`), first
 frame only (the terminal runs with reduced motion), decoded at the size their content box needs at the terminal's
 Cell pixels and loaded again when the box outgrows it; `onLoadStart`, `onLoad`, `onError` and `onLoadEnd` are
-dispatched after the frame that saw them, and `Command::ImageInfo` (`Image.getSize`, `Image.prefetch`) is answered
+dispatched after the frame that saw them (a transparent image with Cells loads as a drawn one does, so an avatar's
+picture, transparent until its `onLoad`, shows; `image::prepare`), and `Command::ImageInfo` (`Image.getSize`, `Image.prefetch`) is answered
 from the header, as Linux answers it. An image of one side and an `aspectRatio` takes the other from it in the
 terminal layout, loaded or not (a photo filling its tile's width has its rows before its natural size is known). The picture is fitted into the box with `ResizeMode::fit` and the
 `objectPosition`, resampled premultiplied (no dark fringes), `tintColor` painted through its alpha. How it shows
@@ -526,7 +528,7 @@ A control whose content is a picture shows its label until the picture has loade
 **Nothing is drawn** for radii other than a border's corners, shadows,
 outlines and focus rings, opacity, filters, blend modes, backdrop effects, transforms other than translation
 (rounded to Cells), icons, videos, web views and native views without a terminal rendering: the
-terminal cannot show them well, so they are left out rather than imitated (the core gives icon-sized images, videos,
+terminal cannot show them well, so they are left out rather than imitated (the core gives icon-sized videos,
 web views, shaders and canvases no Cells; larger videos and web views keep their box, which the painter leaves blank,
 fill included, so the labels around them keep their places; the mounter logs each unsupported kind once). A view that is invisible, concealed (a screen under the top one)
 or nearly transparent (opacity under 0.03) draws nothing. Cells keep the terminal's default foreground and
@@ -560,10 +562,12 @@ own background, so what its children filled stays, and it is at least one step a
 - a selected or current item (a toggle that is on included) is a select band and bold, never the accent; one
   whose every glyph is in a hue of the app's (a pagination's current dot in the accent) is only bold, its color
   telling it apart already; a
-  focused control (a button, a row, a tab) is the accent band, its text in the terminal's background color, bold
+  focused control (a button, a row, a tab) is the accent band (only when the keys moved the focus, as CSS's
+  `:focus-visible`: a control the pointer pressed shows no focus until the next key, a field always does), its text in the terminal's background color, bold
   when it is also selected, so focus is the accent and on or chosen a gray step wherever they meet; a focused
-  container three or more rows tall shows its line in the focus color (without a line, a hover band and an accent
-`▎` rail down its leading column); a focused
+  container three or more rows tall shows its line in the focus color; without a line, one that takes presses (a card
+  that is a button) has an accent `▎` rail down its leading column and no band, and a pane the keys move within (a
+  sidebar's list, an editor) no mark of its own, what is focused in it (its highlighted item, the caret) showing it; a focused
   text field shows its line in the focus color and the caret; one whose box has no room for its line (one row tall)
   is a hover band with an accent underline along its row instead, a step alone being too faint to find; a framed box of any
   size (a one-time code's cell) shows focus with its line alone; a focused control whose Cells are all its
@@ -1218,7 +1222,8 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Borders | Box drawing on each side wider than zero, one Cell, dim (an accent color kept), rounded corners where a radius is set, dashed and dotted lines |
 | Outlines and focus rings | Left out; focus shows as described in "Drawing" |
 | Box shadows | Left out |
-| Images, videos, web views, shaders and canvases | At most 48 × 48 points (icons): left out, laid out as `display: none` by the terminal layout (no Cells, frame or hits, their margins and gaps gone). Larger: images drawn (below), canvases drawn; videos, web views and shaders keep their box blank, so the content around them keeps its place |
+| Images | Every size keeps its box and is drawn (below) |
+| Videos, web views, shaders and canvases | At most 48 × 48 points (icons): left out, laid out as `display: none` by the terminal layout (no Cells, frame or hits, their margins and gaps gone). Larger: canvases drawn; videos, web views and shaders keep their box blank, so the content around them keeps its place |
 | Images | Kitty graphics Unicode placeholders at the terminal's pixels in kitty and Ghostty (24-bit color); elsewhere `▀` half blocks, two pixels a Cell, at 256 colors or more; blank below. Resize modes, `objectPosition` and `tintColor` applied; the first frame of an animation; blur, placeholders and fades left out |
 | Scroll bars | A one-Cell track `│` (dim) and thumb `┃` on the inner edge of an overflowing scroll view, unless hidden |
 | Anchored overlays | Snapped outside the anchor's Cell rect on the core-resolved placement side; cleared and framed, the label as title |

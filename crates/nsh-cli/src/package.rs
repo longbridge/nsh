@@ -299,6 +299,11 @@ pub(crate) struct AndroidConfig {
     /// as it is. Declaring a runtime permission does not grant it.
     #[serde(default)]
     pub(crate) permissions: Vec<String>,
+    /// What the app's window shows from the tap on its icon until its first
+    /// frame, the same keys as `ios.launchScreen`: the window's background
+    /// and, on Android 12+, the splash screen's color and image. Without it
+    /// the platform theme's background and the launcher icon.
+    pub(crate) launch_screen: Option<crate::apple::LaunchScreen>,
 }
 
 impl AndroidConfig {
@@ -956,6 +961,10 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
     warn_ignored(&path, &ignored);
     config.ios.launch_screen = config
         .ios
+        .launch_screen
+        .map(|screen| screen.relative_to(dir));
+    config.android.launch_screen = config
+        .android
         .launch_screen
         .map(|screen| screen.relative_to(dir));
     config.ios.check(ApplePlatform::Ios)?;
@@ -1649,9 +1658,11 @@ fn package_android(
             schemes: &config.schemes,
             rust: built.rust_root,
             dark: config.appearance.as_deref() == Some("dark"),
+            fixed_appearance: matches!(config.appearance.as_deref(), Some("light" | "dark")),
             runtime: &runtime,
             abis: &abis,
             icon: config.android_icon(),
+            launch_screen: config.android.launch_screen.as_ref(),
             assets,
             sounds: android_sounds(config, built),
             signing,

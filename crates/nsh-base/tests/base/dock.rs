@@ -974,9 +974,11 @@ fn Toolbar(props: ToolbarProps) -> impl IntoElement {
 fn start_toolbar(layout: DockAreaLayout, compact: bool) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(1000.0), px(900.0)),
-        ..EngineConfig::new(Root::new::<Toolbar>(move || ToolbarProps {
-            layout: layout.clone(),
-            compact,
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Toolbar>(move || {
+            ToolbarProps {
+                layout: layout.clone(),
+                compact,
+            }
         }))
     };
     config.environment.os = Os::MacOs;

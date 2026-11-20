@@ -478,7 +478,13 @@ The paths below keep their existing behavior:
   method's session is dropped (`discardMarkedText`) and the marked text inserted as its commit would be
   (`commit_marked`), so the change comes before the end. A value
   from JS that arrives during a composition is held and applied when the composition ends, if JS has seen every edit
-  by then, so the input method's session continues undisturbed.
+  by then, so the input method's session continues undisturbed. `maxLength` limits what a composition commits, not
+  what it composes, as in a browser: AppKit asks `should_change` about each change of the marked text, and the
+  editors' `setMarkedText:selectedRange:replacementRange:` marks the input meanwhile (`InputState::marking`), which
+  `should_change` does not clip (clipping it inserted the composition's first letters as text and ended it: pinyin
+  typed past the room left became the text). What it commits is clipped: `insertText:replacementRange:`,
+  `commit_marked` on blur, and `unmarkText` (a return during a composition), which AppKit performs as removing the
+  marked text and inserting it again unmarked.
 - **At the root** (`view.rs` `keyDown:` → `input::key`): the selected text's Cmd+A / Cmd+C / Escape (`text.rs`;
   also the root's `selectAll:` / `copy:` for the menu), going back (`navigation::key_pressed`: Escape, Option+Left,
   Cmd+[), Tab / Shift+Tab into fields and pressable views, and scrolling the scroll view around the focused view or under the mouse:

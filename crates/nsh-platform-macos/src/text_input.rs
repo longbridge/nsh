@@ -325,6 +325,9 @@ pub(crate) struct InputState {
     applying: Cell<bool>,
     /// A clipped insertion (`maxLength`) is being applied.
     clipping: Cell<bool>,
+    /// An input method is setting what it composes (the editor's marked
+    /// text), which `maxLength` leaves whole: it limits what is committed.
+    marking: Cell<bool>,
     /// Focus as last reported.
     focused: Cell<bool>,
     /// Selection as last reported (UTF-16).
@@ -784,20 +787,16 @@ impl Ctx {
         if flattened {
             text = text.replace("\r\n", " ").replace(['\n', '\r'], " ");
         }
-        let max = input.config.borrow().max_length;
-        let fit = match max {
-            Some(max) => {
-                // `maxLength` counts characters: those the edit keeps.
-                let string = text_view.string();
-                let all = string.length();
-                let start = range.location.min(all);
-                let end = range.location.saturating_add(range.length).min(all);
-                let kept = char_len(&input_text(&string, NSRange::new(0, start)))
-                    + char_len(&input_text(&string, NSRange::new(end, all - end)));
-                clip_chars(&text, (max as usize).saturating_sub(kept))
-            }
-            None => &text[..],
+        // A composition is not clipped, as in a browser: clipping it would
+        // insert its first letters as text and end it (pinyin typed past
+        // the room left became the text, and what it was to turn into was
+        // lost). What it commits is clipped.
+        let max = if input.marking.get() {
+            None
+        } else {
+            input.config.borrow().max_length
         };
+        let fit = fitting_text(&text, text_view, range, max);
         if !fit.is_empty() {
             self.key_press(key_of(fit));
         }
@@ -1373,6 +1372,20 @@ define_text_view!(
             }
         }
 
+        /// What an input method composes, which `maxLength` does not clip
+        /// ([`set_marked`]).
+        #[unsafe(method(setMarkedText:selectedRange:replacementRange:))]
+        fn set_marked_text(&self, string: &AnyObject, selected: NSRange, replacement: NSRange) {
+            let input = self.ivars().get().and_then(|cx| cx.input.upgrade());
+            set_marked(input.as_deref(), || {
+                // SAFETY: NSTextView's own method (NSTextInputClient), with
+                // the arguments it was given.
+                let _: () = unsafe {
+                    msg_send![super(self), setMarkedText: string, selectedRange: selected, replacementRange: replacement]
+                };
+            });
+        }
+
         /// Where an input method opens its candidates. TextKit 2 lays out
         /// only the text near the visible part and has no rect for the
         /// rest (a point-wide view, a line per character, soon holds
@@ -1620,6 +1633,20 @@ define_text_view!(
                 // SAFETY: NSTextView's own mouseDown handler on the main thread.
                 let _: () = unsafe { msg_send![super(self), mouseDown: event] };
             }
+        }
+
+        /// What an input method composes, which `maxLength` does not clip
+        /// ([`set_marked`]).
+        #[unsafe(method(setMarkedText:selectedRange:replacementRange:))]
+        fn set_marked_text(&self, string: &AnyObject, selected: NSRange, replacement: NSRange) {
+            let input = field_ctx(self).and_then(|cx| cx.input.upgrade());
+            set_marked(input.as_deref(), || {
+                // SAFETY: NSTextView's own method (NSTextInputClient), with
+                // the arguments it was given.
+                let _: () = unsafe {
+                    msg_send![super(self), setMarkedText: string, selectedRange: selected, replacementRange: replacement]
+                };
+            });
         }
 
         /// A paste (Edit > Paste, Command+V, the context menu): reported,
@@ -2227,6 +2254,7 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
             count: Cell::new(0),
             applying: Cell::new(false),
             clipping: Cell::new(false),
+            marking: Cell::new(false),
             focused: Cell::new(false),
             selection: Cell::new((0, 0)),
             caret: Cell::new(Bounds::default()),
@@ -3426,6 +3454,19 @@ pub(crate) fn blur_all(surface: &Rc<Surface>) {
     }
 }
 
+/// Runs `set`, an input method's `setMarkedText:selectedRange:
+/// replacementRange:` on the editor of `input`, with `input` marking: the
+/// edits it asks for ([`Ctx::should_change`]) are a composition, which
+/// `maxLength` does not clip.
+fn set_marked(input: Option<&InputState>, set: impl FnOnce()) {
+    let Some(input) = input else {
+        return set();
+    };
+    let was = input.marking.replace(true);
+    set();
+    input.marking.set(was);
+}
+
 /// Commits what an input method composes in `view` (its marked text) as
 /// the editor loses the focus, as a browser's blur does: the input method
 /// drops its session and the composed text is inserted as its commit
@@ -3470,6 +3511,58 @@ pub(crate) fn editing_in(root: &NshView) -> bool {
     responder
         .downcast_ref::<NSTextView>()
         .is_some_and(|text| text.isDescendantOf(root))
+}
+
+/// Clips a replacement to the characters left by the selected range.
+fn fitting_text<'a>(
+    text: &'a str,
+    editor: &NSTextView,
+    range: NSRange,
+    max: Option<u32>,
+) -> &'a str {
+    let Some(max) = max else { return text };
+    let string = editor.string();
+    let all = string.length();
+    let start = range.location.min(all);
+    let end = range.location.saturating_add(range.length).min(all);
+    let kept = char_len(&input_text(&string, NSRange::new(0, start)))
+        + char_len(&input_text(&string, NSRange::new(end, all - end)));
+    clip_chars(text, (max as usize).saturating_sub(kept))
+}
+
+/// Inserts the paste an app allowed into the field editor or text area as one undoable edit.
+pub(crate) fn insert_text(view: &NshView, text: &str) {
+    let Some(input) = view.state().input.clone() else {
+        return;
+    };
+    let Some(editor) = input
+        .editor
+        .borrow()
+        .editing()
+        .and_then(|e| e.downcast::<NSTextView>().ok())
+    else {
+        return;
+    };
+    if !editor.isEditable() || editor.hasMarkedText() {
+        return;
+    }
+    let range = editor.selectedRange();
+    let (multiline, max) = {
+        let config = input.config.borrow();
+        (config.multiline, config.max_length)
+    };
+    let text = nsh_core::text_edit::pasted(text, multiline);
+    let replacement = NSString::from_str(fitting_text(&text, &editor, range, max));
+    if replacement.length() == 0 && range.length == 0 {
+        return;
+    }
+    // The edit is already clipped. Keep it out of keyboard handling and
+    // separate from typing on either side in the undo manager.
+    editor.breakUndoCoalescing();
+    input.clipping.set(true);
+    unsafe { editor.insertText_replacementRange(&replacement, range) };
+    input.clipping.set(false);
+    editor.breakUndoCoalescing();
 }
 
 /// `setSelection` (UTF-16 offsets).

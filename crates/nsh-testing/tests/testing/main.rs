@@ -437,7 +437,7 @@ fn a_mouse_drag_selects_in_a_selectable_view() {
     let results = run_file(&run, &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
-    assert_eq!(results.len(), 4);
+    assert_eq!(results.len(), 5);
 }
 
 #[test]
@@ -558,7 +558,7 @@ fn an_app_inserts_the_pastes_it_allows_as_the_user_s_edits() {
     let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
-    assert_eq!(results.len(), 3);
+    assert_eq!(results.len(), 4);
 }
 
 #[test]

@@ -1011,12 +1011,20 @@ Pixel-mode wheel events follow the device's deltas directly, including its inert
 and keyboard commands glide on animation frames. Changing from a glide to direct input continues from the sampled
 position, so an unfinished target cannot cause a catch-up jump.
 
-A smooth scroll of the core's (`scrollTo` with `animated`) in flight moves with a `ScrollBy` (`op_sb` retargets it),
-as the native backends move theirs: setting `scrollTop` would stop the browser's smooth scroll. The user's wheel,
-pointer, touch or key takes it over. The glides of the wheel and the keys are nsh's (`scrollSmoothly`, on animation
-frames), and each frame writes the glide's offset: a `ScrollBy` moves the glide with the content, and `scrollTo` /
-`scrollToEnd` stop it where it is (`stopGlide`) before they scroll, as the native backends interrupt theirs. The
-scroll they stop ends with theirs (the browser's `scrollend`), or at once when they leave the view where it is.
+An animated scroll command of the core's (`scrollTo` or `scrollToEnd` with `animated`) is nsh's own animation
+(`animateScroll`, on animation frames): `SCROLL_MS` eased out cubically, the length and curve the core's
+`scroll::ANIMATION` runs for on the other platforms. The browser's `behavior: "smooth"` is not used for it — over a
+long distance it takes about a second, and it starts over every time a command retargets it, which a list does on
+every commit as it measures the rows the scroll passes, so a jump across unmeasured rows crawled. A command that
+retargets one in flight carries on from where it is, as the core's `animate_to` does, and a `ScrollBy` moves the
+animation with the content (`op_sb`, as `nsh-core`'s `shifted`), so it goes on from the content it was on. The
+scroll ends on the animation's last frame (`ownEnd`); the browser's `scrollend` for the frames it drew is not the
+end, because the scroll is driven here (`drive`). The user's wheel, pointer, touch or key takes it over.
+
+The glides of the wheel and the keys are nsh's too (`scrollSmoothly`, on animation frames), and each frame writes
+the glide's offset: a `ScrollBy` moves the glide with the content, and `scrollTo` / `scrollToEnd` stop it where it
+is (`cancelGlide`) before they scroll, as the native backends interrupt theirs. The scroll a command that does not
+animate stops ends with the browser's `scrollend`, or at once when the command leaves the view where it is.
 The stationary check uses exact clamped offsets: fractional movement can reach another physical pixel. If a
 fractional target instead rounds back to the current offset, a 200 ms quiet-period fallback ends the scroll;
 scroll events postpone it, and the browser's `scrollend` cancels it.

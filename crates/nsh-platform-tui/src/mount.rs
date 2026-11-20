@@ -14,6 +14,10 @@ pub(crate) struct Mounter {
     pub(crate) components: HashMap<String, ComponentFactory>,
     pub(crate) appearance: Option<Appearance>,
     pub(crate) exit: bool,
+    /// The last input was the pointer's (a press): the focus it moved
+    /// to a control shows no mark, as CSS's `:focus-visible`; the next
+    /// key shows it again.
+    pub(crate) pointer_focus: bool,
     /// The app turned the performance line on or off
     /// (`setFpsEnabled`), for the app to apply.
     pub(crate) perf_monitor: Option<bool>,
@@ -25,6 +29,8 @@ pub(crate) struct Mounter {
     pub(crate) pending_modals: Vec<NodeId>,
     pub(crate) back_requests: usize,
     pub(crate) focus_requests: Vec<(NodeId, bool)>,
+    /// The views `ref.clearSelection()` was called on.
+    pub(crate) clear_selection_requests: Vec<NodeId>,
     /// The system dialogs shown (`AlertDialog`), oldest first.
     pub(crate) dialogs: crate::dialog::Dialogs,
     /// The context menu open (`Menu.popup`), and where the pointer last was.
@@ -58,6 +64,7 @@ impl Default for Mounter {
             components: HashMap::new(),
             appearance: None,
             exit: false,
+            pointer_focus: false,
             perf_monitor: None,
             keymap: Default::default(),
             scrolled: Vec::new(),
@@ -67,6 +74,7 @@ impl Default for Mounter {
             pending_modals: Vec::new(),
             back_requests: 0,
             focus_requests: Vec::new(),
+            clear_selection_requests: Vec::new(),
             scroll_bars: Vec::new(),
             text_cells: Vec::new(),
             links: Default::default(),
@@ -96,6 +104,19 @@ impl Mounter {
 
     pub(crate) fn get_mut(&mut self, id: NodeId) -> Option<&mut NshView> {
         self.views.get_mut(id as usize)?.as_mut()
+    }
+
+    /// Whether `id` is `scope` or inside it.
+    pub(crate) fn within(&self, mut id: NodeId, scope: NodeId) -> bool {
+        loop {
+            if id == scope {
+                return true;
+            }
+            match self.get(id).and_then(|v| v.parent) {
+                Some(parent) => id = parent,
+                None => return false,
+            }
+        }
     }
 
     fn children_changed(&mut self, parent: NodeId) {
@@ -136,6 +157,7 @@ impl Mounter {
         self.animator = Default::default();
         self.responder = None;
         self.focus_requests.clear();
+        self.clear_selection_requests.clear();
         self.scroll_bars.clear();
         self.dialogs.clear();
         self.menus.reset();
@@ -318,6 +340,10 @@ impl Mounter {
                     id,
                     command: Command::Blur,
                 } => self.focus_requests.push((id, false)),
+                MountItem::Command {
+                    id,
+                    command: Command::ClearSelection,
+                } => self.clear_selection_requests.push(id),
                 MountItem::TrackStates { id, states } => {
                     if let Some(view) = self.get_mut(id) {
                         view.tracked = states;

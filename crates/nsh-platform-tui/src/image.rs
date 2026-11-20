@@ -679,6 +679,22 @@ pub(crate) fn deliver(
     }
 }
 
+/// Starts the load of image view `id`, not drawn (transparent), for its
+/// box `content`, as [`draw`] does for one drawn.
+pub(crate) fn prepare(
+    image: &mut ImageView,
+    loader: &mut Loader,
+    id: NodeId,
+    content: CellBounds,
+    cells: CellSize,
+) {
+    let cols = content.right - content.left;
+    let rows = content.bottom - content.top;
+    if cols > 0 && rows > 0 {
+        image.request(id, cols, rows, cells, loader);
+    }
+}
+
 /// Draws image view `id` into the `visible` Cells of its content box
 /// `content`, over `ground`, tinted with `tint` (`tintColor`), and starts
 /// its load when it needs one.
