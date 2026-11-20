@@ -97,18 +97,26 @@ as the subsystem: Console shows a connected iPhone's, and
 ## Application events
 
 A standalone app's `UIApplicationDelegate` belongs to NSH. The Rust code of the app's crate or of an
-[nshm](./nshm.md) observes its launch and remote-notification callbacks with
-`nsh_platform_ios::observe_application`, called from the `#[native_module]` entry, which runs on the main thread
-before the app starts:
+[nshm](./nshm.md) receives its launch and remote-notification callbacks with
+`nsh_platform_ios::on_application_event`. Call it once, from the `#[native_module]` entry, which runs on the main
+thread before the app starts; each call adds another handler, so code that runs the entry again (its `registry()`)
+adds it again. The crate depends on `nsh-platform-ios` for iOS only, at the version and from the source of its other
+NSH crates ([Registering from the app's crate](./native-components.md#registering-from-the-apps-crate)):
+
+```toml
+[target.'cfg(target_os = "ios")'.dependencies]
+nsh-platform-ios = { version = "0.6", default-features = false }
+```
 
 ```rust
 #[cfg(target_os = "ios")]
-nsh_platform_ios::observe_application(|event| match event {
+nsh_platform_ios::on_application_event(|event| match event {
     nsh_platform_ios::ApplicationEvent::RegisteredForRemoteNotifications { device_token, .. } => {
         // Hand the token to the push service the app uses.
+        log::info!("device token: {} bytes", device_token.len());
     }
     nsh_platform_ios::ApplicationEvent::RemoteNotification { user_info, completion, .. } => {
-        let payload = user_info.to_json();
+        log::info!("remote notification: {:?}", user_info.to_json());
         // Keep a clone of `completion` across background work, then report how it went.
         completion.set_result(nsh_platform_ios::FetchResult::NewData);
     }
@@ -117,11 +125,12 @@ nsh_platform_ios::observe_application(|event| match event {
 ```
 
 The events are `Launched` (with the launch options), `RegisteredForRemoteNotifications`,
-`FailedToRegisterForRemoteNotifications` and `RemoteNotification`. NSH only passes them on: the observer asks for
+`FailedToRegisterForRemoteNotifications` and `RemoteNotification`. NSH only passes them on: the app's code asks for
 remote notifications itself (`registerForRemoteNotifications`), and the app declares the `aps-environment`
 entitlement and the `remote-notification` background mode it needs in `nsh.json`
-([Info.plist keys and entitlements](./packaging.md#infoplist-keys-and-entitlements)). An app with no observer has a delegate without
-these methods. An app that embeds NSH in its own UIKit app keeps its own delegate and receives them there.
+([Info.plist keys and entitlements](./packaging.md#infoplist-keys-and-entitlements)). An app with no handler has a
+delegate without these methods. An app that embeds NSH in its own UIKit app keeps its own delegate and receives them
+there.
 
 ## Embedding in an iOS app
 

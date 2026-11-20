@@ -87,16 +87,24 @@ nsh package --target ios --sign "Apple Distribution: Example Inc (ABCDE12345)" -
 ## 应用事件
 
 独立应用的 `UIApplicationDelegate` 归 NSH 所有。应用 crate 或 [nshm](./nshm.md) 的 Rust 代码用
-`nsh_platform_ios::observe_application` 观察它的启动和远程通知回调，在 `#[native_module]` 入口里调用：入口在主线程上、应用启动前执行。
+`nsh_platform_ios::on_application_event` 接收它的启动和远程通知回调。在 `#[native_module]` 入口里调用一次：入口在主线程上、应用启动前执行；
+每次调用都会再添加一个处理函数，所以重新运行入口的代码（它的 `registry()`）会重复添加。crate 只在 iOS 上依赖 `nsh-platform-ios`，
+版本和来源与它的其他 NSH crate 一致（[从应用的 crate 注册](./native-components.md#从应用的-crate-注册)）：
+
+```toml
+[target.'cfg(target_os = "ios")'.dependencies]
+nsh-platform-ios = { version = "0.6", default-features = false }
+```
 
 ```rust
 #[cfg(target_os = "ios")]
-nsh_platform_ios::observe_application(|event| match event {
+nsh_platform_ios::on_application_event(|event| match event {
     nsh_platform_ios::ApplicationEvent::RegisteredForRemoteNotifications { device_token, .. } => {
         // 把 token 交给应用使用的推送服务。
+        log::info!("device token: {} bytes", device_token.len());
     }
     nsh_platform_ios::ApplicationEvent::RemoteNotification { user_info, completion, .. } => {
-        let payload = user_info.to_json();
+        log::info!("remote notification: {:?}", user_info.to_json());
         // 后台工作期间保留一份 `completion` 的克隆，完成后报告结果。
         completion.set_result(nsh_platform_ios::FetchResult::NewData);
     }
@@ -105,10 +113,10 @@ nsh_platform_ios::observe_application(|event| match event {
 ```
 
 事件有 `Launched`（带启动选项）、`RegisteredForRemoteNotifications`、`FailedToRegisterForRemoteNotifications` 和
-`RemoteNotification`。NSH 只负责转交：申请远程通知（`registerForRemoteNotifications`）由观察者自己调用，应用自己声明需要的
+`RemoteNotification`。NSH 只负责转交：申请远程通知（`registerForRemoteNotifications`）由应用自己的代码调用，应用需要的
 `aps-environment` entitlement 和 `remote-notification` 后台模式写在 `nsh.json` 里
-（[Info.plist 键与 entitlements](./packaging.md#infoplist-键与-entitlements)）。没有观察者的应用，其 delegate 不实现这些方法。把 NSH 嵌入自己 UIKit
-应用的应用保留自己的 delegate，在那里接收这些回调。
+（[Info.plist 键与 entitlements](./packaging.md#infoplist-键与-entitlements)）。没有处理函数的应用，其 delegate 不实现这些方法。
+把 NSH 嵌入自己 UIKit 应用的应用保留自己的 delegate，在那里接收这些回调。
 
 ## 嵌入 iOS 应用
 

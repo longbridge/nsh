@@ -329,7 +329,7 @@ fn hide_title(scene: &UIWindowScene) {
 ///
 /// Must be called on the main thread, before any other UIKit use. The
 /// application delegate's callbacks reach the observers added before it
-/// ([`crate::observe_application`]).
+/// ([`crate::on_application_event`]).
 pub fn run_app(source: AppSource, options: AppOptions) -> ! {
     let mtm = MainThreadMarker::new().expect("run_app must be called on the main thread");
     *LAUNCH.lock().expect("launch lock") = Some((source, options));

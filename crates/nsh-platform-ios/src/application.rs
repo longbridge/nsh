@@ -1,5 +1,5 @@
 //! What UIKit tells a standalone app's delegate, delivered to observers
-//! that an app's crate or an nshm registers ([`observe_application`]).
+//! that an app's crate or an nshm registers ([`on_application_event`]).
 //!
 //! The application delegate belongs to the backend ([`crate::run_app`]),
 //! so code outside NSH has no other place to receive these callbacks. NSH
@@ -34,7 +34,7 @@ use objc2_ui_kit::{UIApplication, UIBackgroundFetchResult, UIResponder};
 
 use crate::app::AppDelegate;
 
-/// A callback of the application delegate ([`observe_application`]).
+/// A callback of the application delegate ([`on_application_event`]).
 ///
 /// Delivered on the main thread, in the order UIKit calls the delegate.
 #[derive(Debug)]
@@ -175,9 +175,12 @@ impl FetchResult {
 #[derive(Clone)]
 pub struct FetchCompletion(Arc<Fetch>);
 
+/// UIKit's fetch completion handler.
+type FetchHandler = RcBlock<dyn Fn(UIBackgroundFetchResult)>;
+
 struct Fetch {
     result: Mutex<FetchResult>,
-    handler: Option<MainThreadBound<RcBlock<dyn Fn(UIBackgroundFetchResult)>>>,
+    handler: Option<MainThreadBound<FetchHandler>>,
 }
 
 impl FetchCompletion {
@@ -242,17 +245,19 @@ thread_local! {
 /// ([`ApplicationEvent`]) of a standalone app ([`crate::run_app`]).
 ///
 /// Call it on the main thread before [`crate::run_app`], as the
-/// `#[native_module]` entry of an app's crate or an nshm runs. Once the app
-/// runs, it decides whether its delegate implements these methods: an
-/// observer added later sees events only if one was added before. An app
+/// `#[native_module]` entry of an app's crate or an nshm runs, once: every
+/// call adds another observer, so running the entry again (its
+/// `registry()`) delivers each event twice. Once the app runs, it decides
+/// whether its delegate implements these methods: an observer added later
+/// sees events only if one was added before. An app
 /// that embeds NSH in its own UIKit app has its own delegate and does not
 /// need this.
 ///
 /// # Panics
 ///
 /// Off the main thread.
-pub fn observe_application(observer: impl Fn(&ApplicationEvent<'_>) + 'static) {
-    MainThreadMarker::new().expect("observe_application must be called on the main thread");
+pub fn on_application_event(observer: impl Fn(&ApplicationEvent<'_>) + 'static) {
+    MainThreadMarker::new().expect("on_application_event must be called on the main thread");
     if LAUNCHED.get() == Some(false) {
         log::warn!(
             "application observer added after the app launched without one: it sees no events"
@@ -355,6 +360,29 @@ mod tests {
         let dictionary = NSDictionary::<NSString, AnyObject>::from_retained_objects(&keys, &values);
         // SAFETY: an `NSDictionary` of any keys and values.
         unsafe { Retained::cast_unchecked(dictionary) }
+    }
+
+    /// Without observers the app's delegate does not implement the observed
+    /// methods, so the system does not see it handle remote notifications.
+    #[test]
+    fn the_delegate_implements_the_callbacks_only_when_observed() {
+        for sel in [
+            objc2::sel!(application:didFinishLaunchingWithOptions:),
+            objc2::sel!(application:didRegisterForRemoteNotificationsWithDeviceToken:),
+            objc2::sel!(application:didFailToRegisterForRemoteNotificationsWithError:),
+            objc2::sel!(application:didReceiveRemoteNotification:fetchCompletionHandler:),
+        ] {
+            assert!(
+                AppDelegate::class().instance_method(sel).is_none(),
+                "{sel:?}"
+            );
+            assert!(
+                ObservedAppDelegate::class().instance_method(sel).is_some(),
+                "{sel:?}"
+            );
+        }
+        // No observer on this thread.
+        assert!(std::ptr::eq(delegate_class(), AppDelegate::class()));
     }
 
     /// Several observers' results combine into the most significant one.

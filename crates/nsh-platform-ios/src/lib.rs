@@ -204,7 +204,7 @@ fn default_ui_sets() -> Vec<nsh_core::element::Registry> {
 pub use crate::{
     app::{AppOptions, AppSource, in_app_bundle, run_app},
     application::{
-        ApplicationEvent, FetchCompletion, FetchResult, NativeDictionary, observe_application,
+        ApplicationEvent, FetchCompletion, FetchResult, NativeDictionary, on_application_event,
     },
     component::{ComponentContext, ComponentFactory, Components, NativeComponent},
     image::AssetBase,
