@@ -1040,6 +1040,19 @@ impl AttributedText {
         Some(out)
     }
 
+    /// Whether the two texts have the same metadata: what
+    /// [`Self::rendering_eq`] leaves out (test ids, copy texts).
+    pub(crate) fn metadata_eq(&self, other: &Self) -> bool {
+        self.test_ids == other.test_ids && self.copy_texts == other.copy_texts
+    }
+
+    /// Takes `other`'s metadata ([`Self::metadata_eq`]), keeping what is
+    /// drawn: a fitted text's scaled spans mounted again with new metadata.
+    pub(crate) fn set_metadata(&mut self, other: &Self) {
+        self.test_ids = other.test_ids.clone();
+        self.copy_texts = other.copy_texts.clone();
+    }
+
     /// Equality of the content the platform draws, excluding metadata (test ids, copy texts).
     pub(crate) fn rendering_eq(&self, other: &Self) -> bool {
         // Enumerating the fields makes additions revisit this comparison.
@@ -1057,6 +1070,7 @@ impl AttributedText {
             selectable,
             selection_color,
             attachments,
+            // Metadata: `metadata_eq` and `set_metadata` take these.
             test_ids: _,
             copy_texts: _,
         } = self;

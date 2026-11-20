@@ -1205,8 +1205,17 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 Some(c) => out.str(&css_color(c)),
                 None => out.raw("null"),
             };
-            let copies = !text.copy_texts.is_empty();
-            if !layout.backgrounds.is_empty() || !text.links.is_empty() || copies {
+            // What attachments copy as, where the copy puts them among the
+            // runs (which hold no attachments): hidden ones and ones cut off
+            // copy as nothing.
+            let copies: Vec<_> = text
+                .copy_texts
+                .iter()
+                .filter(|copy| !text.hidden_at(copy.index))
+                .filter_map(|copy| Some((copy, layout.attachment_place(copy.index)?)))
+                .collect();
+            let copies_sent = !copies.is_empty();
+            if !layout.backgrounds.is_empty() || !text.links.is_empty() || copies_sent {
                 // Span backgrounds: `[x, y, width, height, radius, color]`.
                 out.s.push_str(",[");
                 for (i, b) in layout.backgrounds.iter().enumerate() {
@@ -1223,7 +1232,7 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 }
                 out.s.push(']');
             }
-            if !text.links.is_empty() || copies {
+            if !text.links.is_empty() || copies_sent {
                 // Links, as runs name them: `[node, events]`.
                 out.s.push_str(",[");
                 for (i, link) in text.links.iter().enumerate() {
@@ -1236,16 +1245,18 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 }
                 out.s.push(']');
             }
-            if copies {
-                // What attachments copy as: `[offset, text]`.
+            if copies_sent {
+                // `[offset, text, run, before]`: the copy text goes after
+                // that run's characters (before its line's break), or
+                // before them (`before` 1).
                 out.s.push_str(",[");
-                for (i, copy) in text.copy_texts.iter().enumerate() {
+                for (i, (copy, (run, before))) in copies.iter().enumerate() {
                     if i > 0 {
                         out.s.push(',');
                     }
                     let _ = write!(out.s, "[{},", copy.index);
                     push_str(&mut out.s, &copy.text);
-                    out.s.push(']');
+                    let _ = write!(out.s, ",{run},{}]", u8::from(*before));
                 }
                 out.s.push(']');
             }

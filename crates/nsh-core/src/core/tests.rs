@@ -887,6 +887,91 @@ fn an_attachments_copy_text_is_copied_in_its_place() {
 }
 
 #[test]
+fn a_fitted_texts_new_copy_text_is_mounted() {
+    // A text fitted to its box mounts its laid out (scaled) text again for
+    // new metadata: the new copy texts come with it.
+    let mut c = core();
+    let insert = |parent, child| Op::Insert {
+        parent,
+        child,
+        before: None,
+    };
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Text,
+            },
+            style_op(
+                2,
+                &[
+                    ("width", StyleValue::Number(30.0)),
+                    ("height", StyleValue::Number(16.0)),
+                    ("fontSize", StyleValue::Number(20.0)),
+                ],
+            ),
+            Op::SetProp {
+                id: 2,
+                prop: Prop::AdjustsFontSizeToFit(true),
+            },
+            Op::CreateText {
+                id: 3,
+                text: "long enough to shrink ".into(),
+            },
+            Op::Create {
+                id: 4,
+                tag: Tag::View,
+            },
+            style_op(
+                4,
+                &[
+                    ("width", StyleValue::Number(20.0)),
+                    ("height", StyleValue::Number(10.0)),
+                ],
+            ),
+            Op::SetProp {
+                id: 4,
+                prop: Prop::CopyText(Some("$x$".into())),
+            },
+            insert(2, 3),
+            insert(2, 4),
+            insert(ROOT_ID, 2),
+        ],
+    );
+    let text_of = |c: &mut Core<_>| {
+        c.commit().unwrap().items.into_iter().find_map(|i| match i {
+            MountItem::Text { id: 2, text, .. } => Some(text),
+            _ => None,
+        })
+    };
+    let text = text_of(&mut c).unwrap();
+    assert!(
+        text.spans[0].style.font_size < Points(20.0),
+        "the text is fitted"
+    );
+    assert_eq!(
+        text.copied_text(0..text.len_utf16()),
+        "long enough to shrink $x$"
+    );
+    let layouts = c.text_engine.layouts.get();
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 4,
+            prop: Prop::CopyText(Some("$y$".into())),
+        }],
+    );
+    let text = text_of(&mut c).expect("mounted again");
+    assert_eq!(
+        text.copied_text(0..text.len_utf16()),
+        "long enough to shrink $y$"
+    );
+    assert!(text.spans[0].style.font_size < Points(20.0));
+    assert_eq!(c.text_engine.layouts.get(), layouts);
+}
+
+#[test]
 fn text_update_emits_only_text_and_frames() {
     let mut c = core();
     apply(
