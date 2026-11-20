@@ -99,6 +99,9 @@ pub(crate) struct AppWindow {
     scale: Cell<f32>,
     /// A `WM_PAINT` is asked for.
     invalid: Cell<bool>,
+    /// It was sized and placed as the app opened it ([`place`]): until
+    /// then its size is the system's default, which is reported to nobody.
+    positioned: Cell<bool>,
     /// The size last reported to the core.
     reported: Cell<Option<Size<Points>>>,
     /// It was shown once (its first frame drawn).
@@ -343,6 +346,7 @@ fn open(surface: &Rc<Surface>, view: &NshView, open: &OpenWindow) {
         pixels: Cell::new((0, 0)),
         scale: Cell::new(1.0),
         invalid: Cell::new(false),
+        positioned: Cell::new(false),
         reported: Cell::new(None),
         opened: Cell::new(false),
         closed: Cell::new(false),
@@ -358,6 +362,7 @@ fn open(surface: &Rc<Surface>, view: &NshView, open: &OpenWindow) {
     surface.windows.borrow_mut().push(window.clone());
     crate::shell::sync(surface, hwnd, None, resolved);
     place(&window, open);
+    window.positioned.set(true);
     hold_owner(&window);
     resized(surface, &window);
     // Shown once the engine has laid out and drawn what it shows: after
@@ -533,6 +538,12 @@ fn fill_background(surface: &Surface, id: NodeId, hwnd: HWND) {
 /// The window's client area was resized or moved to another scale: the
 /// root view takes its size, which the core lays the root out at.
 fn resized(surface: &Surface, window: &AppWindow) {
+    // Made at the system's default size (`CW_USEDEFAULT`, most of the
+    // screen), which its styles report before it is placed: the app would
+    // lay itself out for a window nobody sees.
+    if !window.positioned.get() {
+        return;
+    }
     let mut rect = RECT::default();
     // SAFETY: plain call with a local out value.
     let _ = unsafe { GetClientRect(window.hwnd, &mut rect) };
