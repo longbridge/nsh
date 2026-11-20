@@ -27,7 +27,8 @@ nsh run --target android               # a Rust app
 nsh run App.tsx --target android       # a TSX app
 ```
 
-Start an emulator or connect a device first (`adb devices` lists them; NSH uses the first one). For a Rust app, `nsh`
+Start an emulator or connect a device first (`adb devices` lists them). NSH uses the one `--device <serial>` or
+`ANDROID_SERIAL` names, else the first one, and names the one it uses when several are connected. For a Rust app, `nsh`
 builds the app's `libnsh.so` with your crate, installs the APK and starts it; a change to the crate's Rust code builds
 and installs it again. For a TSX app, it installs a development host APK (rebuilt only when the runtime changes) and
 forwards the dev server's port with `adb reverse`, so it works over USB without a shared network; the app updates as

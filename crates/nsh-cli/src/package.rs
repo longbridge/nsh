@@ -710,6 +710,10 @@ pub(crate) struct PackageOptions<'a> {
     /// (Linux, macOS, Windows: launch it; the web: serve it and open it in
     /// the browser).
     pub(crate) run: bool,
+    /// With `run`: the simulator (name or UDID, `ios-simulator`) or the
+    /// Android device (serial) to run in; `None`: the default one
+    /// ([`crate::run::simulator`], [`crate::android::device`]).
+    pub(crate) device: Option<&'a str>,
     /// The web: the URL the site's files are served from (`--asset-url`).
     pub(crate) asset_url: Option<&'a str>,
     /// A development build for `nsh run`. Android: the APK is debuggable,
@@ -1259,6 +1263,17 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     if options.arch.is_some() && options.target != PackageTarget::Macos {
         bail!("--arch only applies to --target macos");
     }
+    if options.device.is_some() {
+        if !matches!(
+            options.target,
+            PackageTarget::IosSimulator | PackageTarget::Android
+        ) {
+            bail!("--device only applies to --target ios-simulator or android");
+        }
+        if !options.run {
+            bail!("--device is where --run installs the app: add --run");
+        }
+    }
     if options.format != crate::android::Format::Apk {
         if options.target != PackageTarget::Android {
             bail!("--format only applies to --target android");
@@ -1468,7 +1483,8 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
             codesign(&app, "-", path.as_deref())?;
             ui::done(format!("packaged {}", ui::path(&app)));
             if options.run {
-                let udid = crate::run::simulator(None, crate::run::SimulatorWindow::Front)?;
+                let udid =
+                    crate::run::simulator(options.device, crate::run::SimulatorWindow::Front)?;
                 let step = ui::Step::start(format!("installing {id} in the simulator"));
                 crate::run::simctl(&["install", &udid, &app.to_string_lossy()])?;
                 crate::run::simctl_with_env(
@@ -1569,7 +1585,7 @@ fn package_android(
     use crate::android::{self, Apk, Signing};
     let sdk = android::Sdk::find()?;
     let serial = if options.run {
-        Some(android::device(&sdk)?)
+        Some(android::device(&sdk, options.device)?)
     } else {
         None
     };
@@ -2911,6 +2927,7 @@ mod tests {
                 format: crate::android::Format::Apk,
                 arch: Some(Arch::X86_64),
                 run: false,
+                device: None,
                 asset_url: None,
                 development: false,
             })
@@ -2918,6 +2935,49 @@ mod tests {
             assert_eq!(
                 error.to_string(),
                 "--arch only applies to --target macos",
+                "{target:?}"
+            );
+        }
+    }
+
+    /// `--device` names where `--run` installs the app: a simulator or an
+    /// Android device. Other targets, and a package not run, refuse it
+    /// before anything is built.
+    #[test]
+    fn only_runs_on_a_simulator_or_android_device_take_a_device() {
+        let options = |target, run| PackageOptions {
+            entry: Path::new("App.tsx"),
+            target,
+            out: Path::new(".nsh/out"),
+            config: AppConfig::default(),
+            sign: None,
+            profile: None,
+            keystore: None,
+            abis: &[],
+            format: crate::android::Format::Apk,
+            arch: None,
+            run,
+            device: Some("emulator-5554"),
+            asset_url: None,
+            development: false,
+        };
+        for target in [
+            PackageTarget::Macos,
+            PackageTarget::Linux,
+            PackageTarget::Windows,
+            PackageTarget::Ios,
+            PackageTarget::Web,
+        ] {
+            assert_eq!(
+                package(options(target, true)).unwrap_err().to_string(),
+                "--device only applies to --target ios-simulator or android",
+                "{target:?}"
+            );
+        }
+        for target in [PackageTarget::IosSimulator, PackageTarget::Android] {
+            assert_eq!(
+                package(options(target, false)).unwrap_err().to_string(),
+                "--device is where --run installs the app: add --run",
                 "{target:?}"
             );
         }

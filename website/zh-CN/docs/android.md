@@ -26,7 +26,8 @@ nsh run --target android               # Rust 应用
 nsh run App.tsx --target android       # TSX 应用
 ```
 
-先启动模拟器或连接设备（`adb devices` 会列出它们；NSH 使用第一个）。对 Rust 应用，`nsh` 用你的 crate 构建应用的 `libnsh.so`，
+先启动模拟器或连接设备（`adb devices` 会列出它们）。NSH 使用 `--device <serial>` 或 `ANDROID_SERIAL` 指定的那台，否则使用第一台；
+连着多台时会提示用的是哪一台。对 Rust 应用，`nsh` 用你的 crate 构建应用的 `libnsh.so`，
 安装 APK 并启动它；修改 crate 的 Rust 代码会重新构建并安装。对 TSX 应用，`nsh` 会安装一个开发宿主 APK（只在运行时变化时重新构建），并通过
 `adb reverse` 转发开发服务器的端口，因此通过 USB 即可工作，无需共享网络；你保存时应用会更新，日志显示在终端中。
 

@@ -123,6 +123,44 @@ pub(crate) enum Named {
     Ref(RefTarget),
 }
 
+/// A Rust ref, as the element carrying it (a component's prop that names
+/// an element, set from Rust: `Some(error_line)`).
+impl From<ElementRef> for Option<ElementTarget> {
+    fn from(element: ElementRef) -> Self {
+        element.element_target()
+    }
+}
+
+/// `ViewRef`: a node JS passes (a `ref`), as a component's prop that names
+/// an element.
+impl super::JsValue for ElementTarget {
+    fn ts_type(_types: &mut super::TsTypes) -> String {
+        "ViewRef".into()
+    }
+
+    fn from_js(value: super::JsIn<'_>) -> Result<Self, super::PropError> {
+        value
+            .host()
+            .node(value.raw())
+            .map(Self::of_node)
+            .ok_or_else(|| value.expected("a node"))
+    }
+
+    /// The node's JS object (`null` while none carries it).
+    fn to_js<'a>(
+        &self,
+        host: &'a dyn super::JsHost,
+    ) -> Result<super::JsOwned<'a>, super::PropError> {
+        Ok(super::JsOwned::new(
+            host,
+            match self.node() {
+                Some(node) => host.node_value(node),
+                None => host.null(),
+            },
+        ))
+    }
+}
+
 impl ElementTarget {
     /// Node `node` (JS's ref).
     pub(crate) fn of_node(node: NodeId) -> Self {

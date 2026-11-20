@@ -75,6 +75,14 @@ or the tray; an animation's `start` rejects its promise; a canvas call ignores i
 holds up to as many screens: `push` beyond that throws a `RangeError`. Children, submenus and styles nested more than
 64 levels deep throw a `TypeError`. A `<List>`'s `each` takes any number of rows.
 
+**Views nest up to 1024 levels deep, in every app.** Layout and mounting walk the tree in native code, level by level,
+where the interpreter's stack limit does not reach. An app that nests views deeper is stopped, as it is when it goes
+over a quota:
+
+```text
+the app nested views more than 1024 deep and was stopped
+```
+
 > [!TIP]
 > These limits are generous for normal apps. If you hit the 2 s call budget, the work is too long for one event
 > anyway: it would freeze the app's updates for that long. Split it with `setTimeout`, or move it out of the event
