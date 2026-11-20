@@ -23,7 +23,7 @@
 use std::cell::{Cell, RefCell};
 
 use nsh_core::{
-    NodeId, PanActivation, Points, TouchEvent, TouchPhase, TouchPoint, geometry::point,
+    NodeId, PanActivation, Point, Points, TouchEvent, TouchPhase, TouchPoint, geometry::point,
 };
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send, rc::Retained,
@@ -285,7 +285,7 @@ pub(crate) struct GateIvars {
     /// The finger the gate follows and where it went down (window points).
     finger: RefCell<Option<(Retained<UITouch>, CGPoint)>>,
     /// The finger's offset from there at its last move.
-    judged: Cell<(f64, f64)>,
+    judged: Cell<Point<Points>>,
 }
 
 define_class!(
@@ -309,7 +309,7 @@ define_class!(
             {
                 let at = touch.locationInView(None);
                 *finger = Some((touch.retain(), at));
-                self.ivars().judged.set((0.0, 0.0));
+                self.ivars().judged.set(Point::default());
             }
         }
 
@@ -327,9 +327,11 @@ define_class!(
                 return;
             };
             let at = touch.locationInView(None);
-            let to = (at.x - start.x, at.y - start.y);
+            // Judged along the line from the last move: one move of a
+            // diagonal can pass both offsets.
+            let to = point(Points((at.x - start.x) as f32), Points((at.y - start.y) as f32));
             let from = self.ivars().judged.replace(to);
-            match decide_along(self.ivars().activation.get(), from, to) {
+            match self.ivars().activation.get().decide_move(from, to) {
                 Some(true) => {
                     self.set_state(UIGestureRecognizerState::Began);
                     self.report_activation(touch.timestamp());
@@ -379,7 +381,7 @@ impl PanGate {
         let this = Self::alloc(mtm).set_ivars(GateIvars {
             activation: Cell::new(activation),
             finger: RefCell::new(None),
-            judged: Cell::new((0.0, 0.0)),
+            judged: Cell::new(Point::default()),
         });
         // SAFETY: the designated initializer, without an action.
         let this: Retained<Self> = unsafe {
@@ -473,25 +475,6 @@ impl PanGate {
     }
 }
 
-/// The gate's decision on a move of the finger from offset `from` to `to`
-/// (points from where it went down), judged along the straight line
-/// between them a point at a time: the offset the finger passed first
-/// decides even when one move passes both. UIKit delivers moves several
-/// points apart (a synthesized swipe's are 10 apart), and a mostly
-/// sideways diagonal passes `activeOffsetX: 10` and `failOffsetY: 10`
-/// within one such move.
-fn decide_along(activation: PanActivation, from: (f64, f64), to: (f64, f64)) -> Option<bool> {
-    let (mx, my) = (to.0 - from.0, to.1 - from.1);
-    let steps = mx.hypot(my).ceil().max(1.0) as u32;
-    (1..=steps).find_map(|i| {
-        let t = f64::from(i) / f64::from(steps);
-        activation.decide(
-            Points((from.0 + mx * t) as f32),
-            Points((from.1 + my * t) as f32),
-        )
-    })
-}
-
 /// Whether `scroll` scrolls, or bounces, horizontally (else vertically).
 fn scrolls_along(scroll: &UIScrollView, horizontal: bool) -> bool {
     let (bounds, content, inset) = (
@@ -517,29 +500,4 @@ fn tilt(altitude: f64, azimuth: f64) -> (f32, f32) {
     let x = (azimuth.cos() / t).atan().to_degrees();
     let y = (azimuth.sin() / t).atan().to_degrees();
     (x as f32, y as f32)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use nsh_core::geometry::px;
-
-    const SIDEWAYS: PanActivation = PanActivation::horizontal(px(10.0), px(10.0));
-
-    #[test]
-    fn a_move_past_both_offsets_goes_to_the_one_passed_first() {
-        // 1.5 across for 1 down: x passes 10 at y = 6.7.
-        assert_eq!(decide_along(SIDEWAYS, (0.0, 0.0), (-16.6, -11.1)), Some(true));
-        // 1 across for 1.5 down: y passes 10 first.
-        assert_eq!(decide_along(SIDEWAYS, (0.0, 0.0), (-11.1, 16.6)), Some(false));
-    }
-
-    #[test]
-    fn small_moves_decide_as_the_core_does() {
-        assert_eq!(decide_along(SIDEWAYS, (0.0, 0.0), (8.0, 0.0)), None);
-        assert_eq!(decide_along(SIDEWAYS, (8.0, 0.0), (10.5, 1.0)), Some(true));
-        assert_eq!(decide_along(SIDEWAYS, (0.0, 9.0), (2.0, 10.5)), Some(false));
-        // A finger that came back stays undecided.
-        assert_eq!(decide_along(SIDEWAYS, (8.0, 0.0), (0.0, 0.0)), None);
-    }
 }
