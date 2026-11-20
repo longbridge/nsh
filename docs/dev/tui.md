@@ -610,8 +610,8 @@ its frame shows (a popover by the screen's edge); a box across the whole screen 
 tall) stays docked to the edge it is flush with, its frame's side there off the screen (`Core::framed_within`). A
 dropdown's list (a select's, a combobox's, a date picker's calendar: `popup::dropdown`) is at least as wide as its
 trigger less two Cells, so its frame, lines included, runs from the trigger's first column to its last, whichever edge the
-app aligns it on. A word behind the box that it or its frame cuts is
-left out whole, no half of it glued to the frame; a run longer than 12 Cells (a URL, a path) keeps the part that
+app aligns it on. A word behind the box that it or its frame cuts, or that touches
+its line, is left out whole, no half of it glued to the frame (a word a blank Cell or a line away stays); a run longer than 12 Cells (a URL, a path) keeps the part that
 shows, ending in `…` by the frame. A fill the frame cuts goes with its words the same way when it is one row of a
 band of its own up to 12 Cells past the frame (a badge, a chip); a taller band (a panel's) goes on past it. A modal shows the page behind it as it is: a terminal
 has no scrim, so nothing is faded or dimmed, and the app's backdrop (a translucent fill of a modal's layer across

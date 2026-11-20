@@ -846,9 +846,13 @@ impl Painter<'_> {
                 }
             };
             for y in rows.filter(|_| outer) {
-                // The frame's Cell, else the one beyond it (a word touching
-                // the frame).
-                for (frame, step) in [(left - 1, -1), (right, 1)] {
+                // The frame's Cell (drawn a Cell around the box, else the
+                // box's own line, cleared above), else the one beyond it (a
+                // word touching the frame). Never further out: a word a
+                // blank column keeps from a box with lines of its own (a
+                // menu's shortcut beside its open submenu) is not cut.
+                let out = i32::from(around);
+                for (frame, step) in [(left - out, -1), (right - 1 + out, 1)] {
                     let start = match word(self.buffer, &self.text_cells, frame, y) {
                         true => frame,
                         false => frame + step,
