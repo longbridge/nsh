@@ -2119,7 +2119,12 @@ impl Agent {
             // end) less a tenth, a tenth at least.
             let toward = if distance > 0.0 { along } else { 1.0 - along };
             let room = extent * (toward - 0.1).max(0.1);
-            let step = distance.clamp(-room, room);
+            let mut step = distance.clamp(-room, room);
+            // Do not cross the content's edge within this gesture either:
+            // its remainder can pull a sheet down or start a refresh.
+            if let Some((start, end)) = self.native.scroll_room(scroll, horizontal) {
+                step = step.clamp(-start.0, end.0);
+            }
             let delta = if horizontal {
                 Point::new(Points(step), Points(0.0))
             } else {
