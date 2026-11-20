@@ -3364,6 +3364,7 @@
 		"ios",
 		"android",
 		"macos",
+		"windows",
 		"desktop",
 		"web"
 	]);
@@ -3424,6 +3425,15 @@
 					name,
 					args
 				}
+			]);
+		};
+		prototype.animateLayout = function(transition) {
+			const id = values.nodeIds.get(this);
+			if (id === void 0) throw new TypeError("nsh: not a node");
+			return call(314, [
+				id,
+				"layoutAnimation",
+				{ update: Object(transition) === transition ? transition : {} }
 			]);
 		};
 		prototype.scrollToOffset = function(options) {
@@ -3526,11 +3536,12 @@
 			const previous = heldProps.get(node)?.get(name);
 			hold(node, name, value);
 			if (!(name === "desktop" ? platform?.desktop : name === platform?.os)) return;
+			const set = (key, value) => prop(node, name === "windows" ? `windows.${key}` : key, value);
 			const next = value !== null && typeof value === "object" ? value : {};
 			if (previous !== null && typeof previous === "object") {
-				for (const key of Object.keys(previous)) if (!Object.hasOwn(next, key)) prop(node, key, void 0);
+				for (const key of Object.keys(previous)) if (!Object.hasOwn(next, key)) set(key, void 0);
 			}
-			for (const key of Object.keys(next)) prop(node, key, next[key]);
+			for (const key of Object.keys(next)) set(key, next[key]);
 		};
 		const dynamic = (value, depth = 0) => typeof value === "function" || depth < 64 && Array.isArray(value) && value.some((item) => dynamic(item, depth + 1));
 		const itemMemo = (fn) => reactive.computed(() => {
@@ -6319,42 +6330,28 @@
 			if (process.default) process.default.nextTick = nsh.nextTick;
 		}
 		const desktop = modules.exports.get("nsh/desktop");
-		const main = Object.freeze({
-			id: "main",
-			main: true,
-			parent: null,
-			state: () => null,
-			titleBar: env.titleBar,
-			set(attributes) {
-				if (typeof attributes?.title === "string") page.setWindowTitle?.(attributes.title);
-			},
-			show() {},
-			hide() {},
-			focus() {},
-			close() {},
-			minimize() {},
-			restore() {},
-			setMode() {},
-			setBounds() {},
-			setPlacement() {},
-			center() {},
-			requestAttention() {},
-			on: () => () => {}
-		});
-		const Window = Object.assign(() => null, {
+		const windowOpen = (props) => {
+			const open = props.open;
+			return open === void 0 || open === null ? props.defaultOpen !== false : Boolean(open);
+		};
+		const Window = Object.assign((props) => () => windowOpen(props) ? props.children : null, {
 			open() {
 				const error = /* @__PURE__ */ new Error("Window.open: windows of the app's own open on the desktops (`isAvailable`)");
 				error.code = "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM";
 				throw error;
 			},
-			get: (id) => id === "main" ? main : null
+			get: () => null
 		});
 		if (desktop) Object.assign(desktop, {
 			isAvailable: false,
 			titleBar: env.titleBar,
 			Window,
-			currentWindow: () => main,
-			windows: () => [main],
+			currentWindow() {
+				const error = /* @__PURE__ */ new Error("currentWindow(): there is no window here: on iOS, Android, the web and the terminal a <Window> renders its content in the app's one surface");
+				error.code = "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM";
+				throw error;
+			},
+			windows: () => [],
 			focusedWindow: () => null,
 			windowState: () => null,
 			displays: () => [],

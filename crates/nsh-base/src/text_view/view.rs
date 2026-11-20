@@ -1338,7 +1338,9 @@ impl Cx {
                 .text_color(move || theme().border)
                 .into_element()
         };
-        let bar = |glyph: &'static str| text(glyph).flex_none().text_color(move || theme().border);
+        // A side as tall as its row: cells that wrap keep it on every line.
+        let bar =
+            |glyph: &'static str| crate::terminal::glyph_column(glyph, move || theme().border);
         let last_row = table.rows.len();
         let mut lines = vec![ruled(['┌', '┬', '┐'])];
         let rows = std::iter::once(&table.head).chain(&table.rows);

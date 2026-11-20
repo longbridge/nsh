@@ -96,6 +96,7 @@ pub fn App() -> impl IntoElement {
 ```tsx tabs
 import { mount, signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 function App() {
   const name = signal("");
@@ -112,7 +113,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 Because you control the value, you can transform what the user types: `.on_change(move |t: &str| tag.set(t.to_uppercase()))` uppercases, `onChange={({ value }) => code.set(value.replace(/[^0-9]/g, ""))}` keeps digits only.
@@ -188,6 +193,7 @@ In Rust, each prop is a method of `input()` named in snake case (`.placeholder(.
 | `maxLength` | `number` | | The most characters the user can enter, counted as Unicode code points on every platform: an emoji such as 😀 or a rare CJK character counts once. A longer paste goes in cut to what fits, as in a browser, never inside a character such as an emoji with its skin tone. |
 | `readonly` | `boolean` | `false` | The user can select and copy the text but not change it. |
 | `autoFocus` | `boolean` | `false` | Focused when it appears. |
+| `selectTextOnFocus` | `boolean` | `false` | Selects the whole text when the input takes the focus; a drag, a Shift-click or a double click keeps the user's selection. |
 | `submitBehavior` | `"submit" \| "blurAndSubmit" \| "newline"` | single line `"blurAndSubmit"`, multiline `"newline"` | What return does: submit and keep the focus, submit and unfocus, or insert a line break (multiline only). |
 | `pasteBehavior` | `"insert" \| "report"` | `"insert"` | What a paste does: insert its text, or nothing ([pasting](#pasting-images-and-files)). |
 | `caret` | `boolean` | `true` | The caret is drawn; `false` hides it. |
@@ -332,6 +338,7 @@ pub fn sign_in() -> impl IntoElement {
 ```tsx tabs
 import { type InputRef, mount, signal, View } from "nsh";
 import { Input } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 function SignIn() {
   const email = signal("");
@@ -354,7 +361,11 @@ function SignIn() {
   );
 }
 
-mount(SignIn);
+mount(() => (
+  <Window id="main">
+    <SignIn />
+  </Window>
+));
 ```
 
 Submitting without blurring (`SubmitBehavior::Submit`, `submitBehavior="submit"`) on the first field keeps the keyboard up while focus moves, so it does not drop and rise again. A chat input that sends on return and stays focused submits the same way (see the composer [below](#content-outside-scroll-views)).

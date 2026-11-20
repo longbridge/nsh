@@ -27,6 +27,7 @@ fn docs() -> impl IntoElement {
 ```tsx tabs
 import { mount, Text } from "nsh";
 import { Link } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 function App() {
   return (
@@ -39,7 +40,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 `Link` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate。在 Rust 中，`link()` 创建一个链接，每个 prop 有一个 setter（`.href(..)`、`.open_with(..)`），每个事件有一个监听方法（`.on_open(..)`、`.on_press(..)`），链接本身用类型化的样式方法，内容用 `.child(..)`。

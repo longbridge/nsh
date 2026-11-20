@@ -16,6 +16,7 @@ demo: el-rich-editor
 ```tsx
 import { mount } from "nsh";
 import { RichEditor, createRichEditor, history, inputRules, keymap, markdown, markdownRules, starterKeymap, baseKeymap, toggleMark } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 const editor = createRichEditor({
   content: "# Notes\n\nStart typing…",
@@ -34,7 +35,11 @@ function App() {
   return <RichEditor editor={editor} class="flex-1" />;
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 省略 `schema` 时编辑器使用起步 schema（`starterSchema()`）；省略 `plugins` 时它得到起步套件（`starterKit()`：起步的输入规则和键位绑定、基础键位绑定和历史）。空的 `plugins` 数组创建一个完全没有插件的编辑器。

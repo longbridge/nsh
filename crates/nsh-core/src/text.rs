@@ -1114,6 +1114,12 @@ pub trait TextEngine {
         None
     }
 
+    /// Whether a single-line input's intrinsic height depends only on its
+    /// text style, including when a glyph comes from a fallback font.
+    fn uniform_input_line_height(&self) -> bool {
+        false
+    }
+
     /// Whether each line takes all that fits and [`TextEngine::measure`]'s
     /// width is the widest line's: a maximum width between that width and
     /// the one measured then breaks the lines at the same places, so the
@@ -1222,6 +1228,10 @@ impl<T: TextEngine> TextEngine for std::rc::Rc<T> {
 
     fn draws_colors_from_text(&self) -> bool {
         (**self).draws_colors_from_text()
+    }
+
+    fn uniform_input_line_height(&self) -> bool {
+        (**self).uniform_input_line_height()
     }
 
     fn measure(&self, prepared: &Self::Prepared, max_width: Option<Points>) -> Size<Points> {

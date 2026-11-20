@@ -10,7 +10,7 @@ use nsh_base::{
 };
 use nsh_core::{
     Color, MountItem, StyleKey,
-    element::{Root, Style},
+    element::Style,
     platform::{Idiom, Os},
     prelude::*,
 };
@@ -61,7 +61,10 @@ fn AnnotatedCode() -> impl IntoElement {
 
 #[test]
 fn annotated_code_shows_its_spans_and_hands_its_block_to_actions() {
-    let mut app = Headless::start(EngineConfig::new(Root::of::<AnnotatedCode>())).unwrap();
+    let mut app = Headless::start(EngineConfig::new(
+        nsh_testing::windowed_root::<AnnotatedCode>(),
+    ))
+    .unwrap();
     app.wait_for("prefix 日本語 suffix").unwrap();
     assert_eq!(
         app.screen().span_style("text:日本語").unwrap().font_weight,
@@ -78,7 +81,10 @@ fn annotated_code_shows_its_spans_and_hands_its_block_to_actions() {
 
 #[test]
 fn code_content_that_does_not_spell_the_code_is_ignored() {
-    let mut app = Headless::start(EngineConfig::new(Root::of::<AnnotatedCode>())).unwrap();
+    let mut app = Headless::start(EngineConfig::new(
+        nsh_testing::windowed_root::<AnnotatedCode>(),
+    ))
+    .unwrap();
     app.wait_for("literal <tag>").unwrap();
     assert!(!app.shows("replacement"));
 }
@@ -124,7 +130,8 @@ fn DefaultRoot() -> impl IntoElement {
 
 #[test]
 fn typed_root_styles_are_inherited_by_paragraphs() {
-    let mut app = Headless::start(EngineConfig::new(Root::of::<TypedRoot>())).unwrap();
+    let mut app =
+        Headless::start(EngineConfig::new(nsh_testing::windowed_root::<TypedRoot>())).unwrap();
     app.wait_for("Another paragraph").unwrap();
     for text in ["Hello", "Another paragraph"] {
         assert_eq!(app.screen().span_style(text).unwrap().font_size, px(11.0));
@@ -133,7 +140,10 @@ fn typed_root_styles_are_inherited_by_paragraphs() {
 
 #[test]
 fn root_classes_override_typed_parts_and_inline_styles_override_classes() {
-    let mut app = Headless::start(EngineConfig::new(Root::of::<RootOverrides>())).unwrap();
+    let mut app = Headless::start(EngineConfig::new(
+        nsh_testing::windowed_root::<RootOverrides>(),
+    ))
+    .unwrap();
     app.wait_for("Style wins").unwrap();
     assert_eq!(
         app.screen().span_style("Class wins").unwrap().font_size,
@@ -147,7 +157,10 @@ fn root_classes_override_typed_parts_and_inline_styles_override_classes() {
 
 #[test]
 fn root_without_typed_parts_keeps_the_default_typography() {
-    let mut app = Headless::start(EngineConfig::new(Root::of::<DefaultRoot>())).unwrap();
+    let mut app = Headless::start(EngineConfig::new(
+        nsh_testing::windowed_root::<DefaultRoot>(),
+    ))
+    .unwrap();
     app.wait_for("Default text").unwrap();
     assert_eq!(
         app.screen().span_style("Default text").unwrap().font_size,
@@ -169,7 +182,10 @@ fn FramedTable() -> impl IntoElement {
 
 #[test]
 fn a_tables_grid_takes_the_apps_frame() {
-    let mut app = Headless::start(EngineConfig::new(Root::of::<FramedTable>())).unwrap();
+    let mut app = Headless::start(EngineConfig::new(
+        nsh_testing::windowed_root::<FramedTable>(),
+    ))
+    .unwrap();
     let styles = Arc::new(Mutex::new(Vec::new()));
     let into = styles.clone();
     app.observe(move |_, batch| {
@@ -230,7 +246,7 @@ fn Links() -> impl IntoElement {
 
 #[test]
 fn tab_reaches_a_documents_links_in_order_and_return_presses_them() {
-    let mut config = EngineConfig::new(Root::of::<Links>());
+    let mut config = EngineConfig::new(nsh_testing::windowed_root::<Links>());
     config.environment.os = Os::MacOs;
     config.environment.idiom = Idiom::Desktop;
     let mut app = Headless::start(config).unwrap();
@@ -265,7 +281,7 @@ fn HoveredLinks() -> impl IntoElement {
 const LONG: &str = "https://example.com/archive/2026/11/09/a-very-long-article-name-that-goes-on-and-on?utm_source=newsletter&page=2";
 
 fn desktop<C: Component<Props = ()>>() -> Headless {
-    let mut config = EngineConfig::new(Root::of::<C>());
+    let mut config = EngineConfig::new(nsh_testing::windowed_root::<C>());
     config.clock = nsh_engine::Clock::manual(std::time::SystemTime::UNIX_EPOCH);
     config.environment.os = Os::Linux;
     config.environment.idiom = Idiom::Desktop;
@@ -314,7 +330,7 @@ fn a_long_links_hint_keeps_its_host_and_the_end_of_its_url() {
 
 #[test]
 fn a_phone_shows_no_hint_for_a_link() {
-    let mut config = EngineConfig::new(Root::of::<HoveredLinks>());
+    let mut config = EngineConfig::new(nsh_testing::windowed_root::<HoveredLinks>());
     config.environment.os = Os::Web;
     config.environment.idiom = Idiom::Phone;
     let mut app = Headless::start(config).unwrap();
@@ -373,7 +389,7 @@ fn LinkModifiers() -> impl IntoElement {
 
 #[test]
 fn a_link_press_reports_the_modifier_keys_held() {
-    let mut config = EngineConfig::new(Root::of::<LinkModifiers>());
+    let mut config = EngineConfig::new(nsh_testing::windowed_root::<LinkModifiers>());
     config.environment.os = Os::MacOs;
     config.environment.idiom = Idiom::Desktop;
     let mut app = Headless::start(config).unwrap();
@@ -411,7 +427,10 @@ fn WrappedInlineImage() -> impl IntoElement {
 
 #[test]
 fn an_image_in_a_wrapped_line_is_inside_the_column() {
-    let mut app = Headless::start(EngineConfig::new(Root::of::<WrappedInlineImage>())).unwrap();
+    let mut app = Headless::start(EngineConfig::new(nsh_testing::windowed_root::<
+        WrappedInlineImage,
+    >()))
+    .unwrap();
     app.wait_for("label:Dot").unwrap();
     let id = app.screen().id("label:Dot").unwrap();
     let nodes = app.screen().layout_nodes();
@@ -487,7 +506,10 @@ fn bounds_of(app: &Headless, test_id: &str) -> Bounds<Points> {
 
 #[test]
 fn an_apps_image_on_its_own_is_at_most_as_wide_as_the_text() {
-    let mut app = Headless::start(EngineConfig::new(Root::of::<WideCustomImages>())).unwrap();
+    let mut app = Headless::start(EngineConfig::new(nsh_testing::windowed_root::<
+        WideCustomImages,
+    >()))
+    .unwrap();
     app.wait_for("label:Inline").unwrap();
     for card in ["card:Alone", "card:Linked"] {
         let bounds = bounds_of(&app, card);
@@ -511,7 +533,8 @@ fn an_apps_image_on_its_own_is_at_most_as_wide_as_the_text() {
 
 #[test]
 fn a_wide_image_on_its_own_is_at_most_as_wide_as_the_text() {
-    let mut app = Headless::start(EngineConfig::new(Root::of::<WideImage>())).unwrap();
+    let mut app =
+        Headless::start(EngineConfig::new(nsh_testing::windowed_root::<WideImage>())).unwrap();
     app.wait_for("label:Wide").unwrap();
     let id = app.screen().id("label:Wide").unwrap();
     let bounds = app
@@ -542,8 +565,7 @@ mod streaming {
 
     use nsh_base::{MarkdownOptions, text_view};
     use nsh_core::{
-        ApproxTextEngine, Core, EventKind, EventPayload, MountItem, ROOT_ID, Size, element::Root,
-        prelude::*,
+        ApproxTextEngine, Core, EventKind, EventPayload, MountItem, ROOT_ID, Size, prelude::*,
     };
 
     thread_local! {
@@ -611,7 +633,7 @@ mod streaming {
     fn stream(source: &str) -> (Vec<Duration>, Vec<usize>) {
         REPLY.set(source.to_owned());
         let mut core = Core::new(ApproxTextEngine, Size::new(px(390.0), px(844.0)));
-        core.mount_root(&Root::new::<Streamed>(|| ()));
+        core.mount_root(&nsh_testing::windowed_root_with::<Streamed>(|| ()));
         let batch = core.commit().expect("the first frame");
         let host = batch
             .items
@@ -1058,7 +1080,10 @@ fn PressableTasks() -> impl IntoElement {
 
 #[test]
 fn a_pressed_task_box_reports_its_place_in_the_document_and_the_state_asked_for() {
-    let mut app = Headless::start(EngineConfig::new(Root::of::<PressableTasks>())).unwrap();
+    let mut app = Headless::start(EngineConfig::new(nsh_testing::windowed_root::<
+        PressableTasks,
+    >()))
+    .unwrap();
     app.wait_for("first").unwrap();
     app.press("label:second").unwrap();
     app.press("label:nested").unwrap();
@@ -1084,7 +1109,10 @@ fn NestedLists() -> impl IntoElement {
 
 #[test]
 fn a_lists_markers_come_before_their_items_in_tree_order() {
-    let mut app = Headless::start(EngineConfig::new(Root::of::<NestedLists>())).unwrap();
+    let mut app = Headless::start(EngineConfig::new(
+        nsh_testing::windowed_root::<NestedLists>(),
+    ))
+    .unwrap();
     app.wait_for("three").unwrap();
     // A selection across the view takes the texts in this order: a drag
     // from a number selects on into its item, and a copy reads each

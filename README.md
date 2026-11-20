@@ -93,6 +93,12 @@ brew install longbridge/tap/nsh
 irm https://nsh.dev/install.ps1 | iex
 ```
 
+The nightly build:
+
+```powershell
+$env:NSH_VERSION = 'nightly'; irm https://nsh.dev/install.ps1 | iex
+```
+
 </details>
 
 <details>

@@ -327,6 +327,7 @@ impl Portfolio {
 
 ```tsx
 import { mount, signal, View, Text } from "nsh";
+import { Window } from "nsh/desktop";
 import { Chart, Ledger, Portfolio } from "app/native";   // Rust
 
 const ledger = new Ledger();   // 状态保存在 Rust 中
@@ -344,7 +345,11 @@ function Overview() {
   );
 }
 
-mount(() => <Overview />);
+mount(() => (
+  <Window id="main">
+    <Overview />
+  </Window>
+));
 ```
 
 每个导出在 TypeScript 中的文档来自给它命名的那个 Rust 项的文档注释：组件来自 `#[component] fn`（`Chart`），模块和类来自它们的

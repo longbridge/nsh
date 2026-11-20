@@ -344,11 +344,19 @@ fn key_ancestor(surface: &Surface, view: &NshView) -> Option<NshView> {
     }
 }
 
+/// The core's logical content view of an unfocused window.
+fn key_start(surface: &Surface, view: &NshView) -> NshView {
+    let content = view.state().props.key_content;
+    content
+        .and_then(|id| surface.mounter.try_borrow().ok()?.views.get(&id).cloned())
+        .unwrap_or_else(|| view.clone())
+}
+
 /// Whether `view` or a logical ancestor hears a raw key event or captures
 /// keys: only then is a [`KeyEvent`] built. A view that hears none takes
 /// the existing path.
 fn listens(surface: &Surface, view: &NshView) -> bool {
-    let mut current = Some(view.clone());
+    let mut current = Some(key_start(surface, view));
     while let Some(view) = current {
         {
             let state = view.state();
@@ -379,7 +387,7 @@ fn captures(surface: &Surface, view: &NshView, event: &NSEvent) -> bool {
         NSEventType::KeyDown | NSEventType::KeyUp => crate::keymap::keystroke(event),
         _ => None,
     };
-    let mut current = Some(view.clone());
+    let mut current = Some(key_start(surface, view));
     while let Some(view) = current {
         let state = view.state();
         if !state.props.accessibility.state.disabled

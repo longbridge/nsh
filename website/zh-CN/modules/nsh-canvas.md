@@ -40,6 +40,7 @@ interface CanvasSize {
 
 ```tsx
 import { Canvas, mount, signal, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
 
 function App() {
   const values = signal([12, 30, 22, 48, 36, 60, 52, 75]);
@@ -63,7 +64,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 ## 不重绘的动画

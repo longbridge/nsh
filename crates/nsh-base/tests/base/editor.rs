@@ -15,7 +15,6 @@ use nsh_base::editor::{
 };
 use nsh_core::{
     MountItem, NodeId, PointerEvents, Size,
-    element::Root,
     platform::{Idiom, Os},
     prelude::*,
 };
@@ -159,7 +158,9 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
 fn start(props: HarnessProps) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(900.0)),
-        ..EngineConfig::new(Root::new::<Harness>(move || props.clone()))
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>(move || {
+            props.clone()
+        }))
     };
     config.environment.os = Os::Linux;
     config.environment.idiom = Idiom::Desktop;
@@ -200,7 +201,7 @@ fn the_caret_sink_has_no_built_in_scrollbar() {
     }
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(900.0)),
-        ..EngineConfig::new(Root::of::<ThemedEditor>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<ThemedEditor>())
     };
     config.environment.os = Os::MacOs;
     config.environment.idiom = Idiom::Desktop;
@@ -634,7 +635,9 @@ fn the_rows_text_lets_the_pointer_through_to_the_scroll_views() {
     let text = props("alpha\nbeta\ngamma");
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(900.0)),
-        ..EngineConfig::new(Root::new::<Harness>(move || text.clone()))
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>(move || {
+            text.clone()
+        }))
     };
     config.environment.os = Os::Ios;
     config.environment.idiom = Idiom::Phone;
@@ -684,7 +687,9 @@ fn start_idle(os: Os) -> (Headless, Arc<Mutex<usize>>) {
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(900.0)),
         clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
-        ..EngineConfig::new(Root::new::<Harness>(move || props("abc")))
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>(move || {
+            props("abc")
+        }))
     };
     config.environment.os = os;
     config.environment.idiom = Idiom::Desktop;

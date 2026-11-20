@@ -65,6 +65,7 @@ fn App() -> impl IntoElement {
 
 ```tsx tabs
 import { mount, resource, Scroll, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
 
 type Post = { id: number; title: string };
 
@@ -85,7 +86,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 [`resource`](./reactivity.md#resource) keeps the value, the error and whether a load runs, loads again from a source that changes (or on `refetch()`), and cancels a load that no longer counts (the component goes away, or a newer load starts): in Rust by dropping the load's task, which cancels its request, in TSX through the `signal` it passes on. Rust's `fetch` takes absolute URLs; JSON is parsed with a crate such as `serde_json`.
