@@ -237,10 +237,10 @@ impl ElementRef {
         self.send(Command::Blur);
     }
 
-    /// Clears the selection of the selectable view or text the element is,
+    /// Clears the selection of a selectable view the element is, is inside
     /// or holds (TS: `ref.clearSelection()`): its texts lose the highlight
-    /// and a selectable view hears `on_text_selection_change` with nothing
-    /// selected.
+    /// and the selectable view hears `on_text_selection_change` with
+    /// nothing selected.
     pub fn clear_selection(&self) {
         self.send(Command::ClearSelection);
     }
