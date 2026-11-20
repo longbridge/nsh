@@ -319,6 +319,9 @@ covers [props] zoomable
 covers [props] centerContent
 covers [props] zoomScale
 covers [props] scrollValue
+# props-text-copy
+tap id:case-props-text-copy
+expect Copy text
 # props-text-lines
 tap id:case-props-text-lines
 style id:two numberOfLines 2

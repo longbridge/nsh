@@ -568,6 +568,8 @@ impl Surface {
         crate::keyboard::reset(self);
         crate::tray::release(self.key);
         crate::global_shortcut::release(self.key);
+        // The menu bar's ids are the stopped engine's.
+        self.chrome.remove_menu(self.mtm);
         self.js_frame.set(false);
         self.queued.borrow_mut().clear();
         self.resize_late.set(false);

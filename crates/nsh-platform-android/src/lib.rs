@@ -21,6 +21,7 @@
 mod agent;
 mod animation;
 mod component;
+mod context;
 #[cfg(feature = "dev")]
 mod dev;
 mod encode;

@@ -162,10 +162,10 @@ pub use crate::{
         css_font_families, font_families, for_each_font_family,
     },
     text::{
-        ATTACHMENT_CHAR, Affinity, ApproxTextEngine, AttachmentAlignments, AttributedText,
-        BackgroundBox, FontExtent, LinePiece, ResolvedTextStyle, SpanTestId, TextAttachment,
-        TextBackground, TextEngine, TextGeometry, TextLayout, TextLine, TextLink, TextPosition,
-        TextSpan, font_data, font_family, keep_font,
+        ATTACHMENT_CHAR, Affinity, ApproxTextEngine, AttachmentAlignments, AttachmentCopyText,
+        AttributedText, BackgroundBox, FontExtent, LinePiece, ResolvedTextStyle, SpanTestId,
+        TextAttachment, TextBackground, TextEngine, TextGeometry, TextLayout, TextLine, TextLink,
+        TextPosition, TextSpan, font_data, font_family, keep_font,
     },
     transform::{
         Decomposed, MAX_TRANSFORMS, Matrix, Transform, TransformKind, TransformOp, translation,

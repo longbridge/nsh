@@ -957,7 +957,8 @@ browsers' touches into what phones report:
   web page's paragraphs; pressables in the area keep their presses. Select all selects the whole area. Copying joins
   the area's texts on one row (their boxes overlap vertically: a table's cells) with a tab instead of a newline, joins
   a text whose props have `continuesText` (`ViewProps::continues_text`: a wrapped line's later part) to the one
-  before it with nothing, and leaves out attachments (U+FFFC), as `SelectionModel::text` does.
+  before it with nothing, and gives attachments (U+FFFC) as their copy texts (`copyText`, sent with the text) or
+  leaves them out, as `SelectionModel::text` does.
 - **Elsewhere**: no page context menu or iOS callout outside fields and selectable text; a mouse drag selects only in
   selectable text and fields; overflow is `clip`, never `hidden`, so that the browser cannot scroll a box the core
   laid out to show a focused field.
