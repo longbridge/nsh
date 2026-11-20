@@ -215,7 +215,7 @@ pub(crate) fn run(
         return run_rust_app(entry, listen, target, device, &work);
     }
     if target == Target::Android {
-        return run_android(entry, listen, release, limits, &work, trace);
+        return run_android(entry, listen, release, limits, &work, trace, device);
     }
     if target == Target::Web {
         return run_web(entry, listen, release, limits);
@@ -482,7 +482,7 @@ fn run_rust_app(
         Target::Android => {
             use crate::android;
             let sdk = android::Sdk::find()?;
-            let serial = android::device(&sdk)?;
+            let serial = android::device(&sdk, device)?;
             let env = android_app_env(&config);
             let out = run.join("android");
             // The device's ABI alone: each one is a build of the app's crate.
@@ -538,6 +538,7 @@ fn package_for_run(
         format: crate::android::Format::Apk,
         arch: None,
         run: false,
+        device: None,
         asset_url: None,
         development: true,
     })
@@ -768,8 +769,8 @@ impl Drop for KillOnClose {
 }
 
 /// Starts a dev session, builds and installs the Android dev host (when
-/// it changed), forwards the dev server port to the device and starts the
-/// host.
+/// it changed) on `device` ([`crate::android::device`]), forwards the dev
+/// server port to the device and starts the host.
 fn run_android(
     entry: &Path,
     listen: crate::dev::Listen,
@@ -777,10 +778,11 @@ fn run_android(
     limits: Option<HostLimits>,
     work: &Path,
     trace: bool,
+    device: Option<&str>,
 ) -> anyhow::Result<()> {
     use crate::android;
     let sdk = android::Sdk::find()?;
-    let serial = android::device(&sdk)?;
+    let serial = android::device(&sdk, device)?;
     // As on iOS: the host of a previous session must not connect first.
     let _ = android::adb(&sdk, &serial, &["shell", "am", "force-stop", BUNDLE_ID]);
     let session = DevSession::start(entry, listen, release, limits)?;

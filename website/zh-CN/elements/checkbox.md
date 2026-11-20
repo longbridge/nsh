@@ -77,6 +77,8 @@ mount(() => (
 | `checkedStyle` | `.checked_style(\|s\| ..)` | `StyleProp<ViewStyle>` | 无 | 勾选且未禁用时复选框自身的样式，与 `checked:` 类相同。 |
 | `indeterminateStyle` | `.indeterminate_style(\|s\| ..)` | `StyleProp<ViewStyle>` | 无 | 半选且未禁用时复选框自身的样式，与 `indeterminate:` 类相同。 |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 屏幕阅读器读出的文字：子元素没有说明它选择什么的文字时设置。 |
+| `invalid` | `.invalid(..)` | `boolean` | `false` | 值没有通过应用的校验（必选却未勾选）：屏幕阅读器每次读到它都会说明无效。不改变外观。 |
+| `accessibilityDescribedBy` | `.accessibility_described_by(..)` | `ViewRef \| null` | 无 | 描述它的元素（错误或帮助文字），每次聚焦时在名称之后读出。同 view 的 `accessibilityDescribedBy`。 |
 | `role` | `.role(..)` | `AccessibilityRole` | `"checkbox"` | 它对屏幕阅读器而言是什么，用于更具体的情形（可勾选的菜单项：`"menuitem"`）。 |
 | `indicatorClass`、`indicatorStyle` | `.indicator_style(\|s\| ..)` | `string`、`StyleProp<ViewStyle>` | 无 | 指示器，显示值的方框。 |
 | `indicator` | `.indicator(..)` | `JSX.Element` | 无 | 指示器里的内容：标记（对勾、短横），由应用按它持有的值显示。 |
