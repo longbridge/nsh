@@ -8,8 +8,8 @@ import test from "node:test";
 
 const source = await readFile(new URL("nsh.js", import.meta.url), "utf8");
 // `Player` is not exported; the page only gets it from `createPlayer`.
-const { Player, keyCode, elementTag, runtimeSheet, charLength, clipChars } = await import(
-  `data:text/javascript,${encodeURIComponent(`${source}\nexport { Player, keyCode, runtimeSheet, charLength, clipChars };`)}`
+const { Player, keyCode, elementTag, runtimeSheet, charLength, clipChars, copiedRun } = await import(
+  `data:text/javascript,${encodeURIComponent(`${source}\nexport { Player, keyCode, runtimeSheet, charLength, clipChars, copiedRun };`)}`
 );
 
 /** A player on a fake engine; `sent` holds `[name, payload]` of the events it got. */
@@ -3535,6 +3535,19 @@ function fakeClipboard(t, { failWrite } = {}) {
   };
   return log;
 }
+
+test("an attachment copies as its copy text in its place", () => {
+  const copies = new Map([[8, "$x^2$"]]);
+  // A run of "Area is \uFFFC here." from its start, and from offset 5.
+  assert.equal(copiedRun("Area is \uFFFC here.", 0, copies, true), "Area is $x^2$ here.");
+  assert.equal(copiedRun("is \uFFFC", 5, copies, true), "is $x^2$");
+  // One without a copy text is left out of a selectable view's copy.
+  assert.equal(copiedRun("a \uFFFC \uFFFC", 6, copies, true), "a $x^2$ ");
+  assert.equal(copiedRun("a \uFFFC", 0, null, true), "a ");
+  // A text outside selectable views keeps its placeholders, as before.
+  assert.equal(copiedRun("a \uFFFC", 0, null, false), "a \uFFFC");
+  assert.equal(copiedRun("a \uFFFC", 6, copies, false), "a $x^2$");
+});
 
 test("text with its HTML goes on the clipboard as one item of both types", async (t) => {
   const log = fakeClipboard(t);
