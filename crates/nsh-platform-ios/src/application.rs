@@ -22,14 +22,13 @@ use std::{
 use block2::{DynBlock, RcBlock};
 use dispatch2::{DispatchQueue, MainThreadBound};
 use nsh_core::JsonValue;
+use nsh_platform_apple::notifications::user_info_json;
 use objc2::{
     ClassType, MainThreadMarker, MainThreadOnly, define_class,
+    rc::Retained,
     runtime::{AnyClass, AnyObject},
 };
-use objc2_foundation::{
-    NSArray, NSData, NSDictionary, NSError, NSJSONSerialization, NSJSONWritingOptions, NSObject,
-    NSString,
-};
+use objc2_foundation::{NSData, NSDictionary, NSError, NSObject, NSString};
 use objc2_ui_kit::{UIApplication, UIBackgroundFetchResult, UIResponder};
 
 use crate::app::AppDelegate;
@@ -77,21 +76,28 @@ pub enum ApplicationEvent<'a> {
 pub struct NativeDictionary<'a>(&'a NSDictionary);
 
 impl NativeDictionary<'_> {
-    /// The dictionary as JSON, or `None` when it holds values JSON cannot
-    /// represent (a remote notification's payload always can).
-    pub fn to_json(&self) -> Option<JsonValue> {
-        json(self.0)
+    /// The dictionary as JSON. Strings, numbers, booleans, arrays and
+    /// dictionaries keep their values; entries whose keys are not strings
+    /// are left out, and values JSON has no form for (a URL, a date) are
+    /// `null`, so one of them does not lose the rest. A remote
+    /// notification's payload, which came as JSON, reads back whole.
+    pub fn to_json(&self) -> JsonValue {
+        user_info_json(self.0)
     }
 
-    /// The value at `key` as JSON: `None` when the key is absent or its
-    /// value is not one JSON can represent (a URL, a date).
+    /// The value at `key` as JSON ([`to_json`](Self::to_json)'s rules):
+    /// `None` only when the key is absent.
     pub fn get(&self, key: &str) -> Option<JsonValue> {
-        let value = self.0.objectForKey(&NSString::from_str(key))?;
-        // Wrapped in an array, as JSON serialization takes only an array or
-        // an object at the top level.
-        let array = NSArray::from_retained_slice(&[value]);
-        match json(&array)? {
-            JsonValue::Array(mut values) => values.pop(),
+        let key_object = NSString::from_str(key);
+        let value = self.0.objectForKey(&key_object)?;
+        // Converted as a dictionary of this one entry, by the same rules.
+        let entry =
+            NSDictionary::<NSString, AnyObject>::from_retained_objects(&[&*key_object], &[value]);
+        // SAFETY: an `NSDictionary` of any keys and values is an
+        // `NSDictionary`; only the generic parameters differ.
+        let entry: Retained<NSDictionary> = unsafe { Retained::cast_unchecked(entry) };
+        match user_info_json(&entry) {
+            JsonValue::Object(mut entries) => entries.remove(key),
             _ => None,
         }
     }
@@ -108,21 +114,6 @@ impl fmt::Debug for NativeDictionary<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self.0, f)
     }
-}
-
-/// `object` (an array or a dictionary) as JSON, if JSON can represent it.
-fn json(object: &AnyObject) -> Option<JsonValue> {
-    // SAFETY: `isValidJSONObject:` takes any object; checking it first keeps
-    // `dataWithJSONObject:` from raising an Objective-C exception.
-    if !unsafe { NSJSONSerialization::isValidJSONObject(object) } {
-        return None;
-    }
-    // SAFETY: `object` was checked above.
-    let data = unsafe {
-        NSJSONSerialization::dataWithJSONObject_options_error(object, NSJSONWritingOptions::empty())
-    }
-    .ok()?;
-    serde_json::from_slice(&data.to_vec()).ok()
 }
 
 /// How the work a remote notification started turned out, for the system to
@@ -397,8 +388,9 @@ mod tests {
         assert_eq!(FetchResult::default(), NoData);
     }
 
-    /// A payload reads as JSON, booleans included; a value JSON cannot
-    /// represent reads as absent rather than as something else.
+    /// A payload reads as JSON, booleans included; a value JSON has no form
+    /// for reads as `null`, keeping the rest, and only an absent key as
+    /// `None`.
     #[test]
     fn a_dictionary_reads_as_json() {
         let aps = dictionary(&[("badge", object(NSNumber::new_i32(3)))]);
@@ -411,7 +403,7 @@ mod tests {
         let payload = NativeDictionary(&payload);
         assert_eq!(
             payload.to_json(),
-            Some(serde_json::json!({ "aps": { "badge": 3 }, "chat": "42", "silent": true }))
+            serde_json::json!({ "aps": { "badge": 3 }, "chat": "42", "silent": true })
         );
         assert_eq!(payload.get("aps"), Some(serde_json::json!({ "badge": 3 })));
         assert_eq!(payload.get("chat"), Some(serde_json::json!("42")));
@@ -423,13 +415,16 @@ mod tests {
             ("source", object(NSString::from_str("com.example.other"))),
         ]);
         let options = NativeDictionary(&options);
-        assert_eq!(options.get("url"), None);
+        assert_eq!(options.get("url"), Some(JsonValue::Null));
+        assert_eq!(options.get("missing"), None);
         assert_eq!(
             options.get("source"),
             Some(serde_json::json!("com.example.other"))
         );
-        // The URL keeps the whole dictionary from being JSON.
-        assert_eq!(options.to_json(), None);
+        assert_eq!(
+            options.to_json(),
+            serde_json::json!({ "url": null, "source": "com.example.other" })
+        );
         assert_eq!(
             options.as_ptr().as_ptr().cast_const(),
             (options.0 as *const NSDictionary).cast()
