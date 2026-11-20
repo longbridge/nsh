@@ -1106,6 +1106,14 @@ mod native {
         _: Option<String>,
         _: Option<String>,
     ) -> Result<Option<AppUpdate>, JsError> {
+        // A native app built without the feature cannot update; saying so
+        // beats reporting "no update" forever.
+        #[cfg(not(target_arch = "wasm32"))]
+        return Err(JsError::Error(
+            "this runtime was built without the NSH platform crate's feature `updater`".into(),
+        )
+        .with_code(codes::UNAVAILABLE));
+        #[cfg(target_arch = "wasm32")]
         Ok(None)
     }
 
