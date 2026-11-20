@@ -848,6 +848,11 @@ fn traits(props: &ViewProps) -> UIAccessibilityTraits {
 /// mixed pressed, expanded, current and invalid states (UIKit has no
 /// traits for those).
 fn accessibility_value(props: &ViewProps) -> Option<String> {
+    state_value(props, crate::state_words::current())
+}
+
+/// [`accessibility_value`] with the state spoken in `words`.
+fn state_value(props: &ViewProps, words: &crate::state_words::StateWords) -> Option<String> {
     let a = &props.accessibility;
     let mut parts: Vec<String> = Vec::new();
     if let Some(v) = &a.value {
@@ -866,35 +871,33 @@ fn accessibility_value(props: &ViewProps) -> Option<String> {
         }
     }
     match a.state.checked {
-        Some(Checked::True) => parts.push("checked".into()),
-        Some(Checked::False) => parts.push("not checked".into()),
-        Some(Checked::Mixed) => parts.push("mixed".into()),
+        Some(Checked::True) => parts.push(words.checked.into()),
+        Some(Checked::False) => parts.push(words.not_checked.into()),
+        Some(Checked::Mixed) => parts.push(words.mixed.into()),
         None => {}
     }
     if a.state.pressed == Some(Checked::Mixed) {
-        parts.push("mixed".into());
+        parts.push(words.mixed.into());
     }
     match a.state.expanded {
-        Some(true) => parts.push("expanded".into()),
-        Some(false) => parts.push("collapsed".into()),
+        Some(true) => parts.push(words.expanded.into()),
+        Some(false) => parts.push(words.collapsed.into()),
         None => {}
     }
     if let Some(current) = a.state.current {
-        parts.push(
-            match current {
-                AccessibilityCurrent::True => "current",
-                AccessibilityCurrent::Page => "current page",
-                AccessibilityCurrent::Step => "current step",
-                AccessibilityCurrent::Location => "current location",
-                AccessibilityCurrent::Date => "current date",
-                AccessibilityCurrent::Time => "current time",
-            }
-            .into(),
-        );
+        let kind = match current {
+            AccessibilityCurrent::True => 0,
+            AccessibilityCurrent::Page => 1,
+            AccessibilityCurrent::Step => 2,
+            AccessibilityCurrent::Location => 3,
+            AccessibilityCurrent::Date => 4,
+            AccessibilityCurrent::Time => 5,
+        };
+        parts.push(words.current[kind].into());
     }
     // ARIA's `aria-invalid`, read after the value as WebKit reads it.
     if a.state.invalid {
-        parts.push("invalid data".into());
+        parts.push(words.invalid.into());
     }
     (!parts.is_empty()).then(|| parts.join(", "))
 }
@@ -982,20 +985,29 @@ mod tests {
     /// current item are spoken in the value.
     #[test]
     fn pressed_and_current_states() {
+        let en = crate::state_words::for_language("en");
         // SAFETY: immutable UIKit constants.
         let (button, selected) =
             unsafe { (UIAccessibilityTraitButton, UIAccessibilityTraitSelected) };
         let mut on = props(AccessibilityRole::Button, &[]);
         on.accessibility.state.pressed = Some(Checked::True);
         assert_eq!(traits(&on), button | selected);
-        assert_eq!(accessibility_value(&on), None);
+        assert_eq!(state_value(&on, en), None);
         let mut mixed = props(AccessibilityRole::Button, &[]);
         mixed.accessibility.state.pressed = Some(Checked::Mixed);
         assert_eq!(traits(&mixed), button);
-        assert_eq!(accessibility_value(&mixed).as_deref(), Some("mixed"));
+        assert_eq!(state_value(&mixed, en).as_deref(), Some("mixed"));
         let mut page = props(AccessibilityRole::Link, &[]);
         page.accessibility.state.current = Some(AccessibilityCurrent::Page);
-        assert_eq!(accessibility_value(&page).as_deref(), Some("current page"));
+        assert_eq!(state_value(&page, en).as_deref(), Some("current page"));
+        let zh = crate::state_words::for_language("zh-Hans");
+        assert_eq!(state_value(&page, zh).as_deref(), Some("当前页面"));
+        page.accessibility.state.invalid = true;
+        page.accessibility.state.expanded = Some(false);
+        assert_eq!(
+            state_value(&page, zh).as_deref(),
+            Some("已收起, 当前页面, 数据无效")
+        );
         // Groups and toolbars are containers (a labelled toolbar names the
         // controls VoiceOver enters), others are not.
         assert!(is_container(
