@@ -274,6 +274,41 @@ fn shift_enter_inserts_a_hard_break_keeping_marks() {
 }
 
 #[test]
+fn enter_keeps_splittable_marks_in_paragraphs_and_list_items() {
+    let s = pressed(&state_with(vec![p("ab")], 1, Some(3), false), "Mod-i");
+    let mut tr = s.tr();
+    tr.set_selection(TextSelection::create(s.doc(), 3, None));
+    let s = s.apply(tr).unwrap();
+    let s = pressed(&s, "Enter");
+    let s = type_text(&s, "c");
+    assert_doc(
+        &s,
+        r#"doc(paragraph(italic("ab")), paragraph(italic("c")))"#,
+    );
+
+    let s = pressed(
+        &state_with(vec![list("bulletList", &["ab"])], 3, Some(5), false),
+        "Mod-b",
+    );
+    let mut tr = s.tr();
+    tr.set_selection(TextSelection::create(s.doc(), 5, None));
+    let s = s.apply(tr).unwrap();
+    let s = pressed(&s, "Enter");
+    let s = type_text(&s, "c");
+    assert_doc(
+        &s,
+        r#"doc(bulletList(listItem(paragraph(bold("ab"))), listItem(paragraph(bold("c")))))"#,
+    );
+
+    // Links are not kept across Enter.
+    let link = json!({"type": "paragraph", "content": [{"type": "text", "text": "ab", "marks": [{"type": "link", "attrs": {"href": "https://example.com"}}]}]});
+    let s = state(vec![link], 3);
+    let s = pressed(&s, "Enter");
+    let s = type_text(&s, "c");
+    assert_doc(&s, r#"doc(paragraph(link("ab")), paragraph("c"))"#);
+}
+
+#[test]
 fn removed_prosemirror_bindings_are_gone() {
     let keymap = starter::keymap(&starter::schema());
     for key in [
