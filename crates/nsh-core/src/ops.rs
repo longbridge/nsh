@@ -3707,6 +3707,13 @@ pub enum Prop {
     /// `testID`: an identifier for UI tests.
     #[prop(js = "testID")]
     TestId(Option<Arc<str>>),
+    /// `copyText`: what a copy of the text around the view gives in its
+    /// place, when the view is inside a text (an inline formula's source,
+    /// an emoji image's character): selecting across it and copying puts
+    /// this there. Unset, the view adds nothing to the copy. A view outside
+    /// a text ignores it.
+    #[prop(js = "copyText")]
+    CopyText(Option<Arc<str>>),
     /// `web={{ element }}`: the HTML element the web draws the view or text
     /// as (`"p"`, `"nav"`, `"article"`, ...), for what `role` cannot say;
     /// the other platforms keep the view as it is.

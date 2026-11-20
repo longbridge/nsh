@@ -2978,8 +2978,8 @@ pub(crate) fn context_menu(surface: &Rc<crate::surface::Surface>, view: &NshView
     );
 }
 
-/// The selected text of `view`, without attachments' placeholders and
-/// hidden runs.
+/// The selected text of `view` as a copy gives it
+/// ([`nsh_core::AttributedText::copied_text`]).
 fn selected_text(view: &NshView) -> Option<String> {
     let (a, b) = view_selection(view)?.range.get()?;
     let state = view.state();

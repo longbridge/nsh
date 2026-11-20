@@ -70,14 +70,15 @@ pub trait SelectionTexts {
         self.len() == 0
     }
 
-    /// Text `i`'s content (attachments are U+FFFC, left out of copies).
+    /// Text `i`'s content (attachments are U+FFFC).
     fn content(&self, i: usize) -> &str;
 
     /// The UTF-16 range `range` of text `i` as a copy gives it. By default
     /// its content's characters without attachments' placeholders; a
     /// backend that has the texts' runs gives
-    /// [`crate::AttributedText::copied_text`], which also leaves hidden
-    /// runs out (`visibility: "hidden"` on a span).
+    /// [`crate::AttributedText::copied_text`], which puts an attachment's
+    /// copy text (`copyText`) in its place and leaves hidden runs out
+    /// (`visibility: "hidden"` on a span).
     fn copied(&self, i: usize, range: Range<u32>) -> String {
         let content = self.content(i);
         content[byte_offset(content, range.start)..byte_offset(content, range.end)]
@@ -420,8 +421,9 @@ impl SelectionModel {
             .collect()
     }
 
-    /// The selected text, as a copy gives it: each text's selected part,
-    /// attachments and hidden runs left out ([`SelectionTexts::copied`]),
+    /// The selected text, as a copy gives it: each text's selected part
+    /// as [`SelectionTexts::copied`] gives it (attachments as their copy
+    /// text, hidden runs left out),
     /// a text that continues the one before it
     /// ([`SelectionTexts::continues`]) joined to it with nothing between,
     /// other texts on one row (their frames overlap vertically) joined by a
