@@ -16,7 +16,10 @@
   (Dynamic Type on iOS; on both, a box a fraction of a point shorter than the line's measured height).
   CoreText positions it from the same top edge as an unconstrained line; the view's drawing bounds clip the
   excess. Empty and zero-height boxes stay empty.
-  `onTextLayout` reports the final lines (`TextEngine::lines`: range, box, ascender, descender, cap / x height).
+  `onTextLayout` reports the final lines (`TextEngine::lines`: range, box, ascender, descender, cap / x height); Rust
+  components can subscribe with `Text::on_text_layout` (`TextGeometry`) to query `lines`, `hit_test`, `caret_rect` and
+  `range_rects` directly on the engine's final layout in source UTF-16 offsets (skipping synthetic span-padding
+  spacers).
   The last line of a paragraph includes the whitespace hanging past its end in its width, unless an ellipsis
   replaces it: a caret after typed spaces (`RichEditor` puts one at the line's width) stands past them on every
   engine. A line broken inside a paragraph keeps its width within the box; a caret after its break-space stands
@@ -27,7 +30,7 @@
   caret's line-high box, and the line-high boxes a range covers, appended to the caller's buffer. Each backend's
   selection and selectable views hit-test with the same code; an engine that only reports `lines` gets an estimate
   (each line's characters spread evenly over its width). The headless engine hit-tests whole characters, 0.55 em
-  each, on its one line. CoreText retains original offsets for the visible suffix of head / middle
+  each (and each attachment's own width), on its one line. CoreText retains original offsets for the visible suffix of head / middle
   truncations and omits the ellipsis from range boxes; mixed-direction ranges split by visual run on both Apple
   backends. Web hit testing measures cluster rectangles in the complete drawn DOM run on first use, keeps both
   edges at bidi boundaries and caches them with the layout. Linux selection drawing reuses its rectangle buffer.

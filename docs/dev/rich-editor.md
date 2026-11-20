@@ -155,9 +155,11 @@ as a unit. The only looks of the view's own are the caret (2 points, the theme's
 theme's selection color), the placeholder (`muted-foreground`) and the composition (underlined), each a part the app
 restyles.
 
-Geometry (`geometry.rs`): maps document positions to the laid-out text's lines and back from the blocks' and texts'
-layouts, so the caret and hit tests follow the app's fonts (classes included). A position at a wrap shows at the
-upper line's end with `Affinity::Upstream`.
+Geometry (`geometry.rs`): maps document positions to laid-out coordinates and back by querying each textblock's
+`TextGeometry` (`Text::on_text_layout`, which translates UTF-16 offsets across synthetic span-padding spacers
+internally), so the caret, selection boxes, inline leaves, and hit tests follow the app's real fonts, mixed styles,
+attachments, and padding without re-shaping. A position at a wrap shows at the upper line's end with
+`Affinity::Upstream`.
 The view reports `contentSizeChange({ contentSize })` (as `Input`'s `onContentSizeChange`) when the laid-out
 document's size changes, at most once per engine frame. `contentSize` is the full flow extent in points, including
 offscreen blocks and independent of the viewport's minimum height; it excludes the `content` part's padding.
@@ -185,8 +187,7 @@ suggestion's).
 Presses: a node view's `handle_event`, the plugins' click hooks (`handle_click_on` per ancestor, then
 `handle_click`, double and triple likewise), then a caret (Shift extends), a word, the textblock or a node selection (a press inside an inline node view's box
 selects its node without Shift or Mod: `inline_view_at`, after prosemirror-view's `selectClickedLeaf`; an inline
-view's box is the frame the text engine placed it at, `TextGeo::widths`, which fixes the positions around it, the
-text between two fixed points scaled to the room it has);
+view's box is the range box the text engine placed its attachment at);
 a drag extends through `create_selection_between`, and past the viewport's top or bottom it scrolls the view on a timer (the code `Editor`'s `AutoScroll` and `edge_speed`) and extends again at each step. Paste: HTML through `transform_pasted_html` and the
 `clipboard_parser` (else the schema's), read by `DomParser::parse_from_clipboard`: HTML an editor copied carries
 `data-pm-slice` and comes back as the copied slice (its open depths, its whitespace, wrapped in its context again),

@@ -1562,6 +1562,7 @@ impl TextEngine for ApproxTextEngine {
         let units = prepared.chars.saturating_add(prepared.astral.len());
         let mut layout = ApproxLayout {
             attachments: Vec::new(),
+            attachment_widths: Vec::new(),
             line: TextLine {
                 end: u32::try_from(units).unwrap_or(u32::MAX),
                 width: size.width,
@@ -1575,6 +1576,12 @@ impl TextEngine for ApproxTextEngine {
             chars: u32::try_from(prepared.chars).unwrap_or(u32::MAX),
             astral: prepared.astral.clone(),
         };
+        layout.attachment_widths = prepared
+            .attachments
+            .iter()
+            .map(|a| (layout.char_at(a.index), a.width))
+            .collect();
+        layout.attachment_widths.sort_unstable_by_key(|&(k, _)| k);
         // An attachment sits on the line its character wraps to, as
         // `measure` wraps the text in a box this wide.
         layout.attachments = prepared
@@ -1616,13 +1623,7 @@ impl TextEngine for ApproxTextEngine {
         let Some(l) = layout.downcast::<ApproxLayout>() else {
             return TextPosition::default();
         };
-        let k = if l.advance > Points::ZERO {
-            // Clamped to `0..=chars` first: the cast cannot truncate.
-            (p.x / l.advance).round().clamp(0.0, l.chars as f32) as u32
-        } else {
-            0
-        };
-        TextPosition::new(l.unit_of(k), Affinity::Downstream)
+        TextPosition::new(l.unit_of(l.hit_x(p.x)), Affinity::Downstream)
     }
 
     fn caret_rect(&self, layout: &TextLayout, position: TextPosition) -> Option<Bounds<Points>> {
@@ -1694,6 +1695,8 @@ fn approx_place(
 /// [`ApproxTextEngine`]'s final layout: reported as one line.
 struct ApproxLayout {
     attachments: Vec<Option<Point<Points>>>,
+    /// `(char_index, width)` of each attachment, sorted by `char_index`.
+    attachment_widths: Vec<(u32, Points)>,
     line: TextLine,
     /// The width of every character.
     advance: Points,
@@ -1729,7 +1732,68 @@ impl ApproxLayout {
 
     /// The x of the caret at UTF-16 offset `o`.
     fn x_of(&self, o: u32) -> Points {
-        self.advance * self.char_at(o) as f32
+        let k = self.char_at(o);
+        let mut x = self.advance * k as f32;
+        for &(at, width) in &self.attachment_widths {
+            if at >= k {
+                break;
+            }
+            x += width - self.advance;
+        }
+        x
+    }
+
+    /// The character boundary nearest horizontal position `x`.
+    fn hit_x(&self, x: Points) -> u32 {
+        if x <= Points::ZERO {
+            return 0;
+        }
+        if self.attachment_widths.is_empty() {
+            return if self.advance > Points::ZERO {
+                // Clamped to `0..=chars` first: the cast cannot truncate.
+                (x / self.advance).round().clamp(0.0, self.chars as f32) as u32
+            } else {
+                0
+            };
+        }
+        let mut seg_start = 0u32;
+        let mut cur_x = Points::ZERO;
+        for &(at, width) in &self.attachment_widths {
+            let at = at.min(self.chars);
+            if at > seg_start {
+                let n = at - seg_start;
+                let run_end = cur_x + self.advance * n as f32;
+                if x < run_end {
+                    let step = if self.advance > Points::ZERO {
+                        ((x - cur_x) / self.advance).round().clamp(0.0, n as f32) as u32
+                    } else {
+                        0
+                    };
+                    return seg_start + step;
+                }
+                cur_x = run_end;
+            }
+            let att_end = cur_x + width;
+            if x < att_end {
+                return if x < cur_x + width * 0.5 {
+                    at
+                } else {
+                    (at + 1).min(self.chars)
+                };
+            }
+            cur_x = att_end;
+            seg_start = (at + 1).min(self.chars);
+        }
+        if seg_start < self.chars {
+            let n = self.chars - seg_start;
+            let step = if self.advance > Points::ZERO {
+                ((x - cur_x) / self.advance).round().clamp(0.0, n as f32) as u32
+            } else {
+                0
+            };
+            return seg_start + step;
+        }
+        self.chars
     }
 }
 
@@ -2643,14 +2707,11 @@ impl TextGeometry {
         engine: std::rc::Rc<dyn GeometryEngine>,
         layout: TextLayout,
         text: Arc<AttributedText>,
+        spacers: &[u32],
     ) -> Self {
-        let mut spacers: Vec<u32> = text
-            .attachments
-            .iter()
-            .filter(|a| a.height <= Points::ZERO)
-            .map(|a| a.index)
-            .collect();
+        let mut spacers = spacers.to_vec();
         spacers.sort_unstable();
+        spacers.dedup();
         Self {
             engine,
             layout,
@@ -2798,7 +2859,7 @@ mod geometry_tests {
         let text = padded();
         let prepared = engine.prepare(&text);
         let layout = engine.layout(&prepared, size(Points(1000.0), Points(100.0)));
-        TextGeometry::new(std::rc::Rc::new(ApproxTextEngine), layout, text)
+        TextGeometry::new(std::rc::Rc::new(ApproxTextEngine), layout, text, &[1, 4])
     }
 
     #[test]
@@ -2831,5 +2892,74 @@ mod geometry_tests {
         let r = g.range_rects(1..3);
         assert_eq!(r.len(), 1);
         assert_eq!(r[0].origin.x, laid(2));
+    }
+
+    #[test]
+    fn zero_height_user_attachments_stay_in_source_offsets() {
+        let engine = ApproxTextEngine;
+        let mut text = AttributedText {
+            text: format!("a{ATTACHMENT_CHAR}b"),
+            ..AttributedText::default()
+        };
+        text.attachments.push(TextAttachment {
+            index: 1,
+            width: Points(40.0),
+            height: Points::ZERO,
+        });
+        let text = Arc::new(text);
+        let prepared = engine.prepare(&text);
+        let layout = engine.layout(&prepared, size(Points(1000.0), Points(100.0)));
+        // Not a synthetic span-padding spacer, so its offset remains part of the source text.
+        let g = TextGeometry::new(std::rc::Rc::new(ApproxTextEngine), layout, text, &[]);
+        let lines = g.lines();
+        assert_eq!(lines.len(), 1);
+        assert_eq!((lines[0].start, lines[0].end), (0, 3));
+        assert_eq!(lines[0].text, format!("a{ATTACHMENT_CHAR}b"));
+        let r = g.range_rects(1..2);
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].size.width, Points(40.0));
+    }
+
+    #[test]
+    fn approx_engine_hit_test_and_range_rects_respect_attachment_widths() {
+        let engine = ApproxTextEngine;
+        let style = ResolvedTextStyle {
+            font_size: px(10.0 / 0.55),
+            ..ResolvedTextStyle::default()
+        };
+        let mut t = AttributedText::default();
+        t.push("ab", style);
+        t.push_attachment(size(px(80.0), px(16.0)), style);
+        t.push("cd", style);
+        let prepared = engine.prepare(&t);
+        let layout = engine.layout(&prepared, size(px(300.0), px(20.0)));
+
+        let x = |o| {
+            engine
+                .caret_rect(&layout, TextPosition::new(o, Affinity::Downstream))
+                .map(|b| b.origin.x.0.round())
+        };
+        assert_eq!(x(0), Some(0.0));
+        assert_eq!(x(2), Some(20.0));
+        assert_eq!(x(3), Some(100.0));
+        assert_eq!(x(5), Some(120.0));
+
+        let mut rects = Vec::new();
+        engine.range_rects(&layout, 2..3, &mut rects);
+        assert_eq!(rects.len(), 1);
+        assert_eq!(rects[0].origin.x.0.round(), 20.0);
+        assert_eq!(rects[0].size.width.0.round(), 80.0);
+
+        assert_eq!(engine.hit_test(&layout, point(px(19.0), px(5.0))).offset, 2);
+        assert_eq!(engine.hit_test(&layout, point(px(50.0), px(5.0))).offset, 2);
+        assert_eq!(engine.hit_test(&layout, point(px(70.0), px(5.0))).offset, 3);
+        assert_eq!(
+            engine.hit_test(&layout, point(px(101.0), px(5.0))).offset,
+            3
+        );
+        assert_eq!(
+            engine.hit_test(&layout, point(px(118.0), px(5.0))).offset,
+            5
+        );
     }
 }
