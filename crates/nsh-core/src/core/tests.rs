@@ -47002,6 +47002,40 @@ fn a_scroll_view_makes_its_overscan_over_turns() {
     assert_eq!(turns, 3);
 }
 
+/// A turn between two display frames ([`Core::hold_paced_mounts`]) leaves
+/// the overscan waiting; the next frame's turn makes its slice (#2472).
+#[test]
+fn a_turn_between_frames_leaves_the_overscan_waiting() {
+    let mut c = core();
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::Scroll,
+        },
+        style_op(2, &[("height", StyleValue::Number(100.0))]),
+        Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        },
+    ];
+    for i in 0..400u32 {
+        ops.extend(child_view(10 + i, 2, 1.0, &[]));
+    }
+    apply(&mut c, ops);
+    c.begin_mount_turn();
+    c.commit().unwrap();
+    assert!(c.has_paced_mounts());
+    c.begin_mount_turn();
+    c.hold_paced_mounts();
+    let made = c.commit().map(|b| created_in(&b)).unwrap_or_default();
+    assert!(made.is_empty(), "{made:?}");
+    assert!(c.has_paced_mounts());
+    c.begin_mount_turn();
+    let made = created_in(&c.commit().unwrap());
+    assert_eq!(made.len(), super::pace::PACE_VIEWS);
+}
+
 /// Cells bound with more views than a turn's budget: the cells in sight
 /// get theirs at once, the overscan's wait and come over turns, nearest
 /// first.
