@@ -379,7 +379,7 @@ mount(() => (
 | `focus()` | `focus()` | 让输入框获得焦点并弹出键盘。 |
 | `blur()` | `blur()` | 让它失去焦点。 |
 | `set_selection(start, end)` | `setSelection(start, end?)` | 选中 `start..end`（UTF-16 码元）；两者相等时为光标（TSX：不传 `end`）。 |
-| `insert_text(text)` | `insertText(text)` | 以用户编辑的方式用 `text` 替换选区：是输入框撤销历史中的一步，由 `onChange` 报告；目前只在 Linux、Web 和无头测试中生效（[粘贴](#粘贴图片和文件)）。 |
+| `insert_text(text)` | `insertText(text)` | 以用户编辑的方式用 `text` 替换选区：是输入框撤销历史中的一步，由 `onChange` 报告；目前只在 iOS、macOS、Linux、Web 和无头测试中生效（[粘贴](#粘贴图片和文件)）。 |
 
 在 macOS、Web 和 Android 上，可按压视图的 ref 的 `focus()` 和 `blur()` 也会像 Tab 一样移动键盘焦点（[键盘焦点](../elements/index.md#键盘焦点)）；在 Android 上，该视图在这次焦点期间可在触摸模式下获得焦点，默认按钮失去焦点后又恢复为触摸中性。
 
@@ -526,7 +526,7 @@ const caret = signal<Bounds | null>(null);
 
 这时事件在插入任何内容之前到达，应用可以放行、取消或改写这次粘贴。ref 的 `insertText`（Rust 的 `insert_text`）以用户编辑的方式用放行的文本替换选区：遵守 `maxLength` 与单行规则，由 `onChange` 报告，在 Linux 和 Web 上是输入框撤销历史中的一步，Ctrl+Z 一次即可撤回。设置新的 `value` 则是替换整段文本。
 
-`insertText` 在 Linux、Web 和无头测试（`nsh test`）中插入文本；在 macOS、Windows、iOS、Android 和 GPUI 上目前不做任何事，只打印一条警告，所以下面的示例适用于 Linux 和 Web 上的应用。请配合 `pasteBehavior="report"` 使用：`"insert"`（默认值）时输入框已经插入了这次粘贴，再调用 `insertText` 会插入第二遍。输入法正在组字时，`insertText` 不插入任何内容，并打印一条警告。
+`insertText` 在 iOS、macOS、Linux、Web 和无头测试（`nsh test`）中插入文本；在 Windows、Android 和 GPUI 上目前不做任何事，只打印一条警告。请配合 `pasteBehavior="report"` 使用：`"insert"`（默认值）时输入框已经插入了这次粘贴，再调用 `insertText` 会插入第二遍。输入法正在组字时，`insertText` 不插入任何内容。
 
 ```rust tabs
 let field = element_ref();
