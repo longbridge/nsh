@@ -173,6 +173,9 @@ pub(crate) struct Input {
     /// hosted view's or another app's) — `NSCursor::currentCursor` is
     /// another object than the one set when the pointer is customized.
     cursor: Cell<Option<Cursor>>,
+    /// Cursor-affecting state changed during a batch and needs one
+    /// synchronous refresh at [`content_moved`].
+    cursor_dirty: Cell<bool>,
     /// A Control-click (the secondary click) is down: its left-button
     /// release is the secondary button's (`onMouseUp` reports `right`).
     control_click: Cell<bool>,
@@ -454,14 +457,21 @@ pub(crate) fn gestures(surface: &Rc<Surface>, view: &NshView, values: GestureVal
 /// batch's pick (`content_moved`).
 pub(crate) fn events_changed(surface: &Rc<Surface>, view: &NshView) {
     update_hover_tracking(surface, view);
-    refresh_cursor(surface);
+    surface.input.cursor_dirty.set(true);
     release_invalid_control_focus(surface, view);
 }
 
-/// The view's props changed.
-pub(crate) fn props_changed(surface: &Rc<Surface>, view: &NshView) {
-    // `pointerEvents`, `hitSlop` and `delayLongPress` are
-    // read from the state when the pointer goes down.
+/// The view's props changed (`pointerEvents`, `windowResize`, `disabled`).
+pub(crate) fn props_changed(surface: &Rc<Surface>, view: &NshView, old: &nsh_core::ViewProps) {
+    let cursor_affected = {
+        let new = &view.state().props;
+        old.pointer_events != new.pointer_events
+            || old.window_resize != new.window_resize
+            || old.accessibility.state.disabled != new.accessibility.state.disabled
+    };
+    if cursor_affected {
+        surface.input.cursor_dirty.set(true);
+    }
     release_invalid_control_focus(surface, view);
 }
 
@@ -523,9 +533,22 @@ pub(crate) fn release_hidden_focus(surface: &Surface) {
     }
 }
 
-/// The view's style changed (cursor). The cursor follows on the next mouse
-/// move.
-pub(crate) fn style_changed(_view: &NshView) {}
+/// The view's style changed (`cursor`, `visibility`). Batched updates
+/// refresh once at [`content_moved`].
+pub(crate) fn style_changed(surface: &Surface, view: &NshView, old: &nsh_core::ViewStyle) {
+    let cursor_affected = {
+        let new = &view.state().style;
+        old.cursor != new.cursor || old.hidden != new.hidden
+    };
+    if cursor_affected {
+        surface.input.cursor_dirty.set(true);
+    }
+}
+
+/// Cursor-affecting non-style state changed (e.g. text selectability).
+pub(crate) fn cursor_changed(surface: &Surface) {
+    surface.input.cursor_dirty.set(true);
+}
 
 /// `SetJsResponder` / `ClearJsResponder`. Runs while the mounter applies a
 /// batch: it must not write animations (that borrows the mounter).
@@ -763,8 +786,21 @@ fn refresh_cursor(surface: &Surface) {
 /// after views moved or were added, or the pointer left a window edge's
 /// resize cursor): NSH's, which AppKit's default (the arrow, set again on
 /// every update) would replace. Set always: AppKit may have shown another.
-pub(crate) fn cursor_update(surface: &Surface) {
-    if let Some((x, y)) = surface.input.last.get() {
+pub(crate) fn cursor_update(surface: &Surface, event: Option<&NSEvent>) {
+    let root = event_root(surface);
+    let point = event
+        .filter(|e| {
+            e.window(surface.mtm)
+                .is_some_and(|w| root.ns().window().as_deref() == Some(&*w))
+        })
+        .map(|e| {
+            let p = root.ns().convertPoint_fromView(e.locationInWindow(), None);
+            let coords = (p.x as f32, p.y as f32);
+            surface.input.last.set(Some(coords));
+            coords
+        })
+        .or_else(|| surface.input.last.get());
+    if let Some((x, y)) = point {
         set_cursor_at(surface, x, y, true);
     }
 }
@@ -779,16 +815,21 @@ const REPICK_MS: f64 = 120.0;
 /// areas do, though the mouse did not move. Once per main-queue turn,
 /// however many scroll views moved or batches came — and during a scroll
 /// burst it defers to `repick_at`, one trailing pick rather than a hit
-/// test per step.
+/// test per step. Non-scroll batches also update the cursor immediately so
+/// nested hover updates never wait a frame.
 pub(crate) fn content_moved(surface: &Surface, scrolled: bool) {
     let input = &surface.input;
     if input.last.get().is_none() {
+        input.cursor_dirty.set(false);
         return;
     }
     let t = crate::scroll::now();
     let armed = input.repick.replace(true);
     let at = repick_deadline(armed, input.repick_at.get(), t, scrolled);
     input.repick_at.set(at);
+    if !scrolled && input.cursor_dirty.replace(false) && (!armed || at <= t) {
+        refresh_cursor(surface);
+    }
     if armed {
         return;
     }
