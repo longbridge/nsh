@@ -125,19 +125,19 @@ fn pressed(state: &EditorState, key: &str) -> EditorState {
 
 fn type_text(state: &EditorState, text: &str) -> EditorState {
     let (from, to) = (state.selection().from(), state.selection().to());
-    let mut out = None;
+    let mut trs = Vec::new();
     let handled = state
         .plugins()
         .iter()
-        .any(|plugin| plugin.handle_text_input(state, from, to, text, &mut |tr| out = Some(tr)));
-    let tr = if handled {
-        out.unwrap()
+        .any(|plugin| plugin.handle_text_input(state, from, to, text, &mut |tr| trs.push(tr)));
+    if handled {
+        trs.into_iter()
+            .fold(state.clone(), |s, tr| s.apply(tr).unwrap())
     } else {
         let mut tr = state.tr();
         tr.insert_text(text, Some(from), Some(to));
-        tr
-    };
-    state.apply(tr).unwrap()
+        state.apply(tr).unwrap()
+    }
 }
 
 fn type_all(state: &EditorState, text: &str) -> EditorState {
