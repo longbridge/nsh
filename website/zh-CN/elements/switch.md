@@ -44,6 +44,7 @@ fn wifi() -> impl IntoElement {
 ```tsx tabs
 import { mount, signal, Text } from "nsh";
 import { Switch } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 function App() {
   const on = signal(false);
@@ -60,7 +61,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 `Switch` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate。值由应用持有：按压时通过 `onChange` 报告下一个值，开关显示应用传回的 `checked`。在 Rust 中，`switch()` 创建一个开关，每个属性对应一个设置方法（`.checked(..)`、`.track_style(..)`），每个事件对应一个监听方法（`.on_change(..)`），开关自身用类型化的样式方法，标签用 `.child(..)`；部件的样式接受跟随开关的状态方法（`.checked(..)`、`.disabled_style(..)`）。

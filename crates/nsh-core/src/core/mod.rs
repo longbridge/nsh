@@ -1574,6 +1574,17 @@ pub struct Core<M: TextEngine> {
     /// The windows of the app's own, by the app's id: their root nodes,
     /// and whether their placement is kept.
     window_ids: rustc_hash::FxHashMap<String, (NodeId, bool)>,
+    /// When the app quits if its last window closes
+    /// ([`DesktopCommand::SetQuitMode`]); [`crate::desktop::QuitMode::Explicit`]
+    /// until the host sets one.
+    quit_mode: crate::desktop::QuitMode,
+    /// nsh.json's `"window"` launch defaults ([`Core::set_main_window`]):
+    /// the first app window inherits them, since the host has no visible
+    /// window of its own.
+    main_window_options: Option<crate::desktop::MainWindowOptions>,
+    /// The launch defaults were given to the first window that opened this
+    /// run: a later window after every window closed is not the first.
+    launch_defaults_applied: bool,
     /// The main window's placement is kept (nsh.json `window.restoreBounds`,
     /// [`Core::set_main_window`]).
     keep_main_placement: bool,
@@ -1663,6 +1674,11 @@ impl<M: TextEngine> Core<M> {
             window_ids: Default::default(),
             runs: Default::default(),
             folded: Default::default(),
+            // Until the host sets one: the app decides (the engine sets
+            // nsh.json's mode, `"platform"` by default, before the app runs).
+            quit_mode: crate::desktop::QuitMode::Explicit,
+            main_window_options: None,
+            launch_defaults_applied: false,
             keep_main_placement: false,
             main_shown: false,
             clipboard: None,
@@ -1977,6 +1993,13 @@ impl<M: TextEngine> Core<M> {
         self.picker = backend;
     }
 
+    /// Sets when the app quits if its last window closes (the desktops'
+    /// `"platform"` mode: quit on Windows and Linux, stay on macOS).
+    /// `Application.setQuitMode` sets it at run time.
+    pub fn set_quit_mode(&mut self, mode: crate::desktop::QuitMode) {
+        self.quit_mode = mode;
+    }
+
     /// The main window's launch-time options (nsh.json `"window"`): its
     /// attributes go to the main window with the next commit, as
     /// `currentWindow().set()` sends them (capabilities apply); with
@@ -1986,6 +2009,7 @@ impl<M: TextEngine> Core<M> {
     /// Set it after the environment ([`Core::set_environment`]): a surface
     /// without a window, a phone's, takes no attributes.
     pub fn set_main_window(&mut self, options: &crate::desktop::MainWindowOptions) {
+        self.main_window_options = Some(options.clone());
         self.keep_main_placement = options.restore_bounds;
         self.main_shown |= options.visible_at_launch();
         if let Some(state) = self.components.environment.window_state {
@@ -2936,7 +2960,7 @@ impl<M: TextEngine> Core<M> {
             Op::Command {
                 id,
                 command: Command::Desktop(desktop),
-            } if desktop.is_windows() => {
+            } if desktop.is_core_handled() => {
                 self.key(id)?;
                 self.window_command(id, *desktop);
                 Ok(())
@@ -2959,6 +2983,13 @@ impl<M: TextEngine> Core<M> {
             window::{WindowRecord, placement_key},
         };
         match command {
+            // The quit mode reaches past the app's view, as quitting does:
+            // a sandboxed app without `application` keeps the platform's.
+            DesktopCommand::SetQuitMode(_) if !self.access.allows_application() => {
+                self.deny(
+                    "the application (its main window, menu, tray, global shortcuts, quitting and restarting) is not granted: add `\"application\": true` to capabilities in nsh.json".into(),
+                );
+            }
             DesktopCommand::SetAttributes(_) if !self.has_window() => {
                 log::debug!("window attributes of view {id}: the surface has no window");
             }
@@ -2986,6 +3017,9 @@ impl<M: TextEngine> Core<M> {
                     .pending
                     .merge(&attributes);
             }
+            DesktopCommand::SetQuitMode(mode) => {
+                self.quit_mode = mode;
+            }
             DesktopCommand::OpenWindow(mut open) => {
                 let options = &mut open.options;
                 // `Window.open` checked it already and threw; this guards
@@ -2995,21 +3029,64 @@ impl<M: TextEngine> Core<M> {
                     .values()
                     .filter(|(node, _)| *node != id && self.key(*node).is_ok())
                     .count();
-                if let Err(message) =
-                    self.access
-                        .check_window(options.kind, &options.attributes, open_now)
+                // The first app window of the run inherits nsh.json's
+                // `"window"` launch defaults and the host's size: the host is
+                // invisible, so those defaults describe the window the app
+                // shows first. A later window after every one closed opens
+                // as it asked, not as the launch defaults say.
+                if !self.launch_defaults_applied {
+                    if let Some(defaults) = self.main_window_options.clone() {
+                        if options.default_size.is_none() {
+                            options.default_size = defaults.default_size;
+                        }
+                        if options.default_position.is_none() {
+                            options.default_position = defaults.default_position;
+                        }
+                        if options.display.is_none() {
+                            options.display = defaults.display;
+                        }
+                        if options.default_mode.is_none() {
+                            options.default_mode = defaults.default_mode;
+                        }
+                        if !options.restore_bounds {
+                            options.restore_bounds = defaults.restore_bounds;
+                        }
+                        let mut attributes = defaults.attributes;
+                        attributes.merge(&options.attributes);
+                        options.attributes = attributes;
+                    }
+                    if let Some(state) = self.components.environment.window_state {
+                        if options.default_size.is_none() {
+                            options.default_size = Some(state.content_bounds.size);
+                        }
+                        if options.default_position.is_none() {
+                            options.default_position =
+                                Some(crate::desktop::WindowPosition::At(state.bounds.origin));
+                        }
+                    }
+                }
+                // A released app's implicit first window is the main window
+                // it always had, not one of its own: no grant to check.
+                if !open.implicit
+                    && let Err(message) =
+                        self.access
+                            .check_window(options.kind, &options.attributes, open_now)
                 {
                     self.deny(format!("nsh/desktop: {message}: the window does not open"));
                     return;
                 }
+                // A refused first window does not consume the launch
+                // defaults: the next admitted window still gets them.
+                self.launch_defaults_applied = true;
                 options.attributes.sanitize();
                 options.attributes =
                     crate::desktop::WindowAttributes::resolve(options.kind, &options.attributes);
-                open.parent = match options.parent.as_deref() {
-                    None => None,
-                    Some("main") => Some(crate::ROOT_ID),
-                    Some(parent) => self.window_ids.get(parent).map(|(node, _)| *node),
-                };
+                // `"main"` is a window id like any other: a parent is the
+                // window the registry has open under that id.
+                open.parent = options
+                    .parent
+                    .as_deref()
+                    .and_then(|parent| self.window_ids.get(parent).map(|(node, _)| *node));
                 if options.restore_bounds {
                     let _entered = self.components.runtime.enter();
                     open.placement = crate::storage::Storage::get_item(&placement_key(&options.id))
@@ -3051,6 +3128,7 @@ impl<M: TextEngine> Core<M> {
         if self.windows.is_empty() {
             return;
         }
+        let had_windows = !self.window_ids.is_empty();
         let gone: Vec<NodeId> = self
             .windows
             .keys()
@@ -3060,6 +3138,24 @@ impl<M: TextEngine> Core<M> {
         for id in gone {
             self.windows.remove(&id);
             self.window_ids.retain(|_, (node, _)| *node != id);
+        }
+        // The last window went: the quit mode decides whether that ends the
+        // app. The app's own close path has run by now (its root is gone),
+        // and the core's listeners had their turn (a Rust listener turning
+        // the mode to `"explicit"` keeps the app running). A JS listener
+        // runs in a later commit, after this decision: an app that keeps
+        // running with no windows sets `quitMode: "explicit"` before the
+        // last close, not from `lastWindowClosed`. A listener that opens a
+        // window again does so in the next commit, which by then is not the
+        // last window (with the mode `"explicit"`).
+        if had_windows && self.window_ids.is_empty() {
+            self.last_window_closed();
+            if self.quit_mode.quits(self.components.environment.os) {
+                self.commands.push((
+                    ROOT_ID,
+                    Command::Desktop(Box::new(crate::desktop::DesktopCommand::Quit)),
+                ));
+            }
         }
         let mut ids: Vec<NodeId> = self.windows.keys().copied().collect();
         ids.sort_unstable();
@@ -11212,11 +11308,12 @@ fn measure_content<M: TextEngine>(
             let field = cx
                 .field
                 .as_deref_mut()
-                .map(|field| measure_text(engine, cache, field, None).width.0);
+                .map(|field| measure_text(engine, cache, field, None));
+            let field_width = field.map(|size| size.width.0);
             let max_width = if cx.text.no_wrap {
                 None
             } else {
-                known.width.or(match (available.width, field) {
+                known.width.or(match (available.width, field_width) {
                     (AvailableSpace::Definite(w), Some(field)) => Some(field.min(w)),
                     (AvailableSpace::Definite(w), None) => Some(w),
                     (_, Some(field)) => Some(field),
@@ -11226,12 +11323,22 @@ fn measure_content<M: TextEngine>(
                     (AvailableSpace::MaxContent, None) => None,
                 })
             };
-            let measured = measure_text(engine, cache, cx, max_width);
+            let width = known.width.or(field_width.and(max_width));
+            // A single-line input uses the field sample's width. When its font
+            // determines the line height too, shaping the edited value would
+            // change neither dimension.
+            let measured = match field {
+                Some(sample)
+                    if width.is_some()
+                        && cx.text.max_lines == 1
+                        && engine.uniform_input_line_height() =>
+                {
+                    sample
+                }
+                _ => measure_text(engine, cache, cx, max_width),
+            };
             taffy::Size {
-                width: known
-                    .width
-                    .or(field.and(max_width))
-                    .unwrap_or(measured.width.0),
+                width: width.unwrap_or(measured.width.0),
                 height: known.height.unwrap_or(match input_max_height {
                     Some(max) => measured.height.0.min(max),
                     None => measured.height.0,

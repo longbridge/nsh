@@ -56,7 +56,7 @@ A Rust app's root is a component of its crate, which `nsh.json`'s `"root"` names
 // src/lib.rs; nsh.json: { "rust": ".", "root": "App" }
 mod screens;
 
-use nsh_core::prelude::*;
+use nsh_core::{element::desktop::window as app_window, prelude::*};
 
 /// What a TSX entry may import from the crate.
 #[native_module("my-app/native")]
@@ -66,23 +66,25 @@ fn native(registry: &mut Registry) {
 
 #[component]
 pub fn App() -> impl IntoElement {
-    screens::home()
+    // On the desktops this is the app's window; off them it shows its content.
+    app_window().id("main").content(screens::home)
 }
 ```
 
 ```tsx tabs
 // App.tsx
 import { mount } from "nsh";
+import { Window } from "nsh/desktop";
 import { Home } from "./components/Home";
 
 function App() {
   return <Home />;
 }
 
-mount(App);
+mount(() => <Window id="main"><App /></Window>);
 ```
 
-`nsh run` and `nsh package` mount a Rust root on every platform, with no QuickJS. In TSX, `mount(component, props?)` renders the component into the app's surface and returns a function that removes it again; an app calls it once. Code at the top level of the entry runs when the bundle loads, before the first frame.
+`nsh run` and `nsh package` mount a Rust root on every platform, with no QuickJS. In TSX, `mount(component, props?)` renders the component into the app root and returns a function that removes it again; an app calls it once. On the desktops the root holds top-level `<Window>` scenes (an app that declares windows declares the first too; a plain root renders in the implicit first window); off the desktops `<Window>` shows its content in the one surface. Code at the top level of the entry runs when the bundle loads, before the first frame.
 
 ## nsh.json
 
@@ -140,7 +142,8 @@ Every other key is optional; a TSX app may also leave out the four. A TSX app's 
 | `theme` | string or object | every build | The app's design tokens (shadcn/ui's `cssVars`, over the default `neutral` theme), which token classes, `token()` and Rust components draw with: a theme file's path relative to `nsh.json`, or the theme inline ([Building with Rust](./rust.md#theme), [Theme tokens](./tailwind.md#theme-tokens)). |
 | `statusBar` | object | every build, `package` | The status bar's default under every page and dialog (iOS and Android): `{ "foreground": "auto" \| "light" \| "dark", "hidden": boolean }`, both optional. Packaged iOS apps show it from the launch screen on ([Status bar](../modules/nsh-base.md#status-bar)). |
 | `capabilities` | object | every build | What the app may reach outside its VM: network hosts, web view hosts, the status bar, windows of its own ([Sandbox and capabilities](./sandbox-and-capabilities.md)). |
-| `window` | object | every build, `package` | The main window's launch settings on the desktops, which it has from its first frame: `title`, `defaultSize`, `minSize`, `titleBar`, `backdrop` and the other options and attributes of a window, as `nsh/desktop`'s `WindowOptions` spells them (`{ "defaultSize": { "width": 1100, "height": 720 }, "titleBar": { "style": "hidden" } }`), and `defaultVisible` (`false`: it starts hidden, as a tray app's) ([The main window](../modules/nsh-desktop.md#the-main-window)). |
+| `window` | object | every build, `package` | Launch settings for the first window the app declares on the desktops, which it has from its first frame: `title`, `defaultSize`, `minSize`, `titleBar`, `backdrop` and the other options and attributes of a window, as `nsh/desktop`'s `WindowOptions` spells them (`{ "defaultSize": { "width": 1100, "height": 720 }, "titleBar": { "style": "hidden" } }`) ([The app host and the first window](../modules/nsh-desktop.md#the-app-host-and-the-first-window)). `defaultVisible` no longer applies: the app host never shows; an app that starts without a window opens none. |
+| `application` | object | every build, `package` | The app's lifecycle: `"quitMode": "platform" \| "lastWindowClosed" \| "explicit"`. `"platform"` (the default) keeps a macOS app running with no windows and quits Windows and Linux apps when the last window closes; `"lastWindowClosed"` quits on every platform; `"explicit"` leaves the app running with no windows. The app can change it at run time with `Application.setQuitMode` ([Quitting](../modules/nsh-desktop.md#quitting)). |
 | `resolve` | object | every build | How bare imports resolve: the export conditions of npm packages and aliases ([npm packages](#npm-packages)). |
 | `rust` | string or string[] | every command | The app's Rust crate, or a list of them, relative to `nsh.json`: their components and modules, which TSX imports by each crate's `#[native_module]` specifier ([Building with Rust](./rust.md#several-crates)). |
 | `modules` | (string \| object)[] | every command | The [nshm](./nshm.md) the app installs, which `nsh add` lists here and pins in `nsh.lock`: `"acme-gauge@1.0"`, `"github:acme/gauge@v1.0.0"`, `{ "git": "…", "tag": "v1.0.0" }` or `{ "path": "../gauge" }` ([CLI: nsh add](./cli.md#nsh-add)). |

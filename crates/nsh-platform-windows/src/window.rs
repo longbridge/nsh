@@ -1313,7 +1313,12 @@ fn handle(
     match msg {
         WM_NSH_WAKE => surface.drain(),
         WM_NSH_TICK => surface.tick(),
-        WM_NSH_MENU => crate::chrome::show_popup(surface),
+        // An app-level popup (the host is not a user window) belongs to the
+        // focused window of the app's own, where the app is working.
+        WM_NSH_MENU => crate::chrome::show_popup(
+            surface,
+            crate::app_window::focused_hwnd(surface).unwrap_or(hwnd),
+        ),
         crate::tray::WM_NSH_TRAY => {
             crate::tray::message(surface, hwnd, wparam, lparam);
             return Some(LRESULT(0));

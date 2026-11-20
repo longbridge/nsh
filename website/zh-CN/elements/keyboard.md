@@ -42,6 +42,7 @@ fn chat() -> impl IntoElement {
 ```tsx tabs
 import { mount, Scroll, signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 function App() {
   const draft = signal("");
@@ -62,7 +63,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 完整的键盘高度适用于延伸到屏幕底部的视图，界面的内容通常如此。如果它下方还有东西，例如标签栏，就用一个长度减去它：`calc(env(keyboard-inset-height) + -49px)` 让视图保持在 49 pt 的标签栏之上，`calc(env(keyboard-inset-height) + 12px)` 在键盘上方增加间距。内边距至少为 0。

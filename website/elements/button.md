@@ -36,6 +36,7 @@ fn counter() -> impl IntoElement {
 ```tsx tabs
 import { mount, signal, Text } from "nsh";
 import { Button } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 function App() {
   const count = signal(0);
@@ -49,7 +50,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 `Button` comes from [`nsh/base`](../modules/nsh-base.md), the `nsh-base` crate in Rust. In TSX its look is `class` and

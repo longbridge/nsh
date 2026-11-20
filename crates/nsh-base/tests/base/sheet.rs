@@ -7,14 +7,14 @@
 //! its stops and the focus goes back as it closes.
 
 use nsh_base::sheet;
-use nsh_core::{Size, element::Root, prelude::*};
+use nsh_core::{Size, prelude::*};
 use nsh_engine::EngineConfig;
 use nsh_testing::Headless;
 
 fn start<C: Component<Props = ()>>() -> Headless {
     let mut app = Headless::start(EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
-        ..EngineConfig::new(Root::of::<C>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<C>())
     })
     .unwrap();
     app.first_render().unwrap();
@@ -100,7 +100,7 @@ fn a_cancelled_drag_does_not_close_even_past_the_release_threshold() {
 
     let mut app = Headless::start(EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
-        ..EngineConfig::new(Root::of::<SwipeScreen>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<SwipeScreen>())
     })
     .unwrap();
     let panel = Arc::new(Mutex::new(None));
@@ -232,7 +232,7 @@ fn a_sheet_goes_once_its_motion_ends_on_a_manual_clock() {
     let mut app = Headless::start(EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
         clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
-        ..EngineConfig::new(Root::of::<Screen>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<Screen>())
     })
     .expect("the engine starts");
     app.first_render().unwrap();
@@ -408,7 +408,9 @@ fn observe_entrance(
 fn growing_app(props: GrowingProps) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
-        ..EngineConfig::new(Root::new::<GrowingScreen>(move || props.clone()))
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<GrowingScreen>(
+            move || props.clone(),
+        ))
     };
     config.environment.os = nsh_core::platform::Os::Ios;
     config.environment.idiom = nsh_core::platform::Idiom::Phone;
@@ -493,7 +495,7 @@ fn a_long_swipe_exit_keeps_fading_the_backdrop() {
 
     let mut app = Headless::start(EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
-        ..EngineConfig::new(Root::of::<SwipeScreen>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<SwipeScreen>())
     })
     .unwrap();
     let native = Arc::new(Mutex::new((Graph::default(), None, None)));
@@ -569,7 +571,7 @@ fn a_web_sheet_uses_the_presented_surface_size_and_keeps_its_close_lifecycle() {
 
     let mut config = EngineConfig {
         viewport: Size::new(px(320.0), px(240.0)),
-        ..EngineConfig::new(Root::of::<SwipeScreen>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<SwipeScreen>())
     };
     config.environment.os = nsh_core::platform::Os::Web;
     let mut app = Headless::start(config).unwrap();
@@ -625,7 +627,7 @@ fn start_on_a_phone<C: Component<Props = ()>>() -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
         clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
-        ..EngineConfig::new(Root::of::<C>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<C>())
     };
     config.environment.os = Os::Ios;
     config.environment.idiom = Idiom::Phone;
@@ -837,7 +839,7 @@ fn start_on<C: Component<Props = ()>>(os: nsh_core::platform::Os) -> Headless {
 
     let mut config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
-        ..EngineConfig::new(Root::of::<C>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<C>())
     };
     config.environment.os = os;
     config.environment.idiom = if matches!(os, nsh_core::platform::Os::Ios) {
@@ -1073,7 +1075,9 @@ fn detent_app_on(props: DetentProps, clock: nsh_engine::Clock) -> (Headless, Rep
     let mut app = Headless::start(EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
         clock,
-        ..EngineConfig::new(Root::new::<DetentScreen>(move || props.clone()))
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<DetentScreen>(move || {
+            props.clone()
+        }))
     })
     .unwrap();
     let replica = replicate(&mut app);
@@ -1227,9 +1231,8 @@ fn a_sheet_without_detents_makes_no_graph_of_theirs() {
     for (open, footer) in [(true, false), (false, false), (true, true), (false, true)] {
         let mut app = Headless::start(EngineConfig {
             viewport: Size::new(px(390.0), px(844.0)),
-            ..EngineConfig::new(Root::new::<PlainScreen>(move || PlainProps {
-                open,
-                footer,
+            ..EngineConfig::new(nsh_testing::windowed_root_with::<PlainScreen>(move || {
+                PlainProps { open, footer }
             }))
         })
         .unwrap();
@@ -1304,7 +1307,7 @@ fn ToggleDetentsScreen() -> impl IntoElement {
 fn detents_given_and_taken_away_while_open_take_effect() {
     let mut app = Headless::start(EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
-        ..EngineConfig::new(Root::of::<ToggleDetentsScreen>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<ToggleDetentsScreen>())
     })
     .unwrap();
     let replica = replicate(&mut app);

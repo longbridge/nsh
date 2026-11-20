@@ -8,6 +8,10 @@ backend's Apple drawing (CoreText, Core Graphics, Core Animation layers, ImageIO
 Mac Catalyst (`nsh-platform-ios` on `aarch64-apple-ios-macabi`) is selected with `--target catalyst`: it is
 UIKit, phone-style. In a checkout, `cargo run` runs the gallery here (`--target catalyst` for Catalyst). User-facing page: `website/docs/macos.md`.
 
+**Window model v2:** the main window this page describes is the invisible app host. It is made and never shown:
+the windows the app declares with `<Window>` (each an `NSWindow` of its own) are what shows, and a launch shows no
+window until the app opens one. `defaultVisible` and the main window's `show()` no longer apply.
+
 ## Building and checking
 
 The crates need only Xcode's command line tools (the macOS SDK) and, for QuickJS, clang. Off macOS they are empty (like
@@ -211,7 +215,7 @@ belong to the app, which owns retention and its storage budget.
   app's own (`Window.open`) too. AppKit fires a view's link only while some of the view's window shows on a screen
   (`pitfalls.md`), so the link is made from the root view of a window that shows (`window::link_root`; the choice is
   `window::link_window`): the main window's root (the surface's, an embedded `AppView`'s in its host's window) while
-  that window shows, as always; else, the main window hidden (a tray app's, `defaultVisible: false`), minimized or
+  that window shows, as always; else, the host hidden (a tray app keeps no host window), minimized or
   covered, the root of a window of the app's own that shows, the key one first, then the one the link follows now,
   then any. While none shows, the link stays where it is. A window shows (`window::Sight::seen`) while it is ordered
   in, its app not hidden, not minimized, on a screen and its `occlusionState` `Visible` (not wholly covered, the
@@ -245,30 +249,27 @@ belong to the app, which owns retention and its storage budget.
   same reason the host has no icon of its own: `AppOptions::icon` (`--icon <png>`, which `nsh run` and `nsh test` pass
   from nsh.json `"icon"` for macOS; for a Rust app, which `nsh run` runs with the release runner in place, its
   `app.json` `icon`, read only then) becomes `applicationIconImage` before the window shows, so the Dock, the app
-  switcher and the notifications show the app's (`set_app_icon`); a packaged app's bundle carries its own. The window
-  opens centered where AppKit centers a new one, or on `AppOptions::display`: a `WindowDisplay::Index` of
+  switcher and the notifications show the app's (`set_app_icon`); a packaged app's bundle carries its own. The app
+  host is made and never ordered in; the windows the app declares with `<Window>` are what shows. A window opens
+  centered where AppKit centers a new one, or on `AppOptions::display`: a `WindowDisplay::Index` of
   `NSScreen.screens` (the host's one-based `--display <n>`) or `WindowDisplay::Secondary` (`--display secondary`,
   `nsh test`'s default: the first display besides the primary one whose frame is not the primary's, as a mirror's
   is; the primary one when there is no other). With `AppOptions::keep_size` (the host's `--keep-window-size`, which
-  `nsh test` passes) the window's `constrainFrameRect:toScreen:` (it is an `NshWindow`) returns the frame as
+  `nsh test` passes) a window's `constrainFrameRect:toScreen:` (it is an `NshWindow`) returns the frame as
   it is: AppKit would shrink a window taller than its screen when it shows it, and a test's window keeps the size the
-  test opens it at on a shorter secondary display. nsh.json `window` applies before the window shows (its attributes,
-  size, place, display and mode; with `restoreBounds` the placement the engine kept in the app's storage, which the runner reads first).
-  With `defaultVisible: false` the window is made and its app runs, but it is not ordered in. It takes the mode it
-  opens in as `setMode` does: a zoom leaves a window ordered out, but AppKit shows a window that enters full screen,
-  so a hidden window (this one, one `hide()` hid, also while it leaves full screen to be ordered out, a new
-  `Window.open` one before its first frame) holds a full screen `setMode` or `setPlacement` asks for
-  (`Watch::full_screen_on_show`), its state reading the mode, and enters it once it is ordered in and no transition
-  animates (`window_state::shown`): the first `show()` / `focus()`, a link (`application:openURLs:`) or the Dock's
-  reopen (`window::main_shown`); a window ordered in elsewhere (an embedding app's own) enters it on the
-  notification of its order-in (`NSWindowDidChangeOcclusionStateNotification`). A development host holds its first show until the first app
-  came (`Running::held`): the app's `defaultVisible` decides whether it shows, at the host's size and in the normal
-  mode, as every app's window (the other launch options apply where a runner makes the window). An error shows the
-  window while it is hidden (held, or hidden by the app: a tray app whose startup failed), so it is seen; a reload
-  leaves it as it is.
-  The standalone event loop
-  ends when its window closes, a minimized one too; `windowWillClose:` schedules
-  its stop after the close callback. `set_ui_sets`
+  test opens it at on a shorter secondary display. nsh.json `window` supplies launch defaults for the first app
+  window (its attributes, size, place, display and mode; with `restoreBounds` the placement the engine kept in the
+  app's storage, which the runner reads first). A window takes the mode it opens in as `setMode` does: a zoom leaves
+  a window ordered out, but AppKit shows a window that enters full screen, so a hidden window (one `hide()` hid,
+  also while it leaves full screen to be ordered out, a new `Window.open` one before its first frame) holds a full
+  screen `setMode` or `setPlacement` asks for (`Watch::full_screen_on_show`), its state reading the mode, and enters
+  it once it is ordered in and no transition animates (`window_state::shown`): the first `show()` / `focus()`, a link
+  (`application:openURLs:`) or the Dock's reopen (`window::main_shown`); a window ordered in elsewhere (an embedding
+  app's own) enters it on the notification of its order-in (`NSWindowDidChangeOcclusionStateNotification`).
+  `defaultVisible` is parsed but has no effect: the host never shows, and an app that starts without a window opens
+  none. An error reports through the app; a reload leaves the open windows as they are.
+  The standalone event loop follows the app's last-window policy: with the platform default macOS keeps running with
+  no windows; `windowWillClose:` closes only that NSWindow. `set_ui_sets`
   serves the UI sets beside the runtime's modules (`nsh/base` by default; an app with Rust components of its own passes
   `nsh_base::registry()` and its sets). With `AppOptions::transparent` (false by default) a caller of `run_app` gets a
   window that is nonopaque with a clear background, and the surface paints none of its own background under the root,
@@ -293,7 +294,7 @@ belong to the app, which owns retention and its storage budget.
 | Dialogs (`Dialog`) | `navigation.rs` | Children of the root above the app's views, at the size of the surface, sliding up or fading in: transparent layers with no look of their own, showing only the app's popup and backdrop (`presentation` is ignored) |
 | Shaders | `shader.rs` | `Shader` frames as a sublayer's IOSurface (the GPU renders into it; a `CGImage` read back without Metal) under the children; effects and transitions draw their children through the shader from `renderInContext:` pictures of their container, masked while the frames show over it; a page's or a dialog's `transitionShader` as a layer over the stack or the root (`NavOverlay`); see [shaders.md](shaders.md) |
 | Transitions | `transition.rs` | `LayoutAnimation`, style transitions and keyframes on frame callbacks (Linux's); curves, interpolation and timing are `nsh_core::transition`'s, and native animation values are written through `nsh_core::animation` (`animation.rs`), as on the other desktops |
-| Alerts (`AlertDialog`) | `system.rs` | `NSAlert`, placed as open and save panels are (next row: `window::panel_window`): a sheet of the window the user is in while the user sees it, else (a tray app's hidden main window, the app hidden, the window minimized or off every screen, a surface in no window) on its own, in front, an inactive app activated first. On its own an alert is app-modal (`runModal`, `system::run_alone`), one at a time, and the app's batches go on while it shows (`pitfalls.md`); the app stopping or its surface dropped takes its alerts away unanswered. NSAlert puts two buttons in a row, its first rightmost, and stacks more, its first on top but the Return button moved above all: up to two alert buttons are added in reverse with the cancel button last (they read in order, cancel leftmost) and the last regular one is the default; more, and action sheets' options, are added in order with the cancel button last and no default (iOS's order). Cancel is Escape; destructive buttons have `hasDestructiveAction`. An alert's `input` is an `NSTextField` accessory view. |
+| Alerts (`AlertDialog`) | `system.rs` | `NSAlert`, placed as open and save panels are (next row: `window::panel_window`): a sheet of the window the user is in while the user sees it, else (the hidden host, the app hidden, the window minimized or off every screen, a surface in no window) on its own, in front, an inactive app activated first. On its own an alert is app-modal (`runModal`, `system::run_alone`), one at a time, and the app's batches go on while it shows (`pitfalls.md`); the app stopping or its surface dropped takes its alerts away unanswered. NSAlert puts two buttons in a row, its first rightmost, and stacks more, its first on top but the Return button moved above all: up to two alert buttons are added in reverse with the cancel button last (they read in order, cancel leftmost) and the last regular one is the default; more, and action sheets' options, are added in order with the cancel button last and no default (iOS's order). Cancel is Escape; destructive buttons have `hasDestructiveAction`. An alert's `input` is an `NSTextField` accessory view. |
 | Open and save panels (`pick_paths`, `pick_save_path`, `Picker.pickFiles`, `Picker.pickImages`) | `file_requests.rs`, `picker.rs` | `NSOpenPanel` / `NSSavePanel` as a sheet of the window the user is in (`window::sheet_window`: the app's own titled window that has the keyboard, else the main window) while the user sees that window. A sheet of a window out of sight would stay out of sight with it: while the window is hidden (a tray app's main window, `defaultVisible: false`, or the app hidden), minimized or wholly off every screen (`NSWindow.screen` nil), the panel shows in a window of its own, and an inactive app is activated first as `focus()` activates it (`activateIgnoringOtherApps:`; never in the background, as `nsh test` runs it), since such a panel opens behind the front app's windows (`window::panel_window`, `panel_placement`). Alerts follow the same rule (previous row). |
 | Video | `native.rs` | AVFoundation (loaded at run time, as on iOS): an `AVPlayerLayer` in a view that lets the mouse through, or AVKit's `AVPlayerView` with `controls`; the player is made on a frame after the one that mounts the video, once the framework is in (`start_later`, see "First native views") |
 | Web views | `native.rs` | `WKWebView` (WebKit loaded at run time, the configuration and the `WKWebView` each made on a frame after the mount: `start_later`, see "First native views"; iOS's bridge: `window.nsh.postMessage`, injected JS, the `webview` capability's navigation policy, every prop, event and command iOS has; the URL schemes the app serves, `url_scheme`, through `nsh-platform-apple`'s `web_scheme`, one `WKURLSchemeHandler` per web view set on its configuration before it is made, shared with iOS); a `file://` `src` loads with `loadFileURL`, reading the file's own folder and nothing above it (`file_read_scope`: `file://localhost/` is the same local path as `file:///`; none for another host, a file at the root or a path with a `.` or `..` segment, which load as plain requests), and the navigation policy lets that web view open any file in that folder or below it, so a local multi-page HTML document can link between its pages; any file URL outside it is refused (`navigation_allowed`); a web view is transparent by default (`drawsBackground = false`), a page without a background showing the view behind it; macOS's web view has no scroll view to turn off, so with `scrollable={false}` the root's `hitTest:` keeps wheel and trackpad scrolls from it (`passes_wheel`) and they scroll the app's scroll views around it (the page's own keys and scripts still scroll it; swipes between pages, `allowsBackForwardNavigationGestures`, are scrolls too) |
@@ -655,17 +656,15 @@ default policy, so a replacement engine starts with its own quit listener.
 Deferred listener-removal cancellation checks the request serial, so it cannot
 cancel a later confirmation from a replacement listener on the same surface.
 
-For `mainWindowClose`, `window.rs` routes a main-window close to that confirmation
-only when the window's close policy permits closing and it would end the runner.
-A `closeOnPress: false` guard still uses `closePress`; `keep_alive_on_close` still
-hides the window, including while a quit confirmation is pending. The request is
-intercepted before `closePress` is sent, so one close uses one handler.
-Repeated Quit or eligible close requests share the pending
-confirmation. A system quit arriving during it uses the same confirmation and
-adds the AppKit reply. Explicit window closes keep their existing behavior, and
-embedded views leave the lifecycle to their host.
-
-The native test's `quit_requests` cases exercise these paths in child processes.
+`mainWindowClose` is legacy in window model v2: there is no user-closable main
+window, so the option is still parsed but no close press routes through it.
+App windows close as ordinary windows; the last-window policy and
+`Application.quit()` own quitting. The old path (a main-window close routed to
+the confirmation only when its close policy permits closing and it would end
+the runner; a `closeOnPress: false` guard using `closePress`; a retained window
+hiding while a confirmation is pending) remains in the backend for the hidden
+surface and is 待平台验证. The native test's `quit_requests` cases exercise these
+paths in child processes and have not been migrated to v2.
 Run `NSH_QUIT_CHECK_ONLY=1 cargo test -p nsh-platform-macos --test native --features dev -- --ignored`
 in a desktop session. The system cases send a quit Apple event with `keyAEQuitReason`
 to the child process itself, without ending the user's session. The reload cases
@@ -859,6 +858,7 @@ For a real surface, with a window server and a keyboard:
 cargo build -p nsh-cli        # ./target/debug/nsh
 cat > /tmp/raw-keys.tsx <<'EOF'
 import { mount, signal, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
 
 function App() {
   const log = signal("none");
@@ -874,7 +874,7 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => <Window id="main"><App /></Window>);
 EOF
 ./target/debug/nsh run /tmp/raw-keys.tsx --target macos
 ```
