@@ -91,6 +91,14 @@ The cancellation path therefore retains cleanup ownership until stopping is esta
 arriving after the UI node is released. A completed destination is never removed by a late cancellation.
 Removing the last download listener cancels in-flight sessions with `NoListener` while keeping the WebView mounted.
 The commit's final event mask decides this: removing and readding a listener within one turn does not cancel it.
+An offer whose URL the app's `webview` grant does not allow (`Access::allows_webview`, skipped for an unrestricted
+app and for the page's own content, `data:` and `blob:`, which reaches no host) is refused when it reaches the core:
+nothing is staged or offered, the transfer is cancelled and the app hears `Failed` with `ERR_ACCESS_DENIED`. Backends
+therefore report the URL of the response actually downloaded, after redirects: the Apple transport (`response.URL`)
+and Linux (`offer_of`, the response's URI) do, and the Apple transport also refuses such a redirect before WebKit
+requests it. Windows reports `ICoreWebView2DownloadOperation::Uri`, not checked to be the URL after redirects, and a
+web view with neither download listener nor `defer_downloads` leaves its downloads to WebView2's own download UI, which
+the core never sees.
 
 `DownloadDestination` is an absolute file path with an existing parent; overwrite is opt-in. The core allocates an
 owned private sibling staging directory with a nonexistent leaf, accommodating engines that create their output

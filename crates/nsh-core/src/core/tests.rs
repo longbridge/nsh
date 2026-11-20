@@ -49672,6 +49672,165 @@ mod download_decisions {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// An app whose web views may show `hosts` (`capabilities.webview`).
+    fn webview_hosts(hosts: &[&str]) -> Arc<crate::access::Access> {
+        Arc::new(crate::access::Access {
+            declared: crate::access::Capabilities::from_json(
+                &serde_json::json!({ "webview": { "hosts": hosts } }),
+            )
+            .unwrap(),
+            granted: None,
+        })
+    }
+
+    /// An offer of a download whose response came from `url`.
+    fn offer_at(id: &str, url: &str) -> EventPayload {
+        download_offer(&DownloadOffer {
+            id: id.into(),
+            url: url.into(),
+            filename: "secret".into(),
+            mime_type: Some("application/octet-stream".into()),
+            bytes: Some(6),
+            method: Some("GET".into()),
+            source: WebDownloadSource::Transfer,
+        })
+    }
+
+    /// The offer's URL is the response's, after the platform followed its
+    /// redirects: a download that ended up on a host `webview.hosts` does
+    /// not allow is never offered to the app, its transfer is released and
+    /// the app hears it failed with `ERR_ACCESS_DENIED`. One on a granted
+    /// host is offered as before.
+    #[test]
+    fn a_held_download_from_a_host_the_grant_does_not_allow_is_refused() {
+        reset();
+        let dir = scratch("refused-manual");
+        let mut c = core();
+        c.set_access(webview_hosts(&["example.com"]));
+        c.mount_root(&crate::element::Root::new::<ManualDownloads>(|| ()));
+        let batch = c.commit().unwrap();
+        let web = web_node(&batch);
+
+        let secret = "http://127.0.0.1:18732/secret";
+        assert!(c.component_event(web, EventKind::DownloadOffer, &offer_at("r1", secret)));
+        let (node, request, operation) = wait_request(&mut c);
+        assert_eq!(node, web);
+        assert!(
+            matches!(
+                operation,
+                crate::webview::WebViewOperation::CancelDownload { ref id } if id == "r1"
+            ),
+            "the refused transfer is released: {operation:?}"
+        );
+        assert!(pending().is_none(), "a refused download is never offered");
+        let events = downloads();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].state, WebDownloadState::Failed);
+        assert_eq!(events[0].url, secret);
+        assert_eq!(
+            events[0].code.as_deref(),
+            Some(crate::element::codes::ACCESS_DENIED)
+        );
+        reply_ok(&mut c, web, request);
+        pump(&mut c);
+        assert_eq!(downloads().len(), 1, "the stop reports nothing more");
+        assert!(staging_in(&dir).is_none());
+
+        assert!(c.component_event(
+            web,
+            EventKind::DownloadOffer,
+            &offer_at("a1", "https://example.com/report.bin")
+        ));
+        pump(&mut c);
+        let held = pending().expect("a download from a granted host is offered");
+        assert_eq!(held.url, "https://example.com/report.bin");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An automatic download takes the same grant: a refused one stages
+    /// nothing in the app's data directory.
+    #[test]
+    fn an_automatic_download_from_a_host_the_grant_does_not_allow_stages_nothing() {
+        reset();
+        let dir = scratch("refused-automatic");
+        let mut c = core();
+        c.set_access(webview_hosts(&["example.com"]));
+        c.set_data_dir(Some(dir.clone()));
+        c.mount_root(&crate::element::Root::new::<AutomaticDownloads>(|| ()));
+        let batch = c.commit().unwrap();
+        let web = web_node(&batch);
+
+        let secret = "http://127.0.0.1:18732/secret";
+        assert!(c.component_event(web, EventKind::DownloadOffer, &offer_at("r2", secret)));
+        let (_, request, operation) = wait_request(&mut c);
+        assert!(
+            matches!(
+                operation,
+                crate::webview::WebViewOperation::CancelDownload { ref id } if id == "r2"
+            ),
+            "the refused transfer is released, never started: {operation:?}"
+        );
+        reply_ok(&mut c, web, request);
+        let events = wait_downloads(&mut c, 1);
+        assert_eq!(events[0].state, WebDownloadState::Failed);
+        assert_eq!(
+            events[0].code.as_deref(),
+            Some(crate::element::codes::ACCESS_DENIED)
+        );
+        assert!(!dir.join("downloads").join("r2").exists());
+
+        assert!(c.component_event(
+            web,
+            EventKind::DownloadOffer,
+            &offer_at("a2", "https://example.com/report.bin")
+        ));
+        let (_, _, operation) = wait_request(&mut c);
+        assert!(
+            matches!(
+                operation,
+                crate::webview::WebViewOperation::StartDownload { ref id, .. } if id == "a2"
+            ),
+            "a download from a granted host starts: {operation:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A download of the page's own content (`data:`, `blob:`, an opaque
+    /// one too) reaches no host: `webview.hosts` leaves it offered, as
+    /// before.
+    #[test]
+    fn a_download_of_the_pages_own_content_takes_no_host_grant() {
+        reset();
+        let dir = scratch("page-content");
+        let mut c = core();
+        c.set_access(webview_hosts(&["example.com"]));
+        c.mount_root(&crate::element::Root::new::<ManualDownloads>(|| ()));
+        let batch = c.commit().unwrap();
+        let web = web_node(&batch);
+
+        for (id, url) in [
+            ("d1", "data:text/plain;base64,aGk="),
+            ("d2", "blob:null/0b3c9a6e-58a1-4b8e-9d1c-3f0e8e4f2a11"),
+            ("d3", "BLOB:https://elsewhere.test/1f2e"),
+        ] {
+            assert!(c.component_event(web, EventKind::DownloadOffer, &offer_at(id, url)));
+            pump(&mut c);
+            let held = pending().unwrap_or_else(|| panic!("{url} is offered"));
+            assert_eq!(held.url, url);
+            assert!(
+                !downloads()
+                    .iter()
+                    .any(|e| e.state == WebDownloadState::Failed),
+                "{url} is not refused"
+            );
+            reset();
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn teardown_cancels_and_cleans_only_after_the_stop_is_acknowledged() {
         reset();
