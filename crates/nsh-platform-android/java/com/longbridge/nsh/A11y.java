@@ -340,7 +340,9 @@ final class A11y extends View.AccessibilityDelegate {
 
     /** What the node says of its state: mixed, expanded, current, the value's text, invalid, and the checked word with them. */
     private String stateDescription() {
-        return A11yChanges.stateDescription(state, shownValueText(), (state & 256) != 0 || role == ROLE_SWITCH);
+        // In the app's language (its per-app language, else the system's), as the service speaks.
+        return A11yChanges.stateDescription(state, shownValueText(), (state & 256) != 0 || role == ROLE_SWITCH,
+                java.util.Locale.getDefault());
     }
 
     private boolean has(String name) {

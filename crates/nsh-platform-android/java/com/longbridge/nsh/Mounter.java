@@ -409,8 +409,17 @@ final class Mounter {
                     // updating live allocates nothing for it.
                     boolean uniform = b.getInt() != 0;
                     int uniformColor = b.getInt();
+                    // What attachments copy as: offset, string object.
+                    int copies = b.getInt();
+                    int[] copyAt = copies == 0 ? TextLayouts.NO_COPIES : new int[copies];
+                    String[] copyTexts = copies == 0 ? TextLayouts.NO_COPY_TEXTS : new String[copies];
+                    for (int i = 0; i < copies; i++) {
+                        copyAt[i] = b.getInt();
+                        copyTexts[i] = (String) objects[b.getInt()];
+                    }
                     if (v instanceof TextBox) {
                         TextBox t = (TextBox) v;
+                        t.setCopyTexts(copyAt, copyTexts);
                         t.setSelectable(selectable == 1, selectable == 0, selectionColor);
                         t.setLayout((Layout) layout, x * density, y * density, w * density, h * density);
                         t.recolor(uniform, uniformColor, effects.get(t.id));

@@ -778,6 +778,23 @@ function runPoint(run, offset) {
 }
 
 /** The offset in a run of a boundary (`container`, `offset`) inside it. */
+/**
+ * `part` of a run, starting at UTF-16 offset `start` of its text (null: a
+ * truncated line's `…` first), as a copy gives it: an attachment (U+FFFC)
+ * as its copy text in `copies` (offset to text, `copyText`), else left out
+ * in a selectable view (`area`).
+ */
+function copiedRun(part, start, copies, area) {
+  if (!copies || start == null) return area ? part.replaceAll("\uFFFC", "") : part;
+  let out = "";
+  for (let i = 0; i < part.length; i++) {
+    const c = part[i];
+    if (c !== "\uFFFC") out += c;
+    else out += copies.get(start + i) ?? (area ? "" : c);
+  }
+  return out;
+}
+
 function runOffset(run, container, offset) {
   const range = document.createRange();
   range.setStart(run, 0);
@@ -2885,9 +2902,11 @@ class Player {
     el.style.setProperty(prop, value);
   }
 
-  op_t([, id, cx, cy, , , runs, styles, selectable, selection, color, backgrounds, links]) {
+  op_t([, id, cx, cy, , , runs, styles, selectable, selection, color, backgrounds, links, copies]) {
     const el = this.view(id);
     if (!el) return;
+    // What its attachments copy as (`copyText`), by offset.
+    el._copyTexts = copies?.length ? new Map(copies) : null;
     setTextColor(el, color ?? null);
     if (!this.updateRuns(el, cx, cy, runs, styles, backgrounds, links)) this.replaceRuns(el, cx, cy, runs, styles, backgrounds, links);
     el.classList.toggle("nsh-selectable", !!selectable);
@@ -6320,9 +6339,43 @@ class Player {
       return;
     }
     this.pageUrl = resolved.href;
+    if (push && this.earlyPushed) {
+      // An entry of its own was written for this task's push already
+      // (`pushEarly`): the turn's last address is that entry's.
+      push = false;
+    }
     if (push) this.pageUrlPush = true;
     this.pageUrlSets = (this.pageUrlSets ?? 0) + 1;
-    this.syncHistorySoon();
+    this.syncHistorySoon(push);
+  }
+
+  /** Whether an address pushed now can have its entry at once, in the task
+   * the app pushed it in: no page has an entry (no modal, no stack screen
+   * above its first), none is going, and no traversal is waited for. Then
+   * nothing later in the turn can take an entry away under it. */
+  canPushEarly() {
+    if (this.historyDepth || this.ignoredPops || this.dismissing > 0 || this.popAnswer) return false;
+    if ([...(this.root?.children ?? [])].some((el) => el._kind === "modal")) return false;
+    return this.backDepth() === 0;
+  }
+
+  /**
+   * A push with no page open (a list's row that opens a screen of its own
+   * address): the entry is written now, before the browser draws the new
+   * screen, not a task later (`syncHistorySoon`). Chrome on Android pictures
+   * an entry as the page leaves it and shows that picture under a back
+   * swipe; written after the new screen was drawn, the entry under it was
+   * pictured with that screen. Later addresses of the same task replace
+   * this entry's (in a turn the last one wins). With a page open it waits as
+   * before: a sheet's dismissal can reach the player a task after the push,
+   * and an entry written early would be gone back over with the sheet's.
+   */
+  pushEarly() {
+    this.earlyPushed = true;
+    setTimeout(() => {
+      this.earlyPushed = false;
+    }, 0);
+    this.syncHistory();
   }
 
   // The document's title: a mounted `Head`'s (`nsh/web`), else the main
@@ -6371,8 +6424,13 @@ class Player {
     return depth;
   }
 
-  syncHistorySoon() {
-    if (!this.history || this.historySync) return;
+  /** Writes the turn's entries a task later, once all of it reached the
+   * player; with `push` (an address pushed) at once when it can
+   * (`pushEarly`). */
+  syncHistorySoon(push = false) {
+    if (!this.history) return;
+    if (push && this.canPushEarly()) return this.pushEarly();
+    if (this.historySync) return;
     this.historySync = setTimeout(() => {
       this.historySync = 0;
       this.syncHistory();
@@ -9274,8 +9332,8 @@ class Player {
    * selectable view, texts on one row (their boxes overlap vertically: a
    * table's cells) are joined by a tab instead, a text that continues the
    * one before it (`continuesText`: a wrapped line's later part) by
-   * nothing, and attachments (U+FFFC) and hidden runs are left out, as
-   * the native platforms copy. */
+   * nothing, attachments (U+FFFC) are their copy texts (`copyText`) or
+   * left out, and hidden runs are left out, as the native platforms copy. */
   copyText(e) {
     if (e.target.closest?.(".nsh-field")) return;
     const out = this.selectedText();
@@ -9329,8 +9387,7 @@ class Player {
         if (to === text.length && run._after) out += run._after;
         continue;
       }
-      const part = text.slice(from, to);
-      out += area ? part.replaceAll("\uFFFC", "") : part;
+      out += copiedRun(text.slice(from, to), run._start == null ? null : run._start + from, run.parentNode._copyTexts, !!area);
       if (to === text.length && run._after) out += run._after;
     }
     if (!found) return null;

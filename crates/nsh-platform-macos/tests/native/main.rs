@@ -39,6 +39,8 @@ mod keymap_ime;
 #[cfg(target_os = "macos")]
 mod menu_labels;
 #[cfg(target_os = "macos")]
+mod menu_lifetime;
+#[cfg(target_os = "macos")]
 mod modal_fade;
 #[cfg(target_os = "macos")]
 mod modal_focus;
@@ -98,6 +100,9 @@ fn main() {
             } else if std::env::var_os("NSH_MENU_LABELS_CHECK_ONLY").is_some() {
                 window_press::run();
                 menu_labels::run();
+            } else if std::env::var_os("NSH_MENU_LIFETIME_CHECK_ONLY").is_some() {
+                window_press::run();
+                menu_lifetime::run();
             } else if std::env::var_os("NSH_MOUNT_CHECK_ONLY").is_some() {
                 mount::run();
             } else if std::env::var_os("NSH_WINDOW_DIALOG_CHECK_ONLY").is_some() {
@@ -153,6 +158,7 @@ fn main() {
                 shader_content::run();
                 canvas_bounds::run();
                 menu_labels::run();
+                menu_lifetime::run();
                 window_frames::run();
                 keyboard::run();
                 ime::run();

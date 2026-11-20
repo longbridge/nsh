@@ -60,6 +60,7 @@
 mod agent;
 mod animation;
 mod app;
+mod application;
 mod auth_session;
 mod blur;
 mod bottom_bar;
@@ -89,6 +90,7 @@ mod selectable_view;
 mod shader;
 mod share;
 mod split;
+mod state_words;
 // Sound (`Sound`, `AudioPlayer`), the Speech framework's recognizer and the
 // notification center, shared with macOS.
 use nsh_platform_apple::{audio, notifications, speech};
@@ -202,6 +204,9 @@ fn default_ui_sets() -> Vec<nsh_core::element::Registry> {
 
 pub use crate::{
     app::{AppOptions, AppSource, in_app_bundle, run_app},
+    application::{
+        ApplicationEvent, FetchCompletion, FetchResult, NativeDictionary, on_application_event,
+    },
     component::{ComponentContext, ComponentFactory, Components, NativeComponent},
     image::AssetBase,
     scroll_watch::{ScrollHandle, ScrollWatcher, ScrollWatchers},
