@@ -12,9 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use nsh_base::{accordion, accordion_header, accordion_item, accordion_panel, accordion_trigger};
 use nsh_core::{
-    AccessibilityRole, LayoutCurve, MountItem, NodeId, Size,
-    element::{Root, Spring},
-    platform::Os,
+    AccessibilityRole, LayoutCurve, MountItem, NodeId, Size, element::Spring, platform::Os,
     prelude::*,
 };
 use nsh_engine::EngineConfig;
@@ -141,7 +139,9 @@ fn start(props: HarnessProps, reduce_motion: bool) -> App {
     let mut config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
         clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
-        ..EngineConfig::new(Root::new::<Harness>(move || props.clone()))
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>(move || {
+            props.clone()
+        }))
     };
     config.environment.os = Os::MacOs;
     config.environment.reduce_motion = reduce_motion;
@@ -568,8 +568,10 @@ fn closing_reveal_panel_disables_pointer_events_at_once() {
     let config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
         clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
-        ..EngineConfig::new(Root::new::<PanelHarness>(|| PanelProps {
-            block_parent: false,
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<PanelHarness>(|| {
+            PanelProps {
+                block_parent: false,
+            }
         }))
     };
     let mut app = Headless::start(config).expect("engine starts");
@@ -620,8 +622,8 @@ fn closing_reveal_panel_disables_pointer_events_at_once() {
     // An open panel inside a `PointerEvents::None` ancestor inherits `None`.
     let blocked_config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
-        ..EngineConfig::new(Root::new::<PanelHarness>(|| PanelProps {
-            block_parent: true,
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<PanelHarness>(|| {
+            PanelProps { block_parent: true }
         }))
     };
     let mut blocked = Headless::start(blocked_config).expect("engine starts");

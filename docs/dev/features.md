@@ -16,7 +16,7 @@ The large optional parts of a native runtime are Cargo features of the platform 
 | `crypto` | the JS module `crypto`, Web Crypto's globals (implies `js`) | Importing it fails |
 | `websocket` | the native WebSocket client: tokio-tungstenite, rustls, the platform verifier (webpki-roots on Android) | `connect` of `websocket` rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` |
 | `updater` | `nsh/updater`'s checks, downloads and installs (nsh-updater) | `checkForUpdate` and `checkForPackage` find none; downloads and installs reject |
-| `svg` | resvg, usvg, tiny-skia (SVG images) | An SVG `<Image>` shows nothing; its load fails naming the feature |
+| `svg` | resvg, usvg, tiny-skia (SVG images) | `asset!`/`assets!` of an SVG file fails the build naming the feature; an SVG loaded at run time (URL, bytes) shows nothing and its load fails naming the feature |
 | `net` | ureq and rustls: `fetch` and remote images (Linux, Windows, TUI, GPUI; macOS, iOS and Android use the system's HTTP) | `fetch` rejects; `<Image>` shows files, assets and inline data only |
 | `sound` | GStreamer (Linux only: `nsh-platform-linux`, `nsh-linux-app`; the other platforms play sounds with the system's audio) | `Sound.load` rejects with `not-supported`, naming the feature; `AudioPlayer` and `Video` play as before, through GTK |
 | `webview` | WebKitGTK (Linux), WebView2 (Windows) | A web view fails at once, as on a platform that shows none |

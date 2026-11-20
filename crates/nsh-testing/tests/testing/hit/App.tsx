@@ -1,4 +1,5 @@
 import { mount, signal, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
 
 // Buttons for `press`: one a press reaches, one under a view drawn over
 // it, one of no size and one that hears no press.
@@ -37,4 +38,4 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => <Window id="main">{App}</Window>);

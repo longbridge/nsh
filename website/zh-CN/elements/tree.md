@@ -50,6 +50,7 @@ fn files() -> impl IntoElement {
 ```tsx tabs
 import { mount, signal, Text, View } from "nsh";
 import { Tree, type TreeItem } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 const files: TreeItem[] = [
   {
@@ -89,7 +90,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 `Tree` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate。应用设置 `expanded` 和 `selected` 时，展开的项目和选中的项目由应用持有，并在 `onExpandedChange` 和 `onSelectedChange` 中更新；不设置时树自己保存状态，从 `defaultExpanded` 和 `defaultSelected` 开始。项目由 `id` 标识，这是应用自己的标识（路径、记录的键），永远不是标签。在 Rust 中由 `tree()` 创建，每个属性有一个 setter（`.items(..)`、`.expanded(..)`、`.render_item(..)`），每个事件有一个监听方法，以及有类型的样式方法。

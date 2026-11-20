@@ -51,6 +51,11 @@ final class InputBox extends FrameLayout implements Node {
     private int submit = SUBMIT_AND_BLUR;
     private boolean applying;
     private boolean configured;
+
+    /** It has had its first props (an `autoFocus` then focuses it). */
+    boolean isConfigured() {
+        return configured;
+    }
     /** The composition last seen (`onCompositionChange` reports its changes). */
     private boolean inComposition;
     private String composed = "";

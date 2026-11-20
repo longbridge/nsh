@@ -348,6 +348,10 @@ views that report it:
   through nsh-core's `animation::Animator`, which the headless animator wraps, `PanEnd` with the velocity) or a
   scroll view (dragged within its content; past its top only when it listens to `Refresh`, rubber-banded, refreshing
   when released past `ScrollBehavior::refreshes`) takes it, and the press under it is cancelled once it moves away;
+  on a desktop environment one that starts in a selectable view selects across its texts instead
+  (`headless/selection.rs`: `nsh_core::selection::SelectionModel`, the backends' own, over `Screen::area_texts` laid
+  out as `ApproxTextEngine` lays them; `SelectionChange` with `text`, `start` and `bounds` as the backends report it),
+  and one that starts elsewhere clears the selection;
 - `hover` (`headless/pointer.rs`): on a desktop environment the mouse comes over the match's middle: the views from it
   out that hovering matters to (`input::hoverable`: `hover:` styles or hover events) replace those hovered before
   (`Screen::set_hovered`), `input::hover_changes` says which hear `MouseLeave` and `MouseEnter` (with their `HOVERED`
@@ -688,7 +692,7 @@ transitions but not its keyframes repeating forever, `animate-ping`'s or `animat
 finite animations too: a screen sliding in; Android counts a scroll view drawing, as its overscroll stretch relaxes
 without moving a view, and a touch then only catches the stretch). `Native`'s calls do their work
 on the platform's main thread and return when the input is posted. Screenshots come back as base64 bytes: PNG
-on graphical targets, versioned UTF-8 Cell JSON on `tui`. The test's side saves them, as the host may run on another machine. `app.window(id)`'s steps (`TestStep::WindowState`, `PressWindowClose`, `WindowScreenshot`) name a window of the app by its id; the agent finds its root node in the model (`Scene::window_root`) and asks the platform (`Native::window_state`, `press_window_close`, `window_screenshot`), and `Native::target_window` names the window each step on a view acts in. Their defaults serve the main window, so a platform starts with that and adds the app's own windows. `open`'s manual clock reaches the host in the
+on graphical targets, versioned UTF-8 Cell JSON on `tui`. The test's side saves them, as the host may run on another machine. `app.window(id)`'s steps (`TestStep::WindowState`, `PressWindowClose`, `WindowScreenshot`) name a window of the app by its id; the agent finds its root node in the model (`Scene::window_root`) and asks the platform (`Native::window_state`, `press_window_close`, `window_screenshot`), and `Native::target_window` names the window each step on a view acts in. Their defaults name the first app window (or no window), so a platform starts with the app's declared windows and adds `Window.open`'s. `open`'s manual clock reaches the host in the
 test's setup (`TestEnvironment::clock`, its start in Unix milliseconds): `Model::set_up_engine` starts the engine on
 `Clock::manual(start).with_frames()`, and the host hands the started engine back (`Model::engine_started`). The
 test's `clock` steps are `TestStep::Clock` (`ClockChange::RunFor`, `FastForward`, `SetSystemTime`; the web's

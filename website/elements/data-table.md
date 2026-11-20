@@ -38,6 +38,7 @@ fn table() -> impl IntoElement {
 ```tsx tabs
 import { mount } from "nsh";
 import { DataTable, type DataTableColumn } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 const columns: DataTableColumn[] = [
   { key: "name", title: "Name", width: 160, sortable: true },
@@ -55,7 +56,11 @@ function App() {
   return <DataTable columns={columns} data={rows} class="flex-1" />;
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 The table fills the box the app gives it (`flex-1`, a height) and scrolls inside: vertically through the rows and

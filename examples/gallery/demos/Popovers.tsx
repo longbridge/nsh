@@ -2,7 +2,7 @@ import { signal, Text, View } from "nsh";
 import { type OpenChangeReason, Popover } from "nsh/base";
 import { LucideIcon, type LucideIconName } from "../icons";
 import { dismissToast, toast } from "../toast";
-import { alpha, Badge, Button, Caption, Card, colors, DemoPage, hovered, PopIn, placementWords, popoverLook, type PopupSide, popupSurface, Segmented, Stat, Toggle } from "../ui";
+import { alpha, Badge, Button, Caption, Card, colors, DemoPage, hovered, PopIn, placementWords, popoverLook, type PopupSide, popupSurface, Segmented, Stat, TERMINAL_COLUMN, terminal, Toggle } from "../ui";
 import { Avatar, createEvents, Field, pointer, Rule, tap, Trigger } from "./OverlayUi";
 
 // Every popover here comes in with `PopIn` (the gallery's popup surface,
@@ -209,8 +209,8 @@ export function Popovers() {
               </View>
             </PopIn>
           </Popover>
-          {/* A word's space after the mention, as in the line of text it is part of. */}
-          <Text style={{ flex: 1, marginLeft: 4, fontSize: pointer ? 13 : 15, color: colors.muted }}>mentioned you in Q3 roadmap</Text>
+          {/* A word's space after the mention, as in the line of text it is part of: a whole Cell in a terminal. */}
+          <Text style={{ flex: 1, marginLeft: terminal ? TERMINAL_COLUMN : 4, fontSize: pointer ? 13 : 15, color: colors.muted }}>mentioned you in Q3 roadmap</Text>
         </View>
       </Card>
     );
