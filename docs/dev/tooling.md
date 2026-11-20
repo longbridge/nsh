@@ -954,9 +954,11 @@ program that describes them, builds the hosts and runners with them, and does ev
   generates calls their API, and the description and the trace protocol must be the ones it reads), which the app's
   requirements must accept, or by path from the checkout the app's crates depend on (nsh's own examples, as
   `examples/gallery-rs`, through the workspace's path dependencies), which must be of that version, with the app's
-  crates.io dependencies on nsh patched to it. Git dependencies use the checkout Cargo resolves from the app’s
-  lockfile, including registry dependencies redirected by its patches. The generated workspaces patch both crates.io
-  and the Git repository to that checkout, so the app and its hosts share the same core and native module types.
+  crates.io dependencies on nsh patched to it. A direct Git dependency Cargo resolves to a checkout uses it, and its
+  locked revision must be this `nsh`’s revision: another revision stops the command, naming both, instead of
+  rewriting the app’s manifests. When either revision is unknown, the checkout’s workspace version is compared
+  instead. The generated workspaces patch both crates.io and the Git repository to that checkout, so the app and its
+  hosts share the same core and native module types.
   Requirements of another version, or crates taking nsh from two places, stop the command with what to change, rather
   than a build failing later on two `nsh-core`s. They build in the app's own `target/`, as a Cargo project in the app's
   directory does (`nsh init` ignores it), or in `CARGO_TARGET_DIR` when it is set (one directory several checkouts or
