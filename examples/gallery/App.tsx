@@ -398,7 +398,8 @@ function SidebarToggle() {
 }
 
 /** The sidebar's search: filters the demos by name or group as you type
- * (Ctrl+K / Cmd+K focuses it, Escape clears it). */
+ * (Ctrl+K / Cmd+K focuses it, Enter opens the demo named or else the first
+ * found, Escape clears it). */
 function Search() {
   let input: InputRef | undefined;
   keymap.bind("mod+k", () => input?.focus());
@@ -417,6 +418,12 @@ function Search() {
       value={query()}
       onChange={({ value }) => query.set(value)}
       onKeyPress={(e) => e.key === "Escape" && query.set("")}
+      onSubmit={() => {
+        const demos = found().flatMap((g) => g.demos);
+        const q = query().trim().toLowerCase();
+        const demo = demos.find((d) => d.name.toLowerCase() === q) ?? demos[0];
+        if (demo) select(demo);
+      }}
       placeholder={`Search demos  ${keymap.label("mod+k")}`}
       accessibilityLabel="Search demos"
     />
