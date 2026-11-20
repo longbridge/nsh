@@ -234,7 +234,7 @@ pub(crate) fn compile_release(
 /// `--name`, `--version` and `--build`, with the defaults the package
 /// writers use: [`crate::package::name_and_id`], `1.0.0`, build `1`), so
 /// `appInfo()` reports what the package says it is.
-fn app_info(entry: &Path, config: &crate::package::AppConfig) -> AppInfo {
+pub(crate) fn app_info(entry: &Path, config: &crate::package::AppConfig) -> AppInfo {
     let (name, id) = crate::package::name_and_id(entry, config);
     let mut info = AppInfo::default();
     info.id = Some(id);
