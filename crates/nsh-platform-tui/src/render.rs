@@ -794,8 +794,9 @@ impl Painter<'_> {
         // overlay's own box is its frame instead, and a field keeps its
         // underline. A swatch is its color at any size.
         let small = bounds.bottom - bounds.top < i32::from(CONTAINER_ROWS);
+        let picture = view.props.accessibility.role == AccessibilityRole::Image;
         let bandless = parent.ramp.is_none()
-            && (small || swatch.is_some())
+            && (small || picture)
             && !page
             && !dot
             && !hidden
@@ -803,7 +804,14 @@ impl Painter<'_> {
             && !edges.any()
             && !(layer.overlay && !layer.boxed);
         let bandless_fill = bandless
-            .then(|| palette::bandless_fill(fill, parent))
+            .then(|| {
+                // A swatch's Cells keep their own colors, as with surfaces.
+                if picture {
+                    palette::bandless_swatch(fill, parent)
+                } else {
+                    palette::bandless_fill(fill, parent)
+                }
+            })
             .flatten();
         let bandless_reversed = bandless
             && small

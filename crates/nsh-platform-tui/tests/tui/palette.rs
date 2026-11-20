@@ -966,6 +966,11 @@ fn a_swatch_is_its_own_color_with_text_in_black_or_white() {
         Color::Rgb(255, 0, 0),
         "without surfaces a swatch is still its own color"
     );
+    assert_eq!(
+        buffer[(4, 0)].bg,
+        Color::Rgb(39, 39, 42),
+        "a gray one too, not the standard colors' gray (a color area's pale Cells)"
+    );
 }
 
 #[component]
