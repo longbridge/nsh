@@ -431,8 +431,9 @@ impl Mounter {
                         self.detach(surface, &view);
                     }
                     // After the detach: a dialog closing through its shader
-                    // has read it.
-                    crate::navigation::deleted(surface, &view);
+                    // has read it. Navigation lets go of it too, as the
+                    // release below assumes.
+                    crate::navigation::deleted(surface, &view, inside);
                     // Out of its window and of every table: what is left is
                     // freeing it, which waits ([`release_later`]).
                     self.released.borrow_mut().push(view);

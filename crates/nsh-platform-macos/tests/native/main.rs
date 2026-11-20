@@ -41,6 +41,8 @@ mod modal_focus;
 #[cfg(target_os = "macos")]
 mod mount;
 #[cfg(target_os = "macos")]
+mod navigation_unmount;
+#[cfg(target_os = "macos")]
 mod press_momentum;
 #[cfg(target_os = "macos")]
 mod quit_requests;
@@ -82,6 +84,8 @@ fn main() {
                 modal_fade::run();
             } else if std::env::var_os("NSH_MODAL_FOCUS_CHECK_ONLY").is_some() {
                 modal_focus::run();
+            } else if std::env::var_os("NSH_NAVIGATION_UNMOUNT_CHECK_ONLY").is_some() {
+                navigation_unmount::run();
             } else if std::env::var_os("NSH_SHADER_CONTENT_CHECK_ONLY").is_some() {
                 #[cfg(feature = "shader")]
                 shader_content::run();
@@ -135,6 +139,7 @@ fn main() {
                 window_dialog::run();
                 modal_fade::run();
                 modal_focus::run();
+                navigation_unmount::run();
                 #[cfg(feature = "shader")]
                 shader_content::run();
                 canvas_bounds::run();
