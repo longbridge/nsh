@@ -8,9 +8,10 @@
 
 use super::{Core, Key, Kind, NO_KEY, dirty, disabling_changes};
 use crate::{
+    element::JsEvent,
     geometry::{Points, Size},
     mount::MountItem,
-    ops::NodeId,
+    ops::{EventKind, EventPayload, NodeId},
     platform::{Appearance, ColorScheme, InputModality},
     props::PointerEvents,
     style::{Color, Style, StylePatch, ViewStyle},
@@ -569,7 +570,12 @@ impl<M: TextEngine> Core<M> {
             };
             if node.states & state::FOCUS_WITHIN != 0 {
                 node.states &= !state::FOCUS_WITHIN;
+                let hears = node.events.contains(EventKind::FocusOut);
                 self.states_changed(k);
+                if hears {
+                    self.events
+                        .push(JsEvent::Event(id, EventKind::FocusOut, EventPayload::None));
+                }
             }
         }
         for i in 0..self.focus_chain.len() {
@@ -577,7 +583,12 @@ impl<M: TextEngine> Core<M> {
             let node = &mut self.nodes[k as usize];
             if node.states & state::FOCUS_WITHIN == 0 {
                 node.states |= state::FOCUS_WITHIN;
+                let (id, hears) = (node.id, node.events.contains(EventKind::FocusIn));
                 self.states_changed(k);
+                if hears {
+                    self.events
+                        .push(JsEvent::Event(id, EventKind::FocusIn, EventPayload::None));
+                }
             }
         }
         self.focus_scratch = old;

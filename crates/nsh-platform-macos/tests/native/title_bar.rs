@@ -57,7 +57,7 @@ fn Bar() -> impl IntoElement {
 /// The app root: the host, with the one window the test reads.
 #[component]
 fn App() -> impl IntoElement {
-    desktop::window().id("main").content(Bar)
+    desktop::window().id("main").content(bar)
 }
 
 fn pump(ms: u64) {
