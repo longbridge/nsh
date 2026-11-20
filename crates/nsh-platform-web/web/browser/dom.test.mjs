@@ -49,3 +49,15 @@ test("WebView evaluate returns rejected promises on the browser backend", async 
   await assert.rejects(web.evaluate.call(null, "1"), TypeError);
   await assert.rejects(web.evaluate("1", 5), TypeError);
 });
+
+test("WebView getCookies returns rejected promises on the browser backend", async () => {
+  const values = { nodeIds: new WeakMap(), nodes: new Map() };
+  createDom(() => { throw new Error("unexpected native operation"); }, values, { getOwner: () => null }, () => false, () => {});
+  const web = values.makeNode(2);
+  const unsupported = web.getCookies("https://example.com");
+  assert.ok(unsupported instanceof Promise);
+  await assert.rejects(unsupported, { code: "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM" });
+  await assert.rejects(web.getCookies(42), TypeError);
+  await assert.rejects(web.getCookies.call(null, "https://example.com"), TypeError);
+  await assert.rejects(web.getCookies("https://example.com", 5), TypeError);
+});

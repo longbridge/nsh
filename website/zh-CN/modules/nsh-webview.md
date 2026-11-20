@@ -102,6 +102,7 @@ interface WebViewNavigation {
 | `stopLoading()` | 停止加载。 |
 | `injectJavaScript(script)` | 在页面中运行 `script`。 |
 | `evaluate(script, { timeout? })` | 在页面中执行 `script`，返回 `{ value }`，即其 JSON 结果；参见[执行脚本](#执行脚本)。 |
+| `getCookies(url, { timeout? })` | 从 WebView 的存储中读取匹配 `url` 的 Cookie（包含 `HttpOnly` Cookie）；参见[读取 Cookie](#读取-cookie)。 |
 | `postMessage(data)` | 向页面发送 `data`（字符串）：在 `window` 上触发 `message` 事件，`event.data` 即为 `data`。 |
 | `load({ src, headers? })` | 加载 `src`，只给页面自身的请求带上 `headers`（`Record<string, string>`），子资源、之后的导航和重新加载都不带；用于已登录的页面（`Authorization`）。主机必须是 `webview.hosts` 允许的。请求头无效时抛出 `TypeError`。浏览器后端不做任何事。见[已登录的页面](../docs/web-view-and-video.md#已登录的页面请求头)。 |
 
@@ -192,3 +193,60 @@ spawn(async move {
 ```
 
 它返回 `Result<Evaluation, JsError>`；`EvaluateOptions { timeout }` 是 `Duration`。
+
+## 读取 Cookie
+
+`await ref.getCookies(url, { timeout })` 从 WebView 的 Cookie 存储中读取匹配
+`http://` 或 `https://` `url` 的 Cookie，并返回 `WebViewCookie[]`（包含
+`HttpOnly` Cookie）。`timeout` 以毫秒计（默认 30 000）。应用的 `webview`
+权限（`webview.hosts`）必须允许该 `url`。
+
+```ts
+interface WebViewCookie {
+  name: string;
+  value: string;
+  domain?: string;
+  path?: string;
+  expires?: number;
+  httpOnly?: boolean;
+  secure?: boolean;
+  sameSite?: "none" | "lax" | "strict";
+}
+```
+
+```tsx
+const cookies = await web.getCookies("https://example.com");
+const session = cookies.find((c) => c.name === "session");
+```
+
+Windows（`WebView2`）、macOS 与 iOS（`WKHTTPCookieStore`）和 Linux
+（`WebKitCookieManager`）会返回完整属性，并在启用 `incognito` 时读取该
+WebView 的隔离存储。Android（`CookieManager`）也会读取包含 `HttpOnly` 在内的
+匹配 Cookie，但只返回应用共享 Cookie 存储中的 `name` 和 `value`。浏览器后端的
+`WebView.cookiesAvailable()` 解析为 `false`。
+
+失败时以带下列 `code` 的 `Error` 拒绝；参数类型错误、非 HTTP(S) URL 或无效
+`timeout` 会以 `TypeError` 或 `RangeError` 拒绝。
+
+| Code | 含义 |
+|---|---|
+| `ERR_ACCESS_DENIED` | 应用的 capabilities 未对 `url` 授予 `webview`。 |
+| `ERR_NSH_WEBVIEW_ABORTED` | WebView 已被移除，或返回了无效的 Cookie 响应。 |
+| `ETIMEDOUT` | Cookie 存储未在 `timeout` 内响应。 |
+| `ERR_NSH_QUOTA_EXCEEDED` | 匹配的 Cookie 超过 4096 个，或并发 Cookie 请求超过 64 个。 |
+| `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` | 此平台不支持从 WebView 读取 Cookie。 |
+
+Rust 组件通过 WebView 的 element ref 读取 Cookie：
+
+```rust
+let web = element_ref();
+// web_view("https://example.com").element_ref(&web)
+spawn(async move {
+    match web.get_cookies("https://example.com", CookieOptions::default()).await {
+        Ok(cookies) => log::info!("Got {} cookies", cookies.len()),
+        Err(error) => log::warn!("Reading cookies failed: {}", error.message()),
+    }
+});
+```
+
+它返回 `Result<Vec<WebCookie>, JsError>`；`CookieOptions { timeout }` 是 `Duration`。

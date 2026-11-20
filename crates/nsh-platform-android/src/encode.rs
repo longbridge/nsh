@@ -584,6 +584,15 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                         e.int(52);
                         e.int(request as i32);
                     }
+                    Command::WebViewRequest(request) => match request.operation {
+                        nsh_core::webview::WebViewOperation::GetCookies { url } => {
+                            e.int(53);
+                            e.string(request.id.to_string());
+                            e.string(web_generation.to_string());
+                            e.string(url);
+                        }
+                        _ => e.int(-1),
+                    },
                     Command::InjectJavaScript(js) => {
                         e.int(8);
                         e.string(js);
@@ -837,9 +846,6 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                     // the core rejects the calls first.
                     | Command::HostCall { .. }
                     | Command::HostPost { .. }
-                    // No desktop web view controls (`Environment::webview_requests`):
-                    // the core answers these first.
-                    | Command::WebViewRequest(_)
                     // No eyedropper (`Environment::screen_color`): the core
                     // answers no color first.
                     | Command::PickScreenColor { .. } => e.int(-1),

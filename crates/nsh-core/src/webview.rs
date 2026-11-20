@@ -39,8 +39,10 @@ use std::path::PathBuf;
 
 use crate::{EventPayload, JsonValue};
 
+pub mod cookies;
 pub mod downloads;
 
+pub use cookies::{CookieOptions, WebCookie, WebCookieSameSite};
 pub(crate) use downloads::DownloadHandle;
 pub use downloads::{
     CancelReason, DownloadDestination, WebDownload, WebDownloadPending, WebDownloadSource,
@@ -75,6 +77,13 @@ pub enum WebViewOperation {
     CancelDownload {
         /// The download.
         id: String,
+    },
+    /// Reads cookies belonging to `url` from the web view's cookie store
+    /// (including `HttpOnly` cookies). The answer carries a JSON array of
+    /// [`WebCookie`] objects.
+    GetCookies {
+        /// The URL to match cookies against (`http://` or `https://`).
+        url: String,
     },
 }
 

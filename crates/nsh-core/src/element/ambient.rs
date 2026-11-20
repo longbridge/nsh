@@ -1207,6 +1207,17 @@ pub fn web_evaluate_available() -> Answer<bool> {
     answer
 }
 
+/// Whether a web view's ref reads cookies from its store here (TS:
+/// `WebView.cookiesAvailable()`, [`ElementRef::get_cookies`](super::ElementRef::get_cookies)):
+/// the platform supports it and the app's capabilities grant `webview`.
+/// Elsewhere `get_cookies` fails with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. To
+/// await in a task.
+pub fn web_cookies_available() -> Answer<bool> {
+    let (answer, slot) = Answer::new();
+    act(Action::WebCookiesAvailable(slot));
+    answer
+}
+
 /// Whether a web view shows a page here (TS: `WebView.available()`): the
 /// platform shows web views and the app's capabilities grant `webview`.
 /// Where it answers `false`, a web view reports `onError` (`code`

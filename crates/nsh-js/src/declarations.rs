@@ -318,6 +318,7 @@ pub(crate) const REFS: &[(&str, Option<&str>, &str, &[&str])] = &[
             "stopLoading",
             "injectJavaScript",
             "evaluate",
+            "getCookies",
             "postMessage",
             "sendInput",
             "load",

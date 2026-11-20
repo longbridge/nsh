@@ -3909,6 +3909,18 @@ pub enum Op {
         /// How long the script may take to answer.
         timeout: std::time::Duration,
     },
+    /// `ref.getCookies(url, { timeout })` of a web view, in order with
+    /// the UI's ops: JS promise `call` settles with `WebViewCookie[]`.
+    GetCookies {
+        /// The web view.
+        id: NodeId,
+        /// The JS promise's call number.
+        call: u32,
+        /// The URL to match cookies against.
+        url: String,
+        /// How long the cookie store may take to answer.
+        timeout: std::time::Duration,
+    },
     /// `OffscreenCanvas`'s `convertToBlob`: render `drawing` into an image
     /// ([`crate::canvas::render`]); JS promise `call` settles with its
     /// bytes (a `Uint8Array`) or the failure.

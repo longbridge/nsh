@@ -467,3 +467,5 @@ element::rows::RowAccessor::values ->                                 # the app'
 element::rows::RowAccessor::values_now ->                             # the app's data: numbers of any unit, which a component scales
 
 style::TextStyle.line_height_em                                  # a line-height length in multiples of the element font size
+webview::cookies::WebCookie.expires                                   # time (Unix epoch seconds)
+webview::cookies::WebCookie::expires(expires)                         # time (Unix epoch seconds)

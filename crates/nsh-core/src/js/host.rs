@@ -700,6 +700,24 @@ export interface WebViewNavigation {
   canGoForward: boolean;
 }
 
+/** A cookie belonging to a web view's cookie store (`getCookies`). */
+export interface WebViewCookie {
+  name: string;
+  value: string;
+  /** Cookie domain when reported by the platform; Android's CookieManager omits attributes. */
+  domain?: string;
+  /** Cookie path when reported by the platform. */
+  path?: string;
+  /** Expiration time in Unix epoch seconds for non-session cookies when reported by the platform. */
+  expires?: number;
+  /** Whether the cookie is marked `HttpOnly` when reported by the platform. */
+  httpOnly?: boolean;
+  /** Whether the cookie requires HTTPS when reported by the platform. */
+  secure?: boolean;
+  /** Cookie `SameSite` policy when reported by the platform. */
+  sameSite?: "none" | "lax" | "strict";
+}
+
 /** A web view's download (`onDownload`): where it is saved, in the app's data directory's `downloads`. */
 export interface WebViewDownload {
   state: "started" | "finished" | "failed" | "cancelled";

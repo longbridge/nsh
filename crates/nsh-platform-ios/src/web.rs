@@ -286,10 +286,26 @@ impl WebHandler {
     }
 
     /// Answers a [`WebViewOperation`] through `EventKind::WebViewReply`.
-    pub(crate) fn web_request(&self, request: &WebViewRequest) {
+    pub(crate) fn web_request(&self, web: Option<&AnyObject>, request: &WebViewRequest) {
         let ivars = self.ivars();
         let download = ivars.download.clone();
         match &request.operation {
+            WebViewOperation::GetCookies { url } => {
+                if let Some(web) = web {
+                    let control = ivars.control.clone();
+                    let node = ivars.id;
+                    let request_id = request.id;
+                    nsh_platform_apple::web_cookies::get_cookies(web, url, move |result| {
+                        control.dispatch_event(
+                            node,
+                            EventKind::WebViewReply,
+                            nsh_core::webview::reply(request_id, result),
+                        );
+                    });
+                } else {
+                    self.reply(request.id, Err("the web view is not ready".into()));
+                }
+            }
             WebViewOperation::StartDownload { id, staging } => match download.start(id, staging) {
                 // WebKit accepted the destination; the core publishes the
                 // app's `started` and reports the completion as a
@@ -598,7 +614,7 @@ impl WebHost {
     /// `injectJavaScript()`, `postMessage()` and `load()`.
     pub(crate) fn command(&self, command: &nsh_core::Command) {
         if let nsh_core::Command::WebViewRequest(request) = command {
-            self.handler.web_request(request);
+            self.handler.web_request(self.web.as_deref(), request);
             return;
         }
         match command {
@@ -675,7 +691,7 @@ impl WebHost {
 
     /// Carries out a web view request the core asked this view for.
     pub(crate) fn web_request(&self, request: &WebViewRequest) {
-        self.handler.web_request(request);
+        self.handler.web_request(self.web.as_deref(), request);
     }
 }
 

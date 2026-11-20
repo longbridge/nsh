@@ -178,7 +178,7 @@ pub(crate) fn evaluate(
     script: JsValue,
     options: JsValue,
 ) -> JsValue {
-    use nsh_core::element::{IntoThrown, JsError};
+    use nsh_core::element::{EvaluateOptions, IntoThrown, JsError};
     let call = next_call(cx);
     let promise = promise(cx, call);
     // SAFETY: an inline tag check of the newly allocated promise.
@@ -197,7 +197,8 @@ pub(crate) fn evaluate(
         Some(script) => script,
         None => return reject(JsError::Type("evaluate expects a script string".into())),
     };
-    let timeout = match evaluate_timeout(cx, options) {
+    let timeout = match webview_timeout(cx, options, "evaluate", EvaluateOptions::default().timeout)
+    {
         Ok(timeout) => timeout,
         Err(error) => return reject(error),
     };
@@ -225,19 +226,79 @@ pub(crate) fn evaluate(
     promise
 }
 
-/// `evaluate`'s `options.timeout` (milliseconds, 30 seconds when absent).
-fn evaluate_timeout(
+/// `ref.getCookies(url, { timeout })` of a web view: a promise the core
+/// settles with `WebViewCookie[]` or rejects.
+pub(crate) fn get_cookies(
+    cx: *mut JsContext,
+    id: Option<u32>,
+    url: JsValue,
+    options: JsValue,
+) -> JsValue {
+    use nsh_core::element::{CookieOptions, IntoThrown, JsError};
+    let call = next_call(cx);
+    let promise = promise(cx, call);
+    // SAFETY: an inline tag check of the newly allocated promise.
+    if unsafe { qjs::JS_IsException(promise) } {
+        return promise;
+    }
+    let reject = |error: JsError| {
+        let _ = settle(cx, call, Err(error.into_thrown()));
+        promise
+    };
+    // SAFETY: checks the borrowed argument's tag; no user conversion runs.
+    let url = match unsafe { qjs::JS_IsString(url) }
+        .then(|| string_arg(cx, url))
+        .flatten()
+    {
+        Some(url) => url,
+        None => return reject(JsError::Type("getCookies expects a URL string".into())),
+    };
+    let timeout = match webview_timeout(cx, options, "getCookies", CookieOptions::default().timeout)
+    {
+        Ok(timeout) => timeout,
+        Err(error) => return reject(error),
+    };
+    let Some(id) = id else {
+        return reject(JsError::Type("nsh: not a node".into()));
+    };
+    if dom::push_op(
+        cx,
+        Op::GetCookies {
+            id,
+            call,
+            url,
+            timeout,
+        },
+    )
+    .is_err()
+    {
+        // The op limit stops the engine; the promise still rejects.
+        // SAFETY: take the exception push_op raised on this live VM.
+        unsafe { qjs::JS_FreeValue(cx, qjs::JS_GetException(cx)) };
+        return reject(JsError::Error(
+            "the engine stopped before reading cookies".into(),
+        ));
+    }
+    promise
+}
+
+/// Shared `options.timeout` parser for WebView async ref methods.
+fn webview_timeout(
     cx: *mut JsContext,
     options: JsValue,
+    method: &str,
+    default: std::time::Duration,
 ) -> Result<std::time::Duration, nsh_core::element::JsError> {
-    use nsh_core::element::{EvaluateOptions, JsError};
+    use nsh_core::element::JsError;
     // SAFETY: tag checks of a borrowed argument.
     if unsafe { qjs::JS_IsUndefined(options) } {
-        return Ok(EvaluateOptions::default().timeout);
+        return Ok(default);
     }
     // SAFETY: as above.
     if !unsafe { qjs::JS_IsObject(options) } {
-        return Err(JsError::Type("evaluate's options must be an object".into()));
+        return Err(JsError::Type(format!(
+            "{method}'s options must be an object"
+        )));
     }
     // SAFETY: reads a property of a live object; the value is freed below.
     let timeout = unsafe { qjs::JS_GetPropertyStr(cx, options, c"timeout".as_ptr()) };
@@ -245,20 +306,24 @@ fn evaluate_timeout(
     let result = unsafe {
         if qjs::JS_IsException(timeout) {
             qjs::JS_FreeValue(cx, qjs::JS_GetException(cx));
-            Err(JsError::Type("evaluate's timeout could not be read".into()))
+            Err(JsError::Type(format!(
+                "{method}'s timeout could not be read"
+            )))
         } else if qjs::JS_IsUndefined(timeout) {
-            Ok(EvaluateOptions::default().timeout)
+            Ok(default)
         } else if !qjs::JS_IsNumber(timeout) {
-            Err(JsError::Type("evaluate's timeout must be a number".into()))
+            Err(JsError::Type(format!(
+                "{method}'s timeout must be a number"
+            )))
         } else {
             let mut ms = 0f64;
             qjs::JS_ToFloat64(cx, &mut ms, timeout);
             if ms.is_finite() && ms > 0.0 && ms <= u32::MAX as f64 {
                 Ok(std::time::Duration::from_secs_f64(ms / 1000.0))
             } else {
-                Err(JsError::Range(
-                    "evaluate's timeout must be a positive number of milliseconds".into(),
-                ))
+                Err(JsError::Range(format!(
+                    "{method}'s timeout must be a positive number of milliseconds"
+                )))
             }
         }
     };

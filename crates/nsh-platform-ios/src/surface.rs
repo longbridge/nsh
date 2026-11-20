@@ -504,6 +504,7 @@ impl RootView {
             // AVAudioEngine and AVPlayer.
             audio: true,
             web_evaluate: true,
+            web_cookies: true,
             // Download decisions and cancellations reach the web view
             // (`nsh_platform_apple::web_download`).
             webview_requests: true,

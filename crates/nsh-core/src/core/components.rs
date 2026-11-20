@@ -772,8 +772,10 @@ pub(super) struct Components {
     /// The web views' downloads ([`crate::webview::downloads`]): the
     /// sessions, their files and the platform's replies.
     pub(super) downloads: crate::webview::downloads::Downloads,
+    /// In-flight `WebView.getCookies` requests owned by this core.
+    pub(super) web_cookies: super::web_cookies::CookieRequests,
     /// The next id of a platform command answering a web view request
-    /// (shared by the downloads' commands).
+    /// (shared by the downloads' commands and `web_cookies`).
     next_webview_request: u64,
     /// The components' own lists, by node.
     virtual_lists: FxHashMap<NodeId, VirtualListState>,
@@ -899,6 +901,7 @@ impl Default for Components {
             presses: Vec::new(),
             hovers: Vec::new(),
             downloads: crate::webview::downloads::Downloads::default(),
+            web_cookies: super::web_cookies::CookieRequests::default(),
             next_webview_request: 1,
             virtual_lists: FxHashMap::default(),
             list_counts: FxHashMap::default(),
@@ -6333,6 +6336,10 @@ impl<M: TextEngine> Core<M> {
                 self.start_web_evaluation(node, script, timeout, answer)
             }
             Action::WebEvaluationTimeout(request) => self.timeout_web_evaluation(request),
+            Action::GetWebCookies(node, url, timeout, answer) => {
+                self.start_web_cookies(node, url, timeout, answer)
+            }
+            Action::WebCookiesTimeout(request) => self.timeout_web_cookies(request),
             Action::CanvasRenderTimeout(id) => self.timeout_canvas_render(id),
             Action::TransitionTime(id, answer) => {
                 self.components.transition_times.push((id, answer))
@@ -6579,6 +6586,11 @@ impl<M: TextEngine> Core<M> {
             Action::WebEvaluateAvailable(answer) => {
                 let available =
                     self.components.environment.web_evaluate && self.access.allows_webviews();
+                answer.borrow_mut().deliver(available);
+            }
+            Action::WebCookiesAvailable(answer) => {
+                let available =
+                    self.components.environment.web_cookies && self.access.allows_webviews();
                 answer.borrow_mut().deliver(available);
             }
             Action::WebViewAvailable(answer) => {
@@ -6859,11 +6871,11 @@ impl<M: TextEngine> Core<M> {
 
     /// A request id no outstanding download command uses (downloads and
     /// the app's platform replies share one id space per core).
-    fn alloc_webview_request(&mut self) -> u64 {
+    pub(super) fn alloc_webview_request(&mut self) -> u64 {
         loop {
             let id = self.components.next_webview_request;
             self.components.next_webview_request = id.wrapping_add(1);
-            if !self.components.downloads.tracks(id) {
+            if !self.components.downloads.tracks(id) && !self.components.web_cookies.tracks(id) {
                 break id;
             }
         }
@@ -7549,6 +7561,10 @@ impl<M: TextEngine> Core<M> {
                     log::debug!(target: "js", "web view: dropped a reply without a request's id: {reply}");
                     return true;
                 };
+                if self.components.web_cookies.tracks(request) {
+                    self.answer_web_cookies(id, request, reply);
+                    return true;
+                }
                 if !self.components.downloads.tracks(request) {
                     log::debug!(target: "js", "web view: dropped a reply to unknown request {request}: {reply}");
                     return true;

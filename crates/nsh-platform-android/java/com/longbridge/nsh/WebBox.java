@@ -7,6 +7,7 @@ import android.graphics.Bitmap;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.MotionEvent;
+import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
 import android.webkit.WebChromeClient;
@@ -448,6 +449,27 @@ final class WebBox extends WidgetBox {
                 // A dead renderer has no remaining page cell to release.
             }
         }
+    }
+
+    /** Reads cookies for {@code url} from WebView's CookieManager. */
+    void getCookies(String request, String generation, String url) {
+        if (disposed || processGone) {
+            cookieError(request, generation, "The web view was disposed");
+            return;
+        }
+        try {
+            CookieManager manager = CookieManager.getInstance();
+            String raw = manager != null ? manager.getCookie(url) : null;
+            mounter.eventMap(id, Native.WEB_VIEW_REPLY, new String[] {"id", "data", "generation"},
+                    new Object[] {request, raw != null ? raw : "", generation});
+        } catch (RuntimeException error) {
+            cookieError(request, generation, "Android could not read cookies from CookieManager");
+        }
+    }
+
+    private void cookieError(String request, String generation, String message) {
+        mounter.eventMap(id, Native.WEB_VIEW_REPLY, new String[] {"id", "error", "generation"},
+                new Object[] {request, message, generation});
     }
 
     private void cancelEvaluations(String code, String message) {

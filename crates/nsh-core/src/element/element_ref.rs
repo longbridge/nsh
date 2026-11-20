@@ -409,6 +409,37 @@ impl ElementRef {
         answer
     }
 
+    /// Reads cookies belonging to `url` from a web view's cookie store,
+    /// including `HttpOnly` cookies (TS: `ref.getCookies(url, options)`).
+    /// Fails with `ERR_ACCESS_DENIED` when `webview` or `url`'s host is not
+    /// granted, [`codes::TIMED_OUT`](super::codes::TIMED_OUT) after
+    /// `options.timeout`, [`codes::WEBVIEW_ABORTED`](super::codes::WEBVIEW_ABORTED)
+    /// when the web view goes away, and
+    /// [`codes::UNAVAILABLE`](super::codes::UNAVAILABLE) where the platform
+    /// does not support reading cookies
+    /// ([`web_cookies_available`](super::web_cookies_available)). Await it in a task.
+    pub fn get_cookies(
+        &self,
+        url: impl Into<String>,
+        options: crate::webview::CookieOptions,
+    ) -> Answer<Result<Vec<crate::webview::WebCookie>, super::JsError>> {
+        let (answer, slot) = Answer::new();
+        let pending = slot.clone();
+        let url = url.into();
+        if self
+            .reach(|node, executor| {
+                executor.act(Action::GetWebCookies(node, url, options.timeout, pending))
+            })
+            .is_none()
+        {
+            slot.borrow_mut().deliver(Err(super::JsError::Error(
+                "the ref names no web view".into(),
+            )
+            .with_code(super::codes::WEBVIEW_ABORTED)));
+        }
+        answer
+    }
+
     /// Sends `data` to a web view's page (a `message` event on `window`).
     pub fn post_message(&self, data: impl Into<String>) {
         self.send(Command::PostMessage(data.into()));

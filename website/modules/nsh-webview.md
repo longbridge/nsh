@@ -102,6 +102,7 @@ interface WebViewNavigation {
 | `stopLoading()` | Stops loading. |
 | `injectJavaScript(script)` | Runs `script` in the page. |
 | `evaluate(script, { timeout? })` | Runs `script` in the page and resolves `{ value }`, its result as JSON; see [Evaluating scripts](#evaluating-scripts). |
+| `getCookies(url, { timeout? })` | Reads cookies matching `url` from the web view's store (including `HttpOnly` cookies); see [Reading cookies](#reading-cookies). |
 | `postMessage(data)` | Sends `data` (a string) to the page: a `message` event on `window`, with `data` as `event.data`. |
 | `load({ src, headers? })` | Loads `src` with `headers` (`Record<string, string>`) on the page's own request only, not on its subresources, later navigations or reloads; for a signed-in page (`Authorization`). The host must be one `webview.hosts` allows. An invalid header throws a `TypeError`. The browser backend does nothing. See [Signed-in pages](../docs/web-view-and-video.md#signed-in-pages-request-headers). |
 
@@ -198,4 +199,64 @@ spawn(async move {
 ```
 
 It resolves `Result<Evaluation, JsError>`; `EvaluateOptions { timeout }` is a
+`Duration`.
+
+## Reading cookies
+
+`await ref.getCookies(url, { timeout })` reads cookies matching an `http://` or
+`https://` `url` from the web view's cookie store and resolves `WebViewCookie[]`
+(including `HttpOnly` cookies). `timeout` is in milliseconds (30 000 by default).
+The app's `webview` capability (`webview.hosts`) must allow `url`.
+
+```ts
+interface WebViewCookie {
+  name: string;
+  value: string;
+  domain?: string;
+  path?: string;
+  expires?: number;
+  httpOnly?: boolean;
+  secure?: boolean;
+  sameSite?: "none" | "lax" | "strict";
+}
+```
+
+```tsx
+const cookies = await web.getCookies("https://example.com");
+const session = cookies.find((c) => c.name === "session");
+```
+
+Windows (`WebView2`), macOS and iOS (`WKHTTPCookieStore`), and Linux
+(`WebKitCookieManager`) return structured attributes and read from the web
+view's isolated `incognito` store when enabled. Android (`CookieManager`)
+returns matching cookies including `HttpOnly` from the app's shared cookie
+store with `name` and `value` only. Browser targets resolve
+`WebView.cookiesAvailable()` as `false`.
+
+A failure rejects with an `Error` carrying one of these codes; invalid
+arguments, non-HTTP(S) URLs, or negative/non-finite timeouts reject with a
+`TypeError` or `RangeError`.
+
+| Code | Meaning |
+|---|---|
+| `ERR_ACCESS_DENIED` | The app's capabilities do not grant `webview` for `url`. |
+| `ERR_NSH_WEBVIEW_ABORTED` | The web view went away or returned an invalid cookie reply. |
+| `ETIMEDOUT` | The cookie store did not answer within `timeout`. |
+| `ERR_NSH_QUOTA_EXCEEDED` | More than 4,096 matching cookies or more than 64 concurrent cookie requests. |
+| `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` | This platform reads no cookies in web views. |
+
+Rust components read cookies through the web view's element ref:
+
+```rust
+let web = element_ref();
+// web_view("https://example.com").element_ref(&web)
+spawn(async move {
+    match web.get_cookies("https://example.com", CookieOptions::default()).await {
+        Ok(cookies) => log::info!("Got {} cookies", cookies.len()),
+        Err(error) => log::warn!("Reading cookies failed: {}", error.message()),
+    }
+});
+```
+
+It resolves `Result<Vec<WebCookie>, JsError>`; `CookieOptions { timeout }` is a
 `Duration`.

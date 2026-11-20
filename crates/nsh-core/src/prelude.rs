@@ -39,6 +39,7 @@ pub use crate::element::{
     ComponentRef,
     Composition,
     ContextMenuEvent,
+    CookieOptions,
     Corners,
     Cursor,
     Curve,
@@ -204,6 +205,8 @@ pub use crate::element::{
     Viewability,
     ViewableItems,
     VirtualList,
+    WebCookie,
+    WebCookieSameSite,
     WebNavigation,
     WebView,
     WheelDelta,
@@ -282,7 +285,8 @@ pub use crate::element::{
     set_tokens, shaders_available, share, share_available, show_notification, signal, signal_with,
     spawn, speech_available, stored, text_metrics, timer, timer_until, tokens, try_apple_keys,
     try_global, try_os, untracked, use_context, vertical_size_class, wake_count, watch_scroll,
-    web_evaluate_available, web_input_available, web_view_available, when, window,
+    web_cookies_available, web_evaluate_available, web_input_available, web_view_available, when,
+    window,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use crate::element::{background, blocking};

@@ -724,6 +724,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
             // bitmaps with the on-screen canvas's painter.
             canvas_render: true,
             web_evaluate: true,
+            web_cookies: true,
             // wgpu on Vulkan or GLES, in builds with it, until it finds no
             // GPU.
             shaders: nsh_engine::shader::LINKED,
@@ -2039,6 +2040,54 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
         if let Some(control) = control {
             control.dispatch_event(id as NodeId, kind, payload);
         }
+        return;
+    }
+    if kind == EventKind::WebViewReply {
+        let mut request = None;
+        let mut generation = None;
+        let mut data = None;
+        let mut error = None;
+        if let EventPayload::Map(fields) = &payload {
+            for (key, value) in fields {
+                match (*key, value) {
+                    ("id", PayloadValue::Str(s)) => request = s.parse::<u64>().ok(),
+                    ("id", PayloadValue::Number(n))
+                        if n.is_finite() && n.fract() == 0.0 && *n >= 0.0 =>
+                    {
+                        request = Some(*n as u64);
+                    }
+                    ("generation", PayloadValue::Str(s)) => generation = s.parse::<u64>().ok(),
+                    ("data", PayloadValue::Str(s)) => data = Some(s.as_str()),
+                    ("error", PayloadValue::Str(s)) => error = Some(s.as_str()),
+                    _ => {}
+                }
+            }
+        }
+        let Some(request) = request else {
+            return;
+        };
+        let control = {
+            let engine = host.engine.lock().expect("engine");
+            (generation == Some(host.web_generation.load(Ordering::Relaxed)))
+                .then(|| engine.as_ref().map(Engine::control))
+                .flatten()
+        };
+        let Some(control) = control else {
+            return;
+        };
+        let result = match (error, data) {
+            (Some(message), _) => Err(message.to_owned()),
+            (None, Some(header)) => {
+                serde_json::to_value(nsh_core::webview::cookies::parse_cookie_header(header))
+                    .map_err(|e| format!("failed to encode cookies: {e}"))
+            }
+            (None, None) => Err("the WebView returned no cookies".into()),
+        };
+        control.dispatch_event(
+            id as NodeId,
+            EventKind::WebViewReply,
+            nsh_core::webview::reply(request, result),
+        );
         return;
     }
     match host.control() {

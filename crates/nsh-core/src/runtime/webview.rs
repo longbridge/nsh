@@ -26,6 +26,14 @@ impl WebView {
         Later::new(async { Ok::<_, JsError>(crate::prelude::web_evaluate_available().await) })
     }
 
+    /// Resolves with whether a web view's ref reads cookies from its
+    /// store here (`getCookies`): the platform supports it and the app's
+    /// capabilities grant `webview`. Where it resolves `false`, `getCookies`
+    /// rejects with `code` `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"`.
+    pub(crate) fn cookies_available() -> Later<bool> {
+        Later::new(async { Ok::<_, JsError>(crate::prelude::web_cookies_available().await) })
+    }
+
     /// Resolves with whether a web view shows a page here: the platform
     /// shows web views and the app's capabilities grant `webview`. Where
     /// it resolves `false`, a web view shows no page and reports `onError`

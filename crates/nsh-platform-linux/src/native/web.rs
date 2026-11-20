@@ -84,8 +84,8 @@ use gtk4::{self as gtk, gdk, gio, glib, prelude::*};
 use nsh_core::{
     Command, EventKind, EventPayload, JsonValue, PayloadValue, WebProps, WebSource,
     webview::{
-        self, DownloadEnd, DownloadOffer, DownloadOutcome, WebDownloadSource, WebViewOperation,
-        WebViewRequest,
+        self, DownloadEnd, DownloadOffer, DownloadOutcome, WebCookie, WebCookieSameSite,
+        WebDownloadSource, WebViewOperation, WebViewRequest, cookies,
     },
 };
 use nsh_engine::{Access, EngineControl};
@@ -693,6 +693,9 @@ fn load_failed(web: &WebView, shared: &Rc<Shared>) -> glib::SignalHandlerId {
 pub(super) fn web_request(web: &WebView, shared: &Rc<Shared>, request: &WebViewRequest) {
     let id = request.id;
     match &request.operation {
+        WebViewOperation::GetCookies { url } => {
+            get_cookies(web, shared, id, url);
+        }
         WebViewOperation::StartDownload {
             id: download,
             staging,
@@ -704,10 +707,58 @@ pub(super) fn web_request(web: &WebView, shared: &Rc<Shared>, request: &WebViewR
         }
         // A newer core's operation: answered, never left waiting.
         _ => {
-            let _ = web;
             shared.reply(id, Err("unsupported web view operation".into()));
         }
     }
+}
+
+/// Reads cookies matching `url` from `web`'s `WebKitCookieManager` and
+/// answers request `id` through [`Shared::reply`].
+fn get_cookies(web: &WebView, shared: &Rc<Shared>, id: u64, url: &str) {
+    let Some(manager) = web.network_session().and_then(|s| s.cookie_manager()) else {
+        shared.reply(id, Err("the web view has no cookie store".into()));
+        return;
+    };
+    let shared = Rc::clone(shared);
+    manager.cookies(url, gio::Cancellable::NONE, move |res| {
+        let answer = match res {
+            Err(err) => Err(format!("WebKitGTK failed to read cookies: {err}")),
+            Ok(mut list) => {
+                let mut entries = Vec::with_capacity(list.len().min(cookies::MAX_COOKIES + 1));
+                for cookie in list.iter_mut().take(cookies::MAX_COOKIES + 1) {
+                    let name = cookie.name().as_deref().unwrap_or_default().to_owned();
+                    let value = cookie.value().as_deref().unwrap_or_default().to_owned();
+                    let mut entry = WebCookie::new(name, value)
+                        .http_only(cookie.is_http_only())
+                        .secure(cookie.is_secure());
+                    if let Some(domain) = cookie.domain().filter(|s| !s.is_empty()) {
+                        entry = entry.domain(domain.as_str());
+                    }
+                    if let Some(path) = cookie.path().filter(|s| !s.is_empty()) {
+                        entry = entry.path(path.as_str());
+                    }
+                    if let Some(expires) = cookie.expires() {
+                        entry = entry.expires(expires.to_unix() as f64);
+                    }
+                    match cookie.same_site_policy() {
+                        webkit6::soup::SameSitePolicy::None => {
+                            entry = entry.same_site(WebCookieSameSite::None);
+                        }
+                        webkit6::soup::SameSitePolicy::Lax => {
+                            entry = entry.same_site(WebCookieSameSite::Lax);
+                        }
+                        webkit6::soup::SameSitePolicy::Strict => {
+                            entry = entry.same_site(WebCookieSameSite::Strict);
+                        }
+                        _ => {}
+                    }
+                    entries.push(entry);
+                }
+                serde_json::to_value(entries).map_err(|e| format!("cannot encode cookies: {e}"))
+            }
+        };
+        shared.reply(id, answer);
+    });
 }
 
 /// WebKit reported a download of this page: held without a destination

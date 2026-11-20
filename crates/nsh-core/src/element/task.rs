@@ -193,6 +193,8 @@ pub(crate) enum Action {
     WebInputAvailable(AnswerSlot<bool>),
     /// Whether a web view's ref evaluates scripts here.
     WebEvaluateAvailable(AnswerSlot<bool>),
+    /// Whether a web view's ref reads cookies from its store here.
+    WebCookiesAvailable(AnswerSlot<bool>),
     /// Whether a web view shows a page here: the platform shows web views
     /// and the app holds `webview`; the answer resolves the slot.
     WebViewAvailable(AnswerSlot<bool>),
@@ -262,6 +264,15 @@ pub(crate) enum Action {
     ),
     /// Rejects a request that exceeded its deadline.
     WebEvaluationTimeout(u32),
+    /// Reads cookies belonging to a URL from a web view's cookie store.
+    GetWebCookies(
+        NodeId,
+        String,
+        std::time::Duration,
+        AnswerSlot<Result<Vec<crate::webview::WebCookie>, super::JsError>>,
+    ),
+    /// Rejects a cookie request that exceeded its deadline.
+    WebCookiesTimeout(u64),
     /// An offscreen canvas render's deadline passed.
     CanvasRenderTimeout(u32),
     /// How long the node's transitions run with the styles of the commit

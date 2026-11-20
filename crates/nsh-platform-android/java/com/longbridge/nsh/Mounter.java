@@ -2671,6 +2671,19 @@ final class Mounter {
                 if (v instanceof WebBox) ((WebBox) v).cancelEvaluation(request);
                 break;
             }
+            case 53: {
+                String request = (String) objects[b.getInt()];
+                String generation = (String) objects[b.getInt()];
+                String url = (String) objects[b.getInt()];
+                if (v instanceof WebBox) {
+                    ((WebBox) v).getCookies(request, generation, url);
+                } else {
+                    eventMap(id, Native.WEB_VIEW_REPLY,
+                            new String[] {"id", "error", "generation"},
+                            new Object[] {request, "The view is not a web view", generation});
+                }
+                break;
+            }
             case 50:
                 if (v instanceof InputBox) ((InputBox) v).closeEditMenu();
                 break;

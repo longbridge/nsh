@@ -620,6 +620,7 @@ fn initial_environment() -> Environment {
         audio: true,
         web_input: true,
         web_evaluate: true,
+        web_cookies: true,
         webview_requests: true,
         reads_active_descendants: true,
         // wgpu, in builds with it, until it finds no GPU.

@@ -19,6 +19,15 @@ export function createDom(invoke, values, reactive, live, wake) {
     error.code = "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM";
     throw error;
   };
+  // `getCookies` rejects here, as `WebView.cookiesAvailable()` says.
+  prototype.getCookies = async function (url, options) {
+    if (typeof url !== "string") throw new TypeError("getCookies expects a URL string");
+    if (options !== undefined && (options === null || typeof options !== "object")) throw new TypeError("getCookies's options must be an object");
+    if (!values.nodeIds.has(this)) throw new TypeError("nsh: not a node");
+    const error = new Error("web views read no cookies here");
+    error.code = "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM";
+    throw error;
+  };
   prototype.setSelection = function (start, end = start) { return call(314, [values.nodeIds.get(this), "setSelection", { start: Number(start), end: Number(end) }]); };
   prototype.command = function (name, args) { return call(314, [values.nodeIds.get(this), "native", { name, args }]); };
   // A layout animation of this node's change whose `update` phase is

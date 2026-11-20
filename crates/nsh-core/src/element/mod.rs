@@ -105,6 +105,7 @@ pub use nsh_macros::{
 };
 
 // The core's parts of `nsh_base`'s navigation and dialogs.
+pub use self::ambient::web_cookies_available;
 #[doc(hidden)]
 pub use self::host::{modal, screen, stack};
 pub use self::{
@@ -215,6 +216,7 @@ pub use crate::geometry::{
     Point, Points, Radians, Rems, Size, auto, bounds, deg, percentage, point, px, radians,
     relative, rems, size,
 };
+pub use crate::webview::{CookieOptions, WebCookie, WebCookieSameSite};
 pub use crate::{
     AccessibilityRole, AccessibilityState, AutoCapitalize, AutoFill, BackdropMaterial, BlendMode,
     BoxShadow, ColorStop, ContextMenuEvent, Cursor, Dialog, DialogButton, DialogButtonStyle,

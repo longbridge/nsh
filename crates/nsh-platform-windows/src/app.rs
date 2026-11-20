@@ -576,6 +576,7 @@ fn initial_environment() -> Environment {
         // WebView2, in builds with it.
         web_views: cfg!(feature = "webview"),
         webview_requests: cfg!(feature = "webview"),
+        web_cookies: cfg!(feature = "webview"),
         // wgpu, in builds with it, until it finds no GPU.
         shaders: nsh_engine::shader::LINKED,
         ..Environment::default()

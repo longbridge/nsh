@@ -552,6 +552,14 @@ pub(crate) const NODE_METHODS: &[(&str, c_int, &str, &str)] = &[
         ),
     ),
     (
+        "getCookies",
+        2,
+        decl!("(url: string, options?: { timeout?: number }): Promise<WebViewCookie[]>"),
+        decl!(
+            "`WebView`: reads cookies belonging to `url` (`http://` or `https://`) from the web view's cookie store, including `HttpOnly` cookies. Both `webview` and `url`'s host must be allowed by `capabilities.webview`, else it rejects with `ERR_ACCESS_DENIED`. Rejects with `ERR_NSH_WEBVIEW_ABORTED` when the web view goes away or fails to read, `ETIMEDOUT` after `options.timeout` milliseconds (30 000 by default), and `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where `WebView.cookiesAvailable()` resolves `false`. Android's CookieManager reports `name` and `value` only, omitting attributes (`domain`, `path`, `expires`, `httpOnly`, `secure`, `sameSite`)."
+        ),
+    ),
+    (
         "injectJavaScript",
         1,
         decl!("(script: string): void"),
@@ -605,6 +613,14 @@ unsafe extern "C" fn node_method(
     };
     if name == "evaluate" {
         return crate::components::evaluate(
+            cx,
+            node_id(cx, this),
+            arg(argc, argv, 0),
+            arg(argc, argv, 1),
+        );
+    }
+    if name == "getCookies" {
+        return crate::components::get_cookies(
             cx,
             node_id(cx, this),
             arg(argc, argv, 0),
@@ -5214,6 +5230,35 @@ mod tests {
             Promise.all(results.map(value => value.catch(error => error.name))).then(report);
             globalThis.keep = web;
         "#)).unwrap();
+        host.run_jobs();
+        assert_eq!(
+            reported(&host),
+            [
+                "true",
+                r#"["TypeError","TypeError","TypeError","RangeError"]"#
+            ]
+        );
+    }
+
+    #[test]
+    fn get_cookies_rejects_wrong_arguments_and_receivers() {
+        let host = Host::new().unwrap();
+        host.eval_source(&format!(
+            r#"{REPORT}
+            import {{ element }} from "nsh:rt";
+            const web = element("webview");
+            const results = [
+                web.getCookies(42),
+                web.getCookies.call(null, "https://example.com"),
+                web.getCookies("https://example.com", 5),
+                web.getCookies("https://example.com", {{ timeout: -1 }}),
+            ];
+            report(results.every(value => value instanceof Promise));
+            Promise.all(results.map(value => value.catch(error => error.name))).then(report);
+            globalThis.keep = web;
+        "#
+        ))
+        .unwrap();
         host.run_jobs();
         assert_eq!(
             reported(&host),

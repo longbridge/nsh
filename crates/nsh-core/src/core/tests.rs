@@ -18980,6 +18980,45 @@ mod components {
         );
     }
 
+    #[component]
+    fn CookiesCheck() -> impl IntoElement {
+        let shown = signal(String::from("asking"));
+        let page = element_ref();
+        spawn(async move {
+            let available = web_cookies_available().await;
+            let options = CookieOptions {
+                timeout: std::time::Duration::from_millis(5),
+            };
+            let code = match page.get_cookies("https://example.com/", options).await {
+                Ok(cookies) => format!("count {}", cookies.len()),
+                Err(error) => error.code().unwrap_or("none").to_owned(),
+            };
+            shown.set(format!("cookies {available} {code}"));
+        });
+        view()
+            .child(web_view("about:blank").element_ref(&page))
+            .child(text(move || shown.get()))
+    }
+
+    #[test]
+    fn get_cookies_answers_by_its_timeout_where_the_platform_reads_cookies() {
+        let shown = |platform: bool| {
+            let mut c = core();
+            c.set_environment(crate::element::Environment {
+                web_cookies: platform,
+                ..Default::default()
+            });
+            c.mount_root(&crate::element::Root::new::<CookiesCheck>(|| ()));
+            let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("cookies ")));
+            shown.last().unwrap().clone()
+        };
+        assert_eq!(shown(true), "cookies true ETIMEDOUT");
+        assert_eq!(
+            shown(false),
+            "cookies false ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"
+        );
+    }
+
     #[test]
     fn web_input_is_available_where_the_platform_delivers_it_and_the_app_holds_the_grant() {
         let granted = || Some(serde_json::json!({ "webview": { "hosts": [], "input": true } }));
@@ -47288,6 +47327,165 @@ fn web_evaluation_requires_a_capable_host_even_with_a_mobile_environment() {
             )))
     );
     drop(future);
+}
+
+fn cookies_core() -> Core<FakeEngine> {
+    let mut c = core();
+    c.set_environment(crate::element::Environment {
+        os: crate::platform::Os::Windows,
+        web_cookies: true,
+        ..Default::default()
+    });
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::WebView,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    c.commit();
+    c
+}
+
+#[test]
+fn web_cookies_round_trip_ignores_foreign_and_late_replies_and_checks_url_and_capabilities() {
+    use crate::element::{Answer, JsError};
+    let mut c = cookies_core();
+    let (future_bad_url, slot_bad_url) = Answer::new();
+    c.start_web_cookies(2, "javascript:alert(1)".into(), T, slot_bad_url.clone());
+    assert!(matches!(
+        slot_bad_url.borrow_mut().value.take().unwrap().unwrap_err(),
+        JsError::Type(_)
+    ));
+    drop(future_bad_url);
+
+    let (one, a) = Answer::new();
+    c.start_web_cookies(2, "https://example.com/app".into(), T, a.clone());
+    let batch = c.commit().unwrap();
+    let req_id = batch
+        .items
+        .iter()
+        .find_map(|item| match item {
+            MountItem::Command {
+                command: Command::WebViewRequest(req),
+                ..
+            } => match &req.operation {
+                crate::webview::WebViewOperation::GetCookies { url } => {
+                    assert_eq!(url, "https://example.com/app");
+                    Some(req.id)
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("GetCookies command");
+
+    let payload = crate::webview::reply(
+        req_id,
+        Ok(serde_json::json!([
+            {
+                "name": "sid",
+                "value": "secret",
+                "domain": ".example.com",
+                "path": "/",
+                "httpOnly": true,
+                "secure": true,
+                "sameSite": "lax"
+            }
+        ])),
+    );
+    // Foreign node reply must be ignored without consuming pending request.
+    c.component_event(99, EventKind::WebViewReply, &payload);
+    assert!(a.borrow().value.is_none());
+
+    // Own node consumes and delivers cookies, including httpOnly.
+    c.component_event(2, EventKind::WebViewReply, &payload);
+    let list = a.borrow_mut().value.take().unwrap().unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].name, "sid");
+    assert_eq!(list[0].value, "secret");
+    assert_eq!(list[0].http_only, Some(true));
+    drop(one);
+
+    // Non-WebView node aborts.
+    let (f2, s2) = Answer::new();
+    c.start_web_cookies(99, "https://example.com/".into(), T, s2.clone());
+    assert_eq!(
+        s2.borrow_mut().value.take().unwrap().unwrap_err().code(),
+        Some("ERR_NSH_WEBVIEW_ABORTED")
+    );
+    drop(f2);
+
+    // Timeout and node release abort cleanly.
+    let (f3, s3) = Answer::new();
+    c.start_web_cookies(2, "https://example.com/".into(), T, s3.clone());
+    let b3 = c.commit().unwrap();
+    let tid = b3
+        .items
+        .iter()
+        .find_map(|i| match i {
+            MountItem::Command {
+                command: Command::WebViewRequest(req),
+                ..
+            } => Some(req.id),
+            _ => None,
+        })
+        .unwrap();
+    c.timeout_web_cookies(tid);
+    assert_eq!(
+        s3.borrow_mut().value.take().unwrap().unwrap_err().code(),
+        Some("ETIMEDOUT")
+    );
+    drop(f3);
+
+    let (f4, s4) = Answer::new();
+    c.start_web_cookies(2, "https://example.com/".into(), T, s4.clone());
+    c.apply(Op::Release { id: 2 }).unwrap();
+    assert_eq!(
+        s4.borrow_mut().value.take().unwrap().unwrap_err().code(),
+        Some("ERR_NSH_WEBVIEW_ABORTED")
+    );
+    drop(f4);
+}
+
+#[test]
+fn web_cookies_enforce_webview_host_capabilities() {
+    use crate::{access::Access, element::Answer};
+    let mut c = cookies_core();
+    let access = std::sync::Arc::new(Access {
+        declared: crate::access::Capabilities::from_json(&serde_json::json!({
+            "webview": { "hosts": ["allowed.example"] }
+        }))
+        .unwrap(),
+        granted: None,
+    });
+    c.set_access(access);
+
+    let (f_denied, s_denied) = Answer::new();
+    c.start_web_cookies(2, "https://other.example/login".into(), T, s_denied.clone());
+    assert_eq!(
+        s_denied
+            .borrow_mut()
+            .value
+            .take()
+            .unwrap()
+            .unwrap_err()
+            .code(),
+        Some("ERR_ACCESS_DENIED")
+    );
+    drop(f_denied);
+
+    let (f_ok, s_ok) = Answer::new();
+    c.start_web_cookies(2, "https://allowed.example/login".into(), T, s_ok.clone());
+    assert!(s_ok.borrow().value.is_none());
+    drop(f_ok);
 }
 
 /// An `svg()` the platform draws as an image (the web) is sent with its text

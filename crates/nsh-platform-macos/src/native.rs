@@ -2587,12 +2587,25 @@ impl Drop for WebHost {
 fn web_request(
     surface: &Rc<Surface>,
     node: NodeId,
-    _web: &AnyObject,
+    web: &AnyObject,
     handler: &WebHandler,
     request: &WebViewRequest,
 ) {
     let download = handler.ivars().download.clone();
     match &request.operation {
+        WebViewOperation::GetCookies { url } => {
+            let control = surface.event_control();
+            let request_id = request.id;
+            nsh_platform_apple::web_cookies::get_cookies(web, url, move |result| {
+                if let Some(control) = &control {
+                    control.dispatch_event(
+                        node,
+                        EventKind::WebViewReply,
+                        nsh_core::webview::reply(request_id, result),
+                    );
+                }
+            });
+        }
         WebViewOperation::StartDownload { id, staging } => {
             match download.start(id, staging) {
                 // WebKit accepted the destination; the core publishes the
