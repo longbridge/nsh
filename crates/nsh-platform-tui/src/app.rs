@@ -264,6 +264,8 @@ impl AppView {
             // report Command: Ctrl stands in for it, and labels say so.
             ctrl_for_command: OS == nsh_core::platform::Os::MacOs
                 && !options.capabilities.command_key,
+            // No link of the app's schemes reaches a terminal app.
+            scheme_links: Some(false),
             ..Default::default()
         };
         let clipboard = options
