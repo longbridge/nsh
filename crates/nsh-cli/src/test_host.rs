@@ -28,7 +28,7 @@ const CONNECT: Duration = Duration::from_secs(60);
 /// Starts the apps tests open on `target`'s host; `browser` is the one
 /// `--target web` runs them in (else the one found on this machine); `fps`
 /// has the host log its performance monitor's readings; `device` is the iOS
-/// simulator (name or UDID); `display` (one-based) is the display the
+/// simulator (name or UDID) or the Android device (its serial); `display` (one-based) is the display the
 /// macOS and GPUI hosts open their windows on (by default a secondary one
 /// when there is one: [`opens_on_a_display`]); `foreground` lets the apps of the
 /// hosts that run them in the background ([`runs_in_background`]) become the
@@ -53,8 +53,8 @@ pub(crate) fn starter(
     {
         anyhow::bail!("--fps goes with --target linux, macos, windows or ios");
     }
-    if device.is_some() && target != Target::Ios {
-        anyhow::bail!("--device goes with --target ios");
+    if device.is_some() && !matches!(target, Target::Ios | Target::Android) {
+        anyhow::bail!("--device goes with --target ios or android");
     }
     if display.is_some() && !opens_on_a_display(target) {
         anyhow::bail!("{DISPLAY_TARGETS}");
@@ -65,7 +65,7 @@ pub(crate) fn starter(
     match target {
         Target::Web => return crate::test_web::starter(browser),
         Target::Ios => return crate::test_ios::starter(work, fps, device),
-        Target::Android => return crate::test_android::starter(work),
+        Target::Android => return crate::test_android::starter(work, device),
         _ => {}
     }
     if !matches!(
@@ -447,10 +447,10 @@ mod tests {
         }
     }
 
-    /// `--device` names an iOS simulator: the other targets refuse it before
-    /// anything is built or started.
+    /// `--device` names an iOS simulator or an Android device: the other
+    /// targets refuse it before anything is built or started.
     #[test]
-    fn device_is_for_the_ios_host_only() {
+    fn device_is_for_the_mobile_hosts_only() {
         for target in [
             Target::Macos,
             Target::Linux,
@@ -458,7 +458,6 @@ mod tests {
             Target::Gpui,
             Target::Tui,
             Target::Web,
-            Target::Android,
         ] {
             let err = starter(
                 target,
@@ -472,7 +471,7 @@ mod tests {
             .err();
             assert_eq!(
                 err.map(|e| e.to_string()).as_deref(),
-                Some("--device goes with --target ios"),
+                Some("--device goes with --target ios or android"),
                 "{target:?}"
             );
         }

@@ -1632,6 +1632,7 @@ fn sink(rv: Rv) -> impl IntoElement {
         // see: a thumb here would show at the caret once the text it
         // holds overflows.
         .scrollbar(false)
+        .auto_focus(props.auto_focus)
         .auto_correct(false)
         .auto_capitalize(AutoCapitalize::None)
         .paste_behavior(PasteBehavior::Report)

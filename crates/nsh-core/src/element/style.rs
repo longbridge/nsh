@@ -901,6 +901,40 @@ impl Hash for StyleRefinement {
 }
 
 impl StyleRefinement {
+    /// The color of an input's placeholder (`placeholderColor`, Tailwind's
+    /// `placeholder:text-*`), for the style of a component's part that edits
+    /// text ([`super::InputPartStyle`], such as `number_input`'s
+    /// `input_style`). Inherent rather than [`super::Styled`]'s: on an element it
+    /// is the input's own prop (`input().placeholder_color(..)`).
+    pub fn placeholder_color(mut self, color: impl IntoReactive<AdaptiveColor>) -> Self {
+        self.bind_value(color, |s, color: AdaptiveColor| {
+            s.color(&[StyleKey::PlaceholderColor], color);
+        });
+        self
+    }
+
+    /// The color of an input's caret (`caretColor`, Tailwind's `caret-*`),
+    /// for a part that edits text ([`super::InputPartStyle`]); on iOS it
+    /// also tints the selection highlight, as UIKit has one tint for both.
+    pub fn caret_color(mut self, color: impl IntoReactive<AdaptiveColor>) -> Self {
+        self.bind_value(color, |s, color: AdaptiveColor| {
+            s.color(&[StyleKey::CaretColor], color);
+        });
+        self
+    }
+
+    /// The color of the selection highlight (`selectionColor`, Tailwind's
+    /// `selection:bg-*`) of a part's input or texts
+    /// ([`super::InputPartStyle`], [`super::TextPartStyle`]). Inherent
+    /// rather than [`super::Styled`]'s: an element has
+    /// [`Element::selection_color`](super::Element::selection_color).
+    pub fn selection_color(mut self, color: impl IntoReactive<AdaptiveColor>) -> Self {
+        self.bind_value(color, |s, color: AdaptiveColor| {
+            s.color(&[StyleKey::SelectionColor], color);
+        });
+        self
+    }
+
     /// Applies `value` with `apply`: now when it is static, else as a bound
     /// part.
     pub(crate) fn bind_value<T: 'static>(
@@ -4734,6 +4768,33 @@ mod tests {
                 resolve(&tailwind::parse(&PRESETS, &classes), dark, 0, 0)
             );
         }
+    }
+
+    #[test]
+    fn a_parts_input_colors_come_from_the_typed_style() {
+        let list = s()
+            .placeholder_color(RED.shade(500))
+            .caret_color(SKY.shade(500))
+            .selection_color(EMERALD.shade(500))
+            .lower();
+        let mut style = Style::default();
+        list.apply(
+            &Context {
+                env: ClassEnvironment::default(),
+                window: crate::geometry::size_pt(390.0, 844.0),
+                rtl: false,
+                states: 0,
+                position: 0,
+                group: &|_| 0,
+            },
+            &PRESETS,
+            &mut style,
+            &mut ClassProps::default(),
+            |_| {},
+        );
+        assert_eq!(style.text.placeholder_color, Some(RED.shade(500).into()));
+        assert_eq!(style.text.caret_color, Some(SKY.shade(500).into()));
+        assert_eq!(style.text.selection_color, Some(EMERALD.shade(500).into()));
     }
 
     #[test]

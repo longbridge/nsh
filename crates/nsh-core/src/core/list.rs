@@ -376,6 +376,10 @@ pub(super) struct ListState {
     pub(super) offset: f32,
     /// Main-axis size of the list viewport (from layout).
     pub(super) viewport: f32,
+    /// The list's `contentInset` along the main axis (leading, trailing):
+    /// its offsets run from `-leading` to the content's end plus
+    /// `trailing`, as the platforms scroll it.
+    pub(super) inset: (f32, f32),
     /// Window, bindings or positions need recomputing.
     pub(super) dirty: bool,
     /// Cross-axis size the cells were last laid out at.
@@ -484,6 +488,7 @@ impl ListState {
             start_threshold: START_THRESHOLD,
             offset: 0.0,
             viewport: 0.0,
+            inset: (0.0, 0.0),
             dirty: true,
             cells_cross: f32::NAN,
             load_more_at: None,
@@ -595,8 +600,15 @@ impl ListState {
         if self.parent {
             self.limits
         } else {
-            (0.0, (self.content_len() - self.viewport).max(0.0))
+            (-self.inset.0, self.own_end())
         }
+    }
+
+    /// The end of a list in its own scroll view: the content's end plus
+    /// the trailing inset, at the viewport's end; content too short to
+    /// scroll rests at its start, under the leading inset.
+    fn own_end(&self) -> f32 {
+        (self.content_len() + self.inset.1 - self.viewport).max(-self.inset.0)
     }
 
     /// The items changed: `removed` items at `at` were replaced by
@@ -1563,6 +1575,28 @@ impl ListState {
         }
     }
 
+    /// Records the size of item `i` when it has none yet, without
+    /// scrolling: for a cell the window just bound to the row it already
+    /// shows (a cell that took back the row now at its index after the
+    /// items changed, [`Self::adopt_orphans`]). No render lays it out
+    /// again, so it is measured where it is placed, in the same commit, and
+    /// the rows after it move with it. The window was set from the
+    /// estimate: the list updates again in the next commit.
+    pub(super) fn measured_unknown(&mut self, i: u32, size: f32) {
+        let idx = i as usize;
+        if !self.sizes.get(idx).is_some_and(|s| s.is_nan()) {
+            return;
+        }
+        let row = self.row_of(i);
+        let before = self.row_size(row);
+        self.sizes[idx] = size;
+        let delta = self.row_size(row) - before;
+        if delta != 0.0 {
+            self.rows.add(row as usize, delta as f64);
+        }
+        self.dirty = true;
+    }
+
     /// Records the size of an extra cell; returns the anchoring change as
     /// [`ListState::measured`] does.
     pub(super) fn measured_extra(&mut self, kind: ExtraKind, size: f32) -> f32 {
@@ -1608,8 +1642,8 @@ impl ListState {
         if self.viewport <= 0.0 {
             return 0.0;
         }
-        let end = (self.content_len() - self.viewport).max(0.0);
         if !self.inverted {
+            let end = self.own_end();
             let bottom = self.bottom();
             let threshold = match self.follow_end {
                 Some(threshold) => threshold,
@@ -1647,6 +1681,7 @@ impl ListState {
             self.offset = end;
             return delta;
         }
+        let end = (self.content_len() - self.viewport).max(0.0);
         let delta = if self.anchored_end.is_nan() {
             end - self.offset
         } else {
@@ -1702,7 +1737,7 @@ impl ListState {
             let (min, max) = self.limits;
             (self.content_len() - self.viewport).clamp(min, max)
         } else {
-            (self.content_len() - self.viewport).max(0.0)
+            self.own_end()
         }
     }
 
@@ -2440,6 +2475,35 @@ mod tests {
         l.splice(2, 0, 1);
         assert_eq!(l.anchor_end(0.0), 0.0);
         assert_eq!(l.to_content(l.item_at(0), 50.0), 250.0);
+    }
+
+    #[test]
+    fn lists_under_a_content_inset_follow_their_end() {
+        // Under a bar it scrolls beneath: offsets start at minus the
+        // leading inset, where content too short to scroll rests.
+        let mut l = list(2, 50.0, 956.0);
+        l.follow_end = Some(80.0);
+        l.inset = (116.0, 0.0);
+        assert_eq!(l.measured(0, 176.0), 0.0);
+        assert_eq!(l.measured(1, 176.0), 0.0);
+        l.reported(-116.0, 0);
+        assert_eq!(l.anchor_end(0.0), 0.0);
+        assert_eq!(l.offset_limits(), (-116.0, -116.0));
+        // The keyboard shortens the viewport as the last row grows past
+        // it: the list was at its end, so it follows.
+        l.viewport = 609.0;
+        assert_eq!(l.measured(1, 442.0), 0.0);
+        assert_eq!(l.anchor_end(0.0), 125.0);
+        assert_eq!(l.offset, 9.0);
+        // The trailing inset is scrolled past too.
+        l.inset = (116.0, 34.0);
+        assert_eq!(l.end_offset(), 43.0);
+        assert_eq!(l.offset_limits(), (-116.0, 43.0));
+        // Scrolled up past the threshold, growth below leaves it alone.
+        l.anchor_end(0.0);
+        l.reported(-116.0, 0);
+        l.measured(1, 500.0);
+        assert_eq!(l.anchor_end(0.0), 0.0);
     }
 
     #[test]

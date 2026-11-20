@@ -1050,3 +1050,66 @@ fn padded_inline_marks_keep_caret_selection_and_hits_aligned() {
         "prefix_eq=true dup=false hit=true sel_x_eq=true sel_w_eq=true",
     );
 }
+
+#[test]
+fn auto_focus_configures_the_caret_sink_input_on_mount() {
+    #[component]
+    fn AutoFocusedRich() -> impl IntoElement {
+        let schema = starter::schema();
+        let plugins = starter::plugins(&schema);
+        let doc = schema
+            .node_from_json(&json!({"type": "doc", "content": [{"type": "paragraph"}]}))
+            .unwrap();
+        let state =
+            EditorState::create(EditorStateConfig::new(schema).doc(doc).plugins(plugins)).unwrap();
+        let session = EditorSession::new(state, NodeViews::new());
+        let shown = signal(String::new());
+        let focused = signal(0u32);
+        let read = {
+            let session = session.clone();
+            move || doc_text(session.state().doc())
+        };
+        view()
+            .w(px(400.0))
+            .h(px(200.0))
+            .child(
+                rich_editor()
+                    .editor(session)
+                    .auto_focus(true)
+                    .on_focus(move || focused.update(|n| *n += 1))
+                    .on_change(move |_: &_| shown.set(read()))
+                    .size_full(),
+            )
+            .child(text(move || format!("Focused {}", focused.get())))
+            .child(text(move || format!("Text {:?}", shown.get())))
+    }
+
+    let mut config = EngineConfig {
+        viewport: Size::new(px(400.0), px(250.0)),
+        clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
+        ..EngineConfig::new(nsh_testing::windowed_root::<AutoFocusedRich>())
+    };
+    config.environment.os = Os::Linux;
+    config.environment.idiom = Idiom::Desktop;
+    let mut app = Headless::start(config).expect("the engine starts");
+    let auto_focused_inputs = std::sync::Arc::new(std::sync::Mutex::new(0usize));
+    let seen = auto_focused_inputs.clone();
+    app.observe(move |_, batch| {
+        for item in &batch.items {
+            if let nsh_core::MountItem::Input { config, .. } = item
+                && config.auto_focus
+            {
+                *seen.lock().unwrap() += 1;
+            }
+        }
+    });
+    app.first_render().unwrap();
+    assert_eq!(
+        *auto_focused_inputs.lock().unwrap(),
+        1,
+        "autoFocus should configure RichEditor's caret sink input on first mount"
+    );
+    app.press_key("a").unwrap();
+    see(&mut app, "Text \"a\"");
+    see(&mut app, "Focused 1");
+}

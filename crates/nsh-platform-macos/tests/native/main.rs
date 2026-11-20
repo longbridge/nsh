@@ -17,11 +17,15 @@ mod canvas_bounds;
 #[cfg(target_os = "macos")]
 mod deleted_scroll;
 #[cfg(target_os = "macos")]
+mod download_redirect;
+#[cfg(target_os = "macos")]
 mod embedded_scroll;
 #[cfg(target_os = "macos")]
 mod focus_selection;
 #[cfg(target_os = "macos")]
 mod fps_collapse;
+#[cfg(target_os = "macos")]
+mod hover_cursor;
 #[cfg(target_os = "macos")]
 mod ime;
 #[cfg(target_os = "macos")]
@@ -125,10 +129,14 @@ fn main() {
                 keyboard::run();
             } else if std::env::var_os("NSH_DELETED_SCROLL_CHECK_ONLY").is_some() {
                 deleted_scroll::run();
+            } else if std::env::var_os("NSH_DOWNLOAD_REDIRECT_CHECK_ONLY").is_some() {
+                download_redirect::run();
             } else if std::env::var_os("NSH_EMBEDDED_SCROLL_CHECK_ONLY").is_some() {
                 embedded_scroll::run();
             } else if std::env::var_os("NSH_CANVAS_BOUNDS_CHECK_ONLY").is_some() {
                 canvas_bounds::run();
+            } else if std::env::var_os("NSH_HOVER_CURSOR_CHECK_ONLY").is_some() {
+                hover_cursor::run();
             } else if std::env::var_os("NSH_PRESS_MOMENTUM_CHECK_ONLY").is_some() {
                 press_momentum::run();
             } else {
@@ -140,6 +148,7 @@ fn main() {
                 modal_fade::run();
                 modal_focus::run();
                 navigation_unmount::run();
+                hover_cursor::run();
                 #[cfg(feature = "shader")]
                 shader_content::run();
                 canvas_bounds::run();
@@ -154,6 +163,7 @@ fn main() {
                 scaled_input::run();
                 zoom::run();
                 deleted_scroll::run();
+                download_redirect::run();
                 mount::run();
                 // Last: it makes the process an accessory app.
                 embedded_scroll::run();

@@ -176,7 +176,7 @@ enum Command {
         /// (macos, linux, windows, gpui, tui, web, ios and android; tui uses
         /// an in-memory terminal; web runs them
         /// in a headless Chrome, Edge or Chromium, ios in a simulator,
-        /// android on the first device adb lists).
+        /// android on a device or emulator: see --device).
         #[arg(long, value_enum)]
         target: Option<run::Target>,
         /// The Chrome, Edge or Chromium executable `--target web` runs the
@@ -189,7 +189,10 @@ enum Command {
         #[arg(long, value_name = "JS")]
         web_host: Option<PathBuf>,
         /// With `--target ios`: the simulator the apps run in (name or
-        /// UDID); default: a booted one, else the newest iPhone.
+        /// UDID); default: a booted one, else the newest iPhone. With
+        /// `--target android`: the device or emulator (its serial, as `adb
+        /// devices` lists it); default: the one `ANDROID_SERIAL` names, else
+        /// the first one.
         #[arg(long, value_name = "DEVICE")]
         device: Option<String>,
         /// With `--target macos` or `gpui`: the display the apps' windows
@@ -250,7 +253,9 @@ enum Command {
         /// Where to run; defaults to this system's native desktop host.
         #[arg(long, value_enum, default_value_t = run::Target::native())]
         target: run::Target,
-        /// iOS simulator to use (name or UDID).
+        /// The iOS simulator to use (name or UDID), or the Android device or
+        /// emulator (its serial, as `adb devices` lists it; default: the one
+        /// `ANDROID_SERIAL` names, else the first one).
         #[arg(long)]
         device: Option<String>,
         /// Serve hot reload to hosts you start yourself.
@@ -299,8 +304,10 @@ enum Command {
         /// Where to run.
         #[arg(long, value_enum, default_value_t = run::Target::native())]
         target: run::Target,
-        /// iOS simulator to use (name or UDID); default: a booted one, else
-        /// the newest iPhone.
+        /// The iOS simulator to use (name or UDID; default: a booted one,
+        /// else the newest iPhone), or the Android device or emulator (its
+        /// serial, as `adb devices` lists it; default: the one
+        /// `ANDROID_SERIAL` names, else the first one).
         #[arg(long)]
         device: Option<String>,
         /// Points per terminal Cell, overriding nsh.json tui.pointsPerCell (default: 8x16).
@@ -599,6 +606,12 @@ struct PackageArgs {
     /// machine at the address it prints).
     #[arg(long)]
     run: bool,
+    /// With --run: the iOS simulator to run the app in (`ios-simulator`;
+    /// name or UDID; default: a booted one, else the newest iPhone) or the
+    /// Android device to install it on (its serial, as `adb devices` lists
+    /// it; default: the one `ANDROID_SERIAL` names, else the first one).
+    #[arg(long, value_name = "DEVICE")]
+    device: Option<String>,
     /// Web: the http(s) URL the site's files are served from, a CDN
     /// (`https://cdn.example.com/app/`), as the page names them; `index.html`
     /// stays at the page's address. Default: next to the page, named
@@ -835,6 +848,15 @@ fn run(mut command: Command) -> anyhow::Result<()> {
         Command::Package(args) => Some(args.target) == package::PackageTarget::desktop(),
         _ => false,
     };
+    // A Rust app's root reports what the package names and versions it.
+    if let Command::Package(args) = &command {
+        rust_app::set_package_identity(rust_app::PackageIdentity {
+            id: args.id.clone(),
+            name: args.name.clone(),
+            version: args.version.clone(),
+            build: args.build,
+        });
+    }
     let app = match command.entry_mut() {
         Some(entry) => rust_app::of(entry, unify)?,
         None => None,
@@ -998,6 +1020,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 format,
                 arch,
                 run,
+                device,
                 asset_url,
             } = *args;
             let mut config = package::read_config(&entry)?;
@@ -1024,6 +1047,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 format,
                 arch,
                 run,
+                device: device.as_deref(),
                 asset_url: asset_url.as_deref(),
                 development: false,
             })
