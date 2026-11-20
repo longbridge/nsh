@@ -3178,6 +3178,69 @@ test("in one turn, pushes make one entry with the last address, and a push wins 
   assert.deepEqual(calls.splice(0), [["replace", 0, 1, "https://a.test/inbox?tab=mine&sort=new"]]);
 });
 
+/** The player's own `syncHistorySoon`: the turn's entries a task later. */
+function realSoon(player) {
+  player.syncHistorySoon = Player.prototype.syncHistorySoon;
+}
+
+test("a push with no page open writes its entry in the task it came in, before the browser draws", (t) => {
+  const { player, calls, user } = historyPlayer(t);
+  realSoon(player);
+  player.setPageUrl("?item=1", true);
+  // No task passes: the entry exists before the next frame.
+  assert.deepEqual(calls.splice(0), [["push", 0, 1, "https://a.test/inbox?item=1"]]);
+  // More of the turn in the same task: the last address is that entry's, with no entry of its own.
+  player.setPageUrl("?item=2", true);
+  t.mock.timers.tick(0);
+  assert.deepEqual(calls.splice(0), [["replace", 0, 1, "https://a.test/inbox?item=2"]]);
+  // A later task's push makes an entry of its own, at once again.
+  player.setPageUrl("?item=3", true);
+  assert.deepEqual(calls.splice(0), [["push", 0, 2, "https://a.test/inbox?item=3"]]);
+  t.mock.timers.tick(0);
+  assert.deepEqual(calls.splice(0), []);
+  // Back twice and forward twice go through every entry.
+  user(-1);
+  user(-1);
+  user(1);
+  user(1);
+  assert.deepEqual(calls.splice(0).map((c) => [c[2].url, c[2].change]), [
+    ["https://a.test/inbox?item=2", "back"],
+    ["https://a.test/inbox", "back"],
+    ["https://a.test/inbox?item=2", "forward"],
+    ["https://a.test/inbox?item=3", "forward"],
+  ]);
+});
+
+test("a push from a sheet waits for the turn, so a dismissal a task later takes the sheet's entry over and loses none", (t) => {
+  const { player, calls, app, at, entries, user } = historyPlayer(t);
+  app.depth = 1;
+  player.syncHistory();
+  calls.splice(0);
+  realSoon(player);
+  // The sheet's item pushes a page's address; the sheet goes a task later.
+  player.setPageUrl("?item=1", true);
+  assert.deepEqual(calls.splice(0), []);
+  app.depth = 0;
+  player.syncHistorySoon();
+  t.mock.timers.tick(0);
+  assert.deepEqual(calls.splice(0), [["replace", 0, 1, "https://a.test/inbox?item=1"]]);
+  assert.equal(at(), 1);
+  assert.equal(entries().length, 2);
+  user(-1);
+  assert.deepEqual(calls.splice(0), [["event", "onUrlScheme", { url: "https://a.test/inbox", page: true, change: "back" }]]);
+});
+
+test("a push waits while a traversal of the player's is waited for or a page is going", (t) => {
+  const { player, calls } = historyPlayer(t);
+  realSoon(player);
+  player.dismissing = 1;
+  player.setPageUrl("?item=1", true);
+  assert.deepEqual(calls.splice(0), []);
+  player.dismissing = 0;
+  t.mock.timers.tick(0);
+  assert.deepEqual(calls.splice(0), [["push", 0, 1, "https://a.test/inbox?item=1"]]);
+});
+
 test("a push in the turn that pushes a page gives the page's entry its address, with no entry of its own", (t) => {
   const { player, calls, app } = historyPlayer(t);
   inOneTurn(player, () => {

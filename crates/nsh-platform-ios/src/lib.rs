@@ -71,6 +71,7 @@ mod decor;
 pub mod dev;
 #[cfg(feature = "embed")]
 pub mod embed;
+mod file_drop;
 mod fps;
 mod haptics;
 mod image;
@@ -90,6 +91,7 @@ mod selectable_view;
 mod shader;
 mod share;
 mod split;
+mod state_words;
 // Sound (`Sound`, `AudioPlayer`), the Speech framework's recognizer and the
 // notification center, shared with macOS.
 use nsh_platform_apple::{audio, notifications, speech};
