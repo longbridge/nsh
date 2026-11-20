@@ -51,6 +51,8 @@ Each desktop OS packages apps with its own backend, built for the machine it run
 
 ## Embed in a native app
 
+Step-by-step guides for each platform are in [Embedding in an existing app](./embedding.md).
+
 | Platform | Host view | Runs | Ships as | Host language |
 |---|---|---|---|---|
 | macOS | `AppView` (an `NSView`) | a Rust root, TSX bundles | the `nsh-platform-macos` crate | Rust |

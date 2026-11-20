@@ -4013,14 +4013,15 @@ impl<M: TextEngine> Core<M> {
     /// ([`terminal_layout::Role`]): whether it is a control
     /// ([`Self::is_control`]), a text, a scroll view, and whether a
     /// terminal leaves it out: what it cannot show at an icon's size is
-    /// left out, never emulated (icon-sized images, videos, web views,
-    /// shaders and canvases); larger, they keep their box.
+    /// left out, never emulated (icon-sized videos, web views, shaders and
+    /// canvases); larger, they keep their box, as images do at every size.
     fn grid_role(&self, key: Key) -> terminal_layout::Role {
         let kind = self.nodes[key as usize].kind;
         let left_out = match kind {
             // A native component draws itself where the platform
             // registered one, and is blank where it did not.
-            Kind::Image | Kind::Video | Kind::WebView | Kind::Shader | Kind::Canvas => {
+            Kind::Image => terminal_layout::LeftOut::Picture,
+            Kind::Video | Kind::WebView | Kind::Shader | Kind::Canvas => {
                 terminal_layout::LeftOut::IfIcon
             }
             _ => terminal_layout::LeftOut::No,

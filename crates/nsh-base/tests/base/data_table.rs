@@ -594,7 +594,7 @@ fn WideShort() -> impl IntoElement {
 fn horizontal_body_height<C: Component<Props = ()>>() -> f32 {
     let config = EngineConfig {
         viewport: Size::new(px(600.0), px(300.0)),
-        ..EngineConfig::new(Root::of::<C>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<C>())
     };
     let mut app = Headless::start(config).unwrap();
     let horizontal = Arc::new(Mutex::new(Vec::new()));
@@ -665,7 +665,7 @@ fn a_wheel_over_the_empty_state_scrolls_the_columns() {
             window: viewport,
             ..Default::default()
         },
-        ..EngineConfig::new(Root::of::<WideEmptyState>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<WideEmptyState>())
     };
     let mut app = Headless::start(config).unwrap();
     app.first_render().unwrap();
@@ -674,7 +674,6 @@ fn a_wheel_over_the_empty_state_scrolls_the_columns() {
         .unwrap();
     app.wait_for("First column 1").unwrap();
 }
-
 
 /// Wide columns between one fixed at each side.
 #[component]

@@ -640,6 +640,9 @@ impl AppView {
             }
             _ => None,
         };
+        if let Some(modality) = modality {
+            self.tree.pointer_focus = modality == nsh_core::platform::InputModality::Pointer;
+        }
         if let (Some(modality), Some(engine)) = (modality, &self.surface.engine) {
             engine.control().set_input_modality(modality);
         }
@@ -1834,6 +1837,10 @@ impl AppView {
                     .keyboard
                     .reconcile(&mut self.tree, &self.geometry, &engine.control())
             {
+                self.surface.wake.notify();
+            }
+            for id in std::mem::take(&mut self.tree.clear_selection_requests) {
+                self.selection.clear_in(&self.tree, id);
                 self.surface.wake.notify();
             }
             if let Some(engine) = &self.surface.engine {

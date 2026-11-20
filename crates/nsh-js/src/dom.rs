@@ -428,6 +428,14 @@ pub(crate) const NODE_METHODS: &[(&str, c_int, &str, &str)] = &[
         decl!("Unfocuses an `<Input>`, or takes the keyboard focus off a view that takes presses."),
     ),
     (
+        "clearSelection",
+        0,
+        decl!("(): void"),
+        decl!(
+            "Clears the selection of a `selectable` view, or of the selectable texts inside the view: the highlight goes and the selectable view hears `onSelectionChange` with `\"\"`."
+        ),
+    ),
+    (
         "setSelection",
         2,
         decl!("(start: number, end?: number): void"),
