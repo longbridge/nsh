@@ -59,6 +59,7 @@ fn sections() -> impl IntoElement {
 ```tsx tabs
 import { mount, signal, Text, View } from "nsh";
 import { Tab, Tabs } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 function App() {
   const section = signal("overview");
@@ -89,7 +90,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 `Tab` 和 `Tabs` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate。值由应用持有：列表本身不持有值。每个标签页被告知自己是否选中；按下时通过 `onPress` 报告，应用设置自己的值并显示对应的部分，每个标签页显示应用传回的 `selected`。列表和标签页的圆角同心：列表的内边距（`p-1`）正是 `radius.lg` 与 `radius` 之差。选中标签页的填充是列表的指示器（`indicatorClass`，位于这层内边距之内：`inset-y-1`），它以弹簧动画移到应用选中的标签页。在 Rust 中，`tab()` 和 `tabs()` 创建它们，每个属性对应一个设置方法（`.selected(..)`），每个事件对应一个监听方法（`.on_press(..)`），外观用类型化的样式方法，内容用 `.child(..)`。

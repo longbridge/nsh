@@ -10,6 +10,7 @@ mod canvas;
 mod dialog;
 mod geometry;
 mod gradient;
+mod image;
 mod input;
 mod key_event;
 mod key_scheme;
@@ -39,7 +40,7 @@ pub use perf::{FrameMetrics, MeasuredBackend, MeasuredWriter};
 #[cfg(feature = "run-app")]
 pub use crate::run::{RunEvent, run_app};
 pub use crate::{
-    app::{AppOptions, AppView, ColorDepth, TerminalCapabilities, WakeCallback},
+    app::{AppOptions, AppView, ColorDepth, Graphics, TerminalCapabilities, WakeCallback},
     geometry::CellSize,
     input::{CursorStyle, Handled, Input, Modifiers, MouseButton, MouseInput, MouseKind},
     native::{ComponentFactory, NativeComponent},

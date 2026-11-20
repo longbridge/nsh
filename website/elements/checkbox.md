@@ -44,6 +44,7 @@ fn notify() -> impl IntoElement {
 ```tsx tabs
 import { mount, signal, Text } from "nsh";
 import { Checkbox } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 function App() {
   const on = signal(false);
@@ -60,7 +61,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 `Checkbox` comes from [`nsh/base`](../modules/nsh-base.md), the `nsh-base` crate in Rust. The value is the app's: a

@@ -34,6 +34,7 @@ fn counter() -> impl IntoElement {
 ```tsx tabs
 import { mount, signal, Text } from "nsh";
 import { Button } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 function App() {
   const count = signal(0);
@@ -47,7 +48,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 `Button` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中来自 `nsh-base` crate。在 TSX 中，它的外观是 `class` 和 `style`，配合状态变体 `active:`、`hover:`、`focus-visible:`、`selected:` 和 `disabled:`（或对应的 `activeStyle`、`hoverStyle`、`focusVisibleStyle`、`selectedStyle` 和 `disabledStyle`）。在 Rust 中，`button()` 像 `view()` 创建视图那样创建按钮：每个属性一个设置方法（`.disabled(..)`、`.selected(..)`），每个事件一个监听方法（`.on_press(..)`），类型化的样式方法（`.px_4()`、`.bg(..)`）决定外观，状态方法（`.active(..)`、`.hover(..)`、`.focus(..)`、`.selected_style(..)`、`.disabled_style(..)`）设置各状态的样式，`.child(..)` 添加内容。

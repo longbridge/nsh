@@ -3,7 +3,8 @@
 //! it, into a tab bar), a split's handle resizes it and shows what
 //! `render_handle` draws, and the ref's methods
 //! close panels, toggle docks and zoom; a bar's tabs that do not fit
-//! scroll and the displayed one comes into view; a locked area moves nothing, and
+//! scroll and the displayed one comes into view; `render_toolbar`
+//! draws the toolbar of a group's displayed tab; a locked area moves nothing, and
 //! at compact width the center shows one group with every panel's tab.
 //! The app controls the layout: what it shows is what the area reported.
 
@@ -13,7 +14,6 @@ use nsh_base::dock::{
 };
 use nsh_core::{
     Size, ViewKind,
-    element::Root,
     geometry::{Axis, point},
     platform::{Idiom, Os},
     prelude::*,
@@ -290,11 +290,13 @@ fn start_in(
 ) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(width), px(900.0)),
-        ..EngineConfig::new(Root::new::<Workspace>(move || WorkspaceProps {
-            layout: layout.clone(),
-            width: frame.map(|f| f.0),
-            height: frame.map(|f| f.1),
-            compact,
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Workspace>(move || {
+            WorkspaceProps {
+                layout: layout.clone(),
+                width: frame.map(|f| f.0),
+                height: frame.map(|f| f.1),
+                compact,
+            }
         }))
     };
     config.environment.os = Os::MacOs;
@@ -310,11 +312,13 @@ fn start_manual(layout: DockAreaLayout, width: f32) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(width), px(900.0)),
         clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
-        ..EngineConfig::new(Root::new::<Workspace>(move || WorkspaceProps {
-            layout: layout.clone(),
-            width: None,
-            height: None,
-            compact: None,
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Workspace>(move || {
+            WorkspaceProps {
+                layout: layout.clone(),
+                width: None,
+                height: None,
+                compact: None,
+            }
         }))
     };
     config.environment.os = Os::MacOs;
@@ -661,11 +665,13 @@ fn a_terminals_compact_sheet_gives_its_panel_the_sheets_rows() {
     // fills the rows under its tab bar, not none.
     let mut config = EngineConfig {
         viewport: Size::new(px(400.0), px(900.0)),
-        ..EngineConfig::new(Root::new::<Workspace>(move || WorkspaceProps {
-            layout: with_two_docks(),
-            width: None,
-            height: None,
-            compact: Some(true),
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Workspace>(move || {
+            WorkspaceProps {
+                layout: with_two_docks(),
+                width: None,
+                height: None,
+                compact: Some(true),
+            }
         }))
     };
     config.environment.os = Os::Linux;
@@ -698,11 +704,13 @@ fn a_terminals_compact_sheet_gives_its_panel_the_sheets_rows() {
 fn start_web_phone(layout: DockAreaLayout) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(400.0), px(900.0)),
-        ..EngineConfig::new(Root::new::<Workspace>(move || WorkspaceProps {
-            layout: layout.clone(),
-            width: None,
-            height: None,
-            compact: None,
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Workspace>(move || {
+            WorkspaceProps {
+                layout: layout.clone(),
+                width: None,
+                height: None,
+                compact: None,
+            }
         }))
     };
     config.environment.os = Os::Web;
@@ -736,11 +744,13 @@ fn a_compact_bottom_dock_lifted_by_the_keyboard_stays_below_the_status_bar() {
     let mut config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
         clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
-        ..EngineConfig::new(Root::new::<Workspace>(move || WorkspaceProps {
-            layout: layout.clone(),
-            width: None,
-            height: None,
-            compact: Some(true),
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Workspace>(move || {
+            WorkspaceProps {
+                layout: layout.clone(),
+                width: None,
+                height: None,
+                compact: Some(true),
+            }
         }))
     };
     config.environment.os = Os::Ios;
@@ -833,7 +843,7 @@ fn frame_of(app: &Headless, id: &str) -> nsh_core::Bounds<Points> {
 fn tabs_that_do_not_fit_scroll_in_their_bar_and_the_displayed_one_comes_into_view() {
     let mut config = EngineConfig {
         viewport: Size::new(px(1000.0), px(900.0)),
-        ..EngineConfig::new(Root::of::<Strip>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<Strip>())
     };
     config.environment.os = Os::MacOs;
     config.environment.idiom = Idiom::Desktop;
@@ -897,8 +907,10 @@ fn Grips(props: GripsProps) -> impl IntoElement {
 fn start_grips(layout: DockAreaLayout) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(1000.0), px(900.0)),
-        ..EngineConfig::new(Root::new::<Grips>(move || GripsProps {
-            layout: layout.clone(),
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Grips>(move || {
+            GripsProps {
+                layout: layout.clone(),
+            }
         }))
     };
     config.environment.os = Os::MacOs;
@@ -930,4 +942,70 @@ fn a_split_s_handles_show_what_render_handle_draws() {
         .filter(|text| text.starts_with("Grip "))
         .count();
     assert_eq!(grips, 1, "the docks' edges draw no grip");
+}
+
+/// An area of `layout` whose tab bars end with the toolbar of their
+/// displayed tab.
+#[derive(Clone, PartialEq, Props)]
+struct ToolbarProps {
+    layout: DockAreaLayout,
+    compact: bool,
+}
+
+#[component]
+fn Toolbar(props: ToolbarProps) -> impl IntoElement {
+    view().w(px(800.0)).h(px(600.0)).child(
+        dock_area()
+            .default_layout(props.layout.clone())
+            .compact(props.compact)
+            .tab_bar_class("flex-row h-6")
+            .render_tab(|tab: &DockTab| {
+                view()
+                    .test_id(&format!("tab-{}", tab.panel))
+                    .w(px(60.0))
+                    .h(px(24.0))
+                    .child(text(format!("Tab {}", tab.panel)))
+            })
+            .render_toolbar(|tab: &DockTab| text(format!("Toolbar {} of {}", tab.panel, tab.index)))
+            .size_full(),
+    )
+}
+
+fn start_toolbar(layout: DockAreaLayout, compact: bool) -> Headless {
+    let mut config = EngineConfig {
+        viewport: Size::new(px(1000.0), px(900.0)),
+        ..EngineConfig::new(Root::new::<Toolbar>(move || ToolbarProps {
+            layout: layout.clone(),
+            compact,
+        }))
+    };
+    config.environment.os = Os::MacOs;
+    config.environment.idiom = Idiom::Desktop;
+    let mut app = Headless::start(config).expect("the engine starts");
+    app.wait_for("Tab a").unwrap();
+    app
+}
+
+#[test]
+fn a_tab_bar_ends_with_the_toolbar_of_its_displayed_tab() {
+    // Each group's bar ends with its displayed tab's toolbar, in the
+    // center and in a dock.
+    let mut app = start_toolbar(with_files(), false);
+    app.wait_for("Toolbar a of 0").unwrap();
+    app.wait_for("Toolbar c of 0").unwrap();
+    app.wait_for("Toolbar files of 0").unwrap();
+    // It follows the group: another tab displayed.
+    app.press("id:tab-b").unwrap();
+    app.wait_for("Toolbar b of 1").unwrap();
+    assert_eq!(app.screen().count("text:Toolbar a of 0"), Ok(0));
+    app.wait_for("Toolbar c of 0").unwrap();
+
+    // Compact: one bar with every center panel's tab, ending with the
+    // shown tab's toolbar.
+    let mut app = start_toolbar(two_groups(), true);
+    app.wait_for("Toolbar a of 0").unwrap();
+    assert_eq!(app.screen().count("text:Toolbar c of 0"), Ok(0));
+    app.press("id:tab-c").unwrap();
+    app.wait_for("Toolbar c of 0").unwrap();
+    assert_eq!(app.screen().count("text:Toolbar a of 0"), Ok(0));
 }

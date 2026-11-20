@@ -515,6 +515,12 @@ pub(crate) struct Executor {
     pub(crate) quitting: Rc<std::cell::Cell<usize>>,
     /// What hears the user ask to quit ([`super::desktop::on_quit_request`]).
     pub(crate) quit_requests: Rc<RefCell<super::quit::QuitRequestListeners>>,
+    /// What hears the OS ask the app to show itself
+    /// ([`super::desktop::on_reopen`]).
+    pub(crate) reopens: Rc<RefCell<super::quit::ReopenListeners>>,
+    /// What hears the app's last window close
+    /// ([`super::desktop::on_last_window_closed`]).
+    pub(crate) last_window_closed: Rc<RefCell<super::quit::LastWindowClosedListeners>>,
     /// The views' keyboard shortcuts.
     pub(crate) keys: Rc<RefCell<super::keys::ViewKeys>>,
     /// The views' menus' handlers.

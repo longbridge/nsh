@@ -26,6 +26,8 @@ pub(crate) enum Message {
     /// terminal ([`MountSink::run_on_main_thread`]), after the batches
     /// before it.
     Run(MainThreadTask),
+    /// An image view's load finished (`crate::image`).
+    Image(crate::image::Loaded),
     #[cfg(feature = "dev")]
     Reload,
 }

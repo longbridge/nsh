@@ -18,7 +18,6 @@ use nsh_base::{
 use nsh_core::{
     ApproxTextEngine, AttachmentAlignments, AttributedText, MountItem, NodeId, Size, TextEngine,
     TextLayout, TextLine,
-    element::Root,
     geometry::point,
     platform::{Environment, Idiom, Os},
     prelude::*,
@@ -36,7 +35,7 @@ fn start<C: Component<Props = ()>>(idiom: Idiom) -> Headless {
             idiom,
             ..Environment::default()
         },
-        ..EngineConfig::new(Root::of::<C>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<C>())
     };
     let mut app = if idiom == Idiom::Terminal {
         Headless::start_with_text_engine(config, || TerminalText)
@@ -472,7 +471,7 @@ fn text_bounds<C: Component<Props = ()>>() -> std::collections::HashMap<String, 
             cell: Some(Size::new(px(8.0), px(21.0))),
             ..Environment::default()
         },
-        ..EngineConfig::new(Root::of::<C>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<C>())
     };
     let mut app = Headless::start_with_text_engine(config, || TerminalText).unwrap();
     type Seen = (
@@ -1252,7 +1251,7 @@ fn a_color_area_fills_its_width_and_its_rows_with_cells() {
             cell: Some(Size::new(px(8.0), px(21.0))),
             ..Environment::default()
         },
-        ..EngineConfig::new(Root::of::<WideArea>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<WideArea>())
     };
     let mut app = Headless::start(config).unwrap();
     app.first_render().unwrap();
@@ -1289,7 +1288,7 @@ fn a_checkboxs_children_keep_their_column_beside_the_mark() {
             idiom: Idiom::Terminal,
             ..Environment::default()
         },
-        ..EngineConfig::new(Root::of::<Choice>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<Choice>())
     };
     let mut app = Headless::start(config).unwrap();
     // Each text's frame, in its parent, as the batches set it.
@@ -1357,7 +1356,7 @@ fn backgrounds<C: Component<Props = ()>>(idiom: Idiom) -> Vec<nsh_core::Color> {
             idiom,
             ..Environment::default()
         },
-        ..EngineConfig::new(Root::of::<C>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<C>())
     };
     let mut app = Headless::start(config).unwrap();
     let seen = Arc::new(Mutex::new(Vec::new()));
@@ -1521,7 +1520,7 @@ fn a_terminals_diff_cuts_every_line_alike() {
             cell: Some(Size::new(px(8.0), px(16.0))),
             ..Environment::default()
         },
-        ..EngineConfig::new(Root::of::<LongDiff>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<LongDiff>())
     };
     let mut app = Headless::start(config).unwrap();
     let lines = Arc::new(Mutex::new(std::collections::HashMap::new()));
