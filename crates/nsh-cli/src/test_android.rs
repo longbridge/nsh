@@ -1,5 +1,6 @@
 //! `nsh test --target android`: the apps tests open run on the development
-//! host on an Android device or emulator (the first `adb devices` lists).
+//! host on an Android device or emulator (the one `--device` or
+//! `ANDROID_SERIAL` names, else the first `adb devices` lists).
 //! The host is built and installed once; each `open` builds the entry,
 //! serves it in a dev server's test session of its own, forwards its port
 //! to the device and starts the host on it with a data directory of its
@@ -28,11 +29,11 @@ use crate::{
 /// How long the host may take to start and connect.
 const CONNECT: Duration = Duration::from_secs(90);
 
-/// Starts the apps tests open on the first device, installing the
-/// development host there.
-pub(crate) fn starter(work: &Path) -> anyhow::Result<StartHost> {
+/// Starts the apps tests open on `device` ([`crate::android::device`]),
+/// installing the development host there.
+pub(crate) fn starter(work: &Path, device: Option<&str>) -> anyhow::Result<StartHost> {
     let sdk = Arc::new(Sdk::find()?);
-    let serial = crate::android::device(&sdk)?;
+    let serial = crate::android::device(&sdk, device)?;
     crate::run::install_android_host(&sdk, &serial, work, &crate::runtime::test_android()?, &[])?;
     Ok(Arc::new(move |entry: &Path, options: &HostOptions| {
         start(&sdk, &serial, entry, options).map(|h| Box::new(h) as Box<dyn Host>)

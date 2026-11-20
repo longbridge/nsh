@@ -238,7 +238,10 @@ function runFrames(n = 120) {
   }
 }
 
-/** A vertical scroll view 300 × 200 with content 5000 tall, at the top. */
+/** A vertical scroll view 300 × 200 with content 5000 tall, at the top, and
+ * in it `full`, a scroll view whose content fits: a wheel over it is one the
+ * browser would leave on `full`, so nsh scrolls the outer view itself
+ * (`wheel`), as the glide tests need. */
 function scroller() {
   const p = Object.create(Player.prototype);
   p.root = { parentNode: null };
@@ -249,6 +252,7 @@ function scroller() {
   p.keyScrolls = [];
   p.wasm = {
     nsh_scroll_ended: () => -1,
+    nsh_scroll: () => -1,
     nsh_key_scroll: (id, kind, amount) => (p.keyScrolls.push([id, kind, amount]), -1),
   };
   const el = {
@@ -259,10 +263,20 @@ function scroller() {
       this.scrollTop = Math.min(Math.max(top, 0), this.scrollHeight - this.clientHeight);
     },
   };
-  p.views = new Map([[1, el]]);
-  return { p, el };
+  const full = {
+    _id: 3, _kind: 'scroll', _events: new Set(), _applied: 0, parentNode: el, isConnected: true,
+    clientWidth: 300, clientHeight: 100, scrollWidth: 300, scrollHeight: 100, scrollLeft: 0, scrollTop: 0,
+  };
+  p.views = new Map([[1, el], [3, full]]);
+  return { p, el, full };
 }
 const wheel = (el, deltaY) => ({ deltaMode: 0, deltaX: 0, deltaY, target: el, preventDefault() {} });
+/** A wheel event over `target` that records whether it was prevented. */
+function tracked(target, deltaY, deltaMode = 0) {
+  const e = { deltaMode, deltaX: 0, deltaY, target, prevented: false };
+  e.preventDefault = () => { e.prevented = true; };
+  return e;
+}
 
 test('scroll commands win over a wheel or key glide', (t) => {
   t.mock.method(performance, 'now', () => clock);
@@ -273,9 +287,9 @@ test('scroll commands win over a wheel or key glide', (t) => {
   ];
   for (const key of [false, true]) {
     for (const [command, end] of commands) {
-      const { p, el } = scroller();
+      const { p, el, full } = scroller();
       if (key) p.scrollKey({ key: 'PageDown', shiftKey: false }, el);
-      else p.wheel({ ...wheel(el, 22.5), deltaMode: 1 });
+      else p.wheel({ ...wheel(full, 22.5), deltaMode: 1 });
       runFrames(2);
       assert.ok(el._glide && el.scrollTop > 0, 'gliding');
       p.op_cmd(command);
@@ -301,8 +315,8 @@ test('scroll keys tell the engine, End as End', (t) => {
 
 test('a glide moves with the content the core keeps in place', (t) => {
   t.mock.method(performance, 'now', () => clock);
-  const { p, el } = scroller();
-  p.wheel({ ...wheel(el, 22.5), deltaMode: 1 });
+  const { p, el, full } = scroller();
+  p.wheel({ ...wheel(full, 22.5), deltaMode: 1 });
   runFrames(2);
   const at = el.scrollTop;
   p.op_sb(['sb', 1, 0, 100]);
@@ -312,9 +326,9 @@ test('a glide moves with the content the core keeps in place', (t) => {
   assert.equal(el._applied, 1);
   // A touchpad's scroll goes on from there too.
   const pad = scroller();
-  pad.p.wheel(wheel(pad.el, 20));
+  pad.p.wheel(wheel(pad.full, 20));
   pad.p.op_sb(['sb', 1, 0, 100]);
-  pad.p.wheel(wheel(pad.el, 20));
+  pad.p.wheel(wheel(pad.full, 20));
   assert.equal(pad.el.scrollTop, 140);
 });
 
@@ -329,15 +343,15 @@ test('a scroll a command stops ends once, with or without moving', (t) => {
     [['cmd', 1, 'scrollTo', 0, 0, false], 0, 0],
   ];
   for (const [command, start, end] of commands) {
-    const { p, el } = scroller();
+    const { p, el, full } = scroller();
     el.scrollTop = start;
     const ends = [];
     el._events.add('onScrollEnd');
     p.event = (id, name, e) => ends.push(e.y);
     // A touchpad moves the view at once; its end waits for it to settle,
     // and the browser's `scrollend` meanwhile is not the end.
-    p.wheel(wheel(el, 20));
-    p.wheel(wheel(el, 20));
+    p.wheel(wheel(full, 20));
+    p.wheel(wheel(full, 20));
     p.scrollEnded(el);
     const at = el.scrollTop;
     p.op_cmd(command);
@@ -357,12 +371,12 @@ test('fractional scroll commands end once at the browser destination', (t) => {
   // Commands that do not animate are the browser's scroll; animated ones
   // run their own frames and end on the last of them, below.
   for (const destination of [40, 40.5]) {
-    const { p, el } = scroller();
+    const { p, el, full } = scroller();
     const ends = [];
     el._events.add('onScrollEnd');
     p.event = (id, name, e) => ends.push(e.y);
-    p.wheel(wheel(el, 20));
-    p.wheel(wheel(el, 20));
+    p.wheel(wheel(full, 20));
+    p.wheel(wheel(full, 20));
     // Model a browser that rounds to physical pixels, including a
     // destination that rounds back to the current position.
     el.scrollTo = () => { el.scrollTop = destination; };
@@ -477,12 +491,12 @@ test('the anchoring scroll of a list does not stop the animation beside it', (t)
 test('a glide whose frames stop ends where it was going, once', (t) => {
   t.mock.method(performance, 'now', () => clock);
   t.mock.timers.enable({ apis: ['setTimeout'] });
-  const { p, el } = scroller();
+  const { p, el, full } = scroller();
   const ends = [];
   el._events.add('onScrollEnd');
   p.event = (id, name, e) => ends.push(e.y);
   p.call = () => {};
-  p.wheel({ ...wheel(el, 22.5), deltaMode: 1 });
+  p.wheel({ ...wheel(full, 22.5), deltaMode: 1 });
   runFrames(2);
   assert.ok(el._glide && el.scrollTop < 900, 'gliding');
   // No more frames (a hidden tab): its frame stays queued.
@@ -517,10 +531,10 @@ test('a glide interrupted by direct input continues from its displayed position'
 test('pixel-mode inertia crosses 40 without starting or cancelling a glide', (t) => {
   t.mock.method(performance, 'now', () => clock);
   t.mock.timers.enable({ apis: ['setTimeout'] });
-  const { p, el } = scroller();
+  const { p, el, full } = scroller();
   let total = 0;
   for (const d of [120, 80, 40, 39, 20, 5, 1, 0.25]) {
-    p.wheel(wheel(el, d));
+    p.wheel(wheel(full, d));
     total += d;
     assert.equal(el.scrollTop, total);
     assert.equal(el._glide.frame, 0, 'the device already supplies inertia');
@@ -552,14 +566,17 @@ test('a view listening to onWheel inside a scroll view takes the wheel', (t) => 
     position: { x: 5, y: 10 }, pagePosition: { x: 15, y: 30 }, delta: { x: 0, y: -3 }, deltaMode: 'lines',
     modifiers: { control: true, alt: undefined, shift: undefined, platform: undefined },
   }]]);
-  // The scroll view itself listening only observes: it still scrolls.
+  // The scroll view itself listening only observes: it still scrolls (the
+  // browser does).
   sent.length = 0;
   canvas._events = new Set();
   el._events = new Set(['onWheel']);
   el.getBoundingClientRect = () => ({ left: 0, top: 0 });
-  p.wheel({ ...wheel(el, 20), clientX: 0, clientY: 0 });
+  const own = { ...tracked(el, 20), clientX: 0, clientY: 0 };
+  p.wheel(own);
   assert.equal(sent.length, 1);
-  assert.equal(el.scrollTop, 20);
+  assert.equal(own.prevented, false);
+  assert.equal(p.wheelLock.el, el);
 });
 
 test('one scroll stays on the view that took it, and a scroll going on is only observed', (t) => {
@@ -590,12 +607,112 @@ test('one scroll stays on the view that took it, and a scroll going on is only o
   // comes under the pointer while that scroll goes on, it only observes it.
   el.isConnected = true;
   clock += 300;
-  p.wheel(wheel(el, 20));
-  assert.equal(el.scrollTop, 20);
+  const pad = tracked(el, 20);
+  p.wheel(pad);
+  assert.equal(pad.prevented, false, 'the browser scrolls it');
+  assert.equal(p.wheelLock.el, el);
   clock += 50;
-  p.wheel(wheel(canvas, 20));
+  const over = tracked(canvas, 20);
+  p.wheel(over);
   assert.equal(sent.at(-1)[0], 2);
-  assert.equal(el.scrollTop, 40, 'the scroll view kept scrolling');
+  assert.equal(over.prevented, false, 'the scroll view kept scrolling');
+});
+
+test('a wheel the browser would scroll the same way is its own', (t) => {
+  t.mock.method(performance, 'now', () => clock);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  for (const scrollend of [true, false]) {
+    const { p, el } = scroller();
+    const ends = [];
+    el._events.add('onScrollEnd');
+    p.event = (id, name, e) => ends.push(e.y);
+    // A mouse notch as Chrome and Safari send it: pixels.
+    const e = tracked(el, 4);
+    p.wheel(e);
+    assert.equal(e.prevented, false, 'the browser scrolls it, with its own glide');
+    assert.equal(el._glide ?? null, null);
+    assert.equal(el._driven ?? 0, 0);
+    // Its frames move the view; each keeps the end waiting. A second notch
+    // soon after, with the browser's `scrollend` for the first between
+    // them, is the same scroll.
+    for (const y of [1, 2, 4]) {
+      t.mock.timers.tick(50);
+      el.scrollTop = y;
+      p.scrolled(el);
+      if (y === 2) {
+        p.scrollEnded(el);
+        p.wheel(tracked(el, 2));
+      }
+    }
+    assert.deepEqual(ends, []);
+    clock += 300;
+    if (scrollend) p.scrollEnded(el);
+    else t.mock.timers.tick(200);
+    assert.deepEqual(ends, [4], scrollend ? 'the browser\'s scrollend' : 'no scrollend: 200 ms after the last move');
+    // Neither the fallback after the browser's end nor a late `scrollend`
+    // after the fallback's is another.
+    t.mock.timers.tick(1000);
+    if (!scrollend) p.scrollEnded(el);
+    assert.deepEqual(ends, [4], 'once');
+  }
+});
+
+test('a key glide a browser wheel interrupts stops where it is', (t) => {
+  t.mock.method(performance, 'now', () => clock);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { p, el } = scroller();
+  p.call = () => {};
+  const ends = [];
+  el._events.add('onScrollEnd');
+  p.event = (id, name, e) => ends.push(e.y);
+  p.scrollKey({ key: 'PageDown', shiftKey: false }, el);
+  runFrames(2);
+  const at = el.scrollTop;
+  assert.ok(el._glide && at > 0, 'gliding');
+  p.wheel(tracked(el, 4));
+  assert.equal(el._glide, null);
+  assert.equal(el._driven, 0);
+  runFrames();
+  assert.equal(el.scrollTop, at, 'its frames do not put the view back');
+  assert.deepEqual(ends, [], 'the wheel goes on from there');
+  clock += 200;
+  t.mock.timers.tick(200);
+  assert.deepEqual(ends, [at]);
+});
+
+test('nsh scrolls the wheels the browser would not scroll the same way', (t) => {
+  t.mock.method(performance, 'now', () => clock);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  // An outer view, past an inner one at its end.
+  const outer = scroller();
+  const e = tracked(outer.full, 40);
+  outer.p.wheel(e);
+  assert.ok(e.prevented);
+  assert.equal(outer.el.scrollTop, 40);
+  // A snapping view: one snap point per scroll.
+  const snapping = scroller();
+  snapping.el._snapPoints = [0, 200, 400];
+  let stepped = 0;
+  snapping.p.snapStep = () => stepped++;
+  const s = tracked(snapping.el, 40);
+  snapping.p.wheel(s);
+  assert.ok(s.prevented);
+  assert.equal(stepped, 1);
+  // A content layer (zoom, pull to refresh): its offsets are nsh's.
+  const layered = scroller();
+  layered.el._layer = {};
+  const l = tracked(layered.el, 40);
+  layered.p.wheel(l);
+  assert.ok(l.prevented);
+  assert.equal(layered.el.scrollTop, 40);
+  // A vertical wheel on a horizontal view no vertical one takes.
+  const sideways = scroller();
+  Object.assign(sideways.el, { _horizontal: true, scrollWidth: 5000, scrollHeight: 200 });
+  sideways.p.views.delete(3);
+  const h = tracked(sideways.el, 40);
+  sideways.p.wheel(h);
+  assert.ok(h.prevented);
+  assert.equal(sideways.el.scrollLeft, 40);
 });
 
 test('onPinch hears a Safari touchpad pinch from its start to its end', (t) => {
