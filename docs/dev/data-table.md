@@ -29,7 +29,9 @@ The table is a body, a hit layer over it and a header (`view.rs`), from the bott
   rows only) and the scrolling columns between them (which move both ways). Those fixed at the end stand right after
   the scrolling columns while these fit, at the view's end once they overflow it (`Columns::end_left`, as CSS's
   `sticky`). The cells a scroll needs come with the next commit, which moves the body with them;
-- the *hit layer* over it is a vertical scroll view of a horizontal one of an empty box of the content's size. The
+- the *hit layer* over it is a vertical scroll view of a horizontal one of an empty box of the content's size (no
+  shorter than the viewport, so the columns scroll from below the last row, and from the body of a table with no rows; over what the app put in the `empty` slot, which lies above the layer, a wheel
+  moves the columns from the slot's box). The
   platforms scroll it as they scroll any scroll view (inertia, scroll bars, wheel, touch), and its box takes presses,
   hovers and the context menu. It draws nothing but its scroll bars (the platform's indicator, or the built-in
   `Scrollbar` of the app's theme, both the scroll view's own), which lie over the rows' backgrounds this way: with

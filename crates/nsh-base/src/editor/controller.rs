@@ -361,12 +361,6 @@ impl Ed {
             ed.marks_rev.update(|r| *r += 1);
             ed.bump_text();
         });
-        let ed = self.clone();
-        effect(move || {
-            if ed.props.auto_focus.get() {
-                ed.focus();
-            }
-        });
     }
 
     /// The app's `value`: taken as an edit unless it is the text already

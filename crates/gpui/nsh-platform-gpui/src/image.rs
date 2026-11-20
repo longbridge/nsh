@@ -48,10 +48,11 @@
 //! A file named `…@2x.png` (or a source with a declared size) has its
 //! natural size scaled accordingly, as on iOS.
 //!
-//! Animated GIF and WebP images decode every frame (composited, at most
-//! [`MAX_FRAMES`] and [`MAX_ANIMATION_BYTES`]: larger ones show their first
-//! frame) with its delay, as browsers and iOS time them (under 20ms: 100ms),
-//! and play their loop count. A view advances its frames with a timer at
+//! Animated GIF and WebP images decode every frame with
+//! [`nsh_core::image::animation`] (composited, with its delay, as browsers
+//! and iOS time them: under 20ms, 100ms; ones too large to keep decoded
+//! decode as small as their frames fit, since GPUI draws an animation as
+//! one image of every frame) and play their loop count. A view advances its frames with a timer at
 //! each frame's delay ([`rt::after_ms`]), not on the frame ticker (a 10 fps
 //! GIF need not keep the window redrawing at the display's rate), measured
 //! on the monotonic clock so delays do not drift. Playback pauses when the
@@ -81,7 +82,7 @@ use nsh_core::{
     ObjectPosition, PayloadValue, ResizeMode,
     geometry::{DevicePixels, Points, Size, size},
     image::{
-        DiskCache, Frames, Images, Key, Lease, Natural, Request, Target, Want,
+        DiskCache, Frames, Images, Key, Lease, Natural, Request, Target, Want, animation,
         loader::{Context, Priority, Ticket, loader},
     },
 };
@@ -167,14 +168,6 @@ fn context(surface: &Surface, uri: &str) -> Context {
     }
 }
 
-/// Frames of an animated image decoded at most (as iOS; longer ones stop
-/// at the last of them).
-const MAX_FRAMES: usize = 600;
-
-/// The most bytes one animation's frames take: larger animations show
-/// their first frame.
-const MAX_ANIMATION_BYTES: usize = 48 << 20;
-
 /// Swaps the red and blue channels of RGBA pixels in place: GPUI's images
 /// are BGRA (straight alpha).
 fn swap_red_blue(data: &mut [u8]) {
@@ -233,27 +226,6 @@ impl Pixels {
     }
 }
 
-/// A frame's delay in ms: as browsers and iOS, delays under 20ms (often
-/// written as 0 by tools that meant "fast") show for 100ms.
-fn frame_delay(delay: image::Delay) -> u32 {
-    let (numer, denom) = delay.numer_denom_ms();
-    match numer / denom.max(1) {
-        ms if ms >= 20 => ms,
-        _ => 100,
-    }
-}
-
-/// The container `bytes` start with, if it may hold an animation.
-fn animated_format(bytes: &[u8]) -> Option<image::ImageFormat> {
-    if bytes.starts_with(b"GIF8") {
-        Some(image::ImageFormat::Gif)
-    } else if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
-        Some(image::ImageFormat::WebP)
-    } else {
-        None
-    }
-}
-
 /// The size an image of `size` pixels decodes at to have its longest side
 /// `longest` pixels long (0: its own): never larger than it is, nor than
 /// [`MAX_DIMENSION`] a side.
@@ -274,86 +246,22 @@ fn scaled(size: (u32, u32), longest: u32) -> (u32, u32) {
     )
 }
 
-/// `rgba` scaled to [`scaled`]'s size.
-fn shrunk(rgba: image::RgbaImage, longest: u32) -> image::RgbaImage {
-    let size = rgba.dimensions();
-    match scaled(size, longest) {
-        s if s == size => rgba,
-        (w, h) => image::imageops::thumbnail(&rgba, w, h),
-    }
-}
-
-/// Decodes the frames of a GIF or WebP, its longest side at most `longest`
-/// pixels (0: its own); `None` when it is a still image (or too large to
-/// animate: then it decodes as one).
+/// Decodes the frames of a GIF or WebP at `longest` ([`animation::decode`],
+/// kept decoded); `None` when it is a still image.
 fn animation(
     bytes: &[u8],
     format: image::ImageFormat,
     longest: u32,
 ) -> Result<Option<Pixels>, String> {
-    use image::{AnimationDecoder, metadata::LoopCount};
-    let cursor = std::io::Cursor::new(bytes);
-    let error = |e: image::ImageError| e.to_string();
-    let (frames, loops) = match format {
-        image::ImageFormat::Gif => {
-            let decoder = image::codecs::gif::GifDecoder::new(cursor).map_err(error)?;
-            let loops = decoder.loop_count();
-            (decoder.into_frames(), loops)
-        }
-        _ => {
-            let decoder = image::codecs::webp::WebPDecoder::new(cursor).map_err(error)?;
-            if !decoder.has_animation() {
-                return Ok(None);
-            }
-            let loops = decoder.loop_count();
-            (decoder.into_frames(), loops)
-        }
+    let Some(decoded) = animation::decode(bytes, format, longest, false, bgra_frame)? else {
+        return Ok(None);
     };
-    let plays = match loops {
-        LoopCount::Infinite => 0,
-        // GIF counts repetitions after the first play (as browsers read
-        // it), WebP plays.
-        LoopCount::Finite(n) if format == image::ImageFormat::Gif => n.get().saturating_add(1),
-        LoopCount::Finite(n) => n.get(),
-    };
-    let (mut buffers, mut delays, mut total) = (Vec::new(), Vec::new(), 0);
-    let mut natural = None;
-    for frame in frames.take(MAX_FRAMES) {
-        let frame = match frame {
-            Ok(frame) => frame,
-            // A damaged frame ends the animation; what decoded plays.
-            Err(e) if !buffers.is_empty() => {
-                log::debug!("image: animation cut short: {e}");
-                break;
-            }
-            Err(e) => return Err(error(e)),
-        };
-        let delay = frame_delay(frame.delay());
-        let buffer = frame.into_buffer();
-        let (w, h) = buffer.dimensions();
-        natural.get_or_insert(Natural::Pixels(w, h));
-        let buffer = shrunk(buffer, longest);
-        total += buffer.as_raw().len();
-        if total > MAX_ANIMATION_BYTES {
-            log::debug!("image: animation over {MAX_ANIMATION_BYTES} bytes: its first frame shows");
-            buffers.truncate(1);
-            delays.truncate(1);
-            if buffers.is_empty() {
-                buffers.push(buffer);
-            }
-            break;
-        }
-        buffers.push(buffer);
-        delays.push(delay);
-    }
-    let Some(natural) = natural.filter(|_| !buffers.is_empty()) else {
-        return Err("no frames".into());
-    };
-    if buffers.len() == 1 {
-        delays.clear();
-    }
-    let frames = buffers.into_iter().map(bgra_frame).collect();
-    Ok(Some(Pixels::new(frames, delays, plays, natural)))
+    let (w, h) = decoded.natural;
+    let natural = Natural::Pixels(w, h);
+    Ok(Some(match decoded.animation {
+        Some(a) => Pixels::new(a.cached().to_vec(), a.delays.clone(), a.plays, natural),
+        None => Pixels::new(vec![decoded.first], Vec::new(), 0, natural),
+    }))
 }
 
 /// Decodes a still image (any format the `image` crate reads), turned
@@ -443,7 +351,7 @@ fn decode(bytes: &[u8], target: &Target) -> Result<Pixels, String> {
         return decode_svg(bytes, longest);
     }
     if target.frames == Frames::All
-        && let Some(format) = animated_format(bytes)
+        && let Some(format) = animation::format(bytes)
     {
         match animation(bytes, format, longest) {
             Ok(Some(pixels)) => return Ok(pixels),
@@ -2366,25 +2274,6 @@ mod tests {
     }
 
     #[test]
-    fn times_frames() {
-        assert_eq!(frame_delay(image::Delay::from_numer_denom_ms(70, 1)), 70);
-        assert_eq!(frame_delay(image::Delay::from_numer_denom_ms(0, 1)), 100);
-        assert_eq!(frame_delay(image::Delay::from_numer_denom_ms(10, 1)), 100);
-        assert_eq!(frame_delay(image::Delay::from_numer_denom_ms(41, 2)), 20);
-    }
-
-    #[test]
-    fn sniffs_animated_formats() {
-        assert_eq!(animated_format(b"GIF89a..."), Some(image::ImageFormat::Gif));
-        assert_eq!(
-            animated_format(b"RIFF\0\0\0\0WEBPVP8X"),
-            Some(image::ImageFormat::WebP)
-        );
-        assert_eq!(animated_format(b"\x89PNG\r\n"), None);
-        assert_eq!(animated_format(b"RIFF"), None);
-    }
-
-    #[test]
     fn decodes_animations() {
         let dir =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../examples/gallery");
@@ -2393,7 +2282,7 @@ mod tests {
             ("spinner.webp", image::ImageFormat::WebP),
         ] {
             let bytes = std::fs::read(dir.join(name)).unwrap();
-            assert_eq!(animated_format(&bytes), Some(format));
+            assert_eq!(animation::format(&bytes), Some(format));
             let decoded = animation(&bytes, format, 0).unwrap().unwrap();
             assert!(decoded.image.frame_count() > 1, "{name}");
             let small = animation(&bytes, format, 8).unwrap().unwrap();

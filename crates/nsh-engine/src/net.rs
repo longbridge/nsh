@@ -24,7 +24,9 @@ use std::{
 
 use ureq::{Agent, ResponseExt, SendBody, http};
 
-use crate::{FetchEvent, FetchEvents, FetchTask, HttpBody, HttpHead, HttpRequest, Network};
+use crate::{
+    FetchEvent, FetchEvents, FetchTask, HttpBody, HttpCache, HttpHead, HttpRequest, Network,
+};
 
 /// Bytes read from the response per chunk.
 const CHUNK: usize = 64 << 10;
@@ -233,6 +235,10 @@ fn run(
     body: Option<Receiver<Option<Vec<u8>>>>,
     events: &Events,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // No HTTP cache here: nothing can answer from it.
+    if request.cache == HttpCache::OnlyIfCached {
+        return Err("no cached response (`cache: \"only-if-cached\"`)".into());
+    }
     let requested: http::Uri = request.url.parse()?;
     let mut builder = http::Request::builder()
         .method(request.method.as_str())
@@ -352,6 +358,7 @@ mod tests {
             headers: Vec::new(),
             body: HttpBody::Empty,
             follow_redirects: true,
+            cache: HttpCache::Default,
         }
     }
 

@@ -1419,6 +1419,12 @@ impl TextEngine for GpuiTextEngine {
         }
     }
 
+    fn uniform_input_line_height(&self) -> bool {
+        // A plain input has one span. Its line box uses that span's font
+        // extents even when individual glyphs use a fallback font.
+        true
+    }
+
     fn measure(&self, p: &Prepared, max_width: Option<Points>) -> Size<Points> {
         let max = match max_width.map(|m| m.0) {
             Some(m) if !p.text.no_wrap => m.max(0.0),
@@ -1898,6 +1904,18 @@ impl GpuiTextEngine {
             (left, right) = (at, at);
         }
         let width = right - left;
+        // Whitespace hanging past the end of a paragraph's last line is
+        // not drawn and takes no room in the box, but a caret after it
+        // stands past it: that line reports it in its width. A line broken
+        // inside its paragraph does not: a caret after its break-space
+        // stands at the next line's start, and its width stays within the
+        // box (a justified line fills it exactly). A clamped line's
+        // ellipsis takes the whitespace's place.
+        let hanging: f32 = if row.last && !row.ellipsis {
+            advances[trailing..].iter().sum()
+        } else {
+            0.0
+        };
         let free = avail - width;
         let start_right = t.rtl || p.rtl;
         let x0 = match t.align {
@@ -1959,7 +1977,7 @@ impl GpuiTextEngine {
                 end,
                 x: Points(x0),
                 y: Points(y),
-                width: Points(width),
+                width: Points(width + hanging),
                 height: Points(ascent + descent),
                 ascender: Points(ascent),
                 descender: Points(descent),
@@ -2966,8 +2984,8 @@ pub(crate) fn context_menu(surface: &Rc<crate::surface::Surface>, view: &NshView
     );
 }
 
-/// The selected text of `view`, without attachments' placeholders and
-/// hidden runs.
+/// The selected text of `view` as a copy gives it
+/// ([`nsh_core::AttributedText::copied_text`]).
 fn selected_text(view: &NshView) -> Option<String> {
     let (a, b) = view_selection(view)?.range.get()?;
     let state = view.state();
@@ -3246,6 +3264,36 @@ mod tests {
             .iter()
             .map(|l| String::from_utf16_lossy(&units[l.start as usize..l.end as usize]))
             .collect()
+    }
+
+    #[test]
+    fn single_line_inputs_keep_the_field_samples_height() {
+        let Some(engine) = engine() else { return };
+        for style in [
+            plain(15.0),
+            ResolvedTextStyle {
+                line_height: Points(28.0),
+                ..plain(18.0)
+            },
+        ] {
+            let sample = engine.measure(
+                &engine.prepare(&text(&[("00000000000000000000", style)])),
+                None,
+            );
+            for value in [
+                "\u{200b}",
+                "a long line that does not fit",
+                "第二行🙂",
+                "ab\ncd",
+            ] {
+                let mut field = text(&[(value, style)]);
+                field.max_lines = 1;
+                let value = engine.prepare(&field);
+                for width in [None, Some(Points(5.0)), Some(Points(80.0))] {
+                    assert_eq!(engine.measure(&value, width).height, sample.height);
+                }
+            }
+        }
     }
 
     #[test]
@@ -3799,6 +3847,29 @@ mod tests {
         let (cap, x) = (first.cap_height.0, first.x_height.0);
         assert!(cap > 11.0 && cap < 16.0 && x > 8.0 && x < cap, "{cap} {x}");
         assert!(second.width.0 > first.width.0);
+    }
+
+    #[test]
+    fn trailing_spaces_hang_in_the_line_width() {
+        let Some(engine) = engine() else {
+            return;
+        };
+        let width = |s: &str| {
+            let (_, layout) = layout_of(&engine, &text(&[(s, plain(20.0))]), None);
+            engine.lines(&layout)[0].width.0
+        };
+        let (word, spaced) = (width("Hx"), width("Hx  "));
+        // A caret after the spaces (`RichEditor` puts one at the line's
+        // width) stands past them.
+        assert!(spaced > word + 5.0, "{word} {spaced}");
+        // A line broken at a space keeps its width within the box.
+        let (size, layout) = layout_of(&engine, &text(&[("Hx Hx", plain(20.0))]), Some(word + 1.0));
+        let lines = engine.lines(&layout);
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(
+            lines[0].width.0 <= size.width.0 + 0.01,
+            "{lines:?} {size:?}"
+        );
     }
 
     #[test]

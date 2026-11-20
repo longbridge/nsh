@@ -186,9 +186,6 @@ pub(crate) struct Rv {
     pub(crate) deco_rev: Signal<u64>,
     /// A block's frame or a text's lines changed.
     pub(crate) layout_rev: Signal<u64>,
-    /// Inline views' widths changed and `layout_rev` goes up once for all
-    /// of them, in a task (`Rv::set_inline_width`).
-    pub(crate) widths_pending: Rc<Cell<bool>>,
     /// The session has a state the view has not taken yet.
     notified: Signal<u64>,
     pub(crate) focused: Signal<bool>,
@@ -264,17 +261,12 @@ impl Rv {
             cx,
             st: Rc::new(RefCell::new(state.clone())),
             tree: Rc::default(),
-            geo: Rc::new(RefCell::new(Geometry {
-                font: "16px sans-serif".into(),
-                measure: Some(Rc::new(nsh_core::element::text_measurer())),
-                ..Geometry::default()
-            })),
+            geo: Rc::default(),
             decorations: Rc::default(),
             doc_rev: signal(0),
             sel_rev: signal(0),
             deco_rev: signal(0),
             layout_rev: signal(0),
-            widths_pending: Rc::default(),
             notified: signal(0),
             focused: signal(false),
             blink: signal(true),
@@ -397,15 +389,6 @@ impl Rv {
                     },
                     move |_| rv.key(&event),
                 );
-            }
-        });
-        let rv = self.clone();
-        effect(move || {
-            if rv.props.auto_focus.get() {
-                // After this commit: the input it focuses is not mounted yet
-                // when the view connects.
-                let rv = rv.clone();
-                spawn(async move { rv.focus() });
             }
         });
         // Scrolls the selection into view once its place is known.
@@ -2619,9 +2602,14 @@ impl Rv {
     }
 
     /// The box of the node at `pos` in the content box: a block's, else an
-    /// inline view's or image's on its line.
+    /// inline leaf's (image, node view, mention) on its line.
     pub(crate) fn node_box(&self, pos: usize) -> Option<Bounds<Points>> {
-        node_box(&self.tree.borrow(), &self.geo.borrow(), pos)
+        node_box(
+            &self.tree.borrow(),
+            &self.geo.borrow(),
+            &self.st.borrow(),
+            pos,
+        )
     }
 
     /// The selected node's box in the content box, for a node selection:
@@ -3351,15 +3339,28 @@ impl ViewGeometry for GeometryHandle {
         if !self.here() {
             return None;
         }
-        node_box(&self.tree.borrow(), &self.geo.borrow(), pos)
+        node_box(
+            &self.tree.borrow(),
+            &self.geo.borrow(),
+            &self.state.borrow(),
+            pos,
+        )
     }
 }
 
 /// The box of the node at `pos` in the content box: a block's, else an
-/// inline view's or image's on its line.
-fn node_box(tree: &Tree, geo: &Geometry, pos: usize) -> Option<Bounds<Points>> {
+/// inline leaf's (image, node view, mention) on its line.
+fn node_box(
+    tree: &Tree,
+    geo: &Geometry,
+    state: &EditorState,
+    pos: usize,
+) -> Option<Bounds<Points>> {
     let Some(id) = tree.id_at(pos) else {
-        // Not a block: an inline view or image, on its line.
+        let node = state.doc().node_at(pos)?;
+        if !node.is_inline() || node.is_text() {
+            return None;
+        }
         return geo.inline_rect(pos);
     };
     let origin = geo.origin(id)?;

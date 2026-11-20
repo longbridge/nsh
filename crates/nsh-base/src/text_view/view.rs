@@ -97,7 +97,9 @@ pub struct TextViewProps {
     /// Content of the app's above each table (a copy or export button).
     pub render_table_actions: Prop<Option<Renderer<Table>>>,
     /// Shows a formula (`$…$` in text, `$$…$$` blocks); without it, its
-    /// TeX shows as code.
+    /// TeX shows as code. Give a formula in text a `copyText` (its `$…$`
+    /// source) so that a copy of the text keeps it in place, as the
+    /// built-in formulas do.
     pub render_math: Prop<Option<Renderer<TextViewMath>>>,
     /// Shows an image in place of the default: alone in a paragraph, the
     /// image at the size it asks for (`width` / `height`) or its natural
@@ -1338,7 +1340,9 @@ impl Cx {
                 .text_color(move || theme().border)
                 .into_element()
         };
-        let bar = |glyph: &'static str| text(glyph).flex_none().text_color(move || theme().border);
+        // A side as tall as its row: cells that wrap keep it on every line.
+        let bar =
+            |glyph: &'static str| crate::terminal::glyph_column(glyph, move || theme().border);
         let last_row = table.rows.len();
         let mut lines = vec![ruled(['┌', '┬', '┐'])];
         let rows = std::iter::once(&table.head).chain(&table.rows);
@@ -1736,6 +1740,17 @@ impl Cx {
                 };
                 self.part(span, Part::Highlight).into_element()
             }
+            // A span in the document's color, which the app's `textStyle`
+            // part can override (a theme's own colors in dark appearance).
+            Inline::TextStyle { content, color } => {
+                let color = color.as_deref().and_then(|c| c.trim().parse::<Hsla>().ok());
+                let span = self.span(content, key);
+                let span = match color {
+                    Some(c) => span.text_color(c),
+                    None => span,
+                };
+                self.part(span, Part::TextStyle).into_element()
+            }
             Inline::Superscript { content } => self
                 .part(
                     self.span(content, key).text_size(rems(0.75)),
@@ -1814,7 +1829,8 @@ impl Cx {
                 None if is_terminal() => self
                     .part(text(super::tex_text::tex_text(tex)), Part::Math)
                     .into_element(),
-                // Typeset in the line, its middle on the text's.
+                // Typeset in the line, its middle on the text's; a copy
+                // of the text keeps its source in place.
                 None => match self.formula(tex, false, BODY_SIZE) {
                     Some(formula) => self
                         .part(
@@ -1822,6 +1838,7 @@ impl Cx {
                                 .flex_row()
                                 .align_middle()
                                 .label(tex.clone())
+                                .copy_text(format!("${tex}$"))
                                 .child(formula),
                             Part::Math,
                         )

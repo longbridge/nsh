@@ -913,6 +913,9 @@ fn input_json(c: &InputConfig) -> String {
     if c.replaced {
         s.push_str(",\"replaced\":true");
     }
+    if c.select_text_on_focus {
+        s.push_str(",\"selectTextOnFocus\":true");
+    }
     s.push('}');
     s
 }
@@ -1202,7 +1205,8 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 Some(c) => out.str(&css_color(c)),
                 None => out.raw("null"),
             };
-            if !layout.backgrounds.is_empty() || !text.links.is_empty() {
+            let copies = !text.copy_texts.is_empty();
+            if !layout.backgrounds.is_empty() || !text.links.is_empty() || copies {
                 // Span backgrounds: `[x, y, width, height, radius, color]`.
                 out.s.push_str(",[");
                 for (i, b) in layout.backgrounds.iter().enumerate() {
@@ -1219,7 +1223,7 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 }
                 out.s.push(']');
             }
-            if !text.links.is_empty() {
+            if !text.links.is_empty() || copies {
                 // Links, as runs name them: `[node, events]`.
                 out.s.push_str(",[");
                 for (i, link) in text.links.iter().enumerate() {
@@ -1228,6 +1232,19 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                     }
                     let _ = write!(out.s, "[{},", link.node);
                     push_events(&mut out.s, link.events);
+                    out.s.push(']');
+                }
+                out.s.push(']');
+            }
+            if copies {
+                // What attachments copy as: `[offset, text]`.
+                out.s.push_str(",[");
+                for (i, copy) in text.copy_texts.iter().enumerate() {
+                    if i > 0 {
+                        out.s.push(',');
+                    }
+                    let _ = write!(out.s, "[{},", copy.index);
+                    push_str(&mut out.s, &copy.text);
                     out.s.push(']');
                 }
                 out.s.push(']');
@@ -1459,6 +1476,7 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
     match command {
         Command::Focus => out.item("cmd").num(id).str("focus").end(),
         Command::Blur => out.item("cmd").num(id).str("blur").end(),
+        Command::ClearSelection => out.item("cmd").num(id).str("clearSelection").end(),
         Command::ScrollTo { x, y, animated } => {
             out.item("cmd")
                 .num(id)

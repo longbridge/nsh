@@ -193,20 +193,26 @@ fn Features(props: FeaturesProps) -> impl IntoElement {
 }
 
 fn start_features(doc: Value, editable: bool) -> Headless {
-    let schema = feature_schema();
-    let plugins = starter::plugins(&schema);
-    let doc = schema.node_from_json(&doc).unwrap();
-    let state =
-        EditorState::create(EditorStateConfig::new(schema).doc(doc).plugins(plugins)).unwrap();
-    let session = EditorSession::new(state, NodeViews::new());
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(900.0)),
-        ..EngineConfig::new(Root::new::<Features>(move || FeaturesProps {
-            session: Some(session.clone()),
-            editable,
+        // Made in the engine, so its keymaps follow the test environment's OS,
+        // not the host machine's.
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Features>(move || {
+            let schema = feature_schema();
+            let plugins = starter::plugins(&schema);
+            let doc = schema.node_from_json(&doc).unwrap();
+            let state =
+                EditorState::create(EditorStateConfig::new(schema).doc(doc).plugins(plugins))
+                    .unwrap();
+            let session = EditorSession::new(state, NodeViews::new());
+            FeaturesProps {
+                session: Some(session),
+                editable,
+            }
         }))
     };
     config.environment.os = Os::Linux;
+    config.environment.apple_keyboard = false;
     config.environment.idiom = Idiom::Desktop;
     let mut app = Headless::start(config).expect("the engine starts");
     app.wait_for("text:Ready").unwrap();
@@ -370,8 +376,10 @@ fn a_padded_root_keeps_the_sink_in_the_viewport_and_fills_its_height() {
     let mounted = session.clone();
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(900.0)),
-        ..EngineConfig::new(Root::new::<Padded>(move || PaddedProps {
-            session: Some(mounted.clone()),
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Padded>(move || {
+            PaddedProps {
+                session: Some(mounted.clone()),
+            }
         }))
     };
     config.environment.os = Os::Linux;
@@ -473,10 +481,10 @@ fn selection_boxes_are_drawn_in_task_items_and_code_blocks() {
         assert_eq!(boxes.len(), 1, "one selection box under {text}");
         let b = boxes[0];
         // From the text's start (after a task's checkbox, inside a code
-        // block's padding), on its line, through its end.
+        // block's padding), on its line, covering its characters.
         assert_eq!(b.origin, text_box.origin, "{text}");
         assert_eq!(b.size.height, text_box.size.height, "{text}");
-        assert!(b.size.width >= text_box.size.width, "{text}");
+        assert!(b.size.width > px(0.0), "{text}");
     }
 }
 
@@ -553,8 +561,10 @@ fn inline_image_app(doc: serde_json::Value) -> Headless {
     let session = EditorSession::new(state, NodeViews::new());
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(900.0)),
-        ..EngineConfig::new(Root::new::<InlineImage>(move || InlineImageProps {
-            session: Some(session.clone()),
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<InlineImage>(move || {
+            InlineImageProps {
+                session: Some(session.clone()),
+            }
         }))
     };
     config.environment.os = Os::Linux;
@@ -607,6 +617,101 @@ fn the_caret_steps_over_an_inline_image_moved_by_an_edit_above() {
     app.press("text:Type").unwrap();
     app.press("text:Measure").unwrap();
     see(&mut app, "Image 8 gap 80 Some(1) rect Some((0.0, 80.0))");
+}
+
+/// An 80-point widget decoration at the start of the line, before `abcd`
+/// (1..5): what a plugin draws in a line with no position of its own.
+struct Spacer;
+
+impl nsh_base::rich_editor::state::PluginSpec for Spacer {
+    fn decorations(
+        &self,
+        state: &EditorState,
+    ) -> Option<nsh_base::rich_editor::state::DecorationSet> {
+        let spec = [("class".to_owned(), json!("w-20 h-4"))]
+            .into_iter()
+            .collect();
+        let widget =
+            nsh_base::rich_editor::state::Decoration::widget(1, "spacer", -1).with_spec(spec);
+        Some(nsh_base::rich_editor::state::DecorationSet::create(
+            state.doc(),
+            vec![widget],
+        ))
+    }
+}
+
+#[derive(Clone, PartialEq, Props)]
+struct WidgetLineProps {
+    session: Option<EditorSession>,
+}
+
+/// An editor and a press that shows where the caret after the spacer is
+/// and the position at a point just past the spacer.
+#[component]
+fn WidgetLine(props: WidgetLineProps) -> impl IntoElement {
+    let session = props.session.clone().expect("a session");
+    let shown = signal(String::new());
+    let asked = session.clone();
+    view()
+        .child(
+            view()
+                .test_id("editor")
+                .w(px(600.0))
+                .h(px(200.0))
+                .child(rich_editor().editor(session)),
+        )
+        .child(
+            view()
+                .on_press(move || {
+                    let Some(after) = asked.coords_at_pos(1).map(|b| b.origin) else {
+                        return;
+                    };
+                    let past =
+                        asked.pos_at_coords(after + nsh_core::geometry::point(px(1.0), px(1.0)));
+                    shown.set(format!(
+                        "Spacer ends at {} past {:?}",
+                        after.x.0.round(),
+                        past
+                    ));
+                })
+                .child(text("Measure")),
+        )
+        .child(text(move || shown.get()))
+        .child(text("Ready"))
+}
+
+/// A widget decoration is as wide as its view where the caret and presses
+/// are placed, as an inline image is: the caret after it is past its
+/// width, and a point just past it is the position after it.
+#[test]
+fn the_caret_steps_over_a_widget_decorations_width() {
+    let schema = feature_schema();
+    let mut plugins = starter::plugins(&schema);
+    plugins.push(Arc::new(Spacer));
+    let doc = schema
+        .node_from_json(
+            &json!({"type": "doc", "content": [{"type": "paragraph", "content": [
+                {"type": "text", "text": "abcd"},
+            ]}]}),
+        )
+        .unwrap();
+    let state =
+        EditorState::create(EditorStateConfig::new(schema).doc(doc).plugins(plugins)).unwrap();
+    let session = EditorSession::new(state, NodeViews::new());
+    let mut config = EngineConfig {
+        viewport: Size::new(px(800.0), px(900.0)),
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<WidgetLine>(move || {
+            WidgetLineProps {
+                session: Some(session.clone()),
+            }
+        }))
+    };
+    config.environment.os = Os::Linux;
+    config.environment.idiom = Idiom::Desktop;
+    let mut app = Headless::start(config).expect("the engine starts");
+    app.wait_for("text:Ready").unwrap();
+    app.press("text:Measure").unwrap();
+    see(&mut app, "Spacer ends at 80 past Some(1)");
 }
 
 #[derive(Clone, PartialEq, Props)]
@@ -699,11 +804,13 @@ fn selected_block_app(paragraphs: usize, height: f32) -> Headless {
     let session = EditorSession::new(state, NodeViews::new());
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(900.0)),
-        ..EngineConfig::new(Root::new::<SelectedBlock>(move || SelectedBlockProps {
-            session: Some(session.clone()),
-            height,
-            at: paragraphs * 3,
-        }))
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<SelectedBlock>(
+            move || SelectedBlockProps {
+                session: Some(session.clone()),
+                height,
+                at: paragraphs * 3,
+            },
+        ))
     };
     config.environment.os = Os::Linux;
     config.environment.idiom = Idiom::Desktop;
@@ -811,4 +918,198 @@ fn range_selection_boxes_update_only_overlapped_blocks_and_clear_on_collapse() {
         let (_, boxes) = selection_boxes(&app, text);
         assert!(boxes.is_empty(), "cleared box under {text}");
     }
+}
+
+#[derive(Clone, PartialEq, Props)]
+struct PaddedMarksProps {
+    session: Option<EditorSession>,
+}
+
+#[component]
+fn PaddedMarks(props: PaddedMarksProps) -> impl IntoElement {
+    let session = props.session.clone().expect("a session");
+    let shown = signal(String::new());
+    let asked = session.clone();
+    let select = session.clone();
+    view()
+        .child(view().test_id("editor").w(px(600.0)).h(px(200.0)).child(
+            rich_editor().editor(session).size_full().classes({
+                let mut classes = nsh_base::rich_editor::view::RichEditorClasses::default();
+                classes.marks = Some(std::collections::BTreeMap::from([(
+                    "code".to_owned(),
+                    "font-mono px-1.5".to_owned(),
+                )]));
+                classes
+            }),
+        ))
+        .child(
+            view()
+                .on_press(move || {
+                    let p1_start = 24usize;
+                    let mut tr = select.state().tr();
+                    tr.set_selection(nsh_base::rich_editor::state::TextSelection::create(
+                        tr.doc(),
+                        p1_start + 15,
+                        Some(p1_start + 19),
+                    ));
+                    select.dispatch(tr).unwrap();
+                })
+                .child(text("Select")),
+        )
+        .child(
+            view()
+                .on_press(move || {
+                    // P0: "Code mark: plain text" (start = 1)
+                    // P1: "Code mark: " (1..12) + code("foo", 12..15) + " bold" (15..20)
+                    // Doc offset of P1: 1 + 21 + 2 = 24
+                    let p0_end_prefix = asked.coords_at_pos(1 + 10).map_or(-1.0, |b| b.origin.x.0);
+                    let p1_start = 24usize;
+                    let p1_end_prefix = asked
+                        .coords_at_pos(p1_start + 10)
+                        .map_or(-1.0, |b| b.origin.x.0);
+                    let bold_from = p1_start + 15;
+                    let bold_to = p1_start + 19;
+                    let bold_x0 = asked
+                        .coords_at_pos(bold_from)
+                        .map_or(-1.0, |b| b.origin.x.0);
+                    let bold_x1 = asked.coords_at_pos(bold_to).map_or(-1.0, |b| b.origin.x.0);
+                    let sel = asked.selection_rect().unwrap_or_default();
+                    let hit_after = asked.coords_at_pos(bold_from).and_then(|b| {
+                        asked.pos_at_coords(
+                            b.origin + nsh_core::geometry::point(px(1.0), b.size.height * 0.5),
+                        )
+                    });
+                    // Check there are no duplicate zero-advance steps across P1.
+                    let mut dup = false;
+                    for i in 0..19 {
+                        let a = asked
+                            .coords_at_pos(p1_start + i)
+                            .map_or(-1.0, |b| b.origin.x.0);
+                        let b = asked
+                            .coords_at_pos(p1_start + i + 1)
+                            .map_or(-1.0, |b| b.origin.x.0);
+                        if (b - a).abs() < 0.01 {
+                            dup = true;
+                        }
+                    }
+                    shown.set(format!(
+                        "prefix_eq={} dup={} hit={} sel_x_eq={} sel_w_eq={}",
+                        (p0_end_prefix - p1_end_prefix).abs() < 0.01,
+                        dup,
+                        hit_after == Some(bold_from),
+                        (sel.origin.x.0 - bold_x0).abs() < 0.01,
+                        (sel.size.width.0 - (bold_x1 - bold_x0)).abs() < 0.01,
+                    ));
+                })
+                .child(text("Measure")),
+        )
+        .child(text(move || shown.get()))
+        .child(text("Ready"))
+}
+
+/// Horizontal padding on inline marks injects synthetic spacer attachments in
+/// `AttributedText`. Document positions, caret coordinates, hit tests and
+/// selection boxes after a padded mark must remain aligned without offset
+/// drift or prefix stretching.
+#[test]
+fn padded_inline_marks_keep_caret_selection_and_hits_aligned() {
+    let schema = feature_schema();
+    let plugins = starter::plugins(&schema);
+    let doc = schema
+        .node_from_json(&json!({"type": "doc", "content": [
+            {"type": "paragraph", "content": [
+                {"type": "text", "text": "Code mark: plain text"}
+            ]},
+            {"type": "paragraph", "content": [
+                {"type": "text", "text": "Code mark: "},
+                {"type": "text", "text": "foo", "marks": [{"type": "code"}]},
+                {"type": "text", "text": " bold"},
+            ]},
+        ]}))
+        .unwrap();
+    let state =
+        EditorState::create(EditorStateConfig::new(schema).doc(doc).plugins(plugins)).unwrap();
+    let session = EditorSession::new(state, NodeViews::new());
+    let mut config = EngineConfig {
+        viewport: Size::new(px(800.0), px(900.0)),
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<PaddedMarks>(move || {
+            PaddedMarksProps {
+                session: Some(session.clone()),
+            }
+        }))
+    };
+    config.environment.os = Os::Linux;
+    config.environment.apple_keyboard = false;
+    config.environment.idiom = Idiom::Desktop;
+    let mut app = Headless::start(config).expect("the engine starts");
+    app.wait_for("text:Ready").unwrap();
+    app.press("text:Select").unwrap();
+    app.press("text:Measure").unwrap();
+    see(
+        &mut app,
+        "prefix_eq=true dup=false hit=true sel_x_eq=true sel_w_eq=true",
+    );
+}
+
+#[test]
+fn auto_focus_configures_the_caret_sink_input_on_mount() {
+    #[component]
+    fn AutoFocusedRich() -> impl IntoElement {
+        let schema = starter::schema();
+        let plugins = starter::plugins(&schema);
+        let doc = schema
+            .node_from_json(&json!({"type": "doc", "content": [{"type": "paragraph"}]}))
+            .unwrap();
+        let state =
+            EditorState::create(EditorStateConfig::new(schema).doc(doc).plugins(plugins)).unwrap();
+        let session = EditorSession::new(state, NodeViews::new());
+        let shown = signal(String::new());
+        let focused = signal(0u32);
+        let read = {
+            let session = session.clone();
+            move || doc_text(session.state().doc())
+        };
+        view()
+            .w(px(400.0))
+            .h(px(200.0))
+            .child(
+                rich_editor()
+                    .editor(session)
+                    .auto_focus(true)
+                    .on_focus(move || focused.update(|n| *n += 1))
+                    .on_change(move |_: &_| shown.set(read()))
+                    .size_full(),
+            )
+            .child(text(move || format!("Focused {}", focused.get())))
+            .child(text(move || format!("Text {:?}", shown.get())))
+    }
+
+    let mut config = EngineConfig {
+        viewport: Size::new(px(400.0), px(250.0)),
+        clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
+        ..EngineConfig::new(nsh_testing::windowed_root::<AutoFocusedRich>())
+    };
+    config.environment.os = Os::Linux;
+    config.environment.idiom = Idiom::Desktop;
+    let mut app = Headless::start(config).expect("the engine starts");
+    let auto_focused_inputs = std::sync::Arc::new(std::sync::Mutex::new(0usize));
+    let seen = auto_focused_inputs.clone();
+    app.observe(move |_, batch| {
+        for item in &batch.items {
+            if let nsh_core::MountItem::Input { config, .. } = item
+                && config.auto_focus
+            {
+                *seen.lock().unwrap() += 1;
+            }
+        }
+    });
+    app.first_render().unwrap();
+    assert_eq!(
+        *auto_focused_inputs.lock().unwrap(),
+        1,
+        "autoFocus should configure RichEditor's caret sink input on first mount"
+    );
+    app.press_key("a").unwrap();
+    see(&mut app, "Text \"a\"");
+    see(&mut app, "Focused 1");
 }

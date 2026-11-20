@@ -152,7 +152,11 @@ fn content(rv: Rv) -> impl IntoElement {
             })
             .relative()
             .min_h(relative(1.0))
-            .cursor(Cursor::Text),
+            .cursor(Cursor::Text)
+            // The presses below are the pointer's: a press focuses the
+            // sink, which takes the keys and is the editor's one stop of
+            // Tab, not this box.
+            .focusable(false),
         &rv,
         Part::Content,
     )
@@ -1032,12 +1036,6 @@ fn text_block(rv: Rv, item: ReadSignal<BlockItem>, owner: u64) -> impl IntoEleme
             |n| inline_rv.leaf_text(n),
         );
         if let Some(geo) = inline_rv.geo.borrow_mut().texts.get_mut(&id) {
-            // Its views moved within it: they report their widths anew.
-            // A move of the whole block (an edit in another) keeps them;
-            // its spans are not drawn again.
-            if geo.map != inline.map {
-                geo.widths.clear();
-            }
             geo.map = inline.map.clone();
         }
         inline
@@ -1050,10 +1048,11 @@ fn text_block(rv: Rv, item: ReadSignal<BlockItem>, owner: u64) -> impl IntoEleme
     let (frame_rv, lines_rv, spans_rv, sel_rv) = (rv.clone(), rv.clone(), rv.clone(), rv);
     // The text's box: its selection boxes, then the text over them.
     let text = text("")
-        .on(EventKind::TextLayout, move |p: &EventPayload| {
-            if let EventPayload::TextLayout(lines) = p {
-                lines_rv.set_lines(id, lines.clone());
-            }
+        // The engine's layout: its lines without the placeholders of
+        // spans' padding, so their offsets are the text's, and its own hit
+        // testing, caret edges and range boxes.
+        .on_text_layout(move |g: &nsh_core::TextGeometry| {
+            lines_rv.set_lines(id, g.lines(), g.clone());
         })
         .child(dynamic(move || {
             let inline = content.get();
@@ -1229,15 +1228,6 @@ fn link_destination(marks: &[Mark]) -> Option<(SharedString, Option<SharedString
     Some((attr("href")?, attr("title")))
 }
 
-/// The box of an inline view or image at `offset` in textblock `id`'s
-/// content: it reports its width, which its attachment character stands
-/// for when the geometry places the caret and finds the position at a
-/// point.
-fn inline_box(rv: &Rv, el: View, (id, offset): (u64, usize)) -> View {
-    let width_rv = rv.clone();
-    el.on_layout(move |b: &Bounds<Points>| width_rv.set_inline_width(id, offset, *b))
-}
-
 /// An inline leaf: its one-character text (a line break), its node view,
 /// the text it is drawn as (`drawn`, [`Rv::leaf_text`]), else a box of its
 /// part. Its position is its textblock's current one plus its offset: an
@@ -1303,14 +1293,10 @@ fn leaf(
         .rendered_at(rv.cx.__host(), key, rv.doc_rev.read_only());
         let el = view.create(&cx, &node);
         cleanup(move || view.destroy());
-        return inline_box(rv, styled(view_box()), at)
-            .child(el)
-            .into_element();
+        return styled(view_box()).child(el).into_element();
     }
     if render_kind(&node) == Some("image") {
-        return inline_box(rv, styled(view_box()), at)
-            .child(image_of(&node))
-            .into_element();
+        return styled(view_box()).child(image_of(&node)).into_element();
     }
     if let Some(drawn) = drawn {
         let (class_node, style_node) = (node.clone(), node);
@@ -1650,6 +1636,7 @@ fn sink(rv: Rv) -> impl IntoElement {
         // see: a thumb here would show at the caret once the text it
         // holds overflows.
         .scrollbar(false)
+        .auto_focus(props.auto_focus)
         .auto_correct(false)
         .auto_capitalize(AutoCapitalize::None)
         .paste_behavior(PasteBehavior::Report)
@@ -1698,32 +1685,6 @@ impl Rv {
         geo.frames.insert(id, (parent, frame));
         drop(geo);
         self.layout_rev.update(|r| *r += 1);
-    }
-
-    /// The width of the inline view or image at `offset` in textblock
-    /// `id`'s content (see `TextGeo::widths`).
-    fn set_inline_width(&self, id: u64, offset: usize, frame: Bounds<Points>) {
-        let mut geo = self.geo.borrow_mut();
-        let Some(text) = geo.texts.get_mut(&id) else {
-            return;
-        };
-        if text.widths.get(&offset) == Some(&frame) {
-            return;
-        }
-        text.widths.insert(offset, frame);
-        drop(geo);
-        self.refresh_block_selection_rects(id);
-        // Every inline view of a block reports its width as an edit before
-        // them moves them (their offsets are new): the geometry follows once
-        // for all of them, not once per view.
-        if self.widths_pending.replace(true) {
-            return;
-        }
-        let (pending, layout_rev) = (self.widths_pending.clone(), self.layout_rev);
-        spawn(async move {
-            pending.set(false);
-            layout_rev.update(|r| *r += 1);
-        });
     }
 
     /// Where block `id`'s children start in its box (see
@@ -1790,17 +1751,15 @@ impl Rv {
         None
     }
 
-    /// Textblock `id`'s lines.
-    fn set_lines(&self, id: u64, lines: Vec<nsh_core::TextLine>) {
+    /// Textblock `id`'s final layout and lines (`Text::on_text_layout`).
+    fn set_lines(&self, id: u64, lines: Vec<nsh_core::TextLine>, geometry: nsh_core::TextGeometry) {
         {
             let mut geo = self.geo.borrow_mut();
             let Some(text) = geo.texts.get_mut(&id) else {
                 return;
             };
-            if text.lines == lines {
-                return;
-            }
             text.lines = lines;
+            text.geometry = Some(geometry);
         }
         self.refresh_block_selection_rects(id);
         self.layout_rev.update(|r| *r += 1);

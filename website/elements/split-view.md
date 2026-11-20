@@ -63,6 +63,7 @@ fn mail() -> impl IntoElement {
 ```tsx tabs
 import { horizontalSizeClass, mount, signal, Text, View } from "nsh";
 import { Button, type ColumnVisibility, createNavStack, NavPage, NavStack, SplitView } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 const messages = ["Welcome", "Release notes"];
 const inbox = createNavStack(["inbox"]);
@@ -109,7 +110,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 `SplitView` comes from [`nsh/base`](../modules/nsh-base.md), `nsh_base::split_view()` in Rust, with

@@ -19,11 +19,11 @@
 use jni::objects::GlobalRef;
 use nsh_core::{
     AccessibilityCurrent, AccessibilityRole, AudioSession, AutoCapitalize, AutoFill, BorderStyle,
-    Checked, Color, Command, DialogButtonStyle, EditAction, InputConfig, KeyCapture,
-    KeyboardDismissMode, KeyboardTaps, KeyboardType, LayoutCurve, LayoutProperty, LayoutTransition,
-    LiveRegion, ModalAnimation, ModalPresentation, MountBatch, MountItem, NativeProps,
-    PointerEvents, ResizeMode, ReturnKeyType, ScreenAnimation, ScreenConfig, SnapAlignment,
-    StatusBarStyle, SubmitBehavior, ViewKind, ViewProps, ViewStyle, WebSource,
+    Checked, Color, Command, DialogButtonStyle, EditAction, HeaderTitleAlign, InputConfig,
+    KeyCapture, KeyboardDismissMode, KeyboardTaps, KeyboardType, LayoutCurve, LayoutProperty,
+    LayoutTransition, LiveRegion, ModalAnimation, ModalPresentation, MountBatch, MountItem,
+    NativeProps, PointerEvents, ResizeMode, ReturnKeyType, ScreenAnimation, ScreenConfig,
+    SnapAlignment, StatusBarStyle, SubmitBehavior, ViewKind, ViewProps, ViewStyle, WebSource,
     audio::AudioCommand,
     geometry::{DefiniteLength, REM_SIZE},
 };
@@ -234,6 +234,13 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                 // The one color all of it is drawn in, if there is one: a
                 // change of it transitions (`transition-colors`, `TextBox`).
                 opt_color(&mut e, text.uniform_color());
+                // What attachments copy as: offset, then the string's
+                // object (`TextBox.copied`).
+                e.int(text.copy_texts.len() as i32);
+                for copy in &text.copy_texts {
+                    e.int(copy.index as i32);
+                    e.string(copy.text.to_string());
+                }
             }
             MountItem::Events { id, events } => {
                 e.int(EVENTS);
@@ -559,6 +566,7 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                 match command {
                     Command::Focus => e.int(0),
                     Command::Blur => e.int(1),
+                    Command::ClearSelection => e.int(62),
                     Command::ScrollTo { x, y, animated } => {
                         e.int(2);
                         e.float(x.0);
@@ -1449,6 +1457,10 @@ fn screen_config(e: &mut Encoded, c: &ScreenConfig) {
     }
     e.float(c.header_height.0);
     e.opt_string(c.back_title.as_deref());
+    e.int(match c.title_align {
+        HeaderTitleAlign::Left => 0,
+        HeaderTitleAlign::Center => 1,
+    });
 }
 
 fn view_props(e: &mut Encoded, p: &ViewProps) {
@@ -1743,6 +1755,7 @@ fn input(e: &mut Encoded, c: &InputConfig) {
     e.int(c.max_length.map_or(-1, |m| m as i32));
     e.bool(c.editable);
     e.bool(c.auto_focus);
+    e.bool(c.select_text_on_focus);
     e.bool(c.selection_color.is_some());
     e.int(c.selection_color.map_or(0, argb));
     e.bool(c.caret_color.is_some());
@@ -2148,8 +2161,10 @@ mod tests {
             canvas(&mut e, &drawing);
             let words: Vec<u32> = e
                 .bytes
-                .chunks_exact(4)
-                .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()))
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|chunk| u32::from_le_bytes(*chunk))
                 .collect();
             // The word count, the code, the URI's object, no source.
             assert_eq!(&words[..4], &[12, 42, 0, 0]);
@@ -2173,8 +2188,10 @@ mod tests {
         };
         encode(batch, 0)
             .bytes
-            .chunks_exact(4)
-            .map(|chunk| i32::from_le_bytes(chunk.try_into().unwrap()))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|chunk| i32::from_le_bytes(*chunk))
             .collect()
     }
 
@@ -2237,8 +2254,10 @@ mod tests {
         };
         let ints: Vec<i32> = encode(batch, 0)
             .bytes
-            .chunks_exact(4)
-            .map(|chunk| i32::from_le_bytes(chunk.try_into().unwrap()))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|chunk| i32::from_le_bytes(*chunk))
             .collect();
         // `COMMAND`, the root, op 55 (`Mounter.java`), the request, the
         // pixel size, the scale's bits, PNG, then `CANVAS`'s words: their
@@ -2281,8 +2300,10 @@ mod tests {
         );
         let ints: Vec<_> = encoded
             .bytes
-            .chunks_exact(4)
-            .map(|chunk| i32::from_le_bytes(chunk.try_into().unwrap()))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|chunk| i32::from_le_bytes(*chunk))
             .collect();
         assert_eq!(ints, vec![COMMAND, 3, 51, -1, 0, 1, 2, 3]);
         assert!(matches!(&encoded.objects[0], Obj::Str(generation) if generation == "19"));
@@ -2291,30 +2312,37 @@ mod tests {
     fn view_props_carry_the_key_capture_policy() {
         use nsh_core::keymap::{Key, Keystroke, Modifiers};
 
-        let mut props = ViewProps::default();
-        props.key_capture = KeyCapture::keys([
-            Keystroke {
-                key: Key::Char('a'),
-                modifiers: Modifiers::default(),
-            },
-            Keystroke {
-                key: Key::Left,
-                modifiers: Modifiers {
-                    shift: true,
-                    ..Modifiers::default()
+        let props = ViewProps {
+            key_capture: KeyCapture::keys([
+                Keystroke {
+                    key: Key::Char('a'),
+                    modifiers: Modifiers::default(),
                 },
-            },
-        ]);
+                Keystroke {
+                    key: Key::Left,
+                    modifiers: Modifiers {
+                        shift: true,
+                        ..Modifiers::default()
+                    },
+                },
+            ]),
+            ..ViewProps::default()
+        };
         let encoded = encode(
             MountBatch {
-                items: vec![MountItem::ViewProps { id: 2, props }],
+                items: vec![MountItem::ViewProps {
+                    id: 2,
+                    props: Box::new(props),
+                }],
             },
             0,
         );
         let ints: Vec<_> = encoded
             .bytes
-            .chunks_exact(4)
-            .map(|chunk| i32::from_le_bytes(chunk.try_into().unwrap()))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|chunk| i32::from_le_bytes(*chunk))
             .collect();
         // The tail `Mounter.java` reads: mode, count, (key, modifiers)*,
         // `focusable` (-1 unset), then `key_parent` (-1 none).
@@ -2333,35 +2361,49 @@ mod tests {
         );
 
         for (focusable, expected) in [(None, -1), (Some(false), 0), (Some(true), 1)] {
-            let mut props = ViewProps::default();
-            props.focusable = focusable;
+            let props = ViewProps {
+                focusable,
+                ..ViewProps::default()
+            };
             let encoded = encode(
                 MountBatch {
-                    items: vec![MountItem::ViewProps { id: 2, props }],
+                    items: vec![MountItem::ViewProps {
+                        id: 2,
+                        props: Box::new(props),
+                    }],
                 },
                 0,
             );
             let ints: Vec<_> = encoded
                 .bytes
-                .chunks_exact(4)
-                .map(|chunk| i32::from_le_bytes(chunk.try_into().unwrap()))
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|chunk| i32::from_le_bytes(*chunk))
                 .collect();
             assert_eq!(ints[ints.len() - 2], expected);
             assert_eq!(ints[ints.len() - 1], -1);
         }
 
-        let mut props = ViewProps::default();
-        props.key_parent = Some(7);
+        let props = ViewProps {
+            key_parent: Some(7),
+            ..ViewProps::default()
+        };
         let encoded = encode(
             MountBatch {
-                items: vec![MountItem::ViewProps { id: 2, props }],
+                items: vec![MountItem::ViewProps {
+                    id: 2,
+                    props: Box::new(props),
+                }],
             },
             0,
         );
         let ints: Vec<_> = encoded
             .bytes
-            .chunks_exact(4)
-            .map(|chunk| i32::from_le_bytes(chunk.try_into().unwrap()))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|chunk| i32::from_le_bytes(*chunk))
             .collect();
         assert_eq!(ints[ints.len() - 1], 7);
     }
@@ -2370,23 +2412,30 @@ mod tests {
     fn inputs_carry_text_layout_align_letter_spacing_and_font_variant() {
         use nsh_core::{FontVariant, InputConfig, Points, ResolvedTextStyle, TextAlign};
 
-        let mut config = InputConfig::default();
-        config.style = ResolvedTextStyle {
-            letter_spacing: Points(2.5),
-            font_variant: FontVariant(FontVariant::TABULAR_NUMS | FontVariant::SMALL_CAPS),
-            ..ResolvedTextStyle::default()
+        let config = InputConfig {
+            style: ResolvedTextStyle {
+                letter_spacing: Points(2.5),
+                font_variant: FontVariant(FontVariant::TABULAR_NUMS | FontVariant::SMALL_CAPS),
+                ..ResolvedTextStyle::default()
+            },
+            ..InputConfig::default()
         };
         let ints_for = |cfg: InputConfig| {
             let encoded = encode(
                 MountBatch {
-                    items: vec![MountItem::Input { id: 5, config: cfg }],
+                    items: vec![MountItem::Input {
+                        id: 5,
+                        config: Box::new(cfg),
+                    }],
                 },
                 0,
             );
             encoded
                 .bytes
-                .chunks_exact(4)
-                .map(|chunk| i32::from_le_bytes(chunk.try_into().unwrap()))
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|chunk| i32::from_le_bytes(*chunk))
                 .collect::<Vec<_>>()
         };
 

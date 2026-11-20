@@ -53,6 +53,11 @@ pub(crate) struct Ambient {
     storage: Option<crate::storage::Store>,
     /// The app's own data directory ([`data_dir`]).
     data_dir: Option<std::path::PathBuf>,
+    /// The app as it was built ([`app_info`]).
+    app_info: Option<crate::platform::AppInfo>,
+    /// What `nsh/updater` checks with for Rust code
+    /// ([`crate::runtime::prompt_for_update`]).
+    updater: Option<std::sync::Arc<dyn crate::runtime::UpdaterHost>>,
     /// The displays (desktops), as the platform reports them.
     displays: Option<Signal<Arc<[crate::desktop::Display]>>>,
     /// Whether the performance monitor measures, as the platform reports
@@ -174,6 +179,21 @@ impl super::Runtime {
     pub(crate) fn set_data_dir(&self, dir: Option<std::path::PathBuf>) {
         let _entered = self.enter();
         with_data(|d| d.ambient.data_dir = dir);
+    }
+
+    /// The app as it was built ([`app_info`]).
+    pub(crate) fn set_app_info(&self, info: Option<crate::platform::AppInfo>) {
+        let _entered = self.enter();
+        with_data(|d| d.ambient.app_info = info);
+    }
+
+    /// What Rust code checks for updates with ([`updater_host`]).
+    pub(crate) fn set_updater(
+        &self,
+        updater: Option<std::sync::Arc<dyn crate::runtime::UpdaterHost>>,
+    ) {
+        let _entered = self.enter();
+        with_data(|d| d.ambient.updater = updater);
     }
 
     /// How text is measured (the core's text engine).
@@ -676,6 +696,26 @@ pub fn data_dir() -> Option<std::path::PathBuf> {
     with_data(|d| d.ambient.data_dir.clone())
 }
 
+/// The app as it was built (TS: `appInfo()`): its id, name, version and
+/// build number, and whether it is a development build
+/// ([`crate::platform::AppInfo`]). `None` in a TSX app, whose JS
+/// `appInfo()` reports it, and where the runner gave none.
+///
+/// ```ignore
+/// if let Some(version) = app_info().and_then(|info| info.version) {
+///     log::info!("version {version}");
+/// }
+/// ```
+pub fn app_info() -> Option<crate::platform::AppInfo> {
+    with_data(|d| d.ambient.app_info.clone())
+}
+
+/// What Rust code checks for updates with: the engine's, `None` where the
+/// app does not update.
+pub(crate) fn updater_host() -> Option<std::sync::Arc<dyn crate::runtime::UpdaterHost>> {
+    with_data(|d| d.ambient.updater.clone())
+}
+
 /// The file the app's log lines are written to (TS: `process.logFile`): a
 /// packaged desktop app's rolling log, `logs/app.log` in the app's data
 /// directory, for a diagnostics report or an "Open logs folder" command
@@ -1084,8 +1124,8 @@ pub fn next_open_files() -> Answer<Vec<std::path::PathBuf>> {
 /// ...)`): with `nsh.json` `"singleInstance": true`, a second launch on
 /// Windows or Linux hands the running instance its arguments and working
 /// directory and exits; those that came before anything listened first
-/// ([`crate::single_instance`]). The main window is already brought
-/// forward. Never on macOS (Launch Services activates the running app
+/// ([`crate::single_instance`]). The app has already heard `reopen`;
+/// nothing is brought forward implicitly. Never on macOS (Launch Services activates the running app
 /// instead), iOS, Android or the web. To await in a task.
 pub fn next_second_instance() -> Answer<crate::single_instance::SecondInstance> {
     let (answer, slot) = Answer::new();
@@ -1689,6 +1729,8 @@ pub fn component_ref<C: super::Component>() -> super::ComponentRef<C> {
 /// options).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct KeyOptions {
+    /// Where it fires ([`KeyScope`]).
+    pub scope: KeyScope,
     /// While a text input (or a web view) has the keyboard focus: by
     /// default unless the input uses the keystroke itself.
     pub when: crate::keymap::When,
@@ -1707,6 +1749,19 @@ pub struct KeyOptions {
     /// give way to the control the focus is on (default)
     /// ([`crate::keymap::KeyBinding::for_focus`]).
     pub for_focus: bool,
+}
+
+/// Where a keyboard shortcut fires ([`on_key_with`]; TS: `keymap.bind`'s
+/// `scope`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum KeyScope {
+    /// The window the shortcut is made in: the window around the component,
+    /// or the window the core finds its component in. A shortcut made in the
+    /// app root (outside every window) is app-wide.
+    #[default]
+    Window,
+    /// Every window: the app's own shortcuts, made in the app root.
+    App,
 }
 
 /// Whether shortcuts follow Apple's conventions here (`mod` is Command):
@@ -1730,10 +1785,12 @@ pub fn try_apple_keys() -> Option<bool> {
 /// lives (TS: `keymap.bind`): `"mod+k"` (`mod` is Command on Apple
 /// platforms, Control elsewhere), `"shift+mod+l"`, `"escape"`, ... (the
 /// keystrokes of `nsh/keymap`). The handler gets the keystroke as written.
-/// It belongs to the window bound in ([`super::desktop::current_window`];
-/// in a component JS places in a window, that window) and fires only for
-/// keys pressed there; a key it does not take goes on as usual. Desktop
-/// platforms fire them; elsewhere they are kept but no key does.
+/// By default it belongs to the window bound in ([`super::desktop::current_window`];
+/// in a component JS places in a window, that window), or to every window
+/// when bound in the app root; [`KeyOptions::scope`] makes the choice
+/// explicit. It fires only for keys pressed there, and a key it does not
+/// take goes on as usual. Desktop platforms fire them; elsewhere they are
+/// kept but no key does.
 ///
 /// # Panics
 ///
@@ -1761,8 +1818,15 @@ pub fn on_key_with(keystroke: &str, options: KeyOptions, handler: impl Fn(&str) 
     let handler: super::keys::KeyHandler = Rc::new(move |k: &str| owner.run(|| handler(k)));
     // It belongs to the window whose tree binds it (`current_window`); with
     // no window around it in Rust (a component JS placed in a `Window`),
-    // the core finds the window its owner's component shows in.
-    let window = super::use_context::<super::desktop::WindowRef>().and_then(|w| w.dialog_root());
+    // the core finds the window its owner's component shows in. An app-wide
+    // binding (`KeyScope::App`) belongs to every window.
+    let (window, app) = match options.scope {
+        KeyScope::App => (None, true),
+        KeyScope::Window => (
+            super::use_context::<super::desktop::WindowRef>().and_then(|w| w.dialog_root()),
+            false,
+        ),
+    };
     let keys = executor().keys.clone();
     let id = keys.borrow_mut().add(
         |id| {
@@ -1773,6 +1837,7 @@ pub fn on_key_with(keystroke: &str, options: KeyOptions, handler: impl Fn(&str) 
         keystroke.into(),
         handler,
         window,
+        app,
         owner,
     );
     let weak = Rc::downgrade(&keys);

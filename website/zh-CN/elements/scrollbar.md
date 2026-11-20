@@ -57,6 +57,7 @@ fn inbox(rows: impl IntoElement) -> impl IntoElement {
 ```tsx tabs
 import { mount, Scroll, Text, View, type YNode } from "nsh";
 import { Scrollbar } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 function App() {
   let list: YNode | undefined;
@@ -79,7 +80,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 `Scrollbar` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate。在 Rust 中，`scrollbar()` 创建一个滚动条，每个

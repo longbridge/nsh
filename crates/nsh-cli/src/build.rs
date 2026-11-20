@@ -234,7 +234,7 @@ pub(crate) fn compile_release(
 /// `--name`, `--version` and `--build`, with the defaults the package
 /// writers use: [`crate::package::name_and_id`], `1.0.0`, build `1`), so
 /// `appInfo()` reports what the package says it is.
-fn app_info(entry: &Path, config: &crate::package::AppConfig) -> AppInfo {
+pub(crate) fn app_info(entry: &Path, config: &crate::package::AppConfig) -> AppInfo {
     let (name, id) = crate::package::name_and_id(entry, config);
     let mut info = AppInfo::default();
     info.id = Some(id);
@@ -380,6 +380,9 @@ pub(crate) fn build(entry: &Path, out: &Path, release: bool, split: bool) -> any
                 let mut info = serde_json::json!({ "id": id });
                 config.add_file_types_to_app_json(&mut info);
                 config.add_data_dir_to_app_json(&mut info);
+                if let Some(application) = &config.application {
+                    info["application"] = application.clone();
+                }
                 info
             },
             &schemes,

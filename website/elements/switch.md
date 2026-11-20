@@ -47,6 +47,7 @@ fn wifi() -> impl IntoElement {
 ```tsx tabs
 import { mount, signal, Text } from "nsh";
 import { Switch } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 function App() {
   const on = signal(false);
@@ -63,7 +64,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 `Switch` comes from [`nsh/base`](../modules/nsh-base.md), the `nsh-base` crate in Rust. The value is the app's: a

@@ -1358,30 +1358,63 @@ pub(crate) fn pasted(pasteboard: &NSPasteboard) -> nsh_core::PasteEvent {
             .unwrap_or_default(),
     );
     paste.html = pasted_html(pasteboard).unwrap_or_default();
-    let file_url = NSString::from_str("public.file-url");
     for item in pasteboard
         .pasteboardItems()
         .map(|i| i.to_vec())
         .unwrap_or_default()
     {
-        if let Some(uri) = item.stringForType(&file_url) {
-            paste.uris.extend(crate::file_drop::local_file_uri(&uri));
-            continue;
-        }
-        let image = IMAGE_TYPES.iter().find_map(|(mime, kind)| {
-            item.dataForType(&NSString::from_str(kind))
-                .map(|data| (*mime, data.to_vec()))
-        });
-        let Some((mime, bytes)) = image else {
-            continue;
-        };
-        let bytes = match mime {
-            "image/tiff" | "image/bmp" => to_png(&bytes).unwrap_or(bytes),
-            _ => bytes,
-        };
-        paste.files.push(nsh_core::PastedFile::image(bytes));
+        paste_item(&item, &mut paste);
     }
     paste
+}
+
+fn paste_item(item: &objc2_app_kit::NSPasteboardItem, paste: &mut nsh_core::PasteEvent) {
+    let uri = item
+        .stringForType(ns_string!("public.file-url"))
+        .and_then(|uri| crate::file_drop::local_file_uri(&uri));
+    if let Some(uri) = &uri {
+        let types = item.types();
+        // Finder can supply a file icon alongside the URL. Only probe
+        // the file when this item offers a possible image fallback.
+        if types.containsObject(ns_string!("com.apple.finder.node"))
+            || types.containsObject(ns_string!("com.apple.finder.noderef"))
+            || !IMAGE_TYPES
+                .iter()
+                .any(|(_, kind)| types.containsObject(&NSString::from_str(kind)))
+            || nsh_core::access::file_url_path(uri).is_none_or(|path| prefer_file_url(&path))
+        {
+            paste.uris.push(uri.clone());
+            return;
+        }
+    }
+    let image = IMAGE_TYPES.iter().find_map(|(mime, kind)| {
+        item.dataForType(&NSString::from_str(kind))
+            .filter(|data| data.length() > 0)
+            .map(|data| (*mime, data.to_vec()))
+    });
+    let Some((mime, bytes)) = image else {
+        paste.uris.extend(uri);
+        return;
+    };
+    let bytes = match mime {
+        "image/tiff" | "image/bmp" => to_png(&bytes).unwrap_or(bytes),
+        _ => bytes,
+    };
+    paste.files.push(nsh_core::PastedFile::image(bytes));
+}
+
+/// Keep directories and special files as URLs. Opening a regular file
+/// checks the current process's read access without reading its contents.
+fn prefer_file_url(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::OpenOptionsExt;
+    if path.metadata().is_ok_and(|metadata| !metadata.is_file()) {
+        return true;
+    }
+    std::fs::File::options()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK | libc::O_NOCTTY)
+        .open(path)
+        .is_ok()
 }
 
 /// The pasteboard's formatted content as HTML: `public.html` as browsers,
@@ -1591,7 +1624,7 @@ mod tests {
         NSData, NSDictionary, NSPropertyListFormat, NSPropertyListSerialization, NSString,
     };
 
-    use super::{Shows, answered_index, next_alone, pasted_html};
+    use super::{Shows, answered_index, next_alone, paste_item, pasted_html};
 
     #[test]
     fn alerts_on_their_own_show_one_at_a_time_oldest_first() {
@@ -1638,6 +1671,69 @@ mod tests {
         board.clearContents();
         board.setData_forType(Some(&NSData::with_bytes(bytes)), &NSString::from_str(kind));
         board
+    }
+
+    #[test]
+    fn paste_prefers_files_with_an_inline_image_fallback() {
+        use std::os::unix::fs::OpenOptionsExt;
+
+        use objc2_app_kit::NSPasteboardItem;
+        use objc2_foundation::NSURL;
+
+        let (_, bytes) = nsh_core::image::decode_data_uri("data:;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==").unwrap();
+        let readable = "file:///etc/hosts";
+        let denied = std::env::temp_dir().join(format!("nsh-paste-{}.png", std::process::id()));
+        std::fs::File::options()
+            .write(true)
+            .create_new(true)
+            .mode(0o000)
+            .open(&denied)
+            .unwrap();
+        let denied_url = NSURL::fileURLWithPath(&NSString::from_str(denied.to_str().unwrap()))
+            .absoluteString()
+            .unwrap()
+            .to_string();
+        let can_read = std::fs::File::open(&denied).is_ok();
+        let missing = "file:///dev/null/nsh-inaccessible.png";
+        for (uri, finder, image, expect_image) in [
+            (Some(denied_url.as_str()), false, true, !can_read),
+            (Some(missing), false, true, true),
+            (Some(readable), false, true, false),
+            (Some(missing), true, true, false),
+            (Some(missing), false, false, false),
+            (None, false, true, true),
+        ] {
+            let item = NSPasteboardItem::new();
+            if let Some(uri) = uri {
+                item.setString_forType(
+                    &NSString::from_str(uri),
+                    &NSString::from_str("public.file-url"),
+                );
+            }
+            if finder {
+                item.setData_forType(
+                    &NSData::with_bytes(&[]),
+                    &NSString::from_str("com.apple.finder.node"),
+                );
+            }
+            if image {
+                item.setData_forType(
+                    &NSData::with_bytes(&bytes),
+                    &NSString::from_str(if finder { "public.tiff" } else { "public.png" }),
+                );
+            }
+            let mut event = nsh_core::PasteEvent::new("");
+            paste_item(&item, &mut event);
+            if expect_image {
+                assert!(event.uris.is_empty());
+                assert_eq!(event.files.len(), 1);
+                assert_eq!(event.files[0].data, bytes);
+            } else {
+                assert_eq!(event.uris, [uri.unwrap()]);
+                assert!(event.files.is_empty());
+            }
+        }
+        std::fs::remove_file(denied).unwrap();
     }
 
     #[test]

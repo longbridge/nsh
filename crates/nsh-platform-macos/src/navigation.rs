@@ -292,6 +292,14 @@ impl Motion {
         }
     }
 
+    /// The motion itself, its shader's overlay (if any) let go.
+    fn into_inner(self) -> Motion {
+        match self {
+            Motion::Shader { motion, .. } => motion.into_inner(),
+            m => m,
+        }
+    }
+
     /// Draws `self` through `shader` instead: pictures of the view it
     /// happens in without and with the upper side (what comes, or what
     /// leaves: backwards), its views at rest. `self` when there is nothing
@@ -1009,6 +1017,27 @@ impl Nav {
             .cloned()
     }
 
+    /// Forgets stack `id`, deleted (its screens with it): it is reconciled
+    /// no more, and its transitions stop where they end without settling
+    /// it or telling the app (its pages are gone), so that nothing here
+    /// holds its views.
+    fn forget_stack(&mut self, surface: &Surface, id: NodeId) {
+        self.dirty.retain(|&s| s != id);
+        self.stacks.remove(&id);
+        for motion in self.transitions.take(|m| m.stack() == Some(id)) {
+            let motion = motion.into_inner();
+            self.apply(surface, &motion, 1.0);
+            if let Motion::Pop {
+                stack,
+                leaving: Leaving::Image(image),
+                ..
+            } = &motion
+            {
+                stack.remove_native(image);
+            }
+        }
+    }
+
     /// Shows the app's screens of `stack` after a batch changed them.
     fn reconcile(&mut self, surface: &Rc<Surface>, stack_id: NodeId) {
         self.finish(surface, |m| m.stack() == Some(stack_id));
@@ -1613,12 +1642,31 @@ pub(crate) fn set_shader(
     };
 }
 
-/// `view` is deleted: a dialog's `transitionShader` goes with it (a
-/// page's leaves in [`Nav::reconcile`], which reads it first when the page
-/// was the one on top).
-pub(crate) fn deleted(surface: &Surface, view: &NshView) {
-    if view.kind() == ViewKind::Modal {
-        surface.nav.borrow_mut().shaders.remove(&view.id());
+/// `view` is deleted (`inside`: with its parent, in the same batch): a
+/// dialog's `transitionShader` goes with it, and so does a stack with all
+/// it keeps. A page deleted inside its parent goes too: its stack is
+/// deleted with it, or the page was in no stack. Otherwise its stack stays
+/// and reads its `transitionShader` and animation when it is reconciled
+/// ([`Nav::reconcile`]), which forgets the pages it showed (not yet one
+/// inserted and deleted in the same batch, nor one outside any stack whose
+/// parent stays). The pages of a navigator the
+/// app takes away are deleted with it and never detached from it, so no
+/// reconcile would; and the mounter frees deleted views once nothing else
+/// holds them. Done now, while `view`'s id is its own: a later item may
+/// give it to a new view.
+pub(crate) fn deleted(surface: &Surface, view: &NshView, inside: bool) {
+    let mut nav = surface.nav.borrow_mut();
+    let id = view.id();
+    match view.kind() {
+        ViewKind::Modal => {
+            nav.shaders.remove(&id);
+        }
+        ViewKind::Stack => nav.forget_stack(surface, id),
+        ViewKind::Screen if inside => {
+            nav.screens.remove(&id);
+            nav.shaders.remove(&id);
+        }
+        _ => {}
     }
 }
 

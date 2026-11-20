@@ -26,7 +26,8 @@ nsh run --target android               # Rust 应用
 nsh run App.tsx --target android       # TSX 应用
 ```
 
-先启动模拟器或连接设备（`adb devices` 会列出它们；NSH 使用第一个）。对 Rust 应用，`nsh` 用你的 crate 构建应用的 `libnsh.so`，
+先启动模拟器或连接设备（`adb devices` 会列出它们）。NSH 使用 `--device <serial>` 或 `ANDROID_SERIAL` 指定的那台，否则使用第一台；
+连着多台时会提示用的是哪一台。对 Rust 应用，`nsh` 用你的 crate 构建应用的 `libnsh.so`，
 安装 APK 并启动它；修改 crate 的 Rust 代码会重新构建并安装。对 TSX 应用，`nsh` 会安装一个开发宿主 APK（只在运行时变化时重新构建），并通过
 `adb reverse` 转发开发服务器的端口，因此通过 USB 即可工作，无需共享网络；你保存时应用会更新，日志显示在终端中。
 
@@ -320,6 +321,45 @@ nsh.setOpenUrlHandler(url -> {
     return false;
 });
 ```
+
+## 在 Rust 中申请运行时权限
+
+Android 用系统提示框申请危险权限（相机、麦克风、位置、附近设备、通讯录等），并且只把结果交给发起申请的 activity：打包的应用里是
+`AppActivity`，嵌入 `NshView` 时是你自己的 activity。使用这类 API 的 Rust 代码（应用自己的 crate、扩展）通过
+`nsh-platform-android` crate（其库名为 `nsh`）的 `permissions` 申请：它通过前台的 activity 申请，一次一个，并能跨越配置变更：
+
+```rust
+use nsh::permissions::{self, Permission};
+
+let answers = permissions::request(&["android.permission.RECORD_AUDIO"]).await?;
+if answers[0] == Permission::Granted {
+    // 录音。
+}
+```
+
+`state(name)` 和 `states(names)` 不申请，只返回当前状态。权限的状态是 `Default`（申请时会显示提示框）、`Granted`、`Denied`
+（用户拒绝过，Android 不再询问：只有系统设置能改变它）或 `Undeclared`。Android 只授予 manifest 声明的权限：未声明的权限返回
+`Undeclared`，不显示提示框。前台没有 activity（应用在后台），或 activity 在用户回答前结束时，申请以 `PermissionError::NoActivity`
+失败。NSH 自己的提示框（通知、网页的相机和麦克风）也这样申请，所以一个申请会等前面正在显示的提示框结束。
+
+## 在 Rust 中获取 JavaVM 和 Context
+
+Android 上的 Rust crate 通过 [`ndk-context`](https://docs.rs/ndk-context)（`ndk_context::android_context()`）获取进程的
+`JavaVM` 和一个 `android.content.Context`：音频和传感器 crate、密钥库、`robius-*`，以及你自己的 JNI 代码。NSH 在创建第一个
+`NshView` 时设置一次，早于应用或扩展的 Rust 代码运行，设置为 VM 和应用的 `Context`（它比任何 activity 都活得久）：
+
+```rust
+let context = ndk_context::android_context();
+// SAFETY: VM 与进程同寿。
+let vm = unsafe { jni::JavaVM::from_raw(context.vm().cast()) }?;
+let mut env = vm.attach_current_thread()?;
+// SAFETY: NSH 在进程的整个生命周期内保留的全局引用。
+let application = unsafe { jni::objects::JObject::from_raw(context.context().cast()) };
+```
+
+`ndk-context` 每个进程只保存一个 context，再次设置会 panic，所以在 NSH 应用中不要自己调用
+`ndk_context::initialize_android_context`。需要前台的 activity（显示系统界面）时，向 Android 获取，或通过上面的 `permissions`
+申请权限。
 
 ## 限制
 

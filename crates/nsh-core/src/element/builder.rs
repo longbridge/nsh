@@ -1089,6 +1089,19 @@ pub trait Element: IntoElement + Sized {
         self
     }
 
+    /// The highlight of the selections of the texts and inputs in the
+    /// view that set none of their own, as TSX's `selection:bg-*` class
+    /// (Tailwind's `& *::selection`): the nearest view around a text that
+    /// sets one decides, a text's or an input's own color wins. Android
+    /// tints the selection handles of a selectable view
+    /// ([`Self::selectable`]) and of an input in it too.
+    fn selection_color(mut self, color: impl IntoReactive<Hsla>) -> Self {
+        super::host::bind_prop(self.node(), color, |c: Hsla| {
+            Prop::SelectionColor(Some(Color::from(c)))
+        });
+        self
+    }
+
     /// The app's items of the selection menu of this selectable view
     /// ([`Self::selectable`]; TSX `selectionMenu`): shown after the
     /// system's own (Copy, Select All, Look Up, Share…), which stay, in
@@ -1128,6 +1141,26 @@ pub trait Element: IntoElement + Sized {
             if continues || a.rare.is_some() {
                 a.rare_mut().continues_text = continues;
             }
+        });
+        self
+    }
+
+    /// What a copy of the text around the view gives in its place, when
+    /// the view is inside a text (`copyText`): an inline formula's source
+    /// (`$x^2$`), an emoji image's character. Selecting across the view
+    /// and copying puts this where it is, as a browser copies an inline
+    /// image's `alt`. Unset, the view adds nothing to the copy; a view
+    /// outside a text ignores it. Screen readers keep reading the view's
+    /// [`Accessible::label`].
+    ///
+    /// ```ignore
+    /// text("Area is ")
+    ///     .child(view().copy_text("$x^2$").child(formula))
+    ///     .child(" here.")
+    /// ```
+    fn copy_text(mut self, text: impl IntoReactive<SharedString>) -> Self {
+        super::host::bind_prop(self.node(), text, |text: SharedString| {
+            Prop::CopyText(Some(text.to_arc()))
         });
         self
     }
@@ -1607,16 +1640,28 @@ pub trait Accessible: Element {
     /// [`Accessible::accessibility_description`], whose place it takes
     /// while it names a rendered element with text. `None` names none.
     fn accessibility_described_by(
-        mut self,
+        self,
         target: impl IntoReactive<Option<super::ElementRef>>,
     ) -> Self {
+        let target = target.into_reactive();
+        self.accessibility_described_by_target(move || {
+            target.get().and_then(|t| t.element_target())
+        })
+    }
+
+    /// [`Accessible::accessibility_described_by`] with the element as a
+    /// component's prop holds it (a ref from JS or from Rust): what
+    /// `nsh-base`'s components pass to the view screen readers reach.
+    #[doc(hidden)]
+    fn accessibility_described_by_target(
+        mut self,
+        target: impl IntoReactive<Option<super::ElementTarget>>,
+    ) -> Self {
         self.node()
-            .bind_attr(target, |a, target: Option<super::ElementRef>| {
+            .bind_attr(target, |a, target: Option<super::ElementTarget>| {
                 super::host::set_in(
                     &mut a.props,
-                    Prop::Accessibility(AccessibilityProp::DescribedBy(
-                        target.and_then(|t| t.element_target()),
-                    )),
+                    Prop::Accessibility(AccessibilityProp::DescribedBy(target)),
                 )
             });
         self
@@ -2205,10 +2250,44 @@ pub trait Interactive: Element {
         self
     }
 
+    /// The scroll view it floats over and the edge of it it sits at
+    /// (`ios={{ scrollEdgeElement }}`): a bottom toolbar, a floating button
+    /// placed over a list. From iOS 26 the scroll edge effect of that
+    /// scroll view takes its shape from what the view shows, as it does
+    /// from a bar, so the content scrolled under it fades out instead of
+    /// being cut by it. Elsewhere a fade the app draws under the view
+    /// gives the same separation. `None` names none.
+    fn scroll_edge_element(
+        mut self,
+        scroll_view: impl IntoReactive<Option<super::ElementRef>>,
+        edge: crate::ScrollEdge,
+    ) -> Self {
+        let target =
+            scroll_view
+                .into_reactive()
+                .map(move |scroll_view: Option<super::ElementRef>| {
+                    let scroll_view = scroll_view?.element_target()?;
+                    Some(super::ScrollEdgeTarget { scroll_view, edge })
+                });
+        super::host::bind_prop(self.node(), target, Prop::ScrollEdgeElement);
+        self
+    }
+
     /// The native material the view draws with on macOS
     /// (`macos={{ backdrop }}`): an `NSVisualEffectView`, or none.
     fn macos_backdrop(mut self, backdrop: impl IntoReactive<Option<crate::MacOsBackdrop>>) -> Self {
         super::host::bind_prop(self.node(), backdrop, Prop::MacOsBackdrop);
+        self
+    }
+
+    /// The system's blur of what is behind a transparent window, under the
+    /// view's box and corners, on Windows 11 and later
+    /// (`windows={{ backdrop }}`), or none.
+    fn windows_backdrop(
+        mut self,
+        backdrop: impl IntoReactive<Option<crate::WindowsBackdrop>>,
+    ) -> Self {
+        super::host::bind_prop(self.node(), backdrop, Prop::WindowsBackdrop);
         self
     }
 
@@ -2635,6 +2714,25 @@ fn span(mut el: ElNode) -> ElNode {
 }
 
 impl Text {
+    /// Its final layout, each time it is laid out anew: the platform text
+    /// engine's own hit testing, caret and range boxes
+    /// ([`crate::TextGeometry`]), where `onTextLayout`'s lines only allow
+    /// an estimate. Rust-only, on a Rust component's text; JS keeps
+    /// `onTextLayout`.
+    pub fn on_text_layout(mut self, listener: impl Fn(&crate::TextGeometry) + 'static) -> Self {
+        self.0.handlers.push((
+            EventKind::TextLayout,
+            super::Listener::from(move |payload: &EventPayload| {
+                if let EventPayload::TextLayout(_) = payload
+                    && let Some(geometry) = crate::text::GeometryScope::current()
+                {
+                    listener(&geometry);
+                }
+            }),
+        ));
+        self
+    }
+
     /// The highlight of its selection, when it is selectable.
     pub fn selection_color(mut self, color: impl IntoReactive<Hsla>) -> Self {
         super::host::bind_prop(&mut self.0, color, |c: Hsla| {

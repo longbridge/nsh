@@ -268,6 +268,9 @@ pub struct Screen {
     /// The header items of each screen under a system bar, from its
     /// options.
     headers: HashMap<NodeId, ScreenHeader>,
+    /// The content size of each window of the app's own, by root: its views
+    /// are found within it, as the window clips them.
+    window_sizes: std::collections::HashMap<NodeId, Size<Points>>,
 }
 
 /// The header bar iOS and Android draw over a stack's screens: they place
@@ -543,6 +546,9 @@ pub(crate) struct Input {
     /// Whether it was configured: only its first configuration asks for
     /// the focus.
     configured: bool,
+    /// Its whole text is selected (`selectTextOnFocus` focused it): the
+    /// next edit replaces it. Otherwise the caret is at the end.
+    pub(crate) selected_all: bool,
 }
 
 /// Where a scroll view is, as its platform view keeps it.
@@ -774,6 +780,10 @@ impl Screen {
                 if let Some(input) = self.input_mut(*id)
                     && *count >= input.count
                 {
+                    // A new value puts the caret at its end.
+                    if input.text != *text {
+                        input.selected_all = false;
+                    }
                     input.text = text.clone();
                 }
             }
@@ -1322,7 +1332,13 @@ impl Screen {
             // tree; a window of the app's own is a window of its own, as
             // large as the main one (its root fills it).
             let (origin, clip) = if view.kind == Some(ViewKind::Modal) {
-                (Point::default(), window)
+                // A window of the app's own, or a dialog in one: the
+                // window it shows in decides the clip, not the host surface.
+                let window_id = self.window_of(id);
+                let clip = self.window_sizes.get(&window_id).map_or(window, |size| {
+                    Clip::Within(Bounds::new(Point::default(), *size))
+                });
+                (Point::default(), clip)
             } else {
                 (origin, clip)
             };
@@ -1536,6 +1552,18 @@ impl Screen {
         }
     }
 
+    /// A window of the app's own is `size` points: its views are clipped to
+    /// that, not to the main window's viewport.
+    pub(crate) fn set_window_size(&mut self, root: NodeId, size: Size<Points>) {
+        self.window_sizes.insert(root, size);
+    }
+
+    /// The size `set_window_size` gave window `root`, if any.
+    #[cfg(feature = "agent")]
+    pub(crate) fn window_size(&self, root: NodeId) -> Option<Size<Points>> {
+        self.window_sizes.get(&root).copied()
+    }
+
     /// The screens stack `id` shows, bottom to top (without those a back
     /// popped).
     fn screens(&self, id: NodeId) -> Vec<NodeId> {
@@ -1599,11 +1627,7 @@ impl Screen {
                 self.kind(*id) == Some(ViewKind::Stack)
                     && modal.is_none_or(|m| self.is_inside(*id, m))
                     && can_go_back(*id)
-                    && nsh_core::navigation::shown_in_layout(
-                        std::iter::successors(Some(*id), |id| self.nodes.get(id)?.parent)
-                            .filter(|id| *id != ROOT)
-                            .filter_map(|id| Some(self.nodes.get(&id)?.frame)),
-                    )
+                    && self.chain_shown(*id)
             })
             .collect();
         let innermost = stacks
@@ -1628,6 +1652,32 @@ impl Screen {
         }
     }
 
+    /// Whether `id` and its ancestors up to its window's root (or the app
+    /// root, for a view outside the windows) have a frame. A Rust app root's
+    /// component host above the window has no box of its own: it says
+    /// nothing of what shows.
+    fn chain_shown(&self, id: NodeId) -> bool {
+        let mut at = id;
+        loop {
+            if at == ROOT {
+                return true;
+            }
+            let Some(node) = self.nodes.get(&at) else {
+                return true;
+            };
+            if node.frame.is_empty() {
+                return false;
+            }
+            if self.is_window(at) {
+                return true;
+            }
+            match node.parent {
+                Some(parent) => at = parent,
+                None => return true,
+            }
+        }
+    }
+
     /// How many backs the screen holds, as the web counts its history
     /// entries: a presented modal each, and each shown stack's screens over
     /// its bottom one.
@@ -1636,13 +1686,7 @@ impl Screen {
             .into_iter()
             .map(|id| match self.kind(id) {
                 Some(ViewKind::Modal) if !self.is_window(id) => 1,
-                Some(ViewKind::Stack)
-                    if nsh_core::navigation::shown_in_layout(
-                        std::iter::successors(Some(id), |id| self.nodes.get(id)?.parent)
-                            .filter(|id| *id != ROOT)
-                            .filter_map(|id| Some(self.nodes.get(&id)?.frame)),
-                    ) =>
-                {
+                Some(ViewKind::Stack) if self.chain_shown(id) => {
                     self.screens(id).len().saturating_sub(1)
                 }
                 _ => 0,
@@ -1712,12 +1756,14 @@ impl Screen {
         }
     }
 
-    /// The root of the window the app calls `id` (`"main"`: the main
-    /// window's), while it is open.
+    /// The ids of the app's open windows, in opening order.
+    #[cfg(feature = "agent")]
+    pub(crate) fn window_ids(&self) -> Vec<String> {
+        self.windows.iter().map(|(_, id)| id.clone()).collect()
+    }
+
+    /// The root of the window the app calls `id`, while it is open.
     pub(crate) fn window_root(&self, id: &str) -> Option<NodeId> {
-        if id == "main" {
-            return Some(ROOT);
-        }
         self.windows
             .iter()
             .find(|(_, own)| own == id)
@@ -1742,6 +1788,7 @@ impl Screen {
     fn forget_window(&mut self, id: NodeId) {
         self.windows.retain(|(root, _)| *root != id);
         self.hidden_windows.remove(&id);
+        self.window_sizes.remove(&id);
     }
 
     /// Whether the app asked for a back since the last call.
@@ -2117,6 +2164,67 @@ impl Screen {
             [] => Err(crate::failure::not_found("view", selector)),
             ref all => Err(format!("`{selector}` matches {} views", all.len())),
         }
+    }
+
+    /// The selectable view a press on view `id` selects in: the outermost
+    /// view around it (or itself) that is one, unless `id` is a text kept
+    /// out (`selectable={false}`).
+    pub(crate) fn selection_area(&self, id: NodeId) -> Option<NodeId> {
+        let kept_out = self
+            .nodes
+            .get(&id)
+            .and_then(|v| v.attributed.as_ref())
+            .is_some_and(|t| t.selectable == Some(false));
+        if kept_out {
+            return None;
+        }
+        let mut found = None;
+        let mut at = Some(id);
+        while let Some(view) = at.and_then(|id| self.nodes.get(&id)) {
+            if view.selectable_view {
+                found = at;
+            }
+            at = view.parent;
+        }
+        found
+    }
+
+    /// The texts of selectable view `area` that take part in its selection,
+    /// in document order: each text view, its text and its content box in
+    /// `area`'s points. Hidden views and texts kept out
+    /// (`selectable={false}`) are left out.
+    pub(crate) fn area_texts(
+        &self,
+        area: NodeId,
+    ) -> Vec<(NodeId, Arc<nsh_core::AttributedText>, Bounds<Points>)> {
+        let mut out = Vec::new();
+        let Some(origin) = self.bounds_in_root(area).map(|b| b.origin) else {
+            return out;
+        };
+        let mut stack = vec![area];
+        while let Some(id) = stack.pop() {
+            let Some(view) = self.nodes.get(&id) else {
+                continue;
+            };
+            if view.hidden {
+                continue;
+            }
+            if let Some(text) = &view.attributed
+                && text.selectable != Some(false)
+                && let Some(bounds) = self.bounds_in_root(id)
+            {
+                let content = view.text_content;
+                out.push((
+                    id,
+                    Arc::clone(text),
+                    Bounds::new(bounds.origin - origin + content.origin, content.size),
+                ));
+            }
+            if let Some(children) = self.children.get(&id) {
+                stack.extend(children.iter().rev());
+            }
+        }
+        out
     }
 
     /// Whether the view `selector` names is selected (its accessibility
@@ -3156,6 +3264,14 @@ impl Screen {
                 && !self.is_window(id)
                 && self.window_of(id) == window
         })
+    }
+
+    /// The newest modal shown over any window (not a window's own root).
+    pub(crate) fn newest_modal(&self) -> Option<NodeId> {
+        self.shown()
+            .into_iter()
+            .rev()
+            .find(|&id| self.kind(id) == Some(ViewKind::Modal) && !self.is_window(id))
     }
 
     /// Whether view `id` is `scope` or inside it.

@@ -63,8 +63,8 @@ TSX app adds its entry (`nsh package App.tsx --target …`).
 
 `nsh.json` also holds `rust` and `root` (the app's crates and its root component, [Building with Rust](./rust.md)),
 `theme` and `appearance`, `tailwind` (see [Tailwind](./tailwind.md)), `capabilities` (see
-[Sandbox and capabilities](./sandbox-and-capabilities.md)), `android` (`targetSdk` and `usesCleartextTraffic`, [below](#target-api-level)), `ios` and `macos` (the `Info.plist` keys and entitlements
-of their packages, [below](#infoplist-keys-and-entitlements); `macos.activationPolicy`, a [menu bar app](./macos.md#menu-bar-apps)) and `updater`, which makes desktop packages update themselves
+[Sandbox and capabilities](./sandbox-and-capabilities.md)), `android` (`targetSdk`, `usesCleartextTraffic`, `permissions` and `dex`, [below](#target-api-level)), `ios` and `macos` (the `Info.plist` keys and entitlements
+of their packages, [below](#infoplist-keys-and-entitlements); `ios.extensions`, [app extensions](#app-extensions); `macos.activationPolicy`, a [menu bar app](./macos.md#menu-bar-apps)) and `updater`, which makes desktop packages update themselves
 (see [App Updates](./app-updates.md)) and every native package take [OTA updates](./ota-updates.md); [Project structure](./project-structure.md#nshjson) lists
 every key. A key or value NSH cannot read is reported as a warning and left out, so an app written for a newer NSH
 still builds with an older one, and the warning catches a typo.
@@ -87,7 +87,7 @@ nsh package --target android --app-version 1.4.0 --build 42
 | `--build <n>` | Build number. |
 | `--icon <png>` | App icon: a square PNG, ideally 1024×1024. |
 | `--sign <identity>` | iOS: the code signing identity for devices. |
-| `--profile <file>` | iOS: the provisioning profile for devices (`.mobileprovision`). |
+| `--profile <file>` | iOS: the provisioning profile for devices (`.mobileprovision`). Repeat it to give each [app extension](#app-extensions) its own. |
 | `--keystore <file>` | Android: a release keystore (default: the debug key). |
 | `--key-alias <alias>` | Android: the key alias in the keystore. |
 | `--keystore-password <password>` | Android: the keystore password; also read from `NSH_KEYSTORE_PASSWORD`. |
@@ -124,6 +124,7 @@ profile). What happens:
 - The entitlements come from the profile, with the app's own from `nsh.json` `ios.entitlements` checked against it
   ([below](#infoplist-keys-and-entitlements)). NSH checks that the profile's application identifier covers the app's `id`
   (wildcard profiles such as `TEAMID.*` or `TEAMID.com.example.*` work) and stops with an error otherwise.
+- The app's extensions, if any, are signed first, each with its own profile ([App extensions](#app-extensions)).
 - The app is signed with `codesign` using the identity, then zipped into an `.ipa` (`Payload/<Name>.app`).
 
 Find your identities with:
@@ -137,6 +138,55 @@ device as it is.
 
 The app supports iPhone and iPad, portrait and landscape (portrait upside down on iPad only), and needs iOS 15.0 or
 newer, or the later version it names ([Minimum system version](#minimum-system-version)).
+
+### App extensions
+
+Widgets, Live Activities, notification service extensions and other app extensions are bundles of their own
+(`.appex`) that iOS finds in the app's `PlugIns/` folder. Build them with Xcode or `swiftc`, then list them under
+`ios.extensions` in the app's `nsh.json`, relative to `nsh.json`, as `android.dex` lists Java code:
+
+```json
+{
+  "ios": {
+    "extensions": [
+      {
+        "path": "ios/build/iphoneos/Widget.appex",
+        "simulatorPath": "ios/build/iphonesimulator/Widget.appex",
+        "entitlements": { "com.apple.security.application-groups": ["group.com.example.app"] }
+      }
+    ]
+  }
+}
+```
+
+| Key | Meaning |
+|---|---|
+| `path` | The extension built for devices. |
+| `simulatorPath` | The extension built for the simulator. Without it, simulator packages carry `path` when it is built for the simulator and leave the extension out (with a warning) when it is not. |
+| `entitlements` | The extension's entitlements, as `ios.entitlements` are the app's ([below](#infoplist-keys-and-entitlements)). |
+
+Each package copies the extensions into `PlugIns/` and gives them the app's `version` and `build`: an extension's
+version should match its app's (App Store Connect flags a mismatch). An extension's identifier must start with the app's (`com.example.app.Widget` for
+`com.example.app`). The simulator package signs them ad hoc; the device package signs each one with the profile for its
+identifier, which it carries as `embedded.mobileprovision`, before it signs the app. Pass one `--profile` for the app
+and one for each extension; a profile that names a bundle's identifier is taken before a wildcard that covers it:
+
+```sh
+nsh package --target ios \
+  --sign "Apple Distribution: Example Inc (ABCDE12345)" \
+  --profile AppStore.mobileprovision \
+  --profile AppStoreWidget.mobileprovision
+```
+
+Code the app and an extension share, such as a Live Activity's attributes, is built into each of them. They share
+data through an app group, which both list in their entitlements. An app that starts Live Activities also declares
+`NSSupportsLiveActivities` in its own `Info.plist`, through `ios.infoPlist`:
+
+```json
+{
+  "ios": { "infoPlist": { "NSSupportsLiveActivities": true } }
+}
+```
 
 ## Android
 
@@ -200,6 +250,50 @@ Packaged apps make requests over HTTPS. For servers without TLS, such as one on 
 ```
 
 Development builds (`nsh run --target android`) always allow plain HTTP: they load the app from the dev server over it.
+
+### Permissions
+
+The manifest declares the permissions NSH's own features need: `INTERNET`, `POST_NOTIFICATIONS` for
+[notifications](./sandbox-and-capabilities.md#notifications), `RECORD_AUDIO` and `CAMERA` for a web view's `media`. `android.permissions` adds
+others, for code of the app or an extension that calls Android itself: a bare name is one of Android's
+(`android.permission.<NAME>`), a dotted one is written as it is.
+
+```json
+{
+  "android": { "permissions": ["ACCESS_NETWORK_STATE", "com.example.permission.READ_ORDERS"] }
+}
+```
+
+A normal permission such as `ACCESS_NETWORK_STATE` is granted when the app is installed. A runtime permission
+(`ACCESS_FINE_LOCATION`, say) is only declared: the app's own code still asks the user for it. The TSX development
+host (`nsh run --target android` of a TSX app) declares none of these; a Rust app's `nsh run` builds its package and
+declares them.
+
+### Java code
+
+Rust reaches most Android APIs through JNI, but some take a class the app defines: a listener, a callback, a
+`PrintDocumentAdapter`. `android.dex` in the app's `nsh.json` lists the dex files of the Java code the app ships,
+relative to `nsh.json`. The package carries them after NSH's runtime as `classes2.dex`, `classes3.dex` and so on, in the
+order listed, so the app's class loader finds their classes. Only the app's own `nsh.json` lists them: an extension
+that needs Java code cannot add its dex itself, so the apps that use it list the file it provides:
+
+```json
+{
+  "android": { "dex": ["java/out/classes.dex"] }
+}
+```
+
+Compile the Java sources against the platform's `android.jar`, then turn the classes into a dex with the SDK's `d8`:
+
+```sh
+javac -source 11 -target 11 -classpath "$ANDROID_HOME/platforms/android-35/android.jar" -d java/classes java/src/*.java
+"$ANDROID_HOME/build-tools/<version>/d8" --min-api 26 --lib "$ANDROID_HOME/platforms/android-35/android.jar" \
+  --output java/out $(find java/classes -name '*.class')
+```
+
+A thread Rust started finds only the system's classes through JNI's `FindClass`; load the app's classes from the
+activity's class loader (`Context.getClassLoader()`) there. The TSX development host (`nsh run --target android` of
+a TSX app) carries none of these files; a Rust app's `nsh run` builds its package and carries them.
 
 ### Google Play: App Bundles
 
@@ -361,7 +455,7 @@ Give one square PNG, ideally 1024×1024, in `nsh.json` (`"icon": "icon.png"`) or
 
 - **iOS:** compiled by Xcode's `actool` into the app's asset catalog (`Assets.car`), which derives every size iOS
   needs.
-- **Android:** resized to 192×192 and used as the launcher icon (`mipmap-xxxhdpi`).
+- **Android:** resized to 192×192 and used as the launcher icon (`mipmap-xxxhdpi`); see adaptive icons below.
 - **macOS:** converted by `sips` to `AppIcon.icns`. `nsh run --target macos` and `nsh test --target macos` show the
   PNG in the Dock and the app switcher.
 - **Linux:** copied as `<id>.png`, which the `.desktop` file names as its `Icon`.
@@ -384,6 +478,29 @@ Windows, Linux and Android fill it. Give `icon` an object to use a PNG per platf
   }
 }
 ```
+
+`icon.android` also takes an adaptive icon, whose layers the launcher masks to its own shape (circle, squircle, ...).
+Each layer is 108×108dp; the inner 72×72dp appears within the mask, and the outer 18dp on each side is left for the
+launcher's visual effects. Keep the artwork within the central circle of 66dp: about 61% of the width, 264 pixels of a
+432-pixel layer.
+
+```json
+{
+  "icon": {
+    "android": {
+      "foreground": "icon-foreground.png",
+      "background": "#ffffff",
+      "monochrome": "icon-monochrome.png"
+    }
+  }
+}
+```
+
+- `foreground`: a square PNG with a transparent background, ideally 432×432 or larger.
+- `background`: a color (`"#rrggbb"`, `"#rrggbbaa"`) or a square PNG.
+- `monochrome` (optional): the artwork in one color on transparent, which Android 13 and later tint for themed icons.
+
+Only `icon.android` takes this form.
 
 `--icon` replaces it for the target being packaged.
 
@@ -413,6 +530,24 @@ middle of the screen, the same in both appearances or one for each:
 Both are compiled into the app's asset catalog with its icon and named in `UILaunchScreen`, which the app no longer
 sets in `ios.infoPlist`. A launch screen that matches the app's first frame (its background, the same image in the
 same place) makes the start look seamless. `appearance` picks which of the two the system shows.
+
+On Android, `android.launchScreen` takes the same keys. The package gives the app a theme whose window background is
+`background`, so the window matches the app's first frame from the tap on the icon on, and stays behind it. On Android
+12 and later the system splash screen also uses `background` (behind the icon too), with `image` in the middle at the
+same size as on iOS (a 288×288 PNG is 96×96 dp). Without `image` the splash screen shows the launcher icon. An app
+that targets an API level below 31 has no splash screen to show `image` in, though the file is still checked. The dark
+values apply in the system's dark mode, and `appearance` set to `light` or `dark` keeps that one.
+
+```json
+{
+  "android": {
+    "launchScreen": {
+      "background": { "light": "#ffffff", "dark": "#131312" },
+      "image": { "light": "launch.png", "dark": "launch-dark.png" }
+    }
+  }
+}
+```
 
 ## Camera, Bluetooth and other hardware
 

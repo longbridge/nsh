@@ -75,6 +75,14 @@ or the tray; an animation's `start` rejects its promise; a canvas call ignores i
 holds up to as many screens: `push` beyond that throws a `RangeError`. Children, submenus and styles nested more than
 64 levels deep throw a `TypeError`. A `<List>`'s `each` takes any number of rows.
 
+**Views nest up to 1024 levels deep, in every app.** Layout and mounting walk the tree in native code, level by level,
+where the interpreter's stack limit does not reach. An app that nests views deeper is stopped, as it is when it goes
+over a quota:
+
+```text
+the app nested views more than 1024 deep and was stopped
+```
+
 > [!TIP]
 > These limits are generous for normal apps. If you hit the 2 s call budget, the work is too long for one event
 > anyway: it would freeze the app's updates for that long. Split it with `setTimeout`, or move it out of the event
@@ -226,6 +234,11 @@ embeds the origin of the document that made it, so it is allowed when that origi
 blob of a host the page may not show — or an opaque one (`blob:null/…`) — is not. Every platform checks this
 the same way.
 
+A download from a host follows the same rule: a download whose response comes from a host not in `hosts` is not
+saved, and `onDownload` reports it `failed` with `code` `"ERR_ACCESS_DENIED"`. On iOS, macOS and Linux this holds
+wherever its redirects lead, and on iOS and macOS a redirect to such a host is cancelled before it is requested. A
+download of the page's own content (`data:` and `blob:` URLs) comes from no host and is saved as before.
+
 `input` is separate from `hosts` because trusted input carries user activation, which `injectJavaScript` never gets:
 the page may then open windows, write the clipboard, open the system's file panel, start WebAuthn or permission prompts
 and press any button that checks `isTrusted`. Without it the core drops `sendInput` and logs which key to add.
@@ -235,7 +248,7 @@ Android, Windows and Linux, and the rest are denied. The system still asks the u
 declare what it needs: `nsh package` writes `NSMicrophoneUsageDescription` / `NSCameraUsageDescription` (word them your
 own way with `ios.infoPlist` / `macos.infoPlist`), the macOS `com.apple.security.device.audio-input` /
 `com.apple.security.device.camera` entitlements, and Android's `RECORD_AUDIO` / `CAMERA` permissions, which the app asks
-for when a page first needs them. Pages need a secure context (`https:` or `localhost`) for `getUserMedia`.
+for when a page first needs them. The development hosts (`nsh run`) carry the usage descriptions for any app. Pages need a secure context (`https:` or `localhost`) for `getUserMedia`.
 
 ```json
 { "capabilities": { "webview": { "hosts": ["phone.example.com"], "media": ["microphone"] } } }
@@ -278,12 +291,12 @@ needs a `network` grant for its host.
 ### `application`
 
 `"application": true` lets the app act on the application as a whole on the desktop
-([`nsh/desktop`](../modules/nsh-desktop.md)): the main window (`currentWindow()` outside any `<Window>`,
-`Window.get("main")`: its title, title bar, mode, frame and level, bringing it to the front, closing it), the
-application menu (`Menu.setApplicationMenu`), the tray, global shortcuts, `Application.quit()`, `Application.restart()`
-and `Application.setLaunchAtLogin()`. Without it they do nothing, `Application.launchAtLogin()` resolves `false` and
-`setLaunchAtLogin` rejects with `ERR_ACCESS_DENIED` (`permission` `"application"`). Context menus (`Menu.popup`) show in the app's own view,
-and windows the app opens are granted by [`windows`](#windows), so neither needs it.
+([`nsh/desktop`](../modules/nsh-desktop.md)): the application menu (`Menu.setApplicationMenu`), the tray, global
+shortcuts, `Application.quit()`, `Application.setQuitMode()`, `Application.restart()` and
+`Application.setLaunchAtLogin()`. Without it they do
+nothing, `Application.launchAtLogin()` resolves `false` and `setLaunchAtLogin` rejects with `ERR_ACCESS_DENIED`
+(`permission` `"application"`). Context menus (`Menu.popup`) show in the app's own view, and windows the app opens are
+granted by [`windows`](#windows), so neither needs it.
 
 ### `homeDir`
 
@@ -308,11 +321,11 @@ for every kind but overlays, or an object that narrows it:
 |---|---|---|
 | `kinds` | `string[]` | The kinds it may open: `"normal"`, `"dialog"`, `"panel"`, `"popup"`, `"overlay"`. Missing: every kind but `"overlay"`. |
 | `levels` | `string[]` | The levels its windows may float at: `"normal"`, `"floating"`, `"aboveDock"`, `"desktopIcon"`. Missing: every level. |
-| `max` | `number` | How many windows of its own may be open at once. Missing: any number. |
+| `max` | `number` | How many windows of its own may be open at once, the first window included. Missing: any number. |
 | `overlay` | `boolean` | Overlays and click-through windows (`pointerEvents: "none"`). Never granted unless declared, also for an app without `"capabilities"`. |
 
 `overlay` is separate because a transparent, click-through window above every other can pass for the system's own UI.
-The main window needs no grant.
+Every window needs the grant, the first one included: no window is privileged.
 
 ### Storage
 

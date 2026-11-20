@@ -113,6 +113,10 @@ enum Drag {
     Word(usize, usize),
     /// Whole lines, from the line triple-clicked.
     Line(usize, usize),
+    /// The whole text, selected by the press that focused a field that
+    /// selects on focus (`selectTextOnFocus`); dragging away from where it
+    /// was pressed (the offset) selects characters from there instead.
+    All(usize),
 }
 
 /// The text input `view` holds now (`None`: it is no input).
@@ -166,6 +170,7 @@ pub(crate) struct InputState {
     /// Scroll offset of the text: horizontal for one line, vertical for
     /// several.
     scroll: Cell<f32>,
+    reveal_on_layout: Cell<bool>,
     /// The scroll of several lines as last reported to a built-in bar
     /// (`InputConfig::replaced`): offset, text height, width, viewport
     /// height. `None` until reported (again).
@@ -203,6 +208,7 @@ impl InputState {
             active: Cell::new(true),
             caret_on: Cell::new(true),
             scroll: Cell::new(0.0),
+            reveal_on_layout: Cell::new(false),
             reported_scroll: Cell::new(None),
             goal_x: Cell::new(None),
             drag: Cell::new(None),
@@ -294,6 +300,9 @@ impl InputState {
             align,
             None,
         ));
+        if self.reveal_on_layout.replace(false) {
+            self.reveal_in(&layout);
+        }
         *self.layout.borrow_mut() = Some(layout.clone());
         Some(layout)
     }
@@ -378,7 +387,12 @@ impl InputState {
 
     /// Scrolls so that the caret shows.
     fn reveal(&self) {
-        let Some(layout) = self.layout() else { return };
+        if let Some(layout) = self.layout() {
+            self.reveal_in(&layout);
+        }
+    }
+
+    fn reveal_in(&self, layout: &Layout) {
         let pos = self.model.borrow().display_caret(self.secure());
         let (x, y, h) = layout.caret(pos);
         let (w, height) = self.size.get();
@@ -400,7 +414,7 @@ impl InputState {
         };
         self.scroll.set(scroll);
         // Clamped to the text.
-        self.origin(&layout);
+        self.origin(layout);
     }
 
     /// Reports how far several lines scrolled, the text's height and the
@@ -751,6 +765,9 @@ fn set_focus(surface: &Rc<Surface>, view: Option<&NshView>) {
     set_changing(surface, true);
     if old.as_ref() != view {
         move_focus(surface, view, old.as_ref());
+        if let Some(view) = view {
+            select_on_focus(surface, view);
+        }
         // The new field's value may still be on its way from the engine,
         // after what the old one reported. Text typed now waits for it.
         if view.is_some() {
@@ -763,6 +780,21 @@ fn set_focus(surface: &Rc<Surface>, view: Option<&NshView>) {
     }
     set_changing(surface, false);
     flush_pending(surface);
+}
+
+/// `selectTextOnFocus`: the field that just took the focus selects its
+/// whole text, decided here as the focus arrives rather than by JS, and
+/// before text typed meanwhile is given to it (which then replaces it).
+fn select_on_focus(surface: &Surface, view: &NshView) {
+    let Some(input) = input_of(view) else {
+        return;
+    };
+    if !input.focused.get() || !input.config.borrow().select_text_on_focus {
+        return;
+    }
+    input.model.borrow_mut().select_all();
+    input.goal_x.set(None);
+    after_edit(surface, view, &input, false);
 }
 
 fn set_changing(surface: &Surface, changing: bool) {
@@ -1558,7 +1590,13 @@ fn after_edit(surface: &Surface, view: &NshView, input: &InputState, changed: bo
         );
     }
     input.wake_caret();
-    input.reveal();
+    if changed && !input.multiline() {
+        // Shape the new line when a draw, hit test or caret observer needs it.
+        // Several edits can arrive before any of them reads the layout.
+        input.reveal_on_layout.set(true);
+    } else {
+        input.reveal();
+    }
     report_selection(surface, view, input);
     view.changed();
 }
@@ -1640,6 +1678,7 @@ pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig
         }
         input.placeholder.borrow_mut().take();
         if config.multiline != input.multiline() {
+            input.reveal_on_layout.set(false);
             input.scroll.set(0.0);
         }
     }
@@ -1882,12 +1921,30 @@ pub(crate) fn pointer(surface: &Rc<Surface>, view: &NshView, event: &ItemPointer
                 // the input method on a press).
                 ime::unmark_text(surface);
             }
+            // A plain click that focuses a field selecting on focus keeps
+            // the whole text `set_focus` selected; Shift-clicks, multiple
+            // clicks and clicks in the focused field select as usual.
+            let keep_all = !input.focused.get()
+                && event.clicks <= 1
+                && !event.modifiers.shift
+                && input.config.borrow().select_text_on_focus;
+            // A Shift-press that focuses the field extends the selection
+            // the field kept rather than the one focusing selects.
+            let kept = (event.modifiers.shift && !input.focused.get()).then(|| {
+                let model = input.model.borrow();
+                let ((start, end), caret) = (model.selection(), model.caret());
+                (if caret == start { end } else { start }, caret)
+            });
             set_focus(surface, Some(view));
+            if let Some((anchor, caret)) = kept {
+                input.model.borrow_mut().select(anchor, caret);
+            }
             let at = input.hit(x, y);
             let secure = input.secure();
             let drag = {
                 let mut model = input.model.borrow_mut();
                 match event.clicks {
+                    0 | 1 if keep_all && input.focused.get() => Drag::All(at),
                     0 | 1 => {
                         model.move_to(at, event.modifiers.shift);
                         Drag::Char
@@ -1923,6 +1980,15 @@ pub(crate) fn pointer(surface: &Rc<Surface>, view: &NshView, event: &ItemPointer
             {
                 let mut model = input.model.borrow_mut();
                 match drag {
+                    Drag::All(from) => {
+                        // Until the pointer leaves the offset it pressed,
+                        // the whole text stays selected.
+                        if at == from {
+                            return true;
+                        }
+                        model.select(from, at);
+                        input.drag.set(Some(Drag::Char));
+                    }
                     Drag::Char => model.move_to(at, true),
                     Drag::Word(s, e) | Drag::Line(s, e) => {
                         let (ws, we) = match drag {

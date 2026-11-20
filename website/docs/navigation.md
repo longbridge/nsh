@@ -85,6 +85,7 @@ pub fn App() -> impl IntoElement {
 ```tsx tabs
 import { mount, Scroll, Text, View } from "nsh";
 import { createNavStack, NavPage, NavStack } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 type Route = { name: "inbox" } | { name: "message"; id: number };
 
@@ -145,7 +146,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 ## The stack's state
@@ -239,6 +244,7 @@ In Rust, each prop below is a method of `nav_page()` in snake case: `.title(..)`
 | `headerVisible` | `boolean` | `true` | iOS and Android: the system header shows. |
 | `headerTransparent` | `boolean` | `false` | iOS and Android: the content extends under the header. |
 | `headerShadowVisible` | `boolean` | `true` | iOS: the hairline under the header. Set it to `false` for a bar without a line, as iOS 26's own. Android's header has none. |
+| `headerTitleAlign` | `"left" \| "center"` | `"left"` | Android: where the title sits in the header, at the start or centered between the items on either side. iOS: the system bar always centers the title and ignores this value. |
 | `headerBackgroundOnScroll` | `boolean` | `false` | iOS: with `headerTransparent`, the header stays clear while the content rests at its top and shows its background once the content scrolls under it, as UIKit's own bars. It follows the largest visible scroll view that starts at the top of the page. Ignored elsewhere. |
 | `headerStyle` | `{ backgroundColor?, color?, tintColor? }` | | iOS and Android: the header's background, the title's color (`color`) and the buttons' (`tintColor`). |
 | `headerClass` | `string` | | The same as classes: `bg-*`, `text-*` for the title, `tint-*` for the buttons; `headerStyle` wins over them. |
@@ -586,7 +592,7 @@ function Files() {
 }
 ```
 
-Escape, Android's back button, a press on the backdrop (TSX's backdrop, a native sheet's in Rust) and a swipe down on a sheet close it natively (`close_on_escape`, `close_on_backdrop_press` and `close_on_swipe`, TSX `closeOnEscape`, `closeOnBackdropPress` and `closeOnSwipe`, each true by default). In Rust, `on_cancel` reports every attempt and `on_close` the close, so leave the dialog out of the view there; a backdrop your app draws closes it with its own press handler, as above. In TSX, `onOpenChange({ open: false, reason })` tells you, so set `open` to `false` there. To confirm first, set a flag to false and handle the cancel event (`on_cancel`, `onCancel`), which reports every attempt, then close the dialog yourself. On iOS, `.presentation(ModalPresentation::PageSheet)` or `FormSheet` (`presentation="pageSheet"` or `"formSheet"`) presents a sheet that keeps what is behind visible.
+Escape, Android's back button, a press on the backdrop (TSX's backdrop, a native sheet's in Rust) and a swipe down on a sheet close it natively (`close_on_escape`, `close_on_backdrop_press` and `close_on_swipe`, TSX `closeOnEscape`, `closeOnBackdropPress` and `closeOnSwipe`, each true by default). In Rust, `on_cancel` reports every attempt and `on_close` the close, so leave the dialog out of the view there; a backdrop your app draws closes it with its own press handler, as above. In TSX, `onOpenChange({ open: false, reason })` tells you, so set `open` to `false` there. On iOS, what the dialog shows can close it too, as the close button of a video's system controls does: that is reported as Escape is (`"cancel"`), so the dialog and its video go. To confirm first, set a flag to false and handle the cancel event (`on_cancel`, `onCancel`), which reports every attempt, then close the dialog yourself. On iOS, `.presentation(ModalPresentation::PageSheet)` or `FormSheet` (`presentation="pageSheet"` or `"formSheet"`) presents a sheet that keeps what is behind visible.
 
 See [Dialog](../elements/dialog.md) for every prop. Inside a dialog, the `env(safe-area-inset-*)` variables and the insets are the dialog's own. For system dialogs (an alert with actions, an action sheet) use [`AlertDialog`](../modules/nsh-base.md#alertdialog) from `nsh_base` (TSX: `nsh/base`).
 

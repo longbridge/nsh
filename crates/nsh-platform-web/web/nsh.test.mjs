@@ -8,8 +8,8 @@ import test from "node:test";
 
 const source = await readFile(new URL("nsh.js", import.meta.url), "utf8");
 // `Player` is not exported; the page only gets it from `createPlayer`.
-const { Player, keyCode, elementTag, runtimeSheet, charLength, clipChars } = await import(
-  `data:text/javascript,${encodeURIComponent(`${source}\nexport { Player, keyCode, runtimeSheet, charLength, clipChars };`)}`
+const { Player, keyCode, elementTag, runtimeSheet, charLength, clipChars, copiedRun } = await import(
+  `data:text/javascript,${encodeURIComponent(`${source}\nexport { Player, keyCode, runtimeSheet, charLength, clipChars, copiedRun };`)}`
 );
 
 /** A player on a fake engine; `sent` holds `[name, payload]` of the events it got. */
@@ -1093,6 +1093,88 @@ test("Return a shortcut takes does not submit the field as well", () => {
   assert.equal(press("Enter"), true);
   assert.equal(submits(), 1);
   assert.deepEqual(sent.find(([name]) => name === "onSubmitEditing")[1], { text: "/rev", count: 4 });
+});
+
+test("selectTextOnFocus selects the text on focus and keeps a press's own selection", () => {
+  const { player } = fakePlayer();
+  player.setState = () => {};
+  player.caretMoved = () => {};
+  const reported = [];
+  player.event = (_, name, value) => name === "onSelectionChange" && reported.push([value.start, value.end]);
+  globalThis.document = { activeElement: null };
+  try {
+    for (const tagName of ["INPUT", "TEXTAREA"]) {
+      reported.length = 0;
+      const listeners = {};
+      const field = {
+        tagName,
+        value: "Hello",
+        selectionStart: 0,
+        selectionEnd: 0,
+        addEventListener: (type, listener) => (listeners[type] = listener),
+        setSelectionRange(start, end) {
+          this.selectionStart = start;
+          this.selectionEnd = end;
+        },
+      };
+      const el = { _id: 4, _events: new Set(["onSelectionChange"]), _config: { selectTextOnFocus: true } };
+      player.wireInput(el, field);
+      const focus = () => {
+        listeners.focus();
+        document.activeElement = field;
+      };
+      const blur = () => {
+        listeners.blur();
+        document.activeElement = null;
+      };
+      // A press: its pointerdown focuses an unfocused field, the browser
+      // places the caret (or the drag's range), then its mouseup.
+      const press = ({ shiftKey = false, caret = [2, 2] } = {}) => {
+        const focused = document.activeElement === field;
+        listeners.pointerdown({ shiftKey });
+        if (!focused) focus();
+        field.setSelectionRange(...caret);
+        listeners.pointerup();
+        let prevented = false;
+        listeners.mouseup({ preventDefault: () => (prevented = true) });
+        return prevented;
+      };
+      const selection = () => [field.selectionStart, field.selectionEnd];
+
+      // Focus without a press (Tab, `ref.focus()`, `autoFocus`) selects all, reported.
+      focus();
+      assert.deepEqual(selection(), [0, 5]);
+      assert.deepEqual(reported.at(-1), [0, 5]);
+      // A click on the focused field places the caret.
+      assert.equal(press(), false);
+      assert.deepEqual(selection(), [2, 2]);
+      blur();
+      // A click that focuses selects all over the caret its mouseup would place.
+      assert.equal(press(), true);
+      assert.deepEqual(selection(), [0, 5]);
+      assert.deepEqual(reported.at(-1), [0, 5]);
+      blur();
+      // A drag's range is kept.
+      assert.equal(press({ caret: [1, 3] }), false);
+      assert.deepEqual(selection(), [1, 3]);
+      blur();
+      // A Shift-click's selection is kept.
+      assert.equal(press({ shiftKey: true, caret: [0, 2] }), false);
+      assert.deepEqual(selection(), [0, 2]);
+      blur();
+      // Without the prop, focus leaves the selection alone.
+      el._config = { selectTextOnFocus: false };
+      field.setSelectionRange(1, 1);
+      focus();
+      assert.deepEqual(selection(), [1, 1]);
+      blur();
+      assert.equal(press(), false);
+      assert.deepEqual(selection(), [2, 2]);
+      blur();
+    }
+  } finally {
+    delete globalThis.document;
+  }
 });
 
 /** A player whose core answers are `interest` — whether the focused view's
@@ -2563,7 +2645,7 @@ test("UrlScheme.setUrl gives its address to the entry of the page pushed with it
     let depth = 0;
     const player = Object.create(Player.prototype);
     Object.assign(player, {
-      history: true, historyDepth: 0, historyIndex: 0, historyDepths: [0], ignoredPops: 0, historySession: "s", pageUrl: null,
+      history: true, historyDepth: 0, historyIndex: 0, historyDepths: [0], historyUrls: ["https://a.test/debugger/"], ignoredPops: 0, historySession: "s", pageUrl: null,
       backDepth: () => depth, syncHistorySoon() {}, showError: (m) => calls.push(["error", m]),
     });
     // A page pushed and its address set in one turn: the entry first.
@@ -2613,7 +2695,7 @@ test("the main window's title titles the page once the turn's entries exist, und
     let depth = 0;
     const player = Object.create(Player.prototype);
     Object.assign(player, {
-      history: true, historyDepth: 0, historyIndex: 0, historyDepths: [0], ignoredPops: 0, historySession: "s", pageUrl: null,
+      history: true, historyDepth: 0, historyIndex: 0, historyDepths: [0], historyUrls: ["https://a.test/inbox"], ignoredPops: 0, historySession: "s", pageUrl: null,
       views: new Map(), backDepth: () => depth, tellAddress() {}, showError: (m) => calls.push(["error", m]),
     });
     // A page pushed and the title set in one turn, the title's command
@@ -2676,7 +2758,7 @@ test("the browser's back gives the core the entry's address with no open, and a 
     let lets = true;
     const player = Object.create(Player.prototype);
     Object.assign(player, {
-      history: true, historyDepth: 1, historyIndex: 1, historyDepths: [0, 1], ignoredPops: 0, historySession: "s", pageUrl: null,
+      history: true, historyDepth: 1, historyIndex: 1, historyDepths: [0, 1], historyUrls: ["https://a.test/inbox", "https://a.test/inbox?message=a"], ignoredPops: 0, historySession: "s", pageUrl: null,
       shownUrl: "https://a.test/inbox?message=a",
       backDepth: () => depth, showError: (m) => calls.push(["error", m]),
       back: () => lets && (depth--, true),
@@ -2776,7 +2858,7 @@ test("an address the app sets while the browser's back pops its page wins over t
     let depth = 1;
     const player = Object.create(Player.prototype);
     Object.assign(player, {
-      history: true, historyDepth: 1, historyIndex: 1, historyDepths: [0, 1], ignoredPops: 0, historySession: "s", pageUrl: null,
+      history: true, historyDepth: 1, historyIndex: 1, historyDepths: [0, 1], historyUrls: ["https://a.test/inbox?message=42", "https://a.test/inbox?message=42"], ignoredPops: 0, historySession: "s", pageUrl: null,
       backDepth: () => depth, showError: (m) => calls.push(["error", m]),
       event: (id, name, payload) => calls.push(["event", name, payload]),
     });
@@ -2842,7 +2924,7 @@ test("a forward the app shows goes on from the entry the browser is at", () => {
     let depth = 0;
     const player = Object.create(Player.prototype);
     Object.assign(player, {
-      history: true, historyDepth: 0, historyIndex: 0, historyDepths: [0], ignoredPops: 0, historySession: "s", pageUrl: null,
+      history: true, historyDepth: 0, historyIndex: 0, historyDepths: [0], historyUrls: ["https://a.test/inbox"], ignoredPops: 0, historySession: "s", pageUrl: null,
       backDepth: () => depth, showError: (m) => calls.push(["error", m]),
       // The app takes the link: its stack shows the page again.
       event: (id, name, payload) => { calls.push(["event", name, payload]); if (!payload.quiet) depth = 1; },
@@ -3096,6 +3178,69 @@ test("in one turn, pushes make one entry with the last address, and a push wins 
   assert.deepEqual(calls.splice(0), [["replace", 0, 1, "https://a.test/inbox?tab=mine&sort=new"]]);
 });
 
+/** The player's own `syncHistorySoon`: the turn's entries a task later. */
+function realSoon(player) {
+  player.syncHistorySoon = Player.prototype.syncHistorySoon;
+}
+
+test("a push with no page open writes its entry in the task it came in, before the browser draws", (t) => {
+  const { player, calls, user } = historyPlayer(t);
+  realSoon(player);
+  player.setPageUrl("?item=1", true);
+  // No task passes: the entry exists before the next frame.
+  assert.deepEqual(calls.splice(0), [["push", 0, 1, "https://a.test/inbox?item=1"]]);
+  // More of the turn in the same task: the last address is that entry's, with no entry of its own.
+  player.setPageUrl("?item=2", true);
+  t.mock.timers.tick(0);
+  assert.deepEqual(calls.splice(0), [["replace", 0, 1, "https://a.test/inbox?item=2"]]);
+  // A later task's push makes an entry of its own, at once again.
+  player.setPageUrl("?item=3", true);
+  assert.deepEqual(calls.splice(0), [["push", 0, 2, "https://a.test/inbox?item=3"]]);
+  t.mock.timers.tick(0);
+  assert.deepEqual(calls.splice(0), []);
+  // Back twice and forward twice go through every entry.
+  user(-1);
+  user(-1);
+  user(1);
+  user(1);
+  assert.deepEqual(calls.splice(0).map((c) => [c[2].url, c[2].change]), [
+    ["https://a.test/inbox?item=2", "back"],
+    ["https://a.test/inbox", "back"],
+    ["https://a.test/inbox?item=2", "forward"],
+    ["https://a.test/inbox?item=3", "forward"],
+  ]);
+});
+
+test("a push from a sheet waits for the turn, so a dismissal a task later takes the sheet's entry over and loses none", (t) => {
+  const { player, calls, app, at, entries, user } = historyPlayer(t);
+  app.depth = 1;
+  player.syncHistory();
+  calls.splice(0);
+  realSoon(player);
+  // The sheet's item pushes a page's address; the sheet goes a task later.
+  player.setPageUrl("?item=1", true);
+  assert.deepEqual(calls.splice(0), []);
+  app.depth = 0;
+  player.syncHistorySoon();
+  t.mock.timers.tick(0);
+  assert.deepEqual(calls.splice(0), [["replace", 0, 1, "https://a.test/inbox?item=1"]]);
+  assert.equal(at(), 1);
+  assert.equal(entries().length, 2);
+  user(-1);
+  assert.deepEqual(calls.splice(0), [["event", "onUrlScheme", { url: "https://a.test/inbox", page: true, change: "back" }]]);
+});
+
+test("a push waits while a traversal of the player's is waited for or a page is going", (t) => {
+  const { player, calls } = historyPlayer(t);
+  realSoon(player);
+  player.dismissing = 1;
+  player.setPageUrl("?item=1", true);
+  assert.deepEqual(calls.splice(0), []);
+  player.dismissing = 0;
+  t.mock.timers.tick(0);
+  assert.deepEqual(calls.splice(0), [["push", 0, 1, "https://a.test/inbox?item=1"]]);
+});
+
 test("a push in the turn that pushes a page gives the page's entry its address, with no entry of its own", (t) => {
   const { player, calls, app } = historyPlayer(t);
   inOneTurn(player, () => {
@@ -3105,8 +3250,8 @@ test("a push in the turn that pushes a page gives the page's entry its address, 
   assert.deepEqual(calls.splice(0), [["push", 1, 1], ["replace", 1, 1, "https://a.test/inbox?message=42"]]);
 });
 
-test("a push in the turn that pops a page waits for the back over its entry, then makes its own", (t) => {
-  const { player, calls, app, at } = historyPlayer(t);
+test("a push in the turn that pops a page takes the page's entry over: nothing goes back, no entry of its own", (t) => {
+  const { player, calls, app, at, entries, user } = historyPlayer(t);
   app.depth = 1;
   player.syncHistory();
   calls.splice(0);
@@ -3114,9 +3259,82 @@ test("a push in the turn that pops a page waits for the back over its entry, the
     app.depth = 0;
     player.setPageUrl("?tab=all", true);
   });
-  assert.deepEqual(calls.splice(0), [["go", -1], ["push", 0, 1, "https://a.test/inbox?tab=all"]]);
+  // The entry under it is not left again, so a browser's picture of it is the one taken as the page came.
+  assert.deepEqual(calls.splice(0), [["replace", 0, 1, "https://a.test/inbox?tab=all"]]);
   assert.equal(at(), 1);
+  assert.equal(entries().length, 2);
   assert.equal(player.historyDepth, 0);
+  assert.deepEqual(player.historyDepths, [0, 0]);
+  // Back from it goes to the entry under, as from an entry of its own.
+  user(-1);
+  assert.deepEqual(calls.splice(0), [["event", "onUrlScheme", { url: "https://a.test/inbox", page: true, change: "back" }]]);
+  user(1);
+  assert.deepEqual(calls.splice(0), [["event", "onUrlScheme", { url: "https://a.test/inbox?tab=all", page: true, change: "forward" }]]);
+});
+
+test("a push in the turn that pops a page with an address of its own takes its entry over, unless the address is the entry under it's", (t) => {
+  const { player, calls, app, at, entries } = historyPlayer(t);
+  inOneTurn(player, () => {
+    app.depth = 1;
+    player.setPageUrl("?sheet=1", true);
+  });
+  calls.splice(0);
+  // Back to its opener's address: the back lands on the opener's entry and the push makes nothing.
+  inOneTurn(player, () => {
+    app.depth = 0;
+    player.setPageUrl("/inbox", true);
+  });
+  assert.deepEqual(calls.splice(0), [["go", -1], ["replace", 0, 0, "https://a.test/inbox"]]);
+  assert.equal(at(), 0);
+  assert.deepEqual(entries().map((e) => e.url), ["https://a.test/inbox", "https://a.test/inbox?sheet=1"]);
+  inOneTurn(player, () => {
+    app.depth = 1;
+    player.setPageUrl("?sheet=1", true);
+  });
+  calls.splice(0);
+  inOneTurn(player, () => {
+    app.depth = 0;
+    player.setPageUrl("?tab=all", true);
+  });
+  assert.deepEqual(calls.splice(0), [["replace", 0, 1, "https://a.test/inbox?tab=all"]]);
+  inOneTurn(player, () => {
+    app.depth = 1;
+    player.setPageUrl("?sheet=2", true);
+  });
+  calls.splice(0);
+  // To the address of the entry under it, not its opener's first one: the same.
+  inOneTurn(player, () => {
+    app.depth = 0;
+    player.setPageUrl("?tab=all", true);
+  });
+  assert.deepEqual(calls.splice(0), [["go", -1], ["replace", 0, 1, "https://a.test/inbox?tab=all"]]);
+  assert.equal(at(), 1);
+  assert.deepEqual(entries().map((e) => e.url), ["https://a.test/inbox", "https://a.test/inbox?tab=all", "https://a.test/inbox?sheet=2"]);
+});
+
+test("a push in the turn that pops two pages, or one the user went back onto, waits for the back over their entries, then makes its own", (t) => {
+  const { player, calls, app, at, user } = historyPlayer(t);
+  app.depth = 2;
+  player.syncHistory();
+  calls.splice(0);
+  inOneTurn(player, () => {
+    app.depth = 0;
+    player.setPageUrl("?tab=all", true);
+  });
+  assert.deepEqual(calls.splice(0), [["go", -2], ["push", 0, 1, "https://a.test/inbox?tab=all"]]);
+  assert.equal(at(), 1);
+  // A page whose entry has one after it (the user went back onto it): the push drops that one.
+  player.setPageUrl("?tab=live", true);
+  app.depth = 1;
+  player.syncHistory();
+  player.setPageUrl("?tab=mine", true);
+  user(-1);
+  calls.splice(0);
+  inOneTurn(player, () => {
+    app.depth = 0;
+    player.setPageUrl("?tab=new", true);
+  });
+  assert.deepEqual(calls.splice(0)[0], ["go", -1]);
 });
 
 test("a push drops the browser's forward entries, and the address shown makes none", (t) => {
@@ -3380,6 +3598,19 @@ function fakeClipboard(t, { failWrite } = {}) {
   };
   return log;
 }
+
+test("an attachment copies as its copy text in its place", () => {
+  const copies = new Map([[8, "$x^2$"]]);
+  // A run of "Area is \uFFFC here." from its start, and from offset 5.
+  assert.equal(copiedRun("Area is \uFFFC here.", 0, copies, true), "Area is $x^2$ here.");
+  assert.equal(copiedRun("is \uFFFC", 5, copies, true), "is $x^2$");
+  // One without a copy text is left out of a selectable view's copy.
+  assert.equal(copiedRun("a \uFFFC \uFFFC", 6, copies, true), "a $x^2$ ");
+  assert.equal(copiedRun("a \uFFFC", 0, null, true), "a ");
+  // A text outside selectable views keeps its placeholders, as before.
+  assert.equal(copiedRun("a \uFFFC", 0, null, false), "a \uFFFC");
+  assert.equal(copiedRun("a \uFFFC", 6, copies, false), "a $x^2$");
+});
 
 test("text with its HTML goes on the clipboard as one item of both types", async (t) => {
   const log = fakeClipboard(t);
@@ -4039,8 +4270,9 @@ test("links and addresses resolve against the site's base where the page names i
 });
 
 /** An element whose DOM state, as a real one's, is not among its own
- * enumerable keys (`retag` copies those); a `style` attribute set as text
- * applies nothing, as under a strict `style-src`. */
+ * enumerable keys (`retag` copies those), listeners included; a `style`
+ * attribute set as text applies nothing, as under a strict `style-src`;
+ * focused, it is focused from the keyboard. */
 function fakeElement(tag, attributes = {}) {
   const attrs = new Map(Object.entries(attributes));
   const set = [];
@@ -4050,14 +4282,26 @@ function fakeElement(tag, attributes = {}) {
     attributes: { get: () => [...attrs].map(([name, value]) => ({ name, value })) },
     setAttribute: { value(name, value) { set.push(name); if (name !== "style") attrs.set(name, String(value)); } },
     getAttribute: { value: (name) => attrs.get(name) ?? null },
+    hasAttribute: { value: (name) => attrs.has(name) },
     removeAttribute: { value: (name) => attrs.delete(name) },
     attributesSet: { value: set },
+    tabIndex: { get: () => Number(attrs.get("tabindex") ?? -1), set: (v) => attrs.set("tabindex", String(v)) },
+    dataset: { value: {} },
+    classList: { value: { toggle() {} } },
+    matches: { value: (selector) => selector === ":focus-visible" },
     style: { value: { cssText: attributes.style ?? "" } },
     childNodes: { value: [] },
     append: { value(...nodes) { this.childNodes.push(...nodes); } },
     replaceWith: { value() {} },
+    listeners: { value: [] },
+    addEventListener: { value(type, listener) { this.listeners.push([type, listener]); } },
   });
   return el;
+}
+
+/** Dispatches `event` of `type` to the listeners `el` (`fakeElement`) has. */
+function fire(el, type, event = {}) {
+  for (const [t, listener] of el.listeners) if (t === type) listener({ type, ...event });
 }
 
 test("a view drawn as another element keeps its frame under a strict style-src", () => {
@@ -4078,6 +4322,71 @@ test("a view drawn as another element keeps its frame under a strict style-src",
     assert.equal(next.getAttribute("class"), "nsh-v");
     assert.equal(next._id, 6);
     assert.equal(player.views.get(6), next);
+  } finally {
+    globalThis.document = savedDocument;
+  }
+});
+
+test("a link drawn as an a keeps its hover and its keyboard focus", () => {
+  const savedDocument = globalThis.document;
+  globalThis.document = { createElement: (tag) => fakeElement(tag), activeElement: null };
+  try {
+    const { player } = fakePlayer();
+    const reported = [];
+    player.wasm.nsh_states = (id, states) => {
+      reported.push([id, states]);
+      return -1;
+    };
+    const heard = [];
+    player.event = (id, name) => heard.push([id, name]);
+    Object.assign(player, { views: new Map(), mouseTracked: new Set(), wheelTracked: new Set() });
+    player.updateAria = () => {};
+    player.updateTouchAction = () => {};
+    const el = fakeElement("div", { class: "nsh-v" });
+    Object.assign(el, { _id: 6, _kind: "view", _events: new Set(), _frame: null });
+    player.views.set(6, el);
+    // A new `Link` with `hover:` and `focus:` classes, in the core's order:
+    // its tracked states and events come before the props whose `href`
+    // draws it as an `a`.
+    player.op_ts([, 6, 2 | 4]);
+    player.op_e([, 6, ["onPress"]]);
+    player.op_vp([, 6, { role: "link", href: "/notes" }]);
+    const link = player.view(6);
+    assert.equal(link.localName, "a");
+    // Listeners of its own, once each: the div's went with the div.
+    assert.deepEqual(link.listeners.map(([type]) => type), ["pointerenter", "pointerleave", "focus", "blur"]);
+    fire(link, "pointerenter", { pointerType: "mouse" });
+    fire(link, "focus");
+    fire(link, "pointerleave", { pointerType: "mouse" });
+    fire(link, "blur");
+    // Hovered, then focused too, then focused only, then neither.
+    assert.deepEqual(reported, [[6, 2], [6, 6], [6, 4], [6, 0]]);
+    assert.deepEqual(heard, [[6, "onFocus"], [6, "onBlur"]]);
+  } finally {
+    globalThis.document = savedDocument;
+  }
+});
+
+test("a text drawn as a heading after its links keeps their hover", () => {
+  const savedDocument = globalThis.document;
+  globalThis.document = { createElement: (tag) => fakeElement(tag) };
+  try {
+    const { player } = fakePlayer();
+    const heard = [];
+    player.event = (id, name) => heard.push([id, name]);
+    player.mouseEvent = () => null;
+    player.views = new Map();
+    const el = fakeElement("div", { class: "nsh-v" });
+    Object.assign(el, { _id: 8, _kind: "text" });
+    player.views.set(8, el);
+    // Its runs hold a link the mouse is reported for (`runs`); then a
+    // `role="header"` draws it as an `h2`.
+    player.installLinkHover(el);
+    const heading = player.retag(el, "h2");
+    const run = { _link: { node: 10, events: new Set(["onMouseEnter", "onMouseLeave"]) } };
+    fire(heading, "pointerover", { pointerType: "mouse", target: run });
+    fire(heading, "pointerleave", { pointerType: "mouse" });
+    assert.deepEqual(heard, [[10, "onMouseEnter"], [10, "onMouseLeave"]]);
   } finally {
     globalThis.document = savedDocument;
   }

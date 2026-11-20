@@ -40,6 +40,7 @@ fn app() -> impl IntoElement {
 
 ```tsx tabs
 import { mount, signal, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
 
 function App() {
   const count = signal(0);
@@ -53,7 +54,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 In Rust, the primitives are functions of `nsh_core::prelude` (`view()`, `text(..)`, `image(..)`) and the base
@@ -546,6 +551,7 @@ view().on_press(open_page).child(
 | `ref` | `.element_ref(&handle)` | `ViewRef \| (node: ViewRef) => void` | The element's ref (see [ref methods](#ref-methods)): `ViewRef`, or the element's own type over it. `ref={el}` assigns a variable, `ref={fn}` calls a function. |
 | `nativeID` | `.native_id(id)` | `string` | Names the view for others, e.g. the `InputAccessoryView` an input refers to. |
 | `testID` | `.test_id(id)` | `string` | An identifier for UI tests (on Android, the view's resource id). |
+| `copyText` | `.copy_text(text)` | `string` | Inside a text: what copying the text gives in the element's place (an inline formula's source). Unset, the copy leaves the element out. See [inline views](./text.md#inline-views-and-images). |
 | `key` | `.key(key)` | `string` | The element's identity among its siblings. |
 
 ### The page's markup
@@ -708,7 +714,7 @@ of its own.
 | `measure()` | `measure()` | `ViewRef` | [Where the view is](../docs/touch-and-gestures.md#where-a-view-is-measure). |
 | `reveal({ vertical?, horizontal?, animated? })` | `reveal(options)` | `ViewRef` | [Scrolls the scroll views around the view](../docs/scrolling.md#revealing-a-view) so it shows. |
 | `setSelection(start, end?)` | `set_selection(start, end)` | `InputRef` | Selects `start..end` in UTF-16 units; a caret without `end`. |
-| `insertText(text)` | `insert_text(text)` | `InputRef` | Inserts `text` in place of the selection as the user's edit, one step of the undo history (Linux, the web, headless tests). |
+| `insertText(text)` | `insert_text(text)` | `InputRef` | Inserts `text` in place of the selection as the user's edit, one step of the undo history (iOS, macOS, Linux, the web, headless tests). |
 | `scrollTo({ x?, y?, animated? })` | `scroll_to(point, animated)` | `ScrollRef`, `ListRef` | Scrolls to an offset. |
 | `zoomTo({ scale, x?, y?, animated? })` | `zoom_to(scale, center, animated)` | `ScrollRef` (a zoomable `<Scroll>`) | Zooms to `scale` around a content point. |
 | `scrollToOffset({ offset, animated? })` | `scroll_to_offset(offset, animated)` | `ListRef` | Scrolls to an offset along the list's axis. |
