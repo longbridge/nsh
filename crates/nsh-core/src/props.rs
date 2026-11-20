@@ -523,6 +523,38 @@ pub struct ViewProps {
     /// and a double or triple click selects across them
     /// ([`crate::selection::SelectionTexts::continues`]).
     pub continues_text: bool,
+    /// `ios={{ scrollEdgeElement }}`: the scroll view the view floats
+    /// over and the edge of it the view sits at. Resolved by the core from
+    /// the element the app names; `None` when it names none or that element
+    /// is gone.
+    pub scroll_edge_element: Option<ScrollEdgeElement>,
+}
+
+/// The edge of a scroll view a view floating over it sits at
+/// (`ios={{ scrollEdgeElement }}`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
+#[non_exhaustive]
+pub enum ScrollEdge {
+    /// The top edge.
+    Top,
+    /// The bottom edge (default).
+    #[default]
+    Bottom,
+}
+
+/// A view floating over an edge of a scroll view, as the platform gets it
+/// ([`ViewProps::scroll_edge_element`]): on iOS 26 and later the scroll
+/// edge effect of that scroll view takes its shape from the view, as it
+/// does from a bar, so the content scrolled under the view fades out
+/// around what the view shows instead of being cut by it. Elsewhere a
+/// fade the app draws under the view gives the same separation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ScrollEdgeElement {
+    /// The scroll view (its native id).
+    pub scroll_view: crate::NodeId,
+    /// The edge of it the view sits at.
+    pub edge: ScrollEdge,
 }
 
 impl ViewProps {

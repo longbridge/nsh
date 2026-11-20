@@ -235,7 +235,7 @@ Android, Windows and Linux, and the rest are denied. The system still asks the u
 declare what it needs: `nsh package` writes `NSMicrophoneUsageDescription` / `NSCameraUsageDescription` (word them your
 own way with `ios.infoPlist` / `macos.infoPlist`), the macOS `com.apple.security.device.audio-input` /
 `com.apple.security.device.camera` entitlements, and Android's `RECORD_AUDIO` / `CAMERA` permissions, which the app asks
-for when a page first needs them. Pages need a secure context (`https:` or `localhost`) for `getUserMedia`.
+for when a page first needs them. The development hosts (`nsh run`) carry the usage descriptions for any app. Pages need a secure context (`https:` or `localhost`) for `getUserMedia`.
 
 ```json
 { "capabilities": { "webview": { "hosts": ["phone.example.com"], "media": ["microphone"] } } }

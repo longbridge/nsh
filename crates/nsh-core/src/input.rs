@@ -44,6 +44,24 @@ pub const SCROLL_PRESS_DELAY: u64 = 130;
 pub const LONG_PRESS: f32 = 500.0;
 /// Velocities are measured over this many milliseconds.
 pub const VELOCITY_WINDOW: f64 = 100.0;
+/// Minimum duration a completed short press holds its `PRESSED` visual
+/// state so a same-turn tap-to-click renders `:active` feedback.
+pub const TAP_FEEDBACK: std::time::Duration = std::time::Duration::from_millis(64);
+
+/// How long to hold a completed short press's `PRESSED` state after a
+/// pointer release `elapsed` after the press began; `None` when the press
+/// lasted at least [`TAP_FEEDBACK`], was `cancelled`, or visual feedback
+/// must end `immediate`ly (reduced motion, automated tests).
+pub fn tap_feedback_delay(
+    elapsed: std::time::Duration,
+    cancelled: bool,
+    immediate: bool,
+) -> Option<std::time::Duration> {
+    if cancelled || immediate {
+        return None;
+    }
+    TAP_FEEDBACK.checked_sub(elapsed).filter(|d| !d.is_zero())
+}
 
 /// Estimates a pointer's velocity from its recent positions (points).
 #[derive(Debug, Clone, Copy, Default)]
@@ -1575,5 +1593,28 @@ mod tests {
         let s = size(Points(120.0), Points(40.0));
         assert_eq!(context_menu_anchor(s, false), p(0.0, 40.0));
         assert_eq!(context_menu_anchor(s, true), p(120.0, 40.0));
+    }
+
+    #[test]
+    fn tap_feedback_delay_holds_short_presses() {
+        use std::time::Duration;
+        assert_eq!(
+            tap_feedback_delay(Duration::ZERO, false, false),
+            Some(Duration::from_millis(64))
+        );
+        assert_eq!(
+            tap_feedback_delay(Duration::from_millis(12), false, false),
+            Some(Duration::from_millis(52))
+        );
+        assert_eq!(
+            tap_feedback_delay(Duration::from_millis(64), false, false),
+            None
+        );
+        assert_eq!(
+            tap_feedback_delay(Duration::from_millis(120), false, false),
+            None
+        );
+        assert_eq!(tap_feedback_delay(Duration::ZERO, true, false), None);
+        assert_eq!(tap_feedback_delay(Duration::ZERO, false, true), None);
     }
 }

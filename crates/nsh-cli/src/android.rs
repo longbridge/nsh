@@ -212,6 +212,9 @@ pub(crate) struct Apk<'a> {
     /// (`webview.media`): `RECORD_AUDIO` and `CAMERA` are declared.
     pub(crate) microphone: bool,
     pub(crate) camera: bool,
+    /// The permissions the app declares itself (nsh.json
+    /// `android.permissions`), in full: declared after NSH's, each once.
+    pub(crate) permissions: &'a [String],
     /// URL schemes that open the app (nsh.json `schemes`): one
     /// `VIEW` intent filter.
     pub(crate) schemes: &'a [String],
@@ -395,17 +398,25 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
         .replace('&', "&amp;")
         .replace('"', "&quot;")
         .replace('<', "&lt;");
-    let post_notifications = if apk.notifications {
-        "\n    <uses-permission android:name=\"android.permission.POST_NOTIFICATIONS\" />"
-    } else {
-        ""
-    };
-    let media: String = [(apk.microphone, "RECORD_AUDIO"), (apk.camera, "CAMERA")]
+    // NSH's own, then the app's (`android.permissions`), each once.
+    let mut permissions = vec!["android.permission.INTERNET".to_owned()];
+    for (declared, name) in [
+        (apk.notifications, "POST_NOTIFICATIONS"),
+        (apk.microphone, "RECORD_AUDIO"),
+        (apk.camera, "CAMERA"),
+    ] {
+        if declared {
+            permissions.push(format!("android.permission.{name}"));
+        }
+    }
+    for name in apk.permissions {
+        if !permissions.contains(name) {
+            permissions.push(name.clone());
+        }
+    }
+    let permissions: String = permissions
         .iter()
-        .filter(|(declared, _)| *declared)
-        .map(|(_, name)| {
-            format!("\n    <uses-permission android:name=\"android.permission.{name}\" />")
-        })
+        .map(|name| format!("\n    <uses-permission android:name=\"{name}\" />"))
         .collect();
     // A link opens the running app (`onNewIntent`), not another activity in
     // the caller's task.
@@ -428,8 +439,7 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
     };
     format!(
         r#"<?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="{package}">
-    <uses-permission android:name="android.permission.INTERNET" />{post_notifications}{media}
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="{package}">{permissions}
     <!-- Text actions (Translate and the like) the selection menu offers,
         as TextView's: Android 11+ hides other apps' activities otherwise. -->
     <queries>
@@ -789,6 +799,16 @@ pub(crate) fn device_abis(sdk: &Sdk, serial: &str) -> anyhow::Result<Vec<String>
         .collect())
 }
 
+/// The ABI to build an app for device `serial`, whose ABIs are `device`
+/// (preferred first): the first one NSH builds for.
+pub(crate) fn preferred_abi(serial: &str, device: &[String]) -> anyhow::Result<String> {
+    device
+        .iter()
+        .find(|abi| ABIS.contains(&abi.as_str()))
+        .cloned()
+        .with_context(|| format!("{serial} runs none of {}", ABIS.join(", ")))
+}
+
 /// A port of the device forwarded to this machine (`adb reverse`), removed
 /// when dropped, however the command ends (Ctrl-C too: it is
 /// [`ui::Stoppable`] meanwhile): a dev host left on the device would
@@ -845,6 +865,24 @@ pub(crate) fn adb(sdk: &Sdk, serial: &str, args: &[&str]) -> anyhow::Result<Stri
 
 #[cfg(test)]
 mod tests {
+    /// An app is built for the device's preferred ABI that NSH builds for;
+    /// a device that runs none of them is an error.
+    #[test]
+    fn an_app_is_built_for_the_devices_preferred_abi() {
+        let abi = |list: &[&str]| {
+            let device: Vec<String> = list.iter().map(|abi| abi.to_string()).collect();
+            super::preferred_abi("emulator-5554", &device).ok()
+        };
+        assert_eq!(
+            abi(&["arm64-v8a", "armeabi-v7a", "armeabi"]).as_deref(),
+            Some("arm64-v8a")
+        );
+        assert_eq!(abi(&["x86_64", "arm64-v8a"]).as_deref(), Some("x86_64"));
+        assert_eq!(abi(&["x86", "armeabi-v7a"]).as_deref(), Some("armeabi-v7a"));
+        assert_eq!(abi(&["x86"]), None);
+        assert_eq!(abi(&[]), None);
+    }
+
     fn apk(rust: bool, notifications: bool) -> super::Apk<'static> {
         super::Apk {
             package: "com.example.app",
@@ -858,6 +896,7 @@ mod tests {
             notifications,
             microphone: false,
             camera: false,
+            permissions: &[],
             schemes: &[],
             rust,
             dark: false,
@@ -921,6 +960,43 @@ mod tests {
         assert!(manifest.contains("android.permission.RECORD_AUDIO"));
         assert!(!manifest.contains("android.permission.CAMERA"));
         assert!(!super::manifest_xml(&apk(false, false)).contains("RECORD_AUDIO"));
+    }
+
+    #[test]
+    fn an_app_declares_the_permissions_it_lists_once() {
+        let listed = [
+            "android.permission.ACCESS_NETWORK_STATE".to_owned(),
+            "android.permission.POST_NOTIFICATIONS".to_owned(),
+            "com.example.permission.READ".to_owned(),
+            "android.permission.INTERNET".to_owned(),
+        ];
+        let manifest = super::manifest_xml(&super::Apk {
+            permissions: &listed,
+            ..apk(false, true)
+        });
+        let declared = |name: &str| {
+            manifest
+                .matches(&format!("<uses-permission android:name=\"{name}\" />"))
+                .count()
+        };
+        assert_eq!(
+            declared("android.permission.ACCESS_NETWORK_STATE"),
+            1,
+            "{manifest}"
+        );
+        assert_eq!(declared("com.example.permission.READ"), 1, "{manifest}");
+        // NSH's own stay, once, even when the app lists them too.
+        assert_eq!(declared("android.permission.INTERNET"), 1, "{manifest}");
+        assert_eq!(
+            declared("android.permission.POST_NOTIFICATIONS"),
+            1,
+            "{manifest}"
+        );
+        // Permissions go before the application, as Android reads them.
+        let application = manifest.find("<application").unwrap();
+        let at = manifest.find("ACCESS_NETWORK_STATE").unwrap();
+        assert!(at < application, "{manifest}");
+        assert!(!super::manifest_xml(&apk(false, false)).contains("ACCESS_NETWORK_STATE"));
     }
 
     #[test]

@@ -543,6 +543,9 @@ pub(crate) struct Input {
     /// Whether it was configured: only its first configuration asks for
     /// the focus.
     configured: bool,
+    /// Its whole text is selected (`selectTextOnFocus` focused it): the
+    /// next edit replaces it. Otherwise the caret is at the end.
+    pub(crate) selected_all: bool,
 }
 
 /// Where a scroll view is, as its platform view keeps it.
@@ -774,6 +777,10 @@ impl Screen {
                 if let Some(input) = self.input_mut(*id)
                     && *count >= input.count
                 {
+                    // A new value puts the caret at its end.
+                    if input.text != *text {
+                        input.selected_all = false;
+                    }
                     input.text = text.clone();
                 }
             }

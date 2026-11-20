@@ -56,6 +56,15 @@ pub(crate) fn offer(view: &NshView) {
     }
 }
 
+/// Whether GTK's focus traversal (Tab, Shift+Tab, the focus GTK hands out
+/// as a window maps) passes over `view` and everything in it: a disabled
+/// view takes its subtree out of it, the native fields in it too, as the
+/// headless runner and a browser's disabled `fieldset` do. `focus()` grabs
+/// the focus directly and is not affected.
+pub(crate) fn skips_subtree(view: &NshView) -> bool {
+    view.state().props.accessibility.state.disabled
+}
+
 /// After [`offer`]: a stop Tab passed over goes back to unfocusable.
 pub(crate) fn offered(view: &NshView) {
     if TABBING.get() && !view.is_focus() {
@@ -1450,6 +1459,98 @@ mod tests {
                 "the focus leaves with the field"
             );
             window.destroy();
+        });
+    }
+
+    /// The issue's layout: a stop (2), a disabled panel (3) with a field (4)
+    /// and a stop (5) in it, then a stop (6). Tab and Shift+Tab pass over
+    /// the panel while it is disabled and enter it again once it is not.
+    #[test]
+    fn tab_passes_over_a_disabled_subtree() {
+        run(|| {
+            let surface = surface();
+            let mut items = Vec::new();
+            for (id, parent, kind, y) in [
+                (2, ROOT_ID, ViewKind::View, 0.0),
+                (3, ROOT_ID, ViewKind::View, 40.0),
+                (4, 3, ViewKind::Input, 0.0),
+                (5, 3, ViewKind::View, 40.0),
+                (6, ROOT_ID, ViewKind::View, 120.0),
+            ] {
+                items.extend([
+                    MountItem::Create { id, kind },
+                    MountItem::Insert {
+                        parent,
+                        child: id,
+                        before: None,
+                    },
+                    MountItem::Frame {
+                        id,
+                        frame: frame(0.0, y, 100.0, 30.0),
+                    },
+                ]);
+                if id == 4 {
+                    items.push(MountItem::Input {
+                        id,
+                        config: Box::default(),
+                    });
+                } else if id != 3 {
+                    let mut events = EventMask::default();
+                    events.set(EventKind::Press, true);
+                    items.push(MountItem::Events { id, events });
+                }
+            }
+            apply(&surface, &items);
+            let disable = |on: bool| props(&surface, 3, |p| p.accessibility.state.disabled = on);
+            disable(true);
+            let window = show(&surface);
+            let (before, field, inside, after) = (
+                view(&surface, 2),
+                view(&surface, 4),
+                view(&surface, 5),
+                view(&surface, 6),
+            );
+            assert!(wait_until(|| after.is_mapped()));
+            let back = |w: &gtk::Window| {
+                TABBING.set(true);
+                w.child_focus(gtk::DirectionType::TabBackward);
+                TABBING.set(false);
+            };
+            let in_field = || {
+                GtkWindowExt::focus(&window).is_some_and(|f| {
+                    f.is_ancestor(&field) || f == *field.upcast_ref::<gtk::Widget>()
+                })
+            };
+
+            tab(&window);
+            assert!(
+                before.is_focus(),
+                "Tab enters the first stop: {:?}",
+                GtkWindowExt::focus(&window).map(|w| (
+                    w.type_().name(),
+                    w.downcast_ref::<NshView>().map(|v| v.state().id)
+                ))
+            );
+            tab(&window);
+            assert!(after.is_focus(), "Tab passes over the disabled panel");
+            back(&window);
+            assert!(before.is_focus(), "Shift+Tab passes over it too");
+
+            disable(false);
+            tab(&window);
+            assert!(in_field(), "an enabled panel's field is a stop again");
+            tab(&window);
+            assert!(inside.is_focus(), "and so is its pressable view");
+
+            // Disabled again while the focus is on the stop before it.
+            back(&window);
+            back(&window);
+            assert!(before.is_focus());
+            disable(true);
+            tab(&window);
+            let passed = after.is_focus();
+            window.destroy();
+            assert!(passed, "a panel disabled later is passed over");
         });
     }
 

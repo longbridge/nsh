@@ -255,7 +255,8 @@ ancestors within the same window:
   forced onto a US key), and `"Unidentified"` for a dead key or a key the layout cannot name. The source's own
   translation is used as it is: AltGr (Windows reports it as Control+Alt) keeps the character the layout provides
   (`@` for AltGr+Q); only a Control/Alt combination that makes a control character (Ctrl+A's 0x01) falls back to the
-  key's own character (`a`). A keypad key with Num Lock off is the navigation key it is (or `Clear`, `Delete` for
+  key's own character (`a`). The dedicated Play key reports `MediaPlay`, and the combined key reports
+  `MediaPlayPause`. A keypad key with Num Lock off is the navigation key it is (or `Clear`, `Delete` for
   `5` and the decimal point).
 - `code` is the DOM `KeyboardEvent.code` of the message's scan code with its extended bit: the key's physical place
   on any layout (`KeyA`, `ArrowLeft`, `NumpadEnter`, `Numpad1`, `ShiftLeft`/`ShiftRight`,

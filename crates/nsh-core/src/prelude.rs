@@ -168,6 +168,7 @@ pub use crate::element::{
     ScreenAnimation,
     Scroll,
     ScrollAlignment,
+    ScrollEdge,
     ScrollEvent,
     Scrollable,
     Selection,

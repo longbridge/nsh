@@ -415,6 +415,7 @@ prop id:first headerVisible true
 prop id:first headerLargeTitle false
 prop id:first headerTransparent false
 prop id:first headerShadowVisible true
+prop id:first headerTitleAlign left
 prop id:first headerBackgroundOnScroll false
 prop id:first headerBackVisible true
 noprop id:first headerBackTitle
@@ -434,6 +435,7 @@ prop id:second headerVisible false
 prop id:second headerLargeTitle true
 prop id:second headerTransparent true
 prop id:second headerShadowVisible false
+prop id:second headerTitleAlign center
 prop id:second headerBackgroundOnScroll true
 prop id:second headerBackTitle Back to second
 prop id:second headerBackVisible false
@@ -486,6 +488,7 @@ covers [props] headerVisible
 covers [props] headerLargeTitle
 covers [props] headerTransparent
 covers [props] headerShadowVisible
+covers [props] headerTitleAlign
 covers [props] headerBackgroundOnScroll
 covers [props] headerBackTitle
 covers [props] headerBackVisible
@@ -4806,3 +4809,15 @@ expect Toolbar c of 0
 tap id:toolbar-tab-b
 expect Toolbar b of 1
 covers [props] DockArea.renderToolbar
+
+# base-tree-slots
+# The header shows above the rows; `empty` shows while no item does.
+tap id:case-base-tree-slots
+expect Pinned files
+expect No files
+tap id:tree-slots-fill
+expect README.md
+absent No files
+expect Pinned files
+covers [props] Tree.header
+covers [props] Tree.empty
