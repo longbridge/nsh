@@ -8,8 +8,9 @@ use crate::{
     CellSlot, EdgeInsets, HeaderItem, HeaderItemContent, HeaderSystemItem, ImageScales,
     ImageSource, KeyboardTaps, ListContentStyle, MacOsBackdrop, MacOsBackdropBlending,
     MacOsBackdropMaterial, MacOsBackdropState, ModalProp, Prop, RevealOptions, ScreenProp,
-    ScrollAlignment, ScrollProp, StatusBarSetting, StatusBarStyle, Viewability,
-    element::{ElementTarget, TsTypes},
+    ScrollAlignment, ScrollProp, StatusBarSetting, StatusBarStyle, Viewability, WindowsBackdrop,
+    WindowsBackdropMaterial,
+    element::{ElementTarget, ScrollEdgeTarget, TsTypes},
     geometry::{Bounds, Percentage, Points, point, size},
     mount::ModalConfig,
     ops::OverlayProp,
@@ -192,6 +193,50 @@ impl HostValue for MacOsBackdrop {
                 "/** The material a view draws with on macOS (`macos={{{{ backdrop }}}}`). */\n\
                  export interface MacOsBackdrop {{\n  material?: {material};\n  \
                  blending?: {blending};\n  state?: {state};\n}}"
+            )
+        })
+    }
+}
+
+/// `ios={{ scrollEdgeElement }}`: `{ scrollView, edge }`, the scroll
+/// view a ref holds and the edge (`"bottom"` when left out or unknown);
+/// without a scroll view it is none.
+impl HostValue for ScrollEdgeTarget {
+    fn decode<I: HostInput>(input: &I, cx: &mut HostCx) -> Option<Self> {
+        let scroll_view = input.field("scrollView")?.node()?;
+        let edge = field::<crate::ScrollEdge, _>(input, "edge", cx).unwrap_or_default();
+        Some(ScrollEdgeTarget::of_node(scroll_view, edge))
+    }
+
+    fn ts_type(types: &mut TsTypes) -> String {
+        let edge = <crate::ScrollEdge as HostValue>::ts_type(types);
+        types.declare("ScrollEdgeElement", |_| {
+            format!(
+                "/** The scroll view a view floats over and the edge of it the view sits at \
+                 (`ios={{{{ scrollEdgeElement }}}}`). */\n\
+                 export interface ScrollEdgeElement {{\n  scrollView: ViewRef;\n  \
+                 edge?: {edge};\n}}"
+            )
+        })
+    }
+}
+
+impl HostValue for WindowsBackdrop {
+    fn decode<I: HostInput>(input: &I, cx: &mut HostCx) -> Option<Self> {
+        if !input.is_object() {
+            return None;
+        }
+        Some(Self {
+            material: field(input, "material", cx)?,
+        })
+    }
+
+    fn ts_type(types: &mut TsTypes) -> String {
+        let material = <WindowsBackdropMaterial as HostValue>::ts_type(types);
+        types.declare("WindowsBackdrop", |_| {
+            format!(
+                "/** The material a view draws with on Windows (`windows={{{{ backdrop }}}}`). */\n\
+                 export interface WindowsBackdrop {{\n  material: {material};\n}}"
             )
         })
     }

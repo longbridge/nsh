@@ -63,7 +63,7 @@ TSX app adds its entry (`nsh package App.tsx --target …`).
 
 `nsh.json` also holds `rust` and `root` (the app's crates and its root component, [Building with Rust](./rust.md)),
 `theme` and `appearance`, `tailwind` (see [Tailwind](./tailwind.md)), `capabilities` (see
-[Sandbox and capabilities](./sandbox-and-capabilities.md)), `android` (`targetSdk` and `usesCleartextTraffic`, [below](#target-api-level)), `ios` and `macos` (the `Info.plist` keys and entitlements
+[Sandbox and capabilities](./sandbox-and-capabilities.md)), `android` (`targetSdk`, `usesCleartextTraffic` and `permissions`, [below](#target-api-level)), `ios` and `macos` (the `Info.plist` keys and entitlements
 of their packages, [below](#infoplist-keys-and-entitlements); `macos.activationPolicy`, a [menu bar app](./macos.md#menu-bar-apps)) and `updater`, which makes desktop packages update themselves
 (see [App Updates](./app-updates.md)) and every native package take [OTA updates](./ota-updates.md); [Project structure](./project-structure.md#nshjson) lists
 every key. A key or value NSH cannot read is reported as a warning and left out, so an app written for a newer NSH
@@ -200,6 +200,24 @@ Packaged apps make requests over HTTPS. For servers without TLS, such as one on 
 ```
 
 Development builds (`nsh run --target android`) always allow plain HTTP: they load the app from the dev server over it.
+
+### Permissions
+
+The manifest declares the permissions NSH's own features need: `INTERNET`, `POST_NOTIFICATIONS` for
+[notifications](./sandbox-and-capabilities.md#notifications), `RECORD_AUDIO` and `CAMERA` for a web view's `media`. `android.permissions` adds
+others, for code of the app or an extension that calls Android itself: a bare name is one of Android's
+(`android.permission.<NAME>`), a dotted one is written as it is.
+
+```json
+{
+  "android": { "permissions": ["ACCESS_NETWORK_STATE", "com.example.permission.READ_ORDERS"] }
+}
+```
+
+A normal permission such as `ACCESS_NETWORK_STATE` is granted when the app is installed. A runtime permission
+(`ACCESS_FINE_LOCATION`, say) is only declared: the app's own code still asks the user for it. The TSX development
+host (`nsh run --target android` of a TSX app) declares none of these; a Rust app's `nsh run` builds its package and
+declares them.
 
 ### Google Play: App Bundles
 
@@ -361,7 +379,7 @@ Give one square PNG, ideally 1024×1024, in `nsh.json` (`"icon": "icon.png"`) or
 
 - **iOS:** compiled by Xcode's `actool` into the app's asset catalog (`Assets.car`), which derives every size iOS
   needs.
-- **Android:** resized to 192×192 and used as the launcher icon (`mipmap-xxxhdpi`).
+- **Android:** resized to 192×192 and used as the launcher icon (`mipmap-xxxhdpi`); see adaptive icons below.
 - **macOS:** converted by `sips` to `AppIcon.icns`. `nsh run --target macos` and `nsh test --target macos` show the
   PNG in the Dock and the app switcher.
 - **Linux:** copied as `<id>.png`, which the `.desktop` file names as its `Icon`.
@@ -384,6 +402,29 @@ Windows, Linux and Android fill it. Give `icon` an object to use a PNG per platf
   }
 }
 ```
+
+`icon.android` also takes an adaptive icon, whose layers the launcher masks to its own shape (circle, squircle, ...).
+Each layer is 108×108dp; the inner 72×72dp appears within the mask, and the outer 18dp on each side is left for the
+launcher's visual effects. Keep the artwork within the central circle of 66dp: about 61% of the width, 264 pixels of a
+432-pixel layer.
+
+```json
+{
+  "icon": {
+    "android": {
+      "foreground": "icon-foreground.png",
+      "background": "#ffffff",
+      "monochrome": "icon-monochrome.png"
+    }
+  }
+}
+```
+
+- `foreground`: a square PNG with a transparent background, ideally 432×432 or larger.
+- `background`: a color (`"#rrggbb"`, `"#rrggbbaa"`) or a square PNG.
+- `monochrome` (optional): the artwork in one color on transparent, which Android 13 and later tint for themed icons.
+
+Only `icon.android` takes this form.
 
 `--icon` replaces it for the target being packaged.
 
@@ -413,6 +454,24 @@ middle of the screen, the same in both appearances or one for each:
 Both are compiled into the app's asset catalog with its icon and named in `UILaunchScreen`, which the app no longer
 sets in `ios.infoPlist`. A launch screen that matches the app's first frame (its background, the same image in the
 same place) makes the start look seamless. `appearance` picks which of the two the system shows.
+
+On Android, `android.launchScreen` takes the same keys. The package gives the app a theme whose window background is
+`background`, so the window matches the app's first frame from the tap on the icon on, and stays behind it. On Android
+12 and later the system splash screen also uses `background` (behind the icon too), with `image` in the middle at the
+same size as on iOS (a 288×288 PNG is 96×96 dp). Without `image` the splash screen shows the launcher icon. An app
+that targets an API level below 31 has no splash screen to show `image` in, though the file is still checked. The dark
+values apply in the system's dark mode, and `appearance` set to `light` or `dark` keeps that one.
+
+```json
+{
+  "android": {
+    "launchScreen": {
+      "background": { "light": "#ffffff", "dark": "#131312" },
+      "image": { "light": "launch.png", "dark": "launch-dark.png" }
+    }
+  }
+}
+```
 
 ## Camera, Bluetooth and other hardware
 

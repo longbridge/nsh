@@ -28,7 +28,6 @@ use nsh_base::rich_editor::{
 };
 use nsh_core::{
     PasteEvent, PayloadValue, Size,
-    element::Root,
     platform::{Idiom, Os},
     prelude::*,
 };
@@ -199,8 +198,10 @@ fn start_session(
         viewport: Size::new(px(800.0), px(900.0)),
         // Made in the engine, so its keymaps are the platform's the engine
         // says, not the machine's.
-        ..EngineConfig::new(Root::new::<Harness>(move || HarnessProps {
-            session: Some(make()),
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>(move || {
+            HarnessProps {
+                session: Some(make()),
+            }
         }))
     };
     config.environment.os = os;
@@ -407,8 +408,10 @@ fn a_link_marks_hint_shows_its_destination_and_leaves_editing_alone() {
 fn a_link_mark_shows_no_hint_on_a_phone() {
     let mut config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
-        ..EngineConfig::new(Root::new::<Harness>(|| HarnessProps {
-            session: Some(session(linked_doc())),
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>(|| {
+            HarnessProps {
+                session: Some(session(linked_doc())),
+            }
         }))
     };
     config.environment.os = Os::Ios;
@@ -503,11 +506,13 @@ fn list_items_show_their_markers() {
 fn a_terminals_markers_are_in_flow_their_numbers_right_aligned() {
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(900.0)),
-        ..EngineConfig::new(Root::new::<Harness>(|| HarnessProps {
-            session: Some(session(json!({"type": "doc", "content": [
-                {"type": "bulletList", "content": [item("one", None)]},
-                {"type": "orderedList", "attrs": {"start": 9}, "content": [item("nine", None), item("ten", None)]},
-            ]}))),
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>(|| {
+            HarnessProps {
+                session: Some(session(json!({"type": "doc", "content": [
+                    {"type": "bulletList", "content": [item("one", None)]},
+                    {"type": "orderedList", "attrs": {"start": 9}, "content": [item("nine", None), item("ten", None)]},
+                ]}))),
+            }
         }))
     };
     config.environment.os = Os::Linux;
@@ -527,14 +532,16 @@ fn a_terminals_quote_has_a_bar_and_its_rule_is_a_row_of_lines() {
     let started = |idiom: Idiom| {
         let mut config = EngineConfig {
             viewport: Size::new(px(800.0), px(900.0)),
-            ..EngineConfig::new(Root::new::<Harness>(|| HarnessProps {
-                session: Some(session(json!({"type": "doc", "content": [
-                    {"type": "blockquote", "content": [
-                        {"type": "paragraph", "content": [{"type": "text", "text": "Quoted"}]},
-                    ]},
-                    {"type": "horizontalRule"},
-                    {"type": "paragraph", "content": [{"type": "text", "text": "After"}]},
-                ]}))),
+            ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>(|| {
+                HarnessProps {
+                    session: Some(session(json!({"type": "doc", "content": [
+                        {"type": "blockquote", "content": [
+                            {"type": "paragraph", "content": [{"type": "text", "text": "Quoted"}]},
+                        ]},
+                        {"type": "horizontalRule"},
+                        {"type": "paragraph", "content": [{"type": "text", "text": "After"}]},
+                    ]}))),
+                }
             }))
         };
         config.environment.os = Os::Linux;
@@ -561,10 +568,12 @@ fn a_terminal_draws_no_caret_of_its_own() {
     let started = |idiom: Idiom| {
         let mut config = EngineConfig {
             viewport: Size::new(px(800.0), px(900.0)),
-            ..EngineConfig::new(Root::new::<Harness>(|| HarnessProps {
-                session: Some(session(json!({"type": "doc", "content": [
-                    {"type": "paragraph", "content": [{"type": "text", "text": "Hi"}]},
-                ]}))),
+            ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>(|| {
+                HarnessProps {
+                    session: Some(session(json!({"type": "doc", "content": [
+                        {"type": "paragraph", "content": [{"type": "text", "text": "Hi"}]},
+                    ]}))),
+                }
             }))
         };
         config.environment.os = Os::Linux;

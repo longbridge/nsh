@@ -440,6 +440,11 @@ impl Mounter {
                     crate::text_input::set_selection(view, *start, *end);
                 }
             }
+            Command::ClearSelection => {
+                if let Some(view) = view {
+                    crate::selectable_view::clear_in(view);
+                }
+            }
             // Not carried out on this platform yet: the app's paste is lost,
             // so say so.
             Command::InsertText(_) => {

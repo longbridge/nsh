@@ -39,6 +39,7 @@ fn app() -> impl IntoElement {
 
 ```tsx tabs
 import { List, mount, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
 
 const contacts = Array.from({ length: 1000 }, (_, i) => ({ id: i, name: `Contact ${i + 1}` }));
 
@@ -56,7 +57,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 In TSX, `List` is generic: `List<T>` checks that `each` and the row function agree on the item type, which TypeScript

@@ -201,6 +201,8 @@ public class NshView extends FrameLayout {
         super(context);
         density = getResources().getDisplayMetrics().density;
         TextLayouts.cacheDir = context.getCacheDir();
+        // Rust code's permission requests ask through the activity in front.
+        Permissions.track(context);
         mounter = new Mounter(this, new Images(this::readAsset));
         root = mounter.root;
         addView(root, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
@@ -294,6 +296,14 @@ public class NshView extends FrameLayout {
     /** Runs the apps loaded from now on as apps on their own, without limits (nsh's own activities). */
     void useStandaloneLimits() {
         Native.setStandaloneLimits(handle);
+    }
+
+    /**
+     * The activity's system bars are this app's (an app on its own): their default icons follow the app's
+     * appearance, not only the system's. An embedding host keeps its bars unless the app asks for the status bar.
+     */
+    void ownSystemBars() {
+        mounter.ownsSystemBars = true;
     }
 
     /**

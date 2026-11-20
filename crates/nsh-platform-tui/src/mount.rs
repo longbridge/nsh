@@ -14,6 +14,10 @@ pub(crate) struct Mounter {
     pub(crate) components: HashMap<String, ComponentFactory>,
     pub(crate) appearance: Option<Appearance>,
     pub(crate) exit: bool,
+    /// The last input was the pointer's (a press): the focus it moved
+    /// to a control shows no mark, as CSS's `:focus-visible`; the next
+    /// key shows it again.
+    pub(crate) pointer_focus: bool,
     /// The app turned the performance line on or off
     /// (`setFpsEnabled`), for the app to apply.
     pub(crate) perf_monitor: Option<bool>,
@@ -25,6 +29,8 @@ pub(crate) struct Mounter {
     pub(crate) pending_modals: Vec<NodeId>,
     pub(crate) back_requests: usize,
     pub(crate) focus_requests: Vec<(NodeId, bool)>,
+    /// The views `ref.clearSelection()` was called on.
+    pub(crate) clear_selection_requests: Vec<NodeId>,
     /// The system dialogs shown (`AlertDialog`), oldest first.
     pub(crate) dialogs: crate::dialog::Dialogs,
     /// The context menu open (`Menu.popup`), and where the pointer last was.
@@ -43,6 +49,8 @@ pub(crate) struct Mounter {
     pub(crate) spans: HashMap<NodeId, crate::keyboard::Span>,
     /// The link that has the keyboard focus, which its text shows.
     pub(crate) focused_span: Option<NodeId>,
+    /// Where image views load and how the terminal shows them.
+    pub(crate) images: crate::image::Loader,
     unhandled: HashSet<Discriminant<MountItem>>,
     unsupported: HashSet<String>,
 }
@@ -56,6 +64,7 @@ impl Default for Mounter {
             components: HashMap::new(),
             appearance: None,
             exit: false,
+            pointer_focus: false,
             perf_monitor: None,
             keymap: Default::default(),
             scrolled: Vec::new(),
@@ -65,11 +74,13 @@ impl Default for Mounter {
             pending_modals: Vec::new(),
             back_requests: 0,
             focus_requests: Vec::new(),
+            clear_selection_requests: Vec::new(),
             scroll_bars: Vec::new(),
             text_cells: Vec::new(),
             links: Default::default(),
             spans: HashMap::new(),
             focused_span: None,
+            images: Default::default(),
             dialogs: Default::default(),
             menus: Default::default(),
             unhandled: HashSet::new(),
@@ -93,6 +104,19 @@ impl Mounter {
 
     pub(crate) fn get_mut(&mut self, id: NodeId) -> Option<&mut NshView> {
         self.views.get_mut(id as usize)?.as_mut()
+    }
+
+    /// Whether `id` is `scope` or inside it.
+    pub(crate) fn within(&self, mut id: NodeId, scope: NodeId) -> bool {
+        loop {
+            if id == scope {
+                return true;
+            }
+            match self.get(id).and_then(|v| v.parent) {
+                Some(parent) => id = parent,
+                None => return false,
+            }
+        }
     }
 
     fn children_changed(&mut self, parent: NodeId) {
@@ -133,6 +157,7 @@ impl Mounter {
         self.animator = Default::default();
         self.responder = None;
         self.focus_requests.clear();
+        self.clear_selection_requests.clear();
         self.scroll_bars.clear();
         self.dialogs.clear();
         self.menus.reset();
@@ -180,6 +205,7 @@ impl Mounter {
                         ViewKind::View
                             | ViewKind::Text
                             | ViewKind::Canvas
+                            | ViewKind::Image
                             | ViewKind::Native
                             | ViewKind::Input
                             | ViewKind::Scroll
@@ -314,6 +340,10 @@ impl Mounter {
                     id,
                     command: Command::Blur,
                 } => self.focus_requests.push((id, false)),
+                MountItem::Command {
+                    id,
+                    command: Command::ClearSelection,
+                } => self.clear_selection_requests.push(id),
                 MountItem::TrackStates { id, states } => {
                     if let Some(view) = self.get_mut(id) {
                         view.tracked = states;
@@ -367,9 +397,16 @@ impl Mounter {
                         scroll.mirrored = mirrored;
                     }
                 }
-                // Pictures are content the terminal shows as their label
-                // (`render.rs`).
-                MountItem::Image { .. } => {}
+                MountItem::Image {
+                    id,
+                    source,
+                    resize_mode,
+                    options,
+                } => {
+                    if let Some(image) = self.get_mut(id).and_then(|view| view.image.as_mut()) {
+                        image.set(source, resize_mode, options.position);
+                    }
+                }
                 MountItem::ScrollContent { id, size } => {
                     if let Some(scroll) = self.get_mut(id).and_then(|view| view.scroll.as_mut()) {
                         scroll.content = size;
@@ -381,6 +418,13 @@ impl Mounter {
                 MountItem::ScrollBehavior { id, behavior } => {
                     if let Some(scroll) = self.get_mut(id).and_then(|view| view.scroll.as_mut()) {
                         scroll.behavior = *behavior;
+                    }
+                }
+                // Pinned at every frame (`render.rs`): a cell no longer in
+                // the set is drawn at its frame again.
+                MountItem::StickyCells { id, cells } => {
+                    if let Some(scroll) = self.get_mut(id).and_then(|view| view.scroll.as_mut()) {
+                        scroll.sticky = cells;
                     }
                 }
                 MountItem::ScrollBy { id, dx, dy } => {
@@ -479,6 +523,10 @@ impl Mounter {
                     command: Command::Tokens(_),
                     ..
                 } => {}
+                MountItem::Command {
+                    command: Command::ImageInfo { id, uri },
+                    ..
+                } => self.images.info(id, &uri),
                 MountItem::Command {
                     command: Command::Dialog(dialog),
                     ..

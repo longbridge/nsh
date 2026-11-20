@@ -36,6 +36,7 @@ fn app() -> impl IntoElement {
 
 ```tsx tabs
 import { mount, signal, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
 
 function App() {
   const count = signal(0);
@@ -49,7 +50,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 在 Rust 中，原语是 `nsh_core::prelude` 中的函数（`view()`、`text(..)`、`image(..)`），基础组件来自 `nsh_base` crate。样式是有类型的方法（`.flex_1()`、`.gap_3()`、`.px(px(20.0))`、`.bg(..)`），状态样式接收一个闭包（`.active(|s| s.opacity(0.6))`），监听器是接收事件的闭包（`.on_press(move || ..)`、`.on_change(move |text: &str| ..)`），`.child(..)` 添加子元素。一段 UI 就是一个返回 `impl IntoElement` 的普通函数，只运行一次；它在闭包里读取的 signal（`text(move || ..)`、`.bg(move || ..)`）会更新所绑定的内容。参见[用 Rust 构建](../docs/rust.md)。
@@ -585,7 +590,7 @@ view()
 | `measure()` | `measure()` | `ViewRef` | [视图的位置](../docs/touch-and-gestures.md)。 |
 | `reveal({ vertical?, horizontal?, animated? })` | `reveal(options)` | `ViewRef` | [滚动视图外围的滚动视图](../docs/scrolling.md#把视图滚到可见处)，让它显示出来。 |
 | `setSelection(start, end?)` | `set_selection(start, end)` | `InputRef` | 选中 `start..end`（UTF-16 单位）；省略 `end` 时为光标。 |
-| `insertText(text)` | `insert_text(text)` | `InputRef` | 以用户编辑的方式用 `text` 替换选区，是撤销历史中的一步（Linux、Web、无头测试）。 |
+| `insertText(text)` | `insert_text(text)` | `InputRef` | 以用户编辑的方式用 `text` 替换选区，是撤销历史中的一步（iOS、macOS、Linux、Web、无头测试）。 |
 | `scrollTo({ x?, y?, animated? })` | `scroll_to(point, animated)` | `ScrollRef`、`ListRef` | 滚动到某个偏移量。 |
 | `zoomTo({ scale, x?, y?, animated? })` | `zoom_to(scale, center, animated)` | `ScrollRef`（可缩放的 `<Scroll>`） | 围绕内容中的某点缩放到 `scale`。 |
 | `scrollToOffset({ offset, animated? })` | `scroll_to_offset(offset, animated)` | `ListRef` | 沿列表方向滚动到某个偏移量。 |

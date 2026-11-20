@@ -10,6 +10,9 @@ use std::{
 };
 
 use anyhow::{Context as _, bail};
+use serde::Deserialize;
+
+use crate::apple::{Color, LaunchScreen, Themed};
 
 /// Minimum Android version (API 26, Android 8.0), as the runtime is built.
 pub(crate) const MIN_SDK: u32 = 26;
@@ -212,6 +215,9 @@ pub(crate) struct Apk<'a> {
     /// (`webview.media`): `RECORD_AUDIO` and `CAMERA` are declared.
     pub(crate) microphone: bool,
     pub(crate) camera: bool,
+    /// The permissions the app declares itself (nsh.json
+    /// `android.permissions`), in full: declared after NSH's, each once.
+    pub(crate) permissions: &'a [String],
     /// URL schemes that open the app (nsh.json `schemes`): one
     /// `VIEW` intent filter.
     pub(crate) schemes: &'a [String],
@@ -221,13 +227,19 @@ pub(crate) struct Apk<'a> {
     /// `nsh.json` `"appearance": "dark"`: the window's theme is dark from
     /// the start (no light flash before the first frame).
     pub(crate) dark: bool,
+    /// `nsh.json` `"appearance"` is `"light"` or `"dark"`: the launch screen
+    /// shows that appearance's values, not the system's mode's.
+    pub(crate) fixed_appearance: bool,
     /// `classes.dex` and `lib/<abi>/libnsh.so`.
     pub(crate) runtime: &'a Path,
     /// The ABIs whose `libnsh.so` goes in, each of which the runtime must
     /// have (empty: every one it has).
     pub(crate) abis: &'a [String],
-    /// Launcher icon (square PNG).
-    pub(crate) icon: Option<&'a Path>,
+    /// Launcher icon.
+    pub(crate) icon: Option<Icon<'a>>,
+    /// `nsh.json` `android.launchScreen`: the window's background and the
+    /// splash screen's color and image ([`launch_resources`]).
+    pub(crate) launch_screen: Option<&'a LaunchScreen>,
     /// Files under `assets/` in the APK: (path in the APK, contents).
     pub(crate) assets: Vec<(String, Vec<u8>)>,
     /// Notification sounds, raw resources: (resource name, file).
@@ -267,6 +279,165 @@ pub(crate) enum Signing {
     },
 }
 
+/// The launcher icon of an APK.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Icon<'a> {
+    /// One square PNG, which the launcher shows as it is (inside its own
+    /// shape, on a plate of its own when the PNG fills the square).
+    Image(&'a Path),
+    /// Layers that the launcher masks to its own shape.
+    Adaptive(&'a AdaptiveIcon),
+}
+
+/// `nsh.json` `icon.android` as an object: an adaptive icon, layers of
+/// 108×108dp. The middle 72dp is the masked viewport, which the launcher
+/// cuts to its shape (circle, squircle, ...); the outer 18dp on each side
+/// is room for its visual effects (moving the layers apart when touched).
+/// Artwork stays within the central circle of 66dp.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub(crate) struct AdaptiveIcon {
+    /// A square PNG with a transparent background: the artwork, within
+    /// the central circle of 66dp.
+    pub(crate) foreground: PathBuf,
+    /// What the foreground is drawn on.
+    pub(crate) background: IconBackground,
+    /// A square PNG, one color on transparent: the shape the system tints
+    /// for themed icons (Android 13 and later). Without it, themed
+    /// launchers show the colored icon.
+    pub(crate) monochrome: Option<PathBuf>,
+    /// The keys of the object it does not know (`nsh.json` warns of them).
+    #[serde(skip)]
+    pub(crate) unknown: Vec<String>,
+}
+
+impl AdaptiveIcon {
+    /// The same, with its PNGs relative to `dir`.
+    pub(crate) fn relative_to(self, dir: &Path) -> Self {
+        AdaptiveIcon {
+            foreground: dir.join(self.foreground),
+            background: match self.background {
+                IconBackground::Image(path) => IconBackground::Image(dir.join(path)),
+                color => color,
+            },
+            monochrome: self.monochrome.map(|path| dir.join(path)),
+            unknown: self.unknown,
+        }
+    }
+}
+
+/// An adaptive icon's background: `"#rrggbb"` / `"#rrggbbaa"`, or a
+/// square PNG.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "String")]
+pub(crate) enum IconBackground {
+    Color(Color),
+    Image(PathBuf),
+}
+
+impl TryFrom<String> for IconBackground {
+    type Error = String;
+
+    fn try_from(text: String) -> Result<Self, String> {
+        if text.starts_with('#') {
+            Color::try_from(text).map(IconBackground::Color)
+        } else {
+            Ok(IconBackground::Image(text.into()))
+        }
+    }
+}
+
+/// The densities launcher icons are drawn for, with the pixels of 1dp.
+const DENSITIES: [(&str, f32); 5] = [
+    ("mdpi", 1.0),
+    ("hdpi", 1.5),
+    ("xhdpi", 2.0),
+    ("xxhdpi", 3.0),
+    ("xxxhdpi", 4.0),
+];
+
+/// An adaptive icon's canvas, in dp.
+const ADAPTIVE_CANVAS_DP: f32 = 108.0;
+
+/// Writes the launcher icon's resources under `res` and returns their
+/// files, to be compiled by `aapt2`. One PNG goes to
+/// `mipmap-xxxhdpi/ic_launcher.png`; an adaptive icon is
+/// `mipmap-anydpi-v26/ic_launcher.xml` (and `ic_launcher_round.xml`, the
+/// same) naming its layers, each a PNG per density (a color background: a
+/// color resource).
+fn write_icon(icon: Icon<'_>, res: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    // aapt2 parses the file's path itself: the components joined in one
+    // go (`join("res/mipmap-xxxhdpi")`) leave a mix of `/` and `\` on
+    // Windows, which it calls no valid file path. Joined by component
+    // the path comes out uniform.
+    let mut files = Vec::new();
+    let adaptive = match icon {
+        Icon::Image(image) => {
+            let dir = res.join("mipmap-xxxhdpi");
+            fs::create_dir_all(&dir)?;
+            let path = dir.join("ic_launcher.png");
+            resize_png(image, &path, 192)?;
+            files.push(path);
+            return Ok(files);
+        }
+        Icon::Adaptive(adaptive) => adaptive,
+    };
+    let mut layers = vec![("ic_launcher_foreground", &adaptive.foreground)];
+    let background = match &adaptive.background {
+        IconBackground::Image(image) => {
+            layers.push(("ic_launcher_background", image));
+            "@mipmap/ic_launcher_background"
+        }
+        IconBackground::Color(Color([r, g, b, a])) => {
+            let dir = res.join("values");
+            fs::create_dir_all(&dir)?;
+            let path = dir.join("ic_launcher_background.xml");
+            fs::write(
+                &path,
+                format!(
+                    "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<resources>\n    \
+                     <color name=\"ic_launcher_background\">#{a:02X}{r:02X}{g:02X}{b:02X}</color>\n\
+                     </resources>\n"
+                ),
+            )?;
+            files.push(path);
+            "@color/ic_launcher_background"
+        }
+    };
+    if let Some(monochrome) = &adaptive.monochrome {
+        layers.push(("ic_launcher_monochrome", monochrome));
+    }
+    for (density, scale) in DENSITIES {
+        let dir = res.join(format!("mipmap-{density}"));
+        fs::create_dir_all(&dir)?;
+        let size = (ADAPTIVE_CANVAS_DP * scale).round() as u32;
+        for (name, source) in &layers {
+            let path = dir.join(format!("{name}.png"));
+            resize_png(source, &path, size)?;
+            files.push(path);
+        }
+    }
+    let monochrome = if adaptive.monochrome.is_some() {
+        "\n    <monochrome android:drawable=\"@mipmap/ic_launcher_monochrome\" />"
+    } else {
+        ""
+    };
+    let xml = format!(
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n\
+         <adaptive-icon xmlns:android=\"http://schemas.android.com/apk/res/android\">\n    \
+         <background android:drawable=\"{background}\" />\n    \
+         <foreground android:drawable=\"@mipmap/ic_launcher_foreground\" />{monochrome}\n\
+         </adaptive-icon>\n"
+    );
+    let dir = res.join("mipmap-anydpi-v26");
+    fs::create_dir_all(&dir)?;
+    for name in ["ic_launcher", "ic_launcher_round"] {
+        let path = dir.join(format!("{name}.xml"));
+        fs::write(&path, &xml)?;
+        files.push(path);
+    }
+    Ok(files)
+}
+
 pub(crate) fn build_apk(sdk: &Sdk, apk: &Apk<'_>, out: &Path) -> anyhow::Result<()> {
     build(sdk, apk, Format::Apk, out)
 }
@@ -282,27 +453,49 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
     }
     fs::create_dir_all(&work)?;
 
-    // Resources: only the launcher icon.
+    // Resources: the launcher icon, and the launch screen's theme below.
     let mut flat = Vec::new();
     if let Some(icon) = apk.icon {
-        // aapt2 parses the file's path itself: the components joined in one
-        // go (`join("res/mipmap-xxxhdpi")`) leave a mix of `/` and `\` on
-        // Windows, which it calls no valid file path. Joined by component
-        // the path comes out uniform.
-        let res = work.join("res").join("mipmap-xxxhdpi");
-        fs::create_dir_all(&res)?;
-        let icon_path = res.join("ic_launcher.png");
-        resize_png(icon, &icon_path, 192)?;
         let compiled = work.join("compiled");
         fs::create_dir_all(&compiled)?;
-        run(Command::new(sdk.tool("aapt2"))
-            .arg("compile")
-            .arg(&icon_path)
-            .arg("-o")
-            .arg(&compiled))?;
+        for file in write_icon(icon, &work.join("res"))? {
+            run(Command::new(sdk.tool("aapt2"))
+                .arg("compile")
+                .arg(&file)
+                .arg("-o")
+                .arg(&compiled))?;
+        }
         for entry in fs::read_dir(&compiled)? {
             flat.push(entry?.path());
         }
+    }
+
+    // The launch screen: the theme the manifest names and what it uses.
+    if let Some(screen) = apk.launch_screen {
+        let res = work.join("res");
+        let mut files = Vec::new();
+        for file in launch_resources(screen, apk.dark, apk.fixed_appearance, apk.target_sdk)? {
+            let dir = res.join(file.dir);
+            fs::create_dir_all(&dir)?;
+            let path = dir.join(&file.name);
+            match file.contents {
+                ResContents::Text(text) => fs::write(&path, text)?,
+                ResContents::Copy(source) => {
+                    fs::copy(&source, &path).map(drop).with_context(|| {
+                        format!(
+                            "copy {} (nsh.json android.launchScreen.image)",
+                            source.display()
+                        )
+                    })?
+                }
+            }
+            files.push(path);
+        }
+        flat.extend(compile_resources(
+            sdk,
+            &files,
+            &work.join("compiled-launch"),
+        )?);
     }
 
     // Notification sounds: raw resources, which a channel's sound names.
@@ -374,11 +567,223 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
     Ok(())
 }
 
-fn manifest_xml(apk: &Apk<'_>) -> String {
-    let icon = if apk.icon.is_some() {
-        r#" android:icon="@mipmap/ic_launcher""#
+/// The theme of the application: the launch theme ([`LAUNCH_THEME`]) when
+/// the app has a launch screen, the platform's Material theme otherwise.
+fn theme(apk: &Apk<'_>) -> String {
+    if apk.launch_screen.is_some() {
+        format!("@style/{LAUNCH_THEME}")
     } else {
-        ""
+        material_theme(apk.dark).to_owned()
+    }
+}
+
+/// The platform theme apps start in: dark with `"appearance": "dark"`.
+fn material_theme(dark: bool) -> &'static str {
+    if dark {
+        "@android:style/Theme.Material.NoActionBar"
+    } else {
+        "@android:style/Theme.Material.Light.NoActionBar"
+    }
+}
+
+/// The theme a launch screen generates, which the manifest names.
+const LAUNCH_THEME: &str = "NshLaunch";
+/// The splash screen's icon area, in dp. The image's insets are fractions
+/// of it, so they hold whatever size the system draws the icon at.
+const SPLASH_ICON_DP: f32 = 288.0;
+
+/// A resource file a package generates: `res/<dir>/<name>`.
+struct ResFile {
+    dir: &'static str,
+    name: String,
+    contents: ResContents,
+}
+
+enum ResContents {
+    /// An XML file written as it is.
+    Text(String),
+    /// A file copied from the app (an image).
+    Copy(PathBuf),
+}
+
+/// The resources of a launch screen: a theme ([`LAUNCH_THEME`], on the
+/// platform's Material theme) whose window background is the screen's
+/// color, so the window looks like the app's first frame from the tap on
+/// the icon until that frame and behind it; and on Android 12+, the system
+/// splash screen in the same color with the screen's image in the middle
+/// (drawn for 3x screens as on iOS: a 288 px PNG is 96 dp). Without an
+/// image the splash screen shows the launcher icon. The image must be a
+/// PNG, checked even when the app targets a platform before Android 12,
+/// which has no splash screen to show it. The dark values go
+/// to the `-night` qualifiers, which the system picks in dark mode; an app
+/// of one appearance (`fixed`, dark or not) has only that appearance's.
+fn launch_resources(
+    screen: &LaunchScreen,
+    dark: bool,
+    fixed: bool,
+    target_sdk: u32,
+) -> anyhow::Result<Vec<ResFile>> {
+    // The default value and the night one.
+    fn pick<T>(themed: &Themed<T>, dark: bool, fixed: bool) -> (&T, Option<&T>) {
+        match themed.variants() {
+            (light, Some(night)) if fixed => (if dark { night } else { light }, None),
+            variants => variants,
+        }
+    }
+    let xml = |body: String| {
+        ResContents::Text(format!(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<resources>\n{body}</resources>\n"
+        ))
+    };
+    let style = |items: &[(&str, &str)]| {
+        let items: String = items
+            .iter()
+            .map(|(name, value)| format!("        <item name=\"android:{name}\">{value}</item>\n"))
+            .collect();
+        format!(
+            "    <style name=\"{LAUNCH_THEME}\" parent=\"{}\">\n{items}    </style>\n",
+            material_theme(dark)
+        )
+    };
+    let color = |color: &Color| {
+        let [r, g, b, a] = color.0;
+        format!("    <color name=\"nsh_launch_background\">#{a:02x}{r:02x}{g:02x}{b:02x}</color>\n")
+    };
+    let mut files = Vec::new();
+    let background = screen
+        .background
+        .as_ref()
+        .map(|background| pick(background, dark, fixed));
+    let window = [("windowBackground", "@color/nsh_launch_background")];
+    let window: &[(&str, &str)] = if background.is_some() { &window } else { &[] };
+    files.push(ResFile {
+        dir: "values",
+        name: "nsh_launch.xml".into(),
+        contents: xml(format!(
+            "{}{}",
+            background
+                .map(|(light, _)| color(light))
+                .unwrap_or_default(),
+            style(window)
+        )),
+    });
+    if let Some((_, Some(dark))) = background {
+        files.push(ResFile {
+            dir: "values-night",
+            name: "nsh_launch.xml".into(),
+            contents: xml(color(dark)),
+        });
+    }
+    // The image for each appearance (the night one only when it differs)
+    // and its size in pixels.
+    let mut images = Vec::new();
+    if let Some(image) = &screen.image {
+        let (day, night) = pick(image, dark, fixed);
+        for (path, png_dir, xml_dir) in [
+            (Some(day), "drawable-nodpi", "drawable"),
+            (night, "drawable-night-nodpi", "drawable-night"),
+        ] {
+            let Some(path) = path else { continue };
+            images.push((path, png_size(path)?, png_dir, xml_dir));
+        }
+    }
+    // The splash screen's attributes are Android 12's (API 31): an app that
+    // compiles against an older platform keeps its window background only.
+    if target_sdk < 31 {
+        return Ok(files);
+    }
+    let mut splash = window.to_vec();
+    if background.is_some() {
+        splash.push((
+            "windowSplashScreenBackground",
+            "@color/nsh_launch_background",
+        ));
+    }
+    if !images.is_empty() {
+        splash.push(("windowSplashScreenAnimatedIcon", "@drawable/nsh_launch"));
+    }
+    for (path, (width, height), png_dir, xml_dir) in images {
+        // Centered at a third of its pixels in dp: each side insets the
+        // rest of the icon area, as a fraction of it.
+        let inset = |px: u32| {
+            let fraction = ((1.0 - px as f32 / 3.0 / SPLASH_ICON_DP) / 2.0).max(0.0);
+            format!("{:.3}%", fraction * 100.0)
+        };
+        files.push(ResFile {
+            dir: png_dir,
+            name: "nsh_launch_image.png".into(),
+            contents: ResContents::Copy(path.clone()),
+        });
+        files.push(ResFile {
+            dir: xml_dir,
+            name: "nsh_launch.xml".into(),
+            contents: ResContents::Text(format!(
+                r#"<?xml version="1.0" encoding="utf-8"?>
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/nsh_launch_image"
+    android:insetLeft="{x}" android:insetRight="{x}"
+    android:insetTop="{y}" android:insetBottom="{y}" />
+"#,
+                x = inset(width),
+                y = inset(height),
+            )),
+        });
+    }
+    files.push(ResFile {
+        dir: "values-v31",
+        name: "nsh_launch.xml".into(),
+        contents: xml(style(&splash)),
+    });
+    Ok(files)
+}
+
+/// The size of the launch screen's image, which must be a PNG (it is copied
+/// into the package as one).
+fn png_size(path: &Path) -> anyhow::Result<(u32, u32)> {
+    let read = || {
+        format!(
+            "read {} (nsh.json android.launchScreen.image)",
+            path.display()
+        )
+    };
+    let reader = image::ImageReader::open(path)
+        .with_context(read)?
+        .with_guessed_format()
+        .with_context(read)?;
+    if reader.format() != Some(image::ImageFormat::Png) {
+        bail!(
+            "{} is no PNG (nsh.json android.launchScreen.image)",
+            path.display()
+        );
+    }
+    reader.into_dimensions().with_context(read)
+}
+
+/// Compiles resource files (each under `res/<type>/`) with `aapt2` into
+/// `out`, returning what it wrote for `aapt2 link`.
+fn compile_resources(sdk: &Sdk, files: &[PathBuf], out: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    fs::create_dir_all(out)?;
+    for file in files {
+        run(Command::new(sdk.tool("aapt2"))
+            .arg("compile")
+            .arg(file)
+            .arg("-o")
+            .arg(out))?;
+    }
+    let mut flat = Vec::new();
+    for entry in fs::read_dir(out)? {
+        flat.push(entry?.path());
+    }
+    Ok(flat)
+}
+
+fn manifest_xml(apk: &Apk<'_>) -> String {
+    let icon = match apk.icon {
+        Some(Icon::Image(_)) => r#" android:icon="@mipmap/ic_launcher""#,
+        Some(Icon::Adaptive(_)) => {
+            r#" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round""#
+        }
+        None => "",
     };
     let cleartext = if apk.cleartext {
         r#" android:usesCleartextTraffic="true""#
@@ -395,17 +800,25 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
         .replace('&', "&amp;")
         .replace('"', "&quot;")
         .replace('<', "&lt;");
-    let post_notifications = if apk.notifications {
-        "\n    <uses-permission android:name=\"android.permission.POST_NOTIFICATIONS\" />"
-    } else {
-        ""
-    };
-    let media: String = [(apk.microphone, "RECORD_AUDIO"), (apk.camera, "CAMERA")]
+    // NSH's own, then the app's (`android.permissions`), each once.
+    let mut permissions = vec!["android.permission.INTERNET".to_owned()];
+    for (declared, name) in [
+        (apk.notifications, "POST_NOTIFICATIONS"),
+        (apk.microphone, "RECORD_AUDIO"),
+        (apk.camera, "CAMERA"),
+    ] {
+        if declared {
+            permissions.push(format!("android.permission.{name}"));
+        }
+    }
+    for name in apk.permissions {
+        if !permissions.contains(name) {
+            permissions.push(name.clone());
+        }
+    }
+    let permissions: String = permissions
         .iter()
-        .filter(|(declared, _)| *declared)
-        .map(|(_, name)| {
-            format!("\n    <uses-permission android:name=\"android.permission.{name}\" />")
-        })
+        .map(|name| format!("\n    <uses-permission android:name=\"{name}\" />"))
         .collect();
     // A link opens the running app (`onNewIntent`), not another activity in
     // the caller's task.
@@ -428,8 +841,7 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
     };
     format!(
         r#"<?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="{package}">
-    <uses-permission android:name="android.permission.INTERNET" />{post_notifications}{media}
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="{package}">{permissions}
     <!-- Text actions (Translate and the like) the selection menu offers,
         as TextView's: Android 11+ hides other apps' activities otherwise. -->
     <queries>
@@ -442,7 +854,7 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
         android:extractNativeLibs="false"
         android:enableOnBackInvokedCallback="true"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.Material{theme}.NoActionBar">{rust}
+        android:theme="{theme}">{rust}
         <!-- Serves the app's own files to the apps that open them
             (`SystemUi.openPath`): the authority matches what
             `FilesProvider.uriFor` builds. -->
@@ -463,7 +875,7 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
 "#,
         package = apk.package,
         activity = apk.activity,
-        theme = if apk.dark { "" } else { ".Light" },
+        theme = theme(apk),
     )
 }
 
@@ -789,6 +1201,16 @@ pub(crate) fn device_abis(sdk: &Sdk, serial: &str) -> anyhow::Result<Vec<String>
         .collect())
 }
 
+/// The ABI to build an app for device `serial`, whose ABIs are `device`
+/// (preferred first): the first one NSH builds for.
+pub(crate) fn preferred_abi(serial: &str, device: &[String]) -> anyhow::Result<String> {
+    device
+        .iter()
+        .find(|abi| ABIS.contains(&abi.as_str()))
+        .cloned()
+        .with_context(|| format!("{serial} runs none of {}", ABIS.join(", ")))
+}
+
 /// A port of the device forwarded to this machine (`adb reverse`), removed
 /// when dropped, however the command ends (Ctrl-C too: it is
 /// [`ui::Stoppable`] meanwhile): a dev host left on the device would
@@ -845,6 +1267,24 @@ pub(crate) fn adb(sdk: &Sdk, serial: &str, args: &[&str]) -> anyhow::Result<Stri
 
 #[cfg(test)]
 mod tests {
+    /// An app is built for the device's preferred ABI that NSH builds for;
+    /// a device that runs none of them is an error.
+    #[test]
+    fn an_app_is_built_for_the_devices_preferred_abi() {
+        let abi = |list: &[&str]| {
+            let device: Vec<String> = list.iter().map(|abi| abi.to_string()).collect();
+            super::preferred_abi("emulator-5554", &device).ok()
+        };
+        assert_eq!(
+            abi(&["arm64-v8a", "armeabi-v7a", "armeabi"]).as_deref(),
+            Some("arm64-v8a")
+        );
+        assert_eq!(abi(&["x86_64", "arm64-v8a"]).as_deref(), Some("x86_64"));
+        assert_eq!(abi(&["x86", "armeabi-v7a"]).as_deref(), Some("armeabi-v7a"));
+        assert_eq!(abi(&["x86"]), None);
+        assert_eq!(abi(&[]), None);
+    }
+
     fn apk(rust: bool, notifications: bool) -> super::Apk<'static> {
         super::Apk {
             package: "com.example.app",
@@ -858,16 +1298,163 @@ mod tests {
             notifications,
             microphone: false,
             camera: false,
+            permissions: &[],
             schemes: &[],
             rust,
             dark: false,
+            fixed_appearance: false,
             runtime: std::path::Path::new("."),
             abis: &[],
             icon: None,
+            launch_screen: None,
             assets: Vec::new(),
             sounds: Vec::new(),
             signing: super::Signing::Debug,
         }
+    }
+
+    /// A square PNG of `size` pixels in `dir`.
+    fn png(dir: &std::path::Path, name: &str, size: u32) -> std::path::PathBuf {
+        let path = dir.join(name);
+        image::RgbaImage::from_pixel(size, size, image::Rgba([0x1f, 0x1e, 0x1c, 255]))
+            .save(&path)
+            .unwrap();
+        path
+    }
+
+    fn png_size(path: &std::path::Path) -> (u32, u32) {
+        image::image_dimensions(path).unwrap()
+    }
+
+    #[test]
+    fn one_png_stays_the_launcher_icon_as_it_was() {
+        let dir = std::env::temp_dir().join(format!("nsh-android-icon-png-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let icon = png(&dir, "icon.png", 1024);
+        let res = dir.join("res");
+        let files = super::write_icon(super::Icon::Image(&icon), &res).unwrap();
+        let launcher = res.join("mipmap-xxxhdpi").join("ic_launcher.png");
+        assert_eq!(files, std::slice::from_ref(&launcher));
+        assert_eq!(png_size(&launcher), (192, 192));
+        assert!(!res.join("mipmap-anydpi-v26").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn an_adaptive_icon_names_its_layers_drawn_for_each_density() {
+        let dir =
+            std::env::temp_dir().join(format!("nsh-android-icon-adaptive-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let adaptive = super::AdaptiveIcon {
+            foreground: png(&dir, "fg.png", 432),
+            background: super::IconBackground::Color(crate::apple::Color([0xff, 0xff, 0xff, 0xff])),
+            monochrome: Some(png(&dir, "mono.png", 432)),
+            unknown: Vec::new(),
+        };
+        let res = dir.join("res");
+        let files = super::write_icon(super::Icon::Adaptive(&adaptive), &res).unwrap();
+        for (density, size) in [
+            ("mdpi", 108),
+            ("hdpi", 162),
+            ("xhdpi", 216),
+            ("xxhdpi", 324),
+            ("xxxhdpi", 432),
+        ] {
+            for layer in ["ic_launcher_foreground", "ic_launcher_monochrome"] {
+                let path = res
+                    .join(format!("mipmap-{density}"))
+                    .join(format!("{layer}.png"));
+                assert!(files.contains(&path), "{}", path.display());
+                assert_eq!(png_size(&path), (size, size), "{}", path.display());
+            }
+            // A color background is a resource, not a PNG.
+            assert!(
+                !res.join(format!("mipmap-{density}"))
+                    .join("ic_launcher_background.png")
+                    .exists()
+            );
+        }
+        let colors =
+            std::fs::read_to_string(res.join("values").join("ic_launcher_background.xml")).unwrap();
+        assert!(
+            colors.contains(r#"<color name="ic_launcher_background">#FFFFFFFF</color>"#),
+            "{colors}"
+        );
+        let xml =
+            std::fs::read_to_string(res.join("mipmap-anydpi-v26").join("ic_launcher.xml")).unwrap();
+        for layer in [
+            r#"<background android:drawable="@color/ic_launcher_background" />"#,
+            r#"<foreground android:drawable="@mipmap/ic_launcher_foreground" />"#,
+            r#"<monochrome android:drawable="@mipmap/ic_launcher_monochrome" />"#,
+        ] {
+            assert!(xml.contains(layer), "{xml}");
+        }
+        let round =
+            std::fs::read_to_string(res.join("mipmap-anydpi-v26").join("ic_launcher_round.xml"))
+                .unwrap();
+        assert_eq!(round, xml);
+        assert!(!res.join("mipmap-xxxhdpi").join("ic_launcher.png").exists());
+
+        // A PNG background is a layer like the foreground; no monochrome
+        // layer without one.
+        let res = dir.join("res-image");
+        let adaptive = super::AdaptiveIcon {
+            background: super::IconBackground::Image(png(&dir, "bg.png", 432)),
+            monochrome: None,
+            ..adaptive
+        };
+        super::write_icon(super::Icon::Adaptive(&adaptive), &res).unwrap();
+        assert_eq!(
+            png_size(&res.join("mipmap-hdpi").join("ic_launcher_background.png")),
+            (162, 162)
+        );
+        assert!(!res.join("values").exists());
+        assert!(
+            !res.join("mipmap-hdpi")
+                .join("ic_launcher_monochrome.png")
+                .exists()
+        );
+        let xml =
+            std::fs::read_to_string(res.join("mipmap-anydpi-v26").join("ic_launcher.xml")).unwrap();
+        assert!(
+            xml.contains(r#"<background android:drawable="@mipmap/ic_launcher_background" />"#),
+            "{xml}"
+        );
+        assert!(!xml.contains("monochrome"), "{xml}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn only_an_adaptive_icon_declares_a_round_icon() {
+        let adaptive = super::AdaptiveIcon {
+            foreground: "fg.png".into(),
+            background: super::IconBackground::Color(crate::apple::Color([0, 0, 0, 255])),
+            monochrome: None,
+            unknown: Vec::new(),
+        };
+        let manifest = super::manifest_xml(&super::Apk {
+            icon: Some(super::Icon::Adaptive(&adaptive)),
+            ..apk(false, false)
+        });
+        assert!(
+            manifest.contains(r#"android:icon="@mipmap/ic_launcher""#),
+            "{manifest}"
+        );
+        assert!(
+            manifest.contains(r#"android:roundIcon="@mipmap/ic_launcher_round""#),
+            "{manifest}"
+        );
+        let manifest = super::manifest_xml(&super::Apk {
+            icon: Some(super::Icon::Image(std::path::Path::new("icon.png"))),
+            ..apk(false, false)
+        });
+        assert!(
+            manifest.contains(r#"android:icon="@mipmap/ic_launcher""#),
+            "{manifest}"
+        );
+        assert!(!manifest.contains("roundIcon"), "{manifest}");
     }
 
     #[test]
@@ -924,6 +1511,43 @@ mod tests {
     }
 
     #[test]
+    fn an_app_declares_the_permissions_it_lists_once() {
+        let listed = [
+            "android.permission.ACCESS_NETWORK_STATE".to_owned(),
+            "android.permission.POST_NOTIFICATIONS".to_owned(),
+            "com.example.permission.READ".to_owned(),
+            "android.permission.INTERNET".to_owned(),
+        ];
+        let manifest = super::manifest_xml(&super::Apk {
+            permissions: &listed,
+            ..apk(false, true)
+        });
+        let declared = |name: &str| {
+            manifest
+                .matches(&format!("<uses-permission android:name=\"{name}\" />"))
+                .count()
+        };
+        assert_eq!(
+            declared("android.permission.ACCESS_NETWORK_STATE"),
+            1,
+            "{manifest}"
+        );
+        assert_eq!(declared("com.example.permission.READ"), 1, "{manifest}");
+        // NSH's own stay, once, even when the app lists them too.
+        assert_eq!(declared("android.permission.INTERNET"), 1, "{manifest}");
+        assert_eq!(
+            declared("android.permission.POST_NOTIFICATIONS"),
+            1,
+            "{manifest}"
+        );
+        // Permissions go before the application, as Android reads them.
+        let application = manifest.find("<application").unwrap();
+        let at = manifest.find("ACCESS_NETWORK_STATE").unwrap();
+        assert!(at < application, "{manifest}");
+        assert!(!super::manifest_xml(&apk(false, false)).contains("ACCESS_NETWORK_STATE"));
+    }
+
+    #[test]
     fn only_an_app_that_asks_allows_cleartext_traffic() {
         let attribute = r#"android:usesCleartextTraffic="true""#;
         assert!(!super::manifest_xml(&apk(false, false)).contains(attribute));
@@ -935,6 +1559,164 @@ mod tests {
         let activity = manifest.find("<activity").unwrap();
         let at = manifest.find(attribute).expect(&manifest);
         assert!(application < at && at < activity, "{manifest}");
+    }
+
+    fn text(files: &[super::ResFile], dir: &str) -> String {
+        let file = files
+            .iter()
+            .find(|file| file.dir == dir)
+            .unwrap_or_else(|| panic!("no res/{dir}"));
+        match &file.contents {
+            super::ResContents::Text(text) => text.clone(),
+            super::ResContents::Copy(path) => panic!("res/{dir} copies {}", path.display()),
+        }
+    }
+
+    #[test]
+    fn a_launch_screen_names_its_theme_in_the_manifest() {
+        let screen = crate::apple::LaunchScreen::default();
+        let manifest = super::manifest_xml(&super::Apk {
+            launch_screen: Some(&screen),
+            ..apk(false, false)
+        });
+        assert!(
+            manifest.contains(r#"android:theme="@style/NshLaunch""#),
+            "{manifest}"
+        );
+        let manifest = super::manifest_xml(&apk(false, false));
+        assert!(
+            manifest.contains(r#"android:theme="@android:style/Theme.Material.Light.NoActionBar""#),
+            "{manifest}"
+        );
+    }
+
+    /// The window background and the splash screen take the screen's color,
+    /// the dark one in night mode; the splash icon's own background is the
+    /// same color, so it shows no plate around the icon.
+    #[test]
+    fn a_launch_screen_colors_the_window_and_the_splash_screen() {
+        use crate::apple::{Color, LaunchScreen, Themed};
+        let screen = LaunchScreen {
+            background: Some(Themed::Each {
+                light: Color([0xff, 0xff, 0xff, 0xff]),
+                dark: Color([0x13, 0x13, 0x12, 0xff]),
+            }),
+            image: None,
+        };
+        let files = super::launch_resources(&screen, false, false, 35).unwrap();
+        let values = text(&files, "values");
+        assert!(
+            values.contains(r#"<color name="nsh_launch_background">#ffffffff</color>"#),
+            "{values}"
+        );
+        assert!(
+            values.contains(r#"parent="@android:style/Theme.Material.Light.NoActionBar""#),
+            "{values}"
+        );
+        assert!(
+            values.contains(
+                r#"<item name="android:windowBackground">@color/nsh_launch_background</item>"#
+            ),
+            "{values}"
+        );
+        let night = text(&files, "values-night");
+        assert!(night.contains("#ff131312"), "{night}");
+        let splash = text(&files, "values-v31");
+        for item in ["windowBackground", "windowSplashScreenBackground"] {
+            assert!(
+                splash.contains(&format!(
+                    r#"<item name="android:{item}">@color/nsh_launch_background</item>"#
+                )),
+                "{splash}"
+            );
+        }
+        assert!(
+            !splash.contains("windowSplashScreenAnimatedIcon"),
+            "{splash}"
+        );
+        // The system shows an adaptive launcher icon's foreground alone only
+        // while no icon background is set.
+        assert!(
+            !splash.contains("windowSplashScreenIconBackgroundColor"),
+            "{splash}"
+        );
+        // Compiled against a platform before Android 12: no splash
+        // attributes to link.
+        let files = super::launch_resources(&screen, false, false, 30).unwrap();
+        assert!(files.iter().all(|file| file.dir != "values-v31"));
+        // An app that is always dark shows the dark color in either mode.
+        let files = super::launch_resources(&screen, true, true, 35).unwrap();
+        assert!(text(&files, "values").contains("#ff131312"));
+        assert!(files.iter().all(|file| file.dir != "values-night"));
+    }
+
+    /// The image is the splash screen's icon, centered at a third of its
+    /// pixels in dp (as iOS draws it), one for each appearance.
+    #[test]
+    fn a_launch_screen_image_is_the_splash_icon() {
+        use crate::apple::{LaunchScreen, Themed};
+        let dir = std::env::temp_dir().join(format!("nsh-android-launch-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (light, dark) = (dir.join("light.png"), dir.join("dark.png"));
+        image::RgbaImage::new(288, 288).save(&light).unwrap();
+        image::RgbaImage::new(144, 96).save(&dark).unwrap();
+        let screen = LaunchScreen {
+            background: None,
+            image: Some(Themed::Each {
+                light: light.clone(),
+                dark: dark.clone(),
+            }),
+        };
+        let files = super::launch_resources(&screen, true, false, 35).unwrap();
+        let splash = text(&files, "values-v31");
+        assert!(
+            splash.contains(
+                r#"<item name="android:windowSplashScreenAnimatedIcon">@drawable/nsh_launch</item>"#
+            ),
+            "{splash}"
+        );
+        assert!(
+            splash.contains(r#"parent="@android:style/Theme.Material.NoActionBar""#),
+            "{splash}"
+        );
+        // No color: the platform's window background stays.
+        assert!(!splash.contains("windowBackground"), "{splash}");
+        // 288 px is 96 dp: a third of the 288 dp icon area, a third of it
+        // inset on each side.
+        let icon = text(&files, "drawable");
+        assert!(
+            icon.contains(r#"android:drawable="@drawable/nsh_launch_image""#),
+            "{icon}"
+        );
+        assert!(icon.contains(r#"android:insetLeft="33.333%""#), "{icon}");
+        assert!(icon.contains(r#"android:insetTop="33.333%""#), "{icon}");
+        // Not square: its width and its height inset apart.
+        let night = text(&files, "drawable-night");
+        assert!(night.contains(r#"android:insetLeft="41.667%""#), "{night}");
+        assert!(night.contains(r#"android:insetTop="44.444%""#), "{night}");
+        let copied = |dir: &str| {
+            files.iter().find_map(|file| match &file.contents {
+                super::ResContents::Copy(path) if file.dir == dir => Some(path.clone()),
+                _ => None,
+            })
+        };
+        assert_eq!(copied("drawable-nodpi"), Some(light));
+        assert_eq!(copied("drawable-night-nodpi"), Some(dark));
+        // Checked before Android 12 too, and only a PNG.
+        let jpeg = dir.join("launch.jpg");
+        std::fs::write(&jpeg, b"\xff\xd8\xff\xe0not a png").unwrap();
+        for path in [jpeg, dir.join("missing.png")] {
+            let screen = LaunchScreen {
+                background: None,
+                image: Some(Themed::Both(path.clone())),
+            };
+            assert!(
+                super::launch_resources(&screen, false, false, 30).is_err(),
+                "{}",
+                path.display()
+            );
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

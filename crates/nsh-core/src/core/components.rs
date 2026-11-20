@@ -1192,20 +1192,27 @@ impl<M: TextEngine> Core<M> {
             child: id,
             before: None,
         });
-        // The windows `open_window` opens render beside the root (desktops).
-        let desktop = crate::element::os().is_desktop();
-        if desktop {
-            use crate::element::Component as _;
-            let host = crate::element::desktop::OpenedWindowsHost::element(()).into_element();
-            if let Some(host) = self.make_component(host, |_, _| {}) {
-                let _ = self.apply_op(Op::Insert {
-                    parent: ROOT_ID,
-                    child: host,
-                    before: None,
-                });
-            }
-        }
+        self.mount_opened_windows();
         self.own_direction();
+    }
+
+    /// Mounts what renders the windows `open_window` opens, beside the
+    /// app's root (desktops): a Rust app's ([`Self::mount_root`]) or a TSX
+    /// app's, whose built-in windows (the update prompt) open the same way.
+    pub fn mount_opened_windows(&mut self) {
+        let _entered = self.components.runtime.enter();
+        if !crate::element::os().is_desktop() {
+            return;
+        }
+        use crate::element::Component as _;
+        let host = crate::element::desktop::OpenedWindowsHost::element(()).into_element();
+        if let Some(host) = self.make_component(host, |_, _| {}) {
+            let _ = self.apply_op(Op::Insert {
+                parent: ROOT_ID,
+                child: host,
+                before: None,
+            });
+        }
     }
 
     /// Makes the host of component element `el` (`None`: `el` is not a
@@ -1419,6 +1426,32 @@ impl<M: TextEngine> Core<M> {
         for listener in listeners {
             if let Err(message) = caught(|| listener()) {
                 log::error!(target: "js", "a quit request listener failed: {message}");
+            }
+        }
+        self.apply_actions();
+    }
+
+    /// The OS asked the app to show itself: each reopen listener hears it,
+    /// oldest first. The app opens or focuses the window it wants.
+    #[doc(hidden)]
+    pub fn reopened(&mut self) {
+        let _entered = self.components.runtime.enter();
+        let listeners = self.components.executor.reopens.borrow().all();
+        for listener in listeners {
+            if let Err(message) = caught(|| listener()) {
+                log::error!(target: "js", "a reopen listener failed: {message}");
+            }
+        }
+        self.apply_actions();
+    }
+
+    /// The app's last window went: each listener hears it, oldest first.
+    pub(crate) fn last_window_closed(&mut self) {
+        let _entered = self.components.runtime.enter();
+        let listeners = self.components.executor.last_window_closed.borrow().all();
+        for listener in listeners {
+            if let Err(message) = caught(|| listener()) {
+                log::error!(target: "js", "a last window closed listener failed: {message}");
             }
         }
         self.apply_actions();
@@ -5466,9 +5499,11 @@ impl<M: TextEngine> Core<M> {
     /// root, or the dialog's content) and bubbles from it, as a browser
     /// reports it at `document.body` (#2362). Any other node starts at
     /// itself.
-    fn key_start(&self, key: Key) -> Key {
+    pub(super) fn key_start(&self, key: Key) -> Key {
         let node = &self.nodes[key as usize];
-        if node.id != crate::ROOT_ID && self.key_window(key) != node.id {
+        if node.id != crate::ROOT_ID
+            && (node.kind != Kind::Modal || self.key_window(key) != node.id)
+        {
             return key;
         }
         node.children
@@ -5476,6 +5511,16 @@ impl<M: TextEngine> Core<M> {
             .copied()
             .find(|&child| !matches!(self.nodes[child as usize].kind, Kind::Overlay | Kind::Modal))
             .unwrap_or(key)
+    }
+
+    /// A window's staged keyboard target follows its logical children.
+    pub(super) fn key_content_changed(&mut self, parent: Key) {
+        let node = &self.nodes[parent as usize];
+        if node.id == crate::ROOT_ID
+            || (node.kind == Kind::Modal && self.key_window(parent) == node.id)
+        {
+            self.key_ancestry_dirty = true;
+        }
     }
 
     /// The root of the window `key` is in, `key` itself when it is one.
@@ -6295,15 +6340,6 @@ impl<M: TextEngine> Core<M> {
             Action::TextContent(id, answer) => self.components.text_contents.push((id, answer)),
             Action::PressAt(id, press, answer) => self.components.presses.push((id, press, answer)),
             Action::HoverAt(id, mouse) => self.components.hovers.push((id, mouse)),
-            // A terminal decodes no images: the answer is at once, and no
-            // request goes to the platform.
-            Action::ImageInfo(_, answer)
-                if self.components.environment.idiom == crate::platform::Idiom::Terminal =>
-            {
-                answer
-                    .borrow_mut()
-                    .deliver(Err(super::NO_IMAGES_IN_A_TERMINAL.into()));
-            }
             Action::ImageInfo(uri, answer) => {
                 let id = self.components.next_image_info;
                 self.components.next_image_info += 1;

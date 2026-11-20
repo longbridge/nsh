@@ -39,6 +39,7 @@ fn notify() -> impl IntoElement {
 ```tsx tabs
 import { mount, signal, Text } from "nsh";
 import { Checkbox } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 function App() {
   const on = signal(false);
@@ -55,7 +56,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 `Checkbox` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate。值由应用持有：按压时通过 `onChange` 报告下一个值，复选框显示应用传回的 `checked` 和 `indeterminate`。在 Rust 中，`checkbox()` 创建一个复选框，每个属性对应一个设置方法（`.checked(..)`、`.indicator_style(..)`），每个事件对应一个监听方法（`.on_change(..)`），复选框自身用类型化的样式方法，标签用 `.child(..)`；指示器的样式接受跟随复选框的状态方法（`.checked(..)`、`.indeterminate(..)`、`.disabled_style(..)`）。

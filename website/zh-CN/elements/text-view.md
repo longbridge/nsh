@@ -41,6 +41,7 @@ fn release_notes() -> impl IntoElement {
 ```tsx tabs
 import { mount, Scroll } from "nsh";
 import { TextView } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 const README = `# Release notes
 
@@ -71,7 +72,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 在 Rust 中，`text_view()` 像 `view()` 创建视图一样创建它：每个属性一个设置方法（`.markdown(..)`、`.options(..)`、`.selectable(..)`），每个渲染函数一个闭包（`.render_image(|image| ..)`），每个事件一个监听方法（`.on_link_press(..)`），根节点使用类型化的样式方法（`.p_5()`、`.text_color(..)`），其中的文本样式会传给每个部件。

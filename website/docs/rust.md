@@ -360,6 +360,7 @@ impl Portfolio {
 
 ```tsx
 import { mount, signal, View, Text } from "nsh";
+import { Window } from "nsh/desktop";
 import { Chart, Ledger, Portfolio } from "app/native";   // Rust
 
 const ledger = new Ledger();   // its state lives in Rust
@@ -377,7 +378,11 @@ function Overview() {
   );
 }
 
-mount(() => <Overview />);
+mount(() => (
+  <Window id="main">
+    <Overview />
+  </Window>
+));
 ```
 
 Each export is documented in TypeScript by the doc comment of the Rust item that names it: a component by its
