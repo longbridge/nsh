@@ -49,6 +49,16 @@ final class Permissions {
 
     private Permissions() {}
 
+    /** The application, or {@code null} before any {@code NshView} was made. Any thread. */
+    static Context application() {
+        return application;
+    }
+
+    /** The activity in front, or {@code null}. UI thread. */
+    static Activity front() {
+        return front.get();
+    }
+
     /**
      * Follows the activity in front from now on ({@code context} being a view's), which Rust code's requests ask
      * through: the packaged app's or an embedding app's. UI thread.
@@ -88,9 +98,16 @@ final class Permissions {
         });
     }
 
-    /** Asks the user for {@code permissions} through {@code activity}, after the requests before it. UI thread. */
-    static void ask(Activity activity, String[] permissions, Answer answer) {
-        asker(activity).ask(permissions, answer);
+    /**
+     * Asks the user for {@code permissions} through {@code activity}, after the requests before it: {@code false},
+     * and {@code answer} is never called, when the activity has saved its state (the app is in the background) and
+     * cannot take the asking fragment. UI thread.
+     */
+    static boolean ask(Activity activity, String[] permissions, Answer answer) {
+        Asker asker = asker(activity);
+        if (asker == null) return false;
+        asker.ask(permissions, answer);
+        return true;
     }
 
     /** {@code permission}'s state; {@code activity} may be {@code null}. Any thread. */
@@ -157,10 +174,11 @@ final class Permissions {
                 nativeAnswer(key, states(permissions), null);
                 return;
             }
-            ask(activity, permissions, results -> {
+            boolean asked = ask(activity, permissions, results -> {
                 if (results == null) nativeAnswer(key, null, "the activity finished before the user answered");
                 else nativeAnswer(key, states(permissions), null);
             });
+            if (!asked) nativeAnswer(key, null, "the app is in the background");
         });
     }
 
@@ -187,13 +205,22 @@ final class Permissions {
         preferences(activity).edit().putStringSet(DENIED, denied).apply();
     }
 
+    /**
+     * {@code activity}'s asking fragment, added when missing; {@code null} once the activity has saved its state,
+     * when adding a fragment would throw (as {@code Activities.results}).
+     */
     @SuppressWarnings("deprecation")
     private static Asker asker(Activity activity) {
         android.app.FragmentManager fragments = activity.getFragmentManager();
+        if (fragments.isStateSaved()) return null;
         Asker asker = (Asker) fragments.findFragmentByTag(TAG);
         if (asker == null) {
             asker = new Asker();
-            fragments.beginTransaction().add(asker, TAG).commitNow();
+            try {
+                fragments.beginTransaction().add(asker, TAG).commitNow();
+            } catch (IllegalStateException e) {
+                return null;
+            }
         }
         return asker;
     }

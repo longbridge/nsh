@@ -289,6 +289,18 @@ const RESERVED_INFO: [(&str, Owner); 9] = [
     ("CFBundlePackageType", Owner::Package),
 ];
 
+/// Whether `key` of an iOS app's `Info.plist` is one NSH sets itself
+/// ([`RESERVED_INFO`], [`RESERVED_IOS_INFO`]).
+pub(crate) fn is_reserved_ios_info(key: &str) -> bool {
+    ApplePlatform::Ios.reserved().any(|(k, _)| *k == key)
+}
+
+/// Whether `key` of an iOS app's entitlements is one NSH sets itself
+/// ([`RESERVED_ENTITLEMENTS`]).
+pub(crate) fn is_reserved_ios_entitlement(key: &str) -> bool {
+    RESERVED_ENTITLEMENTS.iter().any(|(k, _)| *k == key)
+}
+
 /// The `Info.plist` keys of iOS packages that are NSH's, besides
 /// [`RESERVED_INFO`].
 const RESERVED_IOS_INFO: [(&str, Owner); 10] = [
