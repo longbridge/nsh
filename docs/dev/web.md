@@ -1065,8 +1065,13 @@ scroll events postpone it, and the browser's `scrollend` cancels it.
   source it is given).
 - **Videos** are `<video>`s: `onLoadStart`, `onLoad` (`loadedmetadata`), `onProgress` on a timer at
   `progressUpdateInterval` while playing, `onBuffer` (`waiting` / `playing` / `canplay`), `onEnd`, `onError`; a
-  deleted video is stopped (a detached media element plays on). Browsers only start a video with sound after a user
-  gesture (a warning says so).
+  deleted video is stopped (a detached media element plays on). `paused` is acted on when it changes or a new source
+  is set (`op_video`), so another prop never plays a video that ended or its controls paused; the browser's own pauses
+  are followed where the other platforms play on: a seek past the end of a video the app has not paused plays it
+  (`seek`), and one the browser paused as it left the document plays again when it is back (`videosBack`). Browsers
+  only start a video with sound after a user gesture (a warning says so): a refused play is tried again on the next
+  update (`playVideo`). `crates/nsh-platform-web/tests/video` checks these in Chrome (`--target web` only: headless
+  runs play no video).
 - **Registered native components** are the native apps' own: their view stays empty, with a warning once per name.
 - **The host** (`nsh`'s `host`): the page answers the app's calls with `createPlayer`'s `host` option, an object whose
   `call(name, args)` returns the result or a promise of it. `Command::HostCall` is the command `hostCall` (`encode.rs`;
@@ -1113,7 +1118,9 @@ default), `role="link"` with an `href` (`ViewProps::href`, which `nsh-base`'s `L
 `web={{ element }}` (`Prop::WebElement`, `ViewProps::web_element`, the `WebElement` enum) names what `role` cannot
 say (`p`, `nav`, `article`, `time`, ...) and wins over the role. `retag` replaces the view's element by one of that
 tag, carrying its attributes, children and fields and taking its place in `views`; views whose element is a control
-of its own (images, scroll views, canvases, inputs) keep theirs. A fixed rule of the runtime's stylesheet takes the
+of its own (images, scroll views, canvases, inputs) keep theirs. A new view's tracked states and events reach the page
+before the props that name its tag: `retag` adds the old element's listeners to the new one, as the copied flags say
+(`installMouse`, `installHover`, `installFocus`, `installLinkHover`). A fixed rule of the runtime's stylesheet takes the
 browser's margins, fonts, colors, underlines and list markers off those tags, so the view looks as a `div` does. A
 link gets `href` and is not draggable; a plain click on it stays the app's (`Link`'s press; the root's `click`
 listener prevents the browser's navigation), a click with a modifier key or the middle button opens `href` as the
@@ -1128,9 +1135,8 @@ page's realm (the app runs in its iframe's) and writes the page's real `<head>`:
 mount order, an effect keeps its props current, and one microtask after any change the entries are merged (the later
 one wins key by key, `meta` by `name` / `property`), the elements the heads made (`data-nsh-head`) are written again,
 and `<html lang>` falls back to what the page had before. The merged title goes to the player (`setHeadTitle`), which
-owns `document.title`: the heads' title, else the main window's (a root `SetAttributes` with a `title` is encoded as
-the `setTitle` command, and the browser runtime's main window, `scope.js`, hands the `title` of its `set` to
-`setWindowTitle`; kept where the app is the page), else the page's own, written once the turn's history entries
+owns `document.title`: the heads' title, else the app root's (a root `SetAttributes` with a `title` is encoded as
+the `setTitle` command, and `runtime.js` hands it to `setWindowTitle`; kept where the app is the page), else the page's own, written once the turn's history entries
 exist (after `syncHistory`, or after a traversal of its own lands) so each entry keeps its page's title. A `canonical` path starts at the site's
 base (the directory `document.baseURI` names), as a linked stack's paths do. `page.test.mjs` tests the merging.
 

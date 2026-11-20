@@ -28,6 +28,8 @@ static TOP: AtomicU32 = AtomicU32::new(u32::MAX);
 
 #[component]
 fn Bar() -> impl IntoElement {
+    let window = desktop::current_window();
+    let for_interval = window.clone();
     let applied = signal(0u32);
     set_interval(Duration::from_millis(10), move || {
         let want = WANT.load(Ordering::SeqCst);
@@ -45,11 +47,17 @@ fn Bar() -> impl IntoElement {
             }
             let mut attributes = WindowAttributes::default();
             attributes.title_bar = Some(bar);
-            desktop::main_window().set(attributes);
+            for_interval.set(attributes);
         }
     });
-    effect(|| TOP.store(desktop::title_bar().top.0 as u32, Ordering::SeqCst));
+    effect(move || TOP.store(window.title_bar().top.0 as u32, Ordering::SeqCst));
     view().flex_1().bg(rgb(0xe0e5ed))
+}
+
+/// The app root: the host, with the one window the test reads.
+#[component]
+fn App() -> impl IntoElement {
+    desktop::window().id("main").content(Bar)
 }
 
 fn pump(ms: u64) {
@@ -172,7 +180,7 @@ pub(super) fn run() {
     options.size = (480, 300);
     let surface = platform::AppView::new(mtm, options);
     window.setContentView(Some(&surface.view()));
-    surface.load(platform::App::Rust(platform::Root::of::<Bar>()));
+    surface.load(platform::App::Rust(platform::Root::of::<App>()));
     window.makeKeyAndOrderFront(None);
     set_bar(0, 0);
     let system = lights(&window);

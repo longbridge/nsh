@@ -295,6 +295,7 @@ define_class!(
         fn presses_began(&self, presses: &NSSet<UIPress>, event: Option<&UIPressesEvent>) {
             let consumed = self.target().is_some_and(|target| {
                 crate::keymap::root_began(&target, presses)
+                    || crate::keyboard::root_raw(self, &target, presses, true)
                     || crate::keyboard::root_tab(self, &target, presses)
             });
             if !consumed {
@@ -307,7 +308,10 @@ define_class!(
         fn presses_ended(&self, presses: &NSSet<UIPress>, event: Option<&UIPressesEvent>) {
             let consumed = self
                 .target()
-                .is_some_and(|target| crate::keymap::ended(&target, presses));
+                .is_some_and(|target| {
+                    crate::keymap::ended(&target, presses)
+                        | crate::keyboard::root_raw(self, &target, presses, false)
+                });
             if !consumed {
                 // SAFETY: calling the superclass implementation.
                 let _: () = unsafe { msg_send![super(self), pressesEnded: presses, withEvent: event] };

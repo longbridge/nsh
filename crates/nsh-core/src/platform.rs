@@ -28,12 +28,15 @@ pub const DATE_TIME_PICKER_COMPONENT: &str = "nsh/date-time-picker";
 
 /// The native component of `nsh/base`'s `MenuButton`, which the iOS backend
 /// registers itself (a `UIButton` showing its `UIMenu` as its primary
-/// action).
+/// action), and the Android backend (a button showing the system's popup
+/// menu; `MenuButtonComponent.java`'s `NAME` keeps the same name).
 pub const MENU_BUTTON_COMPONENT: &str = "nsh/menu-button";
 
 /// The native component of `nsh/base`'s `ContextMenu` given `items`, which
 /// the iOS backend registers itself (a `UIContextMenuInteraction` on the
-/// view around the trigger, the trigger lifted as its preview).
+/// view around the trigger, the trigger lifted as its preview), and the
+/// Android backend (the system's popup menu by the trigger, shown when
+/// `open`; `ContextMenuComponent.java`'s `NAME` keeps the same name).
 pub const CONTEXT_MENU_COMPONENT: &str = "nsh/context-menu";
 
 /// The native component of `nsh/base`'s `SplitView`, which the iOS backend

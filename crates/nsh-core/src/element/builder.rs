@@ -1089,6 +1089,19 @@ pub trait Element: IntoElement + Sized {
         self
     }
 
+    /// The highlight of the selections of the texts and inputs in the
+    /// view that set none of their own, as TSX's `selection:bg-*` class
+    /// (Tailwind's `& *::selection`): the nearest view around a text that
+    /// sets one decides, a text's or an input's own color wins. Android
+    /// tints the selection handles of a selectable view
+    /// ([`Self::selectable`]) and of an input in it too.
+    fn selection_color(mut self, color: impl IntoReactive<Hsla>) -> Self {
+        super::host::bind_prop(self.node(), color, |c: Hsla| {
+            Prop::SelectionColor(Some(Color::from(c)))
+        });
+        self
+    }
+
     /// The app's items of the selection menu of this selectable view
     /// ([`Self::selectable`]; TSX `selectionMenu`): shown after the
     /// system's own (Copy, Select All, Look Up, Share…), which stay, in
@@ -2205,10 +2218,44 @@ pub trait Interactive: Element {
         self
     }
 
+    /// The scroll view it floats over and the edge of it it sits at
+    /// (`ios={{ scrollEdgeElement }}`): a bottom toolbar, a floating button
+    /// placed over a list. From iOS 26 the scroll edge effect of that
+    /// scroll view takes its shape from what the view shows, as it does
+    /// from a bar, so the content scrolled under it fades out instead of
+    /// being cut by it. Elsewhere a fade the app draws under the view
+    /// gives the same separation. `None` names none.
+    fn scroll_edge_element(
+        mut self,
+        scroll_view: impl IntoReactive<Option<super::ElementRef>>,
+        edge: crate::ScrollEdge,
+    ) -> Self {
+        let target =
+            scroll_view
+                .into_reactive()
+                .map(move |scroll_view: Option<super::ElementRef>| {
+                    let scroll_view = scroll_view?.element_target()?;
+                    Some(super::ScrollEdgeTarget { scroll_view, edge })
+                });
+        super::host::bind_prop(self.node(), target, Prop::ScrollEdgeElement);
+        self
+    }
+
     /// The native material the view draws with on macOS
     /// (`macos={{ backdrop }}`): an `NSVisualEffectView`, or none.
     fn macos_backdrop(mut self, backdrop: impl IntoReactive<Option<crate::MacOsBackdrop>>) -> Self {
         super::host::bind_prop(self.node(), backdrop, Prop::MacOsBackdrop);
+        self
+    }
+
+    /// The system's blur of what is behind a transparent window, under the
+    /// view's box and corners, on Windows 11 and later
+    /// (`windows={{ backdrop }}`), or none.
+    fn windows_backdrop(
+        mut self,
+        backdrop: impl IntoReactive<Option<crate::WindowsBackdrop>>,
+    ) -> Self {
+        super::host::bind_prop(self.node(), backdrop, Prop::WindowsBackdrop);
         self
     }
 

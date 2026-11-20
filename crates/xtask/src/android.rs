@@ -286,7 +286,8 @@ fn ndk_cargo(sdk: &Sdk, triple: &str, subcommand: &str) -> Command {
 }
 
 /// Clippy on the Android crate (it is empty on other targets): with every
-/// feature, and as a Rust app's library (no JS).
+/// feature, and as a Rust app's library (no JS); its tests too, which build
+/// for Android only.
 pub(crate) fn clippy() -> anyhow::Result<()> {
     let sdk = Sdk::find()?;
     for features in ["--all-features", "--no-default-features"] {
@@ -296,6 +297,7 @@ pub(crate) fn clippy() -> anyhow::Result<()> {
                 "nsh-platform-android",
                 "--target",
                 "aarch64-linux-android",
+                "--all-targets",
                 features,
                 "--",
                 "-D",

@@ -513,6 +513,16 @@ impl Mounter {
             Command::Desktop(desktop) if id != ROOT_ID => {
                 crate::app_window::command(surface, id, view, desktop);
             }
+            // A dialog shows over the window whose content raised it. The
+            // app raises an alert without naming one (`AlertDialog.show`):
+            // it is the focused window's, else the first's.
+            Command::Dialog(dialog) => {
+                let window = match view {
+                    Some(v) if id != ROOT_ID => crate::app_window::window_of(surface, v),
+                    _ => crate::app_window::dialog_window(surface),
+                };
+                crate::system::show_dialog(surface, window, dialog);
+            }
             other => crate::system::command(surface, id, other),
         }
     }

@@ -518,6 +518,9 @@ mod imp {
     impl WidgetImpl for NshView {
         fn focus(&self, direction: gtk::DirectionType) -> bool {
             let view = self.obj();
+            if crate::key_focus::skips_subtree(&view) {
+                return false;
+            }
             crate::key_focus::offer(&view);
             let moved = self.parent_focus(direction);
             crate::key_focus::offered(&view);
