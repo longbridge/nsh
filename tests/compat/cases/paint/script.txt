@@ -494,7 +494,12 @@ style id:field borderColor #ccccccff
 style id:target backgroundColor #888888ff
 style id:target opacity 0.4
 state id:target hovered
+style id:target borderWidth 0
 style id:target backgroundColor #888888ff
+state id:target focused
+style id:target borderWidth 0
+state id:target pressed
+style id:target borderWidth 0
 state id:target none
 tap id:target
 expect Outer: 1
@@ -505,20 +510,27 @@ tap id:toggle
 expect Disabled: false
 style id:target backgroundColor #00ff00ff
 style id:target opacity 1
+state id:target focused
+style id:target borderWidth 4
 state id:target hovered
+style id:target borderWidth 2
 style id:target backgroundColor #0000ffff
 state id:target hovered pressed
+style id:target borderWidth 8
 style id:target backgroundColor #ff0000ff
 state id:target none
 style id:target backgroundColor #00ff00ff
 tap id:target
 expect Presses: 2
 expect Outer: 1
-# Disabled once more: the state style comes back.
+# Disable it while its hover border is visible.
+state id:target hovered
+style id:target borderWidth 2
 tap id:toggle
 expect Disabled: true
 style id:target backgroundColor #888888ff
 style id:target opacity 0.4
+style id:target borderWidth 0
 covers [props] activeStyle
 covers [props] hoverStyle
 covers [props] focusStyle

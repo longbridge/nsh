@@ -455,6 +455,24 @@ Both are compiled into the app's asset catalog with its icon and named in `UILau
 sets in `ios.infoPlist`. A launch screen that matches the app's first frame (its background, the same image in the
 same place) makes the start look seamless. `appearance` picks which of the two the system shows.
 
+On Android, `android.launchScreen` takes the same keys. The package gives the app a theme whose window background is
+`background`, so the window matches the app's first frame from the tap on the icon on, and stays behind it. On Android
+12 and later the system splash screen also uses `background` (behind the icon too), with `image` in the middle at the
+same size as on iOS (a 288×288 PNG is 96×96 dp). Without `image` the splash screen shows the launcher icon. An app
+that targets an API level below 31 has no splash screen to show `image` in, though the file is still checked. The dark
+values apply in the system's dark mode, and `appearance` set to `light` or `dark` keeps that one.
+
+```json
+{
+  "android": {
+    "launchScreen": {
+      "background": { "light": "#ffffff", "dark": "#131312" },
+      "image": { "light": "launch.png", "dark": "launch-dark.png" }
+    }
+  }
+}
+```
+
 ## Camera, Bluetooth and other hardware
 
 A packaged app declares the hardware NSH's own features use, from its `nsh.json`:

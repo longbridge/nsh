@@ -7979,6 +7979,102 @@ fn macos_backdrop_decodes_and_survives_restyling() {
     assert_eq!(decode(HostTestValue::Null), Prop::MacOsBackdrop(None));
 }
 
+/// `windows={{ backdrop }}` decodes its one name, reaches the view
+/// style, and clears through the Windows-qualified decode key.
+#[test]
+fn windows_backdrop_decodes_and_clears() {
+    use crate::{
+        WindowsBackdrop, WindowsBackdropMaterial,
+        js::host::{HostCx, HostProps},
+    };
+    let decode = |value: HostTestValue<'_>| {
+        let mut cx = HostCx::for_element(Tag::View);
+        <Prop as HostProps>::decode("windows.backdrop", &value, &mut cx)
+            .expect("a Windows backdrop prop")
+            .expect("a value")
+    };
+    let backdrop = WindowsBackdrop {
+        material: WindowsBackdropMaterial::Blur,
+    };
+    let prop = decode(HostTestValue::object([(
+        "material",
+        HostTestValue::String("blur"),
+    )]));
+    assert_eq!(prop, Prop::WindowsBackdrop(Some(backdrop)));
+    for value in [
+        HostTestValue::String("blur"),
+        HostTestValue::Number(1.0),
+        HostTestValue::object([]),
+        HostTestValue::object([("material", HostTestValue::String("mica"))]),
+        HostTestValue::object([("material", HostTestValue::Number(1.0))]),
+        HostTestValue::object([("blending", HostTestValue::String("behindWindow"))]),
+        HostTestValue::Null,
+    ] {
+        assert_eq!(decode(value), Prop::WindowsBackdrop(None));
+    }
+
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: prop.clone(),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    assert_eq!(
+        view_style_of(&c.commit().unwrap(), 2)
+            .unwrap()
+            .windows_backdrop,
+        Some(backdrop)
+    );
+    c.apply(Op::SetProp {
+        id: 2,
+        prop: <Prop as HostProps>::reset(&prop).unwrap(),
+    })
+    .unwrap();
+    assert_eq!(
+        view_style_of(&c.commit().unwrap(), 2)
+            .unwrap()
+            .windows_backdrop,
+        None
+    );
+}
+
+#[test]
+fn rust_windows_backdrop_reaches_the_view_style() {
+    use crate::{WindowsBackdrop, element::Root, prelude::*};
+
+    #[component]
+    fn BackdropView() -> impl IntoElement {
+        view().windows_backdrop(WindowsBackdrop::default())
+    }
+
+    let mut c = core();
+    c.mount_root(&Root::new::<BackdropView>(|| ()));
+    let backdrops = c
+        .commit()
+        .unwrap()
+        .items
+        .into_iter()
+        .filter_map(|item| match item {
+            MountItem::ViewStyle { style, .. } => style.windows_backdrop,
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(backdrops, [WindowsBackdrop::default()]);
+}
+
 #[test]
 fn glass_tint_updates_and_removal_keeps_effects() {
     let mut c = core();
@@ -41395,7 +41491,7 @@ mod terminal_layout {
     }
 
     #[test]
-    fn an_image_keeps_its_box_and_an_icon_is_left_out() {
+    fn an_image_keeps_its_box_at_every_size() {
         let mut ops = node(
             2,
             Tag::Image,
@@ -41414,10 +41510,67 @@ mod terminal_layout {
         ));
         ops.extend(text(4, ROOT_ID, "After"));
         let batch = laid_out(ops);
-        // 25 columns, 6.25 rows to 6: blank, so what follows stays below it.
+        // 25 columns, 6.25 rows to 6: what follows stays below it.
         assert_eq!(frame_of(&batch, 2), Some(rect(0.0, 0.0, 200.0, 96.0)));
-        assert!(left_out(&batch, 3));
-        assert_eq!(frame_of(&batch, 4), Some(rect(0.0, 96.0, 320.0, 16.0)));
+        // An icon-sized picture (a star, a logo) is drawn too: two columns,
+        // one row.
+        assert!(!left_out(&batch, 3));
+        assert_eq!(frame_of(&batch, 3), Some(rect(0.0, 96.0, 16.0, 16.0)));
+        assert_eq!(frame_of(&batch, 4), Some(rect(0.0, 112.0, 320.0, 16.0)));
+    }
+
+    #[test]
+    fn an_avatar_holding_only_its_picture_keeps_its_rows() {
+        // An avatar 40pt square: its initials gone once its picture has
+        // loaded, it holds only the picture over it (absolute), filling it.
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("alignSelf", V::Str("flex-start")),
+                ("width", V::Number(40.0)),
+                ("height", V::Number(40.0)),
+            ],
+        );
+        ops.extend(view(3, 2, &[("flexGrow", V::Number(1.0))]));
+        ops.extend(node(
+            4,
+            Tag::Image,
+            3,
+            &[
+                ("position", V::Str("absolute")),
+                ("top", V::Number(0.0)),
+                ("left", V::Number(0.0)),
+                ("right", V::Number(0.0)),
+                ("bottom", V::Number(0.0)),
+            ],
+        ));
+        let batch = laid_out(ops);
+        // Five columns, 2.5 rows to 2.
+        assert_eq!(frame_of(&batch, 2), Some(rect(0.0, 0.0, 40.0, 32.0)));
+        assert_eq!(frame_of(&batch, 3), Some(rect(0.0, 0.0, 40.0, 32.0)));
+        assert_eq!(frame_of(&batch, 4), Some(rect(0.0, 0.0, 40.0, 32.0)));
+    }
+
+    #[test]
+    fn a_box_holding_a_growing_scroll_view_keeps_its_explicit_height() {
+        // A picker 160pt tall: a search row, then its grid in a scroll view
+        // growing into what is left, which has no rows of its content.
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("alignSelf", V::Str("flex-start")),
+                ("height", V::Number(160.0)),
+            ],
+        );
+        ops.extend(text(3, 2, "Search"));
+        ops.extend(node(4, Tag::Scroll, 2, &[("flexGrow", V::Number(1.0))]));
+        ops.extend(text(5, 4, "Grid"));
+        let batch = laid_out(ops);
+        // Ten rows: one for the search, nine for the grid.
+        assert_eq!(frame_of(&batch, 2).map(|f| f.size.height.0), Some(160.0));
+        assert_eq!(frame_of(&batch, 4).map(|f| f.size.height.0), Some(144.0));
     }
 
     #[test]
@@ -43133,7 +43286,7 @@ mod terminal_layout {
             ));
             ops.extend(node(
                 5,
-                Tag::Image,
+                Tag::Canvas,
                 3,
                 &[("width", V::Number(16.0)), ("height", V::Number(16.0))],
             ));
