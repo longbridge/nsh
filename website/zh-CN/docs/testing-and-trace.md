@@ -568,7 +568,7 @@ nsh test --target macos                       # 在 macOS 窗口里运行应用�
 nsh test --target linux                       # 在 GTK 窗口里运行（没有显示器的机器上用 xvfb-run -a …）
 nsh test --target windows                     # 在 Win32 窗口里运行
 nsh test --target ios                         # 在 iOS 模拟器里运行
-nsh test --target android                     # 在 adb 列出的第一个 Android 设备或模拟器上运行
+nsh test --target android                     # 在 Android 设备或模拟器上运行（--device <serial>，否则第一台）
 nsh test --target gpui                        # 在 GPUI 窗口里运行（macOS、Windows、Linux）
 nsh test --target web                         # 在 headless 的 Chrome、Edge 或 Chromium 里运行
 nsh test --target tui                         # 在内存终端里运行
@@ -608,7 +608,8 @@ UIKit 收到它们的方式与在设备上相同。`setColorScheme` 切换模拟
 `nsh test` 环境中由应用在 `capabilities.process.env` 里声明的变量，会传给模拟器中的应用，与桌面上一样（`nsh run --target ios` 也会传递）；
 `HOME`、`TMPDIR` 和 `PATH` 是模拟器为应用设置的路径。
 
-在 Android 上，应用运行在 `adb devices` 列出的第一个设备或模拟器上的开发 host 中，并拥有独立的存储。步骤是手指的触摸和键盘的按键，
+在 Android 上，应用运行在设备或模拟器上的开发 host 中：使用 `--device` 指定的那台（按序列号），否则使用 `ANDROID_SERIAL`
+指定的那台，否则使用 `adb devices` 列出的第一台；并拥有独立的存储。步骤是手指的触摸和键盘的按键，
 应用的视图收到它们的方式与在设备上相同；`back` 是系统的返回。`setColorScheme` 切换设备的深色主题，`nsh test` 会在应用结束后把它恢复原样。
 `nsh test` 环境中由应用在 `capabilities.process.env` 里声明的变量，会传给设备上的应用，与桌面上一样（`nsh run --target android`
 运行 TSX 应用时也会传递）；`PATH`、`HOME`、`TMPDIR` 以及 Android 为每个应用设置的其他路径保持设备上的值。打包的应用
