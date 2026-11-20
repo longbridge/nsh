@@ -5372,6 +5372,11 @@ impl<M: TextEngine> Core<M> {
     /// own parts' events never reach JS, which does not know them).
     pub fn component_event(&mut self, id: NodeId, kind: EventKind, payload: &EventPayload) -> bool {
         let _entered = self.components.runtime.enter();
+        // A Rust text block's final layout, for its `on_text_layout`.
+        let _geometry = (kind == EventKind::TextLayout)
+            .then(|| self.geometries.remove(&id))
+            .flatten()
+            .map(crate::text::GeometryScope::enter);
         let handled = self.dispatch_event(id, kind, payload);
         self.flush_component_emits();
         handled

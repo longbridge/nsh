@@ -2682,6 +2682,25 @@ fn span(mut el: ElNode) -> ElNode {
 }
 
 impl Text {
+    /// Its final layout, each time it is laid out anew: the platform text
+    /// engine's own hit testing, caret and range boxes
+    /// ([`crate::TextGeometry`]), where `onTextLayout`'s lines only allow
+    /// an estimate. Rust-only, on a Rust component's text; JS keeps
+    /// `onTextLayout`.
+    pub fn on_text_layout(mut self, listener: impl Fn(&crate::TextGeometry) + 'static) -> Self {
+        self.0.handlers.push((
+            EventKind::TextLayout,
+            super::Listener::from(move |payload: &EventPayload| {
+                if let EventPayload::TextLayout(_) = payload
+                    && let Some(geometry) = crate::text::GeometryScope::current()
+                {
+                    listener(&geometry);
+                }
+            }),
+        ));
+        self
+    }
+
     /// The highlight of its selection, when it is selectable.
     pub fn selection_color(mut self, color: impl IntoReactive<Hsla>) -> Self {
         super::host::bind_prop(&mut self.0, color, |c: Hsla| {

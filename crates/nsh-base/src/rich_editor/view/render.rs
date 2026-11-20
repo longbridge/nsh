@@ -824,8 +824,11 @@ enum Piece {
         offset: usize,
         text: Option<String>,
     },
-    /// A widget decoration (its `class`).
-    Widget { class: Option<String> },
+    /// A widget decoration (its `class`) at `offset` of the content.
+    Widget {
+        class: Option<String>,
+        offset: usize,
+    },
     /// What an input method is composing at the caret, before the
     /// document holds it: drawn in the line, in its block's typography.
     Composition { text: String },
@@ -905,7 +908,7 @@ fn inline_of(
                 Err(text) => utf16_len(text) as u32,
             };
             out.pieces.push(match kind {
-                Ok(class) => Piece::Widget { class },
+                Ok(class) => Piece::Widget { class, offset: at },
                 Err(text) => Piece::Composition { text },
             });
             out.map.runs.push(Run {
@@ -1050,10 +1053,11 @@ fn text_block(rv: Rv, item: ReadSignal<BlockItem>, owner: u64) -> impl IntoEleme
     let (frame_rv, lines_rv, spans_rv, sel_rv) = (rv.clone(), rv.clone(), rv.clone(), rv);
     // The text's box: its selection boxes, then the text over them.
     let text = text("")
-        .on(EventKind::TextLayout, move |p: &EventPayload| {
-            if let EventPayload::TextLayout(lines) = p {
-                lines_rv.set_lines(id, lines.clone());
-            }
+        // The engine's layout: its lines without the placeholders of
+        // spans' padding, so their offsets are the text's, and its own hit
+        // testing and caret edges.
+        .on_text_layout(move |g: &nsh_core::TextGeometry| {
+            lines_rv.set_lines(id, g.lines(), Some(g.clone()));
         })
         .child(dynamic(move || {
             let inline = content.get();
@@ -1204,9 +1208,10 @@ fn spans(rv: &Rv, pieces: Vec<Piece>, id: u64) -> Vec<AnyElement> {
                 let key = SharedString::from(format!("i{id}.{leaves}"));
                 leaf(rv, node, (id, offset), text, key)
             }
-            Piece::Widget { class } => view()
-                .app_class(class.map(SharedString::from))
-                .into_element(),
+            Piece::Widget { class, offset } => {
+                let widget = view().app_class(class.map(SharedString::from));
+                inline_box(rv, widget, (id, offset)).into_element()
+            }
             Piece::Composition { text: t } => {
                 part(text(t).underline(), rv, Part::Composition).into_element()
             }
@@ -1229,10 +1234,10 @@ fn link_destination(marks: &[Mark]) -> Option<(SharedString, Option<SharedString
     Some((attr("href")?, attr("title")))
 }
 
-/// The box of an inline view or image at `offset` in textblock `id`'s
-/// content: it reports its width, which its attachment character stands
-/// for when the geometry places the caret and finds the position at a
-/// point.
+/// The box of an inline view, image or widget at `offset` in textblock
+/// `id`'s content: it reports its width, which its attachment character
+/// stands for when the geometry places the caret and finds the position at
+/// a point.
 fn inline_box(rv: &Rv, el: View, (id, offset): (u64, usize)) -> View {
     let width_rv = rv.clone();
     el.on_layout(move |b: &Bounds<Points>| width_rv.set_inline_width(id, offset, *b))
@@ -1791,13 +1796,20 @@ impl Rv {
     }
 
     /// Textblock `id`'s lines.
-    fn set_lines(&self, id: u64, lines: Vec<nsh_core::TextLine>) {
+    fn set_lines(
+        &self,
+        id: u64,
+        lines: Vec<nsh_core::TextLine>,
+        geometry: Option<nsh_core::TextGeometry>,
+    ) {
         {
             let mut geo = self.geo.borrow_mut();
             let Some(text) = geo.texts.get_mut(&id) else {
                 return;
             };
-            if text.lines == lines {
+            let same = text.lines == lines;
+            text.geometry = geometry;
+            if same {
                 return;
             }
             text.lines = lines;

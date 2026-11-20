@@ -1267,6 +1267,12 @@ pub struct Core<M: TextEngine> {
     folded: rustc_hash::FxHashMap<Key, NodeId>,
     layout: LayoutTree<LeafContext<M::Prepared>>,
     text_engine: Rc<M>,
+    /// The engine for [`crate::text::TextGeometry`] (`None` for an engine
+    /// that is not `'static`).
+    geometry_engine: Option<Rc<dyn crate::text::GeometryEngine>>,
+    /// Final layouts kept for Rust components' `on_text_layout` until
+    /// their `TextLayout` events are dispatched ([`keep_geometry`]).
+    geometries: rustc_hash::FxHashMap<NodeId, crate::text::TextGeometry>,
     measure_cache: MeasureCache,
     /// Counts the commits of resizes ([`Core::mark_near_screen`]).
     resizing_commit: u32,
@@ -1297,6 +1303,9 @@ pub struct Core<M: TextEngine> {
     /// Culled views were made in this round: their styles go out in
     /// another.
     cull_made: bool,
+    /// A list gave the views in a cell their frames in this round, after
+    /// culling looked at the scroll views among them (`cull.rs`).
+    cells_framed: bool,
     /// The walk of [`Core::sync_culled`], kept for its buffer: each view
     /// with where it is in the scroll view's content and how far the
     /// transforms around it may move it (`cull.rs`).
@@ -1624,7 +1633,8 @@ pub struct Core<M: TextEngine> {
 impl<M: TextEngine + 'static> Core<M> {
     /// Creates a core whose root view (id [`ROOT_ID`]) fills `viewport`.
     pub fn new(text_engine: M, viewport: Size<Points>) -> Self {
-        let core = Self::with_engine(text_engine, viewport);
+        let mut core = Self::with_engine(text_engine, viewport);
+        core.geometry_engine = Some(core.text_engine.clone());
         // Components that run once measure text with it.
         let engine = core.text_engine.clone();
         core.components
@@ -1662,6 +1672,8 @@ impl<M: TextEngine> Core<M> {
             slots,
             layout,
             text_engine: Rc::new(text_engine),
+            geometry_engine: None,
+            geometries: Default::default(),
             measure_cache: MeasureCache::default(),
             resizing_commit: 0,
             resize_settling: false,
@@ -1701,6 +1713,7 @@ impl<M: TextEngine> Core<M> {
             cull_dirty: false,
             reach: crate::animation::Reach::default(),
             cull_made: false,
+            cells_framed: false,
             cull_scratch: Vec::new(),
             pace: pace::Pace::default(),
             list_motion: list_motion::ListMotion::default(),
@@ -3312,6 +3325,9 @@ impl<M: TextEngine> Core<M> {
     /// Finishes a turn: rebuilds text, runs layout, updates lists and
     /// returns the mount items, or `None` when nothing changed.
     pub fn commit(&mut self) -> Option<MountBatch> {
+        // The last round's events were dispatched: a geometry no one took
+        // is stale (its node went).
+        self.geometries.clear();
         // The downloads' file work and deadlines: their events and
         // commands go out with this commit.
         self.poll_downloads();
@@ -3521,13 +3537,23 @@ impl<M: TextEngine> Core<M> {
         }
         // Placeholders sized again are laid out again, in another round,
         // before culling looks at them.
-        if relayout && !self.placeholders.is_empty() && self.size_placeholders() {
+        let sized = relayout && !self.placeholders.is_empty() && self.size_placeholders();
+        if sized {
             self.cull_dirty = true;
         } else if self.cull_dirty || (relayout && !self.culling.is_empty()) {
             // The views a scroll view culls that came within its window.
             self.sync_culled();
         }
         self.update_lists(relayout);
+        // A list gives the views in a cell their frames as it places the
+        // cell, after culling looked: a scroll view made in a cell in this
+        // round had no frame then, so what it culls waited, and nothing
+        // would look at it again before the next layout or scroll (a row
+        // bound as a scroll came to rest kept its scroll views empty).
+        // Not while placeholders wait for their layout, as above.
+        if std::mem::take(&mut self.cells_framed) && !sized && !self.culling.is_empty() {
+            self.sync_culled();
+        }
         if !self.slop_moved.is_empty() {
             self.update_slop_overflow();
         }
@@ -6907,12 +6933,11 @@ impl<M: TextEngine> Core<M> {
         // are its own layout's).
         let inline = p.kind == Kind::Text && !self.nodes[child as usize].fixed_view;
         let pos = match before {
-            Some(b) => p
-                .children
-                .iter()
-                .inspect(|_| self.placing(1))
-                .position(|&c| c == b)
-                .expect("anchor is a child"),
+            Some(b) => {
+                let (pos, looked) = position_from_ends(&p.children, &b).expect("anchor is a child");
+                self.placing(looked);
+                pos
+            }
             None => p.children.len(),
         };
         self.set_inline(child, inline);
@@ -6996,7 +7021,7 @@ impl<M: TextEngine> Core<M> {
             if self.nodes[parent as usize].list.is_none()
                 && !self.nodes[child as usize].is_layout_root()
             {
-                let index = self.render_index_at(parent, pos);
+                let index = self.layout_index_at(parent, pos);
                 let parent_layout = self.nodes[parent as usize]
                     .layout
                     .expect("block parent has layout");
@@ -7463,23 +7488,55 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// Index among rendering (layout-backed) children of `parent` for a
-    /// child at `pos` in the full children list.
-    /// [`Self::render_index`], at once for the last child: after all the
-    /// rendering children its parent's layout node has.
-    fn render_index_at(&self, parent: Key, pos: usize) -> u32 {
+    /// Where the child at `pos` among `parent`'s children goes among the
+    /// children of `parent`'s layout node: before the layout node of the
+    /// next sibling that has one (the layout node's children are those
+    /// siblings', in order), or after them all. Looks at the siblings next
+    /// to it and at the layout children near `pos`, not at every sibling
+    /// before it: views inserted before the one after a list's rows, or
+    /// before the first of a chat's messages, look at a few of them each.
+    fn layout_index_at(&self, parent: Key, pos: usize) -> u32 {
         let node = &self.nodes[parent as usize];
-        if pos + 1 == node.children.len()
-            && let Some(layout) = node.layout
-        {
-            let index = self.layout.children_len(layout) as u32;
-            debug_assert_eq!(index, self.render_index(parent, pos));
-            return index;
-        }
-        self.render_index(parent, pos)
+        let layout = node.layout.expect("block parent has layout");
+        let next = node.children[pos + 1..]
+            .iter()
+            .inspect(|_| self.placing(1))
+            .find_map(|&c| {
+                let c = &self.nodes[c as usize];
+                c.layout.filter(|_| !c.is_layout_root())
+            });
+        let index = match next {
+            // As many layout children are before it as siblings with one
+            // are: at most `pos`, fewer by those without one.
+            Some(next) => match position_near(self.layout.children(layout), &next, pos) {
+                Some((index, looked)) => {
+                    self.placing(looked);
+                    index
+                }
+                None => {
+                    debug_assert!(false, "a sibling's layout node is its parent's child");
+                    self.render_index(parent, pos) as usize
+                }
+            },
+            None => self.layout.children_len(layout),
+        };
+        debug_assert!(
+            pos + 1 != node.children.len() || index as u32 == self.rendering_before(parent, pos),
+            "the layout node's children are its rendering children"
+        );
+        index as u32
     }
 
+    /// The rendering siblings before `pos` among `parent`'s children,
+    /// counted: what [`Self::layout_index_at`] finds without counting them.
+    /// Looks at each of them ([`Components::placing_work`]).
     fn render_index(&self, parent: Key, pos: usize) -> u32 {
+        self.placing(pos);
+        self.rendering_before(parent, pos)
+    }
+
+    /// [`Self::render_index`] uncounted, for the check of debug builds.
+    fn rendering_before(&self, parent: Key, pos: usize) -> u32 {
         self.nodes[parent as usize].children[..pos]
             .iter()
             .map(|&c| &self.nodes[c as usize])
@@ -9601,10 +9658,21 @@ impl<M: TextEngine> Core<M> {
             } else {
                 content_box(&self.rounded_layout(layout))
             };
+            // The width Taffy measured its lines in, before its box was
+            // rounded to device pixels (none on a grid, whose Cells hold
+            // whole characters).
+            let measured_width = (!hidden && self.layout.grid().is_none())
+                .then(|| content_box(self.layout.unrounded_layout(layout)).size.width);
+            let ratio = self.frame_ratio().width;
             let engine = &self.text_engine;
             let cache = &mut self.measure_cache;
             let Some(LeafContext::Text(cx)) = self.layout.get_node_context_mut(layout) else {
                 continue;
+            };
+            let no_wrap = cx.text.no_wrap;
+            let typeset = |rounded: Points| match measured_width {
+                Some(measured) if !no_wrap => typeset_width(rounded, measured, ratio),
+                _ => rounded,
             };
             if hidden {
                 // Out of the layout (`display: none`). Its glyphs typeset
@@ -9648,7 +9716,8 @@ impl<M: TextEngine> Core<M> {
             }
             if align_vertical > Percentage(0.0) {
                 // Text shorter than its box: moved down within it.
-                let height = measure_text(engine, cache, cx, Some(content.size.width.0)).height;
+                let height =
+                    measure_text(engine, cache, cx, Some(typeset(content.size.width).0)).height;
                 if height < content.size.height {
                     content.origin.y += align_vertical.of(content.size.height - height);
                     content.size.height = height;
@@ -9684,6 +9753,13 @@ impl<M: TextEngine> Core<M> {
                         EventKind::TextLayout,
                         text_lines(engine, &text, &text_layout),
                     ));
+                    keep_geometry(
+                        &self.geometry_engine,
+                        &mut self.geometries,
+                        id,
+                        &text_layout,
+                        &text,
+                    );
                 }
                 if !text.attachments.is_empty() {
                     placements.push((key, text_layout.clone(), content));
@@ -9707,13 +9783,21 @@ impl<M: TextEngine> Core<M> {
                     let prepared = cx
                         .prepared
                         .get_or_insert_with(|| engine.prepare_aligned(&cx.text, &cx.alignments));
-                    let layout = engine.layout(prepared, size);
+                    let layout =
+                        engine.layout(prepared, Size::new(typeset(size.width), size.height));
                     if report_lines {
                         self.events.push(crate::element::JsEvent::Event(
                             id,
                             EventKind::TextLayout,
                             text_lines(engine, &cx.text, &layout),
                         ));
+                        keep_geometry(
+                            &self.geometry_engine,
+                            &mut self.geometries,
+                            id,
+                            &layout,
+                            &cx.text,
+                        );
                     }
                     layout
                 }
@@ -10664,6 +10748,7 @@ impl<M: TextEngine> Core<M> {
                 }
                 this.nodes[cell as usize].children = children;
                 this.update_overflow(cell);
+                this.cells_framed = true;
             }
             Some(main_of(size))
         };
@@ -10812,6 +10897,45 @@ impl<M: TextEngine> Core<M> {
 /// How far out of sight unbound list cells are moved.
 const HIDDEN: f32 = 1.0e6;
 
+/// Where `x` is in `items`, looked for from both ends at once, and how
+/// many items were looked at: few for an item near either end.
+fn position_from_ends<T: PartialEq>(items: &[T], x: &T) -> Option<(usize, usize)> {
+    let (mut front, mut back) = (0, items.len());
+    while front < back {
+        if items[front] == *x {
+            return Some((front, 2 * front + 1));
+        }
+        back -= 1;
+        if items[back] == *x {
+            return Some((back, 2 * (items.len() - back)));
+        }
+        front += 1;
+    }
+    None
+}
+
+/// Where `x` is in `items`, looked for outward from `near` (or the last
+/// item, past the end), and how many items were looked at: few when it is
+/// near.
+fn position_near<T: PartialEq>(items: &[T], x: &T, near: usize) -> Option<(usize, usize)> {
+    let near = near.min(items.len().checked_sub(1)?);
+    let mut looked = 0;
+    // Every item is at most `len - 1` from `near`.
+    for distance in 0..items.len() {
+        let below = near.checked_sub(distance);
+        let above = (distance > 0)
+            .then_some(near + distance)
+            .filter(|&i| i < items.len());
+        for i in [below, above].into_iter().flatten() {
+            looked += 1;
+            if items[i] == *x {
+                return Some((i, looked));
+            }
+        }
+    }
+    None
+}
+
 /// The content box (inside padding and border) of a laid-out node.
 /// Taffy's rounding of a coordinate, to the nearest device pixel of
 /// `ratio` pixels per point rather than to whole points: on a display whose
@@ -10842,6 +10966,24 @@ fn pixel(value: f32, ratio: f32) -> f64 {
 /// be sent again unchanged.
 fn span(from: f32, to: f32, ratio: f32) -> f32 {
     ((pixel(to, ratio) - pixel(from, ratio)) / f64::from(ratio)) as f32
+}
+
+/// The width a text block is typeset in: the width Taffy measured its lines
+/// in (`measured`, its unrounded content box), when its box rounded to
+/// device pixels (`rounded`) is within a pixel of it. A box whose edges fall
+/// between pixels can round a pixel narrower than the text was measured in
+/// (a list item's content 21 points in, 57.75 pixels at 2.75): typeset in
+/// that, a line that fit by less than the pixel wrapped once more than its
+/// box was made tall for, and its last line ran over the block after it (a
+/// browser) or was cut (a platform that clips text to its view). Typeset in
+/// the width it was measured in, the lines are the ones its height has; the
+/// text reaches less than a pixel past its rounded box.
+fn typeset_width(rounded: Points, measured: Points, ratio: f32) -> Points {
+    if measured.0.is_finite() && ((measured.0 - rounded.0) * ratio).abs() < 1.0 {
+        measured
+    } else {
+        rounded
+    }
 }
 
 /// `value` rounded up to a device pixel of `ratio` pixels per point. A
@@ -10961,6 +11103,25 @@ fn image_size(natural: Size<Points>, w: Option<f32>, h: Option<f32>) -> taffy::S
 
 /// Measures a text block: per-node cache, then the shared content-addressed
 /// cache, then the platform engine.
+/// Keeps a Rust component's text block's final layout for its
+/// [`crate::Text::on_text_layout`] listener, which hears it with the
+/// block's `TextLayout` event ([`Core::component_event`]). Only the core's
+/// nodes (odd ids, the components'): JS hears the lines.
+fn keep_geometry(
+    engine: &Option<Rc<dyn crate::text::GeometryEngine>>,
+    geometries: &mut rustc_hash::FxHashMap<NodeId, crate::text::TextGeometry>,
+    id: NodeId,
+    layout: &TextLayout,
+    text: &Arc<AttributedText>,
+) {
+    if let Some(engine) = engine.as_ref().filter(|_| id % 2 == 1) {
+        geometries.insert(
+            id,
+            crate::text::TextGeometry::new(engine.clone(), layout.clone(), text.clone()),
+        );
+    }
+}
+
 /// The lines of `layout` with their characters.
 fn text_lines<M: TextEngine>(
     engine: &M,

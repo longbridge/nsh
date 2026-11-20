@@ -2151,6 +2151,44 @@ impl Headless {
         })
     }
 
+    /// The step `longPressAt(<selector>, <x>, <y>)`: [`Headless::long_press`]
+    /// with the finger at `at` in the view `selector` names (its top left
+    /// corner), as [`Headless::press_at`] places a press.
+    pub fn long_press_at(&mut self, selector: &str, at: Point<Points>) -> Result<(), String> {
+        let parsed = Selector::parse(selector)?;
+        self.step(format!("longPressAt({selector}, {}, {})", at.x.0, at.y.0));
+        self.input_with(InputModality::Pointer);
+        let pick = self.screen.long_pressable(&parsed);
+        let id = self.picked(pick, selector, "pressable view")?;
+        let delay = self.screen.long_press_delay(id).unwrap_or(500.0).max(0.0);
+        let named = match self.screen.resolve(&parsed)[..] {
+            [named] => named,
+            _ => id,
+        };
+        let page = self
+            .screen
+            .bounds_in_root(named)
+            .map(|bounds| bounds.origin + at);
+        let at = match (page, self.screen.bounds_in_root(id)) {
+            (Some(page), Some(target)) => page - target.origin,
+            _ => at,
+        };
+        self.activate_window_of(id);
+        let path = self.screen.touch_path(id);
+        if !path.is_empty() {
+            self.send_touch(id, nsh_core::TouchPhase::Start, path.clone(), page);
+        }
+        let payload = self.press_payload(id, Some(at));
+        self.send(id, EventKind::PressDown, payload.clone());
+        self.elapse(Duration::from_secs_f64(f64::from(delay) / 1000.0));
+        self.send(id, EventKind::LongPress, payload.clone());
+        self.send(id, EventKind::PressUp, payload);
+        if !path.is_empty() {
+            self.send_touch(id, nsh_core::TouchPhase::End, path, page);
+        }
+        self.done()
+    }
+
     /// The step `longPress(<selector>)`: holds a finger on what `selector`
     /// names (or the nearest view around it that hears long presses or
     /// presses) for its `delayLongPress` (500 ms), as a long press does:

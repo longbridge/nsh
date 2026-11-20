@@ -2578,3 +2578,258 @@ mod tests {
         assert!((r.letter_spacing.0 - 1.4).abs() < 1e-4);
     }
 }
+
+/// The engine calls a [`TextGeometry`] needs, object-safe.
+pub(crate) trait GeometryEngine {
+    fn geometry_lines(&self, layout: &TextLayout) -> Vec<TextLine>;
+    fn geometry_hit_test(&self, layout: &TextLayout, point: Point<Points>) -> TextPosition;
+    fn geometry_caret_rect(
+        &self,
+        layout: &TextLayout,
+        position: TextPosition,
+    ) -> Option<Bounds<Points>>;
+    fn geometry_range_rects(
+        &self,
+        layout: &TextLayout,
+        range: Range<u32>,
+        out: &mut Vec<Bounds<Points>>,
+    );
+}
+
+impl<M: TextEngine> GeometryEngine for M {
+    fn geometry_lines(&self, layout: &TextLayout) -> Vec<TextLine> {
+        self.lines(layout)
+    }
+    fn geometry_hit_test(&self, layout: &TextLayout, point: Point<Points>) -> TextPosition {
+        self.hit_test(layout, point)
+    }
+    fn geometry_caret_rect(
+        &self,
+        layout: &TextLayout,
+        position: TextPosition,
+    ) -> Option<Bounds<Points>> {
+        self.caret_rect(layout, position)
+    }
+    fn geometry_range_rects(
+        &self,
+        layout: &TextLayout,
+        range: Range<u32>,
+        out: &mut Vec<Bounds<Points>>,
+    ) {
+        self.range_rects(layout, range, out);
+    }
+}
+
+/// A text block's final layout as the platform engine made it
+/// ([`crate::Text::on_text_layout`]), to ask where its characters are:
+/// the engine's own answers, not an estimate from the lines.
+///
+/// Offsets are UTF-16 units in the block's own text: the empty
+/// placeholders the core adds for a span's padding are not counted, so
+/// they match the text the app gave. Boxes are in the content box (y
+/// down, points). Rust-only: it holds the engine and lives on the engine
+/// thread.
+#[derive(Clone)]
+pub struct TextGeometry {
+    engine: std::rc::Rc<dyn GeometryEngine>,
+    layout: TextLayout,
+    text: Arc<AttributedText>,
+    /// The laid-out text's offsets of the padding placeholders, in order.
+    spacers: Arc<[u32]>,
+}
+
+impl TextGeometry {
+    pub(crate) fn new(
+        engine: std::rc::Rc<dyn GeometryEngine>,
+        layout: TextLayout,
+        text: Arc<AttributedText>,
+    ) -> Self {
+        let mut spacers: Vec<u32> = text
+            .attachments
+            .iter()
+            .filter(|a| a.height <= Points::ZERO)
+            .map(|a| a.index)
+            .collect();
+        spacers.sort_unstable();
+        Self {
+            engine,
+            layout,
+            text,
+            spacers: spacers.into(),
+        }
+    }
+
+    /// The offset in the app's text of laid-out offset `t`.
+    fn to_source(&self, t: u32) -> u32 {
+        t - self.spacers.partition_point(|&s| s < t) as u32
+    }
+
+    /// The laid-out offset of offset `s` in the app's text: past the
+    /// placeholders before it, and past those at it unless `upstream`
+    /// (the caret stays with the character before).
+    fn to_laid(&self, s: u32, upstream: bool) -> u32 {
+        let mut t = s;
+        for &at in self.spacers.iter() {
+            if at < t || (at == t && !upstream) {
+                t += 1;
+            } else {
+                break;
+            }
+        }
+        t
+    }
+
+    /// Its lines, in order, with their characters.
+    pub fn lines(&self) -> Vec<TextLine> {
+        let units: Vec<u16> = self.text.text.encode_utf16().collect();
+        let mut lines = self.engine.geometry_lines(&self.layout);
+        for line in &mut lines {
+            let (start, end) = (line.start as usize, (line.end as usize).min(units.len()));
+            if start < end {
+                let mut text = String::from_utf16_lossy(&units[start..end]);
+                if self
+                    .spacers
+                    .iter()
+                    .any(|&s| s >= line.start && s < line.end)
+                {
+                    // Placeholders are one unit each: drop those at spacer
+                    // offsets.
+                    let mut k = line.start;
+                    text = text
+                        .chars()
+                        .filter(|c| {
+                            let at = k;
+                            k += c.len_utf16() as u32;
+                            !(*c == ATTACHMENT_CHAR && self.spacers.binary_search(&at).is_ok())
+                        })
+                        .collect();
+                }
+                line.text = text;
+            }
+            line.start = self.to_source(line.start);
+            line.end = self.to_source(line.end);
+        }
+        lines
+    }
+
+    /// The caret position nearest `point` (content box).
+    pub fn hit_test(&self, point: Point<Points>) -> TextPosition {
+        let p = self.engine.geometry_hit_test(&self.layout, point);
+        TextPosition::new(self.to_source(p.offset), p.affinity)
+    }
+
+    /// The caret at `position`: a box of no width as high as its line.
+    pub fn caret_rect(&self, position: TextPosition) -> Option<Bounds<Points>> {
+        let upstream = position.affinity == Affinity::Upstream;
+        let t = self.to_laid(position.offset, upstream);
+        self.engine
+            .geometry_caret_rect(&self.layout, TextPosition::new(t, position.affinity))
+    }
+
+    /// The boxes that cover the characters of `range`, line high.
+    pub fn range_rects(&self, range: Range<u32>) -> Vec<Bounds<Points>> {
+        let mut out = Vec::new();
+        if range.start < range.end {
+            let r = self.to_laid(range.start, false)..self.to_laid(range.end, true);
+            self.engine.geometry_range_rects(&self.layout, r, &mut out);
+        }
+        out
+    }
+}
+
+thread_local! {
+    static GEOMETRY: std::cell::RefCell<Option<TextGeometry>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// The geometry of the text block whose `TextLayout` event is being
+/// dispatched, for [`crate::Text::on_text_layout`]: the event's payload
+/// crosses threads, the engine does not.
+pub(crate) struct GeometryScope(Option<TextGeometry>);
+
+impl GeometryScope {
+    pub(crate) fn enter(geometry: TextGeometry) -> Self {
+        Self(GEOMETRY.with(|g| g.replace(Some(geometry))))
+    }
+
+    /// The geometry of the event being dispatched, if any.
+    pub(crate) fn current() -> Option<TextGeometry> {
+        GEOMETRY.with(|g| g.borrow().clone())
+    }
+}
+
+impl Drop for GeometryScope {
+    fn drop(&mut self) {
+        let previous = self.0.take();
+        GEOMETRY.with(|g| *g.borrow_mut() = previous);
+    }
+}
+
+impl fmt::Debug for TextGeometry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TextGeometry")
+            .field("spacers", &self.spacers)
+            .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod geometry_tests {
+    use super::*;
+
+    /// "a[pad]bc[pad]d": a padded span's placeholders, as the core adds them.
+    fn padded() -> Arc<AttributedText> {
+        let mut text = AttributedText {
+            text: format!("a{ATTACHMENT_CHAR}bc{ATTACHMENT_CHAR}d"),
+            ..AttributedText::default()
+        };
+        for index in [1, 4] {
+            text.attachments.push(TextAttachment {
+                index,
+                width: Points(4.0),
+                height: Points::ZERO,
+            });
+        }
+        Arc::new(text)
+    }
+
+    fn geometry() -> TextGeometry {
+        let engine = ApproxTextEngine;
+        let text = padded();
+        let prepared = engine.prepare(&text);
+        let layout = engine.layout(&prepared, size(Points(1000.0), Points(100.0)));
+        TextGeometry::new(std::rc::Rc::new(ApproxTextEngine), layout, text)
+    }
+
+    #[test]
+    fn padding_placeholders_are_not_offsets() {
+        let g = geometry();
+        let lines = g.lines();
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].text, "abcd");
+        assert_eq!((lines[0].start, lines[0].end), (0, 4));
+        let at = |o| {
+            g.caret_rect(TextPosition::new(o, Affinity::Downstream))
+                .unwrap()
+                .origin
+                .x
+        };
+        let laid = |o: u32| {
+            ApproxTextEngine
+                .caret_rect(&g.layout, TextPosition::new(o, Affinity::Downstream))
+                .unwrap()
+                .origin
+                .x
+        };
+        // "b" is after the first placeholder, "d" after both.
+        assert_eq!(at(1), laid(2));
+        assert_eq!(at(3), laid(5));
+        // And back: a point at "d" is offset 3 of the text.
+        let p = point(laid(5), Points(1.0));
+        assert_eq!(g.hit_test(p).offset, 3);
+        // A range over "bc" covers the laid-out "bc", not the spacers.
+        let r = g.range_rects(1..3);
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].origin.x, laid(2));
+    }
+}
