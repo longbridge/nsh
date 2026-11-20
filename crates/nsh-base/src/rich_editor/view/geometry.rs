@@ -109,6 +109,11 @@ pub(crate) struct TextGeo {
     /// line. Relative to the block, so an edit in another block leaves
     /// them in place.
     pub(crate) widths: HashMap<usize, Bounds<Points>>,
+    /// The text engine's final layout of it (`Text::on_text_layout`):
+    /// where it is known, hit testing and caret edges are the engine's,
+    /// whatever the fonts and padding; else they are estimated from the
+    /// lines.
+    pub(crate) geometry: Option<nsh_core::TextGeometry>,
 }
 
 /// Measures a text in a font (the platform's measurer, captured).
@@ -373,6 +378,13 @@ impl Geometry {
 
     /// Where `x` of a line falls: the nearest boundary between graphemes.
     fn offset_in_line(&self, geo: &TextGeo, line: &TextLine, x: Points) -> u32 {
+        if let Some(g) = geo.geometry.as_ref().filter(|_| geo.widths.is_empty()) {
+            let p = Point::new(line.x + x, line.y + line.height / 2.0);
+            return g
+                .hit_test(p)
+                .offset
+                .clamp(line.start, line.end.max(line.start));
+        }
         if x <= px(0.0) || line.text.is_empty() {
             return line.start;
         }
@@ -412,6 +424,17 @@ impl Geometry {
     fn x_in_line(&self, geo: &TextGeo, line: &TextLine, t: u32) -> Points {
         if t <= line.start || line.text.is_empty() {
             return px(0.0);
+        }
+        if let Some(g) = geo.geometry.as_ref().filter(|_| geo.widths.is_empty()) {
+            // At a wrapped line's end the caret is on this line.
+            let affinity = if t >= line.end {
+                nsh_core::Affinity::Upstream
+            } else {
+                nsh_core::Affinity::Downstream
+            };
+            if let Some(r) = g.caret_rect(nsh_core::TextPosition::new(t.min(line.end), affinity)) {
+                return r.origin.x - line.x;
+            }
         }
         let widths = self.line_attachments(geo, line);
         if t >= line.end {
@@ -698,6 +721,7 @@ mod tests {
                 owner: None,
                 // The view is at position 3 (content offset 2), placed
                 // after `ab`.
+                geometry: None,
                 widths: HashMap::from([(
                     2,
                     Bounds::new(Point::new(px(20.0), px(0.0)), Size::new(px(80.0), px(20.0))),
@@ -766,6 +790,7 @@ mod tests {
                 }],
                 frame: Bounds::new(Point::default(), Size::new(px(358.0), px(17.0))),
                 owner: None,
+                geometry: None,
                 widths: HashMap::from([(
                     4,
                     Bounds::new(
@@ -840,6 +865,7 @@ mod tests {
                 }],
                 frame: Bounds::new(Point::default(), Size::new(width, px(17.0))),
                 owner: None,
+                geometry: None,
                 widths: HashMap::new(),
             },
         );

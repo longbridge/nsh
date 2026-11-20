@@ -1050,10 +1050,11 @@ fn text_block(rv: Rv, item: ReadSignal<BlockItem>, owner: u64) -> impl IntoEleme
     let (frame_rv, lines_rv, spans_rv, sel_rv) = (rv.clone(), rv.clone(), rv.clone(), rv);
     // The text's box: its selection boxes, then the text over them.
     let text = text("")
-        .on(EventKind::TextLayout, move |p: &EventPayload| {
-            if let EventPayload::TextLayout(lines) = p {
-                lines_rv.set_lines(id, lines.clone());
-            }
+        // The engine's layout: its lines without the placeholders of
+        // spans' padding, so their offsets are the text's, and its own hit
+        // testing and caret edges.
+        .on_text_layout(move |g: &nsh_core::TextGeometry| {
+            lines_rv.set_lines(id, g.lines(), Some(g.clone()));
         })
         .child(dynamic(move || {
             let inline = content.get();
@@ -1791,13 +1792,20 @@ impl Rv {
     }
 
     /// Textblock `id`'s lines.
-    fn set_lines(&self, id: u64, lines: Vec<nsh_core::TextLine>) {
+    fn set_lines(
+        &self,
+        id: u64,
+        lines: Vec<nsh_core::TextLine>,
+        geometry: Option<nsh_core::TextGeometry>,
+    ) {
         {
             let mut geo = self.geo.borrow_mut();
             let Some(text) = geo.texts.get_mut(&id) else {
                 return;
             };
-            if text.lines == lines {
+            let same = text.lines == lines;
+            text.geometry = geometry;
+            if same {
                 return;
             }
             text.lines = lines;
