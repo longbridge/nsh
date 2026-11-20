@@ -103,12 +103,12 @@ use windows::{
             Controls::RichEdit::{
                 CFE_ITALIC, CFM_BOLD, CFM_COLOR, CFM_FACE, CFM_ITALIC, CFM_SIZE, CFM_SPACING,
                 CFM_WEIGHT, EM_CANREDO, EM_EXSETSEL, EM_GETLANGOPTIONS, EM_GETSCROLLPOS, EM_REDO,
-                EM_SETEDITSTYLE, EM_SETEVENTMASK, EM_SETLANGOPTIONS, EM_SETSCROLLPOS,
-                EM_SETTEXTMODE, EM_SETTYPOGRAPHYOPTIONS, ENM_CHANGE, ENM_ENDCOMPOSITION,
-                ENM_SELCHANGE, ENM_STARTCOMPOSITION, IMF_SPELLCHECKING, IMF_TKBPREDICTION,
-                PFA_CENTER, PFA_JUSTIFY, PFA_LEFT, PFA_RIGHT, PFM_ALIGNMENT, PFM_LINESPACING,
-                PFM_RTLPARA, SES_USECTF, TM_MULTICODEPAGE, TM_MULTILEVELUNDO, TM_PLAINTEXT,
-                TO_ADVANCEDTYPOGRAPHY, TXTBIT_AUTOWORDSEL, TXTBIT_CHARFORMATCHANGE,
+                EM_SETEDITSTYLE, EM_SETEVENTMASK, EM_SETLANGOPTIONS, EM_SETPARAFORMAT,
+                EM_SETSCROLLPOS, EM_SETTEXTMODE, EM_SETTYPOGRAPHYOPTIONS, ENM_CHANGE,
+                ENM_ENDCOMPOSITION, ENM_SELCHANGE, ENM_STARTCOMPOSITION, IMF_SPELLCHECKING,
+                IMF_TKBPREDICTION, PFA_CENTER, PFA_JUSTIFY, PFA_LEFT, PFA_RIGHT, PFM_ALIGNMENT,
+                PFM_LINESPACING, PFM_RTLPARA, SES_USECTF, TM_MULTICODEPAGE, TM_MULTILEVELUNDO,
+                TM_PLAINTEXT, TO_ADVANCEDTYPOGRAPHY, TXTBIT_AUTOWORDSEL, TXTBIT_CHARFORMATCHANGE,
                 TXTBIT_CLIENTRECTCHANGE, TXTBIT_D2DDWRITE, TXTBIT_DISABLEDRAG,
                 TXTBIT_HIDESELECTION, TXTBIT_MAXLENGTHCHANGE, TXTBIT_MULTILINE,
                 TXTBIT_PARAFORMATCHANGE, TXTBIT_READONLY, TXTBIT_SCROLLBARCHANGE,
@@ -724,6 +724,12 @@ impl InputState {
                 | TXTBIT_MAXLENGTHCHANGE
                 | TXTBIT_SCROLLBARCHANGE,
         );
+        // RichEdit takes the host's paragraph format for alignment but
+        // keeps its own line spacing (the font's) for text it already
+        // holds, so lines drew closer than the field was laid out for
+        // (#2655). Setting the format on the text, which a plain-text
+        // control applies to all of it, makes it draw at the line height.
+        apply_para_format(e);
         // Spelling (and the touch keyboard's suggestions) where the app
         // wants corrections: never in a password, shown or not.
         let spell =
@@ -961,6 +967,14 @@ impl Hosted for InputState {
 /// The property bits of a config (DirectWrite drawing, lines, read-only,
 /// password); RichEdit's own drag and drop stays off (the window is the
 /// drop target of files).
+/// Sets the editor's paragraph format ([`Props::para_format`]) on its
+/// text, all of it in a plain-text control: RichEdit keeps the font's line
+/// spacing for text it holds whatever the host's default says (#2655).
+fn apply_para_format(e: &Editor) {
+    let mut para = e.props().para_format;
+    e.send(EM_SETPARAFORMAT, 0, &mut para as *mut _ as isize);
+}
+
 fn base_bits(config: &InputConfig) -> u32 {
     // The selection shows only while the field has the keys, as on the
     // other platforms.
@@ -2390,6 +2404,60 @@ mod tests {
             let (min, max, _, _) = editor.vscroll();
             assert!(max - min > 80, "vertical overflow missing: {min}..{max}");
         }
+    }
+
+    /// Several lines are as far apart as the line height says, the same
+    /// height the field is laid out with, also for text the field held
+    /// before the line height was set (#2655).
+    #[test]
+    fn multiline_lines_follow_the_line_height() {
+        // Where the 12th of 12 lines starts below the first, in pixels.
+        let travel = |twips: i32| {
+            let config = InputConfig {
+                multiline: true,
+                ..Default::default()
+            };
+            let editor = Editor::new(
+                HWND::default(),
+                Props {
+                    client: RECT {
+                        right: 800,
+                        bottom: 2000,
+                        ..Default::default()
+                    },
+                    bits: base_bits(&config),
+                    ..Default::default()
+                },
+                Box::new(|| {}),
+                Box::new(|| {}),
+            )
+            .expect("RichEdit");
+            editor.send(EM_SETTEXTMODE, TM_PLAINTEXT.0 as usize, 0);
+            editor.set_text(&["The quick brown fox"; 12].join("\r"));
+            editor.update(
+                |p| {
+                    let pf = &mut p.para_format;
+                    pf.Base.dwMask = PFM_LINESPACING;
+                    pf.bLineSpacingRule = 4;
+                    pf.dyLineSpacing = twips;
+                },
+                TXTBIT_PARAFORMATCHANGE,
+            );
+            apply_para_format(&editor);
+            let y = |line: usize| {
+                let (index, _) = editor.send(0x00BB, line, 0); // EM_LINEINDEX
+                let mut at = windows::Win32::Foundation::POINTL::default();
+                editor.send(0x00D6, &mut at as *mut _ as usize, index.0); // EM_POSFROMCHAR
+                at.y
+            };
+            y(11) - y(0)
+        };
+        let (single, double) = (travel(400), travel(800));
+        assert!(single > 0, "lines not laid out: {single}");
+        assert!(
+            (double - 2 * single).abs() <= 11,
+            "line spacing ignored: {single} px at 400 twips, {double} px at 800"
+        );
     }
 
     #[test]
