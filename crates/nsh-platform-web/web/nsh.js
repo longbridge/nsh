@@ -3335,7 +3335,7 @@ class Player {
     }
     el._focusCall = true;
     try {
-      el.focus({ focusVisible: true });
+      el.focus({ focusVisible: true, preventScroll: true });
     } finally {
       el._focusCall = false;
     }
@@ -7424,7 +7424,7 @@ class Player {
           el.tabIndex = -1;
           el._a11yFocus = true;
         }
-        el.focus();
+        el.focus({ preventScroll: true });
         break;
       default: break;
     }
