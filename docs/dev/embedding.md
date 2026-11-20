@@ -7,7 +7,8 @@
   the keys NSH sets refused with what to set instead; `MinimumOSVersion` / `LSMinimumSystemVersion` are the runtime's
   minimum, `IOS_MINIMUM` / `MACOS_MINIMUM`, which an app may raise but not lower (checked when `nsh.json` is read;
   `actool` compiles the iOS icon, and `ios.launchScreen`'s color and image named in `UILaunchScreen`, for the version
-  declared); device builds check entitlements against the profile,
+  declared, and the app's Rust builds for iOS and macOS compile for it unless the environment sets the deployment
+  target); device builds check entitlements against the profile,
   which keeps the app's values in place of its own). iOS: `.app`, `.ipa` with `--sign <identity>
   --profile <file.mobileprovision>` (entitlements come from the profile; icons are compiled by `actool` into `Assets.car`).
   Android: an APK assembled without Gradle (`aapt2 link`, native libraries stored uncompressed and 16 KB ZIP aligned, `apksigner`;

@@ -3628,7 +3628,7 @@ mod tests {
                 ..ResolvedTextStyle::default()
             },
         );
-        let text = Arc::new(text);
+        let text = std::sync::Arc::new(text);
         let prepared = engine.prepare(&text);
         let size = engine.measure(&prepared, Some(Points(200.0)));
         let layout = engine.layout(&prepared, size);
