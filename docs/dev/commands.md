@@ -38,7 +38,7 @@ xvfb-run -a ./target/debug/nsh test examples/gallery --target linux        # in 
 ./target/debug/nsh test examples/gallery --target ios                      # in an iOS simulator: a finger's touches and the keyboard's typing, as UIKit gets them
 ./target/debug/nsh test examples/gallery --target android                  # on the device --device / ANDROID_SERIAL names, else the first adb lists: MotionEvents and KeyEvents at the window's views
 echo 'await app.screenshot("a.png"); await app.press("label:Navigation"); await app.screenshot("b.png")' | ./target/debug/nsh test examples/gallery/App.tsx --target macos   # check a platform change: steps from stdin in its window
-./target/debug/nsh check examples/hopper                                   # type check (TypeScript 7's native tsc, downloaded once; no Node)
+./target/debug/nsh check examples/hopper                                   # type check (TypeScript 7's native tsc, downloaded once; no Node), warning of what nsh.json is ignored or refused
 ./target/debug/nsh run examples/counter --trace                            # dev server + this desktop's native host, hot reload on save
 ./target/debug/nsh run examples/gallery --target ios                       # in an iOS simulator (boots one; needs the nsh-ios-host sim build)
 ./target/debug/nsh run examples/gallery --target android                   # on an emulator / device (needs `cargo xtask android --dev`)
