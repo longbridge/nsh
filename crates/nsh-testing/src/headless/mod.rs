@@ -56,7 +56,7 @@ use std::{
     io::Write,
     sync::{
         Arc, OnceLock,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -116,6 +116,8 @@ struct ChannelSink {
     /// On a manual clock: the engine asked for a frame, which the driver
     /// gives it when it moves the clock ([`Headless`]).
     wanted: Option<Arc<AtomicBool>>,
+    /// On the system's clock: frames asked for and not yet given.
+    frames: Arc<AtomicUsize>,
 }
 
 impl MountSink for ChannelSink {
@@ -133,11 +135,14 @@ impl MountSink for ChannelSink {
             return;
         }
         let control = self.control.clone();
+        let frames = self.frames.clone();
+        frames.fetch_add(1, Ordering::SeqCst);
         std::thread::spawn(move || {
             std::thread::sleep(FRAME);
             if let Some(control) = control.get() {
                 control.frame();
             }
+            frames.fetch_sub(1, Ordering::SeqCst);
         });
     }
 }
@@ -158,6 +163,8 @@ struct Launched {
     errors: Receiver<AppError>,
     /// On a manual clock: it asked for a frame.
     wanted: Option<Arc<AtomicBool>>,
+    /// On the system's clock: frames asked for and not yet given.
+    frames: Arc<AtomicUsize>,
 }
 
 /// Reports `url` as a link the system handed the app.
@@ -207,11 +214,13 @@ where
     let (errors, errors_rx) = crossbeam_channel::unbounded();
     let control = Arc::new(OnceLock::new());
     let wanted = config.clock.is_manual().then(Arc::default);
+    let frames = Arc::new(AtomicUsize::new(0));
     let sink = ChannelSink {
         batches,
         errors,
         control: control.clone(),
         wanted: wanted.clone(),
+        frames: frames.clone(),
     };
     let engine = Engine::start_with(config, text_engine, sink, |control| {
         // Steps reach every view of a page, below its fold too.
@@ -229,6 +238,7 @@ where
         batches: batches_rx,
         errors: errors_rx,
         wanted,
+        frames,
     })
 }
 
@@ -398,6 +408,8 @@ pub struct Headless {
     clock: Clock,
     /// On a manual clock: the engine asked for a frame.
     wanted: Option<Arc<AtomicBool>>,
+    /// On the system's clock: frames the engine asked for, not yet given.
+    frames: Arc<AtomicUsize>,
     /// The embedding app's channel with the app (`EngineConfig::host`),
     /// which the test plays.
     host: nsh_engine::HostChannel,
@@ -492,6 +504,7 @@ impl Headless {
             batches,
             errors,
             wanted,
+            frames,
         } = launch(config, displays, text_engine, link)?;
         let mut screen = Screen::default();
         screen.set_viewport(viewport);
@@ -532,6 +545,7 @@ impl Headless {
             observer: None,
             clock,
             wanted,
+            frames,
             host,
             last_press: None,
             #[cfg(feature = "js")]
@@ -606,15 +620,21 @@ impl Headless {
     /// sent ([`EngineControl::flush`]): whether it is idle, nothing left to
     /// run and no request in flight. False if it took until `deadline`.
     fn flush(&self, deadline: Instant) -> bool {
+        self.flush_until_due(deadline).0
+    }
+
+    /// [`Headless::flush`], also with when the engine's next timer is due
+    /// ([`EngineControl::flush_until_due`]).
+    fn flush_until_due(&self, deadline: Instant) -> (bool, Option<Instant>) {
         let (tx, rx) = crossbeam_channel::bounded(1);
-        self.engine.control().flush(move |idle| {
-            let _ = tx.send(idle);
+        self.engine.control().flush_until_due(move |idle, due| {
+            let _ = tx.send((idle, due));
         });
         match rx.recv_deadline(deadline) {
-            Ok(idle) => idle,
-            Err(crossbeam_channel::RecvTimeoutError::Timeout) => false,
+            Ok(answer) => answer,
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => (false, None),
             // A gone engine sends nothing more.
-            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => true,
+            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => (true, None),
         }
     }
 
@@ -1532,35 +1552,68 @@ impl Headless {
 
     /// Applies batches until the app is done with a step, or for 2 s at
     /// most (an app updating all the time never is): false if the limit
-    /// ended it. On the system's clock it is done once the engine has
-    /// handled what the step sent ([`Headless::caught_up`]) and then no
-    /// batch came for 100 ms and no native animation that ends by itself
-    /// runs; on a manual clock, as soon as the engine says it is idle
-    /// ([`EngineControl::flush`]), without waiting.
+    /// ended it. Either clock asks the engine whether it is idle
+    /// ([`EngineControl::flush`]) instead of waiting for the batches to
+    /// stop; on the system's clock a timer due within 100 ms, a pending
+    /// frame or a native animation that ends by itself is waited for
+    /// ([`Headless::idle_on_system_clock`]).
     pub fn settle(&mut self) -> bool {
         if self.clock.is_manual() {
             self.idle_on_manual_clock(SETTLE)
         } else {
-            let end = Instant::now() + SETTLE;
-            self.caught_up(end);
-            self.quiet(QUIET, end.saturating_duration_since(Instant::now()))
+            self.idle_on_system_clock(SETTLE)
         }
     }
 
-    /// On the system's clock: has the engine run what was sent to it
-    /// ([`EngineControl::flush`]) and applies the batches that brought,
-    /// again while they bring more (what applying them sends back: a
-    /// scroll reported, a focus moved), until `end` at most. The quiet
-    /// that ends a step is then counted from there, so an engine taking
-    /// longer than [`QUIET`] over a step does not end it early, with the
-    /// next step acting on the screen as it was before.
-    fn caught_up(&mut self, end: Instant) {
-        while !self.exited && self.errors.is_empty() && Instant::now() < end {
+    /// On the system's clock: applies batches until the app is done with a
+    /// step, or for `limit` at most: false if the limit ended it. Done is
+    /// asked, as on a manual clock, and means what waiting [`QUIET`] for no
+    /// batch meant: the engine ran everything sent to it and its batches
+    /// were applied, no frame it asked for is pending, no native animation
+    /// that ends by itself runs, and nothing it runs by itself (a timer)
+    /// comes due within [`QUIET`]. Something due sooner is waited for, until
+    /// no batch came for [`QUIET`] as before. A
+    /// request in flight, whose answer comes from elsewhere, is waited for
+    /// by the batches stopping for [`QUIET`], as before.
+    fn idle_on_system_clock(&mut self, limit: Duration) -> bool {
+        let end = Instant::now() + limit;
+        let mut last = Instant::now();
+        loop {
+            if self.exited || !self.errors.is_empty() {
+                return true;
+            }
+            if Instant::now() >= end {
+                return false;
+            }
             let applied = self.applied;
-            self.flush(end);
+            let (idle, due) = self.flush_until_due(end);
             self.drain();
-            if self.applied == applied {
-                return;
+            if self.applied != applied || !self.errors.is_empty() {
+                last = Instant::now();
+                continue;
+            }
+            let framing =
+                self.frames.load(Ordering::SeqCst) > 0 || self.animator.finishing();
+            if !idle {
+                return self.quiet(QUIET, end.saturating_duration_since(Instant::now()));
+            }
+            let now = Instant::now();
+            let soon = due.filter(|&at| at < now + QUIET);
+            // What the wait for no batch would have ended, it still ends: a
+            // timer that keeps coming due and renders nothing.
+            let quiet = now >= last + QUIET && !self.animator.finishing();
+            if (!framing && soon.is_none()) || quiet {
+                return true;
+            }
+            // Wait for the frame, the animation's next frame or the timer.
+            let wake = match soon {
+                Some(at) if !framing => at,
+                _ => now + FRAME,
+            };
+            match self.pump(wake.min(last + QUIET).min(end)) {
+                Pumped::Batch => last = Instant::now(),
+                Pumped::Error | Pumped::Exited => return true,
+                Pumped::Timeout => {}
             }
         }
     }

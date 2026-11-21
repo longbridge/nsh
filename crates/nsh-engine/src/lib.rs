@@ -1543,8 +1543,9 @@ enum Message {
     /// Moves a manual clock forward by this much, then calls back.
     Advance(std::time::Duration, Box<dyn FnOnce() + Send>),
     /// Runs what is queued and due now, then calls back with whether the
-    /// engine is idle ([`EngineControl::flush`]).
-    Flush(Box<dyn FnOnce(bool) + Send>),
+    /// engine is idle and when the next timer is due
+    /// ([`EngineControl::flush_until_due`]).
+    Flush(Box<dyn FnOnce(bool, Option<std::time::Instant>) + Send>),
     /// Sent by a dropped [`Engine`] (there is none in WebAssembly).
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     Shutdown,
@@ -1774,6 +1775,19 @@ impl EngineControl {
     /// elsewhere. A headless driver on a manual clock settles a step with
     /// it, instead of waiting for the batches to stop for a while.
     pub fn flush(&self, done: impl FnOnce(bool) + Send + 'static) {
+        self.flush_until_due(move |idle, _| done(idle));
+    }
+
+    /// [`EngineControl::flush`], also telling when the next thing the
+    /// engine runs by itself is due (a timer, a held-back event, a state
+    /// timer): `None` when nothing is scheduled. A headless driver on the
+    /// system's clock settles a step with it: idle with nothing due soon
+    /// means no batch is coming, without waiting to see none come.
+    #[doc(hidden)]
+    pub fn flush_until_due(
+        &self,
+        done: impl FnOnce(bool, Option<std::time::Instant>) + Send + 'static,
+    ) {
         let _ = self.tx.send(Message::Flush(Box::new(done)));
     }
 
@@ -2802,7 +2816,11 @@ impl<M: TextEngine + 'static> Driver<M> {
             }
             Message::Flush(done) => {
                 let running = self.flush(rx);
-                done(running && self.idle(rx));
+                let due = [self.due(), self.clock.next_alarm()]
+                    .into_iter()
+                    .flatten()
+                    .min();
+                done(running && self.idle(rx), due);
                 running
             }
             // A test's clock on a real platform: the display's frame moves it
