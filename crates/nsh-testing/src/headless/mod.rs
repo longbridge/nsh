@@ -2920,7 +2920,7 @@ mod tests {
         view()
             .on_press(move || {
                 count.update(|c| *c += 1);
-                set_clipboard(format!("copied {}", count.get_untracked()));
+                drop(set_clipboard(format!("copied {}", count.get_untracked())));
             })
             .child(text("Copy"))
     }
@@ -2960,13 +2960,13 @@ mod tests {
                         let mut item = ClipboardItem::default();
                         item.text = "a b".into();
                         item.html = Some("<p>a <b>b</b></p>".into());
-                        set_clipboard_item(item)
+                        drop(set_clipboard_item(item))
                     })
                     .child(text("Rich")),
             )
             .child(
                 view()
-                    .on_press(|| set_clipboard("plain"))
+                    .on_press(|| drop(set_clipboard("plain")))
                     .child(text("Plain")),
             )
     }

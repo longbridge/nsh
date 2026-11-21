@@ -24,8 +24,8 @@ use super::{
     reactive::with_data,
     signal_with,
     task::{
-        self, Action, Answer, ClipboardImage, ClipboardItem, DialogAnswer, Executor, FileAnswer,
-        ImageSize,
+        self, Action, Answer, ClipboardImage, ClipboardItem, ClipboardWrite, DialogAnswer,
+        Executor, FileAnswer, ImageSize,
     },
 };
 use crate::{
@@ -744,17 +744,27 @@ pub fn open_url(url: impl Into<String>) -> Answer<bool> {
     answer
 }
 
-/// Puts `text` on the system clipboard (TS: `Clipboard.writeText`).
-pub fn set_clipboard(text: impl Into<String>) {
-    act(super::services::set_clipboard(text.into()));
+/// Puts `text` on the system clipboard (TS: `Clipboard.writeText`). The
+/// answer says whether the system clipboard took it
+/// ([`ClipboardWrite`]); drop it when that does not matter, the write
+/// happens either way.
+pub fn set_clipboard(text: impl Into<String>) -> Answer<ClipboardWrite> {
+    let (answer, action) = super::services::set_clipboard(text.into());
+    act(action);
+    answer
 }
 
 /// Puts `item` on the system clipboard (TS: `Clipboard.write`): its
 /// text, and its HTML as the platform's HTML type, which apps that read
 /// formatting paste. Where the platform has no HTML on the clipboard (a
 /// terminal) the text only.
-pub fn set_clipboard_item(item: ClipboardItem) {
-    act(super::services::set_clipboard_item(item));
+///
+/// The answer says whether the system clipboard took it
+/// ([`ClipboardWrite`]); drop it when that does not matter.
+pub fn set_clipboard_item(item: ClipboardItem) -> Answer<ClipboardWrite> {
+    let (answer, action) = super::services::set_clipboard_item(item);
+    act(action);
+    answer
 }
 
 /// The text on the system clipboard, `""` when it holds none (TS:

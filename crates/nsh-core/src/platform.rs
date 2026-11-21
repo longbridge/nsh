@@ -357,6 +357,12 @@ pub struct Environment {
     /// ([`crate::Command::PickScreenColor`]); without it, a pick answers
     /// no color at once.
     pub screen_color: bool,
+    /// The platform reports whether each clipboard write
+    /// ([`crate::Command::SetClipboard`], [`crate::Command::SetClipboardItem`])
+    /// reached the system clipboard, as [`crate::EventKind::ClipboardWrite`]
+    /// in the order of the writes; without it, a write answers
+    /// [`crate::element::ClipboardWrite::Requested`] at once.
+    pub clipboard_write_result: bool,
     /// The platform renders canvas drawings offscreen into images
     /// ([`crate::Command::RenderCanvas`], `OffscreenCanvas`); without it,
     /// a render fails at once with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
@@ -524,6 +530,7 @@ impl Default for Environment {
             lifecycle: Lifecycle::Active,
             wake_count: 0,
             screen_color: false,
+            clipboard_write_result: false,
             canvas_render: false,
             share: false,
             auth_session: false,

@@ -2272,6 +2272,8 @@ class Player {
       lifecycle: this.lifecycle(),
       timeZone: timeZoneName(),
       screenColor: typeof window.EyeDropper === "function",
+      // `writeClipboard` reports each write's result.
+      clipboardWriteResult: true,
       share: webShareAllowed(),
       notifications: typeof window.Notification === "function",
       audio: typeof (window.AudioContext ?? window.webkitAudioContext) === "function",
@@ -7439,8 +7441,8 @@ class Player {
       case "playerClose": this.playerClose(args[0]); break;
       case "setBadge": this.setBadge(args[0]); break;
       case "openUrl": this.event(ROOT_ID, "onOpenUrl", { id: args[0], opened: this.openUrl(args[1]) }); break;
-      case "setClipboard": this.writeClipboard(args[0]); break;
-      case "setClipboardItem": this.writeClipboard(args[0], args[1] ?? undefined); break;
+      case "setClipboard": this.writeClipboard(args[0], undefined, (written) => this.event(ROOT_ID, "onClipboardWrite", { written })); break;
+      case "setClipboardItem": this.writeClipboard(args[0], args[1] ?? undefined, (written) => this.event(ROOT_ID, "onClipboardWrite", { written })); break;
       case "readClipboard": this.readClipboard(args[0], args[1]); break;
       case "setClipboardImage": this.writeClipboardImage(args[0]); break;
       case "readClipboardImage": this.readClipboardImage(args[0], args[1]); break;
@@ -7598,8 +7600,8 @@ class Player {
    * context; some browsers want a gesture), then a copy command over a
    * selected offscreen text area.
    */
-  writeClipboard(text, html) {
-    if (navigator.userActivation?.isActive !== false && this.copyCommand(text, html)) return;
+  writeClipboard(text, html, done = () => {}) {
+    if (navigator.userActivation?.isActive !== false && this.copyCommand(text, html)) return done(true);
     const copy = () => {
       const focused = document.activeElement;
       const area = document.createElement("textarea");
@@ -7608,20 +7610,21 @@ class Player {
       document.body.append(area);
       // Safari copies only a selection.
       area.select();
-      this.copyCommand(text, html);
+      const written = this.copyCommand(text, html);
       area.remove();
       // The selection took the focus from the field that had it (a
       // RichEditor's input).
       if (focused && focused !== document.body && focused.isConnected) focused.focus({ preventScroll: true });
+      done(written);
     };
     if (html !== undefined && navigator.clipboard?.write && typeof ClipboardItem === "function") {
       const item = new ClipboardItem({
         "text/plain": new Blob([text], { type: "text/plain" }),
         "text/html": new Blob([html], { type: "text/html" }),
       });
-      navigator.clipboard.write([item]).catch(copy);
+      navigator.clipboard.write([item]).then(() => done(true), copy);
     } else if (html === undefined && navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(text).catch(copy);
+      navigator.clipboard.writeText(text).then(() => done(true), copy);
     } else {
       copy();
     }

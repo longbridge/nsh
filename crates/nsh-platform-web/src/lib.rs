@@ -599,6 +599,7 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
         None => env.lifecycle,
     };
     env.screen_color = flag("screenColor").unwrap_or(env.screen_color);
+    env.clipboard_write_result = flag("clipboardWriteResult").unwrap_or(env.clipboard_write_result);
     env.share = flag("share").unwrap_or(env.share);
     env.notifications = flag("notifications").unwrap_or(env.notifications);
     env.audio = flag("audio").unwrap_or(env.audio);
@@ -618,6 +619,7 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
         e.keyboard_height = env.keyboard_height;
         e.lifecycle = env.lifecycle;
         e.screen_color = env.screen_color;
+        e.clipboard_write_result = env.clipboard_write_result;
         e.share = env.share;
         e.notifications = env.notifications;
         e.audio = env.audio;

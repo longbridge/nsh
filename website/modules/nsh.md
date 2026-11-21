@@ -1592,8 +1592,8 @@ import { Clipboard } from "nsh";
 
 ```ts
 const Clipboard: {
-  writeText(text: string): Promise<void>;
-  write(item: ClipboardItem): Promise<void>;
+  writeText(text: string): Promise<ClipboardWrite>;
+  write(item: ClipboardItem): Promise<ClipboardWrite>;
   readText(): Promise<string>;
   hasText(): Promise<boolean>;
   writeImage(src: string): Promise<void>;
@@ -1601,6 +1601,8 @@ const Clipboard: {
   hasImage(): Promise<boolean>;
   readFiles(): Promise<string[]>;
 };
+
+type ClipboardWrite = "written" | "failed" | "requested";
 
 interface ClipboardItem {
   text: string; // the content as plain text
@@ -1615,8 +1617,8 @@ interface ClipboardImage {
 
 | TS | Rust (`nsh_core::prelude`) |
 |---|---|
-| `await Clipboard.writeText(text)` | `set_clipboard(text)` |
-| `await Clipboard.write({ text, html })` | `set_clipboard_item(item)` (a `ClipboardItem`) |
+| `await Clipboard.writeText(text)` | `set_clipboard(text).await -> ClipboardWrite` |
+| `await Clipboard.write({ text, html })` | `set_clipboard_item(item).await -> ClipboardWrite` (a `ClipboardItem`) |
 | `await Clipboard.readText()` | `clipboard_string().await -> String` |
 | `await Clipboard.hasText()` | `clipboard_has_string().await -> bool` |
 | `await Clipboard.writeImage(src)` | `set_clipboard_image(src)` |
@@ -1635,10 +1637,16 @@ The user can also copy from a [selectable text](../elements/text.md) themselves;
 ### Clipboard.writeText
 
 ```ts
-writeText(text: string): Promise<void>;
+writeText(text: string): Promise<ClipboardWrite>;
 ```
 
 Puts `text` on the clipboard, replacing what was there. Rust: `set_clipboard(text)`.
+
+It resolves to what became of the write: `"written"` when the system clipboard took it (Windows, macOS, the web),
+`"failed"` when it refused it (another app holds the clipboard, the browser declined), and `"requested"` where the
+platform does not say (iOS, Android, Linux, a GPUI host, a terminal). NSH never reads the clipboard back to find out.
+Show "Copied" only for `"written"`, and keep a way to copy by hand for `"failed"`. In Rust the answer is a
+`ClipboardWrite`; drop it when the result does not matter, the write happens either way.
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -1674,7 +1682,7 @@ const copied = signal(false);
 ### Clipboard.write
 
 ```ts
-write(item: ClipboardItem): Promise<void>;
+write(item: ClipboardItem): Promise<ClipboardWrite>;
 ```
 
 Puts the same content as plain text and as HTML on the clipboard, replacing what was there, as a browser copies a

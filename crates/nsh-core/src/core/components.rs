@@ -716,6 +716,10 @@ pub(super) struct Components {
     next_host_call: u64,
     /// URLs being opened (`openUrl`), by request id: their answers.
     url_opens: FxHashMap<u32, AnswerSlot<bool>>,
+    /// The clipboard writes sent to the platform waiting for its result,
+    /// in the order sent ([`crate::EventKind::ClipboardWrite`]).
+    pub(super) clipboard_writes:
+        std::collections::VecDeque<AnswerSlot<crate::element::ClipboardWrite>>,
     /// Those not handed to the engine yet ([`Core::take_url_opens`]).
     url_requests: Vec<(u32, String)>,
     /// The language the app asked to show in (`Some(None)`: the user's
@@ -864,6 +868,7 @@ impl Default for Components {
             next_image_info: 1,
             clipboard_reads: FxHashMap::default(),
             url_opens: FxHashMap::default(),
+            clipboard_writes: Default::default(),
             url_requests: Vec::new(),
             locale_request: None,
             asks_quit: false,
@@ -6270,6 +6275,15 @@ impl<M: TextEngine> Core<M> {
             Action::Command(id, command) => {
                 let _ = self.apply_op(Op::Command { id, command });
             }
+            // Answered as the command leaves for the platform
+            // (`Core::take_commands`) or when the platform reports it.
+            Action::WriteClipboard(command, answer) => {
+                self.components.clipboard_writes.push_back(answer);
+                let _ = self.apply_op(Op::Command {
+                    id: crate::ROOT_ID,
+                    command,
+                });
+            }
             Action::FocusBack { to, from } => self.focus_back = Some((to, from)),
             Action::Dialog(mut dialog, answer) => {
                 dialog.id = self.components.next_dialog;
@@ -7053,6 +7067,13 @@ impl<M: TextEngine> Core<M> {
         out.append(&mut self.components.url_requests);
     }
 
+    /// Answers the oldest clipboard write still waiting.
+    pub(super) fn answer_clipboard_write(&mut self, result: crate::element::ClipboardWrite) {
+        if let Some(answer) = self.components.clipboard_writes.pop_front() {
+            answer.borrow_mut().deliver(result);
+        }
+    }
+
     /// Answers URL request `id`: whether the URL opened.
     pub fn answer_open_url(&mut self, id: u32, opened: bool) {
         if let Some(answer) = self.components.url_opens.remove(&id) {
@@ -7499,6 +7520,20 @@ impl<M: TextEngine> Core<M> {
                     self.components.url_schemes.address.set_page_base(base);
                 }
                 self.url_scheme(url.clone(), page, quiet, change);
+                true
+            }
+            EventKind::ClipboardWrite if id == crate::ROOT_ID => {
+                let written = match payload {
+                    EventPayload::Map(entries) => entries
+                        .iter()
+                        .any(|(k, v)| *k == "written" && *v == crate::PayloadValue::Bool(true)),
+                    _ => false,
+                };
+                self.answer_clipboard_write(if written {
+                    crate::element::ClipboardWrite::Written
+                } else {
+                    crate::element::ClipboardWrite::Failed
+                });
                 true
             }
             EventKind::OpenUrl if id == crate::ROOT_ID => {
