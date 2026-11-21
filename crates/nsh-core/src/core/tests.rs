@@ -28574,6 +28574,82 @@ mod rust_windows {
         title
     }
 
+    // #2759: what the ref `open_window` returns is asked for in the same
+    // turn follows the opening, in order; attributes join its options.
+    #[test]
+    fn requests_made_right_after_open_window_follow_its_opening() {
+        use crate::desktop::WindowMode;
+        use crate::element::desktop::open_window;
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<Empty>());
+        let _ = c.commit().unwrap();
+        let doc = {
+            let _entered = c.components.runtime.enter();
+            let doc = open_window(window().id("doc").title("Static").content(|| text("doc")))
+                .expect("opens on a desktop");
+            doc.focus();
+            doc.set(WindowAttributes {
+                title: Some("Set".into()),
+                ..Default::default()
+            });
+            doc.set_mode(WindowMode::Maximized);
+            doc.focus();
+            doc
+        };
+        let batch = c.commit().unwrap();
+        let commands = window_commands(&batch);
+        let [
+            (id, DesktopCommand::OpenWindow(open)),
+            (focus, DesktopCommand::Request(WindowRequest::Focus)),
+            (mode, DesktopCommand::Request(WindowRequest::SetMode(WindowMode::Maximized))),
+            (again, DesktopCommand::Request(WindowRequest::Focus)),
+        ] = &commands[..]
+        else {
+            panic!("opens, then its requests in order: {commands:?}");
+        };
+        assert_eq!([focus, mode, again], [id; 3]);
+        assert_eq!(open.options.attributes.title.as_deref(), Some("Set"));
+        // Sent once: a later commit does not repeat them.
+        {
+            let _entered = c.components.runtime.enter();
+            doc.set(WindowAttributes {
+                title: Some("Later".into()),
+                ..Default::default()
+            });
+        }
+        let commands = window_commands(&c.commit().unwrap());
+        assert!(
+            matches!(&commands[..], [(_, DesktopCommand::SetAttributes(_))]),
+            "{commands:?}"
+        );
+        // Closed: its requests reach nothing, and the next opening of the
+        // id does not inherit them.
+        {
+            let _entered = c.components.runtime.enter();
+            doc.close();
+        }
+        let _ = c.commit().unwrap();
+        {
+            let _entered = c.components.runtime.enter();
+            doc.set_mode(WindowMode::FullScreen);
+            doc.focus();
+        }
+        assert!(c.commit().is_none_or(|b| window_commands(&b).is_empty()));
+        {
+            let _entered = c.components.runtime.enter();
+            open_window(window().id("doc").content(|| text("doc"))).expect("opens again");
+        }
+        let commands = window_commands(&c.commit().unwrap());
+        assert!(
+            matches!(&commands[..], [(_, DesktopCommand::OpenWindow(_))]),
+            "{commands:?}"
+        );
+    }
+
     // #1344, `open_window` and a window opened again: each opening keeps
     // what its content set then, not what an earlier one did.
     #[test]

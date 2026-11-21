@@ -3286,10 +3286,21 @@ impl<M: TextEngine> Core<M> {
                         window.attributes.clone(),
                     ))
                 };
+                let opens = or.window.is_none();
                 let _ = self.apply_op(Op::Command {
                     id,
                     command: crate::Command::Desktop(Box::new(command)),
                 });
+                // What its ref was asked for before it existed follows its
+                // opening, in order (`open_window(..)` then `focus()`).
+                if opens {
+                    for command in &nr.window_commands {
+                        let _ = self.apply_op(Op::Command {
+                            id,
+                            command: crate::Command::Desktop(Box::new(command.clone())),
+                        });
+                    }
+                }
             }
         }
     }

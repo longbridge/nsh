@@ -249,6 +249,9 @@ pub(crate) struct RareAttrs {
     /// A window of the app's own: the dialog root it shows
     /// ([`super::desktop::window`]).
     pub(crate) window: Option<Box<crate::desktop::WindowOptions>>,
+    /// What its ref was asked for before it was mounted: sent after the
+    /// window opens.
+    pub(crate) window_commands: Vec<crate::desktop::DesktopCommand>,
 }
 
 impl RareAttrs {
