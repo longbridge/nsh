@@ -535,6 +535,27 @@ mod tests {
     }
 
     #[test]
+    fn turkish_weekdays_follow_the_date() {
+        let long = Format {
+            weekday: Some(Text::Long),
+            month: Some(Month::Text(Text::Long)),
+            ..DATE
+        };
+        assert_eq!(fmt("tr-TR", long), "16 Ekim 2026 Cuma");
+        let short = Format {
+            weekday: Some(Text::Short),
+            month: Some(Month::Text(Text::Short)),
+            ..DATE
+        };
+        assert_eq!(fmt("tr-TR", short), "16 Eki 2026 Cum");
+        let numeric = Format {
+            weekday: Some(Text::Long),
+            ..DATE
+        };
+        assert_eq!(fmt("tr-TR", numeric), "16.10.2026 Cuma");
+    }
+
+    #[test]
     fn times_in_12_and_24_hours() {
         assert_eq!(fmt("en-US", TIME), "3:04:05 PM");
         assert_eq!(fmt("en-GB", TIME), "15:04:05");
