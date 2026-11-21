@@ -76,6 +76,10 @@ Without a handler, these notifications show as the app's own do and their presse
 notification itself is reported, not the actions of its category. An app that embeds NSH and has a notification center
 delegate of its own keeps every notification there. macOS works the same way.
 
+An app that turns on `nsh-extra`'s [`push`](./nshm.md#push) feature has this handler set by that module, which
+passes the notifications to `Push.on` and to Rust code through `nsh_extra::push::on_event`; the app's crate then
+listens there rather than setting a handler of its own.
+
 ## Packaging
 
 ```sh

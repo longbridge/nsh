@@ -124,6 +124,7 @@ nsh add nsh-extra --features camera
 | Feature | TSX | 作用 |
 |---|---|---|
 | `camera` | `Camera` | 在 iOS 和 Android 上用系统相机拍一张照片 |
+| `push` | `Push` | 在 iOS 上接收任意推送服务发来的远程通知 |
 
 ```tsx
 import { Camera } from "nsh-extra";
@@ -136,6 +137,43 @@ if (await Camera.available()) {
 ```
 
 用户取消时 `takePhoto` 返回 `null`；用户不允许应用使用相机时，它以错误码 `EACCES` 拒绝。没有相机可用的地方（桌面、Web、模拟器）`available()` 为 `false`，`takePhoto` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝。开启这个 feature 后，打包的应用会带上它需要的条目：iOS 上的相机用途说明（应用可以在 `ios.infoPlist` 里写自己的 `NSCameraUsageDescription` 文案），Android 上对相机应用的查询声明。
+
+### Push
+
+`Push` 向系统的推送服务注册设备，把设备 token 交给应用，应用再把它发给自己使用的推送服务。之后通知以事件的形式到达：
+
+```sh
+nsh add nsh-extra --features push
+```
+
+```tsx
+import { Notifications } from "nsh";
+import { Push } from "nsh-extra";
+
+if (await Push.available()) {
+  // 显示通知需要用户授权；后台投递不需要。
+  await Notifications.requestPermission();
+  const token = await Push.register();
+  await sendTokenToServer(token);
+}
+
+Push.on("token", ({ token }) => sendTokenToServer(token));
+Push.on("press", ({ payload }) => openChat(payload));
+Push.on("notification", ({ threadId }) => refreshInbox(threadId));
+Push.on("background", async ({ payload }) => {
+  const changed = await syncInbox(payload);
+  return changed ? "newData" : "noData";
+});
+```
+
+- `register()` 以十六进制的 token 完成；设备未能注册时以系统给出的原因拒绝。每次启动都注册一次：token 变了，`on("token")` 会报告。
+- `press` 报告用户点按的通知，包括启动应用的那一条，它会等到第一个监听者。`notification` 报告应用在前台时到达的通知。两者都带它的 `id`、`threadId` 和推送服务发来的 `payload`。payload 是不可信输入。
+- `background` 报告唤醒应用的投递（iOS 上是带 `content-available` 的那种）。系统会等它的监听者：返回一个 Promise 表示这项工作及其结果，须在 25 秒内完成。
+- `setForegroundPresentation({ banner: false })` 决定应用在前台时通知怎么显示，要在通知到达之前设好：系统会立即询问。
+- `closeThread(threadId)` 移除某个 thread 里已送达的通知；`Notifications.close(id)` 移除单条。
+- 独立运行的 iOS 应用里 `available()` 为 `true`。其他地方为 `false`，`register` 和 `closeThread` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝。
+
+开启这个 feature 后，打包的应用会带上 `remote-notification` 后台模式。`aps-environment` entitlement 来自应用签名所用的描述文件（[iOS 真机](./packaging.md#ios-真机)）。Rust 代码（比如某个推送服务 SDK 的绑定）使用 `nsh_extra::push`：`on_event` 收到同样的事件，并带 token 的原始字节；`launch_options` 原样交出系统传入的启动参数。
 
 ## 编写 nshm
 

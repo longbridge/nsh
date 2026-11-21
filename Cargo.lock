@@ -3969,6 +3969,7 @@ dependencies = [
  "log",
  "nsh-core",
  "nsh-platform-android",
+ "nsh-platform-apple",
  "nsh-platform-ios",
  "objc2",
  "objc2-foundation",

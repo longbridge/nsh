@@ -69,6 +69,9 @@ set_foreign_handler(Chats);
 这些通知和应用自己的通知一样显示，点击被丢弃。只报告点击通知本身，不报告其类别的操作。嵌入 NSH 且自己设置了通知中心 delegate 的应用，
 所有通知都留在自己的 delegate。macOS 上同样如此。
 
+开启 `nsh-extra` 的 [`push`](./nshm.md#push) feature 的应用，由这个模块设置处理者，它把通知交给 `Push.on`，并通过
+`nsh_extra::push::on_event` 交给 Rust 代码；这时应用 crate 在那里监听，不再自己设置处理者。
+
 ## 打包
 
 ```sh

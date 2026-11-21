@@ -126,6 +126,7 @@ crate, imported from `nsh-extra` in TSX and called as `nsh_extra::<module>` in R
 | Feature | TSX | What it does |
 |---|---|---|
 | `camera` | `Camera` | Takes a photo with the system's camera on iOS and Android |
+| `push` | `Push` | Receives remote notifications from any push service on iOS |
 
 ```tsx
 import { Camera } from "nsh-extra";
@@ -142,6 +143,53 @@ the app use the camera. `available()` is `false` where there is no camera to sho
 and there `takePhoto` rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. The feature adds what the packaged app needs:
 the camera's usage description on iOS (an app sets its own wording with `ios.infoPlist`'s
 `NSCameraUsageDescription`) and the query of camera apps on Android.
+
+### Push
+
+`Push` registers the device with the system's push service and hands the app its token, which the app sends to the
+push service it uses. Notifications then arrive as events:
+
+```sh
+nsh add nsh-extra --features push
+```
+
+```tsx
+import { Notifications } from "nsh";
+import { Push } from "nsh-extra";
+
+if (await Push.available()) {
+  // Showing notifications needs the user's permission; background deliveries do not.
+  await Notifications.requestPermission();
+  const token = await Push.register();
+  await sendTokenToServer(token);
+}
+
+Push.on("token", ({ token }) => sendTokenToServer(token));
+Push.on("press", ({ payload }) => openChat(payload));
+Push.on("notification", ({ threadId }) => refreshInbox(threadId));
+Push.on("background", async ({ payload }) => {
+  const changed = await syncInbox(payload);
+  return changed ? "newData" : "noData";
+});
+```
+
+- `register()` resolves with the token in hexadecimal and rejects with the system's reason when the device is not
+  registered. Register at every launch: `on("token")` reports a token that changed.
+- `press` reports the notification the user pressed, including the one that launched the app, which waits for the
+  first listener. `notification` reports one that arrived while the app is in front. Both carry its `id`, its
+  `threadId` and the `payload` the push service sent. A payload is untrusted input.
+- `background` reports a delivery that woke the app (on iOS one with `content-available`). The system waits for its
+  listeners: return a promise for the work and what it gave, within 25 seconds.
+- `setForegroundPresentation({ banner: false })` decides how notifications show while the app is in front, ahead of
+  their arrival: the system asks at once.
+- `closeThread(threadId)` removes the delivered notifications of a thread; `Notifications.close(id)` removes one.
+- `available()` is `true` in a standalone iOS app. Elsewhere it is `false`, and `register` and `closeThread` reject
+  with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
+
+The feature adds the `remote-notification` background mode to the packaged app. The `aps-environment` entitlement comes
+from the provisioning profile the app is signed with ([iOS devices](./packaging.md#ios-devices)). Rust code, such as
+a push service's SDK binding, uses `nsh_extra::push`: `on_event` hears the same events with the token's bytes, and
+`launch_options` hands over the launch options as the system passed them.
 
 ## Writing an nshm
 
