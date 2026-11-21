@@ -102,7 +102,7 @@ Consider a research workstation. A trader selects cells while quotes arrive, rea
 | [TextView](../elements/text-view.md) | Rust parses streamed Markdown into text and views, including tables, code and links, so a research assistant can render a reply as it arrives. |
 | [RichEditor](../elements/rich-editor.md) | A schema constrains document structure and transactions record edits. Teams can add mentions or commands while retaining edit history. |
 | [DiffView](../elements/diff-view.md) | Render a patch or compare two texts with aligned or unified views, word-level highlights and review annotations. |
-| [Dock (DockArea)](../elements/dock.md) | The component handles splitting, resizing and moving tabs. Panels retain their content when moved and the app owns the layout data. |
+| [Dock](../elements/dock.md) | The component handles splitting, resizing and moving tabs. Panels retain their content when moved and the app owns the layout data. |
 
 These choices affect performance, stability and extensibility in different ways. The grid bounds cell creation, the document schema keeps edits valid, and moving a tab preserves its content. Apps can supply cells, document types and panels while reusing scrolling, undo and drag behavior. The quote workload below measures runtime performance; the linked component examples demonstrate the individual behaviors.
 
@@ -155,7 +155,7 @@ How NSH answers:
 
 Chat and AI apps gain the most. Many AI products render their conversations as web pages, and long sessions bring dropped frames while scrolling, awkward input methods and selection, and weak integration with system accessibility and gestures. NSH renders rich text, code blocks, tables, images and streamed output with the platform's text views and editors ([Text](./text.md), [Lists](./lists.md)).
 
-For a multi-pane review tool, inventory the web grid, docking library and diff renderer separately. Map them to DataTable, DockArea and DiffView, then port custom cells and review actions. Existing DOM widgets need replacement or an embedded web view.
+For a multi-pane review tool, inventory the web grid, docking library and diff renderer separately. Map them to DataTable, Dock and DiffView, then port custom cells and review actions. Existing DOM widgets need replacement or an embedded web view.
 
 ### Tauri
 
@@ -240,7 +240,7 @@ GPUI Kit users already have advanced desktop components. The gain is carrying th
 
 **Qt offers two UI technologies, Widgets and Qt Quick.** Qt Widgets and Qt Quick draw their own controls styled to resemble each platform, with long-built tooling. NSH differs in foundation and model: platform controls rather than styled look-alikes, Rust at the core with a TSX path instead of C++ and QML, HTML on the web, one component model that adapts interaction across mobile, desktop and web, a toolchain designed for automated and AI-driven development, and an Apache-2.0 license for every use.
 
-For a Qt Widgets workspace, map dock widgets to DockArea and test saved layouts and panel state; existing Qt widget code still needs an integration or rewrite.
+For a Qt Widgets workspace, map dock widgets to Dock and test saved layouts and panel state; existing Qt widget code still needs an integration or rewrite.
 
 ### Slint
 
