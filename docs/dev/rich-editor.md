@@ -268,6 +268,14 @@ selects the column or row (a cell selection), a drag on desktops shows the drop 
 and moves it with `moveTableColumn` / `moveTableRow` on release. Table gestures come before the content box's
 selecting (`Rv::table_target` at the press).
 
+Each table's handles and grips are a region of their own (`table_controls`), placed from that table's layout alone
+(`Rv::table_layout`). Every block reports its frame in an event of its own, so a region over all the tables, run again
+on `layout_rev`, laid every table out again for each block: the first commit of a long document with tables grew with
+its square. A table's region follows its own revision (`Rv::watch_table`), which `Rv::table_moved` moves when the
+table's frame, a cell's frame, or the frame or inset of a box around it changes (`Tree::table_holders` lists the tables
+in each box, the document's included), and the selection's table (a memo of its block) wakes only the two tables a
+change of it concerns. The drop line is a region of its own too (`drop_line`).
+
 ## The JS API (`rich_editor/js/`)
 
 ```tsx
