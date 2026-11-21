@@ -4629,6 +4629,15 @@ expect Observed: true 1 日Seed
 # that emits its own payload under that name.
 covers [events] onCompositionChange
 
+# base-rich-editor-accessory
+tap id:case-base-rich-editor-accessory
+# The input the editor types with names the bar, which is mounted.
+expect Format bar
+expect Rendered
+prop label:AccessoryNotes inputAccessoryViewID format
+prop label:AccessoryNotes inputAccessoryView true
+covers [props] RichEditor.inputAccessoryViewID
+
 # base-rich-editor-node-view
 tap id:case-base-rich-editor-node-view
 # The app's component renders the atom with its props, once.

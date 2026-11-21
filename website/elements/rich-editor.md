@@ -115,6 +115,28 @@ once everything is selected, and a read-only editor offers Copy and Select All. 
 toolbar's `isActive` follows the selection, `toggleMark` formats it, and undo takes a cut or a paste back. Taps,
 keys, input methods and the mouse select as before.
 
+### A bar over the keyboard
+
+`inputAccessoryViewID` (Rust `.input_accessory(id)`) shows the
+[`InputAccessoryView`](../docs/forms-and-keyboard.md#a-bar-over-the-keyboard-ios-inputaccessoryview) with that
+`nativeID` on top of the keyboard while the editor has the focus, as an `Input`'s `ios={{ inputAccessoryViewID }}`
+does: it comes and goes with the keyboard and moves with it natively. Formatting buttons there run on the session and
+leave the focus in the editor:
+
+```tsx
+import { InputAccessoryView } from "nsh/mobile";
+
+<RichEditor editor={editor} inputAccessoryViewID="format" />
+<InputAccessoryView nativeID="format">
+  <View style={{ flexDirection: "row", padding: 8, gap: 8 }}>
+    <Button label="Bold" onPress={() => editor.run(command("toggleBold"))} />
+    <Button label="Done" onPress={() => editor.blur()} />
+  </View>
+</InputAccessoryView>
+```
+
+Input accessories are iOS's; elsewhere the editor shows none.
+
 ### Bubble menu
 
 `bubbleMenu` is Tiptap's bubble menu: the app's content shown next to the selection, above it by default

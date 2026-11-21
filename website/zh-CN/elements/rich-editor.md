@@ -77,6 +77,24 @@ mount(() => (
 
 在 iOS 和 Android 上，编辑器像平台自己的文本视图一样选择文本。长按选中手指下的词，之后移动手指按整词扩展选区；在空白处长按则放置光标。双击选中一个词，三击选中整段。触摸产生的选区两端各有一个手柄（`selectionHandle`，主题 `primary` 色的圆点），手指拖动手柄即可移动那一端。手指抬起时，系统编辑菜单在选区上方打开，提供剪切、拷贝、粘贴和全选；点按选区会再次打开它，点按光标则打开粘贴和全选。菜单只提供适用的操作：全部选中后不再提供全选，只读编辑器只提供拷贝和全选。每个操作都是编辑器的事务，因此工具栏的 `isActive` 跟随选区，`toggleMark` 作用于它，撤销可以撤回剪切或粘贴。点按、键盘、输入法和鼠标的选择方式不变。
 
+### 键盘上方的工具栏
+
+`inputAccessoryViewID`（Rust 中为 `.input_accessory(id)`）在编辑器获得焦点时，把 `nativeID` 为该值的 [`InputAccessoryView`](../docs/forms-and-keyboard.md#键盘上方的工具栏inputaccessoryview) 显示在键盘顶部，与 `Input` 的 `ios={{ inputAccessoryViewID }}` 一样：它随键盘出现和消失，并由原生跟随键盘移动。其中的格式按钮作用于会话，焦点仍留在编辑器中：
+
+```tsx
+import { InputAccessoryView } from "nsh/mobile";
+
+<RichEditor editor={editor} inputAccessoryViewID="format" />
+<InputAccessoryView nativeID="format">
+  <View style={{ flexDirection: "row", padding: 8, gap: 8 }}>
+    <Button label="Bold" onPress={() => editor.run(command("toggleBold"))} />
+    <Button label="Done" onPress={() => editor.blur()} />
+  </View>
+</InputAccessoryView>
+```
+
+输入附件视图是 iOS 的功能，其他平台上编辑器不显示它。
+
 ### 气泡菜单
 
 `bubbleMenu` 即 Tiptap 的气泡菜单：应用的内容显示在选区旁，默认在其上方（`bubbleMenuPlacement`，没有空间时翻到另一侧），相距 `bubbleMenuOffset` 点（8），位于一个随文本滚动的浮层中。应用在希望显示它时传入，依据会话的状态：
