@@ -1084,8 +1084,8 @@ Builds that link nothing of the app's own (`rust_app.rs`):
 
 - An app whose Rust is installed nshm only (no `"rust"`, a released nsh) builds in a workspace shared by every app with
   the same nshm, `~/.nsh/builds/<fingerprint>` (`shared_workspace`: this nsh, the nshm with their features, `unify`, the
-  Apple minimums). It is optimized throughout (`opt-level = 3`, line tables, not incremental), so there is no
-  separate dev or release build of an nshm. A build no app used for 30 days is removed when a new one starts; the app's
+  Apple minimums). Its dev profile is a release build (`opt-level = 3`, no debug assertions or overflow checks,
+  line tables, not incremental), and `nsh run --release` uses that development host too: one build of an nshm. A build no app used for 30 days is removed when a new one starts; the app's
   own old `.nsh/rust` is removed.
 - Every generated workspace builds the crates the app does not write (`[profile.dev.package."*"]`) optimized; the
   app's crates and nsh's crates from a checkout stay at `opt-level = 0` with full debug info.

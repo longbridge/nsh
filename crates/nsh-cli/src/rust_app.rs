@@ -2946,11 +2946,12 @@ opt-level = \"s\"
         manifest.push_str(
             "\n[profile.dev.package.\"*\"]\nopt-level = 3\ndebug = \"line-tables-only\"\n",
         );
-        // A shared build is nobody's code to debug: its generated crates are
-        // optimized too, and nothing is kept to build them again faster.
+        // A shared build is nobody's code to debug: it is a release build
+        // (its development host serves `--release` as well), keeping only
+        // line tables, and nothing is kept to build it again faster.
         if self.shared {
             manifest.push_str(
-                "\n[profile.dev]\nopt-level = 3\ndebug = \"line-tables-only\"\nincremental = false\n",
+                "\n[profile.dev]\nopt-level = 3\ndebug = \"line-tables-only\"\ndebug-assertions = false\noverflow-checks = false\nincremental = false\n",
             );
         }
         for package in ["quickjs-jit-sys", "taffy", "objc2", "objc2-encode"] {
@@ -3362,8 +3363,11 @@ opt-level = \"s\"
             _ => (self.workspace.clone(), &trimmed[..]),
         };
         let package = self.bin(name);
-        let release = runner || RELEASE_HOSTS.load(std::sync::atomic::Ordering::Relaxed);
-        let what = if release && !runner {
+        let asked = RELEASE_HOSTS.load(std::sync::atomic::Ordering::Relaxed);
+        // A shared workspace's development host is optimized as a release
+        // one already (`write_workspace_manifest`): one build serves both.
+        let release = runner || asked && !self.shared;
+        let what = if asked && !runner {
             format!("{what} (release build)")
         } else {
             what
