@@ -53,7 +53,6 @@ NSH 起步于移动客户端的插件层（[GPUI Shell](https://gpui-kit.com/she
 | 工具链 | 一个 nsh 可执行文件，无需 Node | Node、npm、打包工具 | Node、Metro、CocoaPods、Gradle | flutter CLI、Xcode、Gradle | CMake、Qt Creator | cargo | cargo、CMake |
 | 热重载 | <span class="status status--yes" role="img" aria-label="支持"></span> | <span class="status status--yes" role="img" aria-label="支持"></span> | <span class="status status--yes" role="img" aria-label="支持"></span> Fast Refresh | <span class="status status--yes" role="img" aria-label="支持"></span> | <span class="status status--partial" role="img" aria-label="部分支持"></span> QML | <span class="status status--no" role="img" aria-label="不支持"></span> | <span class="status status--partial" role="img" aria-label="部分支持"></span> 实时预览 |
 | 签名、沙箱化的下发界面 | <span class="status status--yes" role="img" aria-label="支持"></span> | <span class="status status--no" role="img" aria-label="不支持"></span> | <span class="status status--partial" role="img" aria-label="部分支持"></span> OTA 可信代码 | <span class="status status--no" role="img" aria-label="不支持"></span> | <span class="status status--partial" role="img" aria-label="部分支持"></span> 加载 QML | <span class="status status--partial" role="img" aria-label="部分支持"></span> GPUI Shell | <span class="status status--no" role="img" aria-label="不支持"></span> |
-| API 兼容性登记 | <span class="status status--yes" role="img" aria-label="支持"></span> CI 检查 nsh-compat | <span class="status status--no" role="img" aria-label="不支持"></span> | <span class="status status--no" role="img" aria-label="不支持"></span> | <span class="status status--no" role="img" aria-label="不支持"></span> | <span class="status status--no" role="img" aria-label="不支持"></span> | <span class="status status--no" role="img" aria-label="不支持"></span> | <span class="status status--no" role="img" aria-label="不支持"></span> |
 | 许可证 | Apache-2.0 | MIT | MIT | BSD-3-Clause | LGPL、GPL、商业 | Apache-2.0 | GPL、商业 |
 
 GPUI 与 GPUI Fast 合为一列：两者运行的平台相同，GPUI Fast 在 GPUI 之上增加了 Retained 渲染。“GPUI Shell”指 [GPUI Shell](https://gpui-kit.com/shell)。
@@ -65,7 +64,7 @@ GPUI 与 GPUI Fast 合为一列：两者运行的平台相同，GPUI Fast 在 GP
 - **按设备适配的交互内置在基础组件里**，而不是由每个应用自己处理；
 - **作为一个视图嵌入**现有的 iOS、Android、桌面和 GPUI 应用；
 - **发布之后下发签名、沙箱化的界面**，支持吊销和回滚；
-- **整个工具链只有一个可执行文件**，以及**由 CI 检查的 API 兼容性登记**。
+- **整个工具链只有一个可执行文件**。
 
 ### 各行的含义
 
@@ -80,7 +79,6 @@ GPUI 与 GPUI Fast 合为一列：两者运行的平台相同，GPUI Fast 在 GP
 - **嵌入。** NSH 应用可以作为一个视图嵌入现有的 iOS、Android 或桌面应用（[嵌入](./embedding.md)），也能通过 GPUI 后端作为视图嵌入 GPUI 和 GPUI Kit 应用（[GPUI](./gpui.md)）。React Native（brownfield）和 Flutter（add-to-app）也能嵌入，但各自带上自己的 runtime。
 - **终端。** 同一套组件模型通过 ratatui 渲染终端应用（[TUI](./tui.md)）。
 - **工具链、热重载。** 一个 `nsh` 可执行文件负责创建、热重载运行、在真实平台上测试、为每个目标打包和签名，TSX 不需要 Node 或 npm（[CLI](./cli.md)）。
-- **API 兼容性登记。** 每一处公开 API 变更都登记在 nsh-compat 中并由 CI 检查，按兼容版本构建的应用无需修改即可继续运行（[向后兼容](./compatibility.md)）。其他框架遵循语义化版本，但没有机器检查的登记。
 - **无 JS runtime。** Rust 应用的运行器在任何平台上都不链接 JavaScript 引擎；TSX 是第二条路径，运行在同一个引擎上。Qt Quick 的 QML 运行在 Qt 的 JavaScript 引擎上，用 C++ 编写的 Qt Widgets 则不需要。
 - **签名下发界面。** NSH 用自己信任的密钥和吊销列表校验签名的 `.nshpkg` 包，并让每个包运行在宿主设定限制和能力的虚拟机里（[签名包](./signed-packages.md)、[沙箱与能力](./sandbox-and-capabilities.md)）。打包的 NSH 应用也以同样的方式 OTA 更新自己的 TSX（包括 iOS 和 Android），启动失败的版本会自动回滚（[OTA 更新](./ota-updates.md)）。React Native 的 OTA 更新下发的是可信的应用代码；Qt 可以加载 QML 文件；GPUI 应用通过 [GPUI Shell](https://gpui-kit.com/shell) 加载 JavaScript 模块。
 
@@ -92,7 +90,21 @@ GPUI 与 GPUI Fast 合为一列：两者运行的平台相同，GPUI Fast 在 GP
 - **面向日常应用的 Retained Mode。** 组件只运行一次，细粒度的 signal 只把变化的属性发给视图，因此聊天、表单、列表和文档在静止时几乎不占 CPU（[简介](./index.md#retained-mode)、[响应式](./reactivity.md)）。
 - **发布之后下发界面，经过签名、运行在沙箱里。** 用 NSH 构建的应用——以及用各平台自己的工具编写的原生应用——都能在运行时接收 TSX 模块，由团队编写或 AI 生成（[动态界面](./index.md#动态界面与-ai-生成的界面)）。
 - **一个工具链，人和 AI agent 都能用。** 一个 `nsh` 可执行文件负责创建、运行、热更新、在真实平台上测试、打包和签名，覆盖每个目标平台；TSX 不需要 Node 或 npm（[CLI](./cli.md)、[安装](./installation.md)）。
-- **对已发布的应用有兼容承诺。** 为某个兼容版本构建的应用，在之后的每个版本上都能原样运行；每次 API 改动都记录在 nsh-compat 中并由 CI 约束（[向下兼容](./compatibility.md)）。
+
+### 专业应用的组件基础
+
+以行情研究工作台为例：主表要在报价更新时保持选区，研究报告要边接收边排版，拖动面板之后还要保留正在编辑的内容。这些都是产品需要长期维护的交互。NSH 把 GPUI Kit 在桌面应用上积累的分层方式带到各端：[NSH Base](../modules/nsh-base.md) 负责行为、状态、焦点和无障碍，产品团队在自己的 UI 层定义外观。由此，同一套组件可以成为团队内多个产品共同遵循的交互标准。
+
+| 基础组件 | 应用可直接复用的能力 |
+|---|---|
+| [DataTable](../elements/data-table.md) | 行列双向虚拟化只创建可见单元格；冻结价格列、按页供数和键盘选区可组合在同一张行情表中。 |
+| [Editor](../elements/editor.md) | 只创建可见行，按编辑位置增量高亮；查找替换、多光标、折叠和诊断可直接用于策略编辑器。 |
+| [TextView](../elements/text-view.md) | Rust 解析流式 Markdown，用文本和视图呈现表格、代码和链接，研究助手可直接显示分段到达的回复。 |
+| [RichEditor](../elements/rich-editor.md) | 文档结构由 schema 约束，编辑通过事务更新；团队可以添加提及或快捷命令，并沿用历史记录。 |
+| [DiffView](../elements/diff-view.md) | 可直接显示补丁或比较两段文本，支持并排与统一视图、词级高亮及逐处审阅批注。 |
+| [Dock（DockArea）](../elements/dock.md) | 拆分、调整大小和移动标签页由组件处理；移动时保留面板内容，布局数据由应用保存。 |
+
+这也给性能、稳定性和扩展划出了具体边界：大表只创建可见单元格，文档模型检查编辑结果，面板移动保留内容。应用可以扩展单元格、文档 schema 和面板，而不必接管滚动、撤销或拖动逻辑。下表的行情负载提供运行时性能参考；组件行为则可以在各自文档的示例里单独验证。
 
 ### 实测数字
 
@@ -143,6 +155,8 @@ NSH 怎么解决：
 
 聊天和 AI 应用收益最大。很多 AI 产品用网页渲染对话，长会话里会出现滚动掉帧、输入法和选择别扭、与系统无障碍和手势脱节。NSH 用平台的文本视图和编辑器渲染富文本、代码块、表格、图片和流式输出（[文本](./text.md)、[列表](./lists.md)）。
 
+迁移多面板审阅工具时，可以先列出现有的 Web 表格、停靠布局和差异视图，分别映射到 DataTable、DockArea 和 DiffView，再移植业务单元格和审阅动作。已有 DOM 控件需要替换或放进 WebView。
+
 ### Tauri
 
 **Tauri 使用系统提供的 Web View。** Tauri 不打包 Chromium，而是用操作系统提供的：Windows 上是 WebView2（Chromium），macOS 和 iOS 上是 WKWebView（WebKit），Linux 上是 `webkit2gtk`（WebKit），Android 上是设备的 Android WebView（[Tauri webview 版本](https://v2.tauri.app/reference/webview-versions/)）。应用变小了，界面仍然是网页。
@@ -157,6 +171,8 @@ NSH 怎么解决：
 NSH 怎么解决：界面是平台自己的视图，在平台支持的每个系统版本上都一样，中间没有 Web 引擎；Rust 和 TSX 在同一个进程、同一张响应式图上运行，TSX 界面直接调用 Rust 模块——从 TSX 排序 100,000 行约 3 ms，与纯 Rust 持平（[性能报告](./performance-report.md)）。Tauri 最好的想法——核心用 Rust——是 NSH 的默认做法，而界面不再需要浏览器。
 
 在 NSH 原生界面上，图表可以用原生 Canvas 绘制，更新逻辑可以绑定到响应式作用域。释放作用域时，运行时会清理归属于它的计算和已登记的清理函数。应用仍须为自行创建的定时器、外部行情订阅登记取消操作；选择嵌入 WebView 的页面仍按浏览器的生命周期管理资源。[响应式运行时实现](https://github.com/longbridge/nsh/blob/d2c6e800dac5985c112e61626b89e30ace2d2f83/crates/nsh-core/src/reactive.rs#L1169)
+
+可沿用 Rust 后端生成的报告数据，先把一个 Markdown 网页面板换成 TextView，再用同一份报告逐端核对链接、表格和流式更新。
 
 ### React Native
 
@@ -186,6 +202,8 @@ NSH 怎么解决：
 
 **能沿用的。** TSX 和 JSX 很像，组件、props、事件的思路不变；hooks 换成 signal。**要付出的。** NSH 刻意不做 React Native 兼容层：它用更高效的模型取代了 React 协调，所以 React Native 的包不能在 NSH 上运行。列表、导航、动画、手势、文本、画布、Web View 和视频由框架原生提供，视觉组件由应用自己定义（[设计指南](./design-guides.md)），已有的原生 SDK 可以做成[原生组件](./native-components.md)或 Rust [模块](./platform-extensions.md)。
 
+[React Native 核心组件](https://reactnative.dev/docs/components-and-apis)包括列表和文本输入。要做可冻结列的双向虚拟行情表，或带撤销的结构化编辑器，还需要选库或自行组合。NSH 可直接从 DataTable 和 RichEditor 开始，迁移数据源、文档结构和产品样式，再到目标设备上验收选区与撤销。
+
 ### Flutter
 
 **Flutter 使用自己的渲染引擎绘制控件。** Flutter 自己渲染整个界面，所以应用在哪里看起来都一样——也因此没有一处是平台自己的。
@@ -199,6 +217,8 @@ NSH 怎么解决：
 
 NSH 怎么解决：每个后端用的都是平台自己的视图——UIKit、Android View、AppKit、Win32、GTK 4——地图或 Web View 只是视图树里的又一个视图，不是被合成进来的客人；文本编辑、输入法、选择和无障碍都是系统的（[简介](./index.md#native-的含义)）；Web 产物是真正的 HTML，可选择、可被索引、可被读屏软件朗读；语言是 Rust（有 crates 生态和原生线程）加上用于快速写界面的 TSX。**要付出的。** 各平台外观不同，这正是使用平台 UI 的意义；如果要像素级一致的品牌界面，Flutter 更合适。
 
+Flutter 已有表格和输入控件。迁移代码审阅页时，值得比较的是上层工作量：Editor 提供诊断与折叠，DiffView 提供差异对齐与批注，现有 Dart 控件实现仍需移植。
+
 ### GPUI 和 GPUI Fast
 
 **GPUI 为 Zed 桌面编辑器提供 GPU 渲染。** [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) 是 Zed 编辑器的 Rust UI 框架；[GPUI Fast](https://github.com/longbridge/gpui-fast) 是 Longbridge 的分支，加入了保留式渲染、滚动图层和原生窗口合成，NSH 出自同一个团队。
@@ -210,17 +230,23 @@ NSH 怎么解决：每个后端用的都是平台自己的视图——UIKit、An
 - **一切都是画出来的。** 输入框、选择和菜单由框架绘制，不是平台控件，系统文本行为要像 Flutter 一样重新实现。
 - **只有 Rust，不能下发。** 没有用于快速写界面的脚本路径，也没有给发布后下发界面准备的沙箱（GPUI Kit 通过 [GPUI Shell](https://gpui-kit.com/shell) 加入了 JavaScript 模块，NSH 正是从这个想法长出来的）。
 
-NSH 怎么解决：同样以 Rust 为先的模型覆盖 iOS、Android 和 Web；文本输入、选择和输入法是平台的；内置 TSX 路径和签名、沙箱化的下发；API 变更记录在兼容性登记里并由 CI 检查（[向后兼容](./compatibility.md)）。NSH 的 GPUI 后端可以把 NSH 应用嵌进现有的 GPUI 和 GPUI Kit 应用，界面可以一个个迁移，不必整体重写（[GPUI](./gpui.md)）。
+NSH 怎么解决：同样以 Rust 为先的模型覆盖 iOS、Android 和 Web；文本输入、选择和输入法是平台的；内置 TSX 路径和签名、沙箱化的下发。NSH 的 GPUI 后端可以把 NSH 应用嵌进现有的 GPUI 和 GPUI Kit 应用，界面可以一个个迁移，不必整体重写（[GPUI](./gpui.md)）。
 
 **数字如实写。** 在 [NSH 性能基准](https://github.com/longbridge/nsh-perf-bench)中（Linux，500 行行情表，NSH 用 GTK 4 后端），日常负载开销相同：每秒 1,000 条行情时 NSH Rust 占单核 18%，GPUI Fast 20%。持续高强度更新时 GPUI Fast 领先：每秒 20,000 条行情时它占 25%，NSH 为 73–78%；每帧计算 1,000 个方块的动画，它的 CPU 约为 NSH 的三分之一。只做桌面、由每帧更新的成千上万个视图主导的交易终端，留在 GPUI Fast；要覆盖手机、Web、日常界面或下发界面，用 NSH。
+
+GPUI Kit 用户在桌面上已经拥有成熟组件。迁移的收益在于把熟悉的交互模型带到更多平台。可先嵌入一个 NSH 面板，验证文档状态和键盘操作，再迁移外围工作区。
 
 ### Qt
 
 **Qt 提供 Widgets 和 Qt Quick 两套 UI 技术。** Qt Widgets 和 Qt Quick 自己绘制控件，并按各平台风格做样式，工具链积累多年。NSH 的根基和模型不同：用平台控件而不是仿制样式；核心是 Rust 并提供 TSX 路径，而不是 C++ 和 QML；Web 上输出 HTML；一套组件模型在手机、桌面和 Web 上自动适配交互；工具链为自动化和 AI 驱动的开发设计；任何用途都是 Apache-2.0 许可。
 
+迁移 Qt Widgets 工作区时，可将停靠窗口映射到 DockArea，优先验证布局恢复与面板状态；已有 Qt 控件代码仍需适配或重写。
+
 ### Slint
 
 **Slint 提供自己的声明式语言和渲染器**，面向桌面和嵌入式设备，可从 Rust、C++、JavaScript 或 Python 使用。两者都重视原生性能；NSH 的路线是每个平台自己的 UI 和交互、Web 上的 HTML、用 Rust 和 TSX 写应用而不是另一门标记语言，并且手机是一等目标。
+
+对于以表格为主的 Slint 工具，可用同一数据模型对照 DataTable，先验证分页、冻结列和键盘选区，再移植自定义单元格。
 
 ### 小结：每个框架一行
 
@@ -230,7 +256,7 @@ NSH 怎么解决：同样以 Rust 为先的模型覆盖 iOS、Android 和 Web；
 | Tauri | 每个系统、每个版本是不同的 Web 引擎 | 平台视图，在支持的系统上表现一致；Rust 和 TSX 同进程 |
 | React Native | 每次更新都过 JS 线程和协调；桌面和 Web 是独立项目 | Rust 核心加细粒度 signal；六个平台同一框架、同一发布 |
 | Flutter | 自绘文本和输入；原生视图代价高；Web 接近画布 | 系统的文本、输入和无障碍；原生视图就在视图树里；Web 是 HTML |
-| GPUI | 只有桌面、1.0 之前、随编辑器演进 | 同样的 Rust 模型覆盖手机和 Web；兼容性登记；可嵌入 GPUI 应用 |
+| GPUI | 只有桌面、1.0 之前、随编辑器演进 | 同样的 Rust 模型覆盖手机和 Web；可嵌入 GPUI 应用 |
 
 ## 如何评估：先做一个试点
 

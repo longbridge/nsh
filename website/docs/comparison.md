@@ -53,7 +53,6 @@ Legend: <span class="status status--yes" role="img" aria-label="Yes"></span> Yes
 | Toolchain | One nsh executable, no Node | Node, npm, packager | Node, Metro, CocoaPods, Gradle | flutter CLI, Xcode, Gradle | CMake, Qt Creator | cargo | cargo, CMake |
 | Hot reload | <span class="status status--yes" role="img" aria-label="Yes"></span> | <span class="status status--yes" role="img" aria-label="Yes"></span> | <span class="status status--yes" role="img" aria-label="Yes"></span> Fast Refresh | <span class="status status--yes" role="img" aria-label="Yes"></span> | <span class="status status--partial" role="img" aria-label="Partial"></span> QML | <span class="status status--no" role="img" aria-label="No"></span> | <span class="status status--partial" role="img" aria-label="Partial"></span> Live preview |
 | Signed, sandboxed delivered UI | <span class="status status--yes" role="img" aria-label="Yes"></span> | <span class="status status--no" role="img" aria-label="No"></span> | <span class="status status--partial" role="img" aria-label="Partial"></span> OTA of trusted code | <span class="status status--no" role="img" aria-label="No"></span> | <span class="status status--partial" role="img" aria-label="Partial"></span> Loads QML | <span class="status status--partial" role="img" aria-label="Partial"></span> GPUI Shell | <span class="status status--no" role="img" aria-label="No"></span> |
-| API compatibility registry | <span class="status status--yes" role="img" aria-label="Yes"></span> nsh-compat in CI | <span class="status status--no" role="img" aria-label="No"></span> | <span class="status status--no" role="img" aria-label="No"></span> | <span class="status status--no" role="img" aria-label="No"></span> | <span class="status status--no" role="img" aria-label="No"></span> | <span class="status status--no" role="img" aria-label="No"></span> | <span class="status status--no" role="img" aria-label="No"></span> |
 | License | Apache-2.0 | MIT | MIT | BSD-3-Clause | LGPL, GPL, commercial | Apache-2.0 | GPL, commercial |
 
 GPUI and GPUI Fast share a column: they run on the same platforms, and GPUI Fast adds retained rendering on top of GPUI. "GPUI Shell" is [GPUI Shell](https://gpui-kit.com/shell).
@@ -65,7 +64,7 @@ Read down the NSH column: it is the only one green in every group. In particular
 - **interaction that adapts per device inside the base components**, instead of in each app;
 - **embedding as a single view** into existing iOS, Android, desktop and GPUI apps;
 - **signed, sandboxed UI delivered after release**, with revocation and rollback;
-- **one executable for the whole toolchain** and **a CI-checked API compatibility registry**.
+- **one executable for the whole toolchain**.
 
 ### What the rows mean
 
@@ -80,7 +79,6 @@ Read down the NSH column: it is the only one green in every group. In particular
 - **Embedding.** An NSH app embeds as one view in an existing iOS, Android or desktop app ([Embedding](./embedding.md)), and as a view in GPUI and GPUI Kit apps through its GPUI backend ([GPUI](./gpui.md)). React Native (brownfield) and Flutter (add-to-app) also embed, each bringing its own runtime.
 - **Terminal.** The same component model renders terminal apps through ratatui ([TUI](./tui.md)).
 - **Toolchain, hot reload.** One `nsh` executable creates, runs with hot reload, tests on real platforms, packages and signs for every target, and TSX needs no Node or npm ([CLI](./cli.md)).
-- **API compatibility registry.** Every public API change is recorded in nsh-compat and checked by CI, so an app built for a compatible version keeps running unchanged ([Backward compatibility](./compatibility.md)). The others follow semantic versioning without a machine-checked registry.
 - **No JS runtime.** A Rust app's runners link no JavaScript engine on any platform; TSX is the second path, on the same engine. Qt Quick's QML runs on Qt's JavaScript engine; Qt Widgets in C++ do not.
 - **Signed delivery.** NSH verifies signed `.nshpkg` packages against the keys it trusts and a revocation list, and runs each in a VM with the limits and capabilities the host grants ([Signed packages](./signed-packages.md), [Sandbox and capabilities](./sandbox-and-capabilities.md)). A packaged NSH app takes its own TSX over the air the same way, iOS and Android included, and rolls back a release that fails to start ([OTA Updates](./ota-updates.md)). React Native's over-the-air updates ship trusted app code; Qt can load QML files; GPUI apps take JavaScript modules through [GPUI Shell](https://gpui-kit.com/shell).
 
@@ -92,7 +90,21 @@ Read down the NSH column: it is the only one green in every group. In particular
 - **Retained views for everyday apps.** Components run once and fine-grained signals send only the properties that changed, so chats, forms, lists and documents sit near idle at rest ([Introduction](./index.md#retained-views), [Reactivity](./reactivity.md)).
 - **UI delivered after release, signed and sandboxed.** Apps built with NSH — and native apps written with each platform's own tools — take TSX modules at run time, written by a team or generated by AI ([Dynamic UI](./index.md#dynamic-ui-and-ai-generated-ui)).
 - **One toolchain, for people and agents.** One `nsh` executable creates, runs, hot-reloads, tests on real platforms, packages and signs apps for every target; TSX needs no Node or npm ([CLI](./cli.md), [Installation](./installation.md)).
-- **A compatibility promise for shipped apps.** An app built for a compatible version keeps running unchanged on every later one; each API change is recorded in nsh-compat and checked by CI ([Backward compatibility](./compatibility.md)).
+
+### Components for professional applications
+
+Consider a research workstation. A trader selects cells while quotes arrive, reads a report as it streams in, and moves a panel while editing a note. Each interaction needs a durable implementation. NSH carries the layering developed in GPUI Kit across its hosts. [NSH Base](../modules/nsh-base.md) owns behavior, state, focus and accessibility. Product teams build their visual language above it and can use the same interaction conventions across applications.
+
+| Base component | What an application can reuse |
+|---|---|
+| [DataTable](../elements/data-table.md) | Virtualization on both axes creates only visible cells. A quote grid can combine pinned columns, paged data and keyboard selection. |
+| [Editor](../elements/editor.md) | Visible rows and incremental highlighting limit work after an edit. A strategy editor can reuse multiple carets, folding, diagnostics and find-and-replace. |
+| [TextView](../elements/text-view.md) | Rust parses streamed Markdown into text and views, including tables, code and links, so a research assistant can render a reply as it arrives. |
+| [RichEditor](../elements/rich-editor.md) | A schema constrains document structure and transactions record edits. Teams can add mentions or commands while retaining edit history. |
+| [DiffView](../elements/diff-view.md) | Render a patch or compare two texts with aligned or unified views, word-level highlights and review annotations. |
+| [Dock (DockArea)](../elements/dock.md) | The component handles splitting, resizing and moving tabs. Panels retain their content when moved and the app owns the layout data. |
+
+These choices affect performance, stability and extensibility in different ways. The grid bounds cell creation, the document schema keeps edits valid, and moving a tab preserves its content. Apps can supply cells, document types and panels while reusing scrolling, undo and drag behavior. The quote workload below measures runtime performance; the linked component examples demonstrate the individual behaviors.
 
 ### Measured numbers
 
@@ -143,6 +155,8 @@ How NSH answers:
 
 Chat and AI apps gain the most. Many AI products render their conversations as web pages, and long sessions bring dropped frames while scrolling, awkward input methods and selection, and weak integration with system accessibility and gestures. NSH renders rich text, code blocks, tables, images and streamed output with the platform's text views and editors ([Text](./text.md), [Lists](./lists.md)).
 
+For a multi-pane review tool, inventory the web grid, docking library and diff renderer separately. Map them to DataTable, DockArea and DiffView, then port custom cells and review actions. Existing DOM widgets need replacement or an embedded web view.
+
 ### Tauri
 
 **Tauri uses the system webview.** Tauri avoids bundling Chromium by using whatever the OS provides: WebView2 (Chromium) on Windows, WKWebView (WebKit) on macOS and iOS, `webkit2gtk` (WebKit) on Linux, and the device's Android WebView ([Tauri webview versions](https://v2.tauri.app/reference/webview-versions/)). Apps get smaller; the UI is still a web page.
@@ -157,6 +171,8 @@ Where that hurts:
 How NSH answers: the UI is the platform's own views, the same on every OS version the platform supports, with no web engine in between; Rust and TSX run in one process on one reactive graph, and a TSX screen calls a Rust module directly — sorting 100,000 rows from TSX takes ~3 ms, on par with pure Rust ([Performance report](./performance-report.md)). Tauri's best idea — Rust for the core — is NSH's default, and the UI no longer needs a browser at all.
 
 On native NSH targets, a chart can draw into a native Canvas and tie its update logic to a reactive scope. Disposing the scope tears down its owned computations and runs registered cleanup callbacks. Application-created timers and external quote subscriptions still need cancellation handlers. A screen that embeds a WebView still manages browser resources inside that view. [Reactive runtime implementation](https://github.com/longbridge/nsh/blob/d2c6e800dac5985c112e61626b89e30ace2d2f83/crates/nsh-core/src/reactive.rs#L1169)
+
+A Rust backend can keep producing report data. Replace a Markdown web panel with TextView first, then check links, tables and streamed updates using the same documents on each target.
 
 ### React Native
 
@@ -186,6 +202,8 @@ How NSH answers:
 
 **What carries over.** TSX looks much like JSX, and components, props and events stay; hooks become signals. **What it costs.** NSH is not a compatibility layer for React Native, by design: it replaces React reconciliation with a more efficient model, so React Native packages do not run on it. The framework provides lists, navigation, animation, gestures, text, canvas, web views and video natively, visual components are the app's own ([Design guides](./design-guides.md)), and an existing native SDK becomes a [native component](./native-components.md) or a Rust [module](./platform-extensions.md).
 
+The [core component catalog](https://reactnative.dev/docs/components-and-apis) includes lists and text inputs. A virtualized two-axis quote grid with pinned columns, or a schema-driven editor with undo, requires additional choices. With NSH the starting points are DataTable and RichEditor. Port the data source, document schema and product styling, and test selection and undo on the target devices.
+
 ### Flutter
 
 **Flutter draws widgets with its own rendering engine.** Flutter renders the whole UI itself, so an app looks the same everywhere — and none of it is the platform's.
@@ -199,6 +217,8 @@ Where that hurts:
 
 How NSH answers: each backend is the platform's own views — UIKit, Android views, AppKit, Win32, GTK 4 — so a map or web view is just another view in the tree, not a composited guest; text editing, input methods, selection and accessibility are the system's ([Introduction](./index.md#what-native-means)); the web build is real HTML that can be selected, indexed and read by screen readers; and the languages are Rust, with its crates and native threads, plus TSX for quick screens. **What it costs.** The look differs between platforms, which is the point of platform UI; for pixel-identical branded UI, Flutter is the natural fit.
 
+Flutter already offers tables and text fields. For a code-review screen, compare the work above those widgets: Editor supplies diagnostics and folding, and DiffView supplies aligned hunks and annotations. Dart widget implementations still need porting.
+
 ### GPUI and GPUI Fast
 
 **GPUI provides GPU rendering for the Zed desktop editor.** [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) is the Rust UI framework of the Zed editor; [GPUI Fast](https://github.com/longbridge/gpui-fast) is Longbridge's fork with retained rendering, scroll layers and native window compositing, and NSH comes from the same team.
@@ -210,17 +230,23 @@ Where that hurts, for a general app:
 - **Everything is drawn.** Text fields, selection and menus are drawn by the framework rather than being the platform's controls, so system text behavior is reimplemented, as in Flutter.
 - **Rust only, nothing delivered.** There is no scripting path for quick screens and no sandbox for UI delivered after release (GPUI Kit adds JavaScript modules through [GPUI Shell](https://gpui-kit.com/shell), the idea NSH grew from).
 
-How NSH answers: the same Rust-first model reaches iOS, Android and the web; text input, selection and input methods are the platform's; a TSX path and signed, sandboxed delivery are built in; and API changes are recorded and checked against a compatibility registry ([Backward compatibility](./compatibility.md)). NSH's GPUI backend embeds NSH apps in existing GPUI and GPUI Kit apps, so screens can move one at a time instead of in a rewrite ([GPUI](./gpui.md)).
+How NSH answers: the same Rust-first model reaches iOS, Android and the web; text input, selection and input methods are the platform's; a TSX path and signed, sandboxed delivery are built in. NSH's GPUI backend embeds NSH apps in existing GPUI and GPUI Kit apps, so screens can move one at a time instead of in a rewrite ([GPUI](./gpui.md)).
 
 **The numbers, honestly.** In the [NSH performance benchmark](https://github.com/longbridge/nsh-perf-bench) (Linux, a 500-row quote table, NSH on GTK 4), everyday load costs the same: at 1,000 quotes a second NSH Rust uses 18% of one core and GPUI Fast 20%. Under sustained heavy updates GPUI Fast leads: at 20,000 quotes a second it uses 25% against NSH's 73–78%, and on an animation of 1,000 boxes computed every frame about a third of NSH's CPU. For a desktop-only terminal dominated by thousands of views updated every frame, stay on GPUI Fast; for phones, the web, everyday screens or delivered UI, use NSH.
+
+GPUI Kit users already have advanced desktop components. The gain is carrying the same interaction model to additional hosts. Embed one NSH panel first and verify its document state and keyboard behavior before moving the surrounding workspace.
 
 ### Qt
 
 **Qt offers two UI technologies, Widgets and Qt Quick.** Qt Widgets and Qt Quick draw their own controls styled to resemble each platform, with long-built tooling. NSH differs in foundation and model: platform controls rather than styled look-alikes, Rust at the core with a TSX path instead of C++ and QML, HTML on the web, one component model that adapts interaction across mobile, desktop and web, a toolchain designed for automated and AI-driven development, and an Apache-2.0 license for every use.
 
+For a Qt Widgets workspace, map dock widgets to DockArea and test saved layouts and panel state; existing Qt widget code still needs an integration or rewrite.
+
 ### Slint
 
 **Slint provides its own declarative language and renderer**, aimed at desktop and embedded devices and usable from Rust, C++, JavaScript or Python. Both value native performance; NSH's path is each platform's own UI and interaction, HTML on the web, Rust and TSX as app languages instead of a separate markup language, and phones as first-class targets.
+
+For a table-heavy tool, compare the existing table with DataTable using the same model and check paging, column pinning and keyboard selection before porting custom cells.
 
 ### Summary: one row per framework
 
@@ -230,7 +256,7 @@ How NSH answers: the same Rust-first model reaches iOS, Android and the web; tex
 | Tauri | A different web engine per OS and version | Platform views, the same on every supported OS; Rust and TSX in one process |
 | React Native | JS thread and reconciliation on every update; desktop and web as separate projects | Rust core with fine-grained signals; six platforms in one framework and release |
 | Flutter | Self-drawn text and input; costly native views; canvas-like web | The system's text, input and accessibility; native views in the tree; HTML web |
-| GPUI | Desktop only, pre-1.0, editor-driven | Same Rust model on phones and web; compatibility registry; embeds in GPUI apps |
+| GPUI | Desktop only, pre-1.0, editor-driven | Same Rust model on phones and web; embeds in GPUI apps |
 
 ## Evaluating it: start with a pilot
 
