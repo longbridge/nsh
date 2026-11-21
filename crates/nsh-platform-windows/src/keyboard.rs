@@ -264,7 +264,7 @@ pub(crate) fn focus_control(surface: &std::rc::Rc<Surface>, view: &NshView) -> b
 
 /// A press at `view`: the focus stop it belongs to is the view itself or
 /// its nearest focusable ancestor within the same window.
-pub(crate) fn focus_target(surface: &Surface, view: &NshView) -> Option<NshView> {
+fn focus_target(surface: &Surface, view: &NshView) -> Option<NshView> {
     let window = window_of(surface, view);
     let mut current = Some(view.clone());
     while let Some(view) = current {
@@ -279,12 +279,50 @@ pub(crate) fn focus_target(surface: &Surface, view: &NshView) -> Option<NshView>
     None
 }
 
-/// A press focused `view`: as [`focus_control`], without scrolling it into
-/// view (the pointer is on it).
-pub(crate) fn focus_pointer(surface: &std::rc::Rc<Surface>, view: &NshView) {
-    if is_stop(view) {
-        focus_view(surface, view, false);
+/// A pointer's press at `view` (not a field's): a `focusable` view under
+/// it within its window that takes no presses (a chart that takes keys)
+/// takes the keyboard focus, as on macOS and GPUI, without scrolling it
+/// into view (the pointer is on it). A press on a control, a view that
+/// takes presses (a button, a select's trigger, a switch, a slider),
+/// gives it no focus, as Safari and macOS do, and takes the focus off the
+/// control that had it, unless it is that one: Return and Space then go
+/// to the app's shortcuts, not to a control the user last pressed.
+pub(crate) fn press_focus(surface: &std::rc::Rc<Surface>, view: &NshView) {
+    let window = window_of(surface, view);
+    let mut current = Some(view.clone());
+    while let Some(view) = current {
+        if window_of(surface, &view) != window {
+            break;
+        }
+        if is_stop(&view) && focusable_without_presses(&view) {
+            focus_view(surface, &view, false);
+            return;
+        }
+        if takes_presses(&view) {
+            // The press is this control's: no focusable view around it
+            // takes it either.
+            break;
+        }
+        current = view.parent_view();
     }
+    let pressed = focus_target(surface, view);
+    let held = surface.keyboard.focus.borrow().get(&window).cloned();
+    if held.is_some() && held != pressed {
+        clear(surface, window);
+    }
+}
+
+/// Whether `view` is `focusable` without taking presses: it takes keys,
+/// not a pointer's presses (a chart, a canvas).
+fn focusable_without_presses(view: &NshView) -> bool {
+    let state = view.state();
+    state.props.focusable == Some(true)
+        && !state.events.contains(EventKind::Press)
+        && !state.props.accessibility.state.disabled
+}
+
+fn takes_presses(view: &NshView) -> bool {
+    view.state().events.contains(EventKind::Press)
 }
 
 /// Moves the keyboard focus to `view` in its window, reporting the blur of
@@ -1710,6 +1748,67 @@ mod tests {
         assert_eq!(focused_in(&surface, ROOT_ID).as_ref(), Some(&second));
         // Removed: the focus goes with the view.
         apply(&surface, &[MountItem::Delete { id: 4 }]);
+        assert!(focused_in(&surface, ROOT_ID).is_none());
+    }
+
+    /// A view `id` under the root, at `x`, that takes presses (and is
+    /// `focusable`, as a select's trigger is, when `focusable`).
+    fn control(surface: &std::rc::Rc<Surface>, id: NodeId, x: f32, focusable: bool) -> NshView {
+        let view = under(surface, ROOT_ID, id, focusable);
+        let mut mask = EventMask::default();
+        mask.set(EventKind::Press, true);
+        apply(
+            surface,
+            &[
+                MountItem::Events { id, events: mask },
+                MountItem::Frame {
+                    id,
+                    frame: rect(x, 0.0, 100.0, 40.0),
+                },
+            ],
+        );
+        view
+    }
+
+    fn press_at(surface: &std::rc::Rc<Surface>, x: f32) {
+        crate::input::pointer(
+            surface,
+            crate::input::PointerEvent {
+                kind: crate::input::PointerKind::Down,
+                x,
+                y: 10.0,
+                button: 0,
+                buttons: 1,
+                pointer: 1,
+                touch: false,
+                pen: false,
+                time: 0.0,
+                clicks: 1,
+                modifiers: Modifiers::default(),
+            },
+        );
+    }
+
+    #[test]
+    fn a_press_gives_a_control_no_focus_and_takes_it_off_another() {
+        let surface = surface();
+        let first = control(&surface, 2, 0.0, false);
+        let second = control(&surface, 4, 200.0, true);
+        // A press focuses no control: Return and Space stay the app's.
+        press_at(&surface, 10.0);
+        assert!(focused_in(&surface, ROOT_ID).is_none());
+        // Tab's focus stays on the control it is on when that one is
+        // pressed, and leaves it for a press on another.
+        assert!(focus_control(&surface, &first));
+        press_at(&surface, 10.0);
+        assert_eq!(focused_in(&surface, ROOT_ID).as_ref(), Some(&first));
+        press_at(&surface, 210.0);
+        assert!(
+            focused_in(&surface, ROOT_ID).is_none(),
+            "focusable, it takes presses"
+        );
+        assert!(focus_control(&surface, &second));
+        press_at(&surface, 390.0);
         assert!(focused_in(&surface, ROOT_ID).is_none());
     }
 }

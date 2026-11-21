@@ -86,6 +86,15 @@ impl App {
         self.focus_count(selector) > 0
     }
 
+    /// Whether a view was told to let go of the keyboard focus.
+    fn blur_sent(&self) -> bool {
+        self.app
+            .screen()
+            .commands()
+            .iter()
+            .any(|(_, c)| *c == Command::Blur)
+    }
+
     /// How many times the view `selector` names was told to take the
     /// focus.
     fn focus_count(&self, selector: &str) -> usize {
@@ -243,9 +252,11 @@ fn a_select_list_stays_with_its_ending_look_until_its_exit_ran() {
     assert!(app.app.shows("Pear"), "kept while it goes");
     assert_eq!(app.popup_opacity(), 0.0, "with its ending look");
     assert!(app.popup_inert(), "taking no presses");
+    // A press opened it with nothing focused, so nothing has the keyboard
+    // as it goes: the trigger does not take it.
     assert!(
-        app.focus_sent("role:combobox"),
-        "the trigger has the keyboard again as the list starts to go"
+        !app.focus_sent("role:combobox"),
+        "the trigger takes no keyboard as the list starts to go"
     );
     assert!(
         app.app.shows("Log: openChange:true open openChange:false"),
@@ -532,9 +543,11 @@ fn a_date_picker_calendar_comes_in_and_goes_with_its_looks() {
     assert!(app.shows_calendar(), "kept while it goes");
     assert_eq!(app.popup_opacity(), 0.0, "with its ending look");
     assert!(app.popup_inert(), "taking no presses");
+    // A press opened it with nothing focused: the keyboard leaves the
+    // calendar as it starts to go, back where it was, not to the trigger.
     assert!(
-        app.focus_sent("id:trigger"),
-        "the trigger has the keyboard again as the calendar starts to go"
+        app.blur_sent() && !app.focus_sent("id:trigger"),
+        "the keyboard leaves the calendar as it starts to go"
     );
     app.app.run_for(Duration::from_millis(150)).unwrap();
     assert!(!app.shows_calendar(), "gone once its 200 ms ran");
@@ -652,6 +665,8 @@ fn a_select_choice_that_focuses_another_field_keeps_the_focus_there() {
         |p| nsh_testing::windowed_root_with::<SelectChoice>(move || p.clone()),
         "role:combobox",
         |app| {
+            // The trigger has the keyboard (Tab) as the press opens it.
+            app.press_key("tab").unwrap();
             app.press("role:combobox").unwrap();
             app.wait_for("role:listbox").unwrap();
         },

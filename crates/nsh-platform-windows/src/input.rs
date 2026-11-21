@@ -1702,20 +1702,16 @@ fn down(
             item = Some(c);
         }
     }
-    // The press gives the keyboard focus to the stop it is on (the view or
-    // its nearest focusable ancestor), as a click does on a desktop; a
-    // hosted item (a video's controls, a component's window) or a field
-    // keeps the keys for itself.
+    // The press gives the keyboard focus to an explicitly `focusable` view
+    // it is on, and none to a control: it takes the focus off the one that
+    // had it (`keyboard::press_focus`). A hosted item (a video's controls, a
+    // component's window) or a field keeps the keys for itself.
     match &item {
         Some(Item::Input(_)) => {}
         Some(Item::Hosted(..)) => {
             crate::keyboard::blur_window(surface, crate::app_window::window_of(surface, &hit.view))
         }
-        _ => {
-            if let Some(target) = crate::keyboard::focus_target(surface, &hit.view) {
-                crate::keyboard::focus_pointer(surface, &target);
-            }
-        }
+        _ => crate::keyboard::press_focus(surface, &hit.view),
     }
     let native = matches!(item, Some(Item::Hosted(..) | Item::Input(_)));
     let selects = matches!(item, Some(Item::Text(_) | Item::Area(..)));
