@@ -118,7 +118,7 @@ Each framework below made a foundational choice that shapes what its apps can an
 
 Where that hurts:
 
-- **Size and memory.** A browser engine and a JavaScript runtime come with every app and every window, before the app draws anything. A desktop with several Electron apps runs several browsers.
+- **Size and memory.** A browser engine and a JavaScript runtime come with every app and every window, before the app draws anything. In practice a typical Electron app starts at an installer of around 150 MB and often uses 1 GB of memory or more once in use (typical figures from experience, not a benchmark); a desktop with several Electron apps runs several browsers. For comparison, NSH's measured Linux packages are 9.7–11.7 MB archives (hello worlds, and real apps such as sysmon and Omasend), and a Rust app on macOS uses ~19 MB of memory ([App size](./performance-report.md#app-size)).
 - **Start-up.** The app waits for Chromium and Node.js to start, then for its JavaScript to load, parse and run, before the first frame.
 - **Steady-state CPU.** Live data updates the DOM, which goes through style recalculation, layout and painting in the page; long lists and frequent updates are exactly what web pages handle worst.
 - **The page is not the system.** Text fields, selection, context menus, scrolling and accessibility are the browser's implementations inside a window, not the operating system's controls. Native menus, dialogs and tray icons exist, but only through the main process, across an IPC boundary from the UI.
@@ -130,7 +130,7 @@ How NSH answers:
 | Electron's cost | NSH |
 |---|---|
 | Chromium + Node.js in every app | No browser engine. Rust apps link no JavaScript engine at all; TSX apps run app code in QuickJS while rendering, layout and animation run in Rust ([Architecture](./architecture.md)) |
-| Memory of a browser | ~19 MB for a Rust app on macOS, against ~17 MB for an AppKit window with one label ([Performance report](./performance-report.md)) |
+| ~150 MB installers, often 1 GB+ memory (typical) | 9.7–11.7 MB Linux archives for hello worlds, sysmon and Omasend ([App size](./performance-report.md#app-size)); ~19 MB for a Rust app on macOS, against ~17 MB for an AppKit window with one label ([Performance report](./performance-report.md)) |
 | Slow start | Engine start ~75–155 µs; counter app first frame ~1.05–1.15 ms |
 | DOM layout under live data | Fine-grained signals push only the properties that changed to platform views; a 500-row quote table at 1,000 updates a second uses 18% of one core on Linux |
 | Browser text, menus and accessibility | AppKit, Win32 + Direct2D and GTK 4 controls, input methods and accessibility ([Introduction](./index.md#what-native-means)) |

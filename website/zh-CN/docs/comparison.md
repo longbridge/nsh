@@ -118,7 +118,7 @@ GPUI 与 GPUI Fast 合为一列：两者运行的平台相同，GPUI Fast 在 GP
 
 代价在这里：
 
-- **体积和内存。** 应用还没画任何东西，浏览器引擎和 JavaScript 运行时就已经随每个应用、每个窗口带上了。桌面上开着几个 Electron 应用，就是开着几个浏览器。
+- **体积和内存。** 应用还没画任何东西，浏览器引擎和 JavaScript 运行时就已经随每个应用、每个窗口带上了。实际中，一个典型的 Electron 应用安装包起步就在 150 MB 左右，用起来内存常常到 1 GB 甚至更多（典型情况的经验数字，不是基准测试）；桌面上开着几个 Electron 应用，就是开着几个浏览器。作为对比，NSH 在 Linux 上实测的发布包只有 9.7–11.7 MB（hello world 以及 sysmon、Omasend 等真实应用），macOS 上 Rust 应用内存约 19 MB（[应用体积](./performance-report.md#应用体积)）。
 - **启动。** 要等 Chromium 和 Node.js 启动，再等 JavaScript 加载、解析、执行，才有第一帧。
 - **常态 CPU。** 实时数据要更新 DOM，经过页面里的样式重算、布局和绘制；长列表和高频更新恰好是网页最不擅长的。
 - **页面不是系统。** 输入框、选择、右键菜单、滚动和无障碍都是浏览器在窗口里的实现，不是操作系统的控件。原生菜单、对话框和托盘虽然有，但只能经主进程调用，和界面隔着 IPC。
@@ -130,7 +130,7 @@ NSH 怎么解决：
 | Electron 的代价 | NSH |
 |---|---|
 | 每个应用带 Chromium + Node.js | 没有浏览器引擎。Rust 应用完全不链接 JavaScript 引擎；TSX 应用只在 QuickJS 里跑应用代码，渲染、布局和动画在 Rust 里（[架构](./architecture.md)） |
-| 浏览器级内存 | macOS 上 Rust 应用约 19 MB，只放一个标签的 AppKit 窗口约 17 MB（[性能报告](./performance-report.md)） |
+| 安装包约 150 MB、内存常达 1 GB 以上（典型情况） | Linux 发布包 9.7–11.7 MB（hello world、sysmon、Omasend，[应用体积](./performance-report.md#应用体积)）；macOS 上 Rust 应用约 19 MB，只放一个标签的 AppKit 窗口约 17 MB（[性能报告](./performance-report.md)） |
 | 启动慢 | 引擎启动约 75–155 µs；计数器应用首帧约 1.05–1.15 ms |
 | 实时数据下的 DOM 布局 | 细粒度 signal 只把变化的属性推给平台视图；Linux 上 500 行行情表每秒 1,000 次更新占单核 18% |
 | 浏览器的文本、菜单和无障碍 | AppKit、Win32 + Direct2D 和 GTK 4 的控件、输入法和无障碍（[简介](./index.md#native-的含义)） |
