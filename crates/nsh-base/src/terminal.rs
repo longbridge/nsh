@@ -84,6 +84,7 @@ pub(crate) fn glyph_column(
     let cell = cell_height();
     let rows = signal(0usize);
     view()
+        .select_none()
         .flex_none()
         .overflow_hidden()
         .on_layout(move |frame: &Bounds<Points>| {
@@ -132,6 +133,7 @@ fn line_colored(
     let cell = cell_width();
     let columns = signal(0usize);
     view()
+        .select_none()
         .on_layout(move |frame: &Bounds<Points>| {
             let n = columns_in(frame.size.width, cell);
             if columns.get_untracked() != n {
@@ -170,6 +172,7 @@ pub(crate) fn filled_line(
             .text_overflow(EllipsizeMode::Clip)
     };
     view()
+        .select_none()
         .on_layout(move |frame: &Bounds<Points>| {
             let n = columns_in(frame.size.width, cell);
             if columns.get_untracked() != n {
