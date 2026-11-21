@@ -621,7 +621,8 @@ pub(crate) fn add(dir: &Path, source: Source) -> anyhow::Result<()> {
     })();
     match result {
         Ok((module, at)) => {
-            println!("added {id} at {at}: import from \"{module}\"");
+            status("Added", format!("{id} at {at}"));
+            println!("import from \"{module}\"");
             Ok(())
         }
         Err(e) => {
@@ -917,9 +918,21 @@ fn write_lock(dir: &Path, lock: &Lock) -> anyhow::Result<()> {
 }
 
 /// Resolves `source` (from Git or crates.io) and reads its metadata.
+/// A Cargo-style status line on stderr: `    Updating crates.io index`.
+fn status(verb: &str, what: impl std::fmt::Display) {
+    crate::ui::plain(format!(
+        "{} {what}",
+        crate::ui::green(format!("{verb:>12}"))
+    ));
+}
+
 fn resolve(source: &Source) -> anyhow::Result<Locked> {
     if let Some(name) = &source.krate {
-        let (version, dir) = registry(name, source.version.as_deref().unwrap_or("*"))?;
+        let req = source.version.as_deref().unwrap_or("*");
+        status("Updating", "crates.io index");
+        status("Downloading", format!("{name} {req}"));
+        let (version, dir) = registry(name, req)?;
+        status("Downloaded", format!("{name} v{version}"));
         let package = rust_app::package_name(&dir.join("Cargo.toml"))?;
         let module = check(&dir, name)?;
         return Ok(Locked {
@@ -931,6 +944,7 @@ fn resolve(source: &Source) -> anyhow::Result<Locked> {
         });
     }
     let url = source.git.as_deref().context("nothing to resolve")?;
+    status("Updating", format!("git repository `{url}`"));
     let repo = repository(url, true)?;
     let reference = source.reference();
     let spec = match (&source.tag, &source.rev) {
@@ -951,6 +965,10 @@ fn resolve(source: &Source) -> anyhow::Result<Locked> {
             )
         })
         .with_context(|| format!("{url}: no {reference}"))?;
+    status(
+        "Locking",
+        format!("{url}#{}", &commit[..commit.len().min(9)]),
+    );
     let checkout = checkout(url, &commit)?;
     let package = rust_app::package_name(&checkout.join("Cargo.toml"))?;
     let module = check(&checkout, url)?;
