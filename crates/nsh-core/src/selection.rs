@@ -20,11 +20,11 @@
 //! order: a point inside a text's frame is in that text; otherwise, among
 //! the texts whose rows (vertical extent) contain the point, the
 //! horizontally nearest one; above every text, the first text's start;
-//! below every text, the end of the bottom-most row's last text in document
-//! order; between rows, the end of the last text on the nearest row above or
-//! the start of the first text on the nearest row below, whichever vertical
-//! edge is nearer (the row above on a tie). A point is clamped into the
-//! chosen text's frame before [`SelectionTexts::offset_at`].
+//! below every text, the last text's end; between rows, the end of the last
+//! text above (in document order) or the start of the first text below,
+//! whichever is vertically nearer (the text above on a tie). A point is
+//! clamped into the chosen text's frame before
+//! [`SelectionTexts::offset_at`].
 //!
 //! Words are runs of letters, digits, `_` and combining marks, runs of
 //! spaces, or single other characters: punctuation, an emoji, each CJK
@@ -665,60 +665,26 @@ fn hit(texts: &impl SelectionTexts, point: Point<Points>) -> Option<TextPosition
     if let Some((i, _)) = nearest {
         return Some(at(i));
     }
-    // Between rows: find the vertically nearest edge above and below
-    // `point.y`, then take the last text in document order on that upper
-    // row or the first text in document order on that lower row. Comparing
-    // vertical edges rather than bare document order keeps an out-of-flow
-    // or multi-column text sitting higher up from hijacking a drag past a
-    // lower block.
-    let mut above_edge: Option<(usize, Points)> = None;
-    let mut below_edge: Option<(usize, Points)> = None;
-    for i in 0..count {
-        let frame = texts.frame(i);
-        if frame.bottom() <= point.y {
-            let distance = point.y - frame.bottom();
-            if above_edge.is_none_or(|(_, best)| distance <= best) {
-                above_edge = Some((i, distance));
-            }
-        }
-        if frame.top() > point.y {
-            let distance = frame.top() - point.y;
-            if below_edge.is_none_or(|(_, best)| distance < best) {
-                below_edge = Some((i, distance));
-            }
-        }
-    }
+    // Between rows: the end of the last text above or the start of the
+    // first text below, whichever is nearer.
+    let above = (0..count)
+        .rev()
+        .find(|&i| texts.frame(i).bottom() <= point.y);
+    let below = (0..count).find(|&i| texts.frame(i).top() > point.y);
     let end_of = |i: usize| TextPosition::new(i, utf16_len(texts.content(i)));
     let start_of = |i: usize| TextPosition::new(i, 0);
-    let last_in_above_row = |nearest: usize| {
-        let row_top = texts.frame(nearest).top();
-        (0..count)
-            .rev()
-            .find(|&i| {
-                let frame = texts.frame(i);
-                frame.bottom() <= point.y && frame.bottom() > row_top
-            })
-            .unwrap_or(nearest)
-    };
-    let first_in_below_row = |nearest: usize| {
-        let row_bottom = texts.frame(nearest).bottom();
-        (0..count)
-            .find(|&i| {
-                let frame = texts.frame(i);
-                frame.top() > point.y && frame.top() < row_bottom
-            })
-            .unwrap_or(nearest)
-    };
-    Some(match (above_edge, below_edge) {
-        (Some((a, to_above)), Some((b, to_below))) => {
+    Some(match (above, below) {
+        (Some(a), Some(b)) => {
+            let to_above = point.y - texts.frame(a).bottom();
+            let to_below = texts.frame(b).top() - point.y;
             if to_above <= to_below {
-                end_of(last_in_above_row(a))
+                end_of(a)
             } else {
-                start_of(first_in_below_row(b))
+                start_of(b)
             }
         }
-        (Some((a, _)), None) => end_of(last_in_above_row(a)),
-        (None, Some(_)) => start_of(0),
+        (Some(a), None) => end_of(a),
+        (None, Some(b)) => start_of(b),
         // Only frames of no height, which no row contains.
         (None, None) => end_of(count - 1),
     })
@@ -1797,66 +1763,5 @@ mod tests {
         model.press(&texts, at(60.0, 5.0), 2, false);
         assert_eq!(model.text(&texts), "line");
         assert_eq!(model.bounds(), Some((pos(0, 6), pos(0, 10))));
-    }
-
-    #[test]
-    fn out_of_flow_top_text_does_not_hijack_drag_below_lower_content() {
-        // Text 2 sits visually at the top (e.g. an absolute overlay or
-        // floating action label) despite appearing after text 1 in tree order.
-        let texts = Fake::new(&[
-            ("Heading", (20.0, 0.0, 200.0, 20.0)),
-            ("Body quote line", (36.0, 36.0, 200.0, 40.0)),
-            ("Floating", (0.0, 0.0, 16.0, 20.0)),
-        ]);
-        let mut model = SelectionModel::new();
-        model.press(&texts, at(44.0, 50.0), 1, false);
-        // Dragging slightly past the bottom of text 1 must clamp to text 1's
-        // end instead of jumping to text 2 at the top.
-        model.drag(&texts, at(120.0, 84.0));
-        assert_eq!(model.bounds(), Some((pos(1, 1), pos(1, 15))));
-        assert_eq!(model.text(&texts), "ody quote line");
-    }
-
-    #[test]
-    fn unequal_height_columns_stay_grouped_between_rows_and_below_all() {
-        // Left column spans 3 lines (0..60), right column spans 1 line (0..20),
-        // followed by a block at 80..100.
-        let texts = Fake::new(&[
-            ("Left1\nLeft2\nLeft3", (0.0, 0.0, 80.0, 60.0)),
-            ("Right", (100.0, 0.0, 80.0, 20.0)),
-            ("Below", (0.0, 80.0, 80.0, 20.0)),
-        ]);
-        let mut model = SelectionModel::new();
-        model.press(&texts, at(0.0, 5.0), 1, false);
-        // 4pt below the tall column (16pt above "Below"): ends the first row.
-        model.drag(&texts, at(40.0, 64.0));
-        assert_eq!(model.bounds(), Some((pos(0, 0), pos(1, 5))));
-        // Below everything selects through the last block.
-        model.drag(&texts, at(40.0, 140.0));
-        assert_eq!(model.bounds(), Some((pos(0, 0), pos(2, 5))));
-
-        // Without a trailing block, dragging below the unequal-height row
-        // still reaches the end of the row (both columns).
-        let two_col = Fake::new(&[
-            ("Left1\nLeft2\nLeft3", (0.0, 0.0, 80.0, 60.0)),
-            ("Right", (100.0, 0.0, 80.0, 20.0)),
-        ]);
-        let mut model = SelectionModel::new();
-        model.press(&two_col, at(0.0, 5.0), 1, false);
-        model.drag(&two_col, at(40.0, 90.0));
-        assert_eq!(model.bounds(), Some((pos(0, 0), pos(1, 5))));
-    }
-
-    #[test]
-    fn dragging_above_all_texts_starts_at_document_start_even_with_higher_later_node() {
-        let texts = Fake::new(&[
-            ("First body", (0.0, 40.0, 120.0, 20.0)),
-            ("Higher badge", (0.0, 0.0, 120.0, 20.0)),
-        ]);
-        let mut model = SelectionModel::new();
-        model.press(&texts, at(40.0, 50.0), 1, false);
-        model.drag(&texts, at(40.0, -10.0));
-        assert_eq!(model.bounds(), Some((pos(0, 0), pos(0, 5))));
-        assert_eq!(model.text(&texts), "First");
     }
 }
