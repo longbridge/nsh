@@ -25,6 +25,8 @@ mod focus_selection;
 #[cfg(target_os = "macos")]
 mod fps_collapse;
 #[cfg(target_os = "macos")]
+mod hover_cursor;
+#[cfg(target_os = "macos")]
 mod ime;
 #[cfg(target_os = "macos")]
 mod input_focus;
@@ -36,6 +38,8 @@ mod keyboard;
 mod keymap_ime;
 #[cfg(target_os = "macos")]
 mod menu_labels;
+#[cfg(target_os = "macos")]
+mod menu_lifetime;
 #[cfg(target_os = "macos")]
 mod modal_fade;
 #[cfg(target_os = "macos")]
@@ -96,6 +100,9 @@ fn main() {
             } else if std::env::var_os("NSH_MENU_LABELS_CHECK_ONLY").is_some() {
                 window_press::run();
                 menu_labels::run();
+            } else if std::env::var_os("NSH_MENU_LIFETIME_CHECK_ONLY").is_some() {
+                window_press::run();
+                menu_lifetime::run();
             } else if std::env::var_os("NSH_MOUNT_CHECK_ONLY").is_some() {
                 mount::run();
             } else if std::env::var_os("NSH_WINDOW_DIALOG_CHECK_ONLY").is_some() {
@@ -133,6 +140,8 @@ fn main() {
                 embedded_scroll::run();
             } else if std::env::var_os("NSH_CANVAS_BOUNDS_CHECK_ONLY").is_some() {
                 canvas_bounds::run();
+            } else if std::env::var_os("NSH_HOVER_CURSOR_CHECK_ONLY").is_some() {
+                hover_cursor::run();
             } else if std::env::var_os("NSH_PRESS_MOMENTUM_CHECK_ONLY").is_some() {
                 press_momentum::run();
             } else {
@@ -144,10 +153,12 @@ fn main() {
                 modal_fade::run();
                 modal_focus::run();
                 navigation_unmount::run();
+                hover_cursor::run();
                 #[cfg(feature = "shader")]
                 shader_content::run();
                 canvas_bounds::run();
                 menu_labels::run();
+                menu_lifetime::run();
                 window_frames::run();
                 keyboard::run();
                 ime::run();

@@ -580,6 +580,7 @@ pub struct Root {
     main_window: Option<crate::desktop::MainWindowOptions>,
     application: Option<crate::desktop::ApplicationOptions>,
     translations: Option<crate::i18n::Translations>,
+    app_info: Option<crate::platform::AppInfo>,
 }
 
 impl Root {
@@ -597,6 +598,7 @@ impl Root {
             main_window: None,
             application: None,
             translations: None,
+            app_info: None,
         }
     }
 
@@ -635,6 +637,35 @@ impl Root {
     /// The app's id ([`Root::app_id`]).
     pub fn app_id_ref(&self) -> Option<&str> {
         self.app_id.as_deref()
+    }
+
+    /// The app as it was built ([`crate::platform::AppInfo`]), which
+    /// nsh's generated code sets: what [`crate::element::app_info`]
+    /// answers.
+    pub fn app_info(mut self, info: crate::platform::AppInfo) -> Self {
+        self.app_info = Some(info);
+        self
+    }
+
+    /// [`Root::app_info`] from the JSON `appInfo()` reports, which nsh's
+    /// generated code compiles in. JSON it cannot read is an app with
+    /// nothing known (logged).
+    #[doc(hidden)]
+    pub fn app_info_json(self, json: &str) -> Self {
+        let info = match serde_json::from_str(json) {
+            Ok(value) => crate::platform::AppInfo::from_json(&value),
+            Err(e) => {
+                log::warn!("appInfo: {e}, ignored");
+                crate::platform::AppInfo::default()
+            }
+        };
+        self.app_info(info)
+    }
+
+    /// The app as it was built ([`Root::app_info`]).
+    #[doc(hidden)]
+    pub fn app_info_ref(&self) -> Option<&crate::platform::AppInfo> {
+        self.app_info.as_ref()
     }
 
     /// The URL schemes the app claims (`nsh.json` `schemes`,

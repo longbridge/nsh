@@ -290,6 +290,14 @@ Native components are registered with `AppView::register_component`; see
 engine serves: NSH's (`nsh_base::registry()`) and your crates' (`my_app::registry()`, which `#[native_module]`
 makes), so the TSX a view loads imports your Rust components and modules too.
 
+## Notifications from other code
+
+Remote notifications, and those other native code schedules, never reach `Notifications`' `press`: they go to the
+handler Rust code sets with `nsh_platform_apple::notifications::set_foreign_handler`, as on
+[iOS](./ios.md#notifications-from-other-code). The handler decides how they show while the app is in front and hears
+their presses. An embedded app gets them only when the embedding app hands it the notifications
+(`AppOptions::notifications`) and has no notification center delegate of its own.
+
 ## What differs on macOS
 
 The environment is a desktop's: the safe area and the keyboard height are 0, `idiom()` is the desktop

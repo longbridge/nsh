@@ -10,10 +10,11 @@
 //! [`Agent`] on a thread of its own, which resolves the selector on the
 //! model, asks the platform ([`Native`]) where the view is on screen and
 //! acts there (a click or a tap, a drag, typed keys), then waits until the
-//! app is quiet: no batch and no native animation that ends by itself for
-//! 100 ms, 2 s at most (one that loops forever, a spinner, is not waited
-//! for). [`Native`]'s calls come from that thread; implementations do
-//! their work on the main thread and return when it is done.
+//! app is quiet: no batch, no native animation that ends by itself (one
+//! that loops forever, a spinner, is not waited for) and no window of the
+//! app's own waiting to show for 100 ms, 2 s at most. [`Native`]'s calls
+//! come from that thread; implementations do their work on the main thread
+//! and return when it is done.
 
 use std::{
     sync::{Arc, Condvar, Mutex, MutexGuard},
@@ -1315,6 +1316,14 @@ pub trait Native: Send + Sync {
     /// Whether a native animation runs now that ends by itself: one that
     /// loops forever (a spinner) does not count, or no step would settle.
     fn animating(&self) -> bool;
+    /// Whether a window of the app's own is still opening: made, but kept
+    /// hidden until its first frame is in, which it waits for a moment at
+    /// most. Input sent to it meanwhile is lost (AppKit gives a window that
+    /// is not visible no mouse events), so a step waits for it to show as
+    /// for an animation ([`Native::animating`]).
+    fn opening(&self) -> bool {
+        false
+    }
     /// A picture of the window: PNG bytes, or UTF-8 Cell JSON on the terminal target.
     fn screenshot(&self) -> Result<Vec<u8>, String>;
     /// Makes the window `size` points.
@@ -1557,12 +1566,13 @@ fn anchor(misses: usize, to_start: bool) -> Option<f32> {
 
 /// Whether [`Agent::settled_unless_still`] can skip [`Agent::settled`]
 /// because nothing changed since the last settled step: `settled` matches
-/// `activity.batches`, the last batch arrived at least [`QUIET`] ago, and no
-/// finite native animation is running.
-fn is_still(settled: Option<u64>, activity: Activity, animating: bool) -> bool {
+/// `activity.batches`, the last batch arrived at least [`QUIET`] ago, and the
+/// platform is not `changing` what shows by itself ([`Agent::changing`]: no
+/// finite native animation runs, no window waits to show).
+fn is_still(settled: Option<u64>, activity: Activity, changing: bool) -> bool {
     settled == Some(activity.batches)
         && activity.since_last.is_some_and(|since| since >= QUIET)
-        && !animating
+        && !changing
 }
 
 /// Takes test steps on a host's app ([`Model`], [`Native`]).
@@ -2472,41 +2482,49 @@ impl Agent {
         *self.quiet.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 
+    /// Whether the platform still changes what shows by itself: a native
+    /// animation that ends by itself runs ([`Native::animating`]), or a
+    /// window of the app's own waits to show ([`Native::opening`]).
+    fn changing(&self) -> bool {
+        self.native.animating() || self.native.opening()
+    }
+
     /// [`Agent::settled`], but not again for an app that has not changed
-    /// since the last step left it quiet: no batch came, nothing animates, and
-    /// the last one is older than [`QUIET`] (on a manual clock, `WaitFor` and
-    /// `NextFrame` advance the clock with 2 ms waits without calling
-    /// `settled()`, so the wait is never skipped).
+    /// since the last step left it quiet: no batch came, nothing animates or
+    /// opens, and the last one is older than [`QUIET`] (on a manual clock,
+    /// `WaitFor` and `NextFrame` advance the clock with 2 ms waits without
+    /// calling `settled()`, so the wait is never skipped).
     fn settled_unless_still(&self) -> Result<(), String> {
         let settled = *self.quiet.lock().unwrap_or_else(|e| e.into_inner());
         if settled.is_some() && !self.scene.manual_clock() {
             let activity = self.scene.activity()?;
-            if is_still(settled, activity, self.native.animating()) {
+            if is_still(settled, activity, self.changing()) {
                 return self.check();
             }
         }
         self.settled()
     }
 
-    /// Waits until the app is quiet ([`QUIET`], no native animation that
-    /// ends by itself), [`SETTLE`] at most, then fails if it threw
-    /// meanwhile.
+    /// Waits until the app is quiet ([`QUIET`], nothing the platform
+    /// changes by itself: [`Agent::changing`]), [`SETTLE`] at most, then
+    /// fails if it threw meanwhile.
     fn settled(&self) -> Result<(), String> {
         self.clear_quiet();
         let start = Instant::now();
-        // When an animation last ran: what it ends with (a screen popped
-        // once it slid out) comes after it.
+        // When an animation last ran or a window last waited to show: what
+        // it ends with (a screen popped once it slid out, what a window
+        // tells the app once it shows) comes after it.
         let mut moved = start;
         let mut first = None;
         let quiet_batches;
         loop {
             let activity = self.scene.activity()?;
             let first = *first.get_or_insert(activity.batches);
-            if self.native.animating() {
+            if self.changing() {
                 moved = Instant::now();
             }
             // Quiet since the step began, the last batch and the last
-            // animation.
+            // animation or opening window.
             let since = activity
                 .since_last
                 .map_or(start.elapsed(), |d| d.min(start.elapsed()))
@@ -2520,7 +2538,7 @@ impl Agent {
                 // The step goes on all the same; why it waited this long
                 // tells why a run is slow.
                 log::info!(
-                    "test agent: the app did not settle in {} s: {} batches came, an animation ran {} ms ago",
+                    "test agent: the app did not settle in {} s: {} batches came, an animation ran or a window waited to show {} ms ago",
                     SETTLE.as_secs(),
                     activity.batches - first,
                     moved.elapsed().as_millis()
@@ -3653,7 +3671,131 @@ mod tests {
             false,
         ));
 
-        // A finite native animation is running.
+        // A finite native animation is running, or a window waits to show.
         assert!(!is_still(Some(5), quiet, true));
+    }
+
+    /// [`Fake`] whose window opens hidden and shows by itself at
+    /// `shows_at`, as a window of the app's own waits for its first frame:
+    /// a press while it is hidden is lost, as AppKit gives a window that is
+    /// not visible no mouse events.
+    struct Opening {
+        fake: Fake,
+        shows_at: Arc<Mutex<Instant>>,
+        /// The presses that came while it was hidden.
+        lost: Arc<Mutex<usize>>,
+    }
+
+    impl Native for Opening {
+        fn bounds(&self, id: NodeId) -> Option<Bounds<Points>> {
+            self.fake.bounds(id)
+        }
+        fn viewport(&self) -> Size<Points> {
+            self.fake.viewport()
+        }
+        fn press(&self, at: Point<Points>) {
+            if self.opening() {
+                *self.lost.lock().unwrap() += 1;
+            } else {
+                self.fake.press(at);
+            }
+        }
+        fn long_press(&self, _: Point<Points>, _: Duration) {}
+        fn scroll(&self, _: Point<Points>, _: Point<Points>) {}
+        fn drag(&self, _: Point<Points>, _: Point<Points>) {}
+        fn type_text(&self, _: &str) {}
+        fn key(&self, _: Key) {}
+        fn input_text(&self, _: NodeId) -> Option<String> {
+            None
+        }
+        fn back(&self) -> Result<(), String> {
+            Err("no back here".into())
+        }
+        fn answer_dialog(&self, _: Option<&str>) -> Result<(), String> {
+            Ok(())
+        }
+        fn animating(&self) -> bool {
+            false
+        }
+        fn opening(&self) -> bool {
+            Instant::now() < *self.shows_at.lock().unwrap()
+        }
+        fn screenshot(&self) -> Result<Vec<u8>, String> {
+            Ok(Vec::new())
+        }
+        fn resize(&self, _: Points, _: Points) -> Result<(), String> {
+            Ok(())
+        }
+        fn set_dark(&self, _: bool) -> Result<(), String> {
+            Ok(())
+        }
+        fn quit(&self) {}
+    }
+
+    #[test]
+    fn steps_wait_for_a_window_to_show_its_first_frame() {
+        let (engine, batches) =
+            crate::start(EngineConfig::new(crate::windowed_root::<Tally>())).unwrap();
+        let model = Arc::new(Model::default());
+        let feeding = model.clone();
+        std::thread::spawn(move || {
+            while let Ok(batch) = batches.recv() {
+                feeding.apply(&batch);
+            }
+        });
+        let scene = Arc::new(CountingScene::new(model.clone(), false));
+        // The window shows well after the app's one batch is quiet, as a
+        // window whose first frame does not come shows when its wait runs
+        // out.
+        let shows_at = Arc::new(Mutex::new(Instant::now() + QUIET * 3));
+        let lost = Arc::new(Mutex::new(0));
+        let agent = Agent::new(
+            scene.clone(),
+            Box::new(Opening {
+                fake: Fake(engine.control(), Arc::default(), Some(model.clone())),
+                shows_at: shows_at.clone(),
+                lost: lost.clone(),
+            }),
+        );
+        let ok = StepOutcome::Done {
+            value: serde_json::Value::Null,
+        };
+
+        // `open` is done once the window shows, and the first press reaches
+        // the app.
+        assert_eq!(agent.take(TestStep::Ready { timeout_ms: 5000 }), ok);
+        assert!(!agent.native.opening());
+        assert_eq!(
+            agent.take(TestStep::Press {
+                selector: "Add".into(),
+            }),
+            ok
+        );
+        assert_eq!(*lost.lock().unwrap(), 0);
+        assert_eq!(
+            agent.take(TestStep::Texts),
+            StepOutcome::Done {
+                value: serde_json::json!(["Count: 1", "Add"])
+            }
+        );
+
+        // Shown, the window holds no step back: the next one skips the
+        // settle the last one ended with.
+        scene.take_waits();
+        agent
+            .find("Add", "pressable view", PickTarget::Pressable)
+            .unwrap();
+        assert_eq!(scene.take_waits(), 0);
+
+        // A window opening after a quiet step, without a batch, is waited
+        // for before the next step acts.
+        *shows_at.lock().unwrap() = Instant::now() + QUIET;
+        agent
+            .find("Add", "pressable view", PickTarget::Pressable)
+            .unwrap();
+        assert!(scene.take_waits() > 0);
+        assert!(!agent.native.opening());
+
+        drop(engine);
     }
 }
