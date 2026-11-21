@@ -1114,9 +1114,9 @@ impl Mounter {
     }
 
     /// What the content insets of scroll view `id` keep clear at its start
-    /// and its end along its axis, as UIKit adjusts them: the bars and the
-    /// home indicator it scrolls under, the room kept for the keyboard and
-    /// the app's own insets (`None`: it is no scroll view).
+    /// and its end along its axis, as UIKit adjusts them: the room kept for
+    /// the keyboard and for a refresh, the app's own insets, and a large
+    /// title's bar (`None`: it is no scroll view).
     #[cfg(feature = "dev")]
     pub(crate) fn scroll_insets(&self, id: NodeId, horizontal: bool) -> Option<(CGFloat, CGFloat)> {
         let Native::Scroll(scroll) = &self.slot(id)?.native else {
@@ -1127,6 +1127,17 @@ impl Mounter {
             (inset.left, inset.right)
         } else {
             (inset.top, inset.bottom)
+        })
+    }
+
+    /// Whether `view` is inside one of the app's component elements: the
+    /// app's own view (a `TabBar` draws its `UITabBar` there), not one
+    /// UIKit draws over the app.
+    #[cfg(feature = "dev")]
+    pub(crate) fn in_component(&self, view: &UIView) -> bool {
+        self.views.iter().flatten().any(|s| match &s.native {
+            Native::Component(c) => view.isDescendantOfView(&c.container),
+            _ => false,
         })
     }
 

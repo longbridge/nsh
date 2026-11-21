@@ -662,8 +662,8 @@ so selectors resolve the same everywhere; the `Agent` takes each step on a threa
 selector on the model, scrolls the view into view when it is not (the innermost scroll view around it, inside the modal it is in, that
 hides it and can still move it, a gesture at a time: one already at the end a gesture would move it towards,
 `Native::scroll_room`, is not dragged past it, where a pull to refresh starts or a page sheet closes; a view under
-what draws over a scroll view's edges, `Native::scroll_insets` (on iOS its adjusted content inset: a header it scrolls
-under, the home indicator, the keyboard), is hidden as one outside it is, the gestures land clear of those edges, and
+what draws over a scroll view's edges, `Native::scroll_insets` (on iOS a system bar over it, a transparent header or a
+tab bar, and what its content inset keeps clear, the keyboard's room), is hidden as one outside it is, the gestures land clear of those edges, and
 one left under them fails the step as covered rather than being pressed there; on a touch screen the finger lands clear of the views inside that take a drag themselves,
 `Scene::drag_takers`: responders and pans, whose app would answer, a moment later, whether the scroll view keeps
 the gesture; it lands at the scroll view's middle, and after a gesture that moved nothing (what is there scrolls by
