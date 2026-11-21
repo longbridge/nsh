@@ -1045,22 +1045,57 @@ for the release runner in both. The test runner links QuickJS, so the first `nsh
 `nsh build` no longer does.
 
 
-### nshm (`nsh.json` `"modules"`, `nsh add`)
+### nshm (`nsh.json` `"dependencies"`, `nsh add`, `nsh upgrade`, `nsh remove`)
 
-`crates/nsh-cli/src/nshm.rs`. An nshm (NSH module) is a crate like the ones `"rust"` lists, from Git (`nsh add <url>
-[--tag|--rev]`, `{ "git", "tag"|"rev" }`, locked to a `commit`), crates.io (`nsh add <crate>[@<req>]`, `{ "crate",
-"version" }`, resolved by `cargo metadata` on a probe crate in the cache and locked to the exact version as `resolved`)
-or a directory (`nsh add --path <dir>`, `{ "path" }`, not locked, read as it is). `nsh.lock` holds `{ <source>,
-commit|resolved, package, module }`. A locked crate is Cargo's own download of that version. Each locked commit is a `git worktree` of one clone per repository in
-nsh's cache (`<cache>/nshm/<name>-<hash of url>/<commit>`), made again when missing, so a build after clearing
-the cache takes the same commit. `rust_app::of` appends the nshm to the app's crates (an app with nshm
-only is a `RustApp` too, its nsh crates this CLI's, as `runner_only`), checks them together (`check_crates`: the same
-directory, package or `#[native_module]` specifier), and the workspace links each like an app crate. The app's crate
-depends on the nshm as `nsh add` writes it (Git at the locked `rev`, the resolved crate version, or a relative
-`path`), which the workspace's `[patch."<url>"]` / `[patch.crates-io]` sends to the same checkout. Before linking, the nshm must have a `#[native_module]` at its root
-(its module) and its `nsh-core` dependency requirement, if any, must match this CLI. An entry's `"features"` (`nsh
-add --features`) are the crate's Cargo features the app turns on, carried to every dependency on the crate; the lock
-does not depend on them. The list was `"extensions"` before any release; `nshm::sources` rejects that key. `nsh check` does not `cargo check` nshm (only crates outside the cache). Not yet: per-target support checks, web and mobile packaging checks, and an OTA check of the shell's linked modules.
+`crates/nsh-cli/src/nshm/` resolves, installs and locks; `crates/nsh-bundler/src/nshm.rs` reads the lock for TSX.
+
+- `dep.rs`: `"dependencies"` entries by package name (`"^1.2"`, `{ github|git, tag|rev, version, features }`,
+  `{ path }`) and `nsh add` arguments (`crate[@req]`, `github:owner/repo[@req]`, Git URLs, `--path`). The
+  pre-release keys `"modules"` and `"extensions"` are rejected.
+- `manifest.rs`: an nshm's own description. A Rust nshm's name and version are its `Cargo.toml`'s and it needs a
+  `#[native_module]` at its root; an `nsh.json` beside it (or alone, for a TSX nshm) adds `"exports"` (specifier →
+  TSX entry inside the nshm, the specifier being the package name or `name/...`), `"dependencies"`, `"nsh"` (a
+  requirement on this CLI's version, as is the crate's `nsh-core` requirement) and `"platform"` (Rust only). An
+  `nsh.json` counts as a manifest only with `"exports"` or `"platform"`, or without a `Cargo.toml`.
+- `fetch.rs`: versions and installation in `~/.nsh/nshms` (`nsh_bundler::nshm::installed_dir`, `NSH_HOME`). crates.io
+  through its sparse index and `static.crates.io` downloads, checked against the index's sha256; Git through one bare
+  clone per repository (`.git/<host>/<path>`), versions from semver tags, installed with `git archive`. Each version
+  goes to its own directory (`<crate>/<version>`, `<host>/<path>/<version>` or `/<commit12>`), written to a sibling
+  and renamed, never changed once there.
+- `resolve.rs`: a depth-first search over the app's dependencies and each chosen nshm's, one version per package,
+  trying the locked version first (unless the command upgrades that package), then the others newest first, and
+  backtracking out of dead ends. The app's entry decides a package's origin; two nshm naming different origins
+  without one is an error. Published nshm cannot depend on directories. It also rejects two packages exporting one
+  specifier or platform, and specifiers of NSH's own. `nsh.lock` v2 holds each package's version, source, commit,
+  checksum, installed `dir` (or `path`), `module`, `exports`, `platform` and dependency names; an earlier format is
+  resolved again.
+- `mod.rs`: `crates` (called by `rust_app::of` for every command) resolves when the lock no longer fits, installs
+  what is missing and returns the Rust nshm as `AppCrate`s with the app's features; the generated workspace
+  patches crates.io / Git dependencies on them to the installed copies (`patch_table`), so the app's crates and other
+  nshm link one copy. A pure TSX app with TSX nshm stays without Rust. `add`, `remove` and `upgrade` edit `nsh.json`,
+  `nsh.lock` and the app crate's `[dependencies]` (`cargo_toml.rs`), restoring them on error. `platform_program`
+  builds a platform nshm's `nsh-platform-<name>` from a copy in the app's `.nsh/platforms/<name>` (so Cargo writes
+  nothing into the shared installation); `platforms::dispatch` tries it before `PATH`.
+- The bundler aliases each locked TSX export to its installed file (`ResolveSetup::with_nshm`, after the app's own
+  `resolve.alias`), so it compiles into the app's bundle; `init::write_types` writes `.nsh/types/<specifier>.d.ts`
+  re-exporting the source for `nsh check`.
+
+Builds that link nothing of the app's own (`rust_app.rs`):
+
+- An app whose Rust is installed nshm only (no `"rust"`, a released nsh) builds in a workspace shared by every app with
+  the same nshm, `~/.nsh/builds/<fingerprint>` (`shared_workspace`: this nsh, the nshm with their features, `unify`, the
+  Apple minimums). Its dev profile is a release build (`opt-level = 3`, no debug assertions or overflow checks,
+  line tables, not incremental), and `nsh run --release` uses that development host too: one build of an nshm. A build no app used for 30 days is removed when a new one starts; the app's
+  own old `.nsh/rust` is removed.
+- Every generated workspace builds the crates the app does not write (`[profile.dev.package."*"]`) optimized; the
+  app's crates and nsh's crates from a checkout stay at `opt-level = 0` with full debug info.
+- `BuiltOnce` skips Cargo for a build whose manifests name only generated or installed paths: it records a fingerprint
+  (this nsh's binary, the manifests and lock, the package's generated files, the command line and Cargo's environment)
+  with the binary's size and time in `<workspace>/.built/`, and returns the binary while both hold. Even a no-op Cargo
+  takes a moment, and a Cargo that copies its binaries anew each time makes macOS check the signature again on launch.
+
+`nsh check` does not `cargo check` nshm (only crates outside `~/.nsh/nshms`). Not yet: a registry of TSX nshm, prebuilt
+binaries, cleaning old versions, per-target support checks and an OTA check of the shell's linked modules.
 
 ### What crates declare for packages (`[package.metadata.nsh]`)
 

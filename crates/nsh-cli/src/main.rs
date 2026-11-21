@@ -346,23 +346,25 @@ enum Command {
         #[arg(value_enum)]
         channel: Option<self_update::Channel>,
     },
-    /// Add an nshm (NSH module) to the app in this directory: a Rust
-    /// crate with components, modules and classes for its Rust and TSX
-    /// code, from crates.io (`nsh add acme-ui[@1.2]`), Git (`nsh add
-    /// https://github.com/acme/ui`) or a directory (`nsh add --path
-    /// ../ui`). Listed in `nsh.json` `"modules"`, the version or commit
-    /// it resolved to pinned in `nsh.lock`; `--features` turns on the
-    /// modules of a crate that keeps them behind Cargo features (`nsh add
-    /// nsh-extra --features camera`).
+    /// Add an nshm (NSH module) to the app in this directory (or the nearest
+    /// one above it with `nsh.json`): a package of components, modules and
+    /// classes for its Rust and TSX code, from crates.io (`nsh add
+    /// acme-ui[@1.2]`), GitHub (`nsh add github:acme/ui[@^1.4]`), any Git
+    /// URL or a directory (`nsh add --path ../ui`). Listed in `nsh.json`
+    /// `"dependencies"` by package name, installed once in `~/.nsh/nshms`,
+    /// the version it resolved to pinned in `nsh.lock`; `--features` turns
+    /// on the modules of a crate that keeps them behind Cargo features (`nsh
+    /// add nsh-extra --features camera`).
     Add {
         /// A crate name (with `@<version>`), `github:<owner>/<repo>` (with
-        /// `@<tag>`) or a Git repository URL.
+        /// `@<version>`) or a Git repository URL.
         #[arg(required_unless_present = "path", conflicts_with = "path")]
         source: Option<String>,
         /// A local directory with the nshm.
         #[arg(long)]
         path: Option<String>,
-        /// The tag to take from Git (default: the default branch).
+        /// The tag to take from Git (default: its newest version tag, else
+        /// its default branch).
         #[arg(long, conflicts_with_all = ["rev", "path"])]
         tag: Option<String>,
         /// The commit or branch to take from Git.
@@ -373,6 +375,21 @@ enum Command {
         /// already.
         #[arg(long, value_delimiter = ',')]
         features: Vec<String>,
+    },
+    /// Remove nshm from the app in this directory (or the nearest one above
+    /// it): from `nsh.json` `"dependencies"`, `nsh.lock` and its crate's
+    /// `[dependencies]`. Their installed copies stay in `~/.nsh/nshms`.
+    Remove {
+        /// The nshm, by package name.
+        #[arg(required = true)]
+        names: Vec<String>,
+    },
+    /// Upgrade the app's nshm to the newest versions their requirements in
+    /// `nsh.json` accept, and lock them in `nsh.lock` (all of them, or
+    /// those named).
+    Upgrade {
+        /// The nshm to upgrade, by package name (default: all).
+        names: Vec<String>,
     },
     /// Add, remove or list the runtimes installed beside this nsh: those
     /// of other platforms than this machine's (`android`, `ios`, `web`,
@@ -675,6 +692,8 @@ impl Command {
             | Command::Update { .. }
             | Command::Component { .. }
             | Command::Add { .. }
+            | Command::Remove { .. }
+            | Command::Upgrade { .. }
             | Command::UpdateManifest { .. }
             | Command::Certify { .. }
             | Command::Verify { .. }
@@ -1111,8 +1130,10 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             features,
         } => nshm::add(
             &std::env::current_dir()?,
-            nshm::Source::parse(source, path, tag, rev)?.with_features(features)?,
+            nshm::Added::parse(source, path, tag, rev, features)?,
         ),
+        Command::Remove { names } => nshm::remove(&std::env::current_dir()?, &names),
+        Command::Upgrade { names } => nshm::upgrade(&std::env::current_dir()?, &names),
         Command::Component { action } => match action {
             ComponentAction::List => component::list(),
             ComponentAction::Add { names } => component::add_named(&names),

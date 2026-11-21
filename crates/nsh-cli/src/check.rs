@@ -122,10 +122,13 @@ pub(crate) fn check(entry: &Path, tsc: Option<&Path>, args: &[String]) -> anyhow
 /// with errors, showing cargo's output.
 pub(crate) fn cargo_check(app: &RustApp) -> anyhow::Result<()> {
     // nshm (`nsh add`) are checked by their authors: only the
-    // app's own crates, not those checked out in the cache.
-    let cache = cache().ok();
+    // app's own crates, not those installed in `~/.nsh/nshms`.
+    let installed = nsh_bundler::nshm::installed_dir();
     for krate in app.crates() {
-        if cache.as_ref().is_some_and(|c| krate.dir().starts_with(c)) {
+        if installed
+            .as_ref()
+            .is_some_and(|c| krate.dir().starts_with(c))
+        {
             continue;
         }
         let mut cmd = krate.cargo("check");
