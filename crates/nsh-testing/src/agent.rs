@@ -34,7 +34,7 @@ mod forward;
 
 pub use self::forward::{Outgoing, Send as SendOutgoing};
 pub use crate::screen::Pick;
-use crate::{MemoryStorage, screen::Screen, selector::Selector};
+use crate::{DragOptions, MemoryStorage, screen::Screen, selector::Selector};
 
 /// How far a dragging finger moves in a display frame, as headless drags
 /// move it.
@@ -44,7 +44,7 @@ pub const FRAME: Duration = Duration::from_millis(16);
 /// How long a dragging finger rests where it lands before it moves, as a
 /// hand does: the views under it hear it land (a JS responder takes it)
 /// before a drag starts.
-pub const LANDING: Duration = Duration::from_millis(100);
+pub const LANDING: Duration = crate::drag::LANDING;
 
 /// The positions of a finger dragged from `from` to `to`
 /// ([`Native::drag`]), after `from`, a display frame apart: [`DRAG_STEP`]
@@ -56,6 +56,19 @@ pub fn drag_path(from: Point<Points>, to: Point<Points>) -> impl Iterator<Item =
         let t = i as f32 / steps as f32;
         Point::new(from.x + dx * t, from.y + dy * t)
     })
+}
+
+/// Refuses `options` that ask a drag for more than an agent resting
+/// [`LANDING`] does (a custom hold), before it puts a pointer down: `step`
+/// names the test's step (`"drag"`, `"dragAndHold"`).
+pub fn refuse_custom_drag(step: &str, options: DragOptions) -> Result<(), String> {
+    match options.hold {
+        Some(hold) if hold != LANDING => Err(crate::failure::unsupported_here(
+            step,
+            "this platform's test agent does not support a custom hold",
+        )),
+        _ => Ok(()),
+    }
 }
 
 /// How long after the last batch the app is quiet.
@@ -1201,10 +1214,17 @@ pub trait Native: Send + Sync {
     /// towards the content's end), as a trackpad or a finger does.
     fn scroll(&self, at: Point<Points>, delta: Point<Points>);
     /// Drags from `from` to `to`: a finger (on a desktop, the mouse's
-    /// button) down at `from`, resting there for [`LANDING`], moving along
-    /// [`drag_path`] a display frame at a time and lifting at `to` at once,
-    /// still moving, as a quick drag does.
-    fn drag(&self, from: Point<Points>, to: Point<Points>);
+    /// button) down at `from`, resting there for `options.hold` ([`LANDING`]
+    /// by default), moving along [`drag_path`] a display frame at a time and
+    /// lifting at `to` at once, still moving, as a quick drag does. An agent
+    /// that cannot honour `options` refuses them before putting a pointer
+    /// down ([`refuse_custom_drag`]).
+    fn drag(
+        &self,
+        from: Point<Points>,
+        to: Point<Points>,
+        options: DragOptions,
+    ) -> Result<(), String>;
     /// The platform has a mouse ([`Native::hover`]): the desktops and the
     /// web; not the phones.
     fn mouse(&self) -> bool {
@@ -1284,9 +1304,14 @@ pub trait Native: Send + Sync {
     }
     /// Drags from `from` to `to` as [`Native::drag`] does, keeping the
     /// button down until [`Native::drop_at`].
-    fn drag_and_hold(&self, from: Point<Points>, to: Point<Points>) -> Result<(), String> {
-        let _ = (from, to);
-        Err("`dragAndHold` runs headless and on Linux for now".into())
+    fn drag_and_hold(
+        &self,
+        from: Point<Points>,
+        to: Point<Points>,
+        options: DragOptions,
+    ) -> Result<(), String> {
+        let _ = (from, to, options);
+        Err("`dragAndHold` runs headless, on Linux and on iOS for now".into())
     }
     /// Drops local files (`file:` URLs) at `at`, as a file manager's drag
     /// does.
@@ -1297,7 +1322,7 @@ pub trait Native: Send + Sync {
     /// Lets go of the button [`Native::drag_and_hold`] holds, at `at`.
     fn drop_at(&self, at: Point<Points>) -> Result<(), String> {
         let _ = at;
-        Err("`drop` runs headless and on Linux for now".into())
+        Err("`drop` runs headless, on Linux and on iOS for now".into())
     }
     /// Holds modifier keys down (`down`) or lets go of them: the presses,
     /// drags and hovers until then carry them. One that cannot refuses it.
@@ -1679,7 +1704,12 @@ impl Agent {
             TestStep::Submit { selector } => done(self.submit(&selector)),
             TestStep::Clear { selector } => done(self.clear(&selector)),
             TestStep::Scroll { selector, distance } => done(self.scroll(&selector, distance)),
-            TestStep::Drag { selector, x, y } => done(self.drag(&selector, x, y)),
+            TestStep::Drag {
+                selector,
+                x,
+                y,
+                hold_ms,
+            } => done(self.drag(&selector, x, y, DragOptions::from_ms(hold_ms)?)),
             TestStep::Hover { selector } => done(self.hover(&selector)),
             TestStep::RightClick { selector } => done(self.right_click(&selector)),
             TestStep::Paste {
@@ -1712,7 +1742,12 @@ impl Agent {
                     .and_then(|()| self.settled()),
             ),
             TestStep::OpenedUrls => self.scene.opened_urls().map(Value::from),
-            TestStep::DragAndHold { selector, x, y } => done(self.drag_and_hold(&selector, x, y)),
+            TestStep::DragAndHold {
+                selector,
+                x,
+                y,
+                hold_ms,
+            } => done(self.drag_and_hold(&selector, x, y, DragOptions::from_ms(hold_ms)?)),
             TestStep::Drop => done(self.drop_held()),
             TestStep::Compose { selector, text } => done(self.compose(&selector, &text)),
             TestStep::DropFiles { selector, uris } => done(
@@ -1803,8 +1838,9 @@ impl Agent {
                 done(self.native.set_dark(dark).and_then(|()| self.settled()))
             }
             TestStep::Quit => {
+                let released = self.release_held().map(|_| ());
                 self.native.quit();
-                Ok(Value::Null)
+                done(released)
             }
             TestStep::WindowIds => Ok(serde_json::json!(self.scene.window_ids()?)),
             TestStep::WindowState { id } => match self.scene.window_root(&id)? {
@@ -2517,30 +2553,42 @@ impl Agent {
         self.settled()
     }
 
-    fn drag_and_hold(&self, selector: &str, x: f32, y: f32) -> Result<(), String> {
-        self.drop_held().ok();
+    fn drag_and_hold(
+        &self,
+        selector: &str,
+        x: f32,
+        y: f32,
+        options: DragOptions,
+    ) -> Result<(), String> {
+        self.release_held()?;
         let (_, at) = self.find(selector, "view", PickTarget::View)?;
         let to = Point::new(at.x + Points(x), at.y + Points(y));
-        self.native.drag_and_hold(at, to)?;
+        self.native.drag_and_hold(at, to, options)?;
         *self.held.lock().unwrap() = Some(to);
         self.settled()
     }
 
-    fn drop_held(&self) -> Result<(), String> {
-        let at = self
-            .held
-            .lock()
-            .unwrap()
-            .take()
-            .ok_or("`drop()` comes after `dragAndHold`: no pointer is down")?;
+    /// Clearing the owner follows a successful Up; a failed release can be retried.
+    fn release_held(&self) -> Result<bool, String> {
+        let mut held = self.held.lock().unwrap();
+        let Some(at) = *held else { return Ok(false) };
         self.native.drop_at(at)?;
+        *held = None;
+        Ok(true)
+    }
+
+    fn drop_held(&self) -> Result<(), String> {
+        if !self.release_held()? {
+            return Err("`drop()` comes after `dragAndHold`: no pointer is down".into());
+        }
         self.settled()
     }
 
-    fn drag(&self, selector: &str, x: f32, y: f32) -> Result<(), String> {
+    fn drag(&self, selector: &str, x: f32, y: f32, options: DragOptions) -> Result<(), String> {
+        self.release_held()?;
         let (_, at) = self.find(selector, "view", PickTarget::View)?;
         let to = Point::new(at.x + Points(x), at.y + Points(y));
-        self.native.drag(at, to);
+        self.native.drag(at, to, options)?;
         self.settled()
     }
 
@@ -2778,7 +2826,9 @@ mod tests {
         }
         fn long_press(&self, _: Point<Points>, _: Duration) {}
         fn scroll(&self, _: Point<Points>, _: Point<Points>) {}
-        fn drag(&self, _: Point<Points>, _: Point<Points>) {}
+        fn drag(&self, _: Point<Points>, _: Point<Points>, _: DragOptions) -> Result<(), String> {
+            Ok(())
+        }
         fn type_text(&self, text: &str) {
             self.1.lock().unwrap().push(format!("type {text}"));
         }
@@ -2906,7 +2956,9 @@ mod tests {
                 *offset = (*offset + delta.y.0).clamp(0.0, self.end());
             }
         }
-        fn drag(&self, _: Point<Points>, _: Point<Points>) {}
+        fn drag(&self, _: Point<Points>, _: Point<Points>, _: DragOptions) -> Result<(), String> {
+            Ok(())
+        }
         fn type_text(&self, _: &str) {}
         fn key(&self, _: Key) {}
         fn input_text(&self, _: NodeId) -> Option<String> {
@@ -3284,7 +3336,9 @@ mod tests {
         }
         fn long_press(&self, _: Point<Points>, _: Duration) {}
         fn scroll(&self, _: Point<Points>, _: Point<Points>) {}
-        fn drag(&self, _: Point<Points>, _: Point<Points>) {}
+        fn drag(&self, _: Point<Points>, _: Point<Points>, _: DragOptions) -> Result<(), String> {
+            Ok(())
+        }
         fn type_text(&self, _: &str) {}
         fn key(&self, _: Key) {}
         fn input_text(&self, _: NodeId) -> Option<String> {
@@ -3606,7 +3660,9 @@ mod tests {
         }
         fn long_press(&self, _: Point<Points>, _: Duration) {}
         fn scroll(&self, _: Point<Points>, _: Point<Points>) {}
-        fn drag(&self, _: Point<Points>, _: Point<Points>) {}
+        fn drag(&self, _: Point<Points>, _: Point<Points>, _: DragOptions) -> Result<(), String> {
+            Ok(())
+        }
         fn type_text(&self, text: &str) {
             self.did.lock().unwrap().push(format!("type {text}"));
         }
@@ -4003,7 +4059,9 @@ mod tests {
         }
         fn long_press(&self, _: Point<Points>, _: Duration) {}
         fn scroll(&self, _: Point<Points>, _: Point<Points>) {}
-        fn drag(&self, _: Point<Points>, _: Point<Points>) {}
+        fn drag(&self, _: Point<Points>, _: Point<Points>, _: DragOptions) -> Result<(), String> {
+            Ok(())
+        }
         fn type_text(&self, _: &str) {}
         fn key(&self, _: Key) {}
         fn input_text(&self, _: NodeId) -> Option<String> {
@@ -4100,3 +4158,7 @@ mod tests {
         drop(engine);
     }
 }
+
+#[cfg(test)]
+#[path = "tests/drag_agent.rs"]
+mod drag_tests;

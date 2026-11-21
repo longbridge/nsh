@@ -424,7 +424,13 @@ impl Native for MacNative {
         gesture(0, 0, 4);
     }
 
-    fn drag(&self, from: Point<Points>, to: Point<Points>) {
+    fn drag(
+        &self,
+        from: Point<Points>,
+        to: Point<Points>,
+        options: nsh_testing::DragOptions,
+    ) -> Result<(), String> {
+        nsh_testing::agent::refuse_custom_drag("drag", options)?;
         self.activate();
         let (x, y) = (f64::from(from.x.0), f64::from(from.y.0));
         let clicks = self
@@ -447,6 +453,7 @@ impl Native for MacNative {
         }
         let (x, y) = (f64::from(last.x.0), f64::from(last.y.0));
         self.on_target(move |_, window| mouse(window, NSEventType::LeftMouseUp, x, y, clicks));
+        Ok(())
     }
 
     fn type_text(&self, text: &str) {

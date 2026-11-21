@@ -232,7 +232,13 @@ impl Native for AndroidNative {
         self.swipe(from, (from.0 - delta.x.0, from.1 - delta.y.0), REST);
     }
 
-    fn drag(&self, from: Point<Points>, to: Point<Points>) {
+    fn drag(
+        &self,
+        from: Point<Points>,
+        to: Point<Points>,
+        options: nsh_testing::DragOptions,
+    ) -> Result<(), String> {
+        nsh_testing::agent::refuse_custom_drag("drag", options)?;
         // A touchscreen samples a finger several times a frame: its first
         // moves stay within the touch slop, so the views under it decide
         // who takes the drag as they do for a real one.
@@ -257,6 +263,7 @@ impl Native for AndroidNative {
         xs.push(self.px(to.x.0));
         ys.push(self.px(to.y.0));
         self.path(&xs, &ys, frame / SAMPLES);
+        Ok(())
     }
 
     fn type_text(&self, text: &str) {
