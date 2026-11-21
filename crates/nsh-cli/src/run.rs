@@ -894,6 +894,7 @@ pub(crate) fn install_android_host(
                 launch_screen: None,
                 assets: Vec::new(),
                 sounds: Vec::new(),
+                res: None,
                 signing: Signing::Debug,
             },
             &apk_path,

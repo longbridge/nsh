@@ -238,7 +238,7 @@ nsh package my-app --target web
 
 ## 外部 target
 
-`nsh dev`、`nsh run`、`nsh test` 和 `nsh package` 的 `--target` 不是 NSH 自带的 target 时，会运行在 NSH 之外构建的同名平台：`PATH` 上的程序 `nsh-platform-<name>`，就像 Cargo 运行 `cargo-<name>` 一样。它收到命令和除 `--target` 及其值以外的所有参数，以及环境变量 `NSH`（当前的 `nsh` 可执行文件）、`NSH_VERSION` 和 `NSH_TARGET`（平台名）；它的退出码就是命令的退出码。
+`nsh dev`、`nsh run`、`nsh test` 和 `nsh package` 的 `--target` 不是 NSH 自带的 target 时，会运行在 NSH 之外构建的同名平台：应用的[平台 nshm](./nshm.md#平台-nshm) 提供的那个，否则是 `PATH` 上的程序 `nsh-platform-<name>`，就像 Cargo 运行 `cargo-<name>` 一样。它收到命令和除 `--target` 及其值以外的所有参数，以及环境变量 `NSH`（当前的 `nsh` 可执行文件）、`NSH_VERSION` 和 `NSH_TARGET`（平台名）；它的退出码就是命令的退出码。
 
 ```sh
 nsh package my-app --target miniprogram --out dist
@@ -257,25 +257,41 @@ nsh update [stable|nightly]
 
 ## nsh add
 
-为当前目录的应用添加 [nshm](./nshm.md)（NSH 模块）：一个来自 crates.io、Git 或本地目录的 Rust crate，应用可在 TSX（`import { Gauge } from "acme/gauge"`）和 Rust（`acme_gauge::gauge()`）中使用它导出的组件、模块和类。实验性功能。
+为当前目录（或向上最近的有 `nsh.json` 的目录）的应用添加 [nshm](./nshm.md)（NSH 模块）：来自 crates.io、Git 或本地目录的 Rust crate，或 Git 仓库里的 TSX，应用导入它导出的组件、模块和类（`import { Gauge } from "acme-gauge"`，Rust 中则是 `acme_gauge::gauge()`）。
 
 ```sh
-nsh add acme-gauge@1.0                                 # 来自 crates.io：取匹配 1.0 的最新版本
-nsh add github:acme/gauge@v1.0.0                    # 来自 GitHub 的标签；或 --rev <提交或分支>；都不给则取默认分支
-nsh add https://git.example.com/gauge.git --tag v1.0.0  # 来自任意 Git 地址
-nsh add --path ../gauge                              # 来自本地目录，按当前内容使用
-nsh add nsh-extra --features camera                  # 同时开启 crate 的 Cargo feature（逗号分隔或重复给出）
+nsh add acme-gauge                                   # crates.io：最新版本
+nsh add acme-gauge@1.2                               # crates.io：匹配 ^1.2 的最新版本
+nsh add github:acme/ui                               # GitHub：最新的版本标签，没有则用默认分支
+nsh add github:acme/ui@^1.4                          # GitHub：匹配 ^1.4 的最新标签
+nsh add https://git.example.com/ui.git --tag v1.4.0  # 任意 Git 地址的某个标签；或 --rev <提交或分支>
+nsh add --path ../gauge                              # 本地目录，按当前内容使用
+nsh add nsh-extra --features camera                  # 开启 crate 的 Cargo feature（逗号分隔或重复传入）
 ```
 
-它把 nshm 记录到 `nsh.json` 的 `"modules"`（`"acme-gauge@1.0"`、`"github:acme/gauge@v1.0.0"`、`{ "github": "acme/gauge", "rev": "…" }`、`{ "git": "…", "tag": "v1.0.0" }` 或 `{ "path": "../gauge" }`），交给 Cargo 解析，并把解析到的版本或提交锁定在 `nsh.lock`（随应用一起提交），应用有自己的 crate（`"rust"`）时还会加入其 `[dependencies]`。构建始终使用锁定的版本或提交（本地目录按当前内容），再次运行 `nsh add` 即更新。纯 TSX 应用会像带 crate 的应用一样用 nshm 重新构建宿主（[使用 Rust](./rust.md)），因此开发机和 CI 需要 Rust 工具链。nshm 与应用的 crate 或其他 nshm 冲突（同名包或同名模块），或与当前 NSH 不兼容时，`nsh.json` 和 `nsh.lock` 保持不变。
+它像 `Cargo.toml` 一样按包名（crate 名，或 Git、本地 nshm 的 `nsh.json` 中的 `"name"`）把 nshm 记录到 `nsh.json` 的 `"dependencies"`：`"acme-gauge": "^1.2.0"`、`{ "github": "acme/ui", "version": "^1.4" }`、`{ "git": "…", "tag": "v1.4.0" }`、`{ "git": "…", "rev": "…" }` 或 `{ "path": "../gauge" }`，对象形式可加 `"version"` 和 `"features"`。没写版本时写入 `^` 加解析到的版本。随后它重新解析应用用到的所有 nshm，把缺少的安装到 `~/.nsh/nshms`，锁定在 `nsh.lock`（随应用提交），应用有自己的 crate（`"rust"`）时把 Rust nshm 加入该 crate 的 `[dependencies]`。它会打印要导入的标识；如果 nshm 给纯 TSX 应用带来了 Rust，也会说明，此后开发机和 CI 需要 Rust 工具链（[用 Rust 开发](./rust.md)）。若 nshm 无法解析、与应用的 crate 或其他 nshm 冲突（同一个包、标识或模块），或不兼容当前 NSH，应用的文件保持不变。
 
-`--features` 开启 crate 的 Cargo feature，也就是应用用到的那些模块，已经列出的 feature 保留（在 `camera` 之后运行 `nsh add nsh-extra --features push`，`camera` 仍然开着）；crate 没有定义的名字会让 `nsh add` 报错，`nsh.json` 不变。这时条目写成对象形式（`{ "crate": "nsh-extra", "version": "0.6", "features": ["camera"] }`，`"github"`、`"git"`、`"path"` 旁边同样可以写 `"features"`），应用的 crate 也带着这些 feature 依赖它，并保留它的 `Cargo.toml` 里已经开启的 feature。要关掉某个 feature，把它从 `nsh.json` 和应用 crate 的 `Cargo.toml` 里这个依赖上一起删掉。和每次 `nsh add` 一样，加 feature 也会按命令行重新解析这个条目：命令行没有重复的版本要求、tag 或 rev 会被去掉（`nsh add nsh-extra@0.6 --features push` 保留 `0.6`）。crate 在 `[package.metadata.nsh]` 下为已开启的 feature 声明的条目会加进安装包，除 entitlements 外也加进开发宿主（[打包的应用需要什么](./nshm.md#打包的应用需要什么)）。
+`--features` 开启 Rust nshm 的 Cargo feature，即应用用到的模块，已列出的会保留（在 `camera` 之后 `nsh add nsh-extra --features push` 仍保留 `camera`）；crate 未定义的名字会让 `nsh add` 停止。要关闭某个 feature，从 `nsh.json` 和应用 crate 的 `Cargo.toml` 依赖中删掉它。crate 在 `[package.metadata.nsh]` 中为开启的 feature 声明的内容会进入打包结果，除 entitlements 外也进入开发宿主（[打包的应用需要什么](./nshm.md#打包的应用需要什么)）。
 
-nshm 是普通的 Cargo 库：根部有 `#[native_module("<module>")]` 入口（与应用自己的 crate 相同），TSX 按这个标识导入它（[编写 nshm](./nshm.md#编写-nshm)）。
+版本是语义化版本要求，含义与 Cargo 相同：`1.2` 和 `^1.2` 接受 1.2.0 起的任何 1.x，`~1.2`、`=1.2.3`、`>=1.2, <2` 和 `*` 与 `Cargo.toml` 中一样（在 shell 里要加引号：`nsh add "acme-gauge@>=1.2, <2"`）。Git 上的 nshm 以标签（`v1.4.0` 或 `1.4.0`）为版本。`nsh.json` 写可以接受什么，`nsh.lock` 记录解析出了什么：只要锁定的版本仍满足要求，所有命令都用它构建，不访问网络；要求改变时重新解析。整个应用中每个包只解析出一个版本，即所有要求都接受的最新版本；没有满足的版本时，错误会指出谁要求了什么。nshm 适用的 NSH 版本是它 `nsh.json` 中的 `"nsh"` 要求，Rust nshm 还有它的 `nsh-core` 要求，二者都会与当前运行的 `nsh` 比对。
 
-版本要求沿用 Cargo 的写法和语义：`"acme-gauge@1.2"` 即 `^1.2`（1.2.0 起的任意 1.x），`~1.2`、`=1.2.3`、`>=1.2, <2`、`*` 与 `Cargo.toml` 相同（在 shell 中加引号：`nsh add "acme-gauge@>=1.2, <2"`）。`nsh.json` 写可接受的范围，`nsh.lock` 记录实际解析结果：锁定的版本仍满足要求时构建一直用它，修改要求后重新解析。Git 或本地目录可以在对象写法里加 `"version"`（`{ "github": "acme/gauge", "tag": "v1.2.0", "version": "1.2" }`），与 Cargo 对这类依赖的处理一样，包的版本必须满足它。nshm 兼容的 NSH 版本就是它自己对 `nsh-core` 依赖的版本要求（`nsh-core = "0.6"`），编译前会与当前 `nsh` 比对。
+nshm 的构建脚本和过程宏会在应用构建时执行，它的代码以应用的权限运行：请像审查应用自己的代码一样审查它的源码和 `nsh.lock` 的变更。
 
-nshm 的构建脚本和过程宏会在应用构建时执行，其代码以应用的权限运行：请像审查应用代码一样审查 nshm 来源和 `nsh.lock` 的变更。
+## nsh upgrade
+
+把应用的 nshm（全部或指定的几个）升级到其要求接受的最新版本，并锁定在 `nsh.lock`；Rust nshm 在应用 crate 中的依赖随之更新。要越过某个要求，在 `nsh.json` 中修改它，或用新的要求运行 `nsh add`。
+
+```sh
+nsh upgrade [NAME]...
+```
+
+## nsh remove
+
+从应用中移除 nshm：从 `nsh.json` 的 `"dependencies"`、`nsh.lock` 和应用 crate 的 `[dependencies]` 中删除。已安装的副本留在 `~/.nsh/nshms`，其他应用可能还在使用。
+
+```sh
+nsh remove <NAME>...
+```
 
 ## nsh component
 

@@ -355,6 +355,20 @@ impl ResolveSetup {
         Ok(setup)
     }
 
+    /// The TSX the app's nshm export (`nsh.lock`, [`crate::nshm`]),
+    /// imported by their specifiers as the app's own modules are; an alias
+    /// of `nsh.json` `"resolve"` wins.
+    fn with_nshm(mut self, dir: &std::path::Path) -> Result<Self, BundleError> {
+        for (specifier, file) in crate::nshm::exports(dir).map_err(BundleError::other)? {
+            if self.alias.iter().any(|(from, _)| *from == specifier) {
+                continue;
+            }
+            self.alias
+                .push((specifier, vec![Some(file.to_string_lossy().into_owned())]));
+        }
+        Ok(self)
+    }
+
     /// Sets `options`' platform and resolution (`production`: the value of
     /// `process.env.NODE_ENV`, as rolldown sets it for the browser).
     fn apply(&self, options: &mut BundlerOptions, production: bool) {
@@ -628,7 +642,7 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
     // opens below its app's root starts alike headless and in a window.
     let main_window = main_window(&cwd)?;
     let application = application(&cwd)?;
-    let resolve = ResolveSetup::read(&app)?;
+    let resolve = ResolveSetup::read(&app)?.with_nshm(&app)?;
     let asset_root = match &options.asset_root_from {
         Some(file) => {
             let file = dunce::canonicalize(file).map_err(|e| {
@@ -1053,7 +1067,7 @@ pub async fn bundle_hot_async(
     let capabilities = capabilities(&app)?;
     let url_schemes = url_schemes(&app)?;
     let link_domains = link_domains(&app)?;
-    let resolve = ResolveSetup::read(&app)?;
+    let resolve = ResolveSetup::read(&app)?.with_nshm(&app)?;
     let mut bundler_options = BundlerOptions {
         input: Some(vec![InputItem {
             import: entry.to_string_lossy().into_owned(),

@@ -208,9 +208,9 @@ pub(crate) struct AppConfig {
     /// The app's Rust crate: its builds are the app's own (`rust_app.rs`).
     #[serde(default, rename = "rust")]
     _rust: Option<serde_json::Value>,
-    /// The app's nshm, linked like its crates (`nshm.rs`).
-    #[serde(default, rename = "modules")]
-    _modules: Option<serde_json::Value>,
+    /// The app's nshm, resolved and linked by `nshm/`.
+    #[serde(default, rename = "dependencies")]
+    _dependencies: Option<serde_json::Value>,
     /// A Rust app's root component in its crate (`rust_app::RootConfig`).
     #[serde(default, rename = "root")]
     _root: Option<serde_json::Value>,
@@ -1782,6 +1782,16 @@ fn package_android(
         .out
         .join(format!("{name}.{}", options.format.extension()));
     let version = config.version.as_deref().unwrap_or("1.0.0");
+    // `android/res/` next to `nsh.json`: the app's own resources.
+    let res = Some(
+        options
+            .entry
+            .parent()
+            .unwrap_or(Path::new("."))
+            .join("android")
+            .join("res"),
+    )
+    .filter(|dir| dir.is_dir());
     let step = ui::Step::start(format!("packaging {}", ui::path(&apk_path)));
     android::build(
         &sdk,
@@ -1812,6 +1822,7 @@ fn package_android(
             launch_screen: config.android.launch_screen.as_ref(),
             assets,
             sounds: android_sounds(config, built),
+            res: res.as_deref(),
             signing,
         },
         options.format,
