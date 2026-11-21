@@ -15,7 +15,7 @@ use nsh_core::{
     prelude::*,
 };
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
+use nsh_testing::{DragOptions, Headless};
 
 #[component]
 fn AnnotatedCode() -> impl IntoElement {
@@ -1217,8 +1217,12 @@ fn list_item_blockquote_overshoot_drag_does_not_select_marker() {
     assert_eq!(doc_texts, ["•", "不想辩论、礼貌结束话题版：", quote]);
     // Dragging inside the blockquote and slightly past its bottom/right must
     // select only the blockquote text, never the bullet marker at top-left.
-    app.drag(&format!("text:{quote}"), point(px(220.0), px(40.0)))
-        .unwrap();
+    app.drag(
+        &format!("text:{quote}"),
+        point(px(220.0), px(40.0)),
+        DragOptions::default(),
+    )
+    .unwrap();
     let chosen = app
         .screen()
         .texts()
@@ -1483,8 +1487,12 @@ fn selectable_text_view_excludes_all_generated_chrome_and_keeps_visual_order() {
 
     // 4. Dragging across list items reports clean plain text AND valid
     // structured Markdown/HTML (not escaped plain text fallback).
-    app.drag("text:Bullet one", point(px(0.0), px(65.0)))
-        .unwrap();
+    app.drag(
+        "text:Bullet one",
+        point(px(0.0), px(65.0)),
+        DragOptions::default(),
+    )
+    .unwrap();
     let sel = app
         .screen()
         .texts()
@@ -1518,8 +1526,12 @@ fn selectable_text_view_excludes_all_generated_chrome_and_keeps_visual_order() {
 
     // 5. Dragging past the bottom of a code block with floating text actions
     // must never select the floating "Run code" button text.
-    app.drag("text:let x = 1;", point(px(120.0), px(20.0)))
-        .unwrap();
+    app.drag(
+        "text:let x = 1;",
+        point(px(120.0), px(20.0)),
+        DragOptions::default(),
+    )
+    .unwrap();
     let code_sel = app
         .screen()
         .texts()
