@@ -751,10 +751,17 @@ pub(crate) struct Mounter {
     /// Views were inserted, removed or deleted in this batch: the modals
     /// are checked against the tree.
     tree_changed: bool,
-    /// Modals the app shows that wait for a modal on its way out to be
-    /// gone ([`navigation::leaving_over`]): presented over it, they would
-    /// go with it.
+    /// Modals the app shows that wait for a transition to end
+    /// ([`navigation::transition_over`]): presented over a modal on its
+    /// way out, they would go with it.
     waiting_modals: Vec<NodeId>,
+    /// Modals dismissed since the last [`Mounter::finish_modals`], which a
+    /// modal presented there waits for even before their transition
+    /// starts.
+    dismissed_now: Vec<NodeId>,
+    /// Modals taken along by a dismissal under them, then hidden by the
+    /// app: reported closed once that dismissal ends.
+    closing_taken: Vec<NodeId>,
     /// Where `asset:/` URIs of videos resolve.
     asset_base: Option<AssetBase>,
     /// Report touches to JS: on the root and on each modal's root.
@@ -901,6 +908,8 @@ impl Mounter {
             modal_attached: Vec::new(),
             tree_changed: false,
             waiting_modals: Vec::new(),
+            dismissed_now: Vec::new(),
+            closing_taken: Vec::new(),
             asset_base: asset_base.clone(),
             sticky: Default::default(),
             touch_trackers: Vec::new(),
@@ -1356,6 +1365,7 @@ impl Mounter {
                     if let Native::Modal(modal) = &mut s.native {
                         self.modal_attached.retain(|&(m, _)| m != id);
                         self.waiting_modals.retain(|&m| m != id);
+                        self.closing_taken.retain(|&m| m != id);
                         let changes = modal.changes(false);
                         let at_once = changes && self.dialog_overlay(id, false);
                         // The modals over it go with it: those the app
@@ -1366,6 +1376,9 @@ impl Mounter {
                                     self.waiting_modals.push(above);
                                 }
                             }
+                        }
+                        if changes {
+                            self.dismissed_now.push(id);
                         }
                         let shared = self.shared.clone();
                         modal.dismiss(at_once, move || Self::present_waiting(&shared));
@@ -4260,7 +4273,24 @@ impl Mounter {
                 }
             }
         }
+        // Taken along by a dismissal and hidden since: closed once it ends.
+        let control = self.control.clone();
+        let views = &self.views;
+        self.closing_taken.retain(|&id| {
+            let gone = match views.get(id as usize).and_then(Option::as_ref) {
+                Some(Slot {
+                    native: Native::Modal(modal),
+                    ..
+                }) => modal.gone(),
+                _ => return false,
+            };
+            if gone {
+                control.dispatch_event(id, EventKind::Dismiss, EventPayload::None);
+            }
+            !gone
+        });
         if self.dirty_modals.is_empty() {
+            self.dismissed_now.clear();
             return;
         }
         let mut modals = std::mem::take(&mut self.dirty_modals);
@@ -4280,6 +4310,18 @@ impl Mounter {
         // go with it, those it shows come back once it is gone, and one
         // presented now waits for it.
         hidden.sort_by_cached_key(|&id| self.modal(id).map_or(0, ModalHost::depth));
+        // Taken along by a dismissal under it (its presentation was
+        // UIKit's undoing, not the app's): reported closed when gone.
+        for &id in &hidden {
+            match self.modal_mut(id).and_then(ModalHost::hidden_after_taken) {
+                Some(true) => {
+                    self.control
+                        .dispatch_event(id, EventKind::Dismiss, EventPayload::None)
+                }
+                Some(false) => self.closing_taken.push(id),
+                None => {}
+            }
+        }
         let mut handled = Vec::new();
         for &id in &hidden {
             if handled.contains(&id) {
@@ -4319,6 +4361,9 @@ impl Mounter {
             }
             let control = self.control.clone();
             let shared = self.shared.clone();
+            if changes {
+                self.dismissed_now.push(id);
+            }
             let Some(modal) = self.modal_mut(id) else {
                 continue;
             };
@@ -4329,6 +4374,7 @@ impl Mounter {
                 Self::present_waiting(&shared);
             });
         }
+        let dismissed = std::mem::take(&mut self.dismissed_now);
         let Some(root) = self
             .slot(nsh_core::ROOT_ID)
             .map(|s| s.native.view().retain())
@@ -4342,8 +4388,8 @@ impl Mounter {
             if !modal.changes(true) {
                 continue;
             }
-            if let Some(leaving) = crate::navigation::leaving_over(&root) {
-                self.wait_for(id, &leaving);
+            if let Some(awaited) = crate::navigation::transition_over(&root, &dismissed) {
+                self.wait_for(id, &awaited);
                 continue;
             }
             // Through its shader, pictured before it comes at once (where
@@ -4392,37 +4438,41 @@ impl Mounter {
         }
     }
 
-    /// Modal `id` is presented once `leaving` is gone: NSH's dismissal
-    /// presents the waiting modals when it is done
-    /// ([`Mounter::present_waiting`]), UIKit's when its transition ends.
-    fn wait_for(&mut self, id: NodeId, leaving: &objc2_ui_kit::UIViewController) {
+    /// Modal `id` is presented once the transition of `awaited` ends
+    /// ([`Mounter::present_waiting`]), and NSH's dismissal presents the
+    /// waiting modals when it is done. One NSH just dismissed with no
+    /// transition yet is looked at again on the main queue's next turn: by
+    /// then its transition runs, or it is gone, or UIKit refused it.
+    fn wait_for(&mut self, id: NodeId, awaited: &objc2_ui_kit::UIViewController) {
         if !self.waiting_modals.contains(&id) {
             self.waiting_modals.push(id);
         }
-        if let Some(coordinator) = leaving.transitionCoordinator() {
-            let shared = self.shared.clone();
-            let done = RcBlock::new(
-                move |_: NonNull<
-                    ProtocolObject<dyn UIViewControllerTransitionCoordinatorContext>,
-                >| { Self::present_waiting(&shared) },
-            );
-            // Refused when the transition is already ending.
-            if !coordinator.animateAlongsideTransition_completion(None, Some(&done)) {
-                Self::present_waiting(&self.shared);
-            }
+        let Some(coordinator) = awaited.transitionCoordinator() else {
+            return Self::present_waiting(&self.shared);
+        };
+        let shared = self.shared.clone();
+        let done = RcBlock::new(
+            move |_: NonNull<ProtocolObject<dyn UIViewControllerTransitionCoordinatorContext>>| {
+                Self::present_waiting(&shared)
+            },
+        );
+        // Refused when the transition is already ending.
+        if !coordinator.animateAlongsideTransition_completion(None, Some(&done)) {
+            Self::present_waiting(&self.shared);
         }
     }
 
-    /// Presents the modals waiting for one on its way out
-    /// ([`Mounter::wait_for`]), on the main queue's next turn: the
-    /// controller that left is out of the presentation by then. One still
-    /// in the way of another leaving waits again.
+    /// Presents the modals waiting for a transition to end
+    /// ([`Mounter::wait_for`]) and reports the taken ones hidden since
+    /// (`closing_taken`), on the main queue's next turn: the controller
+    /// that left is out of the presentation by then. One still in the way
+    /// of another transition waits again.
     fn present_waiting(shared: &SharedMounter) {
         let shared = shared.clone();
         DispatchQueue::main().exec_async(move || {
             let mtm = MainThreadMarker::new().expect("main queue");
             if let Some(m) = shared.get(mtm).borrow_mut().as_mut()
-                && !m.waiting_modals.is_empty()
+                && !(m.waiting_modals.is_empty() && m.closing_taken.is_empty())
             {
                 let waiting = std::mem::take(&mut m.waiting_modals);
                 m.dirty_modals.extend(waiting);
