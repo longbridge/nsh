@@ -22,6 +22,13 @@
 //! Otherwise it locates or obtains the pinned CLI and `exec`s it with the
 //! original arguments, before any subcommand runs. Cached toolchains live
 //! under `$NSH_CACHE/toolchains/<tag-or-rev>/`.
+//!
+//! Trust: a pin from any repository other than the default `longbridge/nsh`
+//! is declined unless acknowledged through `NSH_TOOLCHAIN_ALLOW` (a
+//! comma-separated set of `owner/repo` entries) or interactively confirmed
+//! on a TTY. Without that, a cloned project could otherwise escalate any
+//! `nsh` invocation into executing arbitrary code from a fork — the
+//! SHA-256 we verify only proves integrity against that release, not origin.
 
 use std::{
     env, fs, io,
@@ -34,6 +41,9 @@ use anyhow::{Context as _, bail};
 use serde::Deserialize;
 
 use crate::ui;
+
+/// Default upstream if the pin does not specify one.
+const DEFAULT_REPOSITORY: &str = "longbridge/nsh";
 
 /// The pin in `nsh.json`.
 #[derive(Debug, Clone, Deserialize)]
@@ -56,10 +66,7 @@ struct Toolchain {
 #[derive(Debug, Clone)]
 pub(crate) enum Selection {
     /// The version in `nsh` package version (e.g. `0.6.1`).
-    Release {
-        version: String,
-        repository: String,
-    },
+    Release { version: String, repository: String },
     /// An exact Git revision.
     GitRev { rev: String, repository: String },
 }
@@ -86,7 +93,9 @@ fn cache_root() -> anyhow::Result<PathBuf> {
             .map(PathBuf::from)
             .or_else(|| home.map(|h| h.join(".cache")))
     };
-    Ok(base.context("no cache directory: set NSH_CACHE")?.join("nsh"))
+    Ok(base
+        .context("no cache directory: set NSH_CACHE")?
+        .join("nsh"))
 }
 
 /// The executable file name for the current platform.
@@ -119,9 +128,7 @@ fn read_pin(app_dir: &Path) -> anyhow::Result<Option<Pin>> {
 
 /// Parses the pin into a [`Selection`]. Errors clearly on invalid input.
 fn parse(pin: Pin) -> anyhow::Result<Selection> {
-    let repository = pin
-        .repository
-        .unwrap_or_else(|| "longbridge/nsh".into());
+    let repository = pin.repository.unwrap_or_else(|| "longbridge/nsh".into());
     if let Some(rev) = pin.rev {
         // Require 40-hex (full Git SHA).
         if rev.len() != 40 || !rev.bytes().all(|b| b.is_ascii_hexdigit()) {
@@ -193,6 +200,9 @@ fn exec(bin: &Path, args: &[std::ffi::OsString]) -> anyhow::Result<()> {
 
 #[cfg(windows)]
 fn exec(bin: &Path, args: &[std::ffi::OsString]) -> anyhow::Result<()> {
+    // Windows has no `exec`: spawn the pinned CLI, wait for it, then exit
+    // with its status so the caller sees it as the running nsh. Ctrl+C / job
+    // object signals propagate to the child; the wrapper does no work.
     let status = Command::new(bin)
         .args(args)
         .status()
@@ -202,14 +212,13 @@ fn exec(bin: &Path, args: &[std::ffi::OsString]) -> anyhow::Result<()> {
 
 /// Install a release from GitHub: download `nsh-<host>.{tar.gz,zip}`, verify
 /// SHA-256, unpack into the target directory.
-fn install_release(
-    version: &str,
-    repository: &str,
-    dest: &Path,
-) -> anyhow::Result<()> {
+fn install_release(version: &str, repository: &str, dest: &Path) -> anyhow::Result<()> {
     let tag = tag_of(version);
     let host = host()?;
-    let asset = format!("nsh-{host}.{}", if cfg!(windows) { "zip" } else { "tar.gz" });
+    let asset = format!(
+        "nsh-{host}.{}",
+        if cfg!(windows) { "zip" } else { "tar.gz" }
+    );
     let base = format!("https://github.com/{repository}/releases/download/{tag}");
     let archive = dest.join(format!(".{asset}.part"));
 
@@ -255,19 +264,16 @@ fn install_by_building(rev: &str, repository: &str, dest: &Path) -> anyhow::Resu
     let target = dest.join("._build_target");
     fs::create_dir_all(&target)?;
     let status = Command::new(cargo_bin())
-        .args([
-            "build",
-            "--release",
-            "-p",
-            "nsh-cli",
-            "--target-dir",
-        ])
+        .args(["build", "--release", "-p", "nsh-cli", "--target-dir"])
         .arg(&target)
         .current_dir(&checkout)
         .status()
         .context("cargo build --release -p nsh-cli")?;
     if !status.success() {
-        bail!("cargo build --release -p nsh-cli failed at {}", checkout.display());
+        bail!(
+            "cargo build --release -p nsh-cli failed at {}",
+            checkout.display()
+        );
     }
     let bin = target.join("release").join(exe("nsh-cli"));
     if !bin.is_file() {
@@ -466,6 +472,10 @@ pub(crate) fn run(app_dir: &Path, args: &[std::ffi::OsString]) -> Option<ExitCod
         // Running it in place: the rest of nsh proceeds.
         return None;
     }
+    if let Err(e) = permission_to_install(&selection) {
+        ui::error(format!("{e}"));
+        return Some(ExitCode::FAILURE);
+    }
     let dir = match target_dir(&selection) {
         Ok(d) => d,
         Err(e) => {
@@ -507,6 +517,54 @@ fn install(selection: &Selection, dest: &Path) -> anyhow::Result<()> {
     }
 }
 
+/// Refuses a pin that moves the CLI's trust root away from the default
+/// `longbridge/nsh` without an explicit acknowledgment.
+///
+/// `NSH_TOOLCHAIN_ALLOW=owner/repo,other/repo` accepts on a non-interactive
+/// shell; on a TTY and without an ack, we ask. CI (no TTY, no ack, non-default
+/// repository) is an error.
+fn permission_to_install(selection: &Selection) -> anyhow::Result<()> {
+    let repository = match selection {
+        Selection::Release { repository, .. } | Selection::GitRev { repository, .. } => {
+            repository.as_str()
+        }
+    };
+    if repository == DEFAULT_REPOSITORY {
+        return Ok(());
+    }
+    if env::var_os("NSH_TOOLCHAIN_ALLOW")
+        .map(|list| {
+            list.to_string_lossy()
+                .split(',')
+                .any(|r| r.trim() == repository)
+        })
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
+    // Last resort: interactive confirm only when on a terminal.
+    use io::IsTerminal as _;
+    if io::stdin().is_terminal() {
+        ui::warn(format!(
+            "the project pins nsh to {repository}, which is not the default {DEFAULT_REPOSITORY}"
+        ));
+        ui::warn(format!(
+            "continuing will download and execute a CLI from {repository}"
+        ));
+        print!("proceed? [y/N] ");
+        let _ = io::Write::flush(&mut io::stdout());
+        let mut answer = String::new();
+        io::stdin().read_line(&mut answer)?;
+        if answer.trim().eq_ignore_ascii_case("y") {
+            return Ok(());
+        }
+    }
+    bail!(
+        "toolchain pin to {repository} is not the default {DEFAULT_REPOSITORY}; \
+         set NSH_TOOLCHAIN_ALLOW={repository} (or run on a TTY and confirm) to trust it"
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -533,7 +591,11 @@ mod tests {
 
     #[test]
     fn a_git_rev_requires_full_40_hex() {
-        for rev in ["abc".to_string(), "deadbee".to_string(), "abcdef0123456789abcdef0123456789abcdef01".to_string()] {
+        for rev in [
+            "abc".to_string(),
+            "deadbee".to_string(),
+            "abcdef0123456789abcdef0123456789abcdef01".to_string(),
+        ] {
             let pin = Pin {
                 version: None,
                 rev: Some(rev.clone()),
@@ -582,6 +644,32 @@ mod tests {
     fn toolchain_dir_is_under_the_cache_root() {
         let dir = toolchain_dir("v0.6.1", "longbridge/nsh").unwrap();
         // Must be under some user-specific cache root, not absolute /.
-        assert!(dir.ends_with("toolchains/longbridge__nsh/v0.6.1"), "{dir:?}");
+        assert!(
+            dir.ends_with("toolchains/longbridge__nsh/v0.6.1"),
+            "{dir:?}"
+        );
+    }
+
+    #[test]
+    fn a_non_default_repository_requires_an_ack() {
+        let pin = Pin {
+            version: Some("0.6.1".into()),
+            rev: None,
+            repository: Some("acme/nsh".into()),
+        };
+        let selection = parse(pin).unwrap();
+        // Without NSH_TOOLCHAIN_ALLOW and no TTY we expect an error.
+        let err = permission_to_install(&selection).unwrap_err();
+        assert!(err.to_string().contains("acme/nsh"), "{err}");
+    }
+
+    #[test]
+    fn the_default_repository_is_implicitly_allowed() {
+        let pin = Pin {
+            version: Some("0.6.1".into()),
+            rev: None,
+            repository: None,
+        };
+        assert!(permission_to_install(&parse(pin).unwrap()).is_ok());
     }
 }
