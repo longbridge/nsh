@@ -106,7 +106,9 @@ are its [spans](./text.md#spans); inline code is a span with a [span background]
 With `selectable`, the whole document selects as one, as a web page does: a drag (or, on touch screens, a long press
 and the handles) runs from one paragraph, list item, cell or code block to the next, and Copy takes the text of them
 all, leaving generated markers and controls (bullets, numbers, task checkmarks, alert icons, disclosure triangles and
-action buttons) out of the selection. A `selectable` `TextView` selects as one of its own; inside a
+action buttons) out of the selection. A part's classes or styles can take one back in: with
+`classes={{ listMarker: "select-text" }}`, bullets and numbers are selected and copied with their items. A
+`selectable` `TextView` selects as one of its own; inside a
 [selectable view](./text-selection.md), its selection also runs on into the texts and other `TextView`s around it.
 
 What `TextView` adds is the rest: reading Markdown, HTML or a document into blocks, the views around the texts (lists,

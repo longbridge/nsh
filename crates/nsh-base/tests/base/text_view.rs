@@ -1242,10 +1242,9 @@ fn list_item_blockquote_overshoot_drag_does_not_select_marker() {
         .find_map(|t| t.strip_prefix("Markdown: "))
         .unwrap_or_default()
         .to_owned();
-    assert!(
-        md.starts_with("- > ") || md.starts_with("> "),
-        "selectedText(markdown) should preserve document structure, got {md:?}"
-    );
+    // The selection's Markdown is the quote's line under its list item, not
+    // escaped plain text.
+    assert_eq!(md, format!("- > {chosen}"));
 }
 
 const KITCHEN_SINK: &str = "\
@@ -1324,32 +1323,26 @@ fn KitchenSinkSelectable() -> impl IntoElement {
         .child(text(move || format!("Html: {}", html.get())))
 }
 
-/// Architectural invariant: every generated chrome/marker node in `TextView`
-/// carries `userSelect: "none"`, every selectable content node is in
-/// non-decreasing visual `top` order, and real drags across lists/tasks/
-/// alerts/code/footnotes produce clean text and structured Markdown/HTML.
-#[test]
-fn selectable_text_view_excludes_all_generated_chrome_and_keeps_visual_order() {
+/// A text under a batch's selectable view: its content, its `userSelect`
+/// and its top in the view's points.
+struct AreaText {
+    text: String,
+    selectable: Option<bool>,
+    top: Points,
+}
+
+/// The texts under the selectable view of a first mount batch, in tree
+/// order, rebuilt from its `Insert`, `ViewProps`, `Text` and `Frame` items.
+fn selectable_area_texts(items: &[MountItem]) -> Vec<AreaText> {
     use std::collections::HashMap;
 
     use nsh_core::{AttributedText, NodeId};
 
-    let mut config = EngineConfig::new(nsh_testing::windowed_root::<KitchenSinkSelectable>());
-    config.environment.os = Os::MacOs;
-    config.environment.idiom = Idiom::Desktop;
-    let mut app = Headless::start(config).unwrap();
-    app.wait_for("Footnote body").unwrap();
-
-    // Inspect the exact mounted tree and frames from `Core` directly.
-    let mut core =
-        nsh_core::Core::new(nsh_core::ApproxTextEngine, Size::new(px(640.0), px(2000.0)));
-    core.mount_root(&nsh_core::element::Root::of::<KitchenSinkSelectable>());
-    let batch = core.commit().expect("initial batch");
-    let mut texts_by_id: HashMap<NodeId, Arc<AttributedText>> = HashMap::new();
-    let mut frames_by_id: HashMap<NodeId, Bounds<Points>> = HashMap::new();
+    let mut texts: HashMap<NodeId, &Arc<AttributedText>> = HashMap::new();
+    let mut frames: HashMap<NodeId, Bounds<Points>> = HashMap::new();
     let mut children: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
-    let mut selectable_area = None;
-    for item in &batch.items {
+    let mut area = None;
+    for item in items {
         match item {
             MountItem::Insert {
                 parent,
@@ -1357,45 +1350,64 @@ fn selectable_text_view_excludes_all_generated_chrome_and_keeps_visual_order() {
                 before,
             } => {
                 let kids = children.entry(*parent).or_default();
-                if let Some(at) = before.and_then(|b| kids.iter().position(|&id| id == b)) {
-                    kids.insert(at, *child);
-                } else {
-                    kids.push(*child);
+                match before.and_then(|b| kids.iter().position(|&id| id == b)) {
+                    Some(at) => kids.insert(at, *child),
+                    None => kids.push(*child),
                 }
             }
-            MountItem::ViewProps { id, props } if props.selectable_view => {
-                selectable_area = Some(*id);
-            }
+            MountItem::ViewProps { id, props } if props.selectable_view => area = Some(*id),
             MountItem::Text { id, text, .. } => {
-                texts_by_id.insert(*id, Arc::clone(text));
+                texts.insert(*id, text);
             }
             MountItem::Frame { id, frame } => {
-                frames_by_id.insert(*id, *frame);
+                frames.insert(*id, *frame);
             }
             _ => {}
         }
     }
-    let area = selectable_area.expect("TextView selectable area");
-    // Walk the TextView subtree in tree order collecting every text node, its
-    // selectable flag, and its absolute top coordinate.
+    let area = area.expect("a selectable view");
+    let mut out = Vec::new();
     let mut stack = vec![(area, Points::ZERO)];
-    let mut all_texts: Vec<(String, Option<bool>, Points)> = Vec::new();
-    while let Some((id, y)) = stack.pop() {
-        let frame = frames_by_id.get(&id).copied().unwrap_or_default();
-        let top = if id == area {
-            Points::ZERO
-        } else {
-            y + frame.origin.y
+    while let Some((id, parent_top)) = stack.pop() {
+        let top = match id == area {
+            true => Points::ZERO,
+            false => parent_top + frames.get(&id).copied().unwrap_or_default().origin.y,
         };
-        if let Some(t) = texts_by_id.get(&id) {
-            all_texts.push((t.text.clone(), t.selectable, top));
+        if let Some(t) = texts.get(&id) {
+            out.push(AreaText {
+                text: t.text.clone(),
+                selectable: t.selectable,
+                top,
+            });
         }
         if let Some(kids) = children.get(&id) {
-            for &kid in kids.iter().rev() {
-                stack.push((kid, top));
-            }
+            stack.extend(kids.iter().rev().map(|&kid| (kid, top)));
         }
     }
+    out
+}
+
+/// Architectural invariant: every generated chrome/marker node in `TextView`
+/// carries `userSelect: "none"`, every selectable content node is in
+/// non-decreasing visual `top` order, and real drags across lists/tasks/
+/// alerts/code/footnotes produce clean text and structured Markdown/HTML.
+#[test]
+fn selectable_text_view_excludes_all_generated_chrome_and_keeps_visual_order() {
+    let mut config = EngineConfig::new(nsh_testing::windowed_root::<KitchenSinkSelectable>());
+    config.environment.os = Os::MacOs;
+    config.environment.idiom = Idiom::Desktop;
+    let mut app = Headless::start(config).unwrap();
+    app.wait_for("Footnote body").unwrap();
+
+    // The mounted tree and frames, straight from `Core`.
+    let mut core =
+        nsh_core::Core::new(nsh_core::ApproxTextEngine, Size::new(px(640.0), px(2000.0)));
+    core.mount_root(&nsh_core::element::Root::of::<KitchenSinkSelectable>());
+    let batch = core.commit().expect("initial batch");
+    let all_texts: Vec<(String, Option<bool>, Points)> = selectable_area_texts(&batch.items)
+        .into_iter()
+        .map(|t| (t.text, t.selectable, t.top))
+        .collect();
 
     // 1. Every chrome/marker text MUST be excluded (`selectable == Some(false)`).
     for chrome in [
@@ -1554,10 +1566,6 @@ fn TerminalChromeDoc() -> impl IntoElement {
 
 #[test]
 fn terminal_text_view_excludes_decorative_chrome_from_selection() {
-    use std::collections::HashMap;
-
-    use nsh_core::{AttributedText, NodeId};
-
     let mut core = nsh_core::Core::new(nsh_core::ApproxTextEngine, Size::new(px(480.0), px(600.0)));
     let env = nsh_core::element::Environment {
         idiom: Idiom::Terminal,
@@ -1566,46 +1574,11 @@ fn terminal_text_view_excludes_decorative_chrome_from_selection() {
     core.set_environment(env);
     core.mount_root(&nsh_core::element::Root::of::<TerminalChromeDoc>());
     let batch = core.commit().expect("initial batch");
-    let mut texts_by_id: HashMap<NodeId, Arc<AttributedText>> = HashMap::new();
-    let mut children: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
-    let mut area = None;
-    for item in &batch.items {
-        match item {
-            MountItem::Insert {
-                parent,
-                child,
-                before,
-            } => {
-                let kids = children.entry(*parent).or_default();
-                if let Some(at) = before.and_then(|b| kids.iter().position(|&id| id == b)) {
-                    kids.insert(at, *child);
-                } else {
-                    kids.push(*child);
-                }
-            }
-            MountItem::ViewProps { id, props } if props.selectable_view => {
-                area = Some(*id);
-            }
-            MountItem::Text { id, text, .. } => {
-                texts_by_id.insert(*id, Arc::clone(text));
-            }
-            _ => {}
-        }
-    }
-    let mut stack = vec![area.expect("selectable area")];
-    let mut selectable = Vec::new();
-    while let Some(id) = stack.pop() {
-        if let Some(t) = texts_by_id.get(&id)
-            && t.selectable != Some(false)
-        {
-            selectable.push(t.text.clone());
-        }
-        if let Some(kids) = children.get(&id) {
-            for &kid in kids.iter().rev() {
-                stack.push(kid);
-            }
-        }
-    }
+    let selectable: Vec<String> = selectable_area_texts(&batch.items)
+        .into_iter()
+        .filter(|t| t.selectable != Some(false))
+        .map(|t| t.text)
+        .collect();
     assert_eq!(
         selectable,
         [

@@ -276,13 +276,22 @@ pub(super) fn run() {
     }
 
     // Verify Cmd+C writes clean text without `•` to the system pasteboard.
+    // The pasteboard is the developer's own: its text is put back right
+    // after the copy is read.
     let pasteboard = NSPasteboard::generalPasteboard();
+    // SAFETY: immutable AppKit pasteboard type constant.
+    let string_type = unsafe { NSPasteboardTypeString };
+    let saved = pasteboard.stringForType(string_type);
     pasteboard.clearContents();
     send_cmd_c(&window, &app);
-    // SAFETY: immutable AppKit pasteboard type constant.
-    let copied = unsafe { pasteboard.stringForType(NSPasteboardTypeString) }
+    let copied = pasteboard
+        .stringForType(string_type)
         .map(|s| s.to_string())
         .unwrap_or_default();
+    pasteboard.clearContents();
+    if let Some(saved) = saved {
+        pasteboard.setString_forType(&saved, string_type);
+    }
     assert_eq!(copied, sel, "Cmd+C must match clean selection without •");
 
     // 2. Drag from the blockquote down into the second list item: omits `•`
