@@ -287,7 +287,8 @@ fn ndk_cargo(sdk: &Sdk, triple: &str, subcommand: &str) -> Command {
 
 /// Clippy on the Android crate (it is empty on other targets): with every
 /// feature, and as a Rust app's library (no JS); its tests too, which build
-/// for Android only.
+/// for Android only. Then `nsh-extra`'s modules, whose Android parts build
+/// for Android only too.
 pub(crate) fn clippy() -> anyhow::Result<()> {
     let sdk = Sdk::find()?;
     for features in ["--all-features", "--no-default-features"] {
@@ -307,6 +308,23 @@ pub(crate) fn clippy() -> anyhow::Result<()> {
         if !status.success() {
             bail!("clippy found problems ({features})");
         }
+    }
+    let status = ndk_cargo(&sdk, "aarch64-linux-android", "clippy")
+        .args([
+            "-p",
+            "nsh-extra",
+            "--features",
+            "nsh-extra/camera",
+            "--target",
+            "aarch64-linux-android",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings",
+        ])
+        .status()?;
+    if !status.success() {
+        bail!("clippy found problems (nsh-extra)");
     }
     Ok(())
 }

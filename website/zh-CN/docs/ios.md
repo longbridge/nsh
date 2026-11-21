@@ -417,6 +417,13 @@ app.onOpenURL = { url in
 }
 ```
 
+## 在 Rust 中弹出视图
+
+需要显示系统视图控制器（相机、分享面板）的 Rust 代码，把它弹在发起调用的那个 surface 之上。在主线程任务（`run_on_main_thread`）里，
+`nsh_platform_ios::presenting_controller(mtm)` 是这个 surface 所在窗口最上层的视图控制器，没有时取应用的 key window。
+`prepare_image(bytes, name, &request)` 像 `Picker.pickImages` 一样处理图片数据：摆正方向，按请求缩放和编码。`nsh-extra` 的相机
+（`crates/nsh-extra/src/camera/ios.rs`）用到了这两个函数。
+
 ## 限制
 
 ```swift

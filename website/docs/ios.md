@@ -454,6 +454,14 @@ app.onOpenURL = { url in
 }
 ```
 
+## Presenting from Rust
+
+Rust code that shows a system view controller (the camera, a share sheet) presents it over the surface whose code
+asked. In a main-thread task (`run_on_main_thread`), `nsh_platform_ios::presenting_controller(mtm)` is the top view
+controller of that surface's window, else of the app's key window. `prepare_image(bytes, name, &request)` prepares
+image bytes as `Picker.pickImages` does: upright, scaled and encoded as the request says. `nsh-extra`'s camera
+(`crates/nsh-extra/src/camera/ios.rs`) uses both.
+
 ## Limits
 
 ```swift

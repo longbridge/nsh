@@ -65,6 +65,10 @@ crates/
                        wgpu offscreen, read back asynchronously, never blocking the main thread; docs/dev/shaders.md)
   nsh-package/         Signed packages (`.nshpkg`): Ed25519 keys, release-key certificates, revocation lists, the trust store
   nsh-updater/          App self-update: manifests and their signatures, verified downloads, replacing the installed app on the desktop (docs/dev/updater.md); `nsh-core`'s `runtime/updater.rs` is its JS face, `nsh/updater`
+  nsh-extra/           NSH's official modules, an nshm apps install with `nsh add nsh-extra --features <name>`: one Cargo feature
+                       per module (`camera`: `Camera`, photos from the system's camera on iOS and Android), its code in
+                       `src/<name>/` on the platform crates' extension points, what the packaged app needs under
+                       `[package.metadata.nsh.features.<name>]` (merged into packages by `nsh-cli`'s `module_meta.rs`)
   nsh-bundler/         Bundler: rolldown + Oxc (TS stripping) + NSH's JSX compiler (`jsx.rs`, docs/dev/native-pipeline.md) + source maps;
                        imports of the native modules stay imports (`plugin.rs`), so a bundle holds only the app's code;
                        the app's themes (nsh.json `tailwind` / `theme`, checked, handed to the renderer by the entry) and the
