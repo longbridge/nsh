@@ -110,56 +110,122 @@ GPUI 与 GPUI Fast 合为一列：两者运行的平台相同，GPUI Fast 在 GP
 
 ## 从各个方案转到 NSH
 
-### Electron 与 Tauri
+下面每个框架都做过一个奠基性的选择，它决定了用这个框架写的应用能做什么、做不到什么。本节逐一写出这些选择和有据可查的代价（每条附出处），再写 NSH 怎样处理同一个问题。NSH 的说法链接到 NSH 自己的文档和上文的[实测数字](#实测数字)。
 
-Electron 内置 Chromium，Tauri 使用系统的 WebView：两者都用网页内容构建桌面应用，开发体验好，代价是每个应用都带着一个浏览器引擎，文本、滚动和输入来自网页，而不是系统。长桥最初做 GPUI 正是为了离开这条路。
+### Electron
 
-- **得到什么。** 平台自己的窗口、菜单、文本框和输入法；Rust 应用不带浏览器和 JS 引擎，内存接近一个系统窗口（见[实测数字](#实测数字)）；同一套代码再覆盖手机。Web 版本依然存在，而且是真正的 HTML。
-- **保留什么。** TSX 的写法接近 JSX，样式接近 CSS 和 [Tailwind](./tailwind.md)，Web 团队的经验大部分可以直接用。需要显示现成网页时，用[网页视图](./web-view-and-video.md)嵌入。
-- **代价。** 不能直接复用 DOM 和 npm 上依赖浏览器的组件库；界面要用 NSH 的元素重写。
+**奠基性选择：随应用带一个浏览器。** Electron 的多进程架构“继承自 Chromium”：每个应用有一个运行 Node.js 的主进程，并且“为每个打开的 `BrowserWindow` 启动一个独立的渲染进程”（[Electron 进程模型](https://www.electronjs.org/docs/latest/tutorial/process-model)）。也就是说，每个 Electron 应用都自带一份 Chromium 和 Node.js。
 
-聊天和 AI 应用尤其受益：很多 AI 产品的对话界面用网页实现，长会话之后滚动掉帧、输入法与选区不自然、与系统的无障碍和手势结合得差。NSH 用平台的文本视图和编辑器渲染富文本、代码块、表格、图片和流式输出（[文本](./text.md)、[列表](./lists.md)），选择、复制、输入法和无障碍都是系统的。
+代价在这里：
+
+- **体积和内存。** 应用还没画任何东西，浏览器引擎和 JavaScript 运行时就已经随每个应用、每个窗口带上了。桌面上开着几个 Electron 应用，就是开着几个浏览器。
+- **启动。** 要等 Chromium 和 Node.js 启动，再等 JavaScript 加载、解析、执行，才有第一帧。
+- **常态 CPU。** 实时数据要更新 DOM，经过页面里的样式重算、布局和绘制；长列表和高频更新恰好是网页最不擅长的。
+- **页面不是系统。** 输入框、选择、右键菜单、滚动和无障碍都是浏览器在窗口里的实现，不是操作系统的控件。原生菜单、对话框和托盘虽然有，但只能经主进程调用，和界面隔着 IPC。
+- **没有手机。** Electron 只做桌面，移动端是另一个项目。
+- **安全靠应用自己。** 渲染进程可以被给予 Node.js 权限，Electron 官方的安全清单（上下文隔离、沙箱、不让远程内容获得 Node 集成）要每个应用自己逐条做对。
+
+NSH 怎么解决：
+
+| Electron 的代价 | NSH |
+|---|---|
+| 每个应用带 Chromium + Node.js | 没有浏览器引擎。Rust 应用完全不链接 JavaScript 引擎；TSX 应用只在 QuickJS 里跑应用代码，渲染、布局和动画在 Rust 里（[架构](./architecture.md)） |
+| 浏览器级内存 | macOS 上 Rust 应用约 19 MB，只放一个标签的 AppKit 窗口约 17 MB（[性能报告](./performance-report.md)） |
+| 启动慢 | 引擎启动约 75–155 µs；计数器应用首帧约 1.05–1.15 ms |
+| 实时数据下的 DOM 布局 | 细粒度 signal 只把变化的属性推给平台视图；Linux 上 500 行行情表每秒 1,000 次更新占单核 18% |
+| 浏览器的文本、菜单和无障碍 | AppKit、Win32 + Direct2D 和 GTK 4 的控件、输入法和无障碍（[简介](./index.md#native-的含义)） |
+| 只有桌面 | 同一个应用跑在 iOS、Android 和 Web 上（[平台](./platforms.md)） |
+| 安全由应用自管 | 下发的界面跑在沙箱虚拟机里，能力由宿主授予，包经过签名并可吊销（[沙箱与能力](./sandbox-and-capabilities.md)） |
+
+**能沿用的。** TSX 读起来像 JSX，样式读起来像 CSS 和 [Tailwind](./tailwind.md)，Web 团队的经验大部分用得上；已有页面仍可放进 [Web View](./web-view-and-video.md)。**要付出的。** 依赖浏览器的 DOM 代码和 npm 组件库带不过来，界面要用 NSH 元素重写。
+
+聊天和 AI 应用收益最大。很多 AI 产品用网页渲染对话，长会话里会出现滚动掉帧、输入法和选择别扭、与系统无障碍和手势脱节。NSH 用平台的文本视图和编辑器渲染富文本、代码块、表格、图片和流式输出（[文本](./text.md)、[列表](./lists.md)）。
+
+### Tauri
+
+**奠基性选择：借用系统自带的 Web View。** Tauri 不打包 Chromium，而是用操作系统提供的：Windows 上是 WebView2（Chromium），macOS 和 iOS 上是 WKWebView（WebKit），Linux 上是 `webkit2gtk`（WebKit），Android 上是设备的 Android WebView（[Tauri webview 版本](https://v2.tauri.app/reference/webview-versions/)）。应用变小了，界面仍然是网页。
+
+代价在这里：
+
+- **三种引擎，版本众多。** 同一个应用在 Windows 和 Android 上跑 Chromium，在 Apple 平台和 Linux 上跑 WebKit。Tauri 自己的文档写明：Android 上“运行时版本取决于设备当前选择的 WebView 提供者”，“不再受支持的 macOS 版本**不会**收到 WebKit 更新”，Linux 上“很难整理出各发行版 WebKitGTK 的准确信息”（[出处](https://v2.tauri.app/reference/webview-versions/)）。渲染问题和缺失的 Web 特性要按引擎、按系统版本逐一测。
+- **仍然是网页。** 文本、滚动、选择和无障碍是 Web View 的，不是系统控件；实时数据下的性能取决于 DOM。
+- **两种语言隔着桥。** 界面用 JavaScript，逻辑用 Rust，靠 IPC 调用和序列化连接。
+
+NSH 怎么解决：界面是平台自己的视图，在平台支持的每个系统版本上都一样，中间没有 Web 引擎；Rust 和 TSX 在同一个进程、同一张响应式图上运行，TSX 界面直接调用 Rust 模块——从 TSX 排序 100,000 行约 3 ms，与纯 Rust 持平（[性能报告](./performance-report.md)）。Tauri 最好的想法——核心用 Rust——是 NSH 的默认做法，而界面不再需要浏览器。
 
 ### React Native
 
-React Native 在目标上与 NSH 最接近：两者都希望减少重复的客户端开发，并使用平台的视图。区别在架构上，新架构也没有改变这几点：
+**奠基性选择：用 JavaScript 跑 React，再映射到原生视图。** React Native 的目标和 NSH 最接近：都想减少重复的客户端工作，都使用平台视图。但应用逻辑和 React 协调始终跑在 JavaScript 引擎里，新架构（Fabric、TurboModules、JSI）让桥更快，并没有改变这一点（[React Native 架构](https://reactnative.dev/architecture/landing-page)）。
+
+代价在这里：
+
+- **JS 线程就是帧预算。** React Native 自己的性能指南把 JavaScript 线程在一帧内无响应视为掉帧（[Performance](https://reactnative.dev/docs/performance)）。每次状态变化都要在 JavaScript 里重新渲染组件并做 diff，所以高频更新——行情、聊天流、计时器——要和输入处理争同一个线程。团队只能靠 `memo`、`useMemo`、`useCallback` 和依赖数组去压。
+- **桌面和 Web 是别人的项目。** macOS 和 Windows 是微软维护的 `react-native-macos`、`react-native-windows`；Web 是社区的 `react-native-web`；Linux 没有独立平台，只能经社区的 React Native Skia 渲染器（[Out-of-tree platforms](https://reactnative.dev/docs/out-of-tree-platforms)）。每个项目各有发布节奏、缺口和相对核心的滞后。
+- **不同设备的交互由应用自理。** 手机和桌面需要不同的菜单、悬停、键盘和指针行为，React Native 的组件把这些留给应用。
+- **OTA 下发的是受信任代码。** CodePush 式更新替换的是应用自己的 JavaScript，没有给别人写的代码准备的沙箱。
+- **工具链很长。** Node、npm、Metro、CocoaPods、Gradle 和原生构建工具，各自的版本都要对齐。
+
+NSH 怎么解决：
 
 | | React Native | NSH |
 |---|---|---|
-| 运行时 | 始终有 JS 引擎（Hermes），业务逻辑和协调都在 JS 里 | Rust 应用没有 JS 引擎；TSX 应用只把应用代码放在 QuickJS 上，响应式图、渲染器、布局、动画、列表虚拟化都在 Rust 里 |
-| 更新模型 | React 协调：状态变化后重新渲染组件，再比较差异 | 细粒度 signal（Solid 风格）：组件只运行一次，只推送变化的属性 |
-| 桌面 | 独立项目 react-native-macos、react-native-windows，Linux 不支持 | AppKit、Win32 + Direct2D、GTK 4，与手机同一个框架和版本 |
-| Web | 社区的 react-native-web | 框架后端，输出 HTML 和 CSS |
-| 按设备适配 | 应用自己处理 | 基础组件随设备变化：`Menu` 在桌面贴着指针弹出，在手机从底部升起 |
-| 发布后更新 | OTA 下发可信的 JS bundle | 签名 `.nshpkg`，吊销列表，宿主设定能力与限制的沙箱虚拟机，启动失败自动回滚 |
-| 工具链 | Node、Metro、CocoaPods、Gradle 等 | 一个 `nsh` 可执行文件 |
+| 运行时 | 始终有 JS 引擎（Hermes），应用逻辑和协调都在 JS 里 | Rust 应用没有 JS 引擎；TSX 应用只在 QuickJS 里跑应用代码，响应式图、渲染、布局、动画和列表虚拟化都在 Rust 里 |
+| 更新模型 | 状态变化后重新渲染，再 diff | 细粒度 signal（类似 Solid）：组件只运行一次，只推送变化的属性；不需要 memo，也没有依赖数组（[响应式](./reactivity.md)） |
+| 一次点击 | — | 约 0.12 ms，含 JS 和提交（[性能报告](./performance-report.md)） |
+| 桌面 | 微软维护的独立项目，没有 Linux | AppKit、Win32 + Direct2D 和 GTK 4，与手机同框架、同测试、同发布 |
+| Web | 社区的 react-native-web | 框架自带后端，输出 HTML 和 CSS |
+| 按设备适配交互 | 交给应用 | 基础组件自动适配：`Menu` 在桌面从指针处弹出，在手机从底部升起 |
+| 重计算 | 原生模块加桥接代码 | 在同一个应用里用 Rust 写，从 TSX 调用：排序 100,000 行约 3 ms |
+| 发布后更新 | OTA 下发受信任的 JS bundle | 签名的 `.nshpkg`、吊销列表、宿主设定能力和限额的沙箱虚拟机、启动失败自动回滚（[OTA 更新](./ota-updates.md)） |
+| 工具链 | Node、Metro、CocoaPods、Gradle 等 | 一个 `nsh` 可执行文件；TSX 不需要 Node 或 npm（[CLI](./cli.md)） |
 
-- **保留什么。** TSX 和 JSX 看起来很像，组件、props 和事件的思路都能沿用；React 的 hooks 改为 signal，不再需要依赖数组和 memo。
-- **代价。** NSH 不是 React Native 的兼容层，这是刻意的选择：用更高效的模型替换 React 协调，因此 React Native 的第三方包不能直接使用。NSH 在框架层提供列表、导航、动画、手势、文本、画布、网页视图和视频等关键能力，视觉组件由应用自己构建（[设计指南](./design-guides.md)）；需要原有原生 SDK 时，把它注册为[原生组件](./native-components.md)，或写成 Rust [模块](./platform-extensions.md)。
+**能沿用的。** TSX 和 JSX 很像，组件、props、事件的思路不变；hooks 换成 signal。**要付出的。** NSH 刻意不做 React Native 兼容层：它用更高效的模型取代了 React 协调，所以 React Native 的包不能在 NSH 上运行。列表、导航、动画、手势、文本、画布、Web View 和视频由框架原生提供，视觉组件由应用自己定义（[设计指南](./design-guides.md)），已有的原生 SDK 可以做成[原生组件](./native-components.md)或 Rust [模块](./platform-extensions.md)。
 
 ### Flutter
 
-Flutter 用自己的引擎绘制每个像素，因此应用在每个平台上看起来都一样。NSH 走的是另一条路：使用每个平台的视图、文本和文本输入，在 Web 上使用 HTML 元素以及浏览器自己的滚动、选择和输入。
+**奠基性选择：用自己的引擎画每一个像素。** Flutter 自己渲染整个界面，所以应用在哪里看起来都一样——也因此没有一处是平台自己的。
 
-- **得到什么。** 文本编辑、输入法、选区菜单（拷贝、分享、翻译、查询）和无障碍都是平台的，系统新版本带来的视觉材质和交互改进应用直接获得，而不必等引擎重新实现；Web 输出是可选择、可被搜索引擎和读屏读取的 HTML，而不是画布。
-- **语言。** Dart 换成 Rust 和 TSX：Rust 带来 crates 生态和原生线程，TSX 适合快速编写界面。
-- **代价。** 平台之间的外观会有差异，这正是使用平台界面的结果；需要像素级一致的品牌界面时，Flutter 天生更合适。
+代价在这里：
 
-### GPUI 与 GPUI Fast
+- **文本和输入是重新实现的。** 文本编辑、输入法、选择菜单和无障碍语义都是 Flutter 对各平台行为的重写；新系统版本在这些方面带来的改进，要等 Flutter 再实现一遍。
+- **原生视图是昂贵的客人。** Flutter 官方文档写明“Flutter 中的平台视图有性能取舍”：Android 上用 hybrid composition 时，Flutter“把光栅线程合并到平台线程”，“可能导致帧率下降和掉帧”；texture layer 模式可能造成“快速滚动时卡顿（例如 Web View）”和“`SurfaceView` 的无障碍失效”（[在 Android 上嵌入原生视图](https://docs.flutter.dev/platform-integration/android/platform-views)）。地图、Web View、视频和支付 SDK 正是这类视图。
+- **Web 不是真正的 Web。** Flutter“不适合以文本为主、流式排版的静态网站”，其输出“与搜索引擎正确索引所需的内容不一致”；Flutter 团队自己建议文档类内容用 Jaspr 或普通 HTML，并把自己的文档站迁到了 Jaspr（[Flutter Web FAQ](https://docs.flutter.dev/platform-integration/web/faq)）。
+- **只有 Dart。** 逻辑和界面都是 Dart，系统级代码和已有原生库要走 platform channel 或 FFI。
 
-[GPUI](https://gpui-kit.com) 是用 GPU 绘制的 Rust UI 框架，面向要求很高的桌面应用；[GPUI Fast](https://github.com/longbridge/gpui-fast) 是长桥维护的分支，带来 Retained 渲染——复用没有变化的视图、布局和文本测量——以及滚动图层和原生窗口合成。NSH 与它们来自同一个团队，适合不同的负载。
+NSH 怎么解决：每个后端用的都是平台自己的视图——UIKit、Android View、AppKit、Win32、GTK 4——地图或 Web View 只是视图树里的又一个视图，不是被合成进来的客人；文本编辑、输入法、选择和无障碍都是系统的（[简介](./index.md#native-的含义)）；Web 产物是真正的 HTML，可选择、可被索引、可被读屏软件朗读；语言是 Rust（有 crates 生态和原生线程）加上用于快速写界面的 TSX。**要付出的。** 各平台外观不同，这正是使用平台 UI 的意义；如果要像素级一致的品牌界面，Flutter 更合适。
 
-- **得到什么。** 手机和 Web；平台自己的文本输入、选区、输入法和系统交互；TSX 路径和签名下发。NSH 的 GPUI 后端还能把 NSH 应用嵌入现有的 GPUI 和 GPUI Kit 应用，可以逐个界面迁移，而不是一次重写（[GPUI](./gpui.md)）。
-- **数字。** 在 [NSH 性能基准](https://github.com/longbridge/nsh-perf-bench)中（Linux，500 行行情表，NSH 运行在 GTK 4 后端上），日常负载的开销相同：每秒 1,000 条行情时，NSH Rust 占用 18% 的单核 CPU，GPUI Fast 为 20%。在持续、密集的更新下 GPUI Fast 领先：每秒 20,000 条行情时它占用 25%，NSH 为 73–78%；1,000 个方块逐帧计算的动画，它的 CPU 约为 NSH 的三分之一。
-- **怎么选。** 只做桌面、以海量视图逐帧更新为主的交易终端或自定义可视化，继续用 GPUI Fast；要同时覆盖手机和 Web、以日常界面为主，或者需要下发界面，用 NSH。
+### GPUI 和 GPUI Fast
+
+**奠基性选择：为一个编辑器做的 GPU 绘制桌面框架。** [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) 是 Zed 编辑器的 Rust UI 框架；[GPUI Fast](https://github.com/longbridge/gpui-fast) 是 Longbridge 的分支，加入了保留式渲染、滚动图层和原生窗口合成，NSH 出自同一个团队。
+
+对通用应用来说，代价在这里：
+
+- **只有桌面。** GPUI 的 README 只涵盖 macOS、Linux/FreeBSD 和 Windows，手机和 Web 不是目标平台（[GPUI README](https://github.com/zed-industries/zed/blob/main/crates/gpui/README.md)）。
+- **编辑器的框架，跟着编辑器走。** GPUI“仍处于 1.0 之前”，“版本之间经常会有破坏性变更”；README 给出的学习方式是“阅读 Zed 源码或到 Zed Discord 提问”（[同一出处](https://github.com/zed-industries/zed/blob/main/crates/gpui/README.md)）。
+- **一切都是画出来的。** 输入框、选择和菜单由框架绘制，不是平台控件，系统文本行为要像 Flutter 一样重新实现。
+- **只有 Rust，不能下发。** 没有用于快速写界面的脚本路径，也没有给发布后下发界面准备的沙箱（GPUI Kit 通过 [GPUI Shell](https://gpui-kit.com/shell) 加入了 JavaScript 模块，NSH 正是从这个想法长出来的）。
+
+NSH 怎么解决：同样以 Rust 为先的模型覆盖 iOS、Android 和 Web；文本输入、选择和输入法是平台的；内置 TSX 路径和签名、沙箱化的下发；API 变更记录在兼容性登记里并由 CI 检查（[向后兼容](./compatibility.md)）。NSH 的 GPUI 后端可以把 NSH 应用嵌进现有的 GPUI 和 GPUI Kit 应用，界面可以一个个迁移，不必整体重写（[GPUI](./gpui.md)）。
+
+**数字如实写。** 在 [NSH 性能基准](https://github.com/longbridge/nsh-perf-bench)中（Linux，500 行行情表，NSH 用 GTK 4 后端），日常负载开销相同：每秒 1,000 条行情时 NSH Rust 占单核 18%，GPUI Fast 20%。持续高强度更新时 GPUI Fast 领先：每秒 20,000 条行情时它占 25%，NSH 为 73–78%；每帧计算 1,000 个方块的动画，它的 CPU 约为 NSH 的三分之一。只做桌面、由每帧更新的成千上万个视图主导的交易终端，留在 GPUI Fast；要覆盖手机、Web、日常界面或下发界面，用 NSH。
 
 ### Qt
 
-Qt 是成熟的工具包，有 Qt Widgets 和 Qt Quick 两种界面技术，以及长期积累的工具和平台支持。NSH 的不同在于基础和模型：以 Rust 为核心语言并提供 TSX 路径，工具链为自动化（以及 AI 驱动的）开发而设计，Web 渲染为 HTML，并在一套组件模型里适配移动、桌面和 Web 的交互；许可证是 Apache-2.0。
+**奠基性选择：成熟的 C++ 工具包，自带 UI 层。** Qt Widgets 和 Qt Quick 自己绘制控件，并按各平台风格做样式，工具链积累多年。NSH 的根基和模型不同：用平台控件而不是仿制样式；核心是 Rust 并提供 TSX 路径，而不是 C++ 和 QML；Web 上输出 HTML；一套组件模型在手机、桌面和 Web 上自动适配交互；工具链为自动化和 AI 驱动的开发设计；任何用途都是 Apache-2.0 许可。
 
 ### Slint
 
-Slint 是声明式 UI 工具包，有自己的语言和轻量的渲染器，面向桌面和嵌入式设备，可以从 Rust、C++、JavaScript 或 Python 使用。两者都重视 Native 性能；NSH 的路线是每个平台自己的界面和交互、Web 上的 HTML、Rust 与 TSX 两种应用语言，以及覆盖六个平台的 AI 驱动开发。
+**奠基性选择：自己的声明式语言和渲染器**，面向桌面和嵌入式设备，可从 Rust、C++、JavaScript 或 Python 使用。两者都重视原生性能；NSH 的路线是每个平台自己的 UI 和交互、Web 上的 HTML、用 Rust 和 TSX 写应用而不是另一门标记语言，并且手机是一等目标。
+
+### 小结：每个框架一行
+
+| 框架 | 结构性短板 | NSH 的做法 |
+|---|---|---|
+| Electron | 每个应用带浏览器和 Node.js；只有桌面 | 平台视图，没有浏览器；Rust 应用约 19 MB；同一份代码覆盖手机和 Web |
+| Tauri | 每个系统、每个版本是不同的 Web 引擎 | 平台视图，在支持的系统上表现一致；Rust 和 TSX 同进程 |
+| React Native | 每次更新都过 JS 线程和协调；桌面和 Web 是独立项目 | Rust 核心加细粒度 signal；六个平台同一框架、同一发布 |
+| Flutter | 自绘文本和输入；原生视图代价高；Web 接近画布 | 系统的文本、输入和无障碍；原生视图就在视图树里；Web 是 HTML |
+| GPUI | 只有桌面、1.0 之前、随编辑器演进 | 同样的 Rust 模型覆盖手机和 Web；兼容性登记；可嵌入 GPUI 应用 |
 
 ## 如何评估：先做一个试点
 
@@ -193,7 +259,7 @@ Slint 是声明式 UI 工具包，有自己的语言和轻量的渲染器，面�
 
 ## 其他方案更合适的情况
 
-- 界面以数千个视图持续、密集的更新为主——每秒推送数万条行情的交易终端、每帧重画的自定义可视化：GPUI Fast 的 Retained GPU 渲染只占用其中一小部分 CPU（见 [GPUI 与 GPUI Fast](#gpui-与-gpui-fast)）。
+- 界面以数千个视图持续、密集的更新为主——每秒推送数万条行情的交易终端、每帧重画的自定义可视化：GPUI Fast 的 Retained GPU 渲染只占用其中一小部分 CPU（见 [GPUI 与 GPUI Fast](#gpui-和-gpui-fast)）。
 - 应用必须在每个平台上像素级一致：Flutter、Slint 这类自己绘制一切的框架天生如此。
 - 你现在就需要庞大的第三方包生态：React Native、Flutter 和 Qt 积累了多年。
 - 界面是一份文档或一个现成的网页：WebView 能原样显示它。
