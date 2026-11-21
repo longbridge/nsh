@@ -62,6 +62,14 @@ pub(crate) fn status(verb: &str, what: impl std::fmt::Display) {
     ));
 }
 
+/// A status line to heed, in the same column: `        Note …`.
+fn notice(verb: &str, what: impl std::fmt::Display) {
+    crate::ui::plain(format!(
+        "{} {what}",
+        crate::ui::yellow(format!("{verb:>12}"))
+    ));
+}
+
 /// Where nshm are installed.
 fn root() -> anyhow::Result<PathBuf> {
     nsh_bundler::nshm::installed_dir().context("no home directory to install nshm in: set NSH_HOME")
@@ -313,10 +321,10 @@ fn depend_from_own_crate(
     Ok(())
 }
 
-/// Says the app needs Rust now, when its nshm bring Rust in and it has
-/// no crate of its own.
-fn say_rust_needed(app: &App, resolved: &[Resolved]) {
-    if app.config.get("rust").is_some() {
+/// Says the app needs Rust now, when its nshm bring Rust in, it has no
+/// crate of its own and `lock` (before the change) had no Rust nshm.
+fn say_rust_needed(app: &App, lock: &Lock, resolved: &[Resolved]) {
+    if app.config.get("rust").is_some() || lock.packages.iter().any(|p| p.module.is_some()) {
         return;
     }
     let rust: Vec<&str> = resolved
@@ -325,12 +333,46 @@ fn say_rust_needed(app: &App, resolved: &[Resolved]) {
         .map(|r| r.locked.name.as_str())
         .collect();
     if !rust.is_empty() {
-        crate::ui::note(format!(
-            "{} {} Rust: nsh builds this app's hosts with {}, which needs the Rust toolchain \
-             (https://rustup.rs)",
-            rust.join(", "),
-            if rust.len() == 1 { "has" } else { "have" },
-            if rust.len() == 1 { "it" } else { "them" }
+        notice(
+            "Note",
+            format!(
+                "{} {} Rust, so this app now builds with the Rust toolchain (https://rustup.rs)",
+                rust.join(", "),
+                if rust.len() == 1 { "has" } else { "have" },
+            ),
+        );
+    }
+}
+
+/// Builds the development host of this machine with the app's Rust nshm,
+/// after `nsh add` or `nsh upgrade` changed them, so that the next `nsh
+/// run` starts at once instead of compiling first. Nothing when the app
+/// links no Rust; a failed build is reported, and the next command that
+/// needs the host builds it again and shows why.
+fn prebuild(app: &App, resolved: &[Resolved]) {
+    if !resolved.iter().any(|r| r.manifest.module.is_some()) {
+        return;
+    }
+    let Ok(entry) = crate::entry::resolve(&app.dir) else {
+        return;
+    };
+    let target = crate::run::Target::native();
+    // Unified as `nsh run` on this machine builds it, so that run finds it built.
+    let built = rust_app::of(&entry, true).and_then(|rust| {
+        let Some(rust) = rust else {
+            return Ok(());
+        };
+        // As `nsh run` does: described first, its host built with the UI
+        // sets the description names.
+        rust_app::set_current(rust.clone());
+        crate::set_app_sets(rust.describe()?);
+        let platform = target.platform();
+        rust.runtime(platform, false, platform.triple()).map(drop)
+    });
+    // The build's own steps say what they built.
+    if let Err(err) = built {
+        crate::ui::warn(format!(
+            "building the development host ahead failed; `nsh run` builds it again: {err:#}"
         ));
     }
 }
@@ -461,16 +503,24 @@ fn add_to(app: &mut App, backup: &mut Backup, added: Added) -> anyhow::Result<()
         Origin::Path(p) => p.clone(),
         other => other.describe(),
     };
-    status("Added", format!("{name} v{} ({from})", this.locked.version));
-    for specifier in this
+    status(
+        "Added",
+        format!("{name} v{} ({from}) to dependencies", this.locked.version),
+    );
+    let specifiers: Vec<String> = this
         .manifest
         .module
         .iter()
         .chain(this.manifest.exports.keys())
-    {
-        println!("import from \"{specifier}\"");
+        .map(|s| format!("\"{s}\""))
+        .collect();
+    if !specifiers.is_empty() {
+        status("Import", format!("from {}", specifiers.join(", ")));
     }
-    say_rust_needed(app, &resolved);
+    say_rust_needed(app, &lock, &resolved);
+    if this.manifest.module.is_some() {
+        prebuild(app, &resolved);
+    }
     Ok(())
 }
 
@@ -599,6 +649,9 @@ pub(crate) fn upgrade(cwd: &Path, names: &[String]) -> anyhow::Result<()> {
                 "Locked",
                 "every nshm is at the newest version its requirements accept",
             );
+        }
+        if changed {
+            prebuild(&app, &resolved);
         }
         anyhow::Ok(())
     })();

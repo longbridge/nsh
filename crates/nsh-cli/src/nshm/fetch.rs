@@ -348,7 +348,15 @@ impl Fetch for Net {
         } else {
             name.to_owned()
         };
-        status("Installed", format!("{shown} ({})", home_relative(&dir)));
+        let at = match (&candidate.version, &candidate.commit) {
+            (Some(v), _) => format!(" v{v}"),
+            (None, Some(c)) => format!(" #{}", &c[..c.len().min(12)]),
+            _ => String::new(),
+        };
+        status(
+            "Installed",
+            format!("{shown}{at} to {}", home_relative(&dir)),
+        );
         Ok(rel)
     }
 }
