@@ -3420,7 +3420,8 @@ fn scroll_target(surface: &Surface, x: f32, y: f32, dx: f32, dy: f32) -> Option<
 
 /// The scroll view a trackpad gesture by `(dx, dy)` at `(x, y)` moves:
 /// the one [`scroll_target`] picks, else, at the edges, the innermost one
-/// along the gesture that bounces, which stretches as on macOS.
+/// along the gesture that bounces ([`crate::scroll::can_bounce`]), which
+/// stretches as on macOS.
 fn gesture_target(surface: &Surface, x: f32, y: f32, dx: f32, dy: f32) -> Option<NshView> {
     scroll_target(surface, x, y, dx, dy).or_else(|| {
         let hit = pick(&event_root(surface), x, y)?;
