@@ -19,7 +19,7 @@ use nsh_core::{
 };
 use nsh_testing::agent::{Key, Native, SystemName};
 use objc2::{Message, msg_send, rc::Retained};
-use objc2_core_foundation::CGRect;
+use objc2_core_foundation::{CGPoint, CGRect};
 use objc2_foundation::NSObjectProtocol;
 use objc2_ui_kit::{UILabel, UIView, UIWindow};
 use rustc_hash::FxHashMap;
@@ -322,6 +322,23 @@ fn system_button(
     walk(window, name)
 }
 
+/// The bar UIKit draws over a screen's content that `view` is in, or is
+/// (a navigation bar, a tab bar, a toolbar): content scrolls under it,
+/// and a press there reaches it.
+fn system_bar(view: &UIView) -> Option<Retained<UIView>> {
+    let mut at = Some(view.retain());
+    while let Some(v) = at {
+        if v.isKindOfClass(<objc2_ui_kit::UINavigationBar as objc2::ClassType>::class())
+            || v.isKindOfClass(<objc2_ui_kit::UITabBar as objc2::ClassType>::class())
+            || objc2::runtime::AnyClass::get(c"UIToolbar").is_some_and(|c| v.isKindOfClass(c))
+        {
+            return Some(v);
+        }
+        at = v.superview();
+    }
+    None
+}
+
 /// `rect` of `view` in `window`'s points, if the view shows.
 fn bounds_in(view: &UIView, rect: CGRect, window: &UIWindow) -> Option<Bounds<Points>> {
     if view.window().is_none() || view.isHidden() {
@@ -357,6 +374,41 @@ impl Native for IosNative {
             .flatten()
             .flatten()
             .map(|(start, end)| (Points(start as f32), Points(end as f32)))
+    }
+
+    fn scroll_insets(&self, id: NodeId, horizontal: bool) -> (Points, Points) {
+        self.on_main(move |view, _| view.with_mounter(|m| m.scroll_insets(id, horizontal)))
+            .flatten()
+            .flatten()
+            .map_or((Points(0.0), Points(0.0)), |(start, end)| {
+                (Points(start as f32), Points(end as f32))
+            })
+    }
+
+    fn covered(&self, id: NodeId, at: Point<Points>) -> Option<String> {
+        let (x, y) = (f64::from(at.x.0), f64::from(at.y.0));
+        self.on_main(move |view, window| {
+            let target = view.with_mounter(|m| m.ui_view(id))??;
+            // Inside a bar already (a header's own view): the bar is where
+            // it is pressed.
+            if system_bar(&target).is_some() {
+                return None;
+            }
+            let hit = window.hitTest_withEvent(CGPoint::new(x, y), None)?;
+            // The view, one inside it (its text, a native control) or one
+            // around it that takes the touch for it.
+            if hit.isDescendantOfView(&target) || target.isDescendantOfView(&hit) {
+                return None;
+            }
+            // Another of the app's views is the model's to find
+            // (`Scene::pick`); only what UIKit draws over the app counts.
+            let bar = system_bar(&hit)?;
+            Some(format!(
+                "the system's {}",
+                bar.class().name().to_string_lossy()
+            ))
+        })
+        .flatten()
     }
 
     fn viewport(&self) -> Size<Points> {
