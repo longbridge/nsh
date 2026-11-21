@@ -1462,6 +1462,11 @@ pub struct Core<M: TextEngine> {
     /// it comes back from, unless a `focus()` moves it out of that popup
     /// ([`crate::element::ElementRef::focus_back`]).
     focus_back: Option<(NodeId, Option<NodeId>)>,
+    /// The focus the popups that give it back to these nodes opened
+    /// with, when a pointer opened them
+    /// ([`crate::element::ElementRef::focus_back_origin`]): one per
+    /// trigger, its latest opening.
+    focus_origins: Vec<(NodeId, Option<(Key, NodeId)>)>,
     /// Animates the layout changes of the next commit.
     layout_animation: Option<LayoutAnimation>,
     /// Nodes whose change animates the frames it moves in the next commit,
@@ -1791,6 +1796,7 @@ impl<M: TextEngine> Core<M> {
             retags: None,
             commands: Vec::new(),
             focus_back: None,
+            focus_origins: Vec::new(),
             layout_animation: None,
             scoped_layout: Vec::new(),
             resized: Vec::new(),
@@ -3674,6 +3680,11 @@ impl<M: TextEngine> Core<M> {
         // closing. A move inside the popup (its items' keys typed ahead of
         // the choice) or to a view that is gone does not.
         if let Some((id, from)) = self.focus_back.take() {
+            let origin = self
+                .focus_origins
+                .iter()
+                .position(|&(to, _)| to == id)
+                .map(|i| self.focus_origins.swap_remove(i).1);
             let from = from.and_then(|from| self.key(from).ok());
             let moved_out = |to: NodeId| {
                 self.key(to)
@@ -3693,7 +3704,12 @@ impl<M: TextEngine> Core<M> {
                     )
                 });
             if !moved {
-                self.commands.push((id, Command::Focus));
+                match origin {
+                    // Opened by the keyboard (or the app after a key): back
+                    // to the trigger the keyboard opened it from.
+                    None => self.commands.push((id, Command::Focus)),
+                    Some(before) => self.focus_back_to_origin(before, from),
+                }
             }
         }
         // On laid out views; dropped for views that were never shown.
@@ -7523,6 +7539,47 @@ impl<M: TextEngine> Core<M> {
             node.height = height;
             height += 1;
             at = node.parent;
+        }
+    }
+
+    /// A popup that gives the keyboard focus back to `to` opens
+    /// ([`crate::element::ElementRef::focus_back_origin`]): on macOS and
+    /// iOS, opened by a pointer, the focus it opened with is where the focus goes back to
+    /// (the pointer's press left it there, off the trigger); opened by the
+    /// keyboard (or on another platform), the trigger takes it back, as
+    /// before.
+    pub(super) fn note_focus_origin(&mut self, to: NodeId) {
+        let mut origins = std::mem::take(&mut self.focus_origins);
+        // Triggers that are gone leave no note behind (a popup closed by a
+        // press outside gives nothing back, so its note stays until then).
+        origins.retain(|&(id, _)| id != to && self.key(id).is_ok());
+        // Only where a press gives a control no focus (macOS and iOS, as
+        // AppKit and UIKit do): elsewhere a press focuses the trigger, as
+        // native buttons there do, and closing gives the trigger the focus.
+        let apple = matches!(
+            self.components.environment.os,
+            crate::platform::Os::MacOs | crate::platform::Os::Ios
+        );
+        if apple && self.modality == Some(crate::platform::InputModality::Pointer) {
+            origins.push((to, self.focus));
+        }
+        self.focus_origins = origins;
+    }
+
+    /// The keyboard focus back from the popup `from` (its node, when it is
+    /// still there) to `before`, the focus a pointer opened it with: there
+    /// when that view is still in the tree and outside the popup, else off
+    /// the popup, so its keys go to the app's shortcuts as they did before
+    /// it opened.
+    fn focus_back_to_origin(&mut self, before: Option<(Key, NodeId)>, from: Option<Key>) {
+        let outside = |this: &Self, key: Key| from.is_none_or(|from| !this.is_ancestor(from, key));
+        let alive = |this: &Self, (key, id): (Key, NodeId)| {
+            this.key(id).is_ok_and(|k| k == key) && this.is_ancestor(this.root, key)
+        };
+        if let Some((_, id)) = before.filter(|&b| alive(self, b) && outside(self, b.0)) {
+            self.commands.push((id, Command::Focus));
+        } else if let Some((_, id)) = self.focus.filter(|&(key, _)| !outside(self, key)) {
+            self.commands.push((id, Command::Blur));
         }
     }
 
