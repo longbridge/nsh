@@ -5,13 +5,16 @@
 //! the default:
 //!
 //! ```json
-//! { "modules": [
-//!   "acme-ui@1.2",
-//!   "github:acme/chart@v0.3.0",
-//!   { "git": "https://git.example.com/ui.git", "rev": "4f2a1c0" },
-//!   { "path": "../my-ui" }
-//! ] }
+//! { "dependencies": {
+//!   "acme-ui": "^1.2",
+//!   "acme-chart": { "github": "acme/chart", "tag": "v0.3.0" },
+//!   "acme-grid": { "git": "https://git.example.com/ui.git", "rev": "4f2a1c0" },
+//!   "my-ui": { "path": "../my-ui" }
+//! } }
 //! ```
+//!
+//! Keyed by package name, as `Cargo.toml` `[dependencies]`. The older
+//! `"modules"` list still builds and the next `nsh add` rewrites it.
 //!
 //! Versions are Cargo version requirements with Cargo's meaning: `"1.2"`
 //! is `^1.2`, and `"~1.2"`, `"=1.2.3"`, `">=1.2, <2"` and `"*"` work as in
@@ -61,6 +64,10 @@ pub(crate) const LOCK: &str = "nsh.lock";
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Source {
+    /// Its key in `nsh.json` `"dependencies"`: the package's name. Not in
+    /// `nsh.lock`, which keys entries by place.
+    #[serde(skip)]
+    pub name: Option<String>,
     /// The repository's URL.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git: Option<String>,
@@ -108,6 +115,7 @@ impl Source {
     /// entries by, so turning a feature on resolves nothing again.
     fn place(&self) -> Source {
         Source {
+            name: None,
             features: Vec::new(),
             ..self.clone()
         }
@@ -131,7 +139,7 @@ impl Source {
             .filter(|k| k.is_some())
             .count();
         if kinds != 1 {
-            bail!("nsh.json: \"modules\": each has one of \"git\", \"crate\" or \"path\"");
+            bail!("nsh.json: dependencies: each has one of \"git\", \"crate\" or \"path\"");
         }
         if self.tag.is_some() && self.rev.is_some() {
             bail!(
@@ -239,7 +247,8 @@ impl Source {
         }
     }
 
-    /// How `nsh.json` lists it: a string when it can be one.
+    /// How the old `"modules"` list wrote it: a string when it can be one.
+    #[cfg(test)]
     fn entry(&self) -> serde_json::Value {
         use serde_json::{Value, json};
         if !self.features.is_empty() {
@@ -355,10 +364,90 @@ impl Source {
             krate: full.krate,
             version: full.version,
             features: Vec::new(),
+            name: None,
         };
         let source = source.with_features(full.features)?;
         source.validate()?;
         Ok(source)
+    }
+
+    /// Reads `"dependencies"` entry `name`: a crate's version requirement
+    /// (`"^0.3"`), or an object with `"version"`, `"features"` and, for a
+    /// crate not from crates.io, one of `"github"`, `"git"` or `"path"`
+    /// (Git with `"tag"` or `"rev"`), as a `Cargo.toml` dependency.
+    fn from_dependency(name: &str, value: &serde_json::Value) -> anyhow::Result<Self> {
+        if !is_feature_name(name) {
+            bail!("nsh.json: dependencies: {name:?} is not a package name");
+        }
+        let star = |v: Option<String>| v.filter(|v| v.trim() != "*");
+        if let Some(req) = value.as_str() {
+            let source = Source {
+                name: Some(name.to_owned()),
+                krate: Some(name.to_owned()),
+                version: star(Some(req.to_owned())),
+                ..Default::default()
+            };
+            source.validate()?;
+            return Ok(source);
+        }
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Full {
+            git: Option<String>,
+            github: Option<String>,
+            tag: Option<String>,
+            rev: Option<String>,
+            path: Option<String>,
+            version: Option<String>,
+            #[serde(default)]
+            features: Vec<String>,
+        }
+        let full: Full = serde_json::from_value(value.clone()).with_context(|| {
+            format!(
+                "nsh.json: dependencies: {name} is a version requirement (\"^0.3\") or \
+                 {{ \"version\", \"features\", \"github\" | \"git\" | \"path\", \"tag\" | \"rev\" }}"
+            )
+        })?;
+        if full.git.is_some() && full.github.is_some() {
+            bail!("nsh.json: dependencies: {name} has both \"git\" and \"github\"");
+        }
+        let git = full.git.or(full.github.as_deref().map(github_url));
+        let elsewhere = git.is_some() || full.path.is_some();
+        let source = Source {
+            name: Some(name.to_owned()),
+            krate: (!elsewhere).then(|| name.to_owned()),
+            version: if elsewhere {
+                full.version
+            } else {
+                star(full.version)
+            },
+            git,
+            tag: full.tag,
+            rev: full.rev,
+            path: full.path,
+            features: Vec::new(),
+        };
+        let source = source.with_features(full.features)?;
+        source.validate()?;
+        Ok(source)
+    }
+
+    /// Its `"dependencies"` value: the version requirement when it can be
+    /// one (`"*"` for any), else the object form.
+    fn dependency(&self) -> serde_json::Value {
+        use serde_json::json;
+        if self.krate.is_some() && self.features.is_empty() {
+            return json!(self.version.as_deref().unwrap_or("*"));
+        }
+        let mut o = if self.krate.is_some() {
+            json!({ "version": self.version.as_deref().unwrap_or("*") })
+        } else {
+            self.object()
+        };
+        if !self.features.is_empty() {
+            o["features"] = json!(self.features);
+        }
+        o
     }
 }
 
@@ -424,14 +513,18 @@ pub(crate) fn crates(
     dir: &Path,
     config: &serde_json::Value,
 ) -> anyhow::Result<Vec<(String, AppCrate)>> {
-    let sources = sources(config)?;
+    crates_of(dir, &sources(config)?)
+}
+
+/// [`crates`] of `sources`.
+fn crates_of(dir: &Path, sources: &[Source]) -> anyhow::Result<Vec<(String, AppCrate)>> {
     if sources.is_empty() {
         return Ok(Vec::new());
     }
     let lock = read_lock(dir)?;
     let mut locked = Vec::new();
     let mut crates = Vec::new();
-    for source in &sources {
+    for source in sources {
         if let Some(path) = &source.path {
             // A local directory: read as it is now, nothing to lock.
             let checkout = dunce::canonicalize(dir.join(path))
@@ -548,13 +641,46 @@ pub(crate) fn add(dir: &Path, source: Source) -> anyhow::Result<()> {
             .with_features(source.features.clone())?,
             None => source.clone(),
         };
+        let mut source = source;
         sources.retain(|s| s.id() != id);
         sources.push(source.clone());
-        config["modules"] = serde_json::Value::Array(sources.iter().map(Source::entry).collect());
-        fs::write(&config_path, serde_json::to_string_pretty(&config)? + "\n")?;
         // The app's crates and its nshm together: a clash of
         // packages or modules is reported here, before a build.
-        let modules = crates(dir, &config)?;
+        let modules = crates_of(dir, &sources)?;
+        // Each listed by its package's name; one added without a version
+        // takes what it resolved to, as `cargo add` writes `^0.3.2`.
+        for s in &mut sources {
+            if let Some((_, c)) = modules.iter().find(|(name, _)| name == s.id()) {
+                s.name = Some(c.package().to_owned());
+            }
+        }
+        let mut lock = read_lock(dir)?;
+        if source.krate.is_some() && source.version.is_none() {
+            let place = source.place();
+            if let Some(entry) = lock.modules.iter_mut().find(|l| l.source == place)
+                && let Some(version) = entry.resolved.clone()
+            {
+                entry.source.version = Some(format!("^{version}"));
+                source.version = entry.source.version.clone();
+                write_lock(dir, &lock)?;
+            }
+        }
+        if let Some(listed) = sources.iter_mut().find(|s| s.id() == id) {
+            listed.version = source.version.clone();
+        }
+        let mut dependencies = serde_json::Map::new();
+        for s in &sources {
+            let name = s.name.clone().context("an nshm without a package")?;
+            if dependencies.insert(name.clone(), s.dependency()).is_some() {
+                bail!("nsh.json: dependencies: two are the package {name}");
+            }
+        }
+        let object = config
+            .as_object_mut()
+            .context("nsh.json is not an object")?;
+        object.remove("modules");
+        object.insert("dependencies".into(), dependencies.into());
+        fs::write(&config_path, serde_json::to_string_pretty(&config)? + "\n")?;
         let mut all: Vec<(String, AppCrate)> = match config.get("rust") {
             Some(rust) => rust_crates(dir, rust)?,
             None => Vec::new(),
@@ -578,7 +704,6 @@ pub(crate) fn add(dir: &Path, source: Source) -> anyhow::Result<()> {
         }
         all.extend(modules);
         rust_app::check_crates(&all)?;
-        let lock = read_lock(dir)?;
         let place = source.place();
         let entry = lock.modules.iter().find(|l| l.source == place).cloned();
         // The app's crate uses it from Rust too (`use acme_ui::Gauge`).
@@ -887,6 +1012,20 @@ fn sources(config: &serde_json::Value) -> anyhow::Result<Vec<Source>> {
     if config.get("extensions").is_some() {
         bail!("nsh.json: \"extensions\" is now \"modules\"");
     }
+    if let Some(value) = config.get("dependencies") {
+        if config.get("modules").is_some() {
+            bail!("nsh.json: \"modules\" is now \"dependencies\": keep one of them");
+        }
+        let map = value.as_object().context(
+            "nsh.json: \"dependencies\" is an object by package, e.g. { \"acme-ui\": \"^1.2\" }",
+        )?;
+        return map
+            .iter()
+            .map(|(name, v)| Source::from_dependency(name, v))
+            .collect();
+    }
+    // `"modules"`, the list before `"dependencies"`: still built, and
+    // rewritten as `"dependencies"` by the next `nsh add`.
     match config.get("modules") {
         None => Ok(Vec::new()),
         Some(value) => {
@@ -1434,6 +1573,50 @@ mod tests {
                 .with_features(vec!["dep:tokio".into()])
                 .is_err()
         );
+    }
+
+    #[test]
+    fn dependencies_are_keyed_by_package() {
+        let config = serde_json::json!({ "dependencies": {
+            "nsh-omarchy": "^0.3.2",
+            "acme-any": "*",
+            "nsh-extra": { "version": "0.6", "features": ["camera"] },
+            "acme-chart": { "github": "acme/chart", "tag": "v0.3.0" },
+            "acme-ui": { "git": "https://git.example.com/ui.git", "rev": "4f2a1c0" },
+            "my-gauge": { "path": "../my-gauge", "version": "~1.2" }
+        } });
+        let list = sources(&config).unwrap();
+        let by = |n: &str| list.iter().find(|s| s.name.as_deref() == Some(n)).unwrap();
+        assert_eq!(by("nsh-omarchy").krate.as_deref(), Some("nsh-omarchy"));
+        assert_eq!(by("nsh-omarchy").version.as_deref(), Some("^0.3.2"));
+        assert_eq!(by("acme-any").version, None);
+        assert_eq!(by("nsh-extra").features, ["camera"]);
+        assert_eq!(
+            by("acme-chart").git.as_deref(),
+            Some("https://github.com/acme/chart")
+        );
+        assert_eq!(by("acme-chart").krate, None);
+        assert_eq!(by("my-gauge").path.as_deref(), Some("../my-gauge"));
+        // Written back as it was.
+        for s in &list {
+            assert_eq!(
+                s.dependency(),
+                config["dependencies"][s.name.as_deref().unwrap()]
+            );
+        }
+        // The same place as the old list's entry: nothing resolved again.
+        assert_eq!(
+            by("nsh-omarchy").place(),
+            Source::short("nsh-omarchy@^0.3.2", None, None).unwrap()
+        );
+        let both = serde_json::json!({ "dependencies": {}, "modules": [] });
+        assert!(sources(&both).is_err());
+        let list_form = serde_json::json!({ "dependencies": ["acme-ui"] });
+        assert!(sources(&list_form).is_err());
+        let unknown = serde_json::json!({ "dependencies": { "a": { "branch": "main" } } });
+        assert!(sources(&unknown).is_err());
+        let req = serde_json::json!({ "dependencies": { "a": "one" } });
+        assert!(sources(&req).is_err());
     }
 
     #[test]

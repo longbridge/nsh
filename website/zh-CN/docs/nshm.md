@@ -95,11 +95,14 @@ nsh add https://github.com/huacnlee/nsh-omarchy.git --rev main  # 任意 Git 地
 nsh add --path ../nsh-omarchy                                   # 本地目录，按当前内容使用
 ```
 
-它把 nshm 记录到 `nsh.json` 的 `"modules"`，把解析到的版本或提交锁定在 `nsh.lock`（两者都随应用提交），应用有自己的 crate 时还会把它加入该 crate 的 `[dependencies]`。所有命令都用锁定的版本构建，再次运行 `nsh add` 即更新。纯 TSX 应用会像带 crate 的应用一样用它的 nshm 构建宿主，因此开发机和 CI 需要 Rust 工具链（[用 Rust 开发](./rust.md)）。
+它像 `Cargo.toml` 一样按包名把 nshm 记录到 `nsh.json` 的 `"dependencies"`：crates.io 上的 crate 写版本要求（`nsh add nsh-omarchy` 写入 `"^<解析到的版本>"`，`nsh add nsh-omarchy@0.3` 保留 `"0.3"`），其他来源写带 `"github"`、`"git"` 或 `"path"` 的对象；把解析到的版本或提交锁定在 `nsh.lock`（两者都随应用提交），应用有自己的 crate 时还会把它加入该 crate 的 `[dependencies]`。所有命令都用锁定的版本构建，再次运行 `nsh add` 即更新。纯 TSX 应用会像带 crate 的应用一样用它的 nshm 构建宿主，因此开发机和 CI 需要 Rust 工具链（[用 Rust 开发](./rust.md)）。
 
 ```json
 {
-  "modules": ["nsh-omarchy", { "path": "../my-gauge" }]
+  "dependencies": {
+    "nsh-omarchy": "^0.3.2",
+    "my-gauge": { "path": "../my-gauge" }
+  }
 }
 ```
 
@@ -111,7 +114,7 @@ nsh add nsh-extra --features camera
 
 ```json
 {
-  "modules": [{ "crate": "nsh-extra", "features": ["camera"] }]
+  "dependencies": { "nsh-extra": { "version": "^0.6.0", "features": ["camera"] } }
 }
 ```
 

@@ -209,6 +209,9 @@ pub(crate) struct AppConfig {
     #[serde(default, rename = "rust")]
     _rust: Option<serde_json::Value>,
     /// The app's nshm, linked like its crates (`nshm.rs`).
+    #[serde(default, rename = "dependencies")]
+    _dependencies: Option<serde_json::Value>,
+    /// The older list of the app's nshm (`nshm.rs`).
     #[serde(default, rename = "modules")]
     _modules: Option<serde_json::Value>,
     /// A Rust app's root component in its crate (`rust_app::RootConfig`).

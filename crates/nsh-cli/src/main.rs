@@ -350,7 +350,7 @@ enum Command {
     /// crate with components, modules and classes for its Rust and TSX
     /// code, from crates.io (`nsh add acme-ui[@1.2]`), Git (`nsh add
     /// https://github.com/acme/ui`) or a directory (`nsh add --path
-    /// ../ui`). Listed in `nsh.json` `"modules"`, the version or commit
+    /// ../ui`). Listed in `nsh.json` `"dependencies"` by package name, the version or commit
     /// it resolved to pinned in `nsh.lock`; `--features` turns on the
     /// modules of a crate that keeps them behind Cargo features (`nsh add
     /// nsh-extra --features camera`).

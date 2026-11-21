@@ -95,11 +95,14 @@ nsh add https://github.com/huacnlee/nsh-omarchy.git --rev main  # any Git URL
 nsh add --path ../nsh-omarchy                                   # a local directory, as it is
 ```
 
-It lists the nshm in `nsh.json` `"modules"`, pins the version or commit it resolved to in `nsh.lock` (commit both with the app), and adds the crate to the `[dependencies]` of the app's own crate when it has one. Every command builds with the locked version; running `nsh add` again updates it. A pure TSX app gets hosts built with its nshm, as an app with a crate of its own does, so its development machine and CI need the Rust toolchain ([Building with Rust](./rust.md)).
+It lists the nshm in `nsh.json` `"dependencies"` by its package name, as `Cargo.toml` does: a crate from crates.io takes a version requirement (`nsh add nsh-omarchy` writes `"^<the version it resolved to>"`, `nsh add nsh-omarchy@0.3` keeps `"0.3"`), and one from elsewhere an object with `"github"`, `"git"` or `"path"`. It pins the version or commit it resolved to in `nsh.lock` (commit both with the app), and adds the crate to the `[dependencies]` of the app's own crate when it has one. Every command builds with the locked version; running `nsh add` again updates it. A pure TSX app gets hosts built with its nshm, as an app with a crate of its own does, so its development machine and CI need the Rust toolchain ([Building with Rust](./rust.md)).
 
 ```json
 {
-  "modules": ["nsh-omarchy", { "path": "../my-gauge" }]
+  "dependencies": {
+    "nsh-omarchy": "^0.3.2",
+    "my-gauge": { "path": "../my-gauge" }
+  }
 }
 ```
 
@@ -112,9 +115,11 @@ nsh add nsh-extra --features camera
 
 ```json
 {
-  "modules": [{ "crate": "nsh-extra", "features": ["camera"] }]
+  "dependencies": { "nsh-extra": { "version": "^0.6.0", "features": ["camera"] } }
 }
 ```
+
+An app listing them in the older `"modules"` array still builds; the next `nsh add` rewrites it as `"dependencies"`, keeping each requirement (a bare name becomes `"*"`) and what `nsh.lock` pinned.
 
 [CLI: nsh add](./cli.md#nsh-add) covers every source form, version requirements and how the lock file is kept.
 
