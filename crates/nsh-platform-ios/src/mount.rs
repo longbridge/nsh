@@ -444,6 +444,35 @@ impl KeyboardMotion {
     }
 }
 
+/// Where `view` is laid out in its window, as `convertRect:toView:nil` of
+/// its bounds says without the layers' transforms. The keyboard is avoided
+/// for where a view rests: a transform moves what is drawn, often for a
+/// while (a sheet coming in as the keyboard rises moves its input by the
+/// animator's frames), and measuring it mid-way would move the content up
+/// by what the sheet itself is about to clear.
+fn laid_out_in_window(view: &UIView) -> CGRect {
+    // `center` and `bounds` are the layout's (`frame` follows the
+    // transform); nsh keeps every layer's anchor at its middle.
+    let offset = |v: &UIView| {
+        let (center, bounds) = (v.center(), v.bounds());
+        CGPoint::new(
+            center.x - bounds.size.width / 2.0,
+            center.y - bounds.size.height / 2.0,
+        )
+    };
+    let size = view.bounds().size;
+    let mut origin = offset(view);
+    let mut parent = view.superview();
+    // Up to the window, whose own place on the screen is not counted.
+    while let Some(p) = parent.filter(|p| p.superview().is_some()) {
+        let (at, scrolled) = (offset(&p), p.bounds().origin);
+        origin.x += at.x - scrolled.x;
+        origin.y += at.y - scrolled.y;
+        parent = p.superview();
+    }
+    CGRect::new(origin, size)
+}
+
 /// Moves the content of `view` up by `shift` (through its bounds' origin,
 /// so neither its frame nor a transform the app set changes) along
 /// `motion`, the keyboard's.
@@ -2626,8 +2655,7 @@ impl Mounter {
             }
             let container = self.pan_container(id)?;
             let view = self.slot(container)?.native.view();
-            let editor = input.editor_view();
-            let rect = editor.convertRect_toView(editor.bounds(), None);
+            let rect = laid_out_in_window(input.editor_view());
             // Where it would be unmoved.
             let bottom = rect.origin.y + rect.size.height + view.bounds().origin.y;
             let margin = 12.0;
@@ -2680,12 +2708,12 @@ impl Mounter {
         if self.keyboard <= 0.0 {
             return;
         }
-        let Some(parent) = scroll.superview() else {
+        if scroll.superview().is_none() {
             return;
-        };
+        }
         // In window coordinates: the scroll view may be in a modal, which
         // is not inside the surface's root view.
-        let frame = parent.convertRect_toView(scroll.frame(), None);
+        let frame = laid_out_in_window(&scroll);
         let Some(keyboard_top) = self.keyboard_top() else {
             return;
         };
