@@ -104,11 +104,11 @@ use windows::{
                 CFE_ITALIC, CFM_BOLD, CFM_COLOR, CFM_FACE, CFM_ITALIC, CFM_SIZE, CFM_SPACING,
                 CFM_WEIGHT, EM_CANREDO, EM_EXSETSEL, EM_GETLANGOPTIONS, EM_GETSCROLLPOS, EM_REDO,
                 EM_SETEDITSTYLE, EM_SETEVENTMASK, EM_SETLANGOPTIONS, EM_SETSCROLLPOS,
-                EM_SETTEXTMODE, EM_SETTYPOGRAPHYOPTIONS, ENM_CHANGE, ENM_ENDCOMPOSITION,
-                ENM_SELCHANGE, ENM_STARTCOMPOSITION, IMF_SPELLCHECKING, IMF_TKBPREDICTION,
-                PFA_CENTER, PFA_JUSTIFY, PFA_LEFT, PFA_RIGHT, PFM_ALIGNMENT, PFM_LINESPACING,
-                PFM_RTLPARA, SES_USECTF, TM_MULTICODEPAGE, TM_MULTILEVELUNDO, TM_RICHTEXT,
-                TO_ADVANCEDTYPOGRAPHY, TXTBIT_AUTOWORDSEL, TXTBIT_CHARFORMATCHANGE,
+                EM_SETTEXTMODE, EM_SETTYPOGRAPHYOPTIONS, EM_STOPGROUPTYPING, ENM_CHANGE,
+                ENM_ENDCOMPOSITION, ENM_SELCHANGE, ENM_STARTCOMPOSITION, IMF_SPELLCHECKING,
+                IMF_TKBPREDICTION, PFA_CENTER, PFA_JUSTIFY, PFA_LEFT, PFA_RIGHT, PFM_ALIGNMENT,
+                PFM_LINESPACING, PFM_RTLPARA, SES_USECTF, TM_MULTICODEPAGE, TM_MULTILEVELUNDO,
+                TM_RICHTEXT, TO_ADVANCEDTYPOGRAPHY, TXTBIT_AUTOWORDSEL, TXTBIT_CHARFORMATCHANGE,
                 TXTBIT_CLIENTRECTCHANGE, TXTBIT_D2DDWRITE, TXTBIT_DISABLEDRAG,
                 TXTBIT_HIDESELECTION, TXTBIT_MAXLENGTHCHANGE, TXTBIT_MULTILINE,
                 TXTBIT_PARAFORMATCHANGE, TXTBIT_READONLY, TXTBIT_RICHTEXT, TXTBIT_SCROLLBARCHANGE,
@@ -1109,6 +1109,32 @@ pub(crate) fn set_accessible_value(surface: &Rc<Surface>, view: &NshView, text: 
     replace_selection(&input, &text);
     process(surface, view, &input);
     true
+}
+
+/// `InputRef.insertText`: replaces the selection with `text` as a paste
+/// would (`maxLength` applies, line breaks become spaces in a single-line
+/// field, undo takes it back as one step and the change is reported), for
+/// an app that took a paste over (`pasteBehavior: "report"`). Nothing
+/// happens in a read-only field or during an IME composition.
+pub(crate) fn insert_text(view: &NshView, text: &str) {
+    let Some(input) = input_of(view) else {
+        return;
+    };
+    if !input.config.borrow().editable || input.composing.get().is_some() {
+        return;
+    }
+    let text = pasted(text, input.multiline());
+    let (start, end) = input.selection();
+    if text.is_empty() && start == end {
+        return;
+    }
+    // A step of its own in the undo history, apart from typing around it.
+    input.send(EM_STOPGROUPTYPING, 0, 0);
+    replace_selection(&input, &text.replace('\n', "\r"));
+    if let Some(surface) = surface_of(view) {
+        process(&surface, view, &input);
+    }
+    view.changed();
 }
 
 /// The field that has the keyboard focus.
@@ -2457,6 +2483,41 @@ mod tests {
 
     /// The font the field sets reaches the text it already holds: one
     /// format for all of it, as the text mode promises ([`TEXT_MODE`]).
+    #[test]
+    fn rich_text_mode_reads_back_only_the_text_typed() {
+        for multiline in [false, true] {
+            let config = InputConfig {
+                multiline,
+                ..Default::default()
+            };
+            let editor = Editor::new(
+                HWND::default(),
+                Props {
+                    client: RECT {
+                        right: 800,
+                        bottom: 200,
+                        ..Default::default()
+                    },
+                    bits: base_bits(&config),
+                    ..Default::default()
+                },
+                Box::new(|| {}),
+                Box::new(|| {}),
+            )
+            .expect("RichEdit");
+            editor.send(EM_SETTEXTMODE, TEXT_MODE as usize, 0);
+            // RichEdit's own end of the story is not the field's text.
+            assert_eq!(editor.text_units(), Vec::<u16>::new(), "empty");
+            editor.set_text("/");
+            assert_eq!(String::from_utf16_lossy(&editor.text_units()), "/");
+            if multiline {
+                // A line break the user typed at the end stays.
+                editor.set_text("a\r");
+                assert_eq!(String::from_utf16_lossy(&editor.text_units()), "a\r");
+            }
+        }
+    }
+
     #[test]
     fn font_changes_reach_held_text() {
         let config = InputConfig {
