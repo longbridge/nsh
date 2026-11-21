@@ -2569,6 +2569,53 @@ mod tests {
         );
     }
 
+    /// Rich text's final paragraph mark ([`TEXT_MODE`]) is not the
+    /// field's: its text, selection and limit leave it out.
+    #[test]
+    fn rich_text_keeps_its_final_mark_out_of_the_text() {
+        for multiline in [false, true] {
+            let config = InputConfig {
+                multiline,
+                ..Default::default()
+            };
+            let editor = Editor::new(
+                HWND::default(),
+                Props {
+                    client: RECT {
+                        right: 800,
+                        bottom: 200,
+                        ..Default::default()
+                    },
+                    bits: base_bits(&config),
+                    ..Default::default()
+                },
+                Box::new(|| {}),
+                Box::new(|| {}),
+            )
+            .expect("RichEdit");
+            editor.send(EM_SETTEXTMODE, TEXT_MODE as usize, 0);
+            let text = || String::from_utf16_lossy(&editor.text_units());
+            assert_eq!(text(), "", "multiline {multiline}");
+            editor.send(EM_SETSEL, 0, -1);
+            assert_eq!(editor.selection(), (0, 0), "multiline {multiline}");
+            editor.set_text("own words");
+            assert_eq!(text(), "own words", "multiline {multiline}");
+            editor.send(EM_SETSEL, 0, -1);
+            assert_eq!(editor.selection(), (0, 9), "multiline {multiline}");
+            if multiline {
+                editor.set_text("a\rb\r");
+                assert_eq!(text(), "a\rb\r");
+            }
+            // As many units as the limit says, typed.
+            editor.set_text("");
+            editor.update(|p| p.max_length = 5, TXTBIT_MAXLENGTHCHANGE);
+            for _ in 0..7 {
+                editor.send(WM_CHAR, 'a' as usize, 1);
+            }
+            assert_eq!(text(), "aaaaa", "multiline {multiline}");
+        }
+    }
+
     #[test]
     fn stop_and_destroy_forget_the_focus() {
         let surface = Surface::new(Default::default());

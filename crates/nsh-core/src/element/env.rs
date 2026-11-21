@@ -82,6 +82,10 @@ pub struct Environment {
     /// The platform shows web sign-in sessions
     /// ([`crate::platform::Environment::auth_session`]).
     pub auth_session: bool,
+    /// Links of the schemes the app claims reach it
+    /// ([`field@crate::platform::Environment::scheme_links`], resolved: `true`
+    /// on every OS but the web unless the platform says otherwise).
+    pub scheme_links: bool,
     /// The platform shows file dialogs and opens, reveals and trashes local
     /// paths ([`crate::platform::Environment::file_requests`]).
     pub file_requests: bool,
@@ -158,6 +162,7 @@ impl Default for Environment {
             canvas_render: false,
             share: false,
             auth_session: false,
+            scheme_links: true,
             file_requests: false,
             speech: false,
             notifications: false,

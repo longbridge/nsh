@@ -388,8 +388,21 @@ let application = unsafe { jni::objects::JObject::from_raw(context.context().cas
 ```
 
 `ndk-context` holds one context per process and panics when it is set again, so do not call
-`ndk_context::initialize_android_context` yourself in an NSH app. For the activity in front (to show a system UI),
-ask Android for it, or ask for permissions through `permissions` above.
+`ndk_context::initialize_android_context` yourself in an NSH app. To show a system UI from the activity in front,
+start one for a result through `activity` below, or ask for permissions through `permissions` above.
+
+## Activities from Rust
+
+Rust code that starts another app for a result (the camera app, a document picker) uses `activity` of the same crate.
+`start_for_result(env, &intent)` starts it from the activity in front and resolves with its `ActivityResult` (the
+result code and the intent the other app returned), across configuration changes; `can_start(env, &intent)` says
+whether an installed app answers the intent. Android 11+ shows an app only the apps its manifest queries: a crate
+declares its queries in its `Cargo.toml` ([What the packaged app needs](./nshm.md#what-the-packaged-app-needs)).
+`output_file(env, name)` makes a new file in the app's cache with a `content://` URI the other app writes through the
+app's file provider (`MediaStore.EXTRA_OUTPUT`), and `picker::prepare_image(path, name, &request)` prepares an image
+file as `Picker.pickImages` does. `with_env(f)` runs `f` with the thread's JNI environment (code of the app and its nshm; other crates reach the VM through `ndk-context` above) and returns its result, or the JNI error (a Java exception is
+logged and cleared). A request made while the app is in the background fails with `ActivityError::NoActivity`. `nsh-extra`'s camera
+(`crates/nsh-extra/src/camera/android.rs`) uses all of them.
 
 ## Limits
 

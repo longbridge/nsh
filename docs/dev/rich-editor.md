@@ -150,8 +150,9 @@ their marks' parts (`classes.marks`), split at inline decorations (their `class`
 attachments with their spec's `class`. A node view (`node_view.rs`: `NodeView`, registered in `NodeViews` or a
 plugin's `node_views` as an `Arc<dyn NodeView>`) renders a node type's blocks: `create` makes the element, which
 follows `cx.node()` while `update` returns true; `editable_content_slot` puts the editor's rendering of the content
-(`cx.take_content()`) inside it, measured in the content box; otherwise the node is an atom selected and moved over
-as a unit. The only looks of the view's own are the caret (2 points, the theme's `foreground`), the selection (the
+(`cx.take_content()`) inside it, measured in the block's box (a block moved by an edit before it carries it along)
+and again when its frame in its parent or the block's size changes; otherwise the node is an atom selected and moved
+over as a unit. The only looks of the view's own are the caret (2 points, the theme's `foreground`), the selection (the
 theme's selection color), the placeholder (`muted-foreground`) and the composition (underlined), each a part the app
 restyles.
 

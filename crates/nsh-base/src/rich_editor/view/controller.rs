@@ -22,7 +22,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use super::{
     RichEditorChange, RichEditorEvent, RichEditorFile, RichEditorPastedFiles, RichEditorProps,
     RichEditorSelection,
-    geometry::{DOC, Geometry, Hit},
+    geometry::{DOC, Geometry, Hit, slot_id},
     keys::{self, Move, Unit},
     node_view::{NodeView, NodeViewEvent},
     session::{
@@ -108,12 +108,6 @@ pub(crate) struct ActiveBlocks {
 pub(crate) struct SelRects {
     signals: rustc_hash::FxHashMap<u64, Signal<BlockRects>>,
     active: rustc_hash::FxHashSet<u64>,
-}
-
-/// The id of the slot a node view with an editable content slot renders
-/// its content in (a box measured in the content box).
-pub(crate) fn slot_id(id: u64) -> u64 {
-    id | (1 << 62)
 }
 
 /// The content's offset from the page (content less page) and the scroll

@@ -18,6 +18,12 @@ use crate::rich_editor::state::Affinity;
 /// The block id of the document itself (its children's parent).
 pub(crate) const DOC: u64 = 0;
 
+/// The id of the slot a node view with an editable content slot renders
+/// its content in (a box measured in its block's box).
+pub(crate) fn slot_id(id: u64) -> u64 {
+    id | (1 << 62)
+}
+
 /// A stretch of a textblock's content and of its rendered text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Run {
@@ -112,8 +118,9 @@ pub(crate) struct TextGeo {
 /// The geometry of a rendered document.
 #[derive(Default)]
 pub(crate) struct Geometry {
-    /// Each block's frame in its parent's box, and its parent; `None` for
-    /// a frame measured in the content box directly (a content slot).
+    /// Each block's frame in its parent's box, and its parent (a node view's
+    /// content slot: its block, measured in the block's box); `None` for a
+    /// frame in the content box.
     pub(crate) frames: HashMap<u64, (Option<u64>, Bounds<Points>)>,
     /// Where a block's children start in its box, when they sit in a
     /// holder that is not the block's own origin (a task item's content,
@@ -184,7 +191,11 @@ impl Geometry {
             at.y += frame.origin.y;
             id = match parent {
                 Some(p) => {
-                    if let Some(inset) = self.insets.get(p) {
+                    // A slot is measured in its block's box, its holder's
+                    // offset included.
+                    if current != slot_id(*p)
+                        && let Some(inset) = self.insets.get(p)
+                    {
                         at.x += inset.x;
                         at.y += inset.y;
                     }
@@ -607,6 +618,23 @@ mod tests {
         assert_eq!(geo.origin(2), Some(Point::new(px(24.0), px(40.0))));
         // The item itself is in its own parent's box: no inset of its own.
         assert_eq!(geo.origin(1), Some(Point::new(px(0.0), px(40.0))));
+    }
+
+    /// A node view's slot is measured in its block's box, a holder's offset
+    /// (a task item's checkbox before it) included: the holder's inset is
+    /// not added again on the way up.
+    #[test]
+    fn a_slot_in_its_block_takes_no_inset_of_the_block() {
+        let mut geo = Geometry::default();
+        let at =
+            |x: f32, y: f32| Bounds::new(Point::new(px(x), px(y)), Size::new(px(100.0), px(20.0)));
+        geo.frames.insert(1, (Some(DOC), at(0.0, 40.0)));
+        geo.insets.insert(1, Point::new(px(24.0), px(0.0)));
+        geo.frames.insert(slot_id(1), (Some(1), at(24.0, 0.0)));
+        assert_eq!(geo.origin(slot_id(1)), Some(Point::new(px(24.0), px(40.0))));
+        // The block moves: its slot goes with it.
+        geo.frames.insert(1, (Some(DOC), at(0.0, 10.0)));
+        assert_eq!(geo.origin(slot_id(1)), Some(Point::new(px(24.0), px(10.0))));
     }
 
     /// The checkbox is in the item's box before its content: a press there

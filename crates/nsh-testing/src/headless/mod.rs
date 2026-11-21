@@ -899,7 +899,9 @@ impl Headless {
     ///
     /// Without it, as on desktops, a session opens the page as `open_url`
     /// does ([`Screen::opened_urls`]) and ends with a link of its callback
-    /// scheme ([`Headless::open_with_url`]).
+    /// scheme ([`Headless::open_with_url`]); on the web, or with
+    /// [`field@nsh_core::platform::Environment::scheme_links`] `Some(false)`,
+    /// where no such link comes, it fails at once.
     pub fn on_auth_session(
         &mut self,
         outcome: nsh_core::auth_session::AuthSessionOutcome,
@@ -3576,6 +3578,49 @@ mod tests {
         app.wait_for("text:ERR_FEATURE_UNAVAILABLE_ON_PLATFORM")
             .unwrap();
         assert!(app.screen().opened_urls().is_empty());
+    }
+
+    #[test]
+    fn where_no_link_of_the_apps_schemes_comes_the_session_fails_at_once() {
+        let start = |os: Os, scheme_links: Option<bool>| {
+            let mut config = EngineConfig::new(Root::of::<SigningIn>().url_schemes(["demo"]));
+            config.environment.os = os;
+            config.environment.scheme_links = scheme_links;
+            let mut app = Headless::start(config).unwrap();
+            app.first_render().unwrap();
+            app
+        };
+        // The app claims `demo`: only the missing links can refuse it.
+        let refused = "text:ERR_FEATURE_UNAVAILABLE_ON_PLATFORM";
+        // The web hears only its page's address: the claimed scheme's link
+        // never comes, so the session fails instead of waiting forever.
+        let mut app = start(Os::Web, None);
+        app.press("Sign in").unwrap();
+        app.wait_for(refused).unwrap();
+        assert!(app.screen().opened_urls().is_empty());
+        // The same where the platform says it hears none, whatever the OS
+        // (the GPUI and terminal backends).
+        let mut app = start(Os::Ios, Some(false));
+        app.press("Sign in").unwrap();
+        app.wait_for(refused).unwrap();
+        assert!(app.screen().opened_urls().is_empty());
+        // A platform that says it hears them waits for the callback.
+        let mut app = start(Os::Web, Some(true));
+        app.press("Sign in").unwrap();
+        assert_eq!(
+            app.screen().opened_urls(),
+            ["https://example.com/authorize"]
+        );
+        app.open_with_url("demo://done?code=9").unwrap();
+        app.wait_for("text:signed in demo://done?code=9").unwrap();
+        // A session the platform shows itself needs no link.
+        let mut app = start(Os::Web, None);
+        app.on_auth_session(nsh_core::auth_session::AuthSessionOutcome::Completed(
+            "demo://done?code=10".into(),
+        ))
+        .unwrap();
+        app.press("Sign in").unwrap();
+        app.wait_for("text:signed in demo://done?code=10").unwrap();
     }
 
     #[test]
