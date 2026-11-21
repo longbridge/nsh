@@ -45,9 +45,9 @@ use windows::{
         System::LibraryLoader::{GetProcAddress, LoadLibraryW},
         UI::{
             Controls::RichEdit::{
-                CHARFORMAT2W, CHARFORMATW, CHARRANGE, EM_EXGETSEL, EM_GETSCROLLPOS,
-                EM_SETSCROLLPOS, ITextServices2, PARAFORMAT, PARAFORMAT2, TXTBACK_TRANSPARENT,
-                TXTBACKSTYLE, TXTVIEW_ACTIVE,
+                CHARFORMAT2W, CHARFORMATW, CHARRANGE, EM_EXGETSEL, EM_GETSCROLLPOS, EM_GETTEXTMODE,
+                EM_SETSCROLLPOS, ITextServices2, PARAFORMAT, PARAFORMAT2, TM_RICHTEXT,
+                TXTBACK_TRANSPARENT, TXTBACKSTYLE, TXTVIEW_ACTIVE,
             },
             Input::Ime::{HIMC, ImmGetContext, ImmReleaseContext},
             WindowsAndMessaging::{HCURSOR, KillTimer, SetTimer, WM_GETTEXTLENGTH, WM_TIMER},
@@ -369,7 +369,16 @@ impl Editor {
         let mut bstr = windows::core::BSTR::new();
         // SAFETY: an out BSTR we own.
         let _ = unsafe { self.services.TxGetText(&mut bstr) };
-        bstr.to_vec()
+        let mut units = bstr.to_vec();
+        // In rich text mode the story always ends with a paragraph mark of
+        // RichEdit's own, which no one typed: a field holding "/" reads
+        // "/\r". Plain text mode has none.
+        if units.last() == Some(&u16::from(b'\r'))
+            && self.send(EM_GETTEXTMODE, 0, 0).0.0 as i32 & TM_RICHTEXT.0 != 0
+        {
+            units.pop();
+        }
+        units
     }
 
     /// Replaces the text (no undo, no notification but `EN_CHANGE`).

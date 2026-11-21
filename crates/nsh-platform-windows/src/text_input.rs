@@ -2484,6 +2484,41 @@ mod tests {
     /// The font the field sets reaches the text it already holds: one
     /// format for all of it, as the text mode promises ([`TEXT_MODE`]).
     #[test]
+    fn rich_text_mode_reads_back_only_the_text_typed() {
+        for multiline in [false, true] {
+            let config = InputConfig {
+                multiline,
+                ..Default::default()
+            };
+            let editor = Editor::new(
+                HWND::default(),
+                Props {
+                    client: RECT {
+                        right: 800,
+                        bottom: 200,
+                        ..Default::default()
+                    },
+                    bits: base_bits(&config),
+                    ..Default::default()
+                },
+                Box::new(|| {}),
+                Box::new(|| {}),
+            )
+            .expect("RichEdit");
+            editor.send(EM_SETTEXTMODE, TEXT_MODE as usize, 0);
+            // RichEdit's own end of the story is not the field's text.
+            assert_eq!(editor.text_units(), Vec::<u16>::new(), "empty");
+            editor.set_text("/");
+            assert_eq!(String::from_utf16_lossy(&editor.text_units()), "/");
+            if multiline {
+                // A line break the user typed at the end stays.
+                editor.set_text("a\r");
+                assert_eq!(String::from_utf16_lossy(&editor.text_units()), "a\r");
+            }
+        }
+    }
+
+    #[test]
     fn font_changes_reach_held_text() {
         let config = InputConfig {
             multiline: true,
