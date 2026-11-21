@@ -289,6 +289,10 @@ Things that were found the hard way. Read the section of the area you change bef
   itself presenting one (a `Sheet` is a transparent modal over the modal it is in) dismisses only that one, and the outer
   modal stays on screen with its content already gone: a blank screen when a sheet and its modal close together.
   `ModalHost::dismiss` dismisses through `presentingViewController`, which takes the modal and everything above it.
+  So a modal shown while another leaves (one closed and one opened in the same batch) must not be presented over the
+  leaving one: the mounter dismisses first and presents the new modal once the old one is gone, and presents again
+  the modals the app still shows that went along. A modal also leaves with the subtree it is in, not only when its
+  own node is removed.
 
 - **iOS, presses near the top of the window**: UIKit attaches tap recognizers to the window that skip `UIControl`s, and a
   press is a gesture recognizer, not a control. On iOS 26+ the window's `_UIDoubleTapInteraction` (a single-tap

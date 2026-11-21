@@ -1195,6 +1195,26 @@ pub struct DragBy {
     pub y: Points,
 }
 
+/// Timing for a finger or mouse drag: [`crate::DragOptions`] as a test
+/// writes it, in milliseconds.
+#[derive(Debug, Default, Clone, Copy, PartialEq, JsObject)]
+#[non_exhaustive]
+pub struct DragOptions {
+    /// Total milliseconds to rest before moving; defaults to 100. A hold
+    /// past `delayLongPress` delivers the long press before movement.
+    #[prop(skip_none)]
+    pub hold: Option<f64>,
+}
+
+impl DragOptions {
+    /// The options `options` asks for; a hold that is no duration is a
+    /// `RangeError`.
+    fn resolve(options: Option<Self>) -> Result<crate::DragOptions, JsError> {
+        crate::DragOptions::from_ms(options.and_then(|options| options.hold))
+            .map_err(JsError::Range)
+    }
+}
+
 /// An action of the context menu the app shows (`app.menu()`).
 #[derive(Debug, Clone, PartialEq, JsObject)]
 pub struct MenuEntry {
@@ -2029,27 +2049,35 @@ impl App {
     }
 
     /// Drags what `selector` names: a finger lands on its middle, rests for
-    /// 100 ms, moves by `by` points, 10 per display frame, and lifts. On a
-    /// desktop or the web it is the mouse, its button down. A pan moves with it
-    /// (`onPanStart`, `onPanEnd`), the views listening to touches hear them
-    /// (`pointerType` `"touch"`, or `"mouse"`), a scroll view scrolls with a
-    /// finger (pulled past its top, it refreshes) but not with the mouse,
-    /// and the press under it is cancelled.
-    pub async fn drag(this: Instance<Self>, selector: String, by: DragBy) -> Result<(), JsError> {
+    /// `options.hold` milliseconds (100 by default), moves by `by` points,
+    /// 10 per display frame, and lifts. On a desktop or the web it is the
+    /// mouse, its button down. A pan moves with it (`onPanStart`, `onPanEnd`),
+    /// the views listening to touches hear them (`pointerType` `"touch"`,
+    /// or `"mouse"`), a scroll view scrolls with a finger (pulled past its
+    /// top, it refreshes) but not with the mouse, and the press is cancelled.
+    pub async fn drag(
+        this: Instance<Self>,
+        selector: String,
+        by: DragBy,
+        options: Option<DragOptions>,
+    ) -> Result<(), JsError> {
         let by = nsh_core::geometry::point(by.x, by.y);
-        step(&this, move |app| app.drag(&selector, by)).await
+        let options = DragOptions::resolve(options)?;
+        step(&this, move |app| app.drag(&selector, by, options)).await
     }
 
     /// Drags as `drag` does but keeps the finger down, so the test can look
     /// at the screen mid-drag (a drag preview, a drop line); `drop()` lifts
-    /// it. Headless only for now.
+    /// it. Headless, Linux and iOS; other native agents reject this step.
     pub async fn drag_and_hold(
         this: Instance<Self>,
         selector: String,
         by: DragBy,
+        options: Option<DragOptions>,
     ) -> Result<(), JsError> {
         let by = nsh_core::geometry::point(by.x, by.y);
-        step(&this, move |app| app.drag_and_hold(&selector, by)).await
+        let options = DragOptions::resolve(options)?;
+        step(&this, move |app| app.drag_and_hold(&selector, by, options)).await
     }
 
     /// Drops local files (`file:` URLs, as a file manager drags them) on
