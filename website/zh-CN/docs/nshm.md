@@ -118,7 +118,7 @@ nsh upgrade nsh-omarchy    # 只升级这一个
 nsh remove nsh-omarchy     # 从 nsh.json、nsh.lock 和应用的 crate 中移除
 ```
 
-每个版本在一台机器上只安装一次，放在 `~/.nsh/nshms`（`NSH_HOME` 可以改 `~/.nsh` 的位置），所有用到它的应用共享这一份：来自 crates.io 的是 `nsh-omarchy/0.3.2/`，来自标签的是 `github.com/acme/ui/1.4.0/`，来自提交的是 `github.com/acme/ui/<提交>/`。用 `--path` 添加的目录就地读取。
+每个版本在一台机器上只安装一次，放在 `~/.nsh/nshms`（`NSH_HOME` 可以改 `~/.nsh` 的位置），所有用到它的应用共享这一份：来自 crates.io 的是 `nsh-omarchy/0.3.2/`，来自标签的是 `github.com/acme/ui/1.4.0/`，来自提交的是 `github.com/acme/ui/<提交>/`。用 `--path` 添加的目录就地读取。Rust 只来自 nshm 的应用，会在 `~/.nsh/builds` 中以优化方式构建一次，所有用到相同 nshm 的应用共用：第一次 `nsh run` 之后，再启动不再编译，直到 nshm 或 nsh 有更新。30 天没有应用用到的构建会被移除。
 
 应用有自己的 crate 时，Rust nshm 还会加入该 crate 的 `[dependencies]`，应用的 Rust 代码可以直接使用。只要应用的 nshm 里有 Rust nshm，nsh 就会像对带 crate 的应用一样用它构建宿主，因此开发机和 CI 需要 Rust 工具链（[用 Rust 开发](./rust.md)）。nshm 全是 TSX 的应用只需 `nsh` 即可构建。
 

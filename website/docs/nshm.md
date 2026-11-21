@@ -118,7 +118,7 @@ nsh upgrade nsh-omarchy    # only this one
 nsh remove nsh-omarchy     # out of nsh.json, nsh.lock and the app's crate
 ```
 
-Each version is installed once per machine, in `~/.nsh/nshms` (`NSH_HOME` moves `~/.nsh`), and every app that uses it shares that copy: `nsh-omarchy/0.3.2/` from crates.io, `github.com/acme/ui/1.4.0/` from a tag, `github.com/acme/ui/<commit>/` from a commit. A directory added with `--path` is read where it is.
+Each version is installed once per machine, in `~/.nsh/nshms` (`NSH_HOME` moves `~/.nsh`), and every app that uses it shares that copy: `nsh-omarchy/0.3.2/` from crates.io, `github.com/acme/ui/1.4.0/` from a tag, `github.com/acme/ui/<commit>/` from a commit. A directory added with `--path` is read where it is. An app whose Rust comes from nshm only builds them once, optimized, in `~/.nsh/builds`, shared by every app with the same nshm: after the first `nsh run`, the next start skips compiling until an nshm or nsh changes. Builds no app used for 30 days are removed.
 
 A Rust nshm is also added to the `[dependencies]` of the app's own crate when it has one, so the app's Rust uses it directly. An app whose nshm include a Rust one gets hosts built with it, as an app with a crate of its own does, so its development machine and CI need the Rust toolchain ([Building with Rust](./rust.md)). An app whose nshm are all TSX builds with `nsh` alone.
 

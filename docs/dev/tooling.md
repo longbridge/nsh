@@ -1073,12 +1073,26 @@ for the release runner in both. The test runner links QuickJS, so the first `nsh
   what is missing and returns the Rust nshm as `AppCrate`s with the app's features; the generated workspace
   patches crates.io / Git dependencies on them to the installed copies (`patch_table`), so the app's crates and other
   nshm link one copy. A pure TSX app with TSX nshm stays without Rust. `add`, `remove` and `upgrade` edit `nsh.json`,
-  `nsh.lock` and the app crate's `[dependencies]` (`cargo_toml.rs`), restoring them on error. After a change that leaves Rust nshm, `add` and `upgrade` build this machine's development host as `nsh run` would (`prebuild`: unified, described first), so the first run does not compile; a failure there is a warning. `platform_program`
+  `nsh.lock` and the app crate's `[dependencies]` (`cargo_toml.rs`), restoring them on error. `platform_program`
   builds a platform nshm's `nsh-platform-<name>` from a copy in the app's `.nsh/platforms/<name>` (so Cargo writes
   nothing into the shared installation); `platforms::dispatch` tries it before `PATH`.
 - The bundler aliases each locked TSX export to its installed file (`ResolveSetup::with_nshm`, after the app's own
   `resolve.alias`), so it compiles into the app's bundle; `init::write_types` writes `.nsh/types/<specifier>.d.ts`
   re-exporting the source for `nsh check`.
+
+Builds that link nothing of the app's own (`rust_app.rs`):
+
+- An app whose Rust is installed nshm only (no `"rust"`, a released nsh) builds in a workspace shared by every app with
+  the same nshm, `~/.nsh/builds/<fingerprint>` (`shared_workspace`: this nsh, the nshm with their features, `unify`, the
+  Apple minimums). It is optimized throughout (`opt-level = 3`, line tables, not incremental), so there is no
+  separate dev or release build of an nshm. A build no app used for 30 days is removed when a new one starts; the app's
+  own old `.nsh/rust` is removed.
+- Every generated workspace builds the crates the app does not write (`[profile.dev.package."*"]`) optimized; the
+  app's crates and nsh's crates from a checkout stay at `opt-level = 0` with full debug info.
+- `BuiltOnce` skips Cargo for a build whose manifests name only generated or installed paths: it records a fingerprint
+  (this nsh's binary, the manifests and lock, the package's generated files, the command line and Cargo's environment)
+  with the binary's size and time in `<workspace>/.built/`, and returns the binary while both hold. Even a no-op Cargo
+  takes a moment, and a Cargo that copies its binaries anew each time makes macOS check the signature again on launch.
 
 `nsh check` does not `cargo check` nshm (only crates outside `~/.nsh/nshms`). Not yet: a registry of TSX nshm, prebuilt
 binaries, cleaning old versions, per-target support checks and an OTA check of the shell's linked modules.

@@ -344,39 +344,6 @@ fn say_rust_needed(app: &App, lock: &Lock, resolved: &[Resolved]) {
     }
 }
 
-/// Builds the development host of this machine with the app's Rust nshm,
-/// after `nsh add` or `nsh upgrade` changed them, so that the next `nsh
-/// run` starts at once instead of compiling first. Nothing when the app
-/// links no Rust; a failed build is reported, and the next command that
-/// needs the host builds it again and shows why.
-fn prebuild(app: &App, resolved: &[Resolved]) {
-    if !resolved.iter().any(|r| r.manifest.module.is_some()) {
-        return;
-    }
-    let Ok(entry) = crate::entry::resolve(&app.dir) else {
-        return;
-    };
-    let target = crate::run::Target::native();
-    // Unified as `nsh run` on this machine builds it, so that run finds it built.
-    let built = rust_app::of(&entry, true).and_then(|rust| {
-        let Some(rust) = rust else {
-            return Ok(());
-        };
-        // As `nsh run` does: described first, its host built with the UI
-        // sets the description names.
-        rust_app::set_current(rust.clone());
-        crate::set_app_sets(rust.describe()?);
-        let platform = target.platform();
-        rust.runtime(platform, false, platform.triple()).map(drop)
-    });
-    // The build's own steps say what they built.
-    if let Err(err) = built {
-        crate::ui::warn(format!(
-            "building the development host ahead failed; `nsh run` builds it again: {err:#}"
-        ));
-    }
-}
-
 /// Checks the app's crates and its Rust nshm together: a clash of
 /// packages or modules is reported here, before a build.
 fn check_rust(app: &App, resolved: &[Resolved], deps: &[Dep]) -> anyhow::Result<()> {
@@ -518,9 +485,6 @@ fn add_to(app: &mut App, backup: &mut Backup, added: Added) -> anyhow::Result<()
         status("Import", format!("from {}", specifiers.join(", ")));
     }
     say_rust_needed(app, &lock, &resolved);
-    if this.manifest.module.is_some() {
-        prebuild(app, &resolved);
-    }
     Ok(())
 }
 
@@ -649,9 +613,6 @@ pub(crate) fn upgrade(cwd: &Path, names: &[String]) -> anyhow::Result<()> {
                 "Locked",
                 "every nshm is at the newest version its requirements accept",
             );
-        }
-        if changed {
-            prebuild(&app, &resolved);
         }
         anyhow::Ok(())
     })();
