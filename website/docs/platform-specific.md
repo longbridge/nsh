@@ -87,6 +87,7 @@ What exists today:
 | | `android={{ accessibilityLiveRegion }}` | every element | `"none"`, `"polite"` or `"assertive"`: TalkBack announces the view's changes. |
 | `.status_bar_translucent(..)` | `android={{ statusBarTranslucent }}` | `Dialog` | The dialog's content reaches under the status bar. |
 | `.input_accessory(..)` | `ios={{ inputAccessoryViewID }}` | `Input` | The `InputAccessoryView` shown over the keyboard. |
+| `.input_accessory(..)` | `inputAccessoryViewID` | `RichEditor` | The `InputAccessoryView` shown over the keyboard while the editor has the focus. |
 | `.auto_fill(..)` | `ios={{ textContentType }}` | `Input` | iOS's names for autofill types (Rust's `AutoFill` covers both platforms). |
 | `.supported_orientations(..)` | `ios={{ supportedOrientations }}` | `Dialog` | The orientations it allows. |
 | `.supported_orientations(..)` | `ios={{ supportedOrientations }}`, `android={{ supportedOrientations }}` | `NavPage` | The orientations the screen may take while the page is shown ([NavPage](../elements/nav-stack.md#navpage-props)). |

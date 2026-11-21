@@ -857,6 +857,8 @@ function Note() {
 
 The bar is as wide as the window and as tall as its content. Input accessories are iOS's: on Android the bar is an empty hidden view, so place those controls elsewhere there, for example above the input (`os() == Os::Android` in Rust, `platform.os === "android"` in TSX).
 
+A [`RichEditor`](../elements/rich-editor.md#a-bar-over-the-keyboard) shows one the same way, named with `.input_accessory(id)` in Rust and `inputAccessoryViewID` in TSX.
+
 ## Related
 
 - [`Input`](../elements/input.md): the element reference.
