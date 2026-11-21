@@ -452,6 +452,13 @@ Things that were found the hard way. Read the section of the area you change bef
   added there or it is dropped silently.
 - **Android, inputs' `pointerEvents`**: `InputBox` is a `FrameLayout`, not a `Box`: it keeps `pointerEvents` itself and
   refuses touches in `dispatchTouchEvent` for `none` / `box-none`, and `TouchTracker.deepest` reads it as a `Box`'s.
+- **Android, hovers and `pointerEvents`**: a hover goes to the topmost view under the pointer that handles it, and a
+  clickable view handles it whatever its `pointerEvents`, so `Box` routes hovers as it routes touches
+  (`dispatchHoverEvent`, `onInterceptHoverEvent`, `onHoverEvent`). TalkBack's touch exploration is hovers too: an inert
+  overlay that took them kept the screen reader from the views under it. `ViewGroup` keeps its own hover state
+  (hover targets, whether it is hovered itself) and sends no exit or enter when only `pointerEvents` changes, so `Box`
+  sends itself the exit when it turns inert while hovered, and the enter when it stops being `box-none` under the
+  pointer. `tests/hover-routing/run.py` checks the routing on a device or emulator.
 - **Android, inputs**: `EditText` reconfiguration (input type, filters, single line) sets the same text again and fires
   `afterTextChanged`: only text that differs from the last known one counts as an edit, or JS values are rejected as stale.
   Soft keyboards edit through the input connection (`KeyConnection`: composing text, commits, deletes), hardware keys arrive
