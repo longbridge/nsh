@@ -217,7 +217,7 @@ Builds an installable app in release mode. A Rust app (`nsh.json` `"root"`) is p
 | `--build <BUILD>` | Build number. |
 | `--icon <ICON>` | App icon: a square PNG, ideally 1024×1024. |
 | `--sign <IDENTITY>` | iOS devices: code signing identity, e.g. `"Apple Development: …"`. |
-| `--profile <FILE>` | iOS devices: provisioning profile (`.mobileprovision`). Entitlements come from it. |
+| `--profile <FILE>` | iOS devices: provisioning profile (`.mobileprovision`). Entitlements come from it. Repeat it to give each app extension (`nsh.json` `ios.extensions`) its own. |
 | `--keystore <FILE>` | Android: release keystore. Default: the debug key in `~/.android/debug.keystore` (created if missing). |
 | `--key-alias <ALIAS>` | Android: key alias in the keystore. |
 | `--keystore-password <PASSWORD>` | Android: keystore password. Also read from `NSH_KEYSTORE_PASSWORD`. |
@@ -269,9 +269,12 @@ nsh add acme-gauge@1.0                                 # from crates.io: the new
 nsh add github:acme/gauge@v1.0.0                    # from GitHub at a tag; or --rev <commit or branch>; neither: the default branch
 nsh add https://git.example.com/gauge.git --tag v1.0.0  # from any Git URL
 nsh add --path ../gauge                              # from a local directory, as it is
+nsh add nsh-extra --features camera                  # with the crate's Cargo features on (comma-separated or repeated)
 ```
 
 It lists the nshm in `nsh.json` `"modules"` (`"acme-gauge@1.0"`, `"github:acme/gauge@v1.0.0"`, `{ "github": "acme/gauge", "rev": "…" }`, `{ "git": "…", "tag": "v1.0.0" }` or `{ "path": "../gauge" }`), lets Cargo resolve it and pins the version or commit it resolved to in `nsh.lock` (commit it with the app), and adds it to the `[dependencies]` of the app's crate when it has one (`"rust"`). Builds take the locked version or commit (a directory is read as it is); running `nsh add` again updates it. A pure TSX app gets hosts built with the nshm, as an app with a crate of its own does ([Building with Rust](./rust.md)), so its development machine and CI need the Rust toolchain. If the nshm clashes with the app's crates or another nshm (the same package or module), or does not build with this NSH, `nsh.json` and `nsh.lock` are left unchanged.
+
+`--features` turns on Cargo features of the crate, the modules of it the app uses, besides those already listed (`nsh add nsh-extra --features push` after `camera` keeps `camera`); a name the crate does not define stops `nsh add` with `nsh.json` unchanged. The entry then takes the object form (`{ "crate": "nsh-extra", "version": "0.6", "features": ["camera"] }`, and `"features"` beside `"github"`, `"git"` or `"path"`), and the app's crate depends on it with them, keeping the features its `Cargo.toml` already turns on. To turn one off, remove it from `nsh.json` and from the dependency in the app crate's `Cargo.toml`. Like any `nsh add`, adding features resolves the entry again from the command line: a version requirement, tag or rev it does not repeat is dropped (`nsh add nsh-extra@0.6 --features push` keeps `0.6`). What the crates declare under `[package.metadata.nsh]` for the features on goes into the packages, and all but the entitlements into the development hosts ([What the packaged app needs](./nshm.md#what-the-packaged-app-needs)).
 
 An nshm is an ordinary Cargo library with a `#[native_module("<module>")]` entry at its root, the same as an app's crate; TSX imports it by that specifier ([Writing an nshm](./nshm.md#writing-an-nshm)).
 

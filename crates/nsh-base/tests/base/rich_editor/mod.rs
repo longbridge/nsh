@@ -329,6 +329,33 @@ fn a_press_places_the_caret() {
     see(&mut app, "Sel 1-1");
 }
 
+/// The editor is one stop of Tab, its input, which takes the keys: the
+/// content box takes the pointer only, so Tab and Shift+Tab never stop on
+/// it (it has no role, and its keys would go nowhere).
+#[test]
+fn tab_stops_once_at_the_editor_and_its_keys_reach_it() {
+    let mut app = start(paragraphs(&["ab", "cd"]));
+    see(&mut app, "Sel 1-1");
+    keys(&mut app, &["tab", "ctrl+end"]);
+    see(&mut app, "Sel 7-7");
+    // The input is the only stop: Shift+Tab comes around to it.
+    keys(&mut app, &["shift+tab", "ctrl+home"]);
+    see(&mut app, "Sel 1-1");
+}
+
+/// A press in the content box gives the editor the keyboard, though the
+/// box is no stop of Tab.
+#[test]
+fn a_press_gives_the_editor_its_keys() {
+    let mut app = start(paragraphs(&["first", "second"]));
+    see(&mut app, "Sel 1-1");
+    app.press_at("text:second", Point::new(px(1.0), px(1.0)))
+        .unwrap();
+    see(&mut app, "Sel 8-8");
+    keys(&mut app, &["end"]);
+    see(&mut app, "Sel 14-14");
+}
+
 /// A paragraph with a link mark that has a title.
 fn linked_doc() -> Value {
     json!({"type": "doc", "content": [{"type": "paragraph", "content": [

@@ -342,6 +342,36 @@ if answers[0] == Permission::Granted {
 `Undeclared`，不显示提示框。前台没有 activity（应用在后台），或 activity 在用户回答前结束时，申请以 `PermissionError::NoActivity`
 失败。NSH 自己的提示框（通知、网页的相机和麦克风）也这样申请，所以一个申请会等前面正在显示的提示框结束。
 
+## 在 Rust 中获取 JavaVM 和 Context
+
+Android 上的 Rust crate 通过 [`ndk-context`](https://docs.rs/ndk-context)（`ndk_context::android_context()`）获取进程的
+`JavaVM` 和一个 `android.content.Context`：音频和传感器 crate、密钥库、`robius-*`，以及你自己的 JNI 代码。NSH 在创建第一个
+`NshView` 时设置一次，早于应用或扩展的 Rust 代码运行，设置为 VM 和应用的 `Context`（它比任何 activity 都活得久）：
+
+```rust
+let context = ndk_context::android_context();
+// SAFETY: VM 与进程同寿。
+let vm = unsafe { jni::JavaVM::from_raw(context.vm().cast()) }?;
+let mut env = vm.attach_current_thread()?;
+// SAFETY: NSH 在进程的整个生命周期内保留的全局引用。
+let application = unsafe { jni::objects::JObject::from_raw(context.context().cast()) };
+```
+
+`ndk-context` 每个进程只保存一个 context，再次设置会 panic，所以在 NSH 应用中不要自己调用
+`ndk_context::initialize_android_context`。要从前台的 activity 显示系统界面，通过下面的 `activity` 启动并取回结果，或通过上面的
+`permissions` 申请权限。
+
+## 在 Rust 中启动 activity
+
+需要启动另一个应用并取回结果（相机应用、文档选择器）的 Rust 代码，使用同一个 crate 的 `activity`。`start_for_result(env, &intent)`
+从前台的 activity 启动它，并返回它的 `ActivityResult`（结果码和对方返回的 intent），能跨越配置变更；`can_start(env, &intent)`
+判断是否有已安装的应用响应这个 intent。Android 11+ 只让应用看到 manifest 里查询过的应用：crate 在自己的 `Cargo.toml` 里声明这些查询
+（[打包的应用需要什么](./nshm.md#打包的应用需要什么)）。`output_file(env, name)` 在应用缓存里新建一个文件，并给出对方通过应用的
+file provider 写入的 `content://` URI（`MediaStore.EXTRA_OUTPUT`）；`picker::prepare_image(path, name, &request)` 像
+`Picker.pickImages` 一样处理一个图片文件。`with_env(f)` 用当前线程的 JNI 环境运行 `f`（供应用和它的 nshm 的代码使用；其他 crate 通过上面的 `ndk-context` 获取 VM），返回它的结果或 JNI 错误（Java 异常会记录到日志并清除）。应用在后台时发起的请求以
+`ActivityError::NoActivity` 失败。`nsh-extra` 的相机
+（`crates/nsh-extra/src/camera/android.rs`）用到了它们全部。
+
 ## 限制
 
 ```java

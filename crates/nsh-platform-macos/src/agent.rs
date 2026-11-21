@@ -633,6 +633,11 @@ impl Native for MacNative {
             .unwrap_or(false)
     }
 
+    fn opening(&self) -> bool {
+        self.on_main(|surface, _| crate::window::opening(surface))
+            .unwrap_or(false)
+    }
+
     fn screenshot(&self) -> Result<Vec<u8>, String> {
         // The window server shows a commit a frame or two after it is
         // made: let it show the last one before taking its picture.
