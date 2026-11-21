@@ -83,6 +83,14 @@ dist/nsh/embed/android/nsh.aar       release: bundles and signed packages
 dist/nsh/embed/android/nsh-dev.aar   also connects to a `nsh dev` server
 ```
 
+如果你有 NSH 的源码，可以只构建这两个库：
+
+```sh
+cargo xtask android-embed    # writes dist/nsh/embed/android/{nsh,nsh-dev}.aar
+```
+
+`--no-dev` 不构建 `nsh-dev.aar`。默认包含 `arm64-v8a`、`armeabi-v7a` 和 `x86_64`；重复 `--abi` 可以少构建几个。
+
 AAR 包含 Java 运行时以及适用于 `arm64-v8a`、`armeabi-v7a` 和 `x86_64` 的 `libnsh.so`，库中带有符号：应用的 Gradle
 构建在打包时去除符号，并保留它们用于崩溃报告。它声明了 `INTERNET`
 权限，要求 **API 26**（Android 8）或更高版本。它自带 R8 规则（`proguard.txt`），开启混淆的构建会自动应用：原生库按名字
