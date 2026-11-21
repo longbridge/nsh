@@ -23,8 +23,8 @@
     "shortYear2digit": false,
     "text": [["day", " "], ["month", " "], ["year", ""]],
     "textLong": null,
-    "weekdayFirst": true,
-    "weekdaySep": ", ",
+    "weekdayFirst": false,
+    "weekdaySep": " ",
     "dateTimeSep": ", ",
     "names": {
       "months": [
