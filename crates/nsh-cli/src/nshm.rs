@@ -498,19 +498,32 @@ fn place(entry: &Locked) -> anyhow::Result<PathBuf> {
     }
 }
 
+/// The app `nsh add` run in `dir` adds to: the nearest directory, `dir`
+/// or one above it, with `nsh.json` (as `cargo add` finds `Cargo.toml`).
+fn app_dir(dir: &Path) -> anyhow::Result<PathBuf> {
+    dir.ancestors()
+        .find(|d| d.join("nsh.json").is_file())
+        .map(Path::to_path_buf)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "nsh add adds an nshm to an NSH app, but neither {} nor a directory above it \
+                 has nsh.json; run it in the app's directory, or create an app first with \
+                 `nsh init`",
+                dir.display()
+            )
+        })
+}
+
 /// `nsh add`: lists the nshm at `git` (`tag` or `rev`, else the
 /// default branch) in the `nsh.json` in `dir`, replacing one of the same
 /// repository, locks it, and checks it with the app's crates. On an error
 /// `nsh.json` and `nsh.lock` are left as they were.
 pub(crate) fn add(dir: &Path, source: Source) -> anyhow::Result<()> {
+    let dir = &app_dir(dir)?;
     let config_path = dir.join("nsh.json");
     let lock_path = dir.join(LOCK);
-    let config_text = fs::read_to_string(&config_path).with_context(|| {
-        format!(
-            "no nsh.json in {}: run nsh add in the app's directory",
-            dir.display()
-        )
-    })?;
+    let config_text = fs::read_to_string(&config_path)
+        .with_context(|| format!("can't read {}", config_path.display()))?;
     let lock_text = fs::read_to_string(&lock_path).ok();
     let mut config: serde_json::Value =
         serde_json::from_str(&config_text).context("nsh.json is not JSON")?;
@@ -1481,6 +1494,19 @@ mod tests {
         assert!(Source::parse(Some("acme-ui@nope".into()), None, None, None).is_err());
         let path = Source::parse(None, Some("../ui".into()), None, None).unwrap();
         assert_eq!(path.path.as_deref(), Some("../ui"));
+    }
+
+    #[test]
+    fn add_finds_the_app_above() {
+        let root = std::env::temp_dir().join(format!("nsh-app-dir-{}", std::process::id()));
+        let src = root.join("app/src/ui");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(root.join("app/nsh.json"), "{}").unwrap();
+        assert_eq!(app_dir(&src).unwrap(), root.join("app"));
+        let err = app_dir(&root).unwrap_err().to_string();
+        assert!(err.contains("nsh init"), "{err}");
+        assert!(!err.contains("os error"), "{err}");
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

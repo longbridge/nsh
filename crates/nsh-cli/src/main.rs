@@ -346,7 +346,7 @@ enum Command {
         #[arg(value_enum)]
         channel: Option<self_update::Channel>,
     },
-    /// Add an nshm (NSH module) to the app in this directory: a Rust
+    /// Add an nshm (NSH module) to the app in this directory (or the nearest one above it with `nsh.json`): a Rust
     /// crate with components, modules and classes for its Rust and TSX
     /// code, from crates.io (`nsh add acme-ui[@1.2]`), Git (`nsh add
     /// https://github.com/acme/ui`) or a directory (`nsh add --path
