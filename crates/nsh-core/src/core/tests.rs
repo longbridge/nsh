@@ -21013,6 +21013,34 @@ mod touch {
         assert_eq!(any.decide(px(8.0), px(8.0)), Some(true));
     }
 
+    #[test]
+    fn a_pan_activation_judges_a_move_along_its_line() {
+        use crate::geometry::point;
+        let pan = crate::PanActivation::horizontal(px(10.0), px(10.0));
+        let start = point(px(0.0), px(0.0));
+        // One move past both offsets: the one passed first decides.
+        assert_eq!(
+            pan.decide_move(start, point(px(-16.6), px(-11.1))),
+            Some(true)
+        );
+        assert_eq!(
+            pan.decide_move(start, point(px(-11.1), px(16.6))),
+            Some(false)
+        );
+        // Small moves decide as `decide` does.
+        assert_eq!(pan.decide_move(start, point(px(8.0), px(0.0))), None);
+        assert_eq!(
+            pan.decide_move(point(px(8.0), px(0.0)), point(px(10.5), px(1.0))),
+            Some(true)
+        );
+        assert_eq!(
+            pan.decide_move(point(px(0.0), px(9.0)), point(px(2.0), px(10.5))),
+            Some(false)
+        );
+        // A finger that came back is still undecided.
+        assert_eq!(pan.decide_move(point(px(8.0), px(0.0)), start), None);
+    }
+
     /// A card scaled and turned by two-finger gestures.
     #[component]
     fn Card() -> impl IntoElement {

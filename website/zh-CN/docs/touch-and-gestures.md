@@ -647,7 +647,7 @@ view()
 | `active_offset_x`、`active_offset_y` | `activeOffsetX`、`activeOffsetY` | 手指沿该轴离按下的位置超过这个距离（任一方向，单位点）时，拖动激活。 |
 | `fail_offset_x`、`fail_offset_y` | `failOffsetX`、`failOffsetY` | 手指先超过这个距离时拖动失败：触摸留给滚动视图。 |
 
-`PanActivation::horizontal(active, fail)` 和 `PanActivation::vertical(active, fail)` 设置常用的组合。没有激活偏移时，任一方向移动 10 点后激活。激活之前，外层的滚动视图会等待它（iOS），视图的其他接管声明也不会被询问。激活后，滚动视图不能再拿走这些触摸，视图成为响应者（先 grant，再收到移动）；失败时滚动视图照常滚动。在 TSX 中，`PanResponder` 的 `panHandlers` 也可以一起用：和这个属性放在同一个视图上，`onPanResponderGrant` 在激活时运行。
+`PanActivation::horizontal(active, fail)` 和 `PanActivation::vertical(active, fail)` 设置常用的组合。没有激活偏移时，任一方向移动 10 点后激活。激活之前，外层的滚动视图会等待它（iOS），视图的其他接管声明也不会被询问。视图里面不能沿拖动所在方向滚动的滚动视图（横向拖动的视图里的纵向列表）只接手拖动失败的手势，与其他平台相同：斜向拖动归手指先超过的那个偏移。激活后，滚动视图不能再拿走这些触摸，视图成为响应者（先 grant，再收到移动）；失败时滚动视图照常滚动。在 TSX 中，`PanResponder` 的 `panHandlers` 也可以一起用：和这个属性放在同一个视图上，`onPanResponderGrant` 在激活时运行。
 
 > [!NOTE]
 > 所有速度的单位都是每秒的点数：响应者手势的 `vx` / `vy`、拖动的速度以及弹簧或衰减的速度都是，所以 `vx` 可以直接传给弹簧或衰减。

@@ -402,10 +402,15 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   comes a turn late, when the scroll view may have taken it, and claiming on start blocks the scroll view from the
   first pixel. So the platform decides, on the main thread, from the mounted offsets (`ViewProps::pan_activation`,
   `PanActivation::decide`: a fail offset passed first fails, an active offset passed activates; no active offsets: 10
-  points in any direction). iOS: a `PanGate` recognizer on the view (`touch.rs`); the pans of the scroll views around
+  points in any direction). `PanActivation::decide_move` judges each move along the line from the previous one, so the
+  offset passed first decides even when one move (several points apart) passes both; `nsh_core::input::Gate::step` and
+  the iOS gate use it. iOS: a `PanGate` recognizer on the view (`touch.rs`); the pans of the scroll views around
   it must wait for it to fail (`shouldBeRequiredToFailByGestureRecognizer:`), so a vertical drag scrolls once it passes
-  `failOffsetY` and a horizontal one never scrolls. Android: the root's `TouchTracker` decides on each move before the
-  views below see it and, on activation, blocks the `ScrollBox`es around (`gateBlocked`) and disallows their
+  `failOffsetY` and a horizontal one never scrolls. The scroll views inside it that cannot scroll along its one axis
+  (`PanActivation::axis`; content and `alwaysBounce…`) wait too: UIScrollView's pan begins after its slop along the
+  finger's path, so it would take a 1.5:1 diagonal before the gate saw 10 points sideways. Android: the root's
+  `TouchTracker` decides on each move before the views below see it and, on activation, blocks the `ScrollBox`es
+  around (`gateBlocked`) and disallows their
   interception; a scroll view that intercepts first (past its touch slop) wins as before. The gated `Box` takes the
   touches that go down on it, so a scroll view it lies over (a sibling under it) never gets them, and hands a tap
   (no activation, within the touch slop) to the nearest pressable `Box` around it. Web: `nsh.js` defers its
