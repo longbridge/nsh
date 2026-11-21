@@ -153,27 +153,35 @@ import { Push } from "nsh-extra";
 if (await Push.available()) {
   // 显示通知需要用户授权；后台投递不需要。
   await Notifications.requestPermission();
-  const token = await Push.register();
-  await sendTokenToServer(token);
+  // token 可能晚于这次调用才到（离线时）：用事件接收，不要等待它。
+  Push.on("token", ({ token }) => sendTokenToServer(token));
+  Push.register().catch((error) => console.warn("not registered", error));
 }
 
-Push.on("token", ({ token }) => sendTokenToServer(token));
 Push.on("press", ({ payload }) => openChat(payload));
 Push.on("notification", ({ threadId }) => refreshInbox(threadId));
 Push.on("background", async ({ payload }) => {
   const changed = await syncInbox(payload);
   return changed ? "newData" : "noData";
 });
+
+// 某个会话打开时，它的通知不弹横幅、不响铃。
+function openConversation(threadId: string) {
+  Push.setForegroundPresentation({ banner: false, sound: false }, { threadId });
+}
+function closeConversation(threadId: string) {
+  Push.setForegroundPresentation(null, { threadId });
+}
 ```
 
-- `register()` 以十六进制的 token 完成；设备未能注册时以系统给出的原因拒绝。每次启动都注册一次：token 变了，`on("token")` 会报告。
+- `register()` 以 `{ token }` 完成，`token` 是推送服务要的字符串（iOS 上是十六进制）；设备未能注册时以系统给出的原因拒绝。系统要能连上它的服务器才会答复，离线时这个 Promise 会一直等待：可靠的做法是 `on("token")`，token 变了它也会报告。每次启动都注册一次，`token()` 读取最近的一个。
 - `press` 报告用户点按的通知，包括启动应用的那一条，它会等到第一个监听者。`notification` 报告应用在前台时到达的通知。两者都带它的 `id`、`threadId` 和推送服务发来的 `payload`。payload 是不可信输入。
-- `background` 报告唤醒应用的投递（iOS 上是带 `content-available` 的那种）。系统会等它的监听者：返回一个 Promise 表示这项工作及其结果，须在 25 秒内完成。
-- `setForegroundPresentation({ banner: false })` 决定应用在前台时通知怎么显示，要在通知到达之前设好：系统会立即询问。
-- `closeThread(threadId)` 移除某个 thread 里已送达的通知；`Notifications.close(id)` 移除单条。
+- `background` 报告唤醒应用或在前台到达的投递（iOS 上是带 `content-available` 的那种；可见且带 `content-available` 的推送在前台到达时，也会报告给 `notification`）。系统会等它的监听者：返回一个 Promise 表示这项工作及其结果，须在投递到达后 25 秒内完成。到达时没有监听者的投递，最多等到到达后 5 秒。
+- `setForegroundPresentation(presentation)` 决定应用在前台时通知怎么显示，`setForegroundPresentation(presentation, { threadId })` 决定某个 thread 的通知怎么显示；传 `null` 撤销。它们要在通知到达前设好（系统会立即询问），并对应用的所有界面生效。
+- `closeThread(threadId)` 移除某个 thread 里已送达的通知，`Notifications.show` 显示的除外；`Notifications.close(id)` 移除单条。
 - 独立运行的 iOS 应用里 `available()` 为 `true`。其他地方为 `false`，`register` 和 `closeThread` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝。
 
-开启这个 feature 后，打包的应用会带上 `remote-notification` 后台模式。`aps-environment` entitlement 来自应用签名所用的描述文件（[iOS 真机](./packaging.md#ios-真机)）。Rust 代码（比如某个推送服务 SDK 的绑定）使用 `nsh_extra::push`：`on_event` 收到同样的事件，并带 token 的原始字节；`launch_options` 原样交出系统传入的启动参数。
+开启这个 feature 后，打包的应用会带上 `remote-notification` 后台模式。`aps-environment` entitlement 来自应用签名所用的描述文件（[iOS 真机](./packaging.md#ios-真机)）。Rust 代码（比如某个推送服务 SDK 的绑定）使用 `nsh_extra::push`：`on_event` 收到同样的事件，并带 token 的原始字节；`set_foreground_presentation_decider` 在原生侧决定每条通知怎么显示；启动参数从 `nsh_platform_ios::on_application_event` 取得（[应用事件](./ios.md#应用事件)）。
 
 ## 编写 nshm
 

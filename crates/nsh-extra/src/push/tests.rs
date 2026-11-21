@@ -12,7 +12,7 @@ fn turn() -> MutexGuard<'static, ()> {
 /// Polls `future`, which must finish without waiting.
 #[cfg(not(target_os = "ios"))]
 fn ready<T>(future: impl std::future::Future<Output = T>) -> T {
-    use std::task::{Context, Poll, Waker};
+    use std::task::{Context, Waker};
     let mut future = std::pin::pin!(future);
     match future
         .as_mut()
@@ -24,7 +24,7 @@ fn ready<T>(future: impl std::future::Future<Output = T>) -> T {
 }
 
 fn payload(chat: &str) -> JsonValue {
-    let mut aps = nsh_core::JsonValue::Object(Default::default());
+    let mut aps = JsonValue::Object(Default::default());
     aps["thread-id"] = JsonValue::String(format!("chat-{chat}"));
     let mut payload = JsonValue::Object(Default::default());
     payload["aps"] = aps;
@@ -36,13 +36,21 @@ fn press(id: &str) -> Delivery {
     Delivery::Press(RemoteNotification::new(id, "", JsonValue::Null))
 }
 
+fn background_at(id: &str, completion: BackgroundCompletion, at: Instant) -> Delivery {
+    Delivery::Background(
+        RemoteNotification::new(id, "", JsonValue::Null),
+        completion,
+        at,
+    )
+}
+
 /// What `receiver` holds now, as `(kind, id)` pairs.
 fn received(receiver: &mut mpsc::UnboundedReceiver<Delivery>) -> Vec<(Kind, String)> {
     let mut out = Vec::new();
     while let Ok(delivery) = receiver.try_recv() {
         let id = match &delivery {
-            Delivery::Token(token) => token.to_hex(),
-            Delivery::Notification(n) | Delivery::Press(n) | Delivery::Background(n, _) => {
+            Delivery::Token(token) => token.to_string(),
+            Delivery::Notification(n) | Delivery::Press(n) | Delivery::Background(n, ..) => {
                 n.id.clone()
             }
         };
@@ -60,12 +68,18 @@ fn recording() -> (BackgroundCompletion, Arc<Mutex<Vec<BackgroundResult>>>) {
 }
 
 #[test]
-fn tokens_are_hexadecimal() {
-    let token = DeviceToken::new([0x00, 0x0a, 0xff, 0x10]);
-    assert_eq!(token.to_hex(), "000aff10");
+fn ios_tokens_are_the_bytes_in_hexadecimal() {
+    let token = DeviceToken::from_bytes([0x00, 0x0a, 0xff, 0x10]);
+    assert_eq!(token.as_str(), "000aff10");
     assert_eq!(token.to_string(), "000aff10");
     assert_eq!(token.as_bytes(), [0x00, 0x0a, 0xff, 0x10]);
-    assert_eq!(DeviceToken::new(Vec::new()).to_hex(), "");
+    assert_eq!(DeviceToken::from_bytes(Vec::new()).as_str(), "");
+    assert_eq!(
+        PushToken::from(&token),
+        PushToken {
+            token: "000aff10".into()
+        }
+    );
 }
 
 #[test]
@@ -81,10 +95,10 @@ fn a_background_delivery_takes_its_thread_from_the_payload() {
 #[test]
 fn presentation_options_leave_out_what_shows() {
     assert_eq!(
-        PushPresentationOptions::default().presentation(),
+        ForegroundPresentationOptions::default().presentation(),
         ForegroundPresentation::SHOWN
     );
-    let quiet = PushPresentationOptions {
+    let quiet = ForegroundPresentationOptions {
         banner: Some(false),
         sound: Some(false),
         ..Default::default()
@@ -95,14 +109,39 @@ fn presentation_options_leave_out_what_shows() {
         ForegroundPresentation::default().banner(false).sound(false)
     );
     assert!(quiet.list && quiet.badge);
+}
+
+#[test]
+fn a_thread_is_named_by_a_non_empty_id() {
+    let thread = |id: &str| ForegroundPresentationThread {
+        thread_id: id.into(),
+    };
+    assert_eq!(thread("chat-1").id().unwrap(), "chat-1");
+    assert!(matches!(thread("").id(), Err(JsError::Range(_))));
+}
+
+#[test]
+fn threads_can_show_their_own_way() {
+    let mut hub = Hub::new();
+    let quiet = ForegroundPresentation::SHOWN.banner(false).sound(false);
+    hub.set_thread_presentation("chat-1".into(), Some(quiet));
+    assert_eq!(hub.presentation_of("chat-1"), quiet);
+    assert_eq!(hub.presentation_of("chat-2"), ForegroundPresentation::SHOWN);
+    // An empty thread is no thread: the app's presentation.
+    hub.set_thread_presentation(String::new(), Some(quiet));
+    assert_eq!(hub.presentation_of(""), ForegroundPresentation::SHOWN);
+    // The app's presentation does not change the thread's.
+    hub.presentation = ForegroundPresentation::SHOWN.list(false);
+    assert_eq!(hub.presentation_of("chat-1"), quiet);
     assert_eq!(
-        PushPresentation::from(quiet),
-        PushPresentation {
-            banner: false,
-            list: true,
-            sound: false,
-            badge: true,
-        }
+        hub.presentation_of("chat-2"),
+        ForegroundPresentation::SHOWN.list(false)
+    );
+    // Given back to the app's.
+    hub.set_thread_presentation("chat-1".into(), None);
+    assert_eq!(
+        hub.presentation_of("chat-1"),
+        ForegroundPresentation::SHOWN.list(false)
     );
 }
 
@@ -144,11 +183,20 @@ fn the_system_hears_once_when_the_last_clone_goes() {
 }
 
 #[test]
-fn threads_are_filtered_by_identifier() {
-    let delivered = [("a", "chat-1"), ("b", "chat-2"), ("c", "chat-1"), ("d", "")];
+fn a_thread_closes_its_own_notifications_only() {
+    let delivered = [
+        ("a", "chat-1", false),
+        ("b", "chat-2", false),
+        ("c", "chat-1", false),
+        // Shown by `Notifications` in the same thread: left to it.
+        ("d", "chat-1", true),
+        ("e", "", false),
+        ("f", "", true),
+    ];
     assert_eq!(in_thread(delivered, "chat-1"), ["a", "c"]);
-    assert_eq!(in_thread(delivered, ""), ["d"]);
     assert!(in_thread(delivered, "chat-3").is_empty());
+    // An empty id names no thread, not every notification without one.
+    assert!(in_thread(delivered, "").is_empty());
 }
 
 #[test]
@@ -171,7 +219,7 @@ fn presses_wait_for_the_first_listener_in_order() {
         ]
     );
     assert!(hub.pending.is_empty());
-    // Listened to: straight there.
+    // Listened to: straight there, nothing lost.
     assert!(hub.dispatch(press("third"), at).is_empty());
     assert_eq!(received(&mut receiver), [(Kind::Press, "third".to_owned())]);
 }
@@ -183,8 +231,8 @@ fn at_most_sixteen_presses_wait() {
     for i in 0..MAX_PENDING_PRESSES {
         assert!(hub.dispatch(press(&i.to_string()), at).is_empty());
     }
-    let dropped = hub.dispatch(press("last"), at);
-    assert!(matches!(&dropped[..], [Delivery::Press(n)] if n.id == "0"));
+    let lost = hub.dispatch(press("last"), at);
+    assert!(matches!(&lost[..], [Delivery::Press(n)] if n.id == "0"));
     let (id, mut receiver) = hub.subscribe();
     hub.listen(id, Kind::Press);
     let ids = received(&mut receiver);
@@ -194,26 +242,30 @@ fn at_most_sixteen_presses_wait() {
 }
 
 #[test]
-fn notifications_in_front_do_not_wait() {
+fn notifications_in_front_and_tokens_do_not_wait() {
     let mut hub = Hub::new();
     let notification = Delivery::Notification(RemoteNotification::new("n", "", JsonValue::Null));
     assert_eq!(hub.dispatch(notification, Instant::now()).len(), 1);
+    let token = Delivery::Token(DeviceToken::from_bytes([1]));
+    assert_eq!(hub.dispatch(token, Instant::now()).len(), 1);
     assert!(hub.pending.is_empty());
 }
 
 #[test]
-fn a_background_delivery_waits_a_while_for_a_listener() {
+fn a_background_delivery_waits_from_its_arrival() {
     let mut hub = Hub::new();
     let at = Instant::now();
-    let (waited, heard_waited) = recording();
     let (expired, heard_expired) = recording();
-    let early = Delivery::Background(
-        RemoteNotification::new("early", "", JsonValue::Null),
-        expired,
+    let (waited, heard_waited) = recording();
+    assert!(
+        hub.dispatch(background_at("early", expired, at), at)
+            .is_empty()
     );
-    let late = Delivery::Background(RemoteNotification::new("late", "", JsonValue::Null), waited);
-    assert!(hub.dispatch(early, at).is_empty());
-    assert!(hub.dispatch(late, at + Duration::from_secs(3)).is_empty());
+    let later = at + Duration::from_secs(3);
+    assert!(
+        hub.dispatch(background_at("late", waited, later), later)
+            .is_empty()
+    );
 
     // The wait passes for the first one only: the system hears it now.
     let gone = hub.expire(at + BACKGROUND_WAIT);
@@ -224,14 +276,63 @@ fn a_background_delivery_waits_a_while_for_a_listener() {
     // A listener takes the other one, whose completion it reports.
     let (id, mut receiver) = hub.subscribe();
     hub.listen(id, Kind::Background);
-    let Ok(Delivery::Background(n, completion)) = receiver.try_recv() else {
+    let Ok(Delivery::Background(n, completion, arrived)) = receiver.try_recv() else {
         panic!("the delivery that waited was not handed over");
     };
     assert_eq!(n.id, "late");
+    assert_eq!(arrived, later);
     assert!(heard_waited.lock().unwrap().is_empty());
     completion.set_result(BackgroundResult::NewData);
     drop(completion);
     assert_eq!(*heard_waited.lock().unwrap(), [BackgroundResult::NewData]);
+}
+
+/// A delivery handed to a VM whose last listener stopped before its task
+/// ran goes back to the hub: its wait still counts from its arrival, so
+/// the one check the platform scheduled at arrival completes it.
+#[test]
+fn a_redispatched_background_delivery_still_expires() {
+    let mut hub = Hub::new();
+    let arrival = Instant::now();
+    let (completion, heard) = recording();
+    // Arrives while a VM listens: in its channel.
+    let (id, mut receiver) = hub.subscribe();
+    hub.listen(id, Kind::Background);
+    assert!(
+        hub.dispatch(background_at("b", completion, arrival), arrival)
+            .is_empty()
+    );
+    let handed = receiver.try_recv().unwrap();
+    // The listener stops; 2 s later the VM's task finds none and gives it
+    // back.
+    hub.unlisten(id, Kind::Background);
+    assert!(
+        hub.dispatch(handed, arrival + Duration::from_secs(2))
+            .is_empty()
+    );
+    // The check scheduled at arrival.
+    drop(hub.expire(arrival + BACKGROUND_WAIT + Duration::from_millis(100)));
+    assert_eq!(*heard.lock().unwrap(), [BackgroundResult::NoData]);
+    assert!(hub.pending.is_empty());
+}
+
+/// Given back after its wait, a delivery does not wait again: the system
+/// hears it at once.
+#[test]
+fn a_background_delivery_given_back_late_is_completed_at_once() {
+    let mut hub = Hub::new();
+    let arrival = Instant::now();
+    let (completion, heard) = recording();
+    let (id, mut receiver) = hub.subscribe();
+    hub.listen(id, Kind::Background);
+    drop(hub.dispatch(background_at("b", completion, arrival), arrival));
+    let handed = receiver.try_recv().unwrap();
+    hub.unlisten(id, Kind::Background);
+    let lost = hub.dispatch(handed, arrival + BACKGROUND_WAIT + Duration::from_secs(1));
+    assert_eq!(lost.len(), 1);
+    assert!(hub.pending.is_empty());
+    drop(lost);
+    assert_eq!(*heard.lock().unwrap(), [BackgroundResult::NoData]);
 }
 
 #[test]
@@ -242,10 +343,12 @@ fn every_listening_vm_shares_a_background_completion() {
     hub.listen(a, Kind::Background);
     hub.listen(b, Kind::Background);
     let (completion, heard) = recording();
-    let delivery = Delivery::Background(RemoteNotification::default(), completion);
-    // Handed to both; the hub keeps no copy.
-    let kept = hub.dispatch(delivery, Instant::now());
-    drop(kept);
+    let at = Instant::now();
+    // Handed to both; nothing is lost.
+    assert!(
+        hub.dispatch(background_at("b", completion, at), at)
+            .is_empty()
+    );
     let first = to_a.try_recv().unwrap();
     let second = to_b.try_recv().unwrap();
     drop(first);
@@ -261,7 +364,7 @@ fn only_vms_listening_to_a_kind_get_it() {
     let (presses, mut to_presses) = hub.subscribe();
     hub.listen(tokens, Kind::Token);
     hub.listen(presses, Kind::Press);
-    drop(hub.dispatch(press("p"), Instant::now()));
+    assert!(hub.dispatch(press("p"), Instant::now()).is_empty());
     assert!(received(&mut to_tokens).is_empty());
     assert_eq!(received(&mut to_presses).len(), 1);
 
@@ -274,12 +377,33 @@ fn only_vms_listening_to_a_kind_get_it() {
     hub.listen(presses, Kind::Press);
     assert_eq!(received(&mut to_presses).len(), 1);
     drop(to_presses);
-    let dropped = hub.dispatch(press("r"), Instant::now());
-    assert_eq!(dropped.len(), 1);
+    assert!(hub.dispatch(press("r"), Instant::now()).is_empty());
     assert_eq!(hub.pending.len(), 1);
     assert!(hub.subscribers.iter().all(|s| s.id != presses));
     hub.unsubscribe(tokens);
     assert!(hub.subscribers.is_empty());
+}
+
+/// A press a VM did not post before it closed (a reload) goes back to the
+/// hub for the next VM that listens.
+#[test]
+fn a_closing_vm_gives_back_what_it_did_not_post() {
+    let _turn = turn();
+    let pending_before = hub().pending.len();
+    let (id, receiver) = hub().subscribe();
+    hub().listen(id, Kind::Press);
+    let listeners = Listeners {
+        subscriber: Cell::new(Some(id)),
+        receiver: RefCell::new(Some(receiver)),
+        ..Default::default()
+    };
+    assert!(hub().dispatch(press("unposted"), now()).is_empty());
+    listeners.close();
+    let mut hub = hub();
+    assert!(hub.subscribers.iter().all(|s| s.id != id));
+    assert_eq!(hub.pending.len(), pending_before + 1);
+    let back = hub.pending.pop();
+    assert!(matches!(back, Some(Delivery::Press(n)) if n.id == "unposted"));
 }
 
 #[test]
@@ -290,7 +414,7 @@ fn a_token_is_reported_when_it_changes() {
     hub.listen(id, Kind::Token);
     let (answer, registration) = oneshot::channel();
     hub.registering.push(answer);
-    let token = DeviceToken::new([1, 2]);
+    let token = DeviceToken::from_bytes([1, 2]);
     let answers = hub.registered(&token);
     assert_eq!(answers.len(), 1);
     drop(answers);
@@ -300,9 +424,9 @@ fn a_token_is_reported_when_it_changes() {
     // nothing new.
     drop(hub.registered(&token));
     assert!(received(&mut receiver).is_empty());
-    drop(hub.registered(&DeviceToken::new([3])));
+    drop(hub.registered(&DeviceToken::from_bytes([3])));
     assert_eq!(received(&mut receiver), [(Kind::Token, "03".to_owned())]);
-    assert_eq!(hub.token, Some(DeviceToken::new([3])));
+    assert_eq!(hub.token, Some(DeviceToken::from_bytes([3])));
 }
 
 #[test]
@@ -326,8 +450,8 @@ fn rust_observers_hear_every_event() {
         };
         record.lock().unwrap().push(what);
     });
-    registered(DeviceToken::new([0xab]));
-    registered(DeviceToken::new([0xab]));
+    registered(DeviceToken::from_bytes([0xab]));
+    registered(DeviceToken::from_bytes([0xab]));
     registration_failed("no entitlement");
     let shown = arrived(RemoteNotification::new("n1", "t", JsonValue::Null));
     assert_eq!(shown, foreground_presentation());
@@ -346,21 +470,47 @@ fn rust_observers_hear_every_event() {
             "press n2",
         ]
     );
-    assert_eq!(device_token(), Some(DeviceToken::new([0xab])));
-    // The pending ones go with the wait; the observer's result stays.
+    assert_eq!(token(), Some(DeviceToken::from_bytes([0xab])));
+    // The ones that wait go; the observer's result stays.
     let pending: Vec<_> = std::mem::take(&mut hub().pending);
     drop(pending);
     assert_eq!(*done.lock().unwrap(), [BackgroundResult::NewData]);
 }
 
 #[test]
-fn the_foreground_presentation_is_set_before_notifications_come() {
+fn foreground_presentations_are_decided_before_notifications_come() {
     let _turn = turn();
-    set_foreground_presentation(ForegroundPresentation::SHOWN.banner(false));
-    let shown = arrived(RemoteNotification::new("quiet", "", JsonValue::Null));
+    let quiet = ForegroundPresentation::SHOWN.banner(false).sound(false);
+    let arrive = |thread: &str| arrived(RemoteNotification::new("n", thread, JsonValue::Null));
+
+    // The app's, and a thread's own.
+    set_foreground_presentation(ForegroundPresentation::SHOWN.badge(false));
+    set_thread_presentation("chat-open", Some(quiet));
+    assert_eq!(arrive("chat-open"), quiet);
+    assert_eq!(thread_presentation("chat-open"), quiet);
+    assert_eq!(
+        arrive("chat-other"),
+        ForegroundPresentation::SHOWN.badge(false)
+    );
+
+    // A Rust decider has the last word, from what the settings give.
+    set_foreground_presentation_decider(Some(Arc::new(|notification, settings| {
+        if notification.thread_id == "chat-muted" {
+            settings.list(false)
+        } else {
+            settings
+        }
+    })));
+    assert_eq!(
+        arrive("chat-muted"),
+        ForegroundPresentation::SHOWN.badge(false).list(false)
+    );
+    assert_eq!(arrive("chat-open"), quiet);
+    set_foreground_presentation_decider(None);
+
+    set_thread_presentation("chat-open", None);
     set_foreground_presentation(ForegroundPresentation::default());
-    assert!(!shown.banner);
-    assert!(shown.list && shown.sound && shown.badge);
+    assert_eq!(arrive("chat-open"), ForegroundPresentation::SHOWN);
     assert_eq!(foreground_presentation(), ForegroundPresentation::SHOWN);
 }
 
@@ -371,10 +521,17 @@ fn there_are_no_remote_notifications_off_ios() {
     assert!(!ready(available()));
     let error = ready(register()).unwrap_err();
     assert_eq!(error.code.as_deref(), Some(UNAVAILABLE));
-    let error = ready(close_thread("chat-1".into())).unwrap_err();
+    let error = ready(close_thread("chat-1")).unwrap_err();
     assert_eq!(error.code.as_deref(), Some(UNAVAILABLE));
     // Setting up does nothing, and does not panic.
     install();
+}
+
+#[cfg(not(target_os = "ios"))]
+#[test]
+fn an_empty_thread_is_refused() {
+    let error = ready(close_thread("")).unwrap_err();
+    assert_eq!(error.code, None);
 }
 
 #[test]
@@ -387,7 +544,9 @@ fn the_set_declares_push() {
         "closeThread(",
         "setForegroundPresentation(",
         "foregroundPresentation(",
-        "PushPresentationOptions",
+        "ForegroundPresentationOptions",
+        "ForegroundPresentationThread",
+        "PushToken",
         "PushNotification",
         "PushBackground",
         "\"newData\"",

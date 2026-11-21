@@ -160,36 +160,51 @@ import { Push } from "nsh-extra";
 if (await Push.available()) {
   // Showing notifications needs the user's permission; background deliveries do not.
   await Notifications.requestPermission();
-  const token = await Push.register();
-  await sendTokenToServer(token);
+  // The token can come later than this call (offline): hear it as an event, don't wait on it.
+  Push.on("token", ({ token }) => sendTokenToServer(token));
+  Push.register().catch((error) => console.warn("not registered", error));
 }
 
-Push.on("token", ({ token }) => sendTokenToServer(token));
 Push.on("press", ({ payload }) => openChat(payload));
 Push.on("notification", ({ threadId }) => refreshInbox(threadId));
 Push.on("background", async ({ payload }) => {
   const changed = await syncInbox(payload);
   return changed ? "newData" : "noData";
 });
+
+// While a conversation is open, its notifications show no banner and play no sound.
+function openConversation(threadId: string) {
+  Push.setForegroundPresentation({ banner: false, sound: false }, { threadId });
+}
+function closeConversation(threadId: string) {
+  Push.setForegroundPresentation(null, { threadId });
+}
 ```
 
-- `register()` resolves with the token in hexadecimal and rejects with the system's reason when the device is not
-  registered. Register at every launch: `on("token")` reports a token that changed.
+- `register()` resolves with `{ token }`, the string the push service takes (hexadecimal on iOS), and rejects with the
+  system's reason when the device is not registered. The system answers once it can reach its servers, so offline the
+  promise stays pending: `on("token")` is the dependable path, and it reports a token that changed. Register at every
+  launch. `token()` reads the last one.
 - `press` reports the notification the user pressed, including the one that launched the app, which waits for the
   first listener. `notification` reports one that arrived while the app is in front. Both carry its `id`, its
   `threadId` and the `payload` the push service sent. A payload is untrusted input.
-- `background` reports a delivery that woke the app (on iOS one with `content-available`). The system waits for its
-  listeners: return a promise for the work and what it gave, within 25 seconds.
-- `setForegroundPresentation({ banner: false })` decides how notifications show while the app is in front, ahead of
-  their arrival: the system asks at once.
-- `closeThread(threadId)` removes the delivered notifications of a thread; `Notifications.close(id)` removes one.
+- `background` reports a delivery that woke the app or reached it in front (on iOS one with `content-available`; a
+  visible one with `content-available` arriving in front is reported to `notification` too). The system waits for its
+  listeners: return a promise for the work and what it gave, within 25 seconds of the delivery. One that came while
+  nothing listened waits for a listener until 5 seconds after it came.
+- `setForegroundPresentation(presentation)` decides how notifications show while the app is in front, and
+  `setForegroundPresentation(presentation, { threadId })` how one thread's show; `null` takes either back. They are
+  decided ahead of the arrival, as the system asks at once, and hold for every surface of the app.
+- `closeThread(threadId)` removes the delivered notifications of a thread, but those `Notifications.show` showed;
+  `Notifications.close(id)` removes one.
 - `available()` is `true` in a standalone iOS app. Elsewhere it is `false`, and `register` and `closeThread` reject
   with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
 
 The feature adds the `remote-notification` background mode to the packaged app. The `aps-environment` entitlement comes
 from the provisioning profile the app is signed with ([iOS devices](./packaging.md#ios-devices)). Rust code, such as
-a push service's SDK binding, uses `nsh_extra::push`: `on_event` hears the same events with the token's bytes, and
-`launch_options` hands over the launch options as the system passed them.
+a push service's SDK binding, uses `nsh_extra::push`: `on_event` hears the same events with the token's raw bytes,
+`set_foreground_presentation_decider` decides each notification's presentation natively, and the launch options come
+from `nsh_platform_ios::on_application_event` ([Application events](./ios.md#application-events)).
 
 ## Writing an nshm
 

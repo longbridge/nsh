@@ -1,11 +1,10 @@
 //! `Push` (feature `push`): remote notifications. The app registers the
 //! device ([`register`]) and gets the token a push service addresses it
 //! with; the notifications that arrive while it is in front, the
-//! background deliveries that wake it and the presses of notifications come
-//! as events, in JS through `Push.on` and in Rust through [`on_event`]. The
-//! module is generic: it works with any push service, and a push service's
-//! SDK binding builds on its Rust API (the token as bytes, the launch
-//! options as the system passed them).
+//! background deliveries and the presses of notifications come as events,
+//! in JS through `Push.on` and in Rust through [`on_event`]. The module is
+//! generic: it works with any push service, and a push service's SDK
+//! binding builds on its Rust API (the token's raw bytes, every event).
 //!
 //! Showing notifications needs the user's permission, which the app asks
 //! with `Notifications.requestPermission` (`nsh`'s); background deliveries
@@ -14,14 +13,14 @@
 //! thread.
 //!
 //! On iOS (`ios.rs`) the module observes a standalone app's application
-//! delegate (`nsh_platform_ios::on_application_event`) and is the handler
-//! of the notifications NSH did not show
-//! (`nsh_platform_apple::notifications::set_foreign_handler`), both set up
-//! in the crate's `#[native_module]` entry, before the app launches, so the
-//! press that launches the app is not lost. Elsewhere (Android for now, the
-//! desktops, the web, headless runs, Mac Catalyst, an app that embeds NSH
-//! in its own UIKit app and keeps its own delegate) [`available`] is false
-//! and the functions that ask the system fail with [`UNAVAILABLE`].
+//! delegate (`nsh_platform_ios::on_application_event`), set up in the
+//! crate's `#[native_module]` entry before the app launches, and once the
+//! app launches it handles the notifications NSH did not show
+//! (`nsh_platform_apple::notifications::set_foreign_handler`, which keeps
+//! the press that launched the app until then). Elsewhere (Android for now,
+//! the desktops, the web, headless runs, Mac Catalyst, an app that embeds
+//! NSH in its own UIKit app and keeps its own delegate) [`available`] is
+//! false and the functions that ask the system fail with [`UNAVAILABLE`].
 //!
 //! The packaged app needs the `remote-notification` background mode, which
 //! `nsh` adds from this crate's `[package.metadata.nsh.features.push]`.
@@ -37,6 +36,7 @@ use std::{
     fmt,
     rc::{Rc, Weak},
     sync::{Arc, Mutex, MutexGuard, RwLock},
+    task::Poll,
     time::Duration,
 };
 
@@ -50,52 +50,59 @@ use tokio::sync::{mpsc, oneshot};
 
 #[cfg(target_os = "ios")]
 use self::ios as platform;
-#[cfg(target_os = "ios")]
-pub use self::ios::launch_options;
 
 /// The code of a request where there are no remote notifications.
 pub const UNAVAILABLE: &str = codes::UNAVAILABLE;
 
-/// How long a background delivery waits for a JS listener when none
-/// listens yet (the app was launched for it and its JS is starting): after
-/// that the system hears it handled with nothing new.
-pub const BACKGROUND_WAIT: Duration = Duration::from_secs(5);
+/// How long after its arrival a background delivery waits for a JS
+/// listener when none listens (the app was launched for it and its JS is
+/// starting): after that the system hears it handled with nothing new.
+pub(crate) const BACKGROUND_WAIT: Duration = Duration::from_secs(5);
 
-/// How long the JS listeners of a background delivery have to settle: the
-/// system gives the app about 30 seconds.
-pub const BACKGROUND_LIMIT: Duration = Duration::from_secs(25);
+/// How long after its arrival the JS listeners of a background delivery
+/// have to settle: iOS gives the app about 30 seconds.
+pub(crate) const BACKGROUND_LIMIT: Duration = Duration::from_secs(25);
 
 /// How many presses wait for a JS listener; older ones are dropped.
 const MAX_PENDING_PRESSES: usize = 16;
 
-/// The token a push service addresses this device with.
+/// The token a push service addresses this device with. Opaque: the
+/// string the push service takes ([`DeviceToken::as_str`]), and the bytes
+/// the system gave ([`DeviceToken::as_bytes`]) for an SDK that takes those.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct DeviceToken(Vec<u8>);
+pub struct DeviceToken {
+    bytes: Vec<u8>,
+    string: String,
+}
 
 impl DeviceToken {
-    /// The token of `bytes`, as the system gave them.
-    pub fn new(bytes: impl Into<Vec<u8>>) -> Self {
-        Self(bytes.into())
-    }
-
-    /// Its bytes, for an SDK that takes them as they are.
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.0
-    }
-
-    /// Its bytes in lowercase hexadecimal, as push services take it.
-    pub fn to_hex(&self) -> String {
+    /// The token of `bytes` as iOS gives them; push services take them in
+    /// lowercase hexadecimal.
+    #[cfg_attr(not(any(target_os = "ios", test)), allow(dead_code))]
+    pub(crate) fn from_bytes(bytes: impl Into<Vec<u8>>) -> Self {
         use fmt::Write;
-        self.0.iter().fold(String::new(), |mut hex, byte| {
+        let bytes = bytes.into();
+        let string = bytes.iter().fold(String::new(), |mut hex, byte| {
             let _ = write!(hex, "{byte:02x}");
             hex
-        })
+        });
+        Self { bytes, string }
+    }
+
+    /// The string the push service takes (hexadecimal on iOS).
+    pub fn as_str(&self) -> &str {
+        &self.string
+    }
+
+    /// The bytes the system gave, for an SDK that takes them as they are.
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes
     }
 }
 
 impl fmt::Display for DeviceToken {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.to_hex())
+        f.write_str(&self.string)
     }
 }
 
@@ -124,9 +131,10 @@ impl RemoteNotification {
         }
     }
 
-    /// A background delivery of `payload`: no request, its thread the one
-    /// the payload names (`aps.thread-id`).
-    pub fn background(payload: JsonValue) -> Self {
+    /// A background delivery of `payload` from iOS: no request, its thread
+    /// the one the payload names (`aps.thread-id`).
+    #[cfg_attr(not(any(target_os = "ios", test)), allow(dead_code))]
+    pub(crate) fn background(payload: JsonValue) -> Self {
         let thread_id = payload
             .get("aps")
             .and_then(|aps| aps.get("thread-id"))
@@ -144,7 +152,7 @@ impl RemoteNotification {
 /// How a notification that arrives while the app is in front shows
 /// ([`set_foreground_presentation`]). By default it shows as it does while
 /// the app is behind, as the notifications `Notifications` shows do.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, JsObject)]
 #[non_exhaustive]
 pub struct ForegroundPresentation {
     /// It shows as a banner.
@@ -158,8 +166,8 @@ pub struct ForegroundPresentation {
 }
 
 impl ForegroundPresentation {
-    /// Shown in every way: what the app gets until it sets another.
-    pub const SHOWN: Self = Self {
+    /// Shown in every way: the default.
+    pub(crate) const SHOWN: Self = Self {
         banner: true,
         list: true,
         sound: true,
@@ -247,7 +255,8 @@ struct Completion {
 
 impl BackgroundCompletion {
     /// A completion that calls `finish` with the result once the last
-    /// clone is dropped: the platform's, or a test's.
+    /// clone is dropped: the platform's, or one a test of code that
+    /// receives completions makes.
     pub fn new(finish: impl FnOnce(BackgroundResult) + Send + 'static) -> Self {
         Self(Arc::new(Completion {
             result: Mutex::new(BackgroundResult::default()),
@@ -300,7 +309,7 @@ pub struct PushError {
 
 impl PushError {
     /// A failure with `message` and no code.
-    pub fn failed(message: impl Into<String>) -> Self {
+    pub(crate) fn failed(message: impl Into<String>) -> Self {
         Self {
             code: None,
             message: message.into(),
@@ -308,7 +317,7 @@ impl PushError {
     }
 
     /// There are no remote notifications here ([`UNAVAILABLE`]).
-    pub fn unavailable(message: impl Into<String>) -> Self {
+    pub(crate) fn unavailable(message: impl Into<String>) -> Self {
         Self {
             code: Some(UNAVAILABLE.into()),
             message: message.into(),
@@ -342,12 +351,14 @@ pub enum PushEvent<'a> {
     Token(&'a DeviceToken),
     /// The system could not register the device.
     RegistrationFailed(&'a PushError),
-    /// A notification arrived while the app is in front; it shows as
-    /// [`foreground_presentation`] says.
+    /// A notification arrived while the app is in front; it shows as the
+    /// presentation settings say ([`thread_presentation`],
+    /// [`set_foreground_presentation_decider`]).
     Notification(&'a RemoteNotification),
     /// A delivery woke the app or reached it in front (on iOS one with
-    /// `content-available`): work that keeps the completion reports when
-    /// it is done.
+    /// `content-available`; a visible one arriving in front is also a
+    /// [`PushEvent::Notification`]): work that keeps the completion
+    /// reports when it is done.
     Background {
         /// What was delivered.
         notification: &'a RemoteNotification,
@@ -368,7 +379,8 @@ static OBSERVERS: RwLock<Vec<Observer>> = RwLock::new(Vec::new());
 /// SDK and the notifications to its handlers. The events come on the main
 /// thread, every one, whether JS listens or not. Add it from a
 /// `#[native_module]` entry, before the app launches, to hear the press
-/// that launches it.
+/// that launches it. An SDK that wants the launch options observes
+/// `nsh_platform_ios::on_application_event` (`Launched { options }`).
 pub fn on_event(observer: impl Fn(&PushEvent<'_>) + Send + Sync + 'static) {
     OBSERVERS
         .write()
@@ -385,6 +397,15 @@ fn emit(event: &PushEvent<'_>) {
     }
 }
 
+/// Decides how one notification arriving in front shows, from what the
+/// settings give it ([`set_foreground_presentation_decider`]).
+pub type PresentationDecider = Arc<
+    dyn Fn(&RemoteNotification, ForegroundPresentation) -> ForegroundPresentation + Send + Sync,
+>;
+
+/// The Rust decider of foreground presentations.
+static DECIDER: RwLock<Option<PresentationDecider>> = RwLock::new(None);
+
 /// Whether remote notifications work here: in a standalone iOS app
 /// (`nsh_platform_ios::run_app`), whose application delegate the module
 /// observes. In a task.
@@ -393,12 +414,13 @@ pub async fn available() -> bool {
 }
 
 /// Registers the device for remote notifications and resolves with its
-/// token, which the app hands to its push service; the system answers
-/// once it can reach its servers. Registering does not ask the user:
-/// showing notifications needs the permission `Notifications` asks for,
-/// background deliveries do not. Register at every launch, as the token
-/// can change ([`PushEvent::Token`] and `Push.on("token")` report a new
-/// one). In a task.
+/// token, which the app hands to its push service. The system answers
+/// once it can reach its servers, so offline this waits: code that must
+/// not wait hears the token through [`on_event`] instead. Registering does
+/// not ask the user: showing notifications needs the permission
+/// `Notifications` asks for, background deliveries do not. Register at
+/// every launch, as the token can change ([`PushEvent::Token`] and
+/// `Push.on("token")` report a new one). In a task.
 pub async fn register() -> Result<DeviceToken, PushError> {
     if !hub().launched {
         return Err(PushError::unavailable(
@@ -407,7 +429,11 @@ pub async fn register() -> Result<DeviceToken, PushError> {
     }
     let (answer, token) = oneshot::channel();
     hub().registering.push(answer);
-    platform::register().await?;
+    if let Err(error) = platform::register().await {
+        drop(token);
+        hub().registering.retain(|answer| !answer.is_closed());
+        return Err(error);
+    }
     match token.await {
         Ok(token) => token,
         Err(_) => Err(PushError::failed("the registration went away unanswered")),
@@ -415,40 +441,76 @@ pub async fn register() -> Result<DeviceToken, PushError> {
 }
 
 /// The token of this device's last registration in this run, if any.
-pub fn device_token() -> Option<DeviceToken> {
+pub fn token() -> Option<DeviceToken> {
     hub().token.clone()
 }
 
-/// How a notification that arrives while the app is in front shows.
+/// How a notification that arrives in front shows, unless its thread has
+/// its own ([`set_thread_presentation`]).
 pub fn foreground_presentation() -> ForegroundPresentation {
     hub().presentation
 }
 
 /// Shows the notifications that arrive while the app is in front as
-/// `presentation` says, from now on: the system asks at once, so the
-/// decision is made before they come (turn the banner off while the
-/// conversation they would announce is open).
+/// `presentation` says, from now on, unless their thread has its own
+/// ([`set_thread_presentation`]). The system asks at once, so it is decided
+/// before they come. Process-wide: it holds for every surface of the app.
 pub fn set_foreground_presentation(presentation: ForegroundPresentation) {
     hub().presentation = presentation;
 }
 
-/// Removes the delivered notifications grouped in `thread_id`, resolving
-/// with how many there were. In a task.
-pub async fn close_thread(thread_id: String) -> Result<usize, PushError> {
+/// How a notification of `thread_id` that arrives in front shows: its
+/// thread's own presentation, else [`foreground_presentation`].
+pub fn thread_presentation(thread_id: &str) -> ForegroundPresentation {
+    hub().presentation_of(thread_id)
+}
+
+/// Shows the notifications of `thread_id` that arrive in front as
+/// `presentation` says, whatever [`foreground_presentation`] is (no banner
+/// for the conversation that is open); `None` gives the thread back to it.
+/// Process-wide, as [`set_foreground_presentation`].
+pub fn set_thread_presentation(
+    thread_id: impl Into<String>,
+    presentation: Option<ForegroundPresentation>,
+) {
+    hub().set_thread_presentation(thread_id.into(), presentation);
+}
+
+/// Decides how each notification arriving in front shows, from what the
+/// presentation settings give it ([`thread_presentation`]): Rust code that
+/// knows more, such as the screen that is open. It runs on the main thread
+/// while the system waits, so it answers at once and never waits for JS.
+/// `None` leaves it to the settings. Process-wide; a later one replaces
+/// the earlier.
+pub fn set_foreground_presentation_decider(decider: Option<PresentationDecider>) {
+    *DECIDER.write().unwrap_or_else(|e| e.into_inner()) = decider;
+}
+
+/// Removes the delivered notifications grouped in `thread_id`, but those
+/// `Notifications` showed. In a task.
+pub async fn close_thread(thread_id: impl Into<String>) -> Result<(), PushError> {
+    let thread_id = thread_id.into();
+    if thread_id.is_empty() {
+        return Err(PushError::failed("a thread is named by a non-empty id"));
+    }
     platform::close_thread(thread_id).await
 }
 
-/// The identifiers of the notifications of `delivered` (`(id, thread)`
-/// pairs) grouped in `thread_id`.
-#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+/// The identifiers of the notifications of `delivered` (`(id, thread,
+/// shown by Notifications)`) grouped in `thread_id`, but those
+/// `Notifications` showed. An empty `thread_id` names no thread.
+#[cfg_attr(not(any(target_os = "ios", test)), allow(dead_code))]
 pub(crate) fn in_thread<'a>(
-    delivered: impl IntoIterator<Item = (&'a str, &'a str)>,
+    delivered: impl IntoIterator<Item = (&'a str, &'a str, bool)>,
     thread_id: &str,
 ) -> Vec<String> {
+    if thread_id.is_empty() {
+        return Vec::new();
+    }
     delivered
         .into_iter()
-        .filter(|(_, thread)| *thread == thread_id)
-        .map(|(id, _)| id.to_owned())
+        .filter(|(_, thread, own)| !own && *thread == thread_id)
+        .map(|(id, _, _)| id.to_owned())
         .collect()
 }
 
@@ -466,7 +528,7 @@ mod platform {
         ))
     }
 
-    pub(super) async fn close_thread(_: String) -> Result<usize, PushError> {
+    pub(super) async fn close_thread(_: String) -> Result<(), PushError> {
         Err(PushError::unavailable(
             "there are no remote notifications here",
         ))
@@ -488,7 +550,7 @@ fn launched() {
 }
 
 /// The system registered the device with `token`.
-#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+#[cfg_attr(not(any(target_os = "ios", test)), allow(dead_code))]
 fn registered(token: DeviceToken) {
     let answers = hub().registered(&token);
     for answer in answers {
@@ -498,7 +560,7 @@ fn registered(token: DeviceToken) {
 }
 
 /// The system could not register the device.
-#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+#[cfg_attr(not(any(target_os = "ios", test)), allow(dead_code))]
 fn registration_failed(message: &str) {
     let error = PushError::failed(format!("the device was not registered: {message}"));
     log::warn!("push: {error}");
@@ -510,39 +572,45 @@ fn registration_failed(message: &str) {
 }
 
 /// `notification` arrived while the app is in front: how it shows.
-#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+#[cfg_attr(not(any(target_os = "ios", test)), allow(dead_code))]
 fn arrived(notification: RemoteNotification) -> ForegroundPresentation {
     emit(&PushEvent::Notification(&notification));
-    let mut hub = hub();
-    let presentation = hub.presentation;
-    let dropped = hub.dispatch(Delivery::Notification(notification), now());
-    drop(hub);
-    drop(dropped);
+    let presentation = hub().presentation_of(&notification.thread_id);
+    // Outside the hub's lock: the decider may read the settings.
+    let decider = DECIDER.read().unwrap_or_else(|e| e.into_inner()).clone();
+    let presentation = match decider {
+        Some(decide) => decide(&notification, presentation),
+        None => presentation,
+    };
+    let lost = hub().dispatch(Delivery::Notification(notification), now());
+    drop(lost);
     presentation
 }
 
-/// A background delivery of `notification`, which `completion` reports.
-#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+/// A background delivery of `notification` that arrived now, which
+/// `completion` reports.
+#[cfg_attr(not(any(target_os = "ios", test)), allow(dead_code))]
 fn background(notification: RemoteNotification, completion: BackgroundCompletion) {
     emit(&PushEvent::Background {
         notification: &notification,
         completion: &completion,
     });
-    let dropped = hub().dispatch(Delivery::Background(notification, completion), now());
+    let at = now();
+    let lost = hub().dispatch(Delivery::Background(notification, completion, at), at);
     // Outside the hub's lock: the completion may tell the system now.
-    drop(dropped);
+    drop(lost);
 }
 
 /// The user pressed `notification`.
-#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+#[cfg_attr(not(any(target_os = "ios", test)), allow(dead_code))]
 fn pressed(notification: RemoteNotification) {
     emit(&PushEvent::Press(&notification));
-    let dropped = hub().dispatch(Delivery::Press(notification), now());
-    drop(dropped);
+    let lost = hub().dispatch(Delivery::Press(notification), now());
+    drop(lost);
 }
 
 /// Completes the background deliveries that waited for a JS listener
-/// longer than [`BACKGROUND_WAIT`].
+/// [`BACKGROUND_WAIT`] since they arrived.
 #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
 fn expire_pending() {
     let expired = hub().expire(now());
@@ -575,7 +643,8 @@ enum Kind {
 enum Delivery {
     Token(DeviceToken),
     Notification(RemoteNotification),
-    Background(RemoteNotification, BackgroundCompletion),
+    /// With the instant it arrived, which its waits count from.
+    Background(RemoteNotification, BackgroundCompletion, Instant),
     Press(RemoteNotification),
 }
 
@@ -589,23 +658,23 @@ impl Delivery {
         }
     }
 
-    /// Whether it waits for a listener when none listens: a press (the one
-    /// that launched the app comes before its JS runs) and a background
-    /// delivery (the app was launched for it), not a token (`token()` reads
-    /// it) or a notification in front (it showed).
-    fn waits(&self) -> bool {
-        matches!(self, Self::Background(..) | Self::Press(_))
-    }
-
     /// A copy for one more VM: the completion of a background delivery is
     /// shared, so the system hears once every VM is done.
     fn copy(&self) -> Self {
         match self {
             Self::Token(token) => Self::Token(token.clone()),
             Self::Notification(n) => Self::Notification(n.clone()),
-            Self::Background(n, completion) => Self::Background(n.clone(), completion.clone()),
+            Self::Background(n, completion, at) => {
+                Self::Background(n.clone(), completion.clone(), *at)
+            }
             Self::Press(n) => Self::Press(n.clone()),
         }
+    }
+
+    /// Whether it is a background delivery that waited for a listener as
+    /// long as it may at `now`.
+    fn expired(&self, now: Instant) -> bool {
+        matches!(self, Self::Background(_, _, at) if now.saturating_duration_since(*at) >= BACKGROUND_WAIT)
     }
 }
 
@@ -617,17 +686,11 @@ struct Subscriber {
     sender: mpsc::UnboundedSender<Delivery>,
 }
 
-/// An event no VM listened to yet, and when it came.
-#[derive(Debug)]
-struct Pending {
-    delivery: Delivery,
-    at: Instant,
-}
-
 /// The module's state, process-wide: the platform reports on the main
 /// thread and every VM's `Push` reads it. Nothing dropped under its lock
-/// may take it again (a [`BackgroundCompletion`] tells the system without
-/// it): what can be is handed back to drop outside.
+/// takes it again (a [`BackgroundCompletion`] tells the system without
+/// it); what no VM will get is handed back to drop outside it all the
+/// same, so the system hears without waiting for the lock.
 struct Hub {
     /// The module observes a standalone app's delegate ([`available`]).
     launched: bool,
@@ -635,11 +698,14 @@ struct Hub {
     token: Option<DeviceToken>,
     /// The registrations waiting for the system's answer.
     registering: Vec<oneshot::Sender<Result<DeviceToken, PushError>>>,
+    /// How notifications in front show ([`set_foreground_presentation`]).
     presentation: ForegroundPresentation,
+    /// The threads that show their own way ([`set_thread_presentation`]).
+    threads: Vec<(String, ForegroundPresentation)>,
     subscribers: Vec<Subscriber>,
     next_subscriber: u64,
     /// Presses and background deliveries no VM listened to yet, in order.
-    pending: Vec<Pending>,
+    pending: Vec<Delivery>,
 }
 
 static HUB: Mutex<Hub> = Mutex::new(Hub::new());
@@ -655,9 +721,29 @@ impl Hub {
             token: None,
             registering: Vec::new(),
             presentation: ForegroundPresentation::SHOWN,
+            threads: Vec::new(),
             subscribers: Vec::new(),
             next_subscriber: 0,
             pending: Vec::new(),
+        }
+    }
+
+    /// How a notification of `thread_id` shows in front.
+    fn presentation_of(&self, thread_id: &str) -> ForegroundPresentation {
+        self.threads
+            .iter()
+            .find(|(thread, _)| !thread_id.is_empty() && thread == thread_id)
+            .map_or(self.presentation, |(_, presentation)| *presentation)
+    }
+
+    fn set_thread_presentation(
+        &mut self,
+        thread_id: String,
+        presentation: Option<ForegroundPresentation>,
+    ) {
+        self.threads.retain(|(thread, _)| *thread != thread_id);
+        if let Some(presentation) = presentation {
+            self.threads.push((thread_id, presentation));
         }
     }
 
@@ -674,51 +760,55 @@ impl Hub {
         std::mem::take(&mut self.registering)
     }
 
-    /// Hands `delivery` to the VMs listening to its kind, or keeps it for
-    /// the first that will when it waits ([`Delivery::waits`]). What it
-    /// returns is dropped outside the lock.
+    /// Hands `delivery` to the VMs listening to its kind. When none does,
+    /// a press, and a background delivery still within its wait, wait for
+    /// the first that will. Returns what no VM will get: the delivery when
+    /// none took it and it does not wait (a token, a notification in
+    /// front, a background delivery past its wait) and the oldest press
+    /// when too many wait.
     #[must_use]
-    fn dispatch(&mut self, delivery: Delivery, at: Instant) -> Vec<Delivery> {
+    fn dispatch(&mut self, delivery: Delivery, now: Instant) -> Vec<Delivery> {
         let kind = delivery.kind() as u8;
-        let mut dropped = Vec::new();
         let mut taken = false;
+        // A VM that went is forgotten; the copy it did not take is one of
+        // several, so dropping it tells the system nothing.
         self.subscribers.retain(|subscriber| {
             if subscriber.kinds & kind == 0 {
                 return true;
             }
-            match subscriber.sender.send(delivery.copy()) {
-                Ok(()) => {
-                    taken = true;
-                    true
-                }
-                // Its VM went.
-                Err(mpsc::error::SendError(copy)) => {
-                    dropped.push(copy);
-                    false
-                }
-            }
+            let sent = subscriber.sender.send(delivery.copy()).is_ok();
+            taken |= sent;
+            sent
         });
-        if !taken && delivery.waits() {
-            if matches!(delivery, Delivery::Press(_)) {
+        let mut lost = Vec::new();
+        if taken {
+            // The VMs hold copies.
+            drop(delivery);
+            return lost;
+        }
+        match delivery {
+            delivery @ Delivery::Press(_) => {
                 let presses = self
                     .pending
                     .iter()
-                    .filter(|p| matches!(p.delivery, Delivery::Press(_)))
+                    .filter(|d| matches!(d, Delivery::Press(_)))
                     .count();
-                if presses == MAX_PENDING_PRESSES
+                if presses >= MAX_PENDING_PRESSES
                     && let Some(oldest) = self
                         .pending
                         .iter()
-                        .position(|p| matches!(p.delivery, Delivery::Press(_)))
+                        .position(|d| matches!(d, Delivery::Press(_)))
                 {
-                    dropped.push(self.pending.remove(oldest).delivery);
+                    lost.push(self.pending.remove(oldest));
                 }
+                self.pending.push(delivery);
             }
-            self.pending.push(Pending { delivery, at });
-        } else {
-            dropped.push(delivery);
+            delivery @ Delivery::Background(..) if !delivery.expired(now) => {
+                self.pending.push(delivery);
+            }
+            delivery => lost.push(delivery),
         }
-        dropped
+        lost
     }
 
     /// A new VM's subscription, which listens to nothing yet.
@@ -740,12 +830,12 @@ impl Hub {
             return;
         };
         subscriber.kinds |= kind as u8;
-        let (waited, rest) = std::mem::take(&mut self.pending)
+        let (waited, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut self.pending)
             .into_iter()
-            .partition(|p| p.delivery.kind() == kind);
+            .partition(|d| d.kind() == kind);
         self.pending = rest;
-        for Pending { delivery, .. } in waited {
-            // A VM that went drops it later, outside the lock.
+        for delivery in waited {
+            // The VM is the one listening now: it takes them.
             let _ = subscriber.sender.send(delivery);
         }
     }
@@ -762,18 +852,16 @@ impl Hub {
         self.subscribers.retain(|s| s.id != id);
     }
 
-    /// Takes the background deliveries that waited for a listener longer
-    /// than [`BACKGROUND_WAIT`] at `now`, to drop outside the lock.
+    /// Takes the background deliveries that waited for a listener
+    /// [`BACKGROUND_WAIT`] since they arrived, at `now`, to drop outside
+    /// the lock.
     #[must_use]
     fn expire(&mut self, now: Instant) -> Vec<Delivery> {
         let (expired, rest) = std::mem::take(&mut self.pending)
             .into_iter()
-            .partition(|p| {
-                matches!(p.delivery, Delivery::Background(..))
-                    && now.saturating_duration_since(p.at) >= BACKGROUND_WAIT
-            });
+            .partition(|d| d.expired(now));
         self.pending = rest;
-        expired.into_iter().map(|p: Pending| p.delivery).collect()
+        expired
     }
 }
 
@@ -795,52 +883,77 @@ impl Push {
     }
 
     /// Registers the device for remote notifications and resolves with its
-    /// token in hexadecimal, which the app hands to its push service. The
-    /// system answers once it can reach its servers. It does not ask the
-    /// user: showing notifications needs `Notifications.requestPermission`,
-    /// background deliveries do not. Register at every launch: the token
-    /// can change, and `on("token")` reports a new one. Rejects with the
-    /// system's reason when it refuses (an app signed without the
-    /// `aps-environment` entitlement), and with
+    /// token: the string the push service takes (hexadecimal on iOS),
+    /// which the app hands to it. The system answers once it can reach its
+    /// servers, so offline the promise stays pending: listen to
+    /// `on("token")` first and do not wait on the result. It does not ask
+    /// the user: showing notifications needs
+    /// `Notifications.requestPermission`, background deliveries do not.
+    /// Register at every launch: the token can change, and `on("token")`
+    /// reports a new one. Rejects with the system's reason when it refuses
+    /// (an app signed without the `aps-environment` entitlement), and with
     /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where `available()` is false.
-    pub(crate) async fn register() -> Result<String, JsError> {
+    pub(crate) async fn register() -> Result<PushToken, JsError> {
         match crate::push::register().await {
-            Ok(token) => Ok(token.to_hex()),
+            Ok(token) => Ok(PushToken::from(&token)),
             Err(error) => Err(error.to_js()),
         }
     }
 
-    /// The token of the device's last registration in this run, in
-    /// hexadecimal; `null` before one.
-    pub(crate) fn token() -> Option<String> {
-        crate::push::device_token().map(|token| token.to_hex())
+    /// The token of the device's last registration in this run; `null`
+    /// before one.
+    pub(crate) fn token() -> Option<PushToken> {
+        crate::push::token().as_ref().map(PushToken::from)
     }
 
-    /// How a notification that arrives while the app is in front shows.
-    pub(crate) fn foreground_presentation() -> PushPresentation {
-        crate::push::foreground_presentation().into()
+    /// How a notification that arrives while the app is in front shows:
+    /// one of the thread `threadId` when given (its own presentation, else
+    /// the app's).
+    pub(crate) fn foreground_presentation(
+        thread: Option<ForegroundPresentationThread>,
+    ) -> Result<ForegroundPresentation, JsError> {
+        Ok(match thread {
+            Some(thread) => crate::push::thread_presentation(&thread.id()?),
+            None => crate::push::foreground_presentation(),
+        })
     }
 
     /// Shows the notifications that arrive while the app is in front as
-    /// `presentation` says, from now on; what it leaves out shows (all of
-    /// it, until the app sets another). The system asks as they arrive,
-    /// without waiting for JS: set it before (turn `banner` off while the
-    /// conversation they would announce is open). They are reported to
-    /// `on("notification")` either way.
-    pub(crate) fn set_foreground_presentation(presentation: PushPresentationOptions) {
-        crate::push::set_foreground_presentation(presentation.presentation());
+    /// `presentation` says, from now on; what it leaves out shows, and
+    /// `null` shows them all again. With `{ threadId }` it is how the
+    /// notifications of that thread show, whatever the app's is (no banner
+    /// for the conversation that is open), and `null` gives the thread back
+    /// to the app's. The system asks as they arrive, without waiting for
+    /// JS, so it is set before. Process-wide: it holds for every surface of
+    /// the app. They are reported to `on("notification")` either way.
+    /// Throws a `RangeError` for an empty `threadId`.
+    pub(crate) fn set_foreground_presentation(
+        presentation: Option<ForegroundPresentationOptions>,
+        thread: Option<ForegroundPresentationThread>,
+    ) -> Result<(), JsError> {
+        let presentation = presentation.map(ForegroundPresentationOptions::presentation);
+        match thread {
+            Some(thread) => crate::push::set_thread_presentation(thread.id()?, presentation),
+            None => crate::push::set_foreground_presentation(presentation.unwrap_or_default()),
+        }
+        Ok(())
     }
 
     /// Removes the delivered notifications grouped in the thread
-    /// `threadId` (the `thread-id` the push service sent), resolving with
-    /// how many there were. `Notifications.close(id)` removes one by its
-    /// `id`. Rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where
-    /// `available()` is false.
-    pub(crate) async fn close_thread(thread_id: String) -> Result<f64, JsError> {
-        match crate::push::close_thread(thread_id).await {
-            Ok(count) => Ok(count as f64),
-            Err(error) => Err(error.to_js()),
+    /// `threadId` (the `thread-id` the push service sent), but those
+    /// `Notifications.show` showed. `Notifications.close(id)` removes one
+    /// by its `id`. Rejects with a `RangeError` for an empty `threadId`,
+    /// and with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where `available()`
+    /// is false.
+    pub(crate) async fn close_thread(thread_id: String) -> Result<(), JsError> {
+        if thread_id.is_empty() {
+            return Err(JsError::Range(
+                "Push.closeThread: `threadId` must not be empty".into(),
+            ));
         }
+        crate::push::close_thread(thread_id)
+            .await
+            .map_err(|error| error.to_js())
     }
 
     /// Listens to `event`. `token`: a registration gave a token that
@@ -851,13 +964,15 @@ impl Push {
     /// came while nothing listened, the one that launched the app
     /// included, go to the next listener (at most 16). `background`: a
     /// delivery woke the app or reached it in front (on iOS one with
-    /// `content-available`); the system waits for the listeners, so return
-    /// a promise for the work and what it gave (`"newData"`, `"noData"`
-    /// when nothing is returned, `"failed"`, as a thrown error is), within
-    /// 25 seconds. One that came while nothing listened waits 5 seconds
-    /// for a listener. These are the notifications `Notifications` did not
-    /// show: remote ones and those other native code scheduled. A payload
-    /// is untrusted input. Returns a function that stops listening.
+    /// `content-available`; one that is also visible, arriving in front,
+    /// is a `notification` too). The system waits for the listeners, so
+    /// return a promise for the work and what it gave (`"newData"`,
+    /// `"noData"` when nothing is returned, `"failed"`, as a thrown error
+    /// is), within 25 seconds of the delivery. One that came while nothing
+    /// listened waits for a listener until 5 seconds after it came. These
+    /// are the notifications `Notifications` did not show: remote ones and
+    /// those other native code scheduled. A payload is untrusted input.
+    /// Returns a function that stops listening.
     #[overload(fn(event: PushTokenEvent, #[args(token)] listener: Callback<PushToken>) -> Stop)]
     #[overload(fn(event: PushNotificationEvent, #[args(notification)] listener: Callback<PushNotification>) -> Stop)]
     #[overload(fn(event: PushPressEvent, #[args(press)] listener: Callback<PushNotification>) -> Stop)]
@@ -894,35 +1009,11 @@ impl Push {
     }
 }
 
-/// How a notification in front shows (`foregroundPresentation()`).
-#[derive(Debug, Clone, Default, PartialEq, JsObject)]
-pub(crate) struct PushPresentation {
-    /// It shows as a banner.
-    banner: bool,
-    /// It stays in the notification list.
-    list: bool,
-    /// Its sound plays.
-    sound: bool,
-    /// Its badge applies to the app's icon.
-    badge: bool,
-}
-
-impl From<ForegroundPresentation> for PushPresentation {
-    fn from(p: ForegroundPresentation) -> Self {
-        Self {
-            banner: p.banner,
-            list: p.list,
-            sound: p.sound,
-            badge: p.badge,
-        }
-    }
-}
-
 /// How notifications in front show (`setForegroundPresentation`); what is
 /// left out shows.
 #[derive(Debug, Clone, Default, PartialEq, JsObject)]
 #[prop(exact)]
-pub(crate) struct PushPresentationOptions {
+pub(crate) struct ForegroundPresentationOptions {
     /// It shows as a banner (true when not given).
     pub(crate) banner: Option<bool>,
     /// It stays in the notification list (true when not given).
@@ -933,13 +1024,31 @@ pub(crate) struct PushPresentationOptions {
     pub(crate) badge: Option<bool>,
 }
 
-impl PushPresentationOptions {
+impl ForegroundPresentationOptions {
     fn presentation(self) -> ForegroundPresentation {
         ForegroundPresentation::SHOWN
             .banner(self.banner.unwrap_or(true))
             .list(self.list.unwrap_or(true))
             .sound(self.sound.unwrap_or(true))
             .badge(self.badge.unwrap_or(true))
+    }
+}
+
+/// The thread a foreground presentation is for.
+#[derive(Debug, Clone, Default, PartialEq, JsObject)]
+#[prop(exact)]
+pub(crate) struct ForegroundPresentationThread {
+    /// The thread's id (the `thread-id` the push service sends).
+    pub(crate) thread_id: String,
+}
+
+impl ForegroundPresentationThread {
+    /// The thread's id, which names a thread only when not empty.
+    fn id(self) -> Result<String, JsError> {
+        if self.thread_id.is_empty() {
+            return Err(JsError::Range("Push: `threadId` must not be empty".into()));
+        }
+        Ok(self.thread_id)
     }
 }
 
@@ -992,11 +1101,19 @@ pub(crate) enum PushBackgroundEvent {
     Background,
 }
 
-/// A new token (the `token` event).
+/// A token (`register()`, `token()` and the `token` event).
 #[derive(Debug, Clone, Default, PartialEq, JsObject)]
 pub(crate) struct PushToken {
-    /// The token, in hexadecimal.
+    /// The string the push service takes (hexadecimal on iOS).
     token: String,
+}
+
+impl From<&DeviceToken> for PushToken {
+    fn from(token: &DeviceToken) -> Self {
+        Self {
+            token: token.as_str().to_owned(),
+        }
+    }
 }
 
 /// A notification that arrived in front or was pressed (the
@@ -1100,6 +1217,9 @@ struct Listeners {
     press: RefCell<Vec<Listener>>,
     next: Cell<u32>,
     subscriber: Cell<Option<u64>>,
+    /// What the hub handed over, which the delivering task takes; kept
+    /// here so that closing the VM gives what it did not post back.
+    receiver: RefCell<Option<mpsc::UnboundedReceiver<Delivery>>>,
 }
 
 impl Listeners {
@@ -1120,7 +1240,8 @@ impl Listeners {
         }
         let (id, receiver) = hub().subscribe();
         self.subscriber.set(Some(id));
-        cx.start(deliver(Rc::downgrade(self), receiver));
+        *self.receiver.borrow_mut() = Some(receiver);
+        cx.start(deliver(Rc::downgrade(self)));
         id
     }
 }
@@ -1138,58 +1259,83 @@ impl Local for Listeners {
         if let Some(id) = self.subscriber.take() {
             hub().unsubscribe(id);
         }
+        // What the VM did not post goes back to the hub: a press waits for
+        // the next VM that listens (a reload), a background delivery too
+        // while it may.
+        let Some(mut receiver) = self.receiver.take() else {
+            return;
+        };
+        receiver.close();
+        while let Ok(delivery) = receiver.try_recv() {
+            let lost = hub().dispatch(delivery, now());
+            drop(lost);
+        }
     }
+}
+
+/// The next delivery the hub handed `listeners`' VM; `None` once the VM
+/// closed.
+async fn next(listeners: &Weak<Listeners>) -> Option<Delivery> {
+    std::future::poll_fn(|cx| {
+        let Some(listeners) = listeners.upgrade() else {
+            return Poll::Ready(None);
+        };
+        let mut receiver = listeners.receiver.borrow_mut();
+        match receiver.as_mut() {
+            Some(receiver) => receiver.poll_recv(cx),
+            None => Poll::Ready(None),
+        }
+    })
+    .await
 }
 
 /// Posts what the hub hands over to the VM's listeners, while the VM
 /// lasts.
-async fn deliver(listeners: Weak<Listeners>, mut receiver: mpsc::UnboundedReceiver<Delivery>) {
-    while let Some(delivery) = receiver.recv().await {
-        let Some(listeners) = listeners.upgrade() else {
+async fn deliver(listeners: Weak<Listeners>) {
+    while let Some(delivery) = next(&listeners).await {
+        let Some(vm) = listeners.upgrade() else {
             return;
         };
-        let list = listeners.of(delivery.kind()).borrow().clone();
+        let list = vm.of(delivery.kind()).borrow().clone();
         if list.is_empty() {
             // The last listener stopped while it was on its way: the next
             // one, here or in another VM, gets it if it waits.
-            let dropped = hub().dispatch(delivery, now());
-            drop(dropped);
+            let lost = hub().dispatch(delivery, now());
+            drop(lost);
             continue;
         }
-        let listeners = list.into_iter().map(|(_, listener)| listener);
+        let callbacks = list.into_iter().map(|(_, listener)| listener);
         match delivery {
             Delivery::Token(token) => {
-                let token = PushToken {
-                    token: token.to_hex(),
-                };
-                for listener in listeners {
+                let token = PushToken::from(&token);
+                for listener in callbacks {
                     listener.post(Payload::Token(token.clone()));
                 }
             }
             Delivery::Notification(n) | Delivery::Press(n) => {
                 let notification = PushNotification::from(n);
-                for listener in listeners {
+                for listener in callbacks {
                     listener.post(Payload::Notification(notification.clone()));
                 }
             }
-            Delivery::Background(n, completion) => {
+            Delivery::Background(n, completion, at) => {
                 let background = PushBackground::from(n);
-                let answers: Vec<_> = listeners
+                let answers: Vec<_> = callbacks
                     .map(|listener| listener.call_async(Payload::Background(background.clone())))
                     .collect();
-                drop(spawn(settle(answers, completion)));
+                drop(spawn(settle(answers, completion, at + BACKGROUND_LIMIT)));
             }
         }
     }
 }
 
 /// Reports the background work of the listeners' `answers` to
-/// `completion` once they settle, or [`BACKGROUND_LIMIT`] has passed.
+/// `completion` once they settle, or at `deadline`.
 async fn settle(
     answers: Vec<Answer<Result<BackgroundReturn, String>>>,
     completion: BackgroundCompletion,
+    deadline: Instant,
 ) {
-    let deadline = now() + BACKGROUND_LIMIT;
     for answer in answers {
         let result = match within(answer, deadline).await {
             Some(Ok(BackgroundReturn(result))) => result.unwrap_or_default(),
@@ -1211,8 +1357,8 @@ async fn within<T>(future: impl std::future::Future<Output = T>, deadline: Insta
     let mut future = std::pin::pin!(future);
     let mut timeout = std::pin::pin!(timer_until(deadline));
     std::future::poll_fn(|cx| {
-        if let std::task::Poll::Ready(output) = future.as_mut().poll(cx) {
-            return std::task::Poll::Ready(Some(output));
+        if let Poll::Ready(output) = future.as_mut().poll(cx) {
+            return Poll::Ready(Some(output));
         }
         timeout.as_mut().poll(cx).map(|()| None)
     })
