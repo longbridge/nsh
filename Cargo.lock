@@ -3961,6 +3961,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "nsh-extra"
+version = "0.6.0"
+dependencies = [
+ "block2",
+ "dispatch2",
+ "log",
+ "nsh-core",
+ "nsh-platform-android",
+ "nsh-platform-ios",
+ "objc2",
+ "objc2-foundation",
+ "objc2-ui-kit",
+ "tokio",
+]
+
+[[package]]
 name = "nsh-i18n"
 version = "0.6.0"
 dependencies = [

@@ -233,12 +233,19 @@ final class Notifications {
     private static void ask(Activity activity, Mounter mounter, int request) {
         waiting.add(new Object[] {mounter, request});
         if (waiting.size() > 1) return;
-        Permissions.ask(activity, new String[] {Manifest.permission.POST_NOTIFICATIONS}, results -> {
+        boolean asked = Permissions.ask(activity, new String[] {Manifest.permission.POST_NOTIFICATIONS}, results -> {
             // Empty: the prompt was cancelled, so the user can still be asked.
             if (results != null && results.length > 0) preferences(activity).edit().putBoolean(ASKED, true).apply();
-            List<Object[]> answered = new ArrayList<>(waiting);
-            waiting.clear();
-            for (Object[] w : answered) answerPermission((Mounter) w[0], (Integer) w[1]);
+            answerWaiting();
         });
+        // In the background: answered with the state as it is, the user still to be asked.
+        if (!asked) answerWaiting();
+    }
+
+    /** Answers every request waiting for the prompt with the permission's state now. UI thread. */
+    private static void answerWaiting() {
+        List<Object[]> answered = new ArrayList<>(waiting);
+        waiting.clear();
+        for (Object[] w : answered) answerPermission((Mounter) w[0], (Integer) w[1]);
     }
 }

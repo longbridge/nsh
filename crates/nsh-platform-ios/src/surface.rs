@@ -87,8 +87,17 @@ impl MountSink for MainThreadSink {
     }
 
     fn run_on_main_thread(&self, task: MainThreadTask) {
+        let mounter = self.mounter.clone();
         // The main queue is serial: after the batches submitted before it.
-        DispatchQueue::main().exec_async(move || task.run());
+        DispatchQueue::main().exec_async(move || {
+            let mtm = MainThreadMarker::new().expect("main queue runs on the main thread");
+            let root = mounter
+                .get(mtm)
+                .borrow()
+                .as_ref()
+                .and_then(|mounter| mounter.ui_view(nsh_core::ROOT_ID));
+            crate::presenting::run_for(root, || task.run());
+        });
     }
 
     fn hot_update_failed(&self) {
