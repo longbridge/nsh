@@ -1311,6 +1311,23 @@ impl ListState {
         (start, (cross - start - end).max(0.0))
     }
 
+    /// A cell's cross-axis origin within its column, or an extra's full span.
+    pub(super) fn align_cross(&self, start: f32, cross: f32, cell: f32) -> f32 {
+        let free = cross - cell;
+        let align = self
+            .content
+            .align_items
+            .unwrap_or(taffy::AlignItems::STRETCH);
+        start
+            + if align == taffy::AlignItems::CENTER {
+                free / 2.0
+            } else if align == taffy::AlignItems::FLEX_END {
+                free
+            } else {
+                0.0
+            }
+    }
+
     /// Main-axis size of item `i`'s row.
     pub(super) fn row_extent(&self, i: u32) -> f32 {
         self.row_size(self.row_of(i))
@@ -1425,7 +1442,8 @@ impl ListState {
                     content.row_gap.0
                 } else {
                     content.column_gap.0
-                };
+                }
+                || self.content.align_items != content.align_items;
             self.content = content;
             if cross_changed {
                 self.cells_cross = f32::NAN;
@@ -2598,6 +2616,32 @@ mod tests {
     }
 
     #[test]
+    fn cells_align_on_the_cross_axis() {
+        for horizontal in [false, true] {
+            let mut l = list(2, 50.0, 200.0);
+            l.set_horizontal(horizontal);
+            let (start, cross) = l.column(200.0, 0, None);
+            assert_eq!(l.align_cross(start, cross, 40.0), 0.0, "{horizontal}");
+            for (align, expected) in [
+                (taffy::AlignItems::STRETCH, 0.0),
+                (taffy::AlignItems::FLEX_START, 0.0),
+                (taffy::AlignItems::CENTER, 80.0),
+                (taffy::AlignItems::FLEX_END, 160.0),
+            ] {
+                assert!(l.set_content(ListContentStyle {
+                    align_items: Some(align),
+                    ..ListContentStyle::default()
+                }));
+                assert_eq!(
+                    l.align_cross(start, cross, 40.0),
+                    expected,
+                    "{horizontal}: {align:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn a_mirrored_horizontal_list_keeps_its_left_padding_on_the_left() {
         // Laid out left to right and shown mirrored: the left padding is the
         // end of its main axis, so it shows on the left.
@@ -2628,6 +2672,7 @@ mod tests {
             },
             row_gap: px(8.0),
             column_gap: px(0.0),
+            ..ListContentStyle::default()
         });
         l.add_slot_cell(CellSlot::Header, 7);
         l.measured_extra(ExtraKind::Header, 30.0);

@@ -3439,6 +3439,137 @@ fn list_renders_window_and_recycles_cells() {
     assert_eq!(c.node_count(), 2 + cells.len());
 }
 
+#[test]
+fn list_content_aligns_cells_on_the_cross_axis() {
+    for horizontal in [false, true] {
+        let mut c = core();
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::List,
+                },
+                style_op(
+                    2,
+                    &[
+                        (
+                            "width",
+                            StyleValue::Number(if horizontal { 120.0 } else { 200.0 }),
+                        ),
+                        ("height", StyleValue::Number(100.0)),
+                    ],
+                ),
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Horizontal(horizontal),
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::EstimatedItemSize(px(20.0)),
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Count(2),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        c.commit();
+        let (mut next_id, mut cells) = (100, Vec::new());
+        assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 20.0), 2);
+        for (i, &cell) in cells.iter().enumerate() {
+            if horizontal {
+                c.apply(style_op(cell, &[("height", StyleValue::Null)]))
+                    .unwrap();
+            }
+            let card = 200 + i as u32;
+            apply(
+                &mut c,
+                vec![
+                    Op::Create {
+                        id: card,
+                        tag: Tag::View,
+                    },
+                    style_op(
+                        card,
+                        &[
+                            ("width", StyleValue::Number(40.0)),
+                            ("height", StyleValue::Number(20.0)),
+                        ],
+                    ),
+                    Op::Insert {
+                        parent: cell,
+                        child: card,
+                        before: None,
+                    },
+                ],
+            );
+        }
+        let batch = c.commit().unwrap();
+        let expected = if horizontal {
+            [rect(0.0, 0.0, 40.0, 100.0), rect(40.0, 0.0, 40.0, 100.0)]
+        } else {
+            [rect(0.0, 0.0, 200.0, 20.0), rect(0.0, 20.0, 200.0, 20.0)]
+        };
+        for (&cell, expected) in cells.iter().zip(expected) {
+            assert_eq!(frame_of(&batch, cell), Some(expected), "{horizontal}");
+        }
+
+        for (align, cell_at, cell_cross) in [
+            (
+                taffy::AlignItems::FLEX_START,
+                0.0,
+                if horizontal { 20.0 } else { 40.0 },
+            ),
+            (
+                taffy::AlignItems::CENTER,
+                if horizontal { 40.0 } else { 80.0 },
+                if horizontal { 20.0 } else { 40.0 },
+            ),
+            (
+                taffy::AlignItems::FLEX_END,
+                if horizontal { 80.0 } else { 160.0 },
+                if horizontal { 20.0 } else { 40.0 },
+            ),
+            (
+                taffy::AlignItems::STRETCH,
+                0.0,
+                if horizontal { 100.0 } else { 200.0 },
+            ),
+        ] {
+            c.apply(Op::SetProp {
+                id: 2,
+                prop: Prop::ListContent(crate::ListContentStyle {
+                    align_items: Some(align),
+                    ..Default::default()
+                }),
+            })
+            .unwrap();
+            c.commit();
+            let expected = if horizontal {
+                [
+                    rect(0.0, cell_at, 40.0, cell_cross),
+                    rect(40.0, cell_at, 40.0, cell_cross),
+                ]
+            } else {
+                [
+                    rect(cell_at, 0.0, cell_cross, 20.0),
+                    rect(cell_at, 20.0, cell_cross, 20.0),
+                ]
+            };
+            for (&cell, expected) in cells.iter().zip(expected) {
+                let frame = c.nodes[c.key(cell).unwrap() as usize].frame;
+                assert_eq!(frame, expected, "{horizontal}: {align:?}");
+            }
+        }
+    }
+}
+
 /// A list whose columns or content padding change with nothing else in
 /// the turn (columns worked out from a width an `onLayout` measured) lays
 /// its cells out again at the new column width, not only at the new
