@@ -595,7 +595,9 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   Windows `WM_POWERBROADCAST` / `PBT_APMRESUMEAUTOMATIC`, Linux `logind`'s `PrepareForSleep(false)`); headless tests
   wake with `app.wake()`. `padding-bottom: env(keyboard-inset-height)` pads a view by the keyboard's height, animated with the keyboard
   natively, for content outside scroll views (message bars). Inputs inside a scroll view are kept clear of the keyboard natively (bottom inset + scroll to the
-  focused input), with no JS involved.
+  focused input), with no JS involved. iOS measures what the keyboard covers where layout puts the input and its scroll
+  view, without the layers' transforms: a sheet whose input takes the focus as it comes in is not moved up again by
+  the entrance still in motion.
   Both move as one with the keyboard: `LayoutCurve::Keyboard` (`type: "keyboard"`) is the system keyboard's own curve,
   started when the keyboard started to move, however late the batch arrives. iOS takes the notification's curve (7, a
   spring UIKit has no name for) and moves the layers' new animations back to the notification's time (`beginTime`,
