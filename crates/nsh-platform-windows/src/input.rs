@@ -746,7 +746,7 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
 // --- Cursors ------------------------------------------------------------------------
 
 /// The cursor of a CSS `cursor` value, `None` to inherit the parent's.
-fn css_cursor(cursor: nsh_core::Cursor) -> Option<Cursor> {
+pub(crate) fn css_cursor(cursor: nsh_core::Cursor) -> Option<Cursor> {
     use nsh_core::Cursor as C;
     Some(match cursor {
         C::Auto => return None,
