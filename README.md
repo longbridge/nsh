@@ -87,6 +87,15 @@ brew install longbridge/tap/nsh
 </details>
 
 <details>
+<summary>MacPorts</summary>
+
+```sh
+sudo port install native-shell
+```
+
+</details>
+
+<details>
 <summary>Windows (PowerShell)</summary>
 
 ```powershell
