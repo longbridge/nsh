@@ -14,7 +14,7 @@ use nsh_core::{
     prelude::*,
 };
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
+use nsh_testing::{DragOptions, Headless};
 
 #[derive(Clone, PartialEq, Props)]
 struct MailProps {
@@ -183,8 +183,12 @@ fn the_columns_resize() {
             handles,
             "triple: {triple}"
         );
-        app.drag("role:adjustable >> nth=0", point(px(60.0), px(0.0)))
-            .unwrap();
+        app.drag(
+            "role:adjustable >> nth=0",
+            point(px(60.0), px(0.0)),
+            DragOptions::default(),
+        )
+        .unwrap();
         app.idle(Duration::from_millis(100)).unwrap();
         assert_eq!(shown(&app).len(), handles + 1, "triple: {triple}");
     }
