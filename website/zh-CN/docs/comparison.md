@@ -119,6 +119,7 @@ GPUI 与 GPUI Fast 合为一列：两者运行的平台相同，GPUI Fast 在 GP
 代价在这里：
 
 - **体积和内存。** 应用还没画任何东西，浏览器引擎和 JavaScript 运行时就已经随每个应用、每个窗口带上了。实际中，一个典型的 Electron 应用安装包起步就在 150 MB 左右，用起来内存常常到 1 GB 甚至更多（典型情况的经验数字，不是基准测试）；桌面上开着几个 Electron 应用，就是开着几个浏览器。作为对比，NSH 在 Linux 上实测的发布包只有 9.7–11.7 MB（hello world 以及 sysmon、Omasend 等真实应用），macOS 上 Rust 应用内存约 19 MB（[应用体积](./performance-report.md#应用体积)）。
+- **关掉标签页后，内存还在增长。** 例如，行情面板关闭后，全局行情订阅仍持有回调，回调又引用了已经移出页面的 DOM 节点。只要这条引用链还在，垃圾回收器就无法释放整棵子树。反复开关面板可能留下多份旧界面，旧回调还会处理每一笔行情；用户看到的就是内存持续上涨、操作越来越慢。[Chrome DevTools 内存诊断](https://developer.chrome.com/docs/devtools/memory-problems)
 - **启动。** 要等 Chromium 和 Node.js 启动，再等 JavaScript 加载、解析、执行，才有第一帧。
 - **常态 CPU。** 实时数据要更新 DOM，经过页面里的样式重算、布局和绘制；长列表和高频更新恰好是网页最不擅长的。
 - **页面不是系统。** 输入框、选择、右键菜单、滚动和无障碍都是浏览器在窗口里的实现，不是操作系统的控件。原生菜单、对话框和托盘虽然有，但只能经主进程调用，和界面隔着 IPC。
@@ -131,6 +132,7 @@ NSH 怎么解决：
 |---|---|
 | 每个应用带 Chromium + Node.js | 没有浏览器引擎。Rust 应用完全不链接 JavaScript 引擎；TSX 应用只在 QuickJS 里跑应用代码，渲染、布局和动画在 Rust 里（[架构](./architecture.md)） |
 | 安装包约 150 MB、内存常达 1 GB 以上（典型情况） | Linux 发布包 9.7–11.7 MB（hello world、sysmon、Omasend，[应用体积](./performance-report.md#应用体积)）；macOS 上 Rust 应用约 19 MB，只放一个标签的 AppKit 窗口约 17 MB（[性能报告](./performance-report.md)） |
+| 关闭面板后仍被引用的 DOM 子树 | NSH 原生控件由 Rust 运行时驱动，无需创建 DOM 子树。纯 Rust 应用也无需 JS 垃圾回收；TSX 应用仍需清理业务代码持有的回调。 |
 | 启动慢 | 引擎启动约 75–155 µs；计数器应用首帧约 1.05–1.15 ms |
 | 实时数据下的 DOM 布局 | 细粒度 signal 只把变化的属性推给平台视图；Linux 上 500 行行情表每秒 1,000 次更新占单核 18% |
 | 浏览器的文本、菜单和无障碍 | AppKit、Win32 + Direct2D 和 GTK 4 的控件、输入法和无障碍（[简介](./index.md#native-的含义)） |
@@ -149,9 +151,12 @@ NSH 怎么解决：
 
 - **三种引擎，版本众多。** 同一个应用在 Windows 和 Android 上跑 Chromium，在 Apple 平台和 Linux 上跑 WebKit。Tauri 自己的文档写明：Android 上“运行时版本取决于设备当前选择的 WebView 提供者”，“不再受支持的 macOS 版本**不会**收到 WebKit 更新”，Linux 上“很难整理出各发行版 WebKitGTK 的准确信息”（[出处](https://v2.tauri.app/reference/webview-versions/)）。渲染问题和缺失的 Web 特性要按引擎、按系统版本逐一测。
 - **仍然是网页。** 文本、滚动、选择和无障碍是 Web View 的，不是系统控件；实时数据下的性能取决于 DOM。
+- **Rust 后端管不到页面里的引用。** 例如，切走图表后，WebView 里仍在运行的定时器可以通过闭包持有旧图表和历史数据。每次切换都留下一个定时器，内存和后台刷新工作就会一起累积；即便 Rust 端已经释放对应资源，页面仍要取消定时器并释放引用。[Tauri 进程模型](https://v2.tauri.app/concept/process-model/)
 - **两种语言隔着桥。** 界面用 JavaScript，逻辑用 Rust，靠 IPC 调用和序列化连接。
 
 NSH 怎么解决：界面是平台自己的视图，在平台支持的每个系统版本上都一样，中间没有 Web 引擎；Rust 和 TSX 在同一个进程、同一张响应式图上运行，TSX 界面直接调用 Rust 模块——从 TSX 排序 100,000 行约 3 ms，与纯 Rust 持平（[性能报告](./performance-report.md)）。Tauri 最好的想法——核心用 Rust——是 NSH 的默认做法，而界面不再需要浏览器。
+
+在 NSH 原生界面上，图表可以用原生 Canvas 绘制，更新逻辑可以绑定到响应式作用域。释放作用域时，运行时会清理归属于它的计算和已登记的清理函数。应用仍须为自行创建的定时器、外部行情订阅登记取消操作；选择嵌入 WebView 的页面仍按浏览器的生命周期管理资源。[响应式运行时实现](https://github.com/longbridge/nsh/blob/d2c6e800dac5985c112e61626b89e30ace2d2f83/crates/nsh-core/src/reactive.rs#L1169)
 
 ### React Native
 

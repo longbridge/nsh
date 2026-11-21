@@ -119,6 +119,7 @@ The following sections compare the trade-offs teams face when migrating and how 
 Where that hurts:
 
 - **Size and memory.** A browser engine and a JavaScript runtime come with every app and every window, before the app draws anything. In practice a typical Electron app starts at an installer of around 150 MB and often uses 1 GB of memory or more once in use (typical figures from experience, not a benchmark); a desktop with several Electron apps runs several browsers. For comparison, NSH's measured Linux packages are 9.7–11.7 MB archives (hello worlds, and real apps such as sysmon and Omasend), and a Rust app on macOS uses ~19 MB of memory ([App size](./performance-report.md#app-size)).
+- **Memory can grow after a tab closes.** Suppose a global quote feed still holds a callback for a closed panel. If the callback references a detached DOM node, the garbage collector can see a path to it and the whole subtree can stay alive. Reopening and closing the panel can accumulate old views and callbacks that still run on every tick. Both memory use and input latency can grow over a long session. [Chrome DevTools memory guide](https://developer.chrome.com/docs/devtools/memory-problems)
 - **Start-up.** The app waits for Chromium and Node.js to start, then for its JavaScript to load, parse and run, before the first frame.
 - **Steady-state CPU.** Live data updates the DOM, which goes through style recalculation, layout and painting in the page; long lists and frequent updates are exactly what web pages handle worst.
 - **The page is not the system.** Text fields, selection, context menus, scrolling and accessibility are the browser's implementations inside a window, not the operating system's controls. Native menus, dialogs and tray icons exist, but only through the main process, across an IPC boundary from the UI.
@@ -131,6 +132,7 @@ How NSH answers:
 |---|---|
 | Chromium + Node.js in every app | No browser engine. Rust apps link no JavaScript engine at all; TSX apps run app code in QuickJS while rendering, layout and animation run in Rust ([Architecture](./architecture.md)) |
 | ~150 MB installers, often 1 GB+ memory (typical) | 9.7–11.7 MB Linux archives for hello worlds, sysmon and Omasend ([App size](./performance-report.md#app-size)); ~19 MB for a Rust app on macOS, against ~17 MB for an AppKit window with one label ([Performance report](./performance-report.md)) |
+| Detached DOM retained after closing a panel | Native NSH controls run on the Rust runtime and create no DOM subtree to retain. Pure Rust apps also avoid JS garbage collection. TSX apps still need to release callbacks held by application code. |
 | Slow start | Engine start ~75–155 µs; counter app first frame ~1.05–1.15 ms |
 | DOM layout under live data | Fine-grained signals push only the properties that changed to platform views; a 500-row quote table at 1,000 updates a second uses 18% of one core on Linux |
 | Browser text, menus and accessibility | AppKit, Win32 + Direct2D and GTK 4 controls, input methods and accessibility ([Introduction](./index.md#what-native-means)) |
@@ -149,9 +151,12 @@ Where that hurts:
 
 - **Three engines, many versions.** The same app runs on Chromium on Windows and Android and on WebKit on Apple platforms and Linux. Tauri's own reference notes that on Android "the runtime version depends on the device's currently selected WebView provider", that "unsupported macOS versions **do not** receive WebKit updates", and that on Linux "it is very hard to compile accurate information about WebKitGTK on the various distros" ([source](https://v2.tauri.app/reference/webview-versions/)). Rendering bugs and missing web features are tested per engine and per OS version.
 - **Still a page.** Text, scrolling, selection and accessibility are the web view's, not the system's controls; performance under live data is the DOM's.
+- **A Rust backend cannot release references inside the page.** For example, after navigating away from a chart, a timer in the WebView can keep the old chart and its price history alive through a closure. Leaving one timer behind on each visit accumulates both memory and background redraw work. Even after the Rust backend releases its resources, the page still needs to cancel the timer and release its references. [Tauri process model](https://v2.tauri.app/concept/process-model/)
 - **Two languages across a bridge.** UI in JavaScript, logic in Rust, joined by IPC calls and serialization.
 
 How NSH answers: the UI is the platform's own views, the same on every OS version the platform supports, with no web engine in between; Rust and TSX run in one process on one reactive graph, and a TSX screen calls a Rust module directly — sorting 100,000 rows from TSX takes ~3 ms, on par with pure Rust ([Performance report](./performance-report.md)). Tauri's best idea — Rust for the core — is NSH's default, and the UI no longer needs a browser at all.
+
+On native NSH targets, a chart can draw into a native Canvas and tie its update logic to a reactive scope. Disposing the scope tears down its owned computations and runs registered cleanup callbacks. Application-created timers and external quote subscriptions still need cancellation handlers. A screen that embeds a WebView still manages browser resources inside that view. [Reactive runtime implementation](https://github.com/longbridge/nsh/blob/d2c6e800dac5985c112e61626b89e30ace2d2f83/crates/nsh-core/src/reactive.rs#L1169)
 
 ### React Native
 
