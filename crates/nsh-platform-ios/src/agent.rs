@@ -367,15 +367,19 @@ fn shown_bars(view: &UIView, out: &mut Vec<Retained<UIView>>) {
 /// points) reach into it from its top and from its bottom: a navigation
 /// bar over its top (the status bar above it included), a tab bar or a
 /// toolbar over its bottom. Only the part of a bar that takes a press
-/// there counts (a bar behind a sheet does not); `app` says which bars are
-/// the app's own views, which the model knows about.
-fn bars_over(window: &UIWindow, rect: CGRect, app: impl Fn(&UIView) -> bool) -> (CGFloat, CGFloat) {
+/// there counts (a bar behind a sheet does not); `skip` says which bars
+/// do not count at all.
+fn bars_over(
+    window: &UIWindow,
+    rect: CGRect,
+    skip: impl Fn(&UIView) -> bool,
+) -> (CGFloat, CGFloat) {
     let mut bars = Vec::new();
     shown_bars(window, &mut bars);
     let (min_x, max_x) = (rect.origin.x, rect.origin.x + rect.size.width);
     let (min_y, max_y) = (rect.origin.y, rect.origin.y + rect.size.height);
     let (mut top, mut bottom): (CGFloat, CGFloat) = (0.0, 0.0);
-    for bar in bars.iter().filter(|b| !app(b)) {
+    for bar in bars.iter().filter(|b| !skip(b)) {
         let b = bar.convertRect_toView(bar.bounds(), Some(window));
         let (from_x, to_x) = (
             b.origin.x.max(min_x),
@@ -455,7 +459,12 @@ impl Native for IosNative {
             // UIKit does adjust the inset for, counts once.
             let rect = scroll.convertRect_toView(scroll.bounds(), Some(window));
             let (top, bottom) = bars_over(window, rect, |bar| {
-                view.with_mounter(|m| m.in_component(bar)).unwrap_or(false)
+                // A bar in the scroll view's own content (a nested stack's
+                // header) scrolls with what it covers: scrolling brings
+                // nothing out from under it, it is no edge of the scroll
+                // view. One the app mounts is the app's view, the model's.
+                bar.isDescendantOfView(&scroll)
+                    || view.with_mounter(|m| m.in_component(bar)).unwrap_or(false)
             });
             Some((start.max(top), end.max(bottom)))
         })
