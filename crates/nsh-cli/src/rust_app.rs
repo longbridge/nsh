@@ -244,6 +244,38 @@ pub(crate) fn may_make_web_view(app: &RustApp) -> bool {
     app.watched.iter().any(|dir| spells(dir))
 }
 
+/// The cargo arguments that turn web views on in a Rust app's runner
+/// (`rust-<platform>`) on Linux and Windows, the platform crates whose
+/// `webview` is a feature (#2706). A package keeps it when
+/// [`set_runner_features`] chose it; `nsh run`, which chooses nothing, when
+/// the app's code may make a web view ([`may_make_web_view`]), as a package
+/// would, so the development runner does not show a placeholder where the
+/// released one shows the page.
+fn rust_runner_web_view(platform: Platform, may: impl FnOnce() -> bool) -> Vec<&'static str> {
+    let feature = match platform {
+        Platform::Linux => "nsh-platform-linux/webview",
+        Platform::Windows => "nsh-platform-windows/webview",
+        _ => return Vec::new(),
+    };
+    let chosen = RUNNER_FEATURES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .map(|chosen| chosen.iter().any(|f| f == "webview"));
+    if chosen.unwrap_or_else(may) {
+        vec!["--features", feature]
+    } else {
+        Vec::new()
+    }
+}
+
+impl RustApp {
+    /// The generated workspace (`<app>/.nsh/rust`).
+    pub(crate) fn workspace(&self) -> &Path {
+        &self.workspace
+    }
+}
+
 pub(crate) fn current() -> Option<RustApp> {
     CURRENT.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
@@ -308,12 +340,25 @@ pub(crate) struct AppCrate {
     package: String,
     /// Its directory.
     dir: PathBuf,
+    /// The Cargo features the app turns on (an nshm's `"features"` in
+    /// `nsh.json`): the modules of it the app uses.
+    features: Vec<String>,
 }
 
 impl AppCrate {
     /// The crate `package` in `dir`.
     pub(crate) fn new(package: String, dir: PathBuf) -> AppCrate {
-        AppCrate { package, dir }
+        AppCrate {
+            package,
+            dir,
+            features: Vec::new(),
+        }
+    }
+
+    /// The same crate with `features` on.
+    pub(crate) fn with_features(mut self, features: Vec<String>) -> AppCrate {
+        self.features = features;
+        self
     }
 
     /// Its package name.
@@ -345,13 +390,29 @@ impl AppCrate {
 
     /// Its line in the `[dependencies]` of a generated crate.
     fn dependency(&self) -> String {
+        self.dependency_at(&self.dir)
+    }
+
+    /// Its line in the `[dependencies]` of a generated crate, built from
+    /// the manifest in `dir`.
+    fn dependency_at(&self, dir: &Path) -> String {
         format!(
-            "{} = {{ package = {:?}, path = {:?} }}",
+            "{} = {{ package = {:?}, path = {:?}{} }}",
             self.name(),
             self.package,
-            self.dir.to_string_lossy()
+            dir.to_string_lossy(),
+            features_value(&self.features)
         )
     }
+}
+
+/// `, features = [...]` for a dependency's line, or nothing.
+pub(crate) fn features_value(features: &[String]) -> String {
+    if features.is_empty() {
+        return String::new();
+    }
+    let list: Vec<String> = features.iter().map(|f| format!("{f:?}")).collect();
+    format!(", features = [{}]", list.join(", "))
 }
 
 /// Where the generated workspace takes nsh's crates from: where the app's
@@ -984,7 +1045,7 @@ fn crates(dir: &Path, rust: &serde_json::Value) -> anyhow::Result<Vec<AppCrate>>
         let dir = dunce::canonicalize(dir.join(path))
             .with_context(|| format!("nsh.json: \"rust\": no crate at {path}"))?;
         let package = package_name(&dir.join("Cargo.toml"))?;
-        crates.push((path.to_owned(), AppCrate { package, dir }));
+        crates.push((path.to_owned(), AppCrate::new(package, dir)));
     }
     check_crates(&crates)?;
     Ok(crates.into_iter().map(|(_, c)| c).collect())
@@ -3134,7 +3195,15 @@ opt-level = \"s\"
             if release { "" } else { " (debug)" },
             crate::runtime::other_triple(platform, triple)
         );
-        self.build(&self.workspace, &self.bin(dir), triple, release, &[], &what)
+        let web_view = rust_runner_web_view(platform, || may_make_web_view(self));
+        self.build(
+            &self.workspace,
+            &self.bin(dir),
+            triple,
+            release,
+            &web_view,
+            &what,
+        )
     }
 
     /// Waits until `stop` returns true (or the user stops the command);
@@ -3312,15 +3381,7 @@ impl RustApp {
             .iter()
             .map(|c| {
                 if self.retargeted {
-                    format!(
-                        "{} = {{ package = {:?}, path = {:?} }}",
-                        c.name(),
-                        c.package,
-                        self.workspace
-                            .join("app-crates")
-                            .join(&c.package)
-                            .to_string_lossy()
-                    )
+                    c.dependency_at(&self.workspace.join("app-crates").join(&c.package))
                 } else {
                     c.dependency()
                 }
@@ -3670,7 +3731,9 @@ pub(crate) fn cargo_target_directory(workspace: &Path) -> Option<PathBuf> {
     json.get("target_directory")?.as_str().map(PathBuf::from)
 }
 
-fn cargo() -> std::ffi::OsString {
+/// The `cargo` to run: Cargo's own when it runs `nsh`, else the one on
+/// `PATH`.
+pub(crate) fn cargo() -> std::ffi::OsString {
     env::var_os("CARGO").unwrap_or_else(|| "cargo".into())
 }
 
@@ -3737,8 +3800,14 @@ mod tests {
 
     use super::{AppCrate, Nsh, RootConfig, RustApp};
 
+    /// Serialises the tests that set [`super::RUNNER_FEATURES`].
+    static RUNNER_FEATURES_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn a_release_runner_builds_with_the_chosen_features() {
+        let _guard = RUNNER_FEATURES_TEST
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         assert!(super::runner_feature_args("nsh-platform-windows").is_empty());
         super::set_runner_features(vec!["js".into(), "net".into(), "svg".into(), "plot".into()]);
         let args = super::runner_feature_args("nsh-platform-windows");
@@ -3772,6 +3841,36 @@ mod tests {
             super::runner_feature_args("nsh-platform-android")[2],
             "js,plot,svg"
         );
+        *super::RUNNER_FEATURES.lock().unwrap() = None;
+    }
+
+    #[test]
+    fn a_rust_runner_turns_web_views_on_like_its_package() {
+        use crate::runtime::Platform;
+        let _guard = RUNNER_FEATURES_TEST
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        *super::RUNNER_FEATURES.lock().unwrap() = None;
+        // `nsh run`: when the app's code may make a web view (#2706).
+        assert_eq!(
+            super::rust_runner_web_view(Platform::Linux, || true),
+            ["--features", "nsh-platform-linux/webview"]
+        );
+        assert_eq!(
+            super::rust_runner_web_view(Platform::Windows, || true),
+            ["--features", "nsh-platform-windows/webview"]
+        );
+        assert!(super::rust_runner_web_view(Platform::Linux, || false).is_empty());
+        // Web views are no feature on macOS.
+        assert!(super::rust_runner_web_view(Platform::MacOs, || true).is_empty());
+        // A package: what it chose, whatever the scan says.
+        super::set_runner_features(vec!["webview".into()]);
+        assert_eq!(
+            super::rust_runner_web_view(Platform::Linux, || false).len(),
+            2
+        );
+        super::set_runner_features(vec!["js".into()]);
+        assert!(super::rust_runner_web_view(Platform::Linux, || true).is_empty());
         *super::RUNNER_FEATURES.lock().unwrap() = None;
     }
 
@@ -3869,10 +3968,7 @@ mod tests {
     fn app(dir: &Path, crates: &[(&str, PathBuf)], root: Option<RootConfig>) -> RustApp {
         let crates: Vec<AppCrate> = crates
             .iter()
-            .map(|(package, dir)| AppCrate {
-                package: (*package).into(),
-                dir: dir.clone(),
-            })
+            .map(|(package, dir)| AppCrate::new((*package).into(), dir.clone()))
             .collect();
         RustApp {
             workspace: dir.join(".nsh/rust"),
@@ -4856,10 +4952,7 @@ mod tests {
                 .map(|(package, deps)| {
                     let crate_dir = dir.join(package);
                     write_crate(&crate_dir, package, "", deps);
-                    AppCrate {
-                        package: (*package).into(),
-                        dir: crate_dir,
-                    }
+                    AppCrate::new((*package).into(), crate_dir)
                 })
                 .collect();
             Nsh::of(&crates).map_err(|e| e.to_string())
@@ -4901,10 +4994,7 @@ mod tests {
             "",
             "nsh-core = \"=0.0.1\"\nnsh-base = { git = \"https://example.com/nsh.git\", tag = \"v0.0.1\", default-features = false }\nserde = { version = \"1\", features = [\"rc\"] }\n",
         );
-        let crates = [AppCrate {
-            package: "app-native".into(),
-            dir: app.clone(),
-        }];
+        let crates = [AppCrate::new("app-native".into(), app.clone())];
         assert!(super::retargeted(&crates, &Nsh::Registry).unwrap());
         let out = super::write_retargeted(&dir.join("ws"), &app, &Nsh::Registry).unwrap();
         let text = std::fs::read_to_string(out.join("Cargo.toml")).unwrap();
@@ -4994,11 +5084,7 @@ mod tests {
             "",
             &format!("nsh-core = {{ git = {url:?} }}\nnsh-base = {{ git = {url:?} }}\n"),
         );
-        let nsh = Nsh::of(&[AppCrate {
-            package: "git-app".into(),
-            dir: native.clone(),
-        }])
-        .unwrap();
+        let nsh = Nsh::of(&[AppCrate::new("git-app".into(), native.clone())]).unwrap();
         let Nsh::Git {
             checkout,
             url: resolved_url,
@@ -5518,10 +5604,7 @@ panic = \"abort\"
         let crates = |packages: &[&str]| -> Vec<AppCrate> {
             packages
                 .iter()
-                .map(|p| AppCrate {
-                    package: (*p).into(),
-                    dir: PathBuf::from("/app").join(p),
-                })
+                .map(|p| AppCrate::new((*p).into(), PathBuf::from("/app").join(p)))
                 .collect()
         };
         let set = |specifier: &'static str| -> SetDescription {
@@ -5684,5 +5767,19 @@ panic = \"abort\"
                 assert!(name.starts_with("nsh-app-"), "{name}");
             }
         }
+    }
+
+    #[test]
+    fn an_nshm_links_with_the_features_the_app_turns_on() {
+        let extra = AppCrate::new("nsh-extra".into(), PathBuf::from("/cache/nsh-extra"));
+        assert_eq!(
+            extra.dependency(),
+            r#"app_nsh_extra = { package = "nsh-extra", path = "/cache/nsh-extra" }"#
+        );
+        let extra = extra.with_features(vec!["camera".into(), "push".into()]);
+        assert_eq!(
+            extra.dependency(),
+            r#"app_nsh_extra = { package = "nsh-extra", path = "/cache/nsh-extra", features = ["camera", "push"] }"#
+        );
     }
 }

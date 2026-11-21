@@ -264,9 +264,12 @@ nsh add acme-gauge@1.0                                 # 来自 crates.io：取�
 nsh add github:acme/gauge@v1.0.0                    # 来自 GitHub 的标签；或 --rev <提交或分支>；都不给则取默认分支
 nsh add https://git.example.com/gauge.git --tag v1.0.0  # 来自任意 Git 地址
 nsh add --path ../gauge                              # 来自本地目录，按当前内容使用
+nsh add nsh-extra --features camera                  # 同时开启 crate 的 Cargo feature（逗号分隔或重复给出）
 ```
 
 它把 nshm 记录到 `nsh.json` 的 `"modules"`（`"acme-gauge@1.0"`、`"github:acme/gauge@v1.0.0"`、`{ "github": "acme/gauge", "rev": "…" }`、`{ "git": "…", "tag": "v1.0.0" }` 或 `{ "path": "../gauge" }`），交给 Cargo 解析，并把解析到的版本或提交锁定在 `nsh.lock`（随应用一起提交），应用有自己的 crate（`"rust"`）时还会加入其 `[dependencies]`。构建始终使用锁定的版本或提交（本地目录按当前内容），再次运行 `nsh add` 即更新。纯 TSX 应用会像带 crate 的应用一样用 nshm 重新构建宿主（[使用 Rust](./rust.md)），因此开发机和 CI 需要 Rust 工具链。nshm 与应用的 crate 或其他 nshm 冲突（同名包或同名模块），或与当前 NSH 不兼容时，`nsh.json` 和 `nsh.lock` 保持不变。
+
+`--features` 开启 crate 的 Cargo feature，也就是应用用到的那些模块，已经列出的 feature 保留（在 `camera` 之后运行 `nsh add nsh-extra --features push`，`camera` 仍然开着）；crate 没有定义的名字会让 `nsh add` 报错，`nsh.json` 不变。这时条目写成对象形式（`{ "crate": "nsh-extra", "version": "0.6", "features": ["camera"] }`，`"github"`、`"git"`、`"path"` 旁边同样可以写 `"features"`），应用的 crate 也带着这些 feature 依赖它，并保留它的 `Cargo.toml` 里已经开启的 feature。要关掉某个 feature，把它从 `nsh.json` 和应用 crate 的 `Cargo.toml` 里这个依赖上一起删掉。和每次 `nsh add` 一样，加 feature 也会按命令行重新解析这个条目：命令行没有重复的版本要求、tag 或 rev 会被去掉（`nsh add nsh-extra@0.6 --features push` 保留 `0.6`）。crate 在 `[package.metadata.nsh]` 下为已开启的 feature 声明的条目会加进安装包，除 entitlements 外也加进开发宿主（[打包的应用需要什么](./nshm.md#打包的应用需要什么)）。
 
 nshm 是普通的 Cargo 库：根部有 `#[native_module("<module>")]` 入口（与应用自己的 crate 相同），TSX 按这个标识导入它（[编写 nshm](./nshm.md#编写-nshm)）。
 

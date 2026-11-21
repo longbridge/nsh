@@ -215,7 +215,7 @@ final class WebBox extends WidgetBox {
             if (missing.isEmpty()) {
                 request.grant(resources);
             } else if (SystemUi.activity(context) != null) {
-                Permissions.ask(SystemUi.activity(context), missing.toArray(new String[0]), results -> {
+                boolean asked = Permissions.ask(SystemUi.activity(context), missing.toArray(new String[0]), results -> {
                     boolean allowed = results != null && results.length > 0;
                     if (results != null) {
                         for (int r : results) allowed &= r == PackageManager.PERMISSION_GRANTED;
@@ -223,6 +223,7 @@ final class WebBox extends WidgetBox {
                     if (allowed) request.grant(resources);
                     else request.deny();
                 });
+                if (!asked) request.deny();
             } else {
                 request.deny();
             }
