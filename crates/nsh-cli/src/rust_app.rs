@@ -326,9 +326,11 @@ pub(crate) struct RustApp {
     /// share one build of what they have in common
     /// ([`RustApp::unify_features`]).
     unify: bool,
-    /// The app's nshm (`nsh add`): their Git URLs, packages and
-    /// checkouts. The app's crates name them by Git; the workspace patches
-    /// those to the locked checkouts, so all link one copy.
+    /// The app's Rust nshm (`nsh add`): how each is patched (its Git URL,
+    /// crate name or directory: `nshm::patch_table`), its package and its
+    /// installed copy in `~/.nsh/nshms`. Whatever names them (the app's
+    /// crates, other nshm) the workspace patches to those copies, so all
+    /// link one.
     modules: Vec<(String, String, PathBuf)>,
     /// The oldest Apple systems its packages declare, which its builds for
     /// them compile for ([`set_deployment_target`]).
@@ -1047,7 +1049,7 @@ pub(crate) fn of(entry: &Path, unify: bool) -> anyhow::Result<Option<RustApp>> {
         None => Vec::new(),
     };
     // nsh's crates come from where the app's own crates take them; an
-    // nshm asks crates.io for a version, patched to that place. An app
+    // nshm's requirement on them is patched to that place. An app
     // with nshm only builds with this CLI's, as a TSX app's runner
     // does ([`runner_only`]).
     let nsh = if crates.is_empty() {
@@ -2858,8 +2860,8 @@ opt-level = \"s\"
             ));
         }
         // The app's crates take its nshm from Git or crates.io (`nsh
-        // add`): the locked checkouts, the ones the sets link. One from a
-        // directory is that directory already.
+        // add`): the installed copies the lock pins, the ones the sets
+        // link. One from a directory is that directory already.
         let mut crates_io = String::new();
         let mut git_patches = String::new();
         for (id, package, dir) in &self.modules {
