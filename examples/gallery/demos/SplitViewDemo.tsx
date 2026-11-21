@@ -12,7 +12,7 @@ import { alpha, colors, density, focusRing, header, hovered, PageHeader, radius,
 // buttons); elsewhere they stand side by side. Where the window is compact one
 // column shows: a selection brings the next one in front, and back returns.
 // The look is the gallery's: the sidebar on its own surface, a hairline
-// between the columns, the selection in the brand's tint.
+// between the columns, a neutral selection; the columns resize by their edges.
 
 type Mailbox = { id: string; title: string; icon: LucideIconName };
 
@@ -147,10 +147,10 @@ function MailboxRow(props: { mailbox: Mailbox; selected: boolean; onPress: () =>
         gap: 10,
         paddingHorizontal: 10,
         borderRadius: radius.control,
-        backgroundColor: props.selected ? colors.sidebarSelected : "transparent",
+        backgroundColor: props.selected ? alpha(colors.text, 0.07) : "transparent",
       }}
     >
-      {!terminal && <LucideIcon name={props.mailbox.icon} size={16} tint={props.selected ? colors.accent : colors.muted} />}
+      {!terminal && <LucideIcon name={props.mailbox.icon} size={16} tint={props.selected ? colors.text : colors.muted} />}
       <Text style={{ flex: 1, numberOfLines: 1, fontSize: density.body, fontWeight: props.selected ? "600" : "500", color: colors.text }}>{props.mailbox.title}</Text>
       {unread() > 0 && <Text style={{ fontSize: density.note, fontVariant: ["tabular-nums"], color: colors.muted }}>{String(unread())}</Text>}
     </View>
@@ -176,11 +176,11 @@ function MessageRow(props: { message: Message; selected: boolean; onPress: () =>
         paddingEnd: 12,
         paddingStart: 6,
         borderRadius: radius.control,
-        backgroundColor: props.selected ? colors.sidebarSelected : "transparent",
+        backgroundColor: props.selected ? alpha(colors.text, 0.07) : "transparent",
       }}
     >
       <View style={{ width: 10, paddingTop: 6, alignItems: "center" }}>
-        {m.unread && <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.accent }} />}
+        {m.unread && <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.text }} />}
       </View>
       <View style={{ flex: 1, gap: 3 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
