@@ -145,7 +145,7 @@ const chat = Window.open(Chat, { id: "chat", title: "Chat", defaultSize: { width
 chat.focus();
 ```
 
-在 Rust 中，`open_window(window()...)` 是同样的写法（GPUI：`cx.open_window`）：可以在任何地方（事件处理、菜单项、任务）打开 `window()` builder 描述的窗口，并立即返回它的 `WindowRef`。如果同 id 的窗口已经打开（无论是 `open_window` 打开的还是用 `window()` 声明的），它会聚焦该窗口并返回它的 ref。在 `Window.open` 会抛错的情况下（非桌面平台，或权限不允许该窗口），它返回 `None` 并记录警告。它不使用 `.open(..)`；窗口一直打开，直到用户或 `close()` 关闭它，`.on_open_change(..)` 会收到通知。每个文档一个窗口时，给每个窗口自己的 id：
+在 Rust 中，`open_window(window()...)` 是同样的写法（GPUI：`cx.open_window`）：可以在任何地方（事件处理、菜单项、任务）打开 `window()` builder 描述的窗口，并立即返回它的 `WindowRef`。这个 ref 立即可用：同一轮里对它设置的属性会随窗口一起打开，对它的请求（`focus()`、`set_mode(..)` 等）会在窗口打开后按顺序执行。如果同 id 的窗口已经打开（无论是 `open_window` 打开的还是用 `window()` 声明的），它会聚焦该窗口并返回它的 ref。在 `Window.open` 会抛错的情况下（非桌面平台，或权限不允许该窗口），它返回 `None` 并记录警告。它不使用 `.open(..)`；窗口一直打开，直到用户或 `close()` 关闭它，`.on_open_change(..)` 会收到通知。每个文档一个窗口时，给每个窗口自己的 id：
 
 ```rust
 let Some(doc) = open_window(

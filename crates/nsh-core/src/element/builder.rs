@@ -249,6 +249,9 @@ pub(crate) struct RareAttrs {
     /// A window of the app's own: the dialog root it shows
     /// ([`super::desktop::window`]).
     pub(crate) window: Option<Box<crate::desktop::WindowOptions>>,
+    /// What the app asked of that window before it was mounted, sent once
+    /// it opens.
+    pub(crate) window_requests: Option<super::desktop::EarlyRequests>,
 }
 
 impl RareAttrs {
@@ -271,6 +274,7 @@ impl RareAttrs {
             && self.projected_active.is_none()
             && self.render.is_none()
             && self.window.is_none()
+            && self.window_requests.is_none()
     }
 
     pub(crate) fn boxed(self) -> Option<Box<Self>> {

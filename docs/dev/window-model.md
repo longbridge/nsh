@@ -234,6 +234,12 @@ the registry's app windows. This avoids a second rendering model.
 - Imperative: `Window.open(Component, options)` creates a window root and
   returns its `WindowRef`. The open window of the same id is returned; the
   call focuses it.
+- A Rust window of the app's own has no node until its element mounts
+  (right after `open_window`, and while its content first renders), so its
+  `WindowRef` keeps what it is set to (`early`) and asked
+  (`EarlyRequests`) meanwhile: it opens with those attributes, and the core
+  sends the requests right after its `OpenWindow`, in the same commit. JS's
+  implicit first window does the same (`Windows::pending`).
 - `Window.get(id)`, `windows()` and `focusedWindow()` read the registry.
 - A window can open before any other window and while no window is visible.
   The app host does not depend on a visible window.

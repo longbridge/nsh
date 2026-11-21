@@ -3274,7 +3274,8 @@ impl<M: TextEngine> Core<M> {
             {
                 // Opened once; then only its attributes follow (the record sends
                 // what changed).
-                let command = if or.window.is_none() {
+                let opens = or.window.is_none();
+                let command = if opens {
                     crate::desktop::DesktopCommand::OpenWindow(Box::new(
                         crate::desktop::OpenWindow {
                             options: (**window).clone(),
@@ -3290,6 +3291,22 @@ impl<M: TextEngine> Core<M> {
                     id,
                     command: crate::Command::Desktop(Box::new(command)),
                 });
+                // What the app asked of it before it was mounted follows its
+                // open, in order. A window the capabilities refused has no
+                // record and nothing to carry the requests out.
+                if opens && let Some(requests) = &nr.window_requests {
+                    let requests = requests.take();
+                    if self.windows.contains_key(&id) {
+                        for request in requests {
+                            let _ = self.apply_op(Op::Command {
+                                id,
+                                command: crate::Command::Desktop(Box::new(
+                                    crate::desktop::DesktopCommand::Request(request),
+                                )),
+                            });
+                        }
+                    }
+                }
             }
         }
     }

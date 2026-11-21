@@ -127,7 +127,10 @@ enum Target {
 /// ([`window`]), as [`current_window`] gives it. Setting its attributes and
 /// its requests are commands that go out with the commit; the platform may
 /// decline or adjust a request, and [`Self::state`] reports what happened.
-/// Commands to a closed window do nothing.
+/// While a window of the app's own opens (right after [`open_window`]
+/// returned it, or while its content first renders), it opens with the
+/// attributes set and the requests follow its open, in order. Commands to
+/// a closed window do nothing.
 #[derive(Clone)]
 pub struct WindowRef {
     id: Rc<str>,
@@ -145,8 +148,40 @@ pub struct WindowRef {
     /// last one's reason (the app root's are the environment's).
     close_press: Option<Signal<(u64, CloseReason)>>,
     /// What a window of the app's own was set to before its element was
-    /// mounted (its content's first render): opened with it.
+    /// mounted (its content's first render): opened with it. Owned by its
+    /// opening, so it lives exactly while the window opens or is open.
     early: Option<Signal<WindowAttributes>>,
+    /// What a window of the app's own was asked before its element was
+    /// mounted: sent right after it opens.
+    early_requests: Option<EarlyRequests>,
+}
+
+/// The requests made of a window of the app's own before its element was
+/// mounted (it has no node to send them to yet). The window's element
+/// carries them, and the core sends them right after the window opens, in
+/// order, in the commit that opens it.
+#[derive(Clone, Default)]
+pub(crate) struct EarlyRequests(Rc<RefCell<Vec<WindowRequest>>>);
+
+impl EarlyRequests {
+    /// Takes the requests made so far.
+    pub(crate) fn take(&self) -> Vec<WindowRequest> {
+        std::mem::take(&mut self.0.borrow_mut())
+    }
+}
+
+impl PartialEq for EarlyRequests {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl fmt::Debug for EarlyRequests {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("EarlyRequests")
+            .field(&self.0.borrow().len())
+            .finish()
+    }
 }
 
 impl fmt::Debug for WindowRef {
@@ -181,6 +216,7 @@ pub fn main_window() -> WindowRef {
         close: None,
         close_press: None,
         early: None,
+        early_requests: None,
     }
 }
 
@@ -232,16 +268,28 @@ impl WindowRef {
                     super::ambient::desktop_command(command);
                 }
             }
-            // Not mounted yet (set while it first renders): the attributes
-            // join the options it opens with, nothing else reaches it.
-            Target::Own(element) => match (command, self.early) {
-                (DesktopCommand::SetAttributes(attributes), Some(early))
-                    if element.node().is_none() =>
-                {
-                    early.update(|e| e.merge(&attributes));
+            Target::Own(element) if element.node().is_some() => {
+                element.send(Command::Desktop(Box::new(command)));
+            }
+            // Not mounted yet: while it opens (`open_window` returned it, or
+            // its content first renders) the attributes join the options it
+            // opens with and the requests follow its open. Closed, its
+            // opening's owner took `early` with it: nothing reaches it.
+            Target::Own(_) => {
+                let (Some(early), Some(requests)) = (self.early, &self.early_requests) else {
+                    return;
+                };
+                if !early.is_live() {
+                    return;
                 }
-                (command, _) => element.send(Command::Desktop(Box::new(command))),
-            },
+                match command {
+                    DesktopCommand::SetAttributes(attributes) => {
+                        early.update(|e| e.merge(&attributes));
+                    }
+                    DesktopCommand::Request(request) => requests.0.borrow_mut().push(request),
+                    _ => {}
+                }
+            }
         }
     }
 
@@ -658,25 +706,35 @@ impl IntoElement for Window {
         let bound = Rc::new(bound);
         let reactive = Rc::new(reactive);
         super::when(is_open, move || {
-            let (element, state, title_bar, close_press, early) = match &opened {
+            // Each opening has its own: a window `open_window` opened renders
+            // once (closed, its row goes), with what was set and asked of it
+            // since; a declared window opened again starts from its options.
+            let (element, state, title_bar, close_press, early, early_requests) = match &opened {
                 Some(WindowRef {
                     target: Target::Own(element),
                     state: Some(state),
                     title_bar: Some(title_bar),
                     close_press: Some(close_press),
                     early: Some(early),
+                    early_requests: Some(early_requests),
                     ..
-                }) => (*element, *state, *title_bar, *close_press, *early),
+                }) => (
+                    *element,
+                    *state,
+                    *title_bar,
+                    *close_press,
+                    *early,
+                    early_requests.clone(),
+                ),
                 _ => (
                     super::element_ref(),
                     super::signal(None::<WindowState>),
                     super::signal(Edges::<Points>::default()),
                     super::signal((0u64, CloseReason::default())),
                     super::signal(WindowAttributes::default()),
+                    EarlyRequests::default(),
                 ),
             };
-            // A window opened again starts from its options.
-            super::untracked(|| early.set(WindowAttributes::default()));
             let close: Rc<dyn Fn(WindowCloseCause)> = {
                 let on_open_change = on_open_change.clone();
                 Rc::new(move |cause: WindowCloseCause| {
@@ -697,6 +755,7 @@ impl IntoElement for Window {
                 close: Some(close.clone()),
                 close_press: Some(close_press),
                 early: Some(early),
+                early_requests: Some(early_requests.clone()),
             };
             LiveWindows::add(this.clone());
             super::provide_context(this);
@@ -717,8 +776,10 @@ impl IntoElement for Window {
                     early.with(|e| o.attributes.merge(e));
                     o
                 };
-                let apply = |attrs: &mut super::Attrs, o: WindowOptions| {
-                    attrs.rare_mut().window = Some(Box::new(o));
+                let apply = move |attrs: &mut super::Attrs, o: WindowOptions| {
+                    let rare = attrs.rare_mut();
+                    rare.window = Some(Box::new(o));
+                    rare.window_requests = Some(early_requests.clone());
                 };
                 // Bound even with static options: what its content sets
                 // while it first renders (`early`) joins them.
@@ -922,6 +983,7 @@ pub fn open_window(mut window: Window) -> Option<WindowRef> {
             }),
             close_press: Some(super::signal((0, CloseReason::default()))),
             early: Some(super::signal(WindowAttributes::default())),
+            early_requests: Some(EarlyRequests::default()),
         })
     });
     window.on_open_change = Some(on_open_change);

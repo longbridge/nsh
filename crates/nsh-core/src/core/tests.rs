@@ -28260,7 +28260,7 @@ mod rust_windows {
     use crate::{
         desktop::{
             DesktopCommand, OpenWindow, SizeToContent, WindowAttributes, WindowCloseCause,
-            WindowEvent, WindowKind, WindowLevel, WindowRequest,
+            WindowEvent, WindowKind, WindowLevel, WindowMode, WindowRequest,
         },
         element::{
             Root,
@@ -28614,6 +28614,155 @@ mod rust_windows {
             open("Second");
         }
         assert_eq!(opened_title(&mut c).as_deref(), Some("Second"));
+    }
+
+    /// The window commands of each commit until nothing is left to send.
+    fn all_window_commands(c: &mut Core<FakeEngine>) -> Vec<(NodeId, DesktopCommand)> {
+        let mut commands = Vec::new();
+        while let Some(batch) = c.commit() {
+            commands.extend(window_commands(&batch));
+        }
+        commands
+    }
+
+    // #2759: what the app asks of the window `open_window` returned, in the
+    // same turn, reaches it right after it opens, in order; what it sets
+    // joins the options it opens with.
+    #[test]
+    fn requests_made_while_an_opened_window_opens_follow_its_open() {
+        use crate::element::desktop::open_window;
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<Empty>());
+        let _ = c.commit();
+        {
+            let _entered = c.components.runtime.enter();
+            let inspector = open_window(
+                window()
+                    .id("inspector")
+                    .title("Static")
+                    .content(|| text("inspector")),
+            )
+            .expect("opens on a desktop");
+            inspector.set_mode(WindowMode::Maximized);
+            inspector.set(WindowAttributes {
+                title: Some("Set".into()),
+                ..Default::default()
+            });
+            inspector.focus();
+            // Its id again before it rendered: the same window, focused.
+            let again = open_window(window().id("inspector")).expect("the open window");
+            assert!(again == inspector);
+        }
+        let commands = all_window_commands(&mut c);
+        let [(id, DesktopCommand::OpenWindow(open)), rest @ ..] = &commands[..] else {
+            panic!("it opens first: {commands:?}");
+        };
+        assert_eq!(open.options.attributes.title.as_deref(), Some("Set"));
+        let request = |r| (*id, DesktopCommand::Request(r));
+        assert_eq!(
+            rest,
+            [
+                request(WindowRequest::SetMode(WindowMode::Maximized)),
+                request(WindowRequest::Focus),
+                request(WindowRequest::Focus),
+            ]
+        );
+    }
+
+    #[component]
+    fn AsksWhileOpening() -> impl IntoElement {
+        view().child(window().id("player").content(|| {
+            let me = current_window();
+            me.set_mode(WindowMode::FullScreen);
+            effect(move || me.focus());
+            text("player")
+        }))
+    }
+
+    // #2759: a window's own content asking while the window first opens
+    // (as it renders, from an effect) reaches it after its open.
+    #[test]
+    fn requests_made_while_a_window_opens_follow_its_open() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<AsksWhileOpening>());
+        let commands = all_window_commands(&mut c);
+        let [(id, DesktopCommand::OpenWindow(_)), rest @ ..] = &commands[..] else {
+            panic!("it opens first: {commands:?}");
+        };
+        let request = |r| (*id, DesktopCommand::Request(r));
+        assert_eq!(
+            rest,
+            [
+                request(WindowRequest::SetMode(WindowMode::FullScreen)),
+                request(WindowRequest::Focus),
+            ]
+        );
+        // Refused by the capabilities, it does not open, and nothing it
+        // asked goes out.
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        let mut access = crate::access::Access::all();
+        access.declared.windows = None;
+        c.set_access(std::sync::Arc::new(access));
+        c.mount_root(&Root::of::<AsksWhileOpening>());
+        let commands = all_window_commands(&mut c);
+        assert!(commands.is_empty(), "{commands:?}");
+    }
+
+    // A closed window's ref does nothing, and the window opened again under
+    // its id gets none of it.
+    #[test]
+    fn a_closed_windows_ref_does_nothing() {
+        use crate::element::desktop::open_window;
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<Empty>());
+        let _ = c.commit();
+        let doc = {
+            let _entered = c.components.runtime.enter();
+            open_window(window().id("doc").content(|| text("doc"))).expect("opens on a desktop")
+        };
+        let _ = all_window_commands(&mut c);
+        {
+            let _entered = c.components.runtime.enter();
+            doc.close();
+        }
+        let _ = all_window_commands(&mut c);
+        {
+            let _entered = c.components.runtime.enter();
+            doc.set(WindowAttributes {
+                title: Some("Late".into()),
+                ..Default::default()
+            });
+            doc.set_mode(WindowMode::Maximized);
+            doc.focus();
+        }
+        let commands = all_window_commands(&mut c);
+        assert!(commands.is_empty(), "{commands:?}");
+        {
+            let _entered = c.components.runtime.enter();
+            open_window(window().id("doc").title("Again").content(|| text("doc")))
+                .expect("opens again");
+        }
+        let commands = all_window_commands(&mut c);
+        let [(_, DesktopCommand::OpenWindow(open))] = &commands[..] else {
+            panic!("only its open: {commands:?}");
+        };
+        assert_eq!(open.options.attributes.title.as_deref(), Some("Again"));
     }
 
     #[component]
