@@ -47,10 +47,10 @@ use windows::{
             Controls::RichEdit::{
                 CHARFORMAT2W, CHARFORMATW, CHARRANGE, EM_EXGETSEL, EM_GETSCROLLPOS,
                 EM_SETSCROLLPOS, ITextServices2, PARAFORMAT, PARAFORMAT2, TXTBACK_TRANSPARENT,
-                TXTBACKSTYLE, TXTVIEW_ACTIVE,
+                TXTBACKSTYLE, TXTBIT_RICHTEXT, TXTVIEW_ACTIVE,
             },
             Input::Ime::{HIMC, ImmGetContext, ImmReleaseContext},
-            WindowsAndMessaging::{HCURSOR, KillTimer, SetTimer, WM_GETTEXTLENGTH, WM_TIMER},
+            WindowsAndMessaging::{HCURSOR, KillTimer, SetTimer, WM_TIMER},
         },
     },
     core::{BOOL, GUID, HRESULT, IUnknown, Interface, PCWSTR, w},
@@ -366,10 +366,7 @@ impl Editor {
 
     /// The text (plain, lines broken by `\r`, as the services keep it).
     pub(crate) fn text_units(&self) -> Vec<u16> {
-        let mut bstr = windows::core::BSTR::new();
-        // SAFETY: an out BSTR we own.
-        let _ = unsafe { self.services.TxGetText(&mut bstr) };
-        bstr.to_vec()
+        text_of(&self.services, self.host().props.borrow().bits)
     }
 
     /// Replaces the text (no undo, no notification but `EN_CHANGE`).
@@ -379,11 +376,18 @@ impl Editor {
         let _ = unsafe { self.services.TxSetText(PCWSTR(wide.as_ptr())) };
     }
 
-    /// The selection, in UTF-16 units (start ≤ end).
+    /// The selection, in UTF-16 units (start ≤ end), within the text: rich
+    /// text's final paragraph mark ([`text_of`]), which selecting all
+    /// takes in, is left out.
     pub(crate) fn selection(&self) -> (u32, u32) {
         let mut range = CHARRANGE::default();
         self.send(EM_EXGETSEL, 0, &mut range as *mut _ as isize);
-        (range.cpMin.max(0) as u32, range.cpMax.max(0) as u32)
+        let (start, end) = (range.cpMin.max(0) as u32, range.cpMax.max(0) as u32);
+        if self.host().props.borrow().bits & TXTBIT_RICHTEXT == 0 {
+            return (start, end);
+        }
+        let len = self.text_units().len() as u32;
+        (start.min(len), end.min(len))
     }
 
     /// The vertical scroll: minimum, maximum, position and page (pixels).
@@ -981,6 +985,20 @@ unsafe extern "system" fn tx_get_back_style(_: This, style: *mut TXTBACKSTYLE) -
     S_OK
 }
 
+/// The text of `services`, whose host's property bits are `bits`: rich
+/// text always ends with a paragraph mark of its own, which is not the
+/// field's text and is left out.
+fn text_of(services: &ITextServices2, bits: u32) -> Vec<u16> {
+    let mut bstr = windows::core::BSTR::new();
+    // SAFETY: an out BSTR we own.
+    let _ = unsafe { services.TxGetText(&mut bstr) };
+    let mut units = bstr.to_vec();
+    if bits & TXTBIT_RICHTEXT != 0 && units.last() == Some(&u16::from(b'\r')) {
+        units.pop();
+    }
+    units
+}
+
 unsafe extern "system" fn tx_get_max_length(this: This, out: *mut u32) -> HRESULT {
     // SAFETY: a live host and an out value.
     unsafe { *out = host(this).props.borrow().max_length };
@@ -1047,14 +1065,9 @@ unsafe extern "system" fn tx_notify(this: This, code: u32, _: *mut c_void) -> HR
                         LPARAM(&mut range as *mut _ as isize),
                         &mut r,
                     );
-                    let mut len = LRESULT(0);
-                    let _ =
-                        services.TxSendMessage(WM_GETTEXTLENGTH, WPARAM(0), LPARAM(0), &mut len);
-                    notes.composition_start = Some((
-                        range.cpMin.max(0) as u32,
-                        range.cpMax.max(0) as u32,
-                        len.0.max(0) as u32,
-                    ));
+                    let len = text_of(services, host.props.borrow().bits).len() as u32;
+                    let at = |cp: i32| (cp.max(0) as u32).min(len);
+                    notes.composition_start = Some((at(range.cpMin), at(range.cpMax), len));
                 }
             }
         }
