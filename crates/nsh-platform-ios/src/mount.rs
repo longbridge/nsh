@@ -203,6 +203,8 @@ struct Gestures {
     pan: Option<Retained<UIPanGestureRecognizer>>,
     pinch: Option<Retained<UIPinchGestureRecognizer>>,
     rotation: Option<Retained<UIRotationGestureRecognizer>>,
+    /// `onFileDrop`: a `UIDropInteraction` ([`crate::file_drop`]).
+    file_drop: Option<Retained<objc2::runtime::AnyObject>>,
     /// `panActivation`.
     gate: Option<Retained<crate::touch::PanGate>>,
     refresh: Option<Refresh>,
@@ -3160,6 +3162,45 @@ impl Mounter {
             .dispatch_event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
     }
 
+    /// A drag of files entered (`entered`) or left listener `id`
+    /// ([`crate::file_drop`]): its URLs are not known before the drop.
+    pub(crate) fn file_drag(&mut self, id: NodeId, entered: bool) {
+        let kind = if entered {
+            EventKind::FileDragEnter
+        } else {
+            EventKind::FileDragLeave
+        };
+        if self.slot(id).is_some_and(|s| s.events.contains(kind)) {
+            let payload = if entered {
+                EventPayload::FileDrop(Vec::new())
+            } else {
+                EventPayload::None
+            };
+            self.control.dispatch_event(id, kind, payload);
+        }
+    }
+
+    /// Files `uris` were dropped on listener `id` at `in_window` (the
+    /// window's coordinates), then the drag is over: `onFileDrop`, then
+    /// `onFileDragLeave`, as the desktop backends report them.
+    pub(crate) fn files_dropped(&mut self, id: NodeId, in_window: CGPoint, uris: Vec<String>) {
+        let Some(slot) = self.slot(id) else { return };
+        let events = slot.events;
+        let view = slot.native.view().retain();
+        if !uris.is_empty() && events.contains(EventKind::FileDrop) {
+            let (_, page_position) = self.pointer_positions(&view, in_window);
+            self.control.dispatch_event(
+                id,
+                EventKind::FileDrop,
+                EventPayload::FileDropAt {
+                    uris,
+                    page_position,
+                },
+            );
+        }
+        self.file_drag(id, false);
+    }
+
     /// `in_window` (the window's coordinates) in `view` and in the root
     /// view it is in.
     fn pointer_positions(
@@ -3687,8 +3728,25 @@ impl Mounter {
                 r
             }
         });
+        let wants_drop = events.contains(EventKind::FileDrop);
+        match (&slot.gestures.file_drop, wants_drop) {
+            (None, true) => {
+                if let Some(i) = crate::file_drop::interaction(&target) {
+                    // SAFETY: UIView's `addInteraction:` with a UIInteraction.
+                    let _: () = unsafe { objc2::msg_send![view, addInteraction: &*i] };
+                    slot.gestures.file_drop = Some(i);
+                }
+            }
+            (Some(i), false) => {
+                // SAFETY: UIView's `removeInteraction:` with its interaction.
+                let _: () = unsafe { objc2::msg_send![view, removeInteraction: &**i] };
+                slot.gestures.file_drop = None;
+            }
+            _ => {}
+        }
         let wants_touch = events.contains(EventKind::Touch);
-        if wants_press
+        if wants_drop
+            || wants_press
             || wants_pan
             || wants_pinch
             || wants_rotation

@@ -1054,7 +1054,20 @@ only is a `RustApp` too, its nsh crates this CLI's, as `runner_only`), checks th
 directory, package or `#[native_module]` specifier), and the workspace links each like an app crate. The app's crate
 depends on the nshm as `nsh add` writes it (Git at the locked `rev`, the resolved crate version, or a relative
 `path`), which the workspace's `[patch."<url>"]` / `[patch.crates-io]` sends to the same checkout. Before linking, the nshm must have a `#[native_module]` at its root
-(its module) and its `nsh-core` dependency requirement, if any, must match this CLI; there is no NSH-specific metadata. The list was `"extensions"` before any release; `nshm::sources` rejects that key. `nsh check` does not `cargo check` nshm (only crates outside the cache). Not yet: per-target support checks, web and mobile packaging checks, and an OTA check of the shell's linked modules.
+(its module) and its `nsh-core` dependency requirement, if any, must match this CLI. An entry's `"features"` (`nsh
+add --features`) are the crate's Cargo features the app turns on, carried to every dependency on the crate; the lock
+does not depend on them. The list was `"extensions"` before any release; `nshm::sources` rejects that key. `nsh check` does not `cargo check` nshm (only crates outside the cache). Not yet: per-target support checks, web and mobile packaging checks, and an OTA check of the shell's linked modules.
+
+### What crates declare for packages (`[package.metadata.nsh]`)
+
+`crates/nsh-cli/src/module_meta.rs`. A crate the app links (an nshm, the app's own crate or anything they depend on)
+may declare what the packaged app needs, for itself or per feature: `Info.plist` keys and entitlements on iOS,
+permissions, queries and components on Android. The CLI reads them from the app's dependency graph with the features
+Cargo turns on and adds them to iOS and Android packages; `nsh run`'s development hosts get the `Info.plist` keys and
+the Android entries, not the entitlements. The app's `nsh.json` wins and settles what two crates disagree on (for iOS:
+an Android package never stops on an iOS key); keys NSH sets itself stay NSH's. Android permissions are checked and
+spelled out as `nsh.json`'s are. Keys this CLI does not know are
+reported and left out, so the format can grow.
 
 ## Finding the runtimes
 

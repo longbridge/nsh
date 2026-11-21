@@ -72,7 +72,8 @@ enum Task {
         #[arg(long)]
         abi: Vec<String>,
     },
-    /// Run clippy on the Android crate (with the NDK set up).
+    /// Run clippy on the Android crate and `nsh-extra`'s modules for
+    /// Android (with the NDK set up).
     ClippyAndroid,
     /// Build the distribution in `dist/nsh`.
     Dist,

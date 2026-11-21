@@ -95,10 +95,23 @@ final class Picker {
             intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, request.limit > 1);
         }
         android.app.FragmentManager manager = activity.getFragmentManager();
-        Results results = (Results) manager.findFragmentByTag(FRAGMENT);
-        if (results == null) {
+        // After the activity saved its state (the app went to the background) no fragment may be added, and Android
+        // would not show the picker anyway: adding one would throw on the UI thread.
+        Results results = manager.isStateSaved() ? null : (Results) manager.findFragmentByTag(FRAGMENT);
+        if (results == null && !manager.isStateSaved()) {
             results = new Results();
-            manager.beginTransaction().add(results, FRAGMENT).commitNow();
+            try {
+                manager.beginTransaction().add(results, FRAGMENT).commitNow();
+            } catch (IllegalStateException e) {
+                Log.w(TAG, "cannot add the picker's fragment", e);
+                results = null;
+            }
+        }
+        if (results == null) {
+            Log.w(TAG, "the picker cannot be shown while the app is in the background");
+            if (request.paths != null) answerPaths(request, new ArrayList<>(), "the app is in the background");
+            else answer(request, new ArrayList<>());
+            return;
         }
         results.start(intent, request);
     }
@@ -357,6 +370,32 @@ final class Picker {
                 return null;
             }
             return out.toByteArray();
+        }
+    }
+
+    /**
+     * {@code nsh::picker::prepare_image}: the image file at {@code path} prepared as a pick prepares the photos
+     * picked ({@code maxDimension} 0: none; {@code quality} negative: none), named {@code name}, as {@code [name,
+     * type, bytes, int[] {width, height}]}; {@code null} when it is no image or before any {@code NshView} was
+     * made. Any thread but the UI thread's work is better kept off it.
+     */
+    static Object[] prepareFile(String path, String name, int maxDimension, float quality, boolean current) {
+        Context context = Permissions.application();
+        if (context == null) return null;
+        Request request = new Request();
+        request.limit = 1;
+        request.maxDimension = maxDimension;
+        request.quality = quality;
+        request.current = current;
+        try {
+            Picked file = prepare(context.getContentResolver(), Uri.fromFile(new java.io.File(path)), request);
+            // An empty file or one no image decodes from (a camera app that answered without writing) is no image.
+            if (file == null || file.bytes == null || file.bytes.length == 0) return null;
+            if (file.width <= 0 || file.height <= 0) return null;
+            return new Object[] {name, file.type, file.bytes, new int[] {file.width, file.height}};
+        } catch (Exception | OutOfMemoryError e) {
+            Log.w(TAG, "cannot prepare the image", e);
+            return null;
         }
     }
 
