@@ -2421,8 +2421,53 @@ impl ModalHost {
         }
     }
 
+    /// The modals presented over this one, the lowest first: they go when
+    /// it is dismissed (through its presenter, which dismisses everything
+    /// above).
+    pub(crate) fn modals_above(&self) -> Vec<NodeId> {
+        let mut above = Vec::new();
+        let mut next = self.controller.presentedViewController();
+        while let Some(c) = next {
+            if let Some(modal) = c.downcast_ref::<ModalController>() {
+                above.push(modal.ivars().id);
+            }
+            next = c.presentedViewController();
+        }
+        above
+    }
+
+    /// How many controllers present this one, down to the window's (0
+    /// when it is not presented): a lower modal is dismissed first, and
+    /// takes the ones above it.
+    pub(crate) fn depth(&self) -> usize {
+        let mut depth = 0;
+        let mut next = self.controller.presentingViewController();
+        while let Some(c) = next {
+            depth += 1;
+            next = c.presentingViewController();
+        }
+        depth
+    }
+
+    /// Dismissed with a modal under it, which takes it along: no longer
+    /// presented, and not reported as closed by the user when it goes.
+    /// Whether it was showing (one the user closed is already leaving, and
+    /// reported).
+    pub(crate) fn dismissed_under(&mut self) -> bool {
+        if !self.presented || self.controller.ivars().closed.get() {
+            return false;
+        }
+        self.presented = false;
+        self.controller.ivars().dismissing.set(true);
+        if let Some(view) = self.controller.view() {
+            view.endEditing(true);
+        }
+        true
+    }
+
     /// Presents the modal over the controller showing `from` (at once
-    /// when `at_once`: a shader draws its coming).
+    /// when `at_once`: a shader draws its coming). The caller checks
+    /// [`leaving_over`] first.
     pub(crate) fn present(&mut self, from: &UIView, at_once: bool) {
         if self.presented && !self.controller.ivars().closed.get() {
             return;
@@ -2709,6 +2754,26 @@ pub(crate) fn presented_sheet(window: &objc2_ui_kit::UIWindow) -> Option<Retaine
         top = next;
     }
     sheet
+}
+
+/// The controller on its way out among those presented over the one
+/// showing `from`, which a modal presented now waits for: one NSH
+/// dismisses (or that goes with a modal NSH dismisses under it), or one
+/// UIKit dismisses (a swipe, Escape) with a transition whose end is known.
+/// A modal presented over it would go with it (UIKit dismisses everything
+/// above the controller it dismisses), or not show at all.
+pub(crate) fn leaving_over(from: &UIView) -> Option<Retained<UIViewController>> {
+    let mut next = controller_of(from)?.presentedViewController();
+    while let Some(c) = next {
+        let ours = c
+            .downcast_ref::<ModalController>()
+            .is_some_and(|m| m.ivars().dismissing.get());
+        if ours || c.isBeingDismissed() && c.transitionCoordinator().is_some() {
+            return Some(c);
+        }
+        next = c.presentedViewController();
+    }
+    None
 }
 
 /// The view controller whose view contains `view`.
