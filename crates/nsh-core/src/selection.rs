@@ -690,7 +690,7 @@ fn hit(texts: &impl SelectionTexts, point: Point<Points>) -> Option<TextPosition
         any_covering_x = true;
         if frame.bottom() <= point.y {
             let d = point.y - frame.bottom();
-            if col_above.is_none_or(|(_, best)| d < best) {
+            if col_above.is_none_or(|(_, best)| d <= best) {
                 col_above = Some((i, d));
             }
         }
@@ -710,31 +710,86 @@ fn hit(texts: &impl SelectionTexts, point: Point<Points>) -> Option<TextPosition
             }
             if above && frame.bottom() <= point.y {
                 let d = point.y - frame.bottom();
-                if best.is_none_or(|(_, b)| d < b) {
+                if best.is_none_or(|(bi, b)| {
+                    d < b || (d == b && h_dist(frame) <= h_dist(texts.frame(bi)))
+                }) {
                     best = Some((i, d));
                 }
             } else if !above && frame.top() > point.y {
                 let d = frame.top() - point.y;
-                if best.is_none_or(|(_, b)| d < b) {
+                if best.is_none_or(|(bi, b)| {
+                    d < b || (d == b && h_dist(frame) < h_dist(texts.frame(bi)))
+                }) {
                     best = Some((i, d));
                 }
             }
         }
         best
     };
+    let refine_covering = |anchor_idx: usize,
+                           other_idx: Option<usize>,
+                           above: bool,
+                           base: Option<(usize, Points)>| {
+        let anchor = texts.frame(anchor_idx);
+        let restrict = other_idx
+            .map(|o| texts.frame(o))
+            .filter(|o| o.size.width < anchor.size.width && h_overlaps(*o, anchor));
+        // Among texts overlapping `anchor` that sit closer vertically than
+        // `base` (and stay within any narrower opposite-side column), pick the
+        // horizontally nearest one first so a full-width header/footer cannot
+        // pull in a closer text from a disjoint sibling column.
+        let sub_anchor = (0..count)
+            .filter(|&i| {
+                let frame = texts.frame(i);
+                if frame.size.width <= Points::ZERO || !h_overlaps(frame, anchor) {
+                    return false;
+                }
+                if let Some(r) = restrict
+                    && !h_overlaps(frame, r)
+                {
+                    return false;
+                }
+                if above {
+                    frame.bottom() <= point.y
+                        && base.is_none_or(|(_, b)| point.y - frame.bottom() < b)
+                } else {
+                    frame.top() > point.y && base.is_none_or(|(_, b)| frame.top() - point.y < b)
+                }
+            })
+            .min_by(|&a, &b| {
+                let (fa, fb) = (texts.frame(a), texts.frame(b));
+                h_dist(fa)
+                    .partial_cmp(&h_dist(fb))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| {
+                        v_dist(fa)
+                            .partial_cmp(&v_dist(fb))
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .then_with(|| if above { b.cmp(&a) } else { a.cmp(&b) })
+            });
+        match sub_anchor {
+            Some(sub) => nearest_in_column(texts.frame(sub), above, base),
+            None => base,
+        }
+    };
     if any_covering_x {
         // A shorter line in the same column may sit closer vertically than a
         // wider text that covered `point.x` (e.g. a short last paragraph under
         // a wide one, or a short heading above a wide paragraph).
-        if let Some((a, _)) = col_above {
-            col_above = nearest_in_column(texts.frame(a), true, col_above);
-        } else if let Some((b, _)) = col_below {
-            col_above = nearest_in_column(texts.frame(b), true, None);
+        let (orig_above, orig_below) = (col_above, col_below);
+        if let Some((a, _)) = orig_above {
+            col_above = refine_covering(a, orig_below.map(|(b, _)| b), true, orig_above);
         }
-        if let Some((b, _)) = col_below {
-            col_below = nearest_in_column(texts.frame(b), false, col_below);
+        if let Some((b, _)) = orig_below {
+            col_below = refine_covering(b, col_above.map(|(a, _)| a), false, orig_below);
         } else if let Some((a, _)) = col_above {
-            col_below = nearest_in_column(texts.frame(a), false, None);
+            col_below = refine_covering(a, None, false, None);
+        }
+        if orig_above.is_none()
+            && let Some((b, _)) = col_below
+        {
+            col_above = refine_covering(b, None, true, None);
         }
     } else if let Some(anchor) = (0..count)
         .filter(|&i| texts.frame(i).size.width > Points::ZERO)
@@ -793,6 +848,9 @@ fn hit(texts: &impl SelectionTexts, point: Point<Points>) -> Option<TextPosition
     if (0..count).all(|i| texts.frame(i).bottom() > point.y) {
         return Some(start_of(0));
     }
+    let below_all = (0..count).all(|i| texts.frame(i).bottom() <= point.y);
+    let v_overlaps =
+        |a: Bounds<Points>, b: Bounds<Points>| a.top() < b.bottom() && b.top() < a.bottom();
     match (col_above, col_below) {
         (Some((a, to_above)), Some((b, to_below))) => {
             return Some(if to_above <= to_below {
@@ -801,7 +859,21 @@ fn hit(texts: &impl SelectionTexts, point: Point<Points>) -> Option<TextPosition
                 start_of(b)
             });
         }
-        (Some((a, _)), None) => return Some(end_of(a)),
+        (Some((a, _)), None) => {
+            // Below every text in the area: if `a` shares the bottom row with
+            // later sibling cells (e.g. a multi-column table), reach the end
+            // of that row instead of truncating at column 1.
+            let target = if below_all {
+                let af = texts.frame(a);
+                (a..count)
+                    .rev()
+                    .find(|&i| v_overlaps(texts.frame(i), af))
+                    .unwrap_or(a)
+            } else {
+                a
+            };
+            return Some(end_of(target));
+        }
         (None, Some((b, _))) => return Some(start_of(b)),
         (None, None) => {}
     }
@@ -2041,5 +2113,68 @@ mod tests {
         assert_eq!(model.bounds(), Some((pos(0, 1), pos(3, 5))));
         model.drag(&texts, at(350.0, 180.0));
         assert_eq!(model.bounds(), Some((pos(0, 1), pos(4, 0))));
+    }
+
+    #[test]
+    fn full_width_header_does_not_pull_sibling_column_into_narrow_right_column() {
+        let texts = Fake::new(&[
+            ("Full-width Header", (16.0, 12.0, 420.0, 22.0)),
+            ("Left column item 1", (16.0, 50.0, 190.0, 36.0)),
+            ("Left column item 2", (16.0, 98.0, 190.0, 24.0)),
+            ("Left column item 3", (16.0, 134.0, 190.0, 44.0)),
+            ("Right", (280.0, 50.0, 56.0, 48.0)),
+        ]);
+        let mut model = SelectionModel::new();
+        model.press(&texts, at(288.0, 66.0), 1, false);
+        // Dragging into the empty right-column margin under the full-width
+        // header stays on `Right` instead of pulling in `Left column item 2/3`.
+        for y in [126.0, 129.0, 132.0, 156.0] {
+            model.drag(&texts, at(356.0, y));
+            assert_eq!(model.bounds(), Some((pos(4, 1), pos(4, 5))), "at y={y}");
+            assert_eq!(model.text(&texts), "ight", "at y={y}");
+        }
+    }
+
+    #[test]
+    fn dragging_below_a_multi_column_table_reaches_the_last_cell() {
+        let texts = Fake::new(&[
+            ("Column A", (16.0, 20.0, 160.0, 24.0)),
+            ("Column B", (200.0, 20.0, 160.0, 24.0)),
+            ("Row 1 Left", (16.0, 58.0, 160.0, 24.0)),
+            ("Row 1 Right", (200.0, 58.0, 160.0, 24.0)),
+            ("Row 2 Left", (16.0, 96.0, 160.0, 24.0)),
+            ("Row 2 Right", (200.0, 96.0, 160.0, 24.0)),
+        ]);
+        let mut model = SelectionModel::new();
+        model.press(&texts, at(24.0, 32.0), 1, false);
+        model.drag(&texts, at(80.0, 156.0));
+        assert_eq!(model.bounds(), Some((pos(0, 1), pos(5, 11))));
+        assert_eq!(
+            model.text(&texts),
+            "olumn A\tColumn B\nRow 1 Left\tRow 1 Right\nRow 2 Left\tRow 2 Right"
+        );
+    }
+
+    #[test]
+    fn same_bottom_side_by_side_texts_under_wide_title_keep_right_text() {
+        let texts = Fake::new(&[
+            (
+                "Wide section title above two tags",
+                (16.0, 20.0, 360.0, 24.0),
+            ),
+            ("Status:", (16.0, 60.0, 64.0, 24.0)),
+            ("Ready", (96.0, 60.0, 56.0, 24.0)),
+            ("Next paragraph below", (16.0, 140.0, 240.0, 24.0)),
+        ]);
+        let mut model = SelectionModel::new();
+        model.press(&texts, at(24.0, 32.0), 1, false);
+        // Gap to the right of `Ready` (still under the wide title): reaches
+        // `Ready`'s end instead of dropping back to `Status:`.
+        model.drag(&texts, at(230.0, 96.0));
+        assert_eq!(model.bounds(), Some((pos(0, 1), pos(2, 5))));
+        assert_eq!(
+            model.text(&texts),
+            "ide section title above two tags\nStatus:\tReady"
+        );
     }
 }
