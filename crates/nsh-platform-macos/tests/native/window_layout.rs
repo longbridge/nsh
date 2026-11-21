@@ -18,7 +18,7 @@ use nsh_core::{
 };
 use nsh_platform_macos::{
     self as platform,
-    objc2::MainThreadMarker,
+    objc2::{MainThreadMarker, MainThreadOnly},
     objc2_app_kit::{NSApplication, NSBackingStoreType, NSEventMask, NSWindow, NSWindowStyleMask},
     objc2_foundation::{NSDate, NSDefaultRunLoopMode, NSPoint, NSRect, NSSize, NSString},
 };
@@ -32,7 +32,7 @@ const MAIN: (f32, f32) = (900.0, 700.0);
 /// The windows the app opens: id and size.
 const WINDOWS: [(&str, f32, f32); 2] = [("small", 400.0, 300.0), ("tall", 260.0, 520.0)];
 
-fn content(name: &'static str) -> AnyElement {
+fn content(name: &'static str) -> impl IntoElement {
     view()
         .flex_1()
         .on_layout(move |b: &Bounds<Points>| {
@@ -42,7 +42,6 @@ fn content(name: &'static str) -> AnyElement {
                 .push((name, b.size.width.0, b.size.height.0));
         })
         .child(text(name))
-        .into_any_element()
 }
 
 /// Opens the windows once the main window is up, as the issue's app does.
