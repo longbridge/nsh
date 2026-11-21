@@ -34,7 +34,10 @@
 //!   `Paste` in a field), and gets AppKit's title for the state (`Exit
 //!   Full Screen`). A disabled item's action is one nothing answers. The
 //!   main menu the app replaced is kept and comes back with
-//!   `setApplicationMenu(null)`.
+//!   `setApplicationMenu(null)`, when the app stops (another app loads in
+//!   its view) or when its view goes, if the app's bar is the one shown:
+//!   with several views, the original comes back as the last bar shown
+//!   comes down.
 //! - Context menus track the mouse in a loop of their own, so they are
 //!   shown from the main queue once the batch is applied, never while it
 //!   is.
@@ -182,16 +185,32 @@ pub(crate) struct TitleBar {
     remeasure: Cell<bool>,
 }
 
-impl Drop for Chrome {
-    fn drop(&mut self) {
-        // An app view that goes (an embedding app closed it) takes its
-        // menu with it, and the one it replaced comes back.
-        let (Some(bar), Some(mtm)) = (self.menu.take(), MainThreadMarker::new()) else {
+impl Chrome {
+    /// Takes down the application menu the surface's app set
+    /// (`setApplicationMenu`): its items and their icons' loads go, so an
+    /// app loaded next starts with none, and the main menu it replaced
+    /// comes back if the bar is still the one installed (another view's
+    /// may have replaced it since). Its items' ids are its engine's, which
+    /// would be another app's actions. Calling it again does nothing.
+    pub(crate) fn remove_menu(&self, mtm: MainThreadMarker) {
+        self.menu_items.take();
+        self.menu_icons.take();
+        let Some(bar) = self.menu.take() else {
             return;
         };
         let app = NSApplication::sharedApplication(mtm);
         if app.mainMenu().is_some_and(|m| m == bar) {
             restore_menu(&app);
+        }
+    }
+}
+
+impl Drop for Chrome {
+    fn drop(&mut self) {
+        // An app view that goes (an embedding app closed it) takes its
+        // menu with it, and the one it replaced comes back.
+        if let Some(mtm) = MainThreadMarker::new() {
+            self.remove_menu(mtm);
         }
     }
 }
@@ -1245,20 +1264,24 @@ fn holder(
 /// titles are text: an icon is for the items of a menu.
 fn set_menu(surface: &Surface, items: Option<Arc<[MenuItem]>>) {
     let mtm = surface.mtm;
+    let Some(items) = items else {
+        // Only this surface's own bar is taken down: another view's that
+        // shows stays, and the original is kept for it.
+        surface.chrome.remove_menu(mtm);
+        return;
+    };
     let app = NSApplication::sharedApplication(mtm);
+    // Kept from the first bar until an NSH bar that shows comes down: a bar
+    // replacing another view's must not take that one for the original. A
+    // main menu the embedding app set in between is not seen: the original
+    // kept is still the one from before the first bar.
     ORIGINAL_MENU.with(|o| {
         let mut o = o.borrow_mut();
         if o.is_none() {
             *o = Some((app.mainMenu(), app.windowsMenu()));
         }
     });
-    *surface.chrome.menu_items.borrow_mut() = items.clone();
-    let Some(items) = items else {
-        surface.chrome.menu.borrow_mut().take();
-        surface.chrome.menu_icons.borrow_mut().clear();
-        restore_menu(&app);
-        return;
-    };
+    *surface.chrome.menu_items.borrow_mut() = Some(items.clone());
     let (bar, windows, loads) = menu_bar(surface, &items);
     app.setMainMenu(Some(&bar));
     // AppKit lists the open windows at the end of the Window menu.
@@ -1306,7 +1329,9 @@ fn menu_bar(
     (bar, windows_menu, loads)
 }
 
-/// Brings back the main menu the app replaced.
+/// Brings back the main menu the app replaced. Called only with a
+/// surface's own bar installed ([`Chrome::remove_menu`]): the original is
+/// consumed only when it is put back.
 fn restore_menu(app: &NSApplication) {
     let original = ORIGINAL_MENU
         .try_with(|o| o.borrow_mut().take())

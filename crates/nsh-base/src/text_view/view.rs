@@ -97,7 +97,9 @@ pub struct TextViewProps {
     /// Content of the app's above each table (a copy or export button).
     pub render_table_actions: Prop<Option<Renderer<Table>>>,
     /// Shows a formula (`$…$` in text, `$$…$$` blocks); without it, its
-    /// TeX shows as code.
+    /// TeX shows as code. Give a formula in text a `copyText` (its `$…$`
+    /// source) so that a copy of the text keeps it in place, as the
+    /// built-in formulas do.
     pub render_math: Prop<Option<Renderer<TextViewMath>>>,
     /// Shows an image in place of the default: alone in a paragraph, the
     /// image at the size it asks for (`width` / `height`) or its natural
@@ -1827,7 +1829,8 @@ impl Cx {
                 None if is_terminal() => self
                     .part(text(super::tex_text::tex_text(tex)), Part::Math)
                     .into_element(),
-                // Typeset in the line, its middle on the text's.
+                // Typeset in the line, its middle on the text's; a copy
+                // of the text keeps its source in place.
                 None => match self.formula(tex, false, BODY_SIZE) {
                     Some(formula) => self
                         .part(
@@ -1835,6 +1838,7 @@ impl Cx {
                                 .flex_row()
                                 .align_middle()
                                 .label(tex.clone())
+                                .copy_text(format!("${tex}$"))
                                 .child(formula),
                             Part::Math,
                         )
