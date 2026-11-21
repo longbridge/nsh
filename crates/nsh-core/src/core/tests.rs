@@ -4132,6 +4132,67 @@ fn bottom_aligned_list_does_not_mount_scrolls_during_native_bounce() {
     }
 }
 
+/// An empty list following its end gets its rows in the commit that also
+/// grows its viewport (a chat's history arriving as a placeholder beside
+/// it goes away): the platform must learn the grown content before the
+/// scroll to the new end, or the frame's growth clamps that scroll to the
+/// old, empty content and the list shows its first rows.
+#[test]
+fn rows_arriving_as_the_viewport_grows_keep_the_list_at_its_end() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::List,
+            },
+            style_op(2, &[("height", StyleValue::Number(200.0))]),
+            Op::SetProp {
+                id: 2,
+                prop: Prop::EstimatedItemSize(px(50.0)),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::FollowEnd(Some(px(48.0))),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Count(0),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    c.commit();
+    apply(
+        &mut c,
+        vec![
+            style_op(2, &[("height", StyleValue::Number(400.0))]),
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Count(100),
+            },
+        ],
+    );
+    let batch = c.commit().expect("a batch");
+    let at = |wanted: &dyn Fn(&MountItem) -> bool| batch.items.iter().position(wanted);
+    let scroll =
+        at(&|i| matches!(i, MountItem::ScrollBy { id: 2, .. })).expect("the list follows its end");
+    let content =
+        at(&|i| matches!(i, MountItem::ScrollContent { id: 2, size } if size.height.0 > 400.0))
+            .expect("the grown content");
+    let frame = at(&|i| matches!(i, MountItem::Frame { id: 2, .. })).expect("the grown frame");
+    assert!(
+        content < scroll && scroll < frame,
+        "content {content}, scroll {scroll}, frame {frame}: the content grows first, \
+         the scroll lands before the viewport grows"
+    );
+}
+
 /// List 2 (follow_end 80 pt) at its end, then its last row grows by
 /// 300 pt, under its own layout animation when `revealing`: where the list
 /// is after that commit, and the end it could follow to.
