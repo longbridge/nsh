@@ -221,6 +221,21 @@ keymap.bind({
 });
 ```
 
+While the editor has the focus its own bindings come before the app's `keymap`: ⌘↵ inserts a line below, whatever
+the app bound to it. To take keys the editor binds, as a query editor running its text with ⌘↵ does, list them in
+`keyBindings`: while the editor has the focus, such a key runs neither the editor's command for it nor types, and
+`onKeyBinding({ keystroke })` reports it, the keystroke as `keyBindings` writes it. Without the focus the editor binds
+none of them, so the app's `keymap` and other views keep those keys. A keystroke that is not one, or that the platform
+keeps, is logged and skipped.
+
+```tsx
+<Editor
+  language="sql"
+  keyBindings={["mod+enter", "mod+shift+f", "mod+e"]}
+  onKeyBinding={({ keystroke }) => commands[keystroke]()}
+/>
+```
+
 ## Find and replace
 
 `search` is what to find: `{ query, caseSensitive?, wholeWord?, regex?, inSelection? }`. Its matches are highlighted, the one the
@@ -786,6 +801,7 @@ with the user's text size (`fontScale()`), and the rows grow with it.
 | `completion` | `.completion(..)` | `boolean` | `false` | The editor asks for suggestions and shows them as a list ([Completion](#completion)). |
 | `completionTriggerCharacters` | `.completion_trigger_characters(..)` | `string[]` | `[]` | What else asks for completions as it is typed. |
 | `inlineCompletionDelay` | `.inline_completion_delay(..)` | `number` | `300` | Milliseconds typing pauses before an inline completion is asked for. |
+| `keyBindings` | `.key_bindings(..)` | `string[]` | | Keys the app takes while the editor has the focus, before the editor's own (`nsh/keymap` keystrokes), reported by `onKeyBinding` ([Keys](#keys)). |
 | `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | | The editor's box. |
 
 ## Events
@@ -795,6 +811,7 @@ with the user's text size (`fontScale()`), and the rows grow with it.
 | `onChange` | `.on_change(\|value: &SharedString\| ..)` | The text changed: `{ value }`, the whole new text. |
 | `onSelectionChange` | `.on_selection_change(\|selections: &Vec<EditorSelection>\| ..)` | The selections changed: `{ selections }`, every one, the primary last. |
 | `onFocus`, `onBlur` | `.on_focus(\|\| ..)`, `.on_blur(\|\| ..)` | The editor took or lost the focus. |
+| `onKeyBinding` | `.on_key_binding(\|keystroke: &SharedString\| ..)` | One of `keyBindings` was pressed while the editor had the focus: `{ keystroke }`, as `keyBindings` writes it. |
 | `onSearchChange` | `.on_search_change(\|result: &EditorSearchResult\| ..)` | The search's matches changed: `{ result }`, a `{ count, current, error }`. |
 | `onLineNumberPress` | `.on_line_number_press(\|line: &u32\| ..)` | A line number was pressed: `{ line }`, the line, from 0. |
 | `onContextMenu` | `.on_context_menu(\|event: &EditorContextMenuEvent\| ..)` | The secondary button was pressed over the text, or a touch selected text: `{ position, x, y, selection? }`. |

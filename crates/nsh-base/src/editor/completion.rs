@@ -548,7 +548,7 @@ impl Ed {
             }
             let bind = |keys: &str, repeat: bool, f: Rc<dyn Fn(&Ed)>| {
                 let e = ed.clone();
-                on_key_with(
+                ed.bind_key(
                     keys,
                     KeyOptions {
                         when: When::Always,
@@ -584,9 +584,9 @@ impl Ed {
                 return;
             }
             let e = ed.clone();
-            on_key_with("tab", always(), move |_| e.accept_inline_completion());
+            ed.bind_key("tab", always(), move |_| e.accept_inline_completion());
             let e = ed.clone();
-            on_key_with("escape", always(), move |_| e.hide_inline_completion());
+            ed.bind_key("escape", always(), move |_| e.hide_inline_completion());
         });
         let ed = self.clone();
         effect(move || {

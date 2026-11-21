@@ -179,6 +179,16 @@ keymap.bind({
 });
 ```
 
+编辑器拥有焦点时，它自己的绑定排在应用的 `keymap` 之前：无论应用把 ⌘↵ 绑给了什么，⌘↵ 都会在下方插入一行。要接管编辑器已绑定的按键（例如查询编辑器用 ⌘↵ 执行其中的文本），把它们列在 `keyBindings` 里：编辑器拥有焦点时，这些按键既不执行编辑器对应的命令，也不输入文字，而是由 `onKeyBinding({ keystroke })` 报告，`keystroke` 是 `keyBindings` 里的写法。编辑器没有焦点时不绑定其中任何一个，应用的 `keymap` 和其他视图照常使用这些按键。不是合法按键或被平台保留的按键会记入日志并跳过。
+
+```tsx
+<Editor
+  language="sql"
+  keyBindings={["mod+enter", "mod+shift+f", "mod+e"]}
+  onKeyBinding={({ keystroke }) => commands[keystroke]()}
+/>
+```
+
 <a id="find-and-replace"></a>
 
 ## 查找与替换
@@ -682,6 +692,7 @@ let editor!: EditorRef;
 | `completion` | `.completion(..)` | `boolean` | `false` | 编辑器请求建议并把它们显示为列表（[补全](#补全)）。 |
 | `completionTriggerCharacters` | `.completion_trigger_characters(..)` | `string[]` | `[]` | 输入时还会请求补全的字符。 |
 | `inlineCompletionDelay` | `.inline_completion_delay(..)` | `number` | `300` | 停止输入多少毫秒后请求行内补全。 |
+| `keyBindings` | `.key_bindings(..)` | `string[]` | | 编辑器拥有焦点时由应用接管、优先于编辑器自身绑定的按键（`nsh/keymap` 写法），由 `onKeyBinding` 报告（[按键](#keys)）。 |
 | `class`、`style` | 样式方法 | `string`、`StyleProp<ViewStyle>` | | 编辑器的盒子。 |
 
 <a id="events"></a>
@@ -693,6 +704,7 @@ let editor!: EditorRef;
 | `onChange` | `.on_change(\|value: &SharedString\| ..)` | 文本改变了：`{ value }`，完整的新文本。 |
 | `onSelectionChange` | `.on_selection_change(\|selections: &Vec<EditorSelection>\| ..)` | 选区改变了：`{ selections }`，所有选区，主选区在最后。 |
 | `onFocus`、`onBlur` | `.on_focus(\|\| ..)`、`.on_blur(\|\| ..)` | 编辑器获得或失去焦点。 |
+| `onKeyBinding` | `.on_key_binding(\|keystroke: &SharedString\| ..)` | 编辑器拥有焦点时按下了 `keyBindings` 中的某个键：`{ keystroke }`，即 `keyBindings` 里的写法。 |
 | `onSearchChange` | `.on_search_change(\|result: &EditorSearchResult\| ..)` | 搜索的匹配项改变了：`{ result }`，即 `{ count, current, error }`。 |
 | `onLineNumberPress` | `.on_line_number_press(\|line: &u32\| ..)` | 行号被点击：`{ line }`，行号，从 0 开始。 |
 | `onContextMenu` | `.on_context_menu(\|event: &EditorContextMenuEvent\| ..)` | 在文本上按下了辅助按键，或触摸选中了文本：`{ position, x, y, selection? }`。 |

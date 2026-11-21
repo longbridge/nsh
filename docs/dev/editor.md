@@ -152,6 +152,12 @@ controller's, through the clipboard. `run(command)` runs the same commands from 
 default keys (fold all, sorting lines, changing case, trimming trailing whitespace, paragraph moves, paste from the
 clipboard), for the app's own bindings and menus.
 
+Every binding of the editor goes through `Ed::bind_key`, which leaves out the keys the app lists in `keyBindings`
+(compared as parsed keystrokes). `Ed::bind_app_keys` binds those while the editor has the focus and reports them with
+`onKeyBinding`. Because the editor never binds a key the app took, the order its effects bind in (Escape and the
+completion list's keys come later, and win over the editor's earlier ones) does not matter for them. Keystrokes that
+do not parse or that the platform keeps are logged and skipped, as `on_key_with` would panic on them.
+
 ### Presses
 
 On the desktops a press (`PressDown`) places the caret, a double press selects a word, a triple press a line, Shift
@@ -177,8 +183,8 @@ the text and the point in the root view, for the app's `Menu.popup`. A press on 
 Completion, go to definition and the request for code actions are built in (`completion.rs`, with `completion`;
 `definition.rs`); hover cards and code action menus are the app's, built on what gpui-base's `lsp` hooks use
 (`hooks.rs`). Completion is the editor's because a view's key bindings win over the
-app's (`Core::keymap`): while the editor has the focus Up, Down, Enter, Tab and Escape are its own, so only it can
-give them to a list. Typing a word character at a word's end asks the app (`onCompletionRequest`, trigger `typing`,
+app's (`Core::keymap`): while the editor has the focus Up, Down, Enter, Tab and Escape are its own (unless the app
+takes one with `keyBindings`), so only it can give them to a list. Typing a word character at a word's end asks the app (`onCompletionRequest`, trigger `typing`,
 the query the word before the caret), as does one of `completionTriggerCharacters` (`character`, an empty query after
 it) and `showCompletions` / `run("showCompletions")` (`invoked`, no default keys). Requests count up (`id`); the
 app answers with `presentCompletions(id, items, incomplete)`. A session keeps where its query starts: typing on in the
