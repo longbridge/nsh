@@ -1828,6 +1828,12 @@ pub fn set_tray(tray: impl Into<Option<Tray>>) {
 /// # Panics
 ///
 /// When `keystroke` is not one.
+///
+/// The panic is not fatal to the app: like any panic in a component, it
+/// ends the component that made the call (its error boundary hears it, or
+/// it is logged) and the engine goes on. To take keystrokes from user
+/// settings, check them first with
+/// [`Shortcut::parse`](crate::desktop::Shortcut::parse).
 pub fn register_global_shortcut(keystroke: &str, on_press: impl Fn() + 'static) -> Answer<bool> {
     let shortcut = match Shortcut::parse(keystroke, super::os() == Os::MacOs) {
         Ok(shortcut) => shortcut,

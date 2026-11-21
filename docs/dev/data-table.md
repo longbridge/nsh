@@ -95,6 +95,14 @@ label and sort button (for example, their gap), and `headerCellDragging` supplie
 8-point cell padding, 8 points before a title and 4 after its sort button, with a 4-point gap before the button.
 Its columns set `fitPadding: 16` for this app-owned spacing; fits add this to the widest title or cell text.
 
+`Columns` keeps each column's *base* width (its spec's, or what a drag, a fit or the app set) apart from the width it
+shows: the base plus its share of the room the columns leave free (`grow`, `Columns::grow`), given in whole points so
+they fill the room exactly. `Dt::sync_room` gives it the room (the viewport less the row header and a terminal's bar)
+whenever that changes. A width set by a drag, `setColumnWidth` or `fitColumn` settles the column: it keeps that width
+and no longer grows. `autoFit` (`Dt::auto_fit`, run when the columns or the rows change) measures as `fitColumn` does
+and sets the base without settling or reporting, once per column; `Columns::updated` carries the bases, the settled
+and the fitted columns over by key, as it does the widths the user dragged.
+
 ## Data
 
 The app holds as many rows as it likes: `rowCount` is the table's length and `data` holds the rows from `dataStart`.
