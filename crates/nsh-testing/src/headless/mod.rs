@@ -1543,7 +1543,7 @@ impl Headless {
             if self.applied != applied || self.wants_frames() || !self.errors.is_empty() {
                 continue;
             }
-            if idle {
+            if idle && self.host.calls_in_flight() == 0 {
                 return true;
             }
             // What comes from elsewhere comes in real time.
@@ -1602,6 +1602,16 @@ impl Headless {
             let framing = self.frames.load(Ordering::SeqCst) > 0 || self.animator.finishing();
             if !idle || self.host_calls_sent != host_calls {
                 return self.quiet(QUIET, end.saturating_duration_since(Instant::now()));
+            }
+            // A call a handler (the test's) has not answered yet: its answer
+            // comes from another thread, in real time.
+            if self.host.calls_in_flight() > 0 {
+                match self.pump((Instant::now() + FRAME).min(end)) {
+                    Pumped::Batch => last = Instant::now(),
+                    Pumped::Error | Pumped::Exited => return true,
+                    Pumped::Timeout => {}
+                }
+                continue;
             }
             let now = Instant::now();
             let soon = due.filter(|&at| at < now + QUIET);
