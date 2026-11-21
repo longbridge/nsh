@@ -693,7 +693,9 @@ then waits until neither a batch came nor a native animation that ends by itself
 the graph's `Animator::finishing`, so a spinner looping forever does not hold every step for 2 s, and on macOS a view's
 transitions but not its keyframes repeating forever, `animate-ping`'s or `animate-spin`'s, which have no `Live::deadline`; 2 s at most; the web's page counts its own
 finite animations too: a screen sliding in; Android counts a scroll view drawing, as its overscroll stretch relaxes
-without moving a view, and a touch then only catches the stretch). `Native`'s calls do their work
+without moving a view, and a touch then only catches the stretch) nor a window of the app's own was opening
+(`Native::opening`: on macOS a new window stays hidden until a batch laid out at its size is in, 250 ms at most, and
+AppKit gives a window that is not visible no mouse events, so a press sent before it shows would be lost). `Native`'s calls do their work
 on the platform's main thread and return when the input is posted. Screenshots come back as base64 bytes: PNG
 on graphical targets, versioned UTF-8 Cell JSON on `tui`. The test's side saves them, as the host may run on another machine. `app.window(id)`'s steps (`TestStep::WindowState`, `PressWindowClose`, `WindowScreenshot`) name a window of the app by its id; the agent finds its root node in the model (`Scene::window_root`) and asks the platform (`Native::window_state`, `press_window_close`, `window_screenshot`), and `Native::target_window` names the window each step on a view acts in. Their defaults name the first app window (or no window), so a platform starts with the app's declared windows and adds `Window.open`'s. `open`'s manual clock reaches the host in the
 test's setup (`TestEnvironment::clock`, its start in Unix milliseconds): `Model::set_up_engine` starts the engine on
@@ -954,9 +956,11 @@ program that describes them, builds the hosts and runners with them, and does ev
   generates calls their API, and the description and the trace protocol must be the ones it reads), which the app's
   requirements must accept, or by path from the checkout the app's crates depend on (nsh's own examples, as
   `examples/gallery-rs`, through the workspace's path dependencies), which must be of that version, with the app's
-  crates.io dependencies on nsh patched to it. Git dependencies use the checkout Cargo resolves from the app’s
-  lockfile, including registry dependencies redirected by its patches. The generated workspaces patch both crates.io
-  and the Git repository to that checkout, so the app and its hosts share the same core and native module types.
+  crates.io dependencies on nsh patched to it. A direct Git dependency Cargo resolves to a checkout uses it, and its
+  locked revision must be this `nsh`’s revision: another revision stops the command, naming both, instead of
+  rewriting the app’s manifests. When either revision is unknown, the checkout’s workspace version is compared
+  instead. The generated workspaces patch both crates.io and the Git repository to that checkout, so the app and its
+  hosts share the same core and native module types.
   Requirements of another version, or crates taking nsh from two places, stop the command with what to change, rather
   than a build failing later on two `nsh-core`s. They build in the app's own `target/`, as a Cargo project in the app's
   directory does (`nsh init` ignores it), or in `CARGO_TARGET_DIR` when it is set (one directory several checkouts or
@@ -1054,7 +1058,20 @@ only is a `RustApp` too, its nsh crates this CLI's, as `runner_only`), checks th
 directory, package or `#[native_module]` specifier), and the workspace links each like an app crate. The app's crate
 depends on the nshm as `nsh add` writes it (Git at the locked `rev`, the resolved crate version, or a relative
 `path`), which the workspace's `[patch."<url>"]` / `[patch.crates-io]` sends to the same checkout. Before linking, the nshm must have a `#[native_module]` at its root
-(its module) and its `nsh-core` dependency requirement, if any, must match this CLI; there is no NSH-specific metadata. The list was `"extensions"` before any release; `nshm::sources` rejects that key. `nsh check` does not `cargo check` nshm (only crates outside the cache). Not yet: per-target support checks, web and mobile packaging checks, and an OTA check of the shell's linked modules.
+(its module) and its `nsh-core` dependency requirement, if any, must match this CLI. An entry's `"features"` (`nsh
+add --features`) are the crate's Cargo features the app turns on, carried to every dependency on the crate; the lock
+does not depend on them. The list was `"extensions"` before any release; `nshm::sources` rejects that key. `nsh check` does not `cargo check` nshm (only crates outside the cache). Not yet: per-target support checks, web and mobile packaging checks, and an OTA check of the shell's linked modules.
+
+### What crates declare for packages (`[package.metadata.nsh]`)
+
+`crates/nsh-cli/src/module_meta.rs`. A crate the app links (an nshm, the app's own crate or anything they depend on)
+may declare what the packaged app needs, for itself or per feature: `Info.plist` keys and entitlements on iOS,
+permissions, queries and components on Android. The CLI reads them from the app's dependency graph with the features
+Cargo turns on and adds them to iOS and Android packages; `nsh run`'s development hosts get the `Info.plist` keys and
+the Android entries, not the entitlements. The app's `nsh.json` wins and settles what two crates disagree on (for iOS:
+an Android package never stops on an iOS key); keys NSH sets itself stay NSH's. Android permissions are checked and
+spelled out as `nsh.json`'s are. Keys this CLI does not know are
+reported and left out, so the format can grow.
 
 ## Finding the runtimes
 

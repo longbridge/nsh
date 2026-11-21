@@ -551,6 +551,7 @@ view().on_press(open_page).child(
 | `ref` | `.element_ref(&handle)` | `ViewRef \| (node: ViewRef) => void` | The element's ref (see [ref methods](#ref-methods)): `ViewRef`, or the element's own type over it. `ref={el}` assigns a variable, `ref={fn}` calls a function. |
 | `nativeID` | `.native_id(id)` | `string` | Names the view for others, e.g. the `InputAccessoryView` an input refers to. |
 | `testID` | `.test_id(id)` | `string` | An identifier for UI tests (on Android, the view's resource id). |
+| `copyText` | `.copy_text(text)` | `string` | On a view or image inside a text (an inline attachment): what copying the text gives in its place (an inline formula's source). Unset, the copy leaves it out. Nested text spans and elements outside a text ignore it. See [inline views](./text.md#inline-views-and-images). |
 | `key` | `.key(key)` | `string` | The element's identity among its siblings. |
 
 ### The page's markup

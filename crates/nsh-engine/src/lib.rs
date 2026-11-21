@@ -4043,6 +4043,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         canvas_render: env.canvas_render,
         share: env.share,
         auth_session: env.auth_session,
+        scheme_links: env.scheme_links(),
         file_requests: env.file_requests,
         speech: env.speech,
         notifications: env.notifications,

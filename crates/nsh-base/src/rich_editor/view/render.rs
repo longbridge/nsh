@@ -20,8 +20,8 @@ use nsh_core::{
 use serde_json::Value;
 
 use super::{
-    controller::{BlockItem, Rv, slot_id},
-    geometry::{DOC, InlineMap, Run},
+    controller::{BlockItem, Rv},
+    geometry::{DOC, InlineMap, Run, slot_id},
     node_view::{MarkView, NodeView, NodeViewCx},
     parts::{self, Part},
     table,
@@ -152,7 +152,11 @@ fn content(rv: Rv) -> impl IntoElement {
             })
             .relative()
             .min_h(relative(1.0))
-            .cursor(Cursor::Text),
+            .cursor(Cursor::Text)
+            // The presses below are the pointer's: a press focuses the
+            // sink, which takes the keys and is the editor's one stop of
+            // Tab, not this box.
+            .focusable(false),
         &rv,
         Part::Content,
     )
@@ -374,8 +378,28 @@ fn block(rv: Rv, item: ReadSignal<BlockItem>) -> AnyElement {
     }
     let (class_rv, layout_rv) = (rv.clone(), rv.clone());
     let active = rv.watch_block(id);
-    let wrapper = view()
-        .on_layout(move |b: &Bounds<Points>| layout_rv.set_frame(id, Some(parent), *b))
+    // A node view's slot is framed in its block (`slot`): the block's ref
+    // measures it there, and its size, which changes when the view's own
+    // parts around the slot do, has it measured again.
+    let slotted = match &kind {
+        Kind::View(v) if v.editable_content_slot() => {
+            Some((element_ref(), signal(Size::default())))
+        }
+        _ => None,
+    };
+    let wrapper = match slotted {
+        Some((block_ref, _)) => view().element_ref(&block_ref),
+        None => view(),
+    };
+    let wrapper = wrapper
+        .on_layout(move |b: &Bounds<Points>| {
+            layout_rv.set_frame(id, Some(parent), *b);
+            if let Some((_, size)) = slotted
+                && size.get_untracked() != b.size
+            {
+                size.set(b.size);
+            }
+        })
         .app_class(move || {
             let it = item.get();
             let (selected, focused) = active.get();
@@ -430,7 +454,10 @@ fn block(rv: Rv, item: ReadSignal<BlockItem>) -> AnyElement {
     };
     let task = render_kind(&first.node) == Some("task");
     let content = match kind {
-        Kind::View(view) => Some(node_view_block(rv.clone(), item, view).into_element()),
+        Kind::View(view) => {
+            let slot_in = slotted.map(|(block_ref, size)| (block_ref, size.read_only()));
+            Some(node_view_block(rv.clone(), item, view, slot_in).into_element())
+        }
         Kind::Text => Some(text_block(rv.clone(), item, id).into_element()),
         Kind::Image => Some(dynamic(move || image_of(&item.get().node)).into_element()),
         Kind::Atom => None,
@@ -824,11 +851,8 @@ enum Piece {
         offset: usize,
         text: Option<String>,
     },
-    /// A widget decoration (its `class`) at `offset` of the content.
-    Widget {
-        class: Option<String>,
-        offset: usize,
-    },
+    /// A widget decoration (its `class`).
+    Widget { class: Option<String> },
     /// What an input method is composing at the caret, before the
     /// document holds it: drawn in the line, in its block's typography.
     Composition { text: String },
@@ -908,7 +932,7 @@ fn inline_of(
                 Err(text) => utf16_len(text) as u32,
             };
             out.pieces.push(match kind {
-                Ok(class) => Piece::Widget { class, offset: at },
+                Ok(class) => Piece::Widget { class },
                 Err(text) => Piece::Composition { text },
             });
             out.map.runs.push(Run {
@@ -1035,12 +1059,6 @@ fn text_block(rv: Rv, item: ReadSignal<BlockItem>, owner: u64) -> impl IntoEleme
             |n| inline_rv.leaf_text(n),
         );
         if let Some(geo) = inline_rv.geo.borrow_mut().texts.get_mut(&id) {
-            // Its views moved within it: they report their widths anew.
-            // A move of the whole block (an edit in another) keeps them;
-            // its spans are not drawn again.
-            if geo.map != inline.map {
-                geo.widths.clear();
-            }
             geo.map = inline.map.clone();
         }
         inline
@@ -1055,9 +1073,9 @@ fn text_block(rv: Rv, item: ReadSignal<BlockItem>, owner: u64) -> impl IntoEleme
     let text = text("")
         // The engine's layout: its lines without the placeholders of
         // spans' padding, so their offsets are the text's, and its own hit
-        // testing and caret edges.
+        // testing, caret edges and range boxes.
         .on_text_layout(move |g: &nsh_core::TextGeometry| {
-            lines_rv.set_lines(id, g.lines(), Some(g.clone()));
+            lines_rv.set_lines(id, g.lines(), g.clone());
         })
         .child(dynamic(move || {
             let inline = content.get();
@@ -1208,10 +1226,9 @@ fn spans(rv: &Rv, pieces: Vec<Piece>, id: u64) -> Vec<AnyElement> {
                 let key = SharedString::from(format!("i{id}.{leaves}"));
                 leaf(rv, node, (id, offset), text, key)
             }
-            Piece::Widget { class, offset } => {
-                let widget = view().app_class(class.map(SharedString::from));
-                inline_box(rv, widget, (id, offset)).into_element()
-            }
+            Piece::Widget { class } => view()
+                .app_class(class.map(SharedString::from))
+                .into_element(),
             Piece::Composition { text: t } => {
                 part(text(t).underline(), rv, Part::Composition).into_element()
             }
@@ -1232,15 +1249,6 @@ fn link_destination(marks: &[Mark]) -> Option<(SharedString, Option<SharedString
             .map(|s| SharedString::from(s.to_owned()))
     };
     Some((attr("href")?, attr("title")))
-}
-
-/// The box of an inline view, image or widget at `offset` in textblock
-/// `id`'s content: it reports its width, which its attachment character
-/// stands for when the geometry places the caret and finds the position at
-/// a point.
-fn inline_box(rv: &Rv, el: View, (id, offset): (u64, usize)) -> View {
-    let width_rv = rv.clone();
-    el.on_layout(move |b: &Bounds<Points>| width_rv.set_inline_width(id, offset, *b))
 }
 
 /// An inline leaf: its one-character text (a line break), its node view,
@@ -1308,14 +1316,10 @@ fn leaf(
         .rendered_at(rv.cx.__host(), key, rv.doc_rev.read_only());
         let el = view.create(&cx, &node);
         cleanup(move || view.destroy());
-        return inline_box(rv, styled(view_box()), at)
-            .child(el)
-            .into_element();
+        return styled(view_box()).child(el).into_element();
     }
     if render_kind(&node) == Some("image") {
-        return inline_box(rv, styled(view_box()), at)
-            .child(image_of(&node))
-            .into_element();
+        return styled(view_box()).child(image_of(&node)).into_element();
     }
     if let Some(drawn) = drawn {
         let (class_node, style_node) = (node.clone(), node);
@@ -1352,8 +1356,14 @@ fn view_box() -> View {
 }
 
 /// A node view's element for a block, made again when the view's
-/// `update` refuses a new node.
-fn node_view_block(rv: Rv, item: ReadSignal<BlockItem>, view: Arc<dyn NodeView>) -> AnyElement {
+/// `update` refuses a new node. `slot_in`: the block's ref and size, for
+/// a view with an editable content slot (`slot`).
+fn node_view_block(
+    rv: Rv,
+    item: ReadSignal<BlockItem>,
+    view: Arc<dyn NodeView>,
+    slot_in: Option<(ElementRef, ReadSignal<Size<Points>>)>,
+) -> AnyElement {
     let first = item.get_untracked();
     let id = first.id;
     let node = signal(first.node.clone());
@@ -1400,9 +1410,8 @@ fn node_view_block(rv: Rv, item: ReadSignal<BlockItem>, view: Arc<dyn NodeView>)
         let live = live.clone();
         untracked(move || {
             let current = node.get_untracked();
-            let content = view
-                .editable_content_slot()
-                .then(|| slot(rv.clone(), item, id, &current));
+            let content = slot_in
+                .map(|(block, resized)| slot(rv.clone(), item, id, &current, block, resized));
             let pos_rv = rv.clone();
             let get_pos: Rc<dyn Fn() -> Option<usize>> =
                 Rc::new(move || live.get().then(|| pos_rv.block_pos(id))?);
@@ -1427,12 +1436,58 @@ fn node_view_block(rv: Rv, item: ReadSignal<BlockItem>, view: Arc<dyn NodeView>)
     })
 }
 
-/// The editable content of a node view's node: measured in the content
-/// box, since the view's element is the app's.
-fn slot(rv: Rv, item: ReadSignal<BlockItem>, id: u64, node: &Node) -> AnyElement {
+/// The editable content of a node view's node, framed in its block (the
+/// view's element is the app's, so the slot is measured there, `block`):
+/// a block moved by an edit before it carries its slot along, though the
+/// slot's frame in its own parent is unchanged and reports nothing. The
+/// slot is measured again when its frame in its parent changes and when
+/// the block's size does (`resized`); a move inside the block that changes
+/// neither is not seen (`NodeView::editable_content_slot`).
+fn slot(
+    rv: Rv,
+    item: ReadSignal<BlockItem>,
+    id: u64,
+    node: &Node,
+    block: ElementRef,
+    resized: ReadSignal<Size<Points>>,
+) -> AnyElement {
     let sid = slot_id(id);
     let r = element_ref();
-    let measure_rv = rv.clone();
+    // Once a tick, however many layouts ask (the slot's and the block's
+    // report in the same one), under the slot's owner: the effect's would
+    // end the task when it runs again and leave `pending` set.
+    let measure = {
+        let (rv, owner, pending) = (rv.clone(), Owner::current(), Rc::new(Cell::new(false)));
+        move || {
+            if pending.replace(true) {
+                return;
+            }
+            let (rv, pending) = (rv.clone(), pending.clone());
+            owner.run(|| {
+                spawn(async move {
+                    pending.set(false);
+                    // Both asked before either is awaited: one commit's layout.
+                    let (slot, block) = (r.measure(), block.measure());
+                    let (Some(slot), Some(block)) = (slot.await, block.await) else {
+                        return;
+                    };
+                    let origin = Point::new(slot.page.x - block.page.x, slot.page.y - block.page.y);
+                    rv.set_frame(sid, Some(id), Bounds::new(origin, slot.frame.size));
+                })
+            });
+        }
+    };
+    {
+        // The slot's own first layout measures it; the block's size counts
+        // from its next change.
+        let (measure, seen) = (measure.clone(), Cell::new(false));
+        effect(move || {
+            resized.get();
+            if seen.replace(true) {
+                measure();
+            }
+        });
+    }
     let inner = if node.is_textblock() {
         text_block(rv, item, sid).into_element()
     } else {
@@ -1440,17 +1495,7 @@ fn slot(rv: Rv, item: ReadSignal<BlockItem>, id: u64, node: &Node) -> AnyElement
     };
     view()
         .element_ref(&r)
-        .on_layout(move |_: &Bounds<Points>| {
-            let rv = measure_rv.clone();
-            spawn(async move {
-                let (Some(slot), Some(content)) = (r.measure().await, rv.content.measure().await)
-                else {
-                    return;
-                };
-                let origin = Point::new(slot.page.x - content.page.x, slot.page.y - content.page.y);
-                rv.set_frame(sid, None, Bounds::new(origin, slot.frame.size));
-            });
-        })
+        .on_layout(move |_: &Bounds<Points>| measure())
         .child(inner)
         .into_element()
 }
@@ -1706,32 +1751,6 @@ impl Rv {
         self.layout_rev.update(|r| *r += 1);
     }
 
-    /// The width of the inline view or image at `offset` in textblock
-    /// `id`'s content (see `TextGeo::widths`).
-    fn set_inline_width(&self, id: u64, offset: usize, frame: Bounds<Points>) {
-        let mut geo = self.geo.borrow_mut();
-        let Some(text) = geo.texts.get_mut(&id) else {
-            return;
-        };
-        if text.widths.get(&offset) == Some(&frame) {
-            return;
-        }
-        text.widths.insert(offset, frame);
-        drop(geo);
-        self.refresh_block_selection_rects(id);
-        // Every inline view of a block reports its width as an edit before
-        // them moves them (their offsets are new): the geometry follows once
-        // for all of them, not once per view.
-        if self.widths_pending.replace(true) {
-            return;
-        }
-        let (pending, layout_rev) = (self.widths_pending.clone(), self.layout_rev);
-        spawn(async move {
-            pending.set(false);
-            layout_rev.update(|r| *r += 1);
-        });
-    }
-
     /// Where block `id`'s children start in its box (see
     /// `Geometry::insets`).
     fn set_inset(&self, id: u64, origin: Point<Points>) {
@@ -1796,24 +1815,15 @@ impl Rv {
         None
     }
 
-    /// Textblock `id`'s lines.
-    fn set_lines(
-        &self,
-        id: u64,
-        lines: Vec<nsh_core::TextLine>,
-        geometry: Option<nsh_core::TextGeometry>,
-    ) {
+    /// Textblock `id`'s final layout and lines (`Text::on_text_layout`).
+    fn set_lines(&self, id: u64, lines: Vec<nsh_core::TextLine>, geometry: nsh_core::TextGeometry) {
         {
             let mut geo = self.geo.borrow_mut();
             let Some(text) = geo.texts.get_mut(&id) else {
                 return;
             };
-            let same = text.lines == lines;
-            text.geometry = geometry;
-            if same {
-                return;
-            }
             text.lines = lines;
+            text.geometry = Some(geometry);
         }
         self.refresh_block_selection_rects(id);
         self.layout_rev.update(|r| *r += 1);

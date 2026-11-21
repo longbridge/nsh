@@ -6748,6 +6748,13 @@ impl<M: TextEngine> Core<M> {
                 code: Some(crate::element::codes::ACCESS_DENIED.into()),
                 message: denied.message().to_owned(),
             })
+        } else if !in_app && !self.components.environment.scheme_links {
+            // This platform hands the app no links of its schemes (the web,
+            // the GPUI and terminal backends): the callback could never come
+            // back.
+            Some(AuthSessionError::unavailable(format!(
+                "openAuthSession: no in-app sign-in here, and no link of `{scheme}:` can reach the app on this platform"
+            )))
         } else if !in_app && !self.components.url_schemes.schemes.contains(&scheme) {
             // Only a link of a scheme the app claims brings the callback
             // back to it here; without one the session could never end.

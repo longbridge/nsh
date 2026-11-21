@@ -495,6 +495,12 @@ start of the line. An image in a line of text keeps the size it asks for.
 `Highlighted` and `MathView` (`highlighted` and `math_view` in Rust) stand for the app's own components (a
 highlighter, a formula renderer, or a component of its Rust crate). Without `renderMath` `TextView` typesets a formula itself (`math` and `mathBlock` parts) with KaTeX's TeX support and fonts, in the text's color, the same on every platform; TeX it cannot read shows as its source in monospace.
 
+A copy of a selected paragraph gives a formula in its text (`$…$`) as its source, `$x^2$`. Formula blocks (`$$…$$`)
+are not in a text and stay out of a copy. A formula of `renderMath` copies as its source when the
+view it returns has that as its [`copyText`](./text.md#inline-views-and-images):
+`` renderMath={(math) => <MathView tex={math.tex} copyText={`$${math.tex}$`} />} `` (in Rust,
+`.copy_text(format!("${}$", math.tex))`).
+
 ## Markdown extensions
 
 `extensions` turns syntax of the app's into custom nodes, which `renderCustom` shows. Each extension has a `name`

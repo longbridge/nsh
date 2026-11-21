@@ -92,7 +92,7 @@ fn show(container: &UIView) -> AppView {
 
 ### Android
 
-1. 把 `dist/nsh/embed/android` 中的 `nsh.aar`（发布用）和 `nsh-dev.aar`（可连接 `nsh dev`）加到应用模块（[获取库](./android.md#get-the-library)）：
+1. 把 `dist/nsh/embed/android` 中的 `nsh.aar`（发布用）和 `nsh-dev.aar`（可连接 `nsh dev`）加到应用模块，或在 NSH 源码中用 `cargo xtask android-embed` 构建（[获取库](./android.md#get-the-library)）：
 
    ```kotlin
    dependencies {

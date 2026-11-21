@@ -16,7 +16,10 @@
   (Dynamic Type on iOS; on both, a box a fraction of a point shorter than the line's measured height).
   CoreText positions it from the same top edge as an unconstrained line; the view's drawing bounds clip the
   excess. Empty and zero-height boxes stay empty.
-  `onTextLayout` reports the final lines (`TextEngine::lines`: range, box, ascender, descender, cap / x height).
+  `onTextLayout` reports the final lines (`TextEngine::lines`: range, box, ascender, descender, cap / x height); Rust
+  components can subscribe with `Text::on_text_layout` (`TextGeometry`) to query `lines`, `hit_test`, `caret_rect` and
+  `range_rects` directly on the engine's final layout in source UTF-16 offsets (skipping synthetic span-padding
+  spacers).
   The last line of a paragraph includes the whitespace hanging past its end in its width, unless an ellipsis
   replaces it: a caret after typed spaces (`RichEditor` puts one at the line's width) stands past them on every
   engine. A line broken inside a paragraph keeps its width within the box; a caret after its break-space stands
@@ -27,7 +30,7 @@
   caret's line-high box, and the line-high boxes a range covers, appended to the caller's buffer. Each backend's
   selection and selectable views hit-test with the same code; an engine that only reports `lines` gets an estimate
   (each line's characters spread evenly over its width). The headless engine hit-tests whole characters, 0.55 em
-  each, on its one line. CoreText retains original offsets for the visible suffix of head / middle
+  each (and each attachment's own width), on its one line. CoreText retains original offsets for the visible suffix of head / middle
   truncations and omits the ellipsis from range boxes; mixed-direction ranges split by visual run on both Apple
   backends. Web hit testing measures cluster rectangles in the complete drawn DOM run on first use, keeps both
   edges at bidi boundaries and caches them with the layout. Linux selection drawing reuses its rectangle buffer.
@@ -68,7 +71,8 @@
   `textSelectHandleLeft/Right` in popup windows (so they escape clipping and take their own touches), the highlight is
   `Layout.getSelectionPath` in `selectionColor` (55% alpha; the theme's `textColorHighlight` by default) and a floating
   action mode offers Copy, Select all and Share. A touch elsewhere in the surface (`Mounter.touchDown`), new text or
-  detaching ends it; one selection at a time per surface. Copy leaves attachments' placeholders out on both. Text that is
+  detaching ends it; one selection at a time per surface. Copy gives attachments as their copy texts and leaves the
+  others' placeholders out on both. Text that is
   not selectable has no interaction, listener or extra drawing. `selectable` is `Option<bool>` (unset, or `false` from
   `userSelect: "none"` / `select-none`; a view's `userSelect` reaches the texts in it that set none) because the
   web's desktop idiom selects text that is not set off by default, as a web page does, except inside views that take presses or touches. Web: the browser's own selection, `::selection` in
@@ -91,7 +95,7 @@
   boxes in the area's coordinates with scroll offsets applied, its text engine's hit test), feeds `SelectionModel` its
   gestures (press with the click count and Shift, drag, long press, a handle's drag, select all) and draws what
   `ranges` says with its own highlight (each text's `selectionColor`), handles and menu; Copy takes `text` (attachments
-  left out, texts on one row joined by a tab, the others by a line break, a text that continues the one before it by
+  as their copy texts or left out, texts on one row joined by a tab, the others by a line break, a text that continues the one before it by
   nothing). A component that lays one line out as several texts (a code view's soft-wrapped line: `DiffView`) marks
   the later parts with `Element::continues_text` (`ViewProps::continues_text`, the internal `Prop::ContinuesText`;
   `SelectionTexts::continues` reads it): a copy gives the line whole, a triple click selects the whole line, and a
@@ -166,8 +170,9 @@
   hidden runs when it draws (glyphs, color emoji, decorations, shadows, animated colors), never relying on the
   transparent color alone; macOS, Windows, Linux and GPUI also leave them out of selection highlights
   (`AttributedText::visible_ranges`), while iOS and Android highlight a selection over them. What leaves
-  the text through the user goes through `AttributedText::copied_text` (copies: hidden runs and attachments'
-  placeholders left out) and `visible_text` (screen readers, the test model's texts); selectable views copy through
+  the text through the user goes through `AttributedText::copied_text` (copies: hidden runs left out, attachments as
+  their `copy_texts` or left out) and `visible_text` (screen readers, the test model's texts; macOS's accessibility
+  reads `text_without_attachments`, the inline views being read on their own); selectable views copy through
   `SelectionTexts::copied`. Android marks the runs with a span of their own in the laid out text, which its drawing,
   copies and TalkBack read; the web gives the runs `visibility: hidden`.
 - **Inline attachments**: any other element inside a `<Text>` (also inside its spans) is an attachment: laid out as its own
@@ -201,7 +206,9 @@
   an ellipsis move out of sight. Their own children are normal layout children, made with the attachment: a scroll
   view around the text never culls them (`Core::cull_scope`), as its walk does not reach inside texts, though past
   a turn's budget they may wait for the next turns as other views do (`pace.rs`); a text inside them built after the block
-  resizes them and builds the block again (`check_attachments`). They take presses of their own; copying leaves the
+  resizes them and builds the block again (`check_attachments`). They take presses of their own; copying gives an
+  attachment's `copyText` in its place (`AttributedText::copy_texts`: the text's metadata, as `test_ids`, so a new one
+  is mounted without typesetting again; a render's placeholder takes its content's) and leaves the other
   placeholders out. Text inside an attachment takes the color of the text around it (the nearest color set on its
   spans, its block or the views around, as CSS's `color` reaches an inline block and `currentColor` reaches the
   attachment's view), unless it sets its own; the rest of its text style (font, size, line height) is not passed in,

@@ -4,6 +4,7 @@
 //! hosts and runners built for it.
 
 mod android;
+mod app_extensions;
 mod apple;
 mod bindgen;
 mod build;
@@ -15,11 +16,13 @@ mod dev_port;
 mod entry;
 mod init;
 mod logger;
+mod module_meta;
 mod native_features;
 mod nshm;
 mod package;
 mod platforms;
 mod play;
+mod provisioning;
 mod publish_ios;
 mod run;
 mod runtime;
@@ -348,7 +351,9 @@ enum Command {
     /// code, from crates.io (`nsh add acme-ui[@1.2]`), Git (`nsh add
     /// https://github.com/acme/ui`) or a directory (`nsh add --path
     /// ../ui`). Listed in `nsh.json` `"modules"`, the version or commit
-    /// it resolved to pinned in `nsh.lock`.
+    /// it resolved to pinned in `nsh.lock`; `--features` turns on the
+    /// modules of a crate that keeps them behind Cargo features (`nsh add
+    /// nsh-extra --features camera`).
     Add {
         /// A crate name (with `@<version>`), `github:<owner>/<repo>` (with
         /// `@<tag>`) or a Git repository URL.
@@ -363,6 +368,11 @@ enum Command {
         /// The commit or branch to take from Git.
         #[arg(long, conflicts_with = "path")]
         rev: Option<String>,
+        /// The crate's Cargo features to turn on, comma-separated or
+        /// repeated (`--features camera,push`), besides those listed
+        /// already.
+        #[arg(long, value_delimiter = ',')]
+        features: Vec<String>,
     },
     /// Add, remove or list the runtimes installed beside this nsh: those
     /// of other platforms than this machine's (`android`, `ios`, `web`,
@@ -576,9 +586,11 @@ struct PackageArgs {
     /// Code signing identity for devices, e.g. "Apple Development: …".
     #[arg(long)]
     sign: Option<String>,
-    /// Provisioning profile for devices (`.mobileprovision`).
+    /// Provisioning profile for devices (`.mobileprovision`). Repeat it to
+    /// give each app extension (`nsh.json` `ios.extensions`) its own: every
+    /// bundle takes the profile for its identifier.
     #[arg(long)]
-    profile: Option<PathBuf>,
+    profile: Vec<PathBuf>,
     /// Android release keystore (default: the debug key).
     #[arg(long, requires = "key_alias")]
     keystore: Option<PathBuf>,
@@ -1035,7 +1047,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 out: &out,
                 config,
                 sign: sign.as_deref(),
-                profile: profile.as_deref(),
+                profiles: &profile,
                 keystore: keystore.as_deref().map(|k| {
                     (
                         k,
@@ -1096,9 +1108,10 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             path,
             tag,
             rev,
+            features,
         } => nshm::add(
             &std::env::current_dir()?,
-            nshm::Source::parse(source, path, tag, rev)?,
+            nshm::Source::parse(source, path, tag, rev)?.with_features(features)?,
         ),
         Command::Component { action } => match action {
             ComponentAction::List => component::list(),
@@ -1236,6 +1249,33 @@ mod command_tests {
                 "key.cert"
             ])
             .is_err()
+        );
+    }
+
+    /// An iOS package takes a profile for the app and one for each of its
+    /// extensions.
+    #[test]
+    fn ios_packages_take_several_profiles() {
+        let cli = Cli::try_parse_from([
+            "nsh",
+            "package",
+            "--target",
+            "ios",
+            "--profile",
+            "app.mobileprovision",
+            "--profile",
+            "widget.mobileprovision",
+        ])
+        .unwrap();
+        let Command::Package(args) = cli.command else {
+            panic!("not a package command");
+        };
+        assert_eq!(
+            args.profile,
+            [
+                std::path::PathBuf::from("app.mobileprovision"),
+                "widget.mobileprovision".into()
+            ]
         );
     }
 

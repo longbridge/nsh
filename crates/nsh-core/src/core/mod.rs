@@ -709,6 +709,9 @@ struct Node {
     z_index: i32,
     /// `verticalAlign`: where it sits in its line as an attachment.
     vertical_align: crate::style::VerticalAlign,
+    /// `copyText`: what a copy of its text gives in its place as an
+    /// attachment (or as the content of a render placed there).
+    copy_text: Option<Arc<str>>,
     /// Laid out right to left (the resolved `direction`).
     rtl: bool,
     /// `direction`: `None` inherits.
@@ -1014,6 +1017,7 @@ impl Node {
             key_parent: None,
             z_index: 0,
             vertical_align: crate::style::VerticalAlign::Baseline,
+            copy_text: None,
             rtl: false,
             direction: None,
             logical: None,
@@ -1161,8 +1165,10 @@ impl<P> TextContext<P> {
         let text = if laid.text.spans == self.text.spans {
             self.text.clone()
         } else {
+            // A fitted text draws its scaled spans: the new metadata goes
+            // on them.
             let mut text = (*laid.text).clone();
-            text.test_ids = self.text.test_ids.clone();
+            text.set_metadata(&self.text);
             Arc::new(text)
         };
         laid.text = text.clone();
@@ -5759,6 +5765,7 @@ impl<M: TextEngine> Core<M> {
         let mut flags = 0;
         let mut key_ancestry = false;
         let mut rebuild_span = false;
+        let mut copy_text_changed = false;
         let mut slop_moved = false;
         match prop {
             Prop::Source(source) => {
@@ -6327,6 +6334,14 @@ impl<M: TextEngine> Core<M> {
                     }
                 }
             }
+            Prop::CopyText(value) => {
+                if node.copy_text != value {
+                    node.copy_text = value;
+                    // Its block's text holds it; a render's content's is
+                    // its placeholder's (`Core::attachment_copy_text`).
+                    copy_text_changed = true;
+                }
+            }
             Prop::WebElement(value) => {
                 let props = node.props.get_or_insert_default();
                 if props.web_element != value {
@@ -6815,6 +6830,13 @@ impl<M: TextEngine> Core<M> {
         }
         if rebuild_span {
             self.mark_text_block(key);
+        }
+        if copy_text_changed {
+            if self.nodes[key as usize].inline {
+                self.mark_text_block(key);
+            } else if let Some(place) = self.placed_in_text(key) {
+                self.mark_text_block(place);
+            }
         }
         if key_ancestry {
             self.key_ancestry_dirty = true;
@@ -8575,7 +8597,7 @@ impl<M: TextEngine> Core<M> {
             }
             return inserted;
         }
-        if cx.text.test_ids != text.test_ids
+        if !cx.text.metadata_eq(&text)
             && !inserted
             && cx.alignments == alignments
             && cx.text.rendering_eq(&text)
@@ -8747,6 +8769,12 @@ impl<M: TextEngine> Core<M> {
                                 .alignments
                                 .set_baseline(out.len_utf16(), Some(baseline));
                         }
+                        if let Some(copy) = self.attachment_copy_text(c) {
+                            out.copy_texts.push(crate::text::AttachmentCopyText::new(
+                                out.len_utf16(),
+                                copy.clone(),
+                            ));
+                        }
                         parts.alignments.push(
                             out,
                             crate::geometry::size_pt(size.width, size.height),
@@ -8776,6 +8804,22 @@ impl<M: TextEngine> Core<M> {
             .map_or(VerticalAlign::Baseline, |content| {
                 self.nodes[content as usize].vertical_align
             })
+    }
+
+    /// What a copy gives in place of attachment `key` (`copyText`): its
+    /// own, or for a placeholder of a render (`renderCustom`, ...) that
+    /// sets none its content's, as [`Self::attachment_align`] reads the
+    /// content's alignment. An empty one copies as nothing, as unset.
+    fn attachment_copy_text(&self, key: Key) -> Option<&Arc<str>> {
+        let node = &self.nodes[key as usize];
+        let copy = match &node.copy_text {
+            Some(copy) => Some(copy),
+            None if self.components.renders.is_place(node.id) => self
+                .render_content(key)
+                .and_then(|content| self.nodes[content as usize].copy_text.as_ref()),
+            None => None,
+        };
+        copy.filter(|c| !c.is_empty())
     }
 
     /// The content of render placeholder `key`: the placeholder's only
@@ -9863,6 +9907,7 @@ impl<M: TextEngine> Core<M> {
                         id,
                         &text_layout,
                         &text,
+                        &cx.spacers,
                     );
                 }
                 if !text.attachments.is_empty() {
@@ -9901,6 +9946,7 @@ impl<M: TextEngine> Core<M> {
                             id,
                             &layout,
                             &cx.text,
+                            &cx.spacers,
                         );
                     }
                     layout
@@ -11008,6 +11054,25 @@ impl<M: TextEngine> Core<M> {
             })
             .flatten();
         match (scroll_by, frame_at) {
+            // The viewport and the content both grow (rows arriving as a
+            // placeholder beside the list goes away): the content first,
+            // then the scroll, then the frame. A frame grown over the old
+            // content clamps the scroll back to its start.
+            (Some(item), Some(at)) if content_len > old_len => {
+                self.set_scroll_content(key, content);
+                match self
+                    .mount
+                    .iter()
+                    .rposition(|m| matches!(m, MountItem::ScrollContent { id: c, .. } if *c == id))
+                {
+                    Some(queued) if queued > at => {
+                        let grown = self.mount.remove(queued);
+                        self.mount.insert(at, grown);
+                        self.mount.insert(at + 1, item);
+                    }
+                    _ => self.mount.insert(at, item),
+                }
+            }
             (Some(item), Some(at)) => {
                 self.mount.insert(at, item);
                 self.set_scroll_content(key, content);
@@ -11246,11 +11311,12 @@ fn keep_geometry(
     id: NodeId,
     layout: &TextLayout,
     text: &Arc<AttributedText>,
+    spacers: &[u32],
 ) {
     if let Some(engine) = engine.as_ref().filter(|_| id % 2 == 1) {
         geometries.insert(
             id,
-            crate::text::TextGeometry::new(engine.clone(), layout.clone(), text.clone()),
+            crate::text::TextGeometry::new(engine.clone(), layout.clone(), text.clone(), spacers),
         );
     }
 }

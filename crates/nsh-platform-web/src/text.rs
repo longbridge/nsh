@@ -372,6 +372,43 @@ pub(crate) struct WebLayout {
     attachments: Vec<Option<(f32, f32)>>,
 }
 
+impl WebLayout {
+    /// Where a copy of the text puts the attachment at UTF-16 offset
+    /// `index` among the runs, which hold no attachments: after the
+    /// characters of run `r` (`false`: before the line's break after them)
+    /// or before them (`true`). It goes after the last run before it on its
+    /// line, else before the first after it on its line, else before the
+    /// first run of a later line, else after the last run. `None` when it is
+    /// not laid out (cut off with the lines after `numberOfLines`).
+    pub(crate) fn attachment_place(&self, index: u32) -> Option<(usize, bool)> {
+        let run_of = |p: &HitPart| p.text.as_ref().map(|t| t.run);
+        for (n, line) in self.hit.iter().enumerate() {
+            let Some(at) = line
+                .parts
+                .iter()
+                .position(|p| p.text.is_none() && p.start == index)
+            else {
+                continue;
+            };
+            if let Some(r) = line.parts[..at].iter().rev().find_map(run_of) {
+                return Some((r, false));
+            }
+            if let Some(r) = line.parts[at + 1..].iter().find_map(run_of) {
+                return Some((r, true));
+            }
+            if let Some(r) = self.hit[n + 1..]
+                .iter()
+                .flat_map(|l| &l.parts)
+                .find_map(run_of)
+            {
+                return Some((r, true));
+            }
+            return self.runs.len().checked_sub(1).map(|r| (r, false));
+        }
+        None
+    }
+}
+
 /// A line's drawn pieces, for hit testing, and where the caret can stand on
 /// it: measured at the first hit test of the line, when the text is
 /// selected or edited, not for every layout.

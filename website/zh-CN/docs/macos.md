@@ -236,6 +236,12 @@ view.load(Bundle::source(code).into());
 `AppOptions { transparent: true, ..Default::default() }` 为自定义 Rust 宿主的 `run_app` 窗口提供透明的初始默认值，让未绘制的区域显示窗口后面的内容。显式主窗口属性及后续窗口更新优先于这个默认值。标准宿主保持此选项为 `false`，但可以通过窗口配置请求透明；视图的 `behindWindow` 材质本身不会让窗口透明。
 嵌入的 `AppView` 不会改动它所在的窗口：需要同样效果时，请把自己的 `NSWindow` 设为 nonopaque，并给它透明的 `backgroundColor`。
 
+## 来自其他代码的通知
+
+远程通知以及其他原生代码安排的通知不会触发 `Notifications` 的 `press`，而是交给 Rust 代码用
+`nsh_platform_apple::notifications::set_foreign_handler` 设置的处理者，用法与 [iOS](./ios.md#来自其他代码的通知) 相同。处理者决定这些通知在应用位于前台时怎样显示，
+并接收它们的点击。被嵌入的应用只有在嵌入方把通知交给它（`AppOptions::notifications`）、且嵌入方没有自己的通知中心 delegate 时才会收到。
+
 ## macOS 上的差异
 
 运行环境是桌面环境：安全区和键盘高度为 0，`idiom()` 是桌面（`platform.idiom` 为 `"desktop"`），`os_version()`（`platform.version`）为 macOS 的版本号，
