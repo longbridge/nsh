@@ -18426,6 +18426,93 @@ mod components {
         assert_eq!(clipboard.text(), None);
     }
 
+    /// Copies twice when pressed and shows what became of each write.
+    #[component]
+    fn Copier() -> impl IntoElement {
+        let results = signal(String::new());
+        view()
+            .child(text(move || format!("copied {}", results.get())))
+            .child(view().h(px(10.0)).on_press(move |_: &()| {
+                let (first, second) = (
+                    set_clipboard("a"),
+                    set_clipboard_item(ClipboardItem {
+                        text: "b".into(),
+                        html: Some("<b>b</b>".into()),
+                    }),
+                );
+                spawn(async move {
+                    let (first, second) = (first.await, second.await);
+                    results.set(format!("{first:?} {second:?}"));
+                });
+            }))
+    }
+
+    fn press_copier(c: &mut Core<FakeEngine>) -> Vec<Command> {
+        c.mount_root(&crate::element::Root::new::<Copier>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button");
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        c.commit()
+            .map(|b| b.items)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|i| match i {
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command,
+                } => Some(command),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn clipboard_writes_answer_requested_where_the_platform_cannot_tell() {
+        let mut c = core();
+        let sent = press_copier(&mut c);
+        assert_eq!(sent.len(), 2, "{sent:?}");
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("copied R")));
+        assert_eq!(shown.last().unwrap(), "copied Requested Requested");
+    }
+
+    #[test]
+    fn clipboard_writes_answer_what_the_platform_reports_in_order() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            clipboard_write_result: true,
+            ..Default::default()
+        });
+        let sent = press_copier(&mut c);
+        assert!(matches!(
+            sent[..],
+            [Command::SetClipboard(_), Command::SetClipboardItem(_)]
+        ));
+        for written in [true, false] {
+            let payload = EventPayload::Map(vec![("written", crate::PayloadValue::Bool(written))]);
+            assert!(c.component_event(ROOT_ID, EventKind::ClipboardWrite, &payload));
+        }
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("copied W")));
+        assert_eq!(shown.last().unwrap(), "copied Written Failed");
+    }
+
+    #[test]
+    fn clipboard_writes_to_the_embedders_clipboard_are_written() {
+        let clipboard = std::sync::Arc::new(crate::clipboard::MemoryClipboard::new(None));
+        let mut c = core();
+        c.set_clipboard(Some(clipboard.clone()));
+        let sent = press_copier(&mut c);
+        assert!(sent.is_empty(), "{sent:?}");
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("copied W")));
+        assert_eq!(shown.last().unwrap(), "copied Written Written");
+    }
+
     /// Pastes the clipboard's image and files when pressed.
     #[component]
     fn ImagePaster() -> impl IntoElement {
@@ -28485,6 +28572,82 @@ mod rust_windows {
             }
         }
         title
+    }
+
+    // #2759: what the ref `open_window` returns is asked for in the same
+    // turn follows the opening, in order; attributes join its options.
+    #[test]
+    fn requests_made_right_after_open_window_follow_its_opening() {
+        use crate::desktop::WindowMode;
+        use crate::element::desktop::open_window;
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<Empty>());
+        let _ = c.commit().unwrap();
+        let doc = {
+            let _entered = c.components.runtime.enter();
+            let doc = open_window(window().id("doc").title("Static").content(|| text("doc")))
+                .expect("opens on a desktop");
+            doc.focus();
+            doc.set(WindowAttributes {
+                title: Some("Set".into()),
+                ..Default::default()
+            });
+            doc.set_mode(WindowMode::Maximized);
+            doc.focus();
+            doc
+        };
+        let batch = c.commit().unwrap();
+        let commands = window_commands(&batch);
+        let [
+            (id, DesktopCommand::OpenWindow(open)),
+            (focus, DesktopCommand::Request(WindowRequest::Focus)),
+            (mode, DesktopCommand::Request(WindowRequest::SetMode(WindowMode::Maximized))),
+            (again, DesktopCommand::Request(WindowRequest::Focus)),
+        ] = &commands[..]
+        else {
+            panic!("opens, then its requests in order: {commands:?}");
+        };
+        assert_eq!([focus, mode, again], [id; 3]);
+        assert_eq!(open.options.attributes.title.as_deref(), Some("Set"));
+        // Sent once: a later commit does not repeat them.
+        {
+            let _entered = c.components.runtime.enter();
+            doc.set(WindowAttributes {
+                title: Some("Later".into()),
+                ..Default::default()
+            });
+        }
+        let commands = window_commands(&c.commit().unwrap());
+        assert!(
+            matches!(&commands[..], [(_, DesktopCommand::SetAttributes(_))]),
+            "{commands:?}"
+        );
+        // Closed: its requests reach nothing, and the next opening of the
+        // id does not inherit them.
+        {
+            let _entered = c.components.runtime.enter();
+            doc.close();
+        }
+        let _ = c.commit().unwrap();
+        {
+            let _entered = c.components.runtime.enter();
+            doc.set_mode(WindowMode::FullScreen);
+            doc.focus();
+        }
+        assert!(c.commit().is_none_or(|b| window_commands(&b).is_empty()));
+        {
+            let _entered = c.components.runtime.enter();
+            open_window(window().id("doc").content(|| text("doc"))).expect("opens again");
+        }
+        let commands = window_commands(&c.commit().unwrap());
+        assert!(
+            matches!(&commands[..], [(_, DesktopCommand::OpenWindow(_))]),
+            "{commands:?}"
+        );
     }
 
     // #1344, `open_window` and a window opened again: each opening keeps

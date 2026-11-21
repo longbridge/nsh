@@ -1,13 +1,16 @@
 ---
 title: nshm
-description: "nshm (NSH modules): Rust crates of components, modules and classes that any Native Shell app installs with nsh add and uses from Rust and TSX alike, how to write and publish one, versions and the lock file."
+description: "nshm (NSH modules): packages of components, modules and classes that any Native Shell app installs with nsh add, as Rust crates or pure TSX; versions, the lock file, the shared installation, platform nshm, and how to write and publish one."
 order: 5.7
 group: start
 ---
 
 # nshm
 
-An **nshm** (NSH module) is a Rust crate that gives Native Shell apps components, modules and classes, published on crates.io or Git. An app installs one with `nsh add` and uses it from Rust and from TSX: the same implementation, native on every platform.
+An **nshm** (NSH module) is a package that gives Native Shell apps components, modules and classes, as a crate gives Rust programs code. It comes in two kinds:
+
+- A **Rust nshm** is a Rust crate, published on crates.io or Git. An app uses it from Rust and from TSX: the same implementation, native on every platform.
+- A **TSX nshm** is TSX published as a Git repository with version tags. The app's bundle includes it, so an app that uses only TSX nshm needs no Rust, and the nshm ships with the app's packages and over-the-air updates.
 
 [nsh-omarchy](https://github.com/huacnlee/nsh-omarchy), for example, gives an app [Omarchy](https://omarchy.org)'s look: buttons, fields, menus, dialogs, tables and charts that follow the system's Omarchy theme as it changes.
 
@@ -95,13 +98,29 @@ nsh add https://github.com/huacnlee/nsh-omarchy.git --rev main  # any Git URL
 nsh add --path ../nsh-omarchy                                   # a local directory, as it is
 ```
 
-It lists the nshm in `nsh.json` `"modules"`, pins the version or commit it resolved to in `nsh.lock` (commit both with the app), and adds the crate to the `[dependencies]` of the app's own crate when it has one. Every command builds with the locked version; running `nsh add` again updates it. A pure TSX app gets hosts built with its nshm, as an app with a crate of its own does, so its development machine and CI need the Rust toolchain ([Building with Rust](./rust.md)).
+It lists the nshm in `nsh.json` `"dependencies"` by its package name, as `Cargo.toml` does: a version requirement for one from crates.io (`nsh add nsh-omarchy` writes `"^<the version it resolved to>"`, `nsh add nsh-omarchy@0.3` keeps `"0.3"`), and an object with `"github"`, `"git"` or `"path"` for one from elsewhere. A Git nshm's versions are its tags (`v1.4.0` or `1.4.0`), so it takes a version requirement too; `--tag` or `--rev` pins one tag or commit instead.
 
 ```json
 {
-  "modules": ["nsh-omarchy", { "path": "../my-gauge" }]
+  "dependencies": {
+    "nsh-omarchy": "^0.3.2",
+    "acme-ui": { "github": "acme/ui", "version": "^1.4" },
+    "my-gauge": { "path": "../my-gauge" }
+  }
 }
 ```
+
+NSH resolves one version of each nshm the app reaches, including the nshm its nshm depend on: the newest version every requirement accepts. It pins them in `nsh.lock` beside `nsh.json` (commit both with the app), and every command builds with the locked versions, so the app builds the same on every machine until you change them:
+
+```sh
+nsh upgrade                # every nshm to the newest version its requirement accepts
+nsh upgrade nsh-omarchy    # only this one
+nsh remove nsh-omarchy     # out of nsh.json, nsh.lock and the app's crate
+```
+
+Each version is installed once per machine, in `~/.nsh/nshms` (`NSH_HOME` moves `~/.nsh`), and every app that uses it shares that copy: `nsh-omarchy/0.3.2/` from crates.io, `github.com/acme/ui/1.4.0/` from a tag, `github.com/acme/ui/<commit>/` from a commit. A directory added with `--path` is read where it is. An app whose Rust comes from nshm only builds them once, optimized, in `~/.nsh/builds`, shared by every app with the same nshm: after the first `nsh run`, the next start skips compiling until an nshm or nsh changes. Builds no app used for 30 days are removed.
+
+A Rust nshm is also added to the `[dependencies]` of the app's own crate when it has one, so the app's Rust uses it directly. An app whose nshm include a Rust one gets hosts built with it, as an app with a crate of its own does, so its development machine and CI need the Rust toolchain ([Building with Rust](./rust.md)). An app whose nshm are all TSX builds with `nsh` alone.
 
 A crate that holds several modules keeps each behind a Cargo feature, so an app turns on only those it uses and pays
 only their size, permissions and store declarations. `--features` turns them on, and the entry takes the object form:
@@ -112,11 +131,13 @@ nsh add nsh-extra --features camera
 
 ```json
 {
-  "modules": [{ "crate": "nsh-extra", "features": ["camera"] }]
+  "dependencies": { "nsh-extra": { "version": "^0.6.0", "features": ["camera"] } }
 }
 ```
 
-[CLI: nsh add](./cli.md#nsh-add) covers every source form, version requirements and how the lock file is kept.
+An app listing them in the older `"modules"` array still builds; the next `nsh add` rewrites it as `"dependencies"`, keeping each requirement (a bare name becomes `"*"`) and what `nsh.lock` pinned.
+
+[CLI: nsh add](./cli.md#nsh-add) covers every source form; [nsh upgrade](./cli.md#nsh-upgrade) and [nsh remove](./cli.md#nsh-remove) the others.
 
 ## nsh-extra
 
@@ -208,7 +229,9 @@ from `nsh_platform_ios::on_application_event` ([Application events](./ios.md#app
 
 ## Writing an nshm
 
-An nshm is an ordinary Cargo library with a `#[native_module("<specifier>")]` entry at its root, the same as an app's own crate: the specifier is what TSX imports, and the function registers what it exports ([Extending a Rust app with TSX](./rust.md#extending-a-rust-app-with-tsx)). A small one:
+### A Rust nshm
+
+A Rust nshm is an ordinary Cargo library with a `#[native_module("<specifier>")]` entry at its root, the same as an app's own crate: the specifier is what TSX imports, and the function registers what it exports ([Extending a Rust app with TSX](./rust.md#extending-a-rust-app-with-tsx)). A small one:
 
 ```toml
 # Cargo.toml
@@ -288,8 +311,54 @@ two crates set one key to different values (two usage descriptions of the camera
 in `ios.infoPlist` or `ios.entitlements`; until it does, packaging for iOS stops with an error naming both crates. Keys NSH
 sets itself (the bundle's identifier, version and the like) are not the crates'.
 
-Develop it beside an app with `nsh add --path ../my-gauge`, which reads the directory as it is. Publish it as any crate (`cargo publish`), with the keyword `nshm` so that it can be found on [crates.io](https://crates.io/keywords/nshm), or push it to Git and share its URL.
+Develop it beside an app with `nsh add --path ../my-gauge`, which reads the directory as it is. Publish it as any crate (`cargo publish`), with the keyword `nshm` so that it can be found on [crates.io](https://crates.io/keywords/nshm), or push it to Git and tag its versions.
+
+### A TSX nshm
+
+A TSX nshm is a Git repository whose `nsh.json` describes it: its package name and version, the NSH versions it works with, and what it exports, each specifier with its TSX entry file:
+
+```json
+{
+  "name": "acme-badge",
+  "version": "0.1.0",
+  "nsh": ">=0.6",
+  "exports": { "acme-badge": "src/index.tsx" },
+  "dependencies": { "acme-icons": { "github": "acme/icons", "version": "^1" } }
+}
+```
+
+```tsx
+// src/index.tsx
+import { Text, View } from "nsh";
+
+/** A rounded label. */
+export function Badge(props: { label: string }) {
+  return (
+    <View class="rounded-full bg-primary px-2 py-0.5">
+      <Text class="text-xs text-primary-foreground">{props.label}</Text>
+    </View>
+  );
+}
+```
+
+Its exports are its specifier or start with it (`acme-badge`, `acme-badge/icons`), and its files stay inside it. Apps import it as they import their own modules, and `nsh check` checks their TSX against its source. Publish a version by tagging it (`git tag v0.1.0 && git push --tags`); the tag's version must be the one its `nsh.json` says.
+
+A Rust nshm can export TSX as well, by the same `"exports"` in an `nsh.json` beside its `Cargo.toml`: TSX helpers written on top of its native module. Its name and version are then its crate's.
+
+### Dependencies
+
+An nshm lists the nshm it needs in its `nsh.json` `"dependencies"`, in the app's form: from crates.io or Git, with a version requirement as wide as it works with, so that apps and the other nshm they use can agree on one version. A published nshm cannot depend on a directory. The app's own entry for a package decides where it comes from: an app can take an nshm its nshm depend on from a fork or a local directory while their version requirements still apply.
+
+## Platform nshm
+
+An nshm can provide a target of its own, such as a platform NSH does not build for, with `"platform"` in its `nsh.json` and a binary named `nsh-platform-<name>` in its crate:
+
+```json
+{ "name": "nsh-harmony", "version": "0.1.0", "platform": "harmony" }
+```
+
+After `nsh add nsh-harmony`, the app's `nsh run`, `nsh dev`, `nsh test` and `nsh package` with `--target harmony` build that binary (in the app's `.nsh/platforms/harmony`, leaving the shared installation as it is) and run it as an [external target](./cli.md#external-targets). A platform installed on `PATH` as `nsh-platform-<name>` serves every app without being an nshm; the app's nshm comes first. [Building a platform](./platform-extensions.md) covers what a platform implements.
 
 ## Security
 
-An nshm's build scripts and procedural macros run when the app builds, and its code runs with the app's permissions. Any crate in the app's dependency graph can also add system permissions, manifest components and entitlements to the packaged app through `[package.metadata.nsh]`. Review its source and the changes to `nsh.lock` as you review the app's own code.
+An nshm's build scripts and procedural macros run when the app builds, and its code, Rust or TSX, runs with the app's permissions. Any crate in the app's dependency graph can also add system permissions, manifest components and entitlements to the packaged app through `[package.metadata.nsh]`. Review its source and the changes to `nsh.lock` as you review the app's own code.

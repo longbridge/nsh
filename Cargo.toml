@@ -142,7 +142,7 @@ getrandom = "0.3"
 slab = "0.4"
 percent-encoding = "2.3"
 url = "2.5"
-ureq = { version = "~3.5.2", features = ["platform-verifier"] }
+ureq = { version = "~3.5.2", features = ["platform-verifier", "socks-proxy"] }
 ring = "0.17"
 regex = "1"
 # The text of `nsh-base`'s `Editor`: a rope, and its grapheme and word boundaries.
@@ -259,6 +259,8 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 # System trust store for the WebSocket client (and ureq's `platform-verifier`): corporate and newly
 # issued roots work without NSH shipping them. Android's host initializes it over JNI.
 rustls-platform-verifier = "0.7"
+# The roots the global `WebSocket` verifies with (those tokio-tungstenite bundles).
+webpki-roots = "0.26"
 
 rolldown = "=1.2.13"
 rolldown_common = "=1.2.13"

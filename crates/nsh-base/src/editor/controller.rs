@@ -867,7 +867,7 @@ impl Ed {
             st.editing(1, |e| e.copy())
         };
         *self.line_copy.borrow_mut() = line_wise.then(|| text.clone());
-        set_clipboard(text);
+        drop(set_clipboard(text));
     }
 
     pub(crate) fn cut(&self) {
@@ -876,7 +876,7 @@ impl Ed {
             st.editing(1, |e| e.cut())
         };
         *self.line_copy.borrow_mut() = line_wise.then(|| text.clone());
-        set_clipboard(text);
+        drop(set_clipboard(text));
         self.after(outcome);
     }
 

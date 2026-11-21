@@ -126,6 +126,60 @@ pub(super) enum Placement {
     Nested(NodeId, Anchor),
 }
 
+/// A view's handlers of native events, by node, each node's in the order
+/// its element was given them. A view can have thousands of nodes with
+/// handlers (a rich editor's blocks, each with its layout listener), and
+/// an event, a node made again and a check for a node's listener each
+/// look at that node's handlers only: a list of the whole view would be
+/// scanned for each, so mounting such a view would grow with its square.
+#[derive(Default)]
+pub(super) struct Handlers {
+    by_node: FxHashMap<NodeId, Vec<(EventKind, Listener<EventPayload>)>>,
+}
+
+impl Handlers {
+    /// Node `node`'s handlers, in order.
+    pub(super) fn of(&self, node: NodeId) -> &[(EventKind, Listener<EventPayload>)] {
+        self.by_node.get(&node).map_or(&[], Vec::as_slice)
+    }
+
+    /// Adds `listener` of `kind` to node `node`'s, after the ones it has.
+    pub(super) fn push(&mut self, node: NodeId, kind: EventKind, listener: Listener<EventPayload>) {
+        self.by_node.entry(node).or_default().push((kind, listener));
+    }
+
+    /// Drops node `node`'s handlers.
+    pub(super) fn remove(&mut self, node: NodeId) {
+        self.by_node.remove(&node);
+    }
+
+    /// Keeps the handlers of the nodes `keep` keeps.
+    pub(super) fn retain_nodes(&mut self, mut keep: impl FnMut(&NodeId) -> bool) {
+        self.by_node.retain(|node, _| keep(node));
+    }
+
+    /// Moves node `old`'s handlers to node `new` (a slot's target moving to
+    /// another node), after the ones `new` has.
+    pub(super) fn rename(&mut self, old: NodeId, new: NodeId) {
+        if old == new {
+            return;
+        }
+        if let Some(moved) = self.by_node.remove(&old) {
+            self.by_node.entry(new).or_default().extend(moved);
+        }
+    }
+
+    pub(super) fn clear(&mut self) {
+        self.by_node.clear();
+    }
+
+    /// How many handlers there are, on all nodes.
+    #[cfg(test)]
+    pub(super) fn len(&self) -> usize {
+        self.by_node.values().map(Vec::len).sum()
+    }
+}
+
 /// A component instance on its host node.
 pub(super) struct Instance {
     inner: Inner,
@@ -154,9 +208,10 @@ pub(super) struct Instance {
     children_wanted: bool,
     /// The glue's node of each slot the app passes.
     slots: Vec<(&'static str, NodeId)>,
-    /// The view's handlers: native events by node, and the events of
-    /// nested components by their host (a handful: lists beat maps).
-    pub(super) handlers: Vec<(NodeId, EventKind, Listener<EventPayload>)>,
+    /// The view's handlers of native events, by node.
+    pub(super) handlers: Handlers,
+    /// The events of nested components, by their host (a handful: a list
+    /// beats a map).
     pub(super) event_handlers: Vec<(NodeId, Listener<dyn Any>)>,
     /// The view's parts in the touch responder, by node.
     pub(super) responders: Vec<(NodeId, Rc<ResponderEl>)>,
@@ -314,7 +369,7 @@ impl Instance {
             children_at: Placement::None,
             children_wanted: false,
             slots: Vec::new(),
-            handlers: Vec::new(),
+            handlers: Handlers::default(),
             event_handlers: Vec::new(),
             responders: Vec::new(),
             app_style,
@@ -634,6 +689,10 @@ pub(super) struct Components {
     pub(super) released_hosts: FxHashSet<NodeId>,
     #[cfg(test)]
     pub(super) cleanup_work: super::views::CleanupWork,
+    /// The handlers dispatches looked at to find a node's (for a probe that
+    /// the count stays with the node's, whatever the view's size).
+    #[cfg(test)]
+    pub(super) handler_visits: std::cell::Cell<usize>,
     /// Siblings and overlays looked at to place views among them
     /// ([`Core::preceding`], `native_before_at`, `first_overlay_in`).
     #[cfg(test)]
@@ -716,6 +775,10 @@ pub(super) struct Components {
     next_host_call: u64,
     /// URLs being opened (`openUrl`), by request id: their answers.
     url_opens: FxHashMap<u32, AnswerSlot<bool>>,
+    /// The clipboard writes sent to the platform waiting for its result,
+    /// in the order sent ([`crate::EventKind::ClipboardWrite`]).
+    pub(super) clipboard_writes:
+        std::collections::VecDeque<AnswerSlot<crate::element::ClipboardWrite>>,
     /// Those not handed to the engine yet ([`Core::take_url_opens`]).
     url_requests: Vec<(u32, String)>,
     /// The language the app asked to show in (`Some(None)`: the user's
@@ -840,6 +903,8 @@ impl Default for Components {
             #[cfg(test)]
             cleanup_work: Default::default(),
             #[cfg(test)]
+            handler_visits: Default::default(),
+            #[cfg(test)]
             placing_work: Default::default(),
             #[cfg(test)]
             retag_work: Default::default(),
@@ -864,6 +929,7 @@ impl Default for Components {
             next_image_info: 1,
             clipboard_reads: FxHashMap::default(),
             url_opens: FxHashMap::default(),
+            clipboard_writes: Default::default(),
             url_requests: Vec::new(),
             locale_request: None,
             asks_quit: false,
@@ -3281,10 +3347,21 @@ impl<M: TextEngine> Core<M> {
                         window.attributes.clone(),
                     ))
                 };
+                let opens = or.window.is_none();
                 let _ = self.apply_op(Op::Command {
                     id,
                     command: crate::Command::Desktop(Box::new(command)),
                 });
+                // What its ref was asked for before it existed follows its
+                // opening, in order (`open_window(..)` then `focus()`).
+                if opens {
+                    for command in &nr.window_commands {
+                        let _ = self.apply_op(Op::Command {
+                            id,
+                            command: crate::Command::Desktop(Box::new(command.clone())),
+                        });
+                    }
+                }
             }
         }
     }
@@ -3384,12 +3461,12 @@ impl<M: TextEngine> Core<M> {
         // A node made again (its region ran again) hears what this run
         // gives it, not also what the runs before gave it.
         if old.bits() != 0 {
-            inst.handlers.retain(|(n, _, _)| *n != id);
+            inst.handlers.remove(id);
             inst.responders.retain(|(n, _)| *n != id);
         }
         for (kind, handler) in &el.handlers {
             mask.set(*kind, true);
-            inst.handlers.push((id, *kind, handler.clone()));
+            inst.handlers.push(id, *kind, handler.clone());
         }
         // The responder hears the touches the platform reports.
         if let Some(responder) = &el.responder {
@@ -3432,8 +3509,9 @@ impl<M: TextEngine> Core<M> {
                     if *kind == EventKind::Layout
                         && !inst
                             .handlers
+                            .of(id)
                             .iter()
-                            .any(|(n, k, old)| *n == id && *k == *kind && old.same_owner(listener))
+                            .any(|(k, old)| *k == *kind && old.same_owner(listener))
                     {
                         self.events.push(JsEvent::LayoutListener {
                             host,
@@ -5565,9 +5643,10 @@ impl<M: TextEngine> Core<M> {
     ) {
         let _entered = self.components.runtime.enter();
         let installed = self.components.instances.get(&host).is_some_and(|inst| {
-            inst.handlers.iter().any(|(n, kind, current)| {
-                *n == id && *kind == EventKind::Layout && current.ptr_eq(listener)
-            })
+            inst.handlers
+                .of(id)
+                .iter()
+                .any(|(kind, current)| *kind == EventKind::Layout && current.ptr_eq(listener))
         });
         if installed {
             self.run_listener(host, listener, &EventPayload::Layout(frame));
@@ -5704,12 +5783,17 @@ impl<M: TextEngine> Core<M> {
     ) -> Option<(usize, Listener<EventPayload>)> {
         let id = self.base_of(id);
         let inst = self.components.instances.get(&host)?;
-        inst.handlers
+        let handlers = inst.handlers.of(id);
+        #[cfg(test)]
+        self.components
+            .handler_visits
+            .set(self.components.handler_visits.get() + handlers.len().saturating_sub(from));
+        handlers
             .iter()
             .enumerate()
             .skip(from)
-            .find(|(_, (n, k, _))| *n == id && *k == kind)
-            .map(|(at, (_, _, l))| (at, l.clone()))
+            .find(|(_, (k, _))| *k == kind)
+            .map(|(at, (_, l))| (at, l.clone()))
     }
 
     /// The part of `host`'s node `id` in the touch responder.
@@ -6269,6 +6353,15 @@ impl<M: TextEngine> Core<M> {
         match action {
             Action::Command(id, command) => {
                 let _ = self.apply_op(Op::Command { id, command });
+            }
+            // Answered as the command leaves for the platform
+            // (`Core::take_commands`) or when the platform reports it.
+            Action::WriteClipboard(command, answer) => {
+                self.components.clipboard_writes.push_back(answer);
+                let _ = self.apply_op(Op::Command {
+                    id: crate::ROOT_ID,
+                    command,
+                });
             }
             Action::FocusBack { to, from } => self.focus_back = Some((to, from)),
             Action::Dialog(mut dialog, answer) => {
@@ -7053,6 +7146,13 @@ impl<M: TextEngine> Core<M> {
         out.append(&mut self.components.url_requests);
     }
 
+    /// Answers the oldest clipboard write still waiting.
+    pub(super) fn answer_clipboard_write(&mut self, result: crate::element::ClipboardWrite) {
+        if let Some(answer) = self.components.clipboard_writes.pop_front() {
+            answer.borrow_mut().deliver(result);
+        }
+    }
+
     /// Answers URL request `id`: whether the URL opened.
     pub fn answer_open_url(&mut self, id: u32, opened: bool) {
         if let Some(answer) = self.components.url_opens.remove(&id) {
@@ -7499,6 +7599,20 @@ impl<M: TextEngine> Core<M> {
                     self.components.url_schemes.address.set_page_base(base);
                 }
                 self.url_scheme(url.clone(), page, quiet, change);
+                true
+            }
+            EventKind::ClipboardWrite if id == crate::ROOT_ID => {
+                let written = match payload {
+                    EventPayload::Map(entries) => entries
+                        .iter()
+                        .any(|(k, v)| *k == "written" && *v == crate::PayloadValue::Bool(true)),
+                    _ => false,
+                };
+                self.answer_clipboard_write(if written {
+                    crate::element::ClipboardWrite::Written
+                } else {
+                    crate::element::ClipboardWrite::Failed
+                });
                 true
             }
             EventKind::OpenUrl if id == crate::ROOT_ID => {

@@ -3784,6 +3784,12 @@ impl<M: TextEngine> Core<M> {
                     {
                         self.answer_clipboard(*request, components::ClipboardAnswer::default());
                     }
+                    if matches!(
+                        command,
+                        Command::SetClipboard(_) | Command::SetClipboardItem(_)
+                    ) {
+                        self.answer_clipboard_write(crate::element::ClipboardWrite::Failed);
+                    }
                     self.deny("the clipboard is not granted: add `\"clipboard\": true` to capabilities in nsh.json".into());
                     continue;
                 }
@@ -3799,8 +3805,14 @@ impl<M: TextEngine> Core<M> {
                 {
                     let clipboard = self.clipboard.clone().expect("a clipboard");
                     match &command {
-                        Command::SetClipboard(text) => clipboard.set_text(Some(text.clone())),
-                        Command::SetClipboardItem(item) => clipboard.set_item(Some(item.clone())),
+                        Command::SetClipboard(text) => {
+                            clipboard.set_text(Some(text.clone()));
+                            self.answer_clipboard_write(crate::element::ClipboardWrite::Written);
+                        }
+                        Command::SetClipboardItem(item) => {
+                            clipboard.set_item(Some(item.clone()));
+                            self.answer_clipboard_write(crate::element::ClipboardWrite::Written);
+                        }
                         Command::SetClipboardImage(_) => clipboard.set_item(None),
                         Command::ReadClipboard {
                             id: request,
@@ -3821,6 +3833,13 @@ impl<M: TextEngine> Core<M> {
                         _ => {}
                     }
                     continue;
+                }
+                // A platform that cannot tell whether the system took a
+                // write answers it now; the others report it.
+                Command::SetClipboard(_) | Command::SetClipboardItem(_)
+                    if !self.components.environment.clipboard_write_result =>
+                {
+                    self.answer_clipboard_write(crate::element::ClipboardWrite::Requested);
                 }
                 // Checked before the grants: a host may put the name in a
                 // path or a URL, where `user.x/../admin` leaves `user.*`.

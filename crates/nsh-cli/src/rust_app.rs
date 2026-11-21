@@ -326,13 +326,19 @@ pub(crate) struct RustApp {
     /// share one build of what they have in common
     /// ([`RustApp::unify_features`]).
     unify: bool,
-    /// The app's nshm (`nsh add`): their Git URLs, packages and
-    /// checkouts. The app's crates name them by Git; the workspace patches
-    /// those to the locked checkouts, so all link one copy.
+    /// The app's Rust nshm (`nsh add`): how each is patched (its Git URL,
+    /// crate name or directory: `nshm::patch_table`), its package and its
+    /// installed copy in `~/.nsh/nshms`. Whatever names them (the app's
+    /// crates, other nshm) the workspace patches to those copies, so all
+    /// link one.
     modules: Vec<(String, String, PathBuf)>,
     /// The oldest Apple systems its packages declare, which its builds for
     /// them compile for ([`set_deployment_target`]).
     minimums: AppleMinimums,
+    /// Its Rust is nshm installed in `~/.nsh/nshms` only, which never
+    /// change: its workspace is one every app with the same nshm shares
+    /// ([`shared_workspace`]), built once, optimized throughout.
+    shared: bool,
 }
 
 /// A crate of the app (`nsh.json` `"rust"`).
@@ -1019,6 +1025,7 @@ pub(crate) fn runner_only(entry: &Path) -> anyhow::Result<RustApp> {
         unify: true,
         modules: Vec::new(),
         minimums,
+        shared: false,
     };
     app.write_workspace()?;
     Ok(app)
@@ -1047,7 +1054,7 @@ pub(crate) fn of(entry: &Path, unify: bool) -> anyhow::Result<Option<RustApp>> {
         None => Vec::new(),
     };
     // nsh's crates come from where the app's own crates take them; an
-    // nshm asks crates.io for a version, patched to that place. An app
+    // nshm's requirement on them is patched to that place. An app
     // with nshm only builds with this CLI's, as a TSX app's runner
     // does ([`runner_only`]).
     let nsh = if crates.is_empty() {
@@ -1069,14 +1076,34 @@ pub(crate) fn of(entry: &Path, unify: bool) -> anyhow::Result<Option<RustApp>> {
         crates = named.into_iter().map(|(_, c)| c).collect();
     }
     let watched = watched(&crates, nsh.source());
-    let workspace = dir.join(".nsh/rust");
+    let minimums = AppleMinimums::of(&config)?;
+    // Only installed nshm, with a released nsh: nothing of the build is the
+    // app's, so every app with these nshm shares it.
+    let installed = nsh_bundler::nshm::installed_dir().and_then(|d| dunce::canonicalize(d).ok());
+    let shared = rust.is_none()
+        && !is_root(&entry)
+        && matches!(nsh, Nsh::Registry)
+        && !crates.is_empty()
+        && crates
+            .iter()
+            .all(|c| installed.as_ref().is_some_and(|d| c.dir.starts_with(d)));
+    let workspace = if shared {
+        // The app's own generated workspace, from before it shared one, is
+        // a build nothing uses any more.
+        let own = dir.join(".nsh/rust");
+        if own.is_dir() {
+            let _ = fs::remove_dir_all(&own);
+        }
+        shared_workspace(&crates, unify, &minimums)?
+    } else {
+        dir.join(".nsh/rust")
+    };
     let retargeted = retargeted(&crates, &nsh)?;
     let root = if is_root(&entry) {
         Some(root_config(dir, &config, &workspace)?)
     } else {
         None
     };
-    let minimums = AppleMinimums::of(&config)?;
     let app = RustApp {
         workspace,
         nsh,
@@ -1087,9 +1114,71 @@ pub(crate) fn of(entry: &Path, unify: bool) -> anyhow::Result<Option<RustApp>> {
         unify,
         modules: module_patches,
         minimums,
+        shared,
     };
     app.write_workspace()?;
     Ok(Some(app))
+}
+
+/// How long a shared build nobody used stays on this machine.
+const SHARED_KEPT: std::time::Duration = std::time::Duration::from_secs(30 * 24 * 60 * 60);
+
+/// The workspace of the apps whose Rust is the installed nshm `crates`
+/// only: `~/.nsh/builds/<fingerprint>`, after what decides the build (this
+/// nsh, the nshm in order with their features, `unify`, the Apple
+/// minimums). Its binaries are built once and kept; builds no app used for
+/// [`SHARED_KEPT`] are removed as a new one starts.
+fn shared_workspace(
+    crates: &[AppCrate],
+    unify: bool,
+    minimums: &AppleMinimums,
+) -> anyhow::Result<PathBuf> {
+    use sha2::Digest as _;
+    let builds = nsh_bundler::nshm::home()
+        .context("no home directory to build nshm in: set NSH_HOME")?
+        .join("builds");
+    let mut hash = sha2::Sha256::new();
+    hash.update(env!("CARGO_PKG_VERSION"));
+    hash.update(env!("NSH_GIT_SHA_FULL"));
+    for c in crates {
+        hash.update(format!(
+            "\0{}\0{}\0{:?}",
+            c.package,
+            c.dir.display(),
+            c.features
+        ));
+    }
+    hash.update(format!("\0{unify}\0{minimums:?}"));
+    let id: String = hash.finalize()[..8]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let dir = builds.join(id);
+    let used = dir.join(".used");
+    if !dir.is_dir() {
+        prune_shared(&builds);
+    }
+    fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    // Its last use, for [`prune_shared`].
+    fs::write(&used, "").with_context(|| format!("writing {}", used.display()))?;
+    Ok(dir)
+}
+
+/// Removes the shared builds in `builds` no app used for [`SHARED_KEPT`].
+fn prune_shared(builds: &Path) {
+    let Ok(entries) = fs::read_dir(builds) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let unused = fs::metadata(entry.path().join(".used"))
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > SHARED_KEPT);
+        if unused {
+            let _ = fs::remove_dir_all(entry.path());
+        }
+    }
 }
 
 /// The crates `rust` (`nsh.json` `"rust"` of the app in `dir`) lists: a
@@ -2849,17 +2938,48 @@ opt-level = \"s\"
     fn write_workspace_manifest(&self, ws: &Path, base: &str, gpui: bool) -> anyhow::Result<()> {
         let path = ws.join("Cargo.toml");
         let mut manifest = base.to_owned();
-        // These run on every interaction. Keep Objective-C signature
-        // checks enabled, but optimize their parser as well as the bridge.
-        // App Rust code stays easy to debug.
+        // Code the app does not write is built as for release, once: nsh's
+        // crates, its nshm and their dependencies start and run at speed,
+        // and keep only line tables (a far smaller binary to link and
+        // load). These run on every interaction: Objective-C signature
+        // checks stay enabled, their parser optimized as well as the bridge.
+        manifest.push_str(
+            "\n[profile.dev.package.\"*\"]\nopt-level = 3\ndebug = \"line-tables-only\"\n",
+        );
+        // A shared build is nobody's code to debug: it is a release build
+        // (its development host serves `--release` as well), keeping only
+        // line tables, and nothing is kept to build it again faster.
+        if self.shared {
+            manifest.push_str(
+                "\n[profile.dev]\nopt-level = 3\ndebug = \"line-tables-only\"\ndebug-assertions = false\noverflow-checks = false\nincremental = false\n",
+            );
+        }
         for package in ["quickjs-jit-sys", "taffy", "objc2", "objc2-encode"] {
             manifest.push_str(&format!(
                 "\n[profile.dev.package.{package}]\nopt-level = 3\n"
             ));
         }
+        // The app's own Rust code stays easy to debug and quick to build
+        // again; so do nsh's crates built from a checkout, which change.
+        let installed =
+            nsh_bundler::nshm::installed_dir().and_then(|d| dunce::canonicalize(d).ok());
+        let mut changing: Vec<&str> = self
+            .crates
+            .iter()
+            .filter(|c| !installed.as_ref().is_some_and(|d| c.dir.starts_with(d)))
+            .map(|c| c.package.as_str())
+            .collect();
+        if self.nsh.source().is_some() {
+            changing.extend(NSH_CRATES);
+        }
+        for package in changing {
+            manifest.push_str(&format!(
+                "\n[profile.dev.package.{package:?}]\nopt-level = 0\ndebug = true\n"
+            ));
+        }
         // The app's crates take its nshm from Git or crates.io (`nsh
-        // add`): the locked checkouts, the ones the sets link. One from a
-        // directory is that directory already.
+        // add`): the installed copies the lock pins, the ones the sets
+        // link. One from a directory is that directory already.
         let mut crates_io = String::new();
         let mut git_patches = String::new();
         for (id, package, dir) in &self.modules {
@@ -3123,6 +3243,12 @@ opt-level = \"s\"
         } else if release {
             cmd.arg("--release");
         }
+        // Built once with what cannot change since: nothing to ask Cargo.
+        let once = BuiltOnce::of(workspace, package, &cmd);
+        if let Some(path) = once.as_ref().and_then(BuiltOnce::built) {
+            ui::debug(format!("{what}: built already ({})", ui::path(&path)));
+            return Ok(path);
+        }
         if let Err(error) = ui::cargo(&mut cmd, what) {
             // A development session that ran: a mistake in the code just
             // saved waits for the fix (the command line runs again).
@@ -3145,19 +3271,24 @@ opt-level = \"s\"
             path
         };
         let path = place(self.target_dir()?);
-        if path.exists() {
-            return Ok(path);
-        }
         // A cargo that keeps its own target directory (a wrapper ignoring
         // CARGO_TARGET_DIR) built it elsewhere: Cargo says where, or it is
         // the generated workspace's own `target` (a cargo that always uses
         // `./target`, whatever its metadata reports).
-        Ok(cargo_target_directory(workspace)
-            .into_iter()
-            .chain([workspace.join("target")])
-            .map(place)
-            .find(|candidate| candidate.exists())
-            .unwrap_or(path))
+        let path = if path.exists() {
+            path
+        } else {
+            cargo_target_directory(workspace)
+                .into_iter()
+                .chain([workspace.join("target")])
+                .map(place)
+                .find(|candidate| candidate.exists())
+                .unwrap_or(path)
+        };
+        if let Some(once) = once {
+            once.record(&path);
+        }
+        Ok(path)
     }
 
     /// The development host (`runner` false) or release runner of the app,
@@ -3232,8 +3363,11 @@ opt-level = \"s\"
             _ => (self.workspace.clone(), &trimmed[..]),
         };
         let package = self.bin(name);
-        let release = runner || RELEASE_HOSTS.load(std::sync::atomic::Ordering::Relaxed);
-        let what = if release && !runner {
+        let asked = RELEASE_HOSTS.load(std::sync::atomic::Ordering::Relaxed);
+        // A shared workspace's development host is optimized as a release
+        // one already (`write_workspace_manifest`): one build serves both.
+        let release = runner || asked && !self.shared;
+        let what = if asked && !runner {
             format!("{what} (release build)")
         } else {
             what
@@ -3833,6 +3967,210 @@ fn set_deployment_target(
     }
 }
 
+/// A build of the generated workspace that is done once: one that links
+/// only code that cannot change (the generated workspace and the nshm
+/// installed in `~/.nsh/nshms`, each version there written once), so its
+/// binary stays right until what produced it changes or the binary goes.
+/// Cargo is then not run at all: even a build with nothing to do takes it
+/// a moment, and a Cargo that copies its binaries anew each time makes
+/// macOS check a new executable's signature on every launch.
+///
+/// The record (`<workspace>/.built/<package>…`) keeps a fingerprint of
+/// this CLI, the workspace's manifests and lock file, the package's
+/// generated files, the command line and the environment Cargo reads, and
+/// the binary's size and time. An app's own crates and nshm from a
+/// directory can change at any time: their builds are always Cargo's.
+struct BuiltOnce {
+    record: PathBuf,
+    fingerprint: String,
+}
+
+impl BuiltOnce {
+    /// The build of `package` in `workspace` that `cmd` runs, when it
+    /// links nothing that can change.
+    fn of(workspace: &Path, package: &str, cmd: &Command) -> Option<Self> {
+        use sha2::Digest as _;
+        let installed =
+            nsh_bundler::nshm::installed_dir().and_then(|d| dunce::canonicalize(d).ok());
+        let workspace = dunce::canonicalize(workspace).ok()?;
+        let mut hash = sha2::Sha256::new();
+        hash.update(concat!(env!("CARGO_PKG_VERSION"), "\n").as_bytes());
+        // This nsh: another build of it may generate other code.
+        let exe = env::current_exe().ok()?;
+        hash.update(binary_stamp(&exe)?.as_bytes());
+        for name in ["Cargo.toml", "Cargo.lock"] {
+            hash.update(fs::read(workspace.join(name)).ok()?);
+        }
+        let mut member = None;
+        for entry in fs::read_dir(&workspace).ok()?.flatten() {
+            let manifest = entry.path().join("Cargo.toml");
+            let Ok(text) = fs::read_to_string(&manifest) else {
+                continue;
+            };
+            // Every path a manifest names is generated or installed.
+            if !toml_paths(&text)
+                .iter()
+                .all(|p| fixed_path(&entry.path(), p, &workspace, installed.as_deref()))
+            {
+                return None;
+            }
+            let name = text.lines().find_map(|l| toml_string(l.trim(), "name"));
+            if name.as_deref() == Some(package) {
+                member = Some(entry.path());
+            }
+        }
+        if !toml_paths(&fs::read_to_string(workspace.join("Cargo.toml")).ok()?)
+            .iter()
+            .all(|p| fixed_path(&workspace, p, &workspace, installed.as_deref()))
+        {
+            return None;
+        }
+        hash_dir(&mut hash, &member?).ok()?;
+        hash.update(cmd.get_program().as_encoded_bytes());
+        for arg in cmd.get_args() {
+            hash.update(b"\0");
+            hash.update(arg.as_encoded_bytes());
+        }
+        let mut envs: Vec<_> = cmd.get_envs().collect();
+        envs.sort();
+        for (key, value) in envs {
+            hash.update(b"\0");
+            hash.update(key.as_encoded_bytes());
+            hash.update(b"=");
+            hash.update(value.map(|v| v.as_encoded_bytes()).unwrap_or_default());
+        }
+        for (key, value) in env::vars_os() {
+            let key_text = key.to_string_lossy();
+            let read = key_text.starts_with("CARGO_")
+                || key_text.starts_with("RUST")
+                || key_text.ends_with("_DEPLOYMENT_TARGET")
+                || matches!(&*key_text, "CC" | "CXX" | "CFLAGS" | "CXXFLAGS" | "SDKROOT");
+            if read && !cmd.get_envs().any(|(k, _)| k == key) {
+                hash.update(b"\0");
+                hash.update(key.as_encoded_bytes());
+                hash.update(b"=");
+                hash.update(value.as_encoded_bytes());
+            }
+        }
+        let fingerprint = hash.finalize().iter().map(|b| format!("{b:02x}")).collect();
+        let name: String = cmd
+            .get_args()
+            .filter_map(|a| a.to_str())
+            .filter(|a| !a.contains('/') && !a.contains('\\'))
+            .collect::<Vec<_>>()
+            .join("-")
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+            .collect();
+        Some(BuiltOnce {
+            record: workspace.join(".built").join(format!("{name}.json")),
+            fingerprint,
+        })
+    }
+
+    /// The binary this build made, when it still holds.
+    fn built(&self) -> Option<PathBuf> {
+        let record: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&self.record).ok()?).ok()?;
+        if record["fingerprint"].as_str()? != self.fingerprint {
+            return None;
+        }
+        let path = PathBuf::from(record["binary"].as_str()?);
+        (binary_stamp(&path)? == record["stamp"].as_str()?).then_some(path)
+    }
+
+    /// Records that this build made `binary`.
+    fn record(&self, binary: &Path) {
+        let Some(stamp) = binary_stamp(binary) else {
+            return;
+        };
+        let record = serde_json::json!({
+            "fingerprint": self.fingerprint,
+            "binary": binary.to_string_lossy(),
+            "stamp": stamp,
+        });
+        // A record not written only means Cargo runs next time.
+        if let Some(dir) = self.record.parent()
+            && fs::create_dir_all(dir).is_ok()
+        {
+            let _ = fs::write(&self.record, record.to_string());
+        }
+    }
+}
+
+/// A binary's size and modification time: another binary, or none, is
+/// another stamp.
+fn binary_stamp(path: &Path) -> Option<String> {
+    let meta = fs::metadata(path).ok()?;
+    let time = meta
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_nanos();
+    Some(format!("{}:{time}", meta.len()))
+}
+
+/// Whether `path`, as the manifest in `dir` names it, is in `workspace` or
+/// in the nshm installation `installed`: code that does not change. Read
+/// as written: a generated file may not be there yet.
+fn fixed_path(dir: &Path, path: &str, workspace: &Path, installed: Option<&Path>) -> bool {
+    let mut full = PathBuf::new();
+    for part in dir.join(path).components() {
+        match part {
+            std::path::Component::ParentDir => {
+                full.pop();
+            }
+            std::path::Component::CurDir => {}
+            other => full.push(other),
+        }
+    }
+    full.starts_with(workspace) || installed.is_some_and(|d| full.starts_with(d))
+}
+
+/// The `path = "…"` values of a manifest.
+fn toml_paths(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    while let Some(i) = rest.find("path") {
+        let key_start = text.len() - rest.len() + i;
+        rest = &rest[i + 4..];
+        let whole_key = text[..key_start]
+            .chars()
+            .next_back()
+            .is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '_' || c == '-'));
+        if whole_key
+            && let Some(value) = rest.trim_start().strip_prefix('=')
+            && let Some(value) = value.trim_start().strip_prefix('"')
+            && let Some(end) = value.find('"')
+        {
+            out.push(value[..end].to_owned());
+        }
+    }
+    out
+}
+
+/// Feeds the files of a generated directory to `hash`, in order.
+fn hash_dir(hash: &mut sha2::Sha256, dir: &Path) -> std::io::Result<()> {
+    use sha2::Digest as _;
+    let mut entries: Vec<PathBuf> = fs::read_dir(dir)?
+        .map(|e| e.map(|e| e.path()))
+        .collect::<Result<_, _>>()?;
+    entries.sort();
+    for path in entries {
+        if path.file_name().is_some_and(|n| n == "target") {
+            continue;
+        }
+        hash.update(path.file_name().unwrap_or_default().as_encoded_bytes());
+        if path.is_dir() {
+            hash_dir(hash, &path)?;
+        } else {
+            hash.update(fs::read(&path)?);
+        }
+    }
+    Ok(())
+}
+
 /// The target directory of the generated `workspace` ([`RustApp::target_dir`]):
 /// `cargo_target_dir` (a relative one against the current directory, as Cargo
 /// takes it), else the app's `target`.
@@ -4059,6 +4397,7 @@ mod tests {
             unify: true,
             modules: Vec::new(),
             minimums: crate::apple::AppleMinimums::default(),
+            shared: false,
         }
     }
 

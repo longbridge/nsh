@@ -125,6 +125,11 @@ pub(crate) enum Action {
     /// [`crate::open_url::check_url`]); whether it opened resolves the
     /// slot.
     OpenUrl(String, AnswerSlot<bool>),
+    /// Puts something on the system clipboard
+    /// ([`crate::Command::SetClipboard`] or
+    /// [`crate::Command::SetClipboardItem`]); the platform's result
+    /// resolves the slot.
+    WriteClipboard(crate::Command, AnswerSlot<ClipboardWrite>),
     /// Lets the user pick a color on the screen; the color (none when
     /// cancelled or not supported) resolves the slot.
     PickScreenColor(AnswerSlot<Option<crate::Hsla>>),
@@ -409,6 +414,23 @@ pub struct ClipboardItem {
     /// The content as HTML (a fragment, as `text/html` on the web holds).
     #[prop(skip_none)]
     pub html: Option<String>,
+}
+
+/// What became of a clipboard write (`set_clipboard`,
+/// `set_clipboard_item`; TS: what `Clipboard.writeText` and
+/// `Clipboard.write` resolve to). The clipboard is never read back to
+/// find out: a platform that cannot tell answers [`Self::Requested`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, crate::element::PropEnum)]
+pub enum ClipboardWrite {
+    /// The system clipboard took it (Windows, macOS, the web).
+    Written,
+    /// The system clipboard refused it (held by another app, no clipboard,
+    /// the browser declined, the clipboard capability not granted).
+    Failed,
+    /// Handed to the system, which does not say whether it took it (iOS,
+    /// Android, Linux, a GPUI host, a terminal).
+    #[default]
+    Requested,
 }
 
 /// An image read from the system clipboard (`Clipboard.readImage`).

@@ -294,6 +294,8 @@
   ancestor's background and the siblings drawn before the next ancestor, never the view itself; at the size where the
   blur's deviation is 4 px, nothing off screen) and blurred by a `RenderEffect`, drawn stretched and clipped under the
   view's background; box shadows are drawn once into small bitmaps and stretched in slices (`Decor.drawCachedShadow`).
+  WebViews sampled by a backdrop share a hardware layer so their functor renders at the page's size, not the smaller
+  filter layer's viewport. The layer is released when no backdrop samples the page; ordinary WebViews keep no extra layer.
   Known limits: iOS has no CSS filters on views (only `opacity`, `brightness` ≤ 1 and `drop-shadow`; images take every color filter
   and `blur`, applied while decoding); iOS texts draw no gradients or inset shadows; Android has no backdrop blur, `blur` or
   `drop-shadow` before API 31; Linux and GPUI draw no backdrop filter, GPUI no `blur()` or `mixBlendMode`; iOS, macOS and Android draw one `drop-shadow()`,
