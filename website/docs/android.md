@@ -412,6 +412,38 @@ file as `Picker.pickImages` does. `with_env(f)` runs `f` with the thread's JNI e
 logged and cleared). A request made while the app is in the background fails with `ActivityError::NoActivity`. `nsh-extra`'s camera
 (`crates/nsh-extra/src/camera/android.rs`) uses all of them.
 
+## Notifications from other code
+
+[`Notifications`](../modules/nsh.md#notifications) reports presses of the notifications the app showed. Notifications
+other code shows, such as a push service's SDK, open the app's launch activity (or the SDK's own activity, which opens
+it) with their payload as the intent's extras. Those presses go to one handler that Rust code sets with
+`nsh::notifications::set_foreign_handler`, never to `press`. Set it in the `#[native_module]` entry of the app's
+crate, on the UI thread: a press that started the app waits for it.
+
+```rust
+use nsh::notifications::{ForeignNotification, ForeignNotificationHandler, set_foreign_handler};
+
+struct Chats;
+
+impl ForeignNotificationHandler for Chats {
+    // The user pressed it, possibly starting the app.
+    fn pressed(&self, notification: &ForeignNotification) {
+        open_chat(&notification.extras["chat"]);
+    }
+}
+
+set_foreign_handler(Chats);
+```
+
+`ForeignNotification` carries the intent's `extras` as JSON, its `action` and its `data` URI. Android does not say
+which notification opened an activity, so NSH takes an intent for such a press when it has extras and no other
+meaning: links (`ACTION_VIEW`, which reach `onLink`), shares and the system's other actions are not presses, nor is the
+task opened again from Recents. Each intent is handed over once, so an activity recreated with it does not report it
+again. The handler runs on the UI thread, and `set_foreign_handler` panics elsewhere. There is one handler, so the
+app's crate owns it and passes presses on to the modules it uses; a later call replaces it. An app that embeds
+`NshView` passes its activity's intents to `NshView.handleNotificationIntent` in `onCreate` and `onNewIntent`, which
+hands these presses over too.
+
 ## Limits
 
 ```java

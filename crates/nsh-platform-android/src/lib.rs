@@ -31,6 +31,7 @@ mod java;
 mod keymap;
 mod logger;
 mod net;
+pub mod notifications;
 #[cfg(feature = "js")]
 mod package;
 pub mod permissions;
