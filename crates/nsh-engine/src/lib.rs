@@ -1545,7 +1545,7 @@ enum Message {
     /// Runs what is queued and due now, then calls back with whether the
     /// engine is idle and when the next timer is due
     /// ([`EngineControl::flush_until_due`]).
-    Flush(Box<dyn FnOnce(bool, Option<std::time::Instant>) + Send>),
+    Flush(Box<dyn FnOnce(bool, Option<Instant>) + Send>),
     /// Sent by a dropped [`Engine`] (there is none in WebAssembly).
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     Shutdown,
@@ -1784,10 +1784,7 @@ impl EngineControl {
     /// system's clock settles a step with it: idle with nothing due soon
     /// means no batch is coming, without waiting to see none come.
     #[doc(hidden)]
-    pub fn flush_until_due(
-        &self,
-        done: impl FnOnce(bool, Option<std::time::Instant>) + Send + 'static,
-    ) {
+    pub fn flush_until_due(&self, done: impl FnOnce(bool, Option<Instant>) + Send + 'static) {
         let _ = self.tx.send(Message::Flush(Box::new(done)));
     }
 

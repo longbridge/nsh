@@ -410,6 +410,10 @@ pub struct Headless {
     wanted: Option<Arc<AtomicBool>>,
     /// On the system's clock: frames the engine asked for, not yet given.
     frames: Arc<AtomicUsize>,
+    /// The app's `nsh/host` calls handed to the test so far: their answer
+    /// comes from elsewhere, so a step that made one waits for the batches
+    /// to stop, as for a request in flight.
+    host_calls_sent: u64,
     /// The embedding app's channel with the app (`EngineConfig::host`),
     /// which the test plays.
     host: nsh_engine::HostChannel,
@@ -546,6 +550,7 @@ impl Headless {
             clock,
             wanted,
             frames,
+            host_calls_sent: 0,
             host,
             last_press: None,
             #[cfg(feature = "js")]
@@ -1173,6 +1178,7 @@ impl Headless {
                     command: Command::HostCall { id, name, args },
                 } = item
                 {
+                    self.host_calls_sent += 1;
                     calls(*id, name, args);
                 }
             }
@@ -1578,6 +1584,7 @@ impl Headless {
     fn idle_on_system_clock(&mut self, limit: Duration) -> bool {
         let end = Instant::now() + limit;
         let mut last = Instant::now();
+        let host_calls = self.host_calls_sent;
         loop {
             if self.exited || !self.errors.is_empty() {
                 return true;
@@ -1592,9 +1599,8 @@ impl Headless {
                 last = Instant::now();
                 continue;
             }
-            let framing =
-                self.frames.load(Ordering::SeqCst) > 0 || self.animator.finishing();
-            if !idle {
+            let framing = self.frames.load(Ordering::SeqCst) > 0 || self.animator.finishing();
+            if !idle || self.host_calls_sent != host_calls {
                 return self.quiet(QUIET, end.saturating_duration_since(Instant::now()));
             }
             let now = Instant::now();
