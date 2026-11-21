@@ -4539,9 +4539,10 @@ impl<M: TextEngine> Core<M> {
                 }
             }
             Kind::Cell => {
-                // Cells are their own layout roots (laid out at the list's
-                // cross size, positioned by the list): a change in one row
-                // never relayouts the rest of the tree.
+                // Cells are their own layout roots (the list gives them a
+                // definite cross size to stretch, or max-content to align,
+                // and positions them): a change in one row never relayouts
+                // the rest of the tree.
                 let horizontal = self
                     .nodes
                     .get(node.parent as usize)
@@ -9700,15 +9701,24 @@ impl<M: TextEngine> Core<M> {
                 .map(|g| if horizontal { g.height } else { g.width });
             let item_cross = state.column(cross, 0, cell).1;
             let extra_cross = state.full_width(cross).1;
+            let stretch = state
+                .content
+                .align_items
+                .is_none_or(|a| a == taffy::AlignItems::STRETCH);
             let available = |c: f32| {
+                let cross = if stretch {
+                    AvailableSpace::Definite(c)
+                } else {
+                    AvailableSpace::MaxContent
+                };
                 if horizontal {
                     taffy::Size {
                         width: AvailableSpace::MaxContent,
-                        height: AvailableSpace::Definite(c),
+                        height: cross,
                     }
                 } else {
                     taffy::Size {
-                        width: AvailableSpace::Definite(c),
+                        width: cross,
                         height: AvailableSpace::MaxContent,
                     }
                 }
@@ -10917,10 +10927,12 @@ impl<M: TextEngine> Core<M> {
                 main_at += inset.0;
                 x += inset.1;
             }
+            let cell_cross = if horizontal { size.height } else { size.width };
+            x = list.align_cross(x, width, cell_cross);
             let frame = if horizontal {
-                rect(main_at, x, size.width, width)
+                rect(main_at, x, size.width, cell_cross)
             } else {
-                rect(x, main_at, width, size.height)
+                rect(x, main_at, cell_cross, size.height)
             };
             this.set_frame(cell, frame);
             this.set_left_behind(cell, false);

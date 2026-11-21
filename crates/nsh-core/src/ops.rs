@@ -1866,8 +1866,8 @@ pub enum CellSlot {
     Empty,
 }
 
-/// A list's `contentStyle` (or `contentClass`): padding around the content and gaps
-/// between rows and columns.
+/// A list's `contentStyle` (or `contentClass`): padding around the content, gaps
+/// between rows and columns, and cell alignment on the cross axis.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct ListContentStyle {
     /// Padding around the content.
@@ -1876,6 +1876,9 @@ pub struct ListContentStyle {
     pub row_gap: Points,
     /// Gap between columns (`numColumns`) of vertical lists.
     pub column_gap: Points,
+    /// Cell alignment on the cross axis: stretch (default), flex-start, center
+    /// or flex-end.
+    pub align_items: Option<taffy::AlignItems>,
 }
 
 /// Where a list rests (`alignment`), as GPUI's `ListAlignment`.
