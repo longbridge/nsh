@@ -110,11 +110,11 @@ These come from the [performance report](./performance-report.md) and the [NSH p
 
 ## Moving to NSH
 
-Each framework below made a foundational choice that shapes what its apps can and cannot do. This section names those choices and their documented costs, with a source for each, and then shows what NSH does in their place. NSH's claims link to its own documentation and to the [measured numbers](#measured-numbers) above.
+The following sections compare the trade-offs teams face when migrating and how NSH handles the same problems. For performance data, see the [measured numbers](#measured-numbers) above.
 
 ### Electron
 
-**The foundational choice: ship a browser.** Electron "inherits its multi-process architecture from Chromium": every app has a Node.js main process and spawns "a separate renderer process for each open `BrowserWindow`" ([Electron process model](https://www.electronjs.org/docs/latest/tutorial/process-model)). Every Electron app therefore carries its own copy of Chromium and Node.js.
+**Electron apps bundle Chromium and Node.js.** Electron "inherits its multi-process architecture from Chromium": every app has a Node.js main process and spawns "a separate renderer process for each open `BrowserWindow`" ([Electron process model](https://www.electronjs.org/docs/latest/tutorial/process-model)). Every Electron app therefore carries its own copy of Chromium and Node.js.
 
 Where that hurts:
 
@@ -143,7 +143,7 @@ Chat and AI apps gain the most. Many AI products render their conversations as w
 
 ### Tauri
 
-**The foundational choice: borrow the system's web view.** Tauri avoids bundling Chromium by using whatever the OS provides: WebView2 (Chromium) on Windows, WKWebView (WebKit) on macOS and iOS, `webkit2gtk` (WebKit) on Linux, and the device's Android WebView ([Tauri webview versions](https://v2.tauri.app/reference/webview-versions/)). Apps get smaller; the UI is still a web page.
+**Tauri uses the system webview.** Tauri avoids bundling Chromium by using whatever the OS provides: WebView2 (Chromium) on Windows, WKWebView (WebKit) on macOS and iOS, `webkit2gtk` (WebKit) on Linux, and the device's Android WebView ([Tauri webview versions](https://v2.tauri.app/reference/webview-versions/)). Apps get smaller; the UI is still a web page.
 
 Where that hurts:
 
@@ -155,7 +155,7 @@ How NSH answers: the UI is the platform's own views, the same on every OS versio
 
 ### React Native
 
-**The foundational choice: React in JavaScript, mapped onto native views.** React Native is closest to NSH in intent: both aim to cut duplicated client work and both use platform views. But app logic and React reconciliation always run in a JavaScript engine, and the New Architecture (Fabric, TurboModules, JSI) makes the bridge faster without changing that ([React Native architecture](https://reactnative.dev/architecture/landing-page)).
+**React Native drives native views from JavaScript.** React Native is closest to NSH in intent: both aim to cut duplicated client work and both use platform views. But app logic and React reconciliation always run in a JavaScript engine, and the New Architecture (Fabric, TurboModules, JSI) makes the bridge faster without changing that ([React Native architecture](https://reactnative.dev/architecture/landing-page)).
 
 Where that hurts:
 
@@ -183,7 +183,7 @@ How NSH answers:
 
 ### Flutter
 
-**The foundational choice: draw every pixel with its own engine.** Flutter renders the whole UI itself, so an app looks the same everywhere — and none of it is the platform's.
+**Flutter draws widgets with its own rendering engine.** Flutter renders the whole UI itself, so an app looks the same everywhere — and none of it is the platform's.
 
 Where that hurts:
 
@@ -196,7 +196,7 @@ How NSH answers: each backend is the platform's own views — UIKit, Android vie
 
 ### GPUI and GPUI Fast
 
-**The foundational choice: a GPU-drawn desktop framework for one editor.** [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) is the Rust UI framework of the Zed editor; [GPUI Fast](https://github.com/longbridge/gpui-fast) is Longbridge's fork with retained rendering, scroll layers and native window compositing, and NSH comes from the same team.
+**GPUI provides GPU rendering for the Zed desktop editor.** [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) is the Rust UI framework of the Zed editor; [GPUI Fast](https://github.com/longbridge/gpui-fast) is Longbridge's fork with retained rendering, scroll layers and native window compositing, and NSH comes from the same team.
 
 Where that hurts, for a general app:
 
@@ -211,11 +211,11 @@ How NSH answers: the same Rust-first model reaches iOS, Android and the web; tex
 
 ### Qt
 
-**The foundational choice: a mature C++ toolkit with its own UI layers.** Qt Widgets and Qt Quick draw their own controls styled to resemble each platform, with long-built tooling. NSH differs in foundation and model: platform controls rather than styled look-alikes, Rust at the core with a TSX path instead of C++ and QML, HTML on the web, one component model that adapts interaction across mobile, desktop and web, a toolchain designed for automated and AI-driven development, and an Apache-2.0 license for every use.
+**Qt offers two UI technologies, Widgets and Qt Quick.** Qt Widgets and Qt Quick draw their own controls styled to resemble each platform, with long-built tooling. NSH differs in foundation and model: platform controls rather than styled look-alikes, Rust at the core with a TSX path instead of C++ and QML, HTML on the web, one component model that adapts interaction across mobile, desktop and web, a toolchain designed for automated and AI-driven development, and an Apache-2.0 license for every use.
 
 ### Slint
 
-**The foundational choice: its own declarative language and renderer**, aimed at desktop and embedded devices and usable from Rust, C++, JavaScript or Python. Both value native performance; NSH's path is each platform's own UI and interaction, HTML on the web, Rust and TSX as app languages instead of a separate markup language, and phones as first-class targets.
+**Slint provides its own declarative language and renderer**, aimed at desktop and embedded devices and usable from Rust, C++, JavaScript or Python. Both value native performance; NSH's path is each platform's own UI and interaction, HTML on the web, Rust and TSX as app languages instead of a separate markup language, and phones as first-class targets.
 
 ### Summary: one row per framework
 

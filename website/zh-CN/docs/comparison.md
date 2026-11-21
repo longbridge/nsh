@@ -110,11 +110,11 @@ GPUI 与 GPUI Fast 合为一列：两者运行的平台相同，GPUI Fast 在 GP
 
 ## 从各个方案转到 NSH
 
-下面每个框架都做过一个奠基性的选择，它决定了用这个框架写的应用能做什么、做不到什么。本节逐一写出这些选择和有据可查的代价（每条附出处），再写 NSH 怎样处理同一个问题。NSH 的说法链接到 NSH 自己的文档和上文的[实测数字](#实测数字)。
+下面逐个比较迁移时会遇到的技术取舍，以及 NSH 如何处理同一问题。性能数据见上文的[实测数字](#实测数字)。
 
 ### Electron
 
-**奠基性选择：随应用带一个浏览器。** Electron 的多进程架构“继承自 Chromium”：每个应用有一个运行 Node.js 的主进程，并且“为每个打开的 `BrowserWindow` 启动一个独立的渲染进程”（[Electron 进程模型](https://www.electronjs.org/docs/latest/tutorial/process-model)）。也就是说，每个 Electron 应用都自带一份 Chromium 和 Node.js。
+**Electron 应用自带 Chromium 和 Node.js。** Electron 的多进程架构“继承自 Chromium”：每个应用有一个运行 Node.js 的主进程，并且“为每个打开的 `BrowserWindow` 启动一个独立的渲染进程”（[Electron 进程模型](https://www.electronjs.org/docs/latest/tutorial/process-model)）。也就是说，每个 Electron 应用都自带一份 Chromium 和 Node.js。
 
 代价在这里：
 
@@ -143,7 +143,7 @@ NSH 怎么解决：
 
 ### Tauri
 
-**奠基性选择：借用系统自带的 Web View。** Tauri 不打包 Chromium，而是用操作系统提供的：Windows 上是 WebView2（Chromium），macOS 和 iOS 上是 WKWebView（WebKit），Linux 上是 `webkit2gtk`（WebKit），Android 上是设备的 Android WebView（[Tauri webview 版本](https://v2.tauri.app/reference/webview-versions/)）。应用变小了，界面仍然是网页。
+**Tauri 使用系统提供的 Web View。** Tauri 不打包 Chromium，而是用操作系统提供的：Windows 上是 WebView2（Chromium），macOS 和 iOS 上是 WKWebView（WebKit），Linux 上是 `webkit2gtk`（WebKit），Android 上是设备的 Android WebView（[Tauri webview 版本](https://v2.tauri.app/reference/webview-versions/)）。应用变小了，界面仍然是网页。
 
 代价在这里：
 
@@ -155,7 +155,7 @@ NSH 怎么解决：界面是平台自己的视图，在平台支持的每个系�
 
 ### React Native
 
-**奠基性选择：用 JavaScript 跑 React，再映射到原生视图。** React Native 的目标和 NSH 最接近：都想减少重复的客户端工作，都使用平台视图。但应用逻辑和 React 协调始终跑在 JavaScript 引擎里，新架构（Fabric、TurboModules、JSI）让桥更快，并没有改变这一点（[React Native 架构](https://reactnative.dev/architecture/landing-page)）。
+**React Native 用 JavaScript 驱动原生视图。** React Native 的目标和 NSH 最接近：都想减少重复的客户端工作，都使用平台视图。但应用逻辑和 React 协调始终跑在 JavaScript 引擎里，新架构（Fabric、TurboModules、JSI）让桥更快，并没有改变这一点（[React Native 架构](https://reactnative.dev/architecture/landing-page)）。
 
 代价在这里：
 
@@ -183,7 +183,7 @@ NSH 怎么解决：
 
 ### Flutter
 
-**奠基性选择：用自己的引擎画每一个像素。** Flutter 自己渲染整个界面，所以应用在哪里看起来都一样——也因此没有一处是平台自己的。
+**Flutter 使用自己的渲染引擎绘制控件。** Flutter 自己渲染整个界面，所以应用在哪里看起来都一样——也因此没有一处是平台自己的。
 
 代价在这里：
 
@@ -196,7 +196,7 @@ NSH 怎么解决：每个后端用的都是平台自己的视图——UIKit、An
 
 ### GPUI 和 GPUI Fast
 
-**奠基性选择：为一个编辑器做的 GPU 绘制桌面框架。** [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) 是 Zed 编辑器的 Rust UI 框架；[GPUI Fast](https://github.com/longbridge/gpui-fast) 是 Longbridge 的分支，加入了保留式渲染、滚动图层和原生窗口合成，NSH 出自同一个团队。
+**GPUI 为 Zed 桌面编辑器提供 GPU 渲染。** [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) 是 Zed 编辑器的 Rust UI 框架；[GPUI Fast](https://github.com/longbridge/gpui-fast) 是 Longbridge 的分支，加入了保留式渲染、滚动图层和原生窗口合成，NSH 出自同一个团队。
 
 对通用应用来说，代价在这里：
 
@@ -211,11 +211,11 @@ NSH 怎么解决：同样以 Rust 为先的模型覆盖 iOS、Android 和 Web；
 
 ### Qt
 
-**奠基性选择：成熟的 C++ 工具包，自带 UI 层。** Qt Widgets 和 Qt Quick 自己绘制控件，并按各平台风格做样式，工具链积累多年。NSH 的根基和模型不同：用平台控件而不是仿制样式；核心是 Rust 并提供 TSX 路径，而不是 C++ 和 QML；Web 上输出 HTML；一套组件模型在手机、桌面和 Web 上自动适配交互；工具链为自动化和 AI 驱动的开发设计；任何用途都是 Apache-2.0 许可。
+**Qt 提供 Widgets 和 Qt Quick 两套 UI 技术。** Qt Widgets 和 Qt Quick 自己绘制控件，并按各平台风格做样式，工具链积累多年。NSH 的根基和模型不同：用平台控件而不是仿制样式；核心是 Rust 并提供 TSX 路径，而不是 C++ 和 QML；Web 上输出 HTML；一套组件模型在手机、桌面和 Web 上自动适配交互；工具链为自动化和 AI 驱动的开发设计；任何用途都是 Apache-2.0 许可。
 
 ### Slint
 
-**奠基性选择：自己的声明式语言和渲染器**，面向桌面和嵌入式设备，可从 Rust、C++、JavaScript 或 Python 使用。两者都重视原生性能；NSH 的路线是每个平台自己的 UI 和交互、Web 上的 HTML、用 Rust 和 TSX 写应用而不是另一门标记语言，并且手机是一等目标。
+**Slint 提供自己的声明式语言和渲染器**，面向桌面和嵌入式设备，可从 Rust、C++、JavaScript 或 Python 使用。两者都重视原生性能；NSH 的路线是每个平台自己的 UI 和交互、Web 上的 HTML、用 Rust 和 TSX 写应用而不是另一门标记语言，并且手机是一等目标。
 
 ### 小结：每个框架一行
 
