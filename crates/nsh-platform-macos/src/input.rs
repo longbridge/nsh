@@ -1884,13 +1884,20 @@ fn down(
         return;
     };
     // A press moves the keyboard focus to an explicitly `focusable` view
-    // under it, as the other desktops' widgets and browsers do. A field
-    // that edits keeps the focus (the root refuses the first responder
-    // during a press, `NshView::acceptsFirstResponder`), and a press on a
-    // view that is not focusable leaves it where it is.
+    // under it that takes no presses (a chart that takes keys), as the
+    // other desktops' widgets and browsers do. A control, a view that
+    // takes presses (a button, a select's trigger, a slider), takes no
+    // focus from a pointer, as AppKit's and Safari's do, so Return and
+    // Space stay the app's shortcuts. A field that edits keeps the focus
+    // (the root refuses the first responder during a press,
+    // `NshView::acceptsFirstResponder`), and a press on a view that is not
+    // focusable leaves it where it is.
     if hit.native.is_none()
         && let Some(window) = hit.view.ns().window()
-        && let Some(target) = chain(&hit.view).into_iter().find(explicitly_focusable)
+        && let Some(target) = chain(&hit.view)
+            .into_iter()
+            .take_while(|view| !view.state().events.contains(EventKind::Press))
+            .find(explicitly_focusable)
     {
         window.makeFirstResponder(Some(target.ns()));
     }
