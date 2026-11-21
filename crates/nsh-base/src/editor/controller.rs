@@ -198,6 +198,7 @@ impl Ed {
         ed.follow_completion();
         ed.follow_definition();
         ed.bind_keys();
+        ed.bind_app_keys();
         ed.load_syntaxes();
         ed
     }
@@ -401,6 +402,61 @@ impl Ed {
 
     // Keys.
 
+    /// Binds `keys` for the editor while the app does not take them
+    /// (`keyBindings`; read tracked, so a binding effect follows it).
+    pub(crate) fn bind_key(&self, keys: &str, options: KeyOptions, f: impl Fn(&str) + 'static) {
+        if !self.app_takes(keys) {
+            on_key_with(keys, options, f);
+        }
+    }
+
+    /// Whether `keys` is one of the app's `keyBindings` (tracked), compared
+    /// as keystrokes: `"cmd+enter"` on Apple platforms is `"mod+enter"`.
+    fn app_takes(&self, keys: &str) -> bool {
+        let apple = apple_keys();
+        let Ok(stroke) = nsh_core::keymap::Keystroke::parse_with(keys, apple) else {
+            return false;
+        };
+        self.props.key_bindings.with(|taken| {
+            taken.iter().any(|k| {
+                nsh_core::keymap::Keystroke::parse_with(k, apple).is_ok_and(|t| t == stroke)
+            })
+        })
+    }
+
+    /// The app's `keyBindings`, bound while the editor has the focus: each
+    /// reports `onKeyBinding`. The editor leaves those keys alone
+    /// ([`Self::bind_key`]), so none of its bindings, whenever made, takes
+    /// one first. A keystroke that is not one, or that the platform keeps,
+    /// is logged and skipped: a prop never panics the app.
+    fn bind_app_keys(&self) {
+        let ed = self.clone();
+        effect(move || {
+            if !ed.focused.get() {
+                return;
+            }
+            let apple = apple_keys();
+            for keys in ed.props.key_bindings.get() {
+                let stroke = match nsh_core::keymap::Keystroke::parse_with(&keys, apple) {
+                    Ok(stroke) => stroke,
+                    Err(e) => {
+                        log::warn!("Editor.keyBindings: {e}");
+                        continue;
+                    }
+                };
+                if let Some(why) = stroke.reserved(os()) {
+                    log::warn!("Editor.keyBindings: {keys:?} cannot be bound: {why}");
+                    continue;
+                }
+                let e = ed.clone();
+                let written = keys.clone();
+                on_key_with(&keys, always(false), move |_| {
+                    e.cx.emit(EditorEvent::KeyBinding(written.clone()));
+                });
+            }
+        });
+    }
+
     /// The editor's keys, bound while it has the focus (they would take
     /// arrows and Tab from every other input otherwise).
     fn bind_keys(&self) {
@@ -418,7 +474,7 @@ impl Ed {
             {
                 let e = ed.clone();
                 let command = binding.command;
-                on_key_with(
+                ed.bind_key(
                     binding.keys,
                     KeyOptions {
                         when: When::Always,
@@ -432,14 +488,14 @@ impl Ed {
             for binding in keymap::editor_bindings(apple) {
                 let e = ed.clone();
                 let command = binding.command;
-                on_key_with(binding.keys, always(binding.repeat), move |_| {
+                ed.bind_key(binding.keys, always(binding.repeat), move |_| {
                     e.run_public(command)
                 });
             }
             let e = ed.clone();
-            on_key_with("mod+c", always(false), move |_| e.copy());
+            ed.bind_key("mod+c", always(false), move |_| e.copy());
             let e = ed.clone();
-            on_key_with("mod+x", always(false), move |_| e.cut());
+            ed.bind_key("mod+x", always(false), move |_| e.cut());
         });
         // Escape collapses several carets or a selection to one caret;
         // with nothing to collapse it is left to the page (a dialog closes,
@@ -459,7 +515,7 @@ impl Ed {
                 return;
             }
             let e = ed.clone();
-            on_key_with("escape", always(false), move |_| {
+            ed.bind_key("escape", always(false), move |_| {
                 e.run(Command::SingleSelection)
             });
         });

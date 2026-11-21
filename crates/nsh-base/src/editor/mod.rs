@@ -202,6 +202,13 @@ pub struct EditorProps {
     /// (default 300).
     #[prop(default = 300.0)]
     pub inline_completion_delay: Prop<f64>,
+    /// Keys the app takes while the editor has the keyboard focus, before
+    /// the editor's own (`nsh/keymap` keystrokes: `"mod+enter"`): such a
+    /// key runs neither the editor's command for it nor types, and
+    /// `onKeyBinding` reports it. Without the focus the editor binds none
+    /// of them (default none).
+    #[prop(default)]
+    pub key_bindings: Prop<Vec<SharedString>>,
 }
 
 /// The events of an [`Editor`].
@@ -217,6 +224,10 @@ pub enum EditorEvent {
     Focus,
     /// The editor lost the focus.
     Blur,
+    /// One of `keyBindings` was pressed while the editor had the focus:
+    /// the keystroke as `keyBindings` writes it.
+    #[args(keystroke)]
+    KeyBinding(SharedString),
     /// The search's matches changed (a new `search`, an edit, a move to
     /// another match).
     #[args(result)]

@@ -4234,6 +4234,17 @@ covers [props] Editor.gutterDecorationsWidth
 covers [events] Editor.onDefinitionRequest
 covers [events] Editor.onCodeActionRequest
 
+# base-editor-key-bindings
+tap id:case-base-editor-key-bindings
+# With the editor focused, mod+enter goes to the app (`keyBindings`,
+# `onKeyBinding`) instead of inserting a line below.
+tap text:select 1
+key mod+enter
+expect Taken: mod+enter
+expect Lines: 1
+covers [props] Editor.keyBindings
+covers [events] Editor.onKeyBinding
+
 # base-diff
 tap id:case-base-diff
 # Two changes, one line each, with a line of context around them: the
