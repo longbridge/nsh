@@ -1799,8 +1799,11 @@ impl InputPointer {
             return;
         };
         let root = crate::input::root_in(&surface, &window);
-        crate::input::enter(&surface, (root.id() != nsh_core::ROOT_ID).then_some(root));
-        crate::input::event(&surface, event);
+        crate::input::report_hosted(
+            &surface,
+            (root.id() != nsh_core::ROOT_ID).then_some(root),
+            event,
+        );
     }
 }
 

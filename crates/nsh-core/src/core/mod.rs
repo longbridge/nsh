@@ -11052,6 +11052,25 @@ impl<M: TextEngine> Core<M> {
             })
             .flatten();
         match (scroll_by, frame_at) {
+            // The viewport and the content both grow (rows arriving as a
+            // placeholder beside the list goes away): the content first,
+            // then the scroll, then the frame. A frame grown over the old
+            // content clamps the scroll back to its start.
+            (Some(item), Some(at)) if content_len > old_len => {
+                self.set_scroll_content(key, content);
+                match self
+                    .mount
+                    .iter()
+                    .rposition(|m| matches!(m, MountItem::ScrollContent { id: c, .. } if *c == id))
+                {
+                    Some(queued) if queued > at => {
+                        let grown = self.mount.remove(queued);
+                        self.mount.insert(at, grown);
+                        self.mount.insert(at + 1, item);
+                    }
+                    _ => self.mount.insert(at, item),
+                }
+            }
             (Some(item), Some(at)) => {
                 self.mount.insert(at, item);
                 self.set_scroll_content(key, content);
