@@ -25,6 +25,7 @@
 //! | Feature | Rust | TS | What it does |
 //! |---|---|---|---|
 //! | `camera` | [`camera`] | `Camera` | Photos taken with the system's camera (iOS, Android) |
+//! | `push` | [`push`] | `Push` | Remote notifications with any push service (iOS) |
 //!
 //! A module is one feature, named as its Rust module (`camera`, `push`);
 //! its TS namespace is that name in PascalCase (`Camera`, `Push`); its code
@@ -37,13 +38,22 @@
 
 #[cfg(feature = "camera")]
 pub mod camera;
+#[cfg(feature = "push")]
+pub mod push;
 
 use nsh_core::prelude::*;
 
 /// The set apps import from `nsh-extra`: the modules of the features on.
+/// It runs on the main thread before the app launches, where a module sets
+/// up what the launch already needs (`push` observes the app's delegate).
 #[native_module("nsh-extra")]
 fn native(registry: &mut Registry) {
     #[cfg(feature = "camera")]
     registry.module::<camera::Camera>();
+    #[cfg(feature = "push")]
+    {
+        push::install();
+        registry.module::<push::Push>();
+    }
     let _ = registry;
 }
