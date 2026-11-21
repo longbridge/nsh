@@ -147,7 +147,7 @@ const values = signal([12, 30, 22, 48, 36, 60]);
 
 **矩形**：`fillRect`、`strokeRect`、`clearRect`。
 
-**文字**：`fillText(text, x, y, maxWidth?)`、`strokeText(...)`、`measureText(text)`（由平台的文字引擎按当前 `font` 同步测量；只有 `width`）。在 Rust 中，`measure_text(font, text)` 给出宽度。
+**文字**：`fillText(text, x, y, maxWidth?)`、`strokeText(...)`、`measureText(text)`（由平台的文字引擎按当前 `font` 同步测量：`width`，以及这一行字体在基线上方、下方的高度 `fontBoundingBoxAscent`、`fontBoundingBoxDescent`）。在 Rust 中，`measure_text(font, text)` 给出宽度，`text_metrics(font, text)` 给出全部。
 
 **命中测试**：`isPointInPath(path?, x, y, rule?)` 和 `isPointInStroke(path?, x, y)`（`Painter` 上的 `path_contains`、`stroke_contains`、`is_point_in_path` 和 `is_point_in_stroke`）同步给出结果，依据录制的几何信息（当前变换、路径、`lineWidth` 和 `lineCap`）计算。保留绘制和画过的路径，就能找出点击位置下的形状：
 
