@@ -34,6 +34,7 @@ mod test_android;
 mod test_host;
 mod test_ios;
 mod test_web;
+mod toolchain;
 mod ui;
 mod updater;
 mod web;
@@ -686,6 +687,16 @@ impl Command {
 
 /// Runs the command line; errors are printed.
 fn main() -> ExitCode {
+    // `toolchain.nsh` selects another nsh revision or version (`toolchain.rs`):
+    // run after bootstrapping the launcher toolchain, never inside a subcommand.
+    // args are passed verbatim. If no pin, or the pin matches this nsh, runs in place.
+    {
+        let argv: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        if let Some(code) = toolchain::run(&cwd, &argv) {
+            return code;
+        }
+    }
     // `--target` naming a platform outside NSH: its executable runs the
     // command (`platforms.rs`).
     let args: Vec<_> = std::env::args_os().collect();
