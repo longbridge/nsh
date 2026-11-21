@@ -1150,7 +1150,8 @@ pub trait Element: IntoElement + Sized {
     /// (`$x^2$`), an emoji image's character. Selecting across the view
     /// and copying puts this where it is, as a browser copies an inline
     /// image's `alt`. Unset, the view adds nothing to the copy; a view
-    /// outside a text ignores it. Screen readers keep reading the view's
+    /// outside a text and a nested text span (whose characters are copied
+    /// themselves) ignore it. Screen readers keep reading the view's
     /// [`Accessible::label`].
     ///
     /// ```ignore

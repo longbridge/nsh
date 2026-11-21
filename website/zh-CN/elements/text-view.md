@@ -428,7 +428,7 @@ import { Image, View } from "nsh";
 
 `Highlighted` 和 `MathView`（Rust 中是 `highlighted` 和 `math_view`）代表应用自己的组件（高亮器、公式渲染器，或应用 Rust crate 中的组件）。没有 `renderMath` 时，`TextView` 自己排版公式（`math` 和 `mathBlock` 部件）：支持 KaTeX 的 TeX 语法并使用 KaTeX 字体，颜色跟随文本，在各平台上效果一致；无法解析的 TeX 以等宽字体显示其源码。
 
-复制选中的段落时，其中的公式给出它的源码 `$x^2$`。`renderMath` 返回的视图把源码设为它的
+复制选中的段落时，文字中的公式（`$…$`）给出它的源码 `$x^2$`。公式块（`$$…$$`）不在文字中，复制时仍不包含。`renderMath` 返回的视图把源码设为它的
 [`copyText`](./text.md#行内视图和图片)，复制时也会保留公式：
 `` renderMath={(math) => <MathView tex={math.tex} copyText={`$${math.tex}$`} />} ``（Rust 中为
 `.copy_text(format!("${}$", math.tex))`）。
