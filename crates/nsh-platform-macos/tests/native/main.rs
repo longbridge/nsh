@@ -69,6 +69,8 @@ mod window_frames;
 #[cfg(target_os = "macos")]
 mod window_hover;
 #[cfg(target_os = "macos")]
+mod window_layout;
+#[cfg(target_os = "macos")]
 mod window_press;
 #[cfg(target_os = "macos")]
 mod zoom;
@@ -109,6 +111,8 @@ fn main() {
                 window_dialog::run();
             } else if std::env::var_os("NSH_WINDOW_FRAMES_CHECK_ONLY").is_some() {
                 window_frames::run();
+            } else if std::env::var_os("NSH_WINDOW_LAYOUT_CHECK_ONLY").is_some() {
+                window_layout::run();
             } else if std::env::var_os("NSH_WINDOW_ALERT_CHECK_ONLY").is_some() {
                 window_alert::run();
             } else if std::env::var_os("NSH_FOCUS_SELECTION_CHECK_ONLY").is_some() {
@@ -160,6 +164,7 @@ fn main() {
                 menu_labels::run();
                 menu_lifetime::run();
                 window_frames::run();
+                window_layout::run();
                 keyboard::run();
                 ime::run();
                 input_hidden::run();
