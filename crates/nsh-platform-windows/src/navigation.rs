@@ -253,7 +253,7 @@ fn record(surface: &Surface, view: &NshView) -> Option<Picture> {
                 // As it shows when settled: a transition's fade is not
                 // part of it.
                 let fade = std::mem::replace(&mut view.state_mut().fade, 1.0);
-                crate::render::draw_view(&mut cx, view, Mat4::new(), (0.0, 0.0));
+                crate::render::draw_view(&mut cx, view, Mat4::new(), Mat4::new());
                 view.state_mut().fade = fade;
                 true
             }

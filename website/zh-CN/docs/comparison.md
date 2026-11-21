@@ -215,7 +215,7 @@ NSH 怎么解决：
 - **Web 不是真正的 Web。** Flutter“不适合以文本为主、流式排版的静态网站”，其输出“与搜索引擎正确索引所需的内容不一致”；Flutter 团队自己建议文档类内容用 Jaspr 或普通 HTML，并把自己的文档站迁到了 Jaspr（[Flutter Web FAQ](https://docs.flutter.dev/platform-integration/web/faq)）。
 - **只有 Dart。** 逻辑和界面都是 Dart，系统级代码和已有原生库要走 platform channel 或 FFI。
 
-NSH 怎么解决：每个后端用的都是平台自己的视图——UIKit、Android View、AppKit、Win32、GTK 4——地图或 Web View 只是视图树里的又一个视图，不是被合成进来的客人；文本编辑、输入法、选择和无障碍都是系统的（[简介](./index.md#native-的含义)）；Web 产物是真正的 HTML，可选择、可被索引、可被读屏软件朗读；语言是 Rust（有 crates 生态和原生线程）加上用于快速写界面的 TSX。**要付出的。** 各平台外观不同，这正是使用平台 UI 的意义；如果要像素级一致的品牌界面，Flutter 更合适。
+NSH 怎么解决：每个后端用的都是平台自己的视图——UIKit、Android View、AppKit、Win32、GTK 4——地图或 Web View 只是视图树里的又一个视图，不是被合成进来的客人；文本编辑、输入法、选择和无障碍都是系统的（[简介](./index.md#native-的含义)）；Web 产物是真正的 HTML，可选择、可被索引、可被读屏软件朗读；语言是 Rust（有 crates 生态和原生线程）加上用于快速写界面的 TSX。**要付出的。** 应用可以跨平台复用同一套品牌样式；系统字体和材质的渲染细节仍会因平台而异。
 
 Flutter 已有表格和输入控件。迁移代码审阅页时，值得比较的是上层工作量：Editor 提供诊断与折叠，DiffView 提供差异对齐与批注，现有 Dart 控件实现仍需移植。
 
@@ -271,10 +271,12 @@ GPUI Kit 用户在桌面上已经拥有成熟组件。迁移的收益在于把�
 
 应用想要显示安装包里没有的界面——由模型生成的回答、来自合作方或其他团队的功能、无需发版就能变化的页面——无论在手机还是桌面上，都已有几种成熟的做法。它们的区别在于：界面由什么绘制，下发的代码能做什么，以及宿主应用要为承载它们做多大的改动。
 
+NSH 的界面以自定义外观为主。应用决定组件的样式，也可以在支持的平台上使用 Liquid Glass 等系统材质。文本编辑、输入法和选择等交互沿用平台行为。
+
 | 能力 | NSH | WebView | 服务端驱动 UI | 小程序容器 | OTA 更新 |
 |---|---|---|---|---|---|
 | 由什么绘制 | 平台界面 | 浏览器引擎 | 应用自己的视图 | 网页引擎加专有层 | 框架的渲染器 |
-| Native 的外观与行为 | <span class="status status--yes" role="img" aria-label="支持"></span> | <span class="status status--no" role="img" aria-label="不支持"></span> | <span class="status status--yes" role="img" aria-label="支持"></span> | <span class="status status--partial" role="img" aria-label="部分支持"></span> | <span class="status status--yes" role="img" aria-label="支持"></span> |
+| 原生交互行为 | <span class="status status--yes" role="img" aria-label="支持"></span> | <span class="status status--no" role="img" aria-label="不支持"></span> | <span class="status status--yes" role="img" aria-label="支持"></span> | <span class="status status--partial" role="img" aria-label="部分支持"></span> | <span class="status status--yes" role="img" aria-label="支持"></span> |
 | 自己的状态、逻辑和布局 | <span class="status status--yes" role="img" aria-label="支持"></span> | <span class="status status--yes" role="img" aria-label="支持"></span> | <span class="status status--no" role="img" aria-label="不支持"></span> | <span class="status status--yes" role="img" aria-label="支持"></span> | <span class="status status--yes" role="img" aria-label="支持"></span> |
 | 宿主的 Native 组件 | <span class="status status--yes" role="img" aria-label="支持"></span> | <span class="status status--partial" role="img" aria-label="部分支持"></span> 桥接 | <span class="status status--yes" role="img" aria-label="支持"></span> | <span class="status status--partial" role="img" aria-label="部分支持"></span> | <span class="status status--yes" role="img" aria-label="支持"></span> |
 | 宿主配置的沙箱 | <span class="status status--yes" role="img" aria-label="支持"></span> | <span class="status status--partial" role="img" aria-label="部分支持"></span> 同源策略 | <span class="status status--yes" role="img" aria-label="支持"></span> Schema | <span class="status status--yes" role="img" aria-label="支持"></span> | <span class="status status--no" role="img" aria-label="不支持"></span> |

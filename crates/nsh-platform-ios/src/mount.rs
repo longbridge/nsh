@@ -744,6 +744,24 @@ pub(crate) struct Mounter {
     following_scroll: Vec<NodeId>,
     /// Modals to present or dismiss at the end of the current batch.
     dirty_modals: Vec<NodeId>,
+    /// Every modal, with whether it was in the tree when last checked: a
+    /// modal leaves with the subtree it is in, not when its node is
+    /// released (a later batch), and comes back with it.
+    modal_attached: Vec<(NodeId, bool)>,
+    /// Views were inserted, removed or deleted in this batch: the modals
+    /// are checked against the tree.
+    tree_changed: bool,
+    /// Modals the app shows that wait for a transition to end
+    /// ([`navigation::transition_over`]): presented over a modal on its
+    /// way out, they would go with it.
+    waiting_modals: Vec<NodeId>,
+    /// Modals dismissed since the last [`Mounter::finish_modals`], which a
+    /// modal presented there waits for even before their transition
+    /// starts.
+    dismissed_now: Vec<NodeId>,
+    /// Modals taken along by a dismissal under them, then hidden by the
+    /// app: reported closed once that dismissal ends.
+    closing_taken: Vec<NodeId>,
     /// Where `asset:/` URIs of videos resolve.
     asset_base: Option<AssetBase>,
     /// Report touches to JS: on the root and on each modal's root.
@@ -887,6 +905,11 @@ impl Mounter {
             dirty_headers: Vec::new(),
             following_scroll: Vec::new(),
             dirty_modals: Vec::new(),
+            modal_attached: Vec::new(),
+            tree_changed: false,
+            waiting_modals: Vec::new(),
+            dismissed_now: Vec::new(),
+            closing_taken: Vec::new(),
             asset_base: asset_base.clone(),
             sticky: Default::default(),
             touch_trackers: Vec::new(),
@@ -1266,8 +1289,11 @@ impl Mounter {
                 }
                 let modal = matches!(native, Native::Modal(_));
                 self.views[idx] = Some(Slot::new(native));
-                if modal && self.touch_listeners > 0 {
-                    self.add_touch_tracker(id);
+                if modal {
+                    self.modal_attached.push((id, false));
+                    if self.touch_listeners > 0 {
+                        self.add_touch_tracker(id);
+                    }
                 }
                 if self.layout_animation.is_some() {
                     self.created.push(id);
@@ -1281,6 +1307,7 @@ impl Mounter {
                 if let Some(s) = self.slot_mut(child) {
                     s.parent = Some(parent);
                 }
+                self.tree_changed = true;
                 if self.insert_hosted(parent, child, before) {
                     return false;
                 }
@@ -1313,6 +1340,7 @@ impl Mounter {
                 if let Some(s) = self.slot_mut(id) {
                     s.parent = None;
                 }
+                self.tree_changed = true;
                 if self.remove_hosted(id) {
                     return false;
                 }
@@ -1342,6 +1370,7 @@ impl Mounter {
                         Some((self.root_view_of(view)?, view.window()?))
                     });
                 self.remove_hosted(id);
+                self.tree_changed = true;
                 self.sticky.remove(&id);
                 self.split_deleted(id);
                 // A removal animation it was running ends with it: its end
@@ -1362,8 +1391,25 @@ impl Mounter {
                     // shader (from the picture held when it was removed) or
                     // with its own motion.
                     if let Native::Modal(modal) = &mut s.native {
-                        let at_once = modal.changes(false) && self.dialog_overlay(id, false);
-                        modal.dismiss(at_once, || {});
+                        self.modal_attached.retain(|&(m, _)| m != id);
+                        self.waiting_modals.retain(|&m| m != id);
+                        self.closing_taken.retain(|&m| m != id);
+                        let changes = modal.changes(false);
+                        let at_once = changes && self.dialog_overlay(id, false);
+                        // The modals over it go with it: those the app
+                        // still shows come back once it is gone.
+                        if changes {
+                            for above in modal.modals_above() {
+                                if self.modal_mut(above).is_some_and(|m| m.dismissed_under()) {
+                                    self.waiting_modals.push(above);
+                                }
+                            }
+                        }
+                        if changes {
+                            self.dismissed_now.push(id);
+                        }
+                        let shared = self.shared.clone();
+                        modal.dismiss(at_once, move || Self::present_waiting(&shared));
                     }
                     if s.events.contains(EventKind::Touch) {
                         self.touch_listener_changed(false);
@@ -4221,37 +4267,7 @@ impl Mounter {
                 self.following_scroll.push(id);
             }
         }
-        let modals = std::mem::take(&mut self.dirty_modals);
-        let root = self
-            .slot(nsh_core::ROOT_ID)
-            .map(|s| s.native.view().retain());
-        for id in modals {
-            let shown = self.hosts.contains_key(&id);
-            let changes = matches!(
-                self.slot(id).map(|s| &s.native),
-                Some(Native::Modal(modal)) if modal.changes(shown)
-            );
-            // Through its shader, pictured before it comes or goes at once
-            // (where the shader cannot draw, with its own motion).
-            let at_once = changes && self.dialog_overlay(id, shown);
-            let control = self.control.clone();
-            let Some(Slot {
-                native: Native::Modal(modal),
-                ..
-            }) = self.views.get_mut(id as usize).and_then(Option::as_mut)
-            else {
-                continue;
-            };
-            if shown {
-                if let Some(root) = &root {
-                    modal.present(root, at_once);
-                }
-            } else {
-                modal.dismiss(at_once, move || {
-                    control.dispatch_event(id, EventKind::Dismiss, EventPayload::None)
-                });
-            }
-        }
+        self.finish_modals();
         let views = &self.views;
         self.following_scroll.retain(
             |&id| match views.get(id as usize).and_then(Option::as_ref) {
@@ -4271,6 +4287,226 @@ impl Mounter {
         self.leaving_screens
             .retain(|stack, _| deferred.contains(stack));
         self.shaders.release_held(|key| deferred.contains(&key));
+    }
+
+    /// Presents and dismisses the modals whose place in the tree changed.
+    fn finish_modals(&mut self) {
+        if std::mem::take(&mut self.tree_changed) {
+            for i in 0..self.modal_attached.len() {
+                let (id, was) = self.modal_attached[i];
+                let now = self.in_tree(id);
+                if now != was {
+                    self.modal_attached[i].1 = now;
+                    self.dirty_modals.push(id);
+                }
+            }
+        }
+        // Taken along by a dismissal and hidden since: closed once it ends.
+        let control = self.control.clone();
+        let views = &self.views;
+        self.closing_taken.retain(|&id| {
+            let gone = match views.get(id as usize).and_then(Option::as_ref) {
+                Some(Slot {
+                    native: Native::Modal(modal),
+                    ..
+                }) => modal.gone(),
+                _ => return false,
+            };
+            if gone {
+                control.dispatch_event(id, EventKind::Dismiss, EventPayload::None);
+            }
+            !gone
+        });
+        if self.dirty_modals.is_empty() {
+            self.dismissed_now.clear();
+            return;
+        }
+        let mut modals = std::mem::take(&mut self.dirty_modals);
+        let mut seen = 0;
+        while seen < modals.len() {
+            let id = modals[seen];
+            if modals[..seen].contains(&id) {
+                modals.remove(seen);
+            } else {
+                seen += 1;
+            }
+        }
+        let (shown, mut hidden): (Vec<NodeId>, Vec<NodeId>) =
+            modals.into_iter().partition(|&id| self.in_tree(id));
+        // Dismissals first, the lowest first: UIKit dismisses everything
+        // above the modal it dismisses, so the ones the app hides over it
+        // go with it, those it shows come back once it is gone, and one
+        // presented now waits for it.
+        hidden.sort_by_cached_key(|&id| self.modal(id).map_or(0, ModalHost::depth));
+        // Taken along by a dismissal under it (its presentation was
+        // UIKit's undoing, not the app's): reported closed when gone.
+        for &id in &hidden {
+            match self.modal_mut(id).and_then(ModalHost::hidden_after_taken) {
+                Some(true) => {
+                    self.control
+                        .dispatch_event(id, EventKind::Dismiss, EventPayload::None)
+                }
+                Some(false) => self.closing_taken.push(id),
+                None => {}
+            }
+        }
+        let mut handled = Vec::new();
+        for &id in &hidden {
+            if handled.contains(&id) {
+                continue;
+            }
+            let Some(modal) = self.modal(id) else {
+                continue;
+            };
+            let changes = modal.changes(false);
+            let above = if changes {
+                modal.modals_above()
+            } else {
+                Vec::new()
+            };
+            // Through its shader, pictured before it goes at once (where
+            // the shader cannot draw, with its own motion).
+            let at_once = changes && self.dialog_overlay(id, false);
+            let mut gone = vec![id];
+            for other in above {
+                let hides = hidden.contains(&other);
+                let Some(modal) = self.modal_mut(other) else {
+                    continue;
+                };
+                if modal.dismissed_under() {
+                    if hides {
+                        gone.push(other);
+                    } else {
+                        self.waiting_modals.push(other);
+                    }
+                } else if hides {
+                    // Closed by the user already (and reported).
+                    modal.dismiss(false, || {});
+                }
+                if hides {
+                    handled.push(other);
+                }
+            }
+            let control = self.control.clone();
+            let shared = self.shared.clone();
+            if changes {
+                self.dismissed_now.push(id);
+            }
+            let Some(modal) = self.modal_mut(id) else {
+                continue;
+            };
+            modal.dismiss(at_once, move || {
+                for &id in &gone {
+                    control.dispatch_event(id, EventKind::Dismiss, EventPayload::None);
+                }
+                Self::present_waiting(&shared);
+            });
+        }
+        let dismissed = std::mem::take(&mut self.dismissed_now);
+        let Some(root) = self
+            .slot(nsh_core::ROOT_ID)
+            .map(|s| s.native.view().retain())
+        else {
+            return;
+        };
+        for id in shown {
+            let Some(modal) = self.modal(id) else {
+                continue;
+            };
+            if !modal.changes(true) {
+                continue;
+            }
+            if let Some(awaited) = crate::navigation::transition_over(&root, &dismissed) {
+                self.wait_for(id, &awaited);
+                continue;
+            }
+            // Through its shader, pictured before it comes at once (where
+            // the shader cannot draw, with its own motion).
+            let at_once = self.dialog_overlay(id, true);
+            if let Some(modal) = self.modal_mut(id) {
+                modal.present(&root, at_once);
+            }
+        }
+    }
+
+    /// Whether `id` is in the tree: its parents lead to the root. A view
+    /// whose parent was deleted keeps its id until its own deletion, and a
+    /// new view may take that id: the walk stops after as many steps as
+    /// there are views.
+    fn in_tree(&self, mut id: NodeId) -> bool {
+        for _ in 0..self.views.len() {
+            if id == nsh_core::ROOT_ID {
+                return true;
+            }
+            match self.slot(id).and_then(|s| s.parent) {
+                Some(parent) => id = parent,
+                None => return false,
+            }
+        }
+        false
+    }
+
+    fn modal(&self, id: NodeId) -> Option<&ModalHost> {
+        match self.slot(id) {
+            Some(Slot {
+                native: Native::Modal(modal),
+                ..
+            }) => Some(modal),
+            _ => None,
+        }
+    }
+
+    fn modal_mut(&mut self, id: NodeId) -> Option<&mut ModalHost> {
+        match self.slot_mut(id) {
+            Some(Slot {
+                native: Native::Modal(modal),
+                ..
+            }) => Some(modal),
+            _ => None,
+        }
+    }
+
+    /// Modal `id` is presented once the transition of `awaited` ends
+    /// ([`Mounter::present_waiting`]), and NSH's dismissal presents the
+    /// waiting modals when it is done. One NSH just dismissed with no
+    /// transition yet is looked at again on the main queue's next turn: by
+    /// then its transition runs, or it is gone, or UIKit refused it.
+    fn wait_for(&mut self, id: NodeId, awaited: &objc2_ui_kit::UIViewController) {
+        if !self.waiting_modals.contains(&id) {
+            self.waiting_modals.push(id);
+        }
+        let Some(coordinator) = awaited.transitionCoordinator() else {
+            return Self::present_waiting(&self.shared);
+        };
+        let shared = self.shared.clone();
+        let done = RcBlock::new(
+            move |_: NonNull<ProtocolObject<dyn UIViewControllerTransitionCoordinatorContext>>| {
+                Self::present_waiting(&shared)
+            },
+        );
+        // Refused when the transition is already ending.
+        if !coordinator.animateAlongsideTransition_completion(None, Some(&done)) {
+            Self::present_waiting(&self.shared);
+        }
+    }
+
+    /// Presents the modals waiting for a transition to end
+    /// ([`Mounter::wait_for`]) and reports the taken ones hidden since
+    /// (`closing_taken`), on the main queue's next turn: the controller
+    /// that left is out of the presentation by then. One still in the way
+    /// of another transition waits again.
+    fn present_waiting(shared: &SharedMounter) {
+        let shared = shared.clone();
+        DispatchQueue::main().exec_async(move || {
+            let mtm = MainThreadMarker::new().expect("main queue");
+            if let Some(m) = shared.get(mtm).borrow_mut().as_mut()
+                && !(m.waiting_modals.is_empty() && m.closing_taken.is_empty())
+            {
+                let waiting = std::mem::take(&mut m.waiting_modals);
+                m.dirty_modals.extend(waiting);
+                m.finish_navigation();
+            }
+        });
     }
 
     /// A stack is about to show a screen: its header options apply.

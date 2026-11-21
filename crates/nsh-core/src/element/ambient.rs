@@ -1808,6 +1808,12 @@ pub fn try_apple_keys() -> Option<bool> {
 ///
 /// On a keystroke that is not one, or one the platform keeps (Command+Q
 /// on Apple platforms, Alt+F4 elsewhere, ...), as TS's `bind` throws.
+///
+/// The panic is not fatal to the app: like any panic in a component, it
+/// ends the component that made the call (its error boundary hears it, or
+/// it is logged) and the engine goes on. To take keystrokes from user
+/// settings, check them first with
+/// [`Shortcut::parse`](crate::desktop::Shortcut::parse).
 #[track_caller]
 pub fn on_key(keystroke: &str, handler: impl Fn(&str) + 'static) {
     on_key_with(keystroke, KeyOptions::default(), handler);
@@ -2014,6 +2020,12 @@ fn add_watch(target: Rc<dyn Fn() -> Option<NodeId>>, handler: super::watch::Scro
 /// # Panics
 ///
 /// On a keystroke that is not one.
+///
+/// The panic is not fatal to the app: like any panic in a component, it
+/// ends the component that made the call (its error boundary hears it, or
+/// it is logged) and the engine goes on. To take keystrokes from user
+/// settings, check them first with
+/// [`Shortcut::parse`](crate::desktop::Shortcut::parse).
 #[track_caller]
 pub fn key_label(keystroke: &str) -> String {
     let parsed = crate::keymap::Keystroke::parse_with(keystroke, apple_keys())
