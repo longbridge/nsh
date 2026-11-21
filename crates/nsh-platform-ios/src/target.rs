@@ -11,7 +11,7 @@ use nsh_engine::EngineControl;
 use objc2::{
     ClassType, DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send,
     rc::{Retained, Weak},
-    runtime::ProtocolObject,
+    runtime::{AnyObject, ProtocolObject},
 };
 use objc2_core_foundation::CGPoint;
 use objc2_foundation::{NSObject, NSObjectProtocol, NSRange, NSString};
@@ -52,6 +52,9 @@ pub(crate) struct TargetIvars {
     tap_start: std::cell::RefCell<Option<(Retained<UITouch>, CGPoint, f64)>>,
     /// The surface's feedback generators.
     haptics: crate::haptics::Haptics,
+    /// The file drop listeners a drag of files is over (entered, not yet
+    /// left or dropped on): each hears `onFileDragLeave` once.
+    file_drags: std::cell::RefCell<Vec<NodeId>>,
 }
 
 define_class!(
@@ -103,6 +106,67 @@ define_class!(
             // UIKeyModifierFlags (NSInteger).
             let modifiers: isize = unsafe { msg_send![recognizer, modifierFlags] };
             self.with_mounter(move |m| m.hover(id, state, in_window, modifiers));
+        }
+
+        // UIDropInteractionDelegate, for the views that listen to
+        // `onFileDrop` ([`crate::file_drop`]).
+
+        #[unsafe(method(dropInteraction:canHandleSession:))]
+        fn drop_can_handle(&self, _interaction: &AnyObject, session: &AnyObject) -> bool {
+            crate::file_drop::offers_files(session)
+        }
+
+        #[unsafe(method(dropInteraction:sessionDidEnter:))]
+        fn drop_entered(&self, interaction: &AnyObject, _session: &AnyObject) {
+            let Some(id) = drop_listener(interaction) else { return };
+            let mut drags = self.ivars().file_drags.borrow_mut();
+            if !drags.contains(&id) {
+                drags.push(id);
+                drop(drags);
+                self.with_mounter(move |m| m.file_drag(id, true));
+            }
+        }
+
+        #[unsafe(method_id(dropInteraction:sessionDidUpdate:))]
+        fn drop_updated(
+            &self,
+            _interaction: &AnyObject,
+            session: &AnyObject,
+        ) -> Option<Retained<AnyObject>> {
+            crate::file_drop::proposal(session)
+        }
+
+        #[unsafe(method(dropInteraction:sessionDidExit:))]
+        fn drop_exited(&self, interaction: &AnyObject, _session: &AnyObject) {
+            if let Some(id) = drop_listener(interaction) {
+                self.file_drag_left(id);
+            }
+        }
+
+        #[unsafe(method(dropInteraction:sessionDidEnd:))]
+        fn drop_ended(&self, interaction: &AnyObject, _session: &AnyObject) {
+            if let Some(id) = drop_listener(interaction) {
+                self.file_drag_left(id);
+            }
+        }
+
+        #[unsafe(method(dropInteraction:performDrop:))]
+        fn drop_performed(&self, interaction: &AnyObject, session: &AnyObject) {
+            let Some(id) = drop_listener(interaction) else { return };
+            // The leave follows the drop, once its files are read.
+            self.ivars().file_drags.borrow_mut().retain(|&d| d != id);
+            let Some(in_window) = crate::file_drop::location(interaction, session) else {
+                return;
+            };
+            let shared = self.ivars().mounter.clone();
+            crate::file_drop::read(session, move |uris| {
+                DispatchQueue::main().exec_async(move || {
+                    let mtm = MainThreadMarker::new().expect("main queue");
+                    if let Some(m) = shared.get(mtm).borrow_mut().as_mut() {
+                        m.files_dropped(id, in_window, uris);
+                    }
+                });
+            });
         }
 
         #[unsafe(method(handleContextMenu:))]
@@ -591,6 +655,7 @@ impl EventTarget {
             held: Default::default(),
             tap_start: Default::default(),
             haptics: Default::default(),
+            file_drags: Default::default(),
         });
         // SAFETY: NSObject's designated initializer.
         unsafe { msg_send![super(this), init] }
@@ -967,6 +1032,16 @@ impl EventTarget {
     /// Runs `f` on the mounter. UIKit can call back synchronously while the
     /// mounter applies a batch (e.g. setting `contentOffset`); then the call
     /// is deferred to the next main-queue turn instead of re-entering.
+    /// A drag of files left listener `id`, if it was over it.
+    fn file_drag_left(&self, id: NodeId) {
+        let mut drags = self.ivars().file_drags.borrow_mut();
+        if let Some(at) = drags.iter().position(|&d| d == id) {
+            drags.remove(at);
+            drop(drags);
+            self.with_mounter(move |m| m.file_drag(id, false));
+        }
+    }
+
     fn with_mounter(&self, f: impl FnOnce(&mut crate::mount::Mounter) + Send + 'static) {
         let mtm = self.mtm();
         let shared = &self.ivars().mounter;
@@ -989,4 +1064,12 @@ impl EventTarget {
             });
         }
     }
+}
+
+/// The file drop listener whose view has `interaction` (its tag is the
+/// node's id).
+fn drop_listener(interaction: &AnyObject) -> Option<NodeId> {
+    // SAFETY: UIInteraction's `view` (weak: nil once the view is gone).
+    let view: Option<Retained<UIView>> = unsafe { msg_send![interaction, view] };
+    view.map(|v| v.tag() as NodeId)
 }

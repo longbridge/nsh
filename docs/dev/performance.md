@@ -634,6 +634,12 @@ sends 2631 mount items instead of 2885 (no `ViewProps` set and set back in one c
   hardware layers take the slowest back frame's UI thread from 22–36 ms to 2–5 ms and missed frames from 23–32 to
   7–14 per page (p90 frame 35–58 → 14–32 ms). What remains is the RenderThread drawing both screens into their layers
   in the slide's first frames (14–29 ms). Pushes are unchanged (no push frame over 25 ms on the UI thread).
+- Android, glass surfaces (x86_64 emulator, Android 15, SwiftShader, 1080 × 2400 at 2.625x, packaged release; an app
+  of four pages of about the screen's size in a horizontal pager, each with a 24 pt backdrop blur, a 28 pt outer
+  shadow and a 1 px inset rim, under a blurred header and tab bar; eight swipes, `gfxinfo` p50 over three
+  interleaved runs): 105 → 17 ms a frame (RenderThread ~61 → ~16 ms); shadows alone 32 → 10 ms, blur alone 34 →
+  12 ms, neither 6 ms. A blurred drawer sliding over them: 150 → 31 ms. Box shadows come from cached bitmaps
+  (`Decor.drawCachedShadow`), backdrops are recorded at the size their blur needs (`Backdrop`).
 - Android emulator (arm64, release): rebinding one gallery row while scrolling ~0.3–0.4ms (JS ~60µs); text costs per new
   text: `PrecomputedText` ~120µs, measure ~50µs, final layout reused. First gallery frame 20–50ms (noisy on the emulator).
 
