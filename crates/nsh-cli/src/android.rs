@@ -254,6 +254,10 @@ pub(crate) struct Apk<'a> {
     pub(crate) assets: Vec<(String, Vec<u8>)>,
     /// Notification sounds, raw resources: (resource name, file).
     pub(crate) sounds: Vec<(String, PathBuf)>,
+    /// The app's own Android resources (`android/res/` next to `nsh.json`,
+    /// laid out as Gradle's `src/main/res/`): drawables a tab bar names,
+    /// for one. None when the app has none.
+    pub(crate) res: Option<&'a Path>,
     pub(crate) signing: Signing,
 }
 
@@ -527,6 +531,20 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
         for entry in fs::read_dir(&compiled)? {
             flat.push(entry?.path());
         }
+    }
+
+    // The app's own resources, compiled as a whole: `aapt2 compile --dir`
+    // reads `<type>[-<qualifiers>]/<name>` as Gradle does.
+    if let Some(res) = apk.res {
+        let zip = work.join("compiled-app.zip");
+        run(Command::new(sdk.tool("aapt2"))
+            .arg("compile")
+            .arg("--dir")
+            .arg(res)
+            .arg("-o")
+            .arg(&zip))
+        .with_context(|| format!("compile the app's resources in {}", res.display()))?;
+        flat.push(zip);
     }
 
     let manifest = work.join("AndroidManifest.xml");
@@ -1614,6 +1632,7 @@ mod tests {
             launch_screen: None,
             assets: Vec::new(),
             sounds: Vec::new(),
+            res: None,
             signing: super::Signing::Debug,
         }
     }
