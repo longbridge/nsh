@@ -21,6 +21,8 @@ mod download_redirect;
 #[cfg(target_os = "macos")]
 mod embedded_scroll;
 #[cfg(target_os = "macos")]
+mod fitting_input;
+#[cfg(target_os = "macos")]
 mod focus_selection;
 #[cfg(target_os = "macos")]
 mod fps_collapse;
@@ -117,6 +119,8 @@ fn main() {
                 input_focus::run();
             } else if std::env::var_os("NSH_INPUT_HIDDEN_CHECK_ONLY").is_some() {
                 input_hidden::run();
+            } else if std::env::var_os("NSH_FITTING_INPUT_CHECK_ONLY").is_some() {
+                fitting_input::run();
             } else if std::env::var_os("NSH_FPS_COLLAPSE_CHECK_ONLY").is_some() {
                 fps_collapse::run();
             } else if std::env::var_os("NSH_SCALED_INPUT_CHECK_ONLY").is_some() {
@@ -163,6 +167,7 @@ fn main() {
                 keyboard::run();
                 ime::run();
                 input_hidden::run();
+                fitting_input::run();
                 input_focus::run();
                 focus_selection::run();
                 fps_collapse::run();
