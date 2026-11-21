@@ -171,6 +171,15 @@ impl Native for AndroidNative {
         ))
     }
 
+    fn scroll_room(&self, id: NodeId, horizontal: bool) -> Option<(Points, Points)> {
+        let room = self.floats("scrollRoom", "(Lcom/longbridge/nsh/NshView;I)[F", Some(id))?;
+        let at = if horizontal { 0 } else { 2 };
+        Some((
+            Points(room[at] / self.density),
+            Points(room[at + 1] / self.density),
+        ))
+    }
+
     fn text_bounds(&self, text: NodeId, start: u32, end: u32) -> Option<Bounds<Points>> {
         let b = self.call(|env, class, view| {
             let array = env
