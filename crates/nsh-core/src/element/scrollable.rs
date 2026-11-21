@@ -110,6 +110,17 @@ pub trait Scrollable: Element {
         self
     }
 
+    /// How a notched mouse wheel scrolls it on macOS: AppKit's lines landing
+    /// at once (`WheelStyle::Native`, default) or as browsers do
+    /// (`WheelStyle::Browser`: longer lines, eased); elsewhere ignored (TS:
+    /// `macos={{ wheelStyle }}`).
+    fn wheel_style(mut self, style: impl IntoReactive<crate::WheelStyle>) -> Self {
+        host::bind_prop(self.node(), style, |style| {
+            Prop::Scroll(ScrollProp::WheelStyle(style))
+        });
+        self
+    }
+
     /// Space around the content that scrolls with it.
     fn content_inset(mut self, insets: impl IntoReactive<EdgeInsets>) -> Self {
         host::bind_prop(self.node(), insets, |insets| {

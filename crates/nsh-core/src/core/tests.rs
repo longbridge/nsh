@@ -3040,6 +3040,75 @@ fn scrolls_to_top_reaches_the_scroll_behavior() {
     assert_eq!(behavior(&batch).map(|b| b.scrolls_to_top), Some(true));
 }
 
+/// `macos={{ wheelStyle }}` reaches the scroll view's mounted behavior
+/// (macOS glides mouse wheels from it): native by default, browser when the
+/// app says so, and native again once the app drops it (the reset the
+/// runtime sets for a removed prop).
+#[test]
+fn wheel_style_reaches_the_scroll_behavior() {
+    use crate::WheelStyle;
+    fn behavior(batch: &MountBatch) -> Option<ScrollBehavior> {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::ScrollBehavior { id: 2, behavior } => Some((**behavior).clone()),
+            _ => None,
+        })
+    }
+    assert_eq!(ScrollBehavior::default().wheel_style, WheelStyle::Native);
+    let browser = Prop::Scroll(ScrollProp::WheelStyle(WheelStyle::Browser));
+    // `macos={{ wheelStyle }}` decodes `"native"` and `"browser"` (the
+    // runtime hands a platform object's props over by their own names).
+    {
+        use crate::js::host::{HostCx, HostProps};
+        let decode = |name: &str, value: &str| {
+            let mut cx = HostCx::for_element(Tag::Scroll);
+            <Prop as HostProps>::decode(name, &HostTestValue::String(value), &mut cx)
+        };
+        assert_eq!(decode("wheelStyle", "browser"), Some(Some(browser.clone())));
+        assert_eq!(
+            decode("wheelStyle", "native"),
+            Some(Some(Prop::Scroll(ScrollProp::WheelStyle(
+                WheelStyle::Native
+            ))))
+        );
+    }
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Scroll,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: browser.clone(),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        behavior(&batch).map(|b| b.wheel_style),
+        Some(WheelStyle::Browser)
+    );
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: <Prop as crate::js::host::HostProps>::reset(&browser).unwrap(),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        behavior(&batch).map(|b| b.wheel_style),
+        Some(WheelStyle::Native)
+    );
+}
+
 /// `scrollbarInset` reaches the scroll view's mounted behavior (the platforms
 /// keep their indicators within it), negative edges as none, and leaves the
 /// content inset alone.

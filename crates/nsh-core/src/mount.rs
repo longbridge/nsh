@@ -206,6 +206,8 @@ pub struct ScrollBehavior {
     /// A tap at the top of the window scrolls it to its top (iOS:
     /// `UIScrollView.scrollsToTop`).
     pub scrolls_to_top: bool,
+    /// How a notched mouse wheel scrolls it (`macos={{ wheelStyle }}`).
+    pub wheel_style: crate::WheelStyle,
     /// Room around the content.
     pub content_inset: EdgeInsets,
     /// How far the scroll indicator keeps from each edge of the view: its
@@ -253,6 +255,7 @@ impl Default for ScrollBehavior {
             enabled: true,
             bounces: true,
             scrolls_to_top: true,
+            wheel_style: crate::WheelStyle::Native,
             content_inset: EdgeInsets::default(),
             scrollbar_inset: EdgeInsets::default(),
             keyboard_taps: KeyboardTaps::Never,

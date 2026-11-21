@@ -54,6 +54,7 @@ mod selectable_view;
 mod shader;
 mod share;
 mod sight;
+mod wheel_glide;
 // Shared with iOS.
 use nsh_platform_apple::{audio, notifications, speech};
 mod surface;
