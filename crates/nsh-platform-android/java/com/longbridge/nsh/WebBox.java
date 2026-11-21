@@ -7,6 +7,7 @@ import android.graphics.Bitmap;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.MotionEvent;
+import android.view.View;
 import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
 import android.webkit.WebChromeClient;
@@ -42,6 +43,8 @@ import org.json.JSONTokener;
 @SuppressLint({"ViewConstructor", "SetJavaScriptEnabled"})
 final class WebBox extends WidgetBox {
     private WebView web;
+    /** Captures sharing this page's texture; ordinary WebViews need no extra layer. */
+    private int captureLayers;
     /** Source kind (0 none, 1 uri, 2 html) and fields; null before the first load. */
     private Object[] source;
     private String injected, injectedBefore, userAgent;
@@ -75,6 +78,7 @@ final class WebBox extends WidgetBox {
     }
 
     private void attach(WebView web) {
+        if (captureLayers > 0) web.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         web.getSettings().setDomStorageEnabled(true);
         web.addJavascriptInterface(new Bridge(), "nsh");
         web.setWebViewClient(new Client());
@@ -86,6 +90,15 @@ final class WebBox extends WidgetBox {
             }
             return !scrollable && e.getActionMasked() == MotionEvent.ACTION_MOVE;
         });
+    }
+
+    /** Lets captures sample the page without replaying its functor at another viewport size. */
+    void retainCaptureLayer() {
+        if (captureLayers++ == 0) web.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+    }
+
+    void releaseCaptureLayer() {
+        if (--captureLayers == 0) web.setLayerType(View.LAYER_TYPE_NONE, null);
     }
 
     /**
