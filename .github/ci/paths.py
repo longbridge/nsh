@@ -68,7 +68,7 @@ WORKFLOWS = {
     "linux.yml": {
         "packages": [
             "nsh-platform-linux", "nsh-linux-host", "nsh-linux-app",
-            "nsh-cli", "nsh-dev", "xtask",
+            "nsh-cli", "nsh-dev", "nshx", "xtask",
         ],
         # `nsh test --target` runs the examples' tests.
         "files": ["crates/gpui/**", "examples/counter/**", "examples/gallery/**"],
@@ -76,7 +76,7 @@ WORKFLOWS = {
     "windows.yml": {
         "packages": [
             "nsh-platform-windows", "nsh-windows-host", "nsh-windows-app",
-            "nsh-cli", "nsh-dev", "xtask",
+            "nsh-cli", "nsh-dev", "nshx", "xtask",
         ],
         # `nsh test --target` runs the examples' tests.
         "files": ["examples/counter/**", "examples/gallery/**"],

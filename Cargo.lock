@@ -4386,6 +4386,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "nshx"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "flate2",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tar",
+ "toml 0.8.23",
+ "ureq",
+ "zip",
+]
+
+[[package]]
 name = "nu-ansi-term"
 version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

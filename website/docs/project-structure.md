@@ -128,6 +128,7 @@ Every other key is optional; a TSX app may also leave out the four. A TSX app's 
 | `version` | string | `package`, `publish` | The user-visible version, e.g. `1.2.0` (`CFBundleShortVersionString`, Android `versionName`). |
 | `build` | number | `package`, `publish` | The build number (`CFBundleVersion`, Android `versionCode`). Signed packages require it to grow with every release. |
 | `nsh` | string | every command | The NSH versions the app is written for, as a Cargo-style requirement, e.g. `">=0.5"` or `">=0.5, <0.7"`. Every command that takes the app checks the CLI against it first and stops with one message, `this app requires nsh >=0.5; this is nsh 0.4.0`, instead of type or build errors from the other version. A nightly counts as its release. |
+| `toolchain` | object | `nshx` | The exact nsh CLI the project runs: `{ "nsh": { "version": "0.6.1", "repository": "longbridge/nsh" } }`. `version` is one release (no ranges); `repository` defaults to `longbridge/nsh`. `nshx` downloads that release's prebuilt distribution for this machine, verifies its SHA-256, caches it and runs it; a Rust app's `nsh-core` revision in `Cargo.lock` must match the release's `nsh-release.json` ([Toolchain](#toolchain)). |
 | `minRuntime` | string | `publish` | The lowest NSH runtime that runs the signed package, e.g. `0.2.0`. Default: the CLI's version ([Signed packages](./signed-packages.md#which-runtimes-run-a-package)). |
 | `schemes` | string[] | `package`, `run` | URL schemes that open the app, e.g. `["myapp"]` for `myapp://…` links, which reach [`UrlScheme`](../modules/nsh.md#urlscheme). Lowercase letters, digits, `+`, `-` and `.`; not one the system or browser owns (`https`, `file`, …). |
 | `fileTypes` | object[] | `package`, `run` | The file types the app opens, `[{ "name": "Video", "extensions": ["mp4"], "mimeTypes": ["video/mp4"] }]`, which packages declare to the system; the files reach [`Application.on("openFiles")`](../modules/nsh-desktop.md#opening-files). |
@@ -165,6 +166,36 @@ warn nsh.json: tailwind: unknown key `colours`, ignored (one of a newer NSH, or 
 ```
 
 A capability NSH cannot read is not granted, so nothing left out ever widens what the app may do.
+
+
+### toolchain
+
+A project can name the exact nsh CLI it builds with, so a machine with another
+version on `PATH` still runs the pinned one:
+
+```json
+"toolchain": {
+  "nsh": { "version": "0.6.1" }
+}
+```
+
+`version` is one release, not a range (`latest` and `nightly` are refused);
+`repository` defaults to `longbridge/nsh`, and a fork sets its own `owner/repo`.
+`nshx` reads the pin, downloads that release's prebuilt distribution for this
+machine from the repository's GitHub releases, verifies its `.sha256`, caches
+it under `$NSH_CACHE` (or the platform's cache directory) and runs it. It
+never compiles nsh and never rewrites the app's manifests.
+
+Install `nshx` as `nsh` ahead of a distribution's `bin`, or run it explicitly;
+`nsh init` does not write a pin. For a Rust app, the `nsh-core` revision in
+`Cargo.lock` must be the release's commit: `nshx verify` checks the pin, the
+release's `nsh-release.json` and the lock together, for CI. `nshx status`
+prints the pin, cache and selected CLI; `nshx prefetch` downloads it now;
+`nshx which` prints its path. An app without a pin runs the installed
+distribution.
+
+`nshx` is a separate, versionless selector: a different nsh on `PATH` never
+rewrites the app's manifests.
 
 
 ### capabilities

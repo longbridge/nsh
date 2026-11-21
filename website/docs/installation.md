@@ -130,6 +130,7 @@ The distribution is a directory, `dist/nsh`, with the CLI and the prebuilt nativ
 
 ```sh
 dist/nsh/bin/nsh                                             # the CLI
+dist/nsh/bin/nshx                                           # runs a project's pinned CLI
 dist/nsh/runtime/ios/iphoneos/nsh-ios-app                    # runs packaged apps on iOS devices
 dist/nsh/runtime/ios/iphonesimulator/{nsh-ios-app,nsh-ios-host}
 dist/nsh/runtime/ios/maccatalyst/nsh-ios-host                # the Mac Catalyst development host
@@ -145,6 +146,8 @@ dist/nsh/embed/android/{nsh,nsh-dev}.aar                     # embedding in Andr
 ```
 
 Put `dist/nsh/bin` on your `PATH` (or call `dist/nsh/bin/nsh` directly) and keep the directory together: `nsh` finds the runtimes next to itself, in `bin/../runtime` (through a symlink to it, as the installers make, too). The release archives are made from it: each platform's archive keeps `bin` and its own runtime, the other runtimes become [components](#components) and `embed` the SDK archives.
+
+`nshx` runs the exact CLI a project pins in `nsh.json` ([toolchain](./project-structure.md#toolchain)): put it first on `PATH` as `nsh`, or run it by name, and each project uses its pinned release.
 
 ```sh
 export PATH="$PWD/dist/nsh/bin:$PATH"

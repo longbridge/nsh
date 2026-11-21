@@ -130,6 +130,7 @@ irm https://huacnlee.github.io/cargo/install.ps1 | iex
 
 ```sh
 dist/nsh/bin/nsh                                             # the CLI
+dist/nsh/bin/nshx                                           # 运行项目在 nsh.json 中固定的 CLI
 dist/nsh/runtime/ios/iphoneos/nsh-ios-app                    # runs packaged apps on iOS devices
 dist/nsh/runtime/ios/iphonesimulator/{nsh-ios-app,nsh-ios-host}
 dist/nsh/runtime/ios/maccatalyst/nsh-ios-host                # the Mac Catalyst development host
@@ -145,6 +146,8 @@ dist/nsh/embed/android/{nsh,nsh-dev}.aar                     # embedding in Andr
 ```
 
 把 `dist/nsh/bin` 加入 `PATH`（或直接调用 `dist/nsh/bin/nsh`），并保持目录完整：`nsh` 会在自身旁边的 `bin/../runtime` 中查找运行时（通过指向它的符号链接运行时也一样，安装脚本就是这样做的）。发布用的压缩包由它生成：每个平台的压缩包保留 `bin` 和自己的运行时，其他运行时成为[组件](#组件)，`embed` 成为 SDK 压缩包。
+
+`nshx` 运行项目在 `nsh.json` 中固定的那个 CLI（[toolchain](./project-structure.md#toolchain)）：把它以 `nsh` 的名字放在 `PATH` 最前面，或直接按名字运行，每个项目就会使用自己固定的版本。
 
 ```sh
 export PATH="$PWD/dist/nsh/bin:$PATH"
