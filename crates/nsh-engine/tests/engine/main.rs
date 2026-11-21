@@ -22,6 +22,7 @@ mod counter;
 mod errors;
 mod external_wake;
 mod fetch;
+mod first_poll;
 mod focus;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod fs;
