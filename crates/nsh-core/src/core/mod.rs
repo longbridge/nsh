@@ -7542,16 +7542,24 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// A popup that gives the keyboard focus back to `to` opens
-    /// ([`crate::element::ElementRef::focus_back_origin`]): opened by a
-    /// pointer, the focus it opened with is where the focus goes back to
+    /// ([`crate::element::ElementRef::focus_back_origin`]): on macOS and
+    /// iOS, opened by a pointer, the focus it opened with is where the focus goes back to
     /// (the pointer's press left it there, off the trigger); opened by the
-    /// keyboard, the trigger takes it back, as before.
+    /// keyboard (or on another platform), the trigger takes it back, as
+    /// before.
     pub(super) fn note_focus_origin(&mut self, to: NodeId) {
         let mut origins = std::mem::take(&mut self.focus_origins);
         // Triggers that are gone leave no note behind (a popup closed by a
         // press outside gives nothing back, so its note stays until then).
         origins.retain(|&(id, _)| id != to && self.key(id).is_ok());
-        if self.modality == Some(crate::platform::InputModality::Pointer) {
+        // Only where a press gives a control no focus (macOS and iOS, as
+        // AppKit and UIKit do): elsewhere a press focuses the trigger, as
+        // native buttons there do, and closing gives the trigger the focus.
+        let apple = matches!(
+            self.components.environment.os,
+            crate::platform::Os::MacOs | crate::platform::Os::Ios
+        );
+        if apple && self.modality == Some(crate::platform::InputModality::Pointer) {
             origins.push((to, self.focus));
         }
         self.focus_origins = origins;

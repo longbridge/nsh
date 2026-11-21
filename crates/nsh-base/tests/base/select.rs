@@ -700,6 +700,17 @@ fn choosing_in_a_list_a_press_opened_leaves_the_trigger_without_the_keyboard() {
 }
 
 #[test]
+fn on_windows_choosing_in_a_list_a_press_opened_gives_the_trigger_the_keyboard() {
+    // A press focuses a button there, as native buttons do.
+    let mut app = start_on(props(fruits()), Os::Windows, Idiom::Desktop, false);
+    let trigger = app.id("role:combobox");
+    app.open_list();
+    app.press("role:option[Carrot]").unwrap();
+    app.gone("role:listbox");
+    assert!(app.sent(trigger, &Command::Focus));
+}
+
+#[test]
 fn a_press_on_an_item_chooses_it_while_the_trigger_has_the_keyboard() {
     let mut app = focused(props(fruits()));
     let trigger = app.id("role:combobox");

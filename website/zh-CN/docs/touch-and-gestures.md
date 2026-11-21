@@ -96,7 +96,7 @@ mount(() => (
 | `.active(\|s\| ..)` | `activeStyle` | `active:` | 按下时。 |
 | `.hover(\|s\| ..)` | `hoverStyle` | `hover:` | 指针悬停在上面时（桌面、iPad 指针、浏览器）。 |
 | `.focus(\|s\| ..)` | `focusStyle` | `focus:` | 获得焦点时。 |
-| `.focus_visible(\|s\| ..)` | `focusVisibleStyle` | `focus-visible:` | 获得焦点并显示焦点时：键盘把焦点移到了这里（按压或轻点不把焦点交给控件，交给接收按键的视图的焦点也不显示）。 |
+| `.focus_visible(\|s\| ..)` | `focusVisibleStyle` | `focus-visible:` | 获得焦点并显示焦点时：键盘把焦点移到了这里（在 macOS 和 iOS 上按压或轻点不把焦点交给控件；在其他平台上以及对接收按键的视图，按压给出的焦点不显示）。 |
 | `.focus_within(\|s\| ..)` | `focusWithinStyle` | `focus-within:` | 自身或内部的视图获得焦点时：包住正在编辑的输入框的外框。 |
 | `.disabled_style(\|s\| ..)` | `disabledStyle` | `disabled:` | 禁用时。 |
 | `.ripple(Ripple { .. })` | `android={{ ripple }}` | | Android 的 Material 水波纹（`color`、`borderless`、`radius`、`foreground`），叠加在这些样式之上。 |

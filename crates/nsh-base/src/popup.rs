@@ -256,8 +256,8 @@ impl StateLooks {
 
 /// The core notes the keyboard focus and the input each time `open` turns
 /// true, the popup that gives the focus back to `trigger` opening
-/// ([`ElementRef::focus_back_origin`]): a popup a pointer opened gives it
-/// back where it was, as Safari and macOS do (a pointer's press leaves the
+/// ([`ElementRef::focus_back_origin`]): on macOS and iOS, a popup a
+/// pointer opened gives it back where it was, as AppKit and UIKit do (a pointer's press leaves the
 /// focus where it is), one the keyboard opened to its trigger. `open` is
 /// tracked.
 pub(crate) fn note_focus_origin(open: impl Fn() -> bool + 'static, trigger: ElementRef) {

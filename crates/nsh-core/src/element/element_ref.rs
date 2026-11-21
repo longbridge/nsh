@@ -256,7 +256,7 @@ impl ElementRef {
     /// the focus to the item they choose in the commit that closes it. The
     /// last one asked for in a commit is the one that counts.
     ///
-    /// A popup opened by a pointer ([`Self::focus_back_origin`] called on
+    /// On macOS and iOS, a popup opened by a pointer ([`Self::focus_back_origin`] called on
     /// this element as it opened) gives the focus back where it was when
     /// it opened instead, or takes it off the popup when nothing had it:
     /// a pointer's press leaves the keyboard focus where it is, so the
@@ -270,8 +270,8 @@ impl ElementRef {
     /// A popup that gives the keyboard focus back to the element
     /// ([`Self::focus_back`]) opens: the core notes the focus and whether
     /// a pointer opened it, so a popup opened by the keyboard gives the
-    /// focus back to its trigger and one opened by a pointer gives it back
-    /// where it was.
+    /// focus back to its trigger and, on macOS and iOS, one opened by a
+    /// pointer gives it back where it was.
     #[doc(hidden)]
     pub fn focus_back_origin(&self) {
         self.reach(|to, executor| executor.act(Action::FocusOrigin { to }));

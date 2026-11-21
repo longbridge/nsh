@@ -1996,14 +1996,9 @@ fn down(
         input.js_block.set(false);
     }
     let views = chain(&hit.view);
-    // A press focuses a `focusable` view that takes no presses (a chart
-    // that takes keys); a control, a view that takes presses (a button, a
-    // select's trigger, a slider), takes no focus from a pointer, as in
-    // Safari and on macOS, so Return and Space stay the app's shortcuts.
     if !native
         && let Some(target) = views
             .iter()
-            .take_while(|view| !view.state().events.contains(EventKind::Press))
             .find(|view| view.state().props.focusable == Some(true))
     {
         crate::key_focus::focus(surface, target);
