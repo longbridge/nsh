@@ -13,7 +13,7 @@ NSH 是一个在 iOS、Android、macOS、Windows、Linux 和 Web 上编写完整
 
 ## NSH 从哪里来
 
-[长桥（Longbridge）](https://longbridge.com)先有桌面客户端的需求。为了摆脱 Electron 在桌面上的问题——内存高、启动慢、帧率不稳、和系统交互脱节——长桥用 [GPUI](https://gpui-kit.com)（[Zed](https://zed.dev) 编辑器所用的 Rust GPU UI 框架）构建 Longbridge Pro，并在其上发展出 [GPUI Kit](https://gpui-kit.com) 组件库和 [GPUI Fast](https://github.com/longbridge/gpui-fast) 分支。金融客户端对性能的要求很苛刻：高频行情、盘口、K 线、多图联动要长时间驻留，不能掉帧，也不能明显占用 CPU；桌面上还要有可靠的窗口、文本输入和系统交互。
+[长桥（Longbridge）](https://longbridge.com)先有桌面客户端的需求。为了摆脱 Electron 在桌面上的问题——内存高、启动慢、帧率不稳、和系统交互脱节——长桥用 [GPUI](https://gpui-kit.com)（[Zed](https://zed.dev) 编辑器所用的 Rust GPU UI 框架）构建 [Longbridge Pro](https://longbridge.com/desktop)，并在其上发展出 [GPUI Kit](https://gpui-kit.com) 组件库和 [GPUI Fast](https://github.com/longbridge/gpui-fast) 分支。金融客户端对性能的要求很苛刻：高频行情、盘口、K 线、多图联动要长时间驻留，不能掉帧，也不能明显占用 CPU；桌面上还要有可靠的窗口、文本输入和系统交互。
 
 NSH 起步于移动客户端的插件层（[GPUI Shell](https://gpui-kit.com/shell) 的思路延伸到手机），随后把同一套应用模型——组件、signal、布局、模块——推广到 iOS、Android、macOS、Windows、Linux 和 Web（[简介](./index.md#native-shell-与-gpui-shell)）。因此：
 
