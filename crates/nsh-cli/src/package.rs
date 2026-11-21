@@ -1721,6 +1721,16 @@ fn package_android(
         .out
         .join(format!("{name}.{}", options.format.extension()));
     let version = config.version.as_deref().unwrap_or("1.0.0");
+    // `android/res/` next to `nsh.json`: the app's own resources.
+    let res = Some(
+        options
+            .entry
+            .parent()
+            .unwrap_or(Path::new("."))
+            .join("android")
+            .join("res"),
+    )
+    .filter(|dir| dir.is_dir());
     let step = ui::Step::start(format!("packaging {}", ui::path(&apk_path)));
     android::build(
         &sdk,
@@ -1750,6 +1760,7 @@ fn package_android(
             launch_screen: config.android.launch_screen.as_ref(),
             assets,
             sounds: android_sounds(config, built),
+            res: res.as_deref(),
             signing,
         },
         options.format,
