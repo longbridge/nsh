@@ -192,6 +192,7 @@ fn windows(cx: &mut TestAppContext) {
     // The tests' JS imports all of `nsh/base` (Popover etc.), not only the
     // core part a host serves by default.
     crate::set_ui_sets(vec![nsh_base::registry()]);
+    crate::surface::tests::committed_content_height_reaches_host_observers(cx);
     keys_reach_the_fields_of_a_surface_showing_a_native_component(cx);
     a_captured_key_release_is_kept_from_the_window(cx);
     compositions_are_reported_and_hold_values_until_they_end(cx);

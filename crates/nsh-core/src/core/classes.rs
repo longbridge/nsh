@@ -1522,6 +1522,10 @@ impl<M: TextEngine> Core<M> {
     /// [`Self::restyle`] with `position` already known (`None`: query it).
     fn restyle_at(&mut self, key: Key, position: Option<u8>) {
         let mut base = Style::default();
+        // The synthetic root stays sized to the host's viewport when restyled.
+        if key == self.root {
+            base.layout = super::root_style(self.viewport);
+        }
         // Under its own classes and style, as `:where()` is in CSS.
         let space = self.space_of(key);
         if let Some(space) = space {

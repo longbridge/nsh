@@ -3355,6 +3355,36 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// The bottom edge of the logical root's in-flow children, in surface points.
+    ///
+    /// Read after [`Self::commit`] for settled geometry, from the same frames
+    /// reported to layout listeners. Detached layout roots (such as overlays
+    /// and modals) and fixed or absolutely positioned children do not contribute.
+    /// `None` means there is no laid-out in-flow content. This does not run an
+    /// intrinsic-size pass or change the viewport.
+    pub fn content_height(&self) -> Option<Points> {
+        self.nodes[self.root as usize]
+            .children
+            .iter()
+            .filter_map(|&key| {
+                let node = &self.nodes[key as usize];
+                let layout = node.layout?;
+                if node.is_layout_root()
+                    || self.layout.displays_none(layout)
+                    || matches!(
+                        self.layout.style(layout).position,
+                        Position::Absolute | Position::Fixed
+                    )
+                    || node.frame.origin.y.0.is_nan()
+                {
+                    return None;
+                }
+                Some(node.frame.origin.y.0 + node.frame.size.height.0)
+            })
+            .reduce(f32::max)
+            .map(Points)
+    }
+
     /// Finishes a turn: rebuilds text, runs layout, updates lists and
     /// returns the mount items, or `None` when nothing changed.
     pub fn commit(&mut self) -> Option<MountBatch> {
