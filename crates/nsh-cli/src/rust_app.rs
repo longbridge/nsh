@@ -973,6 +973,9 @@ pub(crate) struct RootConfig {
     /// `"schemes"`' schemes (checked, lower case): the URL schemes the
     /// app claims.
     url_schemes: Vec<String>,
+    /// `"linkDomains"`' domains (checked, lower case): the web domains
+    /// whose `https` links open the app.
+    link_domains: Vec<String>,
     /// `"window"` (JSON, checked): the main window's launch options.
     window: Option<String>,
     /// `"application"` (JSON, checked): the app's lifecycle options.
@@ -1429,6 +1432,18 @@ fn root_config(
     if nsh_core::file_type::declares_file_types(config) {
         url_schemes.push(nsh_core::file_type::FILE_SCHEME.to_owned());
     }
+    let link_domains = match config.get("linkDomains") {
+        None => Vec::new(),
+        Some(v) => {
+            let (domains, ignored) = nsh_core::url_scheme::link_domains_from_json_lenient(v);
+            for what in ignored {
+                crate::ui::warn(format_args!(
+                    "nsh.json: {what}, ignored (one of a newer NSH, or a typo)"
+                ));
+            }
+            domains
+        }
+    };
     let window = match config.get("window") {
         None => None,
         Some(v) => {
@@ -1477,6 +1492,7 @@ fn root_config(
         app_id: crate::package::app_id(&dir.join("nsh.json")).ok(),
         status_bar,
         url_schemes,
+        link_domains,
         window,
         application,
         capabilities,
@@ -3772,6 +3788,9 @@ fn root_fn(cfg: &str, krate: &str, root: &RootConfig) -> String {
     if !root.url_schemes.is_empty() {
         make.push_str(&format!("\n        .url_schemes({:?})", root.url_schemes));
     }
+    if !root.link_domains.is_empty() {
+        make.push_str(&format!("\n        .link_domains({:?})", root.link_domains));
+    }
     if let Some(capabilities) = &root.capabilities {
         make.push_str(&format!("\n        .capabilities_json({capabilities:?})"));
     }
@@ -4533,6 +4552,7 @@ mod tests {
                 app_id: None,
                 status_bar: None,
                 url_schemes: Vec::new(),
+                link_domains: Vec::new(),
                 window: None,
                 application: None,
                 capabilities: None,
@@ -4793,6 +4813,7 @@ mod tests {
                 app_id: Some("com.example.app".into()),
                 status_bar: Some(r#"{"foreground":"light","hidden":false}"#.into()),
                 url_schemes: vec!["myapp".into()],
+                link_domains: vec!["example.com".into()],
                 window: Some(
                     r#"{"defaultSize":{"width":900,"height":600},"title":"Notes"}"#.into(),
                 ),
@@ -4812,6 +4833,7 @@ mod tests {
             ".status_bar(",
             ".app_id(\"com.example.app\")",
             ".url_schemes([\"myapp\"])",
+            ".link_domains([\"example.com\"])",
             r#".app_info_json("{}")"#,
             ".status_bar(nsh_core::StatusBarSetting::default().foreground(nsh_core::StatusBarStyle::Light).hidden(false))",
             r#".main_window_json("{\"defaultSize\":{\"width\":900,\"height\":600},\"title\":\"Notes\"}")"#,
@@ -4918,6 +4940,7 @@ mod tests {
                 app_id: None,
                 status_bar: None,
                 url_schemes: Vec::new(),
+                link_domains: Vec::new(),
                 window: None,
                 application: None,
                 capabilities: None,
@@ -5915,6 +5938,7 @@ panic = \"abort\"
                 app_id: None,
                 status_bar: None,
                 url_schemes: Vec::new(),
+                link_domains: Vec::new(),
                 window: None,
                 application: None,
                 capabilities: None,

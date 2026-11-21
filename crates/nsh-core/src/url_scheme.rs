@@ -1,14 +1,15 @@
 //! Links that open the app (`nsh`'s `UrlScheme`): URLs of the schemes the
-//! app claims (`nsh.json` `"schemes": [...]`), which the
-//! system hands the app when the user opens one — at launch or while it
-//! runs.
+//! app claims (`nsh.json` `"schemes": [...]`), and `https` URLs of the web
+//! domains it claims (`"linkDomains": [...]`: iOS's Universal Links,
+//! Android's App Links), which the system hands the app when the user opens
+//! one — at launch or while it runs.
 //!
-//! The packages tell the system which schemes the app claims; the app's
-//! runner gives the core the same list ([`Core::set_url_schemes`],
-//! from the app's own resources, never from its code). The platform reports
-//! every URL the system hands it as the root's
+//! The packages tell the system which schemes and domains the app claims;
+//! the app's runner gives the core the same lists ([`Core::set_url_schemes`],
+//! [`Core::set_link_domains`], from the app's own resources, never from its
+//! code). The platform reports every URL the system hands it as the root's
 //! [`EventKind::UrlScheme`](crate::EventKind::UrlScheme); the core keeps only
-//! those [`check_url`] accepts and holds them until the app listens
+//! those [`check_link`] accepts and holds them until the app listens
 //! ([`crate::element::next_url_scheme_open`]), at most [`MAX_PENDING`]. Nothing
 //! navigates on its own: what a link opens is the app's.
 //!
@@ -18,6 +19,7 @@
 //! ([`crate::element::next_app_url_change`]).
 //!
 //! [`Core::set_url_schemes`]: crate::Core::set_url_schemes
+//! [`Core::set_link_domains`]: crate::Core::set_link_domains
 
 /// The longest URL taken, in bytes (as [`crate::open_url::MAX_URL_LEN`]).
 pub const MAX_URL_LEN: usize = crate::open_url::MAX_URL_LEN;
@@ -241,11 +243,103 @@ pub fn schemes_from_json_lenient(value: &crate::JsonValue) -> (Vec<String>, Vec<
     (schemes, ignored)
 }
 
+/// The longest domain name, in bytes (DNS's).
+const MAX_DOMAIN_LEN: usize = 253;
+
+/// Checks a web domain an app claims, as `nsh.json`'s `"linkDomains"`
+/// writes it: a host name of at least two labels (`example.com`), each of
+/// letters, digits and `-` (not at either end), in ASCII (an
+/// internationalized name in its `xn--` form), optionally after `*.` for
+/// its subdomains (`*.example.com`, which does not cover `example.com`
+/// itself: list both). No scheme, port or path. Upper case is accepted
+/// ([`link_domains_from_json`] lowers it). The error says what is wrong.
+pub fn check_domain(domain: &str) -> Result<(), String> {
+    let host = domain.strip_prefix("*.").unwrap_or(domain);
+    let label = |label: &str| {
+        (1..=63).contains(&label.len())
+            && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+    };
+    let labels: Vec<&str> = host.split('.').collect();
+    // An IP address is no domain: a top-level label has a letter.
+    let top = labels
+        .last()
+        .is_some_and(|l| l.chars().any(|c| c.is_ascii_alphabetic()));
+    if domain.len() > MAX_DOMAIN_LEN || labels.len() < 2 || !labels.iter().all(|l| label(l)) || !top
+    {
+        return Err(format!(
+            "`{domain}` is not a domain: a host name such as `example.com` or `*.example.com`, with no scheme, port or path"
+        ));
+    }
+    Ok(())
+}
+
+/// The domains of `nsh.json`'s `"linkDomains"` (`["example.com"]`),
+/// checked ([`check_domain`]), in lower case, each once. What it cannot
+/// claim (a value of a form it does not know, a newer NSH's) is left out:
+/// an app claims less, never more.
+pub fn link_domains_from_json(value: &crate::JsonValue) -> Vec<String> {
+    link_domains_from_json_lenient(value).0
+}
+
+/// [`link_domains_from_json`], with what it left out, which the toolchain
+/// warns of (a newer NSH's, or a typo).
+pub fn link_domains_from_json_lenient(value: &crate::JsonValue) -> (Vec<String>, Vec<String>) {
+    let mut ignored = Vec::new();
+    let Some(list) = value.as_array() else {
+        ignored.push(format!(
+            "linkDomains: {value} is not an array of domains (`[\"example.com\"]`)"
+        ));
+        return (Vec::new(), ignored);
+    };
+    let mut domains = Vec::with_capacity(list.len());
+    for domain in list {
+        let Some(domain) = domain.as_str() else {
+            ignored.push(format!("linkDomains: {domain} is not a string"));
+            continue;
+        };
+        if let Err(e) = check_domain(domain) {
+            ignored.push(format!("linkDomains: {e}"));
+            continue;
+        }
+        let domain = domain.to_ascii_lowercase();
+        if domains.contains(&domain) {
+            ignored.push(format!("linkDomains: `{domain}` is listed twice"));
+            continue;
+        }
+        domains.push(domain);
+    }
+    (domains, ignored)
+}
+
+/// Whether `host` is one of `domains` (lower case, as
+/// [`link_domains_from_json`] gives them), or under one of their `*.`
+/// forms.
+fn claims_host(domains: &[String], host: &str) -> bool {
+    domains
+        .iter()
+        .any(|domain| match domain.strip_prefix("*.") {
+            Some(parent) => host
+                .strip_suffix(parent)
+                .is_some_and(|sub| sub.len() > 1 && sub.ends_with('.')),
+            None => domain == host,
+        })
+}
+
 /// Checks a URL the system handed the app: at most [`MAX_URL_LEN`] bytes,
 /// no whitespace or control characters, absolute, and of one of `schemes`
 /// (lower case, as [`schemes_from_json`] gives them). The error says why
-/// it is dropped.
+/// it is dropped. [`check_link`] also takes the app's web domains.
 pub fn check_url(url: &str, schemes: &[String]) -> Result<(), String> {
+    check_link(url, schemes, &[])
+}
+
+/// [`check_url`], also taking an `https` URL whose host is one of
+/// `domains` or under one of their `*.` forms (lower case, as
+/// [`link_domains_from_json`] gives them): a web link of the app's own
+/// domains (Universal Links, App Links).
+pub fn check_link(url: &str, schemes: &[String], domains: &[String]) -> Result<(), String> {
     if url.len() > MAX_URL_LEN {
         return Err(format!(
             "a link has at most {MAX_URL_LEN} bytes (this one has {})",
@@ -256,7 +350,16 @@ pub fn check_url(url: &str, schemes: &[String]) -> Result<(), String> {
         return Err("a link has no whitespace or control characters".into());
     }
     let parsed = url::Url::parse(url).map_err(|e| format!("a link is not a URL: {e}"))?;
-    // `Url` lowers the scheme.
+    // `Url` lowers the scheme and a domain host.
+    if parsed.scheme() == "https" {
+        let host = parsed.host_str().unwrap_or_default();
+        if claims_host(domains, host) {
+            return Ok(());
+        }
+        return Err(format!(
+            "`{host}` is not a domain the app claims (nsh.json `linkDomains`)"
+        ));
+    }
     if !schemes.iter().any(|s| s == parsed.scheme()) {
         return Err(format!(
             "`{}:` is not a scheme the app claims (nsh.json `schemes`)",
@@ -447,5 +550,83 @@ mod tests {
         assert!(check_url("myapp://x", &[]).is_err());
         let long = format!("myapp://{}", "a".repeat(MAX_URL_LEN));
         assert!(check_url(&long, &claimed).is_err());
+    }
+
+    #[test]
+    fn domains_are_host_names_of_the_apps_own() {
+        for domain in [
+            "example.com",
+            "Shop.Example.COM",
+            "*.example.com",
+            "xn--bcher-kva.example",
+            "a-b.co",
+        ] {
+            assert_eq!(check_domain(domain), Ok(()), "{domain}");
+        }
+        for domain in [
+            "",
+            "example",
+            "*.com",
+            "https://example.com",
+            "example.com/path",
+            "example.com:8443",
+            "*example.com",
+            "a.*.example.com",
+            "-a.example.com",
+            "a..example.com",
+            "bücher.example",
+            "example.com.",
+            "192.0.2.1",
+        ] {
+            assert!(check_domain(domain).is_err(), "{domain}");
+        }
+        // Valid labels, but longer than DNS takes.
+        let long = format!("{}com", "a.".repeat(MAX_DOMAIN_LEN / 2));
+        assert!(long.len() > MAX_DOMAIN_LEN);
+        assert!(check_domain(&long).is_err());
+        assert_eq!(check_domain(&long[long.len() - MAX_DOMAIN_LEN..]), Ok(()));
+        assert_eq!(
+            link_domains_from_json(&serde_json::json!([
+                "Example.com",
+                "example.com",
+                "example",
+                1,
+                "*.example.com"
+            ])),
+            ["example.com", "*.example.com"]
+        );
+        let (domains, ignored) = link_domains_from_json_lenient(&serde_json::json!("example.com"));
+        assert!(domains.is_empty());
+        assert_eq!(ignored.len(), 1);
+    }
+
+    #[test]
+    fn web_links_of_claimed_domains_are_taken() {
+        let schemes = vec!["myapp".to_owned()];
+        let domains = vec!["example.com".to_owned(), "*.shop.example".to_owned()];
+        for url in [
+            "https://example.com/orders/7?ref=mail#top",
+            "https://EXAMPLE.com",
+            "https://eu.shop.example/cart",
+            "https://a.b.shop.example/",
+            "myapp://open",
+        ] {
+            assert_eq!(check_link(url, &schemes, &domains), Ok(()), "{url}");
+        }
+        for url in [
+            // Only `https`: Universal Links and verified App Links are.
+            "http://example.com/orders/7",
+            "https://www.example.com/",
+            "https://example.com.evil.test/",
+            "https://evilexample.com/",
+            "https://shop.example/",
+            "https://evilshop.example/",
+            "https://192.0.2.1/",
+            "other://example.com",
+        ] {
+            assert!(check_link(url, &schemes, &domains).is_err(), "{url}");
+        }
+        // Without domains, as before: no web link opens the app.
+        assert!(check_url("https://example.com/", &schemes).is_err());
     }
 }

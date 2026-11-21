@@ -337,7 +337,8 @@ nsh package --target web --run
 ## Info.plist 键与 entitlements
 
 iOS 和 macOS 包的 `Info.plist` 由 NSH 写出，签名也由它完成。应用在 `nsh.json` 的 `ios` 和 `macos` 下添加自己的键（例如出口合规、
-App Store 分类、App Transport Security 例外）和 entitlements（例如 Associated Domains）：
+App Store 分类、App Transport Security 例外）和 entitlements（例如 Associated Domains）。（让链接打开应用的 Web 域名写在
+`linkDomains` 中，它会为 iOS 包加上对应的 `applinks:` 条目：参见 [Web 链接](../modules/nsh.md#web-链接)。）
 
 ```json
 {
@@ -350,7 +351,7 @@ App Store 分类、App Transport Security 例外）和 entitlements（例如 Ass
       }
     },
     "entitlements": {
-      "com.apple.developer.associated-domains": ["applinks:example.com"]
+      "com.apple.developer.associated-domains": ["webcredentials:example.com"]
     }
   },
   "macos": {

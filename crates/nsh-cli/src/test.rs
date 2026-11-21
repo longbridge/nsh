@@ -444,17 +444,25 @@ fn in_runner(
 /// files in `work_dir`, or the app's root.
 fn build_for_runner(entry: &Path, kind: Entry, work_dir: &Path, n: usize) -> Reply {
     let built = (|| -> anyhow::Result<Reply> {
-        let (bytecode, map, capabilities, url_schemes, main_window, application, asset_root) =
-            match kind {
-                Entry::TestFile => test_file_bytecode(entry)?,
-                Entry::App => {
-                    let entry = crate::entry::resolve(entry)?;
-                    if crate::rust_app::is_root(&entry) {
-                        return Ok(Reply::Root);
-                    }
-                    bytecode_of(&entry, &crate::ui_sets(), true)?
+        let (
+            bytecode,
+            map,
+            capabilities,
+            url_schemes,
+            link_domains,
+            main_window,
+            application,
+            asset_root,
+        ) = match kind {
+            Entry::TestFile => test_file_bytecode(entry)?,
+            Entry::App => {
+                let entry = crate::entry::resolve(entry)?;
+                if crate::rust_app::is_root(&entry) {
+                    return Ok(Reply::Root);
                 }
-            };
+                bytecode_of(&entry, &crate::ui_sets(), true)?
+            }
+        };
         let dir = work_dir.join("build");
         std::fs::create_dir_all(&dir).with_context(|| format!("{}", dir.display()))?;
         let file = dir.join(format!("{n}.nshc"));
@@ -472,6 +480,7 @@ fn build_for_runner(entry: &Path, kind: Entry, work_dir: &Path, n: usize) -> Rep
             source_map,
             capabilities,
             url_schemes,
+            link_domains,
             main_window,
             application,
             asset_root: Some(asset_root),
@@ -496,7 +505,7 @@ fn test_file_bytecode(entry: &Path) -> anyhow::Result<Compiled> {
 }
 
 /// A compiled entry: its bytecode, its source map, the capabilities
-/// (JSON), URL schemes and main window's launch options (JSON) its
+/// (JSON), URL schemes, link domains and main window's launch options (JSON) its
 /// `nsh.json` declares, which the app runs under, as on a device, and the
 /// directory its assets are named from (`nsh_bundler::Bundle::asset_root`).
 type Compiled = (
@@ -504,13 +513,14 @@ type Compiled = (
     Option<String>,
     Option<String>,
     Vec<String>,
+    Vec<String>,
     Option<String>,
     Option<String>,
     PathBuf,
 );
 
 /// `entry` bundled against `sets` and compiled to bytecode, with its
-/// source map, declared capabilities, URL schemes and main window's launch
+/// source map, declared capabilities, URL schemes, link domains and main window's launch
 /// options; `announce`: saying so.
 fn bytecode_of(entry: &Path, sets: &[SetDescription], announce: bool) -> anyhow::Result<Compiled> {
     let bundle = nsh_bundler::bundle(&BundleOptions {
@@ -540,6 +550,7 @@ fn bytecode_of(entry: &Path, sets: &[SetDescription], announce: bool) -> anyhow:
         bundle.source_map,
         capabilities,
         bundle.url_schemes,
+        bundle.link_domains,
         bundle.main_window,
         bundle.application,
         bundle.asset_root,
@@ -820,39 +831,48 @@ fn steps_file(work_dir: &Path, entry: &Path) -> anyhow::Result<PathBuf> {
 fn compiler() -> nsh_testing::Compile {
     let built: Mutex<HashMap<PathBuf, Compiled>> = Mutex::new(HashMap::new());
     Arc::new(move |entry: &Path, kind: Entry| {
-        let (bytecode, map, capabilities, url_schemes, main_window, application, asset_root) =
-            match kind {
-                Entry::App => {
-                    let entry =
-                        crate::entry::resolve(entry).map_err(|e| crate::ui::with_details(&e))?;
-                    let cached = built
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .get(&entry)
-                        .cloned();
-                    match cached {
-                        Some(built) => built,
-                        None => {
-                            let out = bytecode_of(&entry, &crate::ui_sets(), true)
-                                .map_err(|e| crate::ui::with_details(&e))?;
-                            built
-                                .lock()
-                                .unwrap_or_else(|e| e.into_inner())
-                                .insert(entry, out.clone());
-                            out
-                        }
+        let (
+            bytecode,
+            map,
+            capabilities,
+            url_schemes,
+            link_domains,
+            main_window,
+            application,
+            asset_root,
+        ) = match kind {
+            Entry::App => {
+                let entry =
+                    crate::entry::resolve(entry).map_err(|e| crate::ui::with_details(&e))?;
+                let cached = built
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(&entry)
+                    .cloned();
+                match cached {
+                    Some(built) => built,
+                    None => {
+                        let out = bytecode_of(&entry, &crate::ui_sets(), true)
+                            .map_err(|e| crate::ui::with_details(&e))?;
+                        built
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .insert(entry, out.clone());
+                        out
                     }
                 }
-                Entry::TestFile => {
-                    test_file_bytecode(entry).map_err(|e| crate::ui::with_details(&e))?
-                }
-            };
+            }
+            Entry::TestFile => {
+                test_file_bytecode(entry).map_err(|e| crate::ui::with_details(&e))?
+            }
+        };
         // SAFETY: compiled just now by this runtime.
         let bundle = unsafe { Bundle::bytecode(bytecode) }
             .with_capabilities_json(capabilities.as_deref())?
-            // The schemes it claims and its main window's launch options,
-            // as a packaged app's runner reads them.
+            // The schemes and domains it claims and its main window's
+            // launch options, as a packaged app's runner reads them.
             .with_url_schemes(url_schemes)
+            .with_link_domains(link_domains)
             .with_main_window(main_window.as_deref())
             .with_application(application.as_deref());
         Ok(Built::Js {
@@ -1021,12 +1041,19 @@ test src/lib.rs - App (line 3) ... ok
         let dir = std::env::temp_dir().join(format!("nsh-test-schemes-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("nsh.json"), r#"{ "schemes": ["MyApp"] }"#).unwrap();
+        std::fs::write(
+            dir.join("nsh.json"),
+            r#"{ "schemes": ["MyApp"], "linkDomains": ["Example.com"] }"#,
+        )
+        .unwrap();
         std::fs::write(dir.join("App.tsx"), "export {};\n").unwrap();
         let built = compiler()(&dir.join("App.tsx"), Entry::App);
         std::fs::remove_dir_all(&dir).unwrap();
         match built {
-            Ok(Built::Js { bundle, .. }) => assert_eq!(bundle.url_schemes, ["myapp"]),
+            Ok(Built::Js { bundle, .. }) => {
+                assert_eq!(bundle.url_schemes, ["myapp"]);
+                assert_eq!(bundle.link_domains, ["example.com"]);
+            }
             Ok(_) => panic!("a TSX entry builds to JS"),
             Err(e) => panic!("{e}"),
         }

@@ -407,6 +407,7 @@ fn run_rust_app(
             info["icon"] = icon.to_string_lossy().as_ref().into();
         }
         config.add_file_types_to_app_json(&mut info);
+        config.add_link_domains_to_app_json(&mut info);
         // The main window's launch options, as a package's `app.json`.
         if let Some(window) = &config.window {
             info["window"] = window.clone();
@@ -883,6 +884,7 @@ pub(crate) fn install_android_host(
                 queries: &meta.android_queries,
                 application: &meta.android_application,
                 schemes: &[],
+                link_domains: &[],
                 rust: false,
                 dark: false,
                 fixed_appearance: false,

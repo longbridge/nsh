@@ -151,9 +151,10 @@ fn build(
     let app = unsafe { Bundle::bytecode(bytecode) }
         .with_capabilities_json(capabilities.as_deref())
         .map_err(|e| format!("{}: {e}", entry.display()))?
-        // The schemes it claims and its main window's launch options, as a
-        // packaged app's runner reads them.
+        // The schemes and domains it claims and its main window's launch
+        // options, as a packaged app's runner reads them.
         .with_url_schemes(bundle.url_schemes)
+        .with_link_domains(bundle.link_domains)
         .with_main_window(bundle.main_window.as_deref())
         .with_application(bundle.application.as_deref());
     Ok((app, bundle.source_map, bundle.asset_root))
