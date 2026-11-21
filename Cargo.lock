@@ -4034,6 +4034,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "nsh-launcher"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "flate2",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tar",
+ "toml 0.8.23",
+ "ureq",
+ "zip",
+]
+
+[[package]]
 name = "nsh-linux-app"
 version = "0.6.0"
 dependencies = [

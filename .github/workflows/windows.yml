@@ -22,6 +22,7 @@ on:
       - "crates/nsh-engine/**"
       - "crates/nsh-i18n/**"
       - "crates/nsh-js/**"
+      - "crates/nsh-launcher/**"
       - "crates/nsh-macros/**"
       - "crates/nsh-package/**"
       - "crates/nsh-updater/**"
@@ -102,7 +103,7 @@ jobs:
         run: >
           cargo clippy --all-targets
           -p nsh-platform-windows -p nsh-windows-host -p nsh-windows-app
-          -p nsh-cli -p nsh-dev -p xtask
+          -p nsh-cli -p nsh-dev -p nsh-launcher -p xtask
           -- -D warnings
 
       # Without the optional features: no naga, wgpu, syntect, RaTeX, ropey,
@@ -112,7 +113,7 @@ jobs:
 
       # Tests need no display: they open no window.
       - name: Test
-        run: cargo test -p nsh-platform-windows -p nsh-windows-host -p nsh-windows-app -p nsh-cli -p nsh-dev -p xtask
+        run: cargo test -p nsh-platform-windows -p nsh-windows-host -p nsh-windows-app -p nsh-cli -p nsh-dev -p nsh-launcher -p xtask
 
       # Cargo retries oversized compiler commands with an argument file when
       # it receives the Windows launch error directly from starting rustc.

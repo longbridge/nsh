@@ -205,6 +205,10 @@ pub(crate) struct AppConfig {
     /// Read and checked by the bundler.
     #[serde(default, rename = "resolve")]
     _resolve: Option<serde_json::Value>,
+    /// The CLI the `nsh-launcher` runs (`toolchain.nsh`), which the CLI
+    /// itself does not read.
+    #[serde(default, rename = "toolchain")]
+    _toolchain: Option<serde_json::Value>,
     /// The app's Rust crate: its builds are the app's own (`rust_app.rs`).
     #[serde(default, rename = "rust")]
     _rust: Option<serde_json::Value>,

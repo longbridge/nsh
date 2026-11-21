@@ -23,6 +23,7 @@ on:
       - "crates/nsh-engine/**"
       - "crates/nsh-i18n/**"
       - "crates/nsh-js/**"
+      - "crates/nsh-launcher/**"
       - "crates/nsh-linux-app/**"
       - "crates/nsh-linux-host/**"
       - "crates/nsh-macros/**"
@@ -175,7 +176,7 @@ jobs:
         run: >
           cargo clippy --all-targets
           -p nsh-platform-linux -p nsh-linux-host -p nsh-linux-app
-          -p nsh-cli -p nsh-dev -p xtask
+          -p nsh-cli -p nsh-dev -p nsh-launcher -p xtask
           -- -D warnings
 
       # The backend alone, without the `webview` feature the hosts turn on:
@@ -204,7 +205,7 @@ jobs:
       # of its own, as the examples' tests below.
       - name: Test
         run: >
-          cargo test -p nsh-platform-linux -p nsh-cli -p nsh-dev
+          cargo test -p nsh-platform-linux -p nsh-cli -p nsh-dev -p nsh-launcher
           && dbus-run-session -- xvfb-run -a cargo test -p nsh-platform-linux --features webview
 
       # Opt-in Action-interface tests use an independent AT client, not GTK signals.

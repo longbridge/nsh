@@ -425,6 +425,18 @@ jobs:
             envsubst '$NSH_VERSION $NSH_HASH $NSH_REPO' < .github/packages/nsh.json > assets/nsh.json
           cat assets/nsh.json
 
+      # The release's own description: `nsh-launcher` checks the `nsh-core`
+      # revision a Rust app pins against it.
+      - name: Describe the release
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+          commit=$(git rev-parse HEAD)
+          date=$(date -u +%Y-%m-%d)
+          jq -n --arg version "$version" --arg commit "$commit" --arg tag "$TAG" --arg date "$date" \
+            '{version: $version, commit: $commit, tag: $tag, date: $date}' \
+            > assets/nsh-release.json
+          cat assets/nsh-release.json
+
       # Created only after every platform has built; a draft until it is
       # published by hand.
       - uses: softprops/action-gh-release@v2

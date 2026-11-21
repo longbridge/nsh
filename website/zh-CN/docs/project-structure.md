@@ -128,6 +128,7 @@ mount(() => <Window id="main"><App /></Window>);
 | `version` | string | `package`, `publish` | 用户可见的版本号，例如 `1.2.0`（`CFBundleShortVersionString`，Android 的 `versionName`）。 |
 | `build` | number | `package`, `publish` | 构建号（`CFBundleVersion`，Android 的 `versionCode`）。签名包要求它在每次发布时递增。 |
 | `nsh` | string | 所有命令 | 应用适用的 NSH 版本，写法同 Cargo 的版本要求，例如 `">=0.5"` 或 `">=0.5, <0.7"`。处理该应用的每个命令都会先用它检查 CLI 版本，不满足时只给出一条提示 `this app requires nsh >=0.5; this is nsh 0.4.0`，而不是另一个版本带来的类型或编译错误。nightly 按其正式版本号计算。 |
+| `toolchain` | object | `nsh-launcher` | 项目运行的确切 nsh CLI：`{ "nsh": { "version": "0.6.1", "repository": "longbridge/nsh" } }`。`version` 是一个正式版本（不能是范围）；`repository` 默认 `longbridge/nsh`。`nsh-launcher` 会下载该版本为当前机器预构建的发行包，校验其 SHA-256，缓存后运行；Rust 应用的 `Cargo.lock` 中的 `nsh-core` 修订必须与该发行包的 `nsh-release.json` 一致（[toolchain](#toolchain)）。 |
 | `minRuntime` | string | `publish` | 能运行该签名包的最低 NSH 运行时版本，例如 `0.2.0`。默认：CLI 的版本（[签名包](./signed-packages.md#哪些运行时能运行包)）。 |
 | `schemes` | string[] | `package`、`run` | 打开应用的 URL scheme，例如 `["myapp"]` 对应 `myapp://…` 链接，由 [`UrlScheme`](../modules/nsh.md#urlscheme) 接收。只含小写字母、数字、`+`、`-` 和 `.`；不能是系统或浏览器占用的（`https`、`file` 等）。 |
 | `fileTypes` | object[] | `package`、`run` | 应用打开的文件类型，`[{ "name": "Video", "extensions": ["mp4"], "mimeTypes": ["video/mp4"] }]`，由包声明给系统；文件送到 [`Application.on("openFiles")`](../modules/nsh-desktop.md#打开文件)。 |
@@ -162,6 +163,23 @@ warn nsh.json: tailwind: unknown key `colours`, ignored (one of a newer NSH, or 
 ```
 
 NSH 读不懂的能力不会被授予，因此略过的内容永远不会扩大应用的权限。
+
+
+### toolchain
+
+项目可以指定构建时使用的确切 nsh CLI，这样即使机器上 `PATH` 中装有另一个版本，也会运行固定的那个：
+
+```json
+"toolchain": {
+  "nsh": { "version": "0.6.1" }
+}
+```
+
+`version` 是一个正式版本，而不是范围（`latest` 和 `nightly` 会被拒绝）；`repository` 默认 `longbridge/nsh`，fork 填写自己的 `owner/repo`。`nsh-launcher` 读取固定值，从该仓库的 GitHub Releases 下载当前机器的预构建发行包，校验 `.sha256`，缓存到 `$NSH_CACHE`（或平台的缓存目录）并运行它。它从不编译 nsh，也从不改写应用的清单文件。
+
+把 launcher 以 `nsh` 的名字放在发行包的 `bin` 之前，或直接运行它；`nsh init` 不会写入固定值。对于 Rust 应用，`Cargo.lock` 中的 `nsh-core` 修订必须是该发行包的提交：`nsh-launcher --launcher-verify` 会把固定值、发行包的 `nsh-release.json` 和 lock 一起检查，供 CI 使用。`--launcher-status` 打印固定值、缓存和选中的 CLI；`--launcher-prefetch` 立即下载；`--launcher-which` 打印其路径。未固定版本的应用运行已安装的发行包。
+
+launcher 是一个独立、无版本的选择器：`PATH` 中的另一个 nsh 永远不会改写应用的清单文件。
 
 
 ### capabilities

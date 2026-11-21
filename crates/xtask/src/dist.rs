@@ -2,6 +2,7 @@
 //!
 //! ```text
 //! dist/nsh/bin/nsh                                             the CLI
+//! dist/nsh/bin/nsh-launcher                                    the project-pinned launcher
 //! dist/nsh/runtime/ios/iphoneos/nsh-ios-app                    packaged app runner
 //! dist/nsh/runtime/ios/iphonesimulator/{nsh-ios-app,nsh-ios-host}
 //! dist/nsh/runtime/ios/maccatalyst/nsh-ios-host                development host
@@ -73,11 +74,19 @@ pub(crate) fn dist() -> anyhow::Result<()> {
         step.done("crates/gpui/Cargo.lock is current");
     }
 
-    // The CLI for this machine.
-    cargo(&["build", "--release", "-p", "nsh-cli"], "nsh")?;
+    // The CLI for this machine, and the launcher that selects a project's
+    // pinned CLI.
+    cargo(
+        &["build", "--release", "-p", "nsh-cli", "-p", "nsh-launcher"],
+        "nsh",
+    )?;
     copy_executable(
         &release.join("release").join(exe("nsh")),
         &out.join("bin").join(exe("nsh")),
+    )?;
+    copy_executable(
+        &release.join("release").join(exe("nsh-launcher")),
+        &out.join("bin").join(exe("nsh-launcher")),
     )?;
 
     if WITH_IOS {
