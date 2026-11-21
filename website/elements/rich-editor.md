@@ -124,13 +124,19 @@ does: it comes and goes with the keyboard and moves with it natively. Formatting
 leave the focus in the editor:
 
 ```tsx
+import { Text, View } from "nsh";
+import { Button, RichEditor, command } from "nsh/base";
 import { InputAccessoryView } from "nsh/mobile";
 
 <RichEditor editor={editor} inputAccessoryViewID="format" />
 <InputAccessoryView nativeID="format">
   <View style={{ flexDirection: "row", padding: 8, gap: 8 }}>
-    <Button label="Bold" onPress={() => editor.run(command("toggleBold"))} />
-    <Button label="Done" onPress={() => editor.blur()} />
+    <Button onPress={() => editor.run(command("toggleBold"))}>
+      <Text>Bold</Text>
+    </Button>
+    <Button onPress={() => editor.blur()}>
+      <Text>Done</Text>
+    </Button>
   </View>
 </InputAccessoryView>
 ```

@@ -82,13 +82,19 @@ mount(() => (
 `inputAccessoryViewID`（Rust 中为 `.input_accessory(id)`）在编辑器获得焦点时，把 `nativeID` 为该值的 [`InputAccessoryView`](../docs/forms-and-keyboard.md#键盘上方的工具栏inputaccessoryview) 显示在键盘顶部，与 `Input` 的 `ios={{ inputAccessoryViewID }}` 一样：它随键盘出现和消失，并由原生跟随键盘移动。其中的格式按钮作用于会话，焦点仍留在编辑器中：
 
 ```tsx
+import { Text, View } from "nsh";
+import { Button, RichEditor, command } from "nsh/base";
 import { InputAccessoryView } from "nsh/mobile";
 
 <RichEditor editor={editor} inputAccessoryViewID="format" />
 <InputAccessoryView nativeID="format">
   <View style={{ flexDirection: "row", padding: 8, gap: 8 }}>
-    <Button label="Bold" onPress={() => editor.run(command("toggleBold"))} />
-    <Button label="Done" onPress={() => editor.blur()} />
+    <Button onPress={() => editor.run(command("toggleBold"))}>
+      <Text>Bold</Text>
+    </Button>
+    <Button onPress={() => editor.blur()}>
+      <Text>Done</Text>
+    </Button>
   </View>
 </InputAccessoryView>
 ```
