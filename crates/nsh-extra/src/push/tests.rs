@@ -518,15 +518,93 @@ fn foreground_presentations_are_decided_before_notifications_come() {
 
 #[cfg(not(target_os = "ios"))]
 #[test]
-fn there_are_no_remote_notifications_off_ios() {
+fn there_are_no_remote_notifications_without_a_binding_off_ios() {
     let _turn = turn();
     assert!(!ready(available()));
     let error = ready(register()).unwrap_err();
     assert_eq!(error.code.as_deref(), Some(UNAVAILABLE));
-    let error = ready(close_thread("chat-1")).unwrap_err();
-    assert_eq!(error.code.as_deref(), Some(UNAVAILABLE));
     // Setting up does nothing, and does not panic.
     install();
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[test]
+fn there_are_no_threads_to_close_off_ios_and_android() {
+    let error = ready(close_thread("chat-1")).unwrap_err();
+    assert_eq!(error.code.as_deref(), Some(UNAVAILABLE));
+}
+
+/// A push service's binding that answers at once.
+#[cfg(not(target_os = "ios"))]
+struct Binding {
+    answer: Result<&'static str, &'static str>,
+    asked: Mutex<u32>,
+}
+
+#[cfg(not(target_os = "ios"))]
+impl PushProvider for Binding {
+    fn register(&self) {
+        *self.asked.lock().unwrap() += 1;
+        match self.answer {
+            Ok(token) => provide_token(DeviceToken::from_string(token)),
+            Err(reason) => provide_registration_failure(reason),
+        }
+    }
+}
+
+#[cfg(not(target_os = "ios"))]
+#[test]
+fn a_push_service_binding_registers_the_device() {
+    let _turn = turn();
+    let binding = Arc::new(Binding {
+        answer: Ok("service-token"),
+        asked: Mutex::new(0),
+    });
+    set_provider(Some(binding.clone()));
+    assert!(ready(available()));
+    let token = ready(register()).unwrap();
+    assert_eq!(token.as_str(), "service-token");
+    assert_eq!(token.as_bytes(), b"service-token");
+    assert_eq!(super::token(), Some(token));
+    assert_eq!(*binding.asked.lock().unwrap(), 1);
+
+    set_provider(Some(Arc::new(Binding {
+        answer: Err("no network"),
+        asked: Mutex::new(0),
+    })));
+    let error = ready(register()).unwrap_err();
+    assert_eq!(error.code, None);
+    assert_eq!(error.message, "the device was not registered: no network");
+    assert!(hub().registering.is_empty());
+
+    set_provider(None);
+    assert!(!ready(available()));
+}
+
+#[test]
+fn a_binding_reports_what_its_service_delivers() {
+    let _turn = turn();
+    let (id, mut receiver) = {
+        let mut hub = hub();
+        let (id, receiver) = hub.subscribe();
+        hub.listen(id, Kind::Notification);
+        hub.listen(id, Kind::Press);
+        (id, receiver)
+    };
+    let quiet = ForegroundPresentation::SHOWN.banner(false);
+    set_thread_presentation("group-1", Some(quiet));
+    let shown = provide_notification(RemoteNotification::new("n1", "group-1", JsonValue::Null));
+    assert_eq!(shown, quiet);
+    set_thread_presentation("group-1", None);
+    provide_press(RemoteNotification::new("n2", "group-1", JsonValue::Null));
+    assert_eq!(
+        received(&mut receiver),
+        [
+            (Kind::Notification, "n1".to_owned()),
+            (Kind::Press, "n2".to_owned())
+        ]
+    );
+    hub().unsubscribe(id);
 }
 
 #[cfg(not(target_os = "ios"))]
