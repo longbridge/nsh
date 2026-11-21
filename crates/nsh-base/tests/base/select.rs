@@ -678,12 +678,25 @@ fn escape_cancels_and_gives_the_trigger_the_keyboard_back() {
 
 #[test]
 fn choosing_gives_the_trigger_the_keyboard_back() {
-    let mut app = desktop(props(fruits()));
+    // The trigger had the keyboard (Tab) when the list opened.
+    let mut app = focused(props(fruits()));
     let trigger = app.id("role:combobox");
     app.open_list();
     app.press("role:option[Carrot]").unwrap();
     app.gone("role:listbox");
     assert!(app.sent(trigger, &Command::Focus));
+}
+
+#[test]
+fn choosing_in_a_list_a_press_opened_leaves_the_trigger_without_the_keyboard() {
+    // A press opened it with nothing focused: the trigger never had the
+    // keyboard, so Space and Return stay the app's shortcuts.
+    let mut app = desktop(props(fruits()));
+    let trigger = app.id("role:combobox");
+    app.open_list();
+    app.press("role:option[Carrot]").unwrap();
+    app.gone("role:listbox");
+    assert!(!app.sent(trigger, &Command::Focus));
 }
 
 #[test]

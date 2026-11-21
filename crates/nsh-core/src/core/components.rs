@@ -6364,6 +6364,7 @@ impl<M: TextEngine> Core<M> {
                 });
             }
             Action::FocusBack { to, from } => self.focus_back = Some((to, from)),
+            Action::FocusOrigin { to } => self.note_focus_origin(to),
             Action::Dialog(mut dialog, answer) => {
                 dialog.id = self.components.next_dialog;
                 self.components.next_dialog += 1;

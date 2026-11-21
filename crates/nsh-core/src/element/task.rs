@@ -70,6 +70,12 @@ pub(crate) enum Action {
         to: NodeId,
         from: Option<NodeId>,
     },
+    /// A popup that gives the keyboard focus back to node `to` opens: the
+    /// core notes the focus and the input it opens with
+    /// ([`super::ElementRef::focus_back_origin`]).
+    FocusOrigin {
+        to: NodeId,
+    },
     /// A dialog; its answer resolves the slot.
     Dialog(Dialog, Rc<RefCell<Output<DialogReply>>>),
     /// Close the dialog whose answer resolves the slot, answering it as

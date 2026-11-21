@@ -5495,8 +5495,9 @@ impl Mounter {
         }
     }
 
-    /// Give a tapped focus stop keyboard focus. An input using the software
-    /// keyboard keeps focus so the layout stays in place under the finger.
+    /// Give a tapped `focusable` view that takes no presses keyboard focus.
+    /// An input using the software keyboard keeps focus so the layout stays
+    /// in place under the finger.
     pub(crate) fn focus_node(&mut self, id: NodeId) {
         if !self.typing()
             && let Some(view) = self.slot(id).and_then(|s| s.native.focus_view())
@@ -5516,13 +5517,15 @@ impl Mounter {
         } else {
             EventKind::PressUp
         };
+        // A tap gives a control (a button, a select's trigger, a switch) no
+        // keyboard focus, as UIKit's controls and Safari give none: with a
+        // hardware keyboard, Return and Space stay the app's shortcuts
+        // instead of pressing the control last tapped. A `focusable` view
+        // that takes no presses takes it from its focus tap
+        // (`handleFocusTap:`).
         if s.events.contains(event) {
             let payload = self.press_payload(id, at);
             self.control.dispatch_event(id, event, payload);
-        }
-        // Queue press-down before UIKit sends the resulting focus notifications.
-        if pressed {
-            self.focus_node(id);
         }
     }
 
