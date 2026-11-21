@@ -1564,7 +1564,7 @@ impl Rv {
         item.text = text;
         item.html =
             Some(DomSerializer::from_schema(state.schema()).serialize_for_clipboard(&slice));
-        set_clipboard_item(item);
+        drop(set_clipboard_item(item));
     }
 
     /// A paste of `text` and, when the clipboard had it, the same content as

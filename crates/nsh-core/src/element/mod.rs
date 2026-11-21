@@ -191,8 +191,8 @@ pub use self::{
         Quotas, RefuseConnections, Stop, System, codes, io_code,
     },
     task::{
-        Answer, ClipboardImage, ClipboardItem, DialogAnswer, DialogCloser, DialogReply, ImageSize,
-        Task,
+        Answer, ClipboardImage, ClipboardItem, ClipboardWrite, DialogAnswer, DialogCloser,
+        DialogReply, ImageSize, Task,
     },
     tokens::{FONT_MONO, FONT_SANS, ThemeTokens, Token, TokenSource, Tokens},
     value::{JsValue, NodeRef, PropEnum, PropError, SharedString, TsType, TsTypes, ts_of},

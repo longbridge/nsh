@@ -31,6 +31,7 @@ pub use crate::element::{
     Children,
     ClaimRequest,
     ClipboardItem,
+    ClipboardWrite,
     ColorStop,
     Component,
     ComponentBuilder,

@@ -1691,7 +1691,7 @@ impl Dt {
 
     pub(crate) fn copy_selection(&self) {
         if let Some(text) = self.selection_text() {
-            set_clipboard(text);
+            drop(set_clipboard(text));
         }
     }
 }

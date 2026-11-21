@@ -1463,7 +1463,7 @@ impl Cx {
             .label(label)
             .on_press(move || {
                 if copy {
-                    set_clipboard(event.code.code.clone());
+                    drop(set_clipboard(event.code.code.clone()));
                     let _ = done.spring(
                         1.0,
                         Spring {
