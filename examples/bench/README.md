@@ -37,6 +37,14 @@ echo 'for (let i = 0; i < 8; i++) await app.press("id:edit");' | nsh test exampl
 Compare the final four edits after four warmups. Headless runs keep the complete document mounted; the trace
 includes selection geometry as well as the changed text. Results: `docs/dev/performance.md`.
 
+`RichEditorLongDocument.tsx` holds a long Markdown document (5,000 source lines by default, `LINES`): per section a
+heading, paragraphs with marks and links, a list, a code block, a pipe table and a quote. Its first commit is the
+mount of every block; it grows linearly with `LINES`:
+
+```sh
+echo 'await app.wait(100)' | nsh test examples/bench/RichEditorLongDocument.tsx --trace
+```
+
 `MarkdownDefinitions.tsx` sets about 40 KB of Markdown with link and footnote definitions, then replaces text
 near the start on each press. The replacement is prepared before the press, and keeps the document's shape:
 

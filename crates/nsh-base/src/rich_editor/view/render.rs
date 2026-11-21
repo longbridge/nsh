@@ -252,6 +252,7 @@ fn content(rv: Rv) -> impl IntoElement {
             .child(blocks(rv.clone(), DOC)),
     )
     .child(table::controls(rv.clone()))
+    .child(table::drop_line(rv.clone()))
     .child(gap_cursor(rv.clone()))
     .child(drop_cursor(rv.clone()))
     .child(caret(rv.clone()))
@@ -1748,6 +1749,7 @@ impl Rv {
         }
         geo.frames.insert(id, (parent, frame));
         drop(geo);
+        self.table_moved(id, parent);
         self.layout_rev.update(|r| *r += 1);
     }
 
@@ -1760,6 +1762,7 @@ impl Rv {
         }
         geo.insets.insert(id, origin);
         drop(geo);
+        self.table_moved(id, None);
         self.layout_rev.update(|r| *r += 1);
     }
 
