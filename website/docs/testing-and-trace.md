@@ -616,7 +616,9 @@ own input at the views their selectors name, as Playwright does in a browser:
 - a view off screen is scrolled into view first, a gesture at a time; on a touch screen the finger lands where the
   page itself takes it, beside the views that follow a drag (a slider, a drawing area), as a user scrolls; a view at the
   edge of a scroll view already at its end is acted on where it is, without pulling the scroll view past that end
-  (where a pull to refresh starts or a page sheet closes);
+  (where a pull to refresh starts or a page sheet closes); a view a scroll view's content passes under at its edges
+  (on iOS a transparent header, a tab bar, the keyboard) is scrolled out from under them, and a step on one
+  left under them, or under a bar the system draws, fails with `ERR_NSH_TEST_COVERED` instead of pressing the bar;
 - selectors, waits and queries see the same model of the app as headless runs, built from what the host draws, so
   they find the same views;
 - dialogs are the platform's own: `app.dialogs()` reads them, and answering one (`onDialog`, or its cancel button

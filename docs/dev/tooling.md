@@ -661,7 +661,10 @@ The host's side is `nsh_testing::agent` (feature `agent`: no QuickJS, no network
 so selectors resolve the same everywhere; the `Agent` takes each step on a thread of its own: it resolves the
 selector on the model, scrolls the view into view when it is not (the innermost scroll view around it, inside the modal it is in, that
 hides it and can still move it, a gesture at a time: one already at the end a gesture would move it towards,
-`Native::scroll_room`, is not dragged past it, where a pull to refresh starts or a page sheet closes; on a touch screen the finger lands clear of the views inside that take a drag themselves,
+`Native::scroll_room`, is not dragged past it, where a pull to refresh starts or a page sheet closes; a view under
+what draws over a scroll view's edges, `Native::scroll_insets` (on iOS a system bar over it, a transparent header or a
+tab bar, and what its content inset keeps clear, the keyboard's room), is hidden as one outside it is, the gestures land clear of those edges, and
+one left under them fails the step as covered rather than being pressed there; on a touch screen the finger lands clear of the views inside that take a drag themselves,
 `Scene::drag_takers`: responders and pans, whose app would answer, a moment later, whether the scroll view keeps
 the gesture; it lands at the scroll view's middle, and after a gesture that moved nothing (what is there scrolls by
 itself, a text area, or the gesture was undone) a quarter of the way from the edge the finger moves away from, where
@@ -672,7 +675,9 @@ the view is drawn: its transforms included, a thumb centered with `translate(-50
 platform's hit testing finds it; macOS maps through the views' layer transforms, which AppKit's conversions leave out; a span of a text (`Scene::span`) is pressed on its
 characters' first line, `Native::text_bounds`, the rectangles each platform highlights a selection with, and the
 platform's own hit testing gives the press to the span; a press of a view inside the one that takes it, a cell's
-text in a row, lands on the match's middle, `Scene::match_inside`, as headless) and acts there with synthesized input
+text in a row, lands on the match's middle, `Scene::match_inside`, as headless; before it acts, `Native::covered` asks
+the platform's hit testing whether something the system draws over the app, a navigation or tab bar on iOS, would take
+the press, and the step fails as covered if so) and acts there with synthesized input
 (`Native`: press, long press (on a manual clock, once the finger has landed, the agent moves the clock by the rest
 of the hold, as the headless driver's hold does: a hold the app times itself, a touch screen's `ContextMenu`, comes
 due), scroll, drag along `agent::drag_path` after resting `agent::LANDING`, typed keys,

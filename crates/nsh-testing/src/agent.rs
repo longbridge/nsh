@@ -1106,6 +1106,28 @@ pub trait Native: Send + Sync {
         let _ = (id, horizontal);
         None
     }
+    /// How far in from the start and the end of scroll view `id` along its
+    /// axis (`horizontal`) something covers it while its content scrolls
+    /// underneath, so a press there reaches what covers it: on iOS a bar
+    /// the system draws over it (a transparent navigation bar at the top, a
+    /// tab bar or a toolbar at the bottom) and what its content insets keep
+    /// clear (the keyboard's room). The agent brings views out from under
+    /// those edges. Zero where the platform draws nothing over its scroll
+    /// views.
+    fn scroll_insets(&self, id: NodeId, horizontal: bool) -> (Points, Points) {
+        let _ = (id, horizontal);
+        (Points(0.0), Points(0.0))
+    }
+    /// What a press at `at` (in the window's content, as
+    /// [`Native::bounds`]) would reach in place of view `id`, a view the
+    /// system draws over the app's (a navigation bar, a tab bar), described
+    /// for a failure; `None` when the press reaches the view, a view inside
+    /// it or one around it, or the platform cannot tell. Asked before a
+    /// step acts on a view, so it fails rather than pressing the bar.
+    fn covered(&self, id: NodeId, at: Point<Points>) -> Option<String> {
+        let _ = (id, at);
+        None
+    }
     /// The window the pointer's input that follows acts in, until the next
     /// call: the one whose root node is `window` ([`nsh_core::ROOT_ID`]:
     /// the main window). The points [`Native::press`],
@@ -1334,6 +1356,11 @@ pub trait Native: Send + Sync {
     fn quit(&self);
 }
 
+/// What covers a view under the edge of its scroll view that scrolling
+/// does not bring it out from ([`Native::scroll_insets`]).
+const UNDER_INSETS: &str = "what draws over the edge of its scroll view (a header, a bar, the keyboard), and \
+     scrolling does not bring it out from under that";
+
 /// What names a control the system draws for the app
 /// ([`Native::system_control`]), as a step's selector does: `id:<key>` or
 /// `label:<label>`.
@@ -1517,6 +1544,33 @@ fn well_inside(bounds: &Bounds<Points>, at: Point<Points>, horizontal: bool) -> 
         bounds.origin.y.0 + bounds.size.height.0 - margin_y,
     );
     (x0..=x1).contains(&at.x.0) && (y0..=y1).contains(&at.y.0)
+}
+
+/// `bounds` of a scroll view less `insets`, what its content insets keep
+/// clear at its start and its end along its axis (`horizontal`): the part
+/// of it nothing draws over ([`Native::scroll_insets`]), empty when they
+/// cover all of it.
+fn inset_bounds(
+    bounds: &Bounds<Points>,
+    horizontal: bool,
+    (start, end): (Points, Points),
+) -> Bounds<Points> {
+    let length = if horizontal {
+        bounds.size.width.0
+    } else {
+        bounds.size.height.0
+    };
+    let start = start.0.clamp(0.0, length);
+    let shown = (length - start - end.0.max(0.0)).max(0.0);
+    let mut out = *bounds;
+    if horizontal {
+        out.origin.x = Points(bounds.origin.x.0 + start);
+        out.size.width = Points(shown);
+    } else {
+        out.origin.y = Points(bounds.origin.y.0 + start);
+        out.size.height = Points(shown);
+    }
+    out
 }
 
 /// The spot of a scroll view `extent` points long from `start` (along the
@@ -1936,9 +1990,31 @@ impl Agent {
         let id = self.picked(picked, selector, what)?;
         // The pointer acts in the window the view is in.
         self.native.target_window(self.scene.window_of(id)?)?;
+        let (view, at) = self.locate(id, selector, target)?;
+        // What the system draws over the app (a header it scrolls under)
+        // would take the press: the step fails rather than pressing it.
+        if let Some(cover) = self.native.covered(view, at) {
+            return Err(format!(
+                "{}; {}",
+                crate::failure::covered(selector, &cover),
+                self.on_screen()
+            ));
+        }
+        Ok((id, at))
+    }
+
+    /// Where on screen a step acts on view `id`, which `selector` names,
+    /// scrolled into view first, and the view at that spot: `id`, the match
+    /// inside it a press lands on, its text or its canvas.
+    fn locate(
+        &self,
+        id: NodeId,
+        selector: &str,
+        target: PickTarget,
+    ) -> Result<(NodeId, Point<Points>), String> {
         if let Some((canvas, center)) = self.scene.canvas_node(selector)? {
             return Ok((
-                id,
+                canvas,
                 self.scroll_point_into_view(canvas, selector, Some(center))?,
             ));
         }
@@ -1952,17 +2028,16 @@ impl Agent {
             } else {
                 None
             };
-            let at = match inner {
-                Some(inner) if self.native.bounds(inner).is_some() => {
-                    self.scroll_into_view(inner, selector)?
-                }
-                _ => self.scroll_into_view(id, selector)?,
+            let view = match inner {
+                Some(inner) if self.native.bounds(inner).is_some() => inner,
+                _ => id,
             };
+            let at = self.scroll_into_view(view, selector)?;
             if matches!(target, PickTarget::Input) {
                 // Scrolling can bring the field underneath another view.
                 self.scene.pick(selector, target)?;
             }
-            return Ok((id, at));
+            return Ok((view, at));
         };
         // A span of a text: its text view comes into view, then the finger
         // goes on its characters.
@@ -1978,7 +2053,7 @@ impl Agent {
                     self.on_screen()
                 )
             })?;
-        Ok((id, at.center()))
+        Ok((text, at.center()))
     }
 
     /// The middle of view `id` on screen, scrolled into view first when it
@@ -2032,6 +2107,39 @@ impl Agent {
             .scene
             .window_size(window_root)
             .unwrap_or_else(|| self.native.viewport());
+        let window = Bounds::new(Point::new(Points(0.0), Points(0.0)), window);
+        // Where a scroll view shows its content: its bounds clear of what
+        // draws over its edges ([`Native::scroll_insets`]). A view under
+        // those is hidden as one outside it is, and a finger scrolling it
+        // lands clear of them (a press there reaches the bar over it).
+        let shown = |scroller: NodeId, horizontal: bool| {
+            let b = self.native.bounds(scroller)?;
+            Some(inset_bounds(
+                &b,
+                horizontal,
+                self.native.scroll_insets(scroller, horizontal),
+            ))
+        };
+        // The view's spot once no gesture brings it nearer: in the window
+        // and out from under the edges of its scroll views.
+        let arrived = |at: Point<Points>, scrolled: bool| {
+            if !window.contains(&at) {
+                return Err(not_on_screen());
+            }
+            let under = scrollers.iter().any(|&(scroller, horizontal)| {
+                self.native.bounds(scroller).is_some_and(|b| {
+                    b.contains(&at) && shown(scroller, horizontal).is_some_and(|s| !s.contains(&at))
+                })
+            });
+            if under {
+                return Err(format!(
+                    "{}; {}",
+                    crate::failure::covered(selector, UNDER_INSETS),
+                    self.on_screen()
+                ));
+            }
+            Ok((at, scrolled))
+        };
         let mut before: Option<Point<Points>> = None;
         // The gestures that moved nothing: each moves the finger elsewhere
         // ([`anchor`]).
@@ -2039,7 +2147,6 @@ impl Agent {
         for _ in 0..SCROLLS_INTO_VIEW {
             let bounds = self.native.bounds(id).ok_or_else(not_on_screen)?;
             let at = local.map_or(bounds.center(), |p| bounds.origin + p);
-            let window = Bounds::new(Point::new(Points(0.0), Points(0.0)), window);
             if let Some(b) = before
                 && (b.x.0 - at.x.0).abs() < 1.0
                 && (b.y.0 - at.y.0).abs() < 1.0
@@ -2060,27 +2167,46 @@ impl Agent {
                     .scroll_room(scroller, horizontal)
                     .is_none_or(|(start, end)| if back { start.0 } else { end.0 } >= 1.0)
             };
-            // The innermost scroll view whose bounds leave the middle out,
-            // or near their edge (where a finger does not press and bars,
+            // The innermost scroll view whose shown part leaves the middle
+            // out, or near its edge (where a finger does not press and bars,
             // the home indicator and fades sit), else the outermost one
             // when the window does.
             let hiding = scrollers.iter().find_map(|&(scroller, horizontal)| {
-                let b = self.native.bounds(scroller)?;
+                let b = shown(scroller, horizontal)?;
                 (!well_inside(&b, at, horizontal) && can_move(scroller, horizontal, &b))
                     .then_some((scroller, horizontal, b))
             });
             let hiding = hiding.or_else(|| {
                 let &(s, h) = scrollers.last()?;
                 (!well_inside(&window, at, h)).then_some(())?;
-                let b = self.native.bounds(s)?;
+                let b = shown(s, h)?;
                 can_move(s, h, &b).then_some((s, h, b))
             });
             let Some((scroll, horizontal, scroller)) = hiding else {
-                if window.contains(&at) {
-                    return Ok((at, before.is_some()));
-                }
-                return Err(not_on_screen());
+                return arrived(at, before.is_some());
             };
+            let length = |b: &Bounds<Points>| {
+                if horizontal {
+                    b.size.width.0
+                } else {
+                    b.size.height.0
+                }
+            };
+            if length(&scroller) < 1.0
+                && self
+                    .native
+                    .bounds(scroll)
+                    .is_some_and(|b| length(&b) >= 1.0)
+            {
+                // Its insets cover it from end to end (a keyboard over a
+                // short scroll view): no finger reaches it. One that is
+                // that small itself goes on as before.
+                return Err(format!(
+                    "{}; {}",
+                    crate::failure::covered(selector, UNDER_INSETS),
+                    self.on_screen()
+                ));
+            }
             // The finger moves towards the start when the content moves
             // towards its end.
             let to_start = if horizontal {
@@ -2091,11 +2217,7 @@ impl Agent {
             let Some(along) = anchor(misses, to_start) else {
                 // No gesture moves it any more (its scroll view's end): it
                 // is pressed where it is when it shows.
-                return if window.contains(&at) {
-                    Ok((at, before.is_some()))
-                } else {
-                    Err(not_on_screen())
-                };
+                return arrived(at, before.is_some());
             };
             let along = self.landing(scroll, &scroller, horizontal, along)?;
             let middle = if horizontal {
@@ -2711,27 +2833,49 @@ mod tests {
     /// window's top, over 3000 points of content holding view 4 (40 points
     /// tall) at `target`; each gesture moves it as far as the finger moves,
     /// but the ones `undone` names (counted from 1), which a fling undoes.
+    #[derive(Default)]
     struct Page {
         offset: Mutex<f32>,
         target: f32,
         undone: Vec<usize>,
         /// Where each gesture's finger landed, along the scroll view.
         landed: Arc<Mutex<Vec<f32>>>,
+        /// What the scroll view's insets keep clear at its top and its
+        /// bottom (a header it scrolls under, the keyboard): as on iOS, the
+        /// content rests below the top one at the start and above the
+        /// bottom one at the end.
+        insets: (f32, f32),
+        /// The scroll view is half a point tall.
+        collapsed: bool,
+        /// How far down a bar the platform draws covers the window, which
+        /// a press above that reaches ([`Native::covered`]).
+        bar: f32,
+        /// Where each press landed, down the window.
+        pressed: Arc<Mutex<Vec<f32>>>,
     }
 
     impl Page {
         const LENGTH: f32 = 560.0;
         const CONTENT: f32 = 3000.0;
+
+        fn length(&self) -> f32 {
+            if self.collapsed { 0.5 } else { Page::LENGTH }
+        }
+
+        /// How far it scrolls at most.
+        fn end(&self) -> f32 {
+            (Page::CONTENT + self.insets.0 + self.insets.1 - self.length()).max(0.0)
+        }
     }
 
     impl Native for Page {
         fn bounds(&self, id: NodeId) -> Option<Bounds<Points>> {
             let y = match id {
                 2 => 0.0,
-                4 => self.target - *self.offset.lock().unwrap(),
+                4 => self.insets.0 + self.target - *self.offset.lock().unwrap(),
                 _ => return None,
             };
-            let height = if id == 2 { Page::LENGTH } else { 40.0 };
+            let height = if id == 2 { self.length() } else { 40.0 };
             Some(Bounds::new(
                 point(px(0.0), px(y)),
                 size(px(320.0), px(height)),
@@ -2739,19 +2883,27 @@ mod tests {
         }
         fn scroll_room(&self, _: NodeId, _: bool) -> Option<(Points, Points)> {
             let offset = *self.offset.lock().unwrap();
-            Some((px(offset), px(Page::CONTENT - Page::LENGTH - offset)))
+            Some((px(offset), px(self.end() - offset)))
+        }
+        fn scroll_insets(&self, _: NodeId, _: bool) -> (Points, Points) {
+            (px(self.insets.0), px(self.insets.1))
+        }
+        fn covered(&self, _: NodeId, at: Point<Points>) -> Option<String> {
+            (at.y.0 < self.bar).then(|| "a navigation bar".to_owned())
         }
         fn viewport(&self) -> Size<Points> {
             size(px(320.0), px(640.0))
         }
-        fn press(&self, _: Point<Points>) {}
+        fn press(&self, at: Point<Points>) {
+            self.pressed.lock().unwrap().push(at.y.0);
+        }
         fn long_press(&self, _: Point<Points>, _: Duration) {}
         fn scroll(&self, at: Point<Points>, delta: Point<Points>) {
             let mut landed = self.landed.lock().unwrap();
             landed.push(at.y.0);
             if !self.undone.contains(&landed.len()) {
                 let mut offset = self.offset.lock().unwrap();
-                *offset = (*offset + delta.y.0).clamp(0.0, Page::CONTENT - Page::LENGTH);
+                *offset = (*offset + delta.y.0).clamp(0.0, self.end());
             }
         }
         fn drag(&self, _: Point<Points>, _: Point<Points>) {}
@@ -2816,6 +2968,7 @@ mod tests {
                 target,
                 undone,
                 landed: landed.clone(),
+                ..Page::default()
             };
             let agent = Agent::new(model, Box::new(page));
             let (at, scrolled) = agent.bring_into_view(4, "id:far", None).unwrap();
@@ -2878,6 +3031,7 @@ mod tests {
                 target,
                 undone: Vec::new(),
                 landed: landed.clone(),
+                ..Page::default()
             };
             let agent = Agent::new(model, Box::new(page));
             let (at, _) = agent.bring_into_view(4, "id:row", None).unwrap();
@@ -2892,6 +3046,148 @@ mod tests {
         // A modal shows over the window: the scroll view around it in the
         // tree does not move it.
         assert_eq!(landings(300.0, 280.0, true), (40.0, 0));
+    }
+
+    /// Scroll view 2 holding view 4, which takes presses.
+    fn page_model() -> Arc<Model> {
+        use nsh_core::{EventMask, MountItem, ViewKind};
+        let model = Arc::new(Model::default());
+        let mut events = EventMask::default();
+        events.set(EventKind::Press, true);
+        model.apply(&MountBatch {
+            items: vec![
+                MountItem::Create {
+                    id: 2,
+                    kind: ViewKind::Scroll,
+                },
+                MountItem::Create {
+                    id: 4,
+                    kind: ViewKind::View,
+                },
+                MountItem::Insert {
+                    parent: 1,
+                    child: 2,
+                    before: None,
+                },
+                MountItem::Insert {
+                    parent: 2,
+                    child: 4,
+                    before: None,
+                },
+                MountItem::Frame {
+                    id: 2,
+                    frame: Bounds::new(point(px(0.0), px(0.0)), size(px(320.0), px(Page::LENGTH))),
+                },
+                MountItem::Frame {
+                    id: 4,
+                    frame: Bounds::new(point(px(0.0), px(0.0)), size(px(320.0), px(40.0))),
+                },
+                MountItem::Events { id: 4, events },
+            ],
+        });
+        model
+    }
+
+    #[test]
+    fn a_view_under_the_insets_of_its_scroll_view_comes_out_from_under_them() {
+        // The scroll view runs under a header 103 points tall and keeps 34
+        // clear at its bottom, scrolled down 200 points: view 4's middle is
+        // 80 points down, under the header, though well inside the scroll
+        // view's bounds.
+        let gestures = |insets: (f32, f32)| {
+            let landed = Arc::new(Mutex::new(Vec::new()));
+            let page = Page {
+                offset: Mutex::new(200.0),
+                target: 80.0 - 20.0 - insets.0 + 200.0,
+                landed: landed.clone(),
+                insets,
+                ..Page::default()
+            };
+            let agent = Agent::new(page_model(), Box::new(page));
+            let (at, scrolled) = agent.bring_into_view(4, "id:row", None).unwrap();
+            (at.y.0, scrolled, landed.lock().unwrap().clone())
+        };
+        // Where nothing draws over the scroll view (the desktops), it is
+        // pressed where it is.
+        assert_eq!(gestures((0.0, 0.0)), (80.0, false, Vec::new()));
+        // Under the header, it is scrolled out to well inside the part the
+        // header leaves showing (103 to 526), and the finger that scrolls
+        // it lands there too, not on the header.
+        let (at, scrolled, landed) = gestures((103.0, 34.0));
+        assert!(scrolled);
+        assert!((103.0 + 42.0..=526.0 - 42.0).contains(&at), "{at}");
+        assert!(
+            !landed.is_empty() && landed.iter().all(|y| (103.0..=526.0).contains(y)),
+            "{landed:?}"
+        );
+    }
+
+    #[test]
+    fn a_view_left_under_a_header_fails_the_step_instead_of_pressing_the_header() {
+        let ok = StepOutcome::Done {
+            value: serde_json::Value::Null,
+        };
+        let press = |page: Page| {
+            let pressed = page.pressed.clone();
+            let agent = Agent::new(page_model(), Box::new(page));
+            let outcome = agent.take(TestStep::Press {
+                selector: "view:4".into(),
+            });
+            (outcome, pressed.lock().unwrap().clone())
+        };
+        let under = |outcome: &StepOutcome| matches!(outcome, StepOutcome::Failed { message } if message.starts_with("`view:4` is covered: a press there reaches what draws over the edge of its scroll view"));
+        // Under the header, in a scroll view the gestures do not move (what
+        // is there scrolls by itself, or flings undo them): it stays under.
+        let (outcome, pressed) = press(Page {
+            offset: Mutex::new(200.0),
+            target: 80.0 - 20.0 - 103.0 + 200.0,
+            insets: (103.0, 34.0),
+            undone: (1..=SCROLLS_INTO_VIEW).collect(),
+            ..Page::default()
+        });
+        assert!(under(&outcome), "{outcome:?}");
+        assert!(pressed.is_empty());
+        // Insets that cover the scroll view from end to end (a keyboard over
+        // a short one).
+        let (outcome, pressed) = press(Page {
+            target: 40.0,
+            insets: (300.0, 300.0),
+            ..Page::default()
+        });
+        assert!(under(&outcome), "{outcome:?}");
+        assert!(pressed.is_empty());
+        // A scroll view half a point tall with nothing over it is no
+        // covered one: its gestures go on as before (each moves it a
+        // fraction of a point) until none brings it nearer, and the view is
+        // pressed where it is then.
+        let (outcome, pressed) = press(Page {
+            target: 40.0,
+            collapsed: true,
+            ..Page::default()
+        });
+        assert_eq!(outcome, ok);
+        assert_eq!(pressed.len(), 1, "{pressed:?}");
+        // A platform that does not say what the insets keep clear, but
+        // finds the header under the finger: the step fails, naming it.
+        let (outcome, pressed) = press(Page {
+            target: 40.0,
+            bar: 103.0,
+            ..Page::default()
+        });
+        assert!(
+            matches!(&outcome, StepOutcome::Failed { message } if message.starts_with("`view:4` is covered: a press there reaches a navigation bar")),
+            "{outcome:?}"
+        );
+        assert!(pressed.is_empty());
+        // Clear of the header, it is pressed.
+        let (outcome, pressed) = press(Page {
+            target: 200.0,
+            bar: 103.0,
+            insets: (103.0, 34.0),
+            ..Page::default()
+        });
+        assert_eq!(outcome, ok);
+        assert_eq!(pressed, [323.0]);
     }
 
     #[test]
