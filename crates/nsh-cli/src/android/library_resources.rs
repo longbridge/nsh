@@ -4,8 +4,10 @@
 //! A library's resources are overlays under NSH's own: the package's own
 //! resources win over the app's libraries, which win over its crates'.
 //! A library's code is compiled against `R` fields its build had no final
-//! values for; its `R.txt` lists the ones it uses, and the package gives
-//! them the ids `aapt2 link` settled on.
+//! values for; its `R.txt` lists them, with those of the libraries it was
+//! built with, and the package gives each one a library listed defines the
+//! id `aapt2 link` settled on. One no library listed defines is left out,
+//! unless code reads it (its class file refers to the field).
 
 use std::{
     collections::BTreeMap,
@@ -74,38 +76,73 @@ fn parse(text: &str, java_names: bool) -> Result<Symbols, String> {
     Ok(out)
 }
 
-/// `R.java` of the library `package`: each of `wanted` (its `R.txt`) with
-/// the value `linked` (what `aapt2 link` wrote) gives it. A symbol the
-/// package does not have is an error naming it: no library listed defines
-/// that resource.
-pub(super) fn r_java(package: &str, wanted: &Symbols, linked: &Symbols) -> Result<String, String> {
+/// The fields of a library's `R` that code reads, by (type, name): the
+/// class that reads it, by Java name.
+pub(super) type Reads = BTreeMap<(String, String), String>;
+
+/// The library package and the resource type of the class `class` (by
+/// internal name) when it is one of an `R` class: `com/example/R$string`.
+pub(super) fn r_type(class: &str) -> Option<(String, &str)> {
+    let (package, simple) = class.rsplit_once('/').unwrap_or(("", class));
+    let kind_of = simple.strip_prefix("R$")?;
+    (!kind_of.is_empty() && !kind_of.contains('$')).then(|| (package.replace('/', "."), kind_of))
+}
+
+/// `R.java` of the library `package`, with each field of `wanted` (its
+/// `R.txt`) and `read` (what code reads of it) that `linked` (what `aapt2
+/// link` wrote) has, the value `linked` gives it; and how many of `wanted`
+/// it leaves out, which no library listed defines. A field `read` has that
+/// `linked` has not is an error naming the class that reads it.
+pub(super) fn r_java(
+    package: &str,
+    wanted: &Symbols,
+    read: &Reads,
+    linked: &Symbols,
+) -> Result<(String, usize), Vec<String>> {
     if !package.split('.').all(identifier) {
-        return Err(format!("`{package}` is no Java package"));
+        return Err(vec![format!("`{package}` is no Java package")]);
     }
     if let Some(word) = package.split('.').find(|part| keyword(part)) {
-        return Err(format!(
+        return Err(vec![format!(
             "its package `{package}` has the Java keyword `{word}`, which no `R` class can be in"
-        ));
+        )]);
     }
+    let fields: std::collections::BTreeSet<&(String, String)> =
+        wanted.keys().chain(read.keys()).collect();
     let mut out = format!("package {package};\n\npublic final class R {{\n");
     let mut open: Option<&str> = None;
-    for ((kind_of, name), symbol) in wanted {
-        if let Some(word) = [kind_of, name].into_iter().find(|part| keyword(part)) {
-            return Err(format!(
-                "its R.txt has `{kind_of} {name}`: the Java keyword `{word}` names no `R` field"
-            ));
-        }
-        let Some(have) = linked.get(&(kind_of.clone(), name.clone())) else {
-            return Err(format!(
-                "its code uses `R.{kind_of}.{name}`, which no Android library listed defines"
-            ));
+    let mut left_out = 0;
+    let mut errors = Vec::new();
+    for key @ (kind_of, name) in fields {
+        let reader = read.get(key);
+        let Some(have) = linked.get(key) else {
+            match reader {
+                Some(class) => errors.push(format!(
+                    "`{class}` reads `R.{kind_of}.{name}`, which no Android library listed defines"
+                )),
+                None => left_out += 1,
+            }
+            continue;
         };
-        if have.array != symbol.array {
-            return Err(format!(
+        if let Some(word) = [kind_of, name].into_iter().find(|part| keyword(part)) {
+            errors.push(format!(
+                "`R.{kind_of}.{name}`: the Java keyword `{word}` names no `R` field"
+            ));
+            continue;
+        }
+        if !identifier(kind_of) || !identifier(name) {
+            errors.push(format!("`R.{kind_of}.{name}` is no Java name"));
+            continue;
+        }
+        if let Some(symbol) = wanted.get(key)
+            && have.array != symbol.array
+        {
+            errors.push(format!(
                 "its code takes `R.{kind_of}.{name}` as {}, the package has {}",
                 java_type(symbol.array),
                 java_type(have.array)
             ));
+            continue;
         }
         if open != Some(kind_of) {
             if open.is_some() {
@@ -125,7 +162,10 @@ pub(super) fn r_java(package: &str, wanted: &Symbols, linked: &Symbols) -> Resul
         out.push_str("    }\n");
     }
     out.push_str("}\n");
-    Ok(out)
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+    Ok((out, left_out))
 }
 
 fn java_type(array: bool) -> &'static str {
@@ -444,7 +484,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            r_java("com.example.lib", &wanted, &linked).unwrap(),
+            r_java("com.example.lib", &wanted, &Reads::new(), &linked)
+                .unwrap()
+                .0,
             "package com.example.lib;
 
 public final class R {
@@ -463,22 +505,20 @@ public final class R {
 "
         );
         assert_eq!(
-            r_java("com.example.lib", &Symbols::new(), &linked).unwrap(),
-            "package com.example.lib;\n\npublic final class R {\n}\n"
-        );
-        let missing = parse_symbols("int string gone 0x7f0b0002").unwrap();
-        assert_eq!(
-            r_java("com.example.lib", &missing, &linked).unwrap_err(),
-            "its code uses `R.string.gone`, which no Android library listed defines"
+            r_java("com.example.lib", &Symbols::new(), &Reads::new(), &linked).unwrap(),
+            (
+                "package com.example.lib;\n\npublic final class R {\n}\n".to_owned(),
+                0
+            )
         );
         let kind = parse_symbols("int styleable My_View 0").unwrap();
         assert_eq!(
-            r_java("com.example.lib", &kind, &linked).unwrap_err(),
-            "its code takes `R.styleable.My_View` as int, the package has int[]"
+            r_java("com.example.lib", &kind, &Reads::new(), &linked).unwrap_err(),
+            ["its code takes `R.styleable.My_View` as int, the package has int[]"]
         );
         assert_eq!(
-            r_java("com.example-lib", &wanted, &linked).unwrap_err(),
-            "`com.example-lib` is no Java package"
+            r_java("com.example-lib", &wanted, &Reads::new(), &linked).unwrap_err(),
+            ["`com.example-lib` is no Java package"]
         );
         assert_eq!(
             r_java_path(Path::new("src"), "com.example.lib"),
@@ -535,16 +575,112 @@ public final class R {
             parse_linked("int drawable café 0x7f010000\nint string hi 0x7f020000\n").unwrap();
         assert_eq!(linked.len(), 2);
         let wanted = parse_symbols("int string hi 0x7f0b0000").unwrap();
-        assert!(r_java("com.example.lib", &wanted, &linked).is_ok());
+        let none = Reads::new();
+        assert!(r_java("com.example.lib", &wanted, &none, &linked).is_ok());
         assert_eq!(
-            r_java("com.example.native", &wanted, &linked).unwrap_err(),
-            "its package `com.example.native` has the Java keyword `native`, which no `R` class can be in"
+            r_java("com.example.native", &wanted, &none, &linked).unwrap_err(),
+            [
+                "its package `com.example.native` has the Java keyword `native`, which no `R` class can be in"
+            ]
         );
+        let linked = parse_linked("int string class 0x7f020000\n").unwrap();
         let wanted = parse_symbols("int string class 0x7f0b0000").unwrap();
         assert_eq!(
-            r_java("com.example.lib", &wanted, &linked).unwrap_err(),
-            "its R.txt has `string class`: the Java keyword `class` names no `R` field"
+            r_java("com.example.lib", &wanted, &none, &linked).unwrap_err(),
+            ["`R.string.class`: the Java keyword `class` names no `R` field"]
         );
+    }
+
+    #[test]
+    fn what_no_library_defines_is_left_out_unless_code_reads_it() {
+        let linked = parse_linked(
+            "int string title 0x7f050000\n\
+             int attr tint 0x7f010000\n\
+             int[] styleable Banner { 0x7f010000 }\n\
+             int styleable Banner_tint 0\n",
+        )
+        .unwrap();
+        // Built with another library: its R.txt lists that one's
+        // resources too, which no library listed defines.
+        let wanted = parse_symbols(
+            "int anim abc_fade_in 0x7f010000\n\
+             int attr colorPrimary 0x7f020000\n\
+             int string title 0x7f0b0000\n\
+             int[] styleable ActionBar { 0x7f020000 }\n\
+             int styleable ActionBar_colorPrimary 0\n\
+             int[] styleable Banner { 0x7f030000 }\n\
+             int styleable Banner_tint 0\n",
+        )
+        .unwrap();
+        let reads = |fields: &[(&str, &str)]| -> Reads {
+            fields
+                .iter()
+                .map(|(k, n)| {
+                    (
+                        ((*k).to_owned(), (*n).to_owned()),
+                        "com.example.lib.Banner".to_owned(),
+                    )
+                })
+                .collect()
+        };
+        let read = reads(&[
+            ("string", "title"),
+            ("styleable", "Banner"),
+            ("styleable", "Banner_tint"),
+        ]);
+        assert_eq!(
+            r_java("com.example.lib", &wanted, &read, &linked).unwrap(),
+            (
+                "package com.example.lib;
+
+public final class R {
+    public static final class string {
+        public static final int title = 0x7f050000;
+    }
+    public static final class styleable {
+        public static final int[] Banner = { 0x7f010000 };
+        public static final int Banner_tint = 0;
+    }
+}
+"
+                .to_owned(),
+                4
+            )
+        );
+        // A field the code reads that the R.txt has not: the package
+        // defines it, so it is there.
+        let java = r_java("com.example.lib", &Symbols::new(), &read, &linked)
+            .unwrap()
+            .0;
+        assert!(java.contains("int title = 0x7f050000;"), "{java}");
+        // The code reads what no library defines.
+        let read = reads(&[
+            ("anim", "abc_fade_in"),
+            ("styleable", "ActionBar"),
+            ("styleable", "ActionBar_colorPrimary"),
+        ]);
+        assert_eq!(
+            r_java("com.example.lib", &wanted, &read, &linked).unwrap_err(),
+            [
+                "`com.example.lib.Banner` reads `R.anim.abc_fade_in`, which no Android library listed defines",
+                "`com.example.lib.Banner` reads `R.styleable.ActionBar`, which no Android library listed defines",
+                "`com.example.lib.Banner` reads `R.styleable.ActionBar_colorPrimary`, which no Android library listed defines",
+            ]
+        );
+        assert_eq!(
+            r_type("com/example/lib/R$string"),
+            Some(("com.example.lib".to_owned(), "string"))
+        );
+        assert_eq!(r_type("R$id"), Some((String::new(), "id")));
+        for class in [
+            "com/example/lib/R",
+            "com/example/lib/R$",
+            "com/example/lib/Banner$string",
+            "com/example/lib/R$string$1",
+            "com/example/lib/MyR$string",
+        ] {
+            assert_eq!(r_type(class), None, "{class}");
+        }
     }
 
     #[test]

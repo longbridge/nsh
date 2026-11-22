@@ -6,7 +6,7 @@
 //! package takes as well. A package without libraries runs none of this.
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     io::Read as _,
     path::{Path, PathBuf},
@@ -18,7 +18,7 @@ use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
 
 use super::{
-    Apk, MIN_SDK, Sdk,
+    Apk, MIN_SDK, Sdk, class_file,
     library_manifest::{self, Additions, Element, Placeholders},
     library_resources::{self, Symbols},
 };
@@ -104,8 +104,8 @@ pub(super) struct Contents {
     pub(super) res: Vec<PathBuf>,
     /// The AARs' resources [`compile_res`] compiles.
     res_files: Vec<LibraryRes>,
-    /// The AARs whose code reads `R` fields: (package, its `R.txt`, the AAR
-    /// and who lists it).
+    /// The AARs whose code was compiled against `R` fields: (package, its
+    /// `R.txt`, the AAR and who lists it).
     r_classes: Vec<(String, Symbols, String)>,
     /// The jars [`dex`] turns into dex.
     jars: Vec<Checked>,
@@ -319,9 +319,14 @@ pub(super) fn dex(
     symbols: Option<&Path>,
 ) -> anyhow::Result<()> {
     let r_classes = match symbols {
-        Some(symbols) if contents.needs_symbols() => {
-            Some(r_classes(sdk, apk, work, &contents.r_classes, symbols)?)
-        }
+        Some(symbols) if contents.needs_symbols() => Some(r_classes(
+            sdk,
+            apk,
+            work,
+            &contents.r_classes,
+            &contents.jars,
+            symbols,
+        )?),
         _ => None,
     };
     let jars: Vec<&Checked> = contents.jars.iter().chain(&r_classes).collect();
@@ -382,7 +387,8 @@ struct Aar {
     assets: Vec<(String, Vec<u8>)>,
     /// `res/`: (path under it, contents).
     res: Vec<(String, Vec<u8>)>,
-    /// The `R` fields its code reads (`R.txt`), when it reads any.
+    /// The `R` fields its code was compiled against (`R.txt`), when there
+    /// are any.
     r_txt: Option<Symbols>,
     /// The API level an app must compile against (`minCompileSdk`).
     min_compile_sdk: Option<u32>,
@@ -791,30 +797,64 @@ fn compiled_res(
 
 /// The `R` classes of `libraries` (package, `R.txt`, the AAR), their
 /// fields the ids of `symbols`, compiled by the JDK's `javac` into a jar
-/// in `work`.
+/// in `work`. An `R.txt` lists the resources of the libraries an AAR was
+/// built with as well: those no library listed defines are left out, with
+/// one note, unless the code of `jars` reads them, which is an error.
 fn r_classes(
     sdk: &Sdk,
     apk: &Apk<'_>,
     work: &Path,
     libraries: &[(String, Symbols, String)],
+    jars: &[Checked],
     symbols: &Path,
 ) -> anyhow::Result<Checked> {
     let text = fs::read_to_string(symbols)
         .with_context(|| format!("read what aapt2 wrote to {}", symbols.display()))?;
     let linked = library_resources::parse_linked(&text)
         .map_err(|e| anyhow::anyhow!("read what aapt2 wrote to {}: {e}", symbols.display()))?;
+    let packages = libraries.iter().map(|(p, _, _)| p.as_str()).collect();
+    let mut reads = r_reads(jars, &packages)?;
     let dir = work.join("r");
     let sources = dir.join("src");
     let classes = dir.join("classes");
     fs::create_dir_all(&classes)?;
     let mut files = Vec::new();
+    let mut errors = Vec::new();
+    let (mut left_out, mut leaving_out) = (0, 0);
     for (package, wanted, from) in libraries {
-        let java = library_resources::r_java(package, wanted, &linked)
-            .map_err(|e| anyhow::anyhow!("{from}: {e}"))?;
+        let read = reads.remove(package).unwrap_or_default();
+        let (java, left) = match library_resources::r_java(package, wanted, &read, &linked) {
+            Ok(r) => r,
+            Err(found) => {
+                errors.extend(found.into_iter().map(|e| format!("{from}: {e}")));
+                continue;
+            }
+        };
+        if left > 0 {
+            left_out += left;
+            leaving_out += 1;
+        }
         let path = library_resources::r_java_path(&sources, package);
         fs::create_dir_all(path.parent().unwrap_or(&sources))?;
         fs::write(&path, java)?;
         files.push(path);
+    }
+    if !errors.is_empty() {
+        bail!(
+            "{}\nlist the Android libraries that define them",
+            errors.join("\n")
+        );
+    }
+    if left_out > 0 {
+        crate::ui::note(format!(
+            "left out of the `R` classes of {leaving_out} Android {}: {left_out} resources their R.txt \
+             lists, which no library listed defines and no code reads",
+            if leaving_out == 1 {
+                "library"
+            } else {
+                "libraries"
+            }
+        ));
     }
     let output = Command::new(super::java_tool("javac"))
         .args(["--release", "11", "-encoding", "UTF-8", "-nowarn", "-d"])
@@ -841,6 +881,63 @@ fn r_classes(
         owner: None,
         kind: Kind::Jar,
     })
+}
+
+/// What the classes of `jars` read of the `R` classes of `packages`: by
+/// package, each field and the first class that reads it. A class file
+/// that cannot be read is left out, with one warning a jar.
+fn r_reads(
+    jars: &[Checked],
+    packages: &BTreeSet<&str>,
+) -> anyhow::Result<BTreeMap<String, library_resources::Reads>> {
+    let mut out: BTreeMap<String, library_resources::Reads> = BTreeMap::new();
+    for jar in jars {
+        let file = fs::File::open(&jar.path)
+            .with_context(|| format!("{}: read {}", jar.listed, jar.shown))?;
+        let mut archive = zip::ZipArchive::new(file)
+            .with_context(|| format!("{}: {} is not a jar", jar.listed, jar.shown))?;
+        let mut unread: Vec<(String, String)> = Vec::new();
+        for i in 0..archive.len() {
+            let mut entry = archive.by_index(i)?;
+            let name = entry.name()?.into_owned();
+            if entry.is_dir() || !name.ends_with(".class") {
+                continue;
+            }
+            let mut bytes = Vec::new();
+            entry.read_to_end(&mut bytes)?;
+            let (this, fields) = match class_file::field_refs(&bytes) {
+                Ok(found) => found,
+                Err(e) => {
+                    unread.push((name, e));
+                    continue;
+                }
+            };
+            // An `R` class's own initializer sets every field it has.
+            if library_resources::r_type(&this).is_some() {
+                continue;
+            }
+            for field in fields {
+                let Some((package, kind_of)) = library_resources::r_type(&field.class) else {
+                    continue;
+                };
+                if packages.contains(package.as_str()) {
+                    out.entry(package)
+                        .or_default()
+                        .entry((kind_of.to_owned(), field.name))
+                        .or_insert_with(|| this.replace('/', "."));
+                }
+            }
+        }
+        if let Some((name, e)) = unread.first() {
+            crate::ui::warn(format!(
+                "{}: {} of its class files cannot be read, such as `{name}` ({e}): \
+                 the `R` fields they read are not checked",
+                jar.shown,
+                unread.len()
+            ));
+        }
+    }
+    Ok(out)
 }
 
 /// A jar of the class files under `dir`, the same bytes for the same
@@ -1319,6 +1416,64 @@ mod tests {
             .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
             .collect();
         assert_eq!(names, ["classes.dex", "classes2.dex", "classes10.dex"]);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_r_fields_classes_read_are_found_in_their_jars() {
+        use super::class_file::tests::class_file;
+        let dir = dir("r-reads");
+        let classes = dir.join("classes.jar");
+        let vendor = dir.join("vendor.jar");
+        let banner = class_file(
+            "com/example/push/Banner",
+            &[
+                ("com/example/push/R$string", "title", "I"),
+                ("com/example/push/R$styleable", "Banner", "[I"),
+                ("com/example/push/R$styleable", "Banner_tint", "I"),
+                // Another library's `R`, which the package has none of.
+                ("com/example/other/R$string", "x", "I"),
+                ("com/example/push/Config", "level", "I"),
+            ],
+        );
+        // An `R` class in the jar: its initializer sets its own fields.
+        let r = class_file(
+            "com/example/push/R$anim",
+            &[("com/example/push/R$anim", "abc_fade_in", "I")],
+        );
+        jar(
+            &classes,
+            &[
+                ("com/example/push/Banner.class", &banner),
+                ("com/example/push/R$anim.class", &r),
+                ("com/example/push/broken.class", b"\xca\xfe\xba\xbe\0"),
+                ("com/example/push/notes.txt", b"x"),
+            ],
+        );
+        let menu = class_file(
+            "com/vendor/Menu",
+            &[("com/example/push/R$anim", "abc_fade_in", "I")],
+        );
+        jar(&vendor, &[("com/vendor/Menu.class", &menu)]);
+        let jars = [checked_file(&classes, CRATE), checked_file(&vendor, CRATE)];
+        let reads = r_reads(&jars, &BTreeSet::from(["com.example.push"])).unwrap();
+        let found: Vec<String> = reads
+            .iter()
+            .flat_map(|(package, fields)| {
+                fields
+                    .iter()
+                    .map(move |((k, n), by)| format!("{package} {k}.{n} {by}"))
+            })
+            .collect();
+        assert_eq!(
+            found,
+            [
+                "com.example.push anim.abc_fade_in com.vendor.Menu",
+                "com.example.push string.title com.example.push.Banner",
+                "com.example.push styleable.Banner com.example.push.Banner",
+                "com.example.push styleable.Banner_tint com.example.push.Banner",
+            ]
+        );
         fs::remove_dir_all(&dir).unwrap();
     }
 

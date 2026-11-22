@@ -323,8 +323,9 @@ Resources share one namespace, as in any Android app. When several define a reso
 lists, an earlier one over a later one, then its crates' libraries, the crate whose name sorts first over the others.
 A style is taken whole from the one that wins, not item by item. What NSH makes for the package (its icon, launch
 screen and notification sounds) is the package's in every configuration: a library's resources of those names are left
-out, with a warning. A library's code that reads a resource no library listed defines stops the build, naming the
-library and the resource: list the library that has it.
+out, with a warning. A library's `R.txt` also lists the resources of the libraries it was built with; those no library
+listed defines are left out of its `R` class, with one note. A library's code that reads such a resource stops the
+build, naming the library, the class and the resource: list the library that has it.
 
 Compile your own Java sources against the platform's `android.jar` into a jar:
 

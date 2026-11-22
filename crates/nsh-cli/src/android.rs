@@ -16,6 +16,7 @@ use serde::Deserialize;
 
 use crate::apple::{Color, LaunchScreen, Themed};
 
+mod class_file;
 mod libraries;
 mod library_manifest;
 mod library_resources;
