@@ -199,7 +199,7 @@ without Gradle. Requirements:
 
 - The Android SDK, found through `ANDROID_HOME` (or `ANDROID_SDK_ROOT`, or `~/Library/Android/sdk`), with build tools
   and the `platforms;android-35` package. NSH tells you the `sdkmanager` command when one is missing.
-- A JDK, to create the debug keystore the first time.
+- A JDK, to create the debug keystore the first time and to build the [Java libraries](#java-code) an app lists.
 - For a Rust app, the Android NDK (`sdkmanager "ndk;<version>"`, or `ANDROID_NDK_HOME`), which builds its
   `libnsh.so`.
 
@@ -294,7 +294,8 @@ depends on as well.
 
 An Android library (`.aar`) brings more than its classes, which go the jars' way: its native libraries
 (`jni/<abi>/*.so`) go in for the ABIs the package has, stored uncompressed like NSH's own; its assets join the app's
-own; and its manifest's permissions, features, `<queries>` and components join the app's manifest, its relative class
+own; its resources (`res/`) join the package's, and its code reads them through its `R` class as it was built to; and
+its manifest's permissions, features, `<queries>` and components join the app's manifest, its relative class
 names (`.PushService`) completed with its package and `${applicationId}` filled in with the app's. Components that
 several libraries declare under one name (a startup provider each adds an initializer to) become one. Other
 placeholders in its manifest, or in a crate's `android.application`, take their values from
@@ -314,8 +315,17 @@ Each library goes in once, as its manifest's package names it: the same file fro
 versions of one library stop the build naming both, and the version the app lists in its own `nsh.json` is the one the
 package takes. The package also stops, naming the library, when it needs what an NSH app does not have: a minimum API
 level above 26, a newer platform than `android.targetSdk`, an `Application` class of its own, a manifest merge rule
-(`tools:node="remove"`, `tools:replace`), or native libraries that leave out an ABI the package has. Android
-resources (`res/`) are not packaged yet: an AAR with resources stops the build too.
+(`tools:node="remove"`, `tools:replace`), native libraries that leave out an ABI the package has, or resources
+without the `R.txt` Android's build writes next to them.
+
+Resources share one namespace, as in any Android app. When several define a resource of one name for one configuration
+(density, night mode, language...), the package's own win (`android/res/`), then its crates' own `android.res`
+([What the packaged app needs](./nshm.md#what-the-packaged-app-needs)), then the libraries the app's `nsh.json`
+lists, an earlier one over a later one, then its crates' libraries, the crate whose name sorts first over the others.
+A style is taken whole from the one that wins, not item by item. What NSH makes for the package (its icon, launch
+screen and notification sounds) is the package's in every configuration: a library's resources of those names are left
+out, with a warning. A library's code that reads a resource no library listed defines stops the build, naming the
+library and the resource: list the library that has it.
 
 Compile your own Java sources against the platform's `android.jar` into a jar:
 

@@ -389,12 +389,13 @@ libraries = ["android/libs/scanner-glue.jar"]
 | `android.queries` | `<intent>`, `<package>` and `<provider>` elements of the manifest's `<queries>` |
 | `android.application` | `<service>`, `<receiver>`, `<provider>`, `<activity>` and `<meta-data>` elements of `<application>`; `${applicationId}` is the app's package, other placeholders the app's `android.manifestPlaceholders` |
 | `android.libraries` | Java libraries, jar, Android library (`.aar`) and dex files relative to the crate's `Cargo.toml`, packaged as `nsh.json`'s `android.libraries` are ([Java code](./packaging.md#java-code)) |
-| `android.res` | A directory of Android resources laid out as the app's `android/res/`, linked below the app's, which wins on a name both declare |
+| `android.res` | A directory of Android resources laid out as the app's `android/res/`, linked below the app's, which wins on a name both declare, and above the Android libraries' |
 | `android.jniLibs` | A directory of native libraries, `<abi>/*.so` (`arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64`), packaged beside `libnsh.so` as an Android library's are; a 64-bit library must be aligned to 16 KB pages |
 
 A crate does not set `android.manifestPlaceholders`, which is an error: the values of placeholders (a service's key) are
 the app's, set in its `nsh.json`. The version of an Android library two crates carry in different versions is the one
-the app lists in its own `android.libraries`.
+the app lists in its own `android.libraries`. When two libraries define a resource of one name, a library the app
+lists wins, then the crate whose name sorts first ([Java code](./packaging.md#java-code)).
 
 The paths of `android.res` and `android.jniLibs` are relative to the crate's `Cargo.toml`, written with `/`, and must
 stay inside the crate, links followed, so an nshm packages only files it ships; a link to a folder is refused. Only
@@ -410,7 +411,9 @@ What packaging does with them, and what it does not:
 
 - Resources get no `R` class: Java code finds them by name, `getResources().getIdentifier("scan", "drawable",
   context.getPackageName())`. The app's `android/res` wins on a name both declare, configuration by configuration: a
-  crate's `values-fr` string stays when the app declares only `values`, and a style both declare merges item by item.
+  crate's `values-fr` string stays when the app declares only `values`, and a style both declare is the app's, whole.
+  A crate's resources win over those of the Android libraries (`.aar`) the app or its crates list
+  ([Java code](./packaging.md#java-code)).
   A name NSH generates (`ic_launcher…`,
   `nsh_…`, `NshLaunch…`) or another crate declares is an error.
 - Libraries are `lib<name>.so` files, loaded with `System.loadLibrary("<name>")`; packages keep them uncompressed in the

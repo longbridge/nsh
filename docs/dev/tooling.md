@@ -1119,8 +1119,8 @@ an Android package never stops on an iOS key); keys NSH sets itself stay NSH's. 
 spelled out as `nsh.json`'s are. A crate's Android files (`android.res`, `android.jniLibs`) are paths
 inside the crate, read only by Android packages and the Android host (`ModuleMeta::resolve_android_files`: inside the
 crate with links followed, known ABIs, no resource name NSH generates or another crate declares; the host drops only
-the files when one is wrong). Packages and the host take `crate_res` as `aapt2` overlays with the app's `android/res`
-linked as base and again as the last overlay (`android::resource_layers`), and `jni_libs` as the AARs' native
+the files when one is wrong). Packages and the host take `crate_res` as `aapt2` overlays above the AARs' and below the
+package's own (`android::resource_overlays` into `library_resources::link_inputs`), and `jni_libs` as the AARs' native
 libraries are taken (`android::crate_native` into `libraries::native_for`: `lib*.so`, identical duplicates once, every
 ABI the package has, each checked for its ABI's ELF class and machine and, 64-bit, 16 KB pages: `check_library`); the
 host's stamp holds their digest (path, size, time). Keys this CLI does not know are

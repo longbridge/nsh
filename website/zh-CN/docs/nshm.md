@@ -349,11 +349,12 @@ libraries = ["android/libs/scanner-glue.jar"]
 | `android.queries` | manifest `<queries>` 里的 `<intent>`、`<package>`、`<provider>` 元素 |
 | `android.application` | `<application>` 里的 `<service>`、`<receiver>`、`<provider>`、`<activity>`、`<meta-data>` 元素；`${applicationId}` 是应用的包名，其他占位符取应用的 `android.manifestPlaceholders` |
 | `android.libraries` | Java 库：jar、Android 库（`.aar`）和 dex 文件，路径相对于 crate 的 `Cargo.toml`，打包方式与 `nsh.json` 的 `android.libraries` 相同（[Java 代码](./packaging.md#java-代码)） |
-| `android.res` | 一个 Android 资源目录，布局与应用的 `android/res/` 相同，链接在应用的资源之下，两者声明同名资源时以应用的为准 |
+| `android.res` | 一个 Android 资源目录，布局与应用的 `android/res/` 相同，链接在应用的资源之下，两者声明同名资源时以应用的为准，并在 Android 库的资源之上 |
 | `android.jniLibs` | 一个原生库目录，按 `<abi>/*.so` 布局（`arm64-v8a`、`armeabi-v7a`、`x86`、`x86_64`），与 Android 库的原生库一样和 `libnsh.so` 一起打包；64 位库必须按 16 KB 页对齐 |
 
 crate 不能设置 `android.manifestPlaceholders`，设置了会报错：占位符的值（例如某个服务的 key）属于应用，写在应用的 `nsh.json` 里。
-两个 crate 带了同一个 Android 库的不同版本时，用应用在自己的 `android.libraries` 里列出的那个版本。
+两个 crate 带了同一个 Android 库的不同版本时，用应用在自己的 `android.libraries` 里列出的那个版本。两个库定义了同名资源时，
+应用列出的库优先，其次是 crate 名排序靠前的（[Java 代码](./packaging.md#java-代码)）。
 
 `android.res` 和 `android.jniLibs` 的路径相对于 crate 的 `Cargo.toml`，用 `/` 分隔，且必须位于 crate 之内（链接也按其指向判断），
 因此 nshm 只能打包它自己附带的文件；指向文件夹的链接会被拒绝。只有 Android 包和 Android 开发宿主读取它们，所以文件缺失或有误不会让 iOS 构建停下：
@@ -368,7 +369,7 @@ jniLibs = "android/jniLibs"
 
 - 资源没有 `R` 类：Java 代码按名字查找它们，`getResources().getIdentifier("scan", "drawable", context.getPackageName())`。
   两者声明同名资源时以应用的 `android/res` 为准，按配置逐一比较：应用只声明了 `values` 时，crate 的 `values-fr` 字符串仍会保留；
-  两者都声明的 style 会逐项合并。用了 NSH 生成的名字（`ic_launcher…`、`nsh_…`、`NshLaunch…`）或另一个 crate 已声明的名字会报错。
+  两者都声明的 style 整个取应用的。crate 的资源优先于应用或各 crate 列出的 Android 库（`.aar`）的资源（见 [Java 代码](./packaging.md#java-代码)）。用了 NSH 生成的名字（`ic_launcher…`、`nsh_…`、`NshLaunch…`）或另一个 crate 已声明的名字会报错。
 - 原生库是 `lib<name>.so` 文件，用 `System.loadLibrary("<name>")` 加载；包内以不压缩的形式存放，不会解压出来，所以按文件系统路径打开它的代码找不到它。
   它们遵循 Android 库原生库的规则：两个 crate（或一个 crate 和一个 AAR）带同名库时，内容相同只打包一份，否则报错；crate 带了原生库却缺少包里某个 ABI 的版本时报错
   （可用 `--abi` 只打包较少的 ABI）。每个库必须是其所在文件夹 ABI 的共享库，64 位库必须按 16 KB 页对齐（`-Wl,-z,max-page-size=16384`），

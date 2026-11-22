@@ -18,6 +18,7 @@ use crate::apple::{Color, LaunchScreen, Themed};
 
 mod libraries;
 mod library_manifest;
+mod library_resources;
 
 pub(crate) use libraries::{Library, file_sha256};
 
@@ -224,7 +225,7 @@ pub(crate) struct Apk<'a> {
     pub(crate) camera: bool,
     /// The Java libraries of the app and its crates (`android.libraries`):
     /// jar, dex and AAR files, packaged after the runtime's
-    /// ([`libraries::prepare`]).
+    /// ([`libraries::prepare`], [`libraries::dex`]).
     pub(crate) libraries: &'a [Library],
     /// The values of the placeholders (`${name}`) in the libraries'
     /// manifests and the crates' manifest entries: `nsh.json`
@@ -506,7 +507,7 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
     fs::create_dir_all(&work)?;
 
     // The libraries first: a missing file stops the build early.
-    let mut java = libraries::prepare(sdk, apk, &work)?;
+    let mut java = libraries::prepare(apk, &work)?;
     // The crates' native libraries join the AARs'.
     java.native.extend(crate_native(
         apk.jni_libs,
@@ -581,7 +582,6 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
 
     // The app's own resources, compiled as a whole: `aapt2 compile --dir`
     // reads `<type>[-<qualifiers>]/<name>` as Gradle does.
-    let mut app_res = None;
     if let Some(res) = apk.res {
         let zip = work.join("compiled-app.zip");
         run(Command::new(sdk.tool("aapt2"))
@@ -591,7 +591,7 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
             .arg("-o")
             .arg(&zip))
         .with_context(|| format!("compile the app's resources in {}", res.display()))?;
-        app_res = Some(zip);
+        flat.push(zip);
     }
     // The crates' resources, each compiled the same way.
     let mut crate_res = Vec::new();
@@ -606,7 +606,6 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
         .with_context(|| format!("compile a crate's resources in {}", res.display()))?;
         crate_res.push(zip);
     }
-    let overlays = resource_layers(&mut flat, app_res, crate_res);
 
     let manifest = work.join("AndroidManifest.xml");
     fs::write(&manifest, manifest_xml(apk, &java.manifest))?;
@@ -629,14 +628,20 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
     if format == Format::Aab {
         link.arg("--proto-format");
     }
-    link.args(&flat);
-    if !overlays.is_empty() {
-        link.arg("--auto-add-overlay");
-        for overlay in &overlays {
-            link.arg("-R").arg(overlay);
-        }
+    // The AARs' resources under the package's own (NSH wrote its own to
+    // `work/res`); the ids it gives them for the `R` classes of the AARs
+    // whose code reads any.
+    libraries::compile_res(sdk, apk, &mut java, &work.join("res"))?;
+    link.args(library_resources::link_inputs(
+        &flat,
+        &resource_overlays(&java.res, crate_res),
+    ));
+    let symbols = java.needs_symbols().then(|| work.join("R.txt"));
+    if let Some(symbols) = &symbols {
+        link.arg("--output-text-symbols").arg(symbols);
     }
     run(&mut link)?;
+    libraries::dex(sdk, apk, &work, &mut java, symbols.as_deref())?;
 
     if format == Format::Aab {
         let unsigned = work.join("unsigned.aab");
@@ -662,23 +667,13 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
     Ok(())
 }
 
-/// Where the app's and its crates' compiled resources go in `aapt2 link`:
-/// the app's always with NSH's own (`flat`), so a name both declare stays
-/// an error, as it was before crates had resources; and, when crates have
-/// some, every crate's then the app's again as overlays (returned, in
-/// order), so the app's value of a name a crate declares wins.
-/// `--auto-add-overlay` adds the names the base does not declare.
-fn resource_layers(
-    flat: &mut Vec<PathBuf>,
-    app: Option<PathBuf>,
-    crates: Vec<PathBuf>,
-) -> Vec<PathBuf> {
-    flat.extend(app.clone());
-    if crates.is_empty() {
-        return Vec::new();
-    }
-    let mut overlays = crates;
-    overlays.extend(app);
+/// The overlays of `aapt2 link` ([`library_resources::link_inputs`]),
+/// lowest first: the AARs' resources, then the crates' own, so a crate's
+/// value of a name wins over an SDK it wraps; the package's own resources
+/// go over them all.
+fn resource_overlays(libraries: &[PathBuf], crates: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut overlays = libraries.to_vec();
+    overlays.extend(crates);
     overlays
 }
 
@@ -2256,26 +2251,16 @@ mod tests {
         bytes
     }
 
-    /// An SDK that is not there: a build that needed one of its tools fails.
-    fn no_sdk() -> super::Sdk {
-        super::Sdk {
-            root: "/nsh-no-sdk".into(),
-            build_tools: "/nsh-no-sdk/build-tools/36.1.0".into(),
-        }
-    }
-
     #[test]
     fn the_libraries_dex_and_java_resources_follow_the_runtimes() {
         let (dir, base) = runtime_and_base("libraries");
         let runtime = dir.join("runtime");
-        let java = super::libraries::Contents {
-            dex: vec![dir.join("a.dex"), dir.join("b.dex")],
-            resources: vec![(
-                "META-INF/services/com.example.Greeter".to_owned(),
-                b"com.example.Hello\n".to_vec(),
-            )],
-            ..Default::default()
-        };
+        let mut java = super::libraries::Contents::default();
+        java.dex = vec![dir.join("a.dex"), dir.join("b.dex")];
+        java.resources = vec![(
+            "META-INF/services/com.example.Greeter".to_owned(),
+            b"com.example.Hello\n".to_vec(),
+        )];
         std::fs::write(&java.dex[0], b"dex\n035\0a").unwrap();
         std::fs::write(&java.dex[1], b"dex\n035\0b").unwrap();
         for (layout, prefix, root) in [
@@ -2331,6 +2316,7 @@ mod tests {
             super::Library {
                 path,
                 listed: "nsh.json `android.libraries`".into(),
+                owner: None,
             }
         };
         let libraries = [
@@ -2346,7 +2332,7 @@ mod tests {
             ..apk(false, false)
         };
         // Dex files only: no SDK tool runs, no cache is made.
-        let java = super::libraries::prepare(&no_sdk(), &apk, &dir).unwrap();
+        let java = super::libraries::prepare(&apk, &dir).unwrap();
         assert_eq!(java.dex, [dir.join("b.dex"), dir.join("a.dex")]);
         assert!(java.resources.is_empty());
         assert!(!cache.exists());
@@ -2365,7 +2351,7 @@ mod tests {
             ..apk(false, false)
         };
         // Nothing for d8: no SDK tool runs, no cache is made.
-        let java = super::libraries::prepare(&no_sdk(), &apk, &dir).unwrap();
+        let java = super::libraries::prepare(&apk, &dir).unwrap();
         assert!(java.dex.is_empty() && java.resources.is_empty());
         assert!(java.native.is_empty() && java.assets.is_empty());
         assert!(!cache.exists());
@@ -2448,6 +2434,7 @@ mod tests {
         let libraries = [super::Library {
             path: push.clone(),
             listed: "push: [package.metadata.nsh] `android.libraries`".into(),
+            owner: Some("push".into()),
         }];
         // A crate adds its own initializer to the provider the library
         // declares.
@@ -2471,7 +2458,7 @@ mod tests {
         let placeholders: &'static _ = Box::leak(Box::new(placeholders));
         let apk = with(&[], placeholders);
         // No classes: no SDK tool runs.
-        let java = super::libraries::prepare(&no_sdk(), &apk, &dir).unwrap();
+        let java = super::libraries::prepare(&apk, &dir).unwrap();
         assert!(java.dex.is_empty() && !cache.exists());
         for (layout, lib, assets) in [
             (&super::Layout::APK, "lib/", "assets/"),
@@ -2542,7 +2529,7 @@ mod tests {
             "{error}"
         );
         // A placeholder nsh.json does not set.
-        let error = super::libraries::prepare(&no_sdk(), &with(&[], &NO_PLACEHOLDERS), &dir)
+        let error = super::libraries::prepare(&with(&[], &NO_PLACEHOLDERS), &dir)
             .unwrap_err()
             .to_string();
         assert!(error.contains("the placeholder `${PUSH_KEY}`"), "{error}");
@@ -2556,7 +2543,7 @@ mod tests {
                 b"minCompileSdk=36\n",
             )],
         );
-        let error = super::libraries::prepare(&no_sdk(), &apk, &dir)
+        let error = super::libraries::prepare(&apk, &dir)
             .unwrap_err()
             .to_string();
         assert!(
@@ -2667,25 +2654,49 @@ mod tests {
     }
 
     #[test]
-    fn the_apps_resources_overlay_its_crates() {
+    fn the_apps_resources_overlay_its_crates_over_their_libraries() {
         let p = std::path::PathBuf::from;
-        // No crate resources: the app's link with NSH's, as before.
-        let mut flat = vec![p("icon.flat")];
-        let overlays = super::resource_layers(&mut flat, Some(p("app.zip")), Vec::new());
-        assert_eq!(flat, [p("icon.flat"), p("app.zip")]);
-        assert!(overlays.is_empty());
-        // With them: NSH's and the app's stay the base (a name both
-        // declare is an error, as before); the crates', then the app's
-        // again, on top, so the app's value of a name a crate declares wins.
-        let mut flat = vec![p("icon.flat")];
-        let overlays =
-            super::resource_layers(&mut flat, Some(p("app.zip")), vec![p("a.zip"), p("b.zip")]);
-        assert_eq!(flat, [p("icon.flat"), p("app.zip")]);
-        assert_eq!(overlays, [p("a.zip"), p("b.zip"), p("app.zip")]);
-        let mut flat = Vec::new();
+        let own = [p("icon.flat"), p("app.zip")];
+        let args = |overlays: Vec<std::path::PathBuf>| {
+            super::library_resources::link_inputs(&own, &overlays)
+                .into_iter()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+        };
+        // Neither libraries nor crates with resources: the package's own,
+        // as before.
         assert_eq!(
-            super::resource_layers(&mut flat, None, vec![p("a.zip")]),
-            [p("a.zip")]
+            args(super::resource_overlays(&[], Vec::new())),
+            ["icon.flat", "app.zip"]
+        );
+        // The package's own stay plain inputs (two of them defining one
+        // resource is still an error) and go last over the AARs', then the
+        // crates' (a later overlay wins).
+        let overlays = super::resource_overlays(&[p("aar.zip")], vec![p("a.zip"), p("b.zip")]);
+        assert_eq!(overlays, [p("aar.zip"), p("a.zip"), p("b.zip")]);
+        assert_eq!(
+            args(overlays),
+            [
+                "icon.flat",
+                "app.zip",
+                "-R",
+                "aar.zip",
+                "-R",
+                "a.zip",
+                "-R",
+                "b.zip",
+                "-R",
+                "icon.flat",
+                "-R",
+                "app.zip",
+                "--auto-add-overlay",
+                "--override-styles-instead-of-overlaying",
+            ]
+        );
+        // Crates alone are overlays too.
+        assert_eq!(
+            args(super::resource_overlays(&[], vec![p("a.zip")]))[2..4],
+            ["-R", "a.zip"]
         );
     }
 
@@ -2738,10 +2749,8 @@ mod tests {
         // Packaged as the AARs' native libraries are, from what
         // `crate_native` reads (`required`: 16 KB pages).
         let add = |layout: &super::Layout, required: bool| {
-            let java = super::libraries::Contents {
-                native: super::crate_native(&dirs, required)?,
-                ..Default::default()
-            };
+            let mut java = super::libraries::Contents::default();
+            java.native = super::crate_native(&dirs, required)?;
             let out = dir.join("out.zip");
             super::add_files(
                 &base,
