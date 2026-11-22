@@ -52493,6 +52493,39 @@ fn text_pretty_wraps_and_inherits_with_white_space() {
     assert!(!c.inherited_text_wrap(c.key(3).unwrap()).3);
 }
 
+/// Rust's `text_pretty` on a view reaches the texts in it, as the class
+/// does; a text's own `whitespace_nowrap` takes it back.
+#[test]
+fn rust_text_pretty_inherits_as_the_class() {
+    use crate::{element::Root, prelude::*};
+
+    #[component]
+    fn PrettyTexts() -> impl IntoElement {
+        view()
+            .text_pretty()
+            .child(text("pretty"))
+            .child(text("one line").whitespace_nowrap())
+    }
+
+    let mut c = core();
+    c.mount_root(&Root::new::<PrettyTexts>(|| ()));
+    let batch = c.commit().unwrap();
+    let wrap = |label: &str| {
+        let id = batch
+            .items
+            .iter()
+            .find_map(|item| match item {
+                MountItem::Text { id, text, .. } if &*text.text == label => Some(*id),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no text {label:?}"));
+        let (no_wrap, _, _, pretty) = c.inherited_text_wrap(c.key(id).unwrap());
+        (no_wrap, pretty)
+    };
+    assert_eq!(wrap("pretty"), (Some(false), true));
+    assert_eq!(wrap("one line"), (Some(true), false));
+}
+
 #[test]
 fn an_overlay_leaves_escape_to_focused_content_that_captures_it() {
     use crate::{KeyCapture, keymap::Keystroke, tailwind::state::FOCUSED};
