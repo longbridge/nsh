@@ -1206,20 +1206,26 @@ mod tests {
         assert_eq!(config.android.crate_res, [canonical("android/res")]);
         assert_eq!(config.android.jni_libs, [canonical("android/jniLibs")]);
         // A crate packages only its own files, of the right kind.
-        std::os::unix::fs::symlink(
-            dir.join("secret.dex"),
-            krate.join("android/res/values/out.xml"),
-        )
-        .unwrap();
-        for (android, says) in [
+        let mut cases = vec![
             (json!({ "dex": ["../secret.dex"] }), "outside the crate"),
             (json!({ "dex": [dir.join("secret.dex")] }), "is absolute"),
             (json!({ "dex": ["android/missing.dex"] }), "is missing"),
             (json!({ "dex": ["android/ocr.jar"] }), "is not a dex file"),
             (json!({ "res": "android/ocr.dex" }), "is not a directory"),
-            (json!({ "res": "android/res" }), "leads outside the crate"),
             (json!({ "jniLibs": "android/bad-jni" }), "is no Android ABI"),
-        ] {
+        ];
+        // A file in the crate's resources that links outside it (links
+        // need no privilege on Unix).
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(
+                dir.join("secret.dex"),
+                krate.join("android/res/values/out.xml"),
+            )
+            .unwrap();
+            cases.push((json!({ "res": "android/res" }), "leads outside the crate"));
+        }
+        for (android, says) in cases {
             let error = format!("{:#}", read(android.clone()).unwrap_err());
             assert!(
                 error.starts_with("ocr: [package.metadata.nsh] `android.") && error.contains(says),
@@ -1382,10 +1388,13 @@ mod tests {
             ["drawable/frame", "drawable/icon", "raw/model.v1"]
         );
         // A link to a folder is not followed: refused.
-        std::fs::create_dir_all(dir.join("shared/values")).unwrap();
-        std::os::unix::fs::symlink(dir.join("shared/values"), dir.join("res-values")).unwrap();
-        let error = format!("{:#}", walk(&dir).unwrap_err());
-        assert!(error.contains("links to a folder"), "{error}");
+        #[cfg(unix)]
+        {
+            std::fs::create_dir_all(dir.join("shared/values")).unwrap();
+            std::os::unix::fs::symlink(dir.join("shared/values"), dir.join("res-values")).unwrap();
+            let error = format!("{:#}", walk(&dir).unwrap_err());
+            assert!(error.contains("links to a folder"), "{error}");
+        }
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
