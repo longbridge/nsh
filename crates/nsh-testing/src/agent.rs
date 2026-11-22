@@ -1170,10 +1170,11 @@ pub trait Native: Send + Sync {
     }
     /// What a press at `at` (in the window's content, as
     /// [`Native::bounds`]) would reach in place of view `id`, a view the
-    /// system draws over the app's (a navigation bar, a tab bar), described
-    /// for a failure; `None` when the press reaches the view, a view inside
-    /// it or one around it, or the platform cannot tell. Asked before a
-    /// step acts on a view, so it fails rather than pressing the bar.
+    /// system draws over the app's (a navigation bar, a tab bar, a
+    /// selection's edit menu), described for a failure; `None` when the
+    /// press reaches the view, a view inside it or one around it, or the
+    /// platform cannot tell. Asked before a step acts on a view, so it fails
+    /// rather than pressing what covers it.
     fn covered(&self, id: NodeId, at: Point<Points>) -> Option<String> {
         let _ = (id, at);
         None
