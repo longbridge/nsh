@@ -1,8 +1,10 @@
 //! Android apps without Gradle: the APK is assembled from the prebuilt
 //! runtime (`classes.dex`, `libnsh.so` per ABI) and the app bundle with the
-//! SDK's build tools (`aapt2`, `zipalign`, `apksigner`).
+//! SDK's build tools (`aapt2`, `zipalign`, `apksigner`, and `d8` for the
+//! Java libraries an app lists).
 
 use std::{
+    collections::BTreeMap,
     env, fs,
     io::{Read as _, Write as _},
     path::{Path, PathBuf},
@@ -13,6 +15,11 @@ use anyhow::{Context as _, bail};
 use serde::Deserialize;
 
 use crate::apple::{Color, LaunchScreen, Themed};
+
+mod libraries;
+mod library_manifest;
+
+pub(crate) use libraries::{Library, file_sha256};
 
 /// Minimum Android version (API 26, Android 8.0), as the runtime is built.
 pub(crate) const MIN_SDK: u32 = 26;
@@ -168,8 +175,8 @@ impl Sdk {
 
     fn tool(&self, name: &str) -> PathBuf {
         // On Windows, the Java tools are batch files.
-        if cfg!(windows) && name == "apksigner" {
-            return self.build_tools.join("apksigner.bat");
+        if cfg!(windows) && matches!(name, "apksigner" | "d8") {
+            return self.build_tools.join(format!("{name}.bat"));
         }
         self.build_tools.join(name)
     }
@@ -215,9 +222,19 @@ pub(crate) struct Apk<'a> {
     /// (`webview.media`): `RECORD_AUDIO` and `CAMERA` are declared.
     pub(crate) microphone: bool,
     pub(crate) camera: bool,
-    /// The app's own dex files (nsh.json `android.dex`), then its crates',
-    /// after the runtime's: `classes2.dex`, `classes3.dex`, ...
-    pub(crate) dex: &'a [PathBuf],
+    /// The Java libraries of the app and its crates (`android.libraries`):
+    /// jar, dex and AAR files, packaged after the runtime's
+    /// ([`libraries::prepare`]).
+    pub(crate) libraries: &'a [Library],
+    /// The values of the placeholders (`${name}`) in the libraries'
+    /// manifests and the crates' manifest entries: `nsh.json`
+    /// `android.manifestPlaceholders`. `${applicationId}` is `package`.
+    /// `None` in the shared test host, which reads no app's `nsh.json`: a
+    /// placeholder is left empty there, with a warning.
+    pub(crate) manifest_placeholders: Option<&'a BTreeMap<String, String>>,
+    /// Where the dex `d8` makes of the jar libraries is kept between builds
+    /// (`.nsh/android/libraries`). Unused without jars.
+    pub(crate) library_cache: &'a Path,
     /// The permissions the app declares itself (nsh.json
     /// `android.permissions`), in full: declared after NSH's, each once.
     pub(crate) permissions: &'a [String],
@@ -226,11 +243,15 @@ pub(crate) struct Apk<'a> {
     pub(crate) queries: &'a [String],
     /// Elements the app's crates add to the manifest's `<application>`
     /// ([`crate::module_meta`]): services, receivers, providers, activities
-    /// and meta-data. `${applicationId}` in them is the app's package.
+    /// and meta-data. Their placeholders are filled in as the libraries'
+    /// ([`Apk::manifest_placeholders`]).
     pub(crate) application: &'a [String],
     /// URL schemes that open the app (nsh.json `schemes`): one
     /// `VIEW` intent filter.
     pub(crate) schemes: &'a [String],
+    /// Web links that open the app (nsh.json `links`): an intent filter
+    /// Android verifies (App Links) for each, with its host and paths.
+    pub(crate) links: &'a [nsh_core::url_scheme::WebLink],
     /// A Rust app: its `libnsh.so` has the root, which `AppActivity` runs
     /// instead of a bundle (manifest meta-data `com.longbridge.nsh.RUST`).
     pub(crate) rust: bool,
@@ -263,10 +284,19 @@ pub(crate) struct Apk<'a> {
     /// below the app's own, so the app's value of a resource wins.
     pub(crate) crate_res: &'a [PathBuf],
     /// The native library directories of the app's crates, each holding
-    /// `<abi>/*.so`: packaged beside `libnsh.so` for the ABIs it is built
-    /// for.
-    pub(crate) jni_libs: &'a [PathBuf],
+    /// `<abi>/lib*.so`: packaged beside `libnsh.so` with the AARs' native
+    /// libraries, under the same rules ([`libraries::native_for`]).
+    pub(crate) jni_libs: &'a [NativeDir],
     pub(crate) signing: Signing,
+}
+
+/// A crate's native library directory (`android.jniLibs`), holding
+/// `<abi>/lib*.so`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NativeDir {
+    /// The crate and where in its metadata it is listed, for errors.
+    pub(crate) listed: String,
+    pub(crate) dir: PathBuf,
 }
 
 /// What `nsh package --target android` writes.
@@ -475,6 +505,14 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
     }
     fs::create_dir_all(&work)?;
 
+    // The libraries first: a missing file stops the build early.
+    let mut java = libraries::prepare(sdk, apk, &work)?;
+    // The crates' native libraries join the AARs'.
+    java.native.extend(crate_native(
+        apk.jni_libs,
+        apk.target_sdk >= 35 && !apk.dev,
+    )?);
+
     // Resources: the launcher icon, and the launch screen's theme below.
     let mut flat = Vec::new();
     if let Some(icon) = apk.icon {
@@ -571,7 +609,7 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
     let overlays = resource_layers(&mut flat, app_res, crate_res);
 
     let manifest = work.join("AndroidManifest.xml");
-    fs::write(&manifest, manifest_xml(apk))?;
+    fs::write(&manifest, manifest_xml(apk, &java.manifest))?;
     let base = work.join("base.apk");
     let mut link = Command::new(sdk.tool("aapt2"));
     link.arg("link")
@@ -602,7 +640,7 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
 
     if format == Format::Aab {
         let unsigned = work.join("unsigned.aab");
-        write_bundle(&base, &unsigned, apk)?;
+        write_bundle(&base, &unsigned, apk, &java)?;
         sign_bundle(&apk.signing, &unsigned)?;
         fs::rename(&unsigned, out)?;
         fs::remove_dir_all(&work)?;
@@ -611,7 +649,7 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
 
     // Code, native libraries and app files.
     let unaligned = work.join("unaligned.apk");
-    add_files(&base, &unaligned, apk, &Layout::APK)?;
+    add_files(&base, &unaligned, apk, &java, &Layout::APK)?;
     let aligned = work.join("aligned.apk");
     // `-P 16`: shared libraries on 16 KB pages (Android 15 devices).
     run(Command::new(sdk.tool("zipalign"))
@@ -854,7 +892,45 @@ fn compile_resources(sdk: &Sdk, files: &[PathBuf], out: &Path) -> anyhow::Result
     Ok(flat)
 }
 
-fn manifest_xml(apk: &Apk<'_>) -> String {
+/// `value` as the text of a manifest attribute (in double quotes).
+fn xml_attribute(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('"', "&quot;")
+        // An attribute in single quotes (a crate's entry) holds it too.
+        .replace('\'', "&apos;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        // Kept: a parser turns a raw line break or tab into a space.
+        .replace('\n', "&#10;")
+        .replace('\r', "&#13;")
+        .replace('\t', "&#9;")
+}
+
+/// The permissions NSH declares: its own, then the app's
+/// (`android.permissions`), each once.
+fn declared_permissions(apk: &Apk<'_>) -> Vec<String> {
+    let mut permissions = vec!["android.permission.INTERNET".to_owned()];
+    for (declared, name) in [
+        (apk.notifications, "POST_NOTIFICATIONS"),
+        (apk.microphone, "RECORD_AUDIO"),
+        (apk.camera, "CAMERA"),
+    ] {
+        if declared {
+            permissions.push(format!("android.permission.{name}"));
+        }
+    }
+    for name in apk.permissions {
+        if !permissions.contains(name) {
+            permissions.push(name.clone());
+        }
+    }
+    permissions
+}
+
+/// The manifest of `apk`, with what its crates and libraries add
+/// (`additions`, [`library_manifest::additions`]).
+fn manifest_xml(apk: &Apk<'_>, additions: &library_manifest::Additions) -> String {
     let icon = match apk.icon {
         Some(Icon::Image(_)) => r#" android:icon="@mipmap/ic_launcher""#,
         Some(Icon::Adaptive(_)) => {
@@ -877,29 +953,16 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
         .replace('&', "&amp;")
         .replace('"', "&quot;")
         .replace('<', "&lt;");
-    // NSH's own, then the app's (`android.permissions`), each once.
-    let mut permissions = vec!["android.permission.INTERNET".to_owned()];
-    for (declared, name) in [
-        (apk.notifications, "POST_NOTIFICATIONS"),
-        (apk.microphone, "RECORD_AUDIO"),
-        (apk.camera, "CAMERA"),
-    ] {
-        if declared {
-            permissions.push(format!("android.permission.{name}"));
-        }
-    }
-    for name in apk.permissions {
-        if !permissions.contains(name) {
-            permissions.push(name.clone());
-        }
-    }
-    let permissions: String = permissions
+    // NSH's own, then the app's (`android.permissions`), then the
+    // libraries'.
+    let permissions: String = declared_permissions(apk)
         .iter()
         .map(|name| format!("\n    <uses-permission android:name=\"{name}\" />"))
         .collect();
+    let permissions = format!("{permissions}{}", additions.top);
     // A link opens the running app (`onNewIntent`), not another activity in
     // the caller's task.
-    let launch_mode = if apk.schemes.is_empty() {
+    let launch_mode = if apk.schemes.is_empty() && apk.links.is_empty() {
         ""
     } else {
         r#" android:launchMode="singleTask""#
@@ -916,18 +979,36 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
             "\n            <intent-filter>\n                <action android:name=\"android.intent.action.VIEW\" />\n                <category android:name=\"android.intent.category.DEFAULT\" />\n                <category android:name=\"android.intent.category.BROWSABLE\" />{data}\n            </intent-filter>"
         )
     };
-    let elements = |list: &[String], indent: &str| -> String {
-        list.iter()
-            .map(|e| {
-                format!(
-                    "\n{indent}{}",
-                    e.trim().replace("${applicationId}", apk.package)
-                )
-            })
-            .collect()
-    };
-    let queries = elements(apk.queries, "        ");
-    let components = elements(apk.application, "        ");
+    // App Links: Android checks each host's `/.well-known/assetlinks.json`
+    // as the app installs, and opens their verified links in the app. A
+    // filter's `data` combine (each host with each path), so each link has
+    // its own: one host's paths are not another's.
+    let links: String = apk
+        .links
+        .iter()
+        .map(|link| {
+            let paths: String = link
+                .paths()
+                .iter()
+                .map(|path| {
+                    let (attribute, value) = match path.strip_suffix('*') {
+                        Some(start) => ("pathPrefix", start),
+                        None => ("path", path.as_str()),
+                    };
+                    format!(
+                        "\n                <data android:{attribute}=\"{}\" />",
+                        xml_attribute(value)
+                    )
+                })
+                .collect();
+            format!(
+                "\n            <intent-filter android:autoVerify=\"true\">\n                <action android:name=\"android.intent.action.VIEW\" />\n                <category android:name=\"android.intent.category.DEFAULT\" />\n                <category android:name=\"android.intent.category.BROWSABLE\" />\n                <data android:scheme=\"https\" />\n                <data android:host=\"{}\" />{paths}\n            </intent-filter>",
+                xml_attribute(link.host())
+            )
+        })
+        .collect();
+    let queries = &additions.queries;
+    let components = &additions.application;
     format!(
         r#"<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="{package}">{permissions}
@@ -957,7 +1038,7 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>{schemes}
+            </intent-filter>{schemes}{links}
         </activity>{components}
     </application>
 </manifest>
@@ -976,6 +1057,9 @@ struct Layout {
     dex: &'static str,
     lib: &'static str,
     assets: &'static str,
+    /// Prefix of the files at the installed APK's root: the Java resources
+    /// of the libraries.
+    root: &'static str,
 }
 
 impl Layout {
@@ -984,6 +1068,7 @@ impl Layout {
         dex: "classes.dex",
         lib: "lib",
         assets: "assets",
+        root: "",
     };
     /// The bundle's one module, `base`.
     const BUNDLE: Layout = Layout {
@@ -991,15 +1076,21 @@ impl Layout {
         dex: "base/dex/classes.dex",
         lib: "base/lib",
         assets: "base/assets",
+        root: "base/root/",
     };
 }
 
 /// An Android App Bundle: the module `base` from the proto-format `linked`,
 /// [`add_files`]' code, libraries and assets, the libraries' ABIs
 /// (`base/native.pb`) and `BundleConfig.pb`.
-fn write_bundle(linked: &Path, out: &Path, apk: &Apk<'_>) -> anyhow::Result<()> {
+fn write_bundle(
+    linked: &Path,
+    out: &Path,
+    apk: &Apk<'_>,
+    java: &libraries::Contents,
+) -> anyhow::Result<()> {
     let files = work_file(out, "files.zip");
-    let abis = add_files(linked, &files, apk, &Layout::BUNDLE)?;
+    let abis = add_files(linked, &files, apk, java, &Layout::BUNDLE)?;
     use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
     let mut input = ZipArchive::new(fs::File::open(&files)?)?;
     let mut zip = ZipWriter::new(fs::File::create(out)?);
@@ -1010,7 +1101,13 @@ fn write_bundle(linked: &Path, out: &Path, apk: &Apk<'_>) -> anyhow::Result<()> 
     zip.start_file("base/native.pb", deflate)?;
     zip.write_all(&native_pb(&abis)?)?;
     zip.start_file("BundleConfig.pb", deflate)?;
-    zip.write_all(&bundle_config_pb())?;
+    let stored: Vec<String> = java
+        .assets
+        .iter()
+        .filter(|(path, _)| libraries::stored_asset(path))
+        .map(|(path, _)| format!("assets/{path}"))
+        .collect();
+    zip.write_all(&bundle_config_pb(&stored))?;
     zip.finish()?;
     fs::remove_file(&files)?;
     Ok(())
@@ -1049,12 +1146,30 @@ mod pb {
 /// uncompressed, as `extractNativeLibs="false"` needs).
 const BUNDLETOOL_VERSION: &str = "1.18.1";
 
-/// `BundleConfig { bundletool { version } }` (bundletool's `config.proto`).
-fn bundle_config_pb() -> Vec<u8> {
+/// `BundleConfig { bundletool { version } compression { uncompressed_glob } }`
+/// (bundletool's `config.proto`). Google Play compresses the APKs' assets
+/// as it decides, not as the bundle stores them: the module's `uncompressed`
+/// paths (`assets/...`) are named here to stay stored.
+fn bundle_config_pb(uncompressed: &[String]) -> Vec<u8> {
     let mut bundletool = Vec::new();
     pb::bytes(&mut bundletool, 2, BUNDLETOOL_VERSION.as_bytes());
     let mut config = Vec::new();
     pb::bytes(&mut config, 1, &bundletool);
+    if !uncompressed.is_empty() {
+        let mut compression = Vec::new();
+        for path in uncompressed {
+            // A glob of the path itself: Java's glob syntax.
+            let mut glob = String::with_capacity(path.len());
+            for c in path.chars() {
+                if matches!(c, '\\' | '*' | '?' | '[' | ']' | '{' | '}') {
+                    glob.push('\\');
+                }
+                glob.push(c);
+            }
+            pb::bytes(&mut compression, 1, glob.as_bytes());
+        }
+        pb::bytes(&mut config, 3, &compression);
+    }
     config
 }
 
@@ -1112,13 +1227,16 @@ fn java_tool(name: &str) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(exe))
 }
 
-/// Copies `base` (manifest, resources) and adds the dex, the libraries
-/// (stored: the system maps them in place) and the assets, where `layout`
-/// keeps them; returns the ABIs of the libraries.
+/// Copies `base` (manifest, resources) and adds the dex (the runtime's,
+/// then the libraries' `java`), the native libraries (the runtime's and the
+/// libraries', stored: the system maps them in place), the assets (the
+/// app's and the libraries') and the libraries' Java resources, where
+/// `layout` keeps them; returns the ABIs of the native libraries.
 fn add_files(
     base: &Path,
     out: &Path,
     apk: &Apk<'_>,
+    java: &libraries::Contents,
     layout: &Layout,
 ) -> anyhow::Result<Vec<String>> {
     use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
@@ -1143,12 +1261,12 @@ fn add_files(
         .context("runtime classes.dex missing")?
         .read_to_end(&mut dex)?;
     zip.write_all(&dex)?;
-    // The app's own after the runtime's: Android loads `classes<N>.dex`
+    // The libraries' after the runtime's: Android loads `classes<N>.dex`
     // from 2 up, until one is missing. The numbers assume the runtime is
-    // one dex; a runtime of more would collide with the app's.
-    if !apk.dex.is_empty() && apk.runtime.join("classes2.dex").exists() {
+    // one dex; a runtime of more would collide with the libraries'.
+    if !java.dex.is_empty() && apk.runtime.join("classes2.dex").exists() {
         bail!(
-            "the Android runtime in {} has more than one dex file, which `android.dex` cannot follow yet",
+            "the Android runtime in {} has more than one dex file, which `android.libraries` cannot follow yet",
             apk.runtime.display()
         );
     }
@@ -1156,15 +1274,8 @@ fn add_files(
         .dex
         .strip_suffix("classes.dex")
         .context("dex layout")?;
-    for (i, path) in apk.dex.iter().enumerate() {
-        let bytes =
-            fs::read(path).with_context(|| format!("android.dex: read {}", path.display()))?;
-        if !bytes.starts_with(b"dex\n") {
-            bail!(
-                "android.dex: {} is not a dex file (make one with the SDK's `d8`)",
-                path.display()
-            );
-        }
+    for (i, path) in java.dex.iter().enumerate() {
+        let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
         zip.start_file(format!("{dex_dir}classes{}.dex", i + 2), deflate)?;
         zip.write_all(&bytes)?;
     }
@@ -1191,8 +1302,6 @@ fn add_files(
     } else {
         apk.abis
     };
-    let mut missing: std::collections::BTreeMap<PathBuf, Vec<String>> =
-        std::collections::BTreeMap::new();
     for abi in abis {
         if !available.contains(abi) {
             bail!(
@@ -1203,68 +1312,91 @@ fn add_files(
         let so = libs.join(abi).join("libnsh.so");
         zip.start_file(format!("{}/{abi}/libnsh.so", layout.lib), stored)?;
         zip.write_all(&fs::read(&so)?)?;
-        let mut names: Vec<(String, Vec<u8>)> = Vec::new();
-        for dir in apk.jni_libs {
-            let abi_dir = dir.join(abi);
-            if !abi_dir.is_dir() {
-                missing.entry(dir.clone()).or_default().push(abi.clone());
-                continue;
-            }
-            let mut files: Vec<PathBuf> = fs::read_dir(&abi_dir)
-                .with_context(|| format!("read {}", abi_dir.display()))?
-                .map(|e| e.map(|e| e.path()))
-                .collect::<Result<_, _>>()?;
-            // What the system loads: `lib<name>.so` files.
-            files.retain(|f| {
-                f.is_file()
-                    && f.file_name().is_some_and(|n| {
-                        let n = n.to_string_lossy();
-                        n.starts_with("lib") && n.ends_with(".so")
-                    })
-            });
-            files.sort();
-            for file in files {
-                let name = file
-                    .file_name()
-                    .context("library name")?
-                    .to_string_lossy()
-                    .into_owned();
-                let bytes = fs::read(&file).with_context(|| format!("read {}", file.display()))?;
-                if name == "libnsh.so" {
-                    bail!("{}: libnsh.so is NSH's own library", file.display());
-                }
-                if let Some((_, other)) = names.iter().find(|(n, _)| *n == name) {
-                    if *other == bytes {
-                        continue;
-                    }
-                    bail!(
-                        "{}: another of the package's {abi} libraries is named {name}, with other contents",
-                        file.display()
-                    );
-                }
-                check_library(&bytes, abi, apk.target_sdk >= 35 && !apk.dev)
-                    .with_context(|| format!("{}", file.display()))?;
-                zip.start_file(format!("{}/{abi}/{name}", layout.lib), stored)?;
-                zip.write_all(&bytes)?;
-                names.push((name, bytes));
-            }
+        for (name, bytes) in libraries::native_for(&java.native, abi)? {
+            zip.start_file(format!("{}/{abi}/{name}", layout.lib), stored)?;
+            zip.write_all(bytes)?;
         }
-    }
-    for (dir, abis) in missing {
-        crate::ui::warn(format!(
-            "{} has no libraries for {}: the package's devices of those ABIs will not find them \
-             (`--abi` packages for fewer)",
-            dir.display(),
-            abis.join(", ")
-        ));
     }
     for (path, bytes) in &apk.assets {
         // Bytecode and images are compressed already or small.
         zip.start_file(format!("{}/{path}", layout.assets), deflate)?;
         zip.write_all(bytes)?;
     }
+    for (path, bytes) in &java.assets {
+        let options = if libraries::stored_asset(path) {
+            stored
+        } else {
+            deflate
+        };
+        zip.start_file(format!("{}/{path}", layout.assets), options)?;
+        zip.write_all(bytes)?;
+    }
+    for (path, bytes) in &java.resources {
+        zip.start_file(format!("{}{path}", layout.root), deflate)?;
+        zip.write_all(bytes)?;
+    }
     zip.finish()?;
     Ok(abis.to_vec())
+}
+
+/// The native libraries of the crates' `jniLibs` directories, as the
+/// AARs' are: `lib*.so` per ABI folder, each checked to be a shared
+/// library of its ABI ([`check_library`]; `page_size_required`: a 64-bit
+/// one not aligned to 16 KB is an error rather than a warning).
+fn crate_native(
+    dirs: &[NativeDir],
+    page_size_required: bool,
+) -> anyhow::Result<Vec<libraries::Native>> {
+    let mut native = Vec::new();
+    for NativeDir { listed, dir } in dirs {
+        let mut abis = std::collections::BTreeMap::new();
+        for abi_dir in sorted_entries(dir)? {
+            if !abi_dir.is_dir() {
+                continue;
+            }
+            let abi = abi_dir
+                .file_name()
+                .context("abi")?
+                .to_string_lossy()
+                .into_owned();
+            let mut files = Vec::new();
+            for file in sorted_entries(&abi_dir)? {
+                let name = file
+                    .file_name()
+                    .context("library name")?
+                    .to_string_lossy()
+                    .into_owned();
+                // What the system loads: `lib<name>.so` files.
+                if !file.is_file() || !name.starts_with("lib") || !name.ends_with(".so") {
+                    continue;
+                }
+                let bytes = fs::read(&file).with_context(|| format!("read {}", file.display()))?;
+                check_library(&bytes, &abi, page_size_required)
+                    .with_context(|| format!("{listed}: {}", file.display()))?;
+                files.push((name, bytes));
+            }
+            if !files.is_empty() {
+                abis.insert(abi, files);
+            }
+        }
+        if !abis.is_empty() {
+            native.push(libraries::Native {
+                from: listed.clone(),
+                abis,
+            });
+        }
+    }
+    Ok(native)
+}
+
+/// The entries of `dir`, sorted.
+fn sorted_entries(dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    let mut entries: Vec<PathBuf> = fs::read_dir(dir)
+        .with_context(|| format!("read {}", dir.display()))?
+        .map(|e| e.map(|e| e.path()))
+        .collect::<Result<_, _>>()?;
+    entries.sort();
+    Ok(entries)
 }
 
 /// Checks a shared library `elf` is one for `abi`: an ELF shared object of
@@ -1783,6 +1915,22 @@ mod tests {
         assert_eq!(abi(&[]), None);
     }
 
+    static NO_PLACEHOLDERS: std::collections::BTreeMap<String, String> =
+        std::collections::BTreeMap::new();
+
+    /// The manifest of `apk`, which lists no libraries.
+    fn manifest_of(apk: &super::Apk<'_>) -> String {
+        super::manifest_xml(
+            apk,
+            &super::library_manifest::additions(
+                apk,
+                &super::library_manifest::Placeholders::new(apk.package, apk.manifest_placeholders),
+                Vec::new(),
+            )
+            .unwrap(),
+        )
+    }
+
     fn apk(rust: bool, notifications: bool) -> super::Apk<'static> {
         super::Apk {
             package: "com.example.app",
@@ -1796,11 +1944,14 @@ mod tests {
             notifications,
             microphone: false,
             camera: false,
-            dex: &[],
+            libraries: &[],
+            library_cache: std::path::Path::new("."),
+            manifest_placeholders: Some(&NO_PLACEHOLDERS),
             permissions: &[],
             queries: &[],
             application: &[],
             schemes: &[],
+            links: &[],
             rust,
             dark: false,
             fixed_appearance: false,
@@ -1938,7 +2089,7 @@ mod tests {
             monochrome: None,
             unknown: Vec::new(),
         };
-        let manifest = super::manifest_xml(&super::Apk {
+        let manifest = manifest_of(&super::Apk {
             icon: Some(super::Icon::Adaptive(&adaptive)),
             ..apk(false, false)
         });
@@ -1950,7 +2101,7 @@ mod tests {
             manifest.contains(r#"android:roundIcon="@mipmap/ic_launcher_round""#),
             "{manifest}"
         );
-        let manifest = super::manifest_xml(&super::Apk {
+        let manifest = manifest_of(&super::Apk {
             icon: Some(super::Icon::Image(std::path::Path::new("icon.png"))),
             ..apk(false, false)
         });
@@ -1965,13 +2116,13 @@ mod tests {
     fn a_rust_app_runs_its_root() {
         // `AppActivity` reads it from the application's meta-data.
         let flag = r#"<meta-data android:name="com.longbridge.nsh.RUST" android:value="true" />"#;
-        let manifest = super::manifest_xml(&apk(true, false));
+        let manifest = manifest_of(&apk(true, false));
         assert!(manifest.contains(flag), "{manifest}");
         let application = manifest.find("<application").unwrap();
         let activity = manifest.find("<activity").unwrap();
         let at = manifest.find(flag).unwrap();
         assert!(application < at && at < activity, "{manifest}");
-        assert!(!super::manifest_xml(&apk(false, false)).contains("com.longbridge.nsh.RUST"));
+        assert!(!manifest_of(&apk(false, false)).contains("com.longbridge.nsh.RUST"));
     }
 
     #[test]
@@ -1979,7 +2130,7 @@ mod tests {
         // `SystemUi.openPath` hands the system's viewer a `content:` URI
         // of this authority; without the declaration the provider is not
         // resolved and the file cannot be opened.
-        let manifest = super::manifest_xml(&apk(false, false));
+        let manifest = manifest_of(&apk(false, false));
         let provider = "<provider android:name=\"com.longbridge.nsh.FilesProvider\"";
         assert!(manifest.contains(provider), "{manifest}");
         assert!(
@@ -1999,84 +2150,460 @@ mod tests {
     #[test]
     fn only_an_app_granted_notifications_declares_their_permission() {
         let permission = "android.permission.POST_NOTIFICATIONS";
-        assert!(super::manifest_xml(&apk(false, true)).contains(permission));
-        assert!(!super::manifest_xml(&apk(false, false)).contains(permission));
+        assert!(manifest_of(&apk(false, true)).contains(permission));
+        assert!(!manifest_of(&apk(false, false)).contains(permission));
     }
 
     #[test]
     fn only_an_app_whose_pages_capture_media_declares_its_permissions() {
-        let manifest = super::manifest_xml(&super::Apk {
+        let manifest = manifest_of(&super::Apk {
             microphone: true,
             ..apk(false, false)
         });
         assert!(manifest.contains("android.permission.RECORD_AUDIO"));
         assert!(!manifest.contains("android.permission.CAMERA"));
-        assert!(!super::manifest_xml(&apk(false, false)).contains("RECORD_AUDIO"));
+        assert!(!manifest_of(&apk(false, false)).contains("RECORD_AUDIO"));
     }
 
     #[test]
-    fn the_apps_dex_files_follow_the_runtimes() {
-        use std::io::Read as _;
-        let dir = std::env::temp_dir().join(format!("nsh-cli-android-dex-{}", std::process::id()));
+    fn each_web_link_has_a_filter_android_verifies_with_its_host_and_paths() {
+        let links = nsh_core::url_scheme::AppLinks::from_json(&serde_json::json!({
+            "links": [
+                { "host": "example.com", "paths": ["/orders/*", "/about", "/a&b"] },
+                { "host": "*.shop.example" }
+            ]
+        }));
+        let manifest = manifest_of(&super::Apk {
+            links: links.web(),
+            ..apk(false, false)
+        });
+        let filters: Vec<&str> = manifest
+            .split("<intent-filter android:autoVerify=\"true\">")
+            .skip(1)
+            .map(|rest| rest.split("</intent-filter>").next().unwrap())
+            .collect();
+        assert_eq!(filters.len(), 2, "{manifest}");
+        for filter in &filters {
+            for line in [
+                r#"<action android:name="android.intent.action.VIEW" />"#,
+                r#"<category android:name="android.intent.category.DEFAULT" />"#,
+                r#"<category android:name="android.intent.category.BROWSABLE" />"#,
+                r#"<data android:scheme="https" />"#,
+            ] {
+                assert!(filter.contains(line), "{line} in {filter}");
+            }
+            // Only `https`: Android verifies no other.
+            assert!(!filter.contains(r#"android:scheme="http""#), "{filter}");
+        }
+        // The first host with its paths, and none of another host's.
+        assert!(filters[0].contains(r#"<data android:host="example.com" />"#));
+        assert!(filters[0].contains(r#"<data android:pathPrefix="/orders/" />"#));
+        assert!(filters[0].contains(r#"<data android:path="/about" />"#));
+        assert!(filters[0].contains(r#"<data android:path="/a&amp;b" />"#));
+        assert!(!filters[0].contains("shop.example"));
+        // Every path of the other.
+        assert!(filters[1].contains(r#"<data android:host="*.shop.example" />"#));
+        assert!(!filters[1].contains("android:path"), "{}", filters[1]);
+        // A link opens the running app, as a scheme's does.
+        assert!(manifest.contains(r#"android:launchMode="singleTask""#));
+        let none = manifest_of(&apk(false, false));
+        assert!(!none.contains("autoVerify"), "{none}");
+        assert!(!none.contains("singleTask"), "{none}");
+    }
+
+    /// A runtime of one dex and one ABI and what `aapt2 link` writes, in a
+    /// new `dir`.
+    fn runtime_and_base(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+        use std::io::Write as _;
+        let dir =
+            std::env::temp_dir().join(format!("nsh-cli-android-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let runtime = dir.join("runtime");
         std::fs::create_dir_all(runtime.join("lib/arm64-v8a")).unwrap();
         std::fs::write(runtime.join("classes.dex"), b"dex\n035\0runtime").unwrap();
         std::fs::write(runtime.join("lib/arm64-v8a/libnsh.so"), b"so").unwrap();
         let base = dir.join("base.zip");
-        zip::ZipWriter::new(std::fs::File::create(&base).unwrap())
-            .finish()
-            .unwrap();
-        let app = [dir.join("a.dex"), dir.join("b.dex")];
-        std::fs::write(&app[0], b"dex\n035\0a").unwrap();
-        std::fs::write(&app[1], b"dex\n035\0b").unwrap();
-        let read = |zip: &std::path::Path, name: &str| {
-            let mut archive = zip::ZipArchive::new(std::fs::File::open(zip).unwrap()).unwrap();
-            let mut file = archive.by_name(name).unwrap();
-            let mut bytes = Vec::new();
-            file.read_to_end(&mut bytes).unwrap();
-            bytes
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(&base).unwrap());
+        for name in ["AndroidManifest.xml", "resources.arsc"] {
+            zip.start_file(name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(b"linked").unwrap();
+        }
+        zip.finish().unwrap();
+        (dir, base)
+    }
+
+    fn entries(zip: &std::path::Path) -> Vec<String> {
+        let mut archive = zip::ZipArchive::new(std::fs::File::open(zip).unwrap()).unwrap();
+        (0..archive.len())
+            .map(|i| {
+                archive
+                    .by_index_raw(i)
+                    .unwrap()
+                    .name()
+                    .unwrap()
+                    .into_owned()
+            })
+            .collect()
+    }
+
+    fn read(zip: &std::path::Path, name: &str) -> Vec<u8> {
+        use std::io::Read as _;
+        let mut archive = zip::ZipArchive::new(std::fs::File::open(zip).unwrap()).unwrap();
+        let mut file = archive.by_name(name).unwrap();
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes).unwrap();
+        bytes
+    }
+
+    /// An SDK that is not there: a build that needed one of its tools fails.
+    fn no_sdk() -> super::Sdk {
+        super::Sdk {
+            root: "/nsh-no-sdk".into(),
+            build_tools: "/nsh-no-sdk/build-tools/36.1.0".into(),
+        }
+    }
+
+    #[test]
+    fn the_libraries_dex_and_java_resources_follow_the_runtimes() {
+        let (dir, base) = runtime_and_base("libraries");
+        let runtime = dir.join("runtime");
+        let java = super::libraries::Contents {
+            dex: vec![dir.join("a.dex"), dir.join("b.dex")],
+            resources: vec![(
+                "META-INF/services/com.example.Greeter".to_owned(),
+                b"com.example.Hello\n".to_vec(),
+            )],
+            ..Default::default()
         };
-        for (layout, prefix) in [
-            (&super::Layout::APK, ""),
-            (&super::Layout::BUNDLE, "base/dex/"),
+        std::fs::write(&java.dex[0], b"dex\n035\0a").unwrap();
+        std::fs::write(&java.dex[1], b"dex\n035\0b").unwrap();
+        for (layout, prefix, root) in [
+            (&super::Layout::APK, "", ""),
+            (&super::Layout::BUNDLE, "base/dex/", "base/root/"),
         ] {
             let out = dir.join("out.zip");
-            super::add_files(
-                &base,
-                &out,
-                &super::Apk {
-                    runtime: &runtime,
-                    dex: &app,
-                    ..apk(false, false)
-                },
-                layout,
-            )
-            .unwrap();
+            let apk = super::Apk {
+                runtime: &runtime,
+                ..apk(false, false)
+            };
+            super::add_files(&base, &out, &apk, &java, layout).unwrap();
             assert_eq!(
                 read(&out, &format!("{prefix}classes.dex")),
                 b"dex\n035\0runtime"
             );
             assert_eq!(read(&out, &format!("{prefix}classes2.dex")), b"dex\n035\0a");
             assert_eq!(read(&out, &format!("{prefix}classes3.dex")), b"dex\n035\0b");
+            // At the root of the installed APK, where `ServiceLoader` finds it.
+            assert_eq!(
+                read(
+                    &out,
+                    &format!("{root}META-INF/services/com.example.Greeter")
+                ),
+                b"com.example.Hello\n"
+            );
         }
-        // A file that is no dex fails the build instead of a class lookup on the device.
-        std::fs::write(&app[1], b"PK\x03\x04 a jar").unwrap();
+        // A runtime of two dex files would collide with the libraries'.
+        std::fs::write(runtime.join("classes2.dex"), b"dex\n035\0more").unwrap();
+        let apk = super::Apk {
+            runtime: &runtime,
+            ..apk(false, false)
+        };
         let err = super::add_files(
             &base,
             &dir.join("out.zip"),
-            &super::Apk {
-                runtime: &runtime,
-                dex: &app,
-                ..apk(false, false)
-            },
+            &apk,
+            &java,
             &super::Layout::APK,
         )
         .unwrap_err()
         .to_string();
-        assert!(err.contains("is not a dex file"), "{err}");
+        assert!(err.contains("more than one dex file"), "{err}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
+
+    #[test]
+    fn dex_libraries_are_numbered_as_listed_without_d8() {
+        let (dir, _) = runtime_and_base("dex-libraries");
+        let library = |name: &str, bytes: &[u8]| {
+            let path = dir.join(name);
+            std::fs::write(&path, bytes).unwrap();
+            super::Library {
+                path,
+                listed: "nsh.json `android.libraries`".into(),
+            }
+        };
+        let libraries = [
+            library("b.dex", b"dex\n035\0b"),
+            library("a.dex", b"dex\n035\0a"),
+            // The same file from another crate: packaged once.
+            library("b-copy.dex", b"dex\n035\0b"),
+        ];
+        let cache = dir.join("cache");
+        let apk = super::Apk {
+            libraries: &libraries,
+            library_cache: &cache,
+            ..apk(false, false)
+        };
+        // Dex files only: no SDK tool runs, no cache is made.
+        let java = super::libraries::prepare(&no_sdk(), &apk, &dir).unwrap();
+        assert_eq!(java.dex, [dir.join("b.dex"), dir.join("a.dex")]);
+        assert!(java.resources.is_empty());
+        assert!(!cache.exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn without_libraries_the_package_is_as_before() {
+        let (dir, base) = runtime_and_base("no-libraries");
+        let runtime = dir.join("runtime");
+        let cache = dir.join("cache");
+        let apk = super::Apk {
+            runtime: &runtime,
+            library_cache: &cache,
+            assets: vec![("nsh/bundle.nshc".into(), b"bundle".to_vec())],
+            ..apk(false, false)
+        };
+        // Nothing for d8: no SDK tool runs, no cache is made.
+        let java = super::libraries::prepare(&no_sdk(), &apk, &dir).unwrap();
+        assert!(java.dex.is_empty() && java.resources.is_empty());
+        assert!(java.native.is_empty() && java.assets.is_empty());
+        assert!(!cache.exists());
+        // The files of the package, as they were before libraries.
+        for (layout, expected) in [
+            (
+                &super::Layout::APK,
+                &[
+                    "AndroidManifest.xml",
+                    "resources.arsc",
+                    "classes.dex",
+                    "lib/arm64-v8a/libnsh.so",
+                    "assets/nsh/bundle.nshc",
+                ],
+            ),
+            (
+                &super::Layout::BUNDLE,
+                &[
+                    "base/manifest/AndroidManifest.xml",
+                    "base/resources.arsc",
+                    "base/dex/classes.dex",
+                    "base/lib/arm64-v8a/libnsh.so",
+                    "base/assets/nsh/bundle.nshc",
+                ],
+            ),
+        ] {
+            let out = dir.join("out.zip");
+            super::add_files(&base, &out, &apk, &java, layout).unwrap();
+            assert_eq!(entries(&out), expected);
+        }
+        // The manifest, word for word: libraries add nothing to it.
+        assert_eq!(super::manifest_xml(&apk, &java.manifest), MANIFEST);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// An AAR at `path` with `entries` besides its manifest of `package`,
+    /// whose `<application>` has `application`.
+    fn aar(path: &std::path::Path, package: &str, application: &str, entries: &[(&str, &[u8])]) {
+        use std::io::Write as _;
+        let manifest = format!(
+            r#"<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools" package="{package}">
+    <uses-sdk android:minSdkVersion="23" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <application android:appComponentFactory="x.Factory">{application}</application>
+</manifest>"#
+        );
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+        for (name, bytes) in [("AndroidManifest.xml", manifest.as_bytes())]
+            .into_iter()
+            .chain(entries.iter().copied())
+        {
+            zip.start_file(name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+
+    #[test]
+    fn an_aar_adds_its_native_libraries_assets_and_manifest() {
+        let (dir, base) = runtime_and_base("aar");
+        let runtime = dir.join("runtime");
+        let push = dir.join("push.aar");
+        aar(
+            &push,
+            "com.example.push",
+            r#"<provider android:name="androidx.startup.InitializationProvider"
+                   android:authorities="${applicationId}.androidx-startup" android:exported="false"
+                   tools:node="merge"><meta-data android:name=".PushInit" android:value="androidx.startup" /></provider>
+               <meta-data android:name="push.key" android:value="${PUSH_KEY}" />"#,
+            &[
+                ("jni/arm64-v8a/libpush.so", b"push arm64"),
+                ("jni/x86_64/libpush.so", b"push x86_64"),
+                ("assets/push/config.json", b"{}"),
+                ("assets/push/ding.ogg", b"ogg"),
+            ],
+        );
+        let libraries = [super::Library {
+            path: push.clone(),
+            listed: "push: [package.metadata.nsh] `android.libraries`".into(),
+        }];
+        // A crate adds its own initializer to the provider the library
+        // declares.
+        let application = [r#"<provider android:name="androidx.startup.InitializationProvider" android:authorities="${applicationId}.androidx-startup"><meta-data android:name="com.example.glue.Init" android:value="androidx.startup"/></provider>"#.to_owned()];
+        let placeholders =
+            std::collections::BTreeMap::from([("PUSH_KEY".to_owned(), "k-1".to_owned())]);
+        let cache = dir.join("cache");
+        let with =
+            |abis: &'static [String],
+             placeholders: &'static std::collections::BTreeMap<String, String>| {
+                super::Apk {
+                    runtime: &runtime,
+                    libraries: &libraries,
+                    library_cache: &cache,
+                    manifest_placeholders: Some(placeholders),
+                    application: &application,
+                    abis,
+                    ..apk(false, false)
+                }
+            };
+        let placeholders: &'static _ = Box::leak(Box::new(placeholders));
+        let apk = with(&[], placeholders);
+        // No classes: no SDK tool runs.
+        let java = super::libraries::prepare(&no_sdk(), &apk, &dir).unwrap();
+        assert!(java.dex.is_empty() && !cache.exists());
+        for (layout, lib, assets) in [
+            (&super::Layout::APK, "lib/", "assets/"),
+            (&super::Layout::BUNDLE, "base/lib/", "base/assets/"),
+        ] {
+            let out = dir.join("out.zip");
+            // The runtime's one ABI: the library's x86_64 stays out.
+            let abis = super::add_files(&base, &out, &apk, &java, layout).unwrap();
+            assert_eq!(abis, ["arm64-v8a"]);
+            let mut archive = zip::ZipArchive::new(std::fs::File::open(&out).unwrap()).unwrap();
+            let mut method = |name: &str| archive.by_name(name).unwrap().compression();
+            assert_eq!(
+                method(&format!("{lib}arm64-v8a/libpush.so")),
+                zip::CompressionMethod::Stored
+            );
+            assert_eq!(
+                method(&format!("{assets}push/config.json")),
+                zip::CompressionMethod::Deflated
+            );
+            assert_eq!(
+                method(&format!("{assets}push/ding.ogg")),
+                zip::CompressionMethod::Stored
+            );
+            assert!(!entries(&out).iter().any(|e| e.contains("x86_64")));
+        }
+        let manifest = super::manifest_xml(&apk, &java.manifest);
+        // The library's permission once NSH declares it already, its other
+        // one after NSH's.
+        assert_eq!(manifest.matches("android.permission.INTERNET").count(), 1);
+        assert!(
+            manifest.contains(
+                "<uses-permission android:name=\"android.permission.INTERNET\" />\n    \
+             <uses-permission android:name=\"android.permission.WAKE_LOCK\" />\n    <!--"
+            ),
+            "{manifest}"
+        );
+        // One provider with both initializers, the placeholders filled in.
+        assert!(
+            manifest.contains(
+                "        <provider android:name=\"androidx.startup.InitializationProvider\" \
+                 android:authorities=\"com.example.app.androidx-startup\" android:exported=\"false\">\n            \
+                 <meta-data android:name=\"com.example.glue.Init\" android:value=\"androidx.startup\" />\n            \
+                 <meta-data android:name=\".PushInit\" android:value=\"androidx.startup\" />\n        \
+                 </provider>\n        \
+                 <meta-data android:name=\"push.key\" android:value=\"k-1\" />\n    \
+                 </application>"
+            ),
+            "{manifest}"
+        );
+        assert!(!manifest.contains("tools:") && !manifest.contains("x.Factory"));
+
+        // An ABI the package has and the library has not.
+        let both: &'static [String] =
+            Box::leak(Box::new(["arm64-v8a".to_owned(), "armeabi-v7a".to_owned()]));
+        std::fs::create_dir_all(runtime.join("lib/armeabi-v7a")).unwrap();
+        std::fs::write(runtime.join("lib/armeabi-v7a/libnsh.so"), b"so").unwrap();
+        let error = super::add_files(
+            &base,
+            &dir.join("out.zip"),
+            &with(both, placeholders),
+            &java,
+            &super::Layout::APK,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.contains("has native libraries for arm64-v8a, x86_64, not for armeabi-v7a"),
+            "{error}"
+        );
+        // A placeholder nsh.json does not set.
+        let error = super::libraries::prepare(&no_sdk(), &with(&[], &NO_PLACEHOLDERS), &dir)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("the placeholder `${PUSH_KEY}`"), "{error}");
+        // A library built for a newer platform than the app compiles against.
+        aar(
+            &push,
+            "com.example.push",
+            "",
+            &[(
+                "META-INF/com/android/build/gradle/aar-metadata.properties",
+                b"minCompileSdk=36\n",
+            )],
+        );
+        let error = super::libraries::prepare(&no_sdk(), &apk, &dir)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains(
+                "(its minCompileSdk), the app against 35: set nsh.json `android.targetSdk` to 36"
+            ),
+            "{error}"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The manifest of `apk(false, false)`, as packages had it before
+    /// libraries.
+    const MANIFEST: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.app">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Text actions (Translate and the like) the selection menu offers,
+        as TextView's: Android 11+ hides other apps' activities otherwise. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT" />
+            <data android:mimeType="text/plain" />
+        </intent>
+    </queries>
+    <application android:label="App"
+        android:extractNativeLibs="false"
+        android:enableOnBackInvokedCallback="true"
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <!-- Serves the app's own files to the apps that open them
+            (`SystemUi.openPath`): the authority matches what
+            `FilesProvider.uriFor` builds. -->
+        <provider android:name="com.longbridge.nsh.FilesProvider"
+            android:authorities="com.example.app.files"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+        <activity android:name="com.longbridge.nsh.AppActivity" android:exported="true"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
+"#;
 
     /// An arm64 ELF shared library whose one loadable segment is aligned
     /// to `align`.
@@ -2190,82 +2717,113 @@ mod tests {
         std::fs::write(jni.join("arm64-v8a/README.txt"), b"not a library").unwrap();
         std::fs::write(jni.join("arm64-v8a/ocr.so"), elf(0x4000)).unwrap();
         // A second crate with the same library, byte for byte (two SDKs
-        // each bundling `libc++_shared.so`): packaged once.
+        // each bundling `libc++_shared.so`), for both ABIs: packaged once.
         let other = dir.join("other");
         std::fs::create_dir_all(other.join("arm64-v8a")).unwrap();
+        std::fs::create_dir_all(other.join("armeabi-v7a")).unwrap();
         std::fs::write(other.join("arm64-v8a/libocr.so"), elf(0x4000)).unwrap();
-        let jni_libs = [jni.clone(), other.clone()];
-        let add = |layout: &super::Layout, target_sdk: u32| {
+        std::fs::write(other.join("armeabi-v7a/libocr.so"), &arm32).unwrap();
+        let dirs = [
+            super::NativeDir {
+                listed: "ocr: [package.metadata.nsh] `android.jniLibs`".into(),
+                dir: jni.clone(),
+            },
+            super::NativeDir {
+                listed: "scan: [package.metadata.nsh] `android.jniLibs`".into(),
+                dir: other.clone(),
+            },
+        ];
+        let both: &'static [String] =
+            Box::leak(Box::new(["arm64-v8a".to_owned(), "armeabi-v7a".to_owned()]));
+        // Packaged as the AARs' native libraries are, from what
+        // `crate_native` reads (`required`: 16 KB pages).
+        let add = |layout: &super::Layout, required: bool| {
+            let java = super::libraries::Contents {
+                native: super::crate_native(&dirs, required)?,
+                ..Default::default()
+            };
             let out = dir.join("out.zip");
             super::add_files(
                 &base,
                 &out,
                 &super::Apk {
                     runtime: &runtime,
-                    jni_libs: &jni_libs,
-                    target_sdk,
+                    abis: both,
                     ..apk(false, false)
                 },
+                &java,
                 layout,
             )
-            .map(|_| {
-                let archive = zip::ZipArchive::new(std::fs::File::open(&out).unwrap()).unwrap();
-                let mut names: Vec<String> = archive
-                    .file_names()
-                    .map(|n| n.unwrap().into_owned())
-                    .collect();
-                names.sort();
-                names
-            })
+            .map(|_| entries(&out))
         };
-        let names = add(&super::Layout::APK, 35).unwrap();
-        for name in [
-            "lib/arm64-v8a/libnsh.so",
-            "lib/arm64-v8a/libocr.so",
-            "lib/armeabi-v7a/libocr.so",
+        for (layout, lib) in [
+            (&super::Layout::APK, "lib/"),
+            (&super::Layout::BUNDLE, "base/lib/"),
         ] {
-            assert!(names.iter().any(|n| n == name), "{name}: {names:?}");
+            let names = add(layout, true).unwrap();
+            for name in [
+                "arm64-v8a/libnsh.so",
+                "arm64-v8a/libocr.so",
+                "armeabi-v7a/libocr.so",
+            ] {
+                let name = format!("{lib}{name}");
+                assert_eq!(
+                    names.iter().filter(|n| **n == name).count(),
+                    1,
+                    "{name}: {names:?}"
+                );
+            }
+            assert!(
+                !names
+                    .iter()
+                    .any(|n| n.ends_with("README.txt") || n.ends_with("/ocr.so")),
+                "{names:?}"
+            );
         }
-        assert!(
-            !names
-                .iter()
-                .any(|n| n.ends_with("README.txt") || n.ends_with("/ocr.so")),
-            "{names:?}"
-        );
+        let mut archive =
+            zip::ZipArchive::new(std::fs::File::open(dir.join("out.zip")).unwrap()).unwrap();
         assert_eq!(
-            names
-                .iter()
-                .filter(|n| n.as_str() == "lib/arm64-v8a/libocr.so")
-                .count(),
-            1
-        );
-        let names = add(&super::Layout::BUNDLE, 35).unwrap();
-        assert!(
-            names.iter().any(|n| n == "base/lib/arm64-v8a/libocr.so"),
-            "{names:?}"
+            archive
+                .by_name("base/lib/arm64-v8a/libocr.so")
+                .unwrap()
+                .compression(),
+            zip::CompressionMethod::Stored
         );
         // A 64-bit library on 4 KB pages would not load on 16 KB devices:
-        // an error from target SDK 35, as Google Play requires, a warning
-        // below.
+        // an error when required (a release from target SDK 35, as Google
+        // Play requires), a warning otherwise.
         std::fs::write(jni.join("arm64-v8a/libocr.so"), elf(0x1000)).unwrap();
         std::fs::write(other.join("arm64-v8a/libocr.so"), elf(0x1000)).unwrap();
-        let err = format!("{:#}", add(&super::Layout::APK, 35).unwrap_err());
-        assert!(err.contains("16 KB"), "{err}");
-        assert!(add(&super::Layout::APK, 34).is_ok());
+        let err = format!("{:#}", add(&super::Layout::APK, true).unwrap_err());
+        assert!(err.contains("16 KB") && err.starts_with("ocr: "), "{err}");
+        assert!(add(&super::Layout::APK, false).is_ok());
         // Two crates' libraries of one name with other contents.
         std::fs::write(jni.join("arm64-v8a/libocr.so"), elf(0x8000)).unwrap();
         std::fs::write(other.join("arm64-v8a/libocr.so"), elf(0x4000)).unwrap();
-        let err = format!("{:#}", add(&super::Layout::APK, 35).unwrap_err());
-        assert!(err.contains("with other contents"), "{err}");
+        let err = format!("{:#}", add(&super::Layout::APK, true).unwrap_err());
+        assert!(
+            err.contains("both have `libocr.so` for arm64-v8a, with different contents"),
+            "{err}"
+        );
         // An x86_64 library in `arm64-v8a`.
         std::fs::write(jni.join("arm64-v8a/libocr.so"), elf_for(62, 0x4000)).unwrap();
-        let err = format!("{:#}", add(&super::Layout::APK, 35).unwrap_err());
+        let err = format!("{:#}", add(&super::Layout::APK, true).unwrap_err());
         assert!(err.contains("not a library for arm64-v8a"), "{err}");
         // A library may not replace NSH's.
         std::fs::write(jni.join("arm64-v8a/libocr.so"), elf(0x4000)).unwrap();
+        std::fs::write(other.join("arm64-v8a/libocr.so"), elf(0x4000)).unwrap();
         std::fs::write(jni.join("arm64-v8a/libnsh.so"), elf(0x4000)).unwrap();
-        let err = format!("{:#}", add(&super::Layout::APK, 35).unwrap_err());
+        let err = format!("{:#}", add(&super::Layout::APK, true).unwrap_err());
         assert!(err.contains("NSH's own library"), "{err}");
+        std::fs::remove_file(jni.join("arm64-v8a/libnsh.so")).unwrap();
+        // A crate without libraries for an ABI the package has: its code
+        // would not load on such a device.
+        std::fs::remove_dir_all(other.join("armeabi-v7a")).unwrap();
+        let err = format!("{:#}", add(&super::Layout::APK, true).unwrap_err());
+        assert!(
+            err.contains("scan: [package.metadata.nsh] `android.jniLibs` has native libraries for arm64-v8a, not for armeabi-v7a"),
+            "{err}"
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -2277,7 +2835,7 @@ mod tests {
             "com.example.permission.READ".to_owned(),
             "android.permission.INTERNET".to_owned(),
         ];
-        let manifest = super::manifest_xml(&super::Apk {
+        let manifest = manifest_of(&super::Apk {
             permissions: &listed,
             ..apk(false, true)
         });
@@ -2303,7 +2861,7 @@ mod tests {
         let application = manifest.find("<application").unwrap();
         let at = manifest.find("ACCESS_NETWORK_STATE").unwrap();
         assert!(at < application, "{manifest}");
-        assert!(!super::manifest_xml(&apk(false, false)).contains("ACCESS_NETWORK_STATE"));
+        assert!(!manifest_of(&apk(false, false)).contains("ACCESS_NETWORK_STATE"));
     }
 
     #[test]
@@ -2316,7 +2874,7 @@ mod tests {
             r#"<provider android:name="x.Init" android:authorities="${applicationId}.init" android:exported="false"/>"#
                 .to_owned(),
         ];
-        let manifest = super::manifest_xml(&super::Apk {
+        let manifest = manifest_of(&super::Apk {
             queries: &queries,
             application: &application,
             ..apk(false, false)
@@ -2332,14 +2890,14 @@ mod tests {
             manifest.contains(r#"android:authorities="com.example.app.init""#),
             "{manifest}"
         );
-        assert!(!super::manifest_xml(&apk(false, false)).contains("IMAGE_CAPTURE"));
+        assert!(!manifest_of(&apk(false, false)).contains("IMAGE_CAPTURE"));
     }
 
     #[test]
     fn only_an_app_that_asks_allows_cleartext_traffic() {
         let attribute = r#"android:usesCleartextTraffic="true""#;
-        assert!(!super::manifest_xml(&apk(false, false)).contains(attribute));
-        let manifest = super::manifest_xml(&super::Apk {
+        assert!(!manifest_of(&apk(false, false)).contains(attribute));
+        let manifest = manifest_of(&super::Apk {
             cleartext: true,
             ..apk(false, false)
         });
@@ -2363,7 +2921,7 @@ mod tests {
     #[test]
     fn a_launch_screen_names_its_theme_in_the_manifest() {
         let screen = crate::apple::LaunchScreen::default();
-        let manifest = super::manifest_xml(&super::Apk {
+        let manifest = manifest_of(&super::Apk {
             launch_screen: Some(&screen),
             ..apk(false, false)
         });
@@ -2371,7 +2929,7 @@ mod tests {
             manifest.contains(r#"android:theme="@style/NshLaunch""#),
             "{manifest}"
         );
-        let manifest = super::manifest_xml(&apk(false, false));
+        let manifest = manifest_of(&apk(false, false));
         assert!(
             manifest.contains(r#"android:theme="@android:style/Theme.Material.Light.NoActionBar""#),
             "{manifest}"
@@ -2511,7 +3069,14 @@ mod tests {
     fn bundle_metadata_is_what_bundletool_writes() {
         // `bundletool build-bundle` 1.18.1's own `BundleConfig.pb` and, for
         // a module with these two ABIs, `base/native.pb`.
-        assert_eq!(super::bundle_config_pb(), b"\x0a\x08\x12\x061.18.1");
+        assert_eq!(super::bundle_config_pb(&[]), b"\x0a\x08\x12\x061.18.1");
+        // Libraries' assets of the kinds `aapt2` stores stay stored, by
+        // their own paths, escaped as globs.
+        let stored = ["assets/a[1].mp3".to_owned()];
+        assert_eq!(
+            super::bundle_config_pb(&stored),
+            b"\x0a\x08\x12\x061.18.1\x1a\x13\x0a\x11assets/a\\[1\\].mp3"
+        );
         let abis = ["arm64-v8a".to_owned(), "armeabi-v7a".to_owned()];
         let mut expected = b"\x0a\x15\x0a\x0dlib/arm64-v8a\x12\x04\x0a\x02\x08\x03".to_vec();
         expected.extend_from_slice(b"\x0a\x17\x0a\x0flib/armeabi-v7a\x12\x04\x0a\x02\x08\x02");

@@ -1237,10 +1237,12 @@ class Player {
         font_ascent: (fp, fl) => this.metrics(this.str(fp, fl))[0],
         font_descent: (fp, fl) => this.metrics(this.str(fp, fl))[1],
         font_x_height: (fp, fl) => this.metrics(this.str(fp, fl))[2],
-        register_font: (fp, fl, dp, dl, weight, italic) => {
+        register_font: (fp, fl, dp, dl, weight, maxWeight, italic) => {
           const family = this.str(fp, fl);
           const data = this.bytes(dp, dl).slice();
-          const face = new FontFace(family, data, { weight: String(weight), style: italic ? "italic" : "normal" });
+          // A variable font gets its `wght` range: one value would pin the axis.
+          const range = maxWeight > weight ? `${weight} ${maxWeight}` : String(weight);
+          const face = new FontFace(family, data, { weight: range, style: italic ? "italic" : "normal" });
           document.fonts.add(face);
           this.fontLoading(face.load());
         },

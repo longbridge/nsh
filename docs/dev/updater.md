@@ -8,12 +8,17 @@ in `crates/nsh-core/src/runtime/updater.rs`, the toolchain's side in `crates/nsh
 
 1. `nsh.json`'s `"updater"` (`github` or `url`, `channels`, `publicKey`) is checked by `nsh package`, which adds it with the app's
    id and version to the package's assets as `nsh-updater.json`, and leaves `<name>-<version>-<os>-<arch>.<ext>`.
-2. `nsh update-manifest` writes `latest.json` and `latest.json.sig` for one version's archives.
+2. `nsh update-manifest` writes `latest.json` and `latest.json.sig` for one version's archives; with `--previous`,
+   a zstd patch per platform from the previous version (`Asset::deltas`, `nsh_updater::delta`).
 3. `checkForUpdate` reads the asset, gets the manifest, checks the signature, the id and that the version is newer.
    With `{ channel }` it reads that channel's manifest instead (`Config::channel`); a name the asset does not declare
    rejects before any request.
 4. `downloadUpdate` streams the asset into `<data dir>/updates/download-<sha256>.part` (resuming an existing partial
-   with HTTP `Range`), checks its size and SHA-256, and renames it to `download-<sha256>`.
+   with HTTP `Range`), checks its size and SHA-256, and renames it to `download-<sha256>`. When `Available::delta`
+   offers a patch from the running version it goes first: the installed app written as the patch's reference
+   (`delta::base`: entries sorted, no modes, owners or times, so publisher and app write the same bytes) must hash to
+   `base`, the patch downloads resumably as `delta-<result>.patch`, and what it makes, a `.tar` of the new app, must
+   hash to `result`; any failure logs and downloads the archive.
 5. `installAndRestart` unpacks next to the app, checks the new app, swaps it in, then restarts the app as
    `Application.restart()` does (`DesktopCommand::Restart`): this run quits, and the new version starts once it has
    exited (`nsh_core::restart`). Or `installOnQuit` unpacks and checks it now (`Installation::stage`) and leaves the

@@ -2408,7 +2408,7 @@ only the running app: one left on screen after the app exits does nothing.
 ### Notifications.permission
 
 `permission()` answers without asking, `requestPermission()` shows the system's prompt the first time. Both resolve with
-`"default"` (not asked yet), `"granted"`, `"denied"` (only the system's settings change it) or `"unavailable"`. On Apple
+`"default"` (not asked yet), `"granted"`, `"denied"` (only the system's settings change it; [`AppSettings.open`](./nsh-mobile.md#appsettings) of `nsh/mobile` takes the user there) or `"unavailable"`. On Apple
 platforms `requestPermission()` resolves with the permission the system's settings hold once it has asked: `"denied"` for
 an app the user turned notifications off for.
 
@@ -2452,11 +2452,62 @@ files and the system's apps (`http`, `https`, `file`, `mailto`, `tel`, `sms`, ..
 | Windows | The app, under `HKEY_CURRENT_USER\\Software\\Classes`, each time it starts; a second launch hands its URL to the running app |
 | Linux | The app: its desktop entry in `~/.local/share/applications` (`<app id>.desktop`) with `x-scheme-handler/<scheme>`, written when it starts. An entry an installer put there for this executable is kept, with the schemes it lacks added; one for another copy of the app is left alone. The app becomes a scheme's default handler only where no application handles it yet. `nsh run` registers the development host the same way. A second launch hands its URL to the running app |
 
+### Web links
+
+An app also claims web links: `https` links of its own sites that open it, Universal Links on iOS and macOS and App
+Links on Android. A link such as `https://example.com/orders/42` in an email, a chat or a search result then opens the
+app where it is installed, and the web page everywhere else. It reaches the same `open` listener as a scheme's link, so
+one listener handles both, and on the web the same address is the page's own (`UrlScheme.url()`).
+
+```json
+{
+  "links": [
+    { "host": "example.com", "paths": ["/orders/*", "/invite"] },
+    { "host": "*.example.com" }
+  ]
+}
+```
+
+- `host` is a domain name, compared in lower case (an internationalized name may be written as is), or `*.` and one
+  for its subdomains: `*.example.com` does not cover `example.com` itself, so list both. No scheme, port, path or IP
+  address.
+- `paths` lists the paths of the host that open the app: a whole path (`/invite`), or the start of one ending in `*`
+  (`/orders/*`, which takes `/orders/42` but not `/orders`). `*` comes only at the end. Paths compare with their case,
+  after percent-decoding the link's (`/café/*` takes `/caf%C3%A9/1`): write them decoded, with no query or fragment.
+  Without `paths`, every path of the host opens the app, so a site whose app shows only some of its pages lists them:
+  the others (`/blog`, `/login`) keep opening in the browser.
+
+NSH lets through the `https` links of these hosts and paths only, with no port or user name, wherever they come from:
+another app can send any URL to the Android activity, and the core drops what the app does not claim. As with a scheme,
+anyone can make such a link, so check what it asks for. A link `nsh` cannot read whole (a key of a newer NSH, a path of
+another form, `"paths": []`) is left out with a warning, never claimed in part.
+
+The site proves that the app is its own, over HTTPS and without a redirect:
+
+- `/.well-known/apple-app-site-association` names the app as `<team id>.<app id>`, with `components` that match
+  `paths` (`{ "/": "/orders/*" }`): iOS checks the paths there, NSH checks `paths`, and a link reaches the app only when
+  both take it.
+- `/.well-known/assetlinks.json` names the package and the SHA-256 fingerprint of its signing certificate.
+
+Until it does, the system opens the links in the browser.
+
+| Platform | How the app claims its links |
+| --- | --- |
+| iOS | `applinks:<host>` in the `com.apple.developer.associated-domains` entitlement `nsh package` signs the app with, after those `ios.entitlements` lists; a device build's provisioning profile must grant Associated Domains. The link that launched the app and those that come while it runs |
+| macOS | The same entitlement, which macOS honors only under a provisioning profile: `nsh package`'s ad hoc signed app leaves it out, so list it in `macos.entitlements` and sign the app with a profile that grants it. The app then takes the links |
+| Android | An `ACTION_VIEW` intent filter with `android:autoVerify="true"` for each link, with its host as an `https` host and each path as an `android:path` (or `android:pathPrefix` for one ending in `*`), which Android verifies as the app installs; the activity runs as `singleTask`, so a link reaches the running app |
+| Web | The page is the link: `nsh package` leaves `links` out, with a warning |
+| Windows, Linux | No app links: the browser opens them, and `nsh package` leaves `links` out, with a warning |
+
+A Rust app's generated code passes the links to its root (`Root::links`).
+
 `nsh test` hands a test's app links: `App.open(entry, { url })` launches the app with one, and
 `app.openWithUrl(url)` opens one while it runs, both headless.
 
 An app that embeds NSH owns its schemes and hands a URL to its view: `AppView.open_url` (Linux, iOS), `NshAppView.openURL`
-(Swift), `NshView.openUrl` or `NshView.handleUrlSchemeIntent` (Android).
+(Swift), `NshView.openUrl` or `NshView.handleUrlSchemeIntent` (Android). A Universal Link reaches the embedding app's
+`scene(_:continue:)` as an activity: hand its `webpageURL` to `NshAppView.openURL` too, which checks it against the
+links the app claims.
 
 ### UrlScheme.url
 
@@ -2887,6 +2938,7 @@ const Storage: {
   removeItem(key: string): Promise<void>;
   keys(): Promise<string[]>;
   clear(): Promise<void>;
+  on(event: "change", listener: (change: { key: string | null; value: string | null }) => void): () => void;
 };
 ```
 
@@ -2897,6 +2949,7 @@ const Storage: {
 | `await Storage.removeItem(key)` | `Storage::remove_item(key)` |
 | `await Storage.keys()` | `Storage::get_all_keys() -> Vec<String>` |
 | `await Storage.clear()` | `Storage::clear()` |
+| `Storage.on("change", listener)` | `Storage::on_change(f)` |
 
 The Rust functions are synchronous, as the entries are in memory: call them where components run (their bodies, handlers and tasks).
 
@@ -2913,7 +2966,7 @@ Each app has a storage of its own, up to 5 MB of keys and values. Calls run in t
 
 A `storage.json` that is damaged is kept as `storage.json.corrupt` next to it, and the app starts with an empty storage; one that cannot be read leaves the app's changes in memory, so the file is never replaced.
 
-On the web, the app's other tabs share its storage: what one of them sets, removes or clears, the others read from then on. A value the browser refuses to keep (its own quota, or site data the user blocked) is refused as one past 5 MB is.
+On the web, the app's other tabs share its storage: what one of them sets, removes or clears, the others read from then on, and hear as [`change`](#storageon). Windows of a desktop app share it the same way. A value the browser refuses to keep (its own quota, or site data the user blocked) is refused as one past 5 MB is.
 
 The app id is the `id` in `nsh.json`, and it travels with the app: `nsh build` and `nsh package` write it next to the bundle, the dev server sends it, and a signed package carries the one its release key's certificate vouches for. So every app keeps its own data with no setting, wherever it runs; an app without an id keeps it under `default`. An embedding app can choose another place (see [Embedding on iOS](../docs/ios.md) and [Embedding on Android](../docs/android.md)).
 
@@ -2975,6 +3028,32 @@ clear(): Promise<void>;
 ```
 
 Removes every key of the app, such as when the user signs out. Rust: `Storage::clear()`.
+
+### Storage.on
+
+```ts
+on(event: "change", listener: (change: { key: string | null; value: string | null }) => void): () => void;
+```
+
+Calls `listener` each time the storage is changed elsewhere: by another tab of the app on the web, or by another window or view of the app that shares its storage. `key` is the key changed, `null` when every key was removed; `value` is what it holds now, `null` when it was removed. `getItem` already reads the new value when the listener runs. The app's own changes in this tab or window do not come, nor a change that leaves an entry as it was, and changes made while nothing listened are not kept: read what you need when you start listening. Returns a function that stops listening; a listener a component adds stops with the component. Rust: `Storage::on_change(f)`, which runs `f` with a `StorageChange` (`key()`, `value()`) while the current owner lives.
+
+Use it to keep settings in step across tabs and windows:
+
+```rust tabs
+let theme = signal(Storage::get_item("theme"));
+Storage::on_change(move |change| {
+    if change.key().is_none_or(|key| key == "theme") {
+        theme.set(change.value().map(str::to_owned));
+    }
+});
+```
+
+```tsx tabs
+const theme = signal(await Storage.getItem("theme"));
+Storage.on("change", ({ key, value }) => {
+  if (key === null || key === "theme") theme.set(value);
+});
+```
 
 ### Keeping a signal on the device
 

@@ -62,7 +62,7 @@ nsh init [DIR] [--name <NAME>] [--template <ts|rust|mixed>] [--nsh-source <DIR>]
 |---|---|
 | `rust` | 用 Rust 编写的应用：一个 Cargo 项目（`Cargo.toml`、包含根组件的 `src/lib.rs`、供 `cargo run` 使用的 `src/main.rs`），设置了 `"rust": "."` 和 `"root": "App"` 的 `nsh.json`、根组件的测试 `App.test.tsx`（以及 `tsconfig.json` 和 `.nsh/types`）、`.gitignore` 和 README（其中也说明了之后如何添加 TSX 入口）。`nsh run` 和 `nsh package` 在所有目标（包括浏览器）上挂载根组件，不使用 QuickJS（`nsh test` 为 TypeScript 测试打开它）（见[用 Rust 开发](./rust.md)）；`cargo run` 直接在 macOS、Windows 或 Linux 上启动它。 |
 | `ts` | TSX 应用：`App.tsx`、它的测试 `App.test.tsx`（`nsh test`）、`nsh.json`、`tsconfig.json`、`.gitignore` 和 `.nsh/types`。已存在的文件会保留；只有当这些文件全部已存在时才会失败。 |
-| `mixed` | 根目录即一个 Rust crate 的 TSX 应用：`App.tsx`、它的测试 `App.test.tsx`、`tsconfig.json`、设置了 `"rust": "."` 的 `nsh.json`、`.gitignore`、`.nsh/types`、README，以及与 `App.tsx` 并列的 crate（`Cargo.toml`、`src/lib.rs`），它的 `#[native_module("<name>/native")]` 导出一个组件、一个模块和一个类，供 `App.tsx` 使用。没有 `"root"`，入口就是 `App.tsx`。 |
+| `mixed` | 用 `ext/` 里的 Rust 扩展的 TSX 应用：`App.tsx`、它的测试 `App.test.tsx`、`tsconfig.json`、`.gitignore`、`.nsh/types`、README，以及 `ext/<name>-native/` 里应用自己的 nshm crate（`Cargo.toml`、`src/lib.rs`），`nsh.json` 在 `"dependencies"` 中按路径列出它，它的 `#[native_module("<name>-native")]` 导出一个组件、一个模块和一个类，供 `App.tsx` 使用（[应用自己的 Rust：ext/](./nshm.md#应用自己的-rustext)）。 |
 
 | 参数 | 说明 |
 |---|---|
@@ -320,11 +320,12 @@ nsh keygen <NAME>
 ### nsh update-manifest
 
 ```sh
-nsh update-manifest [<ARCHIVE>...] [--package <FILE.nshpkg>] [--entry <DIR>] [--key <FILE>] [--notes <FILE>] [--notes <TAG>=<FILE>]... [--link ios=<URL>] [--link android=<URL>] [--base-url <URL>] [-o <DIR>]
+nsh update-manifest [<ARCHIVE>...] [--package <FILE.nshpkg>] [--entry <DIR>] [--key <FILE>] [--notes <FILE>] [--notes <TAG>=<FILE>]... [--link ios=<URL>] [--link android=<URL>] [--previous <ARCHIVE>]... [--base-url <URL>] [-o <DIR>]
 ```
 
 根据各平台 `nsh package` 产出的压缩包写出 `latest.json`（加 `--key` 时还有 `latest.json.sig`）；加 `--package` 时还写入应用代码的签名包（`nsh publish` 产出），写入前会按应用 id 和 `updater.packages.roots` 校验它，详见 [OTA 更新](/zh-CN/docs/ota-updates)。一个版本可以只有包。
 `--notes <TAG>=<FILE>` 加入另一种语言（BCP 47 标签）的更新说明，写在清单旁边的 `notes.<TAG>.md`；需要同时给不带标签的 `--notes`。
+`--previous <ARCHIVE>` 传入上一版本某平台的压缩包，在清单旁写出从它到新版本的补丁（`<压缩包>.from-<版本>.patch`）；运行那个版本的应用会下载补丁，而不是整个压缩包。
 
 ### nsh certify
 

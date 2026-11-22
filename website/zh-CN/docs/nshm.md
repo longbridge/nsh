@@ -143,7 +143,7 @@ nsh add nsh-extra --features camera
 | Feature | TSX | 作用 |
 |---|---|---|
 | `camera` | `Camera` | 在 iOS 和 Android 上用系统相机拍一张照片 |
-| `push` | `Push` | 在 iOS 上接收任意推送服务发来的远程通知 |
+| `push` | `Push` | 在 iOS 上接收任意推送服务发来的远程通知，在 Android 上通过该服务的绑定接收 |
 
 ```tsx
 import { Camera } from "nsh-extra";
@@ -159,7 +159,7 @@ if (await Camera.available()) {
 
 ### Push
 
-`Push` 向系统的推送服务注册设备，把设备 token 交给应用，应用再把它发给自己使用的推送服务。之后通知以事件的形式到达：
+`Push` 向推送服务注册设备，把设备 token 交给应用，应用再把它发给自己的服务器。之后通知以事件的形式到达。iOS 上用的是系统的推送服务；Android 没有每台设备都有的推送服务，因此应用要链接一个推送服务的绑定，即基于 `nsh_extra::push`、封装该服务 SDK 的 crate：
 
 ```sh
 nsh add nsh-extra --features push
@@ -193,15 +193,83 @@ function closeConversation(threadId: string) {
 }
 ```
 
-- `register()` 以 `{ token }` 完成，`token` 是推送服务要的字符串（iOS 上是十六进制）；设备未能注册时以系统给出的原因拒绝。系统要能连上它的服务器才会答复，离线时这个 Promise 会一直等待：可靠的做法是 `on("token")`，token 变了它也会报告。每次启动都注册一次，`token()` 读取最近的一个。
+- `register()` 以 `{ token }` 完成，`token` 是推送服务要的字符串（iOS 上是十六进制）；设备未能注册时以服务给出的原因拒绝。服务要能连上才会答复，离线时这个 Promise 会一直等待：可靠的做法是 `on("token")`，token 变了它也会报告。每次启动都注册一次，`token()` 读取最近的一个。
 - `press` 报告用户点按的通知，包括启动应用的那一条，它会等到第一个监听者。`notification` 报告应用在前台时到达的通知。两者都带它的 `id`、`threadId` 和推送服务发来的 `payload`。payload 是不可信输入。
-- `background` 报告唤醒应用或在前台到达的投递（iOS 上是带 `content-available` 的那种；可见且带 `content-available` 的推送在前台到达时，也会报告给 `notification`）。系统会等它的监听者：返回一个 Promise 表示这项工作及其结果，须在投递到达后 25 秒内完成。到达时没有监听者的投递，最多等到到达后 5 秒。
-- `setForegroundPresentation(presentation)` 决定应用在前台时通知怎么显示，`setForegroundPresentation(presentation, { threadId })` 决定某个 thread 的通知怎么显示；传 `null` 撤销。它们要在通知到达前设好（系统会立即询问），并对应用的所有界面生效。
-- `closeThread(threadId)` 移除某个 thread 里已送达的通知，`Notifications.show` 显示的除外；`Notifications.close(id)` 移除单条。
-- 独立运行的 iOS 应用里 `available()` 为 `true`。其他地方为 `false`，`register` 和 `closeThread` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝。
+- `background` 报告唤醒应用或在前台到达的投递（iOS 上是带 `content-available` 的那种，可见且带 `content-available` 的推送在前台到达时，也会报告给 `notification`；Android 上是绑定交来的投递）。系统会等它的监听者：返回一个 Promise 表示这项工作及其结果，须在投递到达后 25 秒内完成。到达时没有监听者的投递，最多等到到达后 5 秒。
+- `setForegroundPresentation(presentation)` 决定应用在前台时通知怎么显示，`setForegroundPresentation(presentation, { threadId })` 决定某个 thread 的通知怎么显示；传 `null` 撤销。它们要在通知到达前设好（系统会立即询问），并对应用的所有界面生效。Android 上由绑定按它们发出通知。
+- `closeThread(threadId)` 移除某个 thread（Android 上是通知分组）里已送达的通知，`Notifications.show` 显示的除外；`Notifications.close(id)` 移除单条。
+- 独立运行的 iOS 应用里，以及应用链接了推送服务绑定的地方，`available()` 为 `true`。其他地方为 `false`，`register` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝；`closeThread` 也一样，Android 除外。
 - 声明了 `"capabilities"` 的应用用 [`"notifications": true`](./sandbox-and-capabilities.md#notifications) 授予 `Push`，与 `Notifications` 用的是同一项能力。token、投递和它们的显示方式属于整个应用，所以除 `available()` 外的每个函数都先检查这项能力。
 
-开启这个 feature 后，打包的应用会带上 `remote-notification` 后台模式。`aps-environment` entitlement 来自应用签名所用的描述文件（[iOS 真机](./packaging.md#ios-真机)）。Rust 代码（比如某个推送服务 SDK 的绑定）使用 `nsh_extra::push`：`on_event` 收到同样的事件，并带 token 的原始字节；`set_foreground_presentation_decider` 在原生侧决定每条通知怎么显示；启动参数从 `nsh_platform_ios::on_application_event` 取得（[应用事件](./ios.md#应用事件)）。
+开启这个 feature 后，打包的 iOS 应用会带上 `remote-notification` 后台模式。`aps-environment` entitlement 来自应用签名所用的描述文件（[iOS 真机](./packaging.md#ios-真机)）。Android 上它不添加任何条目：推送服务的 SDK 自带它的 manifest 所需。Rust 代码（比如某个推送服务 SDK 的绑定）使用 `nsh_extra::push`：`on_event` 收到同样的事件，并带 token 的原始字节；`set_foreground_presentation_decider` 在原生侧决定每条通知怎么显示；iOS 的启动参数从 `nsh_platform_ios::on_application_event` 取得（[应用事件](./ios.md#应用事件)）。绑定实现 `PushProvider`（向它的服务注册设备），在自己的 `#[native_module]` 入口里用 `set_provider` 设上，再用 `provide_token`、`provide_registration_failure`、`provide_notification` 和 `provide_background` 报告服务送来的内容。点按绑定发出的通知会以 intent 的 extras 携带 payload 打开应用，`press` 收到的 `payload` 就是这些 extras（Android 不告诉是哪条通知，所以没有 `id` 和 `threadId`）。
+
+## 应用自己的 Rust：`ext/`
+
+需要自己写 Rust 的 TSX 应用（扫描器、解析器、数据库、原生视图）把 Rust 放在 `ext/`，与 `src/` 并列：`src/` 放应用的 TSX，`ext/` 放它的 Rust，每个目录一个 nshm crate。应用在 `nsh.json` 的 `"dependencies"` 里按路径列出每个 crate，TSX 像导入其他 nshm 一样导入它。`nsh init --template mixed` 创建的就是这种结构。
+
+```text
+my-app/
+├── App.tsx                    入口
+├── src/                       应用的 TSX 模块
+├── ext/                       应用的 Rust
+│   └── my-app-native/
+│       ├── Cargo.toml         nsh-core 和这个 crate 自己的依赖
+│       └── src/lib.rs         #[native_module("my-app-native")]
+├── nsh.json                   "dependencies": { "my-app-native": { "path": "ext/my-app-native" } }
+└── nsh.lock
+```
+
+磁盘占用分析工具 [Disktree](https://github.com/huacnlee/disktree) 就是这样构建的：界面是 `App.tsx` 和 `src/` 里的 TSX，文件系统扫描、SQLite 索引和删除文件是 `ext/disktree-native` 里的 Rust：
+
+```json
+// nsh.json
+{
+  "name": "disktree",
+  "dependencies": {
+    "disktree-native": { "path": "ext/disktree-native" }
+  }
+}
+```
+
+```rust
+// ext/disktree-native/src/lib.rs（节选）
+mod scanner;
+
+use nsh_core::prelude::*;
+
+/// Scans, browses and removes entries using the native disk index.
+#[module]
+pub struct DiskTree;
+
+#[module]
+impl DiskTree {
+    /// Runs a filesystem operation with a JSON payload and returns its JSON result.
+    pub async fn request(route: String, body: String) -> Result<String, String> {
+        // async fn 在 TSX 中返回 Promise；blocking 让文件系统操作不占用 UI 线程。
+        blocking(move || scanner::dispatch(&route, &body)).await
+    }
+}
+
+#[native_module("disktree-native")]
+fn native(registry: &mut Registry) {
+    registry.module::<DiskTree>();
+}
+```
+
+```ts
+// src/runtime.ts
+import { DiskTree } from "disktree-native";
+
+const result = JSON.parse(await DiskTree.request("/scan", JSON.stringify({ path })));
+```
+
+为什么用 `ext/`，而不是把应用根目录做成 crate（`"rust": "."`）：
+
+- **与其他 nshm 一样。** 应用自己的 Rust 和安装的 nshm 用同样的方式列出、锁定和构建；以后把 `ext/` 里的 crate 发布到 crates.io 或单独的仓库，只需改它在 `nsh.json` 里的条目。
+- **每个 crate 独立。** 它有自己的 `Cargo.toml`、依赖和测试（在它的目录里 `cargo test`），并在 `~/.nsh/builds` 里优化构建一次，直到它改变。应用根目录仍是 TSX 项目。
+- **接口小。** TSX 只能通过 `#[native_module]` 注册的内容访问 Rust，声明由 Rust 签名生成（`.nsh/types/<crate>.d.ts`），边界有类型，评审时一目了然。
+
+用 `cargo new --lib ext/<name>` 新增 crate，写上 `#[native_module("<name>")]`，再运行 `nsh add --path ext/<name>`。界面留在 TSX，需要原生性能、平台能力或 crates.io 生态的部分放进 Rust；必须原生的视图也可以由 crate 导出为组件（[Rust nshm](#rust-nshm)）。
 
 ## 编写 nshm
 
@@ -269,41 +337,47 @@ NSCameraUsageDescription = "扫描相机对准的条码。"
 permissions = ["CAMERA"]
 queries = ['<intent><action android:name="android.media.action.IMAGE_CAPTURE"/></intent>']
 application = ['<service android:name="com.example.scanner.Sync" android:exported="false"/>']
+libraries = ["android/libs/scanner-glue.jar"]
 ```
 
 | 键 | 添加的内容 |
 |---|---|
 | `ios.infoPlist` | iOS 应用 `Info.plist` 的键，与 `nsh.json` 的 `ios.infoPlist` 相同 |
+| `ios.infoPlistStrings` | 这些键在其他语言下的文字，按语言给出，与 `nsh.json` 的 `ios.infoPlistStrings` 相同（[打包](./packaging.md#其他语言的-infoplist-文字)） |
 | `ios.entitlements` | iOS 应用的 entitlements |
 | `android.permissions` | `<uses-permission>` 元素，写法与 `nsh.json` 相同（`CAMERA` 即 `android.permission.CAMERA`） |
 | `android.queries` | manifest `<queries>` 里的 `<intent>`、`<package>`、`<provider>` 元素 |
-| `android.application` | `<application>` 里的 `<service>`、`<receiver>`、`<provider>`、`<activity>`、`<meta-data>` 元素；`${applicationId}` 是应用的包名 |
-| `android.dex` | crate 的 Java 代码的 dex 文件，打包时排在应用的之后（见 [Java 代码](./packaging.md#java-代码)） |
+| `android.application` | `<application>` 里的 `<service>`、`<receiver>`、`<provider>`、`<activity>`、`<meta-data>` 元素；`${applicationId}` 是应用的包名，其他占位符取应用的 `android.manifestPlaceholders` |
+| `android.libraries` | Java 库：jar、Android 库（`.aar`）和 dex 文件，路径相对于 crate 的 `Cargo.toml`，打包方式与 `nsh.json` 的 `android.libraries` 相同（[Java 代码](./packaging.md#java-代码)） |
 | `android.res` | 一个 Android 资源目录，布局与应用的 `android/res/` 相同，链接在应用的资源之下，两者声明同名资源时以应用的为准 |
-| `android.jniLibs` | 一个原生库目录，按 `<abi>/*.so` 布局（`arm64-v8a`、`armeabi-v7a`、`x86`、`x86_64`），与 `libnsh.so` 一起打包；64 位库必须按 16 KB 页对齐 |
+| `android.jniLibs` | 一个原生库目录，按 `<abi>/*.so` 布局（`arm64-v8a`、`armeabi-v7a`、`x86`、`x86_64`），与 Android 库的原生库一样和 `libnsh.so` 一起打包；64 位库必须按 16 KB 页对齐 |
 
-路径相对于 crate 的 `Cargo.toml`，用 `/` 分隔，且必须位于 crate 之内（链接也按其指向判断），因此 nshm 只能打包它自己附带的文件；
-指向文件夹的链接会被拒绝。只有 Android 包和 Android 开发宿主读取这些文件，所以文件缺失或有误不会让 iOS 构建停下：
+crate 不能设置 `android.manifestPlaceholders`，设置了会报错：占位符的值（例如某个服务的 key）属于应用，写在应用的 `nsh.json` 里。
+两个 crate 带了同一个 Android 库的不同版本时，用应用在自己的 `android.libraries` 里列出的那个版本。
+
+`android.res` 和 `android.jniLibs` 的路径相对于 crate 的 `Cargo.toml`，用 `/` 分隔，且必须位于 crate 之内（链接也按其指向判断），
+因此 nshm 只能打包它自己附带的文件；指向文件夹的链接会被拒绝。只有 Android 包和 Android 开发宿主读取它们，所以文件缺失或有误不会让 iOS 构建停下：
 
 ```toml
 [package.metadata.nsh.android]
-dex = ["android/ocr.dex"]
 res = "android/res"
 jniLibs = "android/jniLibs"
 ```
 
 打包会对这些文件做什么、不做什么：
 
-- dex 文件排在应用自己的之后，所以两者都有的类从应用的 dex 加载；两个 crate 都有的类从先加载的那个取得，并且不会报告。dex 里只放你自己的类。
 - 资源没有 `R` 类：Java 代码按名字查找它们，`getResources().getIdentifier("scan", "drawable", context.getPackageName())`。
   两者声明同名资源时以应用的 `android/res` 为准，按配置逐一比较：应用只声明了 `values` 时，crate 的 `values-fr` 字符串仍会保留；
   两者都声明的 style 会逐项合并。用了 NSH 生成的名字（`ic_launcher…`、`nsh_…`、`NshLaunch…`）或另一个 crate 已声明的名字会报错。
 - 原生库是 `lib<name>.so` 文件，用 `System.loadLibrary("<name>")` 加载；包内以不压缩的形式存放，不会解压出来，所以按文件系统路径打开它的代码找不到它。
-  两个 crate 带同名库时，内容相同只打包一份，否则报错。64 位库必须按 16 KB 页对齐（`-Wl,-z,max-page-size=16384`），
+  它们遵循 Android 库原生库的规则：两个 crate（或一个 crate 和一个 AAR）带同名库时，内容相同只打包一份，否则报错；crate 带了原生库却缺少包里某个 ABI 的版本时报错
+  （可用 `--abi` 只打包较少的 ABI）。每个库必须是其所在文件夹 ABI 的共享库，64 位库必须按 16 KB 页对齐（`-Wl,-z,max-page-size=16384`），
   Google Play 从目标 SDK 35 起要求这一点。
 - 早于这些键的 `nsh` 构建时不带这些文件，并警告它不读取它们；用到它们的 nshm 应要求本版本或更新的 `nsh-core`。
 
 应用自己的 `nsh.json` 优先：它设置过的键保留它的值，数组（例如 `UIBackgroundModes`）合并。两个 crate 给同一个键设置了不同的值时（例如两段不同的相机用途说明），由应用在 `ios.infoPlist` 或 `ios.entitlements` 里写这个键来决定；应用没写之前，打包 iOS 应用会报错并指出这两个 crate。NSH 自己设置的键（包标识、版本等）不能由 crate 设置。
+
+crate 翻译的是各 crate 在 `ios.infoPlist` 里设置的键，按它们的措辞翻译；按应用开启的 feature 没有 crate 设置的键（例如所在 feature 没开），它的翻译会被略过并给出警告。应用只采用自己支持的语言的 crate 翻译，即 `locales` 里的语言或应用自己 `ios.infoPlistStrings` 里的语言（写一个空的 `{}` 就是只声明语言、不写自己的文字），所以 crate 可以带上很多语言，而不会给应用增加语言。应用自己设置了的键不采用任何 crate 的翻译，因为那些翻译说的不是应用自己的文字。两个 crate 对同一个键给出不同的翻译时，同样由应用在 `ios.infoPlistStrings` 里写这个键来决定。
 
 在应用旁边开发时用 `nsh add --path ../my-gauge`，按目录当前内容使用。发布方式与普通 crate 相同（`cargo publish`），加上关键词 `nshm`，便于在 [crates.io](https://crates.io/keywords/nshm) 上找到；也可以推送到 Git 并给版本打标签。
 
@@ -355,4 +429,4 @@ nshm 可以提供自己的 target，例如 NSH 不构建的平台：在 `nsh.jso
 
 ## 安全
 
-nshm 的构建脚本和过程宏会在应用构建时执行，它的代码（无论 Rust 还是 TSX）以应用的权限运行。应用依赖图里的任何 crate 还能通过 `[package.metadata.nsh]` 给打包的应用加系统权限、清单组件和 entitlements。请像审查应用自己的代码一样审查它的源码和 `nsh.lock` 的变更。
+nshm 的构建脚本和过程宏会在应用构建时执行，它的代码（无论 Rust 还是 TSX）以应用的权限运行。应用依赖图里的任何 crate 还能通过 `[package.metadata.nsh]` 给打包的应用加系统权限、清单组件、Java 库和 Android 库（连同其中的原生代码）以及 entitlements。请像审查应用自己的代码一样审查它的源码和 `nsh.lock` 的变更。

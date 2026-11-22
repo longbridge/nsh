@@ -1546,12 +1546,18 @@ impl Headless {
                 continue;
             }
             let applied = self.applied;
+            let answered = self.host.calls_answered();
             let idle = self.flush(end);
             self.drain();
             if self.applied != applied || self.wants_frames() || !self.errors.is_empty() {
                 continue;
             }
             if idle && self.host.calls_in_flight() == 0 {
+                // An answer that came after the engine said it was idle
+                // waits on its queue: the next flush runs it.
+                if self.host.calls_answered() != answered {
+                    continue;
+                }
                 return true;
             }
             // What comes from elsewhere comes in real time.
@@ -1601,6 +1607,7 @@ impl Headless {
                 return false;
             }
             let applied = self.applied;
+            let answered = self.host.calls_answered();
             let (idle, due) = self.flush_until_due(end);
             self.drain();
             if self.applied != applied || !self.errors.is_empty() {
@@ -1619,6 +1626,12 @@ impl Headless {
                     Pumped::Error | Pumped::Exited => return true,
                     Pumped::Timeout => {}
                 }
+                continue;
+            }
+            // One answered after the engine said it was idle (made in this
+            // flush, or in flight before it) waits on its queue: the next
+            // flush runs it.
+            if self.host.calls_answered() != answered {
                 continue;
             }
             let now = Instant::now();

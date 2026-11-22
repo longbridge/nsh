@@ -474,7 +474,10 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   change that only refreshes the node (a change the app makes by itself to a plain checked or selected state, and a
   tab selected without the focus, are silent, as there is nothing TalkBack reads for them). A first mount, an
   unchanged update, a hidden element and a view not shown send nothing; a list cell recycled for another row may
-  send one, as its props change.
+  send one, as its props change. The state words iOS and Android supply (checked, expanded, current, invalid...)
+  are in the language of the app's text, as NSH's menus on the desktops are (`i18n::text_locale`): the core sends
+  `Command::TextLocale` on the root of those surfaces when it changes, and the words of mounted views follow it the
+  next time a screen reader reads them.
   The `increment` / `decrement` actions make an element adjustable whatever its
   role: iOS adds the adjustable trait to the traits of its role (`native_view.rs` `traits`), so VoiceOver's swipe up /
   down performs them (an `image`, `Plot`'s role, stays an image), Android offers scroll forward / backward, Windows
@@ -650,7 +653,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   During an input method's composition Linux and the web insert nothing and log a warning. With `"insert"` the
   input has inserted the paste already, so an `insertText` from `onPaste` inserts it a second time. Where Paste is offered, it is offered for images and files too while
   the app listens. iOS: `Field` / `Area` override `paste:` (`system::pasted`: strings, `IMAGE_TYPES` data else
-  `UIImage` PNGs, file URLs) and `canPerformAction:withSender:`; with a `maxLength` they insert the clipped text
+  `UIImage` PNGs, file URLs, and the data of items that are no text, link or image, as a document copied in Files,
+  named as its item provider suggests) and `canPerformAction:withSender:`; with a `maxLength` they insert the clipped text
   themselves (`paste_text`, the test agent's paste too) instead of UIKit's `paste:`; Android: `setOnReceiveContentListener` (API 31;
   the clipboard and keyboards' rich content; images read from their content URIs, through `Native.paste`; the text
   goes back to the EditText while it inserts) and `onTextContextMenuItem` before; macOS: `TextArea` and a field

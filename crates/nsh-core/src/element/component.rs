@@ -574,7 +574,7 @@ pub struct Root {
     fonts: Vec<Arc<[u8]>>,
     appearance: Option<crate::platform::Appearance>,
     app_id: Option<String>,
-    url_schemes: Vec<String>,
+    links: crate::url_scheme::AppLinks,
     capabilities: Option<crate::access::Capabilities>,
     status_bar: Option<crate::StatusBarSetting>,
     main_window: Option<crate::desktop::MainWindowOptions>,
@@ -592,7 +592,7 @@ impl Root {
             fonts: Vec::new(),
             appearance: None,
             app_id: None,
-            url_schemes: Vec::new(),
+            links: crate::url_scheme::AppLinks::default(),
             capabilities: None,
             status_bar: None,
             main_window: None,
@@ -668,17 +668,54 @@ impl Root {
         self.app_info.as_ref()
     }
 
-    /// The URL schemes the app claims (`nsh.json` `schemes`,
-    /// which nsh's generated code sets): the links the core lets
-    /// through ([`crate::url_scheme`], [`crate::element::next_url_scheme_open`]).
+    /// The URL schemes the app claims (`nsh.json` `schemes`): the links the
+    /// core lets through ([`crate::url_scheme`],
+    /// [`crate::element::next_url_scheme_open`]). Replaces the schemes of
+    /// [`Root::links`], keeping its web links.
     pub fn url_schemes(mut self, schemes: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        self.url_schemes = schemes.into_iter().map(Into::into).collect();
+        self.links.set_schemes(schemes);
         self
     }
 
     /// The schemes the app claims ([`Root::url_schemes`]).
     pub fn url_schemes_ref(&self) -> &[String] {
-        &self.url_schemes
+        self.links.schemes()
+    }
+
+    /// The links the app claims (`nsh.json` `schemes` and `links`, which
+    /// nsh's generated code sets): URLs of its schemes and `https` URLs of
+    /// its web links, the links the core lets through ([`crate::url_scheme`],
+    /// [`crate::element::next_url_scheme_open`]).
+    pub fn links(mut self, links: crate::url_scheme::AppLinks) -> Self {
+        self.links = links;
+        self
+    }
+
+    /// [`Root::links`] from `nsh.json`'s `schemes` and `links` as JSON text
+    /// (`{"schemes": [...], "links": [...]}`), which nsh's generated code
+    /// compiles in (checked when it was generated). Read as a package's
+    /// `app.json` is: what this runtime cannot claim is left out (logged).
+    #[doc(hidden)]
+    pub fn links_json(self, json: &str) -> Self {
+        let links = match serde_json::from_str::<serde_json::Value>(json) {
+            Ok(config) => {
+                let (links, ignored) = crate::url_scheme::AppLinks::from_json_lenient(&config);
+                for what in ignored {
+                    log::warn!("nsh.json: {what}, ignored");
+                }
+                links
+            }
+            Err(e) => {
+                log::warn!("nsh.json: links: {e}; none claimed");
+                crate::url_scheme::AppLinks::default()
+            }
+        };
+        self.links(links)
+    }
+
+    /// The links the app claims ([`Root::links`]).
+    pub fn links_ref(&self) -> &crate::url_scheme::AppLinks {
+        &self.links
     }
 
     /// What the app declares it may reach (`nsh.json` `capabilities`, which

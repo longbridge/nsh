@@ -98,6 +98,15 @@ jobs:
         with:
           cache: windows
 
+      # Cargo retries oversized compiler commands with an argument file when
+      # it receives the Windows launch error directly from starting rustc.
+      - name: Use the toolchain compiler directly
+        shell: pwsh
+        run: |
+          $rustc = rustup which rustc
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "RUSTC=$rustc" >> $env:GITHUB_ENV
+
       - name: Clippy
         run: >
           cargo clippy --all-targets
@@ -113,15 +122,6 @@ jobs:
       # Tests need no display: they open no window.
       - name: Test
         run: cargo test -p nsh-platform-windows -p nsh-windows-host -p nsh-windows-app -p nsh-cli -p nsh-dev -p xtask
-
-      # Cargo retries oversized compiler commands with an argument file when
-      # it receives the Windows launch error directly from starting rustc.
-      - name: Use the toolchain compiler directly for examples
-        shell: pwsh
-        run: |
-          $rustc = rustup which rustc
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          "RUSTC=$rustc" >> $env:GITHUB_ENV
 
       # The examples' tests in Win32 windows, with the platform's input
       # (`nsh test --target windows`): those a real platform runs (real

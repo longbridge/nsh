@@ -64,7 +64,8 @@ Things that were found the hard way. Read the section of the area you change bef
   (`pixel`, `span`): `round(to) - round(from)` in points differs in its last bits with where the edges are, and a 28 point
   row at 2.625 (73.5 pixels) has every other edge on a half pixel, which an `f32`'s hair rounds either way. As a scroll
   moved DataTable's body a pixel, every frame in it was sent again (460–1000 mount items a frame on a Pixel 10 Pro instead
-  of 3); a half pixel is snapped first, so it always rounds up.
+  of 3); a half pixel is snapped first, so it always rounds up. A box thinner than a pixel never rounds to nothing
+  (`edges`): a 0.5 point rule at one pixel per point keeps a pixel inside its parent, and its neighbours still meet.
 - **The core keeps its own layout tree** (`core/layout_tree.rs`: Taffy's algorithms over the core's nodes through Taffy's low-level
   traits, as `TaffyTree` runs them, call for call). `TaffyTree::mark_dirty` stops at the first node whose cache is already empty, taking
   its ancestors for dirty too; nodes of a `display: none` subtree and absolutely positioned ones always have empty caches while the nodes
@@ -291,8 +292,9 @@ Things that were found the hard way. Read the section of the area you change bef
   `ModalHost::dismiss` dismisses through `presentingViewController`, which takes the modal and everything above it.
   So a modal shown while another leaves (one closed and one opened in the same batch) must not be presented over the
   leaving one: the mounter dismisses first and presents the new modal once the old one is gone, and presents again
-  the modals the app still shows that went along. A modal also leaves with the subtree it is in, not only when its
-  own node is removed.
+  the modals the app still shows that went along. A dismissal still waiting for another transition to end counts as
+  leaving too. A modal also leaves with the subtree it is in, not only when its own node is removed, and reports its
+  close (`onClose`) once gone, also when its node was released in the same batch (as JS does when the app closes it).
 
 - **iOS, presses near the top of the window**: UIKit attaches tap recognizers to the window that skip `UIControl`s, and a
   press is a gesture recognizer, not a control. On iOS 26+ the window's `_UIDoubleTapInteraction` (a single-tap

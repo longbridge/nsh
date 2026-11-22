@@ -176,7 +176,8 @@ Rust uses `RichEditor::on_content_size_change`, whose listener receives
 
 Input (`controller.rs`): as the code `Editor`, an invisible native input at the caret (the sink) takes typed text
 and input methods. The sink is the editor's one stop of Tab; the content box takes the pointer only
-(`focusable(false)`), and a press in it focuses the sink. A node selection of a block atom has no caret: the sink is at the node's box, where a platform
+(`focusable(false)`), and a press in it focuses the sink. The keyboard is the sink's, so the editor's
+`input_accessory` (`inputAccessoryViewID`) is set on the sink, as an `Input`'s. A node selection of a block atom has no caret: the sink is at the node's box, where a platform
 that scrolls a field into view as it focuses it (a browser) finds it, and scrolling the selection into view
 (`scroll_into_view`) brings the node in whole, as ProseMirror scrolls a node selection's DOM node. Typed text goes to plugins' `handle_text_input` (input rules), else is inserted with the stored
 marks (origin `Input`). While an input method composes, its text shows in the line at the caret with the block's

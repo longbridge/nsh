@@ -63,7 +63,7 @@ Creates an app in `DIR` (default: the current directory, created if missing) fro
 |---|---|
 | `rust` | An app written in Rust: a Cargo project (`Cargo.toml`, `src/lib.rs` with the root component, `src/main.rs` for `cargo run`), `nsh.json` with `"rust": "."` and `"root": "App"`, the root's test `App.test.tsx` with `tsconfig.json` and `.nsh/types`, `.gitignore` and a README, which also says how to add a TSX entry later. `nsh run` and `nsh package` mount the root with no QuickJS on every target (`nsh test` opens it for TypeScript tests), the browser included ([Building with Rust](./rust.md)); `cargo run` starts it on macOS, Windows or Linux directly. |
 | `ts` | A TSX app: `App.tsx`, its test `App.test.tsx` (`nsh test`), `nsh.json`, `tsconfig.json`, `.gitignore` and `.nsh/types`. Files that exist are kept; it fails only if all of them exist already. |
-| `mixed` | A TSX app with a Rust crate of its own at its root: `App.tsx`, its test `App.test.tsx`, `tsconfig.json`, `nsh.json` with `"rust": "."`, `.gitignore`, `.nsh/types`, a README, and the crate beside `App.tsx` (`Cargo.toml`, `src/lib.rs`), whose `#[native_module("<name>/native")]` exports a component, a module and a class that `App.tsx` uses. With no `"root"`, `App.tsx` is the entry. |
+| `mixed` | A TSX app extended with Rust in `ext/`: `App.tsx`, its test `App.test.tsx`, `tsconfig.json`, `.gitignore`, `.nsh/types`, a README, and an nshm crate of the app's own in `ext/<name>-native/` (`Cargo.toml`, `src/lib.rs`), which `nsh.json` lists in `"dependencies"` by path and whose `#[native_module("<name>-native")]` exports a component, a module and a class that `App.tsx` uses ([An app's own Rust: ext/](./nshm.md#an-apps-own-rust-ext)). |
 
 | Flag | Description |
 |---|---|
@@ -325,7 +325,7 @@ Creates an Ed25519 key pair: `<NAME>.secret` and `<NAME>.pub` (e.g. `nsh keygen 
 ### nsh update-manifest
 
 ```sh
-nsh update-manifest [<ARCHIVE>...] [--package <FILE.nshpkg>] [--entry <DIR>] [--key <FILE>] [--notes <FILE>] [--notes <TAG>=<FILE>]... [--link ios=<URL>] [--link android=<URL>] [--base-url <URL>] [-o <DIR>]
+nsh update-manifest [<ARCHIVE>...] [--package <FILE.nshpkg>] [--entry <DIR>] [--key <FILE>] [--notes <FILE>] [--notes <TAG>=<FILE>]... [--link ios=<URL>] [--link android=<URL>] [--previous <ARCHIVE>]... [--base-url <URL>] [-o <DIR>]
 ```
 
 Writes `latest.json` (and `latest.json.sig` with `--key`) for the archives `nsh package` made on each platform and,
@@ -333,6 +333,8 @@ with `--package`, a signed package of the app's code (`nsh publish`'s), which it
 `updater.packages.roots` first: see [OTA Updates](/docs/ota-updates). A release may have only a package.
 `--notes <TAG>=<FILE>` adds the notes in another language (a BCP 47 tag), written beside the manifest as
 `notes.<TAG>.md`; it needs an untagged `--notes` too.
+`--previous <ARCHIVE>` takes the previous release's archive of a platform and writes a patch from it beside the
+manifest (`<archive>.from-<version>.patch`): apps running that version download it instead of the whole archive.
 
 ### nsh certify
 
