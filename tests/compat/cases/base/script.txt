@@ -4393,6 +4393,20 @@ covers [props] DataTable.renderCell
 covers [events] DataTable.onSortChange
 covers [events] DataTable.onVisibleRowsChange
 
+# base-data-table-activate
+tap id:case-base-data-table-activate
+expect Activated: none
+# A press on a cell selects it and gives the table the keyboard. Enter /
+# Return activates the focused row, the number `onRowPress` reports.
+tap text:pear
+key enter
+expect Activated: 0
+# An arrow moves the selection; Enter activates the row it moved to.
+key down
+key enter
+expect Activated: 1
+covers [events] DataTable.onRowActivate
+
 # base-data-table-fit-grow
 tap id:case-base-data-table-fit-grow
 # The name column fits its text once the rows come; the qty column grows

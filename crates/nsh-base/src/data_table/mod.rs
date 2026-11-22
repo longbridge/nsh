@@ -533,6 +533,12 @@ pub enum DataTableEvent {
     /// A row, cell or title was pressed twice.
     #[args(target)]
     DoublePress(DataTableTarget),
+    /// The focused row was activated (Enter / Return): the row, the number
+    /// `onRowPress` reports. It fires only when no text input or control
+    /// inside the table takes the key, and not at all while nothing
+    /// selects a row.
+    #[args(row)]
+    RowActivate(u32),
     /// A context menu was asked for (a secondary press, a long press) at a
     /// cell, a row's number or a title: the app opens its `Menu` at the
     /// point.
