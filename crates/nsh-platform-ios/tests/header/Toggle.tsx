@@ -10,8 +10,8 @@ interface Route {
 
 const route = (name: string, visible: boolean): Route => ({ name, visible: signal(visible) });
 
-/** A page's content and where it rests: the top inset of the page (below
- * the header UIKit shows, or the status bar) and the height it got. */
+/** A page's content and where it rests: the top inset of the page (what
+ * UIKit draws over the top of its content) and the height it got. */
 function Content(props: { name: string }) {
   const insets = safeAreaInsets();
   const height = signal<number | undefined>(undefined);
@@ -32,6 +32,8 @@ function Button(props: { label: string; onPress: () => void }) {
 
 function App() {
   const nav = createNavStack<Route>([route("Root", true)]);
+  // Pressed in the bar UIKit shows: found only while the bar is on screen.
+  const presses = signal(0);
   const toggle = () => {
     const top = nav.routes().at(-1);
     top?.visible.set(!top.visible());
@@ -40,8 +42,17 @@ function App() {
     <View style={{ flex: 1 }}>
       <NavStack state={nav} style={{ flex: 1 }}>
         {(r) => (
-          <NavPage title={r.name} headerVisible={r.visible()}>
+          <NavPage
+            title={r.name}
+            headerVisible={r.visible()}
+            ios={{
+              headerRightItems: [
+                { key: "add", symbol: "plus", label: "Header add", onPress: () => presses.set(presses() + 1) },
+              ],
+            }}
+          >
             <Content name={r.name} />
+            <Text>{`Header presses: ${presses()}`}</Text>
           </NavPage>
         )}
       </NavStack>

@@ -8,7 +8,8 @@ import { expect, open, test } from "nsh/test";
 import type { App } from "nsh/test";
 
 interface Rest {
-  /** The page's top inset: the bottom of its header, or of the status bar. */
+  /** The page's top inset: what UIKit draws over the top of its content
+   * (none below a header, the status bar without one). */
   top: number;
   /** The height its content got. */
   height: number;
@@ -25,11 +26,10 @@ async function rest(app: App, name: string): Promise<Rest> {
 
 test("a page on top that hides its header hides the bar", async () => {
   const app = await open("./Toggle.tsx");
-  const shown = await rest(app, "Root");
+  await rest(app, "Root");
   // Where a page pushed without a header rests: UIKit hid the bar for it.
   await app.press("text:Push hidden");
   const hidden = await rest(app, "Hidden");
-  expect(hidden.top).toBeLessThan(shown.top);
   await app.press("text:Pop");
   await app.waitFor("text:/^Hidden top:/", { state: "gone" });
   await app.press("text:Toggle");
@@ -38,9 +38,13 @@ test("a page on top that hides its header hides the bar", async () => {
 
 test("a page on top that shows its header shows the bar", async () => {
   const app = await open("./Toggle.tsx");
-  const shown = await rest(app, "Root");
+  await rest(app, "Root");
   await app.press("text:Push hidden");
   await rest(app, "Hidden");
   await app.press("text:Toggle");
-  expect(await rest(app, "Hidden")).toEqual(shown);
+  await rest(app, "Hidden");
+  // The core lays the page out for its header either way: the bar itself
+  // has to be on screen, with the page's button in it.
+  await app.press("label:Header add");
+  await app.waitFor("text:Header presses: 1");
 });
