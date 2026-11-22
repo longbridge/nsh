@@ -28709,7 +28709,8 @@ mod rust_windows {
     // turn follows the opening, in order; attributes join its options.
     #[test]
     fn requests_made_right_after_open_window_follow_its_opening() {
-        use crate::{desktop::WindowMode, element::desktop::open_window};
+        use crate::desktop::WindowMode;
+        use crate::element::desktop::open_window;
         let mut c = core();
         c.set_environment(crate::element::Environment {
             os: crate::platform::Os::MacOs,
