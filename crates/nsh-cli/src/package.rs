@@ -1378,9 +1378,11 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
             &config.features,
             crate::rust_app::current().is_some_and(|app| crate::rust_app::may_make_web_view(&app)),
         );
+        // Why each feature is in or out is detail: only verbose runs
+        // (`-v`) show it, a normal build stays quiet.
         for c in &choices {
             let mark = if c.keep { "keep" } else { "leave out" };
-            ui::note(format!("{mark} `{}`: {}", c.feature, c.why));
+            ui::debug(format!("{mark} `{}`: {}", c.feature, c.why));
         }
         crate::rust_app::set_runner_features(
             choices
