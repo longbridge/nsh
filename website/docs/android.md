@@ -34,6 +34,11 @@ and installs it again. For a TSX app, it installs a development host APK (rebuil
 forwards the dev server's port with `adb reverse`, so it works over USB without a shared network; the app updates as
 you save, with logs in the terminal.
 
+These development builds carry `libnsh.so` without its debug info, which keeps their APKs small enough to update on an
+emulator; the complete library is in `symbols/<abi>/` next to it, for `ndk-stack` and debuggers. When the device has no
+room to update the development host, NSH uninstalls it and installs it again: it holds only what the apps it runs
+wrote. An app's own APK is never uninstalled for you: the error says how to make room.
+
 ## Packaging
 
 ```sh

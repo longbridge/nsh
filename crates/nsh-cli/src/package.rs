@@ -1934,10 +1934,13 @@ fn package_android(
     ));
     if let Some(serial) = serial {
         let step = ui::Step::start(format!("installing {id} on {serial}"));
-        android::adb(
+        android::install(
             &sdk,
             &serial,
-            &["install", "-r", &apk_path.to_string_lossy()],
+            &apk_path,
+            id,
+            &["-r"],
+            android::AppData::Kept,
         )?;
         android::adb(
             &sdk,

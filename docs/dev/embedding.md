@@ -66,7 +66,9 @@
 - Release runtimes' `lib/<abi>/libnsh.so` is stripped with the NDK's `llvm-strip --strip-unneeded` (a quarter of each
   library, which APKs store uncompressed; the dynamic symbols JNI needs stay), and checked again; `symbols/<abi>/`
   keeps the linked library for `ndk-stack` and Play Console. The AARs carry the linked libraries: Gradle strips what
-  it packages and extracts the symbols itself.
+  it packages and extracts the symbols itself. Debug runtimes (and the CLI's debug builds of apps' libraries) are
+  stripped with `--strip-debug` instead: their debug info is most of the library and made development APKs too large
+  to update on emulators; the symbol table stays for crash reports, and `symbols/<abi>/` keeps the linked library.
 - The AARs carry `proguard.txt` (`AAR_KEEP_RULES` in `crates/xtask/src/android.rs`), which an app's minified build
   applies: `libnsh.so` finds `TextLayouts`, `NshView`, `Net` and `TestAgent` and their members by name over JNI
   (`JNI_OnLoad` fails without them) and binds the `native` methods of `Native`, `Net` and `SelectableView` by name,
