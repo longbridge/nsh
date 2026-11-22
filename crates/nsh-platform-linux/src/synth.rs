@@ -58,7 +58,14 @@ pub(crate) fn after_paint(window: &gtk::Window, f: impl FnOnce(&gtk::Window) + '
 /// whatever covers the window on screen.
 pub(crate) fn shot(window: &gtk::Window) -> Result<Vec<u8>, String> {
     let child = window.child().ok_or("the window shows nothing")?;
-    let (w, h) = (child.width(), child.height());
+    let (mut w, mut h) = (child.width(), child.height());
+    if w <= 0 || h <= 0 {
+        // A window the compositor never mapped (a test host's, offscreen)
+        // was never allocated: lay its content out at the window's size.
+        let (dw, dh) = window.default_size();
+        (w, h) = (dw.max(1), dh.max(1));
+        child.allocate(w, h, -1, None);
+    }
     let scale = f64::from(window.scale_factor().max(1));
     let paintable = gtk::WidgetPaintable::new(Some(&child));
     let snapshot = gtk::Snapshot::new();
@@ -73,9 +80,21 @@ pub(crate) fn shot(window: &gtk::Window) -> Result<Vec<u8>, String> {
         )
         .upcast()
     });
-    let renderer = window.renderer().ok_or("the window has no renderer")?;
     let bounds = gtk::graphene::Rect::new(0.0, 0.0, pw, ph);
-    let texture = renderer.render_texture(&node, Some(&bounds));
+    let texture = match window.renderer() {
+        Some(renderer) => renderer.render_texture(&node, Some(&bounds)),
+        // A window the compositor never mapped (a test host's, offscreen)
+        // has no renderer of its own: one of the display's draws it.
+        None => {
+            let renderer = gtk::gsk::CairoRenderer::new();
+            renderer
+                .realize_for_display(&gtk::prelude::WidgetExt::display(window))
+                .map_err(|e| format!("no renderer for the window: {e}"))?;
+            let texture = renderer.render_texture(&node, Some(&bounds));
+            renderer.unrealize();
+            texture
+        }
+    };
     Ok(texture.save_to_png_bytes().to_vec())
 }
 
