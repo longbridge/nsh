@@ -859,7 +859,11 @@ fn xml_attribute(value: &str) -> String {
 /// The permissions NSH declares: its own, then the app's
 /// (`android.permissions`), each once.
 fn declared_permissions(apk: &Apk<'_>) -> Vec<String> {
-    let mut permissions = vec!["android.permission.INTERNET".to_owned()];
+    // `ACCESS_NETWORK_STATE`: the default network's callback (`network()`).
+    let mut permissions = vec![
+        "android.permission.INTERNET".to_owned(),
+        "android.permission.ACCESS_NETWORK_STATE".to_owned(),
+    ];
     for (declared, name) in [
         (apk.notifications, "POST_NOTIFICATIONS"),
         (apk.microphone, "RECORD_AUDIO"),
@@ -2377,7 +2381,7 @@ mod tests {
         assert_eq!(manifest.matches("android.permission.INTERNET").count(), 1);
         assert!(
             manifest.contains(
-                "<uses-permission android:name=\"android.permission.INTERNET\" />\n    \
+                "<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\" />\n    \
              <uses-permission android:name=\"android.permission.WAKE_LOCK\" />\n    <!--"
             ),
             "{manifest}"
@@ -2447,6 +2451,7 @@ mod tests {
     const MANIFEST: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.app">
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Text actions (Translate and the like) the selection menu offers,
         as TextView's: Android 11+ hides other apps' activities otherwise. -->
     <queries>
@@ -2482,6 +2487,7 @@ mod tests {
     #[test]
     fn an_app_declares_the_permissions_it_lists_once() {
         let listed = [
+            "android.permission.READ_CONTACTS".to_owned(),
             "android.permission.ACCESS_NETWORK_STATE".to_owned(),
             "android.permission.POST_NOTIFICATIONS".to_owned(),
             "com.example.permission.READ".to_owned(),
@@ -2497,7 +2503,7 @@ mod tests {
                 .count()
         };
         assert_eq!(
-            declared("android.permission.ACCESS_NETWORK_STATE"),
+            declared("android.permission.READ_CONTACTS"),
             1,
             "{manifest}"
         );
@@ -2505,15 +2511,30 @@ mod tests {
         // NSH's own stay, once, even when the app lists them too.
         assert_eq!(declared("android.permission.INTERNET"), 1, "{manifest}");
         assert_eq!(
+            declared("android.permission.ACCESS_NETWORK_STATE"),
+            1,
+            "{manifest}"
+        );
+        let own = manifest_of(&apk(false, false));
+        for name in [
+            "android.permission.INTERNET",
+            "android.permission.ACCESS_NETWORK_STATE",
+        ] {
+            assert!(
+                own.contains(&format!("<uses-permission android:name=\"{name}\" />")),
+                "{own}"
+            );
+        }
+        assert_eq!(
             declared("android.permission.POST_NOTIFICATIONS"),
             1,
             "{manifest}"
         );
         // Permissions go before the application, as Android reads them.
         let application = manifest.find("<application").unwrap();
-        let at = manifest.find("ACCESS_NETWORK_STATE").unwrap();
+        let at = manifest.find("READ_CONTACTS").unwrap();
         assert!(at < application, "{manifest}");
-        assert!(!manifest_of(&apk(false, false)).contains("ACCESS_NETWORK_STATE"));
+        assert!(!manifest_of(&apk(false, false)).contains("READ_CONTACTS"));
     }
 
     #[test]

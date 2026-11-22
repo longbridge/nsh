@@ -438,6 +438,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `await app.setColorScheme(scheme)` | 像用户那样把系统外观切换为 `"light"` 或 `"dark"`。 |
 | `await app.setLifecycle(state)` | 把应用移到 `"background"`、`"inactive"` 或 `"active"`，就像用户离开应用、切换到另一个应用或窗口、再回来时系统所做的那样（`lifecycle()`）。仅限 headless 运行。 |
 | `await app.wake()` | 让系统从睡眠中唤醒，就像用户打开笔记本的盖子：`wakeCount()` 加一，`lifecycle()` 保持不变。仅限 headless 运行。 |
+| `await app.setNetworkState(state)` | 按 `state` 修改设备连到网络的方式（`{ kind: "none" }` 离线、`{ kind: "cellular", expensive: true }`、`{ cellularData: "restricted" }`；还有 `constrained`），就像路由或用户设置变化时系统报告的那样；没列出的保持不变（`network()`）。headless 应用启动时 kind 为 `"unknown"`，按在线处理。请求仍按路由应答（`open` 的 `network`）。仅限 headless 运行。 |
 | `await app.setLocaleSettings(settings)` | 修改 `settings` 中列出的语言与地区设置（`{ hourCycle: "h23", timeZone: "Asia/Tokyo" }`；还有 `languages`、`firstDayOfWeek`、`measurementSystem` 和 `temperatureUnit`，与 `open` 的 `localeSettings` 相同），就像用户修改系统设置或出行时那样；其余不变（`localeSettings()`）。仅限 headless 运行。 |
 | `await app.screenshot(path?)` | 应用截图（`Uint8Array`）：图形平台返回应用窗口的 PNG，`tui` 返回 UTF-8 Cell JSON；给出 `path` 时同时保存到本机的这个路径（相对当前目录）。只有真实平台会绘制应用：见[在真实平台上运行](#在真实平台上运行)。 |
 | `app.windowIds()` | 应用已打开窗口的 id，按打开顺序；非桌面平台或没有窗口时为空。 |

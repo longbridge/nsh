@@ -253,18 +253,19 @@ Development builds (`nsh run --target android`) always allow plain HTTP: they lo
 
 ### Permissions
 
-The manifest declares the permissions NSH's own features need: `INTERNET`, `POST_NOTIFICATIONS` for
+The manifest declares the permissions NSH's own features need: `INTERNET`, `ACCESS_NETWORK_STATE` for
+[`network()`](./device-and-environment.md#the-network), `POST_NOTIFICATIONS` for
 [notifications](./sandbox-and-capabilities.md#notifications), `RECORD_AUDIO` and `CAMERA` for a web view's `media`. `android.permissions` adds
 others, for code of the app or an extension that calls Android itself: a bare name is one of Android's
 (`android.permission.<NAME>`), a dotted one is written as it is.
 
 ```json
 {
-  "android": { "permissions": ["ACCESS_NETWORK_STATE", "com.example.permission.READ_ORDERS"] }
+  "android": { "permissions": ["ACCESS_WIFI_STATE", "com.example.permission.READ_ORDERS"] }
 }
 ```
 
-A normal permission such as `ACCESS_NETWORK_STATE` is granted when the app is installed. A runtime permission
+A normal permission such as `ACCESS_WIFI_STATE` is granted when the app is installed. A runtime permission
 (`ACCESS_FINE_LOCATION`, say) is only declared: the app's own code still asks the user for it. The TSX development
 host (`nsh run --target android` of a TSX app) declares none of these; a Rust app's `nsh run` builds its package and
 declares them.
@@ -734,7 +735,7 @@ A packaged app declares the hardware NSH's own features use, from its `nsh.json`
 | Web pages that capture media ([`capabilities.webview.media`](./sandbox-and-capabilities.md#webview)) | `NSMicrophoneUsageDescription`, `NSCameraUsageDescription`; on macOS the entitlements `com.apple.security.device.audio-input` and `com.apple.security.device.camera` | `RECORD_AUDIO`, `CAMERA` |
 | [`Notifications`](../modules/nsh.md#notifications), when the app grants `notifications` or declares no capabilities | | `POST_NOTIFICATIONS` |
 
-Every Android package also declares `INTERNET`. A usage description is what the system shows when the app first asks;
+Every Android package also declares `INTERNET` and `ACCESS_NETWORK_STATE`. A usage description is what the system shows when the app first asks;
 the app's `infoPlist` words it its own way ([above](#infoplist-keys-and-entitlements)).
 
 On iOS and macOS, an app's own [Rust crate](./rust.md) reaches other hardware through the system's frameworks, with the

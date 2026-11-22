@@ -24153,6 +24153,81 @@ mod views {
     }
 
     thread_local! {
+        static NETWORK_RUNS: Cell<u32> = const { Cell::new(0) };
+    }
+
+    /// Shows how the device reaches the network; its effect counts its runs.
+    #[component]
+    fn NetworkLabel() -> impl IntoElement {
+        effect(move || {
+            network();
+            NETWORK_RUNS.with(|n| n.set(n.get() + 1));
+        });
+        text(move || {
+            let n = network();
+            format!(
+                "{} {} expensive={} constrained={} cellular={}",
+                if n.online() { "online" } else { "offline" },
+                n.kind.name(),
+                n.expensive,
+                n.constrained,
+                n.cellular_data.name()
+            )
+        })
+    }
+
+    #[test]
+    fn an_effect_reading_the_network_runs_again_when_the_route_changes_only() {
+        use crate::platform::{CellularData, Network, NetworkKind};
+        NETWORK_RUNS.with(|n| n.set(0));
+        let mut c = core();
+        c.mount_root(&Root::new::<NetworkLabel>(|| ()));
+        // Before the platform says: unknown, which counts as online.
+        assert_eq!(
+            texts(&c.commit().unwrap()),
+            ["online unknown expensive=false constrained=false cellular=unknown"]
+        );
+        assert_eq!(NETWORK_RUNS.with(Cell::get), 1);
+        // Another part of the environment changes: the effect stays.
+        c.set_environment(crate::element::Environment {
+            dark: true,
+            ..Default::default()
+        });
+        c.commit();
+        assert_eq!(NETWORK_RUNS.with(Cell::get), 1);
+        let offline = crate::element::Environment {
+            dark: true,
+            network: Network::new(NetworkKind::None).cellular_data(CellularData::Unknown),
+            ..Default::default()
+        };
+        c.set_environment(offline);
+        assert_eq!(
+            texts(&c.commit().unwrap()),
+            ["offline none expensive=false constrained=false cellular=unknown"]
+        );
+        assert_eq!(NETWORK_RUNS.with(Cell::get), 2);
+        // The same route reported again changes nothing.
+        c.set_environment(offline);
+        c.commit();
+        assert_eq!(NETWORK_RUNS.with(Cell::get), 2);
+        // The user allowed wireless data, and the phone joined cellular in
+        // Low Data Mode.
+        c.set_environment(crate::element::Environment {
+            dark: true,
+            network: Network::new(NetworkKind::Cellular)
+                .expensive(true)
+                .constrained(true)
+                .cellular_data(CellularData::NotRestricted),
+            ..Default::default()
+        });
+        assert_eq!(
+            texts(&c.commit().unwrap()),
+            ["online cellular expensive=true constrained=true cellular=notRestricted"]
+        );
+        assert_eq!(NETWORK_RUNS.with(Cell::get), 3);
+    }
+
+    thread_local! {
         static INTROS: Cell<u32> = const { Cell::new(0) };
     }
 

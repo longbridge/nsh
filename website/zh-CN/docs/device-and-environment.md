@@ -24,6 +24,7 @@ demo: guide-device
 | `locale_settings()` | `localeSettings()`（`nsh`） | 用户的语言与地区设置：偏好语言、时区、12 小时制或 24 小时制、每周的第一天、度量单位和温度单位（[语言与地区设置](#语言与地区设置)）。 |
 | `lifecycle()` | `lifecycle()`（`nsh`） | 应用是否正在使用：`active`、`inactive`（可见但没有焦点）或 `background`（[在后台](#在后台)）。 |
 | `wake_count()` | `wakeCount()`（`nsh`） | 应用运行期间系统从睡眠中唤醒的次数（[睡眠之后](#睡眠之后)）。 |
+| `network()` | `network()`（`nsh`） | 设备怎样连到网络：是否在线，Wi-Fi、蜂窝还是有线，是否昂贵或受限，以及在 iOS 上应用能否使用蜂窝数据（[网络](#网络)）。 |
 | `reduce_motion()`、`screen_reader()` | `reduceMotion()`、`screenReaderEnabled()`（`nsh`） | 见[无障碍](./accessibility.md)。 |
 
 ```rust tabs
@@ -392,6 +393,28 @@ effect(() => {
 ```
 
 独立应用以及嵌入 AppKit、Win32 和 GTK 应用中的视图在 macOS、Windows 和 Linux 上统计唤醒（Linux 通过 systemd 的 `logind`）。在 iOS 和 Android 上，设备睡眠会把应用移到后台，由 `lifecycle()` 报告。在测试中，`nsh/test` 的 `app.wake()` 会唤醒系统（[测试](./testing-and-trace.md#操作步骤)）。
+
+## 网络
+
+`network()`（TSX 中同名）说明设备现在怎样连到网络：`online`（只有系统确知没有路由时才为 false）、路由所走链路的 `kind`（`"wifi"`、`"cellular"`、`"wired"`、`"other"`，离线为 `"none"`，平台不报告时为 `"unknown"`，按在线处理）、这条链路是否 `expensive`（蜂窝数据、手机热点、按流量计费的网络）或 `constrained`（低数据模式、流量节省程序），以及在 iOS 上用户是否允许应用使用蜂窝数据（`cellularData`：`"unknown"`、`"restricted"` 或 `"notRestricted"`）。读取它的 effect 会在路由变化时重新运行，所以离线时失败的请求可以等网络回来后立刻重试，而不是按定时器重试：
+
+```rust tabs
+effect(move || {
+    if network().online() && sync.failed_offline() {
+        sync.retry();
+    }
+});
+```
+
+```tsx tabs
+effect(() => {
+  if (network().online && sync.failedOffline()) sync.retry();
+});
+```
+
+在中国大陆销售的 iPhone 上，应用第一次联网时系统会询问用户是否允许它使用无线数据，用户回答之前应用的请求都会失败。在此之前 `cellularData` 为 `"unknown"`：在 `"unknown"` 时失败的请求等它变化后再重试；在 `"restricted"`（用户选了「关闭」，或蜂窝网络下只允许 WLAN）时失败的请求应告诉用户，`nsh/mobile` 的 `AppSettings.open()` 会打开应用在「设置」里的页面，用户在那里修改。
+
+iOS 和 macOS 跟随系统的路径监视器（Network.framework），iOS 另外跟随 CoreTelephony 的蜂窝数据状态。Android 跟随默认网络（`ConnectivityManager`，需要 `ACCESS_NETWORK_STATE` 权限，`nsh package` 和 Android SDK 的 AAR 都会声明；没有这个权限时 kind 保持 `"unknown"`）。Web 读取 `navigator.onLine`，以及浏览器提供时的 `navigator.connection`（桌面浏览器不报告链路：在线时为 `"unknown"`）。Windows、Linux、GPUI 和终端报告 `"unknown"`。有路由不代表一定能连上：`online` 的链路上服务器仍可能不可达，应用仍要处理失败的请求。在测试中，`nsh/test` 的 `app.setNetworkState({ kind: "none" })` 让设备离线（[测试](./testing-and-trace.md#操作步骤)）。
 
 ## 安全区域
 

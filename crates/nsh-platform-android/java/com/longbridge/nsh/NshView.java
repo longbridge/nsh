@@ -926,6 +926,8 @@ public class NshView extends FrameLayout {
             lifecycle,
             // 24-hour time: the user's setting, else the locale's.
             android.text.format.DateFormat.is24HourFormat(getContext()) ? 1 : 0,
+            // `network()`: the process's default network.
+            network.kind, network.expensive ? 1 : 0, network.constrained ? 1 : 0,
         }, dark, locale.toLanguageTag(), timeZone,
                 // The user's list (an app's own language first, Android 13's
                 // per-app language included), after the embedding app's own.
@@ -958,6 +960,14 @@ public class NshView extends FrameLayout {
             publishEnvironment(getRootWindowInsets());
         }
     };
+
+    /** The device's default network (`network()`), the process's. */
+    private final NetworkState network = NetworkState.of(getContext());
+
+    /** The default network changed (`network()`). */
+    void networkChanged() {
+        publishEnvironment(getRootWindowInsets());
+    }
 
     /** The view's activity reported `state` (`lifecycle()`'s values). */
     private void activityState(Activity activity, int state) {
@@ -1145,6 +1155,9 @@ public class NshView extends FrameLayout {
             Integer state = lifecycles.state(activity);
             if (state != null) activityState(activity, state);
         }
+        // The route's changes, while attached (`network()`); the insets
+        // applied next report the route as it is now.
+        network.views.add(this);
         // The zone may have changed while the view was detached. The
         // broadcasts are the system's alone: no export flag is needed.
         timeZone = java.util.TimeZone.getDefault().getID();
@@ -1167,6 +1180,7 @@ public class NshView extends FrameLayout {
         if (handle != 0) Native.keyReset(handle);
         accessibility().removeTouchExplorationStateChangeListener(screenReader);
         if (Lifecycles.registered != null) Lifecycles.registered.views.remove(this);
+        network.views.remove(this);
         getContext().unregisterReceiver(timeChanged);
     }
 

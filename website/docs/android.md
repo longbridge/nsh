@@ -101,7 +101,7 @@ cargo xtask android-embed    # writes dist/nsh/embed/android/{nsh,nsh-dev}.aar
 
 The AAR holds the Java runtime and `libnsh.so` for `arm64-v8a`, `armeabi-v7a` and `x86_64`, with their symbols: the
 app's Gradle build strips them when it packages the app and keeps the symbols for its crash reports. It declares the
-`INTERNET` permission and needs **API 26** (Android 8) or newer. It carries its R8 rules (`proguard.txt`), which a
+`INTERNET` and `ACCESS_NETWORK_STATE` permissions and needs **API 26** (Android 8) or newer. It carries its R8 rules (`proguard.txt`), which a
 minified build applies on its own: the native library finds the runtime's classes by name, so `com.longbridge.nsh`
 stays as it is.
 

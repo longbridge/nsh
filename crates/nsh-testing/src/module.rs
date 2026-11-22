@@ -624,6 +624,53 @@ impl LocaleSettingsOptions {
     }
 }
 
+/// How the device reaches the network, as a test gives it
+/// (`app.setNetworkState`; `network()`): the ones it names change, the
+/// others stay.
+#[derive(Debug, Default, Clone, PartialEq, JsObject)]
+#[non_exhaustive]
+pub struct NetworkStateOptions {
+    /// The kind of link the default route takes, `"none"` offline.
+    pub kind: Option<nsh_core::platform::NetworkKind>,
+    /// The link costs the user.
+    pub expensive: Option<bool>,
+    /// The user asked to use less data on this link.
+    pub constrained: Option<bool>,
+    /// Whether the user lets the app use cellular data.
+    pub cellular_data: Option<nsh_core::platform::CellularData>,
+}
+
+impl NetworkStateOptions {
+    /// `network` with the ones these name.
+    pub(crate) fn apply(&self, network: &mut nsh_core::platform::Network) {
+        if let Some(kind) = self.kind {
+            network.kind = kind;
+        }
+        if let Some(expensive) = self.expensive {
+            network.expensive = expensive;
+        }
+        if let Some(constrained) = self.constrained {
+            network.constrained = constrained;
+        }
+        if let Some(cellular_data) = self.cellular_data {
+            network.cellular_data = cellular_data;
+        }
+    }
+
+    /// The ones these name, as a test writes them (`{ kind: "none" }`).
+    pub(crate) fn label(&self) -> String {
+        let named = [
+            self.kind.map(|k| format!("kind: {:?}", k.name())),
+            self.expensive.map(|e| format!("expensive: {e}")),
+            self.constrained.map(|c| format!("constrained: {c}")),
+            self.cellular_data
+                .map(|c| format!("cellularData: {:?}", c.name())),
+        ];
+        let named: Vec<String> = named.into_iter().flatten().collect();
+        format!("{{ {} }}", named.join(", "))
+    }
+}
+
 /// The embedding app a test plays (`open`'s `host`; `nsh/host`).
 #[derive(Debug, Default, JsObject)]
 #[non_exhaustive]
@@ -2728,6 +2775,20 @@ impl App {
     /// Headless only.
     pub async fn wake(this: Instance<Self>) -> Result<(), JsError> {
         step(&this, |app| app.wake()).await
+    }
+
+    /// Moves the device to the network `state` names
+    /// (`{ kind: "none" }` offline, `{ kind: "cellular", expensive: true }`,
+    /// `{ cellularData: "restricted" }`), as the system reports when the
+    /// route or the user's settings change; `network()` follows, with what
+    /// it does not name as it was. A headless app starts with the kind
+    /// `"unknown"`, which counts as online. It moves no request: routes
+    /// (`open`'s `network`) still answer. Headless only.
+    pub async fn set_network_state(
+        this: Instance<Self>,
+        state: NetworkStateOptions,
+    ) -> Result<(), JsError> {
+        step(&this, move |app| app.set_network_state(state)).await
     }
 
     /// Gives the user the locale settings `settings` names
