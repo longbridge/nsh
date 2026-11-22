@@ -55,7 +55,7 @@ thread_local! {
 /// Observes the app's delegate, once. On the main thread, before the app
 /// launches: the crate's `#[native_module]` entry, which may run again
 /// later (its `registry()`), maybe off the main thread.
-pub(super) fn install() {
+pub(super) fn install(_: &mut Registry) {
     if cfg!(target_abi = "macabi") || MainThreadMarker::new().is_none() {
         return;
     }

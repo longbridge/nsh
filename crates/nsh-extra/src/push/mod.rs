@@ -35,7 +35,9 @@
 //! registers the device with its service and reports what the service
 //! delivers through the `provide_*` functions; the module does the rest,
 //! the same as on iOS. Android (`android.rs`) closes a thread's
-//! notifications itself.
+//! notifications itself, and hears the presses of the notifications NSH
+//! did not show from `nsh_platform_android::notifications::set_foreign_handler`
+//! (the core keeps the press that started the app until then).
 //!
 //! Elsewhere (the desktops, the web, headless runs, Mac Catalyst, an app
 //! that embeds NSH in its own UIKit app and keeps its own delegate), and on
@@ -448,8 +450,9 @@ static DECIDER: RwLock<Option<PresentationDecider>> = RwLock::new(None);
 /// A push service's binding, where the system has no push of its own
 /// (Android): it registers the device with the service and reports what
 /// the service delivers through [`provide_token`],
-/// [`provide_registration_failure`], [`provide_notification`],
-/// [`provide_background`] and [`provide_press`].
+/// [`provide_registration_failure`], [`provide_notification`] and
+/// [`provide_background`]. The presses of the notifications it posts
+/// come from the system, as on iOS: they open the app with their payload.
 pub trait PushProvider: Send + Sync {
     /// Asks the push service for this device's token. The answer comes
     /// later, from any thread, through [`provide_token`] or
@@ -602,7 +605,7 @@ mod platform {
 
     pub(super) const UNAVAILABLE: &str = "there are no remote notifications here";
 
-    pub(super) fn install() {}
+    pub(super) fn install(_: &mut nsh_core::element::Registry) {}
 
     pub(super) async fn register() -> Result<(), PushError> {
         Err(PushError::unavailable(UNAVAILABLE))
@@ -622,9 +625,12 @@ mod platform {
 }
 
 /// Sets the module up with the platform: called by the crate's
-/// `#[native_module]` entry, on the main thread before the app launches.
-pub(crate) fn install() {
-    platform::install();
+/// `#[native_module]` entry for `registry`, the set it makes. On iOS that
+/// is on the main thread before the app launches; on Android on the thread
+/// that loads the app (the UI thread, another one on a development
+/// reload).
+pub(crate) fn install(registry: &mut Registry) {
+    platform::install(registry);
 }
 
 // --- What a push service's binding reports ----------------------------------
@@ -655,13 +661,6 @@ pub fn provide_notification(notification: RemoteNotification) -> ForegroundPrese
 pub fn provide_background(notification: RemoteNotification, completion: BackgroundCompletion) {
     background(notification, completion);
     platform::expire_later();
-}
-
-/// The user pressed `notification`, which the push service's binding
-/// posted. It waits for the first JS listener, as one that launched the
-/// app does. Any thread.
-pub fn provide_press(notification: RemoteNotification) {
-    pressed(notification);
 }
 
 /// Completes the deliveries that wait for a JS listener once their wait
@@ -737,6 +736,10 @@ fn background(notification: RemoteNotification, completion: BackgroundCompletion
 }
 
 /// The user pressed `notification`.
+#[cfg_attr(
+    not(any(target_os = "ios", target_os = "android", test)),
+    allow(dead_code)
+)]
 fn pressed(notification: RemoteNotification) {
     emit(&PushEvent::Press(&notification));
     let lost = hub().dispatch(Delivery::Press(notification), now());

@@ -52,7 +52,7 @@ fn native(registry: &mut Registry) {
     registry.module::<camera::Camera>();
     #[cfg(feature = "push")]
     {
-        push::install();
+        push::install(registry);
         registry.module::<push::Push>();
     }
     let _ = registry;

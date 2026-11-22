@@ -235,7 +235,9 @@ uses `nsh_extra::push`: `on_event` hears the same events with the token's raw by
 come from `nsh_platform_ios::on_application_event` ([Application events](./ios.md#application-events)). A binding
 implements `PushProvider` (it registers the device with its service), sets it with `set_provider` from its
 `#[native_module]` entry, and reports what the service delivers with `provide_token`,
-`provide_registration_failure`, `provide_notification`, `provide_background` and `provide_press`.
+`provide_registration_failure`, `provide_notification` and `provide_background`. A press of a notification the binding
+posted opens the app with the payload as the intent's extras, and reaches `press` with them as its `payload` (Android
+does not say which notification it was, so it has no `id` or `threadId`).
 
 ## Writing an nshm
 

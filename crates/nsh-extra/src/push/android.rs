@@ -1,7 +1,15 @@
 //! Remote notifications on Android. Android has no push of its own that
 //! every device has: registering the device and delivering notifications
-//! are the push service's binding's ([`super::PushProvider`]), and so are
-//! the presses of the notifications it posts ([`super::provide_press`]).
+//! are the push service's binding's ([`super::PushProvider`]).
+//!
+//! The presses of the notifications NSH did not show (the binding's, an
+//! SDK's) come from the core's handler of them
+//! (`nsh::notifications::set_foreign_handler`), set up by the crate's
+//! `#[native_module]` entry: a press opens the app with the notification's
+//! payload as the intent's extras, which become the press's payload.
+//! Android does not say which notification opened the app, so a press has
+//! no id or thread. The core keeps the press that started the app until
+//! the handler is set.
 //!
 //! The module closes a thread's notifications itself. Android has no
 //! threads; the closest is a notification group (`Notification.getGroup`),
@@ -13,13 +21,17 @@
 //! summary is in the group and closes with it. NSH's own notifications
 //! (`Notifications`) stay.
 
-use nsh::jni::{
-    JNIEnv,
-    errors::Result as JniResult,
-    objects::{JObject, JObjectArray, JString, JValue},
+use nsh::{
+    jni::{
+        JNIEnv,
+        errors::Result as JniResult,
+        objects::{JObject, JObjectArray, JString, JValue},
+    },
+    notifications::{ForeignNotification, ForeignNotificationHandler, set_foreign_handler},
 };
+use nsh_core::prelude::*;
 
-use super::PushError;
+use super::{PushError, RemoteNotification};
 
 /// Why [`super::register`] fails without a push service's binding.
 pub(super) const UNAVAILABLE: &str =
@@ -37,7 +49,51 @@ const NSH_ID: i32 = 1;
 /// `Context.NOTIFICATION_SERVICE`.
 const NOTIFICATION_SERVICE: &str = "notification";
 
-pub(super) fn install() {}
+/// Makes the module the handler of the presses of the notifications NSH
+/// did not show. The handler is set on the UI thread, as the core asks:
+/// the entry loading the app runs there, and sets it now, before the
+/// first engine starts; a development reload runs it again on another
+/// thread, where the set it makes asks each engine it starts to set it on
+/// the UI thread. Each run sets it again, so the handler is always the
+/// module's that runs now (the core warns that it replaced one).
+pub(super) fn install(registry: &mut Registry) {
+    if on_ui_thread() {
+        set_foreign_handler(Foreign);
+    } else {
+        registry.setup(|| {
+            // Dropping the result does not stop it; a panic is logged.
+            drop(run_on_main_thread(|| set_foreign_handler(Foreign)));
+        });
+    }
+}
+
+/// The handler of the presses of the notifications NSH did not show.
+struct Foreign;
+
+impl ForeignNotificationHandler for Foreign {
+    fn pressed(&self, notification: &ForeignNotification) {
+        super::pressed(RemoteNotification::new("", "", notification.extras.clone()));
+    }
+}
+
+/// Whether this is the UI thread (the main looper's).
+fn on_ui_thread() -> bool {
+    let answer = nsh::with_env(|env| {
+        let looper = "android/os/Looper";
+        let signature = "()Landroid/os/Looper;";
+        let main = env
+            .call_static_method(looper, "getMainLooper", signature, &[])?
+            .l()?;
+        let mine = env
+            .call_static_method(looper, "myLooper", signature, &[])?
+            .l()?;
+        Ok(!mine.is_null() && env.is_same_object(&main, &mine)?)
+    });
+    answer.unwrap_or_else(|error| {
+        log::error!("push: cannot tell the UI thread: {error}");
+        false
+    })
+}
 
 /// Never asked: without a binding [`super::register`] fails first.
 pub(super) async fn register() -> Result<(), PushError> {

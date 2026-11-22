@@ -523,8 +523,10 @@ fn there_are_no_remote_notifications_without_a_binding_off_ios() {
     assert!(!ready(available()));
     let error = ready(register()).unwrap_err();
     assert_eq!(error.code.as_deref(), Some(UNAVAILABLE));
-    // Setting up does nothing, and does not panic.
-    install();
+    // Setting up does nothing, and does not panic (Android sets up the
+    // presses' handler, through JNI).
+    #[cfg(not(target_os = "android"))]
+    install(&mut Registry::new());
 }
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -588,7 +590,6 @@ fn a_binding_reports_what_its_service_delivers() {
         let mut hub = hub();
         let (id, receiver) = hub.subscribe();
         hub.listen(id, Kind::Notification);
-        hub.listen(id, Kind::Press);
         (id, receiver)
     };
     let quiet = ForegroundPresentation::SHOWN.banner(false);
@@ -596,13 +597,9 @@ fn a_binding_reports_what_its_service_delivers() {
     let shown = provide_notification(RemoteNotification::new("n1", "group-1", JsonValue::Null));
     assert_eq!(shown, quiet);
     set_thread_presentation("group-1", None);
-    provide_press(RemoteNotification::new("n2", "group-1", JsonValue::Null));
     assert_eq!(
         received(&mut receiver),
-        [
-            (Kind::Notification, "n1".to_owned()),
-            (Kind::Press, "n2".to_owned())
-        ]
+        [(Kind::Notification, "n1".to_owned())]
     );
     hub().unsubscribe(id);
 }

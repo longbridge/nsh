@@ -201,7 +201,7 @@ function closeConversation(threadId: string) {
 - 独立运行的 iOS 应用里，以及应用链接了推送服务绑定的地方，`available()` 为 `true`。其他地方为 `false`，`register` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝；`closeThread` 也一样，Android 除外。
 - 声明了 `"capabilities"` 的应用用 [`"notifications": true`](./sandbox-and-capabilities.md#notifications) 授予 `Push`，与 `Notifications` 用的是同一项能力。token、投递和它们的显示方式属于整个应用，所以除 `available()` 外的每个函数都先检查这项能力。
 
-开启这个 feature 后，打包的 iOS 应用会带上 `remote-notification` 后台模式。`aps-environment` entitlement 来自应用签名所用的描述文件（[iOS 真机](./packaging.md#ios-真机)）。Android 上它不添加任何条目：推送服务的 SDK 自带它的 manifest 所需。Rust 代码（比如某个推送服务 SDK 的绑定）使用 `nsh_extra::push`：`on_event` 收到同样的事件，并带 token 的原始字节；`set_foreground_presentation_decider` 在原生侧决定每条通知怎么显示；iOS 的启动参数从 `nsh_platform_ios::on_application_event` 取得（[应用事件](./ios.md#应用事件)）。绑定实现 `PushProvider`（向它的服务注册设备），在自己的 `#[native_module]` 入口里用 `set_provider` 设上，再用 `provide_token`、`provide_registration_failure`、`provide_notification`、`provide_background` 和 `provide_press` 报告服务送来的内容。
+开启这个 feature 后，打包的 iOS 应用会带上 `remote-notification` 后台模式。`aps-environment` entitlement 来自应用签名所用的描述文件（[iOS 真机](./packaging.md#ios-真机)）。Android 上它不添加任何条目：推送服务的 SDK 自带它的 manifest 所需。Rust 代码（比如某个推送服务 SDK 的绑定）使用 `nsh_extra::push`：`on_event` 收到同样的事件，并带 token 的原始字节；`set_foreground_presentation_decider` 在原生侧决定每条通知怎么显示；iOS 的启动参数从 `nsh_platform_ios::on_application_event` 取得（[应用事件](./ios.md#应用事件)）。绑定实现 `PushProvider`（向它的服务注册设备），在自己的 `#[native_module]` 入口里用 `set_provider` 设上，再用 `provide_token`、`provide_registration_failure`、`provide_notification` 和 `provide_background` 报告服务送来的内容。点按绑定发出的通知会以 intent 的 extras 携带 payload 打开应用，`press` 收到的 `payload` 就是这些 extras（Android 不告诉是哪条通知，所以没有 `id` 和 `threadId`）。
 
 ## 编写 nshm
 
