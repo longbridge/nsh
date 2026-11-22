@@ -95,8 +95,11 @@ pub(super) struct Contents {
     pub(super) resources: Vec<(String, Vec<u8>)>,
     /// The native libraries of the AARs that have any ([`native_for`]).
     pub(super) native: Vec<Native>,
-    /// The AARs' assets: (path under `assets/`, contents).
+    /// The AARs' assets, and the jars' Java resources under `assets/`:
+    /// (path under `assets/`, contents).
     pub(super) assets: Vec<(String, Vec<u8>)>,
+    /// Each asset's index in `assets` and the library it came from.
+    asset_from: BTreeMap<String, (usize, String)>,
     /// What the manifest gets: the crates' entries and the AARs' manifests.
     pub(super) manifest: Additions,
     /// The AARs' resources, compiled ([`compile_res`]): overlays of `aapt2
@@ -132,6 +135,41 @@ impl Contents {
     pub(super) fn needs_symbols(&self) -> bool {
         !self.r_classes.is_empty()
     }
+
+    /// Adds the asset `path` (under `assets/`) of the library `from`, once:
+    /// another library with the same path and different contents is an
+    /// error naming both.
+    fn add_asset(&mut self, path: String, bytes: Vec<u8>, from: &str) -> anyhow::Result<()> {
+        match self.asset_from.get(&path) {
+            None => {
+                self.asset_from
+                    .insert(path.clone(), (self.assets.len(), from.to_owned()));
+                self.assets.push((path, bytes));
+            }
+            Some((at, _)) if self.assets[*at].1 == bytes => {}
+            Some((_, first)) => bail!(
+                "{first} and {from} both have the asset `{path}`, with different contents: list one of them"
+            ),
+        }
+        Ok(())
+    }
+}
+
+/// The path under `assets/` of the entry `name` (`assets/<path>`) of the
+/// library `shown`, which the package can take: one with an empty, `.` or
+/// `..` part would land elsewhere, and `assets/nsh/` is NSH's own.
+fn asset_path(shown: &str, name: &str) -> anyhow::Result<Option<String>> {
+    let Some(path) = name.strip_prefix("assets/") else {
+        return Ok(None);
+    };
+    // `assets/../classes.dex` would be a file of the package's own.
+    if path.split('/').any(|part| matches!(part, "" | "." | "..")) {
+        bail!("{shown} has `{name}`, an asset path with an empty, `.` or `..` part");
+    }
+    if path.starts_with("nsh/") {
+        bail!("{shown} has `{name}`: `assets/nsh/` is NSH's own");
+    }
+    Ok(Some(path.to_owned()))
 }
 
 /// The native libraries of an AAR.
@@ -218,8 +256,6 @@ pub(super) fn prepare(apk: &Apk<'_>, work: &Path) -> anyhow::Result<Contents> {
     let placeholders = Placeholders::new(apk.package, apk.manifest_placeholders);
     let mut manifests = Vec::new();
     let mut warnings = Vec::new();
-    // Each asset's AAR, for errors.
-    let mut assets: BTreeMap<String, (usize, String)> = BTreeMap::new();
     for (i, aar) in choose(aars)?.into_iter().enumerate() {
         if !aar.res.is_empty() {
             contents.res_files.push(LibraryRes {
@@ -267,16 +303,7 @@ pub(super) fn prepare(apk: &Apk<'_>, work: &Path) -> anyhow::Result<Contents> {
             });
         }
         for (path, bytes) in aar.assets {
-            match assets.get(&path) {
-                None => {
-                    assets.insert(path.clone(), (contents.assets.len(), from.clone()));
-                    contents.assets.push((path, bytes));
-                }
-                Some((at, _)) if contents.assets[*at].1 == bytes => {}
-                Some((_, first)) => bail!(
-                    "{first} and {from} both have the asset `{path}`, with different contents: list one of them"
-                ),
-            }
+            contents.add_asset(path, bytes, &from)?;
         }
         if !aar.native.is_empty() {
             contents.native.push(Native {
@@ -365,7 +392,11 @@ pub(super) fn dex(
         );
     }
     contents.dex.extend(dex_files(&merged)?);
-    contents.resources = java_resources(&jars)?;
+    let found = java_resources(&jars)?;
+    contents.resources = found.root;
+    for (path, bytes, from) in found.assets {
+        contents.add_asset(path, bytes, &from)?;
+    }
     Ok(())
 }
 
@@ -448,18 +479,8 @@ fn read_aar(checked: Checked) -> anyhow::Result<Aar> {
                 let (abi, so) = (abi.to_owned(), so.to_owned());
                 native.entry(abi).or_default().push((so, read()?));
             }
-        } else if let Some(path) = name.strip_prefix("assets/") {
-            // `assets/../classes.dex` would be a file of the package's own.
-            if path.split('/').any(|part| matches!(part, "" | "." | "..")) {
-                bail!(
-                    "{} has `{name}`, an asset path with an empty, `.` or `..` part",
-                    checked.shown
-                );
-            }
-            if path.starts_with("nsh/") {
-                bail!("{} has `{name}`: `assets/nsh/` is NSH's own", checked.shown);
-            }
-            assets.push((path.to_owned(), read()?));
+        } else if let Some(path) = asset_path(&checked.shown, &name)? {
+            assets.push((path, read()?));
         } else if let Some(path) = name.strip_prefix("res/") {
             // Written out for `aapt2 compile --dir`, under the AAR's own
             // directory.
@@ -1116,9 +1137,18 @@ fn left_out(name: &str) -> bool {
             .any(|n| upper == *n || upper.starts_with(&format!("{n}.")))
 }
 
+/// The Java resources of jars ([`java_resources`]).
+#[derive(Debug, Default)]
+struct JavaResources {
+    /// At the package's root: (path, contents).
+    root: Vec<(String, Vec<u8>)>,
+    /// Under `assets/`: (path under it, contents, the jar).
+    assets: Vec<(String, Vec<u8>, String)>,
+}
+
 /// Paths at a package's root that are the package's own.
 fn reserved(name: &str) -> bool {
-    ["lib/", "assets/", "res/", "dex/", "manifest/", "root/"]
+    ["lib/", "res/", "dex/", "manifest/", "root/"]
         .iter()
         .any(|dir| name.starts_with(dir))
         || matches!(name, "AndroidManifest.xml" | "resources.arsc")
@@ -1129,9 +1159,12 @@ fn reserved(name: &str) -> bool {
 /// [`left_out`] names, each path once. Service files
 /// (`META-INF/services/<interface>`) of several jars are joined, as
 /// `ServiceLoader` reads every provider they list; another path two jars
-/// have with different contents is an error naming both.
-fn java_resources(jars: &[&Checked]) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
+/// have with different contents is an error naming both. Those under
+/// `assets/` are the package's assets, as at the root of an APK, where
+/// Android's Gradle plugin puts Java resources.
+fn java_resources(jars: &[&Checked]) -> anyhow::Result<JavaResources> {
     let mut out: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut assets = Vec::new();
     // Each path's index in `out`, and the jar it came from.
     let mut seen: BTreeMap<String, (usize, &Checked)> = BTreeMap::new();
     for jar in jars {
@@ -1146,6 +1179,12 @@ fn java_resources(jars: &[&Checked]) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
             }
             let name = entry.name()?.into_owned();
             if name.ends_with(".class") || left_out(&name) {
+                continue;
+            }
+            if let Some(path) = asset_path(&jar.shown, &name)? {
+                let mut bytes = Vec::new();
+                entry.read_to_end(&mut bytes)?;
+                assets.push((path, bytes, jar.shown.clone()));
                 continue;
             }
             if entry.enclosed_name().is_none() || reserved(&name) {
@@ -1178,7 +1217,7 @@ fn java_resources(jars: &[&Checked]) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
             }
         }
     }
-    Ok(out)
+    Ok(JavaResources { root: out, assets })
 }
 
 /// The SHA-256 of `path`'s contents, in hex.
@@ -1496,6 +1535,7 @@ mod tests {
                 ),
                 ("com/example/a/Hello.class", b"class"),
                 ("com/example/a/messages.properties", b"hi=a"),
+                ("assets/sdk/plugin.properties", b"a=1"),
                 (
                     "kotlin/collections/collections.kotlin_builtins",
                     b"builtins",
@@ -1506,6 +1546,7 @@ mod tests {
             &b,
             &[
                 ("META-INF/LICENSE.txt", b"license b"),
+                ("assets/sdk/plugin.properties", b"a=1"),
                 (
                     "META-INF/services/com.example.Greeter",
                     b"com.example.b.Hello",
@@ -1520,7 +1561,10 @@ mod tests {
             checked_file(&a, NSH_JSON),
             checked_file(&b, "x: [package.metadata.nsh] `android.libraries`"),
         );
-        let resources = java_resources(&[&la, &lb]).unwrap();
+        let JavaResources {
+            root: resources,
+            assets,
+        } = java_resources(&[&la, &lb]).unwrap();
         let names: Vec<&str> = resources.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(
             names,
@@ -1532,6 +1576,19 @@ mod tests {
         );
         // Both jars' providers.
         assert_eq!(resources[0].1, b"com.example.a.Hello\ncom.example.b.Hello");
+        // Under `assets/`: assets, as at the root of an APK Android's
+        // Gradle plugin makes, the same in both jars.
+        let assets: Vec<String> = assets
+            .iter()
+            .map(|(path, bytes, from)| format!("{path} {} {from}", String::from_utf8_lossy(bytes)))
+            .collect();
+        assert_eq!(
+            assets,
+            [
+                format!("sdk/plugin.properties a=1 {}", la.shown),
+                format!("sdk/plugin.properties a=1 {}", lb.shown),
+            ]
+        );
         // Another file the two have with different contents: an error
         // naming both.
         jar(&b, &[("com/example/a/messages.properties", b"hi=b")]);
@@ -1543,17 +1600,56 @@ mod tests {
             "{error}"
         );
         // A path the package keeps for its own files.
-        for name in [
-            "lib/arm64-v8a/libx.so",
-            "classes2.dex",
-            "assets/x",
-            "AndroidManifest.xml",
+        for (name, error) in [
+            ("lib/arm64-v8a/libx.so", "keeps for its own files"),
+            ("classes2.dex", "keeps for its own files"),
+            ("AndroidManifest.xml", "keeps for its own files"),
+            ("assets/nsh/bundle.nshc", "`assets/nsh/` is NSH's own"),
+            (
+                "assets/../classes.dex",
+                "an asset path with an empty, `.` or `..` part",
+            ),
         ] {
             jar(&b, &[(name, b"x")]);
-            let error = java_resources(&[&lb]).unwrap_err().to_string();
-            assert!(error.contains("keeps for its own files"), "{name}: {error}");
+            let found = java_resources(&[&lb]).unwrap_err().to_string();
+            assert!(
+                found.contains(&lb.shown) && found.contains(error),
+                "{name}: {found}"
+            );
         }
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn an_asset_goes_in_once_from_an_aar_or_a_jar() {
+        let mut contents = Contents::default();
+        let add = |contents: &mut Contents, bytes: &[u8], from: &str| {
+            contents.add_asset("sdk/plugin.properties".into(), bytes.to_vec(), from)
+        };
+        add(
+            &mut contents,
+            b"a=1",
+            "push.aar (nsh.json `android.libraries`)",
+        )
+        .unwrap();
+        // The same contents: once.
+        add(&mut contents, b"a=1", "`classes.jar` of push.aar").unwrap();
+        assert_eq!(
+            contents.assets,
+            [("sdk/plugin.properties".into(), b"a=1".to_vec())]
+        );
+        let error = add(
+            &mut contents,
+            b"a=2",
+            "vendor.jar (nsh.json `android.libraries`)",
+        )
+        .unwrap_err()
+        .to_string();
+        assert_eq!(
+            error,
+            "push.aar (nsh.json `android.libraries`) and vendor.jar (nsh.json `android.libraries`) \
+             both have the asset `sdk/plugin.properties`, with different contents: list one of them"
+        );
     }
 
     /// The manifest of an AAR of `package`, with `application`'s children.
