@@ -133,7 +133,7 @@ nsh dev [ENTRY] [--target catalyst|ios|android|macos|linux|windows|gpui|tui|web]
 ## nsh test
 
 ```sh
-nsh test [PATH] [--filter <NAME>] [--trace] [--fps] [--junit <FILE>] [--target <TARGET>] [--browser <PATH>] [--web-host <JS>] [--device <DEVICE>] [--display <N>] [--foreground]
+nsh test [PATH] [--filter <NAME>] [--trace] [--fps] [--junit <FILE>] [--jobs <N>] [--target <TARGET>] [--browser <PATH>] [--web-host <JS>] [--device <DEVICE>] [--display <N>] [--foreground]
 ```
 
 以无界面方式运行应用的测试（[测试](./testing-and-trace.md)）：运行目录 `PATH`（默认为当前目录；跳过隐藏目录、`node_modules` 和 `target`）中的测试文件（`*.test.tsx`、`*.test.ts`，导入 `nsh/test`），或者测试文件 `PATH` 本身。如果传入的是带有自己 Rust crate 的应用（`nsh.json` `"rust"`：Rust 应用，或带 crate 的 TSX 应用）的目录，它会先在目录中每个 crate 自己的目录下运行 `cargo test`，并把每个 Rust 测试与 TypeScript 测试一起显示和计数，归在其测试目标的文件下（`src/lib.rs › tests::adds`）；只有 Rust 测试的 Rust 应用也这样测试。每个测试文件在各自的引擎上运行，测试打开的每个应用又在另一个全新的引擎上运行。它为每个测试打印一行；失败时还会打印抛出的内容、它在测试文件中的位置和屏幕上的文字。只要有失败，就以非零退出码结束。如果传入的是应用入口（`nsh test App.tsx`；Rust 应用为 `nsh test nsh.json`），它会在真实网络下打开应用，让它运行 1.2 s，然后执行标准输入给出的步骤（`await app.press("Add")`，其中 `app` 就是这个应用）。TSX 应用在 CLI 自己的进程里运行；带有自己 Rust crate 的应用在用这些 crate 构建的无界面运行器中运行，由 CLI 为它构建入口。除非测试以 Android 打开应用（`open` 的 `platform`），无界面运行按 iOS 处理：`platform.os` 为 `"ios"`，`ios:` 类和 `ios={{…}}` 属性都会生效。
@@ -149,6 +149,7 @@ nsh test [PATH] [--filter <NAME>] [--trace] [--fps] [--junit <FILE>] [--target <
 | `--trace` | 打印测试所打开应用的每个挂载批次，标注它所属的步骤（`── press(Add): 7 items`），以及每次 commit 的耗时：首帧、一个步骤或一帧滚动的开销。加上 `--target` 时，是 host 的批次和耗时。 |
 | `--fps` | 配合 `--target linux`、`macos`、`windows` 或 `ios`：host 每秒输出一行性能监视器读数（帧率、帧各阶段、commit、CPU、内存），用 `-v` 显示。 |
 | `--junit <FILE>` | 同时把结果以 JUnit XML 报告写入 `FILE`，CI 服务按这种格式展示测试结果：每个测试文件一个 `testsuite`，每个测试一个 `testcase`。 |
+| `-j, --jobs <N>` | 同时运行的测试文件数，每个文件用自己的引擎（默认等于 CPU 核数）。结果仍按文件顺序逐个显示。仅限无界面运行：带 `--target` 或 `--trace` 时逐个运行。 |
 | `--target <TARGET>` | 在该平台的开发 host 上运行测试打开的应用，而不是 headless（`macos`、`linux`、`windows`、`gpui`、`tui`、`web`、`ios` 和 `android`；`tui` 在内存终端里运行，`web` 在 headless 的 Chrome、Edge 或 Chromium 里运行）：步骤用平台自己的输入执行（[测试](./testing-and-trace.md#在真实平台上运行)），`open` 会按该平台检查它的选项，平台无法满足的选项会被拒绝（`ERR_NSH_TEST_UNSUPPORTED`：iOS 和 Android 上的 `width` 与 `height`、属于另一类设备的 `platform`）。crate 的 Rust 测试在本机运行，属于不带 `--target` 的运行。 |
 | `--browser <PATH>` | `--target web` 运行应用所用的 Chrome、Edge 或 Chromium 可执行文件（默认：本机安装的那个）。 |
 | `--device <DEVICE>` | 配合 `--target ios`：应用在哪个模拟器里运行，按名称（`"iPhone 16 Pro"`）或 UDID 指定。默认：已启动的模拟器，否则启动最新的 iPhone。配合 `--target android`：应用在哪台设备或模拟器上运行，按序列号（`adb devices` 列出的）指定。默认：`ANDROID_SERIAL` 指定的那台，否则第一台。 |

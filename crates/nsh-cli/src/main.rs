@@ -174,6 +174,12 @@ enum Command {
         /// format CI services read.
         #[arg(long, value_name = "FILE")]
         junit: Option<PathBuf>,
+        /// How many test files run at once, each on its own engine (by
+        /// default as many as the machine has cores). Their results show
+        /// file by file, in order. Headless runs only: with --target or
+        /// --trace the files run one at a time.
+        #[arg(long, short = 'j', value_name = "N")]
+        jobs: Option<std::num::NonZeroUsize>,
         /// Run the apps the tests open on this platform's development host
         /// instead of headless: the steps act with the platform's own input
         /// (macos, linux, windows, gpui, tui, web, ios and android; tui uses
@@ -991,6 +997,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             trace,
             fps,
             junit,
+            jobs,
             target,
             browser,
             web_host,
@@ -1004,6 +1011,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             trace,
             fps,
             junit.as_deref(),
+            jobs,
             target,
             browser.as_deref(),
             web_host,
