@@ -320,7 +320,7 @@ nshm 在自己的 `nsh.json` 的 `"dependencies"` 中列出需要的 nshm，写�
 
 ## 平台 nshm
 
-nshm 可以提供自己的 target，例如 NSH 不构建的平台：在 `nsh.json` 中写 `"platform"`，并在 crate 中提供名为 `nsh-platform-<name>` 的二进制：
+nshm 可以提供自己的 target，例如 NSH 不构建的平台：在 `nsh.json` 中写 `"platform"`，并在 crate 中提供名为 `nsh-platform-<name>` 的二进制。crate 只提供 target 时不需要 `#[native_module]`；没有它时，应用不会链接这个 crate，也不会因此变成 Rust 应用：
 
 ```json
 { "name": "nsh-harmony", "version": "0.1.0", "platform": "harmony" }
