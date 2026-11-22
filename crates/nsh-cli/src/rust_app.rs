@@ -4,7 +4,9 @@
 //! registers its components and modules into a UI set the app imports by
 //! that specifier. The attribute makes the entry the generated code calls
 //! ([`ENTRY`]); each crate is linked under a name of its own
-//! ([`AppCrate::name`]), so their entries do not clash.
+//! ([`AppCrate::name`]), so their entries do not clash. The nshm the app
+//! installs (`"dependencies"`) and those its crates depend on through Cargo
+//! ([`cargo_nshm`]) are linked the same way, after them.
 //!
 //! The prebuilt `nsh` does not link such components, and never needs to:
 //! the toolchain reads a UI set as data (nsh-core `ui::description`). `nsh`
@@ -308,8 +310,9 @@ pub(crate) struct RustApp {
     workspace: PathBuf,
     /// Where nsh's crates come from.
     nsh: Nsh,
-    /// The crates `nsh.json` `"rust"` lists, in its order: each is a UI set
-    /// of its own, after nsh's.
+    /// The crates `nsh.json` `"rust"` lists, in its order, then its nshm
+    /// (`"dependencies"`), then those the crates depend on through Cargo
+    /// ([`cargo_nshm`]): each is a UI set of its own, after nsh's.
     crates: Vec<AppCrate>,
     /// The directories of the app's Rust code: the crates' and those of the
     /// local crates they depend on by path ([`path_dependencies`]), watched
@@ -351,6 +354,23 @@ pub(crate) struct AppCrate {
     /// The Cargo features the app turns on (an nshm's `"features"` in
     /// `nsh.json`): the modules of it the app uses.
     features: Vec<String>,
+    /// How the app links it.
+    link: Link,
+}
+
+/// How the app links one of its crates.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Link {
+    /// `nsh.json` lists it, in `"rust"` or `"dependencies"`.
+    Listed,
+    /// An nshm one of the app's crates depends on through Cargo
+    /// ([`cargo_nshm`]). Its features are the ones those crates turn on,
+    /// so the generated crates ask for none, its defaults included. It is
+    /// in a directory (`None`), or where `source`, the keys of its
+    /// dependency line (`version = "0.6.1"`, `git = "…", branch = "main"`),
+    /// says: the copy Cargo gives the app's crates, which the generated
+    /// crates then share.
+    Cargo(Option<String>),
 }
 
 impl AppCrate {
@@ -360,6 +380,7 @@ impl AppCrate {
             package,
             dir,
             features: Vec::new(),
+            link: Link::Listed,
         }
     }
 
@@ -367,6 +388,26 @@ impl AppCrate {
     pub(crate) fn with_features(mut self, features: Vec<String>) -> AppCrate {
         self.features = features;
         self
+    }
+
+    /// Whether `nsh.json` lists it, rather than one of the app's crates
+    /// depending on it through Cargo ([`cargo_nshm`]).
+    pub(crate) fn is_listed(&self) -> bool {
+        self.link == Link::Listed
+    }
+
+    /// Whether Cargo takes it from a registry or Git rather than a
+    /// directory: none of the app's code to watch or debug.
+    fn is_fetched(&self) -> bool {
+        matches!(self.link, Link::Cargo(Some(_)))
+    }
+
+    /// What links it, for the comments of the generated code.
+    fn origin(&self) -> &'static str {
+        match self.link {
+            Link::Listed => "nsh.json \"rust\"",
+            Link::Cargo(_) => "a Cargo dependency of the app's crates",
+        }
     }
 
     /// Its package name.
@@ -404,13 +445,25 @@ impl AppCrate {
     /// Its line in the `[dependencies]` of a generated crate, built from
     /// the manifest in `dir`.
     fn dependency_at(&self, dir: &Path) -> String {
-        format!(
-            "{} = {{ package = {:?}, path = {:?}{} }}",
-            self.name(),
-            self.package,
-            dir.to_string_lossy(),
-            features_value(&self.features)
-        )
+        match &self.link {
+            Link::Listed => format!(
+                "{} = {{ package = {:?}, path = {:?}{} }}",
+                self.name(),
+                self.package,
+                dir.to_string_lossy(),
+                features_value(&self.features)
+            ),
+            Link::Cargo(source) => {
+                let source = source
+                    .clone()
+                    .unwrap_or_else(|| format!("path = {:?}", dir.to_string_lossy()));
+                format!(
+                    "{} = {{ package = {:?}, {source}, default-features = false }}",
+                    self.name(),
+                    self.package,
+                )
+            }
+        }
     }
 }
 
@@ -1069,16 +1122,21 @@ pub(crate) fn of(entry: &Path, unify: bool) -> anyhow::Result<Option<RustApp>> {
         .iter()
         .map(|(url, c)| (url.clone(), c.package.clone(), c.dir.clone()))
         .collect();
-    if !modules.is_empty() {
+    // The nshm the app's own crates depend on through Cargo: linked after
+    // those `nsh.json` lists, so their entries run as an installed nshm's
+    // do.
+    let found = cargo_nshm(&crates)?;
+    if !modules.is_empty() || !found.is_empty() {
         let mut named: Vec<(String, AppCrate)> = crates
             .iter()
             .map(|c| (c.dir.display().to_string(), c.clone()))
             .collect();
+        let installed: Vec<String> = modules.iter().map(|(_, c)| c.name()).collect();
         named.extend(modules);
-        check_crates(&named)?;
-        crates = named.into_iter().map(|(_, c)| c).collect();
+        crates = with_found(named, &installed, found)?;
     }
-    let watched = watched(&crates, nsh.source());
+    let own: Vec<AppCrate> = crates.iter().filter(|c| !c.is_fetched()).cloned().collect();
+    let watched = watched(&own, nsh.source());
     let minimums = AppleMinimums::of(&config)?;
     // Only installed nshm, with a released nsh: nothing of the build is the
     // app's, so every app with these nshm shares it.
@@ -1271,6 +1329,204 @@ pub(crate) fn specifier_of(dir: &Path) -> Option<String> {
         let rest = rest.strip_prefix('(')?.trim_start().strip_prefix('"')?;
         Some(rest[..rest.find('"')?].to_owned())
     })
+}
+
+/// The nshm the app's `crates` depend on through Cargo, transitively,
+/// each with how errors name it: the packages of their dependency graph
+/// (normal dependencies, on any target; not nsh's own crates) that depend
+/// on nsh-core and have a `#[native_module("…")]` at their root, which is
+/// how `nsh add` tells an nshm ([`specifier_of`]). Each package once, in
+/// the order of their names (then of Cargo's ids: versions and sources),
+/// linked from where Cargo takes it for the app's crates ([`Link::Cargo`]).
+fn cargo_nshm(crates: &[AppCrate]) -> anyhow::Result<Vec<(String, AppCrate)>> {
+    let mut found: Vec<(String, String, AppCrate)> = Vec::new();
+    for c in crates {
+        let manifest = c.dir.join("Cargo.toml");
+        let output = Command::new(cargo())
+            .args(["metadata", "--format-version", "1", "--manifest-path"])
+            .arg(&manifest)
+            .output()
+            .context("run cargo metadata (is Rust installed?)")?;
+        if !output.status.success() {
+            bail!(
+                "cargo cannot resolve the dependencies of {}:\n{}",
+                manifest.display(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        let metadata: serde_json::Value =
+            serde_json::from_slice(&output.stdout).context("cargo metadata's output")?;
+        for (id, label, krate) in nshm_in(&metadata, &manifest)? {
+            if !found.iter().any(|(seen, ..)| *seen == id) {
+                found.push((id, label, krate));
+            }
+        }
+    }
+    found.sort_by(|(a, _, x), (b, _, y)| (&x.package, a).cmp(&(&y.package, b)));
+    Ok(found
+        .into_iter()
+        .map(|(_, label, krate)| (label, krate))
+        .collect())
+}
+
+/// The nshm in the dependency graph of the package at `manifest`, as
+/// `cargo metadata` (with its dependencies) gives it in `metadata`: each
+/// with its Cargo id and how errors name it ([`cargo_nshm`]).
+fn nshm_in(
+    metadata: &serde_json::Value,
+    manifest: &Path,
+) -> anyhow::Result<Vec<(String, String, AppCrate)>> {
+    let packages = metadata["packages"]
+        .as_array()
+        .context("cargo metadata packages")?;
+    let package = |id: &str| packages.iter().find(|p| p["id"] == id);
+    let manifest = dunce::canonicalize(manifest)?;
+    let root = packages
+        .iter()
+        .find(|p| {
+            p["manifest_path"]
+                .as_str()
+                .and_then(|m| dunce::canonicalize(m).ok())
+                .is_some_and(|m| m == manifest)
+        })
+        .with_context(|| format!("cargo metadata has no package at {}", manifest.display()))?;
+    let root_id = root["id"].as_str().context("cargo metadata package id")?;
+    let nodes = metadata["resolve"]["nodes"]
+        .as_array()
+        .context("cargo metadata dependency graph")?;
+    // What the root links: normal dependencies, not dev or build ones.
+    let mut reached = vec![root_id];
+    let mut next = 0;
+    while let Some(id) = reached.get(next).copied() {
+        next += 1;
+        let deps = nodes
+            .iter()
+            .find(|n| n["id"] == id)
+            .and_then(|n| n["deps"].as_array())
+            .into_iter()
+            .flatten();
+        for dep in deps {
+            let normal = dep["dep_kinds"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|k| k["kind"].is_null());
+            if let Some(pkg) = dep["pkg"].as_str()
+                && normal
+                && !reached.contains(&pkg)
+            {
+                reached.push(pkg);
+            }
+        }
+    }
+    let root_name = root["name"].as_str().unwrap_or_default();
+    let mut found = Vec::new();
+    for id in &reached[1..] {
+        let p = package(id).with_context(|| format!("cargo metadata has no package {id}"))?;
+        let name = p["name"].as_str().context("cargo metadata package name")?;
+        // `#[native_module]` expands to `::nsh_core::…`: an nshm depends on
+        // nsh-core itself.
+        let on_core = p["dependencies"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|d| d["name"] == "nsh-core" && d["kind"].is_null());
+        if NSH_CRATES.contains(&name) || !on_core {
+            continue;
+        }
+        let dir = Path::new(
+            p["manifest_path"]
+                .as_str()
+                .context("cargo metadata manifest")?,
+        )
+        .parent()
+        .context("cargo metadata manifest directory")?;
+        let dir = dunce::canonicalize(dir).unwrap_or_else(|_| dir.to_owned());
+        if specifier_of(&dir).is_none() {
+            continue;
+        }
+        let version = p["version"].as_str().unwrap_or_default();
+        let link = Link::Cargo(cargo_source(p)?);
+        let mut krate = AppCrate::new(name.to_owned(), dir);
+        krate.link = link;
+        found.push((
+            (*id).to_owned(),
+            format!("{name} {version} (a Cargo dependency of {root_name})"),
+            krate,
+        ));
+    }
+    Ok(found)
+}
+
+/// The keys of a dependency line on the package `p` of `cargo metadata`
+/// that take it from where Cargo did: `None` for a directory, its version
+/// for a registry (with the registry's index unless it is crates.io), its
+/// repository and reference for Git ([`git_keys`]).
+fn cargo_source(p: &serde_json::Value) -> anyhow::Result<Option<String>> {
+    const CRATES_IO: &[&str] = &[
+        "registry+https://github.com/rust-lang/crates.io-index",
+        "sparse+https://index.crates.io/",
+    ];
+    let Some(source) = p["source"].as_str() else {
+        return Ok(None);
+    };
+    let version = p["version"].as_str().context("cargo metadata version")?;
+    if let Some(git) = source.strip_prefix("git+") {
+        return Ok(Some(git_keys(git)));
+    }
+    if CRATES_IO.contains(&source) {
+        return Ok(Some(format!("version = {version:?}")));
+    }
+    let index = source
+        .strip_prefix("registry+")
+        .or(source.starts_with("sparse+").then_some(source))
+        .with_context(|| {
+            format!(
+                "{} comes from {source}, a source nsh cannot link",
+                p["name"].as_str().unwrap_or_default()
+            )
+        })?;
+    Ok(Some(format!(
+        "version = {version:?}, registry-index = {index:?}"
+    )))
+}
+
+/// `git = "<url>"` and the reference (`, branch = "main"`) of the Git
+/// source `<url>?<query>#<commit>` of `cargo metadata` (after `git+`): the
+/// one source Cargo takes the app's dependency from, so a generated
+/// dependency with these keys shares its package.
+fn git_keys(source: &str) -> String {
+    let source = source.split('#').next().unwrap_or(source);
+    let (url, query) = source.split_once('?').unwrap_or((source, ""));
+    let reference = query
+        .split_once('=')
+        .map(|(key, value)| format!(", {key} = {value:?}"))
+        .unwrap_or_default();
+    format!("git = {url:?}{reference}")
+}
+
+/// The crates `listed` (those `nsh.json` lists, each with how it names
+/// it: `"rust"`'s, then `"dependencies"`'s, whose names are `installed`),
+/// with the nshm `found` in their Cargo dependencies after them
+/// ([`cargo_nshm`]), checked together ([`check_crates`]). One `nsh.json`
+/// lists as well is linked once, as `nsh.json` lists it: the same
+/// directory, or an nshm of `"dependencies"` by its package, to whose
+/// installed copy the generated workspace sends the app's Cargo dependency
+/// ([`RustApp::write_workspace_manifest`]).
+fn with_found(
+    mut listed: Vec<(String, AppCrate)>,
+    installed: &[String],
+    found: Vec<(String, AppCrate)>,
+) -> anyhow::Result<Vec<AppCrate>> {
+    let found: Vec<_> = found
+        .into_iter()
+        .filter(|(_, c)| {
+            !listed.iter().any(|(_, l)| l.dir == c.dir) && !installed.contains(&c.name())
+        })
+        .collect();
+    listed.extend(found);
+    check_crates(&listed)?;
+    Ok(listed.into_iter().map(|(_, c)| c).collect())
 }
 
 /// The directories of the app's Rust code: those of `crates` and of the
@@ -1808,16 +2064,7 @@ fn retargeted_dependency(dep: &serde_json::Value, nsh: &Nsh, local: Option<&Path
         return format!("{{ path = {path:?}{extra} }}");
     }
     if let Some(source) = dep["source"].as_str().and_then(|s| s.strip_prefix("git+")) {
-        let (url, query) = source.split_once('?').unwrap_or((source, ""));
-        let reference = query.split('#').next().unwrap_or_default();
-        let reference = reference
-            .split_once('=')
-            .map(|(key, value)| format!(", {key} = {value:?}"))
-            .unwrap_or_default();
-        return format!(
-            "{{ git = {:?}{reference}{extra} }}",
-            url.split('#').next().unwrap_or(url)
-        );
+        return format!("{{ {}{extra} }}", git_keys(source));
     }
     let registry = dep["registry"]
         .as_str()
@@ -2015,7 +2262,8 @@ impl RustApp {
         })
     }
 
-    /// The crates `nsh.json` `"rust"` lists, in its order.
+    /// Its crates: `nsh.json` `"rust"`'s, its nshm, then those they depend
+    /// on through Cargo.
     pub(crate) fn crates(&self) -> &[AppCrate] {
         &self.crates
     }
@@ -2188,7 +2436,9 @@ panic = \"abort\"
         }
         let _ = fs::remove_file(ws.join("app.json"));
         if self.retargeted {
-            for c in &self.crates {
+            // One from a registry or Git keeps its source, as the app's
+            // crates' retargeted manifests do (`retargeted_dependency`).
+            for c in self.crates.iter().filter(|c| !c.is_fetched()) {
                 write_retargeted(ws, &c.dir, &self.nsh)?;
             }
         }
@@ -2778,7 +3028,7 @@ panic = \"abort\"
 opt-level = \"s\"
 ",
         );
-        for c in &self.crates {
+        for c in self.crates.iter().filter(|c| !c.is_fetched()) {
             profile.push_str(&format!(
                 "[profile.web-dev.package.{:?}]\nopt-level = 1\n",
                 c.package
@@ -2984,6 +3234,7 @@ opt-level = \"s\"
         let mut changing: Vec<&str> = self
             .crates
             .iter()
+            .filter(|c| !c.is_fetched())
             .filter(|c| !installed.as_ref().is_some_and(|d| c.dir.starts_with(d)))
             .map(|c| c.package.as_str())
             .collect();
@@ -3690,11 +3941,12 @@ impl RustApp {
                 "\n/// The UI set of the crate {}: the entry `#[native_module(\"…\")]` makes in it.\n\
                  {cfg}fn {}() -> nsh_core::element::Registry {{\n    \
                  #[allow(unused_imports)]\n    use {}::*;\n    \
-                 {ENTRY}() // the crate {} (nsh.json \"rust\")\n}}\n",
+                 {ENTRY}() // the crate {} ({})\n}}\n",
                 krate.package,
                 set_fn(krate),
                 krate.name(),
                 krate.package,
+                krate.origin(),
             ));
         }
         code.push_str(&format!(
@@ -3719,9 +3971,10 @@ impl RustApp {
         for krate in &self.crates {
             calls.push_str(&format!(
                 "    {{\n        #[allow(unused_imports)]\n        use {}::*;\n        \
-                 {entry}(__nsh_components); // the crate {} (nsh.json \"rust\")\n    }}\n",
+                 {entry}(__nsh_components); // the crate {} ({})\n    }}\n",
                 krate.name(),
                 krate.package,
+                krate.origin(),
             ));
         }
         format!(
@@ -4239,7 +4492,7 @@ fn web_profile(kind: crate::runtime::WebKind) -> &'static str {
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use super::{AppCrate, Nsh, RootConfig, RustApp};
+    use super::{AppCrate, Link, Nsh, RootConfig, RustApp};
 
     /// Serialises the tests that set [`super::RUNNER_FEATURES`].
     static RUNNER_FEATURES_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -6130,6 +6383,234 @@ panic = \"abort\"
         // Named after its first crate and a digest of all of them: another
         // app's crates build apart.
         assert!(read("test/Cargo.toml").contains("name = \"nsh-app-charts-aebab085-test\""));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The nshm in the Cargo graph of the app's crates are those it links,
+    /// transitively, that depend on nsh-core and have a `#[native_module]`
+    /// at their root, ordered by package; dev and build dependencies,
+    /// crates without the entry and nsh's own are not.
+    #[test]
+    fn the_nshm_of_the_app_s_cargo_dependencies_are_found() {
+        let dir = std::env::temp_dir().join(format!("nsh-rust-cargo-nshm-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let entry = |specifier: &str| {
+            format!("#[native_module(\"{specifier}\")]\nfn native(r: &mut Registry) {{}}\n")
+        };
+        let core = "nsh-core = { path = \"../nsh-core\" }\n";
+        write_crate(&dir.join("nsh-core"), "nsh-core", "", "");
+        write_crate(&dir.join("probe"), "probe", &entry("probe"), core);
+        write_crate(&dir.join("zeta"), "zeta", &entry("zeta"), core);
+        write_crate(&dir.join("dev-only"), "dev-only", &entry("dev-only"), core);
+        write_crate(
+            &dir.join("build-only"),
+            "build-only",
+            &entry("build-only"),
+            core,
+        );
+        // Its entry would not build without nsh-core.
+        write_crate(&dir.join("no-core"), "no-core", &entry("no-core"), "");
+        write_crate(
+            &dir.join("shared"),
+            "shared",
+            "pub fn helper() {}\n",
+            &format!("{core}probe = {{ path = \"../probe\" }}\n"),
+        );
+        write_crate(
+            &dir.join("app"),
+            "app",
+            &entry("app"),
+            &format!(
+                "{core}zeta = {{ path = \"../zeta\" }}\nshared = {{ path = \"../shared\" }}\n\
+                 no-core = {{ path = \"../no-core\" }}\n\n\
+                 [dev-dependencies]\ndev-only = {{ path = \"../dev-only\" }}\n\n\
+                 [build-dependencies]\nbuild-only = {{ path = \"../build-only\" }}\n"
+            ),
+        );
+        let app = AppCrate::new("app".into(), dunce::canonicalize(dir.join("app")).unwrap());
+        let found = super::cargo_nshm(std::slice::from_ref(&app)).unwrap();
+        let canonical = |name: &str| dunce::canonicalize(dir.join(name)).unwrap();
+        let mut probe = AppCrate::new("probe".into(), canonical("probe"));
+        probe.link = Link::Cargo(None);
+        let mut zeta = AppCrate::new("zeta".into(), canonical("zeta"));
+        zeta.link = Link::Cargo(None);
+        assert_eq!(
+            found,
+            vec![
+                ("probe 0.1.0 (a Cargo dependency of app)".to_owned(), probe),
+                ("zeta 0.1.0 (a Cargo dependency of app)".to_owned(), zeta),
+            ]
+        );
+        // A crate whose graph has no nshm links nothing more.
+        let shared = AppCrate::new("probe".into(), canonical("probe"));
+        assert_eq!(super::cargo_nshm(&[shared]).unwrap(), Vec::new());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A found nshm is linked from where Cargo takes it for the app.
+    #[test]
+    fn a_found_nshm_is_linked_from_its_cargo_source() {
+        let source = |source: Option<&str>| {
+            super::cargo_source(&serde_json::json!({
+                "name": "acme", "version": "0.6.1", "source": source,
+            }))
+        };
+        assert_eq!(source(None).unwrap(), None);
+        for crates_io in [
+            "registry+https://github.com/rust-lang/crates.io-index",
+            "sparse+https://index.crates.io/",
+        ] {
+            assert_eq!(
+                source(Some(crates_io)).unwrap().as_deref(),
+                Some("version = \"0.6.1\"")
+            );
+        }
+        assert_eq!(
+            source(Some("sparse+https://example.com/index/"))
+                .unwrap()
+                .as_deref(),
+            Some("version = \"0.6.1\", registry-index = \"sparse+https://example.com/index/\"")
+        );
+        assert_eq!(
+            source(Some("registry+https://example.com/index"))
+                .unwrap()
+                .as_deref(),
+            Some("version = \"0.6.1\", registry-index = \"https://example.com/index\"")
+        );
+        let sha = "0123456789abcdef0123456789abcdef01234567";
+        for (git, keys) in [
+            (
+                format!("git+https://example.com/acme#{sha}"),
+                "git = \"https://example.com/acme\"",
+            ),
+            (
+                format!("git+https://example.com/acme?branch=dev#{sha}"),
+                "git = \"https://example.com/acme\", branch = \"dev\"",
+            ),
+            (
+                format!("git+https://example.com/acme?rev=0123456#{sha}"),
+                "git = \"https://example.com/acme\", rev = \"0123456\"",
+            ),
+        ] {
+            assert_eq!(source(Some(&git)).unwrap().as_deref(), Some(keys));
+        }
+        assert!(source(Some("local-registry+file:///x")).is_err());
+    }
+
+    /// A found nshm `nsh.json` lists as well is linked once, as it lists
+    /// it; one that clashes with a listed crate fails as two listed would.
+    #[test]
+    fn a_found_nshm_is_linked_once() {
+        let dir = std::env::temp_dir().join(format!("nsh-rust-found-once-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let entry = |specifier: &str| {
+            format!("#[native_module(\"{specifier}\")]\nfn native(r: &mut Registry) {{}}\n")
+        };
+        write_crate(&dir.join("native"), "app-native", &entry("app/native"), "");
+        write_crate(&dir.join("installed"), "acme", &entry("acme"), "");
+        write_crate(&dir.join("cargo/acme"), "acme", &entry("acme"), "");
+        write_crate(&dir.join("cargo/local"), "app-native", &entry("local"), "");
+        write_crate(&dir.join("cargo/same"), "same", &entry("app/native"), "");
+        let krate = |package: &str, path: &str, link: Link| {
+            let mut c = AppCrate::new(package.into(), dir.join(path));
+            c.link = link;
+            c
+        };
+        let native = krate("app-native", "native", Link::Listed);
+        let installed = krate("acme", "installed", Link::Listed);
+        let listed = || {
+            vec![
+                ("native".to_owned(), native.clone()),
+                ("acme".to_owned(), installed.clone()),
+            ]
+        };
+        let found = |c: AppCrate| (format!("{} (found)", c.package), c);
+        let fetched = Link::Cargo(Some("version = \"0.6.1\"".into()));
+        // The listed crate itself and the installed nshm's package.
+        let crates = super::with_found(
+            listed(),
+            &[installed.name()],
+            vec![
+                found(krate("acme", "cargo/acme", fetched.clone())),
+                found(krate("app-native", "native", Link::Cargo(None))),
+            ],
+        )
+        .unwrap();
+        assert_eq!(crates, vec![native.clone(), installed.clone()]);
+        // Another crate of a listed one's package.
+        let error = super::with_found(
+            listed(),
+            &[installed.name()],
+            vec![found(krate("app-native", "cargo/local", Link::Cargo(None)))],
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.contains("are both the package `app-native`"),
+            "{error}"
+        );
+        // Another crate of a listed one's specifier.
+        let error = super::with_found(
+            listed(),
+            &[installed.name()],
+            vec![found(krate("same", "cargo/same", fetched))],
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.contains("native and same (found) both have `#[native_module(\"app/native\")]`"),
+            "{error}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The generated code links a found nshm from its source, with only the
+    /// features the app's crates turn on, and calls its entries after the
+    /// listed crates'; built optimized when Cargo fetches it.
+    #[test]
+    fn the_generated_code_calls_the_entries_of_found_nshm() {
+        let dir = std::env::temp_dir().join(format!("nsh-rust-found-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut app = app(&dir, &[("app-native", dir.join("native"))], None);
+        let mut probe = AppCrate::new("probe".into(), dir.join("probe"));
+        probe.link = Link::Cargo(None);
+        let mut extra = AppCrate::new("acme-extra".into(), dir.join("registry/acme-extra"));
+        extra.link = Link::Cargo(Some("version = \"0.6.1\"".into()));
+        app.crates.extend([probe, extra]);
+        app.write_workspace().unwrap();
+        let read = |file: &str| std::fs::read_to_string(app.workspace.join(file)).unwrap();
+        let cargo = read("macos-host/Cargo.toml");
+        for line in [
+            format!(
+                "\napp_app_native = {{ package = \"app-native\", path = {:?} }}\n",
+                dir_of(&app, "native")
+            ),
+            format!(
+                "\napp_probe = {{ package = \"probe\", path = {:?}, default-features = false }}\n",
+                dir_of(&app, "probe")
+            ),
+            "\napp_acme_extra = { package = \"acme-extra\", version = \"0.6.1\", default-features = false }\n"
+                .to_owned(),
+        ] {
+            assert!(cargo.contains(&line), "no {line:?} in\n{cargo}");
+        }
+        let main = read("macos-host/main.rs");
+        assert!(
+            main.contains("vec![nsh_base::registry(), set_app_app_native(), set_app_probe(), set_app_acme_extra()]"),
+            "{main}"
+        );
+        assert!(
+            main.contains(
+                "    use app_acme_extra::*;\n    __nsh_native_module() // the crate acme-extra (a Cargo dependency of the app's crates)\n"
+            ),
+            "{main}"
+        );
+        let manifest = read("Cargo.toml");
+        assert!(
+            manifest.contains("[profile.dev.package.\"probe\"]"),
+            "{manifest}"
+        );
+        assert!(!manifest.contains("acme-extra"), "{manifest}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
