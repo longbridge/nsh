@@ -52109,3 +52109,124 @@ fn unfocused_keys_follow_named_window_content_changes() {
     c.apply(capture(KeyCapture::None)).unwrap();
     assert_eq!(mounted_content(&c.commit().unwrap()), Some(None));
 }
+
+#[test]
+fn an_overlay_leaves_escape_to_focused_content_that_captures_it() {
+    use crate::KeyCapture;
+    use crate::keymap::Keystroke;
+    use crate::tailwind::state::FOCUSED;
+    // #2424: an editor in a popover takes Escape first; the overlay binds
+    // it again once the focus leaves the editor or the rule drops it.
+    let mut c = core();
+    add(&mut c, 2, Tag::View, ROOT_ID, &[]);
+    add(&mut c, 4, Tag::Overlay, 2, &[]);
+    add(&mut c, 6, Tag::View, 4, &[]);
+    add(&mut c, 8, Tag::View, 6, &[]);
+    add(&mut c, 10, Tag::View, 4, &[]);
+    apply(
+        &mut c,
+        vec![
+            overlay_prop(
+                4,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(2)),
+            ),
+            Op::Listen {
+                id: 4,
+                event: EventKind::Cancel,
+                enabled: true,
+            },
+        ],
+    );
+    let escape_bound = |c: &mut Core<FakeEngine>| -> Option<bool> {
+        let batch = c.commit()?;
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::Keymap(k) => {
+                Some(k.bindings().iter().any(|b| b.id == overlay::ESCAPE_BINDING))
+            }
+            _ => None,
+        })
+    };
+    assert_eq!(escape_bound(&mut c), Some(true));
+
+    let escape = Keystroke::parse_with("escape", false).unwrap();
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 6,
+            prop: Prop::KeyCapture(KeyCapture::keys([escape])),
+        }],
+    );
+    // No focus in the editor yet: the overlay keeps Escape.
+    assert_ne!(escape_bound(&mut c), Some(false));
+
+    c.set_states(8, FOCUSED);
+    assert_eq!(escape_bound(&mut c), Some(false), "the editor's");
+
+    // The focus on another view of the overlay: Escape cancels again.
+    c.set_states(8, 0);
+    c.set_states(10, FOCUSED);
+    assert_eq!(escape_bound(&mut c), Some(true));
+
+    c.set_states(10, 0);
+    c.set_states(8, FOCUSED);
+    assert_eq!(escape_bound(&mut c), Some(false));
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 6,
+            prop: Prop::KeyCapture(KeyCapture::None),
+        }],
+    );
+    assert_eq!(escape_bound(&mut c), Some(true), "the rule dropped it");
+
+    // Back still cancels the overlay while the content takes Escape.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 6,
+            prop: Prop::KeyCapture(KeyCapture::All),
+        }],
+    );
+    assert_eq!(escape_bound(&mut c), Some(false));
+    js_events(&mut c);
+    assert!(c.overlay_cancel());
+    let events = js_events(&mut c);
+    assert!(
+        events.contains(&(4, EventKind::Cancel, EventPayload::None)),
+        "{events:?}"
+    );
+}
+
+#[test]
+fn a_focus_outside_the_overlay_does_not_take_its_escape() {
+    use crate::KeyCapture;
+    use crate::keymap::Keystroke;
+    use crate::tailwind::state::FOCUSED;
+    let mut c = core();
+    add(&mut c, 2, Tag::View, ROOT_ID, &[]);
+    add(&mut c, 4, Tag::Overlay, 2, &[]);
+    add(&mut c, 6, Tag::View, 4, &[]);
+    let escape = Keystroke::parse_with("escape", false).unwrap();
+    apply(
+        &mut c,
+        vec![
+            overlay_prop(
+                4,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(2)),
+            ),
+            Op::Listen {
+                id: 4,
+                event: EventKind::Cancel,
+                enabled: true,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::KeyCapture(KeyCapture::keys([escape])),
+            },
+        ],
+    );
+    c.commit();
+    c.set_states(2, FOCUSED);
+    c.commit();
+    assert!(!c.focus_takes_escape());
+}

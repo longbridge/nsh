@@ -312,5 +312,68 @@ export function Popovers() {
     );
   }
 
-  return <DemoPage cards={[Share, Profile, Reminder, Placement, Events]} />;
+  /**
+   * Content with its own Escape: a list of labels whose selection
+   * Escape clears first. While a label is selected the list captures
+   * Escape (`captureKeys`), so the popover leaves the key to it; with
+   * nothing selected the next Escape closes the popover.
+   */
+  function Labels() {
+    const labels = ["Design", "Research", "Urgent"];
+    const selected = signal<string | null>(null);
+    let list: { focus(): void } | undefined;
+    return (
+      <Card icon="popover" title="Escape inside first" subtitle="The content clears its selection before Escape closes it">
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+          <Popover onOpenChange={changed("labels")} align="start" offset={6} margin={8} trigger={<Trigger label="Labels" icon="circle-check" />}>
+            <PopIn style={{ ...popupSurface(), width: pointer ? 220 : 260 }}>
+              <View
+                ref={(node) => (list = node)}
+                focusable
+                accessibilityLabel="Label list"
+                testID="label-list"
+                captureKeys={selected() ? ["escape"] : "none"}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape" && selected()) {
+                    log(`selection ${selected()} cleared`);
+                    selected.set(null);
+                  }
+                }}
+                style={{ gap: 2 }}
+              >
+                <Each of={labels}>
+                  {(label) => (
+                    <View
+                      role="button"
+                      accessibilityState={{ selected: selected() === label() }}
+                      onPress={() => {
+                        selected.set(label());
+                        list?.focus();
+                      }}
+                      hoverStyle={hovered()}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 10,
+                        height: pointer ? 28 : 46,
+                        paddingHorizontal: 8,
+                        borderRadius: pointer ? 6 : 10,
+                        backgroundColor: selected() === label() ? alpha(colors.accent, 0.14) : undefined,
+                      }}
+                    >
+                      <LucideIcon name="circle-check" size={pointer ? 14 : 18} tint={selected() === label() ? colors.accent : colors.muted} />
+                      <Text style={{ flex: 1, fontSize: pointer ? 13 : 16, color: colors.text }}>{label()}</Text>
+                    </View>
+                  )}
+                </Each>
+              </View>
+            </PopIn>
+          </Popover>
+        </View>
+        <Caption label={pointer ? "Select a label, then press Escape twice" : "Back always closes it"} />
+      </Card>
+    );
+  }
+
+  return <DemoPage cards={[Share, Profile, Reminder, Labels, Placement, Events]} />;
 }

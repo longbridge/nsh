@@ -7799,6 +7799,11 @@ impl<M: TextEngine> Core<M> {
     /// The root's shortcuts follow the views' bindings coming and going:
     /// the table JS's and theirs make, listened to while either has one.
     pub(super) fn sync_keys(&mut self) {
+        let escape_to_focus = self.focus_takes_escape();
+        if escape_to_focus != self.overlay_state.escape_to_focus {
+            self.overlay_state.escape_to_focus = escape_to_focus;
+            self.components.executor.keys.borrow_mut().changed = true;
+        }
         let rust = {
             // The windows' refs read the graph.
             let _entered = self.components.runtime.enter();

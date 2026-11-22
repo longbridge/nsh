@@ -173,6 +173,11 @@ pub(super) struct Overlays {
     pub(super) cancel: bool,
     /// A hint is shown: Escape is bound (it hides it).
     pub(super) hint_escape: bool,
+    /// The keyboard focus is inside the top overlay listening to
+    /// `onCancel`, on a view whose `captureKeys` (or an enabled
+    /// ancestor's within that overlay) takes Escape: the key is the
+    /// content's, so the overlay does not bind it (#2424).
+    pub(super) escape_to_focus: bool,
     /// The anchors of the hints in the view listening to the pointer
     /// (desktops), checked by id.
     pub(super) hinting: Vec<(Key, NodeId)>,
@@ -1242,6 +1247,10 @@ impl<M: TextEngine> Core<M> {
         if !self.overlay_state.cancel && !self.overlay_state.hint_escape {
             return None;
         }
+        // The focused content takes Escape itself: no binding above it.
+        if self.overlay_state.escape_to_focus && !self.overlay_state.hint_escape {
+            return None;
+        }
         let escape = Keystroke::parse_with("escape", false).ok()?;
         Some(KeyBinding::new(ESCAPE_BINDING, escape, When::Always, false))
     }
@@ -1261,7 +1270,11 @@ impl<M: TextEngine> Core<M> {
             return;
         };
         if self.overlay(key).is_some_and(|s| s.config.hint.is_none()) {
-            self.overlay_cancel();
+            // Bound for a hint lower down: the focused content of this
+            // overlay keeps Escape.
+            if !self.overlay_state.escape_to_focus {
+                self.overlay_cancel();
+            }
             return;
         }
         let state = self.overlay_mut(key).expect("overlay");
@@ -1273,6 +1286,61 @@ impl<M: TextEngine> Core<M> {
         // Shown by the app (`open`) or the pointer and focus: it asks to
         // hide either way.
         self.hint_changed(key, false, HintReason::Escape);
+    }
+
+    /// Whether the keyboard focus is inside the top shown overlay listening
+    /// to `onCancel` and it, or an enabled ancestor within that overlay,
+    /// captures Escape (`captureKeys`): the content, like an editor in a
+    /// popover, handles Escape first, as a focused element does on the
+    /// Web before the page's own handlers. Back and the screen reader's
+    /// escape gesture still cancel the overlay.
+    pub(super) fn focus_takes_escape(&self) -> bool {
+        if !self.overlay_state.cancel {
+            return false;
+        }
+        let Some((focus, focus_id)) = self.focus else {
+            return false;
+        };
+        if self
+            .nodes
+            .get(focus as usize)
+            .is_none_or(|n| n.id != focus_id)
+        {
+            return false;
+        }
+        let top = self.overlays.iter().rev().copied().find(|&k| {
+            self.overlay(k).is_some_and(|s| s.host.is_some())
+                && self.nodes[k as usize].events.contains(EventKind::Cancel)
+        });
+        let Some(top) = top else {
+            return false;
+        };
+        let Ok(escape) = Keystroke::parse_with("escape", false) else {
+            return false;
+        };
+        // A native text input keeps its own keys and captures none.
+        if self.nodes[focus as usize].kind == Kind::Input {
+            return false;
+        }
+        let mut key = focus;
+        let mut captured = false;
+        loop {
+            if key == top {
+                return captured;
+            }
+            let node = &self.nodes[key as usize];
+            if !captured
+                && node.props.as_ref().is_some_and(|p| {
+                    !p.accessibility.state.disabled && p.key_capture.captures_key(Some(&escape))
+                })
+            {
+                captured = true;
+            }
+            if node.parent == NO_KEY {
+                return false;
+            }
+            key = node.parent;
+        }
     }
 
     /// Escape or back: `onCancel` of the top overlay listening to it;
