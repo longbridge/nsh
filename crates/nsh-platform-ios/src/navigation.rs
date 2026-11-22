@@ -105,6 +105,9 @@ pub(crate) struct ScreenIvars {
     follow_scroll: Cell<bool>,
     /// The scroll view last given to UIKit as the content scroll view.
     followed: RefCell<Option<Weak<UIScrollView>>>,
+    /// `!headerVisible`: whether the bar is hidden while this screen is on
+    /// top of its stack (`follow_header`).
+    header_hidden: Cell<bool>,
 }
 
 define_class!(
@@ -170,6 +173,7 @@ impl ScreenController {
             insets: Cell::new(None),
             follow_scroll: Cell::new(false),
             followed: RefCell::new(None),
+            header_hidden: Cell::new(false),
         });
         // SAFETY: UIViewController's designated initializer.
         unsafe {
@@ -179,6 +183,52 @@ impl ScreenController {
 
     pub(crate) fn screen_id(&self) -> NodeId {
         self.ivars().id
+    }
+
+    /// Shows or hides the bar of the stack this screen is on top of, as its
+    /// `headerVisible` says. A stack shows the bar for the screen it pushes
+    /// or pops to (`willShow`); a screen already on top that changes
+    /// `headerVisible` brings no transition, and the core already lays its
+    /// content out for the header it asked for. A transition under way
+    /// (the stack's, or a modal's over it) keeps the bar it started with:
+    /// the bar follows once it ends, if this screen is still on top.
+    fn follow_header(&self) {
+        let Some(nav) = self.navigationController() else {
+            return;
+        };
+        let on_top = nav
+            .topViewController()
+            .is_some_and(|top| std::ptr::eq::<UIViewController>(&*top, &**self));
+        let hidden = self.ivars().header_hidden.get();
+        if !on_top || nav.isNavigationBarHidden() == hidden {
+            return;
+        }
+        if let Some(coordinator) = nav.transitionCoordinator() {
+            let pending = Cell::new(Some(self.retain()));
+            let wait = RcBlock::new(
+                move |_: NonNull<
+                    ProtocolObject<dyn UIViewControllerTransitionCoordinatorContext>,
+                >| {
+                    let Some(screen) = pending.take() else {
+                        return;
+                    };
+                    let mtm = screen.mtm();
+                    let bound = MainThreadBound::new(screen, mtm);
+                    // The main queue's next turn: the transition is over by
+                    // then.
+                    DispatchQueue::main().exec_async(move || {
+                        let mtm = MainThreadMarker::new().expect("the main queue");
+                        bound.into_inner(mtm).follow_header();
+                    });
+                },
+            );
+            // Refused when the transition is already ending.
+            if coordinator.animateAlongsideTransition_completion(None, Some(&wait)) {
+                return;
+            }
+        }
+        let animated = self.viewIfLoaded().is_some_and(|v| v.window().is_some());
+        nav.setNavigationBarHidden_animated(hidden, animated);
     }
 
     /// With `headerBackgroundOnScroll`, the header switches to its standard
@@ -2271,6 +2321,9 @@ impl ScreenHost {
         ivars
             .follow_scroll
             .set(c.header_transparent && c.header_background_on_scroll);
+        ivars.header_hidden.set(!c.header_visible);
+        // After `measure`: the safe area the bar changes reports the header.
+        self.controller.follow_header();
         self.controller.report_insets();
         self.controller.follow_content_scroll();
     }
