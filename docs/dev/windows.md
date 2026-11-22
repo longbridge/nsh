@@ -329,7 +329,15 @@ through NSH's hit testing to web views, as real input does):
 - a screenshot is what the window shows, web views and their layers included, at the window's scale: `PrintWindow`
   with `PW_RENDERFULLCONTENT`, which composes the window's swap chain and DirectComposition content as DWM does,
   whatever covers the window (drawn offscreen with Direct2D when the window cannot be captured: no pages then); the
-  appearance is the system's, simulated; the size is the client area's.
+  appearance is the system's, simulated; the size is the client area's;
+- the agent's pointer is the test window's only one (as on macOS and Linux): while a test model is set
+  (`Surface::testing`), the window's procedure leaves the user's pointer to the system's default handling
+  (`window::users_pointer`: the mouse's moves and leaves in the client area and over the frame, its buttons and wheels
+  in the client area, touches and pens), so the user's mouse moving over the window or resting on it never changes what
+  a test hovers or presses. Windows sends these with no motion too: a `WM_MOUSEMOVE` to the window under the resting
+  pointer when a window above it closes, a `WM_MOUSELEAVE` once another opens over it, which with several apps under
+  test on one desktop moved or ended a test's hover and came between a press's down and up. A press on the frame still
+  moves, sizes and closes the window. Keys still reach the app.
 
 `dev.rs` hands the model to the surface on the server's test session (posted messages keep their order, so it comes
 before the first bundle).
@@ -472,8 +480,13 @@ measured and are not used: they bring back that latency (48 ms) for the same fra
   possible (only content made for it, such as a swap chain or a WebView2 composition controller, can be a visual).
 - **Video**: which formats play depends on the installed Media Foundation codecs; there is no poster; the control bar
   always shows while `controls` is on. Unlike GTK, `rate` works.
-- **Zooming scroll views**: `zoomTo` and the zoom props are ignored. Notched
-  mouse wheels scroll in steps (not animated).
+- **Scroll views**: a zoomable one draws, hit tests and exposes its children through its zoom
+  (`ViewState::child_place`); two fingers, a precision touchpad's pinch or Ctrl + wheel over it zoom it around the
+  pointer, nearer than a view with pinch values. A notched mouse wheel's step glides (`nsh_core::scroll::wheel_step`,
+  150 ms; a notch during the glide adds to its goal) unless the system's animations are off (`reduceMotion`); views that
+  snap or page take notches unanimated and settle on a snap point. A precision touchpad's scroll ends once the
+  system's glide is spent, so a snapping view then settles on its nearest snap point (`wheel_settle`), as browsers'
+  scroll snapping does, rather than moving on in the scroll's direction.
 - **`mixBlendMode` and `backdropFilter`** are drawn (unlike Linux), except inside a view that is itself drawn
   offscreen (a filtered or 3D-transformed ancestor): there the blend is normal and the backdrop unfiltered.
   `borderCurve: "continuous"` draws circular corners; Android's `elevation` is not drawn.
@@ -489,7 +502,7 @@ measured and are not used: they bring back that latency (48 ms) for the same fra
   committed text goes to the field/IME), and a key the system sends to a hosted web view or a native component's
   window never reaches these events.
 - **Accessibility** (UI Automation): items NSH draws itself (alerts) are not in the
-  tree; there is no Text pattern; headings report level 1; live regions raise UIA notifications.
+  tree; there is no Text pattern; live regions raise UIA notifications.
 - **No desktop equivalent**: the status bar, input accessory views, `keyboardShouldPersistTaps` (there is no software
   keyboard); the safe area and the keyboard height are 0.
 - **Window chrome**: the menu bar is not shown while the title bar is hidden (its shortcuts work; apps open its menus

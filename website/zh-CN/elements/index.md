@@ -448,6 +448,7 @@ view().on_press(open_page).child(
 | `ref` | `.element_ref(&handle)` | `ViewRef \| (node: ViewRef) => void` | 元素的 ref（参见 [ref 方法](#ref-方法)）：`ViewRef`，或元素自己基于它的类型。`ref={el}` 赋值给变量，`ref={fn}` 调用函数。 |
 | `nativeID` | `.native_id(id)` | `string` | 为视图命名，供其他元素引用，例如输入框引用的 `InputAccessoryView`。 |
 | `testID` | `.test_id(id)` | `string` | UI 测试使用的标识（在 Android 上是视图的 resource id）。 |
+| `copyText` | `.copy_text(text)` | `string` | 用在文本中的视图或图片（行内附件）上：复制这段文本时在它的位置给出的文字（例如行内公式的源码）。不设置时复制结果不包含它。嵌套的文本片段和不在文本中的元素会忽略它。见[行内视图和图片](./text.md#行内视图和图片)。 |
 | `key` | `.key(key)` | `string` | 元素在兄弟元素之间的标识。 |
 
 ### 页面的标记

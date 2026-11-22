@@ -414,6 +414,15 @@ fn a_press_reaches_a_view_across_a_scroll_view_s_fold() {
 }
 
 #[test]
+fn a_drag_is_a_finger_on_a_phone_and_the_mouse_on_a_desktop_or_the_web() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/drag-pointer");
+    let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 3);
+}
+
+#[test]
 fn a_view_removed_under_the_pointer_or_with_the_focus_hears_no_more() {
     let run = TestRun {
         compile: compiler(vec![nsh_base::registry()]),
@@ -437,7 +446,7 @@ fn a_mouse_drag_selects_in_a_selectable_view() {
     let results = run_file(&run, &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
-    assert_eq!(results.len(), 5);
+    assert_eq!(results.len(), 6);
 }
 
 #[test]
@@ -663,3 +672,5 @@ fn input_targets_report_document_values_and_do_not_edit_covering_fields() {
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
 }
+
+mod drag;

@@ -94,6 +94,8 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
     let push = move |s: String| log.update(|l| l.push(s));
     let items = signal(props.items.clone());
     let invalid = signal(props.invalid);
+    let searchable = signal(props.searchable);
+    on_key("f7", move |_| searchable.update(|s| *s = !*s));
     // Only the trigger that starts invalid is busy too, so that the other
     // tests' trigger carries no state of the app's.
     let busy = props.invalid;
@@ -107,7 +109,7 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
     let follow = props.follow;
     let mut el = select()
         .items(items)
-        .searchable(props.searchable)
+        .searchable(searchable)
         .disabled(props.disabled)
         .default_open(props.default_open)
         .search_placeholder("Search")
@@ -676,7 +678,31 @@ fn escape_cancels_and_gives_the_trigger_the_keyboard_back() {
 
 #[test]
 fn choosing_gives_the_trigger_the_keyboard_back() {
+    // The trigger had the keyboard (Tab) when the list opened.
+    let mut app = focused(props(fruits()));
+    let trigger = app.id("role:combobox");
+    app.open_list();
+    app.press("role:option[Carrot]").unwrap();
+    app.gone("role:listbox");
+    assert!(app.sent(trigger, &Command::Focus));
+}
+
+#[test]
+fn choosing_in_a_list_a_press_opened_leaves_the_trigger_without_the_keyboard() {
+    // A press opened it with nothing focused: the trigger never had the
+    // keyboard, so Space and Return stay the app's shortcuts.
     let mut app = desktop(props(fruits()));
+    let trigger = app.id("role:combobox");
+    app.open_list();
+    app.press("role:option[Carrot]").unwrap();
+    app.gone("role:listbox");
+    assert!(!app.sent(trigger, &Command::Focus));
+}
+
+#[test]
+fn on_windows_choosing_in_a_list_a_press_opened_gives_the_trigger_the_keyboard() {
+    // A press focuses a button there, as native buttons do.
+    let mut app = start_on(props(fruits()), Os::Windows, Idiom::Desktop, false);
     let trigger = app.id("role:combobox");
     app.open_list();
     app.press("role:option[Carrot]").unwrap();
@@ -796,6 +822,38 @@ fn the_pointer_highlights_only_when_it_moves_and_a_press_chooses() {
 }
 
 // 6. Search.
+
+#[test]
+fn turning_searchable_off_while_open_drops_the_query() {
+    let mut app = desktop(HarnessProps {
+        searchable: true,
+        ..props(fruits())
+    });
+    app.open_list();
+    app.type_text("Search", "ric").unwrap();
+    app.see_row(">Rice");
+    assert!(!app.shows("Apple"));
+    // The field goes away with the list still open: every item again.
+    app.key("f7");
+    app.gone("id:food-search");
+    app.wait_for("role:listbox").unwrap();
+    app.see("Apple");
+    app.see("Rice");
+    // Searchable again: the field starts empty, and still filters.
+    app.key("f7");
+    app.wait_for("id:food-search").unwrap();
+    app.see("Apple");
+    app.type_text("Search", "cel").unwrap();
+    app.see_row(">Celery");
+    assert!(!app.shows("Apple"));
+    // Off while closed, then reopened: every item.
+    app.key("escape");
+    app.gone("role:listbox");
+    app.key("f7");
+    app.open_list();
+    app.see("Apple");
+    app.see("Celery");
+}
 
 #[test]
 fn search_filters_the_items_and_their_sections() {

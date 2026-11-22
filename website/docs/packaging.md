@@ -63,8 +63,8 @@ TSX app adds its entry (`nsh package App.tsx --target …`).
 
 `nsh.json` also holds `rust` and `root` (the app's crates and its root component, [Building with Rust](./rust.md)),
 `theme` and `appearance`, `tailwind` (see [Tailwind](./tailwind.md)), `capabilities` (see
-[Sandbox and capabilities](./sandbox-and-capabilities.md)), `android` (`targetSdk`, `usesCleartextTraffic` and `permissions`, [below](#target-api-level)), `ios` and `macos` (the `Info.plist` keys and entitlements
-of their packages, [below](#infoplist-keys-and-entitlements); `macos.activationPolicy`, a [menu bar app](./macos.md#menu-bar-apps)) and `updater`, which makes desktop packages update themselves
+[Sandbox and capabilities](./sandbox-and-capabilities.md)), `android` (`targetSdk`, `usesCleartextTraffic`, `permissions` and `dex`, [below](#target-api-level)), `ios` and `macos` (the `Info.plist` keys and entitlements
+of their packages, [below](#infoplist-keys-and-entitlements); `ios.extensions`, [app extensions](#app-extensions); `macos.activationPolicy`, a [menu bar app](./macos.md#menu-bar-apps)) and `updater`, which makes desktop packages update themselves
 (see [App Updates](./app-updates.md)) and every native package take [OTA updates](./ota-updates.md); [Project structure](./project-structure.md#nshjson) lists
 every key. A key or value NSH cannot read is reported as a warning and left out, so an app written for a newer NSH
 still builds with an older one, and the warning catches a typo.
@@ -87,7 +87,7 @@ nsh package --target android --app-version 1.4.0 --build 42
 | `--build <n>` | Build number. |
 | `--icon <png>` | App icon: a square PNG, ideally 1024×1024. |
 | `--sign <identity>` | iOS: the code signing identity for devices. |
-| `--profile <file>` | iOS: the provisioning profile for devices (`.mobileprovision`). |
+| `--profile <file>` | iOS: the provisioning profile for devices (`.mobileprovision`). Repeat it to give each [app extension](#app-extensions) its own. |
 | `--keystore <file>` | Android: a release keystore (default: the debug key). |
 | `--key-alias <alias>` | Android: the key alias in the keystore. |
 | `--keystore-password <password>` | Android: the keystore password; also read from `NSH_KEYSTORE_PASSWORD`. |
@@ -124,6 +124,7 @@ profile). What happens:
 - The entitlements come from the profile, with the app's own from `nsh.json` `ios.entitlements` checked against it
   ([below](#infoplist-keys-and-entitlements)). NSH checks that the profile's application identifier covers the app's `id`
   (wildcard profiles such as `TEAMID.*` or `TEAMID.com.example.*` work) and stops with an error otherwise.
+- The app's extensions, if any, are signed first, each with its own profile ([App extensions](#app-extensions)).
 - The app is signed with `codesign` using the identity, then zipped into an `.ipa` (`Payload/<Name>.app`).
 
 Find your identities with:
@@ -137,6 +138,55 @@ device as it is.
 
 The app supports iPhone and iPad, portrait and landscape (portrait upside down on iPad only), and needs iOS 15.0 or
 newer, or the later version it names ([Minimum system version](#minimum-system-version)).
+
+### App extensions
+
+Widgets, Live Activities, notification service extensions and other app extensions are bundles of their own
+(`.appex`) that iOS finds in the app's `PlugIns/` folder. Build them with Xcode or `swiftc`, then list them under
+`ios.extensions` in the app's `nsh.json`, relative to `nsh.json`, as `android.dex` lists Java code:
+
+```json
+{
+  "ios": {
+    "extensions": [
+      {
+        "path": "ios/build/iphoneos/Widget.appex",
+        "simulatorPath": "ios/build/iphonesimulator/Widget.appex",
+        "entitlements": { "com.apple.security.application-groups": ["group.com.example.app"] }
+      }
+    ]
+  }
+}
+```
+
+| Key | Meaning |
+|---|---|
+| `path` | The extension built for devices. |
+| `simulatorPath` | The extension built for the simulator. Without it, simulator packages carry `path` when it is built for the simulator and leave the extension out (with a warning) when it is not. |
+| `entitlements` | The extension's entitlements, as `ios.entitlements` are the app's ([below](#infoplist-keys-and-entitlements)). |
+
+Each package copies the extensions into `PlugIns/` and gives them the app's `version` and `build`: an extension's
+version should match its app's (App Store Connect flags a mismatch). An extension's identifier must start with the app's (`com.example.app.Widget` for
+`com.example.app`). The simulator package signs them ad hoc; the device package signs each one with the profile for its
+identifier, which it carries as `embedded.mobileprovision`, before it signs the app. Pass one `--profile` for the app
+and one for each extension; a profile that names a bundle's identifier is taken before a wildcard that covers it:
+
+```sh
+nsh package --target ios \
+  --sign "Apple Distribution: Example Inc (ABCDE12345)" \
+  --profile AppStore.mobileprovision \
+  --profile AppStoreWidget.mobileprovision
+```
+
+Code the app and an extension share, such as a Live Activity's attributes, is built into each of them. They share
+data through an app group, which both list in their entitlements. An app that starts Live Activities also declares
+`NSSupportsLiveActivities` in its own `Info.plist`, through `ios.infoPlist`:
+
+```json
+{
+  "ios": { "infoPlist": { "NSSupportsLiveActivities": true } }
+}
+```
 
 ## Android
 
@@ -218,6 +268,32 @@ A normal permission such as `ACCESS_NETWORK_STATE` is granted when the app is in
 (`ACCESS_FINE_LOCATION`, say) is only declared: the app's own code still asks the user for it. The TSX development
 host (`nsh run --target android` of a TSX app) declares none of these; a Rust app's `nsh run` builds its package and
 declares them.
+
+### Java code
+
+Rust reaches most Android APIs through JNI, but some take a class the app defines: a listener, a callback, a
+`PrintDocumentAdapter`. `android.dex` in the app's `nsh.json` lists the dex files of the Java code the app ships,
+relative to `nsh.json`. The package carries them after NSH's runtime as `classes2.dex`, `classes3.dex` and so on, in the
+order listed, so the app's class loader finds their classes. Only the app's own `nsh.json` lists them: an extension
+that needs Java code cannot add its dex itself, so the apps that use it list the file it provides:
+
+```json
+{
+  "android": { "dex": ["java/out/classes.dex"] }
+}
+```
+
+Compile the Java sources against the platform's `android.jar`, then turn the classes into a dex with the SDK's `d8`:
+
+```sh
+javac -source 11 -target 11 -classpath "$ANDROID_HOME/platforms/android-35/android.jar" -d java/classes java/src/*.java
+"$ANDROID_HOME/build-tools/<version>/d8" --min-api 26 --lib "$ANDROID_HOME/platforms/android-35/android.jar" \
+  --output java/out $(find java/classes -name '*.class')
+```
+
+A thread Rust started finds only the system's classes through JNI's `FindClass`; load the app's classes from the
+activity's class loader (`Context.getClassLoader()`) there. The TSX development host (`nsh run --target android` of
+a TSX app) carries none of these files; a Rust app's `nsh run` builds its package and carries them.
 
 ### Google Play: App Bundles
 

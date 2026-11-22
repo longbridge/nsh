@@ -131,7 +131,7 @@ mount(() => (
 | 字段 | Rust | 类型 | 说明 |
 |---|---|---|---|
 | `title` | `TabBarItem::new(title)` | `string` | 标签的标题，屏幕阅读器会读出它。 |
-| `icon` | `.icon(name)` | `string` | 标签的图标，用平台对它的称呼：iOS 上是 [SF Symbol](https://developer.apple.com/sf-symbols/)（`"house"`），Android 上是应用的 drawable（`res/drawable/home.xml` 写作 `"home"`，`"android:ic_menu_search"` 是系统的）。用 `platform.select` 按平台选择。 |
+| `icon` | `.icon(name)` | `string` | 标签的图标，用平台对它的称呼：iOS 上是 [SF Symbol](https://developer.apple.com/sf-symbols/)（`"house"`），Android 上是应用的 drawable（`nsh.json` 旁的 `android/res/drawable/home.xml` 写作 `"home"`，`"android:ic_menu_search"` 是系统的）。`nsh package --target android` 会把 `android/res/` 编译进 APK，目录结构与 Gradle 模块的 `src/main/res/` 相同（矢量 drawable、按密度放置的 PNG）；`nsh run` 的开发宿主只有系统的。用 `platform.select` 按平台选择。 |
 | `badge` | `.badge(text)` | `string` | 标签的角标：一段文字，例如 `"3"` 或 `"New"`，或者 `""` 表示没有文字的角标；不设置（默认）则不显示。采用系统的角标外观，屏幕阅读器会随标签的标题读出它：它的文字；`""` 则读出系统对没有文字的角标的说法（VoiceOver 的；在 Android 上是系统的“新通知”，使用设备的语言）。 |
 
 ### 事件

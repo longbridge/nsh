@@ -1000,8 +1000,10 @@ what changed.
 - Handlers sit on the elements; the native event of a made node, or of the host, goes to the component first
   (`Core::component_event`, called by the engine before JS). Events of made nodes never reach JS. An element given
   several listeners of one event (`.on_press(a).on_press(b)`, on a host or on a nested component) calls them
-  all, in that order (touch listeners too); a listener that releases its component ends the rest. A dispatch walks
-  the instance's handlers in place (`Core::next_handler`, by index: no list per event), which stay as they are while
+  all, in that order (touch listeners too); a listener that releases its component ends the rest. The instance keeps
+  its handlers by node (`Handlers`): a view can have thousands of nodes with handlers (a rich editor's blocks), and
+  an event, a node made again and a check for a layout listener look at that node's only. A dispatch walks the node's
+  handlers in place (`Core::next_handler`, by index: no list per event), which stay as they are while
   it does: regions change them when they are reconciled. A node a region makes again (kept, the same id) drops the
   handlers, responders and `on_event` listeners its last run gave it, so it hears the new run's only. A listener runs
   in the graph like any other Rust code of the view: the signals it writes run their bindings once it returns.
@@ -1217,7 +1219,8 @@ draws the menu. On iOS the app's content is covered by the native component `nsh
 (`nsh-platform-ios`'s `system_menu_button.rs`): a transparent `UIButton` whose `UIMenu`, made from the mounted items,
 is its primary action, so the tap is answered natively; the button sets itself as the element's only accessibility
 element, and an action emits `select` with the app's id. On Android the same component is
-`MenuButtonComponent.java`: a transparent button whose tap shows the system's `PopupMenu` (`SystemMenus.java`). On a
+`MenuButtonComponent.java`: a transparent button whose tap shows a system popup window (`SystemMenus.java`) with rows
+laid out as Material 3's menus, alike under every vendor's theme. On a
 desktop OS a press shows the same items with `popup_menu`; on the web the content opens nothing. A `ContextMenu` given
 `items` is the same kind of menu on iOS and Android: the native component `nsh/context-menu` (`system_context_menu.rs`,
 `ContextMenuComponent.java`) shows the system's menu from `MenuButton`'s item data, and `menu.rs` reports it with the

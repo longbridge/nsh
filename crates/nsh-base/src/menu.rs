@@ -1704,6 +1704,8 @@ fn surface(
         None => None,
     };
     if let Some(anchor) = trigger {
+        // Opened by a pointer, the focus goes back where it was instead.
+        crate::popup::note_focus_origin(move || open.get(), anchor);
         presence.focus_back_on_close(
             move || open.get(),
             move || {

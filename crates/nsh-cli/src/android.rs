@@ -215,9 +215,19 @@ pub(crate) struct Apk<'a> {
     /// (`webview.media`): `RECORD_AUDIO` and `CAMERA` are declared.
     pub(crate) microphone: bool,
     pub(crate) camera: bool,
+    /// The app's own dex files (nsh.json `android.dex`), after the
+    /// runtime's: `classes2.dex`, `classes3.dex`, ...
+    pub(crate) dex: &'a [PathBuf],
     /// The permissions the app declares itself (nsh.json
     /// `android.permissions`), in full: declared after NSH's, each once.
     pub(crate) permissions: &'a [String],
+    /// Elements the app's crates add to the manifest's `<queries>`
+    /// ([`crate::module_meta`]): the other apps they start.
+    pub(crate) queries: &'a [String],
+    /// Elements the app's crates add to the manifest's `<application>`
+    /// ([`crate::module_meta`]): services, receivers, providers, activities
+    /// and meta-data. `${applicationId}` in them is the app's package.
+    pub(crate) application: &'a [String],
     /// URL schemes that open the app (nsh.json `schemes`): one
     /// `VIEW` intent filter.
     pub(crate) schemes: &'a [String],
@@ -244,6 +254,10 @@ pub(crate) struct Apk<'a> {
     pub(crate) assets: Vec<(String, Vec<u8>)>,
     /// Notification sounds, raw resources: (resource name, file).
     pub(crate) sounds: Vec<(String, PathBuf)>,
+    /// The app's own Android resources (`android/res/` next to `nsh.json`,
+    /// laid out as Gradle's `src/main/res/`): drawables a tab bar names,
+    /// for one. None when the app has none.
+    pub(crate) res: Option<&'a Path>,
     pub(crate) signing: Signing,
 }
 
@@ -517,6 +531,20 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
         for entry in fs::read_dir(&compiled)? {
             flat.push(entry?.path());
         }
+    }
+
+    // The app's own resources, compiled as a whole: `aapt2 compile --dir`
+    // reads `<type>[-<qualifiers>]/<name>` as Gradle does.
+    if let Some(res) = apk.res {
+        let zip = work.join("compiled-app.zip");
+        run(Command::new(sdk.tool("aapt2"))
+            .arg("compile")
+            .arg("--dir")
+            .arg(res)
+            .arg("-o")
+            .arg(&zip))
+        .with_context(|| format!("compile the app's resources in {}", res.display()))?;
+        flat.push(zip);
     }
 
     let manifest = work.join("AndroidManifest.xml");
@@ -839,6 +867,18 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
             "\n            <intent-filter>\n                <action android:name=\"android.intent.action.VIEW\" />\n                <category android:name=\"android.intent.category.DEFAULT\" />\n                <category android:name=\"android.intent.category.BROWSABLE\" />{data}\n            </intent-filter>"
         )
     };
+    let elements = |list: &[String], indent: &str| -> String {
+        list.iter()
+            .map(|e| {
+                format!(
+                    "\n{indent}{}",
+                    e.trim().replace("${applicationId}", apk.package)
+                )
+            })
+            .collect()
+    };
+    let queries = elements(apk.queries, "        ");
+    let components = elements(apk.application, "        ");
     format!(
         r#"<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="{package}">{permissions}
@@ -848,7 +888,7 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT" />
             <data android:mimeType="text/plain" />
-        </intent>
+        </intent>{queries}
     </queries>
     <application android:label="{label}"{icon}{cleartext}
         android:extractNativeLibs="false"
@@ -869,7 +909,7 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>{schemes}
-        </activity>
+        </activity>{components}
     </application>
 </manifest>
 "#,
@@ -1054,6 +1094,31 @@ fn add_files(
         .context("runtime classes.dex missing")?
         .read_to_end(&mut dex)?;
     zip.write_all(&dex)?;
+    // The app's own after the runtime's: Android loads `classes<N>.dex`
+    // from 2 up, until one is missing. The numbers assume the runtime is
+    // one dex; a runtime of more would collide with the app's.
+    if !apk.dex.is_empty() && apk.runtime.join("classes2.dex").exists() {
+        bail!(
+            "the Android runtime in {} has more than one dex file, which nsh.json android.dex cannot follow yet",
+            apk.runtime.display()
+        );
+    }
+    let dex_dir = layout
+        .dex
+        .strip_suffix("classes.dex")
+        .context("dex layout")?;
+    for (i, path) in apk.dex.iter().enumerate() {
+        let bytes = fs::read(path)
+            .with_context(|| format!("nsh.json android.dex: read {}", path.display()))?;
+        if !bytes.starts_with(b"dex\n") {
+            bail!(
+                "nsh.json android.dex: {} is not a dex file (make one with the SDK's `d8`)",
+                path.display()
+            );
+        }
+        zip.start_file(format!("{dex_dir}classes{}.dex", i + 2), deflate)?;
+        zip.write_all(&bytes)?;
+    }
     let libs = apk.runtime.join("lib");
     let mut available = Vec::new();
     for entry in fs::read_dir(&libs).with_context(|| format!("read {}", libs.display()))? {
@@ -1178,16 +1243,138 @@ fn run(cmd: &mut Command) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The serial of a running device or emulator (the first one).
-pub(crate) fn device(sdk: &Sdk) -> anyhow::Result<String> {
-    let output = Command::new(sdk.adb()).arg("devices").output()?;
-    let text = String::from_utf8_lossy(&output.stdout);
+/// The environment variable adb itself reads for the device to talk to.
+const SERIAL_ENV: &str = "ANDROID_SERIAL";
+
+/// The serial of the device or emulator to use: the one `wanted` names
+/// (`--device`), else the one `ANDROID_SERIAL` names, else the first one
+/// `adb devices` lists as ready, with a warning when it lists several. A
+/// device named but not ready is an error: another one would get the app.
+pub(crate) fn device(sdk: &Sdk, wanted: Option<&str>) -> anyhow::Result<String> {
+    let from_env = env::var(SERIAL_ENV).ok();
+    let wanted = match wanted {
+        Some(serial) => Some(Wanted {
+            serial,
+            from: "--device",
+        }),
+        None => from_env
+            .as_deref()
+            .map(str::trim)
+            .filter(|serial| !serial.is_empty())
+            .map(|serial| Wanted {
+                serial,
+                from: SERIAL_ENV,
+            }),
+    };
+    let output = Command::new(sdk.adb())
+        .arg("devices")
+        .output()
+        .context("run adb devices")?;
+    let devices = parse_devices(&String::from_utf8_lossy(&output.stdout));
+    let chosen = choose_device(&devices, wanted)?;
+    if let Some(warning) = chosen.warning {
+        crate::ui::warn(warning);
+    }
+    Ok(chosen.serial)
+}
+
+/// A device or emulator `adb devices` lists.
+#[derive(Debug, PartialEq)]
+struct AdbDevice {
+    serial: String,
+    /// `device` when it is ready; `unauthorized`, `offline`, ... otherwise.
+    state: String,
+}
+
+/// The device asked for and where it was named (`--device`, `ANDROID_SERIAL`).
+#[derive(Clone, Copy)]
+struct Wanted<'a> {
+    serial: &'a str,
+    from: &'static str,
+}
+
+/// The device [`choose_device`] chose, and what to tell the user about it.
+#[derive(Debug, PartialEq)]
+struct Chosen {
+    serial: String,
+    warning: Option<String>,
+}
+
+/// The devices in `adb devices`' output: a line per device, its serial and
+/// state separated by a tab, after a header (and the daemon's messages,
+/// starting with `*`, when it had to start).
+fn parse_devices(text: &str) -> Vec<AdbDevice> {
     text.lines()
-        .skip(1)
-        .filter_map(|l| l.split_once('\t'))
-        .find(|(_, state)| *state == "device")
-        .map(|(serial, _)| serial.to_owned())
-        .context("no Android device or emulator connected (see `adb devices`)")
+        .filter(|line| !line.starts_with('*'))
+        .filter_map(|line| line.split_once('\t'))
+        .map(|(serial, state)| AdbDevice {
+            serial: serial.trim().to_owned(),
+            state: state.trim().to_owned(),
+        })
+        .filter(|device| !device.serial.is_empty())
+        .collect()
+}
+
+/// The device to use among `devices`: `wanted` when it is ready, else the
+/// first ready one when none is wanted.
+fn choose_device(devices: &[AdbDevice], wanted: Option<Wanted<'_>>) -> anyhow::Result<Chosen> {
+    let listed = || {
+        if devices.is_empty() {
+            "none is connected (see `adb devices`)".to_owned()
+        } else {
+            let list: Vec<String> = devices
+                .iter()
+                .map(|d| {
+                    if d.state == "device" {
+                        d.serial.clone()
+                    } else {
+                        format!("{} ({})", d.serial, d.state)
+                    }
+                })
+                .collect();
+            format!("connected: {}", list.join(", "))
+        }
+    };
+    if let Some(Wanted { serial, from }) = wanted {
+        return match devices.iter().find(|d| d.serial == serial) {
+            Some(d) if d.state == "device" => Ok(Chosen {
+                serial: d.serial.clone(),
+                warning: None,
+            }),
+            Some(d) => bail!(
+                "the Android device {serial} ({from}) is {}, not ready; {}",
+                d.state,
+                listed()
+            ),
+            None => bail!(
+                "no Android device {serial} ({from}) is connected; {}",
+                listed()
+            ),
+        };
+    }
+    let ready: Vec<&AdbDevice> = devices.iter().filter(|d| d.state == "device").collect();
+    let Some(first) = ready.first() else {
+        if devices.is_empty() {
+            bail!("no Android device or emulator connected (see `adb devices`)");
+        }
+        bail!("no Android device or emulator is ready; {}", listed());
+    };
+    let warning = (ready.len() > 1).then(|| {
+        format!(
+            "{} Android devices are connected, using {}: choose one with --device <serial> or {SERIAL_ENV} ({})",
+            ready.len(),
+            first.serial,
+            ready
+                .iter()
+                .map(|d| d.serial.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    });
+    Ok(Chosen {
+        serial: first.serial.clone(),
+        warning,
+    })
 }
 
 /// The ABIs `serial` runs, preferred first (`ro.product.cpu.abilist`).
@@ -1267,6 +1454,139 @@ pub(crate) fn adb(sdk: &Sdk, serial: &str, args: &[&str]) -> anyhow::Result<Stri
 
 #[cfg(test)]
 mod tests {
+    use super::{AdbDevice, Chosen, Wanted, choose_device, parse_devices};
+
+    fn devices(list: &[(&str, &str)]) -> Vec<AdbDevice> {
+        list.iter()
+            .map(|(serial, state)| AdbDevice {
+                serial: (*serial).to_owned(),
+                state: (*state).to_owned(),
+            })
+            .collect()
+    }
+
+    fn flag(serial: &str) -> Option<Wanted<'_>> {
+        Some(Wanted {
+            serial,
+            from: "--device",
+        })
+    }
+
+    fn error(result: anyhow::Result<Chosen>) -> String {
+        result.err().map(|e| e.to_string()).unwrap_or_default()
+    }
+
+    /// `adb devices` lists a device per line after its header, with the
+    /// daemon's messages first when it had to start; blank lines and the
+    /// header are no devices.
+    #[test]
+    fn adb_devices_output_is_parsed() {
+        let text = "* daemon not running; starting now at tcp:5037\n\
+                    * daemon started successfully\n\
+                    List of devices attached\n\
+                    R5CR00000AA\tdevice\n\
+                    emulator-5554\tdevice\n\
+                    192.168.1.7:5555\toffline\n\
+                    0123456789\tunauthorized\n\
+                    \n";
+        assert_eq!(
+            parse_devices(text),
+            devices(&[
+                ("R5CR00000AA", "device"),
+                ("emulator-5554", "device"),
+                ("192.168.1.7:5555", "offline"),
+                ("0123456789", "unauthorized"),
+            ])
+        );
+        assert_eq!(parse_devices("List of devices attached\r\n\r\n"), []);
+        assert_eq!(
+            parse_devices("List of devices attached\r\nemulator-5554\tdevice\r\n"),
+            devices(&[("emulator-5554", "device")])
+        );
+    }
+
+    /// The device named (`--device`, `ANDROID_SERIAL`) is used when it is
+    /// ready, whichever place it has in the list.
+    #[test]
+    fn the_device_named_is_used() {
+        let list = devices(&[("R5CR00000AA", "device"), ("emulator-5554", "device")]);
+        assert_eq!(
+            choose_device(&list, flag("emulator-5554")).unwrap(),
+            Chosen {
+                serial: "emulator-5554".to_owned(),
+                warning: None,
+            }
+        );
+        let env = Some(Wanted {
+            serial: "R5CR00000AA",
+            from: "ANDROID_SERIAL",
+        });
+        assert_eq!(choose_device(&list, env).unwrap().serial, "R5CR00000AA");
+    }
+
+    /// A device named but missing or not ready is an error listing what is
+    /// connected, never another device.
+    #[test]
+    fn a_device_named_but_not_ready_is_an_error() {
+        let list = devices(&[("R5CR00000AA", "device"), ("0123456789", "unauthorized")]);
+        assert_eq!(
+            error(choose_device(&list, flag("emulator-5556"))),
+            "no Android device emulator-5556 (--device) is connected; connected: R5CR00000AA, 0123456789 (unauthorized)"
+        );
+        assert_eq!(
+            error(choose_device(&list, flag("0123456789"))),
+            "the Android device 0123456789 (--device) is unauthorized, not ready; connected: R5CR00000AA, 0123456789 (unauthorized)"
+        );
+        let env = Some(Wanted {
+            serial: "emulator-5554",
+            from: "ANDROID_SERIAL",
+        });
+        assert_eq!(
+            error(choose_device(&[], env)),
+            "no Android device emulator-5554 (ANDROID_SERIAL) is connected; none is connected (see `adb devices`)"
+        );
+    }
+
+    /// With none named, the first ready device is used; when several are
+    /// ready, a warning says which one and how to choose another.
+    #[test]
+    fn without_a_name_the_first_ready_device_is_used() {
+        let one = devices(&[("0123456789", "unauthorized"), ("emulator-5554", "device")]);
+        assert_eq!(
+            choose_device(&one, None).unwrap(),
+            Chosen {
+                serial: "emulator-5554".to_owned(),
+                warning: None,
+            }
+        );
+        let two = devices(&[
+            ("R5CR00000AA", "device"),
+            ("0123456789", "offline"),
+            ("emulator-5554", "device"),
+        ]);
+        assert_eq!(
+            choose_device(&two, None).unwrap(),
+            Chosen {
+                serial: "R5CR00000AA".to_owned(),
+                warning: Some(
+                    "2 Android devices are connected, using R5CR00000AA: choose one with --device <serial> or ANDROID_SERIAL (R5CR00000AA, emulator-5554)"
+                        .to_owned()
+                ),
+            }
+        );
+        assert_eq!(
+            error(choose_device(&[], None)),
+            "no Android device or emulator connected (see `adb devices`)"
+        );
+        assert_eq!(
+            error(choose_device(
+                &devices(&[("emulator-5554", "offline")]),
+                None
+            )),
+            "no Android device or emulator is ready; connected: emulator-5554 (offline)"
+        );
+    }
+
     /// An app is built for the device's preferred ABI that NSH builds for;
     /// a device that runs none of them is an error.
     #[test]
@@ -1298,7 +1618,10 @@ mod tests {
             notifications,
             microphone: false,
             camera: false,
+            dex: &[],
             permissions: &[],
+            queries: &[],
+            application: &[],
             schemes: &[],
             rust,
             dark: false,
@@ -1309,6 +1632,7 @@ mod tests {
             launch_screen: None,
             assets: Vec::new(),
             sounds: Vec::new(),
+            res: None,
             signing: super::Signing::Debug,
         }
     }
@@ -1511,6 +1835,70 @@ mod tests {
     }
 
     #[test]
+    fn the_apps_dex_files_follow_the_runtimes() {
+        use std::io::Read as _;
+        let dir = std::env::temp_dir().join(format!("nsh-cli-android-dex-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let runtime = dir.join("runtime");
+        std::fs::create_dir_all(runtime.join("lib/arm64-v8a")).unwrap();
+        std::fs::write(runtime.join("classes.dex"), b"dex\n035\0runtime").unwrap();
+        std::fs::write(runtime.join("lib/arm64-v8a/libnsh.so"), b"so").unwrap();
+        let base = dir.join("base.zip");
+        zip::ZipWriter::new(std::fs::File::create(&base).unwrap())
+            .finish()
+            .unwrap();
+        let app = [dir.join("a.dex"), dir.join("b.dex")];
+        std::fs::write(&app[0], b"dex\n035\0a").unwrap();
+        std::fs::write(&app[1], b"dex\n035\0b").unwrap();
+        let read = |zip: &std::path::Path, name: &str| {
+            let mut archive = zip::ZipArchive::new(std::fs::File::open(zip).unwrap()).unwrap();
+            let mut file = archive.by_name(name).unwrap();
+            let mut bytes = Vec::new();
+            file.read_to_end(&mut bytes).unwrap();
+            bytes
+        };
+        for (layout, prefix) in [
+            (&super::Layout::APK, ""),
+            (&super::Layout::BUNDLE, "base/dex/"),
+        ] {
+            let out = dir.join("out.zip");
+            super::add_files(
+                &base,
+                &out,
+                &super::Apk {
+                    runtime: &runtime,
+                    dex: &app,
+                    ..apk(false, false)
+                },
+                layout,
+            )
+            .unwrap();
+            assert_eq!(
+                read(&out, &format!("{prefix}classes.dex")),
+                b"dex\n035\0runtime"
+            );
+            assert_eq!(read(&out, &format!("{prefix}classes2.dex")), b"dex\n035\0a");
+            assert_eq!(read(&out, &format!("{prefix}classes3.dex")), b"dex\n035\0b");
+        }
+        // A file that is no dex fails the build instead of a class lookup on the device.
+        std::fs::write(&app[1], b"PK\x03\x04 a jar").unwrap();
+        let err = super::add_files(
+            &base,
+            &dir.join("out.zip"),
+            &super::Apk {
+                runtime: &runtime,
+                dex: &app,
+                ..apk(false, false)
+            },
+            &super::Layout::APK,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("is not a dex file"), "{err}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn an_app_declares_the_permissions_it_lists_once() {
         let listed = [
             "android.permission.ACCESS_NETWORK_STATE".to_owned(),
@@ -1545,6 +1933,35 @@ mod tests {
         let at = manifest.find("ACCESS_NETWORK_STATE").unwrap();
         assert!(at < application, "{manifest}");
         assert!(!super::manifest_xml(&apk(false, false)).contains("ACCESS_NETWORK_STATE"));
+    }
+
+    #[test]
+    fn the_crates_add_queries_and_components() {
+        let queries = [
+            r#"<intent><action android:name="android.media.action.IMAGE_CAPTURE"/></intent>"#
+                .to_owned(),
+        ];
+        let application = [
+            r#"<provider android:name="x.Init" android:authorities="${applicationId}.init" android:exported="false"/>"#
+                .to_owned(),
+        ];
+        let manifest = super::manifest_xml(&super::Apk {
+            queries: &queries,
+            application: &application,
+            ..apk(false, false)
+        });
+        let queries_end = manifest.find("</queries>").unwrap();
+        let capture = manifest.find("IMAGE_CAPTURE").expect(&manifest);
+        assert!(manifest.find("<queries>").unwrap() < capture && capture < queries_end);
+        // Inside `<application>`, after NSH's own activity, the package filled in.
+        let provider = manifest.find("x.Init").expect(&manifest);
+        assert!(manifest.find("</activity>").unwrap() < provider);
+        assert!(provider < manifest.find("</application>").unwrap());
+        assert!(
+            manifest.contains(r#"android:authorities="com.example.app.init""#),
+            "{manifest}"
+        );
+        assert!(!super::manifest_xml(&apk(false, false)).contains("IMAGE_CAPTURE"));
     }
 
     #[test]

@@ -3,7 +3,6 @@ package com.longbridge.nsh;
 import android.content.Context;
 import android.view.View;
 import android.widget.Button;
-import android.widget.PopupMenu;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BooleanSupplier;
@@ -11,7 +10,7 @@ import java.util.function.BooleanSupplier;
 /**
  * {@code nsh/base}'s {@code MenuButton} on Android: a transparent button over
  * the app's content whose tap (or TalkBack's activation, or Enter on it)
- * opens the system's popup menu below the content at once, without asking
+ * opens the system menu below the content at once, without asking
  * JS ({@link SystemMenus}). A chosen action emits {@code select} with the
  * app's id. The button is what TalkBack reaches (named by
  * {@code accessibilityLabel}): the content under it is drawn, not read twice
@@ -28,7 +27,7 @@ final class MenuButtonComponent implements NshComponent {
     private List<SystemMenus.Entry> items = new ArrayList<>();
     private String title;
     /** The menu shown (null: none). */
-    private PopupMenu shown;
+    private SystemMenus.Popup shown;
 
     MenuButtonComponent(Context context, NshComponentContext events, BooleanSupplier night) {
         this.context = context;
@@ -73,10 +72,10 @@ final class MenuButtonComponent implements NshComponent {
 
     private void show() {
         if (shown != null || items.isEmpty() || !button.isAttachedToWindow()) return;
-        PopupMenu popup = SystemMenus.popup(SystemMenus.themed(context, night.getAsBoolean()), button,
+        SystemMenus.Popup popup = SystemMenus.popup(context, night.getAsBoolean(), button,
                 SystemMenus.gravity(button), title, items, id -> events.emit("select", id));
-        popup.setOnDismissListener(p -> {
-            if (shown == p) shown = null;
+        popup.setOnDismissListener(() -> {
+            if (shown == popup) shown = null;
         });
         shown = popup;
         popup.show();
@@ -84,7 +83,7 @@ final class MenuButtonComponent implements NshComponent {
 
     @Override
     public void destroy() {
-        PopupMenu popup = shown;
+        SystemMenus.Popup popup = shown;
         shown = null;
         if (popup != null) popup.dismiss();
     }

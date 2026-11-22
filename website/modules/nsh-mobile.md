@@ -149,7 +149,7 @@ In Rust, `tab_bar()` makes one, with a setter per prop (`.items(..)`, `.selected
 | Field | Rust | Type | Description |
 |---|---|---|---|
 | `title` | `TabBarItem::new(title)` | `string` | The tab's title, which screen readers say. |
-| `icon` | `.icon(name)` | `string` | The tab's icon, by the platform's name for it: an [SF Symbol](https://developer.apple.com/sf-symbols/) on iOS (`"house"`), a drawable of the app on Android (`res/drawable/home.xml` is `"home"`, `"android:ic_menu_search"` the system's). `platform.select` picks one per platform. |
+| `icon` | `.icon(name)` | `string` | The tab's icon, by the platform's name for it: an [SF Symbol](https://developer.apple.com/sf-symbols/) on iOS (`"house"`), a drawable of the app on Android (`android/res/drawable/home.xml` next to `nsh.json` is `"home"`, `"android:ic_menu_search"` the system's). `nsh package --target android` compiles `android/res/` into the APK, laid out as a Gradle module's `src/main/res/` (vector drawables, PNGs per density); the `nsh run` development host has only the system's. `platform.select` picks one per platform. |
 | `badge` | `.badge(text)` | `string` | The tab's badge: a text such as `"3"` or `"New"`, or `""` for a badge with no text; left out (the default), none. In the system's badge look; screen readers say it with the tab's title: its text, or for `""` the system's words for a badge with no text (VoiceOver's; on Android the system's "New notification", in the device's language). |
 
 ### Events

@@ -67,7 +67,7 @@ pub use nsh_core::{
     main_thread::MainThreadTask,
     platform::{
         ColorScheme, Environment, FetchEvent, FetchOp, HostEnvironment, HourCycle, HttpBody,
-        HttpHead, HttpRequest, Idiom, Languages, Lifecycle, Locale, LocaleSettings,
+        HttpCache, HttpHead, HttpRequest, Idiom, Languages, Lifecycle, Locale, LocaleSettings,
         MeasurementSystem, Os, TemperatureUnit, TimeZone, Weekday,
     },
     storage::{StorageBackend, StorageChange},
@@ -165,6 +165,16 @@ impl App {
         match self {
             App::Rust(root) => root.application_ref(),
             App::Js(bundle) => bundle.application.as_ref(),
+        }
+    }
+
+    /// The app as it was built: a Rust app root's
+    /// ([`nsh_core::element::Root::app_info`]); `None` for a JS app, whose
+    /// VM reports its own (`appInfo()`).
+    pub fn app_info(&self) -> Option<&nsh_core::platform::AppInfo> {
+        match self {
+            App::Rust(root) => root.app_info_ref(),
+            App::Js(_) => None,
         }
     }
 
@@ -1533,8 +1543,9 @@ enum Message {
     /// Moves a manual clock forward by this much, then calls back.
     Advance(std::time::Duration, Box<dyn FnOnce() + Send>),
     /// Runs what is queued and due now, then calls back with whether the
-    /// engine is idle ([`EngineControl::flush`]).
-    Flush(Box<dyn FnOnce(bool) + Send>),
+    /// engine is idle and when the next timer is due
+    /// ([`EngineControl::flush_until_due`]).
+    Flush(Box<dyn FnOnce(bool, Option<Instant>) + Send>),
     /// Sent by a dropped [`Engine`] (there is none in WebAssembly).
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     Shutdown,
@@ -1764,6 +1775,16 @@ impl EngineControl {
     /// elsewhere. A headless driver on a manual clock settles a step with
     /// it, instead of waiting for the batches to stop for a while.
     pub fn flush(&self, done: impl FnOnce(bool) + Send + 'static) {
+        self.flush_until_due(move |idle, _| done(idle));
+    }
+
+    /// [`EngineControl::flush`], also telling when the next thing the
+    /// engine runs by itself is due (a timer, a held-back event, a state
+    /// timer): `None` when nothing is scheduled. A headless driver on the
+    /// system's clock settles a step with it: idle with nothing due soon
+    /// means no batch is coming, without waiting to see none come.
+    #[doc(hidden)]
+    pub fn flush_until_due(&self, done: impl FnOnce(bool, Option<Instant>) + Send + 'static) {
         let _ = self.tx.send(Message::Flush(Box::new(done)));
     }
 
@@ -2431,6 +2452,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         core.set_picker(config.picker.clone());
         core.set_speech(config.speech.clone());
         core.set_url_schemes(config.app.url_schemes().iter().cloned());
+        core.set_app_info(config.app.app_info().cloned());
         // Every VM reads the core's address where it is (`UrlScheme.url()`).
         #[cfg(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32")))]
         let app_url = core.app_url_cell();
@@ -2791,7 +2813,11 @@ impl<M: TextEngine + 'static> Driver<M> {
             }
             Message::Flush(done) => {
                 let running = self.flush(rx);
-                done(running && self.idle(rx));
+                let due = [self.due(), self.clock.next_alarm()]
+                    .into_iter()
+                    .flatten()
+                    .min();
+                done(running && self.idle(rx), due);
                 running
             }
             // A test's clock on a real platform: the display's frame moves it
@@ -3870,6 +3896,9 @@ impl<M: TextEngine> State<M> {
                             ApplyError::TooManyNodes(max) => {
                                 format!("the app created more than {max} nodes and was stopped")
                             }
+                            ApplyError::TooDeep(max) => {
+                                format!("the app nested views more than {max} deep and was stopped")
+                            }
                             other => {
                                 format!("the app sent an invalid op ({other:?}) and was stopped")
                             }
@@ -3991,9 +4020,11 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         lifecycle: env.lifecycle,
         wake_count: env.wake_count,
         screen_color: env.screen_color,
+        clipboard_write_result: env.clipboard_write_result,
         canvas_render: env.canvas_render,
         share: env.share,
         auth_session: env.auth_session,
+        scheme_links: env.scheme_links(),
         file_requests: env.file_requests,
         speech: env.speech,
         notifications: env.notifications,

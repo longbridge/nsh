@@ -56,7 +56,7 @@ nsh package App.tsx --target ios-simulator --run
 | `build` | number | `1` | 构建号（`CFBundleVersion`、`versionCode`）。每次上传新版本都要递增。 |
 | `icon` | string \| object | 无 | 一张正方形 PNG，最好是 1024×1024，路径相对于 `nsh.json`；也可按平台分别提供（[图标](#图标)）。 |
 
-`nsh.json` 还包含 `rust` 和 `root`（应用的 crate 和根组件，见[用 Rust 开发](./rust.md)）、`theme` 和 `appearance`、`tailwind`（见 [Tailwind](./tailwind.md)）、`capabilities`（见[沙箱与能力](./sandbox-and-capabilities.md)）、`android`（`targetSdk`、`usesCleartextTraffic` 和 `permissions`，见下文“目标 API 级别”“明文 HTTP”和“权限”）、`ios` 和 `macos`（对应包的 `Info.plist` 键和 entitlements，见[下文](#infoplist-键与-entitlements)；`macos.activationPolicy` 用于[菜单栏应用](./macos.md#菜单栏应用)）以及让桌面包自我更新、让所有原生包接收 [OTA 更新](./ota-updates.md)的 `updater`（见[应用更新](./app-updates.md)）；[项目结构](./project-structure.md#nshjson)列出了所有键。NSH 读不懂的键或值会给出警告并被略过：为更新的 NSH 写的应用在较旧的 NSH 上照样能构建，拼写错误也会在警告里看到。
+`nsh.json` 还包含 `rust` 和 `root`（应用的 crate 和根组件，见[用 Rust 开发](./rust.md)）、`theme` 和 `appearance`、`tailwind`（见 [Tailwind](./tailwind.md)）、`capabilities`（见[沙箱与能力](./sandbox-and-capabilities.md)）、`android`（`targetSdk`、`usesCleartextTraffic`、`permissions` 和 `dex`，见下文“目标 API 级别”“明文 HTTP”“权限”和“Java 代码”）、`ios` 和 `macos`（对应包的 `Info.plist` 键和 entitlements，见[下文](#infoplist-键与-entitlements)；`ios.extensions` 是[应用扩展](#应用扩展)；`macos.activationPolicy` 用于[菜单栏应用](./macos.md#菜单栏应用)）以及让桌面包自我更新、让所有原生包接收 [OTA 更新](./ota-updates.md)的 `updater`（见[应用更新](./app-updates.md)）；[项目结构](./project-structure.md#nshjson)列出了所有键。NSH 读不懂的键或值会给出警告并被略过：为更新的 NSH 写的应用在较旧的 NSH 上照样能构建，拼写错误也会在警告里看到。
 
 上表中的每个键都可以在命令行上覆盖，这在 CI 中很方便：
 
@@ -76,7 +76,7 @@ nsh package --target android --app-version 1.4.0 --build 42
 | `--build <n>` | 构建号。 |
 | `--icon <png>` | 应用图标：一张正方形 PNG，最好是 1024×1024。 |
 | `--sign <identity>` | iOS：用于真机的代码签名身份。 |
-| `--profile <file>` | iOS：用于真机的描述文件（`.mobileprovision`）。 |
+| `--profile <file>` | iOS：用于真机的描述文件（`.mobileprovision`）。可以重复传入，给每个[应用扩展](#应用扩展)各传一个。 |
 | `--keystore <file>` | Android：release keystore（默认使用 debug 密钥）。 |
 | `--key-alias <alias>` | Android：keystore 中的密钥别名。 |
 | `--keystore-password <password>` | Android：keystore 密码；也可从 `NSH_KEYSTORE_PASSWORD` 读取。 |
@@ -109,6 +109,7 @@ nsh package --target ios \
 - 描述文件以 `embedded.mobileprovision` 的名称复制进应用。
 - entitlements 取自描述文件，加上 `nsh.json` `ios.entitlements` 中应用自己的项，并对照描述文件检查（见[下文](#infoplist-键与-entitlements)）。NSH 会检查描述文件的 application identifier 是否覆盖应用的 `id`（`TEAMID.*` 或
   `TEAMID.com.example.*` 这样的通配描述文件也可以），不覆盖则报错退出。
+- 应用如果带有扩展，先用各自的描述文件签名扩展（见[应用扩展](#应用扩展)）。
 - 用 `codesign` 以指定身份签名应用，再压缩成 `.ipa`（`Payload/<Name>.app`）。
 
 查看可用的签名身份：
@@ -120,6 +121,55 @@ security find-identity -v -p codesigning
 如果没有传 `--sign` 和 `--profile`，NSH 会写出一个未签名的 `.nsh/out/<Name>.app` 并给出提示；它无法直接安装到真机上。
 
 应用支持 iPhone 和 iPad，支持竖屏和横屏（倒置竖屏仅限 iPad），要求 iOS 15.0 或更高版本，或应用指定的更高版本（见[最低系统版本](#最低系统版本)）。
+
+### 应用扩展
+
+小组件、实时活动（Live Activity）、通知服务扩展等应用扩展是独立的 bundle（`.appex`），iOS 在应用的 `PlugIns/`
+目录里找到它们。先用 Xcode 或 `swiftc` 构建好，再在应用的 `nsh.json` 里用 `ios.extensions` 列出，路径相对于
+`nsh.json`，和 `android.dex` 列出 Java 代码的方式一样：
+
+```json
+{
+  "ios": {
+    "extensions": [
+      {
+        "path": "ios/build/iphoneos/Widget.appex",
+        "simulatorPath": "ios/build/iphonesimulator/Widget.appex",
+        "entitlements": { "com.apple.security.application-groups": ["group.com.example.app"] }
+      }
+    ]
+  }
+}
+```
+
+| 键 | 含义 |
+|---|---|
+| `path` | 为真机构建的扩展。 |
+| `simulatorPath` | 为模拟器构建的扩展。不写时，`path` 如果是为模拟器构建的，模拟器包就带上它，否则不带这个扩展（并给出警告）。 |
+| `entitlements` | 扩展的 entitlements，和应用的 `ios.entitlements` 一样（见[下文](#infoplist-键与-entitlements)）。 |
+
+每个包都会把扩展复制进 `PlugIns/`，并把它们的版本号设成应用的 `version` 和 `build`：扩展的版本号应当和应用一致（不一致时
+App Store Connect 会给出提示）。扩展的
+identifier 必须以应用的开头（应用为 `com.example.app` 时，扩展为 `com.example.app.Widget`）。模拟器包用 ad hoc 签名；
+真机包先用各扩展 identifier 对应的描述文件给它签名，并把描述文件作为 `embedded.mobileprovision` 放进扩展，再签名应用。
+给应用传一个 `--profile`，每个扩展再各传一个；写明了 bundle identifier 的描述文件优先于覆盖它的通配描述文件：
+
+```sh
+nsh package --target ios \
+  --sign "Apple Distribution: Example Inc (ABCDE12345)" \
+  --profile AppStore.mobileprovision \
+  --profile AppStoreWidget.mobileprovision
+```
+
+应用和扩展共用的代码（比如实时活动的 attributes）分别编进两边。它们通过 app group 共享数据，两边的 entitlements
+都要列出这个 group。要启动实时活动的应用，还要在自己的 `Info.plist` 里通过 `ios.infoPlist` 声明
+`NSSupportsLiveActivities`：
+
+```json
+{
+  "ios": { "infoPlist": { "NSSupportsLiveActivities": true } }
+}
+```
 
 ## Android
 
@@ -193,6 +243,30 @@ Android 自己的权限（`android.permission.<NAME>`），带点的名字按原
 
 `ACCESS_NETWORK_STATE` 这样的普通权限在安装应用时授予。运行时权限（例如 `ACCESS_FINE_LOCATION`）只是被声明：仍需应用自己的代码向用户
 申请。TSX 开发宿主（TSX 应用的 `nsh run --target android`）不声明这些权限；Rust 应用的 `nsh run` 会构建它的包，因此会声明。
+
+### Java 代码
+
+Rust 通过 JNI 可以调用大多数 Android API，但有些 API 需要应用自己定义的类：监听器、回调、`PrintDocumentAdapter`。`android.dex`
+写在应用的 `nsh.json` 中，列出应用随包附带的 Java 代码的 dex 文件，路径相对于 `nsh.json`。包会按列出的顺序把它们放在 NSH
+运行时之后，命名为 `classes2.dex`、`classes3.dex` 等，应用的类加载器因此能找到其中的类。只有应用自己的 `nsh.json` 能列出它们：
+需要 Java 代码的扩展不能自己加入 dex，而是由使用它的应用列出它提供的文件：
+
+```json
+{
+  "android": { "dex": ["java/out/classes.dex"] }
+}
+```
+
+先针对平台的 `android.jar` 编译 Java 源码，再用 SDK 的 `d8` 把类转换成 dex：
+
+```sh
+javac -source 11 -target 11 -classpath "$ANDROID_HOME/platforms/android-35/android.jar" -d java/classes java/src/*.java
+"$ANDROID_HOME/build-tools/<version>/d8" --min-api 26 --lib "$ANDROID_HOME/platforms/android-35/android.jar" \
+  --output java/out $(find java/classes -name '*.class')
+```
+
+在 Rust 启动的线程里，JNI 的 `FindClass` 只能找到系统的类；在那里要通过 activity 的类加载器（`Context.getClassLoader()`）加载应用的类。
+TSX 开发宿主（TSX 应用的 `nsh run --target android`）不包含这些文件；Rust 应用的 `nsh run` 会构建它的包，因此会包含。
 
 ### Google Play：App Bundle
 

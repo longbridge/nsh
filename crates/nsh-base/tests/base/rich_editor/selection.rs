@@ -9,6 +9,7 @@
 use std::sync::Mutex;
 
 use nsh_base::rich_editor::state::Transaction;
+use nsh_testing::DragOptions;
 
 use super::*;
 
@@ -259,8 +260,12 @@ fn a_drag_selects_across_blocks() {
     focus_start(&mut app);
     // From the middle of `ab` (between a and b) far right and down: the
     // end of `cd`.
-    app.drag("text:ab", Point::new(px(300.0), px(40.0)))
-        .unwrap();
+    app.drag(
+        "text:ab",
+        Point::new(px(300.0), px(40.0)),
+        DragOptions::default(),
+    )
+    .unwrap();
     see(&mut app, "Sel 2-7");
 }
 

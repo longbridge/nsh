@@ -1431,6 +1431,11 @@ fn open_window(surface: &Rc<Surface>, view: &NshView, open: &OpenWindow) {
     container.setWantsLayer(true);
     view.ns()
         .setFrame(NSRect::new(NSPoint::new(0.0, 0.0), content));
+    // Mounted views disable autoresizing translation to skip per-view Auto
+    // Layout storage (`mount.rs`), so re-enable it here: once any descendant
+    // (such as a glass or backdrop view) activates Auto Layout in this window,
+    // AppKit otherwise ignores the root's autoresizing mask on resize.
+    view.ns().setTranslatesAutoresizingMaskIntoConstraints(true);
     view.ns().setAutoresizingMask(
         NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable,
     );
@@ -1643,6 +1648,19 @@ fn first_frame(surface: &Surface, id: NodeId) {
         crate::window_state::shown(watch, &window)
     });
     report(surface, id);
+}
+
+/// Whether a window of the app's own is still opening, hidden until its
+/// first frame ([`batch_applied`], or [`FIRST_FRAME_MS`] after it opened):
+/// AppKit gives it no mouse events until it shows, so the test agent waits
+/// for it (`nsh_testing::agent::Native::opening`).
+#[cfg(feature = "dev")]
+pub(crate) fn opening(surface: &Surface) -> bool {
+    surface.windows.try_borrow().is_ok_and(|windows| {
+        windows
+            .values()
+            .any(|w| matches!(w.showing.get(), Showing::Waiting(_)))
+    })
 }
 
 /// The standalone app's main window is made: nsh.json `window`'s

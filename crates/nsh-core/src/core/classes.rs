@@ -8,9 +8,10 @@
 
 use super::{Core, Key, Kind, NO_KEY, dirty, disabling_changes};
 use crate::{
+    element::JsEvent,
     geometry::{Points, Size},
     mount::MountItem,
-    ops::NodeId,
+    ops::{EventKind, EventPayload, NodeId},
     platform::{Appearance, ColorScheme, InputModality},
     props::PointerEvents,
     style::{Color, Style, StylePatch, ViewStyle},
@@ -569,7 +570,12 @@ impl<M: TextEngine> Core<M> {
             };
             if node.states & state::FOCUS_WITHIN != 0 {
                 node.states &= !state::FOCUS_WITHIN;
+                let hears = node.events.contains(EventKind::FocusOut);
                 self.states_changed(k);
+                if hears {
+                    self.events
+                        .push(JsEvent::Event(id, EventKind::FocusOut, EventPayload::None));
+                }
             }
         }
         for i in 0..self.focus_chain.len() {
@@ -577,7 +583,12 @@ impl<M: TextEngine> Core<M> {
             let node = &mut self.nodes[k as usize];
             if node.states & state::FOCUS_WITHIN == 0 {
                 node.states |= state::FOCUS_WITHIN;
+                let (id, hears) = (node.id, node.events.contains(EventKind::FocusIn));
                 self.states_changed(k);
+                if hears {
+                    self.events
+                        .push(JsEvent::Event(id, EventKind::FocusIn, EventPayload::None));
+                }
             }
         }
         self.focus_scratch = old;
@@ -967,7 +978,7 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// The padding and gaps a list's `contentClass` sets.
+    /// The padding, gaps and cell alignment a list's `contentClass` sets.
     fn list_content(&self, key: Key) -> crate::ListContentStyle {
         let Some(style) = self.part_resolved(key, Part::Content) else {
             return crate::ListContentStyle::default();
@@ -977,6 +988,12 @@ impl<M: TextEngine> Core<M> {
             _ => crate::geometry::Points::ZERO,
         };
         let p = &style.layout.padding;
+        let align = style.layout.align_items;
+        let align_items = (align == taffy::AlignItems::STRETCH
+            || align == taffy::AlignItems::FLEX_START
+            || align == taffy::AlignItems::CENTER
+            || align == taffy::AlignItems::FLEX_END)
+            .then_some(align);
         crate::ListContentStyle {
             padding: crate::EdgeInsets {
                 top: px(p.top),
@@ -986,6 +1003,7 @@ impl<M: TextEngine> Core<M> {
             },
             row_gap: px(style.layout.gap.height),
             column_gap: px(style.layout.gap.width),
+            align_items,
         }
     }
 

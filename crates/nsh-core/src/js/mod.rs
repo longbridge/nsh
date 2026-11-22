@@ -168,6 +168,10 @@ mod tests {
         // Each host prop and event in the interface of the elements it is for.
         let elements = super::host::declarations();
         assert!(
+            elements
+                .contains("alignItems?: \"stretch\" | \"flex-start\" | \"center\" | \"flex-end\";")
+        );
+        assert!(
             elements.contains("export interface MacOsBackdrop {\n  material?: MacOsBackdropMaterial;\n  blending?: MacOsBackdropBlending;\n  state?: MacOsBackdropState;\n}")
         );
         assert!(elements.contains("export type MacOsBackdropMaterial = \"titlebar\" | \"selection\" | \"menu\" | \"popover\" | \"sidebar\" | \"headerView\" | \"sheet\" | \"windowBackground\" | \"hudWindow\" | \"fullScreenUI\" | \"toolTip\" | \"contentBackground\" | \"underWindowBackground\" | \"underPageBackground\";"));

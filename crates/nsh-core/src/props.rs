@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::{
     element::PropEnum,
-    geometry::{Edges, Points, px},
+    geometry::{Edges, Point, Points, px},
     js::host::HostProps,
 };
 
@@ -663,6 +663,22 @@ impl PanActivation {
             dx.hypot(dy) > Self::MIN_DISTANCE.0
         };
         activates.then_some(true)
+    }
+
+    /// [`PanActivation::decide`] on a move of the finger from offset `from`
+    /// to offset `to` (both from where it went down), judged along the
+    /// straight line between them a point at a time: the offset the finger
+    /// passed first decides, even when the move passes both. Moves arrive
+    /// several points apart, and a diagonal 1.5 across for 1 down passes
+    /// `activeOffsetX: 10` and `failOffsetY: 10` within one 10-point move.
+    /// The platforms ask it with the previous move's offset as `from`.
+    pub fn decide_move(&self, from: Point<Points>, to: Point<Points>) -> Option<bool> {
+        let (mx, my) = (to.x.0 - from.x.0, to.y.0 - from.y.0);
+        let steps = mx.hypot(my).ceil().max(1.0) as u32;
+        (1..=steps).find_map(|i| {
+            let t = i as f32 / steps as f32;
+            self.decide(Points(from.x.0 + mx * t), Points(from.y.0 + my * t))
+        })
     }
 }
 

@@ -1365,7 +1365,7 @@ pub(crate) fn set(
             // is no more (`select` cannot clear a range already `None`).
             if old.text != text.text && s.range.take().is_some() {
                 s.watch_outside(view, false);
-                view.set_focusable(false);
+                s.release(view);
             }
             selection = Some(s);
         }
@@ -1872,7 +1872,16 @@ impl Selection {
         }
         view.insert_action_group("clipboard", None::<&gio::ActionGroup>);
         view.insert_action_group("selection", None::<&gio::ActionGroup>);
+        self.release(view);
+    }
+
+    /// Gives up what a selection took of the keyboard: GTK leaves the
+    /// focus on a widget that stops being focusable, and a focused view
+    /// still takes Ctrl+A, Ctrl+C and Ctrl+Insert for a selection that is
+    /// no more (`key_focus::blur` releases it the same way).
+    fn release(&self, view: &NshView) {
         view.set_focusable(false);
+        crate::key_focus::blur(view);
     }
 
     /// Starts or stops clearing the selection on presses outside `view`.
@@ -1954,7 +1963,7 @@ fn select(view: &NshView, range: Option<(u32, u32)>) {
         }
         None => {
             s.watch_outside(view, false);
-            view.set_focusable(false);
+            s.release(view);
         }
     }
 }
@@ -2067,7 +2076,7 @@ fn copy(view: &NshView) {
     }
 }
 
-/// The selected text, without attachments' placeholders and hidden runs.
+/// The selected text as a copy gives it ([`nsh_core::AttributedText::copied_text`]).
 fn selected_text(view: &NshView) -> Option<String> {
     let (a, b) = view_selection(view)?.range.get()?;
     let state = view.state();
@@ -2841,10 +2850,9 @@ mod tests {
         }
     }
 
-    /// Nothing of a hidden run is drawn: not its color emoji, its
-    /// decorations or its shadow.
     /// A selectable text whose content changes ends its selection as a
-    /// cleared one: not focusable, no watcher on the root (#2436).
+    /// cleared one: no range, no watcher on the root, not focusable and
+    /// not the focus (#2436).
     #[test]
     fn new_content_ends_the_selection_and_its_focus() {
         crate::gtk_test::run(|| {
@@ -2869,26 +2877,29 @@ mod tests {
                     s.range.get(),
                     s.outside.borrow().is_some(),
                     view.is_focusable(),
+                    view.is_focus(),
                 )
             };
             set_text("hello world");
             select(&view, Some((0, 5)));
-            assert_eq!(selected(&view), (Some((0, 5)), true, true));
+            assert_eq!(selected(&view), (Some((0, 5)), true, true, true));
             // The same content keeps it.
             set_text("hello world");
-            assert_eq!(selected(&view), (Some((0, 5)), true, true));
+            assert_eq!(selected(&view), (Some((0, 5)), true, true, true));
             // Other content ends it, focus and watcher included.
             set_text("goodbye");
-            assert_eq!(selected(&view), (None, false, false));
+            assert_eq!(selected(&view), (None, false, false, false));
             // A later selection clears as any other.
             select(&view, Some((0, 4)));
-            assert_eq!(selected(&view), (Some((0, 4)), true, true));
+            assert_eq!(selected(&view), (Some((0, 4)), true, true, true));
             select(&view, None);
-            assert_eq!(selected(&view), (None, false, false));
+            assert_eq!(selected(&view), (None, false, false, false));
             window.destroy();
         });
     }
 
+    /// Nothing of a hidden run is drawn: not its color emoji, its
+    /// decorations or its shadow.
     #[test]
     fn hidden_runs_draw_nothing() {
         crate::gtk_test::run(|| {
@@ -3311,8 +3322,9 @@ mod fallback_tests {
 
 #[cfg(test)]
 mod font_rendering_tests {
-    use super::*;
     use pangocairo::cairo::{HintMetrics, HintStyle};
+
+    use super::*;
 
     /// By default layout is unhinted and drawing slightly hinted; hinted
     /// metrics (manual font rendering) hint and round layout too.

@@ -335,7 +335,8 @@ impl Mounter {
                 // lays out with Auto Layout, AppKit gives a view that
                 // translates its autoresizing mask constraints, anchors and
                 // layout storage that nothing here reads: hundreds of bytes
-                // per view. The root keeps them: the host places it.
+                // per view. The host root keeps them, and app windows re-enable
+                // them in `window::open_window`.
                 view.ns()
                     .setTranslatesAutoresizingMaskIntoConstraints(false);
                 crate::access::created(&view);
@@ -403,6 +404,7 @@ impl Mounter {
                     crate::text_input::deleted(&view);
                     crate::native::deleted(surface, &view);
                     crate::shader::deleted(surface, &view);
+                    crate::scroll::deleted(&view);
                     // A view whose parent the batch deletes too stays in it:
                     // the subtree leaves the window with its root, in one
                     // `removeFromSuperview`, not one per view while still
@@ -430,8 +432,9 @@ impl Mounter {
                         self.detach(surface, &view);
                     }
                     // After the detach: a dialog closing through its shader
-                    // has read it.
-                    crate::navigation::deleted(surface, &view);
+                    // has read it. Navigation lets go of it too, as the
+                    // release below assumes.
+                    crate::navigation::deleted(surface, &view, inside);
                     // Out of its window and of every table: what is left is
                     // freeing it, which waits ([`release_later`]).
                     self.released.borrow_mut().push(view);
@@ -501,7 +504,7 @@ impl Mounter {
             MountItem::ViewStyle { id, style } => {
                 let Some(view) = self.get(*id) else { return };
                 let old = std::mem::replace(&mut view.state_mut().style, style.clone());
-                crate::input::style_changed(view);
+                crate::input::style_changed(surface, view, &old);
                 crate::transition::style_changed(surface, view, &old);
                 view.moved();
                 crate::decor::style_changed(view, &old);
@@ -519,7 +522,7 @@ impl Mounter {
                     let damage = crate::text::damage(view, text, layout, *content);
                     // A text that draws the same keeps its picture.
                     let raster = raster.filter(|_| damage != Damage::None);
-                    crate::text::set(view, text, layout, *content, raster);
+                    crate::text::set(surface, view, text, layout, *content, raster);
                     if let Some(old) = old {
                         crate::transition::text_changed(surface, view, &old, text);
                     }
@@ -641,8 +644,8 @@ impl Mounter {
             }
             MountItem::ViewProps { id, props } => {
                 let Some(view) = self.get(*id) else { return };
-                view.state_mut().props = props.clone();
-                crate::input::props_changed(surface, view);
+                let old = std::mem::replace(&mut view.state_mut().props, props.clone());
+                crate::input::props_changed(surface, view, &old);
                 crate::access::props_changed(view);
             }
             MountItem::LayoutAnimation(a) => self.layout_animation = Some(*a),

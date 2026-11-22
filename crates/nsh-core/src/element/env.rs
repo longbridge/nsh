@@ -73,6 +73,9 @@ pub struct Environment {
     /// The platform picks colors from the screen
     /// ([`crate::platform::Environment::screen_color`]).
     pub screen_color: bool,
+    /// The platform reports clipboard writes' results
+    /// ([`crate::platform::Environment::clipboard_write_result`]).
+    pub clipboard_write_result: bool,
     /// The platform renders canvas drawings offscreen into images
     /// ([`crate::platform::Environment::canvas_render`]).
     pub canvas_render: bool,
@@ -82,6 +85,10 @@ pub struct Environment {
     /// The platform shows web sign-in sessions
     /// ([`crate::platform::Environment::auth_session`]).
     pub auth_session: bool,
+    /// Links of the schemes the app claims reach it
+    /// ([`field@crate::platform::Environment::scheme_links`], resolved: `true`
+    /// on every OS but the web unless the platform says otherwise).
+    pub scheme_links: bool,
     /// The platform shows file dialogs and opens, reveals and trashes local
     /// paths ([`crate::platform::Environment::file_requests`]).
     pub file_requests: bool,
@@ -155,9 +162,11 @@ impl Default for Environment {
             lifecycle: Lifecycle::Active,
             wake_count: 0,
             screen_color: false,
+            clipboard_write_result: false,
             canvas_render: false,
             share: false,
             auth_session: false,
+            scheme_links: true,
             file_requests: false,
             speech: false,
             notifications: false,

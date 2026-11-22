@@ -289,6 +289,10 @@ Things that were found the hard way. Read the section of the area you change bef
   itself presenting one (a `Sheet` is a transparent modal over the modal it is in) dismisses only that one, and the outer
   modal stays on screen with its content already gone: a blank screen when a sheet and its modal close together.
   `ModalHost::dismiss` dismisses through `presentingViewController`, which takes the modal and everything above it.
+  So a modal shown while another leaves (one closed and one opened in the same batch) must not be presented over the
+  leaving one: the mounter dismisses first and presents the new modal once the old one is gone, and presents again
+  the modals the app still shows that went along. A modal also leaves with the subtree it is in, not only when its
+  own node is removed.
 
 - **iOS, presses near the top of the window**: UIKit attaches tap recognizers to the window that skip `UIControl`s, and a
   press is a gesture recognizer, not a control. On iOS 26+ the window's `_UIDoubleTapInteraction` (a single-tap
@@ -405,7 +409,30 @@ Things that were found the hard way. Read the section of the area you change bef
 - **Android, shadows moved by fractions of a pixel**: Skia caches a shadow's blurred mask keyed on the subpixel part
   of its position, so a view moved by a fractional offset each frame blurs its shadows again every frame (on the GPU,
   each into a new render target, slow on PowerVR). `StackBox`'s push / pop slides move by whole pixels; going back to
-  the gallery's index ran at about half the frame rate before (#519).
+  the gallery's index ran at about half the frame rate before (#519). Box shadows no longer draw shadow layers on a
+  hardware canvas (next point); text shadows and a `<Canvas>`'s still do.
+- **Android, box shadows on a hardware canvas**: a shadow layer of the box's path, clipped by that path, is blurred
+  and clipped again on every frame a box moves in. Four boxes as large as the screen, each with an outer shadow and a
+  1 px inset rim, slid at 32 ms a frame on an emulator (p50; 6 ms without the shadows). `Decor.drawCachedShadow`
+  draws each layer once, unclipped, into a bitmap of the smallest box with the same corners (as Android 8's
+  `drawShadowSlices`), at a pixel for every quarter of its blur, and stretches it in slices cut along the clip's edge:
+  pieces on the hidden side are left out, and the squares of the corners' curves (each as wide as its side's
+  corners need) come from a second bitmap drawn clipped at full size, so no path is clipped as the box is drawn
+  (clipping those squares by the path as they were drawn still cost ~2 ms a frame of the emulator's RenderThread).
+  A layer blurred by less than 8 px is at full size anyway: it is drawn clipped into its bitmap, and its slices are
+  drawn whole, as fewer pieces matter where every backdrop recorded behind the box draws them again. The middle of
+  an inset shadow is left out: it lies more than twice the blur from where it casts. A shadow whose bitmaps would
+  take more than a quarter of the 8 MiB cache (a spread of the screen's size) is drawn as a shadow layer, as
+  before. The same boxes slide at 10 ms a frame.
+- **Android, backdrop blur**: `Backdrop` records what lies behind the view into a `RenderNode` before every frame,
+  and hwui draws that whole node into a layer and blurs it every frame. The node is recorded at the size where the
+  blur's deviation is 4 px (Skia's GPU blur scales its input down to that before blurring anyway) and stretched
+  back by its own scale, a property the RenderThread applies (a scale in the view's display list would stay stale
+  when an older backdrop's pre-draw records the view first, #2101); a view with nothing on screen
+  (`getGlobalVisibleRect`) records nothing. Four glass views of about the screen's size, without shadows, slid at
+  34 ms a frame on an emulator, 12 ms after. Every blurred view still records and blurs its backdrop again on
+  every frame, also when nothing behind it changed: a drawer sliding over blurred panes makes each of them blur
+  again (31 ms a frame on the emulator, 17 ms with the panes not blurred).
 - **Android, hidden views lose their display lists**: HWUI drops the display list of a RenderNode no longer drawn,
   and `setVisibility` tells every view under the one that changes, whose background `Drawable.setVisible` calls
   `invalidateSelf`. A whole screen hidden and shown again therefore records all of its views again (22–36 ms for the
@@ -425,6 +452,13 @@ Things that were found the hard way. Read the section of the area you change bef
   added there or it is dropped silently.
 - **Android, inputs' `pointerEvents`**: `InputBox` is a `FrameLayout`, not a `Box`: it keeps `pointerEvents` itself and
   refuses touches in `dispatchTouchEvent` for `none` / `box-none`, and `TouchTracker.deepest` reads it as a `Box`'s.
+- **Android, hovers and `pointerEvents`**: a hover goes to the topmost view under the pointer that handles it, and a
+  clickable view handles it whatever its `pointerEvents`, so `Box` routes hovers as it routes touches
+  (`dispatchHoverEvent`, `onInterceptHoverEvent`, `onHoverEvent`). TalkBack's touch exploration is hovers too: an inert
+  overlay that took them kept the screen reader from the views under it. `ViewGroup` keeps its own hover state
+  (hover targets, whether it is hovered itself) and sends no exit or enter when only `pointerEvents` changes, so `Box`
+  sends itself the exit when it turns inert while hovered, and the enter when it stops being `box-none` under the
+  pointer. `tests/hover-routing/run.py` checks the routing on a device or emulator.
 - **Android, inputs**: `EditText` reconfiguration (input type, filters, single line) sets the same text again and fires
   `afterTextChanged`: only text that differs from the last known one counts as an edit, or JS values are rejected as stale.
   Soft keyboards edit through the input connection (`KeyConnection`: composing text, commits, deletes), hardware keys arrive
@@ -479,6 +513,13 @@ Things that were found the hard way. Read the section of the area you change bef
   child sees it, with the same slop as `ZScroll`, so the pager took every horizontal drag of a zoomed image. `ZScroll`
   asks its parents not to intercept from the down (`requestDisallowInterceptTouchEvent`) while it has content to pan and
   gives that back when the drag has nothing to move or pushes past an edge a scroll view around can go on from.
+- **Android, moving a scroll view during its fling**: `ScrollView` / `HorizontalScrollView` keep their fling's
+  `OverScroller` private, and `computeScroll` sets the position the curve reached every frame, so a `scrollTo` during a
+  fling lasts one frame: the core's anchoring `ScrollBy` (rows above a list's viewport measured mid-fling) was undone
+  and the visible rows jumped by it, while a slow drag over the same rows kept them still. `VScroll` and `HScroll` run
+  their flings themselves (`ScrollBox.Glide`: the platform's `OverScroller.fling` arguments, plus the shifts
+  `scrollByPx` applied). Starting a new fling from the moved position instead goes farther than the rest of the curve:
+  repeated over a run of measured rows it sped the fling up and ran it far past its end.
 - **Android, safe area**: `NshView` reports only the parts of the system bars / keyboard that overlap it (like UIKit's
   `safeAreaInsets`), so embedded views below a toolbar get no top inset. Overlays use the same overlap (`topInset()`).
 - **Android, dev assets come over plain HTTP**, which apps block by default (API 28+): the dev host APK and `nsh-dev.aar` set
@@ -671,6 +712,14 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## macOS, AppKit
 
+- **`performWindowDragWithEvent:` moves the window only from the event AppKit is delivering**: given a press whose
+  drags a `nextEventMatchingMask:` tracking loop already took off the queue, the window stayed put (#2274); given a
+  drag that loop dequeued, it stayed put as well. Called from the view's `mouseDragged:` with that event, the window
+  server moves the window from then on, in step with the pointer and with edge tiling (real mouse events posted with
+  `cliclick` over a hidden title bar, macOS 26.6). Moving the window from a loop instead, one `setFrameOrigin:` per
+  event (#2295), trails the pointer, as the app sets every frame. `input::window_press` keeps the press and lets
+  AppKit deliver its drags, as GPUI's `start_window_move` does.
+
 - **A view's display link follows the window to another screen but keeps the frame rates it was asked for**: one
   resumed while the window was on a 60 Hz screen (range 60–60) and kept running by a looping animation or the
   performance monitor drew at 60 Hz after the window moved to a 120 Hz built-in screen (measured, macOS 26, a 120 Hz
@@ -706,9 +755,15 @@ Things that were found the hard way. Read the section of the area you change bef
 - **From macOS 26 a window with a toolbar has larger corners than one with only a title bar** (seen on 26.6), even an
   empty `NSToolbar` in `UnifiedCompact`; the radius is the system's and no API sets it. A hidden title bar of the app's
   height therefore centers the traffic lights itself instead of selecting a toolbar style (`chrome::TrafficLights`).
-  AppKit lays the buttons out again whenever the title bar does (each live-resize frame, a screen change, leaving full
-  screen), so they are placed again from their `NSViewFrameDidChangeNotification`s, which arrive inside that layout,
-  before anything is drawn.
+  AppKit lays the buttons out again whenever the title bar does (each live-resize frame, `setTitle:`, a screen change,
+  leaving full screen), calling `-[_NSThemeWidget setFrameOrigin:ignoreRentry:]` for Close, Miniaturize and Zoom in
+  order. That method's re-entrancy guard silently ignores `setFrameOrigin:` calls on the notifying button from inside
+  its own `NSViewFrameDidChangeNotification` (verified on macOS 27.0.1), so synchronous placement inside frame-change
+  notifications left the last button (`ZoomButton`) stuck at AppKit's default `y` on every live-resize frame (and after
+  `setTitle:`). `TrafficLights` therefore always coalesces `NSViewFrameDidChangeNotification`s (on the container, title
+  bar view and buttons) onto the main queue so placement runs after `_updateButtonPositions` exits `ignoreRentry:`, and
+  places synchronously on `NSWindowDidResizeNotification` (which fires after `_updateButtonPositions` returns and before
+  AppKit displays the resized frame) so live-resize frames stay aligned without flicker.
 
 - **`contentLayoutRect` lags the frame while a window resizes**: read in the resize (the root view's new size), it is
   still laid out for the old frame, so the frame's height minus its top is the bar plus the change in height (a

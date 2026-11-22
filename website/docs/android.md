@@ -27,7 +27,8 @@ nsh run --target android               # a Rust app
 nsh run App.tsx --target android       # a TSX app
 ```
 
-Start an emulator or connect a device first (`adb devices` lists them; NSH uses the first one). For a Rust app, `nsh`
+Start an emulator or connect a device first (`adb devices` lists them). NSH uses the one `--device <serial>` or
+`ANDROID_SERIAL` names, else the first one, and names the one it uses when several are connected. For a Rust app, `nsh`
 builds the app's `libnsh.so` with your crate, installs the APK and starts it; a change to the crate's Rust code builds
 and installs it again. For a TSX app, it installs a development host APK (rebuilt only when the runtime changes) and
 forwards the dev server's port with `adb reverse`, so it works over USB without a shared network; the app updates as
@@ -89,6 +90,14 @@ The distribution contains both variants:
 dist/nsh/embed/android/nsh.aar       release: bundles and signed packages
 dist/nsh/embed/android/nsh-dev.aar   also connects to a `nsh dev` server
 ```
+
+From a checkout of NSH you can build just the libraries:
+
+```sh
+cargo xtask android-embed    # writes dist/nsh/embed/android/{nsh,nsh-dev}.aar
+```
+
+`--no-dev` leaves out `nsh-dev.aar`. The default build has `arm64-v8a`, `armeabi-v7a` and `x86_64`; repeat `--abi` to build fewer.
 
 The AAR holds the Java runtime and `libnsh.so` for `arm64-v8a`, `armeabi-v7a` and `x86_64`, with their symbols: the
 app's Gradle build strips them when it packages the app and keeps the symbols for its crash reports. It declares the
@@ -369,6 +378,71 @@ Android grants only what the manifest declares: a permission it does not list an
 A request with no activity in front (the app is in the background), or whose activity finishes before the user
 answers, fails with `PermissionError::NoActivity`. NSH's own prompts (notifications, a web page's camera and
 microphone) ask the same way, so a request waits for one already showing.
+
+## The JavaVM and Context from Rust
+
+Rust crates for Android find the process's `JavaVM` and an `android.content.Context` through
+[`ndk-context`](https://docs.rs/ndk-context) (`ndk_context::android_context()`): audio and sensor crates, keystores,
+`robius-*`, and your own JNI code. NSH sets it once, when the first `NshView` is made, before your app's or an
+extension's Rust code runs, to the VM and the application's `Context` (which outlives every activity):
+
+```rust
+let context = ndk_context::android_context();
+// SAFETY: the VM lives as long as the process.
+let vm = unsafe { jni::JavaVM::from_raw(context.vm().cast()) }?;
+let mut env = vm.attach_current_thread()?;
+// SAFETY: a global reference NSH keeps for the life of the process.
+let application = unsafe { jni::objects::JObject::from_raw(context.context().cast()) };
+```
+
+`ndk-context` holds one context per process and panics when it is set again, so do not call
+`ndk_context::initialize_android_context` yourself in an NSH app. To show a system UI from the activity in front,
+start one for a result through `activity` below, or ask for permissions through `permissions` above.
+
+## Activities from Rust
+
+Rust code that starts another app for a result (the camera app, a document picker) uses `activity` of the same crate.
+`start_for_result(env, &intent)` starts it from the activity in front and resolves with its `ActivityResult` (the
+result code and the intent the other app returned), across configuration changes; `can_start(env, &intent)` says
+whether an installed app answers the intent. Android 11+ shows an app only the apps its manifest queries: a crate
+declares its queries in its `Cargo.toml` ([What the packaged app needs](./nshm.md#what-the-packaged-app-needs)).
+`output_file(env, name)` makes a new file in the app's cache with a `content://` URI the other app writes through the
+app's file provider (`MediaStore.EXTRA_OUTPUT`), and `picker::prepare_image(path, name, &request)` prepares an image
+file as `Picker.pickImages` does. `with_env(f)` runs `f` with the thread's JNI environment (code of the app and its nshm; other crates reach the VM through `ndk-context` above) and returns its result, or the JNI error (a Java exception is
+logged and cleared). A request made while the app is in the background fails with `ActivityError::NoActivity`. `nsh-extra`'s camera
+(`crates/nsh-extra/src/camera/android.rs`) uses all of them.
+
+## Notifications from other code
+
+[`Notifications`](../modules/nsh.md#notifications) reports presses of the notifications the app showed. Notifications
+other code shows, such as a push service's SDK, open the app's launch activity (or the SDK's own activity, which opens
+it) with their payload as the intent's extras. Those presses go to one handler that Rust code sets with
+`nsh::notifications::set_foreign_handler`, never to `press`. Set it in the `#[native_module]` entry of the app's
+crate, on the UI thread: a press that started the app waits for it.
+
+```rust
+use nsh::notifications::{ForeignNotification, ForeignNotificationHandler, set_foreign_handler};
+
+struct Chats;
+
+impl ForeignNotificationHandler for Chats {
+    // The user pressed it, possibly starting the app.
+    fn pressed(&self, notification: &ForeignNotification) {
+        open_chat(&notification.extras["chat"]);
+    }
+}
+
+set_foreign_handler(Chats);
+```
+
+`ForeignNotification` carries the intent's `extras` as JSON, its `action` and its `data` URI. Android does not say
+which notification opened an activity, so NSH takes an intent for such a press when it has extras and no other
+meaning: links (`ACTION_VIEW`, which reach `onLink`), shares and the system's other actions are not presses, nor is the
+task opened again from Recents. Each intent is handed over once, so an activity recreated with it does not report it
+again. The handler runs on the UI thread, and `set_foreign_handler` panics elsewhere. There is one handler, so the
+app's crate owns it and passes presses on to the modules it uses; a later call replaces it. An app that embeds
+`NshView` passes its activity's intents to `NshView.handleNotificationIntent` in `onCreate` and `onNewIntent`, which
+hands these presses over too.
 
 ## Limits
 

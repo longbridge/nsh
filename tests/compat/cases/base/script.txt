@@ -709,6 +709,13 @@ expect Task: 0 false
 expect From HTML
 expect An hypertext paragraph.
 style span:hypertext fontWeight 600
+# Text in the colors HTML gives it (a span's style, a font's color).
+expect Colors: red text and green text
+style span:"red text" color #e54545ff
+style span:"green text" color #00aa00ff
+# A text style of the app's document, under its part's styles.
+style span:"Document color" color #336699ff
+style span:"Document color" fontWeight 600
 # The app's own blocks.
 expect From a document
 # Streaming: the `**` left open shows closed, the caret after the text.
@@ -740,6 +747,7 @@ expect CJK emphasis: strong,text
 expect CJK URL: https://example.com,text
 expect Math off: Math $x$
 expect From HTML: Hi there
+expect Text style: textStyle red
 expect Unknown tag: <US tech> up
 # A code block's annotations show in place of its code; its actions get
 # the block, its id too.
@@ -4384,6 +4392,14 @@ covers [props] DataTable.sort
 covers [props] DataTable.renderCell
 covers [events] DataTable.onSortChange
 covers [events] DataTable.onVisibleRowsChange
+
+# base-data-table-fit-grow
+tap id:case-base-data-table-fit-grow
+# The name column fits its text once the rows come; the qty column grows
+# into the rest of the table's 390 points.
+expect Name
+tap id:widths
+expect Widths: fill 390 fitted true
 
 # base-rich-editor-session
 tap id:case-base-rich-editor-session

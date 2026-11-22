@@ -75,6 +75,14 @@ or the tray; an animation's `start` rejects its promise; a canvas call ignores i
 holds up to as many screens: `push` beyond that throws a `RangeError`. Children, submenus and styles nested more than
 64 levels deep throw a `TypeError`. A `<List>`'s `each` takes any number of rows.
 
+**Views nest up to 1024 levels deep, in every app.** Layout and mounting walk the tree in native code, level by level,
+where the interpreter's stack limit does not reach. An app that nests views deeper is stopped, as it is when it goes
+over a quota:
+
+```text
+the app nested views more than 1024 deep and was stopped
+```
+
 > [!TIP]
 > These limits are generous for normal apps. If you hit the 2 s call budget, the work is too long for one event
 > anyway: it would freeze the app's updates for that long. Split it with `setTimeout`, or move it out of the event
@@ -225,6 +233,11 @@ A page may show and download a `blob:` URL it made (`URL.createObjectURL`, a `<a
 embeds the origin of the document that made it, so it is allowed when that origin is a host in `hosts`, and a
 blob of a host the page may not show — or an opaque one (`blob:null/…`) — is not. Every platform checks this
 the same way.
+
+A download from a host follows the same rule: a download whose response comes from a host not in `hosts` is not
+saved, and `onDownload` reports it `failed` with `code` `"ERR_ACCESS_DENIED"`. On iOS, macOS and Linux this holds
+wherever its redirects lead, and on iOS and macOS a redirect to such a host is cancelled before it is requested. A
+download of the page's own content (`data:` and `blob:` URLs) comes from no host and is saved as before.
 
 `input` is separate from `hosts` because trusted input carries user activation, which `injectJavaScript` never gets:
 the page may then open windows, write the clipboard, open the system's file panel, start WebAuthn or permission prompts
