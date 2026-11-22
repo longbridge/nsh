@@ -2603,22 +2603,29 @@ impl Mounter {
     pub(crate) fn keyboard_changed(&mut self, height: f32, motion: KeyboardMotion) {
         self.keyboard = height;
         self.keyboard_motion = motion;
-        self.avoid_keyboard(motion);
         if height <= 0.0 {
             // Hiding: what moved up comes back down with the keyboard.
+            self.avoid_keyboard(motion);
             self.pan_for_keyboard(motion);
         } else {
             // Showing: the app may make room for the keyboard itself, in
-            // the batch it answers with ([`Mounter::keyboard_settled`]).
+            // the batch it answers with ([`Mounter::keyboard_settled`]). A
+            // scroll view it lifts above the keyboard (a panel padded by
+            // the keyboard's height) needs no inset: measured before that
+            // batch, it would keep one as tall as the keyboard and scroll
+            // its content up for nothing.
             self.keyboard_pending = true;
         }
     }
 
     /// The engine handled the keyboard's change: the batch the app
-    /// answered with, if any, is applied. If the focused input is in no
-    /// scroll view and still under the keyboard, its content moves up.
+    /// answered with, if any, is applied. What the keyboard still covers
+    /// of the focused input's scroll view gets a bottom inset; if the
+    /// input is in no scroll view and still under the keyboard, its
+    /// content moves up.
     pub(crate) fn keyboard_settled(&mut self) {
         if std::mem::take(&mut self.keyboard_pending) {
+            self.avoid_keyboard(self.keyboard_motion);
             self.pan_for_keyboard(self.keyboard_motion);
         }
     }
