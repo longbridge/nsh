@@ -21,6 +21,7 @@ use nsh_core::{
     EventKind, EventPayload, MountBatch, MountItem, NodeId, PayloadValue, Points, Size,
     canvas::render::RenderFailure,
     geometry::{DevicePixels, point, px, size},
+    platform::{Network, NetworkKind},
 };
 use nsh_engine::{
     App, Assets, Bundle, ColorScheme, Edges, Engine, EngineConfig, EngineControl, Environment,
@@ -1327,7 +1328,9 @@ extern "system" fn Java_com_longbridge_nsh_Native_resize(
 /// `values`: safe area top, right, bottom, left, keyboard height, keyboard
 /// animation duration, font scale, right to left (1), reduce motion (1),
 /// density, screen reader (1), API level, idiom (0 phone, 1 pad, 3 TV),
-/// app state (0 resumed, 1 paused, 2 stopped), 24-hour time (1).
+/// app state (0 resumed, 1 paused, 2 stopped), 24-hour time (1), the
+/// default network's kind (`NetworkState.java`: 0 unknown, 1 none, 2 Wi-Fi,
+/// 3 cellular, 4 wired, 5 other), metered (1), Data Saver on it (1).
 /// `locale`: `Locale.getDefault()`'s language tag; `regional`: the format
 /// locale's, with Android 14's regional preferences as its extension.
 #[unsafe(no_mangle)]
@@ -1344,7 +1347,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_environment(
 ) {
     // SAFETY: Java passes its live handle.
     let host = unsafe { host(handle) };
-    let mut v = [0f32; 15];
+    let mut v = [0f32; 18];
     if env.get_float_array_region(&values, 0, &mut v).is_err() {
         return;
     }
@@ -1369,6 +1372,9 @@ extern "system" fn Java_com_longbridge_nsh_Native_environment(
     environment.share = true;
     // A Custom Tab, ended by the callback link (`AuthSession.java`).
     environment.auth_session = true;
+    // The app's details in the system's settings (`SystemUi.java`
+    // `openAppSettings`).
+    environment.app_settings = true;
     environment.os_version = (v[11] as u16, 0);
     environment.idiom = match v[12] as u8 {
         1 => Idiom::Pad,
@@ -1381,6 +1387,16 @@ extern "system" fn Java_com_longbridge_nsh_Native_environment(
         2 => Lifecycle::Background,
         _ => Lifecycle::Active,
     };
+    environment.network = Network::new(match v[15] as u8 {
+        1 => NetworkKind::None,
+        2 => NetworkKind::Wifi,
+        3 => NetworkKind::Cellular,
+        4 => NetworkKind::Wired,
+        5 => NetworkKind::Other,
+        _ => NetworkKind::Unknown,
+    })
+    .expensive(v[16] != 0.0)
+    .constrained(v[17] != 0.0);
     if let Ok(tag) = env.get_string(&locale) {
         environment.locale = Locale::parse(&String::from(tag)).unwrap_or_default();
     }
@@ -2990,23 +3006,22 @@ extern "system" fn Java_com_longbridge_nsh_Native_hostCallFree(
     }
 }
 
-/// A packaged app's `app.json` (`nsh package`): its id and the URL schemes
-/// it claims, read as `Bundle::read` reads them on the other platforms.
+/// A packaged app's `app.json` (`nsh package`): its id and the links it
+/// claims (its URL schemes and web links), read as `Bundle::read` reads
+/// them on the other platforms.
 fn with_app_json(bundle: Bundle, json: &str) -> Bundle {
     let app = serde_json::from_str::<serde_json::Value>(json).ok();
     let id = app.as_ref().and_then(|app| app.get("id")?.as_str());
     let bundle = bundle.with_app_id(id);
-    match app.as_ref().and_then(|app| app.get("schemes")) {
-        Some(schemes) => {
-            // A newer NSH's: what this runtime cannot claim is left out.
-            let (schemes, ignored) = nsh_core::url_scheme::schemes_from_json_lenient(schemes);
-            for what in ignored {
-                log::warn!("app.json: {what}, ignored");
-            }
-            bundle.with_url_schemes(schemes)
-        }
-        None => bundle,
+    let Some(app) = app else {
+        return bundle;
+    };
+    // A newer NSH's: what this runtime cannot claim is left out.
+    let (links, ignored) = nsh_core::url_scheme::AppLinks::from_json_lenient(&app);
+    for what in ignored {
+        log::warn!("app.json: {what}, ignored");
     }
+    bundle.with_links(links)
 }
 
 #[cfg(test)]
@@ -3020,13 +3035,28 @@ mod app_json_tests {
             r#"{"id":"dev.example.links","schemes":["example.links"]}"#,
         );
         assert_eq!(bundle.app_id.as_deref(), Some("dev.example.links"));
-        assert_eq!(bundle.url_schemes, ["example.links"]);
+        assert_eq!(bundle.links.schemes(), ["example.links"]);
+        assert!(bundle.links.web().is_empty());
+    }
+
+    #[test]
+    fn a_packaged_app_claims_its_web_links() {
+        let bundle = with_app_json(
+            Bundle::source(String::new()),
+            r#"{"id":"dev.example.links","links":[{"host":"example.com","paths":["/orders/*"]},{"host":"not a host"}]}"#,
+        );
+        assert_eq!(bundle.links.web().len(), 1);
+        assert_eq!(bundle.links.web()[0].host(), "example.com");
+        assert_eq!(bundle.links.web()[0].paths(), ["/orders/*"]);
+        assert!(bundle.links.schemes().is_empty());
+        assert_eq!(bundle.links.check("https://example.com/orders/7"), Ok(()));
+        assert!(bundle.links.check("https://example.com/blog").is_err());
     }
 
     #[test]
     fn an_app_without_schemes_claims_none() {
         let bundle = with_app_json(Bundle::source(String::new()), r#"{"id":"dev.example"}"#);
         assert_eq!(bundle.app_id.as_deref(), Some("dev.example"));
-        assert!(bundle.url_schemes.is_empty());
+        assert!(bundle.links.is_empty());
     }
 }

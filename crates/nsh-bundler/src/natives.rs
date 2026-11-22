@@ -75,6 +75,10 @@ pub struct NativeUse {
     /// `globalThis`, `self`, `window` or `global`, or destructures one of
     /// them with a computed key or a rest element.
     pub global_crypto: bool,
+    /// It may use the global `WebSocket`: it spells the name, or reaches
+    /// the globals by a computed key, the same way as `global_crypto`.
+    /// The global needs the `websocket` module's native side.
+    pub global_websocket: bool,
     /// It loads a module whose specifier is computed (`import(name)`),
     /// which may be any native module, whole.
     pub computed_import: bool,
@@ -145,6 +149,7 @@ impl NativeUse {
             }
         }
         self.global_crypto |= other.global_crypto;
+        self.global_websocket |= other.global_websocket;
         self.computed_import |= other.computed_import;
         self.shader |= other.shader;
         self.scrollbar_theme |= other.scrollbar_theme;
@@ -260,6 +265,9 @@ impl<F> Finder<'_, F> {
     fn spelled(&mut self, name: &str) {
         if nsh_core::js::CRYPTO_GLOBALS.contains(&name) {
             self.uses.global_crypto = true;
+        }
+        if name == "WebSocket" {
+            self.uses.global_websocket = true;
         }
     }
 
@@ -496,6 +504,7 @@ impl<'a, F: Fn(&str) -> bool> Visit<'a> for Finder<'_, F> {
         // A string's name is judged where it is spelled.
         if is_global_object(&it.object) && !matches!(it.expression, Expression::StringLiteral(_)) {
             self.uses.global_crypto = true;
+            self.uses.global_websocket = true;
         }
         // A namespace's member by a name the code spells; by a computed
         // one, the walk visits the namespace itself (whole).
@@ -519,6 +528,7 @@ impl<'a, F: Fn(&str) -> bool> Visit<'a> for Finder<'_, F> {
                     .any(|property| property.computed && !is_literal_key(&property.key)))
         {
             self.uses.global_crypto = true;
+            self.uses.global_websocket = true;
         }
         walk::walk_variable_declarator(self, it);
     }
@@ -536,6 +546,7 @@ impl<'a, F: Fn(&str) -> bool> Visit<'a> for Finder<'_, F> {
                 }))
         {
             self.uses.global_crypto = true;
+            self.uses.global_websocket = true;
         }
         walk::walk_assignment_expression(self, it);
     }

@@ -1159,6 +1159,28 @@ effect(() => {
 });
 ```
 
+### network
+
+```ts
+const network: Accessor<NetworkState>;
+```
+
+How the device reaches the network now: `online` (false only while the system knows there is no route), the `kind` of link the route takes (`"wifi"`, `"cellular"`, `"wired"`, `"other"`, `"none"` offline, `"unknown"` where the platform does not say, which counts as online), whether that link is `expensive` or `constrained` (Low Data Mode, Data Saver), and on iOS whether the user lets the app use cellular data (`cellularData`: `"unknown"` until the user decides, `"restricted"`, `"notRestricted"`). Reactive: an effect that reads it runs again when the route changes, where a request that failed offline tries again. iOS and macOS follow the system's path monitor, Android its default network, the web `navigator.onLine` and `navigator.connection`; Windows, Linux, GPUI and terminals report `"unknown"` ([The network](../docs/device-and-environment.md#the-network)). Rust: `network() -> Network` (`network().online()`, `.kind`, `.expensive`, `.constrained`, `.cellular_data`).
+
+```rust tabs
+effect(move || {
+    if network().online() && sync.failed_offline() {
+        sync.retry();
+    }
+});
+```
+
+```tsx tabs
+effect(() => {
+  if (network().online && sync.failedOffline()) sync.retry();
+});
+```
+
 ### setColorScheme
 
 ```ts
@@ -1592,8 +1614,8 @@ import { Clipboard } from "nsh";
 
 ```ts
 const Clipboard: {
-  writeText(text: string): Promise<void>;
-  write(item: ClipboardItem): Promise<void>;
+  writeText(text: string): Promise<ClipboardWrite>;
+  write(item: ClipboardItem): Promise<ClipboardWrite>;
   readText(): Promise<string>;
   hasText(): Promise<boolean>;
   writeImage(src: string): Promise<void>;
@@ -1601,6 +1623,8 @@ const Clipboard: {
   hasImage(): Promise<boolean>;
   readFiles(): Promise<string[]>;
 };
+
+type ClipboardWrite = "written" | "failed" | "requested";
 
 interface ClipboardItem {
   text: string; // the content as plain text
@@ -1615,8 +1639,8 @@ interface ClipboardImage {
 
 | TS | Rust (`nsh_core::prelude`) |
 |---|---|
-| `await Clipboard.writeText(text)` | `set_clipboard(text)` |
-| `await Clipboard.write({ text, html })` | `set_clipboard_item(item)` (a `ClipboardItem`) |
+| `await Clipboard.writeText(text)` | `set_clipboard(text).await -> ClipboardWrite` |
+| `await Clipboard.write({ text, html })` | `set_clipboard_item(item).await -> ClipboardWrite` (a `ClipboardItem`) |
 | `await Clipboard.readText()` | `clipboard_string().await -> String` |
 | `await Clipboard.hasText()` | `clipboard_has_string().await -> bool` |
 | `await Clipboard.writeImage(src)` | `set_clipboard_image(src)` |
@@ -1635,10 +1659,16 @@ The user can also copy from a [selectable text](../elements/text.md) themselves;
 ### Clipboard.writeText
 
 ```ts
-writeText(text: string): Promise<void>;
+writeText(text: string): Promise<ClipboardWrite>;
 ```
 
 Puts `text` on the clipboard, replacing what was there. Rust: `set_clipboard(text)`.
+
+It resolves to what became of the write: `"written"` when the system clipboard took it (Windows, macOS, the web),
+`"failed"` when it refused it (another app holds the clipboard, the browser declined), and `"requested"` where the
+platform does not say (iOS, Android, Linux, a GPUI host, a terminal). NSH never reads the clipboard back to find out.
+Show "Copied" only for `"written"`, and keep a way to copy by hand for `"failed"`. In Rust the answer is a
+`ClipboardWrite`; drop it when the result does not matter, the write happens either way.
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -1674,7 +1704,7 @@ const copied = signal(false);
 ### Clipboard.write
 
 ```ts
-write(item: ClipboardItem): Promise<void>;
+write(item: ClipboardItem): Promise<ClipboardWrite>;
 ```
 
 Puts the same content as plain text and as HTML on the clipboard, replacing what was there, as a browser copies a
@@ -2387,7 +2417,10 @@ async function signOut() {
 
 `press` reports the `id` of the notification the user pressed. A press can start the app: it waits for the first
 listener, so listen when the app starts, and keep what the press opens in the `id`. On Android an embedding app's
-activity passes its intents to `NshView.handleNotificationIntent`, in `onCreate` and `onNewIntent`. On Apple platforms an
+activity passes its intents to `NshView.handleNotificationIntent`, in `onCreate` and `onNewIntent`; presses of the
+notifications other code showed (a push service's SDK's) go to the handler Rust code sets with
+`nsh::notifications::set_foreign_handler` ([Android](../docs/android.md#notifications-from-other-code)), never to
+`press`. On Apple platforms an
 embedding app that has a notification center delegate keeps it, and its delegate gets the presses; otherwise remote
 notifications and those other native code scheduled go to the handler Rust code sets with
 `nsh_platform_apple::notifications::set_foreign_handler` ([iOS](../docs/ios.md#notifications-from-other-code)), never to
@@ -2397,7 +2430,7 @@ only the running app: one left on screen after the app exits does nothing.
 ### Notifications.permission
 
 `permission()` answers without asking, `requestPermission()` shows the system's prompt the first time. Both resolve with
-`"default"` (not asked yet), `"granted"`, `"denied"` (only the system's settings change it) or `"unavailable"`. On Apple
+`"default"` (not asked yet), `"granted"`, `"denied"` (only the system's settings change it; [`AppSettings.open`](./nsh-mobile.md#appsettings) of `nsh/mobile` takes the user there) or `"unavailable"`. On Apple
 platforms `requestPermission()` resolves with the permission the system's settings hold once it has asked: `"denied"` for
 an app the user turned notifications off for.
 
@@ -2441,11 +2474,62 @@ files and the system's apps (`http`, `https`, `file`, `mailto`, `tel`, `sms`, ..
 | Windows | The app, under `HKEY_CURRENT_USER\\Software\\Classes`, each time it starts; a second launch hands its URL to the running app |
 | Linux | The app: its desktop entry in `~/.local/share/applications` (`<app id>.desktop`) with `x-scheme-handler/<scheme>`, written when it starts. An entry an installer put there for this executable is kept, with the schemes it lacks added; one for another copy of the app is left alone. The app becomes a scheme's default handler only where no application handles it yet. `nsh run` registers the development host the same way. A second launch hands its URL to the running app |
 
+### Web links
+
+An app also claims web links: `https` links of its own sites that open it, Universal Links on iOS and macOS and App
+Links on Android. A link such as `https://example.com/orders/42` in an email, a chat or a search result then opens the
+app where it is installed, and the web page everywhere else. It reaches the same `open` listener as a scheme's link, so
+one listener handles both, and on the web the same address is the page's own (`UrlScheme.url()`).
+
+```json
+{
+  "links": [
+    { "host": "example.com", "paths": ["/orders/*", "/invite"] },
+    { "host": "*.example.com" }
+  ]
+}
+```
+
+- `host` is a domain name, compared in lower case (an internationalized name may be written as is), or `*.` and one
+  for its subdomains: `*.example.com` does not cover `example.com` itself, so list both. No scheme, port, path or IP
+  address.
+- `paths` lists the paths of the host that open the app: a whole path (`/invite`), or the start of one ending in `*`
+  (`/orders/*`, which takes `/orders/42` but not `/orders`). `*` comes only at the end. Paths compare with their case,
+  after percent-decoding the link's (`/café/*` takes `/caf%C3%A9/1`): write them decoded, with no query or fragment.
+  Without `paths`, every path of the host opens the app, so a site whose app shows only some of its pages lists them:
+  the others (`/blog`, `/login`) keep opening in the browser.
+
+NSH lets through the `https` links of these hosts and paths only, with no port or user name, wherever they come from:
+another app can send any URL to the Android activity, and the core drops what the app does not claim. As with a scheme,
+anyone can make such a link, so check what it asks for. A link `nsh` cannot read whole (a key of a newer NSH, a path of
+another form, `"paths": []`) is left out with a warning, never claimed in part.
+
+The site proves that the app is its own, over HTTPS and without a redirect:
+
+- `/.well-known/apple-app-site-association` names the app as `<team id>.<app id>`, with `components` that match
+  `paths` (`{ "/": "/orders/*" }`): iOS checks the paths there, NSH checks `paths`, and a link reaches the app only when
+  both take it.
+- `/.well-known/assetlinks.json` names the package and the SHA-256 fingerprint of its signing certificate.
+
+Until it does, the system opens the links in the browser.
+
+| Platform | How the app claims its links |
+| --- | --- |
+| iOS | `applinks:<host>` in the `com.apple.developer.associated-domains` entitlement `nsh package` signs the app with, after those `ios.entitlements` lists; a device build's provisioning profile must grant Associated Domains. The link that launched the app and those that come while it runs |
+| macOS | The same entitlement, which macOS honors only under a provisioning profile: `nsh package`'s ad hoc signed app leaves it out, so list it in `macos.entitlements` and sign the app with a profile that grants it. The app then takes the links |
+| Android | An `ACTION_VIEW` intent filter with `android:autoVerify="true"` for each link, with its host as an `https` host and each path as an `android:path` (or `android:pathPrefix` for one ending in `*`), which Android verifies as the app installs; the activity runs as `singleTask`, so a link reaches the running app |
+| Web | The page is the link: `nsh package` leaves `links` out, with a warning |
+| Windows, Linux | No app links: the browser opens them, and `nsh package` leaves `links` out, with a warning |
+
+A Rust app's generated code passes the links to its root (`Root::links`).
+
 `nsh test` hands a test's app links: `App.open(entry, { url })` launches the app with one, and
 `app.openWithUrl(url)` opens one while it runs, both headless.
 
 An app that embeds NSH owns its schemes and hands a URL to its view: `AppView.open_url` (Linux, iOS), `NshAppView.openURL`
-(Swift), `NshView.openUrl` or `NshView.handleUrlSchemeIntent` (Android).
+(Swift), `NshView.openUrl` or `NshView.handleUrlSchemeIntent` (Android). A Universal Link reaches the embedding app's
+`scene(_:continue:)` as an activity: hand its `webpageURL` to `NshAppView.openURL` too, which checks it against the
+links the app claims.
 
 ### UrlScheme.url
 
@@ -2876,6 +2960,7 @@ const Storage: {
   removeItem(key: string): Promise<void>;
   keys(): Promise<string[]>;
   clear(): Promise<void>;
+  on(event: "change", listener: (change: { key: string | null; value: string | null }) => void): () => void;
 };
 ```
 
@@ -2886,6 +2971,7 @@ const Storage: {
 | `await Storage.removeItem(key)` | `Storage::remove_item(key)` |
 | `await Storage.keys()` | `Storage::get_all_keys() -> Vec<String>` |
 | `await Storage.clear()` | `Storage::clear()` |
+| `Storage.on("change", listener)` | `Storage::on_change(f)` |
 
 The Rust functions are synchronous, as the entries are in memory: call them where components run (their bodies, handlers and tasks).
 
@@ -2902,7 +2988,7 @@ Each app has a storage of its own, up to 5 MB of keys and values. Calls run in t
 
 A `storage.json` that is damaged is kept as `storage.json.corrupt` next to it, and the app starts with an empty storage; one that cannot be read leaves the app's changes in memory, so the file is never replaced.
 
-On the web, the app's other tabs share its storage: what one of them sets, removes or clears, the others read from then on. A value the browser refuses to keep (its own quota, or site data the user blocked) is refused as one past 5 MB is.
+On the web, the app's other tabs share its storage: what one of them sets, removes or clears, the others read from then on, and hear as [`change`](#storageon). Windows of a desktop app share it the same way. A value the browser refuses to keep (its own quota, or site data the user blocked) is refused as one past 5 MB is.
 
 The app id is the `id` in `nsh.json`, and it travels with the app: `nsh build` and `nsh package` write it next to the bundle, the dev server sends it, and a signed package carries the one its release key's certificate vouches for. So every app keeps its own data with no setting, wherever it runs; an app without an id keeps it under `default`. An embedding app can choose another place (see [Embedding on iOS](../docs/ios.md) and [Embedding on Android](../docs/android.md)).
 
@@ -2964,6 +3050,32 @@ clear(): Promise<void>;
 ```
 
 Removes every key of the app, such as when the user signs out. Rust: `Storage::clear()`.
+
+### Storage.on
+
+```ts
+on(event: "change", listener: (change: { key: string | null; value: string | null }) => void): () => void;
+```
+
+Calls `listener` each time the storage is changed elsewhere: by another tab of the app on the web, or by another window or view of the app that shares its storage. `key` is the key changed, `null` when every key was removed; `value` is what it holds now, `null` when it was removed. `getItem` already reads the new value when the listener runs. The app's own changes in this tab or window do not come, nor a change that leaves an entry as it was, and changes made while nothing listened are not kept: read what you need when you start listening. Returns a function that stops listening; a listener a component adds stops with the component. Rust: `Storage::on_change(f)`, which runs `f` with a `StorageChange` (`key()`, `value()`) while the current owner lives.
+
+Use it to keep settings in step across tabs and windows:
+
+```rust tabs
+let theme = signal(Storage::get_item("theme"));
+Storage::on_change(move |change| {
+    if change.key().is_none_or(|key| key == "theme") {
+        theme.set(change.value().map(str::to_owned));
+    }
+});
+```
+
+```tsx tabs
+const theme = signal(await Storage.getItem("theme"));
+Storage.on("change", ({ key, value }) => {
+  if (key === null || key === "theme") theme.set(value);
+});
+```
 
 ### Keeping a signal on the device
 
@@ -3206,13 +3318,14 @@ interface KeyBindingOptions {
   repeat?: boolean;
   passThrough?: boolean;
   forFocus?: boolean;
+  overFocused?: boolean;
 }
 ```
 
 | TS | Rust |
 |---|---|
 | `keymap.bind(keystroke, handler)` | `on_key(keystroke, handler)` |
-| `keymap.bind(keystroke, handler, { scope, when, repeat, passThrough, forFocus })` | `on_key_with(keystroke, KeyOptions { scope, when, repeat, pass_through, for_focus }, handler)`; `scope` is `KeyScope::Window` (default) or `KeyScope::App`; `when` is `nsh_core::keymap::When` (`Auto`, `Always`, `NotEditing`) |
+| `keymap.bind(keystroke, handler, { scope, when, repeat, passThrough, forFocus, overFocused })` | `on_key_with(keystroke, KeyOptions { scope, when, repeat, pass_through, for_focus, over_focused }, handler)`; `scope` is `KeyScope::Window` (default) or `KeyScope::App`; `when` is `nsh_core::keymap::When` (`Auto`, `Always`, `NotEditing`) |
 | `keymap.bind({ … })` | one `on_key` per keystroke |
 | `keymap.label(keystroke)` | `key_label(keystroke)` |
 
@@ -3402,6 +3515,17 @@ on_key_with("space", KeyOptions { for_focus: true, ..KeyOptions::default() }, mo
 ```
 
 The keys belong to the newest dialog: when the focus stays on a view a dialog covers (a menu gives it back to its trigger as its item opens a dialog), Return and Space go to the dialog's bindings, and that view's `forFocus` bindings and its press wait until the dialog closes.
+
+A focused component's own bindings come before the app's: while an `Editor` has the focus, its Mod+Enter inserts a line below, whatever the app bound to that key. A binding with `overFocused: true` comes before them instead, so the app takes a key a focused component binds, as a query editor running its text with Mod+Enter does. Bind it while that view has the focus and let it go as the focus leaves, so the component keeps the key elsewhere (Rust: `KeyOptions { over_focused: true, .. }`). Without the option the order is as before, and a popup's Escape still closes the popup first.
+
+```tsx
+const focused = signal(false);
+effect(() => {
+  if (focused()) keymap.bind("mod+enter", runQuery, { when: "always", overFocused: true });
+});
+
+<Editor onFocus={() => focused.set(true)} onBlur={() => focused.set(false)} />
+```
 
 Menu shortcuts give way to a binding of the same keystroke: the application menu's ([`nsh/desktop`](./nsh-desktop)) on every desktop, and on macOS the built-in menus' too (Cmd+W, Cmd+C, ...). While you develop with `nsh run`, Cmd+R / Ctrl+R always reloads the app, even if it binds `mod+r`; a packaged app can bind it.
 

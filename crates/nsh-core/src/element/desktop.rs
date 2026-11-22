@@ -144,9 +144,20 @@ pub struct WindowRef {
     /// The close presses of a window of the app's own: how many, and the
     /// last one's reason (the app root's are the environment's).
     close_press: Option<Signal<(u64, CloseReason)>>,
-    /// What a window of the app's own was set to before its element was
-    /// mounted (its content's first render): opened with it.
-    early: Option<Signal<WindowAttributes>>,
+    /// What a window of the app's own was set to and asked for before its
+    /// element was mounted (its content's first render): opened with it.
+    early: Option<Signal<Early>>,
+}
+
+/// What a window's ref was given before its element was mounted.
+#[derive(Clone, Default, PartialEq)]
+struct Early {
+    /// Joins the options it opens with.
+    attributes: WindowAttributes,
+    /// Sent after it opens, in order (`focus()`, `set_mode()`, ...).
+    commands: Vec<DesktopCommand>,
+    /// It closed: nothing more is kept.
+    closed: bool,
 }
 
 impl fmt::Debug for WindowRef {
@@ -232,15 +243,23 @@ impl WindowRef {
                     super::ambient::desktop_command(command);
                 }
             }
-            // Not mounted yet (set while it first renders): the attributes
-            // join the options it opens with, nothing else reaches it.
-            Target::Own(element) => match (command, self.early) {
-                (DesktopCommand::SetAttributes(attributes), Some(early))
-                    if element.node().is_none() =>
-                {
-                    early.update(|e| e.merge(&attributes));
+            // Not mounted yet (`open_window`, or set while it first
+            // renders): the attributes join the options it opens with, and
+            // the other commands follow its opening, in order.
+            Target::Own(element) => match self.early {
+                Some(early) if element.node().is_none() => {
+                    if !early.is_live() {
+                        return;
+                    }
+                    early.update(|e| match command {
+                        _ if e.closed => {}
+                        DesktopCommand::SetAttributes(attributes) => {
+                            e.attributes.merge(&attributes)
+                        }
+                        command => e.commands.push(command),
+                    });
                 }
-                (command, _) => element.send(Command::Desktop(Box::new(command))),
+                _ => element.send(Command::Desktop(Box::new(command))),
             },
         }
     }
@@ -672,11 +691,17 @@ impl IntoElement for Window {
                     super::signal(None::<WindowState>),
                     super::signal(Edges::<Points>::default()),
                     super::signal((0u64, CloseReason::default())),
-                    super::signal(WindowAttributes::default()),
+                    super::signal(Early::default()),
                 ),
             };
-            // A window opened again starts from its options.
-            super::untracked(|| early.set(WindowAttributes::default()));
+            // Closed, its ref reaches nothing: what it is asked for then is
+            // not kept for a later opening.
+            super::cleanup(move || {
+                early.try_set(Early {
+                    closed: true,
+                    ..Early::default()
+                });
+            });
             let close: Rc<dyn Fn(WindowCloseCause)> = {
                 let on_open_change = on_open_change.clone();
                 Rc::new(move |cause: WindowCloseCause| {
@@ -714,11 +739,16 @@ impl IntoElement for Window {
                     for r in reactive.iter() {
                         o.attributes.merge(&r.get());
                     }
-                    early.with(|e| o.attributes.merge(e));
-                    o
+                    let commands = early.with(|e| {
+                        o.attributes.merge(&e.attributes);
+                        e.commands.clone()
+                    });
+                    (o, commands)
                 };
-                let apply = |attrs: &mut super::Attrs, o: WindowOptions| {
-                    attrs.rare_mut().window = Some(Box::new(o));
+                let apply = |attrs: &mut super::Attrs, (o, commands): (WindowOptions, _)| {
+                    let rare = attrs.rare_mut();
+                    rare.window = Some(Box::new(o));
+                    rare.window_commands = commands;
                 };
                 // Bound even with static options: what its content sets
                 // while it first renders (`early`) joins them.
@@ -921,7 +951,7 @@ pub fn open_window(mut window: Window) -> Option<WindowRef> {
                 })
             }),
             close_press: Some(super::signal((0, CloseReason::default()))),
-            early: Some(super::signal(WindowAttributes::default())),
+            early: Some(super::signal(Early::default())),
         })
     });
     window.on_open_change = Some(on_open_change);
@@ -1798,6 +1828,12 @@ pub fn set_tray(tray: impl Into<Option<Tray>>) {
 /// # Panics
 ///
 /// When `keystroke` is not one.
+///
+/// The panic is not fatal to the app: like any panic in a component, it
+/// ends the component that made the call (its error boundary hears it, or
+/// it is logged) and the engine goes on. To take keystrokes from user
+/// settings, check them first with
+/// [`Shortcut::parse`](crate::desktop::Shortcut::parse).
 pub fn register_global_shortcut(keystroke: &str, on_press: impl Fn() + 'static) -> Answer<bool> {
     let shortcut = match Shortcut::parse(keystroke, super::os() == Os::MacOs) {
         Ok(shortcut) => shortcut,

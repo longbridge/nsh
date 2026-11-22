@@ -76,6 +76,11 @@ Without a handler, these notifications show as the app's own do and their presse
 notification itself is reported, not the actions of its category. An app that embeds NSH and has a notification center
 delegate of its own keeps every notification there. macOS works the same way.
 
+An app that turns on `nsh-extra`'s [`push`](./nshm.md#push) feature has this handler set by that module once the
+standalone app launches, which passes the notifications to `Push.on` and to Rust code through
+`nsh_extra::push::on_event`; the app's crate then listens there, and decides how a notification shows in front with
+`nsh_extra::push::set_foreground_presentation_decider`, rather than setting a handler of its own.
+
 ## Packaging
 
 ```sh
@@ -126,9 +131,10 @@ nsh_platform_ios::on_application_event(|event| match event {
 
 The events are `Launched` (with the launch options), `RegisteredForRemoteNotifications`,
 `FailedToRegisterForRemoteNotifications` and `RemoteNotification`. NSH only passes them on: the app's code asks for
-remote notifications itself (`registerForRemoteNotifications`), and the app declares the `aps-environment`
-entitlement and the `remote-notification` background mode it needs in `nsh.json`
-([Info.plist keys and entitlements](./packaging.md#infoplist-keys-and-entitlements)). An app with no handler has a
+remote notifications itself (`registerForRemoteNotifications`). The `aps-environment` entitlement comes from the
+provisioning profile the app is signed with, and the app declares the `remote-notification` background mode in
+`nsh.json` ([Info.plist keys and entitlements](./packaging.md#infoplist-keys-and-entitlements)); `nsh-extra`'s
+[`push`](./nshm.md#push) feature adds that mode itself. An app with no handler has a
 delegate without these methods. An app that embeds NSH in its own UIKit app keeps its own delegate and receives them
 there.
 
@@ -453,6 +459,14 @@ app.onOpenURL = { url in
     return false
 }
 ```
+
+## Presenting from Rust
+
+Rust code that shows a system view controller (the camera, a share sheet) presents it over the surface whose code
+asked. In a main-thread task (`run_on_main_thread`), `nsh_platform_ios::presenting_controller(mtm)` is the top view
+controller of that surface's window, else of the app's key window. `prepare_image(bytes, name, &request)` prepares
+image bytes as `Picker.pickImages` does: upright, scaled and encoded as the request says. `nsh-extra`'s camera
+(`crates/nsh-extra/src/camera/ios.rs`) uses both.
 
 ## Limits
 

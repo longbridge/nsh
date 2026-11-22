@@ -7,6 +7,8 @@
 //! responder holds it, and the press under the finger is cancelled once
 //! the finger moves away.
 
+use std::time::Duration;
+
 use nsh_core::{
     EventKind, EventPayload, NodeId, Point, Points, ROOT_ID, TouchEvent, TouchPhase, TouchPoint,
     geometry::point,
@@ -16,14 +18,16 @@ use nsh_core::{
     },
 };
 
+mod press;
+
 use super::Headless;
-use crate::selector::Selector;
+use crate::{DragOptions, selector::Selector};
 
 /// How far a finger moves in one display frame, as a scroll's does.
 const DRAG_STEP: Points = Points(10.0);
 /// How long the finger rests where it lands before it moves, as a hand
 /// does (the agents' `LANDING`): the views under it hear it land first.
-const LANDING: f64 = 100.0;
+const LANDING: Duration = crate::drag::LANDING;
 
 /// What the drag does.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -61,6 +65,7 @@ pub(super) struct Finger {
     press: Option<input::Press<NodeId>>,
     mode: Mode,
     moved: bool,
+    long_at: Option<nsh_core::time::Instant>,
 }
 
 impl Headless {
@@ -76,18 +81,30 @@ impl Headless {
     /// finger (not with the mouse, as on the desktop backends and the web)
     /// and refreshes when it is pulled far enough past its top, and the
     /// press under the pointer is cancelled once it moves away
-    /// (`onPressUp`, no `onPress`).
-    pub fn drag(&mut self, selector: &str, by: Point<Points>) -> Result<(), String> {
-        self.step(format!("drag({selector}, {}, {})", by.x, by.y));
-        self.drag_from(selector, by, false)
+    /// (`onPressUp`, no `onPress`). `options.hold` sets the rest before the
+    /// move; one past a press's long-press delay delivers the long press
+    /// first.
+    pub fn drag(
+        &mut self,
+        selector: &str,
+        by: Point<Points>,
+        options: DragOptions,
+    ) -> Result<(), String> {
+        self.step(step_name("drag", selector, by, options));
+        self.drag_from(selector, by, false, options)
     }
 
     /// The step `dragAndHold(<selector>, <by>)`: [`Self::drag`] without the
     /// lift, so the test can look at the screen mid-drag (a drag preview, a
     /// drop line); [`Self::drop_held`] lifts the finger where it is.
-    pub fn drag_and_hold(&mut self, selector: &str, by: Point<Points>) -> Result<(), String> {
-        self.step(format!("dragAndHold({selector}, {}, {})", by.x, by.y));
-        self.drag_from(selector, by, true)
+    pub fn drag_and_hold(
+        &mut self,
+        selector: &str,
+        by: Point<Points>,
+        options: DragOptions,
+    ) -> Result<(), String> {
+        self.step(step_name("dragAndHold", selector, by, options));
+        self.drag_from(selector, by, true, options)
     }
 
     /// The step `drop()`: the finger [`Self::drag_and_hold`] left down lifts.
@@ -101,7 +118,19 @@ impl Headless {
         self.done()
     }
 
-    fn drag_from(&mut self, selector: &str, by: Point<Points>, hold: bool) -> Result<(), String> {
+    fn drag_from(
+        &mut self,
+        selector: &str,
+        by: Point<Points>,
+        held: bool,
+        options: DragOptions,
+    ) -> Result<(), String> {
+        // A custom hold keeps the long press's deadline; none keeps the
+        // released timing.
+        let (hold, long_press) = match options.hold {
+            Some(hold) => (hold, true),
+            None => (LANDING, false),
+        };
         // A new drag lifts the finger an earlier one left down.
         if let Some(finger) = self.finger.take() {
             self.finger_lifted(finger);
@@ -139,6 +168,15 @@ impl Headless {
             true => self.selection_down(target, start, press.is_some()),
             false => None,
         };
+        let long_at = long_press
+            .then_some(press.as_ref())
+            .flatten()
+            .filter(|press| press.events.contains(EventKind::LongPress))
+            .and_then(|press| {
+                Duration::try_from_secs_f64(f64::from(press.long_delay.max(0.0)) / 1000.0).ok()
+            })
+            .map(|delay| self.clock.now() + delay);
+
         let mut finger = Finger {
             pointer,
             start,
@@ -154,6 +192,7 @@ impl Headless {
             press,
             mode: selecting.map_or(Mode::Idle, Mode::Select),
             moved: false,
+            long_at,
         };
         finger.velocity.add(0.0, start);
         if finger.reporting {
@@ -169,28 +208,46 @@ impl Headless {
             None
         };
         let frame = super::animation::FRAME.as_secs_f64() * 1000.0;
-        while finger.time + frame <= LANDING {
-            self.display_frame();
+        while if long_press {
+            finger.time < hold.as_secs_f64() * 1000.0
+        } else {
+            finger.time + frame <= hold.as_secs_f64() * 1000.0
+        } {
+            if long_press {
+                self.elapse(super::animation::FRAME);
+            } else {
+                self.display_frame();
+            }
             finger.time += frame;
             if press_due.is_some_and(|due| finger.time >= due) {
                 press_due = None;
                 self.press_in(&mut finger);
             }
+            if long_press {
+                self.long_press_due(&mut finger);
+            }
         }
         let steps = (by.x.abs().max(by.y.abs()) / DRAG_STEP).ceil().max(1.0) as u32;
         for step in 1..=steps {
-            self.display_frame();
+            if long_press {
+                self.elapse(super::animation::FRAME);
+            } else {
+                self.display_frame();
+            }
             finger.time += frame;
             if press_due.is_some_and(|due| finger.time >= due) {
                 press_due = None;
                 self.press_in(&mut finger);
+            }
+            if long_press {
+                self.long_press_due(&mut finger);
             }
             let t = step as f32 / steps as f32;
             let at = point(start.x + by.x * t, start.y + by.y * t);
             self.finger_moved(&mut finger, at);
             self.responder_granted(&mut finger);
         }
-        if hold {
+        if held {
             self.finger = Some(finger);
         } else {
             self.finger_lifted(finger);
@@ -315,34 +372,6 @@ impl Headless {
                         self.send(press.target(kind), kind, EventPayload::None);
                     }
                 }
-            }
-        }
-    }
-
-    /// The press under the finger goes in (`onPressDown`).
-    fn press_in(&mut self, finger: &mut Finger) {
-        let Some(press) = &mut finger.press else {
-            return;
-        };
-        let Some(kind) = press.press_in() else {
-            return;
-        };
-        // Where the drag starts, in the pressed view, with the keys held:
-        // a press that selects or drags from there reads them.
-        let node = press.node;
-        let at = self
-            .screen
-            .bounds_in_root(node)
-            .map(|b| point(finger.start.x - b.origin.x, finger.start.y - b.origin.y));
-        let payload = self.press_payload(node, at);
-        self.send(node, kind, payload);
-    }
-
-    /// The finger moved away from its press: it ends without a press.
-    fn cancel_press(&mut self, finger: &mut Finger) {
-        if let Some(mut press) = finger.press.take() {
-            for kind in press.press_out(false) {
-                self.send(press.target(kind), kind, EventPayload::None);
             }
         }
     }
@@ -581,4 +610,13 @@ impl Headless {
             None,
         ))
     }
+}
+
+/// A drag's step name, with its hold when it has one.
+fn step_name(name: &str, selector: &str, by: Point<Points>, options: DragOptions) -> String {
+    let hold = options
+        .hold_ms()
+        .map(|ms| format!(", hold={ms}ms"))
+        .unwrap_or_default();
+    format!("{name}({selector}, {}, {}{hold})", by.x, by.y)
 }

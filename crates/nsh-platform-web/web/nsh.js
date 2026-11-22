@@ -61,6 +61,11 @@ const FOCUSED = 4;
  * modality as it is (`inputWith`). */
 const MODALITY_KEYS_SKIPPED = new Set(["Shift", "Control", "Alt", "AltGraph", "Meta", "CapsLock", "Fn", "Hyper", "Super", "OS"]);
 const PRESS_EVENTS = ["onPress", "onLongPress", "onPressIn", "onPressOut"];
+/** A view listening to one of these receives files dragged in from the system. */
+const FILE_DROP_EVENTS = ["onFileDrop", "onFileDragEnter", "onFileDragLeave"];
+/** The most files one drop reads, and the most bytes it reads in all (as `Picker.pickFiles`). */
+const FILE_DROP_LIMIT = 100;
+const FILE_DROP_MAX_BYTES = 512 * 1024 * 1024;
 /** The press listeners other than `onLongPress`, which alone leaves the taps to the views around. */
 const TAP_EVENTS = ["onPress", "onPressIn", "onPressOut"];
 const MOUSE_EVENTS = ["onMouseEnter", "onMouseLeave", "onMouseMove"];
@@ -548,6 +553,26 @@ function webShareAllowed() {
   return typeof policy?.allowsFeature === "function" ? policy.allowsFeature("web-share") : true;
 }
 
+/** The kinds `network()` names for `navigator.connection.type`'s. */
+const CONNECTION_KINDS = {
+  wifi: "wifi", cellular: "cellular", ethernet: "wired", none: "none",
+  bluetooth: "other", wimax: "other", mixed: "other", other: "other",
+};
+
+/**
+ * How the page reaches the network (`network()`): `none` while the
+ * browser says it is offline (`navigator.onLine`, which is true whenever
+ * the browser has a link, even one without the internet), else the link
+ * `navigator.connection` names (Chromium on Android; desktop browsers name
+ * none: `unknown`). The link is expensive when it is cellular, constrained
+ * when the user asked to save data (`saveData`).
+ */
+function webNetwork(nav = typeof navigator === "undefined" ? undefined : navigator) {
+  const connection = nav?.connection;
+  const kind = nav?.onLine === false ? "none" : CONNECTION_KINDS[connection?.type] ?? "unknown";
+  return { kind, expensive: kind === "cellular", constrained: connection?.saveData === true };
+}
+
 /** The browser's time zone (`Asia/Shanghai`), Intl's default; "" when unknown. */
 function timeZoneName() {
   return new Intl.DateTimeFormat().resolvedOptions().timeZone ?? "";
@@ -777,24 +802,25 @@ function runPoint(run, offset) {
   return node ? [node, node.length] : [run, 0];
 }
 
-/** The offset in a run of a boundary (`container`, `offset`) inside it. */
+/** The character standing for an attachment in a text's content. */
+const ATTACHMENT = String.fromCharCode(0xfffc);
+
 /**
- * `part` of a run, starting at UTF-16 offset `start` of its text (null: a
- * truncated line's `…` first), as a copy gives it: an attachment (U+FFFC)
- * as its copy text in `copies` (offset to text, `copyText`), else left out
- * in a selectable view (`area`).
+ * The copy texts (`copyText`) of a text's attachments that a copy puts
+ * `before` run `run`'s characters (else after them, before the line's
+ * break), of those in the selected UTF-16 range `start..end`. `copies` are
+ * `[offset, text, run, before]`, as the text's mount item sends them: the
+ * runs hold no attachments.
  */
-function copiedRun(part, start, copies, area) {
-  if (!copies || start == null) return area ? part.replaceAll("\uFFFC", "") : part;
+function copiesAround(copies, run, before, start, end) {
   let out = "";
-  for (let i = 0; i < part.length; i++) {
-    const c = part[i];
-    if (c !== "\uFFFC") out += c;
-    else out += copies.get(start + i) ?? (area ? "" : c);
+  for (const [at, text, r, b] of copies ?? []) {
+    if (r === run && !!b === before && at >= start && at < end) out += text;
   }
   return out;
 }
 
+/** The offset in a run of a boundary (`container`, `offset`) inside it. */
 function runOffset(run, container, offset) {
   const range = document.createRange();
   range.setStart(run, 0);
@@ -1236,10 +1262,12 @@ class Player {
         font_ascent: (fp, fl) => this.metrics(this.str(fp, fl))[0],
         font_descent: (fp, fl) => this.metrics(this.str(fp, fl))[1],
         font_x_height: (fp, fl) => this.metrics(this.str(fp, fl))[2],
-        register_font: (fp, fl, dp, dl, weight, italic) => {
+        register_font: (fp, fl, dp, dl, weight, maxWeight, italic) => {
           const family = this.str(fp, fl);
           const data = this.bytes(dp, dl).slice();
-          const face = new FontFace(family, data, { weight: String(weight), style: italic ? "italic" : "normal" });
+          // A variable font gets its `wght` range: one value would pin the axis.
+          const range = maxWeight > weight ? `${weight} ${maxWeight}` : String(weight);
+          const face = new FontFace(family, data, { weight: range, style: italic ? "italic" : "normal" });
           document.fonts.add(face);
           this.fontLoading(face.load());
         },
@@ -2180,6 +2208,11 @@ class Player {
     resolution();
     addEventListener("languagechange", changed);
     addEventListener("resize", changed);
+    // `network()`: the browser going on- and offline, and its link where it
+    // names one (`navigator.connection`, Chromium's).
+    addEventListener("online", changed);
+    addEventListener("offline", changed);
+    navigator.connection?.addEventListener?.("change", changed);
     // `lifecycle()`: hidden (another tab, a minimized window) or without
     // the focus. The time zone (`localeSettings()`) is read again then too: browsers tell no
     // change of the system's zone, which the user makes away from the page.
@@ -2269,8 +2302,11 @@ class Player {
       appleKeyboard: APPLE,
       host: Boolean(this.options.host),
       lifecycle: this.lifecycle(),
+      network: webNetwork(),
       timeZone: timeZoneName(),
       screenColor: typeof window.EyeDropper === "function",
+      // `writeClipboard` reports each write's result.
+      clipboardWriteResult: true,
       share: webShareAllowed(),
       notifications: typeof window.Notification === "function",
       audio: typeof (window.AudioContext ?? window.webkitAudioContext) === "function",
@@ -2905,8 +2941,9 @@ class Player {
   op_t([, id, cx, cy, , , runs, styles, selectable, selection, color, backgrounds, links, copies]) {
     const el = this.view(id);
     if (!el) return;
-    // What its attachments copy as (`copyText`), by offset.
-    el._copyTexts = copies?.length ? new Map(copies) : null;
+    // What its attachments copy as (`copyText`): `[offset, text, run,
+    // before]`, by where the copy puts them among the runs.
+    el._copyTexts = copies?.length ? copies : null;
     setTextColor(el, color ?? null);
     if (!this.updateRuns(el, cx, cy, runs, styles, backgrounds, links)) this.replaceRuns(el, cx, cy, runs, styles, backgrounds, links);
     el.classList.toggle("nsh-selectable", !!selectable);
@@ -2967,6 +3004,7 @@ class Player {
       if (span.style.top !== top) span.style.top = top;
       if (span.firstChild.data !== text) span.firstChild.data = text;
       span._start = start;
+      span._run = i;
       if (after) span._after = after;
       else delete span._after;
     });
@@ -3008,7 +3046,7 @@ class Player {
     }
     // Nested texts that take presses: `[node, events]`, which runs name.
     const spans = (links ?? []).map(([node, events]) => ({ node, events: new Set(events) }));
-    for (const [x, y, text, style, start, parts, after] of runs) {
+    runs.forEach(([x, y, text, style, start, parts, after], i) => {
       const span = document.createElement("span");
       const name = this.styleClass(styles[style]);
       span.className = name ? `nsh-run ${name}` : "nsh-run";
@@ -3016,11 +3054,13 @@ class Player {
       fillRun(span, text, parts, spans);
       // Where its characters are in the text (UTF-16, as JS strings).
       span._start = start;
+      // Which run it is (attachments' copy texts name it).
+      span._run = i;
       // The line's break, for copying (`copy`).
       if (after) span._after = after;
       if (el._animation.color) span.style.color = el._animation.color;
       frag.append(span);
-    }
+    });
     for (const span of [...el.querySelectorAll(":scope > .nsh-run, :scope > .nsh-run-bg")]) span.remove();
     el.insertBefore(frag, el.firstChild);
     this.lineBreaks(el);
@@ -3243,6 +3283,7 @@ class Player {
     set("aria-valuetext", text);
     set("aria-live", p.live);
     set("aria-hidden", p.hidden && "true");
+    set("aria-orientation", p.orientation);
     if (p.activeDescendant != null || p.controls != null || p.describedBy != null || el._related) {
       // Linked once the batch is applied (`linkRelations`).
       el._related = p.activeDescendant != null || p.controls != null || p.describedBy != null;
@@ -7434,8 +7475,8 @@ class Player {
       case "playerClose": this.playerClose(args[0]); break;
       case "setBadge": this.setBadge(args[0]); break;
       case "openUrl": this.event(ROOT_ID, "onOpenUrl", { id: args[0], opened: this.openUrl(args[1]) }); break;
-      case "setClipboard": this.writeClipboard(args[0]); break;
-      case "setClipboardItem": this.writeClipboard(args[0], args[1] ?? undefined); break;
+      case "setClipboard": this.writeClipboard(args[0], undefined, (written) => this.event(ROOT_ID, "onClipboardWrite", { written })); break;
+      case "setClipboardItem": this.writeClipboard(args[0], args[1] ?? undefined, (written) => this.event(ROOT_ID, "onClipboardWrite", { written })); break;
       case "readClipboard": this.readClipboard(args[0], args[1]); break;
       case "setClipboardImage": this.writeClipboardImage(args[0]); break;
       case "readClipboardImage": this.readClipboardImage(args[0], args[1]); break;
@@ -7593,8 +7634,8 @@ class Player {
    * context; some browsers want a gesture), then a copy command over a
    * selected offscreen text area.
    */
-  writeClipboard(text, html) {
-    if (navigator.userActivation?.isActive !== false && this.copyCommand(text, html)) return;
+  writeClipboard(text, html, done = () => {}) {
+    if (navigator.userActivation?.isActive !== false && this.copyCommand(text, html)) return done(true);
     const copy = () => {
       const focused = document.activeElement;
       const area = document.createElement("textarea");
@@ -7603,20 +7644,21 @@ class Player {
       document.body.append(area);
       // Safari copies only a selection.
       area.select();
-      this.copyCommand(text, html);
+      const written = this.copyCommand(text, html);
       area.remove();
       // The selection took the focus from the field that had it (a
       // RichEditor's input).
       if (focused && focused !== document.body && focused.isConnected) focused.focus({ preventScroll: true });
+      done(written);
     };
     if (html !== undefined && navigator.clipboard?.write && typeof ClipboardItem === "function") {
       const item = new ClipboardItem({
         "text/plain": new Blob([text], { type: "text/plain" }),
         "text/html": new Blob([html], { type: "text/html" }),
       });
-      navigator.clipboard.write([item]).catch(copy);
+      navigator.clipboard.write([item]).then(() => done(true), copy);
     } else if (html === undefined && navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(text).catch(copy);
+      navigator.clipboard.writeText(text).then(() => done(true), copy);
     } else {
       copy();
     }
@@ -8955,6 +8997,7 @@ class Player {
 
   installInput() {
     const root = this.root;
+    this.installFileDrop(root);
     // What the user gives input with, told before it acts (the capture
     // phase, ahead of the app's handlers and the browser's focus moves):
     // the core shows the focus by it (`focus-visible:`), as the browser
@@ -9332,8 +9375,9 @@ class Player {
    * selectable view, texts on one row (their boxes overlap vertically: a
    * table's cells) are joined by a tab instead, a text that continues the
    * one before it (`continuesText`: a wrapped line's later part) by
-   * nothing, attachments (U+FFFC) are their copy texts (`copyText`) or
-   * left out, and hidden runs are left out, as the native platforms copy. */
+   * nothing, attachments (which the runs do not hold) give their copy texts
+   * (`copyText`) where the layout put them among the runs, and hidden runs
+   * are left out, as the native platforms copy. */
   copyText(e) {
     if (e.target.closest?.(".nsh-field")) return;
     const out = this.selectedText();
@@ -9359,6 +9403,13 @@ class Player {
     let lastArea = null;
     let lastBox = null;
     let found = false;
+    // The runs the selection reaches, and the UTF-16 range it covers in
+    // each text: the attachments in it are copied (as their `copyText`).
+    // A run that starts with a truncated line's `…` has no offset and
+    // leaves the range as it is: an attachment between it and the next
+    // run of its line is copied only when the selection goes on past it.
+    const reached = [];
+    const covered = new Map();
     for (const run of (only ?? this.root).querySelectorAll(".nsh-run")) {
       // Text that cannot be selected is not copied, as by the browser.
       if (!range.intersectsNode(run) || !this.selectableText(run)) continue;
@@ -9367,7 +9418,14 @@ class Player {
       if (!text) continue;
       const from = run.contains(range.startContainer) ? runOffset(run, range.startContainer, range.startOffset) : 0;
       const to = run.contains(range.endContainer) ? runOffset(run, range.endContainer, range.endOffset) : text.length;
-      if (from >= to) continue;
+      reached.push([run, text, from, to]);
+      if (run._start == null || !run.parentNode._copyTexts) continue;
+      const span = covered.get(run.parentNode);
+      const start = run._start + from, end = run._start + Math.max(from, to);
+      covered.set(run.parentNode, span ? [Math.min(span[0], start), Math.max(span[1], end)] : [start, end]);
+    }
+    const write = (run, s) => {
+      if (!s) return;
       found = true;
       const area = this.areaOf(run.parentNode);
       if (last !== run.parentNode) {
@@ -9381,14 +9439,23 @@ class Player {
         lastArea = area;
         lastBox = box;
       }
-      // A hidden run (`visibility: hidden` on a span) keeps its place but
-      // is not copied; the line's break after it still is.
-      if (getComputedStyle(run).visibility === "hidden") {
-        if (to === text.length && run._after) out += run._after;
-        continue;
+      out += s;
+    };
+    for (const [run, text, from, to] of reached) {
+      const span = covered.get(run.parentNode);
+      const copies = (before) => span ? copiesAround(run.parentNode._copyTexts, run._run, before, span[0], span[1]) : "";
+      write(run, copies(true));
+      if (from < to) {
+        found = true;
+        // A hidden run (`visibility: hidden` on a span) keeps its place
+        // but is not copied; the line's break after it still is.
+        if (getComputedStyle(run).visibility !== "hidden") {
+          const part = text.slice(from, to);
+          write(run, this.areaOf(run.parentNode) ? part.replaceAll(ATTACHMENT, "") : part);
+        }
       }
-      out += copiedRun(text.slice(from, to), run._start == null ? null : run._start + from, run.parentNode._copyTexts, !!area);
-      if (to === text.length && run._after) out += run._after;
+      write(run, copies(false));
+      if (from < to && to === text.length && run._after) write(run, run._after);
     }
     if (!found) return null;
     return given ? out : out.replace(/\s+$/, "");
@@ -9931,6 +9998,120 @@ class Player {
     const [left, top] = this.origin(layer);
     const [sx, sy] = this.layerScale(layer);
     return [e.clientX / sx - left, e.clientY / sy - top];
+  }
+
+  /**
+   * Files dragged in from the system (`onFileDragEnter`, `onFileDragLeave`,
+   * `onFileDrop`): the nearest view up from the one under the pointer that
+   * listens takes the drag. Only there is the browser's default (opening
+   * the file) cancelled; elsewhere the page behaves as without NSH. Only
+   * file drags count: text and links dragged in are left alone. Moving
+   * between a receiver's children enters and leaves nothing.
+   */
+  installFileDrop(root) {
+    const hasFiles = (e) => [...(e.dataTransfer?.types ?? [])].includes("Files");
+    const receiver = (target) => {
+      for (let el = target; el && el !== root.parentNode; el = el.parentNode) {
+        if (el._events && FILE_DROP_EVENTS.some((n) => el._events.has(n))) return el;
+      }
+      return null;
+    };
+    let current = null;
+    let leaveTimer = 0;
+    const leave = () => {
+      clearTimeout(leaveTimer);
+      leaveTimer = 0;
+      const old = current;
+      current = null;
+      if (old?._events.has("onFileDragLeave")) this.event(old._id, "onFileDragLeave");
+    };
+    const track = (e) => {
+      if (!hasFiles(e)) return;
+      const el = receiver(e.target);
+      clearTimeout(leaveTimer);
+      leaveTimer = 0;
+      if (el !== current) {
+        leave();
+        current = el;
+        if (el?._events.has("onFileDragEnter")) {
+          // Only the types: the browser keeps the files until the drop.
+          const mimeTypes = [...e.dataTransfer.items].filter((i) => i.kind === "file").map((i) => i.type);
+          this.fileDrop(el, 0, { mimeTypes, files: [] }, []);
+        }
+      }
+      if (el?._events.has("onFileDrop")) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+      }
+    };
+    root.addEventListener("dragenter", track);
+    root.addEventListener("dragover", track);
+    // A leave toward a child is followed at once by its enter: leave only
+    // when none comes.
+    root.addEventListener("dragleave", (e) => {
+      if (!hasFiles(e) || !current) return;
+      clearTimeout(leaveTimer);
+      leaveTimer = setTimeout(leave, 50);
+    });
+    root.addEventListener("drop", (e) => {
+      if (!hasFiles(e)) return;
+      const el = receiver(e.target);
+      const target = current;
+      clearTimeout(leaveTimer);
+      leaveTimer = 0;
+      current = null;
+      if (target && target !== el && target._events.has("onFileDragLeave")) this.event(target._id, "onFileDragLeave");
+      if (!el?._events.has("onFileDrop")) return;
+      e.preventDefault();
+      // The items are only readable in this handler: keep the `File`s now.
+      // Directories are left out (their `File` has no bytes to read).
+      const files = [];
+      const mimeTypes = [];
+      for (const item of e.dataTransfer.items) {
+        if (item.kind !== "file") continue;
+        mimeTypes.push(item.type);
+        if (item.webkitGetAsEntry?.()?.isDirectory) continue;
+        const file = item.getAsFile();
+        if (file && files.length < FILE_DROP_LIMIT) files.push(file);
+      }
+      const [x, y] = this.point(e);
+      const app = this.app;
+      let budget = FILE_DROP_MAX_BYTES;
+      Promise.all(files.map(async (f) => {
+        if (f.size > budget) return null;
+        budget -= f.size;
+        try {
+          return new Uint8Array(await f.arrayBuffer());
+        } catch {
+          return undefined;
+        }
+      })).then((buffers) => {
+        if (app !== this.app) return;
+        const parts = [];
+        const meta = [];
+        files.forEach((f, i) => {
+          const b = buffers[i];
+          if (b === undefined) return; // Unreadable: left out.
+          if (b === null) console.warn(`nsh: the dropped ${f.name} is not read: past ${FILE_DROP_MAX_BYTES} bytes a drop`);
+          meta.push({ name: f.name, type: f.type, size: b ? b.byteLength : f.size, read: !!b, lastModified: f.lastModified });
+          if (b) parts.push(b);
+        });
+        this.fileDrop(el, 1, { mimeTypes, x, y, files: meta }, parts);
+      });
+    });
+  }
+
+  /** Sends a file drag (`kind` 0: enter, 1: drop) of `el` to the engine, with the read files' bytes. */
+  fileDrop(el, kind, info, parts) {
+    const size = parts.reduce((n, b) => n + b.byteLength, 0);
+    const bytes = new Uint8Array(size);
+    let at = 0;
+    for (const b of parts) {
+      bytes.set(b, at);
+      at += b.byteLength;
+    }
+    const json = JSON.stringify(info);
+    this.call(() => this.withStrings([json, bytes], (jp, jl, bp, bl) => this.wasm.nsh_file_drop(el._id, kind, jp, jl, bp, bl)));
   }
 
   /** The scale layer `layer` is drawn at (`scaleLayer`): its points are

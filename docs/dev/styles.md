@@ -234,8 +234,9 @@
   the control prefers it over the theme color it is otherwise given. Set on the control, not inherited. `nsh/mobile`'s
   `Switch` reads it (its track when on); the system's segmented control and tab bar could later.
 - **Text style inheritance** (CSS-like): a view's text properties (color, font, size, alignment, ...) pass to the texts and inputs
-  inside it, so `class="text-white"` on a button styles its label. So do its `whitespace-*` / `text-wrap` / `text-nowrap`
-  (and `truncate`'s no wrapping) and `select-*` classes, as CSS's `white-space` and `user-select: auto` (`Core::inherited_text_props`:
+  inside it, so `class="text-white"` on a button styles its label. So do its `whitespace-*` / `text-wrap` / `text-nowrap` / `text-pretty`
+  (and `truncate`'s no wrapping; typed `.whitespace_nowrap()` / `.whitespace_normal()` / `.text_pretty()`, which have no
+  style key) and `select-*` classes, as CSS's `white-space` and `user-select: auto` (`Core::inherited_text_props`:
   the text's own, else the nearest view's that says; `select-auto` says none, so it takes the view's). Inset padding / margin (set by Rust
   components with `.inset_padding(..)` / `.inset_margin(..)`) and `env()` terms ("Environment variables") are added to the resolved padding / margin, so classes and
   styles keep their own.
@@ -294,6 +295,8 @@
   ancestor's background and the siblings drawn before the next ancestor, never the view itself; at the size where the
   blur's deviation is 4 px, nothing off screen) and blurred by a `RenderEffect`, drawn stretched and clipped under the
   view's background; box shadows are drawn once into small bitmaps and stretched in slices (`Decor.drawCachedShadow`).
+  WebViews sampled by a backdrop share a hardware layer so their functor renders at the page's size, not the smaller
+  filter layer's viewport. The layer is released when no backdrop samples the page; ordinary WebViews keep no extra layer.
   Known limits: iOS has no CSS filters on views (only `opacity`, `brightness` ≤ 1 and `drop-shadow`; images take every color filter
   and `blur`, applied while decoding); iOS texts draw no gradients or inset shadows; Android has no backdrop blur, `blur` or
   `drop-shadow` before API 31; Linux and GPUI draw no backdrop filter, GPUI no `blur()` or `mixBlendMode`; iOS, macOS and Android draw one `drop-shadow()`,

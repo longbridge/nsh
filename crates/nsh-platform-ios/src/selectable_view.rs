@@ -9,7 +9,7 @@
 //! gestures on the area: a long press selects the word under the finger
 //! (a drag after it extends by words), two handles (a stem and a round
 //! knob in the tint, subviews of the area kept in front) move the ends, a
-//! tap clears, and the edit menu (`UIEditMenuInteraction` from iOS 16,
+//! tap clears (a finger that scrolls a scroll view is no tap), and the edit menu (`UIEditMenuInteraction` from iOS 16,
 //! `UIMenuController` before) offers Copy and Select All, which the
 //! responder answers as the first responder (so do ⌘C and ⌘A on hardware
 //! keyboards). As in UIKit's text views, the long press plays an impact
@@ -577,15 +577,20 @@ define_class!(
         }
 
         /// Taps and pointer presses leave the presses of the views in the
-        /// area alone (long presses and handle drags take the touches).
+        /// area alone (long presses and handle drags take the touches). A
+        /// finger that scrolls a scroll view is no tap, as in a text view:
+        /// once the scroll begins, the tap fails and the selection stays.
         #[unsafe(method(gestureRecognizer:shouldRecognizeSimultaneouslyWithGestureRecognizer:))]
         fn should_recognize_simultaneously(
             &self,
             recognizer: &UIGestureRecognizer,
-            _other: &UIGestureRecognizer,
+            other: &UIGestureRecognizer,
         ) -> bool {
-            recognizer.isKindOfClass(UITapGestureRecognizer::class())
-                || self.is_pointer(recognizer)
+            if recognizer.isKindOfClass(UITapGestureRecognizer::class()) {
+                !is_scroll_pan(other)
+            } else {
+                self.is_pointer(recognizer)
+            }
         }
 
         /// Scroll views around wait for a handle's drag to fail.
@@ -625,6 +630,14 @@ define_class!(
         }
     }
 );
+
+/// Whether `recognizer` is a scroll view's drag.
+fn is_scroll_pan(recognizer: &UIGestureRecognizer) -> bool {
+    recognizer.isKindOfClass(UIPanGestureRecognizer::class())
+        && recognizer
+            .view()
+            .is_some_and(|v| v.isKindOfClass(UIScrollView::class()))
+}
 
 impl AreaResponder {
     /// Makes `area` a selectable view.

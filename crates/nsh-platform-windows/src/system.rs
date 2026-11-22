@@ -721,14 +721,25 @@ pub(crate) fn open_url(url: &str) -> bool {
     instance.0 as isize > 32
 }
 
+/// Reports a clipboard write's result (`clipboard_write_result`).
+fn clipboard_written(surface: &Rc<Surface>, written: bool) {
+    surface.event(
+        ROOT_ID,
+        EventKind::ClipboardWrite,
+        EventPayload::Map(vec![("written", PayloadValue::Bool(written))]),
+    );
+}
+
 /// A command not addressed to a kind of view.
 pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
     match command {
         Command::CloseDialog(dialog) => close_dialog(surface, *dialog),
         Command::SetClipboard(text) => {
-            if !set_clipboard_text(text) {
+            let written = set_clipboard_text(text);
+            if !written {
                 log::debug!("windows: cannot set the clipboard");
             }
+            clipboard_written(surface, written);
         }
         Command::ReadClipboard { id, has_only } => {
             let has = clipboard_has_text();
@@ -757,9 +768,11 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
                 .iter()
                 .map(|(kind, bytes)| (*kind, bytes.as_slice()))
                 .collect();
-            if !set_clipboard_formats(&formats) {
+            let written = set_clipboard_formats(&formats);
+            if !written {
                 log::debug!("windows: cannot set the clipboard");
             }
+            clipboard_written(surface, written);
         }
         Command::SetClipboardImage(uri) => match clipboard::decode_data_uri(uri) {
             Some(("image/png", bytes)) => {

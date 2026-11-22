@@ -31,6 +31,7 @@
 
 #[cfg(feature = "agent")]
 pub mod agent;
+mod drag;
 #[cfg(feature = "js")]
 mod driver;
 mod failure;
@@ -78,6 +79,13 @@ pub use self::headless::{
 #[cfg(feature = "js")]
 #[allow(deprecated)]
 pub use self::module::MobilePlatform;
+pub use self::{
+    drag::DragOptions,
+    failure::{SCREEN_TEXT_LIMIT, screen_texts},
+    root::{RootProps, WindowedRoot, WindowedRootWith, windowed_root, windowed_root_with},
+    screen::{LayoutNode, LayoutScroll, LayoutText, Pick, Screen},
+    storage::MemoryStorage,
+};
 #[cfg(feature = "js")]
 pub use self::{
     driver::Host,
@@ -90,12 +98,6 @@ pub use self::{
         TestRun, TestStatus, run_file,
     },
     runner::{PROTOCOL, Reply, RunnerMessage, TestRequest, runner},
-};
-pub use self::{
-    failure::{SCREEN_TEXT_LIMIT, screen_texts},
-    root::{RootProps, WindowedRoot, WindowedRootWith, windowed_root, windowed_root_with},
-    screen::{LayoutNode, LayoutScroll, LayoutText, Pick, Screen},
-    storage::MemoryStorage,
 };
 
 /// The sets the entry `nsh test` makes for a test file is built against
@@ -151,9 +153,9 @@ fn build(
     let app = unsafe { Bundle::bytecode(bytecode) }
         .with_capabilities_json(capabilities.as_deref())
         .map_err(|e| format!("{}: {e}", entry.display()))?
-        // The schemes it claims and its main window's launch options, as a
+        // The links it claims and its main window's launch options, as a
         // packaged app's runner reads them.
-        .with_url_schemes(bundle.url_schemes)
+        .with_links(bundle.links)
         .with_main_window(bundle.main_window.as_deref())
         .with_application(bundle.application.as_deref());
     Ok((app, bundle.source_map, bundle.asset_root))

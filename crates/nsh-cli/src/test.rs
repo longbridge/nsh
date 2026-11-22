@@ -63,6 +63,7 @@ pub(crate) fn test(
     trace: bool,
     fps: bool,
     junit: Option<&Path>,
+    jobs: Option<std::num::NonZeroUsize>,
     target: Option<crate::run::Target>,
     browser: Option<&Path>,
     web_host: Option<PathBuf>,
@@ -196,15 +197,14 @@ pub(crate) fn test(
                 target: host_target,
                 page_host,
             };
-            for file in &files {
-                let shown = shown(file);
-                let ran = nsh_testing::run_file(&run, file, &mut |result| {
-                    tally.show(&shown, result);
-                });
-                if let Err(e) = ran {
-                    tally.failed(&shown, &e);
-                }
-            }
+            // A host, or a trace, takes one file at a time.
+            let jobs = if run.host.is_some() || trace {
+                1
+            } else {
+                jobs.or_else(|| std::thread::available_parallelism().ok())
+                    .map_or(1, std::num::NonZeroUsize::get)
+            };
+            run_files(&run, &files, jobs, &shown, &mut tally);
         }
     }
     crate::test_web::close();
@@ -230,6 +230,62 @@ pub(crate) fn test(
     }
     ui::done(summary);
     Ok(())
+}
+
+/// Runs the test files `files` as `run` says, `jobs` at a time, showing
+/// each one's results as it ends: in order, a file's once those before it
+/// were shown.
+fn run_files(
+    run: &nsh_testing::TestRun,
+    files: &[PathBuf],
+    jobs: usize,
+    shown: &dyn Fn(&Path) -> String,
+    tally: &mut Tally,
+) {
+    if jobs <= 1 || files.len() <= 1 {
+        for file in files {
+            let shown = shown(file);
+            let ran = nsh_testing::run_file(run, file, &mut |result| {
+                tally.show(&shown, result);
+            });
+            if let Err(e) = ran {
+                tally.failed(&shown, &e);
+            }
+        }
+        return;
+    }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let (done, ended) = std::sync::mpsc::channel();
+    std::thread::scope(|scope| {
+        for _ in 0..jobs.min(files.len()) {
+            let done = done.clone();
+            let next = &next;
+            scope.spawn(move || {
+                loop {
+                    let n = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(file) = files.get(n) else { break };
+                    let ran = nsh_testing::run_file(run, file, &mut |_| {});
+                    if done.send((n, ran)).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+        drop(done);
+        let mut waiting = HashMap::new();
+        let mut shown_up_to = 0;
+        for (n, ran) in ended {
+            waiting.insert(n, ran);
+            while let Some(ran) = waiting.remove(&shown_up_to) {
+                let shown = shown(&files[shown_up_to]);
+                match ran {
+                    Ok(results) => results.iter().for_each(|r| tally.show(&shown, r)),
+                    Err(e) => tally.failed(&shown, &e),
+                }
+                shown_up_to += 1;
+            }
+        }
+    });
 }
 
 /// How the tests ended so far, by file.
@@ -444,17 +500,17 @@ fn in_runner(
 /// files in `work_dir`, or the app's root.
 fn build_for_runner(entry: &Path, kind: Entry, work_dir: &Path, n: usize) -> Reply {
     let built = (|| -> anyhow::Result<Reply> {
-        let (bytecode, map, capabilities, url_schemes, main_window, application, asset_root) =
-            match kind {
-                Entry::TestFile => test_file_bytecode(entry)?,
-                Entry::App => {
-                    let entry = crate::entry::resolve(entry)?;
-                    if crate::rust_app::is_root(&entry) {
-                        return Ok(Reply::Root);
-                    }
-                    bytecode_of(&entry, &crate::ui_sets(), true)?
+        let (bytecode, map, capabilities, links, main_window, application, asset_root) = match kind
+        {
+            Entry::TestFile => test_file_bytecode(entry)?,
+            Entry::App => {
+                let entry = crate::entry::resolve(entry)?;
+                if crate::rust_app::is_root(&entry) {
+                    return Ok(Reply::Root);
                 }
-            };
+                bytecode_of(&entry, &crate::ui_sets(), true)?
+            }
+        };
         let dir = work_dir.join("build");
         std::fs::create_dir_all(&dir).with_context(|| format!("{}", dir.display()))?;
         let file = dir.join(format!("{n}.nshc"));
@@ -471,7 +527,7 @@ fn build_for_runner(entry: &Path, kind: Entry, work_dir: &Path, n: usize) -> Rep
             bytecode: file,
             source_map,
             capabilities,
-            url_schemes,
+            links,
             main_window,
             application,
             asset_root: Some(asset_root),
@@ -496,21 +552,21 @@ fn test_file_bytecode(entry: &Path) -> anyhow::Result<Compiled> {
 }
 
 /// A compiled entry: its bytecode, its source map, the capabilities
-/// (JSON), URL schemes and main window's launch options (JSON) its
+/// (JSON), links and main window's launch options (JSON) its
 /// `nsh.json` declares, which the app runs under, as on a device, and the
 /// directory its assets are named from (`nsh_bundler::Bundle::asset_root`).
 type Compiled = (
     Vec<u8>,
     Option<String>,
     Option<String>,
-    Vec<String>,
+    nsh_core::url_scheme::AppLinks,
     Option<String>,
     Option<String>,
     PathBuf,
 );
 
 /// `entry` bundled against `sets` and compiled to bytecode, with its
-/// source map, declared capabilities, URL schemes and main window's launch
+/// source map, declared capabilities, links and main window's launch
 /// options; `announce`: saying so.
 fn bytecode_of(entry: &Path, sets: &[SetDescription], announce: bool) -> anyhow::Result<Compiled> {
     let bundle = nsh_bundler::bundle(&BundleOptions {
@@ -539,7 +595,7 @@ fn bytecode_of(entry: &Path, sets: &[SetDescription], announce: bool) -> anyhow:
         bytecode,
         bundle.source_map,
         capabilities,
-        bundle.url_schemes,
+        bundle.links,
         bundle.main_window,
         bundle.application,
         bundle.asset_root,
@@ -820,39 +876,39 @@ fn steps_file(work_dir: &Path, entry: &Path) -> anyhow::Result<PathBuf> {
 fn compiler() -> nsh_testing::Compile {
     let built: Mutex<HashMap<PathBuf, Compiled>> = Mutex::new(HashMap::new());
     Arc::new(move |entry: &Path, kind: Entry| {
-        let (bytecode, map, capabilities, url_schemes, main_window, application, asset_root) =
-            match kind {
-                Entry::App => {
-                    let entry =
-                        crate::entry::resolve(entry).map_err(|e| crate::ui::with_details(&e))?;
-                    let cached = built
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .get(&entry)
-                        .cloned();
-                    match cached {
-                        Some(built) => built,
-                        None => {
-                            let out = bytecode_of(&entry, &crate::ui_sets(), true)
-                                .map_err(|e| crate::ui::with_details(&e))?;
-                            built
-                                .lock()
-                                .unwrap_or_else(|e| e.into_inner())
-                                .insert(entry, out.clone());
-                            out
-                        }
+        let (bytecode, map, capabilities, links, main_window, application, asset_root) = match kind
+        {
+            Entry::App => {
+                let entry =
+                    crate::entry::resolve(entry).map_err(|e| crate::ui::with_details(&e))?;
+                let cached = built
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(&entry)
+                    .cloned();
+                match cached {
+                    Some(built) => built,
+                    None => {
+                        let out = bytecode_of(&entry, &crate::ui_sets(), true)
+                            .map_err(|e| crate::ui::with_details(&e))?;
+                        built
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .insert(entry, out.clone());
+                        out
                     }
                 }
-                Entry::TestFile => {
-                    test_file_bytecode(entry).map_err(|e| crate::ui::with_details(&e))?
-                }
-            };
+            }
+            Entry::TestFile => {
+                test_file_bytecode(entry).map_err(|e| crate::ui::with_details(&e))?
+            }
+        };
         // SAFETY: compiled just now by this runtime.
         let bundle = unsafe { Bundle::bytecode(bytecode) }
             .with_capabilities_json(capabilities.as_deref())?
-            // The schemes it claims and its main window's launch options,
-            // as a packaged app's runner reads them.
-            .with_url_schemes(url_schemes)
+            // The links it claims and its main window's launch options, as
+            // a packaged app's runner reads them.
+            .with_links(links)
             .with_main_window(main_window.as_deref())
             .with_application(application.as_deref());
         Ok(Built::Js {
@@ -964,6 +1020,7 @@ test src/lib.rs - App (line 3) ... ok
             None,
             None,
             None,
+            None,
             Some("iPhone 16"),
             None,
             false,
@@ -1021,12 +1078,21 @@ test src/lib.rs - App (line 3) ... ok
         let dir = std::env::temp_dir().join(format!("nsh-test-schemes-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("nsh.json"), r#"{ "schemes": ["MyApp"] }"#).unwrap();
+        std::fs::write(
+            dir.join("nsh.json"),
+            r#"{ "schemes": ["MyApp"], "links": [{ "host": "Example.com", "paths": ["/orders/*"] }] }"#,
+        )
+        .unwrap();
         std::fs::write(dir.join("App.tsx"), "export {};\n").unwrap();
         let built = compiler()(&dir.join("App.tsx"), Entry::App);
         std::fs::remove_dir_all(&dir).unwrap();
         match built {
-            Ok(Built::Js { bundle, .. }) => assert_eq!(bundle.url_schemes, ["myapp"]),
+            Ok(Built::Js { bundle, .. }) => {
+                assert_eq!(bundle.links.schemes(), ["myapp"]);
+                assert_eq!(bundle.links.web().len(), 1);
+                assert_eq!(bundle.links.check("https://example.com/orders/7"), Ok(()));
+                assert!(bundle.links.check("https://example.com/").is_err());
+            }
             Ok(_) => panic!("a TSX entry builds to JS"),
             Err(e) => panic!("{e}"),
         }

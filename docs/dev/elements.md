@@ -402,10 +402,15 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   comes a turn late, when the scroll view may have taken it, and claiming on start blocks the scroll view from the
   first pixel. So the platform decides, on the main thread, from the mounted offsets (`ViewProps::pan_activation`,
   `PanActivation::decide`: a fail offset passed first fails, an active offset passed activates; no active offsets: 10
-  points in any direction). iOS: a `PanGate` recognizer on the view (`touch.rs`); the pans of the scroll views around
+  points in any direction). `PanActivation::decide_move` judges each move along the line from the previous one, so the
+  offset passed first decides even when one move (several points apart) passes both; `nsh_core::input::Gate::step` and
+  the iOS gate use it. iOS: a `PanGate` recognizer on the view (`touch.rs`); the pans of the scroll views around
   it must wait for it to fail (`shouldBeRequiredToFailByGestureRecognizer:`), so a vertical drag scrolls once it passes
-  `failOffsetY` and a horizontal one never scrolls. Android: the root's `TouchTracker` decides on each move before the
-  views below see it and, on activation, blocks the `ScrollBox`es around (`gateBlocked`) and disallows their
+  `failOffsetY` and a horizontal one never scrolls. The scroll views inside it that cannot scroll along its one axis
+  (`PanActivation::axis`; content and `alwaysBounce…`) wait too: UIScrollView's pan begins after its slop along the
+  finger's path, so it would take a 1.5:1 diagonal before the gate saw 10 points sideways. Android: the root's
+  `TouchTracker` decides on each move before the views below see it and, on activation, blocks the `ScrollBox`es
+  around (`gateBlocked`) and disallows their
   interception; a scroll view that intercepts first (past its touch slop) wins as before. The gated `Box` takes the
   touches that go down on it, so a scroll view it lies over (a sibling under it) never gets them, and hands a tap
   (no activation, within the touch slop) to the nearest pressable `Box` around it. Web: `nsh.js` defers its
@@ -469,7 +474,10 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   change that only refreshes the node (a change the app makes by itself to a plain checked or selected state, and a
   tab selected without the focus, are silent, as there is nothing TalkBack reads for them). A first mount, an
   unchanged update, a hidden element and a view not shown send nothing; a list cell recycled for another row may
-  send one, as its props change.
+  send one, as its props change. The state words iOS and Android supply (checked, expanded, current, invalid...)
+  are in the language of the app's text, as NSH's menus on the desktops are (`i18n::text_locale`): the core sends
+  `Command::TextLocale` on the root of those surfaces when it changes, and the words of mounted views follow it the
+  next time a screen reader reads them.
   The `increment` / `decrement` actions make an element adjustable whatever its
   role: iOS adds the adjustable trait to the traits of its role (`native_view.rs` `traits`), so VoiceOver's swipe up /
   down performs them (an `image`, `Plot`'s role, stays an image), Android offers scroll forward / backward, Windows
@@ -588,9 +596,16 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   the system's wakes from sleep, which `lifecycle()` may not show (a lid closed and opened with the app in front):
   the desktop backends add one to each surface's on the system's report (macOS `NSWorkspaceDidWakeNotification`,
   Windows `WM_POWERBROADCAST` / `PBT_APMRESUMEAUTOMATIC`, Linux `logind`'s `PrepareForSleep(false)`); headless tests
-  wake with `app.wake()`. `padding-bottom: env(keyboard-inset-height)` pads a view by the keyboard's height, animated with the keyboard
+  wake with `app.wake()`. `network()` (`Environment::network`, `Network`: the default route's `NetworkKind`,
+  expensive, constrained, iOS's `CellularData`) is the process's route, which each surface reports in its environment:
+  iOS and macOS from one shared path monitor (`nsh_platform_apple::network`, iOS adding `CTCellularData`), Android
+  from one default-network callback (`NetworkState.java`), the web from `navigator.onLine` / `navigator.connection`;
+  the other backends leave it `Unknown`, which counts as online. Headless tests change it with
+  `app.setNetworkState`. `padding-bottom: env(keyboard-inset-height)` pads a view by the keyboard's height, animated with the keyboard
   natively, for content outside scroll views (message bars). Inputs inside a scroll view are kept clear of the keyboard natively (bottom inset + scroll to the
-  focused input), with no JS involved.
+  focused input), with no JS involved. iOS measures what the keyboard covers where layout puts the input and its scroll
+  view, without the layers' transforms: a sheet whose input takes the focus as it comes in is not moved up again by
+  the entrance still in motion.
   Both move as one with the keyboard: `LayoutCurve::Keyboard` (`type: "keyboard"`) is the system keyboard's own curve,
   started when the keyboard started to move, however late the batch arrives. iOS takes the notification's curve (7, a
   spring UIKit has no name for) and moves the layers' new animations back to the notification's time (`beginTime`,
@@ -643,7 +658,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   During an input method's composition Linux and the web insert nothing and log a warning. With `"insert"` the
   input has inserted the paste already, so an `insertText` from `onPaste` inserts it a second time. Where Paste is offered, it is offered for images and files too while
   the app listens. iOS: `Field` / `Area` override `paste:` (`system::pasted`: strings, `IMAGE_TYPES` data else
-  `UIImage` PNGs, file URLs) and `canPerformAction:withSender:`; with a `maxLength` they insert the clipped text
+  `UIImage` PNGs, file URLs, and the data of items that are no text, link or image, as a document copied in Files,
+  named as its item provider suggests) and `canPerformAction:withSender:`; with a `maxLength` they insert the clipped text
   themselves (`paste_text`, the test agent's paste too) instead of UIKit's `paste:`; Android: `setOnReceiveContentListener` (API 31;
   the clipboard and keyboards' rich content; images read from their content URIs, through `Native.paste`; the text
   goes back to the EditText while it inserts) and `onTextContextMenuItem` before; macOS: `TextArea` and a field

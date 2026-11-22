@@ -84,9 +84,10 @@ TSX 的这些对象和其他属性一样是响应式的；从对象中移除的�
 |---|---|---|---|
 | `.ripple(Ripple { .. })` | `android={{ ripple }}` | 所有元素 | 按下时的 Material 水波纹：颜色、无边界、半径、前景。 |
 | `.elevation(..)` | `android={{ elevation }}` | 所有元素 | 根据视图形状生成的 Material 阴影，单位为点。 |
-| | `android={{ accessibilityLiveRegion }}` | 所有元素 | `"none"`、`"polite"` 或 `"assertive"`：TalkBack 播报视图的变化。 |
+| | `android={{ accessibilityLiveRegion }}` | 所有元素 | `"none"`、`"polite"` 或 `"assertive"`：TalkBack 播报视图的变化。不带 bag 的同名 prop 在其他平台也一样（web 的 `aria-live`、Windows 的实时区域、macOS 的播报）。 |
 | `.status_bar_translucent(..)` | `android={{ statusBarTranslucent }}` | `Dialog` | 对话框的内容延伸到状态栏下方。 |
 | `.input_accessory(..)` | `ios={{ inputAccessoryViewID }}` | `Input` | 显示在键盘上方的 `InputAccessoryView`。 |
+| `.input_accessory(..)` | `inputAccessoryViewID` | `RichEditor` | 编辑器获得焦点时显示在键盘上方的 `InputAccessoryView`。 |
 | `.auto_fill(..)` | `ios={{ textContentType }}` | `Input` | iOS 对自动填充类型的叫法（Rust 的 `AutoFill` 覆盖两个平台）。 |
 | `.supported_orientations(..)` | `ios={{ supportedOrientations }}` | `Dialog` | 允许的方向。 |
 | `.supported_orientations(..)` | `ios={{ supportedOrientations }}`、`android={{ supportedOrientations }}` | `NavPage` | 页面显示时屏幕可以采用的方向（[NavPage](../elements/nav-stack.md#navpage-props)）。 |

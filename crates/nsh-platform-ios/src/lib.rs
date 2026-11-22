@@ -84,6 +84,7 @@ mod native_view;
 mod navigation;
 mod net;
 mod picker;
+mod presenting;
 mod press;
 mod scroll_edge;
 mod scroll_watch;
@@ -107,6 +108,7 @@ mod system_switch;
 mod system_tab_bar;
 mod target;
 mod text;
+mod text_access;
 mod text_selection;
 mod text_view;
 mod touch;
@@ -117,6 +119,8 @@ mod web;
 mod zoom;
 
 pub use nsh_engine::{Bundle, ByteSize, CacheLocation, CacheOptions, CachePolicy, Root};
+pub use picker::prepare_image;
+pub use presenting::presenting_controller;
 
 /// The UI sets apps import ([`set_ui_sets`]; by default [`default_ui_sets`]).
 static UI_SETS: std::sync::RwLock<Option<Vec<nsh_core::element::Registry>>> =

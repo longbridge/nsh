@@ -69,6 +69,10 @@ set_foreign_handler(Chats);
 这些通知和应用自己的通知一样显示，点击被丢弃。只报告点击通知本身，不报告其类别的操作。嵌入 NSH 且自己设置了通知中心 delegate 的应用，
 所有通知都留在自己的 delegate。macOS 上同样如此。
 
+开启 `nsh-extra` 的 [`push`](./nshm.md#push) feature 的应用，独立运行的应用启动后由这个模块设置处理者，它把通知交给 `Push.on`，并通过
+`nsh_extra::push::on_event` 交给 Rust 代码；这时应用 crate 在那里监听，用 `nsh_extra::push::set_foreground_presentation_decider`
+决定通知在前台怎么显示，不再自己设置处理者。
+
 ## 打包
 
 ```sh
@@ -113,9 +117,9 @@ nsh_platform_ios::on_application_event(|event| match event {
 ```
 
 事件有 `Launched`（带启动选项）、`RegisteredForRemoteNotifications`、`FailedToRegisterForRemoteNotifications` 和
-`RemoteNotification`。NSH 只负责转交：申请远程通知（`registerForRemoteNotifications`）由应用自己的代码调用，应用需要的
-`aps-environment` entitlement 和 `remote-notification` 后台模式写在 `nsh.json` 里
-（[Info.plist 键与 entitlements](./packaging.md#infoplist-键与-entitlements)）。没有处理函数的应用，其 delegate 不实现这些方法。
+`RemoteNotification`。NSH 只负责转交：申请远程通知（`registerForRemoteNotifications`）由应用自己的代码调用。
+`aps-environment` entitlement 来自应用签名所用的描述文件，`remote-notification` 后台模式由应用写在 `nsh.json` 里
+（[Info.plist 键与 entitlements](./packaging.md#infoplist-键与-entitlements)）；`nsh-extra` 的 [`push`](./nshm.md#push) feature 会自己加上这个后台模式。没有处理函数的应用，其 delegate 不实现这些方法。
 把 NSH 嵌入自己 UIKit 应用的应用保留自己的 delegate，在那里接收这些回调。
 
 ## 嵌入 iOS 应用
@@ -416,6 +420,13 @@ app.onOpenURL = { url in
     return false
 }
 ```
+
+## 在 Rust 中弹出视图
+
+需要显示系统视图控制器（相机、分享面板）的 Rust 代码，把它弹在发起调用的那个 surface 之上。在主线程任务（`run_on_main_thread`）里，
+`nsh_platform_ios::presenting_controller(mtm)` 是这个 surface 所在窗口最上层的视图控制器，没有时取应用的 key window。
+`prepare_image(bytes, name, &request)` 像 `Picker.pickImages` 一样处理图片数据：摆正方向，按请求缩放和编码。`nsh-extra` 的相机
+（`crates/nsh-extra/src/camera/ios.rs`）用到了这两个函数。
 
 ## 限制
 

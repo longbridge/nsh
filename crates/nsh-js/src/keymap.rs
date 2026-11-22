@@ -45,6 +45,8 @@ struct Options {
     repeat: bool,
     pass_through: bool,
     for_focus: bool,
+    /// It comes before the views' bindings of its keystroke.
+    over_focused: bool,
     /// Where it fires; `None`: the current window, or every window in the
     /// app root.
     scope: Option<Scope>,
@@ -103,7 +105,8 @@ fn make(cx: Ctx) -> Raw {
 }
 
 /// The options: `when` (`undefined`, `"always"` or `"notEditing"`),
-/// `repeat`, `passThrough`, `forFocus` and `scope` (`"app"` or `"window"`).
+/// `repeat`, `passThrough`, `forFocus`, `overFocused` and `scope` (`"app"`
+/// or `"window"`).
 fn parse_options(cx: Ctx, options: Raw) -> R<Options> {
     if js::is_nullish(options) {
         return Ok(Options::default());
@@ -114,6 +117,7 @@ fn parse_options(cx: Ctx, options: Raw) -> R<Options> {
     let repeat = js::to_bool(cx, js::get(cx, options, "repeat")?.raw());
     let pass_through = js::to_bool(cx, js::get(cx, options, "passThrough")?.raw());
     let for_focus = js::to_bool(cx, js::get(cx, options, "forFocus")?.raw());
+    let over_focused = js::to_bool(cx, js::get(cx, options, "overFocused")?.raw());
     let scope = js::get(cx, options, "scope")?;
     let scope = if scope.is_undefined() {
         None
@@ -136,6 +140,7 @@ fn parse_options(cx: Ctx, options: Raw) -> R<Options> {
             repeat,
             pass_through,
             for_focus,
+            over_focused,
             scope,
         });
     }
@@ -154,6 +159,7 @@ fn parse_options(cx: Ctx, options: Raw) -> R<Options> {
         repeat,
         pass_through,
         for_focus,
+        over_focused,
         scope,
     })
 }
@@ -299,7 +305,8 @@ fn send(cx: Ctx) -> R<()> {
         .map(|b| {
             let binding = KeyBinding::new(b.id, b.keystroke, b.options.when, b.options.repeat)
                 .passing_through(b.options.pass_through)
-                .focus_keys(b.options.for_focus);
+                .focus_keys(b.options.for_focus)
+                .over_focused(b.options.over_focused);
             match b.window {
                 Some(window) => binding.in_window(window),
                 None => binding,
@@ -374,6 +381,13 @@ pub(crate) const TYPES: &str = r#"export interface KeyBindingOptions {
    * focus (`onFocus`) and remove it as the focus leaves (`onBlur`): a tile
    * whose Space flips its switch and whose Return opens it. */
   forFocus?: boolean;
+  /** Come before the bindings of the views (default false: a focused
+   * component's own binding of the keystroke wins over the app's). Take a
+   * key a focused component binds itself, as a query editor's mod+enter
+   * over the editor's insert-line-below: bind it while that view has the
+   * focus (`onFocus`) and remove it as the focus leaves (`onBlur`), so the
+   * component keeps the key elsewhere. */
+  overFocused?: boolean;
   /** Where the binding fires. By default it fires in the window it is bound
    * in (a component inside `<Window>`), and in every window when it is bound
    * in the app root. `"app"`: every window, even when bound inside one.

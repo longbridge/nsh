@@ -256,9 +256,11 @@ blob（`blob:null/…`），都不允许。所有平台的检查方式相同。
 
 `"notifications": true` 允许应用显示系统通知并设置应用图标的角标（[`Notifications`](../modules/nsh.md#notifications)）。需要询问的系统仍会向用户请求一次权限。
 
+开启了 `nsh-extra` 的 [`Push`](./nshm.md#push) 的应用，也由它授予远程通知：注册设备并读取 token、监听投递和点按、决定通知在前台怎么显示、移除某个 thread 里已送达的通知。注册和后台投递从不询问用户，用户允许的权限又属于整个应用，所以由这项能力决定哪些代码能用到它们。
+
 ### `application`
 
-`"application": true` 允许应用在桌面上作用于整个应用（[`nsh/desktop`](../modules/nsh-desktop.md)）：应用菜单（`Menu.setApplicationMenu`）、托盘、全局快捷键、`Application.quit()`、`Application.setQuitMode()`、`Application.restart()` 和 `Application.setLaunchAtLogin()`。没有这项能力时它们什么也不做，`Application.launchAtLogin()` 返回 `false`，`setLaunchAtLogin` 以 `ERR_ACCESS_DENIED`（`permission` 为 `"application"`）拒绝。右键菜单（`Menu.popup`）显示在应用自己的视图中，应用打开的窗口由 [`windows`](#windows) 授权，两者都不需要这项能力。
+`"application": true` 允许应用作用于整个应用：在桌面上（[`nsh/desktop`](../modules/nsh-desktop.md)）是应用菜单（`Menu.setApplicationMenu`）、托盘、全局快捷键、`Application.quit()`、`Application.setQuitMode()`、`Application.restart()` 和 `Application.setLaunchAtLogin()`，在 iOS 和 Android 上是系统设置中本应用的页面（`nsh/mobile` 的 [`AppSettings.open()`](../modules/nsh-mobile.md#appsettings)；嵌入的视图打开宿主应用的页面）。没有这项能力时它们什么也不做，`Application.launchAtLogin()` 和 `AppSettings.available()` 返回 `false`，`setLaunchAtLogin` 和 `AppSettings.open()` 以 `ERR_ACCESS_DENIED`（`permission` 为 `"application"`）拒绝。右键菜单（`Menu.popup`）显示在应用自己的视图中，应用打开的窗口由 [`windows`](#windows) 授权，两者都不需要这项能力。
 
 ### `homeDir`
 
@@ -323,6 +325,7 @@ if (host.available()) {
 | 声音 | `Sound.load` reject、`new AudioPlayer` 抛出 `ERR_ACCESS_DENIED`，`permission` 为 `"audio"`，`resource` 为音源；不读取也不播放任何内容。 |
 | 语音 | `Speech.start` 抛出 `ERR_ACCESS_DENIED`，`permission` 为 `"speech"`，`resource` 为 `""`；麦克风不会打开。 |
 | 通知 | `Notifications` 的函数 reject 或抛出 `ERR_ACCESS_DENIED`，`permission` 为 `"notifications"`，`resource` 为 `""`；不会显示任何东西。 |
+| 推送 | `nsh-extra` 的 `Push` 除 `available()` 外的函数 reject 或抛出 `ERR_ACCESS_DENIED`，`permission` 为 `"notifications"`，`resource` 为 `""`；设备不会注册，token 和投递都不会到达应用。 |
 | `openUrl` | Promise 以 `ERR_ACCESS_DENIED` 被 reject，`permission` 为 `"openUrl"`，`resource` 为该 URL；不会打开任何东西。 |
 | 宿主调用 | `host.call` 以 `ERR_ACCESS_DENIED` 被 reject，`permission` 为 `"host"`，`resource` 为函数名（`host.post` 抛出同样的错误）；调用不会到达宿主。 |
 | 文件（`fs/promises`） | Promise 以 `ERR_ACCESS_DENIED` 被 reject，`permission` 为 `"fs"`，`resource` 为该路径；不会访问磁盘。 |

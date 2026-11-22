@@ -1,9 +1,10 @@
 //! The words VoiceOver speaks for the states UIKit has no trait for
 //! (checked, mixed, expanded, current, invalid), which go in the element's
-//! `accessibilityValue`: in the user's language (`NSLocale.preferredLanguages`,
-//! the app's own language first when the user chose one for it), as
-//! VoiceOver speaks the rest. Keep in step with `nsh-platform-android`'s
-//! `A11yChanges.java`.
+//! `accessibilityValue`: in the language the app's text shows in, which the
+//! core sends with `Command::TextLocale` (its selected language, the app's
+//! `setLocale` or the embedding app's included; English until it says
+//! otherwise, as the core's own starts). Keep in step with
+//! `nsh-platform-android`'s `A11yChanges.java`.
 
 /// The spoken state words of one language.
 pub(crate) struct StateWords {
@@ -126,13 +127,8 @@ pub(crate) fn for_language(tag: &str) -> &'static StateWords {
     }
 }
 
-/// The words in the user's first preferred language.
-#[cfg(target_os = "ios")]
-pub(crate) fn current() -> &'static StateWords {
-    objc2_foundation::NSLocale::preferredLanguages()
-        .firstObject()
-        .map_or(&EN, |tag| for_language(&tag.to_string()))
-}
+/// The words before the core names a language: English.
+pub(crate) const DEFAULT: &StateWords = &EN;
 
 #[cfg(test)]
 mod tests {

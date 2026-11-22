@@ -366,7 +366,9 @@ open:
 | Tab, Shift+Tab | Closes the list (`reason: "focus"`) and moves the focus to the next or previous control. |
 
 Once the list closes, the keyboard focus returns to the trigger, unless a press outside, Tab or the choice's `onChange`
-took it elsewhere. The pointer highlights the row it moves over; the highlighted row is revealed as the keys move to it.
+took it elsewhere. On macOS and iOS, a list a pointer opened gives the focus back where it was before it opened instead: a
+press leaves the focus where it is there, as AppKit and UIKit do, so the trigger never had it, and Space and Return go on to your app's
+shortcuts rather than opening the list again. The pointer highlights the row it moves over; the highlighted row is revealed as the keys move to it.
 
 ## On each device
 
