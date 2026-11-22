@@ -407,6 +407,10 @@ impl<M: TextEngine> Core<M> {
             self.focus = (key != self.root).then_some((key, id));
             self.focus_visible = self.focus_shows(key);
             self.focus_by_keyboard = self.keyboard_moves_focus() && !self.restoring_modal_focus;
+            // A popup a pointer opened gave it back (`pointer_focus_back`):
+            // still the pointer's, whatever closed the popup.
+            let given_back = self.pointer_focus_back.take() == Some(id);
+            self.focus_by_pointer = given_back || self.modality == Some(InputModality::Pointer);
             self.blur_held = false;
         } else if self.focus == Some((key, id)) {
             self.focus = None;

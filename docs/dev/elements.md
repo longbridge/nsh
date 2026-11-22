@@ -275,7 +275,12 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   that takes presses, plain Return and Space fire only the focus' own bindings (`KeyOptions::for_focus`, TS's `forFocus`: a
   component's keys while its part has the focus or its popup is open, a menu button's Return opening its menu), else they press
   it; an app's other bindings of those keys (a dialog's Return for its main action) give way to the control the user
-  moved the focus to, on every platform (`Keymap::find_at`, `input::presses_focused_control`). Return and Space press
+  moved the focus to, on every platform (`Keymap::find_at`, `input::presses_focused_control`). A binding that takes
+  them over a pointer's focus (`KeyOptions::over_focused`'s `OverFocused::Pointer`, TS's `overFocused: "pointer"`: a media player's Space)
+  fires instead, before the focus' own, while a pointer gave the focus: the core notes it as the focus is reported
+  (the input modality then, or a popup a press opened giving it back, `Core::pointer_focus_back`) and mounts the
+  keymap again as it changes, carrying it (`Keymap::pointer_focus`), only while a binding asks; the platforms ask
+  `Keymap::find_with` or, matching the bindings themselves (GTK), `Keymap::gives_way`. Return and Space press
   only a focused stop inside the newest modal, and a focus the newest modal covers (one the app left under a dialog) has
   no keys of its own: its bindings for the focus give way to the others, the dialog's (`KeyFocus::covered`,
   `Keymap::find_with`; the headless driver, macOS and GPUI, where `focus()` can leave it there). A page a newer one

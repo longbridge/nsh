@@ -1472,6 +1472,10 @@ pub struct Core<M: TextEngine> {
     /// ([`crate::element::ElementRef::focus_back_origin`]): one per
     /// trigger, its latest opening.
     focus_origins: Vec<(NodeId, Option<(Key, NodeId)>)>,
+    /// The trigger a popup a pointer opened gave the focus back to, off
+    /// macOS and iOS, until the focus is reported: the pointer's focus,
+    /// however the popup closed (`focus_by_pointer`).
+    pointer_focus_back: Option<NodeId>,
     /// Animates the layout changes of the next commit.
     layout_animation: Option<LayoutAnimation>,
     /// Nodes whose change animates the frames it moves in the next commit,
@@ -1546,6 +1550,15 @@ pub struct Core<M: TextEngine> {
     /// whatever is typed meanwhile: only such a focus shows the hint of
     /// the anchor it comes to (`overlay::focus_hints`).
     focus_by_keyboard: bool,
+    /// A pointer moved the focus where it is (a press, a popup a press
+    /// used giving it back), decided when it was reported and kept until
+    /// it moves again: the keymap's [`crate::keymap::Keymap::pointer_focus`].
+    focus_by_pointer: bool,
+    /// The keymap the app mounted last, while one of its bindings asks
+    /// how the focus came ([`crate::keymap::Keymap::takes_over_pointer_focus`]),
+    /// and the `focus_by_pointer` it was mounted with: mounted again as
+    /// that changes.
+    pointer_keymap: Option<(Arc<crate::keymap::Keymap>, bool)>,
     /// A shown modal closed; focus reports restore context until the next
     /// user action, rather than requesting another hint.
     restoring_modal_focus: bool,
@@ -1802,6 +1815,7 @@ impl<M: TextEngine> Core<M> {
             commands: Vec::new(),
             focus_back: None,
             focus_origins: Vec::new(),
+            pointer_focus_back: None,
             layout_animation: None,
             scoped_layout: Vec::new(),
             resized: Vec::new(),
@@ -1825,6 +1839,8 @@ impl<M: TextEngine> Core<M> {
             modality: None,
             focus_visible: false,
             focus_by_keyboard: false,
+            focus_by_pointer: false,
+            pointer_keymap: None,
             restoring_modal_focus: false,
             focus_visible_on: None,
             focus_visible_moved: false,
@@ -3517,6 +3533,7 @@ impl<M: TextEngine> Core<M> {
             // hint: a hint shows only for a focus the keyboard moved.
             self.update_focus_visible();
         }
+        self.sync_pointer_keymap();
         self.sync_colors();
         self.sync_ch();
         self.sync_fixed();
@@ -3713,7 +3730,16 @@ impl<M: TextEngine> Core<M> {
                     // Opened by the keyboard (or the app after a key): back
                     // to the trigger the keyboard opened it from.
                     None => self.commands.push((id, Command::Focus)),
-                    Some(before) => self.focus_back_to_origin(before, from),
+                    Some(before) if self.press_leaves_focus() => {
+                        self.focus_back_to_origin(before, from);
+                    }
+                    // Elsewhere a press focused the trigger: it takes the
+                    // focus back, still the pointer's (Escape closing the
+                    // list a click opened leaves the app's Space to it).
+                    Some(_) => {
+                        self.commands.push((id, Command::Focus));
+                        self.pointer_focus_back = Some(id);
+                    }
                 }
             }
         }
@@ -6249,6 +6275,7 @@ impl<M: TextEngine> Core<M> {
             Prop::Keymap(keymap) => {
                 // The surface's shortcuts (the root's): `nsh/keymap`.
                 if key == self.root {
+                    let keymap = self.keymap_with_focus(keymap);
                     self.mount.push(MountItem::Keymap(keymap));
                 }
                 return Ok(());
@@ -7530,6 +7557,39 @@ impl<M: TextEngine> Core<M> {
         self.nodes[key as usize].height
     }
 
+    /// The app's keymap as mounted: with how the focus came
+    /// ([`crate::keymap::Keymap::pointer_focus`]) when a binding asks for
+    /// it, kept to mount again as the focus moves (`sync_pointer_keymap`).
+    fn keymap_with_focus(
+        &mut self,
+        keymap: Arc<crate::keymap::Keymap>,
+    ) -> Arc<crate::keymap::Keymap> {
+        if !keymap.takes_over_pointer_focus() {
+            self.pointer_keymap = None;
+            return keymap;
+        }
+        let pointer = self.focus.is_some() && self.focus_by_pointer;
+        let mounted = Arc::new((*keymap).clone().with_pointer_focus(pointer));
+        self.pointer_keymap = Some((keymap, pointer));
+        mounted
+    }
+
+    /// The focus a pointer gave came or went: the keymap whose bindings
+    /// ask for it is mounted again, so the platform matches the next keys
+    /// with it. One item per move, only for an app that asks.
+    fn sync_pointer_keymap(&mut self) {
+        let pointer = self.focus.is_some() && self.focus_by_pointer;
+        let Some((keymap, sent)) = &self.pointer_keymap else {
+            return;
+        };
+        if *sent == pointer {
+            return;
+        }
+        let keymap = keymap.clone();
+        let mounted = self.keymap_with_focus(keymap);
+        self.mount.push(MountItem::Keymap(mounted));
+    }
+
     /// `key` came under its parent: the views above it are as high as it
     /// makes them. Stops at the first that was already: a view is always at
     /// least one higher than each of its children.
@@ -7550,25 +7610,29 @@ impl<M: TextEngine> Core<M> {
     /// A popup that gives the keyboard focus back to `to` opens
     /// ([`crate::element::ElementRef::focus_back_origin`]): on macOS and
     /// iOS, opened by a pointer, the focus it opened with is where the focus goes back to
-    /// (the pointer's press left it there, off the trigger); opened by the
-    /// keyboard (or on another platform), the trigger takes it back, as
-    /// before.
+    /// (the pointer's press left it there, off the trigger); elsewhere the
+    /// trigger takes it back as the pointer's (`pointer_focus_back`);
+    /// opened by the keyboard, the trigger takes it back, as before.
     pub(super) fn note_focus_origin(&mut self, to: NodeId) {
         let mut origins = std::mem::take(&mut self.focus_origins);
         // Triggers that are gone leave no note behind (a popup closed by a
         // press outside gives nothing back, so its note stays until then).
         origins.retain(|&(id, _)| id != to && self.key(id).is_ok());
-        // Only where a press gives a control no focus (macOS and iOS, as
-        // AppKit and UIKit do): elsewhere a press focuses the trigger, as
-        // native buttons there do, and closing gives the trigger the focus.
-        let apple = matches!(
-            self.components.environment.os,
-            crate::platform::Os::MacOs | crate::platform::Os::Ios
-        );
-        if apple && self.modality == Some(crate::platform::InputModality::Pointer) {
+        if self.modality == Some(crate::platform::InputModality::Pointer) {
             origins.push((to, self.focus));
         }
         self.focus_origins = origins;
+    }
+
+    /// Whether a press leaves the keyboard focus where it is (macOS and
+    /// iOS, as AppKit and UIKit do), so a popup a pointer opened gives it
+    /// back where it was. Elsewhere a press focuses the trigger, as native
+    /// buttons there do, and closing gives the trigger the focus.
+    fn press_leaves_focus(&self) -> bool {
+        matches!(
+            self.components.environment.os,
+            crate::platform::Os::MacOs | crate::platform::Os::Ios
+        )
     }
 
     /// The keyboard focus back from the popup `from` (its node, when it is

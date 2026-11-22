@@ -5281,7 +5281,8 @@
 			e.when,
 			e.repeat,
 			e.passThrough,
-			e.forFocus
+			e.forFocus,
+			e.overFocused
 		]), !!platform.appleKeyboard]);
 		dom.rootProp("onKeyCommand", (id) => {
 			const entry = entries.find((entry) => entry.id === id);
@@ -5301,8 +5302,9 @@
 					pairs = [[String(first), handler]];
 				}
 				if (options != null && typeof options !== "object") throw new TypeError("keymap.bind: options must be an object");
-				const when = options?.when, repeat = !!options?.repeat, passThrough = !!options?.passThrough, forFocus = !!options?.forFocus;
+				const when = options?.when, repeat = !!options?.repeat, passThrough = !!options?.passThrough, forFocus = !!options?.forFocus, overFocused = options?.overFocused === "pointer" ? "pointer" : !!options?.overFocused;
 				if (when !== void 0 && when !== "always" && when !== "notEditing") throw new TypeError("keymap.bind: when must be always or notEditing");
+				if (typeof options?.overFocused === "string" && overFocused !== "pointer") throw new TypeError("keymap.bind: overFocused must be a boolean or pointer");
 				const added = pairs.map(([text, handler]) => {
 					if (typeof handler !== "function") throw new TypeError(`keymap.bind: the handler of ${JSON.stringify(text)} is not a function`);
 					if (next >= 4294967295) throw new RangeError("shortcut IDs exhausted");
@@ -5313,7 +5315,8 @@
 						when,
 						repeat,
 						passThrough,
-						forFocus
+						forFocus,
+						overFocused
 					};
 				});
 				const updated = [...entries, ...added];
