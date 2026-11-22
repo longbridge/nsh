@@ -259,7 +259,7 @@ nshm 兼容的 NSH 版本就是它自己对 `nsh-core` 的版本要求（`nsh-co
 
 ### 打包的应用需要什么
 
-用到系统功能的 nshm 在 `Cargo.toml` 里声明打包的应用需要什么：写在 `[package.metadata.nsh]` 下；只有某个 feature 需要时，写在 `[package.metadata.nsh.features.<feature>]` 下。`nsh` 构建安装包时，会把应用链接的每个 crate 的条目（按 Cargo 实际开启的 feature）加进去；开发宿主拿到其中的 `Info.plist` 键和 Android 条目：
+用到系统功能的 nshm 在 `Cargo.toml` 里声明打包的应用需要什么：写在 `[package.metadata.nsh]` 下；只有某个 feature 需要时，写在 `[package.metadata.nsh.features.<feature>]` 下。`nsh` 构建安装包时，会把应用链接的每个 crate 的条目（按 Cargo 实际开启的 feature）加进去；开发宿主拿到其中的 `Info.plist` 键以及 Android 条目和文件：
 
 ```toml
 [package.metadata.nsh.features.scanner.ios.infoPlist]
@@ -278,6 +278,30 @@ application = ['<service android:name="com.example.scanner.Sync" android:exporte
 | `android.permissions` | `<uses-permission>` 元素，写法与 `nsh.json` 相同（`CAMERA` 即 `android.permission.CAMERA`） |
 | `android.queries` | manifest `<queries>` 里的 `<intent>`、`<package>`、`<provider>` 元素 |
 | `android.application` | `<application>` 里的 `<service>`、`<receiver>`、`<provider>`、`<activity>`、`<meta-data>` 元素；`${applicationId}` 是应用的包名 |
+| `android.dex` | crate 的 Java 代码的 dex 文件，打包时排在应用的之后（见 [Java 代码](./packaging.md#java-代码)） |
+| `android.res` | 一个 Android 资源目录，布局与应用的 `android/res/` 相同，链接在应用的资源之下，两者声明同名资源时以应用的为准 |
+| `android.jniLibs` | 一个原生库目录，按 `<abi>/*.so` 布局（`arm64-v8a`、`armeabi-v7a`、`x86`、`x86_64`），与 `libnsh.so` 一起打包；64 位库必须按 16 KB 页对齐 |
+
+路径相对于 crate 的 `Cargo.toml`，用 `/` 分隔，且必须位于 crate 之内（链接也按其指向判断），因此 nshm 只能打包它自己附带的文件；
+指向文件夹的链接会被拒绝。只有 Android 包和 Android 开发宿主读取这些文件，所以文件缺失或有误不会让 iOS 构建停下：
+
+```toml
+[package.metadata.nsh.android]
+dex = ["android/ocr.dex"]
+res = "android/res"
+jniLibs = "android/jniLibs"
+```
+
+打包会对这些文件做什么、不做什么：
+
+- dex 文件排在应用自己的之后，所以两者都有的类从应用的 dex 加载；两个 crate 都有的类从先加载的那个取得，并且不会报告。dex 里只放你自己的类。
+- 资源没有 `R` 类：Java 代码按名字查找它们，`getResources().getIdentifier("scan", "drawable", context.getPackageName())`。
+  两者声明同名资源时以应用的 `android/res` 为准，按配置逐一比较：应用只声明了 `values` 时，crate 的 `values-fr` 字符串仍会保留；
+  两者都声明的 style 会逐项合并。用了 NSH 生成的名字（`ic_launcher…`、`nsh_…`、`NshLaunch…`）或另一个 crate 已声明的名字会报错。
+- 原生库是 `lib<name>.so` 文件，用 `System.loadLibrary("<name>")` 加载；包内以不压缩的形式存放，不会解压出来，所以按文件系统路径打开它的代码找不到它。
+  两个 crate 带同名库时，内容相同只打包一份，否则报错。64 位库必须按 16 KB 页对齐（`-Wl,-z,max-page-size=16384`），
+  Google Play 从目标 SDK 35 起要求这一点。
+- 早于这些键的 `nsh` 构建时不带这些文件，并警告它不读取它们；用到它们的 nshm 应要求本版本或更新的 `nsh-core`。
 
 应用自己的 `nsh.json` 优先：它设置过的键保留它的值，数组（例如 `UIBackgroundModes`）合并。两个 crate 给同一个键设置了不同的值时（例如两段不同的相机用途说明），由应用在 `ios.infoPlist` 或 `ios.entitlements` 里写这个键来决定；应用没写之前，打包 iOS 应用会报错并指出这两个 crate。NSH 自己设置的键（包标识、版本等）不能由 crate 设置。
 

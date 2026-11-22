@@ -215,8 +215,8 @@ pub(crate) struct Apk<'a> {
     /// (`webview.media`): `RECORD_AUDIO` and `CAMERA` are declared.
     pub(crate) microphone: bool,
     pub(crate) camera: bool,
-    /// The app's own dex files (nsh.json `android.dex`), after the
-    /// runtime's: `classes2.dex`, `classes3.dex`, ...
+    /// The app's own dex files (nsh.json `android.dex`), then its crates',
+    /// after the runtime's: `classes2.dex`, `classes3.dex`, ...
     pub(crate) dex: &'a [PathBuf],
     /// The permissions the app declares itself (nsh.json
     /// `android.permissions`), in full: declared after NSH's, each once.
@@ -258,6 +258,14 @@ pub(crate) struct Apk<'a> {
     /// laid out as Gradle's `src/main/res/`): drawables a tab bar names,
     /// for one. None when the app has none.
     pub(crate) res: Option<&'a Path>,
+    /// The resource directories of the app's crates
+    /// ([`crate::module_meta`]), each laid out as `res`: linked as overlays
+    /// below the app's own, so the app's value of a resource wins.
+    pub(crate) crate_res: &'a [PathBuf],
+    /// The native library directories of the app's crates, each holding
+    /// `<abi>/*.so`: packaged beside `libnsh.so` for the ABIs it is built
+    /// for.
+    pub(crate) jni_libs: &'a [PathBuf],
     pub(crate) signing: Signing,
 }
 
@@ -535,6 +543,7 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
 
     // The app's own resources, compiled as a whole: `aapt2 compile --dir`
     // reads `<type>[-<qualifiers>]/<name>` as Gradle does.
+    let mut app_res = None;
     if let Some(res) = apk.res {
         let zip = work.join("compiled-app.zip");
         run(Command::new(sdk.tool("aapt2"))
@@ -544,8 +553,22 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
             .arg("-o")
             .arg(&zip))
         .with_context(|| format!("compile the app's resources in {}", res.display()))?;
-        flat.push(zip);
+        app_res = Some(zip);
     }
+    // The crates' resources, each compiled the same way.
+    let mut crate_res = Vec::new();
+    for (i, res) in apk.crate_res.iter().enumerate() {
+        let zip = work.join(format!("compiled-crate-{i}.zip"));
+        run(Command::new(sdk.tool("aapt2"))
+            .arg("compile")
+            .arg("--dir")
+            .arg(res)
+            .arg("-o")
+            .arg(&zip))
+        .with_context(|| format!("compile a crate's resources in {}", res.display()))?;
+        crate_res.push(zip);
+    }
+    let overlays = resource_layers(&mut flat, app_res, crate_res);
 
     let manifest = work.join("AndroidManifest.xml");
     fs::write(&manifest, manifest_xml(apk))?;
@@ -569,6 +592,12 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
         link.arg("--proto-format");
     }
     link.args(&flat);
+    if !overlays.is_empty() {
+        link.arg("--auto-add-overlay");
+        for overlay in &overlays {
+            link.arg("-R").arg(overlay);
+        }
+    }
     run(&mut link)?;
 
     if format == Format::Aab {
@@ -593,6 +622,26 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
     fs::rename(&aligned, out)?;
     fs::remove_dir_all(&work)?;
     Ok(())
+}
+
+/// Where the app's and its crates' compiled resources go in `aapt2 link`:
+/// the app's always with NSH's own (`flat`), so a name both declare stays
+/// an error, as it was before crates had resources; and, when crates have
+/// some, every crate's then the app's again as overlays (returned, in
+/// order), so the app's value of a name a crate declares wins.
+/// `--auto-add-overlay` adds the names the base does not declare.
+fn resource_layers(
+    flat: &mut Vec<PathBuf>,
+    app: Option<PathBuf>,
+    crates: Vec<PathBuf>,
+) -> Vec<PathBuf> {
+    flat.extend(app.clone());
+    if crates.is_empty() {
+        return Vec::new();
+    }
+    let mut overlays = crates;
+    overlays.extend(app);
+    overlays
 }
 
 /// The theme of the application: the launch theme ([`LAUNCH_THEME`]) when
@@ -1099,7 +1148,7 @@ fn add_files(
     // one dex; a runtime of more would collide with the app's.
     if !apk.dex.is_empty() && apk.runtime.join("classes2.dex").exists() {
         bail!(
-            "the Android runtime in {} has more than one dex file, which nsh.json android.dex cannot follow yet",
+            "the Android runtime in {} has more than one dex file, which `android.dex` cannot follow yet",
             apk.runtime.display()
         );
     }
@@ -1108,11 +1157,11 @@ fn add_files(
         .strip_suffix("classes.dex")
         .context("dex layout")?;
     for (i, path) in apk.dex.iter().enumerate() {
-        let bytes = fs::read(path)
-            .with_context(|| format!("nsh.json android.dex: read {}", path.display()))?;
+        let bytes =
+            fs::read(path).with_context(|| format!("android.dex: read {}", path.display()))?;
         if !bytes.starts_with(b"dex\n") {
             bail!(
-                "nsh.json android.dex: {} is not a dex file (make one with the SDK's `d8`)",
+                "android.dex: {} is not a dex file (make one with the SDK's `d8`)",
                 path.display()
             );
         }
@@ -1142,6 +1191,8 @@ fn add_files(
     } else {
         apk.abis
     };
+    let mut missing: std::collections::BTreeMap<PathBuf, Vec<String>> =
+        std::collections::BTreeMap::new();
     for abi in abis {
         if !available.contains(abi) {
             bail!(
@@ -1152,6 +1203,60 @@ fn add_files(
         let so = libs.join(abi).join("libnsh.so");
         zip.start_file(format!("{}/{abi}/libnsh.so", layout.lib), stored)?;
         zip.write_all(&fs::read(&so)?)?;
+        let mut names: Vec<(String, Vec<u8>)> = Vec::new();
+        for dir in apk.jni_libs {
+            let abi_dir = dir.join(abi);
+            if !abi_dir.is_dir() {
+                missing.entry(dir.clone()).or_default().push(abi.clone());
+                continue;
+            }
+            let mut files: Vec<PathBuf> = fs::read_dir(&abi_dir)
+                .with_context(|| format!("read {}", abi_dir.display()))?
+                .map(|e| e.map(|e| e.path()))
+                .collect::<Result<_, _>>()?;
+            // What the system loads: `lib<name>.so` files.
+            files.retain(|f| {
+                f.is_file()
+                    && f.file_name().is_some_and(|n| {
+                        let n = n.to_string_lossy();
+                        n.starts_with("lib") && n.ends_with(".so")
+                    })
+            });
+            files.sort();
+            for file in files {
+                let name = file
+                    .file_name()
+                    .context("library name")?
+                    .to_string_lossy()
+                    .into_owned();
+                let bytes = fs::read(&file).with_context(|| format!("read {}", file.display()))?;
+                if name == "libnsh.so" {
+                    bail!("{}: libnsh.so is NSH's own library", file.display());
+                }
+                if let Some((_, other)) = names.iter().find(|(n, _)| *n == name) {
+                    if *other == bytes {
+                        continue;
+                    }
+                    bail!(
+                        "{}: another of the package's {abi} libraries is named {name}, with other contents",
+                        file.display()
+                    );
+                }
+                check_library(&bytes, abi, apk.target_sdk >= 35 && !apk.dev)
+                    .with_context(|| format!("{}", file.display()))?;
+                zip.start_file(format!("{}/{abi}/{name}", layout.lib), stored)?;
+                zip.write_all(&bytes)?;
+                names.push((name, bytes));
+            }
+        }
+    }
+    for (dir, abis) in missing {
+        crate::ui::warn(format!(
+            "{} has no libraries for {}: the package's devices of those ABIs will not find them \
+             (`--abi` packages for fewer)",
+            dir.display(),
+            abis.join(", ")
+        ));
     }
     for (path, bytes) in &apk.assets {
         // Bytecode and images are compressed already or small.
@@ -1160,6 +1265,79 @@ fn add_files(
     }
     zip.finish()?;
     Ok(abis.to_vec())
+}
+
+/// Checks a shared library `elf` is one for `abi`: an ELF shared object of
+/// its class and machine. A 64-bit one must load on devices with 16 KB
+/// pages (Android 15): every loadable segment aligned to 16 KB at least,
+/// which Google Play requires of a release from target SDK 35
+/// (`required`; otherwise, a warning). 32-bit ABIs run on 4 KB pages.
+fn check_library(elf: &[u8], abi: &str, required: bool) -> anyhow::Result<()> {
+    let (class, machine) = match abi {
+        "arm64-v8a" => (2, 183),
+        "x86_64" => (2, 62),
+        "armeabi-v7a" => (1, 40),
+        "x86" => (1, 3),
+        other => bail!("no ABI {other}"),
+    };
+    let u16_at = |at: usize| -> Option<u16> {
+        Some(u16::from_le_bytes(
+            elf.get(at..at.checked_add(2)?)?.try_into().ok()?,
+        ))
+    };
+    let u32_at = |at: usize| -> Option<u32> {
+        Some(u32::from_le_bytes(
+            elf.get(at..at.checked_add(4)?)?.try_into().ok()?,
+        ))
+    };
+    let u64_at = |at: usize| -> Option<u64> {
+        Some(u64::from_le_bytes(
+            elf.get(at..at.checked_add(8)?)?.try_into().ok()?,
+        ))
+    };
+    // Little-endian, as every Android ABI is.
+    if elf.get(..4) != Some(b"\x7fELF".as_slice()) || elf.get(5) != Some(&1) {
+        bail!("not a little-endian ELF shared library");
+    }
+    if elf.get(4) != Some(&class) || u16_at(0x12) != Some(machine) {
+        bail!("not a library for {abi} (its ELF class or machine is another's)");
+    }
+    // ET_DYN.
+    if u16_at(0x10) != Some(3) {
+        bail!("not a shared library (its ELF type is another)");
+    }
+    if class == 1 {
+        return Ok(());
+    }
+    let (Some(phoff), Some(phentsize), Some(phnum)) = (u64_at(0x20), u16_at(0x36), u16_at(0x38))
+    else {
+        bail!("a truncated ELF header");
+    };
+    if phentsize != 0x38 {
+        bail!("an ELF header with program headers of {phentsize} bytes, not 56");
+    }
+    for i in 0..usize::from(phnum) {
+        let at = usize::try_from(phoff)
+            .ok()
+            .and_then(|phoff| phoff.checked_add(i.checked_mul(0x38)?));
+        let header = at.and_then(|at| Some((u32_at(at)?, u64_at(at.checked_add(0x30)?)?)));
+        let Some((kind, align)) = header else {
+            bail!("a truncated ELF program header");
+        };
+        // PT_LOAD.
+        if kind == 1 && align < 0x4000 {
+            let problem = format!(
+                "a loadable segment is aligned to {align:#x}, below the 16 KB that {abi} devices \
+                 with 16 KB pages need: link it with `-Wl,-z,max-page-size=16384`"
+            );
+            if required {
+                bail!("{problem} (Google Play requires it from target SDK 35)");
+            }
+            crate::ui::warn(problem);
+            return Ok(());
+        }
+    }
+    Ok(())
 }
 
 fn sign(sdk: &Sdk, signing: &Signing, apk: &Path) -> anyhow::Result<()> {
@@ -1633,6 +1811,8 @@ mod tests {
             assets: Vec::new(),
             sounds: Vec::new(),
             res: None,
+            crate_res: &[],
+            jni_libs: &[],
             signing: super::Signing::Debug,
         }
     }
@@ -1895,6 +2075,197 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(err.contains("is not a dex file"), "{err}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// An arm64 ELF shared library whose one loadable segment is aligned
+    /// to `align`.
+    fn elf(align: u64) -> Vec<u8> {
+        elf_for(183, align)
+    }
+
+    /// A 64-bit little-endian ELF shared library for `machine` whose one
+    /// loadable segment is aligned to `align`.
+    fn elf_for(machine: u16, align: u64) -> Vec<u8> {
+        let mut bytes = vec![0u8; 0x40 + 0x38];
+        bytes[..6].copy_from_slice(b"\x7fELF\x02\x01");
+        bytes[0x10..0x12].copy_from_slice(&3u16.to_le_bytes()); // e_type: ET_DYN
+        bytes[0x12..0x14].copy_from_slice(&machine.to_le_bytes()); // e_machine
+        bytes[0x20..0x28].copy_from_slice(&0x40u64.to_le_bytes()); // e_phoff
+        bytes[0x36..0x38].copy_from_slice(&0x38u16.to_le_bytes()); // e_phentsize
+        bytes[0x38..0x3a].copy_from_slice(&1u16.to_le_bytes()); // e_phnum
+        bytes[0x40..0x44].copy_from_slice(&1u32.to_le_bytes()); // PT_LOAD
+        bytes[0x40 + 0x30..0x40 + 0x38].copy_from_slice(&align.to_le_bytes());
+        bytes
+    }
+
+    #[test]
+    fn libraries_are_checked_as_elf_of_their_abi() {
+        assert!(super::check_library(&elf(0x4000), "arm64-v8a", true).is_ok());
+        assert!(super::check_library(&elf_for(62, 0x4000), "x86_64", true).is_ok());
+        assert!(super::check_library(&elf(0x1000), "arm64-v8a", false).is_ok());
+        for (bytes, says) in [
+            (elf(0x1000), "16 KB"),
+            (b"\x7fELF\x02\x01".to_vec(), "not a library for arm64-v8a"),
+            (elf_for(62, 0x4000), "not a library for arm64-v8a"),
+            (b"MZ not an elf".to_vec(), "not a little-endian ELF"),
+        ] {
+            let err = format!(
+                "{:#}",
+                super::check_library(&bytes, "arm64-v8a", true).unwrap_err()
+            );
+            assert!(err.contains(says), "{says}: {err}");
+        }
+        // A program header table at an offset that overflows, or past the
+        // end, is truncated, never a panic.
+        for phoff in [u64::MAX, 0x1000] {
+            let mut far = elf(0x4000);
+            far[0x20..0x28].copy_from_slice(&phoff.to_le_bytes());
+            let err = format!(
+                "{:#}",
+                super::check_library(&far, "arm64-v8a", true).unwrap_err()
+            );
+            assert!(err.contains("truncated"), "{err}");
+        }
+        let mut executable = elf(0x4000);
+        executable[0x10] = 2; // ET_EXEC
+        let err = format!(
+            "{:#}",
+            super::check_library(&executable, "arm64-v8a", true).unwrap_err()
+        );
+        assert!(err.contains("not a shared library"), "{err}");
+        let mut big_endian = elf(0x4000);
+        big_endian[5] = 2;
+        assert!(super::check_library(&big_endian, "arm64-v8a", true).is_err());
+    }
+
+    #[test]
+    fn the_apps_resources_overlay_its_crates() {
+        let p = std::path::PathBuf::from;
+        // No crate resources: the app's link with NSH's, as before.
+        let mut flat = vec![p("icon.flat")];
+        let overlays = super::resource_layers(&mut flat, Some(p("app.zip")), Vec::new());
+        assert_eq!(flat, [p("icon.flat"), p("app.zip")]);
+        assert!(overlays.is_empty());
+        // With them: NSH's and the app's stay the base (a name both
+        // declare is an error, as before); the crates', then the app's
+        // again, on top, so the app's value of a name a crate declares wins.
+        let mut flat = vec![p("icon.flat")];
+        let overlays =
+            super::resource_layers(&mut flat, Some(p("app.zip")), vec![p("a.zip"), p("b.zip")]);
+        assert_eq!(flat, [p("icon.flat"), p("app.zip")]);
+        assert_eq!(overlays, [p("a.zip"), p("b.zip"), p("app.zip")]);
+        let mut flat = Vec::new();
+        assert_eq!(
+            super::resource_layers(&mut flat, None, vec![p("a.zip")]),
+            [p("a.zip")]
+        );
+    }
+
+    #[test]
+    fn crates_native_libraries_join_libnsh() {
+        let dir = std::env::temp_dir().join(format!("nsh-cli-android-jni-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let runtime = dir.join("runtime");
+        for abi in ["arm64-v8a", "armeabi-v7a"] {
+            std::fs::create_dir_all(runtime.join("lib").join(abi)).unwrap();
+            std::fs::write(runtime.join("lib").join(abi).join("libnsh.so"), b"so").unwrap();
+        }
+        std::fs::write(runtime.join("classes.dex"), b"dex\n035\0runtime").unwrap();
+        let base = dir.join("base.zip");
+        zip::ZipWriter::new(std::fs::File::create(&base).unwrap())
+            .finish()
+            .unwrap();
+        let jni = dir.join("jni");
+        std::fs::create_dir_all(jni.join("arm64-v8a")).unwrap();
+        std::fs::create_dir_all(jni.join("armeabi-v7a")).unwrap();
+        std::fs::write(jni.join("arm64-v8a/libocr.so"), elf(0x4000)).unwrap();
+        // 32-bit ABIs run on 4 KB pages: their alignment is not checked.
+        let mut arm32 = vec![0u8; 0x34];
+        arm32[..6].copy_from_slice(b"\x7fELF\x01\x01");
+        arm32[0x10..0x12].copy_from_slice(&3u16.to_le_bytes());
+        arm32[0x12..0x14].copy_from_slice(&40u16.to_le_bytes());
+        std::fs::write(jni.join("armeabi-v7a/libocr.so"), &arm32).unwrap();
+        // Only `lib*.so` files are libraries the system loads.
+        std::fs::write(jni.join("arm64-v8a/README.txt"), b"not a library").unwrap();
+        std::fs::write(jni.join("arm64-v8a/ocr.so"), elf(0x4000)).unwrap();
+        // A second crate with the same library, byte for byte (two SDKs
+        // each bundling `libc++_shared.so`): packaged once.
+        let other = dir.join("other");
+        std::fs::create_dir_all(other.join("arm64-v8a")).unwrap();
+        std::fs::write(other.join("arm64-v8a/libocr.so"), elf(0x4000)).unwrap();
+        let jni_libs = [jni.clone(), other.clone()];
+        let add = |layout: &super::Layout, target_sdk: u32| {
+            let out = dir.join("out.zip");
+            super::add_files(
+                &base,
+                &out,
+                &super::Apk {
+                    runtime: &runtime,
+                    jni_libs: &jni_libs,
+                    target_sdk,
+                    ..apk(false, false)
+                },
+                layout,
+            )
+            .map(|_| {
+                let archive = zip::ZipArchive::new(std::fs::File::open(&out).unwrap()).unwrap();
+                let mut names: Vec<String> = archive
+                    .file_names()
+                    .map(|n| n.unwrap().into_owned())
+                    .collect();
+                names.sort();
+                names
+            })
+        };
+        let names = add(&super::Layout::APK, 35).unwrap();
+        for name in [
+            "lib/arm64-v8a/libnsh.so",
+            "lib/arm64-v8a/libocr.so",
+            "lib/armeabi-v7a/libocr.so",
+        ] {
+            assert!(names.iter().any(|n| n == name), "{name}: {names:?}");
+        }
+        assert!(
+            !names
+                .iter()
+                .any(|n| n.ends_with("README.txt") || n.ends_with("/ocr.so")),
+            "{names:?}"
+        );
+        assert_eq!(
+            names
+                .iter()
+                .filter(|n| n.as_str() == "lib/arm64-v8a/libocr.so")
+                .count(),
+            1
+        );
+        let names = add(&super::Layout::BUNDLE, 35).unwrap();
+        assert!(
+            names.iter().any(|n| n == "base/lib/arm64-v8a/libocr.so"),
+            "{names:?}"
+        );
+        // A 64-bit library on 4 KB pages would not load on 16 KB devices:
+        // an error from target SDK 35, as Google Play requires, a warning
+        // below.
+        std::fs::write(jni.join("arm64-v8a/libocr.so"), elf(0x1000)).unwrap();
+        std::fs::write(other.join("arm64-v8a/libocr.so"), elf(0x1000)).unwrap();
+        let err = format!("{:#}", add(&super::Layout::APK, 35).unwrap_err());
+        assert!(err.contains("16 KB"), "{err}");
+        assert!(add(&super::Layout::APK, 34).is_ok());
+        // Two crates' libraries of one name with other contents.
+        std::fs::write(jni.join("arm64-v8a/libocr.so"), elf(0x8000)).unwrap();
+        std::fs::write(other.join("arm64-v8a/libocr.so"), elf(0x4000)).unwrap();
+        let err = format!("{:#}", add(&super::Layout::APK, 35).unwrap_err());
+        assert!(err.contains("with other contents"), "{err}");
+        // An x86_64 library in `arm64-v8a`.
+        std::fs::write(jni.join("arm64-v8a/libocr.so"), elf_for(62, 0x4000)).unwrap();
+        let err = format!("{:#}", add(&super::Layout::APK, 35).unwrap_err());
+        assert!(err.contains("not a library for arm64-v8a"), "{err}");
+        // A library may not replace NSH's.
+        std::fs::write(jni.join("arm64-v8a/libocr.so"), elf(0x4000)).unwrap();
+        std::fs::write(jni.join("arm64-v8a/libnsh.so"), elf(0x4000)).unwrap();
+        let err = format!("{:#}", add(&super::Layout::APK, 35).unwrap_err());
+        assert!(err.contains("NSH's own library"), "{err}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

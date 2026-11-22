@@ -30,12 +30,19 @@
 //! `android.queries`
 //! (`<intent>`, `<package>` and `<provider>` elements) and
 //! `android.application` (`<service>`, `<receiver>`, `<provider>`,
-//! `<activity>` and `<meta-data>` elements) are read; other keys are
+//! `<activity>` and `<meta-data>` elements), and the crate's Android files
+//! `android.dex`, `android.res` and `android.jniLibs` (paths in the crate,
+//! read by Android packages and hosts only:
+//! [`ModuleMeta::resolve_android_files`]) are read; other keys are
 //! reported and left out. Each Android entry is one balanced element of
 //! those, so a crate cannot close `<application>` or `<queries>` to write
 //! elsewhere in the manifest.
 
-use std::{collections::BTreeMap, path::Path, process::Command};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 use anyhow::{Context as _, bail};
 use serde_json::{Map, Value};
@@ -62,6 +69,16 @@ pub(crate) struct ModuleMeta {
     pub(crate) android_queries: Vec<String>,
     /// Elements of the manifest's `<application>`.
     pub(crate) android_application: Vec<String>,
+    /// The Android files the crates name, read by Android packages and
+    /// hosts only ([`ModuleMeta::resolve_android_files`]), so a crate's
+    /// Android files never stop another platform.
+    android_files: Vec<FileDecl>,
+    /// Dex files of the crates' Java code, packaged after the app's.
+    pub(crate) android_dex: Vec<PathBuf>,
+    /// Resource directories, linked below the app's own.
+    pub(crate) android_res: Vec<PathBuf>,
+    /// Native library directories, each holding `<abi>/*.so`.
+    pub(crate) android_jni_libs: Vec<PathBuf>,
     /// Which package set each key, for errors.
     owners: BTreeMap<String, String>,
     /// Keys two crates set to different values: the first crate's value is
@@ -153,7 +170,13 @@ impl ModuleMeta {
                 continue;
             };
             let name = package["name"].as_str().unwrap_or("?");
-            meta.merge_section(name, "[package.metadata.nsh]", nsh, &mut warnings)?;
+            // Where the crate's files are: paths in its metadata are
+            // relative to its `Cargo.toml`.
+            let dir = package["manifest_path"]
+                .as_str()
+                .and_then(|m| Path::new(m).parent());
+            let crate_ = Crate { name, dir };
+            meta.merge_section(&crate_, "[package.metadata.nsh]", nsh, &mut warnings)?;
             let features = nsh.get("features").and_then(Value::as_object);
             let enabled = node["features"].as_array().into_iter().flatten();
             for feature in enabled.filter_map(Value::as_str) {
@@ -162,7 +185,7 @@ impl ModuleMeta {
                     .and_then(Value::as_object)
                 {
                     let at = format!("[package.metadata.nsh.features.{feature}]");
-                    meta.merge_section(name, &at, section, &mut warnings)?;
+                    meta.merge_section(&crate_, &at, section, &mut warnings)?;
                 }
             }
         }
@@ -173,17 +196,18 @@ impl ModuleMeta {
     /// `android` tables.
     fn merge_section(
         &mut self,
-        name: &str,
+        crate_: &Crate<'_>,
         at: &str,
         section: &Map<String, Value>,
         warnings: &mut Vec<String>,
     ) -> anyhow::Result<()> {
+        let name = crate_.name;
         for (key, value) in section {
             match key.as_str() {
                 // Read by itself: a feature's section is merged only when on.
                 "features" if at == "[package.metadata.nsh]" => {}
                 "ios" => self.merge_ios(name, at, value, warnings)?,
-                "android" => self.merge_android(name, at, value, warnings)?,
+                "android" => self.merge_android(crate_, at, value, warnings)?,
                 _ => warnings.push(format!(
                     "{name}: {at} `{key}` is not something this nsh reads: left out"
                 )),
@@ -255,11 +279,12 @@ impl ModuleMeta {
 
     fn merge_android(
         &mut self,
-        name: &str,
+        crate_: &Crate<'_>,
         at: &str,
         android: &Value,
         warnings: &mut Vec<String>,
     ) -> anyhow::Result<()> {
+        let name = crate_.name;
         let android = android
             .as_object()
             .with_context(|| format!("{name}: {at} `android` is a table"))?;
@@ -305,9 +330,110 @@ impl ModuleMeta {
                     }
                     join_strings(&mut self.android_application, elements);
                 }
+                "dex" => {
+                    for path in strings()? {
+                        self.android_files.push(crate_.decl(at, "dex", path));
+                    }
+                }
+                "res" | "jniLibs" => {
+                    let path = value
+                        .as_str()
+                        .with_context(|| format!("{name}: {at} `android.{key}` is a path"))?;
+                    self.android_files
+                        .push(crate_.decl(at, key, path.to_owned()));
+                }
                 _ => warnings.push(format!(
                     "{name}: {at} `android.{key}` is not something this nsh reads: left out"
                 )),
+            }
+        }
+        Ok(())
+    }
+
+    /// Finds and checks the Android files the crates name
+    /// (`android.dex`, `android.res`, `android.jniLibs`): each inside its
+    /// crate, of its kind; no resource of a name NSH generates; no
+    /// resource two crates both declare. Android packages and the Android
+    /// host call it; other platforms never read the files.
+    pub(crate) fn resolve_android_files(&mut self) -> anyhow::Result<()> {
+        // Which crate (by its directory: two versions of one crate are two)
+        // declares each resource.
+        let mut owners: BTreeMap<String, (&str, Option<&Path>)> = BTreeMap::new();
+        for decl in &self.android_files {
+            let FileDecl { name, at, key, .. } = decl;
+            let path = &decl.path;
+            let file = decl.file()?;
+            match key.as_str() {
+                "dex" => {
+                    let mut magic = [0u8; 4];
+                    std::io::Read::read_exact(
+                        &mut std::fs::File::open(&file)
+                            .with_context(|| format!("{name}: {at} `android.dex`: read {path}"))?,
+                        &mut magic,
+                    )
+                    .ok();
+                    if &magic != b"dex\n" {
+                        bail!(
+                            "{name}: {at} `android.dex`: {path} is not a dex file (make one with the SDK's `d8`)"
+                        );
+                    }
+                    if !self.android_dex.contains(&file) {
+                        self.android_dex.push(file);
+                    }
+                }
+                _ => {
+                    if !file.is_dir() {
+                        bail!("{name}: {at} `android.{key}`: {path} is not a directory");
+                    }
+                    decl.check_inside(&file)?;
+                    if key == "res" {
+                        for resource in resource_names(&file)
+                            .with_context(|| format!("{name}: {at} `android.res`: read {path}"))?
+                        {
+                            let bare = resource.split_once('/').map_or(&*resource, |(_, n)| n);
+                            if RESERVED_RESOURCE_PREFIXES
+                                .iter()
+                                .any(|p| bare.starts_with(p))
+                            {
+                                bail!(
+                                    "{name}: {at} `android.res`: `{resource}` takes a name of NSH's own resources ({})",
+                                    RESERVED_RESOURCE_PREFIXES
+                                        .iter()
+                                        .map(|p| format!("`{p}…`"))
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                );
+                            }
+                            let owner = (name.as_str(), decl.dir.as_deref());
+                            if let Some((other, other_dir)) = owners.insert(resource.clone(), owner)
+                                && other_dir != owner.1
+                            {
+                                bail!(
+                                    "{other} and {name} both declare the Android resource `{resource}`: \
+                                     only the app's own `android/res` may replace another's"
+                                );
+                            }
+                        }
+                        if !self.android_res.contains(&file) {
+                            self.android_res.push(file);
+                        }
+                    } else {
+                        for entry in std::fs::read_dir(&file).with_context(|| {
+                            format!("{name}: {at} `android.jniLibs`: read {path}")
+                        })? {
+                            let abi = entry?.file_name().to_string_lossy().into_owned();
+                            if !ANDROID_ABIS.contains(&abi.as_str()) && !abi.starts_with('.') {
+                                bail!(
+                                    "{name}: {at} `android.jniLibs`: {path}/{abi} is no Android ABI ({})",
+                                    ANDROID_ABIS.join(", ")
+                                );
+                            }
+                        }
+                        if !self.android_jni_libs.contains(&file) {
+                            self.android_jni_libs.push(file);
+                        }
+                    }
+                }
             }
         }
         Ok(())
@@ -342,6 +468,13 @@ impl ModuleMeta {
             &mut config.android.application,
             self.android_application.clone(),
         );
+        for dex in &self.android_dex {
+            if !config.android.dex.contains(dex) {
+                config.android.dex.push(dex.clone());
+            }
+        }
+        config.android.crate_res.clone_from(&self.android_res);
+        config.android.jni_libs.clone_from(&self.android_jni_libs);
         Ok(())
     }
 }
@@ -401,6 +534,306 @@ fn join_strings(list: &mut Vec<String>, more: Vec<String>) {
             list.push(value);
         }
     }
+}
+
+/// The Android ABIs a crate's `jniLibs` may hold.
+const ANDROID_ABIS: &[&str] = &["arm64-v8a", "armeabi-v7a", "x86", "x86_64"];
+
+/// A package whose metadata is read: its name, for errors, and its
+/// directory, which the paths it names are relative to.
+struct Crate<'a> {
+    name: &'a str,
+    dir: Option<&'a Path>,
+}
+
+impl Crate<'_> {
+    /// A file or directory the crate names (`android.<key>` in section
+    /// `at`), found later by [`ModuleMeta::resolve_android_files`].
+    fn decl(&self, at: &str, key: &str, path: String) -> FileDecl {
+        FileDecl {
+            name: self.name.to_owned(),
+            at: at.to_owned(),
+            key: key.to_owned(),
+            dir: self.dir.map(Path::to_path_buf),
+            path,
+        }
+    }
+}
+
+/// A path a crate names in its metadata.
+#[derive(Debug, Clone, PartialEq)]
+struct FileDecl {
+    /// The crate, and where in its metadata (for errors).
+    name: String,
+    at: String,
+    /// `dex`, `res` or `jniLibs`.
+    key: String,
+    /// The crate's directory, which `path` is relative to.
+    dir: Option<PathBuf>,
+    path: String,
+}
+
+impl FileDecl {
+    /// The crate's directory, its links followed.
+    fn root(&self) -> anyhow::Result<PathBuf> {
+        let FileDecl { name, at, key, .. } = self;
+        let dir = self.dir.as_deref().with_context(|| {
+            format!("{name}: {at} `android.{key}`: cargo metadata names no directory")
+        })?;
+        dunce::canonicalize(dir)
+            .with_context(|| format!("{name}: {at} `android.{key}`: {}", dir.display()))
+    }
+
+    /// The file as a path in the crate's directory: relative, and inside it
+    /// once links are followed, so a crate packages only its own files.
+    fn file(&self) -> anyhow::Result<PathBuf> {
+        let FileDecl {
+            name,
+            at,
+            key,
+            path,
+            ..
+        } = self;
+        if Path::new(path).is_absolute() {
+            bail!(
+                "{name}: {at} `android.{key}`: {path} is absolute; name it relative to the crate's Cargo.toml, with `/`"
+            );
+        }
+        let root = self.root()?;
+        let file = dunce::canonicalize(root.join(path))
+            .with_context(|| format!("{name}: {at} `android.{key}`: {path} is missing"))?;
+        if !file.starts_with(&root) {
+            bail!("{name}: {at} `android.{key}`: {path} is outside the crate");
+        }
+        Ok(file)
+    }
+
+    /// Checks every file in the directory `dir` is inside the crate too,
+    /// links followed.
+    fn check_inside(&self, dir: &Path) -> anyhow::Result<()> {
+        let root = self.root()?;
+        let FileDecl { name, at, key, .. } = self;
+        for entry in walk(dir).with_context(|| format!("{name}: {at} `android.{key}`"))? {
+            let real = dunce::canonicalize(&entry).with_context(|| {
+                format!(
+                    "{name}: {at} `android.{key}`: {} leads nowhere",
+                    entry.display()
+                )
+            })?;
+            if !real.starts_with(&root) {
+                bail!(
+                    "{name}: {at} `android.{key}`: {} leads outside the crate",
+                    entry.display()
+                );
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The files under `dir`, dot files (`.DS_Store`) left out. A link to a
+/// folder is refused: `aapt2` and the packaging would follow it where the
+/// checks of the crate's files could not.
+fn walk(dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
+        .with_context(|| format!("read {}", dir.display()))?
+        .map(|e| e.map(|e| e.path()))
+        .collect::<Result<_, _>>()?;
+    entries.sort();
+    for entry in entries {
+        if entry
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy().starts_with('.'))
+        {
+            continue;
+        }
+        let link = std::fs::symlink_metadata(&entry)
+            .with_context(|| format!("read {}", entry.display()))?;
+        if link.is_dir() {
+            files.extend(walk(&entry)?);
+        } else if link.file_type().is_symlink() && entry.is_dir() {
+            bail!(
+                "{} links to a folder; put the folder itself there",
+                entry.display()
+            );
+        } else {
+            files.push(entry);
+        }
+    }
+    Ok(files)
+}
+
+/// The prefixes of the resource names NSH generates (the launcher icon,
+/// the launch screen's theme, color and drawables), which a crate's
+/// resources may not take.
+const RESERVED_RESOURCE_PREFIXES: &[&str] = &["ic_launcher", "nsh_", "NshLaunch"];
+
+/// The resources a resource directory `res` declares, as `type/name`:
+/// each file under `<type>[-<qualifiers>]/` by its name, and each element
+/// of a `values*/` file's `<resources>` by its `name` attribute.
+fn resource_names(res: &Path) -> anyhow::Result<std::collections::BTreeSet<String>> {
+    let mut names = std::collections::BTreeSet::new();
+    for file in walk(res)? {
+        let Some(folder) = file.parent().and_then(Path::file_name) else {
+            continue;
+        };
+        let folder = folder.to_string_lossy();
+        let kind = folder.split('-').next().unwrap_or_default();
+        let stem = file
+            .file_name()
+            .map(|n| n.to_string_lossy())
+            .unwrap_or_default();
+        // As `aapt2` names it: up to the last dot, `.9.png` whole.
+        let stem = stem
+            .strip_suffix(".9.png")
+            .or_else(|| stem.rsplit_once('.').map(|(name, _)| name))
+            .unwrap_or(&stem);
+        if kind == "values" {
+            let text = std::fs::read_to_string(&file)?;
+            names.extend(values_names(&text));
+        } else {
+            names.insert(format!("{kind}/{stem}"));
+        }
+    }
+    Ok(names)
+}
+
+/// The `type/name` of each resource a values file declares: each element
+/// directly in its `<resources>` by its `name` (`<string name="a">` is
+/// `string/a`, `<item type="id" name="b">` is `id/b`,
+/// `<declare-styleable name="c">` is `styleable/c`), an `<attr>` with a
+/// `format` inside a `<declare-styleable>` (`attr/…`), and an `<enum>` or
+/// `<flag>` of an `<attr>` (`id/…`). A style's or an array's items are
+/// their parent's; `<public>`, `<java-symbol>`, `<overlayable>` and
+/// `<eat-comment>` declare nothing.
+fn values_names(xml: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    // The open elements, outermost first.
+    let mut open: Vec<String> = Vec::new();
+    let mut rest = xml;
+    while let Some(start) = rest.find('<') {
+        rest = &rest[start..];
+        if let Some(after) = rest.strip_prefix("<!--") {
+            rest = after.find("-->").map_or("", |end| &after[end + 3..]);
+            continue;
+        }
+        if let Some(after) = rest.strip_prefix("<![CDATA[") {
+            rest = after.find("]]>").map_or("", |end| &after[end + 3..]);
+            continue;
+        }
+        // The tag, to its `>` outside quotes.
+        let mut quote = None;
+        let Some(end) = rest.char_indices().find_map(|(i, c)| match quote {
+            Some(q) if c == q => {
+                quote = None;
+                None
+            }
+            Some(_) => None,
+            None if c == '"' || c == '\'' => {
+                quote = Some(c);
+                None
+            }
+            None => (c == '>').then_some(i),
+        }) else {
+            break;
+        };
+        let tag = &rest[1..end];
+        rest = &rest[end + 1..];
+        if tag.starts_with('?') || tag.starts_with('!') {
+            continue;
+        }
+        if tag.starts_with('/') {
+            open.pop();
+            continue;
+        }
+        let element = tag
+            .split(|c: char| c.is_whitespace() || c == '/')
+            .next()
+            .unwrap_or_default()
+            .to_owned();
+        let attrs = attributes(tag);
+        let attr = |key: &str| attrs.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone());
+        let parent = open.last().map(String::as_str);
+        let depth = open.len();
+        let kind = match (depth, element.as_str(), parent) {
+            (1, "public" | "java-symbol" | "overlayable" | "eat-comment", _) => None,
+            (1, "item", _) => Some(attr("type").unwrap_or_else(|| "item".into())),
+            (1, "declare-styleable", _) => Some("styleable".into()),
+            (1, "string-array" | "integer-array", _) => Some("array".into()),
+            (1, other, _) => Some(other.to_owned()),
+            (2, "attr", Some("declare-styleable")) if attr("format").is_some() => {
+                Some("attr".into())
+            }
+            (_, "enum" | "flag", Some("attr")) => Some("id".into()),
+            _ => None,
+        };
+        if let (Some(kind), Some(name)) = (kind, attr("name")) {
+            names.push(format!("{kind}/{name}"));
+        }
+        if !tag.ends_with('/') {
+            open.push(element);
+        }
+    }
+    names
+}
+
+/// The attributes of a tag (`string name="a" tools:x='b'`): names with
+/// their prefix, values without quotes.
+fn attributes(tag: &str) -> Vec<(String, String)> {
+    let mut attrs = Vec::new();
+    // Past the element's name.
+    let mut rest = tag.trim_start().trim_end_matches('/');
+    rest = rest.find(char::is_whitespace).map_or("", |at| &rest[at..]);
+    loop {
+        rest = rest.trim_start();
+        let Some(eq) = rest.find('=') else { break };
+        let key = rest[..eq].trim().to_owned();
+        let value = rest[eq + 1..].trim_start();
+        let Some(quote) = value.chars().next().filter(|c| *c == '"' || *c == '\'') else {
+            break;
+        };
+        let Some(close) = value[1..].find(quote) else {
+            break;
+        };
+        attrs.push((key, value[1..1 + close].to_owned()));
+        rest = &value[close + 2..];
+    }
+    attrs
+}
+
+/// A digest of `paths` (files, and the files of directories): each one's
+/// path, size and time of change, what a development host is built from,
+/// so a changed file rebuilds it without reading every file each run.
+pub(crate) fn digest(paths: &[&Path]) -> anyhow::Result<String> {
+    use sha2::{Digest as _, Sha256};
+    let mut hasher = Sha256::new();
+    for path in paths {
+        let files = if std::fs::symlink_metadata(path)?.is_dir() {
+            walk(path)?
+        } else {
+            vec![path.to_path_buf()]
+        };
+        for file in files {
+            let meta =
+                std::fs::metadata(&file).with_context(|| format!("read {}", file.display()))?;
+            let modified = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |d| d.as_nanos());
+            let name = file.to_string_lossy();
+            hasher.update((name.len() as u64).to_le_bytes());
+            hasher.update(name.as_bytes());
+            hasher.update(meta.len().to_le_bytes());
+            hasher.update(modified.to_le_bytes());
+        }
+    }
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
 }
 
 /// Checks `xml` is one element, balanced, whose name is one of `elements`
@@ -707,12 +1140,269 @@ mod tests {
         // Keys a later nsh reads: reported, left out.
         let (meta, warnings) = ModuleMeta::from_metadata(&metadata(&[(
             "x",
-            json!({ "nsh": { "android": { "dex": ["a.dex"] }, "ios": { "privacy": {} } } }),
+            json!({ "nsh": { "android": { "libraries": ["a:b:1"] }, "ios": { "privacy": {} } } }),
             &[],
         )]))
         .unwrap();
         assert_eq!(meta, ModuleMeta::default());
         assert_eq!(warnings.len(), 2, "{warnings:?}");
+    }
+
+    /// `cargo metadata`'s output for crates with directories: (name, its
+    /// directory, its `android` table).
+    fn crates_with_files(crates: &[(&str, &Path, Value)]) -> Value {
+        let id = |name: &str| format!("path+file:///work/{name}#0.1.0");
+        json!({
+            "packages": crates.iter().map(|(name, dir, android)| json!({
+                "id": id(name),
+                "name": name,
+                "manifest_path": dir.join("Cargo.toml"),
+                "metadata": { "nsh": { "android": android } },
+            })).collect::<Vec<_>>(),
+            "resolve": { "nodes": crates.iter().map(|(name, _, _)| json!({
+                "id": id(name),
+                "features": [],
+            })).collect::<Vec<_>>() },
+        })
+    }
+
+    #[test]
+    fn crates_android_files_are_their_own() {
+        let dir = std::env::temp_dir().join(format!("nsh-cli-crate-files-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let krate = dir.join("ocr");
+        std::fs::create_dir_all(krate.join("android/res/values")).unwrap();
+        std::fs::create_dir_all(krate.join("android/jniLibs/arm64-v8a")).unwrap();
+        std::fs::create_dir_all(krate.join("android/bad-jni/mips")).unwrap();
+        std::fs::write(krate.join("android/ocr.dex"), b"dex\n035\0ocr").unwrap();
+        std::fs::write(krate.join("android/ocr.jar"), b"PK\x03\x04").unwrap();
+        std::fs::write(krate.join("Cargo.toml"), "").unwrap();
+        std::fs::write(dir.join("secret.dex"), b"dex\n035\0x").unwrap();
+        let read = |android: Value| {
+            let (mut meta, warnings) =
+                ModuleMeta::from_metadata(&crates_with_files(&[("ocr", &krate, android)]))?;
+            assert!(warnings.is_empty(), "{warnings:?}");
+            meta.resolve_android_files().map(|()| meta)
+        };
+        let meta = read(json!({
+            "dex": ["android/ocr.dex"],
+            "res": "android/res",
+            "jniLibs": "android/jniLibs",
+        }))
+        .unwrap();
+        let canonical = |p: &str| dunce::canonicalize(krate.join(p)).unwrap();
+        assert_eq!(meta.android_dex, [canonical("android/ocr.dex")]);
+        assert_eq!(meta.android_res, [canonical("android/res")]);
+        assert_eq!(meta.android_jni_libs, [canonical("android/jniLibs")]);
+        // After the app's own dex; the crates' resources and libraries
+        // beside the app's.
+        let mut config = AppConfig::default();
+        config.android.dex.push(dir.join("app.dex"));
+        meta.apply(&mut config, Platform::Android).unwrap();
+        assert_eq!(
+            config.android.dex,
+            [dir.join("app.dex"), canonical("android/ocr.dex")]
+        );
+        assert_eq!(config.android.crate_res, [canonical("android/res")]);
+        assert_eq!(config.android.jni_libs, [canonical("android/jniLibs")]);
+        // A crate packages only its own files, of the right kind.
+        std::os::unix::fs::symlink(
+            dir.join("secret.dex"),
+            krate.join("android/res/values/out.xml"),
+        )
+        .unwrap();
+        for (android, says) in [
+            (json!({ "dex": ["../secret.dex"] }), "outside the crate"),
+            (json!({ "dex": [dir.join("secret.dex")] }), "is absolute"),
+            (json!({ "dex": ["android/missing.dex"] }), "is missing"),
+            (json!({ "dex": ["android/ocr.jar"] }), "is not a dex file"),
+            (json!({ "res": "android/ocr.dex" }), "is not a directory"),
+            (json!({ "res": "android/res" }), "leads outside the crate"),
+            (json!({ "jniLibs": "android/bad-jni" }), "is no Android ABI"),
+        ] {
+            let error = format!("{:#}", read(android.clone()).unwrap_err());
+            assert!(
+                error.starts_with("ocr: [package.metadata.nsh] `android.") && error.contains(says),
+                "{android}: {error}"
+            );
+        }
+        let error = format!(
+            "{:#}",
+            read(json!({ "dex": "android/ocr.dex" })).unwrap_err()
+        );
+        assert!(error.contains("is a list of strings"), "{error}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn other_platforms_never_read_a_crates_android_files() {
+        let dir = std::env::temp_dir().join(format!("nsh-cli-crate-ios-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (mut meta, _) = ModuleMeta::from_metadata(&crates_with_files(&[(
+            "ocr",
+            &dir,
+            json!({ "dex": ["missing.dex"], "permissions": ["CAMERA"] }),
+        )]))
+        .unwrap();
+        // An iOS package applies what the crates declare without the files.
+        meta.apply(&mut AppConfig::default(), Platform::Ios)
+            .unwrap();
+        // Android finds the file missing, and the rest is still there.
+        assert!(meta.resolve_android_files().is_err());
+        assert_eq!(meta.android_permissions, ["android.permission.CAMERA"]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn crates_resources_take_no_name_nsh_or_another_crate_has() {
+        let dir = std::env::temp_dir().join(format!("nsh-cli-crate-res-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let res = |krate: &str, file: &str, text: &str| {
+            let path = dir.join(krate).join("res").join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+            dir.join(krate)
+        };
+        let a = res(
+            "a",
+            "values/strings.xml",
+            r#"<?xml version="1.0"?>
+<resources>
+    <!-- <string name="commented">x</string> -->
+    <string name="greeting">Hi</string>
+    <style name="Scanner"><item name="android:windowBackground">@null</item></style>
+</resources>"#,
+        );
+        res("a", "drawable-hdpi/scan.png", "png");
+        let b = res(
+            "b",
+            "values/s.xml",
+            r#"<resources><string name="farewell">Bye</string><item type="id" name="scan"/></resources>"#,
+        );
+        let both = |b_android: Value| {
+            let (mut meta, _) = ModuleMeta::from_metadata(&crates_with_files(&[
+                ("a", &a, json!({ "res": "res" })),
+                ("b", &b, b_android),
+            ]))
+            .unwrap();
+            meta.resolve_android_files().map(|()| meta)
+        };
+        // `drawable/scan` and `id/scan` differ; a style's items are not
+        // resources of their own.
+        let meta = both(json!({ "res": "res" })).unwrap();
+        assert_eq!(meta.android_res.len(), 2);
+        res(
+            "b",
+            "values/more.xml",
+            r#"<resources><string name="greeting">Hey</string></resources>"#,
+        );
+        let error = format!("{:#}", both(json!({ "res": "res" })).unwrap_err());
+        assert!(
+            error.contains("a and b both declare the Android resource `string/greeting`"),
+            "{error}"
+        );
+        std::fs::remove_file(dir.join("b/res/values/more.xml")).unwrap();
+        for (file, text, resource) in [
+            ("mipmap-hdpi/ic_launcher.png", "png", "mipmap/ic_launcher"),
+            (
+                "values/c.xml",
+                r#"<resources><color name="nsh_launch_background">#fff</color></resources>"#,
+                "color/nsh_launch_background",
+            ),
+        ] {
+            res("b", file, text);
+            let error = format!("{:#}", both(json!({ "res": "res" })).unwrap_err());
+            assert!(
+                error.contains(&format!("`{resource}` takes a name of NSH's own resources")),
+                "{error}"
+            );
+            std::fs::remove_file(dir.join("b/res").join(file)).unwrap();
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn values_files_declare_what_aapt2_reads() {
+        let names = values_names(
+            r#"<?xml version="1.0"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- <string name="commented">x</string> -->
+    <string name='single'>a</string>
+    <string name = "spaced">b</string>
+    <string tools:name="z" name="real">c</string>
+    <item name="b" type="dimen" format="x>y">1dp</item>
+    <string name="after">d</string>
+    <style name="Scanner"><item name="colorAccent">#f00</item></style>
+    <declare-styleable name="Gauge">
+        <attr name="tint" format="color" />
+        <attr name="android:text" />
+        <attr name="mode"><enum name="ring" value="0" /></attr>
+    </declare-styleable>
+    <public type="string" name="single" />
+    <eat-comment />
+    <string-array name="list"><item>x</item></string-array>
+</resources>"#,
+        );
+        assert_eq!(
+            names,
+            [
+                "string/single",
+                "string/spaced",
+                "string/real",
+                "dimen/b",
+                "string/after",
+                "style/Scanner",
+                "styleable/Gauge",
+                "attr/tint",
+                "id/ring",
+                "array/list",
+            ]
+        );
+    }
+
+    #[test]
+    fn resource_files_are_named_as_aapt2_names_them() {
+        let dir = std::env::temp_dir().join(format!("nsh-cli-res-names-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for file in [
+            "raw/model.v1.bin",
+            "drawable-hdpi/frame.9.png",
+            "drawable-night-v31/icon.xml",
+        ] {
+            let path = dir.join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "x").unwrap();
+        }
+        assert_eq!(
+            resource_names(&dir)
+                .unwrap()
+                .into_iter()
+                .collect::<Vec<_>>(),
+            ["drawable/frame", "drawable/icon", "raw/model.v1"]
+        );
+        // A link to a folder is not followed: refused.
+        std::fs::create_dir_all(dir.join("shared/values")).unwrap();
+        std::os::unix::fs::symlink(dir.join("shared/values"), dir.join("res-values")).unwrap();
+        let error = format!("{:#}", walk(&dir).unwrap_err());
+        assert!(error.contains("links to a folder"), "{error}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_digest_follows_what_files_hold() {
+        let dir = std::env::temp_dir().join(format!("nsh-cli-digest-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("res/values")).unwrap();
+        std::fs::write(dir.join("res/values/a.xml"), "<resources/>").unwrap();
+        std::fs::write(dir.join("a.dex"), b"dex\n1").unwrap();
+        let paths = [dir.join("a.dex"), dir.join("res")];
+        let paths: Vec<&Path> = paths.iter().map(PathBuf::as_path).collect();
+        let first = digest(&paths).unwrap();
+        assert_eq!(digest(&paths).unwrap(), first);
+        std::fs::write(dir.join("res/values/a.xml"), "<resources></resources>").unwrap();
+        assert_ne!(digest(&paths).unwrap(), first);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

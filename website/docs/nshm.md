@@ -290,7 +290,7 @@ The NSH versions an nshm builds with are its own `nsh-core` requirement (`nsh-co
 An nshm that uses a system feature declares what the packaged app needs in its `Cargo.toml`, under
 `[package.metadata.nsh]`, or under a feature's `[package.metadata.nsh.features.<feature>]` when only that feature
 needs it. `nsh` adds the entries of every crate the app links, with the features Cargo turns on, to the packages it builds,
-and the `Info.plist` keys and Android entries to its development hosts:
+and the `Info.plist` keys and Android entries and files to its development hosts:
 
 ```toml
 [package.metadata.nsh.features.scanner.ios.infoPlist]
@@ -309,6 +309,36 @@ application = ['<service android:name="com.example.scanner.Sync" android:exporte
 | `android.permissions` | `<uses-permission>` elements, named as in `nsh.json` (`CAMERA` is `android.permission.CAMERA`) |
 | `android.queries` | `<intent>`, `<package>` and `<provider>` elements of the manifest's `<queries>` |
 | `android.application` | `<service>`, `<receiver>`, `<provider>`, `<activity>` and `<meta-data>` elements of `<application>`; `${applicationId}` is the app's package |
+| `android.dex` | Dex files of the crate's Java code, packaged after the app's ([Java code](./packaging.md#java-code)) |
+| `android.res` | A directory of Android resources laid out as the app's `android/res/`, linked below the app's, which wins on a name both declare |
+| `android.jniLibs` | A directory of native libraries, `<abi>/*.so` (`arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64`), packaged beside `libnsh.so`; a 64-bit library must be aligned to 16 KB pages |
+
+Paths are relative to the crate's `Cargo.toml`, written with `/`, and must stay inside the crate, links followed, so an
+nshm packages only files it ships; a link to a folder is refused. Only Android packages and the Android development
+host read the files, so a missing or wrong one never stops an iOS build:
+
+```toml
+[package.metadata.nsh.android]
+dex = ["android/ocr.dex"]
+res = "android/res"
+jniLibs = "android/jniLibs"
+```
+
+What packaging does with them, and what it does not:
+
+- The dex files come after the app's own, so a class both have is loaded from the app's; a class two crates both have
+  is loaded from the first and not reported. Build the dex from your own classes only.
+- Resources get no `R` class: Java code finds them by name, `getResources().getIdentifier("scan", "drawable",
+  context.getPackageName())`. The app's `android/res` wins on a name both declare, configuration by configuration: a
+  crate's `values-fr` string stays when the app declares only `values`, and a style both declare merges item by item.
+  A name NSH generates (`ic_launcher…`,
+  `nsh_…`, `NshLaunch…`) or another crate declares is an error.
+- Libraries are `lib<name>.so` files, loaded with `System.loadLibrary("<name>")`; packages keep them uncompressed in the
+  APK, not extracted, so code that opens one by its path in the file system does not find it. A library of one name in
+  two crates is packaged once when the files are the same, and is an error otherwise. A 64-bit library must be aligned
+  to 16 KB pages (`-Wl,-z,max-page-size=16384`), which Google Play requires from target SDK 35.
+- An `nsh` older than these keys builds without the files and warns that it does not read them; an nshm that uses them
+  should require the `nsh-core` of this release or later.
 
 The app's own `nsh.json` wins: a key it sets keeps its value, and arrays (such as `UIBackgroundModes`) are joined. When
 two crates set one key to different values (two usage descriptions of the camera), the app chooses by setting the key

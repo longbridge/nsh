@@ -859,10 +859,20 @@ pub(crate) fn install_android_host(
     let installed = work.join("android/installed");
     // What the app's crates declare for the manifest (the apps they start,
     // their components): part of the build, as the runtime is.
-    let meta = crate::module_meta::for_dev_host(
+    let mut meta = crate::module_meta::for_dev_host(
         "aarch64-linux-android",
         crate::module_meta::Platform::Android,
     );
+    // The crates' Android files: a missing or wrong one leaves the files
+    // out, not the rest of what the crates declare.
+    if let Err(e) = meta.resolve_android_files() {
+        ui::warn(format!(
+            "the development host leaves out the Android files the app's crates name: {e:#}"
+        ));
+        meta.android_dex.clear();
+        meta.android_res.clear();
+        meta.android_jni_libs.clear();
+    }
     let mut version = runtime_version(runtime, abis)?;
     for line in meta
         .android_permissions
@@ -873,44 +883,76 @@ pub(crate) fn install_android_host(
         version.push('\n');
         version.push_str(line);
     }
+    // The crates' files too, by what they hold: a rebuilt dex or library
+    // rebuilds the host.
+    let files: Vec<&Path> = meta
+        .android_dex
+        .iter()
+        .chain(&meta.android_res)
+        .chain(&meta.android_jni_libs)
+        .map(PathBuf::as_path)
+        .collect();
+    if !files.is_empty() {
+        version.push('\n');
+        version.push_str(&crate::module_meta::digest(&files)?);
+    }
     let built =
         apk_path.exists() && fs::read_to_string(&stamp).ok().as_deref() == Some(version.as_str());
     if !built {
         let step = ui::Step::start("building the Android development host");
-        android::build_apk(
-            sdk,
-            &Apk {
-                package: BUNDLE_ID,
-                label: APP_NAME,
-                version_name: "0.1.0",
-                version_code: 1,
-                target_sdk: android::DEFAULT_TARGET_SDK,
-                activity: "com.longbridge.nsh.DevActivity",
-                dev: true,
-                cleartext: true,
-                notifications: true,
-                // The host runs any app: its pages may capture media.
-                microphone: true,
-                camera: true,
-                dex: &[],
-                permissions: &meta.android_permissions,
-                queries: &meta.android_queries,
-                application: &meta.android_application,
-                schemes: &[],
-                rust: false,
-                dark: false,
-                fixed_appearance: false,
-                runtime,
-                abis,
-                icon: None,
-                launch_screen: None,
-                assets: Vec::new(),
-                sounds: Vec::new(),
-                res: None,
-                signing: Signing::Debug,
-            },
-            &apk_path,
-        )?;
+        let host = |dex: &[PathBuf], crate_res: &[PathBuf], jni_libs: &[PathBuf]| {
+            android::build_apk(
+                sdk,
+                &Apk {
+                    package: BUNDLE_ID,
+                    label: APP_NAME,
+                    version_name: "0.1.0",
+                    version_code: 1,
+                    target_sdk: android::DEFAULT_TARGET_SDK,
+                    activity: "com.longbridge.nsh.DevActivity",
+                    dev: true,
+                    cleartext: true,
+                    notifications: true,
+                    // The host runs any app: its pages may capture media.
+                    microphone: true,
+                    camera: true,
+                    dex,
+                    permissions: &meta.android_permissions,
+                    queries: &meta.android_queries,
+                    application: &meta.android_application,
+                    schemes: &[],
+                    rust: false,
+                    dark: false,
+                    fixed_appearance: false,
+                    runtime,
+                    abis,
+                    icon: None,
+                    launch_screen: None,
+                    assets: Vec::new(),
+                    sounds: Vec::new(),
+                    res: None,
+                    crate_res,
+                    jni_libs,
+                    signing: Signing::Debug,
+                },
+                &apk_path,
+            )
+        };
+        let built = host(&meta.android_dex, &meta.android_res, &meta.android_jni_libs);
+        // A crate's file that does not build (a resource `aapt2` refuses, a
+        // library of another ABI) leaves the files out, not the session.
+        if let Err(e) = built {
+            if meta.android_dex.is_empty()
+                && meta.android_res.is_empty()
+                && meta.android_jni_libs.is_empty()
+            {
+                return Err(e);
+            }
+            ui::warn(format!(
+                "the development host leaves out the Android files the app's crates name: {e:#}"
+            ));
+            host(&[], &[], &[])?;
+        }
         step.done("built the Android development host");
         // Until it is installed, no device has this build.
         let _ = fs::remove_file(&installed);

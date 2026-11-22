@@ -1116,7 +1116,14 @@ permissions, queries and components on Android. The CLI reads them from the app'
 Cargo turns on and adds them to iOS and Android packages; `nsh run`'s development hosts get the `Info.plist` keys and
 the Android entries, not the entitlements. The app's `nsh.json` wins and settles what two crates disagree on (for iOS:
 an Android package never stops on an iOS key); keys NSH sets itself stay NSH's. Android permissions are checked and
-spelled out as `nsh.json`'s are. Keys this CLI does not know are
+spelled out as `nsh.json`'s are. A crate's Android files (`android.dex`, `android.res`, `android.jniLibs`) are paths
+inside the crate, read only by Android packages and the Android host (`ModuleMeta::resolve_android_files`: inside the
+crate with links followed, a dex's magic, known ABIs, no resource name NSH generates or another crate declares; the
+host drops only the files when one is wrong). Packages and the host take them as `Apk::dex` after the app's,
+`crate_res` as `aapt2` overlays with the app's `android/res` linked as base and again as the last overlay
+(`android::resource_layers`), and `jni_libs` beside `libnsh.so` (`lib*.so`, identical duplicates once, each checked
+for its ABI's ELF class and machine and, 64-bit, 16 KB pages: `check_library`); the host's stamp holds their
+digest (path, size, time). Keys this CLI does not know are
 reported and left out, so the format can grow.
 
 ## Finding the runtimes

@@ -306,6 +306,15 @@ pub(crate) struct AndroidConfig {
     /// their classes as it finds NSH's.
     #[serde(default)]
     pub(crate) dex: Vec<PathBuf>,
+    /// The resource directories the app's crates declare
+    /// ([`crate::module_meta`]); not an `nsh.json` key (the app's own are
+    /// `android/res/`).
+    #[serde(skip)]
+    pub(crate) crate_res: Vec<PathBuf>,
+    /// The native library directories (`<abi>/*.so`) the app's crates
+    /// declare ([`crate::module_meta`]); not an `nsh.json` key.
+    #[serde(skip)]
+    pub(crate) jni_libs: Vec<PathBuf>,
     /// Permissions the manifest declares besides the ones NSH declares
     /// itself (`<uses-permission>`): a bare name (`ACCESS_NETWORK_STATE`)
     /// is Android's, `android.permission.<name>`; a dotted one is written
@@ -1327,11 +1336,14 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
     if let Some((triple, platform)) = options.target.module_meta_triple()
         && let Some(app) = crate::rust_app::current()
     {
-        crate::module_meta::ModuleMeta::of_workspace(
+        let mut meta = crate::module_meta::ModuleMeta::of_workspace(
             &app.workspace().join("Cargo.toml"),
             Some(triple),
-        )?
-        .apply(&mut options.config, platform)?;
+        )?;
+        if platform == crate::module_meta::Platform::Android {
+            meta.resolve_android_files()?;
+        }
+        meta.apply(&mut options.config, platform)?;
     }
     let config = &options.config;
     let (name, id) = release_name_and_id(&entry, config)?;
@@ -1761,6 +1773,8 @@ fn package_android(
             assets,
             sounds: android_sounds(config, built),
             res: res.as_deref(),
+            crate_res: &config.android.crate_res,
+            jni_libs: &config.android.jni_libs,
             signing,
         },
         options.format,
