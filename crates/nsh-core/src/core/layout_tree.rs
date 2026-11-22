@@ -74,7 +74,9 @@ struct LayoutNode<C> {
     cache: Cache,
     unrounded: Layout,
     detailed: DetailedLayoutInfo,
-    context: Option<C>,
+    /// What measures a leaf: boxed, as only leaves have one and it is
+    /// large.
+    context: Option<Box<C>>,
     /// The core's node it lays out ([`LayoutTree::set_tag`]).
     tag: Option<u32>,
     /// What its parent's last full layout gave it and what it gave back:
@@ -116,7 +118,7 @@ impl<C> LayoutNode<C> {
             unrounded: Layout::new(),
             stale: true,
             detailed: DetailedLayoutInfo::None,
-            context,
+            context: context.map(Box::new),
             tag: None,
             last: None,
             queued: false,
@@ -400,16 +402,21 @@ impl<C> LayoutTree<C> {
 
     /// Replaces what measures `node`.
     pub(crate) fn set_node_context(&mut self, node: NodeId, context: Option<C>) {
-        self.nodes[key(node)].context = context;
+        let n = &mut self.nodes[key(node)];
+        match (&mut n.context, context) {
+            // Kept where it is: a leaf's context changes with its content.
+            (Some(old), Some(new)) => **old = new,
+            (old, new) => *old = new.map(Box::new),
+        }
         self.mark_dirty(node);
     }
 
     pub(crate) fn get_node_context(&self, node: NodeId) -> Option<&C> {
-        self.nodes[key(node)].context.as_ref()
+        self.nodes[key(node)].context.as_deref()
     }
 
     pub(crate) fn get_node_context_mut(&mut self, node: NodeId) -> Option<&mut C> {
-        self.nodes[key(node)].context.as_mut()
+        self.nodes[key(node)].context.as_deref_mut()
     }
 
     pub(crate) fn parent(&self, node: NodeId) -> Option<NodeId> {
@@ -595,7 +602,7 @@ impl<C> LayoutTree<C> {
         };
         let style = if plain { &self.plain } else { &n.style };
         measured.iter().all(|(input, output)| {
-            measure(*input, node, n.context.as_mut(), style, aligned) == *output
+            measure(*input, node, n.context.as_deref_mut(), style, aligned) == *output
         })
     }
 
@@ -855,7 +862,7 @@ where
         };
         let n = &mut tree.nodes[key(node)];
         let style = if plain { &tree.plain } else { &n.style };
-        let output = (self.measure)(inputs, node, n.context.as_mut(), style, aligned);
+        let output = (self.measure)(inputs, node, n.context.as_deref_mut(), style, aligned);
         if let Some(measured) = &mut n.measured
             && !measured.iter().any(|(asked, _)| *asked == inputs)
         {
