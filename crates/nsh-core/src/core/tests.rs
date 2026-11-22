@@ -25910,6 +25910,58 @@ mod views {
         assert!(batch.is_none_or(|b| last_screen_config(&b).is_none()));
     }
 
+    #[derive(Default)]
+    struct OptionalTitlePage;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct OptionalTitlePageProps {}
+
+    thread_local! {
+        static TITLE_SHOWN: Cell<Option<Signal<bool>>> = const { Cell::new(None) };
+    }
+
+    impl Component for OptionalTitlePage {
+        type Props = OptionalTitlePageProps;
+        type Event = NoEvent;
+
+        #[allow(deprecated)]
+        fn view(_: OptionalTitlePageProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let shown = signal(false);
+            TITLE_SHOWN.with(|s| s.set(Some(shown)));
+            stack().flex_1().child(
+                screen()
+                    .title("Chat")
+                    .header_title(when(shown, || view().w(px(80.0)).h(px(24.0))))
+                    .child(view().flex_1()),
+            )
+        }
+    }
+
+    /// A title view with nothing to show leaves the platform's title text,
+    /// and comes back when its content does (allsum-nsh#1900).
+    #[test]
+    fn an_empty_header_title_falls_back_to_the_system_title() {
+        let mut c = core();
+        c.mount_root(&Root::new::<OptionalTitlePage>(
+            || OptionalTitlePageProps {},
+        ));
+        let first = last_screen_config(&c.commit().unwrap()).expect("a screen");
+        assert_eq!(first.title_view, None, "nothing shows in the title slot");
+        let shown = TITLE_SHOWN.with(Cell::get).unwrap();
+        {
+            let _entered = c.components.runtime.enter();
+            shown.set(true);
+        }
+        let config = last_screen_config(&c.commit().unwrap()).expect("options again");
+        assert!(config.title_view.is_some(), "the title view shows");
+        {
+            let _entered = c.components.runtime.enter();
+            shown.set(false);
+        }
+        let config = last_screen_config(&c.commit().unwrap()).expect("options again");
+        assert_eq!(config.title_view, None, "back to the system title");
+    }
+
     /// Without the prop the header is built as before: no system button, so
     /// the platform wraps the app's `headerRight` view instead.
     #[test]
@@ -30597,6 +30649,67 @@ mod rust_menus {
         env.idiom = crate::platform::Idiom::Terminal;
         first.set_environment(env);
         assert!(first.commit().as_ref().and_then(labels_in).is_none());
+    }
+
+    #[test]
+    fn mobile_platforms_hear_the_language_the_app_shows() {
+        use crate::platform::{Languages, Locale};
+        let sent = |batch: Option<MountBatch>| -> Vec<String> {
+            batch
+                .map(|batch| {
+                    batch
+                        .items
+                        .iter()
+                        .filter_map(|item| match item {
+                            MountItem::Command {
+                                id: ROOT_ID,
+                                command: Command::TextLocale(locale),
+                            } => Some(locale.to_string()),
+                            _ => None,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let mut c = core();
+        let mut env = crate::element::Environment {
+            os: Os::Android,
+            locale: Locale::parse("ja-JP").unwrap(),
+            ..Default::default()
+        };
+        env.locale_settings.languages = Languages::one(env.locale);
+        c.set_environment(env);
+        assert_eq!(sent(c.commit()), ["ja-JP"]);
+        // Another region of the same language is told; the same one is not.
+        env.locale = Locale::parse("ja").unwrap();
+        env.locale_settings.languages = Languages::one(env.locale);
+        c.set_environment(env);
+        assert_eq!(sent(c.commit()), ["ja"]);
+        env.dark = true;
+        c.set_environment(env);
+        assert_eq!(sent(c.commit()), Vec::<String>::new());
+        // An English-only app shows its text in English.
+        c.set_translations(
+            crate::i18n::Translations::from_json(r#"{"en":{"hello":"Hello"}}"#).unwrap(),
+        );
+        assert_eq!(sent(c.commit()), ["en-US"]);
+        // Translations added at run time bring the user's language back.
+        c.add_translations(std::collections::HashMap::from([(
+            "ja".to_owned(),
+            std::collections::HashMap::from([("hello".to_owned(), "こんにちは".to_owned())]),
+        )]));
+        assert_eq!(sent(c.commit()), ["ja"]);
+
+        // Desktops and browsers speak states in the screen reader's words.
+        for os in [Os::MacOs, Os::Linux, Os::Web] {
+            let mut c = core();
+            c.set_environment(crate::element::Environment {
+                os,
+                locale: Locale::parse("ko").unwrap(),
+                ..Default::default()
+            });
+            assert_eq!(sent(c.commit()), Vec::<String>::new(), "{os:?}");
+        }
     }
 
     fn menu_event(c: &mut Core<FakeEngine>, fields: Vec<(&'static str, PayloadValue)>) -> bool {
@@ -35405,6 +35518,16 @@ fn rounding_lands_on_device_pixels() {
     let up = super::ceil_to_pixel(measured, ratio);
     assert!((up.0 * ratio - 56.0).abs() < 1.0e-3, "{up:?}");
     assert!((super::round(4.0, ratio) * ratio - 11.0).abs() < 1.0e-3);
+    // A box under a pixel thick whose edges round to one pixel takes the
+    // pixel on the side most of it is on (the later one on a tie); one of
+    // no length, or of a length zero but for `f32`, takes none.
+    assert_eq!(super::edges(199.5, 0.5, 1.0), (199.0, 200.0));
+    assert_eq!(super::edges(10.5, 0.4, 1.0), (10.0, 11.0));
+    assert_eq!(super::edges(99.75, 0.5, 1.0), (100.0, 101.0));
+    assert_eq!(super::edges(0.0, 0.5, 1.0), (0.0, 1.0));
+    assert_eq!(super::edges(199.5, 0.5, 2.0), (399.0, 400.0));
+    assert_eq!(super::edges(10.0, 0.0, 1.0), (10.0, 10.0));
+    assert_eq!(super::edges(10.0, 1.0e-5, 1.0), (10.0, 10.0));
     // A width a hair over a whole pixel is not taken back under it: the
     // text measured again in that width would no longer fit.
     assert_eq!(super::ceil_to_pixel(Points(78.000_49), 1.0), Points(79.0));
@@ -35734,6 +35857,110 @@ fn frames_moved_by_whole_pixels_are_not_sent_again() {
             .count();
         assert_eq!(rows, 0, "{pixel} pixels down: {:?}", batch.items);
     }
+}
+
+/// Half point rules at `ratio`: a column 200 wide holding a block 10.5
+/// tall (4), a horizontal rule 0.5 tall (5) and a block below (6), and a
+/// vertical rule 0.5 wide pinned to its right edge from 40 down (7), around
+/// a child as wide as itself (8).
+fn half_point_rules(ratio: f32) -> MountBatch {
+    let mut c = core();
+    at_ratio(&mut c, ratio);
+    let mut ops = Vec::new();
+    for (id, parent) in [(3, ROOT_ID), (4, 3), (5, 3), (6, 3), (7, 3), (8, 7)] {
+        ops.push(Op::Create { id, tag: Tag::View });
+        ops.push(Op::Insert {
+            parent,
+            child: id,
+            before: None,
+        });
+    }
+    ops.push(style_op(
+        3,
+        &[
+            ("position", StyleValue::Str("relative")),
+            ("width", StyleValue::Number(200.0)),
+            ("height", StyleValue::Number(300.0)),
+        ],
+    ));
+    ops.push(style_op(4, &[("height", StyleValue::Number(10.5))]));
+    ops.push(style_op(5, &[("height", StyleValue::Number(0.5))]));
+    ops.push(style_op(6, &[("height", StyleValue::Number(10.0))]));
+    ops.push(style_op(
+        7,
+        &[
+            ("position", StyleValue::Str("absolute")),
+            ("top", StyleValue::Number(40.0)),
+            ("bottom", StyleValue::Number(0.0)),
+            ("right", StyleValue::Number(0.0)),
+            ("width", StyleValue::Number(0.5)),
+        ],
+    ));
+    ops.push(style_op(8, &[("height", StyleValue::Number(10.0))]));
+    apply(&mut c, ops);
+    c.commit().unwrap()
+}
+
+#[test]
+fn half_point_rules_keep_a_device_pixel_and_their_neighbours_meet() {
+    // One pixel per point (a 100% display, the headless default): the
+    // rules' edges both round to one pixel, and the rules took none.
+    let batch = half_point_rules(1.0);
+    let frame = |id| frame_of(&batch, id).expect("frame");
+    let (above, rule, below) = (frame(4), frame(5), frame(6));
+    assert_eq!(rule.size.height, Points(1.0), "{rule:?}");
+    // Its pixel is the one most of it is on, inside the column: the block
+    // above keeps its rounded edge and the block below starts on it, with
+    // no gap, as without the rule.
+    assert_eq!(rule.origin.y, Points(10.0));
+    assert_eq!(above.origin.y + above.size.height, Points(11.0));
+    assert_eq!(below.origin.y, Points(11.0));
+    let pinned = frame(7);
+    assert_eq!(pinned.size.width, Points(1.0), "{pinned:?}");
+    assert_eq!(pinned.origin.x + pinned.size.width, Points(200.0));
+    assert_eq!(pinned.size.height, Points(260.0));
+    // A child as wide as the rule is on the rule's pixel, not moved again.
+    assert_eq!(frame(8), rect(0.0, 0.0, 1.0, 10.0));
+
+    // Two pixels per point: half a point is a pixel, kept as it is.
+    let batch = half_point_rules(2.0);
+    let frame = |id| frame_of(&batch, id).expect("frame");
+    assert_eq!(frame(5), rect(0.0, 10.5, 200.0, 0.5));
+    assert_eq!(frame(6).origin.y, Points(11.0));
+    assert_eq!(frame(7), rect(199.5, 40.0, 0.5, 260.0));
+    assert_eq!(frame(8), rect(0.0, 0.0, 0.5, 10.0));
+}
+
+#[test]
+fn a_rule_that_grows_a_pixel_thick_moves_its_child_back_onto_it() {
+    // A rule 0.5 tall 10.5 down at one pixel per point is on the pixel
+    // before, and its child of its height with it. Grown to a point, it is
+    // on its own pixels: its child, laid out as before, is a pixel above
+    // it, as it is in the layout, though nothing moved it.
+    let mut c = core();
+    let mut ops = Vec::new();
+    for (id, parent) in [(3, ROOT_ID), (4, 3), (5, 3), (6, 5)] {
+        ops.push(Op::Create { id, tag: Tag::View });
+        ops.push(Op::Insert {
+            parent,
+            child: id,
+            before: None,
+        });
+    }
+    ops.push(style_op(4, &[("height", StyleValue::Number(10.5))]));
+    ops.push(style_op(5, &[("height", StyleValue::Number(0.5))]));
+    ops.push(style_op(6, &[("height", StyleValue::Number(0.5))]));
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 5), Some(rect(0.0, 10.0, 320.0, 1.0)));
+    assert_eq!(frame_of(&batch, 6), Some(rect(0.0, 0.0, 320.0, 1.0)));
+    apply(
+        &mut c,
+        vec![style_op(5, &[("height", StyleValue::Number(1.0))])],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 5), Some(rect(0.0, 11.0, 320.0, 1.0)));
+    assert_eq!(frame_of(&batch, 6), Some(rect(0.0, -1.0, 320.0, 1.0)));
 }
 
 #[test]

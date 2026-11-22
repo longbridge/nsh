@@ -2650,6 +2650,12 @@ pub enum Command {
     /// sheets) take their colors from, by the tokens' names (`popover`,
     /// `accent`, `border`, ...).
     Tokens(std::sync::Arc<crate::element::Tokens>),
+    /// The language the app's text shows in ([`crate::i18n`]: its selected
+    /// language, `setLocale`'s or the embedding app's included), on the
+    /// root of an iOS or Android surface, sent when it changes: the words
+    /// the platform speaks for states it has no system words for
+    /// (checked, expanded, invalid...) follow it.
+    TextLocale(crate::platform::Locale),
     /// Change what functions set for the status bar (on the root): the
     /// core merges it under the settings components render and sends
     /// [`Command::StatusBar`] when the result changes.

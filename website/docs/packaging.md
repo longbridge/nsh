@@ -452,6 +452,49 @@ Entitlements:
   `com.apple.developer.*` entitlements or keychain access groups only under a provisioning profile that grants them:
   `nsh package` warns about them, and the app is signed again with a Developer ID and such a profile before it runs.
 
+### Info.plist text in other languages
+
+The system shows the strings of `Info.plist`, such as the usage descriptions in a permission prompt or the app's name
+under its icon, in the user's language when the app has a translation of them. `ios.infoPlistStrings` and
+`macos.infoPlistStrings` give them, by language:
+
+```json
+{
+  "ios": {
+    "infoPlist": {
+      "NSLocationWhenInUseUsageDescription": "Shows the stores near you."
+    },
+    "infoPlistStrings": {
+      "zh-Hans": {
+        "CFBundleDisplayName": "示例",
+        "NSLocationWhenInUseUsageDescription": "显示你附近的门店。"
+      },
+      "ja": { "NSLocationWhenInUseUsageDescription": "近くの店舗を表示します。" }
+    }
+  }
+}
+```
+
+Packages write each language's `<language>.lproj/InfoPlist.strings`, and `nsh run` gives the iOS simulator's and Mac
+Catalyst's development host the same, so a prompt can be checked in each language before packaging. The system asks
+once per app: reset the answer before checking a prompt again, `xcrun simctl privacy booted reset camera <id>` in the
+iOS simulator, `tccutil reset Camera <id>` on macOS and Mac Catalyst, with the app's `id`, or under `nsh run` the
+development host's.
+
+- **Languages** are named as Xcode names them: a language, then a script or a region if needed, joined with `-` (`en`,
+  `ja`, `zh-Hans`, `zh-Hant`, `pt-BR`). Other spellings (`zh-hans`, `zh_TW`, `Chinese`) are an error naming the key.
+- **The `Info.plist` value** stays the text of every language without a translation, so each translated key needs one:
+  set it in `infoPlist`, or have it from NSH (the app's name, the usage descriptions NSH adds) or from a
+  [crate](./nshm.md#what-the-packaged-app-needs). A translation of a key the package's `Info.plist` does not have as a
+  string stops `nsh package` with an error naming it: the system would never show it.
+- **Translated keys** are the app's own and, of NSH's, only `CFBundleDisplayName` and `CFBundleName`; values are
+  strings. A macOS package whose name is translated also says so to Finder (`LSHasLocalizedDisplayName`).
+- **The languages are declared** to the system with the app's [`locales`](./i18n.md) (`CFBundleLocalizations`),
+  English first: users of a language the app has no translation for see the `Info.plist` text, and the system's own UI
+  in the app shows in the translated languages too. A language given as an empty `{}` has no file and is not declared;
+  it takes the [crates'](./nshm.md#what-the-packaged-app-needs) translations, which apps take for their own languages
+  only.
+
 ### Privacy manifest
 
 App Store Connect checks an iOS app's privacy manifest, `PrivacyInfo.xcprivacy`, when it is uploaded: why the app
