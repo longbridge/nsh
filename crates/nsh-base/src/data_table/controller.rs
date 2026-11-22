@@ -868,6 +868,16 @@ impl Dt {
         }
     }
 
+    /// The row Enter / Return activates: the selection's row, when it has
+    /// one (`onRowActivate`). A selected column has no row, so the key does
+    /// nothing.
+    fn activate_row(&self) {
+        let row = self.st.borrow().selection.row();
+        if let Some(row) = row {
+            self.cx.emit(DataTableEvent::RowActivate(row as u32));
+        }
+    }
+
     fn bind_keys(&self) {
         let dt = self.clone();
         // A terminal's Tab moves the focus on, out of the table, as Tab does
@@ -923,6 +933,20 @@ impl Dt {
                     ..Default::default()
                 },
                 move |_| copy.copy_selection(),
+            );
+            // Enter / Return activates the focused row (its selection's
+            // row), as a list's does, unless a text input or a control
+            // inside the table takes the key.
+            let activate = dt.clone();
+            on_key_with(
+                "enter",
+                KeyOptions {
+                    when: When::NotEditing,
+                    repeat: false,
+                    for_focus: true,
+                    ..Default::default()
+                },
+                move |_| activate.activate_row(),
             );
         });
     }
