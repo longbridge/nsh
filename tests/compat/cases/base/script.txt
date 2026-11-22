@@ -1412,12 +1412,14 @@ tap id:case-base-tabs-orientation
 expect Default selected: one
 expect Row selected: one
 expect Column selected: one
-# A list with no `orientation` is a row, the default: Left and Right move,
-# Up and Down are the page's.
+# A list with no `orientation` moves with both pairs, as before, and
+# reports no orientation.
 key tab
 key right
 expect Default selected: two
 key down
+expect Default selected: three
+key up
 expect Default selected: two
 # `"horizontal"` moves with Left and Right; Up and Down are the page's.
 key tab

@@ -1,7 +1,7 @@
-// A row of tabs with no `orientation` (the default, horizontal) and a
-// vertical one, each with the text of the selected tab. `tabs-orientation.test.tsx`
-// runs it: the row moves with Right and leaves Down to the page, the column
-// with Down and leaves Right to the page.
+// A list with no `orientation` (both pairs of arrows move), a horizontal
+// one (Left and Right move, Up and Down are the page's) and a vertical one
+// (Up and Down move, Left and Right are the page's), each with the text of
+// the selected tab. `tabs-orientation.test.tsx` runs it.
 import { mount, signal, Text, View } from "nsh";
 import { Tab, Tabs } from "nsh/base";
 
@@ -30,7 +30,8 @@ function List(props: { name: string; orientation?: "horizontal" | "vertical" }) 
 
 mount(() => (
   <View style={{ gap: 24, padding: 16 }}>
-    <List name="Row" />
+    <List name="Default" />
+    <List name="Row" orientation="horizontal" />
     <List name="Column" orientation="vertical" />
   </View>
 ));

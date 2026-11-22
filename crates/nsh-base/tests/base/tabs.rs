@@ -1,10 +1,10 @@
 //! `Tabs`: one stop of the keyboard focus, at the selected tab; the arrow
-//! keys of its `orientation` (Left and Right in a row, Up and Down in a
-//! column), Home and End move between the tabs past disabled ones, around
-//! the ends, and select the tab they reach (automatic activation); the
-//! other pair of arrows is left to the page. In a right-to-left layout
-//! Left and Right trade places. On macOS, where Tab stops at views that
-//! take presses.
+//! keys move between the tabs past disabled ones, around the ends, and
+//! select the tab they reach (automatic activation). With an `orientation`
+//! only its pair moves (Left and Right in a row, Up and Down in a column),
+//! and the other pair is left to the page; without one both pairs move. In
+//! a right-to-left layout Left and Right trade places. On macOS, where Tab
+//! stops at views that take presses.
 //!
 //! Its indicator: on the selected tab along the list, placed by the core
 //! (no layout events, no JS), springing to the next tab natively as a
@@ -45,7 +45,7 @@ fn start_in<C: Component<Props = ()>>(rtl: bool) -> Headless {
 /// A button before and after a list of five tabs, the fourth disabled; the
 /// second starts selected. The texts say which is selected, how many
 /// presses the tabs reported, and which button Return pressed. Without an
-/// orientation the list keeps its default (`"horizontal"`).
+/// orientation both pairs of arrows move the focus.
 fn tabs_view(orientation: Option<Axis>) -> impl IntoElement {
     let selected = signal(1usize);
     let presses = signal(0u32);
@@ -97,6 +97,11 @@ fn TabsScreen() -> impl IntoElement {
 }
 
 #[component]
+fn HorizontalTabsScreen() -> impl IntoElement {
+    tabs_view(Some(Axis::Horizontal))
+}
+
+#[component]
 fn VerticalTabsScreen() -> impl IntoElement {
     tabs_view(Some(Axis::Vertical))
 }
@@ -122,8 +127,37 @@ fn tab_enters_the_list_at_the_selected_tab_and_leaves_it_in_one_stop() {
 }
 
 #[test]
-fn left_and_right_move_and_select_wrapping_and_skipping_disabled_tabs() {
+fn both_pairs_move_and_select_wrapping_and_skipping_disabled_tabs() {
     let mut app = start::<TabsScreen>();
+    app.press_key("tab").unwrap();
+    app.press_key("tab").unwrap();
+    app.press_key("right").unwrap();
+    app.wait_for("text:selected:Three").unwrap();
+    // Four is disabled: Right goes on to Five.
+    app.press_key("right").unwrap();
+    app.wait_for("text:selected:Five").unwrap();
+    // Past the end, around to the first.
+    app.press_key("right").unwrap();
+    app.wait_for("text:selected:One").unwrap();
+    app.press_key("left").unwrap();
+    app.wait_for("text:selected:Five").unwrap();
+    app.press_key("left").unwrap();
+    app.wait_for("text:selected:Three").unwrap();
+    // Without an orientation Up and Down move as Left and Right do.
+    app.press_key("down").unwrap();
+    app.wait_for("text:selected:Five").unwrap();
+    app.press_key("up").unwrap();
+    app.wait_for("text:selected:Three").unwrap();
+    app.wait_for("text:presses:7").unwrap();
+    // The focus moved with the selection: Return presses Three.
+    app.press_key("enter").unwrap();
+    app.wait_for("text:presses:8").unwrap();
+    app.wait_for("text:selected:Three").unwrap();
+}
+
+#[test]
+fn a_horizontal_list_leaves_up_and_down_to_the_page() {
+    let mut app = start::<HorizontalTabsScreen>();
     app.press_key("tab").unwrap();
     app.press_key("tab").unwrap();
     app.press_key("right").unwrap();
@@ -178,7 +212,7 @@ fn up_and_down_move_a_vertical_list_and_left_and_right_do_not() {
 }
 
 #[test]
-fn right_to_left_trades_left_and_right_in_a_row() {
+fn right_to_left_trades_left_and_right_and_keeps_up_and_down() {
     let mut app = start_in::<TabsScreen>(true);
     app.press_key("tab").unwrap();
     app.press_key("tab").unwrap();
@@ -189,8 +223,8 @@ fn right_to_left_trades_left_and_right_in_a_row() {
     app.wait_for("text:selected:Five").unwrap();
     app.press_key("right").unwrap();
     app.wait_for("text:selected:Three").unwrap();
-    // Up and Down are the page's in a row, whatever its direction.
     app.press_key("down").unwrap();
+    app.wait_for("text:selected:Five").unwrap();
     app.press_key("up").unwrap();
     app.wait_for("text:selected:Three").unwrap();
     // The direction changes while the list has the focus: the keys follow.
@@ -260,12 +294,17 @@ fn a_list_takes_the_name_the_app_gives_it() {
 }
 
 #[test]
-fn a_list_reports_its_orientation() {
+fn a_list_reports_the_orientation_the_app_gives_it() {
     let app = start::<TabsScreen>();
     assert_eq!(
         app.screen().accessibility_orientation("role:tablist"),
-        Ok(Some(Axis::Horizontal)),
-        "a list is horizontal by default"
+        Ok(None),
+        "a list with no orientation reports none"
+    );
+    let app = start::<HorizontalTabsScreen>();
+    assert_eq!(
+        app.screen().accessibility_orientation("role:tablist"),
+        Ok(Some(Axis::Horizontal))
     );
     let app = start::<VerticalTabsScreen>();
     assert_eq!(

@@ -2,7 +2,7 @@
 // list's `orientation` (`"horizontal"` or `"vertical"`) picks the arrow
 // keys that move between its tabs: Left and Right in a row, Up and Down in
 // a column; the other pair is left to the page. A list with no
-// `orientation` is a row, the default.
+// `orientation` moves with both pairs, as before.
 import { Text, signal, View } from "nsh";
 import { Tab, Tabs } from "nsh/base";
 

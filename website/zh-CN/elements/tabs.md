@@ -120,7 +120,7 @@ mount(() => (
 
 | 属性 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
-| `orientation` | `.orientation(..)` | `"horizontal" \| "vertical"` | `"horizontal"` | 列表延伸的方向，决定在标签页之间移动焦点时使用哪组方向键：一行用 Left 和 Right，一列用 Up 和 Down。另一组方向键留给页面（例如列表外层的滚动视图）。它不负责列表的布局：布局仍由应用的 `class` 决定（一行用 `flex-row`）。在创建列表时读取。平台有无障碍属性时，屏幕阅读器会听到这个方向（Web 的 `aria-orientation`）。 |
+| `orientation` | `.orientation(..)` | `"horizontal" \| "vertical"` | 无 | 列表延伸的方向，决定在标签页之间移动焦点时使用哪组方向键：一行用 Left 和 Right，一列用 Up 和 Down。另一组方向键留给页面（例如列表外层的滚动视图）。不设置时两组方向键都会移动焦点（列表按哪种方向排列都可以），也不报告方向。它不负责列表的布局：布局仍由应用的 `class` 决定（一行用 `flex-row`）。在创建列表时读取。平台有无障碍属性时，屏幕阅读器会听到这个方向（Web 的 `aria-orientation`）。 |
 | `indicatorClass` | `.indicator_class(..)` | `string` | 无 | 选中标签页上指示器的 Tailwind 类：它的外观，以及它在列表交叉方向上的位置（一行里的下划线用 `bottom-0 h-0.5`，胶囊用 `inset-y-1`）。沿列表方向，它覆盖选中的标签页，并在这个方向上留出自己的外边距。设置了 `indicatorClass` 或 `indicatorStyle`，列表就有指示器。 |
 | `indicatorStyle` | `.indicator_style(\|s\| ..)` | `StyleProp<ViewStyle>` | 无 | 指示器的样式，叠加在 `indicatorClass` 之上。 |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 这个列表的名字（「分区」「视图」），屏幕阅读器进入列表时会读出。 |
@@ -197,8 +197,8 @@ mount(() => (
 - 标签页对屏幕阅读器而言是一个元素，角色是 `"tab"`，带有它的选中状态。它的标签是子元素的文字，或 `accessibilityLabel`。它的 `accessibilityDescription` 在名称之后读出，所以名称可以只是标签页的标题：把标签页除了被选中之外还能做的事写在这里（例如可关闭的标签页按 Delete 关闭）。
 - `Tabs` 的角色是 `"tablist"`：屏幕阅读器把其中的标签页当作一组播报，每个标签页仍然是独立的元素。它的 `accessibilityLabel` 是这个列表的名字；列表旁没有文字说明这些标签页切换的是什么时，都应给一个。
 - `disabled` 按平台的方式报告（VoiceOver、TalkBack、UI Automation、浏览器的无障碍树）。
-- 平台有列表方向的属性时，屏幕阅读器会听到它：Web 的 `aria-orientation` 跟随 `orientation`。
-- 在 macOS 和 Web 上，整个列表是键盘焦点的一站，按列表方向的那组方向键在它的标签页之间移动（见下文）。
+- 平台有列表方向的属性时，屏幕阅读器会听到它：应用设置了 `orientation` 时，Web 的 `aria-orientation` 跟随它。
+- 在 macOS 和 Web 上，整个列表是键盘焦点的一站，方向键在它的标签页之间移动（见下文）。
 - 指示器对屏幕阅读器隐藏，也不接收焦点：列表里的元素只有标签页。
 
 标签、角色和播报的一般用法见[无障碍](../docs/accessibility.md)。
@@ -213,14 +213,14 @@ mount(() => (
 | 按键 | 作用 |
 |---|---|
 | Tab、Shift+Tab | 从选中的标签页进入列表（没有选中时是第一个未禁用的标签页），一步离开列表。 |
-| Right | 在水平列表中，把焦点移到下一个标签页，从最后一个回到第一个。 |
-| Left | 在水平列表中，把焦点移到上一个标签页，从第一个回到最后一个。 |
-| Down | 在垂直列表中，把焦点移到下一个标签页，从最后一个回到第一个。 |
-| Up | 在垂直列表中，把焦点移到上一个标签页，从第一个回到最后一个。 |
+| Right | 在水平列表中，以及没有设置 `orientation` 的列表中，把焦点移到下一个标签页，从最后一个回到第一个。 |
+| Left | 在水平列表中，以及没有设置 `orientation` 的列表中，把焦点移到上一个标签页，从第一个回到最后一个。 |
+| Down | 在垂直列表中，以及没有设置 `orientation` 的列表中，把焦点移到下一个标签页，从最后一个回到第一个。 |
+| Up | 在垂直列表中，以及没有设置 `orientation` 的列表中，把焦点移到上一个标签页，从第一个回到最后一个。 |
 | Home、End | 把焦点移到第一个或最后一个标签页。 |
 | Space、Return | 按下拥有焦点的标签页。 |
 
-方向键跳过禁用的标签页，焦点移到的标签页报告 `onPress`，应用随焦点移动选中它：显示的部分跟随焦点。`orientation` 决定哪组方向键移动焦点（默认 `horizontal`：Left 和 Right；`vertical`：Up 和 Down）；另一组方向键留给页面，所以列表外层的滚动视图可以用它滚动。布局与它无关，由应用的 `class` 决定。在从右到左的布局里，水平列表从右边开始，Left 和 Right 互换：Left 移到下一个标签页，Right 移到上一个；Up、Down、Home 和 End 不变。`focus-visible:` 样式显示焦点所在。不在 `Tabs` 里的 `Tab` 是独立的一站。
+方向键跳过禁用的标签页，焦点移到的标签页报告 `onPress`，应用随焦点移动选中它：显示的部分跟随焦点。`orientation` 决定哪组方向键移动焦点（`horizontal`：Left 和 Right；`vertical`：Up 和 Down）；不设置时两组都会移动焦点（列表按哪种方向排列都可以）。另一组方向键留给页面，所以列表外层的滚动视图可以用它滚动。布局与它无关，由应用的 `class` 决定。在从右到左的布局里，水平列表从右边开始，Left 和 Right 互换：Left 移到下一个标签页，Right 移到上一个；Up、Down、Home 和 End 不变。`focus-visible:` 样式显示焦点所在。不在 `Tabs` 里的 `Tab` 是独立的一站。
 
 <a id="platform-notes"></a>
 

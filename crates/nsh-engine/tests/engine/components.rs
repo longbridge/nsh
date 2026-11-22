@@ -3952,14 +3952,14 @@ fn a_base_tab_reports_presses_and_its_list_holds_no_value() {
     let initial = std::slice::from_ref(&first);
 
     // The list: a tab list for screen readers, named by the app
-    // (`accessibilityLabel`) and laid out by it.
+    // (`accessibilityLabel`) and laid out by it; with no `orientation` it
+    // reports none, and both pairs of arrows move.
     let list = view_props(&first, sections).unwrap();
     assert_eq!(list.accessibility.role, AccessibilityRole::Tablist);
     assert_eq!(list.accessibility.label.as_deref(), Some("Sections"));
     assert_eq!(
-        list.accessibility.orientation,
-        Some(nsh_core::geometry::Axis::Horizontal),
-        "a list is horizontal by default"
+        list.accessibility.orientation, None,
+        "a list with no orientation reports none"
     );
 
     // The selected tab: selected for screen readers, its `selectedStyle`,

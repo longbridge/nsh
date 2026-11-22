@@ -44,10 +44,11 @@ use crate::keys::bind_while_directed;
 /// What the arrow keys of a group do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Pattern {
-    /// A tab list along its axis: Left / Right (a row) or Up / Down (a
-    /// column) the previous and next tab, Home the first, End the last;
-    /// the other pair is left to the page.
-    Tabs(Axis),
+    /// A tab list: with an axis, its arrows along it (Left / Right in a row,
+    /// Up / Down in a column) the previous and next tab, the other pair left
+    /// to the page; without one both pairs move, whatever the app's layout.
+    /// Home the first, End the last.
+    Tabs(Option<Axis>),
     /// A radio group: Up / Left the previous radio, Down / Right the next.
     Radios,
     /// A toggle group on its own: the keys of a tab list (its axis is the
@@ -226,9 +227,9 @@ impl Roving {
         }));
         let focused = computed(move || focus.get().is_some());
         let keys = match pattern {
-            Pattern::Tabs(Axis::Horizontal) | Pattern::Toolbar(Axis::Horizontal) => ROW_KEYS,
-            Pattern::Tabs(Axis::Vertical) | Pattern::Toolbar(Axis::Vertical) => COLUMN_KEYS,
-            Pattern::Toggles => TAB_KEYS,
+            Pattern::Tabs(Some(Axis::Horizontal)) | Pattern::Toolbar(Axis::Horizontal) => ROW_KEYS,
+            Pattern::Tabs(Some(Axis::Vertical)) | Pattern::Toolbar(Axis::Vertical) => COLUMN_KEYS,
+            Pattern::Tabs(None) | Pattern::Toggles => TAB_KEYS,
             Pattern::Radios => RADIO_KEYS,
         };
         let moved = group.clone();
