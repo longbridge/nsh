@@ -73,6 +73,9 @@ pub struct Environment {
     /// The platform picks colors from the screen
     /// ([`crate::platform::Environment::screen_color`]).
     pub screen_color: bool,
+    /// The platform reports clipboard writes' results
+    /// ([`crate::platform::Environment::clipboard_write_result`]).
+    pub clipboard_write_result: bool,
     /// The platform renders canvas drawings offscreen into images
     /// ([`crate::platform::Environment::canvas_render`]).
     pub canvas_render: bool,
@@ -159,6 +162,7 @@ impl Default for Environment {
             lifecycle: Lifecycle::Active,
             wake_count: 0,
             screen_color: false,
+            clipboard_write_result: false,
             canvas_render: false,
             share: false,
             auth_session: false,

@@ -3439,6 +3439,137 @@ fn list_renders_window_and_recycles_cells() {
     assert_eq!(c.node_count(), 2 + cells.len());
 }
 
+#[test]
+fn list_content_aligns_cells_on_the_cross_axis() {
+    for horizontal in [false, true] {
+        let mut c = core();
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::List,
+                },
+                style_op(
+                    2,
+                    &[
+                        (
+                            "width",
+                            StyleValue::Number(if horizontal { 120.0 } else { 200.0 }),
+                        ),
+                        ("height", StyleValue::Number(100.0)),
+                    ],
+                ),
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Horizontal(horizontal),
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::EstimatedItemSize(px(20.0)),
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Count(2),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        c.commit();
+        let (mut next_id, mut cells) = (100, Vec::new());
+        assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 20.0), 2);
+        for (i, &cell) in cells.iter().enumerate() {
+            if horizontal {
+                c.apply(style_op(cell, &[("height", StyleValue::Null)]))
+                    .unwrap();
+            }
+            let card = 200 + i as u32;
+            apply(
+                &mut c,
+                vec![
+                    Op::Create {
+                        id: card,
+                        tag: Tag::View,
+                    },
+                    style_op(
+                        card,
+                        &[
+                            ("width", StyleValue::Number(40.0)),
+                            ("height", StyleValue::Number(20.0)),
+                        ],
+                    ),
+                    Op::Insert {
+                        parent: cell,
+                        child: card,
+                        before: None,
+                    },
+                ],
+            );
+        }
+        let batch = c.commit().unwrap();
+        let expected = if horizontal {
+            [rect(0.0, 0.0, 40.0, 100.0), rect(40.0, 0.0, 40.0, 100.0)]
+        } else {
+            [rect(0.0, 0.0, 200.0, 20.0), rect(0.0, 20.0, 200.0, 20.0)]
+        };
+        for (&cell, expected) in cells.iter().zip(expected) {
+            assert_eq!(frame_of(&batch, cell), Some(expected), "{horizontal}");
+        }
+
+        for (align, cell_at, cell_cross) in [
+            (
+                taffy::AlignItems::FLEX_START,
+                0.0,
+                if horizontal { 20.0 } else { 40.0 },
+            ),
+            (
+                taffy::AlignItems::CENTER,
+                if horizontal { 40.0 } else { 80.0 },
+                if horizontal { 20.0 } else { 40.0 },
+            ),
+            (
+                taffy::AlignItems::FLEX_END,
+                if horizontal { 80.0 } else { 160.0 },
+                if horizontal { 20.0 } else { 40.0 },
+            ),
+            (
+                taffy::AlignItems::STRETCH,
+                0.0,
+                if horizontal { 100.0 } else { 200.0 },
+            ),
+        ] {
+            c.apply(Op::SetProp {
+                id: 2,
+                prop: Prop::ListContent(crate::ListContentStyle {
+                    align_items: Some(align),
+                    ..Default::default()
+                }),
+            })
+            .unwrap();
+            c.commit();
+            let expected = if horizontal {
+                [
+                    rect(0.0, cell_at, 40.0, cell_cross),
+                    rect(40.0, cell_at, 40.0, cell_cross),
+                ]
+            } else {
+                [
+                    rect(cell_at, 0.0, cell_cross, 20.0),
+                    rect(cell_at, 20.0, cell_cross, 20.0),
+                ]
+            };
+            for (&cell, expected) in cells.iter().zip(expected) {
+                let frame = c.nodes[c.key(cell).unwrap() as usize].frame;
+                assert_eq!(frame, expected, "{horizontal}: {align:?}");
+            }
+        }
+    }
+}
+
 /// A list whose columns or content padding change with nothing else in
 /// the turn (columns worked out from a width an `onLayout` measured) lays
 /// its cells out again at the new column width, not only at the new
@@ -18426,6 +18557,93 @@ mod components {
         assert_eq!(clipboard.text(), None);
     }
 
+    /// Copies twice when pressed and shows what became of each write.
+    #[component]
+    fn Copier() -> impl IntoElement {
+        let results = signal(String::new());
+        view()
+            .child(text(move || format!("copied {}", results.get())))
+            .child(view().h(px(10.0)).on_press(move |_: &()| {
+                let (first, second) = (
+                    set_clipboard("a"),
+                    set_clipboard_item(ClipboardItem {
+                        text: "b".into(),
+                        html: Some("<b>b</b>".into()),
+                    }),
+                );
+                spawn(async move {
+                    let (first, second) = (first.await, second.await);
+                    results.set(format!("{first:?} {second:?}"));
+                });
+            }))
+    }
+
+    fn press_copier(c: &mut Core<FakeEngine>) -> Vec<Command> {
+        c.mount_root(&crate::element::Root::new::<Copier>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button");
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        c.commit()
+            .map(|b| b.items)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|i| match i {
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command,
+                } => Some(command),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn clipboard_writes_answer_requested_where_the_platform_cannot_tell() {
+        let mut c = core();
+        let sent = press_copier(&mut c);
+        assert_eq!(sent.len(), 2, "{sent:?}");
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("copied R")));
+        assert_eq!(shown.last().unwrap(), "copied Requested Requested");
+    }
+
+    #[test]
+    fn clipboard_writes_answer_what_the_platform_reports_in_order() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            clipboard_write_result: true,
+            ..Default::default()
+        });
+        let sent = press_copier(&mut c);
+        assert!(matches!(
+            sent[..],
+            [Command::SetClipboard(_), Command::SetClipboardItem(_)]
+        ));
+        for written in [true, false] {
+            let payload = EventPayload::Map(vec![("written", crate::PayloadValue::Bool(written))]);
+            assert!(c.component_event(ROOT_ID, EventKind::ClipboardWrite, &payload));
+        }
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("copied W")));
+        assert_eq!(shown.last().unwrap(), "copied Written Failed");
+    }
+
+    #[test]
+    fn clipboard_writes_to_the_embedders_clipboard_are_written() {
+        let clipboard = std::sync::Arc::new(crate::clipboard::MemoryClipboard::new(None));
+        let mut c = core();
+        c.set_clipboard(Some(clipboard.clone()));
+        let sent = press_copier(&mut c);
+        assert!(sent.is_empty(), "{sent:?}");
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("copied W")));
+        assert_eq!(shown.last().unwrap(), "copied Written Written");
+    }
+
     /// Pastes the clipboard's image and files when pressed.
     #[component]
     fn ImagePaster() -> impl IntoElement {
@@ -27714,6 +27932,52 @@ mod views {
     }
 
     #[test]
+    fn jss_shortcuts_over_focused_come_after_the_views() {
+        use crate::keymap::{KeyBinding, KeyMatch, Keymap, Keystroke, When};
+        let mod_k = Keystroke::parse_with("mod+k", true).unwrap();
+        let tables = |batch: &MountBatch| -> Vec<std::sync::Arc<Keymap>> {
+            batch
+                .items
+                .iter()
+                .filter_map(|i| match i {
+                    MountItem::Keymap(k) => Some(k.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+        let mut c = core();
+        c.mount_root(&Root::new::<Shortcuts>(|| ()));
+        let batch = c.commit().unwrap();
+        let ours = tables(&batch).last().expect("a table").bindings()[0].id;
+        // JS binds the view's mod+k twice: plainly (1) and over the views (2).
+        let plain = KeyBinding::new(1, mod_k, When::Auto, false);
+        let over = KeyBinding::new(2, mod_k, When::Auto, false).over_focused(true);
+        apply(
+            &mut c,
+            vec![Op::SetProp {
+                id: ROOT_ID,
+                prop: Prop::Keymap(std::sync::Arc::new(Keymap::new(vec![over, plain]))),
+            }],
+        );
+        let batch = c.commit().unwrap();
+        let table = tables(&batch).pop().expect("a table");
+        let ids: Vec<u32> = table.bindings().iter().map(|b| b.id).collect();
+        // The plain one before the view's, the one over them after.
+        assert_eq!(ids, [1, ours, 2]);
+        assert_eq!(table.find(mod_k, false, false), KeyMatch::Fire(2));
+        // Without it, the view's wins as before.
+        apply(
+            &mut c,
+            vec![Op::SetProp {
+                id: ROOT_ID,
+                prop: Prop::Keymap(std::sync::Arc::new(Keymap::new(vec![plain]))),
+            }],
+        );
+        let table = tables(&c.commit().unwrap()).pop().expect("a table");
+        assert_eq!(table.find(mod_k, false, false), KeyMatch::Fire(ours));
+    }
+
+    #[test]
     fn jss_shortcuts_bound_before_any_view_stay_beside_the_views() {
         use crate::keymap::{KeyBinding, Keymap, Keystroke, When};
         let tables = |batch: &MountBatch| -> Vec<Vec<u32>> {
@@ -28485,6 +28749,81 @@ mod rust_windows {
             }
         }
         title
+    }
+
+    // #2759: what the ref `open_window` returns is asked for in the same
+    // turn follows the opening, in order; attributes join its options.
+    #[test]
+    fn requests_made_right_after_open_window_follow_its_opening() {
+        use crate::{desktop::WindowMode, element::desktop::open_window};
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<Empty>());
+        let _ = c.commit().unwrap();
+        let doc = {
+            let _entered = c.components.runtime.enter();
+            let doc = open_window(window().id("doc").title("Static").content(|| text("doc")))
+                .expect("opens on a desktop");
+            doc.focus();
+            doc.set(WindowAttributes {
+                title: Some("Set".into()),
+                ..Default::default()
+            });
+            doc.set_mode(WindowMode::Maximized);
+            doc.focus();
+            doc
+        };
+        let batch = c.commit().unwrap();
+        let commands = window_commands(&batch);
+        let [
+            (id, DesktopCommand::OpenWindow(open)),
+            (focus, DesktopCommand::Request(WindowRequest::Focus)),
+            (mode, DesktopCommand::Request(WindowRequest::SetMode(WindowMode::Maximized))),
+            (again, DesktopCommand::Request(WindowRequest::Focus)),
+        ] = &commands[..]
+        else {
+            panic!("opens, then its requests in order: {commands:?}");
+        };
+        assert_eq!([focus, mode, again], [id; 3]);
+        assert_eq!(open.options.attributes.title.as_deref(), Some("Set"));
+        // Sent once: a later commit does not repeat them.
+        {
+            let _entered = c.components.runtime.enter();
+            doc.set(WindowAttributes {
+                title: Some("Later".into()),
+                ..Default::default()
+            });
+        }
+        let commands = window_commands(&c.commit().unwrap());
+        assert!(
+            matches!(&commands[..], [(_, DesktopCommand::SetAttributes(_))]),
+            "{commands:?}"
+        );
+        // Closed: its requests reach nothing, and the next opening of the
+        // id does not inherit them.
+        {
+            let _entered = c.components.runtime.enter();
+            doc.close();
+        }
+        let _ = c.commit().unwrap();
+        {
+            let _entered = c.components.runtime.enter();
+            doc.set_mode(WindowMode::FullScreen);
+            doc.focus();
+        }
+        assert!(c.commit().is_none_or(|b| window_commands(&b).is_empty()));
+        {
+            let _entered = c.components.runtime.enter();
+            open_window(window().id("doc").content(|| text("doc"))).expect("opens again");
+        }
+        let commands = window_commands(&c.commit().unwrap());
+        assert!(
+            matches!(&commands[..], [(_, DesktopCommand::OpenWindow(_))]),
+            "{commands:?}"
+        );
     }
 
     // #1344, `open_window` and a window opened again: each opening keeps
@@ -51814,4 +52153,246 @@ fn unfocused_keys_follow_named_window_content_changes() {
     assert!(!c.key_captured(root, None), "the input keeps its keys");
     c.apply(capture(KeyCapture::None)).unwrap();
     assert_eq!(mounted_content(&c.commit().unwrap()), Some(None));
+}
+
+/// [`WordsEngine`]'s lines, kept by its layout for [`TextEngine::lines`].
+struct LinesEngine;
+
+fn word_lines(text: &str, max: f32) -> Vec<f32> {
+    let mut lines = vec![0.0f32];
+    for word in text.split(' ') {
+        let width = word.chars().count() as f32 * 8.0;
+        let line = lines.last_mut().unwrap();
+        if *line > 0.0 && *line + 8.0 + width > max {
+            lines.push(width);
+        } else if *line > 0.0 {
+            *line += 8.0 + width;
+        } else {
+            *line = width;
+        }
+    }
+    lines
+}
+
+impl TextEngine for LinesEngine {
+    type Prepared = String;
+
+    fn prepare(&self, text: &AttributedText) -> String {
+        text.text.clone()
+    }
+
+    fn measure(&self, text: &String, max_width: Option<Points>) -> Size<Points> {
+        let lines = word_lines(text, max_width.map_or(f32::INFINITY, |m| m.0));
+        let widest = lines.iter().copied().fold(0.0, f32::max);
+        size_pt(widest, lines.len() as f32 * 16.0)
+    }
+
+    fn layout(&self, text: &String, size: Size<Points>) -> TextLayout {
+        TextLayout(Arc::new(word_lines(text, size.width.0)))
+    }
+
+    fn lines(&self, layout: &TextLayout) -> Vec<crate::TextLine> {
+        layout.downcast::<Vec<f32>>().map_or_else(Vec::new, |l| {
+            l.iter()
+                .map(|&w| crate::TextLine {
+                    width: Points(w),
+                    ..crate::TextLine::default()
+                })
+                .collect()
+        })
+    }
+}
+
+/// `text-pretty` breaks a paragraph whose last line holds a lone word
+/// narrower, as many lines with a longer last one; a paragraph that ends
+/// well, or fits on a line, keeps its box's width.
+#[test]
+fn pretty_text_takes_words_down_to_a_short_last_line() {
+    // At 200: "aaaa bbbb cccc dddd eeee" (192) and "ff" (16).
+    let text = "aaaa bbbb cccc dddd eeee ff";
+    let mut cx = words_context(text, 0);
+    cx.pretty = Some(Box::new((f32::NAN, Points::ZERO)));
+    let width = pretty_width(&LinesEngine, &mut cx, Points(200.0));
+    assert!(width < Points(200.0), "{width:?}");
+    let lines = word_lines(text, width.0);
+    assert_eq!(lines.len(), 2);
+    assert!(
+        lines[1] >= width.0 * PRETTY_LAST_LINE,
+        "{lines:?} at {width:?}"
+    );
+    // Asked again: the same, from what it kept.
+    assert_eq!(pretty_width(&LinesEngine, &mut cx, Points(200.0)), width);
+
+    let mut cx = words_context("aaaa bbbb cccc dddd eeee ffff gggg", 0);
+    assert_eq!(
+        pretty_width(&LinesEngine, &mut cx, Points(200.0)),
+        Points(200.0)
+    );
+    let mut cx = words_context("aaaa bbbb", 0);
+    assert_eq!(
+        pretty_width(&LinesEngine, &mut cx, Points(200.0)),
+        Points(200.0)
+    );
+    // A clamp keeps its lines where they are.
+    let mut cx = words_context(text, 2);
+    assert_eq!(
+        pretty_width(&LinesEngine, &mut cx, Points(200.0)),
+        Points(200.0)
+    );
+}
+
+#[test]
+fn text_pretty_wraps_and_inherits_with_white_space() {
+    let mut c = core();
+    view_with_classes(&mut c, 2, "text-pretty");
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 3,
+                tag: Tag::Text,
+            },
+            Op::CreateText {
+                id: 4,
+                text: "hello".into(),
+            },
+            Op::Insert {
+                parent: 3,
+                child: 4,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+        ],
+    );
+    c.commit();
+    let (no_wrap, _, _, pretty) = c.inherited_text_wrap(c.key(3).unwrap());
+    assert_eq!((no_wrap, pretty), (Some(false), true));
+    c.apply(class_op(3, "whitespace-normal")).unwrap();
+    c.commit();
+    assert!(!c.inherited_text_wrap(c.key(3).unwrap()).3);
+}
+
+#[test]
+fn an_overlay_leaves_escape_to_focused_content_that_captures_it() {
+    use crate::KeyCapture;
+    use crate::keymap::Keystroke;
+    use crate::tailwind::state::FOCUSED;
+    // #2424: an editor in a popover takes Escape first; the overlay binds
+    // it again once the focus leaves the editor or the rule drops it.
+    let mut c = core();
+    add(&mut c, 2, Tag::View, ROOT_ID, &[]);
+    add(&mut c, 4, Tag::Overlay, 2, &[]);
+    add(&mut c, 6, Tag::View, 4, &[]);
+    add(&mut c, 8, Tag::View, 6, &[]);
+    add(&mut c, 10, Tag::View, 4, &[]);
+    apply(
+        &mut c,
+        vec![
+            overlay_prop(
+                4,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(2)),
+            ),
+            Op::Listen {
+                id: 4,
+                event: EventKind::Cancel,
+                enabled: true,
+            },
+        ],
+    );
+    let escape_bound = |c: &mut Core<FakeEngine>| -> Option<bool> {
+        let batch = c.commit()?;
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::Keymap(k) => {
+                Some(k.bindings().iter().any(|b| b.id == overlay::ESCAPE_BINDING))
+            }
+            _ => None,
+        })
+    };
+    assert_eq!(escape_bound(&mut c), Some(true));
+
+    let escape = Keystroke::parse_with("escape", false).unwrap();
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 6,
+            prop: Prop::KeyCapture(KeyCapture::keys([escape])),
+        }],
+    );
+    // No focus in the editor yet: the overlay keeps Escape.
+    assert_ne!(escape_bound(&mut c), Some(false));
+
+    c.set_states(8, FOCUSED);
+    assert_eq!(escape_bound(&mut c), Some(false), "the editor's");
+
+    // The focus on another view of the overlay: Escape cancels again.
+    c.set_states(8, 0);
+    c.set_states(10, FOCUSED);
+    assert_eq!(escape_bound(&mut c), Some(true));
+
+    c.set_states(10, 0);
+    c.set_states(8, FOCUSED);
+    assert_eq!(escape_bound(&mut c), Some(false));
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 6,
+            prop: Prop::KeyCapture(KeyCapture::None),
+        }],
+    );
+    assert_eq!(escape_bound(&mut c), Some(true), "the rule dropped it");
+
+    // Back still cancels the overlay while the content takes Escape.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 6,
+            prop: Prop::KeyCapture(KeyCapture::All),
+        }],
+    );
+    assert_eq!(escape_bound(&mut c), Some(false));
+    js_events(&mut c);
+    assert!(c.overlay_cancel());
+    let events = js_events(&mut c);
+    assert!(
+        events.contains(&(4, EventKind::Cancel, EventPayload::None)),
+        "{events:?}"
+    );
+}
+
+#[test]
+fn a_focus_outside_the_overlay_does_not_take_its_escape() {
+    use crate::KeyCapture;
+    use crate::keymap::Keystroke;
+    use crate::tailwind::state::FOCUSED;
+    let mut c = core();
+    add(&mut c, 2, Tag::View, ROOT_ID, &[]);
+    add(&mut c, 4, Tag::Overlay, 2, &[]);
+    add(&mut c, 6, Tag::View, 4, &[]);
+    let escape = Keystroke::parse_with("escape", false).unwrap();
+    apply(
+        &mut c,
+        vec![
+            overlay_prop(
+                4,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(2)),
+            ),
+            Op::Listen {
+                id: 4,
+                event: EventKind::Cancel,
+                enabled: true,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::KeyCapture(KeyCapture::keys([escape])),
+            },
+        ],
+    );
+    c.commit();
+    c.set_states(2, FOCUSED);
+    c.commit();
+    assert!(!c.focus_takes_escape());
 }

@@ -6,10 +6,10 @@ test("a drag with the mouse selects across a selectable view's texts", async () 
   await app.waitFor('Selected: " beta\\nGamma"');
 });
 
-test("a selectable TextView reports a list item with its marker first", async () => {
+test("a selectable TextView omits list markers from its selection", async () => {
   const app = await open("./App.tsx", { platform: "macos" });
   await app.drag("text:one", { x: 0, y: 30 });
-  await app.waitFor('Selected: "e\\n•\\ttw"');
+  await app.waitFor('Selected: "e\\ntw"');
 });
 
 test("a copy across inline views gives their copy texts in place", async () => {

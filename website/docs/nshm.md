@@ -220,6 +220,10 @@ function closeConversation(threadId: string) {
   `Notifications.close(id)` removes one.
 - `available()` is `true` in a standalone iOS app. Elsewhere it is `false`, and `register` and `closeThread` reject
   with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
+- An app that declares `"capabilities"` grants `Push` with
+  [`"notifications": true`](./sandbox-and-capabilities.md#notifications), the capability `Notifications` uses. The
+  token, the deliveries and how they show belong to the whole app, so every function but `available()` asks for it
+  first.
 
 The feature adds the `remote-notification` background mode to the packaged app. The `aps-environment` entitlement comes
 from the provisioning profile the app is signed with ([iOS devices](./packaging.md#ios-devices)). Rust code, such as
@@ -351,7 +355,7 @@ An nshm lists the nshm it needs in its `nsh.json` `"dependencies"`, in the app's
 
 ## Platform nshm
 
-An nshm can provide a target of its own, such as a platform NSH does not build for, with `"platform"` in its `nsh.json` and a binary named `nsh-platform-<name>` in its crate:
+An nshm can provide a target of its own, such as a platform NSH does not build for, with `"platform"` in its `nsh.json` and a binary named `nsh-platform-<name>` in its crate. The crate needs no `#[native_module]` when it gives the app nothing but the target; without one, the app is not linked with it and does not become a Rust app:
 
 ```json
 { "name": "nsh-harmony", "version": "0.1.0", "platform": "harmony" }

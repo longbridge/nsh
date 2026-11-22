@@ -17,7 +17,10 @@ use nsh_core::{
     NodeId,
     geometry::{Bounds, Point, Points, Size, point},
 };
-use nsh_testing::agent::{Key, Native, SystemName};
+use nsh_testing::{
+    DragOptions,
+    agent::{Key, Native, SystemName},
+};
 use objc2::{Message, msg_send, rc::Retained};
 use objc2_core_foundation::{CGFloat, CGPoint, CGRect};
 use objc2_foundation::NSObjectProtocol;
@@ -89,6 +92,41 @@ impl IosNative {
 
     fn finger(&self, x: f64, y: f64, phase: Phase) {
         self.on_main(move |_, window| synth::touch(window, x, y, phase));
+    }
+
+    fn try_finger(&self, x: f64, y: f64, phase: Phase) -> Result<(), String> {
+        match self.on_main(move |_, window| synth::touch(window, x, y, phase)) {
+            Some(true) => Ok(()),
+            Some(false) => Err("iOS could not synthesize the test touch".into()),
+            None => Err("the window is gone".into()),
+        }
+    }
+
+    /// The same touch stays down across the initial rest and every move.
+    fn drag_finger(
+        &self,
+        from: Point<Points>,
+        to: Point<Points>,
+        options: DragOptions,
+        held: bool,
+    ) -> Result<(), String> {
+        let xy = |p: Point<Points>| (f64::from(p.x.0), f64::from(p.y.0));
+        let (x, y) = xy(from);
+        self.try_finger(x, y, Phase::Down)?;
+        std::thread::sleep(options.hold.unwrap_or(nsh_testing::agent::LANDING));
+        for at in nsh_testing::agent::drag_path(from, to) {
+            std::thread::sleep(nsh_testing::agent::FRAME);
+            let (x, y) = xy(at);
+            if let Err(error) = self.try_finger(x, y, Phase::Move) {
+                let _ = self.try_finger(x, y, Phase::Up);
+                return Err(error);
+            }
+        }
+        if !held {
+            let (x, y) = xy(to);
+            self.try_finger(x, y, Phase::Up)?;
+        }
+        Ok(())
     }
 
     /// A finger down at `from`, moving to `to` a frame at a time, easing
@@ -525,18 +563,26 @@ impl Native for IosNative {
         self.swipe(from, to, REST);
     }
 
-    fn drag(&self, from: Point<Points>, to: Point<Points>) {
-        let xy = |p: Point<Points>| (f64::from(p.x.0), f64::from(p.y.0));
-        let (x, y) = xy(from);
-        self.finger(x, y, Phase::Down);
-        std::thread::sleep(nsh_testing::agent::LANDING);
-        let mut last = (x, y);
-        for at in nsh_testing::agent::drag_path(from, to) {
-            std::thread::sleep(nsh_testing::agent::FRAME);
-            last = xy(at);
-            self.finger(last.0, last.1, Phase::Move);
-        }
-        self.finger(last.0, last.1, Phase::Up);
+    fn drag(
+        &self,
+        from: Point<Points>,
+        to: Point<Points>,
+        options: DragOptions,
+    ) -> Result<(), String> {
+        self.drag_finger(from, to, options, false)
+    }
+
+    fn drag_and_hold(
+        &self,
+        from: Point<Points>,
+        to: Point<Points>,
+        options: DragOptions,
+    ) -> Result<(), String> {
+        self.drag_finger(from, to, options, true)
+    }
+
+    fn drop_at(&self, at: Point<Points>) -> Result<(), String> {
+        self.try_finger(f64::from(at.x.0), f64::from(at.y.0), Phase::Up)
     }
 
     fn paste(&self, content: &nsh_core::PasteEvent) -> Result<(), String> {

@@ -100,8 +100,9 @@ pub(crate) fn selected(
         .or_else(|| locate(&plain, &shown(&masked), text, reported.start))
         .map(|(from, to)| widen(&masked, text, from, to));
     let Some((from, to)) = found else {
-        // Not found (text the document does not have, as a list's
-        // markers): the text itself, in the format.
+        // Not found (text the document does not have, such as custom
+        // rendered content or a marker made selectable by the app): the
+        // text itself, in the format.
         return match format {
             TextSelectionFormat::Html => {
                 let mut out = String::from("<p>");

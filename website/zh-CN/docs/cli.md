@@ -77,7 +77,7 @@ nsh init [DIR] [--name <NAME>] [--template <ts|rust|mixed>] [--nsh-source <DIR>]
 ## nsh run
 
 ```sh
-nsh run [ENTRY] [--target catalyst|ios|android|macos|linux|windows|gpui|tui|web] [--device <DEVICE>] [--port <PORT>] [--release] [--limits [<LIMITS>]] [--trace] [--fps] [--name <NAME>] [--points-per-cell <WIDTHxHEIGHT>] [--window-size <WIDTHxHEIGHT>] [--display <N>]
+nsh run [ENTRY] [--target catalyst|ios|android|macos|linux|windows|gpui|tui|web] [--device <DEVICE>] [--port <PORT>] [--release] [--limits [<LIMITS>]] [--trace] [--fps] [--name <NAME>] [--points-per-cell <WIDTHxHEIGHT>] [--window-size <WIDTHxHEIGHT>] [--display <N>] [--background]
 ```
 
 ```sh
@@ -103,6 +103,7 @@ nsh run my-app/App.tsx --target web
 | `--points-per-cell <WIDTHxHEIGHT>` | `nsh.json` 的 `tui.pointsPerCell`，否则 `8x16` | 终端单元格的宽高，单位为点（`--target tui`）。 |
 | `--window-size <WIDTHxHEIGHT>` | 宿主默认值 | 初始窗口尺寸，单位为点，例如 `800x600`（`--target macos`、`linux`、`windows` 和 `gpui`，TSX 入口）。 |
 | `--display <N>` | 主显示器 | 窗口在哪个显示器上居中打开：`1` 是主显示器（带菜单栏的那个），`2` 是下一个，依此类推；没有这个编号的显示器时在主显示器上打开（`--target macos`，TSX 入口）。 |
+| `--background` | | 应用不会成为当前活跃的应用，和 `nsh test` 运行应用的方式一样：窗口照常显示，键盘留在你正在输入的应用里，发给它窗口的输入（驱动它的 agent、UI 测试）照样能到达。在 macOS 上它运行时没有 Dock 图标和菜单栏。用于不需要你盯着的运行，比如你工作时 agent 在检查一处改动（`--target macos`、`linux`、`windows` 和 `gpui`，TSX 入口）。 |
 
 使用 `--target android` 时，会选用 `--device` 或 `ANDROID_SERIAL` 指定的设备，否则选用 `adb devices` 列出的第一台（连着多台时 `nsh` 会提示用的是哪一台）；开发服务器的端口通过 `adb reverse` 转发到设备上。参见[快速开始](./getting-started.md)和[开发服务器与调试](./dev-server-and-debugging.md)。
 

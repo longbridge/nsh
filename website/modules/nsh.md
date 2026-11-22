@@ -1592,8 +1592,8 @@ import { Clipboard } from "nsh";
 
 ```ts
 const Clipboard: {
-  writeText(text: string): Promise<void>;
-  write(item: ClipboardItem): Promise<void>;
+  writeText(text: string): Promise<ClipboardWrite>;
+  write(item: ClipboardItem): Promise<ClipboardWrite>;
   readText(): Promise<string>;
   hasText(): Promise<boolean>;
   writeImage(src: string): Promise<void>;
@@ -1601,6 +1601,8 @@ const Clipboard: {
   hasImage(): Promise<boolean>;
   readFiles(): Promise<string[]>;
 };
+
+type ClipboardWrite = "written" | "failed" | "requested";
 
 interface ClipboardItem {
   text: string; // the content as plain text
@@ -1615,8 +1617,8 @@ interface ClipboardImage {
 
 | TS | Rust (`nsh_core::prelude`) |
 |---|---|
-| `await Clipboard.writeText(text)` | `set_clipboard(text)` |
-| `await Clipboard.write({ text, html })` | `set_clipboard_item(item)` (a `ClipboardItem`) |
+| `await Clipboard.writeText(text)` | `set_clipboard(text).await -> ClipboardWrite` |
+| `await Clipboard.write({ text, html })` | `set_clipboard_item(item).await -> ClipboardWrite` (a `ClipboardItem`) |
 | `await Clipboard.readText()` | `clipboard_string().await -> String` |
 | `await Clipboard.hasText()` | `clipboard_has_string().await -> bool` |
 | `await Clipboard.writeImage(src)` | `set_clipboard_image(src)` |
@@ -1635,10 +1637,16 @@ The user can also copy from a [selectable text](../elements/text.md) themselves;
 ### Clipboard.writeText
 
 ```ts
-writeText(text: string): Promise<void>;
+writeText(text: string): Promise<ClipboardWrite>;
 ```
 
 Puts `text` on the clipboard, replacing what was there. Rust: `set_clipboard(text)`.
+
+It resolves to what became of the write: `"written"` when the system clipboard took it (Windows, macOS, the web),
+`"failed"` when it refused it (another app holds the clipboard, the browser declined), and `"requested"` where the
+platform does not say (iOS, Android, Linux, a GPUI host, a terminal). NSH never reads the clipboard back to find out.
+Show "Copied" only for `"written"`, and keep a way to copy by hand for `"failed"`. In Rust the answer is a
+`ClipboardWrite`; drop it when the result does not matter, the write happens either way.
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -1674,7 +1682,7 @@ const copied = signal(false);
 ### Clipboard.write
 
 ```ts
-write(item: ClipboardItem): Promise<void>;
+write(item: ClipboardItem): Promise<ClipboardWrite>;
 ```
 
 Puts the same content as plain text and as HTML on the clipboard, replacing what was there, as a browser copies a
@@ -3209,13 +3217,14 @@ interface KeyBindingOptions {
   repeat?: boolean;
   passThrough?: boolean;
   forFocus?: boolean;
+  overFocused?: boolean;
 }
 ```
 
 | TS | Rust |
 |---|---|
 | `keymap.bind(keystroke, handler)` | `on_key(keystroke, handler)` |
-| `keymap.bind(keystroke, handler, { scope, when, repeat, passThrough, forFocus })` | `on_key_with(keystroke, KeyOptions { scope, when, repeat, pass_through, for_focus }, handler)`; `scope` is `KeyScope::Window` (default) or `KeyScope::App`; `when` is `nsh_core::keymap::When` (`Auto`, `Always`, `NotEditing`) |
+| `keymap.bind(keystroke, handler, { scope, when, repeat, passThrough, forFocus, overFocused })` | `on_key_with(keystroke, KeyOptions { scope, when, repeat, pass_through, for_focus, over_focused }, handler)`; `scope` is `KeyScope::Window` (default) or `KeyScope::App`; `when` is `nsh_core::keymap::When` (`Auto`, `Always`, `NotEditing`) |
 | `keymap.bind({ … })` | one `on_key` per keystroke |
 | `keymap.label(keystroke)` | `key_label(keystroke)` |
 
@@ -3405,6 +3414,17 @@ on_key_with("space", KeyOptions { for_focus: true, ..KeyOptions::default() }, mo
 ```
 
 The keys belong to the newest dialog: when the focus stays on a view a dialog covers (a menu gives it back to its trigger as its item opens a dialog), Return and Space go to the dialog's bindings, and that view's `forFocus` bindings and its press wait until the dialog closes.
+
+A focused component's own bindings come before the app's: while an `Editor` has the focus, its Mod+Enter inserts a line below, whatever the app bound to that key. A binding with `overFocused: true` comes before them instead, so the app takes a key a focused component binds, as a query editor running its text with Mod+Enter does. Bind it while that view has the focus and let it go as the focus leaves, so the component keeps the key elsewhere (Rust: `KeyOptions { over_focused: true, .. }`). Without the option the order is as before, and a popup's Escape still closes the popup first.
+
+```tsx
+const focused = signal(false);
+effect(() => {
+  if (focused()) keymap.bind("mod+enter", runQuery, { when: "always", overFocused: true });
+});
+
+<Editor onFocus={() => focused.set(true)} onBlur={() => focused.set(false)} />
+```
 
 Menu shortcuts give way to a binding of the same keystroke: the application menu's ([`nsh/desktop`](./nsh-desktop)) on every desktop, and on macOS the built-in menus' too (Cmd+W, Cmd+C, ...). While you develop with `nsh run`, Cmd+R / Ctrl+R always reloads the app, even if it binds `mod+r`; a packaged app can bind it.
 

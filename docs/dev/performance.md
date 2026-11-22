@@ -4,6 +4,30 @@ Performance is the project's first priority; the rules are in `AGENTS.md`. Chang
 after `nsh test --trace` timings and item counts (`nsh trace` before it, in the records below). Current baselines
 (Apple Silicon except where noted):
 
+A long RichEditor document with tables (2026-11-21, Linux x86_64, Intel Core Ultra 7 270K Plus, debug, against
+`ca7b8fba3`): every block reports its frame in a layout event of its own, and each event went through all of the
+component's handlers to find the block's (a list of every node's), then ran the tables' controls again, one region
+laying out every table and making all their handles: the first commit grew with the square of the blocks. The
+component's handlers are now kept by node (`Handlers`), and each table's controls are a region that runs again when
+that table, a cell of it or a box around it moves (`docs/dev/rich-editor.md`). `examples/bench/RichEditorLongDocument.tsx`
+with `LINES` set, `echo 'await app.wait(100)' | nsh test … --trace`, the first commit:
+
+| Source lines | Mount items | Nodes | Before: commit (list js) | After: commit (list js) |
+|---:|---:|---:|---:|---:|
+| 200 | 2,921 | 1,039 | 109 ms (46 ms) | 71 ms (9 ms) |
+| 400 | 5,783 | 2,065 | 272 ms (154 ms) | 137 ms (19 ms) |
+| 800 | 11,507 | 4,117 | 951 ms (714 ms) | 278 ms (38 ms) |
+| 1,600 | 22,478 | 8,050 | 3,260 ms (2,792 ms) | 537 ms (74 ms) |
+| 5,000 | 70,178 | 25,150 | 28,518 ms (27,019 ms), test failed | 1,724 ms (240 ms) |
+
+The rows were measured with the same app mounted without a `Window` (the bench file wraps it in one: 70,177 items at
+5,000 lines). Item and node counts are unchanged. The same document without tables went from 75 ms to 37 ms of list js at
+1,600 lines (the handlers alone). `examples/bench/RichEditor.tsx` keeps its counts (13,054 items and 4,011 nodes first,
+3 or 4 items an edit); its first commit went from 312 to 246 ms (list js 109 → 50 ms), and its edits, five interleaved
+runs of the last four, from 409–703 µs (list js 96–134 µs) to 386–610 µs (79–95 µs). The counter keeps 56 / 10 ops,
+50 / 7 mount items and 15 / 18 nodes. `an_event_looks_only_at_its_nodes_handlers` keeps an event's handler lookups the
+same at 50, 200 and 800 rows.
+
 Many children of one parent mounted at once (2026-11-18, Linux x86_64, Intel Core Ultra 7 270K Plus, release, one
 CPU, against `6442c86be`): an `each` placed its new rows by searching the parent's children for each one, and a view
 made last among its siblings looked through every overlay of the surface (a document's links each have a hint

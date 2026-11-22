@@ -18,7 +18,7 @@ use nsh_base::{
 };
 use nsh_core::{MountItem, NodeId, Size, geometry::point, platform::Os, prelude::*};
 use nsh_engine::EngineConfig;
-use nsh_testing::{Headless, Screen};
+use nsh_testing::{DragOptions, Headless, Screen};
 
 #[derive(Clone, PartialEq, Props)]
 struct HarnessProps {
@@ -275,7 +275,8 @@ fn ends_after_keys(area: bool, rtl: bool, keys: &[&str]) -> Vec<String> {
 /// left-to-right or right-to-left layout.
 fn end_after_drag(rtl: bool, selector: &str, by: f32) -> String {
     let mut app = start_in(rtl);
-    app.drag(selector, point(px(by), px(0.0))).unwrap();
+    app.drag(selector, point(px(by), px(0.0)), DragOptions::default())
+        .unwrap();
     app.wait_until("the drag's end", Duration::from_secs(5), |s| {
         ends(s).len() == 1
     })
@@ -399,7 +400,12 @@ fn a_swatch_and_a_typed_color_change_the_color_the_app_keeps() {
 fn a_slider_drag_reports_the_color_then_its_end_once() {
     let mut app = start(ColorFormat::Hex, false);
     // Past the alpha's start: fully transparent.
-    app.drag("label:Alpha", point(px(-300.0), px(0.0))).unwrap();
+    app.drag(
+        "label:Alpha",
+        point(px(-300.0), px(0.0)),
+        DragOptions::default(),
+    )
+    .unwrap();
     app.wait_for("text:Ends #3b82f600").unwrap();
 }
 
@@ -421,7 +427,12 @@ fn a_disabled_picker_takes_no_changes() {
         assert!(state.disabled, "{part}");
     }
     app.press("label:Red").unwrap();
-    app.drag("label:Alpha", point(px(-300.0), px(0.0))).unwrap();
+    app.drag(
+        "label:Alpha",
+        point(px(-300.0), px(0.0)),
+        DragOptions::default(),
+    )
+    .unwrap();
     app.settle();
     assert!(app.shows("Unchanged"));
 }

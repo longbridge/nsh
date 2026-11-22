@@ -2069,7 +2069,15 @@ final class Mounter {
             View v = views.get(id);
             if (v instanceof StackBox) {
                 StackBox stack = (StackBox) v;
-                for (int s : stack.screens) dirtyScreens.add(s);
+                for (int s : stack.screens) {
+                    dirtyScreens.add(s);
+                    // The transition reads each screen's animation: a screen
+                    // mounted in this batch is configured only below, so give
+                    // it its option before the stack animates it in.
+                    View sv = views.get(s);
+                    ScreenOptions so = screenOptions.get(s);
+                    if (sv instanceof StackBox.ScreenBox && so != null) ((StackBox.ScreenBox) sv).animation = so.animation;
+                }
                 stack.reconcile();
             }
         }

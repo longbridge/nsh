@@ -199,6 +199,7 @@ function closeConversation(threadId: string) {
 - `setForegroundPresentation(presentation)` 决定应用在前台时通知怎么显示，`setForegroundPresentation(presentation, { threadId })` 决定某个 thread 的通知怎么显示；传 `null` 撤销。它们要在通知到达前设好（系统会立即询问），并对应用的所有界面生效。
 - `closeThread(threadId)` 移除某个 thread 里已送达的通知，`Notifications.show` 显示的除外；`Notifications.close(id)` 移除单条。
 - 独立运行的 iOS 应用里 `available()` 为 `true`。其他地方为 `false`，`register` 和 `closeThread` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝。
+- 声明了 `"capabilities"` 的应用用 [`"notifications": true`](./sandbox-and-capabilities.md#notifications) 授予 `Push`，与 `Notifications` 用的是同一项能力。token、投递和它们的显示方式属于整个应用，所以除 `available()` 外的每个函数都先检查这项能力。
 
 开启这个 feature 后，打包的应用会带上 `remote-notification` 后台模式。`aps-environment` entitlement 来自应用签名所用的描述文件（[iOS 真机](./packaging.md#ios-真机)）。Rust 代码（比如某个推送服务 SDK 的绑定）使用 `nsh_extra::push`：`on_event` 收到同样的事件，并带 token 的原始字节；`set_foreground_presentation_decider` 在原生侧决定每条通知怎么显示；启动参数从 `nsh_platform_ios::on_application_event` 取得（[应用事件](./ios.md#应用事件)）。
 
@@ -320,7 +321,7 @@ nshm 在自己的 `nsh.json` 的 `"dependencies"` 中列出需要的 nshm，写�
 
 ## 平台 nshm
 
-nshm 可以提供自己的 target，例如 NSH 不构建的平台：在 `nsh.json` 中写 `"platform"`，并在 crate 中提供名为 `nsh-platform-<name>` 的二进制：
+nshm 可以提供自己的 target，例如 NSH 不构建的平台：在 `nsh.json` 中写 `"platform"`，并在 crate 中提供名为 `nsh-platform-<name>` 的二进制。crate 只提供 target 时不需要 `#[native_module]`；没有它时，应用不会链接这个 crate，也不会因此变成 Rust 应用：
 
 ```json
 { "name": "nsh-harmony", "version": "0.1.0", "platform": "harmony" }

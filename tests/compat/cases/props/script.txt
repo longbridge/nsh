@@ -131,6 +131,9 @@ prop scroll:text:"Sticky 0" stickyHeaderIndices start=0 end=80, start=120 end=In
 # Items not measured yet count 100 points each: 30 items are 3000 tall.
 scroll scroll:text:"Estimated 0" 0 10
 expect Content: 3000
+# Cells align at their natural cross-axis size, from either style form.
+origin id:align-center 40 704
+origin id:align-end 0 794
 covers [props] numColumns
 covers [props] inverted
 covers [props] stickyHeaderIndices

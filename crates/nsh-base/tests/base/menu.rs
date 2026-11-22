@@ -22,7 +22,7 @@ use nsh_base::{
     ContextMenuEvents, MenuButtonItem, MenuEvent, context_menu, dialog, input, menu, menu_item,
 };
 use nsh_core::{
-    Checked, MountItem, NodeId, Size,
+    Checked, Command, MountItem, NodeId, Size,
     element::Root,
     platform::{CONTEXT_MENU_COMPONENT, Idiom, Os},
     prelude::*,
@@ -491,8 +491,42 @@ fn after_a_press_the_arrows_home_and_end_focus_an_end_of_the_enabled_items() {
 }
 
 #[test]
-fn after_a_press_and_an_arrow_escape_gives_the_focus_to_the_trigger() {
+fn after_a_press_and_an_arrow_escape_leaves_the_focus_where_it_was() {
     let mut app = start_with(nsh_testing::windowed_root::<FileMenu>());
+    app.app.press("id:file").unwrap();
+    app.app.wait_for("Open").unwrap();
+    app.app.press_key("down").unwrap();
+    app.app.press_key("escape").unwrap();
+    app.app
+        .wait_for_gone("Open", std::time::Duration::from_secs(2))
+        .unwrap();
+    // A press opened it, so the trigger never had the focus and does not
+    // get it now: the arrows are not the trigger's, Up opens nothing.
+    app.app.press_key("up").unwrap();
+    assert!(!app.app.shows("Quit"));
+}
+
+#[test]
+fn on_windows_after_a_press_and_an_arrow_escape_gives_the_focus_to_the_trigger() {
+    // A press focuses a button there, as native buttons do: the trigger
+    // takes the focus back, so its arrows open the menu again.
+    let mut app = start_on(nsh_testing::windowed_root::<FileMenu>(), Os::Windows);
+    app.app.press("id:file").unwrap();
+    app.app.wait_for("Open").unwrap();
+    app.app.press_key("down").unwrap();
+    app.app.press_key("escape").unwrap();
+    app.app
+        .wait_for_gone("Open", std::time::Duration::from_secs(2))
+        .unwrap();
+    app.app.press_key("up").unwrap();
+    app.app.wait_for("Quit").unwrap();
+}
+
+#[test]
+fn after_a_press_on_the_focused_trigger_escape_gives_it_the_focus_back() {
+    let mut app = start_with(nsh_testing::windowed_root::<FileMenu>());
+    // Tab gave the trigger the focus before the press: it gets it back.
+    app.app.press_key("tab").unwrap();
     app.app.press("id:file").unwrap();
     app.app.wait_for("Open").unwrap();
     app.app.press_key("down").unwrap();
@@ -1299,6 +1333,29 @@ fn escape_gives_the_focus_to_the_trigger_of_a_context_menu_the_app_opened() {
     // The row has it: Shift+F10 opens its menu again.
     app.app.press_key("shift+f10").unwrap();
     app.app.wait_for("Rename").unwrap();
+}
+
+#[test]
+fn escape_leaves_the_focus_where_it_was_after_a_context_menu_opened_by_a_press_on_a_mac() {
+    let mut app = start_on(nsh_testing::windowed_root::<ShownMenu>(), Os::MacOs);
+    app.app.press("id:show").unwrap();
+    app.app.wait_for("Rename").unwrap();
+    let focus = |app: &App| {
+        let screen = app.app.screen();
+        screen
+            .commands()
+            .iter()
+            .filter(|(_, c)| *c == Command::Focus)
+            .count()
+    };
+    let before = focus(&app);
+    app.app.press_key("escape").unwrap();
+    app.app
+        .wait_for_gone("Rename", std::time::Duration::from_secs(5))
+        .unwrap();
+    // Nothing had the focus as the press opened it, as AppKit leaves it:
+    // the row does not get it.
+    assert_eq!(focus(&app), before, "no view takes the focus");
 }
 
 #[test]

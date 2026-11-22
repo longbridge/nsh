@@ -330,6 +330,13 @@ enum Command {
         /// main one when there is no such display (`--target macos` only).
         #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..))]
         display: Option<u32>,
+        /// With `--target macos`, `linux`, `windows` or `gpui`: the app
+        /// never becomes the active app, as `nsh test` runs its apps. Its
+        /// window shows (behind the active app's), the keyboard stays with
+        /// the app in use, and input sent to its windows still reaches it
+        /// (TSX entries).
+        #[arg(long)]
+        background: bool,
     },
     /// Create a signing key: `<name>.secret` (keep it offline for a root)
     /// and `<name>.pub` (what apps trust, for a root).
@@ -852,6 +859,16 @@ fn run(mut command: Command) -> anyhow::Result<()> {
     if let Some(entry) = command.entry_mut() {
         package::check_nsh_version(entry)?;
     }
+    // `nsh check` runs no bundle, host or runner, so nothing else it does
+    // reads the manifest: what the other commands warn of as they read it
+    // (`read_config`), it says before the type check calls the app fine.
+    // A Rust app's manifest is its describing's (`root_config`), which
+    // refuses what it does not know.
+    if let Command::Check { entry, .. } = &command
+        && !rust_app::is_root(entry)
+    {
+        package::read_config(entry)?;
+    }
     if let Some(entry) = command.entry_mut()
         && rust_app::is_root(entry)
         && !rust_command
@@ -1095,6 +1112,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             name,
             size,
             display,
+            background,
             points_per_cell,
         } => {
             no_limits_for_rust(&entry, limits)?;
@@ -1117,6 +1135,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                     name: name.as_deref(),
                     size: size.as_deref(),
                     display: display.map(|n| n as usize),
+                    background,
                 },
             )
         }

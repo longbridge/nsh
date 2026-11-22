@@ -11,7 +11,7 @@
 //! Hit testing walks the views ([`pick`]), as the Linux backend does:
 //! points go into children through their frames, the parent's scroll
 //! offset and sticky shift ([`ViewState::child_origin`]) and their
-//! transforms (inverted with [`Mat4::unproject`], so 3D transforms hit
+//! transforms (inverted with [`crate::geom::Mat4::unproject`], so 3D transforms hit
 //! where they are drawn). Hidden and concealed views, `pointerEvents`,
 //! `hitSlop` and `overflow: hidden` are honored; outside a view's bounds,
 //! only the area its descendants cover (`MountItem::Overflow`: a dropdown
@@ -77,7 +77,6 @@ use nsh_core::{
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
-    geom::Mat4,
     surface::Surface,
     view::{ItemPointer, Native, NshView, ViewState},
 };
@@ -90,8 +89,13 @@ struct Transform {
     view: NshView,
     pinch: bool,
     rotation: bool,
+    /// It zooms `view`, a zoomable scroll view, rather than driving its
+    /// pinch values.
+    zoom: bool,
     scale: f32,
     degrees: f32,
+    /// Where the pinch is centered (root coordinates).
+    at: (f32, f32),
 }
 
 /// Two touchscreen fingers transforming a view.
@@ -1550,13 +1554,13 @@ fn pick_in(view: &NshView, x: f32, y: f32, items: bool) -> Option<Hit> {
         kids.iter().rev().find_map(|child| {
             let (cx, cy) = {
                 let c = child.state();
-                let (ox, oy) = s.child_origin(c.frame, c.shift);
+                let zoomed = s.child_scale() != 1.0;
                 match c.transform() {
-                    None => (x - ox, y - oy),
-                    Some(t) => {
-                        let local = Mat4::mul(&t, &Mat4::new().translate(ox, oy));
-                        local.unproject(x, y)?
+                    None if !zoomed => {
+                        let (ox, oy) = s.child_origin(c.frame, c.shift);
+                        (x - ox, y - oy)
                     }
+                    _ => s.child_matrix(&c).unproject(x, y)?,
                 }
             };
             pick_in(child, cx, cy, items)
@@ -1745,6 +1749,12 @@ fn down(
         gate,
         ..
     } = grab;
+    // A zoomable scroll view nearer than a view with pinch values is what
+    // two fingers zoom.
+    let pinch = views
+        .iter()
+        .find(|v| pinch.as_ref() == Some(*v) || crate::scroll::pinches(surface, v))
+        .cloned();
     // A text field takes its own clicks (focus, caret, selection drags);
     // the `Input` itself hears them as a press too (a combobox opens its
     // list), but no view around it does.
@@ -2245,22 +2255,28 @@ fn transform_payload(key: &'static str, amount: f32) -> EventPayload {
     ])
 }
 
-fn transform_view(surface: &Surface, view: &NshView) -> Transform {
+fn transform_view(surface: &Rc<Surface>, view: &NshView) -> Transform {
     let (id, events) = {
         let s = view.state();
         (s.id, s.events)
     };
     let (pinch, rotation) = transforms(&gesture_values(surface, view, id), events);
+    let zoom = crate::scroll::pinches(surface, view);
     Transform {
         view: view.clone(),
-        pinch,
-        rotation,
+        pinch: pinch && !zoom,
+        rotation: rotation && !zoom,
+        zoom,
         scale: 1.0,
         degrees: 0.0,
+        at: (0.0, 0.0),
     }
 }
 
-fn transform_begin(surface: &Surface, t: &Transform) {
+fn transform_begin(surface: &Rc<Surface>, t: &Transform) {
+    if t.zoom {
+        return crate::scroll::pinch_begin(surface, &t.view);
+    }
     let (id, events) = {
         let s = t.view.state();
         (s.id, s.events)
@@ -2284,6 +2300,10 @@ fn transform_begin(surface: &Surface, t: &Transform) {
 }
 
 fn transform_move(surface: &Rc<Surface>, t: &Transform) {
+    if t.zoom {
+        let (x, y) = local(&t.view, t.at.0, t.at.1);
+        return crate::scroll::pinch(surface, &t.view, t.scale, x, y);
+    }
     let id = t.view.state().id;
     {
         let mut anim = surface.anim.borrow_mut();
@@ -2298,7 +2318,11 @@ fn transform_move(surface: &Rc<Surface>, t: &Transform) {
     surface.ensure_ticking();
 }
 
-fn transform_end(surface: &Surface, t: &Transform) {
+fn transform_end(surface: &Rc<Surface>, t: &Transform) {
+    if t.zoom {
+        let (x, y) = local(&t.view, t.at.0, t.at.1);
+        return crate::scroll::pinch_end(surface, &t.view, x, y);
+    }
     let (id, events) = {
         let s = t.view.state();
         (s.id, s.events)
@@ -2369,6 +2393,7 @@ fn two_finger_moved(surface: &Rc<Surface>) {
         let Some((a, b)) = positions else { return };
         let (scale, rotation) = t.pinch.at(a, b);
         t.transform.scale = scale;
+        t.transform.at = ((a.x.0 + b.x.0) / 2.0, (a.y.0 + b.y.0) / 2.0);
         t.transform.degrees = rotation.0.to_degrees();
         t.transform.clone()
     };
@@ -2403,7 +2428,12 @@ fn wheel_zoom(surface: &Rc<Surface>, x: f32, y: f32, dy: f32) -> bool {
             let Some(hit) = pick(&surface.input_root(), x, y, true) else {
                 return false;
             };
+            // A zoomable scroll view nearer than a view with pinch values
+            // zooms around the pointer.
             let view = chain(&hit.view).into_iter().find(|v| {
+                if crate::scroll::pinches(surface, v) {
+                    return true;
+                }
                 let s = v.state();
                 transforms(&gesture_values(surface, v, s.id), s.events).0
             });
@@ -2415,6 +2445,7 @@ fn wheel_zoom(surface: &Rc<Surface>, x: f32, y: f32, dy: f32) -> bool {
         }
     };
     t.scale *= zoom_factor(dy);
+    t.at = (x, y);
     transform_move(surface, &t);
     *input.zoom.borrow_mut() = Some((t, generation));
     let weak = Rc::downgrade(surface);
@@ -2800,9 +2831,16 @@ fn wheel_input(
                 return false;
             };
             *input.latch.borrow_mut() = Some((view.clone(), horizontal, time));
-            // Without a begin, the scroll module takes it as a mouse wheel:
-            // it settles (and snaps) by itself once the notches stop.
-            scroll_wheel(surface, &view, dx, dy);
+            if view.kind() == ViewKind::Scroll && !surface.environment.get().reduce_motion {
+                // A notch glides, as in Windows' own apps and browsers
+                // (unless the system's animations are off).
+                crate::scroll::wheel_step(surface, &view, dx, dy);
+            } else {
+                // Without a begin, the scroll module takes it as a mouse
+                // wheel: it settles (and snaps) by itself once the notches
+                // stop.
+                scroll_wheel(surface, &view, dx, dy);
+            }
             true
         }
         WheelInput::Touchpad => {
@@ -2838,9 +2876,10 @@ fn wheel_input(
                 return false;
             };
             // The system glides on by itself (its inertia comes as more
-            // deltas, which this scroll took): no velocity to add.
+            // deltas, which this scroll took): no velocity to add, and a
+            // snapping view settles where it came to rest.
             if w.view.kind() == ViewKind::Scroll {
-                crate::scroll::wheel_end(surface, &w.view, 0.0, 0.0);
+                crate::scroll::wheel_settle(surface, &w.view);
             }
             true
         }

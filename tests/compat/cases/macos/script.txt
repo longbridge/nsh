@@ -44,6 +44,12 @@ key tab
 key space
 expect Opens: 1 Flips: 1
 covers [nsh] keymap
+# mod-keymap-over-focused
+tap id:case-mod-keymap-over-focused
+# A binding made with `overFocused` fires.
+key mod+enter
+expect Runs: 1
+covers [nsh] keymap
 # mod-standard-system
 tap id:case-mod-standard-system
 expect console.identity=true

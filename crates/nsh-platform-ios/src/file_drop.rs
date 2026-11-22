@@ -1,6 +1,8 @@
-//! File drops (`onFileDragEnter`, `onFileDragLeave`, `onFileDrop`) on iOS:
-//! a `UIDropInteraction` on each view that listens to `onFileDrop`, whose
-//! delegate is the surface's [`crate::target::EventTarget`].
+//! File drops (`onFileDragEnter`, `onFileDragLeave`, `onFileDrop`) and text
+//! drops ([`nsh_core::EventKind::TextDrop`], a Rust component's such as
+//! `RichEditor`'s) on iOS: a `UIDropInteraction` on each view that listens
+//! to either, whose delegate is the surface's
+//! [`crate::target::EventTarget`].
 //!
 //! UIKit routes a drag to the deepest view under it with a drop interaction
 //! that can handle the session, so the closest listener takes the files, as
@@ -27,7 +29,7 @@ use objc2::{
     rc::{Allocated, Retained},
     runtime::{AnyClass, AnyObject},
 };
-use objc2_foundation::{NSArray, NSError, NSString, NSURL};
+use objc2_foundation::{NSArray, NSData, NSError, NSString, NSURL};
 
 /// `UIDropOperationCopy`.
 const COPY: isize = 2;
@@ -92,17 +94,46 @@ fn providers(session: &AnyObject) -> Vec<Retained<AnyObject>> {
 }
 
 /// Whether `session` offers at least one file.
-pub(crate) fn offers_files(session: &AnyObject) -> bool {
+fn offers_files(session: &AnyObject) -> bool {
     providers(session).iter().any(|p| file_type(p).is_some())
 }
 
-/// The proposal for `session` over a listener: copy its files.
-pub(crate) fn proposal(session: &AnyObject) -> Option<Retained<AnyObject>> {
-    let operation = if offers_files(session) {
-        COPY
+/// Whether `provider` offers text (plain or rich; a link alone is no text).
+fn has_text(provider: &AnyObject) -> bool {
+    let text = NSString::from_str("public.text");
+    // SAFETY: NSItemProvider's documented API (iOS 11).
+    unsafe { msg_send![provider, hasItemConformingToTypeIdentifier: &*text] }
+}
+
+/// What a drag gives a view: its files when it offers some and the view
+/// listens to `onFileDrop`, else its text when it offers some and the view
+/// takes text drops (a Rust component such as `RichEditor`,
+/// [`nsh_core::EventKind::TextDrop`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Offer {
+    Files,
+    Text,
+}
+
+/// What `session` gives a view that listens to `events`, if anything.
+pub(crate) fn offer(session: &AnyObject, events: nsh_core::EventMask) -> Option<Offer> {
+    use nsh_core::EventKind;
+    let files = offers_files(session);
+    if files && events.contains(EventKind::FileDrop) {
+        Some(Offer::Files)
+    } else if !files
+        && events.contains(EventKind::TextDrop)
+        && providers(session).iter().any(|p| has_text(p))
+    {
+        Some(Offer::Text)
     } else {
-        FORBIDDEN
-    };
+        None
+    }
+}
+
+/// The proposal for a drag over a listener: copy what it offers it.
+pub(crate) fn proposal(offered: bool) -> Option<Retained<AnyObject>> {
+    let operation = if offered { COPY } else { FORBIDDEN };
     let class = class(c"UIDropProposal")?;
     // SAFETY: UIDropProposal's documented initializer (iOS 11).
     unsafe {
@@ -225,6 +256,91 @@ pub(crate) fn read(session: &AnyObject, done: impl FnOnce(Vec<String>) + Send + 
         let _: Option<Retained<AnyObject>> = unsafe {
             msg_send![&provider, loadFileRepresentationForTypeIdentifier: &*kind, completionHandler: &*handler]
         };
+    }
+}
+
+/// Reads the text `session` offers (each item's plain text, and its HTML
+/// when it has some, joined by line breaks), then calls `done` with the
+/// text and the HTML, on a queue of the providers'.
+pub(crate) fn read_text(session: &AnyObject, done: impl FnOnce(String, String) + Send + 'static) {
+    let providers: Vec<_> = providers(session)
+        .into_iter()
+        .filter(|p| has_text(p))
+        .collect();
+    let Some(string_class) = class(c"NSString").filter(|_| !providers.is_empty()) else {
+        done(String::new(), String::new());
+        return;
+    };
+    let html_type = NSString::from_str("public.html");
+    let with_html: Vec<bool> = providers
+        .iter()
+        // SAFETY: NSItemProvider's documented API (iOS 11).
+        .map(|p| unsafe { msg_send![&**p, hasItemConformingToTypeIdentifier: &*html_type] })
+        .collect();
+    let reads = providers.len() + with_html.iter().filter(|&&h| h).count();
+    let reading = Arc::new(Mutex::new(TextReading {
+        text: vec![None; providers.len()],
+        html: vec![None; providers.len()],
+        left: reads,
+        done: Some(Box::new(done) as Box<dyn FnOnce(String, String) + Send>),
+    }));
+    for (index, provider) in providers.iter().enumerate() {
+        let r = reading.clone();
+        let handler = RcBlock::new(move |object: *mut AnyObject, _error: *mut NSError| {
+            // SAFETY: the NSString the provider read, valid for this call
+            // (null on failure).
+            let text = unsafe { object.as_ref() }
+                .and_then(|o| o.downcast_ref::<NSString>())
+                .map(|s| s.to_string());
+            TextReading::done_one(&r, |state| state.text[index] = text);
+        });
+        // SAFETY: NSItemProvider's `loadObjectOfClass:completionHandler:`
+        // (iOS 11) with NSString, an NSItemProviderReading class; the
+        // handler runs once on a queue of the provider's.
+        let _: Option<Retained<AnyObject>> = unsafe {
+            msg_send![&**provider, loadObjectOfClass: string_class, completionHandler: &*handler]
+        };
+        if with_html[index] {
+            let r = reading.clone();
+            let handler = RcBlock::new(move |data: *mut NSData, _error: *mut NSError| {
+                // SAFETY: the data the provider read, valid for this call
+                // (null on failure).
+                let html = unsafe { data.as_ref() }
+                    .map(|d| String::from_utf8_lossy(&d.to_vec()).into_owned());
+                TextReading::done_one(&r, |state| state.html[index] = html);
+            });
+            // SAFETY: NSItemProvider's documented API (iOS 11); the handler
+            // runs once on a queue of the provider's.
+            let _: Option<Retained<AnyObject>> = unsafe {
+                msg_send![&**provider, loadDataRepresentationForTypeIdentifier: &*html_type, completionHandler: &*handler]
+            };
+        }
+    }
+}
+
+/// The text and HTML of a text drop read so far, by item.
+struct TextReading {
+    text: Vec<Option<String>>,
+    html: Vec<Option<String>>,
+    left: usize,
+    done: Option<Box<dyn FnOnce(String, String) + Send>>,
+}
+
+impl TextReading {
+    /// One read finished (`set` keeps what it read); the last one calls
+    /// `done` with the items' text and HTML joined by line breaks.
+    fn done_one(reading: &Mutex<TextReading>, set: impl FnOnce(&mut TextReading)) {
+        let mut state = reading.lock().unwrap_or_else(|e| e.into_inner());
+        set(&mut state);
+        state.left -= 1;
+        if state.left == 0
+            && let Some(done) = state.done.take()
+        {
+            let text: Vec<String> = state.text.drain(..).flatten().collect();
+            let html: Vec<String> = state.html.drain(..).flatten().collect();
+            drop(state);
+            done(text.join("\n"), html.join("\n"));
+        }
     }
 }
 

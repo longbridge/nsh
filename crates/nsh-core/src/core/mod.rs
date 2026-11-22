@@ -1108,6 +1108,10 @@ struct TextContext<P> {
     laid_out: Option<LaidText>,
     /// New test metadata must be mounted even when the glyphs are unchanged.
     metadata_changed: bool,
+    /// `text-pretty`: a short last line takes words from the lines above
+    /// ([`pretty_width`]), with the last width asked for and what it gave
+    /// (`NAN` for none). Boxed: few texts say it.
+    pretty: Option<Box<(f32, Points)>>,
 }
 
 /// A text measures `size` at every maximum width from `narrowest` to
@@ -1151,6 +1155,7 @@ impl<P> TextContext<P> {
             baseline: None,
             laid_out: None,
             metadata_changed: false,
+            pretty: None,
         }
     }
     /// Remount metadata in the same box, keeping any fitted font sizes.
@@ -1462,6 +1467,11 @@ pub struct Core<M: TextEngine> {
     /// it comes back from, unless a `focus()` moves it out of that popup
     /// ([`crate::element::ElementRef::focus_back`]).
     focus_back: Option<(NodeId, Option<NodeId>)>,
+    /// The focus the popups that give it back to these nodes opened
+    /// with, when a pointer opened them
+    /// ([`crate::element::ElementRef::focus_back_origin`]): one per
+    /// trigger, its latest opening.
+    focus_origins: Vec<(NodeId, Option<(Key, NodeId)>)>,
     /// Animates the layout changes of the next commit.
     layout_animation: Option<LayoutAnimation>,
     /// Nodes whose change animates the frames it moves in the next commit,
@@ -1791,6 +1801,7 @@ impl<M: TextEngine> Core<M> {
             retags: None,
             commands: Vec::new(),
             focus_back: None,
+            focus_origins: Vec::new(),
             layout_animation: None,
             scoped_layout: Vec::new(),
             resized: Vec::new(),
@@ -3674,6 +3685,11 @@ impl<M: TextEngine> Core<M> {
         // closing. A move inside the popup (its items' keys typed ahead of
         // the choice) or to a view that is gone does not.
         if let Some((id, from)) = self.focus_back.take() {
+            let origin = self
+                .focus_origins
+                .iter()
+                .position(|&(to, _)| to == id)
+                .map(|i| self.focus_origins.swap_remove(i).1);
             let from = from.and_then(|from| self.key(from).ok());
             let moved_out = |to: NodeId| {
                 self.key(to)
@@ -3693,7 +3709,12 @@ impl<M: TextEngine> Core<M> {
                     )
                 });
             if !moved {
-                self.commands.push((id, Command::Focus));
+                match origin {
+                    // Opened by the keyboard (or the app after a key): back
+                    // to the trigger the keyboard opened it from.
+                    None => self.commands.push((id, Command::Focus)),
+                    Some(before) => self.focus_back_to_origin(before, from),
+                }
             }
         }
         // On laid out views; dropped for views that were never shown.
@@ -3784,6 +3805,12 @@ impl<M: TextEngine> Core<M> {
                     {
                         self.answer_clipboard(*request, components::ClipboardAnswer::default());
                     }
+                    if matches!(
+                        command,
+                        Command::SetClipboard(_) | Command::SetClipboardItem(_)
+                    ) {
+                        self.answer_clipboard_write(crate::element::ClipboardWrite::Failed);
+                    }
                     self.deny("the clipboard is not granted: add `\"clipboard\": true` to capabilities in nsh.json".into());
                     continue;
                 }
@@ -3799,8 +3826,14 @@ impl<M: TextEngine> Core<M> {
                 {
                     let clipboard = self.clipboard.clone().expect("a clipboard");
                     match &command {
-                        Command::SetClipboard(text) => clipboard.set_text(Some(text.clone())),
-                        Command::SetClipboardItem(item) => clipboard.set_item(Some(item.clone())),
+                        Command::SetClipboard(text) => {
+                            clipboard.set_text(Some(text.clone()));
+                            self.answer_clipboard_write(crate::element::ClipboardWrite::Written);
+                        }
+                        Command::SetClipboardItem(item) => {
+                            clipboard.set_item(Some(item.clone()));
+                            self.answer_clipboard_write(crate::element::ClipboardWrite::Written);
+                        }
                         Command::SetClipboardImage(_) => clipboard.set_item(None),
                         Command::ReadClipboard {
                             id: request,
@@ -3821,6 +3854,13 @@ impl<M: TextEngine> Core<M> {
                         _ => {}
                     }
                     continue;
+                }
+                // A platform that cannot tell whether the system took a
+                // write answers it now; the others report it.
+                Command::SetClipboard(_) | Command::SetClipboardItem(_)
+                    if !self.components.environment.clipboard_write_result =>
+                {
+                    self.answer_clipboard_write(crate::element::ClipboardWrite::Requested);
                 }
                 // Checked before the grants: a host may put the name in a
                 // path or a URL, where `user.x/../admin` leaves `user.*`.
@@ -4520,9 +4560,10 @@ impl<M: TextEngine> Core<M> {
                 }
             }
             Kind::Cell => {
-                // Cells are their own layout roots (laid out at the list's
-                // cross size, positioned by the list): a change in one row
-                // never relayouts the rest of the tree.
+                // Cells are their own layout roots (the list gives them a
+                // definite cross size to stretch, or max-content to align,
+                // and positions them): a change in one row never relayouts
+                // the rest of the tree.
                 let horizontal = self
                     .nodes
                     .get(node.parent as usize)
@@ -7506,6 +7547,47 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// A popup that gives the keyboard focus back to `to` opens
+    /// ([`crate::element::ElementRef::focus_back_origin`]): on macOS and
+    /// iOS, opened by a pointer, the focus it opened with is where the focus goes back to
+    /// (the pointer's press left it there, off the trigger); opened by the
+    /// keyboard (or on another platform), the trigger takes it back, as
+    /// before.
+    pub(super) fn note_focus_origin(&mut self, to: NodeId) {
+        let mut origins = std::mem::take(&mut self.focus_origins);
+        // Triggers that are gone leave no note behind (a popup closed by a
+        // press outside gives nothing back, so its note stays until then).
+        origins.retain(|&(id, _)| id != to && self.key(id).is_ok());
+        // Only where a press gives a control no focus (macOS and iOS, as
+        // AppKit and UIKit do): elsewhere a press focuses the trigger, as
+        // native buttons there do, and closing gives the trigger the focus.
+        let apple = matches!(
+            self.components.environment.os,
+            crate::platform::Os::MacOs | crate::platform::Os::Ios
+        );
+        if apple && self.modality == Some(crate::platform::InputModality::Pointer) {
+            origins.push((to, self.focus));
+        }
+        self.focus_origins = origins;
+    }
+
+    /// The keyboard focus back from the popup `from` (its node, when it is
+    /// still there) to `before`, the focus a pointer opened it with: there
+    /// when that view is still in the tree and outside the popup, else off
+    /// the popup, so its keys go to the app's shortcuts as they did before
+    /// it opened.
+    fn focus_back_to_origin(&mut self, before: Option<(Key, NodeId)>, from: Option<Key>) {
+        let outside = |this: &Self, key: Key| from.is_none_or(|from| !this.is_ancestor(from, key));
+        let alive = |this: &Self, (key, id): (Key, NodeId)| {
+            this.key(id).is_ok_and(|k| k == key) && this.is_ancestor(this.root, key)
+        };
+        if let Some((_, id)) = before.filter(|&b| alive(self, b) && outside(self, b.0)) {
+            self.commands.push((id, Command::Focus));
+        } else if let Some((_, id)) = self.focus.filter(|&(key, _)| !outside(self, key)) {
+            self.commands.push((id, Command::Blur));
+        }
+    }
+
     fn is_ancestor(&self, ancestor: Key, mut key: Key) -> bool {
         while key != NO_KEY {
             if key == ancestor {
@@ -8469,7 +8551,16 @@ impl<M: TextEngine> Core<M> {
     /// own color does (Rust's `Element::selection_color`, over its
     /// classes'). One walk up.
     fn inherited_text_props(&self, key: Key) -> (Option<bool>, Option<bool>, Option<Color>) {
+        let (no_wrap, selectable, highlight, _) = self.inherited_text_wrap(key);
+        (no_wrap, selectable, highlight)
+    }
+
+    /// [`Core::inherited_text_props`] and whether its lines wrap
+    /// `text-pretty`, which inherits with `white-space` (the same classes
+    /// set both).
+    fn inherited_text_wrap(&self, key: Key) -> (Option<bool>, Option<bool>, Option<Color>, bool) {
         let (mut no_wrap, mut selectable, mut highlight) = (None, None, None);
+        let mut pretty = None;
         let mut k = key;
         while k != NO_KEY && (no_wrap.is_none() || selectable.is_none() || highlight.is_none()) {
             let node = &self.nodes[k as usize];
@@ -8477,13 +8568,16 @@ impl<M: TextEngine> Core<M> {
                 highlight = highlight.or(node.paragraph.selection_color);
             }
             if let Some(c) = node.class_props.as_deref() {
+                if no_wrap.is_none() && c.no_wrap.is_some() {
+                    pretty = Some(c.pretty);
+                }
                 no_wrap = no_wrap.or(c.no_wrap);
                 selectable = selectable.or(c.selectable);
                 highlight = highlight.or(c.selection_color);
             }
             k = node.parent;
         }
-        (no_wrap, selectable, highlight)
+        (no_wrap, selectable, highlight, pretty.unwrap_or(false))
     }
 
     /// The nearest `textAlign` set on a view around `key`.
@@ -8536,7 +8630,7 @@ impl<M: TextEngine> Core<M> {
         let max_lines = class.and_then(|c| c.number_of_lines).unwrap_or(0);
         let ellipsize = class.and_then(|c| c.ellipsize).unwrap_or_default();
         let inherited = self.inherited_text_style(key);
-        let (no_wrap, selectable, highlight) = self.inherited_text_props(key);
+        let (no_wrap, selectable, highlight, pretty) = self.inherited_text_wrap(key);
         let (align, physical) = node
             .text_style
             .text_align
@@ -8590,12 +8684,17 @@ impl<M: TextEngine> Core<M> {
         let cx = self.text_cx(layout);
         cx.deferred = deferred;
         cx.spacers = spacers;
+        let pretty_changed = cx.pretty.is_some() != pretty;
+        if pretty_changed {
+            cx.pretty = pretty.then(|| Box::new((f32::NAN, Points::ZERO)));
+            cx.laid_out = None;
+        }
         if *cx.text == text && cx.alignments == alignments {
             if inserted {
                 // New attachment views: placed with the next final layout.
                 cx.laid_out = None;
             }
-            return inserted;
+            return inserted || pretty_changed;
         }
         if !cx.text.metadata_eq(&text)
             && !inserted
@@ -8636,6 +8735,9 @@ impl<M: TextEngine> Core<M> {
         cx.prepared = None;
         cx.min_content = None;
         cx.laid_out = None;
+        if let Some(p) = &mut cx.pretty {
+            p.0 = f32::NAN;
+        }
         if !same_layout {
             cx.layout_hash = cx.alignments.layout_hash(&cx.text);
             cx.cache = None;
@@ -9681,15 +9783,24 @@ impl<M: TextEngine> Core<M> {
                 .map(|g| if horizontal { g.height } else { g.width });
             let item_cross = state.column(cross, 0, cell).1;
             let extra_cross = state.full_width(cross).1;
+            let stretch = state
+                .content
+                .align_items
+                .is_none_or(|a| a == taffy::AlignItems::STRETCH);
             let available = |c: f32| {
+                let cross = if stretch {
+                    AvailableSpace::Definite(c)
+                } else {
+                    AvailableSpace::MaxContent
+                };
                 if horizontal {
                     taffy::Size {
                         width: AvailableSpace::MaxContent,
-                        height: AvailableSpace::Definite(c),
+                        height: cross,
                     }
                 } else {
                     taffy::Size {
-                        width: AvailableSpace::Definite(c),
+                        width: cross,
                         height: AvailableSpace::MaxContent,
                     }
                 }
@@ -9869,6 +9980,21 @@ impl<M: TextEngine> Core<M> {
                 if height < content.size.height {
                     content.origin.y += align_vertical.of(content.size.height - height);
                     content.size.height = height;
+                }
+            }
+            if cx.pretty.is_some() && fit.is_none() {
+                // Lines broken narrower than the box, where they go in it
+                // as the text is aligned.
+                let width = pretty_width(engine, cx, content.size.width);
+                let spare = content.size.width - width;
+                if spare > Points::ZERO {
+                    content.origin.x += match cx.text.align {
+                        TextAlign::Center => spare * 0.5,
+                        TextAlign::Right => spare,
+                        TextAlign::Auto if cx.text.rtl => spare,
+                        _ => Points::ZERO,
+                    };
+                    content.size.width = width;
                 }
             }
             if let Some((text, layout)) = cx.remount_metadata(content) {
@@ -10898,10 +11024,12 @@ impl<M: TextEngine> Core<M> {
                 main_at += inset.0;
                 x += inset.1;
             }
+            let cell_cross = if horizontal { size.height } else { size.width };
+            x = list.align_cross(x, width, cell_cross);
             let frame = if horizontal {
-                rect(main_at, x, size.width, width)
+                rect(main_at, x, size.width, cell_cross)
             } else {
-                rect(x, main_at, width, size.height)
+                rect(x, main_at, cell_cross, size.height)
             };
             this.set_frame(cell, frame);
             this.set_left_behind(cell, false);
@@ -11818,6 +11946,83 @@ fn measure_text<M: TextEngine>(
 /// Whether `laid`, the layout of `cx`'s text, stands for a box of `size`:
 /// both widths break its lines the same ([`SameLines`]) and its lines start
 /// at the box's left, wherever its right is.
+/// The width `text-pretty` breaks a text's lines at in a box `width` wide:
+/// narrower when its last line would hold less than a quarter of it (a
+/// word or two left alone below a paragraph), as narrow as it takes for
+/// that line to hold a quarter of the width without adding a line. The
+/// platform's own line breaking decides where the lines break at it; a
+/// text that cannot do better keeps the box's width.
+fn pretty_width<M: TextEngine>(
+    engine: &M,
+    cx: &mut TextContext<M::Prepared>,
+    width: Points,
+) -> Points {
+    if let Some(&(w, out)) = cx.pretty.as_deref()
+        && w == width.0
+    {
+        return out;
+    }
+    let out = narrower_lines(engine, cx, width).unwrap_or(width);
+    if let Some(p) = &mut cx.pretty {
+        **p = (width.0, out);
+    }
+    out
+}
+
+/// How short a last line `text-pretty` leaves alone: a quarter of the box.
+const PRETTY_LAST_LINE: f32 = 0.25;
+
+fn narrower_lines<M: TextEngine>(
+    engine: &M,
+    cx: &mut TextContext<M::Prepared>,
+    width: Points,
+) -> Option<Points> {
+    let text = &cx.text;
+    if text.no_wrap || text.max_lines > 0 || width <= Points::ZERO || text.text.contains('\n') {
+        return None;
+    }
+    let prepared = cx
+        .prepared
+        .get_or_insert_with(|| engine.prepare_aligned(&cx.text, &cx.alignments));
+    let height = engine.measure(prepared, Some(width)).height;
+    // How short the last line is at `w`, `None` past a line more.
+    let short = |w: Points| -> Option<bool> {
+        let size = engine.measure(prepared, Some(w));
+        if size.height > height {
+            return None;
+        }
+        let lines = engine.lines(&engine.layout(prepared, Size { width: w, height }));
+        let last = lines.last()?;
+        Some(lines.len() > 1 && last.width < w * PRETTY_LAST_LINE)
+    };
+    if short(width) != Some(true) {
+        return None;
+    }
+    // Narrowing moves words down to the last line: find the widest width
+    // whose last line is no longer short, between the box and the
+    // narrowest width with as many lines.
+    let lines = engine
+        .lines(&engine.layout(prepared, Size { width, height }))
+        .len();
+    let (mut lo, mut hi) = (width * ((lines - 1) as f32 / lines as f32), width);
+    let mut found = None;
+    for _ in 0..8 {
+        let mid = (lo + hi) * 0.5;
+        match short(mid) {
+            Some(false) => {
+                found = Some(mid);
+                lo = mid;
+            }
+            Some(true) => hi = mid,
+            None => lo = mid,
+        }
+        if hi - lo < Points(1.0) {
+            break;
+        }
+    }
+    found
+}
+
 fn keeps_lines<P>(cx: &TextContext<P>, laid: &LaidText, size: Size<Points>) -> bool {
     let Some(same) = cx.same_lines else {
         return false;

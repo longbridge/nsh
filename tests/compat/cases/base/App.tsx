@@ -17,6 +17,7 @@ import BaseCollapsibleReveal from "./base-collapsible-reveal";
 import BaseDialog from "./base-dialog";
 import BaseDialogBackdrop from "./base-dialog-backdrop";
 import BaseDataTable from "./base-data-table";
+import BaseDataTableFitGrow from "./base-data-table-fit-grow";
 import BaseDiff from "./base-diff";
 import BaseDock from "./base-dock";
 import BaseDockTabScroll from "./base-dock-tab-scroll";
@@ -83,6 +84,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-dialog": BaseDialog,
   "base-dialog-backdrop": BaseDialogBackdrop,
   "base-data-table": BaseDataTable,
+  "base-data-table-fit-grow": BaseDataTableFitGrow,
   "base-diff": BaseDiff,
   "base-dock": BaseDock,
   "base-dock-tab-scroll": BaseDockTabScroll,

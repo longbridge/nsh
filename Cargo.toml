@@ -259,6 +259,8 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 # System trust store for the WebSocket client (and ureq's `platform-verifier`): corporate and newly
 # issued roots work without NSH shipping them. Android's host initializes it over JNI.
 rustls-platform-verifier = "0.7"
+# The roots the global `WebSocket` verifies with (those tokio-tungstenite bundles).
+webpki-roots = "0.26"
 
 rolldown = "=1.2.13"
 rolldown_common = "=1.2.13"

@@ -274,6 +274,31 @@ function KeyboardBar(props: { editor: RichEditorSession; revision: number }) {
   );
 }
 
+// A long document (about 5,000 Markdown lines, 1,200 top-level blocks):
+// the editor mounts only the blocks near its viewport, so it opens as fast
+// as a short one.
+function longDocument(sections: number): string {
+  const words = "alpha beta gamma delta epsilon zeta theta kappa lambda sigma omega".split(" ");
+  const pick = (seed: number, n: number) => Array.from({ length: n }, (_, i) => words[(seed * 7 + i * 3) % words.length]).join(" ");
+  const out: string[] = ["# A long document", ""];
+  for (let s = 1; s <= sections; s++) {
+    out.push(`## Section ${s}: ${pick(s, 4)}`, "");
+    for (let p = 0; p < 3; p++) out.push(`${pick(s * 31 + p, 38)}. See **${pick(s + p, 2)}** and \`code_${p}\`.`, "");
+    for (let i = 0; i < 5; i++) out.push(`- ${pick(s * 13 + i, 9)}`);
+    out.push("", "```rust");
+    for (let i = 0; i < 8; i++) out.push(`let v_${i} = f(${i * s});`);
+    out.push("```", "", "| Key | Value | Note |", "| --- | --- | --- |");
+    for (let i = 0; i < 4; i++) out.push(`| ${pick(s * 23 + i, 1)} | ${i * s} | ${pick(s * 29 + i, 4)} |`);
+    out.push("", `> ${pick(s * 37, 16)}.`, "");
+  }
+  return out.join("\n");
+}
+
+function LongDocument() {
+  const editor = createRichEditor({ extensions: [StarterKit, TableKit], content: longDocument(150), format: "markdown" });
+  return <RichEditor testID="long-editor" editor={editor} accessibilityLabel="Long document" style={{ flex: 1 }} classes={richEditorClasses} />;
+}
+
 export function RichEditorDemo() {
   // Mod-K opens the link field, as in most editors.
   const keys = new RichEditorPlugin("linkKey");
@@ -290,7 +315,7 @@ export function RichEditorDemo() {
   keys.captureKeys(["Mod-k"], () => link.edit());
   keys.capturing = true;
 
-  const mode = signal<"edit" | "markdown">("edit");
+  const mode = signal<"edit" | "markdown" | "long">("edit");
   const zoomed = signal(false);
   const words = () => text().split(/\s+/).filter(Boolean).length;
   // The editor and its bars; zoomed, they cover the whole window.
@@ -313,11 +338,16 @@ export function RichEditorDemo() {
       <If
         when={mode() === "edit"}
         else={
-          <View style={{ flex: 1, paddingHorizontal: 24, paddingVertical: 20 }}>
-            <Text testID="markdown-source" style={{ fontFamily: mono, fontSize: 13, lineHeight: 20, color: colors.text }}>
-              {source()}
-            </Text>
-          </View>
+          <If
+            when={mode() === "markdown"}
+            else={<LongDocument />}
+          >
+            <View style={{ flex: 1, paddingHorizontal: 24, paddingVertical: 20 }}>
+              <Text testID="markdown-source" style={{ fontFamily: mono, fontSize: 13, lineHeight: 20, color: colors.text }}>
+                {source()}
+              </Text>
+            </View>
+          </If>
         }
       >
         <RichEditor
@@ -356,6 +386,7 @@ export function RichEditorDemo() {
             options={[
               { value: "edit", label: "Edit" },
               { value: "markdown", label: "Markdown" },
+              { value: "long", label: "Long" },
             ]}
             value={mode()}
             onChange={(value) => mode.set(value)}

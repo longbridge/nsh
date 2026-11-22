@@ -65,7 +65,11 @@ trusted: every limit and check is enforced in Rust, never in JS.
   showing the system's share sheet; denied, `Share.show` rejects; each shared file also needs `fs.read`), `speech`
   (`nsh`'s `Speech`: the microphone and the system's speech recognizer, whose transcript reaches the app; denied,
   `Speech.start` throws), `audio` (`nsh`'s `Sound` and `AudioPlayer`: making sound; denied, `Sound.load` rejects and
-  `new AudioPlayer` throws; a remote source also needs `network`), `host`
+  `new AudioPlayer` throws; a remote source also needs `network`), `notifications` (`nsh`'s `Notifications`: showing
+  system notifications and the badge; denied, each function rejects or throws. Also `nsh-extra`'s `Push`, checked in
+  each call of its JS face but `available` (`push/mod.rs` `granted`): its token, its hub of deliveries, the
+  presentation settings and the delivered notifications are the process's, so a VM without the grant must not reach
+  them, and the system's permission is the whole app's, with none asked for registering or background deliveries), `host`
   (`nsh`'s `host`: the embedding app's functions `host.call` may call, names or prefixes ending in `*`, `true` for all;
   names and grants are 1 to 128 of `[A-Za-z0-9_.:-]` without `..` (`access::valid_host_name`), and the core refuses
   the call of any other name before it reads the grants, since hosts may put names in paths or URLs;

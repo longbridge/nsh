@@ -1549,8 +1549,8 @@ import { Clipboard } from "nsh";
 
 ```ts
 const Clipboard: {
-  writeText(text: string): Promise<void>;
-  write(item: ClipboardItem): Promise<void>;
+  writeText(text: string): Promise<ClipboardWrite>;
+  write(item: ClipboardItem): Promise<ClipboardWrite>;
   readText(): Promise<string>;
   hasText(): Promise<boolean>;
   writeImage(src: string): Promise<void>;
@@ -1558,6 +1558,8 @@ const Clipboard: {
   hasImage(): Promise<boolean>;
   readFiles(): Promise<string[]>;
 };
+
+type ClipboardWrite = "written" | "failed" | "requested";
 
 interface ClipboardItem {
   text: string; // 纯文本形式的内容
@@ -1572,8 +1574,8 @@ interface ClipboardImage {
 
 | TS | Rust（`nsh_core::prelude`） |
 |---|---|
-| `await Clipboard.writeText(text)` | `set_clipboard(text)` |
-| `await Clipboard.write({ text, html })` | `set_clipboard_item(item)`（一个 `ClipboardItem`） |
+| `await Clipboard.writeText(text)` | `set_clipboard(text).await -> ClipboardWrite` |
+| `await Clipboard.write({ text, html })` | `set_clipboard_item(item).await -> ClipboardWrite`（一个 `ClipboardItem`） |
 | `await Clipboard.readText()` | `clipboard_string().await -> String` |
 | `await Clipboard.hasText()` | `clipboard_has_string().await -> bool` |
 | `await Clipboard.writeImage(src)` | `set_clipboard_image(src)` |
@@ -1592,10 +1594,12 @@ iOS、桌面和 Web 上可以通过剪贴板传递图片。在 Android 上，剪
 ### Clipboard.writeText
 
 ```ts
-writeText(text: string): Promise<void>;
+writeText(text: string): Promise<ClipboardWrite>;
 ```
 
 把 `text` 放到剪贴板上，替换原有内容。Rust：`set_clipboard(text)`。
+
+结果表示这次写入的情况：系统剪贴板接收时为 `"written"`（Windows、macOS、Web），被拒绝时为 `"failed"`（剪贴板被其他应用占用、浏览器拒绝），平台无法确认时为 `"requested"`（iOS、Android、Linux、GPUI 宿主、终端）。NSH 不会读回剪贴板来确认。只在 `"written"` 时显示“已复制”，`"failed"` 时保留手动复制入口。Rust 中返回 `ClipboardWrite`；不关心结果时直接丢弃，写入照常进行。
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -1631,7 +1635,7 @@ const copied = signal(false);
 ### Clipboard.write
 
 ```ts
-write(item: ClipboardItem): Promise<void>;
+write(item: ClipboardItem): Promise<ClipboardWrite>;
 ```
 
 把同一内容的纯文本和 HTML 一起放到剪贴板上，替换原有内容，和浏览器复制选区的做法一样：能读格式的应用（邮件、文档、富文本编辑器）
@@ -3053,13 +3057,14 @@ interface KeyBindingOptions {
   repeat?: boolean;
   passThrough?: boolean;
   forFocus?: boolean;
+  overFocused?: boolean;
 }
 ```
 
 | TS | Rust |
 |---|---|
 | `keymap.bind(keystroke, handler)` | `on_key(keystroke, handler)` |
-| `keymap.bind(keystroke, handler, { scope, when, repeat, passThrough, forFocus })` | `on_key_with(keystroke, KeyOptions { scope, when, repeat, pass_through, for_focus }, handler)`；`scope` 是 `KeyScope::Window`（默认）或 `KeyScope::App`；`when` 是 `nsh_core::keymap::When`（`Auto`、`Always`、`NotEditing`） |
+| `keymap.bind(keystroke, handler, { scope, when, repeat, passThrough, forFocus, overFocused })` | `on_key_with(keystroke, KeyOptions { scope, when, repeat, pass_through, for_focus, over_focused }, handler)`；`scope` 是 `KeyScope::Window`（默认）或 `KeyScope::App`；`when` 是 `nsh_core::keymap::When`（`Auto`、`Always`、`NotEditing`） |
 | `keymap.bind({ … })` | 每个按键组合一次 `on_key` |
 | `keymap.label(keystroke)` | `key_label(keystroke)` |
 
@@ -3249,6 +3254,17 @@ on_key_with("space", KeyOptions { for_focus: true, ..KeyOptions::default() }, mo
 ```
 
 按键归最新的对话框：焦点留在被对话框盖住的视图上时（菜单项打开对话框，菜单关闭时把焦点还给触发器），回车和空格交给对话框的绑定，这个视图的 `forFocus` 绑定和按下都要等对话框关闭后才生效。
+
+拥有焦点的组件自己的绑定排在应用的绑定之前：`Editor` 有焦点时，无论应用把 Mod+Enter 绑给了什么，它都会在下方插入一行。带 `overFocused: true` 的绑定则排在它们之前，应用因此能拿到聚焦组件自己绑定的按键，例如查询编辑器用 Mod+Enter 执行其中的文本。在那个视图有焦点时绑定、焦点离开时撤销，组件在别的时候仍然保留这个键（Rust：`KeyOptions { over_focused: true, .. }`）。不带这个选项时顺序与以前相同，弹出层的 Escape 仍然先关闭弹出层。
+
+```tsx
+const focused = signal(false);
+effect(() => {
+  if (focused()) keymap.bind("mod+enter", runQuery, { when: "always", overFocused: true });
+});
+
+<Editor onFocus={() => focused.set(true)} onBlur={() => focused.set(false)} />
+```
 
 菜单快捷键会让位给相同按键组合的绑定：所有桌面平台上的应用菜单（[`nsh/desktop`](./nsh-desktop)），以及 macOS 上的内置菜单（Cmd+W、Cmd+C 等）。使用 `nsh run` 开发时，即使应用绑定了 `mod+r`，Cmd+R / Ctrl+R 也总是重新加载应用；打包后的应用可以绑定它。
 

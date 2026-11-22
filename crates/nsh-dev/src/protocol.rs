@@ -485,6 +485,13 @@ pub enum TestStep {
         /// Points downwards.
         #[serde(deserialize_with = "float::f32")]
         y: f32,
+        /// Total milliseconds to rest before moving (100 when omitted).
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "float::option_f64"
+        )]
+        hold_ms: Option<f64>,
     },
     /// Moves the mouse over the view (`app.hover`).
     Hover {
@@ -556,9 +563,18 @@ pub enum TestStep {
         /// What to drag.
         selector: String,
         /// Rightwards.
+        #[serde(deserialize_with = "float::f32")]
         x: f32,
         /// Downwards.
+        #[serde(deserialize_with = "float::f32")]
         y: f32,
+        /// Total milliseconds to rest before moving (100 when omitted).
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "float::option_f64"
+        )]
+        hold_ms: Option<f64>,
     },
     /// Lets go of the pointer `DragAndHold` left down (`app.drop`).
     Drop,
@@ -1164,9 +1180,16 @@ mod tests {
                 distance: -120.5,
             }),
             step(TestStep::Drag {
+                hold_ms: Some(600.5),
                 selector: "id:knob".into(),
                 x: 12.25,
                 y: -0.1,
+            }),
+            step(TestStep::DragAndHold {
+                selector: "id:row".into(),
+                x: 1.25,
+                y: -0.5,
+                hold_ms: Some(500.25),
             }),
             step(TestStep::SetViewport {
                 width: 390.5,
@@ -1239,3 +1262,7 @@ mod tests {
         assert!(serde_json::from_str::<ServerMessage>(odd).is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "tests/protocol_drag.rs"]
+mod drag_tests;

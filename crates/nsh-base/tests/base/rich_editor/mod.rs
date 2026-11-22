@@ -14,6 +14,7 @@ mod node_view_presses;
 mod selection;
 mod sizing;
 mod structure;
+mod tables;
 mod tiptap;
 mod touch;
 mod typing;
