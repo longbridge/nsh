@@ -1287,6 +1287,105 @@ pub unsafe extern "C" fn nsh_paste(
     })
 }
 
+/// A file drag over view `id` (`kind` 0: `onFileDragEnter`, 1:
+/// `onFileDrop`): JSON `{ mimeTypes, x, y, files: [{ name, type, size,
+/// read, lastModified }] }` and the read files' bytes one after the other.
+/// The Web hands over contents, never paths: `uris` stays empty.
+///
+/// # Safety
+///
+/// `ptr..ptr + len` and `data..data + data_len` are memory from
+/// [`nsh_alloc`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_file_drop(
+    id: u32,
+    kind: u32,
+    ptr: *const u8,
+    len: usize,
+    data: *const u8,
+    data_len: usize,
+) -> f64 {
+    // SAFETY: guaranteed by the caller.
+    let json = unsafe { string(ptr, len) };
+    // SAFETY: guaranteed by the caller.
+    let bytes: &[u8] = if data_len == 0 {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(data, data_len) }
+    };
+    let value: serde_json::Value = serde_json::from_str(&json).unwrap_or_default();
+    let (files, mime_types, page_position) = file_contents(&value, bytes);
+    let (kind, page_position) = match kind {
+        0 => (EventKind::FileDragEnter, None),
+        _ => (EventKind::FileDrop, Some(page_position)),
+    };
+    let contents = nsh_core::FileContents::new(files, mime_types, page_position);
+    send(|app| {
+        app.control
+            .dispatch_event(id, kind, EventPayload::FileContents(Box::new(contents)))
+    })
+}
+
+/// The files, types and drop point of [`nsh_file_drop`]'s JSON over `bytes`.
+fn file_contents(
+    value: &serde_json::Value,
+    bytes: &[u8],
+) -> (
+    Vec<nsh_core::picker::PickedFile>,
+    Vec<String>,
+    nsh_core::geometry::Point<Points>,
+) {
+    let text = |v: &serde_json::Value, k: &str| {
+        v.get(k)
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_owned()
+    };
+    let num = |v: &serde_json::Value, k: &str| v.get(k).and_then(|n| n.as_f64()).unwrap_or(0.0);
+    let mut files = Vec::new();
+    let mut at = 0usize;
+    for file in value
+        .get("files")
+        .and_then(|f| f.as_array())
+        .into_iter()
+        .flatten()
+    {
+        let size = num(file, "size").max(0.0) as u64;
+        let read = file.get("read").and_then(|r| r.as_bool()).unwrap_or(false);
+        let mut picked = if read {
+            let Some(part) = bytes.get(at..at + size as usize) else {
+                break;
+            };
+            at += size as usize;
+            nsh_core::picker::PickedFile::new(
+                text(file, "name"),
+                text(file, "type"),
+                nsh_core::ImageData::new(part.to_vec()),
+            )
+        } else {
+            nsh_core::picker::PickedFile::too_large(text(file, "name"), text(file, "type"), size)
+        };
+        let modified = num(file, "lastModified");
+        if modified.is_finite() && modified > 0.0 {
+            picked.last_modified =
+                Some(std::time::UNIX_EPOCH + std::time::Duration::from_millis(modified as u64));
+        }
+        files.push(picked);
+    }
+    let mime_types = value
+        .get("mimeTypes")
+        .and_then(|m| m.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|m| m.as_str().map(str::to_owned))
+        .collect();
+    let at = nsh_core::geometry::point(
+        Points(num(value, "x") as f32),
+        Points(num(value, "y") as f32),
+    );
+    (files, mime_types, at)
+}
+
 thread_local! {
     /// The files of the pick `nsh.js` is answering ([`nsh_picked_file`]).
     static PICKED: RefCell<Vec<nsh_core::picker::PickedFile>> = const { RefCell::new(Vec::new()) };
