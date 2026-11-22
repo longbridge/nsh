@@ -112,6 +112,11 @@ pub(crate) struct AppleConfig {
     /// `PlugIns/` ([`crate::app_extensions`]).
     #[serde(default)]
     pub(crate) extensions: Vec<crate::app_extensions::AppExtension>,
+    /// The app's privacy manifest, which iOS packages carry as
+    /// `PrivacyInfo.xcprivacy` ([`keep_privacy_manifest`] leaves out what
+    /// is not one of its keys in its form).
+    #[serde(default)]
+    pub(crate) privacy_manifest: serde_json::Map<String, serde_json::Value>,
 }
 
 /// `nsh.json` `ios.launchScreen`: a background color and an image in the
@@ -448,6 +453,169 @@ impl MacosConfig {
     }
 }
 
+/// The keys of a privacy manifest (`PrivacyInfo.xcprivacy`) and, for the
+/// arrays of dictionaries, the keys their entries have, each of which an
+/// entry must have: Apple's "Privacy manifest files", which App Store
+/// Connect checks for exactly these.
+const PRIVACY_KEYS: [(&str, PrivacyForm); 4] = [
+    ("NSPrivacyTracking", PrivacyForm::Boolean),
+    ("NSPrivacyTrackingDomains", PrivacyForm::Strings),
+    (
+        "NSPrivacyCollectedDataTypes",
+        PrivacyForm::Entries(&[
+            ("NSPrivacyCollectedDataType", PrivacyForm::String),
+            ("NSPrivacyCollectedDataTypeLinked", PrivacyForm::Boolean),
+            ("NSPrivacyCollectedDataTypeTracking", PrivacyForm::Boolean),
+            ("NSPrivacyCollectedDataTypePurposes", PrivacyForm::Strings),
+        ]),
+    ),
+    (
+        "NSPrivacyAccessedAPITypes",
+        PrivacyForm::Entries(&[
+            ("NSPrivacyAccessedAPIType", PrivacyForm::String),
+            ("NSPrivacyAccessedAPITypeReasons", PrivacyForm::Strings),
+        ]),
+    ),
+];
+
+/// The form of a privacy manifest value.
+#[derive(Clone, Copy)]
+enum PrivacyForm {
+    Boolean,
+    String,
+    Strings,
+    /// An array of dictionaries with exactly these keys, each its form.
+    Entries(&'static [(&'static str, PrivacyForm)]),
+}
+
+impl PrivacyForm {
+    /// Whether `value` has this form (an array of entries: is an array).
+    fn fits(self, value: &serde_json::Value) -> bool {
+        use serde_json::Value as Json;
+        match (self, value) {
+            (PrivacyForm::Boolean, Json::Bool(_)) | (PrivacyForm::String, Json::String(_)) => true,
+            (PrivacyForm::Strings, Json::Array(items)) => items.iter().all(Json::is_string),
+            (PrivacyForm::Entries(_), Json::Array(_)) => true,
+            _ => false,
+        }
+    }
+
+    /// What is wrong with `entry` of an array of entries with `keys`, if
+    /// anything: a key of another kind or form, or one it lacks.
+    fn entry_problem(
+        keys: &[(&'static str, PrivacyForm)],
+        entry: &serde_json::Value,
+    ) -> Option<String> {
+        let Some(entry) = entry.as_object() else {
+            return Some("is no dictionary".into());
+        };
+        for (key, value) in entry {
+            match keys.iter().find(|(name, _)| name == key) {
+                None => return Some(format!("has `{key}`, which is no key of it")),
+                Some((_, form)) if !form.fits(value) => {
+                    return Some(format!("`{key}` is not in its form"));
+                }
+                Some(_) => {}
+            }
+        }
+        keys.iter()
+            .find(|(name, _)| !entry.contains_key(*name))
+            .map(|(name, _)| format!("lacks `{name}`"))
+    }
+}
+
+/// Keeps the keys of `nsh.json` `ios.privacyManifest` (`manifest`) that are
+/// a privacy manifest's, in their form, and of its arrays of entries the
+/// entries that are whole: each other key or entry is reported in
+/// `ignored` and left out, as any `nsh.json` value an `nsh` cannot read
+/// is. What App Store Connect would refuse in the values it keeps (an
+/// entry without reasons, tracking without its domains) is reported too.
+pub(crate) fn keep_privacy_manifest(
+    manifest: &mut serde_json::Map<String, serde_json::Value>,
+    ignored: &mut Vec<String>,
+) {
+    let at = "ios.privacyManifest";
+    manifest.retain(|key, value| {
+        let Some((_, form)) = PRIVACY_KEYS.iter().find(|(name, _)| name == key) else {
+            ignored.push(format!(
+                "unknown key `{at}.{key}`: a privacy manifest has {}",
+                PRIVACY_KEYS
+                    .iter()
+                    .map(|(name, _)| format!("`{name}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+            return false;
+        };
+        if !form.fits(value) {
+            ignored.push(format!(
+                "{at}.{key}: not in the form a privacy manifest has"
+            ));
+            return false;
+        }
+        if let (PrivacyForm::Entries(keys), serde_json::Value::Array(entries)) = (form, value) {
+            let mut i = 0;
+            entries.retain(|entry| {
+                let problem = PrivacyForm::entry_problem(keys, entry);
+                if let Some(problem) = &problem {
+                    ignored.push(format!("{at}.{key}[{i}] {problem}: left out"));
+                }
+                i += 1;
+                problem.is_none()
+            });
+        }
+        true
+    });
+    // Kept, but what App Store Connect refuses as it is.
+    let mut refused = |problem: String| {
+        ignored.push(format!("{at}: {problem}, which App Store Connect refuses"));
+    };
+    let accessed = manifest
+        .get("NSPrivacyAccessedAPITypes")
+        .and_then(serde_json::Value::as_array);
+    if accessed.is_some_and(Vec::is_empty) {
+        refused("`NSPrivacyAccessedAPITypes` is empty".into());
+    }
+    for (i, entry) in accessed.into_iter().flatten().enumerate() {
+        if entry["NSPrivacyAccessedAPITypeReasons"]
+            .as_array()
+            .is_some_and(Vec::is_empty)
+        {
+            refused(format!("`NSPrivacyAccessedAPITypes[{i}]` gives no reason"));
+        }
+    }
+    let tracking = manifest
+        .get("NSPrivacyTracking")
+        .and_then(serde_json::Value::as_bool);
+    let domains = manifest
+        .get("NSPrivacyTrackingDomains")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|d| !d.is_empty());
+    match (tracking, domains) {
+        (Some(true), false) => refused("`NSPrivacyTracking` is on with no tracking domains".into()),
+        (Some(false) | None, true) => {
+            refused("tracking domains are listed with `NSPrivacyTracking` off".into());
+        }
+        _ => {}
+    }
+}
+
+/// Writes the app's privacy manifest (`nsh.json` `ios.privacyManifest`)
+/// into the iOS app bundle `app`, where the system and App Store Connect
+/// read it, before the bundle is signed; nothing when the app has none.
+pub(crate) fn write_privacy_manifest(
+    manifest: &serde_json::Map<String, serde_json::Value>,
+    app: &std::path::Path,
+) -> anyhow::Result<()> {
+    if manifest.is_empty() {
+        return Ok(());
+    }
+    let dictionary = convert(manifest, "ios.privacyManifest", std::iter::empty())?;
+    plist::Value::Dictionary(dictionary)
+        .to_file_xml(app.join("PrivacyInfo.xcprivacy"))
+        .map_err(|e| anyhow::anyhow!("write PrivacyInfo.xcprivacy: {e}"))
+}
+
 /// `nsh.json` `<platform>.infoPlist` as property list values.
 fn info_plist(
     entries: &serde_json::Map<String, serde_json::Value>,
@@ -686,6 +854,138 @@ mod tests {
 
     fn config(json: serde_json::Value) -> AppleConfig {
         serde_json::from_value(json).unwrap()
+    }
+
+    /// A privacy manifest as Apple's documentation writes one.
+    fn privacy() -> serde_json::Map<String, serde_json::Value> {
+        serde_json::json!({
+            "NSPrivacyTracking": false,
+            "NSPrivacyTrackingDomains": [],
+            "NSPrivacyCollectedDataTypes": [{
+                "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeCrashData",
+                "NSPrivacyCollectedDataTypeLinked": false,
+                "NSPrivacyCollectedDataTypeTracking": false,
+                "NSPrivacyCollectedDataTypePurposes": ["NSPrivacyCollectedDataTypePurposeAppFunctionality"],
+            }],
+            "NSPrivacyAccessedAPITypes": [{
+                "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults",
+                "NSPrivacyAccessedAPITypeReasons": ["CA92.1"],
+            }],
+        })
+        .as_object()
+        .unwrap()
+        .clone()
+    }
+
+    #[test]
+    fn a_privacy_manifest_keeps_its_own_keys_in_their_form() {
+        let mut manifest = privacy();
+        let mut ignored = Vec::new();
+        keep_privacy_manifest(&mut manifest, &mut ignored);
+        assert!(ignored.is_empty(), "{ignored:?}");
+        assert_eq!(manifest, privacy());
+        // An unknown key and a value of another form are left out; of an
+        // array of entries, only the entries that are not whole.
+        let mut manifest = privacy();
+        manifest.insert("NSPrivacyAccessedAPI".into(), serde_json::json!([]));
+        manifest.insert("NSPrivacyTrackingDomains".into(), serde_json::json!(true));
+        manifest.insert(
+            "NSPrivacyAccessedAPITypes".into(),
+            serde_json::json!([
+                { "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults",
+                  "NSPrivacyAccessedAPITypeReasons": ["CA92.1"] },
+                { "NSPrivacyAccessedAPIType": "x", "Reasons": ["CA92.1"] },
+                { "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime" },
+            ]),
+        );
+        let mut ignored = Vec::new();
+        keep_privacy_manifest(&mut manifest, &mut ignored);
+        let mut kept: Vec<&String> = manifest.keys().collect();
+        kept.sort();
+        assert_eq!(
+            kept,
+            [
+                "NSPrivacyAccessedAPITypes",
+                "NSPrivacyCollectedDataTypes",
+                "NSPrivacyTracking"
+            ]
+        );
+        assert_eq!(
+            manifest["NSPrivacyAccessedAPITypes"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        for says in [
+            "unknown key `ios.privacyManifest.NSPrivacyAccessedAPI`",
+            "ios.privacyManifest.NSPrivacyTrackingDomains: not in the form",
+            "ios.privacyManifest.NSPrivacyAccessedAPITypes[1] has `Reasons`",
+            "ios.privacyManifest.NSPrivacyAccessedAPITypes[2] lacks `NSPrivacyAccessedAPITypeReasons`",
+        ] {
+            assert!(
+                ignored.iter().any(|i| i.starts_with(says)),
+                "{says}: {ignored:?}"
+            );
+        }
+        assert_eq!(ignored.len(), 4, "{ignored:?}");
+    }
+
+    #[test]
+    fn what_app_store_connect_refuses_is_reported() {
+        let refused = |json: serde_json::Value| {
+            let mut manifest = json.as_object().unwrap().clone();
+            let mut ignored = Vec::new();
+            keep_privacy_manifest(&mut manifest, &mut ignored);
+            ignored
+        };
+        for (json, says) in [
+            (
+                serde_json::json!({ "NSPrivacyTracking": true }),
+                "no tracking domains",
+            ),
+            (
+                serde_json::json!({ "NSPrivacyTracking": false, "NSPrivacyTrackingDomains": ["ads.example"] }),
+                "with `NSPrivacyTracking` off",
+            ),
+            (
+                serde_json::json!({ "NSPrivacyAccessedAPITypes": [] }),
+                "is empty",
+            ),
+            (
+                serde_json::json!({ "NSPrivacyAccessedAPITypes": [{
+                    "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults",
+                    "NSPrivacyAccessedAPITypeReasons": [],
+                }] }),
+                "gives no reason",
+            ),
+        ] {
+            let ignored = refused(json);
+            assert!(
+                ignored.len() == 1 && ignored[0].contains(says) && ignored[0].contains("refuses"),
+                "{says}: {ignored:?}"
+            );
+        }
+        assert!(refused(serde_json::Value::Object(privacy())).is_empty());
+    }
+
+    #[test]
+    fn the_privacy_manifest_is_written_into_the_app() {
+        let app = std::env::temp_dir().join(format!("nsh-cli-privacy-{}.app", std::process::id()));
+        let _ = std::fs::remove_dir_all(&app);
+        std::fs::create_dir_all(&app).unwrap();
+        write_privacy_manifest(&serde_json::Map::new(), &app).unwrap();
+        assert!(!app.join("PrivacyInfo.xcprivacy").exists());
+        write_privacy_manifest(&privacy(), &app).unwrap();
+        let written = plist::Value::from_file(app.join("PrivacyInfo.xcprivacy")).unwrap();
+        let written = written.as_dictionary().unwrap();
+        assert_eq!(written["NSPrivacyTracking"], plist::Value::Boolean(false));
+        let accessed = written["NSPrivacyAccessedAPITypes"].as_array().unwrap();
+        assert_eq!(
+            accessed[0].as_dictionary().unwrap()["NSPrivacyAccessedAPITypeReasons"],
+            plist::Value::Array(vec![plist::Value::String("CA92.1".into())])
+        );
+        std::fs::remove_dir_all(&app).unwrap();
     }
 
     /// `ios.launchScreen` takes a color and an image for both appearances

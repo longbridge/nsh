@@ -431,6 +431,49 @@ Entitlements:
   `com.apple.developer.*` entitlements or keychain access groups only under a provisioning profile that grants them:
   `nsh package` warns about them, and the app is signed again with a Developer ID and such a profile before it runs.
 
+### Privacy manifest
+
+App Store Connect checks an iOS app's privacy manifest, `PrivacyInfo.xcprivacy`, when it is uploaded: why the app
+calls the APIs Apple requires a reason for, whether it tracks and with which domains, and the data it collects
+([Privacy manifest files](https://developer.apple.com/documentation/bundleresources/privacy-manifest-files)).
+`ios.privacyManifest` in `nsh.json` is that file's contents, which iOS packages write at the root of the app before
+signing it (an app extension carries its own, in its `.appex`):
+
+```json
+{
+  "ios": {
+    "privacyManifest": {
+      "NSPrivacyTracking": false,
+      "NSPrivacyAccessedAPITypes": [
+        {
+          "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
+          "NSPrivacyAccessedAPITypeReasons": ["C617.1"]
+        },
+        {
+          "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime",
+          "NSPrivacyAccessedAPITypeReasons": ["35F9.1"]
+        }
+      ]
+    }
+  }
+}
+```
+
+It takes the four keys of Apple's format (`NSPrivacyTracking`, `NSPrivacyTrackingDomains`,
+`NSPrivacyCollectedDataTypes`, `NSPrivacyAccessedAPITypes`) and their entries' keys. An unknown key, a value of the
+wrong type or an entry without all its keys is left out with a warning. What App Store Connect would refuse as written
+(an entry with no reason, tracking without its domains) is warned about too; App Store Connect still checks the
+category and reason codes themselves.
+
+NSH's runtime is part of the app's executable, so the APIs it calls count as the app's: declare these with the app's
+own.
+
+| Category | What in NSH calls it | Reason |
+|---|---|---|
+| `NSPrivacyAccessedAPICategoryFileTimestamp` | Rust's standard library reading file metadata; the image cache, which ages its files | `C617.1`; also `3B52.1` when the app reads files people pick |
+| `NSPrivacyAccessedAPICategorySystemBootTime` | the renderer's timer | `35F9.1` |
+| `NSPrivacyAccessedAPICategoryUserDefaults` | reading the temperature unit people choose in Settings, which no reason of Apple's covers ([#2830](https://github.com/longbridge/nsh/issues/2830)) | |
+
 ### Minimum system version
 
 Packages run on iOS 15.0 and macOS 14 or later, the systems NSH's runtime runs on. An app that uses the APIs of a
