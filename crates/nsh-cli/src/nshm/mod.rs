@@ -697,7 +697,10 @@ fn copy_dir(from: &Path, to: &Path) -> anyhow::Result<()> {
         let dest = to.join(entry.file_name());
         let kind = entry.file_type()?;
         if kind.is_dir() {
-            if entry.file_name() == "target" || entry.file_name() == ".git" {
+            // `.nsh` holds builds, and this copy itself when the nshm is
+            // the app's own directory.
+            let name = entry.file_name();
+            if name == "target" || name == ".git" || name == ".nsh" {
                 continue;
             }
             copy_dir(&path, &dest)?;

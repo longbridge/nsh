@@ -55,6 +55,9 @@ impl Manifest {
         let config = config.filter(|c| {
             cargo.is_none() || c.get("exports").is_some() || c.get("platform").is_some()
         });
+        // A platform nshm is a program `nsh` builds and runs, not linked into
+        // the app's host, so it needs no `#[native_module]`.
+        let is_platform = config.as_ref().is_some_and(|c| c.get("platform").is_some());
         let (mut name, mut version, mut module) = (None, None, None);
         if let Some(cargo) = &cargo {
             let text = fs::read_to_string(cargo)?;
@@ -63,11 +66,10 @@ impl Manifest {
                 package_version(&text)
                     .with_context(|| format!("{what}: Cargo.toml has no [package] version"))?,
             );
-            module = Some(rust_app::specifier_of(dir).with_context(|| {
-                format!(
-                    "{what}: no #[native_module(\"...\")] at the crate's root: is this an nshm?"
-                )
-            })?);
+            module = rust_app::specifier_of(dir);
+            if module.is_none() && !is_platform {
+                bail!("{what}: no #[native_module(\"...\")] at the crate's root: is this an nshm?");
+            }
             if let Some(req) = nsh_core_requirement(&text) {
                 check_nsh(&req, &format!("{what}: Cargo.toml: nsh-core"))?;
             }
@@ -143,7 +145,7 @@ impl Manifest {
         let version = version.with_context(|| format!("{what}: nsh.json has no \"version\""))?;
         let version = semver::Version::parse(&version)
             .with_context(|| format!("{what}: version {version:?} is not a semver version"))?;
-        if module.is_none() && exports.is_empty() {
+        if module.is_none() && exports.is_empty() && platform.is_none() {
             bail!("{what}: nsh.json has no \"exports\": a TSX nshm names its entry files there");
         }
         for (specifier, file) in &exports {
@@ -161,8 +163,10 @@ impl Manifest {
             }
         }
         if let Some(p) = &platform {
-            if module.is_none() {
-                bail!("{what}: \"platform\" is for an nshm with Rust (it builds the platform)");
+            if !dir.join("Cargo.toml").is_file() {
+                bail!(
+                    "{what}: \"platform\" is for an nshm with a Cargo.toml (it builds the platform)"
+                );
             }
             if !crate::platforms::valid_name(p) {
                 bail!("{what}: platform {p:?}: lower-case letters, digits and dashes");
@@ -326,6 +330,34 @@ mod tests {
         fs::write(d.join("nsh.json"), r#"{ "name": "other", "exports": {} }"#).unwrap();
         assert!(Manifest::read(&d, "acme-gauge").is_err());
         fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn a_platform_nshm_needs_no_native_module() {
+        let d = dir("platform");
+        fs::write(
+            d.join("Cargo.toml"),
+            "[package]\nname = \"nsh-harmony\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(d.join("src/main.rs"), "fn main() {}\n").unwrap();
+        // Without "platform", a crate with no #[native_module] is no nshm.
+        assert!(Manifest::read(&d, "nsh-harmony").is_err());
+        fs::write(d.join("nsh.json"), r#"{ "platform": "harmony" }"#).unwrap();
+        let m = Manifest::read(&d, "nsh-harmony").unwrap();
+        assert_eq!(m.platform.as_deref(), Some("harmony"));
+        assert_eq!(m.module, None);
+        assert!(m.exports.is_empty());
+        fs::remove_dir_all(&d).unwrap();
+        // A platform is built, so it needs a crate.
+        let t = dir("platform-tsx");
+        fs::write(
+            t.join("nsh.json"),
+            r#"{ "name": "nsh-harmony", "version": "0.1.0", "platform": "harmony" }"#,
+        )
+        .unwrap();
+        assert!(Manifest::read(&t, "nsh-harmony").is_err());
+        fs::remove_dir_all(&t).unwrap();
     }
 
     #[test]
