@@ -688,7 +688,10 @@ pub(crate) fn platform_program(cwd: &Path, name: &str) -> anyhow::Result<Option<
     Ok(Some(program))
 }
 
-/// Copies the directory `from` to `to`, without its `target/`.
+/// Copies the directory `from` to `to`, without its `target/`, `.git/` and
+/// `.nsh/`: a platform nshm in a directory above the app (an example app in
+/// the platform's repository, `{ "path": "../.." }`) holds the copy itself in
+/// the app's `.nsh/platforms`.
 fn copy_dir(from: &Path, to: &Path) -> anyhow::Result<()> {
     fs::create_dir_all(to)?;
     for entry in fs::read_dir(from)? {
@@ -697,7 +700,7 @@ fn copy_dir(from: &Path, to: &Path) -> anyhow::Result<()> {
         let dest = to.join(entry.file_name());
         let kind = entry.file_type()?;
         if kind.is_dir() {
-            if entry.file_name() == "target" || entry.file_name() == ".git" {
+            if ["target", ".git", ".nsh"].iter().any(|n| entry.file_name() == *n) {
                 continue;
             }
             copy_dir(&path, &dest)?;
@@ -711,6 +714,27 @@ fn copy_dir(from: &Path, to: &Path) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn copies_leave_builds_out() {
+        let root = std::env::temp_dir().join(format!("nsh-copy-dir-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let from = root.join("platform");
+        for dir in ["src", "target/release", ".git", "examples/app/.nsh/platforms/x"] {
+            fs::create_dir_all(from.join(dir)).unwrap();
+        }
+        fs::write(from.join("src/main.rs"), "fn main() {}").unwrap();
+        fs::write(from.join("examples/app/nsh.json"), "{}").unwrap();
+        // The app's copy lies inside the platform it copies.
+        copy_dir(&from, &from.join("examples/app/.nsh/platforms/x")).unwrap();
+        let to = from.join("examples/app/.nsh/platforms/x");
+        assert!(to.join("src/main.rs").is_file());
+        assert!(to.join("examples/app/nsh.json").is_file());
+        assert!(!to.join("target").exists());
+        assert!(!to.join(".git").exists());
+        assert!(!to.join("examples/app/.nsh").exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
 
     #[test]
     fn add_finds_the_app_above() {

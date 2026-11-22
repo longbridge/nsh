@@ -1108,6 +1108,10 @@ struct TextContext<P> {
     laid_out: Option<LaidText>,
     /// New test metadata must be mounted even when the glyphs are unchanged.
     metadata_changed: bool,
+    /// `text-pretty`: a short last line takes words from the lines above
+    /// ([`pretty_width`]), with the last width asked for and what it gave
+    /// (`NAN` for none). Boxed: few texts say it.
+    pretty: Option<Box<(f32, Points)>>,
 }
 
 /// A text measures `size` at every maximum width from `narrowest` to
@@ -1151,6 +1155,7 @@ impl<P> TextContext<P> {
             baseline: None,
             laid_out: None,
             metadata_changed: false,
+            pretty: None,
         }
     }
     /// Remount metadata in the same box, keeping any fitted font sizes.
@@ -8546,7 +8551,16 @@ impl<M: TextEngine> Core<M> {
     /// own color does (Rust's `Element::selection_color`, over its
     /// classes'). One walk up.
     fn inherited_text_props(&self, key: Key) -> (Option<bool>, Option<bool>, Option<Color>) {
+        let (no_wrap, selectable, highlight, _) = self.inherited_text_wrap(key);
+        (no_wrap, selectable, highlight)
+    }
+
+    /// [`Core::inherited_text_props`] and whether its lines wrap
+    /// `text-pretty`, which inherits with `white-space` (the same classes
+    /// set both).
+    fn inherited_text_wrap(&self, key: Key) -> (Option<bool>, Option<bool>, Option<Color>, bool) {
         let (mut no_wrap, mut selectable, mut highlight) = (None, None, None);
+        let mut pretty = None;
         let mut k = key;
         while k != NO_KEY && (no_wrap.is_none() || selectable.is_none() || highlight.is_none()) {
             let node = &self.nodes[k as usize];
@@ -8554,13 +8568,16 @@ impl<M: TextEngine> Core<M> {
                 highlight = highlight.or(node.paragraph.selection_color);
             }
             if let Some(c) = node.class_props.as_deref() {
+                if no_wrap.is_none() && c.no_wrap.is_some() {
+                    pretty = Some(c.pretty);
+                }
                 no_wrap = no_wrap.or(c.no_wrap);
                 selectable = selectable.or(c.selectable);
                 highlight = highlight.or(c.selection_color);
             }
             k = node.parent;
         }
-        (no_wrap, selectable, highlight)
+        (no_wrap, selectable, highlight, pretty.unwrap_or(false))
     }
 
     /// The nearest `textAlign` set on a view around `key`.
@@ -8613,7 +8630,7 @@ impl<M: TextEngine> Core<M> {
         let max_lines = class.and_then(|c| c.number_of_lines).unwrap_or(0);
         let ellipsize = class.and_then(|c| c.ellipsize).unwrap_or_default();
         let inherited = self.inherited_text_style(key);
-        let (no_wrap, selectable, highlight) = self.inherited_text_props(key);
+        let (no_wrap, selectable, highlight, pretty) = self.inherited_text_wrap(key);
         let (align, physical) = node
             .text_style
             .text_align
@@ -8667,12 +8684,17 @@ impl<M: TextEngine> Core<M> {
         let cx = self.text_cx(layout);
         cx.deferred = deferred;
         cx.spacers = spacers;
+        let pretty_changed = cx.pretty.is_some() != pretty;
+        if pretty_changed {
+            cx.pretty = pretty.then(|| Box::new((f32::NAN, Points::ZERO)));
+            cx.laid_out = None;
+        }
         if *cx.text == text && cx.alignments == alignments {
             if inserted {
                 // New attachment views: placed with the next final layout.
                 cx.laid_out = None;
             }
-            return inserted;
+            return inserted || pretty_changed;
         }
         if !cx.text.metadata_eq(&text)
             && !inserted
@@ -8713,6 +8735,9 @@ impl<M: TextEngine> Core<M> {
         cx.prepared = None;
         cx.min_content = None;
         cx.laid_out = None;
+        if let Some(p) = &mut cx.pretty {
+            p.0 = f32::NAN;
+        }
         if !same_layout {
             cx.layout_hash = cx.alignments.layout_hash(&cx.text);
             cx.cache = None;
@@ -9955,6 +9980,21 @@ impl<M: TextEngine> Core<M> {
                 if height < content.size.height {
                     content.origin.y += align_vertical.of(content.size.height - height);
                     content.size.height = height;
+                }
+            }
+            if cx.pretty.is_some() && fit.is_none() {
+                // Lines broken narrower than the box, where they go in it
+                // as the text is aligned.
+                let width = pretty_width(engine, cx, content.size.width);
+                let spare = content.size.width - width;
+                if spare > Points::ZERO {
+                    content.origin.x += match cx.text.align {
+                        TextAlign::Center => spare * 0.5,
+                        TextAlign::Right => spare,
+                        TextAlign::Auto if cx.text.rtl => spare,
+                        _ => Points::ZERO,
+                    };
+                    content.size.width = width;
                 }
             }
             if let Some((text, layout)) = cx.remount_metadata(content) {
@@ -11906,6 +11946,83 @@ fn measure_text<M: TextEngine>(
 /// Whether `laid`, the layout of `cx`'s text, stands for a box of `size`:
 /// both widths break its lines the same ([`SameLines`]) and its lines start
 /// at the box's left, wherever its right is.
+/// The width `text-pretty` breaks a text's lines at in a box `width` wide:
+/// narrower when its last line would hold less than a quarter of it (a
+/// word or two left alone below a paragraph), as narrow as it takes for
+/// that line to hold a quarter of the width without adding a line. The
+/// platform's own line breaking decides where the lines break at it; a
+/// text that cannot do better keeps the box's width.
+fn pretty_width<M: TextEngine>(
+    engine: &M,
+    cx: &mut TextContext<M::Prepared>,
+    width: Points,
+) -> Points {
+    if let Some(&(w, out)) = cx.pretty.as_deref()
+        && w == width.0
+    {
+        return out;
+    }
+    let out = narrower_lines(engine, cx, width).unwrap_or(width);
+    if let Some(p) = &mut cx.pretty {
+        **p = (width.0, out);
+    }
+    out
+}
+
+/// How short a last line `text-pretty` leaves alone: a quarter of the box.
+const PRETTY_LAST_LINE: f32 = 0.25;
+
+fn narrower_lines<M: TextEngine>(
+    engine: &M,
+    cx: &mut TextContext<M::Prepared>,
+    width: Points,
+) -> Option<Points> {
+    let text = &cx.text;
+    if text.no_wrap || text.max_lines > 0 || width <= Points::ZERO || text.text.contains('\n') {
+        return None;
+    }
+    let prepared = cx
+        .prepared
+        .get_or_insert_with(|| engine.prepare_aligned(&cx.text, &cx.alignments));
+    let height = engine.measure(prepared, Some(width)).height;
+    // How short the last line is at `w`, `None` past a line more.
+    let short = |w: Points| -> Option<bool> {
+        let size = engine.measure(prepared, Some(w));
+        if size.height > height {
+            return None;
+        }
+        let lines = engine.lines(&engine.layout(prepared, Size { width: w, height }));
+        let last = lines.last()?;
+        Some(lines.len() > 1 && last.width < w * PRETTY_LAST_LINE)
+    };
+    if short(width) != Some(true) {
+        return None;
+    }
+    // Narrowing moves words down to the last line: find the widest width
+    // whose last line is no longer short, between the box and the
+    // narrowest width with as many lines.
+    let lines = engine
+        .lines(&engine.layout(prepared, Size { width, height }))
+        .len();
+    let (mut lo, mut hi) = (width * ((lines - 1) as f32 / lines as f32), width);
+    let mut found = None;
+    for _ in 0..8 {
+        let mid = (lo + hi) * 0.5;
+        match short(mid) {
+            Some(false) => {
+                found = Some(mid);
+                lo = mid;
+            }
+            Some(true) => hi = mid,
+            None => lo = mid,
+        }
+        if hi - lo < Points(1.0) {
+            break;
+        }
+    }
+    found
+}
+
 fn keeps_lines<P>(cx: &TextContext<P>, laid: &LaidText, size: Size<Points>) -> bool {
     let Some(same) = cx.same_lines else {
         return false;
