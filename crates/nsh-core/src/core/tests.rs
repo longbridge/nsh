@@ -19266,6 +19266,98 @@ mod components {
         assert!(c.commit().is_none_or(|b| texts(&b).is_empty()));
     }
 
+    /// Asks whether the app's settings page opens here and opens it when
+    /// its button is pressed; shows both answers.
+    #[component]
+    fn SettingsOpener() -> impl IntoElement {
+        use crate::element::{app_settings_available, open_app_settings};
+        let shown = signal(String::new());
+        view()
+            .child(text(move || format!("settings{}", shown.get())))
+            .child(view().h(px(10.0)).on_press(move |_: &()| {
+                let available = app_settings_available();
+                let opened = open_app_settings();
+                spawn(async move {
+                    let available = available.await;
+                    let opened = match opened.await {
+                        Ok(opened) => opened.to_string(),
+                        Err(error) => format!("{error:?}"),
+                    };
+                    shown.set(format!(" {available} {opened}"));
+                });
+            }))
+    }
+
+    /// Mounts [`SettingsOpener`] in `environment`, presses its button and
+    /// returns the requests that reached the platform.
+    fn press_settings_opener(
+        environment: crate::element::Environment,
+    ) -> (Core<FakeEngine>, Vec<u32>) {
+        let mut c = core();
+        c.set_environment(environment);
+        c.mount_root(&crate::element::Root::new::<SettingsOpener>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button");
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        let items = c.commit().map(|b| b.items).unwrap_or_default();
+        let requests = items
+            .into_iter()
+            .filter_map(|i| match i {
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::OpenAppSettings { id },
+                } => Some(id),
+                _ => None,
+            })
+            .collect();
+        (c, requests)
+    }
+
+    #[test]
+    fn app_settings_fail_at_once_where_the_platform_has_none() {
+        let (mut c, requests) = press_settings_opener(Default::default());
+        assert!(requests.is_empty(), "nothing reaches the platform");
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("settings ")));
+        assert_eq!(shown.last().unwrap(), "settings false Unavailable");
+    }
+
+    #[test]
+    fn app_settings_open_on_the_platform_and_answer_what_it_reports() {
+        let (mut c, requests) = press_settings_opener(crate::element::Environment {
+            app_settings: true,
+            ..Default::default()
+        });
+        assert_eq!(requests.len(), 1, "one request reaches the platform");
+        // An answer of another request settles nothing.
+        let answer = |id: u32, opened: bool| {
+            EventPayload::Map(vec![
+                ("id", crate::PayloadValue::Number(f64::from(id))),
+                ("opened", crate::PayloadValue::Bool(opened)),
+            ])
+        };
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::OpenAppSettings,
+            &answer(requests[0].wrapping_add(1), false)
+        ));
+        c.run_component_tasks();
+        assert!(c.commit().is_none_or(|b| texts(&b).is_empty()));
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::OpenAppSettings,
+            &answer(requests[0], true)
+        ));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("settings ")));
+        assert_eq!(shown.last().unwrap(), "settings true true");
+    }
+
     /// Turns launching at login on, reads it, turns it off and reads it
     /// again when its button is pressed, all asked at once; shows each
     /// answer in the order it was asked.

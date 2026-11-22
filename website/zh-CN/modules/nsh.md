@@ -1323,6 +1323,43 @@ button()
 - 各平台用自己的方式打开：iOS 用 `UIApplication.open`（嵌入时是宿主应用的 application），Android 用 `ACTION_VIEW` Intent，macOS 用 `NSWorkspace`，Windows 用 `ShellExecuteW`，Linux 用 `GtkUriLauncher`，GPUI 用它的 `open_url`，Web 在新标签页中打开。`nsh test` 记录这些 URL，而不真正打开。
 - [`TextView`](../elements/text-view.md) 设置 `links="open"` 后，以同样的方式打开其中的链接。
 
+### openAppSettings
+
+```ts
+function openAppSettings(): Promise<OpenAppSettingsResult>;
+function appSettingsAvailable(): Promise<boolean>;
+
+interface OpenAppSettingsResult {
+  opened: boolean;
+}
+```
+
+打开系统设置中本应用自己的页面，用户在那里重新打开曾经拒绝的权限（相机、照片、通知）：权限一旦被拒绝，只有系统设置能改回来，所以应用解释为什么需要权限时，通常会附一个“打开设置”按钮。结果是 `{ opened }`，表示系统是否打开了这个页面。`appSettingsAvailable()` 表示当前平台是否有这样的页面，显示按钮之前先问它。Rust：`nsh_core::prelude` 的 `open_app_settings()` 和 `app_settings_available()`，返回可在任务中等待的回答；`open_app_settings` 的回答是 `Result<bool, AppSettingsError>`。
+
+```rust tabs
+let can_open = signal(false);
+spawn(async move { can_open.set(app_settings_available().await) });
+
+button()
+    .child(text("打开设置"))
+    .on_press(|| drop(open_app_settings()))
+```
+
+```tsx tabs
+const canOpen = signal(false);
+appSettingsAvailable().then(canOpen.set);
+
+<If when={canOpen()}>
+  <Button onPress={() => openAppSettings()}>
+    <Text>打开设置</Text>
+  </Button>
+</If>
+```
+
+- iOS 打开“设置”应用中本应用的页面，Android 打开应用信息页。嵌入的视图打开宿主应用的页面。
+- 其他平台（macOS、Windows、Linux、Mac Catalyst、Web、终端、`nsh test`）没有应用自己的页面：`appSettingsAvailable()` 为 `false`，`openAppSettings()` 以一个 `Error` reject，其 `code` 为 `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"`（Rust：`AppSettingsError::Unavailable`）。在 macOS 上，想打开某个隐私面板的应用可以用 [`openUrl`](#openurl) 打开它。
+- 不需要任何能力，`openAppSettings` 从不抛出：所有失败都以 reject 报告。
+
 ### 布局方向
 
 布局方向跟随用户的语言：在从右到左书写的语言（阿拉伯语、希伯来语等）中，应用从右到左布局，行从右侧开始排列，`left` / `right` 样式属性（`marginLeft`、`paddingRight` 等）表示起始端和结束端。修改即时生效，无需重启。
@@ -2303,7 +2340,7 @@ async function signOut() {
 
 ### Notifications.permission
 
-`permission()` 只查询不询问，`requestPermission()` 首次会显示系统提示。两者的结果都是 `"default"`（尚未询问）、`"granted"`、`"denied"`（只能在系统设置里更改）或 `"unavailable"`。在 Apple 平台上，`requestPermission()` 询问之后按系统设置里的权限返回：用户关掉了通知的应用得到 `"denied"`。
+`permission()` 只查询不询问，`requestPermission()` 首次会显示系统提示。两者的结果都是 `"default"`（尚未询问）、`"granted"`、`"denied"`（只能在系统设置里更改，[`openAppSettings`](#openappsettings) 可以把用户带过去）或 `"unavailable"`。在 Apple 平台上，`requestPermission()` 询问之后按系统设置里的权限返回：用户关掉了通知的应用得到 `"denied"`。
 
 ## UrlScheme
 

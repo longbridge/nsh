@@ -2853,6 +2853,14 @@ final class Mounter {
                 eventMap(1, Native.OPEN_URL, new String[] {"id", "opened"}, new Object[] {(double) request, opened});
                 break;
             }
+            case 63: {
+                // `encode.rs` `Command::OpenAppSettings`: the request.
+                int request = b.getInt();
+                boolean opened = SystemUi.openAppSettings(context);
+                eventMap(1, Native.OPEN_APP_SETTINGS, new String[] {"id", "opened"},
+                        new Object[] {(double) request, opened});
+                break;
+            }
             case 23: {
                 int request = b.getInt();
                 boolean hasOnly = b.getInt() != 0;

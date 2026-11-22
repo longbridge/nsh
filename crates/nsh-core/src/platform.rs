@@ -371,6 +371,11 @@ pub struct Environment {
     /// ([`crate::Command::Share`], `Share.show`); without it, a share fails
     /// at once with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
     pub share: bool,
+    /// The platform opens the app's own page in the system's settings
+    /// ([`crate::Command::OpenAppSettings`], `openAppSettings`: iOS and
+    /// Android); without it, opening it fails at once with
+    /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` ([`crate::app_settings`]).
+    pub app_settings: bool,
     /// The platform shows web sign-in sessions
     /// ([`crate::Command::AuthSession`]: iOS's
     /// `ASWebAuthenticationSession`, Android's Custom Tabs); without it,
@@ -533,6 +538,7 @@ impl Default for Environment {
             clipboard_write_result: false,
             canvas_render: false,
             share: false,
+            app_settings: false,
             auth_session: false,
             scheme_links: None,
             file_requests: false,

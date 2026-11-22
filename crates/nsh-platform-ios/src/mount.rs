@@ -2315,6 +2315,9 @@ impl Mounter {
                 None => crate::system::set_clipboard(&item.text),
             },
             (Command::OpenUrl { id, url }, _) => crate::system::open_url(id, &url, &self.control),
+            (Command::OpenAppSettings { id }, _) => {
+                crate::system::open_app_settings(id, &self.control)
+            }
             (Command::ReadClipboard { id, has_only }, _) => {
                 let (has, text, denied) = crate::system::read_clipboard(has_only);
                 let mut fields = vec![

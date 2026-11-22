@@ -504,6 +504,9 @@ impl RootView {
             canvas_render: true,
             // `UIActivityViewController` (`crate::share`).
             share: true,
+            // `UIApplication.openSettingsURLString`. Mac Catalyst reports
+            // none: what it opens there is not the app's own page.
+            app_settings: !cfg!(target_abi = "macabi"),
             // `ASWebAuthenticationSession` (`crate::auth_session`).
             auth_session: true,
             // The Speech framework fed by the microphone.

@@ -1,15 +1,18 @@
-import { Notifications, signal } from "nsh";
+import { Notifications, appSettingsAvailable, openAppSettings, signal } from "nsh";
 import { Badge, Button, Caption, Card, DemoPage, Row } from "../ui";
 
 /**
  * `Notifications` of `nsh`: the permission asked for when the user wants
- * notifications, one shown and replaced under its id, its press, the badge
- * on the app's icon.
+ * notifications (and, where the system has one, the app's page in its
+ * settings, where a denied permission is turned back on), one shown and
+ * replaced under its id, its press, the badge on the app's icon.
  */
 export function NotificationsDemo() {
   const permission = signal("…");
   const last = signal("Nothing pressed yet");
   const badge = signal(0);
+  const settings = signal(false);
+  void appSettingsAvailable().then((yes) => settings.set(yes));
   const asked = (value: Promise<string>) => void value.then((p) => permission.set(p));
   asked(Notifications.permission());
   Notifications.on("press", ({ id }) => last.set(`Pressed ${id}`));
@@ -30,6 +33,14 @@ export function NotificationsDemo() {
               <Button label="Allow notifications" onPress={() => asked(Notifications.requestPermission())} />
               <Badge label={permission()} />
             </Row>
+            <If when={settings()}>
+              <Row>
+                <Caption
+                  label={permission() === "denied" ? "Denied: only Settings turns them back on" : "Change it any time in Settings"}
+                />
+                <Button label="Open Settings" variant="secondary" onPress={() => void openAppSettings()} />
+              </Row>
+            </If>
           </Card>
         ),
         () => (

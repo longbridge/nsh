@@ -4023,6 +4023,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         clipboard_write_result: env.clipboard_write_result,
         canvas_render: env.canvas_render,
         share: env.share,
+        app_settings: env.app_settings,
         auth_session: env.auth_session,
         scheme_links: env.scheme_links(),
         file_requests: env.file_requests,

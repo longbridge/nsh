@@ -1366,6 +1366,43 @@ button()
 - Each platform opens it with its own opener: `UIApplication.open` on iOS (the host app's application when embedded), an `ACTION_VIEW` intent on Android, `NSWorkspace` on macOS, `ShellExecuteW` on Windows, `GtkUriLauncher` on Linux, GPUI's `open_url`, a new tab on the web. `nsh test` records the URLs instead of opening them.
 - A [`TextView`](../elements/text-view.md) opens its links this way with `links="open"`.
 
+### openAppSettings
+
+```ts
+function openAppSettings(): Promise<OpenAppSettingsResult>;
+function appSettingsAvailable(): Promise<boolean>;
+
+interface OpenAppSettingsResult {
+  opened: boolean;
+}
+```
+
+Opens the app's own page in the system's settings, where the user turns back on a permission they denied (the camera, photos, notifications): once denied, only the system's settings change it, so an explanation of why the app needs it usually comes with an "Open Settings" button. It resolves with `{ opened }`, whether the system opened the page. `appSettingsAvailable()` resolves with whether the platform has such a page; ask it before showing the button. Rust: `open_app_settings()` and `app_settings_available()` of `nsh_core::prelude`, answers to await in a task; `open_app_settings` answers `Result<bool, AppSettingsError>`.
+
+```rust tabs
+let can_open = signal(false);
+spawn(async move { can_open.set(app_settings_available().await) });
+
+button()
+    .child(text("Open Settings"))
+    .on_press(|| drop(open_app_settings()))
+```
+
+```tsx tabs
+const canOpen = signal(false);
+appSettingsAvailable().then(canOpen.set);
+
+<If when={canOpen()}>
+  <Button onPress={() => openAppSettings()}>
+    <Text>Open Settings</Text>
+  </Button>
+</If>
+```
+
+- iOS opens the app's page in the Settings app, Android its App info page. An embedded view opens the host app's page.
+- Elsewhere (macOS, Windows, Linux, Mac Catalyst, the web, a terminal, `nsh test`) there is no page of the app's own: `appSettingsAvailable()` resolves `false` and `openAppSettings()` rejects with an `Error` whose `code` is `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"` (Rust: `AppSettingsError::Unavailable`). On macOS, an app that wants a particular privacy pane opens it with [`openUrl`](#openurl).
+- It needs no capability, and `openAppSettings` never throws: every failure rejects.
+
 ### Layout direction
 
 The layout direction follows the user's language: in a right-to-left language (Arabic, Hebrew, ...) the app lays out right to left, rows run from the right, and `left` / `right` style properties (`marginLeft`, `paddingRight`, ...) mean start and end. Changes apply at once, with no restart.
@@ -2408,7 +2445,7 @@ only the running app: one left on screen after the app exits does nothing.
 ### Notifications.permission
 
 `permission()` answers without asking, `requestPermission()` shows the system's prompt the first time. Both resolve with
-`"default"` (not asked yet), `"granted"`, `"denied"` (only the system's settings change it) or `"unavailable"`. On Apple
+`"default"` (not asked yet), `"granted"`, `"denied"` (only the system's settings change it; [`openAppSettings`](#openappsettings) takes the user there) or `"unavailable"`. On Apple
 platforms `requestPermission()` resolves with the permission the system's settings hold once it has asked: `"denied"` for
 an app the user turned notifications off for.
 

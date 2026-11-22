@@ -12377,6 +12377,7 @@ fn shown_by(item: &MountItem) -> Shown {
                 | C::PickImages { .. }
                 | C::PickFiles { .. }
                 | C::OpenUrl { .. }
+                | C::OpenAppSettings { .. }
                 | C::PickScreenColor { .. }
                 | C::Share { .. }
                 | C::RenderCanvas { .. }

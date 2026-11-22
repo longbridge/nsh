@@ -670,6 +670,40 @@ pub(crate) fn open_url(id: u32, url: &str, control: &EngineControl) {
     };
 }
 
+/// `openAppSettings`: opens the app's page in the Settings app
+/// (`UIApplication.openSettingsURLString`; the embedding app's page when
+/// NSH is embedded) and reports whether the system opened it
+/// ([`EventKind::OpenAppSettings`] `id`). Commands are applied on the main
+/// thread, as UIKit needs.
+pub(crate) fn open_app_settings(id: u32, control: &EngineControl) {
+    let control = control.clone();
+    let answer = move |opened: bool| {
+        control.dispatch_event(
+            nsh_core::ROOT_ID,
+            EventKind::OpenAppSettings,
+            EventPayload::Map(vec![
+                ("id", PayloadValue::Number(id as f64)),
+                ("opened", PayloadValue::Bool(opened)),
+            ]),
+        );
+    };
+    // SAFETY: a constant UIKit exports, valid for the process's life.
+    let settings = unsafe { objc2_ui_kit::UIApplicationOpenSettingsURLString };
+    let (Some(mtm), Some(url)) = (MainThreadMarker::new(), NSURL::URLWithString(settings)) else {
+        return answer(false);
+    };
+    let completion = RcBlock::new(move |opened: Bool| answer(opened.as_bool()));
+    // SAFETY: an empty dictionary is valid options; UIKit calls the
+    // completion on the main thread.
+    unsafe {
+        UIApplication::sharedApplication(mtm).openURL_options_completionHandler(
+            &url,
+            &NSDictionary::new(),
+            Some(&completion),
+        )
+    };
+}
+
 /// `Clipboard.writeText`: puts `text` on the general pasteboard.
 pub(crate) fn set_clipboard(text: &str) {
     // SAFETY: a plain setter of the general pasteboard.
