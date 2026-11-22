@@ -318,6 +318,10 @@ pub struct Accessibility {
     /// [`Accessibility::description`], so a platform without such a
     /// relation reads it all the same.
     pub described_by: Option<crate::NodeId>,
+    /// The list's orientation (ARIA's `aria-orientation`, reported on the
+    /// web): `"horizontal"` or `"vertical"`, for a tab list or toolbar laid
+    /// out along that axis; `None` has none.
+    pub orientation: Option<crate::geometry::Axis>,
 }
 
 impl Accessibility {
@@ -428,6 +432,9 @@ pub enum AccessibilityProp {
     /// rendered element with text.
     #[prop(js = "accessibilityDescribedBy", with = crate::js::host_values::accessibility_described_by, reset = AccessibilityProp::DescribedBy(None), ts = "ViewRef | null")]
     DescribedBy(Option<crate::element::ElementTarget>),
+    /// `aria-orientation` (web): set by a component from its own
+    /// orientation (a `Tabs`'s), never from JS.
+    Orientation(Option<crate::geometry::Axis>),
 }
 
 /// Android's press ripple (`android={{ ripple }}`).

@@ -1,8 +1,10 @@
 //! `Tabs`: one stop of the keyboard focus, at the selected tab; the arrow
-//! keys, Home and End move between the tabs past disabled ones, around the
-//! ends, and select the tab they reach (automatic activation); in a
-//! right-to-left layout Left and Right trade places. On macOS,
-//! where Tab stops at views that take presses.
+//! keys of its `orientation` (Left and Right in a row, Up and Down in a
+//! column), Home and End move between the tabs past disabled ones, around
+//! the ends, and select the tab they reach (automatic activation); the
+//! other pair of arrows is left to the page. In a right-to-left layout
+//! Left and Right trade places. On macOS, where Tab stops at views that
+//! take presses.
 //!
 //! Its indicator: on the selected tab along the list, placed by the core
 //! (no layout events, no JS), springing to the next tab natively as a
@@ -16,7 +18,8 @@ use std::sync::{
 
 use nsh_base::{tab, tabs};
 use nsh_core::{
-    Color, LayoutCurve, MountItem, NodeId, Size, element::Spring, platform::Os, prelude::*,
+    Color, LayoutCurve, MountItem, NodeId, Size, element::Spring, geometry::Axis, platform::Os,
+    prelude::*,
 };
 use nsh_engine::EngineConfig;
 use nsh_testing::Headless;
@@ -41,9 +44,9 @@ fn start_in<C: Component<Props = ()>>(rtl: bool) -> Headless {
 
 /// A button before and after a list of five tabs, the fourth disabled; the
 /// second starts selected. The texts say which is selected, how many
-/// presses the tabs reported, and which button Return pressed.
-#[component]
-fn TabsScreen() -> impl IntoElement {
+/// presses the tabs reported, and which button Return pressed. Without an
+/// orientation the list keeps its default (`"horizontal"`).
+fn tabs_view(orientation: Option<Axis>) -> impl IntoElement {
     let selected = signal(1usize);
     let presses = signal(0u32);
     let pressed = signal("none");
@@ -67,7 +70,10 @@ fn TabsScreen() -> impl IntoElement {
             // An indicator, the list's first child: the keys below move
             // between the tabs alone.
             tabs()
-                .flex_row()
+                .when_some(orientation, |list, orientation| {
+                    list.orientation(orientation)
+                })
+                .when(orientation != Some(Axis::Vertical), |list| list.flex_row())
                 .indicator_style(|s| s.bottom(px(0.0)).h(px(2.0)))
                 .child(section(0))
                 .child(section(1))
@@ -83,6 +89,16 @@ fn TabsScreen() -> impl IntoElement {
         .child(text(move || format!("selected:{}", NAMES[selected.get()])))
         .child(text(move || format!("presses:{}", presses.get())))
         .child(text(move || format!("pressed:{}", pressed.get())))
+}
+
+#[component]
+fn TabsScreen() -> impl IntoElement {
+    tabs_view(None)
+}
+
+#[component]
+fn VerticalTabsScreen() -> impl IntoElement {
+    tabs_view(Some(Axis::Vertical))
 }
 
 #[test]
@@ -106,7 +122,7 @@ fn tab_enters_the_list_at_the_selected_tab_and_leaves_it_in_one_stop() {
 }
 
 #[test]
-fn arrows_move_and_select_wrapping_and_skipping_disabled_tabs() {
+fn left_and_right_move_and_select_wrapping_and_skipping_disabled_tabs() {
     let mut app = start::<TabsScreen>();
     app.press_key("tab").unwrap();
     app.press_key("tab").unwrap();
@@ -122,20 +138,47 @@ fn arrows_move_and_select_wrapping_and_skipping_disabled_tabs() {
     app.wait_for("text:selected:Five").unwrap();
     app.press_key("left").unwrap();
     app.wait_for("text:selected:Three").unwrap();
-    // Up and Down move as Left and Right do.
+    // A row's Up and Down are the page's: the list stays on Three.
     app.press_key("down").unwrap();
-    app.wait_for("text:selected:Five").unwrap();
     app.press_key("up").unwrap();
     app.wait_for("text:selected:Three").unwrap();
-    app.wait_for("text:presses:7").unwrap();
+    app.wait_for("text:presses:5").unwrap();
     // The focus moved with the selection: Return presses Three.
     app.press_key("enter").unwrap();
-    app.wait_for("text:presses:8").unwrap();
+    app.wait_for("text:presses:6").unwrap();
     app.wait_for("text:selected:Three").unwrap();
 }
 
 #[test]
-fn right_to_left_trades_left_and_right_and_keeps_up_and_down() {
+fn up_and_down_move_a_vertical_list_and_left_and_right_do_not() {
+    let mut app = start::<VerticalTabsScreen>();
+    app.press_key("tab").unwrap();
+    app.press_key("tab").unwrap();
+    app.press_key("down").unwrap();
+    app.wait_for("text:selected:Three").unwrap();
+    // Four is disabled: Down goes on to Five.
+    app.press_key("down").unwrap();
+    app.wait_for("text:selected:Five").unwrap();
+    // Past the end, around to the first.
+    app.press_key("down").unwrap();
+    app.wait_for("text:selected:One").unwrap();
+    app.press_key("up").unwrap();
+    app.wait_for("text:selected:Five").unwrap();
+    // A column's Left and Right are the page's: the list stays on Five.
+    app.press_key("right").unwrap();
+    app.press_key("left").unwrap();
+    app.wait_for("text:selected:Five").unwrap();
+    app.wait_for("text:presses:4").unwrap();
+    // Home and End work along either axis.
+    app.press_key("home").unwrap();
+    app.wait_for("text:selected:One").unwrap();
+    app.press_key("end").unwrap();
+    app.wait_for("text:selected:Five").unwrap();
+    app.wait_for("text:presses:6").unwrap();
+}
+
+#[test]
+fn right_to_left_trades_left_and_right_in_a_row() {
     let mut app = start_in::<TabsScreen>(true);
     app.press_key("tab").unwrap();
     app.press_key("tab").unwrap();
@@ -146,8 +189,8 @@ fn right_to_left_trades_left_and_right_and_keeps_up_and_down() {
     app.wait_for("text:selected:Five").unwrap();
     app.press_key("right").unwrap();
     app.wait_for("text:selected:Three").unwrap();
+    // Up and Down are the page's in a row, whatever its direction.
     app.press_key("down").unwrap();
-    app.wait_for("text:selected:Five").unwrap();
     app.press_key("up").unwrap();
     app.wait_for("text:selected:Three").unwrap();
     // The direction changes while the list has the focus: the keys follow.
@@ -214,6 +257,21 @@ fn a_list_takes_the_name_the_app_gives_it() {
     let app = start::<TabsScreen>();
     assert_eq!(app.screen().count("role:tablist"), Ok(1));
     assert_eq!(app.screen().count("role:tablist[Sections]"), Ok(0));
+}
+
+#[test]
+fn a_list_reports_its_orientation() {
+    let app = start::<TabsScreen>();
+    assert_eq!(
+        app.screen().accessibility_orientation("role:tablist"),
+        Ok(Some(Axis::Horizontal)),
+        "a list is horizontal by default"
+    );
+    let app = start::<VerticalTabsScreen>();
+    assert_eq!(
+        app.screen().accessibility_orientation("role:tablist"),
+        Ok(Some(Axis::Vertical))
+    );
 }
 
 #[test]

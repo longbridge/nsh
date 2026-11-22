@@ -784,6 +784,9 @@ fn props_json(p: &ViewProps) -> String {
     }
     // The role's JS name, which is ARIA's (`columnheader`, `treeitem`).
     let _ = write!(s, ",\"role\":{}", json_str(enum_name(&a.role)));
+    if let Some(o) = a.orientation {
+        let _ = write!(s, ",\"orientation\":{}", json_str(enum_name(&o)));
+    }
     if a.state.disabled {
         s.push_str(",\"disabled\":true");
     }

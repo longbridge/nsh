@@ -1407,6 +1407,32 @@ covers [props] accessibilityLabel
 covers [props] accessibilityDescription
 covers [events] onPress
 
+# base-tabs-orientation
+tap id:case-base-tabs-orientation
+expect Default selected: one
+expect Row selected: one
+expect Column selected: one
+# A list with no `orientation` is a row, the default: Left and Right move,
+# Up and Down are the page's.
+key tab
+key right
+expect Default selected: two
+key down
+expect Default selected: two
+# `"horizontal"` moves with Left and Right; Up and Down are the page's.
+key tab
+key right
+expect Row selected: two
+key down
+expect Row selected: two
+# `"vertical"` moves with Up and Down; Left and Right are the page's.
+key tab
+key down
+expect Column selected: two
+key right
+expect Column selected: two
+covers [props] Tabs.orientation
+
 # base-toggle
 tap id:case-base-toggle
 # The group is a toolbar for screen readers; each toggle is a button of
