@@ -351,7 +351,8 @@ libraries = ["android/libs/scanner-glue.jar"]
 | `android.libraries` | Java 库：jar、Android 库（`.aar`）和 dex 文件，路径相对于 crate 的 `Cargo.toml`，打包方式与 `nsh.json` 的 `android.libraries` 相同（[Java 代码](./packaging.md#java-代码)） |
 
 crate 不能设置 `android.manifestPlaceholders`，设置了会报错：占位符的值（例如某个服务的 key）属于应用，写在应用的 `nsh.json` 里。
-两个 crate 带了同一个 Android 库的不同版本时，用应用在自己的 `android.libraries` 里列出的那个版本。
+两个 crate 带了同一个 Android 库的不同版本时，用应用在自己的 `android.libraries` 里列出的那个版本。两个库定义了同名资源时，
+应用列出的库优先，其次是 crate 名排序靠前的（[Java 代码](./packaging.md#java-代码)）。
 
 应用自己的 `nsh.json` 优先：它设置过的键保留它的值，数组（例如 `UIBackgroundModes`）合并。两个 crate 给同一个键设置了不同的值时（例如两段不同的相机用途说明），由应用在 `ios.infoPlist` 或 `ios.entitlements` 里写这个键来决定；应用没写之前，打包 iOS 应用会报错并指出这两个 crate。NSH 自己设置的键（包标识、版本等）不能由 crate 设置。
 

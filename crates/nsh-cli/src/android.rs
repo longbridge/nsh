@@ -18,6 +18,7 @@ use crate::apple::{Color, LaunchScreen, Themed};
 
 mod libraries;
 mod library_manifest;
+mod library_resources;
 
 pub(crate) use libraries::{Library, file_sha256};
 
@@ -60,18 +61,20 @@ impl Sdk {
         Ok(Sdk { root, build_tools })
     }
 
-    /// The platform an app targeting `level` compiles against.
+    /// The platform an app targeting `level` compiles against: in
+    /// `platforms/android-<level>`, or in `android-<level>.0`, the
+    /// directory of a package `sdkmanager` names so (`platforms;android-37.0`).
     fn android_jar(&self, level: u32) -> anyhow::Result<PathBuf> {
-        let jar = self
-            .root
-            .join(format!("platforms/android-{level}/android.jar"));
-        if !jar.exists() {
-            bail!(
-                "{} missing: install it with `sdkmanager \"platforms;android-{level}\"`",
-                jar.display()
-            );
+        let dirs = [format!("android-{level}"), format!("android-{level}.0")];
+        let jars = dirs.map(|dir| self.root.join("platforms").join(dir).join("android.jar"));
+        match jars.iter().find(|jar| jar.exists()) {
+            Some(jar) => Ok(jar.clone()),
+            None => bail!(
+                "{} missing: install it with `sdkmanager \"platforms;android-{level}\"` \
+                 (`\"platforms;android-{level}.0\"` in SDKs that name it so, as they do API level 37)",
+                jars[0].display()
+            ),
         }
-        Ok(jar)
     }
 
     pub(crate) fn adb(&self) -> PathBuf {
@@ -224,7 +227,7 @@ pub(crate) struct Apk<'a> {
     pub(crate) camera: bool,
     /// The Java libraries of the app and its crates (`android.libraries`):
     /// jar, dex and AAR files, packaged after the runtime's
-    /// ([`libraries::prepare`]).
+    /// ([`libraries::prepare`], [`libraries::dex`]).
     pub(crate) libraries: &'a [Library],
     /// The values of the placeholders (`${name}`) in the libraries'
     /// manifests and the crates' manifest entries: `nsh.json`
@@ -489,7 +492,7 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
     fs::create_dir_all(&work)?;
 
     // The libraries first: a missing file stops the build early.
-    let java = libraries::prepare(sdk, apk, &work)?;
+    let mut java = libraries::prepare(apk, &work)?;
 
     // Resources: the launcher icon, and the launch screen's theme below.
     let mut flat = Vec::new();
@@ -592,8 +595,17 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
     if format == Format::Aab {
         link.arg("--proto-format");
     }
-    link.args(&flat);
+    // The AARs' resources under the package's own (NSH wrote its own to
+    // `work/res`); the ids it gives them for the `R` classes of the AARs
+    // whose code reads any.
+    libraries::compile_res(sdk, apk, &mut java, &work.join("res"))?;
+    link.args(library_resources::link_inputs(&flat, &java.res));
+    let symbols = java.needs_symbols().then(|| work.join("R.txt"));
+    if let Some(symbols) = &symbols {
+        link.arg("--output-text-symbols").arg(symbols);
+    }
     run(&mut link)?;
+    libraries::dex(sdk, apk, &work, &mut java, symbols.as_deref())?;
 
     if format == Format::Aab {
         let unsigned = work.join("unsigned.aab");
@@ -1512,6 +1524,23 @@ pub(crate) fn preferred_abi(serial: &str, device: &[String]) -> anyhow::Result<S
         .with_context(|| format!("{serial} runs none of {}", ABIS.join(", ")))
 }
 
+/// The ABIs a development build for device `serial` takes
+/// ([`dev_abis_of`] its ABIs).
+pub(crate) fn dev_abis(sdk: &Sdk, serial: &str) -> anyhow::Result<Vec<String>> {
+    dev_abis_of(serial, device_abis(sdk, serial).ok().as_deref())
+}
+
+/// The ABIs a development build for device `serial`, whose ABIs are
+/// `device`, takes: its preferred one ([`preferred_abi`]), as a debug
+/// library per ABI makes the APK too large to build. When the device's ABIs
+/// can't be read (`None`): every ABI of the runtime (empty).
+fn dev_abis_of(serial: &str, device: Option<&[String]>) -> anyhow::Result<Vec<String>> {
+    match device {
+        Some(device) => Ok(vec![preferred_abi(serial, device)?]),
+        None => Ok(Vec::new()),
+    }
+}
+
 /// A port of the device forwarded to this machine (`adb reverse`), removed
 /// when dropped, however the command ends (Ctrl-C too: it is
 /// [`ui::Stoppable`] meanwhile): a dev host left on the device would
@@ -1717,6 +1746,28 @@ mod tests {
         assert_eq!(abi(&["x86", "armeabi-v7a"]).as_deref(), Some("armeabi-v7a"));
         assert_eq!(abi(&["x86"]), None);
         assert_eq!(abi(&[]), None);
+    }
+
+    /// A development build takes the device's preferred ABI alone, every
+    /// ABI of the runtime when the device's ABIs can't be read, and none
+    /// for a device that runs none NSH builds for.
+    #[test]
+    fn a_development_build_takes_the_devices_abi() {
+        let abis = |list: Option<&[&str]>| {
+            let device: Option<Vec<String>> =
+                list.map(|list| list.iter().map(|abi| abi.to_string()).collect());
+            super::dev_abis_of("emulator-5554", device.as_deref()).ok()
+        };
+        assert_eq!(
+            abis(Some(&["x86_64", "arm64-v8a"])),
+            Some(vec!["x86_64".to_owned()])
+        );
+        assert_eq!(
+            abis(Some(&["arm64-v8a", "armeabi-v7a", "armeabi"])),
+            Some(vec!["arm64-v8a".to_owned()])
+        );
+        assert_eq!(abis(None), Some(Vec::new()));
+        assert_eq!(abis(Some(&["x86"])), None);
     }
 
     static NO_PLACEHOLDERS: std::collections::BTreeMap<String, String> =
@@ -2058,26 +2109,45 @@ mod tests {
         bytes
     }
 
-    /// An SDK that is not there: a build that needed one of its tools fails.
-    fn no_sdk() -> super::Sdk {
-        super::Sdk {
-            root: "/nsh-no-sdk".into(),
-            build_tools: "/nsh-no-sdk/build-tools/36.1.0".into(),
+    #[test]
+    fn a_platform_is_found_under_either_name_sdkmanager_gives_it() {
+        let root = std::env::temp_dir().join(format!("nsh-cli-platforms-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for dir in ["android-35", "android-37.0"] {
+            let dir = root.join("platforms").join(dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("android.jar"), b"").unwrap();
         }
+        let sdk = super::Sdk {
+            root: root.clone(),
+            build_tools: root.join("build-tools/36.1.0"),
+        };
+        assert_eq!(
+            sdk.android_jar(35).unwrap(),
+            root.join("platforms/android-35/android.jar")
+        );
+        assert_eq!(
+            sdk.android_jar(37).unwrap(),
+            root.join("platforms/android-37.0/android.jar")
+        );
+        let error = sdk.android_jar(36).unwrap_err().to_string();
+        assert!(
+            error.contains("platforms;android-36\"") && error.contains("platforms;android-36.0"),
+            "{error}"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
     fn the_libraries_dex_and_java_resources_follow_the_runtimes() {
         let (dir, base) = runtime_and_base("libraries");
         let runtime = dir.join("runtime");
-        let java = super::libraries::Contents {
-            dex: vec![dir.join("a.dex"), dir.join("b.dex")],
-            resources: vec![(
-                "META-INF/services/com.example.Greeter".to_owned(),
-                b"com.example.Hello\n".to_vec(),
-            )],
-            ..Default::default()
-        };
+        let mut java = super::libraries::Contents::default();
+        java.dex = vec![dir.join("a.dex"), dir.join("b.dex")];
+        java.resources = vec![(
+            "META-INF/services/com.example.Greeter".to_owned(),
+            b"com.example.Hello\n".to_vec(),
+        )];
         std::fs::write(&java.dex[0], b"dex\n035\0a").unwrap();
         std::fs::write(&java.dex[1], b"dex\n035\0b").unwrap();
         for (layout, prefix, root) in [
@@ -2133,6 +2203,7 @@ mod tests {
             super::Library {
                 path,
                 listed: "nsh.json `android.libraries`".into(),
+                owner: None,
             }
         };
         let libraries = [
@@ -2148,7 +2219,7 @@ mod tests {
             ..apk(false, false)
         };
         // Dex files only: no SDK tool runs, no cache is made.
-        let java = super::libraries::prepare(&no_sdk(), &apk, &dir).unwrap();
+        let java = super::libraries::prepare(&apk, &dir).unwrap();
         assert_eq!(java.dex, [dir.join("b.dex"), dir.join("a.dex")]);
         assert!(java.resources.is_empty());
         assert!(!cache.exists());
@@ -2167,7 +2238,7 @@ mod tests {
             ..apk(false, false)
         };
         // Nothing for d8: no SDK tool runs, no cache is made.
-        let java = super::libraries::prepare(&no_sdk(), &apk, &dir).unwrap();
+        let java = super::libraries::prepare(&apk, &dir).unwrap();
         assert!(java.dex.is_empty() && java.resources.is_empty());
         assert!(java.native.is_empty() && java.assets.is_empty());
         assert!(!cache.exists());
@@ -2250,6 +2321,7 @@ mod tests {
         let libraries = [super::Library {
             path: push.clone(),
             listed: "push: [package.metadata.nsh] `android.libraries`".into(),
+            owner: Some("push".into()),
         }];
         // A crate adds its own initializer to the provider the library
         // declares.
@@ -2273,7 +2345,7 @@ mod tests {
         let placeholders: &'static _ = Box::leak(Box::new(placeholders));
         let apk = with(&[], placeholders);
         // No classes: no SDK tool runs.
-        let java = super::libraries::prepare(&no_sdk(), &apk, &dir).unwrap();
+        let java = super::libraries::prepare(&apk, &dir).unwrap();
         assert!(java.dex.is_empty() && !cache.exists());
         for (layout, lib, assets) in [
             (&super::Layout::APK, "lib/", "assets/"),
@@ -2344,7 +2416,7 @@ mod tests {
             "{error}"
         );
         // A placeholder nsh.json does not set.
-        let error = super::libraries::prepare(&no_sdk(), &with(&[], &NO_PLACEHOLDERS), &dir)
+        let error = super::libraries::prepare(&with(&[], &NO_PLACEHOLDERS), &dir)
             .unwrap_err()
             .to_string();
         assert!(error.contains("the placeholder `${PUSH_KEY}`"), "{error}");
@@ -2358,7 +2430,7 @@ mod tests {
                 b"minCompileSdk=36\n",
             )],
         );
-        let error = super::libraries::prepare(&no_sdk(), &apk, &dir)
+        let error = super::libraries::prepare(&apk, &dir)
             .unwrap_err()
             .to_string();
         assert!(

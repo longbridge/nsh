@@ -433,6 +433,7 @@ impl ModuleMeta {
                         .map(|path| Library {
                             path: dir.join(path),
                             listed: listed.clone(),
+                            owner: Some(name.to_owned()),
                         })
                         .collect();
                     join_libraries(&mut self.android_libraries, libraries);
@@ -626,6 +627,56 @@ fn join_libraries(list: &mut Vec<Library>, more: Vec<Library>) {
             list.push(library);
         }
     }
+}
+
+/// Keeps the app's own `nsh.json` `android.queries` and
+/// `android.application` entries that pass a crate's checks (one balanced
+/// element each, of the elements a crate may add there); each other one is
+/// reported in `ignored` and left out, as any `nsh.json` value an `nsh`
+/// cannot read is.
+pub(crate) fn keep_app_android_elements(
+    queries: &mut Vec<String>,
+    application: &mut Vec<String>,
+    ignored: &mut Vec<String>,
+) {
+    for (list, elements, key) in [
+        (queries, QUERY_ELEMENTS, "android.queries"),
+        (application, APPLICATION_ELEMENTS, "android.application"),
+    ] {
+        list.retain(|e| {
+            let problem = match check_element(e, elements) {
+                Ok(()) => app_entry_problem(e),
+                Err(error) => Some(format!("{error:#}")),
+            };
+            if let Some(problem) = &problem {
+                ignored.push(format!("{key}: {problem}"));
+            }
+            problem.is_none()
+        });
+    }
+}
+
+/// What makes the app's own manifest entry `xml`, one allowed element,
+/// unfit for the manifest NSH writes: a `tools:` attribute, which only a
+/// manifest merger reads and `aapt2` refuses unbound; or a name NSH
+/// declares itself, which Android takes only once.
+fn app_entry_problem(xml: &str) -> Option<String> {
+    if xml.contains("tools:") {
+        return Some(format!(
+            "{xml:?}: `tools:` attributes are for libraries' manifests, not nsh.json: leave them out"
+        ));
+    }
+    if xml.contains("\"com.longbridge.nsh.") {
+        return Some(format!(
+            "{xml:?}: names under `com.longbridge.nsh.` are NSH's own"
+        ));
+    }
+    if xml.contains("${applicationId}.files\"") {
+        return Some(format!(
+            "{xml:?}: `${{applicationId}}.files` is the authority of NSH's own file provider"
+        ));
+    }
+    None
 }
 
 /// Checks `xml` is one element, balanced, whose name is one of `elements`
@@ -1144,6 +1195,7 @@ mod tests {
         config.android.libraries.push(Library {
             path: "/work/scanner/android/libs/glue.jar".into(),
             listed: "nsh.json `android.libraries`".into(),
+            owner: None,
         });
         meta.apply(&mut config, Platform::Android).unwrap();
         let listed: Vec<&str> = config
@@ -1191,6 +1243,64 @@ mod tests {
             ),
             "{error}"
         );
+    }
+
+    #[test]
+    fn the_apps_own_android_entries_are_checked_as_a_crates() {
+        let query =
+            "<intent><action android:name=\"android.media.action.IMAGE_CAPTURE\"/></intent>"
+                .to_owned();
+        let service =
+            "<service android:name=\"${applicationId}.Sync\" android:exported=\"false\"/>"
+                .to_owned();
+        // A `<service>` is no query, and an entry that closes `<application>`
+        // to write elsewhere is no element: each is left out and reported,
+        // the rest kept.
+        let escape =
+            "<service android:name=\"a\"/></application><application android:debuggable=\"true\">";
+        // Nor is a `tools:` attribute, or a name NSH declares itself.
+        let tools = "<service android:name=\"a.B\" tools:node=\"remove\"/>";
+        let ours = "<provider android:name=\"com.longbridge.nsh.FilesProvider\" android:authorities=\"x\"/>";
+        let files =
+            "<provider android:name=\"a.Files\" android:authorities=\"${applicationId}.files\"/>";
+        let mut queries = vec![query.clone(), service.clone()];
+        let mut application = vec![
+            escape.to_owned(),
+            tools.to_owned(),
+            ours.to_owned(),
+            files.to_owned(),
+            service.clone(),
+        ];
+        let mut ignored = Vec::new();
+        keep_app_android_elements(&mut queries, &mut application, &mut ignored);
+        assert_eq!(queries, std::slice::from_ref(&query));
+        assert_eq!(application, std::slice::from_ref(&service));
+        assert!(
+            ignored.len() == 5
+                && ignored[0].starts_with("android.queries: ")
+                && ignored[1..]
+                    .iter()
+                    .all(|i| i.starts_with("android.application: ")),
+            "{ignored:?}"
+        );
+        assert!(ignored[2].contains("`tools:` attributes"), "{ignored:?}");
+        assert!(ignored[3].contains("`com.longbridge.nsh.`"), "{ignored:?}");
+        assert!(
+            ignored[4].contains("NSH's own file provider"),
+            "{ignored:?}"
+        );
+        // The crates' entries follow the app's, each once.
+        let mut config = AppConfig::default();
+        config.android.queries.push(query.clone());
+        config.android.application.push(service.clone());
+        let mut meta = ModuleMeta::default();
+        meta.android_queries.push(query.clone());
+        meta.android_application
+            .push("<receiver android:name=\"x.Boot\" android:exported=\"false\"/>".into());
+        meta.apply(&mut config, Platform::Android).unwrap();
+        assert_eq!(config.android.queries, [query]);
+        assert_eq!(config.android.application.len(), 2);
+        assert_eq!(config.android.application[0], service);
     }
 
     #[test]

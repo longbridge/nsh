@@ -300,8 +300,9 @@ define_class!(
     pub(crate) struct FocusTap;
 
     impl FocusTap {
-        /// A touch on a stop inside the view is that stop's: its own press
-        /// or tap focuses it, and an input focuses itself.
+        /// A touch on a stop inside the view is that stop's: its own focus
+        /// tap focuses it, an input focuses itself, and a control (a view
+        /// that takes presses) takes its press and no focus.
         #[unsafe(method(touchesBegan:withEvent:))]
         fn touches_began(&self, touches: &NSSet<UITouch>, event: &UIEvent) {
             if let (Some(view), Some(touch)) = (self.view(), touches.anyObject())
@@ -565,10 +566,10 @@ impl NshView {
         self.ivars().events.set(events);
     }
 
-    /// A `focusable` view that takes no presses has no `PressRecognizer` to
-    /// focus it: a tap recognizer that neither claims nor cancels touches
-    /// gives it the keyboard focus. It is removed once the view stops being
-    /// such a stop (or starts taking presses, which focuses it already).
+    /// A `focusable` view that takes no presses (one that takes keys) gets
+    /// the keyboard focus from a tap recognizer that neither claims nor
+    /// cancels touches. It is removed once the view stops being such a stop
+    /// or starts taking presses: a tap gives a control no focus.
     pub(crate) fn update_focus_tap(&self, target: &EventTarget) {
         let wants = self.is_focus_stop() && !self.takes_presses();
         let mut kept = self.ivars().focus_tap.borrow_mut();

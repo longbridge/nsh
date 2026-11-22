@@ -585,6 +585,11 @@ impl Native for IosNative {
         self.try_finger(f64::from(at.x.0), f64::from(at.y.0), Phase::Up)
     }
 
+    fn focused(&self) -> Option<NodeId> {
+        self.on_main(|_, window| crate::input::test_focused(window))
+            .flatten()
+    }
+
     fn paste(&self, content: &nsh_core::PasteEvent) -> Result<(), String> {
         let content = content.clone();
         self.on_main(move |_, window| crate::input::test_paste(window, &content))

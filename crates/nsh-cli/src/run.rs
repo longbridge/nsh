@@ -802,13 +802,7 @@ fn run_android(
     // As on iOS: the host of a previous session must not connect first.
     let _ = android::adb(&sdk, &serial, &["shell", "am", "force-stop", BUNDLE_ID]);
     let session = DevSession::start(entry, listen, release, limits)?;
-    // Only the device's ABI: a debug library per ABI makes the APK too
-    // large to build. When the device's ABIs can't be read: every ABI, as
-    // before.
-    let abis = match android::device_abis(&sdk, &serial) {
-        Ok(device) => vec![android::preferred_abi(&serial, &device)?],
-        Err(_) => Vec::new(),
-    };
+    let abis = android::dev_abis(&sdk, &serial)?;
     let runtime = crate::runtime::android(true, &abis)?;
     let config = crate::package::read_config(entry)?.android;
     install_android_host(
@@ -903,7 +897,8 @@ pub(crate) fn install_android_host(
         version.push_str(line);
     }
     // A library's contents, not its time: a rebuilt jar that is the same
-    // keeps the host.
+    // keeps the host. Their order and crates settle which of two AARs'
+    // resources of one name the host takes.
     let mut libraries = app.map(|app| app.libraries.to_vec()).unwrap_or_default();
     for library in &meta.android_libraries {
         if !libraries.iter().any(|have| have.path == library.path) {
@@ -913,6 +908,9 @@ pub(crate) fn install_android_host(
     for library in &libraries {
         let sha256 = android::file_sha256(&library.path).unwrap_or_default();
         version.push_str(&format!("\n{} {sha256}", library.path.display()));
+        if let Some(owner) = &library.owner {
+            version.push_str(&format!(" ({owner})"));
+        }
     }
     // The platform the host compiles against: the app's, when newer, which
     // its libraries may need (`minCompileSdk`).

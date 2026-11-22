@@ -531,6 +531,19 @@ pub(crate) fn test_paste(
     Ok(())
 }
 
+/// The input of the app that has the keyboard focus, if one has it
+/// (`nsh test --target ios`): typing or a paste into it needs no tap, which
+/// would move its caret or, on a word, select it.
+#[cfg(feature = "dev")]
+pub(crate) fn test_focused(window: &objc2_ui_kit::UIWindow) -> Option<NodeId> {
+    let responder = crate::synth::first_responder(window)?;
+    let view: &UIView = match responder.downcast_ref::<Field>() {
+        Some(field) => field.as_ref(),
+        None => responder.downcast_ref::<Area>()?.as_ref(),
+    };
+    Some(view.tag() as NodeId)
+}
+
 /// The pasteboard type of an image of MIME type `mime` that a test pastes.
 #[cfg(feature = "dev")]
 fn image_type(mime: &str) -> Option<&'static str> {
