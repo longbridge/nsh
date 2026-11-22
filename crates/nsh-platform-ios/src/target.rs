@@ -109,16 +109,20 @@ define_class!(
         }
 
         // UIDropInteractionDelegate, for the views that listen to
-        // `onFileDrop` ([`crate::file_drop`]).
+        // `onFileDrop` or take text drops ([`crate::file_drop`]).
 
         #[unsafe(method(dropInteraction:canHandleSession:))]
-        fn drop_can_handle(&self, _interaction: &AnyObject, session: &AnyObject) -> bool {
-            crate::file_drop::offers_files(session)
+        fn drop_can_handle(&self, interaction: &AnyObject, session: &AnyObject) -> bool {
+            drop_listener(interaction)
+                .is_some_and(|(_, events)| crate::file_drop::offer(session, events).is_some())
         }
 
         #[unsafe(method(dropInteraction:sessionDidEnter:))]
-        fn drop_entered(&self, interaction: &AnyObject, _session: &AnyObject) {
-            let Some(id) = drop_listener(interaction) else { return };
+        fn drop_entered(&self, interaction: &AnyObject, session: &AnyObject) {
+            let Some((id, events)) = drop_listener(interaction) else { return };
+            if crate::file_drop::offer(session, events) != Some(crate::file_drop::Offer::Files) {
+                return;
+            }
             let mut drags = self.ivars().file_drags.borrow_mut();
             if !drags.contains(&id) {
                 drags.push(id);
@@ -130,43 +134,59 @@ define_class!(
         #[unsafe(method_id(dropInteraction:sessionDidUpdate:))]
         fn drop_updated(
             &self,
-            _interaction: &AnyObject,
+            interaction: &AnyObject,
             session: &AnyObject,
         ) -> Option<Retained<AnyObject>> {
-            crate::file_drop::proposal(session)
+            let offered = drop_listener(interaction)
+                .is_some_and(|(_, events)| crate::file_drop::offer(session, events).is_some());
+            crate::file_drop::proposal(offered)
         }
 
         #[unsafe(method(dropInteraction:sessionDidExit:))]
         fn drop_exited(&self, interaction: &AnyObject, _session: &AnyObject) {
-            if let Some(id) = drop_listener(interaction) {
+            if let Some((id, _)) = drop_listener(interaction) {
                 self.file_drag_left(id);
             }
         }
 
         #[unsafe(method(dropInteraction:sessionDidEnd:))]
         fn drop_ended(&self, interaction: &AnyObject, _session: &AnyObject) {
-            if let Some(id) = drop_listener(interaction) {
+            if let Some((id, _)) = drop_listener(interaction) {
                 self.file_drag_left(id);
             }
         }
 
         #[unsafe(method(dropInteraction:performDrop:))]
         fn drop_performed(&self, interaction: &AnyObject, session: &AnyObject) {
-            let Some(id) = drop_listener(interaction) else { return };
-            // The leave follows the drop, once its files are read.
+            let Some((id, events)) = drop_listener(interaction) else { return };
+            let offer = crate::file_drop::offer(session, events);
+            // A file drop's leave follows the drop, once its files are read.
             self.ivars().file_drags.borrow_mut().retain(|&d| d != id);
             let Some(in_window) = crate::file_drop::location(interaction, session) else {
                 return;
             };
             let shared = self.ivars().mounter.clone();
-            crate::file_drop::read(session, move |uris| {
+            let on_main = move |f: Box<dyn FnOnce(&mut crate::mount::Mounter) + Send>| {
                 DispatchQueue::main().exec_async(move || {
                     let mtm = MainThreadMarker::new().expect("main queue");
                     if let Some(m) = shared.get(mtm).borrow_mut().as_mut() {
-                        m.files_dropped(id, in_window, uris);
+                        f(m);
                     }
                 });
-            });
+            };
+            match offer {
+                Some(crate::file_drop::Offer::Files) => {
+                    crate::file_drop::read(session, move |uris| {
+                        on_main(Box::new(move |m| m.files_dropped(id, in_window, uris)));
+                    });
+                }
+                Some(crate::file_drop::Offer::Text) => {
+                    crate::file_drop::read_text(session, move |text, html| {
+                        on_main(Box::new(move |m| m.text_dropped(id, in_window, text, html)));
+                    });
+                }
+                None => {}
+            }
         }
 
         #[unsafe(method(handleContextMenu:))]
@@ -1066,10 +1086,12 @@ impl EventTarget {
     }
 }
 
-/// The file drop listener whose view has `interaction` (its tag is the
-/// node's id).
-fn drop_listener(interaction: &AnyObject) -> Option<NodeId> {
+/// The drop listener whose view has `interaction` (its tag is the node's
+/// id), with the events it listens to.
+fn drop_listener(interaction: &AnyObject) -> Option<(NodeId, nsh_core::EventMask)> {
     // SAFETY: UIInteraction's `view` (weak: nil once the view is gone).
     let view: Option<Retained<UIView>> = unsafe { msg_send![interaction, view] };
-    view.map(|v| v.tag() as NodeId)
+    let view = view?;
+    let events = view.downcast_ref::<crate::native_view::NshView>()?.events();
+    Some((view.tag() as NodeId, events))
 }

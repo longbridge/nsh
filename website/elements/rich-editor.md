@@ -169,6 +169,10 @@ the editor call its `onFileDrop` with `{ uris, mimeTypes }`, as a [view's file d
 do, and `onFileDragEnter` / `onFileDragLeave` follow the drag, for a hint such as "Release to attach". Without
 `onFileDrop` the editor leaves dropped files to the view around it that listens.
 
+Text dragged onto the editor from another app or another view goes in where it is let go: the caret moves there and
+the text goes in as a paste of it would (with its HTML when the drag has some, through `transformPasted` and
+`handlePaste`), as one undo step. iOS delivers text drops; the desktops and Android leave text drags to the platform.
+
 ```tsx
 <RichEditor
   editor={editor}
