@@ -432,6 +432,11 @@ enum Command {
         /// Where iOS or Android users get it: `ios=<url>`, `android=<url>` (repeatable).
         #[arg(long = "link")]
         links: Vec<String>,
+        /// The previous release's archive of a platform (repeatable):
+        /// writes a patch from it beside the manifest, which apps running
+        /// that version download instead of the whole archive.
+        #[arg(long)]
+        previous: Vec<PathBuf>,
         /// Prefix of the archives' URLs (default: next to the manifest).
         #[arg(long)]
         base_url: Option<String>,
@@ -1166,6 +1171,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             key,
             notes,
             links,
+            previous,
             base_url,
             out,
         } => updater::manifest(updater::ManifestOptions {
@@ -1175,6 +1181,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             key: key.as_deref(),
             notes: &notes,
             links: &links,
+            previous: &previous,
             base_url: base_url.as_deref(),
             out: &out,
         }),

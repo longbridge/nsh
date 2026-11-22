@@ -324,7 +324,7 @@ Creates an Ed25519 key pair: `<NAME>.secret` and `<NAME>.pub` (e.g. `nsh keygen 
 ### nsh update-manifest
 
 ```sh
-nsh update-manifest [<ARCHIVE>...] [--package <FILE.nshpkg>] [--entry <DIR>] [--key <FILE>] [--notes <FILE>] [--notes <TAG>=<FILE>]... [--link ios=<URL>] [--link android=<URL>] [--base-url <URL>] [-o <DIR>]
+nsh update-manifest [<ARCHIVE>...] [--package <FILE.nshpkg>] [--entry <DIR>] [--key <FILE>] [--notes <FILE>] [--notes <TAG>=<FILE>]... [--link ios=<URL>] [--link android=<URL>] [--previous <ARCHIVE>]... [--base-url <URL>] [-o <DIR>]
 ```
 
 Writes `latest.json` (and `latest.json.sig` with `--key`) for the archives `nsh package` made on each platform and,
@@ -332,6 +332,8 @@ with `--package`, a signed package of the app's code (`nsh publish`'s), which it
 `updater.packages.roots` first: see [OTA Updates](/docs/ota-updates). A release may have only a package.
 `--notes <TAG>=<FILE>` adds the notes in another language (a BCP 47 tag), written beside the manifest as
 `notes.<TAG>.md`; it needs an untagged `--notes` too.
+`--previous <ARCHIVE>` takes the previous release's archive of a platform and writes a patch from it beside the
+manifest (`<archive>.from-<version>.patch`): apps running that version download it instead of the whole archive.
 
 ### nsh certify
 
