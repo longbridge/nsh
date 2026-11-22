@@ -1,15 +1,15 @@
 // A page sheet dialog closed and another opened in the same press: the new
 // one stays open and takes presses, whichever comes first in the tree, and
-// also when the old one leaves with the view it is in. Dialogs closed while
-// another's dismissal runs report their close, and do not keep later ones
-// from opening.
+// also when the old one leaves with the view it is in; the old one reports
+// its close. Dialogs closed while another's dismissal runs report their
+// close, and do not keep later ones from opening.
 import { expect, open, test } from "nsh/test";
 
 // Long enough for the old sheet's dismissal to end, which took the new one
 // along when it was presented over the old one.
 const SETTLE = 1500;
 
-async function replace(from: string, press: string, to: string) {
+async function replace(from: string, press: string, to: string, old: string) {
   const app = await open("./fixtures/dialog-swap.tsx");
   await app.press(`text:${from}`);
   await app.waitFor(`text:${press}`);
@@ -20,18 +20,19 @@ async function replace(from: string, press: string, to: string) {
   await app.press(`text:Count in ${title}`);
   await app.waitFor("text:count: 1");
   expect(app.texts()).toContain(`shown: ${to}`);
+  if (!headless(app)) expect(app.texts()).toContain(`closed: ${old}`);
 }
 
 test("a dialog written after the one it replaces stays open", async () => {
-  await replace("Open first", "Replace with later", "later");
+  await replace("Open first", "Replace with later", "later", "first");
 });
 
 test("a dialog written before the one it replaces stays open", async () => {
-  await replace("Open first", "Replace with earlier", "earlier");
+  await replace("Open first", "Replace with earlier", "earlier", "first");
 });
 
 test("a dialog replacing one closed with its view stays open", async () => {
-  await replace("Open wrapped", "Replace wrapped with later", "later");
+  await replace("Open wrapped", "Replace wrapped with later", "later", "wrapped");
 });
 
 // Whether the app runs headless: `requests()` is a headless run's only.
@@ -64,4 +65,6 @@ test("a dialog opens after one closed while the sheet over it leaves", async () 
   await app.wait(SETTLE);
   await app.press("text:Count in Later sheet");
   await app.waitFor("text:count: 1");
+  expect(app.texts()).toContain("shown: later");
+  if (!headless(app)) expect(app.texts()).toContain("closed: inner, outer");
 });
