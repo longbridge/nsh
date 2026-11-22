@@ -318,10 +318,13 @@ level above 26, a newer platform than `android.targetSdk`, an `Application` clas
 (`tools:node="remove"`, `tools:replace`), native libraries that leave out an ABI the package has, or resources
 without the `R.txt` Android's build writes next to them.
 
-Resources share one namespace, as in any Android app. When several define a resource of one name, the package's own
-win (its icon, launch screen and `android/res/`), then the libraries the app's `nsh.json` lists, an earlier one over a
-later one, then its crates' libraries, by crate name. A library's code that reads a resource no library listed defines
-stops the build, naming the library and the resource: list the library that has it.
+Resources share one namespace, as in any Android app. When several define a resource of one name for one configuration
+(density, night mode, language...), the package's own win (`android/res/`), then the libraries the app's `nsh.json`
+lists, an earlier one over a later one, then its crates' libraries, the crate whose name sorts first over the others.
+A style is taken whole from the one that wins, not item by item. What NSH makes for the package (its icon, launch
+screen and notification sounds) is the package's in every configuration: a library's resources of those names are left
+out, with a warning. A library's code that reads a resource no library listed defines stops the build, naming the
+library and the resource: list the library that has it.
 
 Compile your own Java sources against the platform's `android.jar` into a jar:
 

@@ -99,14 +99,31 @@ pub(super) struct Contents {
     pub(super) assets: Vec<(String, Vec<u8>)>,
     /// What the manifest gets: the crates' entries and the AARs' manifests.
     pub(super) manifest: Additions,
-    /// The AARs' resources, compiled: overlays of `aapt2 link`, lowest
-    /// priority first ([`library_resources::link_inputs`]).
+    /// The AARs' resources, compiled ([`compile_res`]): overlays of `aapt2
+    /// link`, lowest priority first ([`library_resources::link_inputs`]).
     pub(super) res: Vec<PathBuf>,
+    /// The AARs' resources [`compile_res`] compiles.
+    res_files: Vec<LibraryRes>,
     /// The AARs whose code reads `R` fields: (package, its `R.txt`, the AAR
     /// and who lists it).
     r_classes: Vec<(String, Symbols, String)>,
     /// The jars [`dex`] turns into dex.
     jars: Vec<Checked>,
+}
+
+/// The resources of an AAR, to compile.
+#[derive(Debug)]
+struct LibraryRes {
+    /// The crate that lists the AAR; `None`: the app's own `nsh.json`.
+    owner: Option<String>,
+    /// The AAR and who lists it, for errors.
+    from: String,
+    /// The AAR's contents, which the compiled resources are cached by.
+    sha256: String,
+    /// `res/`: (path under it, contents).
+    files: Vec<(String, Vec<u8>)>,
+    /// Where they are written out to compile.
+    dir: PathBuf,
 }
 
 impl Contents {
@@ -187,7 +204,7 @@ fn checked(libraries: &[Library]) -> anyhow::Result<Vec<Checked>> {
 /// which fails on a class two libraries define; and the AARs' native
 /// libraries, assets and manifests. Without libraries, only the crates'
 /// manifest entries.
-pub(super) fn prepare(sdk: &Sdk, apk: &Apk<'_>, work: &Path) -> anyhow::Result<Contents> {
+pub(super) fn prepare(apk: &Apk<'_>, work: &Path) -> anyhow::Result<Contents> {
     let mut contents = Contents::default();
     let mut files = Vec::new();
     let mut aars = Vec::new();
@@ -203,12 +220,15 @@ pub(super) fn prepare(sdk: &Sdk, apk: &Apk<'_>, work: &Path) -> anyhow::Result<C
     let mut warnings = Vec::new();
     // Each asset's AAR, for errors.
     let mut assets: BTreeMap<String, (usize, String)> = BTreeMap::new();
-    // Each compiled `res/`, with the crate that lists its AAR.
-    let mut res = Vec::new();
     for (i, aar) in choose(aars)?.into_iter().enumerate() {
         if !aar.res.is_empty() {
-            let compiled = compiled_res(sdk, apk, &aar, &work.join("aar").join(i.to_string()))?;
-            res.push((aar.checked.owner.clone(), compiled));
+            contents.res_files.push(LibraryRes {
+                owner: aar.checked.owner.clone(),
+                from: aar.checked.shown.clone(),
+                sha256: aar.checked.sha256.clone(),
+                files: aar.res,
+                dir: work.join("aar").join(i.to_string()),
+            });
         }
         if let Some(symbols) = aar.r_txt {
             contents
@@ -265,7 +285,6 @@ pub(super) fn prepare(sdk: &Sdk, apk: &Apk<'_>, work: &Path) -> anyhow::Result<C
             });
         }
     }
-    contents.res = library_resources::lowest_first(res);
     contents.manifest = library_manifest::additions(apk, &placeholders, manifests)?;
     for name in placeholders.missing.borrow().iter() {
         warnings.push(format!(
@@ -388,6 +407,8 @@ fn read_aar(checked: Checked) -> anyhow::Result<Aar> {
     let mut native: BTreeMap<String, Vec<(String, Vec<u8>)>> = BTreeMap::new();
     let mut assets = Vec::new();
     let mut res = Vec::new();
+    // Each resource path in lower case: the path.
+    let mut res_paths: BTreeMap<String, String> = BTreeMap::new();
     let mut r_txt = None;
     let mut min_compile_sdk = None;
     for i in 0..archive.len() {
@@ -439,6 +460,14 @@ fn read_aar(checked: Checked) -> anyhow::Result<Aar> {
             if path.split('/').any(|part| matches!(part, "" | "." | "..")) {
                 bail!(
                     "{} has `{name}`, a resource path with an empty, `.` or `..` part",
+                    checked.shown
+                );
+            }
+            // On a file system that ignores case, one would overwrite the
+            // other.
+            if let Some(other) = res_paths.insert(path.to_lowercase(), path.to_owned()) {
+                bail!(
+                    "{} has `res/{other}` and `{name}`, whose paths differ only in case",
                     checked.shown
                 );
             }
@@ -645,8 +674,10 @@ fn intermediate_dex(
     android_jar: &Path,
     apk: &Apk<'_>,
 ) -> anyhow::Result<PathBuf> {
+    // `dex-v1`: what this makes; a change to the `d8` command takes a new
+    // version, which leaves the entries of the old one unused.
     let key = format!(
-        "{}\0{}\0{MIN_SDK}\0{}\0{}",
+        "dex-v1\0{}\0{}\0{MIN_SDK}\0{}\0{}",
         jar.sha256,
         build_tools_version(sdk),
         mode(apk.dev),
@@ -672,15 +703,68 @@ fn intermediate_dex(
     })
 }
 
-/// `aar`'s resources compiled by `aapt2 compile --dir` (kept in
-/// `apk.library_cache` by the AAR's contents and the build tools'
-/// version), written out to `dir` first when they are not.
-fn compiled_res(sdk: &Sdk, apk: &Apk<'_>, aar: &Aar, dir: &Path) -> anyhow::Result<PathBuf> {
-    let key = format!("res\0{}\0{}", aar.checked.sha256, build_tools_version(sdk));
-    let from = &aar.checked.shown;
+/// Compiles the AARs' resources into `contents.res`, lowest priority first,
+/// once NSH wrote its own under `own` ([`library_resources::left_out`]
+/// leaves out a library's of the same names, with a warning).
+pub(super) fn compile_res(
+    sdk: &Sdk,
+    apk: &Apk<'_>,
+    contents: &mut Contents,
+    own: &Path,
+) -> anyhow::Result<()> {
+    if contents.res_files.is_empty() {
+        return Ok(());
+    }
+    let own = library_resources::generated(own)?;
+    let mut compiled = Vec::new();
+    for library in &contents.res_files {
+        let left_out = library_resources::left_out(&own, &library.files)
+            .map_err(|e| anyhow::anyhow!("{}: {e}", library.from))?;
+        if !left_out.is_empty() {
+            crate::ui::warn(format!(
+                "{}: {} left out: NSH makes these resources for the package",
+                library.from,
+                left_out
+                    .iter()
+                    .map(|path| format!("`res/{path}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        if left_out.len() == library.files.len() {
+            continue;
+        }
+        let path = compiled_res(sdk, apk, library, &left_out)?;
+        compiled.push((library.owner.clone(), path));
+    }
+    contents.res = library_resources::lowest_first(compiled);
+    Ok(())
+}
+
+/// `library`'s resources but `left_out`, compiled by `aapt2 compile --dir`
+/// (kept in `apk.library_cache` by the AAR's contents, what is left out and
+/// the build tools' version), written out first when they are not.
+fn compiled_res(
+    sdk: &Sdk,
+    apk: &Apk<'_>,
+    library: &LibraryRes,
+    left_out: &[String],
+) -> anyhow::Result<PathBuf> {
+    // `res-v1`: what this makes; a change to the `aapt2 compile` command
+    // takes a new version.
+    let key = format!(
+        "res-v1\0{}\0{}\0{}",
+        library.sha256,
+        build_tools_version(sdk),
+        left_out.join("\0")
+    );
+    let from = &library.from;
     let cache = cached(apk, &key, &format!("the resources of {from}"), |out| {
-        let res = dir.join("res");
-        for (path, bytes) in &aar.res {
+        let res = library.dir.join("res");
+        for (path, bytes) in &library.files {
+            if left_out.contains(path) {
+                continue;
+            }
             let file = res.join(path);
             fs::create_dir_all(file.parent().unwrap_or(&res))?;
             fs::write(&file, bytes)?;
@@ -695,8 +779,7 @@ fn compiled_res(sdk: &Sdk, apk: &Apk<'_>, aar: &Aar, dir: &Path) -> anyhow::Resu
             .context("run the SDK's aapt2")?;
         if !output.status.success() {
             bail!(
-                "{}: aapt2 could not compile the resources of {from}:\n{}{}",
-                aar.checked.listed,
+                "aapt2 could not compile the resources of {from}:\n{}{}",
                 String::from_utf8_lossy(&output.stdout),
                 String::from_utf8_lossy(&output.stderr)
             );
@@ -718,7 +801,7 @@ fn r_classes(
 ) -> anyhow::Result<Checked> {
     let text = fs::read_to_string(symbols)
         .with_context(|| format!("read what aapt2 wrote to {}", symbols.display()))?;
-    let linked = library_resources::parse_symbols(&text)
+    let linked = library_resources::parse_linked(&text)
         .map_err(|e| anyhow::anyhow!("read what aapt2 wrote to {}: {e}", symbols.display()))?;
     let dir = work.join("r");
     let sources = dir.join("src");
@@ -1389,6 +1472,26 @@ mod tests {
         );
         let symbols: Vec<&(String, String)> = aar.r_txt.as_ref().unwrap().keys().collect();
         assert_eq!(symbols, [&("string".into(), "push_title".into())]);
+        // Two that one would overwrite on a file system ignoring case.
+        jar(
+            &path,
+            &[
+                ("AndroidManifest.xml", &manifest),
+                ("res/drawable/logo.png", b"a"),
+                ("res/drawable/Logo.png", b"b"),
+                ("R.txt", b""),
+            ],
+        );
+        let found = read_aar(checked(&[library(&path, CRATE)]).unwrap().remove(0))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(
+            found.contains(
+                "has `res/drawable/logo.png` and `res/drawable/Logo.png`, whose paths differ only in case"
+            ),
+            "{found}"
+        );
         // What the package cannot take, or that is NSH's.
         for (entry, error) in [
             (

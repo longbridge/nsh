@@ -26,8 +26,20 @@ pub(super) struct Symbol {
     pub(super) value: String,
 }
 
-/// Reads an `R.txt`: one `<int|int[]> <type> <name> <value>` a line.
+/// Reads a library's `R.txt`: one `<int|int[]> <type> <name> <value>` a
+/// line, each name a Java name, as its `R` class has them.
 pub(super) fn parse_symbols(text: &str) -> Result<Symbols, String> {
+    parse(text, true)
+}
+
+/// Reads what `aapt2 link --output-text-symbols` wrote: every resource of
+/// the package, the app's own among them, whose names are no Java names
+/// unless a library's code reads them ([`r_java`] checks those).
+pub(super) fn parse_linked(text: &str) -> Result<Symbols, String> {
+    parse(text, false)
+}
+
+fn parse(text: &str, java_names: bool) -> Result<Symbols, String> {
     let mut out = Symbols::new();
     for (number, line) in text.lines().enumerate() {
         let line = line.trim();
@@ -45,7 +57,7 @@ pub(super) fn parse_symbols(text: &str) -> Result<Symbols, String> {
             "int[]" => true,
             _ => return Err(format!("line {}: `{kind}` is no symbol kind", number + 1)),
         };
-        if !identifier(kind_of) || !identifier(name) {
+        if java_names && (!identifier(kind_of) || !identifier(name)) {
             return Err(format!(
                 "line {}: `{kind_of} {name}` is no Java name",
                 number + 1
@@ -70,9 +82,19 @@ pub(super) fn r_java(package: &str, wanted: &Symbols, linked: &Symbols) -> Resul
     if !package.split('.').all(identifier) {
         return Err(format!("`{package}` is no Java package"));
     }
+    if let Some(word) = package.split('.').find(|part| keyword(part)) {
+        return Err(format!(
+            "its package `{package}` has the Java keyword `{word}`, which no `R` class can be in"
+        ));
+    }
     let mut out = format!("package {package};\n\npublic final class R {{\n");
     let mut open: Option<&str> = None;
     for ((kind_of, name), symbol) in wanted {
+        if let Some(word) = [kind_of, name].into_iter().find(|part| keyword(part)) {
+            return Err(format!(
+                "its R.txt has `{kind_of} {name}`: the Java keyword `{word}` names no `R` field"
+            ));
+        }
         let Some(have) = linked.get(&(kind_of.clone(), name.clone())) else {
             return Err(format!(
                 "its code uses `R.{kind_of}.{name}`, which no Android library listed defines"
@@ -119,20 +141,224 @@ fn identifier(text: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
 }
 
+/// A word Java reserves, which no identifier is.
+fn keyword(text: &str) -> bool {
+    const KEYWORDS: &[&str] = &[
+        "abstract",
+        "assert",
+        "boolean",
+        "break",
+        "byte",
+        "case",
+        "catch",
+        "char",
+        "class",
+        "const",
+        "continue",
+        "default",
+        "do",
+        "double",
+        "else",
+        "enum",
+        "extends",
+        "false",
+        "final",
+        "finally",
+        "float",
+        "for",
+        "goto",
+        "if",
+        "implements",
+        "import",
+        "instanceof",
+        "int",
+        "interface",
+        "long",
+        "native",
+        "new",
+        "null",
+        "package",
+        "private",
+        "protected",
+        "public",
+        "return",
+        "short",
+        "static",
+        "strictfp",
+        "super",
+        "switch",
+        "synchronized",
+        "this",
+        "throw",
+        "throws",
+        "transient",
+        "true",
+        "try",
+        "void",
+        "volatile",
+        "while",
+        "_",
+    ];
+    KEYWORDS.contains(&text)
+}
+
 /// The resources `aapt2 link` takes: `own` (the package's) as they are
-/// when no library has any; else every one an overlay (`-R`, of which a
-/// later one wins), `libraries` lowest first and `own` last.
+/// when no library has any. Else the libraries are overlays (`-R`, of which
+/// a later one wins), lowest first, and `own` one more over them all,
+/// besides as it is, where two of its files that define one resource are
+/// still an error. A style an overlay defines again is replaced whole, not
+/// joined item by item, as Android's Gradle plugin merges them.
 pub(super) fn link_inputs(own: &[PathBuf], libraries: &[PathBuf]) -> Vec<OsString> {
+    let mut out: Vec<OsString> = own.iter().map(|p| p.clone().into_os_string()).collect();
     if libraries.is_empty() {
-        return own.iter().map(|p| p.clone().into_os_string()).collect();
+        return out;
     }
-    let mut out = Vec::new();
     for path in libraries.iter().chain(own) {
         out.push("-R".into());
         out.push(path.clone().into_os_string());
     }
     out.push("--auto-add-overlay".into());
+    out.push("--override-styles-instead-of-overlaying".into());
     out
+}
+
+/// A resource a file under `res/` defines.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct Defined {
+    /// `mipmap`, `color`, `style`...
+    pub(super) kind: String,
+    pub(super) name: String,
+    /// The directory's qualifiers: `anydpi-v26`, `night`, empty for none.
+    pub(super) config: String,
+}
+
+/// What the file `path` under `res/` (`<type>[-<qualifiers>]/<file>`)
+/// defines: a values file (`values[-<qualifiers>]/*.xml`) the resources of
+/// its elements, `true`; another one the resource it is, `false`.
+pub(super) fn defined(path: &str, bytes: &[u8]) -> Result<(bool, Vec<Defined>), String> {
+    let Some((dir, file)) = path.split_once('/') else {
+        return Err(format!("`{path}` is in no resource directory"));
+    };
+    let (kind, config) = dir.split_once('-').unwrap_or((dir, ""));
+    if kind != "values" {
+        let name = file.split('.').next().unwrap_or(file);
+        let one = Defined {
+            kind: kind.to_owned(),
+            name: name.to_owned(),
+            config: config.to_owned(),
+        };
+        return Ok((false, vec![one]));
+    }
+    let mut reader = quick_xml::Reader::from_reader(bytes);
+    let mut out = Vec::new();
+    let mut depth = 0usize;
+    let mut buf = Vec::new();
+    loop {
+        let event = reader
+            .read_event_into(&mut buf)
+            .map_err(|e| format!("`{path}` is no XML: {e}"))?;
+        let (element, opens) = match &event {
+            quick_xml::events::Event::Start(e) => (Some(e.clone()), true),
+            quick_xml::events::Event::Empty(e) => (Some(e.clone()), false),
+            quick_xml::events::Event::End(_) => {
+                depth = depth.saturating_sub(1);
+                (None, false)
+            }
+            quick_xml::events::Event::Eof => break,
+            _ => (None, false),
+        };
+        if let Some(element) = element {
+            // `<resources>`'s own children.
+            if depth == 1 {
+                let attribute = |key: &str| {
+                    element
+                        .attributes()
+                        .flatten()
+                        .find(|a| a.key.as_ref() == key)
+                        .and_then(|a| {
+                            a.normalized_value(quick_xml::XmlVersion::Implicit1_0)
+                                .ok()
+                                .map(|v| v.into_owned())
+                        })
+                };
+                let tag = element.local_name().as_ref().to_owned();
+                let kind = match tag.as_str() {
+                    "item" => attribute("type"),
+                    "string-array" | "integer-array" | "array" => Some("array".to_owned()),
+                    "declare-styleable" => Some("styleable".to_owned()),
+                    "public" | "eat-comment" | "skip" => None,
+                    _ => Some(tag),
+                };
+                if let (Some(kind), Some(name)) = (kind, attribute("name")) {
+                    out.push(Defined {
+                        kind,
+                        name,
+                        config: config.to_owned(),
+                    });
+                }
+            }
+            if opens {
+                depth += 1;
+            }
+        }
+        buf.clear();
+    }
+    Ok((true, out))
+}
+
+/// The files of `res` (a library's: path under `res/`, contents) that the
+/// package leaves out: those of resources `own` (what NSH generates for the
+/// package: its icon, launch screen, notification sounds) has, in whichever
+/// configuration, as the device would take the library's for a
+/// configuration NSH has none for. A values file defining one for such a
+/// configuration is an error, which leaving it out would not do alone.
+pub(super) fn left_out(
+    own: &std::collections::BTreeSet<Defined>,
+    res: &[(String, Vec<u8>)],
+) -> Result<Vec<String>, String> {
+    let owns = |d: &Defined| own.iter().any(|o| o.kind == d.kind && o.name == d.name);
+    let mut out = Vec::new();
+    for (path, bytes) in res {
+        let (values, defines) = defined(path, bytes)?;
+        if !values {
+            if defines.iter().any(owns) {
+                out.push(path.clone());
+            }
+            continue;
+        }
+        if let Some(d) = defines.iter().find(|d| owns(d) && !own.contains(d)) {
+            return Err(format!(
+                "its `res/{path}` defines `@{}/{}`, which NSH makes for the package \
+                 (its icon, launch screen or notification sounds)",
+                d.kind, d.name
+            ));
+        }
+    }
+    Ok(out)
+}
+
+/// What the resource files NSH wrote under `dir` define.
+pub(super) fn generated(dir: &Path) -> anyhow::Result<std::collections::BTreeSet<Defined>> {
+    let mut out = std::collections::BTreeSet::new();
+    if !dir.exists() {
+        return Ok(out);
+    }
+    for entry in std::fs::read_dir(dir)? {
+        let sub = entry?.path();
+        let Some(dir_name) = sub.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        for file in std::fs::read_dir(&sub)? {
+            let file = file?.path();
+            let Some(name) = file.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            let (_, defines) = defined(&format!("{dir_name}/{name}"), &std::fs::read(&file)?)
+                .map_err(anyhow::Error::msg)?;
+            out.extend(defines);
+        }
+    }
+    Ok(out)
 }
 
 /// `libraries` (who lists each: `None` for the app, else its crate),
@@ -292,10 +518,94 @@ public final class R {
             .iter()
             .map(|a| a.to_string_lossy().into_owned())
             .collect();
+        // `own` as it is, which finds two of its files defining one
+        // resource, and once more over the libraries; styles replaced whole.
         assert_eq!(
             args.join(" "),
-            "-R zeta.zip -R alpha-second.zip -R alpha-first.zip -R app-second.zip \
-             -R app-first.zip -R icon.flat -R compiled-app.zip --auto-add-overlay"
+            "icon.flat compiled-app.zip -R zeta.zip -R alpha-second.zip -R alpha-first.zip \
+             -R app-second.zip -R app-first.zip -R icon.flat -R compiled-app.zip \
+             --auto-add-overlay --override-styles-instead-of-overlaying"
         );
+    }
+
+    #[test]
+    fn the_link_symbols_need_no_java_names_and_keywords_name_no_field() {
+        // The app's own `drawable/café.png`: no library reads it.
+        let linked =
+            parse_linked("int drawable café 0x7f010000\nint string hi 0x7f020000\n").unwrap();
+        assert_eq!(linked.len(), 2);
+        let wanted = parse_symbols("int string hi 0x7f0b0000").unwrap();
+        assert!(r_java("com.example.lib", &wanted, &linked).is_ok());
+        assert_eq!(
+            r_java("com.example.native", &wanted, &linked).unwrap_err(),
+            "its package `com.example.native` has the Java keyword `native`, which no `R` class can be in"
+        );
+        let wanted = parse_symbols("int string class 0x7f0b0000").unwrap();
+        assert_eq!(
+            r_java("com.example.lib", &wanted, &linked).unwrap_err(),
+            "its R.txt has `string class`: the Java keyword `class` names no `R` field"
+        );
+    }
+
+    #[test]
+    fn a_library_leaves_out_the_resources_nsh_makes_in_any_configuration() {
+        let own: std::collections::BTreeSet<Defined> = [
+            ("mipmap-xxxhdpi/ic_launcher.png", &b"png"[..]),
+            (
+                "values/ic_launcher_background.xml",
+                b"<resources>\n<color name=\"ic_launcher_background\">#FFFFFFFF</color>\n</resources>",
+            ),
+        ]
+        .into_iter()
+        .flat_map(|(path, bytes)| defined(path, bytes).unwrap().1)
+        .collect();
+        let res = |entries: &[(&str, &str)]| -> Vec<(String, Vec<u8>)> {
+            entries
+                .iter()
+                .map(|(p, b)| ((*p).to_owned(), b.as_bytes().to_vec()))
+                .collect()
+        };
+        // The library's icon in other densities and as an adaptive icon.
+        let library = res(&[
+            ("mipmap-hdpi/ic_launcher.png", "png"),
+            ("mipmap-anydpi-v26/ic_launcher.xml", "<adaptive-icon/>"),
+            ("drawable/lib_logo.png", "png"),
+            // The same configuration: NSH's wins anyway.
+            (
+                "values/values.xml",
+                "<resources><color name=\"ic_launcher_background\">#000</color>\
+                 <string name=\"lib\">x</string><item type=\"id\" name=\"lib_id\"/></resources>",
+            ),
+        ]);
+        assert_eq!(
+            left_out(&own, &library).unwrap(),
+            [
+                "mipmap-hdpi/ic_launcher.png",
+                "mipmap-anydpi-v26/ic_launcher.xml"
+            ]
+        );
+        // A values file of another configuration: an error.
+        let night = res(&[(
+            "values-night/values.xml",
+            "<resources><color name=\"ic_launcher_background\">#000</color></resources>",
+        )]);
+        assert_eq!(
+            left_out(&own, &night).unwrap_err(),
+            "its `res/values-night/values.xml` defines `@color/ic_launcher_background`, which NSH \
+             makes for the package (its icon, launch screen or notification sounds)"
+        );
+        let (values, defines) = defined(
+            "values-v31/v.xml",
+            b"<resources><style name=\"A\"><item name=\"x\">1</item></style>\
+              <declare-styleable name=\"S\"><attr name=\"a\"/></declare-styleable>\
+              <string-array name=\"L\"/></resources>",
+        )
+        .unwrap();
+        assert!(values);
+        let defines: Vec<String> = defines
+            .iter()
+            .map(|d| format!("{}/{} {}", d.kind, d.name, d.config))
+            .collect();
+        assert_eq!(defines, ["style/A v31", "styleable/S v31", "array/L v31"]);
     }
 }
