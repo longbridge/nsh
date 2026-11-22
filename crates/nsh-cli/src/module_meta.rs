@@ -433,6 +433,7 @@ impl ModuleMeta {
                         .map(|path| Library {
                             path: dir.join(path),
                             listed: listed.clone(),
+                            owner: Some(name.to_owned()),
                         })
                         .collect();
                     join_libraries(&mut self.android_libraries, libraries);
@@ -1144,6 +1145,7 @@ mod tests {
         config.android.libraries.push(Library {
             path: "/work/scanner/android/libs/glue.jar".into(),
             listed: "nsh.json `android.libraries`".into(),
+            owner: None,
         });
         meta.apply(&mut config, Platform::Android).unwrap();
         let listed: Vec<&str> = config

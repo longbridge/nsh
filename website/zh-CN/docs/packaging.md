@@ -181,7 +181,7 @@ nsh package --target android --run
 
 - Android SDK，通过 `ANDROID_HOME`（或 `ANDROID_SDK_ROOT`，或 `~/Library/Android/sdk`）查找，需要安装 build tools 和
   `platforms;android-35` 包。缺少时 NSH 会告诉你对应的 `sdkmanager` 命令。
-- 一个 JDK，用于首次创建 debug keystore。
+- 一个 JDK，用于首次创建 debug keystore，以及构建应用列出的 [Java 库](#java-代码)。
 - Rust 应用还需要 Android NDK（`sdkmanager "ndk;<version>"`，或 `ANDROID_NDK_HOME`），用它构建应用的 `libnsh.so`。
 
 应用的目标 API 为 35（`targetSdkVersion`，Google Play 的要求），除非 `nsh.json` 指定了其他级别；应用要求 API 26（Android 8）或更高版本。它包含适用于手机 ABI `arm64-v8a` 和 `armeabi-v7a` 的原生代码；
@@ -263,7 +263,7 @@ Rust 通过 JNI 可以调用大多数 Android API，但有些 API 需要应用�
 这些库都是本地文件：NSH 不下载它们，也不解析 Maven 依赖，所以 SDK 依赖的库也要一并列出。
 
 Android 库（`.aar`）带来的不只是类（类按 jar 的方式处理）：它的原生库（`jni/<abi>/*.so`）按包含的 ABI 放入，和 NSH 自己的一样不压缩存放；
-它的 assets 和应用自己的 assets 放在一起；它 manifest 里的权限、功能、`<queries>` 和组件并入应用的 manifest，相对类名（`.PushService`）
+它的 assets 和应用自己的 assets 放在一起；它的资源（`res/`）并入包里的资源，库的代码照它构建时那样通过自己的 `R` 类读取；它 manifest 里的权限、功能、`<queries>` 和组件并入应用的 manifest，相对类名（`.PushService`）
 补上它的包名，`${applicationId}` 换成应用的包名。几个库以同一个名字声明的组件（例如各自往同一个启动 provider 里加初始化器）合成一个。
 它 manifest 里（或 crate 的 `android.application` 里）的其他占位符取 `android.manifestPlaceholders` 的值，只有应用的 `nsh.json`
 能设置：这些值属于应用，例如某个服务的 key。`nsh test --target android` 安装的共用开发宿主不读任何应用的 `nsh.json`，
@@ -280,8 +280,12 @@ Android 库（`.aar`）带来的不只是类（类按 jar 的方式处理）：�
 
 每个库按它 manifest 里的包名只放入一次：两个 crate 带了同一个文件时只放一次；同一个库的两个版本会让构建停止并指出两者；应用在自己的
 `nsh.json` 里列出的版本就是包里用的版本。库需要 NSH 应用没有的东西时，构建也会停止并指出这个库：最低 API 级别高于 26、平台比
-`android.targetSdk` 更新、自己的 `Application` 类、manifest 合并规则（`tools:node="remove"`、`tools:replace`），或包里有某个 ABI、而库带了原生库却缺这个 ABI 的版本。
-Android 资源（`res/`）暂时还不能打包：带资源的 AAR 同样会让构建停止。
+`android.targetSdk` 更新、自己的 `Application` 类、manifest 合并规则（`tools:node="remove"`、`tools:replace`），或包里有某个 ABI、而库带了原生库却缺这个 ABI 的版本，或带了资源却没有 Android 构建一并写出的 `R.txt`。
+
+和所有 Android 应用一样，资源共用一个命名空间。几处为同一配置（密度、夜间模式、语言等）定义了同名资源时，包自己的资源（`android/res/`）
+优先，其次是应用 `nsh.json` 列出的库（先列的优先于后列的），再次是各 crate 的库（crate 名排序靠前的优先）。样式整个取自胜出的一方，
+不逐条合并。NSH 为包生成的资源（图标、启动画面和通知音）在所有配置下都归包自己：库里同名的资源会被去掉，并给出警告。
+库的代码读取的某个资源如果没有任何列出的库定义，构建会停止并指出这个库和资源：把定义它的库也列上。
 
 自己的 Java 源码先针对平台的 `android.jar` 编译，再打成 jar：
 

@@ -18,6 +18,7 @@ use crate::apple::{Color, LaunchScreen, Themed};
 
 mod libraries;
 mod library_manifest;
+mod library_resources;
 
 pub(crate) use libraries::{Library, file_sha256};
 
@@ -224,7 +225,7 @@ pub(crate) struct Apk<'a> {
     pub(crate) camera: bool,
     /// The Java libraries of the app and its crates (`android.libraries`):
     /// jar, dex and AAR files, packaged after the runtime's
-    /// ([`libraries::prepare`]).
+    /// ([`libraries::prepare`], [`libraries::dex`]).
     pub(crate) libraries: &'a [Library],
     /// The values of the placeholders (`${name}`) in the libraries'
     /// manifests and the crates' manifest entries: `nsh.json`
@@ -489,7 +490,7 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
     fs::create_dir_all(&work)?;
 
     // The libraries first: a missing file stops the build early.
-    let java = libraries::prepare(sdk, apk, &work)?;
+    let mut java = libraries::prepare(apk, &work)?;
 
     // Resources: the launcher icon, and the launch screen's theme below.
     let mut flat = Vec::new();
@@ -592,8 +593,17 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
     if format == Format::Aab {
         link.arg("--proto-format");
     }
-    link.args(&flat);
+    // The AARs' resources under the package's own (NSH wrote its own to
+    // `work/res`); the ids it gives them for the `R` classes of the AARs
+    // whose code reads any.
+    libraries::compile_res(sdk, apk, &mut java, &work.join("res"))?;
+    link.args(library_resources::link_inputs(&flat, &java.res));
+    let symbols = java.needs_symbols().then(|| work.join("R.txt"));
+    if let Some(symbols) = &symbols {
+        link.arg("--output-text-symbols").arg(symbols);
+    }
     run(&mut link)?;
+    libraries::dex(sdk, apk, &work, &mut java, symbols.as_deref())?;
 
     if format == Format::Aab {
         let unsigned = work.join("unsigned.aab");
@@ -2058,26 +2068,16 @@ mod tests {
         bytes
     }
 
-    /// An SDK that is not there: a build that needed one of its tools fails.
-    fn no_sdk() -> super::Sdk {
-        super::Sdk {
-            root: "/nsh-no-sdk".into(),
-            build_tools: "/nsh-no-sdk/build-tools/36.1.0".into(),
-        }
-    }
-
     #[test]
     fn the_libraries_dex_and_java_resources_follow_the_runtimes() {
         let (dir, base) = runtime_and_base("libraries");
         let runtime = dir.join("runtime");
-        let java = super::libraries::Contents {
-            dex: vec![dir.join("a.dex"), dir.join("b.dex")],
-            resources: vec![(
-                "META-INF/services/com.example.Greeter".to_owned(),
-                b"com.example.Hello\n".to_vec(),
-            )],
-            ..Default::default()
-        };
+        let mut java = super::libraries::Contents::default();
+        java.dex = vec![dir.join("a.dex"), dir.join("b.dex")];
+        java.resources = vec![(
+            "META-INF/services/com.example.Greeter".to_owned(),
+            b"com.example.Hello\n".to_vec(),
+        )];
         std::fs::write(&java.dex[0], b"dex\n035\0a").unwrap();
         std::fs::write(&java.dex[1], b"dex\n035\0b").unwrap();
         for (layout, prefix, root) in [
@@ -2133,6 +2133,7 @@ mod tests {
             super::Library {
                 path,
                 listed: "nsh.json `android.libraries`".into(),
+                owner: None,
             }
         };
         let libraries = [
@@ -2148,7 +2149,7 @@ mod tests {
             ..apk(false, false)
         };
         // Dex files only: no SDK tool runs, no cache is made.
-        let java = super::libraries::prepare(&no_sdk(), &apk, &dir).unwrap();
+        let java = super::libraries::prepare(&apk, &dir).unwrap();
         assert_eq!(java.dex, [dir.join("b.dex"), dir.join("a.dex")]);
         assert!(java.resources.is_empty());
         assert!(!cache.exists());
@@ -2167,7 +2168,7 @@ mod tests {
             ..apk(false, false)
         };
         // Nothing for d8: no SDK tool runs, no cache is made.
-        let java = super::libraries::prepare(&no_sdk(), &apk, &dir).unwrap();
+        let java = super::libraries::prepare(&apk, &dir).unwrap();
         assert!(java.dex.is_empty() && java.resources.is_empty());
         assert!(java.native.is_empty() && java.assets.is_empty());
         assert!(!cache.exists());
@@ -2250,6 +2251,7 @@ mod tests {
         let libraries = [super::Library {
             path: push.clone(),
             listed: "push: [package.metadata.nsh] `android.libraries`".into(),
+            owner: Some("push".into()),
         }];
         // A crate adds its own initializer to the provider the library
         // declares.
@@ -2273,7 +2275,7 @@ mod tests {
         let placeholders: &'static _ = Box::leak(Box::new(placeholders));
         let apk = with(&[], placeholders);
         // No classes: no SDK tool runs.
-        let java = super::libraries::prepare(&no_sdk(), &apk, &dir).unwrap();
+        let java = super::libraries::prepare(&apk, &dir).unwrap();
         assert!(java.dex.is_empty() && !cache.exists());
         for (layout, lib, assets) in [
             (&super::Layout::APK, "lib/", "assets/"),
@@ -2344,7 +2346,7 @@ mod tests {
             "{error}"
         );
         // A placeholder nsh.json does not set.
-        let error = super::libraries::prepare(&no_sdk(), &with(&[], &NO_PLACEHOLDERS), &dir)
+        let error = super::libraries::prepare(&with(&[], &NO_PLACEHOLDERS), &dir)
             .unwrap_err()
             .to_string();
         assert!(error.contains("the placeholder `${PUSH_KEY}`"), "{error}");
@@ -2358,7 +2360,7 @@ mod tests {
                 b"minCompileSdk=36\n",
             )],
         );
-        let error = super::libraries::prepare(&no_sdk(), &apk, &dir)
+        let error = super::libraries::prepare(&apk, &dir)
             .unwrap_err()
             .to_string();
         assert!(
