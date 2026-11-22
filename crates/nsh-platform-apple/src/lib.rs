@@ -16,6 +16,11 @@ pub mod handoff;
 // apps': hidden from the docs, so it stays out of what NSH keeps compatible.
 #[doc(hidden)]
 pub mod image_source;
+// The path monitor and the cellular data permission behind `network()`,
+// read by the backends' environments, no API of apps': hidden from the
+// docs, so it stays out of what NSH keeps compatible.
+#[doc(hidden)]
+pub mod network;
 pub mod notifications;
 pub mod speech;
 // The logger NSH's release runners and its iOS SDK install, no API of apps':

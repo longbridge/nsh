@@ -231,17 +231,17 @@ platform（`sdkmanager "platforms;android-36"`）：
 
 ### 权限
 
-manifest 会声明 NSH 自身功能需要的权限：`INTERNET`，[通知](./sandbox-and-capabilities.md#notifications)用的 `POST_NOTIFICATIONS`，web view 的 `media`
+manifest 会声明 NSH 自身功能需要的权限：`INTERNET`，[`network()`](./device-and-environment.md#网络) 用的 `ACCESS_NETWORK_STATE`，[通知](./sandbox-and-capabilities.md#notifications)用的 `POST_NOTIFICATIONS`，web view 的 `media`
 用的 `RECORD_AUDIO` 和 `CAMERA`。`android.permissions` 用来添加其他权限，供应用或扩展中直接调用 Android 的代码使用：不带点的名字是
 Android 自己的权限（`android.permission.<NAME>`），带点的名字按原样写入。
 
 ```json
 {
-  "android": { "permissions": ["ACCESS_NETWORK_STATE", "com.example.permission.READ_ORDERS"] }
+  "android": { "permissions": ["ACCESS_WIFI_STATE", "com.example.permission.READ_ORDERS"] }
 }
 ```
 
-`ACCESS_NETWORK_STATE` 这样的普通权限在安装应用时授予。运行时权限（例如 `ACCESS_FINE_LOCATION`）只是被声明：仍需应用自己的代码向用户
+`ACCESS_WIFI_STATE` 这样的普通权限在安装应用时授予。运行时权限（例如 `ACCESS_FINE_LOCATION`）只是被声明：仍需应用自己的代码向用户
 申请。TSX 开发宿主（TSX 应用的 `nsh run --target android`）不声明这些权限；Rust 应用的 `nsh run` 会构建它的包，因此会声明。
 
 ### Java 代码
@@ -642,7 +642,7 @@ Android 上 `android.launchScreen` 用同样的键。打包时给应用生成一
 | 采集媒体的网页（[`capabilities.webview.media`](./sandbox-and-capabilities.md#webview)） | `NSMicrophoneUsageDescription`、`NSCameraUsageDescription`；macOS 上还有 entitlements `com.apple.security.device.audio-input` 和 `com.apple.security.device.camera` | `RECORD_AUDIO`、`CAMERA` |
 | [`Notifications`](../modules/nsh.md#notifications)，应用授予 `notifications` 或没有声明 capabilities 时 | | `POST_NOTIFICATIONS` |
 
-每个 Android 包还声明了 `INTERNET`。权限说明文字是应用第一次请求时系统显示的内容，应用可以在 `infoPlist` 中改用自己的措辞
+每个 Android 包还声明了 `INTERNET` 和 `ACCESS_NETWORK_STATE`。权限说明文字是应用第一次请求时系统显示的内容，应用可以在 `infoPlist` 中改用自己的措辞
 （见[上文](#infoplist-keys-and-entitlements)）。
 
 在 iOS 和 macOS 上，应用自己的 [Rust crate](./rust.md) 通过系统框架访问其他硬件，所需的权限说明文字写在 `infoPlist` 中，macOS

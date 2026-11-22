@@ -553,6 +553,26 @@ function webShareAllowed() {
   return typeof policy?.allowsFeature === "function" ? policy.allowsFeature("web-share") : true;
 }
 
+/** The kinds `network()` names for `navigator.connection.type`'s. */
+const CONNECTION_KINDS = {
+  wifi: "wifi", cellular: "cellular", ethernet: "wired", none: "none",
+  bluetooth: "other", wimax: "other", mixed: "other", other: "other",
+};
+
+/**
+ * How the page reaches the network (`network()`): `none` while the
+ * browser says it is offline (`navigator.onLine`, which is true whenever
+ * the browser has a link, even one without the internet), else the link
+ * `navigator.connection` names (Chromium on Android; desktop browsers name
+ * none: `unknown`). The link is expensive when it is cellular, constrained
+ * when the user asked to save data (`saveData`).
+ */
+function webNetwork(nav = typeof navigator === "undefined" ? undefined : navigator) {
+  const connection = nav?.connection;
+  const kind = nav?.onLine === false ? "none" : CONNECTION_KINDS[connection?.type] ?? "unknown";
+  return { kind, expensive: kind === "cellular", constrained: connection?.saveData === true };
+}
+
 /** The browser's time zone (`Asia/Shanghai`), Intl's default; "" when unknown. */
 function timeZoneName() {
   return new Intl.DateTimeFormat().resolvedOptions().timeZone ?? "";
@@ -2188,6 +2208,11 @@ class Player {
     resolution();
     addEventListener("languagechange", changed);
     addEventListener("resize", changed);
+    // `network()`: the browser going on- and offline, and its link where it
+    // names one (`navigator.connection`, Chromium's).
+    addEventListener("online", changed);
+    addEventListener("offline", changed);
+    navigator.connection?.addEventListener?.("change", changed);
     // `lifecycle()`: hidden (another tab, a minimized window) or without
     // the focus. The time zone (`localeSettings()`) is read again then too: browsers tell no
     // change of the system's zone, which the user makes away from the page.
@@ -2277,6 +2302,7 @@ class Player {
       appleKeyboard: APPLE,
       host: Boolean(this.options.host),
       lifecycle: this.lifecycle(),
+      network: webNetwork(),
       timeZone: timeZoneName(),
       screenColor: typeof window.EyeDropper === "function",
       // `writeClipboard` reports each write's result.

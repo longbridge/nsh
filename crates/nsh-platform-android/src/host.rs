@@ -21,6 +21,7 @@ use nsh_core::{
     EventKind, EventPayload, MountBatch, MountItem, NodeId, PayloadValue, Points, Size,
     canvas::render::RenderFailure,
     geometry::{DevicePixels, point, px, size},
+    platform::{Network, NetworkKind},
 };
 use nsh_engine::{
     App, Assets, Bundle, ColorScheme, Edges, Engine, EngineConfig, EngineControl, Environment,
@@ -1327,7 +1328,9 @@ extern "system" fn Java_com_longbridge_nsh_Native_resize(
 /// `values`: safe area top, right, bottom, left, keyboard height, keyboard
 /// animation duration, font scale, right to left (1), reduce motion (1),
 /// density, screen reader (1), API level, idiom (0 phone, 1 pad, 3 TV),
-/// app state (0 resumed, 1 paused, 2 stopped), 24-hour time (1).
+/// app state (0 resumed, 1 paused, 2 stopped), 24-hour time (1), the
+/// default network's kind (`NetworkState.java`: 0 unknown, 1 none, 2 Wi-Fi,
+/// 3 cellular, 4 wired, 5 other), metered (1), Data Saver on it (1).
 /// `locale`: `Locale.getDefault()`'s language tag; `regional`: the format
 /// locale's, with Android 14's regional preferences as its extension.
 #[unsafe(no_mangle)]
@@ -1344,7 +1347,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_environment(
 ) {
     // SAFETY: Java passes its live handle.
     let host = unsafe { host(handle) };
-    let mut v = [0f32; 15];
+    let mut v = [0f32; 18];
     if env.get_float_array_region(&values, 0, &mut v).is_err() {
         return;
     }
@@ -1384,6 +1387,16 @@ extern "system" fn Java_com_longbridge_nsh_Native_environment(
         2 => Lifecycle::Background,
         _ => Lifecycle::Active,
     };
+    environment.network = Network::new(match v[15] as u8 {
+        1 => NetworkKind::None,
+        2 => NetworkKind::Wifi,
+        3 => NetworkKind::Cellular,
+        4 => NetworkKind::Wired,
+        5 => NetworkKind::Other,
+        _ => NetworkKind::Unknown,
+    })
+    .expensive(v[16] != 0.0)
+    .constrained(v[17] != 0.0);
     if let Ok(tag) = env.get_string(&locale) {
         environment.locale = Locale::parse(&String::from(tag)).unwrap_or_default();
     }

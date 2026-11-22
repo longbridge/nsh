@@ -24,6 +24,7 @@ In Rust the accessors are functions of `nsh_core::prelude`; in TSX they come fro
 | `locale_settings()` | `localeSettings()` (`nsh`) | The user's locale settings: the preferred languages, the time zone, 12- or 24-hour time, the day weeks start on, the units of measurements and of temperatures ([Locale settings](#locale-settings)). |
 | `lifecycle()` | `lifecycle()` (`nsh`) | Whether the app is in use: `active`, `inactive` (visible without the focus) or `background` ([In the background](#in-the-background)). |
 | `wake_count()` | `wakeCount()` (`nsh`) | How many times the system woke from sleep while the app ran ([After a sleep](#after-a-sleep)). |
+| `network()` | `network()` (`nsh`) | How the device reaches the network: online or not, Wi-Fi, cellular or wired, expensive or constrained, and on iOS whether the app may use cellular data ([The network](#the-network)). |
 | `reduce_motion()`, `screen_reader()` | `reduceMotion()`, `screenReaderEnabled()` (`nsh`) | See [Accessibility](./accessibility.md). |
 
 ```rust tabs
@@ -404,6 +405,28 @@ effect(() => {
 ```
 
 Standalone apps and views embedded in AppKit, Win32 and GTK apps count wakes on macOS, Windows and Linux (Linux through systemd's `logind`). On iOS and Android a sleeping device takes the app to the background, which `lifecycle()` reports. In tests, `app.wake()` of `nsh/test` wakes the system ([Testing](./testing-and-trace.md#steps)).
+
+## The network
+
+`network()` (the same in TSX) says how the device reaches the network now: `online` (false only while the system knows there is no route), the `kind` of link the route takes (`"wifi"`, `"cellular"`, `"wired"`, `"other"`, `"none"` offline, `"unknown"` where the platform does not say, which counts as online), whether that link is `expensive` (cellular data, a phone's hotspot, a metered network) or `constrained` (Low Data Mode, Data Saver), and on iOS whether the user lets the app use cellular data (`cellularData`: `"unknown"`, `"restricted"` or `"notRestricted"`). An effect that reads it runs again when the route changes, so a request that failed offline waits for the network and tries again at once, instead of retrying on a timer:
+
+```rust tabs
+effect(move || {
+    if network().online() && sync.failed_offline() {
+        sync.retry();
+    }
+});
+```
+
+```tsx tabs
+effect(() => {
+  if (network().online && sync.failedOffline()) sync.retry();
+});
+```
+
+On iPhones sold in mainland China, the system asks the user whether the app may use wireless data the first time it reaches the network, and the app's requests fail until the user answers. `cellularData` is `"unknown"` until then: a request that failed while it is `"unknown"` waits for it to change and tries again; one that failed while it is `"restricted"` (the user chose Off, or WLAN only on cellular) tells the user, and `AppSettings.open()` of `nsh/mobile` opens the app's page in Settings, where they change it.
+
+iOS and macOS follow the system's path monitor (Network.framework) and, on iOS, CoreTelephony's cellular data state. Android follows the default network (`ConnectivityManager`, with the `ACCESS_NETWORK_STATE` permission that `nsh package` and the Android SDK's AAR declare; without it the kind stays `"unknown"`). The web reads `navigator.onLine` and, where the browser has it, `navigator.connection` (a desktop browser names no link: `"unknown"` while online). Windows, Linux, GPUI and terminals report `"unknown"`. A route is not a promise: a server may still be out of reach on a link that is `online`, so the app keeps handling failed requests. In tests, `app.setNetworkState({ kind: "none" })` of `nsh/test` takes the device offline ([Testing](./testing-and-trace.md#steps)).
 
 ## Safe areas
 

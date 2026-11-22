@@ -534,6 +534,8 @@ pub(crate) fn make_aar(built: &Path, abis: &[String], dev: bool, aar: &Path) -> 
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.longbridge.nsh">
     <uses-sdk android:minSdkVersion="{MIN_SDK}" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- The default network's callback (`network()`). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Text actions (Translate and the like) the selection menu offers,
         as TextView's: Android 11+ hides other apps' activities otherwise. -->
     <queries>

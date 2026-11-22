@@ -3,7 +3,7 @@
 
 use crate::{
     EdgeInsets, Points, Size,
-    platform::{Idiom, Lifecycle, Locale, LocaleSettings, Os},
+    platform::{Idiom, Lifecycle, Locale, LocaleSettings, Network, Os},
 };
 
 /// The environment of a surface, as the platform reports it.
@@ -70,6 +70,9 @@ pub struct Environment {
     /// How many times the system woke from sleep while the surface ran
     /// ([`crate::platform::Environment::wake_count`]).
     pub wake_count: u32,
+    /// How the device reaches the network
+    /// ([`crate::platform::Environment::network`]).
+    pub network: Network,
     /// The platform picks colors from the screen
     /// ([`crate::platform::Environment::screen_color`]).
     pub screen_color: bool,
@@ -164,6 +167,7 @@ impl Default for Environment {
             host: false,
             lifecycle: Lifecycle::Active,
             wake_count: 0,
+            network: Network::default(),
             screen_color: false,
             clipboard_write_result: false,
             canvas_render: false,

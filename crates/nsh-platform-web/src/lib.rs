@@ -460,6 +460,21 @@ pub unsafe extern "C" fn nsh_asset_bytes(ptr: *const u8, len: usize) {
     ASSET.with(|a| *a.borrow_mut() = Some(data));
 }
 
+/// How the page reaches the network (`network()`): the page's
+/// `{ kind, expensive, constrained }`, a kind it does not name unknown. A
+/// browser does not say whether the user lets the app use cellular data.
+fn web_network(value: &serde_json::Value) -> nsh_core::platform::Network {
+    let kind = value
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .and_then(nsh_core::platform::NetworkKind::parse)
+        .unwrap_or_default();
+    let flag = |k: &str| value.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+    nsh_core::platform::Network::new(kind)
+        .expensive(flag("expensive"))
+        .constrained(flag("constrained"))
+}
+
 fn environment(width: f32, height: f32, dark: bool, pixel_ratio: f32) -> Environment {
     Environment {
         window: nsh_core::Size::new(nsh_core::Points(width), nsh_core::Points(height)),
@@ -490,7 +505,9 @@ fn page() -> Environment {
 /// `reduceMotion`, `fontScale`, `pixelRatio`, `safeArea` (`[top, right,
 /// bottom, left]`), `keyboard` (the height the on-screen keyboard
 /// covers), `appleKeyboard` (the browser runs on an Apple platform: its
-/// shortcuts are Apple's), `host` (the page answers `nsh/host` calls:
+/// shortcuts are Apple's), `network` (`{ kind, expensive, constrained }`:
+/// `network()`, from `navigator.onLine` and `navigator.connection`),
+/// `host` (the page answers `nsh/host` calls:
 /// `createPlayer`'s `host`), `screenColor` (the browser has an
 /// `EyeDropper`), `share` (the browser has `navigator.share`) and `shaders` (`false` once a shader view found no
 /// WebGL 2); missing keys keep their value. Called before the app starts
@@ -598,6 +615,9 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
         Some(_) => Lifecycle::Active,
         None => env.lifecycle,
     };
+    if let Some(network) = value.get("network") {
+        env.network = web_network(network);
+    }
     env.screen_color = flag("screenColor").unwrap_or(env.screen_color);
     env.clipboard_write_result = flag("clipboardWriteResult").unwrap_or(env.clipboard_write_result);
     env.share = flag("share").unwrap_or(env.share);
@@ -618,6 +638,7 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
         e.safe_area = env.safe_area;
         e.keyboard_height = env.keyboard_height;
         e.lifecycle = env.lifecycle;
+        e.network = env.network;
         e.screen_color = env.screen_color;
         e.clipboard_write_result = env.clipboard_write_result;
         e.share = env.share;

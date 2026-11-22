@@ -4045,6 +4045,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         host: env.host,
         lifecycle: env.lifecycle,
         wake_count: env.wake_count,
+        network: env.network,
         screen_color: env.screen_color,
         clipboard_write_result: env.clipboard_write_result,
         canvas_render: env.canvas_render,
