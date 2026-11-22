@@ -1917,21 +1917,30 @@ fn resolve_git_dependencies(
         .and_then(|nodes| nodes.iter().find(|node| node["id"] == app["id"]))
         .context("cargo metadata app dependencies")?;
     for dep in dependencies {
-        let name = dep["rename"]
-            .as_str()
-            .or(dep["name"].as_str())
-            .unwrap_or_default()
-            .replace('-', "_");
-        let Some(edge) = node["deps"]
+        // An edge's `name` is how the app's code names the dependency: its
+        // rename, else the package's library name, which need not be the
+        // package's (`nsh-platform-android`'s is `nsh`). The package the
+        // edge resolves to says which dependency it is; a rename tells
+        // apart two dependencies on one package.
+        let package = dep["name"].as_str().unwrap_or_default();
+        let rename = dep["rename"].as_str().map(|r| r.replace('-', "_"));
+        let Some(resolved) = node["deps"]
             .as_array()
-            .and_then(|deps| deps.iter().find(|d| d["name"] == name))
+            .into_iter()
+            .flatten()
+            .filter(|edge| {
+                rename
+                    .as_deref()
+                    .is_none_or(|rename| edge["name"] == rename)
+            })
+            .find_map(|edge| {
+                packages
+                    .iter()
+                    .find(|p| p["id"] == edge["pkg"] && p["name"] == package)
+            })
         else {
             continue;
         };
-        let resolved = packages
-            .iter()
-            .find(|p| p["id"] == edge["pkg"])
-            .context("cargo metadata resolved dependency")?;
         if let Some(source) = resolved["source"]
             .as_str()
             .and_then(|s| s.strip_prefix("git+"))
@@ -5774,6 +5783,57 @@ mod tests {
             dependencies[0]["path"],
             "/cargo/git/checkouts/nsh/locked/crates/nsh-core"
         );
+    }
+
+    /// A Git dependency whose library is named apart from its package
+    /// (`nsh-platform-android`'s is `nsh`) is found by its package, not
+    /// taken for one from crates.io beside the others from Git.
+    #[test]
+    fn git_resolution_finds_dependencies_by_package_not_library_name() {
+        let git = |name: &str| {
+            serde_json::json!({
+                "name": name, "req": "*",
+                "source": "git+https://example.com/nsh.git?branch=main"
+            })
+        };
+        let mut dependencies = vec![git("nsh-core"), git("nsh-platform-android")];
+        let locked = "0123456789abcdef0123456789abcdef01234567";
+        let resolved = |name: &str| {
+            serde_json::json!({
+                "name": name, "id": name,
+                "source": format!("git+https://example.com/nsh.git?branch=main#{locked}"),
+                "manifest_path": format!("/cargo/git/checkouts/nsh/locked/crates/{name}/Cargo.toml")
+            })
+        };
+        let metadata = serde_json::json!({
+            "packages": [
+                {"name": "app-native", "id": "app"},
+                resolved("nsh-core"),
+                resolved("nsh-platform-android"),
+                // Another package whose library is `nsh`.
+                {"name": "other-nsh", "id": "other", "manifest_path": "/elsewhere/Cargo.toml"}
+            ],
+            "resolve": {"nodes": [
+                {"id": "app", "deps": [
+                    {"name": "nsh", "pkg": "other"},
+                    {"name": "nsh_core", "pkg": "nsh-core"},
+                    {"name": "nsh", "pkg": "nsh-platform-android"}
+                ]}
+            ]}
+        });
+        super::resolve_git_dependencies(&mut dependencies, &metadata, "app-native").unwrap();
+        for (dep, name) in dependencies
+            .iter()
+            .zip(["nsh-core", "nsh-platform-android"])
+        {
+            assert_eq!(dep["git"], "https://example.com/nsh.git", "{name}");
+            assert_eq!(dep["rev"], locked, "{name}");
+            assert_eq!(
+                dep["path"],
+                format!("/cargo/git/checkouts/nsh/locked/crates/{name}"),
+                "{name}"
+            );
+        }
     }
 
     #[test]
