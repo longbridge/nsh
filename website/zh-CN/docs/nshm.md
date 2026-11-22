@@ -203,6 +203,74 @@ function closeConversation(threadId: string) {
 
 开启这个 feature 后，打包的应用会带上 `remote-notification` 后台模式。`aps-environment` entitlement 来自应用签名所用的描述文件（[iOS 真机](./packaging.md#ios-真机)）。Rust 代码（比如某个推送服务 SDK 的绑定）使用 `nsh_extra::push`：`on_event` 收到同样的事件，并带 token 的原始字节；`set_foreground_presentation_decider` 在原生侧决定每条通知怎么显示；启动参数从 `nsh_platform_ios::on_application_event` 取得（[应用事件](./ios.md#应用事件)）。
 
+## 应用自己的 Rust：`ext/`
+
+需要自己写 Rust 的 TSX 应用（扫描器、解析器、数据库、原生视图）把 Rust 放在 `ext/`，与 `src/` 并列：`src/` 放应用的 TSX，`ext/` 放它的 Rust，每个目录一个 nshm crate。应用在 `nsh.json` 的 `"dependencies"` 里按路径列出每个 crate，TSX 像导入其他 nshm 一样导入它。`nsh init --template mixed` 创建的就是这种结构。
+
+```text
+my-app/
+├── App.tsx                    入口
+├── src/                       应用的 TSX 模块
+├── ext/                       应用的 Rust
+│   └── my-app-native/
+│       ├── Cargo.toml         nsh-core 和这个 crate 自己的依赖
+│       └── src/lib.rs         #[native_module("my-app-native")]
+├── nsh.json                   "dependencies": { "my-app-native": { "path": "ext/my-app-native" } }
+└── nsh.lock
+```
+
+磁盘占用分析工具 [Disktree](https://github.com/huacnlee/disktree) 就是这样构建的：界面是 `App.tsx` 和 `src/` 里的 TSX，文件系统扫描、SQLite 索引和删除文件是 `ext/disktree-native` 里的 Rust：
+
+```json
+// nsh.json
+{
+  "name": "disktree",
+  "dependencies": {
+    "disktree-native": { "path": "ext/disktree-native" }
+  }
+}
+```
+
+```rust
+// ext/disktree-native/src/lib.rs（节选）
+mod scanner;
+
+use nsh_core::prelude::*;
+
+/// Scans, browses and removes entries using the native disk index.
+#[module]
+pub struct DiskTree;
+
+#[module]
+impl DiskTree {
+    /// Runs a filesystem operation with a JSON payload and returns its JSON result.
+    pub async fn request(route: String, body: String) -> Result<String, String> {
+        // async fn 在 TSX 中返回 Promise；blocking 让文件系统操作不占用 UI 线程。
+        blocking(move || scanner::dispatch(&route, &body)).await
+    }
+}
+
+#[native_module("disktree-native")]
+fn native(registry: &mut Registry) {
+    registry.module::<DiskTree>();
+}
+```
+
+```ts
+// src/runtime.ts
+import { DiskTree } from "disktree-native";
+
+const result = JSON.parse(await DiskTree.request("/scan", JSON.stringify({ path })));
+```
+
+为什么用 `ext/`，而不是把应用根目录做成 crate（`"rust": "."`）：
+
+- **与其他 nshm 一样。** 应用自己的 Rust 和安装的 nshm 用同样的方式列出、锁定和构建；以后把 `ext/` 里的 crate 发布到 crates.io 或单独的仓库，只需改它在 `nsh.json` 里的条目。
+- **每个 crate 独立。** 它有自己的 `Cargo.toml`、依赖和测试（在它的目录里 `cargo test`），并在 `~/.nsh/builds` 里优化构建一次，直到它改变。应用根目录仍是 TSX 项目。
+- **接口小。** TSX 只能通过 `#[native_module]` 注册的内容访问 Rust，声明由 Rust 签名生成（`.nsh/types/<crate>.d.ts`），边界有类型，评审时一目了然。
+
+用 `cargo new --lib ext/<name>` 新增 crate，写上 `#[native_module("<name>")]`，再运行 `nsh add --path ext/<name>`。界面留在 TSX，需要原生性能、平台能力或 crates.io 生态的部分放进 Rust；必须原生的视图也可以由 crate 导出为组件（[Rust nshm](#rust-nshm)）。
+
 ## 编写 nshm
 
 ### Rust nshm

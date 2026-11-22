@@ -231,6 +231,75 @@ a push service's SDK binding, uses `nsh_extra::push`: `on_event` hears the same 
 `set_foreground_presentation_decider` decides each notification's presentation natively, and the launch options come
 from `nsh_platform_ios::on_application_event` ([Application events](./ios.md#application-events)).
 
+## An app's own Rust: `ext/`
+
+A TSX app that needs Rust of its own (a scanner, a parser, a database, a native view) keeps it in `ext/`, beside `src/`: `src/` holds the app's TSX, `ext/` its Rust, one nshm crate per directory. The app lists each in `nsh.json` `"dependencies"` by path and imports it from TSX like any other nshm. `nsh init --template mixed` starts an app this way.
+
+```text
+my-app/
+├── App.tsx                    the entry
+├── src/                       the app's TSX modules
+├── ext/                       the app's Rust
+│   └── my-app-native/
+│       ├── Cargo.toml         nsh-core and the crate's own dependencies
+│       └── src/lib.rs         #[native_module("my-app-native")]
+├── nsh.json                   "dependencies": { "my-app-native": { "path": "ext/my-app-native" } }
+└── nsh.lock
+```
+
+[Disktree](https://github.com/huacnlee/disktree), a disk usage analyzer, is built this way: its UI is TSX in `App.tsx` and `src/`, and its file system scanner, an SQLite index and file removal are Rust in `ext/disktree-native`:
+
+```json
+// nsh.json
+{
+  "name": "disktree",
+  "dependencies": {
+    "disktree-native": { "path": "ext/disktree-native" }
+  }
+}
+```
+
+```rust
+// ext/disktree-native/src/lib.rs (abridged)
+mod scanner;
+
+use nsh_core::prelude::*;
+
+/// Scans, browses and removes entries using the native disk index.
+#[module]
+pub struct DiskTree;
+
+#[module]
+impl DiskTree {
+    /// Runs a filesystem operation with a JSON payload and returns its JSON result.
+    pub async fn request(route: String, body: String) -> Result<String, String> {
+        // An `async fn` returns a Promise to TSX; `blocking` keeps the
+        // file system work off the UI thread.
+        blocking(move || scanner::dispatch(&route, &body)).await
+    }
+}
+
+#[native_module("disktree-native")]
+fn native(registry: &mut Registry) {
+    registry.module::<DiskTree>();
+}
+```
+
+```ts
+// src/runtime.ts
+import { DiskTree } from "disktree-native";
+
+const result = JSON.parse(await DiskTree.request("/scan", JSON.stringify({ path })));
+```
+
+Why `ext/` rather than a crate at the app's root (`"rust": "."`):
+
+- **The same way as every other nshm.** The app's own Rust and the nshm it installs are listed, locked and built the same way, and moving a crate from `ext/` to crates.io or its own repository later only changes its `nsh.json` entry.
+- **Each crate on its own.** It has its own `Cargo.toml`, dependencies and tests (`cargo test` in its directory), and builds once, optimized, in `~/.nsh/builds` until it changes. The app's root stays a TSX project.
+- **Small interfaces.** TSX reaches the Rust only through what `#[native_module]` registers, with declarations generated from the Rust signatures (`.nsh/types/<crate>.d.ts`), so the boundary is typed and easy to see in review.
+
+Add another crate with `cargo new --lib ext/<name>`, give it a `#[native_module("<name>")]`, and run `nsh add --path ext/<name>`. Keep UI in TSX and put in Rust what needs native speed, the platform, or the crates.io ecosystem; a crate exports components too when a view must be native ([A Rust nshm](#a-rust-nshm)).
+
 ## Writing an nshm
 
 ### A Rust nshm
