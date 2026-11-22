@@ -28,6 +28,7 @@ ordered-float.workspace = true
 resvg = { workspace = true, optional = true }
 flate2 = { workspace = true, optional = true }
 url.workspace = true
+percent-encoding.workspace = true
 sha2.workspace = true
 # Picked images' sizes and types (`picker.rs`).
 imagesize.workspace = true

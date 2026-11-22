@@ -409,6 +409,8 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `app.value(selector)` | 输入框的内容，没有匹配时为 `null`。 |
 | `app.spanStyle(selector)` | 返回匹配到的第一个字符的解析样式（无界面测试和各个 `--target` 都支持）：`color`、可选的 `backgroundColor`、`fontSize`、`fontWeight`、`italic`、`underline` 和 `lineThrough`。颜色为 `#rrggbbaa`，字号单位为 pt。 |
 | `app.viewStyle(selector)` | 返回匹配视图由应用设置的样式（无界面测试和各个 `--target` 都支持）：可选的 `backgroundColor`（透明时不返回）、自身的 `opacity`，以及 `effectiveOpacity`（自身透明度乘以所有祖先视图的透明度）。颜色为 `#rrggbbaa`。没有匹配时返回 `null`，匹配不唯一时报错。 |
+| `app.layout(selector)` | 返回匹配视图的布局位置（根坐标，单位 pt）：`x`、`y`、`width`、`height`，`hidden`（自身或祖先为 `visibility: hidden`），以及 `clipped`（被 `overflow: hidden` 的祖先或滚动视图裁掉一部分）。屏幕上没有匹配时返回 `null`，匹配不唯一时报错。 |
+| `app.accessibility(selector?)` | 返回无障碍树：屏幕上带 `role` 或 `accessibilityLabel` 的视图，每个节点含 `role`、`label`、`disabled`、`selected`、`checked`（`"true"`、`"false"` 或 `"mixed"`）、`expanded`、`level`、`description` 和 `children`。传 selector 时从匹配视图开始（屏幕上没有匹配时返回 `null`）；不传时从没有 role 的根节点开始。 |
 | `app.storage()` | 应用存储当前保存的内容。 |
 | `await app.back()` | 像用户那样返回（导航栏的返回按钮、下滑关闭弹出页；弹出页里推入了页面时按它标题栏的返回按钮）：最新的模态窗口里（没有模态窗口时就在整个屏幕上）最内层、布局尺寸不为零（不在尺寸为零的标签页里）的导航栈弹出栈顶页面（`onDismiss`），栈顶页面设置了 `preventBack` 时改为询问它（`onBackRequest`）；没有可返回的栈时，最新的模态窗口请求关闭（`onRequestClose`）。没有可返回的内容时 reject。 |
 | `await app.forward()` | 像浏览器的前进按钮那样在浏览器历史中前进。仅限 `--target web`；其他情况下以 `ERR_NSH_TEST_UNSUPPORTED` reject。 |
@@ -436,6 +438,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `await app.setColorScheme(scheme)` | 像用户那样把系统外观切换为 `"light"` 或 `"dark"`。 |
 | `await app.setLifecycle(state)` | 把应用移到 `"background"`、`"inactive"` 或 `"active"`，就像用户离开应用、切换到另一个应用或窗口、再回来时系统所做的那样（`lifecycle()`）。仅限 headless 运行。 |
 | `await app.wake()` | 让系统从睡眠中唤醒，就像用户打开笔记本的盖子：`wakeCount()` 加一，`lifecycle()` 保持不变。仅限 headless 运行。 |
+| `await app.setNetworkState(state)` | 按 `state` 修改设备连到网络的方式（`{ kind: "none" }` 离线、`{ kind: "cellular", expensive: true }`、`{ cellularData: "restricted" }`；还有 `constrained`），就像路由或用户设置变化时系统报告的那样；没列出的保持不变（`network()`）。headless 应用启动时 kind 为 `"unknown"`，按在线处理。请求仍按路由应答（`open` 的 `network`）。仅限 headless 运行。 |
 | `await app.setLocaleSettings(settings)` | 修改 `settings` 中列出的语言与地区设置（`{ hourCycle: "h23", timeZone: "Asia/Tokyo" }`；还有 `languages`、`firstDayOfWeek`、`measurementSystem` 和 `temperatureUnit`，与 `open` 的 `localeSettings` 相同），就像用户修改系统设置或出行时那样；其余不变（`localeSettings()`）。仅限 headless 运行。 |
 | `await app.screenshot(path?)` | 应用截图（`Uint8Array`）：图形平台返回应用窗口的 PNG，`tui` 返回 UTF-8 Cell JSON；给出 `path` 时同时保存到本机的这个路径（相对当前目录）。只有真实平台会绘制应用：见[在真实平台上运行](#在真实平台上运行)。 |
 | `app.windowIds()` | 应用已打开窗口的 id，按打开顺序；非桌面平台或没有窗口时为空。 |
@@ -462,7 +465,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 |---|---|
 | `ERR_NSH_TEST_NOT_FOUND` | 屏幕上没有视图匹配选择器，或者打开的菜单没有这一项。 |
 | `ERR_NSH_TEST_DISABLED` | 选择器指向的视图已禁用（用户不能滚动的滚动视图、已禁用的菜单项）。 |
-| `ERR_NSH_TEST_COVERED` | `press` 指向的视图上面盖着另一个视图，手指按在那里会按到它（盖住按钮的浮层、滚到底栏下面的行）。 |
+| `ERR_NSH_TEST_COVERED` | `press` 指向的视图上面盖着另一个视图，手指按在那里会按到它（盖住按钮的浮层、滚到底栏下面的行、盖住视图的选区编辑菜单）。 |
 | `ETIMEDOUT` | `waitFor` 或 `waitUntil` 超时，或者应用在 `open` 之后没有渲染任何内容。 |
 | `ERR_NSH_TEST_NO_BACK` | `back()` 没有可以返回的地方。 |
 | `ERR_NSH_TEST_UNSUPPORTED` | 使用 `--target` 时，`open` 收到了目标平台无法满足的选项：iOS 和 Android 上的 `width` 或 `height`、桌面或 web 上的手机 `platform`、iOS 或 Android 上的桌面平台或另一种手机的 `platform`、`host.handlers`、`modules`、`url`。消息会指出是哪一个。不使用 `--target web` 时的 `forward()` 也是如此。 |
@@ -560,7 +563,7 @@ test("calls reach the page's host", async () => {
 数据目录；步骤用平台自己的输入作用在选择器指向的视图上，就像 Playwright 在浏览器里那样：
 
 - 按压是在视图中心点击，长按是按住不放，`type` 先点击输入框再逐键输入，`scroll` 是在滚动视图上的触控板手势，`back` 是用户的操作（macOS 和 Linux 上按 Escape，Windows 和 GPUI 里按鼠标的后退键，web 上是浏览器的后退按钮，iOS 上是把 sheet 往下滑，菜单、弹出框或 `Sheet` 打开时是 VoiceOver 的退出手势，否则点标题栏的返回按钮，Android 上是返回键）；
-- 不在屏幕上的视图会先被滚动到可见，每次一个手势；在触摸屏上，手指像用户那样落在页面本身接收拖动的地方，避开跟随拖动的视图（滑块、绘图区域）；滚动视图已经到头时，贴在它边缘的视图就地操作，不会把滚动视图拖过头（那样会触发下拉刷新或关掉页面 sheet）；滚动视图内容从边缘下面经过的部分（iOS 上透明的标题栏、Tab 栏、键盘）里的视图会先被滚出来，仍留在那下面或被系统绘制的栏盖住的视图，操作会以 `ERR_NSH_TEST_COVERED` 失败，而不是按到那条栏上；
+- 不在屏幕上的视图会先被滚动到可见，每次一个手势；在触摸屏上，手指像用户那样落在页面本身接收拖动的地方，避开跟随拖动的视图（滑块、绘图区域）；滚动视图已经到头时，贴在它边缘的视图就地操作，不会把滚动视图拖过头（那样会触发下拉刷新或关掉页面 sheet）；滚动视图内容从边缘下面经过的部分（iOS 上透明的标题栏、Tab 栏、键盘）里的视图会先被滚出来，仍留在那下面、被系统绘制的栏或选区的编辑菜单盖住的视图，操作会以 `ERR_NSH_TEST_COVERED` 失败，而不是按到盖住它的东西上；
 - 选择器、等待和查询看到的应用模型与 headless 相同，由 host 绘制的内容建立，所以找到的是同样的视图；
 - 对话框是平台自己的：`app.dialogs()` 读取它们，回答对话框（`onDialog`，或测试没有回答时按它的取消按钮）会按下对应的按钮；
 - `app.screenshot(path)` 截取窗口，`app.window(id).screenshot(path)` 截取应用的其他窗口。
@@ -590,7 +593,7 @@ nsh test tests/form.test.tsx --target macos   # 只运行一个文件
 `height`、属于另一类设备的 `platform`（桌面或 web 上的手机平台，iOS 或 Android 上的桌面平台或另一种手机）、`host.handlers`、`modules` 以及 `url` 会以
 `ERR_NSH_TEST_UNSUPPORTED` reject，这样测试要么按写的那样运行，要么说明它需要什么。桌面平台的 `platform`（例如用 `"macos"` 获得桌面的鼠标和按键）
 可以在任何桌面目标和 web 上运行，应用以该目标的平台运行，且总是桌面形态：在浏览器中页面无论宽度都以桌面形态启动；
-不给 `platform`（或给 `"web"`）时，页面像浏览器一样自己判断形态（宽度至少 600 点时为桌面）。带有自己 Rust crate 的应用运行在 NSH 为该平台用这些 crate 构建的开发 host 中；
+不给 `platform`（或给 `"web"`）时，页面像浏览器一样自己判断形态（宽度至少 600 点时为桌面）。带有自己 Rust crate 的应用运行在 NSH 为该平台用这些 crate 构建的开发 host 中（Android 上和 `nsh run` 一样，只为设备的 ABI 构建）；
 Rust 应用的 host 运行它的 root，所以 `open(".")` 在那里启动它，和 headless 时一样。
 
 `nsh test --target tui` 在内存终端中使用终端渲染器运行测试，适合 CI。每次 `open` 使用独立的 surface 和数据目录。

@@ -788,9 +788,10 @@ pub(crate) struct Mounter {
     /// modal presented there waits for even before their transition
     /// starts.
     dismissed_now: Vec<NodeId>,
-    /// Modals taken along by a dismissal under them, then hidden by the
-    /// app: reported closed once that dismissal ends.
-    closing_taken: Vec<NodeId>,
+    /// Modals taken along by a dismissal under them, then hidden or
+    /// deleted by the app: reported closed once that dismissal ends. With
+    /// their controllers, which outlive a deleted modal's slot.
+    closing_taken: Vec<(NodeId, Retained<crate::navigation::ModalController>)>,
     /// Where `asset:/` URIs of videos resolve.
     asset_base: Option<AssetBase>,
     /// Report touches to JS: on the root and on each modal's root.
@@ -1418,11 +1419,23 @@ impl Mounter {
                     // released it, or released its subtree without a
                     // remove) goes away too, as on Android: through its
                     // shader (from the picture held when it was removed) or
-                    // with its own motion.
+                    // with its own motion, and its close is reported once
+                    // it is gone. JS releases a node it removes at once:
+                    // this is how a dialog the app closes goes.
                     if let Native::Modal(modal) = &mut s.native {
                         self.modal_attached.retain(|&(m, _)| m != id);
                         self.waiting_modals.retain(|&m| m != id);
-                        self.closing_taken.retain(|&m| m != id);
+                        // Taken along by a dismissal under it: reported
+                        // closed once that one ends.
+                        match modal.hidden_after_taken() {
+                            Some(true) => self.control.dispatch_event(
+                                id,
+                                EventKind::Dismiss,
+                                EventPayload::None,
+                            ),
+                            Some(false) => self.closing_taken.push((id, modal.controller.clone())),
+                            None => {}
+                        }
                         let changes = modal.changes(false);
                         let at_once = changes && self.dialog_overlay(id, false);
                         // The modals over it go with it: those the app
@@ -1437,8 +1450,12 @@ impl Mounter {
                         if changes {
                             self.dismissed_now.push(id);
                         }
+                        let control = self.control.clone();
                         let shared = self.shared.clone();
-                        modal.dismiss(at_once, move || Self::present_waiting(&shared));
+                        modal.dismiss(at_once, move || {
+                            control.dispatch_event(id, EventKind::Dismiss, EventPayload::None);
+                            Self::present_waiting(&shared);
+                        });
                     }
                     if s.events.contains(EventKind::Touch) {
                         self.touch_listener_changed(false);
@@ -2308,6 +2325,7 @@ impl Mounter {
             (Command::PerfMonitor(true), _) => self.measure(),
             (Command::PerfMonitor(false), _) => self.stop_measuring(),
             (Command::Tokens(tokens), _) => self.alert_tint = crate::system::alert_tint(&tokens),
+            (Command::TextLocale(locale), _) => self.target.set_text_locale(locale),
             (Command::ImageInfo { id, uri }, _) => self.images.info(id, &uri),
             (Command::SetClipboard(text), _) => crate::system::set_clipboard(&text),
             (Command::SetClipboardItem(item), _) => match &item.html {
@@ -2315,6 +2333,9 @@ impl Mounter {
                 None => crate::system::set_clipboard(&item.text),
             },
             (Command::OpenUrl { id, url }, _) => crate::system::open_url(id, &url, &self.control),
+            (Command::OpenAppSettings { id }, _) => {
+                crate::system::open_app_settings(id, &self.control)
+            }
             (Command::ReadClipboard { id, has_only }, _) => {
                 let (has, text, denied) = crate::system::read_clipboard(has_only);
                 let mut fields = vec![
@@ -2582,22 +2603,29 @@ impl Mounter {
     pub(crate) fn keyboard_changed(&mut self, height: f32, motion: KeyboardMotion) {
         self.keyboard = height;
         self.keyboard_motion = motion;
-        self.avoid_keyboard(motion);
         if height <= 0.0 {
             // Hiding: what moved up comes back down with the keyboard.
+            self.avoid_keyboard(motion);
             self.pan_for_keyboard(motion);
         } else {
             // Showing: the app may make room for the keyboard itself, in
-            // the batch it answers with ([`Mounter::keyboard_settled`]).
+            // the batch it answers with ([`Mounter::keyboard_settled`]). A
+            // scroll view it lifts above the keyboard (a panel padded by
+            // the keyboard's height) needs no inset: measured before that
+            // batch, it would keep one as tall as the keyboard and scroll
+            // its content up for nothing.
             self.keyboard_pending = true;
         }
     }
 
     /// The engine handled the keyboard's change: the batch the app
-    /// answered with, if any, is applied. If the focused input is in no
-    /// scroll view and still under the keyboard, its content moves up.
+    /// answered with, if any, is applied. What the keyboard still covers
+    /// of the focused input's scroll view gets a bottom inset; if the
+    /// input is in no scroll view and still under the keyboard, its
+    /// content moves up.
     pub(crate) fn keyboard_settled(&mut self) {
         if std::mem::take(&mut self.keyboard_pending) {
+            self.avoid_keyboard(self.keyboard_motion);
             self.pan_for_keyboard(self.keyboard_motion);
         }
     }
@@ -3303,6 +3331,28 @@ impl Mounter {
         self.file_drag(id, false);
     }
 
+    /// Text (`text`, and `html` when the drag had some) was dropped on view
+    /// `id` at `in_window` (the window's coordinates).
+    pub(crate) fn text_dropped(
+        &mut self,
+        id: NodeId,
+        in_window: CGPoint,
+        text: String,
+        html: String,
+    ) {
+        let Some(slot) = self.slot(id) else { return };
+        if (text.is_empty() && html.is_empty()) || !slot.events.contains(EventKind::TextDrop) {
+            return;
+        }
+        let view = slot.native.view().retain();
+        let (_, page_position) = self.pointer_positions(&view, in_window);
+        self.control.dispatch_event(
+            id,
+            EventKind::TextDrop,
+            EventPayload::TextDrop(Box::new(nsh_core::TextDrop::new(text, html, page_position))),
+        );
+    }
+
     /// `in_window` (the window's coordinates) in `view` and in the root
     /// view it is in.
     fn pointer_positions(
@@ -3830,7 +3880,8 @@ impl Mounter {
                 r
             }
         });
-        let wants_drop = events.contains(EventKind::FileDrop);
+        let wants_drop =
+            events.contains(EventKind::FileDrop) || events.contains(EventKind::TextDrop);
         match (&slot.gestures.file_drop, wants_drop) {
             (None, true) => {
                 if let Some(i) = crate::file_drop::interaction(&target) {
@@ -4329,19 +4380,13 @@ impl Mounter {
                 }
             }
         }
-        // Taken along by a dismissal and hidden since: closed once it ends.
+        // Taken along by a dismissal and hidden (or deleted) since: closed
+        // once it ends.
         let control = self.control.clone();
-        let views = &self.views;
-        self.closing_taken.retain(|&id| {
-            let gone = match views.get(id as usize).and_then(Option::as_ref) {
-                Some(Slot {
-                    native: Native::Modal(modal),
-                    ..
-                }) => modal.gone(),
-                _ => return false,
-            };
+        self.closing_taken.retain(|(id, controller)| {
+            let gone = controller.presentingViewController().is_none();
             if gone {
-                control.dispatch_event(id, EventKind::Dismiss, EventPayload::None);
+                control.dispatch_event(*id, EventKind::Dismiss, EventPayload::None);
             }
             !gone
         });
@@ -4369,12 +4414,18 @@ impl Mounter {
         // Taken along by a dismissal under it (its presentation was
         // UIKit's undoing, not the app's): reported closed when gone.
         for &id in &hidden {
-            match self.modal_mut(id).and_then(ModalHost::hidden_after_taken) {
+            let Some(modal) = self.modal_mut(id) else {
+                continue;
+            };
+            match modal.hidden_after_taken() {
                 Some(true) => {
                     self.control
                         .dispatch_event(id, EventKind::Dismiss, EventPayload::None)
                 }
-                Some(false) => self.closing_taken.push(id),
+                Some(false) => {
+                    let controller = modal.controller.clone();
+                    self.closing_taken.push((id, controller));
+                }
                 None => {}
             }
         }
@@ -4497,8 +4548,9 @@ impl Mounter {
     /// Modal `id` is presented once the transition of `awaited` ends
     /// ([`Mounter::present_waiting`]), and NSH's dismissal presents the
     /// waiting modals when it is done. One NSH just dismissed with no
-    /// transition yet is looked at again on the main queue's next turn: by
-    /// then its transition runs, or it is gone, or UIKit refused it.
+    /// transition yet, or whose dismissal waited for a transition that
+    /// ended, is looked at again on the main queue's next turn: by then its
+    /// transition runs, or it is gone, or UIKit refused it.
     fn wait_for(&mut self, id: NodeId, awaited: &objc2_ui_kit::UIViewController) {
         if !self.waiting_modals.contains(&id) {
             self.waiting_modals.push(id);

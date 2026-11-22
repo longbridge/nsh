@@ -267,6 +267,8 @@ pub struct AccessibilityActionDef {
     pub label: Option<Arc<str>>,
 }
 
+crate::static_reactive!(Vec<AccessibilityActionDef>: Vec<AccessibilityActionDef>);
+
 /// Accessibility of one view.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Accessibility {
@@ -316,6 +318,10 @@ pub struct Accessibility {
     /// [`Accessibility::description`], so a platform without such a
     /// relation reads it all the same.
     pub described_by: Option<crate::NodeId>,
+    /// The list's orientation (ARIA's `aria-orientation`, reported on the
+    /// web): `"horizontal"` or `"vertical"`, for a tab list or toolbar laid
+    /// out along that axis; `None` has none.
+    pub orientation: Option<crate::geometry::Axis>,
 }
 
 impl Accessibility {
@@ -390,9 +396,15 @@ pub enum AccessibilityProp {
     /// `"no-hide-descendants"`.
     #[prop(js = "importantForAccessibility", with = crate::js::host_values::important, reset = AccessibilityProp::Important(None, false), ts = "\"auto\" | \"yes\" | \"no\" | \"no-hide-descendants\"")]
     Important(Option<bool>, bool),
-    /// `accessibilityLiveRegion` (Android): how changes of the view are announced
-    /// to TalkBack.
+    /// `accessibilityLiveRegion`: how changes of the view are announced by the
+    /// screen reader — TalkBack on Android, VoiceOver on macOS, UIA's live
+    /// setting and notification on Windows (`"polite"` when the user is idle,
+    /// `"assertive"` right away).
     #[prop(android = "accessibilityLiveRegion")]
+    #[prop(
+        js = "accessibilityLiveRegion",
+        ts = "\"none\" | \"polite\" | \"assertive\""
+    )]
     LiveRegion(LiveRegion),
     /// `accessibilityActions`: custom actions offered to assistive technologies
     /// (`onAccessibilityAction` reports them).
@@ -420,6 +432,9 @@ pub enum AccessibilityProp {
     /// rendered element with text.
     #[prop(js = "accessibilityDescribedBy", with = crate::js::host_values::accessibility_described_by, reset = AccessibilityProp::DescribedBy(None), ts = "ViewRef | null")]
     DescribedBy(Option<crate::element::ElementTarget>),
+    /// `aria-orientation` (web): set by a component from its own
+    /// orientation (a `Tabs`'s), never from JS.
+    Orientation(Option<crate::geometry::Axis>),
 }
 
 /// Android's press ripple (`android={{ ripple }}`).

@@ -18,7 +18,7 @@ Rust 应用，再看同一个应用的 TSX 写法。前提是已经安装 `nsh` 
 
 ## 创建应用
 
-在终端中，`nsh init` 会询问应用用什么编写：`rust`、`ts` 或 `mixed`（带有自己 Rust crate 的 TSX）。用 `--template`
+在终端中，`nsh init` 会询问应用用什么编写：`rust`、`ts` 或 `mixed`（用 `ext/` 里的 Rust 扩展的 TSX）。用 `--template`
 可以直接选择，不再询问。
 
 ### 用 Rust
@@ -61,7 +61,7 @@ TSX 应用是一个或多个带入口的 `.tsx` 文件：它是 `nsh run` 运行
 已存在的文件会被保留，所以你可以在已经有部分文件的目录里运行它；Rust 应用则在一个新目录中创建。
 
 两者的显示名称都默认是目录名；可以用 `--name "My App"` 指定其他名称。id 会是 `com.example.<name>`：发布前请在 `nsh.json`
-中修改。`nsh init my-app --template mixed` 创建一个同时也是 Rust crate 的 TSX 应用（`Cargo.toml` 和 `src/lib.rs` 与 `App.tsx` 并列），`App.tsx` 导入它的组件、模块和类（[用 Rust 开发](./rust.md)）。
+中修改。`nsh init my-app --template mixed` 创建一个用 Rust 扩展的 TSX 应用：`ext/<name>-native/` 里是它自己的 nshm crate，`App.tsx` 导入它的组件、模块和类（[应用自己的 Rust：ext/](./nshm.md#应用自己的-rustext)）。
 
 ### 根组件
 

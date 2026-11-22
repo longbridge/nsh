@@ -277,6 +277,8 @@ events! {
     AuthSession = "onAuthSession" as "": "A [`Command::AuthSession`] request finished (root only; payload: `id`, then the callback `url`, `action` `\"cancelled\"`, or `error` with its `code`; [`crate::auth_session`]; never reaches a listener).",
     FocusIn = "onFocusIn": "The keyboard focus came into the view: onto it or a view inside it, from outside (it entered `focus-within`; raised by the core). Moving between views inside it is no new coming in.",
     FocusOut = "onFocusOut": "The keyboard focus left the view: from it or a view inside it to one outside, or to none (it left `focus-within`; raised by the core).",
+    TextDrop = "onTextDrop" as "": "Text dragged from another app or view was dropped on the view (payload: [`EventPayload::TextDrop`]): a Rust component's, such as `RichEditor`'s, which inserts it where it was let go (iOS).",
+    OpenAppSettings = "onOpenAppSettings" as "": "A [`Command::OpenAppSettings`] request finished (root only; payload: `id`, `opened`: whether the system opened the app's page in its settings; [`crate::mobile::open_app_settings`]; never reaches a listener).",
 }
 
 /// What an input holds, for the system's autofill and suggestions
@@ -868,6 +870,29 @@ pub struct PasteEvent {
     pub uris: Vec<String>,
 }
 
+/// Text dropped on a view ([`EventKind::TextDrop`]).
+#[derive(Debug, Clone, PartialEq, Default)]
+#[non_exhaustive]
+pub struct TextDrop {
+    /// The plain text, empty when the drag held none.
+    pub text: String,
+    /// The same content as HTML, empty when the drag held none.
+    pub html: String,
+    /// The drop point in the window's coordinates.
+    pub page_position: Point<Points>,
+}
+
+impl TextDrop {
+    /// A drop of `text` (and `html`) at `page_position`.
+    pub fn new(text: String, html: String, page_position: Point<Points>) -> Self {
+        TextDrop {
+            text,
+            html,
+            page_position,
+        }
+    }
+}
+
 impl EventPayload {
     /// An `onPaste` payload of fields (`text`; a reported paste with no
     /// payload is an empty one) made a [`EventPayload::Paste`], as handlers
@@ -1049,6 +1074,34 @@ pub enum PayloadValue {
     Bounds(Bounds<Points>),
 }
 
+/// Files dragged in with their contents ([`EventPayload::FileContents`]).
+#[derive(Debug, Clone, PartialEq, Default)]
+#[non_exhaustive]
+pub struct FileContents {
+    /// The regular files, in the drag's order: read ones with their bytes,
+    /// ones over the limit `tooLarge`; on drag entry, none are read yet.
+    pub files: Vec<crate::picker::PickedFile>,
+    /// The MIME type of each offered item, as the platform reports them.
+    pub mime_types: Vec<String>,
+    /// Where the files were let go, in the window's coordinates.
+    pub page_position: Option<Point<Points>>,
+}
+
+impl FileContents {
+    /// Contents of `files`, typed `mime_types`, let go at `page_position`.
+    pub fn new(
+        files: Vec<crate::picker::PickedFile>,
+        mime_types: Vec<String>,
+        page_position: Option<Point<Points>>,
+    ) -> Self {
+        Self {
+            files,
+            mime_types,
+            page_position,
+        }
+    }
+}
+
 /// Data delivered with an event.
 #[derive(Debug, Clone, PartialEq)]
 pub enum EventPayload {
@@ -1132,8 +1185,16 @@ pub enum EventPayload {
         /// The drop point in the window's coordinates.
         page_position: Point<Points>,
     },
+    /// Files a drag offers or drops where the platform hands over their
+    /// contents rather than local paths (the Web): `files` in the drag's
+    /// order, unread on drag entry (types only), and where they were let
+    /// go. Boxed, as [`Self::Paste`], to keep every payload small.
+    FileContents(Box<FileContents>),
     /// What the user pasted into an input.
     Paste(Box<PasteEvent>),
+    /// Text dropped on a view ([`EventKind::TextDrop`]); boxed, as
+    /// [`Self::Paste`], to keep every payload small.
+    TextDrop(Box<TextDrop>),
     /// The lines of a text block.
     TextLayout(Vec<crate::text::TextLine>),
     /// The files the user picked ([`EventKind::Pick`]), with their bytes.
@@ -2622,6 +2683,12 @@ pub enum Command {
     /// sheets) take their colors from, by the tokens' names (`popover`,
     /// `accent`, `border`, ...).
     Tokens(std::sync::Arc<crate::element::Tokens>),
+    /// The language the app's text shows in ([`crate::i18n`]: its selected
+    /// language, `setLocale`'s or the embedding app's included), on the
+    /// root of an iOS or Android surface, sent when it changes: the words
+    /// the platform speaks for states it has no system words for
+    /// (checked, expanded, invalid...) follow it.
+    TextLocale(crate::platform::Locale),
     /// Change what functions set for the status bar (on the root): the
     /// core merges it under the settings components render and sends
     /// [`Command::StatusBar`] when the result changes.
@@ -2770,6 +2837,17 @@ pub enum Command {
         id: u32,
         /// The URL ([`crate::open_url::check_url`] passed it).
         url: String,
+    },
+    /// Open the app's own page in the system's settings (on the root;
+    /// `nsh/mobile`'s `AppSettings.open`,
+    /// [`crate::mobile::open_app_settings`]): iOS's
+    /// `UIApplication.openSettingsURLString`, Android's application
+    /// details. Report whether the system opened it as
+    /// [`EventKind::OpenAppSettings`] `id`. Sent only on platforms whose
+    /// [`crate::platform::Environment::app_settings`] is set.
+    OpenAppSettings {
+        /// The request.
+        id: u32,
     },
     /// Show the system's share sheet for `sheet` (on the root;
     /// `Share.show`, [`crate::share`]) and report how it ended as

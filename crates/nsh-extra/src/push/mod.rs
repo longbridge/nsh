@@ -6,6 +6,16 @@
 //! generic: it works with any push service, and a push service's SDK
 //! binding builds on its Rust API (the token's raw bytes, every event).
 //!
+//! From JS the module needs the `notifications` capability, as `nsh`'s
+//! `Notifications` does: the device's token, the deliveries (their payloads
+//! are the app's, whichever VM listens), how they show and the delivered
+//! ones `closeThread` removes are process-wide, so every function of
+//! `Push` but `available` checks the calling VM's grant first
+//! ([`granted`]) and fails with `ERR_ACCESS_DENIED` without it. The
+//! system's permission does not stand in for it: registering and
+//! background deliveries ask the user nothing, and what the user allowed
+//! is the whole app's. The Rust API is native code, which is not checked.
+//!
 //! Showing notifications needs the user's permission, which the app asks
 //! with `Notifications.requestPermission` (`nsh`'s); background deliveries
 //! need none. A notification the app removes by its id goes with
@@ -17,17 +27,32 @@
 //! crate's `#[native_module]` entry before the app launches, and once the
 //! app launches it handles the notifications NSH did not show
 //! (`nsh_platform_apple::notifications::set_foreign_handler`, which keeps
-//! the press that launched the app until then). Elsewhere (Android for now,
-//! the desktops, the web, headless runs, Mac Catalyst, an app that embeds
-//! NSH in its own UIKit app and keeps its own delegate) [`available`] is
-//! false and the functions that ask the system fail with [`UNAVAILABLE`].
+//! the press that launched the app until then).
 //!
-//! The packaged app needs the `remote-notification` background mode, which
-//! `nsh` adds from this crate's `[package.metadata.nsh.features.push]`.
+//! Android has no push of its own that every device has: an app receives
+//! remote notifications through a push service's SDK, whose Rust binding
+//! is the module's [`PushProvider`] ([`set_provider`]). The binding
+//! registers the device with its service and reports what the service
+//! delivers through the `provide_*` functions; the module does the rest,
+//! the same as on iOS. Android (`android.rs`) closes a thread's
+//! notifications itself, and hears the presses of the notifications NSH
+//! did not show from `nsh_platform_android::notifications::set_foreign_handler`
+//! (the core keeps the press that started the app until then).
+//!
+//! Elsewhere (the desktops, the web, headless runs, Mac Catalyst, an app
+//! that embeds NSH in its own UIKit app and keeps its own delegate), and on
+//! Android without a binding, [`available`] is false and the functions
+//! that ask the system fail with [`UNAVAILABLE`].
+//!
+//! The packaged iOS app needs the `remote-notification` background mode,
+//! which `nsh` adds from this crate's `[package.metadata.nsh.features.push]`.
 //! The `aps-environment` entitlement comes from the provisioning profile
 //! the app is signed with, which grants it with the environment the profile
-//! is for.
+//! is for. On Android the module needs nothing of the manifest: what a
+//! push service needs (its service, its permissions) comes with its SDK.
 
+#[cfg(target_os = "android")]
+mod android;
 #[cfg(target_os = "ios")]
 mod ios;
 
@@ -48,6 +73,8 @@ use nsh_core::{
 };
 use tokio::sync::{mpsc, oneshot};
 
+#[cfg(target_os = "android")]
+use self::android as platform;
 #[cfg(target_os = "ios")]
 use self::ios as platform;
 
@@ -89,12 +116,23 @@ impl DeviceToken {
         Self { bytes, string }
     }
 
+    /// The token a push service's SDK gave as `token`, a string (on
+    /// Android), for [`provide_token`]. Its bytes are the string's.
+    pub fn from_string(token: impl Into<String>) -> Self {
+        let string = token.into();
+        Self {
+            bytes: string.as_bytes().to_vec(),
+            string,
+        }
+    }
+
     /// The string the push service takes (hexadecimal on iOS).
     pub fn as_str(&self) -> &str {
         &self.string
     }
 
-    /// The bytes the system gave, for an SDK that takes them as they are.
+    /// The bytes the system gave, for an SDK that takes them as they are
+    /// (a string's UTF-8 for a token made [`from_string`](Self::from_string)).
     pub fn as_bytes(&self) -> &[u8] {
         &self.bytes
     }
@@ -114,10 +152,12 @@ pub struct RemoteNotification {
     /// Its request's identifier, which `Notifications.close` removes it
     /// by; `""` for a background delivery, which has none.
     pub id: String,
-    /// The thread it is grouped in, `""` for none.
+    /// The thread it is grouped in, `""` for none: on iOS its thread
+    /// identifier, on Android the group (`Notification.getGroup`) the
+    /// push service's binding posts it in.
     pub thread_id: String,
-    /// What the push service sent (on iOS the `aps` dictionary included)
-    /// as JSON.
+    /// What the push service sent (on iOS the `aps` dictionary included,
+    /// on Android the data its SDK gave) as JSON.
     pub payload: JsonValue,
 }
 
@@ -341,15 +381,15 @@ impl fmt::Display for PushError {
 
 impl std::error::Error for PushError {}
 
-/// What the module reports to Rust code ([`on_event`]), on the main
-/// thread.
+/// What the module reports to Rust code ([`on_event`]), on the thread the
+/// platform or the provider reports from (on iOS the main thread).
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum PushEvent<'a> {
-    /// The system registered the device. Every registration reports its
-    /// token, the same one again included.
+    /// The device was registered. Every registration reports its token,
+    /// the same one again included.
     Token(&'a DeviceToken),
-    /// The system could not register the device.
+    /// The device could not be registered.
     RegistrationFailed(&'a PushError),
     /// A notification arrived while the app is in front; it shows as the
     /// presentation settings say ([`thread_presentation`],
@@ -376,10 +416,11 @@ static OBSERVERS: RwLock<Vec<Observer>> = RwLock::new(Vec::new());
 
 /// Adds an observer of the module's events ([`PushEvent`]), for native
 /// code such as a push service's SDK binding: it hands the token to the
-/// SDK and the notifications to its handlers. The events come on the main
-/// thread, every one, whether JS listens or not. Add it from a
-/// `#[native_module]` entry, before the app launches, to hear the press
-/// that launches it. An SDK that wants the launch options observes
+/// SDK and the notifications to its handlers. The events come on the
+/// thread they are reported from (on iOS the main thread), every one,
+/// whether JS listens or not. Add it from a `#[native_module]` entry,
+/// before the app launches, to hear the press that launches it. An SDK
+/// that wants the launch options on iOS observes
 /// `nsh_platform_ios::on_application_event` (`Launched { options }`).
 pub fn on_event(observer: impl Fn(&PushEvent<'_>) + Send + Sync + 'static) {
     OBSERVERS
@@ -406,30 +447,67 @@ pub type PresentationDecider = Arc<
 /// The Rust decider of foreground presentations.
 static DECIDER: RwLock<Option<PresentationDecider>> = RwLock::new(None);
 
+/// A push service's binding, where the system has no push of its own
+/// (Android): it registers the device with the service and reports what
+/// the service delivers through [`provide_token`],
+/// [`provide_registration_failure`], [`provide_notification`] and
+/// [`provide_background`]. The presses of the notifications it posts
+/// come from the system, as on iOS: they open the app with their payload.
+pub trait PushProvider: Send + Sync {
+    /// Asks the push service for this device's token. The answer comes
+    /// later, from any thread, through [`provide_token`] or
+    /// [`provide_registration_failure`].
+    fn register(&self);
+}
+
+/// The push service's binding ([`set_provider`]).
+static PROVIDER: RwLock<Option<Arc<dyn PushProvider>>> = RwLock::new(None);
+
+/// Makes `provider` the push service the module registers with, from now
+/// on (`None`: none). Where the system has push of its own (iOS), a
+/// provider takes over registering from it. Set it from the binding's
+/// `#[native_module]` entry, before the app launches. Process-wide; a
+/// later one replaces the earlier.
+pub fn set_provider(provider: Option<Arc<dyn PushProvider>>) {
+    *PROVIDER.write().unwrap_or_else(|e| e.into_inner()) = provider;
+}
+
+fn provider() -> Option<Arc<dyn PushProvider>> {
+    PROVIDER.read().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
 /// Whether remote notifications work here: in a standalone iOS app
 /// (`nsh_platform_ios::run_app`), whose application delegate the module
-/// observes. In a task.
+/// observes, and wherever a push service's binding is set
+/// ([`set_provider`]; on Android the only way). In a task.
 pub async fn available() -> bool {
-    hub().launched
+    hub().launched || provider().is_some()
 }
 
 /// Registers the device for remote notifications and resolves with its
-/// token, which the app hands to its push service. The system answers
-/// once it can reach its servers, so offline this waits: code that must
-/// not wait hears the token through [`on_event`] instead. Registering does
-/// not ask the user: showing notifications needs the permission
-/// `Notifications` asks for, background deliveries do not. Register at
-/// every launch, as the token can change ([`PushEvent::Token`] and
-/// `Push.on("token")` report a new one). In a task.
+/// token, which the app hands to its push service: the system's push on
+/// iOS, else the binding's ([`set_provider`]). The answer comes once the
+/// service can be reached, so offline this waits: code that must not wait
+/// hears the token through [`on_event`] instead. Registering does not ask
+/// the user: showing notifications needs the permission `Notifications`
+/// asks for, background deliveries do not. Register at every launch, as
+/// the token can change ([`PushEvent::Token`] and `Push.on("token")` report
+/// a new one). In a task.
 pub async fn register() -> Result<DeviceToken, PushError> {
-    if !hub().launched {
-        return Err(PushError::unavailable(
-            "remote notifications need a standalone iOS app",
-        ));
+    let provider = provider();
+    if provider.is_none() && !hub().launched {
+        return Err(PushError::unavailable(platform::UNAVAILABLE));
     }
     let (answer, token) = oneshot::channel();
     hub().registering.push(answer);
-    if let Err(error) = platform::register().await {
+    let asked = match provider {
+        Some(provider) => {
+            provider.register();
+            Ok(())
+        }
+        None => platform::register().await,
+    };
+    if let Err(error) = asked {
         drop(token);
         hub().registering.retain(|answer| !answer.is_closed());
         return Err(error);
@@ -486,8 +564,10 @@ pub fn set_foreground_presentation_decider(decider: Option<PresentationDecider>)
     *DECIDER.write().unwrap_or_else(|e| e.into_inner()) = decider;
 }
 
-/// Removes the delivered notifications grouped in `thread_id`, but those
-/// `Notifications` showed. In a task.
+/// Removes the delivered notifications grouped in `thread_id` (on Android
+/// a notification group, with or without a push service's binding), but
+/// those `Notifications` showed. On Android, once the app made its first
+/// view. In a task.
 pub async fn close_thread(thread_id: impl Into<String>) -> Result<(), PushError> {
     let thread_id = thread_id.into();
     if thread_id.is_empty() {
@@ -496,49 +576,107 @@ pub async fn close_thread(thread_id: impl Into<String>) -> Result<(), PushError>
     platform::close_thread(thread_id).await
 }
 
-/// The identifiers of the notifications of `delivered` (`(id, thread,
-/// shown by Notifications)`) grouped in `thread_id`, but those
-/// `Notifications` showed. An empty `thread_id` names no thread.
-#[cfg_attr(not(any(target_os = "ios", test)), allow(dead_code))]
-pub(crate) fn in_thread<'a>(
-    delivered: impl IntoIterator<Item = (&'a str, &'a str, bool)>,
+/// The keys of the notifications of `delivered` (`(key, thread, shown by
+/// Notifications)`) grouped in `thread_id`, but those `Notifications`
+/// showed. An empty `thread_id` names no thread.
+#[cfg_attr(
+    not(any(target_os = "ios", target_os = "android", test)),
+    allow(dead_code)
+)]
+pub(crate) fn in_thread<'a, K>(
+    delivered: impl IntoIterator<Item = (K, &'a str, bool)>,
     thread_id: &str,
-) -> Vec<String> {
+) -> Vec<K> {
     if thread_id.is_empty() {
         return Vec::new();
     }
     delivered
         .into_iter()
         .filter(|(_, thread, own)| !own && *thread == thread_id)
-        .map(|(id, _, _)| id.to_owned())
+        .map(|(key, _, _)| key)
         .collect()
 }
 
-/// Where NSH has no remote notifications: Android for now, the desktops,
-/// the web, headless runs.
-#[cfg(not(target_os = "ios"))]
+/// Where NSH has no remote notifications: the desktops, the web, headless
+/// runs.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 mod platform {
     use super::PushError;
 
-    pub(super) fn install() {}
+    pub(super) const UNAVAILABLE: &str = "there are no remote notifications here";
+
+    pub(super) fn install(_: &mut nsh_core::element::Registry) {}
 
     pub(super) async fn register() -> Result<(), PushError> {
-        Err(PushError::unavailable(
-            "there are no remote notifications here",
-        ))
+        Err(PushError::unavailable(UNAVAILABLE))
     }
 
     pub(super) async fn close_thread(_: String) -> Result<(), PushError> {
-        Err(PushError::unavailable(
-            "there are no remote notifications here",
-        ))
+        Err(PushError::unavailable(UNAVAILABLE))
     }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) use super::expire_later;
+
+    /// The web has no thread to wait on (and no push service's binding):
+    /// a delivery that waits is completed when a listener takes it.
+    #[cfg(target_arch = "wasm32")]
+    pub(super) fn expire_later() {}
 }
 
 /// Sets the module up with the platform: called by the crate's
-/// `#[native_module]` entry, on the main thread before the app launches.
-pub(crate) fn install() {
-    platform::install();
+/// `#[native_module]` entry for `registry`, the set it makes. On iOS that
+/// is on the main thread before the app launches; on Android on the thread
+/// that loads the app (the UI thread, another one on a development
+/// reload).
+pub(crate) fn install(registry: &mut Registry) {
+    platform::install(registry);
+}
+
+// --- What a push service's binding reports ----------------------------------
+
+/// The push service registered the device with `token` (the binding's
+/// [`PushProvider::register`], or a token the service changed). Any thread.
+pub fn provide_token(token: DeviceToken) {
+    registered(token);
+}
+
+/// The push service could not register the device, for the reason
+/// `message`. Any thread.
+pub fn provide_registration_failure(message: &str) {
+    registration_failed(message);
+}
+
+/// `notification` arrived while the app is in front: how it shows, which
+/// the binding follows when it posts it (heard by `Push.on("notification")`
+/// and [`on_event`] either way). Any thread.
+pub fn provide_notification(notification: RemoteNotification) -> ForegroundPresentation {
+    arrived(notification)
+}
+
+/// A background delivery of `notification` arrived now. `completion`
+/// hears what the listeners made of it, when the last of them is done,
+/// [`BACKGROUND_WAIT`] after its arrival when none listened, and at the
+/// latest [`BACKGROUND_LIMIT`] after it. Any thread.
+pub fn provide_background(notification: RemoteNotification, completion: BackgroundCompletion) {
+    background(notification, completion);
+    platform::expire_later();
+}
+
+/// Completes the deliveries that wait for a JS listener once their wait
+/// is over, on a thread of its own: the wait counts from the arrival
+/// however often a delivery waits, so one check covers it.
+#[cfg(not(any(target_os = "ios", target_arch = "wasm32")))]
+fn expire_later() {
+    let spawned = std::thread::Builder::new()
+        .name("nsh-push-expiry".into())
+        .spawn(|| {
+            std::thread::sleep(BACKGROUND_WAIT + Duration::from_millis(100));
+            expire_pending();
+        });
+    if let Err(error) = spawned {
+        log::error!("push: cannot wait for a background delivery's listener: {error}");
+    }
 }
 
 // --- What the platform reports ----------------------------------------------
@@ -549,8 +687,7 @@ fn launched() {
     hub().launched = true;
 }
 
-/// The system registered the device with `token`.
-#[cfg_attr(not(any(target_os = "ios", test)), allow(dead_code))]
+/// The device was registered with `token`.
 fn registered(token: DeviceToken) {
     let answers = hub().registered(&token);
     for answer in answers {
@@ -559,8 +696,7 @@ fn registered(token: DeviceToken) {
     emit(&PushEvent::Token(&token));
 }
 
-/// The system could not register the device.
-#[cfg_attr(not(any(target_os = "ios", test)), allow(dead_code))]
+/// The device could not be registered.
 fn registration_failed(message: &str) {
     let error = PushError::failed(format!("the device was not registered: {message}"));
     log::warn!("push: {error}");
@@ -572,7 +708,6 @@ fn registration_failed(message: &str) {
 }
 
 /// `notification` arrived while the app is in front: how it shows.
-#[cfg_attr(not(any(target_os = "ios", test)), allow(dead_code))]
 fn arrived(notification: RemoteNotification) -> ForegroundPresentation {
     emit(&PushEvent::Notification(&notification));
     let presentation = hub().presentation_of(&notification.thread_id);
@@ -589,7 +724,6 @@ fn arrived(notification: RemoteNotification) -> ForegroundPresentation {
 
 /// A background delivery of `notification` that arrived now, which
 /// `completion` reports.
-#[cfg_attr(not(any(target_os = "ios", test)), allow(dead_code))]
 fn background(notification: RemoteNotification, completion: BackgroundCompletion) {
     emit(&PushEvent::Background {
         notification: &notification,
@@ -602,7 +736,10 @@ fn background(notification: RemoteNotification, completion: BackgroundCompletion
 }
 
 /// The user pressed `notification`.
-#[cfg_attr(not(any(target_os = "ios", test)), allow(dead_code))]
+#[cfg_attr(
+    not(any(target_os = "ios", target_os = "android", test)),
+    allow(dead_code)
+)]
 fn pressed(notification: RemoteNotification) {
     emit(&PushEvent::Press(&notification));
     let lost = hub().dispatch(Delivery::Press(notification), now());
@@ -611,7 +748,7 @@ fn pressed(notification: RemoteNotification) {
 
 /// Completes the background deliveries that waited for a JS listener
 /// [`BACKGROUND_WAIT`] since they arrived.
-#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn expire_pending() {
     let expired = hub().expire(now());
     if !expired.is_empty() {
@@ -867,33 +1004,55 @@ impl Hub {
 
 // --- JS ---------------------------------------------------------------------
 
-/// Remote notifications.
+/// Whether the calling VM may use remote notifications: why not when it
+/// may not. The module's state is the process's (the token, the hub every
+/// VM's listeners subscribe to, the presentation settings, the delivered
+/// notifications), so this check in each call is all that keeps a VM
+/// without the grant from it.
+fn granted(sys: &System) -> Result<(), JsError> {
+    if sys.access.allows_notifications() {
+        return Ok(());
+    }
+    Err(JsError::access_denied(
+        "remote notifications are not granted: add `\"notifications\": true` to capabilities in nsh.json",
+        "notifications",
+        "",
+    ))
+}
+
+/// Remote notifications. Needs the `notifications` capability when the app
+/// declares capabilities: without it every function but `available`
+/// rejects or throws `ERR_ACCESS_DENIED` (checked here, in the call).
 #[module]
 pub(crate) struct Push;
 
 #[module]
 impl Push {
     /// Resolves with whether remote notifications work here: `true` in a
-    /// standalone iOS app, `false` on Android (for now), the desktops, the
-    /// web, Mac Catalyst and in an app that embeds NSH in its own iOS app,
-    /// where `register` and `closeThread` reject with
-    /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
+    /// standalone iOS app and wherever the app links a push service's
+    /// binding (on Android the only way), `false` elsewhere (the desktops,
+    /// the web, Mac Catalyst, an app that embeds NSH in its own iOS app),
+    /// where `register` rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
+    /// It tells the platform only, so it needs no capability.
     pub(crate) async fn available() -> bool {
         crate::push::available().await
     }
 
     /// Registers the device for remote notifications and resolves with its
     /// token: the string the push service takes (hexadecimal on iOS),
-    /// which the app hands to it. The system answers once it can reach its
-    /// servers, so offline the promise stays pending: listen to
+    /// which the app hands to it. The service answers once it can be
+    /// reached, so offline the promise stays pending: listen to
     /// `on("token")` first and do not wait on the result. It does not ask
     /// the user: showing notifications needs
     /// `Notifications.requestPermission`, background deliveries do not.
     /// Register at every launch: the token can change, and `on("token")`
-    /// reports a new one. Rejects with the system's reason when it refuses
-    /// (an app signed without the `aps-environment` entitlement), and with
-    /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where `available()` is false.
-    pub(crate) async fn register() -> Result<PushToken, JsError> {
+    /// reports a new one. Rejects with the service's reason when it refuses
+    /// (an iOS app signed without the `aps-environment` entitlement), with
+    /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where `available()` is false,
+    /// and with `ERR_ACCESS_DENIED` when the `notifications` capability is
+    /// not granted.
+    pub(crate) async fn register(sys: System) -> Result<PushToken, JsError> {
+        granted(&sys)?;
         match crate::push::register().await {
             Ok(token) => Ok(PushToken::from(&token)),
             Err(error) => Err(error.to_js()),
@@ -901,17 +1060,23 @@ impl Push {
     }
 
     /// The token of the device's last registration in this run; `null`
-    /// before one.
-    pub(crate) fn token() -> Option<PushToken> {
-        crate::push::token().as_ref().map(PushToken::from)
+    /// before one. Throws `ERR_ACCESS_DENIED` when the `notifications`
+    /// capability is not granted.
+    pub(crate) fn token(sys: System) -> Result<Option<PushToken>, JsError> {
+        granted(&sys)?;
+        Ok(crate::push::token().as_ref().map(PushToken::from))
     }
 
     /// How a notification that arrives while the app is in front shows:
     /// one of the thread `threadId` when given (its own presentation, else
-    /// the app's).
+    /// the app's). Throws `ERR_ACCESS_DENIED` when the `notifications`
+    /// capability is not granted, and a `RangeError` for an empty
+    /// `threadId`.
     pub(crate) fn foreground_presentation(
         thread: Option<ForegroundPresentationThread>,
+        sys: System,
     ) -> Result<ForegroundPresentation, JsError> {
+        granted(&sys)?;
         Ok(match thread {
             Some(thread) => crate::push::thread_presentation(&thread.id()?),
             None => crate::push::foreground_presentation(),
@@ -926,11 +1091,14 @@ impl Push {
     /// to the app's. The system asks as they arrive, without waiting for
     /// JS, so it is set before. Process-wide: it holds for every surface of
     /// the app. They are reported to `on("notification")` either way.
-    /// Throws a `RangeError` for an empty `threadId`.
+    /// Throws `ERR_ACCESS_DENIED` when the `notifications` capability is
+    /// not granted, and a `RangeError` for an empty `threadId`.
     pub(crate) fn set_foreground_presentation(
         presentation: Option<ForegroundPresentationOptions>,
         thread: Option<ForegroundPresentationThread>,
+        sys: System,
     ) -> Result<(), JsError> {
+        granted(&sys)?;
         let presentation = presentation.map(ForegroundPresentationOptions::presentation);
         match thread {
             Some(thread) => crate::push::set_thread_presentation(thread.id()?, presentation),
@@ -940,12 +1108,16 @@ impl Push {
     }
 
     /// Removes the delivered notifications grouped in the thread
-    /// `threadId` (the `thread-id` the push service sent), but those
-    /// `Notifications.show` showed. `Notifications.close(id)` removes one
-    /// by its `id`. Rejects with a `RangeError` for an empty `threadId`,
-    /// and with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where `available()`
-    /// is false.
-    pub(crate) async fn close_thread(thread_id: String) -> Result<(), JsError> {
+    /// `threadId` (on iOS the `thread-id` the push service sent, on Android
+    /// the group they were posted in), but those `Notifications.show`
+    /// showed. `Notifications.close(id)` removes one by its `id`. Rejects
+    /// with `ERR_ACCESS_DENIED` when the `notifications` capability is not
+    /// granted, with a `RangeError` for an empty `threadId`, and with
+    /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where there are no remote
+    /// notifications (Android, which has its notifications' groups, needs
+    /// no push service's binding for this).
+    pub(crate) async fn close_thread(thread_id: String, sys: System) -> Result<(), JsError> {
+        granted(&sys)?;
         if thread_id.is_empty() {
             return Err(JsError::Range(
                 "Push.closeThread: `threadId` must not be empty".into(),
@@ -965,14 +1137,16 @@ impl Push {
     /// included, go to the next listener (at most 16). `background`: a
     /// delivery woke the app or reached it in front (on iOS one with
     /// `content-available`; one that is also visible, arriving in front,
-    /// is a `notification` too). The system waits for the listeners, so
+    /// is a `notification` too; on Android one its push service's binding
+    /// hands over). The system waits for the listeners, so
     /// return a promise for the work and what it gave (`"newData"`,
     /// `"noData"` when nothing is returned, `"failed"`, as a thrown error
     /// is), within 25 seconds of the delivery. One that came while nothing
     /// listened waits for a listener until 5 seconds after it came. These
     /// are the notifications `Notifications` did not show: remote ones and
     /// those other native code scheduled. A payload is untrusted input.
-    /// Returns a function that stops listening.
+    /// Returns a function that stops listening. Throws `ERR_ACCESS_DENIED`
+    /// when the `notifications` capability is not granted.
     #[overload(fn(event: PushTokenEvent, #[args(token)] listener: Callback<PushToken>) -> Stop)]
     #[overload(fn(event: PushNotificationEvent, #[args(notification)] listener: Callback<PushNotification>) -> Stop)]
     #[overload(fn(event: PushPressEvent, #[args(press)] listener: Callback<PushNotification>) -> Stop)]
@@ -982,7 +1156,10 @@ impl Push {
         #[args(payload)] listener: Callback<Payload, BackgroundReturn>,
         sys: System,
         cx: CallCx<'_>,
-    ) -> Stop {
+    ) -> Result<Stop, JsError> {
+        // Before the VM subscribes to the hub: a subscriber gets every
+        // delivery of the kinds it listens to, and takes those that waited.
+        granted(&sys)?;
         let kind = event.kind();
         let listeners = sys.locals.get::<Listeners>();
         let id = listeners.next.get();
@@ -994,7 +1171,7 @@ impl Push {
             hub().listen(subscriber, kind);
         }
         let listeners = Rc::downgrade(&listeners);
-        Stop::new(move || {
+        Ok(Stop::new(move || {
             let Some(listeners) = listeners.upgrade() else {
                 return;
             };
@@ -1005,7 +1182,7 @@ impl Push {
             {
                 hub().unlisten(subscriber, kind);
             }
-        })
+        }))
     }
 }
 

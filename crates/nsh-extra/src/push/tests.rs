@@ -1,5 +1,7 @@
 use std::sync::Mutex;
 
+use nsh_core::access::{Access, Capabilities};
+
 use super::*;
 
 /// The module's state is process-wide: the tests that touch it take turns.
@@ -516,15 +518,90 @@ fn foreground_presentations_are_decided_before_notifications_come() {
 
 #[cfg(not(target_os = "ios"))]
 #[test]
-fn there_are_no_remote_notifications_off_ios() {
+fn there_are_no_remote_notifications_without_a_binding_off_ios() {
     let _turn = turn();
     assert!(!ready(available()));
     let error = ready(register()).unwrap_err();
     assert_eq!(error.code.as_deref(), Some(UNAVAILABLE));
+    // Setting up does nothing, and does not panic (Android sets up the
+    // presses' handler, through JNI).
+    #[cfg(not(target_os = "android"))]
+    install(&mut Registry::new());
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[test]
+fn there_are_no_threads_to_close_off_ios_and_android() {
     let error = ready(close_thread("chat-1")).unwrap_err();
     assert_eq!(error.code.as_deref(), Some(UNAVAILABLE));
-    // Setting up does nothing, and does not panic.
-    install();
+}
+
+/// A push service's binding that answers at once.
+#[cfg(not(target_os = "ios"))]
+struct Binding {
+    answer: Result<&'static str, &'static str>,
+    asked: Mutex<u32>,
+}
+
+#[cfg(not(target_os = "ios"))]
+impl PushProvider for Binding {
+    fn register(&self) {
+        *self.asked.lock().unwrap() += 1;
+        match self.answer {
+            Ok(token) => provide_token(DeviceToken::from_string(token)),
+            Err(reason) => provide_registration_failure(reason),
+        }
+    }
+}
+
+#[cfg(not(target_os = "ios"))]
+#[test]
+fn a_push_service_binding_registers_the_device() {
+    let _turn = turn();
+    let binding = Arc::new(Binding {
+        answer: Ok("service-token"),
+        asked: Mutex::new(0),
+    });
+    set_provider(Some(binding.clone()));
+    assert!(ready(available()));
+    let token = ready(register()).unwrap();
+    assert_eq!(token.as_str(), "service-token");
+    assert_eq!(token.as_bytes(), b"service-token");
+    assert_eq!(super::token(), Some(token));
+    assert_eq!(*binding.asked.lock().unwrap(), 1);
+
+    set_provider(Some(Arc::new(Binding {
+        answer: Err("no network"),
+        asked: Mutex::new(0),
+    })));
+    let error = ready(register()).unwrap_err();
+    assert_eq!(error.code, None);
+    assert_eq!(error.message, "the device was not registered: no network");
+    assert!(hub().registering.is_empty());
+
+    set_provider(None);
+    assert!(!ready(available()));
+}
+
+#[test]
+fn a_binding_reports_what_its_service_delivers() {
+    let _turn = turn();
+    let (id, mut receiver) = {
+        let mut hub = hub();
+        let (id, receiver) = hub.subscribe();
+        hub.listen(id, Kind::Notification);
+        (id, receiver)
+    };
+    let quiet = ForegroundPresentation::SHOWN.banner(false);
+    set_thread_presentation("group-1", Some(quiet));
+    let shown = provide_notification(RemoteNotification::new("n1", "group-1", JsonValue::Null));
+    assert_eq!(shown, quiet);
+    set_thread_presentation("group-1", None);
+    assert_eq!(
+        received(&mut receiver),
+        [(Kind::Notification, "n1".to_owned())]
+    );
+    hub().unsubscribe(id);
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -532,6 +609,124 @@ fn there_are_no_remote_notifications_off_ios() {
 fn an_empty_thread_is_refused() {
     let error = ready(close_thread("")).unwrap_err();
     assert_eq!(error.code, None);
+}
+
+/// The system of a VM whose app declares capabilities without
+/// `notifications`.
+fn undeclared() -> System {
+    let mut sys = System::default();
+    sys.access = Arc::new(Access {
+        declared: Capabilities::default(),
+        granted: None,
+    });
+    sys
+}
+
+/// The system of a VM whose app may do everything, in a host that grants
+/// it nothing.
+fn ungranted() -> System {
+    let mut sys = System::default();
+    sys.access = Arc::new(Access {
+        declared: Capabilities::all(),
+        granted: Some(Capabilities::default()),
+    });
+    sys
+}
+
+/// `error` is the refusal of a VM without the `notifications` capability.
+#[track_caller]
+fn assert_refused(error: &JsError) {
+    assert_eq!(error.code(), Some(codes::ACCESS_DENIED), "{error:?}");
+    let JsError::Fields(fields) = error else {
+        panic!("{error:?} names no permission");
+    };
+    assert_eq!(fields.field("permission"), Some(&"notifications".into()));
+    assert_eq!(fields.field("resource"), Some(&"".into()));
+}
+
+#[test]
+fn the_grant_is_the_declaration_and_the_hosts() {
+    assert!(granted(&System::default()).is_ok());
+    assert_refused(&granted(&undeclared()).unwrap_err());
+    assert_refused(&granted(&ungranted()).unwrap_err());
+}
+
+#[test]
+fn a_vm_without_the_grant_reads_and_sets_nothing() {
+    let _turn = turn();
+    let quiet = ForegroundPresentation::SHOWN.banner(false).sound(false);
+    let thread = || {
+        Some(ForegroundPresentationThread {
+            thread_id: "chat-1".into(),
+        })
+    };
+    let options = || {
+        Some(ForegroundPresentationOptions {
+            banner: Some(false),
+            sound: Some(false),
+            ..Default::default()
+        })
+    };
+    hub().token = Some(DeviceToken::from_bytes([0xab]));
+    for sys in [undeclared, ungranted] {
+        // The token of the app's registration.
+        assert_refused(&Push::token(sys()).unwrap_err());
+        // How the app's notifications show, and changing it.
+        assert_refused(&Push::foreground_presentation(None, sys()).unwrap_err());
+        assert_refused(&Push::foreground_presentation(thread(), sys()).unwrap_err());
+        assert_refused(&Push::set_foreground_presentation(options(), None, sys()).unwrap_err());
+        assert_refused(&Push::set_foreground_presentation(options(), thread(), sys()).unwrap_err());
+        // The grant is asked first: a thread that names none is refused
+        // the same.
+        let empty = Some(ForegroundPresentationThread::default());
+        assert_refused(&Push::set_foreground_presentation(options(), empty, sys()).unwrap_err());
+    }
+    assert_eq!(foreground_presentation(), ForegroundPresentation::SHOWN);
+    assert_eq!(thread_presentation("chat-1"), ForegroundPresentation::SHOWN);
+
+    // With the grant the same calls read and set them.
+    let sys = System::default;
+    assert_eq!(
+        Push::token(sys()).unwrap(),
+        Some(PushToken { token: "ab".into() })
+    );
+    Push::set_foreground_presentation(options(), thread(), sys()).unwrap();
+    assert_eq!(
+        Push::foreground_presentation(thread(), sys()).unwrap(),
+        quiet
+    );
+    assert_eq!(
+        Push::foreground_presentation(None, sys()).unwrap(),
+        ForegroundPresentation::SHOWN
+    );
+    Push::set_foreground_presentation(None, thread(), sys()).unwrap();
+    assert_eq!(thread_presentation("chat-1"), ForegroundPresentation::SHOWN);
+    hub().token = None;
+}
+
+#[cfg(not(target_os = "ios"))]
+#[test]
+fn a_vm_without_the_grant_neither_registers_nor_removes() {
+    let _turn = turn();
+    for sys in [undeclared, ungranted] {
+        // Refused before the platform is asked: not "unavailable", which
+        // is what a VM with the grant hears here.
+        assert_refused(&ready(Push::register(sys())).unwrap_err());
+        assert!(hub().registering.is_empty());
+        assert_refused(&ready(Push::close_thread("chat-1".into(), sys())).unwrap_err());
+        assert_refused(&ready(Push::close_thread(String::new(), sys())).unwrap_err());
+    }
+    let sys = System::default;
+    let error = ready(Push::register(sys())).unwrap_err();
+    assert_eq!(error.code(), Some(UNAVAILABLE));
+    let error = ready(Push::close_thread("chat-1".into(), sys())).unwrap_err();
+    assert_eq!(error.code(), Some(UNAVAILABLE));
+    assert!(matches!(
+        ready(Push::close_thread(String::new(), sys())),
+        Err(JsError::Range(_))
+    ));
+    // What the platform is told needs no capability.
+    assert!(!ready(Push::available()));
 }
 
 #[test]

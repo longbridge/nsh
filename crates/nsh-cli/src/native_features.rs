@@ -99,7 +99,15 @@ pub(crate) fn choose(
     }
     for (feature, module) in BY_MODULE {
         let imported = uses.is_none_or(|u| u.computed_import || u.imports.contains_key(*module));
-        out.push(if imported {
+        // The global `WebSocket` is the `websocket` module's native side.
+        let global = *feature == "websocket" && uses.is_some_and(|u| u.global_websocket);
+        out.push(if global {
+            Choice {
+                feature,
+                keep: true,
+                why: "the app may use the global `WebSocket`".into(),
+            }
+        } else if imported {
             Choice {
                 feature,
                 keep: true,
@@ -195,6 +203,15 @@ mod tests {
             false,
         );
         assert!(k.iter().all(|c| c.keep), "{k:?}");
+    }
+
+    #[test]
+    fn the_global_websocket_keeps_websocket() {
+        let uses = bundle("const ws = new WebSocket('wss://example.com'); ws;");
+        assert!(uses.global_websocket);
+        assert!(kept(&choose(Some(&uses), &[], false)).contains(&"websocket"));
+        let uses = bundle("import { Button } from 'nsh/base'; Button;");
+        assert!(!kept(&choose(Some(&uses), &[], false)).contains(&"websocket"));
     }
 
     #[test]

@@ -367,12 +367,12 @@ pub(crate) fn build(entry: &Path, out: &Path, release: bool, split: bool) -> any
         let path = out.join(name);
         fs::write(&path, bytes).with_context(|| format!("write {}", path.display()))?;
     }
-    // The app's id, which names where it keeps its data, and the schemes
-    // it claims (`Bundle::read`).
+    // The app's id, which names where it keeps its data, and the links it
+    // claims (`Bundle::read`).
     let app = out.join("app.json");
     let id = crate::package::app_id(entry)?;
     let config = crate::package::read_config(&dunce::canonicalize(entry)?)?;
-    let schemes = config.url_schemes();
+    let links = config.app_links();
     fs::write(
         &app,
         crate::package::app_json(
@@ -385,7 +385,7 @@ pub(crate) fn build(entry: &Path, out: &Path, release: bool, split: bool) -> any
                 }
                 info
             },
-            &schemes,
+            &links,
             config.window.as_ref(),
         ),
     )

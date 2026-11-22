@@ -21,7 +21,7 @@ It assumes `nsh` is installed and on your `PATH` ([Installation](./installation.
 
 ## Create an app
 
-On a terminal, `nsh init` asks what the app is written in: `rust`, `ts` or `mixed` (TSX with a Rust crate of its own).
+On a terminal, `nsh init` asks what the app is written in: `rust`, `ts` or `mixed` (TSX extended with Rust in `ext/`).
 `--template` chooses without asking.
 
 ### In Rust
@@ -68,8 +68,8 @@ a new directory.
 
 For both, the display name defaults to the directory's name; pass `--name "My App"` to choose another. The id becomes
 `com.example.<name>`: change it in `nsh.json` before you ship. `nsh init my-app --template mixed` creates a TSX app
-that is also a Rust crate (`Cargo.toml` and `src/lib.rs` beside `App.tsx`), whose component, module and class
-`App.tsx` imports ([Building with Rust](./rust.md)).
+extended with Rust: an nshm crate of its own in `ext/<name>-native/`, whose component, module and class `App.tsx`
+imports ([An app's own Rust: ext/](./nshm.md#an-apps-own-rust-ext)).
 
 ### The root component
 

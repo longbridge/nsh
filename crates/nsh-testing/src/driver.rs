@@ -17,7 +17,7 @@ use serde_json::Value;
 use crate::{
     DragOptions,
     headless::{DialogAnswer, Headless},
-    module::LocaleSettingsOptions,
+    module::{LocaleSettingsOptions, NetworkStateOptions},
 };
 
 /// An app a test opened, driven by steps and read by queries.
@@ -99,6 +99,11 @@ pub(crate) trait Driver: Send {
     /// The system wakes from sleep (`wakeCount()`).
     fn wake(&mut self) -> Result<(), String> {
         Err(headless_only("wake"))
+    }
+    /// The device's network changes as `state` names (`network()`).
+    fn set_network_state(&mut self, state: NetworkStateOptions) -> Result<(), String> {
+        let _ = state;
+        Err(headless_only("setNetworkState"))
     }
     /// The OS asks the app to show itself (`Application.on("reopen")`).
     fn reopen(&mut self) -> Result<(), String> {
@@ -188,6 +193,11 @@ pub(crate) trait Driver: Send {
     fn value(&mut self, selector: &str) -> Result<Option<String>, String>;
     fn span_style(&mut self, selector: &str) -> Result<ResolvedTextStyle, String>;
     fn view_style(&mut self, selector: &str) -> Result<Option<crate::screen::ViewStyle>, String>;
+    fn layout(&mut self, selector: &str) -> Result<Option<nsh_dev::protocol::ViewLayout>, String>;
+    fn accessibility(
+        &mut self,
+        selector: Option<&str>,
+    ) -> Result<Option<nsh_dev::protocol::AccessibilityNode>, String>;
     fn dialogs(&mut self) -> Result<Vec<Dialog>, String>;
     /// The open context menu's actions, `None` when none is open.
     fn menu(&mut self) -> Result<Option<Vec<crate::menu::Entry>>, String>;
@@ -333,6 +343,10 @@ impl Driver for Headless {
     fn wake(&mut self) -> Result<(), String> {
         self.set_environment("wake()", |e| e.wake_count = e.wake_count.wrapping_add(1))
     }
+    fn set_network_state(&mut self, state: NetworkStateOptions) -> Result<(), String> {
+        let what = format!("setNetworkState({})", state.label());
+        self.set_environment(&what, |e| state.apply(&mut e.network))
+    }
     fn reopen(&mut self) -> Result<(), String> {
         Headless::reopen(self)
     }
@@ -434,6 +448,23 @@ impl Driver for Headless {
     fn view_style(&mut self, selector: &str) -> Result<Option<crate::screen::ViewStyle>, String> {
         self.catch_up();
         self.screen().view_style(selector)
+    }
+    fn layout(&mut self, selector: &str) -> Result<Option<nsh_dev::protocol::ViewLayout>, String> {
+        self.catch_up();
+        Ok(self
+            .screen()
+            .layout(selector)?
+            .map(crate::screen::protocol_layout))
+    }
+    fn accessibility(
+        &mut self,
+        selector: Option<&str>,
+    ) -> Result<Option<nsh_dev::protocol::AccessibilityNode>, String> {
+        self.catch_up();
+        Ok(self
+            .screen()
+            .accessibility(selector)?
+            .map(crate::screen::protocol_accessibility))
     }
     fn dialogs(&mut self) -> Result<Vec<Dialog>, String> {
         self.catch_up();
@@ -880,6 +911,19 @@ impl Driver for Remote {
             opacity: s.opacity,
             effective_opacity: s.effective_opacity,
         }))
+    }
+    fn layout(&mut self, selector: &str) -> Result<Option<nsh_dev::protocol::ViewLayout>, String> {
+        self.query(TestStep::Layout {
+            selector: selector.into(),
+        })
+    }
+    fn accessibility(
+        &mut self,
+        selector: Option<&str>,
+    ) -> Result<Option<nsh_dev::protocol::AccessibilityNode>, String> {
+        self.query(TestStep::Accessibility {
+            selector: selector.map(Into::into),
+        })
     }
     fn span_style(&mut self, selector: &str) -> Result<ResolvedTextStyle, String> {
         let span: nsh_dev::protocol::SpanStyle = self.query(TestStep::SpanStyle {

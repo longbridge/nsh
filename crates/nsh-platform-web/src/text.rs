@@ -476,6 +476,26 @@ struct LineBox {
     above: f32,
 }
 
+/// The `font-weight` range a face covers: its `wght` axis for a variable
+/// font, else its one OS/2 weight. A single-value `FontFace` descriptor pins
+/// a variable font's `wght` axis, so every requested weight would draw at the
+/// default instance.
+fn weight_range(face: &ttf_parser::Face) -> (u16, u16) {
+    let weight = face.weight().to_number();
+    face.variation_axes()
+        .into_iter()
+        .find(|a| a.tag == ttf_parser::Tag::from_bytes(b"wght"))
+        .map(|a| {
+            let (lo, hi) = (
+                a.min_value.round().clamp(1.0, 1000.0),
+                a.max_value.round().clamp(1.0, 1000.0),
+            );
+            (lo as u16, hi as u16)
+        })
+        .filter(|(lo, hi)| lo < hi)
+        .unwrap_or((weight, weight))
+}
+
 #[cfg(test)]
 impl Prepared {
     /// Whether it was prepared as an edit of a recent text ([`Base`]).
@@ -1621,7 +1641,8 @@ impl TextEngine for WebTextEngine {
         let family = name(ttf_parser::name_id::TYPOGRAPHIC_FAMILY)
             .or_else(|| name(ttf_parser::name_id::FAMILY))
             .ok_or("the font has no family name")?;
-        ffi::register_font(&family, data, face.weight().to_number(), face.is_italic());
+        let (min, max) = weight_range(&face);
+        ffi::register_font(&family, data, min, max, face.is_italic());
         // Widths measured with a fallback font are stale now (and again
         // when the face finishes loading: `nsh_fonts_loaded`).
         self.clear_caches();

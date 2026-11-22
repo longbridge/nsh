@@ -10280,6 +10280,41 @@ fn pressed_current_and_level_decode_from_js() {
     }
 }
 
+/// `accessibilityLiveRegion` from its JS shape, on every platform now that
+/// it is one prop (Android's bag took it before).
+#[test]
+fn a_live_region_decodes_from_js() {
+    use crate::{
+        AccessibilityProp, LiveRegion,
+        js::host::{HostCx, HostProps},
+    };
+    let decode = |v: serde_json::Value| {
+        AccessibilityProp::decode("accessibilityLiveRegion", &J(v), &mut HostCx::default())
+            .expect("accessibilityLiveRegion")
+            .expect("a value")
+    };
+    assert_eq!(
+        decode(serde_json::json!("polite")),
+        AccessibilityProp::LiveRegion(LiveRegion::Polite)
+    );
+    assert_eq!(
+        decode(serde_json::json!("assertive")),
+        AccessibilityProp::LiveRegion(LiveRegion::Assertive)
+    );
+    assert_eq!(
+        decode(serde_json::json!("none")),
+        AccessibilityProp::LiveRegion(LiveRegion::None)
+    );
+    assert_eq!(
+        decode(serde_json::Value::Null),
+        AccessibilityProp::LiveRegion(LiveRegion::None)
+    );
+    assert_eq!(
+        decode(serde_json::json!("yes")),
+        AccessibilityProp::LiveRegion(LiveRegion::None)
+    );
+}
+
 /// `accessibilityDescription` from JS, and what platforms with one place
 /// for everything read after the name get from it.
 #[test]
@@ -11394,6 +11429,50 @@ fn a_focus_reported_untracked_survives_a_tracking_change() {
 }
 
 #[test]
+fn a_view_goes_below_its_next_sibling_in_the_parent_not_an_input_accessory() {
+    let mut c = core();
+    let view = |id| Op::Create { id, tag: Tag::View };
+    let insert = |child, before| Op::Insert {
+        parent: ROOT_ID,
+        child,
+        before,
+    };
+    apply(
+        &mut c,
+        vec![
+            view(2),
+            Op::Create {
+                id: 3,
+                tag: Tag::InputAccessory,
+            },
+            Op::SetProp {
+                id: 3,
+                prop: Prop::NativeId(Some("bar".into())),
+            },
+            view(4),
+            insert(2, None),
+            insert(3, None),
+            insert(4, None),
+        ],
+    );
+    c.commit().unwrap();
+    // Between the first view and the accessory: the accessory is over the
+    // keyboard, not among the root's subviews, so the view goes below the
+    // one after it.
+    apply(&mut c, vec![view(5), insert(5, Some(3))]);
+    let batch = c.commit().unwrap();
+    let inserts: Vec<_> = batch
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            MountItem::Insert { child, before, .. } => Some((*child, *before)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(inserts, vec![(5, Some(4))]);
+}
+
+#[test]
 fn input_accessories_are_found_by_native_id() {
     let mut c = core();
     let accessory = |batch: &MountBatch| {
@@ -12283,11 +12362,12 @@ fn nest(
     Ok(())
 }
 
-/// Runs `f` on a thread with the engine thread's stack, which the depth
-/// quota is sized for (a test thread's is smaller).
+/// Runs `f` on a thread with room for the depth quota's recursion, sized
+/// past the engine's own (`a test thread's is smaller`, and a Windows
+/// debug build drops a deep tree with deeper frames than a release one).
 fn on_engine_stack(f: impl FnOnce() + Send + 'static) {
     std::thread::Builder::new()
-        .stack_size(8 << 20)
+        .stack_size(64 << 20)
         .spawn(f)
         .unwrap()
         .join()
@@ -19266,6 +19346,123 @@ mod components {
         assert!(c.commit().is_none_or(|b| texts(&b).is_empty()));
     }
 
+    /// Asks whether the app's settings page opens here and opens it when
+    /// its button is pressed; shows both answers.
+    #[component]
+    fn SettingsOpener() -> impl IntoElement {
+        use crate::mobile::{app_settings_available, open_app_settings};
+        let shown = signal(String::new());
+        view()
+            .child(text(move || format!("settings{}", shown.get())))
+            .child(view().h(px(10.0)).on_press(move |_: &()| {
+                let available = app_settings_available();
+                let opened = open_app_settings();
+                spawn(async move {
+                    let available = available.await;
+                    let opened = match opened.await {
+                        Ok(opened) => opened.to_string(),
+                        Err(error) => format!("{error:?}"),
+                    };
+                    shown.set(format!(" {available} {opened}"));
+                });
+            }))
+    }
+
+    /// Mounts [`SettingsOpener`] in `environment` with `capabilities`
+    /// declared (`None`: none), presses its button and returns the requests
+    /// that reached the platform.
+    fn press_settings_opener(
+        environment: crate::element::Environment,
+        capabilities: Option<serde_json::Value>,
+    ) -> (Core<FakeEngine>, Vec<u32>) {
+        let mut c = core();
+        if let Some(capabilities) = capabilities {
+            c.set_access(std::sync::Arc::new(crate::access::Access {
+                declared: crate::access::Capabilities::from_json(&capabilities).unwrap(),
+                granted: None,
+            }));
+        }
+        c.set_environment(environment);
+        c.mount_root(&crate::element::Root::new::<SettingsOpener>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button");
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        let items = c.commit().map(|b| b.items).unwrap_or_default();
+        let requests = items
+            .into_iter()
+            .filter_map(|i| match i {
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::OpenAppSettings { id },
+                } => Some(id),
+                _ => None,
+            })
+            .collect();
+        (c, requests)
+    }
+
+    #[test]
+    fn app_settings_fail_at_once_where_the_platform_has_none() {
+        let (mut c, requests) = press_settings_opener(Default::default(), None);
+        assert!(requests.is_empty(), "nothing reaches the platform");
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("settings ")));
+        assert_eq!(shown.last().unwrap(), "settings false Unavailable");
+    }
+
+    #[test]
+    fn app_settings_open_on_the_platform_and_answer_what_it_reports() {
+        let (mut c, requests) = press_settings_opener(
+            crate::element::Environment {
+                app_settings: true,
+                ..Default::default()
+            },
+            Some(serde_json::json!({ "application": true })),
+        );
+        assert_eq!(requests.len(), 1, "one request reaches the platform");
+        // An answer of another request settles nothing.
+        let answer = |id: u32, opened: bool| {
+            EventPayload::Map(vec![
+                ("id", crate::PayloadValue::Number(f64::from(id))),
+                ("opened", crate::PayloadValue::Bool(opened)),
+            ])
+        };
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::OpenAppSettings,
+            &answer(requests[0].wrapping_add(1), false)
+        ));
+        c.run_component_tasks();
+        assert!(c.commit().is_none_or(|b| texts(&b).is_empty()));
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::OpenAppSettings,
+            &answer(requests[0], true)
+        ));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("settings ")));
+        assert_eq!(shown.last().unwrap(), "settings true true");
+    }
+
+    #[test]
+    fn app_settings_need_the_application_capability_when_capabilities_are_declared() {
+        let (mut c, requests) = press_settings_opener(
+            crate::element::Environment {
+                app_settings: true,
+                ..Default::default()
+            },
+            Some(serde_json::json!({ "share": true })),
+        );
+        assert!(requests.is_empty(), "nothing reaches the platform");
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("settings ")));
+        assert_eq!(shown.last().unwrap(), "settings false Denied");
+    }
+
     /// Turns launching at login on, reads it, turns it off and reads it
     /// again when its button is pressed, all asked at once; shows each
     /// answer in the order it was asked.
@@ -23956,6 +24153,81 @@ mod views {
     }
 
     thread_local! {
+        static NETWORK_RUNS: Cell<u32> = const { Cell::new(0) };
+    }
+
+    /// Shows how the device reaches the network; its effect counts its runs.
+    #[component]
+    fn NetworkLabel() -> impl IntoElement {
+        effect(move || {
+            network();
+            NETWORK_RUNS.with(|n| n.set(n.get() + 1));
+        });
+        text(move || {
+            let n = network();
+            format!(
+                "{} {} expensive={} constrained={} cellular={}",
+                if n.online() { "online" } else { "offline" },
+                n.kind.name(),
+                n.expensive,
+                n.constrained,
+                n.cellular_data.name()
+            )
+        })
+    }
+
+    #[test]
+    fn an_effect_reading_the_network_runs_again_when_the_route_changes_only() {
+        use crate::platform::{CellularData, Network, NetworkKind};
+        NETWORK_RUNS.with(|n| n.set(0));
+        let mut c = core();
+        c.mount_root(&Root::new::<NetworkLabel>(|| ()));
+        // Before the platform says: unknown, which counts as online.
+        assert_eq!(
+            texts(&c.commit().unwrap()),
+            ["online unknown expensive=false constrained=false cellular=unknown"]
+        );
+        assert_eq!(NETWORK_RUNS.with(Cell::get), 1);
+        // Another part of the environment changes: the effect stays.
+        c.set_environment(crate::element::Environment {
+            dark: true,
+            ..Default::default()
+        });
+        c.commit();
+        assert_eq!(NETWORK_RUNS.with(Cell::get), 1);
+        let offline = crate::element::Environment {
+            dark: true,
+            network: Network::new(NetworkKind::None).cellular_data(CellularData::Unknown),
+            ..Default::default()
+        };
+        c.set_environment(offline);
+        assert_eq!(
+            texts(&c.commit().unwrap()),
+            ["offline none expensive=false constrained=false cellular=unknown"]
+        );
+        assert_eq!(NETWORK_RUNS.with(Cell::get), 2);
+        // The same route reported again changes nothing.
+        c.set_environment(offline);
+        c.commit();
+        assert_eq!(NETWORK_RUNS.with(Cell::get), 2);
+        // The user allowed wireless data, and the phone joined cellular in
+        // Low Data Mode.
+        c.set_environment(crate::element::Environment {
+            dark: true,
+            network: Network::new(NetworkKind::Cellular)
+                .expensive(true)
+                .constrained(true)
+                .cellular_data(CellularData::NotRestricted),
+            ..Default::default()
+        });
+        assert_eq!(
+            texts(&c.commit().unwrap()),
+            ["online cellular expensive=true constrained=true cellular=notRestricted"]
+        );
+        assert_eq!(NETWORK_RUNS.with(Cell::get), 3);
+    }
+
+    thread_local! {
         static INTROS: Cell<u32> = const { Cell::new(0) };
     }
 
@@ -25711,6 +25983,58 @@ mod views {
         // Nothing changed: no options again.
         let batch = c.commit();
         assert!(batch.is_none_or(|b| last_screen_config(&b).is_none()));
+    }
+
+    #[derive(Default)]
+    struct OptionalTitlePage;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct OptionalTitlePageProps {}
+
+    thread_local! {
+        static TITLE_SHOWN: Cell<Option<Signal<bool>>> = const { Cell::new(None) };
+    }
+
+    impl Component for OptionalTitlePage {
+        type Props = OptionalTitlePageProps;
+        type Event = NoEvent;
+
+        #[allow(deprecated)]
+        fn view(_: OptionalTitlePageProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let shown = signal(false);
+            TITLE_SHOWN.with(|s| s.set(Some(shown)));
+            stack().flex_1().child(
+                screen()
+                    .title("Chat")
+                    .header_title(when(shown, || view().w(px(80.0)).h(px(24.0))))
+                    .child(view().flex_1()),
+            )
+        }
+    }
+
+    /// A title view with nothing to show leaves the platform's title text,
+    /// and comes back when its content does (allsum-nsh#1900).
+    #[test]
+    fn an_empty_header_title_falls_back_to_the_system_title() {
+        let mut c = core();
+        c.mount_root(&Root::new::<OptionalTitlePage>(
+            || OptionalTitlePageProps {},
+        ));
+        let first = last_screen_config(&c.commit().unwrap()).expect("a screen");
+        assert_eq!(first.title_view, None, "nothing shows in the title slot");
+        let shown = TITLE_SHOWN.with(Cell::get).unwrap();
+        {
+            let _entered = c.components.runtime.enter();
+            shown.set(true);
+        }
+        let config = last_screen_config(&c.commit().unwrap()).expect("options again");
+        assert!(config.title_view.is_some(), "the title view shows");
+        {
+            let _entered = c.components.runtime.enter();
+            shown.set(false);
+        }
+        let config = last_screen_config(&c.commit().unwrap()).expect("options again");
+        assert_eq!(config.title_view, None, "back to the system title");
     }
 
     /// Without the prop the header is built as before: no system button, so
@@ -27932,6 +28256,52 @@ mod views {
     }
 
     #[test]
+    fn jss_shortcuts_over_focused_come_after_the_views() {
+        use crate::keymap::{KeyBinding, KeyMatch, Keymap, Keystroke, When};
+        let mod_k = Keystroke::parse_with("mod+k", true).unwrap();
+        let tables = |batch: &MountBatch| -> Vec<std::sync::Arc<Keymap>> {
+            batch
+                .items
+                .iter()
+                .filter_map(|i| match i {
+                    MountItem::Keymap(k) => Some(k.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+        let mut c = core();
+        c.mount_root(&Root::new::<Shortcuts>(|| ()));
+        let batch = c.commit().unwrap();
+        let ours = tables(&batch).last().expect("a table").bindings()[0].id;
+        // JS binds the view's mod+k twice: plainly (1) and over the views (2).
+        let plain = KeyBinding::new(1, mod_k, When::Auto, false);
+        let over = KeyBinding::new(2, mod_k, When::Auto, false).over_focused(true);
+        apply(
+            &mut c,
+            vec![Op::SetProp {
+                id: ROOT_ID,
+                prop: Prop::Keymap(std::sync::Arc::new(Keymap::new(vec![over, plain]))),
+            }],
+        );
+        let batch = c.commit().unwrap();
+        let table = tables(&batch).pop().expect("a table");
+        let ids: Vec<u32> = table.bindings().iter().map(|b| b.id).collect();
+        // The plain one before the view's, the one over them after.
+        assert_eq!(ids, [1, ours, 2]);
+        assert_eq!(table.find(mod_k, false, false), KeyMatch::Fire(2));
+        // Without it, the view's wins as before.
+        apply(
+            &mut c,
+            vec![Op::SetProp {
+                id: ROOT_ID,
+                prop: Prop::Keymap(std::sync::Arc::new(Keymap::new(vec![plain]))),
+            }],
+        );
+        let table = tables(&c.commit().unwrap()).pop().expect("a table");
+        assert_eq!(table.find(mod_k, false, false), KeyMatch::Fire(ours));
+    }
+
+    #[test]
     fn jss_shortcuts_bound_before_any_view_stay_beside_the_views() {
         use crate::keymap::{KeyBinding, Keymap, Keystroke, When};
         let tables = |batch: &MountBatch| -> Vec<Vec<u32>> {
@@ -28092,6 +28462,67 @@ mod views {
                 .on_press(move || hidden.set(false))
                 .child(text("4"))
         }
+    }
+
+    /// A row whose custom action is named in the interface's language,
+    /// which a press switches.
+    #[derive(Default)]
+    struct Row;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct RowProps {}
+
+    impl Component for Row {
+        type Props = RowProps;
+        type Event = NoEvent;
+
+        fn view(_: RowProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let chinese = signal(false);
+            view()
+                .size_10()
+                .test_id("row")
+                .accessibility_actions(move || {
+                    vec![crate::AccessibilityActionDef {
+                        name: "delete".into(),
+                        label: Some(if chinese.get() { "删除" } else { "Delete" }.into()),
+                    }]
+                })
+                .on_press(move || chinese.set(!chinese.get()))
+        }
+    }
+
+    #[test]
+    fn an_elements_accessibility_actions_follow_their_signals_in_place() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Row>(|| RowProps {}));
+        let batch = c.commit().unwrap();
+        let actions = |batch: &MountBatch| {
+            batch.items.iter().find_map(|i| match i {
+                MountItem::ViewProps { id, props } if props.test_id.as_deref() == Some("row") => {
+                    Some((*id, props.accessibility.actions.clone()))
+                }
+                _ => None,
+            })
+        };
+        let action = |label: &str| crate::AccessibilityActionDef {
+            name: "delete".into(),
+            label: Some(label.into()),
+        };
+        let (id, first) = actions(&batch).expect("the row's props");
+        assert_eq!(first, vec![action("Delete")]);
+        assert!(c.component_event(id, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        // The same view, renamed: nothing is created or removed, so the
+        // screen reader's focus stays on it.
+        assert_eq!(actions(&batch), Some((id, vec![action("删除")])));
+        assert!(
+            !batch
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::Create { .. } | MountItem::Remove { .. })),
+            "{:?}",
+            batch.items
+        );
     }
 
     #[test]
@@ -28709,8 +29140,7 @@ mod rust_windows {
     // turn follows the opening, in order; attributes join its options.
     #[test]
     fn requests_made_right_after_open_window_follow_its_opening() {
-        use crate::desktop::WindowMode;
-        use crate::element::desktop::open_window;
+        use crate::{desktop::WindowMode, element::desktop::open_window};
         let mut c = core();
         c.set_environment(crate::element::Environment {
             os: crate::platform::Os::MacOs,
@@ -30275,6 +30705,17 @@ mod rust_menus {
         let labels = labels_in(&first.commit().unwrap()).unwrap();
         assert_eq!(labels.label(MenuRole::Copy), "Copy");
         assert_eq!(labels.edit_menu.as_deref(), Some("Edit"));
+
+        // Adding Japanese translations at run time switches the menu labels
+        // back to Japanese without resetting the surface.
+        first.add_translations(std::collections::HashMap::from([(
+            "ja".to_owned(),
+            std::collections::HashMap::from([("hello".to_owned(), "こんにちは".to_owned())]),
+        )]));
+        let labels = labels_in(&first.commit().unwrap()).unwrap();
+        assert_eq!(labels.label(MenuRole::Copy), "コピー");
+        assert_eq!(labels.edit_menu.as_deref(), Some("編集"));
+
         // Mobile platforms use the system's own menus.
         env.os = Os::Ios;
         first.set_environment(env);
@@ -30283,6 +30724,67 @@ mod rust_menus {
         env.idiom = crate::platform::Idiom::Terminal;
         first.set_environment(env);
         assert!(first.commit().as_ref().and_then(labels_in).is_none());
+    }
+
+    #[test]
+    fn mobile_platforms_hear_the_language_the_app_shows() {
+        use crate::platform::{Languages, Locale};
+        let sent = |batch: Option<MountBatch>| -> Vec<String> {
+            batch
+                .map(|batch| {
+                    batch
+                        .items
+                        .iter()
+                        .filter_map(|item| match item {
+                            MountItem::Command {
+                                id: ROOT_ID,
+                                command: Command::TextLocale(locale),
+                            } => Some(locale.to_string()),
+                            _ => None,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let mut c = core();
+        let mut env = crate::element::Environment {
+            os: Os::Android,
+            locale: Locale::parse("ja-JP").unwrap(),
+            ..Default::default()
+        };
+        env.locale_settings.languages = Languages::one(env.locale);
+        c.set_environment(env);
+        assert_eq!(sent(c.commit()), ["ja-JP"]);
+        // Another region of the same language is told; the same one is not.
+        env.locale = Locale::parse("ja").unwrap();
+        env.locale_settings.languages = Languages::one(env.locale);
+        c.set_environment(env);
+        assert_eq!(sent(c.commit()), ["ja"]);
+        env.dark = true;
+        c.set_environment(env);
+        assert_eq!(sent(c.commit()), Vec::<String>::new());
+        // An English-only app shows its text in English.
+        c.set_translations(
+            crate::i18n::Translations::from_json(r#"{"en":{"hello":"Hello"}}"#).unwrap(),
+        );
+        assert_eq!(sent(c.commit()), ["en-US"]);
+        // Translations added at run time bring the user's language back.
+        c.add_translations(std::collections::HashMap::from([(
+            "ja".to_owned(),
+            std::collections::HashMap::from([("hello".to_owned(), "こんにちは".to_owned())]),
+        )]));
+        assert_eq!(sent(c.commit()), ["ja"]);
+
+        // Desktops and browsers speak states in the screen reader's words.
+        for os in [Os::MacOs, Os::Linux, Os::Web] {
+            let mut c = core();
+            c.set_environment(crate::element::Environment {
+                os,
+                locale: Locale::parse("ko").unwrap(),
+                ..Default::default()
+            });
+            assert_eq!(sent(c.commit()), Vec::<String>::new(), "{os:?}");
+        }
     }
 
     fn menu_event(c: &mut Core<FakeEngine>, fields: Vec<(&'static str, PayloadValue)>) -> bool {
@@ -33244,6 +33746,15 @@ fn anchored_overlays_go_within_the_area_the_platform_shows_them_in() {
     assert_eq!(pressed.len(), 1);
     assert_eq!(pressed[0].0, 10);
 
+    // A press a view's native content took (a web view's page): outside
+    // the overlay on another view, inside it on its anchor or its content.
+    let page = point(px(10.0), px(10.0));
+    let pressed = c.presses_on_native(2, page);
+    assert_eq!(pressed.len(), 1);
+    assert_eq!(pressed[0].0, 10);
+    assert!(c.presses_on_native(4, page).is_empty());
+    assert!(c.presses_on_native(12, page).is_empty());
+
     // Back to the root view.
     c.set_overlay_area(None);
     let batch = c.commit().unwrap();
@@ -35082,6 +35593,16 @@ fn rounding_lands_on_device_pixels() {
     let up = super::ceil_to_pixel(measured, ratio);
     assert!((up.0 * ratio - 56.0).abs() < 1.0e-3, "{up:?}");
     assert!((super::round(4.0, ratio) * ratio - 11.0).abs() < 1.0e-3);
+    // A box under a pixel thick whose edges round to one pixel takes the
+    // pixel on the side most of it is on (the later one on a tie); one of
+    // no length, or of a length zero but for `f32`, takes none.
+    assert_eq!(super::edges(199.5, 0.5, 1.0), (199.0, 200.0));
+    assert_eq!(super::edges(10.5, 0.4, 1.0), (10.0, 11.0));
+    assert_eq!(super::edges(99.75, 0.5, 1.0), (100.0, 101.0));
+    assert_eq!(super::edges(0.0, 0.5, 1.0), (0.0, 1.0));
+    assert_eq!(super::edges(199.5, 0.5, 2.0), (399.0, 400.0));
+    assert_eq!(super::edges(10.0, 0.0, 1.0), (10.0, 10.0));
+    assert_eq!(super::edges(10.0, 1.0e-5, 1.0), (10.0, 10.0));
     // A width a hair over a whole pixel is not taken back under it: the
     // text measured again in that width would no longer fit.
     assert_eq!(super::ceil_to_pixel(Points(78.000_49), 1.0), Points(79.0));
@@ -35411,6 +35932,110 @@ fn frames_moved_by_whole_pixels_are_not_sent_again() {
             .count();
         assert_eq!(rows, 0, "{pixel} pixels down: {:?}", batch.items);
     }
+}
+
+/// Half point rules at `ratio`: a column 200 wide holding a block 10.5
+/// tall (4), a horizontal rule 0.5 tall (5) and a block below (6), and a
+/// vertical rule 0.5 wide pinned to its right edge from 40 down (7), around
+/// a child as wide as itself (8).
+fn half_point_rules(ratio: f32) -> MountBatch {
+    let mut c = core();
+    at_ratio(&mut c, ratio);
+    let mut ops = Vec::new();
+    for (id, parent) in [(3, ROOT_ID), (4, 3), (5, 3), (6, 3), (7, 3), (8, 7)] {
+        ops.push(Op::Create { id, tag: Tag::View });
+        ops.push(Op::Insert {
+            parent,
+            child: id,
+            before: None,
+        });
+    }
+    ops.push(style_op(
+        3,
+        &[
+            ("position", StyleValue::Str("relative")),
+            ("width", StyleValue::Number(200.0)),
+            ("height", StyleValue::Number(300.0)),
+        ],
+    ));
+    ops.push(style_op(4, &[("height", StyleValue::Number(10.5))]));
+    ops.push(style_op(5, &[("height", StyleValue::Number(0.5))]));
+    ops.push(style_op(6, &[("height", StyleValue::Number(10.0))]));
+    ops.push(style_op(
+        7,
+        &[
+            ("position", StyleValue::Str("absolute")),
+            ("top", StyleValue::Number(40.0)),
+            ("bottom", StyleValue::Number(0.0)),
+            ("right", StyleValue::Number(0.0)),
+            ("width", StyleValue::Number(0.5)),
+        ],
+    ));
+    ops.push(style_op(8, &[("height", StyleValue::Number(10.0))]));
+    apply(&mut c, ops);
+    c.commit().unwrap()
+}
+
+#[test]
+fn half_point_rules_keep_a_device_pixel_and_their_neighbours_meet() {
+    // One pixel per point (a 100% display, the headless default): the
+    // rules' edges both round to one pixel, and the rules took none.
+    let batch = half_point_rules(1.0);
+    let frame = |id| frame_of(&batch, id).expect("frame");
+    let (above, rule, below) = (frame(4), frame(5), frame(6));
+    assert_eq!(rule.size.height, Points(1.0), "{rule:?}");
+    // Its pixel is the one most of it is on, inside the column: the block
+    // above keeps its rounded edge and the block below starts on it, with
+    // no gap, as without the rule.
+    assert_eq!(rule.origin.y, Points(10.0));
+    assert_eq!(above.origin.y + above.size.height, Points(11.0));
+    assert_eq!(below.origin.y, Points(11.0));
+    let pinned = frame(7);
+    assert_eq!(pinned.size.width, Points(1.0), "{pinned:?}");
+    assert_eq!(pinned.origin.x + pinned.size.width, Points(200.0));
+    assert_eq!(pinned.size.height, Points(260.0));
+    // A child as wide as the rule is on the rule's pixel, not moved again.
+    assert_eq!(frame(8), rect(0.0, 0.0, 1.0, 10.0));
+
+    // Two pixels per point: half a point is a pixel, kept as it is.
+    let batch = half_point_rules(2.0);
+    let frame = |id| frame_of(&batch, id).expect("frame");
+    assert_eq!(frame(5), rect(0.0, 10.5, 200.0, 0.5));
+    assert_eq!(frame(6).origin.y, Points(11.0));
+    assert_eq!(frame(7), rect(199.5, 40.0, 0.5, 260.0));
+    assert_eq!(frame(8), rect(0.0, 0.0, 0.5, 10.0));
+}
+
+#[test]
+fn a_rule_that_grows_a_pixel_thick_moves_its_child_back_onto_it() {
+    // A rule 0.5 tall 10.5 down at one pixel per point is on the pixel
+    // before, and its child of its height with it. Grown to a point, it is
+    // on its own pixels: its child, laid out as before, is a pixel above
+    // it, as it is in the layout, though nothing moved it.
+    let mut c = core();
+    let mut ops = Vec::new();
+    for (id, parent) in [(3, ROOT_ID), (4, 3), (5, 3), (6, 5)] {
+        ops.push(Op::Create { id, tag: Tag::View });
+        ops.push(Op::Insert {
+            parent,
+            child: id,
+            before: None,
+        });
+    }
+    ops.push(style_op(4, &[("height", StyleValue::Number(10.5))]));
+    ops.push(style_op(5, &[("height", StyleValue::Number(0.5))]));
+    ops.push(style_op(6, &[("height", StyleValue::Number(0.5))]));
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 5), Some(rect(0.0, 10.0, 320.0, 1.0)));
+    assert_eq!(frame_of(&batch, 6), Some(rect(0.0, 0.0, 320.0, 1.0)));
+    apply(
+        &mut c,
+        vec![style_op(5, &[("height", StyleValue::Number(1.0))])],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 5), Some(rect(0.0, 11.0, 320.0, 1.0)));
+    assert_eq!(frame_of(&batch, 6), Some(rect(0.0, -1.0, 320.0, 1.0)));
 }
 
 #[test]
@@ -41595,6 +42220,260 @@ fn nothing_follows_while_no_view_follows_an_element() {
     c.set_viewport(size_pt(320.0, 480.0));
     c.commit();
     assert!(!c.follow_changed);
+}
+
+/// A column (2) of a follower (8: absolute, at the left, 3 wide), a
+/// header (3, 40 high) and a list (20, 400 high, 30 rows of 50); `nested`
+/// puts the list in a scroll view (30, 300 high) after a view 100 high,
+/// with a second follower (9) in the scroll view's content. Both follow
+/// 50, a view 20 high 10 down row 3's cell: the cell at 150 in the list's
+/// content, so the view at 160 there.
+fn follow_list(c: &mut Core<FakeEngine>, nested: bool) -> Vec<u32> {
+    use StyleValue::{Number, Str};
+    let follower = vec![
+        ("position", Str("absolute")),
+        ("left", Number(0.0)),
+        ("width", Number(3.0)),
+    ];
+    type ViewSpec<'a> = (NodeId, Tag, NodeId, Vec<(&'a str, StyleValue<'a>)>);
+    let mut views: Vec<ViewSpec<'_>> = vec![
+        (
+            2,
+            Tag::View,
+            ROOT_ID,
+            vec![("flexDirection", Str("column"))],
+        ),
+        (8, Tag::View, 2, follower.clone()),
+        (3, Tag::View, 2, vec![("height", Number(40.0))]),
+    ];
+    let list_parent = if nested {
+        views.extend([
+            (30, Tag::Scroll, 2, vec![("height", Number(300.0))]),
+            (9, Tag::View, 30, follower),
+            (31, Tag::View, 30, vec![("height", Number(100.0))]),
+        ]);
+        30
+    } else {
+        2
+    };
+    views.push((20, Tag::List, list_parent, vec![("height", Number(400.0))]));
+    let mut ops = Vec::new();
+    for (id, tag, parent, style) in views {
+        ops.push(Op::Create { id, tag });
+        ops.push(style_op(id, &style));
+        if tag == Tag::List {
+            ops.push(Op::SetProp {
+                id,
+                prop: Prop::EstimatedItemSize(px(50.0)),
+            });
+            ops.push(Op::SetProp {
+                id,
+                prop: Prop::Count(30),
+            });
+        }
+        ops.push(Op::Insert {
+            parent,
+            child: id,
+            before: None,
+        });
+    }
+    apply(c, ops);
+    c.commit();
+    let (mut next_id, mut cells) = (100, Vec::new());
+    render_binds(c, &mut next_id, &mut cells, 50.0);
+    c.commit();
+    let mut ops = vec![
+        Op::Create {
+            id: 50,
+            tag: Tag::View,
+        },
+        style_op(50, &[("height", Number(20.0)), ("marginTop", Number(10.0))]),
+        Op::Insert {
+            parent: cells[3],
+            child: 50,
+            before: None,
+        },
+    ];
+    for id in if nested { vec![8, 9] } else { vec![8] } {
+        ops.push(Op::SetProp {
+            id,
+            prop: Prop::Follow(Some(crate::element::FollowTarget::of_node(50))),
+        });
+    }
+    apply(c, ops);
+    cells
+}
+
+#[test]
+fn a_follower_follows_a_row_of_a_list_where_the_list_scrolled_it() {
+    let mut c = core();
+    follow_list(&mut c, false);
+    let batch = c.commit().unwrap();
+    // Under the header (40), the row's view (160 in the list's content).
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 200.0, 3.0, 20.0)));
+
+    // The platform reports the list scrolled: the follower goes with the
+    // row, in the commit that follows the report.
+    c.set_scroll_offset(20, point(px(0.0), px(100.0)), u32::MAX);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 100.0, 3.0, 20.0)));
+
+    // Half of the view scrolled out of the list's viewport: the follower
+    // spans the half the list shows.
+    c.set_scroll_offset(20, point(px(0.0), px(170.0)), u32::MAX);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 40.0, 3.0, 10.0)));
+
+    // Wholly out of it: the list shows no part of it, and the follower
+    // follows nothing (its style alone places it).
+    c.set_scroll_offset(20, point(px(0.0), px(600.0)), u32::MAX);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 0.0, 3.0, 0.0)));
+
+    // Back: it follows the row again.
+    c.set_scroll_offset(20, point(px(0.0), px(0.0)), u32::MAX);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 200.0, 3.0, 20.0)));
+}
+
+#[test]
+fn a_follower_lets_go_of_a_row_whose_cell_the_list_gave_up() {
+    let mut c = core();
+    follow_list(&mut c, false);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 200.0, 3.0, 20.0)));
+    // Row 3 goes: its cell is spare, hidden where it was, and shows no row
+    // to follow.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 20,
+            prop: Prop::Count(2),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 0.0, 3.0, 0.0)));
+}
+
+#[test]
+fn a_follower_lets_go_of_a_row_left_behind_once_the_items_change() {
+    // A list in its parent's viewport (4) in a scroll view (2), with a
+    // follower (8) in the scroll view's content: no viewport on the way
+    // cuts what it follows.
+    use StyleValue::{Number, Str};
+    let mut c = core();
+    let mut ops = Vec::new();
+    for (id, tag, parent, style) in [
+        (2, Tag::Scroll, ROOT_ID, vec![("height", Number(400.0))]),
+        (
+            8,
+            Tag::View,
+            2,
+            vec![
+                ("position", Str("absolute")),
+                ("left", Number(0.0)),
+                ("width", Number(3.0)),
+            ],
+        ),
+        (4, Tag::List, 2, vec![]),
+    ] {
+        ops.push(Op::Create { id, tag });
+        ops.push(style_op(id, &style));
+        ops.push(Op::Insert {
+            parent,
+            child: id,
+            before: None,
+        });
+    }
+    ops.extend([
+        Op::SetProp {
+            id: 4,
+            prop: Prop::ListViewport(crate::ListViewport::Parent),
+        },
+        Op::SetProp {
+            id: 4,
+            prop: Prop::EstimatedItemSize(px(50.0)),
+        },
+        Op::SetProp {
+            id: 4,
+            prop: Prop::Count(100),
+        },
+    ]);
+    apply(&mut c, ops);
+    c.commit();
+    let (mut next_id, mut cells) = (100, Vec::new());
+    render_binds(&mut c, &mut next_id, &mut cells, 50.0);
+    c.commit();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 50,
+                tag: Tag::View,
+            },
+            style_op(50, &[("height", Number(20.0)), ("marginTop", Number(10.0))]),
+            Op::Insert {
+                parent: cells[3],
+                child: 50,
+                before: None,
+            },
+            Op::SetProp {
+                id: 8,
+                prop: Prop::Follow(Some(crate::element::FollowTarget::of_node(50))),
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 160.0, 3.0, 20.0)));
+    // Scrolled far down: row 3's cell is left behind, where it showed the
+    // row, and the follower stays on it (the scroll view moves both).
+    c.set_scroll_offset(2, point(px(0.0), px(2000.0)), u32::MAX);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 8), None);
+    // Rows change far from it: the cell is spare, though it stays where it
+    // was, and shows no row to follow.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 4,
+            prop: Prop::Splice(90, 1, 1),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, cells[3]), None, "the cell stays");
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 0.0, 3.0, 0.0)));
+}
+
+#[test]
+fn a_follower_follows_a_row_through_the_scroll_views_outside_it() {
+    let mut c = core();
+    follow_list(&mut c, true);
+    let batch = c.commit().unwrap();
+    // 8, outside the scroll view: under the header (40), the view (100)
+    // and the row's view (160). 9, in the scroll view's content: the
+    // view and the row's.
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 300.0, 3.0, 20.0)));
+    assert_eq!(frame_of(&batch, 9), Some(rect(0.0, 260.0, 3.0, 20.0)));
+
+    // The list scrolls: both go with the row.
+    c.set_scroll_offset(20, point(px(0.0), px(100.0)), u32::MAX);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 200.0, 3.0, 20.0)));
+    assert_eq!(frame_of(&batch, 9), Some(rect(0.0, 160.0, 3.0, 20.0)));
+
+    // The scroll view scrolls: 8 goes with it; 9 is in what it scrolls,
+    // which the platform moves, and stays.
+    c.set_scroll_offset(30, point(px(0.0), px(50.0)), u32::MAX);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 150.0, 3.0, 20.0)));
+    assert_eq!(frame_of(&batch, 9), None);
+
+    // Out of the scroll view's viewport, though in the list's: 8 follows
+    // nothing.
+    c.set_scroll_offset(30, point(px(0.0), px(250.0)), u32::MAX);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 0.0, 3.0, 0.0)));
+    assert_eq!(frame_of(&batch, 9), None);
 }
 
 #[test]
@@ -52108,4 +52987,275 @@ fn unfocused_keys_follow_named_window_content_changes() {
     assert!(!c.key_captured(root, None), "the input keeps its keys");
     c.apply(capture(KeyCapture::None)).unwrap();
     assert_eq!(mounted_content(&c.commit().unwrap()), Some(None));
+}
+
+/// [`WordsEngine`]'s lines, kept by its layout for [`TextEngine::lines`].
+struct LinesEngine;
+
+fn word_lines(text: &str, max: f32) -> Vec<f32> {
+    let mut lines = vec![0.0f32];
+    for word in text.split(' ') {
+        let width = word.chars().count() as f32 * 8.0;
+        let line = lines.last_mut().unwrap();
+        if *line > 0.0 && *line + 8.0 + width > max {
+            lines.push(width);
+        } else if *line > 0.0 {
+            *line += 8.0 + width;
+        } else {
+            *line = width;
+        }
+    }
+    lines
+}
+
+impl TextEngine for LinesEngine {
+    type Prepared = String;
+
+    fn prepare(&self, text: &AttributedText) -> String {
+        text.text.clone()
+    }
+
+    fn measure(&self, text: &String, max_width: Option<Points>) -> Size<Points> {
+        let lines = word_lines(text, max_width.map_or(f32::INFINITY, |m| m.0));
+        let widest = lines.iter().copied().fold(0.0, f32::max);
+        size_pt(widest, lines.len() as f32 * 16.0)
+    }
+
+    fn layout(&self, text: &String, size: Size<Points>) -> TextLayout {
+        TextLayout(Arc::new(word_lines(text, size.width.0)))
+    }
+
+    fn lines(&self, layout: &TextLayout) -> Vec<crate::TextLine> {
+        layout.downcast::<Vec<f32>>().map_or_else(Vec::new, |l| {
+            l.iter()
+                .map(|&w| crate::TextLine {
+                    width: Points(w),
+                    ..crate::TextLine::default()
+                })
+                .collect()
+        })
+    }
+}
+
+/// `text-pretty` breaks a paragraph whose last line holds a lone word
+/// narrower, as many lines with a longer last one; a paragraph that ends
+/// well, or fits on a line, keeps its box's width.
+#[test]
+fn pretty_text_takes_words_down_to_a_short_last_line() {
+    // At 200: "aaaa bbbb cccc dddd eeee" (192) and "ff" (16).
+    let text = "aaaa bbbb cccc dddd eeee ff";
+    let mut cx = words_context(text, 0);
+    cx.pretty = Some(Box::new((f32::NAN, Points::ZERO)));
+    let width = pretty_width(&LinesEngine, &mut cx, Points(200.0));
+    assert!(width < Points(200.0), "{width:?}");
+    let lines = word_lines(text, width.0);
+    assert_eq!(lines.len(), 2);
+    assert!(
+        lines[1] >= width.0 * PRETTY_LAST_LINE,
+        "{lines:?} at {width:?}"
+    );
+    // Asked again: the same, from what it kept.
+    assert_eq!(pretty_width(&LinesEngine, &mut cx, Points(200.0)), width);
+
+    let mut cx = words_context("aaaa bbbb cccc dddd eeee ffff gggg", 0);
+    assert_eq!(
+        pretty_width(&LinesEngine, &mut cx, Points(200.0)),
+        Points(200.0)
+    );
+    let mut cx = words_context("aaaa bbbb", 0);
+    assert_eq!(
+        pretty_width(&LinesEngine, &mut cx, Points(200.0)),
+        Points(200.0)
+    );
+    // A clamp keeps its lines where they are.
+    let mut cx = words_context(text, 2);
+    assert_eq!(
+        pretty_width(&LinesEngine, &mut cx, Points(200.0)),
+        Points(200.0)
+    );
+}
+
+#[test]
+fn text_pretty_wraps_and_inherits_with_white_space() {
+    let mut c = core();
+    view_with_classes(&mut c, 2, "text-pretty");
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 3,
+                tag: Tag::Text,
+            },
+            Op::CreateText {
+                id: 4,
+                text: "hello".into(),
+            },
+            Op::Insert {
+                parent: 3,
+                child: 4,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+        ],
+    );
+    c.commit();
+    let (no_wrap, _, _, pretty) = c.inherited_text_wrap(c.key(3).unwrap());
+    assert_eq!((no_wrap, pretty), (Some(false), true));
+    c.apply(class_op(3, "whitespace-normal")).unwrap();
+    c.commit();
+    assert!(!c.inherited_text_wrap(c.key(3).unwrap()).3);
+}
+
+/// Rust's `text_pretty` on a view reaches the texts in it, as the class
+/// does; a text's own `whitespace_nowrap` takes it back.
+#[test]
+fn rust_text_pretty_inherits_as_the_class() {
+    use crate::{element::Root, prelude::*};
+
+    #[component]
+    fn PrettyTexts() -> impl IntoElement {
+        view()
+            .text_pretty()
+            .child(text("pretty"))
+            .child(text("one line").whitespace_nowrap())
+    }
+
+    let mut c = core();
+    c.mount_root(&Root::new::<PrettyTexts>(|| ()));
+    let batch = c.commit().unwrap();
+    let wrap = |label: &str| {
+        let id = batch
+            .items
+            .iter()
+            .find_map(|item| match item {
+                MountItem::Text { id, text, .. } if &*text.text == label => Some(*id),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no text {label:?}"));
+        let (no_wrap, _, _, pretty) = c.inherited_text_wrap(c.key(id).unwrap());
+        (no_wrap, pretty)
+    };
+    assert_eq!(wrap("pretty"), (Some(false), true));
+    assert_eq!(wrap("one line"), (Some(true), false));
+}
+
+#[test]
+fn an_overlay_leaves_escape_to_focused_content_that_captures_it() {
+    use crate::{KeyCapture, keymap::Keystroke, tailwind::state::FOCUSED};
+    // #2424: an editor in a popover takes Escape first; the overlay binds
+    // it again once the focus leaves the editor or the rule drops it.
+    let mut c = core();
+    add(&mut c, 2, Tag::View, ROOT_ID, &[]);
+    add(&mut c, 4, Tag::Overlay, 2, &[]);
+    add(&mut c, 6, Tag::View, 4, &[]);
+    add(&mut c, 8, Tag::View, 6, &[]);
+    add(&mut c, 10, Tag::View, 4, &[]);
+    apply(
+        &mut c,
+        vec![
+            overlay_prop(
+                4,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(2)),
+            ),
+            Op::Listen {
+                id: 4,
+                event: EventKind::Cancel,
+                enabled: true,
+            },
+        ],
+    );
+    let escape_bound = |c: &mut Core<FakeEngine>| -> Option<bool> {
+        let batch = c.commit()?;
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::Keymap(k) => {
+                Some(k.bindings().iter().any(|b| b.id == overlay::ESCAPE_BINDING))
+            }
+            _ => None,
+        })
+    };
+    assert_eq!(escape_bound(&mut c), Some(true));
+
+    let escape = Keystroke::parse_with("escape", false).unwrap();
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 6,
+            prop: Prop::KeyCapture(KeyCapture::keys([escape])),
+        }],
+    );
+    // No focus in the editor yet: the overlay keeps Escape.
+    assert_ne!(escape_bound(&mut c), Some(false));
+
+    c.set_states(8, FOCUSED);
+    assert_eq!(escape_bound(&mut c), Some(false), "the editor's");
+
+    // The focus on another view of the overlay: Escape cancels again.
+    c.set_states(8, 0);
+    c.set_states(10, FOCUSED);
+    assert_eq!(escape_bound(&mut c), Some(true));
+
+    c.set_states(10, 0);
+    c.set_states(8, FOCUSED);
+    assert_eq!(escape_bound(&mut c), Some(false));
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 6,
+            prop: Prop::KeyCapture(KeyCapture::None),
+        }],
+    );
+    assert_eq!(escape_bound(&mut c), Some(true), "the rule dropped it");
+
+    // Back still cancels the overlay while the content takes Escape.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 6,
+            prop: Prop::KeyCapture(KeyCapture::All),
+        }],
+    );
+    assert_eq!(escape_bound(&mut c), Some(false));
+    js_events(&mut c);
+    assert!(c.overlay_cancel());
+    let events = js_events(&mut c);
+    assert!(
+        events.contains(&(4, EventKind::Cancel, EventPayload::None)),
+        "{events:?}"
+    );
+}
+
+#[test]
+fn a_focus_outside_the_overlay_does_not_take_its_escape() {
+    use crate::{KeyCapture, keymap::Keystroke, tailwind::state::FOCUSED};
+    let mut c = core();
+    add(&mut c, 2, Tag::View, ROOT_ID, &[]);
+    add(&mut c, 4, Tag::Overlay, 2, &[]);
+    add(&mut c, 6, Tag::View, 4, &[]);
+    let escape = Keystroke::parse_with("escape", false).unwrap();
+    apply(
+        &mut c,
+        vec![
+            overlay_prop(
+                4,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(2)),
+            ),
+            Op::Listen {
+                id: 4,
+                event: EventKind::Cancel,
+                enabled: true,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::KeyCapture(KeyCapture::keys([escape])),
+            },
+        ],
+    );
+    c.commit();
+    c.set_states(2, FOCUSED);
+    c.commit();
+    assert!(!c.focus_takes_escape());
 }

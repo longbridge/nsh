@@ -122,6 +122,8 @@ Each version is installed once per machine, in `~/.nsh/nshms` (`NSH_HOME` moves 
 
 A Rust nshm is also added to the `[dependencies]` of the app's own crate when it has one, so the app's Rust uses it directly. An app whose nshm include a Rust one gets hosts built with it, as an app with a crate of its own does, so its development machine and CI need the Rust toolchain ([Building with Rust](./rust.md)). An app whose nshm are all TSX builds with `nsh` alone.
 
+An app with a crate of its own can also depend on a Rust nshm in its `Cargo.toml` alone, as on any other crate, from crates.io, Git (a crate in a subdirectory of the repository too) or a path. `nsh` finds the Rust nshm among the crate's dependencies, direct or not, and links them as it links those of `"dependencies"`: their `#[native_module]` entries run when the app starts, with the features the crate turns on, in `nsh run`, `nsh test` and the packages alike, and TSX imports them by their specifiers. One listed in `"dependencies"` too is linked once.
+
 A crate that holds several modules keeps each behind a Cargo feature, so an app turns on only those it uses and pays
 only their size, permissions and store declarations. `--features` turns them on, and the entry takes the object form:
 
@@ -147,7 +149,7 @@ crate, imported from `nsh-extra` in TSX and called as `nsh_extra::<module>` in R
 | Feature | TSX | What it does |
 |---|---|---|
 | `camera` | `Camera` | Takes a photo with the system's camera on iOS and Android |
-| `push` | `Push` | Receives remote notifications from any push service on iOS |
+| `push` | `Push` | Receives remote notifications from any push service on iOS, and on Android through the service's binding |
 
 ```tsx
 import { Camera } from "nsh-extra";
@@ -167,8 +169,9 @@ the camera's usage description on iOS (an app sets its own wording with `ios.inf
 
 ### Push
 
-`Push` registers the device with the system's push service and hands the app its token, which the app sends to the
-push service it uses. Notifications then arrive as events:
+`Push` registers the device with a push service and hands the app its token, which the app sends to its server.
+Notifications then arrive as events. On iOS the service is the system's; Android has none that every device has, so
+there the app links a push service's binding, a crate built on `nsh_extra::push` that wraps the service's SDK:
 
 ```sh
 nsh add nsh-extra --features push
@@ -203,29 +206,109 @@ function closeConversation(threadId: string) {
 ```
 
 - `register()` resolves with `{ token }`, the string the push service takes (hexadecimal on iOS), and rejects with the
-  system's reason when the device is not registered. The system answers once it can reach its servers, so offline the
+  service's reason when the device is not registered. The service answers once it can be reached, so offline the
   promise stays pending: `on("token")` is the dependable path, and it reports a token that changed. Register at every
   launch. `token()` reads the last one.
 - `press` reports the notification the user pressed, including the one that launched the app, which waits for the
   first listener. `notification` reports one that arrived while the app is in front. Both carry its `id`, its
   `threadId` and the `payload` the push service sent. A payload is untrusted input.
 - `background` reports a delivery that woke the app or reached it in front (on iOS one with `content-available`; a
-  visible one with `content-available` arriving in front is reported to `notification` too). The system waits for its
-  listeners: return a promise for the work and what it gave, within 25 seconds of the delivery. One that came while
-  nothing listened waits for a listener until 5 seconds after it came.
+  visible one with `content-available` arriving in front is reported to `notification` too; on Android one the
+  binding hands over). The system waits for its listeners: return a promise for the work and what it gave, within 25
+  seconds of the delivery. One that came while nothing listened waits for a listener until 5 seconds after it came.
 - `setForegroundPresentation(presentation)` decides how notifications show while the app is in front, and
   `setForegroundPresentation(presentation, { threadId })` how one thread's show; `null` takes either back. They are
-  decided ahead of the arrival, as the system asks at once, and hold for every surface of the app.
-- `closeThread(threadId)` removes the delivered notifications of a thread, but those `Notifications.show` showed;
-  `Notifications.close(id)` removes one.
-- `available()` is `true` in a standalone iOS app. Elsewhere it is `false`, and `register` and `closeThread` reject
-  with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
+  decided ahead of the arrival, as the system asks at once, and hold for every surface of the app. On Android the
+  binding posts a notification as they say.
+- `closeThread(threadId)` removes the delivered notifications of a thread (on Android a notification group), but those
+  `Notifications.show` showed; `Notifications.close(id)` removes one.
+- `available()` is `true` in a standalone iOS app and wherever the app links a push service's binding. Elsewhere it is
+  `false`, and `register` rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`; so does `closeThread`, except on Android.
+- An app that declares `"capabilities"` grants `Push` with
+  [`"notifications": true`](./sandbox-and-capabilities.md#notifications), the capability `Notifications` uses. The
+  token, the deliveries and how they show belong to the whole app, so every function but `available()` asks for it
+  first.
 
-The feature adds the `remote-notification` background mode to the packaged app. The `aps-environment` entitlement comes
-from the provisioning profile the app is signed with ([iOS devices](./packaging.md#ios-devices)). Rust code, such as
-a push service's SDK binding, uses `nsh_extra::push`: `on_event` hears the same events with the token's raw bytes,
-`set_foreground_presentation_decider` decides each notification's presentation natively, and the launch options come
-from `nsh_platform_ios::on_application_event` ([Application events](./ios.md#application-events)).
+The feature adds the `remote-notification` background mode to the packaged iOS app. The `aps-environment` entitlement
+comes from the provisioning profile the app is signed with ([iOS devices](./packaging.md#ios-devices)). On Android it
+adds nothing: the push service's SDK brings what its manifest needs. Rust code, such as a push service's SDK binding,
+uses `nsh_extra::push`: `on_event` hears the same events with the token's raw bytes,
+`set_foreground_presentation_decider` decides each notification's presentation natively, and the launch options on iOS
+come from `nsh_platform_ios::on_application_event` ([Application events](./ios.md#application-events)). A binding
+implements `PushProvider` (it registers the device with its service), sets it with `set_provider` from its
+`#[native_module]` entry, and reports what the service delivers with `provide_token`,
+`provide_registration_failure`, `provide_notification` and `provide_background`. A press of a notification the binding
+posted opens the app with the payload as the intent's extras, and reaches `press` with them as its `payload` (Android
+does not say which notification it was, so it has no `id` or `threadId`).
+
+## An app's own Rust: `ext/`
+
+A TSX app that needs Rust of its own (a scanner, a parser, a database, a native view) keeps it in `ext/`, beside `src/`: `src/` holds the app's TSX, `ext/` its Rust, one nshm crate per directory. The app lists each in `nsh.json` `"dependencies"` by path and imports it from TSX like any other nshm. `nsh init --template mixed` starts an app this way.
+
+```text
+my-app/
+├── App.tsx                    the entry
+├── src/                       the app's TSX modules
+├── ext/                       the app's Rust
+│   └── my-app-native/
+│       ├── Cargo.toml         nsh-core and the crate's own dependencies
+│       └── src/lib.rs         #[native_module("my-app-native")]
+├── nsh.json                   "dependencies": { "my-app-native": { "path": "ext/my-app-native" } }
+└── nsh.lock
+```
+
+[Disktree](https://github.com/huacnlee/disktree), a disk usage analyzer, is built this way: its UI is TSX in `App.tsx` and `src/`, and its file system scanner, an SQLite index and file removal are Rust in `ext/disktree-native`:
+
+```json
+// nsh.json
+{
+  "name": "disktree",
+  "dependencies": {
+    "disktree-native": { "path": "ext/disktree-native" }
+  }
+}
+```
+
+```rust
+// ext/disktree-native/src/lib.rs (abridged)
+mod scanner;
+
+use nsh_core::prelude::*;
+
+/// Scans, browses and removes entries using the native disk index.
+#[module]
+pub struct DiskTree;
+
+#[module]
+impl DiskTree {
+    /// Runs a filesystem operation with a JSON payload and returns its JSON result.
+    pub async fn request(route: String, body: String) -> Result<String, String> {
+        // An `async fn` returns a Promise to TSX; `blocking` keeps the
+        // file system work off the UI thread.
+        blocking(move || scanner::dispatch(&route, &body)).await
+    }
+}
+
+#[native_module("disktree-native")]
+fn native(registry: &mut Registry) {
+    registry.module::<DiskTree>();
+}
+```
+
+```ts
+// src/runtime.ts
+import { DiskTree } from "disktree-native";
+
+const result = JSON.parse(await DiskTree.request("/scan", JSON.stringify({ path })));
+```
+
+Why `ext/` rather than a crate at the app's root (`"rust": "."`):
+
+- **The same way as every other nshm.** The app's own Rust and the nshm it installs are listed, locked and built the same way, and moving a crate from `ext/` to crates.io or its own repository later only changes its `nsh.json` entry.
+- **Each crate on its own.** It has its own `Cargo.toml`, dependencies and tests (`cargo test` in its directory), and builds once, optimized, in `~/.nsh/builds` until it changes. The app's root stays a TSX project.
+- **Small interfaces.** TSX reaches the Rust only through what `#[native_module]` registers, with declarations generated from the Rust signatures (`.nsh/types/<crate>.d.ts`), so the boundary is typed and easy to see in review.
+
+Add another crate with `cargo new --lib ext/<name>`, give it a `#[native_module("<name>")]`, and run `nsh add --path ext/<name>`. Keep UI in TSX and put in Rust what needs native speed, the platform, or the crates.io ecosystem; a crate exports components too when a view must be native ([A Rust nshm](#a-rust-nshm)).
 
 ## Writing an nshm
 
@@ -296,20 +379,37 @@ NSCameraUsageDescription = "Scans the codes you point the camera at."
 permissions = ["CAMERA"]
 queries = ['<intent><action android:name="android.media.action.IMAGE_CAPTURE"/></intent>']
 application = ['<service android:name="com.example.scanner.Sync" android:exported="false"/>']
+libraries = ["android/libs/scanner-glue.jar"]
 ```
 
 | Key | Adds |
 |---|---|
 | `ios.infoPlist` | Keys of the iOS app's `Info.plist`, as `nsh.json`'s `ios.infoPlist` |
+| `ios.infoPlistStrings` | The text of those keys in other languages, by language, as `nsh.json`'s `ios.infoPlistStrings` ([Packaging](./packaging.md#infoplist-text-in-other-languages)) |
 | `ios.entitlements` | The iOS app's entitlements |
+| `ios.frameworks` | XCFrameworks and frameworks relative to the crate's `Cargo.toml`, linked and packaged as `nsh.json`'s `ios.frameworks` are ([Frameworks and linker flags](./packaging.md#frameworks-and-linker-flags)) |
+| `ios.linkerFlags` | Arguments of the iOS executable's link, after the app's own |
 | `android.permissions` | `<uses-permission>` elements, named as in `nsh.json` (`CAMERA` is `android.permission.CAMERA`) |
 | `android.queries` | `<intent>`, `<package>` and `<provider>` elements of the manifest's `<queries>` |
-| `android.application` | `<service>`, `<receiver>`, `<provider>`, `<activity>` and `<meta-data>` elements of `<application>`; `${applicationId}` is the app's package |
+| `android.application` | `<service>`, `<receiver>`, `<provider>`, `<activity>` and `<meta-data>` elements of `<application>`; `${applicationId}` is the app's package, other placeholders the app's `android.manifestPlaceholders` |
+| `android.libraries` | Java libraries, jar, Android library (`.aar`) and dex files relative to the crate's `Cargo.toml`, packaged as `nsh.json`'s `android.libraries` are ([Java code](./packaging.md#java-code)) |
+
+A crate does not set `android.manifestPlaceholders`, which is an error: the values of placeholders (a service's key) are
+the app's, set in its `nsh.json`. The version of an Android library two crates carry in different versions is the one
+the app lists in its own `android.libraries`. When two libraries define a resource of one name, a library the app
+lists wins, then the crate whose name sorts first ([Java code](./packaging.md#java-code)).
 
 The app's own `nsh.json` wins: a key it sets keeps its value, and arrays (such as `UIBackgroundModes`) are joined. When
 two crates set one key to different values (two usage descriptions of the camera), the app chooses by setting the key
 in `ios.infoPlist` or `ios.entitlements`; until it does, packaging for iOS stops with an error naming both crates. Keys NSH
 sets itself (the bundle's identifier, version and the like) are not the crates'.
+
+A crate translates the keys the crates set in `ios.infoPlist`, as they word them; a translation of a key no crate sets
+with the app's features (one of a feature that is off) is left out with a warning. The app takes the crates'
+translations for the languages it has only, those of its `locales` or its own `ios.infoPlistStrings` (an empty `{}`
+names a language without text of its own), so a crate may carry many languages without adding any to the app. A key
+the app sets itself takes none of the crates' translations, which would say something else than the app's text. Two
+crates translating a key differently are settled by the app as above, in `ios.infoPlistStrings`.
 
 Develop it beside an app with `nsh add --path ../my-gauge`, which reads the directory as it is. Publish it as any crate (`cargo publish`), with the keyword `nshm` so that it can be found on [crates.io](https://crates.io/keywords/nshm), or push it to Git and tag its versions.
 
@@ -351,7 +451,7 @@ An nshm lists the nshm it needs in its `nsh.json` `"dependencies"`, in the app's
 
 ## Platform nshm
 
-An nshm can provide a target of its own, such as a platform NSH does not build for, with `"platform"` in its `nsh.json` and a binary named `nsh-platform-<name>` in its crate:
+An nshm can provide a target of its own, such as a platform NSH does not build for, with `"platform"` in its `nsh.json` and a binary named `nsh-platform-<name>` in its crate. The crate needs no `#[native_module]` when it gives the app nothing but the target; without one, the app is not linked with it and does not become a Rust app:
 
 ```json
 { "name": "nsh-harmony", "version": "0.1.0", "platform": "harmony" }
@@ -361,4 +461,4 @@ After `nsh add nsh-harmony`, the app's `nsh run`, `nsh dev`, `nsh test` and `nsh
 
 ## Security
 
-An nshm's build scripts and procedural macros run when the app builds, and its code, Rust or TSX, runs with the app's permissions. Any crate in the app's dependency graph can also add system permissions, manifest components and entitlements to the packaged app through `[package.metadata.nsh]`. Review its source and the changes to `nsh.lock` as you review the app's own code.
+An nshm's build scripts and procedural macros run when the app builds, and its code, Rust or TSX, runs with the app's permissions. Any crate in the app's dependency graph can also add system permissions, manifest components, Java and Android libraries (with their native code) and entitlements to the packaged app through `[package.metadata.nsh]`. Review its source and the changes to `nsh.lock` as you review the app's own code.

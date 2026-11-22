@@ -795,19 +795,19 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         EventKind::FileDragEnter,
         on::ALL,
         "(e: { uris: string[]; mimeTypes: string[] }) => void",
-        "A local file drag entered this destination (desktops and iOS) with its offered file URLs and each one's MIME type by its name (`\"\"` when the name says none); no file is read. GTK waits for its file-list preload; iOS reads files only on drop, so it offers no URLs.",
+        "A local file drag entered this destination (desktops and iOS) with its offered file URLs and each one's MIME type by its name (`\"\"` when the name says none); no file is read. GTK waits for its file-list preload; iOS reads files only on drop, so it offers no URLs; the Web offers no URLs, only the types the browser shows.",
     ),
     (
         EventKind::FileDragLeave,
         on::ALL,
         "() => void",
-        "A local file drag left this destination (desktops and iOS).",
+        "A local file drag left this destination (desktops, iOS and the Web).",
     ),
     (
         EventKind::FileDrop,
         on::ALL,
-        "(e: { uris: string[]; mimeTypes: string[]; pagePosition?: { x: number; y: number } }) => void",
-        "Local file URLs dropped on this destination (desktops and iOS), with each one's MIME type by its name (`\"\"` when the name says none); `pagePosition`: where, in the window's coordinates, on backends that know it (Linux, iOS).",
+        "(e: { uris: string[]; mimeTypes: string[]; pagePosition?: { x: number; y: number }; files: { file: File | null; name: string; type: string; size: number; status: \"read\" | \"tooLarge\" }[] }) => void",
+        "Local file URLs dropped on this destination (desktops, iOS and the Web), with each one's MIME type by its name (`\"\"` when the name says none); `pagePosition`: where, in the window's coordinates, on backends that know it (Linux, iOS, Web). On the Web `uris` is empty and `files` holds the dropped regular files with their contents (`status` `\"tooLarge\"` past 512 MiB a drop; at most 100); elsewhere `files` is empty.",
     ),
     (
         EventKind::Layout,
@@ -1118,6 +1118,7 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::Host,
     EventKind::Pick,
     EventKind::OpenUrl,
+    EventKind::OpenAppSettings,
     EventKind::ClipboardWrite,
     EventKind::ScreenColor,
     EventKind::Share,
@@ -1134,6 +1135,8 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::KeyCommand,
     EventKind::Menu,
     EventKind::ViewableItemsChange,
+    // Text dropped on a Rust component (`RichEditor` inserts it).
+    EventKind::TextDrop,
     // `NavPage`'s `onDismiss` / `onBackPress` and `Dialog`'s `onClose` /
     // `onCancel` / `onOpenChange` / `onOpen`: the navigation's handlers
     // (`nsh-js` `navigation.rs`), declared with its components.

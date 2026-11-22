@@ -446,6 +446,8 @@ one: a selector matching several fails the step, and the error says how to narro
 | `app.value(selector)` | The text of an input, `null` when none matches. |
 | `app.spanStyle(selector)` | The first matched character’s resolved style, headless and on every `--target`: `color`, optional `backgroundColor`, `fontSize`, `fontWeight`, `italic`, `underline`, and `lineThrough`. Colors are `#rrggbbaa`; sizes are in points. |
 | `app.viewStyle(selector)` | The matched view’s style as the app set it, headless and on every `--target`: optional `backgroundColor` (absent when transparent), its own `opacity`, and `effectiveOpacity` (its opacity times every ancestor’s). Colors are `#rrggbbaa`. Returns `null` when nothing matches; reports an error for an ambiguous selector. |
+| `app.layout(selector)` | Where layout placed the matched view, in the root's points: `x`, `y`, `width`, `height`, `hidden` (it or an ancestor has `visibility: hidden`), and `clipped` (an ancestor with `overflow: hidden` or a scroll view cuts part of it). Returns `null` when nothing on screen matches; reports an error for an ambiguous selector. |
+| `app.accessibility(selector?)` | The accessibility tree: views on screen with a `role` or an `accessibilityLabel`, each with `role`, `label`, `disabled`, `selected`, `checked` (`"true"`, `"false"` or `"mixed"`), `expanded`, `level`, `description` and `children`. With a selector, the tree from the matched view (`null` when nothing on screen matches); without, from a root that has no role. |
 | `app.storage()` | What the app's storage holds now. |
 | `await app.back()` | Goes back as the user does (a header's back button, swiping a sheet down; in a sheet showing a pushed page, its header's back button): the innermost stack of the newest modal, else of the screen, that is laid out with a size (not in a tab laid out at no size) pops its top screen (`onDismiss`), or asks it (`onBackRequest`) when it has `preventBack`; without one, the newest modal asks to close (`onRequestClose`). Rejects when there is nothing to go back from. |
 | `await app.forward()` | Goes forward in the browser's history, as its forward button does. With `--target web` only; elsewhere it rejects with `ERR_NSH_TEST_UNSUPPORTED`. |
@@ -473,6 +475,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `await app.setColorScheme(scheme)` | Switches the system's appearance to `"light"` or `"dark"`, as the user does. |
 | `await app.setLifecycle(state)` | Moves the app to `"background"`, `"inactive"` or `"active"`, as the system does when the user leaves it, switches to another app or window and comes back (`lifecycle()`). Headless runs only. |
 | `await app.wake()` | Wakes the system from sleep, as when the user opens a laptop's lid: `wakeCount()` counts one more and `lifecycle()` stays as it was. Headless runs only. |
+| `await app.setNetworkState(state)` | Changes how the device reaches the network as `state` names (`{ kind: "none" }` offline, `{ kind: "cellular", expensive: true }`, `{ cellularData: "restricted" }`; also `constrained`), as the system reports when the route or the user's settings change; what it does not name stays (`network()`). A headless app starts with the kind `"unknown"`, which counts as online. Requests still get their routes (`open`'s `network`). Headless runs only. |
 | `await app.setLocaleSettings(settings)` | Changes the locale settings `settings` names (`{ hourCycle: "h23", timeZone: "Asia/Tokyo" }`; also `languages`, `firstDayOfWeek`, `measurementSystem` and `temperatureUnit`, as `open`'s `localeSettings` takes them), as when the user changes the system's or travels; the others stay (`localeSettings()`). Headless runs only. |
 | `await app.screenshot(path?)` | A picture of the app as a `Uint8Array`: PNG of its window on graphical targets, UTF-8 Cell JSON on `tui`, also saved at `path` on this machine when given (relative to the current directory). Only a real platform draws the app: see [On a real platform](#on-a-real-platform). |
 | `app.windowIds()` | The ids of the app's open windows, in opening order; empty off the desktops and while the app has none. |
@@ -504,7 +507,7 @@ a test matches the code:
 |---|---|
 | `ERR_NSH_TEST_NOT_FOUND` | Nothing on screen matches the selector, or the open menu has no such item. |
 | `ERR_NSH_TEST_DISABLED` | The view the selector names is disabled (a scroll view the user cannot scroll, a disabled menu item). |
-| `ERR_NSH_TEST_COVERED` | Another view is drawn over the one `press` names and would take a finger there (an overlay over a button, a bar over a row scrolled under it). |
+| `ERR_NSH_TEST_COVERED` | Another view is drawn over the one `press` names and would take a finger there (an overlay over a button, a bar over a row scrolled under it, a selection's edit menu over a view). |
 | `ETIMEDOUT` | `waitFor` or `waitUntil` ran out of time, or the app rendered nothing after `open`. |
 | `ERR_NSH_TEST_NO_BACK` | `back()` found nothing to go back from. |
 | `ERR_NSH_TEST_UNSUPPORTED` | `open` with `--target` was given an option the target's platform cannot honor: `width` or `height` on iOS and Android, a phone's `platform` on a desktop or the web, a desktop's or the other phone's on iOS or Android, `host.handlers`, `modules`, `url`. The message names it. Also `forward()` off `--target web`. |
@@ -620,7 +623,8 @@ own input at the views their selectors name, as Playwright does in a browser:
   edge of a scroll view already at its end is acted on where it is, without pulling the scroll view past that end
   (where a pull to refresh starts or a page sheet closes); a view a scroll view's content passes under at its edges
   (on iOS a transparent header, a tab bar, the keyboard) is scrolled out from under them, and a step on one
-  left under them, or under a bar the system draws, fails with `ERR_NSH_TEST_COVERED` instead of pressing the bar;
+  left under them, or under a bar the system draws or a selection's edit menu, fails with `ERR_NSH_TEST_COVERED`
+  instead of pressing what covers it;
 - selectors, waits and queries see the same model of the app as headless runs, built from what the host draws, so
   they find the same views;
 - dialogs are the platform's own: `app.dialogs()` reads them, and answering one (`onDialog`, or its cancel button
@@ -662,7 +666,7 @@ is written or says what it needs. A desktop's `platform` (`"macos"` for a deskto
 desktop target and the web, as that target's platform and always as a desktop: in the browser the page starts in the
 desktop idiom whatever its width, where without a `platform` (or with `"web"`) it measures its idiom as a browser does
 (a desktop from 600 points wide). An app with Rust crates of its own runs in a development host built with its crates, which NSH
-builds for the platform; a Rust app's host runs its root, so `open(".")` starts it there as it does headless.
+builds for the platform (on Android for the device's ABI, as `nsh run` does); a Rust app's host runs its root, so `open(".")` starts it there as it does headless.
 
 `nsh test --target tui` runs the tests against the terminal renderer in an in-memory terminal, suitable for CI.
 Each `open` uses its own surface and data directory. Set its point dimensions with `open(entry, { width, height })`;

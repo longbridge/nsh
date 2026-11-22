@@ -90,7 +90,9 @@ pub(super) async fn take_photo(request: PhotoRequest) -> Result<Option<PickedFil
 fn has_camera() -> bool {
     // UIKit shows a Mac's camera to a Catalyst app, but NSH packages none
     // and its development host is not entitled to the camera: none there.
-    if cfg!(target_abi = "macabi") {
+    // The simulator has no real camera, yet UIKit reports one there (the
+    // iOS 27 simulator), and the photo could not be taken: none there either.
+    if cfg!(any(target_abi = "macabi", target_abi = "sim")) {
         return false;
     }
     let Some(class) = AnyClass::get(c"UIImagePickerController") else {

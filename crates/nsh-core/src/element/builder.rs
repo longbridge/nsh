@@ -12,9 +12,9 @@ use super::{
 use crate::{
     AccessibilityProp, AccessibilityRole, AccessibilityState, AccessibilityValue, Bounds,
     ContextMenuEvent, EdgeInsets, EventKind, EventPayload, Hsla, ImageSource, KeyCapture, KeyEvent,
-    ListContentStyle, MouseEvent, NativeProp, NodeId, PinchEvent, PointerEvents, Points,
-    PressEvent, Prop, Size, Tag, TouchEvent, WheelEvent,
-    geometry::{DevicePixels, Radians},
+    ListContentStyle, LiveRegion, MouseEvent, NativeProp, NodeId, PinchEvent, PointerEvents,
+    Points, PressEvent, Prop, Size, Tag, TouchEvent, WheelEvent,
+    geometry::{Axis, DevicePixels, Radians},
     style::Color,
 };
 
@@ -1595,6 +1595,34 @@ pub trait Accessible: Element {
         self
     }
 
+    /// The list's orientation for screen readers (ARIA's
+    /// `aria-orientation`, reported on the web): `"horizontal"` or
+    /// `"vertical"`, for a tab list or toolbar laid out along that axis;
+    /// `None` has none.
+    fn accessibility_orientation(mut self, orientation: impl IntoReactive<Option<Axis>>) -> Self {
+        self.node().bind_attr(orientation, |a, orientation| {
+            super::host::set_in(
+                &mut a.props,
+                Prop::Accessibility(AccessibilityProp::Orientation(orientation)),
+            )
+        });
+        self
+    }
+
+    /// How changes of it the screen reader announces by itself (TS:
+    /// `accessibilityLiveRegion`): TalkBack on Android, VoiceOver on macOS,
+    /// the web's `aria-live`, a live region on Windows; `"polite"` when the
+    /// user is idle, `"assertive"` right away.
+    fn accessibility_live_region(mut self, region: impl IntoReactive<LiveRegion>) -> Self {
+        self.node().bind_attr(region, |a, region| {
+            super::host::set_in(
+                &mut a.props,
+                Prop::Accessibility(AccessibilityProp::LiveRegion(region)),
+            )
+        });
+        self
+    }
+
     /// The element that is the active one while it keeps the keyboard
     /// focus, which screen readers read as it changes (TS:
     /// `accessibilityActiveDescendant`; ARIA's `aria-activedescendant`):
@@ -1702,11 +1730,19 @@ pub trait Accessible: Element {
     /// `accessibilityActions`): `increment` and `decrement` for an
     /// adjustable element, `activate`, `longpress`, or the app's own with
     /// a label; [`Interactive::on_accessibility_action`] hears them.
-    fn accessibility_actions(mut self, actions: Vec<crate::AccessibilityActionDef>) -> Self {
-        super::host::set(
-            self.node(),
-            Prop::Accessibility(AccessibilityProp::Actions(actions)),
-        );
+    /// Bound to signals, the labels follow them in place (the interface's
+    /// language): the element and the screen reader's focus on it stay,
+    /// and the names its handler hears do not change.
+    fn accessibility_actions(
+        mut self,
+        actions: impl IntoReactive<Vec<crate::AccessibilityActionDef>>,
+    ) -> Self {
+        self.node().bind_attr(actions, |a, actions| {
+            super::host::set_in(
+                &mut a.props,
+                Prop::Accessibility(AccessibilityProp::Actions(actions)),
+            )
+        });
         self
     }
 }
@@ -2644,15 +2680,20 @@ impl View {
     /// indicator on the selected tab): along the main axis of its parent
     /// (vertical in a flex column, else horizontal) it spans that element's
     /// frame, inside its own margins on that axis, wherever the element is
-    /// inside its parent; across it, its style places it (`bottom(px(0.))`
-    /// and a height for an underline, top and bottom insets for a pill),
-    /// so its style makes it [`Styled::absolute`]. The core places it after
-    /// each layout, with no layout of its own and no JS: following another
-    /// element changes its frame alone, and a layout that moves the element
-    /// moves it in the same batch. While `target` is `None`, or no laid
-    /// out element carries it, its style alone places it; hidden
-    /// (`display: none`) and shown again, it is placed at once. A view
-    /// that follows nothing costs no work after layout.
+    /// inside its parent, in a list's row too; across it, its style places
+    /// it (`bottom(px(0.))` and a height for an underline, top and bottom
+    /// insets for a pill), so its style makes it [`Styled::absolute`]. The
+    /// core places it after each layout, with no layout of its own and no
+    /// JS: following another element changes its frame alone, and a layout
+    /// that moves the element moves it in the same batch. Scroll views and
+    /// lists in between count where they are scrolled, and it spans only
+    /// the part of the element they show: outside them, it follows their
+    /// scrolling a frame or so behind; in the same scroll view's content as the
+    /// element, it moves with it natively. While `target` is `None`, or no
+    /// laid out element carries it (a list's row gone, or scrolled out of
+    /// view), its style alone places it; hidden (`display: none`) and shown
+    /// again, it is placed at once. A view that follows nothing costs no
+    /// work after layout.
     pub fn follow(mut self, target: impl IntoReactive<Option<super::ElementRef>>) -> Self {
         let target = (target.into_reactive()).map(|t: Option<super::ElementRef>| {
             t.and_then(|t| t.target()).map(super::FollowTarget)

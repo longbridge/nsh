@@ -107,6 +107,17 @@ pub use nsh_macros::{
 // The core's parts of `nsh_base`'s navigation and dialogs.
 #[doc(hidden)]
 pub use self::host::{modal, screen, stack};
+pub(crate) use self::{
+    ambient::act,
+    animated::LiveNode,
+    back::BackListener,
+    builder::{ElKind, PlaceFn},
+    component::{AnyInstance, caught, panic_message},
+    task::{
+        Action, AfterAnswer, AnswerSlot, AudioAction, ClipboardRead, Executor, FileAnswer,
+        NotificationAction, SpeechAction,
+    },
+};
 pub use self::{
     ambient::*,
     animated::{
@@ -199,16 +210,6 @@ pub use self::{
     virtual_list::{ListLayout, ViewableItems, VirtualList, virtual_list},
     watch::OrderWatch,
 };
-pub(crate) use self::{
-    animated::LiveNode,
-    back::BackListener,
-    builder::{ElKind, PlaceFn},
-    component::{AnyInstance, caught, panic_message},
-    task::{
-        Action, AfterAnswer, AnswerSlot, AudioAction, ClipboardRead, Executor, FileAnswer,
-        NotificationAction, SpeechAction,
-    },
-};
 /// The geometry Rust components style with (`crate::geometry`).
 pub use crate::geometry::{
     AbsoluteLength, Bounds, Corners, DefiniteLength, DevicePixels, Edges, Length, Percentage,
@@ -241,9 +242,9 @@ pub use crate::{
     main_thread::{MainThreadError, OnMainThread},
     overlay::{Align, Placement},
     platform::{
-        Appearance, HourCycle, HttpBody, HttpHead, HttpRequest, Idiom, Languages, Lifecycle,
-        Locale, LocaleSettings, MeasurementSystem, Os, PerfStats, SizeClass, TemperatureUnit,
-        TimeZone, Weekday,
+        Appearance, CellularData, HourCycle, HttpBody, HttpHead, HttpRequest, Idiom, Languages,
+        Lifecycle, Locale, LocaleSettings, MeasurementSystem, Network, NetworkKind, Os, PerfStats,
+        SizeClass, TemperatureUnit, TimeZone, Weekday,
     },
     style::Color,
 };

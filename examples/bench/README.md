@@ -23,9 +23,22 @@ an OtpInput. Steps on standard input drive them, `--trace` shows each keystroke'
 
 `data-table/` is a DataTable of 100 000 rows × 20 columns whose app serves the rows around those in view
 (`onVisibleRowsChange`), as an app over more values than a prop takes (a million) must. Its test opens a 1280 × 800
-desktop window and holds it for 20 s while something outside drives it: on Linux, Xvfb and XTest dragging the scroll
-bar's thumb or turning the wheel, with `nsh test examples/bench/data-table --target linux --fps -v` logging the frame
-rate and the engine's cost each second. Results: `docs/dev/performance.md` ("DataTable scroll bar drag").
+desktop viewport and drives steady vertical scroll steps through `nsh/test`, verifying that `onVisibleRowsChange`
+advances past the initial 200-row page. Run headless with `--trace`, or on a desktop host with `--fps -v`:
+
+```sh
+nsh test examples/bench/data-table/scroll.test.tsx --trace
+nsh test examples/bench/data-table --target macos --fps -v    # or windows / linux
+```
+
+Set `EXTERNAL_DRIVER=1` to hold the 1280 × 800 window open for 20 s while an outside driver (such as Xvfb and XTest
+dragging the scroll bar's thumb on Linux) drives it while `--fps` logs:
+
+```sh
+EXTERNAL_DRIVER=1 nsh test examples/bench/data-table --target linux --fps -v
+```
+
+Results: `docs/dev/performance.md`.
 
 `RichEditor.tsx` holds 1,000 paragraphs of 80 ASCII characters. Each press alternates inserting and deleting one
 character in the first paragraph, retaining the rows' keys and order:

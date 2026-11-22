@@ -32,7 +32,7 @@ use crate::{
     Command, Dialog, EdgeInsets, LayoutAnimation, NodeId, Points, Size,
     canvas::CanvasFont,
     color::Hsla,
-    platform::{Appearance, Idiom, Lifecycle, Locale, LocaleSettings, Os},
+    platform::{Appearance, Idiom, Lifecycle, Locale, LocaleSettings, Network, Os},
     time::Instant,
 };
 
@@ -102,6 +102,7 @@ struct EnvSignals {
     locale_settings: Memo<LocaleSettings>,
     lifecycle: Memo<Lifecycle>,
     wake_count: Memo<u32>,
+    network: Memo<Network>,
     screen_color: Memo<bool>,
     shaders: Memo<bool>,
 }
@@ -147,6 +148,7 @@ impl EnvSignals {
                 locale_settings: part!(locale_settings),
                 lifecycle: part!(lifecycle),
                 wake_count: part!(wake_count),
+                network: part!(network),
                 screen_color: part!(screen_color),
                 shaders: part!(shaders),
             }
@@ -307,7 +309,7 @@ pub(super) fn executor() -> Rc<Executor> {
     with_data(|d| d.ambient.executor.clone()).expect("the core sets the executor")
 }
 
-fn act(action: Action) {
+pub(crate) fn act(action: Action) {
     executor().act(action);
 }
 
@@ -469,6 +471,24 @@ pub fn lifecycle() -> Lifecycle {
 /// to the background, which [`lifecycle`] reports.
 pub fn wake_count() -> u32 {
     env(|e| e.wake_count)
+}
+
+/// How the device reaches the network now (TS: `network()`): the kind of
+/// link its default route takes
+/// ([`NetworkKind::None`](crate::platform::NetworkKind::None) offline),
+/// whether that link costs the user or the user asked to save data on it,
+/// and on iOS whether the user lets the app use cellular data. Reading it
+/// subscribes, so an effect that reads it runs again when the route
+/// changes: a request that failed offline can wait for
+/// [`Network::online`] and try again at once, and one refused while
+/// [`CellularData::Restricted`](crate::platform::CellularData::Restricted)
+/// points the user to the system's settings instead of retrying. iOS and
+/// macOS follow the system's path monitor, Android its default network,
+/// the web `navigator.onLine` and `navigator.connection`; elsewhere it
+/// stays [`NetworkKind::Unknown`](crate::platform::NetworkKind::Unknown),
+/// which counts as online.
+pub fn network() -> Network {
+    env(|e| e.network)
 }
 
 /// The operating system (TS: `platform.os`); it does not change.
@@ -1404,6 +1424,13 @@ pub(crate) fn act_locale(locale: Option<crate::platform::Locale>) {
     act(Action::Locale(locale));
 }
 
+/// Tells the core that translations changed in place
+/// ([`crate::i18n::add_translations`]), so menus can re-localize if the
+/// selected language changed.
+pub(crate) fn act_translations_changed(before: crate::i18n::Translations) {
+    act_if_running(Action::TranslationsChanged(before));
+}
+
 /// Shows the surface in `appearance` whatever the system's (TS:
 /// `setColorScheme`).
 pub fn set_color_scheme(appearance: Appearance) {
@@ -1761,6 +1788,11 @@ pub struct KeyOptions {
     /// give way to the control the focus is on (default)
     /// ([`crate::keymap::KeyBinding::for_focus`]).
     pub for_focus: bool,
+    /// Comes before the views' bindings of the keystroke, so it takes a key
+    /// a focused component binds itself (a query editor's mod+enter over
+    /// the editor's own) while it is kept (default: the views' come first)
+    /// ([`crate::keymap::KeyBinding::over_focused`]).
+    pub over_focused: bool,
 }
 
 /// Where a keyboard shortcut fires ([`on_key_with`]; TS: `keymap.bind`'s
@@ -1851,6 +1883,7 @@ pub fn on_key_with(keystroke: &str, options: KeyOptions, handler: impl Fn(&str) 
             crate::keymap::KeyBinding::new(id, parsed, options.when, options.repeat)
                 .passing_through(options.pass_through)
                 .focus_keys(options.for_focus)
+                .over_focused(options.over_focused)
         },
         keystroke.into(),
         handler,

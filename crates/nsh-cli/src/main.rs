@@ -15,6 +15,7 @@ mod dev;
 mod dev_port;
 mod entry;
 mod init;
+mod ios_frameworks;
 mod logger;
 mod module_meta;
 mod native_features;
@@ -174,6 +175,12 @@ enum Command {
         /// format CI services read.
         #[arg(long, value_name = "FILE")]
         junit: Option<PathBuf>,
+        /// How many test files run at once, each on its own engine (by
+        /// default as many as the machine has cores). Their results show
+        /// file by file, in order. Headless runs only: with --target or
+        /// --trace the files run one at a time.
+        #[arg(long, short = 'j', value_name = "N")]
+        jobs: Option<std::num::NonZeroUsize>,
         /// Run the apps the tests open on this platform's development host
         /// instead of headless: the steps act with the platform's own input
         /// (macos, linux, windows, gpui, tui, web, ios and android; tui uses
@@ -432,6 +439,11 @@ enum Command {
         /// Where iOS or Android users get it: `ios=<url>`, `android=<url>` (repeatable).
         #[arg(long = "link")]
         links: Vec<String>,
+        /// The previous release's archive of a platform (repeatable):
+        /// writes a patch from it beside the manifest, which apps running
+        /// that version download instead of the whole archive.
+        #[arg(long)]
+        previous: Vec<PathBuf>,
         /// Prefix of the archives' URLs (default: next to the manifest).
         #[arg(long)]
         base_url: Option<String>,
@@ -991,6 +1003,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             trace,
             fps,
             junit,
+            jobs,
             target,
             browser,
             web_host,
@@ -1004,6 +1017,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             trace,
             fps,
             junit.as_deref(),
+            jobs,
             target,
             browser.as_deref(),
             web_host,
@@ -1166,6 +1180,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             key,
             notes,
             links,
+            previous,
             base_url,
             out,
         } => updater::manifest(updater::ManifestOptions {
@@ -1175,6 +1190,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             key: key.as_deref(),
             notes: &notes,
             links: &links,
+            previous: &previous,
             base_url: base_url.as_deref(),
             out: &out,
         }),

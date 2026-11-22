@@ -110,7 +110,7 @@ define_class!(
 
         #[unsafe(method_id(accessibilityValue))]
         fn accessibility_value(&self) -> Option<Retained<NSString>> {
-            let value = accessibility_value(&self.ivars().props.borrow());
+            let value = self.a11y_value(&self.ivars().props.borrow());
             if let Some(read) = self.ivars().step.borrow_mut().as_mut() {
                 *read = Some(value.clone().unwrap_or_default());
             }
@@ -300,8 +300,9 @@ define_class!(
     pub(crate) struct FocusTap;
 
     impl FocusTap {
-        /// A touch on a stop inside the view is that stop's: its own press
-        /// or tap focuses it, and an input focuses itself.
+        /// A touch on a stop inside the view is that stop's: its own focus
+        /// tap focuses it, an input focuses itself, and a control (a view
+        /// that takes presses) takes its press and no focus.
         #[unsafe(method(touchesBegan:withEvent:))]
         fn touches_began(&self, touches: &NSSet<UITouch>, event: &UIEvent) {
             if let (Some(view), Some(touch)) = (self.view(), touches.anyObject())
@@ -565,10 +566,10 @@ impl NshView {
         self.ivars().events.set(events);
     }
 
-    /// A `focusable` view that takes no presses has no `PressRecognizer` to
-    /// focus it: a tap recognizer that neither claims nor cancels touches
-    /// gives it the keyboard focus. It is removed once the view stops being
-    /// such a stop (or starts taking presses, which focuses it already).
+    /// A `focusable` view that takes no presses (one that takes keys) gets
+    /// the keyboard focus from a tap recognizer that neither claims nor
+    /// cancels touches. It is removed once the view stops being such a stop
+    /// or starts taking presses: a tap gives a control no focus.
     pub(crate) fn update_focus_tap(&self, target: &EventTarget) {
         let wants = self.is_focus_stop() && !self.takes_presses();
         let mut kept = self.ivars().focus_tap.borrow_mut();
@@ -621,6 +622,16 @@ impl NshView {
         !props.accessibility.state.disabled && props.key_capture.captures_key(stroke)
     }
 
+    /// The spoken value: an explicit `accessibilityValue`, plus checked,
+    /// mixed pressed, expanded, current and invalid states (UIKit has no
+    /// traits for those), in the language of the app's text.
+    fn a11y_value(&self, props: &ViewProps) -> Option<String> {
+        let words = self
+            .keyboard_target()
+            .map_or(crate::state_words::DEFAULT, |target| target.state_words());
+        state_value(props, words)
+    }
+
     /// The surface's target, once the view is mounted.
     pub(crate) fn keyboard_target(&self) -> Option<Retained<EventTarget>> {
         self.ivars().target.borrow().as_ref().and_then(Weak::load)
@@ -651,8 +662,12 @@ impl NshView {
         if self.ivars().step.borrow().is_none() {
             return None;
         }
-        let value = accessibility_value(props).unwrap_or_default();
-        if accessibility_value(&self.ivars().props.borrow()).unwrap_or_default() == value {
+        let value = self.a11y_value(props).unwrap_or_default();
+        if self
+            .a11y_value(&self.ivars().props.borrow())
+            .unwrap_or_default()
+            == value
+        {
             return None;
         }
         let read = self.ivars().step.take().flatten()?;
@@ -686,6 +701,27 @@ impl NshView {
     /// Replaces the label of the props set last (`MountItem::AccessibilityLabel`).
     pub(crate) fn set_accessibility_label(&self, label: Option<std::sync::Arc<str>>) {
         self.ivars().props.borrow_mut().accessibility.label = label;
+    }
+
+    /// Whether the view says nothing of its own to a screen reader (no
+    /// role, name, value, help, actions or press, and not made one
+    /// element): a text view's inline links and views can then be elements
+    /// of their own ([`crate::text_access`]).
+    pub(crate) fn reads_only_content(&self) -> bool {
+        let a = &self.ivars().props.borrow().accessibility;
+        a.role == AccessibilityRole::None
+            && a.accessible != Some(true)
+            && a.label.is_none()
+            && a.value.is_none()
+            && a.hint.is_none()
+            && a.description.is_none()
+            && a.actions.is_empty()
+            && !self.ivars().pressable.get()
+    }
+
+    /// `accessibilityState={{ disabled: true }}`.
+    pub(crate) fn accessibility_disabled(&self) -> bool {
+        self.ivars().props.borrow().accessibility.state.disabled
     }
 
     /// The view has press handlers.
@@ -844,14 +880,8 @@ fn traits(props: &ViewProps) -> UIAccessibilityTraits {
     }
 }
 
-/// The spoken value: an explicit `accessibilityValue`, plus checked,
-/// mixed pressed, expanded, current and invalid states (UIKit has no
-/// traits for those).
-fn accessibility_value(props: &ViewProps) -> Option<String> {
-    state_value(props, crate::state_words::current())
-}
-
-/// [`accessibility_value`] with the state spoken in `words`.
+/// The spoken value with the state spoken in `words`
+/// (`NshView::a11y_value`).
 fn state_value(props: &ViewProps, words: &crate::state_words::StateWords) -> Option<String> {
     let a = &props.accessibility;
     let mut parts: Vec<String> = Vec::new();

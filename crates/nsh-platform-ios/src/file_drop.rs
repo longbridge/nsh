@@ -1,6 +1,8 @@
-//! File drops (`onFileDragEnter`, `onFileDragLeave`, `onFileDrop`) on iOS:
-//! a `UIDropInteraction` on each view that listens to `onFileDrop`, whose
-//! delegate is the surface's [`crate::target::EventTarget`].
+//! File drops (`onFileDragEnter`, `onFileDragLeave`, `onFileDrop`) and text
+//! drops ([`nsh_core::EventKind::TextDrop`], a Rust component's such as
+//! `RichEditor`'s) on iOS: a `UIDropInteraction` on each view that listens
+//! to either, whose delegate is the surface's
+//! [`crate::target::EventTarget`].
 //!
 //! UIKit routes a drag to the deepest view under it with a drop interaction
 //! that can handle the session, so the closest listener takes the files, as
@@ -27,7 +29,7 @@ use objc2::{
     rc::{Allocated, Retained},
     runtime::{AnyClass, AnyObject},
 };
-use objc2_foundation::{NSArray, NSError, NSString, NSURL};
+use objc2_foundation::{NSArray, NSData, NSError, NSString, NSURL};
 
 /// `UIDropOperationCopy`.
 const COPY: isize = 2;
@@ -53,29 +55,107 @@ pub(crate) fn interaction(delegate: &AnyObject) -> Option<Retained<AnyObject>> {
 /// The type identifier of the file `provider` offers: its first registered
 /// type that is data, but not text or a link (those are a text drag's).
 fn file_type(provider: &AnyObject) -> Option<Retained<NSString>> {
+    // SAFETY: NSItemProvider's documented API (iOS 11).
+    let types: Retained<NSArray<NSString>> =
+        unsafe { msg_send![provider, registeredTypeIdentifiers] };
+    types.iter().find(|identifier| is_file_type(identifier))
+}
+
+/// The uniform type `identifier` names (a `UTType`), when the framework
+/// loads and knows it.
+fn uniform_type(identifier: &str) -> Option<Retained<AnyObject>> {
     let type_class = crate::picker::uniform_types()
         .then(|| class(c"UTType"))
         .flatten()?;
-    // SAFETY: NSItemProvider's and UTType's documented API (iOS 11, 14).
-    unsafe {
-        let types: Retained<NSArray<NSString>> = msg_send![provider, registeredTypeIdentifiers];
-        let named = |identifier: &str| -> Option<Retained<AnyObject>> {
-            let identifier = NSString::from_str(identifier);
-            msg_send![type_class, typeWithIdentifier: &*identifier]
-        };
-        let (data, text, url) = (
-            named("public.data")?,
-            named("public.text")?,
-            named("public.url")?,
-        );
-        types.iter().find(|identifier| {
-            let found: Option<Retained<AnyObject>> =
-                msg_send![type_class, typeWithIdentifier: &**identifier];
-            found.is_some_and(|t| {
-                let conforms = |to: &AnyObject| -> bool { msg_send![&t, conformsToType: to] };
-                conforms(&data) && !conforms(&text) && !conforms(&url)
-            })
-        })
+    let identifier = NSString::from_str(identifier);
+    // SAFETY: UTType's documented API (iOS 14).
+    unsafe { msg_send![type_class, typeWithIdentifier: &*identifier] }
+}
+
+/// Whether the type `identifier` conforms to the type `to` (false when
+/// either is unknown).
+pub(crate) fn conforms(identifier: &NSString, to: &str) -> bool {
+    let (Some(kind), Some(to)) = (uniform_type(&identifier.to_string()), uniform_type(to)) else {
+        return false;
+    };
+    // SAFETY: UTType's documented API (iOS 14).
+    unsafe { msg_send![&kind, conformsToType: &*to] }
+}
+
+/// Whether the type `identifier` is a file's: data, but not text or a link.
+pub(crate) fn is_file_type(identifier: &NSString) -> bool {
+    conforms(identifier, "public.data")
+        && !conforms(identifier, "public.text")
+        && !conforms(identifier, "public.url")
+}
+
+/// The MIME type of a file of type `identifier` (`application/octet-stream`
+/// when the type has none) and the file name extension the type prefers.
+pub(crate) fn mime_and_extension(identifier: &NSString) -> (String, Option<String>) {
+    let kind = uniform_type(&identifier.to_string());
+    // SAFETY: UTType's documented getters (iOS 14).
+    let (mime, extension) = kind.map_or((None, None), |kind| unsafe {
+        let mime: Option<Retained<NSString>> = msg_send![&kind, preferredMIMEType];
+        let extension: Option<Retained<NSString>> = msg_send![&kind, preferredFilenameExtension];
+        (
+            mime.map(|m| m.to_string()),
+            extension.map(|e| e.to_string()),
+        )
+    });
+    (
+        mime.unwrap_or_else(|| "application/octet-stream".into()),
+        extension,
+    )
+}
+
+/// The type identifier a file named `name` of MIME type `mime` has: the
+/// type of its extension, else of its MIME type, else `public.data`.
+#[cfg(feature = "dev")]
+pub(crate) fn type_of_file(name: &str, mime: &str) -> String {
+    let found = crate::picker::uniform_types()
+        .then(|| class(c"UTType"))
+        .flatten()
+        .and_then(|type_class| {
+            let extension = std::path::Path::new(name)
+                .extension()
+                .map(|e| NSString::from_str(&e.to_string_lossy()));
+            let mime = NSString::from_str(mime);
+            // SAFETY: UTType's documented API (iOS 14).
+            unsafe {
+                let by_extension: Option<Retained<AnyObject>> = match &extension {
+                    Some(extension) => {
+                        msg_send![type_class, typeWithFilenameExtension: &**extension]
+                    }
+                    None => None,
+                };
+                let found = match by_extension {
+                    Some(found) => Some(found),
+                    None => msg_send![type_class, typeWithMIMEType: &*mime],
+                };
+                // A dynamic type (`dyn.…`) is no type another app reads.
+                found
+                    .map(|found| -> Retained<NSString> { msg_send![&found, identifier] })
+                    .map(|identifier| identifier.to_string())
+                    .filter(|identifier| !identifier.starts_with("dyn."))
+            }
+        });
+    found.unwrap_or_else(|| "public.data".into())
+}
+
+/// The name of a pasted file: the one its item suggests (no folder in it),
+/// else `file`, given the extension of its type when it has none.
+pub(crate) fn pasted_name(suggested: Option<&str>, extension: Option<&str>) -> String {
+    let suggested = suggested.unwrap_or_default().trim().replace('/', "_");
+    let name = if suggested.is_empty() {
+        "file".to_owned()
+    } else {
+        suggested
+    };
+    match extension {
+        Some(extension) if std::path::Path::new(&name).extension().is_none() => {
+            format!("{name}.{extension}")
+        }
+        _ => name,
     }
 }
 
@@ -92,17 +172,46 @@ fn providers(session: &AnyObject) -> Vec<Retained<AnyObject>> {
 }
 
 /// Whether `session` offers at least one file.
-pub(crate) fn offers_files(session: &AnyObject) -> bool {
+fn offers_files(session: &AnyObject) -> bool {
     providers(session).iter().any(|p| file_type(p).is_some())
 }
 
-/// The proposal for `session` over a listener: copy its files.
-pub(crate) fn proposal(session: &AnyObject) -> Option<Retained<AnyObject>> {
-    let operation = if offers_files(session) {
-        COPY
+/// Whether `provider` offers text (plain or rich; a link alone is no text).
+fn has_text(provider: &AnyObject) -> bool {
+    let text = NSString::from_str("public.text");
+    // SAFETY: NSItemProvider's documented API (iOS 11).
+    unsafe { msg_send![provider, hasItemConformingToTypeIdentifier: &*text] }
+}
+
+/// What a drag gives a view: its files when it offers some and the view
+/// listens to `onFileDrop`, else its text when it offers some and the view
+/// takes text drops (a Rust component such as `RichEditor`,
+/// [`nsh_core::EventKind::TextDrop`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Offer {
+    Files,
+    Text,
+}
+
+/// What `session` gives a view that listens to `events`, if anything.
+pub(crate) fn offer(session: &AnyObject, events: nsh_core::EventMask) -> Option<Offer> {
+    use nsh_core::EventKind;
+    let files = offers_files(session);
+    if files && events.contains(EventKind::FileDrop) {
+        Some(Offer::Files)
+    } else if !files
+        && events.contains(EventKind::TextDrop)
+        && providers(session).iter().any(|p| has_text(p))
+    {
+        Some(Offer::Text)
     } else {
-        FORBIDDEN
-    };
+        None
+    }
+}
+
+/// The proposal for a drag over a listener: copy what it offers it.
+pub(crate) fn proposal(offered: bool) -> Option<Retained<AnyObject>> {
+    let operation = if offered { COPY } else { FORBIDDEN };
     let class = class(c"UIDropProposal")?;
     // SAFETY: UIDropProposal's documented initializer (iOS 11).
     unsafe {
@@ -225,6 +334,91 @@ pub(crate) fn read(session: &AnyObject, done: impl FnOnce(Vec<String>) + Send + 
         let _: Option<Retained<AnyObject>> = unsafe {
             msg_send![&provider, loadFileRepresentationForTypeIdentifier: &*kind, completionHandler: &*handler]
         };
+    }
+}
+
+/// Reads the text `session` offers (each item's plain text, and its HTML
+/// when it has some, joined by line breaks), then calls `done` with the
+/// text and the HTML, on a queue of the providers'.
+pub(crate) fn read_text(session: &AnyObject, done: impl FnOnce(String, String) + Send + 'static) {
+    let providers: Vec<_> = providers(session)
+        .into_iter()
+        .filter(|p| has_text(p))
+        .collect();
+    let Some(string_class) = class(c"NSString").filter(|_| !providers.is_empty()) else {
+        done(String::new(), String::new());
+        return;
+    };
+    let html_type = NSString::from_str("public.html");
+    let with_html: Vec<bool> = providers
+        .iter()
+        // SAFETY: NSItemProvider's documented API (iOS 11).
+        .map(|p| unsafe { msg_send![&**p, hasItemConformingToTypeIdentifier: &*html_type] })
+        .collect();
+    let reads = providers.len() + with_html.iter().filter(|&&h| h).count();
+    let reading = Arc::new(Mutex::new(TextReading {
+        text: vec![None; providers.len()],
+        html: vec![None; providers.len()],
+        left: reads,
+        done: Some(Box::new(done) as Box<dyn FnOnce(String, String) + Send>),
+    }));
+    for (index, provider) in providers.iter().enumerate() {
+        let r = reading.clone();
+        let handler = RcBlock::new(move |object: *mut AnyObject, _error: *mut NSError| {
+            // SAFETY: the NSString the provider read, valid for this call
+            // (null on failure).
+            let text = unsafe { object.as_ref() }
+                .and_then(|o| o.downcast_ref::<NSString>())
+                .map(|s| s.to_string());
+            TextReading::done_one(&r, |state| state.text[index] = text);
+        });
+        // SAFETY: NSItemProvider's `loadObjectOfClass:completionHandler:`
+        // (iOS 11) with NSString, an NSItemProviderReading class; the
+        // handler runs once on a queue of the provider's.
+        let _: Option<Retained<AnyObject>> = unsafe {
+            msg_send![&**provider, loadObjectOfClass: string_class, completionHandler: &*handler]
+        };
+        if with_html[index] {
+            let r = reading.clone();
+            let handler = RcBlock::new(move |data: *mut NSData, _error: *mut NSError| {
+                // SAFETY: the data the provider read, valid for this call
+                // (null on failure).
+                let html = unsafe { data.as_ref() }
+                    .map(|d| String::from_utf8_lossy(&d.to_vec()).into_owned());
+                TextReading::done_one(&r, |state| state.html[index] = html);
+            });
+            // SAFETY: NSItemProvider's documented API (iOS 11); the handler
+            // runs once on a queue of the provider's.
+            let _: Option<Retained<AnyObject>> = unsafe {
+                msg_send![&**provider, loadDataRepresentationForTypeIdentifier: &*html_type, completionHandler: &*handler]
+            };
+        }
+    }
+}
+
+/// The text and HTML of a text drop read so far, by item.
+struct TextReading {
+    text: Vec<Option<String>>,
+    html: Vec<Option<String>>,
+    left: usize,
+    done: Option<Box<dyn FnOnce(String, String) + Send>>,
+}
+
+impl TextReading {
+    /// One read finished (`set` keeps what it read); the last one calls
+    /// `done` with the items' text and HTML joined by line breaks.
+    fn done_one(reading: &Mutex<TextReading>, set: impl FnOnce(&mut TextReading)) {
+        let mut state = reading.lock().unwrap_or_else(|e| e.into_inner());
+        set(&mut state);
+        state.left -= 1;
+        if state.left == 0
+            && let Some(done) = state.done.take()
+        {
+            let text: Vec<String> = state.text.drain(..).flatten().collect();
+            let html: Vec<String> = state.html.drain(..).flatten().collect();
+            drop(state);
+            done(text.join("\n"), html.join("\n"));
+        }
     }
 }
 

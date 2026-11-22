@@ -214,11 +214,12 @@ pub(crate) fn android(dev: bool, abis: &[String]) -> anyhow::Result<PathBuf> {
 }
 
 /// The Android runtime `nsh test --target android` runs apps in: the
-/// development one, a Rust app's too ([`crate::rust_app::RustApp::test_android`]).
-pub(crate) fn test_android() -> anyhow::Result<PathBuf> {
+/// development one, a Rust app's too, built for `abis` (empty: every ABI of
+/// the prebuilt runtime) ([`crate::rust_app::RustApp::test_android`]).
+pub(crate) fn test_android(abis: &[String]) -> anyhow::Result<PathBuf> {
     let prebuilt = prebuilt_android(true)?;
     match crate::rust_app::current() {
-        Some(app) => app.test_android(&prebuilt),
+        Some(app) => app.test_android(&prebuilt, abis),
         None => Ok(prebuilt),
     }
 }

@@ -1657,6 +1657,24 @@ impl Rv {
         self.insert_paste(&state, slice);
     }
 
+    /// Text dropped on the editor at `page` (the root view's coordinates):
+    /// the caret goes where it was let go, then the text goes in as a paste
+    /// of it would (the paste hooks see it), one undo step, as editors such
+    /// as ProseMirror insert dropped text.
+    pub(crate) fn drop_text(&self, text: &str, html: &str, page: Point<Points>) {
+        if !self.editable() || (text.is_empty() && html.is_empty()) {
+            return;
+        }
+        let state = self.session.state();
+        if let Some(pos) = self.session.pos_at_page_coords(page)
+            && let Ok(at) = state.doc().resolve(pos)
+        {
+            self.set_selection(Selection::near(&at, 1), false);
+        }
+        self.focus();
+        self.paste(text, html);
+    }
+
     /// Replaces the selection of `state` (the current one) with `slice`.
     fn insert_paste(&self, state: &EditorState, slice: Slice) {
         self.dispatch(paste_transaction(state, slice));

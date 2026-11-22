@@ -531,6 +531,7 @@ stopPropagation() }`）；`…ShouldSetResponder` 回调还会收到 `gestureSta
 | `accessibilityDescribedBy` | `.accessibility_described_by(..)` | `ViewRef \| null` | 文字用来说明这个元素的元素：输入框的错误提示行（[无障碍](../docs/accessibility.md#说明另一个元素的元素)）。 |
 | `accessibilityValue` | `.accessibility_value(..)` | `{ min?, max?, now?, text? }` | 范围类或文本类元素的值。 |
 | `accessibilityElementsHidden` | | `boolean` | 对辅助技术隐藏该视图及其子树。 |
+| `accessibilityLiveRegion` | `.accessibility_live_region(..)` | `"none" \| "polite" \| "assertive"` | 视图的变化如何自动播报：Android 上的 TalkBack、macOS 上的 VoiceOver、web 的 `aria-live`、Windows 上的实时区域。 |
 | `importantForAccessibility` | | `"auto" \| "yes" \| "no" \| "no-hide-descendants"` | 是否暴露该视图。 |
 | `accessibilityActions` | | `{ name: string; label?: string }[]` | 提供给辅助技术的自定义操作。 |
 | `onAccessibilityAction` | `.on_accessibility_action(..)` | `(e: { actionName: string }) => void` | 用户触发了 `accessibilityActions` 中的某个操作。 |
@@ -552,7 +553,7 @@ stopPropagation() }`）；`…ShouldSetResponder` 回调还会收到 `gestureSta
 |---|---|---|---|
 | `ripple` | `.ripple(Ripple { .. })` | `{ color?, borderless?, radius?, foreground? }` | 按下时的 Material 水波纹。 |
 | `elevation` | `.elevation(px(2.0))` | `number` | 根据视图形状生成的 Material 阴影（单位为点）。 |
-| `accessibilityLiveRegion` | | `"none" \| "polite" \| "assertive"` | 视图变化如何播报给 TalkBack。 |
+| `accessibilityLiveRegion` | | `"none" \| "polite" \| "assertive"` | 在 Android 上的播报方式；不带 bag 的同名 prop 在其他平台也一样。 |
 
 | `desktop` 键 | Rust | 类型 | 说明 |
 |---|---|---|---|

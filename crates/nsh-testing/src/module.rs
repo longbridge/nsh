@@ -624,6 +624,53 @@ impl LocaleSettingsOptions {
     }
 }
 
+/// How the device reaches the network, as a test gives it
+/// (`app.setNetworkState`; `network()`): the ones it names change, the
+/// others stay.
+#[derive(Debug, Default, Clone, PartialEq, JsObject)]
+#[non_exhaustive]
+pub struct NetworkStateOptions {
+    /// The kind of link the default route takes, `"none"` offline.
+    pub kind: Option<nsh_core::platform::NetworkKind>,
+    /// The link costs the user.
+    pub expensive: Option<bool>,
+    /// The user asked to use less data on this link.
+    pub constrained: Option<bool>,
+    /// Whether the user lets the app use cellular data.
+    pub cellular_data: Option<nsh_core::platform::CellularData>,
+}
+
+impl NetworkStateOptions {
+    /// `network` with the ones these name.
+    pub(crate) fn apply(&self, network: &mut nsh_core::platform::Network) {
+        if let Some(kind) = self.kind {
+            network.kind = kind;
+        }
+        if let Some(expensive) = self.expensive {
+            network.expensive = expensive;
+        }
+        if let Some(constrained) = self.constrained {
+            network.constrained = constrained;
+        }
+        if let Some(cellular_data) = self.cellular_data {
+            network.cellular_data = cellular_data;
+        }
+    }
+
+    /// The ones these name, as a test writes them (`{ kind: "none" }`).
+    pub(crate) fn label(&self) -> String {
+        let named = [
+            self.kind.map(|k| format!("kind: {:?}", k.name())),
+            self.expensive.map(|e| format!("expensive: {e}")),
+            self.constrained.map(|c| format!("constrained: {c}")),
+            self.cellular_data
+                .map(|c| format!("cellularData: {:?}", c.name())),
+        ];
+        let named: Vec<String> = named.into_iter().flatten().collect();
+        format!("{{ {} }}", named.join(", "))
+    }
+}
+
 /// The embedding app a test plays (`open`'s `host`; `nsh/host`).
 #[derive(Debug, Default, JsObject)]
 #[non_exhaustive]
@@ -1292,6 +1339,84 @@ impl From<crate::screen::ViewStyle> for ViewStyle {
             background_color: style.background_color.map(|c| format!("#{c:08x}")),
             opacity: f64::from(style.opacity),
             effective_opacity: f64::from(style.effective_opacity),
+        }
+    }
+}
+
+/// Where layout placed a view (`app.layout`), in the root's points.
+#[derive(Debug, Clone, PartialEq, JsObject)]
+#[non_exhaustive]
+pub struct ViewLayout {
+    /// Its left edge.
+    pub x: f64,
+    /// Its top edge.
+    pub y: f64,
+    /// Its width.
+    pub width: f64,
+    /// Its height.
+    pub height: f64,
+    /// It or a view around it is hidden (`visibility: hidden`).
+    pub hidden: bool,
+    /// A view around it that clips (`overflow: hidden`, a scroll view)
+    /// cuts part or all of it.
+    pub clipped: bool,
+}
+
+impl From<nsh_dev::protocol::ViewLayout> for ViewLayout {
+    fn from(l: nsh_dev::protocol::ViewLayout) -> Self {
+        ViewLayout {
+            x: f64::from(l.x),
+            y: f64::from(l.y),
+            width: f64::from(l.width),
+            height: f64::from(l.height),
+            hidden: l.hidden,
+            clipped: l.clipped,
+        }
+    }
+}
+
+/// A node of the accessibility tree (`app.accessibility`).
+#[derive(Debug, Clone, PartialEq, JsObject)]
+#[non_exhaustive]
+pub struct AccessibilityNode {
+    /// Its `role`, absent without one.
+    #[prop(skip_none)]
+    pub role: Option<String>,
+    /// Its `accessibilityLabel`.
+    #[prop(skip_none)]
+    pub label: Option<String>,
+    /// It takes no presses.
+    pub disabled: bool,
+    /// It is selected.
+    pub selected: bool,
+    /// Its checked state: `"true"`, `"false"` or `"mixed"`.
+    #[prop(skip_none)]
+    pub checked: Option<String>,
+    /// Whether it is expanded, for an expandable view.
+    #[prop(skip_none)]
+    pub expanded: Option<bool>,
+    /// Its `accessibilityLevel`.
+    #[prop(skip_none)]
+    pub level: Option<u32>,
+    /// Its `accessibilityDescription`.
+    #[prop(skip_none)]
+    pub description: Option<String>,
+    /// The views inside it with a role or a label, in tree order.
+    pub children: Vec<AccessibilityNode>,
+}
+
+impl From<nsh_dev::protocol::AccessibilityNode> for AccessibilityNode {
+    fn from(n: nsh_dev::protocol::AccessibilityNode) -> Self {
+        AccessibilityNode {
+            role: n.role,
+            label: n.label,
+            disabled: n.disabled,
+            selected: n.selected,
+            checked: n.checked,
+            expanded: n.expanded,
+            level: n.level,
+            description: n.description,
+            children: n.children.into_iter().map(Self::from).collect(),
         }
     }
 }
@@ -2309,6 +2434,30 @@ impl App {
         self.with(|app| app.view_style(&selector).map(|s| s.map(ViewStyle::from)))
     }
 
+    /// Where layout placed the view `selector` names, in the root's
+    /// points: `x`, `y`, `width`, `height`, whether it is `hidden`, and
+    /// whether a view around it that clips cuts it (`clipped`); `null`
+    /// when none is on screen.
+    pub fn layout(&self, selector: String) -> Result<Option<ViewLayout>, JsError> {
+        self.with(|app| app.layout(&selector).map(|l| l.map(ViewLayout::from)))
+    }
+
+    /// The accessibility tree as assistive technologies read it: the
+    /// views on screen with a role or a label, each with `role`, `label`,
+    /// `disabled`, `selected`, `checked`, `expanded`, `level`,
+    /// `description` and the nodes inside it (`children`). With a
+    /// selector, from the view it names (`null` when none is on screen);
+    /// without, from a root that has no role.
+    pub fn accessibility(
+        &self,
+        selector: Option<String>,
+    ) -> Result<Option<AccessibilityNode>, JsError> {
+        self.with(|app| {
+            app.accessibility(selector.as_deref())
+                .map(|n| n.map(AccessibilityNode::from))
+        })
+    }
+
     /// What the app's storage holds now.
     pub fn storage(&self) -> Result<Entries, String> {
         if let Some(storage) = &self.storage {
@@ -2626,6 +2775,20 @@ impl App {
     /// Headless only.
     pub async fn wake(this: Instance<Self>) -> Result<(), JsError> {
         step(&this, |app| app.wake()).await
+    }
+
+    /// Moves the device to the network `state` names
+    /// (`{ kind: "none" }` offline, `{ kind: "cellular", expensive: true }`,
+    /// `{ cellularData: "restricted" }`), as the system reports when the
+    /// route or the user's settings change; `network()` follows, with what
+    /// it does not name as it was. A headless app starts with the kind
+    /// `"unknown"`, which counts as online. It moves no request: routes
+    /// (`open`'s `network`) still answer. Headless only.
+    pub async fn set_network_state(
+        this: Instance<Self>,
+        state: NetworkStateOptions,
+    ) -> Result<(), JsError> {
+        step(&this, move |app| app.set_network_state(state)).await
     }
 
     /// Gives the user the locale settings `settings` names

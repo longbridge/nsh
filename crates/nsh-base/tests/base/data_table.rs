@@ -267,6 +267,52 @@ fn a_desktops_tab_moves_the_chosen_cell_to_the_next_column() {
     app.wait_for("Chosen Some(0):Some(1) next false").unwrap();
 }
 
+/// [`Quotes`] whose rows activate on Enter / Return: the activated row is
+/// written under the table.
+#[component]
+fn Activate() -> impl IntoElement {
+    let rows = DataTableRows::new(2)
+        .texts("symbol", ["AAPL", "MSFT"])
+        .numbers("last", [231.5, 412.0]);
+    let activated = signal(String::from("none"));
+    view()
+        .child(
+            data_table()
+                .h(px(120.0))
+                .cell_selectable(true)
+                .columns(vec![column("symbol"), column("last")])
+                .data(rows)
+                .on_row_activate(move |row: &u32| activated.set(row.to_string())),
+        )
+        .child(text(move || format!("Activated {}", activated.get())))
+}
+
+#[test]
+fn enter_activates_the_focused_row() {
+    let viewport = Size::new(px(600.0), px(300.0));
+    let config = EngineConfig {
+        viewport,
+        environment: Environment {
+            window: viewport,
+            os: Os::Linux,
+            idiom: Idiom::Desktop,
+            ..Environment::default()
+        },
+        ..EngineConfig::new(nsh_testing::windowed_root::<Activate>())
+    };
+    let mut app = Headless::start(config).unwrap();
+    app.first_render().unwrap();
+    // A press on a cell chooses it and gives the table the keyboard.
+    app.press("text:AAPL").unwrap();
+    // Enter / Return activates the row under the selection.
+    app.press_key("enter").unwrap();
+    app.wait_for("Activated 0").unwrap();
+    // An arrow moves the selection; Enter activates the row it moved to.
+    app.press_key("down").unwrap();
+    app.press_key("enter").unwrap();
+    app.wait_for("Activated 1").unwrap();
+}
+
 /// A huge table whose visible row is reported without loading row data.
 #[component]
 fn HugeWebTable() -> impl IntoElement {

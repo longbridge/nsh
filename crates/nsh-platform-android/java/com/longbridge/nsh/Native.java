@@ -105,6 +105,8 @@ final class Native {
     static final int AUTH_SESSION = 93;
     static final int FOCUS_IN = 94;
     static final int FOCUS_OUT = 95;
+    static final int TEXT_DROP = 96;
+    static final int OPEN_APP_SETTINGS = 97;
 
     /**
      * Draws the SVG {@code bytes} for a view {@code maxPx} pixels on its longer side, with its shorter side that long
