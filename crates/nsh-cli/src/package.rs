@@ -3380,6 +3380,9 @@ mod tests {
         .unwrap();
         let config = read_config(&dir.join("App.tsx")).unwrap();
         assert_eq!(declared(&config).unwrap(), ["en", "ja", "zh-Hans"]);
+        // Without translations or `locales`, an empty language alone
+        // declares nothing.
+        fs::remove_dir_all(dir.join("locales")).unwrap();
         fs::write(
             dir.join("nsh.json"),
             r#"{ "ios": { "infoPlistStrings": { "ko": {} } }, "macos": { "infoPlistStrings": { "ko": {} } } }"#,
