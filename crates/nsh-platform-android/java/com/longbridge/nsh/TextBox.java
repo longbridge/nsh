@@ -322,9 +322,19 @@ final class TextBox extends android.view.ViewGroup implements Node {
         super.onDetachedFromWindow();
     }
 
-    /** The selected text, without the placeholders of attachments and hidden runs. */
+    /** The selected text as a copy gives it ({@link #copied}). */
     private String selectedText() {
-        return TextLayouts.shown(layout.getText(), selStart, selEnd);
+        return copied(selStart, selEnd);
+    }
+
+    /**
+     * The UTF-16 range {@code start..end} as a copy gives it, as
+     * {@code AttributedText::copied_text} in nsh-core: attachments as their
+     * copy texts (none without one), hidden runs left out.
+     */
+    String copied(int start, int end) {
+        if (layout == null) return "";
+        return TextLayouts.copied(layout.getText(), start, end, copyAt, copyTexts);
     }
 
     private void showToolbar() {
@@ -471,6 +481,15 @@ final class TextBox extends android.view.ViewGroup implements Node {
         if (info.getClassName() == null || info.getClassName().equals(View.class.getName())) {
             info.setClassName("android.widget.TextView");
         }
+    }
+
+    /** What attachments copy as: their offsets (ascending) and texts. */
+    private int[] copyAt = TextLayouts.NO_COPIES;
+    private String[] copyTexts = TextLayouts.NO_COPY_TEXTS;
+
+    void setCopyTexts(int[] at, String[] texts) {
+        copyAt = at;
+        copyTexts = texts;
     }
 
     /** Pressable spans: (start, end, node) triples in UTF-16 offsets, and their events. */

@@ -4,6 +4,7 @@
 //! hosts and runners built for it.
 
 mod android;
+mod app_extensions;
 mod apple;
 mod bindgen;
 mod build;
@@ -13,13 +14,16 @@ mod component;
 mod dev;
 mod dev_port;
 mod entry;
-mod extensions;
 mod init;
+mod ios_frameworks;
 mod logger;
+mod module_meta;
 mod native_features;
+mod nshm;
 mod package;
 mod platforms;
 mod play;
+mod provisioning;
 mod publish_ios;
 mod run;
 mod runtime;
@@ -171,12 +175,18 @@ enum Command {
         /// format CI services read.
         #[arg(long, value_name = "FILE")]
         junit: Option<PathBuf>,
+        /// How many test files run at once, each on its own engine (by
+        /// default as many as the machine has cores). Their results show
+        /// file by file, in order. Headless runs only: with --target or
+        /// --trace the files run one at a time.
+        #[arg(long, short = 'j', value_name = "N")]
+        jobs: Option<std::num::NonZeroUsize>,
         /// Run the apps the tests open on this platform's development host
         /// instead of headless: the steps act with the platform's own input
         /// (macos, linux, windows, gpui, tui, web, ios and android; tui uses
         /// an in-memory terminal; web runs them
         /// in a headless Chrome, Edge or Chromium, ios in a simulator,
-        /// android on the first device adb lists).
+        /// android on a device or emulator: see --device).
         #[arg(long, value_enum)]
         target: Option<run::Target>,
         /// The Chrome, Edge or Chromium executable `--target web` runs the
@@ -189,7 +199,10 @@ enum Command {
         #[arg(long, value_name = "JS")]
         web_host: Option<PathBuf>,
         /// With `--target ios`: the simulator the apps run in (name or
-        /// UDID); default: a booted one, else the newest iPhone.
+        /// UDID); default: a booted one, else the newest iPhone. With
+        /// `--target android`: the device or emulator (its serial, as `adb
+        /// devices` lists it); default: the one `ANDROID_SERIAL` names, else
+        /// the first one.
         #[arg(long, value_name = "DEVICE")]
         device: Option<String>,
         /// With `--target macos` or `gpui`: the display the apps' windows
@@ -250,7 +263,9 @@ enum Command {
         /// Where to run; defaults to this system's native desktop host.
         #[arg(long, value_enum, default_value_t = run::Target::native())]
         target: run::Target,
-        /// iOS simulator to use (name or UDID).
+        /// The iOS simulator to use (name or UDID), or the Android device or
+        /// emulator (its serial, as `adb devices` lists it; default: the one
+        /// `ANDROID_SERIAL` names, else the first one).
         #[arg(long)]
         device: Option<String>,
         /// Serve hot reload to hosts you start yourself.
@@ -299,8 +314,10 @@ enum Command {
         /// Where to run.
         #[arg(long, value_enum, default_value_t = run::Target::native())]
         target: run::Target,
-        /// iOS simulator to use (name or UDID); default: a booted one, else
-        /// the newest iPhone.
+        /// The iOS simulator to use (name or UDID; default: a booted one,
+        /// else the newest iPhone), or the Android device or emulator (its
+        /// serial, as `adb devices` lists it; default: the one
+        /// `ANDROID_SERIAL` names, else the first one).
         #[arg(long)]
         device: Option<String>,
         /// Points per terminal Cell, overriding nsh.json tui.pointsPerCell (default: 8x16).
@@ -320,6 +337,13 @@ enum Command {
         /// main one when there is no such display (`--target macos` only).
         #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..))]
         display: Option<u32>,
+        /// With `--target macos`, `linux`, `windows` or `gpui`: the app
+        /// never becomes the active app, as `nsh test` runs its apps. Its
+        /// window shows (behind the active app's), the keyboard stays with
+        /// the app in use, and input sent to its windows still reaches it
+        /// (TSX entries).
+        #[arg(long)]
+        background: bool,
     },
     /// Create a signing key: `<name>.secret` (keep it offline for a root)
     /// and `<name>.pub` (what apps trust, for a root).
@@ -336,26 +360,50 @@ enum Command {
         #[arg(value_enum)]
         channel: Option<self_update::Channel>,
     },
-    /// Add a third-party extension to the app in this directory: a Rust
-    /// crate with components, modules and classes for its Rust and TSX
-    /// code, from crates.io (`nsh add acme-ui[@1.2]`), Git (`nsh add
-    /// https://github.com/acme/ui`) or a directory (`nsh add --path
-    /// ../ui`). Listed in `nsh.json` `"extensions"`, the version or commit
-    /// it resolved to pinned in `nsh.lock`.
+    /// Add an nshm (NSH module) to the app in this directory (or the nearest
+    /// one above it with `nsh.json`): a package of components, modules and
+    /// classes for its Rust and TSX code, from crates.io (`nsh add
+    /// acme-ui[@1.2]`), GitHub (`nsh add github:acme/ui[@^1.4]`), any Git
+    /// URL or a directory (`nsh add --path ../ui`). Listed in `nsh.json`
+    /// `"dependencies"` by package name, installed once in `~/.nsh/nshms`,
+    /// the version it resolved to pinned in `nsh.lock`; `--features` turns
+    /// on the modules of a crate that keeps them behind Cargo features (`nsh
+    /// add nsh-extra --features camera`).
     Add {
         /// A crate name (with `@<version>`), `github:<owner>/<repo>` (with
-        /// `@<tag>`) or a Git repository URL.
+        /// `@<version>`) or a Git repository URL.
         #[arg(required_unless_present = "path", conflicts_with = "path")]
         source: Option<String>,
-        /// A local directory with the extension.
+        /// A local directory with the nshm.
         #[arg(long)]
         path: Option<String>,
-        /// The tag to take from Git (default: the default branch).
+        /// The tag to take from Git (default: its newest version tag, else
+        /// its default branch).
         #[arg(long, conflicts_with_all = ["rev", "path"])]
         tag: Option<String>,
         /// The commit or branch to take from Git.
         #[arg(long, conflicts_with = "path")]
         rev: Option<String>,
+        /// The crate's Cargo features to turn on, comma-separated or
+        /// repeated (`--features camera,push`), besides those listed
+        /// already.
+        #[arg(long, value_delimiter = ',')]
+        features: Vec<String>,
+    },
+    /// Remove nshm from the app in this directory (or the nearest one above
+    /// it): from `nsh.json` `"dependencies"`, `nsh.lock` and its crate's
+    /// `[dependencies]`. Their installed copies stay in `~/.nsh/nshms`.
+    Remove {
+        /// The nshm, by package name.
+        #[arg(required = true)]
+        names: Vec<String>,
+    },
+    /// Upgrade the app's nshm to the newest versions their requirements in
+    /// `nsh.json` accept, and lock them in `nsh.lock` (all of them, or
+    /// those named).
+    Upgrade {
+        /// The nshm to upgrade, by package name (default: all).
+        names: Vec<String>,
     },
     /// Add, remove or list the runtimes installed beside this nsh: those
     /// of other platforms than this machine's (`android`, `ios`, `web`,
@@ -391,6 +439,11 @@ enum Command {
         /// Where iOS or Android users get it: `ios=<url>`, `android=<url>` (repeatable).
         #[arg(long = "link")]
         links: Vec<String>,
+        /// The previous release's archive of a platform (repeatable):
+        /// writes a patch from it beside the manifest, which apps running
+        /// that version download instead of the whole archive.
+        #[arg(long)]
+        previous: Vec<PathBuf>,
         /// Prefix of the archives' URLs (default: next to the manifest).
         #[arg(long)]
         base_url: Option<String>,
@@ -569,9 +622,11 @@ struct PackageArgs {
     /// Code signing identity for devices, e.g. "Apple Development: …".
     #[arg(long)]
     sign: Option<String>,
-    /// Provisioning profile for devices (`.mobileprovision`).
+    /// Provisioning profile for devices (`.mobileprovision`). Repeat it to
+    /// give each app extension (`nsh.json` `ios.extensions`) its own: every
+    /// bundle takes the profile for its identifier.
     #[arg(long)]
-    profile: Option<PathBuf>,
+    profile: Vec<PathBuf>,
     /// Android release keystore (default: the debug key).
     #[arg(long, requires = "key_alias")]
     keystore: Option<PathBuf>,
@@ -599,6 +654,12 @@ struct PackageArgs {
     /// machine at the address it prints).
     #[arg(long)]
     run: bool,
+    /// With --run: the iOS simulator to run the app in (`ios-simulator`;
+    /// name or UDID; default: a booted one, else the newest iPhone) or the
+    /// Android device to install it on (its serial, as `adb devices` lists
+    /// it; default: the one `ANDROID_SERIAL` names, else the first one).
+    #[arg(long, value_name = "DEVICE")]
+    device: Option<String>,
     /// Web: the http(s) URL the site's files are served from, a CDN
     /// (`https://cdn.example.com/app/`), as the page names them; `index.html`
     /// stays at the page's address. Default: next to the page, named
@@ -650,6 +711,8 @@ impl Command {
             | Command::Update { .. }
             | Command::Component { .. }
             | Command::Add { .. }
+            | Command::Remove { .. }
+            | Command::Upgrade { .. }
             | Command::UpdateManifest { .. }
             | Command::Certify { .. }
             | Command::Verify { .. }
@@ -808,6 +871,16 @@ fn run(mut command: Command) -> anyhow::Result<()> {
     if let Some(entry) = command.entry_mut() {
         package::check_nsh_version(entry)?;
     }
+    // `nsh check` runs no bundle, host or runner, so nothing else it does
+    // reads the manifest: what the other commands warn of as they read it
+    // (`read_config`), it says before the type check calls the app fine.
+    // A Rust app's manifest is its describing's (`root_config`), which
+    // refuses what it does not know.
+    if let Command::Check { entry, .. } = &command
+        && !rust_app::is_root(entry)
+    {
+        package::read_config(entry)?;
+    }
     if let Some(entry) = command.entry_mut()
         && rust_app::is_root(entry)
         && !rust_command
@@ -835,6 +908,15 @@ fn run(mut command: Command) -> anyhow::Result<()> {
         Command::Package(args) => Some(args.target) == package::PackageTarget::desktop(),
         _ => false,
     };
+    // A Rust app's root reports what the package names and versions it.
+    if let Command::Package(args) = &command {
+        rust_app::set_package_identity(rust_app::PackageIdentity {
+            id: args.id.clone(),
+            name: args.name.clone(),
+            version: args.version.clone(),
+            build: args.build,
+        });
+    }
     let app = match command.entry_mut() {
         Some(entry) => rust_app::of(entry, unify)?,
         None => None,
@@ -921,6 +1003,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             trace,
             fps,
             junit,
+            jobs,
             target,
             browser,
             web_host,
@@ -934,6 +1017,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             trace,
             fps,
             junit.as_deref(),
+            jobs,
             target,
             browser.as_deref(),
             web_host,
@@ -998,6 +1082,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 format,
                 arch,
                 run,
+                device,
                 asset_url,
             } = *args;
             let mut config = package::read_config(&entry)?;
@@ -1012,7 +1097,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 out: &out,
                 config,
                 sign: sign.as_deref(),
-                profile: profile.as_deref(),
+                profiles: &profile,
                 keystore: keystore.as_deref().map(|k| {
                     (
                         k,
@@ -1024,6 +1109,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 format,
                 arch,
                 run,
+                device: device.as_deref(),
                 asset_url: asset_url.as_deref(),
                 development: false,
             })
@@ -1040,6 +1126,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             name,
             size,
             display,
+            background,
             points_per_cell,
         } => {
             no_limits_for_rust(&entry, limits)?;
@@ -1062,6 +1149,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                     name: name.as_deref(),
                     size: size.as_deref(),
                     display: display.map(|n| n as usize),
+                    background,
                 },
             )
         }
@@ -1072,10 +1160,13 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             path,
             tag,
             rev,
-        } => extensions::add(
+            features,
+        } => nshm::add(
             &std::env::current_dir()?,
-            extensions::Source::parse(source, path, tag, rev)?,
+            nshm::Added::parse(source, path, tag, rev, features)?,
         ),
+        Command::Remove { names } => nshm::remove(&std::env::current_dir()?, &names),
+        Command::Upgrade { names } => nshm::upgrade(&std::env::current_dir()?, &names),
         Command::Component { action } => match action {
             ComponentAction::List => component::list(),
             ComponentAction::Add { names } => component::add_named(&names),
@@ -1089,6 +1180,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             key,
             notes,
             links,
+            previous,
             base_url,
             out,
         } => updater::manifest(updater::ManifestOptions {
@@ -1098,6 +1190,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             key: key.as_deref(),
             notes: &notes,
             links: &links,
+            previous: &previous,
             base_url: base_url.as_deref(),
             out: &out,
         }),
@@ -1212,6 +1305,33 @@ mod command_tests {
                 "key.cert"
             ])
             .is_err()
+        );
+    }
+
+    /// An iOS package takes a profile for the app and one for each of its
+    /// extensions.
+    #[test]
+    fn ios_packages_take_several_profiles() {
+        let cli = Cli::try_parse_from([
+            "nsh",
+            "package",
+            "--target",
+            "ios",
+            "--profile",
+            "app.mobileprovision",
+            "--profile",
+            "widget.mobileprovision",
+        ])
+        .unwrap();
+        let Command::Package(args) = cli.command else {
+            panic!("not a package command");
+        };
+        assert_eq!(
+            args.profile,
+            [
+                std::path::PathBuf::from("app.mobileprovision"),
+                "widget.mobileprovision".into()
+            ]
         );
     }
 

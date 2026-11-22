@@ -72,6 +72,14 @@ final class TestAgent {
         });
     }
 
+    /** The scroll view's room left, right, up and down (px); null for another kind of view. */
+    static float[] scrollRoom(NshView host, int id) {
+        return onMain(() -> {
+            View v = host.mounter().views.get(id);
+            return v instanceof ScrollBox ? ((ScrollBox) v).scrollRoom() : null;
+        });
+    }
+
     /**
      * Where the characters {@code start}..{@code end} (UTF-16 units) of
      * text view {@code id} are on their first line, in the window: x, y,

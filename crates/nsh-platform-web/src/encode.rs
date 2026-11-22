@@ -784,6 +784,9 @@ fn props_json(p: &ViewProps) -> String {
     }
     // The role's JS name, which is ARIA's (`columnheader`, `treeitem`).
     let _ = write!(s, ",\"role\":{}", json_str(enum_name(&a.role)));
+    if let Some(o) = a.orientation {
+        let _ = write!(s, ",\"orientation\":{}", json_str(enum_name(&o)));
+    }
     if a.state.disabled {
         s.push_str(",\"disabled\":true");
     }
@@ -912,6 +915,9 @@ fn input_json(c: &InputConfig) -> String {
     }
     if c.replaced {
         s.push_str(",\"replaced\":true");
+    }
+    if c.select_text_on_focus {
+        s.push_str(",\"selectTextOnFocus\":true");
     }
     s.push('}');
     s
@@ -1202,7 +1208,17 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 Some(c) => out.str(&css_color(c)),
                 None => out.raw("null"),
             };
-            if !layout.backgrounds.is_empty() || !text.links.is_empty() {
+            // What attachments copy as, where the copy puts them among the
+            // runs (which hold no attachments): hidden ones and ones cut off
+            // copy as nothing.
+            let copies: Vec<_> = text
+                .copy_texts
+                .iter()
+                .filter(|copy| !text.hidden_at(copy.index))
+                .filter_map(|copy| Some((copy, layout.attachment_place(copy.index)?)))
+                .collect();
+            let copies_sent = !copies.is_empty();
+            if !layout.backgrounds.is_empty() || !text.links.is_empty() || copies_sent {
                 // Span backgrounds: `[x, y, width, height, radius, color]`.
                 out.s.push_str(",[");
                 for (i, b) in layout.backgrounds.iter().enumerate() {
@@ -1219,7 +1235,7 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 }
                 out.s.push(']');
             }
-            if !text.links.is_empty() {
+            if !text.links.is_empty() || copies_sent {
                 // Links, as runs name them: `[node, events]`.
                 out.s.push_str(",[");
                 for (i, link) in text.links.iter().enumerate() {
@@ -1229,6 +1245,21 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                     let _ = write!(out.s, "[{},", link.node);
                     push_events(&mut out.s, link.events);
                     out.s.push(']');
+                }
+                out.s.push(']');
+            }
+            if copies_sent {
+                // `[offset, text, run, before]`: the copy text goes after
+                // that run's characters (before its line's break), or
+                // before them (`before` 1).
+                out.s.push_str(",[");
+                for (i, (copy, (run, before))) in copies.iter().enumerate() {
+                    if i > 0 {
+                        out.s.push(',');
+                    }
+                    let _ = write!(out.s, "[{},", copy.index);
+                    push_str(&mut out.s, &copy.text);
+                    let _ = write!(out.s, ",{run},{}]", u8::from(*before));
                 }
                 out.s.push(']');
             }
@@ -1459,6 +1490,7 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
     match command {
         Command::Focus => out.item("cmd").num(id).str("focus").end(),
         Command::Blur => out.item("cmd").num(id).str("blur").end(),
+        Command::ClearSelection => out.item("cmd").num(id).str("clearSelection").end(),
         Command::ScrollTo { x, y, animated } => {
             out.item("cmd")
                 .num(id)

@@ -657,7 +657,10 @@ define_class!(
         fn view_will_start_live_resize(&self) {
             // SAFETY: NSView's own notification.
             unsafe { msg_send![super(self), viewWillStartLiveResize] }
-            if let Some(surface) = self.ivars().surface.borrow().upgrade() {
+            if let Some(surface) = self
+                .surface()
+                .or_else(|| self.ivars().window.borrow().upgrade())
+            {
                 surface.live_resize(true);
             }
         }
@@ -666,7 +669,10 @@ define_class!(
         fn view_did_end_live_resize(&self) {
             // SAFETY: NSView's own notification.
             unsafe { msg_send![super(self), viewDidEndLiveResize] }
-            if let Some(surface) = self.ivars().surface.borrow().upgrade() {
+            if let Some(surface) = self
+                .surface()
+                .or_else(|| self.ivars().window.borrow().upgrade())
+            {
                 surface.live_resize(false);
             }
         }
@@ -832,7 +838,7 @@ define_class!(
         #[unsafe(method(cursorUpdate:))]
         fn cursor_update(&self, event: &NSEvent) {
             match self.input_surface() {
-                Some(surface) => crate::input::cursor_update(&surface),
+                Some(surface) => crate::input::cursor_update(&surface, Some(event)),
                 // SAFETY: NSView's own handling (passes it up).
                 None => unsafe { msg_send![super(self), cursorUpdate: event] },
             }
@@ -1447,6 +1453,9 @@ impl ViewObj {
             }
         }
         if let Some(surface) = self.input_surface() {
+            if crate::input::saw_hosted(&surface, event) {
+                return;
+            }
             // Drags may scroll or pan (a frame for the performance
             // monitor); the rest changes the screen through the engine.
             let drag = matches!(
@@ -1471,6 +1480,7 @@ impl ViewObj {
         }
         let options = NSTrackingAreaOptions::MouseMoved
             | NSTrackingAreaOptions::MouseEnteredAndExited
+            | NSTrackingAreaOptions::CursorUpdate
             | NSTrackingAreaOptions::ActiveAlways
             | NSTrackingAreaOptions::InVisibleRect;
         // SAFETY: the owner (this view) outlives the tracking area, which
@@ -1672,6 +1682,19 @@ pub(crate) fn pressing(mtm: MainThreadMarker) -> bool {
     )
 }
 
+/// Whether the event AppKit handles (or the test agent hands the window)
+/// is a left mouse press.
+pub(crate) fn left_pressing(mtm: MainThreadMarker) -> bool {
+    use objc2_app_kit::NSApplication;
+    scripted_type()
+        .or_else(|| {
+            NSApplication::sharedApplication(mtm)
+                .currentEvent()
+                .map(|e| e.r#type())
+        })
+        .is_some_and(|t| t == NSEventType::LeftMouseDown)
+}
+
 /// Whether the event AppKit handles is a mouse wheel or trackpad scroll.
 fn scrolling(mtm: MainThreadMarker) -> bool {
     scripted_type()
@@ -1691,7 +1714,7 @@ thread_local! {
 }
 
 /// The type of the event the test agent hands its window now.
-fn scripted_type() -> Option<NSEventType> {
+pub(crate) fn scripted_type() -> Option<NSEventType> {
     SCRIPTED.with_borrow(|e| e.as_ref().map(|e| e.r#type()))
 }
 

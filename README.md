@@ -87,10 +87,25 @@ brew install longbridge/tap/nsh
 </details>
 
 <details>
+<summary>MacPorts</summary>
+
+```sh
+sudo port install native-shell
+```
+
+</details>
+
+<details>
 <summary>Windows (PowerShell)</summary>
 
 ```powershell
 irm https://nsh.dev/install.ps1 | iex
+```
+
+The nightly build:
+
+```powershell
+$env:NSH_VERSION = 'nightly'; irm https://nsh.dev/install.ps1 | iex
 ```
 
 </details>

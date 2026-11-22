@@ -12,9 +12,9 @@ use super::{
 use crate::{
     AccessibilityProp, AccessibilityRole, AccessibilityState, AccessibilityValue, Bounds,
     ContextMenuEvent, EdgeInsets, EventKind, EventPayload, Hsla, ImageSource, KeyCapture, KeyEvent,
-    ListContentStyle, MouseEvent, NativeProp, NodeId, PinchEvent, PointerEvents, Points,
-    PressEvent, Prop, Size, Tag, TouchEvent, WheelEvent,
-    geometry::{DevicePixels, Radians},
+    ListContentStyle, LiveRegion, MouseEvent, NativeProp, NodeId, PinchEvent, PointerEvents,
+    Points, PressEvent, Prop, Size, Tag, TouchEvent, WheelEvent,
+    geometry::{Axis, DevicePixels, Radians},
     style::Color,
 };
 
@@ -249,6 +249,9 @@ pub(crate) struct RareAttrs {
     /// A window of the app's own: the dialog root it shows
     /// ([`super::desktop::window`]).
     pub(crate) window: Option<Box<crate::desktop::WindowOptions>>,
+    /// What its ref was asked for before it was mounted: sent after the
+    /// window opens.
+    pub(crate) window_commands: Vec<crate::desktop::DesktopCommand>,
 }
 
 impl RareAttrs {
@@ -1089,6 +1092,19 @@ pub trait Element: IntoElement + Sized {
         self
     }
 
+    /// The highlight of the selections of the texts and inputs in the
+    /// view that set none of their own, as TSX's `selection:bg-*` class
+    /// (Tailwind's `& *::selection`): the nearest view around a text that
+    /// sets one decides, a text's or an input's own color wins. Android
+    /// tints the selection handles of a selectable view
+    /// ([`Self::selectable`]) and of an input in it too.
+    fn selection_color(mut self, color: impl IntoReactive<Hsla>) -> Self {
+        super::host::bind_prop(self.node(), color, |c: Hsla| {
+            Prop::SelectionColor(Some(Color::from(c)))
+        });
+        self
+    }
+
     /// The app's items of the selection menu of this selectable view
     /// ([`Self::selectable`]; TSX `selectionMenu`): shown after the
     /// system's own (Copy, Select All, Look Up, Share…), which stay, in
@@ -1128,6 +1144,27 @@ pub trait Element: IntoElement + Sized {
             if continues || a.rare.is_some() {
                 a.rare_mut().continues_text = continues;
             }
+        });
+        self
+    }
+
+    /// What a copy of the text around the view gives in its place, when
+    /// the view is inside a text (`copyText`): an inline formula's source
+    /// (`$x^2$`), an emoji image's character. Selecting across the view
+    /// and copying puts this where it is, as a browser copies an inline
+    /// image's `alt`. Unset, the view adds nothing to the copy; a view
+    /// outside a text and a nested text span (whose characters are copied
+    /// themselves) ignore it. Screen readers keep reading the view's
+    /// [`Accessible::label`].
+    ///
+    /// ```ignore
+    /// text("Area is ")
+    ///     .child(view().copy_text("$x^2$").child(formula))
+    ///     .child(" here.")
+    /// ```
+    fn copy_text(mut self, text: impl IntoReactive<SharedString>) -> Self {
+        super::host::bind_prop(self.node(), text, |text: SharedString| {
+            Prop::CopyText(Some(text.to_arc()))
         });
         self
     }
@@ -1558,6 +1595,34 @@ pub trait Accessible: Element {
         self
     }
 
+    /// The list's orientation for screen readers (ARIA's
+    /// `aria-orientation`, reported on the web): `"horizontal"` or
+    /// `"vertical"`, for a tab list or toolbar laid out along that axis;
+    /// `None` has none.
+    fn accessibility_orientation(mut self, orientation: impl IntoReactive<Option<Axis>>) -> Self {
+        self.node().bind_attr(orientation, |a, orientation| {
+            super::host::set_in(
+                &mut a.props,
+                Prop::Accessibility(AccessibilityProp::Orientation(orientation)),
+            )
+        });
+        self
+    }
+
+    /// How changes of it the screen reader announces by itself (TS:
+    /// `accessibilityLiveRegion`): TalkBack on Android, VoiceOver on macOS,
+    /// the web's `aria-live`, a live region on Windows; `"polite"` when the
+    /// user is idle, `"assertive"` right away.
+    fn accessibility_live_region(mut self, region: impl IntoReactive<LiveRegion>) -> Self {
+        self.node().bind_attr(region, |a, region| {
+            super::host::set_in(
+                &mut a.props,
+                Prop::Accessibility(AccessibilityProp::LiveRegion(region)),
+            )
+        });
+        self
+    }
+
     /// The element that is the active one while it keeps the keyboard
     /// focus, which screen readers read as it changes (TS:
     /// `accessibilityActiveDescendant`; ARIA's `aria-activedescendant`):
@@ -1607,16 +1672,28 @@ pub trait Accessible: Element {
     /// [`Accessible::accessibility_description`], whose place it takes
     /// while it names a rendered element with text. `None` names none.
     fn accessibility_described_by(
-        mut self,
+        self,
         target: impl IntoReactive<Option<super::ElementRef>>,
     ) -> Self {
+        let target = target.into_reactive();
+        self.accessibility_described_by_target(move || {
+            target.get().and_then(|t| t.element_target())
+        })
+    }
+
+    /// [`Accessible::accessibility_described_by`] with the element as a
+    /// component's prop holds it (a ref from JS or from Rust): what
+    /// `nsh-base`'s components pass to the view screen readers reach.
+    #[doc(hidden)]
+    fn accessibility_described_by_target(
+        mut self,
+        target: impl IntoReactive<Option<super::ElementTarget>>,
+    ) -> Self {
         self.node()
-            .bind_attr(target, |a, target: Option<super::ElementRef>| {
+            .bind_attr(target, |a, target: Option<super::ElementTarget>| {
                 super::host::set_in(
                     &mut a.props,
-                    Prop::Accessibility(AccessibilityProp::DescribedBy(
-                        target.and_then(|t| t.element_target()),
-                    )),
+                    Prop::Accessibility(AccessibilityProp::DescribedBy(target)),
                 )
             });
         self
@@ -1653,11 +1730,19 @@ pub trait Accessible: Element {
     /// `accessibilityActions`): `increment` and `decrement` for an
     /// adjustable element, `activate`, `longpress`, or the app's own with
     /// a label; [`Interactive::on_accessibility_action`] hears them.
-    fn accessibility_actions(mut self, actions: Vec<crate::AccessibilityActionDef>) -> Self {
-        super::host::set(
-            self.node(),
-            Prop::Accessibility(AccessibilityProp::Actions(actions)),
-        );
+    /// Bound to signals, the labels follow them in place (the interface's
+    /// language): the element and the screen reader's focus on it stay,
+    /// and the names its handler hears do not change.
+    fn accessibility_actions(
+        mut self,
+        actions: impl IntoReactive<Vec<crate::AccessibilityActionDef>>,
+    ) -> Self {
+        self.node().bind_attr(actions, |a, actions| {
+            super::host::set_in(
+                &mut a.props,
+                Prop::Accessibility(AccessibilityProp::Actions(actions)),
+            )
+        });
         self
     }
 }
@@ -2205,10 +2290,44 @@ pub trait Interactive: Element {
         self
     }
 
+    /// The scroll view it floats over and the edge of it it sits at
+    /// (`ios={{ scrollEdgeElement }}`): a bottom toolbar, a floating button
+    /// placed over a list. From iOS 26 the scroll edge effect of that
+    /// scroll view takes its shape from what the view shows, as it does
+    /// from a bar, so the content scrolled under it fades out instead of
+    /// being cut by it. Elsewhere a fade the app draws under the view
+    /// gives the same separation. `None` names none.
+    fn scroll_edge_element(
+        mut self,
+        scroll_view: impl IntoReactive<Option<super::ElementRef>>,
+        edge: crate::ScrollEdge,
+    ) -> Self {
+        let target =
+            scroll_view
+                .into_reactive()
+                .map(move |scroll_view: Option<super::ElementRef>| {
+                    let scroll_view = scroll_view?.element_target()?;
+                    Some(super::ScrollEdgeTarget { scroll_view, edge })
+                });
+        super::host::bind_prop(self.node(), target, Prop::ScrollEdgeElement);
+        self
+    }
+
     /// The native material the view draws with on macOS
     /// (`macos={{ backdrop }}`): an `NSVisualEffectView`, or none.
     fn macos_backdrop(mut self, backdrop: impl IntoReactive<Option<crate::MacOsBackdrop>>) -> Self {
         super::host::bind_prop(self.node(), backdrop, Prop::MacOsBackdrop);
+        self
+    }
+
+    /// The system's blur of what is behind a transparent window, under the
+    /// view's box and corners, on Windows 11 and later
+    /// (`windows={{ backdrop }}`), or none.
+    fn windows_backdrop(
+        mut self,
+        backdrop: impl IntoReactive<Option<crate::WindowsBackdrop>>,
+    ) -> Self {
+        super::host::bind_prop(self.node(), backdrop, Prop::WindowsBackdrop);
         self
     }
 
@@ -2561,15 +2680,20 @@ impl View {
     /// indicator on the selected tab): along the main axis of its parent
     /// (vertical in a flex column, else horizontal) it spans that element's
     /// frame, inside its own margins on that axis, wherever the element is
-    /// inside its parent; across it, its style places it (`bottom(px(0.))`
-    /// and a height for an underline, top and bottom insets for a pill),
-    /// so its style makes it [`Styled::absolute`]. The core places it after
-    /// each layout, with no layout of its own and no JS: following another
-    /// element changes its frame alone, and a layout that moves the element
-    /// moves it in the same batch. While `target` is `None`, or no laid
-    /// out element carries it, its style alone places it; hidden
-    /// (`display: none`) and shown again, it is placed at once. A view
-    /// that follows nothing costs no work after layout.
+    /// inside its parent, in a list's row too; across it, its style places
+    /// it (`bottom(px(0.))` and a height for an underline, top and bottom
+    /// insets for a pill), so its style makes it [`Styled::absolute`]. The
+    /// core places it after each layout, with no layout of its own and no
+    /// JS: following another element changes its frame alone, and a layout
+    /// that moves the element moves it in the same batch. Scroll views and
+    /// lists in between count where they are scrolled, and it spans only
+    /// the part of the element they show: outside them, it follows their
+    /// scrolling a frame or so behind; in the same scroll view's content as the
+    /// element, it moves with it natively. While `target` is `None`, or no
+    /// laid out element carries it (a list's row gone, or scrolled out of
+    /// view), its style alone places it; hidden (`display: none`) and shown
+    /// again, it is placed at once. A view that follows nothing costs no
+    /// work after layout.
     pub fn follow(mut self, target: impl IntoReactive<Option<super::ElementRef>>) -> Self {
         let target = (target.into_reactive()).map(|t: Option<super::ElementRef>| {
             t.and_then(|t| t.target()).map(super::FollowTarget)
@@ -2635,6 +2759,25 @@ fn span(mut el: ElNode) -> ElNode {
 }
 
 impl Text {
+    /// Its final layout, each time it is laid out anew: the platform text
+    /// engine's own hit testing, caret and range boxes
+    /// ([`crate::TextGeometry`]), where `onTextLayout`'s lines only allow
+    /// an estimate. Rust-only, on a Rust component's text; JS keeps
+    /// `onTextLayout`.
+    pub fn on_text_layout(mut self, listener: impl Fn(&crate::TextGeometry) + 'static) -> Self {
+        self.0.handlers.push((
+            EventKind::TextLayout,
+            super::Listener::from(move |payload: &EventPayload| {
+                if let EventPayload::TextLayout(_) = payload
+                    && let Some(geometry) = crate::text::GeometryScope::current()
+                {
+                    listener(&geometry);
+                }
+            }),
+        ));
+        self
+    }
+
     /// The highlight of its selection, when it is selectable.
     pub fn selection_color(mut self, color: impl IntoReactive<Hsla>) -> Self {
         super::host::bind_prop(&mut self.0, color, |c: Hsla| {

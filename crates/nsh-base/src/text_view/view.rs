@@ -97,7 +97,9 @@ pub struct TextViewProps {
     /// Content of the app's above each table (a copy or export button).
     pub render_table_actions: Prop<Option<Renderer<Table>>>,
     /// Shows a formula (`$…$` in text, `$$…$$` blocks); without it, its
-    /// TeX shows as code.
+    /// TeX shows as code. Give a formula in text a `copyText` (its `$…$`
+    /// source) so that a copy of the text keeps it in place, as the
+    /// built-in formulas do.
     pub render_math: Prop<Option<Renderer<TextViewMath>>>,
     /// Shows an image in place of the default: alone in a paragraph, the
     /// image at the size it asks for (`width` / `height`) or its natural
@@ -426,7 +428,10 @@ pub fn TextView(props: TextViewProps, cx: Scope<TextViewEvent>) -> impl IntoElem
                     .children(notes.iter().map(|note| {
                         let key = format!("f{}", note.index);
                         cx.part(view().flex_row().gap(px(6.0)), Part::Footnote)
-                            .child(cx.part(text(format!("{}.", note.index)), Part::FootnoteLabel))
+                            .child(cx.part(
+                                cx.chrome(text(format!("{}.", note.index))),
+                                Part::FootnoteLabel,
+                            ))
                             .child(cx.with_line(SMALL_SIZE * 1.6, || {
                                 cx.blocks(
                                     view().flex_col().flex_1().gap(px(4.0)),
@@ -599,6 +604,15 @@ impl Cx {
         }
     }
 
+    /// Marks generated document chrome (list markers, task boxes, alert
+    /// icons, disclosure triangles, footnote numbers, action bars and
+    /// terminal borders) as outside text selection (`userSelect: "none"`).
+    /// Applied before [`Self::part`] / [`Self::parts`] so an app's own part
+    /// classes or styles can still override it.
+    fn chrome<E: Styled>(&self, el: E) -> E {
+        el.select_none()
+    }
+
     /// `el` with part `part`'s classes and style.
     fn part<E: Element>(&self, el: E, part: Part) -> E {
         self.parts(el, &[part])
@@ -703,7 +717,7 @@ impl Cx {
             view()
                 .flex_col()
                 .child(el)
-                .child(self.caret_after(text(""), true))
+                .child(self.caret_after(self.chrome(text("")), true))
                 .into_element()
         } else {
             el
@@ -965,7 +979,8 @@ impl Cx {
                     }
                     // A ballot box, as a Markdown reader in a terminal
                     // shows `[ ]` and `[x]`: checked in the accent.
-                    let marker = text(if checked { "☑ " } else { "☐ " })
+                    let marker = self
+                        .chrome(text(if checked { "☑ " } else { "☐ " }))
                         .flex_none()
                         .text_color(move || match checked {
                             true => AdaptiveColor::from(crate::terminal::ACCENT),
@@ -988,7 +1003,8 @@ impl Cx {
                     } else {
                         format!("{} ", bullet(depth))
                     };
-                    let marker = text(marker)
+                    let marker = self
+                        .chrome(text(marker))
                         .flex_none()
                         .text_color(move || theme().muted_foreground);
                     self.part(marker, Part::ListMarker).into_element()
@@ -999,7 +1015,8 @@ impl Cx {
                         parts.push(Part::TaskMarkerChecked);
                     }
                     // A box centered on the first line.
-                    let marker = view()
+                    let marker = self
+                        .chrome(view())
                         .flex_none()
                         .size(px(TASK_BOX))
                         .mt(px((BODY_SIZE * BODY_LINE - TASK_BOX) / 2.0))
@@ -1039,15 +1056,20 @@ impl Cx {
                         bullet(depth).to_owned()
                     };
                     // In the indent before the content, its end against
-                    // it, as a browser places it: wider numbers reach
-                    // further left and the content stays in line.
-                    let marker = text(marker)
+                    // it, as a browser places CSS `::marker`: wider numbers
+                    // reach further left and the content stays in line. Kept
+                    // out of text selection and pointer hit-testing so drags
+                    // across the indent or past an item's end never capture
+                    // the marker.
+                    let marker = self
+                        .chrome(text(marker))
                         .absolute()
                         .top(px(0.0))
                         .right(relative(1.0))
                         .w(px(MARKER_BOX))
                         .pe(px(6.0))
                         .text_right()
+                        .pointer_events(PointerEvents::None)
                         .text_color(move || theme().muted_foreground);
                     self.part(marker, Part::ListMarker).into_element()
                 }
@@ -1116,7 +1138,8 @@ impl Cx {
             // and no rows: its icon in its color, its text right after.
             // Where a terminal shows no bands (16 colors, none), its line
             // on the left in its color instead, where a quote's bar is.
-            let icon = text(glyph)
+            let icon = self
+                .chrome(text(glyph))
                 .flex_none()
                 .font_weight(FontWeight::BOLD)
                 .text_color(tint);
@@ -1140,7 +1163,8 @@ impl Cx {
                 .child(self.parts(band, &[Part::Blockquote, Part::Alert, part]))
                 .into_element();
         }
-        let icon = view()
+        let icon = self
+            .chrome(view())
             .flex_none()
             .size(px(ALERT_ICON))
             .mt(px((BODY_SIZE * BODY_LINE - ALERT_ICON) / 2.0))
@@ -1187,7 +1211,8 @@ impl Cx {
         // block; touch screens have no hover, so there they always show.
         let hover = is_desktop();
         let header = (!self.code_block_actions.is_empty()).then(|| {
-            let header = view()
+            let header = self
+                .chrome(view())
                 .absolute()
                 .top(px(6.0))
                 .right(px(6.0))
@@ -1281,7 +1306,7 @@ impl Cx {
             .map(str::trim)
             .filter(|l| !l.is_empty())
             .map(|l| {
-                text(format!(" {l} "))
+                self.chrome(text(format!(" {l} ")))
                     .flex_none()
                     .font_weight(FontWeight::BOLD)
                     .text_color(move || theme().background)
@@ -1333,12 +1358,16 @@ impl Cx {
         let room = signal(0usize);
         let widths = computed(move || fit_columns(&natural, room.get()));
         let ruled = |ends: [char; 3]| {
-            text(move || widths.with(|widths| SharedString::from(table_rule(widths, ends))))
-                .number_of_lines(1u32)
-                .text_color(move || theme().border)
-                .into_element()
+            self.chrome(text(move || {
+                widths.with(|widths| SharedString::from(table_rule(widths, ends)))
+            }))
+            .number_of_lines(1u32)
+            .text_color(move || theme().border)
+            .into_element()
         };
-        let bar = |glyph: &'static str| text(glyph).flex_none().text_color(move || theme().border);
+        // A side as tall as its row: cells that wrap keep it on every line.
+        let bar =
+            |glyph: &'static str| crate::terminal::glyph_column(glyph, move || theme().border);
         let last_row = table.rows.len();
         let mut lines = vec![ruled(['┌', '┬', '┐'])];
         let rows = std::iter::once(&table.head).chain(&table.rows);
@@ -1395,10 +1424,10 @@ impl Cx {
             }
         }
         lines.push(ruled(['└', '┴', '┘']));
-        let actions = self
-            .render_table_actions
-            .as_ref()
-            .map(|r| r.render(format!("table:{key}"), table.clone()));
+        let actions = self.render_table_actions.as_ref().map(|r| {
+            self.chrome(view())
+                .child(r.render(format!("table:{key}"), table.clone()))
+        });
         let table_view = view().flex_col().on_layout(move |frame: &Bounds<Points>| {
             let n = crate::terminal::columns_in(frame.size.width, cell);
             if room.get_untracked() != n {
@@ -1459,7 +1488,7 @@ impl Cx {
             .label(label)
             .on_press(move || {
                 if copy {
-                    set_clipboard(event.code.code.clone());
+                    drop(set_clipboard(event.code.code.clone()));
                     let _ = done.spring(
                         1.0,
                         Spring {
@@ -1586,10 +1615,10 @@ impl Cx {
                 self.parts(cell, cell_parts).child(t).into_element()
             }));
         }
-        let actions = self
-            .render_table_actions
-            .as_ref()
-            .map(|r| r.render(format!("table:{key}"), table.clone()));
+        let actions = self.render_table_actions.as_ref().map(|r| {
+            self.chrome(view())
+                .child(r.render(format!("table:{key}"), table.clone()))
+        });
         // As wide as the view, never narrower than the floors: past them,
         // the scroll view moves it.
         let frame = view()
@@ -1626,7 +1655,10 @@ impl Cx {
         tail: bool,
     ) -> AnyElement {
         let shown = signal(open);
-        let marker = text(move || SharedString::from(if shown.get() { "▾ " } else { "▸ " }))
+        let marker = self
+            .chrome(text(move || {
+                SharedString::from(if shown.get() { "▾ " } else { "▸ " })
+            }))
             .text_color(move || theme().muted_foreground);
         let summary = self.part(
             view()
@@ -1736,6 +1768,17 @@ impl Cx {
                 };
                 self.part(span, Part::Highlight).into_element()
             }
+            // A span in the document's color, which the app's `textStyle`
+            // part can override (a theme's own colors in dark appearance).
+            Inline::TextStyle { content, color } => {
+                let color = color.as_deref().and_then(|c| c.trim().parse::<Hsla>().ok());
+                let span = self.span(content, key);
+                let span = match color {
+                    Some(c) => span.text_color(c),
+                    None => span,
+                };
+                self.part(span, Part::TextStyle).into_element()
+            }
             Inline::Superscript { content } => self
                 .part(
                     self.span(content, key).text_size(rems(0.75)),
@@ -1814,7 +1857,8 @@ impl Cx {
                 None if is_terminal() => self
                     .part(text(super::tex_text::tex_text(tex)), Part::Math)
                     .into_element(),
-                // Typeset in the line, its middle on the text's.
+                // Typeset in the line, its middle on the text's; a copy
+                // of the text keeps its source in place.
                 None => match self.formula(tex, false, BODY_SIZE) {
                     Some(formula) => self
                         .part(
@@ -1822,6 +1866,7 @@ impl Cx {
                                 .flex_row()
                                 .align_middle()
                                 .label(tex.clone())
+                                .copy_text(format!("${tex}$"))
                                 .child(formula),
                             Part::Math,
                         )

@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::{
     element::PropEnum,
-    geometry::{Edges, Points, px},
+    geometry::{Edges, Point, Points, px},
     js::host::HostProps,
 };
 
@@ -267,6 +267,8 @@ pub struct AccessibilityActionDef {
     pub label: Option<Arc<str>>,
 }
 
+crate::static_reactive!(Vec<AccessibilityActionDef>: Vec<AccessibilityActionDef>);
+
 /// Accessibility of one view.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Accessibility {
@@ -316,6 +318,10 @@ pub struct Accessibility {
     /// [`Accessibility::description`], so a platform without such a
     /// relation reads it all the same.
     pub described_by: Option<crate::NodeId>,
+    /// The list's orientation (ARIA's `aria-orientation`, reported on the
+    /// web): `"horizontal"` or `"vertical"`, for a tab list or toolbar laid
+    /// out along that axis; `None` has none.
+    pub orientation: Option<crate::geometry::Axis>,
 }
 
 impl Accessibility {
@@ -390,9 +396,15 @@ pub enum AccessibilityProp {
     /// `"no-hide-descendants"`.
     #[prop(js = "importantForAccessibility", with = crate::js::host_values::important, reset = AccessibilityProp::Important(None, false), ts = "\"auto\" | \"yes\" | \"no\" | \"no-hide-descendants\"")]
     Important(Option<bool>, bool),
-    /// `accessibilityLiveRegion` (Android): how changes of the view are announced
-    /// to TalkBack.
+    /// `accessibilityLiveRegion`: how changes of the view are announced by the
+    /// screen reader — TalkBack on Android, VoiceOver on macOS, UIA's live
+    /// setting and notification on Windows (`"polite"` when the user is idle,
+    /// `"assertive"` right away).
     #[prop(android = "accessibilityLiveRegion")]
+    #[prop(
+        js = "accessibilityLiveRegion",
+        ts = "\"none\" | \"polite\" | \"assertive\""
+    )]
     LiveRegion(LiveRegion),
     /// `accessibilityActions`: custom actions offered to assistive technologies
     /// (`onAccessibilityAction` reports them).
@@ -420,6 +432,9 @@ pub enum AccessibilityProp {
     /// rendered element with text.
     #[prop(js = "accessibilityDescribedBy", with = crate::js::host_values::accessibility_described_by, reset = AccessibilityProp::DescribedBy(None), ts = "ViewRef | null")]
     DescribedBy(Option<crate::element::ElementTarget>),
+    /// `aria-orientation` (web): set by a component from its own
+    /// orientation (a `Tabs`'s), never from JS.
+    Orientation(Option<crate::geometry::Axis>),
 }
 
 /// Android's press ripple (`android={{ ripple }}`).
@@ -506,6 +521,12 @@ pub struct ViewProps {
     /// for ordinary views and for portals with no key listener or capture
     /// rule on their logical ancestry.
     pub key_parent: Option<crate::NodeId>,
+    /// The app's content view where unfocused keys start in this native
+    /// window. Mounted by the core so keyboard routing follows logical
+    /// order even when the backend stacks the children differently. Only
+    /// sent when that path has a key listener or capture rule.
+    #[doc(hidden)]
+    pub key_content: Option<crate::NodeId>,
     /// The view is a selectable view (`View`'s `selectable`): the
     /// texts in its subtree that are not `selectable={false}` share one
     /// selection, from text to text ([`crate::selection`]); an area inside
@@ -523,6 +544,38 @@ pub struct ViewProps {
     /// and a double or triple click selects across them
     /// ([`crate::selection::SelectionTexts::continues`]).
     pub continues_text: bool,
+    /// `ios={{ scrollEdgeElement }}`: the scroll view the view floats
+    /// over and the edge of it the view sits at. Resolved by the core from
+    /// the element the app names; `None` when it names none or that element
+    /// is gone.
+    pub scroll_edge_element: Option<ScrollEdgeElement>,
+}
+
+/// The edge of a scroll view a view floating over it sits at
+/// (`ios={{ scrollEdgeElement }}`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
+#[non_exhaustive]
+pub enum ScrollEdge {
+    /// The top edge.
+    Top,
+    /// The bottom edge (default).
+    #[default]
+    Bottom,
+}
+
+/// A view floating over an edge of a scroll view, as the platform gets it
+/// ([`ViewProps::scroll_edge_element`]): on iOS 26 and later the scroll
+/// edge effect of that scroll view takes its shape from the view, as it
+/// does from a bar, so the content scrolled under the view fades out
+/// around what the view shows instead of being cut by it. Elsewhere a
+/// fade the app draws under the view gives the same separation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ScrollEdgeElement {
+    /// The scroll view (its native id).
+    pub scroll_view: crate::NodeId,
+    /// The edge of it the view sits at.
+    pub edge: ScrollEdge,
 }
 
 impl ViewProps {
@@ -625,6 +678,22 @@ impl PanActivation {
             dx.hypot(dy) > Self::MIN_DISTANCE.0
         };
         activates.then_some(true)
+    }
+
+    /// [`PanActivation::decide`] on a move of the finger from offset `from`
+    /// to offset `to` (both from where it went down), judged along the
+    /// straight line between them a point at a time: the offset the finger
+    /// passed first decides, even when the move passes both. Moves arrive
+    /// several points apart, and a diagonal 1.5 across for 1 down passes
+    /// `activeOffsetX: 10` and `failOffsetY: 10` within one 10-point move.
+    /// The platforms ask it with the previous move's offset as `from`.
+    pub fn decide_move(&self, from: Point<Points>, to: Point<Points>) -> Option<bool> {
+        let (mx, my) = (to.x.0 - from.x.0, to.y.0 - from.y.0);
+        let steps = mx.hypot(my).ceil().max(1.0) as u32;
+        (1..=steps).find_map(|i| {
+            let t = i as f32 / steps as f32;
+            self.decide(Points(from.x.0 + mx * t), Points(from.y.0 + my * t))
+        })
     }
 }
 

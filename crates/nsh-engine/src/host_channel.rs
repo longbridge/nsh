@@ -21,7 +21,10 @@
 
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{
+        Arc, Mutex, MutexGuard,
+        atomic::{AtomicU64, AtomicUsize, Ordering},
+    },
 };
 
 use crossbeam_channel::{Receiver, Sender};
@@ -66,6 +69,19 @@ type UrlHandler = Arc<dyn Fn(OpenUrlRequest) + Send + Sync>;
 #[derive(Clone, Default)]
 pub struct HostChannel {
     inner: Arc<Mutex<Inner>>,
+    /// The app's calls handed to a handler and not yet answered, and
+    /// those answered.
+    calls: Arc<CallCount>,
+}
+
+/// A channel's count of the calls its handlers took ([`HostReply`]).
+#[derive(Default)]
+struct CallCount {
+    /// Taken and not yet answered.
+    in_flight: AtomicUsize,
+    /// Answered so far: counted before the call leaves `in_flight`, so a
+    /// reader that saw none in flight sees every answer that came.
+    answered: AtomicU64,
 }
 
 #[derive(Default)]
@@ -111,6 +127,24 @@ impl HostChannel {
 
     fn lock(&self) -> MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// How many of the apps' calls a handler has and has not answered yet.
+    /// A headless test driver waits for them before it ends a step: their
+    /// answer comes from another thread, in real time.
+    #[doc(hidden)]
+    pub fn calls_in_flight(&self) -> usize {
+        self.calls.in_flight.load(Ordering::SeqCst)
+    }
+
+    /// How many of the apps' calls a handler has answered so far. An
+    /// answer is on the engine's queue once counted, and may land after
+    /// the engine said it was idle: a headless test driver that read this
+    /// before asking, and finds no call in flight and this count changed,
+    /// asks again ([`HostChannel::calls_in_flight`] first, then this).
+    #[doc(hidden)]
+    pub fn calls_answered(&self) -> u64 {
+        self.calls.answered.load(Ordering::SeqCst)
     }
 
     /// The launch parameters of the apps started from now on
@@ -380,6 +414,8 @@ impl EngineBridge {
     /// Runs `handler` with call `id` of `name`, answered back to this
     /// engine.
     fn start(&self, handler: &Handler, id: u64, name: &str, data: JsonValue) {
+        let calls = self.channel.calls.clone();
+        calls.in_flight.fetch_add(1, Ordering::SeqCst);
         let call = HostCall {
             name: name.to_owned(),
             data,
@@ -387,6 +423,7 @@ impl EngineBridge {
                 id,
                 name: name.to_owned(),
                 tx: Some(self.tx.clone()),
+                calls: Some(calls),
             }),
         };
         Self::run(handler, call);
@@ -592,6 +629,8 @@ pub struct HostReply {
     name: String,
     /// The queue of the engine that made the call; `None` once answered.
     tx: Option<Sender<Message>>,
+    /// Its channel's count of calls, until answered.
+    calls: Option<Arc<CallCount>>,
 }
 
 impl std::fmt::Debug for HostReply {
@@ -618,6 +657,15 @@ impl HostReply {
         if let Some(tx) = self.tx.take() {
             let _ = tx.send(Message::HostReply(self.id, result));
         }
+        self.answered();
+    }
+
+    /// Counts the call answered, once its answer is on the engine's queue.
+    fn answered(&mut self) {
+        if let Some(calls) = self.calls.take() {
+            calls.answered.fetch_add(1, Ordering::SeqCst);
+            calls.in_flight.fetch_sub(1, Ordering::SeqCst);
+        }
     }
 }
 
@@ -630,6 +678,7 @@ impl Drop for HostReply {
             );
             let _ = tx.send(Message::HostReply(self.id, Err(message)));
         }
+        self.answered();
     }
 }
 

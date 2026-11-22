@@ -858,6 +858,14 @@ pub(crate) fn root_focus_if_none(root: &UIView, window: &UIWindow) {
     let _ = root.becomeFirstResponder();
 }
 
+/// Whether `responder` is the surface root holding the hardware keys
+/// because nothing else had the focus ([`root_focus_if_none`]). Code that
+/// returns the focus to a control only where none has it treats this
+/// responder as no focus.
+pub(crate) fn is_root_focus(responder: &UIView) -> bool {
+    responder.tag() == nsh_core::ROOT_ID as isize
+}
+
 /// Whether `view` or any view below it is the first responder. A native
 /// input's field editor and a hosted view's content are views in the tree,
 /// so a transfer to either counts before the root is restored.

@@ -18,13 +18,12 @@ use nsh_base::{
 use nsh_core::{
     MountItem, NodeId, PointerEvents, Size, Transform,
     animation::{AnimationOp, AnimationProp, Driver},
-    element::Root,
     geometry::point,
     platform::Os,
     prelude::*,
 };
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
+use nsh_testing::{DragOptions, Headless};
 
 #[derive(Clone, PartialEq, Props)]
 struct HarnessProps {
@@ -162,10 +161,12 @@ fn start_with(mode: ScrollbarMode, motion: ScrollbarMotion, content: f32) -> (He
     let mut config = EngineConfig {
         viewport: Size::new(px(400.0), px(844.0)),
         clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
-        ..EngineConfig::new(Root::new::<Harness>(move || HarnessProps {
-            mode,
-            motion,
-            content,
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>(move || {
+            HarnessProps {
+                mode,
+                motion,
+                content,
+            }
         }))
     };
     config.environment.os = Os::MacOs;
@@ -227,7 +228,12 @@ fn start_with(mode: ScrollbarMode, motion: ScrollbarMotion, content: f32) -> (He
 /// Presses the middle of the bar and drags across its axis, which
 /// scrolls nothing more: where the press went shows.
 fn press_middle(app: &mut Headless) {
-    app.drag("label:Bar", point(px(40.0), px(0.0))).unwrap();
+    app.drag(
+        "label:Bar",
+        point(px(40.0), px(0.0)),
+        DragOptions::default(),
+    )
+    .unwrap();
 }
 
 #[test]
@@ -237,17 +243,32 @@ fn a_press_on_the_track_centers_the_thumb_there_and_a_drag_goes_on() {
     // From the middle of the track (the thumb is at 0 to 40): the thumb's
     // middle there puts its start at 80, half its travel (400), and 40
     // points down are 40 of 160 more: 200 of 800.
-    app.drag("label:Bar", point(px(0.0), px(40.0))).unwrap();
+    app.drag(
+        "label:Bar",
+        point(px(0.0), px(40.0)),
+        DragOptions::default(),
+    )
+    .unwrap();
     app.wait_for("text:Offset 600").unwrap();
     // Past the end: held at it.
-    app.drag("label:Bar", point(px(0.0), px(400.0))).unwrap();
+    app.drag(
+        "label:Bar",
+        point(px(0.0), px(400.0)),
+        DragOptions::default(),
+    )
+    .unwrap();
     app.wait_for("text:Offset 800").unwrap();
 }
 
 #[test]
 fn a_drag_moves_the_thumb_in_the_batch_that_scrolls() {
     let (mut app, seen) = start(ScrollbarMode::Always, 1000.0);
-    app.drag("label:Bar", point(px(0.0), px(40.0))).unwrap();
+    app.drag(
+        "label:Bar",
+        point(px(0.0), px(40.0)),
+        DragOptions::default(),
+    )
+    .unwrap();
     app.wait_for("text:Offset 600").unwrap();
     // Not a frame later, when the platform reports the scroll: the thumb
     // would trail the pointer.
@@ -270,7 +291,12 @@ fn the_thumb_follows_the_target_scrolled_elsewhere() {
     app.wait_for("text:Offset 400").unwrap();
     // The thumb is at 80 to 120 now: a drag from the middle takes it, and
     // 16 points move the content 80.
-    app.drag("label:Bar", point(px(0.0), px(16.0))).unwrap();
+    app.drag(
+        "label:Bar",
+        point(px(0.0), px(16.0)),
+        DragOptions::default(),
+    )
+    .unwrap();
     app.wait_for("text:Offset 480").unwrap();
 }
 
@@ -333,7 +359,12 @@ fn a_hover_bar_passes_presses_through_until_its_content_overflows() {
     assert_eq!(seen.pointer(), Some(PointerEvents::Auto));
     app.hover("label:Bar").unwrap();
     assert!(seen.shown());
-    app.drag("label:Bar", point(px(0.0), px(40.0))).unwrap();
+    app.drag(
+        "label:Bar",
+        point(px(0.0), px(40.0)),
+        DragOptions::default(),
+    )
+    .unwrap();
     app.wait_for("text:Offset 600").unwrap();
 
     app.press("id:shrink").unwrap();
@@ -434,7 +465,9 @@ fn BuiltIn(props: BuiltInProps) -> impl IntoElement {
 fn start_built_in(list: bool) -> (Headless, Arc<Mutex<HashMap<NodeId, bool>>>) {
     let mut config = EngineConfig {
         viewport: Size::new(px(400.0), px(844.0)),
-        ..EngineConfig::new(Root::new::<BuiltIn>(move || BuiltInProps { list }))
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<BuiltIn>(move || {
+            BuiltInProps { list }
+        }))
     };
     config.environment.os = Os::MacOs;
     let mut app = Headless::start(config).expect("the engine starts");
@@ -460,7 +493,12 @@ fn start_built_in(list: bool) -> (Headless, Arc<Mutex<HashMap<NodeId, bool>>>) {
 fn a_built_in_bar_scrolls_its_view_in_place_of_the_indicator() {
     let (mut app, indicators) = start_built_in(false);
     // The thumb is 40 of the track's 200 and travels 160 over 800 points.
-    app.drag("label:Bar", point(px(0.0), px(40.0))).unwrap();
+    app.drag(
+        "label:Bar",
+        point(px(0.0), px(40.0)),
+        DragOptions::default(),
+    )
+    .unwrap();
     app.wait_for("text:Offset 600").unwrap();
     let indicators = indicators.lock().unwrap();
     assert_eq!(indicators.values().copied().collect::<Vec<_>>(), [false]);
@@ -469,7 +507,12 @@ fn a_built_in_bar_scrolls_its_view_in_place_of_the_indicator() {
 #[test]
 fn a_list_has_its_built_in_bar_too() {
     let (mut app, indicators) = start_built_in(true);
-    app.drag("label:Bar", point(px(0.0), px(40.0))).unwrap();
+    app.drag(
+        "label:Bar",
+        point(px(0.0), px(40.0)),
+        DragOptions::default(),
+    )
+    .unwrap();
     app.wait_for("text:Offset 600").unwrap();
     let indicators = indicators.lock().unwrap();
     assert_eq!(indicators.values().copied().collect::<Vec<_>>(), [false]);

@@ -1601,7 +1601,20 @@ impl WebItem {
         self.background.set(view.state().style.background_color);
         *self.props.borrow_mut() = Some(p.clone());
         // The core keeps `incognito` from changing once it is made.
-        self.start(surface);
+        if self.host.get().is_some() {
+            self.start(surface);
+        } else {
+            // Not bound yet: it binds once the batch is applied. A
+            // `<Window>` made in the same batch has opened by then, so its
+            // content binds to that window rather than the main one (#2514).
+            let weak = Rc::downgrade(self);
+            surface.on_frame(move |surface, _| {
+                if let Some(item) = weak.upgrade() {
+                    item.start(surface);
+                }
+                crate::surface::Next::Done
+            });
+        }
         if self.webview.borrow().is_some() {
             self.paint_background();
             self.apply(p);

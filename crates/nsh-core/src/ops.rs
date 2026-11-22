@@ -233,8 +233,8 @@ events! {
     Menu = "onMenu": "A menu item was chosen: the application menu's or a context menu's (root only; desktops; payload: `id`), or a context menu closed (`closed`: true, after its item).",
     MouseEnter = "onMouseEnter": "The mouse came over the view or a view inside it (never on touches; payload: [`EventPayload::Mouse`]).",
     MouseLeave = "onMouseLeave": "The mouse left the view and the views inside it, or the window (payload: [`EventPayload::Mouse`], where it was last).",
-    FileDragEnter = "onFileDragEnter": "A local file drag entered an eligible desktop drop destination (payload: [`EventPayload::FileDrop`]).",
-    FileDragLeave = "onFileDragLeave": "A local file drag left its desktop drop destination.",
+    FileDragEnter = "onFileDragEnter": "A local file drag entered an eligible drop destination, on desktops and iOS (payload: [`EventPayload::FileDrop`]).",
+    FileDragLeave = "onFileDragLeave": "A local file drag left its drop destination, on desktops and iOS.",
     FileDrop = "onFileDrop": "Local files were dropped (payload: [`EventPayload::FileDrop`]).",
     MouseMove = "onMouseMove": "The mouse moved over the view or a view inside it, with or without a button down, or a modifier key changed while it rests there with none down (payload: [`EventPayload::Mouse`]; at most one per frame).",
     ContextMenu = "onContextMenu": "The secondary button was pressed over the view (payload: [`EventPayload::ContextMenu`]): the nearest listener around the view under the pointer hears it, unless a text input or selectable text is nearer.",
@@ -248,6 +248,7 @@ events! {
     OpenUrl = "onOpenUrl": "A [`Command::OpenUrl`] request finished (root only; payload: `id`, `opened`: whether the platform opened the URL).",
     CaretMove = "onCaretMove": "An input's caret moved: with its selection, or as its text scrolled or wrapped again (payload: `bounds`, the caret in the input; the core adds `pageBounds`, in the root view).",
     Paste = "onPaste": "The user pasted into an input (payload: [`EventPayload::Paste`]: the text, files with their bytes such as a screenshot, local files' URLs), before the `onChangeText` of the text it inserts.",
+    ClipboardWrite = "onClipboardWrite": "A [`Command::SetClipboard`] or [`Command::SetClipboardItem`] finished, in the order of the writes (root only, platforms with [`crate::platform::Environment::clipboard_write_result`]; payload: `written`: whether the system clipboard took it).",
     ScreenColor = "onScreenColor": "A [`Command::PickScreenColor`] request finished (root only; payload: `id`, `color`: the color picked, packed `0xRRGGBBAA`, absent when cancelled).",
     FileRequest = "onFileRequest": "A [`Command::FileRequest`] finished (root only; payload: [`EventPayload::FileRequest`]).",
     Speech = "onSpeech": "A speech recognition session reported (root only; payload: [`EventPayload::Speech`]).",
@@ -274,6 +275,10 @@ events! {
     Share = "onShare": "A [`Command::Share`] request finished (root only; payload: `id`, then `action` (`\"shared\"` with the `target` where the platform names it, or `\"dismissed\"`), or `error` with its `code`; [`crate::share`]).",
     DetentChange = "onDetentChange": "The user moved an iOS sheet dialog to another of its `detents` (dragging it, its grabber, a scroll at its edge, a screen reader; payload: [`EventPayload::Json`], `{ detent }`, [`SheetDetent::change_payload`]).",
     AuthSession = "onAuthSession" as "": "A [`Command::AuthSession`] request finished (root only; payload: `id`, then the callback `url`, `action` `\"cancelled\"`, or `error` with its `code`; [`crate::auth_session`]; never reaches a listener).",
+    FocusIn = "onFocusIn": "The keyboard focus came into the view: onto it or a view inside it, from outside (it entered `focus-within`; raised by the core). Moving between views inside it is no new coming in.",
+    FocusOut = "onFocusOut": "The keyboard focus left the view: from it or a view inside it to one outside, or to none (it left `focus-within`; raised by the core).",
+    TextDrop = "onTextDrop" as "": "Text dragged from another app or view was dropped on the view (payload: [`EventPayload::TextDrop`]): a Rust component's, such as `RichEditor`'s, which inserts it where it was let go (iOS).",
+    OpenAppSettings = "onOpenAppSettings" as "": "A [`Command::OpenAppSettings`] request finished (root only; payload: `id`, `opened`: whether the system opened the app's page in its settings; [`crate::mobile::open_app_settings`]; never reaches a listener).",
 }
 
 /// What an input holds, for the system's autofill and suggestions
@@ -659,7 +664,8 @@ pub struct PressEvent {
     /// The modifier keys held when the press began.
     pub modifiers: crate::keymap::Modifiers,
     /// Consecutive clicks at the same place: 1 for a click, 2 for a
-    /// double click, ...
+    /// double click, ...; 0 when not from a pointer (a keyboard or
+    /// assistive technology activation), as the DOM's `detail`.
     pub clicks: u32,
 }
 
@@ -864,6 +870,29 @@ pub struct PasteEvent {
     pub uris: Vec<String>,
 }
 
+/// Text dropped on a view ([`EventKind::TextDrop`]).
+#[derive(Debug, Clone, PartialEq, Default)]
+#[non_exhaustive]
+pub struct TextDrop {
+    /// The plain text, empty when the drag held none.
+    pub text: String,
+    /// The same content as HTML, empty when the drag held none.
+    pub html: String,
+    /// The drop point in the window's coordinates.
+    pub page_position: Point<Points>,
+}
+
+impl TextDrop {
+    /// A drop of `text` (and `html`) at `page_position`.
+    pub fn new(text: String, html: String, page_position: Point<Points>) -> Self {
+        TextDrop {
+            text,
+            html,
+            page_position,
+        }
+    }
+}
+
 impl EventPayload {
     /// An `onPaste` payload of fields (`text`; a reported paste with no
     /// payload is an empty one) made a [`EventPayload::Paste`], as handlers
@@ -1045,6 +1074,34 @@ pub enum PayloadValue {
     Bounds(Bounds<Points>),
 }
 
+/// Files dragged in with their contents ([`EventPayload::FileContents`]).
+#[derive(Debug, Clone, PartialEq, Default)]
+#[non_exhaustive]
+pub struct FileContents {
+    /// The regular files, in the drag's order: read ones with their bytes,
+    /// ones over the limit `tooLarge`; on drag entry, none are read yet.
+    pub files: Vec<crate::picker::PickedFile>,
+    /// The MIME type of each offered item, as the platform reports them.
+    pub mime_types: Vec<String>,
+    /// Where the files were let go, in the window's coordinates.
+    pub page_position: Option<Point<Points>>,
+}
+
+impl FileContents {
+    /// Contents of `files`, typed `mime_types`, let go at `page_position`.
+    pub fn new(
+        files: Vec<crate::picker::PickedFile>,
+        mime_types: Vec<String>,
+        page_position: Option<Point<Points>>,
+    ) -> Self {
+        Self {
+            files,
+            mime_types,
+            page_position,
+        }
+    }
+}
+
 /// Data delivered with an event.
 #[derive(Debug, Clone, PartialEq)]
 pub enum EventPayload {
@@ -1128,8 +1185,16 @@ pub enum EventPayload {
         /// The drop point in the window's coordinates.
         page_position: Point<Points>,
     },
+    /// Files a drag offers or drops where the platform hands over their
+    /// contents rather than local paths (the Web): `files` in the drag's
+    /// order, unread on drag entry (types only), and where they were let
+    /// go. Boxed, as [`Self::Paste`], to keep every payload small.
+    FileContents(Box<FileContents>),
     /// What the user pasted into an input.
     Paste(Box<PasteEvent>),
+    /// Text dropped on a view ([`EventKind::TextDrop`]); boxed, as
+    /// [`Self::Paste`], to keep every payload small.
+    TextDrop(Box<TextDrop>),
     /// The lines of a text block.
     TextLayout(Vec<crate::text::TextLine>),
     /// The files the user picked ([`EventKind::Pick`]), with their bytes.
@@ -1862,8 +1927,8 @@ pub enum CellSlot {
     Empty,
 }
 
-/// A list's `contentStyle` (or `contentClass`): padding around the content and gaps
-/// between rows and columns.
+/// A list's `contentStyle` (or `contentClass`): padding around the content, gaps
+/// between rows and columns, and cell alignment on the cross axis.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct ListContentStyle {
     /// Padding around the content.
@@ -1872,6 +1937,9 @@ pub struct ListContentStyle {
     pub row_gap: Points,
     /// Gap between columns (`numColumns`) of vertical lists.
     pub column_gap: Points,
+    /// Cell alignment on the cross axis: stretch (default), flex-start, center
+    /// or flex-end.
+    pub align_items: Option<taffy::AlignItems>,
 }
 
 /// Where a list rests (`alignment`), as GPUI's `ListAlignment`.
@@ -1953,6 +2021,19 @@ pub enum ScreenAnimation {
     None,
 }
 
+/// Where a page's title sits in the native header (`headerTitleAlign`).
+/// Android's toolbar honors it. iOS's system bar always centers the title
+/// and ignores the value; the desktops and the web draw no native header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
+pub enum HeaderTitleAlign {
+    /// At the start, after the back button or the leading item (Android's
+    /// default).
+    #[default]
+    Left,
+    /// Centered across the header, between the leading and trailing items.
+    Center,
+}
+
 /// A screen option (`<NavPage title headerVisible ...>`).
 #[derive(Debug, Clone, PartialEq, HostProps)]
 pub enum ScreenProp {
@@ -1981,6 +2062,12 @@ pub enum ScreenProp {
     /// iOS 26's own bars.
     #[prop(js = "headerShadowVisible", default = true, on = SCREEN)]
     HeaderShadowVisible(bool),
+    /// `headerTitleAlign` (Android: the system header): where the title
+    /// sits, `"left"` (the default) or `"center"`. iOS's system bar always
+    /// centers the title and ignores the value; the desktops and the web
+    /// draw no native header.
+    #[prop(js = "headerTitleAlign", on = SCREEN)]
+    HeaderTitleAlign(HeaderTitleAlign),
     /// `headerBackgroundOnScroll` (iOS: the system header; ignored
     /// elsewhere): with `headerTransparent`, the header stays clear while
     /// the content rests at its top and shows its background once the
@@ -2490,6 +2577,9 @@ pub enum Command {
     Focus,
     /// Unfocus an input; on the root view, unfocus whatever is focused.
     Blur,
+    /// Clear the selection of a selectable view (`ViewProps::selectable_view`)
+    /// the view is, is inside or holds.
+    ClearSelection,
     /// Scroll a scroll view to an offset.
     ScrollTo {
         /// Horizontal offset.
@@ -2593,6 +2683,12 @@ pub enum Command {
     /// sheets) take their colors from, by the tokens' names (`popover`,
     /// `accent`, `border`, ...).
     Tokens(std::sync::Arc<crate::element::Tokens>),
+    /// The language the app's text shows in ([`crate::i18n`]: its selected
+    /// language, `setLocale`'s or the embedding app's included), on the
+    /// root of an iOS or Android surface, sent when it changes: the words
+    /// the platform speaks for states it has no system words for
+    /// (checked, expanded, invalid...) follow it.
+    TextLocale(crate::platform::Locale),
     /// Change what functions set for the status bar (on the root): the
     /// core merges it under the settings components render and sends
     /// [`Command::StatusBar`] when the result changes.
@@ -2741,6 +2837,17 @@ pub enum Command {
         id: u32,
         /// The URL ([`crate::open_url::check_url`] passed it).
         url: String,
+    },
+    /// Open the app's own page in the system's settings (on the root;
+    /// `nsh/mobile`'s `AppSettings.open`,
+    /// [`crate::mobile::open_app_settings`]): iOS's
+    /// `UIApplication.openSettingsURLString`, Android's application
+    /// details. Report whether the system opened it as
+    /// [`EventKind::OpenAppSettings`] `id`. Sent only on platforms whose
+    /// [`crate::platform::Environment::app_settings`] is set.
+    OpenAppSettings {
+        /// The request.
+        id: u32,
     },
     /// Show the system's share sheet for `sheet` (on the root;
     /// `Share.show`, [`crate::share`]) and report how it ended as
@@ -3458,6 +3565,12 @@ pub enum Prop {
     /// `autoFocus`: focused when it appears.
     #[prop(js = "autoFocus", on = INPUT)]
     AutoFocus(bool),
+    /// `selectTextOnFocus`: the whole text is selected when the input takes
+    /// the focus (a click, Tab, `focus()`, `autoFocus`). Decided natively as
+    /// the focus arrives; a click that drags, extends (Shift) or selects
+    /// words (double click) keeps the user's selection.
+    #[prop(js = "selectTextOnFocus", on = INPUT)]
+    SelectTextOnFocus(bool),
     /// `caret`: the caret is drawn (default true; `false` hides it).
     #[prop(js = "caret", default = true, on = INPUT)]
     Caret(bool),
@@ -3630,16 +3743,32 @@ pub enum Prop {
     /// The system material of a backdrop blur (iOS, default `ultraThin`).
     #[prop(ios = "backdropMaterial")]
     BackdropMaterial(crate::BackdropMaterial),
+    /// `ios={{ scrollEdgeElement }}`: the scroll view the view floats over
+    /// and the edge of it the view sits at (iOS 26: that scroll view's edge
+    /// effect takes its shape from the view); `None`: none.
+    #[prop(ios = "scrollEdgeElement")]
+    ScrollEdgeElement(Option<crate::element::ScrollEdgeTarget>),
     /// `macos={{ backdrop }}`: the `NSVisualEffectView` material on macOS
     /// (default `popover` / `withinWindow` / `active`; `None`: none).
     #[prop(macos = "backdrop")]
     MacOsBackdrop(Option<crate::MacOsBackdrop>),
+    /// `windows={{ backdrop }}`: `{ material: "blur" }` draws the system's blur
+    /// of what is behind a transparent window under the view, on Windows 11.
+    #[prop(windows = "backdrop")]
+    WindowsBackdrop(Option<crate::WindowsBackdrop>),
     /// An accessibility property.
     #[prop(nested)]
     Accessibility(AccessibilityProp),
     /// `testID`: an identifier for UI tests.
     #[prop(js = "testID")]
     TestId(Option<Arc<str>>),
+    /// `copyText`: what a copy of the text around the view gives in its
+    /// place, when the view (or image) is inside a text (an inline
+    /// formula's source, an emoji image's character): selecting across it
+    /// and copying puts this there. Unset, the view adds nothing to the
+    /// copy. A view outside a text and a nested text span ignore it.
+    #[prop(js = "copyText")]
+    CopyText(Option<Arc<str>>),
     /// `web={{ element }}`: the HTML element the web draws the view or text
     /// as (`"p"`, `"nav"`, `"article"`, ...), for what `role` cannot say;
     /// the other platforms keep the view as it is.

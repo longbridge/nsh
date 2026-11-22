@@ -44,6 +44,24 @@ pub const SCROLL_PRESS_DELAY: u64 = 130;
 pub const LONG_PRESS: f32 = 500.0;
 /// Velocities are measured over this many milliseconds.
 pub const VELOCITY_WINDOW: f64 = 100.0;
+/// Minimum duration a completed short press holds its `PRESSED` visual
+/// state so a same-turn tap-to-click renders `:active` feedback.
+pub const TAP_FEEDBACK: std::time::Duration = std::time::Duration::from_millis(64);
+
+/// How long to hold a completed short press's `PRESSED` state after a
+/// pointer release `elapsed` after the press began; `None` when the press
+/// lasted at least [`TAP_FEEDBACK`], was `cancelled`, or visual feedback
+/// must end `immediate`ly (reduced motion, automated tests).
+pub fn tap_feedback_delay(
+    elapsed: std::time::Duration,
+    cancelled: bool,
+    immediate: bool,
+) -> Option<std::time::Duration> {
+    if cancelled || immediate {
+        return None;
+    }
+    TAP_FEEDBACK.checked_sub(elapsed).filter(|d| !d.is_zero())
+}
 
 /// Estimates a pointer's velocity from its recent positions (points).
 #[derive(Debug, Clone, Copy, Default)]
@@ -142,6 +160,8 @@ pub struct Gate {
     id: NodeId,
     activation: PanActivation,
     outer: usize,
+    /// The pointer's offset at the last step.
+    last: Point<Points>,
 }
 
 impl Gate {
@@ -152,6 +172,7 @@ impl Gate {
             id,
             activation,
             outer,
+            last: Point::default(),
         }
     }
 
@@ -169,7 +190,15 @@ impl Gate {
         dx: Points,
         dy: Points,
     ) -> (Option<NodeId>, bool) {
-        match self.activation.decide(dx, dy) {
+        self.apply(candidates, self.activation.decide(dx, dy))
+    }
+
+    fn apply<V, C>(
+        &self,
+        candidates: &mut Vec<(V, C)>,
+        decision: Option<bool>,
+    ) -> (Option<NodeId>, bool) {
+        match decision {
             Some(true) => {
                 candidates.truncate(self.outer);
                 (Some(self.id), false)
@@ -180,15 +209,19 @@ impl Gate {
     }
 
     /// [`Gate::decide`] on a pointer's gate, which stays only while
-    /// undecided: the view whose pan activated.
+    /// undecided: the view whose pan activated. The move since the last
+    /// step is judged along its line ([`PanActivation::decide_move`]).
     pub fn step<V, C>(
         gate: &mut Option<Gate>,
         candidates: &mut Vec<(V, C)>,
         dx: Points,
         dy: Points,
     ) -> Option<NodeId> {
-        let g = gate.take()?;
-        let (id, undecided) = g.decide(candidates, dx, dy);
+        let mut g = gate.take()?;
+        let to = crate::geometry::point(dx, dy);
+        let decision = g.activation.decide_move(g.last, to);
+        g.last = to;
+        let (id, undecided) = g.apply(candidates, decision);
         if let Some(id) = id {
             log::debug!(target: "nsh::input", "panActivation of {id} activated");
         }
@@ -1149,6 +1182,34 @@ mod tests {
     }
 
     #[test]
+    fn a_gate_steps_to_the_offset_its_pointer_passed_first() {
+        // 1.5 across for 1 down, 10 points a move: the second move passes
+        // both offsets, x first.
+        let sideways = PanActivation::horizontal(Points(10.0), Points(10.0));
+        let mut candidates: Vec<((), Candidate)> = Vec::new();
+        let mut gate = Some(Gate::new(3, sideways, 0));
+        assert_eq!(
+            Gate::step(&mut gate, &mut candidates, Points(-8.3), Points(-5.5)),
+            None
+        );
+        assert_eq!(
+            Gate::step(&mut gate, &mut candidates, Points(-16.6), Points(-11.1)),
+            Some(3)
+        );
+        // 1 across for 1.5 down: y first.
+        let mut gate = Some(Gate::new(3, sideways, 0));
+        assert_eq!(
+            Gate::step(&mut gate, &mut candidates, Points(5.5), Points(8.3)),
+            None
+        );
+        assert_eq!(
+            Gate::step(&mut gate, &mut candidates, Points(11.1), Points(16.6)),
+            None
+        );
+        assert!(gate.is_none());
+    }
+
+    #[test]
     fn an_activated_gate_drops_the_candidates_around_it() {
         let pan = Candidate::Pan { x: true, y: true };
         let mut candidates = vec![(1, pan), (2, pan)];
@@ -1575,5 +1636,28 @@ mod tests {
         let s = size(Points(120.0), Points(40.0));
         assert_eq!(context_menu_anchor(s, false), p(0.0, 40.0));
         assert_eq!(context_menu_anchor(s, true), p(120.0, 40.0));
+    }
+
+    #[test]
+    fn tap_feedback_delay_holds_short_presses() {
+        use std::time::Duration;
+        assert_eq!(
+            tap_feedback_delay(Duration::ZERO, false, false),
+            Some(Duration::from_millis(64))
+        );
+        assert_eq!(
+            tap_feedback_delay(Duration::from_millis(12), false, false),
+            Some(Duration::from_millis(52))
+        );
+        assert_eq!(
+            tap_feedback_delay(Duration::from_millis(64), false, false),
+            None
+        );
+        assert_eq!(
+            tap_feedback_delay(Duration::from_millis(120), false, false),
+            None
+        );
+        assert_eq!(tap_feedback_delay(Duration::ZERO, true, false), None);
+        assert_eq!(tap_feedback_delay(Duration::ZERO, false, true), None);
     }
 }

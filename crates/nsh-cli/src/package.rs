@@ -17,9 +17,11 @@ use anyhow::{Context as _, bail};
 use serde::Deserialize;
 
 use crate::{
+    android,
     apple::{
         ActivationPolicy, AppleConfig, ApplePlatform, IOS_MINIMUM, MACOS_MINIMUM, MacosConfig,
     },
+    provisioning::Profile,
     runtime::{self, Platform},
     ui,
 };
@@ -52,6 +54,18 @@ pub(crate) enum PackageTarget {
 }
 
 impl PackageTarget {
+    /// The platform [`crate::module_meta`] reads the app's dependency
+    /// graph for: iOS and Android, where crates declare package entries.
+    fn module_meta_triple(self) -> Option<(&'static str, crate::module_meta::Platform)> {
+        use crate::module_meta::Platform;
+        match self {
+            PackageTarget::Ios => Some(("aarch64-apple-ios", Platform::Ios)),
+            PackageTarget::IosSimulator => Some(("aarch64-apple-ios-sim", Platform::Ios)),
+            PackageTarget::Android => Some(("aarch64-linux-android", Platform::Android)),
+            _ => None,
+        }
+    }
+
     /// This machine's desktop target (`None` off macOS, Windows and
     /// Linux): where `--target gpui` points.
     pub(crate) fn desktop() -> Option<PackageTarget> {
@@ -194,9 +208,9 @@ pub(crate) struct AppConfig {
     /// The app's Rust crate: its builds are the app's own (`rust_app.rs`).
     #[serde(default, rename = "rust")]
     _rust: Option<serde_json::Value>,
-    /// The app's third-party extensions, linked like its crates (`extensions.rs`).
-    #[serde(default, rename = "extensions")]
-    _extensions: Option<serde_json::Value>,
+    /// The app's nshm, resolved and linked by `nshm/`.
+    #[serde(default, rename = "dependencies")]
+    _dependencies: Option<serde_json::Value>,
     /// A Rust app's root component in its crate (`rust_app::RootConfig`).
     #[serde(default, rename = "root")]
     _root: Option<serde_json::Value>,
@@ -211,9 +225,17 @@ pub(crate) struct AppConfig {
     /// URL schemes that open the app (`"myapp"`: `myapp://...`), which
     /// packages register with the system; the app hears them through
     /// `UrlScheme.on("open", ...)`. [`read_config`] checks them and lowers
-    /// their case ([`AppConfig::url_schemes`]).
+    /// their case ([`AppConfig::app_links`]).
     #[serde(default)]
     pub(crate) schemes: Vec<String>,
+    /// Web links that open the app (`[{ "host": "example.com", "paths":
+    /// ["/orders/*"] }]`: Universal Links on iOS, App Links on Android),
+    /// which packages claim with the system; the app hears them through
+    /// `UrlScheme.on("open", ...)` as it does its schemes' links.
+    /// [`read_config`] checks them, and leaves out (warning) each one it
+    /// cannot read whole ([`AppConfig::app_links`]).
+    #[serde(default)]
+    pub(crate) links: Option<serde_json::Value>,
     /// The app runs once (`"singleInstance": true`, Windows and Linux): a
     /// second launch hands its arguments and working directory to the
     /// running instance (`Application.on("secondInstance", ...)`) and exits
@@ -253,6 +275,11 @@ pub(crate) struct AppConfig {
     /// [`read_config`]): written into `app.json` and the dev server's app
     /// info, where the runners read them before the app's code runs.
     pub(crate) window: Option<serde_json::Value>,
+    /// The app's lifecycle (`"application"`, checked by [`read_config`]):
+    /// `{ "quitMode": "platform" | "lastWindowClosed" | "explicit" }`.
+    /// Written into `app.json` and the dev server's app info, where the
+    /// engine sets the quit mode before the app's code runs.
+    pub(crate) application: Option<serde_json::Value>,
     /// What iOS packages add to their `Info.plist` and entitlements.
     #[serde(default)]
     pub(crate) ios: AppleConfig,
@@ -280,9 +307,59 @@ pub(crate) struct AndroidConfig {
     /// TLS. Off by default, as Android has it from API 28 on.
     #[serde(default)]
     pub(crate) uses_cleartext_traffic: bool,
+    /// Java libraries the app ships (`"libraries"`: jar, AAR and dex files,
+    /// relative to `nsh.json`), before the ones its crates list
+    /// ([`crate::module_meta`]): packaged after the runtime's
+    /// `classes.dex`, so the app's class loader finds their classes as it
+    /// finds NSH's. An AAR listed here is the version of its library the
+    /// package takes, whichever its crates list.
+    #[serde(default)]
+    pub(crate) libraries: Vec<crate::android::Library>,
+    /// The values of the placeholders (`${name}`) the libraries' manifests
+    /// and the crates' manifest entries use: a service's key, for one.
+    /// Only the app sets them; `${applicationId}` is its package.
+    #[serde(default)]
+    pub(crate) manifest_placeholders: std::collections::BTreeMap<String, String>,
+    /// Permissions the manifest declares besides the ones NSH declares
+    /// itself (`<uses-permission>`): a bare name (`ACCESS_NETWORK_STATE`)
+    /// is Android's, `android.permission.<name>`; a dotted one is written
+    /// as it is. Declaring a runtime permission does not grant it.
+    #[serde(default)]
+    pub(crate) permissions: Vec<String>,
+    /// Elements of the manifest's `<queries>`: `<intent>`, `<package>` and
+    /// `<provider>`, one balanced element each. The app's crates add theirs
+    /// after the app's ([`crate::module_meta`]).
+    #[serde(default)]
+    pub(crate) queries: Vec<String>,
+    /// Elements of the manifest's `<application>`: `<service>`,
+    /// `<receiver>`, `<provider>`, `<activity>` and `<meta-data>`, one
+    /// balanced element each; `${applicationId}` in them is the app's
+    /// package. The app's crates add theirs after the app's
+    /// ([`crate::module_meta`]).
+    #[serde(default)]
+    pub(crate) application: Vec<String>,
+    /// What the app's window shows from the tap on its icon until its first
+    /// frame, the same keys as `ios.launchScreen`: the window's background
+    /// and, on Android 12+, the splash screen's color and image. Without it
+    /// the platform theme's background and the launcher icon.
+    pub(crate) launch_screen: Option<crate::apple::LaunchScreen>,
 }
 
 impl AndroidConfig {
+    /// `permissions`, checked and spelled out in full.
+    pub(crate) fn permissions(&self) -> anyhow::Result<Vec<String>> {
+        for name in &self.permissions {
+            if let Some(warning) = lower_case_android_warning(name, "nsh.json android.permissions")
+            {
+                ui::warn(warning);
+            }
+        }
+        self.permissions
+            .iter()
+            .map(|name| android_permission(name, "nsh.json android.permissions"))
+            .collect()
+    }
+
     /// `targetSdk`, checked: no lower than the runtime's minimum.
     pub(crate) fn target_sdk(&self) -> anyhow::Result<u32> {
         use crate::android::{DEFAULT_TARGET_SDK, MIN_SDK};
@@ -294,6 +371,48 @@ impl AndroidConfig {
         }
         Ok(level)
     }
+}
+
+/// Whether `name` is a bare name (one of Android's own) with a lower case
+/// letter, which no permission of Android's has: most likely a typo.
+fn lower_case_android_name(name: &str) -> bool {
+    !name.contains('.') && name.chars().any(|c| c.is_ascii_lowercase())
+}
+
+/// The warning about the `android.permissions` entry `name` written at
+/// `at`, when it is a bare name in lower case.
+pub(crate) fn lower_case_android_warning(name: &str, at: &str) -> Option<String> {
+    lower_case_android_name(name).then(|| {
+        format!(
+            "{at}: `{name}` is not upper case, as Android's own permission names are \
+             (`ACCESS_NETWORK_STATE`): Android ignores a name it does not know"
+        )
+    })
+}
+
+/// An `android.permissions` entry in full: a bare name is one of
+/// Android's own (`android.permission.<name>`). Each part of the name is a
+/// Java identifier, so nothing but the name reaches the manifest. `at`
+/// names where the entry was written, for the error.
+pub(crate) fn android_permission(name: &str, at: &str) -> anyhow::Result<String> {
+    let identifier = |part: &str| {
+        let mut chars = part.chars();
+        chars
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+    };
+    if !name.split('.').all(identifier) {
+        bail!(
+            "{at}: `{name}` is not a permission name \
+             (`ACCESS_NETWORK_STATE`, or `com.example.permission.NAME`)"
+        );
+    }
+    Ok(if name.contains('.') {
+        name.to_owned()
+    } else {
+        format!("android.permission.{name}")
+    })
 }
 
 /// `nsh.json` `"tui"`.
@@ -327,11 +446,46 @@ impl AppConfig {
         }
     }
 
-    /// The URL schemes the app claims (`"schemes": [...]`), checked, in
-    /// lower case; those it cannot claim are left out ([`read_config`]
-    /// warns of them).
-    pub(crate) fn url_schemes(&self) -> Vec<String> {
-        nsh_core::url_scheme::schemes_from_json(&serde_json::json!(self.schemes))
+    /// The links the app claims: its URL schemes (`"schemes": [...]`)
+    /// and web links (`"links": [...]`), checked; those it cannot claim are
+    /// left out ([`read_config`] warns of them).
+    pub(crate) fn app_links(&self) -> nsh_core::url_scheme::AppLinks {
+        let mut config = serde_json::json!({ "schemes": self.schemes });
+        if let Some(links) = &self.links {
+            config["links"] = links.clone();
+        }
+        nsh_core::url_scheme::AppLinks::from_json(&config)
+    }
+
+    /// Claims the web links' hosts in iOS `entitlements`:
+    /// `applinks:<host>` in `com.apple.developer.associated-domains`, after
+    /// what `ios.entitlements` lists there. Their paths are the host's to
+    /// confirm (`apple-app-site-association`); the core keeps only the
+    /// claimed ones.
+    pub(crate) fn add_links_to_entitlements(
+        &self,
+        entitlements: &mut plist::Dictionary,
+    ) -> anyhow::Result<()> {
+        const KEY: &str = "com.apple.developer.associated-domains";
+        let links = self.app_links();
+        if links.web().is_empty() {
+            return Ok(());
+        }
+        let mut entries = match entitlements.remove(KEY) {
+            Some(plist::Value::Array(entries)) => entries,
+            None => Vec::new(),
+            Some(_) => anyhow::bail!(
+                "ios.entitlements: `{KEY}` is not an array of domains (`[\"applinks:example.com\"]`), so the web links of nsh.json `links` cannot be added to it"
+            ),
+        };
+        for link in links.web() {
+            let entry = plist::Value::String(format!("applinks:{}", link.host()));
+            if !entries.contains(&entry) {
+                entries.push(entry);
+            }
+        }
+        entitlements.insert(KEY.into(), plist::Value::Array(entries));
+        Ok(())
     }
 
     /// The file types the app opens (`"fileTypes"`), checked; those it
@@ -436,15 +590,15 @@ pub(crate) const WEB_MEDIA_USAGE_DESCRIPTIONS: [(&str, &str, &str); 2] = [
 ];
 
 /// The `app.json` of a package: `info` (the app's id, ...) with the
-/// schemes it claims, which its runner hands the core so the links of
-/// others are dropped (`nsh_engine::Bundle::url_schemes`).
+/// links it claims (`"schemes"`, `"links"`), which its runner hands the
+/// core so other links are dropped (`nsh_engine::Bundle::links`).
 pub(crate) fn app_json(
     mut info: serde_json::Value,
-    schemes: &[String],
+    links: &nsh_core::url_scheme::AppLinks,
     window: Option<&serde_json::Value>,
 ) -> String {
-    if !schemes.is_empty() {
-        info["schemes"] = serde_json::json!(schemes);
+    if let Some(info) = info.as_object_mut() {
+        links.add_to_json(info);
     }
     if let Some(window) = window {
         info["window"] = window.clone();
@@ -469,6 +623,9 @@ pub(crate) fn desktop_app_json(
     if let Some(window) = &config.window {
         info["window"] = window.clone();
     }
+    if let Some(application) = &config.application {
+        info["application"] = application.clone();
+    }
     if config.single_instance {
         info["singleInstance"] = true.into();
     }
@@ -484,10 +641,16 @@ pub(crate) fn window_json(entry: &Path) -> Option<String> {
     read_config(&entry).ok()?.window.map(|w| w.to_string())
 }
 
-/// Says, once per app, that the main window of the app at `entry` starts
-/// hidden (`nsh.json` `window.defaultVisible: false`): the desktop hosts of
-/// `nsh run` and `nsh test --target` open it so, as its package does, and
-/// only the app shows it.
+/// `nsh.json` `"application"` of the app at `entry` (checked), as JSON: the
+/// dev server's app info carries it.
+pub(crate) fn application_json(entry: &Path) -> Option<String> {
+    let entry = dunce::canonicalize(entry).ok()?;
+    read_config(&entry).ok()?.application.map(|a| a.to_string())
+}
+
+/// Says, once per app, that `nsh.json` `window.defaultVisible: false` has no
+/// effect in window model v2: the app host never shows, and the app opens the
+/// windows it declares with `<Window>`.
 pub(crate) fn note_hidden_main_window(entry: &Path) {
     static NOTED: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
     let Ok(entry) = dunce::canonicalize(entry) else {
@@ -496,13 +659,13 @@ pub(crate) fn note_hidden_main_window(entry: &Path) {
     let hidden = read_config(&entry)
         .ok()
         .and_then(|config| config.window)
-        .and_then(|window| nsh_core::desktop::MainWindowOptions::from_json(&window).ok())
-        .is_some_and(|window| !window.visible_at_launch());
+        .and_then(|window| window.get("defaultVisible").and_then(|v| v.as_bool()))
+        == Some(false);
     let mut noted = NOTED.lock().unwrap_or_else(|e| e.into_inner());
     if hidden && !noted.contains(&entry) {
         noted.push(entry);
         crate::ui::note(
-            "the main window starts hidden (nsh.json window.defaultVisible: false) until the app shows it",
+            "nsh.json window.defaultVisible has no effect in window model v2: the app host never shows; the app opens its <Window> when ready",
         );
     }
 }
@@ -614,8 +777,9 @@ pub(crate) struct PackageOptions<'a> {
     pub(crate) config: AppConfig,
     /// Code signing identity (device builds).
     pub(crate) sign: Option<&'a str>,
-    /// Provisioning profile (device builds).
-    pub(crate) profile: Option<&'a Path>,
+    /// Provisioning profiles (device builds): the app's, and one for each of
+    /// its app extensions (`ios.extensions`), found by bundle identifier.
+    pub(crate) profiles: &'a [PathBuf],
     /// Android release keystore, key alias and password.
     pub(crate) keystore: Option<(&'a Path, &'a str, &'a str)>,
     /// Android: the ABIs of the APK (empty: [`android::DEFAULT_ABIS`], plus
@@ -631,6 +795,10 @@ pub(crate) struct PackageOptions<'a> {
     /// (Linux, macOS, Windows: launch it; the web: serve it and open it in
     /// the browser).
     pub(crate) run: bool,
+    /// With `run`: the simulator (name or UDID, `ios-simulator`) or the
+    /// Android device (serial) to run in; `None`: the default one
+    /// ([`crate::run::simulator`], [`crate::android::device`]).
+    pub(crate) device: Option<&'a str>,
     /// The web: the URL the site's files are served from (`--asset-url`).
     pub(crate) asset_url: Option<&'a str>,
     /// A development build for `nsh run`. Android: the APK is debuggable,
@@ -642,6 +810,7 @@ pub(crate) struct PackageOptions<'a> {
 /// (`{ "macos": "icon-mac.png", "windows": "icon-win.png" }`) since their
 /// conventions differ (macOS draws its artwork inset on a transparent
 /// canvas, Windows edge to edge). A platform left out gets no icon.
+/// Android's may also be an adaptive icon ([`PlatformIcon::Adaptive`]).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(untagged)]
 pub(crate) enum AppIcon {
@@ -649,7 +818,43 @@ pub(crate) enum AppIcon {
     All(PathBuf),
     /// The icons by platform: `macos`, `windows`, `linux`, `ios`, `android`,
     /// `web` ([`AppIcon::PLATFORMS`]).
-    Platforms(std::collections::BTreeMap<String, PathBuf>),
+    Platforms(std::collections::BTreeMap<String, PlatformIcon>),
+}
+
+/// One platform's icon in [`AppIcon::Platforms`].
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(from = "serde_json::Value")]
+pub(crate) enum PlatformIcon {
+    /// A PNG.
+    Image(PathBuf),
+    /// Android: the layers of an adaptive icon (`{ "foreground": ..,
+    /// "background": .., "monochrome": .. }`).
+    Adaptive(android::AdaptiveIcon),
+    /// A value that is neither, with why: [`read_config`] warns of it and
+    /// leaves the platform without an icon, as it does an adaptive icon
+    /// given for another platform than Android. Read here rather than
+    /// failing, which would drop the whole `icon`.
+    Invalid(String),
+}
+
+impl From<serde_json::Value> for PlatformIcon {
+    fn from(value: serde_json::Value) -> Self {
+        match value {
+            serde_json::Value::String(path) => PlatformIcon::Image(path.into()),
+            serde_json::Value::Object(_) => {
+                let mut unknown = Vec::new();
+                match serde_ignored::deserialize::<_, _, android::AdaptiveIcon>(&value, |key| {
+                    unknown.push(key.to_string())
+                }) {
+                    Ok(icon) => PlatformIcon::Adaptive(android::AdaptiveIcon { unknown, ..icon }),
+                    Err(e) => PlatformIcon::Invalid(e.to_string()),
+                }
+            }
+            _ => PlatformIcon::Invalid(
+                "expected the path of a PNG, or (Android) an adaptive icon's layers".into(),
+            ),
+        }
+    }
 }
 
 impl AppIcon {
@@ -657,7 +862,7 @@ impl AppIcon {
     const PLATFORMS: [&str; 6] = ["macos", "windows", "linux", "ios", "android", "web"];
 
     /// The icon of `target`'s platform.
-    pub(crate) fn of(&self, target: PackageTarget) -> Option<&Path> {
+    pub(crate) fn of(&self, target: PackageTarget) -> Option<android::Icon<'_>> {
         let platform = match target {
             PackageTarget::Ios | PackageTarget::IosSimulator => "ios",
             PackageTarget::Android => "android",
@@ -668,16 +873,29 @@ impl AppIcon {
             PackageTarget::Gpui => return None,
         };
         match self {
-            AppIcon::All(icon) => Some(icon),
-            AppIcon::Platforms(icons) => icons.get(platform).map(PathBuf::as_path),
+            AppIcon::All(icon) => Some(android::Icon::Image(icon)),
+            AppIcon::Platforms(icons) => match icons.get(platform)? {
+                PlatformIcon::Image(icon) => Some(android::Icon::Image(icon)),
+                PlatformIcon::Adaptive(icon) => Some(android::Icon::Adaptive(icon)),
+                PlatformIcon::Invalid(_) => None,
+            },
         }
     }
 }
 
 impl AppConfig {
-    /// The app's icon for `target` (`nsh.json` `"icon"`, or `--icon`).
+    /// The app's icon for `target` (`nsh.json` `"icon"`, or `--icon`): a
+    /// PNG. Android's may be adaptive instead ([`AppConfig::android_icon`]).
     pub(crate) fn icon(&self, target: PackageTarget) -> Option<&Path> {
-        self.icon.as_ref()?.of(target)
+        match self.icon.as_ref()?.of(target)? {
+            android::Icon::Image(icon) => Some(icon),
+            android::Icon::Adaptive(_) => None,
+        }
+    }
+
+    /// The app's Android launcher icon: a PNG or an adaptive icon.
+    pub(crate) fn android_icon(&self) -> Option<android::Icon<'_>> {
+        self.icon.as_ref()?.of(PackageTarget::Android)
     }
 
     /// The macOS development host's arguments for the app (`nsh run`,
@@ -746,6 +964,11 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
     };
     let (mut config, mut ignored) =
         parse_config(&text).with_context(|| format!("invalid {}", path.display()))?;
+    crate::module_meta::keep_app_android_elements(
+        &mut config.android.queries,
+        &mut config.android.application,
+        &mut ignored,
+    );
     if let Some(value) = &config.tui.points_per_cell
         && let Err(e) = crate::run::parse_points_per_cell(value)
     {
@@ -756,6 +979,12 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
         nsh_core::url_scheme::schemes_from_json_lenient(&serde_json::json!(config.schemes));
     config.schemes = schemes;
     ignored.extend(schemes_ignored);
+    if let Some(links) = &config.links {
+        let (_, links_ignored) = nsh_core::url_scheme::AppLinks::from_json_lenient(
+            &serde_json::json!({ "links": links }),
+        );
+        ignored.extend(links_ignored);
+    }
     if let Some(types) = &config.file_types {
         let (_, types_ignored) = nsh_core::file_type::parse_file_types(types);
         ignored.extend(types_ignored);
@@ -773,6 +1002,12 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
         ignored.push(format!("window: {e}"));
         config.window = None;
     }
+    if let Some(application) = &config.application
+        && let Err(e) = nsh_core::desktop::ApplicationOptions::from_json(application)
+    {
+        ignored.push(format!("application: {e}"));
+        config.application = None;
+    }
     // The runner resolves it again on the user's machine, with their home.
     if let Some(dir) = &config.data_dir
         && nsh_engine::resolve_data_dir(dir).is_none()
@@ -782,26 +1017,71 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
         ));
         config.data_dir = None;
     }
+    for library in &mut config.android.libraries {
+        library.path = dir.join(&library.path);
+    }
+    config.ios.extensions = crate::app_extensions::read(
+        std::mem::take(&mut config.ios.extensions),
+        dir,
+        &mut ignored,
+    );
+    config.ios.frameworks = crate::ios_frameworks::read(
+        std::mem::take(&mut config.ios.frameworks),
+        dir,
+        &mut ignored,
+    );
+    config.ios.linker_flags.retain(|flag| {
+        let checked = crate::ios_frameworks::check_flag(flag);
+        if let Err(why) = &checked {
+            ignored.push(format!("ios.linkerFlags: {why}: left out"));
+        }
+        checked.is_ok()
+    });
     config.icon = match config.icon {
         Some(AppIcon::All(icon)) => Some(AppIcon::All(dir.join(icon))),
         Some(AppIcon::Platforms(icons)) => Some(AppIcon::Platforms(
             icons
                 .into_iter()
-                .filter(|(platform, _)| {
-                    let known = AppIcon::PLATFORMS.contains(&platform.as_str());
-                    if !known {
+                .filter_map(|(platform, icon)| {
+                    if !AppIcon::PLATFORMS.contains(&platform.as_str()) {
                         ignored.push(format!("unknown key `icon.{platform}`"));
+                        return None;
                     }
-                    known
+                    let icon = match icon {
+                        PlatformIcon::Image(path) => PlatformIcon::Image(dir.join(path)),
+                        PlatformIcon::Adaptive(icon) if platform == "android" => {
+                            ignored.extend(
+                                icon.unknown
+                                    .iter()
+                                    .map(|key| format!("unknown key `icon.android.{key}`")),
+                            );
+                            PlatformIcon::Adaptive(icon.relative_to(dir))
+                        }
+                        PlatformIcon::Adaptive(_) => {
+                            ignored.push(format!(
+                                "icon.{platform}: an adaptive icon is Android's only; give the path of a PNG"
+                            ));
+                            return None;
+                        }
+                        PlatformIcon::Invalid(why) => {
+                            ignored.push(format!("icon.{platform}: {why}"));
+                            return None;
+                        }
+                    };
+                    Some((platform, icon))
                 })
-                .map(|(platform, icon)| (platform, dir.join(icon)))
                 .collect(),
         )),
         None => None,
     };
+    crate::apple::keep_privacy_manifest(&mut config.ios.privacy_manifest, &mut ignored);
     warn_ignored(&path, &ignored);
     config.ios.launch_screen = config
         .ios
+        .launch_screen
+        .map(|screen| screen.relative_to(dir));
+    config.android.launch_screen = config
+        .android
         .launch_screen
         .map(|screen| screen.relative_to(dir));
     config.ios.check(ApplePlatform::Ios)?;
@@ -831,21 +1111,48 @@ fn app_localizations(dir: &Path, locales: Option<&serde_json::Value>) -> Vec<Str
 /// Declares the app's locales to Apple's systems (`CFBundleLocalizations`,
 /// English, the development region, first): system UI, such as AppKit's and
 /// UIKit's menus, shows in the language the app does, which without it is
-/// English whatever the user's.
-fn bundle_localizations(d: &mut plist::Dictionary, config: &AppConfig) {
-    if config.localizations.is_empty() {
-        return;
+/// English whatever the user's. The languages of the app's `Info.plist`
+/// strings (`strings`, `<platform>.infoPlistStrings`) are among them
+/// ([`bundle_languages`]).
+fn bundle_localizations(
+    d: &mut plist::Dictionary,
+    config: &AppConfig,
+    strings: &serde_json::Map<String, serde_json::Value>,
+) {
+    let list = bundle_languages(&config.localizations, strings);
+    if !list.is_empty() {
+        d.insert(
+            "CFBundleLocalizations".into(),
+            plist::Value::Array(list.into_iter().map(plist::Value::String).collect()),
+        );
     }
-    let mut list = vec!["en".to_owned()];
-    for locale in &config.localizations {
-        if !list.contains(locale) {
-            list.push(locale.clone());
+}
+
+/// The languages an Apple bundle declares (`CFBundleLocalizations`): none
+/// for an app with neither `locales` nor `Info.plist` strings, else
+/// English, the development region, first, then `locales` and the
+/// languages `strings` (`<platform>.infoPlistStrings`) has text in, whose
+/// `.lproj` directories the bundle carries; one without text has none. The
+/// development region has no directory: listed, it stays the language of
+/// every user whose language the app does not have.
+pub(crate) fn bundle_languages(
+    locales: &[String],
+    strings: &serde_json::Map<String, serde_json::Value>,
+) -> Vec<String> {
+    let translated = strings
+        .iter()
+        .filter(|(_, texts)| texts.as_object().is_some_and(|texts| !texts.is_empty()))
+        .map(|(language, _)| language);
+    let mut list = Vec::new();
+    for language in locales.iter().chain(translated) {
+        if list.is_empty() {
+            list.push("en".to_owned());
+        }
+        if !list.contains(language) {
+            list.push(language.clone());
         }
     }
-    d.insert(
-        "CFBundleLocalizations".into(),
-        plist::Value::Array(list.into_iter().map(plist::Value::String).collect()),
-    );
+    list
 }
 
 /// `nsh.json`'s text as an [`AppConfig`], with what it left out: keys it
@@ -1072,7 +1379,7 @@ fn trimmed_runner(entry: &Path, target: PackageTarget) -> bool {
     }
 }
 
-pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
+pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
     if options.asset_url.is_some() && options.target != PackageTarget::Web {
         bail!("--asset-url is where a web site's files are served from: package with --target web");
     }
@@ -1096,6 +1403,17 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     if options.arch.is_some() && options.target != PackageTarget::Macos {
         bail!("--arch only applies to --target macos");
     }
+    if options.device.is_some() {
+        if !matches!(
+            options.target,
+            PackageTarget::IosSimulator | PackageTarget::Android
+        ) {
+            bail!("--device only applies to --target ios-simulator or android");
+        }
+        if !options.run {
+            bail!("--device is where --run installs the app: add --run");
+        }
+    }
     if options.format != crate::android::Format::Apk {
         if options.target != PackageTarget::Android {
             bail!("--format only applies to --target android");
@@ -1107,12 +1425,35 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
         }
     }
     let entry = dunce::canonicalize(options.entry)?;
+    // What the app's crates and nshm declare for the package (an
+    // `Info.plist` key, a manifest entry), under what `nsh.json` sets.
+    if let Some((triple, platform)) = options.target.module_meta_triple()
+        && let Some(app) = crate::rust_app::current()
+    {
+        crate::module_meta::ModuleMeta::of_workspace(
+            &app.workspace().join("Cargo.toml"),
+            Some(triple),
+        )?
+        .apply(&mut options.config, platform)?;
+    }
     let config = &options.config;
     let (name, id) = release_name_and_id(&entry, config)?;
-    let schemes = config.url_schemes();
-    if options.target == PackageTarget::Web && !schemes.is_empty() {
+    let links = config.app_links();
+    if options.target == PackageTarget::Web && !links.schemes().is_empty() {
         ui::warn(
             "nsh.json schemes: a web page opens from its address, so the schemes are left out",
+        );
+    }
+    if options.target == PackageTarget::Web && !links.web().is_empty() {
+        ui::warn("nsh.json links: a web page is its own link, so the links are left out");
+    }
+    if matches!(
+        options.target,
+        PackageTarget::Linux | PackageTarget::Windows
+    ) && !links.web().is_empty()
+    {
+        ui::warn(
+            "nsh.json links: Linux and Windows open web links in the browser, so the links are left out",
         );
     }
     let executable: String = name.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
@@ -1141,6 +1482,7 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     // its bundle can reach, and those `nsh.json` keeps. A TSX app does too
     // where cargo is, else it ships the prebuilt runner, which has all.
     let has_crates = crate::rust_app::current().is_some();
+    check_ios_link(config, options.target, has_crates)?;
     let mut own_runner = false;
     if options.target != PackageTarget::Web
         && !crate::rust_app::is_root(&entry)
@@ -1152,9 +1494,11 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
             &config.features,
             crate::rust_app::current().is_some_and(|app| crate::rust_app::may_make_web_view(&app)),
         );
+        // Why each feature is in or out is detail: only verbose runs
+        // (`-v`) show it, a normal build stays quiet.
         for c in &choices {
             let mark = if c.keep { "keep" } else { "leave out" };
-            ui::note(format!("{mark} `{}`: {}", c.feature, c.why));
+            ui::debug(format!("{mark} `{}`: {}", c.feature, c.why));
         }
         crate::rust_app::set_runner_features(
             choices
@@ -1238,8 +1582,8 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     if let Some(json) = built.capabilities_json() {
         fs::write(resources.join("capabilities.json"), json)?;
     }
-    // The app's id, which names where it keeps its data, and the schemes
-    // it claims (`Bundle::read`).
+    // The app's id, which names where it keeps its data, and the links it
+    // claims (`Bundle::read`).
     fs::write(
         resources.join("app.json"),
         app_json(
@@ -1247,9 +1591,12 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
                 let mut info = serde_json::json!({ "id": id, "name": name });
                 config.add_file_types_to_app_json(&mut info);
                 config.add_data_dir_to_app_json(&mut info);
+                if let Some(application) = &config.application {
+                    info["application"] = application.clone();
+                }
                 info
             },
-            &schemes,
+            &links,
             config.window.as_ref(),
         ),
     )?;
@@ -1276,7 +1623,7 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     if sdk == "iphoneos" {
         info.extend(ios_toolchain_info()?);
     }
-    url_types(&mut info, &id, &schemes);
+    url_types(&mut info, &id, links.schemes());
     activity_types(&mut info, &id, config.handoff);
     document_types(&mut info, &config.file_types());
     let icon = config.icon(PackageTarget::Ios);
@@ -1287,12 +1634,41 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
             info.insert(key, value);
         }
     }
+    let extensions = crate::app_extensions::embed(
+        &config.ios.extensions,
+        &app,
+        &info,
+        options.target == PackageTarget::IosSimulator,
+        None,
+    )?;
+    // The runner linked the frameworks for this target
+    // (`rust_app::RustApp::ios_link_env`); the dynamic ones go with it.
+    let (frameworks, _) = crate::ios_frameworks::sync(
+        &config.ios.frameworks,
+        platform.triple().context("an iOS target")?,
+        &app.join("Frameworks"),
+        None,
+    )?;
+    let localized = config.ios.localized_info(ApplePlatform::Ios, &info)?;
+    crate::apple::write_localized_info(&app, &localized)?;
     plist::Value::Dictionary(info).to_file_xml(app.join("Info.plist"))?;
+    let mut privacy = config.ios.privacy_manifest.clone();
+    crate::ios_frameworks::add_static_privacy(
+        &config.ios.frameworks,
+        platform.triple().context("an iOS target")?,
+        &mut privacy,
+    )?;
+    crate::apple::write_privacy_manifest(&privacy, &app)?;
 
     match options.target {
         PackageTarget::IosSimulator => {
+            // The app's signature seals its extensions' and frameworks':
+            // they are signed first.
+            crate::app_extensions::sign_ad_hoc(&extensions, options.out)?;
+            crate::ios_frameworks::sign(&frameworks, "-")?;
             // The simulator takes the app's entitlements without a profile.
-            let entitlements = config.ios.entitlements(ApplePlatform::Ios)?;
+            let mut entitlements = config.ios.entitlements(ApplePlatform::Ios)?;
+            config.add_links_to_entitlements(&mut entitlements)?;
             let mut path = None;
             if !entitlements.is_empty() {
                 let file = options.out.join(format!("{executable}.entitlements"));
@@ -1302,7 +1678,8 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
             codesign(&app, "-", path.as_deref())?;
             ui::done(format!("packaged {}", ui::path(&app)));
             if options.run {
-                let udid = crate::run::simulator(None, crate::run::SimulatorWindow::Front)?;
+                let udid =
+                    crate::run::simulator(options.device, crate::run::SimulatorWindow::Front)?;
                 let step = ui::Step::start(format!("installing {id} in the simulator"));
                 crate::run::simctl(&["install", &udid, &app.to_string_lossy()])?;
                 crate::run::simctl_with_env(
@@ -1324,17 +1701,30 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
             if options.run {
                 bail!("--run only applies to the simulator and Android");
             }
-            let (Some(identity), Some(profile)) = (options.sign, options.profile) else {
+            let (Some(identity), false) = (options.sign, options.profiles.is_empty()) else {
                 ui::warn(format!(
                     "{} is unsigned: pass --sign <identity> and --profile <file.mobileprovision> to install it on devices",
                     ui::path(&app)
                 ));
                 return Ok(());
             };
-            fs::copy(profile, app.join("embedded.mobileprovision"))
-                .with_context(|| format!("copy {}", profile.display()))?;
-            let requested = config.ios.entitlements(ApplePlatform::Ios)?;
-            let entitlements = entitlements(profile, &id, requested)?;
+            let profiles = options
+                .profiles
+                .iter()
+                .map(|path| Profile::read(path))
+                .collect::<anyhow::Result<Vec<_>>>()?;
+            // The app's signature seals its extensions' and frameworks':
+            // they are signed first.
+            crate::app_extensions::sign_device(&extensions, identity, &profiles, options.out)?;
+            crate::ios_frameworks::sign(&frameworks, identity)?;
+            let profile = Profile::choose(&profiles, &id, false)?;
+            crate::provisioning::warn_unused(&profiles);
+            fs::copy(&profile.path, app.join("embedded.mobileprovision"))
+                .with_context(|| format!("copy {}", profile.path.display()))?;
+            let mut requested = config.ios.entitlements(ApplePlatform::Ios)?;
+            // The profile grants Associated Domains for the web links'.
+            config.add_links_to_entitlements(&mut requested)?;
+            let entitlements = profile.entitlements(&id, requested, "ios.entitlements")?;
             let path = options.out.join(format!("{executable}.entitlements"));
             entitlements.to_file_xml(&path)?;
             codesign(&app, identity, Some(&path))?;
@@ -1342,6 +1732,29 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
             make_ipa(&app, &ipa)?;
             ui::done(format!("packaged {}", ui::path(&ipa)));
         }
+    }
+    Ok(())
+}
+
+/// `ios.frameworks` and `ios.linkerFlags` are linked with the app's Rust
+/// code, which is what calls a framework: an iOS package of an app
+/// without crates (`has_crates`), whose runner is NSH's own, has nothing
+/// to link them with.
+fn check_ios_link(
+    config: &AppConfig,
+    target: PackageTarget,
+    has_crates: bool,
+) -> anyhow::Result<()> {
+    let ios = matches!(target, PackageTarget::Ios | PackageTarget::IosSimulator);
+    if ios
+        && !has_crates
+        && (!config.ios.frameworks.is_empty() || !config.ios.linker_flags.is_empty())
+    {
+        bail!(
+            "nsh.json ios.frameworks and ios.linkerFlags are linked with the app's Rust code, \
+             which calls the frameworks, and the app has none: add the crate that calls them \
+             (nsh.json `rust`, or an nshm with `nsh add`)"
+        );
     }
     Ok(())
 }
@@ -1403,7 +1816,7 @@ fn package_android(
     use crate::android::{self, Apk, Signing};
     let sdk = android::Sdk::find()?;
     let serial = if options.run {
-        Some(android::device(&sdk)?)
+        Some(android::device(&sdk, options.device)?)
     } else {
         None
     };
@@ -1438,8 +1851,14 @@ fn package_android(
     assets.push((
         "nsh/app.json".to_owned(),
         app_json(
-            serde_json::json!({ "id": id }),
-            &config.schemes,
+            {
+                let mut info = serde_json::json!({ "id": id });
+                if let Some(application) = &config.application {
+                    info["application"] = application.clone();
+                }
+                info
+            },
+            &config.app_links(),
             config.window.as_ref(),
         )
         .into_bytes(),
@@ -1461,10 +1880,15 @@ fn package_android(
     };
     fs::create_dir_all(options.out)?;
     let target_sdk = config.android.target_sdk()?;
+    let permissions = config.android.permissions()?;
     let apk_path = options
         .out
         .join(format!("{name}.{}", options.format.extension()));
     let version = config.version.as_deref().unwrap_or("1.0.0");
+    // `android/res/` next to `nsh.json`: the app's own resources.
+    let app_dir = options.entry.parent().unwrap_or(Path::new("."));
+    let res = Some(app_dir.join("android").join("res")).filter(|dir| dir.is_dir());
+    let library_cache = app_dir.join(".nsh/android/libraries");
     let step = ui::Step::start(format!("packaging {}", ui::path(&apk_path)));
     android::build(
         &sdk,
@@ -1480,14 +1904,24 @@ fn package_android(
             notifications: config.notifications(),
             microphone: config.web_media("microphone"),
             camera: config.web_media("camera"),
+            libraries: &config.android.libraries,
+            library_cache: &library_cache,
+            manifest_placeholders: Some(&config.android.manifest_placeholders),
+            permissions: &permissions,
+            queries: &config.android.queries,
+            application: &config.android.application,
             schemes: &config.schemes,
+            links: config.app_links().web(),
             rust: built.rust_root,
             dark: config.appearance.as_deref() == Some("dark"),
+            fixed_appearance: matches!(config.appearance.as_deref(), Some("light" | "dark")),
             runtime: &runtime,
             abis: &abis,
-            icon: config.icon(PackageTarget::Android),
+            icon: config.android_icon(),
+            launch_screen: config.android.launch_screen.as_ref(),
             assets,
             sounds: android_sounds(config, built),
+            res: res.as_deref(),
             signing,
         },
         options.format,
@@ -1737,10 +2171,15 @@ fn package_macos(
     config.macos.add_to_app_json(&mut info);
     config.add_file_types_to_app_json(&mut info);
     config.add_data_dir_to_app_json(&mut info);
-    let schemes = config.url_schemes();
+    if let Some(application) = &config.application {
+        info["application"] = application.clone();
+    }
+    // macOS opens web links in the app only under a profile that grants
+    // Associated Domains, which an ad hoc package has not: the links are
+    // there for an app signed so.
     fs::write(
         nsh.join("app.json"),
-        app_json(info, &schemes, config.window.as_ref()),
+        app_json(info, &config.app_links(), config.window.as_ref()),
     )?;
     let icon = match config.icon(PackageTarget::Macos) {
         Some(icon) => {
@@ -1750,9 +2189,12 @@ fn package_macos(
         None => false,
     };
     let mut plist = macos_info_plist(name, id, executable, config, icon)?;
-    url_types(&mut plist, id, &schemes);
+    let links = config.app_links();
+    url_types(&mut plist, id, links.schemes());
     activity_types(&mut plist, id, config.handoff);
     document_types(&mut plist, &config.file_types());
+    let localized = config.macos.localized_info(&plist)?;
+    crate::apple::write_localized_info(&resources, &localized)?;
     plist::Value::Dictionary(plist)
         .to_file_xml(contents.join("Info.plist"))
         .context("write Info.plist")?;
@@ -2009,7 +2451,16 @@ fn macos_info_plist(
         d.insert("LSUIElement".into(), true.into());
     }
     config.usage_descriptions(&mut d);
-    bundle_localizations(&mut d, config);
+    bundle_localizations(&mut d, config, &config.macos.info_plist_strings);
+    // Finder shows a translated name of the app only with it.
+    if config
+        .macos
+        .info_plist_strings
+        .values()
+        .any(|texts| texts.get("CFBundleDisplayName").is_some())
+    {
+        d.insert("LSHasLocalizedDisplayName".into(), true.into());
+    }
     // The app's own keys, over NSH's defaults (never over its reserved ones).
     d.extend(config.macos.info_plist()?);
     Ok(d)
@@ -2180,7 +2631,7 @@ fn info_plist(
     );
     d.insert("LSRequiresIPhoneOS".into(), true.into());
     config.usage_descriptions(&mut d);
-    bundle_localizations(&mut d, config);
+    bundle_localizations(&mut d, config, &config.ios.info_plist_strings);
     // A launch screen entry opts into the full screen (no letterboxing);
     // the app's color and image are in its asset catalog
     // ([`launch_screen_sets`]).
@@ -2420,7 +2871,11 @@ fn compile_assets(
     Ok(keys)
 }
 
-fn codesign(app: &Path, identity: &str, entitlements: Option<&Path>) -> anyhow::Result<()> {
+pub(crate) fn codesign(
+    app: &Path,
+    identity: &str,
+    entitlements: Option<&Path>,
+) -> anyhow::Result<()> {
     let mut cmd = Command::new("codesign");
     cmd.args(["--force", "--sign", identity]);
     if identity == "-" {
@@ -2436,77 +2891,12 @@ fn codesign(app: &Path, identity: &str, entitlements: Option<&Path>) -> anyhow::
         .context("run codesign")?;
     if !output.status.success() {
         bail!(
-            "codesign failed: {}",
+            "codesign failed for {}: {}",
+            app.display(),
             String::from_utf8_lossy(&output.stderr).trim()
         );
     }
     Ok(())
-}
-
-/// The entitlements an app is signed with: those a provisioning profile
-/// grants, checked against `id`, with the app's own (`requested`, `nsh.json`
-/// `ios.entitlements`) in place of the profile's values, each checked
-/// against what the profile grants.
-fn entitlements(
-    profile: &Path,
-    id: &str,
-    requested: plist::Dictionary,
-) -> anyhow::Result<plist::Value> {
-    let output = Command::new("security")
-        .args(["cms", "-D", "-i"])
-        .arg(profile)
-        .output()
-        .context("run security cms")?;
-    if !output.status.success() {
-        bail!("cannot read provisioning profile {}", profile.display());
-    }
-    let profile = plist::Value::from_reader_xml(output.stdout.as_slice())?;
-    let mut entitlements = profile
-        .as_dictionary()
-        .and_then(|d| d.get("Entitlements"))
-        .cloned()
-        .context("the provisioning profile has no entitlements")?;
-    let app_id = entitlements
-        .as_dictionary()
-        .and_then(|d| d.get("application-identifier"))
-        .and_then(|v| v.as_string())
-        .unwrap_or_default()
-        .to_owned();
-    if !profile_allows(&app_id, id) {
-        bail!("the provisioning profile is for {app_id}, not {id}");
-    }
-    // A wildcard profile (`TEAMID.*`) signs the app as `TEAMID.<id>`, as
-    // Xcode does: devices refuse an app signed with the wildcard itself.
-    if let Some(dictionary) = entitlements.as_dictionary_mut() {
-        crate::apple::grant(dictionary, requested)?;
-        dictionary.insert(
-            "application-identifier".to_owned(),
-            plist::Value::String(signed_app_id(&app_id, id)),
-        );
-    }
-    Ok(entitlements)
-}
-
-/// The `application-identifier` an app with bundle id `id` is signed with
-/// under a profile's (`TEAMID.com.example.app` or a wildcard such as
-/// `TEAMID.*`), which covers it.
-fn signed_app_id(app_id: &str, id: &str) -> String {
-    match app_id.split_once('.') {
-        Some((team, pattern)) if pattern.ends_with('*') => format!("{team}.{id}"),
-        _ => app_id.to_owned(),
-    }
-}
-
-/// Whether a profile's `application-identifier` (`TEAMID.com.example.app`,
-/// or a wildcard such as `TEAMID.*`) covers bundle id `id`.
-fn profile_allows(app_id: &str, id: &str) -> bool {
-    app_id
-        .split_once('.')
-        .map(|(_, pattern)| match pattern.strip_suffix('*') {
-            Some(prefix) => id.starts_with(prefix),
-            None => pattern == id,
-        })
-        .unwrap_or(false)
 }
 
 /// `Payload/<App>.app` zipped, keeping permissions and symlinks.
@@ -2725,12 +3115,13 @@ mod tests {
                 out: Path::new(".nsh/out"),
                 config: AppConfig::default(),
                 sign: None,
-                profile: None,
+                profiles: &[],
                 keystore: None,
                 abis: &[],
                 format: crate::android::Format::Apk,
                 arch: Some(Arch::X86_64),
                 run: false,
+                device: None,
                 asset_url: None,
                 development: false,
             })
@@ -2738,6 +3129,49 @@ mod tests {
             assert_eq!(
                 error.to_string(),
                 "--arch only applies to --target macos",
+                "{target:?}"
+            );
+        }
+    }
+
+    /// `--device` names where `--run` installs the app: a simulator or an
+    /// Android device. Other targets, and a package not run, refuse it
+    /// before anything is built.
+    #[test]
+    fn only_runs_on_a_simulator_or_android_device_take_a_device() {
+        let options = |target, run| PackageOptions {
+            entry: Path::new("App.tsx"),
+            target,
+            out: Path::new(".nsh/out"),
+            config: AppConfig::default(),
+            sign: None,
+            profiles: &[],
+            keystore: None,
+            abis: &[],
+            format: crate::android::Format::Apk,
+            arch: None,
+            run,
+            device: Some("emulator-5554"),
+            asset_url: None,
+            development: false,
+        };
+        for target in [
+            PackageTarget::Macos,
+            PackageTarget::Linux,
+            PackageTarget::Windows,
+            PackageTarget::Ios,
+            PackageTarget::Web,
+        ] {
+            assert_eq!(
+                package(options(target, true)).unwrap_err().to_string(),
+                "--device only applies to --target ios-simulator or android",
+                "{target:?}"
+            );
+        }
+        for target in [PackageTarget::IosSimulator, PackageTarget::Android] {
+            assert_eq!(
+                package(options(target, false)).unwrap_err().to_string(),
+                "--device is where --run installs the app: add --run",
                 "{target:?}"
             );
         }
@@ -2832,6 +3266,81 @@ mod tests {
         assert!(target(serde_json::json!({ "android": { "targetSdk": 21 } })).is_err());
     }
 
+    /// `ios.privacyManifest` is read with the rest of `nsh.json`; what is
+    /// not a privacy manifest's is left out there, never an error.
+    #[test]
+    fn the_privacy_manifest_is_read_from_nsh_json() {
+        let dir =
+            std::env::temp_dir().join(format!("nsh-cli-privacy-config-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("nsh.json"),
+            r#"{ "ios": { "privacyManifest": {
+                "NSPrivacyTracking": false,
+                "NSPrivacyAccessedAPIType": []
+            } } }"#,
+        )
+        .unwrap();
+        let config = read_config(&dir.join("App.tsx")).unwrap();
+        assert_eq!(
+            config.ios.privacy_manifest,
+            *serde_json::json!({ "NSPrivacyTracking": false })
+                .as_object()
+                .unwrap()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `android.queries` and `android.application` are the app's to write
+    /// too; a value of another form is left out with a warning, as any
+    /// `nsh.json` value is.
+    #[test]
+    fn the_app_writes_android_queries_and_components() {
+        let (config, ignored) = parse_config(
+            r#"{ "android": {
+                "queries": ["<package android:name=\"com.singular.sdk\"/>"],
+                "application": ["<service android:name=\"${applicationId}.Sync\" android:exported=\"false\"/>"]
+            } }"#,
+        )
+        .unwrap();
+        assert!(ignored.is_empty(), "{ignored:?}");
+        assert_eq!(
+            config.android.queries,
+            [r#"<package android:name="com.singular.sdk"/>"#]
+        );
+        assert_eq!(config.android.application.len(), 1);
+        let (config, ignored) =
+            parse_config(r#"{ "android": { "queries": "<package android:name=\"a\"/>" } }"#)
+                .unwrap();
+        assert!(config.android.queries.is_empty());
+        assert!(
+            ignored.len() == 1 && ignored[0].starts_with("android.queries"),
+            "{ignored:?}"
+        );
+        // Read from the app: an entry that is not one element of those
+        // allowed is left out, never an error, and the rest is kept.
+        let dir = std::env::temp_dir().join(format!(
+            "nsh-cli-android-elements-config-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("nsh.json"),
+            r#"{ "android": {
+                "queries": ["<service android:name=\"a.B\"/>", "<package android:name=\"com.example.wallet\"/>"],
+                "application": ["<receiver android:name=\"a.Boot\" android:exported=\"false\"/></application><application>"]
+            } }"#,
+        )
+        .unwrap();
+        let config = read_config(&dir.join("App.tsx")).unwrap();
+        assert_eq!(
+            config.android.queries,
+            [r#"<package android:name="com.example.wallet"/>"#]
+        );
+        assert!(config.android.application.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn android_cleartext_traffic_is_off_unless_asked_for() {
         let cleartext = |json: serde_json::Value| {
@@ -2847,6 +3356,203 @@ mod tests {
         assert!(cleartext(
             serde_json::json!({ "android": { "usesCleartextTraffic": true } })
         ));
+    }
+
+    #[test]
+    fn android_libraries_are_relative_to_nsh_json() {
+        let dir = std::env::temp_dir().join(format!(
+            "nsh-cli-android-libraries-config-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("nsh.json"),
+            r#"{ "android": { "libraries": ["android/libs/sdk.jar", "java/out/classes.dex"] } }"#,
+        )
+        .unwrap();
+        let config = read_config(&dir.join("App.tsx")).unwrap();
+        let libraries: Vec<(PathBuf, &str)> = config
+            .android
+            .libraries
+            .iter()
+            .map(|l| (l.path.clone(), l.listed.as_str()))
+            .collect();
+        assert_eq!(
+            libraries,
+            [
+                (
+                    dir.join("android/libs/sdk.jar"),
+                    "nsh.json `android.libraries`"
+                ),
+                (
+                    dir.join("java/out/classes.dex"),
+                    "nsh.json `android.libraries`"
+                ),
+            ]
+        );
+        assert!(
+            serde_json::from_value::<AppConfig>(serde_json::json!({}))
+                .unwrap()
+                .android
+                .libraries
+                .is_empty()
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn ios_frameworks_need_the_apps_crates() {
+        let mut config = AppConfig::default();
+        assert!(check_ios_link(&config, PackageTarget::Ios, false).is_ok());
+        config.ios.linker_flags.push("-ObjC".into());
+        let error = check_ios_link(&config, PackageTarget::IosSimulator, false).unwrap_err();
+        assert!(error.to_string().contains("add the crate"), "{error}");
+        assert!(check_ios_link(&config, PackageTarget::Ios, true).is_ok());
+        // Other packages do not link them.
+        assert!(check_ios_link(&config, PackageTarget::Android, false).is_ok());
+    }
+
+    #[test]
+    fn ios_frameworks_are_relative_to_nsh_json() {
+        let dir = std::env::temp_dir().join(format!(
+            "nsh-cli-ios-frameworks-config-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("nsh.json"),
+            r#"{ "ios": {
+                "frameworks": [
+                    "ios/Vendor/Sdk.xcframework",
+                    { "path": "ios/Vendor/Ads.xcframework", "forceLoad": true }
+                ],
+                "linkerFlags": ["-ObjC", "", "-lsqlite3"]
+            } }"#,
+        )
+        .unwrap();
+        let config = read_config(&dir.join("App.tsx")).unwrap();
+        let frameworks: Vec<(PathBuf, bool)> = config
+            .ios
+            .frameworks
+            .iter()
+            .map(|f| (f.path.clone(), f.force_load))
+            .collect();
+        assert_eq!(
+            frameworks,
+            [
+                (dir.join("ios/Vendor/Sdk.xcframework"), false),
+                (dir.join("ios/Vendor/Ads.xcframework"), true),
+            ]
+        );
+        // The empty flag is left out with a warning.
+        assert_eq!(config.ios.linker_flags, ["-ObjC", "-lsqlite3"]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn ios_extensions_are_relative_to_nsh_json() {
+        let dir = std::env::temp_dir().join(format!(
+            "nsh-cli-ios-extensions-config-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("nsh.json"),
+            r#"{ "ios": { "extensions": [
+                { "path": "ios/Widget.appex", "simulatorPath": "ios/sim/Widget.appex",
+                  "entitlements": { "com.apple.security.application-groups": ["group.com.example"] } },
+                { "path": "ios/Service.appex" }
+            ] } }"#,
+        )
+        .unwrap();
+        let config = read_config(&dir.join("App.tsx")).unwrap();
+        let extensions = &config.ios.extensions;
+        assert_eq!(extensions.len(), 2);
+        assert_eq!(extensions[0].path, dir.join("ios/Widget.appex"));
+        assert_eq!(
+            extensions[0].simulator_path.as_deref(),
+            Some(dir.join("ios/sim/Widget.appex").as_path())
+        );
+        assert_eq!(extensions[1].simulator_path, None);
+        let (entitlements, section) = crate::apple::extension_entitlements(&extensions[0]).unwrap();
+        assert_eq!(section, "ios.extensions[0].entitlements");
+        assert!(entitlements.contains_key("com.apple.security.application-groups"));
+        assert!(
+            crate::apple::extension_entitlements(&extensions[1])
+                .unwrap()
+                .0
+                .is_empty()
+        );
+
+        // An extension's identity is NSH's to sign, as the app's is.
+        std::fs::write(
+            dir.join("nsh.json"),
+            r#"{ "ios": { "extensions": [
+                { "path": "Widget.appex", "entitlements": { "application-identifier": "T.x" } }
+            ] } }"#,
+        )
+        .unwrap();
+        let error = read_config(&dir.join("App.tsx")).unwrap_err().to_string();
+        assert!(
+            error.contains("ios.extensions[0].entitlements: `application-identifier`"),
+            "{error}"
+        );
+
+        // An entry left out keeps the next one's index as the app wrote it.
+        std::fs::write(
+            dir.join("nsh.json"),
+            r#"{ "ios": { "extensions": [
+                { "simulatorPath": "sim/A.appex" },
+                { "path": "B.appex", "entitlements": { "application-identifier": "T.x" } }
+            ] } }"#,
+        )
+        .unwrap();
+        let error = read_config(&dir.join("App.tsx")).unwrap_err().to_string();
+        assert!(
+            error.contains("ios.extensions[1].entitlements: `application-identifier`"),
+            "{error}"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn android_permissions_are_spelled_out_and_checked() {
+        let permissions = |json: serde_json::Value| {
+            serde_json::from_value::<AppConfig>(json)
+                .unwrap()
+                .android
+                .permissions()
+        };
+        assert!(permissions(serde_json::json!({})).unwrap().is_empty());
+        assert_eq!(
+            permissions(serde_json::json!({ "android": { "permissions": [
+                "ACCESS_NETWORK_STATE",
+                "com.example.permission.READ_ORDERS"
+            ] } }))
+            .unwrap(),
+            [
+                "android.permission.ACCESS_NETWORK_STATE",
+                "com.example.permission.READ_ORDERS"
+            ]
+        );
+        // Only a name reaches the manifest: no markup, no empty part.
+        for bad in [
+            "",
+            "ACCESS NETWORK",
+            "A\" /><uses-permission android:name=\"B",
+            "com..example",
+            "com.example.",
+            "1PERMISSION",
+        ] {
+            let err = permissions(serde_json::json!({ "android": { "permissions": [bad] } }))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("android.permissions"), "{bad}: {err}");
+        }
+        // A bare name in lower case is warned of; a dotted one is the app's.
+        assert!(lower_case_android_name("access_network_state"));
+        assert!(!lower_case_android_name("ACCESS_NETWORK_STATE"));
+        assert!(!lower_case_android_name("com.example.permission.read"));
     }
 
     #[test]
@@ -2936,14 +3642,104 @@ mod tests {
         assert_eq!(declared(&config).unwrap(), ["en", "ja", "zh-TW"]);
         // An app without either declares nothing: English, as before.
         assert_eq!(declared(&AppConfig::default()), None);
+        // The languages the `Info.plist` strings have text in join them:
+        // English stays the language of the users the app has no strings
+        // for. A language without text has no `.lproj`: not declared.
+        let strings = r#"{ "zh-Hans": { "CFBundleDisplayName": "甲" }, "ja": {}, "ko": {} }"#;
+        fs::write(
+            dir.join("nsh.json"),
+            format!(
+                r#"{{
+                    "locales": ["ja"],
+                    "ios": {{ "infoPlistStrings": {strings} }},
+                    "macos": {{ "infoPlistStrings": {strings} }}
+                }}"#
+            ),
+        )
+        .unwrap();
+        let config = read_config(&dir.join("App.tsx")).unwrap();
+        assert_eq!(declared(&config).unwrap(), ["en", "ja", "zh-Hans"]);
+        // Without translations or `locales`, an empty language alone
+        // declares nothing.
+        fs::remove_dir_all(dir.join("locales")).unwrap();
+        fs::write(
+            dir.join("nsh.json"),
+            r#"{ "ios": { "infoPlistStrings": { "ko": {} } }, "macos": { "infoPlistStrings": { "ko": {} } } }"#,
+        )
+        .unwrap();
+        let config = read_config(&dir.join("App.tsx")).unwrap();
+        assert_eq!(declared(&config), None);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// `ios.infoPlistStrings` translates the `Info.plist` packages write,
+    /// NSH's keys among them (the app's name, the usage descriptions NSH
+    /// adds), and only those it has as strings.
+    #[test]
+    fn apps_translate_their_info_plist() {
+        let config: AppConfig = serde_json::from_value(serde_json::json!({
+            "capabilities": { "webview": { "hosts": ["*"], "media": ["camera"] } },
+            "ios": {
+                "infoPlist": { "NSLocationWhenInUseUsageDescription": "Shows nearby stores." },
+                "infoPlistStrings": { "zh-Hans": {
+                    "CFBundleDisplayName": "示例",
+                    "NSCameraUsageDescription": "网页使用相机。",
+                    "NSLocationWhenInUseUsageDescription": "显示附近的门店。"
+                } }
+            },
+            "macos": { "infoPlistStrings": { "de": { "NSCameraUsageDescription": "Kamera." } } }
+        }))
+        .unwrap();
+        let ios = info_plist("A", "com.a", "a", &config, "iphoneos").unwrap();
+        let files = config.ios.localized_info(ApplePlatform::Ios, &ios).unwrap();
+        assert_eq!(
+            files["zh-Hans"],
+            "\"CFBundleDisplayName\" = \"示例\";\n\
+             \"NSCameraUsageDescription\" = \"网页使用相机。\";\n\
+             \"NSLocationWhenInUseUsageDescription\" = \"显示附近的门店。\";\n"
+        );
+        let macos = macos_info_plist("A", "com.a", "a", &config, false).unwrap();
+        assert_eq!(
+            config.macos.localized_info(&macos).unwrap()["de"],
+            "\"NSCameraUsageDescription\" = \"Kamera.\";\n"
+        );
+        // Finder shows a translated name only with `LSHasLocalizedDisplayName`,
+        // written when the app's name is translated.
+        assert!(!macos.contains_key("LSHasLocalizedDisplayName"));
+        let named: AppConfig = serde_json::from_value(serde_json::json!({
+            "macos": { "infoPlistStrings": { "de": { "CFBundleDisplayName": "Beispiel" } } }
+        }))
+        .unwrap();
+        let macos = macos_info_plist("A", "com.a", "a", &named, false).unwrap();
+        assert_eq!(
+            macos.get("LSHasLocalizedDisplayName"),
+            Some(&plist::Value::Boolean(true))
+        );
+        // Without the media capture, the package has no camera usage
+        // description to translate.
+        let config = AppConfig {
+            capabilities: None,
+            ..config
+        };
+        let ios = info_plist("A", "com.a", "a", &config, "iphoneos").unwrap();
+        let error = config
+            .ios
+            .localized_info(ApplePlatform::Ios, &ios)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains(
+                "ios.infoPlistStrings.zh-Hans.NSCameraUsageDescription: the app's Info.plist has no"
+            ),
+            "{error}"
+        );
     }
 
     #[test]
     fn apps_claim_their_url_schemes_in_the_package() {
         let config: AppConfig =
             serde_json::from_str(r#"{ "schemes": ["MyApp", "myapp-dev"] }"#).unwrap();
-        let schemes = config.url_schemes();
+        let schemes = config.app_links().schemes().to_vec();
         assert_eq!(schemes, ["myapp", "myapp-dev"]);
         // The system opens the app for their links...
         let mut info = info_plist("A", "com.a", "a", &config, "iphoneos").unwrap();
@@ -2961,7 +3757,7 @@ mod tests {
         // ...and the runner lets them through.
         let json: serde_json::Value = serde_json::from_str(&app_json(
             serde_json::json!({ "id": "com.a" }),
-            &schemes,
+            &config.app_links(),
             None,
         ))
         .unwrap();
@@ -2974,13 +3770,94 @@ mod tests {
         url_types(&mut info, "com.a", &[]);
         assert!(!info.contains_key("CFBundleURLTypes"));
         assert_eq!(
-            app_json(serde_json::json!({ "id": "com.a" }), &[], None),
+            app_json(
+                serde_json::json!({ "id": "com.a" }),
+                &Default::default(),
+                None
+            ),
             r#"{"id":"com.a"}"#
         );
         // Schemes of the system and other apps are left out.
         let config: AppConfig =
             serde_json::from_str(r#"{ "schemes": ["https", "myapp"] }"#).unwrap();
-        assert_eq!(config.url_schemes(), ["myapp"]);
+        assert_eq!(config.app_links().schemes(), ["myapp"]);
+    }
+
+    #[test]
+    fn apps_claim_their_web_links_in_the_package() {
+        let config: AppConfig = serde_json::from_str(
+            r#"{
+                "schemes": ["MyApp"],
+                "links": [
+                    { "host": "Example.com", "paths": ["/orders/*"] },
+                    { "host": "*.shop.example" },
+                    { "host": "new.example", "exclude": ["/admin/*"] },
+                    { "host": "https://x.test" }
+                ]
+            }"#,
+        )
+        .unwrap();
+        // Checked, lower case, those it cannot read whole left out.
+        let links = config.app_links();
+        assert_eq!(links.schemes(), ["myapp"]);
+        let hosts: Vec<_> = links.web().iter().map(|l| l.host()).collect();
+        assert_eq!(hosts, ["example.com", "*.shop.example"]);
+        // iOS claims their hosts after the app's own associated domains...
+        let mut entitlements = plist::Dictionary::new();
+        entitlements.insert(
+            "com.apple.developer.associated-domains".into(),
+            plist::Value::Array(vec![
+                "webcredentials:example.com".into(),
+                "applinks:example.com".into(),
+            ]),
+        );
+        config.add_links_to_entitlements(&mut entitlements).unwrap();
+        let claimed: Vec<_> = entitlements["com.apple.developer.associated-domains"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(plist::Value::as_string)
+            .collect();
+        assert_eq!(
+            claimed,
+            [
+                "webcredentials:example.com",
+                "applinks:example.com",
+                "applinks:*.shop.example"
+            ]
+        );
+        // ...refuses to guess at a value of another form...
+        let mut wrong = plist::Dictionary::new();
+        wrong.insert(
+            "com.apple.developer.associated-domains".into(),
+            "applinks:example.com".into(),
+        );
+        assert!(config.add_links_to_entitlements(&mut wrong).is_err());
+        // ...and the runner lets them through, paths and all.
+        let json: serde_json::Value = serde_json::from_str(&app_json(
+            serde_json::json!({ "id": "com.a" }),
+            &links,
+            None,
+        ))
+        .unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "id": "com.a",
+                "schemes": ["myapp"],
+                "links": [
+                    { "host": "example.com", "paths": ["/orders/*"] },
+                    { "host": "*.shop.example" }
+                ]
+            })
+        );
+        assert_eq!(nsh_core::url_scheme::AppLinks::from_json(&json), links);
+        // An app that claims none adds nothing.
+        let mut entitlements = plist::Dictionary::new();
+        AppConfig::default()
+            .add_links_to_entitlements(&mut entitlements)
+            .unwrap();
+        assert!(entitlements.is_empty());
     }
 
     #[test]
@@ -3010,7 +3887,7 @@ mod tests {
     #[test]
     fn desktop_packages_carry_the_main_windows_options() {
         let config: AppConfig = serde_json::from_str(
-            r#"{ "appearance": "dark", "window": { "title": "Focus", "closeOnPress": false } }"#,
+            r#"{ "appearance": "dark", "window": { "title": "Focus", "closeOnPress": false }, "application": { "quitMode": "explicit" } }"#,
         )
         .unwrap();
         let info = desktop_app_json(&config, "Focus", "com.a", "1.0.0");
@@ -3022,6 +3899,7 @@ mod tests {
                 "version": "1.0.0",
                 "appearance": "dark",
                 "window": { "title": "Focus", "closeOnPress": false },
+                "application": { "quitMode": "explicit" },
             })
         );
         // The runner opens the main window with them (`Bundle::read_trusted`).
@@ -3218,11 +4096,88 @@ mod tests {
             config.icon,
             Some(AppIcon::Platforms(
                 [
-                    ("macos".to_owned(), dir.join("mac.png")),
-                    ("windows".to_owned(), dir.join("win.png")),
+                    ("macos".to_owned(), PlatformIcon::Image(dir.join("mac.png"))),
+                    (
+                        "windows".to_owned(),
+                        PlatformIcon::Image(dir.join("win.png"))
+                    ),
                 ]
                 .into()
             ))
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn nsh_json_android_icon_may_be_adaptive() {
+        let dir =
+            std::env::temp_dir().join(format!("nsh-adaptive-icon-config-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let entry = dir.join("app.tsx");
+        fs::write(
+            dir.join("nsh.json"),
+            r##"{ "icon": {
+                "ios": "ios.png",
+                "android": { "foreground": "fg.png", "background": "#ffffff", "monochrome": "mono.png", "inset": 1 },
+                "macos": { "foreground": "fg.png", "background": "#ffffff" }
+            } }"##,
+        )
+        .unwrap();
+        let config = read_config(&entry).unwrap();
+        let Some(android::Icon::Adaptive(icon)) = config.android_icon() else {
+            panic!("{:?}", config.icon);
+        };
+        assert_eq!(icon.foreground, dir.join("fg.png"));
+        assert_eq!(
+            icon.background,
+            android::IconBackground::Color(crate::apple::Color([255, 255, 255, 255]))
+        );
+        assert_eq!(icon.monochrome, Some(dir.join("mono.png")));
+        // No PNG for the targets that take one.
+        assert_eq!(config.icon(PackageTarget::Android), None);
+        // Android's only: macOS gets none, the other platforms keep theirs.
+        assert_eq!(config.icon(PackageTarget::Macos), None);
+        assert_eq!(
+            config.icon(PackageTarget::Ios),
+            Some(dir.join("ios.png").as_path())
+        );
+
+        // A background image is relative to `nsh.json`; a malformed color
+        // leaves Android without an icon, the other platforms with theirs.
+        fs::write(
+            dir.join("nsh.json"),
+            r##"{ "icon": { "android": { "foreground": "fg.png", "background": "bg.png" } } }"##,
+        )
+        .unwrap();
+        let config = read_config(&entry).unwrap();
+        let Some(android::Icon::Adaptive(icon)) = config.android_icon() else {
+            panic!("{:?}", config.icon);
+        };
+        assert_eq!(
+            icon.background,
+            android::IconBackground::Image(dir.join("bg.png"))
+        );
+        fs::write(
+            dir.join("nsh.json"),
+            r##"{ "icon": { "ios": "ios.png", "android": { "foreground": "fg.png", "background": "#fff" } } }"##,
+        )
+        .unwrap();
+        let config = read_config(&entry).unwrap();
+        assert!(config.android_icon().is_none());
+        assert_eq!(
+            config.icon(PackageTarget::Ios),
+            Some(dir.join("ios.png").as_path())
+        );
+
+        // One PNG for Android stays one.
+        fs::write(
+            dir.join("nsh.json"),
+            r#"{ "icon": { "android": "icon.png" } }"#,
+        )
+        .unwrap();
+        let config = read_config(&entry).unwrap();
+        assert!(
+            matches!(config.android_icon(), Some(android::Icon::Image(path)) if path == dir.join("icon.png"))
         );
         fs::remove_dir_all(&dir).unwrap();
     }
@@ -3488,41 +4443,6 @@ mod tests {
         assert!(fs::metadata(&icns).unwrap().len() > 0);
         assert!(!dir.join("AppIcon.iconset").exists());
         fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
-    fn profiles_match_bundle_ids() {
-        assert!(profile_allows(
-            "ABCDE12345.com.example.app",
-            "com.example.app"
-        ));
-        assert!(!profile_allows(
-            "ABCDE12345.com.example.app",
-            "com.example.other"
-        ));
-        assert!(profile_allows("ABCDE12345.*", "com.example.app"));
-        assert!(profile_allows(
-            "ABCDE12345.com.example.*",
-            "com.example.app"
-        ));
-        assert!(!profile_allows("ABCDE12345.com.other.*", "com.example.app"));
-        assert!(!profile_allows("", "com.example.app"));
-    }
-
-    #[test]
-    fn wildcard_profiles_sign_the_bundle_id() {
-        assert_eq!(
-            signed_app_id("ABCDE12345.*", "com.example.app"),
-            "ABCDE12345.com.example.app"
-        );
-        assert_eq!(
-            signed_app_id("ABCDE12345.com.example.*", "com.example.app"),
-            "ABCDE12345.com.example.app"
-        );
-        assert_eq!(
-            signed_app_id("ABCDE12345.com.example.app", "com.example.app"),
-            "ABCDE12345.com.example.app"
-        );
     }
 
     #[test]

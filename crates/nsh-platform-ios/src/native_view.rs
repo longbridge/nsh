@@ -110,7 +110,7 @@ define_class!(
 
         #[unsafe(method_id(accessibilityValue))]
         fn accessibility_value(&self) -> Option<Retained<NSString>> {
-            let value = accessibility_value(&self.ivars().props.borrow());
+            let value = self.a11y_value(&self.ivars().props.borrow());
             if let Some(read) = self.ivars().step.borrow_mut().as_mut() {
                 *read = Some(value.clone().unwrap_or_default());
             }
@@ -300,8 +300,9 @@ define_class!(
     pub(crate) struct FocusTap;
 
     impl FocusTap {
-        /// A touch on a stop inside the view is that stop's: its own press
-        /// or tap focuses it, and an input focuses itself.
+        /// A touch on a stop inside the view is that stop's: its own focus
+        /// tap focuses it, an input focuses itself, and a control (a view
+        /// that takes presses) takes its press and no focus.
         #[unsafe(method(touchesBegan:withEvent:))]
         fn touches_began(&self, touches: &NSSet<UITouch>, event: &UIEvent) {
             if let (Some(view), Some(touch)) = (self.view(), touches.anyObject())
@@ -565,10 +566,10 @@ impl NshView {
         self.ivars().events.set(events);
     }
 
-    /// A `focusable` view that takes no presses has no `PressRecognizer` to
-    /// focus it: a tap recognizer that neither claims nor cancels touches
-    /// gives it the keyboard focus. It is removed once the view stops being
-    /// such a stop (or starts taking presses, which focuses it already).
+    /// A `focusable` view that takes no presses (one that takes keys) gets
+    /// the keyboard focus from a tap recognizer that neither claims nor
+    /// cancels touches. It is removed once the view stops being such a stop
+    /// or starts taking presses: a tap gives a control no focus.
     pub(crate) fn update_focus_tap(&self, target: &EventTarget) {
         let wants = self.is_focus_stop() && !self.takes_presses();
         let mut kept = self.ivars().focus_tap.borrow_mut();
@@ -621,6 +622,16 @@ impl NshView {
         !props.accessibility.state.disabled && props.key_capture.captures_key(stroke)
     }
 
+    /// The spoken value: an explicit `accessibilityValue`, plus checked,
+    /// mixed pressed, expanded, current and invalid states (UIKit has no
+    /// traits for those), in the language of the app's text.
+    fn a11y_value(&self, props: &ViewProps) -> Option<String> {
+        let words = self
+            .keyboard_target()
+            .map_or(crate::state_words::DEFAULT, |target| target.state_words());
+        state_value(props, words)
+    }
+
     /// The surface's target, once the view is mounted.
     pub(crate) fn keyboard_target(&self) -> Option<Retained<EventTarget>> {
         self.ivars().target.borrow().as_ref().and_then(Weak::load)
@@ -651,8 +662,12 @@ impl NshView {
         if self.ivars().step.borrow().is_none() {
             return None;
         }
-        let value = accessibility_value(props).unwrap_or_default();
-        if accessibility_value(&self.ivars().props.borrow()).unwrap_or_default() == value {
+        let value = self.a11y_value(props).unwrap_or_default();
+        if self
+            .a11y_value(&self.ivars().props.borrow())
+            .unwrap_or_default()
+            == value
+        {
             return None;
         }
         let read = self.ivars().step.take().flatten()?;
@@ -686,6 +701,27 @@ impl NshView {
     /// Replaces the label of the props set last (`MountItem::AccessibilityLabel`).
     pub(crate) fn set_accessibility_label(&self, label: Option<std::sync::Arc<str>>) {
         self.ivars().props.borrow_mut().accessibility.label = label;
+    }
+
+    /// Whether the view says nothing of its own to a screen reader (no
+    /// role, name, value, help, actions or press, and not made one
+    /// element): a text view's inline links and views can then be elements
+    /// of their own ([`crate::text_access`]).
+    pub(crate) fn reads_only_content(&self) -> bool {
+        let a = &self.ivars().props.borrow().accessibility;
+        a.role == AccessibilityRole::None
+            && a.accessible != Some(true)
+            && a.label.is_none()
+            && a.value.is_none()
+            && a.hint.is_none()
+            && a.description.is_none()
+            && a.actions.is_empty()
+            && !self.ivars().pressable.get()
+    }
+
+    /// `accessibilityState={{ disabled: true }}`.
+    pub(crate) fn accessibility_disabled(&self) -> bool {
+        self.ivars().props.borrow().accessibility.state.disabled
     }
 
     /// The view has press handlers.
@@ -844,10 +880,9 @@ fn traits(props: &ViewProps) -> UIAccessibilityTraits {
     }
 }
 
-/// The spoken value: an explicit `accessibilityValue`, plus checked,
-/// mixed pressed, expanded, current and invalid states (UIKit has no
-/// traits for those).
-fn accessibility_value(props: &ViewProps) -> Option<String> {
+/// The spoken value with the state spoken in `words`
+/// (`NshView::a11y_value`).
+fn state_value(props: &ViewProps, words: &crate::state_words::StateWords) -> Option<String> {
     let a = &props.accessibility;
     let mut parts: Vec<String> = Vec::new();
     if let Some(v) = &a.value {
@@ -866,35 +901,33 @@ fn accessibility_value(props: &ViewProps) -> Option<String> {
         }
     }
     match a.state.checked {
-        Some(Checked::True) => parts.push("checked".into()),
-        Some(Checked::False) => parts.push("not checked".into()),
-        Some(Checked::Mixed) => parts.push("mixed".into()),
+        Some(Checked::True) => parts.push(words.checked.into()),
+        Some(Checked::False) => parts.push(words.not_checked.into()),
+        Some(Checked::Mixed) => parts.push(words.mixed.into()),
         None => {}
     }
     if a.state.pressed == Some(Checked::Mixed) {
-        parts.push("mixed".into());
+        parts.push(words.mixed.into());
     }
     match a.state.expanded {
-        Some(true) => parts.push("expanded".into()),
-        Some(false) => parts.push("collapsed".into()),
+        Some(true) => parts.push(words.expanded.into()),
+        Some(false) => parts.push(words.collapsed.into()),
         None => {}
     }
     if let Some(current) = a.state.current {
-        parts.push(
-            match current {
-                AccessibilityCurrent::True => "current",
-                AccessibilityCurrent::Page => "current page",
-                AccessibilityCurrent::Step => "current step",
-                AccessibilityCurrent::Location => "current location",
-                AccessibilityCurrent::Date => "current date",
-                AccessibilityCurrent::Time => "current time",
-            }
-            .into(),
-        );
+        let kind = match current {
+            AccessibilityCurrent::True => 0,
+            AccessibilityCurrent::Page => 1,
+            AccessibilityCurrent::Step => 2,
+            AccessibilityCurrent::Location => 3,
+            AccessibilityCurrent::Date => 4,
+            AccessibilityCurrent::Time => 5,
+        };
+        parts.push(words.current[kind].into());
     }
     // ARIA's `aria-invalid`, read after the value as WebKit reads it.
     if a.state.invalid {
-        parts.push("invalid data".into());
+        parts.push(words.invalid.into());
     }
     (!parts.is_empty()).then(|| parts.join(", "))
 }
@@ -982,20 +1015,29 @@ mod tests {
     /// current item are spoken in the value.
     #[test]
     fn pressed_and_current_states() {
+        let en = crate::state_words::for_language("en");
         // SAFETY: immutable UIKit constants.
         let (button, selected) =
             unsafe { (UIAccessibilityTraitButton, UIAccessibilityTraitSelected) };
         let mut on = props(AccessibilityRole::Button, &[]);
         on.accessibility.state.pressed = Some(Checked::True);
         assert_eq!(traits(&on), button | selected);
-        assert_eq!(accessibility_value(&on), None);
+        assert_eq!(state_value(&on, en), None);
         let mut mixed = props(AccessibilityRole::Button, &[]);
         mixed.accessibility.state.pressed = Some(Checked::Mixed);
         assert_eq!(traits(&mixed), button);
-        assert_eq!(accessibility_value(&mixed).as_deref(), Some("mixed"));
+        assert_eq!(state_value(&mixed, en).as_deref(), Some("mixed"));
         let mut page = props(AccessibilityRole::Link, &[]);
         page.accessibility.state.current = Some(AccessibilityCurrent::Page);
-        assert_eq!(accessibility_value(&page).as_deref(), Some("current page"));
+        assert_eq!(state_value(&page, en).as_deref(), Some("current page"));
+        let zh = crate::state_words::for_language("zh-Hans");
+        assert_eq!(state_value(&page, zh).as_deref(), Some("当前页面"));
+        page.accessibility.state.invalid = true;
+        page.accessibility.state.expanded = Some(false);
+        assert_eq!(
+            state_value(&page, zh).as_deref(),
+            Some("已收起, 当前页面, 数据无效")
+        );
         // Groups and toolbars are containers (a labelled toolbar names the
         // controls VoiceOver enters), others are not.
         assert!(is_container(
