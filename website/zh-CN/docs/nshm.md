@@ -329,7 +329,7 @@ nshm 兼容的 NSH 版本就是它自己对 `nsh-core` 的版本要求（`nsh-co
 
 ### 打包的应用需要什么
 
-用到系统功能的 nshm 在 `Cargo.toml` 里声明打包的应用需要什么：写在 `[package.metadata.nsh]` 下；只有某个 feature 需要时，写在 `[package.metadata.nsh.features.<feature>]` 下。`nsh` 构建安装包时，会把应用链接的每个 crate 的条目（按 Cargo 实际开启的 feature）加进去；开发宿主拿到其中的 `Info.plist` 键和 Android 条目：
+用到系统功能的 nshm 在 `Cargo.toml` 里声明打包的应用需要什么：写在 `[package.metadata.nsh]` 下；只有某个 feature 需要时，写在 `[package.metadata.nsh.features.<feature>]` 下。`nsh` 构建安装包时，会把应用链接的每个 crate 的条目（按 Cargo 实际开启的 feature）加进去；开发宿主拿到其中的 iOS `Info.plist` 键和 Android 条目：
 
 ```toml
 [package.metadata.nsh.features.scanner.ios.infoPlist]
@@ -349,6 +349,8 @@ libraries = ["android/libs/scanner-glue.jar"]
 | `ios.entitlements` | iOS 应用的 entitlements |
 | `ios.frameworks` | XCFramework 和 framework，路径相对于 crate 的 `Cargo.toml`，链接和打包方式与 `nsh.json` 的 `ios.frameworks` 相同（[Framework 与链接参数](./packaging.md#framework-与链接参数)） |
 | `ios.linkerFlags` | iOS 可执行文件的链接参数，放在应用自己的之后 |
+| `macos.infoPlist` | macOS 应用 `Info.plist` 的键，与 `nsh.json` 的 `macos.infoPlist` 相同 |
+| `macos.entitlements` | macOS 应用的 entitlements |
 | `android.permissions` | `<uses-permission>` 元素，写法与 `nsh.json` 相同（`CAMERA` 即 `android.permission.CAMERA`） |
 | `android.queries` | manifest `<queries>` 里的 `<intent>`、`<package>`、`<provider>` 元素 |
 | `android.application` | `<application>` 里的 `<service>`、`<receiver>`、`<provider>`、`<activity>`、`<meta-data>` 元素；`${applicationId}` 是应用的包名，其他占位符取应用的 `android.manifestPlaceholders` |
@@ -358,7 +360,7 @@ crate 不能设置 `android.manifestPlaceholders`，设置了会报错：占位�
 两个 crate 带了同一个 Android 库的不同版本时，用应用在自己的 `android.libraries` 里列出的那个版本。两个库定义了同名资源时，
 应用列出的库优先，其次是 crate 名排序靠前的（[Java 代码](./packaging.md#java-代码)）。
 
-应用自己的 `nsh.json` 优先：它设置过的键保留它的值，数组（例如 `UIBackgroundModes`）合并。两个 crate 给同一个键设置了不同的值时（例如两段不同的相机用途说明），由应用在 `ios.infoPlist` 或 `ios.entitlements` 里写这个键来决定；应用没写之前，打包 iOS 应用会报错并指出这两个 crate。NSH 自己设置的键（包标识、版本等）不能由 crate 设置。
+应用自己的 `nsh.json` 优先：它设置过的键保留它的值，数组（例如 `UIBackgroundModes`）合并。两个 crate 给同一个键设置了不同的值时（例如两段不同的相机用途说明），由应用在 `ios.infoPlist`、`ios.entitlements`、`macos.infoPlist` 或 `macos.entitlements` 里写这个键来决定；应用没写之前，打包该平台应用会报错并指出这两个 crate。NSH 自己设置的键（包标识、版本等）不能由 crate 设置。
 
 crate 翻译的是各 crate 在 `ios.infoPlist` 里设置的键，按它们的措辞翻译；按应用开启的 feature 没有 crate 设置的键（例如所在 feature 没开），它的翻译会被略过并给出警告。应用只采用自己支持的语言的 crate 翻译，即 `locales` 里的语言或应用自己 `ios.infoPlistStrings` 里的语言（写一个空的 `{}` 就是只声明语言、不写自己的文字），所以 crate 可以带上很多语言，而不会给应用增加语言。应用自己设置了的键不采用任何 crate 的翻译，因为那些翻译说的不是应用自己的文字。两个 crate 对同一个键给出不同的翻译时，同样由应用在 `ios.infoPlistStrings` 里写这个键来决定。
 

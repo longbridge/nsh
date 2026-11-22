@@ -1,10 +1,13 @@
 //! What the app's crates and nshm need of the packaged app: `Info.plist`
-//! keys and entitlements on iOS, permissions and manifest entries on
+//! keys and entitlements on iOS and macOS, permissions and manifest entries on
 //! Android, which a crate declares in its `Cargo.toml`:
 //!
 //! ```toml
 //! [package.metadata.nsh.ios.infoPlist]      # always, when the crate is linked
 //! NSExampleUsageDescription = "..."
+//!
+//! [package.metadata.nsh.macos.entitlements] # always, when the crate is linked
+//! "com.apple.security.network.client" = true
 //!
 //! [package.metadata.nsh.features.camera.ios.infoPlist]   # when `camera` is on
 //! NSCameraUsageDescription = "The app takes photos with the camera."
@@ -36,9 +39,10 @@
 //! itself, which the crates' translations would not say
 //! ([`ModuleMeta::crate_strings`]).
 //!
-//! `ios.infoPlist`, `ios.infoPlistStrings`, `ios.entitlements` (named as
-//! in `nsh.json`), `ios.frameworks` (relative to the directory of the
-//! crate's `Cargo.toml`) and `ios.linkerFlags` ([`crate::ios_frameworks`]),
+//! `ios.infoPlist`, `ios.infoPlistStrings`, `ios.entitlements`,
+//! `macos.infoPlist`, `macos.entitlements` (named as in `nsh.json`),
+//! `ios.frameworks` (relative to the directory of the crate's
+//! `Cargo.toml`) and `ios.linkerFlags` ([`crate::ios_frameworks`]),
 //! `android.permissions` (checked and spelled out as `nsh.json`'s are),
 //! `android.queries`
 //! (`<intent>`, `<package>` and `<provider>` elements) and
@@ -56,7 +60,9 @@ use std::{collections::BTreeMap, path::Path, process::Command};
 use anyhow::{Context as _, bail};
 use serde_json::{Map, Value};
 
-use crate::{android::Library, ios_frameworks::Framework, package::AppConfig, ui};
+use crate::{
+    android::Library, apple::ApplePlatform, ios_frameworks::Framework, package::AppConfig, ui,
+};
 
 /// The elements `android.queries` takes.
 const QUERY_ELEMENTS: &[&str] = &["intent", "package", "provider"];
@@ -80,6 +86,10 @@ pub(crate) struct ModuleMeta {
     pub(crate) ios_frameworks: Vec<Framework>,
     /// Arguments of the iOS executables' link, in the crates' order.
     pub(crate) ios_linker_flags: Vec<String>,
+    /// `Info.plist` keys of macOS packages.
+    pub(crate) macos_info: Map<String, Value>,
+    /// Entitlements of macOS packages.
+    pub(crate) macos_entitlements: Map<String, Value>,
     /// Android permissions (`<uses-permission>`).
     pub(crate) android_permissions: Vec<String>,
     /// Elements of the manifest's `<queries>`.
@@ -100,20 +110,34 @@ pub(crate) struct ModuleMeta {
 pub(crate) enum Platform {
     /// iOS, its simulator and Mac Catalyst.
     Ios,
+    /// macOS (AppKit).
+    Macos,
     Android,
 }
 
 /// A key two crates set to different values.
 #[derive(Debug, Clone, PartialEq)]
 struct Clash {
-    /// `ios.infoPlist`, `ios.infoPlistStrings` or `ios.entitlements`, the
-    /// same in `nsh.json`.
+    /// `ios.infoPlist`, `ios.infoPlistStrings`, `ios.entitlements`,
+    /// `macos.infoPlist` or `macos.entitlements`, the same in `nsh.json`.
     kind: &'static str,
     /// The key; a language's, `<lang>.<key>`, in `ios.infoPlistStrings`.
     key: String,
     /// The crate whose value is kept, and the one that disagrees.
     first: String,
     second: String,
+}
+
+impl Clash {
+    fn applies_to(&self, platform: Platform) -> bool {
+        matches!(
+            (platform, self.kind),
+            (
+                Platform::Ios,
+                "ios.infoPlist" | "ios.infoPlistStrings" | "ios.entitlements"
+            ) | (Platform::Macos, "macos.infoPlist" | "macos.entitlements")
+        )
+    }
 }
 
 impl std::fmt::Display for Clash {
@@ -211,8 +235,8 @@ impl ModuleMeta {
         Ok((meta, warnings))
     }
 
-    /// Merges one section (`at`, of package `name` in `dir`): its `ios` and
-    /// `android` tables.
+    /// Merges one section (`at`, of package `name` in `dir`): its `ios`,
+    /// `macos` and `android` tables.
     fn merge_section(
         &mut self,
         name: &str,
@@ -225,7 +249,10 @@ impl ModuleMeta {
             match key.as_str() {
                 // Read by itself: a feature's section is merged only when on.
                 "features" if at == "[package.metadata.nsh]" => {}
-                "ios" => self.merge_ios(name, dir, at, value, warnings)?,
+                "ios" => self.merge_apple(name, dir, at, ApplePlatform::Ios, value, warnings)?,
+                "macos" => {
+                    self.merge_apple(name, dir, at, ApplePlatform::Macos, value, warnings)?
+                }
                 "android" => self.merge_android(name, dir, at, value, warnings)?,
                 _ => warnings.push(format!(
                     "{name}: {at} `{key}` is not something this nsh reads: left out"
@@ -235,20 +262,22 @@ impl ModuleMeta {
         Ok(())
     }
 
-    fn merge_ios(
+    fn merge_apple(
         &mut self,
         name: &str,
         dir: Option<&Path>,
         at: &str,
-        ios: &Value,
+        platform: ApplePlatform,
+        table: &Value,
         warnings: &mut Vec<String>,
     ) -> anyhow::Result<()> {
-        let ios = ios
+        let section = platform.key();
+        let table = table
             .as_object()
-            .with_context(|| format!("{name}: {at} `ios` is a table"))?;
-        for (key, value) in ios {
-            let kind = match key.as_str() {
-                "frameworks" => {
+            .with_context(|| format!("{name}: {at} `{section}` is a table"))?;
+        for (key, value) in table {
+            let kind = match (platform, key.as_str()) {
+                (ApplePlatform::Ios, "frameworks") => {
                     let listed = format!("{name}: {at} `ios.frameworks`");
                     let dir = dir.with_context(|| {
                         format!("{listed}: cargo metadata names no Cargo.toml for the crate")
@@ -262,7 +291,7 @@ impl ModuleMeta {
                     }
                     continue;
                 }
-                "linkerFlags" => {
+                (ApplePlatform::Ios, "linkerFlags") => {
                     let listed = format!("{name}: {at} `ios.linkerFlags`");
                     // Kept as written, repeats too: a flag's argument
                     // (`-framework`, `StoreKit`) may repeat another's.
@@ -270,12 +299,14 @@ impl ModuleMeta {
                         .extend(crate::ios_frameworks::linker_flags(value, &listed)?);
                     continue;
                 }
-                "infoPlist" => "ios.infoPlist",
-                "infoPlistStrings" => "ios.infoPlistStrings",
-                "entitlements" => "ios.entitlements",
+                (ApplePlatform::Ios, "infoPlist") => "ios.infoPlist",
+                (ApplePlatform::Ios, "infoPlistStrings") => "ios.infoPlistStrings",
+                (ApplePlatform::Ios, "entitlements") => "ios.entitlements",
+                (ApplePlatform::Macos, "infoPlist") => "macos.infoPlist",
+                (ApplePlatform::Macos, "entitlements") => "macos.entitlements",
                 _ => {
                     warnings.push(format!(
-                        "{name}: {at} `ios.{key}` is not something this nsh reads: left out"
+                        "{name}: {at} `{section}.{key}` is not something this nsh reads: left out"
                     ));
                     continue;
                 }
@@ -323,8 +354,13 @@ impl ModuleMeta {
                 _ => {
                     for entry in entries.keys() {
                         let reserved = match kind {
-                            "ios.infoPlist" => crate::apple::is_reserved_ios_info(entry),
-                            _ => crate::apple::is_reserved_ios_entitlement(entry),
+                            "ios.infoPlist" => {
+                                crate::apple::is_reserved_info(ApplePlatform::Ios, entry)
+                            }
+                            "macos.infoPlist" => {
+                                crate::apple::is_reserved_info(ApplePlatform::Macos, entry)
+                            }
+                            _ => crate::apple::is_reserved_entitlement(entry),
                         };
                         if reserved {
                             bail!("{name}: {at} `{kind}.{entry}` is a key NSH sets itself");
@@ -332,7 +368,9 @@ impl ModuleMeta {
                     }
                     let target = match kind {
                         "ios.infoPlist" => &mut self.ios_info,
-                        _ => &mut self.ios_entitlements,
+                        "ios.entitlements" => &mut self.ios_entitlements,
+                        "macos.infoPlist" => &mut self.macos_info,
+                        _ => &mut self.macos_entitlements,
                     };
                     merge_entries(
                         target,
@@ -492,33 +530,32 @@ impl ModuleMeta {
 
     /// Adds what the crates declare to the app's `config` (its `nsh.json`):
     /// a key the app sets keeps the app's value, its arrays joined with
-    /// the crates' entries; permissions are joined. For an iOS `platform`, a
-    /// key two crates set to different values that the app does not set is
-    /// an error naming both.
+    /// the crates' entries; permissions are joined. For an iOS or macOS
+    /// `platform`, a key two crates set to different values that the app does
+    /// not set is an error naming both.
     pub(crate) fn apply(&self, config: &mut AppConfig, platform: Platform) -> anyhow::Result<()> {
-        // The clashes are all iOS keys: an Android package has none of them.
-        if platform == Platform::Ios {
-            for clash in &self.clashes {
-                let settled = match clash.kind {
-                    "ios.infoPlist" => config.ios.info_plist.contains_key(&clash.key),
-                    "ios.infoPlistStrings" => {
-                        let (language, key) = clash.key.split_once('.').unwrap_or_default();
-                        // A language the app does not declare and a key
-                        // the app words itself take none of the crates'.
-                        !self.crate_strings(config).contains_key(language)
-                            || config.ios.info_plist.contains_key(key)
-                            || config
-                                .ios
-                                .info_plist_strings
-                                .get(language)
-                                .and_then(Value::as_object)
-                                .is_some_and(|texts| texts.contains_key(key))
-                    }
-                    _ => config.ios.entitlements.contains_key(&clash.key),
-                };
-                if !settled {
-                    bail!("{clash}");
+        for clash in self.clashes.iter().filter(|c| c.applies_to(platform)) {
+            let settled = match clash.kind {
+                "ios.infoPlist" => config.ios.info_plist.contains_key(&clash.key),
+                "ios.infoPlistStrings" => {
+                    let (language, key) = clash.key.split_once('.').unwrap_or_default();
+                    // A language the app does not declare and a key
+                    // the app words itself take none of the crates'.
+                    !self.crate_strings(config).contains_key(language)
+                        || config.ios.info_plist.contains_key(key)
+                        || config
+                            .ios
+                            .info_plist_strings
+                            .get(language)
+                            .and_then(Value::as_object)
+                            .is_some_and(|texts| texts.contains_key(key))
                 }
+                "ios.entitlements" => config.ios.entitlements.contains_key(&clash.key),
+                "macos.infoPlist" => config.macos.info_plist.contains_key(&clash.key),
+                _ => config.macos.entitlements.contains_key(&clash.key),
+            };
+            if !settled {
+                bail!("{clash}");
             }
         }
         // Before the crates' keys join the app's ([`Self::crate_strings`]).
@@ -526,6 +563,8 @@ impl ModuleMeta {
         add_strings(&mut config.ios.info_plist_strings, &strings);
         under(&mut config.ios.info_plist, &self.ios_info);
         under(&mut config.ios.entitlements, &self.ios_entitlements);
+        under(&mut config.macos.info_plist, &self.macos_info);
+        under(&mut config.macos.entitlements, &self.macos_entitlements);
         join_strings(
             &mut config.android.permissions,
             self.android_permissions.clone(),
@@ -580,8 +619,8 @@ pub(crate) fn for_dev_host(triple: &str, platform: Platform) -> ModuleMeta {
             ModuleMeta::default()
         });
     // The host is the same for every app: it takes the first crate's value,
-    // where a package takes the app's. Only iOS hosts have the keys.
-    for clash in meta.clashes.iter().filter(|_| platform == Platform::Ios) {
+    // where a package takes the app's.
+    for clash in meta.clashes.iter().filter(|c| c.applies_to(platform)) {
         ui::warn(format!(
             "{clash}; the development host takes {}'s",
             clash.first
@@ -1493,5 +1532,258 @@ mod tests {
             ["CAMERA", "android.permission.POST_NOTIFICATIONS"]
         );
         assert_eq!(config.android.queries.len(), 1);
+    }
+
+    #[test]
+    fn macos_info_plist_and_entitlements_merge_and_join() {
+        let a = json!({ "nsh": { "macos": {
+            "infoPlist": {
+                "NSBluetoothAlwaysUsageDescription": "A uses Bluetooth.",
+                "NSUserActivityTypes": ["com.example.browse"],
+            },
+            "entitlements": {
+                "com.apple.security.network.client": true,
+                "com.apple.security.application-groups": ["T.a"],
+            },
+        } } });
+        let b = json!({ "nsh": { "macos": {
+            "infoPlist": {
+                "NSBluetoothAlwaysUsageDescription": "A uses Bluetooth.",
+                "NSUserActivityTypes": ["com.example.browse", "com.example.edit"],
+            },
+            "entitlements": {
+                "com.apple.security.network.client": true,
+                "com.apple.security.application-groups": ["T.a", "T.b"],
+            },
+        } } });
+        let (meta, warnings) =
+            ModuleMeta::from_metadata(&metadata(&[("a", a, &[]), ("b", b, &[])])).unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(
+            meta.macos_info["NSBluetoothAlwaysUsageDescription"],
+            "A uses Bluetooth."
+        );
+        assert_eq!(
+            meta.macos_info["NSUserActivityTypes"],
+            json!(["com.example.browse", "com.example.edit"])
+        );
+        assert_eq!(
+            meta.macos_entitlements["com.apple.security.network.client"],
+            true
+        );
+        assert_eq!(
+            meta.macos_entitlements["com.apple.security.application-groups"],
+            json!(["T.a", "T.b"])
+        );
+
+        let mut config = AppConfig::default();
+        config.macos.info_plist.insert(
+            "NSBluetoothAlwaysUsageDescription".into(),
+            json!("App uses Bluetooth."),
+        );
+        config.macos.entitlements.insert(
+            "com.apple.security.application-groups".into(),
+            json!(["T.app"]),
+        );
+        meta.apply(&mut config, Platform::Macos).unwrap();
+        assert_eq!(
+            config.macos.info_plist["NSBluetoothAlwaysUsageDescription"],
+            "App uses Bluetooth."
+        );
+        assert_eq!(
+            config.macos.info_plist["NSUserActivityTypes"],
+            json!(["com.example.browse", "com.example.edit"])
+        );
+        assert_eq!(
+            config.macos.entitlements["com.apple.security.network.client"],
+            true
+        );
+        assert_eq!(
+            config.macos.entitlements["com.apple.security.application-groups"],
+            json!(["T.app", "T.a", "T.b"])
+        );
+    }
+
+    #[test]
+    fn macos_clashes_are_isolated_by_platform_and_settled_by_app() {
+        let a = json!({ "nsh": {
+            "macos": {
+                "infoPlist": { "NSCameraUsageDescription": "A uses camera." },
+                "entitlements": { "com.apple.security.app-sandbox": true },
+            },
+            "ios": {
+                "infoPlist": { "NSLocationWhenInUseUsageDescription": "A uses location." },
+            },
+        } });
+        let b = json!({ "nsh": {
+            "macos": {
+                "infoPlist": { "NSCameraUsageDescription": "B uses camera." },
+                "entitlements": { "com.apple.security.app-sandbox": false },
+            },
+            "ios": {
+                "infoPlist": { "NSLocationWhenInUseUsageDescription": "B uses location." },
+            },
+        } });
+        let (meta, warnings) =
+            ModuleMeta::from_metadata(&metadata(&[("a", a, &[]), ("b", b, &[])])).unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+
+        // macOS clash stops macOS packaging, naming both crates and section.
+        let error = meta
+            .apply(&mut AppConfig::default(), Platform::Macos)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("a and b set `NSCameraUsageDescription` (macos.infoPlist)")
+                && error.contains("`macos.infoPlist`"),
+            "{error}"
+        );
+
+        // Settling infoPlist alone still stops on the macOS entitlements clash.
+        let mut config = AppConfig::default();
+        config
+            .macos
+            .info_plist
+            .insert("NSCameraUsageDescription".into(), json!("App wins."));
+        let error = meta
+            .apply(&mut config, Platform::Macos)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("a and b set `com.apple.security.app-sandbox` (macos.entitlements)")
+                && error.contains("`macos.entitlements`"),
+            "{error}"
+        );
+
+        // Settling both lets macOS package even though the iOS clash is still open.
+        config
+            .macos
+            .entitlements
+            .insert("com.apple.security.app-sandbox".into(), json!(true));
+        meta.apply(&mut config, Platform::Macos).unwrap();
+        assert_eq!(
+            config.macos.info_plist["NSCameraUsageDescription"],
+            "App wins."
+        );
+        assert_eq!(
+            config.macos.entitlements["com.apple.security.app-sandbox"],
+            true
+        );
+
+        // Settling the iOS clash lets iOS package even though the macOS clashes are open.
+        let mut ios_config = AppConfig::default();
+        ios_config.ios.info_plist.insert(
+            "NSLocationWhenInUseUsageDescription".into(),
+            json!("App location."),
+        );
+        meta.apply(&mut ios_config, Platform::Ios).unwrap();
+
+        // Android has neither Apple clash.
+        meta.apply(&mut AppConfig::default(), Platform::Android)
+            .unwrap();
+
+        // `Clash::applies_to` keeps dev host clash warnings scoped to the host's platform.
+        assert_eq!(
+            meta.clashes
+                .iter()
+                .filter(|c| c.applies_to(Platform::Ios))
+                .count(),
+            1
+        );
+        assert_eq!(
+            meta.clashes
+                .iter()
+                .filter(|c| c.applies_to(Platform::Macos))
+                .count(),
+            2
+        );
+        assert_eq!(
+            meta.clashes
+                .iter()
+                .filter(|c| c.applies_to(Platform::Android))
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn macos_reserved_keys_features_and_unknown_keys() {
+        // Reserved macOS Info.plist keys and entitlements are rejected, naming the crate.
+        for reserved in [
+            json!({ "nsh": { "macos": { "infoPlist": { "LSUIElement": true } } } }),
+            json!({ "nsh": { "macos": { "infoPlist": { "CFBundleIdentifier": "x" } } } }),
+            json!({ "nsh": { "macos": { "infoPlist": { "NSPrincipalClass": "App" } } } }),
+            json!({ "nsh": { "macos": { "infoPlist": { "CFBundleIconFile": "Icon" } } } }),
+            json!({ "nsh": { "macos": { "entitlements": { "application-identifier": "T.x" } } } }),
+            json!({ "nsh": { "macos": { "entitlements": { "com.apple.developer.team-identifier": "T" } } } }),
+        ] {
+            let error = ModuleMeta::from_metadata(&metadata(&[("x", reserved, &[])]))
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.starts_with("x: ") && error.contains("NSH sets itself"),
+                "{error}"
+            );
+        }
+
+        // Platform-specific reservation: `LSUIElement` is macOS-only, `LSRequiresIPhoneOS` is iOS-only.
+        let (meta, warnings) = ModuleMeta::from_metadata(&metadata(&[(
+            "x",
+            json!({ "nsh": {
+                "ios": { "infoPlist": { "LSUIElement": true } },
+                "macos": { "infoPlist": { "LSRequiresIPhoneOS": false } },
+            } }),
+            &[],
+        )]))
+        .unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(meta.ios_info["LSUIElement"], true);
+        assert_eq!(meta.macos_info["LSRequiresIPhoneOS"], false);
+
+        // Feature-gated `[package.metadata.nsh.features.<feat>].macos` applies only when on.
+        let gated = json!({ "nsh": { "features": { "audio": { "macos": {
+            "infoPlist": { "NSMicrophoneUsageDescription": "Records audio." },
+            "entitlements": { "com.apple.security.device.audio-input": true },
+        } } } } });
+        let (meta, warnings) =
+            ModuleMeta::from_metadata(&metadata(&[("rec", gated.clone(), &["audio"])])).unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(
+            meta.macos_info["NSMicrophoneUsageDescription"],
+            "Records audio."
+        );
+        assert_eq!(
+            meta.macos_entitlements["com.apple.security.device.audio-input"],
+            true
+        );
+        let (off, warnings) = ModuleMeta::from_metadata(&metadata(&[("rec", gated, &[])])).unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(off, ModuleMeta::default());
+
+        // Unknown keys under `macos` are warned of and left out.
+        let (meta, warnings) = ModuleMeta::from_metadata(&metadata(&[(
+            "x",
+            json!({ "nsh": { "macos": { "privacy": {} } } }),
+            &[],
+        )]))
+        .unwrap();
+        assert_eq!(meta, ModuleMeta::default());
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].contains("x: [package.metadata.nsh] `macos.privacy`"),
+            "{warnings:?}"
+        );
+
+        // Non-table sections under `macos` fail clearly, naming the crate.
+        for bad in [
+            json!({ "nsh": { "macos": true } }),
+            json!({ "nsh": { "macos": { "infoPlist": [] } } }),
+            json!({ "nsh": { "macos": { "entitlements": "none" } } }),
+        ] {
+            let error = ModuleMeta::from_metadata(&metadata(&[("x", bad, &[])]))
+                .unwrap_err()
+                .to_string();
+            assert!(error.starts_with("x: "), "{error}");
+        }
     }
 }
