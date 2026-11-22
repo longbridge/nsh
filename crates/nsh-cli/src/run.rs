@@ -808,7 +808,8 @@ fn run_android(
         Err(_) => Vec::new(),
     };
     let runtime = crate::runtime::android(true, &abis)?;
-    install_android_host(&sdk, &serial, work, &runtime, &abis)?;
+    let libraries = crate::package::read_config(entry)?.android.libraries;
+    install_android_host(&sdk, &serial, work, &runtime, &abis, &libraries)?;
     // The device reaches the dev server on its own 127.0.0.1, until the
     // run ends.
     let _reverse = android::Reverse::add(&sdk, &serial, session.port())?;
@@ -840,13 +841,15 @@ fn run_android(
 /// Builds the Android development host (when its runtime changed) into
 /// `work` and installs it on device `serial` (when the device does not have
 /// this build). It takes the runtime's libraries for `abis` (empty: every
-/// one the runtime has).
+/// one the runtime has), and the Java `libraries` of the app's `nsh.json`
+/// before its crates'.
 pub(crate) fn install_android_host(
     sdk: &crate::android::Sdk,
     serial: &str,
     work: &Path,
     runtime: &Path,
     abis: &[String],
+    libraries: &[crate::android::Library],
 ) -> anyhow::Result<()> {
     use crate::android::{self, Apk, Signing};
     let apk_path = work.join("android/NshDev.apk");
@@ -858,7 +861,8 @@ pub(crate) fn install_android_host(
     // tells whether the host there is still the one this app installed.
     let installed = work.join("android/installed");
     // What the app's crates declare for the manifest (the apps they start,
-    // their components): part of the build, as the runtime is.
+    // their components) and the Java libraries they list: part of the
+    // build, as the runtime is.
     let meta = crate::module_meta::for_dev_host(
         "aarch64-linux-android",
         crate::module_meta::Platform::Android,
@@ -872,6 +876,18 @@ pub(crate) fn install_android_host(
     {
         version.push('\n');
         version.push_str(line);
+    }
+    // A library's contents, not its time: a rebuilt jar that is the same
+    // keeps the host.
+    let mut libraries = libraries.to_vec();
+    for library in &meta.android_libraries {
+        if !libraries.iter().any(|have| have.path == library.path) {
+            libraries.push(library.clone());
+        }
+    }
+    for library in &libraries {
+        let sha256 = android::file_sha256(&library.path).unwrap_or_default();
+        version.push_str(&format!("\n{} {sha256}", library.path.display()));
     }
     let built =
         apk_path.exists() && fs::read_to_string(&stamp).ok().as_deref() == Some(version.as_str());
@@ -892,7 +908,8 @@ pub(crate) fn install_android_host(
                 // The host runs any app: its pages may capture media.
                 microphone: true,
                 camera: true,
-                dex: &[],
+                libraries: &libraries,
+                library_cache: &work.join("android/libraries"),
                 permissions: &meta.android_permissions,
                 queries: &meta.android_queries,
                 application: &meta.android_application,

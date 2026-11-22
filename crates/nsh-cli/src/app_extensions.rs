@@ -2,8 +2,8 @@
 //! Activities, notification service and content extensions, share
 //! extensions) that iOS packages carry in `PlugIns/`.
 //!
-//! The app builds them itself, with whatever toolchain they need, as it
-//! builds `android.dex`; NSH only packages them. Only a package can carry an
+//! The app builds them itself, with whatever toolchain they need; NSH only
+//! packages them. Only a package can carry an
 //! extension, and only the packaging can sign it, so an nshm cannot add one
 //! on its own. Each extension is copied into the app, given the app's
 //! version (an extension's version should match its app's: App Store

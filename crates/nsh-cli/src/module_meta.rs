@@ -13,6 +13,7 @@
 //! permissions = ["android.permission.CAMERA"]
 //! queries = ['<intent><action android:name="android.media.action.IMAGE_CAPTURE"/></intent>']
 //! application = ['<service android:name="..." android:exported="false"/>']
+//! libraries = ["android/libs/scanner-glue.jar"]
 //! ```
 //!
 //! Every package in the generated workspace's dependency graph is read, so
@@ -30,7 +31,9 @@
 //! `android.queries`
 //! (`<intent>`, `<package>` and `<provider>` elements) and
 //! `android.application` (`<service>`, `<receiver>`, `<provider>`,
-//! `<activity>` and `<meta-data>` elements) are read; other keys are
+//! `<activity>` and `<meta-data>` elements) and `android.libraries` (jar
+//! and dex files, relative to the directory of the crate's `Cargo.toml`,
+//! which [`crate::android`] packages) are read; other keys are
 //! reported and left out. Each Android entry is one balanced element of
 //! those, so a crate cannot close `<application>` or `<queries>` to write
 //! elsewhere in the manifest.
@@ -40,7 +43,7 @@ use std::{collections::BTreeMap, path::Path, process::Command};
 use anyhow::{Context as _, bail};
 use serde_json::{Map, Value};
 
-use crate::{package::AppConfig, ui};
+use crate::{android::Library, package::AppConfig, ui};
 
 /// The elements `android.queries` takes.
 const QUERY_ELEMENTS: &[&str] = &["intent", "package", "provider"];
@@ -62,6 +65,8 @@ pub(crate) struct ModuleMeta {
     pub(crate) android_queries: Vec<String>,
     /// Elements of the manifest's `<application>`.
     pub(crate) android_application: Vec<String>,
+    /// Java libraries (jar and dex files), each file once.
+    pub(crate) android_libraries: Vec<Library>,
     /// Which package set each key, for errors.
     owners: BTreeMap<String, String>,
     /// Keys two crates set to different values: the first crate's value is
@@ -153,7 +158,11 @@ impl ModuleMeta {
                 continue;
             };
             let name = package["name"].as_str().unwrap_or("?");
-            meta.merge_section(name, "[package.metadata.nsh]", nsh, &mut warnings)?;
+            // What the crate's paths are relative to.
+            let dir = package["manifest_path"]
+                .as_str()
+                .and_then(|manifest| Path::new(manifest).parent());
+            meta.merge_section(name, dir, "[package.metadata.nsh]", nsh, &mut warnings)?;
             let features = nsh.get("features").and_then(Value::as_object);
             let enabled = node["features"].as_array().into_iter().flatten();
             for feature in enabled.filter_map(Value::as_str) {
@@ -162,18 +171,19 @@ impl ModuleMeta {
                     .and_then(Value::as_object)
                 {
                     let at = format!("[package.metadata.nsh.features.{feature}]");
-                    meta.merge_section(name, &at, section, &mut warnings)?;
+                    meta.merge_section(name, dir, &at, section, &mut warnings)?;
                 }
             }
         }
         Ok((meta, warnings))
     }
 
-    /// Merges one section (`at`, of package `name`): its `ios` and
+    /// Merges one section (`at`, of package `name` in `dir`): its `ios` and
     /// `android` tables.
     fn merge_section(
         &mut self,
         name: &str,
+        dir: Option<&Path>,
         at: &str,
         section: &Map<String, Value>,
         warnings: &mut Vec<String>,
@@ -183,7 +193,7 @@ impl ModuleMeta {
                 // Read by itself: a feature's section is merged only when on.
                 "features" if at == "[package.metadata.nsh]" => {}
                 "ios" => self.merge_ios(name, at, value, warnings)?,
-                "android" => self.merge_android(name, at, value, warnings)?,
+                "android" => self.merge_android(name, dir, at, value, warnings)?,
                 _ => warnings.push(format!(
                     "{name}: {at} `{key}` is not something this nsh reads: left out"
                 )),
@@ -256,6 +266,7 @@ impl ModuleMeta {
     fn merge_android(
         &mut self,
         name: &str,
+        dir: Option<&Path>,
         at: &str,
         android: &Value,
         warnings: &mut Vec<String>,
@@ -305,6 +316,20 @@ impl ModuleMeta {
                     }
                     join_strings(&mut self.android_application, elements);
                 }
+                "libraries" => {
+                    let listed = format!("{name}: {at} `android.libraries`");
+                    let dir = dir.with_context(|| {
+                        format!("{listed}: cargo metadata names no Cargo.toml for the crate")
+                    })?;
+                    let libraries = strings()?
+                        .into_iter()
+                        .map(|path| Library {
+                            path: dir.join(path),
+                            listed: listed.clone(),
+                        })
+                        .collect();
+                    join_libraries(&mut self.android_libraries, libraries);
+                }
                 _ => warnings.push(format!(
                     "{name}: {at} `android.{key}` is not something this nsh reads: left out"
                 )),
@@ -341,6 +366,11 @@ impl ModuleMeta {
         join_strings(
             &mut config.android.application,
             self.android_application.clone(),
+        );
+        // The app's own first, then the crates'.
+        join_libraries(
+            &mut config.android.libraries,
+            self.android_libraries.clone(),
         );
         Ok(())
     }
@@ -399,6 +429,16 @@ fn join_strings(list: &mut Vec<String>, more: Vec<String>) {
     for value in more {
         if !list.contains(&value) {
             list.push(value);
+        }
+    }
+}
+
+/// Appends each of `more` whose file `list` does not have yet: the first
+/// that lists a file is the one errors name.
+fn join_libraries(list: &mut Vec<Library>, more: Vec<Library>) {
+    for library in more {
+        if !list.iter().any(|have| have.path == library.path) {
+            list.push(library);
         }
     }
 }
@@ -509,6 +549,7 @@ mod tests {
             "packages": packages.iter().map(|(name, metadata, _)| json!({
                 "id": id(name),
                 "name": name,
+                "manifest_path": format!("/work/{name}/Cargo.toml"),
                 "metadata": metadata,
             })).collect::<Vec<_>>(),
             "resolve": { "nodes": packages.iter().map(|(name, _, features)| json!({
@@ -713,6 +754,78 @@ mod tests {
         .unwrap();
         assert_eq!(meta, ModuleMeta::default());
         assert_eq!(warnings.len(), 2, "{warnings:?}");
+    }
+
+    #[test]
+    fn crates_libraries_are_relative_to_their_cargo_toml() {
+        let scanner = json!({ "nsh": {
+            "android": { "libraries": ["android/libs/glue.jar"] },
+            "features": { "vendor": { "android": {
+                "libraries": ["android/libs/vendor-sdk.jar", "android/libs/glue.jar"],
+            } } },
+        } });
+        let printer = json!({ "nsh": { "android": { "libraries": ["java/out/classes.dex"] } } });
+        let (meta, warnings) = ModuleMeta::from_metadata(&metadata(&[
+            ("printer", printer, &[]),
+            ("scanner", scanner, &["vendor"]),
+        ]))
+        .unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let found: Vec<(&Path, &str)> = meta
+            .android_libraries
+            .iter()
+            .map(|l| (l.path.as_path(), l.listed.as_str()))
+            .collect();
+        assert_eq!(
+            found,
+            [
+                (
+                    Path::new("/work/printer/java/out/classes.dex"),
+                    "printer: [package.metadata.nsh] `android.libraries`"
+                ),
+                (
+                    Path::new("/work/scanner/android/libs/glue.jar"),
+                    "scanner: [package.metadata.nsh] `android.libraries`"
+                ),
+                (
+                    Path::new("/work/scanner/android/libs/vendor-sdk.jar"),
+                    "scanner: [package.metadata.nsh.features.vendor] `android.libraries`"
+                ),
+            ]
+        );
+        // The app's own come first; a file both list is the app's.
+        let mut config = AppConfig::default();
+        config.android.libraries.push(Library {
+            path: "/work/scanner/android/libs/glue.jar".into(),
+            listed: "nsh.json `android.libraries`".into(),
+        });
+        meta.apply(&mut config, Platform::Android).unwrap();
+        let listed: Vec<&str> = config
+            .android
+            .libraries
+            .iter()
+            .map(|l| l.listed.as_str())
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                "nsh.json `android.libraries`",
+                "printer: [package.metadata.nsh] `android.libraries`",
+                "scanner: [package.metadata.nsh.features.vendor] `android.libraries`",
+            ]
+        );
+        // Not a list of paths: an error naming the crate.
+        let error = ModuleMeta::from_metadata(&metadata(&[(
+            "x",
+            json!({ "nsh": { "android": { "libraries": "a.jar" } } }),
+            &[],
+        )]))
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.starts_with("x: [package.metadata.nsh] `android.libraries`"),
+            "{error}"
+        );
     }
 
     #[test]
