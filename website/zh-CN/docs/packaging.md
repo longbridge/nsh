@@ -412,16 +412,20 @@ entitlements：
 ```
 
 打包时每种语言写成包里的 `<语言>.lproj/InfoPlist.strings`；`nsh run` 也给 iOS 模拟器和 Mac Catalyst 的开发宿主带上同样的文件，
-打包前就能看到各语言的弹框文字。
+打包前就能看到各语言的弹框文字。系统对每个应用只问一次：再次检查弹框前先重置之前的选择，iOS 模拟器用
+`xcrun simctl privacy booted reset camera <id>`，macOS 和 Mac Catalyst 用 `tccutil reset Camera <id>`，`<id>` 是应用的
+`id`，在 `nsh run` 下是开发宿主的 id。
 
-- **语言代码**按系统的写法：语言，需要时再加文字（script）或地区（`en`、`ja`、`zh-Hans`、`zh-Hant`、`pt-BR`）。其他写法
-  （`zh-hans`、`Chinese`）会报错并指出是哪个键。
+- **语言代码**按 Xcode 的写法：语言，需要时再加文字（script）或地区，用 `-` 连接（`en`、`ja`、`zh-Hans`、`zh-Hant`、`pt-BR`）。
+  其他写法（`zh-hans`、`zh_TW`、`Chinese`）会报错并指出是哪个键。
 - **`Info.plist` 里的值**是所有没有翻译的语言看到的文字，所以每个翻译的键都要有这个值：写在 `infoPlist` 里，或者来自 NSH
   （应用名、NSH 添加的用途说明）或 [crate](./nshm.md#打包的应用需要什么)。包的 `Info.plist` 里没有这个键、或者它不是字符串时，
   `nsh package` 报错并指出这个键：系统永远不会显示这条翻译。
-- **可以翻译的键**是应用自己的键，NSH 的键里只有 `CFBundleDisplayName` 和 `CFBundleName`；值都是字符串。
+- **可以翻译的键**是应用自己的键，NSH 的键里只有 `CFBundleDisplayName` 和 `CFBundleName`；值都是字符串。翻译了应用名的 macOS
+  包还会告诉访达（`LSHasLocalizedDisplayName`）。
 - **这些语言会和应用的 [`locales`](./i18n.md) 一起声明给系统**（`CFBundleLocalizations`，英语在前）：没有翻译的语言的用户看到
-  `Info.plist` 的文字，系统在应用里显示的界面也会使用这些翻译过的语言。
+  `Info.plist` 的文字，系统在应用里显示的界面也会使用这些翻译过的语言。写成空的 `{}` 的语言没有文件，也不会声明；它采用
+  [crate](./nshm.md#打包的应用需要什么) 的翻译，应用只采用自己支持的语言的 crate 翻译。
 
 ### 最低系统版本
 

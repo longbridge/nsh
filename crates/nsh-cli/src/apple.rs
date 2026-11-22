@@ -572,10 +572,12 @@ fn info_plist_strings(
 
 /// Checks `code` names a language as `.lproj` directories do: a language
 /// (`en`, `fil`), then a script (`Hans`) or a region (`BR`, `419`) or
-/// both, joined with `-` or `_` (`zh-Hans`, `pt-BR`, `zh_TW`), cased as
-/// the system names them: the system finds the directory by this name.
+/// both, joined with `-` as Xcode names them (`zh-Hans`, `pt-BR`,
+/// `zh-Hant-HK`), cased as the system names them: the system finds the
+/// directory by this name. The older `_` (`zh_TW`) is refused, so one
+/// language never has two directories.
 pub(crate) fn check_language(code: &str) -> Result<(), String> {
-    let mut parts = code.split(['-', '_']);
+    let mut parts = code.split('-');
     let language = parts.next().unwrap_or_default();
     let mut ok =
         (2..=3).contains(&language.len()) && language.bytes().all(|b| b.is_ascii_lowercase());
@@ -604,7 +606,8 @@ pub(crate) fn check_language(code: &str) -> Result<(), String> {
     } else {
         Err(format!(
             "{code:?} is no language code; write a language, then a script or a region if needed, \
-             as the system names them: \"en\", \"ja\", \"zh-Hans\", \"zh-Hant\", \"pt-BR\""
+             joined with `-` and cased as the system names them: \"en\", \"ja\", \"zh-Hans\", \
+             \"zh-Hant\", \"pt-BR\""
         ))
     }
 }
@@ -1327,10 +1330,10 @@ mod tests {
             "zh-Hans",
             "zh-Hant",
             "pt-BR",
-            "zh_TW",
+            "zh-TW",
             "es-419",
             "zh-Hant-HK",
-            "sr_Latn_RS",
+            "sr-Latn-RS",
         ] {
             assert_eq!(check_language(code), Ok(()), "{code}");
         }
@@ -1352,6 +1355,9 @@ mod tests {
             "zh.Hans",
             "../en",
             "en-1234",
+            "zh_TW",
+            "zh_Hant",
+            "sr_Latn_RS",
         ] {
             let error = check_language(code).unwrap_err();
             assert!(error.contains("is no language code"), "{code}: {error}");

@@ -69,8 +69,11 @@ good, whatever the version number says. Between releases, and before the first c
    `url_scheme::schemes_from_json_lenient`, the bundler's `resolve`, `Capabilities::from_json_lenient` (a capability or `http` grant it cannot read is not granted, so
    nothing left out widens access). Only text that is no JSON object, a file `nsh.json` names that is missing,
    NSH's own `Info.plist` keys, a minimum system version (`MinimumOSVersion`, `LSMinimumSystemVersion`) that is no
-   version string or is below the runtime's, and an Android `targetSdk` below the minimum are errors: a package
-   declaring a lower system than the one its app needs would install where it cannot run.
+   version string or is below the runtime's, an Android `targetSdk` below the minimum, and an `Info.plist`
+   translation (`<platform>.infoPlistStrings`) whose language is no `.lproj` name, whose form is not a language's
+   object of strings, or whose key the package's `Info.plist` has no string for are errors: a package
+   declaring a lower system than the one its app needs would install where it cannot run, and the system never
+   shows a misspelled language or key, while a missing usage description ends the app when it asks for access.
 7. **The only exception is security**: a capability that cannot be kept safe may be closed. A pull request of
    `nsh-compat` adds what it removes to that repository's `closed.txt`, each with its reason (`<entry> -- <reason>`,
    the entry as the checks report the break: `[<module>] <path>`, `<file>: <Name>`, `<file>: <Name>.<member>` or

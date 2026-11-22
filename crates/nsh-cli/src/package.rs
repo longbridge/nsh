@@ -1036,28 +1036,47 @@ fn app_localizations(dir: &Path, locales: Option<&serde_json::Value>) -> Vec<Str
 /// English, the development region, first): system UI, such as AppKit's and
 /// UIKit's menus, shows in the language the app does, which without it is
 /// English whatever the user's. The languages of the app's `Info.plist`
-/// strings (`strings`, `<platform>.infoPlistStrings`) are among them: their
-/// `.lproj` directories declare them anyway, and the development region,
-/// which has no directory, stays the language of every user whose
-/// language the app does not have.
+/// strings (`strings`, `<platform>.infoPlistStrings`) are among them
+/// ([`bundle_languages`]).
 fn bundle_localizations(
     d: &mut plist::Dictionary,
     config: &AppConfig,
     strings: &serde_json::Map<String, serde_json::Value>,
 ) {
-    if config.localizations.is_empty() && strings.is_empty() {
-        return;
+    let list = bundle_languages(&config.localizations, strings);
+    if !list.is_empty() {
+        d.insert(
+            "CFBundleLocalizations".into(),
+            plist::Value::Array(list.into_iter().map(plist::Value::String).collect()),
+        );
     }
-    let mut list = vec!["en".to_owned()];
-    for locale in config.localizations.iter().chain(strings.keys()) {
-        if !list.contains(locale) {
-            list.push(locale.clone());
+}
+
+/// The languages an Apple bundle declares (`CFBundleLocalizations`): none
+/// for an app with neither `locales` nor `Info.plist` strings, else
+/// English, the development region, first, then `locales` and the
+/// languages `strings` (`<platform>.infoPlistStrings`) has text in, whose
+/// `.lproj` directories the bundle carries; one without text has none. The
+/// development region has no directory: listed, it stays the language of
+/// every user whose language the app does not have.
+pub(crate) fn bundle_languages(
+    locales: &[String],
+    strings: &serde_json::Map<String, serde_json::Value>,
+) -> Vec<String> {
+    let translated = strings
+        .iter()
+        .filter(|(_, texts)| texts.as_object().is_some_and(|texts| !texts.is_empty()))
+        .map(|(language, _)| language);
+    let mut list = Vec::new();
+    for language in locales.iter().chain(translated) {
+        if list.is_empty() {
+            list.push("en".to_owned());
+        }
+        if !list.contains(language) {
+            list.push(language.clone());
         }
     }
-    d.insert(
-        "CFBundleLocalizations".into(),
-        plist::Value::Array(list.into_iter().map(plist::Value::String).collect()),
-    );
+    list
 }
 
 /// `nsh.json`'s text as an [`AppConfig`], with what it left out: keys it
@@ -2298,6 +2317,15 @@ fn macos_info_plist(
     }
     config.usage_descriptions(&mut d);
     bundle_localizations(&mut d, config, &config.macos.info_plist_strings);
+    // Finder shows a translated name of the app only with it.
+    if config
+        .macos
+        .info_plist_strings
+        .values()
+        .any(|texts| texts.get("CFBundleDisplayName").is_some())
+    {
+        d.insert("LSHasLocalizedDisplayName".into(), true.into());
+    }
     // The app's own keys, over NSH's defaults (never over its reserved ones).
     d.extend(config.macos.info_plist()?);
     Ok(d)
@@ -3335,19 +3363,30 @@ mod tests {
         assert_eq!(declared(&config).unwrap(), ["en", "ja", "zh-TW"]);
         // An app without either declares nothing: English, as before.
         assert_eq!(declared(&AppConfig::default()), None);
-        // The languages of the `Info.plist` strings join them: English
-        // stays the language of the users the app has no strings for.
+        // The languages the `Info.plist` strings have text in join them:
+        // English stays the language of the users the app has no strings
+        // for. A language without text has no `.lproj`: not declared.
+        let strings = r#"{ "zh-Hans": { "CFBundleDisplayName": "甲" }, "ja": {}, "ko": {} }"#;
         fs::write(
             dir.join("nsh.json"),
-            r#"{
-                "locales": ["ja"],
-                "ios": { "infoPlistStrings": { "zh-Hans": {}, "ja": {} } },
-                "macos": { "infoPlistStrings": { "zh-Hans": {}, "ja": {} } }
-            }"#,
+            format!(
+                r#"{{
+                    "locales": ["ja"],
+                    "ios": {{ "infoPlistStrings": {strings} }},
+                    "macos": {{ "infoPlistStrings": {strings} }}
+                }}"#
+            ),
         )
         .unwrap();
         let config = read_config(&dir.join("App.tsx")).unwrap();
         assert_eq!(declared(&config).unwrap(), ["en", "ja", "zh-Hans"]);
+        fs::write(
+            dir.join("nsh.json"),
+            r#"{ "ios": { "infoPlistStrings": { "ko": {} } }, "macos": { "infoPlistStrings": { "ko": {} } } }"#,
+        )
+        .unwrap();
+        let config = read_config(&dir.join("App.tsx")).unwrap();
+        assert_eq!(declared(&config), None);
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -3381,6 +3420,18 @@ mod tests {
         assert_eq!(
             config.macos.localized_info(&macos).unwrap()["de"],
             "\"NSCameraUsageDescription\" = \"Kamera.\";\n"
+        );
+        // Finder shows a translated name only with `LSHasLocalizedDisplayName`,
+        // written when the app's name is translated.
+        assert!(!macos.contains_key("LSHasLocalizedDisplayName"));
+        let named: AppConfig = serde_json::from_value(serde_json::json!({
+            "macos": { "infoPlistStrings": { "de": { "CFBundleDisplayName": "Beispiel" } } }
+        }))
+        .unwrap();
+        let macos = macos_info_plist("A", "com.a", "a", &named, false).unwrap();
+        assert_eq!(
+            macos.get("LSHasLocalizedDisplayName"),
+            Some(&plist::Value::Boolean(true))
         );
         // Without the media capture, the package has no camera usage
         // description to translate.

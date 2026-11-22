@@ -29,9 +29,11 @@
 //! naming both crates. Keys NSH sets itself are refused, naming the crate.
 //!
 //! A crate's `ios.infoPlistStrings` translates the keys the crates set in
-//! `ios.infoPlist`, as the crates word them: a key the app sets itself
-//! takes none of the crates' translations, which would say what the app's
-//! own text does not.
+//! `ios.infoPlist`, as the crates word them; a translation of a key no
+//! crate sets (its feature off) is left out with a warning. The app takes
+//! them for the languages it declares only, and none for a key it sets
+//! itself, which the crates' translations would not say
+//! ([`ModuleMeta::crate_strings`]).
 //!
 //! `ios.infoPlist`, `ios.infoPlistStrings`, `ios.entitlements` (named as
 //! in `nsh.json`),
@@ -180,7 +182,7 @@ impl ModuleMeta {
                 }
             }
         }
-        meta.check_strings()?;
+        meta.drop_untranslatable(&mut warnings);
         Ok((meta, warnings))
     }
 
@@ -300,24 +302,61 @@ impl ModuleMeta {
         Ok(())
     }
 
-    /// Checks that each key the crates translate is one a crate sets in
-    /// `ios.infoPlist`: their translations are of the crates' wording.
-    fn check_strings(&self) -> anyhow::Result<()> {
-        for (language, texts) in &self.ios_strings {
-            for key in texts.as_object().into_iter().flat_map(Map::keys) {
-                if !self.ios_info.contains_key(key) {
-                    let owner = self
-                        .owners
-                        .get(&format!("ios.infoPlistStrings.{language}.{key}"))
-                        .map_or("a crate", String::as_str);
-                    bail!(
-                        "{owner}: `ios.infoPlistStrings.{language}.{key}` translates a key no crate \
-                         sets in `ios.infoPlist`; set its text there too"
-                    );
+    /// Leaves out, with a warning, the translations of keys no crate sets
+    /// in `ios.infoPlist` as Cargo resolved the app: their translations are
+    /// of the crates' wording. A translation outside the feature that sets
+    /// its key is no error, so an app without the feature, or an Android
+    /// package, is not stopped by it.
+    fn drop_untranslatable(&mut self, warnings: &mut Vec<String>) {
+        for (language, texts) in &mut self.ios_strings {
+            let Some(texts) = texts.as_object_mut() else {
+                continue;
+            };
+            texts.retain(|key, _| {
+                if self.ios_info.contains_key(key) {
+                    return true;
                 }
-            }
+                let owner = self
+                    .owners
+                    .get(&format!("ios.infoPlistStrings.{language}.{key}"))
+                    .map_or("a crate", String::as_str);
+                warnings.push(format!(
+                    "{owner}: `ios.infoPlistStrings.{language}.{key}` translates a key no crate \
+                     sets in `ios.infoPlist` (with the features on): left out"
+                ));
+                self.clashes.retain(|clash| {
+                    clash.kind != "ios.infoPlistStrings" || clash.key != format!("{language}.{key}")
+                });
+                false
+            });
         }
-        Ok(())
+        self.ios_strings
+            .retain(|_, texts| texts.as_object().is_some_and(|texts| !texts.is_empty()));
+    }
+
+    /// The crates' translations the app takes, by language: those of the
+    /// languages the app declares (its `locales`, or its own
+    /// `ios.infoPlistStrings`), so a crate never adds a language to the
+    /// app; and none of a key the app words itself in `ios.infoPlist`,
+    /// which the crates' translations of their own wording would not say.
+    pub(crate) fn crate_strings(&self, config: &AppConfig) -> Map<String, Value> {
+        let declared = |language: &str| {
+            config.localizations.iter().any(|l| l == language)
+                || config.ios.info_plist_strings.contains_key(language)
+        };
+        self.ios_strings
+            .iter()
+            .filter(|(language, _)| declared(language))
+            .filter_map(|(language, texts)| {
+                let texts: Map<String, Value> = texts
+                    .as_object()?
+                    .iter()
+                    .filter(|(key, _)| !config.ios.info_plist.contains_key(*key))
+                    .map(|(key, text)| (key.clone(), text.clone()))
+                    .collect();
+                (!texts.is_empty()).then(|| (language.clone(), Value::Object(texts)))
+            })
+            .collect()
     }
 
     fn merge_android(
@@ -393,8 +432,10 @@ impl ModuleMeta {
                     "ios.infoPlist" => config.ios.info_plist.contains_key(&clash.key),
                     "ios.infoPlistStrings" => {
                         let (language, key) = clash.key.split_once('.').unwrap_or_default();
-                        // The app's own text takes none of the crates'.
-                        config.ios.info_plist.contains_key(key)
+                        // A language the app does not declare and a key
+                        // the app words itself take none of the crates'.
+                        !self.crate_strings(config).contains_key(language)
+                            || config.ios.info_plist.contains_key(key)
                             || config
                                 .ios
                                 .info_plist_strings
@@ -409,29 +450,9 @@ impl ModuleMeta {
                 }
             }
         }
-        // Before the crates' keys join the app's: the translations of a key
-        // the app words itself are left out.
-        for (language, texts) in &self.ios_strings {
-            let texts: Map<String, Value> = texts
-                .as_object()
-                .into_iter()
-                .flatten()
-                .filter(|(key, _)| !config.ios.info_plist.contains_key(*key))
-                .map(|(key, text)| (key.clone(), text.clone()))
-                .collect();
-            if texts.is_empty() {
-                continue;
-            }
-            // Another form is refused when `nsh.json` is read.
-            if let Value::Object(app) = config
-                .ios
-                .info_plist_strings
-                .entry(language.clone())
-                .or_insert_with(|| Value::Object(Map::new()))
-            {
-                under(app, &texts);
-            }
-        }
+        // Before the crates' keys join the app's ([`Self::crate_strings`]).
+        let strings = self.crate_strings(config);
+        add_strings(&mut config.ios.info_plist_strings, &strings);
         under(&mut config.ios.info_plist, &self.ios_info);
         under(&mut config.ios.entitlements, &self.ios_entitlements);
         join_strings(
@@ -470,6 +491,21 @@ pub(crate) fn for_dev_host(triple: &str, platform: Platform) -> ModuleMeta {
         ));
     }
     meta
+}
+
+/// Adds the crates' translations (`from`, by language) to the app's
+/// (`app`, `ios.infoPlistStrings`): the app's text wins.
+pub(crate) fn add_strings(app: &mut Map<String, Value>, from: &Map<String, Value>) {
+    for (language, texts) in from {
+        // Another form is refused when `nsh.json` is read.
+        if let (Value::Object(app), Some(texts)) = (
+            app.entry(language.clone())
+                .or_insert_with(|| Value::Object(Map::new())),
+            texts.as_object(),
+        ) {
+            under(app, texts);
+        }
+    }
 }
 
 /// Adds `from` to `app`: the app's value wins, arrays are joined.
@@ -766,9 +802,9 @@ mod tests {
         assert!(android.android.queries[0].contains("IMAGE_CAPTURE"));
     }
 
-    /// Crates translate the keys they set; the app's own text and its own
-    /// translations win, and a clash is the app's to settle as for
-    /// `ios.infoPlist`.
+    /// Crates translate the keys they set, for the languages the app
+    /// declares; the app's own text and its own translations win, and a
+    /// clash is the app's to settle as for `ios.infoPlist`.
     #[test]
     fn crates_translate_their_own_keys() {
         let camera = |zh: &str| {
@@ -777,6 +813,7 @@ mod tests {
                 "infoPlistStrings": {
                     "zh-Hans": { "NSCameraUsageDescription": zh },
                     "ja": { "NSCameraUsageDescription": "カメラで写真を撮ります。" },
+                    "de": { "NSCameraUsageDescription": "Die App macht Fotos." },
                 },
             } } })
         };
@@ -784,7 +821,14 @@ mod tests {
             ModuleMeta::from_metadata(&metadata(&[("camera", camera("用相机拍照。"), &[])]))
                 .unwrap();
         assert!(warnings.is_empty(), "{warnings:?}");
-        let mut config = AppConfig::default();
+        // `zh-Hans` from `locales`, `ja` from the app's own translations;
+        // `de` is no language of the app's: left out.
+        let chinese = || {
+            let mut config = AppConfig::default();
+            config.localizations = vec!["zh-Hans".into()];
+            config
+        };
+        let mut config = chinese();
         config.ios.info_plist_strings.insert(
             "ja".into(),
             json!({ "NSCameraUsageDescription": "レシートを撮ります。" }),
@@ -798,9 +842,22 @@ mod tests {
             config.ios.info_plist_strings["ja"],
             json!({ "NSCameraUsageDescription": "レシートを撮ります。" })
         );
+        assert!(!config.ios.info_plist_strings.contains_key("de"));
+        // An English-only app takes no language from its crates.
+        let mut english = AppConfig::default();
+        meta.apply(&mut english, Platform::Ios).unwrap();
+        assert!(english.ios.info_plist_strings.is_empty());
+        // An empty object declares the language: the crates translate it.
+        let mut german = AppConfig::default();
+        german.ios.info_plist_strings.insert("de".into(), json!({}));
+        meta.apply(&mut german, Platform::Ios).unwrap();
+        assert_eq!(
+            german.ios.info_plist_strings["de"]["NSCameraUsageDescription"],
+            "Die App macht Fotos."
+        );
         // The app words the key itself: the crate's translations of the
         // crate's wording are left out.
-        let mut own = AppConfig::default();
+        let mut own = chinese();
         own.ios.info_plist.insert(
             "NSCameraUsageDescription".into(),
             json!("Photos of receipts."),
@@ -808,14 +865,17 @@ mod tests {
         meta.apply(&mut own, Platform::Ios).unwrap();
         assert!(own.ios.info_plist_strings.is_empty());
 
-        // Two crates translate differently: the app settles it.
+        // Two crates translate differently: the app settles it, unless the
+        // language is none of the app's.
         let (meta, _) = ModuleMeta::from_metadata(&metadata(&[
             ("camera", camera("用相机拍照。"), &[]),
             ("scanner", camera("扫描二维码。"), &[]),
         ]))
         .unwrap();
+        meta.apply(&mut AppConfig::default(), Platform::Ios)
+            .unwrap();
         let error = meta
-            .apply(&mut AppConfig::default(), Platform::Ios)
+            .apply(&mut chinese(), Platform::Ios)
             .unwrap_err()
             .to_string();
         assert!(
@@ -824,7 +884,7 @@ mod tests {
             ),
             "{error}"
         );
-        let mut settled = AppConfig::default();
+        let mut settled = chinese();
         settled.ios.info_plist_strings.insert(
             "zh-Hans".into(),
             json!({ "NSCameraUsageDescription": "拍摄收据。" }),
@@ -836,8 +896,44 @@ mod tests {
         );
     }
 
-    /// A crate's translations are checked as `nsh.json`'s are, and are of
-    /// keys the crates set.
+    /// A translation in a crate's own section of a key its feature sets:
+    /// an app without the feature, and an Android package, are not stopped
+    /// by it; the translation is left out with a warning.
+    #[test]
+    fn crates_translations_outside_the_feature_are_left_out() {
+        let scanner = json!({ "nsh": {
+            "ios": { "infoPlistStrings": { "zh-Hans": { "NSCameraUsageDescription": "扫描二维码。" } } },
+            "features": { "camera": { "ios": {
+                "infoPlist": { "NSCameraUsageDescription": "Scans codes." }
+            } } },
+        } });
+        let (meta, warnings) =
+            ModuleMeta::from_metadata(&metadata(&[("scanner", scanner.clone(), &["camera"])]))
+                .unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(
+            meta.ios_strings["zh-Hans"]["NSCameraUsageDescription"],
+            "扫描二维码。"
+        );
+        let off = ModuleMeta::from_metadata(&metadata(&[("scanner", scanner, &[])]));
+        assert!(off.is_ok(), "{off:?}");
+        let (meta, warnings) = off.unwrap();
+        assert!(meta.ios_strings.is_empty());
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].contains(
+                "scanner: `ios.infoPlistStrings.zh-Hans.NSCameraUsageDescription` translates a key \
+                 no crate sets in `ios.infoPlist`"
+            ),
+            "{warnings:?}"
+        );
+        meta.apply(&mut AppConfig::default(), Platform::Ios)
+            .unwrap();
+        meta.apply(&mut AppConfig::default(), Platform::Android)
+            .unwrap();
+    }
+
+    /// A crate's translations are checked as `nsh.json`'s are.
     #[test]
     fn crates_translations_are_checked() {
         let strings = |strings: Value| {
@@ -853,16 +949,9 @@ mod tests {
             .unwrap_err()
             .to_string()
         };
-        let error = strings(json!({ "zh_hans": {} }));
+        let error = strings(json!({ "zh_Hans": {} }));
         assert!(
-            error.contains("scanner: [package.metadata.nsh] `ios.infoPlistStrings`: \"zh_hans\" is no language code"),
-            "{error}"
-        );
-        let error = strings(json!({ "ja": { "NSMicrophoneUsageDescription": "マイク" } }));
-        assert!(
-            error.contains(
-                "scanner: `ios.infoPlistStrings.ja.NSMicrophoneUsageDescription` translates a key no crate sets"
-            ),
+            error.contains("scanner: [package.metadata.nsh] `ios.infoPlistStrings`: \"zh_Hans\" is no language code"),
             "{error}"
         );
         let error = strings(json!({ "ja": { "CFBundleIdentifier": "x" } }));

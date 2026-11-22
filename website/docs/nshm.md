@@ -316,10 +316,12 @@ two crates set one key to different values (two usage descriptions of the camera
 in `ios.infoPlist` or `ios.entitlements`; until it does, packaging for iOS stops with an error naming both crates. Keys NSH
 sets itself (the bundle's identifier, version and the like) are not the crates'.
 
-A crate translates the keys the crates set in `ios.infoPlist`, as they word them: a translation of a key no crate sets
-is an error, and a key the app sets itself takes none of the crates' translations, which would say something else
-than the app's text. Two crates translating a key differently are settled by the app as above, in
-`ios.infoPlistStrings`. A crate's languages are declared to the system as the app's are.
+A crate translates the keys the crates set in `ios.infoPlist`, as they word them; a translation of a key no crate sets
+with the app's features (one of a feature that is off) is left out with a warning. The app takes the crates'
+translations for the languages it has only, those of its `locales` or its own `ios.infoPlistStrings` (an empty `{}`
+names a language without text of its own), so a crate may carry many languages without adding any to the app. A key
+the app sets itself takes none of the crates' translations, which would say something else than the app's text. Two
+crates translating a key differently are settled by the app as above, in `ios.infoPlistStrings`.
 
 Develop it beside an app with `nsh add --path ../my-gauge`, which reads the directory as it is. Publish it as any crate (`cargo publish`), with the keyword `nshm` so that it can be found on [crates.io](https://crates.io/keywords/nshm), or push it to Git and tag its versions.
 
