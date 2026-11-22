@@ -3888,6 +3888,7 @@ dependencies = [
  "nsh-macros",
  "nsh-updater",
  "ordered-float",
+ "percent-encoding",
  "resvg",
  "rust-i18n",
  "rustc-hash 2.1.3",

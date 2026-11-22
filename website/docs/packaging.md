@@ -373,7 +373,8 @@ so hosts can cache them for good. Deploy the directory to any web server or CDN;
 
 NSH writes the `Info.plist` of iOS and macOS packages, and signs them. An app adds keys of its own, such as export
 compliance, an App Store category or App Transport Security exceptions, and entitlements, such as associated domains,
-under `ios` and `macos` in `nsh.json`:
+under `ios` and `macos` in `nsh.json`. (The web links that open the app go in `links`, which adds their `applinks:`
+entries to iOS packages: [Web links](../modules/nsh.md#web-links).)
 
 ```json
 {
@@ -386,7 +387,7 @@ under `ios` and `macos` in `nsh.json`:
       }
     },
     "entitlements": {
-      "com.apple.developer.associated-domains": ["applinks:example.com"]
+      "com.apple.developer.associated-domains": ["webcredentials:example.com"]
     }
   },
   "macos": {

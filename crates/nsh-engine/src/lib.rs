@@ -178,12 +178,18 @@ impl App {
         }
     }
 
-    /// The URL schemes the app claims (`nsh.json` `schemes`):
-    /// the links the core lets through (`nsh_core::url_scheme`).
+    /// The URL schemes the app claims (`nsh.json` `schemes`): those of
+    /// [`App::links`].
     pub fn url_schemes(&self) -> &[String] {
+        self.links().schemes()
+    }
+
+    /// The links the app claims (`nsh.json` `schemes` and `links`): the
+    /// links the core lets through (`nsh_core::url_scheme`).
+    pub fn links(&self) -> &nsh_core::url_scheme::AppLinks {
         match self {
-            App::Rust(root) => root.url_schemes_ref(),
-            App::Js(bundle) => &bundle.url_schemes,
+            App::Rust(root) => root.links_ref(),
+            App::Js(bundle) => &bundle.links,
         }
     }
 }
@@ -214,11 +220,12 @@ pub struct Bundle {
     /// The app's id (`nsh.json` `"id"`; a signed package's verified one):
     /// it names where the app keeps its data (`nsh/storage`).
     pub app_id: Option<String>,
-    /// The URL schemes the app claims (`nsh.json` `schemes`, a
-    /// packaged app's `app.json`): the links its engine lets through.
-    /// Read from the app's own resources, never from its code; none for a
-    /// signed package, whose embedding app owns the schemes.
-    pub url_schemes: Vec<String>,
+    /// The links the app claims (`nsh.json` `schemes` and `links`, a
+    /// packaged app's `app.json`): the URLs of its schemes and the `https`
+    /// URLs of its web links its engine lets through. Read from the app's
+    /// own resources, never from its code; none for a signed package, whose
+    /// embedding app owns them.
+    pub links: nsh_core::url_scheme::AppLinks,
     /// Trusted filesystem anchors selected by the native host, never decoded
     /// from application code, its manifest or a development server message.
     /// Missing anchors deny relative and corresponding placeholder grants.
@@ -382,7 +389,7 @@ impl Bundle {
             base_url: None,
             chunks: Arc::default(),
             app_id: None,
-            url_schemes: Vec::new(),
+            links: nsh_core::url_scheme::AppLinks::default(),
             system_paths: nsh_core::access::TrustedPaths::default(),
             package: None,
             updater_config: None,
@@ -401,7 +408,7 @@ impl Bundle {
             base_url: None,
             chunks: Arc::default(),
             app_id: None,
-            url_schemes: Vec::new(),
+            links: nsh_core::url_scheme::AppLinks::default(),
             system_paths: nsh_core::access::TrustedPaths::default(),
             package: None,
             updater_config: None,
@@ -457,13 +464,19 @@ impl Bundle {
         self
     }
 
-    /// The URL schemes the app claims ([`Bundle::url_schemes`]), as
-    /// `nsh.json` gives them.
+    /// The URL schemes the app claims, as `nsh.json` gives them: those of
+    /// [`Bundle::links`], whose web links stay.
     pub fn with_url_schemes(
         mut self,
         schemes: impl IntoIterator<Item = impl Into<String>>,
     ) -> Self {
-        self.url_schemes = schemes.into_iter().map(Into::into).collect();
+        self.links.set_schemes(schemes);
+        self
+    }
+
+    /// The links the app claims ([`Bundle::links`]).
+    pub fn with_links(mut self, links: nsh_core::url_scheme::AppLinks) -> Self {
+        self.links = links;
         self
     }
 
@@ -547,22 +560,25 @@ impl Bundle {
                     .map_err(|e| io::Error::other(format!("app.json: {e}")))?,
             );
         }
-        if let Some(url_schemes) = info.as_ref().and_then(|info| info.get("schemes")) {
+        if let Some(info) = &info {
             // A newer NSH's: what this runtime cannot claim is left out.
-            let (schemes, ignored) = nsh_core::url_scheme::schemes_from_json_lenient(url_schemes);
+            let (links, ignored) = nsh_core::url_scheme::AppLinks::from_json_lenient(info);
             for what in ignored {
                 log::warn!("app.json: {what}, ignored");
             }
-            bundle.url_schemes = schemes;
+            bundle.links = links;
         }
         // The files it opens come as `file:` URLs (`nsh_core::file_type`).
         if info
             .as_ref()
             .is_some_and(nsh_core::file_type::declares_file_types)
         {
-            bundle
-                .url_schemes
-                .push(nsh_core::file_type::FILE_SCHEME.to_owned());
+            let schemes = bundle.links.schemes().to_vec();
+            bundle.links.set_schemes(
+                schemes
+                    .into_iter()
+                    .chain([nsh_core::file_type::FILE_SCHEME.to_owned()]),
+            );
         }
         bundle.system_paths.plugin_dir = nsh_core::access::canonicalize(path)?
             .parent()
@@ -2451,7 +2467,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         core.set_clipboard(config.clipboard.clone());
         core.set_picker(config.picker.clone());
         core.set_speech(config.speech.clone());
-        core.set_url_schemes(config.app.url_schemes().iter().cloned());
+        core.set_app_links(config.app.links().clone());
         core.set_app_info(config.app.app_info().cloned());
         // Every VM reads the core's address where it is (`UrlScheme.url()`).
         #[cfg(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32")))]

@@ -161,7 +161,8 @@ expect Early: 1.2.3
 covers [nsh] appInfo
 # mod-url-scheme
 tap id:case-mod-url-scheme
-# the domain claims `compat`: no link opened it, and the listener stops.
+# the domain claims `compat` and a web link: no link opened it, and the
+# listener stops.
 # The app's own `setUrl` is no change of the address it did not make.
 expect Links: none
 expect Listener: listening

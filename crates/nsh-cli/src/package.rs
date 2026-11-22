@@ -225,9 +225,17 @@ pub(crate) struct AppConfig {
     /// URL schemes that open the app (`"myapp"`: `myapp://...`), which
     /// packages register with the system; the app hears them through
     /// `UrlScheme.on("open", ...)`. [`read_config`] checks them and lowers
-    /// their case ([`AppConfig::url_schemes`]).
+    /// their case ([`AppConfig::app_links`]).
     #[serde(default)]
     pub(crate) schemes: Vec<String>,
+    /// Web links that open the app (`[{ "host": "example.com", "paths":
+    /// ["/orders/*"] }]`: Universal Links on iOS, App Links on Android),
+    /// which packages claim with the system; the app hears them through
+    /// `UrlScheme.on("open", ...)` as it does its schemes' links.
+    /// [`read_config`] checks them, and leaves out (warning) each one it
+    /// cannot read whole ([`AppConfig::app_links`]).
+    #[serde(default)]
+    pub(crate) links: Option<serde_json::Value>,
     /// The app runs once (`"singleInstance": true`, Windows and Linux): a
     /// second launch hands its arguments and working directory to the
     /// running instance (`Application.on("secondInstance", ...)`) and exits
@@ -428,11 +436,46 @@ impl AppConfig {
         }
     }
 
-    /// The URL schemes the app claims (`"schemes": [...]`), checked, in
-    /// lower case; those it cannot claim are left out ([`read_config`]
-    /// warns of them).
-    pub(crate) fn url_schemes(&self) -> Vec<String> {
-        nsh_core::url_scheme::schemes_from_json(&serde_json::json!(self.schemes))
+    /// The links the app claims: its URL schemes (`"schemes": [...]`)
+    /// and web links (`"links": [...]`), checked; those it cannot claim are
+    /// left out ([`read_config`] warns of them).
+    pub(crate) fn app_links(&self) -> nsh_core::url_scheme::AppLinks {
+        let mut config = serde_json::json!({ "schemes": self.schemes });
+        if let Some(links) = &self.links {
+            config["links"] = links.clone();
+        }
+        nsh_core::url_scheme::AppLinks::from_json(&config)
+    }
+
+    /// Claims the web links' hosts in iOS `entitlements`:
+    /// `applinks:<host>` in `com.apple.developer.associated-domains`, after
+    /// what `ios.entitlements` lists there. Their paths are the host's to
+    /// confirm (`apple-app-site-association`); the core keeps only the
+    /// claimed ones.
+    pub(crate) fn add_links_to_entitlements(
+        &self,
+        entitlements: &mut plist::Dictionary,
+    ) -> anyhow::Result<()> {
+        const KEY: &str = "com.apple.developer.associated-domains";
+        let links = self.app_links();
+        if links.web().is_empty() {
+            return Ok(());
+        }
+        let mut entries = match entitlements.remove(KEY) {
+            Some(plist::Value::Array(entries)) => entries,
+            None => Vec::new(),
+            Some(_) => anyhow::bail!(
+                "ios.entitlements: `{KEY}` is not an array of domains (`[\"applinks:example.com\"]`), so the web links of nsh.json `links` cannot be added to it"
+            ),
+        };
+        for link in links.web() {
+            let entry = plist::Value::String(format!("applinks:{}", link.host()));
+            if !entries.contains(&entry) {
+                entries.push(entry);
+            }
+        }
+        entitlements.insert(KEY.into(), plist::Value::Array(entries));
+        Ok(())
     }
 
     /// The file types the app opens (`"fileTypes"`), checked; those it
@@ -537,15 +580,15 @@ pub(crate) const WEB_MEDIA_USAGE_DESCRIPTIONS: [(&str, &str, &str); 2] = [
 ];
 
 /// The `app.json` of a package: `info` (the app's id, ...) with the
-/// schemes it claims, which its runner hands the core so the links of
-/// others are dropped (`nsh_engine::Bundle::url_schemes`).
+/// links it claims (`"schemes"`, `"links"`), which its runner hands the
+/// core so other links are dropped (`nsh_engine::Bundle::links`).
 pub(crate) fn app_json(
     mut info: serde_json::Value,
-    schemes: &[String],
+    links: &nsh_core::url_scheme::AppLinks,
     window: Option<&serde_json::Value>,
 ) -> String {
-    if !schemes.is_empty() {
-        info["schemes"] = serde_json::json!(schemes);
+    if let Some(info) = info.as_object_mut() {
+        links.add_to_json(info);
     }
     if let Some(window) = window {
         info["window"] = window.clone();
@@ -921,6 +964,12 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
         nsh_core::url_scheme::schemes_from_json_lenient(&serde_json::json!(config.schemes));
     config.schemes = schemes;
     ignored.extend(schemes_ignored);
+    if let Some(links) = &config.links {
+        let (_, links_ignored) = nsh_core::url_scheme::AppLinks::from_json_lenient(
+            &serde_json::json!({ "links": links }),
+        );
+        ignored.extend(links_ignored);
+    }
     if let Some(types) = &config.file_types {
         let (_, types_ignored) = nsh_core::file_type::parse_file_types(types);
         ignored.extend(types_ignored);
@@ -1335,10 +1384,22 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
     }
     let config = &options.config;
     let (name, id) = release_name_and_id(&entry, config)?;
-    let schemes = config.url_schemes();
-    if options.target == PackageTarget::Web && !schemes.is_empty() {
+    let links = config.app_links();
+    if options.target == PackageTarget::Web && !links.schemes().is_empty() {
         ui::warn(
             "nsh.json schemes: a web page opens from its address, so the schemes are left out",
+        );
+    }
+    if options.target == PackageTarget::Web && !links.web().is_empty() {
+        ui::warn("nsh.json links: a web page is its own link, so the links are left out");
+    }
+    if matches!(
+        options.target,
+        PackageTarget::Linux | PackageTarget::Windows
+    ) && !links.web().is_empty()
+    {
+        ui::warn(
+            "nsh.json links: Linux and Windows open web links in the browser, so the links are left out",
         );
     }
     let executable: String = name.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
@@ -1464,8 +1525,8 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
     if let Some(json) = built.capabilities_json() {
         fs::write(resources.join("capabilities.json"), json)?;
     }
-    // The app's id, which names where it keeps its data, and the schemes
-    // it claims (`Bundle::read`).
+    // The app's id, which names where it keeps its data, and the links it
+    // claims (`Bundle::read`).
     fs::write(
         resources.join("app.json"),
         app_json(
@@ -1478,7 +1539,7 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
                 }
                 info
             },
-            &schemes,
+            &links,
             config.window.as_ref(),
         ),
     )?;
@@ -1505,7 +1566,7 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
     if sdk == "iphoneos" {
         info.extend(ios_toolchain_info()?);
     }
-    url_types(&mut info, &id, &schemes);
+    url_types(&mut info, &id, links.schemes());
     activity_types(&mut info, &id, config.handoff);
     document_types(&mut info, &config.file_types());
     let icon = config.icon(PackageTarget::Ios);
@@ -1530,7 +1591,8 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
             // first.
             crate::app_extensions::sign_ad_hoc(&extensions, options.out)?;
             // The simulator takes the app's entitlements without a profile.
-            let entitlements = config.ios.entitlements(ApplePlatform::Ios)?;
+            let mut entitlements = config.ios.entitlements(ApplePlatform::Ios)?;
+            config.add_links_to_entitlements(&mut entitlements)?;
             let mut path = None;
             if !entitlements.is_empty() {
                 let file = options.out.join(format!("{executable}.entitlements"));
@@ -1582,7 +1644,9 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
             crate::provisioning::warn_unused(&profiles);
             fs::copy(&profile.path, app.join("embedded.mobileprovision"))
                 .with_context(|| format!("copy {}", profile.path.display()))?;
-            let requested = config.ios.entitlements(ApplePlatform::Ios)?;
+            let mut requested = config.ios.entitlements(ApplePlatform::Ios)?;
+            // The profile grants Associated Domains for the web links'.
+            config.add_links_to_entitlements(&mut requested)?;
             let entitlements = profile.entitlements(&id, requested, "ios.entitlements")?;
             let path = options.out.join(format!("{executable}.entitlements"));
             entitlements.to_file_xml(&path)?;
@@ -1694,7 +1758,7 @@ fn package_android(
                 }
                 info
             },
-            &config.schemes,
+            &config.app_links(),
             config.window.as_ref(),
         )
         .into_bytes(),
@@ -1751,6 +1815,7 @@ fn package_android(
             queries: &config.android.queries,
             application: &config.android.application,
             schemes: &config.schemes,
+            links: config.app_links().web(),
             rust: built.rust_root,
             dark: config.appearance.as_deref() == Some("dark"),
             fixed_appearance: matches!(config.appearance.as_deref(), Some("light" | "dark")),
@@ -2013,10 +2078,12 @@ fn package_macos(
     if let Some(application) = &config.application {
         info["application"] = application.clone();
     }
-    let schemes = config.url_schemes();
+    // macOS opens web links in the app only under a profile that grants
+    // Associated Domains, which an ad hoc package has not: the links are
+    // there for an app signed so.
     fs::write(
         nsh.join("app.json"),
-        app_json(info, &schemes, config.window.as_ref()),
+        app_json(info, &config.app_links(), config.window.as_ref()),
     )?;
     let icon = match config.icon(PackageTarget::Macos) {
         Some(icon) => {
@@ -2026,7 +2093,8 @@ fn package_macos(
         None => false,
     };
     let mut plist = macos_info_plist(name, id, executable, config, icon)?;
-    url_types(&mut plist, id, &schemes);
+    let links = config.app_links();
+    url_types(&mut plist, id, links.schemes());
     activity_types(&mut plist, id, config.handoff);
     document_types(&mut plist, &config.file_types());
     plist::Value::Dictionary(plist)
@@ -3330,7 +3398,7 @@ mod tests {
     fn apps_claim_their_url_schemes_in_the_package() {
         let config: AppConfig =
             serde_json::from_str(r#"{ "schemes": ["MyApp", "myapp-dev"] }"#).unwrap();
-        let schemes = config.url_schemes();
+        let schemes = config.app_links().schemes().to_vec();
         assert_eq!(schemes, ["myapp", "myapp-dev"]);
         // The system opens the app for their links...
         let mut info = info_plist("A", "com.a", "a", &config, "iphoneos").unwrap();
@@ -3348,7 +3416,7 @@ mod tests {
         // ...and the runner lets them through.
         let json: serde_json::Value = serde_json::from_str(&app_json(
             serde_json::json!({ "id": "com.a" }),
-            &schemes,
+            &config.app_links(),
             None,
         ))
         .unwrap();
@@ -3361,13 +3429,94 @@ mod tests {
         url_types(&mut info, "com.a", &[]);
         assert!(!info.contains_key("CFBundleURLTypes"));
         assert_eq!(
-            app_json(serde_json::json!({ "id": "com.a" }), &[], None),
+            app_json(
+                serde_json::json!({ "id": "com.a" }),
+                &Default::default(),
+                None
+            ),
             r#"{"id":"com.a"}"#
         );
         // Schemes of the system and other apps are left out.
         let config: AppConfig =
             serde_json::from_str(r#"{ "schemes": ["https", "myapp"] }"#).unwrap();
-        assert_eq!(config.url_schemes(), ["myapp"]);
+        assert_eq!(config.app_links().schemes(), ["myapp"]);
+    }
+
+    #[test]
+    fn apps_claim_their_web_links_in_the_package() {
+        let config: AppConfig = serde_json::from_str(
+            r#"{
+                "schemes": ["MyApp"],
+                "links": [
+                    { "host": "Example.com", "paths": ["/orders/*"] },
+                    { "host": "*.shop.example" },
+                    { "host": "new.example", "exclude": ["/admin/*"] },
+                    { "host": "https://x.test" }
+                ]
+            }"#,
+        )
+        .unwrap();
+        // Checked, lower case, those it cannot read whole left out.
+        let links = config.app_links();
+        assert_eq!(links.schemes(), ["myapp"]);
+        let hosts: Vec<_> = links.web().iter().map(|l| l.host()).collect();
+        assert_eq!(hosts, ["example.com", "*.shop.example"]);
+        // iOS claims their hosts after the app's own associated domains...
+        let mut entitlements = plist::Dictionary::new();
+        entitlements.insert(
+            "com.apple.developer.associated-domains".into(),
+            plist::Value::Array(vec![
+                "webcredentials:example.com".into(),
+                "applinks:example.com".into(),
+            ]),
+        );
+        config.add_links_to_entitlements(&mut entitlements).unwrap();
+        let claimed: Vec<_> = entitlements["com.apple.developer.associated-domains"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(plist::Value::as_string)
+            .collect();
+        assert_eq!(
+            claimed,
+            [
+                "webcredentials:example.com",
+                "applinks:example.com",
+                "applinks:*.shop.example"
+            ]
+        );
+        // ...refuses to guess at a value of another form...
+        let mut wrong = plist::Dictionary::new();
+        wrong.insert(
+            "com.apple.developer.associated-domains".into(),
+            "applinks:example.com".into(),
+        );
+        assert!(config.add_links_to_entitlements(&mut wrong).is_err());
+        // ...and the runner lets them through, paths and all.
+        let json: serde_json::Value = serde_json::from_str(&app_json(
+            serde_json::json!({ "id": "com.a" }),
+            &links,
+            None,
+        ))
+        .unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "id": "com.a",
+                "schemes": ["myapp"],
+                "links": [
+                    { "host": "example.com", "paths": ["/orders/*"] },
+                    { "host": "*.shop.example" }
+                ]
+            })
+        );
+        assert_eq!(nsh_core::url_scheme::AppLinks::from_json(&json), links);
+        // An app that claims none adds nothing.
+        let mut entitlements = plist::Dictionary::new();
+        AppConfig::default()
+            .add_links_to_entitlements(&mut entitlements)
+            .unwrap();
+        assert!(entitlements.is_empty());
     }
 
     #[test]
