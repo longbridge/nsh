@@ -59,7 +59,7 @@ view()
 | `.on_accessibility_action(..)` | `onAccessibilityAction` | `(e: { actionName }) => void` | An action was performed (Rust: its name). |
 | `.accessibility_elements_hidden(..)` | `accessibilityElementsHidden` | `boolean` | Hides the view and its subtree from assistive technologies. |
 | | `importantForAccessibility` | `"auto" \| "yes" \| "no" \| "no-hide-descendants"` | Whether the view (and its subtree) is exposed. |
-| | `android={{ accessibilityLiveRegion }}` | `"none" \| "polite" \| "assertive"` | Android: how changes of the view are announced to TalkBack. |
+| `.accessibility_live_region(..)` | `accessibilityLiveRegion` | `"none" \| "polite" \| "assertive"` | How changes of the view are announced by themselves: TalkBack on Android, VoiceOver on macOS, the web's `aria-live`, a live region on Windows. |
 | `.test_id(..)` | `testID` | `string` | An identifier for UI tests (the accessibility identifier on iOS, the resource id on Android); not read aloud. |
 
 Give every icon-only control a label: a screen reader cannot read a glyph or an image. Keep labels short and do not include the role ("Play", not "Play button"): the role is announced on its own.
@@ -379,7 +379,7 @@ function Upload() {
 }
 ```
 
-Announce changes the user would otherwise miss: a background save finishing, an error appearing away from the focus, a timer ending. On Android, `android={{ accessibilityLiveRegion: "polite" }}` on a view makes TalkBack announce its changes by itself.
+Announce changes the user would otherwise miss: a background save finishing, an error appearing away from the focus, a timer ending. `accessibilityLiveRegion: "polite"` on a view has the screen reader announce its changes by itself — TalkBack on Android, VoiceOver on macOS, `aria-live` on the web, a live region on Windows (`"assertive"` reads right away instead of when the user is idle).
 
 An alert (`.role(AccessibilityRole::Alert)`, `role="alert"`) is read by itself on macOS and the web: its label, or else the texts inside it, as it appears and again when its content changes, ahead of what the screen reader was saying. An error shown with the role needs no announcement of its own there; on macOS the same text announced in the same update is read once. On the other platforms, announce it as well.
 

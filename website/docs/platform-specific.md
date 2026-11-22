@@ -84,7 +84,7 @@ What exists today:
 |---|---|---|---|
 | `.ripple(Ripple { .. })` | `android={{ ripple }}` | every element | The material ripple while pressed: color, borderless, radius, foreground. |
 | `.elevation(..)` | `android={{ elevation }}` | every element | The material shadow, in points, from the view's shape. |
-| | `android={{ accessibilityLiveRegion }}` | every element | `"none"`, `"polite"` or `"assertive"`: TalkBack announces the view's changes. |
+| | `android={{ accessibilityLiveRegion }}` | every element | `"none"`, `"polite"` or `"assertive"`: TalkBack announces the view's changes. The same prop without the bag does it on the other platforms too (`aria-live` on the web, a live region on Windows, an announcement on macOS). |
 | `.status_bar_translucent(..)` | `android={{ statusBarTranslucent }}` | `Dialog` | The dialog's content reaches under the status bar. |
 | `.input_accessory(..)` | `ios={{ inputAccessoryViewID }}` | `Input` | The `InputAccessoryView` shown over the keyboard. |
 | `.input_accessory(..)` | `inputAccessoryViewID` | `RichEditor` | The `InputAccessoryView` shown over the keyboard while the editor has the focus. |

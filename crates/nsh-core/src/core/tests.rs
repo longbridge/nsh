@@ -10280,6 +10280,41 @@ fn pressed_current_and_level_decode_from_js() {
     }
 }
 
+/// `accessibilityLiveRegion` from its JS shape, on every platform now that
+/// it is one prop (Android's bag took it before).
+#[test]
+fn a_live_region_decodes_from_js() {
+    use crate::{
+        AccessibilityProp, LiveRegion,
+        js::host::{HostCx, HostProps},
+    };
+    let decode = |v: serde_json::Value| {
+        AccessibilityProp::decode("accessibilityLiveRegion", &J(v), &mut HostCx::default())
+            .expect("accessibilityLiveRegion")
+            .expect("a value")
+    };
+    assert_eq!(
+        decode(serde_json::json!("polite")),
+        AccessibilityProp::LiveRegion(LiveRegion::Polite)
+    );
+    assert_eq!(
+        decode(serde_json::json!("assertive")),
+        AccessibilityProp::LiveRegion(LiveRegion::Assertive)
+    );
+    assert_eq!(
+        decode(serde_json::json!("none")),
+        AccessibilityProp::LiveRegion(LiveRegion::None)
+    );
+    assert_eq!(
+        decode(serde_json::Value::Null),
+        AccessibilityProp::LiveRegion(LiveRegion::None)
+    );
+    assert_eq!(
+        decode(serde_json::json!("yes")),
+        AccessibilityProp::LiveRegion(LiveRegion::None)
+    );
+}
+
 /// `accessibilityDescription` from JS, and what platforms with one place
 /// for everything read after the name get from it.
 #[test]
