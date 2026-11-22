@@ -1056,7 +1056,39 @@ fn package_catalyst(
     )?;
     crate::apple::write_localized_info(&contents.join("Resources"), &localized)?;
     install_binary(host, &macos.join("nsh-ios-host"))?;
+    let (frameworks, changed) = dev_host_frameworks(
+        config,
+        &meta,
+        "aarch64-apple-ios-macabi",
+        &contents.join("Frameworks"),
+        &work.join("frameworks.json"),
+    )?;
+    // macOS runs signed code only, ad hoc at least: a framework that came
+    // without a signature gets one.
+    if changed {
+        crate::ios_frameworks::sign(&frameworks, "-")?;
+    }
     Ok(app)
+}
+
+/// Makes the development host's `Frameworks/` (`dir`) hold the dynamic
+/// frameworks of the app's `nsh.json` (`config`) and its crates' (`meta`)
+/// for `triple`, which the host built with the app's crates linked
+/// (`ios_frameworks`); `record` remembers the copies. A host without the
+/// app's crates (a TSX app's prebuilt one) links none.
+fn dev_host_frameworks(
+    config: &crate::package::AppConfig,
+    meta: &crate::module_meta::ModuleMeta,
+    triple: &str,
+    dir: &Path,
+    record: &Path,
+) -> anyhow::Result<(Vec<PathBuf>, bool)> {
+    let frameworks = if crate::rust_app::current().is_some() {
+        crate::module_meta::ios_link(&config.ios.frameworks, &[], meta).0
+    } else {
+        Vec::new()
+    };
+    crate::ios_frameworks::sync(&frameworks, triple, dir, Some(record))
 }
 
 /// Creates (or refreshes) `<work>/ios/NshDev.app`, a flat iOS app bundle,
@@ -1086,7 +1118,22 @@ pub(crate) fn package_ios(
     }
     let strings_changed = crate::apple::write_localized_info(&app, &localized)?;
     let installed = install_binary(host, &app.join("nsh-ios-host"))?;
-    if installed || info_changed || strings_changed || !app.join("_CodeSignature").exists() {
+    let (frameworks, frameworks_changed) = dev_host_frameworks(
+        config,
+        &meta,
+        "aarch64-apple-ios-sim",
+        &app.join("Frameworks"),
+        &work.join("ios").join("frameworks.json"),
+    )?;
+    if installed
+        || info_changed
+        || strings_changed
+        || frameworks_changed
+        || !app.join("_CodeSignature").exists()
+    {
+        // The app's signature seals its frameworks': they are signed
+        // first.
+        crate::ios_frameworks::sign(&frameworks, "-")?;
         let status = Command::new("codesign")
             .args(["--force", "--sign", "-", "--timestamp=none"])
             .arg(&app)

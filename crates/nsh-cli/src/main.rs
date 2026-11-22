@@ -15,6 +15,7 @@ mod dev;
 mod dev_port;
 mod entry;
 mod init;
+mod ios_frameworks;
 mod logger;
 mod module_meta;
 mod native_features;
