@@ -147,7 +147,7 @@ crate, imported from `nsh-extra` in TSX and called as `nsh_extra::<module>` in R
 | Feature | TSX | What it does |
 |---|---|---|
 | `camera` | `Camera` | Takes a photo with the system's camera on iOS and Android |
-| `push` | `Push` | Receives remote notifications from any push service on iOS |
+| `push` | `Push` | Receives remote notifications from any push service on iOS, and on Android through the service's binding |
 
 ```tsx
 import { Camera } from "nsh-extra";
@@ -167,8 +167,9 @@ the camera's usage description on iOS (an app sets its own wording with `ios.inf
 
 ### Push
 
-`Push` registers the device with the system's push service and hands the app its token, which the app sends to the
-push service it uses. Notifications then arrive as events:
+`Push` registers the device with a push service and hands the app its token, which the app sends to its server.
+Notifications then arrive as events. On iOS the service is the system's; Android has none that every device has, so
+there the app links a push service's binding, a crate built on `nsh_extra::push` that wraps the service's SDK:
 
 ```sh
 nsh add nsh-extra --features push
@@ -203,33 +204,40 @@ function closeConversation(threadId: string) {
 ```
 
 - `register()` resolves with `{ token }`, the string the push service takes (hexadecimal on iOS), and rejects with the
-  system's reason when the device is not registered. The system answers once it can reach its servers, so offline the
+  service's reason when the device is not registered. The service answers once it can be reached, so offline the
   promise stays pending: `on("token")` is the dependable path, and it reports a token that changed. Register at every
   launch. `token()` reads the last one.
 - `press` reports the notification the user pressed, including the one that launched the app, which waits for the
   first listener. `notification` reports one that arrived while the app is in front. Both carry its `id`, its
   `threadId` and the `payload` the push service sent. A payload is untrusted input.
 - `background` reports a delivery that woke the app or reached it in front (on iOS one with `content-available`; a
-  visible one with `content-available` arriving in front is reported to `notification` too). The system waits for its
-  listeners: return a promise for the work and what it gave, within 25 seconds of the delivery. One that came while
-  nothing listened waits for a listener until 5 seconds after it came.
+  visible one with `content-available` arriving in front is reported to `notification` too; on Android one the
+  binding hands over). The system waits for its listeners: return a promise for the work and what it gave, within 25
+  seconds of the delivery. One that came while nothing listened waits for a listener until 5 seconds after it came.
 - `setForegroundPresentation(presentation)` decides how notifications show while the app is in front, and
   `setForegroundPresentation(presentation, { threadId })` how one thread's show; `null` takes either back. They are
-  decided ahead of the arrival, as the system asks at once, and hold for every surface of the app.
-- `closeThread(threadId)` removes the delivered notifications of a thread, but those `Notifications.show` showed;
-  `Notifications.close(id)` removes one.
-- `available()` is `true` in a standalone iOS app. Elsewhere it is `false`, and `register` and `closeThread` reject
-  with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
+  decided ahead of the arrival, as the system asks at once, and hold for every surface of the app. On Android the
+  binding posts a notification as they say.
+- `closeThread(threadId)` removes the delivered notifications of a thread (on Android a notification group), but those
+  `Notifications.show` showed; `Notifications.close(id)` removes one.
+- `available()` is `true` in a standalone iOS app and wherever the app links a push service's binding. Elsewhere it is
+  `false`, and `register` rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`; so does `closeThread`, except on Android.
 - An app that declares `"capabilities"` grants `Push` with
   [`"notifications": true`](./sandbox-and-capabilities.md#notifications), the capability `Notifications` uses. The
   token, the deliveries and how they show belong to the whole app, so every function but `available()` asks for it
   first.
 
-The feature adds the `remote-notification` background mode to the packaged app. The `aps-environment` entitlement comes
-from the provisioning profile the app is signed with ([iOS devices](./packaging.md#ios-devices)). Rust code, such as
-a push service's SDK binding, uses `nsh_extra::push`: `on_event` hears the same events with the token's raw bytes,
-`set_foreground_presentation_decider` decides each notification's presentation natively, and the launch options come
-from `nsh_platform_ios::on_application_event` ([Application events](./ios.md#application-events)).
+The feature adds the `remote-notification` background mode to the packaged iOS app. The `aps-environment` entitlement
+comes from the provisioning profile the app is signed with ([iOS devices](./packaging.md#ios-devices)). On Android it
+adds nothing: the push service's SDK brings what its manifest needs. Rust code, such as a push service's SDK binding,
+uses `nsh_extra::push`: `on_event` hears the same events with the token's raw bytes,
+`set_foreground_presentation_decider` decides each notification's presentation natively, and the launch options on iOS
+come from `nsh_platform_ios::on_application_event` ([Application events](./ios.md#application-events)). A binding
+implements `PushProvider` (it registers the device with its service), sets it with `set_provider` from its
+`#[native_module]` entry, and reports what the service delivers with `provide_token`,
+`provide_registration_failure`, `provide_notification` and `provide_background`. A press of a notification the binding
+posted opens the app with the payload as the intent's extras, and reaches `press` with them as its `payload` (Android
+does not say which notification it was, so it has no `id` or `threadId`).
 
 ## An app's own Rust: `ext/`
 
