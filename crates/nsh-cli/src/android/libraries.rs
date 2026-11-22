@@ -2,8 +2,8 @@
 //! app's `nsh.json` and of its crates' `[package.metadata.nsh]`): jar files,
 //! which the SDK's `d8` turns into dex; prebuilt dex files; and Android
 //! libraries (AARs), whose classes go the jars' way and whose native
-//! libraries, assets and manifest the package takes as well. A package
-//! without libraries runs none of this.
+//! libraries, assets, resources ([`library_resources`]) and manifest the
+//! package takes as well. A package without libraries runs none of this.
 
 use std::{
     collections::BTreeMap,
@@ -20,6 +20,7 @@ use sha2::{Digest as _, Sha256};
 use super::{
     Apk, MIN_SDK, Sdk,
     library_manifest::{self, Additions, Element, Placeholders},
+    library_resources::{self, Symbols},
 };
 
 /// Where `nsh.json` lists its libraries, as errors name it.
@@ -36,6 +37,8 @@ pub(crate) struct Library {
     /// Who lists it, for errors: `nsh.json `android.libraries`` or
     /// `<crate>: [package.metadata.nsh] `android.libraries``.
     pub(crate) listed: String,
+    /// The crate that lists it; `None`: the app's `nsh.json`.
+    pub(crate) owner: Option<String>,
 }
 
 impl From<PathBuf> for Library {
@@ -43,6 +46,7 @@ impl From<PathBuf> for Library {
         Library {
             path,
             listed: NSH_JSON.to_owned(),
+            owner: None,
         }
     }
 }
@@ -95,6 +99,22 @@ pub(super) struct Contents {
     pub(super) assets: Vec<(String, Vec<u8>)>,
     /// What the manifest gets: the crates' entries and the AARs' manifests.
     pub(super) manifest: Additions,
+    /// The AARs' resources, compiled: overlays of `aapt2 link`, lowest
+    /// priority first ([`library_resources::link_inputs`]).
+    pub(super) res: Vec<PathBuf>,
+    /// The AARs whose code reads `R` fields: (package, its `R.txt`, the AAR
+    /// and who lists it).
+    r_classes: Vec<(String, Symbols, String)>,
+    /// The jars [`dex`] turns into dex.
+    jars: Vec<Checked>,
+}
+
+impl Contents {
+    /// Whether [`dex`] needs the ids `aapt2 link` gave the resources
+    /// (`--output-text-symbols`).
+    pub(super) fn needs_symbols(&self) -> bool {
+        !self.r_classes.is_empty()
+    }
 }
 
 /// The native libraries of an AAR.
@@ -114,10 +134,17 @@ struct Checked {
     listed: String,
     /// The file and who lists it, which errors name it by.
     shown: String,
-    /// The app's own `nsh.json` lists it.
-    apps: bool,
+    /// The crate that lists it; `None`: the app's own `nsh.json`.
+    owner: Option<String>,
     kind: Kind,
     sha256: String,
+}
+
+impl Checked {
+    /// The app's own `nsh.json` lists it.
+    fn apps(&self) -> bool {
+        self.owner.is_none()
+    }
 }
 
 /// The libraries of `apk`, checked and each file once: a missing file or
@@ -145,7 +172,7 @@ fn checked(libraries: &[Library]) -> anyhow::Result<Vec<Checked>> {
             path: library.path.clone(),
             listed: library.listed.clone(),
             shown: library.describe(),
-            apps: library.listed == NSH_JSON,
+            owner: library.owner.clone(),
             kind,
             sha256,
         });
@@ -176,7 +203,18 @@ pub(super) fn prepare(sdk: &Sdk, apk: &Apk<'_>, work: &Path) -> anyhow::Result<C
     let mut warnings = Vec::new();
     // Each asset's AAR, for errors.
     let mut assets: BTreeMap<String, (usize, String)> = BTreeMap::new();
+    // Each compiled `res/`, with the crate that lists its AAR.
+    let mut res = Vec::new();
     for (i, aar) in choose(aars)?.into_iter().enumerate() {
+        if !aar.res.is_empty() {
+            let compiled = compiled_res(sdk, apk, &aar, &work.join("aar").join(i.to_string()))?;
+            res.push((aar.checked.owner.clone(), compiled));
+        }
+        if let Some(symbols) = aar.r_txt {
+            contents
+                .r_classes
+                .push((aar.package, symbols, aar.checked.shown.clone()));
+        }
         let from = aar.checked.shown;
         if let Some(level) = aar.min_compile_sdk
             && level > apk.target_sdk
@@ -203,7 +241,7 @@ pub(super) fn prepare(sdk: &Sdk, apk: &Apk<'_>, work: &Path) -> anyhow::Result<C
                 path,
                 listed: aar.checked.listed.clone(),
                 shown: format!("`{name}` of {from}"),
-                apps: aar.checked.apps,
+                owner: aar.checked.owner.clone(),
                 kind: Kind::Jar,
                 sha256,
             });
@@ -227,6 +265,7 @@ pub(super) fn prepare(sdk: &Sdk, apk: &Apk<'_>, work: &Path) -> anyhow::Result<C
             });
         }
     }
+    contents.res = library_resources::lowest_first(res);
     contents.manifest = library_manifest::additions(apk, &placeholders, manifests)?;
     for name in placeholders.missing.borrow().iter() {
         warnings.push(format!(
@@ -243,9 +282,32 @@ pub(super) fn prepare(sdk: &Sdk, apk: &Apk<'_>, work: &Path) -> anyhow::Result<C
             .filter(|c| c.kind == Kind::Dex)
             .map(|c| c.path.clone()),
     );
-    let jars: Vec<&Checked> = files.iter().filter(|c| c.kind == Kind::Jar).collect();
+    contents.jars = files.into_iter().filter(|c| c.kind == Kind::Jar).collect();
+    Ok(contents)
+}
+
+/// Adds the dex of the jars [`prepare`] found to `contents.dex`, with the
+/// `R` classes of the AARs whose code reads any, their fields the ids of
+/// `symbols` (what `aapt2 link --output-text-symbols` wrote): each jar
+/// through `d8 --intermediate` (kept in `apk.library_cache` by contents,
+/// `d8` version, API level and mode), then merged by one `d8` run into
+/// `work`, which fails on a class two libraries define.
+pub(super) fn dex(
+    sdk: &Sdk,
+    apk: &Apk<'_>,
+    work: &Path,
+    contents: &mut Contents,
+    symbols: Option<&Path>,
+) -> anyhow::Result<()> {
+    let r_classes = match symbols {
+        Some(symbols) if contents.needs_symbols() => {
+            Some(r_classes(sdk, apk, work, &contents.r_classes, symbols)?)
+        }
+        _ => None,
+    };
+    let jars: Vec<&Checked> = contents.jars.iter().chain(&r_classes).collect();
     if jars.is_empty() {
-        return Ok(contents);
+        return Ok(());
     }
     let android_jar = sdk.android_jar(apk.target_sdk)?;
     // Each intermediate dex, with the library it is made of.
@@ -280,7 +342,7 @@ pub(super) fn prepare(sdk: &Sdk, apk: &Apk<'_>, work: &Path) -> anyhow::Result<C
     }
     contents.dex.extend(dex_files(&merged)?);
     contents.resources = java_resources(&jars)?;
-    Ok(contents)
+    Ok(())
 }
 
 /// Where an AAR keeps what its build was made for.
@@ -299,14 +361,18 @@ struct Aar {
     native: BTreeMap<String, Vec<(String, Vec<u8>)>>,
     /// `assets/`: (path under it, contents).
     assets: Vec<(String, Vec<u8>)>,
+    /// `res/`: (path under it, contents).
+    res: Vec<(String, Vec<u8>)>,
+    /// The `R` fields its code reads (`R.txt`), when it reads any.
+    r_txt: Option<Symbols>,
     /// The API level an app must compile against (`minCompileSdk`).
     min_compile_sdk: Option<u32>,
 }
 
 /// Reads what the package takes of an AAR: its classes, native
-/// libraries, assets and manifest. Resources (`res/`) are an error, which
-/// this does not package yet; what only a build reads (`R.txt`,
-/// `proguard.txt`, `lint.jar`, ...) is left out.
+/// libraries, assets, resources, the `R` fields its code reads and its
+/// manifest; what only a build reads (`public.txt`, `proguard.txt`,
+/// `lint.jar`, ...) is left out.
 fn read_aar(checked: Checked) -> anyhow::Result<Aar> {
     let file = fs::File::open(&checked.path)
         .with_context(|| format!("{}: read {}", checked.listed, checked.path.display()))?;
@@ -321,6 +387,8 @@ fn read_aar(checked: Checked) -> anyhow::Result<Aar> {
     let mut jars = Vec::new();
     let mut native: BTreeMap<String, Vec<(String, Vec<u8>)>> = BTreeMap::new();
     let mut assets = Vec::new();
+    let mut res = Vec::new();
+    let mut r_txt = None;
     let mut min_compile_sdk = None;
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i)?;
@@ -365,12 +433,22 @@ fn read_aar(checked: Checked) -> anyhow::Result<Aar> {
                 bail!("{} has `{name}`: `assets/nsh/` is NSH's own", checked.shown);
             }
             assets.push((path.to_owned(), read()?));
-        } else if name.starts_with("res/") {
-            bail!(
-                "{} has Android resources (`{name}`), which this nsh does not package yet: \
-                 the next version will",
-                checked.shown
-            );
+        } else if let Some(path) = name.strip_prefix("res/") {
+            // Written out for `aapt2 compile --dir`, under the AAR's own
+            // directory.
+            if path.split('/').any(|part| matches!(part, "" | "." | "..")) {
+                bail!(
+                    "{} has `{name}`, a resource path with an empty, `.` or `..` part",
+                    checked.shown
+                );
+            }
+            res.push((path.to_owned(), read()?));
+        } else if name == "R.txt" {
+            let text = String::from_utf8(read()?)
+                .with_context(|| format!("{}: its R.txt is not UTF-8", checked.shown))?;
+            let symbols = library_resources::parse_symbols(&text)
+                .map_err(|e| anyhow::anyhow!("{}: its R.txt, {e}", checked.shown))?;
+            r_txt = Some(symbols);
         } else if name == AAR_METADATA {
             let text = String::from_utf8_lossy(&read()?).into_owned();
             if let Some(value) = text
@@ -397,6 +475,16 @@ fn read_aar(checked: Checked) -> anyhow::Result<Aar> {
         .filter(|package| !package.is_empty())
         .with_context(|| format!("{}: its manifest names no package", checked.shown))?
         .to_owned();
+    // Android's build writes one with the resources; without it, which of
+    // the package's fields the code reads is unknown, and an `R` of all of
+    // them would be every library's resources over again.
+    if !res.is_empty() && r_txt.is_none() {
+        bail!(
+            "{} has resources (`res/`) but no R.txt, which lists those its code uses: \
+             list an AAR as Android's build makes it",
+            checked.shown
+        );
+    }
     Ok(Aar {
         checked,
         package,
@@ -404,6 +492,8 @@ fn read_aar(checked: Checked) -> anyhow::Result<Aar> {
         jars,
         native,
         assets,
+        res,
+        r_txt: r_txt.filter(|symbols| !symbols.is_empty()),
         min_compile_sdk,
     })
 }
@@ -419,10 +509,10 @@ fn choose(aars: Vec<Aar>) -> anyhow::Result<Vec<Aar>> {
             continue;
         };
         // The app lists its own first.
-        if have.checked.apps && !aar.checked.apps {
+        if have.checked.apps() && !aar.checked.apps() {
             continue;
         }
-        let settle = if have.checked.apps {
+        let settle = if have.checked.apps() {
             "list one of them"
         } else {
             "list the one to package in nsh.json `android.libraries`"
@@ -498,25 +588,24 @@ pub(super) fn stored_asset(path: &str) -> bool {
         .is_some_and(|e| STORED.contains(&e.to_ascii_lowercase().as_str()))
 }
 
-/// The directory of `jar`'s intermediate dex in the cache, made when
-/// missing.
-fn intermediate_dex(
-    sdk: &Sdk,
-    jar: &Checked,
-    android_jar: &Path,
-    apk: &Apk<'_>,
-) -> anyhow::Result<PathBuf> {
-    let d8_version = sdk
-        .build_tools
+/// The version of the SDK's build tools (`d8`, `aapt2`), which the cache
+/// keys take.
+fn build_tools_version(sdk: &Sdk) -> String {
+    sdk.build_tools
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let key = hex(&Sha256::digest(format!(
-        "{}\0{d8_version}\0{MIN_SDK}\0{}\0{}",
-        jar.sha256,
-        mode(apk.dev),
-        apk.target_sdk
-    )));
+        .unwrap_or_default()
+}
+
+/// The directory `key` names in `apk.library_cache`, which `make` fills
+/// when it is missing.
+fn cached(
+    apk: &Apk<'_>,
+    key: &str,
+    what: &str,
+    make: impl FnOnce(&Path) -> anyhow::Result<()>,
+) -> anyhow::Result<PathBuf> {
+    let key = hex(&Sha256::digest(key));
     let dir = apk.library_cache.join(&key[..32]);
     if dir.join("done").exists() {
         return Ok(dir);
@@ -530,37 +619,180 @@ fn intermediate_dex(
         fs::remove_dir_all(&partial)?;
     }
     fs::create_dir_all(&partial)?;
-    let output = intermediate_command(sdk, &jar.path, android_jar, apk.dev, &partial)
-        .output()
-        .context("run the SDK's d8 (is a JDK installed?)")?;
-    if !output.status.success() {
+    if let Err(e) = make(&partial) {
         let _ = fs::remove_dir_all(&partial);
-        bail!(
-            "{}: d8 could not read {}:\n{}",
-            jar.listed,
-            jar.shown,
-            d8_message(&format!(
-                "{}{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            ))
-        );
+        return Err(e);
     }
     fs::write(partial.join("done"), b"")?;
-    // Another run may have moved its own copy in meanwhile, the same dex,
-    // which it or a third run may be reading: keep it, never remove it.
+    // Another run may have moved its own copy in meanwhile, the same
+    // files, which it or a third run may be reading: keep it, never
+    // remove it.
     if !dir.join("done").exists() && fs::rename(&partial, &dir).is_ok() {
         return Ok(dir);
     }
     let _ = fs::remove_dir_all(&partial);
     if !dir.join("done").exists() {
-        bail!(
-            "could not keep the dex of {} in {}",
-            jar.shown,
-            dir.display()
-        );
+        bail!("could not keep {what} in {}", dir.display());
     }
     Ok(dir)
+}
+
+/// The directory of `jar`'s intermediate dex in the cache, made when
+/// missing.
+fn intermediate_dex(
+    sdk: &Sdk,
+    jar: &Checked,
+    android_jar: &Path,
+    apk: &Apk<'_>,
+) -> anyhow::Result<PathBuf> {
+    let key = format!(
+        "{}\0{}\0{MIN_SDK}\0{}\0{}",
+        jar.sha256,
+        build_tools_version(sdk),
+        mode(apk.dev),
+        apk.target_sdk
+    );
+    cached(apk, &key, &format!("the dex of {}", jar.shown), |out| {
+        let output = intermediate_command(sdk, &jar.path, android_jar, apk.dev, out)
+            .output()
+            .context("run the SDK's d8 (is a JDK installed?)")?;
+        if !output.status.success() {
+            bail!(
+                "{}: d8 could not read {}:\n{}",
+                jar.listed,
+                jar.shown,
+                d8_message(&format!(
+                    "{}{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                ))
+            );
+        }
+        Ok(())
+    })
+}
+
+/// `aar`'s resources compiled by `aapt2 compile --dir` (kept in
+/// `apk.library_cache` by the AAR's contents and the build tools'
+/// version), written out to `dir` first when they are not.
+fn compiled_res(sdk: &Sdk, apk: &Apk<'_>, aar: &Aar, dir: &Path) -> anyhow::Result<PathBuf> {
+    let key = format!("res\0{}\0{}", aar.checked.sha256, build_tools_version(sdk));
+    let from = &aar.checked.shown;
+    let cache = cached(apk, &key, &format!("the resources of {from}"), |out| {
+        let res = dir.join("res");
+        for (path, bytes) in &aar.res {
+            let file = res.join(path);
+            fs::create_dir_all(file.parent().unwrap_or(&res))?;
+            fs::write(&file, bytes)?;
+        }
+        let output = Command::new(sdk.tool("aapt2"))
+            .arg("compile")
+            .arg("--dir")
+            .arg(&res)
+            .arg("-o")
+            .arg(out.join("res.zip"))
+            .output()
+            .context("run the SDK's aapt2")?;
+        if !output.status.success() {
+            bail!(
+                "{}: aapt2 could not compile the resources of {from}:\n{}{}",
+                aar.checked.listed,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        Ok(())
+    })?;
+    Ok(cache.join("res.zip"))
+}
+
+/// The `R` classes of `libraries` (package, `R.txt`, the AAR), their
+/// fields the ids of `symbols`, compiled by the JDK's `javac` into a jar
+/// in `work`.
+fn r_classes(
+    sdk: &Sdk,
+    apk: &Apk<'_>,
+    work: &Path,
+    libraries: &[(String, Symbols, String)],
+    symbols: &Path,
+) -> anyhow::Result<Checked> {
+    let text = fs::read_to_string(symbols)
+        .with_context(|| format!("read what aapt2 wrote to {}", symbols.display()))?;
+    let linked = library_resources::parse_symbols(&text)
+        .map_err(|e| anyhow::anyhow!("read what aapt2 wrote to {}: {e}", symbols.display()))?;
+    let dir = work.join("r");
+    let sources = dir.join("src");
+    let classes = dir.join("classes");
+    fs::create_dir_all(&classes)?;
+    let mut files = Vec::new();
+    for (package, wanted, from) in libraries {
+        let java = library_resources::r_java(package, wanted, &linked)
+            .map_err(|e| anyhow::anyhow!("{from}: {e}"))?;
+        let path = library_resources::r_java_path(&sources, package);
+        fs::create_dir_all(path.parent().unwrap_or(&sources))?;
+        fs::write(&path, java)?;
+        files.push(path);
+    }
+    let output = Command::new(super::java_tool("javac"))
+        .args(["--release", "11", "-encoding", "UTF-8", "-nowarn", "-d"])
+        .arg(&classes)
+        .arg("-classpath")
+        .arg(sdk.android_jar(apk.target_sdk)?)
+        .args(&files)
+        .output()
+        .context("run javac to compile the AARs' `R` classes (is a JDK installed?)")?;
+    if !output.status.success() {
+        bail!(
+            "javac could not compile the AARs' `R` classes:\n{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let jar = dir.join("R.jar");
+    write_jar(&classes, &jar)?;
+    Ok(Checked {
+        sha256: file_sha256(&jar)?,
+        path: jar,
+        listed: "the AARs' R.txt".to_owned(),
+        shown: "the `R` classes of the AARs".to_owned(),
+        owner: None,
+        kind: Kind::Jar,
+    })
+}
+
+/// A jar of the class files under `dir`, the same bytes for the same
+/// classes, which keeps its dex in the cache.
+fn write_jar(dir: &Path, jar: &Path) -> anyhow::Result<()> {
+    fn add(dir: &Path, files: &mut Vec<PathBuf>) -> anyhow::Result<()> {
+        for entry in fs::read_dir(dir)? {
+            let path = entry?.path();
+            if path.is_dir() {
+                add(&path, files)?;
+            } else {
+                files.push(path);
+            }
+        }
+        Ok(())
+    }
+    let mut files = Vec::new();
+    add(dir, &mut files)?;
+    files.sort();
+    let mut zip = zip::ZipWriter::new(fs::File::create(jar)?);
+    let options = zip::write::SimpleFileOptions::default()
+        .last_modified_time(zip::DateTime::default())
+        .compression_method(zip::CompressionMethod::Deflated);
+    for file in files {
+        let name = file
+            .strip_prefix(dir)?
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/");
+        zip.start_file(name, options)?;
+        std::io::Write::write_all(&mut zip, &fs::read(&file)?)?;
+    }
+    zip.finish()?;
+    Ok(())
 }
 
 fn mode(dev: bool) -> &'static str {
@@ -809,6 +1041,10 @@ mod tests {
         Library {
             path: path.to_owned(),
             listed: listed.to_owned(),
+            owner: listed
+                .split_once(": ")
+                .filter(|_| listed != NSH_JSON)
+                .map(|(name, _)| name.to_owned()),
         }
     }
 
@@ -818,7 +1054,7 @@ mod tests {
             path: path.to_owned(),
             listed: listed.to_owned(),
             shown: library(path, listed).describe(),
-            apps: listed == NSH_JSON,
+            owner: library(path, listed).owner,
             kind: Kind::Jar,
             sha256: String::new(),
         }
@@ -862,7 +1098,7 @@ mod tests {
         let checked_ = checked(&listed).unwrap();
         assert_eq!(checked_.len(), 1);
         assert_eq!(checked_[0].path, a);
-        assert!(checked_[0].apps);
+        assert!(checked_[0].apps());
         // A missing file names who lists it.
         let missing = [library(
             &dir.join("gone.jar"),
@@ -1135,12 +1371,35 @@ mod tests {
         );
         assert_eq!(aar.assets, [("push/config.json".into(), b"{}".to_vec())]);
         assert_eq!(aar.min_compile_sdk, Some(34));
-        // What the package cannot take yet, or that is NSH's.
+        // An empty R.txt: its code reads no `R` field.
+        assert!(aar.res.is_empty() && aar.r_txt.is_none());
+        // Its resources, and the `R` fields its code reads.
+        jar(
+            &path,
+            &[
+                ("AndroidManifest.xml", &manifest),
+                ("res/values/values.xml", b"<resources/>"),
+                ("R.txt", b"int string push_title 0x7f0b0001\n"),
+            ],
+        );
+        let aar = read_aar(checked(&[library(&path, CRATE)]).unwrap().remove(0)).unwrap();
+        assert_eq!(
+            aar.res,
+            [("values/values.xml".into(), b"<resources/>".to_vec())]
+        );
+        let symbols: Vec<&(String, String)> = aar.r_txt.as_ref().unwrap().keys().collect();
+        assert_eq!(symbols, [&("string".into(), "push_title".into())]);
+        // What the package cannot take, or that is NSH's.
         for (entry, error) in [
             (
                 "res/values/values.xml",
-                "has Android resources (`res/values/values.xml`), which this nsh does not package yet",
+                "has resources (`res/`) but no R.txt, which lists those its code uses",
             ),
+            (
+                "res/../classes.dex",
+                "a resource path with an empty, `.` or `..` part",
+            ),
+            ("R.txt", "its R.txt, line 1: `x` is no symbol"),
             ("assets/nsh/bundle.nshc", "`assets/nsh/` is NSH's own"),
             (
                 "assets/../classes.dex",

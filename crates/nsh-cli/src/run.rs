@@ -901,7 +901,8 @@ pub(crate) fn install_android_host(
         version.push_str(line);
     }
     // A library's contents, not its time: a rebuilt jar that is the same
-    // keeps the host.
+    // keeps the host. Their order and crates settle which of two AARs'
+    // resources of one name the host takes.
     let mut libraries = app.map(|app| app.libraries.to_vec()).unwrap_or_default();
     for library in &meta.android_libraries {
         if !libraries.iter().any(|have| have.path == library.path) {
@@ -911,6 +912,9 @@ pub(crate) fn install_android_host(
     for library in &libraries {
         let sha256 = android::file_sha256(&library.path).unwrap_or_default();
         version.push_str(&format!("\n{} {sha256}", library.path.display()));
+        if let Some(owner) = &library.owner {
+            version.push_str(&format!(" ({owner})"));
+        }
     }
     // The platform the host compiles against: the app's, when newer, which
     // its libraries may need (`minCompileSdk`).

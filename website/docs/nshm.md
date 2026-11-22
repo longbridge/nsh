@@ -391,7 +391,8 @@ libraries = ["android/libs/scanner-glue.jar"]
 
 A crate does not set `android.manifestPlaceholders`, which is an error: the values of placeholders (a service's key) are
 the app's, set in its `nsh.json`. The version of an Android library two crates carry in different versions is the one
-the app lists in its own `android.libraries`.
+the app lists in its own `android.libraries`. When two libraries define a resource of one name, a library the app
+lists wins, then the crates' by crate name ([Java code](./packaging.md#java-code)).
 
 The app's own `nsh.json` wins: a key it sets keeps its value, and arrays (such as `UIBackgroundModes`) are joined. When
 two crates set one key to different values (two usage descriptions of the camera), the app chooses by setting the key
