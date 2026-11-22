@@ -61,18 +61,20 @@ impl Sdk {
         Ok(Sdk { root, build_tools })
     }
 
-    /// The platform an app targeting `level` compiles against.
+    /// The platform an app targeting `level` compiles against: in
+    /// `platforms/android-<level>`, or in `android-<level>.0`, the
+    /// directory of a package `sdkmanager` names so (`platforms;android-37.0`).
     fn android_jar(&self, level: u32) -> anyhow::Result<PathBuf> {
-        let jar = self
-            .root
-            .join(format!("platforms/android-{level}/android.jar"));
-        if !jar.exists() {
-            bail!(
-                "{} missing: install it with `sdkmanager \"platforms;android-{level}\"`",
-                jar.display()
-            );
+        let dirs = [format!("android-{level}"), format!("android-{level}.0")];
+        let jars = dirs.map(|dir| self.root.join("platforms").join(dir).join("android.jar"));
+        match jars.iter().find(|jar| jar.exists()) {
+            Some(jar) => Ok(jar.clone()),
+            None => bail!(
+                "{} missing: install it with `sdkmanager \"platforms;android-{level}\"` \
+                 (`\"platforms;android-{level}.0\"` in SDKs that name it so, as they do API level 37)",
+                jars[0].display()
+            ),
         }
-        Ok(jar)
     }
 
     pub(crate) fn adb(&self) -> PathBuf {
@@ -2066,6 +2068,35 @@ mod tests {
         let mut bytes = Vec::new();
         file.read_to_end(&mut bytes).unwrap();
         bytes
+    }
+
+    #[test]
+    fn a_platform_is_found_under_either_name_sdkmanager_gives_it() {
+        let root = std::env::temp_dir().join(format!("nsh-cli-platforms-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for dir in ["android-35", "android-37.0"] {
+            let dir = root.join("platforms").join(dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("android.jar"), b"").unwrap();
+        }
+        let sdk = super::Sdk {
+            root: root.clone(),
+            build_tools: root.join("build-tools/36.1.0"),
+        };
+        assert_eq!(
+            sdk.android_jar(35).unwrap(),
+            root.join("platforms/android-35/android.jar")
+        );
+        assert_eq!(
+            sdk.android_jar(37).unwrap(),
+            root.join("platforms/android-37.0/android.jar")
+        );
+        let error = sdk.android_jar(36).unwrap_err().to_string();
+        assert!(
+            error.contains("platforms;android-36\"") && error.contains("platforms;android-36.0"),
+            "{error}"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
