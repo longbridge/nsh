@@ -61,6 +61,11 @@ const FOCUSED = 4;
  * modality as it is (`inputWith`). */
 const MODALITY_KEYS_SKIPPED = new Set(["Shift", "Control", "Alt", "AltGraph", "Meta", "CapsLock", "Fn", "Hyper", "Super", "OS"]);
 const PRESS_EVENTS = ["onPress", "onLongPress", "onPressIn", "onPressOut"];
+/** A view listening to one of these receives files dragged in from the system. */
+const FILE_DROP_EVENTS = ["onFileDrop", "onFileDragEnter", "onFileDragLeave"];
+/** The most files one drop reads, and the most bytes it reads in all (as `Picker.pickFiles`). */
+const FILE_DROP_LIMIT = 100;
+const FILE_DROP_MAX_BYTES = 512 * 1024 * 1024;
 /** The press listeners other than `onLongPress`, which alone leaves the taps to the views around. */
 const TAP_EVENTS = ["onPress", "onPressIn", "onPressOut"];
 const MOUSE_EVENTS = ["onMouseEnter", "onMouseLeave", "onMouseMove"];
@@ -8965,6 +8970,7 @@ class Player {
 
   installInput() {
     const root = this.root;
+    this.installFileDrop(root);
     // What the user gives input with, told before it acts (the capture
     // phase, ahead of the app's handlers and the browser's focus moves):
     // the core shows the focus by it (`focus-visible:`), as the browser
@@ -9965,6 +9971,120 @@ class Player {
     const [left, top] = this.origin(layer);
     const [sx, sy] = this.layerScale(layer);
     return [e.clientX / sx - left, e.clientY / sy - top];
+  }
+
+  /**
+   * Files dragged in from the system (`onFileDragEnter`, `onFileDragLeave`,
+   * `onFileDrop`): the nearest view up from the one under the pointer that
+   * listens takes the drag. Only there is the browser's default (opening
+   * the file) cancelled; elsewhere the page behaves as without NSH. Only
+   * file drags count: text and links dragged in are left alone. Moving
+   * between a receiver's children enters and leaves nothing.
+   */
+  installFileDrop(root) {
+    const hasFiles = (e) => [...(e.dataTransfer?.types ?? [])].includes("Files");
+    const receiver = (target) => {
+      for (let el = target; el && el !== root.parentNode; el = el.parentNode) {
+        if (el._events && FILE_DROP_EVENTS.some((n) => el._events.has(n))) return el;
+      }
+      return null;
+    };
+    let current = null;
+    let leaveTimer = 0;
+    const leave = () => {
+      clearTimeout(leaveTimer);
+      leaveTimer = 0;
+      const old = current;
+      current = null;
+      if (old?._events.has("onFileDragLeave")) this.event(old._id, "onFileDragLeave");
+    };
+    const track = (e) => {
+      if (!hasFiles(e)) return;
+      const el = receiver(e.target);
+      clearTimeout(leaveTimer);
+      leaveTimer = 0;
+      if (el !== current) {
+        leave();
+        current = el;
+        if (el?._events.has("onFileDragEnter")) {
+          // Only the types: the browser keeps the files until the drop.
+          const mimeTypes = [...e.dataTransfer.items].filter((i) => i.kind === "file").map((i) => i.type);
+          this.fileDrop(el, 0, { mimeTypes, files: [] }, []);
+        }
+      }
+      if (el?._events.has("onFileDrop")) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+      }
+    };
+    root.addEventListener("dragenter", track);
+    root.addEventListener("dragover", track);
+    // A leave toward a child is followed at once by its enter: leave only
+    // when none comes.
+    root.addEventListener("dragleave", (e) => {
+      if (!hasFiles(e) || !current) return;
+      clearTimeout(leaveTimer);
+      leaveTimer = setTimeout(leave, 50);
+    });
+    root.addEventListener("drop", (e) => {
+      if (!hasFiles(e)) return;
+      const el = receiver(e.target);
+      const target = current;
+      clearTimeout(leaveTimer);
+      leaveTimer = 0;
+      current = null;
+      if (target && target !== el && target._events.has("onFileDragLeave")) this.event(target._id, "onFileDragLeave");
+      if (!el?._events.has("onFileDrop")) return;
+      e.preventDefault();
+      // The items are only readable in this handler: keep the `File`s now.
+      // Directories are left out (their `File` has no bytes to read).
+      const files = [];
+      const mimeTypes = [];
+      for (const item of e.dataTransfer.items) {
+        if (item.kind !== "file") continue;
+        mimeTypes.push(item.type);
+        if (item.webkitGetAsEntry?.()?.isDirectory) continue;
+        const file = item.getAsFile();
+        if (file && files.length < FILE_DROP_LIMIT) files.push(file);
+      }
+      const [x, y] = this.point(e);
+      const app = this.app;
+      let budget = FILE_DROP_MAX_BYTES;
+      Promise.all(files.map(async (f) => {
+        if (f.size > budget) return null;
+        budget -= f.size;
+        try {
+          return new Uint8Array(await f.arrayBuffer());
+        } catch {
+          return undefined;
+        }
+      })).then((buffers) => {
+        if (app !== this.app) return;
+        const parts = [];
+        const meta = [];
+        files.forEach((f, i) => {
+          const b = buffers[i];
+          if (b === undefined) return; // Unreadable: left out.
+          if (b === null) console.warn(`nsh: the dropped ${f.name} is not read: past ${FILE_DROP_MAX_BYTES} bytes a drop`);
+          meta.push({ name: f.name, type: f.type, size: b ? b.byteLength : f.size, read: !!b, lastModified: f.lastModified });
+          if (b) parts.push(b);
+        });
+        this.fileDrop(el, 1, { mimeTypes, x, y, files: meta }, parts);
+      });
+    });
+  }
+
+  /** Sends a file drag (`kind` 0: enter, 1: drop) of `el` to the engine, with the read files' bytes. */
+  fileDrop(el, kind, info, parts) {
+    const size = parts.reduce((n, b) => n + b.byteLength, 0);
+    const bytes = new Uint8Array(size);
+    let at = 0;
+    for (const b of parts) {
+      bytes.set(b, at);
+      at += b.byteLength;
+    }
+    const json = JSON.stringify(info);
+    this.call(() => this.withStrings([json, bytes], (jp, jl, bp, bl) => this.wasm.nsh_file_drop(el._id, kind, jp, jl, bp, bl)));
   }
 
   /** The scale layer `layer` is drawn at (`scaleLayer`): its points are

@@ -1350,8 +1350,52 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
             }
             obj.set("uris", list)?;
             obj.set("mimeTypes", types)?;
+            // Contents come only where there are no paths (the Web).
+            obj.set("files", rquickjs::Array::new(cx.clone())?)?;
             if let EventPayload::FileDropAt { page_position, .. } = payload {
                 obj.set("pagePosition", point_object(cx, *page_position)?)?;
+            }
+        }
+        // `PickedFile`s: each read one's `File` shares the dropped bytes.
+        EventPayload::FileContents(drop) => {
+            obj.set("uris", rquickjs::Array::new(cx.clone())?)?;
+            let types = rquickjs::Array::new(cx.clone())?;
+            for (index, mime) in drop.mime_types.iter().enumerate() {
+                types.set(index, mime.as_str())?;
+            }
+            obj.set("mimeTypes", types)?;
+            let files = rquickjs::Array::new(cx.clone())?;
+            for (index, file) in drop.files.iter().enumerate() {
+                let entry = rquickjs::Object::new(cx.clone())?;
+                if file.status == nsh_core::picker::PickedStatus::TooLarge {
+                    entry.set("file", Value::new_null(cx.clone()))?;
+                    entry.set("status", "tooLarge")?;
+                } else {
+                    let blob = crate::web::blob::Blob::shared(file.data.clone(), file.mime.clone());
+                    let modified = file
+                        .last_modified
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map_or_else(crate::web::blob::now_ms, |d| d.as_millis() as f64);
+                    let made = crate::web::blob::new_file(
+                        cx.as_raw().as_ptr(),
+                        blob,
+                        file.name.clone(),
+                        modified,
+                    )
+                    .map_err(|_| rquickjs::Error::Exception)?;
+                    // SAFETY: an owned value of this context, handed over.
+                    let value = unsafe { Value::from_raw(cx.clone(), made.take()) };
+                    entry.set("file", value)?;
+                    entry.set("status", "read")?;
+                }
+                entry.set("name", file.name.as_str())?;
+                entry.set("type", file.mime.as_str())?;
+                entry.set("size", file.len as f64)?;
+                files.set(index, entry)?;
+            }
+            obj.set("files", files)?;
+            if let Some(at) = drop.page_position {
+                obj.set("pagePosition", point_object(cx, at)?)?;
             }
         }
         EventPayload::TextDrop(drop) => {
