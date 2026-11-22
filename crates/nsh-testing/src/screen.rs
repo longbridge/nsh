@@ -347,6 +347,9 @@ struct View {
     level: Option<u32>,
     /// Its `accessibilityDescription`.
     description: Option<Arc<str>>,
+    /// The orientation it reports to assistive technologies (a tab list's),
+    /// ARIA's `aria-orientation`.
+    orientation: Option<nsh_core::geometry::Axis>,
     /// The view its `accessibilityActiveDescendant` names.
     active_descendant: Option<NodeId>,
     /// The view its `accessibilityControls` names.
@@ -767,6 +770,7 @@ impl Screen {
                     .and_then(|v| v.text.clone());
                 view.level = props.accessibility.level;
                 view.description = props.accessibility.description.clone();
+                view.orientation = props.accessibility.orientation;
                 view.active_descendant = props.accessibility.active_descendant;
                 view.controls = props.accessibility.controls;
                 view.described_by = props.accessibility.described_by;
@@ -2417,6 +2421,17 @@ impl Screen {
             [] => Err(crate::failure::not_found("view", selector)),
             ref all => Err(format!("`{selector}` matches {} views", all.len())),
         }
+    }
+
+    /// The orientation the view `selector` names reports to assistive
+    /// technologies (a tab list's, ARIA's `aria-orientation`); `None` for a
+    /// view without one. An error when none or several match.
+    pub fn accessibility_orientation(
+        &self,
+        selector: &str,
+    ) -> Result<Option<nsh_core::geometry::Axis>, String> {
+        let id = self.id(selector)?;
+        Ok(self.nodes.get(&id).and_then(|v| v.orientation))
     }
 
     /// The detent the dialog `selector` names rests at as an iOS sheet

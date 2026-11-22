@@ -3952,10 +3952,15 @@ fn a_base_tab_reports_presses_and_its_list_holds_no_value() {
     let initial = std::slice::from_ref(&first);
 
     // The list: a tab list for screen readers, named by the app
-    // (`accessibilityLabel`) and laid out by it.
+    // (`accessibilityLabel`) and laid out by it; with no `orientation` it
+    // reports none, and both pairs of arrows move.
     let list = view_props(&first, sections).unwrap();
     assert_eq!(list.accessibility.role, AccessibilityRole::Tablist);
     assert_eq!(list.accessibility.label.as_deref(), Some("Sections"));
+    assert_eq!(
+        list.accessibility.orientation, None,
+        "a list with no orientation reports none"
+    );
 
     // The selected tab: selected for screen readers, its `selectedStyle`,
     // and the app's marker `group-selected:`.
@@ -4044,7 +4049,7 @@ function App() {
   );
   return (
     <View>
-      <Tabs class="flex-row">
+      <Tabs testID="sections" orientation="horizontal" class="flex-row">
         {tab("a")}
         {tab("b")}
         {tab("c", true)}
@@ -4095,7 +4100,21 @@ fn base_tabs_and_radio_groups_rove_the_keyboard_focus() {
             })
             .expect(test_id)
     };
-    let [a, b, c, d, x, y, z] = ["a", "b", "c", "d", "x", "y", "z"].map(|t| id(&batches, t));
+    let [sections, a, b, c, d, x, y, z] =
+        ["sections", "a", "b", "c", "d", "x", "y", "z"].map(|t| id(&batches, t));
+    let list = batches
+        .iter()
+        .flat_map(|b| b.items.iter())
+        .find_map(|i| match i {
+            MountItem::ViewProps { id, props } if *id == sections => Some(props.clone()),
+            _ => None,
+        })
+        .expect("the list's props");
+    assert_eq!(
+        list.accessibility.orientation,
+        Some(nsh_core::geometry::Axis::Horizontal),
+        "the app's orientation reaches the accessibility props"
+    );
     // The newest `focusable` of each view.
     let stops = |batches: &[MountBatch], views: &[u32]| -> Vec<u32> {
         views
@@ -4171,8 +4190,12 @@ fn base_tabs_and_radio_groups_rove_the_keyboard_focus() {
             .any(|i| matches!(i, MountItem::Keymap(_)))
     }));
     let keys = keymap(&batches).expect("the list's keys");
-    for keystroke in ["left", "right", "up", "down", "home", "end"] {
+    for keystroke in ["left", "right", "home", "end"] {
         assert!(bound(&keys, keystroke).is_some(), "{keystroke}");
+    }
+    // A horizontal list leaves Up and Down to the page.
+    for keystroke in ["up", "down"] {
+        assert!(bound(&keys, keystroke).is_none(), "{keystroke}");
     }
     // Right passes the disabled tab: d becomes the stop, gets the focus
     // and reports a press.

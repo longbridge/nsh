@@ -17,12 +17,12 @@
 //! pattern's automatic activation (a toolbar's items do nothing: the focus
 //! only moves). In a right-to-left layout the row runs from the right, so
 //! Left and Right trade places (Left the next item), as the patterns say;
-//! Up and Down keep theirs. Disabled items are skipped, as they are no stops. The items
-//! are in the tree's order: components render in the order the core makes
-//! them (an item inside a toolbar's group, or a popover's trigger, renders
-//! after the toolbar's later children), so the group asks the core to put
-//! them in order as they come and as the app moves them (`watch_order`), in
-//! the batch they come or move in.
+//! Up and Down keep theirs. Disabled items are skipped, as they are no
+//! stops. The items are in the tree's order: components render in the
+//! order the core makes them (an item inside a toolbar's group, or a
+//! popover's trigger, renders after the toolbar's later children), so the
+//! group asks the core to put them in order as they come and as the app
+//! moves them (`watch_order`), in the batch they come or move in.
 //!
 //! Each item's view reads a flag of its own, which the group sets when the
 //! stop changes: moving the focus runs the bindings of the item it left and
@@ -44,10 +44,11 @@ use crate::keys::bind_while_directed;
 /// What the arrow keys of a group do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Pattern {
-    /// A tab list: Left / Up the previous tab, Right / Down the next, Home
-    /// the first, End the last. The list's axis is the app's layout, so
-    /// both pairs move.
-    Tabs,
+    /// A tab list: with an axis, its arrows along it (Left / Right in a row,
+    /// Up / Down in a column) the previous and next tab, the other pair left
+    /// to the page; without one both pairs move, whatever the app's layout.
+    /// Home the first, End the last.
+    Tabs(Option<Axis>),
     /// A radio group: Up / Left the previous radio, Down / Right the next.
     Radios,
     /// A toggle group on its own: the keys of a tab list (its axis is the
@@ -226,10 +227,10 @@ impl Roving {
         }));
         let focused = computed(move || focus.get().is_some());
         let keys = match pattern {
-            Pattern::Tabs | Pattern::Toggles => TAB_KEYS,
+            Pattern::Tabs(Some(Axis::Horizontal)) | Pattern::Toolbar(Axis::Horizontal) => ROW_KEYS,
+            Pattern::Tabs(Some(Axis::Vertical)) | Pattern::Toolbar(Axis::Vertical) => COLUMN_KEYS,
+            Pattern::Tabs(None) | Pattern::Toggles => TAB_KEYS,
             Pattern::Radios => RADIO_KEYS,
-            Pattern::Toolbar(Axis::Horizontal) => ROW_KEYS,
-            Pattern::Toolbar(Axis::Vertical) => COLUMN_KEYS,
         };
         let moved = group.clone();
         bind_while_directed(move || focused.get(), keys, move |step| moved.step(step));
