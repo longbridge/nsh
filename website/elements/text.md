@@ -207,7 +207,9 @@ text("Area is ")
 </Text>
 ```
 
-Copying the whole line gives `Area is $x^2$ here.`. Screen readers keep reading the view by its label.
+Copying the whole line gives `Area is $x^2$ here.`. Screen readers keep reading the view by its label. `copyText` is
+read from the views and images in a text (and from the content a `renderMath` or `renderCustom` places there).
+Nested text spans ignore it, as their characters are copied themselves.
 
 ### Whitespace
 

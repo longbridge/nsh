@@ -249,6 +249,9 @@ pub(crate) struct RareAttrs {
     /// A window of the app's own: the dialog root it shows
     /// ([`super::desktop::window`]).
     pub(crate) window: Option<Box<crate::desktop::WindowOptions>>,
+    /// What its ref was asked for before it was mounted: sent after the
+    /// window opens.
+    pub(crate) window_commands: Vec<crate::desktop::DesktopCommand>,
 }
 
 impl RareAttrs {
@@ -1150,7 +1153,8 @@ pub trait Element: IntoElement + Sized {
     /// (`$x^2$`), an emoji image's character. Selecting across the view
     /// and copying puts this where it is, as a browser copies an inline
     /// image's `alt`. Unset, the view adds nothing to the copy; a view
-    /// outside a text ignores it. Screen readers keep reading the view's
+    /// outside a text and a nested text span (whose characters are copied
+    /// themselves) ignore it. Screen readers keep reading the view's
     /// [`Accessible::label`].
     ///
     /// ```ignore

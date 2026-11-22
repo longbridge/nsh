@@ -83,6 +83,14 @@ dist/nsh/embed/android/nsh.aar       release: bundles and signed packages
 dist/nsh/embed/android/nsh-dev.aar   also connects to a `nsh dev` server
 ```
 
+如果你有 NSH 的源码，可以只构建这两个库：
+
+```sh
+cargo xtask android-embed    # writes dist/nsh/embed/android/{nsh,nsh-dev}.aar
+```
+
+`--no-dev` 不构建 `nsh-dev.aar`。默认包含 `arm64-v8a`、`armeabi-v7a` 和 `x86_64`；重复 `--abi` 可以少构建几个。
+
 AAR 包含 Java 运行时以及适用于 `arm64-v8a`、`armeabi-v7a` 和 `x86_64` 的 `libnsh.so`，库中带有符号：应用的 Gradle
 构建在打包时去除符号，并保留它们用于崩溃报告。它声明了 `INTERNET`
 权限，要求 **API 26**（Android 8）或更高版本。它自带 R8 规则（`proguard.txt`），开启混淆的构建会自动应用：原生库按名字
@@ -371,6 +379,34 @@ file provider 写入的 `content://` URI（`MediaStore.EXTRA_OUTPUT`）；`picke
 `Picker.pickImages` 一样处理一个图片文件。`with_env(f)` 用当前线程的 JNI 环境运行 `f`（供应用和它的 nshm 的代码使用；其他 crate 通过上面的 `ndk-context` 获取 VM），返回它的结果或 JNI 错误（Java 异常会记录到日志并清除）。应用在后台时发起的请求以
 `ActivityError::NoActivity` 失败。`nsh-extra` 的相机
 （`crates/nsh-extra/src/camera/android.rs`）用到了它们全部。
+
+## 来自其他代码的通知
+
+[`Notifications`](../modules/nsh.md#notifications) 报告应用自己显示的通知的点击。推送 SDK 等其他代码显示的通知，点击时打开应用的启动
+activity（或 SDK 自己的 activity，再由它打开），把内容放在 intent 的 extras 里。这些点击交给 Rust 代码用
+`nsh::notifications::set_foreign_handler` 设置的唯一处理者，不会触发 `press`。请在应用 crate 的 `#[native_module]` 入口里、
+在 UI 线程上设置：启动应用的那次点击会等到它设置后送达。
+
+```rust
+use nsh::notifications::{ForeignNotification, ForeignNotificationHandler, set_foreign_handler};
+
+struct Chats;
+
+impl ForeignNotificationHandler for Chats {
+    // 用户点击了它，应用可能因此启动。
+    fn pressed(&self, notification: &ForeignNotification) {
+        open_chat(&notification.extras["chat"]);
+    }
+}
+
+set_foreign_handler(Chats);
+```
+
+`ForeignNotification` 带有转成 JSON 的 intent `extras`、它的 `action` 和 `data` URI。Android 不告诉 activity 是哪条通知打开了它，
+所以 NSH 把带 extras、又没有别的含义的 intent 当作这样的点击：链接（`ACTION_VIEW`，交给 `onLink`）、分享和系统的其他 action
+都不算，从最近任务重新打开任务也不算。每个 intent 只交一次，用它重建的 activity 不会再报一次。处理者在 UI 线程运行，在其他线程调用
+`set_foreign_handler` 会 panic。处理者只有一个，所以由应用 crate 持有，再转给它使用的模块；之后的调用会替换它。嵌入 `NshView` 的应用
+在 `onCreate` 和 `onNewIntent` 里把 activity 的 intent 传给 `NshView.handleNotificationIntent`，这些点击也由它交出。
 
 ## 限制
 

@@ -1165,8 +1165,10 @@ impl<P> TextContext<P> {
         let text = if laid.text.spans == self.text.spans {
             self.text.clone()
         } else {
+            // A fitted text draws its scaled spans: the new metadata goes
+            // on them.
             let mut text = (*laid.text).clone();
-            text.test_ids = self.text.test_ids.clone();
+            text.set_metadata(&self.text);
             Arc::new(text)
         };
         laid.text = text.clone();
@@ -1460,6 +1462,11 @@ pub struct Core<M: TextEngine> {
     /// it comes back from, unless a `focus()` moves it out of that popup
     /// ([`crate::element::ElementRef::focus_back`]).
     focus_back: Option<(NodeId, Option<NodeId>)>,
+    /// The focus the popups that give it back to these nodes opened
+    /// with, when a pointer opened them
+    /// ([`crate::element::ElementRef::focus_back_origin`]): one per
+    /// trigger, its latest opening.
+    focus_origins: Vec<(NodeId, Option<(Key, NodeId)>)>,
     /// Animates the layout changes of the next commit.
     layout_animation: Option<LayoutAnimation>,
     /// Nodes whose change animates the frames it moves in the next commit,
@@ -1789,6 +1796,7 @@ impl<M: TextEngine> Core<M> {
             retags: None,
             commands: Vec::new(),
             focus_back: None,
+            focus_origins: Vec::new(),
             layout_animation: None,
             scoped_layout: Vec::new(),
             resized: Vec::new(),
@@ -3672,6 +3680,11 @@ impl<M: TextEngine> Core<M> {
         // closing. A move inside the popup (its items' keys typed ahead of
         // the choice) or to a view that is gone does not.
         if let Some((id, from)) = self.focus_back.take() {
+            let origin = self
+                .focus_origins
+                .iter()
+                .position(|&(to, _)| to == id)
+                .map(|i| self.focus_origins.swap_remove(i).1);
             let from = from.and_then(|from| self.key(from).ok());
             let moved_out = |to: NodeId| {
                 self.key(to)
@@ -3691,7 +3704,12 @@ impl<M: TextEngine> Core<M> {
                     )
                 });
             if !moved {
-                self.commands.push((id, Command::Focus));
+                match origin {
+                    // Opened by the keyboard (or the app after a key): back
+                    // to the trigger the keyboard opened it from.
+                    None => self.commands.push((id, Command::Focus)),
+                    Some(before) => self.focus_back_to_origin(before, from),
+                }
             }
         }
         // On laid out views; dropped for views that were never shown.
@@ -3782,6 +3800,12 @@ impl<M: TextEngine> Core<M> {
                     {
                         self.answer_clipboard(*request, components::ClipboardAnswer::default());
                     }
+                    if matches!(
+                        command,
+                        Command::SetClipboard(_) | Command::SetClipboardItem(_)
+                    ) {
+                        self.answer_clipboard_write(crate::element::ClipboardWrite::Failed);
+                    }
                     self.deny("the clipboard is not granted: add `\"clipboard\": true` to capabilities in nsh.json".into());
                     continue;
                 }
@@ -3797,8 +3821,14 @@ impl<M: TextEngine> Core<M> {
                 {
                     let clipboard = self.clipboard.clone().expect("a clipboard");
                     match &command {
-                        Command::SetClipboard(text) => clipboard.set_text(Some(text.clone())),
-                        Command::SetClipboardItem(item) => clipboard.set_item(Some(item.clone())),
+                        Command::SetClipboard(text) => {
+                            clipboard.set_text(Some(text.clone()));
+                            self.answer_clipboard_write(crate::element::ClipboardWrite::Written);
+                        }
+                        Command::SetClipboardItem(item) => {
+                            clipboard.set_item(Some(item.clone()));
+                            self.answer_clipboard_write(crate::element::ClipboardWrite::Written);
+                        }
                         Command::SetClipboardImage(_) => clipboard.set_item(None),
                         Command::ReadClipboard {
                             id: request,
@@ -3819,6 +3849,13 @@ impl<M: TextEngine> Core<M> {
                         _ => {}
                     }
                     continue;
+                }
+                // A platform that cannot tell whether the system took a
+                // write answers it now; the others report it.
+                Command::SetClipboard(_) | Command::SetClipboardItem(_)
+                    if !self.components.environment.clipboard_write_result =>
+                {
+                    self.answer_clipboard_write(crate::element::ClipboardWrite::Requested);
                 }
                 // Checked before the grants: a host may put the name in a
                 // path or a URL, where `user.x/../admin` leaves `user.*`.
@@ -4518,9 +4555,10 @@ impl<M: TextEngine> Core<M> {
                 }
             }
             Kind::Cell => {
-                // Cells are their own layout roots (laid out at the list's
-                // cross size, positioned by the list): a change in one row
-                // never relayouts the rest of the tree.
+                // Cells are their own layout roots (the list gives them a
+                // definite cross size to stretch, or max-content to align,
+                // and positions them): a change in one row never relayouts
+                // the rest of the tree.
                 let horizontal = self
                     .nodes
                     .get(node.parent as usize)
@@ -7504,6 +7542,47 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// A popup that gives the keyboard focus back to `to` opens
+    /// ([`crate::element::ElementRef::focus_back_origin`]): on macOS and
+    /// iOS, opened by a pointer, the focus it opened with is where the focus goes back to
+    /// (the pointer's press left it there, off the trigger); opened by the
+    /// keyboard (or on another platform), the trigger takes it back, as
+    /// before.
+    pub(super) fn note_focus_origin(&mut self, to: NodeId) {
+        let mut origins = std::mem::take(&mut self.focus_origins);
+        // Triggers that are gone leave no note behind (a popup closed by a
+        // press outside gives nothing back, so its note stays until then).
+        origins.retain(|&(id, _)| id != to && self.key(id).is_ok());
+        // Only where a press gives a control no focus (macOS and iOS, as
+        // AppKit and UIKit do): elsewhere a press focuses the trigger, as
+        // native buttons there do, and closing gives the trigger the focus.
+        let apple = matches!(
+            self.components.environment.os,
+            crate::platform::Os::MacOs | crate::platform::Os::Ios
+        );
+        if apple && self.modality == Some(crate::platform::InputModality::Pointer) {
+            origins.push((to, self.focus));
+        }
+        self.focus_origins = origins;
+    }
+
+    /// The keyboard focus back from the popup `from` (its node, when it is
+    /// still there) to `before`, the focus a pointer opened it with: there
+    /// when that view is still in the tree and outside the popup, else off
+    /// the popup, so its keys go to the app's shortcuts as they did before
+    /// it opened.
+    fn focus_back_to_origin(&mut self, before: Option<(Key, NodeId)>, from: Option<Key>) {
+        let outside = |this: &Self, key: Key| from.is_none_or(|from| !this.is_ancestor(from, key));
+        let alive = |this: &Self, (key, id): (Key, NodeId)| {
+            this.key(id).is_ok_and(|k| k == key) && this.is_ancestor(this.root, key)
+        };
+        if let Some((_, id)) = before.filter(|&b| alive(self, b) && outside(self, b.0)) {
+            self.commands.push((id, Command::Focus));
+        } else if let Some((_, id)) = self.focus.filter(|&(key, _)| !outside(self, key)) {
+            self.commands.push((id, Command::Blur));
+        }
+    }
+
     fn is_ancestor(&self, ancestor: Key, mut key: Key) -> bool {
         while key != NO_KEY {
             if key == ancestor {
@@ -8595,7 +8674,7 @@ impl<M: TextEngine> Core<M> {
             }
             return inserted;
         }
-        if (cx.text.test_ids != text.test_ids || cx.text.copy_texts != text.copy_texts)
+        if !cx.text.metadata_eq(&text)
             && !inserted
             && cx.alignments == alignments
             && cx.text.rendering_eq(&text)
@@ -9679,15 +9758,24 @@ impl<M: TextEngine> Core<M> {
                 .map(|g| if horizontal { g.height } else { g.width });
             let item_cross = state.column(cross, 0, cell).1;
             let extra_cross = state.full_width(cross).1;
+            let stretch = state
+                .content
+                .align_items
+                .is_none_or(|a| a == taffy::AlignItems::STRETCH);
             let available = |c: f32| {
+                let cross = if stretch {
+                    AvailableSpace::Definite(c)
+                } else {
+                    AvailableSpace::MaxContent
+                };
                 if horizontal {
                     taffy::Size {
                         width: AvailableSpace::MaxContent,
-                        height: AvailableSpace::Definite(c),
+                        height: cross,
                     }
                 } else {
                     taffy::Size {
-                        width: AvailableSpace::Definite(c),
+                        width: cross,
                         height: AvailableSpace::MaxContent,
                     }
                 }
@@ -10896,10 +10984,12 @@ impl<M: TextEngine> Core<M> {
                 main_at += inset.0;
                 x += inset.1;
             }
+            let cell_cross = if horizontal { size.height } else { size.width };
+            x = list.align_cross(x, width, cell_cross);
             let frame = if horizontal {
-                rect(main_at, x, size.width, width)
+                rect(main_at, x, size.width, cell_cross)
             } else {
-                rect(x, main_at, width, size.height)
+                rect(x, main_at, cell_cross, size.height)
             };
             this.set_frame(cell, frame);
             this.set_left_behind(cell, false);
@@ -11052,6 +11142,25 @@ impl<M: TextEngine> Core<M> {
             })
             .flatten();
         match (scroll_by, frame_at) {
+            // The viewport and the content both grow (rows arriving as a
+            // placeholder beside the list goes away): the content first,
+            // then the scroll, then the frame. A frame grown over the old
+            // content clamps the scroll back to its start.
+            (Some(item), Some(at)) if content_len > old_len => {
+                self.set_scroll_content(key, content);
+                match self
+                    .mount
+                    .iter()
+                    .rposition(|m| matches!(m, MountItem::ScrollContent { id: c, .. } if *c == id))
+                {
+                    Some(queued) if queued > at => {
+                        let grown = self.mount.remove(queued);
+                        self.mount.insert(at, grown);
+                        self.mount.insert(at + 1, item);
+                    }
+                    _ => self.mount.insert(at, item),
+                }
+            }
             (Some(item), Some(at)) => {
                 self.mount.insert(at, item);
                 self.set_scroll_content(key, content);

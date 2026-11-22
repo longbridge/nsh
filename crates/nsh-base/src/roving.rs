@@ -107,12 +107,25 @@ struct Item {
     key: u64,
     node: ElementRef,
     /// Selected or checked.
-    current: Prop<bool>,
-    disabled: Prop<bool>,
+    current: Option<Memo<bool>>,
+    disabled: Memo<bool>,
     /// Whether it is the stop: what its view reads.
     is_stop: Signal<bool>,
     /// What moving the focus to it does besides.
     activate: Rc<dyn Fn()>,
+}
+
+impl Item {
+    /// Whether the item is disabled, or its owner (or enclosing group) was
+    /// already disposed while siblings are unmounting.
+    fn is_disabled(&self) -> bool {
+        self.disabled.try_get().unwrap_or(true)
+    }
+
+    /// Whether the item is current (selected or checked), false once disposed.
+    fn is_current(&self) -> bool {
+        self.current.is_some_and(|c| c.try_get().unwrap_or(false))
+    }
 }
 
 /// A group of items with one stop of the keyboard focus (see the module's
@@ -146,7 +159,7 @@ impl Roving {
             computed(move || {
                 changed.get();
                 let items = items.borrow();
-                let enabled = |key: u64| items.iter().any(|i| i.key == key && !i.disabled.get());
+                let enabled = |key: u64| items.iter().any(|i| i.key == key && !i.is_disabled());
                 if let Some(key) = focus.get()
                     && enabled(key)
                 {
@@ -158,12 +171,11 @@ impl Roving {
                     {
                         return Some(key);
                     }
-                } else if let Some(item) =
-                    items.iter().find(|i| i.current.get() && !i.disabled.get())
+                } else if let Some(item) = items.iter().find(|i| i.is_current() && !i.is_disabled())
                 {
                     return Some(item.key);
                 }
-                items.iter().find(|i| !i.disabled.get()).map(|i| i.key)
+                items.iter().find(|i| !i.is_disabled()).map(|i| i.key)
             })
         };
         // Tells the item that stops being the stop and the one that becomes
@@ -233,6 +245,21 @@ impl Roving {
         disabled: Prop<bool>,
         activate: impl Fn() + 'static,
     ) -> Member {
+        self.register_memos(
+            node,
+            Some(computed(move || current.get())),
+            computed(move || disabled.get()),
+            activate,
+        )
+    }
+
+    fn register_memos(
+        &self,
+        node: ElementRef,
+        current: Option<Memo<bool>>,
+        disabled: Memo<bool>,
+        activate: impl Fn() + 'static,
+    ) -> Member {
         let key = self.0.next_key.get();
         self.0.next_key.set(key + 1);
         let is_stop = signal(false);
@@ -271,7 +298,7 @@ impl Roving {
     pub(crate) fn current(&self) -> Option<ElementRef> {
         self.0.changed.get();
         let items = self.0.items.borrow();
-        items.iter().find(|i| i.current.get()).map(|i| i.node)
+        items.iter().find(|i| i.is_current()).map(|i| i.node)
     }
 
     /// Moves the focus by `step`, around the ends, past disabled items, and
@@ -280,7 +307,7 @@ impl Roving {
         let target = {
             let items = self.0.items.borrow();
             let enabled: Vec<usize> = (0..items.len())
-                .filter(|&i| !items[i].disabled.get_untracked())
+                .filter(|&i| !untracked(|| items[i].is_disabled()))
                 .collect();
             let (Some(&first), Some(&last)) = (enabled.first(), enabled.last()) else {
                 return;
@@ -371,8 +398,10 @@ pub(crate) fn member<V: Interactive>(view: V, node: &ElementRef, member: Option<
 #[derive(Clone)]
 pub(crate) struct Bar {
     pub(crate) roving: Roving,
-    /// Every item inside is disabled.
-    pub(crate) disabled: Prop<bool>,
+    /// Every item inside is disabled (a memo so sibling items still in the
+    /// outer group can read it with `try_get` when an enclosing group is
+    /// disposed before its children unmount).
+    disabled: Memo<bool>,
     /// The toolbar's axis (`None`: a toggle group on its own), which its
     /// groups lay out along.
     pub(crate) axis: Option<Axis>,
@@ -380,6 +409,17 @@ pub(crate) struct Bar {
     /// over another menu's trigger opens that one instead, as a menu bar
     /// does.
     pub(crate) open_menu: OpenMenu,
+}
+
+impl Bar {
+    pub(crate) fn new(roving: Roving, disabled: Prop<bool>, axis: Option<Axis>) -> Self {
+        Self {
+            roving,
+            disabled: computed(move || disabled.get()),
+            axis,
+            open_menu: Default::default(),
+        }
+    }
 }
 
 /// A bar's open menu: what opens or closes it.
@@ -431,7 +471,7 @@ pub(crate) fn popup_bar() -> Option<Bar> {
 pub(crate) fn nested_bar(outer: Bar, disabled: Prop<bool>) -> Bar {
     let all = outer.disabled;
     Bar {
-        disabled: Prop::bind(move || disabled.get() || all.get()),
+        disabled: computed(move || disabled.get() || all.try_get().unwrap_or(true)),
         ..outer
     }
 }
@@ -449,11 +489,11 @@ pub(crate) fn bar_item<V: Interactive>(
         return (view, disabled);
     };
     let all = bar.disabled;
-    let disabled = Prop::bind(move || disabled.get() || all.get());
-    let current = current.unwrap_or_else(|| Prop::new(false));
+    let disabled = computed(move || disabled.get() || all.try_get().unwrap_or(true));
+    let current = current.map(|c| computed(move || c.get()));
     let node = element_ref();
-    let item = bar.roving.register(node, current, disabled, || {});
-    (member(view, &node, Some(item)), disabled)
+    let item = bar.roving.register_memos(node, current, disabled, || {});
+    (member(view, &node, Some(item)), disabled.into())
 }
 
 /// Puts a popup's trigger in the bar around the popup, when there is one:
@@ -466,6 +506,6 @@ pub(crate) fn bar_trigger<V: Interactive>(bar: Option<Bar>, view: V, node: Eleme
         return view;
     };
     let disabled = bar.disabled;
-    let item = bar.roving.register(node, Prop::new(false), disabled, || {});
-    member(view, &node, Some(item)).disabled(disabled)
+    let item = bar.roving.register_memos(node, None, disabled, || {});
+    member(view, &node, Some(item)).disabled(move || disabled.try_get().unwrap_or(true))
 }

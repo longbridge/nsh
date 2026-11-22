@@ -412,7 +412,9 @@ fn the_clear_button_and_delete_clear_the_value() {
         .unwrap();
     assert!(app.log().ends_with("open:false:Select -"), "{}", app.log());
     assert_eq!(app.heard(), None);
-    // Delete on the focused trigger, too.
+    // Delete on the focused trigger, too: Tab gives it the keyboard, which
+    // the calendar a press opened gives back.
+    app.press_key("tab").unwrap();
     app.open();
     app.press("label:2026-10-15").unwrap();
     app.closed();

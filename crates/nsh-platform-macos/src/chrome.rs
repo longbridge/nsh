@@ -69,7 +69,7 @@ use objc2::{
 use objc2_app_kit::{
     NSApplication, NSButton, NSEvent, NSEventModifierFlags, NSImage, NSMenu, NSMenuItem,
     NSRunningApplication, NSScreen, NSView, NSViewFrameDidChangeNotification, NSWindow,
-    NSWindowButton, NSWindowStyleMask, NSWindowTitleVisibility,
+    NSWindowButton, NSWindowDidResizeNotification, NSWindowStyleMask, NSWindowTitleVisibility,
 };
 use objc2_core_graphics::CGImage;
 use objc2_foundation::{
@@ -178,7 +178,8 @@ pub(crate) struct TitleBar {
     /// Set while [`place_controls`] runs: the frames it sets post the
     /// notifications that call it.
     placing: Cell<bool>,
-    /// Coalesces offset placement until AppKit finishes moving all buttons.
+    /// Coalesces notification-driven placement until AppKit finishes moving
+    /// all buttons (and exits `_NSThemeWidget`'s re-entrancy guard).
     placement_pending: Cell<bool>,
     /// Set while a measure of the area from `contentLayoutRect` waits for
     /// AppKit's layout ([`update_area`]).
@@ -353,14 +354,21 @@ fn toolbar_height(frame_height: f64, layout: NSRect, natural: f32) -> f32 {
 /// button's superview's superview) as tall as the bar, and the three
 /// buttons moved down to its middle, their `x` kept. AppKit lays them out
 /// again when the window resizes (every frame of a live resize), changes
-/// screen or leaves full screen: the frame-change notifications of the
-/// buttons and the container place them again at once, in the same layout
-/// pass, before anything is drawn. Explicit offsets use the saved AppKit
-/// spacing and defer notification-driven writes until layout finishes.
-/// Nothing is placed in full screen, where
-/// AppKit shows the bar in a window of its own. A host toolbar owns its
-/// container height. Dropping this gives the container and
-/// the buttons back their frames.
+/// its title or style, changes screen or leaves full screen.
+///
+/// Inside `NSViewFrameDidChangeNotification`, `_NSThemeWidget` is inside
+/// `setFrameOrigin:ignoreRentry:`, which silently ignores re-entrant
+/// `setFrameOrigin:` writes on the notifying button, and AppKit can be
+/// between moving two buttons. Frame-change notifications on the
+/// container, title bar view and buttons therefore always coalesce onto
+/// the main queue so placement runs once AppKit's layout pass finishes.
+/// `NSWindowDidResizeNotification` fires after `_updateButtonPositions`
+/// has returned and before AppKit displays the resized frame, so it places
+/// synchronously to keep every live-resize frame aligned without flicker.
+/// Explicit offsets use the saved AppKit spacing through the same path.
+/// Nothing is placed in full screen, where AppKit shows the bar in a
+/// window of its own. A host toolbar owns its container height. Dropping
+/// this gives the container and the buttons back their frames.
 struct TrafficLights {
     window: Weak<NSWindow>,
     container: Retained<NSView>,
@@ -368,7 +376,7 @@ struct TrafficLights {
     container_height: f64,
     /// The buttons and their original AppKit origins, before any placement.
     buttons: Vec<(Retained<NSButton>, NSPoint)>,
-    /// Frame-change observers (tokens of the default center).
+    /// Frame-change and window-resize observers (tokens of the default center).
     observers: Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>,
 }
 
@@ -391,52 +399,72 @@ impl TrafficLights {
         })
         .collect();
         let key = surface.key();
-        let block = RcBlock::new(move |_: NonNull<NSNotification>| {
+        // Frame-change notifications arrive inside `_NSThemeWidget`'s
+        // `setFrameOrigin:ignoreRentry:` (where writes to the notifying
+        // button are ignored) and mid-way between moving buttons. Coalesce
+        // onto the main queue so placement runs once AppKit finishes.
+        let frame_block = RcBlock::new(move |_: NonNull<NSNotification>| {
+            if let Some(surface) = Surface::with_key(key) {
+                crate::window::with_title_bar(&surface, id, |bar| {
+                    if bar.placing.get() || bar.placement_pending.replace(true) {
+                        return;
+                    }
+                    DispatchQueue::main().exec_async(move || {
+                        if let Some(surface) = Surface::with_key(key) {
+                            crate::window::with_title_bar(&surface, id, |bar| {
+                                bar.placement_pending.set(false);
+                                if let Some(window) = crate::window::window_of(&surface, id) {
+                                    place_controls(&surface, id, bar, &window);
+                                }
+                            });
+                        }
+                    });
+                });
+            }
+        });
+        // `NSWindowDidResizeNotification` runs after `_updateButtonPositions`
+        // returns and before AppKit displays the resized frame, keeping every
+        // live-resize frame aligned without waiting for the next run-loop turn.
+        let resize_block = RcBlock::new(move |_: NonNull<NSNotification>| {
             if let Some(surface) = Surface::with_key(key)
                 && let Some(window) = crate::window::window_of(&surface, id)
             {
                 crate::window::with_title_bar(&surface, id, |bar| {
-                    if bar.placing.get() {
-                        return;
-                    }
-                    if bar.controls_offset.get().is_none() {
+                    if !bar.placing.get() {
                         place_controls(&surface, id, bar, &window);
-                    } else if !bar.placement_pending.replace(true) {
-                        // AppKit can be between moving two buttons here. Wait
-                        // for the whole layout, and use the saved spacing.
-                        DispatchQueue::main().exec_async(move || {
-                            if let Some(surface) = Surface::with_key(key) {
-                                crate::window::with_title_bar(&surface, id, |bar| {
-                                    bar.placement_pending.set(false);
-                                    if let Some(window) = crate::window::window_of(&surface, id) {
-                                        place_controls(&surface, id, bar, &window);
-                                    }
-                                });
-                            }
-                        });
                     }
                 });
             }
         });
         let center = NSNotificationCenter::defaultCenter();
-        let views = std::iter::once(&*container)
+        let views = [container.as_ref(), bar.as_ref()]
+            .into_iter()
             .chain(buttons.iter().map(|(button, _)| -> &NSView { button }));
-        let observers = views
+        let mut observers: Vec<_> = views
             .map(|view| {
                 view.setPostsFrameChangedNotifications(true);
                 // SAFETY: AppKit posts it on the main thread, where the
-                // block runs (no queue: at once, inside the layout that
-                // moved the view); the observer is removed on drop.
+                // block runs; the observer is removed on drop.
                 unsafe {
                     center.addObserverForName_object_queue_usingBlock(
                         Some(NSViewFrameDidChangeNotification),
                         Some(view),
                         None,
-                        &block,
+                        &frame_block,
                     )
                 }
             })
             .collect();
+        // SAFETY: `NSWindowDidResizeNotification` is an immutable AppKit
+        // constant posted on the main thread; the observer is removed on drop.
+        observers.push(unsafe {
+            center.addObserverForName_object_queue_usingBlock(
+                Some(NSWindowDidResizeNotification),
+                Some(window),
+                None,
+                &resize_block,
+            )
+        });
         Some(Self {
             window: Weak::from(window),
             container_height: container.frame().size.height,

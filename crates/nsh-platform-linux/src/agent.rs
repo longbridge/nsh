@@ -237,7 +237,13 @@ impl Native for LinuxNative {
         }
     }
 
-    fn drag(&self, from: Point<Points>, to: Point<Points>) {
+    fn drag(
+        &self,
+        from: Point<Points>,
+        to: Point<Points>,
+        options: nsh_testing::DragOptions,
+    ) -> Result<(), String> {
+        nsh_testing::agent::refuse_custom_drag("drag", options)?;
         let (x, y) = (from.x.0, from.y.0);
         self.sim(true, move |s| {
             crate::input::simulate(s, Simulated::Hover(x, y));
@@ -257,9 +263,16 @@ impl Native for LinuxNative {
         self.sim(false, move |s| {
             crate::input::simulate(s, Simulated::Up(x, y))
         });
+        Ok(())
     }
 
-    fn drag_and_hold(&self, from: Point<Points>, to: Point<Points>) -> Result<(), String> {
+    fn drag_and_hold(
+        &self,
+        from: Point<Points>,
+        to: Point<Points>,
+        options: nsh_testing::DragOptions,
+    ) -> Result<(), String> {
+        nsh_testing::agent::refuse_custom_drag("dragAndHold", options)?;
         let (x, y) = (from.x.0, from.y.0);
         self.sim(true, move |s| {
             crate::input::simulate(s, Simulated::Hover(x, y));

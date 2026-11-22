@@ -100,6 +100,10 @@ pub(crate) struct HostWindow<'a> {
     pub(crate) size: Option<&'a str>,
     /// The display the window opens on, from 1 (the primary display).
     pub(crate) display: Option<usize>,
+    /// Never the active app (`--background`): the window shows, the
+    /// keyboard stays with the app the user types in, as `nsh test` runs
+    /// its apps.
+    pub(crate) background: bool,
 }
 
 impl HostWindow<'_> {
@@ -133,10 +137,16 @@ impl HostWindow<'_> {
                 "--window-size needs a desktop host (--target macos, linux, windows or gpui) and a TSX entry"
             );
         }
+        if self.background && (!crate::test_host::runs_in_background(target) || rust_root) {
+            bail!(
+                "--background needs a desktop host (--target macos, linux, windows or gpui) and a TSX entry"
+            );
+        }
         Ok(())
     }
 
-    /// The arguments of the size and the display, for a desktop host.
+    /// The arguments of the size, the display and the background, for a
+    /// desktop host.
     fn args(&self) -> Vec<String> {
         let mut args = Vec::new();
         if let Some(size) = self.size {
@@ -146,6 +156,10 @@ impl HostWindow<'_> {
         if let Some(display) = self.display {
             // One-based, as the host counts them.
             args.extend(["--display".to_owned(), display.to_string()]);
+        }
+        if self.background {
+            // The host the tests run in takes it too (`test_host.rs`).
+            args.push("--background".to_owned());
         }
         args
     }
@@ -892,6 +906,7 @@ pub(crate) fn install_android_host(
                 launch_screen: None,
                 assets: Vec::new(),
                 sounds: Vec::new(),
+                res: None,
                 signing: Signing::Debug,
             },
             &apk_path,
@@ -1564,6 +1579,24 @@ mod tests {
             assert!(placed.check(target, false).is_err(), "{target:?}");
         }
         assert_eq!(placed.args(), ["--display", "2"]);
+    }
+
+    /// `--background` reaches the desktop hosts that run tests in the
+    /// background, for a TSX entry.
+    #[test]
+    fn the_desktop_hosts_run_in_the_background() {
+        let background = HostWindow {
+            background: true,
+            ..HostWindow::default()
+        };
+        for target in [Target::Macos, Target::Linux, Target::Windows, Target::Gpui] {
+            assert!(background.check(target, false).is_ok(), "{target:?}");
+        }
+        assert!(background.check(Target::Macos, true).is_err());
+        for target in [Target::Catalyst, Target::Ios, Target::Android, Target::Web] {
+            assert!(background.check(target, false).is_err(), "{target:?}");
+        }
+        assert_eq!(background.args(), ["--background"]);
     }
 
     /// The desktop hosts get each app's own id, so each keeps its own data.

@@ -648,7 +648,9 @@ public class NshView extends FrameLayout {
     /**
      * Reports the notification press {@code intent} carries to the app, if it does. The activity showing this view
      * calls it from {@code onCreate} and {@code onNewIntent}, with {@code Notifications} of {@code nsh}: a press opens
-     * the app's launcher activity.
+     * the app's launcher activity. An intent with extras that a notification NSH did not show (a push service's SDK's)
+     * may have opened goes to the handler Rust code sets with {@code nsh::notifications::set_foreign_handler} instead,
+     * once per intent. UI thread.
      *
      * @param intent the activity's intent
      */

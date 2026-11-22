@@ -248,6 +248,7 @@ events! {
     OpenUrl = "onOpenUrl": "A [`Command::OpenUrl`] request finished (root only; payload: `id`, `opened`: whether the platform opened the URL).",
     CaretMove = "onCaretMove": "An input's caret moved: with its selection, or as its text scrolled or wrapped again (payload: `bounds`, the caret in the input; the core adds `pageBounds`, in the root view).",
     Paste = "onPaste": "The user pasted into an input (payload: [`EventPayload::Paste`]: the text, files with their bytes such as a screenshot, local files' URLs), before the `onChangeText` of the text it inserts.",
+    ClipboardWrite = "onClipboardWrite": "A [`Command::SetClipboard`] or [`Command::SetClipboardItem`] finished, in the order of the writes (root only, platforms with [`crate::platform::Environment::clipboard_write_result`]; payload: `written`: whether the system clipboard took it).",
     ScreenColor = "onScreenColor": "A [`Command::PickScreenColor`] request finished (root only; payload: `id`, `color`: the color picked, packed `0xRRGGBBAA`, absent when cancelled).",
     FileRequest = "onFileRequest": "A [`Command::FileRequest`] finished (root only; payload: [`EventPayload::FileRequest`]).",
     Speech = "onSpeech": "A speech recognition session reported (root only; payload: [`EventPayload::Speech`]).",
@@ -1865,8 +1866,8 @@ pub enum CellSlot {
     Empty,
 }
 
-/// A list's `contentStyle` (or `contentClass`): padding around the content and gaps
-/// between rows and columns.
+/// A list's `contentStyle` (or `contentClass`): padding around the content, gaps
+/// between rows and columns, and cell alignment on the cross axis.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct ListContentStyle {
     /// Padding around the content.
@@ -1875,6 +1876,9 @@ pub struct ListContentStyle {
     pub row_gap: Points,
     /// Gap between columns (`numColumns`) of vertical lists.
     pub column_gap: Points,
+    /// Cell alignment on the cross axis: stretch (default), flex-start, center
+    /// or flex-end.
+    pub align_items: Option<taffy::AlignItems>,
 }
 
 /// Where a list rests (`alignment`), as GPUI's `ListAlignment`.
@@ -3681,10 +3685,10 @@ pub enum Prop {
     #[prop(js = "testID")]
     TestId(Option<Arc<str>>),
     /// `copyText`: what a copy of the text around the view gives in its
-    /// place, when the view is inside a text (an inline formula's source,
-    /// an emoji image's character): selecting across it and copying puts
-    /// this there. Unset, the view adds nothing to the copy. A view outside
-    /// a text ignores it.
+    /// place, when the view (or image) is inside a text (an inline
+    /// formula's source, an emoji image's character): selecting across it
+    /// and copying puts this there. Unset, the view adds nothing to the
+    /// copy. A view outside a text and a nested text span ignore it.
     #[prop(js = "copyText")]
     CopyText(Option<Arc<str>>),
     /// `web={{ element }}`: the HTML element the web draws the view or text

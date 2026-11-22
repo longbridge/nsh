@@ -20,8 +20,8 @@ use nsh_core::{
 use serde_json::Value;
 
 use super::{
-    controller::{BlockItem, Rv, slot_id},
-    geometry::{DOC, InlineMap, Run},
+    controller::{BlockItem, Rv},
+    geometry::{DOC, InlineMap, Run, slot_id},
     node_view::{MarkView, NodeView, NodeViewCx},
     parts::{self, Part},
     table,
@@ -252,6 +252,7 @@ fn content(rv: Rv) -> impl IntoElement {
             .child(blocks(rv.clone(), DOC)),
     )
     .child(table::controls(rv.clone()))
+    .child(table::drop_line(rv.clone()))
     .child(gap_cursor(rv.clone()))
     .child(drop_cursor(rv.clone()))
     .child(caret(rv.clone()))
@@ -378,8 +379,28 @@ fn block(rv: Rv, item: ReadSignal<BlockItem>) -> AnyElement {
     }
     let (class_rv, layout_rv) = (rv.clone(), rv.clone());
     let active = rv.watch_block(id);
-    let wrapper = view()
-        .on_layout(move |b: &Bounds<Points>| layout_rv.set_frame(id, Some(parent), *b))
+    // A node view's slot is framed in its block (`slot`): the block's ref
+    // measures it there, and its size, which changes when the view's own
+    // parts around the slot do, has it measured again.
+    let slotted = match &kind {
+        Kind::View(v) if v.editable_content_slot() => {
+            Some((element_ref(), signal(Size::default())))
+        }
+        _ => None,
+    };
+    let wrapper = match slotted {
+        Some((block_ref, _)) => view().element_ref(&block_ref),
+        None => view(),
+    };
+    let wrapper = wrapper
+        .on_layout(move |b: &Bounds<Points>| {
+            layout_rv.set_frame(id, Some(parent), *b);
+            if let Some((_, size)) = slotted
+                && size.get_untracked() != b.size
+            {
+                size.set(b.size);
+            }
+        })
         .app_class(move || {
             let it = item.get();
             let (selected, focused) = active.get();
@@ -434,7 +455,10 @@ fn block(rv: Rv, item: ReadSignal<BlockItem>) -> AnyElement {
     };
     let task = render_kind(&first.node) == Some("task");
     let content = match kind {
-        Kind::View(view) => Some(node_view_block(rv.clone(), item, view).into_element()),
+        Kind::View(view) => {
+            let slot_in = slotted.map(|(block_ref, size)| (block_ref, size.read_only()));
+            Some(node_view_block(rv.clone(), item, view, slot_in).into_element())
+        }
         Kind::Text => Some(text_block(rv.clone(), item, id).into_element()),
         Kind::Image => Some(dynamic(move || image_of(&item.get().node)).into_element()),
         Kind::Atom => None,
@@ -1333,8 +1357,14 @@ fn view_box() -> View {
 }
 
 /// A node view's element for a block, made again when the view's
-/// `update` refuses a new node.
-fn node_view_block(rv: Rv, item: ReadSignal<BlockItem>, view: Arc<dyn NodeView>) -> AnyElement {
+/// `update` refuses a new node. `slot_in`: the block's ref and size, for
+/// a view with an editable content slot (`slot`).
+fn node_view_block(
+    rv: Rv,
+    item: ReadSignal<BlockItem>,
+    view: Arc<dyn NodeView>,
+    slot_in: Option<(ElementRef, ReadSignal<Size<Points>>)>,
+) -> AnyElement {
     let first = item.get_untracked();
     let id = first.id;
     let node = signal(first.node.clone());
@@ -1381,9 +1411,8 @@ fn node_view_block(rv: Rv, item: ReadSignal<BlockItem>, view: Arc<dyn NodeView>)
         let live = live.clone();
         untracked(move || {
             let current = node.get_untracked();
-            let content = view
-                .editable_content_slot()
-                .then(|| slot(rv.clone(), item, id, &current));
+            let content = slot_in
+                .map(|(block, resized)| slot(rv.clone(), item, id, &current, block, resized));
             let pos_rv = rv.clone();
             let get_pos: Rc<dyn Fn() -> Option<usize>> =
                 Rc::new(move || live.get().then(|| pos_rv.block_pos(id))?);
@@ -1408,12 +1437,58 @@ fn node_view_block(rv: Rv, item: ReadSignal<BlockItem>, view: Arc<dyn NodeView>)
     })
 }
 
-/// The editable content of a node view's node: measured in the content
-/// box, since the view's element is the app's.
-fn slot(rv: Rv, item: ReadSignal<BlockItem>, id: u64, node: &Node) -> AnyElement {
+/// The editable content of a node view's node, framed in its block (the
+/// view's element is the app's, so the slot is measured there, `block`):
+/// a block moved by an edit before it carries its slot along, though the
+/// slot's frame in its own parent is unchanged and reports nothing. The
+/// slot is measured again when its frame in its parent changes and when
+/// the block's size does (`resized`); a move inside the block that changes
+/// neither is not seen (`NodeView::editable_content_slot`).
+fn slot(
+    rv: Rv,
+    item: ReadSignal<BlockItem>,
+    id: u64,
+    node: &Node,
+    block: ElementRef,
+    resized: ReadSignal<Size<Points>>,
+) -> AnyElement {
     let sid = slot_id(id);
     let r = element_ref();
-    let measure_rv = rv.clone();
+    // Once a tick, however many layouts ask (the slot's and the block's
+    // report in the same one), under the slot's owner: the effect's would
+    // end the task when it runs again and leave `pending` set.
+    let measure = {
+        let (rv, owner, pending) = (rv.clone(), Owner::current(), Rc::new(Cell::new(false)));
+        move || {
+            if pending.replace(true) {
+                return;
+            }
+            let (rv, pending) = (rv.clone(), pending.clone());
+            owner.run(|| {
+                spawn(async move {
+                    pending.set(false);
+                    // Both asked before either is awaited: one commit's layout.
+                    let (slot, block) = (r.measure(), block.measure());
+                    let (Some(slot), Some(block)) = (slot.await, block.await) else {
+                        return;
+                    };
+                    let origin = Point::new(slot.page.x - block.page.x, slot.page.y - block.page.y);
+                    rv.set_frame(sid, Some(id), Bounds::new(origin, slot.frame.size));
+                })
+            });
+        }
+    };
+    {
+        // The slot's own first layout measures it; the block's size counts
+        // from its next change.
+        let (measure, seen) = (measure.clone(), Cell::new(false));
+        effect(move || {
+            resized.get();
+            if seen.replace(true) {
+                measure();
+            }
+        });
+    }
     let inner = if node.is_textblock() {
         text_block(rv, item, sid).into_element()
     } else {
@@ -1421,17 +1496,7 @@ fn slot(rv: Rv, item: ReadSignal<BlockItem>, id: u64, node: &Node) -> AnyElement
     };
     view()
         .element_ref(&r)
-        .on_layout(move |_: &Bounds<Points>| {
-            let rv = measure_rv.clone();
-            spawn(async move {
-                let (Some(slot), Some(content)) = (r.measure().await, rv.content.measure().await)
-                else {
-                    return;
-                };
-                let origin = Point::new(slot.page.x - content.page.x, slot.page.y - content.page.y);
-                rv.set_frame(sid, None, Bounds::new(origin, slot.frame.size));
-            });
-        })
+        .on_layout(move |_: &Bounds<Points>| measure())
         .child(inner)
         .into_element()
 }
@@ -1684,6 +1749,7 @@ impl Rv {
         }
         geo.frames.insert(id, (parent, frame));
         drop(geo);
+        self.table_moved(id, parent);
         self.layout_rev.update(|r| *r += 1);
     }
 
@@ -1696,6 +1762,7 @@ impl Rv {
         }
         geo.insets.insert(id, origin);
         drop(geo);
+        self.table_moved(id, None);
         self.layout_rev.update(|r| *r += 1);
     }
 
