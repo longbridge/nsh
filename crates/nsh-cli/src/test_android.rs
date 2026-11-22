@@ -1,13 +1,14 @@
 //! `nsh test --target android`: the apps tests open run on the development
 //! host on an Android device or emulator (the one `--device` or
 //! `ANDROID_SERIAL` names, else the first `adb devices` lists).
-//! The host is built and installed once; each `open` builds the entry,
-//! serves it in a dev server's test session of its own, forwards its port
-//! to the device and starts the host on it with a data directory of its
-//! own, empty when it starts. The host's test agent takes the test's steps
-//! with `MotionEvent`s and `KeyEvent`s its views get as a finger's and a
-//! keyboard's (`nsh-platform-android`'s `agent.rs`, `TestAgent.java`); the
-//! host is stopped when the test closes the app.
+//! The host is built (for the device's ABI, as `nsh run`'s) and installed
+//! once; each `open` builds the entry, serves it in a dev server's test
+//! session of its own, forwards its port to the device and starts the host
+//! on it with a data directory of its own, empty when it starts. The host's
+//! test agent takes the test's steps with `MotionEvent`s and `KeyEvent`s its
+//! views get as a finger's and a keyboard's (`nsh-platform-android`'s
+//! `agent.rs`, `TestAgent.java`); the host is stopped when the test closes
+//! the app.
 
 use std::{
     path::Path,
@@ -34,6 +35,7 @@ const CONNECT: Duration = Duration::from_secs(90);
 pub(crate) fn starter(work: &Path, device: Option<&str>) -> anyhow::Result<StartHost> {
     let sdk = Arc::new(Sdk::find()?);
     let serial = crate::android::device(&sdk, device)?;
+    let abis = crate::android::dev_abis(&sdk, &serial)?;
     // Tests of many apps share the host: it takes their crates' Java
     // libraries, not one app's `nsh.json` ones: their placeholders are left
     // empty, with a warning.
@@ -41,8 +43,8 @@ pub(crate) fn starter(work: &Path, device: Option<&str>) -> anyhow::Result<Start
         &sdk,
         &serial,
         work,
-        &crate::runtime::test_android()?,
-        &[],
+        &crate::runtime::test_android(&abis)?,
+        &abis,
         None,
     )?;
     Ok(Arc::new(move |entry: &Path, options: &HostOptions| {

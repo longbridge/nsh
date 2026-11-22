@@ -664,7 +664,7 @@ is written or says what it needs. A desktop's `platform` (`"macos"` for a deskto
 desktop target and the web, as that target's platform and always as a desktop: in the browser the page starts in the
 desktop idiom whatever its width, where without a `platform` (or with `"web"`) it measures its idiom as a browser does
 (a desktop from 600 points wide). An app with Rust crates of its own runs in a development host built with its crates, which NSH
-builds for the platform; a Rust app's host runs its root, so `open(".")` starts it there as it does headless.
+builds for the platform (on Android for the device's ABI, as `nsh run` does); a Rust app's host runs its root, so `open(".")` starts it there as it does headless.
 
 `nsh test --target tui` runs the tests against the terminal renderer in an in-memory terminal, suitable for CI.
 Each `open` uses its own surface and data directory. Set its point dimensions with `open(entry, { width, height })`;

@@ -802,13 +802,7 @@ fn run_android(
     // As on iOS: the host of a previous session must not connect first.
     let _ = android::adb(&sdk, &serial, &["shell", "am", "force-stop", BUNDLE_ID]);
     let session = DevSession::start(entry, listen, release, limits)?;
-    // Only the device's ABI: a debug library per ABI makes the APK too
-    // large to build. When the device's ABIs can't be read: every ABI, as
-    // before.
-    let abis = match android::device_abis(&sdk, &serial) {
-        Ok(device) => vec![android::preferred_abi(&serial, &device)?],
-        Err(_) => Vec::new(),
-    };
+    let abis = android::dev_abis(&sdk, &serial)?;
     let runtime = crate::runtime::android(true, &abis)?;
     let config = crate::package::read_config(entry)?.android;
     install_android_host(
