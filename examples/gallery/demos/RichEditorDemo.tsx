@@ -254,6 +254,7 @@ function KeyboardBar(props: { editor: RichEditorSession; revision: number }) {
   return (
     <InputAccessoryView nativeID={KEYBOARD_BAR} style={{ backgroundColor: colors.inset }}>
       <View
+        testID="keyboard-bar"
         style={{
           flexDirection: "row",
           alignItems: "center",
