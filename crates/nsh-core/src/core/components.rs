@@ -792,6 +792,10 @@ pub(super) struct Components {
     /// ([`Core::take_main_thread_tasks`]).
     main_thread: Vec<crate::main_thread::MainThreadTask>,
     next_url_open: u32,
+    /// The app's settings pages being opened (`AppSettings.open`), by
+    /// request id: their answers.
+    app_settings_opens: FxHashMap<u32, AnswerSlot<Result<bool, crate::mobile::AppSettingsError>>>,
+    next_app_settings_open: u32,
     /// Colors being picked on the screen, by request id: their answers.
     screen_colors: FxHashMap<u32, AnswerSlot<Option<crate::Hsla>>>,
     next_screen_color: u32,
@@ -935,6 +939,8 @@ impl Default for Components {
             asks_quit: false,
             main_thread: Vec::new(),
             next_url_open: 0,
+            app_settings_opens: FxHashMap::default(),
+            next_app_settings_open: 1,
             screen_colors: FxHashMap::default(),
             next_screen_color: 1,
             shares: FxHashMap::default(),
@@ -6644,6 +6650,35 @@ impl<M: TextEngine> Core<M> {
                 self.components.url_opens.insert(id, answer);
                 self.components.url_requests.push((id, url));
             }
+            Action::OpenAppSettings(answer) => {
+                use crate::mobile::AppSettingsError;
+                // The app's settings page acts on the application as a
+                // whole (the embedding app's, embedded): an app declaring
+                // capabilities needs `application`.
+                let refused = if !self.access.allows_application() {
+                    Some(AppSettingsError::Denied)
+                } else if !self.components.environment.app_settings {
+                    Some(AppSettingsError::Unavailable)
+                } else {
+                    None
+                };
+                if let Some(error) = refused {
+                    answer.borrow_mut().deliver(Err(error));
+                    return;
+                }
+                let id = self.components.next_app_settings_open;
+                self.components.next_app_settings_open = id.wrapping_add(1);
+                self.components.app_settings_opens.insert(id, answer);
+                let _ = self.apply_op(Op::Command {
+                    id: crate::ROOT_ID,
+                    command: Command::OpenAppSettings { id },
+                });
+            }
+            Action::AppSettingsAvailable(answer) => {
+                let available =
+                    self.components.environment.app_settings && self.access.allows_application();
+                answer.borrow_mut().deliver(available);
+            }
             Action::Speech(action) => self.speech_action(action),
             Action::Audio(action) => self.audio_action(action),
             Action::Notification(action) => self.notification_action(action),
@@ -7674,6 +7709,21 @@ impl<M: TextEngine> Core<M> {
                     _ => false,
                 };
                 self.answer_open_url(request as u32, opened);
+                true
+            }
+            EventKind::OpenAppSettings if id == crate::ROOT_ID => {
+                let Some(request) = number("id") else {
+                    return false;
+                };
+                let opened = match payload {
+                    EventPayload::Map(entries) => entries
+                        .iter()
+                        .any(|(k, v)| *k == "opened" && *v == crate::PayloadValue::Bool(true)),
+                    _ => false,
+                };
+                if let Some(answer) = self.components.app_settings_opens.remove(&(request as u32)) {
+                    answer.borrow_mut().deliver(Ok(opened));
+                }
                 true
             }
             EventKind::ScreenColor if id == crate::ROOT_ID => {

@@ -287,6 +287,8 @@ pub use crate::element::{
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use crate::element::{background, blocking};
+/// The app's page in the system's settings ([`crate::mobile`]).
+pub use crate::mobile::{app_settings_available, open_app_settings};
 /// Translations ([`crate::i18n`]).
 pub use crate::{
     i18n::{add_translations, available_locales, set_locale},

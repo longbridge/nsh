@@ -1,4 +1,5 @@
 //! The runtime's modules written in Rust: `nsh/android`'s `BackHandler`,
+//! `nsh/mobile`'s `AppSettings`,
 //! `nsh/accessibility`'s commands, `nsh/device`'s `openUrl`, `nsh`'s
 //! `Image` and `WebView` functions, all of `nsh/clipboard`, `nsh/picker`, `nsh`'s `Share`,
 //! `Speech`, `UrlScheme`, `setFpsEnabled` and `nsh/storage`,
@@ -15,6 +16,7 @@ use crate::element::Registry;
 
 mod accessibility;
 mod android;
+mod app_settings;
 mod audio;
 mod clipboard;
 mod desktop;
@@ -85,7 +87,8 @@ pub fn registries() -> &'static [Registry] {
             .register::<crate::mobile::Switch>()
             .register::<crate::mobile::DateTimePicker>()
             .module::<android::BackHandler>()
-            .module::<haptics::Haptics>();
+            .module::<haptics::Haptics>()
+            .module::<app_settings::AppSettings>();
         let mut os = Registry::runtime("os");
         os.module::<os::Os>();
         let mut process = Registry::runtime("process");

@@ -2303,7 +2303,7 @@ async function signOut() {
 
 ### Notifications.permission
 
-`permission()` 只查询不询问，`requestPermission()` 首次会显示系统提示。两者的结果都是 `"default"`（尚未询问）、`"granted"`、`"denied"`（只能在系统设置里更改）或 `"unavailable"`。在 Apple 平台上，`requestPermission()` 询问之后按系统设置里的权限返回：用户关掉了通知的应用得到 `"denied"`。
+`permission()` 只查询不询问，`requestPermission()` 首次会显示系统提示。两者的结果都是 `"default"`（尚未询问）、`"granted"`、`"denied"`（只能在系统设置里更改，`nsh/mobile` 的 [`AppSettings.open`](./nsh-mobile.md#appsettings) 可以把用户带过去）或 `"unavailable"`。在 Apple 平台上，`requestPermission()` 询问之后按系统设置里的权限返回：用户关掉了通知的应用得到 `"denied"`。
 
 ## UrlScheme
 

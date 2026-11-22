@@ -121,6 +121,15 @@ expect File: rejected ERR_ACCESS_DENIED
 expect Blank: rejected TypeError
 expect Long URL: rejected RangeError
 covers [nsh] Share
+# mod-app-settings
+tap id:case-mod-app-settings
+# no settings page of the app's own there: AppSettings.available() resolves
+# false and AppSettings.open() rejects as unavailable, never as opened.
+expect Available: false
+expect Settings: not opened
+tap id:settings
+expect Settings: rejected ERR_FEATURE_UNAVAILABLE_ON_PLATFORM
+covers [nsh/mobile] AppSettings
 # mod-speech
 tap id:case-mod-speech
 # nothing recognizes speech there: available() resolves false and a session

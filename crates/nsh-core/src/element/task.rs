@@ -131,6 +131,13 @@ pub(crate) enum Action {
     /// [`crate::open_url::check_url`]); whether it opened resolves the
     /// slot.
     OpenUrl(String, AnswerSlot<bool>),
+    /// Opens the app's own page in the system's settings
+    /// ([`crate::mobile::open_app_settings`]); whether it opened, or why it
+    /// could not, resolves the slot.
+    OpenAppSettings(AnswerSlot<Result<bool, crate::mobile::AppSettingsError>>),
+    /// Whether the platform opens the app's page in the system's settings
+    /// resolves the slot.
+    AppSettingsAvailable(AnswerSlot<bool>),
     /// Puts something on the system clipboard
     /// ([`crate::Command::SetClipboard`] or
     /// [`crate::Command::SetClipboardItem`]); the platform's result
