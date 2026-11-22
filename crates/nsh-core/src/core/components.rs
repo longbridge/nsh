@@ -7849,13 +7849,18 @@ impl<M: TextEngine> Core<M> {
             })
         };
         drop(keys);
-        let bindings = self
-            .components
-            .js_keymap
-            .bindings()
+        // JS's first, then the views', where the newest that may fire wins:
+        // a focused component's keys win over the app's. Bindings
+        // `over_focused` come after both, so they win over the components';
+        // the overlay's Escape (a popup closing) stays last.
+        let js = self.components.js_keymap.bindings();
+        let bindings = js
             .iter()
+            .filter(|b| !b.over_focused)
+            .chain(views.iter().filter(|b| !b.over_focused))
+            .chain(js.iter().filter(|b| b.over_focused))
+            .chain(views.iter().filter(|b| b.over_focused))
             .copied()
-            .chain(views)
             .chain(overlay)
             .collect();
         Arc::new(crate::keymap::Keymap::new(bindings))

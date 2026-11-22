@@ -27932,6 +27932,52 @@ mod views {
     }
 
     #[test]
+    fn jss_shortcuts_over_focused_come_after_the_views() {
+        use crate::keymap::{KeyBinding, KeyMatch, Keymap, Keystroke, When};
+        let mod_k = Keystroke::parse_with("mod+k", true).unwrap();
+        let tables = |batch: &MountBatch| -> Vec<std::sync::Arc<Keymap>> {
+            batch
+                .items
+                .iter()
+                .filter_map(|i| match i {
+                    MountItem::Keymap(k) => Some(k.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+        let mut c = core();
+        c.mount_root(&Root::new::<Shortcuts>(|| ()));
+        let batch = c.commit().unwrap();
+        let ours = tables(&batch).last().expect("a table").bindings()[0].id;
+        // JS binds the view's mod+k twice: plainly (1) and over the views (2).
+        let plain = KeyBinding::new(1, mod_k, When::Auto, false);
+        let over = KeyBinding::new(2, mod_k, When::Auto, false).over_focused(true);
+        apply(
+            &mut c,
+            vec![Op::SetProp {
+                id: ROOT_ID,
+                prop: Prop::Keymap(std::sync::Arc::new(Keymap::new(vec![over, plain]))),
+            }],
+        );
+        let batch = c.commit().unwrap();
+        let table = tables(&batch).pop().expect("a table");
+        let ids: Vec<u32> = table.bindings().iter().map(|b| b.id).collect();
+        // The plain one before the view's, the one over them after.
+        assert_eq!(ids, [1, ours, 2]);
+        assert_eq!(table.find(mod_k, false, false), KeyMatch::Fire(2));
+        // Without it, the view's wins as before.
+        apply(
+            &mut c,
+            vec![Op::SetProp {
+                id: ROOT_ID,
+                prop: Prop::Keymap(std::sync::Arc::new(Keymap::new(vec![plain]))),
+            }],
+        );
+        let table = tables(&c.commit().unwrap()).pop().expect("a table");
+        assert_eq!(table.find(mod_k, false, false), KeyMatch::Fire(ours));
+    }
+
+    #[test]
     fn jss_shortcuts_bound_before_any_view_stay_beside_the_views() {
         use crate::keymap::{KeyBinding, Keymap, Keystroke, When};
         let tables = |batch: &MountBatch| -> Vec<Vec<u32>> {
@@ -28709,8 +28755,7 @@ mod rust_windows {
     // turn follows the opening, in order; attributes join its options.
     #[test]
     fn requests_made_right_after_open_window_follow_its_opening() {
-        use crate::desktop::WindowMode;
-        use crate::element::desktop::open_window;
+        use crate::{desktop::WindowMode, element::desktop::open_window};
         let mut c = core();
         c.set_environment(crate::element::Environment {
             os: crate::platform::Os::MacOs,
