@@ -2938,6 +2938,7 @@ const Storage: {
   removeItem(key: string): Promise<void>;
   keys(): Promise<string[]>;
   clear(): Promise<void>;
+  on(event: "change", listener: (change: { key: string | null; value: string | null }) => void): () => void;
 };
 ```
 
@@ -2948,6 +2949,7 @@ const Storage: {
 | `await Storage.removeItem(key)` | `Storage::remove_item(key)` |
 | `await Storage.keys()` | `Storage::get_all_keys() -> Vec<String>` |
 | `await Storage.clear()` | `Storage::clear()` |
+| `Storage.on("change", listener)` | `Storage::on_change(f)` |
 
 The Rust functions are synchronous, as the entries are in memory: call them where components run (their bodies, handlers and tasks).
 
@@ -2964,7 +2966,7 @@ Each app has a storage of its own, up to 5 MB of keys and values. Calls run in t
 
 A `storage.json` that is damaged is kept as `storage.json.corrupt` next to it, and the app starts with an empty storage; one that cannot be read leaves the app's changes in memory, so the file is never replaced.
 
-On the web, the app's other tabs share its storage: what one of them sets, removes or clears, the others read from then on. A value the browser refuses to keep (its own quota, or site data the user blocked) is refused as one past 5 MB is.
+On the web, the app's other tabs share its storage: what one of them sets, removes or clears, the others read from then on, and hear as [`change`](#storageon). Windows of a desktop app share it the same way. A value the browser refuses to keep (its own quota, or site data the user blocked) is refused as one past 5 MB is.
 
 The app id is the `id` in `nsh.json`, and it travels with the app: `nsh build` and `nsh package` write it next to the bundle, the dev server sends it, and a signed package carries the one its release key's certificate vouches for. So every app keeps its own data with no setting, wherever it runs; an app without an id keeps it under `default`. An embedding app can choose another place (see [Embedding on iOS](../docs/ios.md) and [Embedding on Android](../docs/android.md)).
 
@@ -3026,6 +3028,32 @@ clear(): Promise<void>;
 ```
 
 Removes every key of the app, such as when the user signs out. Rust: `Storage::clear()`.
+
+### Storage.on
+
+```ts
+on(event: "change", listener: (change: { key: string | null; value: string | null }) => void): () => void;
+```
+
+Calls `listener` each time the storage is changed elsewhere: by another tab of the app on the web, or by another window or view of the app that shares its storage. `key` is the key changed, `null` when every key was removed; `value` is what it holds now, `null` when it was removed. `getItem` already reads the new value when the listener runs. The app's own changes in this tab or window do not come, nor a change that leaves an entry as it was, and changes made while nothing listened are not kept: read what you need when you start listening. Returns a function that stops listening; a listener a component adds stops with the component. Rust: `Storage::on_change(f)`, which runs `f` with a `StorageChange` (`key()`, `value()`) while the current owner lives.
+
+Use it to keep settings in step across tabs and windows:
+
+```rust tabs
+let theme = signal(Storage::get_item("theme"));
+Storage::on_change(move |change| {
+    if change.key().is_none_or(|key| key == "theme") {
+        theme.set(change.value().map(str::to_owned));
+    }
+});
+```
+
+```tsx tabs
+const theme = signal(await Storage.getItem("theme"));
+Storage.on("change", ({ key, value }) => {
+  if (key === null || key === "theme") theme.set(value);
+});
+```
 
 ### Keeping a signal on the device
 

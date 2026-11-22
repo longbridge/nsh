@@ -362,6 +362,10 @@ expect Storage cleared: none missing=null
 # A value past the quota rejects with a code and is not kept.
 tap id:full
 expect Storage full: Error ERR_NSH_QUOTA_EXCEEDED kept=false
+# The app's own changes are not changes made elsewhere.
+expect Storage listener listening
+tap id:stop
+expect Storage listener stopped function, heard nothing
 covers [nsh] Storage
 # mod-host
 tap id:case-mod-host
