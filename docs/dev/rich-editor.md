@@ -156,6 +156,12 @@ over as a unit. The only looks of the view's own are the caret (2 points, the th
 theme's selection color), the placeholder (`muted-foreground`) and the composition (underlined), each a part the app
 restyles.
 
+Long documents (`render.rs`, `doc_blocks`): past 300 top-level blocks the view mounts only the top-level blocks within
+1.5 viewports of the visible part, in steps of 16, plus the ones the selection is in when they are near, between two
+spacers whose heights come from the blocks' last measured frames (the measured average where a block was never
+mounted). Shorter documents mount every block as before. Positions in unmounted blocks have no geometry until scrolling
+(or scrolling to the caret, which edits do) mounts them.
+
 Geometry (`geometry.rs`): maps document positions to laid-out coordinates and back by querying each textblock's
 `TextGeometry` (`Text::on_text_layout`, which translates UTF-16 offsets across synthetic span-padding spacers
 internally), so the caret, selection boxes, inline leaves, and hit tests follow the app's real fonts, mixed styles,
