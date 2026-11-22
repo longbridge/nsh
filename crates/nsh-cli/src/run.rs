@@ -263,7 +263,8 @@ pub(crate) fn run(
     }
     match target {
         Target::Catalyst => {
-            let app = package_catalyst(&work, &host)?;
+            let config = crate::package::read_config(entry)?;
+            let app = package_catalyst(&work, &host, &config)?;
             let exe = app.join("Contents/MacOS/nsh-ios-host");
             // Its own output (AppKit's notes) is kept for when it fails.
             let mut command = Command::new(&exe);
@@ -333,14 +334,15 @@ pub(crate) fn run(
             run_local(&session, &mut command, "the GPUI host")
         }
         Target::Ios => {
-            let app = package_ios(&work, &host)?;
+            let config = crate::package::read_config(entry)?;
+            let app = package_ios(&work, &host, &config)?;
             let udid = udid.expect("the simulator is picked before the session");
             let step = ui::Step::start("installing the development host in the simulator");
             simctl(&["install", &udid, &app.to_string_lossy()])?;
             step.finish();
             let mut launch = vec!["launch", "--terminate-running-process", &udid, BUNDLE_ID];
             launch.extend(args.iter().map(String::as_str));
-            let env = simctl_app_env(&crate::package::read_config(entry)?);
+            let env = simctl_app_env(&config);
             let step = ui::Step::start("launching the development host");
             simctl_with_env(&launch, &env)?;
             step.finish();
@@ -448,7 +450,7 @@ fn run_rust_app(
         }
         Target::Catalyst => {
             let runner = crate::runtime::file(Platform::MacCatalyst, false)?;
-            let bundle = package_catalyst(&run.join("catalyst"), &runner)?;
+            let bundle = package_catalyst(&run.join("catalyst"), &runner, &config)?;
             let macos = bundle.join("Contents/MacOS");
             // The iOS runner looks next to itself.
             resources(&macos.join("nsh"))?;
@@ -1032,35 +1034,61 @@ fn runtime_version(runtime: &Path, abis: &[String]) -> anyhow::Result<String> {
     Ok(parts.join("\n"))
 }
 
-/// Creates (or refreshes) `<work>/NshDev.app` around the host binary.
-fn package_catalyst(work: &Path, host: &Path) -> anyhow::Result<PathBuf> {
+/// Creates (or refreshes) `<work>/NshDev.app` around the host binary, with
+/// the languages of the app whose `nsh.json` is `config` (`locales`,
+/// `ios.infoPlistStrings`).
+fn package_catalyst(
+    work: &Path,
+    host: &Path,
+    config: &crate::package::AppConfig,
+) -> anyhow::Result<PathBuf> {
     let app = work.join(format!("{APP_NAME}.app"));
     let contents = app.join("Contents");
     let macos = contents.join("MacOS");
     fs::create_dir_all(&macos)?;
+    let meta = crate::module_meta::for_dev_host(
+        "aarch64-apple-ios-macabi",
+        crate::module_meta::Platform::Ios,
+    );
+    let strings = dev_host_strings(config, &meta)?;
+    let localized = localized_files(&strings);
     fs::write(
         contents.join("Info.plist"),
-        with_crates_info(info_plist(Target::Catalyst), "aarch64-apple-ios-macabi")?,
+        with_crates_info(info_plist(Target::Catalyst), &meta, config, &strings)?,
     )?;
+    crate::apple::write_localized_info(&contents.join("Resources"), &localized)?;
     install_binary(host, &macos.join("nsh-ios-host"))?;
     Ok(app)
 }
 
 /// Creates (or refreshes) `<work>/ios/NshDev.app`, a flat iOS app bundle,
-/// signed ad hoc (the simulator requires a signature).
-pub(crate) fn package_ios(work: &Path, host: &Path) -> anyhow::Result<PathBuf> {
+/// signed ad hoc (the simulator requires a signature), with the languages
+/// of the app whose `nsh.json` is `config`, as [`package_catalyst`].
+pub(crate) fn package_ios(
+    work: &Path,
+    host: &Path,
+    config: &crate::package::AppConfig,
+) -> anyhow::Result<PathBuf> {
     let app = work.join("ios").join(format!("{APP_NAME}.app"));
     fs::create_dir_all(&app)?;
-    // The signature seals the Info.plist too: one changed (the app's crates
-    // declare other keys) is signed again, as a new binary is.
+    // The signature seals the Info.plist and the other languages' strings
+    // too: one changed (the app's crates declare other keys, the app
+    // translates them anew) is signed again, as a new binary is.
     let plist = app.join("Info.plist");
-    let info = with_crates_info(info_plist(Target::Ios), "aarch64-apple-ios-sim")?;
+    let meta = crate::module_meta::for_dev_host(
+        "aarch64-apple-ios-sim",
+        crate::module_meta::Platform::Ios,
+    );
+    let strings = dev_host_strings(config, &meta)?;
+    let localized = localized_files(&strings);
+    let info = with_crates_info(info_plist(Target::Ios), &meta, config, &strings)?;
     let info_changed = fs::read_to_string(&plist).ok().as_deref() != Some(info.as_str());
     if info_changed {
         fs::write(&plist, &info)?;
     }
+    let strings_changed = crate::apple::write_localized_info(&app, &localized)?;
     let installed = install_binary(host, &app.join("nsh-ios-host"))?;
-    if installed || info_changed || !app.join("_CodeSignature").exists() {
+    if installed || info_changed || strings_changed || !app.join("_CodeSignature").exists() {
         let status = Command::new("codesign")
             .args(["--force", "--sign", "-", "--timestamp=none"])
             .arg(&app)
@@ -1343,15 +1371,63 @@ fn show_simulators(window: SimulatorWindow) {
     ui::warn("no Simulator or DeviceHub app found: the simulator runs without a window");
 }
 
+/// The development host's `Info.plist` strings, by language: the app's
+/// (`config`'s `ios.infoPlistStrings`) over those its crates declare
+/// (`meta`) for the app's languages, as packages take them
+/// ([`crate::module_meta::ModuleMeta::crate_strings`]). The host is not the
+/// app's package: its `Info.plist` is its own, so a translated key it has
+/// no value of is left to the package to refuse
+/// ([`crate::apple::localized_info`]).
+fn dev_host_strings(
+    config: &crate::package::AppConfig,
+    meta: &crate::module_meta::ModuleMeta,
+) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    let mut strings = config.ios.info_plist_strings.clone();
+    crate::module_meta::add_strings(&mut strings, &meta.crate_strings(config));
+    // Checked as `nsh.json`'s are.
+    crate::apple::AppleConfig {
+        info_plist_strings: strings.clone(),
+        ..Default::default()
+    }
+    .info_plist_strings(crate::apple::ApplePlatform::Ios)?;
+    Ok(strings)
+}
+
+/// The `InfoPlist.strings` files of `strings` (checked by
+/// [`dev_host_strings`]), by language: none of a language without text.
+fn localized_files(
+    strings: &serde_json::Map<String, serde_json::Value>,
+) -> std::collections::BTreeMap<String, String> {
+    strings
+        .iter()
+        .filter_map(|(language, texts)| {
+            let texts: std::collections::BTreeMap<String, String> = texts
+                .as_object()?
+                .iter()
+                .filter_map(|(key, text)| Some((key.clone(), text.as_str()?.to_owned())))
+                .collect();
+            (!texts.is_empty()).then(|| (language.clone(), crate::apple::strings_file(&texts)))
+        })
+        .collect()
+}
+
 /// The development host's `Info.plist` with the keys the app's crates
-/// declare for `triple` ([`crate::module_meta`]) that it does not set.
-fn with_crates_info(plist: String, triple: &str) -> anyhow::Result<String> {
-    let meta = crate::module_meta::for_dev_host(triple, crate::module_meta::Platform::Ios);
-    if meta.ios_info.is_empty() {
+/// declare (`meta`, [`crate::module_meta`]) that it does not set, and the
+/// app's languages declared as its packages declare them: its `locales`
+/// (`config`) and those its `Info.plist` strings (`strings`) have text in
+/// ([`crate::package::bundle_languages`]).
+fn with_crates_info(
+    plist: String,
+    meta: &crate::module_meta::ModuleMeta,
+    config: &crate::package::AppConfig,
+    strings: &serde_json::Map<String, serde_json::Value>,
+) -> anyhow::Result<String> {
+    let languages = crate::package::bundle_languages(&config.localizations, strings);
+    if meta.ios_info.is_empty() && languages.is_empty() {
         return Ok(plist);
     }
     let crates = crate::apple::AppleConfig {
-        info_plist: meta.ios_info,
+        info_plist: meta.ios_info.clone(),
         ..Default::default()
     }
     .info_plist(crate::apple::ApplePlatform::Ios)?;
@@ -1363,6 +1439,13 @@ fn with_crates_info(plist: String, triple: &str) -> anyhow::Result<String> {
         if !dict.contains_key(&key) {
             dict.insert(key, value);
         }
+    }
+    if !languages.is_empty() {
+        dict.insert("CFBundleDevelopmentRegion".into(), "en".into());
+        dict.insert(
+            "CFBundleLocalizations".into(),
+            plist::Value::Array(languages.into_iter().map(plist::Value::String).collect()),
+        );
     }
     let mut out = Vec::new();
     value.to_writer_xml(&mut out)?;
@@ -1679,5 +1762,63 @@ mod tests {
         let target = Target::from_str("gpui", false).unwrap();
         assert_eq!(target, Target::Gpui);
         assert_eq!(target.platform().binary(false), "nsh-gpui-host");
+    }
+
+    /// The development host declares the app's languages as its packages
+    /// do (`locales` and those its strings have text in), and takes the
+    /// crates' translations for those languages only.
+    #[test]
+    fn dev_hosts_declare_the_apps_languages() {
+        let mut config: crate::package::AppConfig = serde_json::from_value(serde_json::json!({
+            "ios": { "infoPlistStrings": {
+                "zh-Hans": { "NSCameraUsageDescription": "用相机拍照。" },
+                "ko": {}
+            } }
+        }))
+        .unwrap();
+        config.localizations = vec!["ja".into()];
+        let mut meta = crate::module_meta::ModuleMeta::default();
+        for (language, text) in [("ja", "カメラ。"), ("de", "Kamera."), ("zh-Hans", "相机。")]
+        {
+            meta.ios_strings.insert(
+                language.into(),
+                serde_json::json!({ "NSCameraUsageDescription": text }),
+            );
+        }
+        let strings = super::dev_host_strings(&config, &meta).unwrap();
+        let files = super::localized_files(&strings);
+        assert_eq!(
+            files.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["ja", "zh-Hans"]
+        );
+        // The app's own text wins over the crate's.
+        assert_eq!(
+            files["zh-Hans"],
+            "\"NSCameraUsageDescription\" = \"用相机拍照。\";\n"
+        );
+        let info =
+            super::with_crates_info(super::info_plist(Target::Ios), &meta, &config, &strings)
+                .unwrap();
+        let info = plist::Value::from_reader_xml(info.as_bytes()).unwrap();
+        let languages: Vec<&str> = info.as_dictionary().unwrap()["CFBundleLocalizations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(plist::Value::as_string)
+            .collect();
+        assert_eq!(languages, ["en", "ja", "zh-Hans"]);
+        // An app without languages leaves the host's Info.plist as it is.
+        let plain = crate::package::AppConfig::default();
+        let none = crate::module_meta::ModuleMeta::default();
+        assert_eq!(
+            super::with_crates_info(
+                super::info_plist(Target::Ios),
+                &none,
+                &plain,
+                &Default::default()
+            )
+            .unwrap(),
+            super::info_plist(Target::Ios)
+        );
     }
 }

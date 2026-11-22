@@ -2773,6 +2773,7 @@ const Storage: {
   removeItem(key: string): Promise<void>;
   keys(): Promise<string[]>;
   clear(): Promise<void>;
+  on(event: "change", listener: (change: { key: string | null; value: string | null }) => void): () => void;
 };
 ```
 
@@ -2783,6 +2784,7 @@ const Storage: {
 | `await Storage.removeItem(key)` | `Storage::remove_item(key)` |
 | `await Storage.keys()` | `Storage::get_all_keys() -> Vec<String>` |
 | `await Storage.clear()` | `Storage::clear()` |
+| `Storage.on("change", listener)` | `Storage::on_change(f)` |
 
 Rust 函数是同步的，因为数据就在内存中：在组件运行的地方（组件函数体、事件处理函数和任务）调用它们。
 
@@ -2799,7 +2801,7 @@ Rust 函数是同步的，因为数据就在内存中：在组件运行的地方
 
 损坏的 `storage.json` 会被保留为同目录下的 `storage.json.corrupt`，应用从空存储开始；读不了的文件则让应用的改动只留在内存中，文件本身永远不会被覆盖。
 
-在 Web 上，应用的多个标签页共用同一份存储：其中一个标签页设置、删除或清空的内容，其他标签页随后都能读到。浏览器拒绝保存的值（浏览器自身的配额用尽，或用户禁止了网站保存数据）会像超过 5 MB 的值一样被拒绝。
+在 Web 上，应用的多个标签页共用同一份存储：其中一个标签页设置、删除或清空的内容，其他标签页随后都能读到，并会收到 [`change`](#storageon)。桌面应用的多个窗口也同样共用。浏览器拒绝保存的值（浏览器自身的配额用尽，或用户禁止了网站保存数据）会像超过 5 MB 的值一样被拒绝。
 
 app id 是 `nsh.json` 中的 `id`，它随应用一起传递：`nsh build` 和 `nsh package` 把它写在 bundle 旁边，开发服务器会发送它，签名包则带有经发布密钥证书担保的 id。因此无论应用在哪里运行，都无需任何设置就各自保存自己的数据；没有 id 的应用保存在 `default` 下。宿主应用可以另选位置（见[在 iOS 中嵌入](../docs/ios.md)和[在 Android 中嵌入](../docs/android.md)）。
 
@@ -2861,6 +2863,32 @@ clear(): Promise<void>;
 ```
 
 删除应用的所有键，例如在用户退出登录时。Rust：`Storage::clear()`。
+
+### Storage.on
+
+```ts
+on(event: "change", listener: (change: { key: string | null; value: string | null }) => void): () => void;
+```
+
+每当存储在别处被改动时调用 `listener`：在 Web 上是应用的另一个标签页，或是共用同一份存储的应用的另一个窗口或视图。`key` 是改动的键，所有键都被删除时为 `null`；`value` 是它现在的值，被删除时为 `null`。监听函数运行时，`getItem` 已经读得到新值。本标签页或本窗口自己的改动不会触发，没有改变条目的改动也不会触发；没有监听时发生的改动不会保留：开始监听时先读取需要的值。返回一个停止监听的函数；组件添加的监听随组件一起停止。Rust：`Storage::on_change(f)`，在当前 owner 存活期间以 `StorageChange`（`key()`、`value()`）调用 `f`。
+
+用它让设置在多个标签页和窗口之间保持一致：
+
+```rust tabs
+let theme = signal(Storage::get_item("theme"));
+Storage::on_change(move |change| {
+    if change.key().is_none_or(|key| key == "theme") {
+        theme.set(change.value().map(str::to_owned));
+    }
+});
+```
+
+```tsx tabs
+const theme = signal(await Storage.getItem("theme"));
+Storage.on("change", ({ key, value }) => {
+  if (key === null || key === "theme") theme.set(value);
+});
+```
 
 ### 把 signal 保存在设备上
 
