@@ -52155,6 +52155,127 @@ fn unfocused_keys_follow_named_window_content_changes() {
     assert_eq!(mounted_content(&c.commit().unwrap()), Some(None));
 }
 
+/// [`WordsEngine`]'s lines, kept by its layout for [`TextEngine::lines`].
+struct LinesEngine;
+
+fn word_lines(text: &str, max: f32) -> Vec<f32> {
+    let mut lines = vec![0.0f32];
+    for word in text.split(' ') {
+        let width = word.chars().count() as f32 * 8.0;
+        let line = lines.last_mut().unwrap();
+        if *line > 0.0 && *line + 8.0 + width > max {
+            lines.push(width);
+        } else if *line > 0.0 {
+            *line += 8.0 + width;
+        } else {
+            *line = width;
+        }
+    }
+    lines
+}
+
+impl TextEngine for LinesEngine {
+    type Prepared = String;
+
+    fn prepare(&self, text: &AttributedText) -> String {
+        text.text.clone()
+    }
+
+    fn measure(&self, text: &String, max_width: Option<Points>) -> Size<Points> {
+        let lines = word_lines(text, max_width.map_or(f32::INFINITY, |m| m.0));
+        let widest = lines.iter().copied().fold(0.0, f32::max);
+        size_pt(widest, lines.len() as f32 * 16.0)
+    }
+
+    fn layout(&self, text: &String, size: Size<Points>) -> TextLayout {
+        TextLayout(Arc::new(word_lines(text, size.width.0)))
+    }
+
+    fn lines(&self, layout: &TextLayout) -> Vec<crate::TextLine> {
+        layout.downcast::<Vec<f32>>().map_or_else(Vec::new, |l| {
+            l.iter()
+                .map(|&w| crate::TextLine {
+                    width: Points(w),
+                    ..crate::TextLine::default()
+                })
+                .collect()
+        })
+    }
+}
+
+/// `text-pretty` breaks a paragraph whose last line holds a lone word
+/// narrower, as many lines with a longer last one; a paragraph that ends
+/// well, or fits on a line, keeps its box's width.
+#[test]
+fn pretty_text_takes_words_down_to_a_short_last_line() {
+    // At 200: "aaaa bbbb cccc dddd eeee" (192) and "ff" (16).
+    let text = "aaaa bbbb cccc dddd eeee ff";
+    let mut cx = words_context(text, 0);
+    cx.pretty = Some(Box::new((f32::NAN, Points::ZERO)));
+    let width = pretty_width(&LinesEngine, &mut cx, Points(200.0));
+    assert!(width < Points(200.0), "{width:?}");
+    let lines = word_lines(text, width.0);
+    assert_eq!(lines.len(), 2);
+    assert!(
+        lines[1] >= width.0 * PRETTY_LAST_LINE,
+        "{lines:?} at {width:?}"
+    );
+    // Asked again: the same, from what it kept.
+    assert_eq!(pretty_width(&LinesEngine, &mut cx, Points(200.0)), width);
+
+    let mut cx = words_context("aaaa bbbb cccc dddd eeee ffff gggg", 0);
+    assert_eq!(
+        pretty_width(&LinesEngine, &mut cx, Points(200.0)),
+        Points(200.0)
+    );
+    let mut cx = words_context("aaaa bbbb", 0);
+    assert_eq!(
+        pretty_width(&LinesEngine, &mut cx, Points(200.0)),
+        Points(200.0)
+    );
+    // A clamp keeps its lines where they are.
+    let mut cx = words_context(text, 2);
+    assert_eq!(
+        pretty_width(&LinesEngine, &mut cx, Points(200.0)),
+        Points(200.0)
+    );
+}
+
+#[test]
+fn text_pretty_wraps_and_inherits_with_white_space() {
+    let mut c = core();
+    view_with_classes(&mut c, 2, "text-pretty");
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 3,
+                tag: Tag::Text,
+            },
+            Op::CreateText {
+                id: 4,
+                text: "hello".into(),
+            },
+            Op::Insert {
+                parent: 3,
+                child: 4,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+        ],
+    );
+    c.commit();
+    let (no_wrap, _, _, pretty) = c.inherited_text_wrap(c.key(3).unwrap());
+    assert_eq!((no_wrap, pretty), (Some(false), true));
+    c.apply(class_op(3, "whitespace-normal")).unwrap();
+    c.commit();
+    assert!(!c.inherited_text_wrap(c.key(3).unwrap()).3);
+}
+
 #[test]
 fn an_overlay_leaves_escape_to_focused_content_that_captures_it() {
     use crate::KeyCapture;
