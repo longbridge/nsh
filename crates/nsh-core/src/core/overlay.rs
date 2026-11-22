@@ -1331,6 +1331,31 @@ impl<M: TextEngine> Core<M> {
         if event.pointer_type != Some(PointerType::Mouse) || self.overlay_state.watched.is_empty() {
             return Vec::new();
         }
+        self.presses_on(id, event.page_position)
+    }
+
+    /// A press at `page` that went to view `id`'s hosted native content
+    /// (a web view's page takes its presses, and the platform does not
+    /// pick them through the core): the shown overlays watching presses
+    /// that `id` is outside of hear `onPressOutside`, as for a press on
+    /// any other view.
+    ///
+    /// Returns those events for the caller to hand out, as
+    /// [`Core::context_menu_presses_outside`].
+    pub fn presses_on_native(
+        &mut self,
+        id: NodeId,
+        page: Point<Points>,
+    ) -> Vec<(NodeId, EventPayload)> {
+        if self.overlay_state.watched.is_empty() {
+            return Vec::new();
+        }
+        self.presses_on(id, page)
+    }
+
+    /// The `onPressOutside` events of a press at `page` on `id` and its
+    /// ancestors.
+    fn presses_on(&mut self, id: NodeId, page: Point<Points>) -> Vec<(NodeId, EventPayload)> {
         let Ok(mut key) = self.key(id) else {
             return Vec::new();
         };
@@ -1339,7 +1364,7 @@ impl<M: TextEngine> Core<M> {
             path.push(self.nodes[key as usize].id);
             key = self.nodes[key as usize].parent;
         }
-        self.presses_outside(event.page_position, &path)
+        self.presses_outside(page, &path)
     }
 
     /// A press beyond the root view, at `page` in its coordinates: on what
