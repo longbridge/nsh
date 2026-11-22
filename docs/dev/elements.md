@@ -653,7 +653,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   During an input method's composition Linux and the web insert nothing and log a warning. With `"insert"` the
   input has inserted the paste already, so an `insertText` from `onPaste` inserts it a second time. Where Paste is offered, it is offered for images and files too while
   the app listens. iOS: `Field` / `Area` override `paste:` (`system::pasted`: strings, `IMAGE_TYPES` data else
-  `UIImage` PNGs, file URLs) and `canPerformAction:withSender:`; with a `maxLength` they insert the clipped text
+  `UIImage` PNGs, file URLs, and the data of items that are no text, link or image, as a document copied in Files,
+  named as its item provider suggests) and `canPerformAction:withSender:`; with a `maxLength` they insert the clipped text
   themselves (`paste_text`, the test agent's paste too) instead of UIKit's `paste:`; Android: `setOnReceiveContentListener` (API 31;
   the clipboard and keyboards' rich content; images read from their content URIs, through `Native.paste`; the text
   goes back to the EditText while it inserts) and `onTextContextMenuItem` before; macOS: `TextArea` and a field
