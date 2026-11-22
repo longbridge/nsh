@@ -53,6 +53,7 @@ mod runtime;
 mod rust_animation;
 mod rust_app;
 mod rust_classes;
+mod rust_host;
 mod rust_inputs;
 mod rust_lists;
 mod rust_media;

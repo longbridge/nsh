@@ -49,6 +49,7 @@ mod events;
 pub(crate) mod flow;
 pub mod header;
 pub(crate) mod host;
+pub(crate) mod host_events;
 mod js;
 pub(crate) mod json_host;
 mod keyboard;

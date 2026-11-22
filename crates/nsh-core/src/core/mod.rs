@@ -3868,16 +3868,11 @@ impl<M: TextEngine> Core<M> {
                 // Checked before the grants: a host may put the name in a
                 // path or a URL, where `user.x/../admin` leaves `user.*`.
                 Command::HostCall { id: call, name, .. }
-                    if !crate::access::valid_host_name(name) =>
+                    if crate::host_channel::refusal(&self.access, name).is_some() =>
                 {
-                    let error = crate::host_channel::invalid_name(name);
-                    self.deny(error.message().to_owned());
-                    self.answer_host(*call, Err(error));
-                    continue;
-                }
-                Command::HostCall { id: call, name, .. } if !self.access.allows_host(name) => {
-                    let error = crate::host_channel::not_granted(name);
-                    self.deny(error.message().to_owned());
+                    let error =
+                        crate::host_channel::refusal(&self.access, name).expect("a refused name");
+                    self.deny(error.to_string());
                     self.answer_host(*call, Err(error));
                     continue;
                 }

@@ -1348,26 +1348,94 @@ impl Drop for SpeechRecognition {
     }
 }
 
-/// The value function `name` of the embedding app returns for `args`
-/// (TS: `host.call`), to await in a task.
-pub(crate) fn host_call(
-    name: String,
+/// Calls function `name` of the app's host with `args` (TS: `host.call`),
+/// to await in a task: what it returns, or why the call failed. The host
+/// is the embedding app (the native app around the view, whose handlers
+/// answer: `HostChannel::handle` in Rust, `handle` in Swift and Java), or
+/// on the web the page that runs the app (`createPlayer`'s `host`, the
+/// module nsh.json's `web.host` names). A call waits
+/// [`DEFAULT_CALL_TIMEOUT`](crate::host_channel::DEFAULT_CALL_TIMEOUT)
+/// ([`host_call_with`] says otherwise), on the app's clock. `name` must
+/// be granted by `capabilities.host` in nsh.json ([`HostError::Denied`]);
+/// where nothing embeds the app it fails with [`HostError::Unavailable`].
+///
+/// [`HostError::Denied`]: crate::host_channel::HostError::Denied
+/// [`HostError::Unavailable`]: crate::host_channel::HostError::Unavailable
+pub async fn host_call(
+    name: impl Into<String>,
     args: crate::JsonValue,
-) -> Answer<Result<crate::JsonValue, super::JsError>> {
-    let (answer, action) = super::services::host_call(name, args);
+) -> Result<crate::JsonValue, crate::host_channel::HostError> {
+    host_call_with(name, args, crate::host_channel::HostCallOptions::default()).await
+}
+
+/// [`host_call`] as `options` say (TS: `host.call(name, args, options)`).
+pub async fn host_call_with(
+    name: impl Into<String>,
+    args: crate::JsonValue,
+    options: crate::host_channel::HostCallOptions,
+) -> Result<crate::JsonValue, crate::host_channel::HostError> {
+    use crate::host_channel::HostError;
+    let name = name.into();
+    // One so long the clock never gets there waits as `ZERO` does.
+    let timeout = options.timeout;
+    let deadline = (!timeout.is_zero())
+        .then(|| crate::time::now().checked_add(timeout))
+        .flatten();
+    let (answer, action) = super::services::host_call(name.clone(), args);
     act(action);
-    answer
+    let Some(at) = deadline else {
+        return answer.await;
+    };
+    // On the app's clock, as its timers: a manual clock moves it.
+    let answered = {
+        let mut answer = std::pin::pin!(answer);
+        let mut delay = std::pin::pin!(timer_until(at));
+        std::future::poll_fn(|cx| {
+            if let std::task::Poll::Ready(result) = answer.as_mut().poll(cx) {
+                return std::task::Poll::Ready(Some(result));
+            }
+            if delay.as_mut().poll(cx).is_ready() {
+                return std::task::Poll::Ready(None);
+            }
+            std::task::Poll::Pending
+        })
+        .await
+    };
+    answered.unwrap_or_else(|| {
+        // The answer went with the block: the core drops its slot now,
+        // and a late reply finds none (`Core::answer_host`).
+        act(Action::ForgetHostCalls);
+        Err(HostError::TimedOut { name, timeout })
+    })
 }
 
-/// Hands `args` to function `name` of the embedding app, with no answer
-/// (TS: `host.post`).
-pub(crate) fn host_post(name: String, args: crate::JsonValue) {
-    act(Action::HostPost { name, args });
+/// Hands `args` to function `name` of the app's host, with no answer (TS:
+/// `host.post`): its handler of `name` gets it, as [`host_call`]'s calls.
+/// Where nothing embeds the app, or the host has no handler of `name`, the
+/// post goes nowhere; a name `capabilities.host` does not grant, or no
+/// valid one, is refused and logged.
+pub fn host_post(name: impl Into<String>, args: crate::JsonValue) {
+    act(Action::HostPost {
+        name: name.into(),
+        args,
+    });
 }
 
-/// Forgets the host calls whose answers were dropped (they timed out).
-pub(crate) fn forget_host_calls() {
-    act(Action::ForgetHostCalls);
+/// Runs `listener` with the data of every event `event` the app's host
+/// sends while the current owner lives (TS: `host.on`): the embedding
+/// app's (`HostChannel::send` in Rust, `send` in Swift and Java) and on
+/// the web the page's (`player.hostEvent`). The events the host sent
+/// before the app started reach the listeners the app's first render
+/// adds; an event that comes before a listener of its name is not
+/// replayed to it. Events need no capability.
+pub fn on_host_event(event: impl Into<String>, listener: impl Fn(&crate::JsonValue) + 'static) {
+    let owner = Owner::current();
+    let listener: super::host_events::HostListener =
+        Rc::new(move |data: &crate::JsonValue| owner.run(|| listener(data)));
+    let listeners = &executor().host_events;
+    let id = listeners.borrow_mut().add(event.into(), listener);
+    let subscription = super::host_events::HostSubscription::new(listeners, id);
+    cleanup(move || drop(subscription));
 }
 
 /// The size in pixels of the image at `src` (TS: `Image.getSize`).

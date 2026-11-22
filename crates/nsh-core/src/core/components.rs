@@ -771,8 +771,15 @@ pub(super) struct Components {
     open_files: OpenFiles,
     /// Calls of the embedding app's functions (`nsh/host`), by request id:
     /// their answers.
-    host_calls: FxHashMap<u64, AnswerSlot<Result<crate::JsonValue, crate::element::JsError>>>,
+    host_calls:
+        FxHashMap<u64, AnswerSlot<Result<crate::JsonValue, crate::host_channel::HostError>>>,
     next_host_call: u64,
+    /// The calls and posts not handed to the engine yet
+    /// ([`Core::take_host_requests`]).
+    host_requests: Vec<crate::host_channel::HostRequest>,
+    /// The host's events until the first commit
+    /// ([`Core::release_host_events`]); `None` after it.
+    held_host_events: Option<crate::host_channel::HostInbox>,
     /// URLs being opened (`openUrl`), by request id: their answers.
     url_opens: FxHashMap<u32, AnswerSlot<bool>>,
     /// The clipboard writes sent to the platform waiting for its result,
@@ -962,6 +969,8 @@ impl Default for Components {
             open_files: OpenFiles::default(),
             host_calls: FxHashMap::default(),
             next_host_call: 1,
+            host_requests: Vec::new(),
+            held_host_events: Some(Default::default()),
             web_evaluations: Default::default(),
             canvas_renders: Default::default(),
             fetches: FxHashMap::default(),
@@ -6615,30 +6624,36 @@ impl<M: TextEngine> Core<M> {
                     command,
                 });
             }
+            // Checked here, before the engine routes them: the embedding
+            // app's channel and the platform get only granted names.
             Action::HostCall { name, args, answer } => {
-                if !self.components.environment.host {
-                    answer
-                        .borrow_mut()
-                        .deliver(Err(crate::host_channel::no_host()));
+                use crate::host_channel::{HostError, MAX_PENDING_CALLS};
+                let refused = crate::host_channel::refusal(&self.access, &name).or_else(|| {
+                    (self.components.host_calls.len() >= MAX_PENDING_CALLS)
+                        .then(|| HostError::TooManyCalls { name: name.clone() })
+                });
+                if let Some(error) = refused {
+                    if !matches!(error, HostError::TooManyCalls { .. }) {
+                        self.deny(error.to_string());
+                    }
+                    answer.borrow_mut().deliver(Err(error));
                     return;
                 }
                 let id = self.components.next_host_call;
                 self.components.next_host_call += 1;
                 self.components.host_calls.insert(id, answer);
-                let _ = self.apply_op(Op::Command {
-                    id: crate::ROOT_ID,
-                    command: Command::HostCall { id, name, args },
-                });
+                self.components
+                    .host_requests
+                    .push(crate::host_channel::HostRequest::Call { id, name, args });
             }
-            // Dropped without a host, as an SDK channel drops it without
-            // an embedding app.
             Action::HostPost { name, args } => {
-                if self.components.environment.host {
-                    let _ = self.apply_op(Op::Command {
-                        id: crate::ROOT_ID,
-                        command: Command::HostPost { name, args },
-                    });
+                if let Some(error) = crate::host_channel::refusal(&self.access, &name) {
+                    self.deny(error.to_string());
+                    return;
                 }
+                self.components
+                    .host_requests
+                    .push(crate::host_channel::HostRequest::Post { name, args });
             }
             // A call timed out (`runtime/host.rs`), its answer dropped: its
             // slot waits no more.
@@ -7386,12 +7401,12 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// The answer to host call `id`: the host's value, or its error. A
-    /// call that timed out (`runtime/host.rs`) takes none: its late answer
-    /// is dropped.
-    pub(super) fn answer_host(
+    /// call that timed out ([`crate::element::host_call_with`]) takes none:
+    /// its late answer is dropped.
+    pub fn answer_host(
         &mut self,
         id: u64,
-        result: Result<crate::JsonValue, crate::element::JsError>,
+        result: Result<crate::JsonValue, crate::host_channel::HostError>,
     ) {
         match self.components.host_calls.remove(&id) {
             Some(answer) if std::rc::Rc::strong_count(&answer) > 1 => {
@@ -7401,6 +7416,85 @@ impl<M: TextEngine> Core<M> {
                 log::debug!(target: "js", "nsh/host: dropped the answer to call {id}, which no longer waits")
             }
         }
+    }
+
+    /// Moves the host calls and posts of the app's Rust and JS
+    /// ([`crate::element::host_call`], [`crate::element::host_post`])
+    /// since the last call to `out`, checked and granted. The engine hands
+    /// each to the embedding app's channel where it is configured (its
+    /// answers come with [`Core::answer_host`]), else to
+    /// [`Core::host_request_on_platform`].
+    pub fn take_host_requests(&mut self, out: &mut Vec<crate::host_channel::HostRequest>) {
+        out.append(&mut self.components.host_requests);
+    }
+
+    /// Hands `request` to the platform's host (the web page's): a call
+    /// goes out as [`Command::HostCall`], answered by the root's
+    /// [`EventKind::Host`] `{ type: "reply" }`, a post as
+    /// [`Command::HostPost`]. Without one ([`Environment::host`]) a call
+    /// fails at once ([`crate::host_channel::HostError::Unavailable`]) and
+    /// a post goes nowhere, as a channel without a handler drops it.
+    ///
+    /// [`Environment::host`]: crate::platform::Environment::host
+    pub fn host_request_on_platform(&mut self, request: crate::host_channel::HostRequest) {
+        use crate::host_channel::{HostError, HostRequest};
+        let host = self.components.environment.host;
+        let command = match request {
+            HostRequest::Call { id, .. } if !host => {
+                self.answer_host(id, Err(HostError::Unavailable));
+                return;
+            }
+            HostRequest::Post { .. } if !host => return,
+            HostRequest::Call { id, name, args } => Command::HostCall { id, name, args },
+            HostRequest::Post { name, args } => Command::HostPost { name, args },
+        };
+        let _ = self.apply_op(Op::Command {
+            id: crate::ROOT_ID,
+            command,
+        });
+    }
+
+    /// The host's event `event` with `data`: the components' listeners of
+    /// it ([`crate::element::on_host_event`]) run, oldest first. The
+    /// engine calls it for the embedding app's events; the web page's come
+    /// as the root's [`EventKind::Host`] events. Those that come before
+    /// the first commit wait for it ([`Core::release_host_events`]), so
+    /// the listeners the first render adds hear what the host sent before
+    /// the app started.
+    pub fn host_event(&mut self, event: &str, data: &crate::JsonValue) {
+        if let Some(held) = &mut self.components.held_host_events {
+            if let Some((dropped, _)) = held.push(event.to_owned(), data.clone()) {
+                log::warn!(target: "js", "nsh/host: the app had not started; its oldest event (\"{dropped}\") was dropped");
+            }
+            return;
+        }
+        let listeners = self.components.executor.host_events.borrow().of(event);
+        if listeners.is_empty() {
+            return;
+        }
+        let _entered = self.components.runtime.enter();
+        for listener in listeners {
+            let result = caught(|| listener(data));
+            self.apply_actions();
+            if let Err(message) = result {
+                log::error!(target: "js", "a listener of the host's \"{event}\" failed: {message}");
+            }
+        }
+    }
+
+    /// Hands the host's events that came before the first commit to the
+    /// listeners there now ([`Core::host_event`]); the engine calls it
+    /// after each commit. True when some were delivered: what their
+    /// listeners changed shows in another round.
+    pub fn release_host_events(&mut self) -> bool {
+        let Some(mut held) = self.components.held_host_events.take() else {
+            return false;
+        };
+        let events = held.take_all();
+        for (event, data) in &events {
+            self.host_event(event, data);
+        }
+        !events.is_empty()
     }
 
     /// Events the components handle before anything else: dialog answers
@@ -7826,14 +7920,22 @@ impl<M: TextEngine> Core<M> {
                 self.answer_clipboard(request as u32, answer);
                 true
             }
-            // The host's replies; its events go on to `nsh/host`'s
-            // listeners (`nsh-js`).
+            // The host's replies; its events reach the components'
+            // listeners, then go on to `nsh/host`'s (`nsh-js`).
             EventKind::Host if id == crate::ROOT_ID => {
                 let EventPayload::Json(reply) = payload else {
                     return false;
                 };
-                if reply.get("type").and_then(crate::JsonValue::as_str) != Some("reply") {
-                    return false;
+                match reply.get("type").and_then(crate::JsonValue::as_str) {
+                    Some("reply") => {}
+                    Some("event") => {
+                        if let Some(event) = reply.get("event").and_then(crate::JsonValue::as_str) {
+                            let data = reply.get("payload").cloned().unwrap_or_default();
+                            self.host_event(event, &data);
+                        }
+                        return false;
+                    }
+                    _ => return false,
                 }
                 // JSON's numbers may come as floats (`1.0`); `1.5` is no
                 // call. Ids stay within JS' safe integers.
@@ -7853,11 +7955,12 @@ impl<M: TextEngine> Core<M> {
                 let result = if reply.get("ok").and_then(crate::JsonValue::as_bool) == Some(true) {
                     Ok(reply.get("value").cloned().unwrap_or_default())
                 } else {
-                    Err(crate::host_channel::host_error(
+                    Err(crate::host_channel::HostError::Failed(
                         reply
                             .get("error")
                             .and_then(crate::JsonValue::as_str)
-                            .unwrap_or("nsh/host: the call failed"),
+                            .unwrap_or("nsh/host: the call failed")
+                            .to_owned(),
                     ))
                 };
                 self.answer_host(call, result);
