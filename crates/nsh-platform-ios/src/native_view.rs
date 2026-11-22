@@ -703,6 +703,27 @@ impl NshView {
         self.ivars().props.borrow_mut().accessibility.label = label;
     }
 
+    /// Whether the view says nothing of its own to a screen reader (no
+    /// role, name, value, help, actions or press, and not made one
+    /// element): a text view's inline links and views can then be elements
+    /// of their own ([`crate::text_access`]).
+    pub(crate) fn reads_only_content(&self) -> bool {
+        let a = &self.ivars().props.borrow().accessibility;
+        a.role == AccessibilityRole::None
+            && a.accessible != Some(true)
+            && a.label.is_none()
+            && a.value.is_none()
+            && a.hint.is_none()
+            && a.description.is_none()
+            && a.actions.is_empty()
+            && !self.ivars().pressable.get()
+    }
+
+    /// `accessibilityState={{ disabled: true }}`.
+    pub(crate) fn accessibility_disabled(&self) -> bool {
+        self.ivars().props.borrow().accessibility.state.disabled
+    }
+
     /// The view has press handlers.
     pub(crate) fn set_pressable(&self, pressable: bool, control: &EngineControl) {
         self.ivars().pressable.set(pressable);
