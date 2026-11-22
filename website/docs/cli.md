@@ -292,6 +292,22 @@ Upgrades the app's nshm to the newest versions their requirements accept, all of
 nsh upgrade [NAME]...
 ```
 
+## nsh maven
+
+Adds Android libraries published to Maven repositories, as `group:artifact:version`, and what they depend on. NSH
+resolves them as Gradle resolves an Android app's runtime classpath, downloads the files into `android/maven/`, records
+what it asked for and got in `android/maven/maven.json`, and lists the files in `nsh.json` `android.libraries`
+([Packaging](./packaging.md#libraries-from-maven)). Packaging then reads only those files.
+
+```sh
+nsh maven com.google.firebase:firebase-messaging:26.0.1   # add, or change the version of, a library
+nsh maven                                                 # resolve the libraries added before again
+nsh maven --remove com.google.firebase:firebase-messaging # remove one, with what only it needed
+```
+
+`--repository <URL>` (repeated, `https://` or `file://`) searches other repositories, in order, instead of Google's
+Maven repository and Maven Central; later runs keep them.
+
 ## nsh remove
 
 Removes nshm from the app: from `nsh.json` `"dependencies"`, `nsh.lock` and the `[dependencies]` of the app's crate. Their installed copies stay in `~/.nsh/nshms`, where other apps may use them.

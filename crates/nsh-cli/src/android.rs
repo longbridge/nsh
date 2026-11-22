@@ -19,6 +19,7 @@ use crate::apple::{Color, LaunchScreen, Themed};
 mod libraries;
 mod library_manifest;
 mod library_resources;
+pub(crate) mod maven;
 
 pub(crate) use libraries::{Library, file_sha256};
 

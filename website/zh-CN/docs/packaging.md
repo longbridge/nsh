@@ -260,7 +260,7 @@ Rust 通过 JNI 可以调用大多数 Android API，但有些 API 需要应用�
 供 `ServiceLoader` 读取的 `META-INF/services/...`）放到包的根目录。dex 文件按原样放入，不经过 `d8` 合并，所以它和 jar 里重复定义的类在打包时不会被发现。同一个文件被列出两次或被两个 crate
 列出时只放入一次；两个不同的文件定义了同一个类时构建会停止，并指出这两个文件。不列出任何库的应用照旧打包，不会运行 `d8`。
 
-这些库都是本地文件：NSH 不下载它们，也不解析 Maven 依赖，所以 SDK 依赖的库也要一并列出。
+这些库都是本地文件，所以 SDK 依赖的库也要一并列出，或者交给 `nsh maven` 去找。
 
 Android 库（`.aar`）带来的不只是类（类按 jar 的方式处理）：它的原生库（`jni/<abi>/*.so`）按包含的 ABI 放入，和 NSH 自己的一样不压缩存放；
 它的 assets 和应用自己的 assets 放在一起；它的资源（`res/`）并入包里的资源，库的代码照它构建时那样通过自己的 `R` 类读取；它 manifest 里的权限、功能、`<queries>` 和组件并入应用的 manifest，相对类名（`.PushService`）
@@ -308,6 +308,24 @@ application = ['<provider android:name="com.example.push.Init" android:authoriti
 `nsh run --target android` 同样带上这些库：TSX 应用放在开发宿主里，Rust 应用放在它构建的包里。开发宿主对所有应用使用同一个包名，
 所以按包名校验应用的 SDK（推送服务的 SDK、地图 SDK）只能在应用自己的包里使用：用 `nsh package --target android --run` 试。
 TSX 开发宿主（TSX 应用的 `nsh run --target android`）不包含这些文件；Rust 应用的 `nsh run` 会构建它的包，因此会包含。
+
+#### 来自 Maven 的库
+
+`nsh maven` 添加发布在 Maven 仓库（先 Google 的 Maven 仓库，再 Maven Central）中的库，连同它们的全部依赖：
+
+```sh
+nsh maven com.google.firebase:firebase-messaging:26.0.1
+```
+
+它只解析一次，方式与 Gradle 解析 Android 应用运行时类路径相同：库发布了 Gradle 模块元数据时使用它（Android 应用运行的变体、Kotlin
+Multiplatform 模块指向的 `-jvm` 或 `-android` 模块、BOM 的约束），否则使用 POM（父 POM、属性、`dependencyManagement` 和导入的 BOM、
+`compile` 与 `runtime` 依赖、排除项）；每个模块只取一个版本，即依赖图中要求的最高版本。它把文件下载到 `android/maven/`，按仓库给出的校验和检查，
+并把它们放进 `nsh.json` 的 `android.libraries`，排在应用自己的条目之后。`android/maven/maven.json` 记录请求的库、仓库，以及每个文件和它的
+SHA-256；把它和文件一起提交，或者只提交它，之后再运行 `nsh maven` 下载文件。打包和 `nsh run` 都不会访问网络。
+
+列出应用自己直接使用的库即可，就像 Gradle 的 `implementation`；它们的依赖会一并带上。用另一个版本运行 `nsh maven` 会改变该库的版本，
+`--remove group:artifact` 会移除它，每次都会根据全部请求重新解析文件。不支持：Gradle 插件（`google-services.json` 的值放在
+`android/res/values`）、需要构建脚本处理的依赖替换规则和 capability 冲突，以及仓库没有列出版本时除精确的 `[1.0]` 之外的版本范围。
 
 ### 组件与 queries
 

@@ -289,8 +289,7 @@ when packaging. A file listed twice, or by two
 crates, goes in once; a class that two different files define stops the build, naming both files. An app that lists
 no libraries is packaged as before, without `d8`.
 
-The libraries are local files: NSH does not download them or resolve Maven dependencies, so list the libraries an SDK
-depends on as well.
+The libraries are local files, so list the libraries an SDK depends on as well, or let `nsh maven` find them.
 
 An Android library (`.aar`) brings more than its classes, which go the jars' way: its native libraries
 (`jni/<abi>/*.so`) go in for the ABIs the package has, stored uncompressed like NSH's own; its assets join the app's
@@ -349,6 +348,30 @@ application = ['<provider android:name="com.example.push.Init" android:authoriti
 `nsh run --target android` carries the libraries too: a TSX app's in its development host, a Rust app's in the package
 it builds. The development host has the same package name for every app, so an SDK that checks the app's package name
 (a push service's SDK, a maps SDK) works only in the app's own package: try it with `nsh package --target android --run`.
+
+#### Libraries from Maven
+
+`nsh maven` adds libraries published to Maven repositories (Google's Maven repository, then Maven Central) with all
+they depend on:
+
+```sh
+nsh maven com.google.firebase:firebase-messaging:26.0.1
+```
+
+It resolves them once, as Gradle resolves an Android app's runtime classpath: Gradle module metadata where a library
+publishes it (the variant an Android app runs, Kotlin Multiplatform modules' `-jvm` or `-android` modules, BOM
+constraints), otherwise its POM (parents, properties, `dependencyManagement` and imported BOMs, `compile` and
+`runtime` dependencies, exclusions); one version of each module, the highest any of the graph asks for. It downloads
+the files into `android/maven/`, checked against the checksums the repository gives, and puts them in `nsh.json`
+`android.libraries` after the app's own entries. `android/maven/maven.json` records the libraries asked for, the
+repositories, and every file with its SHA-256; commit it with the files, or commit it alone and run `nsh maven`
+again to download them. Packaging and `nsh run` never reach the network.
+
+Name the libraries the app uses itself, as Gradle's `implementation` does; their dependencies come along. Running
+`nsh maven` with another version of a library changes it, `--remove group:artifact` removes it, and the files are
+resolved again from all of them each time. Not supported: Gradle plugins (`google-services.json` values go in
+`android/res/values`), dependency substitution rules and capability conflicts that a build script would settle,
+and version ranges other than an exact `[1.0]` when the repository lists no versions.
 
 ### Components and queries
 

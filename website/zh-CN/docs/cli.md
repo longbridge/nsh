@@ -287,6 +287,20 @@ nshm 的构建脚本和过程宏会在应用构建时执行，它的代码以应
 nsh upgrade [NAME]...
 ```
 
+## nsh maven
+
+添加发布在 Maven 仓库中的 Android 库（写作 `group:artifact:version`）以及它们的依赖。NSH 按 Gradle 解析 Android 应用运行时类路径的方式解析它们，
+把文件下载到 `android/maven/`，在 `android/maven/maven.json` 里记录请求了什么、得到了什么，并把这些文件列入 `nsh.json` 的
+`android.libraries`（见[打包](./packaging.md#来自-maven-的库)）。之后打包只读取这些文件。
+
+```sh
+nsh maven com.google.firebase:firebase-messaging:26.0.1   # 添加某个库，或改变它的版本
+nsh maven                                                 # 重新解析之前添加的库
+nsh maven --remove com.google.firebase:firebase-messaging # 移除一个库，以及只有它需要的依赖
+```
+
+`--repository <URL>`（可重复，`https://` 或 `file://`）按顺序搜索其他仓库，代替 Google 的 Maven 仓库和 Maven Central；之后的运行会沿用它们。
+
 ## nsh remove
 
 从应用中移除 nshm：从 `nsh.json` 的 `"dependencies"`、`nsh.lock` 和应用 crate 的 `[dependencies]` 中删除。已安装的副本留在 `~/.nsh/nshms`，其他应用可能还在使用。

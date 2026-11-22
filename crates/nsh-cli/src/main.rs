@@ -404,6 +404,26 @@ enum Command {
         /// The nshm to upgrade, by package name (default: all).
         names: Vec<String>,
     },
+    /// Add Android libraries published to Maven repositories to the app in
+    /// this directory (or the nearest one above it): `nsh maven
+    /// com.google.firebase:firebase-messaging:26.0.1`. Resolves them with
+    /// their dependencies as Gradle does, downloads the files into
+    /// `android/maven/` and lists them in `nsh.json` `android.libraries`,
+    /// so packaging stays offline. Without libraries, resolves the ones
+    /// added before again (`android/maven/maven.json`).
+    Maven {
+        /// Libraries to add, as `group:artifact:version`; one already added
+        /// takes the version given.
+        libraries: Vec<String>,
+        /// Libraries to remove, as `group:artifact`.
+        #[arg(long, value_name = "GROUP:ARTIFACT")]
+        remove: Vec<String>,
+        /// The repositories to search, in order, `https://` or `file://`
+        /// (default: Google's Maven repository, then Maven Central); kept
+        /// for later runs.
+        #[arg(long, value_name = "URL")]
+        repository: Vec<String>,
+    },
     /// Add, remove or list the runtimes installed beside this nsh: those
     /// of other platforms than this machine's (`android`, `ios`, `web`,
     /// `gpui`, `tui`), which a command that needs one also adds itself.
@@ -712,6 +732,7 @@ impl Command {
             | Command::Add { .. }
             | Command::Remove { .. }
             | Command::Upgrade { .. }
+            | Command::Maven { .. }
             | Command::UpdateManifest { .. }
             | Command::Certify { .. }
             | Command::Verify { .. }
@@ -1166,6 +1187,11 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
         ),
         Command::Remove { names } => nshm::remove(&std::env::current_dir()?, &names),
         Command::Upgrade { names } => nshm::upgrade(&std::env::current_dir()?, &names),
+        Command::Maven {
+            libraries,
+            remove,
+            repository,
+        } => android::maven::run(&std::env::current_dir()?, &libraries, &remove, &repository),
         Command::Component { action } => match action {
             ComponentAction::List => component::list(),
             ComponentAction::Add { names } => component::add_named(&names),
