@@ -504,45 +504,97 @@ fn movable_in(s: &ScrollState, viewport: (f32, f32)) -> bool {
     s.behavior.enabled && (max.x > min.x || max.y > min.y)
 }
 
-/// Whether a trackpad gesture by `(dx, dy)` may stretch `view` past its
-/// edge: it is enabled, bounces and scrolls along the gesture's axis (a
-/// zoomable view along both). Input gives it gestures no scroll view can
-/// follow ([`can_scroll`]).
-pub(crate) fn can_bounce(view: &NshView, dx: f32, dy: f32) -> bool {
-    let state = view.state();
-    let refreshes = state.events.contains(EventKind::Refresh);
-    state.scroll.as_ref().is_some_and(|s| {
-        bounces_in(
-            s,
-            (state.frame.size.width.0, state.frame.size.height.0),
-            dx.abs() > dy.abs(),
-            refreshes,
-        )
-    })
+/// Which scroll view in `chain` (innermost first) a trackpad gesture by
+/// `(dx, dy)` stretches past its edge, when [`can_scroll`] found none that can
+/// move:
+///
+/// 1. The innermost bouncing scroll view along the gesture's axis whose
+///    content overflows, that zooms, or (vertically) that pulls to refresh.
+/// 2. Otherwise, for a vertical gesture only, the outermost enabled vertical
+///    scroll view in `chain`, if it bounces: on macOS, AppKit's `.automatic`
+///    elasticity still stretches a standalone short vertical scroll view while
+///    horizontal elasticity requires overflow, and a fitting inner vertical
+///    scroll view (an editor as tall as its document inside a list) hands the
+///    stretch to the list around it.
+pub(crate) fn bounce_target(chain: &[NshView], dx: f32, dy: f32) -> Option<NshView> {
+    let horizontal = dx.abs() > dy.abs();
+    let kinds: Vec<Option<Bounce>> = chain
+        .iter()
+        .map(|v| {
+            let state = v.state();
+            let refreshes = state.events.contains(EventKind::Refresh);
+            state.scroll.as_ref().map(|s| {
+                bounce_kind(
+                    s,
+                    (state.frame.size.width.0, state.frame.size.height.0),
+                    horizontal,
+                    refreshes,
+                )
+            })
+        })
+        .collect();
+    let idx = bounce_index(&kinds, horizontal)?;
+    Some(chain[idx].clone())
 }
 
-/// [`can_bounce`] for scroll state `s` in a viewport of `viewport` points,
-/// along the gesture's axis (`horizontal`). As AppKit's scroll views, one
-/// whose content fits along that axis stays still, so the gesture stretches
-/// a scroll view around it that can move: an editor as tall as its document
-/// inside a list. A vertical view that pulls to refresh (`refreshes`)
-/// stretches all the same.
-fn bounces_in(s: &ScrollState, viewport: (f32, f32), horizontal: bool, refreshes: bool) -> bool {
-    if !s.behavior.enabled || !s.behavior.bounces {
-        return false;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Bounce {
+    /// Does not participate along this gesture's axis.
+    None,
+    /// Stretches at its edge: zooms, overflows along the gesture's axis, or
+    /// pulls to refresh vertically.
+    Primary,
+    /// Enabled vertical scroll view whose content fits with `bounces: true`:
+    /// stretches only when it is the outermost enabled vertical scroll view.
+    VerticalFit,
+    /// Enabled vertical scroll view with `bounces: false`: never stretches,
+    /// and claims the outer vertical slot so a fitting inner view stays still.
+    VerticalRigid,
+}
+
+fn bounce_kind(s: &ScrollState, viewport: (f32, f32), horizontal: bool, refreshes: bool) -> Bounce {
+    if !s.behavior.enabled {
+        return Bounce::None;
     }
     if s.behavior.zooms() {
-        return true;
+        return if s.behavior.bounces {
+            Bounce::Primary
+        } else {
+            Bounce::None
+        };
     }
     if s.horizontal != horizontal {
-        return false;
+        return Bounce::None;
     }
     let (min, max) = range(s, viewport);
     if horizontal {
-        max.x > min.x
-    } else {
-        max.y > min.y || refreshes
+        return if s.behavior.bounces && max.x > min.x {
+            Bounce::Primary
+        } else {
+            Bounce::None
+        };
     }
+    if !s.behavior.bounces {
+        return Bounce::VerticalRigid;
+    }
+    if max.y > min.y || refreshes {
+        Bounce::Primary
+    } else {
+        Bounce::VerticalFit
+    }
+}
+
+fn bounce_index(kinds: &[Option<Bounce>], horizontal: bool) -> Option<usize> {
+    if let Some(i) = kinds.iter().position(|k| *k == Some(Bounce::Primary)) {
+        return Some(i);
+    }
+    if horizontal {
+        return None;
+    }
+    let outermost = kinds
+        .iter()
+        .rposition(|k| matches!(k, Some(Bounce::VerticalFit | Bounce::VerticalRigid)))?;
+    (kinds[outermost] == Some(Bounce::VerticalFit)).then_some(outermost)
 }
 
 /// Sends `kind` with the offset if JS listens to it.
@@ -2667,48 +2719,79 @@ mod tests {
         assert!(movable_with((900.0, 200.0), true, true));
     }
 
-    /// Whether a gesture along `horizontal` stretches a bouncing scroll view
-    /// of `content` points in a 300 x 200 viewport.
-    fn bounces_with(
+    /// A scroll view's [`Bounce`] classification for `content` points in a
+    /// 300 x 200 viewport along `horizontal`.
+    fn bounce_kind_with(
         content: (f32, f32),
         view_horizontal: bool,
         horizontal: bool,
         refreshes: bool,
-    ) -> bool {
+        bounces: bool,
+    ) -> Bounce {
         let s = ScrollState {
             content,
             horizontal: view_horizontal,
             behavior: nsh_core::ScrollBehavior {
                 enabled: true,
-                bounces: true,
+                bounces,
                 ..Default::default()
             },
             ..Default::default()
         };
-        bounces_in(&s, (300.0, 200.0), horizontal, refreshes)
+        bounce_kind(&s, (300.0, 200.0), horizontal, refreshes)
     }
 
-    /// A gesture no scroll view can follow stretches the innermost one that
-    /// bounces: one whose content fits (an editor as tall as its document,
-    /// in a list) passes it on to the one around it.
+    /// A standalone short vertical scroll view still stretches (AppKit's
+    /// `.automatic` vertical elasticity), while a horizontal scroll view whose
+    /// content fits does not.
     #[test]
-    fn a_scroll_view_whose_content_fits_does_not_bounce() {
-        assert!(!bounces_with((300.0, 200.0), false, false, false));
-        assert!(!bounces_with((300.0, 120.0), false, false, false));
-        assert!(!bounces_with((300.0, 200.0), true, true, false));
+    fn standalone_bounce_matches_appkit_axes() {
+        let short_v = bounce_kind_with((300.0, 120.0), false, false, false, true);
+        let short_h = bounce_kind_with((300.0, 200.0), true, true, false, true);
+        assert_eq!(bounce_index(&[Some(short_v)], false), Some(0));
+        assert_eq!(bounce_index(&[Some(short_h)], true), None);
+    }
+
+    /// An inner vertical scroll view whose content fits (an editor as tall as
+    /// its document inside a list) hands the stretch to the outer list,
+    /// whether the outer list overflows or also fits; if the outer list
+    /// disables bounce, neither stretches.
+    #[test]
+    fn nested_fitting_vertical_scroll_view_hands_bounce_to_outer() {
+        let fit = bounce_kind_with((300.0, 120.0), false, false, false, true);
+        let overflow = bounce_kind_with((300.0, 800.0), false, false, false, true);
+        let no_bounce = bounce_kind_with((300.0, 800.0), false, false, false, false);
+        assert_eq!(bounce_index(&[Some(fit), Some(overflow)], false), Some(1));
+        assert_eq!(bounce_index(&[Some(fit), Some(fit)], false), Some(1));
+        assert_eq!(bounce_index(&[Some(fit), Some(no_bounce)], false), None);
+        // When the inner view itself overflows, it keeps its edge stretch.
+        assert_eq!(
+            bounce_index(&[Some(overflow), Some(overflow)], false),
+            Some(0)
+        );
     }
 
     #[test]
     fn an_overflowing_scroll_view_bounces_along_its_axis() {
-        assert!(bounces_with((300.0, 800.0), false, false, false));
-        assert!(bounces_with((900.0, 200.0), true, true, false));
-        assert!(!bounces_with((300.0, 800.0), false, true, false));
+        let tall_v = bounce_kind_with((300.0, 800.0), false, false, false, true);
+        let wide_h = bounce_kind_with((900.0, 200.0), true, true, false, true);
+        let wrong_axis = bounce_kind_with((300.0, 800.0), false, true, false, true);
+        assert_eq!(bounce_index(&[Some(tall_v)], false), Some(0));
+        assert_eq!(bounce_index(&[Some(wide_h)], true), Some(0));
+        assert_eq!(bounce_index(&[Some(wrong_axis)], true), None);
     }
 
-    /// Pulling to refresh needs the stretch, however short the content.
+    /// Pulling to refresh needs the stretch, however short the content, even
+    /// when nested inside another vertical scroll view.
     #[test]
     fn a_scroll_view_that_refreshes_bounces_when_its_content_fits() {
-        assert!(bounces_with((300.0, 120.0), false, false, true));
+        let refreshes = bounce_kind_with((300.0, 120.0), false, false, true, true);
+        let outer_fit = bounce_kind_with((300.0, 120.0), false, false, false, true);
+        assert_eq!(bounce_index(&[Some(refreshes)], false), Some(0));
+        assert_eq!(
+            bounce_index(&[Some(refreshes), Some(outer_fit)], false),
+            Some(0)
+        );
     }
 
     #[test]
