@@ -310,6 +310,7 @@ pub fn run_file(
 
 /// Starts the test file's VM and collects what it reports until its tests
 /// ended.
+#[allow(clippy::too_many_arguments)]
 fn drive(
     run: &TestRun,
     session: &Arc<Session>,
