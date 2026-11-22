@@ -231,12 +231,18 @@ fn intermediate_dex(
         );
     }
     fs::write(partial.join("done"), b"")?;
-    if dir.exists() {
-        fs::remove_dir_all(&dir)?;
+    // Another run may have moved its own copy in meanwhile, the same dex,
+    // which it or a third run may be reading: keep it, never remove it.
+    if !dir.join("done").exists() && fs::rename(&partial, &dir).is_ok() {
+        return Ok(dir);
     }
-    if fs::rename(&partial, &dir).is_err() {
-        // Another run moved its own copy in first: the same dex.
-        let _ = fs::remove_dir_all(&partial);
+    let _ = fs::remove_dir_all(&partial);
+    if !dir.join("done").exists() {
+        bail!(
+            "could not keep the dex of {} in {}",
+            jar.library.path.display(),
+            dir.display()
+        );
     }
     Ok(dir)
 }

@@ -284,7 +284,8 @@ and dex files, relative to `nsh.json`. An nshm lists its own in its `Cargo.toml`
 
 The package turns the jars into dex with the SDK's `d8` and carries their classes after NSH's runtime, where the
 app's class loader finds them. The files a jar carries besides its classes (`META-INF/services/...` for
-`ServiceLoader`, for one) go to the root of the package. A dex file goes in as it is. A file listed twice, or by two
+`ServiceLoader`, for one) go to the root of the package. A dex file goes in as it is, without `d8`, so a class it defines again besides a jar is not found
+when packaging. A file listed twice, or by two
 crates, goes in once; a class that two different files define stops the build, naming both files. An app that lists
 no libraries is packaged as before, without `d8`.
 
