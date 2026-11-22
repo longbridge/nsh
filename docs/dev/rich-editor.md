@@ -150,8 +150,9 @@ their marks' parts (`classes.marks`), split at inline decorations (their `class`
 attachments with their spec's `class`. A node view (`node_view.rs`: `NodeView`, registered in `NodeViews` or a
 plugin's `node_views` as an `Arc<dyn NodeView>`) renders a node type's blocks: `create` makes the element, which
 follows `cx.node()` while `update` returns true; `editable_content_slot` puts the editor's rendering of the content
-(`cx.take_content()`) inside it, measured in the content box; otherwise the node is an atom selected and moved over
-as a unit. The only looks of the view's own are the caret (2 points, the theme's `foreground`), the selection (the
+(`cx.take_content()`) inside it, measured in the block's box (a block moved by an edit before it carries it along)
+and again when its frame in its parent or the block's size changes; otherwise the node is an atom selected and moved
+over as a unit. The only looks of the view's own are the caret (2 points, the theme's `foreground`), the selection (the
 theme's selection color), the placeholder (`muted-foreground`) and the composition (underlined), each a part the app
 restyles.
 
@@ -266,6 +267,14 @@ the new size in the grid's tracks and commits `setColumnWidth` / `setRowHeight` 
 selects the column or row (a cell selection), a drag on desktops shows the drop line (`tableDropIndicator`, `primary`)
 and moves it with `moveTableColumn` / `moveTableRow` on release. Table gestures come before the content box's
 selecting (`Rv::table_target` at the press).
+
+Each table's handles and grips are a region of their own (`table_controls`), placed from that table's layout alone
+(`Rv::table_layout`). Every block reports its frame in an event of its own, so a region over all the tables, run again
+on `layout_rev`, laid every table out again for each block: the first commit of a long document with tables grew with
+its square. A table's region follows its own revision (`Rv::watch_table`), which `Rv::table_moved` moves when the
+table's frame, a cell's frame, or the frame or inset of a box around it changes (`Tree::table_holders` lists the tables
+in each box, the document's included), and the selection's table (a memo of its block) wakes only the two tables a
+change of it concerns. The drop line is a region of its own too (`drop_line`).
 
 ## The JS API (`rich_editor/js/`)
 

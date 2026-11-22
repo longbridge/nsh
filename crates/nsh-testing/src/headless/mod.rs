@@ -56,7 +56,7 @@ use std::{
     io::Write,
     sync::{
         Arc, OnceLock,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -116,6 +116,8 @@ struct ChannelSink {
     /// On a manual clock: the engine asked for a frame, which the driver
     /// gives it when it moves the clock ([`Headless`]).
     wanted: Option<Arc<AtomicBool>>,
+    /// On the system's clock: frames asked for and not yet given.
+    frames: Arc<AtomicUsize>,
 }
 
 impl MountSink for ChannelSink {
@@ -133,11 +135,14 @@ impl MountSink for ChannelSink {
             return;
         }
         let control = self.control.clone();
+        let frames = self.frames.clone();
+        frames.fetch_add(1, Ordering::SeqCst);
         std::thread::spawn(move || {
             std::thread::sleep(FRAME);
             if let Some(control) = control.get() {
                 control.frame();
             }
+            frames.fetch_sub(1, Ordering::SeqCst);
         });
     }
 }
@@ -158,6 +163,8 @@ struct Launched {
     errors: Receiver<AppError>,
     /// On a manual clock: it asked for a frame.
     wanted: Option<Arc<AtomicBool>>,
+    /// On the system's clock: frames asked for and not yet given.
+    frames: Arc<AtomicUsize>,
 }
 
 /// Reports `url` as a link the system handed the app.
@@ -207,11 +214,13 @@ where
     let (errors, errors_rx) = crossbeam_channel::unbounded();
     let control = Arc::new(OnceLock::new());
     let wanted = config.clock.is_manual().then(Arc::default);
+    let frames = Arc::new(AtomicUsize::new(0));
     let sink = ChannelSink {
         batches,
         errors,
         control: control.clone(),
         wanted: wanted.clone(),
+        frames: frames.clone(),
     };
     let engine = Engine::start_with(config, text_engine, sink, |control| {
         // Steps reach every view of a page, below its fold too.
@@ -229,6 +238,7 @@ where
         batches: batches_rx,
         errors: errors_rx,
         wanted,
+        frames,
     })
 }
 
@@ -398,6 +408,12 @@ pub struct Headless {
     clock: Clock,
     /// On a manual clock: the engine asked for a frame.
     wanted: Option<Arc<AtomicBool>>,
+    /// On the system's clock: frames the engine asked for, not yet given.
+    frames: Arc<AtomicUsize>,
+    /// The app's `nsh/host` calls handed to the test so far: their answer
+    /// comes from elsewhere, so a step that made one waits for the batches
+    /// to stop, as for a request in flight.
+    host_calls_sent: u64,
     /// The embedding app's channel with the app (`EngineConfig::host`),
     /// which the test plays.
     host: nsh_engine::HostChannel,
@@ -492,6 +508,7 @@ impl Headless {
             batches,
             errors,
             wanted,
+            frames,
         } = launch(config, displays, text_engine, link)?;
         let mut screen = Screen::default();
         screen.set_viewport(viewport);
@@ -532,6 +549,8 @@ impl Headless {
             observer: None,
             clock,
             wanted,
+            frames,
+            host_calls_sent: 0,
             host,
             last_press: None,
             #[cfg(feature = "js")]
@@ -606,15 +625,21 @@ impl Headless {
     /// sent ([`EngineControl::flush`]): whether it is idle, nothing left to
     /// run and no request in flight. False if it took until `deadline`.
     fn flush(&self, deadline: Instant) -> bool {
+        self.flush_until_due(deadline).0
+    }
+
+    /// [`Headless::flush`], also with when the engine's next timer is due
+    /// ([`EngineControl::flush_until_due`]).
+    fn flush_until_due(&self, deadline: Instant) -> (bool, Option<Instant>) {
         let (tx, rx) = crossbeam_channel::bounded(1);
-        self.engine.control().flush(move |idle| {
-            let _ = tx.send(idle);
+        self.engine.control().flush_until_due(move |idle, due| {
+            let _ = tx.send((idle, due));
         });
         match rx.recv_deadline(deadline) {
-            Ok(idle) => idle,
-            Err(crossbeam_channel::RecvTimeoutError::Timeout) => false,
+            Ok(answer) => answer,
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => (false, None),
             // A gone engine sends nothing more.
-            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => true,
+            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => (true, None),
         }
     }
 
@@ -899,7 +924,9 @@ impl Headless {
     ///
     /// Without it, as on desktops, a session opens the page as `open_url`
     /// does ([`Screen::opened_urls`]) and ends with a link of its callback
-    /// scheme ([`Headless::open_with_url`]).
+    /// scheme ([`Headless::open_with_url`]); on the web, or with
+    /// [`field@nsh_core::platform::Environment::scheme_links`] `Some(false)`,
+    /// where no such link comes, it fails at once.
     pub fn on_auth_session(
         &mut self,
         outcome: nsh_core::auth_session::AuthSessionOutcome,
@@ -1151,6 +1178,7 @@ impl Headless {
                     command: Command::HostCall { id, name, args },
                 } = item
                 {
+                    self.host_calls_sent += 1;
                     calls(*id, name, args);
                 }
             }
@@ -1388,6 +1416,7 @@ impl Headless {
 
     /// Applies the batches that came, without waiting.
     fn drain(&mut self) -> bool {
+        self.tick_held_press();
         let mut applied = false;
         while let Ok(batch) = self.batches.try_recv() {
             self.apply(&batch);
@@ -1403,6 +1432,7 @@ impl Headless {
     /// the next check.
     fn pump(&mut self, deadline: Instant) -> Pumped {
         loop {
+            self.tick_held_press();
             if self.exited {
                 return Pumped::Exited;
             }
@@ -1416,6 +1446,12 @@ impl Headless {
                 _ if framed => Instant::now(),
                 Some(frame) if !self.clock.is_manual() => frame.min(deadline),
                 _ => deadline,
+            };
+            let wake = if !self.clock.is_manual() {
+                self.held_press_timeout()
+                    .map_or(wake, |after| wake.min(Instant::now() + after))
+            } else {
+                wake
             };
             let timeout = wake.saturating_duration_since(Instant::now());
             crossbeam_channel::select_biased! {
@@ -1515,7 +1551,7 @@ impl Headless {
             if self.applied != applied || self.wants_frames() || !self.errors.is_empty() {
                 continue;
             }
-            if idle {
+            if idle && self.host.calls_in_flight() == 0 {
                 return true;
             }
             // What comes from elsewhere comes in real time.
@@ -1530,35 +1566,78 @@ impl Headless {
 
     /// Applies batches until the app is done with a step, or for 2 s at
     /// most (an app updating all the time never is): false if the limit
-    /// ended it. On the system's clock it is done once the engine has
-    /// handled what the step sent ([`Headless::caught_up`]) and then no
-    /// batch came for 100 ms and no native animation that ends by itself
-    /// runs; on a manual clock, as soon as the engine says it is idle
-    /// ([`EngineControl::flush`]), without waiting.
+    /// ended it. Either clock asks the engine whether it is idle
+    /// ([`EngineControl::flush`]) instead of waiting for the batches to
+    /// stop; on the system's clock a timer due within 100 ms, a pending
+    /// frame or a native animation that ends by itself is waited for
+    /// ([`Headless::idle_on_system_clock`]).
     pub fn settle(&mut self) -> bool {
         if self.clock.is_manual() {
             self.idle_on_manual_clock(SETTLE)
         } else {
-            let end = Instant::now() + SETTLE;
-            self.caught_up(end);
-            self.quiet(QUIET, end.saturating_duration_since(Instant::now()))
+            self.idle_on_system_clock(SETTLE)
         }
     }
 
-    /// On the system's clock: has the engine run what was sent to it
-    /// ([`EngineControl::flush`]) and applies the batches that brought,
-    /// again while they bring more (what applying them sends back: a
-    /// scroll reported, a focus moved), until `end` at most. The quiet
-    /// that ends a step is then counted from there, so an engine taking
-    /// longer than [`QUIET`] over a step does not end it early, with the
-    /// next step acting on the screen as it was before.
-    fn caught_up(&mut self, end: Instant) {
-        while !self.exited && self.errors.is_empty() && Instant::now() < end {
+    /// On the system's clock: applies batches until the app is done with a
+    /// step, or for `limit` at most: false if the limit ended it. Done is
+    /// asked, as on a manual clock, and means what waiting [`QUIET`] for no
+    /// batch meant: the engine ran everything sent to it and its batches
+    /// were applied, no frame it asked for is pending, no native animation
+    /// that ends by itself runs, and nothing it runs by itself (a timer)
+    /// comes due within [`QUIET`]. Something due sooner is waited for, until
+    /// no batch came for [`QUIET`] as before. A
+    /// request in flight, whose answer comes from elsewhere, is waited for
+    /// by the batches stopping for [`QUIET`], as before.
+    fn idle_on_system_clock(&mut self, limit: Duration) -> bool {
+        let end = Instant::now() + limit;
+        let mut last = Instant::now();
+        let host_calls = self.host_calls_sent;
+        loop {
+            if self.exited || !self.errors.is_empty() {
+                return true;
+            }
+            if Instant::now() >= end {
+                return false;
+            }
             let applied = self.applied;
-            self.flush(end);
+            let (idle, due) = self.flush_until_due(end);
             self.drain();
-            if self.applied == applied {
-                return;
+            if self.applied != applied || !self.errors.is_empty() {
+                last = Instant::now();
+                continue;
+            }
+            let framing = self.frames.load(Ordering::SeqCst) > 0 || self.animator.finishing();
+            if !idle || self.host_calls_sent != host_calls {
+                return self.quiet(QUIET, end.saturating_duration_since(Instant::now()));
+            }
+            // A call a handler (the test's) has not answered yet: its answer
+            // comes from another thread, in real time.
+            if self.host.calls_in_flight() > 0 {
+                match self.pump((Instant::now() + FRAME).min(end)) {
+                    Pumped::Batch => last = Instant::now(),
+                    Pumped::Error | Pumped::Exited => return true,
+                    Pumped::Timeout => {}
+                }
+                continue;
+            }
+            let now = Instant::now();
+            let soon = due.filter(|&at| at < now + QUIET);
+            // What the wait for no batch would have ended, it still ends: a
+            // timer that keeps coming due and renders nothing.
+            let quiet = now >= last + QUIET && !self.animator.finishing();
+            if (!framing && soon.is_none()) || quiet {
+                return true;
+            }
+            // Wait for the frame, the animation's next frame or the timer.
+            let wake = match soon {
+                Some(at) if !framing => at,
+                _ => now + FRAME,
+            };
+            match self.pump(wake.min(last + QUIET).min(end)) {
+                Pumped::Batch => last = Instant::now(),
+                Pumped::Error | Pumped::Exited => return true,
+                Pumped::Timeout => {}
             }
         }
     }
@@ -2823,6 +2902,7 @@ mod tests {
     };
 
     use super::*;
+    use crate::DragOptions;
 
     /// A paragraph with a link and a marked word.
     #[component]
@@ -2918,7 +2998,7 @@ mod tests {
         view()
             .on_press(move || {
                 count.update(|c| *c += 1);
-                set_clipboard(format!("copied {}", count.get_untracked()));
+                drop(set_clipboard(format!("copied {}", count.get_untracked())));
             })
             .child(text("Copy"))
     }
@@ -2958,13 +3038,13 @@ mod tests {
                         let mut item = ClipboardItem::default();
                         item.text = "a b".into();
                         item.html = Some("<p>a <b>b</b></p>".into());
-                        set_clipboard_item(item)
+                        drop(set_clipboard_item(item))
                     })
                     .child(text("Rich")),
             )
             .child(
                 view()
-                    .on_press(|| set_clipboard("plain"))
+                    .on_press(|| drop(set_clipboard("plain")))
                     .child(text("Plain")),
             )
     }
@@ -3579,6 +3659,49 @@ mod tests {
     }
 
     #[test]
+    fn where_no_link_of_the_apps_schemes_comes_the_session_fails_at_once() {
+        let start = |os: Os, scheme_links: Option<bool>| {
+            let mut config = EngineConfig::new(Root::of::<SigningIn>().url_schemes(["demo"]));
+            config.environment.os = os;
+            config.environment.scheme_links = scheme_links;
+            let mut app = Headless::start(config).unwrap();
+            app.first_render().unwrap();
+            app
+        };
+        // The app claims `demo`: only the missing links can refuse it.
+        let refused = "text:ERR_FEATURE_UNAVAILABLE_ON_PLATFORM";
+        // The web hears only its page's address: the claimed scheme's link
+        // never comes, so the session fails instead of waiting forever.
+        let mut app = start(Os::Web, None);
+        app.press("Sign in").unwrap();
+        app.wait_for(refused).unwrap();
+        assert!(app.screen().opened_urls().is_empty());
+        // The same where the platform says it hears none, whatever the OS
+        // (the GPUI and terminal backends).
+        let mut app = start(Os::Ios, Some(false));
+        app.press("Sign in").unwrap();
+        app.wait_for(refused).unwrap();
+        assert!(app.screen().opened_urls().is_empty());
+        // A platform that says it hears them waits for the callback.
+        let mut app = start(Os::Web, Some(true));
+        app.press("Sign in").unwrap();
+        assert_eq!(
+            app.screen().opened_urls(),
+            ["https://example.com/authorize"]
+        );
+        app.open_with_url("demo://done?code=9").unwrap();
+        app.wait_for("text:signed in demo://done?code=9").unwrap();
+        // A session the platform shows itself needs no link.
+        let mut app = start(Os::Web, None);
+        app.on_auth_session(nsh_core::auth_session::AuthSessionOutcome::Completed(
+            "demo://done?code=10".into(),
+        ))
+        .unwrap();
+        app.press("Sign in").unwrap();
+        app.wait_for("text:signed in demo://done?code=10").unwrap();
+    }
+
+    #[test]
     fn the_app_closes_its_sign_in_session() {
         let mut app = Headless::start(EngineConfig::new(Root::of::<SigningIn>())).unwrap();
         app.first_render().unwrap();
@@ -4013,19 +4136,28 @@ mod tests {
         let mut app = Headless::start(EngineConfig::new(crate::windowed_root::<Drags>())).unwrap();
         app.first_render().unwrap();
         // A pan follows the finger to the end.
-        app.drag("id:card", point(px(120.0), px(-30.0))).unwrap();
+        app.drag(
+            "id:card",
+            point(px(120.0), px(-30.0)),
+            DragOptions::default(),
+        )
+        .unwrap();
         app.wait_for("Pan 120 -30").unwrap();
         // A finger moving off a button cancels its press: up, no press.
-        app.drag("Button", point(px(0.0), px(40.0))).unwrap();
+        app.drag("Button", point(px(0.0), px(40.0)), DragOptions::default())
+            .unwrap();
         app.wait_for("Presses 0 ups 1").unwrap();
         // A small slip still presses it.
-        app.drag("Button", point(px(0.0), px(4.0))).unwrap();
+        app.drag("Button", point(px(0.0), px(4.0)), DragOptions::default())
+            .unwrap();
         app.wait_for("Presses 1 ups 2").unwrap();
         // The views listening to touches hear the finger down, moving, up.
-        app.drag("id:pad", point(px(0.0), px(30.0))).unwrap();
+        app.drag("id:pad", point(px(0.0), px(30.0)), DragOptions::default())
+            .unwrap();
         assert!(!app.shows("Touches 0"));
         // A list pulled down past its top refreshes; dragged up, it scrolls.
-        app.drag("Row 2", point(px(0.0), px(300.0))).unwrap();
+        app.drag("Row 2", point(px(0.0), px(300.0)), DragOptions::default())
+            .unwrap();
         app.wait_for("Refreshes 1").unwrap();
         let Pick::One(list) = app
             .screen()
@@ -4036,13 +4168,18 @@ mod tests {
         assert_eq!(app.screen().scroll(list).map(|s| s.y), Some(Points::ZERO));
         // It takes the drag over once the finger passed the slop, a frame
         // in, and follows it from there, as the platforms' scroll views do.
-        app.drag("Row 2", point(px(0.0), px(-200.0))).unwrap();
+        app.drag("Row 2", point(px(0.0), px(-200.0)), DragOptions::default())
+            .unwrap();
         assert_eq!(app.screen().scroll(list).map(|s| s.y), Some(px(190.0)));
         // A short pull does not.
-        app.drag("Row 6", point(px(0.0), px(-40.0))).unwrap();
-        app.drag("Row 6", point(px(0.0), px(100.0))).unwrap();
+        app.drag("Row 6", point(px(0.0), px(-40.0)), DragOptions::default())
+            .unwrap();
+        app.drag("Row 6", point(px(0.0), px(100.0)), DragOptions::default())
+            .unwrap();
         assert!(app.shows("Refreshes 1"));
-        let error = app.drag("Nothing", point(px(1.0), px(1.0))).unwrap_err();
+        let error = app
+            .drag("Nothing", point(px(1.0), px(1.0)), DragOptions::default())
+            .unwrap_err();
         assert!(error.starts_with("no view matches `Nothing`"), "{error}");
     }
 
@@ -4069,9 +4206,11 @@ mod tests {
             Headless::start(EngineConfig::new(crate::windowed_root::<FarPull>())).unwrap();
         app.first_render().unwrap();
         // 150 points of finger rubber-band to less than 100 (past 64).
-        app.drag("Row 2", point(px(0.0), px(150.0))).unwrap();
+        app.drag("Row 2", point(px(0.0), px(150.0)), DragOptions::default())
+            .unwrap();
         assert!(app.shows("Refreshes 0"));
-        app.drag("Row 2", point(px(0.0), px(1000.0))).unwrap();
+        app.drag("Row 2", point(px(0.0), px(1000.0)), DragOptions::default())
+            .unwrap();
         app.wait_for("Refreshes 1").unwrap();
     }
 

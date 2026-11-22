@@ -396,9 +396,9 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `await app.closeMenu()` | 关闭已打开的上下文菜单，不选择任何项，如同按下 Escape（iOS 上是点按系统菜单之外）。 |
 | `await app.keyboard.press(keys)` | 按下一个带修饰键的按键，写法同 `keymap`（`"mod+k"`、`"shift+/"`、`"escape"`；`mod` 是平台的命令键），如同硬件键盘，在所有平台上都可用（手机和平板也可以接硬件键盘）：由应用的对应快捷键接收（`keymap.bind`、`onKeyCommand`），否则在桌面上选中应用菜单里带这个快捷键的项（`Menu.setApplicationMenu`，输入框有焦点时遵守它的 `when`），否则在 macOS 和 Web 上由 Tab 和 Shift+Tab 在输入框和可按压的视图之间移动键盘焦点（`onFocus`、`onBlur`、`focus:` 样式；有对话框开着时只在最新的对话框里移动，对话框关闭后焦点回到打开前所在的视图），Return 或空格按下焦点所在的视图（该视图须在最新的对话框里，或没有对话框开着；否则按键交给快捷键）；`NavStack` 推入新页面或返回弹出页面时，焦点离开不再显示的页面（它的视图收到 `onBlur`），在 Web 上（`platform: "web"`）Shift+F10 为它请求上下文菜单（`onContextMenu`，`pointerType` 为 `null`），否则由获得焦点的输入框接收字符、Backspace 或回车，否则 Escape 执行返回。 |
 | `await app.keyboard.down(keys)` / `up(keys)` | 按住修饰键（`"mod"`、`"shift"`、`"alt"`、`"ctrl"`、`"meta"`，用 `+` 连接）直到 `up`：期间的按压、拖动和悬停都带着这些键，如同 Mod 加点击或 Shift 加拖动。目前在 headless 和 Linux 上可用。 |
-| `await app.dragAndHold(selector, by)` / `app.drop()` | 像 `drag` 一样拖动，但手指一直按着，直到 `drop()` 在当前位置抬起：其间的步骤可以查看拖动中的画面（拖动预览、放置线）。目前在 headless 和 Linux 上可用。 |
+| `await app.dragAndHold(selector, by, options?)` / `app.drop()` | 像 `drag` 一样拖动，但手指一直按着，直到 `drop()` 在当前位置抬起：其间的步骤可以查看拖动中的画面（拖动预览、放置线）。目前在 headless、Linux 和 iOS 上可用。 |
 | `await app.dropFiles(selector, uris)` | 把本地文件（`file:` URL，如同从文件管理器拖来）放到视图中央：它或外层最近一个监听的视图收到 `onFileDrop`。桌面平台，目前在 headless、Linux 和 macOS 上可用。 |
-| `await app.drag(selector, { x, y })` | 手指落在视图中央，停留 100 ms，再移动 `x`、`y` 点（每帧 10 点）后抬起，由平台的输入系统处理：pan 跟随手指（`pan={{ x, y }}`、`onPanStart`，以及带松手速度的 `onPanEnd`），监听触摸的视图会收到触摸事件（`onTouchStart`、`PanResponder`），滚动视图随手指滚动，拉过顶部足够远时触发刷新（`onRefresh`），手指移开后其下的按压会被取消。在桌面和 web 上由鼠标完成，无头测试里也一样：触摸事件的 `pointerType` 是 `"mouse"`，滚动视图不随它滚动，和这些平台上一样。从可选择视图（`View selectable`、设置了 `selectable` 的 `TextView`）里开始的拖动会跨视图里的文字选择，该视图收到 `onSelectionChange`（复制会得到的文字、它的起始位置和外框）；从别处开始的拖动会清除选区。 |
+| `await app.drag(selector, { x, y }, options?)` | 手指落在视图中央，停留 100 ms，再移动 `x`、`y` 点（每帧 10 点）后抬起，由平台的输入系统处理：pan 跟随手指（`pan={{ x, y }}`、`onPanStart`，以及带松手速度的 `onPanEnd`），监听触摸的视图会收到触摸事件（`onTouchStart`、`PanResponder`），滚动视图随手指滚动，拉过顶部足够远时触发刷新（`onRefresh`），手指移开后其下的按压会被取消。在桌面和 web 上由鼠标完成，无头测试里也一样：触摸事件的 `pointerType` 是 `"mouse"`，滚动视图不随它滚动，和这些平台上一样。从可选择视图（`View selectable`、设置了 `selectable` 的 `TextView`）里开始的拖动会跨视图里的文字选择，该视图收到 `onSelectionChange`（复制会得到的文字、它的起始位置和外框）；从别处开始的拖动会清除选区。 |
 | `await app.wait(ms)` | 让应用运行 `ms` 毫秒：定时器、动画、请求。在手动时钟上，把时钟推进 `ms`（`app.clock.runFor`）。 |
 | `await app.waitFor(selector, options?)` | 有视图匹配时 resolve；传 `{ state: "gone" }` 时，等到没有视图匹配才 resolve；`timeout` 毫秒（5000）后 reject。在手动时钟上，等待时每次把时钟推进一个显示帧，最多推进 `timeout`。 |
 | `await app.waitUntil(condition, options?)` | 应用每发生一次变化就重新检查，`condition()` 返回 true 时 resolve：用于选择器表达不了的条件（`() => app.storage().note === "Milk"`）。在手动时钟上，两次检查之间把时钟推进一个显示帧，最多推进 `timeout`。 |
@@ -447,7 +447,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `await app.quitRequest()` | 像 Quit 菜单项那样请求退出：运行 `Application.on("quitRequest")`，应用只有调用 `Application.quit()` 才会退出。仅限 headless 运行。 |
 | `app.quit()` | 应用是否已退出（`Application.quit()`、Quit 菜单项或最后窗口策略）。退出后后续步骤会报告应用已停止。 |
 
-步骤会等到应用连续 100 ms 没有渲染、并且没有正在运行的、会自行结束的原生动画（对一直在渲染的应用最多等 2 s；在手动时钟上，同时最多等应用时间的 2 s）后才 resolve，所以下一行
+步骤会等到应用连续 100 ms 没有渲染、没有正在运行的、会自行结束的原生动画，并且（`--target macos` 时）应用打开的窗口都已显示出来（对一直在渲染的应用最多等 2 s；在手动时钟上，同时最多等应用时间的 2 s）后才 resolve，所以下一行
 代码运行时，这一步带来的变化已经在屏幕上；之后才出现的内容（响应、定时器）用 `waitFor` 等待。在手动时钟上，步骤不等这
 100 ms：应用一旦跑完这一步和当前时钟时间带来的全部工作（此刻到期的定时器、promise、立即应答的桩响应），且不再需要帧，步骤
 就 resolve（仍有请求在途时除外），所以手动时钟上的测试在步骤之间没有停顿。由其他线程应答的结果（`nsh/host` 调用、
@@ -476,6 +476,8 @@ await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISAB
 `app.spanStyle("id:guide")` 读取嵌套的 `<Text testID="guide">`；`text:word` 读取匹配文字的第一个字符。
 用 `id:note >> text:word` 限定范围，用 `>> nth=0` 选择重复匹配中的一个。
 没有匹配、匹配不唯一或 span 为空时会报错。更新 span 的 `testID` 会复用文本排版，保持 `onTextLayout` 的回调次数。
+
+`drag` 和 `dragAndHold` 的第三个可选参数是 `DragOptions`：`{ hold?: number }`。`hold` 是落指后、开始移动前停留的总毫秒数，省略时保持 100 ms。无头和 iOS 测试支持自定义停留；其他原生 agent 会在开始新的拖动前以 `ERR_NSH_TEST_UNSUPPORTED` 拒绝不支持的自定义停留。负值、非有限值和不可表示的时长会被拒绝。需要长按后拖动时可传 `{ hold: 600 }`，并用 `try` / `finally` 保证 `drop()` 抬起同一根手指。
 
 ### 无界面运行替平台做了什么
 
@@ -558,7 +560,7 @@ test("calls reach the page's host", async () => {
 数据目录；步骤用平台自己的输入作用在选择器指向的视图上，就像 Playwright 在浏览器里那样：
 
 - 按压是在视图中心点击，长按是按住不放，`type` 先点击输入框再逐键输入，`scroll` 是在滚动视图上的触控板手势，`back` 是用户的操作（macOS 和 Linux 上按 Escape，Windows 和 GPUI 里按鼠标的后退键，web 上是浏览器的后退按钮，iOS 上是把 sheet 往下滑，菜单、弹出框或 `Sheet` 打开时是 VoiceOver 的退出手势，否则点标题栏的返回按钮，Android 上是返回键）；
-- 不在屏幕上的视图会先被滚动到可见，每次一个手势；在触摸屏上，手指像用户那样落在页面本身接收拖动的地方，避开跟随拖动的视图（滑块、绘图区域）；滚动视图已经到头时，贴在它边缘的视图就地操作，不会把滚动视图拖过头（那样会触发下拉刷新或关掉页面 sheet）；
+- 不在屏幕上的视图会先被滚动到可见，每次一个手势；在触摸屏上，手指像用户那样落在页面本身接收拖动的地方，避开跟随拖动的视图（滑块、绘图区域）；滚动视图已经到头时，贴在它边缘的视图就地操作，不会把滚动视图拖过头（那样会触发下拉刷新或关掉页面 sheet）；滚动视图内容从边缘下面经过的部分（iOS 上透明的标题栏、Tab 栏、键盘）里的视图会先被滚出来，仍留在那下面或被系统绘制的栏盖住的视图，操作会以 `ERR_NSH_TEST_COVERED` 失败，而不是按到那条栏上；
 - 选择器、等待和查询看到的应用模型与 headless 相同，由 host 绘制的内容建立，所以找到的是同样的视图；
 - 对话框是平台自己的：`app.dialogs()` 读取它们，回答对话框（`onDialog`，或测试没有回答时按它的取消按钮）会按下对应的按钮；
 - `app.screenshot(path)` 截取窗口，`app.window(id).screenshot(path)` 截取应用的其他窗口。

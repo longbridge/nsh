@@ -289,6 +289,10 @@ Things that were found the hard way. Read the section of the area you change bef
   itself presenting one (a `Sheet` is a transparent modal over the modal it is in) dismisses only that one, and the outer
   modal stays on screen with its content already gone: a blank screen when a sheet and its modal close together.
   `ModalHost::dismiss` dismisses through `presentingViewController`, which takes the modal and everything above it.
+  So a modal shown while another leaves (one closed and one opened in the same batch) must not be presented over the
+  leaving one: the mounter dismisses first and presents the new modal once the old one is gone, and presents again
+  the modals the app still shows that went along. A modal also leaves with the subtree it is in, not only when its
+  own node is removed.
 
 - **iOS, presses near the top of the window**: UIKit attaches tap recognizers to the window that skip `UIControl`s, and a
   press is a gesture recognizer, not a control. On iOS 26+ the window's `_UIDoubleTapInteraction` (a single-tap
@@ -448,6 +452,13 @@ Things that were found the hard way. Read the section of the area you change bef
   added there or it is dropped silently.
 - **Android, inputs' `pointerEvents`**: `InputBox` is a `FrameLayout`, not a `Box`: it keeps `pointerEvents` itself and
   refuses touches in `dispatchTouchEvent` for `none` / `box-none`, and `TouchTracker.deepest` reads it as a `Box`'s.
+- **Android, hovers and `pointerEvents`**: a hover goes to the topmost view under the pointer that handles it, and a
+  clickable view handles it whatever its `pointerEvents`, so `Box` routes hovers as it routes touches
+  (`dispatchHoverEvent`, `onInterceptHoverEvent`, `onHoverEvent`). TalkBack's touch exploration is hovers too: an inert
+  overlay that took them kept the screen reader from the views under it. `ViewGroup` keeps its own hover state
+  (hover targets, whether it is hovered itself) and sends no exit or enter when only `pointerEvents` changes, so `Box`
+  sends itself the exit when it turns inert while hovered, and the enter when it stops being `box-none` under the
+  pointer. `tests/hover-routing/run.py` checks the routing on a device or emulator.
 - **Android, inputs**: `EditText` reconfiguration (input type, filters, single line) sets the same text again and fires
   `afterTextChanged`: only text that differs from the last known one counts as an edit, or JS values are rejected as stale.
   Soft keyboards edit through the input connection (`KeyConnection`: composing text, commits, deletes), hardware keys arrive
@@ -744,9 +755,15 @@ Things that were found the hard way. Read the section of the area you change bef
 - **From macOS 26 a window with a toolbar has larger corners than one with only a title bar** (seen on 26.6), even an
   empty `NSToolbar` in `UnifiedCompact`; the radius is the system's and no API sets it. A hidden title bar of the app's
   height therefore centers the traffic lights itself instead of selecting a toolbar style (`chrome::TrafficLights`).
-  AppKit lays the buttons out again whenever the title bar does (each live-resize frame, a screen change, leaving full
-  screen), so they are placed again from their `NSViewFrameDidChangeNotification`s, which arrive inside that layout,
-  before anything is drawn.
+  AppKit lays the buttons out again whenever the title bar does (each live-resize frame, `setTitle:`, a screen change,
+  leaving full screen), calling `-[_NSThemeWidget setFrameOrigin:ignoreRentry:]` for Close, Miniaturize and Zoom in
+  order. That method's re-entrancy guard silently ignores `setFrameOrigin:` calls on the notifying button from inside
+  its own `NSViewFrameDidChangeNotification` (verified on macOS 27.0.1), so synchronous placement inside frame-change
+  notifications left the last button (`ZoomButton`) stuck at AppKit's default `y` on every live-resize frame (and after
+  `setTitle:`). `TrafficLights` therefore always coalesces `NSViewFrameDidChangeNotification`s (on the container, title
+  bar view and buttons) onto the main queue so placement runs after `_updateButtonPositions` exits `ignoreRentry:`, and
+  places synchronously on `NSWindowDidResizeNotification` (which fires after `_updateButtonPositions` returns and before
+  AppKit displays the resized frame) so live-resize frames stay aligned without flicker.
 
 - **`contentLayoutRect` lags the frame while a window resizes**: read in the resize (the root view's new size), it is
   still laid out for the old frame, so the frame's height minus its top is the bar plus the change in height (a

@@ -433,9 +433,9 @@ one: a selector matching several fails the step, and the error says how to narro
 | `await app.closeMenu()` | Closes the open context menu with nothing chosen, as Escape does (on iOS, a tap outside the system's menu). |
 | `await app.keyboard.press(keys)` | Presses a key with its modifiers, as `keymap` names it (`"mod+k"`, `"shift+/"`, `"escape"`; `mod` is the platform's command key), on a hardware keyboard, on every platform (phones and tablets have one too): the app's shortcut of it hears it (`keymap.bind`, `onKeyCommand`), else on a desktop the application menu's item with that shortcut is chosen (`Menu.setApplicationMenu`, its `when` kept while an input has the focus), else on macOS and the web Tab and Shift+Tab move the keyboard focus between the inputs and the views that take presses (`onFocus`, `onBlur`, `focus:` styles), inside the newest dialog while one is open (it gives the focus back to what had it when it closes), and Return or Space presses the view it is on when that view is in the newest dialog (or no dialog is open; else the key goes to the shortcuts); a page pushed onto a `NavStack`, or a back that pops one, takes the focus off the page that no longer shows (its view hears `onBlur`), and on the web (`platform: "web"`) Shift+F10 asks it for its context menu (`onContextMenu` with `pointerType: null`), else the focused input takes a character, Backspace or the return key, else Escape goes back. |
 | `await app.keyboard.down(keys)` / `up(keys)` | Holds modifier keys (`"mod"`, `"shift"`, `"alt"`, `"ctrl"`, `"meta"`, joined by `+`) down until `up`: the presses, drags and hovers meanwhile carry them, as a Mod-click or a Shift-drag does. Headless and on Linux for now. |
-| `await app.dragAndHold(selector, by)` / `app.drop()` | Drags as `drag` does and keeps the finger down until `drop()`, which lifts it where it is: the steps between look at the screen mid-drag (a drag preview, a drop line). Headless and on Linux for now. |
+| `await app.dragAndHold(selector, by, options?)` / `app.drop()` | Drags as `drag` does and keeps the finger down until `drop()`, which lifts it where it is: the steps between look at the screen mid-drag (a drag preview, a drop line). Headless, on Linux and on iOS. |
 | `await app.dropFiles(selector, uris)` | Drops local files (`file:` URLs, as a file manager drags them) on the middle of the view: it, or the nearest view around it listening, hears `onFileDrop`. Desktops, headless, on Linux and on macOS for now. |
-| `await app.drag(selector, { x, y })` | A finger lands on the middle of the view, rests for 100 ms, moves by `x`, `y` points, 10 per frame, and lifts, as the platform's input takes it: a pan follows it (`pan={{ x, y }}`, `onPanStart`, `onPanEnd` with the release velocity), the views listening to touches hear it (`onTouchStart`, `PanResponder`), a scroll view scrolls with it and, pulled far enough past its top, refreshes (`onRefresh`), and a press under it is cancelled once it moves away. On the desktops and the web it is the mouse, headless too: the touches say `pointerType: "mouse"` and no scroll view scrolls with it, as on those platforms. Started in a selectable view (`View selectable`, a `selectable` `TextView`), it selects across the view's texts, which hears `onSelectionChange` (the selected text as Copy gives it, where it starts and its box); started elsewhere, it clears the selection. |
+| `await app.drag(selector, { x, y }, options?)` | A finger lands on the middle of the view, rests for 100 ms, moves by `x`, `y` points, 10 per frame, and lifts, as the platform's input takes it: a pan follows it (`pan={{ x, y }}`, `onPanStart`, `onPanEnd` with the release velocity), the views listening to touches hear it (`onTouchStart`, `PanResponder`), a scroll view scrolls with it and, pulled far enough past its top, refreshes (`onRefresh`), and a press under it is cancelled once it moves away. On the desktops and the web it is the mouse, headless too: the touches say `pointerType: "mouse"` and no scroll view scrolls with it, as on those platforms. Started in a selectable view (`View selectable`, a `selectable` `TextView`), it selects across the view's texts, which hears `onSelectionChange` (the selected text as Copy gives it, where it starts and its box); started elsewhere, it clears the selection. |
 | `await app.wait(ms)` | Lets the app run for `ms` milliseconds: timers, animations, requests. On a manual clock, moves it by `ms` (`app.clock.runFor`). |
 | `await app.waitFor(selector, options?)` | Resolves once a view matches, or with `{ state: "gone" }` once none does; rejects after `timeout` ms (5000). On a manual clock, moves it a display frame at a time while it waits, by `timeout` at most. |
 | `await app.waitUntil(condition, options?)` | Resolves once `condition()` returns true, looking again after each change of the app: for what no selector says (`() => app.storage().note === "Milk"`). On a manual clock, moves it a display frame between two looks, by `timeout` at most. |
@@ -484,8 +484,9 @@ one: a selector matching several fails the step, and the error says how to narro
 | `await app.window(id).pressClose()` | Presses the window's close button as the user does: the window reports the press (`onClosePress`, reason `"closeButton"`) and closes when its `closeOnPress` lets it. |
 | `await app.window(id).screenshot(path?)` | A picture of the window's content as a `Uint8Array` (PNG), as `app.screenshot` takes of the app's surface, also saved at `path` when given. Only a real platform draws the app. |
 
-A step resolves once the app rendered nothing for 100 ms and no native animation runs that ends by itself (2 s at
-most, for apps that render all the time; on a manual clock, also 2 s of the app's time), so what it changed is on
+A step resolves once the app rendered nothing for 100 ms, no native animation runs that ends by itself and, with
+`--target macos`, no window the app opened still waits to show (2 s at most, for apps that render all the time; on a
+manual clock, also 2 s of the app's time), so what it changed is on
 screen when the next line runs; use `waitFor` for what comes later (a response, a timer). On a manual clock a step
 does not wait for those 100 ms: it resolves as soon as the app has run everything the step and the clock's time made
 due (timers due now, promises, a stubbed response answered at once) and wants no frame, unless a request is still in
@@ -518,6 +519,8 @@ await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISAB
 of that match. Scope queries with `id:note >> text:word` and select repeated matches with `>> nth=0`.
 The query reports an error for a missing, ambiguous or empty span. Updating a span’s `testID` reuses its text
 layout and preserves the `onTextLayout` callback count.
+
+The optional third argument of `drag` and `dragAndHold` is `DragOptions`: `{ hold?: number }`. `hold` is the total rest in milliseconds after the pointer lands and before it moves; omitting it keeps 100 ms. Headless and iOS support custom timing. Unsupported custom timing rejects with `ERR_NSH_TEST_UNSUPPORTED` before a new pointer goes down. Negative, non-finite and unrepresentable durations reject. For a long-press drag, use `{ hold: 600 }` and put `drop()` in `finally` so an assertion failure still lifts the same finger.
 
 ### What headless runs play of the platform
 
@@ -615,7 +618,9 @@ own input at the views their selectors name, as Playwright does in a browser:
 - a view off screen is scrolled into view first, a gesture at a time; on a touch screen the finger lands where the
   page itself takes it, beside the views that follow a drag (a slider, a drawing area), as a user scrolls; a view at the
   edge of a scroll view already at its end is acted on where it is, without pulling the scroll view past that end
-  (where a pull to refresh starts or a page sheet closes);
+  (where a pull to refresh starts or a page sheet closes); a view a scroll view's content passes under at its edges
+  (on iOS a transparent header, a tab bar, the keyboard) is scrolled out from under them, and a step on one
+  left under them, or under a bar the system draws, fails with `ERR_NSH_TEST_COVERED` instead of pressing the bar;
 - selectors, waits and queries see the same model of the app as headless runs, built from what the host draws, so
   they find the same views;
 - dialogs are the platform's own: `app.dialogs()` reads them, and answering one (`onDialog`, or its cancel button

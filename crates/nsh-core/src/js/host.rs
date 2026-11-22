@@ -1118,6 +1118,7 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::Host,
     EventKind::Pick,
     EventKind::OpenUrl,
+    EventKind::ClipboardWrite,
     EventKind::ScreenColor,
     EventKind::Share,
     EventKind::AuthSession,

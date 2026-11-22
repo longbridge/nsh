@@ -18,8 +18,8 @@ use std::{
 };
 
 use nsh_base::{
-    LinkOpenWith, PopoverEvent, button, link, popover, toggle, toggle_group, toolbar,
-    toolbar_group, toolbar_separator,
+    LinkOpenWith, PopoverEvent, button, link, menu, menu_item, popover, toggle, toggle_group,
+    toolbar, toolbar_group, toolbar_separator,
 };
 use nsh_core::{Checked, MountItem, Size, element::Root, geometry::Axis, platform::Os, prelude::*};
 use nsh_engine::EngineConfig;
@@ -636,4 +636,95 @@ fn a_key_press_changes_the_item_left_and_the_item_reached_only() {
     // The `focusable` of the item left and of the item reached, and the
     // command that focuses the second.
     assert!(few <= 3, "{few} mount items");
+}
+
+#[derive(Clone, PartialEq, Props)]
+struct ConditionalGroupProps {
+    show: Prop<bool>,
+    label: Prop<Option<SharedString>>,
+    children: Prop<Children>,
+}
+
+/// Mounts a `ToolbarGroup` around caller-owned children while `show` is true:
+/// when `show` flips false, the group's owner is disposed with the `when`
+/// branch before the core releases the child hosts top-down (the same order
+/// TSX unmounts a `<ToolbarGroup>` and its `<Menu>` children).
+#[component]
+fn ConditionalGroup(props: ConditionalGroupProps) -> impl IntoElement {
+    let label = props.label;
+    let children = props.children;
+    when(
+        move || props.show.get(),
+        move || toolbar_group().accessibility_label(label).child(children),
+    )
+}
+
+/// A toolbar whose `ToolbarGroup` of `Menu` triggers switches when a signal
+/// flips: each group holds two menus with `Button` triggers, and a view
+/// outside the toolbar switches between them.
+#[component]
+fn SwitchingMenuGroups() -> impl IntoElement {
+    let second = signal(false);
+    let pressed = signal(SharedString::from("none"));
+    let menu_trigger = move |name: &'static str, item: &'static str| {
+        menu()
+            .trigger(
+                button()
+                    .accessibility_label(name)
+                    .on_press(move || pressed.set(name.into()))
+                    .child(text(name)),
+            )
+            .child(menu_item().child(text(item)))
+    };
+    view()
+        .child(
+            toolbar()
+                .child(
+                    conditional_group()
+                        .show(move || !second.get())
+                        .label("First")
+                        .child(menu_trigger("File", "New"))
+                        .child(menu_trigger("Edit", "Cut")),
+                )
+                .child(when(
+                    move || second.get(),
+                    move || {
+                        toolbar_group()
+                            .accessibility_label("Second")
+                            .child(menu_trigger("View", "Zoom"))
+                            .child(menu_trigger("Help", "About"))
+                    },
+                )),
+        )
+        .child(
+            view()
+                .on_press(move || second.update(|s| *s = !*s))
+                .child(text("Switch")),
+        )
+        .child(text(move || format!("pressed:{}", pressed.get())))
+}
+
+#[test]
+fn switching_a_toolbar_group_of_menus_updates_roving_focus_without_panicking() {
+    let mut app = start::<SwitchingMenuGroups>();
+    app.wait_for("text:File").unwrap();
+    app.wait_for("text:Edit").unwrap();
+    // Focus an item in the first group so `focus` and `last` point into it
+    // before it unmounts.
+    app.press_key("tab").unwrap();
+    app.press_key("right").unwrap();
+    // Switch from the first group to the second: disposes the first
+    // ToolbarGroup before its Menu triggers unmount, and mounts the second.
+    app.press("text:Switch").unwrap();
+    app.wait_for("text:View").unwrap();
+    app.wait_for("text:Help").unwrap();
+    // Roving focus and keyboard navigation work on the newly mounted group.
+    app.press_key("tab").unwrap();
+    app.press_key("right").unwrap();
+    app.press_key("enter").unwrap();
+    app.wait_for("text:About").unwrap();
+    app.press_key("escape").unwrap();
+    app.press_key("left").unwrap();
+    app.press_key("enter").unwrap();
+    app.wait_for("text:Zoom").unwrap();
 }

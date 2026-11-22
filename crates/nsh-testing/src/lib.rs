@@ -31,6 +31,7 @@
 
 #[cfg(feature = "agent")]
 pub mod agent;
+mod drag;
 #[cfg(feature = "js")]
 mod driver;
 mod failure;
@@ -78,6 +79,13 @@ pub use self::headless::{
 #[cfg(feature = "js")]
 #[allow(deprecated)]
 pub use self::module::MobilePlatform;
+pub use self::{
+    drag::DragOptions,
+    failure::{SCREEN_TEXT_LIMIT, screen_texts},
+    root::{RootProps, WindowedRoot, WindowedRootWith, windowed_root, windowed_root_with},
+    screen::{LayoutNode, LayoutScroll, LayoutText, Pick, Screen},
+    storage::MemoryStorage,
+};
 #[cfg(feature = "js")]
 pub use self::{
     driver::Host,
@@ -90,12 +98,6 @@ pub use self::{
         TestRun, TestStatus, run_file,
     },
     runner::{PROTOCOL, Reply, RunnerMessage, TestRequest, runner},
-};
-pub use self::{
-    failure::{SCREEN_TEXT_LIMIT, screen_texts},
-    root::{RootProps, WindowedRoot, WindowedRootWith, windowed_root, windowed_root_with},
-    screen::{LayoutNode, LayoutScroll, LayoutText, Pick, Screen},
-    storage::MemoryStorage,
 };
 
 /// The sets the entry `nsh test` makes for a test file is built against

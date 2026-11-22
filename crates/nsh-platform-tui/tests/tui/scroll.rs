@@ -678,12 +678,13 @@ fn a_text_the_viewport_cuts_below_ends_in_no_ellipsis_inside_a_card() {
 fn StickySections() -> impl IntoElement {
     view().flex_1().child(
         virtual_list(10usize, |at| {
-            let label = match at.index() {
+            // Cells are reused, so read the index reactively.
+            text(move || match at.index() {
                 0 => "head A".to_owned(),
                 5 => "head B".to_owned(),
                 i => format!("row {i}"),
-            };
-            text(label).h(px(16.0))
+            })
+            .h(px(16.0))
         })
         .estimated_item_size(px(16.0))
         .w(px(80.0))

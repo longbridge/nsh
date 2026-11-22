@@ -91,6 +91,14 @@ dist/nsh/embed/android/nsh.aar       release: bundles and signed packages
 dist/nsh/embed/android/nsh-dev.aar   also connects to a `nsh dev` server
 ```
 
+From a checkout of NSH you can build just the libraries:
+
+```sh
+cargo xtask android-embed    # writes dist/nsh/embed/android/{nsh,nsh-dev}.aar
+```
+
+`--no-dev` leaves out `nsh-dev.aar`. The default build has `arm64-v8a`, `armeabi-v7a` and `x86_64`; repeat `--abi` to build fewer.
+
 The AAR holds the Java runtime and `libnsh.so` for `arm64-v8a`, `armeabi-v7a` and `x86_64`, with their symbols: the
 app's Gradle build strips them when it packages the app and keeps the symbols for its crash reports. It declares the
 `INTERNET` permission and needs **API 26** (Android 8) or newer. It carries its R8 rules (`proguard.txt`), which a
@@ -388,8 +396,53 @@ let application = unsafe { jni::objects::JObject::from_raw(context.context().cas
 ```
 
 `ndk-context` holds one context per process and panics when it is set again, so do not call
-`ndk_context::initialize_android_context` yourself in an NSH app. For the activity in front (to show a system UI),
-ask Android for it, or ask for permissions through `permissions` above.
+`ndk_context::initialize_android_context` yourself in an NSH app. To show a system UI from the activity in front,
+start one for a result through `activity` below, or ask for permissions through `permissions` above.
+
+## Activities from Rust
+
+Rust code that starts another app for a result (the camera app, a document picker) uses `activity` of the same crate.
+`start_for_result(env, &intent)` starts it from the activity in front and resolves with its `ActivityResult` (the
+result code and the intent the other app returned), across configuration changes; `can_start(env, &intent)` says
+whether an installed app answers the intent. Android 11+ shows an app only the apps its manifest queries: a crate
+declares its queries in its `Cargo.toml` ([What the packaged app needs](./nshm.md#what-the-packaged-app-needs)).
+`output_file(env, name)` makes a new file in the app's cache with a `content://` URI the other app writes through the
+app's file provider (`MediaStore.EXTRA_OUTPUT`), and `picker::prepare_image(path, name, &request)` prepares an image
+file as `Picker.pickImages` does. `with_env(f)` runs `f` with the thread's JNI environment (code of the app and its nshm; other crates reach the VM through `ndk-context` above) and returns its result, or the JNI error (a Java exception is
+logged and cleared). A request made while the app is in the background fails with `ActivityError::NoActivity`. `nsh-extra`'s camera
+(`crates/nsh-extra/src/camera/android.rs`) uses all of them.
+
+## Notifications from other code
+
+[`Notifications`](../modules/nsh.md#notifications) reports presses of the notifications the app showed. Notifications
+other code shows, such as a push service's SDK, open the app's launch activity (or the SDK's own activity, which opens
+it) with their payload as the intent's extras. Those presses go to one handler that Rust code sets with
+`nsh::notifications::set_foreign_handler`, never to `press`. Set it in the `#[native_module]` entry of the app's
+crate, on the UI thread: a press that started the app waits for it.
+
+```rust
+use nsh::notifications::{ForeignNotification, ForeignNotificationHandler, set_foreign_handler};
+
+struct Chats;
+
+impl ForeignNotificationHandler for Chats {
+    // The user pressed it, possibly starting the app.
+    fn pressed(&self, notification: &ForeignNotification) {
+        open_chat(&notification.extras["chat"]);
+    }
+}
+
+set_foreign_handler(Chats);
+```
+
+`ForeignNotification` carries the intent's `extras` as JSON, its `action` and its `data` URI. Android does not say
+which notification opened an activity, so NSH takes an intent for such a press when it has extras and no other
+meaning: links (`ACTION_VIEW`, which reach `onLink`), shares and the system's other actions are not presses, nor is the
+task opened again from Recents. Each intent is handed over once, so an activity recreated with it does not report it
+again. The handler runs on the UI thread, and `set_foreign_handler` panics elsewhere. There is one handler, so the
+app's crate owns it and passes presses on to the modules it uses; a later call replaces it. An app that embeds
+`NshView` passes its activity's intents to `NshView.handleNotificationIntent` in `onCreate` and `onNewIntent`, which
+hands these presses over too.
 
 ## Limits
 

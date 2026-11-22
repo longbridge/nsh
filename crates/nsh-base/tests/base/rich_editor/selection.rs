@@ -6,6 +6,8 @@
 //! Positions: in `paragraphs(&["ab", "cd"])` the first paragraph's text
 //! is 1..3, the second's 5..7, the document's size 8.
 
+use nsh_testing::DragOptions;
+
 use super::*;
 
 /// Focuses the editor and puts the caret at the document's start.
@@ -255,8 +257,12 @@ fn a_drag_selects_across_blocks() {
     focus_start(&mut app);
     // From the middle of `ab` (between a and b) far right and down: the
     // end of `cd`.
-    app.drag("text:ab", Point::new(px(300.0), px(40.0)))
-        .unwrap();
+    app.drag(
+        "text:ab",
+        Point::new(px(300.0), px(40.0)),
+        DragOptions::default(),
+    )
+    .unwrap();
     see(&mut app, "Sel 2-7");
 }
 

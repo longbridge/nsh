@@ -54,6 +54,18 @@ pub(crate) enum PackageTarget {
 }
 
 impl PackageTarget {
+    /// The platform [`crate::module_meta`] reads the app's dependency
+    /// graph for: iOS and Android, where crates declare package entries.
+    fn module_meta_triple(self) -> Option<(&'static str, crate::module_meta::Platform)> {
+        use crate::module_meta::Platform;
+        match self {
+            PackageTarget::Ios => Some(("aarch64-apple-ios", Platform::Ios)),
+            PackageTarget::IosSimulator => Some(("aarch64-apple-ios-sim", Platform::Ios)),
+            PackageTarget::Android => Some(("aarch64-linux-android", Platform::Android)),
+            _ => None,
+        }
+    }
+
     /// This machine's desktop target (`None` off macOS, Windows and
     /// Linux): where `--target gpui` points.
     pub(crate) fn desktop() -> Option<PackageTarget> {
@@ -196,9 +208,9 @@ pub(crate) struct AppConfig {
     /// The app's Rust crate: its builds are the app's own (`rust_app.rs`).
     #[serde(default, rename = "rust")]
     _rust: Option<serde_json::Value>,
-    /// The app's nshm, linked like its crates (`nshm.rs`).
-    #[serde(default, rename = "modules")]
-    _modules: Option<serde_json::Value>,
+    /// The app's nshm, resolved and linked by `nshm/`.
+    #[serde(default, rename = "dependencies")]
+    _dependencies: Option<serde_json::Value>,
     /// A Rust app's root component in its crate (`rust_app::RootConfig`).
     #[serde(default, rename = "root")]
     _root: Option<serde_json::Value>,
@@ -300,6 +312,14 @@ pub(crate) struct AndroidConfig {
     /// as it is. Declaring a runtime permission does not grant it.
     #[serde(default)]
     pub(crate) permissions: Vec<String>,
+    /// Elements of the manifest's `<queries>` the app's crates declare
+    /// ([`crate::module_meta`]); not an `nsh.json` key.
+    #[serde(skip)]
+    pub(crate) queries: Vec<String>,
+    /// Elements of the manifest's `<application>` the app's crates declare
+    /// ([`crate::module_meta`]); not an `nsh.json` key.
+    #[serde(skip)]
+    pub(crate) application: Vec<String>,
     /// What the app's window shows from the tap on its icon until its first
     /// frame, the same keys as `ios.launchScreen`: the window's background
     /// and, on Android 12+, the splash screen's color and image. Without it
@@ -311,16 +331,14 @@ impl AndroidConfig {
     /// `permissions`, checked and spelled out in full.
     pub(crate) fn permissions(&self) -> anyhow::Result<Vec<String>> {
         for name in &self.permissions {
-            if lower_case_android_name(name) {
-                ui::warn(format!(
-                    "nsh.json android.permissions: `{name}` is not upper case, as Android's own \
-                     permission names are (`ACCESS_NETWORK_STATE`): Android ignores a name it does not know"
-                ));
+            if let Some(warning) = lower_case_android_warning(name, "nsh.json android.permissions")
+            {
+                ui::warn(warning);
             }
         }
         self.permissions
             .iter()
-            .map(|name| android_permission(name))
+            .map(|name| android_permission(name, "nsh.json android.permissions"))
             .collect()
     }
 
@@ -343,10 +361,22 @@ fn lower_case_android_name(name: &str) -> bool {
     !name.contains('.') && name.chars().any(|c| c.is_ascii_lowercase())
 }
 
+/// The warning about the `android.permissions` entry `name` written at
+/// `at`, when it is a bare name in lower case.
+pub(crate) fn lower_case_android_warning(name: &str, at: &str) -> Option<String> {
+    lower_case_android_name(name).then(|| {
+        format!(
+            "{at}: `{name}` is not upper case, as Android's own permission names are \
+             (`ACCESS_NETWORK_STATE`): Android ignores a name it does not know"
+        )
+    })
+}
+
 /// An `android.permissions` entry in full: a bare name is one of
 /// Android's own (`android.permission.<name>`). Each part of the name is a
-/// Java identifier, so nothing but the name reaches the manifest.
-fn android_permission(name: &str) -> anyhow::Result<String> {
+/// Java identifier, so nothing but the name reaches the manifest. `at`
+/// names where the entry was written, for the error.
+pub(crate) fn android_permission(name: &str, at: &str) -> anyhow::Result<String> {
     let identifier = |part: &str| {
         let mut chars = part.chars();
         chars
@@ -356,7 +386,7 @@ fn android_permission(name: &str) -> anyhow::Result<String> {
     };
     if !name.split('.').all(identifier) {
         bail!(
-            "nsh.json android.permissions: `{name}` is not a permission name \
+            "{at}: `{name}` is not a permission name \
              (`ACCESS_NETWORK_STATE`, or `com.example.permission.NAME`)"
         );
     }
@@ -1246,7 +1276,7 @@ fn trimmed_runner(entry: &Path, target: PackageTarget) -> bool {
     }
 }
 
-pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
+pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
     if options.asset_url.is_some() && options.target != PackageTarget::Web {
         bail!("--asset-url is where a web site's files are served from: package with --target web");
     }
@@ -1292,6 +1322,17 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
         }
     }
     let entry = dunce::canonicalize(options.entry)?;
+    // What the app's crates and nshm declare for the package (an
+    // `Info.plist` key, a manifest entry), under what `nsh.json` sets.
+    if let Some((triple, platform)) = options.target.module_meta_triple()
+        && let Some(app) = crate::rust_app::current()
+    {
+        crate::module_meta::ModuleMeta::of_workspace(
+            &app.workspace().join("Cargo.toml"),
+            Some(triple),
+        )?
+        .apply(&mut options.config, platform)?;
+    }
     let config = &options.config;
     let (name, id) = release_name_and_id(&entry, config)?;
     let schemes = config.url_schemes();
@@ -1680,6 +1721,16 @@ fn package_android(
         .out
         .join(format!("{name}.{}", options.format.extension()));
     let version = config.version.as_deref().unwrap_or("1.0.0");
+    // `android/res/` next to `nsh.json`: the app's own resources.
+    let res = Some(
+        options
+            .entry
+            .parent()
+            .unwrap_or(Path::new("."))
+            .join("android")
+            .join("res"),
+    )
+    .filter(|dir| dir.is_dir());
     let step = ui::Step::start(format!("packaging {}", ui::path(&apk_path)));
     android::build(
         &sdk,
@@ -1697,6 +1748,8 @@ fn package_android(
             camera: config.web_media("camera"),
             dex: &config.android.dex,
             permissions: &permissions,
+            queries: &config.android.queries,
+            application: &config.android.application,
             schemes: &config.schemes,
             rust: built.rust_root,
             dark: config.appearance.as_deref() == Some("dark"),
@@ -1707,6 +1760,7 @@ fn package_android(
             launch_screen: config.android.launch_screen.as_ref(),
             assets,
             sounds: android_sounds(config, built),
+            res: res.as_deref(),
             signing,
         },
         options.format,

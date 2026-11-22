@@ -1549,8 +1549,8 @@ import { Clipboard } from "nsh";
 
 ```ts
 const Clipboard: {
-  writeText(text: string): Promise<void>;
-  write(item: ClipboardItem): Promise<void>;
+  writeText(text: string): Promise<ClipboardWrite>;
+  write(item: ClipboardItem): Promise<ClipboardWrite>;
   readText(): Promise<string>;
   hasText(): Promise<boolean>;
   writeImage(src: string): Promise<void>;
@@ -1558,6 +1558,8 @@ const Clipboard: {
   hasImage(): Promise<boolean>;
   readFiles(): Promise<string[]>;
 };
+
+type ClipboardWrite = "written" | "failed" | "requested";
 
 interface ClipboardItem {
   text: string; // 纯文本形式的内容
@@ -1572,8 +1574,8 @@ interface ClipboardImage {
 
 | TS | Rust（`nsh_core::prelude`） |
 |---|---|
-| `await Clipboard.writeText(text)` | `set_clipboard(text)` |
-| `await Clipboard.write({ text, html })` | `set_clipboard_item(item)`（一个 `ClipboardItem`） |
+| `await Clipboard.writeText(text)` | `set_clipboard(text).await -> ClipboardWrite` |
+| `await Clipboard.write({ text, html })` | `set_clipboard_item(item).await -> ClipboardWrite`（一个 `ClipboardItem`） |
 | `await Clipboard.readText()` | `clipboard_string().await -> String` |
 | `await Clipboard.hasText()` | `clipboard_has_string().await -> bool` |
 | `await Clipboard.writeImage(src)` | `set_clipboard_image(src)` |
@@ -1592,10 +1594,12 @@ iOS、桌面和 Web 上可以通过剪贴板传递图片。在 Android 上，剪
 ### Clipboard.writeText
 
 ```ts
-writeText(text: string): Promise<void>;
+writeText(text: string): Promise<ClipboardWrite>;
 ```
 
 把 `text` 放到剪贴板上，替换原有内容。Rust：`set_clipboard(text)`。
+
+结果表示这次写入的情况：系统剪贴板接收时为 `"written"`（Windows、macOS、Web），被拒绝时为 `"failed"`（剪贴板被其他应用占用、浏览器拒绝），平台无法确认时为 `"requested"`（iOS、Android、Linux、GPUI 宿主、终端）。NSH 不会读回剪贴板来确认。只在 `"written"` 时显示“已复制”，`"failed"` 时保留手动复制入口。Rust 中返回 `ClipboardWrite`；不关心结果时直接丢弃，写入照常进行。
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -1631,7 +1635,7 @@ const copied = signal(false);
 ### Clipboard.write
 
 ```ts
-write(item: ClipboardItem): Promise<void>;
+write(item: ClipboardItem): Promise<ClipboardWrite>;
 ```
 
 把同一内容的纯文本和 HTML 一起放到剪贴板上，替换原有内容，和浏览器复制选区的做法一样：能读格式的应用（邮件、文档、富文本编辑器）
@@ -2295,7 +2299,7 @@ async function signOut() {
 
 ### Notifications.on
 
-`press` 报告用户点击的通知的 `id`。点击可能启动应用：事件会等到第一个监听器注册后送达，所以请在应用启动时监听，并把点击后要打开的内容放在 `id` 里。Android 上，嵌入方的 Activity 要在 `onCreate` 和 `onNewIntent` 里把 Intent 传给 `NshView.handleNotificationIntent`。Apple 平台上，已设置通知中心 delegate 的嵌入方保留自己的 delegate，点击也由它接收；否则远程通知和其他原生代码安排的通知交给 Rust 代码用 `nsh_platform_apple::notifications::set_foreign_handler` 设置的处理者（见 [iOS](../docs/ios.md#来自其他代码的通知)），不会触发 `press`。Linux 上点击只传给运行中的应用：应用退出后留下的通知点击后没有反应。
+`press` 报告用户点击的通知的 `id`。点击可能启动应用：事件会等到第一个监听器注册后送达，所以请在应用启动时监听，并把点击后要打开的内容放在 `id` 里。Android 上，嵌入方的 Activity 要在 `onCreate` 和 `onNewIntent` 里把 Intent 传给 `NshView.handleNotificationIntent`；推送 SDK 等其他代码显示的通知的点击交给 Rust 代码用 `nsh::notifications::set_foreign_handler` 设置的处理者（见 [Android](../docs/android.md#来自其他代码的通知)），不会触发 `press`。Apple 平台上，已设置通知中心 delegate 的嵌入方保留自己的 delegate，点击也由它接收；否则远程通知和其他原生代码安排的通知交给 Rust 代码用 `nsh_platform_apple::notifications::set_foreign_handler` 设置的处理者（见 [iOS](../docs/ios.md#来自其他代码的通知)），不会触发 `press`。Linux 上点击只传给运行中的应用：应用退出后留下的通知点击后没有反应。
 
 ### Notifications.permission
 
