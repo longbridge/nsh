@@ -1522,6 +1522,23 @@ pub(crate) fn preferred_abi(serial: &str, device: &[String]) -> anyhow::Result<S
         .with_context(|| format!("{serial} runs none of {}", ABIS.join(", ")))
 }
 
+/// The ABIs a development build for device `serial` takes
+/// ([`dev_abis_of`] its ABIs).
+pub(crate) fn dev_abis(sdk: &Sdk, serial: &str) -> anyhow::Result<Vec<String>> {
+    dev_abis_of(serial, device_abis(sdk, serial).ok().as_deref())
+}
+
+/// The ABIs a development build for device `serial`, whose ABIs are
+/// `device`, takes: its preferred one ([`preferred_abi`]), as a debug
+/// library per ABI makes the APK too large to build. When the device's ABIs
+/// can't be read (`None`): every ABI of the runtime (empty).
+fn dev_abis_of(serial: &str, device: Option<&[String]>) -> anyhow::Result<Vec<String>> {
+    match device {
+        Some(device) => Ok(vec![preferred_abi(serial, device)?]),
+        None => Ok(Vec::new()),
+    }
+}
+
 /// A port of the device forwarded to this machine (`adb reverse`), removed
 /// when dropped, however the command ends (Ctrl-C too: it is
 /// [`ui::Stoppable`] meanwhile): a dev host left on the device would
@@ -1727,6 +1744,28 @@ mod tests {
         assert_eq!(abi(&["x86", "armeabi-v7a"]).as_deref(), Some("armeabi-v7a"));
         assert_eq!(abi(&["x86"]), None);
         assert_eq!(abi(&[]), None);
+    }
+
+    /// A development build takes the device's preferred ABI alone, every
+    /// ABI of the runtime when the device's ABIs can't be read, and none
+    /// for a device that runs none NSH builds for.
+    #[test]
+    fn a_development_build_takes_the_devices_abi() {
+        let abis = |list: Option<&[&str]>| {
+            let device: Option<Vec<String>> =
+                list.map(|list| list.iter().map(|abi| abi.to_string()).collect());
+            super::dev_abis_of("emulator-5554", device.as_deref()).ok()
+        };
+        assert_eq!(
+            abis(Some(&["x86_64", "arm64-v8a"])),
+            Some(vec!["x86_64".to_owned()])
+        );
+        assert_eq!(
+            abis(Some(&["arm64-v8a", "armeabi-v7a", "armeabi"])),
+            Some(vec!["arm64-v8a".to_owned()])
+        );
+        assert_eq!(abis(None), Some(Vec::new()));
+        assert_eq!(abis(Some(&["x86"])), None);
     }
 
     static NO_PLACEHOLDERS: std::collections::BTreeMap<String, String> =

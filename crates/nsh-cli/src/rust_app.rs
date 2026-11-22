@@ -3482,9 +3482,10 @@ opt-level = \"s\"
 
     /// The Android runtime `nsh test --target android` runs the app in: the
     /// development library, a Rust app's too (with its root, which it runs
-    /// when the test session says so).
-    pub(crate) fn test_android(&self, prebuilt: &Path) -> anyhow::Result<PathBuf> {
-        self.android_runtime(prebuilt, true, false, &[])
+    /// when the test session says so), for each of `abis` (empty: each ABI
+    /// of the prebuilt runtime).
+    pub(crate) fn test_android(&self, prebuilt: &Path, abis: &[String]) -> anyhow::Result<PathBuf> {
+        self.android_runtime(prebuilt, true, false, abis)
     }
 
     /// [`Self::android`]; `rust`: a Rust app's runner library, with no
