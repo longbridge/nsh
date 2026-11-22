@@ -63,6 +63,7 @@ pub(crate) fn test(
     trace: bool,
     fps: bool,
     junit: Option<&Path>,
+    jobs: Option<std::num::NonZeroUsize>,
     target: Option<crate::run::Target>,
     browser: Option<&Path>,
     web_host: Option<PathBuf>,
@@ -196,15 +197,14 @@ pub(crate) fn test(
                 target: host_target,
                 page_host,
             };
-            for file in &files {
-                let shown = shown(file);
-                let ran = nsh_testing::run_file(&run, file, &mut |result| {
-                    tally.show(&shown, result);
-                });
-                if let Err(e) = ran {
-                    tally.failed(&shown, &e);
-                }
-            }
+            // A host, or a trace, takes one file at a time.
+            let jobs = if run.host.is_some() || trace {
+                1
+            } else {
+                jobs.or_else(|| std::thread::available_parallelism().ok())
+                    .map_or(1, std::num::NonZeroUsize::get)
+            };
+            run_files(&run, &files, jobs, &shown, &mut tally);
         }
     }
     crate::test_web::close();
@@ -230,6 +230,62 @@ pub(crate) fn test(
     }
     ui::done(summary);
     Ok(())
+}
+
+/// Runs the test files `files` as `run` says, `jobs` at a time, showing
+/// each one's results as it ends: in order, a file's once those before it
+/// were shown.
+fn run_files(
+    run: &nsh_testing::TestRun,
+    files: &[PathBuf],
+    jobs: usize,
+    shown: &dyn Fn(&Path) -> String,
+    tally: &mut Tally,
+) {
+    if jobs <= 1 || files.len() <= 1 {
+        for file in files {
+            let shown = shown(file);
+            let ran = nsh_testing::run_file(run, file, &mut |result| {
+                tally.show(&shown, result);
+            });
+            if let Err(e) = ran {
+                tally.failed(&shown, &e);
+            }
+        }
+        return;
+    }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let (done, ended) = std::sync::mpsc::channel();
+    std::thread::scope(|scope| {
+        for _ in 0..jobs.min(files.len()) {
+            let done = done.clone();
+            let next = &next;
+            scope.spawn(move || {
+                loop {
+                    let n = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(file) = files.get(n) else { break };
+                    let ran = nsh_testing::run_file(run, file, &mut |_| {});
+                    if done.send((n, ran)).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+        drop(done);
+        let mut waiting = HashMap::new();
+        let mut shown_up_to = 0;
+        for (n, ran) in ended {
+            waiting.insert(n, ran);
+            while let Some(ran) = waiting.remove(&shown_up_to) {
+                let shown = shown(&files[shown_up_to]);
+                match ran {
+                    Ok(results) => results.iter().for_each(|r| tally.show(&shown, r)),
+                    Err(e) => tally.failed(&shown, &e),
+                }
+                shown_up_to += 1;
+            }
+        }
+    });
 }
 
 /// How the tests ended so far, by file.
@@ -960,6 +1016,7 @@ test src/lib.rs - App (line 3) ... ok
             None,
             false,
             false,
+            None,
             None,
             None,
             None,
