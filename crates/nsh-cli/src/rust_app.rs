@@ -3901,13 +3901,17 @@ opt-level = \"s\"
             let dir = out.join("lib").join(&abi);
             fs::create_dir_all(&dir)?;
             let dest = dir.join("libnsh.so");
+            // `symbols/<abi>` keeps the library whole, for `ndk-stack`,
+            // debuggers and Play Console.
+            let symbols = out.join("symbols").join(&abi).join("libnsh.so");
             if dev {
-                install(&lib, &dest)?;
+                // Without its debug info: most of a debug build, it made an
+                // app's development APK too large to update on an emulator.
+                // The symbol table stays, for the names in crash reports.
+                install_stripped(&lib, &dest, &symbols, |from, to| sdk.strip_debug(from, to))?;
             } else {
                 // Without its symbol tables and debug info, which APKs
-                // store uncompressed; `symbols/<abi>` keeps them, for
-                // `ndk-stack` and Play Console.
-                let symbols = out.join("symbols").join(&abi).join("libnsh.so");
+                // store uncompressed.
                 install_stripped(&lib, &dest, &symbols, |from, to| sdk.strip(from, to))?;
             }
         }

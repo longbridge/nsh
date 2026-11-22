@@ -512,7 +512,7 @@ fn run_rust_app(
             )?;
             let apk = out.join(format!("{name}.apk"));
             let step = ui::Step::start(format!("installing {id} on {serial}"));
-            android::adb(&sdk, &serial, &["install", "-r", &apk.to_string_lossy()])?;
+            android::install(&sdk, &serial, &apk, &id, &["-r"], android::AppData::Kept)?;
             let activity = format!("{id}/com.longbridge.nsh.AppActivity");
             let mut start = vec!["shell", "am", "start", "-S", "-n", activity.as_str()];
             start.extend(env.iter().map(String::as_str));
@@ -975,10 +975,15 @@ pub(crate) fn install_android_host(
     let current = fs::read_to_string(&installed).ok();
     if current.is_none() || current != on_device(sdk) {
         let step = ui::Step::start(format!("installing it on {serial}"));
-        android::adb(
+        // The host keeps only what apps under test and in development
+        // write, which they start without again.
+        android::install(
             sdk,
             serial,
-            &["install", "-r", "-t", &apk_path.to_string_lossy()],
+            &apk_path,
+            BUNDLE_ID,
+            &["-r", "-t"],
+            android::AppData::Disposable,
         )?;
         step.done(format!(
             "installed the Android development host on {serial}"
