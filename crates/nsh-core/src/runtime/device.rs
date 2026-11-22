@@ -1,8 +1,6 @@
 //! `nsh/device`'s requests to the system: opening a URL outside the app
-//! ([`crate::open_url`]), which needs the `openUrl` capability when the app
-//! declares capabilities (else it rejects with `ERR_ACCESS_DENIED`), and
-//! opening the app's own page in the system's settings
-//! ([`crate::app_settings`]), which needs none.
+//! ([`crate::open_url`]). Needs the `openUrl` capability when the app
+//! declares capabilities (else it rejects with `ERR_ACCESS_DENIED`).
 
 use crate::element::{JsError, JsObject, Later, System, module};
 
@@ -11,14 +9,6 @@ use crate::element::{JsError, JsObject, Later, System, module};
 #[non_exhaustive]
 pub(crate) struct OpenUrlResult {
     /// Whether an app opened the URL (`false` when none handles it).
-    pub(crate) opened: bool,
-}
-
-/// What `openAppSettings` did.
-#[derive(Debug, Clone, Copy, Default, PartialEq, JsObject)]
-#[non_exhaustive]
-pub(crate) struct OpenAppSettingsResult {
-    /// Whether the system opened the app's page in its settings.
     pub(crate) opened: bool,
 }
 
@@ -46,27 +36,5 @@ impl Device {
                 opened: crate::prelude::open_url(url).await,
             })
         }))
-    }
-
-    /// Opens the app's own page in the system's settings, where the user
-    /// turns back on a permission they denied (the camera, photos,
-    /// notifications): iOS's Settings app at the app, Android's App info.
-    /// Resolves with `{ opened }`: whether the system opened it. Rejects
-    /// with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where the platform has no
-    /// such page (the desktops, the web, a terminal;
-    /// `appSettingsAvailable()`). Needs no capability.
-    pub(crate) async fn open_app_settings() -> Result<OpenAppSettingsResult, JsError> {
-        match crate::prelude::open_app_settings().await {
-            Ok(opened) => Ok(OpenAppSettingsResult { opened }),
-            Err(error) => Err(error.js()),
-        }
-    }
-
-    /// Resolves with whether `openAppSettings()` opens the app's page in
-    /// the system's settings here: `true` on iOS and Android, `false`
-    /// elsewhere, where it rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
-    /// Ask it before showing an "Open Settings" button.
-    pub(crate) async fn app_settings_available() -> bool {
-        crate::prelude::app_settings_available().await
     }
 }

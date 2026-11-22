@@ -372,9 +372,10 @@ pub struct Environment {
     /// at once with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
     pub share: bool,
     /// The platform opens the app's own page in the system's settings
-    /// ([`crate::Command::OpenAppSettings`], `openAppSettings`: iOS and
-    /// Android); without it, opening it fails at once with
-    /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` ([`crate::app_settings`]).
+    /// ([`crate::Command::OpenAppSettings`], `nsh/mobile`'s
+    /// `AppSettings.open`: iOS and Android); without it, opening it fails at
+    /// once with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`
+    /// ([`crate::mobile::open_app_settings`]).
     pub app_settings: bool,
     /// The platform shows web sign-in sessions
     /// ([`crate::Command::AuthSession`]: iOS's

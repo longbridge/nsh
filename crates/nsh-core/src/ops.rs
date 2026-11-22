@@ -278,7 +278,7 @@ events! {
     FocusIn = "onFocusIn": "The keyboard focus came into the view: onto it or a view inside it, from outside (it entered `focus-within`; raised by the core). Moving between views inside it is no new coming in.",
     FocusOut = "onFocusOut": "The keyboard focus left the view: from it or a view inside it to one outside, or to none (it left `focus-within`; raised by the core).",
     TextDrop = "onTextDrop" as "": "Text dragged from another app or view was dropped on the view (payload: [`EventPayload::TextDrop`]): a Rust component's, such as `RichEditor`'s, which inserts it where it was let go (iOS).",
-    OpenAppSettings = "onOpenAppSettings" as "": "A [`Command::OpenAppSettings`] request finished (root only; payload: `id`, `opened`: whether the system opened the app's page in its settings; [`crate::app_settings`]; never reaches a listener).",
+    OpenAppSettings = "onOpenAppSettings" as "": "A [`Command::OpenAppSettings`] request finished (root only; payload: `id`, `opened`: whether the system opened the app's page in its settings; [`crate::mobile::open_app_settings`]; never reaches a listener).",
 }
 
 /// What an input holds, for the system's autofill and suggestions
@@ -2800,7 +2800,8 @@ pub enum Command {
         url: String,
     },
     /// Open the app's own page in the system's settings (on the root;
-    /// `openAppSettings` of `nsh/device`, [`crate::app_settings`]): iOS's
+    /// `nsh/mobile`'s `AppSettings.open`,
+    /// [`crate::mobile::open_app_settings`]): iOS's
     /// `UIApplication.openSettingsURLString`, Android's application
     /// details. Report whether the system opened it as
     /// [`EventKind::OpenAppSettings`] `id`. Sent only on platforms whose

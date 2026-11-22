@@ -792,10 +792,9 @@ pub(super) struct Components {
     /// ([`Core::take_main_thread_tasks`]).
     main_thread: Vec<crate::main_thread::MainThreadTask>,
     next_url_open: u32,
-    /// The app's settings pages being opened (`openAppSettings`), by
+    /// The app's settings pages being opened (`AppSettings.open`), by
     /// request id: their answers.
-    app_settings_opens:
-        FxHashMap<u32, AnswerSlot<Result<bool, crate::app_settings::AppSettingsError>>>,
+    app_settings_opens: FxHashMap<u32, AnswerSlot<Result<bool, crate::mobile::AppSettingsError>>>,
     next_app_settings_open: u32,
     /// Colors being picked on the screen, by request id: their answers.
     screen_colors: FxHashMap<u32, AnswerSlot<Option<crate::Hsla>>>,
@@ -6612,10 +6611,19 @@ impl<M: TextEngine> Core<M> {
                 self.components.url_requests.push((id, url));
             }
             Action::OpenAppSettings(answer) => {
-                if !self.components.environment.app_settings {
-                    answer
-                        .borrow_mut()
-                        .deliver(Err(crate::app_settings::AppSettingsError::Unavailable));
+                use crate::mobile::AppSettingsError;
+                // The app's settings page acts on the application as a
+                // whole (the embedding app's, embedded): an app declaring
+                // capabilities needs `application`.
+                let refused = if !self.access.allows_application() {
+                    Some(AppSettingsError::Denied)
+                } else if !self.components.environment.app_settings {
+                    Some(AppSettingsError::Unavailable)
+                } else {
+                    None
+                };
+                if let Some(error) = refused {
+                    answer.borrow_mut().deliver(Err(error));
                     return;
                 }
                 let id = self.components.next_app_settings_open;
@@ -6627,7 +6635,8 @@ impl<M: TextEngine> Core<M> {
                 });
             }
             Action::AppSettingsAvailable(answer) => {
-                let available = self.components.environment.app_settings;
+                let available =
+                    self.components.environment.app_settings && self.access.allows_application();
                 answer.borrow_mut().deliver(available);
             }
             Action::Speech(action) => self.speech_action(action),

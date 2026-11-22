@@ -132,9 +132,9 @@ pub(crate) enum Action {
     /// slot.
     OpenUrl(String, AnswerSlot<bool>),
     /// Opens the app's own page in the system's settings
-    /// ([`crate::app_settings`]); whether it opened, or why it could not,
-    /// resolves the slot.
-    OpenAppSettings(AnswerSlot<Result<bool, crate::app_settings::AppSettingsError>>),
+    /// ([`crate::mobile::open_app_settings`]); whether it opened, or why it
+    /// could not, resolves the slot.
+    OpenAppSettings(AnswerSlot<Result<bool, crate::mobile::AppSettingsError>>),
     /// Whether the platform opens the app's page in the system's settings
     /// resolves the slot.
     AppSettingsAvailable(AnswerSlot<bool>),

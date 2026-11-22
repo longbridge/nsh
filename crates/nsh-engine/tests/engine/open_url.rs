@@ -2,8 +2,8 @@
 //! URL handler does not take, what the handler takes never reaches the
 //! platform, and refused URLs and capabilities reject; a `TextView` with
 //! `links="open"` opens its links, and a `Link` its `href`. And
-//! `openAppSettings`: sent to a platform that has the app's settings page,
-//! rejected at once elsewhere.
+//! `nsh/mobile`'s `AppSettings.open`: sent to a platform that has the app's
+//! settings page, rejected at once elsewhere.
 
 use std::time::Duration;
 
@@ -417,13 +417,13 @@ fn a_rust_root_opens_urls_under_its_declared_capabilities() {
 }
 
 const SETTINGS_APP: &str = r#"import { mount, signal, Text } from "nsh";
-import { appSettingsAvailable, openAppSettings } from "nsh";
+import { AppSettings } from "nsh/mobile";
 
 const log = signal<string[]>([]);
 const say = (s: string) => log.set([...log(), s]);
 
-appSettingsAvailable().then((yes: boolean) => say(`available ${yes}`));
-const pending = openAppSettings();
+AppSettings.available().then((yes: boolean) => say(`available ${yes}`));
+const pending = AppSettings.open();
 say(`promise ${typeof pending.then}`);
 pending.then(
   ({ opened }) => say(`opened ${opened}`),

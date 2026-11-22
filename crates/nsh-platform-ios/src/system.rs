@@ -670,7 +670,7 @@ pub(crate) fn open_url(id: u32, url: &str, control: &EngineControl) {
     };
 }
 
-/// `openAppSettings`: opens the app's page in the Settings app
+/// `AppSettings.open`: opens the app's page in the Settings app
 /// (`UIApplication.openSettingsURLString`; the embedding app's page when
 /// NSH is embedded) and reports whether the system opened it
 /// ([`EventKind::OpenAppSettings`] `id`). Commands are applied on the main

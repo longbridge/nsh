@@ -19270,7 +19270,7 @@ mod components {
     /// its button is pressed; shows both answers.
     #[component]
     fn SettingsOpener() -> impl IntoElement {
-        use crate::element::{app_settings_available, open_app_settings};
+        use crate::mobile::{app_settings_available, open_app_settings};
         let shown = signal(String::new());
         view()
             .child(text(move || format!("settings{}", shown.get())))
@@ -19288,12 +19288,20 @@ mod components {
             }))
     }
 
-    /// Mounts [`SettingsOpener`] in `environment`, presses its button and
-    /// returns the requests that reached the platform.
+    /// Mounts [`SettingsOpener`] in `environment` with `capabilities`
+    /// declared (`None`: none), presses its button and returns the requests
+    /// that reached the platform.
     fn press_settings_opener(
         environment: crate::element::Environment,
+        capabilities: Option<serde_json::Value>,
     ) -> (Core<FakeEngine>, Vec<u32>) {
         let mut c = core();
+        if let Some(capabilities) = capabilities {
+            c.set_access(std::sync::Arc::new(crate::access::Access {
+                declared: crate::access::Capabilities::from_json(&capabilities).unwrap(),
+                granted: None,
+            }));
+        }
         c.set_environment(environment);
         c.mount_root(&crate::element::Root::new::<SettingsOpener>(|| ()));
         let batch = c.commit().unwrap();
@@ -19322,7 +19330,7 @@ mod components {
 
     #[test]
     fn app_settings_fail_at_once_where_the_platform_has_none() {
-        let (mut c, requests) = press_settings_opener(Default::default());
+        let (mut c, requests) = press_settings_opener(Default::default(), None);
         assert!(requests.is_empty(), "nothing reaches the platform");
         let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("settings ")));
         assert_eq!(shown.last().unwrap(), "settings false Unavailable");
@@ -19330,10 +19338,13 @@ mod components {
 
     #[test]
     fn app_settings_open_on_the_platform_and_answer_what_it_reports() {
-        let (mut c, requests) = press_settings_opener(crate::element::Environment {
-            app_settings: true,
-            ..Default::default()
-        });
+        let (mut c, requests) = press_settings_opener(
+            crate::element::Environment {
+                app_settings: true,
+                ..Default::default()
+            },
+            Some(serde_json::json!({ "application": true })),
+        );
         assert_eq!(requests.len(), 1, "one request reaches the platform");
         // An answer of another request settles nothing.
         let answer = |id: u32, opened: bool| {
@@ -19356,6 +19367,20 @@ mod components {
         ));
         let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("settings ")));
         assert_eq!(shown.last().unwrap(), "settings true true");
+    }
+
+    #[test]
+    fn app_settings_need_the_application_capability_when_capabilities_are_declared() {
+        let (mut c, requests) = press_settings_opener(
+            crate::element::Environment {
+                app_settings: true,
+                ..Default::default()
+            },
+            Some(serde_json::json!({ "share": true })),
+        );
+        assert!(requests.is_empty(), "nothing reaches the platform");
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("settings ")));
+        assert_eq!(shown.last().unwrap(), "settings false Denied");
     }
 
     /// Turns launching at login on, reads it, turns it off and reads it

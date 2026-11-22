@@ -12,7 +12,6 @@ mod byte_size;
 pub use byte_size::ByteSize;
 pub mod access;
 pub mod animation;
-pub mod app_settings;
 pub mod audio;
 pub mod auth_session;
 pub mod canvas;

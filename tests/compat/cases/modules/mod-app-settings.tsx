@@ -1,15 +1,15 @@
-// A case of the API's test suite (docs/dev/compatibility.md): `nsh`'s
-// `openAppSettings` and `appSettingsAvailable` on the headless runtime, which
-// has no settings page of the app's own: `appSettingsAvailable()` resolves
-// false and `openAppSettings()` returns a promise (it never throws) that
-// rejects with ERR_FEATURE_UNAVAILABLE_ON_PLATFORM, never resolving as opened.
-// Its script checks each.
-import { Text, View, appSettingsAvailable, openAppSettings, signal } from "nsh";
+// A case of the API's test suite (docs/dev/compatibility.md): `nsh/mobile`'s
+// `AppSettings` on the headless runtime, which has no settings page of the
+// app's own: `available()` resolves false and `open()` returns a promise (it
+// never throws) that rejects with ERR_FEATURE_UNAVAILABLE_ON_PLATFORM, never
+// resolving as opened. Its script checks each.
+import { Text, View, signal } from "nsh";
+import { AppSettings } from "nsh/mobile";
 
 function App() {
   const available = signal("unknown");
   const opened = signal("not opened");
-  appSettingsAvailable().then((yes: boolean) => available.set(`${yes}`));
+  AppSettings.available().then((yes: boolean) => available.set(`${yes}`));
   return (
     <View style={{ flex: 1, paddingTop: 64 }}>
       <Text>{`Available: ${available()}`}</Text>
@@ -18,7 +18,7 @@ function App() {
         testID="settings"
         onPress={() => {
           try {
-            const pending = openAppSettings();
+            const pending = AppSettings.open();
             opened.set(typeof pending.then === "function" ? "pending" : "not a promise");
             pending.then(
               (result) => opened.set(`resolved ${result.opened}`),

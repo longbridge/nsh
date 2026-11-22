@@ -307,7 +307,7 @@ pub(super) fn executor() -> Rc<Executor> {
     with_data(|d| d.ambient.executor.clone()).expect("the core sets the executor")
 }
 
-fn act(action: Action) {
+pub(crate) fn act(action: Action) {
     executor().act(action);
 }
 
@@ -741,29 +741,6 @@ pub fn log_file() -> Option<std::path::PathBuf> {
 pub fn open_url(url: impl Into<String>) -> Answer<bool> {
     let (answer, action) = super::services::open_url(url.into());
     act(action);
-    answer
-}
-
-/// Opens the app's own page in the system's settings (TS:
-/// `openAppSettings` of `nsh/device`; [`crate::app_settings`]): where the
-/// user turns back on a permission they denied, as an "Open Settings"
-/// button beside the app's explanation does. To await in a task: whether
-/// the system opened the page; it fails with
-/// [`AppSettingsError::Unavailable`](crate::app_settings::AppSettingsError::Unavailable)
-/// where the platform has no such page (all but iOS and Android;
-/// [`app_settings_available`]). Drop it when the answer does not matter.
-pub fn open_app_settings() -> Answer<Result<bool, crate::app_settings::AppSettingsError>> {
-    let (answer, slot) = Answer::new();
-    act(Action::OpenAppSettings(slot));
-    answer
-}
-
-/// Whether [`open_app_settings`] opens the app's page in the system's
-/// settings here (TS: `appSettingsAvailable` of `nsh/device`): on iOS and
-/// Android. To await in a task, before showing an "Open Settings" button.
-pub fn app_settings_available() -> Answer<bool> {
-    let (answer, slot) = Answer::new();
-    act(Action::AppSettingsAvailable(slot));
     answer
 }
 

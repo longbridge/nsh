@@ -298,7 +298,7 @@ final class SystemUi {
     }
 
     /**
-     * {@code openAppSettings}: opens the app's page in the system's settings (App info,
+     * {@code AppSettings.open}: opens the app's page in the system's settings (App info,
      * {@code Settings.ACTION_APPLICATION_DETAILS_SETTINGS} for {@code package:<the app's package>}), where the user
      * turns back on a permission they denied. From the view's activity, as {@link #openUrl} opens a URL (a new task
      * from any other context, as the system needs). Whether the system opened it.
