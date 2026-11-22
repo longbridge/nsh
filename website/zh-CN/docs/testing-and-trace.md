@@ -110,7 +110,8 @@ error 2 tests: 1 passed, 1 failed (0.9s)
 共享状态；测试结束时，它打开的应用会被关闭。测试在抛出异常、返回的 promise 被 reject 或超时时失败：超时默认 30 秒，
 也可以用 `test` 的第三个参数按毫秒指定（`test("syncs", body, 60_000)`）。带有自己
 Rust crate 的应用（`nsh.json` 的 `"rust"`）以同样的方式，在 NSH 用这些 crate 构建的无界面运行器中运行测试；在 Rust 应用
-（`nsh.json` 的 `"root"`，[用 Rust 开发](./rust.md)）中，`open(".")` 启动它的根组件。
+（`nsh.json` 的 `"root"`，[用 Rust 开发](./rust.md)）中，`open(".")` 启动它的根组件。加上 `--release` 会以
+`cargo test --release` 运行其 crate 测试，以优化模式（`--release`）构建无界面运行器和开发宿主，并对被测应用 bundle 压缩代码、去掉调试信息。
 
 ### 分组与准备测试
 
@@ -761,7 +762,7 @@ perf commit: 55 ops, 1667µs (list js 771µs), 46 mount items, 414 nodes
 ```
 
 对于[列表](./lists.md)，这能展示虚拟化的实际效果：哪些帧绑定了新行、一行需要多少操作，以及没有露出新行的帧不产生任何
-内容。要得到有意义的耗时，请使用 release 构建（`cargo test --release`，或源码检出中的 `./target/release/nsh`）。
+内容。要得到有意义的耗时，请使用 release 构建（`cargo test --release`、带 Rust crate 的应用用 `nsh test --release`，或源码检出中的 `./target/release/nsh`）。
 
 ### 在 CI 中
 

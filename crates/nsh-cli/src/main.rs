@@ -161,6 +161,12 @@ enum Command {
         /// too).
         #[arg(long)]
         filter: Option<String>,
+        /// Build and run in release mode: minify and strip debug info from the
+        /// app bundles under test, run the crates' Rust tests with
+        /// `cargo test --release`, and build an app with Rust crates' headless
+        /// runner and development hosts optimized (`--release`).
+        #[arg(long)]
+        release: bool,
         /// Print every mount batch of the apps the tests open, under the
         /// step it came in, and the time of every commit.
         #[arg(long)]
@@ -1000,6 +1006,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             path,
             entry,
             filter,
+            release,
             trace,
             fps,
             junit,
@@ -1014,6 +1021,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             &path,
             &entry,
             filter,
+            release,
             trace,
             fps,
             junit.as_deref(),
@@ -1486,5 +1494,36 @@ mod command_tests {
             }
         ));
         assert!(Cli::try_parse_from(["nsh", "dev", "--server-only", "--target", "ios"]).is_err());
+    }
+
+    #[test]
+    fn test_accepts_release_flag() {
+        let default = Cli::try_parse_from(["nsh", "test"]).unwrap();
+        assert!(matches!(
+            default.command,
+            Command::Test { release: false, .. }
+        ));
+        let release = Cli::try_parse_from(["nsh", "test", "--release"]).unwrap();
+        assert!(matches!(
+            release.command,
+            Command::Test { release: true, .. }
+        ));
+        let targeted = Cli::try_parse_from([
+            "nsh",
+            "test",
+            "App.test.tsx",
+            "--release",
+            "--target",
+            "windows",
+        ])
+        .unwrap();
+        assert!(matches!(
+            targeted.command,
+            Command::Test {
+                release: true,
+                target: Some(Target::Windows),
+                ..
+            }
+        ));
     }
 }

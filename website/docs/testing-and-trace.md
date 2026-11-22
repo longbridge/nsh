@@ -119,7 +119,9 @@ another engine, a fresh one each time, so tests never share state; the apps a te
 test fails when it throws, when the promise it returns rejects, and after its timeout: 30 seconds, or the milliseconds
 `test`'s third argument gives (`test("syncs", body, 60_000)`). An app with Rust crates of its own
 (`nsh.json` `"rust"`) runs its tests in a headless runner NSH builds with them, the same way; in a Rust app
-(`nsh.json` `"root"`, [Building with Rust](./rust.md)), `open(".")` starts its root component.
+(`nsh.json` `"root"`, [Building with Rust](./rust.md)), `open(".")` starts its root component. Pass `--release` to run
+`cargo test --release` on its crates, build its headless runner and development hosts optimized (`--release`), and
+minify and strip debug info from the app bundles under test.
 
 ### Grouping tests and setting them up
 
@@ -841,7 +843,8 @@ perf commit: 55 ops, 1667µs (list js 771µs), 46 mount items, 414 nodes
 ```
 
 For a [list](./lists.md), this shows the virtualization at work: which frames bind new rows, how many operations a row
-costs, and that frames revealing no new row produce nothing. Use it with a release build (`cargo test --release`, or `./target/release/nsh` in a checkout) for meaningful
+costs, and that frames revealing no new row produce nothing. Use it with a release build (`cargo test --release`,
+`nsh test --release` for an app with Rust crates, or `./target/release/nsh` in a checkout) for meaningful
 timings.
 
 ### In CI

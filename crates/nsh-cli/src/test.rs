@@ -60,6 +60,7 @@ pub(crate) fn test(
     path: &Path,
     entry: &Path,
     filter: Option<String>,
+    release: bool,
     trace: bool,
     fps: bool,
     junit: Option<&Path>,
@@ -136,6 +137,11 @@ pub(crate) fn test(
             "--web-host goes with headless runs: --target web takes nsh.json's web.host, the other targets have no page host"
         );
     }
+    if release {
+        // The app's crates and NSH's in the headless runner and development
+        // hosts, optimized as in a package.
+        crate::rust_app::set_release_hosts();
+    }
     // The page's host of headless runs: `--web-host`, else nsh.json's.
     // Absolute: an app's headless runner opens it too.
     let page_host = match web_host {
@@ -155,14 +161,16 @@ pub(crate) fn test(
             ui::note("the crates' Rust tests (`cargo test`) run without --target");
         } else {
             for krate in &crates {
-                cargo_test(krate, filter.as_deref(), &mut tally);
+                cargo_test(krate, filter.as_deref(), release, &mut tally);
             }
         }
     }
     let host = target
         .filter(|_| !files.is_empty())
         .map(|target| {
-            crate::test_host::starter(target, browser, &work_dir, fps, device, display, foreground)
+            crate::test_host::starter(
+                target, browser, &work_dir, fps, device, display, foreground, release,
+            )
         })
         .transpose()?;
     // What `open` checks its options against on that host.
@@ -184,12 +192,12 @@ pub(crate) fn test(
                 verbose: ui::verbose(),
                 page_host,
             };
-            in_runner(&app, &request, &shown, &mut tally)?;
+            in_runner(&app, &request, release, &shown, &mut tally)?;
         }
         None => {
             let run = TestRun {
                 ui_sets: crate::own_sets().to_vec(),
-                compile: compiler(),
+                compile: compiler(release),
                 work_dir: work_dir.clone(),
                 filter,
                 trace: trace.then(|| Arc::new(Mutex::new(Box::new(std::io::stdout()) as _))),
@@ -449,6 +457,7 @@ fn xml(text: &str) -> String {
 fn in_runner(
     app: &RustApp,
     request: &TestRequest,
+    release: bool,
     shown: &dyn Fn(&Path) -> String,
     tally: &mut Tally,
 ) -> anyhow::Result<()> {
@@ -475,7 +484,7 @@ fn in_runner(
             }
             Some(RunnerMessage::Build { entry, kind }) => {
                 builds += 1;
-                let reply = build_for_runner(&entry, kind, &request.work_dir, builds);
+                let reply = build_for_runner(&entry, kind, &request.work_dir, builds, release);
                 writeln!(input, "{}", serde_json::to_string(&reply)?)
                     .context("answer the runner")?;
             }
@@ -498,7 +507,7 @@ fn in_runner(
 
 /// Builds `entry` for the app's runner, the `n`th build of the run: its
 /// files in `work_dir`, or the app's root.
-fn build_for_runner(entry: &Path, kind: Entry, work_dir: &Path, n: usize) -> Reply {
+fn build_for_runner(entry: &Path, kind: Entry, work_dir: &Path, n: usize, release: bool) -> Reply {
     let built = (|| -> anyhow::Result<Reply> {
         let (bytecode, map, capabilities, links, main_window, application, asset_root) = match kind
         {
@@ -508,7 +517,7 @@ fn build_for_runner(entry: &Path, kind: Entry, work_dir: &Path, n: usize) -> Rep
                 if crate::rust_app::is_root(&entry) {
                     return Ok(Reply::Root);
                 }
-                bytecode_of(&entry, &crate::ui_sets(), true)?
+                bytecode_of(&entry, &crate::ui_sets(), true, release)?
             }
         };
         let dir = work_dir.join("build");
@@ -539,7 +548,8 @@ fn build_for_runner(entry: &Path, kind: Entry, work_dir: &Path, n: usize) -> Rep
 }
 
 /// The entry made for a test file, bundled against the app's sets and
-/// `nsh/test`, and compiled.
+/// `nsh/test`, and compiled. Test files always keep debug info so failure
+/// stacks report exact source locations.
 fn test_file_bytecode(entry: &Path) -> anyhow::Result<Compiled> {
     let mut sets = crate::ui_sets().to_vec();
     sets.extend(
@@ -548,7 +558,7 @@ fn test_file_bytecode(entry: &Path) -> anyhow::Result<Compiled> {
             .flat_map(nsh_core::element::Registry::sets)
             .map(SetDescription::from),
     );
-    bytecode_of(entry, &sets, false)
+    bytecode_of(entry, &sets, false, false)
 }
 
 /// A compiled entry: its bytecode, its source map, the capabilities
@@ -567,14 +577,19 @@ type Compiled = (
 
 /// `entry` bundled against `sets` and compiled to bytecode, with its
 /// source map, declared capabilities, links and main window's launch
-/// options; `announce`: saying so.
-fn bytecode_of(entry: &Path, sets: &[SetDescription], announce: bool) -> anyhow::Result<Compiled> {
+/// options; `announce`: saying so; `release`: minify and strip debug info.
+fn bytecode_of(
+    entry: &Path,
+    sets: &[SetDescription],
+    announce: bool,
+    release: bool,
+) -> anyhow::Result<Compiled> {
     let bundle = nsh_bundler::bundle(&BundleOptions {
         entry: entry.to_path_buf(),
-        minify: false,
+        minify: release,
         split: false,
         ui_sets: sets.to_vec(),
-        development: true,
+        development: !release,
         ..Default::default()
     })
     .map_err(|e| BuildError::from(e).into_error(entry))?;
@@ -589,7 +604,7 @@ fn bytecode_of(entry: &Path, sets: &[SetDescription], announce: bool) -> anyhow:
             ))
         ));
     }
-    let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, sets)?;
+    let bytecode = nsh_js::compile_bytecode_with(&bundle.code, release, sets)?;
     let capabilities = bundle.capabilities.map(|c| c.to_json().to_string());
     Ok((
         bytecode,
@@ -663,18 +678,19 @@ fn screen_limit() -> Option<usize> {
     (!ui::verbose()).then_some(SCREEN_TEXT_LIMIT)
 }
 
-/// Tests the app's crate `krate` with `cargo test --no-fail-fast` (only the
-/// tests whose name contains `filter`, if given) in its directory, and
-/// shows and counts each test it ran, under the file of its test target.
+/// Tests the app's crate `krate` with `cargo test --no-fail-fast` (with
+/// `--release` when `release` is set, and only the tests whose name contains
+/// `filter`, if given) in its directory, and shows and counts each test it
+/// ran, under the file of its test target.
 /// A run that fails with no test failing (the tests do not build, a test
 /// binary crashed) counts as a failure of the crate, with cargo's output.
-fn cargo_test(krate: &AppCrate, filter: Option<&str>, tally: &mut Tally) {
-    let step = ui::Step::start(format!("testing {}", krate.package()));
-    let mut cmd = krate.cargo("test");
-    cmd.arg("--no-fail-fast").env("CARGO_TERM_COLOR", "never");
-    if let Some(filter) = filter {
-        cmd.arg(filter);
-    }
+fn cargo_test(krate: &AppCrate, filter: Option<&str>, release: bool, tally: &mut Tally) {
+    let step = ui::Step::start(format!(
+        "testing {}{}",
+        krate.package(),
+        if release { " (release build)" } else { "" }
+    ));
+    let mut cmd = cargo_test_command(krate, filter, release);
     let ran = ui::capture_all(&mut cmd, |line| {
         let line = line.trim_start();
         if let Some(rest) = line.strip_prefix("Compiling ") {
@@ -709,6 +725,20 @@ fn cargo_test(krate: &AppCrate, filter: Option<&str>, tally: &mut Tally) {
             &format!("cargo test failed ({status})\n{}", output.trim_end()),
         );
     }
+}
+
+/// The `cargo test` command for `krate`, with `--release` and `filter` when
+/// given.
+fn cargo_test_command(krate: &AppCrate, filter: Option<&str>, release: bool) -> Command {
+    let mut cmd = krate.cargo("test");
+    cmd.arg("--no-fail-fast").env("CARGO_TERM_COLOR", "never");
+    if release {
+        cmd.arg("--release");
+    }
+    if let Some(filter) = filter {
+        cmd.arg(filter);
+    }
+    cmd
 }
 
 /// The tests `cargo test`'s `output` reports, by test target in order:
@@ -873,7 +903,7 @@ fn steps_file(work_dir: &Path, entry: &Path) -> anyhow::Result<PathBuf> {
 /// Builds the apps tests open against the UI sets this command line
 /// serves (each entry once), and the entries made for test files against
 /// them and `nsh/test`, in this process.
-fn compiler() -> nsh_testing::Compile {
+fn compiler(release: bool) -> nsh_testing::Compile {
     let built: Mutex<HashMap<PathBuf, Compiled>> = Mutex::new(HashMap::new());
     Arc::new(move |entry: &Path, kind: Entry| {
         let (bytecode, map, capabilities, links, main_window, application, asset_root) = match kind
@@ -889,7 +919,7 @@ fn compiler() -> nsh_testing::Compile {
                 match cached {
                     Some(built) => built,
                     None => {
-                        let out = bytecode_of(&entry, &crate::ui_sets(), true)
+                        let out = bytecode_of(&entry, &crate::ui_sets(), true, release)
                             .map_err(|e| crate::ui::with_details(&e))?;
                         built
                             .lock()
@@ -1016,6 +1046,7 @@ test src/lib.rs - App (line 3) ... ok
             None,
             false,
             false,
+            false,
             None,
             None,
             None,
@@ -1084,7 +1115,7 @@ test src/lib.rs - App (line 3) ... ok
         )
         .unwrap();
         std::fs::write(dir.join("App.tsx"), "export {};\n").unwrap();
-        let built = compiler()(&dir.join("App.tsx"), Entry::App);
+        let built = compiler(false)(&dir.join("App.tsx"), Entry::App);
         std::fs::remove_dir_all(&dir).unwrap();
         match built {
             Ok(Built::Js { bundle, .. }) => {
@@ -1175,5 +1206,46 @@ test src/lib.rs - App (line 3) ... ok
         let report = tally.junit(std::time::Duration::from_secs(1));
         assert!(report.len() < 10_000, "{} characters", report.len());
         assert!(report.contains("more characters"), "{report}");
+    }
+
+    #[test]
+    fn cargo_test_command_passes_release_flag_when_requested() {
+        let krate = AppCrate::new("app-native".into(), PathBuf::from("/app/native"));
+        let args = |filter: Option<&str>, release: bool| -> Vec<String> {
+            cargo_test_command(&krate, filter, release)
+                .get_args()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect()
+        };
+        assert!(!args(None, false).iter().any(|a| a == "--release"));
+        assert!(args(None, true).iter().any(|a| a == "--release"));
+        let filtered = args(Some("adds"), true);
+        let release_at = filtered.iter().position(|a| a == "--release").unwrap();
+        let filter_at = filtered.iter().position(|a| a == "adds").unwrap();
+        assert!(release_at < filter_at, "{filtered:?}");
+    }
+
+    #[test]
+    fn release_mode_builds_app_bundle_without_development_debug_info() {
+        let dir = std::env::temp_dir().join(format!("nsh-test-release-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("nsh.json"), "{}").unwrap();
+        std::fs::write(
+            dir.join("App.tsx"),
+            "import { appInfo, mount, Text } from \"nsh\";\n\
+             mount(() => <Text>{appInfo().development ? \"dev\" : \"prod\"}</Text>);\n",
+        )
+        .unwrap();
+        let entry = dir.join("App.tsx");
+        let debug = bytecode_of(&entry, &crate::ui_sets(), false, false).unwrap();
+        let release = bytecode_of(&entry, &crate::ui_sets(), false, true).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(
+            release.0.len() < debug.0.len(),
+            "release bytecode ({} B) should be smaller than debug ({} B)",
+            release.0.len(),
+            debug.0.len()
+        );
     }
 }

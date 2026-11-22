@@ -81,14 +81,22 @@ static CURRENT: std::sync::Mutex<Option<RustApp>> = std::sync::Mutex::new(None);
 /// of ending the session ([`RustApp::build_with`]).
 static RESTARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Set by `nsh run --release`: the development host is an optimized
-/// (`--release`) build too, so what the session shows runs at the speed
-/// the app ships at ([`RustApp::host`]).
+/// Set by `nsh run --release` and `nsh test --release`: the development
+/// hosts and headless test runner are optimized (`--release`) builds too, so
+/// the session or test run exercises optimized Rust code
+/// ([`RustApp::host`], [`RustApp::test_runner`], [`RustApp::android_runtime`]).
 static RELEASE_HOSTS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Builds this command's development hosts optimized ([`RELEASE_HOSTS`]).
+/// Builds this command's development hosts and headless test runner optimized
+/// ([`RELEASE_HOSTS`]).
 pub(crate) fn set_release_hosts() {
     RELEASE_HOSTS.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether `--release` was requested for development hosts and the headless
+/// test runner ([`RELEASE_HOSTS`]).
+fn release_hosts() -> bool {
+    RELEASE_HOSTS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// What `nsh package` names and versions the app (`--id`, `--name`,
@@ -2430,14 +2438,30 @@ impl RustApp {
 
     /// The app's headless runner (`nsh test`), built for this machine.
     pub(crate) fn test_runner(&self) -> anyhow::Result<PathBuf> {
+        let (release, what) = self.test_runner_build(release_hosts());
         self.build(
             &self.workspace,
             &self.bin("test"),
             None,
-            false,
+            release,
             &[],
-            &format!("the headless runner of {}", self.packages()),
+            &what,
         )
+    }
+
+    /// Whether [`Self::test_runner`] builds with `--release` and the step
+    /// label it reports when `asked` is set (`nsh test --release`). A shared
+    /// workspace's `dev` profile is optimized already
+    /// (`write_workspace_manifest`), so one build serves both.
+    fn test_runner_build(&self, asked: bool) -> (bool, String) {
+        let base = format!("the headless runner of {}", self.packages());
+        let release = asked && !self.shared;
+        let what = if asked {
+            format!("{base} (release build)")
+        } else {
+            base
+        };
+        (release, what)
     }
 
     /// The generated workspace.
@@ -3599,18 +3623,7 @@ opt-level = \"s\"
             }
             return Err(error);
         }
-        let place = |mut path: PathBuf| {
-            if let Some(triple) = triple {
-                path.push(triple);
-            }
-            path.push(match profile {
-                Some(profile) => profile,
-                None if release => "release",
-                None => "debug",
-            });
-            path.push(artifact);
-            path
-        };
+        let place = |path: PathBuf| artifact_path(path, triple, release, profile, artifact);
         let path = place(self.target_dir()?);
         // A cargo that keeps its own target directory (a wrapper ignoring
         // CARGO_TARGET_DIR) built it elsewhere: Cargo says where, or it is
@@ -3728,7 +3741,7 @@ opt-level = \"s\"
             _ => (self.workspace.clone(), &trimmed[..]),
         };
         let package = self.bin(name);
-        let asked = RELEASE_HOSTS.load(std::sync::atomic::Ordering::Relaxed);
+        let asked = release_hosts();
         // A shared workspace's development host is optimized as a release
         // one already (`write_workspace_manifest`): one build serves both.
         let release = runner || asked && !self.shared;
@@ -3883,19 +3896,16 @@ opt-level = \"s\"
             };
             let package = self.bin(if rust { "rust-android" } else { "android" });
             let artifact = format!("lib{}.so", self.android_lib(rust));
+            let (release, what) = self.android_build(dev, &abi, release_hosts());
             let build = Build {
                 workspace: &self.workspace,
                 package: &package,
                 triple: Some(triple),
-                release: !dev,
+                release,
                 profile: None,
                 extra: features,
                 artifact: &artifact,
-                what: &match self.packages() {
-                    // A TSX app's own library (`runner_only`) has no crates.
-                    p if p.is_empty() => format!("libnsh.so for {abi}"),
-                    p => format!("libnsh.so of {p} for {abi}"),
-                },
+                what: &what,
             };
             let lib = self.build_with(sdk.ndk_cargo(triple)?, &build)?;
             let dir = out.join("lib").join(&abi);
@@ -3917,6 +3927,47 @@ opt-level = \"s\"
         }
         Ok(out)
     }
+
+    /// Whether [`Self::android_runtime`] builds with `--release` and the step
+    /// label it reports for `abi`. Release packages (`!dev`) always use
+    /// `--release`; development libraries use it when `asked` is set
+    /// (`nsh run --release`, `nsh test --release`) and the workspace is not
+    /// shared (a shared workspace's `dev` profile is optimized already).
+    fn android_build(&self, dev: bool, abi: &str, asked: bool) -> (bool, String) {
+        let base = match self.packages() {
+            // A TSX app's own library (`runner_only`) has no crates.
+            p if p.is_empty() => format!("libnsh.so for {abi}"),
+            p => format!("libnsh.so of {p} for {abi}"),
+        };
+        let release = !dev || asked && !self.shared;
+        let what = if dev && asked {
+            format!("{base} (release build)")
+        } else {
+            base
+        };
+        (release, what)
+    }
+}
+
+/// Where Cargo writes `artifact` under `target_dir` for `triple` and the
+/// chosen profile (`profile`, else `"release"` or `"debug"`).
+fn artifact_path(
+    mut target_dir: PathBuf,
+    triple: Option<&str>,
+    release: bool,
+    profile: Option<&str>,
+    artifact: &str,
+) -> PathBuf {
+    if let Some(triple) = triple {
+        target_dir.push(triple);
+    }
+    target_dir.push(match profile {
+        Some(profile) => profile,
+        None if release => "release",
+        None => "debug",
+    });
+    target_dir.push(artifact);
+    target_dir
 }
 
 /// A `cargo build` of a package of the workspace ([`RustApp::build_with`]).
@@ -6981,6 +7032,81 @@ panic = \"abort\"
         assert_eq!(
             extra.dependency(),
             r#"app_nsh_extra = { package = "nsh-extra", path = "/cache/nsh-extra", features = ["camera", "push"] }"#
+        );
+    }
+
+    #[test]
+    fn test_runner_uses_release_profile_only_when_requested_and_not_shared() {
+        let dir = std::env::temp_dir().join(format!("nsh-rust-test-rel-{}", std::process::id()));
+        let mut own = app(&dir, &[("app-native", dir.join("native"))], None);
+        assert_eq!(
+            own.test_runner_build(false),
+            (false, "the headless runner of app-native".into())
+        );
+        assert_eq!(
+            own.test_runner_build(true),
+            (
+                true,
+                "the headless runner of app-native (release build)".into()
+            )
+        );
+        // A shared nshm-only workspace already optimizes its `dev` profile,
+        // so `--release` reuses that build instead of passing `--release`.
+        own.shared = true;
+        assert_eq!(
+            own.test_runner_build(true),
+            (
+                false,
+                "the headless runner of app-native (release build)".into()
+            )
+        );
+        let target = PathBuf::from("/app/target");
+        assert_eq!(
+            super::artifact_path(target.clone(), None, false, None, "nsh-app-test"),
+            PathBuf::from("/app/target/debug/nsh-app-test")
+        );
+        assert_eq!(
+            super::artifact_path(target.clone(), None, true, None, "nsh-app-test"),
+            PathBuf::from("/app/target/release/nsh-app-test")
+        );
+        assert_eq!(
+            super::artifact_path(
+                target,
+                Some("aarch64-linux-android"),
+                true,
+                None,
+                "libnsh_app.so",
+            ),
+            PathBuf::from("/app/target/aarch64-linux-android/release/libnsh_app.so")
+        );
+    }
+
+    #[test]
+    fn android_dev_build_uses_release_profile_when_requested_and_not_shared() {
+        let dir = std::env::temp_dir().join(format!("nsh-rust-and-rel-{}", std::process::id()));
+        let mut own = app(&dir, &[("app-native", dir.join("native"))], None);
+        assert_eq!(
+            own.android_build(true, "arm64-v8a", false),
+            (false, "libnsh.so of app-native for arm64-v8a".into())
+        );
+        assert_eq!(
+            own.android_build(true, "arm64-v8a", true),
+            (
+                true,
+                "libnsh.so of app-native for arm64-v8a (release build)".into()
+            )
+        );
+        assert_eq!(
+            own.android_build(false, "arm64-v8a", false),
+            (true, "libnsh.so of app-native for arm64-v8a".into())
+        );
+        own.shared = true;
+        assert_eq!(
+            own.android_build(true, "arm64-v8a", true),
+            (
+                false,
+                "libnsh.so of app-native for arm64-v8a (release build)".into()
+            )
         );
     }
 }
