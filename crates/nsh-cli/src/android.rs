@@ -55,9 +55,15 @@ impl Sdk {
 
     /// The platform an app targeting `level` compiles against.
     fn android_jar(&self, level: u32) -> anyhow::Result<PathBuf> {
-        let jar = self
-            .root
-            .join(format!("platforms/android-{level}/android.jar"));
+        // Newer platforms install as `android-<n>.0` (`android-37.0`).
+        let jar = [format!("android-{level}"), format!("android-{level}.0")]
+            .iter()
+            .map(|dir| self.root.join("platforms").join(dir).join("android.jar"))
+            .find(|jar| jar.exists())
+            .unwrap_or_else(|| {
+                self.root
+                    .join(format!("platforms/android-{level}/android.jar"))
+            });
         if !jar.exists() {
             bail!(
                 "{} missing: install it with `sdkmanager \"platforms;android-{level}\"`",
@@ -168,8 +174,8 @@ impl Sdk {
 
     fn tool(&self, name: &str) -> PathBuf {
         // On Windows, the Java tools are batch files.
-        if cfg!(windows) && name == "apksigner" {
-            return self.build_tools.join("apksigner.bat");
+        if cfg!(windows) && matches!(name, "apksigner" | "d8") {
+            return self.build_tools.join(format!("{name}.bat"));
         }
         self.build_tools.join(name)
     }
@@ -266,6 +272,9 @@ pub(crate) struct Apk<'a> {
     /// `<abi>/*.so`: packaged beside `libnsh.so` for the ABIs it is built
     /// for.
     pub(crate) jni_libs: &'a [PathBuf],
+    /// The Android libraries (`.aar`, `.jar`) of the app's crates
+    /// ([`crate::android_libraries`]).
+    pub(crate) libraries: &'a [PathBuf],
     pub(crate) signing: Signing,
 }
 
@@ -568,17 +577,54 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
         .with_context(|| format!("compile a crate's resources in {}", res.display()))?;
         crate_res.push(zip);
     }
-    let overlays = resource_layers(&mut flat, app_res, crate_res);
+    // The libraries' resources, below the crates': each is an overlay too.
+    let mut libraries = Vec::new();
+    let mut compile_sdk = apk.target_sdk;
+    let mut library_res = Vec::new();
+    for (i, source) in apk.libraries.iter().enumerate() {
+        let library =
+            crate::android_libraries::Library::unpack(source, &work.join(format!("library-{i}")))?;
+        library.check()?;
+        compile_sdk = compile_sdk.max(library.min_compile_sdk());
+        let res = library.dir.join("res");
+        if fs::read_dir(&res).is_ok_and(|mut d| d.next().is_some()) {
+            let zip = work.join(format!("compiled-library-{i}.zip"));
+            run(Command::new(sdk.tool("aapt2"))
+                .arg("compile")
+                .arg("--dir")
+                .arg(&res)
+                .arg("-o")
+                .arg(&zip))
+            .with_context(|| format!("compile the resources of {}", source.display()))?;
+            library_res.push(zip);
+        }
+        libraries.push(library);
+    }
+    library_res.extend(crate_res);
+    let overlays = resource_layers(&mut flat, app_res, library_res);
+    let merged = if libraries.is_empty() {
+        crate::android_libraries::Manifest::default()
+    } else {
+        crate::android_libraries::merge_manifests(
+            &libraries,
+            apk.package,
+            &declared_permissions(apk),
+            apk.application,
+        )?
+    };
+    for note in &merged.notes {
+        crate::ui::note(note.clone());
+    }
 
     let manifest = work.join("AndroidManifest.xml");
-    fs::write(&manifest, manifest_xml(apk))?;
+    fs::write(&manifest, manifest_xml_with(apk, &merged))?;
     let base = work.join("base.apk");
     let mut link = Command::new(sdk.tool("aapt2"));
     link.arg("link")
         .arg("-o")
         .arg(&base)
         .arg("-I")
-        .arg(sdk.android_jar(apk.target_sdk)?)
+        .arg(sdk.android_jar(compile_sdk)?)
         .arg("--manifest")
         .arg(&manifest)
         .args(["--min-sdk-version", &MIN_SDK.to_string()])
@@ -598,11 +644,16 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
             link.arg("-R").arg(overlay);
         }
     }
+    let symbols = work.join("R.txt");
+    if !libraries.is_empty() {
+        link.arg("--output-text-symbols").arg(&symbols);
+    }
     run(&mut link)?;
+    let extras = library_files(sdk, &libraries, &symbols, compile_sdk, &work, apk.dev)?;
 
     if format == Format::Aab {
         let unsigned = work.join("unsigned.aab");
-        write_bundle(&base, &unsigned, apk)?;
+        write_bundle(&base, &unsigned, apk, &extras)?;
         sign_bundle(&apk.signing, &unsigned)?;
         fs::rename(&unsigned, out)?;
         fs::remove_dir_all(&work)?;
@@ -611,7 +662,7 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
 
     // Code, native libraries and app files.
     let unaligned = work.join("unaligned.apk");
-    add_files(&base, &unaligned, apk, &Layout::APK)?;
+    add_files(&base, &unaligned, apk, &Layout::APK, &extras)?;
     let aligned = work.join("aligned.apk");
     // `-P 16`: shared libraries on 16 KB pages (Android 15 devices).
     run(Command::new(sdk.tool("zipalign"))
@@ -642,6 +693,125 @@ fn resource_layers(
     let mut overlays = crates;
     overlays.extend(app);
     overlays
+}
+
+/// What the app's Android libraries add to the package besides their
+/// resources and manifests ([`library_files`]).
+#[derive(Debug, Default)]
+struct Extras {
+    /// Their classes and `R` classes, dexed: `classesN.dex` after the
+    /// app's.
+    dex: Vec<PathBuf>,
+    /// Java resources, at the package's root.
+    root: Vec<(String, Vec<u8>)>,
+    /// Their native library directories (`<abi>/*.so`).
+    jni: Vec<PathBuf>,
+    /// Their assets.
+    assets: Vec<(String, Vec<u8>)>,
+}
+
+/// Dexes `libraries`' jars with an `R` class per library package (its
+/// names from its `R.txt`, its values from the app's link, `symbols`) in
+/// one `d8` run against `compile_sdk`'s platform, which fails on a class
+/// two of them hold; and gathers their Java resources, native libraries
+/// and assets.
+fn library_files(
+    sdk: &Sdk,
+    libraries: &[crate::android_libraries::Library],
+    symbols: &Path,
+    compile_sdk: u32,
+    work: &Path,
+    dev: bool,
+) -> anyhow::Result<Extras> {
+    let mut extras = Extras::default();
+    if libraries.is_empty() {
+        return Ok(extras);
+    }
+    let linked = fs::read_to_string(symbols).context("read the linked R.txt")?;
+    let mut classes = Vec::new();
+    // AARs of one package (before namespaces) share one `R` class.
+    let mut packages: Vec<(String, String)> = Vec::new();
+    let mut jars = Vec::new();
+    for library in libraries {
+        jars.extend(library.jars());
+        if let (Some(package), Ok(own)) = (
+            library.package()?,
+            fs::read_to_string(library.dir.join("R.txt")),
+        ) {
+            match packages.iter_mut().find(|(p, _)| *p == package) {
+                Some((_, names)) => names.push_str(&own),
+                None => packages.push((package, own)),
+            }
+        }
+        let jni = library.dir.join("jni");
+        if jni.is_dir() {
+            extras.jni.push(jni);
+        }
+        let assets = library.dir.join("assets");
+        for file in walk_files(&assets)? {
+            let name = file
+                .strip_prefix(&assets)?
+                .to_string_lossy()
+                .replace('\\', "/");
+            crate::android_libraries::add_asset(
+                &mut extras.assets,
+                name,
+                fs::read(&file)?,
+                &library.source,
+            )?;
+        }
+    }
+    for (package, own) in &packages {
+        classes.extend(crate::android_libraries::r_classes(package, own, &linked));
+    }
+    let r_jar = work.join("library-r.jar");
+    crate::android_libraries::write_jar(&r_jar, &classes)?;
+    extras.root = crate::android_libraries::java_resources(&jars)?;
+    let out = work.join("library-dex");
+    fs::create_dir_all(&out)?;
+    run(Command::new(sdk.tool("d8"))
+        .arg(if dev { "--debug" } else { "--release" })
+        .args(["--min-api", &MIN_SDK.to_string()])
+        .arg("--lib")
+        .arg(sdk.android_jar(compile_sdk)?)
+        .arg("--output")
+        .arg(&out)
+        .args(&jars)
+        .arg(&r_jar))
+    .context("dex the Android libraries with the SDK's d8 (it needs a JDK)")?;
+    let mut dex: Vec<PathBuf> = fs::read_dir(&out)?
+        .map(|e| e.map(|e| e.path()))
+        .collect::<Result<_, _>>()?;
+    dex.retain(|p| p.extension().is_some_and(|e| e == "dex"));
+    // `classes.dex`, `classes2.dex`, ... in d8's order.
+    dex.sort_by_key(|p| {
+        p.file_stem()
+            .and_then(|s| s.to_str())
+            .and_then(|s| s.strip_prefix("classes"))
+            .map_or(0, |n| n.parse::<u32>().unwrap_or(1))
+    });
+    extras.dex = dex;
+    Ok(extras)
+}
+
+/// The files under `dir` (none when it is missing), in a stable order.
+fn walk_files(dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Ok(files);
+    };
+    let mut entries: Vec<PathBuf> = entries
+        .map(|e| e.map(|e| e.path()))
+        .collect::<Result<_, _>>()?;
+    entries.sort();
+    for entry in entries {
+        if entry.is_dir() {
+            files.extend(walk_files(&entry)?);
+        } else {
+            files.push(entry);
+        }
+    }
+    Ok(files)
 }
 
 /// The theme of the application: the launch theme ([`LAUNCH_THEME`]) when
@@ -854,7 +1024,37 @@ fn compile_resources(sdk: &Sdk, files: &[PathBuf], out: &Path) -> anyhow::Result
     Ok(flat)
 }
 
+/// The permissions the manifest declares: NSH's own, then the app's
+/// (`android.permissions`), each once.
+fn declared_permissions(apk: &Apk<'_>) -> Vec<String> {
+    let mut permissions = vec!["android.permission.INTERNET".to_owned()];
+    for (declared, name) in [
+        (apk.notifications, "POST_NOTIFICATIONS"),
+        (apk.microphone, "RECORD_AUDIO"),
+        (apk.camera, "CAMERA"),
+    ] {
+        if declared {
+            permissions.push(format!("android.permission.{name}"));
+        }
+    }
+    for name in apk.permissions {
+        if !permissions.contains(name) {
+            permissions.push(name.clone());
+        }
+    }
+    permissions
+}
+
+/// [`manifest_xml_with`] for an app without Android libraries.
+#[cfg(test)]
 fn manifest_xml(apk: &Apk<'_>) -> String {
+    manifest_xml_with(apk, &crate::android_libraries::Manifest::default())
+}
+
+/// [`manifest_xml`] with what the app's Android libraries add (`merged`):
+/// their permissions and features under `<manifest>`, their queries and
+/// components after the app's.
+fn manifest_xml_with(apk: &Apk<'_>, merged: &crate::android_libraries::Manifest) -> String {
     let icon = match apk.icon {
         Some(Icon::Image(_)) => r#" android:icon="@mipmap/ic_launcher""#,
         Some(Icon::Adaptive(_)) => {
@@ -877,23 +1077,7 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
         .replace('&', "&amp;")
         .replace('"', "&quot;")
         .replace('<', "&lt;");
-    // NSH's own, then the app's (`android.permissions`), each once.
-    let mut permissions = vec!["android.permission.INTERNET".to_owned()];
-    for (declared, name) in [
-        (apk.notifications, "POST_NOTIFICATIONS"),
-        (apk.microphone, "RECORD_AUDIO"),
-        (apk.camera, "CAMERA"),
-    ] {
-        if declared {
-            permissions.push(format!("android.permission.{name}"));
-        }
-    }
-    for name in apk.permissions {
-        if !permissions.contains(name) {
-            permissions.push(name.clone());
-        }
-    }
-    let permissions: String = permissions
+    let permissions: String = declared_permissions(apk)
         .iter()
         .map(|name| format!("\n    <uses-permission android:name=\"{name}\" />"))
         .collect();
@@ -926,8 +1110,14 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
             })
             .collect()
     };
-    let queries = elements(apk.queries, "        ");
-    let components = elements(apk.application, "        ");
+    let queries = elements(apk.queries, "        ") + &elements(&merged.queries, "        ");
+    // The libraries' components merged with the app's: the whole list.
+    let components = if merged.replaces_app {
+        elements(&merged.application, "        ")
+    } else {
+        elements(apk.application, "        ")
+    };
+    let permissions = permissions + &elements(&merged.top, "    ");
     format!(
         r#"<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="{package}">{permissions}
@@ -976,6 +1166,8 @@ struct Layout {
     dex: &'static str,
     lib: &'static str,
     assets: &'static str,
+    /// Where Java resources go: the APK's root, a bundle's `root/`.
+    root: &'static str,
 }
 
 impl Layout {
@@ -984,6 +1176,7 @@ impl Layout {
         dex: "classes.dex",
         lib: "lib",
         assets: "assets",
+        root: "",
     };
     /// The bundle's one module, `base`.
     const BUNDLE: Layout = Layout {
@@ -991,15 +1184,16 @@ impl Layout {
         dex: "base/dex/classes.dex",
         lib: "base/lib",
         assets: "base/assets",
+        root: "base/root/",
     };
 }
 
 /// An Android App Bundle: the module `base` from the proto-format `linked`,
 /// [`add_files`]' code, libraries and assets, the libraries' ABIs
 /// (`base/native.pb`) and `BundleConfig.pb`.
-fn write_bundle(linked: &Path, out: &Path, apk: &Apk<'_>) -> anyhow::Result<()> {
+fn write_bundle(linked: &Path, out: &Path, apk: &Apk<'_>, extras: &Extras) -> anyhow::Result<()> {
     let files = work_file(out, "files.zip");
-    let abis = add_files(linked, &files, apk, &Layout::BUNDLE)?;
+    let abis = add_files(linked, &files, apk, &Layout::BUNDLE, extras)?;
     use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
     let mut input = ZipArchive::new(fs::File::open(&files)?)?;
     let mut zip = ZipWriter::new(fs::File::create(out)?);
@@ -1120,6 +1314,7 @@ fn add_files(
     out: &Path,
     apk: &Apk<'_>,
     layout: &Layout,
+    extras: &Extras,
 ) -> anyhow::Result<Vec<String>> {
     use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
     let mut input = ZipArchive::new(fs::File::open(base)?)?;
@@ -1146,7 +1341,7 @@ fn add_files(
     // The app's own after the runtime's: Android loads `classes<N>.dex`
     // from 2 up, until one is missing. The numbers assume the runtime is
     // one dex; a runtime of more would collide with the app's.
-    if !apk.dex.is_empty() && apk.runtime.join("classes2.dex").exists() {
+    if !(apk.dex.is_empty() && extras.dex.is_empty()) && apk.runtime.join("classes2.dex").exists() {
         bail!(
             "the Android runtime in {} has more than one dex file, which `android.dex` cannot follow yet",
             apk.runtime.display()
@@ -1167,6 +1362,18 @@ fn add_files(
         }
         zip.start_file(format!("{dex_dir}classes{}.dex", i + 2), deflate)?;
         zip.write_all(&bytes)?;
+    }
+    // The libraries' after the app's and its crates'.
+    for (i, path) in extras.dex.iter().enumerate() {
+        zip.start_file(
+            format!("{dex_dir}classes{}.dex", apk.dex.len() + i + 2),
+            deflate,
+        )?;
+        zip.write_all(&fs::read(path)?)?;
+    }
+    for (path, bytes) in &extras.root {
+        zip.start_file(format!("{}{path}", layout.root), deflate)?;
+        zip.write_all(bytes)?;
     }
     let libs = apk.runtime.join("lib");
     let mut available = Vec::new();
@@ -1204,7 +1411,7 @@ fn add_files(
         zip.start_file(format!("{}/{abi}/libnsh.so", layout.lib), stored)?;
         zip.write_all(&fs::read(&so)?)?;
         let mut names: Vec<(String, Vec<u8>)> = Vec::new();
-        for dir in apk.jni_libs {
+        for dir in apk.jni_libs.iter().chain(&extras.jni) {
             let abi_dir = dir.join(abi);
             if !abi_dir.is_dir() {
                 missing.entry(dir.clone()).or_default().push(abi.clone());
@@ -1261,6 +1468,18 @@ fn add_files(
     for (path, bytes) in &apk.assets {
         // Bytecode and images are compressed already or small.
         zip.start_file(format!("{}/{path}", layout.assets), deflate)?;
+        zip.write_all(bytes)?;
+    }
+    for (path, bytes) in &extras.assets {
+        if apk.assets.iter().any(|(own, _)| own == path) {
+            bail!("an Android library's asset {path} has the name of one of the app's");
+        }
+        let options = if crate::android_libraries::store_uncompressed(path) {
+            stored
+        } else {
+            deflate
+        };
+        zip.start_file(format!("{}/{path}", layout.assets), options)?;
         zip.write_all(bytes)?;
     }
     zip.finish()?;
@@ -1813,6 +2032,7 @@ mod tests {
             res: None,
             crate_res: &[],
             jni_libs: &[],
+            libraries: &[],
             signing: super::Signing::Debug,
         }
     }
@@ -2051,6 +2271,7 @@ mod tests {
                     ..apk(false, false)
                 },
                 layout,
+                &super::Extras::default(),
             )
             .unwrap();
             assert_eq!(
@@ -2071,6 +2292,7 @@ mod tests {
                 ..apk(false, false)
             },
             &super::Layout::APK,
+            &super::Extras::default(),
         )
         .unwrap_err()
         .to_string();
@@ -2207,6 +2429,7 @@ mod tests {
                     ..apk(false, false)
                 },
                 layout,
+                &super::Extras::default(),
             )
             .map(|_| {
                 let archive = zip::ZipArchive::new(std::fs::File::open(&out).unwrap()).unwrap();

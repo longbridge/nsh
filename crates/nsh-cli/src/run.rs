@@ -872,6 +872,7 @@ pub(crate) fn install_android_host(
         meta.android_dex.clear();
         meta.android_res.clear();
         meta.android_jni_libs.clear();
+        meta.android_libraries.clear();
     }
     let mut version = runtime_version(runtime, abis)?;
     for line in meta
@@ -890,6 +891,7 @@ pub(crate) fn install_android_host(
         .iter()
         .chain(&meta.android_res)
         .chain(&meta.android_jni_libs)
+        .chain(&meta.android_libraries)
         .map(PathBuf::as_path)
         .collect();
     if !files.is_empty() {
@@ -900,7 +902,10 @@ pub(crate) fn install_android_host(
         apk_path.exists() && fs::read_to_string(&stamp).ok().as_deref() == Some(version.as_str());
     if !built {
         let step = ui::Step::start("building the Android development host");
-        let host = |dex: &[PathBuf], crate_res: &[PathBuf], jni_libs: &[PathBuf]| {
+        let host = |dex: &[PathBuf],
+                    crate_res: &[PathBuf],
+                    jni_libs: &[PathBuf],
+                    libraries: &[PathBuf]| {
             android::build_apk(
                 sdk,
                 &Apk {
@@ -933,25 +938,32 @@ pub(crate) fn install_android_host(
                     res: None,
                     crate_res,
                     jni_libs,
+                    libraries,
                     signing: Signing::Debug,
                 },
                 &apk_path,
             )
         };
-        let built = host(&meta.android_dex, &meta.android_res, &meta.android_jni_libs);
+        let built = host(
+            &meta.android_dex,
+            &meta.android_res,
+            &meta.android_jni_libs,
+            &meta.android_libraries,
+        );
         // A crate's file that does not build (a resource `aapt2` refuses, a
         // library of another ABI) leaves the files out, not the session.
         if let Err(e) = built {
             if meta.android_dex.is_empty()
                 && meta.android_res.is_empty()
                 && meta.android_jni_libs.is_empty()
+                && meta.android_libraries.is_empty()
             {
                 return Err(e);
             }
             ui::warn(format!(
                 "the development host leaves out the Android files the app's crates name: {e:#}"
             ));
-            host(&[], &[], &[])?;
+            host(&[], &[], &[], &[])?;
         }
         step.done("built the Android development host");
         // Until it is installed, no device has this build.

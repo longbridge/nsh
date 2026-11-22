@@ -312,6 +312,7 @@ application = ['<service android:name="com.example.scanner.Sync" android:exporte
 | `android.dex` | Dex files of the crate's Java code, packaged after the app's ([Java code](./packaging.md#java-code)) |
 | `android.res` | A directory of Android resources laid out as the app's `android/res/`, linked below the app's, which wins on a name both declare |
 | `android.jniLibs` | A directory of native libraries, `<abi>/*.so` (`arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64`), packaged beside `libnsh.so`; a 64-bit library must be aligned to 16 KB pages |
+| `android.libraries` | Android libraries the crate ships, `.aar` and `.jar` files: their classes, resources, manifest entries, Java resources, native libraries and assets ([Android libraries](#android-libraries)) |
 
 Paths are relative to the crate's `Cargo.toml`, written with `/`, and must stay inside the crate, links followed, so an
 nshm packages only files it ships; a link to a folder is refused. Only Android packages and the Android development
@@ -339,6 +340,42 @@ What packaging does with them, and what it does not:
   to 16 KB pages (`-Wl,-z,max-page-size=16384`), which Google Play requires from target SDK 35.
 - An `nsh` older than these keys builds without the files and warns that it does not read them; an nshm that uses them
   should require the `nsh-core` of this release or later.
+
+#### Android libraries
+
+An nshm whose Android side uses a library published as an `.aar` (or a plain `.jar`) ships the files and lists them:
+
+```toml
+[package.metadata.nsh.android]
+libraries = ["android/libs/text-recognition-16.0.1.aar", "android/libs/kotlin-stdlib-2.2.0.jar"]
+```
+
+`nsh package` builds them in as Gradle would, without Gradle:
+
+- Their classes (`classes.jar`, `libs/*.jar`) are dexed with the SDK's `d8` in one run, which needs a JDK (`JAVA_HOME`)
+  and fails on a class two libraries hold; their dex files come after the app's.
+- Their resources are linked as overlays below the crates' and the app's (a library listed later wins over an earlier
+  one on a name both declare), and each library package gets its `R` class,
+  with the values the app's link gave them. The package links against the newest platform any of them asks for
+  (`minCompileSdk`), which must be installed.
+- Their manifests are merged element by element: a component two libraries declare (androidx.startup's
+  `InitializationProvider`, Firebase's `ComponentDiscoveryService`) becomes one, with both libraries' `<meta-data>`;
+  `${applicationId}` is the app's package; a permission two libraries ask for keeps the broader `maxSdkVersion`, and a
+  `<uses-feature>` or `<uses-library>` is required when either requires it. A placeholder NSH does not fill, two
+  values of one attribute, a `<permission>` two libraries define differently, a component with an `<intent-filter>`
+  but no `android:exported`, or a `minSdkVersion` above 26 is an error. `tools:node` (`merge`, `remove`, `removeAll`,
+  `replace`), `tools:replace` and `tools:remove` in a library's manifest apply as in Gradle's merger, whatever order
+  the libraries are listed in; a `remove` on an element with no name (an `<intent-filter>`) removes the one equal to
+  it. An app's own component of the same name (`android.application`) merges with a library's, the app's attribute
+  values winning, and can give it the `android:exported` it lacks.
+- Java resources are packaged at the root (`META-INF/services` files joined, licenses and build metadata left out),
+  native libraries (`jni/<abi>`) beside `libnsh.so`, assets in `assets/`, models such as `.tflite` uncompressed. A
+  Java resource or asset two libraries hold with other contents, a Java resource at a path of the package itself
+  (`classes.dex`, `res/`), or an asset the app has too is an error.
+- Not supported: core library desugaring, Gradle plugins (the values `google-services.json` makes go in the app's
+  `android/res/values`), annotation processors, R8 shrinking (`proguard.txt` has no effect).
+
+List every library the code needs: NSH resolves no Maven dependencies.
 
 The app's own `nsh.json` wins: a key it sets keeps its value, and arrays (such as `UIBackgroundModes`) are joined. When
 two crates set one key to different values (two usage descriptions of the camera), the app chooses by setting the key

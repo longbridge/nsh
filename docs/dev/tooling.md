@@ -1123,7 +1123,11 @@ host drops only the files when one is wrong). Packages and the host take them as
 `crate_res` as `aapt2` overlays with the app's `android/res` linked as base and again as the last overlay
 (`android::resource_layers`), and `jni_libs` beside `libnsh.so` (`lib*.so`, identical duplicates once, each checked
 for its ABI's ELF class and machine and, 64-bit, 16 KB pages: `check_library`); the host's stamp holds their
-digest (path, size, time). Keys this CLI does not know are
+digest (path, size, time). `android.libraries` (`.aar`, `.jar`; `android_libraries.rs`) go through the same
+path: `android::build` unpacks them, links their `res` as the lowest overlays against the newest `minCompileSdk`,
+merges their manifests by element (`android_libraries::merge_manifests`), writes each library package's `R` classes
+from the link's `--output-text-symbols` as class files (`r_classes`, no `javac`), dexes their jars with those in one
+`d8` run (`library_files`), and adds their Java resources, `jni/` and `assets/`. Keys this CLI does not know are
 reported and left out, so the format can grow.
 
 ## Finding the runtimes

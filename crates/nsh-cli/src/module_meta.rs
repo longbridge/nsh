@@ -79,6 +79,9 @@ pub(crate) struct ModuleMeta {
     pub(crate) android_res: Vec<PathBuf>,
     /// Native library directories, each holding `<abi>/*.so`.
     pub(crate) android_jni_libs: Vec<PathBuf>,
+    /// Android libraries, `.aar` and `.jar` files
+    /// ([`crate::android_libraries`]).
+    pub(crate) android_libraries: Vec<PathBuf>,
     /// Which package set each key, for errors.
     owners: BTreeMap<String, String>,
     /// Keys two crates set to different values: the first crate's value is
@@ -330,9 +333,9 @@ impl ModuleMeta {
                     }
                     join_strings(&mut self.android_application, elements);
                 }
-                "dex" => {
+                "dex" | "libraries" => {
                     for path in strings()? {
-                        self.android_files.push(crate_.decl(at, "dex", path));
+                        self.android_files.push(crate_.decl(at, key, path));
                     }
                 }
                 "res" | "jniLibs" => {
@@ -364,6 +367,20 @@ impl ModuleMeta {
             let path = &decl.path;
             let file = decl.file()?;
             match key.as_str() {
+                "libraries" => {
+                    let kind = file
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or_default();
+                    if !file.is_file() || !matches!(kind, "aar" | "jar") {
+                        bail!(
+                            "{name}: {at} `android.libraries`: {path} is no `.aar` or `.jar` file"
+                        );
+                    }
+                    if !self.android_libraries.contains(&file) {
+                        self.android_libraries.push(file);
+                    }
+                }
                 "dex" => {
                     let mut magic = [0u8; 4];
                     std::io::Read::read_exact(
@@ -475,6 +492,7 @@ impl ModuleMeta {
         }
         config.android.crate_res.clone_from(&self.android_res);
         config.android.jni_libs.clone_from(&self.android_jni_libs);
+        config.android.libraries.clone_from(&self.android_libraries);
         Ok(())
     }
 }
@@ -1140,7 +1158,7 @@ mod tests {
         // Keys a later nsh reads: reported, left out.
         let (meta, warnings) = ModuleMeta::from_metadata(&metadata(&[(
             "x",
-            json!({ "nsh": { "android": { "libraries": ["a:b:1"] }, "ios": { "privacy": {} } } }),
+            json!({ "nsh": { "android": { "maven": ["a:b:1"] }, "ios": { "privacy": {} } } }),
             &[],
         )]))
         .unwrap();
@@ -1237,6 +1255,38 @@ mod tests {
             read(json!({ "dex": "android/ocr.dex" })).unwrap_err()
         );
         assert!(error.contains("is a list of strings"), "{error}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn crates_android_libraries_are_aar_or_jar_files_of_theirs() {
+        let dir = std::env::temp_dir().join(format!("nsh-cli-crate-libs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("libs")).unwrap();
+        std::fs::write(dir.join("libs/ocr.aar"), b"PK").unwrap();
+        std::fs::write(dir.join("libs/kotlin.jar"), b"PK").unwrap();
+        std::fs::write(dir.join("libs/notes.txt"), b"x").unwrap();
+        let read = |android: Value| {
+            let (mut meta, _) =
+                ModuleMeta::from_metadata(&crates_with_files(&[("ocr", &dir, android)]))?;
+            meta.resolve_android_files().map(|()| meta)
+        };
+        let meta =
+            read(json!({ "libraries": ["libs/ocr.aar", "libs/kotlin.jar", "libs/ocr.aar"] }))
+                .unwrap();
+        let canonical = |p: &str| dunce::canonicalize(dir.join(p)).unwrap();
+        assert_eq!(
+            meta.android_libraries,
+            [canonical("libs/ocr.aar"), canonical("libs/kotlin.jar")]
+        );
+        let mut config = AppConfig::default();
+        meta.apply(&mut config, Platform::Android).unwrap();
+        assert_eq!(config.android.libraries.len(), 2);
+        let error = format!(
+            "{:#}",
+            read(json!({ "libraries": ["libs/notes.txt"] })).unwrap_err()
+        );
+        assert!(error.contains("is no `.aar` or `.jar` file"), "{error}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

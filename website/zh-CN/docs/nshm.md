@@ -281,6 +281,7 @@ application = ['<service android:name="com.example.scanner.Sync" android:exporte
 | `android.dex` | crate 的 Java 代码的 dex 文件，打包时排在应用的之后（见 [Java 代码](./packaging.md#java-代码)） |
 | `android.res` | 一个 Android 资源目录，布局与应用的 `android/res/` 相同，链接在应用的资源之下，两者声明同名资源时以应用的为准 |
 | `android.jniLibs` | 一个原生库目录，按 `<abi>/*.so` 布局（`arm64-v8a`、`armeabi-v7a`、`x86`、`x86_64`），与 `libnsh.so` 一起打包；64 位库必须按 16 KB 页对齐 |
+| `android.libraries` | crate 附带的 Android 库，即 `.aar` 和 `.jar` 文件：它们的类、资源、manifest 条目、Java 资源、原生库和 assets（见 [Android 库](#android-库)） |
 
 路径相对于 crate 的 `Cargo.toml`，用 `/` 分隔，且必须位于 crate 之内（链接也按其指向判断），因此 nshm 只能打包它自己附带的文件；
 指向文件夹的链接会被拒绝。只有 Android 包和 Android 开发宿主读取这些文件，所以文件缺失或有误不会让 iOS 构建停下：
@@ -302,6 +303,36 @@ jniLibs = "android/jniLibs"
   两个 crate 带同名库时，内容相同只打包一份，否则报错。64 位库必须按 16 KB 页对齐（`-Wl,-z,max-page-size=16384`），
   Google Play 从目标 SDK 35 起要求这一点。
 - 早于这些键的 `nsh` 构建时不带这些文件，并警告它不读取它们；用到它们的 nshm 应要求本版本或更新的 `nsh-core`。
+
+#### Android 库
+
+Android 端用到以 `.aar`（或普通 `.jar`）发布的库的 nshm，附带这些文件并列出它们：
+
+```toml
+[package.metadata.nsh.android]
+libraries = ["android/libs/text-recognition-16.0.1.aar", "android/libs/kotlin-stdlib-2.2.0.jar"]
+```
+
+`nsh package` 会像 Gradle 那样把它们构建进去，但不需要 Gradle：
+
+- 它们的类（`classes.jar`、`libs/*.jar`）用 SDK 的 `d8` 一次性转换成 dex，这需要 JDK（`JAVA_HOME`），两个库包含同一个类时会失败；
+  它们的 dex 文件排在应用的之后。
+- 它们的资源作为 overlay 链接在 crate 和应用的资源之下（两者声明同名资源时，后列出的库优先），每个库的包都会得到自己的 `R` 类，取值来自应用链接的结果。包会针对它们
+  要求的最新平台（`minCompileSdk`）链接，该平台必须已安装。
+- 它们的 manifest 按元素合并：两个库都声明的组件（androidx.startup 的 `InitializationProvider`、Firebase 的
+  `ComponentDiscoveryService`）合并为一个，并带上两个库的 `<meta-data>`；`${applicationId}` 是应用的包名；两个库都申请的权限取更宽的
+  `maxSdkVersion`，`<uses-feature>` 或 `<uses-library>` 只要有一方要求就是必需的。NSH 不填写的占位符、同一属性的两个不同值、两个库定义不同的
+  `<permission>`、有 `<intent-filter>` 却没有 `android:exported` 的组件，或高于 26 的 `minSdkVersion` 都会报错。库 manifest 中的
+  `tools:node`（`merge`、`remove`、`removeAll`、`replace`）、`tools:replace` 和 `tools:remove` 与 Gradle 的合并器一样生效，与库的列出顺序无关；
+  对没有名字的元素（`<intent-filter>`）的 `remove` 会移除与它相同的那一个。应用自己同名的组件（`android.application`）会与库的组件合并，
+  属性值以应用的为准，也可以补上它缺少的 `android:exported`。
+- Java 资源打包在根目录（`META-INF/services` 文件会合并，许可证和构建元数据会被略过），原生库（`jni/<abi>`）放在 `libnsh.so`
+  旁边，assets 放在 `assets/` 里，`.tflite` 之类的模型不压缩。两个库内容不同的同名 Java 资源或 asset、位于包自身路径（`classes.dex`、
+  `res/`）的 Java 资源，或与应用同名的 asset 都会报错。
+- 不支持：core library desugaring、Gradle 插件（`google-services.json` 生成的值放在应用的 `android/res/values` 里）、注解处理器、
+  R8 压缩（`proguard.txt` 不起作用）。
+
+请列出代码需要的每个库：NSH 不解析 Maven 依赖。
 
 应用自己的 `nsh.json` 优先：它设置过的键保留它的值，数组（例如 `UIBackgroundModes`）合并。两个 crate 给同一个键设置了不同的值时（例如两段不同的相机用途说明），由应用在 `ios.infoPlist` 或 `ios.entitlements` 里写这个键来决定；应用没写之前，打包 iOS 应用会报错并指出这两个 crate。NSH 自己设置的键（包标识、版本等）不能由 crate 设置。
 

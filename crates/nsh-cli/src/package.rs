@@ -315,6 +315,10 @@ pub(crate) struct AndroidConfig {
     /// declare ([`crate::module_meta`]); not an `nsh.json` key.
     #[serde(skip)]
     pub(crate) jni_libs: Vec<PathBuf>,
+    /// The Android libraries (`.aar`, `.jar`) the app's crates ship
+    /// ([`crate::module_meta`]); not an `nsh.json` key.
+    #[serde(skip)]
+    pub(crate) libraries: Vec<PathBuf>,
     /// Permissions the manifest declares besides the ones NSH declares
     /// itself (`<uses-permission>`): a bare name (`ACCESS_NETWORK_STATE`)
     /// is Android's, `android.permission.<name>`; a dotted one is written
@@ -1775,6 +1779,7 @@ fn package_android(
             res: res.as_deref(),
             crate_res: &config.android.crate_res,
             jni_libs: &config.android.jni_libs,
+            libraries: &config.android.libraries,
             signing,
         },
         options.format,

@@ -4,6 +4,7 @@
 //! hosts and runners built for it.
 
 mod android;
+mod android_libraries;
 mod app_extensions;
 mod apple;
 mod bindgen;
