@@ -131,6 +131,15 @@ pub(crate) struct AppleConfig {
     /// is not one of its keys in its form).
     #[serde(default)]
     pub(crate) privacy_manifest: serde_json::Map<String, serde_json::Value>,
+    /// Third-party libraries (`.xcframework`, `.framework`) the app's iOS
+    /// executables link, and iOS packages carry when dynamic
+    /// ([`crate::ios_frameworks`]).
+    #[serde(default)]
+    pub(crate) frameworks: Vec<crate::ios_frameworks::Framework>,
+    /// Arguments added to the link of the app's iOS executables
+    /// (`-ObjC`, `-lsqlite3`).
+    #[serde(default)]
+    pub(crate) linker_flags: Vec<String>,
 }
 
 /// `nsh.json` `ios.launchScreen`: a background color and an image in the

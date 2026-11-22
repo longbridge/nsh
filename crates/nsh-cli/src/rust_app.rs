@@ -335,10 +335,49 @@ pub(crate) struct RustApp {
     /// The oldest Apple systems its packages declare, which its builds for
     /// them compile for ([`set_deployment_target`]).
     minimums: AppleMinimums,
+    /// `nsh.json` `ios.frameworks` and `ios.linkerFlags`, which its builds
+    /// for iOS link with the crates' ([`RustApp::ios_link_env`]).
+    ios_link: IosLink,
     /// Its Rust is nshm installed in `~/.nsh/nshms` only, which never
     /// change: its workspace is one every app with the same nshm shares
     /// ([`shared_workspace`]), built once, optimized throughout.
     shared: bool,
+}
+
+/// What the app's `nsh.json` links into its iOS executables.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct IosLink {
+    /// `ios.frameworks`, relative to `nsh.json`'s directory.
+    frameworks: Vec<crate::ios_frameworks::Framework>,
+    /// `ios.linkerFlags`.
+    linker_flags: Vec<String>,
+}
+
+impl IosLink {
+    /// Those of the `nsh.json` `config` in `dir`. What cannot be read is
+    /// left out here; reading the whole `nsh.json` warns of it
+    /// (`package::read_config`).
+    fn of(dir: &Path, config: &serde_json::Value) -> Self {
+        let ios = config.get("ios");
+        let frameworks = ios
+            .and_then(|ios| ios.get("frameworks"))
+            .and_then(|list| serde_json::from_value(list.clone()).ok())
+            .map(|entries| crate::ios_frameworks::read(entries, dir, &mut Vec::new()))
+            .unwrap_or_default();
+        let linker_flags = ios
+            .and_then(|ios| ios.get("linkerFlags"))
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(serde_json::Value::as_str)
+            .filter(|flag| crate::ios_frameworks::check_flag(flag).is_ok())
+            .map(str::to_owned)
+            .collect();
+        IosLink {
+            frameworks,
+            linker_flags,
+        }
+    }
 }
 
 /// A crate of the app (`nsh.json` `"rust"`).
@@ -1028,6 +1067,9 @@ pub(crate) fn runner_only(entry: &Path) -> anyhow::Result<RustApp> {
         unify: true,
         modules: Vec::new(),
         minimums,
+        // A TSX app without crates has no code that calls a framework:
+        // `nsh package` refuses them.
+        ios_link: IosLink::default(),
         shared: false,
     };
     app.write_workspace()?;
@@ -1080,6 +1122,7 @@ pub(crate) fn of(entry: &Path, unify: bool) -> anyhow::Result<Option<RustApp>> {
     }
     let watched = watched(&crates, nsh.source());
     let minimums = AppleMinimums::of(&config)?;
+    let ios_link = IosLink::of(dir, &config);
     // Only installed nshm, with a released nsh: nothing of the build is the
     // app's, so every app with these nshm shares it.
     let installed = nsh_bundler::nshm::installed_dir().and_then(|d| dunce::canonicalize(d).ok());
@@ -1117,6 +1160,7 @@ pub(crate) fn of(entry: &Path, unify: bool) -> anyhow::Result<Option<RustApp>> {
         unify,
         modules: module_patches,
         minimums,
+        ios_link,
         shared,
     };
     app.write_workspace()?;
@@ -2645,6 +2689,12 @@ panic = \"abort\"
                 self.nsh.dep(platform, &rust_app_platform(platform)),
             ),
         )?;
+        if dir == "rust-ios" {
+            write(
+                &ws.join(dir).join("build.rs"),
+                crate::ios_frameworks::BUILD_RS,
+            )?;
+        }
         let lib = lib.replace('-', "_");
         let platform = platform.replace('-', "_");
         let cfg = format!("#[cfg({os})]\n");
@@ -3157,6 +3207,14 @@ opt-level = \"s\"
                 src("nsh-core"),
             ),
         )?;
+        // The app's iOS frameworks and linker flags reach the executable's
+        // link through it.
+        if dir.starts_with("ios") {
+            write(
+                &ws.join(dir).join("build.rs"),
+                crate::ios_frameworks::BUILD_RS,
+            )?;
+        }
         let lib = lib.replace('-', "_");
         let platform = platform.replace('-', "_");
         // A windowed program: no console opens with the app.
@@ -3261,6 +3319,11 @@ opt-level = \"s\"
         } else if release {
             cmd.arg("--release");
         }
+        if let Some(triple) = triple
+            && triple.contains("-apple-ios")
+        {
+            cmd.envs(self.ios_link_env(workspace, triple)?);
+        }
         // Built once with what cannot change since: nothing to ask Cargo.
         let once = BuiltOnce::of(workspace, package, &cmd);
         if let Some(path) = once.as_ref().and_then(BuiltOnce::built) {
@@ -3307,6 +3370,30 @@ opt-level = \"s\"
             once.record(&path);
         }
         Ok(path)
+    }
+
+    /// The variables of a build of the generated `workspace` for the iOS
+    /// `triple` that link the frameworks and flags of the app's `nsh.json`
+    /// and its crates' into its executables (`ios_frameworks::BUILD_RS`).
+    fn ios_link_env(
+        &self,
+        workspace: &Path,
+        triple: &str,
+    ) -> anyhow::Result<Vec<(&'static str, String)>> {
+        let (crates, _) = crate::module_meta::ModuleMeta::read_workspace(
+            &workspace.join("Cargo.toml"),
+            Some(triple),
+        )?;
+        let (frameworks, flags) = crate::module_meta::ios_link(
+            &self.ios_link.frameworks,
+            &self.ios_link.linker_flags,
+            &crates,
+        );
+        if frameworks.is_empty() && flags.is_empty() {
+            return Ok(Vec::new());
+        }
+        let link = crate::ios_frameworks::link(&frameworks, &flags, triple)?;
+        Ok(crate::ios_frameworks::link_env(&link))
     }
 
     /// The development host (`runner` false) or release runner of the app,
@@ -4421,6 +4508,7 @@ mod tests {
             unify: true,
             modules: Vec::new(),
             minimums: crate::apple::AppleMinimums::default(),
+            ios_link: super::IosLink::default(),
             shared: false,
         }
     }
@@ -4937,6 +5025,27 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// The app's `nsh.json` frameworks and flags, relative to its
+    /// directory; what cannot be read is left out, as reading the whole
+    /// `nsh.json` reports.
+    #[test]
+    fn the_apps_ios_link_is_read_from_nsh_json() {
+        let link = super::IosLink::of(
+            Path::new("/app"),
+            &serde_json::json!({ "ios": {
+                "frameworks": ["ios/Sdk.xcframework", 3],
+                "linkerFlags": ["-ObjC", "", 4],
+            } }),
+        );
+        let paths: Vec<&Path> = link.frameworks.iter().map(|f| f.path.as_path()).collect();
+        assert_eq!(paths, [Path::new("/app/ios/Sdk.xcframework")]);
+        assert_eq!(link.linker_flags, ["-ObjC"]);
+        assert_eq!(
+            super::IosLink::of(Path::new("/app"), &serde_json::json!({})),
+            super::IosLink::default()
+        );
+    }
+
     #[test]
     fn a_rust_app_gets_runners_without_js() {
         let dir = std::env::temp_dir().join(format!("nsh-rust-runners-{}", std::process::id()));
@@ -4989,6 +5098,18 @@ mod tests {
                 main.contains("nsh_core::element::Root::of::<app_app_native::App>()"),
                 "{main}"
             );
+        }
+        // The iOS executables take the app's frameworks and linker flags
+        // through a `build.rs` (`ios_frameworks::BUILD_RS`); the others
+        // have none.
+        for dir in ["ios-host", "ios-app", "rust-ios"] {
+            assert_eq!(
+                read(&format!("{dir}/build.rs")),
+                crate::ios_frameworks::BUILD_RS
+            );
+        }
+        for dir in ["macos-host", "macos-app", "rust-macos", "rust-linux"] {
+            assert!(!app.workspace.join(dir).join("build.rs").exists(), "{dir}");
         }
         // Optional platform features come from the app, not its runner.
         assert!(!read("rust-linux/Cargo.toml").contains("webview"));

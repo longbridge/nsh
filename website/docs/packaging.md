@@ -64,7 +64,7 @@ TSX app adds its entry (`nsh package App.tsx --target …`).
 `nsh.json` also holds `rust` and `root` (the app's crates and its root component, [Building with Rust](./rust.md)),
 `theme` and `appearance`, `tailwind` (see [Tailwind](./tailwind.md)), `capabilities` (see
 [Sandbox and capabilities](./sandbox-and-capabilities.md)), `android` (`targetSdk`, `usesCleartextTraffic`, `permissions`, `libraries`, `manifestPlaceholders`, `queries` and `application`, [below](#target-api-level)), `ios` and `macos` (the `Info.plist` keys and entitlements
-of their packages, [below](#infoplist-keys-and-entitlements); `ios.extensions`, [app extensions](#app-extensions); `macos.activationPolicy`, a [menu bar app](./macos.md#menu-bar-apps)) and `updater`, which makes desktop packages update themselves
+of their packages, [below](#infoplist-keys-and-entitlements); `ios.extensions`, [app extensions](#app-extensions); `ios.frameworks` and `ios.linkerFlags`, [frameworks](#frameworks-and-linker-flags); `macos.activationPolicy`, a [menu bar app](./macos.md#menu-bar-apps)) and `updater`, which makes desktop packages update themselves
 (see [App Updates](./app-updates.md)) and every native package take [OTA updates](./ota-updates.md); [Project structure](./project-structure.md#nshjson) lists
 every key. A key or value NSH cannot read is reported as a warning and left out, so an app written for a newer NSH
 still builds with an older one, and the warning catches a typo.
@@ -187,6 +187,45 @@ data through an app group, which both list in their entitlements. An app that st
   "ios": { "infoPlist": { "NSSupportsLiveActivities": true } }
 }
 ```
+
+### Frameworks and linker flags
+
+An iOS SDK comes as an XCFramework (`.xcframework`) or a framework (`.framework`), with a static or a dynamic library
+inside. The app's [Rust crate](./rust.md) calls it; `ios.frameworks` lists it, relative to `nsh.json`, and
+`ios.linkerFlags` adds what the SDK's instructions ask of the link, such as `-ObjC` and the system libraries and
+frameworks it uses. An nshm lists its own in its `Cargo.toml`
+([What the packaged app needs](./nshm.md#what-the-packaged-app-needs)), and the apps that use it list nothing:
+
+```json
+{
+  "ios": {
+    "frameworks": [
+      "ios/Vendor/Analytics.xcframework",
+      { "path": "ios/Vendor/Ads.xcframework", "forceLoad": true }
+    ],
+    "linkerFlags": ["-ObjC", "-lsqlite3", "-framework", "AdServices"]
+  }
+}
+```
+
+| Key | Meaning |
+|---|---|
+| `path` | The `.xcframework` or `.framework`. An entry that is a string is its path. |
+| `forceLoad` | Links all of a static library (`-force_load`), not only the parts the app's code calls, for SDKs whose instructions ask for it. |
+
+- Every iOS executable built with the app's crates links them: packages, and `nsh run`'s development hosts for the
+  simulator and Mac Catalyst. Each build takes the XCFramework's library for its target (devices, the simulator,
+  Mac Catalyst); an XCFramework without one for the target stops the build with an error naming those it has.
+- A static library becomes part of the app's executable. A dynamic framework is copied into the app's `Frameworks/`
+  and signed before the app: ad hoc for the simulator, with the `--sign` identity for devices.
+- A dynamic framework keeps its privacy manifest in its own bundle, where App Store Connect reads it. A static
+  library's code is the app's, so iOS packages add what its privacy manifest declares to the app's
+  `PrivacyInfo.xcprivacy` ([Privacy manifest](#privacy-manifest)).
+- Each flag is one argument, passed as written after the libraries (`"-framework", "AdServices"` are two). Paths in
+  flags are not resolved against `nsh.json`: list a library in `frameworks` to link it.
+- The same crates also build for other platforms without the SDK: call it under `#[cfg(target_os = "ios")]`.
+- The frameworks are linked with the app's Rust code, so an app without crates (`rust` or an nshm) cannot list them:
+  `nsh package` stops with an error.
 
 ## Android
 
@@ -595,7 +634,8 @@ wrong type or an entry without all its keys is left out with a warning. What App
 category and reason codes themselves.
 
 NSH's runtime is part of the app's executable, so the APIs it calls count as the app's: declare these with the app's
-own.
+own. So is the code of the static libraries in `ios.frameworks`, whose privacy manifests packages add to the app's
+([Frameworks and linker flags](#frameworks-and-linker-flags)).
 
 | Category | What in NSH calls it | Reason |
 |---|---|---|
@@ -760,6 +800,9 @@ assets it imports, next to the prebuilt runtime:
 | Linux | the `nsh-linux-app` executable, renamed `<Name>` | `<Name>/nsh/bundle.nshc`, `nsh/assets/…` |
 | Windows | the `nsh-windows-app.exe` executable, renamed `<Name>.exe` | `<Name>\nsh\bundle.nshc`, `nsh\assets\…` |
 | Web | `nsh.<digest>.wasm`, `nsh.<digest>.js` | `<Name>/app.<digest>.js`, `assets/…`, `index.html` |
+
+An iOS package also carries the dynamic frameworks the app lists in `Frameworks/`
+([Frameworks and linker flags](#frameworks-and-linker-flags)).
 
 A packaged app registers no [native components](./native-components.md); for those, embed NSH in your own app.
 
