@@ -55,7 +55,7 @@ view()
 | `.accessibility_active_descendant(..)` | `accessibilityActiveDescendant` | `ViewRef \| null` | 获得焦点的元素里当前活动的那一项：组合框高亮的选项、列表的光标行。 |
 | `.accessibility_controls(..)` | `accessibilityControls` | `ViewRef \| null` | 内容由这个元素控制的元素：组合框的列表。 |
 | `.accessibility_described_by(..)` | `accessibilityDescribedBy` | `ViewRef \| null` | 文字用来说明这个元素的元素：输入框的错误提示行。 |
-| | `accessibilityActions` | `{ name, label? }[]` | 提供给辅助技术的操作。 |
+| `.accessibility_actions(..)` | `accessibilityActions` | `{ name, label? }[]` | 提供给辅助技术的操作。 |
 | `.on_accessibility_action(..)` | `onAccessibilityAction` | `(e: { actionName }) => void` | 执行了某个操作（Rust：操作名称）。 |
 | `.accessibility_elements_hidden(..)` | `accessibilityElementsHidden` | `boolean` | 对辅助技术隐藏该视图及其子树。 |
 | | `importantForAccessibility` | `"auto" \| "yes" \| "no" \| "no-hide-descendants"` | 视图（及其子树）是否暴露。 |
@@ -280,6 +280,32 @@ function Quantity() {
 <View
   accessibilityActions={[{ name: "archive", label: "Archive" }, { name: "delete", label: "Delete" }]}
   onAccessibilityAction={(e) => (e.actionName === "archive" ? archive(mail.id) : remove(mail.id))}
+>
+  …
+</View>
+```
+
+读取 signal 或[翻译](i18n.md)的标签会在已挂载的元素上跟着更新：应用切换语言时，操作换上新标签，元素本身、`onAccessibilityAction` 收到的名称和读屏焦点都保持不变。在 Rust 中给 `.accessibility_actions(..)` 传一个闭包：
+
+```rust tabs
+view()
+    .accessibility_actions(|| {
+        vec![AccessibilityActionDef {
+            name: "delete".into(),
+            label: Some(t!("mail.delete").into()),
+        }]
+    })
+    .on_accessibility_action(move |name: &str| {
+        if name == "delete" {
+            remove(id);
+        }
+    })
+```
+
+```tsx tabs
+<View
+  accessibilityActions={[{ name: "delete", label: t("mail.delete") }]}
+  onAccessibilityAction={() => remove(mail.id)}
 >
   …
 </View>

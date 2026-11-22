@@ -28337,6 +28337,67 @@ mod views {
         }
     }
 
+    /// A row whose custom action is named in the interface's language,
+    /// which a press switches.
+    #[derive(Default)]
+    struct Row;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct RowProps {}
+
+    impl Component for Row {
+        type Props = RowProps;
+        type Event = NoEvent;
+
+        fn view(_: RowProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let chinese = signal(false);
+            view()
+                .size_10()
+                .test_id("row")
+                .accessibility_actions(move || {
+                    vec![crate::AccessibilityActionDef {
+                        name: "delete".into(),
+                        label: Some(if chinese.get() { "删除" } else { "Delete" }.into()),
+                    }]
+                })
+                .on_press(move || chinese.set(!chinese.get()))
+        }
+    }
+
+    #[test]
+    fn an_elements_accessibility_actions_follow_their_signals_in_place() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Row>(|| RowProps {}));
+        let batch = c.commit().unwrap();
+        let actions = |batch: &MountBatch| {
+            batch.items.iter().find_map(|i| match i {
+                MountItem::ViewProps { id, props } if props.test_id.as_deref() == Some("row") => {
+                    Some((*id, props.accessibility.actions.clone()))
+                }
+                _ => None,
+            })
+        };
+        let action = |label: &str| crate::AccessibilityActionDef {
+            name: "delete".into(),
+            label: Some(label.into()),
+        };
+        let (id, first) = actions(&batch).expect("the row's props");
+        assert_eq!(first, vec![action("Delete")]);
+        assert!(c.component_event(id, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        // The same view, renamed: nothing is created or removed, so the
+        // screen reader's focus stays on it.
+        assert_eq!(actions(&batch), Some((id, vec![action("删除")])));
+        assert!(
+            !batch
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::Create { .. } | MountItem::Remove { .. })),
+            "{:?}",
+            batch.items
+        );
+    }
+
     #[test]
     fn an_element_hides_from_screen_readers_while_its_signal_holds() {
         let mut c = core();

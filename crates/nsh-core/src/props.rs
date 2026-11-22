@@ -267,6 +267,8 @@ pub struct AccessibilityActionDef {
     pub label: Option<Arc<str>>,
 }
 
+crate::static_reactive!(Vec<AccessibilityActionDef>: Vec<AccessibilityActionDef>);
+
 /// Accessibility of one view.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Accessibility {
