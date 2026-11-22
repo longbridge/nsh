@@ -1097,7 +1097,7 @@ mod tests {
             link.args,
             [
                 "-force_load".to_owned(),
-                s(&ads.join("ios-arm64/libAds.a")),
+                s(&ads.join("ios-arm64").join("libAds.a")),
                 format!("-F{}", s(&dir.join("static"))),
                 "-framework".to_owned(),
                 "Analytics".to_owned(),
