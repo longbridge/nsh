@@ -88,13 +88,14 @@ nsh package App.tsx --target macos [--run]   # TSX 应用
 .nsh/out/<Name>.app/Contents/
   Info.plist
   MacOS/<Name>               可执行文件：Rust 应用是用它的 crate 构建的自有 runner；TSX 应用是 nsh 的发布版运行器
+  PlugIns/<Ext>.appex        nsh.json `macos.extensions` 列出的预构建应用扩展（设置了该键时）
   Resources/nsh/bundle.nshc  编译后的 TSX 应用
   Resources/nsh/assets/…     应用导入的资源（也包括 Rust crate 的 `assets!()`）
   Resources/nsh/app.json     窗口标题、应用的外观、激活策略和 nsh.json 中的窗口设置
   Resources/AppIcon.icns     图标（nsh.json 指定了图标时，用 sips 转换）
 ```
 
-`.app` 使用 ad hoc 签名，因此可以在构建它的 Mac 上运行。要分发它，请用 Developer ID 签名并进行公证。`--run` 会在打包后打开应用。
+不传 `--sign` 时，`.app` 使用 ad hoc 签名，因此可以在构建它的 Mac 上运行。传入 `--sign <identity>`（例如 `"Developer ID Application: …"`）会开启 Hardened Runtime 和安全时间戳（`codesign --options runtime --timestamp`），由内向外签名嵌套扩展和应用，以便公证和分发；NSH 随后用 `codesign --verify --deep --strict` 校验签名。`--run` 会在打包后打开应用。见[打包：macOS](./packaging.md#macos)。
 
 应用把它的警告、错误以及 `console.log` 和 `console.info` 日志写入统一日志，以它的 id 为子系统：“控制台”应用会显示它们，
 `log stream --predicate 'subsystem == "com.example.notes"'` 也会。从终端启动时（`.nsh/out/<Name>.app/Contents/MacOS/<Name>`），

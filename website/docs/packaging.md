@@ -8,7 +8,8 @@ group: platforms
 # Packaging
 
 `nsh package` turns an app into something you can install: a `.app` for the iOS simulator, a signed `.ipa` for iOS
-devices, a signed `.apk` or `.aab` (Android App Bundle, for Google Play) for Android, an ad hoc signed `.app` for macOS, a directory and `.tar.gz` for Linux, a directory, `.zip` and installer (`<Name>-setup.exe`, with Inno Setup) for Windows, or a static site for the web. It needs no Xcode project and no Gradle.
+devices, a signed `.apk` or `.aab` (Android App Bundle, for Google Play) for Android, a signed `.app` (ad hoc without
+`--sign`) for macOS, a directory and `.tar.gz` for Linux, a directory, `.zip` and installer (`<Name>-setup.exe`, with Inno Setup) for Windows, or a static site for the web. It needs no Xcode project and no Gradle.
 
 - **A Rust app** (`nsh.json` names its `"root"`) is packaged from its directory. `nsh` builds the target's runner in
   release mode with your crate compiled in and the root mounted, with no QuickJS: Cargo, the Rust target of the
@@ -64,7 +65,7 @@ TSX app adds its entry (`nsh package App.tsx --target …`).
 `nsh.json` also holds `rust` and `root` (the app's crates and its root component, [Building with Rust](./rust.md)),
 `theme` and `appearance`, `tailwind` (see [Tailwind](./tailwind.md)), `capabilities` (see
 [Sandbox and capabilities](./sandbox-and-capabilities.md)), `android` (`targetSdk`, `usesCleartextTraffic`, `permissions`, `libraries`, `manifestPlaceholders`, `queries` and `application`, [below](#target-api-level)), `ios` and `macos` (the `Info.plist` keys and entitlements
-of their packages, [below](#infoplist-keys-and-entitlements); `ios.extensions`, [app extensions](#app-extensions); `ios.frameworks` and `ios.linkerFlags`, [frameworks](#frameworks-and-linker-flags); `macos.activationPolicy`, a [menu bar app](./macos.md#menu-bar-apps)) and `updater`, which makes desktop packages update themselves
+of their packages, [below](#infoplist-keys-and-entitlements); `ios.extensions` and `macos.extensions`, [iOS app extensions](#app-extensions) and [macOS app extensions](#macos-app-extensions); `ios.frameworks` and `ios.linkerFlags`, [frameworks](#frameworks-and-linker-flags); `macos.activationPolicy`, a [menu bar app](./macos.md#menu-bar-apps)) and `updater`, which makes desktop packages update themselves
 (see [App Updates](./app-updates.md)) and every native package take [OTA updates](./ota-updates.md); [Project structure](./project-structure.md#nshjson) lists
 every key. A key or value NSH cannot read is reported as a warning and left out, so an app written for a newer NSH
 still builds with an older one, and the warning catches a typo.
@@ -86,7 +87,7 @@ nsh package --target android --app-version 1.4.0 --build 42
 | `--app-version <version>` | Version, such as `1.2.0`. |
 | `--build <n>` | Build number. |
 | `--icon <png>` | App icon: a square PNG, ideally 1024×1024. |
-| `--sign <identity>` | iOS: the code signing identity for devices. |
+| `--sign <identity>` | iOS and macOS: the code signing identity (for iOS devices, or macOS packages with Hardened Runtime and a secure timestamp). |
 | `--profile <file>` | iOS: the provisioning profile for devices (`.mobileprovision`). Repeat it to give each [app extension](#app-extensions) its own. |
 | `--keystore <file>` | Android: a release keystore (default: the debug key). |
 | `--key-alias <alias>` | Android: the key alias in the keystore. |
@@ -448,9 +449,19 @@ nsh package --target macos --run
 
 Writes `.nsh/out/<Name>.app`: the executable in `Contents/MacOS/`, and `nsh/assets/…`, `nsh/app.json` (the window
 title, the app's appearance, its activation policy and nsh.json's window options) and a TSX app's `nsh/bundle.nshc` in
-`Contents/Resources/`. The app is signed ad hoc and needs macOS 14 or
-later, or the later version it names ([Minimum system version](#minimum-system-version)); to distribute it, sign it
-with a Developer ID and notarize it. See [macOS](./macos.md#packaging).
+`Contents/Resources/`. Without `--sign`, the app is signed ad hoc; it needs macOS 14 or later, or the later version it
+names ([Minimum system version](#minimum-system-version)). See [macOS](./macos.md#packaging).
+
+To sign the app for distribution, pass `--sign <identity>` (such as `"Developer ID Application: …"` or
+`"Apple Development: …"`):
+
+```sh
+nsh package --target macos --sign "Developer ID Application: Example Inc (ABCDE12345)"
+```
+
+When signed with a certificate, NSH enables Hardened Runtime (`--options runtime`) and a secure timestamp
+(`--timestamp`) as notarization requires, signs any embedded extensions and their nested frameworks/libraries inside-out
+first, signs the `.app`, and verifies the result with `codesign --verify --deep --strict`.
 
 The app runs on this Mac's processor. `--arch` picks another: `x86_64` for Intel Macs, `arm64` for Apple silicon, or
 `universal` for both in one executable. A runner for another processor needs its Rust target:
@@ -459,6 +470,38 @@ The app runs on this Mac's processor. `--arch` picks another: `x86_64` for Intel
 rustup target add x86_64-apple-darwin
 nsh package --target macos --arch universal
 ```
+
+### macOS app extensions
+
+Prebuilt macOS app extensions (`.appex` bundles built with Xcode or `swiftc`) can be listed under `macos.extensions` in
+the app's `nsh.json`, relative to `nsh.json`:
+
+```json
+{
+  "macos": {
+    "extensions": [
+      {
+        "path": "macos/build/Share.appex",
+        "entitlements": {
+          "com.apple.security.app-sandbox": true,
+          "com.apple.security.application-groups": ["TEAM123456.com.example.app"]
+        }
+      }
+    ]
+  }
+}
+```
+
+| Key | Meaning |
+|---|---|
+| `path` | The macOS `.appex` bundle directory, containing `Contents/Info.plist` and `Contents/MacOS/<executable>`. |
+| `entitlements` | The extension's entitlements, as `macos.entitlements` are the app's ([below](#infoplist-keys-and-entitlements)). |
+
+Each package copies the extensions into `Contents/PlugIns/` and syncs their `CFBundleShortVersionString` and
+`CFBundleVersion` to match the app's `version` and `build`. Each extension's bundle identifier must start with the app's
+(`<app_id>.`), and when `CFBundleSupportedPlatforms` is present it must include `MacOSX`. Before signing the `.app`,
+NSH signs each extension inside-out — nested `.framework` and `.dylib` items in `Contents/Frameworks/` first (with no
+entitlements), then the `.appex` with its own entitlements — using the package's signing identity (ad hoc or `--sign`).
 
 ## Linux
 
@@ -557,9 +600,10 @@ Entitlements:
   grants associated domains as `*` and keychain groups as `TEAMID.*`); otherwise `nsh package` stops and names the
   entitlement, so enable its capability for the app's identifier and download the profile again.
 - **The iOS simulator** is signed with the app's entitlements as they are.
-- **macOS** packages are signed ad hoc with the app's entitlements. macOS launches an app with
-  `com.apple.developer.*` entitlements or keychain access groups only under a provisioning profile that grants them:
-  `nsh package` warns about them, and the app is signed again with a Developer ID and such a profile before it runs.
+- **macOS** packages are signed with the app's entitlements, ad hoc by default or with `--sign <identity>` (Hardened
+  Runtime). macOS launches an app with `com.apple.developer.*` entitlements or keychain access groups only under a
+  provisioning profile that grants them: `nsh package` warns about them, and a matching profile must be embedded as
+  `Contents/embedded.provisionprofile` and signed before the app runs.
 
 ### Info.plist text in other languages
 
