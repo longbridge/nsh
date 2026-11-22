@@ -154,7 +154,7 @@ struct RootState {
     nav_shader: Option<crate::NavShader>,
     /// Where a header item goes (header items).
     slot: HeaderSlot,
-    /// A leading or trailing header item laid out with no width: nothing
+    /// A leading, trailing or title header item laid out with no width: nothing
     /// of it shows, so the screen's options leave it out of the bar.
     empty: bool,
     /// `nativeID` (input accessories).
@@ -9633,8 +9633,8 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// Header item `key` was laid out: records whether a leading or
-    /// trailing one has no width (its content is gone, or shows nothing)
+    /// Header item `key` was laid out: records whether a leading,
+    /// trailing or title one has no width (its content is gone, or shows nothing)
     /// and answers whether that changed, so its screen's options go out
     /// again with the bar's item left out or put back.
     fn header_item_emptied(&mut self, key: Key) -> bool {
@@ -9642,7 +9642,7 @@ impl<M: TextEngine> Core<M> {
             .layout
             .map_or(0.0, |l| self.rounded_layout(l).size.width);
         let root = self.nodes[key as usize].root.as_mut().expect("root state");
-        if !matches!(root.slot, HeaderSlot::Left | HeaderSlot::Right) {
+        if root.slot == HeaderSlot::Header {
             return false;
         }
         let empty = width <= 0.0;
@@ -9721,7 +9721,9 @@ impl<M: TextEngine> Core<M> {
                 HeaderSlot::Right => {
                     config.right_system_item.is_some() || config.right_symbol.is_some()
                 }
-                _ => true,
+                // An empty title view gives the platform's title text back.
+                HeaderSlot::Title => false,
+                HeaderSlot::Header => true,
             };
             if empty && !system {
                 continue;
