@@ -3851,6 +3851,7 @@ dependencies = [
  "nsh-testing",
  "nsh-updater",
  "plist",
+ "quick-xml",
  "ring",
  "semver",
  "serde",

@@ -1,4 +1,5 @@
-// Storage: a launch counter kept across reloads, the stored keys and a reset.
+// Storage: a launch counter kept across reloads and followed across tabs,
+// the stored keys and a reset.
 import { mount, signal, Text, View } from "nsh";
 import { Button } from "nsh/base";
 import { Storage } from "nsh";
@@ -28,6 +29,11 @@ function App() {
     keys.set(await Storage.keys());
   };
   start();
+  // Another tab of the page counted an opening, or reset: follow it.
+  Storage.on("change", async (e) => {
+    if (e.key === null || e.key === "opened") opened.set(Number(e.value ?? "0"));
+    keys.set(await Storage.keys());
+  });
 
   return (
     <View style={{ flex: 1, backgroundColor: ui().page, padding: wide() ? 20 : 16, paddingTop: 24, gap: 12, alignItems: wide() ? "flex-start" : "stretch" }}>
@@ -37,7 +43,7 @@ function App() {
           {opened() === null ? "Reading…" : `Opened ${opened()} ${opened() === 1 ? "time" : "times"}`}
         </Text>
         <Text style={{ color: ui().muted }}>
-          {saved() ? "Reload the page: the count is still there." : "Not saved: this browser keeps no storage for the page."}
+          {saved() ? "Reload the page: the count is still there. Open it in another tab: this one follows." : "Not saved: this browser keeps no storage for the page."}
         </Text>
       </View>
       <Text style={{ color: ui().muted }}>{`Keys: ${keys().length ? keys().join(", ") : "none"}`}</Text>

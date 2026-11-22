@@ -42147,6 +42147,260 @@ fn nothing_follows_while_no_view_follows_an_element() {
     assert!(!c.follow_changed);
 }
 
+/// A column (2) of a follower (8: absolute, at the left, 3 wide), a
+/// header (3, 40 high) and a list (20, 400 high, 30 rows of 50); `nested`
+/// puts the list in a scroll view (30, 300 high) after a view 100 high,
+/// with a second follower (9) in the scroll view's content. Both follow
+/// 50, a view 20 high 10 down row 3's cell: the cell at 150 in the list's
+/// content, so the view at 160 there.
+fn follow_list(c: &mut Core<FakeEngine>, nested: bool) -> Vec<u32> {
+    use StyleValue::{Number, Str};
+    let follower = vec![
+        ("position", Str("absolute")),
+        ("left", Number(0.0)),
+        ("width", Number(3.0)),
+    ];
+    type ViewSpec<'a> = (NodeId, Tag, NodeId, Vec<(&'a str, StyleValue<'a>)>);
+    let mut views: Vec<ViewSpec<'_>> = vec![
+        (
+            2,
+            Tag::View,
+            ROOT_ID,
+            vec![("flexDirection", Str("column"))],
+        ),
+        (8, Tag::View, 2, follower.clone()),
+        (3, Tag::View, 2, vec![("height", Number(40.0))]),
+    ];
+    let list_parent = if nested {
+        views.extend([
+            (30, Tag::Scroll, 2, vec![("height", Number(300.0))]),
+            (9, Tag::View, 30, follower),
+            (31, Tag::View, 30, vec![("height", Number(100.0))]),
+        ]);
+        30
+    } else {
+        2
+    };
+    views.push((20, Tag::List, list_parent, vec![("height", Number(400.0))]));
+    let mut ops = Vec::new();
+    for (id, tag, parent, style) in views {
+        ops.push(Op::Create { id, tag });
+        ops.push(style_op(id, &style));
+        if tag == Tag::List {
+            ops.push(Op::SetProp {
+                id,
+                prop: Prop::EstimatedItemSize(px(50.0)),
+            });
+            ops.push(Op::SetProp {
+                id,
+                prop: Prop::Count(30),
+            });
+        }
+        ops.push(Op::Insert {
+            parent,
+            child: id,
+            before: None,
+        });
+    }
+    apply(c, ops);
+    c.commit();
+    let (mut next_id, mut cells) = (100, Vec::new());
+    render_binds(c, &mut next_id, &mut cells, 50.0);
+    c.commit();
+    let mut ops = vec![
+        Op::Create {
+            id: 50,
+            tag: Tag::View,
+        },
+        style_op(50, &[("height", Number(20.0)), ("marginTop", Number(10.0))]),
+        Op::Insert {
+            parent: cells[3],
+            child: 50,
+            before: None,
+        },
+    ];
+    for id in if nested { vec![8, 9] } else { vec![8] } {
+        ops.push(Op::SetProp {
+            id,
+            prop: Prop::Follow(Some(crate::element::FollowTarget::of_node(50))),
+        });
+    }
+    apply(c, ops);
+    cells
+}
+
+#[test]
+fn a_follower_follows_a_row_of_a_list_where_the_list_scrolled_it() {
+    let mut c = core();
+    follow_list(&mut c, false);
+    let batch = c.commit().unwrap();
+    // Under the header (40), the row's view (160 in the list's content).
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 200.0, 3.0, 20.0)));
+
+    // The platform reports the list scrolled: the follower goes with the
+    // row, in the commit that follows the report.
+    c.set_scroll_offset(20, point(px(0.0), px(100.0)), u32::MAX);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 100.0, 3.0, 20.0)));
+
+    // Half of the view scrolled out of the list's viewport: the follower
+    // spans the half the list shows.
+    c.set_scroll_offset(20, point(px(0.0), px(170.0)), u32::MAX);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 40.0, 3.0, 10.0)));
+
+    // Wholly out of it: the list shows no part of it, and the follower
+    // follows nothing (its style alone places it).
+    c.set_scroll_offset(20, point(px(0.0), px(600.0)), u32::MAX);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 0.0, 3.0, 0.0)));
+
+    // Back: it follows the row again.
+    c.set_scroll_offset(20, point(px(0.0), px(0.0)), u32::MAX);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 200.0, 3.0, 20.0)));
+}
+
+#[test]
+fn a_follower_lets_go_of_a_row_whose_cell_the_list_gave_up() {
+    let mut c = core();
+    follow_list(&mut c, false);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 200.0, 3.0, 20.0)));
+    // Row 3 goes: its cell is spare, hidden where it was, and shows no row
+    // to follow.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 20,
+            prop: Prop::Count(2),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 0.0, 3.0, 0.0)));
+}
+
+#[test]
+fn a_follower_lets_go_of_a_row_left_behind_once_the_items_change() {
+    // A list in its parent's viewport (4) in a scroll view (2), with a
+    // follower (8) in the scroll view's content: no viewport on the way
+    // cuts what it follows.
+    use StyleValue::{Number, Str};
+    let mut c = core();
+    let mut ops = Vec::new();
+    for (id, tag, parent, style) in [
+        (2, Tag::Scroll, ROOT_ID, vec![("height", Number(400.0))]),
+        (
+            8,
+            Tag::View,
+            2,
+            vec![
+                ("position", Str("absolute")),
+                ("left", Number(0.0)),
+                ("width", Number(3.0)),
+            ],
+        ),
+        (4, Tag::List, 2, vec![]),
+    ] {
+        ops.push(Op::Create { id, tag });
+        ops.push(style_op(id, &style));
+        ops.push(Op::Insert {
+            parent,
+            child: id,
+            before: None,
+        });
+    }
+    ops.extend([
+        Op::SetProp {
+            id: 4,
+            prop: Prop::ListViewport(crate::ListViewport::Parent),
+        },
+        Op::SetProp {
+            id: 4,
+            prop: Prop::EstimatedItemSize(px(50.0)),
+        },
+        Op::SetProp {
+            id: 4,
+            prop: Prop::Count(100),
+        },
+    ]);
+    apply(&mut c, ops);
+    c.commit();
+    let (mut next_id, mut cells) = (100, Vec::new());
+    render_binds(&mut c, &mut next_id, &mut cells, 50.0);
+    c.commit();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 50,
+                tag: Tag::View,
+            },
+            style_op(50, &[("height", Number(20.0)), ("marginTop", Number(10.0))]),
+            Op::Insert {
+                parent: cells[3],
+                child: 50,
+                before: None,
+            },
+            Op::SetProp {
+                id: 8,
+                prop: Prop::Follow(Some(crate::element::FollowTarget::of_node(50))),
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 160.0, 3.0, 20.0)));
+    // Scrolled far down: row 3's cell is left behind, where it showed the
+    // row, and the follower stays on it (the scroll view moves both).
+    c.set_scroll_offset(2, point(px(0.0), px(2000.0)), u32::MAX);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 8), None);
+    // Rows change far from it: the cell is spare, though it stays where it
+    // was, and shows no row to follow.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 4,
+            prop: Prop::Splice(90, 1, 1),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, cells[3]), None, "the cell stays");
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 0.0, 3.0, 0.0)));
+}
+
+#[test]
+fn a_follower_follows_a_row_through_the_scroll_views_outside_it() {
+    let mut c = core();
+    follow_list(&mut c, true);
+    let batch = c.commit().unwrap();
+    // 8, outside the scroll view: under the header (40), the view (100)
+    // and the row's view (160). 9, in the scroll view's content: the
+    // view and the row's.
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 300.0, 3.0, 20.0)));
+    assert_eq!(frame_of(&batch, 9), Some(rect(0.0, 260.0, 3.0, 20.0)));
+
+    // The list scrolls: both go with the row.
+    c.set_scroll_offset(20, point(px(0.0), px(100.0)), u32::MAX);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 200.0, 3.0, 20.0)));
+    assert_eq!(frame_of(&batch, 9), Some(rect(0.0, 160.0, 3.0, 20.0)));
+
+    // The scroll view scrolls: 8 goes with it; 9 is in what it scrolls,
+    // which the platform moves, and stays.
+    c.set_scroll_offset(30, point(px(0.0), px(50.0)), u32::MAX);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 150.0, 3.0, 20.0)));
+    assert_eq!(frame_of(&batch, 9), None);
+
+    // Out of the scroll view's viewport, though in the list's: 8 follows
+    // nothing.
+    c.set_scroll_offset(30, point(px(0.0), px(250.0)), u32::MAX);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 0.0, 3.0, 0.0)));
+    assert_eq!(frame_of(&batch, 9), None);
+}
+
 #[test]
 fn an_effect_takes_its_picture_again_when_a_child_leaves() {
     let mut c = core();
