@@ -1093,7 +1093,8 @@ fn dev_host_frameworks(
 
 /// Creates (or refreshes) `<work>/ios/NshDev.app`, a flat iOS app bundle,
 /// signed ad hoc (the simulator requires a signature), with the languages
-/// of the app whose `nsh.json` is `config`, as [`package_catalyst`].
+/// of the app whose `nsh.json` is `config`, as [`package_catalyst`], and its
+/// `ios.entitlements` and `ios.extensions`.
 pub(crate) fn package_ios(
     work: &Path,
     host: &Path,
@@ -1125,17 +1126,40 @@ pub(crate) fn package_ios(
         &app.join("Frameworks"),
         &work.join("ios").join("frameworks.json"),
     )?;
+    let (extensions, extensions_changed) = dev_host_extensions(config, &app, &info)?;
+    // The app's entitlements, as its simulator package has them: an app
+    // group the host shares with the app's extensions, for one.
+    let entitlements = config.ios.entitlements(crate::apple::ApplePlatform::Ios)?;
+    let entitlements_file = work.join("ios").join(format!("{APP_NAME}.entitlements"));
+    let entitlements_changed = if entitlements.is_empty() {
+        fs::remove_file(&entitlements_file).is_ok()
+    } else {
+        let mut xml = Vec::new();
+        plist::Value::Dictionary(entitlements).to_writer_xml(&mut xml)?;
+        let changed = fs::read(&entitlements_file).ok() != Some(xml.clone());
+        if changed {
+            fs::write(&entitlements_file, &xml)?;
+        }
+        changed
+    };
     if installed
         || info_changed
         || strings_changed
         || frameworks_changed
+        || extensions_changed
+        || entitlements_changed
         || !app.join("_CodeSignature").exists()
     {
-        // The app's signature seals its frameworks': they are signed
-        // first.
+        // The app's signature seals its extensions' and frameworks': they
+        // are signed first.
+        crate::app_extensions::sign_ad_hoc(&extensions, &work.join("ios"))?;
         crate::ios_frameworks::sign(&frameworks, "-")?;
-        let status = Command::new("codesign")
-            .args(["--force", "--sign", "-", "--timestamp=none"])
+        let mut codesign = Command::new("codesign");
+        codesign.args(["--force", "--sign", "-", "--timestamp=none"]);
+        if entitlements_file.exists() {
+            codesign.arg("--entitlements").arg(&entitlements_file);
+        }
+        let status = codesign
             .arg(&app)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -1146,6 +1170,36 @@ pub(crate) fn package_ios(
         }
     }
     Ok(app)
+}
+
+/// The app's extensions (`nsh.json` `ios.extensions`, `config`) copied into
+/// the development host `app` (whose `Info.plist` is `info`) afresh, under
+/// the host's identifier: iOS installs an extension only under its
+/// containing app's, and the host runs any app. Returns them, to sign, and
+/// whether `PlugIns/` changed (it had or has some).
+fn dev_host_extensions(
+    config: &crate::package::AppConfig,
+    app: &Path,
+    info: &str,
+) -> anyhow::Result<(Vec<crate::app_extensions::Embedded>, bool)> {
+    let plugins = app.join("PlugIns");
+    let had = plugins.exists();
+    if had {
+        fs::remove_dir_all(&plugins).with_context(|| format!("remove {}", plugins.display()))?;
+    }
+    if config.ios.extensions.is_empty() {
+        return Ok((Vec::new(), had));
+    }
+    let app_id = config.id.as_deref().context(
+        "nsh.json ios.extensions need the app's \"id\", which their identifiers start with",
+    )?;
+    let mut info = plist::Value::from_reader_xml(info.as_bytes())?
+        .into_dictionary()
+        .context("the host's Info.plist is a dictionary")?;
+    info.insert("CFBundleIdentifier".to_owned(), app_id.into());
+    let extensions =
+        crate::app_extensions::embed(&config.ios.extensions, app, &info, true, Some(BUNDLE_ID))?;
+    Ok((extensions, true))
 }
 
 /// Copies the host binary if it changed. Returns true if it did.

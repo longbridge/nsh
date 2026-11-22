@@ -152,6 +152,8 @@ security find-identity -v -p codesigning
 App Store Connect 会给出提示）。扩展的
 identifier 必须以应用的开头（应用为 `com.example.app` 时，扩展为 `com.example.app.Widget`）。模拟器包用 ad hoc 签名；
 真机包先用各扩展 identifier 对应的描述文件给它签名，并把描述文件作为 `embedded.mobileprovision` 放进扩展，再签名应用。
+`nsh run --target ios` 也会带上扩展：模拟器里的开发宿主运行所有 TSX 应用，所以每个扩展的 identifier 改用宿主的开头
+（`com.longbridge.nsh.host.Widget`）。
 给应用传一个 `--profile`，每个扩展再各传一个；写明了 bundle identifier 的描述文件优先于覆盖它的通配描述文件：
 
 ```sh

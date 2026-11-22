@@ -168,7 +168,9 @@ Widgets, Live Activities, notification service extensions and other app extensio
 Each package copies the extensions into `PlugIns/` and gives them the app's `version` and `build`: an extension's
 version should match its app's (App Store Connect flags a mismatch). An extension's identifier must start with the app's (`com.example.app.Widget` for
 `com.example.app`). The simulator package signs them ad hoc; the device package signs each one with the profile for its
-identifier, which it carries as `embedded.mobileprovision`, before it signs the app. Pass one `--profile` for the app
+identifier, which it carries as `embedded.mobileprovision`, before it signs the app. `nsh run --target ios` carries them
+too: the simulator's development host runs every TSX app, so each extension takes the host's identifier in place of
+the app's (`com.longbridge.nsh.host.Widget`).  Pass one `--profile` for the app
 and one for each extension; a profile that names a bundle's identifier is taken before a wildcard that covers it:
 
 ```sh
