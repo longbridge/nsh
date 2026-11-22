@@ -33289,6 +33289,15 @@ fn anchored_overlays_go_within_the_area_the_platform_shows_them_in() {
     assert_eq!(pressed.len(), 1);
     assert_eq!(pressed[0].0, 10);
 
+    // A press a view's native content took (a web view's page): outside
+    // the overlay on another view, inside it on its anchor or its content.
+    let page = point(px(10.0), px(10.0));
+    let pressed = c.presses_on_native(2, page);
+    assert_eq!(pressed.len(), 1);
+    assert_eq!(pressed[0].0, 10);
+    assert!(c.presses_on_native(4, page).is_empty());
+    assert!(c.presses_on_native(12, page).is_empty());
+
     // Back to the root view.
     c.set_overlay_area(None);
     let batch = c.commit().unwrap();

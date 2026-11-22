@@ -1504,6 +1504,8 @@ enum Message {
     OverlayArea(Option<nsh_core::Bounds<Points>>),
     /// A press beyond the root view ([`EngineControl::press_beyond_root`]).
     PressBeyondRoot(nsh_core::Point<Points>),
+    /// A press on a view's native content ([`EngineControl::press_on_native`]).
+    PressOnNative(NodeId, nsh_core::Point<Points>),
     ScreenHeader(NodeId, Option<Points>),
     Frame,
     States(NodeId, u16),
@@ -1723,6 +1725,14 @@ impl EngineControl {
     /// `onPressOutside` ([`nsh_core::Core::presses_beyond_root`]).
     pub fn press_beyond_root(&self, page: nsh_core::Point<Points>) {
         let _ = self.tx.send(Message::PressBeyondRoot(page));
+    }
+
+    /// A press at `page` (root view coordinates) that view `id`'s native
+    /// content took (a web view's page): the overlays watching presses
+    /// that it is outside of hear `onPressOutside`
+    /// ([`nsh_core::Core::presses_on_native`]).
+    pub fn press_on_native(&self, id: NodeId, page: nsh_core::Point<Points>) {
+        let _ = self.tx.send(Message::PressOnNative(id, page));
     }
 
     /// The platform measured where the content of screen `id` starts below
@@ -4371,6 +4381,10 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
         Message::OverlayArea(area) => state.core.set_overlay_area(area),
         Message::PressBeyondRoot(page) => {
             let pressed = state.core.presses_beyond_root(page);
+            press_outside(script, &mut state.core, pressed);
+        }
+        Message::PressOnNative(id, page) => {
+            let pressed = state.core.presses_on_native(id, page);
             press_outside(script, &mut state.core, pressed);
         }
         Message::ScreenHeader(id, height) => state.core.set_screen_header(id, height),
