@@ -124,11 +124,17 @@ pub(crate) struct Embedded {
 /// Copies the app's extensions (`extensions`) into `app`'s `PlugIns/`, the
 /// builds for the simulator when `simulator`, each given the version and
 /// build of the app's `Info.plist` (`info`).
+///
+/// `host` is the identifier of the bundle that carries them when it is not
+/// the app's (the development host of `nsh run`, which runs any app): iOS
+/// installs an extension only under its containing bundle's identifier, so
+/// each one's identifier, `<app id>.<name>`, becomes `<host>.<name>`.
 pub(crate) fn embed(
     extensions: &[AppExtension],
     app: &Path,
     info: &plist::Dictionary,
     simulator: bool,
+    host: Option<&str>,
 ) -> anyhow::Result<Vec<Embedded>> {
     let text = |key: &str| info.get(key).and_then(plist::Value::as_string);
     let app_id = text("CFBundleIdentifier").context("the app's Info.plist has no identifier")?;
@@ -183,13 +189,17 @@ pub(crate) fn embed(
             .with_context(|| format!("{at}: {} has no CFBundleIdentifier", source.display()))?
             .to_owned();
         // iOS installs an extension only under its app's identifier.
-        if id
+        let Some(suffix) = id
             .strip_prefix(app_id)
             .and_then(|rest| rest.strip_prefix('.'))
-            .is_none_or(str::is_empty)
-        {
+            .filter(|rest| !rest.is_empty())
+        else {
             bail!("{at}: its identifier {id} does not start with the app's, `{app_id}.`");
-        }
+        };
+        let id = match host {
+            Some(host) => format!("{host}.{suffix}"),
+            None => id,
+        };
         let executable = extension_info
             .get("CFBundleExecutable")
             .and_then(plist::Value::as_string)
@@ -230,6 +240,7 @@ pub(crate) fn embed(
                 extension_info.insert(key.to_owned(), value.clone());
             }
         }
+        extension_info.insert("CFBundleIdentifier".to_owned(), id.clone().into());
         plist::Value::Dictionary(extension_info).to_file_xml(bundle.join("Info.plist"))?;
         embedded.push(Embedded {
             index,
@@ -438,7 +449,7 @@ mod tests {
         for (simulator, platform) in [(false, "iPhoneOS"), (true, "iPhoneSimulator")] {
             let app = dir.join(format!("{platform}/Demo.app"));
             fs::create_dir_all(&app).unwrap();
-            let embedded = embed(&extensions, &app, &app_info(), simulator).unwrap();
+            let embedded = embed(&extensions, &app, &app_info(), simulator, None).unwrap();
             assert_eq!(embedded.len(), 1);
             assert_eq!(embedded[0].id, "com.example.app.Widget");
             assert_eq!(embedded[0].bundle, app.join("PlugIns/Widget.appex"));
@@ -451,6 +462,33 @@ mod tests {
                 plist::Value::Array(vec![platform.into()])
             );
         }
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Carried by another bundle (`nsh run`'s development host), an
+    /// extension takes that bundle's identifier in place of the app's.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_host_bundle_gives_extensions_its_identifier() {
+        let dir = temp("host");
+        let source = appex(&dir, "Widget", "com.example.app.Widget", "iPhoneSimulator");
+        let extensions = [AppExtension {
+            path: source,
+            ..AppExtension::default()
+        }];
+        let app = dir.join("Host.app");
+        fs::create_dir_all(&app).unwrap();
+        let embedded = embed(
+            &extensions,
+            &app,
+            &app_info(),
+            true,
+            Some("com.example.host"),
+        )
+        .unwrap();
+        assert_eq!(embedded[0].id, "com.example.host.Widget");
+        let info = read_info(&embedded[0].bundle).unwrap();
+        assert_eq!(info["CFBundleIdentifier"], "com.example.host.Widget".into());
         fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -468,7 +506,7 @@ mod tests {
             ..AppExtension::default()
         }];
         assert!(
-            embed(&only_device, &app, &app_info(), true)
+            embed(&only_device, &app, &app_info(), true, None)
                 .unwrap()
                 .is_empty()
         );
@@ -479,7 +517,7 @@ mod tests {
             simulator_path: Some(device),
             ..AppExtension::default()
         }];
-        let error = embed(&swapped, &app, &app_info(), true)
+        let error = embed(&swapped, &app, &app_info(), true, None)
             .unwrap_err()
             .to_string();
         assert!(
@@ -506,7 +544,7 @@ mod tests {
                 path: bundle.clone(),
                 ..AppExtension::default()
             }];
-            let error = embed(&extensions, &app, &app_info(), false)
+            let error = embed(&extensions, &app, &app_info(), false, None)
                 .unwrap_err()
                 .to_string();
             assert!(
@@ -528,7 +566,7 @@ mod tests {
             path: dir.join("Missing.appex"),
             ..AppExtension::default()
         }];
-        let error = embed(&extensions, &app, &app_info(), false)
+        let error = embed(&extensions, &app, &app_info(), false, None)
             .unwrap_err()
             .to_string();
         assert!(
@@ -560,7 +598,7 @@ mod tests {
         ];
         let app = dir.join("Demo.app");
         fs::create_dir_all(&app).unwrap();
-        let error = embed(&extensions, &app, &app_info(), false)
+        let error = embed(&extensions, &app, &app_info(), false, None)
             .unwrap_err()
             .to_string();
         assert!(

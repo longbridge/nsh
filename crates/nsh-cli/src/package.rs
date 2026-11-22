@@ -1639,6 +1639,7 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
         &app,
         &info,
         options.target == PackageTarget::IosSimulator,
+        None,
     )?;
     // The runner linked the frameworks for this target
     // (`rust_app::RustApp::ios_link_env`); the dynamic ones go with it.
