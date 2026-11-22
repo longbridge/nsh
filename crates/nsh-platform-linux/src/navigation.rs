@@ -1284,6 +1284,7 @@ impl Nav {
     /// Sizes modal `id` to the root view of its window and reports it
     /// (with the surface's safe area in the main window).
     fn size_modal(&mut self, surface: &Surface, id: NodeId) {
+        let presenting = self.presenting.contains(&id);
         let window = self.window_of(surface, id);
         let host = crate::window::host_root(surface, window);
         let Some(m) = self.modals.get_mut(&id) else {
@@ -1302,6 +1303,13 @@ impl Nav {
             view.moved();
         }
         let size = frame.size;
+        // Reported once its batch is applied ([`end_batch`]): a window
+        // of the app's own (`Window.open`) is presented first and only
+        // claimed by the batch's commands, and must not be laid out at the
+        // surface's size in between.
+        if presenting {
+            return;
+        }
         report(surface, id, &mut m.reported, size, insets);
     }
 
@@ -1716,6 +1724,7 @@ pub(crate) fn end_batch(surface: &Rc<Surface>) {
         nav.reconcile(surface, stack);
     }
     for id in std::mem::take(&mut nav.presenting) {
+        nav.size_modal(surface, id);
         nav.show_modal(surface, id);
     }
     // The pages and dialogs this batch deleted left through their shaders

@@ -12,8 +12,8 @@ use super::{
 use crate::{
     AccessibilityProp, AccessibilityRole, AccessibilityState, AccessibilityValue, Bounds,
     ContextMenuEvent, EdgeInsets, EventKind, EventPayload, Hsla, ImageSource, KeyCapture, KeyEvent,
-    ListContentStyle, MouseEvent, NativeProp, NodeId, PinchEvent, PointerEvents, Points,
-    PressEvent, Prop, Size, Tag, TouchEvent, WheelEvent,
+    ListContentStyle, LiveRegion, MouseEvent, NativeProp, NodeId, PinchEvent, PointerEvents,
+    Points, PressEvent, Prop, Size, Tag, TouchEvent, WheelEvent,
     geometry::{DevicePixels, Radians},
     style::Color,
 };
@@ -249,6 +249,9 @@ pub(crate) struct RareAttrs {
     /// A window of the app's own: the dialog root it shows
     /// ([`super::desktop::window`]).
     pub(crate) window: Option<Box<crate::desktop::WindowOptions>>,
+    /// What its ref was asked for before it was mounted: sent after the
+    /// window opens.
+    pub(crate) window_commands: Vec<crate::desktop::DesktopCommand>,
 }
 
 impl RareAttrs {
@@ -1150,7 +1153,8 @@ pub trait Element: IntoElement + Sized {
     /// (`$x^2$`), an emoji image's character. Selecting across the view
     /// and copying puts this where it is, as a browser copies an inline
     /// image's `alt`. Unset, the view adds nothing to the copy; a view
-    /// outside a text ignores it. Screen readers keep reading the view's
+    /// outside a text and a nested text span (whose characters are copied
+    /// themselves) ignore it. Screen readers keep reading the view's
     /// [`Accessible::label`].
     ///
     /// ```ignore
@@ -1591,6 +1595,20 @@ pub trait Accessible: Element {
         self
     }
 
+    /// How changes of it the screen reader announces by itself (TS:
+    /// `accessibilityLiveRegion`): TalkBack on Android, VoiceOver on macOS,
+    /// the web's `aria-live`, a live region on Windows; `"polite"` when the
+    /// user is idle, `"assertive"` right away.
+    fn accessibility_live_region(mut self, region: impl IntoReactive<LiveRegion>) -> Self {
+        self.node().bind_attr(region, |a, region| {
+            super::host::set_in(
+                &mut a.props,
+                Prop::Accessibility(AccessibilityProp::LiveRegion(region)),
+            )
+        });
+        self
+    }
+
     /// The element that is the active one while it keeps the keyboard
     /// focus, which screen readers read as it changes (TS:
     /// `accessibilityActiveDescendant`; ARIA's `aria-activedescendant`):
@@ -1698,11 +1716,19 @@ pub trait Accessible: Element {
     /// `accessibilityActions`): `increment` and `decrement` for an
     /// adjustable element, `activate`, `longpress`, or the app's own with
     /// a label; [`Interactive::on_accessibility_action`] hears them.
-    fn accessibility_actions(mut self, actions: Vec<crate::AccessibilityActionDef>) -> Self {
-        super::host::set(
-            self.node(),
-            Prop::Accessibility(AccessibilityProp::Actions(actions)),
-        );
+    /// Bound to signals, the labels follow them in place (the interface's
+    /// language): the element and the screen reader's focus on it stay,
+    /// and the names its handler hears do not change.
+    fn accessibility_actions(
+        mut self,
+        actions: impl IntoReactive<Vec<crate::AccessibilityActionDef>>,
+    ) -> Self {
+        self.node().bind_attr(actions, |a, actions| {
+            super::host::set_in(
+                &mut a.props,
+                Prop::Accessibility(AccessibilityProp::Actions(actions)),
+            )
+        });
         self
     }
 }

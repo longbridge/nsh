@@ -1118,6 +1118,8 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::Host,
     EventKind::Pick,
     EventKind::OpenUrl,
+    EventKind::OpenAppSettings,
+    EventKind::ClipboardWrite,
     EventKind::ScreenColor,
     EventKind::Share,
     EventKind::AuthSession,
@@ -1133,6 +1135,8 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::KeyCommand,
     EventKind::Menu,
     EventKind::ViewableItemsChange,
+    // Text dropped on a Rust component (`RichEditor` inserts it).
+    EventKind::TextDrop,
     // `NavPage`'s `onDismiss` / `onBackPress` and `Dialog`'s `onClose` /
     // `onCancel` / `onOpenChange` / `onOpen`: the navigation's handlers
     // (`nsh-js` `navigation.rs`), declared with its components.

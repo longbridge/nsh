@@ -268,6 +268,66 @@ fn find_in_any(
     keymap.find_in(window, stroke, false, false)
 }
 
+const RENAMED_ACTIONS: &str = r#"import { mount, signal, View } from "nsh";
+
+const chinese = signal(false);
+setTimeout(() => chinese.set(true), 50);
+
+mount(() => (
+  <View
+    testID="row"
+    style={{ width: 40, height: 40 }}
+    accessibilityActions={[{ name: "delete", label: chinese() ? "删除" : "Delete" }]}
+    onAccessibilityAction={() => {}}
+  />
+));
+"#;
+
+/// `accessibilityActions` follows its signals on the view it is mounted
+/// on: the label changes, the name and the view stay (the screen reader's
+/// focus with it).
+#[test]
+fn accessibility_actions_follow_their_signals_in_place() {
+    let (_engine, rx) = start(RENAMED_ACTIONS);
+    let labels = |batch: &MountBatch| -> Vec<(nsh_core::NodeId, Vec<_>)> {
+        batch
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::ViewProps { id, props } if props.test_id.as_deref() == Some("row") => {
+                    Some((
+                        *id,
+                        props
+                            .accessibility
+                            .actions
+                            .iter()
+                            .map(|a| (a.name.to_string(), a.label.as_deref().map(str::to_owned)))
+                            .collect(),
+                    ))
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    let renamed = |batch: &MountBatch| {
+        labels(batch)
+            .iter()
+            .any(|(_, a)| a.iter().any(|(_, l)| l.as_deref() == Some("删除")))
+    };
+    let batches = until(&rx, renamed);
+    let seen: Vec<_> = batches.iter().flat_map(labels).collect();
+    let delete = |label: &str| vec![("delete".to_owned(), Some(label.to_owned()))];
+    let (id, first) = seen.first().expect("the row's props").clone();
+    assert_eq!(first, delete("Delete"));
+    assert_eq!(seen.last(), Some(&(id, delete("删除"))), "{seen:?}");
+    let created = batches
+        .iter()
+        .flat_map(|b| &b.items)
+        .filter(|i| matches!(i, MountItem::Create { id: c, .. } if *c == id))
+        .count();
+    assert_eq!(created, 1, "the row was made again");
+}
+
 const KEYED_CHILDREN: &str = r#"import { mount, signal, Text } from "nsh";
 import { Group } from "test/ui";
 
@@ -1219,10 +1279,10 @@ import { Clipboard } from "nsh";
 const shown = signal("waiting");
 setTimeout(async () => {
   const before = await Clipboard.hasText();
-  Clipboard.writeText("copied");
+  const written = await Clipboard.writeText("copied");
   const has = await Clipboard.hasText();
   const text = await Clipboard.readText();
-  shown.set(`${before} ${has} ${text}`);
+  shown.set(`${before} ${has} ${text} ${written}`);
 }, 0);
 
 mount(() => <Text>{shown()}</Text>);
@@ -1318,7 +1378,7 @@ fn the_clipboard_takes_text_with_its_html() {
 #[test]
 fn the_clipboard_round_trips_through_the_platform() {
     let (engine, rx) = start(CLIPBOARD);
-    let commands = serve_clipboard(&engine, &rx, "false true copied");
+    let commands = serve_clipboard(&engine, &rx, "false true copied requested");
     assert_eq!(
         commands,
         [
@@ -1452,7 +1512,7 @@ fn the_clipboard_needs_its_capability() {
         Some(r#"{ "clipboard": true }"#),
         None,
     );
-    serve_clipboard(&engine, &rx, "false true copied");
+    serve_clipboard(&engine, &rx, "false true copied requested");
 }
 
 const CLIPBOARD_IMAGE: &str = r#"import { mount, signal, Text } from "nsh";

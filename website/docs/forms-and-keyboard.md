@@ -543,10 +543,10 @@ The input decides at once, from the prop, because the system asks it on the spot
 
 The event then comes before anything is inserted, so the app can allow the paste, cancel it or rewrite it. The
 ref's `insertText` (Rust `insert_text`) puts the text it allows in place of the selection as the user's edit:
-`maxLength` and the line rules apply, `onChange` reports it, and on Linux and the web it is one step of the input's
+`maxLength` and the line rules apply, `onChange` reports it, and on Linux, Windows and the web it is one step of the input's
 undo history, so Ctrl+Z takes it out again. A new `value` replaces the text instead.
 
-`insertText` inserts text on iOS, macOS, Linux, the web and in headless tests (`nsh test`); on Windows, Android
+`insertText` inserts text on iOS, macOS, Linux, Windows, the web and in headless tests (`nsh test`); on Android
 and GPUI it does nothing yet and logs a warning, so use it on supported targets. Use it with
 `pasteBehavior="report"`: with `"insert"`, the default, the input has inserted the paste already and `insertText`
 inserts it a second time. While an input method is composing, `insertText` inserts nothing.
@@ -856,6 +856,8 @@ function Note() {
 ```
 
 The bar is as wide as the window and as tall as its content. Input accessories are iOS's: on Android the bar is an empty hidden view, so place those controls elsewhere there, for example above the input (`os() == Os::Android` in Rust, `platform.os === "android"` in TSX).
+
+A [`RichEditor`](../elements/rich-editor.md#a-bar-over-the-keyboard) shows one the same way, named with `.input_accessory(id)` in Rust and `inputAccessoryViewID` in TSX.
 
 ## Related
 

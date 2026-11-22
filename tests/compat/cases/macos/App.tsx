@@ -10,6 +10,7 @@ import ModAccessDenied from "./mod-access-denied";
 import ModKeymapPass from "./mod-keymap-pass";
 import ModKeymapFocus from "./mod-keymap-focus";
 import ModKeymapForFocus from "./mod-keymap-for-focus";
+import ModKeymapOverFocused from "./mod-keymap-over-focused";
 import DesktopProps from "./desktop-props";
 import ModStandardSystem from "./mod-standard-system";
 import ModStandardFiles from "./mod-standard-files";
@@ -27,6 +28,7 @@ const cases: Record<string, () => JSX.Element> = {
   "mod-keymap-pass": ModKeymapPass,
   "mod-keymap-focus": ModKeymapFocus,
   "mod-keymap-for-focus": ModKeymapForFocus,
+  "mod-keymap-over-focused": ModKeymapOverFocused,
   "web-send-input": WebSendInput,
   "material-composition": MaterialComposition,
   "application-refused": ApplicationRefused,

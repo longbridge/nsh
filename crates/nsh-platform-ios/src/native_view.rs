@@ -110,7 +110,7 @@ define_class!(
 
         #[unsafe(method_id(accessibilityValue))]
         fn accessibility_value(&self) -> Option<Retained<NSString>> {
-            let value = accessibility_value(&self.ivars().props.borrow());
+            let value = self.a11y_value(&self.ivars().props.borrow());
             if let Some(read) = self.ivars().step.borrow_mut().as_mut() {
                 *read = Some(value.clone().unwrap_or_default());
             }
@@ -621,6 +621,16 @@ impl NshView {
         !props.accessibility.state.disabled && props.key_capture.captures_key(stroke)
     }
 
+    /// The spoken value: an explicit `accessibilityValue`, plus checked,
+    /// mixed pressed, expanded, current and invalid states (UIKit has no
+    /// traits for those), in the language of the app's text.
+    fn a11y_value(&self, props: &ViewProps) -> Option<String> {
+        let words = self
+            .keyboard_target()
+            .map_or(crate::state_words::DEFAULT, |target| target.state_words());
+        state_value(props, words)
+    }
+
     /// The surface's target, once the view is mounted.
     pub(crate) fn keyboard_target(&self) -> Option<Retained<EventTarget>> {
         self.ivars().target.borrow().as_ref().and_then(Weak::load)
@@ -651,8 +661,12 @@ impl NshView {
         if self.ivars().step.borrow().is_none() {
             return None;
         }
-        let value = accessibility_value(props).unwrap_or_default();
-        if accessibility_value(&self.ivars().props.borrow()).unwrap_or_default() == value {
+        let value = self.a11y_value(props).unwrap_or_default();
+        if self
+            .a11y_value(&self.ivars().props.borrow())
+            .unwrap_or_default()
+            == value
+        {
             return None;
         }
         let read = self.ivars().step.take().flatten()?;
@@ -844,14 +858,8 @@ fn traits(props: &ViewProps) -> UIAccessibilityTraits {
     }
 }
 
-/// The spoken value: an explicit `accessibilityValue`, plus checked,
-/// mixed pressed, expanded, current and invalid states (UIKit has no
-/// traits for those).
-fn accessibility_value(props: &ViewProps) -> Option<String> {
-    state_value(props, crate::state_words::current())
-}
-
-/// [`accessibility_value`] with the state spoken in `words`.
+/// The spoken value with the state spoken in `words`
+/// (`NshView::a11y_value`).
 fn state_value(props: &ViewProps, words: &crate::state_words::StateWords) -> Option<String> {
     let a = &props.accessibility;
     let mut parts: Vec<String> = Vec::new();

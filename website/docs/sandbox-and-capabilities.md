@@ -288,14 +288,20 @@ needs a `network` grant for its host.
 `"notifications": true` lets the app show system notifications and set its icon's badge
 ([`Notifications`](../modules/nsh.md#notifications)). The system still asks the user once, where it asks.
 
+It also grants remote notifications to an app that turns on `nsh-extra`'s [`Push`](./nshm.md#push): registering the
+device and reading its token, listening to deliveries and presses, deciding how notifications show in front and
+removing a thread's delivered ones. Registering and background deliveries never ask the user, and what the user
+allowed holds for the whole app, so this capability is what decides which code reaches them.
+
 ### `application`
 
-`"application": true` lets the app act on the application as a whole on the desktop
-([`nsh/desktop`](../modules/nsh-desktop.md)): the application menu (`Menu.setApplicationMenu`), the tray, global
+`"application": true` lets the app act on the application as a whole: on the desktop
+([`nsh/desktop`](../modules/nsh-desktop.md)) the application menu (`Menu.setApplicationMenu`), the tray, global
 shortcuts, `Application.quit()`, `Application.setQuitMode()`, `Application.restart()` and
-`Application.setLaunchAtLogin()`. Without it they do
-nothing, `Application.launchAtLogin()` resolves `false` and `setLaunchAtLogin` rejects with `ERR_ACCESS_DENIED`
-(`permission` `"application"`). Context menus (`Menu.popup`) show in the app's own view, and windows the app opens are
+`Application.setLaunchAtLogin()`, and on iOS and Android the app's page in the system's settings
+([`AppSettings.open()`](../modules/nsh-mobile.md#appsettings) of `nsh/mobile`; for an embedded view, the embedding
+app's page). Without it they do nothing, `Application.launchAtLogin()` and `AppSettings.available()` resolve `false`,
+and `setLaunchAtLogin` and `AppSettings.open()` reject with `ERR_ACCESS_DENIED` (`permission` `"application"`). Context menus (`Menu.popup`) show in the app's own view, and windows the app opens are
 granted by [`windows`](#windows), so neither needs it.
 
 ### `homeDir`
@@ -368,6 +374,7 @@ if (host.available()) {
 | Speech | `Speech.start` throws `ERR_ACCESS_DENIED`, `permission` `"speech"` and `resource` `""`; the microphone stays off. |
 | Sound | `Sound.load` rejects and `new AudioPlayer` throws `ERR_ACCESS_DENIED`, `permission` `"audio"` and `resource` the source; nothing is read or played. |
 | Notifications | Each function of `Notifications` rejects or throws `ERR_ACCESS_DENIED`, `permission` `"notifications"` and `resource` `""`; nothing shows. |
+| Push | Each function of `nsh-extra`'s `Push` but `available()` rejects or throws `ERR_ACCESS_DENIED`, `permission` `"notifications"` and `resource` `""`; the device is not registered, and no token or delivery reaches the app. |
 | `openUrl` | The promise rejects with `ERR_ACCESS_DENIED`, `permission` `"openUrl"` and `resource` the URL; nothing opens. |
 | Host call | `host.call` rejects with `ERR_ACCESS_DENIED`, `permission` `"host"` and `resource` the function's name (`host.post` throws it); the call never reaches the host. |
 | Files (`fs/promises`) | The promise rejects with `ERR_ACCESS_DENIED`, `permission` `"fs"` and `resource` the path; the disk is never touched. |

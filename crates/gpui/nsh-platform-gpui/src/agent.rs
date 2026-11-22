@@ -362,7 +362,13 @@ impl Native for GpuiNative {
         }
     }
 
-    fn drag(&self, from: Point<Points>, to: Point<Points>) {
+    fn drag(
+        &self,
+        from: Point<Points>,
+        to: Point<Points>,
+        options: nsh_testing::DragOptions,
+    ) -> Result<(), String> {
+        nsh_testing::agent::refuse_custom_drag("drag", options)?;
         self.mouse(PointerKind::Move, from, 0, false);
         self.mouse(PointerKind::Down, from, 0, false);
         std::thread::sleep(nsh_testing::agent::LANDING);
@@ -373,6 +379,7 @@ impl Native for GpuiNative {
             last = at;
         }
         self.mouse(PointerKind::Up, last, 0, false);
+        Ok(())
     }
 
     fn type_text(&self, text: &str) {

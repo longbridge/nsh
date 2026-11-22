@@ -160,6 +160,8 @@ pub struct Gate {
     id: NodeId,
     activation: PanActivation,
     outer: usize,
+    /// The pointer's offset at the last step.
+    last: Point<Points>,
 }
 
 impl Gate {
@@ -170,6 +172,7 @@ impl Gate {
             id,
             activation,
             outer,
+            last: Point::default(),
         }
     }
 
@@ -187,7 +190,15 @@ impl Gate {
         dx: Points,
         dy: Points,
     ) -> (Option<NodeId>, bool) {
-        match self.activation.decide(dx, dy) {
+        self.apply(candidates, self.activation.decide(dx, dy))
+    }
+
+    fn apply<V, C>(
+        &self,
+        candidates: &mut Vec<(V, C)>,
+        decision: Option<bool>,
+    ) -> (Option<NodeId>, bool) {
+        match decision {
             Some(true) => {
                 candidates.truncate(self.outer);
                 (Some(self.id), false)
@@ -198,15 +209,19 @@ impl Gate {
     }
 
     /// [`Gate::decide`] on a pointer's gate, which stays only while
-    /// undecided: the view whose pan activated.
+    /// undecided: the view whose pan activated. The move since the last
+    /// step is judged along its line ([`PanActivation::decide_move`]).
     pub fn step<V, C>(
         gate: &mut Option<Gate>,
         candidates: &mut Vec<(V, C)>,
         dx: Points,
         dy: Points,
     ) -> Option<NodeId> {
-        let g = gate.take()?;
-        let (id, undecided) = g.decide(candidates, dx, dy);
+        let mut g = gate.take()?;
+        let to = crate::geometry::point(dx, dy);
+        let decision = g.activation.decide_move(g.last, to);
+        g.last = to;
+        let (id, undecided) = g.apply(candidates, decision);
         if let Some(id) = id {
             log::debug!(target: "nsh::input", "panActivation of {id} activated");
         }
@@ -1164,6 +1179,34 @@ mod tests {
         assert_eq!(decide(2.0, -9.0), (None, false));
         // A fail offset passed by the same move wins.
         assert_eq!(decide(9.0, 9.0), (None, false));
+    }
+
+    #[test]
+    fn a_gate_steps_to_the_offset_its_pointer_passed_first() {
+        // 1.5 across for 1 down, 10 points a move: the second move passes
+        // both offsets, x first.
+        let sideways = PanActivation::horizontal(Points(10.0), Points(10.0));
+        let mut candidates: Vec<((), Candidate)> = Vec::new();
+        let mut gate = Some(Gate::new(3, sideways, 0));
+        assert_eq!(
+            Gate::step(&mut gate, &mut candidates, Points(-8.3), Points(-5.5)),
+            None
+        );
+        assert_eq!(
+            Gate::step(&mut gate, &mut candidates, Points(-16.6), Points(-11.1)),
+            Some(3)
+        );
+        // 1 across for 1.5 down: y first.
+        let mut gate = Some(Gate::new(3, sideways, 0));
+        assert_eq!(
+            Gate::step(&mut gate, &mut candidates, Points(5.5), Points(8.3)),
+            None
+        );
+        assert_eq!(
+            Gate::step(&mut gate, &mut candidates, Points(11.1), Points(16.6)),
+            None
+        );
+        assert!(gate.is_none());
     }
 
     #[test]

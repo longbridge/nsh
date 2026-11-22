@@ -302,6 +302,25 @@ fn paste_html(app: &mut Headless, text: &str, html: &str) {
 }
 
 #[test]
+fn dropped_text_goes_in_where_it_is_let_go() {
+    let mut app = start(paragraphs(&[""]));
+    app.drop_text("id:editor", "dropped", "").unwrap();
+    tree(&mut app, r#"doc(paragraph("dropped"))"#);
+}
+
+#[test]
+fn dropped_html_keeps_its_formatting() {
+    let mut app = start(paragraphs(&[""]));
+    app.drop_text(
+        "id:editor",
+        "some bold",
+        "<p>some <strong>bold</strong></p>",
+    )
+    .unwrap();
+    tree(&mut app, r#"doc(paragraph("some ", bold("bold")))"#);
+}
+
+#[test]
 fn pasted_html_keeps_its_formatting() {
     let mut app = start(paragraphs(&[""]));
     paste_html(

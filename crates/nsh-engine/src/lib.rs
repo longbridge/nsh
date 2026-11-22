@@ -178,12 +178,18 @@ impl App {
         }
     }
 
-    /// The URL schemes the app claims (`nsh.json` `schemes`):
-    /// the links the core lets through (`nsh_core::url_scheme`).
+    /// The URL schemes the app claims (`nsh.json` `schemes`): those of
+    /// [`App::links`].
     pub fn url_schemes(&self) -> &[String] {
+        self.links().schemes()
+    }
+
+    /// The links the app claims (`nsh.json` `schemes` and `links`): the
+    /// links the core lets through (`nsh_core::url_scheme`).
+    pub fn links(&self) -> &nsh_core::url_scheme::AppLinks {
         match self {
-            App::Rust(root) => root.url_schemes_ref(),
-            App::Js(bundle) => &bundle.url_schemes,
+            App::Rust(root) => root.links_ref(),
+            App::Js(bundle) => &bundle.links,
         }
     }
 }
@@ -214,11 +220,12 @@ pub struct Bundle {
     /// The app's id (`nsh.json` `"id"`; a signed package's verified one):
     /// it names where the app keeps its data (`nsh/storage`).
     pub app_id: Option<String>,
-    /// The URL schemes the app claims (`nsh.json` `schemes`, a
-    /// packaged app's `app.json`): the links its engine lets through.
-    /// Read from the app's own resources, never from its code; none for a
-    /// signed package, whose embedding app owns the schemes.
-    pub url_schemes: Vec<String>,
+    /// The links the app claims (`nsh.json` `schemes` and `links`, a
+    /// packaged app's `app.json`): the URLs of its schemes and the `https`
+    /// URLs of its web links its engine lets through. Read from the app's
+    /// own resources, never from its code; none for a signed package, whose
+    /// embedding app owns them.
+    pub links: nsh_core::url_scheme::AppLinks,
     /// Trusted filesystem anchors selected by the native host, never decoded
     /// from application code, its manifest or a development server message.
     /// Missing anchors deny relative and corresponding placeholder grants.
@@ -382,7 +389,7 @@ impl Bundle {
             base_url: None,
             chunks: Arc::default(),
             app_id: None,
-            url_schemes: Vec::new(),
+            links: nsh_core::url_scheme::AppLinks::default(),
             system_paths: nsh_core::access::TrustedPaths::default(),
             package: None,
             updater_config: None,
@@ -401,7 +408,7 @@ impl Bundle {
             base_url: None,
             chunks: Arc::default(),
             app_id: None,
-            url_schemes: Vec::new(),
+            links: nsh_core::url_scheme::AppLinks::default(),
             system_paths: nsh_core::access::TrustedPaths::default(),
             package: None,
             updater_config: None,
@@ -457,13 +464,19 @@ impl Bundle {
         self
     }
 
-    /// The URL schemes the app claims ([`Bundle::url_schemes`]), as
-    /// `nsh.json` gives them.
+    /// The URL schemes the app claims, as `nsh.json` gives them: those of
+    /// [`Bundle::links`], whose web links stay.
     pub fn with_url_schemes(
         mut self,
         schemes: impl IntoIterator<Item = impl Into<String>>,
     ) -> Self {
-        self.url_schemes = schemes.into_iter().map(Into::into).collect();
+        self.links.set_schemes(schemes);
+        self
+    }
+
+    /// The links the app claims ([`Bundle::links`]).
+    pub fn with_links(mut self, links: nsh_core::url_scheme::AppLinks) -> Self {
+        self.links = links;
         self
     }
 
@@ -547,22 +560,25 @@ impl Bundle {
                     .map_err(|e| io::Error::other(format!("app.json: {e}")))?,
             );
         }
-        if let Some(url_schemes) = info.as_ref().and_then(|info| info.get("schemes")) {
+        if let Some(info) = &info {
             // A newer NSH's: what this runtime cannot claim is left out.
-            let (schemes, ignored) = nsh_core::url_scheme::schemes_from_json_lenient(url_schemes);
+            let (links, ignored) = nsh_core::url_scheme::AppLinks::from_json_lenient(info);
             for what in ignored {
                 log::warn!("app.json: {what}, ignored");
             }
-            bundle.url_schemes = schemes;
+            bundle.links = links;
         }
         // The files it opens come as `file:` URLs (`nsh_core::file_type`).
         if info
             .as_ref()
             .is_some_and(nsh_core::file_type::declares_file_types)
         {
-            bundle
-                .url_schemes
-                .push(nsh_core::file_type::FILE_SCHEME.to_owned());
+            let schemes = bundle.links.schemes().to_vec();
+            bundle.links.set_schemes(
+                schemes
+                    .into_iter()
+                    .chain([nsh_core::file_type::FILE_SCHEME.to_owned()]),
+            );
         }
         bundle.system_paths.plugin_dir = nsh_core::access::canonicalize(path)?
             .parent()
@@ -1521,6 +1537,8 @@ enum Message {
     OverlayArea(Option<nsh_core::Bounds<Points>>),
     /// A press beyond the root view ([`EngineControl::press_beyond_root`]).
     PressBeyondRoot(nsh_core::Point<Points>),
+    /// A press on a view's native content ([`EngineControl::press_on_native`]).
+    PressOnNative(NodeId, nsh_core::Point<Points>),
     ScreenHeader(NodeId, Option<Points>),
     Frame,
     States(NodeId, u16),
@@ -1560,8 +1578,9 @@ enum Message {
     /// Moves a manual clock forward by this much, then calls back.
     Advance(std::time::Duration, Box<dyn FnOnce() + Send>),
     /// Runs what is queued and due now, then calls back with whether the
-    /// engine is idle ([`EngineControl::flush`]).
-    Flush(Box<dyn FnOnce(bool) + Send>),
+    /// engine is idle and when the next timer is due
+    /// ([`EngineControl::flush_until_due`]).
+    Flush(Box<dyn FnOnce(bool, Option<Instant>) + Send>),
     /// Sent by a dropped [`Engine`] (there is none in WebAssembly).
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     Shutdown,
@@ -1741,6 +1760,14 @@ impl EngineControl {
         let _ = self.tx.send(Message::PressBeyondRoot(page));
     }
 
+    /// A press at `page` (root view coordinates) that view `id`'s native
+    /// content took (a web view's page): the overlays watching presses
+    /// that it is outside of hear `onPressOutside`
+    /// ([`nsh_core::Core::presses_on_native`]).
+    pub fn press_on_native(&self, id: NodeId, page: nsh_core::Point<Points>) {
+        let _ = self.tx.send(Message::PressOnNative(id, page));
+    }
+
     /// The platform measured where the content of screen `id` starts below
     /// its header (`None`: let the core estimate it).
     pub fn set_screen_header(&self, id: NodeId, height: Option<Points>) {
@@ -1791,6 +1818,16 @@ impl EngineControl {
     /// elsewhere. A headless driver on a manual clock settles a step with
     /// it, instead of waiting for the batches to stop for a while.
     pub fn flush(&self, done: impl FnOnce(bool) + Send + 'static) {
+        self.flush_until_due(move |idle, _| done(idle));
+    }
+
+    /// [`EngineControl::flush`], also telling when the next thing the
+    /// engine runs by itself is due (a timer, a held-back event, a state
+    /// timer): `None` when nothing is scheduled. A headless driver on the
+    /// system's clock settles a step with it: idle with nothing due soon
+    /// means no batch is coming, without waiting to see none come.
+    #[doc(hidden)]
+    pub fn flush_until_due(&self, done: impl FnOnce(bool, Option<Instant>) + Send + 'static) {
         let _ = self.tx.send(Message::Flush(Box::new(done)));
     }
 
@@ -2457,7 +2494,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         core.set_clipboard(config.clipboard.clone());
         core.set_picker(config.picker.clone());
         core.set_speech(config.speech.clone());
-        core.set_url_schemes(config.app.url_schemes().iter().cloned());
+        core.set_app_links(config.app.links().clone());
         core.set_app_info(config.app.app_info().cloned());
         // Every VM reads the core's address where it is (`UrlScheme.url()`).
         #[cfg(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32")))]
@@ -2817,7 +2854,11 @@ impl<M: TextEngine + 'static> Driver<M> {
             }
             Message::Flush(done) => {
                 let running = self.flush(rx);
-                done(running && self.idle(rx));
+                let due = [self.due(), self.clock.next_alarm()]
+                    .into_iter()
+                    .flatten()
+                    .min();
+                done(running && self.idle(rx), due);
                 running
             }
             // A test's clock on a real platform: the display's frame moves it
@@ -4036,9 +4077,12 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         lifecycle: env.lifecycle,
         wake_count: env.wake_count,
         screen_color: env.screen_color,
+        clipboard_write_result: env.clipboard_write_result,
         canvas_render: env.canvas_render,
         share: env.share,
+        app_settings: env.app_settings,
         auth_session: env.auth_session,
+        scheme_links: env.scheme_links(),
         file_requests: env.file_requests,
         speech: env.speech,
         notifications: env.notifications,
@@ -4385,6 +4429,10 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
         Message::OverlayArea(area) => state.core.set_overlay_area(area),
         Message::PressBeyondRoot(page) => {
             let pressed = state.core.presses_beyond_root(page);
+            press_outside(script, &mut state.core, pressed);
+        }
+        Message::PressOnNative(id, page) => {
+            let pressed = state.core.presses_on_native(id, page);
             press_outside(script, &mut state.core, pressed);
         }
         Message::ScreenHeader(id, height) => state.core.set_screen_header(id, height),

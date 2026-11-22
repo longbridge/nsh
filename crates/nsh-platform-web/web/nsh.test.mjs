@@ -8,8 +8,8 @@ import test from "node:test";
 
 const source = await readFile(new URL("nsh.js", import.meta.url), "utf8");
 // `Player` is not exported; the page only gets it from `createPlayer`.
-const { Player, keyCode, elementTag, runtimeSheet, charLength, clipChars, copiedRun } = await import(
-  `data:text/javascript,${encodeURIComponent(`${source}\nexport { Player, keyCode, runtimeSheet, charLength, clipChars, copiedRun };`)}`
+const { Player, keyCode, elementTag, runtimeSheet, charLength, clipChars } = await import(
+  `data:text/javascript,${encodeURIComponent(`${source}\nexport { Player, keyCode, runtimeSheet, charLength, clipChars };`)}`
 );
 
 /** A player on a fake engine; `sent` holds `[name, payload]` of the events it got. */
@@ -3599,17 +3599,49 @@ function fakeClipboard(t, { failWrite } = {}) {
   return log;
 }
 
-test("an attachment copies as its copy text in its place", () => {
-  const copies = new Map([[8, "$x^2$"]]);
-  // A run of "Area is \uFFFC here." from its start, and from offset 5.
-  assert.equal(copiedRun("Area is \uFFFC here.", 0, copies, true), "Area is $x^2$ here.");
-  assert.equal(copiedRun("is \uFFFC", 5, copies, true), "is $x^2$");
-  // One without a copy text is left out of a selectable view's copy.
-  assert.equal(copiedRun("a \uFFFC \uFFFC", 6, copies, true), "a $x^2$ ");
-  assert.equal(copiedRun("a \uFFFC", 0, null, true), "a ");
-  // A text outside selectable views keeps its placeholders, as before.
-  assert.equal(copiedRun("a \uFFFC", 0, null, false), "a \uFFFC");
-  assert.equal(copiedRun("a \uFFFC", 6, copies, false), "a $x^2$");
+test("a copy gives attachments' copy texts where the layout put them among the runs", (t) => {
+  const saved = ["getComputedStyle", "document"].map((k) => [k, Object.getOwnPropertyDescriptor(globalThis, k)]);
+  t.after(() => {
+    for (const [k, d] of saved) d ? Object.defineProperty(globalThis, k, d) : delete globalThis[k];
+  });
+  globalThis.getComputedStyle = () => ({ visibility: "visible" });
+  // `runOffset`'s range: the boundary's offset in the run's text.
+  globalThis.document = {
+    createRange: () => ({ setStart() {}, setEnd(_, offset) { this.offset = offset; }, toString() { return "x".repeat(this.offset); } }),
+  };
+  const { player } = fakePlayer();
+  // "Area is <formula> here,\n<formula> next" in two lines: run 0
+  // "Area is " (0..8), a formula at 8 after it, run 1 " here," (9..15)
+  // with the line's break, a formula at 16 first on the next line, before
+  // run 2 " next" (17..22).
+  const el = {
+    _copyTexts: [[8, "$x^2$", 0, 0], [16, "$y$", 2, 1]],
+    getBoundingClientRect: () => ({ top: 0, bottom: 40 }),
+  };
+  const runs = [[0, "Area is "], [9, " here,", "\n"], [17, " next"]].map(([start, text, after], i) => {
+    const run = { _run: i, _start: start, _after: after, textContent: text, parentNode: el };
+    run.contains = (node) => node === run;
+    return run;
+  });
+  player.selectableText = () => true;
+  player.areaOf = () => el;
+  const root = { querySelectorAll: () => runs };
+  const reaching = (first, last, end = null) => ({
+    intersectsNode: (run) => runs.indexOf(run) >= first && runs.indexOf(run) <= last,
+    startContainer: null,
+    endContainer: end?.[0] ?? null,
+    endOffset: end?.[1] ?? 0,
+  });
+  assert.equal(player.selectedText(root, reaching(0, 2)), "Area is $x^2$ here,\n$y$ next");
+  // From the second run on: the first formula is before the selection.
+  assert.equal(player.selectedText(root, reaching(1, 2)), " here,\n$y$ next");
+  // Up to the end of the first run: the formula after it is not selected...
+  assert.equal(player.selectedText(root, reaching(0, 0)), "Area is ");
+  // ...up to the start of the next run, it is.
+  assert.equal(player.selectedText(root, reaching(0, 1, [runs[1], 0])), "Area is $x^2$");
+  // A text without copy texts copies its runs.
+  el._copyTexts = null;
+  assert.equal(player.selectedText(root, reaching(0, 2)), "Area is  here,\n next");
 });
 
 test("text with its HTML goes on the clipboard as one item of both types", async (t) => {

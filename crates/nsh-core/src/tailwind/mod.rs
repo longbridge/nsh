@@ -31,7 +31,7 @@ use std::sync::Arc;
 use rustc_hash::FxHashMap;
 
 pub use self::theme::{Theme, ThemeError};
-pub(crate) use self::utilities::{Decl, Len, Part};
+pub(crate) use self::utilities::{Decl, Len, Part, PropDecl};
 use self::{
     theme::ClassTokens,
     utilities::{Parts, touched},
@@ -571,6 +571,9 @@ pub struct ClassProps {
     /// `whitespace-nowrap`, `text-nowrap`, `truncate`: lines never wrap.
     /// Inherited, as CSS's `white-space`: a view's reaches the texts in it.
     pub no_wrap: Option<bool>,
+    /// `text-pretty`: lines wrap, and a last line of a word or two takes
+    /// words from the lines above. Set with [`Self::no_wrap`].
+    pub pretty: bool,
     /// `pointerEvents` (`pointer-events-none` / `-auto`).
     pub pointer_events: Option<PointerEvents>,
     /// `userSelect` (`select-none` / `select-text`; `auto`: none). A

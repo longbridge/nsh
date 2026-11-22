@@ -373,7 +373,8 @@ so hosts can cache them for good. Deploy the directory to any web server or CDN;
 
 NSH writes the `Info.plist` of iOS and macOS packages, and signs them. An app adds keys of its own, such as export
 compliance, an App Store category or App Transport Security exceptions, and entitlements, such as associated domains,
-under `ios` and `macos` in `nsh.json`:
+under `ios` and `macos` in `nsh.json`. (The web links that open the app go in `links`, which adds their `applinks:`
+entries to iOS packages: [Web links](../modules/nsh.md#web-links).)
 
 ```json
 {
@@ -386,7 +387,7 @@ under `ios` and `macos` in `nsh.json`:
       }
     },
     "entitlements": {
-      "com.apple.developer.associated-domains": ["applinks:example.com"]
+      "com.apple.developer.associated-domains": ["webcredentials:example.com"]
     }
   },
   "macos": {
@@ -429,6 +430,92 @@ Entitlements:
 - **macOS** packages are signed ad hoc with the app's entitlements. macOS launches an app with
   `com.apple.developer.*` entitlements or keychain access groups only under a provisioning profile that grants them:
   `nsh package` warns about them, and the app is signed again with a Developer ID and such a profile before it runs.
+
+### Info.plist text in other languages
+
+The system shows the strings of `Info.plist`, such as the usage descriptions in a permission prompt or the app's name
+under its icon, in the user's language when the app has a translation of them. `ios.infoPlistStrings` and
+`macos.infoPlistStrings` give them, by language:
+
+```json
+{
+  "ios": {
+    "infoPlist": {
+      "NSLocationWhenInUseUsageDescription": "Shows the stores near you."
+    },
+    "infoPlistStrings": {
+      "zh-Hans": {
+        "CFBundleDisplayName": "示例",
+        "NSLocationWhenInUseUsageDescription": "显示你附近的门店。"
+      },
+      "ja": { "NSLocationWhenInUseUsageDescription": "近くの店舗を表示します。" }
+    }
+  }
+}
+```
+
+Packages write each language's `<language>.lproj/InfoPlist.strings`, and `nsh run` gives the iOS simulator's and Mac
+Catalyst's development host the same, so a prompt can be checked in each language before packaging. The system asks
+once per app: reset the answer before checking a prompt again, `xcrun simctl privacy booted reset camera <id>` in the
+iOS simulator, `tccutil reset Camera <id>` on macOS and Mac Catalyst, with the app's `id`, or under `nsh run` the
+development host's.
+
+- **Languages** are named as Xcode names them: a language, then a script or a region if needed, joined with `-` (`en`,
+  `ja`, `zh-Hans`, `zh-Hant`, `pt-BR`). Other spellings (`zh-hans`, `zh_TW`, `Chinese`) are an error naming the key.
+- **The `Info.plist` value** stays the text of every language without a translation, so each translated key needs one:
+  set it in `infoPlist`, or have it from NSH (the app's name, the usage descriptions NSH adds) or from a
+  [crate](./nshm.md#what-the-packaged-app-needs). A translation of a key the package's `Info.plist` does not have as a
+  string stops `nsh package` with an error naming it: the system would never show it.
+- **Translated keys** are the app's own and, of NSH's, only `CFBundleDisplayName` and `CFBundleName`; values are
+  strings. A macOS package whose name is translated also says so to Finder (`LSHasLocalizedDisplayName`).
+- **The languages are declared** to the system with the app's [`locales`](./i18n.md) (`CFBundleLocalizations`),
+  English first: users of a language the app has no translation for see the `Info.plist` text, and the system's own UI
+  in the app shows in the translated languages too. A language given as an empty `{}` has no file and is not declared;
+  it takes the [crates'](./nshm.md#what-the-packaged-app-needs) translations, which apps take for their own languages
+  only.
+
+### Privacy manifest
+
+App Store Connect checks an iOS app's privacy manifest, `PrivacyInfo.xcprivacy`, when it is uploaded: why the app
+calls the APIs Apple requires a reason for, whether it tracks and with which domains, and the data it collects
+([Privacy manifest files](https://developer.apple.com/documentation/bundleresources/privacy-manifest-files)).
+`ios.privacyManifest` in `nsh.json` is that file's contents, which iOS packages write at the root of the app before
+signing it (an app extension carries its own, in its `.appex`):
+
+```json
+{
+  "ios": {
+    "privacyManifest": {
+      "NSPrivacyTracking": false,
+      "NSPrivacyAccessedAPITypes": [
+        {
+          "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
+          "NSPrivacyAccessedAPITypeReasons": ["C617.1"]
+        },
+        {
+          "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime",
+          "NSPrivacyAccessedAPITypeReasons": ["35F9.1"]
+        }
+      ]
+    }
+  }
+}
+```
+
+It takes the four keys of Apple's format (`NSPrivacyTracking`, `NSPrivacyTrackingDomains`,
+`NSPrivacyCollectedDataTypes`, `NSPrivacyAccessedAPITypes`) and their entries' keys. An unknown key, a value of the
+wrong type or an entry without all its keys is left out with a warning. What App Store Connect would refuse as written
+(an entry with no reason, tracking without its domains) is warned about too; App Store Connect still checks the
+category and reason codes themselves.
+
+NSH's runtime is part of the app's executable, so the APIs it calls count as the app's: declare these with the app's
+own.
+
+| Category | What in NSH calls it | Reason |
+|---|---|---|
+| `NSPrivacyAccessedAPICategoryFileTimestamp` | Rust's standard library reading file metadata; the image cache, which ages its files | `C617.1`; also `3B52.1` when the app reads files people pick |
+| `NSPrivacyAccessedAPICategorySystemBootTime` | the renderer's timer | `35F9.1` |
+| `NSPrivacyAccessedAPICategoryUserDefaults` | reading the temperature unit people choose in Settings, which no reason of Apple's covers ([#2830](https://github.com/longbridge/nsh/issues/2830)) | |
 
 ### Minimum system version
 

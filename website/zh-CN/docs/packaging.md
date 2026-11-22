@@ -337,7 +337,8 @@ nsh package --target web --run
 ## Info.plist 键与 entitlements
 
 iOS 和 macOS 包的 `Info.plist` 由 NSH 写出，签名也由它完成。应用在 `nsh.json` 的 `ios` 和 `macos` 下添加自己的键（例如出口合规、
-App Store 分类、App Transport Security 例外）和 entitlements（例如 Associated Domains）：
+App Store 分类、App Transport Security 例外）和 entitlements（例如 Associated Domains）。（打开应用的 Web 链接写在
+`links` 中，它会为 iOS 包加上对应的 `applinks:` 条目：参见 [Web 链接](../modules/nsh.md#web-链接)。）
 
 ```json
 {
@@ -350,7 +351,7 @@ App Store 分类、App Transport Security 例外）和 entitlements（例如 Ass
       }
     },
     "entitlements": {
-      "com.apple.developer.associated-domains": ["applinks:example.com"]
+      "com.apple.developer.associated-domains": ["webcredentials:example.com"]
     }
   },
   "macos": {
@@ -388,6 +389,82 @@ entitlements：
 - **iOS 模拟器**包直接用应用写的 entitlements 签名。
 - **macOS** 包用应用的 entitlements 做 ad hoc 签名。带 `com.apple.developer.*` entitlements 或钥匙串分组的应用，macOS 只在授予它们的描述文件下启动：
   `nsh package` 会对这些项给出警告，应用要先用 Developer ID 和这样的描述文件重新签名才能运行。
+
+### 其他语言的 Info.plist 文字
+
+`Info.plist` 里的字符串（例如权限弹框中的用途说明、图标下的应用名）在应用提供了翻译时，系统按用户的语言显示。
+`ios.infoPlistStrings` 和 `macos.infoPlistStrings` 按语言给出这些翻译：
+
+```json
+{
+  "ios": {
+    "infoPlist": {
+      "NSLocationWhenInUseUsageDescription": "Shows the stores near you."
+    },
+    "infoPlistStrings": {
+      "zh-Hans": {
+        "CFBundleDisplayName": "示例",
+        "NSLocationWhenInUseUsageDescription": "显示你附近的门店。"
+      },
+      "ja": { "NSLocationWhenInUseUsageDescription": "近くの店舗を表示します。" }
+    }
+  }
+}
+```
+
+打包时每种语言写成包里的 `<语言>.lproj/InfoPlist.strings`；`nsh run` 也给 iOS 模拟器和 Mac Catalyst 的开发宿主带上同样的文件，
+打包前就能看到各语言的弹框文字。系统对每个应用只问一次：再次检查弹框前先重置之前的选择，iOS 模拟器用
+`xcrun simctl privacy booted reset camera <id>`，macOS 和 Mac Catalyst 用 `tccutil reset Camera <id>`，`<id>` 是应用的
+`id`，在 `nsh run` 下是开发宿主的 id。
+
+- **语言代码**按 Xcode 的写法：语言，需要时再加文字（script）或地区，用 `-` 连接（`en`、`ja`、`zh-Hans`、`zh-Hant`、`pt-BR`）。
+  其他写法（`zh-hans`、`zh_TW`、`Chinese`）会报错并指出是哪个键。
+- **`Info.plist` 里的值**是所有没有翻译的语言看到的文字，所以每个翻译的键都要有这个值：写在 `infoPlist` 里，或者来自 NSH
+  （应用名、NSH 添加的用途说明）或 [crate](./nshm.md#打包的应用需要什么)。包的 `Info.plist` 里没有这个键、或者它不是字符串时，
+  `nsh package` 报错并指出这个键：系统永远不会显示这条翻译。
+- **可以翻译的键**是应用自己的键，NSH 的键里只有 `CFBundleDisplayName` 和 `CFBundleName`；值都是字符串。翻译了应用名的 macOS
+  包还会告诉访达（`LSHasLocalizedDisplayName`）。
+- **这些语言会和应用的 [`locales`](./i18n.md) 一起声明给系统**（`CFBundleLocalizations`，英语在前）：没有翻译的语言的用户看到
+  `Info.plist` 的文字，系统在应用里显示的界面也会使用这些翻译过的语言。写成空的 `{}` 的语言没有文件，也不会声明；它采用
+  [crate](./nshm.md#打包的应用需要什么) 的翻译，应用只采用自己支持的语言的 crate 翻译。
+
+### 隐私清单
+
+上传 iOS 应用时，App Store Connect 会检查它的隐私清单 `PrivacyInfo.xcprivacy`：应用调用 Apple 要求说明使用理由的 API 的原因、
+是否进行跟踪以及跟踪所用的域名，以及它收集的数据（见 [Privacy manifest files](https://developer.apple.com/documentation/bundleresources/privacy-manifest-files)）。
+`nsh.json` 的 `ios.privacyManifest` 就是这个文件的内容，iOS 包会在签名前把它写到应用的根目录（应用扩展在自己的 `.appex` 里带一份自己的）：
+
+```json
+{
+  "ios": {
+    "privacyManifest": {
+      "NSPrivacyTracking": false,
+      "NSPrivacyAccessedAPITypes": [
+        {
+          "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
+          "NSPrivacyAccessedAPITypeReasons": ["C617.1"]
+        },
+        {
+          "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime",
+          "NSPrivacyAccessedAPITypeReasons": ["35F9.1"]
+        }
+      ]
+    }
+  }
+}
+```
+
+它接受 Apple 格式的四个键（`NSPrivacyTracking`、`NSPrivacyTrackingDomains`、`NSPrivacyCollectedDataTypes`、
+`NSPrivacyAccessedAPITypes`）及其条目里的键。未知的键、类型不对的值或缺少键的条目会被略过并给出警告；App Store Connect
+按原样会拒绝的内容（没有理由的条目、开启跟踪却没有域名）也会给出警告。类别和理由代码本身仍由 App Store Connect 检查。
+
+NSH 的运行时是应用可执行文件的一部分，所以它调用的 API 也算作应用的：请把下面这些和应用自己的一起声明。
+
+| 类别 | NSH 中调用它的部分 | 理由 |
+|---|---|---|
+| `NSPrivacyAccessedAPICategoryFileTimestamp` | Rust 标准库读取文件元数据；图片缓存按时间淘汰文件 | `C617.1`；应用读取用户选择的文件时再加 `3B52.1` |
+| `NSPrivacyAccessedAPICategorySystemBootTime` | 渲染器的计时器 | `35F9.1` |
+| `NSPrivacyAccessedAPICategoryUserDefaults` | 读取用户在设置中选择的温度单位，Apple 的理由都不涵盖这种读取（[#2830](https://github.com/longbridge/nsh/issues/2830)） | |
 
 ### 最低系统版本
 

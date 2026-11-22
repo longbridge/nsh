@@ -102,9 +102,11 @@
   double click takes a word the wrap cut across its parts. Every backend reads it from its text views' props (Android
   passes it to the model with the texts, `nativeSetTexts`); the web's copy joins such texts by nothing (the browser's
   own selection takes the clicks). Positions are (text index, UTF-16 offset),
-  never inside a surrogate pair. A point outside every text is hit-tested in reading order: the horizontally nearest
-  text on its row, above every text the first text's start, below every text the last one's end, between rows the
-  nearer of the end of the text above and the start of the text below. Words are runs of letters, digits and `_`, runs
+  never inside a surrogate pair. A point outside every text is hit-tested in reading order: when it sits below a text
+  in a closer, horizontally disjoint column than any text whose row contains it, it stays in that column (clamping to
+  the vertically nearer text above or below in the column); otherwise the horizontally nearest text on its row, above
+  every text the first text's start, and between rows or below a column the vertically nearer edge in the point's
+  column (falling back to document order when no column has width). Words are runs of letters, digits and `_`, runs
   of spaces, or single other characters (each CJK ideograph, kana, emoji or punctuation mark); a triple click selects
   a whole text. Desktops select as their single texts do (drag, double click words, triple click paragraphs, drags go
   on by them, Shift+click extends; Ctrl / Cmd+A, Ctrl / Cmd+C, Escape; a press elsewhere clears), touch screens with a

@@ -96,7 +96,7 @@ Press feedback is the app's: styles the view takes while it is pressed, hovered,
 | `.active(\|s\| ..)` | `activeStyle` | `active:` | While pressed. |
 | `.hover(\|s\| ..)` | `hoverStyle` | `hover:` | While a pointer is over it (desktops, iPad pointers, browsers). |
 | `.focus(\|s\| ..)` | `focusStyle` | `focus:` | While it has focus. |
-| `.focus_visible(\|s\| ..)` | `focusVisibleStyle` | `focus-visible:` | While it has focus and shows it: the keyboard moved it there (a press or a tap gives focus without it). |
+| `.focus_visible(\|s\| ..)` | `focusVisibleStyle` | `focus-visible:` | While it has focus and shows it: the keyboard moved it there (on macOS and iOS a press or a tap gives a control no focus; elsewhere, and for a view that takes keys, it gives focus without showing it). |
 | `.focus_within(\|s\| ..)` | `focusWithinStyle` | `focus-within:` | While it or a view inside it has focus: a field's frame around the input that edits. |
 | `.disabled_style(\|s\| ..)` | `disabledStyle` | `disabled:` | While disabled. |
 | `.ripple(Ripple { .. })` | `android={{ ripple }}` | | Android's material ripple (`color`, `borderless`, `radius`, `foreground`), in addition to the styles. |
@@ -647,7 +647,7 @@ view()
 | `active_offset_x`, `active_offset_y` | `activeOffsetX`, `activeOffsetY` | The pan activates once the finger has moved further than this from where it went down, along that axis (either direction, points). |
 | `fail_offset_x`, `fail_offset_y` | `failOffsetX`, `failOffsetY` | The pan fails once the finger has moved further than this first: the scroll views keep the touches. |
 
-`PanActivation::horizontal(active, fail)` and `PanActivation::vertical(active, fail)` set the usual pairs. Without active offsets the pan activates after 10 points in any direction. Until it activates, the scroll views around wait for it (iOS) and the view's other claims are not asked. When it activates, the scroll views can no longer take these touches and the view becomes the responder (the grant, then the moves); when it fails, the scroll view scrolls as usual. In TSX, `PanResponder`'s `panHandlers` work with it too: spread them next to the prop, and `onPanResponderGrant` runs at the activation.
+`PanActivation::horizontal(active, fail)` and `PanActivation::vertical(active, fail)` set the usual pairs. Without active offsets the pan activates after 10 points in any direction. Until it activates, the scroll views around wait for it (iOS) and the view's other claims are not asked. A scroll view inside the view that cannot scroll along the pan's one axis (a vertical list inside a view that pans sideways) takes only the drags the pan fails on, as on the other platforms: a diagonal goes to whichever offset the finger passes first. When it activates, the scroll views can no longer take these touches and the view becomes the responder (the grant, then the moves); when it fails, the scroll view scrolls as usual. In TSX, `PanResponder`'s `panHandlers` work with it too: spread them next to the prop, and `onPanResponderGrant` runs at the activation.
 
 > [!NOTE]
 > Every velocity is in points per second: the responder gesture's `vx` / `vy`, a pan's velocity and a spring's or a decay's, so `vx` goes to a spring or a decay as it is.

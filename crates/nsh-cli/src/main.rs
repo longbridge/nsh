@@ -16,6 +16,7 @@ mod dev_port;
 mod entry;
 mod init;
 mod logger;
+mod module_meta;
 mod native_features;
 mod nshm;
 mod package;
@@ -173,6 +174,12 @@ enum Command {
         /// format CI services read.
         #[arg(long, value_name = "FILE")]
         junit: Option<PathBuf>,
+        /// How many test files run at once, each on its own engine (by
+        /// default as many as the machine has cores). Their results show
+        /// file by file, in order. Headless runs only: with --target or
+        /// --trace the files run one at a time.
+        #[arg(long, short = 'j', value_name = "N")]
+        jobs: Option<std::num::NonZeroUsize>,
         /// Run the apps the tests open on this platform's development host
         /// instead of headless: the steps act with the platform's own input
         /// (macos, linux, windows, gpui, tui, web, ios and android; tui uses
@@ -329,6 +336,13 @@ enum Command {
         /// main one when there is no such display (`--target macos` only).
         #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..))]
         display: Option<u32>,
+        /// With `--target macos`, `linux`, `windows` or `gpui`: the app
+        /// never becomes the active app, as `nsh test` runs its apps. Its
+        /// window shows (behind the active app's), the keyboard stays with
+        /// the app in use, and input sent to its windows still reaches it
+        /// (TSX entries).
+        #[arg(long)]
+        background: bool,
     },
     /// Create a signing key: `<name>.secret` (keep it offline for a root)
     /// and `<name>.pub` (what apps trust, for a root).
@@ -345,26 +359,50 @@ enum Command {
         #[arg(value_enum)]
         channel: Option<self_update::Channel>,
     },
-    /// Add an nshm (NSH module) to the app in this directory: a Rust
-    /// crate with components, modules and classes for its Rust and TSX
-    /// code, from crates.io (`nsh add acme-ui[@1.2]`), Git (`nsh add
-    /// https://github.com/acme/ui`) or a directory (`nsh add --path
-    /// ../ui`). Listed in `nsh.json` `"modules"`, the version or commit
-    /// it resolved to pinned in `nsh.lock`.
+    /// Add an nshm (NSH module) to the app in this directory (or the nearest
+    /// one above it with `nsh.json`): a package of components, modules and
+    /// classes for its Rust and TSX code, from crates.io (`nsh add
+    /// acme-ui[@1.2]`), GitHub (`nsh add github:acme/ui[@^1.4]`), any Git
+    /// URL or a directory (`nsh add --path ../ui`). Listed in `nsh.json`
+    /// `"dependencies"` by package name, installed once in `~/.nsh/nshms`,
+    /// the version it resolved to pinned in `nsh.lock`; `--features` turns
+    /// on the modules of a crate that keeps them behind Cargo features (`nsh
+    /// add nsh-extra --features camera`).
     Add {
         /// A crate name (with `@<version>`), `github:<owner>/<repo>` (with
-        /// `@<tag>`) or a Git repository URL.
+        /// `@<version>`) or a Git repository URL.
         #[arg(required_unless_present = "path", conflicts_with = "path")]
         source: Option<String>,
         /// A local directory with the nshm.
         #[arg(long)]
         path: Option<String>,
-        /// The tag to take from Git (default: the default branch).
+        /// The tag to take from Git (default: its newest version tag, else
+        /// its default branch).
         #[arg(long, conflicts_with_all = ["rev", "path"])]
         tag: Option<String>,
         /// The commit or branch to take from Git.
         #[arg(long, conflicts_with = "path")]
         rev: Option<String>,
+        /// The crate's Cargo features to turn on, comma-separated or
+        /// repeated (`--features camera,push`), besides those listed
+        /// already.
+        #[arg(long, value_delimiter = ',')]
+        features: Vec<String>,
+    },
+    /// Remove nshm from the app in this directory (or the nearest one above
+    /// it): from `nsh.json` `"dependencies"`, `nsh.lock` and its crate's
+    /// `[dependencies]`. Their installed copies stay in `~/.nsh/nshms`.
+    Remove {
+        /// The nshm, by package name.
+        #[arg(required = true)]
+        names: Vec<String>,
+    },
+    /// Upgrade the app's nshm to the newest versions their requirements in
+    /// `nsh.json` accept, and lock them in `nsh.lock` (all of them, or
+    /// those named).
+    Upgrade {
+        /// The nshm to upgrade, by package name (default: all).
+        names: Vec<String>,
     },
     /// Add, remove or list the runtimes installed beside this nsh: those
     /// of other platforms than this machine's (`android`, `ios`, `web`,
@@ -400,6 +438,11 @@ enum Command {
         /// Where iOS or Android users get it: `ios=<url>`, `android=<url>` (repeatable).
         #[arg(long = "link")]
         links: Vec<String>,
+        /// The previous release's archive of a platform (repeatable):
+        /// writes a patch from it beside the manifest, which apps running
+        /// that version download instead of the whole archive.
+        #[arg(long)]
+        previous: Vec<PathBuf>,
         /// Prefix of the archives' URLs (default: next to the manifest).
         #[arg(long)]
         base_url: Option<String>,
@@ -667,6 +710,8 @@ impl Command {
             | Command::Update { .. }
             | Command::Component { .. }
             | Command::Add { .. }
+            | Command::Remove { .. }
+            | Command::Upgrade { .. }
             | Command::UpdateManifest { .. }
             | Command::Certify { .. }
             | Command::Verify { .. }
@@ -825,6 +870,16 @@ fn run(mut command: Command) -> anyhow::Result<()> {
     if let Some(entry) = command.entry_mut() {
         package::check_nsh_version(entry)?;
     }
+    // `nsh check` runs no bundle, host or runner, so nothing else it does
+    // reads the manifest: what the other commands warn of as they read it
+    // (`read_config`), it says before the type check calls the app fine.
+    // A Rust app's manifest is its describing's (`root_config`), which
+    // refuses what it does not know.
+    if let Command::Check { entry, .. } = &command
+        && !rust_app::is_root(entry)
+    {
+        package::read_config(entry)?;
+    }
     if let Some(entry) = command.entry_mut()
         && rust_app::is_root(entry)
         && !rust_command
@@ -947,6 +1002,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             trace,
             fps,
             junit,
+            jobs,
             target,
             browser,
             web_host,
@@ -960,6 +1016,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             trace,
             fps,
             junit.as_deref(),
+            jobs,
             target,
             browser.as_deref(),
             web_host,
@@ -1068,6 +1125,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             name,
             size,
             display,
+            background,
             points_per_cell,
         } => {
             no_limits_for_rust(&entry, limits)?;
@@ -1090,6 +1148,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                     name: name.as_deref(),
                     size: size.as_deref(),
                     display: display.map(|n| n as usize),
+                    background,
                 },
             )
         }
@@ -1100,10 +1159,13 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             path,
             tag,
             rev,
+            features,
         } => nshm::add(
             &std::env::current_dir()?,
-            nshm::Source::parse(source, path, tag, rev)?,
+            nshm::Added::parse(source, path, tag, rev, features)?,
         ),
+        Command::Remove { names } => nshm::remove(&std::env::current_dir()?, &names),
+        Command::Upgrade { names } => nshm::upgrade(&std::env::current_dir()?, &names),
         Command::Component { action } => match action {
             ComponentAction::List => component::list(),
             ComponentAction::Add { names } => component::add_named(&names),
@@ -1117,6 +1179,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             key,
             notes,
             links,
+            previous,
             base_url,
             out,
         } => updater::manifest(updater::ManifestOptions {
@@ -1126,6 +1189,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             key: key.as_deref(),
             notes: &notes,
             links: &links,
+            previous: &previous,
             base_url: base_url.as_deref(),
             out: &out,
         }),

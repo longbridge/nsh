@@ -65,7 +65,11 @@ trusted: every limit and check is enforced in Rust, never in JS.
   showing the system's share sheet; denied, `Share.show` rejects; each shared file also needs `fs.read`), `speech`
   (`nsh`'s `Speech`: the microphone and the system's speech recognizer, whose transcript reaches the app; denied,
   `Speech.start` throws), `audio` (`nsh`'s `Sound` and `AudioPlayer`: making sound; denied, `Sound.load` rejects and
-  `new AudioPlayer` throws; a remote source also needs `network`), `host`
+  `new AudioPlayer` throws; a remote source also needs `network`), `notifications` (`nsh`'s `Notifications`: showing
+  system notifications and the badge; denied, each function rejects or throws. Also `nsh-extra`'s `Push`, checked in
+  each call of its JS face but `available` (`push/mod.rs` `granted`): its token, its hub of deliveries, the
+  presentation settings and the delivered notifications are the process's, so a VM without the grant must not reach
+  them, and the system's permission is the whole app's, with none asked for registering or background deliveries), `host`
   (`nsh`'s `host`: the embedding app's functions `host.call` may call, names or prefixes ending in `*`, `true` for all;
   names and grants are 1 to 128 of `[A-Za-z0-9_.:-]` without `..` (`access::valid_host_name`), and the core refuses
   the call of any other name before it reads the grants, since hosts may put names in paths or URLs;
@@ -74,8 +78,9 @@ trusted: every limit and check is enforced in Rust, never in JS.
   host sends them), `openUrl`
   (`openUrl` of `nsh`: `true`, or `{ "schemes": [...] }` for the schemes listed), `application` (what acts on the application as a whole:
   the application menu, the tray, global shortcuts, quitting, restarting and launching at login,
-  `nsh/desktop`'s; refused commands are dropped in the core with a warning, `setLaunchAtLogin` rejects with
-  `ERR_ACCESS_DENIED`; context menus show in the app's own view and windows the app opens are `windows`', so they need
+  `nsh/desktop`'s, and the app's page in the system's settings, `nsh/mobile`'s `AppSettings` (the embedding app's page
+  for an embedded view); refused commands are dropped in the core with a warning, `setLaunchAtLogin` and
+  `AppSettings.open` reject with `ERR_ACCESS_DENIED`; context menus show in the app's own view and windows the app opens are `windows`', so they need
   none), `homeDir` (`os.homedir()`, which fails with
   `ERR_ACCESS_DENIED` without it). `nsh`'s `Storage`
   is no capability: an app's storage holds only its own data, and the host decides where it is kept. Everything not listed is denied. `nsh.json`, bundles' `capabilities.json`, packages and embedders' grants are all
