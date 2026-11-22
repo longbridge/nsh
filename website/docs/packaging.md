@@ -63,7 +63,7 @@ TSX app adds its entry (`nsh package App.tsx --target …`).
 
 `nsh.json` also holds `rust` and `root` (the app's crates and its root component, [Building with Rust](./rust.md)),
 `theme` and `appearance`, `tailwind` (see [Tailwind](./tailwind.md)), `capabilities` (see
-[Sandbox and capabilities](./sandbox-and-capabilities.md)), `android` (`targetSdk`, `usesCleartextTraffic`, `permissions`, `libraries` and `manifestPlaceholders`, [below](#target-api-level)), `ios` and `macos` (the `Info.plist` keys and entitlements
+[Sandbox and capabilities](./sandbox-and-capabilities.md)), `android` (`targetSdk`, `usesCleartextTraffic`, `permissions`, `libraries`, `manifestPlaceholders`, `queries` and `application`, [below](#target-api-level)), `ios` and `macos` (the `Info.plist` keys and entitlements
 of their packages, [below](#infoplist-keys-and-entitlements); `ios.extensions`, [app extensions](#app-extensions); `macos.activationPolicy`, a [menu bar app](./macos.md#menu-bar-apps)) and `updater`, which makes desktop packages update themselves
 (see [App Updates](./app-updates.md)) and every native package take [OTA updates](./ota-updates.md); [Project structure](./project-structure.md#nshjson) lists
 every key. A key or value NSH cannot read is reported as a warning and left out, so an app written for a newer NSH
@@ -349,6 +349,37 @@ application = ['<provider android:name="com.example.push.Init" android:authoriti
 `nsh run --target android` carries the libraries too: a TSX app's in its development host, a Rust app's in the package
 it builds. The development host has the same package name for every app, so an SDK that checks the app's package name
 (a push service's SDK, a maps SDK) works only in the app's own package: try it with `nsh package --target android --run`.
+
+### Components and queries
+
+A class the system starts (a `<service>`, a `<receiver>`, a `<provider>`) works only once the manifest declares it, and
+an SDK may need `<meta-data>`, or `<queries>` entries to see other apps. `android.application` adds elements of the
+manifest's `<application>`: `<service>`, `<receiver>`, `<provider>`, `<activity>` and `<meta-data>`. `android.queries`
+adds `<intent>`, `<package>` and `<provider>` elements of its `<queries>`. Each entry is one element, written out whole;
+`${applicationId}` in it becomes the app's package, another `${name}` the value `android.manifestPlaceholders` gives it.
+An entry that is not one such element, carries `tools:` attributes (those are for libraries' manifests) or takes a name
+NSH declares itself (its `com.longbridge.nsh.*` classes and meta-data, the `${applicationId}.files` authority of its
+file provider) is left out with a warning:
+
+```json
+{
+  "android": {
+    "libraries": ["java/out/classes.dex"],
+    "application": [
+      "<receiver android:name=\"com.example.orders.SyncReceiver\" android:exported=\"false\"/>",
+      "<provider android:name=\"com.example.orders.Files\" android:authorities=\"${applicationId}.orders\" android:exported=\"false\"/>"
+    ],
+    "queries": ["<package android:name=\"com.example.wallet\"/>"]
+  }
+}
+```
+
+The crates the app links add theirs the same way ([What the packaged app needs](./nshm.md#what-the-packaged-app-needs)),
+after the app's. When the app has Android libraries (`.aar`), these entries are merged with what the libraries declare:
+one of the same name as a library's (`<meta-data>` for a provider a library declares) joins it. `<application>`'s own
+attributes stay NSH's. The development host (`nsh run` of a TSX app, and
+`nsh test --target android`) declares the crates' entries but not the app's own; a Rust app's `nsh run` builds its
+package and declares them.
 
 ### Google Play: App Bundles
 

@@ -326,13 +326,17 @@ pub(crate) struct AndroidConfig {
     /// as it is. Declaring a runtime permission does not grant it.
     #[serde(default)]
     pub(crate) permissions: Vec<String>,
-    /// Elements of the manifest's `<queries>` the app's crates declare
-    /// ([`crate::module_meta`]); not an `nsh.json` key.
-    #[serde(skip)]
+    /// Elements of the manifest's `<queries>`: `<intent>`, `<package>` and
+    /// `<provider>`, one balanced element each. The app's crates add theirs
+    /// after the app's ([`crate::module_meta`]).
+    #[serde(default)]
     pub(crate) queries: Vec<String>,
-    /// Elements of the manifest's `<application>` the app's crates declare
-    /// ([`crate::module_meta`]); not an `nsh.json` key.
-    #[serde(skip)]
+    /// Elements of the manifest's `<application>`: `<service>`,
+    /// `<receiver>`, `<provider>`, `<activity>` and `<meta-data>`, one
+    /// balanced element each; `${applicationId}` in them is the app's
+    /// package. The app's crates add theirs after the app's
+    /// ([`crate::module_meta`]).
+    #[serde(default)]
     pub(crate) application: Vec<String>,
     /// What the app's window shows from the tap on its icon until its first
     /// frame, the same keys as `ios.launchScreen`: the window's background
@@ -960,6 +964,11 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
     };
     let (mut config, mut ignored) =
         parse_config(&text).with_context(|| format!("invalid {}", path.display()))?;
+    crate::module_meta::keep_app_android_elements(
+        &mut config.android.queries,
+        &mut config.android.application,
+        &mut ignored,
+    );
     if let Some(value) = &config.tui.points_per_cell
         && let Err(e) = crate::run::parse_points_per_cell(value)
     {
@@ -3226,6 +3235,56 @@ mod tests {
                 .as_object()
                 .unwrap()
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `android.queries` and `android.application` are the app's to write
+    /// too; a value of another form is left out with a warning, as any
+    /// `nsh.json` value is.
+    #[test]
+    fn the_app_writes_android_queries_and_components() {
+        let (config, ignored) = parse_config(
+            r#"{ "android": {
+                "queries": ["<package android:name=\"com.singular.sdk\"/>"],
+                "application": ["<service android:name=\"${applicationId}.Sync\" android:exported=\"false\"/>"]
+            } }"#,
+        )
+        .unwrap();
+        assert!(ignored.is_empty(), "{ignored:?}");
+        assert_eq!(
+            config.android.queries,
+            [r#"<package android:name="com.singular.sdk"/>"#]
+        );
+        assert_eq!(config.android.application.len(), 1);
+        let (config, ignored) =
+            parse_config(r#"{ "android": { "queries": "<package android:name=\"a\"/>" } }"#)
+                .unwrap();
+        assert!(config.android.queries.is_empty());
+        assert!(
+            ignored.len() == 1 && ignored[0].starts_with("android.queries"),
+            "{ignored:?}"
+        );
+        // Read from the app: an entry that is not one element of those
+        // allowed is left out, never an error, and the rest is kept.
+        let dir = std::env::temp_dir().join(format!(
+            "nsh-cli-android-elements-config-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("nsh.json"),
+            r#"{ "android": {
+                "queries": ["<service android:name=\"a.B\"/>", "<package android:name=\"com.example.wallet\"/>"],
+                "application": ["<receiver android:name=\"a.Boot\" android:exported=\"false\"/></application><application>"]
+            } }"#,
+        )
+        .unwrap();
+        let config = read_config(&dir.join("App.tsx")).unwrap();
+        assert_eq!(
+            config.android.queries,
+            [r#"<package android:name="com.example.wallet"/>"#]
+        );
+        assert!(config.android.application.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
