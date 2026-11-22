@@ -7799,6 +7799,11 @@ impl<M: TextEngine> Core<M> {
     /// The root's shortcuts follow the views' bindings coming and going:
     /// the table JS's and theirs make, listened to while either has one.
     pub(super) fn sync_keys(&mut self) {
+        let escape_to_focus = self.focus_takes_escape();
+        if escape_to_focus != self.overlay_state.escape_to_focus {
+            self.overlay_state.escape_to_focus = escape_to_focus;
+            self.components.executor.keys.borrow_mut().changed = true;
+        }
         let rust = {
             // The windows' refs read the graph.
             let _entered = self.components.runtime.enter();
@@ -7849,13 +7854,18 @@ impl<M: TextEngine> Core<M> {
             })
         };
         drop(keys);
-        let bindings = self
-            .components
-            .js_keymap
-            .bindings()
+        // JS's first, then the views', where the newest that may fire wins:
+        // a focused component's keys win over the app's. Bindings
+        // `over_focused` come after both, so they win over the components';
+        // the overlay's Escape (a popup closing) stays last.
+        let js = self.components.js_keymap.bindings();
+        let bindings = js
             .iter()
+            .filter(|b| !b.over_focused)
+            .chain(views.iter().filter(|b| !b.over_focused))
+            .chain(js.iter().filter(|b| b.over_focused))
+            .chain(views.iter().filter(|b| b.over_focused))
             .copied()
-            .chain(views)
             .chain(overlay)
             .collect();
         Arc::new(crate::keymap::Keymap::new(bindings))

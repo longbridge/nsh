@@ -6,6 +6,16 @@
 //! generic: it works with any push service, and a push service's SDK
 //! binding builds on its Rust API (the token's raw bytes, every event).
 //!
+//! From JS the module needs the `notifications` capability, as `nsh`'s
+//! `Notifications` does: the device's token, the deliveries (their payloads
+//! are the app's, whichever VM listens), how they show and the delivered
+//! ones `closeThread` removes are process-wide, so every function of
+//! `Push` but `available` checks the calling VM's grant first
+//! ([`granted`]) and fails with `ERR_ACCESS_DENIED` without it. The
+//! system's permission does not stand in for it: registering and
+//! background deliveries ask the user nothing, and what the user allowed
+//! is the whole app's. The Rust API is native code, which is not checked.
+//!
 //! Showing notifications needs the user's permission, which the app asks
 //! with `Notifications.requestPermission` (`nsh`'s); background deliveries
 //! need none. A notification the app removes by its id goes with
@@ -867,7 +877,25 @@ impl Hub {
 
 // --- JS ---------------------------------------------------------------------
 
-/// Remote notifications.
+/// Whether the calling VM may use remote notifications: why not when it
+/// may not. The module's state is the process's (the token, the hub every
+/// VM's listeners subscribe to, the presentation settings, the delivered
+/// notifications), so this check in each call is all that keeps a VM
+/// without the grant from it.
+fn granted(sys: &System) -> Result<(), JsError> {
+    if sys.access.allows_notifications() {
+        return Ok(());
+    }
+    Err(JsError::access_denied(
+        "remote notifications are not granted: add `\"notifications\": true` to capabilities in nsh.json",
+        "notifications",
+        "",
+    ))
+}
+
+/// Remote notifications. Needs the `notifications` capability when the app
+/// declares capabilities: without it every function but `available`
+/// rejects or throws `ERR_ACCESS_DENIED` (checked here, in the call).
 #[module]
 pub(crate) struct Push;
 
@@ -877,7 +905,8 @@ impl Push {
     /// standalone iOS app, `false` on Android (for now), the desktops, the
     /// web, Mac Catalyst and in an app that embeds NSH in its own iOS app,
     /// where `register` and `closeThread` reject with
-    /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
+    /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. It tells the platform only,
+    /// so it needs no capability.
     pub(crate) async fn available() -> bool {
         crate::push::available().await
     }
@@ -891,9 +920,12 @@ impl Push {
     /// `Notifications.requestPermission`, background deliveries do not.
     /// Register at every launch: the token can change, and `on("token")`
     /// reports a new one. Rejects with the system's reason when it refuses
-    /// (an app signed without the `aps-environment` entitlement), and with
-    /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where `available()` is false.
-    pub(crate) async fn register() -> Result<PushToken, JsError> {
+    /// (an app signed without the `aps-environment` entitlement), with
+    /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where `available()` is false,
+    /// and with `ERR_ACCESS_DENIED` when the `notifications` capability is
+    /// not granted.
+    pub(crate) async fn register(sys: System) -> Result<PushToken, JsError> {
+        granted(&sys)?;
         match crate::push::register().await {
             Ok(token) => Ok(PushToken::from(&token)),
             Err(error) => Err(error.to_js()),
@@ -901,17 +933,23 @@ impl Push {
     }
 
     /// The token of the device's last registration in this run; `null`
-    /// before one.
-    pub(crate) fn token() -> Option<PushToken> {
-        crate::push::token().as_ref().map(PushToken::from)
+    /// before one. Throws `ERR_ACCESS_DENIED` when the `notifications`
+    /// capability is not granted.
+    pub(crate) fn token(sys: System) -> Result<Option<PushToken>, JsError> {
+        granted(&sys)?;
+        Ok(crate::push::token().as_ref().map(PushToken::from))
     }
 
     /// How a notification that arrives while the app is in front shows:
     /// one of the thread `threadId` when given (its own presentation, else
-    /// the app's).
+    /// the app's). Throws `ERR_ACCESS_DENIED` when the `notifications`
+    /// capability is not granted, and a `RangeError` for an empty
+    /// `threadId`.
     pub(crate) fn foreground_presentation(
         thread: Option<ForegroundPresentationThread>,
+        sys: System,
     ) -> Result<ForegroundPresentation, JsError> {
+        granted(&sys)?;
         Ok(match thread {
             Some(thread) => crate::push::thread_presentation(&thread.id()?),
             None => crate::push::foreground_presentation(),
@@ -926,11 +964,14 @@ impl Push {
     /// to the app's. The system asks as they arrive, without waiting for
     /// JS, so it is set before. Process-wide: it holds for every surface of
     /// the app. They are reported to `on("notification")` either way.
-    /// Throws a `RangeError` for an empty `threadId`.
+    /// Throws `ERR_ACCESS_DENIED` when the `notifications` capability is
+    /// not granted, and a `RangeError` for an empty `threadId`.
     pub(crate) fn set_foreground_presentation(
         presentation: Option<ForegroundPresentationOptions>,
         thread: Option<ForegroundPresentationThread>,
+        sys: System,
     ) -> Result<(), JsError> {
+        granted(&sys)?;
         let presentation = presentation.map(ForegroundPresentationOptions::presentation);
         match thread {
             Some(thread) => crate::push::set_thread_presentation(thread.id()?, presentation),
@@ -942,10 +983,12 @@ impl Push {
     /// Removes the delivered notifications grouped in the thread
     /// `threadId` (the `thread-id` the push service sent), but those
     /// `Notifications.show` showed. `Notifications.close(id)` removes one
-    /// by its `id`. Rejects with a `RangeError` for an empty `threadId`,
-    /// and with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where `available()`
-    /// is false.
-    pub(crate) async fn close_thread(thread_id: String) -> Result<(), JsError> {
+    /// by its `id`. Rejects with `ERR_ACCESS_DENIED` when the
+    /// `notifications` capability is not granted, with a `RangeError` for
+    /// an empty `threadId`, and with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`
+    /// where `available()` is false.
+    pub(crate) async fn close_thread(thread_id: String, sys: System) -> Result<(), JsError> {
+        granted(&sys)?;
         if thread_id.is_empty() {
             return Err(JsError::Range(
                 "Push.closeThread: `threadId` must not be empty".into(),
@@ -972,7 +1015,8 @@ impl Push {
     /// listened waits for a listener until 5 seconds after it came. These
     /// are the notifications `Notifications` did not show: remote ones and
     /// those other native code scheduled. A payload is untrusted input.
-    /// Returns a function that stops listening.
+    /// Returns a function that stops listening. Throws `ERR_ACCESS_DENIED`
+    /// when the `notifications` capability is not granted.
     #[overload(fn(event: PushTokenEvent, #[args(token)] listener: Callback<PushToken>) -> Stop)]
     #[overload(fn(event: PushNotificationEvent, #[args(notification)] listener: Callback<PushNotification>) -> Stop)]
     #[overload(fn(event: PushPressEvent, #[args(press)] listener: Callback<PushNotification>) -> Stop)]
@@ -982,7 +1026,10 @@ impl Push {
         #[args(payload)] listener: Callback<Payload, BackgroundReturn>,
         sys: System,
         cx: CallCx<'_>,
-    ) -> Stop {
+    ) -> Result<Stop, JsError> {
+        // Before the VM subscribes to the hub: a subscriber gets every
+        // delivery of the kinds it listens to, and takes those that waited.
+        granted(&sys)?;
         let kind = event.kind();
         let listeners = sys.locals.get::<Listeners>();
         let id = listeners.next.get();
@@ -994,7 +1041,7 @@ impl Push {
             hub().listen(subscriber, kind);
         }
         let listeners = Rc::downgrade(&listeners);
-        Stop::new(move || {
+        Ok(Stop::new(move || {
             let Some(listeners) = listeners.upgrade() else {
                 return;
             };
@@ -1005,7 +1052,7 @@ impl Push {
             {
                 hub().unlisten(subscriber, kind);
             }
-        })
+        }))
     }
 }
 

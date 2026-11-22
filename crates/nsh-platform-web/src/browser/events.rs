@@ -175,6 +175,11 @@ pub(super) fn payload(host: &Bindings, payload: &EventPayload) -> Result<Value, 
             ("mimeTypes", strings(&file_mime_types(uris))?),
             ("pagePosition", point(*page_position)?),
         ])?,
+        EventPayload::TextDrop(drop) => object([
+            ("text", Value::string(&drop.text)?),
+            ("html", Value::string(&drop.html)?),
+            ("pagePosition", point(drop.page_position)?),
+        ])?,
         EventPayload::Paste(paste) => {
             let mut files = Vec::new();
             for file in &paste.files {

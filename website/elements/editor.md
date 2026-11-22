@@ -221,6 +221,10 @@ keymap.bind({
 });
 ```
 
+The editor's own bindings come before the app's while it has the focus: Mod+Enter inserts a line below, whatever the
+app bound to it. To take such a key, as a query editor running its text with Mod+Enter does, bind it with
+[`keymap`](../modules/nsh.md#keymap)'s `overFocused: true` while the editor has the focus (`onFocus` / `onBlur`).
+
 ## Find and replace
 
 `search` is what to find: `{ query, caseSensitive?, wholeWord?, regex?, inSelection? }`. Its matches are highlighted, the one the
