@@ -611,6 +611,8 @@ fn initial_environment() -> Environment {
         os: Os::MacOs,
         idiom: Idiom::Desktop,
         screen_color: true,
+        // `setString:forType:` says whether the pasteboard took the write.
+        clipboard_write_result: true,
         canvas_render: true,
         // `NSSharingServicePicker` (`crate::share`).
         share: true,
