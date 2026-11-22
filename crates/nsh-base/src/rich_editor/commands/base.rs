@@ -233,8 +233,8 @@ fn join_textblocks_around(
         return false;
     };
     // As ProseMirror's, only a plain replace must remove more than it
-    // inserts: a step around the content (a heading's text moved into a
-    // paragraph) joins too.
+    // inserts: a step around the content (a paragraph after a blockquote
+    // moved into the quote's last paragraph) joins too.
     let fits = if let Some(replace) = step.as_any().downcast_ref::<ReplaceStep>() {
         replace.from == before_pos && replace.slice.size() < after_pos - before_pos
     } else {
