@@ -1200,9 +1200,11 @@ define_class!(
                 && let Some(view) = controller.view()
                 && editor.isDescendantOfView(&view)
                 && let Some(window) = editor.window()
-                && first_responder(&window).is_none()
+                && first_responder(&window).is_none_or(|r| crate::keyboard::is_root_focus(&r))
             {
-                // The swipe was cancelled. Another control's focus wins.
+                // The swipe was cancelled. Another control's focus wins; the
+                // surface root, which took the keys when the editor
+                // resigned, is no control's focus.
                 editor.becomeFirstResponder();
             }
             // An animated change of screens is deferred to a layout pass of
