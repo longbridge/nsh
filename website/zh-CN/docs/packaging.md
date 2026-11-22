@@ -56,7 +56,7 @@ nsh package App.tsx --target ios-simulator --run
 | `build` | number | `1` | 构建号（`CFBundleVersion`、`versionCode`）。每次上传新版本都要递增。 |
 | `icon` | string \| object | 无 | 一张正方形 PNG，最好是 1024×1024，路径相对于 `nsh.json`；也可按平台分别提供（[图标](#图标)）。 |
 
-`nsh.json` 还包含 `rust` 和 `root`（应用的 crate 和根组件，见[用 Rust 开发](./rust.md)）、`theme` 和 `appearance`、`tailwind`（见 [Tailwind](./tailwind.md)）、`capabilities`（见[沙箱与能力](./sandbox-and-capabilities.md)）、`android`（`targetSdk`、`usesCleartextTraffic`、`permissions` 和 `libraries`，见下文“目标 API 级别”“明文 HTTP”“权限”和“Java 代码”）、`ios` 和 `macos`（对应包的 `Info.plist` 键和 entitlements，见[下文](#infoplist-键与-entitlements)；`ios.extensions` 是[应用扩展](#应用扩展)；`macos.activationPolicy` 用于[菜单栏应用](./macos.md#菜单栏应用)）以及让桌面包自我更新、让所有原生包接收 [OTA 更新](./ota-updates.md)的 `updater`（见[应用更新](./app-updates.md)）；[项目结构](./project-structure.md#nshjson)列出了所有键。NSH 读不懂的键或值会给出警告并被略过：为更新的 NSH 写的应用在较旧的 NSH 上照样能构建，拼写错误也会在警告里看到。
+`nsh.json` 还包含 `rust` 和 `root`（应用的 crate 和根组件，见[用 Rust 开发](./rust.md)）、`theme` 和 `appearance`、`tailwind`（见 [Tailwind](./tailwind.md)）、`capabilities`（见[沙箱与能力](./sandbox-and-capabilities.md)）、`android`（`targetSdk`、`usesCleartextTraffic`、`permissions`、`libraries` 和 `manifestPlaceholders`，见下文“目标 API 级别”“明文 HTTP”“权限”和“Java 代码”）、`ios` 和 `macos`（对应包的 `Info.plist` 键和 entitlements，见[下文](#infoplist-键与-entitlements)；`ios.extensions` 是[应用扩展](#应用扩展)；`macos.activationPolicy` 用于[菜单栏应用](./macos.md#菜单栏应用)）以及让桌面包自我更新、让所有原生包接收 [OTA 更新](./ota-updates.md)的 `updater`（见[应用更新](./app-updates.md)）；[项目结构](./project-structure.md#nshjson)列出了所有键。NSH 读不懂的键或值会给出警告并被略过：为更新的 NSH 写的应用在较旧的 NSH 上照样能构建，拼写错误也会在警告里看到。
 
 上表中的每个键都可以在命令行上覆盖，这在 CI 中很方便：
 
@@ -247,7 +247,7 @@ Android 自己的权限（`android.permission.<NAME>`），带点的名字按原
 ### Java 代码
 
 Rust 通过 JNI 可以调用大多数 Android API，但有些 API 需要应用自己定义的类（监听器、回调、`PrintDocumentAdapter`），还有些 SDK
-以 Java 库的形式提供。`android.libraries` 写在应用的 `nsh.json` 中，列出 jar 和 dex 文件，路径相对于 `nsh.json`。nshm 在自己的
+以 Java 库的形式提供。`android.libraries` 写在应用的 `nsh.json` 中，列出 jar、Android 库（`.aar`）和 dex 文件，路径相对于 `nsh.json`。nshm 在自己的
 `Cargo.toml` 里列出它的库（见[打包的应用需要什么](./nshm.md#打包的应用需要什么)），使用它的应用无需再列：
 
 ```json
@@ -260,8 +260,28 @@ Rust 通过 JNI 可以调用大多数 Android API，但有些 API 需要应用�
 供 `ServiceLoader` 读取的 `META-INF/services/...`）放到包的根目录。dex 文件按原样放入，不经过 `d8` 合并，所以它和 jar 里重复定义的类在打包时不会被发现。同一个文件被列出两次或被两个 crate
 列出时只放入一次；两个不同的文件定义了同一个类时构建会停止，并指出这两个文件。不列出任何库的应用照旧打包，不会运行 `d8`。
 
-这些库都是本地文件：NSH 不下载它们，也不解析 Maven 依赖，所以 SDK 依赖的库也要一并列出。Android 库（`.aar`，带资源和 manifest
-条目）暂时还不能打包。
+这些库都是本地文件：NSH 不下载它们，也不解析 Maven 依赖，所以 SDK 依赖的库也要一并列出。
+
+Android 库（`.aar`）带来的不只是类（类按 jar 的方式处理）：它的原生库（`jni/<abi>/*.so`）按包含的 ABI 放入，和 NSH 自己的一样不压缩存放；
+它的 assets 和应用自己的 assets 放在一起；它 manifest 里的权限、功能、`<queries>` 和组件并入应用的 manifest，相对类名（`.PushService`）
+补上它的包名，`${applicationId}` 换成应用的包名。几个库以同一个名字声明的组件（例如各自往同一个启动 provider 里加初始化器）合成一个。
+它 manifest 里（或 crate 的 `android.application` 里）的其他占位符取 `android.manifestPlaceholders` 的值，只有应用的 `nsh.json`
+能设置：这些值属于应用，例如某个服务的 key。`nsh test --target android` 安装的共用开发宿主不读任何应用的 `nsh.json`，
+这些占位符在那里留空，并给出警告。
+
+```json
+{
+  "android": {
+    "libraries": ["android/libs/push-sdk-5.2.0.aar"],
+    "manifestPlaceholders": { "PUSH_APP_KEY": "…" }
+  }
+}
+```
+
+每个库按它 manifest 里的包名只放入一次：两个 crate 带了同一个文件时只放一次；同一个库的两个版本会让构建停止并指出两者；应用在自己的
+`nsh.json` 里列出的版本就是包里用的版本。库需要 NSH 应用没有的东西时，构建也会停止并指出这个库：最低 API 级别高于 26、平台比
+`android.targetSdk` 更新、自己的 `Application` 类、manifest 合并规则（`tools:node="remove"`、`tools:replace`），或包里有某个 ABI、而库带了原生库却缺这个 ABI 的版本。
+Android 资源（`res/`）暂时还不能打包：带资源的 AAR 同样会让构建停止。
 
 自己的 Java 源码先针对平台的 `android.jar` 编译，再打成 jar：
 
@@ -273,7 +293,7 @@ jar cf java/out/glue.jar -C java/classes .
 在 Rust 启动的线程里，JNI 的 `FindClass` 只能找到系统的类；在那里要通过 activity 的类加载器（`Context.getClassLoader()`）加载应用的类。
 
 NSH 应用没有自己的 `Application` 类，所以必须在 `Application` 里初始化、或必须继承它的 SDK 无法使用。随应用启动的 SDK 通过
-content provider 初始化，由 nshm 在 `android.application` 里声明：
+content provider 初始化：由它的 AAR 自己声明，或由 nshm 在 `android.application` 里声明：
 
 ```toml
 [package.metadata.nsh.features.push.android]

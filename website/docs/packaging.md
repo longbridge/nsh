@@ -63,7 +63,7 @@ TSX app adds its entry (`nsh package App.tsx --target …`).
 
 `nsh.json` also holds `rust` and `root` (the app's crates and its root component, [Building with Rust](./rust.md)),
 `theme` and `appearance`, `tailwind` (see [Tailwind](./tailwind.md)), `capabilities` (see
-[Sandbox and capabilities](./sandbox-and-capabilities.md)), `android` (`targetSdk`, `usesCleartextTraffic`, `permissions` and `libraries`, [below](#target-api-level)), `ios` and `macos` (the `Info.plist` keys and entitlements
+[Sandbox and capabilities](./sandbox-and-capabilities.md)), `android` (`targetSdk`, `usesCleartextTraffic`, `permissions`, `libraries` and `manifestPlaceholders`, [below](#target-api-level)), `ios` and `macos` (the `Info.plist` keys and entitlements
 of their packages, [below](#infoplist-keys-and-entitlements); `ios.extensions`, [app extensions](#app-extensions); `macos.activationPolicy`, a [menu bar app](./macos.md#menu-bar-apps)) and `updater`, which makes desktop packages update themselves
 (see [App Updates](./app-updates.md)) and every native package take [OTA updates](./ota-updates.md); [Project structure](./project-structure.md#nshjson) lists
 every key. A key or value NSH cannot read is reported as a warning and left out, so an app written for a newer NSH
@@ -272,8 +272,8 @@ declares them.
 ### Java code
 
 Rust reaches most Android APIs through JNI, but some take a class the app defines (a listener, a callback, a
-`PrintDocumentAdapter`), and some SDKs come as Java libraries. `android.libraries` in the app's `nsh.json` lists jar
-and dex files, relative to `nsh.json`. An nshm lists its own in its `Cargo.toml`
+`PrintDocumentAdapter`), and some SDKs come as Java libraries. `android.libraries` in the app's `nsh.json` lists jar,
+Android library (`.aar`) and dex files, relative to `nsh.json`. An nshm lists its own in its `Cargo.toml`
 ([What the packaged app needs](./nshm.md#what-the-packaged-app-needs)), so the apps that use it list nothing:
 
 ```json
@@ -290,7 +290,32 @@ crates, goes in once; a class that two different files define stops the build, n
 no libraries is packaged as before, without `d8`.
 
 The libraries are local files: NSH does not download them or resolve Maven dependencies, so list the libraries an SDK
-depends on as well. Android libraries (`.aar`, with resources and manifest entries) are not packaged yet.
+depends on as well.
+
+An Android library (`.aar`) brings more than its classes, which go the jars' way: its native libraries
+(`jni/<abi>/*.so`) go in for the ABIs the package has, stored uncompressed like NSH's own; its assets join the app's
+own; and its manifest's permissions, features, `<queries>` and components join the app's manifest, its relative class
+names (`.PushService`) completed with its package and `${applicationId}` filled in with the app's. Components that
+several libraries declare under one name (a startup provider each adds an initializer to) become one. Other
+placeholders in its manifest, or in a crate's `android.application`, take their values from
+`android.manifestPlaceholders`, which only the app's `nsh.json` sets: they are the app's, such as a service's key. The shared development host that
+`nsh test --target android` installs reads no app's `nsh.json`, so it leaves them empty, with a warning.
+
+```json
+{
+  "android": {
+    "libraries": ["android/libs/push-sdk-5.2.0.aar"],
+    "manifestPlaceholders": { "PUSH_APP_KEY": "…" }
+  }
+}
+```
+
+Each library goes in once, as its manifest's package names it: the same file from two crates goes in once, two
+versions of one library stop the build naming both, and the version the app lists in its own `nsh.json` is the one the
+package takes. The package also stops, naming the library, when it needs what an NSH app does not have: a minimum API
+level above 26, a newer platform than `android.targetSdk`, an `Application` class of its own, a manifest merge rule
+(`tools:node="remove"`, `tools:replace`), or native libraries that leave out an ABI the package has. Android
+resources (`res/`) are not packaged yet: an AAR with resources stops the build too.
 
 Compile your own Java sources against the platform's `android.jar` into a jar:
 
@@ -303,8 +328,8 @@ A thread Rust started finds only the system's classes through JNI's `FindClass`;
 activity's class loader (`Context.getClassLoader()`) there.
 
 An NSH app has no `Application` class of its own, so an SDK that must be initialized from one, or must be its
-subclass, cannot be used. An SDK that starts with the app is initialized by a content provider, which an nshm declares
-in its `android.application`:
+subclass, cannot be used. An SDK that starts with the app is initialized by a content provider, which its AAR declares
+itself, or which an nshm declares in its `android.application`:
 
 ```toml
 [package.metadata.nsh.features.push.android]

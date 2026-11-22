@@ -1,6 +1,8 @@
 //! The Java libraries an Android package carries (`android.libraries` of the
 //! app's `nsh.json` and of its crates' `[package.metadata.nsh]`): jar files,
-//! which the SDK's `d8` turns into dex, and prebuilt dex files. A package
+//! which the SDK's `d8` turns into dex; prebuilt dex files; and Android
+//! libraries (AARs), whose classes go the jars' way and whose native
+//! libraries, assets and manifest the package takes as well. A package
 //! without libraries runs none of this.
 
 use std::{
@@ -15,7 +17,10 @@ use anyhow::{Context as _, bail};
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
 
-use super::{Apk, MIN_SDK, Sdk};
+use super::{
+    Apk, MIN_SDK, Sdk,
+    library_manifest::{self, Additions, Element, Placeholders},
+};
 
 /// Where `nsh.json` lists its libraries, as errors name it.
 const NSH_JSON: &str = "nsh.json `android.libraries`";
@@ -47,6 +52,7 @@ impl From<PathBuf> for Library {
 enum Kind {
     Jar,
     Dex,
+    Aar,
 }
 
 impl Library {
@@ -59,13 +65,9 @@ impl Library {
         match extension.as_deref() {
             Some("jar") => Ok(Kind::Jar),
             Some("dex") => Ok(Kind::Dex),
-            Some("aar") => bail!(
-                "{}: {} is an Android library (AAR), which this nsh does not package yet: list jar and dex files",
-                self.listed,
-                self.path.display()
-            ),
+            Some("aar") => Ok(Kind::Aar),
             _ => bail!(
-                "{}: {} is neither a jar (`.jar`) nor a dex file (`.dex`)",
+                "{}: {} is neither a jar (`.jar`), an Android library (`.aar`) nor a dex file (`.dex`)",
                 self.listed,
                 self.path.display()
             ),
@@ -78,29 +80,52 @@ impl Library {
     }
 }
 
-/// The Java code [`super::add_files`] packages after the runtime's.
+/// What the libraries add to the package, after the runtime's.
 #[derive(Debug, Default)]
-pub(super) struct JavaCode {
+pub(super) struct Contents {
     /// Dex files, numbered in this order after the runtime's
     /// `classes.dex`: `classes2.dex`, `classes3.dex`, ...
     pub(super) dex: Vec<PathBuf>,
     /// The jars' Java resources (`META-INF/services/...` and the like):
     /// (path at the package's root, contents).
     pub(super) resources: Vec<(String, Vec<u8>)>,
+    /// The native libraries of the AARs that have any ([`native_for`]).
+    pub(super) native: Vec<Native>,
+    /// The AARs' assets: (path under `assets/`, contents).
+    pub(super) assets: Vec<(String, Vec<u8>)>,
+    /// What the manifest gets: the crates' entries and the AARs' manifests.
+    pub(super) manifest: Additions,
 }
 
-/// A library to package, checked.
-struct Checked<'a> {
-    library: &'a Library,
+/// The native libraries of an AAR.
+#[derive(Debug)]
+pub(super) struct Native {
+    /// The AAR and who lists it, for errors.
+    pub(super) from: String,
+    /// Its `jni/<abi>/*.so`: (file name, contents) by ABI.
+    pub(super) abis: BTreeMap<String, Vec<(String, Vec<u8>)>>,
+}
+
+/// A library file to package, checked: one listed, or a jar of an AAR.
+#[derive(Debug)]
+struct Checked {
+    path: PathBuf,
+    /// Who lists it, which errors start with.
+    listed: String,
+    /// The file and who lists it, which errors name it by.
+    shown: String,
+    /// The app's own `nsh.json` lists it.
+    apps: bool,
     kind: Kind,
     sha256: String,
 }
 
 /// The libraries of `apk`, checked and each file once: a missing file or
 /// one of another kind is an error naming who lists it; files with the same
-/// contents (two crates that carry one jar) are packaged once.
-fn checked(libraries: &[Library]) -> anyhow::Result<Vec<Checked<'_>>> {
-    let mut out: Vec<Checked<'_>> = Vec::new();
+/// contents (two crates that carry one jar) are packaged once, as the first
+/// that lists them (the app before its crates).
+fn checked(libraries: &[Library]) -> anyhow::Result<Vec<Checked>> {
+    let mut out: Vec<Checked> = Vec::new();
     for library in libraries {
         let kind = library.kind()?;
         let bytes = fs::read(&library.path)
@@ -117,7 +142,10 @@ fn checked(libraries: &[Library]) -> anyhow::Result<Vec<Checked<'_>>> {
             continue;
         }
         out.push(Checked {
-            library,
+            path: library.path.clone(),
+            listed: library.listed.clone(),
+            shown: library.describe(),
+            apps: library.listed == NSH_JSON,
             kind,
             sha256,
         });
@@ -125,34 +153,107 @@ fn checked(libraries: &[Library]) -> anyhow::Result<Vec<Checked<'_>>> {
     Ok(out)
 }
 
-/// Turns the libraries of `apk` into the dex files and Java resources the
-/// package carries: dex files as they are, in the order listed; the jars
-/// each through `d8 --intermediate` (kept in `apk.library_cache` by
-/// contents, `d8` version, API level and mode), then merged by one `d8` run
-/// into `work`, which fails on a class two libraries define.
-pub(super) fn java_code(sdk: &Sdk, apk: &Apk<'_>, work: &Path) -> anyhow::Result<JavaCode> {
-    if apk.libraries.is_empty() {
-        return Ok(JavaCode::default());
+/// What the libraries of `apk` add to the package: the dex files as they
+/// are, in the order listed; the jars, and those of the AARs, each through
+/// `d8 --intermediate` (kept in `apk.library_cache` by contents, `d8`
+/// version, API level and mode), then merged by one `d8` run into `work`,
+/// which fails on a class two libraries define; and the AARs' native
+/// libraries, assets and manifests. Without libraries, only the crates'
+/// manifest entries.
+pub(super) fn prepare(sdk: &Sdk, apk: &Apk<'_>, work: &Path) -> anyhow::Result<Contents> {
+    let mut contents = Contents::default();
+    let mut files = Vec::new();
+    let mut aars = Vec::new();
+    for checked in checked(apk.libraries)? {
+        if checked.kind == Kind::Aar {
+            aars.push(read_aar(checked)?);
+        } else {
+            files.push(checked);
+        }
     }
-    let libraries = checked(apk.libraries)?;
-    let mut code = JavaCode::default();
-    let jars: Vec<&Checked<'_>> = libraries.iter().filter(|c| c.kind == Kind::Jar).collect();
-    code.dex.extend(
-        libraries
+    let placeholders = Placeholders::new(apk.package, apk.manifest_placeholders);
+    let mut manifests = Vec::new();
+    let mut warnings = Vec::new();
+    // Each asset's AAR, for errors.
+    let mut assets: BTreeMap<String, (usize, String)> = BTreeMap::new();
+    for (i, aar) in choose(aars)?.into_iter().enumerate() {
+        let from = aar.checked.shown;
+        if let Some(level) = aar.min_compile_sdk
+            && level > apk.target_sdk
+        {
+            bail!(
+                "{from} compiles against Android API level {level} and later (its minCompileSdk), \
+                 the app against {}: set nsh.json `android.targetSdk` to {level} or more",
+                apk.target_sdk
+            );
+        }
+        let parts = library_manifest::resolve(&aar.manifest, &from, &placeholders, &mut warnings)?;
+        manifests.push((parts, from.clone()));
+        // Its classes go the jars' way, from the work directory.
+        let dir = work.join("aar").join(i.to_string());
+        for (name, bytes) in aar.jars {
+            let sha256 = hex(&Sha256::digest(&bytes));
+            if files.iter().any(|c| c.sha256 == sha256) {
+                continue;
+            }
+            let path = dir.join(&name);
+            fs::create_dir_all(path.parent().unwrap_or(&dir))?;
+            fs::write(&path, &bytes)?;
+            files.push(Checked {
+                path,
+                listed: aar.checked.listed.clone(),
+                shown: format!("`{name}` of {from}"),
+                apps: aar.checked.apps,
+                kind: Kind::Jar,
+                sha256,
+            });
+        }
+        for (path, bytes) in aar.assets {
+            match assets.get(&path) {
+                None => {
+                    assets.insert(path.clone(), (contents.assets.len(), from.clone()));
+                    contents.assets.push((path, bytes));
+                }
+                Some((at, _)) if contents.assets[*at].1 == bytes => {}
+                Some((_, first)) => bail!(
+                    "{first} and {from} both have the asset `{path}`, with different contents: list one of them"
+                ),
+            }
+        }
+        if !aar.native.is_empty() {
+            contents.native.push(Native {
+                from,
+                abis: aar.native,
+            });
+        }
+    }
+    contents.manifest = library_manifest::additions(apk, &placeholders, manifests)?;
+    for name in placeholders.missing.borrow().iter() {
+        warnings.push(format!(
+            "the placeholder `${{{name}}}` is empty in the shared test host, which reads no app's nsh.json"
+        ));
+    }
+    for warning in warnings {
+        crate::ui::warn(warning);
+    }
+
+    contents.dex.extend(
+        files
             .iter()
             .filter(|c| c.kind == Kind::Dex)
-            .map(|c| c.library.path.clone()),
+            .map(|c| c.path.clone()),
     );
+    let jars: Vec<&Checked> = files.iter().filter(|c| c.kind == Kind::Jar).collect();
     if jars.is_empty() {
-        return Ok(code);
+        return Ok(contents);
     }
     let android_jar = sdk.android_jar(apk.target_sdk)?;
     // Each intermediate dex, with the library it is made of.
-    let mut intermediate: Vec<(PathBuf, &Library)> = Vec::new();
+    let mut intermediate: Vec<(PathBuf, &Checked)> = Vec::new();
     for jar in &jars {
         let dir = intermediate_dex(sdk, jar, &android_jar, apk)?;
         for dex in dex_files(&dir)? {
-            intermediate.push((dex, jar.library));
+            intermediate.push((dex, jar));
         }
     }
     let merged = work.join("libraries-dex");
@@ -177,16 +278,231 @@ pub(super) fn java_code(sdk: &Sdk, apk: &Apk<'_>, work: &Path) -> anyhow::Result
             )
         );
     }
-    code.dex.extend(dex_files(&merged)?);
-    code.resources = java_resources(&jars.iter().map(|c| c.library).collect::<Vec<_>>())?;
-    Ok(code)
+    contents.dex.extend(dex_files(&merged)?);
+    contents.resources = java_resources(&jars)?;
+    Ok(contents)
+}
+
+/// Where an AAR keeps what its build was made for.
+const AAR_METADATA: &str = "META-INF/com/android/build/gradle/aar-metadata.properties";
+
+/// An AAR, read.
+struct Aar {
+    checked: Checked,
+    /// Its manifest's package: what tells the library apart from others,
+    /// whichever version of it this is.
+    package: String,
+    manifest: Element,
+    /// `classes.jar` and `libs/*.jar`: (path in the AAR, contents).
+    jars: Vec<(String, Vec<u8>)>,
+    /// `jni/<abi>/*.so`: (file name, contents) by ABI.
+    native: BTreeMap<String, Vec<(String, Vec<u8>)>>,
+    /// `assets/`: (path under it, contents).
+    assets: Vec<(String, Vec<u8>)>,
+    /// The API level an app must compile against (`minCompileSdk`).
+    min_compile_sdk: Option<u32>,
+}
+
+/// Reads what the package takes of an AAR: its classes, native
+/// libraries, assets and manifest. Resources (`res/`) are an error, which
+/// this does not package yet; what only a build reads (`R.txt`,
+/// `proguard.txt`, `lint.jar`, ...) is left out.
+fn read_aar(checked: Checked) -> anyhow::Result<Aar> {
+    let file = fs::File::open(&checked.path)
+        .with_context(|| format!("{}: read {}", checked.listed, checked.path.display()))?;
+    let mut archive = zip::ZipArchive::new(file).with_context(|| {
+        format!(
+            "{}: {} is not an Android library (AAR)",
+            checked.listed,
+            checked.path.display()
+        )
+    })?;
+    let mut manifest = None;
+    let mut jars = Vec::new();
+    let mut native: BTreeMap<String, Vec<(String, Vec<u8>)>> = BTreeMap::new();
+    let mut assets = Vec::new();
+    let mut min_compile_sdk = None;
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i)?;
+        if entry.is_dir() {
+            continue;
+        }
+        let name = entry.name()?.into_owned();
+        if entry.enclosed_name().is_none() {
+            bail!("{} has `{name}`, a path outside it", checked.shown);
+        }
+        let mut read = || -> anyhow::Result<Vec<u8>> {
+            let mut bytes = Vec::new();
+            entry.read_to_end(&mut bytes)?;
+            Ok(bytes)
+        };
+        let libs_jar = name
+            .strip_prefix("libs/")
+            .is_some_and(|jar| !jar.contains('/') && jar.ends_with(".jar"));
+        if name == "AndroidManifest.xml" {
+            manifest = Some(String::from_utf8(read()?).with_context(|| {
+                format!("{}: its AndroidManifest.xml is not UTF-8", checked.shown)
+            })?);
+        } else if name == "classes.jar" || libs_jar {
+            jars.push((name, read()?));
+        } else if let Some(rest) = name.strip_prefix("jni/") {
+            if let Some((abi, so)) = rest.split_once('/')
+                && !so.contains('/')
+                && so.ends_with(".so")
+            {
+                let (abi, so) = (abi.to_owned(), so.to_owned());
+                native.entry(abi).or_default().push((so, read()?));
+            }
+        } else if let Some(path) = name.strip_prefix("assets/") {
+            // `assets/../classes.dex` would be a file of the package's own.
+            if path.split('/').any(|part| matches!(part, "" | "." | "..")) {
+                bail!(
+                    "{} has `{name}`, an asset path with an empty, `.` or `..` part",
+                    checked.shown
+                );
+            }
+            if path.starts_with("nsh/") {
+                bail!("{} has `{name}`: `assets/nsh/` is NSH's own", checked.shown);
+            }
+            assets.push((path.to_owned(), read()?));
+        } else if name.starts_with("res/") {
+            bail!(
+                "{} has Android resources (`{name}`), which this nsh does not package yet: \
+                 the next version will",
+                checked.shown
+            );
+        } else if name == AAR_METADATA {
+            let text = String::from_utf8_lossy(&read()?).into_owned();
+            if let Some(value) = text
+                .lines()
+                .filter_map(|line| line.split_once('='))
+                .find(|(key, _)| key.trim() == "minCompileSdk")
+                .map(|(_, value)| value.trim().to_owned())
+            {
+                min_compile_sdk = Some(value.parse().map_err(|_| {
+                    anyhow::anyhow!(
+                        "{}: its minCompileSdk `{value}` is no API level",
+                        checked.shown
+                    )
+                })?);
+            }
+        }
+    }
+    let manifest =
+        manifest.with_context(|| format!("{} has no AndroidManifest.xml", checked.shown))?;
+    let manifest = library_manifest::parse(&manifest)
+        .with_context(|| format!("{}: read its AndroidManifest.xml", checked.shown))?;
+    let package = manifest
+        .attribute("package")
+        .filter(|package| !package.is_empty())
+        .with_context(|| format!("{}: its manifest names no package", checked.shown))?
+        .to_owned();
+    Ok(Aar {
+        checked,
+        package,
+        manifest,
+        jars,
+        native,
+        assets,
+        min_compile_sdk,
+    })
+}
+
+/// One AAR per library (manifest package): the app's own when it lists
+/// one, which settles which version of it the package takes; two others
+/// are an error naming both. (The same file twice was left out already.)
+fn choose(aars: Vec<Aar>) -> anyhow::Result<Vec<Aar>> {
+    let mut out: Vec<Aar> = Vec::new();
+    for aar in aars {
+        let Some(have) = out.iter().find(|have| have.package == aar.package) else {
+            out.push(aar);
+            continue;
+        };
+        // The app lists its own first.
+        if have.checked.apps && !aar.checked.apps {
+            continue;
+        }
+        let settle = if have.checked.apps {
+            "list one of them"
+        } else {
+            "list the one to package in nsh.json `android.libraries`"
+        };
+        bail!(
+            "{} and {} are two versions of the library `{}`: {settle}",
+            have.checked.shown,
+            aar.checked.shown,
+            aar.package
+        );
+    }
+    Ok(out)
+}
+
+/// The native libraries of `native` for `abi`, which the package has:
+/// (file name, contents), each name once. An AAR with native libraries but
+/// none for `abi` is an error (its code would not load on such a device),
+/// as is a library named as NSH's own.
+pub(super) fn native_for<'a>(
+    native: &'a [Native],
+    abi: &str,
+) -> anyhow::Result<Vec<(&'a str, &'a [u8])>> {
+    let mut out: Vec<(&str, &[u8], &str)> = Vec::new();
+    for library in native {
+        let Some(files) = library.abis.get(abi) else {
+            bail!(
+                "{} has native libraries for {}, not for {abi}, which the package has: \
+                 package the ABIs it has (`--abi`) or list a build of it for {abi}",
+                library.from,
+                library
+                    .abis
+                    .keys()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        };
+        for (name, bytes) in files {
+            if name == "libnsh.so" {
+                bail!(
+                    "{} has `jni/{abi}/libnsh.so`, the name of NSH's own library",
+                    library.from
+                );
+            }
+            match out.iter().find(|(have, ..)| *have == name) {
+                None => out.push((name, bytes, &library.from)),
+                Some((_, have, _)) if *have == bytes.as_slice() => {}
+                Some((.., first)) => bail!(
+                    "{first} and {} both have `{name}` for {abi}, with different contents: list one of them",
+                    library.from
+                ),
+            }
+        }
+    }
+    Ok(out
+        .into_iter()
+        .map(|(name, bytes, _)| (name, bytes))
+        .collect())
+}
+
+/// Whether an asset goes into the package uncompressed: the kinds `aapt2`
+/// leaves so, which are compressed already, and which an app opens as a
+/// file descriptor (`AssetManager.openFd`) only when stored.
+pub(super) fn stored_asset(path: &str) -> bool {
+    const STORED: &[&str] = &[
+        "jpg", "jpeg", "png", "gif", "webp", "wav", "mp2", "mp3", "ogg", "aac", "mpg", "mpeg",
+        "mid", "midi", "smf", "jet", "rtttl", "imy", "xmf", "mp4", "m4a", "m4v", "3gp", "3gpp",
+        "3g2", "3gpp2", "amr", "awb", "wma", "wmv", "webm", "mkv",
+    ];
+    Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| STORED.contains(&e.to_ascii_lowercase().as_str()))
 }
 
 /// The directory of `jar`'s intermediate dex in the cache, made when
 /// missing.
 fn intermediate_dex(
     sdk: &Sdk,
-    jar: &Checked<'_>,
+    jar: &Checked,
     android_jar: &Path,
     apk: &Apk<'_>,
 ) -> anyhow::Result<PathBuf> {
@@ -214,15 +530,15 @@ fn intermediate_dex(
         fs::remove_dir_all(&partial)?;
     }
     fs::create_dir_all(&partial)?;
-    let output = intermediate_command(sdk, &jar.library.path, android_jar, apk.dev, &partial)
+    let output = intermediate_command(sdk, &jar.path, android_jar, apk.dev, &partial)
         .output()
         .context("run the SDK's d8 (is a JDK installed?)")?;
     if !output.status.success() {
         let _ = fs::remove_dir_all(&partial);
         bail!(
             "{}: d8 could not read {}:\n{}",
-            jar.library.listed,
-            jar.library.path.display(),
+            jar.listed,
+            jar.shown,
             d8_message(&format!(
                 "{}{}",
                 String::from_utf8_lossy(&output.stdout),
@@ -240,7 +556,7 @@ fn intermediate_dex(
     if !dir.join("done").exists() {
         bail!(
             "could not keep the dex of {} in {}",
-            jar.library.path.display(),
+            jar.shown,
             dir.display()
         );
     }
@@ -326,12 +642,12 @@ fn d8_message(output: &str) -> String {
 /// The error of the merging `d8` run, about the libraries: a class two of
 /// them define names both files and who lists them, not the intermediate
 /// dex `d8` saw.
-fn merge_error(output: &str, intermediate: &[(PathBuf, &Library)]) -> String {
+fn merge_error(output: &str, intermediate: &[(PathBuf, &Checked)]) -> String {
     let library = |path: &str| {
         intermediate
             .iter()
             .find(|(dex, _)| dex.to_string_lossy() == path.trim())
-            .map(|(_, library)| library.describe())
+            .map(|(_, library)| library.shown.clone())
     };
     let mut twice = Vec::new();
     for line in output.lines() {
@@ -359,7 +675,7 @@ fn merge_error(output: &str, intermediate: &[(PathBuf, &Library)]) -> String {
     }
     let mut message = d8_message(output);
     for (dex, library) in intermediate {
-        message = message.replace(&*dex.to_string_lossy(), &library.describe());
+        message = message.replace(&*dex.to_string_lossy(), &library.shown);
     }
     format!("d8 could not merge the Java libraries:\n{message}")
 }
@@ -402,15 +718,15 @@ fn reserved(name: &str) -> bool {
 /// (`META-INF/services/<interface>`) of several jars are joined, as
 /// `ServiceLoader` reads every provider they list; another path two jars
 /// have with different contents is an error naming both.
-fn java_resources(jars: &[&Library]) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
+fn java_resources(jars: &[&Checked]) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
     let mut out: Vec<(String, Vec<u8>)> = Vec::new();
     // Each path's index in `out`, and the jar it came from.
-    let mut seen: BTreeMap<String, (usize, &Library)> = BTreeMap::new();
+    let mut seen: BTreeMap<String, (usize, &Checked)> = BTreeMap::new();
     for jar in jars {
         let file = fs::File::open(&jar.path)
-            .with_context(|| format!("{}: read {}", jar.listed, jar.path.display()))?;
+            .with_context(|| format!("{}: read {}", jar.listed, jar.shown))?;
         let mut archive = zip::ZipArchive::new(file)
-            .with_context(|| format!("{}: {} is not a jar", jar.listed, jar.path.display()))?;
+            .with_context(|| format!("{}: {} is not a jar", jar.listed, jar.shown))?;
         for i in 0..archive.len() {
             let mut entry = archive.by_index(i)?;
             if entry.is_dir() {
@@ -424,7 +740,7 @@ fn java_resources(jars: &[&Library]) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
                 bail!(
                     "{}: {} has `{name}`, a path the package keeps for its own files",
                     jar.listed,
-                    jar.path.display()
+                    jar.shown
                 );
             }
             let mut bytes = Vec::new();
@@ -444,8 +760,8 @@ fn java_resources(jars: &[&Library]) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
                 }
                 Some((_, first)) => bail!(
                     "{} and {} both have `{name}`, with different contents: list one of them",
-                    first.describe(),
-                    jar.describe()
+                    first.shown,
+                    jar.shown
                 ),
             }
         }
@@ -478,7 +794,7 @@ mod tests {
         dir
     }
 
-    /// A jar at `path` with `entries` (name, contents).
+    /// A jar (or an AAR) at `path` with `entries` (name, contents).
     fn jar(path: &Path, entries: &[(&str, &[u8])]) {
         let mut zip = zip::ZipWriter::new(fs::File::create(path).unwrap());
         for (name, bytes) in entries {
@@ -496,6 +812,18 @@ mod tests {
         }
     }
 
+    /// `library(path, listed)`, checked.
+    fn checked_file(path: &Path, listed: &str) -> Checked {
+        Checked {
+            path: path.to_owned(),
+            listed: listed.to_owned(),
+            shown: library(path, listed).describe(),
+            apps: listed == NSH_JSON,
+            kind: Kind::Jar,
+            sha256: String::new(),
+        }
+    }
+
     #[test]
     fn kinds_go_by_extension_and_name_who_lists_them() {
         let kind = |name: &str| {
@@ -508,14 +836,13 @@ mod tests {
         assert_eq!(kind("libs/sdk.jar").unwrap(), Kind::Jar);
         assert_eq!(kind("libs/SDK.JAR").unwrap(), Kind::Jar);
         assert_eq!(kind("java/classes.dex").unwrap(), Kind::Dex);
-        let aar = kind("libs/sdk.aar").unwrap_err().to_string();
-        assert!(
-            aar.starts_with("scanner: [package.metadata.nsh] `android.libraries`: libs/sdk.aar")
-                && aar.contains("does not package yet"),
-            "{aar}"
-        );
+        assert_eq!(kind("libs/sdk.aar").unwrap(), Kind::Aar);
         let other = kind("libs/sdk.zip").unwrap_err().to_string();
-        assert!(other.contains("neither a jar"), "{other}");
+        assert!(
+            other.starts_with("scanner: [package.metadata.nsh] `android.libraries`: libs/sdk.zip")
+                && other.contains("neither a jar"),
+            "{other}"
+        );
         assert!(kind("libs/sdk").is_err());
     }
 
@@ -534,7 +861,8 @@ mod tests {
         // The same contents, from two places: one library.
         let checked_ = checked(&listed).unwrap();
         assert_eq!(checked_.len(), 1);
-        assert_eq!(checked_[0].library.path, a);
+        assert_eq!(checked_[0].path, a);
+        assert!(checked_[0].apps);
         // A missing file names who lists it.
         let missing = [library(
             &dir.join("gone.jar"),
@@ -618,11 +946,11 @@ mod tests {
 
     #[test]
     fn a_class_defined_twice_names_the_libraries() {
-        let a = library(
+        let a = checked_file(
             Path::new("/work/scanner/libs/glue.jar"),
             "scanner: [package.metadata.nsh] `android.libraries`",
         );
-        let b = library(Path::new("/app/libs/glue-copy.jar"), NSH_JSON);
+        let b = checked_file(Path::new("/app/libs/glue-copy.jar"), NSH_JSON);
         let intermediate = [
             (PathBuf::from("/cache/aaaa/classes.dex"), &a),
             (PathBuf::from("/cache/bbbb/classes.dex"), &b),
@@ -715,8 +1043,8 @@ mod tests {
             ],
         );
         let (la, lb) = (
-            library(&a, NSH_JSON),
-            library(&b, "x: [package.metadata.nsh] `android.libraries`"),
+            checked_file(&a, NSH_JSON),
+            checked_file(&b, "x: [package.metadata.nsh] `android.libraries`"),
         );
         let resources = java_resources(&[&la, &lb]).unwrap();
         let names: Vec<&str> = resources.iter().map(|(n, _)| n.as_str()).collect();
@@ -752,5 +1080,203 @@ mod tests {
             assert!(error.contains("keeps for its own files"), "{name}: {error}");
         }
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The manifest of an AAR of `package`, with `application`'s children.
+    fn aar_manifest(package: &str, application: &str) -> Vec<u8> {
+        format!(
+            r#"<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="{package}">
+    <uses-sdk android:minSdkVersion="21" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <application>{application}</application>
+</manifest>"#
+        )
+        .into_bytes()
+    }
+
+    const CRATE: &str = "push: [package.metadata.nsh] `android.libraries`";
+
+    #[test]
+    fn an_aar_brings_its_classes_native_libraries_assets_and_manifest() {
+        let dir = dir("aar");
+        let path = dir.join("push.aar");
+        let manifest = aar_manifest(
+            "com.example.push",
+            r#"<provider android:name=".PushInit" android:authorities="${applicationId}.push-init" android:exported="false" />"#,
+        );
+        jar(
+            &path,
+            &[
+                ("AndroidManifest.xml", &manifest),
+                ("classes.jar", b"classes"),
+                ("libs/vendor.jar", b"vendor"),
+                ("libs/deeper/not.jar", b"x"),
+                ("jni/arm64-v8a/libpush.so", b"arm64"),
+                ("jni/x86_64/libpush.so", b"x86_64"),
+                ("jni/arm64-v8a/notes.txt", b"x"),
+                ("assets/push/config.json", b"{}"),
+                ("R.txt", b""),
+                ("proguard.txt", b"-keep class x"),
+                ("lint.jar", b"lint"),
+                (AAR_METADATA, b"aarFormatVersion=1.0\nminCompileSdk=34\n"),
+            ],
+        );
+        let aar = read_aar(checked(&[library(&path, CRATE)]).unwrap().remove(0)).unwrap();
+        assert_eq!(aar.package, "com.example.push");
+        let jars: Vec<&str> = aar.jars.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(jars, ["classes.jar", "libs/vendor.jar"]);
+        let abis: Vec<&str> = aar.native.keys().map(String::as_str).collect();
+        assert_eq!(abis, ["arm64-v8a", "x86_64"]);
+        assert_eq!(
+            aar.native["arm64-v8a"],
+            [("libpush.so".into(), b"arm64".to_vec())]
+        );
+        assert_eq!(aar.assets, [("push/config.json".into(), b"{}".to_vec())]);
+        assert_eq!(aar.min_compile_sdk, Some(34));
+        // What the package cannot take yet, or that is NSH's.
+        for (entry, error) in [
+            (
+                "res/values/values.xml",
+                "has Android resources (`res/values/values.xml`), which this nsh does not package yet",
+            ),
+            ("assets/nsh/bundle.nshc", "`assets/nsh/` is NSH's own"),
+            (
+                "assets/../classes.dex",
+                "an asset path with an empty, `.` or `..` part",
+            ),
+            (
+                "assets/a/./b.txt",
+                "an asset path with an empty, `.` or `..` part",
+            ),
+            (
+                "assets/a//b.txt",
+                "an asset path with an empty, `.` or `..` part",
+            ),
+        ] {
+            jar(&path, &[("AndroidManifest.xml", &manifest), (entry, b"x")]);
+            let found = read_aar(checked(&[library(&path, CRATE)]).unwrap().remove(0))
+                .err()
+                .unwrap()
+                .to_string();
+            assert!(
+                found.starts_with(&format!("{} ({CRATE})", path.display()))
+                    && found.contains(error),
+                "{found}"
+            );
+        }
+        jar(&path, &[("classes.jar", b"x")]);
+        let found = read_aar(checked(&[library(&path, CRATE)]).unwrap().remove(0))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(found.contains("has no AndroidManifest.xml"), "{found}");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn one_version_of_an_aar_goes_in_and_the_app_settles_which() {
+        let dir = dir("aar-versions");
+        let aar = |name: &str, package: &str, asset: &[u8], listed: &str| {
+            let path = dir.join(name);
+            jar(
+                &path,
+                &[
+                    ("AndroidManifest.xml", &aar_manifest(package, "")),
+                    ("assets/version.txt", asset),
+                ],
+            );
+            library(&path, listed)
+        };
+        let chosen = |libraries: &[Library]| -> anyhow::Result<Vec<String>> {
+            let aars = checked(libraries)?
+                .into_iter()
+                .map(read_aar)
+                .collect::<anyhow::Result<Vec<_>>>()?;
+            Ok(choose(aars)?
+                .into_iter()
+                .map(|aar| aar.checked.shown)
+                .collect())
+        };
+        let other = "maps: [package.metadata.nsh] `android.libraries`";
+        let one = aar("core-1.aar", "androidx.core", b"1", CRATE);
+        let same = aar("core-1-copy.aar", "androidx.core", b"1", other);
+        let two = aar("core-2.aar", "androidx.core", b"2", other);
+        let apps = aar("core-3.aar", "androidx.core", b"3", NSH_JSON);
+        let maps = aar("maps.aar", "com.example.maps", b"m", other);
+        // The same file twice: once.
+        assert_eq!(chosen(&[one.clone(), same, maps.clone()]).unwrap().len(), 2);
+        // Two versions from crates: an error naming both.
+        let error = chosen(&[one.clone(), two.clone()]).unwrap_err().to_string();
+        assert!(
+            error.contains("core-1.aar (push:")
+                && error.contains("core-2.aar (maps:")
+                && error.contains("two versions of the library `androidx.core`")
+                && error.contains("list the one to package in nsh.json `android.libraries`"),
+            "{error}"
+        );
+        // The app's own wins.
+        let found = chosen(&[apps.clone(), one, two, maps]).unwrap();
+        assert_eq!(found.len(), 2);
+        assert!(found[0].contains("core-3.aar (nsh.json"), "{found:?}");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn native_libraries_go_per_abi_the_package_has() {
+        let native = |from: &str, abis: &[(&str, &str, &[u8])]| {
+            let mut map: BTreeMap<String, Vec<(String, Vec<u8>)>> = BTreeMap::new();
+            for (abi, name, bytes) in abis {
+                map.entry((*abi).into())
+                    .or_default()
+                    .push(((*name).into(), bytes.to_vec()));
+            }
+            Native {
+                from: from.into(),
+                abis: map,
+            }
+        };
+        let libraries = [
+            native(
+                "push.aar",
+                &[
+                    ("arm64-v8a", "libpush.so", b"a"),
+                    ("x86_64", "libpush.so", b"x"),
+                    ("arm64-v8a", "libc++_shared.so", b"c"),
+                ],
+            ),
+            native("maps.aar", &[("arm64-v8a", "libc++_shared.so", b"c")]),
+        ];
+        let names = |abi: &str| -> anyhow::Result<Vec<String>> {
+            Ok(native_for(&libraries, abi)?
+                .into_iter()
+                .map(|(name, _)| name.to_owned())
+                .collect())
+        };
+        assert_eq!(
+            names("arm64-v8a").unwrap(),
+            ["libpush.so", "libc++_shared.so"]
+        );
+        // An ABI the package has and a library has not.
+        let error = names("x86_64").unwrap_err().to_string();
+        assert!(
+            error.starts_with("maps.aar has native libraries for arm64-v8a, not for x86_64"),
+            "{error}"
+        );
+        // Two libraries of one name.
+        let clash = [
+            native("push.aar", &[("arm64-v8a", "libc++_shared.so", b"1")]),
+            native("maps.aar", &[("arm64-v8a", "libc++_shared.so", b"2")]),
+        ];
+        let error = native_for(&clash, "arm64-v8a").unwrap_err().to_string();
+        assert!(
+            error.contains("push.aar and maps.aar both have `libc++_shared.so` for arm64-v8a"),
+            "{error}"
+        );
+        let nsh = [native("push.aar", &[("arm64-v8a", "libnsh.so", b"1")])];
+        let error = native_for(&nsh, "arm64-v8a").unwrap_err().to_string();
+        assert!(error.contains("the name of NSH's own library"), "{error}");
+        assert!(stored_asset("sounds/ding.OGG") && !stored_asset("config.json"));
     }
 }
