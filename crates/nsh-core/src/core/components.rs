@@ -593,8 +593,8 @@ struct Notifications {
 /// The links that open the app ([`crate::url_scheme`]).
 #[derive(Default)]
 struct UrlScheme {
-    /// The schemes the app claims (lower case).
-    schemes: Vec<String>,
+    /// The links the app claims: its schemes and web links.
+    links: crate::url_scheme::AppLinks,
     /// Links no listener took yet, at most [`crate::url_scheme::MAX_PENDING`].
     pending: std::collections::VecDeque<String>,
     /// The listener waiting for a link.
@@ -6052,7 +6052,8 @@ impl<M: TextEngine> Core<M> {
         // app as a file ([`crate::file_type`]), never as a link.
         if !page && change.is_none() && crate::file_type::is_file_url(&url) {
             if !links
-                .schemes
+                .links
+                .schemes()
                 .iter()
                 .any(|s| s == crate::file_type::FILE_SCHEME)
             {
@@ -6081,7 +6082,7 @@ impl<M: TextEngine> Core<M> {
         let checked = if page {
             crate::url_scheme::check_page_url(&url)
         } else {
-            crate::url_scheme::check_url(&url, &links.schemes)
+            links.links.check(&url)
         };
         if let Err(dropped) = checked {
             log::warn!("link dropped: {dropped}");
@@ -6141,11 +6142,17 @@ impl<M: TextEngine> Core<M> {
     /// The schemes the app claims (`nsh.json` `schemes`,
     /// [`crate::url_scheme`]), from the app's own resources: the links the
     /// platform reports of other schemes are dropped. None by default.
+    /// [`Core::set_app_links`] sets them with the app's web links.
     pub fn set_url_schemes(&mut self, schemes: impl IntoIterator<Item = impl Into<String>>) {
-        self.components.url_schemes.schemes = schemes
-            .into_iter()
-            .map(|s| s.into().to_ascii_lowercase())
-            .collect();
+        self.components.url_schemes.links.set_schemes(schemes);
+    }
+
+    /// The links the app claims (`nsh.json` `schemes` and `links`,
+    /// [`crate::url_scheme::AppLinks`]), from the app's own resources: the
+    /// links the platform reports that are none of them (another scheme, an
+    /// `https` link of another host or path) are dropped. None by default.
+    pub fn set_app_links(&mut self, links: crate::url_scheme::AppLinks) {
+        self.components.url_schemes.links = links;
     }
 
     /// Answers what waits for the platform's [`EventKind::Notification`].
@@ -6868,7 +6875,14 @@ impl<M: TextEngine> Core<M> {
             Some(AuthSessionError::unavailable(format!(
                 "openAuthSession: no in-app sign-in here, and no link of `{scheme}:` can reach the app on this platform"
             )))
-        } else if !in_app && !self.components.url_schemes.schemes.contains(&scheme) {
+        } else if !in_app
+            && !self
+                .components
+                .url_schemes
+                .links
+                .schemes()
+                .contains(&scheme)
+        {
             // Only a link of a scheme the app claims brings the callback
             // back to it here; without one the session could never end.
             Some(AuthSessionError::unavailable(format!(

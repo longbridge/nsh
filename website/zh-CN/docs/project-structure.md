@@ -131,6 +131,7 @@ mount(() => <Window id="main"><App /></Window>);
 | `nsh` | string | 所有命令 | 应用适用的 NSH 版本，写法同 Cargo 的版本要求，例如 `">=0.5"` 或 `">=0.5, <0.7"`。处理该应用的每个命令都会先用它检查 CLI 版本，不满足时只给出一条提示 `this app requires nsh >=0.5; this is nsh 0.4.0`，而不是另一个版本带来的类型或编译错误。nightly 按其正式版本号计算。 |
 | `minRuntime` | string | `publish` | 能运行该签名包的最低 NSH 运行时版本，例如 `0.2.0`。默认：CLI 的版本（[签名包](./signed-packages.md#哪些运行时能运行包)）。 |
 | `schemes` | string[] | `package`、`run` | 打开应用的 URL scheme，例如 `["myapp"]` 对应 `myapp://…` 链接，由 [`UrlScheme`](../modules/nsh.md#urlscheme) 接收。只含小写字母、数字、`+`、`-` 和 `.`；不能是系统或浏览器占用的（`https`、`file` 等）。 |
+| `links` | object[] | `package`、`run` | 打开应用的 Web 链接（Universal Links、App Links）：`[{ "host": "example.com", "paths": ["/orders/*"] }]`，`host` 是域名，或用 `*.` 加域名表示子域名；`paths` 是完整路径或以 `*` 结尾的路径开头（省略：所有路径）。它们的 `https` 链接和 scheme 的链接一样由 [`UrlScheme`](../modules/nsh.md#web-链接) 接收。iOS 包在 Associated Domains entitlement 中声明主机，Android 包为每个链接写一个经过验证的 intent filter。 |
 | `fileTypes` | object[] | `package`、`run` | 应用打开的文件类型，`[{ "name": "Video", "extensions": ["mp4"], "mimeTypes": ["video/mp4"] }]`，由包声明给系统；文件送到 [`Application.on("openFiles")`](../modules/nsh-desktop.md#打开文件)。 |
 | `handoff` | boolean | `package` | `true`：在 iOS 和 macOS 上，应用用 [`UrlScheme.setUrl`](../modules/nsh.md#handoff) 设置的地址交给系统，Handoff 可以在用户的其他设备上接着打开它；打包时在 `NSUserActivityTypes` 中声明它的活动类型 `<id>.url`。 |
 | `singleInstance` | boolean | `package` | `true`：应用在 Windows 和 Linux 上只运行一份；第二次启动把参数和工作目录交给正在运行的应用后退出（[单实例](../modules/nsh-desktop.md#单实例)）。 |
