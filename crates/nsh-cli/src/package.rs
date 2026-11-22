@@ -307,13 +307,13 @@ pub(crate) struct AndroidConfig {
     /// TLS. Off by default, as Android has it from API 28 on.
     #[serde(default)]
     pub(crate) uses_cleartext_traffic: bool,
-    /// Dex files of the Java code the app ships (only the app's own
-    /// `nsh.json` lists them; an extension's are listed there too), relative
-    /// to `nsh.json`: packaged after the runtime's `classes.dex` as
-    /// `classes2.dex`, `classes3.dex`, ..., so the app's class loader finds
-    /// their classes as it finds NSH's.
+    /// Java libraries the app ships (`"libraries"`: jar and dex files,
+    /// relative to `nsh.json`), before the ones its crates list
+    /// ([`crate::module_meta`]): packaged after the runtime's
+    /// `classes.dex`, so the app's class loader finds their classes as it
+    /// finds NSH's.
     #[serde(default)]
-    pub(crate) dex: Vec<PathBuf>,
+    pub(crate) libraries: Vec<crate::android::Library>,
     /// Permissions the manifest declares besides the ones NSH declares
     /// itself (`<uses-permission>`): a bare name (`ACCESS_NETWORK_STATE`)
     /// is Android's, `android.permission.<name>`; a dotted one is written
@@ -1002,10 +1002,9 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
         ));
         config.data_dir = None;
     }
-    config.android.dex = std::mem::take(&mut config.android.dex)
-        .into_iter()
-        .map(|dex| dir.join(dex))
-        .collect();
+    for library in &mut config.android.libraries {
+        library.path = dir.join(&library.path);
+    }
     config.ios.extensions = crate::app_extensions::read(
         std::mem::take(&mut config.ios.extensions),
         dir,
@@ -1819,15 +1818,9 @@ fn package_android(
         .join(format!("{name}.{}", options.format.extension()));
     let version = config.version.as_deref().unwrap_or("1.0.0");
     // `android/res/` next to `nsh.json`: the app's own resources.
-    let res = Some(
-        options
-            .entry
-            .parent()
-            .unwrap_or(Path::new("."))
-            .join("android")
-            .join("res"),
-    )
-    .filter(|dir| dir.is_dir());
+    let app_dir = options.entry.parent().unwrap_or(Path::new("."));
+    let res = Some(app_dir.join("android").join("res")).filter(|dir| dir.is_dir());
+    let library_cache = app_dir.join(".nsh/android/libraries");
     let step = ui::Step::start(format!("packaging {}", ui::path(&apk_path)));
     android::build(
         &sdk,
@@ -1843,7 +1836,8 @@ fn package_android(
             notifications: config.notifications(),
             microphone: config.web_media("microphone"),
             camera: config.web_media("camera"),
-            dex: &config.android.dex,
+            libraries: &config.android.libraries,
+            library_cache: &library_cache,
             permissions: &permissions,
             queries: &config.android.queries,
             application: &config.android.application,
@@ -3246,22 +3240,42 @@ mod tests {
     }
 
     #[test]
-    fn android_dex_files_are_relative_to_nsh_json() {
-        let dir =
-            std::env::temp_dir().join(format!("nsh-cli-android-dex-config-{}", std::process::id()));
+    fn android_libraries_are_relative_to_nsh_json() {
+        let dir = std::env::temp_dir().join(format!(
+            "nsh-cli-android-libraries-config-{}",
+            std::process::id()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("nsh.json"),
-            r#"{ "android": { "dex": ["java/out/classes.dex"] } }"#,
+            r#"{ "android": { "libraries": ["android/libs/sdk.jar", "java/out/classes.dex"] } }"#,
         )
         .unwrap();
         let config = read_config(&dir.join("App.tsx")).unwrap();
-        assert_eq!(config.android.dex, [dir.join("java/out/classes.dex")]);
+        let libraries: Vec<(PathBuf, &str)> = config
+            .android
+            .libraries
+            .iter()
+            .map(|l| (l.path.clone(), l.listed.as_str()))
+            .collect();
+        assert_eq!(
+            libraries,
+            [
+                (
+                    dir.join("android/libs/sdk.jar"),
+                    "nsh.json `android.libraries`"
+                ),
+                (
+                    dir.join("java/out/classes.dex"),
+                    "nsh.json `android.libraries`"
+                ),
+            ]
+        );
         assert!(
             serde_json::from_value::<AppConfig>(serde_json::json!({}))
                 .unwrap()
                 .android
-                .dex
+                .libraries
                 .is_empty()
         );
         std::fs::remove_dir_all(&dir).unwrap();

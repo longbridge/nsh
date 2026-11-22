@@ -1,6 +1,7 @@
 //! Android apps without Gradle: the APK is assembled from the prebuilt
 //! runtime (`classes.dex`, `libnsh.so` per ABI) and the app bundle with the
-//! SDK's build tools (`aapt2`, `zipalign`, `apksigner`).
+//! SDK's build tools (`aapt2`, `zipalign`, `apksigner`, and `d8` for the
+//! Java libraries an app lists).
 
 use std::{
     env, fs,
@@ -13,6 +14,10 @@ use anyhow::{Context as _, bail};
 use serde::Deserialize;
 
 use crate::apple::{Color, LaunchScreen, Themed};
+
+mod libraries;
+
+pub(crate) use libraries::{Library, file_sha256};
 
 /// Minimum Android version (API 26, Android 8.0), as the runtime is built.
 pub(crate) const MIN_SDK: u32 = 26;
@@ -168,8 +173,8 @@ impl Sdk {
 
     fn tool(&self, name: &str) -> PathBuf {
         // On Windows, the Java tools are batch files.
-        if cfg!(windows) && name == "apksigner" {
-            return self.build_tools.join("apksigner.bat");
+        if cfg!(windows) && matches!(name, "apksigner" | "d8") {
+            return self.build_tools.join(format!("{name}.bat"));
         }
         self.build_tools.join(name)
     }
@@ -215,9 +220,13 @@ pub(crate) struct Apk<'a> {
     /// (`webview.media`): `RECORD_AUDIO` and `CAMERA` are declared.
     pub(crate) microphone: bool,
     pub(crate) camera: bool,
-    /// The app's own dex files (nsh.json `android.dex`), after the
-    /// runtime's: `classes2.dex`, `classes3.dex`, ...
-    pub(crate) dex: &'a [PathBuf],
+    /// The Java libraries of the app and its crates (`android.libraries`):
+    /// jar and dex files, packaged after the runtime's dex
+    /// ([`libraries::java_code`]).
+    pub(crate) libraries: &'a [Library],
+    /// Where the dex `d8` makes of the jar libraries is kept between builds
+    /// (`.nsh/android/libraries`). Unused without jars.
+    pub(crate) library_cache: &'a Path,
     /// The permissions the app declares itself (nsh.json
     /// `android.permissions`), in full: declared after NSH's, each once.
     pub(crate) permissions: &'a [String],
@@ -470,6 +479,9 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
     }
     fs::create_dir_all(&work)?;
 
+    // The Java libraries first: a missing file stops the build early.
+    let java = libraries::java_code(sdk, apk, &work)?;
+
     // Resources: the launcher icon, and the launch screen's theme below.
     let mut flat = Vec::new();
     if let Some(icon) = apk.icon {
@@ -576,7 +588,7 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
 
     if format == Format::Aab {
         let unsigned = work.join("unsigned.aab");
-        write_bundle(&base, &unsigned, apk)?;
+        write_bundle(&base, &unsigned, apk, &java)?;
         sign_bundle(&apk.signing, &unsigned)?;
         fs::rename(&unsigned, out)?;
         fs::remove_dir_all(&work)?;
@@ -585,7 +597,7 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
 
     // Code, native libraries and app files.
     let unaligned = work.join("unaligned.apk");
-    add_files(&base, &unaligned, apk, &Layout::APK)?;
+    add_files(&base, &unaligned, apk, &java, &Layout::APK)?;
     let aligned = work.join("aligned.apk");
     // `-P 16`: shared libraries on 16 KB pages (Android 15 devices).
     run(Command::new(sdk.tool("zipalign"))
@@ -967,6 +979,9 @@ struct Layout {
     dex: &'static str,
     lib: &'static str,
     assets: &'static str,
+    /// Prefix of the files at the installed APK's root: the Java resources
+    /// of the libraries.
+    root: &'static str,
 }
 
 impl Layout {
@@ -975,6 +990,7 @@ impl Layout {
         dex: "classes.dex",
         lib: "lib",
         assets: "assets",
+        root: "",
     };
     /// The bundle's one module, `base`.
     const BUNDLE: Layout = Layout {
@@ -982,15 +998,21 @@ impl Layout {
         dex: "base/dex/classes.dex",
         lib: "base/lib",
         assets: "base/assets",
+        root: "base/root/",
     };
 }
 
 /// An Android App Bundle: the module `base` from the proto-format `linked`,
 /// [`add_files`]' code, libraries and assets, the libraries' ABIs
 /// (`base/native.pb`) and `BundleConfig.pb`.
-fn write_bundle(linked: &Path, out: &Path, apk: &Apk<'_>) -> anyhow::Result<()> {
+fn write_bundle(
+    linked: &Path,
+    out: &Path,
+    apk: &Apk<'_>,
+    java: &libraries::JavaCode,
+) -> anyhow::Result<()> {
     let files = work_file(out, "files.zip");
-    let abis = add_files(linked, &files, apk, &Layout::BUNDLE)?;
+    let abis = add_files(linked, &files, apk, java, &Layout::BUNDLE)?;
     use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
     let mut input = ZipArchive::new(fs::File::open(&files)?)?;
     let mut zip = ZipWriter::new(fs::File::create(out)?);
@@ -1103,13 +1125,15 @@ fn java_tool(name: &str) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(exe))
 }
 
-/// Copies `base` (manifest, resources) and adds the dex, the libraries
-/// (stored: the system maps them in place) and the assets, where `layout`
-/// keeps them; returns the ABIs of the libraries.
+/// Copies `base` (manifest, resources) and adds the dex (the runtime's,
+/// then the libraries' `java`), the native libraries (stored: the system
+/// maps them in place), the assets and the libraries' Java resources, where
+/// `layout` keeps them; returns the ABIs of the native libraries.
 fn add_files(
     base: &Path,
     out: &Path,
     apk: &Apk<'_>,
+    java: &libraries::JavaCode,
     layout: &Layout,
 ) -> anyhow::Result<Vec<String>> {
     use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
@@ -1134,12 +1158,12 @@ fn add_files(
         .context("runtime classes.dex missing")?
         .read_to_end(&mut dex)?;
     zip.write_all(&dex)?;
-    // The app's own after the runtime's: Android loads `classes<N>.dex`
+    // The libraries' after the runtime's: Android loads `classes<N>.dex`
     // from 2 up, until one is missing. The numbers assume the runtime is
-    // one dex; a runtime of more would collide with the app's.
-    if !apk.dex.is_empty() && apk.runtime.join("classes2.dex").exists() {
+    // one dex; a runtime of more would collide with the libraries'.
+    if !java.dex.is_empty() && apk.runtime.join("classes2.dex").exists() {
         bail!(
-            "the Android runtime in {} has more than one dex file, which nsh.json android.dex cannot follow yet",
+            "the Android runtime in {} has more than one dex file, which `android.libraries` cannot follow yet",
             apk.runtime.display()
         );
     }
@@ -1147,15 +1171,8 @@ fn add_files(
         .dex
         .strip_suffix("classes.dex")
         .context("dex layout")?;
-    for (i, path) in apk.dex.iter().enumerate() {
-        let bytes = fs::read(path)
-            .with_context(|| format!("nsh.json android.dex: read {}", path.display()))?;
-        if !bytes.starts_with(b"dex\n") {
-            bail!(
-                "nsh.json android.dex: {} is not a dex file (make one with the SDK's `d8`)",
-                path.display()
-            );
-        }
+    for (i, path) in java.dex.iter().enumerate() {
+        let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
         zip.start_file(format!("{dex_dir}classes{}.dex", i + 2), deflate)?;
         zip.write_all(&bytes)?;
     }
@@ -1196,6 +1213,10 @@ fn add_files(
     for (path, bytes) in &apk.assets {
         // Bytecode and images are compressed already or small.
         zip.start_file(format!("{}/{path}", layout.assets), deflate)?;
+        zip.write_all(bytes)?;
+    }
+    for (path, bytes) in &java.resources {
+        zip.start_file(format!("{}{path}", layout.root), deflate)?;
         zip.write_all(bytes)?;
     }
     zip.finish()?;
@@ -1658,7 +1679,8 @@ mod tests {
             notifications,
             microphone: false,
             camera: false,
-            dex: &[],
+            libraries: &[],
+            library_cache: std::path::Path::new("."),
             permissions: &[],
             queries: &[],
             application: &[],
@@ -1921,69 +1943,230 @@ mod tests {
         assert!(!none.contains("singleTask"), "{none}");
     }
 
-    #[test]
-    fn the_apps_dex_files_follow_the_runtimes() {
-        use std::io::Read as _;
-        let dir = std::env::temp_dir().join(format!("nsh-cli-android-dex-{}", std::process::id()));
+    /// A runtime of one dex and one ABI and what `aapt2 link` writes, in a
+    /// new `dir`.
+    fn runtime_and_base(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+        use std::io::Write as _;
+        let dir =
+            std::env::temp_dir().join(format!("nsh-cli-android-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let runtime = dir.join("runtime");
         std::fs::create_dir_all(runtime.join("lib/arm64-v8a")).unwrap();
         std::fs::write(runtime.join("classes.dex"), b"dex\n035\0runtime").unwrap();
         std::fs::write(runtime.join("lib/arm64-v8a/libnsh.so"), b"so").unwrap();
         let base = dir.join("base.zip");
-        zip::ZipWriter::new(std::fs::File::create(&base).unwrap())
-            .finish()
-            .unwrap();
-        let app = [dir.join("a.dex"), dir.join("b.dex")];
-        std::fs::write(&app[0], b"dex\n035\0a").unwrap();
-        std::fs::write(&app[1], b"dex\n035\0b").unwrap();
-        let read = |zip: &std::path::Path, name: &str| {
-            let mut archive = zip::ZipArchive::new(std::fs::File::open(zip).unwrap()).unwrap();
-            let mut file = archive.by_name(name).unwrap();
-            let mut bytes = Vec::new();
-            file.read_to_end(&mut bytes).unwrap();
-            bytes
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(&base).unwrap());
+        for name in ["AndroidManifest.xml", "resources.arsc"] {
+            zip.start_file(name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(b"linked").unwrap();
+        }
+        zip.finish().unwrap();
+        (dir, base)
+    }
+
+    fn entries(zip: &std::path::Path) -> Vec<String> {
+        let mut archive = zip::ZipArchive::new(std::fs::File::open(zip).unwrap()).unwrap();
+        (0..archive.len())
+            .map(|i| {
+                archive
+                    .by_index_raw(i)
+                    .unwrap()
+                    .name()
+                    .unwrap()
+                    .into_owned()
+            })
+            .collect()
+    }
+
+    fn read(zip: &std::path::Path, name: &str) -> Vec<u8> {
+        use std::io::Read as _;
+        let mut archive = zip::ZipArchive::new(std::fs::File::open(zip).unwrap()).unwrap();
+        let mut file = archive.by_name(name).unwrap();
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes).unwrap();
+        bytes
+    }
+
+    /// An SDK that is not there: a build that needed one of its tools fails.
+    fn no_sdk() -> super::Sdk {
+        super::Sdk {
+            root: "/nsh-no-sdk".into(),
+            build_tools: "/nsh-no-sdk/build-tools/36.1.0".into(),
+        }
+    }
+
+    #[test]
+    fn the_libraries_dex_and_java_resources_follow_the_runtimes() {
+        let (dir, base) = runtime_and_base("libraries");
+        let runtime = dir.join("runtime");
+        let java = super::libraries::JavaCode {
+            dex: vec![dir.join("a.dex"), dir.join("b.dex")],
+            resources: vec![(
+                "META-INF/services/com.example.Greeter".to_owned(),
+                b"com.example.Hello\n".to_vec(),
+            )],
         };
-        for (layout, prefix) in [
-            (&super::Layout::APK, ""),
-            (&super::Layout::BUNDLE, "base/dex/"),
+        std::fs::write(&java.dex[0], b"dex\n035\0a").unwrap();
+        std::fs::write(&java.dex[1], b"dex\n035\0b").unwrap();
+        for (layout, prefix, root) in [
+            (&super::Layout::APK, "", ""),
+            (&super::Layout::BUNDLE, "base/dex/", "base/root/"),
         ] {
             let out = dir.join("out.zip");
-            super::add_files(
-                &base,
-                &out,
-                &super::Apk {
-                    runtime: &runtime,
-                    dex: &app,
-                    ..apk(false, false)
-                },
-                layout,
-            )
-            .unwrap();
+            let apk = super::Apk {
+                runtime: &runtime,
+                ..apk(false, false)
+            };
+            super::add_files(&base, &out, &apk, &java, layout).unwrap();
             assert_eq!(
                 read(&out, &format!("{prefix}classes.dex")),
                 b"dex\n035\0runtime"
             );
             assert_eq!(read(&out, &format!("{prefix}classes2.dex")), b"dex\n035\0a");
             assert_eq!(read(&out, &format!("{prefix}classes3.dex")), b"dex\n035\0b");
+            // At the root of the installed APK, where `ServiceLoader` finds it.
+            assert_eq!(
+                read(
+                    &out,
+                    &format!("{root}META-INF/services/com.example.Greeter")
+                ),
+                b"com.example.Hello\n"
+            );
         }
-        // A file that is no dex fails the build instead of a class lookup on the device.
-        std::fs::write(&app[1], b"PK\x03\x04 a jar").unwrap();
+        // A runtime of two dex files would collide with the libraries'.
+        std::fs::write(runtime.join("classes2.dex"), b"dex\n035\0more").unwrap();
+        let apk = super::Apk {
+            runtime: &runtime,
+            ..apk(false, false)
+        };
         let err = super::add_files(
             &base,
             &dir.join("out.zip"),
-            &super::Apk {
-                runtime: &runtime,
-                dex: &app,
-                ..apk(false, false)
-            },
+            &apk,
+            &java,
             &super::Layout::APK,
         )
         .unwrap_err()
         .to_string();
-        assert!(err.contains("is not a dex file"), "{err}");
+        assert!(err.contains("more than one dex file"), "{err}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
+
+    #[test]
+    fn dex_libraries_are_numbered_as_listed_without_d8() {
+        let (dir, _) = runtime_and_base("dex-libraries");
+        let library = |name: &str, bytes: &[u8]| {
+            let path = dir.join(name);
+            std::fs::write(&path, bytes).unwrap();
+            super::Library {
+                path,
+                listed: "nsh.json `android.libraries`".into(),
+            }
+        };
+        let libraries = [
+            library("b.dex", b"dex\n035\0b"),
+            library("a.dex", b"dex\n035\0a"),
+            // The same file from another crate: packaged once.
+            library("b-copy.dex", b"dex\n035\0b"),
+        ];
+        let cache = dir.join("cache");
+        let apk = super::Apk {
+            libraries: &libraries,
+            library_cache: &cache,
+            ..apk(false, false)
+        };
+        // Dex files only: no SDK tool runs, no cache is made.
+        let java = super::libraries::java_code(&no_sdk(), &apk, &dir).unwrap();
+        assert_eq!(java.dex, [dir.join("b.dex"), dir.join("a.dex")]);
+        assert!(java.resources.is_empty());
+        assert!(!cache.exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn without_libraries_the_package_is_as_before() {
+        let (dir, base) = runtime_and_base("no-libraries");
+        let runtime = dir.join("runtime");
+        let cache = dir.join("cache");
+        let apk = super::Apk {
+            runtime: &runtime,
+            library_cache: &cache,
+            assets: vec![("nsh/bundle.nshc".into(), b"bundle".to_vec())],
+            ..apk(false, false)
+        };
+        // Nothing for d8: no SDK tool runs, no cache is made.
+        let java = super::libraries::java_code(&no_sdk(), &apk, &dir).unwrap();
+        assert!(java.dex.is_empty() && java.resources.is_empty());
+        assert!(!cache.exists());
+        // The files of the package, as they were before libraries.
+        for (layout, expected) in [
+            (
+                &super::Layout::APK,
+                &[
+                    "AndroidManifest.xml",
+                    "resources.arsc",
+                    "classes.dex",
+                    "lib/arm64-v8a/libnsh.so",
+                    "assets/nsh/bundle.nshc",
+                ],
+            ),
+            (
+                &super::Layout::BUNDLE,
+                &[
+                    "base/manifest/AndroidManifest.xml",
+                    "base/resources.arsc",
+                    "base/dex/classes.dex",
+                    "base/lib/arm64-v8a/libnsh.so",
+                    "base/assets/nsh/bundle.nshc",
+                ],
+            ),
+        ] {
+            let out = dir.join("out.zip");
+            super::add_files(&base, &out, &apk, &java, layout).unwrap();
+            assert_eq!(entries(&out), expected);
+        }
+        // The manifest, word for word: libraries add nothing to it.
+        assert_eq!(super::manifest_xml(&apk), MANIFEST);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The manifest of `apk(false, false)`, as packages had it before
+    /// libraries.
+    const MANIFEST: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.app">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Text actions (Translate and the like) the selection menu offers,
+        as TextView's: Android 11+ hides other apps' activities otherwise. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT" />
+            <data android:mimeType="text/plain" />
+        </intent>
+    </queries>
+    <application android:label="App"
+        android:extractNativeLibs="false"
+        android:enableOnBackInvokedCallback="true"
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <!-- Serves the app's own files to the apps that open them
+            (`SystemUi.openPath`): the authority matches what
+            `FilesProvider.uriFor` builds. -->
+        <provider android:name="com.longbridge.nsh.FilesProvider"
+            android:authorities="com.example.app.files"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+        <activity android:name="com.longbridge.nsh.AppActivity" android:exported="true"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
+"#;
 
     #[test]
     fn an_app_declares_the_permissions_it_lists_once() {
