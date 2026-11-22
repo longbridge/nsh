@@ -377,6 +377,7 @@ NSCameraUsageDescription = "Scans the codes you point the camera at."
 permissions = ["CAMERA"]
 queries = ['<intent><action android:name="android.media.action.IMAGE_CAPTURE"/></intent>']
 application = ['<service android:name="com.example.scanner.Sync" android:exported="false"/>']
+libraries = ["android/libs/scanner-glue.jar"]
 ```
 
 | Key | Adds |
@@ -386,7 +387,12 @@ application = ['<service android:name="com.example.scanner.Sync" android:exporte
 | `ios.entitlements` | The iOS app's entitlements |
 | `android.permissions` | `<uses-permission>` elements, named as in `nsh.json` (`CAMERA` is `android.permission.CAMERA`) |
 | `android.queries` | `<intent>`, `<package>` and `<provider>` elements of the manifest's `<queries>` |
-| `android.application` | `<service>`, `<receiver>`, `<provider>`, `<activity>` and `<meta-data>` elements of `<application>`; `${applicationId}` is the app's package |
+| `android.application` | `<service>`, `<receiver>`, `<provider>`, `<activity>` and `<meta-data>` elements of `<application>`; `${applicationId}` is the app's package, other placeholders the app's `android.manifestPlaceholders` |
+| `android.libraries` | Java libraries, jar, Android library (`.aar`) and dex files relative to the crate's `Cargo.toml`, packaged as `nsh.json`'s `android.libraries` are ([Java code](./packaging.md#java-code)) |
+
+A crate does not set `android.manifestPlaceholders`, which is an error: the values of placeholders (a service's key) are
+the app's, set in its `nsh.json`. The version of an Android library two crates carry in different versions is the one
+the app lists in its own `android.libraries`.
 
 The app's own `nsh.json` wins: a key it sets keeps its value, and arrays (such as `UIBackgroundModes`) are joined. When
 two crates set one key to different values (two usage descriptions of the camera), the app chooses by setting the key
@@ -450,4 +456,4 @@ After `nsh add nsh-harmony`, the app's `nsh run`, `nsh dev`, `nsh test` and `nsh
 
 ## Security
 
-An nshm's build scripts and procedural macros run when the app builds, and its code, Rust or TSX, runs with the app's permissions. Any crate in the app's dependency graph can also add system permissions, manifest components and entitlements to the packaged app through `[package.metadata.nsh]`. Review its source and the changes to `nsh.lock` as you review the app's own code.
+An nshm's build scripts and procedural macros run when the app builds, and its code, Rust or TSX, runs with the app's permissions. Any crate in the app's dependency graph can also add system permissions, manifest components, Java and Android libraries (with their native code) and entitlements to the packaged app through `[package.metadata.nsh]`. Review its source and the changes to `nsh.lock` as you review the app's own code.
