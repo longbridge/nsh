@@ -64,7 +64,7 @@ TSX app adds its entry (`nsh package App.tsx --target …`).
 `nsh.json` also holds `rust` and `root` (the app's crates and its root component, [Building with Rust](./rust.md)),
 `theme` and `appearance`, `tailwind` (see [Tailwind](./tailwind.md)), `capabilities` (see
 [Sandbox and capabilities](./sandbox-and-capabilities.md)), `android` (`targetSdk`, `usesCleartextTraffic`, `permissions`, `libraries`, `manifestPlaceholders`, `queries` and `application`, [below](#target-api-level)), `ios` and `macos` (the `Info.plist` keys and entitlements
-of their packages, [below](#infoplist-keys-and-entitlements); `ios.extensions`, [app extensions](#app-extensions); `ios.frameworks` and `ios.linkerFlags`, [frameworks](#frameworks-and-linker-flags); `macos.activationPolicy`, a [menu bar app](./macos.md#menu-bar-apps)) and `updater`, which makes desktop packages update themselves
+of their packages, [below](#infoplist-keys-and-entitlements); `ios.extensions`, [app extensions](#app-extensions); `ios.frameworks`, `ios.linkerFlags` and macOS's, [frameworks](#frameworks-and-linker-flags); `macos.activationPolicy`, a [menu bar app](./macos.md#menu-bar-apps)) and `updater`, which makes desktop packages update themselves
 (see [App Updates](./app-updates.md)) and every native package take [OTA updates](./ota-updates.md); [Project structure](./project-structure.md#nshjson) lists
 every key. A key or value NSH cannot read is reported as a warning and left out, so an app written for a newer NSH
 still builds with an older one, and the warning catches a typo.
@@ -226,6 +226,28 @@ frameworks it uses. An nshm lists its own in its `Cargo.toml`
 - The same crates also build for other platforms without the SDK: call it under `#[cfg(target_os = "ios")]`.
 - The frameworks are linked with the app's Rust code, so an app without crates (`rust` or an nshm) cannot list them:
   `nsh package` stops with an error.
+
+macOS apps list theirs in `macos.frameworks` and `macos.linkerFlags`, with the same keys:
+
+```json
+{
+  "macos": {
+    "frameworks": ["macos/Vendor/Analytics.xcframework"],
+    "linkerFlags": ["-ObjC"]
+  }
+}
+```
+
+- The macOS executables built with the app's crates link them: packages, and the development host and headless
+  runner of `nsh run` and `nsh test`. Each takes the XCFramework's macOS library for its architecture.
+- A dynamic framework is copied into the package's `Contents/Frameworks/`, keeping its links, and signed before the
+  app. `nsh run` and `nsh test` run the executables where Cargo built them, and those find a dynamic framework where
+  it is; packages leave that path out.
+- A universal package (`--arch universal`) carries one copy of each dynamic framework, so the XCFramework's library
+  must hold both architectures (`macos-arm64_x86_64`, as `xcodebuild -create-xcframework` makes from a universal
+  framework).
+- Call the SDK under `#[cfg(target_os = "macos")]`. NSH does not add the Swift runtime's search paths: a static
+  library with Swift code needs them in `linkerFlags`.
 
 ## Android
 

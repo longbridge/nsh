@@ -56,7 +56,7 @@ nsh package App.tsx --target ios-simulator --run
 | `build` | number | `1` | 构建号（`CFBundleVersion`、`versionCode`）。每次上传新版本都要递增。 |
 | `icon` | string \| object | 无 | 一张正方形 PNG，最好是 1024×1024，路径相对于 `nsh.json`；也可按平台分别提供（[图标](#图标)）。 |
 
-`nsh.json` 还包含 `rust` 和 `root`（应用的 crate 和根组件，见[用 Rust 开发](./rust.md)）、`theme` 和 `appearance`、`tailwind`（见 [Tailwind](./tailwind.md)）、`capabilities`（见[沙箱与能力](./sandbox-and-capabilities.md)）、`android`（`targetSdk`、`usesCleartextTraffic`、`permissions`、`libraries`、`manifestPlaceholders`、`queries` 和 `application`，见下文“目标 API 级别”“明文 HTTP”“权限”“Java 代码”和“组件与 queries”）、`ios` 和 `macos`（对应包的 `Info.plist` 键和 entitlements，见[下文](#infoplist-键与-entitlements)；`ios.extensions` 是[应用扩展](#应用扩展)；`ios.frameworks` 和 `ios.linkerFlags` 见 [Framework 与链接参数](#framework-与链接参数)；`macos.activationPolicy` 用于[菜单栏应用](./macos.md#菜单栏应用)）以及让桌面包自我更新、让所有原生包接收 [OTA 更新](./ota-updates.md)的 `updater`（见[应用更新](./app-updates.md)）；[项目结构](./project-structure.md#nshjson)列出了所有键。NSH 读不懂的键或值会给出警告并被略过：为更新的 NSH 写的应用在较旧的 NSH 上照样能构建，拼写错误也会在警告里看到。
+`nsh.json` 还包含 `rust` 和 `root`（应用的 crate 和根组件，见[用 Rust 开发](./rust.md)）、`theme` 和 `appearance`、`tailwind`（见 [Tailwind](./tailwind.md)）、`capabilities`（见[沙箱与能力](./sandbox-and-capabilities.md)）、`android`（`targetSdk`、`usesCleartextTraffic`、`permissions`、`libraries`、`manifestPlaceholders`、`queries` 和 `application`，见下文“目标 API 级别”“明文 HTTP”“权限”“Java 代码”和“组件与 queries”）、`ios` 和 `macos`（对应包的 `Info.plist` 键和 entitlements，见[下文](#infoplist-键与-entitlements)；`ios.extensions` 是[应用扩展](#应用扩展)；`ios.frameworks`、`ios.linkerFlags` 以及 macOS 的同名键见 [Framework 与链接参数](#framework-与链接参数)；`macos.activationPolicy` 用于[菜单栏应用](./macos.md#菜单栏应用)）以及让桌面包自我更新、让所有原生包接收 [OTA 更新](./ota-updates.md)的 `updater`（见[应用更新](./app-updates.md)）；[项目结构](./project-structure.md#nshjson)列出了所有键。NSH 读不懂的键或值会给出警告并被略过：为更新的 NSH 写的应用在较旧的 NSH 上照样能构建，拼写错误也会在警告里看到。
 
 上表中的每个键都可以在命令行上覆盖，这在 CI 中很方便：
 
@@ -205,6 +205,26 @@ iOS SDK 以 XCFramework（`.xcframework`）或 framework（`.framework`）的形
   解析：要链接一个库，请把它列进 `frameworks`。
 - 同样的 crate 也会在没有这个 SDK 的其他平台上构建：请在 `#[cfg(target_os = "ios")]` 下调用它。
 - 这些 framework 与应用的 Rust 代码一起链接，所以没有 crate（`rust` 或 nshm）的应用不能列出它们：`nsh package` 会报错停止。
+
+macOS 应用在 `macos.frameworks` 和 `macos.linkerFlags` 里列出自己的，键相同：
+
+```json
+{
+  "macos": {
+    "frameworks": ["macos/Vendor/Analytics.xcframework"],
+    "linkerFlags": ["-ObjC"]
+  }
+}
+```
+
+- 用应用的 crate 构建的 macOS 可执行文件都会链接它们：打出的包，以及 `nsh run` 和 `nsh test` 的开发宿主与无头运行器。
+  每个可执行文件取 XCFramework 里对应其架构的 macOS 库。
+- 动态 framework 会被复制到包的 `Contents/Frameworks/`（保留其中的链接），并先于应用签名。`nsh run` 和 `nsh test`
+  在 Cargo 构建出可执行文件的位置运行它们，这些可执行文件直接在动态 framework 所在的位置找到它；打出的包不保留这个路径。
+- 通用包（`--arch universal`）里每个动态 framework 只有一份，所以 XCFramework 的库必须同时包含两种架构
+  （`macos-arm64_x86_64`，`xcodebuild -create-xcframework` 由通用 framework 生成的就是这样）。
+- 请在 `#[cfg(target_os = "macos")]` 下调用 SDK。NSH 不会添加 Swift 运行时的搜索路径：含 Swift 代码的静态库需要在
+  `linkerFlags` 里给出。
 
 ## Android
 

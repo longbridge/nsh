@@ -14,10 +14,14 @@
   `ios.extensions` lists prebuilt `.appex` bundles the app builds itself (`crates/nsh-cli/src/app_extensions.rs`):
   packages copy them into `PlugIns/` with the app's version and sign them before the app; device packages take one
   `--profile` per bundle, chosen by bundle identifier (`crates/nsh-cli/src/provisioning.rs`). NSH builds no Swift.
-  `ios.frameworks` and `ios.linkerFlags`, of `nsh.json` and of the crates' metadata
-  (`crates/nsh-cli/src/ios_frameworks.rs`), reach the link of every generated iOS executable through its `build.rs`
-  (Cargo keeps a dependency's `rustc-link-arg` to that dependency); dynamic frameworks are copied into `Frameworks/`
-  and signed before the app.
+  `ios.frameworks` and `ios.linkerFlags` (`macos.` for macOS), of `nsh.json` and of the crates' metadata
+  (`crates/nsh-cli/src/ios_frameworks.rs`), reach the link of every generated iOS and macOS executable through its
+  `build.rs` (Cargo keeps a dependency's `rustc-link-arg` to that dependency; on a Mac `describe` and `test` have it
+  too); dynamic frameworks are copied into `Frameworks/` (`Contents/Frameworks/` on macOS) and signed before the app.
+  The crates' lists are kept in the workspace (`apple-link-<triple>.json`), keyed by this nsh, `Cargo.toml`,
+  `Cargo.lock` and the path packages' manifests, so builds run `cargo metadata` only when those change. macOS
+  executables also get rpaths to the frameworks' directories, for `nsh run` and `nsh test`; packages delete them
+  (`install_name_tool -delete_rpath`).
   Android: an APK assembled without Gradle (`aapt2 link`, native libraries stored uncompressed and 16 KB ZIP aligned, `apksigner`;
   the debug key unless `--keystore`; `android.launchScreen` becomes a generated launch theme). Linux: a directory `<name>/` with the release runner (`crates/nsh-linux-app`) as
   the executable, `nsh/bundle.nshc`, `nsh/assets/` and `nsh/app.json` (the window title, the GTK application id and

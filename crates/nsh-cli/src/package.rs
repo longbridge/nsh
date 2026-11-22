@@ -1043,15 +1043,27 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
     config.ios.frameworks = crate::ios_frameworks::read(
         std::mem::take(&mut config.ios.frameworks),
         dir,
+        "ios",
         &mut ignored,
     );
-    config.ios.linker_flags.retain(|flag| {
-        let checked = crate::ios_frameworks::check_flag(flag);
-        if let Err(why) = &checked {
-            ignored.push(format!("ios.linkerFlags: {why}: left out"));
-        }
-        checked.is_ok()
-    });
+    config.macos.frameworks = crate::ios_frameworks::read(
+        std::mem::take(&mut config.macos.frameworks),
+        dir,
+        "macos",
+        &mut ignored,
+    );
+    for (section, flags) in [
+        ("ios", &mut config.ios.linker_flags),
+        ("macos", &mut config.macos.linker_flags),
+    ] {
+        flags.retain(|flag| {
+            let checked = crate::ios_frameworks::check_flag(flag);
+            if let Err(why) = &checked {
+                ignored.push(format!("{section}.linkerFlags: {why}: left out"));
+            }
+            checked.is_ok()
+        });
+    }
     config.icon = match config.icon {
         Some(AppIcon::All(icon)) => Some(AppIcon::All(dir.join(icon))),
         Some(AppIcon::Platforms(icons)) => Some(AppIcon::Platforms(
@@ -1494,7 +1506,7 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
     // its bundle can reach, and those `nsh.json` keeps. A TSX app does too
     // where cargo is, else it ships the prebuilt runner, which has all.
     let has_crates = crate::rust_app::current().is_some();
-    check_ios_link(config, options.target, has_crates)?;
+    check_apple_link(config, options.target, has_crates)?;
     let mut own_runner = false;
     if options.target != PackageTarget::Web
         && !crate::rust_app::is_root(&entry)
@@ -1747,24 +1759,31 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// `ios.frameworks` and `ios.linkerFlags` are linked with the app's Rust
-/// code, which is what calls a framework: an iOS package of an app
-/// without crates (`has_crates`), whose runner is NSH's own, has nothing
-/// to link them with.
-fn check_ios_link(
+/// `ios.frameworks` and `ios.linkerFlags` (`macos.` for macOS) are linked
+/// with the app's Rust code, which is what calls a framework: an iOS or
+/// macOS package of an app without crates (`has_crates`), whose runner is
+/// NSH's own, has nothing to link them with.
+fn check_apple_link(
     config: &AppConfig,
     target: PackageTarget,
     has_crates: bool,
 ) -> anyhow::Result<()> {
-    let ios = matches!(target, PackageTarget::Ios | PackageTarget::IosSimulator);
-    if ios
-        && !has_crates
-        && (!config.ios.frameworks.is_empty() || !config.ios.linker_flags.is_empty())
-    {
+    let (section, frameworks, flags) = match target {
+        PackageTarget::Ios | PackageTarget::IosSimulator => {
+            ("ios", &config.ios.frameworks, &config.ios.linker_flags)
+        }
+        PackageTarget::Macos => (
+            "macos",
+            &config.macos.frameworks,
+            &config.macos.linker_flags,
+        ),
+        _ => return Ok(()),
+    };
+    if !has_crates && (!frameworks.is_empty() || !flags.is_empty()) {
         bail!(
-            "nsh.json ios.frameworks and ios.linkerFlags are linked with the app's Rust code, \
-             which calls the frameworks, and the app has none: add the crate that calls them \
-             (nsh.json `rust`, or an nshm with `nsh add`)"
+            "nsh.json {section}.frameworks and {section}.linkerFlags are linked with the app's \
+             Rust code, which calls the frameworks, and the app has none: add the crate that \
+             calls them (nsh.json `rust`, or an nshm with `nsh add`)"
         );
     }
     Ok(())
@@ -2159,6 +2178,19 @@ fn package_macos(
     fs::create_dir_all(&macos)?;
     fs::create_dir_all(&nsh)?;
     install_macos_runner(&runners, &macos.join(executable))?;
+    // The runner linked the app's frameworks for its targets
+    // (`rust_app::RustApp::apple_link_env`): the dynamic ones go with it.
+    let host = [host_macos_triple()];
+    let triples = match options.arch {
+        Some(arch) => arch.macos_triples(),
+        None => &host[..],
+    };
+    let frameworks = embed_macos_frameworks(
+        &config.macos.frameworks,
+        triples,
+        &contents.join("Frameworks"),
+        &macos.join(executable),
+    )?;
     // A Rust app has no bundle: the runner mounts its root.
     if !built.rust_root {
         fs::write(nsh.join("bundle.nshc"), &built.bytecode)?;
@@ -2220,6 +2252,8 @@ fn package_macos(
             ));
         }
     }
+    // The app's signature seals its frameworks': they are signed first.
+    crate::ios_frameworks::sign(&frameworks, "-")?;
     let mut codesign = Command::new("codesign");
     codesign.args(["--force", "--sign", "-", "--timestamp=none"]);
     if !entitlements.is_empty() {
@@ -2254,6 +2288,67 @@ fn package_macos(
         ui::done(format!("launched {name}"));
     }
     Ok(())
+}
+
+/// Copies the dynamic frameworks of `frameworks` that the package's
+/// `executable` links for `triples` (one per architecture) into `dir`
+/// (`Contents/Frameworks`), and takes the rpaths to where they are on this
+/// Mac, which `nsh run` needs, out of it. A universal package carries one
+/// copy of each, so each must be one library of both architectures.
+/// Returns the copies, which are signed before the app.
+fn embed_macos_frameworks(
+    frameworks: &[crate::ios_frameworks::Framework],
+    triples: &[&str],
+    dir: &Path,
+    executable: &Path,
+) -> anyhow::Result<Vec<PathBuf>> {
+    let Some((first, others)) = triples.split_first() else {
+        return Ok(Vec::new());
+    };
+    for framework in frameworks {
+        let library = framework.library(first)?;
+        for triple in others {
+            let other = framework.library(triple)?;
+            if let crate::ios_frameworks::Library::Framework { dynamic: true, .. } = library
+                && other != library
+            {
+                bail!(
+                    "{}: a universal macOS package carries one copy of a dynamic framework, and {} has \
+                     another for each architecture: build it as one framework of both (an \
+                     XCFramework library `macos-arm64_x86_64`), or package one architecture (--arch)",
+                    framework.listed,
+                    framework.path.display()
+                );
+            }
+        }
+    }
+    let mut rpaths: Vec<PathBuf> = Vec::new();
+    for triple in triples {
+        for rpath in crate::ios_frameworks::development_rpaths(frameworks, triple)? {
+            if !rpaths.contains(&rpath) {
+                rpaths.push(rpath);
+            }
+        }
+    }
+    for rpath in &rpaths {
+        let output = Command::new("install_name_tool")
+            .arg("-delete_rpath")
+            .arg(rpath)
+            .arg(executable)
+            .output()
+            .context("run install_name_tool")?;
+        // A runner linked before cannot lack one: the link changed with it.
+        if !output.status.success() {
+            bail!(
+                "install_name_tool -delete_rpath {} {}: {}",
+                rpath.display(),
+                executable.display(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+    }
+    let (embedded, _) = crate::ios_frameworks::sync(frameworks, first, dir, None)?;
+    Ok(embedded)
 }
 
 /// A macOS release runner a package is made of.
@@ -3439,13 +3534,110 @@ mod tests {
     #[test]
     fn ios_frameworks_need_the_apps_crates() {
         let mut config = AppConfig::default();
-        assert!(check_ios_link(&config, PackageTarget::Ios, false).is_ok());
+        assert!(check_apple_link(&config, PackageTarget::Ios, false).is_ok());
         config.ios.linker_flags.push("-ObjC".into());
-        let error = check_ios_link(&config, PackageTarget::IosSimulator, false).unwrap_err();
+        let error = check_apple_link(&config, PackageTarget::IosSimulator, false).unwrap_err();
         assert!(error.to_string().contains("add the crate"), "{error}");
-        assert!(check_ios_link(&config, PackageTarget::Ios, true).is_ok());
+        assert!(check_apple_link(&config, PackageTarget::Ios, true).is_ok());
         // Other packages do not link them.
-        assert!(check_ios_link(&config, PackageTarget::Android, false).is_ok());
+        assert!(check_apple_link(&config, PackageTarget::Android, false).is_ok());
+        // macOS packages, by `macos.`'s.
+        assert!(check_apple_link(&config, PackageTarget::Macos, false).is_ok());
+        config.macos.linker_flags.push("-ObjC".into());
+        let error = check_apple_link(&config, PackageTarget::Macos, false).unwrap_err();
+        assert!(
+            error.to_string().starts_with("nsh.json macos.frameworks"),
+            "{error}"
+        );
+        assert!(check_apple_link(&config, PackageTarget::Macos, true).is_ok());
+    }
+
+    /// A universal macOS package carries one copy of a dynamic framework:
+    /// one with another library for each architecture is refused before
+    /// anything is copied; static ones may differ.
+    #[test]
+    fn a_universal_package_needs_one_framework_of_both_architectures() {
+        let dir =
+            std::env::temp_dir().join(format!("nsh-cli-macos-frameworks-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let slice = |sdk: &str, id: &str, file: &str, arch: &str, dylib: bool| {
+            let at = dir.join(format!("{sdk}.xcframework")).join(id);
+            let binary: Vec<u8> = if dylib {
+                let mut b = Vec::new();
+                b.extend(0xfeed_facf_u32.to_le_bytes());
+                b.extend(0x0100_000c_u32.to_le_bytes());
+                b.extend(0u32.to_le_bytes());
+                b.extend(6u32.to_le_bytes());
+                b.extend([0u8; 16]);
+                b
+            } else {
+                b"!<arch>\n".to_vec()
+            };
+            match file.strip_suffix(".framework") {
+                Some(stem) => {
+                    std::fs::create_dir_all(at.join(file)).unwrap();
+                    std::fs::write(at.join(file).join(stem), binary).unwrap();
+                }
+                None => {
+                    std::fs::create_dir_all(&at).unwrap();
+                    std::fs::write(at.join(file), binary).unwrap();
+                }
+            }
+            let mut library = plist::Dictionary::new();
+            library.insert("LibraryIdentifier".into(), id.into());
+            library.insert("LibraryPath".into(), file.into());
+            library.insert("SupportedPlatform".into(), "macos".into());
+            library.insert(
+                "SupportedArchitectures".into(),
+                plist::Value::Array(vec![arch.into()]),
+            );
+            plist::Value::Dictionary(library)
+        };
+        let xcframework = |sdk: &str, libraries: Vec<plist::Value>| {
+            let mut info = plist::Dictionary::new();
+            info.insert("AvailableLibraries".into(), plist::Value::Array(libraries));
+            plist::Value::Dictionary(info)
+                .to_file_xml(dir.join(format!("{sdk}.xcframework/Info.plist")))
+                .unwrap();
+            crate::ios_frameworks::Framework::from_cached(&serde_json::json!({
+                "path": dir.join(format!("{sdk}.xcframework")),
+                "forceLoad": false,
+                "listed": format!("nsh.json `macos.frameworks` {sdk}"),
+            }))
+            .unwrap()
+        };
+        let split = xcframework(
+            "Split",
+            vec![
+                slice("Split", "macos-arm64", "Split.framework", "arm64", true),
+                slice("Split", "macos-x86_64", "Split.framework", "x86_64", true),
+            ],
+        );
+        let stat = xcframework(
+            "Stat",
+            vec![
+                slice("Stat", "macos-arm64", "libStat.a", "arm64", false),
+                slice("Stat", "macos-x86_64", "libStat.a", "x86_64", false),
+            ],
+        );
+        let into = dir.join("App.app/Contents/Frameworks");
+        let missing = dir.join("App.app/Contents/MacOS/App");
+        let both = Arch::Universal.macos_triples();
+        let error = embed_macos_frameworks(&[stat.clone(), split], both, &into, &missing)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.starts_with("nsh.json `macos.frameworks` Split: a universal macOS package"),
+            "{error}"
+        );
+        assert!(!into.exists());
+        // Static libraries are in the executable: nothing to copy or take out.
+        assert!(
+            embed_macos_frameworks(&[stat], both, &into, &missing)
+                .unwrap()
+                .is_empty()
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -3463,6 +3655,9 @@ mod tests {
                     { "path": "ios/Vendor/Ads.xcframework", "forceLoad": true }
                 ],
                 "linkerFlags": ["-ObjC", "", "-lsqlite3"]
+            }, "macos": {
+                "frameworks": ["macos/Vendor/Sdk.xcframework"],
+                "linkerFlags": ["", "-ObjC"]
             } }"#,
         )
         .unwrap();
@@ -3482,6 +3677,16 @@ mod tests {
         );
         // The empty flag is left out with a warning.
         assert_eq!(config.ios.linker_flags, ["-ObjC", "-lsqlite3"]);
+        // macOS's are read the same.
+        assert_eq!(
+            config.macos.frameworks[0].path,
+            dir.join("macos/Vendor/Sdk.xcframework")
+        );
+        assert_eq!(
+            config.macos.frameworks[0].listed,
+            "nsh.json `macos.frameworks[0]`"
+        );
+        assert_eq!(config.macos.linker_flags, ["-ObjC"]);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

@@ -48,8 +48,9 @@
 //!
 //! `ios.infoPlist`, `ios.infoPlistStrings`, `ios.entitlements`,
 //! `macos.infoPlist`, `macos.entitlements` (named as in `nsh.json`),
-//! `ios.frameworks` (relative to the directory of the crate's
-//! `Cargo.toml`) and `ios.linkerFlags` ([`crate::ios_frameworks`]),
+//! `ios.frameworks` and `macos.frameworks` (relative to the directory of
+//! the crate's `Cargo.toml`), `ios.linkerFlags` and `macos.linkerFlags`
+//! ([`crate::ios_frameworks`]),
 //! `android.permissions` (checked and spelled out as `nsh.json`'s are),
 //! `android.queries`
 //! (`<intent>`, `<package>` and `<provider>` elements) and
@@ -116,6 +117,10 @@ pub(crate) struct ModuleMeta {
     pub(crate) ios_frameworks: Vec<Framework>,
     /// Arguments of the iOS executables' link, in the crates' order.
     pub(crate) ios_linker_flags: Vec<String>,
+    /// Libraries the macOS executables link, each once.
+    pub(crate) macos_frameworks: Vec<Framework>,
+    /// Arguments of the macOS executables' link, in the crates' order.
+    pub(crate) macos_linker_flags: Vec<String>,
     /// `Info.plist` keys of macOS packages.
     pub(crate) macos_info: Map<String, Value>,
     /// Entitlements of macOS packages.
@@ -211,26 +216,47 @@ impl ModuleMeta {
         manifest: &Path,
         triples: &[&str],
     ) -> anyhow::Result<(Self, Vec<String>)> {
-        let mut cmd = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
-        cmd.args(["metadata", "--format-version", "1", "--manifest-path"])
-            .arg(manifest);
-        for triple in triples {
-            cmd.args(["--filter-platform", triple]);
-        }
-        let out = cmd
-            .output()
-            .context("running cargo metadata for the app's crates")?;
-        if !out.status.success() {
-            bail!(
-                "cargo metadata failed for the app's crates:\n{}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            );
-        }
-        let json: Value =
-            serde_json::from_slice(&out.stdout).context("cargo metadata printed no JSON")?;
-        Self::from_metadata(&json)
+        Self::from_metadata(&metadata(manifest, triples)?)
     }
+}
 
+/// `cargo metadata`'s output for the generated workspace `manifest`, as
+/// Cargo resolves it for `triples` together (none: every platform).
+pub(crate) fn metadata(manifest: &Path, triples: &[&str]) -> anyhow::Result<Value> {
+    let mut cmd = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
+    cmd.args(["metadata", "--format-version", "1", "--manifest-path"])
+        .arg(manifest);
+    for triple in triples {
+        cmd.args(["--filter-platform", triple]);
+    }
+    let out = cmd
+        .output()
+        .context("running cargo metadata for the app's crates")?;
+    if !out.status.success() {
+        bail!(
+            "cargo metadata failed for the app's crates:\n{}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    serde_json::from_slice(&out.stdout).context("cargo metadata printed no JSON")
+}
+
+/// The `Cargo.toml` of each path package of `cargo metadata`'s output
+/// `json` (the app's crates, nshm): what changes without `Cargo.lock`
+/// changing.
+pub(crate) fn path_manifests(json: &Value) -> Vec<std::path::PathBuf> {
+    let mut manifests: Vec<std::path::PathBuf> = json["packages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|p| p["source"].is_null())
+        .filter_map(|p| p["manifest_path"].as_str().map(std::path::PathBuf::from))
+        .collect();
+    manifests.sort();
+    manifests
+}
+
+impl ModuleMeta {
     /// What `cargo metadata`'s output `json` declares: each resolved
     /// package's `[package.metadata.nsh]`, its sections for the features
     /// Cargo turned on; and the warnings about what was left out.
@@ -322,26 +348,33 @@ impl ModuleMeta {
             .with_context(|| format!("{name}: {at} `{section}` is a table"))?;
         for (key, value) in table {
             let kind = match (platform, key.as_str()) {
-                (ApplePlatform::Ios, "frameworks") => {
-                    let listed = format!("{name}: {at} `ios.frameworks`");
+                (_, "frameworks") => {
+                    let listed = format!("{name}: {at} `{section}.frameworks`");
                     let dir = dir.with_context(|| {
                         format!("{listed}: cargo metadata names no Cargo.toml for the crate")
                     })?;
                     let frameworks =
                         crate::ios_frameworks::of_crate(value, dir, &listed, warnings)?;
+                    let all = match platform {
+                        ApplePlatform::Ios => &mut self.ios_frameworks,
+                        ApplePlatform::Macos => &mut self.macos_frameworks,
+                    };
                     for framework in frameworks {
-                        if !self.ios_frameworks.iter().any(|f| f.path == framework.path) {
-                            self.ios_frameworks.push(framework);
+                        if !all.iter().any(|f| f.path == framework.path) {
+                            all.push(framework);
                         }
                     }
                     continue;
                 }
-                (ApplePlatform::Ios, "linkerFlags") => {
-                    let listed = format!("{name}: {at} `ios.linkerFlags`");
+                (_, "linkerFlags") => {
+                    let listed = format!("{name}: {at} `{section}.linkerFlags`");
                     // Kept as written, repeats too: a flag's argument
                     // (`-framework`, `StoreKit`) may repeat another's.
-                    self.ios_linker_flags
-                        .extend(crate::ios_frameworks::linker_flags(value, &listed)?);
+                    let flags = crate::ios_frameworks::linker_flags(value, &listed)?;
+                    match platform {
+                        ApplePlatform::Ios => self.ios_linker_flags.extend(flags),
+                        ApplePlatform::Macos => self.macos_linker_flags.extend(flags),
+                    }
                     continue;
                 }
                 (ApplePlatform::Ios, "infoPlist") => "ios.infoPlist",
@@ -626,8 +659,18 @@ impl ModuleMeta {
             &mut config.android.libraries,
             self.android_libraries.clone(),
         );
-        (config.ios.frameworks, config.ios.linker_flags) =
-            ios_link(&config.ios.frameworks, &config.ios.linker_flags, self);
+        (config.ios.frameworks, config.ios.linker_flags) = apple_link(
+            ApplePlatform::Ios,
+            &config.ios.frameworks,
+            &config.ios.linker_flags,
+            self,
+        );
+        (config.macos.frameworks, config.macos.linker_flags) = apple_link(
+            ApplePlatform::Macos,
+            &config.macos.frameworks,
+            &config.macos.linker_flags,
+            self,
+        );
         Ok(())
     }
 
@@ -640,22 +683,39 @@ impl ModuleMeta {
     }
 }
 
-/// The frameworks and linker flags of the app's iOS executables: the
-/// app's own (`frameworks`, `flags`, from its `nsh.json`) first, then the
-/// crates' (`meta`); a framework two list is linked once.
-pub(crate) fn ios_link(
+/// The frameworks and linker flags of the app's iOS or macOS executables
+/// (`platform`): the app's own (`frameworks`, `flags`, from its
+/// `nsh.json`) first, then the crates' (`meta`); a framework two list is
+/// linked once.
+pub(crate) fn apple_link(
+    platform: ApplePlatform,
     frameworks: &[Framework],
     flags: &[String],
     meta: &ModuleMeta,
 ) -> (Vec<Framework>, Vec<String>) {
+    let (crates, crate_flags) = match platform {
+        ApplePlatform::Ios => (&meta.ios_frameworks, &meta.ios_linker_flags),
+        ApplePlatform::Macos => (&meta.macos_frameworks, &meta.macos_linker_flags),
+    };
+    join_link(frameworks, flags, crates, crate_flags)
+}
+
+/// The app's frameworks and flags (`frameworks`, `flags`) first, then the
+/// crates' (`crates`, `crate_flags`); a framework two list is linked once.
+pub(crate) fn join_link(
+    frameworks: &[Framework],
+    flags: &[String],
+    crates: &[Framework],
+    crate_flags: &[String],
+) -> (Vec<Framework>, Vec<String>) {
     let mut all = frameworks.to_vec();
-    for framework in &meta.ios_frameworks {
+    for framework in crates {
         if !all.iter().any(|f| f.path == framework.path) {
             all.push(framework.clone());
         }
     }
     let mut all_flags = flags.to_vec();
-    all_flags.extend(meta.ios_linker_flags.iter().cloned());
+    all_flags.extend(crate_flags.iter().cloned());
     (all, all_flags)
 }
 
@@ -1686,6 +1746,7 @@ mod tests {
         config.ios.frameworks = crate::ios_frameworks::read(
             serde_json::from_value(json!(["/work/ads/ios/Ads.xcframework"])).unwrap(),
             Path::new("/app"),
+            "ios",
             &mut Vec::new(),
         );
         config.ios.linker_flags = vec!["-lz".into()];
@@ -1735,6 +1796,56 @@ mod tests {
                 "{error}"
             );
         }
+    }
+
+    /// A crate's `macos.frameworks` and `macos.linkerFlags` are macOS
+    /// packages' alone, joined after the app's own as iOS's are.
+    #[test]
+    fn crates_macos_frameworks_are_the_macos_packages() {
+        let scanner = json!({ "nsh": {
+            "ios": { "frameworks": ["apple/Scanner.xcframework"] },
+            "macos": {
+                "frameworks": ["apple/Scanner.xcframework"],
+                "linkerFlags": ["-ObjC"],
+            },
+        } });
+        let (meta, warnings) =
+            ModuleMeta::from_metadata(&metadata(&[("scanner", scanner, &[])])).unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let listed = |frameworks: &[Framework]| -> Vec<String> {
+            frameworks.iter().map(|f| f.listed.clone()).collect()
+        };
+        assert_eq!(
+            listed(&meta.macos_frameworks),
+            ["scanner: [package.metadata.nsh] `macos.frameworks`[0]"]
+        );
+        assert_eq!(
+            meta.macos_frameworks[0].path,
+            Path::new("/work/scanner/apple/Scanner.xcframework")
+        );
+        assert_eq!(meta.macos_linker_flags, ["-ObjC"]);
+        assert_eq!(meta.ios_frameworks.len(), 1);
+        assert!(meta.ios_linker_flags.is_empty());
+
+        let mut config = AppConfig::default();
+        config.macos.linker_flags = vec!["-lz".into()];
+        meta.apply(&mut config, Platform::Macos).unwrap();
+        assert_eq!(
+            listed(&config.macos.frameworks),
+            ["scanner: [package.metadata.nsh] `macos.frameworks`[0]"]
+        );
+        assert_eq!(config.macos.linker_flags, ["-lz", "-ObjC"]);
+
+        let error = ModuleMeta::from_metadata(&metadata(&[(
+            "x",
+            json!({ "nsh": { "macos": { "linkerFlags": [""] } } }),
+            &[],
+        )]))
+        .unwrap_err();
+        assert!(
+            format!("{error:#}").starts_with("x: [package.metadata.nsh] `macos.linkerFlags`"),
+            "{error:#}"
+        );
     }
 
     #[test]

@@ -249,6 +249,14 @@ pub(crate) struct MacosConfig {
     /// development host (`--activation-policy`).
     #[serde(default)]
     pub(crate) activation_policy: ActivationPolicy,
+    /// Third-party libraries (`.xcframework`, `.framework`) the app's
+    /// macOS executables link, and macOS packages carry when dynamic
+    /// ([`crate::ios_frameworks`]).
+    #[serde(default)]
+    pub(crate) frameworks: Vec<crate::ios_frameworks::Framework>,
+    /// Arguments added to the link of the app's macOS executables.
+    #[serde(default)]
+    pub(crate) linker_flags: Vec<String>,
 }
 
 /// `nsh.json` `macos.activationPolicy`, as GPUI's `ActivationPolicy`. Read

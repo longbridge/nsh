@@ -1,7 +1,8 @@
 //! `ios.frameworks` and `ios.linkerFlags`, of the app's `nsh.json` and of
 //! its crates' `[package.metadata.nsh]`: the third-party libraries an iOS
 //! app links (an SDK's `.xcframework` or `.framework`) and the flags its
-//! executable is linked with.
+//! executable is linked with. `macos.frameworks` and `macos.linkerFlags`
+//! are the same for macOS apps.
 //!
 //! Every iOS executable built with the app's crates links them: the
 //! development hosts of the simulator and Mac Catalyst and the release
@@ -17,6 +18,13 @@
 //! static library's code is the app's, and so is what its privacy
 //! manifest declares: packages add it to the app's own
 //! ([`add_static_privacy`]).
+//!
+//! On macOS the release runner finds its frameworks in the package's
+//! `Contents/Frameworks/`, and the executables `nsh run` and `nsh test`
+//! run where Cargo built them (the development host, the describing
+//! program, the headless runner) find them where they are, through rpaths
+//! to their directories ([`link`]), which packages take out of the runner
+//! ([`development_rpaths`]).
 
 use std::{
     fs,
@@ -28,7 +36,7 @@ use std::{
 use anyhow::{Context as _, bail};
 use serde::Deserialize;
 
-/// The variable that carries an iOS build's link arguments to the
+/// The variable that carries an iOS or macOS build's link arguments to the
 /// generated crate's `build.rs`, separated by U+001F.
 pub(crate) const LINK_ARGS_VAR: &str = "NSH_IOS_LINK_ARGS";
 
@@ -36,18 +44,21 @@ pub(crate) const LINK_ARGS_VAR: &str = "NSH_IOS_LINK_ARGS";
 /// U+001F: a new build of a library links the executable again.
 pub(crate) const LINK_INPUTS_VAR: &str = "NSH_IOS_LINK_INPUTS";
 
-/// The `build.rs` of the generated iOS executables (`ios-host`, `ios-app`,
-/// `rust-ios`): the link arguments `nsh` gives the build ([`link_env`]).
-pub(crate) const BUILD_RS: &str = r#"//! The app's iOS frameworks and linker flags (nsh.json and its crates'
-//! `ios.frameworks`, `ios.linkerFlags`), which `nsh` passes for this
-//! executable's link: Cargo keeps a dependency's `rustc-link-arg` to that
-//! dependency.
+/// The `build.rs` of the generated iOS and macOS executables (`ios-host`,
+/// `ios-app`, `rust-ios`, `macos-host`, `macos-app`, `rust-macos`, and
+/// `describe` and `test`, which link the app's crates on a Mac): the link
+/// arguments `nsh` gives the build ([`link_env`]).
+pub(crate) const BUILD_RS: &str = r#"//! The app's iOS or macOS frameworks and linker flags (nsh.json and its
+//! crates' `ios.frameworks`, `ios.linkerFlags`, `macos.frameworks`,
+//! `macos.linkerFlags`), which `nsh` passes for this executable's link:
+//! Cargo keeps a dependency's `rustc-link-arg` to that dependency.
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-env-changed=NSH_IOS_LINK_ARGS");
     println!("cargo:rerun-if-env-changed=NSH_IOS_LINK_INPUTS");
-    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("ios") {
+    let os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    if os != "ios" && os != "macos" {
         return;
     }
     let list = |name: &str| std::env::var(name).unwrap_or_default();
@@ -60,7 +71,8 @@ fn main() {
 }
 "#;
 
-/// One of `ios.frameworks`: a path, or `{ "path": .., "forceLoad": true }`.
+/// One of `ios.frameworks` or `macos.frameworks`: a path, or
+/// `{ "path": .., "forceLoad": true }`.
 /// It is read from any value, so an entry the reader cannot take is left
 /// out by [`read`] where it stands: the others keep the index the app
 /// wrote, which errors name.
@@ -118,20 +130,21 @@ impl From<serde_json::Value> for Framework {
     }
 }
 
-/// `ios.frameworks` of `nsh.json` as read (`entries`), each relative to
-/// `dir`, `nsh.json`'s directory; an entry that cannot be read is left
-/// out, reported with the unknown keys in `ignored`, which `read_config`
-/// warns of.
+/// `<section>.frameworks` of `nsh.json` (`ios` or `macos`) as read
+/// (`entries`), each relative to `dir`, `nsh.json`'s directory; an entry
+/// that cannot be read is left out, reported with the unknown keys in
+/// `ignored`, which `read_config` warns of.
 pub(crate) fn read(
     entries: Vec<Framework>,
     dir: &Path,
+    section: &str,
     ignored: &mut Vec<String>,
 ) -> Vec<Framework> {
     entries
         .into_iter()
         .enumerate()
         .filter_map(|(index, framework)| {
-            let at = format!("ios.frameworks[{index}]");
+            let at = format!("{section}.frameworks[{index}]");
             ignored.extend(
                 framework
                     .unknown
@@ -151,7 +164,7 @@ pub(crate) fn read(
         .collect()
 }
 
-/// A crate's `ios.frameworks` (`value`), relative to its directory `dir`;
+/// A crate's `ios.frameworks` or `macos.frameworks` (`value`), relative to its directory `dir`;
 /// `listed` names the list in errors. An entry of another form is an
 /// error, as a crate's other values are; unknown keys are reported in
 /// `warnings`.
@@ -188,7 +201,7 @@ pub(crate) fn of_crate(
         .collect()
 }
 
-/// `ios.linkerFlags` (`value`): a list of strings, each one argument of
+/// `ios.linkerFlags` or `macos.linkerFlags` (`value`): a list of strings, each one argument of
 /// the link. `listed` names it in errors.
 pub(crate) fn linker_flags(value: &serde_json::Value, listed: &str) -> anyhow::Result<Vec<String>> {
     let flags = value
@@ -240,36 +253,63 @@ impl Library {
     }
 }
 
-/// The platform variant and processor of an iOS `triple`, as XCFrameworks
-/// name them: `None` for devices, `simulator`, `maccatalyst`.
-fn xcframework_target(triple: &str) -> anyhow::Result<(Option<&'static str>, &'static str)> {
+/// The platform, its variant and the processor of an iOS or macOS
+/// `triple`, as XCFrameworks name them: `ios` or `macos`; `None` for
+/// devices and Macs, `simulator`, `maccatalyst`.
+fn xcframework_target(
+    triple: &str,
+) -> anyhow::Result<(&'static str, Option<&'static str>, &'static str)> {
     let arch = match triple.split('-').next() {
         Some("aarch64") => "arm64",
         Some("x86_64") => "x86_64",
-        _ => bail!("{triple} is not an iOS target"),
+        _ => bail!("{triple} is not an iOS or macOS target"),
     };
+    if triple.ends_with("-apple-darwin") {
+        return Ok(("macos", None, arch));
+    }
     let variant = match triple.rsplit_once("-apple-ios") {
         Some((_, "")) if arch == "arm64" => None,
         // The Intel triple of iOS is the simulator's.
         Some((_, "")) => Some("simulator"),
         Some((_, "-sim")) => Some("simulator"),
         Some((_, "-macabi")) => Some("maccatalyst"),
-        _ => bail!("{triple} is not an iOS target"),
+        _ => bail!("{triple} is not an iOS or macOS target"),
     };
-    Ok((variant, arch))
+    Ok(("ios", variant, arch))
 }
 
 /// What the target of `triple` is called in errors.
 fn target_name(triple: &str) -> String {
     match xcframework_target(triple) {
-        Ok((None, arch)) => format!("iOS devices ({arch})"),
-        Ok((Some("simulator"), arch)) => format!("the iOS simulator ({arch})"),
-        Ok((Some(_), arch)) => format!("Mac Catalyst ({arch})"),
+        Ok(("macos", _, arch)) => format!("macOS ({arch})"),
+        Ok((_, None, arch)) => format!("iOS devices ({arch})"),
+        Ok((_, Some("simulator"), arch)) => format!("the iOS simulator ({arch})"),
+        Ok((_, Some(_), arch)) => format!("Mac Catalyst ({arch})"),
         Err(_) => triple.to_owned(),
     }
 }
 
 impl Framework {
+    /// The framework as `rust_app` keeps it between runs: its path, whether
+    /// it is force-loaded and who lists it ([`Self::from_cached`]).
+    pub(crate) fn cached(&self) -> serde_json::Value {
+        serde_json::json!({
+            "path": self.path,
+            "forceLoad": self.force_load,
+            "listed": self.listed,
+        })
+    }
+
+    /// A framework [`Self::cached`] kept.
+    pub(crate) fn from_cached(value: &serde_json::Value) -> Option<Self> {
+        Some(Framework {
+            path: value["path"].as_str()?.into(),
+            force_load: value["forceLoad"].as_bool()?,
+            listed: value["listed"].as_str()?.to_owned(),
+            ..Framework::default()
+        })
+    }
+
     /// `path`, and who lists it.
     fn describe(&self) -> String {
         format!("{} ({})", self.path.display(), self.listed)
@@ -312,7 +352,7 @@ impl Framework {
                 })
             }
             _ => bail!(
-                "{}: {} is not a static library (`.a`) or a framework: iOS apps carry dynamic \
+                "{}: {} is not a static library (`.a`) or a framework: apps carry dynamic \
                  libraries as frameworks",
                 self.listed,
                 path.display()
@@ -323,7 +363,7 @@ impl Framework {
     /// The library of an XCFramework for `triple`, by its `Info.plist`'s
     /// `AvailableLibraries`.
     fn xcframework_library(&self, triple: &str) -> anyhow::Result<PathBuf> {
-        let (variant, arch) = xcframework_target(triple)?;
+        let (wanted, variant, arch) = xcframework_target(triple)?;
         let info_path = self.path.join("Info.plist");
         let info = plist::Value::from_file(&info_path)
             .with_context(|| format!("{}: cannot read {}", self.listed, info_path.display()))?;
@@ -361,7 +401,7 @@ impl Framework {
                 .flatten()
                 .filter_map(plist::Value::as_string)
                 .collect();
-            if platform.as_deref() == Some("ios")
+            if platform.as_deref() == Some(wanted)
                 && library_variant.as_deref() == variant
                 && archs.contains(&arch)
             {
@@ -456,7 +496,8 @@ fn read_at(binary: &Path, offset: usize) -> std::io::Result<Option<bool>> {
     })
 }
 
-/// The link of an iOS executable: its arguments and the files they link.
+/// The link of an iOS or macOS executable: its arguments and the files
+/// they link.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct Link {
     /// Arguments of the linker driver (`cc`), in order.
@@ -533,13 +574,23 @@ pub(crate) fn link(
     }
     if dynamic {
         // Where the executable finds its frameworks: an iOS bundle's
-        // `Frameworks/` is next to it, a Mac Catalyst app's in `Contents/`.
-        let (variant, _) = xcframework_target(triple)?;
-        link.args.push(if variant == Some("maccatalyst") {
+        // `Frameworks/` is next to it, a Mac app's in `Contents/`.
+        let (platform, variant, _) = xcframework_target(triple)?;
+        let mac = platform == "macos" || variant == Some("maccatalyst");
+        link.args.push(if mac {
             "-Wl,-rpath,@executable_path/../Frameworks".to_owned()
         } else {
             "-Wl,-rpath,@executable_path/Frameworks".to_owned()
         });
+        // A macOS executable runs where Cargo built it too (`nsh run`,
+        // `nsh test`): it finds them where they are. Packages take these
+        // out ([`development_rpaths`]).
+        if platform == "macos" {
+            for dir in development_rpaths(frameworks, triple)? {
+                link.args
+                    .push(format!("-Wl,-rpath,{}", dir.to_string_lossy()));
+            }
+        }
     }
     for flag in flags {
         check_flag(flag)?;
@@ -548,7 +599,7 @@ pub(crate) fn link(
     Ok(link)
 }
 
-/// The variables a `cargo build` of an iOS executable for `triple` sets
+/// The variables a `cargo build` of an iOS or macOS executable sets
 /// for [`BUILD_RS`]: none without frameworks or flags. They also carry
 /// the libraries' sizes and times, so a build `nsh` keeps
 /// (`rust_app::BuiltOnce`, which reads the command's variables) is made
@@ -581,6 +632,26 @@ fn stamp(path: &Path) -> String {
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map_or(0, |d| d.as_nanos());
     format!("{}:{time}", meta.len())
+}
+
+/// The directories of the dynamic frameworks of `frameworks` for the
+/// macOS `triple`: the rpaths by which a macOS executable that runs where
+/// Cargo built it finds them, which a package's runner does not keep.
+pub(crate) fn development_rpaths(
+    frameworks: &[Framework],
+    triple: &str,
+) -> anyhow::Result<Vec<PathBuf>> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    for bundle in dynamic(frameworks, triple)? {
+        let dir = bundle
+            .parent()
+            .context("a framework is in a directory")?
+            .to_owned();
+        if !dirs.contains(&dir) {
+            dirs.push(dir);
+        }
+    }
+    Ok(dirs)
 }
 
 /// The dynamic frameworks of `frameworks` for `triple`, which a bundle
@@ -634,9 +705,12 @@ pub(crate) fn sync(
                 fs::remove_dir_all(&dest)?;
             }
             fs::create_dir_all(dir)?;
-            // `ditto` keeps a framework's symbolic links (Mac Catalyst's
-            // are versioned) and permissions.
+            // `ditto` keeps a framework's symbolic links (macOS and Mac
+            // Catalyst ones are versioned) and permissions, and leaves out
+            // extended attributes (a downloaded SDK's quarantine), which
+            // `codesign` refuses.
             let status = Command::new("ditto")
+                .args(["--norsrc", "--noextattr", "--noqtn"])
                 .arg(bundle)
                 .arg(&dest)
                 .status()
@@ -880,13 +954,18 @@ mod tests {
             library.insert("LibraryPath".into(), (*file).into());
             library.insert(
                 "SupportedArchitectures".into(),
-                plist::Value::Array(if variant.is_some() {
+                plist::Value::Array(if identifier.contains("x86_64") {
                     vec!["arm64".into(), "x86_64".into()]
                 } else {
                     vec!["arm64".into()]
                 }),
             );
-            library.insert("SupportedPlatform".into(), "ios".into());
+            let platform = if identifier.starts_with("macos") {
+                "macos"
+            } else {
+                "ios"
+            };
+            library.insert("SupportedPlatform".into(), platform.into());
             if let Some(variant) = variant {
                 library.insert("SupportedPlatformVariant".into(), (*variant).into());
             }
@@ -921,7 +1000,7 @@ mod tests {
         ]))
         .unwrap();
         let mut ignored = Vec::new();
-        let read = read(entries, Path::new("/app"), &mut ignored);
+        let read = read(entries, Path::new("/app"), "ios", &mut ignored);
         assert_eq!(read.len(), 2);
         assert_eq!(read[0].path, Path::new("/app/ios/Vendor/Sdk.xcframework"));
         assert!(!read[0].force_load);
@@ -1037,6 +1116,93 @@ mod tests {
                 dynamic: true,
             }
         );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A macOS target takes the XCFramework's macOS library, which an iOS
+    /// one never does; macOS executables find a dynamic one in
+    /// `Contents/Frameworks` when packaged, and where it is when they run
+    /// where Cargo built them.
+    #[test]
+    fn macos_takes_the_macos_library() {
+        let dir = temp("macos");
+        let sdk = xcframework(
+            &dir,
+            "Sdk",
+            &[
+                ("ios-arm64", "Sdk.framework", None, mach_o(MH_DYLIB)),
+                (
+                    "macos-arm64_x86_64",
+                    "Sdk.framework",
+                    None,
+                    universal(&mach_o(MH_DYLIB)),
+                ),
+            ],
+        );
+        let sdk = listed(sdk);
+        let bundle = sdk.path.join("macos-arm64_x86_64/Sdk.framework");
+        for triple in ["aarch64-apple-darwin", "x86_64-apple-darwin"] {
+            assert_eq!(
+                sdk.library(triple).unwrap(),
+                Library::Framework {
+                    binary: bundle.join("Sdk"),
+                    bundle: bundle.clone(),
+                    dynamic: true,
+                }
+            );
+        }
+        let ios = xcframework(&dir, "Ios", &[("ios-arm64", "libIos.a", None, archive())]);
+        let error = listed(ios)
+            .library("aarch64-apple-darwin")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("no library for macOS (arm64)"), "{error}");
+
+        let link = link(
+            std::slice::from_ref(&sdk),
+            &["-ObjC".to_owned()],
+            "aarch64-apple-darwin",
+        )
+        .unwrap();
+        let slice = sdk.path.join("macos-arm64_x86_64");
+        assert_eq!(
+            link.args,
+            [
+                format!("-F{}", slice.display()),
+                "-framework".to_owned(),
+                "Sdk".to_owned(),
+                "-Wl,-rpath,@executable_path/../Frameworks".to_owned(),
+                format!("-Wl,-rpath,{}", slice.display()),
+                "-ObjC".to_owned(),
+            ]
+        );
+        assert_eq!(
+            development_rpaths(std::slice::from_ref(&sdk), "x86_64-apple-darwin").unwrap(),
+            [slice]
+        );
+        // Static libraries need no rpath.
+        let stat = xcframework(
+            &dir,
+            "Stat",
+            &[("macos-arm64_x86_64", "libStat.a", None, archive())],
+        );
+        assert!(
+            development_rpaths(&[listed(stat)], "aarch64-apple-darwin")
+                .unwrap()
+                .is_empty()
+        );
+
+        // What `rust_app` keeps between runs comes back as it was.
+        let forced = Framework {
+            force_load: true,
+            ..sdk.clone()
+        };
+        let back = Framework::from_cached(&forced.cached()).unwrap();
+        assert_eq!(
+            (&back.path, back.force_load, &back.listed),
+            (&forced.path, true, &forced.listed)
+        );
+        assert!(Framework::from_cached(&serde_json::json!({ "path": "x" })).is_none());
         fs::remove_dir_all(&dir).unwrap();
     }
 

@@ -339,33 +339,35 @@ pub(crate) struct RustApp {
     /// them compile for ([`set_deployment_target`]).
     minimums: AppleMinimums,
     /// `nsh.json` `ios.frameworks` and `ios.linkerFlags`, which its builds
-    /// for iOS link with the crates' ([`RustApp::ios_link_env`]).
-    ios_link: IosLink,
+    /// for iOS link with the crates' ([`RustApp::apple_link_env`]).
+    ios_link: AppleLink,
+    /// `nsh.json` `macos.frameworks` and `macos.linkerFlags`, for macOS.
+    macos_link: AppleLink,
     /// Its Rust is nshm installed in `~/.nsh/nshms` only, which never
     /// change: its workspace is one every app with the same nshm shares
     /// ([`shared_workspace`]), built once, optimized throughout.
     shared: bool,
 }
 
-/// What the app's `nsh.json` links into its iOS executables.
+/// What the app's `nsh.json` links into its iOS or macOS executables.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-struct IosLink {
-    /// `ios.frameworks`, relative to `nsh.json`'s directory.
+struct AppleLink {
+    /// `<section>.frameworks`, relative to `nsh.json`'s directory.
     frameworks: Vec<crate::ios_frameworks::Framework>,
-    /// `ios.linkerFlags`.
+    /// `<section>.linkerFlags`.
     linker_flags: Vec<String>,
 }
 
-impl IosLink {
-    /// Those of the `nsh.json` `config` in `dir`. What cannot be read is
-    /// left out here; reading the whole `nsh.json` warns of it
-    /// (`package::read_config`).
-    fn of(dir: &Path, config: &serde_json::Value) -> Self {
-        let ios = config.get("ios");
+impl AppleLink {
+    /// Those of `section` (`ios`, `macos`) of the `nsh.json` `config` in
+    /// `dir`. What cannot be read is left out here; reading the whole
+    /// `nsh.json` warns of it (`package::read_config`).
+    fn of(dir: &Path, config: &serde_json::Value, section: &str) -> Self {
+        let ios = config.get(section);
         let frameworks = ios
             .and_then(|ios| ios.get("frameworks"))
             .and_then(|list| serde_json::from_value(list.clone()).ok())
-            .map(|entries| crate::ios_frameworks::read(entries, dir, &mut Vec::new()))
+            .map(|entries| crate::ios_frameworks::read(entries, dir, section, &mut Vec::new()))
             .unwrap_or_default();
         let linker_flags = ios
             .and_then(|ios| ios.get("linkerFlags"))
@@ -376,7 +378,7 @@ impl IosLink {
             .filter(|flag| crate::ios_frameworks::check_flag(flag).is_ok())
             .map(str::to_owned)
             .collect();
-        IosLink {
+        AppleLink {
             frameworks,
             linker_flags,
         }
@@ -1122,7 +1124,8 @@ pub(crate) fn runner_only(entry: &Path) -> anyhow::Result<RustApp> {
         minimums,
         // A TSX app without crates has no code that calls a framework:
         // `nsh package` refuses them.
-        ios_link: IosLink::default(),
+        ios_link: AppleLink::default(),
+        macos_link: AppleLink::default(),
         shared: false,
     };
     app.write_workspace()?;
@@ -1180,7 +1183,8 @@ pub(crate) fn of(entry: &Path, unify: bool) -> anyhow::Result<Option<RustApp>> {
     let own: Vec<AppCrate> = crates.iter().filter(|c| !c.is_fetched()).cloned().collect();
     let watched = watched(&own, nsh.source());
     let minimums = AppleMinimums::of(&config)?;
-    let ios_link = IosLink::of(dir, &config);
+    let ios_link = AppleLink::of(dir, &config, "ios");
+    let macos_link = AppleLink::of(dir, &config, "macos");
     // Only installed nshm, with a released nsh: nothing of the build is the
     // app's, so every app with these nshm shares it.
     let installed = nsh_bundler::nshm::installed_dir().and_then(|d| dunce::canonicalize(d).ok());
@@ -1219,6 +1223,7 @@ pub(crate) fn of(entry: &Path, unify: bool) -> anyhow::Result<Option<RustApp>> {
         modules: module_patches,
         minimums,
         ios_link,
+        macos_link,
         shared,
     };
     app.write_workspace()?;
@@ -2727,6 +2732,7 @@ panic = \"abort\"
                 self.hack_dependency(),
             ),
         )?;
+        write_mac_build_rs(&ws.join("describe"))?;
         let calls: Vec<String> = self
             .crates
             .iter()
@@ -2765,6 +2771,7 @@ panic = \"abort\"
                 self.hack_dependency(),
             ),
         )?;
+        write_mac_build_rs(&ws.join("test"))?;
         let (make_root, root_fn) = match &self.root {
             Some(root) => ("Some(app_root)", self.root_fn("", root)),
             None => ("None", String::new()),
@@ -2948,7 +2955,7 @@ panic = \"abort\"
                 self.nsh.dep(platform, &rust_app_platform(platform)),
             ),
         )?;
-        if dir == "rust-ios" {
+        if dir == "rust-ios" || dir == "rust-macos" {
             write(
                 &ws.join(dir).join("build.rs"),
                 crate::ios_frameworks::BUILD_RS,
@@ -3467,9 +3474,9 @@ opt-level = \"s\"
                 src("nsh-core"),
             ),
         )?;
-        // The app's iOS frameworks and linker flags reach the executable's
-        // link through it.
-        if dir.starts_with("ios") {
+        // The app's iOS and macOS frameworks and linker flags reach the
+        // executable's link through it.
+        if dir.starts_with("ios") || dir.starts_with("macos") {
             write(
                 &ws.join(dir).join("build.rs"),
                 crate::ios_frameworks::BUILD_RS,
@@ -3579,10 +3586,10 @@ opt-level = \"s\"
         } else if release {
             cmd.arg("--release");
         }
-        if let Some(triple) = triple
-            && triple.contains("-apple-ios")
+        if let Some(triple) = apple_link_triple(triple)
+            && workspace == self.workspace
         {
-            cmd.envs(self.ios_link_env(workspace, triple)?);
+            cmd.envs(self.apple_link_env(workspace, triple)?);
         }
         // Built once with what cannot change since: nothing to ask Cargo.
         let once = BuiltOnce::of(workspace, package, &cmd);
@@ -3633,21 +3640,25 @@ opt-level = \"s\"
     }
 
     /// The variables of a build of the generated `workspace` for the iOS
-    /// `triple` that link the frameworks and flags of the app's `nsh.json`
-    /// and its crates' into its executables (`ios_frameworks::BUILD_RS`).
-    fn ios_link_env(
+    /// or macOS `triple` that link the frameworks and flags of the app's
+    /// `nsh.json` and its crates' into its executables
+    /// (`ios_frameworks::BUILD_RS`).
+    fn apple_link_env(
         &self,
         workspace: &Path,
         triple: &str,
     ) -> anyhow::Result<Vec<(&'static str, String)>> {
-        let (crates, _) = crate::module_meta::ModuleMeta::read_workspace(
-            &workspace.join("Cargo.toml"),
-            &[triple],
-        )?;
-        let (frameworks, flags) = crate::module_meta::ios_link(
-            &self.ios_link.frameworks,
-            &self.ios_link.linker_flags,
+        let (platform, app) = if triple.ends_with("-apple-darwin") {
+            (crate::apple::ApplePlatform::Macos, &self.macos_link)
+        } else {
+            (crate::apple::ApplePlatform::Ios, &self.ios_link)
+        };
+        let (crates, crate_flags) = crates_link(workspace, platform, triple)?;
+        let (frameworks, flags) = crate::module_meta::join_link(
+            &app.frameworks,
+            &app.linker_flags,
             &crates,
+            &crate_flags,
         );
         if frameworks.is_empty() && flags.is_empty() {
             return Ok(Vec::new());
@@ -4189,6 +4200,101 @@ fn root_fn(cfg: &str, krate: &str, root: &RootConfig) -> String {
          /// status bar.\n\
          {cfg}fn app_root() -> nsh_core::element::Root {{\n    {make}\n}}\n"
     )
+}
+
+/// The Apple target a build for `triple` (`None`: this machine) links the
+/// app's frameworks for: an iOS one, or macOS, this Mac's included.
+fn apple_link_triple(triple: Option<&str>) -> Option<&str> {
+    match triple {
+        Some(triple) if triple.contains("-apple-ios") || triple.ends_with("-apple-darwin") => {
+            Some(triple)
+        }
+        Some(_) => None,
+        None if cfg!(all(target_os = "macos", target_arch = "aarch64")) => {
+            Some("aarch64-apple-darwin")
+        }
+        None if cfg!(target_os = "macos") => Some("x86_64-apple-darwin"),
+        None => None,
+    }
+}
+
+/// Writes `<dir>/build.rs`, the link of the app's macOS frameworks
+/// (`ios_frameworks::BUILD_RS`), on a Mac: `dir` is a program `nsh` builds
+/// for this machine with the app's crates (`describe`, `test`).
+fn write_mac_build_rs(dir: &Path) -> anyhow::Result<()> {
+    if cfg!(target_os = "macos") {
+        write(&dir.join("build.rs"), crate::ios_frameworks::BUILD_RS)?;
+    }
+    Ok(())
+}
+
+/// The frameworks and linker flags the crates of the generated `workspace`
+/// declare for `platform`'s executables built for `triple`. Reading them
+/// takes a `cargo metadata` run, so they are kept in the workspace
+/// (`apple-link-<triple>.json`) with a hash of what they come from: this
+/// nsh, the workspace's `Cargo.toml` and `Cargo.lock`, and the manifests
+/// of the path packages they were read from (the app's crates, nshm).
+fn crates_link(
+    workspace: &Path,
+    platform: crate::apple::ApplePlatform,
+    triple: &str,
+) -> anyhow::Result<(Vec<crate::ios_frameworks::Framework>, Vec<String>)> {
+    let cache = workspace.join(format!("apple-link-{triple}.json"));
+    let key = |manifests: &[PathBuf]| {
+        let mut hash = Sha256::new();
+        hash.update(env!("CARGO_PKG_VERSION"));
+        for file in [workspace.join("Cargo.toml"), workspace.join("Cargo.lock")]
+            .iter()
+            .chain(manifests)
+        {
+            hash.update(file.to_string_lossy().as_bytes());
+            hash.update([0]);
+            hash.update(fs::read(file).unwrap_or_default());
+            hash.update([0]);
+        }
+        format!("{:x}", hash.finalize())
+    };
+    let cached: Option<serde_json::Value> = fs::read_to_string(&cache)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok());
+    if let Some(cached) = cached {
+        let manifests: Vec<PathBuf> = cached["manifests"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|m| m.as_str().map(PathBuf::from))
+            .collect();
+        if cached["key"].as_str() == Some(key(&manifests).as_str()) {
+            let frameworks = cached["frameworks"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(crate::ios_frameworks::Framework::from_cached)
+                .collect();
+            let flags = cached["linkerFlags"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|f| f.as_str().map(str::to_owned))
+                .collect();
+            return Ok((frameworks, flags));
+        }
+    }
+    let json = crate::module_meta::metadata(&workspace.join("Cargo.toml"), &[triple])?;
+    let (meta, _) = crate::module_meta::ModuleMeta::from_metadata(&json)?;
+    let (frameworks, flags) = crate::module_meta::apple_link(platform, &[], &[], &meta);
+    let manifests = crate::module_meta::path_manifests(&json);
+    write(
+        &cache,
+        &serde_json::json!({
+            "key": key(&manifests),
+            "manifests": manifests,
+            "frameworks": frameworks.iter().map(|f| f.cached()).collect::<Vec<_>>(),
+            "linkerFlags": flags,
+        })
+        .to_string(),
+    )?;
+    Ok((frameworks, flags))
 }
 
 /// What tells one build of `program` from another: its size and time.
@@ -4770,7 +4876,8 @@ mod tests {
             unify: true,
             modules: Vec::new(),
             minimums: crate::apple::AppleMinimums::default(),
-            ios_link: super::IosLink::default(),
+            ios_link: super::AppleLink::default(),
+            macos_link: super::AppleLink::default(),
             shared: false,
         }
     }
@@ -5292,19 +5399,113 @@ mod tests {
     /// `nsh.json` reports.
     #[test]
     fn the_apps_ios_link_is_read_from_nsh_json() {
-        let link = super::IosLink::of(
-            Path::new("/app"),
-            &serde_json::json!({ "ios": {
+        let config = serde_json::json!({
+            "ios": {
                 "frameworks": ["ios/Sdk.xcframework", 3],
                 "linkerFlags": ["-ObjC", "", 4],
-            } }),
-        );
+            },
+            "macos": { "frameworks": ["macos/Sdk.xcframework"] },
+        });
+        let link = super::AppleLink::of(Path::new("/app"), &config, "ios");
         let paths: Vec<&Path> = link.frameworks.iter().map(|f| f.path.as_path()).collect();
         assert_eq!(paths, [Path::new("/app/ios/Sdk.xcframework")]);
         assert_eq!(link.linker_flags, ["-ObjC"]);
+        let macos = super::AppleLink::of(Path::new("/app"), &config, "macos");
         assert_eq!(
-            super::IosLink::of(Path::new("/app"), &serde_json::json!({})),
-            super::IosLink::default()
+            macos.frameworks[0].path,
+            Path::new("/app/macos/Sdk.xcframework")
+        );
+        assert_eq!(macos.frameworks[0].listed, "nsh.json `macos.frameworks[0]`");
+        assert!(macos.linker_flags.is_empty());
+        assert_eq!(
+            super::AppleLink::of(Path::new("/app"), &serde_json::json!({}), "ios"),
+            super::AppleLink::default()
+        );
+    }
+
+    /// The crates' frameworks are read again only when what they come from
+    /// changed: the workspace's manifest and lock, a path package's
+    /// manifest.
+    #[test]
+    fn the_crates_frameworks_are_kept_until_their_manifests_change() {
+        let dir = std::env::temp_dir().join(format!("nsh-apple-link-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let crate_dir = dir.join("scanner");
+        std::fs::create_dir_all(&crate_dir).unwrap();
+        // Not a workspace Cargo can read: reading it again fails.
+        std::fs::write(dir.join("Cargo.toml"), "not toml [").unwrap();
+        std::fs::write(dir.join("Cargo.lock"), "").unwrap();
+        std::fs::write(crate_dir.join("Cargo.toml"), "[package]").unwrap();
+        let manifest = crate_dir.join("Cargo.toml");
+        let framework = crate::ios_frameworks::Framework::from_cached(&serde_json::json!({
+            "path": crate_dir.join("Scanner.xcframework"),
+            "forceLoad": true,
+            "listed": "scanner: [package.metadata.nsh] `macos.frameworks`[0]",
+        }))
+        .unwrap();
+        let triple = "aarch64-apple-darwin";
+        let key = {
+            use sha2::{Digest as _, Sha256};
+            let mut hash = Sha256::new();
+            hash.update(env!("CARGO_PKG_VERSION"));
+            for file in [
+                dir.join("Cargo.toml"),
+                dir.join("Cargo.lock"),
+                manifest.clone(),
+            ] {
+                hash.update(file.to_string_lossy().as_bytes());
+                hash.update([0]);
+                hash.update(std::fs::read(&file).unwrap());
+                hash.update([0]);
+            }
+            format!("{:x}", hash.finalize())
+        };
+        std::fs::write(
+            dir.join(format!("apple-link-{triple}.json")),
+            serde_json::json!({
+                "key": key,
+                "manifests": [manifest],
+                "frameworks": [framework.cached()],
+                "linkerFlags": ["-ObjC"],
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let (frameworks, flags) =
+            super::crates_link(&dir, crate::apple::ApplePlatform::Macos, triple).unwrap();
+        assert_eq!(frameworks.len(), 1);
+        assert_eq!(frameworks[0].path, framework.path);
+        assert!(frameworks[0].force_load);
+        assert_eq!(frameworks[0].listed, framework.listed);
+        assert_eq!(flags, ["-ObjC"]);
+        // The crate's manifest changed: Cargo is asked again.
+        std::fs::write(&manifest, "[package]\nname = \"scanner\"").unwrap();
+        assert!(super::crates_link(&dir, crate::apple::ApplePlatform::Macos, triple).is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn apple_builds_link_the_apps_frameworks() {
+        assert_eq!(
+            super::apple_link_triple(Some("aarch64-apple-ios-sim")),
+            Some("aarch64-apple-ios-sim")
+        );
+        assert_eq!(
+            super::apple_link_triple(Some("x86_64-apple-darwin")),
+            Some("x86_64-apple-darwin")
+        );
+        assert_eq!(
+            super::apple_link_triple(Some("aarch64-linux-android")),
+            None
+        );
+        assert_eq!(
+            super::apple_link_triple(Some("wasm32-unknown-unknown")),
+            None
+        );
+        // A build for this machine is one for this Mac.
+        assert_eq!(
+            super::apple_link_triple(None).is_some(),
+            cfg!(target_os = "macos")
         );
     }
 
@@ -5361,16 +5562,31 @@ mod tests {
                 "{main}"
             );
         }
-        // The iOS executables take the app's frameworks and linker flags
-        // through a `build.rs` (`ios_frameworks::BUILD_RS`); the others
-        // have none.
-        for dir in ["ios-host", "ios-app", "rust-ios"] {
+        // The iOS and macOS executables take the app's frameworks and
+        // linker flags through a `build.rs` (`ios_frameworks::BUILD_RS`),
+        // and so do the programs that link the app's crates on a Mac; the
+        // others have none.
+        for dir in [
+            "ios-host",
+            "ios-app",
+            "rust-ios",
+            "macos-host",
+            "macos-app",
+            "rust-macos",
+        ] {
             assert_eq!(
                 read(&format!("{dir}/build.rs")),
                 crate::ios_frameworks::BUILD_RS
             );
         }
-        for dir in ["macos-host", "macos-app", "rust-macos", "rust-linux"] {
+        for dir in ["describe", "test"] {
+            assert_eq!(
+                app.workspace.join(dir).join("build.rs").exists(),
+                cfg!(target_os = "macos"),
+                "{dir}"
+            );
+        }
+        for dir in ["linux-host", "linux-app", "rust-linux", "windows-app"] {
             assert!(!app.workspace.join(dir).join("build.rs").exists(), "{dir}");
         }
         // Optional platform features come from the app, not its runner.

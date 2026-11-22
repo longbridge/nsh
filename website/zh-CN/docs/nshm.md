@@ -352,6 +352,7 @@ libraries = ["android/libs/scanner-glue.jar"]
 | `ios.entitlements` | iOS 应用的 entitlements |
 | `ios.frameworks` | XCFramework 和 framework，路径相对于 crate 的 `Cargo.toml`，链接和打包方式与 `nsh.json` 的 `ios.frameworks` 相同（[Framework 与链接参数](./packaging.md#framework-与链接参数)） |
 | `ios.linkerFlags` | iOS 可执行文件的链接参数，放在应用自己的之后 |
+| `macos.frameworks`、`macos.linkerFlags` | macOS 可执行文件的同名内容，与 `nsh.json` 的相同（[Framework 与链接参数](./packaging.md#framework-与链接参数)） |
 | `macos.infoPlist` | macOS 应用 `Info.plist` 的键，与 `nsh.json` 的 `macos.infoPlist` 相同 |
 | `macos.entitlements` | macOS 应用的 entitlements |
 | `android.permissions` | `<uses-permission>` 元素，写法与 `nsh.json` 相同（`CAMERA` 即 `android.permission.CAMERA`） |

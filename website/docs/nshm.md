@@ -393,6 +393,7 @@ libraries = ["android/libs/scanner-glue.jar"]
 | `ios.entitlements` | The iOS app's entitlements |
 | `ios.frameworks` | XCFrameworks and frameworks relative to the crate's `Cargo.toml`, linked and packaged as `nsh.json`'s `ios.frameworks` are ([Frameworks and linker flags](./packaging.md#frameworks-and-linker-flags)) |
 | `ios.linkerFlags` | Arguments of the iOS executable's link, after the app's own |
+| `macos.frameworks`, `macos.linkerFlags` | The same for the macOS executable, as `nsh.json`'s ([Frameworks and linker flags](./packaging.md#frameworks-and-linker-flags)) |
 | `macos.infoPlist` | Keys of the macOS app's `Info.plist`, as `nsh.json`'s `macos.infoPlist` |
 | `macos.entitlements` | The macOS app's entitlements |
 | `android.permissions` | `<uses-permission>` elements, named as in `nsh.json` (`CAMERA` is `android.permission.CAMERA`) |

@@ -1084,7 +1084,13 @@ fn dev_host_frameworks(
     record: &Path,
 ) -> anyhow::Result<(Vec<PathBuf>, bool)> {
     let frameworks = if crate::rust_app::current().is_some() {
-        crate::module_meta::ios_link(&config.ios.frameworks, &[], meta).0
+        crate::module_meta::apple_link(
+            crate::apple::ApplePlatform::Ios,
+            &config.ios.frameworks,
+            &[],
+            meta,
+        )
+        .0
     } else {
         Vec::new()
     };
