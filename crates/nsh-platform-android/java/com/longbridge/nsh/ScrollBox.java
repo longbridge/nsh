@@ -988,6 +988,20 @@ final class ScrollBox extends FrameLayout implements Node {
         return scroller.getHeight();
     }
 
+    /** Room still scrollable left, right, up and down (px), including content insets and zoom. */
+    float[] scrollRoom() {
+        int x = scroller.getScrollX(), y = scroller.getScrollY();
+        int maxX, maxY;
+        if (scroller instanceof ZScroll) {
+            maxX = ((ZScroll) scroller).maxX();
+            maxY = ((ZScroll) scroller).maxY();
+        } else {
+            maxX = horizontal ? Math.max(0, content.getWidth() + scroller.getPaddingLeft() + scroller.getPaddingRight() - scroller.getWidth()) : 0;
+            maxY = horizontal ? 0 : Math.max(0, content.getHeight() + scroller.getPaddingTop() + scroller.getPaddingBottom() - scroller.getHeight());
+        }
+        return new float[] {Math.max(0, x), Math.max(0, maxX - x), Math.max(0, y), Math.max(0, maxY - y)};
+    }
+
     /** Scrolls as the user would: not one of the core's scrolls (`applied`). */
     void hostScrollBy(int dx, int dy, boolean animated) {
         if (scroller instanceof ZScroll) {

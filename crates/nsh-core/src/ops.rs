@@ -233,8 +233,8 @@ events! {
     Menu = "onMenu": "A menu item was chosen: the application menu's or a context menu's (root only; desktops; payload: `id`), or a context menu closed (`closed`: true, after its item).",
     MouseEnter = "onMouseEnter": "The mouse came over the view or a view inside it (never on touches; payload: [`EventPayload::Mouse`]).",
     MouseLeave = "onMouseLeave": "The mouse left the view and the views inside it, or the window (payload: [`EventPayload::Mouse`], where it was last).",
-    FileDragEnter = "onFileDragEnter": "A local file drag entered an eligible desktop drop destination (payload: [`EventPayload::FileDrop`]).",
-    FileDragLeave = "onFileDragLeave": "A local file drag left its desktop drop destination.",
+    FileDragEnter = "onFileDragEnter": "A local file drag entered an eligible drop destination, on desktops and iOS (payload: [`EventPayload::FileDrop`]).",
+    FileDragLeave = "onFileDragLeave": "A local file drag left its drop destination, on desktops and iOS.",
     FileDrop = "onFileDrop": "Local files were dropped (payload: [`EventPayload::FileDrop`]).",
     MouseMove = "onMouseMove": "The mouse moved over the view or a view inside it, with or without a button down, or a modifier key changed while it rests there with none down (payload: [`EventPayload::Mouse`]; at most one per frame).",
     ContextMenu = "onContextMenu": "The secondary button was pressed over the view (payload: [`EventPayload::ContextMenu`]): the nearest listener around the view under the pointer hears it, unless a text input or selectable text is nearer.",
@@ -248,6 +248,7 @@ events! {
     OpenUrl = "onOpenUrl": "A [`Command::OpenUrl`] request finished (root only; payload: `id`, `opened`: whether the platform opened the URL).",
     CaretMove = "onCaretMove": "An input's caret moved: with its selection, or as its text scrolled or wrapped again (payload: `bounds`, the caret in the input; the core adds `pageBounds`, in the root view).",
     Paste = "onPaste": "The user pasted into an input (payload: [`EventPayload::Paste`]: the text, files with their bytes such as a screenshot, local files' URLs), before the `onChangeText` of the text it inserts.",
+    ClipboardWrite = "onClipboardWrite": "A [`Command::SetClipboard`] or [`Command::SetClipboardItem`] finished, in the order of the writes (root only, platforms with [`crate::platform::Environment::clipboard_write_result`]; payload: `written`: whether the system clipboard took it).",
     ScreenColor = "onScreenColor": "A [`Command::PickScreenColor`] request finished (root only; payload: `id`, `color`: the color picked, packed `0xRRGGBBAA`, absent when cancelled).",
     FileRequest = "onFileRequest": "A [`Command::FileRequest`] finished (root only; payload: [`EventPayload::FileRequest`]).",
     Speech = "onSpeech": "A speech recognition session reported (root only; payload: [`EventPayload::Speech`]).",
@@ -276,6 +277,8 @@ events! {
     AuthSession = "onAuthSession" as "": "A [`Command::AuthSession`] request finished (root only; payload: `id`, then the callback `url`, `action` `\"cancelled\"`, or `error` with its `code`; [`crate::auth_session`]; never reaches a listener).",
     FocusIn = "onFocusIn": "The keyboard focus came into the view: onto it or a view inside it, from outside (it entered `focus-within`; raised by the core). Moving between views inside it is no new coming in.",
     FocusOut = "onFocusOut": "The keyboard focus left the view: from it or a view inside it to one outside, or to none (it left `focus-within`; raised by the core).",
+    TextDrop = "onTextDrop" as "": "Text dragged from another app or view was dropped on the view (payload: [`EventPayload::TextDrop`]): a Rust component's, such as `RichEditor`'s, which inserts it where it was let go (iOS).",
+    OpenAppSettings = "onOpenAppSettings" as "": "A [`Command::OpenAppSettings`] request finished (root only; payload: `id`, `opened`: whether the system opened the app's page in its settings; [`crate::mobile::open_app_settings`]; never reaches a listener).",
 }
 
 /// What an input holds, for the system's autofill and suggestions
@@ -867,6 +870,29 @@ pub struct PasteEvent {
     pub uris: Vec<String>,
 }
 
+/// Text dropped on a view ([`EventKind::TextDrop`]).
+#[derive(Debug, Clone, PartialEq, Default)]
+#[non_exhaustive]
+pub struct TextDrop {
+    /// The plain text, empty when the drag held none.
+    pub text: String,
+    /// The same content as HTML, empty when the drag held none.
+    pub html: String,
+    /// The drop point in the window's coordinates.
+    pub page_position: Point<Points>,
+}
+
+impl TextDrop {
+    /// A drop of `text` (and `html`) at `page_position`.
+    pub fn new(text: String, html: String, page_position: Point<Points>) -> Self {
+        TextDrop {
+            text,
+            html,
+            page_position,
+        }
+    }
+}
+
 impl EventPayload {
     /// An `onPaste` payload of fields (`text`; a reported paste with no
     /// payload is an empty one) made a [`EventPayload::Paste`], as handlers
@@ -1133,6 +1159,9 @@ pub enum EventPayload {
     },
     /// What the user pasted into an input.
     Paste(Box<PasteEvent>),
+    /// Text dropped on a view ([`EventKind::TextDrop`]); boxed, as
+    /// [`Self::Paste`], to keep every payload small.
+    TextDrop(Box<TextDrop>),
     /// The lines of a text block.
     TextLayout(Vec<crate::text::TextLine>),
     /// The files the user picked ([`EventKind::Pick`]), with their bytes.
@@ -1865,8 +1894,8 @@ pub enum CellSlot {
     Empty,
 }
 
-/// A list's `contentStyle` (or `contentClass`): padding around the content and gaps
-/// between rows and columns.
+/// A list's `contentStyle` (or `contentClass`): padding around the content, gaps
+/// between rows and columns, and cell alignment on the cross axis.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct ListContentStyle {
     /// Padding around the content.
@@ -1875,6 +1904,9 @@ pub struct ListContentStyle {
     pub row_gap: Points,
     /// Gap between columns (`numColumns`) of vertical lists.
     pub column_gap: Points,
+    /// Cell alignment on the cross axis: stretch (default), flex-start, center
+    /// or flex-end.
+    pub align_items: Option<taffy::AlignItems>,
 }
 
 /// Where a list rests (`alignment`), as GPUI's `ListAlignment`.
@@ -2618,6 +2650,12 @@ pub enum Command {
     /// sheets) take their colors from, by the tokens' names (`popover`,
     /// `accent`, `border`, ...).
     Tokens(std::sync::Arc<crate::element::Tokens>),
+    /// The language the app's text shows in ([`crate::i18n`]: its selected
+    /// language, `setLocale`'s or the embedding app's included), on the
+    /// root of an iOS or Android surface, sent when it changes: the words
+    /// the platform speaks for states it has no system words for
+    /// (checked, expanded, invalid...) follow it.
+    TextLocale(crate::platform::Locale),
     /// Change what functions set for the status bar (on the root): the
     /// core merges it under the settings components render and sends
     /// [`Command::StatusBar`] when the result changes.
@@ -2766,6 +2804,17 @@ pub enum Command {
         id: u32,
         /// The URL ([`crate::open_url::check_url`] passed it).
         url: String,
+    },
+    /// Open the app's own page in the system's settings (on the root;
+    /// `nsh/mobile`'s `AppSettings.open`,
+    /// [`crate::mobile::open_app_settings`]): iOS's
+    /// `UIApplication.openSettingsURLString`, Android's application
+    /// details. Report whether the system opened it as
+    /// [`EventKind::OpenAppSettings`] `id`. Sent only on platforms whose
+    /// [`crate::platform::Environment::app_settings`] is set.
+    OpenAppSettings {
+        /// The request.
+        id: u32,
     },
     /// Show the system's share sheet for `sheet` (on the root;
     /// `Share.show`, [`crate::share`]) and report how it ended as
@@ -3680,6 +3729,13 @@ pub enum Prop {
     /// `testID`: an identifier for UI tests.
     #[prop(js = "testID")]
     TestId(Option<Arc<str>>),
+    /// `copyText`: what a copy of the text around the view gives in its
+    /// place, when the view (or image) is inside a text (an inline
+    /// formula's source, an emoji image's character): selecting across it
+    /// and copying puts this there. Unset, the view adds nothing to the
+    /// copy. A view outside a text and a nested text span ignore it.
+    #[prop(js = "copyText")]
+    CopyText(Option<Arc<str>>),
     /// `web={{ element }}`: the HTML element the web draws the view or text
     /// as (`"p"`, `"nav"`, `"article"`, ...), for what `role` cannot say;
     /// the other platforms keep the view as it is.

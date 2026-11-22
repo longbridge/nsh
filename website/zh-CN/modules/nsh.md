@@ -342,7 +342,8 @@ interface AppInfo {
 `--release` 的 `nsh build` 是开发构建；`nsh package`、`nsh publish` 和 `nsh build --release` 不是。在任何平台、任何模块中
 都能读取，包括模块顶层的代码：构建会在应用的模块运行之前把这些信息交给运行时。
 
-安装的应用本体的版本见 `nsh/updater` 的 [`shellInfo()`](./nsh-updater.md#shellinfo)。
+安装的应用本体的版本见 `nsh/updater` 的 [`shellInfo()`](./nsh-updater.md#shellinfo)。Rust 应用的 Rust 代码用 `app_info()`
+读取同样的信息（[应用的版本](../docs/device-and-environment.md#应用的版本)）。
 
 ```tsx
 import { appInfo, Text } from "nsh";
@@ -1548,8 +1549,8 @@ import { Clipboard } from "nsh";
 
 ```ts
 const Clipboard: {
-  writeText(text: string): Promise<void>;
-  write(item: ClipboardItem): Promise<void>;
+  writeText(text: string): Promise<ClipboardWrite>;
+  write(item: ClipboardItem): Promise<ClipboardWrite>;
   readText(): Promise<string>;
   hasText(): Promise<boolean>;
   writeImage(src: string): Promise<void>;
@@ -1557,6 +1558,8 @@ const Clipboard: {
   hasImage(): Promise<boolean>;
   readFiles(): Promise<string[]>;
 };
+
+type ClipboardWrite = "written" | "failed" | "requested";
 
 interface ClipboardItem {
   text: string; // 纯文本形式的内容
@@ -1571,8 +1574,8 @@ interface ClipboardImage {
 
 | TS | Rust（`nsh_core::prelude`） |
 |---|---|
-| `await Clipboard.writeText(text)` | `set_clipboard(text)` |
-| `await Clipboard.write({ text, html })` | `set_clipboard_item(item)`（一个 `ClipboardItem`） |
+| `await Clipboard.writeText(text)` | `set_clipboard(text).await -> ClipboardWrite` |
+| `await Clipboard.write({ text, html })` | `set_clipboard_item(item).await -> ClipboardWrite`（一个 `ClipboardItem`） |
 | `await Clipboard.readText()` | `clipboard_string().await -> String` |
 | `await Clipboard.hasText()` | `clipboard_has_string().await -> bool` |
 | `await Clipboard.writeImage(src)` | `set_clipboard_image(src)` |
@@ -1591,10 +1594,12 @@ iOS、桌面和 Web 上可以通过剪贴板传递图片。在 Android 上，剪
 ### Clipboard.writeText
 
 ```ts
-writeText(text: string): Promise<void>;
+writeText(text: string): Promise<ClipboardWrite>;
 ```
 
 把 `text` 放到剪贴板上，替换原有内容。Rust：`set_clipboard(text)`。
+
+结果表示这次写入的情况：系统剪贴板接收时为 `"written"`（Windows、macOS、Web），被拒绝时为 `"failed"`（剪贴板被其他应用占用、浏览器拒绝），平台无法确认时为 `"requested"`（iOS、Android、Linux、GPUI 宿主、终端）。NSH 不会读回剪贴板来确认。只在 `"written"` 时显示“已复制”，`"failed"` 时保留手动复制入口。Rust 中返回 `ClipboardWrite`；不关心结果时直接丢弃，写入照常进行。
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -1630,7 +1635,7 @@ const copied = signal(false);
 ### Clipboard.write
 
 ```ts
-write(item: ClipboardItem): Promise<void>;
+write(item: ClipboardItem): Promise<ClipboardWrite>;
 ```
 
 把同一内容的纯文本和 HTML 一起放到剪贴板上，替换原有内容，和浏览器复制选区的做法一样：能读格式的应用（邮件、文档、富文本编辑器）
@@ -2294,11 +2299,11 @@ async function signOut() {
 
 ### Notifications.on
 
-`press` 报告用户点击的通知的 `id`。点击可能启动应用：事件会等到第一个监听器注册后送达，所以请在应用启动时监听，并把点击后要打开的内容放在 `id` 里。Android 上，嵌入方的 Activity 要在 `onCreate` 和 `onNewIntent` 里把 Intent 传给 `NshView.handleNotificationIntent`。Apple 平台上，已设置通知中心 delegate 的嵌入方保留自己的 delegate，点击也由它接收。Linux 上点击只传给运行中的应用：应用退出后留下的通知点击后没有反应。
+`press` 报告用户点击的通知的 `id`。点击可能启动应用：事件会等到第一个监听器注册后送达，所以请在应用启动时监听，并把点击后要打开的内容放在 `id` 里。Android 上，嵌入方的 Activity 要在 `onCreate` 和 `onNewIntent` 里把 Intent 传给 `NshView.handleNotificationIntent`；推送 SDK 等其他代码显示的通知的点击交给 Rust 代码用 `nsh::notifications::set_foreign_handler` 设置的处理者（见 [Android](../docs/android.md#来自其他代码的通知)），不会触发 `press`。Apple 平台上，已设置通知中心 delegate 的嵌入方保留自己的 delegate，点击也由它接收；否则远程通知和其他原生代码安排的通知交给 Rust 代码用 `nsh_platform_apple::notifications::set_foreign_handler` 设置的处理者（见 [iOS](../docs/ios.md#来自其他代码的通知)），不会触发 `press`。Linux 上点击只传给运行中的应用：应用退出后留下的通知点击后没有反应。
 
 ### Notifications.permission
 
-`permission()` 只查询不询问，`requestPermission()` 首次会显示系统提示。两者的结果都是 `"default"`（尚未询问）、`"granted"`、`"denied"`（只能在系统设置里更改）或 `"unavailable"`。在 Apple 平台上，`requestPermission()` 询问之后按系统设置里的权限返回：用户关掉了通知的应用得到 `"denied"`。
+`permission()` 只查询不询问，`requestPermission()` 首次会显示系统提示。两者的结果都是 `"default"`（尚未询问）、`"granted"`、`"denied"`（只能在系统设置里更改，`nsh/mobile` 的 [`AppSettings.open`](./nsh-mobile.md#appsettings) 可以把用户带过去）或 `"unavailable"`。在 Apple 平台上，`requestPermission()` 询问之后按系统设置里的权限返回：用户关掉了通知的应用得到 `"denied"`。
 
 ## UrlScheme
 
@@ -2336,11 +2341,57 @@ scheme 以字母开头，后面是字母、数字、`+`、`-` 或 `.`，按小�
 | Windows | 应用每次启动时写入 `HKEY_CURRENT_USER\\Software\\Classes`；第二次启动会把 URL 交给正在运行的应用 |
 | Linux | 应用启动时在 `~/.local/share/applications` 写入带 `x-scheme-handler/<scheme>` 的桌面文件（`<应用 id>.desktop`）。安装器为本可执行文件放在那里的条目会保留，只补上它缺少的 scheme；属于应用另一份副本的条目不会改动。只有某个 scheme 还没有任何应用处理时，应用才设为它的默认处理程序。`nsh run` 以同样方式注册开发宿主。第二次启动会把 URL 交给正在运行的应用 |
 
+### Web 链接
+
+应用还可以声明 Web 链接：自己网站上能打开应用的 `https` 链接，即 iOS 和 macOS 上的 Universal Links、Android 上的 App
+Links。这样，邮件、聊天或搜索结果里的 `https://example.com/orders/42` 这类链接在装有应用的设备上打开应用，在其他地方打开网页。
+它和 scheme 的链接交给同一个 `open` 监听器，一个监听器就能处理两者；在 Web 上，同一个地址就是页面自己的地址
+（`UrlScheme.url()`）。
+
+```json
+{
+  "links": [
+    { "host": "example.com", "paths": ["/orders/*", "/invite"] },
+    { "host": "*.example.com" }
+  ]
+}
+```
+
+- `host` 是域名，按小写比较（国际化域名可以直接写），或者 `*.` 加域名表示它的子域名：`*.example.com` 不包括
+  `example.com` 本身，两者都要列出。不能带 scheme、端口、路径，也不能是 IP 地址。
+- `paths` 列出该主机中能打开应用的路径：完整路径（`/invite`），或以 `*` 结尾的路径开头（`/orders/*` 匹配 `/orders/42`，
+  但不匹配 `/orders`）。`*` 只能出现在末尾。路径区分大小写，与链接经过百分号解码后的路径比较（`/café/*` 匹配
+  `/caf%C3%A9/1`）：请写解码后的形式，不带查询或片段。省略 `paths` 时，该主机的所有路径都打开应用；如果应用只展示网站的部分页面，
+  就把它们列出来，其他页面（`/blog`、`/login`）仍在浏览器中打开。
+
+NSH 只放行这些主机和路径的、不带端口和用户名的 `https` 链接，无论链接从哪里来：其他应用可以把任何 URL 发给 Android 的
+Activity，核心会丢弃应用没有声明的链接。和 scheme 一样，任何人都能做出这样的链接，所以要检查它请求的内容。`nsh` 不能完整读取的链接
+（新版 NSH 的键、其他形式的路径、`"paths": []`）会被略过并给出警告，绝不会只声明其中一部分。
+
+网站要通过 HTTPS 且不经重定向证明应用属于它：
+
+- `/.well-known/apple-app-site-association` 以 `<team id>.<应用 id>` 指明应用，其中的 `components` 与 `paths` 一致
+  （`{ "/": "/orders/*" }`）：iOS 检查那里的路径，NSH 检查 `paths`，两者都接受的链接才会到达应用。
+- `/.well-known/assetlinks.json` 指明包名和签名证书的 SHA-256 指纹。
+
+在此之前，系统会在浏览器中打开这些链接。
+
+| 平台 | 应用如何声明链接 |
+| --- | --- |
+| iOS | `nsh package` 签名应用时使用的 `com.apple.developer.associated-domains` entitlement 中的 `applinks:<主机>`，排在 `ios.entitlements` 列出的条目之后；真机构建的描述文件必须授予 Associated Domains。包括启动应用的链接和运行中到达的链接 |
+| macOS | 同一个 entitlement，但 macOS 只在描述文件下承认它：`nsh package` 以 ad hoc 方式签名的应用不包含它，请在 `macos.entitlements` 中列出，并用授予它的描述文件签名应用。之后应用就会接收这些链接 |
+| Android | 每个链接一个带 `android:autoVerify="true"` 的 `ACTION_VIEW` intent filter，主机作为 `https` 主机，每个路径作为 `android:path`（以 `*` 结尾的作为 `android:pathPrefix`），Android 在安装应用时验证；Activity 以 `singleTask` 运行，链接会交给正在运行的应用 |
+| Web | 页面本身就是链接：`nsh package` 略过 `links` 并给出警告 |
+| Windows、Linux | 没有应用链接：由浏览器打开，`nsh package` 略过 `links` 并给出警告 |
+
+Rust 应用生成的代码把这些链接交给它的根组件（`Root::links`）。
+
 `nsh test` 可以把链接交给测试中的应用：`App.open(entry, { url })` 用一个链接启动应用，`app.openWithUrl(url)`
 在运行中打开一个链接，两者都在无头模式下运行。
 
 嵌入 NSH 的应用自己拥有 scheme，把 URL 交给视图：`AppView.open_url`（Linux、iOS）、`NshAppView.openURL`（Swift）、
-`NshView.openUrl` 或 `NshView.handleUrlSchemeIntent`（Android）。
+`NshView.openUrl` 或 `NshView.handleUrlSchemeIntent`（Android）。Universal Link 以 activity 的形式到达嵌入应用的
+`scene(_:continue:)`：把它的 `webpageURL` 也交给 `NshAppView.openURL`，它会按应用声明的链接检查。
 
 ### UrlScheme.url
 
@@ -3052,13 +3103,14 @@ interface KeyBindingOptions {
   repeat?: boolean;
   passThrough?: boolean;
   forFocus?: boolean;
+  overFocused?: boolean;
 }
 ```
 
 | TS | Rust |
 |---|---|
 | `keymap.bind(keystroke, handler)` | `on_key(keystroke, handler)` |
-| `keymap.bind(keystroke, handler, { scope, when, repeat, passThrough, forFocus })` | `on_key_with(keystroke, KeyOptions { scope, when, repeat, pass_through, for_focus }, handler)`；`scope` 是 `KeyScope::Window`（默认）或 `KeyScope::App`；`when` 是 `nsh_core::keymap::When`（`Auto`、`Always`、`NotEditing`） |
+| `keymap.bind(keystroke, handler, { scope, when, repeat, passThrough, forFocus, overFocused })` | `on_key_with(keystroke, KeyOptions { scope, when, repeat, pass_through, for_focus, over_focused }, handler)`；`scope` 是 `KeyScope::Window`（默认）或 `KeyScope::App`；`when` 是 `nsh_core::keymap::When`（`Auto`、`Always`、`NotEditing`） |
 | `keymap.bind({ … })` | 每个按键组合一次 `on_key` |
 | `keymap.label(keystroke)` | `key_label(keystroke)` |
 
@@ -3248,6 +3300,17 @@ on_key_with("space", KeyOptions { for_focus: true, ..KeyOptions::default() }, mo
 ```
 
 按键归最新的对话框：焦点留在被对话框盖住的视图上时（菜单项打开对话框，菜单关闭时把焦点还给触发器），回车和空格交给对话框的绑定，这个视图的 `forFocus` 绑定和按下都要等对话框关闭后才生效。
+
+拥有焦点的组件自己的绑定排在应用的绑定之前：`Editor` 有焦点时，无论应用把 Mod+Enter 绑给了什么，它都会在下方插入一行。带 `overFocused: true` 的绑定则排在它们之前，应用因此能拿到聚焦组件自己绑定的按键，例如查询编辑器用 Mod+Enter 执行其中的文本。在那个视图有焦点时绑定、焦点离开时撤销，组件在别的时候仍然保留这个键（Rust：`KeyOptions { over_focused: true, .. }`）。不带这个选项时顺序与以前相同，弹出层的 Escape 仍然先关闭弹出层。
+
+```tsx
+const focused = signal(false);
+effect(() => {
+  if (focused()) keymap.bind("mod+enter", runQuery, { when: "always", overFocused: true });
+});
+
+<Editor onFocus={() => focused.set(true)} onBlur={() => focused.set(false)} />
+```
 
 菜单快捷键会让位给相同按键组合的绑定：所有桌面平台上的应用菜单（[`nsh/desktop`](./nsh-desktop)），以及 macOS 上的内置菜单（Cmd+W、Cmd+C 等）。使用 `nsh run` 开发时，即使应用绑定了 `mod+r`，Cmd+R / Ctrl+R 也总是重新加载应用；打包后的应用可以绑定它。
 

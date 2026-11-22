@@ -24,8 +24,8 @@ use super::{
     reactive::with_data,
     signal_with,
     task::{
-        self, Action, Answer, ClipboardImage, ClipboardItem, DialogAnswer, Executor, FileAnswer,
-        ImageSize,
+        self, Action, Answer, ClipboardImage, ClipboardItem, ClipboardWrite, DialogAnswer,
+        Executor, FileAnswer, ImageSize,
     },
 };
 use crate::{
@@ -53,6 +53,8 @@ pub(crate) struct Ambient {
     storage: Option<crate::storage::Store>,
     /// The app's own data directory ([`data_dir`]).
     data_dir: Option<std::path::PathBuf>,
+    /// The app as it was built ([`app_info`]).
+    app_info: Option<crate::platform::AppInfo>,
     /// What `nsh/updater` checks with for Rust code
     /// ([`crate::runtime::prompt_for_update`]).
     updater: Option<std::sync::Arc<dyn crate::runtime::UpdaterHost>>,
@@ -179,6 +181,12 @@ impl super::Runtime {
         with_data(|d| d.ambient.data_dir = dir);
     }
 
+    /// The app as it was built ([`app_info`]).
+    pub(crate) fn set_app_info(&self, info: Option<crate::platform::AppInfo>) {
+        let _entered = self.enter();
+        with_data(|d| d.ambient.app_info = info);
+    }
+
     /// What Rust code checks for updates with ([`updater_host`]).
     pub(crate) fn set_updater(
         &self,
@@ -299,7 +307,7 @@ pub(super) fn executor() -> Rc<Executor> {
     with_data(|d| d.ambient.executor.clone()).expect("the core sets the executor")
 }
 
-fn act(action: Action) {
+pub(crate) fn act(action: Action) {
     executor().act(action);
 }
 
@@ -688,6 +696,20 @@ pub fn data_dir() -> Option<std::path::PathBuf> {
     with_data(|d| d.ambient.data_dir.clone())
 }
 
+/// The app as it was built (TS: `appInfo()`): its id, name, version and
+/// build number, and whether it is a development build
+/// ([`crate::platform::AppInfo`]). `None` in a TSX app, whose JS
+/// `appInfo()` reports it, and where the runner gave none.
+///
+/// ```ignore
+/// if let Some(version) = app_info().and_then(|info| info.version) {
+///     log::info!("version {version}");
+/// }
+/// ```
+pub fn app_info() -> Option<crate::platform::AppInfo> {
+    with_data(|d| d.ambient.app_info.clone())
+}
+
 /// What Rust code checks for updates with: the engine's, `None` where the
 /// app does not update.
 pub(crate) fn updater_host() -> Option<std::sync::Arc<dyn crate::runtime::UpdaterHost>> {
@@ -722,17 +744,27 @@ pub fn open_url(url: impl Into<String>) -> Answer<bool> {
     answer
 }
 
-/// Puts `text` on the system clipboard (TS: `Clipboard.writeText`).
-pub fn set_clipboard(text: impl Into<String>) {
-    act(super::services::set_clipboard(text.into()));
+/// Puts `text` on the system clipboard (TS: `Clipboard.writeText`). The
+/// answer says whether the system clipboard took it
+/// ([`ClipboardWrite`]); drop it when that does not matter, the write
+/// happens either way.
+pub fn set_clipboard(text: impl Into<String>) -> Answer<ClipboardWrite> {
+    let (answer, action) = super::services::set_clipboard(text.into());
+    act(action);
+    answer
 }
 
 /// Puts `item` on the system clipboard (TS: `Clipboard.write`): its
 /// text, and its HTML as the platform's HTML type, which apps that read
 /// formatting paste. Where the platform has no HTML on the clipboard (a
 /// terminal) the text only.
-pub fn set_clipboard_item(item: ClipboardItem) {
-    act(super::services::set_clipboard_item(item));
+///
+/// The answer says whether the system clipboard took it
+/// ([`ClipboardWrite`]); drop it when that does not matter.
+pub fn set_clipboard_item(item: ClipboardItem) -> Answer<ClipboardWrite> {
+    let (answer, action) = super::services::set_clipboard_item(item);
+    act(action);
+    answer
 }
 
 /// The text on the system clipboard, `""` when it holds none (TS:
@@ -840,15 +872,17 @@ pub fn share(
 /// Opens a web sign-in session for `request` ([`crate::auth_session`]):
 /// the provider's sign-in page, which redirects to a URL of the request's
 /// callback scheme when the user is done. iOS shows it in an
-/// `ASWebAuthenticationSession`, Android in a Custom Tab, other platforms
-/// in the system browser. To await in a task: the
+/// `ASWebAuthenticationSession`, Android in a Custom Tab, the macOS,
+/// Windows and Linux backends in the system browser. To await in a task: the
 /// [`AuthSessionOutcome`](crate::auth_session::AuthSessionOutcome) is the
 /// callback URL, or a cancellation (the user closed the page or came back
 /// without signing in, or a later session replaced it). Outside iOS the
 /// callback comes back as a link of a scheme the app claims (`nsh.json`
 /// `schemes`), which the session takes instead of
-/// [`next_url_scheme_open`]; where neither brings it back, the session
-/// fails with the [`AuthSessionError`](crate::auth_session::AuthSessionError)
+/// [`next_url_scheme_open`]; where nothing brings it back (an unclaimed
+/// scheme, or a platform that hears no links of the app's schemes: the
+/// web, the GPUI and terminal backends), the session fails at once with the
+/// [`AuthSessionError`](crate::auth_session::AuthSessionError)
 /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. It fails with `ERR_ACCESS_DENIED`
 /// where the app's `openUrl` capability does not grant the page's URL, and
 /// with no code for a request
@@ -1370,6 +1404,13 @@ pub(crate) fn act_locale(locale: Option<crate::platform::Locale>) {
     act(Action::Locale(locale));
 }
 
+/// Tells the core that translations changed in place
+/// ([`crate::i18n::add_translations`]), so menus can re-localize if the
+/// selected language changed.
+pub(crate) fn act_translations_changed(before: crate::i18n::Translations) {
+    act_if_running(Action::TranslationsChanged(before));
+}
+
 /// Shows the surface in `appearance` whatever the system's (TS:
 /// `setColorScheme`).
 pub fn set_color_scheme(appearance: Appearance) {
@@ -1727,6 +1768,11 @@ pub struct KeyOptions {
     /// give way to the control the focus is on (default)
     /// ([`crate::keymap::KeyBinding::for_focus`]).
     pub for_focus: bool,
+    /// Comes before the views' bindings of the keystroke, so it takes a key
+    /// a focused component binds itself (a query editor's mod+enter over
+    /// the editor's own) while it is kept (default: the views' come first)
+    /// ([`crate::keymap::KeyBinding::over_focused`]).
+    pub over_focused: bool,
 }
 
 /// Where a keyboard shortcut fires ([`on_key_with`]; TS: `keymap.bind`'s
@@ -1774,6 +1820,12 @@ pub fn try_apple_keys() -> Option<bool> {
 ///
 /// On a keystroke that is not one, or one the platform keeps (Command+Q
 /// on Apple platforms, Alt+F4 elsewhere, ...), as TS's `bind` throws.
+///
+/// The panic is not fatal to the app: like any panic in a component, it
+/// ends the component that made the call (its error boundary hears it, or
+/// it is logged) and the engine goes on. To take keystrokes from user
+/// settings, check them first with
+/// [`Shortcut::parse`](crate::desktop::Shortcut::parse).
 #[track_caller]
 pub fn on_key(keystroke: &str, handler: impl Fn(&str) + 'static) {
     on_key_with(keystroke, KeyOptions::default(), handler);
@@ -1811,6 +1863,7 @@ pub fn on_key_with(keystroke: &str, options: KeyOptions, handler: impl Fn(&str) 
             crate::keymap::KeyBinding::new(id, parsed, options.when, options.repeat)
                 .passing_through(options.pass_through)
                 .focus_keys(options.for_focus)
+                .over_focused(options.over_focused)
         },
         keystroke.into(),
         handler,
@@ -1980,6 +2033,12 @@ fn add_watch(target: Rc<dyn Fn() -> Option<NodeId>>, handler: super::watch::Scro
 /// # Panics
 ///
 /// On a keystroke that is not one.
+///
+/// The panic is not fatal to the app: like any panic in a component, it
+/// ends the component that made the call (its error boundary hears it, or
+/// it is logged) and the engine goes on. To take keystrokes from user
+/// settings, check them first with
+/// [`Shortcut::parse`](crate::desktop::Shortcut::parse).
 #[track_caller]
 pub fn key_label(keystroke: &str) -> String {
     let parsed = crate::keymap::Keystroke::parse_with(keystroke, apple_keys())

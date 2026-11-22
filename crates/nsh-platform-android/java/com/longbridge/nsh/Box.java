@@ -580,6 +580,75 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
         }
     }
 
+    // --- Hover routing: pointerEvents -----------------------------------------
+
+    /*
+     * Hovers follow pointerEvents as touches do (below). Android gives a
+     * hover to the topmost view under the pointer that handles it, and a
+     * clickable view handles it whatever its pointerEvents. So an inert
+     * overlay (pointerEvents none, a press-to-dismiss scrim kept mounted
+     * while hidden) took the hovers of the views under it, and neither a
+     * mouse nor a screen reader's touch exploration (TalkBack explores with
+     * hover events) reached them.
+     *
+     * ViewGroup keeps its own hover state and sends no exit or enter when
+     * only pointerEvents changes: a box that turns inert while hovered stays
+     * its parent's hover target, with no exit until the pointer leaves its
+     * area (a full-screen overlay's never), so it sends itself the exit.
+     */
+
+    /** The last hover this box passed on, to its children or itself, was not an exit. */
+    private boolean hoverPassed;
+    /** The last hover this box handled itself was not an exit. */
+    private boolean hoverSelf;
+
+    @Override
+    protected boolean dispatchHoverEvent(MotionEvent e) {
+        boolean exit = e.getActionMasked() == MotionEvent.ACTION_HOVER_EXIT;
+        if (pointerEvents == 1) {
+            if (!hoverPassed) return false;
+            hoverPassed = false;
+            if (exit) return super.dispatchHoverEvent(e);
+            hoverAs(e, MotionEvent.ACTION_HOVER_EXIT, true);
+            return false;
+        }
+        hoverPassed = !exit;
+        return super.dispatchHoverEvent(e);
+    }
+
+    @Override
+    public boolean onInterceptHoverEvent(MotionEvent e) {
+        if (pointerEvents == 3) return true;
+        return super.onInterceptHoverEvent(e);
+    }
+
+    @Override
+    public boolean onHoverEvent(MotionEvent e) {
+        int action = e.getActionMasked();
+        boolean exit = action == MotionEvent.ACTION_HOVER_EXIT;
+        if (pointerEvents == 2) {
+            if (!hoverSelf) return false;
+            hoverSelf = false;
+            if (exit) return super.onHoverEvent(e);
+            hoverAs(e, MotionEvent.ACTION_HOVER_EXIT, false);
+            return false;
+        }
+        // Box-none no longer: the group, which counted this view hovered all
+        // along, sends a move, not the enter that marks it hovered.
+        if (!hoverSelf && action == MotionEvent.ACTION_HOVER_MOVE) hoverAs(e, MotionEvent.ACTION_HOVER_ENTER, false);
+        hoverSelf = !exit;
+        return super.onHoverEvent(e);
+    }
+
+    /** {@code e} as {@code action}, through the group (children and self) or to this view only. */
+    private void hoverAs(MotionEvent e, int action, boolean group) {
+        MotionEvent copy = MotionEvent.obtainNoHistory(e);
+        copy.setAction(action);
+        if (group) super.dispatchHoverEvent(copy);
+        else super.onHoverEvent(copy);
+        copy.recycle();
+    }
+
     // --- Touch routing: pointerEvents and hitSlop -----------------------------
 
     @Override

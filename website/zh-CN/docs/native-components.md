@@ -616,6 +616,40 @@ impl NativeComponent for ImageView {
 }
 ```
 
+绘制型组件也可以在自己有可命中内容的地方（比如画在图片上的标注）接收按下、移动和松开。`hit` 对每个点询问，默认返回
+`false`，此时按下仍交给视图的处理器（`onPress`、`onMouseMove`）。返回 `true` 的地方，`pointer` 会收到 `Pointer`
+（`kind`：`Down`、`Move`、`Up`、`Cancel`、`Leave`；`x`、`y` 为组件坐标的点；`clicks`；`shift`、`ctrl`、`alt`）：它接下的按下之后，
+移动和松开会一直送给它直到松开，即使移出边界；没有按键时，鼠标在它命中的区域上移动时收到移动，离开时收到 `Leave`。它返回
+`false` 的按下会交给下面的视图。只有左键会送给它，右键和上下文菜单仍归视图。`cursor` 设置它命中区域上的光标：
+
+```rust
+use nsh_platform_windows::{Cursor, Pointer, PointerKind};
+
+impl NativeComponent for ImageView {
+    // draw、set_prop、wheel ……
+
+    fn hit(&self, x: f32, y: f32, _size: (f32, f32)) -> bool {
+        self.annotation_at(x, y).is_some()
+    }
+
+    fn pointer(&mut self, event: &Pointer) -> bool {
+        match event.kind {
+            PointerKind::Down => self.grab(event.x, event.y),
+            PointerKind::Move => self.drag_or_hover(event.x, event.y),
+            PointerKind::Up | PointerKind::Cancel => self.release(),
+            PointerKind::Leave => self.unhover(),
+            _ => {}
+        }
+        self.context.redraw();
+        true
+    }
+
+    fn cursor(&self, _x: f32, _y: f32) -> Option<Cursor> {
+        Some(Cursor::Move)
+    }
+}
+```
+
 ## 从应用的 crate 注册
 
 带有自己 Rust crate 的应用（`nsh.json` 的 `"rust"`，见 [Rust](./rust.md)）可以在这个 crate 里注册原生组件，NSH 为应用构建的宿主都会用到它们：

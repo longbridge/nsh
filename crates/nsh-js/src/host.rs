@@ -1371,6 +1371,11 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
                 obj.set("pagePosition", point_object(cx, *page_position)?)?;
             }
         }
+        EventPayload::TextDrop(drop) => {
+            obj.set("text", drop.text.as_str())?;
+            obj.set("html", drop.html.as_str())?;
+            obj.set("pagePosition", point_object(cx, drop.page_position)?)?;
+        }
         // The bytes cross natively: each file is a `File` over them.
         EventPayload::Paste(paste) => {
             obj.set("text", paste.text.as_str())?;

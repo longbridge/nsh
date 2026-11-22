@@ -64,7 +64,7 @@ TSX app adds its entry (`nsh package App.tsx --target …`).
 `nsh.json` also holds `rust` and `root` (the app's crates and its root component, [Building with Rust](./rust.md)),
 `theme` and `appearance`, `tailwind` (see [Tailwind](./tailwind.md)), `capabilities` (see
 [Sandbox and capabilities](./sandbox-and-capabilities.md)), `android` (`targetSdk`, `usesCleartextTraffic`, `permissions` and `dex`, [below](#target-api-level)), `ios` and `macos` (the `Info.plist` keys and entitlements
-of their packages, [below](#infoplist-keys-and-entitlements); `macos.activationPolicy`, a [menu bar app](./macos.md#menu-bar-apps)) and `updater`, which makes desktop packages update themselves
+of their packages, [below](#infoplist-keys-and-entitlements); `ios.extensions`, [app extensions](#app-extensions); `macos.activationPolicy`, a [menu bar app](./macos.md#menu-bar-apps)) and `updater`, which makes desktop packages update themselves
 (see [App Updates](./app-updates.md)) and every native package take [OTA updates](./ota-updates.md); [Project structure](./project-structure.md#nshjson) lists
 every key. A key or value NSH cannot read is reported as a warning and left out, so an app written for a newer NSH
 still builds with an older one, and the warning catches a typo.
@@ -87,7 +87,7 @@ nsh package --target android --app-version 1.4.0 --build 42
 | `--build <n>` | Build number. |
 | `--icon <png>` | App icon: a square PNG, ideally 1024×1024. |
 | `--sign <identity>` | iOS: the code signing identity for devices. |
-| `--profile <file>` | iOS: the provisioning profile for devices (`.mobileprovision`). |
+| `--profile <file>` | iOS: the provisioning profile for devices (`.mobileprovision`). Repeat it to give each [app extension](#app-extensions) its own. |
 | `--keystore <file>` | Android: a release keystore (default: the debug key). |
 | `--key-alias <alias>` | Android: the key alias in the keystore. |
 | `--keystore-password <password>` | Android: the keystore password; also read from `NSH_KEYSTORE_PASSWORD`. |
@@ -124,6 +124,7 @@ profile). What happens:
 - The entitlements come from the profile, with the app's own from `nsh.json` `ios.entitlements` checked against it
   ([below](#infoplist-keys-and-entitlements)). NSH checks that the profile's application identifier covers the app's `id`
   (wildcard profiles such as `TEAMID.*` or `TEAMID.com.example.*` work) and stops with an error otherwise.
+- The app's extensions, if any, are signed first, each with its own profile ([App extensions](#app-extensions)).
 - The app is signed with `codesign` using the identity, then zipped into an `.ipa` (`Payload/<Name>.app`).
 
 Find your identities with:
@@ -137,6 +138,55 @@ device as it is.
 
 The app supports iPhone and iPad, portrait and landscape (portrait upside down on iPad only), and needs iOS 15.0 or
 newer, or the later version it names ([Minimum system version](#minimum-system-version)).
+
+### App extensions
+
+Widgets, Live Activities, notification service extensions and other app extensions are bundles of their own
+(`.appex`) that iOS finds in the app's `PlugIns/` folder. Build them with Xcode or `swiftc`, then list them under
+`ios.extensions` in the app's `nsh.json`, relative to `nsh.json`, as `android.dex` lists Java code:
+
+```json
+{
+  "ios": {
+    "extensions": [
+      {
+        "path": "ios/build/iphoneos/Widget.appex",
+        "simulatorPath": "ios/build/iphonesimulator/Widget.appex",
+        "entitlements": { "com.apple.security.application-groups": ["group.com.example.app"] }
+      }
+    ]
+  }
+}
+```
+
+| Key | Meaning |
+|---|---|
+| `path` | The extension built for devices. |
+| `simulatorPath` | The extension built for the simulator. Without it, simulator packages carry `path` when it is built for the simulator and leave the extension out (with a warning) when it is not. |
+| `entitlements` | The extension's entitlements, as `ios.entitlements` are the app's ([below](#infoplist-keys-and-entitlements)). |
+
+Each package copies the extensions into `PlugIns/` and gives them the app's `version` and `build`: an extension's
+version should match its app's (App Store Connect flags a mismatch). An extension's identifier must start with the app's (`com.example.app.Widget` for
+`com.example.app`). The simulator package signs them ad hoc; the device package signs each one with the profile for its
+identifier, which it carries as `embedded.mobileprovision`, before it signs the app. Pass one `--profile` for the app
+and one for each extension; a profile that names a bundle's identifier is taken before a wildcard that covers it:
+
+```sh
+nsh package --target ios \
+  --sign "Apple Distribution: Example Inc (ABCDE12345)" \
+  --profile AppStore.mobileprovision \
+  --profile AppStoreWidget.mobileprovision
+```
+
+Code the app and an extension share, such as a Live Activity's attributes, is built into each of them. They share
+data through an app group, which both list in their entitlements. An app that starts Live Activities also declares
+`NSSupportsLiveActivities` in its own `Info.plist`, through `ios.infoPlist`:
+
+```json
+{
+  "ios": { "infoPlist": { "NSSupportsLiveActivities": true } }
+}
+```
 
 ## Android
 
@@ -323,7 +373,8 @@ so hosts can cache them for good. Deploy the directory to any web server or CDN;
 
 NSH writes the `Info.plist` of iOS and macOS packages, and signs them. An app adds keys of its own, such as export
 compliance, an App Store category or App Transport Security exceptions, and entitlements, such as associated domains,
-under `ios` and `macos` in `nsh.json`:
+under `ios` and `macos` in `nsh.json`. (The web links that open the app go in `links`, which adds their `applinks:`
+entries to iOS packages: [Web links](../modules/nsh.md#web-links).)
 
 ```json
 {
@@ -336,7 +387,7 @@ under `ios` and `macos` in `nsh.json`:
       }
     },
     "entitlements": {
-      "com.apple.developer.associated-domains": ["applinks:example.com"]
+      "com.apple.developer.associated-domains": ["webcredentials:example.com"]
     }
   },
   "macos": {
@@ -379,6 +430,92 @@ Entitlements:
 - **macOS** packages are signed ad hoc with the app's entitlements. macOS launches an app with
   `com.apple.developer.*` entitlements or keychain access groups only under a provisioning profile that grants them:
   `nsh package` warns about them, and the app is signed again with a Developer ID and such a profile before it runs.
+
+### Info.plist text in other languages
+
+The system shows the strings of `Info.plist`, such as the usage descriptions in a permission prompt or the app's name
+under its icon, in the user's language when the app has a translation of them. `ios.infoPlistStrings` and
+`macos.infoPlistStrings` give them, by language:
+
+```json
+{
+  "ios": {
+    "infoPlist": {
+      "NSLocationWhenInUseUsageDescription": "Shows the stores near you."
+    },
+    "infoPlistStrings": {
+      "zh-Hans": {
+        "CFBundleDisplayName": "示例",
+        "NSLocationWhenInUseUsageDescription": "显示你附近的门店。"
+      },
+      "ja": { "NSLocationWhenInUseUsageDescription": "近くの店舗を表示します。" }
+    }
+  }
+}
+```
+
+Packages write each language's `<language>.lproj/InfoPlist.strings`, and `nsh run` gives the iOS simulator's and Mac
+Catalyst's development host the same, so a prompt can be checked in each language before packaging. The system asks
+once per app: reset the answer before checking a prompt again, `xcrun simctl privacy booted reset camera <id>` in the
+iOS simulator, `tccutil reset Camera <id>` on macOS and Mac Catalyst, with the app's `id`, or under `nsh run` the
+development host's.
+
+- **Languages** are named as Xcode names them: a language, then a script or a region if needed, joined with `-` (`en`,
+  `ja`, `zh-Hans`, `zh-Hant`, `pt-BR`). Other spellings (`zh-hans`, `zh_TW`, `Chinese`) are an error naming the key.
+- **The `Info.plist` value** stays the text of every language without a translation, so each translated key needs one:
+  set it in `infoPlist`, or have it from NSH (the app's name, the usage descriptions NSH adds) or from a
+  [crate](./nshm.md#what-the-packaged-app-needs). A translation of a key the package's `Info.plist` does not have as a
+  string stops `nsh package` with an error naming it: the system would never show it.
+- **Translated keys** are the app's own and, of NSH's, only `CFBundleDisplayName` and `CFBundleName`; values are
+  strings. A macOS package whose name is translated also says so to Finder (`LSHasLocalizedDisplayName`).
+- **The languages are declared** to the system with the app's [`locales`](./i18n.md) (`CFBundleLocalizations`),
+  English first: users of a language the app has no translation for see the `Info.plist` text, and the system's own UI
+  in the app shows in the translated languages too. A language given as an empty `{}` has no file and is not declared;
+  it takes the [crates'](./nshm.md#what-the-packaged-app-needs) translations, which apps take for their own languages
+  only.
+
+### Privacy manifest
+
+App Store Connect checks an iOS app's privacy manifest, `PrivacyInfo.xcprivacy`, when it is uploaded: why the app
+calls the APIs Apple requires a reason for, whether it tracks and with which domains, and the data it collects
+([Privacy manifest files](https://developer.apple.com/documentation/bundleresources/privacy-manifest-files)).
+`ios.privacyManifest` in `nsh.json` is that file's contents, which iOS packages write at the root of the app before
+signing it (an app extension carries its own, in its `.appex`):
+
+```json
+{
+  "ios": {
+    "privacyManifest": {
+      "NSPrivacyTracking": false,
+      "NSPrivacyAccessedAPITypes": [
+        {
+          "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
+          "NSPrivacyAccessedAPITypeReasons": ["C617.1"]
+        },
+        {
+          "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime",
+          "NSPrivacyAccessedAPITypeReasons": ["35F9.1"]
+        }
+      ]
+    }
+  }
+}
+```
+
+It takes the four keys of Apple's format (`NSPrivacyTracking`, `NSPrivacyTrackingDomains`,
+`NSPrivacyCollectedDataTypes`, `NSPrivacyAccessedAPITypes`) and their entries' keys. An unknown key, a value of the
+wrong type or an entry without all its keys is left out with a warning. What App Store Connect would refuse as written
+(an entry with no reason, tracking without its domains) is warned about too; App Store Connect still checks the
+category and reason codes themselves.
+
+NSH's runtime is part of the app's executable, so the APIs it calls count as the app's: declare these with the app's
+own.
+
+| Category | What in NSH calls it | Reason |
+|---|---|---|
+| `NSPrivacyAccessedAPICategoryFileTimestamp` | Rust's standard library reading file metadata; the image cache, which ages its files | `C617.1`; also `3B52.1` when the app reads files people pick |
+| `NSPrivacyAccessedAPICategorySystemBootTime` | the renderer's timer | `35F9.1` |
+| `NSPrivacyAccessedAPICategoryUserDefaults` | reading the temperature unit people choose in Settings, which no reason of Apple's covers ([#2830](https://github.com/longbridge/nsh/issues/2830)) | |
 
 ### Minimum system version
 

@@ -79,6 +79,11 @@ final class Mounter {
      * its message, its buttons and a destructive action, each light then dark ARGB (0: the system's).
      */
     final int[] dialogColors = new int[10];
+    /**
+     * The language the app's text shows in ({@code encode.rs} {@code Command::TextLocale}), which
+     * the state words services read follow ({@link A11y}); null, English, until the core names one.
+     */
+    java.util.Locale textLocale;
     /** The alerts shown and not answered yet, by dialog id: what {@link SystemUi#closeDialog} takes back. */
     final SparseArray<android.app.AlertDialog> dialogs = new SparseArray<>();
     /**
@@ -409,8 +414,17 @@ final class Mounter {
                     // updating live allocates nothing for it.
                     boolean uniform = b.getInt() != 0;
                     int uniformColor = b.getInt();
+                    // What attachments copy as: offset, string object.
+                    int copies = b.getInt();
+                    int[] copyAt = copies == 0 ? TextLayouts.NO_COPIES : new int[copies];
+                    String[] copyTexts = copies == 0 ? TextLayouts.NO_COPY_TEXTS : new String[copies];
+                    for (int i = 0; i < copies; i++) {
+                        copyAt[i] = b.getInt();
+                        copyTexts[i] = (String) objects[b.getInt()];
+                    }
                     if (v instanceof TextBox) {
                         TextBox t = (TextBox) v;
+                        t.setCopyTexts(copyAt, copyTexts);
                         t.setSelectable(selectable == 1, selectable == 0, selectionColor);
                         t.setLayout((Layout) layout, x * density, y * density, w * density, h * density);
                         t.recolor(uniform, uniformColor, effects.get(t.id));
@@ -2060,7 +2074,15 @@ final class Mounter {
             View v = views.get(id);
             if (v instanceof StackBox) {
                 StackBox stack = (StackBox) v;
-                for (int s : stack.screens) dirtyScreens.add(s);
+                for (int s : stack.screens) {
+                    dirtyScreens.add(s);
+                    // The transition reads each screen's animation: a screen
+                    // mounted in this batch is configured only below, so give
+                    // it its option before the stack animates it in.
+                    View sv = views.get(s);
+                    ScreenOptions so = screenOptions.get(s);
+                    if (sv instanceof StackBox.ScreenBox && so != null) ((StackBox.ScreenBox) sv).animation = so.animation;
+                }
                 stack.reconcile();
             }
         }
@@ -2836,6 +2858,14 @@ final class Mounter {
                 eventMap(1, Native.OPEN_URL, new String[] {"id", "opened"}, new Object[] {(double) request, opened});
                 break;
             }
+            case 63: {
+                // `encode.rs` `Command::OpenAppSettings`: the request.
+                int request = b.getInt();
+                boolean opened = SystemUi.openAppSettings(context);
+                eventMap(1, Native.OPEN_APP_SETTINGS, new String[] {"id", "opened"},
+                        new Object[] {(double) request, opened});
+                break;
+            }
             case 23: {
                 int request = b.getInt();
                 boolean hasOnly = b.getInt() != 0;
@@ -2865,6 +2895,19 @@ final class Mounter {
             case 17: {
                 String text = (String) objects[b.getInt()];
                 (v != null ? v : host).announceForAccessibility(text);
+                break;
+            }
+            case 63: {
+                textLocale = java.util.Locale.forLanguageTag((String) objects[b.getInt()]);
+                // Services keep copies of the nodes: those with state words read them again.
+                android.view.accessibility.AccessibilityManager manager = host.accessibility();
+                // Without a running service there is no copy to refresh.
+                if (manager != null && manager.isEnabled()) {
+                    for (int i = 0; i < a11y.size(); i++) {
+                        View view = views.get(a11y.keyAt(i));
+                        if (view != null) a11y.valueAt(i).wordsChanged(view);
+                    }
+                }
                 break;
             }
             case 48: {

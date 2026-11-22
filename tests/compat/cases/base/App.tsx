@@ -17,6 +17,7 @@ import BaseCollapsibleReveal from "./base-collapsible-reveal";
 import BaseDialog from "./base-dialog";
 import BaseDialogBackdrop from "./base-dialog-backdrop";
 import BaseDataTable from "./base-data-table";
+import BaseDataTableFitGrow from "./base-data-table-fit-grow";
 import BaseDiff from "./base-diff";
 import BaseDock from "./base-dock";
 import BaseDockTabScroll from "./base-dock-tab-scroll";
@@ -44,6 +45,7 @@ import BaseRadio from "./base-radio";
 import BaseResizable from "./base-resizable";
 import BaseRichEditorContentSize from "./base-rich-editor-content-size";
 import BaseRichEditorExtensions from "./base-rich-editor-extensions";
+import BaseRichEditorAccessory from "./base-rich-editor-accessory";
 import BaseRichEditorComposition from "./base-rich-editor-composition";
 import BaseRichEditorKit from "./base-rich-editor-kit";
 import BaseRichEditorPasteHooks from "./base-rich-editor-paste-hooks";
@@ -82,6 +84,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-dialog": BaseDialog,
   "base-dialog-backdrop": BaseDialogBackdrop,
   "base-data-table": BaseDataTable,
+  "base-data-table-fit-grow": BaseDataTableFitGrow,
   "base-diff": BaseDiff,
   "base-dock": BaseDock,
   "base-dock-tab-scroll": BaseDockTabScroll,
@@ -111,6 +114,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-rich-editor-content-size": BaseRichEditorContentSize,
   "base-rich-editor-extensions": BaseRichEditorExtensions,
   "base-rich-editor-composition": BaseRichEditorComposition,
+  "base-rich-editor-accessory": BaseRichEditorAccessory,
   "base-rich-editor-kit": BaseRichEditorKit,
   "base-rich-editor-paste-hooks": BaseRichEditorPasteHooks,
   "base-rich-editor-node-view": BaseRichEditorNodeView,

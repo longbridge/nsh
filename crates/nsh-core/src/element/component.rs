@@ -574,12 +574,13 @@ pub struct Root {
     fonts: Vec<Arc<[u8]>>,
     appearance: Option<crate::platform::Appearance>,
     app_id: Option<String>,
-    url_schemes: Vec<String>,
+    links: crate::url_scheme::AppLinks,
     capabilities: Option<crate::access::Capabilities>,
     status_bar: Option<crate::StatusBarSetting>,
     main_window: Option<crate::desktop::MainWindowOptions>,
     application: Option<crate::desktop::ApplicationOptions>,
     translations: Option<crate::i18n::Translations>,
+    app_info: Option<crate::platform::AppInfo>,
 }
 
 impl Root {
@@ -591,12 +592,13 @@ impl Root {
             fonts: Vec::new(),
             appearance: None,
             app_id: None,
-            url_schemes: Vec::new(),
+            links: crate::url_scheme::AppLinks::default(),
             capabilities: None,
             status_bar: None,
             main_window: None,
             application: None,
             translations: None,
+            app_info: None,
         }
     }
 
@@ -637,17 +639,83 @@ impl Root {
         self.app_id.as_deref()
     }
 
-    /// The URL schemes the app claims (`nsh.json` `schemes`,
-    /// which nsh's generated code sets): the links the core lets
-    /// through ([`crate::url_scheme`], [`crate::element::next_url_scheme_open`]).
+    /// The app as it was built ([`crate::platform::AppInfo`]), which
+    /// nsh's generated code sets: what [`crate::element::app_info`]
+    /// answers.
+    pub fn app_info(mut self, info: crate::platform::AppInfo) -> Self {
+        self.app_info = Some(info);
+        self
+    }
+
+    /// [`Root::app_info`] from the JSON `appInfo()` reports, which nsh's
+    /// generated code compiles in. JSON it cannot read is an app with
+    /// nothing known (logged).
+    #[doc(hidden)]
+    pub fn app_info_json(self, json: &str) -> Self {
+        let info = match serde_json::from_str(json) {
+            Ok(value) => crate::platform::AppInfo::from_json(&value),
+            Err(e) => {
+                log::warn!("appInfo: {e}, ignored");
+                crate::platform::AppInfo::default()
+            }
+        };
+        self.app_info(info)
+    }
+
+    /// The app as it was built ([`Root::app_info`]).
+    #[doc(hidden)]
+    pub fn app_info_ref(&self) -> Option<&crate::platform::AppInfo> {
+        self.app_info.as_ref()
+    }
+
+    /// The URL schemes the app claims (`nsh.json` `schemes`): the links the
+    /// core lets through ([`crate::url_scheme`],
+    /// [`crate::element::next_url_scheme_open`]). Replaces the schemes of
+    /// [`Root::links`], keeping its web links.
     pub fn url_schemes(mut self, schemes: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        self.url_schemes = schemes.into_iter().map(Into::into).collect();
+        self.links.set_schemes(schemes);
         self
     }
 
     /// The schemes the app claims ([`Root::url_schemes`]).
     pub fn url_schemes_ref(&self) -> &[String] {
-        &self.url_schemes
+        self.links.schemes()
+    }
+
+    /// The links the app claims (`nsh.json` `schemes` and `links`, which
+    /// nsh's generated code sets): URLs of its schemes and `https` URLs of
+    /// its web links, the links the core lets through ([`crate::url_scheme`],
+    /// [`crate::element::next_url_scheme_open`]).
+    pub fn links(mut self, links: crate::url_scheme::AppLinks) -> Self {
+        self.links = links;
+        self
+    }
+
+    /// [`Root::links`] from `nsh.json`'s `schemes` and `links` as JSON text
+    /// (`{"schemes": [...], "links": [...]}`), which nsh's generated code
+    /// compiles in (checked when it was generated). Read as a package's
+    /// `app.json` is: what this runtime cannot claim is left out (logged).
+    #[doc(hidden)]
+    pub fn links_json(self, json: &str) -> Self {
+        let links = match serde_json::from_str::<serde_json::Value>(json) {
+            Ok(config) => {
+                let (links, ignored) = crate::url_scheme::AppLinks::from_json_lenient(&config);
+                for what in ignored {
+                    log::warn!("nsh.json: {what}, ignored");
+                }
+                links
+            }
+            Err(e) => {
+                log::warn!("nsh.json: links: {e}; none claimed");
+                crate::url_scheme::AppLinks::default()
+            }
+        };
+        self.links(links)
+    }
+
+    /// The links the app claims ([`Root::links`]).
+    pub fn links_ref(&self) -> &crate::url_scheme::AppLinks {
+        &self.links
     }
 
     /// What the app declares it may reach (`nsh.json` `capabilities`, which

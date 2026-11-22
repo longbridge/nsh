@@ -234,6 +234,13 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                 // The one color all of it is drawn in, if there is one: a
                 // change of it transitions (`transition-colors`, `TextBox`).
                 opt_color(&mut e, text.uniform_color());
+                // What attachments copy as: offset, then the string's
+                // object (`TextBox.copied`).
+                e.int(text.copy_texts.len() as i32);
+                for copy in &text.copy_texts {
+                    e.int(copy.index as i32);
+                    e.string(copy.text.to_string());
+                }
             }
             MountItem::Events { id, events } => {
                 e.int(EVENTS);
@@ -667,6 +674,11 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                         e.int(17);
                         e.string(text);
                     }
+                    // `Mounter.textLocale`: the language tag.
+                    Command::TextLocale(locale) => {
+                        e.int(63);
+                        e.string(locale.as_str().to_owned());
+                    }
                     Command::AccessibilityFocus => e.int(18),
                     // `InputBox.openEditMenu`: the bounds in the root view,
                     // then the actions' bits (cut 1, copy 2, paste 4,
@@ -762,6 +774,11 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                         e.int(26);
                         e.int(id as i32);
                         e.string(url);
+                    }
+                    // `SystemUi.java` `openAppSettings`: the request.
+                    Command::OpenAppSettings { id } => {
+                        e.int(63);
+                        e.int(id as i32);
                     }
                     // `Share.java`: the request, the title and the text
                     // (the text and the URL on lines of their own), each

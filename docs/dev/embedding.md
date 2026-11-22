@@ -11,6 +11,9 @@
   target); device builds check entitlements against the profile,
   which keeps the app's values in place of its own). iOS: `.app`, `.ipa` with `--sign <identity>
   --profile <file.mobileprovision>` (entitlements come from the profile; icons are compiled by `actool` into `Assets.car`).
+  `ios.extensions` lists prebuilt `.appex` bundles the app builds itself (`crates/nsh-cli/src/app_extensions.rs`):
+  packages copy them into `PlugIns/` with the app's version and sign them before the app; device packages take one
+  `--profile` per bundle, chosen by bundle identifier (`crates/nsh-cli/src/provisioning.rs`). NSH builds no Swift.
   Android: an APK assembled without Gradle (`aapt2 link`, native libraries stored uncompressed and 16 KB ZIP aligned, `apksigner`;
   the debug key unless `--keystore`; `android.launchScreen` becomes a generated launch theme). Linux: a directory `<name>/` with the release runner (`crates/nsh-linux-app`) as
   the executable, `nsh/bundle.nshc`, `nsh/assets/` and `nsh/app.json` (the window title, the GTK application id and
@@ -50,13 +53,15 @@
   takes no web links. The other native platforms ignore the command.
 - Android's `libnsh.so` uses 16 KB ELF LOAD alignment and a 16 KB-aligned RELRO end, set by `nsh-platform-android/build.rs` and
   the generated Android runtimes' build scripts. `cargo xtask android` checks every linked library's LOAD alignment
-  with the NDK's `llvm-objdump` before copying it into the runtime; `cargo xtask dist` uses the same checked libraries
-  for the APK runtimes and AARs. APK ZIP alignment is checked separately by `zipalign -c -P 16 -v 4 <app.apk>`.
+  with the NDK's `llvm-objdump` before copying it into the runtime; `cargo xtask dist` and `cargo xtask android-embed`
+  use the same checked libraries for the APK runtimes and AARs. `android-embed` writes only
+  `dist/nsh/embed/android/{nsh,nsh-dev}.aar` (`--no-dev` leaves out `nsh-dev.aar`; `--abi` repeats to build fewer than
+  `arm64-v8a`, `armeabi-v7a` and `x86_64`). APK ZIP alignment is checked separately by `zipalign -c -P 16 -v 4 <app.apk>`.
 - Release runtimes' `lib/<abi>/libnsh.so` is stripped with the NDK's `llvm-strip --strip-unneeded` (a quarter of each
   library, which APKs store uncompressed; the dynamic symbols JNI needs stay), and checked again; `symbols/<abi>/`
   keeps the linked library for `ndk-stack` and Play Console. The AARs carry the linked libraries: Gradle strips what
   it packages and extracts the symbols itself.
-- The AARs carry `proguard.txt` (`AAR_KEEP_RULES` in `crates/xtask/src/dist.rs`), which an app's minified build
+- The AARs carry `proguard.txt` (`AAR_KEEP_RULES` in `crates/xtask/src/android.rs`), which an app's minified build
   applies: `libnsh.so` finds `TextLayouts`, `NshView`, `Net` and `TestAgent` and their members by name over JNI
   (`JNI_OnLoad` fails without them) and binds the `native` methods of `Native`, `Net` and `SelectableView` by name,
   while Java code names few of them, so R8 removed or renamed them (`ClassNotFoundException: TextLayouts`). The rule
@@ -404,7 +409,10 @@ NSH draws (`src/layers.rs`).
   (a delegate the embedding app already set stays), on Windows the process takes the app's id as its
   AppUserModelID, registers it for toasts and hears their presses; the first such view's app wins. Without it the
   permission is `unavailable`, `show` resolves `false` and the badge is left alone. On Linux the desktop portal knows
-  the app by its id either way.
+  the app by its id either way. On Apple platforms, where NSH is the delegate, notifications NSH did not show (remote
+  ones, other code's) never reach `press`; they go to the native handler of `set_foreign_handler`. On Android,
+  `NshView.handleNotificationIntent` hands an intent without NSH's mark that may be another notification's press to
+  `nsh::notifications::set_foreign_handler`'s handler in the same way.
 - **Caches.** An app's caches (today the images it downloads, `nsh_core::image::DiskCache`) live in
   `<root>/<app id>/<kind>`, which the engine opens from `EngineConfig::cache` (`nsh_engine::CacheOptions`: a
   `CacheLocation` (`System`, `Dir`, `Off`) and a `CachePolicy` per kind (`Default`, `MaxSize(ByteSize)`, `Off`),

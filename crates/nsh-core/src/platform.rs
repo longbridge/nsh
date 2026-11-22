@@ -357,6 +357,12 @@ pub struct Environment {
     /// ([`crate::Command::PickScreenColor`]); without it, a pick answers
     /// no color at once.
     pub screen_color: bool,
+    /// The platform reports whether each clipboard write
+    /// ([`crate::Command::SetClipboard`], [`crate::Command::SetClipboardItem`])
+    /// reached the system clipboard, as [`crate::EventKind::ClipboardWrite`]
+    /// in the order of the writes; without it, a write answers
+    /// [`crate::element::ClipboardWrite::Requested`] at once.
+    pub clipboard_write_result: bool,
     /// The platform renders canvas drawings offscreen into images
     /// ([`crate::Command::RenderCanvas`], `OffscreenCanvas`); without it,
     /// a render fails at once with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
@@ -365,12 +371,30 @@ pub struct Environment {
     /// ([`crate::Command::Share`], `Share.show`); without it, a share fails
     /// at once with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
     pub share: bool,
+    /// The platform opens the app's own page in the system's settings
+    /// ([`crate::Command::OpenAppSettings`], `nsh/mobile`'s
+    /// `AppSettings.open`: iOS and Android); without it, opening it fails at
+    /// once with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`
+    /// ([`crate::mobile::open_app_settings`]).
+    pub app_settings: bool,
     /// The platform shows web sign-in sessions
     /// ([`crate::Command::AuthSession`]: iOS's
     /// `ASWebAuthenticationSession`, Android's Custom Tabs); without it,
     /// a session opens the system browser and waits for a link of a scheme
-    /// the app claims ([`crate::auth_session`]).
+    /// the app claims where the platform hands it such links
+    /// ([`Self::scheme_links()`]), and fails at once elsewhere
+    /// ([`crate::auth_session`]).
     pub auth_session: bool,
+    /// Whether the platform hands the app links of the schemes it claims
+    /// (`nsh.json` `schemes`, [`crate::element::next_url_scheme_open`]).
+    /// `None` (the default): as NSH's native backends on [`Self::os`],
+    /// every OS but the web, where a page hears only its own address. The
+    /// GPUI and terminal backends, which hear no links, say `Some(false)`,
+    /// as does a platform built outside NSH that hears none. Without it, a
+    /// sign-in session the platform does not show itself
+    /// ([`Self::auth_session`]) fails at once, since nothing could bring
+    /// its callback back ([`Self::scheme_links()`]).
+    pub scheme_links: Option<bool>,
     /// The platform handles file requests ([`crate::Command::FileRequest`]).
     /// Desktops implement the full set; mobile platforms answer the open
     /// dialog and reject operations they do not support. Without it, all
@@ -473,6 +497,13 @@ impl Environment {
     pub fn reported_idiom(&self) -> Idiom {
         self.idiom.reported_on(self.os)
     }
+
+    /// Whether links of the schemes the app claims reach it
+    /// ([`field@Environment::scheme_links`], or by the OS: all but the
+    /// web).
+    pub fn scheme_links(&self) -> bool {
+        self.scheme_links.unwrap_or(self.os != Os::Web)
+    }
 }
 
 impl Default for Environment {
@@ -505,9 +536,12 @@ impl Default for Environment {
             lifecycle: Lifecycle::Active,
             wake_count: 0,
             screen_color: false,
+            clipboard_write_result: false,
             canvas_render: false,
             share: false,
+            app_settings: false,
             auth_session: false,
+            scheme_links: None,
             file_requests: false,
             speech: false,
             notifications: false,
@@ -913,6 +947,61 @@ impl PerfStats {
             fps,
             ..PerfStats::default()
         }
+    }
+}
+
+/// The app as it was built (TS: `appInfo()`; Rust:
+/// [`crate::element::app_info`]): its id, name, version and build number,
+/// and whether it is a development build. A Rust app's root carries it
+/// ([`crate::element::Root::app_info`], which nsh's generated code sets
+/// from `nsh.json`, or from the package: `nsh package --id`, `--name`,
+/// `--version` and `--build` included); a TSX app's is JS's `appInfo()`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct AppInfo {
+    /// The app's id (`nsh.json` `"id"`; a package's as it names it).
+    pub id: Option<String>,
+    /// The app's name (`nsh.json` `"name"`; a package's as it names it).
+    pub name: Option<String>,
+    /// The app's version (`nsh.json` `"version"`; a package's, `1.0.0`
+    /// where nothing gives one).
+    pub version: Option<String>,
+    /// The build number (`nsh.json` `"build"`; a package's, `1` where
+    /// nothing gives one).
+    pub build: Option<u64>,
+    /// A development build (`nsh run`, `nsh dev`, `nsh test`, a build
+    /// without `--release`), not a package's.
+    pub development: bool,
+}
+
+impl AppInfo {
+    /// From the JSON `appInfo()` reports (`{"id", "name", "version",
+    /// "build", "development"}`): a key that is missing, `null` or of
+    /// another type is left unknown, and other keys are ignored.
+    #[doc(hidden)]
+    pub fn from_json(value: &crate::JsonValue) -> AppInfo {
+        let text = |key: &str| value.get(key).and_then(|v| v.as_str()).map(str::to_owned);
+        AppInfo {
+            id: text("id"),
+            name: text("name"),
+            version: text("version"),
+            build: value.get("build").and_then(|v| v.as_u64()),
+            development: value
+                .get("development")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+        }
+    }
+
+    /// As `appInfo()` reports it: unknown fields are `null`.
+    pub fn to_json(&self) -> crate::JsonValue {
+        serde_json::json!({
+            "id": self.id,
+            "name": self.name,
+            "version": self.version,
+            "build": self.build,
+            "development": self.development,
+        })
     }
 }
 
@@ -1651,6 +1740,60 @@ pub enum FetchOp {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn app_info_reads_and_writes_app_infos_json() {
+        use super::AppInfo;
+        let json = serde_json::json!({
+            "id": "com.example.orders",
+            "name": "Orders",
+            "version": "2.1.0",
+            "build": 7,
+            "development": true,
+            "store": "play",
+        });
+        let info = AppInfo::from_json(&json);
+        assert_eq!(info.id.as_deref(), Some("com.example.orders"));
+        assert_eq!(info.name.as_deref(), Some("Orders"));
+        assert_eq!(info.version.as_deref(), Some("2.1.0"));
+        assert_eq!(info.build, Some(7));
+        assert!(info.development);
+        assert_eq!(AppInfo::from_json(&info.to_json()), info);
+        // Missing, null or mistyped: unknown.
+        let partial = AppInfo::from_json(&serde_json::json!({
+            "id": null,
+            "version": 2,
+            "build": "7",
+        }));
+        assert_eq!(partial, AppInfo::default());
+        assert_eq!(
+            AppInfo::default().to_json(),
+            serde_json::json!({
+                "id": null, "name": null, "version": null, "build": null, "development": false,
+            })
+        );
+    }
+
+    #[test]
+    fn scheme_links_follow_the_os_unless_the_platform_says() {
+        use super::{Environment, Os};
+        let on = |os: Os, scheme_links: Option<bool>| {
+            Environment {
+                os,
+                scheme_links,
+                ..Environment::default()
+            }
+            .scheme_links()
+        };
+        for os in [Os::Ios, Os::Android, Os::MacOs, Os::Windows, Os::Linux] {
+            assert!(on(os, None), "{os:?}");
+            assert!(on(os, Some(true)), "{os:?}");
+            assert!(!on(os, Some(false)), "{os:?}");
+        }
+        assert!(!on(Os::Web, None));
+        assert!(on(Os::Web, Some(true)));
+        assert!(!on(Os::Web, Some(false)));
+    }
+
     #[test]
     fn size_class_fallback_uses_points_and_native_traits_win() {
         use super::{Environment, SizeClass};

@@ -200,7 +200,13 @@ impl Native for TuiNative {
         }
     }
 
-    fn drag(&self, from: Point<Points>, to: Point<Points>) {
+    fn drag(
+        &self,
+        from: Point<Points>,
+        to: Point<Points>,
+        options: nsh_testing::DragOptions,
+    ) -> Result<(), String> {
+        nsh_testing::agent::refuse_custom_drag("drag", options)?;
         let _ = self.pointer(from, MouseKind::Move);
         let _ = self.pointer(from, MouseKind::Down(MouseButton::Left));
         std::thread::sleep(nsh_testing::agent::LANDING);
@@ -211,6 +217,7 @@ impl Native for TuiNative {
             last = at;
         }
         let _ = self.pointer(last, MouseKind::Up(MouseButton::Left));
+        Ok(())
     }
 
     fn type_text(&self, text: &str) {

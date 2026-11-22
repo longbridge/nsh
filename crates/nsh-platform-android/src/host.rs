@@ -640,19 +640,7 @@ pub(crate) unsafe fn host<'a>(handle: jlong) -> &'a Arc<Host> {
 fn init_tls_verifier(env: &mut JNIEnv<'_>, view: &JObject<'_>) {
     static DONE: std::sync::Once = std::sync::Once::new();
     DONE.call_once(|| {
-        let context = env
-            .call_method(view, "getContext", "()Landroid/content/Context;", &[])
-            .and_then(|context| context.l())
-            .and_then(|context| {
-                env.call_method(
-                    &context,
-                    "getApplicationContext",
-                    "()Landroid/content/Context;",
-                    &[],
-                )
-            })
-            .and_then(|context| context.l());
-        let context = match context {
+        let context = match crate::context::application_context(env, view) {
             Ok(context) => context,
             Err(err) => {
                 let _ = env.exception_clear();
@@ -693,6 +681,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
     support_dir: JString<'_>,
     cache_dir: JString<'_>,
 ) -> jlong {
+    crate::context::init(&mut env, &view);
     #[cfg(feature = "websocket")]
     init_tls_verifier(&mut env, &view);
     let Ok(view) = env.new_global_ref(view) else {
@@ -1380,6 +1369,9 @@ extern "system" fn Java_com_longbridge_nsh_Native_environment(
     environment.share = true;
     // A Custom Tab, ended by the callback link (`AuthSession.java`).
     environment.auth_session = true;
+    // The app's details in the system's settings (`SystemUi.java`
+    // `openAppSettings`).
+    environment.app_settings = true;
     environment.os_version = (v[11] as u16, 0);
     environment.idiom = match v[12] as u8 {
         1 => Idiom::Pad,
@@ -3001,23 +2993,22 @@ extern "system" fn Java_com_longbridge_nsh_Native_hostCallFree(
     }
 }
 
-/// A packaged app's `app.json` (`nsh package`): its id and the URL schemes
-/// it claims, read as `Bundle::read` reads them on the other platforms.
+/// A packaged app's `app.json` (`nsh package`): its id and the links it
+/// claims (its URL schemes and web links), read as `Bundle::read` reads
+/// them on the other platforms.
 fn with_app_json(bundle: Bundle, json: &str) -> Bundle {
     let app = serde_json::from_str::<serde_json::Value>(json).ok();
     let id = app.as_ref().and_then(|app| app.get("id")?.as_str());
     let bundle = bundle.with_app_id(id);
-    match app.as_ref().and_then(|app| app.get("schemes")) {
-        Some(schemes) => {
-            // A newer NSH's: what this runtime cannot claim is left out.
-            let (schemes, ignored) = nsh_core::url_scheme::schemes_from_json_lenient(schemes);
-            for what in ignored {
-                log::warn!("app.json: {what}, ignored");
-            }
-            bundle.with_url_schemes(schemes)
-        }
-        None => bundle,
+    let Some(app) = app else {
+        return bundle;
+    };
+    // A newer NSH's: what this runtime cannot claim is left out.
+    let (links, ignored) = nsh_core::url_scheme::AppLinks::from_json_lenient(&app);
+    for what in ignored {
+        log::warn!("app.json: {what}, ignored");
     }
+    bundle.with_links(links)
 }
 
 #[cfg(test)]
@@ -3031,13 +3022,28 @@ mod app_json_tests {
             r#"{"id":"dev.example.links","schemes":["example.links"]}"#,
         );
         assert_eq!(bundle.app_id.as_deref(), Some("dev.example.links"));
-        assert_eq!(bundle.url_schemes, ["example.links"]);
+        assert_eq!(bundle.links.schemes(), ["example.links"]);
+        assert!(bundle.links.web().is_empty());
+    }
+
+    #[test]
+    fn a_packaged_app_claims_its_web_links() {
+        let bundle = with_app_json(
+            Bundle::source(String::new()),
+            r#"{"id":"dev.example.links","links":[{"host":"example.com","paths":["/orders/*"]},{"host":"not a host"}]}"#,
+        );
+        assert_eq!(bundle.links.web().len(), 1);
+        assert_eq!(bundle.links.web()[0].host(), "example.com");
+        assert_eq!(bundle.links.web()[0].paths(), ["/orders/*"]);
+        assert!(bundle.links.schemes().is_empty());
+        assert_eq!(bundle.links.check("https://example.com/orders/7"), Ok(()));
+        assert!(bundle.links.check("https://example.com/blog").is_err());
     }
 
     #[test]
     fn an_app_without_schemes_claims_none() {
         let bundle = with_app_json(Bundle::source(String::new()), r#"{"id":"dev.example"}"#);
         assert_eq!(bundle.app_id.as_deref(), Some("dev.example"));
-        assert!(bundle.url_schemes.is_empty());
+        assert!(bundle.links.is_empty());
     }
 }

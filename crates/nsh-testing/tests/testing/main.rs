@@ -446,7 +446,7 @@ fn a_mouse_drag_selects_in_a_selectable_view() {
     let results = run_file(&run, &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
-    assert_eq!(results.len(), 5);
+    assert_eq!(results.len(), 6);
 }
 
 #[test]
@@ -642,6 +642,14 @@ fn view_styles_read_background_and_opacity() {
 }
 
 #[test]
+fn layout_and_accessibility_read_what_is_on_screen() {
+    let file = todo().parent().unwrap().join("queries/Layout.test.tsx");
+    let results = run_file(&test_run(None), &file, &mut |_| {}).unwrap();
+    assert_eq!(results.len(), 1);
+    assert!(results[0].failure.is_none(), "{:?}", results[0]);
+}
+
+#[test]
 fn expect_compares_values_as_jest_does() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/expect");
     let results = run_file(&test_run(None), &dir.join("Expect.test.ts"), &mut |_| {}).unwrap();
@@ -672,3 +680,5 @@ fn input_targets_report_document_values_and_do_not_edit_covering_fields() {
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
 }
+
+mod drag;

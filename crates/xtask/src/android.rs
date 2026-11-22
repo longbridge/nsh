@@ -287,7 +287,8 @@ fn ndk_cargo(sdk: &Sdk, triple: &str, subcommand: &str) -> Command {
 
 /// Clippy on the Android crate (it is empty on other targets): with every
 /// feature, and as a Rust app's library (no JS); its tests too, which build
-/// for Android only.
+/// for Android only. Then `nsh-extra`'s modules, whose Android parts build
+/// for Android only too.
 pub(crate) fn clippy() -> anyhow::Result<()> {
     let sdk = Sdk::find()?;
     for features in ["--all-features", "--no-default-features"] {
@@ -307,6 +308,23 @@ pub(crate) fn clippy() -> anyhow::Result<()> {
         if !status.success() {
             bail!("clippy found problems ({features})");
         }
+    }
+    let status = ndk_cargo(&sdk, "aarch64-linux-android", "clippy")
+        .args([
+            "-p",
+            "nsh-extra",
+            "--features",
+            "nsh-extra/camera",
+            "--target",
+            "aarch64-linux-android",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings",
+        ])
+        .status()?;
+    if !status.success() {
+        bail!("clippy found problems (nsh-extra)");
     }
     Ok(())
 }
@@ -445,9 +463,155 @@ fn collect_ext(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) -> anyhow::Result<
     Ok(())
 }
 
+/// What `cargo xtask android-embed` builds.
+#[derive(clap::Args, Clone, Debug, Default)]
+pub(crate) struct EmbedOptions {
+    /// Build only `nsh.aar`, not `nsh-dev.aar`.
+    #[arg(long)]
+    pub(crate) no_dev: bool,
+    /// ABIs to build (default: arm64-v8a, armeabi-v7a and x86_64).
+    #[arg(long)]
+    pub(crate) abi: Vec<String>,
+}
+
+/// `cargo xtask android-embed`: the Android libraries into
+/// `dist/nsh/embed/android`. Release only: the archive carries
+/// `symbols/<abi>/libnsh.so`.
+pub(crate) fn embed(options: EmbedOptions) -> anyhow::Result<PathBuf> {
+    let abis = if options.abi.is_empty() {
+        ABIS.iter().map(|abi| (*abi).to_string()).collect()
+    } else {
+        options.abi
+    };
+    let root = root();
+    let out = root.join("dist/nsh/embed/android");
+    let variants: &[(bool, &str)] = if options.no_dev {
+        &[(false, "nsh.aar")]
+    } else {
+        &[(false, "nsh.aar"), (true, "nsh-dev.aar")]
+    };
+    for &(dev, name) in variants {
+        let built = build(true, dev, &abis)?;
+        let aar = out.join(name);
+        make_aar(&built, &abis, dev, &aar)?;
+        term::done(format!(
+            "packed {}",
+            aar.strip_prefix(&root).unwrap_or(&aar).display()
+        ));
+    }
+    Ok(out)
+}
+
+/// R8 rules the archive carries (`proguard.txt`), which an app's Gradle
+/// build applies when it shrinks the app: `libnsh.so` finds the runtime's
+/// classes, methods and fields by name over JNI (`TextLayouts` in
+/// `JNI_OnLoad`) and binds `native` methods by their Java names, which R8
+/// would remove or rename, Java code never naming most of them.
+const AAR_KEEP_RULES: &str = "\
+# Native Shell: libnsh.so finds these classes and members by name over JNI
+# and binds native methods by their Java names.
+-keep class com.longbridge.nsh.** { *; }
+# The WebSocket client's TLS verifier (rustls-platform-verifier) calls these
+# over JNI.
+-keep class org.rustls.platformverifier.** { *; }
+";
+
+/// An Android library archive: the Java runtime and `libnsh.so` per ABI,
+/// with the R8 rules that keep the runtime ([`AAR_KEEP_RULES`]).
+///
+/// The development library allows cleartext HTTP (merged into the app's
+/// manifest): it loads assets from the `nsh dev` server over plain HTTP.
+pub(crate) fn make_aar(built: &Path, abis: &[String], dev: bool, aar: &Path) -> anyhow::Result<()> {
+    let work = aar.with_extension("aar-work");
+    if work.exists() {
+        fs::remove_dir_all(&work)?;
+    }
+    fs::create_dir_all(&work)?;
+    fs::write(
+        work.join("AndroidManifest.xml"),
+        format!(
+            r#"<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.longbridge.nsh">
+    <uses-sdk android:minSdkVersion="{MIN_SDK}" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Text actions (Translate and the like) the selection menu offers,
+        as TextView's: Android 11+ hides other apps' activities otherwise. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT" />
+            <data android:mimeType="text/plain" />
+        </intent>
+    </queries>{}
+</manifest>
+"#,
+            if dev {
+                "\n    <application android:usesCleartextTraffic=\"true\" />"
+            } else {
+                ""
+            }
+        ),
+    )?;
+    fs::write(work.join("R.txt"), "")?;
+    fs::write(work.join("proguard.txt"), AAR_KEEP_RULES)?;
+    copy_file(&built.join("classes.jar"), &work.join("classes.jar"))?;
+    // With their symbols: the app's Gradle build strips what it packages
+    // and keeps them for its crash reports.
+    for abi in abis {
+        copy_file(
+            &built.join("symbols").join(abi).join("libnsh.so"),
+            &work.join("jni").join(abi).join("libnsh.so"),
+        )?;
+    }
+    if let Some(dir) = aar.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    let _ = fs::remove_file(aar);
+    zip_dir(&work, aar).with_context(|| format!("create {}", aar.display()))?;
+    fs::remove_dir_all(&work)?;
+    Ok(())
+}
+
+fn copy_file(from: &Path, to: &Path) -> anyhow::Result<()> {
+    if let Some(dir) = to.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    fs::copy(from, to).with_context(|| format!("copy {} -> {}", from.display(), to.display()))?;
+    Ok(())
+}
+
+/// Zips the files under `dir` into `archive`, by their paths relative to
+/// `dir` (with `/`, whatever this machine's separator).
+fn zip_dir(dir: &Path, archive: &Path) -> anyhow::Result<()> {
+    use std::io::Write as _;
+
+    use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
+
+    let mut zip = ZipWriter::new(fs::File::create(archive)?);
+    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+    let mut pending = vec![(dir.to_path_buf(), String::new())];
+    while let Some((dir, prefix)) = pending.pop() {
+        let mut entries: Vec<_> = fs::read_dir(&dir)?.collect::<Result<_, _>>()?;
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            let name = format!("{prefix}{}", entry.file_name().to_string_lossy());
+            if entry.file_type()?.is_dir() {
+                zip.add_directory(format!("{name}/"), options)?;
+                pending.push((entry.path(), format!("{name}/")));
+            } else {
+                zip.start_file(name, options)?;
+                zip.write_all(&fs::read(entry.path())?)?;
+            }
+        }
+    }
+    zip.finish()?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::check_load_alignment;
+    use std::{fs, io::Read as _};
+
+    use super::{AAR_KEEP_RULES, check_load_alignment, make_aar};
 
     #[test]
     fn load_segments_support_16_kb_pages() {
@@ -472,5 +636,26 @@ mod tests {
         for headers in ["", "LOAD off 0x0000", "LOAD off 0x0000 align 2**invalid"] {
             assert!(check_load_alignment(headers).is_err(), "{headers}");
         }
+    }
+
+    #[test]
+    fn an_aar_carries_the_rules_that_keep_the_runtime() {
+        let dir = std::env::temp_dir().join(format!("nsh-aar-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let built = dir.join("built");
+        fs::create_dir_all(built.join("symbols/arm64-v8a")).unwrap();
+        fs::write(built.join("classes.jar"), b"jar").unwrap();
+        fs::write(built.join("symbols/arm64-v8a/libnsh.so"), b"so").unwrap();
+        let aar = dir.join("nsh.aar");
+        make_aar(&built, &["arm64-v8a".to_string()], false, &aar).unwrap();
+        let mut zip = zip::ZipArchive::new(fs::File::open(&aar).unwrap()).unwrap();
+        let mut rules = String::new();
+        zip.by_name("proguard.txt")
+            .unwrap()
+            .read_to_string(&mut rules)
+            .unwrap();
+        assert_eq!(rules, AAR_KEEP_RULES);
+        assert!(rules.contains("-keep class com.longbridge.nsh.** { *; }"));
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

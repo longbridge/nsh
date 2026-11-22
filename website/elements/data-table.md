@@ -80,6 +80,8 @@ booleans and strings show as text. Rust gives the rows a field at a time, each o
 | `width` | Its width, in points. Default `120`. |
 | `minWidth`, `maxWidth` | The narrowest and widest a drag or a fit makes it. Default `20` and `1200`. |
 | `fitPadding` | Extra room for the app's padding, icons or badges, added to the widest title or cell text when fitting the column. |
+| `grow` | Its share of the width the columns leave free in the table, added to its width (see [Filling the width](#filling-the-width)). Default none. |
+| `autoFit` | Fits it to its widest text and title once the table first has text for it (see [Filling the width](#filling-the-width)). Default `false`. |
 | `align` | `"start"` (the default), `"center"` or `"end"`, for numbers. Cells and title alike. |
 | `sortable` | Its title has a sort button that asks for a sort (see [Sorting](#sorting)). |
 | `fixed` | Where it stays while the other columns scroll under it: `true` or `"left"` at the left, leading the others; `"right"` at the right, after them (right after the scrolling columns while they fit, at the table's right edge once they overflow it). Fixed columns keep their order. |
@@ -245,6 +247,33 @@ reports every step. Pressing the edge twice in a row fits the column to its wide
 `{ key, from, to, order }`, `order` being the `key`s of all the columns in the order shown. Fixed columns stay among
 the ones fixed at their side. `resizableColumns` and `movableColumns` turn both off for the table, and a column's `resizable` and
 `movable` win over them.
+
+## Filling the width
+
+Columns whose content the app does not know in advance (a query's results, a file's fields) take their width from it
+and from the table. A column with `autoFit` fits its widest text and title, as `fitColumn` does, once the table first
+holds rows with text in it; until then it has its `width`. It fits once per `key`: later data leaves the width as it is, so live
+rows do not move the columns, and a column of a new key fits when its rows come.
+
+While the columns are narrower than the table, the width they leave free goes to the columns with a `grow`, in
+proportion to it, as CSS's `flex-grow`: on top of their width (or the width they fitted), each up to its `maxWidth`.
+The shares follow the table's width; once the columns are wider than the table, none grows and the table scrolls. A
+column the user resizes, or whose width the app sets (`setColumnWidth`, `fitColumn`), keeps that width and no longer
+grows. Growing and fitting by themselves report no `onColumnResize`; `columnWidths()` gives the widths shown.
+
+```tsx
+<DataTable
+  columns={result.columns.map((name, i) => ({
+    key: `${result.id}:${i}`,
+    title: name,
+    align: numeric[i] ? "end" : "start",
+    autoFit: true,
+    grow: numeric[i] ? 0 : 1,
+  }))}
+  data={result.rows}
+  class="flex-1"
+/>
+```
 
 ## Live data
 

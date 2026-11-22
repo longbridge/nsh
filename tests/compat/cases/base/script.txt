@@ -4393,6 +4393,14 @@ covers [props] DataTable.renderCell
 covers [events] DataTable.onSortChange
 covers [events] DataTable.onVisibleRowsChange
 
+# base-data-table-fit-grow
+tap id:case-base-data-table-fit-grow
+# The name column fits its text once the rows come; the qty column grows
+# into the rest of the table's 390 points.
+expect Name
+tap id:widths
+expect Widths: fill 390 fitted true
+
 # base-rich-editor-session
 tap id:case-base-rich-editor-session
 tap text:RunSession
@@ -4628,6 +4636,15 @@ expect Observed: true 1 日Seed
 # Host event names have one shared coverage key, including a component
 # that emits its own payload under that name.
 covers [events] onCompositionChange
+
+# base-rich-editor-accessory
+tap id:case-base-rich-editor-accessory
+# The input the editor types with names the bar, which is mounted.
+expect Format bar
+expect Rendered
+prop label:AccessoryNotes inputAccessoryViewID format
+prop label:AccessoryNotes inputAccessoryView true
+covers [props] RichEditor.inputAccessoryViewID
 
 # base-rich-editor-node-view
 tap id:case-base-rich-editor-node-view

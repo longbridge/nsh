@@ -107,6 +107,17 @@ pub use nsh_macros::{
 // The core's parts of `nsh_base`'s navigation and dialogs.
 #[doc(hidden)]
 pub use self::host::{modal, screen, stack};
+pub(crate) use self::{
+    ambient::act,
+    animated::LiveNode,
+    back::BackListener,
+    builder::{ElKind, PlaceFn},
+    component::{AnyInstance, caught, panic_message},
+    task::{
+        Action, AfterAnswer, AnswerSlot, AudioAction, ClipboardRead, Executor, FileAnswer,
+        NotificationAction, SpeechAction,
+    },
+};
 pub use self::{
     ambient::*,
     animated::{
@@ -191,23 +202,13 @@ pub use self::{
         Quotas, RefuseConnections, Stop, System, codes, io_code,
     },
     task::{
-        Answer, ClipboardImage, ClipboardItem, DialogAnswer, DialogCloser, DialogReply, ImageSize,
-        Task,
+        Answer, ClipboardImage, ClipboardItem, ClipboardWrite, DialogAnswer, DialogCloser,
+        DialogReply, ImageSize, Task,
     },
     tokens::{FONT_MONO, FONT_SANS, ThemeTokens, Token, TokenSource, Tokens},
     value::{JsValue, NodeRef, PropEnum, PropError, SharedString, TsType, TsTypes, ts_of},
     virtual_list::{ListLayout, ViewableItems, VirtualList, virtual_list},
     watch::OrderWatch,
-};
-pub(crate) use self::{
-    animated::LiveNode,
-    back::BackListener,
-    builder::{ElKind, PlaceFn},
-    component::{AnyInstance, caught, panic_message},
-    task::{
-        Action, AfterAnswer, AnswerSlot, AudioAction, ClipboardRead, Executor, FileAnswer,
-        NotificationAction, SpeechAction,
-    },
 };
 /// The geometry Rust components style with (`crate::geometry`).
 pub use crate::geometry::{

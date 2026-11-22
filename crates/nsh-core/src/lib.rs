@@ -143,7 +143,7 @@ pub use crate::{
         PayloadValue, PinchEvent, PinchPhase, PointerType, PressEvent, Prop, ROOT_ID, ResizeMode,
         ReturnKeyType, RevealOptions, ScreenAnimation, ScreenProp, ScrollAlignment, ScrollProp,
         ScrollbarSetting, SheetDetent, SnapAlignment, StatusBarConfig, StatusBarSetting,
-        StatusBarStyle, SubmitBehavior, Tag, TouchEvent, TouchPhase, TouchPoint,
+        StatusBarStyle, SubmitBehavior, Tag, TextDrop, TouchEvent, TouchPhase, TouchPoint,
         TransitionFallback, Viewability, WebElement, WebInput, WebKey, WebLoad, WebSource,
         WheelDelta, WheelEvent, dialog_default_button,
     },
@@ -162,10 +162,10 @@ pub use crate::{
         css_font_families, font_families, for_each_font_family,
     },
     text::{
-        ATTACHMENT_CHAR, Affinity, ApproxTextEngine, AttachmentAlignments, AttributedText,
-        BackgroundBox, FontExtent, LinePiece, ResolvedTextStyle, SpanTestId, TextAttachment,
-        TextBackground, TextEngine, TextGeometry, TextLayout, TextLine, TextLink, TextPosition,
-        TextSpan, font_data, font_family, keep_font,
+        ATTACHMENT_CHAR, Affinity, ApproxTextEngine, AttachmentAlignments, AttachmentCopyText,
+        AttributedText, BackgroundBox, FontExtent, LinePiece, ResolvedTextStyle, SpanTestId,
+        TextAttachment, TextBackground, TextEngine, TextGeometry, TextLayout, TextLine, TextLink,
+        TextPosition, TextSpan, font_data, font_family, keep_font,
     },
     transform::{
         Decomposed, MAX_TRANSFORMS, Matrix, Transform, TransformKind, TransformOp, translation,
