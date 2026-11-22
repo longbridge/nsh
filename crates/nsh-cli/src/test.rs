@@ -1020,6 +1020,7 @@ test src/lib.rs - App (line 3) ... ok
             None,
             None,
             None,
+            None,
             Some("iPhone 16"),
             None,
             false,
