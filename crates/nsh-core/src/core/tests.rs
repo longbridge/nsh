@@ -35518,6 +35518,16 @@ fn rounding_lands_on_device_pixels() {
     let up = super::ceil_to_pixel(measured, ratio);
     assert!((up.0 * ratio - 56.0).abs() < 1.0e-3, "{up:?}");
     assert!((super::round(4.0, ratio) * ratio - 11.0).abs() < 1.0e-3);
+    // A box under a pixel thick whose edges round to one pixel takes the
+    // pixel on the side most of it is on (the later one on a tie); one of
+    // no length, or of a length zero but for `f32`, takes none.
+    assert_eq!(super::edges(199.5, 0.5, 1.0), (199.0, 200.0));
+    assert_eq!(super::edges(10.5, 0.4, 1.0), (10.0, 11.0));
+    assert_eq!(super::edges(99.75, 0.5, 1.0), (100.0, 101.0));
+    assert_eq!(super::edges(0.0, 0.5, 1.0), (0.0, 1.0));
+    assert_eq!(super::edges(199.5, 0.5, 2.0), (399.0, 400.0));
+    assert_eq!(super::edges(10.0, 0.0, 1.0), (10.0, 10.0));
+    assert_eq!(super::edges(10.0, 1.0e-5, 1.0), (10.0, 10.0));
     // A width a hair over a whole pixel is not taken back under it: the
     // text measured again in that width would no longer fit.
     assert_eq!(super::ceil_to_pixel(Points(78.000_49), 1.0), Points(79.0));
@@ -35847,6 +35857,110 @@ fn frames_moved_by_whole_pixels_are_not_sent_again() {
             .count();
         assert_eq!(rows, 0, "{pixel} pixels down: {:?}", batch.items);
     }
+}
+
+/// Half point rules at `ratio`: a column 200 wide holding a block 10.5
+/// tall (4), a horizontal rule 0.5 tall (5) and a block below (6), and a
+/// vertical rule 0.5 wide pinned to its right edge from 40 down (7), around
+/// a child as wide as itself (8).
+fn half_point_rules(ratio: f32) -> MountBatch {
+    let mut c = core();
+    at_ratio(&mut c, ratio);
+    let mut ops = Vec::new();
+    for (id, parent) in [(3, ROOT_ID), (4, 3), (5, 3), (6, 3), (7, 3), (8, 7)] {
+        ops.push(Op::Create { id, tag: Tag::View });
+        ops.push(Op::Insert {
+            parent,
+            child: id,
+            before: None,
+        });
+    }
+    ops.push(style_op(
+        3,
+        &[
+            ("position", StyleValue::Str("relative")),
+            ("width", StyleValue::Number(200.0)),
+            ("height", StyleValue::Number(300.0)),
+        ],
+    ));
+    ops.push(style_op(4, &[("height", StyleValue::Number(10.5))]));
+    ops.push(style_op(5, &[("height", StyleValue::Number(0.5))]));
+    ops.push(style_op(6, &[("height", StyleValue::Number(10.0))]));
+    ops.push(style_op(
+        7,
+        &[
+            ("position", StyleValue::Str("absolute")),
+            ("top", StyleValue::Number(40.0)),
+            ("bottom", StyleValue::Number(0.0)),
+            ("right", StyleValue::Number(0.0)),
+            ("width", StyleValue::Number(0.5)),
+        ],
+    ));
+    ops.push(style_op(8, &[("height", StyleValue::Number(10.0))]));
+    apply(&mut c, ops);
+    c.commit().unwrap()
+}
+
+#[test]
+fn half_point_rules_keep_a_device_pixel_and_their_neighbours_meet() {
+    // One pixel per point (a 100% display, the headless default): the
+    // rules' edges both round to one pixel, and the rules took none.
+    let batch = half_point_rules(1.0);
+    let frame = |id| frame_of(&batch, id).expect("frame");
+    let (above, rule, below) = (frame(4), frame(5), frame(6));
+    assert_eq!(rule.size.height, Points(1.0), "{rule:?}");
+    // Its pixel is the one most of it is on, inside the column: the block
+    // above keeps its rounded edge and the block below starts on it, with
+    // no gap, as without the rule.
+    assert_eq!(rule.origin.y, Points(10.0));
+    assert_eq!(above.origin.y + above.size.height, Points(11.0));
+    assert_eq!(below.origin.y, Points(11.0));
+    let pinned = frame(7);
+    assert_eq!(pinned.size.width, Points(1.0), "{pinned:?}");
+    assert_eq!(pinned.origin.x + pinned.size.width, Points(200.0));
+    assert_eq!(pinned.size.height, Points(260.0));
+    // A child as wide as the rule is on the rule's pixel, not moved again.
+    assert_eq!(frame(8), rect(0.0, 0.0, 1.0, 10.0));
+
+    // Two pixels per point: half a point is a pixel, kept as it is.
+    let batch = half_point_rules(2.0);
+    let frame = |id| frame_of(&batch, id).expect("frame");
+    assert_eq!(frame(5), rect(0.0, 10.5, 200.0, 0.5));
+    assert_eq!(frame(6).origin.y, Points(11.0));
+    assert_eq!(frame(7), rect(199.5, 40.0, 0.5, 260.0));
+    assert_eq!(frame(8), rect(0.0, 0.0, 0.5, 10.0));
+}
+
+#[test]
+fn a_rule_that_grows_a_pixel_thick_moves_its_child_back_onto_it() {
+    // A rule 0.5 tall 10.5 down at one pixel per point is on the pixel
+    // before, and its child of its height with it. Grown to a point, it is
+    // on its own pixels: its child, laid out as before, is a pixel above
+    // it, as it is in the layout, though nothing moved it.
+    let mut c = core();
+    let mut ops = Vec::new();
+    for (id, parent) in [(3, ROOT_ID), (4, 3), (5, 3), (6, 5)] {
+        ops.push(Op::Create { id, tag: Tag::View });
+        ops.push(Op::Insert {
+            parent,
+            child: id,
+            before: None,
+        });
+    }
+    ops.push(style_op(4, &[("height", StyleValue::Number(10.5))]));
+    ops.push(style_op(5, &[("height", StyleValue::Number(0.5))]));
+    ops.push(style_op(6, &[("height", StyleValue::Number(0.5))]));
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 5), Some(rect(0.0, 10.0, 320.0, 1.0)));
+    assert_eq!(frame_of(&batch, 6), Some(rect(0.0, 0.0, 320.0, 1.0)));
+    apply(
+        &mut c,
+        vec![style_op(5, &[("height", StyleValue::Number(1.0))])],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 5), Some(rect(0.0, 11.0, 320.0, 1.0)));
+    assert_eq!(frame_of(&batch, 6), Some(rect(0.0, -1.0, 320.0, 1.0)));
 }
 
 #[test]
