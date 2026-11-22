@@ -658,4 +658,84 @@ mod tests {
         assert!(rules.contains("-keep class com.longbridge.nsh.** { *; }"));
         fs::remove_dir_all(&dir).unwrap();
     }
+
+    /// The opcodes of `Command` in `encode.rs`, and the `case` labels of
+    /// `Mounter.command`, are numbers two PRs can pick at once: a duplicate
+    /// label is a `javac` error, a duplicate opcode a command that runs as
+    /// another one. `nsh-platform-android` is empty off Android, so this
+    /// reads both sources as text.
+    #[test]
+    fn a_command_opcode_is_used_once() {
+        let dir = super::root().join("crates/nsh-platform-android");
+        let java = fs::read_to_string(dir.join("java/com/longbridge/nsh/Mounter.java")).unwrap();
+        let rust = fs::read_to_string(dir.join("src/encode.rs")).unwrap();
+
+        let start = java
+            .find("    private void command(")
+            .expect("Mounter.command");
+        let body = &java[start..];
+        let body = &body[..body.find("\n    }\n").expect("end of Mounter.command")];
+        // A line is `case 1:`, `case 3: stop(); break;` or `case 4: case 5:`.
+        let mut labels = Vec::new();
+        for line in body.lines() {
+            let Some(mut rest) = line.strip_prefix("            case ") else {
+                continue;
+            };
+            loop {
+                let (number, after) = rest.split_once(':').expect("a case label ends in a colon");
+                labels.push(number.parse::<u32>().expect("a numeric case label"));
+                match after.trim_start().strip_prefix("case ") {
+                    Some(next) => rest = next,
+                    None => break,
+                }
+            }
+        }
+        assert!(labels.len() > 40, "found only {} case labels", labels.len());
+        assert_eq!(
+            duplicates(&labels),
+            Vec::<u32>::new(),
+            "Mounter.command: duplicate case labels"
+        );
+
+        // The first `e.int(N)` after each `Command::` arm is its opcode;
+        // arms that write -1 are not carried out and have none.
+        let start = rust
+            .find("MountItem::Command { id, command }")
+            .expect("the command arm");
+        let mut opcodes = Vec::new();
+        let mut open = false;
+        for line in rust[start..].lines() {
+            let indent = line.len() - line.trim_start().len();
+            if indent == 20 && line.trim_start().starts_with("Command::") {
+                open = true;
+            }
+            if open && let Some(rest) = line.split("e.int(").nth(1) {
+                let number = rest.split(')').next().unwrap();
+                if let Ok(n) = number.parse::<u32>() {
+                    opcodes.push(n);
+                }
+                open = false;
+            }
+            if indent < 20 && line.trim() == "}" && !opcodes.is_empty() && opcodes.len() > 40 {
+                break;
+            }
+        }
+        assert!(opcodes.len() > 40, "found only {} opcodes", opcodes.len());
+        assert_eq!(
+            duplicates(&opcodes),
+            Vec::<u32>::new(),
+            "encode.rs: duplicate command opcodes"
+        );
+    }
+
+    fn duplicates(numbers: &[u32]) -> Vec<u32> {
+        let mut seen = std::collections::BTreeSet::new();
+        let mut again = std::collections::BTreeSet::new();
+        for n in numbers {
+            if !seen.insert(*n) {
+                again.insert(*n);
+            }
+        }
+        again.into_iter().collect()
+    }
 }
