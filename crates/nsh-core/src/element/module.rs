@@ -424,6 +424,16 @@ impl ModuleCx {
         self.actions.push(Action::Translations(translations));
     }
 
+    /// Merges translations into the core's dictionary (`nsh-js` and web:
+    /// `addTranslations`).
+    #[doc(hidden)]
+    pub fn add_translations(
+        &mut self,
+        map: std::collections::HashMap<String, std::collections::HashMap<String, String>>,
+    ) {
+        self.actions.push(Action::AddTranslations(map));
+    }
+
     /// Asks the platform for `action` (the runtime's own modules).
     pub(crate) fn act(&mut self, action: Action) {
         self.actions.push(action);

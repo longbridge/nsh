@@ -20,7 +20,8 @@ workspace = true
 default = []
 # `Camera`: photos taken with the system's camera (iOS, Android).
 camera = ["dep:tokio"]
-# `Push`: remote notifications with any push service (iOS).
+# `Push`: remote notifications with any push service (iOS, Android with a
+# push service's binding).
 push = ["dep:tokio"]
 
 [dependencies]
@@ -39,6 +40,7 @@ objc2-ui-kit.workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]
 nsh-platform-android.workspace = true
+ndk-context.workspace = true
 
 [dev-dependencies]
 nsh-core = { workspace = true, features = ["declarations"] }
@@ -60,3 +62,7 @@ queries = ['<intent><action android:name="android.media.action.IMAGE_CAPTURE"/><
 # other environment's profiles.
 [package.metadata.nsh.features.push.ios.infoPlist]
 UIBackgroundModes = ["remote-notification"]
+
+# Android needs no entry for the module itself: a push service's SDK
+# brings its own service, receiver and permissions in its manifest, and
+# showing notifications is `Notifications`' permission.

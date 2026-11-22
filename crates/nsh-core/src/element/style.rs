@@ -31,7 +31,7 @@ use crate::{
         percentage, px, relative,
     },
     style::{Color, LineHeight, PositionAxis, PropertyValue, StyleKey},
-    tailwind::{self, ClassList, Decl, Part, Rank, Rule, rank, state},
+    tailwind::{self, ClassList, Decl, Part, PropDecl, Rank, Rule, rank, state},
     transform::TransformKind,
 };
 
@@ -468,6 +468,11 @@ pub(crate) enum Declaration {
     },
     /// [`UNDERLINE`] and [`LINE_THROUGH`] add up; 0 removes both.
     Decoration(u8),
+    /// Lines never wrap (`true`, `whitespace-nowrap`) or wrap
+    /// (`whitespace-normal`): inherited, as the classes'.
+    NoWrap(bool),
+    /// Lines wrap without a lone last word (`text-pretty`).
+    Pretty,
     /// [`TransitionProps`] bits.
     Transition(u8),
     TransitionNone,
@@ -709,6 +714,8 @@ impl Declaration {
                     line_through: bits & LINE_THROUGH != 0,
                 })),
             )),
+            Declaration::NoWrap(no_wrap) => out.push(Decl::Prop(PropDecl::NoWrap(*no_wrap))),
+            Declaration::Pretty => out.push(Decl::Prop(PropDecl::Pretty)),
             Declaration::Transition(props) => part(out, Part::TransitionProps(*props)),
             Declaration::TransitionNone => part(out, Part::TransitionNone),
             Declaration::Duration(ms) => part(out, Part::Duration(ms.0)),
@@ -4111,6 +4118,29 @@ pub trait Styled: Sized {
             .text_overflow(crate::EllipsizeMode::Tail)
     }
 
+    /// Its texts' lines never wrap (Tailwind's `whitespace-nowrap`). A
+    /// view's reaches the texts in it, as CSS's `white-space` does.
+    fn whitespace_nowrap(mut self) -> Self {
+        self.style().push(Declaration::NoWrap(true));
+        self
+    }
+
+    /// Its texts' lines wrap (Tailwind's `whitespace-normal`): undoes a
+    /// view's `whitespace_nowrap` or `text_pretty` around them.
+    fn whitespace_normal(mut self) -> Self {
+        self.style().push(Declaration::NoWrap(false));
+        self
+    }
+
+    /// Its texts' lines wrap without leaving a word or two alone on the
+    /// last line (Tailwind's `text-pretty`): a last line shorter than a
+    /// quarter of the box takes words from the lines above, without adding
+    /// a line. A view's reaches the texts in it.
+    fn text_pretty(mut self) -> Self {
+        self.style().push(Declaration::Pretty);
+        self
+    }
+
     /// The text's base direction (by default its content's).
     fn writing_direction(mut self, direction: WritingDirection) -> Self {
         self.style().value(
@@ -5153,6 +5183,18 @@ mod tests {
         same(s().align_text_top(), "align-text-top");
         same(s().align_text_bottom(), "align-text-bottom");
         same(s().align_middle(), "align-middle");
+        same(s().text_pretty(), "text-pretty");
+        same(s().whitespace_nowrap(), "whitespace-nowrap");
+        same(s().whitespace_normal(), "whitespace-normal");
+        // The last of them holds, as the classes'.
+        same(
+            s().text_pretty().whitespace_normal(),
+            "text-pretty whitespace-normal",
+        );
+        same(
+            s().whitespace_nowrap().text_pretty(),
+            "whitespace-nowrap text-pretty",
+        );
         // Unlike classes, the two lines add up.
         let both = s().underline().line_through().lower();
         let mut style = Style::default();

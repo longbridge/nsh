@@ -9,10 +9,14 @@
 //! [package.metadata.nsh.features.camera.ios.infoPlist]   # when `camera` is on
 //! NSCameraUsageDescription = "The app takes photos with the camera."
 //!
+//! [package.metadata.nsh.features.camera.ios.infoPlistStrings.zh-Hans]
+//! NSCameraUsageDescription = "..."
+//!
 //! [package.metadata.nsh.features.camera.android]
 //! permissions = ["android.permission.CAMERA"]
 //! queries = ['<intent><action android:name="android.media.action.IMAGE_CAPTURE"/></intent>']
 //! application = ['<service android:name="..." android:exported="false"/>']
+//! libraries = ["android/libs/scanner-glue.jar"]
 //! ```
 //!
 //! Every package in the generated workspace's dependency graph is read, so
@@ -25,12 +29,23 @@
 //! which also settles a clash; a clash the app leaves open is an error
 //! naming both crates. Keys NSH sets itself are refused, naming the crate.
 //!
-//! `ios.infoPlist`, `ios.entitlements` (named as in `nsh.json`),
+//! A crate's `ios.infoPlistStrings` translates the keys the crates set in
+//! `ios.infoPlist`, as the crates word them; a translation of a key no
+//! crate sets (its feature off) is left out with a warning. The app takes
+//! them for the languages it declares only, and none for a key it sets
+//! itself, which the crates' translations would not say
+//! ([`ModuleMeta::crate_strings`]).
+//!
+//! `ios.infoPlist`, `ios.infoPlistStrings`, `ios.entitlements` (named as
+//! in `nsh.json`),
 //! `android.permissions` (checked and spelled out as `nsh.json`'s are),
 //! `android.queries`
 //! (`<intent>`, `<package>` and `<provider>` elements) and
 //! `android.application` (`<service>`, `<receiver>`, `<provider>`,
-//! `<activity>` and `<meta-data>` elements) are read; other keys are
+//! `<activity>` and `<meta-data>` elements) and `android.libraries` (jar,
+//! AAR and dex files, relative to the directory of the crate's `Cargo.toml`,
+//! which [`crate::android`] packages) are read; `android.manifestPlaceholders`
+//! is an error (only the app sets them); other keys are
 //! reported and left out. Each Android entry is one balanced element of
 //! those, so a crate cannot close `<application>` or `<queries>` to write
 //! elsewhere in the manifest.
@@ -40,7 +55,7 @@ use std::{collections::BTreeMap, path::Path, process::Command};
 use anyhow::{Context as _, bail};
 use serde_json::{Map, Value};
 
-use crate::{package::AppConfig, ui};
+use crate::{android::Library, package::AppConfig, ui};
 
 /// The elements `android.queries` takes.
 const QUERY_ELEMENTS: &[&str] = &["intent", "package", "provider"];
@@ -54,6 +69,9 @@ const APPLICATION_ELEMENTS: &[&str] = &["service", "receiver", "provider", "acti
 pub(crate) struct ModuleMeta {
     /// `Info.plist` keys of iOS packages.
     pub(crate) ios_info: Map<String, Value>,
+    /// `Info.plist` strings of iOS packages in other languages: by
+    /// language, an object of texts (`nsh.json`'s `ios.infoPlistStrings`).
+    pub(crate) ios_strings: Map<String, Value>,
     /// Entitlements of iOS packages.
     pub(crate) ios_entitlements: Map<String, Value>,
     /// Android permissions (`<uses-permission>`).
@@ -62,6 +80,8 @@ pub(crate) struct ModuleMeta {
     pub(crate) android_queries: Vec<String>,
     /// Elements of the manifest's `<application>`.
     pub(crate) android_application: Vec<String>,
+    /// Java libraries (jar and dex files), each file once.
+    pub(crate) android_libraries: Vec<Library>,
     /// Which package set each key, for errors.
     owners: BTreeMap<String, String>,
     /// Keys two crates set to different values: the first crate's value is
@@ -80,8 +100,10 @@ pub(crate) enum Platform {
 /// A key two crates set to different values.
 #[derive(Debug, Clone, PartialEq)]
 struct Clash {
-    /// `ios.infoPlist` or `ios.entitlements`, the same in `nsh.json`.
+    /// `ios.infoPlist`, `ios.infoPlistStrings` or `ios.entitlements`, the
+    /// same in `nsh.json`.
     kind: &'static str,
+    /// The key; a language's, `<lang>.<key>`, in `ios.infoPlistStrings`.
     key: String,
     /// The crate whose value is kept, and the one that disagrees.
     first: String,
@@ -153,7 +175,11 @@ impl ModuleMeta {
                 continue;
             };
             let name = package["name"].as_str().unwrap_or("?");
-            meta.merge_section(name, "[package.metadata.nsh]", nsh, &mut warnings)?;
+            // What the crate's paths are relative to.
+            let dir = package["manifest_path"]
+                .as_str()
+                .and_then(|manifest| Path::new(manifest).parent());
+            meta.merge_section(name, dir, "[package.metadata.nsh]", nsh, &mut warnings)?;
             let features = nsh.get("features").and_then(Value::as_object);
             let enabled = node["features"].as_array().into_iter().flatten();
             for feature in enabled.filter_map(Value::as_str) {
@@ -162,18 +188,20 @@ impl ModuleMeta {
                     .and_then(Value::as_object)
                 {
                     let at = format!("[package.metadata.nsh.features.{feature}]");
-                    meta.merge_section(name, &at, section, &mut warnings)?;
+                    meta.merge_section(name, dir, &at, section, &mut warnings)?;
                 }
             }
         }
+        meta.drop_untranslatable(&mut warnings);
         Ok((meta, warnings))
     }
 
-    /// Merges one section (`at`, of package `name`): its `ios` and
+    /// Merges one section (`at`, of package `name` in `dir`): its `ios` and
     /// `android` tables.
     fn merge_section(
         &mut self,
         name: &str,
+        dir: Option<&Path>,
         at: &str,
         section: &Map<String, Value>,
         warnings: &mut Vec<String>,
@@ -183,7 +211,7 @@ impl ModuleMeta {
                 // Read by itself: a feature's section is merged only when on.
                 "features" if at == "[package.metadata.nsh]" => {}
                 "ios" => self.merge_ios(name, at, value, warnings)?,
-                "android" => self.merge_android(name, at, value, warnings)?,
+                "android" => self.merge_android(name, dir, at, value, warnings)?,
                 _ => warnings.push(format!(
                     "{name}: {at} `{key}` is not something this nsh reads: left out"
                 )),
@@ -203,9 +231,10 @@ impl ModuleMeta {
             .as_object()
             .with_context(|| format!("{name}: {at} `ios` is a table"))?;
         for (key, value) in ios {
-            let (target, kind) = match key.as_str() {
-                "infoPlist" => (&mut self.ios_info, "ios.infoPlist"),
-                "entitlements" => (&mut self.ios_entitlements, "ios.entitlements"),
+            let kind = match key.as_str() {
+                "infoPlist" => "ios.infoPlist",
+                "infoPlistStrings" => "ios.infoPlistStrings",
+                "entitlements" => "ios.entitlements",
                 _ => {
                     warnings.push(format!(
                         "{name}: {at} `ios.{key}` is not something this nsh reads: left out"
@@ -216,46 +245,135 @@ impl ModuleMeta {
             let entries = value
                 .as_object()
                 .with_context(|| format!("{name}: {at} `{kind}` is a table"))?;
-            for (entry, value) in entries {
-                let reserved = match kind {
-                    "ios.infoPlist" => crate::apple::is_reserved_ios_info(entry),
-                    _ => crate::apple::is_reserved_ios_entitlement(entry),
-                };
-                if reserved {
-                    bail!("{name}: {at} `{kind}.{entry}` is a key NSH sets itself");
+            match kind {
+                "ios.infoPlistStrings" => {
+                    for (language, texts) in entries {
+                        crate::apple::check_language(language)
+                            .map_err(|why| anyhow::anyhow!("{name}: {at} `{kind}`: {why}"))?;
+                        let texts = texts.as_object().with_context(|| {
+                            format!("{name}: {at} `{kind}.{language}` is a table")
+                        })?;
+                        for (entry, text) in texts {
+                            if !crate::apple::is_translatable_ios_info(entry) {
+                                bail!(
+                                    "{name}: {at} `{kind}.{language}.{entry}` is a key NSH sets itself"
+                                );
+                            }
+                            if !text.is_string() {
+                                bail!("{name}: {at} `{kind}.{language}.{entry}` is a string");
+                            }
+                        }
+                        let target = self
+                            .ios_strings
+                            .entry(language.clone())
+                            .or_insert_with(|| Value::Object(Map::new()))
+                            .as_object_mut()
+                            .expect("languages hold objects");
+                        merge_entries(
+                            target,
+                            texts,
+                            Entries {
+                                kind,
+                                prefix: &format!("{language}."),
+                                name,
+                            },
+                            &mut self.owners,
+                            &mut self.clashes,
+                        );
+                    }
                 }
-                let owner = format!("{kind}.{entry}");
-                match target.get_mut(entry) {
-                    None => {
-                        target.insert(entry.clone(), value.clone());
-                        self.owners.insert(owner, name.to_owned());
+                _ => {
+                    for entry in entries.keys() {
+                        let reserved = match kind {
+                            "ios.infoPlist" => crate::apple::is_reserved_ios_info(entry),
+                            _ => crate::apple::is_reserved_ios_entitlement(entry),
+                        };
+                        if reserved {
+                            bail!("{name}: {at} `{kind}.{entry}` is a key NSH sets itself");
+                        }
                     }
-                    Some(Value::Array(have)) if value.is_array() => {
-                        join(have, value.as_array().into_iter().flatten().cloned());
-                    }
-                    Some(have) if have == value => {}
-                    Some(_) => {
-                        let first = self
-                            .owners
-                            .get(&owner)
-                            .map_or("another crate", |o| o)
-                            .to_owned();
-                        self.clashes.push(Clash {
+                    let target = match kind {
+                        "ios.infoPlist" => &mut self.ios_info,
+                        _ => &mut self.ios_entitlements,
+                    };
+                    merge_entries(
+                        target,
+                        entries,
+                        Entries {
                             kind,
-                            key: entry.clone(),
-                            first,
-                            second: name.to_owned(),
-                        });
-                    }
+                            prefix: "",
+                            name,
+                        },
+                        &mut self.owners,
+                        &mut self.clashes,
+                    );
                 }
             }
         }
         Ok(())
     }
 
+    /// Leaves out, with a warning, the translations of keys no crate sets
+    /// in `ios.infoPlist` as Cargo resolved the app: their translations are
+    /// of the crates' wording. A translation outside the feature that sets
+    /// its key is no error, so an app without the feature, or an Android
+    /// package, is not stopped by it.
+    fn drop_untranslatable(&mut self, warnings: &mut Vec<String>) {
+        for (language, texts) in &mut self.ios_strings {
+            let Some(texts) = texts.as_object_mut() else {
+                continue;
+            };
+            texts.retain(|key, _| {
+                if self.ios_info.contains_key(key) {
+                    return true;
+                }
+                let owner = self
+                    .owners
+                    .get(&format!("ios.infoPlistStrings.{language}.{key}"))
+                    .map_or("a crate", String::as_str);
+                warnings.push(format!(
+                    "{owner}: `ios.infoPlistStrings.{language}.{key}` translates a key no crate \
+                     sets in `ios.infoPlist` (with the features on): left out"
+                ));
+                self.clashes.retain(|clash| {
+                    clash.kind != "ios.infoPlistStrings" || clash.key != format!("{language}.{key}")
+                });
+                false
+            });
+        }
+        self.ios_strings
+            .retain(|_, texts| texts.as_object().is_some_and(|texts| !texts.is_empty()));
+    }
+
+    /// The crates' translations the app takes, by language: those of the
+    /// languages the app declares (its `locales`, or its own
+    /// `ios.infoPlistStrings`), so a crate never adds a language to the
+    /// app; and none of a key the app words itself in `ios.infoPlist`,
+    /// which the crates' translations of their own wording would not say.
+    pub(crate) fn crate_strings(&self, config: &AppConfig) -> Map<String, Value> {
+        let declared = |language: &str| {
+            config.localizations.iter().any(|l| l == language)
+                || config.ios.info_plist_strings.contains_key(language)
+        };
+        self.ios_strings
+            .iter()
+            .filter(|(language, _)| declared(language))
+            .filter_map(|(language, texts)| {
+                let texts: Map<String, Value> = texts
+                    .as_object()?
+                    .iter()
+                    .filter(|(key, _)| !config.ios.info_plist.contains_key(*key))
+                    .map(|(key, text)| (key.clone(), text.clone()))
+                    .collect();
+                (!texts.is_empty()).then(|| (language.clone(), Value::Object(texts)))
+            })
+            .collect()
+    }
+
     fn merge_android(
         &mut self,
         name: &str,
+        dir: Option<&Path>,
         at: &str,
         android: &Value,
         warnings: &mut Vec<String>,
@@ -305,6 +423,26 @@ impl ModuleMeta {
                     }
                     join_strings(&mut self.android_application, elements);
                 }
+                "libraries" => {
+                    let listed = format!("{name}: {at} `android.libraries`");
+                    let dir = dir.with_context(|| {
+                        format!("{listed}: cargo metadata names no Cargo.toml for the crate")
+                    })?;
+                    let libraries = strings()?
+                        .into_iter()
+                        .map(|path| Library {
+                            path: dir.join(path),
+                            listed: listed.clone(),
+                        })
+                        .collect();
+                    join_libraries(&mut self.android_libraries, libraries);
+                }
+                // A placeholder's value (a service's key) is the app's: a
+                // crate's default would ship in every app that uses it.
+                "manifestPlaceholders" => bail!(
+                    "{name}: {at} `android.manifestPlaceholders`: only the app sets placeholders, \
+                     in its nsh.json: their values are the app's"
+                ),
                 _ => warnings.push(format!(
                     "{name}: {at} `android.{key}` is not something this nsh reads: left out"
                 )),
@@ -322,15 +460,31 @@ impl ModuleMeta {
         // The clashes are all iOS keys: an Android package has none of them.
         if platform == Platform::Ios {
             for clash in &self.clashes {
-                let app = match clash.kind {
-                    "ios.infoPlist" => &config.ios.info_plist,
-                    _ => &config.ios.entitlements,
+                let settled = match clash.kind {
+                    "ios.infoPlist" => config.ios.info_plist.contains_key(&clash.key),
+                    "ios.infoPlistStrings" => {
+                        let (language, key) = clash.key.split_once('.').unwrap_or_default();
+                        // A language the app does not declare and a key
+                        // the app words itself take none of the crates'.
+                        !self.crate_strings(config).contains_key(language)
+                            || config.ios.info_plist.contains_key(key)
+                            || config
+                                .ios
+                                .info_plist_strings
+                                .get(language)
+                                .and_then(Value::as_object)
+                                .is_some_and(|texts| texts.contains_key(key))
+                    }
+                    _ => config.ios.entitlements.contains_key(&clash.key),
                 };
-                if !app.contains_key(&clash.key) {
+                if !settled {
                     bail!("{clash}");
                 }
             }
         }
+        // Before the crates' keys join the app's ([`Self::crate_strings`]).
+        let strings = self.crate_strings(config);
+        add_strings(&mut config.ios.info_plist_strings, &strings);
         under(&mut config.ios.info_plist, &self.ios_info);
         under(&mut config.ios.entitlements, &self.ios_entitlements);
         join_strings(
@@ -341,6 +495,11 @@ impl ModuleMeta {
         join_strings(
             &mut config.android.application,
             self.android_application.clone(),
+        );
+        // The app's own first, then the crates'.
+        join_libraries(
+            &mut config.android.libraries,
+            self.android_libraries.clone(),
         );
         Ok(())
     }
@@ -371,6 +530,21 @@ pub(crate) fn for_dev_host(triple: &str, platform: Platform) -> ModuleMeta {
     meta
 }
 
+/// Adds the crates' translations (`from`, by language) to the app's
+/// (`app`, `ios.infoPlistStrings`): the app's text wins.
+pub(crate) fn add_strings(app: &mut Map<String, Value>, from: &Map<String, Value>) {
+    for (language, texts) in from {
+        // Another form is refused when `nsh.json` is read.
+        if let (Value::Object(app), Some(texts)) = (
+            app.entry(language.clone())
+                .or_insert_with(|| Value::Object(Map::new())),
+            texts.as_object(),
+        ) {
+            under(app, texts);
+        }
+    }
+}
+
 /// Adds `from` to `app`: the app's value wins, arrays are joined.
 pub(crate) fn under(app: &mut Map<String, Value>, from: &Map<String, Value>) {
     for (key, value) in from {
@@ -382,6 +556,47 @@ pub(crate) fn under(app: &mut Map<String, Value>, from: &Map<String, Value>) {
                 join(have, value.as_array().into_iter().flatten().cloned());
             }
             Some(_) => {}
+        }
+    }
+}
+
+/// Where [`merge_entries`] merges: the `nsh.json` key the entries are of,
+/// the prefix of their keys in it (a language's), and the crate.
+struct Entries<'a> {
+    kind: &'static str,
+    prefix: &'a str,
+    name: &'a str,
+}
+
+/// Merges the `entries` of a crate into `target`: arrays are joined, a
+/// value another crate set differently is a clash.
+fn merge_entries(
+    target: &mut Map<String, Value>,
+    entries: &Map<String, Value>,
+    Entries { kind, prefix, name }: Entries<'_>,
+    owners: &mut BTreeMap<String, String>,
+    clashes: &mut Vec<Clash>,
+) {
+    for (entry, value) in entries {
+        let owner = format!("{kind}.{prefix}{entry}");
+        match target.get_mut(entry) {
+            None => {
+                target.insert(entry.clone(), value.clone());
+                owners.insert(owner, name.to_owned());
+            }
+            Some(Value::Array(have)) if value.is_array() => {
+                join(have, value.as_array().into_iter().flatten().cloned());
+            }
+            Some(have) if have == value => {}
+            Some(_) => {
+                let first = owners.get(&owner).map_or("another crate", |o| o).to_owned();
+                clashes.push(Clash {
+                    kind,
+                    key: format!("{prefix}{entry}"),
+                    first,
+                    second: name.to_owned(),
+                });
+            }
         }
     }
 }
@@ -399,6 +614,16 @@ fn join_strings(list: &mut Vec<String>, more: Vec<String>) {
     for value in more {
         if !list.contains(&value) {
             list.push(value);
+        }
+    }
+}
+
+/// Appends each of `more` whose file `list` does not have yet: the first
+/// that lists a file is the one errors name.
+fn join_libraries(list: &mut Vec<Library>, more: Vec<Library>) {
+    for library in more {
+        if !list.iter().any(|have| have.path == library.path) {
+            list.push(library);
         }
     }
 }
@@ -509,6 +734,7 @@ mod tests {
             "packages": packages.iter().map(|(name, metadata, _)| json!({
                 "id": id(name),
                 "name": name,
+                "manifest_path": format!("/work/{name}/Cargo.toml"),
                 "metadata": metadata,
             })).collect::<Vec<_>>(),
             "resolve": { "nodes": packages.iter().map(|(name, _, features)| json!({
@@ -624,6 +850,167 @@ mod tests {
         assert!(android.android.queries[0].contains("IMAGE_CAPTURE"));
     }
 
+    /// Crates translate the keys they set, for the languages the app
+    /// declares; the app's own text and its own translations win, and a
+    /// clash is the app's to settle as for `ios.infoPlist`.
+    #[test]
+    fn crates_translate_their_own_keys() {
+        let camera = |zh: &str| {
+            json!({ "nsh": { "ios": {
+                "infoPlist": { "NSCameraUsageDescription": "The app takes photos with the camera." },
+                "infoPlistStrings": {
+                    "zh-Hans": { "NSCameraUsageDescription": zh },
+                    "ja": { "NSCameraUsageDescription": "カメラで写真を撮ります。" },
+                    "de": { "NSCameraUsageDescription": "Die App macht Fotos." },
+                },
+            } } })
+        };
+        let (meta, warnings) =
+            ModuleMeta::from_metadata(&metadata(&[("camera", camera("用相机拍照。"), &[])]))
+                .unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        // `zh-Hans` from `locales`, `ja` from the app's own translations;
+        // `de` is no language of the app's: left out.
+        let chinese = || {
+            let mut config = AppConfig::default();
+            config.localizations = vec!["zh-Hans".into()];
+            config
+        };
+        let mut config = chinese();
+        config.ios.info_plist_strings.insert(
+            "ja".into(),
+            json!({ "NSCameraUsageDescription": "レシートを撮ります。" }),
+        );
+        meta.apply(&mut config, Platform::Ios).unwrap();
+        assert_eq!(
+            config.ios.info_plist_strings["zh-Hans"],
+            json!({ "NSCameraUsageDescription": "用相机拍照。" })
+        );
+        assert_eq!(
+            config.ios.info_plist_strings["ja"],
+            json!({ "NSCameraUsageDescription": "レシートを撮ります。" })
+        );
+        assert!(!config.ios.info_plist_strings.contains_key("de"));
+        // An English-only app takes no language from its crates.
+        let mut english = AppConfig::default();
+        meta.apply(&mut english, Platform::Ios).unwrap();
+        assert!(english.ios.info_plist_strings.is_empty());
+        // An empty object declares the language: the crates translate it.
+        let mut german = AppConfig::default();
+        german.ios.info_plist_strings.insert("de".into(), json!({}));
+        meta.apply(&mut german, Platform::Ios).unwrap();
+        assert_eq!(
+            german.ios.info_plist_strings["de"]["NSCameraUsageDescription"],
+            "Die App macht Fotos."
+        );
+        // The app words the key itself: the crate's translations of the
+        // crate's wording are left out.
+        let mut own = chinese();
+        own.ios.info_plist.insert(
+            "NSCameraUsageDescription".into(),
+            json!("Photos of receipts."),
+        );
+        meta.apply(&mut own, Platform::Ios).unwrap();
+        assert!(own.ios.info_plist_strings.is_empty());
+
+        // Two crates translate differently: the app settles it, unless the
+        // language is none of the app's.
+        let (meta, _) = ModuleMeta::from_metadata(&metadata(&[
+            ("camera", camera("用相机拍照。"), &[]),
+            ("scanner", camera("扫描二维码。"), &[]),
+        ]))
+        .unwrap();
+        meta.apply(&mut AppConfig::default(), Platform::Ios)
+            .unwrap();
+        let error = meta
+            .apply(&mut chinese(), Platform::Ios)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains(
+                "camera and scanner set `zh-Hans.NSCameraUsageDescription` (ios.infoPlistStrings)"
+            ),
+            "{error}"
+        );
+        let mut settled = chinese();
+        settled.ios.info_plist_strings.insert(
+            "zh-Hans".into(),
+            json!({ "NSCameraUsageDescription": "拍摄收据。" }),
+        );
+        meta.apply(&mut settled, Platform::Ios).unwrap();
+        assert_eq!(
+            settled.ios.info_plist_strings["zh-Hans"]["NSCameraUsageDescription"],
+            "拍摄收据。"
+        );
+    }
+
+    /// A translation in a crate's own section of a key its feature sets:
+    /// an app without the feature, and an Android package, are not stopped
+    /// by it; the translation is left out with a warning.
+    #[test]
+    fn crates_translations_outside_the_feature_are_left_out() {
+        let scanner = json!({ "nsh": {
+            "ios": { "infoPlistStrings": { "zh-Hans": { "NSCameraUsageDescription": "扫描二维码。" } } },
+            "features": { "camera": { "ios": {
+                "infoPlist": { "NSCameraUsageDescription": "Scans codes." }
+            } } },
+        } });
+        let (meta, warnings) =
+            ModuleMeta::from_metadata(&metadata(&[("scanner", scanner.clone(), &["camera"])]))
+                .unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(
+            meta.ios_strings["zh-Hans"]["NSCameraUsageDescription"],
+            "扫描二维码。"
+        );
+        let off = ModuleMeta::from_metadata(&metadata(&[("scanner", scanner, &[])]));
+        assert!(off.is_ok(), "{off:?}");
+        let (meta, warnings) = off.unwrap();
+        assert!(meta.ios_strings.is_empty());
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].contains(
+                "scanner: `ios.infoPlistStrings.zh-Hans.NSCameraUsageDescription` translates a key \
+                 no crate sets in `ios.infoPlist`"
+            ),
+            "{warnings:?}"
+        );
+        meta.apply(&mut AppConfig::default(), Platform::Ios)
+            .unwrap();
+        meta.apply(&mut AppConfig::default(), Platform::Android)
+            .unwrap();
+    }
+
+    /// A crate's translations are checked as `nsh.json`'s are.
+    #[test]
+    fn crates_translations_are_checked() {
+        let strings = |strings: Value| {
+            ModuleMeta::from_metadata(&metadata(&[(
+                "scanner",
+                json!({ "nsh": { "ios": {
+                    "infoPlist": { "NSCameraUsageDescription": "Scans codes." },
+                    "infoPlistStrings": strings,
+                } } }),
+                &[],
+            )]))
+            .map(|_| ())
+            .unwrap_err()
+            .to_string()
+        };
+        let error = strings(json!({ "zh_Hans": {} }));
+        assert!(
+            error.contains("scanner: [package.metadata.nsh] `ios.infoPlistStrings`: \"zh_Hans\" is no language code"),
+            "{error}"
+        );
+        let error = strings(json!({ "ja": { "CFBundleIdentifier": "x" } }));
+        assert!(error.contains("is a key NSH sets itself"), "{error}");
+        let error = strings(json!({ "ja": { "NSCameraUsageDescription": 1 } }));
+        assert!(
+            error.contains("`ios.infoPlistStrings.ja.NSCameraUsageDescription` is a string"),
+            "{error}"
+        );
+    }
+
     #[test]
     fn crates_permissions_are_checked_and_spelled_out() {
         let permissions = |list: Value| {
@@ -713,6 +1100,97 @@ mod tests {
         .unwrap();
         assert_eq!(meta, ModuleMeta::default());
         assert_eq!(warnings.len(), 2, "{warnings:?}");
+    }
+
+    #[test]
+    fn crates_libraries_are_relative_to_their_cargo_toml() {
+        let scanner = json!({ "nsh": {
+            "android": { "libraries": ["android/libs/glue.jar"] },
+            "features": { "vendor": { "android": {
+                "libraries": ["android/libs/vendor-sdk.jar", "android/libs/glue.jar"],
+            } } },
+        } });
+        let printer = json!({ "nsh": { "android": { "libraries": ["java/out/classes.dex"] } } });
+        let (meta, warnings) = ModuleMeta::from_metadata(&metadata(&[
+            ("printer", printer, &[]),
+            ("scanner", scanner, &["vendor"]),
+        ]))
+        .unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let found: Vec<(&Path, &str)> = meta
+            .android_libraries
+            .iter()
+            .map(|l| (l.path.as_path(), l.listed.as_str()))
+            .collect();
+        assert_eq!(
+            found,
+            [
+                (
+                    Path::new("/work/printer/java/out/classes.dex"),
+                    "printer: [package.metadata.nsh] `android.libraries`"
+                ),
+                (
+                    Path::new("/work/scanner/android/libs/glue.jar"),
+                    "scanner: [package.metadata.nsh] `android.libraries`"
+                ),
+                (
+                    Path::new("/work/scanner/android/libs/vendor-sdk.jar"),
+                    "scanner: [package.metadata.nsh.features.vendor] `android.libraries`"
+                ),
+            ]
+        );
+        // The app's own come first; a file both list is the app's.
+        let mut config = AppConfig::default();
+        config.android.libraries.push(Library {
+            path: "/work/scanner/android/libs/glue.jar".into(),
+            listed: "nsh.json `android.libraries`".into(),
+        });
+        meta.apply(&mut config, Platform::Android).unwrap();
+        let listed: Vec<&str> = config
+            .android
+            .libraries
+            .iter()
+            .map(|l| l.listed.as_str())
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                "nsh.json `android.libraries`",
+                "printer: [package.metadata.nsh] `android.libraries`",
+                "scanner: [package.metadata.nsh.features.vendor] `android.libraries`",
+            ]
+        );
+        // Not a list of paths: an error naming the crate.
+        let error = ModuleMeta::from_metadata(&metadata(&[(
+            "x",
+            json!({ "nsh": { "android": { "libraries": "a.jar" } } }),
+            &[],
+        )]))
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.starts_with("x: [package.metadata.nsh] `android.libraries`"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn only_the_app_sets_manifest_placeholders() {
+        let error = ModuleMeta::from_metadata(&metadata(&[(
+            "push",
+            json!({ "nsh": { "features": { "vendor": { "android": {
+                "manifestPlaceholders": { "PUSH_KEY": "default" },
+            } } } } }),
+            &["vendor"],
+        )]))
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.starts_with(
+                "push: [package.metadata.nsh.features.vendor] `android.manifestPlaceholders`: only the app sets"
+            ),
+            "{error}"
+        );
     }
 
     #[test]

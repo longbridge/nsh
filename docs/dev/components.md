@@ -343,6 +343,7 @@ reasons: `reactive-components.md`.
   | `Image.getSize(src)`, `Image.prefetch(src)` | `image_size(src)` / `prefetch_image(src)`: answers to await in a task |
   | `Clipboard.writeText(text)`, `Clipboard.write({ text, html })`, `await Clipboard.readText()` / `hasText()`, `writeImage(src)`, `readImage()` / `hasImage()`, `readFiles()` (`nsh`'s `Clipboard`) | `set_clipboard(text)`, `set_clipboard_item(item)` (a `ClipboardItem`: one item as a plain object of its formats, `text` and `html`, named as GPUI's and the DOM's), `clipboard_string()` / `clipboard_has_string()`, `set_clipboard_image(uri)`, `clipboard_image()` (an `Option<ClipboardImage>`) / `clipboard_has_image()`, `clipboard_files()`: answers to await in a task (the app's `capabilities.clipboard` applies as for JS) |
   | `await Storage.getItem(k)`, `setItem(k, v)`, `removeItem(k)`, `keys()`, `clear()` (`nsh`'s `Storage`) | `nsh_core::storage::Storage::get_item(k)`, `set_item(k, v)` (`Err(StorageFull)` past the quota), `remove_item(k)`, `get_all_keys()`, `clear()`: synchronous (the entries are in memory on the engine thread), and the same entries the app's JS uses, so a TSX entry and a Rust entry of one app read each other's data |
+  | `Storage.on("change", listener)` (`nsh`'s `Storage`) | `nsh_core::storage::Storage::on_change(f)`: the changes another window, view or (web) tab made, under the current owner; this engine's own changes do not come |
   | `announce(message)`, `setAccessibilityFocus(ref)` (`nsh`'s accessibility API) | `announce_for_accessibility(msg)`, `note.set_accessibility_focus()` (an `ElementRef`) |
   | `safeAreaInsets()` | `cx.insets()`: the insets where the component is (the nearest screen's or modal's, else the surface's safe area) |
   | a signal or store at module level | `global::<G>()`: a `Signal<G>` of the surface, made with `Default` (shared by its components and modules) |
@@ -1066,12 +1067,15 @@ what changed.
 - A part that follows another element (`Tabs`' indicator): a view with `View::follow(move || list.current())`, absolute
   in the list and first among its children (drawn behind the tabs), `pointer-events: none`. The core spans the
   target's frame along the list's main axis after each layout (`core/follow.rs`: the frames from the target up to the
-  follower's parent summed, the follower's margins on that axis taken off; across it the follower's own layout), so a
+  follower's parent summed, through list cells, and scroll views and lists where they last reported being scrolled,
+  cut to their viewports; the follower's margins on that axis taken off; across it the follower's own layout), so a
   selection change is one frame item and its layout animation (`View::follow_transition`), and a resize moves it in
   the batch that moves the tabs. The ref is looked up as the core places it, so the target may render after the
   follower. `Tabs` hides it while no tab is selected (`Roving::current` is `None`) and keeps it on the first of
   several selected; it is `accessibility_elements_hidden` and takes no focus, so screen readers and the roving keys
   see the tabs alone. `ToggleGroup`'s segmented highlight, a pagination's marker or a listbox's highlight are the same view.
+  A highlight that slides over a virtual list's rows follows the row's element from outside the list (it follows the
+  list's scrolling a frame or so behind) or, over a plain scroll view's rows, from inside its content (moved natively).
 
 ## The JS face and the declarations
 

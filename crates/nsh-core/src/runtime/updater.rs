@@ -1106,6 +1106,16 @@ mod native {
         let url = pending.available.url.clone();
         let sha256 = pending.available.sha256.clone().unwrap_or_default();
         let size = pending.available.size;
+        #[cfg(any(
+            all(target_os = "linux", not(target_env = "ohos")),
+            target_os = "macos",
+            windows
+        ))]
+        let delta = pending
+            .available
+            .delta
+            .clone()
+            .map(|delta| (delta, pending.installation.clone()));
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let mut work = std::pin::pin!(blocking(move || {
             std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -1113,6 +1123,22 @@ mod native {
             let part_name = format!("download-{key}.part");
             let dest_name = format!("download-{key}");
             cleanup_stale_downloads(&dir, &part_name, &dest_name);
+            // The patch from the running version first, the archive when
+            // it cannot make the new app.
+            #[cfg(any(
+                all(target_os = "linux", not(target_env = "ohos")),
+                target_os = "macos",
+                windows
+            ))]
+            if let Some((delta, installation)) = &delta {
+                let progress = |received, total| tx.send((received, total)).is_ok();
+                match patched(&*host, installation, &dir, delta, progress) {
+                    Ok(path) => return Ok(path),
+                    Err(e) => {
+                        log::warn!("updater: downloading the whole app, the patch failed: {e}")
+                    }
+                }
+            }
             let part = dir.join(&part_name);
             let dest = dir.join(&dest_name);
             let target = DownloadTarget {
@@ -1155,6 +1181,77 @@ mod native {
             let _ = std::fs::remove_file(previous);
         }
         Ok(())
+    }
+
+    /// Makes the new app from the patch of the running version
+    /// ([`nsh_updater::delta`]): the installed app as the patch's reference,
+    /// checked against the manifest, the patch downloaded (resumable) and
+    /// applied; the `.tar` it made, checked too.
+    #[cfg(any(
+        all(target_os = "linux", not(target_env = "ohos")),
+        target_os = "macos",
+        windows
+    ))]
+    fn patched(
+        host: &dyn UpdaterHost,
+        installation: &nsh_updater::install::Installation,
+        dir: &std::path::Path,
+        delta: &nsh_updater::Delta,
+        progress: impl FnMut(u64, Option<u64>) -> bool,
+    ) -> Result<PathBuf, String> {
+        use std::{fs, io::BufWriter};
+        let key = part_key(&delta.result);
+        // What patches to other versions left.
+        if let Ok(entries) = fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                if let Some(name) = name.to_str()
+                    && name.starts_with("delta-")
+                    && !name.starts_with(&format!("delta-{key}"))
+                {
+                    let _ = fs::remove_file(entry.path());
+                }
+            }
+        }
+        let base_path = dir.join(format!("delta-{key}.base"));
+        let result = (|| {
+            let file = fs::File::create(&base_path).map_err(|e| e.to_string())?;
+            let base = installation
+                .delta_base(BufWriter::new(file))
+                .map_err(|e| e.to_string())?;
+            if base != delta.base.to_ascii_lowercase() {
+                return Err(format!(
+                    "the installed app is not version {} as released",
+                    delta.from
+                ));
+            }
+            let part = dir.join(format!("delta-{key}.patch.part"));
+            let patch = dir.join(format!("delta-{key}.patch"));
+            let target = DownloadTarget {
+                host,
+                url: &delta.url,
+                part: &part,
+                dest: &patch,
+                remove_invalid_dest: true,
+                sha256: &delta.sha256,
+                size: Some(delta.size),
+            };
+            download_resumable(&target, progress, |_| Ok(()))?;
+            let base = fs::read(&base_path).map_err(|e| e.to_string())?;
+            let out_path = dir.join(format!("delta-{key}.tar"));
+            let applied = (|| {
+                let out = BufWriter::new(fs::File::create(&out_path)?);
+                nsh_updater::delta::apply(&base, fs::File::open(&patch)?, out, &delta.result)
+            })();
+            let _ = fs::remove_file(&patch);
+            if let Err(e) = applied {
+                let _ = fs::remove_file(&out_path);
+                return Err(e.to_string());
+            }
+            Ok(out_path)
+        })();
+        let _ = fs::remove_file(&base_path);
+        result
     }
 
     /// The app's updates directory, as `nsh_engine::updates` has it.

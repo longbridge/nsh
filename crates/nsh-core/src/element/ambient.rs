@@ -307,7 +307,7 @@ pub(super) fn executor() -> Rc<Executor> {
     with_data(|d| d.ambient.executor.clone()).expect("the core sets the executor")
 }
 
-fn act(action: Action) {
+pub(crate) fn act(action: Action) {
     executor().act(action);
 }
 
@@ -1402,6 +1402,13 @@ pub fn fetch(request: impl Into<crate::platform::HttpRequest>) -> super::Fetch {
 /// Asks for the app to show in `locale` ([`crate::i18n::set_locale`]).
 pub(crate) fn act_locale(locale: Option<crate::platform::Locale>) {
     act(Action::Locale(locale));
+}
+
+/// Tells the core that translations changed in place
+/// ([`crate::i18n::add_translations`]), so menus can re-localize if the
+/// selected language changed.
+pub(crate) fn act_translations_changed(before: crate::i18n::Translations) {
+    act_if_running(Action::TranslationsChanged(before));
 }
 
 /// Shows the surface in `appearance` whatever the system's (TS:

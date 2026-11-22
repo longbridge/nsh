@@ -31,7 +31,7 @@ use std::sync::Arc;
 use rustc_hash::FxHashMap;
 
 pub use self::theme::{Theme, ThemeError};
-pub(crate) use self::utilities::{Decl, Len, Part};
+pub(crate) use self::utilities::{Decl, Len, Part, PropDecl};
 use self::{
     theme::ClassTokens,
     utilities::{Parts, touched},

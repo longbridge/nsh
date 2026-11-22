@@ -1861,6 +1861,13 @@ fn sink(rv: Rv) -> impl IntoElement {
         .paste_behavior(PasteBehavior::Report)
         .value(move || value.get())
         .label(move || props.accessibility_label.get().unwrap_or_default())
+        // The keyboard is the sink's, so the editor's accessory is too;
+        // unset, the empty id (as the label's).
+        .input_accessory(move || {
+            props
+                .input_accessory
+                .with(|id| id.as_deref().unwrap_or_default().to_owned())
+        })
         .on_change(move |text: &str| change.sink_changed(text))
         .on_composition_change(move |c: &Composition| {
             composition.composition_changed(c.composing, &c.text)

@@ -1,6 +1,6 @@
 # Tooling
 
-Commands for all three modes, Rust first. "Rust" is an app with `nsh.json` `"root"`. "Mixed" has `"rust"` and no
+Commands for all three modes, Rust first. "Rust" is an app with `nsh.json` `"root"`. "Mixed" is a TSX entry with Rust nshm crates in `ext/` (`"dependencies"` by path), or `"rust"` and no
 `"root"`, so `App.tsx` is the entry. "TSX" has neither. Mode pages: [rust.md](rust.md), [mixed.md](mixed.md), [tsx.md](tsx.md).
 
 ## First-run setup

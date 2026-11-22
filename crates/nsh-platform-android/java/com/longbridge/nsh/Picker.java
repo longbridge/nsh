@@ -337,7 +337,14 @@ final class Picker {
         if (length > request.maxBytes) {
             file.length = length;
         } else {
-            file.bytes = readAtMost(resolver, uri, request.maxBytes, length, file);
+            try {
+                file.bytes = readAtMost(resolver, uri, request.maxBytes, length, file);
+            } catch (OutOfMemoryError e) {
+                // Under the limit but over the Java heap (often ~192 MB): told
+                // as too large, as one over the limit, instead of dropped.
+                file.bytes = null;
+                file.length = length > 0 ? length : count(resolver, uri);
+            }
         }
         if (file.bytes == null) {
             Log.w(TAG, "a picked file is not read: larger than " + request.maxBytes + " bytes");
@@ -350,6 +357,17 @@ final class Picker {
      * counted into {@code file.length}, so no more than {@code max} bytes are ever held ({@code length}: what the
      * provider told, -1 when it told nothing).
      */
+    /** How many bytes {@code uri} has, counted without holding them. */
+    private static long count(ContentResolver resolver, Uri uri) throws Exception {
+        try (InputStream in = resolver.openInputStream(uri)) {
+            if (in == null) throw new java.io.IOException("no stream for " + uri);
+            byte[] buffer = new byte[64 * 1024];
+            long total = 0;
+            for (int n; (n = in.read(buffer)) > 0; ) total += n;
+            return total;
+        }
+    }
+
     private static byte[] readAtMost(ContentResolver resolver, Uri uri, int max, long length, Picked file)
             throws Exception {
         try (InputStream in = resolver.openInputStream(uri)) {
