@@ -274,12 +274,15 @@ application = ['<service android:name="com.example.scanner.Sync" android:exporte
 | 键 | 添加的内容 |
 |---|---|
 | `ios.infoPlist` | iOS 应用 `Info.plist` 的键，与 `nsh.json` 的 `ios.infoPlist` 相同 |
+| `ios.infoPlistStrings` | 这些键在其他语言下的文字，按语言给出，与 `nsh.json` 的 `ios.infoPlistStrings` 相同（[打包](./packaging.md#其他语言的-infoplist-文字)） |
 | `ios.entitlements` | iOS 应用的 entitlements |
 | `android.permissions` | `<uses-permission>` 元素，写法与 `nsh.json` 相同（`CAMERA` 即 `android.permission.CAMERA`） |
 | `android.queries` | manifest `<queries>` 里的 `<intent>`、`<package>`、`<provider>` 元素 |
 | `android.application` | `<application>` 里的 `<service>`、`<receiver>`、`<provider>`、`<activity>`、`<meta-data>` 元素；`${applicationId}` 是应用的包名 |
 
 应用自己的 `nsh.json` 优先：它设置过的键保留它的值，数组（例如 `UIBackgroundModes`）合并。两个 crate 给同一个键设置了不同的值时（例如两段不同的相机用途说明），由应用在 `ios.infoPlist` 或 `ios.entitlements` 里写这个键来决定；应用没写之前，打包 iOS 应用会报错并指出这两个 crate。NSH 自己设置的键（包标识、版本等）不能由 crate 设置。
+
+crate 翻译的是各 crate 在 `ios.infoPlist` 里设置的键，按它们的措辞翻译：翻译一个没有 crate 设置的键会报错；应用自己设置了的键不采用任何 crate 的翻译，因为那些翻译说的不是应用自己的文字。两个 crate 对同一个键给出不同的翻译时，同样由应用在 `ios.infoPlistStrings` 里写这个键来决定。crate 的语言也会像应用的语言一样声明给系统。
 
 在应用旁边开发时用 `nsh add --path ../my-gauge`，按目录当前内容使用。发布方式与普通 crate 相同（`cargo publish`），加上关键词 `nshm`，便于在 [crates.io](https://crates.io/keywords/nshm) 上找到；也可以推送到 Git 并给版本打标签。
 

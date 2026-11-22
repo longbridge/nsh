@@ -305,6 +305,7 @@ application = ['<service android:name="com.example.scanner.Sync" android:exporte
 | Key | Adds |
 |---|---|
 | `ios.infoPlist` | Keys of the iOS app's `Info.plist`, as `nsh.json`'s `ios.infoPlist` |
+| `ios.infoPlistStrings` | The text of those keys in other languages, by language, as `nsh.json`'s `ios.infoPlistStrings` ([Packaging](./packaging.md#infoplist-text-in-other-languages)) |
 | `ios.entitlements` | The iOS app's entitlements |
 | `android.permissions` | `<uses-permission>` elements, named as in `nsh.json` (`CAMERA` is `android.permission.CAMERA`) |
 | `android.queries` | `<intent>`, `<package>` and `<provider>` elements of the manifest's `<queries>` |
@@ -314,6 +315,11 @@ The app's own `nsh.json` wins: a key it sets keeps its value, and arrays (such a
 two crates set one key to different values (two usage descriptions of the camera), the app chooses by setting the key
 in `ios.infoPlist` or `ios.entitlements`; until it does, packaging for iOS stops with an error naming both crates. Keys NSH
 sets itself (the bundle's identifier, version and the like) are not the crates'.
+
+A crate translates the keys the crates set in `ios.infoPlist`, as they word them: a translation of a key no crate sets
+is an error, and a key the app sets itself takes none of the crates' translations, which would say something else
+than the app's text. Two crates translating a key differently are settled by the app as above, in
+`ios.infoPlistStrings`. A crate's languages are declared to the system as the app's are.
 
 Develop it beside an app with `nsh add --path ../my-gauge`, which reads the directory as it is. Publish it as any crate (`cargo publish`), with the keyword `nshm` so that it can be found on [crates.io](https://crates.io/keywords/nshm), or push it to Git and tag its versions.
 

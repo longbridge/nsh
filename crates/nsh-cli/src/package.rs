@@ -1035,13 +1035,21 @@ fn app_localizations(dir: &Path, locales: Option<&serde_json::Value>) -> Vec<Str
 /// Declares the app's locales to Apple's systems (`CFBundleLocalizations`,
 /// English, the development region, first): system UI, such as AppKit's and
 /// UIKit's menus, shows in the language the app does, which without it is
-/// English whatever the user's.
-fn bundle_localizations(d: &mut plist::Dictionary, config: &AppConfig) {
-    if config.localizations.is_empty() {
+/// English whatever the user's. The languages of the app's `Info.plist`
+/// strings (`strings`, `<platform>.infoPlistStrings`) are among them: their
+/// `.lproj` directories declare them anyway, and the development region,
+/// which has no directory, stays the language of every user whose
+/// language the app does not have.
+fn bundle_localizations(
+    d: &mut plist::Dictionary,
+    config: &AppConfig,
+    strings: &serde_json::Map<String, serde_json::Value>,
+) {
+    if config.localizations.is_empty() && strings.is_empty() {
         return;
     }
     let mut list = vec!["en".to_owned()];
-    for locale in &config.localizations {
+    for locale in config.localizations.iter().chain(strings.keys()) {
         if !list.contains(locale) {
             list.push(locale.clone());
         }
@@ -1522,6 +1530,8 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
         &info,
         options.target == PackageTarget::IosSimulator,
     )?;
+    let localized = config.ios.localized_info(ApplePlatform::Ios, &info)?;
+    crate::apple::write_localized_info(&app, &localized)?;
     plist::Value::Dictionary(info).to_file_xml(app.join("Info.plist"))?;
 
     match options.target {
@@ -2029,6 +2039,8 @@ fn package_macos(
     url_types(&mut plist, id, &schemes);
     activity_types(&mut plist, id, config.handoff);
     document_types(&mut plist, &config.file_types());
+    let localized = config.macos.localized_info(&plist)?;
+    crate::apple::write_localized_info(&resources, &localized)?;
     plist::Value::Dictionary(plist)
         .to_file_xml(contents.join("Info.plist"))
         .context("write Info.plist")?;
@@ -2285,7 +2297,7 @@ fn macos_info_plist(
         d.insert("LSUIElement".into(), true.into());
     }
     config.usage_descriptions(&mut d);
-    bundle_localizations(&mut d, config);
+    bundle_localizations(&mut d, config, &config.macos.info_plist_strings);
     // The app's own keys, over NSH's defaults (never over its reserved ones).
     d.extend(config.macos.info_plist()?);
     Ok(d)
@@ -2456,7 +2468,7 @@ fn info_plist(
     );
     d.insert("LSRequiresIPhoneOS".into(), true.into());
     config.usage_descriptions(&mut d);
-    bundle_localizations(&mut d, config);
+    bundle_localizations(&mut d, config, &config.ios.info_plist_strings);
     // A launch screen entry opts into the full screen (no letterboxing);
     // the app's color and image are in its asset catalog
     // ([`launch_screen_sets`]).
@@ -3323,7 +3335,71 @@ mod tests {
         assert_eq!(declared(&config).unwrap(), ["en", "ja", "zh-TW"]);
         // An app without either declares nothing: English, as before.
         assert_eq!(declared(&AppConfig::default()), None);
+        // The languages of the `Info.plist` strings join them: English
+        // stays the language of the users the app has no strings for.
+        fs::write(
+            dir.join("nsh.json"),
+            r#"{
+                "locales": ["ja"],
+                "ios": { "infoPlistStrings": { "zh-Hans": {}, "ja": {} } },
+                "macos": { "infoPlistStrings": { "zh-Hans": {}, "ja": {} } }
+            }"#,
+        )
+        .unwrap();
+        let config = read_config(&dir.join("App.tsx")).unwrap();
+        assert_eq!(declared(&config).unwrap(), ["en", "ja", "zh-Hans"]);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// `ios.infoPlistStrings` translates the `Info.plist` packages write,
+    /// NSH's keys among them (the app's name, the usage descriptions NSH
+    /// adds), and only those it has as strings.
+    #[test]
+    fn apps_translate_their_info_plist() {
+        let config: AppConfig = serde_json::from_value(serde_json::json!({
+            "capabilities": { "webview": { "hosts": ["*"], "media": ["camera"] } },
+            "ios": {
+                "infoPlist": { "NSLocationWhenInUseUsageDescription": "Shows nearby stores." },
+                "infoPlistStrings": { "zh-Hans": {
+                    "CFBundleDisplayName": "示例",
+                    "NSCameraUsageDescription": "网页使用相机。",
+                    "NSLocationWhenInUseUsageDescription": "显示附近的门店。"
+                } }
+            },
+            "macos": { "infoPlistStrings": { "de": { "NSCameraUsageDescription": "Kamera." } } }
+        }))
+        .unwrap();
+        let ios = info_plist("A", "com.a", "a", &config, "iphoneos").unwrap();
+        let files = config.ios.localized_info(ApplePlatform::Ios, &ios).unwrap();
+        assert_eq!(
+            files["zh-Hans"],
+            "\"CFBundleDisplayName\" = \"示例\";\n\
+             \"NSCameraUsageDescription\" = \"网页使用相机。\";\n\
+             \"NSLocationWhenInUseUsageDescription\" = \"显示附近的门店。\";\n"
+        );
+        let macos = macos_info_plist("A", "com.a", "a", &config, false).unwrap();
+        assert_eq!(
+            config.macos.localized_info(&macos).unwrap()["de"],
+            "\"NSCameraUsageDescription\" = \"Kamera.\";\n"
+        );
+        // Without the media capture, the package has no camera usage
+        // description to translate.
+        let config = AppConfig {
+            capabilities: None,
+            ..config
+        };
+        let ios = info_plist("A", "com.a", "a", &config, "iphoneos").unwrap();
+        let error = config
+            .ios
+            .localized_info(ApplePlatform::Ios, &ios)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains(
+                "ios.infoPlistStrings.zh-Hans.NSCameraUsageDescription: the app's Info.plist has no"
+            ),
+            "{error}"
+        );
     }
 
     #[test]

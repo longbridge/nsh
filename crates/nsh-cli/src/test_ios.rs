@@ -33,7 +33,8 @@ pub(crate) fn starter(work: &Path, fps: bool, device: Option<&str>) -> anyhow::R
     // Behind the app the user types in: the touches and keys go to the
     // app in the simulator directly.
     let udid = crate::run::simulator(device, crate::run::SimulatorWindow::Behind)?;
-    let app = crate::run::package_ios(&work.join("ios"), &host)?;
+    // The host runs every app the tests open: no one app's strings.
+    let app = crate::run::package_ios(&work.join("ios"), &host, &Default::default())?;
     let step = crate::ui::Step::start("installing the development host in the simulator");
     simctl(&["install", &udid, &app.to_string_lossy()])?;
     step.finish();
