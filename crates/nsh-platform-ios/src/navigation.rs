@@ -332,6 +332,10 @@ pub(crate) struct ModalIvars {
     closed: Cell<bool>,
     /// The app is hiding it (`ModalHost::dismiss`).
     dismissing: Cell<bool>,
+    /// Its dismissal waits for a transition where it is to end
+    /// ([`dismiss_settled`]): a modal presented over it meanwhile would go
+    /// with it once it runs ([`transition_over`]).
+    deferred: Cell<bool>,
     /// The identifiers of the sheet's UIKit detents and the detents
     /// (`detents`) they stand for, to report the one the user picks.
     detents: RefCell<Vec<(Retained<NSString>, SheetDetent)>>,
@@ -528,6 +532,7 @@ impl ModalController {
             animated: Cell::new(true),
             closed: Cell::new(false),
             dismissing: Cell::new(false),
+            deferred: Cell::new(false),
             detents: RefCell::new(Vec::new()),
             screen: Cell::new(0.0),
         });
@@ -2689,9 +2694,9 @@ fn transition_at(controller: &UIViewController) -> Option<Retained<UIViewControl
 }
 
 /// Dismisses `controller` through its presenter, once no transition runs
-/// where it is ([`transition_at`]); `waited` after such a wait, when it
-/// may have left meanwhile (with a dismissal under it, or by the user's
-/// swipe): then only `done` runs.
+/// where it is ([`transition_at`]; meanwhile it is `deferred`); `waited`
+/// after such a wait, when it may have left meanwhile (with a dismissal
+/// under it, or by the user's swipe): then only `done` runs.
 fn dismiss_settled(
     controller: Retained<ModalController>,
     animated: bool,
@@ -2714,12 +2719,14 @@ fn dismiss_settled(
                 DispatchQueue::main().exec_async(move || {
                     let mtm = MainThreadMarker::new().expect("the main queue");
                     let (controller, done) = bound.into_inner(mtm);
+                    controller.ivars().deferred.set(false);
                     dismiss_settled(controller, animated, done, true);
                 });
             },
         );
         // Refused when the transition is already ending.
         if coordinator.animateAlongsideTransition_completion(None, Some(&wait)) {
+            controller.ivars().deferred.set(true);
             return;
         }
     }
@@ -2897,11 +2904,14 @@ pub(crate) fn presented_sheet(window: &objc2_ui_kit::UIWindow) -> Option<Retaine
 
 /// The controller a modal presented now over the one showing `from` waits
 /// for: the lowest of those presented over it that is in a transition
-/// (coming, or leaving: NSH's dismissal, a swipe, Escape), or that NSH
-/// just dismissed (`dismissed`, the modals dismissed in this pass, whose
-/// transition may not have started yet). Presented over a leaving one, the
-/// modal would go with it (UIKit dismisses everything above the controller
-/// it dismisses); over a moving one UIKit refuses it. A dismissal UIKit
+/// (coming, or leaving: NSH's dismissal, a swipe, Escape), that NSH just
+/// dismissed (`dismissed`, the modals dismissed in this pass, whose
+/// transition may not have started yet), or whose dismissal waits for a
+/// transition to end ([`dismiss_settled`], from an earlier pass): for that
+/// one, the transition it waits for, or itself once that has ended and its
+/// dismissal is about to run. Presented over a leaving one, the modal
+/// would go with it (UIKit dismisses everything above the controller it
+/// dismisses); over a moving one UIKit refuses it. A dismissal UIKit
 /// refused leaves its modal in place, with no transition: no longer
 /// awaited after its pass.
 pub(crate) fn transition_over(
@@ -2910,13 +2920,15 @@ pub(crate) fn transition_over(
 ) -> Option<Retained<UIViewController>> {
     let mut next = controller_of(from)?.presentedViewController();
     while let Some(c) = next {
-        let just = c
-            .downcast_ref::<ModalController>()
-            .is_some_and(|m| m.ivars().dismissing.get() && dismissed.contains(&m.ivars().id));
+        let modal = c.downcast_ref::<ModalController>().map(|m| m.ivars());
+        let just = modal.is_some_and(|m| m.dismissing.get() && dismissed.contains(&m.id));
         let moving =
             (c.isBeingPresented() || c.isBeingDismissed()) && c.transitionCoordinator().is_some();
         if just || moving {
             return Some(c);
+        }
+        if modal.is_some_and(|m| m.deferred.get()) {
+            return Some(transition_at(&c).unwrap_or(c));
         }
         next = c.presentedViewController();
     }
