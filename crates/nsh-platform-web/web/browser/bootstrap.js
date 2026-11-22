@@ -20,7 +20,7 @@
 	};
 
 //#endregion
-//#region E:/Villa/VibeCoding/_t3-worktrees/nsh-upstream/feat-i18n-add-translati-c086e3e8265b800c/crates/nsh-platform-web/web/browser/host.js
+//#region ../nsh-platform-web/web/browser/host.js
 	function createHost(invoke, reactive, dom, environment, live, platform = {}) {
 		const listeners = /* @__PURE__ */ new Map(), inbox = [], pending = /* @__PURE__ */ new Map();
 		let next = 1;
@@ -136,7 +136,7 @@
 	}
 
 //#endregion
-//#region E:/Villa/VibeCoding/_t3-worktrees/nsh-upstream/feat-i18n-add-translati-c086e3e8265b800c/crates/nsh-platform-web/web/browser/path.js
+//#region ../nsh-platform-web/web/browser/path.js
 	const module = { exports: {} };
 	const process = { cwd: () => "/" };
 	function assertPath(path) {
@@ -473,7 +473,7 @@
 	var path_default = module.exports;
 
 //#endregion
-//#region E:/Villa/VibeCoding/_t3-worktrees/nsh-upstream/feat-i18n-add-translati-c086e3e8265b800c/crates/nsh-platform-web/web/browser/buffer.js
+//#region ../nsh-platform-web/web/browser/buffer.js
 	var buffer_exports = /* @__PURE__ */ __exportAll({
 		Buffer: () => Buffer$2,
 		INSPECT_MAX_BYTES: () => INSPECT_MAX_BYTES,
@@ -1939,7 +1939,7 @@
 	const { Buffer: Buffer$2, SlowBuffer, INSPECT_MAX_BYTES, kMaxLength } = buffer;
 
 //#endregion
-//#region E:/Villa/VibeCoding/_t3-worktrees/nsh-upstream/feat-i18n-add-translati-c086e3e8265b800c/crates/nsh-platform-web/web/browser/standard.js
+//#region ../nsh-platform-web/web/browser/standard.js
 	const { Buffer: Buffer$1 } = buffer_exports;
 	const bytes = (value, encoding) => typeof value === "string" ? Buffer$1.from(value, encoding) : Buffer$1.from(value);
 	function createStandard(invoke, live) {
@@ -2156,7 +2156,7 @@
 	}
 
 //#endregion
-//#region E:/Villa/VibeCoding/_t3-worktrees/nsh-upstream/feat-i18n-add-translati-c086e3e8265b800c/crates/nsh-platform-web/web/browser/resource.js
+//#region ../nsh-platform-web/web/browser/resource.js
 	function createResource(invoke, reactive, live, wake) {
 		const finalizers = new FinalizationRegistry((id) => {
 			if (live()) invoke(807, [id]);
@@ -2240,7 +2240,7 @@
 	}
 
 //#endregion
-//#region E:/Villa/VibeCoding/_t3-worktrees/nsh-upstream/feat-i18n-add-translati-c086e3e8265b800c/crates/nsh-platform-web/web/browser/list.js
+//#region ../nsh-platform-web/web/browser/list.js
 	const itemsProps = [
 		"each",
 		"children",
@@ -2520,7 +2520,7 @@
 	}
 
 //#endregion
-//#region E:/Villa/VibeCoding/_t3-worktrees/nsh-upstream/feat-i18n-add-translati-c086e3e8265b800c/crates/nsh-platform-web/web/browser/values.js
+//#region ../nsh-platform-web/web/browser/values.js
 	const INDEX_BITS = 20;
 	const INDEX_MASK = (1 << INDEX_BITS) - 1;
 	const MAX_GENERATION = 4095;
@@ -3006,7 +3006,7 @@
 	};
 
 //#endregion
-//#region E:/Villa/VibeCoding/_t3-worktrees/nsh-upstream/feat-i18n-add-translati-c086e3e8265b800c/crates/nsh-platform-web/web/browser/reactive.js
+//#region ../nsh-platform-web/web/browser/reactive.js
 	const contextDefaults = /* @__PURE__ */ new WeakMap();
 	/** Gives context `kept` the default of context `from`. */
 	function adoptContextDefault(kept, from) {
@@ -3159,7 +3159,7 @@
 	}
 
 //#endregion
-//#region E:/Villa/VibeCoding/_t3-worktrees/nsh-upstream/feat-i18n-add-translati-c086e3e8265b800c/crates/nsh-platform-web/web/browser/modules.js
+//#region ../nsh-platform-web/web/browser/modules.js
 	function createModules(invoke, values, live, wake, makeComponent) {
 		const pending = /* @__PURE__ */ new Map();
 		const classes = /* @__PURE__ */ new Map();
@@ -3359,7 +3359,7 @@
 	}
 
 //#endregion
-//#region E:/Villa/VibeCoding/_t3-worktrees/nsh-upstream/feat-i18n-add-translati-c086e3e8265b800c/crates/nsh-platform-web/web/browser/dom.js
+//#region ../nsh-platform-web/web/browser/dom.js
 	const PLATFORM_PROPS = /* @__PURE__ */ new Set([
 		"ios",
 		"android",
@@ -3732,7 +3732,7 @@
 	}
 
 //#endregion
-//#region E:/Villa/VibeCoding/_t3-worktrees/nsh-upstream/feat-i18n-add-translati-c086e3e8265b800c/crates/nsh-platform-web/web/browser/components.js
+//#region ../nsh-platform-web/web/browser/components.js
 	function createComponents(invoke, values, reactive, dom) {
 		const states = /* @__PURE__ */ new WeakMap();
 		const handler = (name) => "on" + name[0].toUpperCase() + name.slice(1);
@@ -3891,7 +3891,7 @@
 	}
 
 //#endregion
-//#region E:/Villa/VibeCoding/_t3-worktrees/nsh-upstream/feat-i18n-add-translati-c086e3e8265b800c/crates/nsh-platform-web/web/browser/gesture.js
+//#region ../nsh-platform-web/web/browser/gesture.js
 	function createGestures(invoke, values, reactive, dom, live, wake) {
 		const raw = [
 			"onTouchStart",
@@ -4138,7 +4138,7 @@
 	}
 
 //#endregion
-//#region E:/Villa/VibeCoding/_t3-worktrees/nsh-upstream/feat-i18n-add-translati-c086e3e8265b800c/crates/nsh-platform-web/web/browser/canvas.js
+//#region ../nsh-platform-web/web/browser/canvas.js
 	function createCanvas(invoke, reactive, dom, live, wake, request = () => Promise.reject(/* @__PURE__ */ new Error("offscreen canvases are not available here"))) {
 		const recordings = /* @__PURE__ */ new WeakMap(), retained = /* @__PURE__ */ new WeakMap();
 		const call = (op, args) => {
@@ -4571,7 +4571,7 @@
 	}
 
 //#endregion
-//#region E:/Villa/VibeCoding/_t3-worktrees/nsh-upstream/feat-i18n-add-translati-c086e3e8265b800c/crates/nsh-platform-web/web/browser/animation.js
+//#region ../nsh-platform-web/web/browser/animation.js
 	function createAnimation(invoke, live, wake, environment) {
 		const nodes = /* @__PURE__ */ new WeakMap(), composites = /* @__PURE__ */ new WeakMap(), derived = /* @__PURE__ */ new Map(), pending = /* @__PURE__ */ new Map();
 		let nextNode = 2, nextAnimation = 2, nextComposite = 2;
@@ -5033,7 +5033,7 @@
 	}
 
 //#endregion
-//#region E:/Villa/VibeCoding/_t3-worktrees/nsh-upstream/feat-i18n-add-translati-c086e3e8265b800c/crates/nsh-platform-web/web/browser/navigation.js
+//#region ../nsh-platform-web/web/browser/navigation.js
 	function createNavigation(reactive, dom, environment, animation) {
 		const { signal, computed, effect, untracked, split, batch } = reactive;
 		const rt = dom.rt, pages = /* @__PURE__ */ new WeakSet(), popped = /* @__PURE__ */ new WeakMap();
@@ -5263,7 +5263,7 @@
 	}
 
 //#endregion
-//#region E:/Villa/VibeCoding/_t3-worktrees/nsh-upstream/feat-i18n-add-translati-c086e3e8265b800c/crates/nsh-platform-web/web/browser/keymap.js
+//#region ../nsh-platform-web/web/browser/keymap.js
 	function createKeymap(invoke, reactive, dom, platform, wake, hot) {
 		let next = 1, entries = [];
 		const call = (op, args) => {
@@ -5336,7 +5336,7 @@
 	}
 
 //#endregion
-//#region E:/Villa/VibeCoding/_t3-worktrees/nsh-upstream/feat-i18n-add-translati-c086e3e8265b800c/crates/nsh-platform-web/web/browser/environment.js
+//#region ../nsh-platform-web/web/browser/environment.js
 /** Whether `a` and `b` are the same value, or objects (arrays) with the
 	* same members, compared `depth` levels down. */
 	function same(a, b, depth) {
@@ -5529,7 +5529,7 @@
 	}
 
 //#endregion
-//#region E:/Villa/VibeCoding/_t3-worktrees/nsh-upstream/feat-i18n-add-translati-c086e3e8265b800c/crates/nsh-platform-web/web/browser/i18n.js
+//#region ../nsh-platform-web/web/browser/i18n.js
 /** `nsh/i18n` in the browser, as nsh-js's (`src/i18n.rs`): the bundle's
 	* translations (`nsh:rt`'s `i18n`, run before the app's modules), `t`
 	* looking a key up as rust-i18n does in the first of the user's languages
@@ -5636,7 +5636,7 @@
 	}
 
 //#endregion
-//#region E:/Villa/VibeCoding/_t3-worktrees/nsh-upstream/feat-i18n-add-translati-c086e3e8265b800c/crates/nsh-platform-web/web/browser/testing.js
+//#region ../nsh-platform-web/web/browser/testing.js
 	const define = (target, name, value) => Object.defineProperty(target, name, {
 		value,
 		writable: true,
@@ -5842,7 +5842,7 @@
 	}
 
 //#endregion
-//#region E:/Villa/VibeCoding/_t3-worktrees/nsh-upstream/feat-i18n-add-translati-c086e3e8265b800c/crates/nsh-platform-web/web/browser/fetch.js
+//#region ../nsh-platform-web/web/browser/fetch.js
 	const REDIRECTS = /* @__PURE__ */ new Set([
 		301,
 		302,
@@ -6020,7 +6020,7 @@
 	}
 
 //#endregion
-//#region E:/Villa/VibeCoding/_t3-worktrees/nsh-upstream/feat-i18n-add-translati-c086e3e8265b800c/crates/nsh-platform-web/web/browser/hot.js
+//#region ../nsh-platform-web/web/browser/hot.js
 	function createHot(reactive, report) {
 		const factories = /* @__PURE__ */ new Map();
 		const fixed = /* @__PURE__ */ new Set();
@@ -6304,7 +6304,7 @@
 	}
 
 //#endregion
-//#region E:/Villa/VibeCoding/_t3-worktrees/nsh-upstream/feat-i18n-add-translati-c086e3e8265b800c/crates/nsh-platform-web/web/browser/address.js
+//#region ../nsh-platform-web/web/browser/address.js
 /** `nsh_core::url_scheme::MAX_URL_LEN`, in UTF-8 bytes. */
 	const MAX_ADDRESS_BYTES = 16384;
 	/** What `nsh_core::url_scheme::check_address` refuses: Rust's
@@ -6333,7 +6333,7 @@
 	}
 
 //#endregion
-//#region E:/Villa/VibeCoding/_t3-worktrees/nsh-upstream/feat-i18n-add-translati-c086e3e8265b800c/crates/nsh-platform-web/web/browser/scope.js
+//#region ../nsh-platform-web/web/browser/scope.js
 	var scope_exports = /* @__PURE__ */ __exportAll({
 		Values: () => Values,
 		configureAPIs: () => configureAPIs,
@@ -6460,7 +6460,7 @@
 	}
 
 //#endregion
-//#region E:/Villa/VibeCoding/_t3-worktrees/nsh-upstream/feat-i18n-add-translati-c086e3e8265b800c/crates/nsh-bundler/examples/browser-bootstrap.js
+//#region examples/browser-bootstrap.js
 	globalThis.__nsh_browser_bootstrap(scope_exports);
 
 //#endregion
