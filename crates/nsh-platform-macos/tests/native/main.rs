@@ -61,6 +61,8 @@ mod shader_content;
 #[cfg(target_os = "macos")]
 mod tap_feedback;
 #[cfg(target_os = "macos")]
+mod text_view_selection;
+#[cfg(target_os = "macos")]
 mod title_bar;
 #[cfg(target_os = "macos")]
 mod window_alert;
@@ -84,6 +86,8 @@ fn main() {
         {
             if std::env::var_os("NSH_TAP_FEEDBACK_CHECK_ONLY").is_some() {
                 tap_feedback::run();
+            } else if std::env::var_os("NSH_TEXT_VIEW_SELECTION_CHECK_ONLY").is_some() {
+                text_view_selection::run();
             } else if std::env::var_os("NSH_QUIT_CHECK_CASE").is_some() {
                 quit_requests::run_case();
             } else if std::env::var_os("NSH_QUIT_CHECK_ONLY").is_some() {
@@ -175,6 +179,7 @@ fn main() {
                 fitting_input::run();
                 input_focus::run();
                 focus_selection::run();
+                text_view_selection::run();
                 fps_collapse::run();
                 scaled_input::run();
                 zoom::run();
