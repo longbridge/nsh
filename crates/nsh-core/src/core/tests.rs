@@ -781,6 +781,197 @@ fn a_spans_test_id_is_in_its_blocks_text() {
 }
 
 #[test]
+fn an_attachments_copy_text_is_copied_in_its_place() {
+    let mut c = core();
+    let text_of = |c: &mut Core<_>| {
+        c.commit().unwrap().items.into_iter().find_map(|i| match i {
+            MountItem::Text { id: 2, text, .. } => Some(text),
+            _ => None,
+        })
+    };
+    let insert = |parent, child| Op::Insert {
+        parent,
+        child,
+        before: None,
+    };
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Text,
+            },
+            Op::Listen {
+                id: 2,
+                event: EventKind::TextLayout,
+                enabled: true,
+            },
+            Op::CreateText {
+                id: 3,
+                text: "Area is ".into(),
+            },
+            Op::Create {
+                id: 4,
+                tag: Tag::View,
+            },
+            style_op(
+                4,
+                &[
+                    ("width", StyleValue::Number(20.0)),
+                    ("height", StyleValue::Number(10.0)),
+                ],
+            ),
+            Op::SetProp {
+                id: 4,
+                prop: Prop::CopyText(Some("$x^2$".into())),
+            },
+            Op::CreateText {
+                id: 5,
+                text: " here.".into(),
+            },
+            insert(2, 3),
+            insert(2, 4),
+            insert(2, 5),
+            insert(ROOT_ID, 2),
+        ],
+    );
+    let text = text_of(&mut c).unwrap();
+    assert_eq!(text.text, "Area is \u{FFFC} here.");
+    assert_eq!(text.copied_text(0..text.len_utf16()), "Area is $x^2$ here.");
+    js_events(&mut c);
+    let prepares = c.text_engine.prepares.get();
+    let layouts = c.text_engine.layouts.get();
+    let measures = c.text_engine.measures.get();
+    // A new copy text, or none, is the text's metadata: mounted again
+    // without typesetting it again.
+    for (copy, copied) in [
+        (Some("$y$"), "Area is $y$ here."),
+        (Some(""), "Area is  here."),
+        (Some("$z$"), "Area is $z$ here."),
+        (None, "Area is  here."),
+    ] {
+        apply(
+            &mut c,
+            vec![Op::SetProp {
+                id: 4,
+                prop: Prop::CopyText(copy.map(Into::into)),
+            }],
+        );
+        let text = text_of(&mut c).unwrap();
+        assert_eq!(text.copied_text(0..text.len_utf16()), copied);
+        assert_eq!(c.text_engine.layouts.get(), layouts);
+        assert_eq!(c.text_engine.prepares.get(), prepares);
+        assert_eq!(c.text_engine.measures.get(), measures);
+        assert!(js_events(&mut c).is_empty(), "no onTextLayout");
+    }
+    // A view outside a text: nothing to rebuild.
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 6,
+                tag: Tag::View,
+            },
+            insert(ROOT_ID, 6),
+        ],
+    );
+    c.commit();
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 6,
+            prop: Prop::CopyText(Some("unused".into())),
+        }],
+    );
+    assert!(c.commit().is_none());
+}
+
+#[test]
+fn a_fitted_texts_new_copy_text_is_mounted() {
+    // A text fitted to its box mounts its laid out (scaled) text again for
+    // new metadata: the new copy texts come with it.
+    let mut c = core();
+    let insert = |parent, child| Op::Insert {
+        parent,
+        child,
+        before: None,
+    };
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Text,
+            },
+            style_op(
+                2,
+                &[
+                    ("width", StyleValue::Number(30.0)),
+                    ("height", StyleValue::Number(16.0)),
+                    ("fontSize", StyleValue::Number(20.0)),
+                ],
+            ),
+            Op::SetProp {
+                id: 2,
+                prop: Prop::AdjustsFontSizeToFit(true),
+            },
+            Op::CreateText {
+                id: 3,
+                text: "long enough to shrink ".into(),
+            },
+            Op::Create {
+                id: 4,
+                tag: Tag::View,
+            },
+            style_op(
+                4,
+                &[
+                    ("width", StyleValue::Number(20.0)),
+                    ("height", StyleValue::Number(10.0)),
+                ],
+            ),
+            Op::SetProp {
+                id: 4,
+                prop: Prop::CopyText(Some("$x$".into())),
+            },
+            insert(2, 3),
+            insert(2, 4),
+            insert(ROOT_ID, 2),
+        ],
+    );
+    let text_of = |c: &mut Core<_>| {
+        c.commit().unwrap().items.into_iter().find_map(|i| match i {
+            MountItem::Text { id: 2, text, .. } => Some(text),
+            _ => None,
+        })
+    };
+    let text = text_of(&mut c).unwrap();
+    assert!(
+        text.spans[0].style.font_size < Points(20.0),
+        "the text is fitted"
+    );
+    assert_eq!(
+        text.copied_text(0..text.len_utf16()),
+        "long enough to shrink $x$"
+    );
+    let layouts = c.text_engine.layouts.get();
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 4,
+            prop: Prop::CopyText(Some("$y$".into())),
+        }],
+    );
+    let text = text_of(&mut c).expect("mounted again");
+    assert_eq!(
+        text.copied_text(0..text.len_utf16()),
+        "long enough to shrink $y$"
+    );
+    assert!(text.spans[0].style.font_size < Points(20.0));
+    assert_eq!(c.text_engine.layouts.get(), layouts);
+}
+
+#[test]
 fn text_update_emits_only_text_and_frames() {
     let mut c = core();
     apply(
@@ -1640,6 +1831,35 @@ fn visible_ranges_leave_hidden_runs_out() {
     let mut shown = AttributedText::default();
     shown.push("abc", plain);
     assert_eq!(shown.visible_ranges(1..3), vec![1..3]);
+}
+
+#[test]
+fn copied_text_puts_attachments_copy_texts_in_their_place() {
+    let plain = ResolvedTextStyle::default();
+    let mut t = AttributedText::default();
+    t.push("Area is ", plain);
+    t.copy_texts
+        .push(crate::AttachmentCopyText::new(t.len_utf16(), "$x^2$"));
+    t.push_attachment(crate::geometry::size_pt(20.0, 10.0), plain);
+    t.push(" and ", plain);
+    // No copy text: left out, as before.
+    t.push_attachment(crate::geometry::size_pt(8.0, 8.0), plain);
+    t.push("\u{1F600}", plain);
+    t.copy_texts
+        .push(crate::AttachmentCopyText::new(t.len_utf16(), "\u{2764}"));
+    t.push_attachment(crate::geometry::size_pt(8.0, 8.0), plain.hide());
+    t.push(" here.", plain);
+    let len = t.len_utf16();
+    assert_eq!(t.copied_text(0..len), "Area is $x^2$ and \u{1F600} here.");
+    // Only an attachment inside the range is copied.
+    assert_eq!(t.copied_text(8..9), "$x^2$");
+    assert_eq!(t.copied_text(0..8), "Area is ");
+    assert_eq!(t.copied_text(9..len), " and \u{1F600} here.");
+    // What accessibility reads of the text itself leaves them all out.
+    assert_eq!(
+        t.text_without_attachments(0..len),
+        "Area is  and \u{1F600} here."
+    );
 }
 
 #[test]
@@ -3219,6 +3439,137 @@ fn list_renders_window_and_recycles_cells() {
     assert_eq!(c.node_count(), 2 + cells.len());
 }
 
+#[test]
+fn list_content_aligns_cells_on_the_cross_axis() {
+    for horizontal in [false, true] {
+        let mut c = core();
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::List,
+                },
+                style_op(
+                    2,
+                    &[
+                        (
+                            "width",
+                            StyleValue::Number(if horizontal { 120.0 } else { 200.0 }),
+                        ),
+                        ("height", StyleValue::Number(100.0)),
+                    ],
+                ),
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Horizontal(horizontal),
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::EstimatedItemSize(px(20.0)),
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Count(2),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        c.commit();
+        let (mut next_id, mut cells) = (100, Vec::new());
+        assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 20.0), 2);
+        for (i, &cell) in cells.iter().enumerate() {
+            if horizontal {
+                c.apply(style_op(cell, &[("height", StyleValue::Null)]))
+                    .unwrap();
+            }
+            let card = 200 + i as u32;
+            apply(
+                &mut c,
+                vec![
+                    Op::Create {
+                        id: card,
+                        tag: Tag::View,
+                    },
+                    style_op(
+                        card,
+                        &[
+                            ("width", StyleValue::Number(40.0)),
+                            ("height", StyleValue::Number(20.0)),
+                        ],
+                    ),
+                    Op::Insert {
+                        parent: cell,
+                        child: card,
+                        before: None,
+                    },
+                ],
+            );
+        }
+        let batch = c.commit().unwrap();
+        let expected = if horizontal {
+            [rect(0.0, 0.0, 40.0, 100.0), rect(40.0, 0.0, 40.0, 100.0)]
+        } else {
+            [rect(0.0, 0.0, 200.0, 20.0), rect(0.0, 20.0, 200.0, 20.0)]
+        };
+        for (&cell, expected) in cells.iter().zip(expected) {
+            assert_eq!(frame_of(&batch, cell), Some(expected), "{horizontal}");
+        }
+
+        for (align, cell_at, cell_cross) in [
+            (
+                taffy::AlignItems::FLEX_START,
+                0.0,
+                if horizontal { 20.0 } else { 40.0 },
+            ),
+            (
+                taffy::AlignItems::CENTER,
+                if horizontal { 40.0 } else { 80.0 },
+                if horizontal { 20.0 } else { 40.0 },
+            ),
+            (
+                taffy::AlignItems::FLEX_END,
+                if horizontal { 80.0 } else { 160.0 },
+                if horizontal { 20.0 } else { 40.0 },
+            ),
+            (
+                taffy::AlignItems::STRETCH,
+                0.0,
+                if horizontal { 100.0 } else { 200.0 },
+            ),
+        ] {
+            c.apply(Op::SetProp {
+                id: 2,
+                prop: Prop::ListContent(crate::ListContentStyle {
+                    align_items: Some(align),
+                    ..Default::default()
+                }),
+            })
+            .unwrap();
+            c.commit();
+            let expected = if horizontal {
+                [
+                    rect(0.0, cell_at, 40.0, cell_cross),
+                    rect(40.0, cell_at, 40.0, cell_cross),
+                ]
+            } else {
+                [
+                    rect(cell_at, 0.0, cell_cross, 20.0),
+                    rect(cell_at, 20.0, cell_cross, 20.0),
+                ]
+            };
+            for (&cell, expected) in cells.iter().zip(expected) {
+                let frame = c.nodes[c.key(cell).unwrap() as usize].frame;
+                assert_eq!(frame, expected, "{horizontal}: {align:?}");
+            }
+        }
+    }
+}
+
 /// A list whose columns or content padding change with nothing else in
 /// the turn (columns worked out from a width an `onLayout` measured) lays
 /// its cells out again at the new column width, not only at the new
@@ -3995,6 +4346,67 @@ fn bottom_aligned_list_does_not_mount_scrolls_during_native_bounce() {
             assert_eq!(scrolled(&batch, offset), offset, "native offset {offset}");
         }
     }
+}
+
+/// An empty list following its end gets its rows in the commit that also
+/// grows its viewport (a chat's history arriving as a placeholder beside
+/// it goes away): the platform must learn the grown content before the
+/// scroll to the new end, or the frame's growth clamps that scroll to the
+/// old, empty content and the list shows its first rows.
+#[test]
+fn rows_arriving_as_the_viewport_grows_keep_the_list_at_its_end() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::List,
+            },
+            style_op(2, &[("height", StyleValue::Number(200.0))]),
+            Op::SetProp {
+                id: 2,
+                prop: Prop::EstimatedItemSize(px(50.0)),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::FollowEnd(Some(px(48.0))),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Count(0),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    c.commit();
+    apply(
+        &mut c,
+        vec![
+            style_op(2, &[("height", StyleValue::Number(400.0))]),
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Count(100),
+            },
+        ],
+    );
+    let batch = c.commit().expect("a batch");
+    let at = |wanted: &dyn Fn(&MountItem) -> bool| batch.items.iter().position(wanted);
+    let scroll =
+        at(&|i| matches!(i, MountItem::ScrollBy { id: 2, .. })).expect("the list follows its end");
+    let content =
+        at(&|i| matches!(i, MountItem::ScrollContent { id: 2, size } if size.height.0 > 400.0))
+            .expect("the grown content");
+    let frame = at(&|i| matches!(i, MountItem::Frame { id: 2, .. })).expect("the grown frame");
+    assert!(
+        content < scroll && scroll < frame,
+        "content {content}, scroll {scroll}, frame {frame}: the content grows first, \
+         the scroll lands before the viewport grows"
+    );
 }
 
 /// List 2 (follow_end 80 pt) at its end, then its last row grows by
@@ -18145,6 +18557,93 @@ mod components {
         assert_eq!(clipboard.text(), None);
     }
 
+    /// Copies twice when pressed and shows what became of each write.
+    #[component]
+    fn Copier() -> impl IntoElement {
+        let results = signal(String::new());
+        view()
+            .child(text(move || format!("copied {}", results.get())))
+            .child(view().h(px(10.0)).on_press(move |_: &()| {
+                let (first, second) = (
+                    set_clipboard("a"),
+                    set_clipboard_item(ClipboardItem {
+                        text: "b".into(),
+                        html: Some("<b>b</b>".into()),
+                    }),
+                );
+                spawn(async move {
+                    let (first, second) = (first.await, second.await);
+                    results.set(format!("{first:?} {second:?}"));
+                });
+            }))
+    }
+
+    fn press_copier(c: &mut Core<FakeEngine>) -> Vec<Command> {
+        c.mount_root(&crate::element::Root::new::<Copier>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button");
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        c.commit()
+            .map(|b| b.items)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|i| match i {
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command,
+                } => Some(command),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn clipboard_writes_answer_requested_where_the_platform_cannot_tell() {
+        let mut c = core();
+        let sent = press_copier(&mut c);
+        assert_eq!(sent.len(), 2, "{sent:?}");
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("copied R")));
+        assert_eq!(shown.last().unwrap(), "copied Requested Requested");
+    }
+
+    #[test]
+    fn clipboard_writes_answer_what_the_platform_reports_in_order() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            clipboard_write_result: true,
+            ..Default::default()
+        });
+        let sent = press_copier(&mut c);
+        assert!(matches!(
+            sent[..],
+            [Command::SetClipboard(_), Command::SetClipboardItem(_)]
+        ));
+        for written in [true, false] {
+            let payload = EventPayload::Map(vec![("written", crate::PayloadValue::Bool(written))]);
+            assert!(c.component_event(ROOT_ID, EventKind::ClipboardWrite, &payload));
+        }
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("copied W")));
+        assert_eq!(shown.last().unwrap(), "copied Written Failed");
+    }
+
+    #[test]
+    fn clipboard_writes_to_the_embedders_clipboard_are_written() {
+        let clipboard = std::sync::Arc::new(crate::clipboard::MemoryClipboard::new(None));
+        let mut c = core();
+        c.set_clipboard(Some(clipboard.clone()));
+        let sent = press_copier(&mut c);
+        assert!(sent.is_empty(), "{sent:?}");
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("copied W")));
+        assert_eq!(shown.last().unwrap(), "copied Written Written");
+    }
+
     /// Pastes the clipboard's image and files when pressed.
     #[component]
     fn ImagePaster() -> impl IntoElement {
@@ -20730,6 +21229,34 @@ mod touch {
         let any = crate::PanActivation::default();
         assert_eq!(any.decide(px(6.0), px(6.0)), None);
         assert_eq!(any.decide(px(8.0), px(8.0)), Some(true));
+    }
+
+    #[test]
+    fn a_pan_activation_judges_a_move_along_its_line() {
+        use crate::geometry::point;
+        let pan = crate::PanActivation::horizontal(px(10.0), px(10.0));
+        let start = point(px(0.0), px(0.0));
+        // One move past both offsets: the one passed first decides.
+        assert_eq!(
+            pan.decide_move(start, point(px(-16.6), px(-11.1))),
+            Some(true)
+        );
+        assert_eq!(
+            pan.decide_move(start, point(px(-11.1), px(16.6))),
+            Some(false)
+        );
+        // Small moves decide as `decide` does.
+        assert_eq!(pan.decide_move(start, point(px(8.0), px(0.0))), None);
+        assert_eq!(
+            pan.decide_move(point(px(8.0), px(0.0)), point(px(10.5), px(1.0))),
+            Some(true)
+        );
+        assert_eq!(
+            pan.decide_move(point(px(0.0), px(9.0)), point(px(2.0), px(10.5))),
+            Some(false)
+        );
+        // A finger that came back is still undecided.
+        assert_eq!(pan.decide_move(point(px(8.0), px(0.0)), start), None);
     }
 
     /// A card scaled and turned by two-finger gestures.
@@ -28176,6 +28703,82 @@ mod rust_windows {
             }
         }
         title
+    }
+
+    // #2759: what the ref `open_window` returns is asked for in the same
+    // turn follows the opening, in order; attributes join its options.
+    #[test]
+    fn requests_made_right_after_open_window_follow_its_opening() {
+        use crate::desktop::WindowMode;
+        use crate::element::desktop::open_window;
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<Empty>());
+        let _ = c.commit().unwrap();
+        let doc = {
+            let _entered = c.components.runtime.enter();
+            let doc = open_window(window().id("doc").title("Static").content(|| text("doc")))
+                .expect("opens on a desktop");
+            doc.focus();
+            doc.set(WindowAttributes {
+                title: Some("Set".into()),
+                ..Default::default()
+            });
+            doc.set_mode(WindowMode::Maximized);
+            doc.focus();
+            doc
+        };
+        let batch = c.commit().unwrap();
+        let commands = window_commands(&batch);
+        let [
+            (id, DesktopCommand::OpenWindow(open)),
+            (focus, DesktopCommand::Request(WindowRequest::Focus)),
+            (mode, DesktopCommand::Request(WindowRequest::SetMode(WindowMode::Maximized))),
+            (again, DesktopCommand::Request(WindowRequest::Focus)),
+        ] = &commands[..]
+        else {
+            panic!("opens, then its requests in order: {commands:?}");
+        };
+        assert_eq!([focus, mode, again], [id; 3]);
+        assert_eq!(open.options.attributes.title.as_deref(), Some("Set"));
+        // Sent once: a later commit does not repeat them.
+        {
+            let _entered = c.components.runtime.enter();
+            doc.set(WindowAttributes {
+                title: Some("Later".into()),
+                ..Default::default()
+            });
+        }
+        let commands = window_commands(&c.commit().unwrap());
+        assert!(
+            matches!(&commands[..], [(_, DesktopCommand::SetAttributes(_))]),
+            "{commands:?}"
+        );
+        // Closed: its requests reach nothing, and the next opening of the
+        // id does not inherit them.
+        {
+            let _entered = c.components.runtime.enter();
+            doc.close();
+        }
+        let _ = c.commit().unwrap();
+        {
+            let _entered = c.components.runtime.enter();
+            doc.set_mode(WindowMode::FullScreen);
+            doc.focus();
+        }
+        assert!(c.commit().is_none_or(|b| window_commands(&b).is_empty()));
+        {
+            let _entered = c.components.runtime.enter();
+            open_window(window().id("doc").content(|| text("doc"))).expect("opens again");
+        }
+        let commands = window_commands(&c.commit().unwrap());
+        assert!(
+            matches!(&commands[..], [(_, DesktopCommand::OpenWindow(_))]),
+            "{commands:?}"
+        );
     }
 
     // #1344, `open_window` and a window opened again: each opening keeps

@@ -246,7 +246,7 @@ See [Windows](./windows.md).
 
 ### Building the Android runtime
 
-Building the Android runtime from a checkout (`cargo xtask android`) additionally needs an **NDK** from the SDK (`ndk;<version>`; set `ANDROID_NDK_HOME` if the newest one installed is incomplete) and `javac`.
+Building the Android runtime from a checkout (`cargo xtask android`) additionally needs an **NDK** from the SDK (`ndk;<version>`; set `ANDROID_NDK_HOME` if the newest one installed is incomplete) and `javac`. The embedding libraries alone: `cargo xtask android-embed` (`dist/nsh/embed/android/{nsh,nsh-dev}.aar`).
 
 ## What works where
 

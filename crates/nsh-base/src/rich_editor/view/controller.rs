@@ -22,7 +22,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use super::{
     RichEditorChange, RichEditorEvent, RichEditorFile, RichEditorPastedFiles, RichEditorProps,
     RichEditorSelection,
-    geometry::{DOC, Geometry, Hit},
+    geometry::{DOC, Geometry, Hit, slot_id},
     keys::{self, Move, Unit},
     node_view::{NodeView, NodeViewEvent},
     session::{
@@ -81,6 +81,12 @@ pub(crate) struct Tree {
     pub(crate) positions: rustc_hash::FxHashMap<u64, usize>,
     pub(crate) by_pos: rustc_hash::FxHashMap<usize, u64>,
     pub(crate) tables: Vec<(u64, Node)>,
+    /// The tables in each box around a table (the blocks and node views'
+    /// slots it is in, and the document's box, [`DOC`]): what a move of
+    /// the box moves.
+    pub(crate) table_holders: rustc_hash::FxHashMap<u64, Vec<u64>>,
+    /// The boxes the walk is in, outermost first.
+    path: Vec<u64>,
     next: u64,
 }
 
@@ -108,12 +114,6 @@ pub(crate) struct ActiveBlocks {
 pub(crate) struct SelRects {
     signals: rustc_hash::FxHashMap<u64, Signal<BlockRects>>,
     active: rustc_hash::FxHashSet<u64>,
-}
-
-/// The id of the slot a node view with an editable content slot renders
-/// its content in (a box measured in the content box).
-pub(crate) fn slot_id(id: u64) -> u64 {
-    id | (1 << 62)
 }
 
 /// The content's offset from the page (content less page) and the scroll
@@ -186,9 +186,6 @@ pub(crate) struct Rv {
     pub(crate) deco_rev: Signal<u64>,
     /// A block's frame or a text's lines changed.
     pub(crate) layout_rev: Signal<u64>,
-    /// Inline views' widths changed and `layout_rev` goes up once for all
-    /// of them, in a task (`Rv::set_inline_width`).
-    pub(crate) widths_pending: Rc<Cell<bool>>,
     /// The session has a state the view has not taken yet.
     notified: Signal<u64>,
     pub(crate) focused: Signal<bool>,
@@ -243,6 +240,9 @@ pub(crate) struct Rv {
     active_blocks: Rc<RefCell<ActiveBlocks>>,
     /// Per-textblock range selection rectangles, notified only for overlapped blocks.
     sel_rects: Rc<RefCell<SelRects>>,
+    /// Per-table layout revisions, of the tables whose controls are drawn
+    /// (`Rv::watch_table`), moved only for the tables a layout changes.
+    pub(crate) table_revs: Rc<RefCell<rustc_hash::FxHashMap<u64, Signal<u64>>>>,
     /// Position of the current `NodeSelection`, `None` for any other selection.
     pub(crate) node_sel_pos: Signal<Option<usize>>,
 }
@@ -264,17 +264,12 @@ impl Rv {
             cx,
             st: Rc::new(RefCell::new(state.clone())),
             tree: Rc::default(),
-            geo: Rc::new(RefCell::new(Geometry {
-                font: "16px sans-serif".into(),
-                measure: Some(Rc::new(nsh_core::element::text_measurer())),
-                ..Geometry::default()
-            })),
+            geo: Rc::default(),
             decorations: Rc::default(),
             doc_rev: signal(0),
             sel_rev: signal(0),
             deco_rev: signal(0),
             layout_rev: signal(0),
-            widths_pending: Rc::default(),
             notified: signal(0),
             focused: signal(false),
             blink: signal(true),
@@ -307,6 +302,7 @@ impl Rv {
             touch: super::touch::Touch::new(),
             active_blocks: Rc::default(),
             sel_rects: Rc::default(),
+            table_revs: Rc::default(),
             node_sel_pos: signal(None),
         };
         rv.sync_tree(&state);
@@ -501,6 +497,9 @@ impl Rv {
         tree.positions.clear();
         tree.by_pos.clear();
         tree.tables.clear();
+        tree.table_holders.clear();
+        tree.path.clear();
+        tree.path.push(DOC);
         geo.text_order.clear();
         let mut alive = HashSet::with_capacity(prev_blocks);
         let mut texts = HashMap::with_capacity(prev_texts);
@@ -517,6 +516,7 @@ impl Rv {
             &mut geo.text_order,
             &mut atoms,
         );
+        tree.path.clear();
         tree.children
             .retain(|id, _| *id == DOC || alive.contains(id));
         geo.frames
@@ -1578,7 +1578,7 @@ impl Rv {
         item.text = text;
         item.html =
             Some(DomSerializer::from_schema(state.schema()).serialize_for_clipboard(&slice));
-        set_clipboard_item(item);
+        drop(set_clipboard_item(item));
     }
 
     /// A paste of `text` and, when the clipboard had it, the same content as
@@ -2610,9 +2610,14 @@ impl Rv {
     }
 
     /// The box of the node at `pos` in the content box: a block's, else an
-    /// inline view's or image's on its line.
+    /// inline leaf's (image, node view, mention) on its line.
     pub(crate) fn node_box(&self, pos: usize) -> Option<Bounds<Points>> {
-        node_box(&self.tree.borrow(), &self.geo.borrow(), pos)
+        node_box(
+            &self.tree.borrow(),
+            &self.geo.borrow(),
+            &self.st.borrow(),
+            pos,
+        )
     }
 
     /// The selected node's box in the content box, for a node selection:
@@ -2759,6 +2764,14 @@ fn walk(
         let view = views.get(child.ty().name());
         if is_table(child) && view.is_none() {
             tree.tables.push((child_id, child.clone()));
+            let Tree {
+                path,
+                table_holders,
+                ..
+            } = &mut *tree;
+            for holder in path.iter() {
+                table_holders.entry(*holder).or_default().push(child_id);
+            }
         }
         let atom = match view {
             Some(v) => !v.editable_content_slot(),
@@ -2775,6 +2788,11 @@ fn walk(
             } else {
                 child_id
             };
+            let depth = tree.path.len();
+            tree.path.push(child_id);
+            if box_id != child_id {
+                tree.path.push(box_id);
+            }
             walk(
                 tree,
                 views,
@@ -2787,6 +2805,7 @@ fn walk(
                 text_order,
                 atoms,
             );
+            tree.path.truncate(depth);
         }
     }
     tree.children.insert(id, items);
@@ -3222,6 +3241,64 @@ mod tests {
         let first = &tree.children[&cells[0].id][0];
         assert_eq!(texts[&first.id], cell_pos(&d, "a") + 2);
     }
+
+    #[test]
+    fn the_boxes_around_a_table_hold_it() {
+        use crate::rich_editor::{
+            model::Fragment,
+            tables::test_util::{doc, grid, p, schema, table, tr},
+        };
+        let s = schema();
+        let cell = s
+            .node(
+                "tableCell",
+                None,
+                Fragment::from(vec![grid(&[&["inner"]])]),
+                vec![],
+            )
+            .unwrap();
+        let quote = s
+            .node(
+                "blockquote",
+                None,
+                Fragment::from(vec![table(vec![tr(vec![cell])])]),
+                vec![],
+            )
+            .unwrap();
+        let d = doc(vec![p("x"), grid(&[&["top"]]), quote]);
+        let mut tree = Tree::default();
+        let (mut alive, mut texts, mut text_order, mut atoms) =
+            (HashSet::new(), HashMap::new(), Vec::new(), HashMap::new());
+        // As `sync_tree` starts it: in the document's box.
+        tree.path.push(DOC);
+        walk(
+            &mut tree,
+            &NodeViews::default(),
+            DOC,
+            DOC,
+            &d,
+            0,
+            &mut alive,
+            &mut texts,
+            &mut text_order,
+            &mut atoms,
+        );
+        let ids: Vec<u64> = tree.tables.iter().map(|(id, _)| *id).collect();
+        let [top, outer, inner] = ids[..] else {
+            panic!("three tables: {ids:?}")
+        };
+        let quote = tree.children[&DOC][2].id;
+        let cell = tree.children[&outer][0].id;
+        // A box's move moves the tables in it, however deep, and nothing
+        // else: a table holds only the tables in its cells.
+        assert_eq!(tree.table_holders[&DOC], [top, outer, inner]);
+        assert_eq!(tree.table_holders[&quote], [outer, inner]);
+        assert_eq!(tree.table_holders[&outer], [inner]);
+        assert_eq!(tree.table_holders[&cell], [inner]);
+        assert!(!tree.table_holders.contains_key(&top));
+        assert!(!tree.table_holders.contains_key(&inner));
+        assert_eq!(tree.table_holders.len(), 4);
+    }
 }
 
 /// A wake-up that any thread or call may signal and one task awaits:
@@ -3342,15 +3419,28 @@ impl ViewGeometry for GeometryHandle {
         if !self.here() {
             return None;
         }
-        node_box(&self.tree.borrow(), &self.geo.borrow(), pos)
+        node_box(
+            &self.tree.borrow(),
+            &self.geo.borrow(),
+            &self.state.borrow(),
+            pos,
+        )
     }
 }
 
 /// The box of the node at `pos` in the content box: a block's, else an
-/// inline view's or image's on its line.
-fn node_box(tree: &Tree, geo: &Geometry, pos: usize) -> Option<Bounds<Points>> {
+/// inline leaf's (image, node view, mention) on its line.
+fn node_box(
+    tree: &Tree,
+    geo: &Geometry,
+    state: &EditorState,
+    pos: usize,
+) -> Option<Bounds<Points>> {
     let Some(id) = tree.id_at(pos) else {
-        // Not a block: an inline view or image, on its line.
+        let node = state.doc().node_at(pos)?;
+        if !node.is_inline() || node.is_text() {
+            return None;
+        }
         return geo.inline_rect(pos);
     };
     let origin = geo.origin(id)?;

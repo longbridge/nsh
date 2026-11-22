@@ -1592,8 +1592,8 @@ import { Clipboard } from "nsh";
 
 ```ts
 const Clipboard: {
-  writeText(text: string): Promise<void>;
-  write(item: ClipboardItem): Promise<void>;
+  writeText(text: string): Promise<ClipboardWrite>;
+  write(item: ClipboardItem): Promise<ClipboardWrite>;
   readText(): Promise<string>;
   hasText(): Promise<boolean>;
   writeImage(src: string): Promise<void>;
@@ -1601,6 +1601,8 @@ const Clipboard: {
   hasImage(): Promise<boolean>;
   readFiles(): Promise<string[]>;
 };
+
+type ClipboardWrite = "written" | "failed" | "requested";
 
 interface ClipboardItem {
   text: string; // the content as plain text
@@ -1615,8 +1617,8 @@ interface ClipboardImage {
 
 | TS | Rust (`nsh_core::prelude`) |
 |---|---|
-| `await Clipboard.writeText(text)` | `set_clipboard(text)` |
-| `await Clipboard.write({ text, html })` | `set_clipboard_item(item)` (a `ClipboardItem`) |
+| `await Clipboard.writeText(text)` | `set_clipboard(text).await -> ClipboardWrite` |
+| `await Clipboard.write({ text, html })` | `set_clipboard_item(item).await -> ClipboardWrite` (a `ClipboardItem`) |
 | `await Clipboard.readText()` | `clipboard_string().await -> String` |
 | `await Clipboard.hasText()` | `clipboard_has_string().await -> bool` |
 | `await Clipboard.writeImage(src)` | `set_clipboard_image(src)` |
@@ -1635,10 +1637,16 @@ The user can also copy from a [selectable text](../elements/text.md) themselves;
 ### Clipboard.writeText
 
 ```ts
-writeText(text: string): Promise<void>;
+writeText(text: string): Promise<ClipboardWrite>;
 ```
 
 Puts `text` on the clipboard, replacing what was there. Rust: `set_clipboard(text)`.
+
+It resolves to what became of the write: `"written"` when the system clipboard took it (Windows, macOS, the web),
+`"failed"` when it refused it (another app holds the clipboard, the browser declined), and `"requested"` where the
+platform does not say (iOS, Android, Linux, a GPUI host, a terminal). NSH never reads the clipboard back to find out.
+Show "Copied" only for `"written"`, and keep a way to copy by hand for `"failed"`. In Rust the answer is a
+`ClipboardWrite`; drop it when the result does not matter, the write happens either way.
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -1674,7 +1682,7 @@ const copied = signal(false);
 ### Clipboard.write
 
 ```ts
-write(item: ClipboardItem): Promise<void>;
+write(item: ClipboardItem): Promise<ClipboardWrite>;
 ```
 
 Puts the same content as plain text and as HTML on the clipboard, replacing what was there, as a browser copies a
@@ -2387,7 +2395,10 @@ async function signOut() {
 
 `press` reports the `id` of the notification the user pressed. A press can start the app: it waits for the first
 listener, so listen when the app starts, and keep what the press opens in the `id`. On Android an embedding app's
-activity passes its intents to `NshView.handleNotificationIntent`, in `onCreate` and `onNewIntent`. On Apple platforms an
+activity passes its intents to `NshView.handleNotificationIntent`, in `onCreate` and `onNewIntent`; presses of the
+notifications other code showed (a push service's SDK's) go to the handler Rust code sets with
+`nsh::notifications::set_foreign_handler` ([Android](../docs/android.md#notifications-from-other-code)), never to
+`press`. On Apple platforms an
 embedding app that has a notification center delegate keeps it, and its delegate gets the presses; otherwise remote
 notifications and those other native code scheduled go to the handler Rust code sets with
 `nsh_platform_apple::notifications::set_foreign_handler` ([iOS](../docs/ios.md#notifications-from-other-code)), never to

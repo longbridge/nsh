@@ -4,6 +4,30 @@ Performance is the project's first priority; the rules are in `AGENTS.md`. Chang
 after `nsh test --trace` timings and item counts (`nsh trace` before it, in the records below). Current baselines
 (Apple Silicon except where noted):
 
+A long RichEditor document with tables (2026-11-21, Linux x86_64, Intel Core Ultra 7 270K Plus, debug, against
+`ca7b8fba3`): every block reports its frame in a layout event of its own, and each event went through all of the
+component's handlers to find the block's (a list of every node's), then ran the tables' controls again, one region
+laying out every table and making all their handles: the first commit grew with the square of the blocks. The
+component's handlers are now kept by node (`Handlers`), and each table's controls are a region that runs again when
+that table, a cell of it or a box around it moves (`docs/dev/rich-editor.md`). `examples/bench/RichEditorLongDocument.tsx`
+with `LINES` set, `echo 'await app.wait(100)' | nsh test … --trace`, the first commit:
+
+| Source lines | Mount items | Nodes | Before: commit (list js) | After: commit (list js) |
+|---:|---:|---:|---:|---:|
+| 200 | 2,921 | 1,039 | 109 ms (46 ms) | 71 ms (9 ms) |
+| 400 | 5,783 | 2,065 | 272 ms (154 ms) | 137 ms (19 ms) |
+| 800 | 11,507 | 4,117 | 951 ms (714 ms) | 278 ms (38 ms) |
+| 1,600 | 22,478 | 8,050 | 3,260 ms (2,792 ms) | 537 ms (74 ms) |
+| 5,000 | 70,178 | 25,150 | 28,518 ms (27,019 ms), test failed | 1,724 ms (240 ms) |
+
+The rows were measured with the same app mounted without a `Window` (the bench file wraps it in one: 70,177 items at
+5,000 lines). Item and node counts are unchanged. The same document without tables went from 75 ms to 37 ms of list js at
+1,600 lines (the handlers alone). `examples/bench/RichEditor.tsx` keeps its counts (13,054 items and 4,011 nodes first,
+3 or 4 items an edit); its first commit went from 312 to 246 ms (list js 109 → 50 ms), and its edits, five interleaved
+runs of the last four, from 409–703 µs (list js 96–134 µs) to 386–610 µs (79–95 µs). The counter keeps 56 / 10 ops,
+50 / 7 mount items and 15 / 18 nodes. `an_event_looks_only_at_its_nodes_handlers` keeps an event's handler lookups the
+same at 50, 200 and 800 rows.
+
 Rust components' props read by atom (`nsh-js` `components.rs`, 2026-11-19, macOS arm64, release, against
 `2ede573ac`): a Rust component's props effect read each of its keys (its value and renderer props and the about 20
 host props it does not declare) by name on every run, making the key list again (`ComponentSpec::host_props`, one
@@ -655,6 +679,12 @@ sends 2631 mount items instead of 2885 (no `ViewProps` set and set back in one c
   hardware layers take the slowest back frame's UI thread from 22–36 ms to 2–5 ms and missed frames from 23–32 to
   7–14 per page (p90 frame 35–58 → 14–32 ms). What remains is the RenderThread drawing both screens into their layers
   in the slide's first frames (14–29 ms). Pushes are unchanged (no push frame over 25 ms on the UI thread).
+- Android, glass surfaces (x86_64 emulator, Android 15, SwiftShader, 1080 × 2400 at 2.625x, packaged release; an app
+  of four pages of about the screen's size in a horizontal pager, each with a 24 pt backdrop blur, a 28 pt outer
+  shadow and a 1 px inset rim, under a blurred header and tab bar; eight swipes, `gfxinfo` p50 over three
+  interleaved runs): 105 → 17 ms a frame (RenderThread ~61 → ~16 ms); shadows alone 32 → 10 ms, blur alone 34 →
+  12 ms, neither 6 ms. A blurred drawer sliding over them: 150 → 31 ms. Box shadows come from cached bitmaps
+  (`Decor.drawCachedShadow`), backdrops are recorded at the size their blur needs (`Backdrop`).
 - Android emulator (arm64, release): rebinding one gallery row while scrolling ~0.3–0.4ms (JS ~60µs); text costs per new
   text: `PrecomputedText` ~120µs, measure ~50µs, final layout reused. First gallery frame 20–50ms (noisy on the emulator).
 

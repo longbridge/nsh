@@ -161,7 +161,8 @@ it. A view's own `onContextMenu` tells these openings apart by `pointerType`, wh
 
 When you control `open` and set it to `true` yourself, for a shortcut of your own or for a list that has the focus
 while one of its rows is the one asked about, the menu opens the same way: below the trigger, with the keyboard
-focus on its first enabled item, and closing it gives the focus back to the trigger.
+focus on its first enabled item, and closing it gives the focus back to the trigger. On macOS and iOS, a menu a pointer opened
+gives it back where it was before it opened: a press there gives the trigger no focus, so your app's shortcuts keep their keys.
 
 ## Checkable items
 

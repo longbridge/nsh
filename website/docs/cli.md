@@ -78,7 +78,7 @@ Apps whose Rust crates depend on NSH through Git use the checkout Cargo resolves
 ## nsh run
 
 ```sh
-nsh run [ENTRY] [--target catalyst|ios|android|macos|linux|windows|gpui|tui|web] [--device <DEVICE>] [--port <PORT>] [--release] [--limits [<LIMITS>]] [--trace] [--fps] [--name <NAME>] [--points-per-cell <WIDTHxHEIGHT>] [--window-size <WIDTHxHEIGHT>] [--display <N>]
+nsh run [ENTRY] [--target catalyst|ios|android|macos|linux|windows|gpui|tui|web] [--device <DEVICE>] [--port <PORT>] [--release] [--limits [<LIMITS>]] [--trace] [--fps] [--name <NAME>] [--points-per-cell <WIDTHxHEIGHT>] [--window-size <WIDTHxHEIGHT>] [--display <N>] [--background]
 ```
 
 ```sh
@@ -104,6 +104,7 @@ On the native window and mobile targets, a Rust app (`nsh.json` `"root"`, [Build
 | `--points-per-cell <WIDTHxHEIGHT>` | `nsh.json` `tui.pointsPerCell`, otherwise `8x16` | Terminal Cell width and height in points (`--target tui`). |
 | `--window-size <WIDTHxHEIGHT>` | Host default | Initial window size in points, such as `800x600` (`--target macos`, `linux`, `windows` and `gpui`, TSX entries). |
 | `--display <N>` | The main display | The display the window opens on, centered: `1` is the primary display (the one with the menu bar), `2` the next, and so on; a number with no display opens it on the main one (`--target macos`, TSX entries). |
+| `--background` | | The app never becomes the active app, as `nsh test` runs its apps: its window shows, the keyboard stays with the app you type in, and input sent to its windows (an agent driving it, a UI test) still reaches it. On macOS it has no Dock icon or menu bar while it runs. For a run you do not watch, such as an agent checking a change while you work (`--target macos`, `linux`, `windows` and `gpui`, TSX entries). |
 
 With `--target android`, the device `--device` or `ANDROID_SERIAL` names is used, else the first one `adb devices` lists (`nsh` names it when several are connected); the dev server's port is forwarded to it with `adb reverse`. See [Getting started](./getting-started.md#run-it) and [Dev server and debugging](./dev-server-and-debugging.md).
 
@@ -242,7 +243,7 @@ See [Packaging](./packaging.md).
 
 ## External targets
 
-`nsh dev`, `nsh run`, `nsh test` and `nsh package` with a `--target` that is none of NSH's own run the platform of that name, built outside NSH: the program `nsh-platform-<name>` on your `PATH`, as Cargo runs `cargo-<name>`. It gets the command and every argument but `--target` and its value, and the environment variables `NSH` (this `nsh` executable), `NSH_VERSION` and `NSH_TARGET` (the name); its exit code is the command's.
+`nsh dev`, `nsh run`, `nsh test` and `nsh package` with a `--target` that is none of NSH's own run the platform of that name, built outside NSH: the one a [platform nshm](./nshm.md#platform-nshm) of the app provides, else the program `nsh-platform-<name>` on your `PATH`, as Cargo runs `cargo-<name>`. It gets the command and every argument but `--target` and its value, and the environment variables `NSH` (this `nsh` executable), `NSH_VERSION` and `NSH_TARGET` (the name); its exit code is the command's.
 
 ```sh
 nsh package my-app --target miniprogram --out dist
@@ -262,22 +263,41 @@ nsh update [stable|nightly]
 
 ## nsh add
 
-Adds an [nshm](./nshm.md) (NSH module) to the app in the current directory: a Rust crate from crates.io, Git or a local directory whose components, modules and classes the app uses from TSX (`import { Gauge } from "acme/gauge"`) and from Rust (`acme_gauge::gauge()`). Experimental.
+Adds an [nshm](./nshm.md) (NSH module) to the app in the current directory, or the nearest one above it with `nsh.json`: a Rust crate from crates.io, Git or a local directory, or TSX from a Git repository, whose components, modules and classes the app imports (`import { Gauge } from "acme-gauge"`, and `acme_gauge::gauge()` in Rust).
 
 ```sh
-nsh add acme-gauge@1.0                                 # from crates.io: the newest version matching 1.0
-nsh add github:acme/gauge@v1.0.0                    # from GitHub at a tag; or --rev <commit or branch>; neither: the default branch
-nsh add https://git.example.com/gauge.git --tag v1.0.0  # from any Git URL
-nsh add --path ../gauge                              # from a local directory, as it is
+nsh add acme-gauge                                   # crates.io: the newest version
+nsh add acme-gauge@1.2                               # crates.io: the newest matching ^1.2
+nsh add github:acme/ui                               # GitHub: the newest version tag, else the default branch
+nsh add github:acme/ui@^1.4                          # GitHub: the newest tag matching ^1.4
+nsh add https://git.example.com/ui.git --tag v1.4.0  # any Git URL, at a tag; or --rev <commit or branch>
+nsh add --path ../gauge                              # a local directory, as it is
+nsh add nsh-extra --features camera                  # with the crate's Cargo features on (comma-separated or repeated)
 ```
 
-It lists the nshm in `nsh.json` `"modules"` (`"acme-gauge@1.0"`, `"github:acme/gauge@v1.0.0"`, `{ "github": "acme/gauge", "rev": "…" }`, `{ "git": "…", "tag": "v1.0.0" }` or `{ "path": "../gauge" }`), lets Cargo resolve it and pins the version or commit it resolved to in `nsh.lock` (commit it with the app), and adds it to the `[dependencies]` of the app's crate when it has one (`"rust"`). Builds take the locked version or commit (a directory is read as it is); running `nsh add` again updates it. A pure TSX app gets hosts built with the nshm, as an app with a crate of its own does ([Building with Rust](./rust.md)), so its development machine and CI need the Rust toolchain. If the nshm clashes with the app's crates or another nshm (the same package or module), or does not build with this NSH, `nsh.json` and `nsh.lock` are left unchanged.
+It lists the nshm in `nsh.json` `"dependencies"` under its package name (the crate's, or the `"name"` in a Git or local nshm's `nsh.json`), as `Cargo.toml` does: `"acme-gauge": "^1.2.0"`, `{ "github": "acme/ui", "version": "^1.4" }`, `{ "git": "…", "tag": "v1.4.0" }`, `{ "git": "…", "rev": "…" }` or `{ "path": "../gauge" }`, each object with optional `"version"` and `"features"`. Added without a version, it gets `^` and the version it resolved to. Then it resolves every nshm the app reaches again, installs what is missing in `~/.nsh/nshms`, pins them in `nsh.lock` (commit it with the app), and adds a Rust nshm to the `[dependencies]` of the app's crate when it has one (`"rust"`). It prints the specifiers to import, and says so when the nshm brings Rust into a pure TSX app, whose development machine and CI then need the Rust toolchain ([Building with Rust](./rust.md)). If the nshm cannot be resolved, clashes with the app's crates or another nshm (the same package, specifier or module), or does not work with this NSH, the app's files are left unchanged.
 
-An nshm is an ordinary Cargo library with a `#[native_module("<module>")]` entry at its root, the same as an app's crate; TSX imports it by that specifier ([Writing an nshm](./nshm.md#writing-an-nshm)).
+`--features` turns on Cargo features of a Rust nshm, the modules of it the app uses, besides those already listed (`nsh add nsh-extra --features push` after `camera` keeps `camera`); a name the crate does not define stops `nsh add`. To turn one off, remove it from `nsh.json` and from the dependency in the app crate's `Cargo.toml`. What the crates declare under `[package.metadata.nsh]` for the features on goes into the packages, and all but the entitlements into the development hosts ([What the packaged app needs](./nshm.md#what-the-packaged-app-needs)).
 
-Versions are Cargo version requirements with Cargo's meaning: `"acme-gauge@1.2"` takes `^1.2` (any 1.x from 1.2.0), and `~1.2`, `=1.2.3`, `>=1.2, <2` and `*` work as in `Cargo.toml` (quote them in the shell: `nsh add "acme-gauge@>=1.2, <2"`). `nsh.json` says what is acceptable, `nsh.lock` what was resolved: a build takes the locked version while it still meets the requirement, and changing the requirement resolves anew. A Git or path entry may add `"version"` in its object form (`{ "github": "acme/gauge", "tag": "v1.2.0", "version": "1.2" }`); as Cargo does for such dependencies, the package must then be such a version. The NSH versions an nshm builds with are its own `nsh-core` dependency's requirement (`nsh-core = "0.6"`), checked against the running `nsh` before anything compiles.
+Versions are semver requirements with Cargo's meaning: `1.2` and `^1.2` take any 1.x from 1.2.0, and `~1.2`, `=1.2.3`, `>=1.2, <2` and `*` work as in `Cargo.toml` (quote them in the shell: `nsh add "acme-gauge@>=1.2, <2"`). A Git nshm's versions are its tags (`v1.4.0` or `1.4.0`). `nsh.json` says what is acceptable, `nsh.lock` what was resolved: every command builds with the locked versions while they still meet the requirements, without the network; a changed requirement resolves anew. One version of each package is resolved for the whole app, the newest every requirement on it accepts; when none fits, the error names who requires what. The NSH versions an nshm works with are its `nsh.json` `"nsh"` requirement and, for a Rust nshm, its `nsh-core` requirement, checked against the running `nsh`.
 
 Build scripts and procedural macros of an nshm run when the app builds, and its code runs with the app's permissions: review its source and `nsh.lock` changes like the app's own code.
+
+## nsh upgrade
+
+Upgrades the app's nshm to the newest versions their requirements accept, all of them or those named, and pins them in `nsh.lock`; a Rust nshm's dependency in the app's crate follows. To move past a requirement, change it in `nsh.json` or run `nsh add` with the new one.
+
+```sh
+nsh upgrade [NAME]...
+```
+
+## nsh remove
+
+Removes nshm from the app: from `nsh.json` `"dependencies"`, `nsh.lock` and the `[dependencies]` of the app's crate. Their installed copies stay in `~/.nsh/nshms`, where other apps may use them.
+
+```sh
+nsh remove <NAME>...
+```
 
 ## nsh component
 

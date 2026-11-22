@@ -139,7 +139,7 @@ mount(() => (
 
 ## 出现与离开
 
-在桌面平台上，弹出层像 [Popover](./popover.md#entrance-and-exit) 一样随你的过渡出现和离开：`popupStartingClass` 是它第一帧的外观，`popupClass` 里的 `transition-*` 类把它过渡到自己的外观；`popupEndingClass` 是关闭后的外观，在这些过渡播放期间它会保留、不接受按压，随后触发 `onClose`。关闭时键盘焦点就回到触发元素，除非选择的 `onChange` 把焦点移到了别的视图（比如表单的下一个输入框），那样焦点就留在那里。在离开途中再次打开时，它从当前状态回到自己的外观。`popupStartingStyle` 和 `popupEndingStyle` 以内联样式做同样的事。用户要求减少动态效果时，它立即出现、立即离开；触摸屏上的 sheet 自带滑入和滑出的动作。
+在桌面平台上，弹出层像 [Popover](./popover.md#entrance-and-exit) 一样随你的过渡出现和离开：`popupStartingClass` 是它第一帧的外观，`popupClass` 里的 `transition-*` 类把它过渡到自己的外观；`popupEndingClass` 是关闭后的外观，在这些过渡播放期间它会保留、不接受按压，随后触发 `onClose`。关闭时键盘焦点就回到触发元素（在 macOS 和 iOS 上由指针打开时，回到打开之前的位置），除非选择的 `onChange` 把焦点移到了别的视图（比如表单的下一个输入框），那样焦点就留在那里。在离开途中再次打开时，它从当前状态回到自己的外观。`popupStartingStyle` 和 `popupEndingStyle` 以内联样式做同样的事。用户要求减少动态效果时，它立即出现、立即离开；触摸屏上的 sheet 自带滑入和滑出的动作。
 
 ```tsx
 <DatePicker

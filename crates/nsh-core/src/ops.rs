@@ -233,8 +233,8 @@ events! {
     Menu = "onMenu": "A menu item was chosen: the application menu's or a context menu's (root only; desktops; payload: `id`), or a context menu closed (`closed`: true, after its item).",
     MouseEnter = "onMouseEnter": "The mouse came over the view or a view inside it (never on touches; payload: [`EventPayload::Mouse`]).",
     MouseLeave = "onMouseLeave": "The mouse left the view and the views inside it, or the window (payload: [`EventPayload::Mouse`], where it was last).",
-    FileDragEnter = "onFileDragEnter": "A local file drag entered an eligible desktop drop destination (payload: [`EventPayload::FileDrop`]).",
-    FileDragLeave = "onFileDragLeave": "A local file drag left its desktop drop destination.",
+    FileDragEnter = "onFileDragEnter": "A local file drag entered an eligible drop destination, on desktops and iOS (payload: [`EventPayload::FileDrop`]).",
+    FileDragLeave = "onFileDragLeave": "A local file drag left its drop destination, on desktops and iOS.",
     FileDrop = "onFileDrop": "Local files were dropped (payload: [`EventPayload::FileDrop`]).",
     MouseMove = "onMouseMove": "The mouse moved over the view or a view inside it, with or without a button down, or a modifier key changed while it rests there with none down (payload: [`EventPayload::Mouse`]; at most one per frame).",
     ContextMenu = "onContextMenu": "The secondary button was pressed over the view (payload: [`EventPayload::ContextMenu`]): the nearest listener around the view under the pointer hears it, unless a text input or selectable text is nearer.",
@@ -248,6 +248,7 @@ events! {
     OpenUrl = "onOpenUrl": "A [`Command::OpenUrl`] request finished (root only; payload: `id`, `opened`: whether the platform opened the URL).",
     CaretMove = "onCaretMove": "An input's caret moved: with its selection, or as its text scrolled or wrapped again (payload: `bounds`, the caret in the input; the core adds `pageBounds`, in the root view).",
     Paste = "onPaste": "The user pasted into an input (payload: [`EventPayload::Paste`]: the text, files with their bytes such as a screenshot, local files' URLs), before the `onChangeText` of the text it inserts.",
+    ClipboardWrite = "onClipboardWrite": "A [`Command::SetClipboard`] or [`Command::SetClipboardItem`] finished, in the order of the writes (root only, platforms with [`crate::platform::Environment::clipboard_write_result`]; payload: `written`: whether the system clipboard took it).",
     ScreenColor = "onScreenColor": "A [`Command::PickScreenColor`] request finished (root only; payload: `id`, `color`: the color picked, packed `0xRRGGBBAA`, absent when cancelled).",
     FileRequest = "onFileRequest": "A [`Command::FileRequest`] finished (root only; payload: [`EventPayload::FileRequest`]).",
     Speech = "onSpeech": "A speech recognition session reported (root only; payload: [`EventPayload::Speech`]).",
@@ -1865,8 +1866,8 @@ pub enum CellSlot {
     Empty,
 }
 
-/// A list's `contentStyle` (or `contentClass`): padding around the content and gaps
-/// between rows and columns.
+/// A list's `contentStyle` (or `contentClass`): padding around the content, gaps
+/// between rows and columns, and cell alignment on the cross axis.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct ListContentStyle {
     /// Padding around the content.
@@ -1875,6 +1876,9 @@ pub struct ListContentStyle {
     pub row_gap: Points,
     /// Gap between columns (`numColumns`) of vertical lists.
     pub column_gap: Points,
+    /// Cell alignment on the cross axis: stretch (default), flex-start, center
+    /// or flex-end.
+    pub align_items: Option<taffy::AlignItems>,
 }
 
 /// Where a list rests (`alignment`), as GPUI's `ListAlignment`.
@@ -3680,6 +3684,13 @@ pub enum Prop {
     /// `testID`: an identifier for UI tests.
     #[prop(js = "testID")]
     TestId(Option<Arc<str>>),
+    /// `copyText`: what a copy of the text around the view gives in its
+    /// place, when the view (or image) is inside a text (an inline
+    /// formula's source, an emoji image's character): selecting across it
+    /// and copying puts this there. Unset, the view adds nothing to the
+    /// copy. A view outside a text and a nested text span ignore it.
+    #[prop(js = "copyText")]
+    CopyText(Option<Arc<str>>),
     /// `web={{ element }}`: the HTML element the web draws the view or text
     /// as (`"p"`, `"nav"`, `"article"`, ...), for what `role` cannot say;
     /// the other platforms keep the view as it is.

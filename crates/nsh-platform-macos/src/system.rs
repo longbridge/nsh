@@ -630,6 +630,15 @@ fn os_version() -> (u16, u16) {
     })
 }
 
+/// Reports a clipboard write's result (`clipboard_write_result`).
+fn clipboard_written(surface: &Rc<Surface>, written: bool) {
+    surface.event(
+        ROOT_ID,
+        EventKind::ClipboardWrite,
+        EventPayload::Map(vec![("written", PayloadValue::Bool(written))]),
+    );
+}
+
 /// A command not addressed to a kind of view.
 pub(crate) fn command(surface: &Rc<Surface>, id: NodeId, command: &Command) {
     match command {
@@ -660,18 +669,20 @@ pub(crate) fn command(surface: &Rc<Surface>, id: NodeId, command: &Command) {
             let pasteboard = NSPasteboard::generalPasteboard();
             pasteboard.clearContents();
             // SAFETY: an immutable AppKit constant.
-            pasteboard
+            let written = pasteboard
                 .setString_forType(&NSString::from_str(text), unsafe { NSPasteboardTypeString });
+            clipboard_written(surface, written);
         }
         Command::SetClipboardItem(item) => {
             let pasteboard = NSPasteboard::generalPasteboard();
             pasteboard.clearContents();
             // SAFETY: immutable AppKit constants.
             let (string, kind_html) = unsafe { (NSPasteboardTypeString, NSPasteboardTypeHTML) };
-            pasteboard.setString_forType(&NSString::from_str(&item.text), string);
+            let mut written = pasteboard.setString_forType(&NSString::from_str(&item.text), string);
             if let Some(html) = &item.html {
-                pasteboard.setString_forType(&NSString::from_str(html), kind_html);
+                written &= pasteboard.setString_forType(&NSString::from_str(html), kind_html);
             }
+            clipboard_written(surface, written);
         }
         Command::ReadClipboard { id, has_only } => read_clipboard(surface, *id, *has_only),
         Command::SetClipboardImage(uri) => set_clipboard_image(uri),

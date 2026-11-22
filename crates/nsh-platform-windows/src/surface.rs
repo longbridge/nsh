@@ -619,6 +619,32 @@ impl Surface {
         }
     }
 
+    /// Tells the engine the window size and scale the app sees
+    /// (`windowSize()`, `pixelRatio()`, the size classes): its primary
+    /// window's, the first of its own windows still open
+    /// ([`crate::app_window::primary`]), as the user resizes it, else this
+    /// surface's (an embedded view, or a host whose app shows no window).
+    /// The host's own window never shows: reporting its size would leave
+    /// the app's layout at the host's size whatever the user does with the
+    /// window they see.
+    pub(crate) fn window_environment(&self) {
+        let (size, scale) = crate::app_window::primary(self).unwrap_or_else(|| {
+            let s = self.root.state();
+            (s.frame.size, self.scale.get())
+        });
+        let mut env = self.environment.get();
+        if env.window == size && env.pixel_ratio == scale {
+            return;
+        }
+        env.window = size;
+        env.pixel_ratio = scale;
+        // Only the size changed: the appearance stays as it was applied
+        // (`set_environment` applies it again), which a live resize would
+        // otherwise do on every step.
+        self.environment.set(env);
+        self.control(|c| c.set_environment(env));
+    }
+
     /// The window's client area is `pixels` big at `scale` pixels per point.
     pub(crate) fn resized(self: &Rc<Self>, pixels: (u32, u32), scale: f32) {
         self.pixels.set(pixels);
@@ -641,14 +667,8 @@ impl Surface {
             s.frame.size.width.0 = width;
             s.frame.size.height.0 = height;
         }
-        let mut env = self.environment.get();
-        env.window = Size::new(Points(width), Points(height));
-        env.pixel_ratio = scale;
-        self.environment.set(env);
-        self.control(|c| {
-            c.resize(Size::new(Points(width), Points(height)));
-            c.set_environment(env);
-        });
+        self.control(|c| c.resize(Size::new(Points(width), Points(height))));
+        self.window_environment();
         crate::navigation::surface_resized(self, width, height);
         crate::system::surface_resized(self, width, height);
         for f in self.on_resized.borrow().iter() {

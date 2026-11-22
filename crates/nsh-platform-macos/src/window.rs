@@ -1650,6 +1650,19 @@ fn first_frame(surface: &Surface, id: NodeId) {
     report(surface, id);
 }
 
+/// Whether a window of the app's own is still opening, hidden until its
+/// first frame ([`batch_applied`], or [`FIRST_FRAME_MS`] after it opened):
+/// AppKit gives it no mouse events until it shows, so the test agent waits
+/// for it (`nsh_testing::agent::Native::opening`).
+#[cfg(feature = "dev")]
+pub(crate) fn opening(surface: &Surface) -> bool {
+    surface.windows.try_borrow().is_ok_and(|windows| {
+        windows
+            .values()
+            .any(|w| matches!(w.showing.get(), Showing::Waiting(_)))
+    })
+}
+
 /// The standalone app's main window is made: nsh.json `window`'s
 /// attributes, size and place apply before it shows (`kept`: where the
 /// user left it, `restoreBounds`).

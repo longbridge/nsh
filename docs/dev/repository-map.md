@@ -65,6 +65,11 @@ crates/
                        wgpu offscreen, read back asynchronously, never blocking the main thread; docs/dev/shaders.md)
   nsh-package/         Signed packages (`.nshpkg`): Ed25519 keys, release-key certificates, revocation lists, the trust store
   nsh-updater/          App self-update: manifests and their signatures, verified downloads, replacing the installed app on the desktop (docs/dev/updater.md); `nsh-core`'s `runtime/updater.rs` is its JS face, `nsh/updater`
+  nsh-extra/           NSH's official modules, an nshm apps install with `nsh add nsh-extra --features <name>`: one Cargo feature
+                       per module (`camera`: `Camera`, photos from the system's camera on iOS and Android; `push`: `Push`,
+                       remote notifications on iOS), its code in
+                       `src/<name>/` on the platform crates' extension points, what the packaged app needs under
+                       `[package.metadata.nsh.features.<name>]` (merged into packages by `nsh-cli`'s `module_meta.rs`)
   nsh-bundler/         Bundler: rolldown + Oxc (TS stripping) + NSH's JSX compiler (`jsx.rs`, docs/dev/native-pipeline.md) + source maps;
                        imports of the native modules stay imports (`plugin.rs`), so a bundle holds only the app's code;
                        the app's themes (nsh.json `tailwind` / `theme`, checked, handed to the renderer by the entry) and the
@@ -140,7 +145,7 @@ crates/
                        browser host's pages (`web.rs`, `web/`); `nsh test --target web`'s headless browser (`cdp.rs`, `test_web.rs`);
                        what it prints (`ui.rs`:
                        one line per step, tools' output only on failure, `-v` for everything; docs/dev/tooling.md "Output")
-  xtask/               Maintainer tasks: `cargo xtask android` (Android runtime), `ios-embed` (the iOS SDK), `dist` (the distribution),
+  xtask/               Maintainer tasks: `cargo xtask android` (Android runtime), `android-embed` (the Android SDK), `ios-embed` (the iOS SDK), `dist` (the distribution),
                        `web` (the WebAssembly runtime and the website's demos), `emoji-data` (`EmojiPicker`'s emoji from a release of emojibase-data), `compat` (runs `nsh-compat` against this checkout;
                        `compat record <version>`: records a release there)
 tests/compat/         The apps whose scripts check the API apps use (`nsh-compat` builds and runs them): `cases/<domain>/` (one app per

@@ -12,12 +12,18 @@
 //! (`shouldBeRequiredToFailByGestureRecognizer:`), so they keep the touches
 //! when it fails and never get them when it activates; the activation goes
 //! to the engine with the tracker's touches (`TouchEvent::activated`), and
-//! the view becomes the responder there.
+//! the view becomes the responder there. A scroll view inside the view
+//! waits too when the gate names one axis it cannot scroll along (a
+//! sideways pan around a vertical list): UIScrollView's pan begins once
+//! the finger has moved its slop along its path, so without the wait it
+//! would take a mostly sideways diagonal before the gate decides, unlike
+//! the other platforms, where such a list takes only movements mostly
+//! along its axis (`nsh_core::input::Candidate::accepts`).
 
 use std::cell::{Cell, RefCell};
 
 use nsh_core::{
-    NodeId, PanActivation, Points, TouchEvent, TouchPhase, TouchPoint, geometry::point,
+    NodeId, PanActivation, Point, Points, TouchEvent, TouchPhase, TouchPoint, geometry::point,
 };
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send, rc::Retained,
@@ -278,6 +284,8 @@ pub(crate) struct GateIvars {
     activation: Cell<PanActivation>,
     /// The finger the gate follows and where it went down (window points).
     finger: RefCell<Option<(Retained<UITouch>, CGPoint)>>,
+    /// The finger's offset from there at its last move.
+    judged: Cell<Point<Points>>,
 }
 
 define_class!(
@@ -301,6 +309,7 @@ define_class!(
             {
                 let at = touch.locationInView(None);
                 *finger = Some((touch.retain(), at));
+                self.ivars().judged.set(Point::default());
             }
         }
 
@@ -318,8 +327,11 @@ define_class!(
                 return;
             };
             let at = touch.locationInView(None);
-            let (dx, dy) = ((at.x - start.x) as f32, (at.y - start.y) as f32);
-            match self.ivars().activation.get().decide(Points(dx), Points(dy)) {
+            // Judged along the line from the last move: one move of a
+            // diagonal can pass both offsets.
+            let to = point(Points((at.x - start.x) as f32), Points((at.y - start.y) as f32));
+            let from = self.ivars().judged.replace(to);
+            match self.ivars().activation.get().decide_move(from, to) {
                 Some(true) => {
                     self.set_state(UIGestureRecognizerState::Began);
                     self.report_activation(touch.timestamp());
@@ -346,7 +358,8 @@ define_class!(
             self.ivars().finger.borrow_mut().take();
         }
 
-        /// The pans of the scroll views around the view wait for the gate.
+        /// The pans of the scroll views around the view, and of those
+        /// inside it across its axis, wait for the gate.
         #[unsafe(method(shouldBeRequiredToFailByGestureRecognizer:))]
         fn should_be_required_to_fail_by(&self, other: &UIGestureRecognizer) -> bool {
             self.holds_back(other)
@@ -368,6 +381,7 @@ impl PanGate {
         let this = Self::alloc(mtm).set_ivars(GateIvars {
             activation: Cell::new(activation),
             finger: RefCell::new(None),
+            judged: Cell::new(Point::default()),
         });
         // SAFETY: the designated initializer, without an action.
         let this: Retained<Self> = unsafe {
@@ -384,7 +398,11 @@ impl PanGate {
         self.ivars().activation.set(activation);
     }
 
-    /// Whether `other` is the pan of a scroll view around the view.
+    /// Whether `other` is the pan of a scroll view around the view, or of
+    /// one inside it that cannot scroll along the gate's one axis: until
+    /// the gate decides, the finger's movement is the gate's to judge.
+    /// Asked once per recognition attempt, so a scroll view's content
+    /// growing past its bounds takes effect with the next touch.
     fn holds_back(&self, other: &UIGestureRecognizer) -> bool {
         let (Some(view), Some(other_view)) = (self.view(), other.view()) else {
             return false;
@@ -394,7 +412,16 @@ impl PanGate {
         };
         let pan = scroll.panGestureRecognizer();
         let pan: &UIGestureRecognizer = &pan;
-        std::ptr::eq(pan, other) && view.isDescendantOfView(scroll)
+        if !std::ptr::eq(pan, other) {
+            return false;
+        }
+        if view.isDescendantOfView(scroll) {
+            return true;
+        }
+        let Some(horizontal) = self.ivars().activation.get().axis() else {
+            return false;
+        };
+        scroll.isDescendantOfView(&view) && !scrolls_along(scroll, horizontal)
     }
 
     fn set_state(&self, state: UIGestureRecognizerState) {
@@ -445,6 +472,20 @@ impl PanGate {
             }
             current = v.superview();
         }
+    }
+}
+
+/// Whether `scroll` scrolls, or bounces, horizontally (else vertically).
+fn scrolls_along(scroll: &UIScrollView, horizontal: bool) -> bool {
+    let (bounds, content, inset) = (
+        scroll.bounds().size,
+        scroll.contentSize(),
+        scroll.adjustedContentInset(),
+    );
+    if horizontal {
+        scroll.alwaysBounceHorizontal() || content.width + inset.left + inset.right > bounds.width
+    } else {
+        scroll.alwaysBounceVertical() || content.height + inset.top + inset.bottom > bounds.height
     }
 }
 

@@ -110,8 +110,8 @@ touches and UI tests meet each row once.
 | `inverted` | `.inverted()` | `boolean` | `false` | Laid out from the end, item 0 last (chat style): starts scrolled to the end and keeps its distance from the end as content changes. |
 | `maintainVisibleContentPosition` | `.follow_end(px(threshold))` | `{ autoscrollToBottomThreshold?: number }` | | For lists that are not inverted: at the end of the content, or within that many points of it, the list stays at the end as the content grows or the viewport shrinks; scrolled further up, the visible content stays. |
 | `stickyHeaderIndices` | `.sticky_header_indices([..])` | `number[]` | | Items that stick to the start while scrolled past (one column, not inverted). |
-| `contentStyle` | `.content_padding(..)`, `.content_padding_x(..)`, `.row_gap(..)`, `.column_gap(..)`, … | `ListContentStyle` | | Padding and gaps of the content, in points: `padding`, `paddingHorizontal`, `paddingVertical`, `paddingTop`, `paddingRight`, `paddingBottom`, `paddingLeft`, `gap`, `rowGap`, `columnGap`. |
-| `contentClass` | | `string` | | Padding and gaps of the content as classes (`p-*`, `gap-*`); `contentStyle` wins over them. |
+| `contentStyle` | `.content_padding(..)`, `.content_padding_x(..)`, `.row_gap(..)`, `.column_gap(..)`, … | `ListContentStyle` | | Padding and gaps of the content, in points: `padding`, `paddingHorizontal`, `paddingVertical`, `paddingTop`, `paddingRight`, `paddingBottom`, `paddingLeft`, `gap`, `rowGap`, `columnGap`. `alignItems` aligns cells on the cross axis: `stretch` (default), `flex-start`, `center` or `flex-end`. |
+| `contentClass` | | `string` | | Padding, gaps and cross-axis alignment as classes (`p-*`, `gap-*`, `items-start`, `items-center`, `items-end`, `items-stretch`); `contentStyle` wins over them. |
 | `header` | `.header(el)` | `ListSlot` | | Before the items: a component (`Header`) or an element (`<Header />`). |
 | `footer` | `.footer(el)` | `ListSlot` | | After the items. |
 | `empty` | `.empty(el)` | `ListSlot` | | Shown instead of the items while `each` is empty. |

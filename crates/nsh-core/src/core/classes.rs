@@ -978,7 +978,7 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// The padding and gaps a list's `contentClass` sets.
+    /// The padding, gaps and cell alignment a list's `contentClass` sets.
     fn list_content(&self, key: Key) -> crate::ListContentStyle {
         let Some(style) = self.part_resolved(key, Part::Content) else {
             return crate::ListContentStyle::default();
@@ -988,6 +988,12 @@ impl<M: TextEngine> Core<M> {
             _ => crate::geometry::Points::ZERO,
         };
         let p = &style.layout.padding;
+        let align = style.layout.align_items;
+        let align_items = (align == taffy::AlignItems::STRETCH
+            || align == taffy::AlignItems::FLEX_START
+            || align == taffy::AlignItems::CENTER
+            || align == taffy::AlignItems::FLEX_END)
+            .then_some(align);
         crate::ListContentStyle {
             padding: crate::EdgeInsets {
                 top: px(p.top),
@@ -997,6 +1003,7 @@ impl<M: TextEngine> Core<M> {
             },
             row_gap: px(style.layout.gap.height),
             column_gap: px(style.layout.gap.width),
+            align_items,
         }
     }
 

@@ -247,7 +247,7 @@ sdkmanager "platforms;android-35" "build-tools;35.0.1" "platform-tools"
 
 ### 构建 Android 运行时
 
-从源码构建 Android 运行时（`cargo xtask android`）还需要 SDK 中的 **NDK**（`ndk;<version>`；如果已安装的最新版本不完整，请设置 `ANDROID_NDK_HOME`）以及 `javac`。
+从源码构建 Android 运行时（`cargo xtask android`）还需要 SDK 中的 **NDK**（`ndk;<version>`；如果已安装的最新版本不完整，请设置 `ANDROID_NDK_HOME`）以及 `javac`。只打嵌入用的 AAR：`cargo xtask android-embed`（`dist/nsh/embed/android/{nsh,nsh-dev}.aar`）。
 
 ## 各平台可用的命令
 

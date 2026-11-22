@@ -777,6 +777,24 @@ function runPoint(run, offset) {
   return node ? [node, node.length] : [run, 0];
 }
 
+/** The character standing for an attachment in a text's content. */
+const ATTACHMENT = String.fromCharCode(0xfffc);
+
+/**
+ * The copy texts (`copyText`) of a text's attachments that a copy puts
+ * `before` run `run`'s characters (else after them, before the line's
+ * break), of those in the selected UTF-16 range `start..end`. `copies` are
+ * `[offset, text, run, before]`, as the text's mount item sends them: the
+ * runs hold no attachments.
+ */
+function copiesAround(copies, run, before, start, end) {
+  let out = "";
+  for (const [at, text, r, b] of copies ?? []) {
+    if (r === run && !!b === before && at >= start && at < end) out += text;
+  }
+  return out;
+}
+
 /** The offset in a run of a boundary (`container`, `offset`) inside it. */
 function runOffset(run, container, offset) {
   const range = document.createRange();
@@ -2254,6 +2272,8 @@ class Player {
       lifecycle: this.lifecycle(),
       timeZone: timeZoneName(),
       screenColor: typeof window.EyeDropper === "function",
+      // `writeClipboard` reports each write's result.
+      clipboardWriteResult: true,
       share: webShareAllowed(),
       notifications: typeof window.Notification === "function",
       audio: typeof (window.AudioContext ?? window.webkitAudioContext) === "function",
@@ -2885,9 +2905,12 @@ class Player {
     el.style.setProperty(prop, value);
   }
 
-  op_t([, id, cx, cy, , , runs, styles, selectable, selection, color, backgrounds, links]) {
+  op_t([, id, cx, cy, , , runs, styles, selectable, selection, color, backgrounds, links, copies]) {
     const el = this.view(id);
     if (!el) return;
+    // What its attachments copy as (`copyText`): `[offset, text, run,
+    // before]`, by where the copy puts them among the runs.
+    el._copyTexts = copies?.length ? copies : null;
     setTextColor(el, color ?? null);
     if (!this.updateRuns(el, cx, cy, runs, styles, backgrounds, links)) this.replaceRuns(el, cx, cy, runs, styles, backgrounds, links);
     el.classList.toggle("nsh-selectable", !!selectable);
@@ -2948,6 +2971,7 @@ class Player {
       if (span.style.top !== top) span.style.top = top;
       if (span.firstChild.data !== text) span.firstChild.data = text;
       span._start = start;
+      span._run = i;
       if (after) span._after = after;
       else delete span._after;
     });
@@ -2989,7 +3013,7 @@ class Player {
     }
     // Nested texts that take presses: `[node, events]`, which runs name.
     const spans = (links ?? []).map(([node, events]) => ({ node, events: new Set(events) }));
-    for (const [x, y, text, style, start, parts, after] of runs) {
+    runs.forEach(([x, y, text, style, start, parts, after], i) => {
       const span = document.createElement("span");
       const name = this.styleClass(styles[style]);
       span.className = name ? `nsh-run ${name}` : "nsh-run";
@@ -2997,11 +3021,13 @@ class Player {
       fillRun(span, text, parts, spans);
       // Where its characters are in the text (UTF-16, as JS strings).
       span._start = start;
+      // Which run it is (attachments' copy texts name it).
+      span._run = i;
       // The line's break, for copying (`copy`).
       if (after) span._after = after;
       if (el._animation.color) span.style.color = el._animation.color;
       frag.append(span);
-    }
+    });
     for (const span of [...el.querySelectorAll(":scope > .nsh-run, :scope > .nsh-run-bg")]) span.remove();
     el.insertBefore(frag, el.firstChild);
     this.lineBreaks(el);
@@ -6320,9 +6346,43 @@ class Player {
       return;
     }
     this.pageUrl = resolved.href;
+    if (push && this.earlyPushed) {
+      // An entry of its own was written for this task's push already
+      // (`pushEarly`): the turn's last address is that entry's.
+      push = false;
+    }
     if (push) this.pageUrlPush = true;
     this.pageUrlSets = (this.pageUrlSets ?? 0) + 1;
-    this.syncHistorySoon();
+    this.syncHistorySoon(push);
+  }
+
+  /** Whether an address pushed now can have its entry at once, in the task
+   * the app pushed it in: no page has an entry (no modal, no stack screen
+   * above its first), none is going, and no traversal is waited for. Then
+   * nothing later in the turn can take an entry away under it. */
+  canPushEarly() {
+    if (this.historyDepth || this.ignoredPops || this.dismissing > 0 || this.popAnswer) return false;
+    if ([...(this.root?.children ?? [])].some((el) => el._kind === "modal")) return false;
+    return this.backDepth() === 0;
+  }
+
+  /**
+   * A push with no page open (a list's row that opens a screen of its own
+   * address): the entry is written now, before the browser draws the new
+   * screen, not a task later (`syncHistorySoon`). Chrome on Android pictures
+   * an entry as the page leaves it and shows that picture under a back
+   * swipe; written after the new screen was drawn, the entry under it was
+   * pictured with that screen. Later addresses of the same task replace
+   * this entry's (in a turn the last one wins). With a page open it waits as
+   * before: a sheet's dismissal can reach the player a task after the push,
+   * and an entry written early would be gone back over with the sheet's.
+   */
+  pushEarly() {
+    this.earlyPushed = true;
+    setTimeout(() => {
+      this.earlyPushed = false;
+    }, 0);
+    this.syncHistory();
   }
 
   // The document's title: a mounted `Head`'s (`nsh/web`), else the main
@@ -6371,8 +6431,13 @@ class Player {
     return depth;
   }
 
-  syncHistorySoon() {
-    if (!this.history || this.historySync) return;
+  /** Writes the turn's entries a task later, once all of it reached the
+   * player; with `push` (an address pushed) at once when it can
+   * (`pushEarly`). */
+  syncHistorySoon(push = false) {
+    if (!this.history) return;
+    if (push && this.canPushEarly()) return this.pushEarly();
+    if (this.historySync) return;
     this.historySync = setTimeout(() => {
       this.historySync = 0;
       this.syncHistory();
@@ -7376,8 +7441,8 @@ class Player {
       case "playerClose": this.playerClose(args[0]); break;
       case "setBadge": this.setBadge(args[0]); break;
       case "openUrl": this.event(ROOT_ID, "onOpenUrl", { id: args[0], opened: this.openUrl(args[1]) }); break;
-      case "setClipboard": this.writeClipboard(args[0]); break;
-      case "setClipboardItem": this.writeClipboard(args[0], args[1] ?? undefined); break;
+      case "setClipboard": this.writeClipboard(args[0], undefined, (written) => this.event(ROOT_ID, "onClipboardWrite", { written })); break;
+      case "setClipboardItem": this.writeClipboard(args[0], args[1] ?? undefined, (written) => this.event(ROOT_ID, "onClipboardWrite", { written })); break;
       case "readClipboard": this.readClipboard(args[0], args[1]); break;
       case "setClipboardImage": this.writeClipboardImage(args[0]); break;
       case "readClipboardImage": this.readClipboardImage(args[0], args[1]); break;
@@ -7535,8 +7600,8 @@ class Player {
    * context; some browsers want a gesture), then a copy command over a
    * selected offscreen text area.
    */
-  writeClipboard(text, html) {
-    if (navigator.userActivation?.isActive !== false && this.copyCommand(text, html)) return;
+  writeClipboard(text, html, done = () => {}) {
+    if (navigator.userActivation?.isActive !== false && this.copyCommand(text, html)) return done(true);
     const copy = () => {
       const focused = document.activeElement;
       const area = document.createElement("textarea");
@@ -7545,20 +7610,21 @@ class Player {
       document.body.append(area);
       // Safari copies only a selection.
       area.select();
-      this.copyCommand(text, html);
+      const written = this.copyCommand(text, html);
       area.remove();
       // The selection took the focus from the field that had it (a
       // RichEditor's input).
       if (focused && focused !== document.body && focused.isConnected) focused.focus({ preventScroll: true });
+      done(written);
     };
     if (html !== undefined && navigator.clipboard?.write && typeof ClipboardItem === "function") {
       const item = new ClipboardItem({
         "text/plain": new Blob([text], { type: "text/plain" }),
         "text/html": new Blob([html], { type: "text/html" }),
       });
-      navigator.clipboard.write([item]).catch(copy);
+      navigator.clipboard.write([item]).then(() => done(true), copy);
     } else if (html === undefined && navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(text).catch(copy);
+      navigator.clipboard.writeText(text).then(() => done(true), copy);
     } else {
       copy();
     }
@@ -9274,8 +9340,9 @@ class Player {
    * selectable view, texts on one row (their boxes overlap vertically: a
    * table's cells) are joined by a tab instead, a text that continues the
    * one before it (`continuesText`: a wrapped line's later part) by
-   * nothing, and attachments (U+FFFC) and hidden runs are left out, as
-   * the native platforms copy. */
+   * nothing, attachments (which the runs do not hold) give their copy texts
+   * (`copyText`) where the layout put them among the runs, and hidden runs
+   * are left out, as the native platforms copy. */
   copyText(e) {
     if (e.target.closest?.(".nsh-field")) return;
     const out = this.selectedText();
@@ -9301,6 +9368,13 @@ class Player {
     let lastArea = null;
     let lastBox = null;
     let found = false;
+    // The runs the selection reaches, and the UTF-16 range it covers in
+    // each text: the attachments in it are copied (as their `copyText`).
+    // A run that starts with a truncated line's `…` has no offset and
+    // leaves the range as it is: an attachment between it and the next
+    // run of its line is copied only when the selection goes on past it.
+    const reached = [];
+    const covered = new Map();
     for (const run of (only ?? this.root).querySelectorAll(".nsh-run")) {
       // Text that cannot be selected is not copied, as by the browser.
       if (!range.intersectsNode(run) || !this.selectableText(run)) continue;
@@ -9309,7 +9383,14 @@ class Player {
       if (!text) continue;
       const from = run.contains(range.startContainer) ? runOffset(run, range.startContainer, range.startOffset) : 0;
       const to = run.contains(range.endContainer) ? runOffset(run, range.endContainer, range.endOffset) : text.length;
-      if (from >= to) continue;
+      reached.push([run, text, from, to]);
+      if (run._start == null || !run.parentNode._copyTexts) continue;
+      const span = covered.get(run.parentNode);
+      const start = run._start + from, end = run._start + Math.max(from, to);
+      covered.set(run.parentNode, span ? [Math.min(span[0], start), Math.max(span[1], end)] : [start, end]);
+    }
+    const write = (run, s) => {
+      if (!s) return;
       found = true;
       const area = this.areaOf(run.parentNode);
       if (last !== run.parentNode) {
@@ -9323,15 +9404,23 @@ class Player {
         lastArea = area;
         lastBox = box;
       }
-      // A hidden run (`visibility: hidden` on a span) keeps its place but
-      // is not copied; the line's break after it still is.
-      if (getComputedStyle(run).visibility === "hidden") {
-        if (to === text.length && run._after) out += run._after;
-        continue;
+      out += s;
+    };
+    for (const [run, text, from, to] of reached) {
+      const span = covered.get(run.parentNode);
+      const copies = (before) => span ? copiesAround(run.parentNode._copyTexts, run._run, before, span[0], span[1]) : "";
+      write(run, copies(true));
+      if (from < to) {
+        found = true;
+        // A hidden run (`visibility: hidden` on a span) keeps its place
+        // but is not copied; the line's break after it still is.
+        if (getComputedStyle(run).visibility !== "hidden") {
+          const part = text.slice(from, to);
+          write(run, this.areaOf(run.parentNode) ? part.replaceAll(ATTACHMENT, "") : part);
+        }
       }
-      const part = text.slice(from, to);
-      out += area ? part.replaceAll("\uFFFC", "") : part;
-      if (to === text.length && run._after) out += run._after;
+      write(run, copies(false));
+      if (from < to && to === text.length && run._after) write(run, run._after);
     }
     if (!found) return null;
     return given ? out : out.replace(/\s+$/, "");

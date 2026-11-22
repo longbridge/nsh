@@ -221,6 +221,13 @@ pub(crate) struct Apk<'a> {
     /// The permissions the app declares itself (nsh.json
     /// `android.permissions`), in full: declared after NSH's, each once.
     pub(crate) permissions: &'a [String],
+    /// Elements the app's crates add to the manifest's `<queries>`
+    /// ([`crate::module_meta`]): the other apps they start.
+    pub(crate) queries: &'a [String],
+    /// Elements the app's crates add to the manifest's `<application>`
+    /// ([`crate::module_meta`]): services, receivers, providers, activities
+    /// and meta-data. `${applicationId}` in them is the app's package.
+    pub(crate) application: &'a [String],
     /// URL schemes that open the app (nsh.json `schemes`): one
     /// `VIEW` intent filter.
     pub(crate) schemes: &'a [String],
@@ -247,6 +254,10 @@ pub(crate) struct Apk<'a> {
     pub(crate) assets: Vec<(String, Vec<u8>)>,
     /// Notification sounds, raw resources: (resource name, file).
     pub(crate) sounds: Vec<(String, PathBuf)>,
+    /// The app's own Android resources (`android/res/` next to `nsh.json`,
+    /// laid out as Gradle's `src/main/res/`): drawables a tab bar names,
+    /// for one. None when the app has none.
+    pub(crate) res: Option<&'a Path>,
     pub(crate) signing: Signing,
 }
 
@@ -520,6 +531,20 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
         for entry in fs::read_dir(&compiled)? {
             flat.push(entry?.path());
         }
+    }
+
+    // The app's own resources, compiled as a whole: `aapt2 compile --dir`
+    // reads `<type>[-<qualifiers>]/<name>` as Gradle does.
+    if let Some(res) = apk.res {
+        let zip = work.join("compiled-app.zip");
+        run(Command::new(sdk.tool("aapt2"))
+            .arg("compile")
+            .arg("--dir")
+            .arg(res)
+            .arg("-o")
+            .arg(&zip))
+        .with_context(|| format!("compile the app's resources in {}", res.display()))?;
+        flat.push(zip);
     }
 
     let manifest = work.join("AndroidManifest.xml");
@@ -842,6 +867,18 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
             "\n            <intent-filter>\n                <action android:name=\"android.intent.action.VIEW\" />\n                <category android:name=\"android.intent.category.DEFAULT\" />\n                <category android:name=\"android.intent.category.BROWSABLE\" />{data}\n            </intent-filter>"
         )
     };
+    let elements = |list: &[String], indent: &str| -> String {
+        list.iter()
+            .map(|e| {
+                format!(
+                    "\n{indent}{}",
+                    e.trim().replace("${applicationId}", apk.package)
+                )
+            })
+            .collect()
+    };
+    let queries = elements(apk.queries, "        ");
+    let components = elements(apk.application, "        ");
     format!(
         r#"<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="{package}">{permissions}
@@ -851,7 +888,7 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT" />
             <data android:mimeType="text/plain" />
-        </intent>
+        </intent>{queries}
     </queries>
     <application android:label="{label}"{icon}{cleartext}
         android:extractNativeLibs="false"
@@ -872,7 +909,7 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>{schemes}
-        </activity>
+        </activity>{components}
     </application>
 </manifest>
 "#,
@@ -1583,6 +1620,8 @@ mod tests {
             camera: false,
             dex: &[],
             permissions: &[],
+            queries: &[],
+            application: &[],
             schemes: &[],
             rust,
             dark: false,
@@ -1593,6 +1632,7 @@ mod tests {
             launch_screen: None,
             assets: Vec::new(),
             sounds: Vec::new(),
+            res: None,
             signing: super::Signing::Debug,
         }
     }
@@ -1893,6 +1933,35 @@ mod tests {
         let at = manifest.find("ACCESS_NETWORK_STATE").unwrap();
         assert!(at < application, "{manifest}");
         assert!(!super::manifest_xml(&apk(false, false)).contains("ACCESS_NETWORK_STATE"));
+    }
+
+    #[test]
+    fn the_crates_add_queries_and_components() {
+        let queries = [
+            r#"<intent><action android:name="android.media.action.IMAGE_CAPTURE"/></intent>"#
+                .to_owned(),
+        ];
+        let application = [
+            r#"<provider android:name="x.Init" android:authorities="${applicationId}.init" android:exported="false"/>"#
+                .to_owned(),
+        ];
+        let manifest = super::manifest_xml(&super::Apk {
+            queries: &queries,
+            application: &application,
+            ..apk(false, false)
+        });
+        let queries_end = manifest.find("</queries>").unwrap();
+        let capture = manifest.find("IMAGE_CAPTURE").expect(&manifest);
+        assert!(manifest.find("<queries>").unwrap() < capture && capture < queries_end);
+        // Inside `<application>`, after NSH's own activity, the package filled in.
+        let provider = manifest.find("x.Init").expect(&manifest);
+        assert!(manifest.find("</activity>").unwrap() < provider);
+        assert!(provider < manifest.find("</application>").unwrap());
+        assert!(
+            manifest.contains(r#"android:authorities="com.example.app.init""#),
+            "{manifest}"
+        );
+        assert!(!super::manifest_xml(&apk(false, false)).contains("IMAGE_CAPTURE"));
     }
 
     #[test]

@@ -249,6 +249,9 @@ pub(crate) struct RareAttrs {
     /// A window of the app's own: the dialog root it shows
     /// ([`super::desktop::window`]).
     pub(crate) window: Option<Box<crate::desktop::WindowOptions>>,
+    /// What its ref was asked for before it was mounted: sent after the
+    /// window opens.
+    pub(crate) window_commands: Vec<crate::desktop::DesktopCommand>,
 }
 
 impl RareAttrs {
@@ -1141,6 +1144,27 @@ pub trait Element: IntoElement + Sized {
             if continues || a.rare.is_some() {
                 a.rare_mut().continues_text = continues;
             }
+        });
+        self
+    }
+
+    /// What a copy of the text around the view gives in its place, when
+    /// the view is inside a text (`copyText`): an inline formula's source
+    /// (`$x^2$`), an emoji image's character. Selecting across the view
+    /// and copying puts this where it is, as a browser copies an inline
+    /// image's `alt`. Unset, the view adds nothing to the copy; a view
+    /// outside a text and a nested text span (whose characters are copied
+    /// themselves) ignore it. Screen readers keep reading the view's
+    /// [`Accessible::label`].
+    ///
+    /// ```ignore
+    /// text("Area is ")
+    ///     .child(view().copy_text("$x^2$").child(formula))
+    ///     .child(" here.")
+    /// ```
+    fn copy_text(mut self, text: impl IntoReactive<SharedString>) -> Self {
+        super::host::bind_prop(self.node(), text, |text: SharedString| {
+            Prop::CopyText(Some(text.to_arc()))
         });
         self
     }

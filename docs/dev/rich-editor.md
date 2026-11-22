@@ -150,14 +150,17 @@ their marks' parts (`classes.marks`), split at inline decorations (their `class`
 attachments with their spec's `class`. A node view (`node_view.rs`: `NodeView`, registered in `NodeViews` or a
 plugin's `node_views` as an `Arc<dyn NodeView>`) renders a node type's blocks: `create` makes the element, which
 follows `cx.node()` while `update` returns true; `editable_content_slot` puts the editor's rendering of the content
-(`cx.take_content()`) inside it, measured in the content box; otherwise the node is an atom selected and moved over
-as a unit. The only looks of the view's own are the caret (2 points, the theme's `foreground`), the selection (the
+(`cx.take_content()`) inside it, measured in the block's box (a block moved by an edit before it carries it along)
+and again when its frame in its parent or the block's size changes; otherwise the node is an atom selected and moved
+over as a unit. The only looks of the view's own are the caret (2 points, the theme's `foreground`), the selection (the
 theme's selection color), the placeholder (`muted-foreground`) and the composition (underlined), each a part the app
 restyles.
 
-Geometry (`geometry.rs`): maps document positions to the laid-out text's lines and back from the blocks' and texts'
-layouts, so the caret and hit tests follow the app's fonts (classes included). A position at a wrap shows at the
-upper line's end with `Affinity::Upstream`.
+Geometry (`geometry.rs`): maps document positions to laid-out coordinates and back by querying each textblock's
+`TextGeometry` (`Text::on_text_layout`, which translates UTF-16 offsets across synthetic span-padding spacers
+internally), so the caret, selection boxes, inline leaves, and hit tests follow the app's real fonts, mixed styles,
+attachments, and padding without re-shaping. A position at a wrap shows at the upper line's end with
+`Affinity::Upstream`.
 The view reports `contentSizeChange({ contentSize })` (as `Input`'s `onContentSizeChange`) when the laid-out
 document's size changes, at most once per engine frame. `contentSize` is the full flow extent in points, including
 offscreen blocks and independent of the viewport's minimum height; it excludes the `content` part's padding.
@@ -186,8 +189,7 @@ suggestion's).
 Presses: a node view's `handle_event`, the plugins' click hooks (`handle_click_on` per ancestor, then
 `handle_click`, double and triple likewise), then a caret (Shift extends), a word, the textblock or a node selection (a press inside an inline node view's box
 selects its node without Shift or Mod: `inline_view_at`, after prosemirror-view's `selectClickedLeaf`; an inline
-view's box is the frame the text engine placed it at, `TextGeo::widths`, which fixes the positions around it, the
-text between two fixed points scaled to the room it has);
+view's box is the range box the text engine placed its attachment at);
 a drag extends through `create_selection_between`, and past the viewport's top or bottom it scrolls the view on a timer (the code `Editor`'s `AutoScroll` and `edge_speed`) and extends again at each step. Paste: HTML through `transform_pasted_html` and the
 `clipboard_parser` (else the schema's), read by `DomParser::parse_from_clipboard`: HTML an editor copied carries
 `data-pm-slice` and comes back as the copied slice (its open depths, its whitespace, wrapped in its context again),
@@ -265,6 +267,14 @@ the new size in the grid's tracks and commits `setColumnWidth` / `setRowHeight` 
 selects the column or row (a cell selection), a drag on desktops shows the drop line (`tableDropIndicator`, `primary`)
 and moves it with `moveTableColumn` / `moveTableRow` on release. Table gestures come before the content box's
 selecting (`Rv::table_target` at the press).
+
+Each table's handles and grips are a region of their own (`table_controls`), placed from that table's layout alone
+(`Rv::table_layout`). Every block reports its frame in an event of its own, so a region over all the tables, run again
+on `layout_rev`, laid every table out again for each block: the first commit of a long document with tables grew with
+its square. A table's region follows its own revision (`Rv::watch_table`), which `Rv::table_moved` moves when the
+table's frame, a cell's frame, or the frame or inset of a box around it changes (`Tree::table_holders` lists the tables
+in each box, the document's included), and the selection's table (a memo of its block) wakes only the two tables a
+change of it concerns. The drop line is a region of its own too (`drop_line`).
 
 ## The JS API (`rich_editor/js/`)
 

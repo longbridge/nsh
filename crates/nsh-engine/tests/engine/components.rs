@@ -1219,10 +1219,10 @@ import { Clipboard } from "nsh";
 const shown = signal("waiting");
 setTimeout(async () => {
   const before = await Clipboard.hasText();
-  Clipboard.writeText("copied");
+  const written = await Clipboard.writeText("copied");
   const has = await Clipboard.hasText();
   const text = await Clipboard.readText();
-  shown.set(`${before} ${has} ${text}`);
+  shown.set(`${before} ${has} ${text} ${written}`);
 }, 0);
 
 mount(() => <Text>{shown()}</Text>);
@@ -1318,7 +1318,7 @@ fn the_clipboard_takes_text_with_its_html() {
 #[test]
 fn the_clipboard_round_trips_through_the_platform() {
     let (engine, rx) = start(CLIPBOARD);
-    let commands = serve_clipboard(&engine, &rx, "false true copied");
+    let commands = serve_clipboard(&engine, &rx, "false true copied requested");
     assert_eq!(
         commands,
         [
@@ -1452,7 +1452,7 @@ fn the_clipboard_needs_its_capability() {
         Some(r#"{ "clipboard": true }"#),
         None,
     );
-    serve_clipboard(&engine, &rx, "false true copied");
+    serve_clipboard(&engine, &rx, "false true copied requested");
 }
 
 const CLIPBOARD_IMAGE: &str = r#"import { mount, signal, Text } from "nsh";
