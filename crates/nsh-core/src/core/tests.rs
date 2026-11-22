@@ -25910,6 +25910,58 @@ mod views {
         assert!(batch.is_none_or(|b| last_screen_config(&b).is_none()));
     }
 
+    #[derive(Default)]
+    struct OptionalTitlePage;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct OptionalTitlePageProps {}
+
+    thread_local! {
+        static TITLE_SHOWN: Cell<Option<Signal<bool>>> = const { Cell::new(None) };
+    }
+
+    impl Component for OptionalTitlePage {
+        type Props = OptionalTitlePageProps;
+        type Event = NoEvent;
+
+        #[allow(deprecated)]
+        fn view(_: OptionalTitlePageProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let shown = signal(false);
+            TITLE_SHOWN.with(|s| s.set(Some(shown)));
+            stack().flex_1().child(
+                screen()
+                    .title("Chat")
+                    .header_title(when(shown, || view().w(px(80.0)).h(px(24.0))))
+                    .child(view().flex_1()),
+            )
+        }
+    }
+
+    /// A title view with nothing to show leaves the platform's title text,
+    /// and comes back when its content does (allsum-nsh#1900).
+    #[test]
+    fn an_empty_header_title_falls_back_to_the_system_title() {
+        let mut c = core();
+        c.mount_root(&Root::new::<OptionalTitlePage>(
+            || OptionalTitlePageProps {},
+        ));
+        let first = last_screen_config(&c.commit().unwrap()).expect("a screen");
+        assert_eq!(first.title_view, None, "nothing shows in the title slot");
+        let shown = TITLE_SHOWN.with(Cell::get).unwrap();
+        {
+            let _entered = c.components.runtime.enter();
+            shown.set(true);
+        }
+        let config = last_screen_config(&c.commit().unwrap()).expect("options again");
+        assert!(config.title_view.is_some(), "the title view shows");
+        {
+            let _entered = c.components.runtime.enter();
+            shown.set(false);
+        }
+        let config = last_screen_config(&c.commit().unwrap()).expect("options again");
+        assert_eq!(config.title_view, None, "back to the system title");
+    }
+
     /// Without the prop the header is built as before: no system button, so
     /// the platform wraps the app's `headerRight` view instead.
     #[test]
