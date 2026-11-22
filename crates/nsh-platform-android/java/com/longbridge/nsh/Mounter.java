@@ -2897,7 +2897,7 @@ final class Mounter {
                 (v != null ? v : host).announceForAccessibility(text);
                 break;
             }
-            case 63: {
+            case 64: {
                 textLocale = java.util.Locale.forLanguageTag((String) objects[b.getInt()]);
                 // Services keep copies of the nodes: those with state words read them again.
                 android.view.accessibility.AccessibilityManager manager = host.accessibility();
