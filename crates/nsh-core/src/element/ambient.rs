@@ -1761,6 +1761,11 @@ pub struct KeyOptions {
     /// give way to the control the focus is on (default)
     /// ([`crate::keymap::KeyBinding::for_focus`]).
     pub for_focus: bool,
+    /// Comes before the views' bindings of the keystroke, so it takes a key
+    /// a focused component binds itself (a query editor's mod+enter over
+    /// the editor's own) while it is kept (default: the views' come first)
+    /// ([`crate::keymap::KeyBinding::over_focused`]).
+    pub over_focused: bool,
 }
 
 /// Where a keyboard shortcut fires ([`on_key_with`]; TS: `keymap.bind`'s
@@ -1851,6 +1856,7 @@ pub fn on_key_with(keystroke: &str, options: KeyOptions, handler: impl Fn(&str) 
             crate::keymap::KeyBinding::new(id, parsed, options.when, options.repeat)
                 .passing_through(options.pass_through)
                 .focus_keys(options.for_focus)
+                .over_focused(options.over_focused)
         },
         keystroke.into(),
         handler,

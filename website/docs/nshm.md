@@ -355,7 +355,7 @@ An nshm lists the nshm it needs in its `nsh.json` `"dependencies"`, in the app's
 
 ## Platform nshm
 
-An nshm can provide a target of its own, such as a platform NSH does not build for, with `"platform"` in its `nsh.json` and a binary named `nsh-platform-<name>` in its crate:
+An nshm can provide a target of its own, such as a platform NSH does not build for, with `"platform"` in its `nsh.json` and a binary named `nsh-platform-<name>` in its crate. The crate needs no `#[native_module]` when it gives the app nothing but the target; without one, the app is not linked with it and does not become a Rust app:
 
 ```json
 { "name": "nsh-harmony", "version": "0.1.0", "platform": "harmony" }
