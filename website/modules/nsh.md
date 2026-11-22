@@ -2408,7 +2408,7 @@ only the running app: one left on screen after the app exits does nothing.
 ### Notifications.permission
 
 `permission()` answers without asking, `requestPermission()` shows the system's prompt the first time. Both resolve with
-`"default"` (not asked yet), `"granted"`, `"denied"` (only the system's settings change it) or `"unavailable"`. On Apple
+`"default"` (not asked yet), `"granted"`, `"denied"` (only the system's settings change it; [`AppSettings.open`](./nsh-mobile.md#appsettings) of `nsh/mobile` takes the user there) or `"unavailable"`. On Apple
 platforms `requestPermission()` resolves with the permission the system's settings hold once it has asked: `"denied"` for
 an app the user turned notifications off for.
 
@@ -2452,11 +2452,62 @@ files and the system's apps (`http`, `https`, `file`, `mailto`, `tel`, `sms`, ..
 | Windows | The app, under `HKEY_CURRENT_USER\\Software\\Classes`, each time it starts; a second launch hands its URL to the running app |
 | Linux | The app: its desktop entry in `~/.local/share/applications` (`<app id>.desktop`) with `x-scheme-handler/<scheme>`, written when it starts. An entry an installer put there for this executable is kept, with the schemes it lacks added; one for another copy of the app is left alone. The app becomes a scheme's default handler only where no application handles it yet. `nsh run` registers the development host the same way. A second launch hands its URL to the running app |
 
+### Web links
+
+An app also claims web links: `https` links of its own sites that open it, Universal Links on iOS and macOS and App
+Links on Android. A link such as `https://example.com/orders/42` in an email, a chat or a search result then opens the
+app where it is installed, and the web page everywhere else. It reaches the same `open` listener as a scheme's link, so
+one listener handles both, and on the web the same address is the page's own (`UrlScheme.url()`).
+
+```json
+{
+  "links": [
+    { "host": "example.com", "paths": ["/orders/*", "/invite"] },
+    { "host": "*.example.com" }
+  ]
+}
+```
+
+- `host` is a domain name, compared in lower case (an internationalized name may be written as is), or `*.` and one
+  for its subdomains: `*.example.com` does not cover `example.com` itself, so list both. No scheme, port, path or IP
+  address.
+- `paths` lists the paths of the host that open the app: a whole path (`/invite`), or the start of one ending in `*`
+  (`/orders/*`, which takes `/orders/42` but not `/orders`). `*` comes only at the end. Paths compare with their case,
+  after percent-decoding the link's (`/café/*` takes `/caf%C3%A9/1`): write them decoded, with no query or fragment.
+  Without `paths`, every path of the host opens the app, so a site whose app shows only some of its pages lists them:
+  the others (`/blog`, `/login`) keep opening in the browser.
+
+NSH lets through the `https` links of these hosts and paths only, with no port or user name, wherever they come from:
+another app can send any URL to the Android activity, and the core drops what the app does not claim. As with a scheme,
+anyone can make such a link, so check what it asks for. A link `nsh` cannot read whole (a key of a newer NSH, a path of
+another form, `"paths": []`) is left out with a warning, never claimed in part.
+
+The site proves that the app is its own, over HTTPS and without a redirect:
+
+- `/.well-known/apple-app-site-association` names the app as `<team id>.<app id>`, with `components` that match
+  `paths` (`{ "/": "/orders/*" }`): iOS checks the paths there, NSH checks `paths`, and a link reaches the app only when
+  both take it.
+- `/.well-known/assetlinks.json` names the package and the SHA-256 fingerprint of its signing certificate.
+
+Until it does, the system opens the links in the browser.
+
+| Platform | How the app claims its links |
+| --- | --- |
+| iOS | `applinks:<host>` in the `com.apple.developer.associated-domains` entitlement `nsh package` signs the app with, after those `ios.entitlements` lists; a device build's provisioning profile must grant Associated Domains. The link that launched the app and those that come while it runs |
+| macOS | The same entitlement, which macOS honors only under a provisioning profile: `nsh package`'s ad hoc signed app leaves it out, so list it in `macos.entitlements` and sign the app with a profile that grants it. The app then takes the links |
+| Android | An `ACTION_VIEW` intent filter with `android:autoVerify="true"` for each link, with its host as an `https` host and each path as an `android:path` (or `android:pathPrefix` for one ending in `*`), which Android verifies as the app installs; the activity runs as `singleTask`, so a link reaches the running app |
+| Web | The page is the link: `nsh package` leaves `links` out, with a warning |
+| Windows, Linux | No app links: the browser opens them, and `nsh package` leaves `links` out, with a warning |
+
+A Rust app's generated code passes the links to its root (`Root::links`).
+
 `nsh test` hands a test's app links: `App.open(entry, { url })` launches the app with one, and
 `app.openWithUrl(url)` opens one while it runs, both headless.
 
 An app that embeds NSH owns its schemes and hands a URL to its view: `AppView.open_url` (Linux, iOS), `NshAppView.openURL`
-(Swift), `NshView.openUrl` or `NshView.handleUrlSchemeIntent` (Android).
+(Swift), `NshView.openUrl` or `NshView.handleUrlSchemeIntent` (Android). A Universal Link reaches the embedding app's
+`scene(_:continue:)` as an activity: hand its `webpageURL` to `NshAppView.openURL` too, which checks it against the
+links the app claims.
 
 ### UrlScheme.url
 

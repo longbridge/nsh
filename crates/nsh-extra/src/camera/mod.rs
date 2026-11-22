@@ -42,7 +42,9 @@ use self::ios as platform;
 
 /// The code of a photo the system refused to take: the user does not let
 /// the app use the camera (Node's `EACCES`: the OS refused). Only the
-/// system's settings change that.
+/// system's settings change that:
+/// [`open_app_settings`](nsh_core::mobile::open_app_settings) takes the
+/// user to the app's page there.
 pub const DENIED: &str = "EACCES";
 
 /// The code of a photo where there is no camera to take one with.

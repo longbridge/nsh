@@ -973,6 +973,9 @@ pub(crate) struct RootConfig {
     /// `"schemes"`' schemes (checked, lower case): the URL schemes the
     /// app claims.
     url_schemes: Vec<String>,
+    /// `"links"` as `{"links": [...]}` (JSON, checked: those it cannot read
+    /// whole left out): the web links that open the app.
+    links: Option<String>,
     /// `"window"` (JSON, checked): the main window's launch options.
     window: Option<String>,
     /// `"application"` (JSON, checked): the app's lifecycle options.
@@ -1429,6 +1432,20 @@ fn root_config(
     if nsh_core::file_type::declares_file_types(config) {
         url_schemes.push(nsh_core::file_type::FILE_SCHEME.to_owned());
     }
+    let links = match config.get("links") {
+        None => None,
+        Some(v) => {
+            let (links, ignored) = nsh_core::url_scheme::AppLinks::from_json_lenient(
+                &serde_json::json!({ "links": v }),
+            );
+            for what in ignored {
+                crate::ui::warn(format_args!(
+                    "nsh.json: {what}, ignored (one of a newer NSH, or a typo)"
+                ));
+            }
+            (!links.web().is_empty()).then(|| links.to_json().to_string())
+        }
+    };
     let window = match config.get("window") {
         None => None,
         Some(v) => {
@@ -1477,6 +1494,7 @@ fn root_config(
         app_id: crate::package::app_id(&dir.join("nsh.json")).ok(),
         status_bar,
         url_schemes,
+        links,
         window,
         application,
         capabilities,
@@ -3769,6 +3787,11 @@ fn root_fn(cfg: &str, krate: &str, root: &RootConfig) -> String {
             translations.to_string_lossy()
         ));
     }
+    // The web links first: `links_json` sets the app's links whole, and
+    // `url_schemes` then its schemes (with the core's own `file:`).
+    if let Some(links) = &root.links {
+        make.push_str(&format!("\n        .links_json({links:?})"));
+    }
     if !root.url_schemes.is_empty() {
         make.push_str(&format!("\n        .url_schemes({:?})", root.url_schemes));
     }
@@ -4533,6 +4556,7 @@ mod tests {
                 app_id: None,
                 status_bar: None,
                 url_schemes: Vec::new(),
+                links: None,
                 window: None,
                 application: None,
                 capabilities: None,
@@ -4793,6 +4817,7 @@ mod tests {
                 app_id: Some("com.example.app".into()),
                 status_bar: Some(r#"{"foreground":"light","hidden":false}"#.into()),
                 url_schemes: vec!["myapp".into()],
+                links: Some(r#"{"links":[{"host":"example.com","paths":["/orders/*"]}]}"#.into()),
                 window: Some(
                     r#"{"defaultSize":{"width":900,"height":600},"title":"Notes"}"#.into(),
                 ),
@@ -4812,12 +4837,18 @@ mod tests {
             ".status_bar(",
             ".app_id(\"com.example.app\")",
             ".url_schemes([\"myapp\"])",
+            r#".links_json("{\"links\":[{\"host\":\"example.com\",\"paths\":[\"/orders/*\"]}]}")"#,
             r#".app_info_json("{}")"#,
             ".status_bar(nsh_core::StatusBarSetting::default().foreground(nsh_core::StatusBarStyle::Light).hidden(false))",
             r#".main_window_json("{\"defaultSize\":{\"width\":900,\"height\":600},\"title\":\"Notes\"}")"#,
         ] {
             assert!(code.contains(line), "no {line:?} in\n{code}");
         }
+        // The web links, then the schemes, which `links_json` would reset.
+        assert!(
+            code.find(".links_json(") < code.find(".url_schemes("),
+            "{code}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -4918,6 +4949,7 @@ mod tests {
                 app_id: None,
                 status_bar: None,
                 url_schemes: Vec::new(),
+                links: None,
                 window: None,
                 application: None,
                 capabilities: None,
@@ -5915,6 +5947,7 @@ panic = \"abort\"
                 app_id: None,
                 status_bar: None,
                 url_schemes: Vec::new(),
+                links: None,
                 window: None,
                 application: None,
                 capabilities: None,

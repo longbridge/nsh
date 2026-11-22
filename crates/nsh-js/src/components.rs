@@ -21,13 +21,15 @@ use std::{
     cell::{Cell, RefCell},
     ffi::{CString, c_int},
     panic::{AssertUnwindSafe, catch_unwind},
+    rc::Rc,
     sync::Arc,
 };
 
 use nsh_core::{
     Command, EventKind, Op, Prop,
     element::{
-        ComponentSpec, FunctionCall, JsEvent, JsIn, JsResult, ModuleSpec, PropKind, RustCall,
+        ComponentSpec, FunctionCall, JsEvent, JsIn, JsResult, ModuleSpec, PropDecode, PropKind,
+        RustCall,
     },
 };
 use rquickjs::qjs;
@@ -63,6 +65,20 @@ pub(crate) struct Components {
     /// `(read) => props` reading the latest value of signal `read`, made
     /// the first time a component's function renders (owned).
     props_of: Cell<Option<JsValue>>,
+    /// The props each component's effect reads ([`props_run`]), by spec
+    /// index, made the first time it runs: its own value and renderer
+    /// props and the host props it does not declare, with their names'
+    /// atoms (owned), so a run allocates nothing for its keys.
+    prop_keys: RefCell<Vec<Option<Rc<[PropKey]>>>>,
+}
+
+/// A prop a component's effect reads.
+struct PropKey {
+    name: &'static str,
+    /// `name`'s atom (owned by [`Components`]).
+    atom: qjs::JSAtom,
+    /// Its decoder; `None` for a host prop.
+    decode: Option<PropDecode>,
 }
 
 /// What a component's own function rendered for a key: JS's holder, the
@@ -95,6 +111,12 @@ impl Components {
             // SAFETY: as above.
             unsafe { qjs::JS_FreeValue(raw, f) };
         }
+        for keys in self.prop_keys.borrow_mut().drain(..).flatten() {
+            for key in keys.iter() {
+                // SAFETY: atoms the table owned.
+                unsafe { qjs::JS_FreeAtom(raw, key.atom) };
+            }
+        }
     }
 }
 
@@ -116,6 +138,17 @@ fn get(cx: *mut JsContext, obj: JsValue, key: &str) -> JsValue {
             return UNDEFINED;
         }
         qjs::JS_GetPropertyStr(cx, obj, k.as_ptr())
+    }
+}
+
+/// `obj[atom]` (undefined for non-objects).
+fn get_atom(cx: *mut JsContext, obj: JsValue, atom: qjs::JSAtom) -> JsValue {
+    // SAFETY: a property read of a live value.
+    unsafe {
+        if !qjs::JS_IsObject(obj) {
+            return UNDEFINED;
+        }
+        qjs::JS_GetProperty(cx, obj, atom)
     }
 }
 
@@ -815,10 +848,55 @@ pub(crate) fn component(
 }
 
 fn spec_of(cx: *mut JsContext, data: *mut JsValue) -> Arc<ComponentSpec> {
+    spec_at(cx, spec_index(cx, data))
+}
+
+fn spec_at(cx: *mut JsContext, index: usize) -> Arc<ComponentSpec> {
+    components(cx).specs.borrow()[index].clone()
+}
+
+/// The spec index a component's function data holds.
+fn spec_index(cx: *mut JsContext, data: *mut JsValue) -> usize {
     let mut index = 0f64;
     // SAFETY: one data value, a number (`component`).
     unsafe { qjs::JS_ToFloat64(cx, &mut index, *data) };
-    components(cx).specs.borrow()[index as usize].clone()
+    index as usize
+}
+
+/// The props the effect of the component of spec `index` reads, made the
+/// first time; `None` with an exception pending when an atom could not be
+/// made (nothing is kept, so the next run tries again).
+fn prop_keys(cx: *mut JsContext, index: usize, spec: &ComponentSpec) -> Option<Rc<[PropKey]>> {
+    let c = components(cx);
+    if let Some(Some(keys)) = c.prop_keys.borrow().get(index) {
+        return Some(keys.clone());
+    }
+    let mut keys: Vec<PropKey> = Vec::new();
+    let names = spec
+        .props
+        .iter()
+        .filter(|p| matches!(p.kind, PropKind::Value | PropKind::Renderer))
+        .map(|p| (p.name, p.decode))
+        .chain(spec.host_props().map(|h| (h, None)));
+    for (name, decode) in names {
+        // SAFETY: a new atom, owned by the table (or freed below).
+        let atom = unsafe { qjs::JS_NewAtomLen(cx, name.as_ptr().cast(), name.len() as _) };
+        if atom == qjs::JS_ATOM_NULL {
+            for key in &keys {
+                // SAFETY: the atoms made above.
+                unsafe { qjs::JS_FreeAtom(cx, key.atom) };
+            }
+            return None;
+        }
+        keys.push(PropKey { name, atom, decode });
+    }
+    let keys: Rc<[PropKey]> = keys.into();
+    let mut all = c.prop_keys.borrow_mut();
+    if all.len() <= index {
+        all.resize(index + 1, None);
+    }
+    all[index] = Some(keys.clone());
+    Some(keys)
 }
 
 /// A function returning `props[key]` (read when the renderer calls it).
@@ -1116,13 +1194,11 @@ unsafe extern "C" fn props_run(
 ) -> JsValue {
     // SAFETY: four data values (`render_component`).
     let (node, props, prev, index) = unsafe { (*data, *data.add(1), *data.add(2), data.add(3)) };
-    let spec = spec_of(cx, index);
-    let keys = spec
-        .props
-        .iter()
-        .filter(|p| matches!(p.kind, PropKind::Value | PropKind::Renderer))
-        .map(|p| (p.name, p.decode))
-        .chain(spec.host_props().map(|h| (h, None)));
+    let index = spec_index(cx, index);
+    let spec = spec_at(cx, index);
+    let Some(keys) = prop_keys(cx, index, &spec) else {
+        return qjs::JS_EXCEPTION;
+    };
     // Every prop is read and set whatever another one did, so each stays
     // tracked and the good ones reach the view; the first error is thrown
     // at the end (an uncatchable one, an interrupt, at once).
@@ -1137,8 +1213,9 @@ unsafe extern "C" fn props_run(
         first.get_or_insert(e);
         false
     };
-    for (i, (key, decode)) in keys.enumerate() {
-        let value = get(cx, props, key);
+    for (i, k) in keys.iter().enumerate() {
+        let (key, decode) = (k.name, k.decode);
+        let value = get_atom(cx, props, k.atom);
         // SAFETY: live values; the array keeps a dup of the new value.
         unsafe {
             if qjs::JS_IsException(value) {

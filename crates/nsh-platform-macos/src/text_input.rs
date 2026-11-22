@@ -1871,6 +1871,24 @@ define_class!(
                 self.ivars().forwarding.set(false);
             }
         }
+
+        /// A scroll over the padding goes to the editor, as one over its
+        /// text does: a multiline input scrolls its text, and what it does
+        /// not take goes up the editor's responder chain (through this
+        /// pad) to the input's views, never to a view under the input (a
+        /// web view the input floats over).
+        #[unsafe(method(scrollWheel:))]
+        fn scroll_wheel(&self, event: &NSEvent) {
+            // The editor is the topmost subview (the placeholder is below it).
+            match self.subviews().lastObject() {
+                Some(editor) if !self.ivars().forwarding.replace(true) => {
+                    editor.scrollWheel(event);
+                    self.ivars().forwarding.set(false);
+                }
+                // SAFETY: NSResponder's own handling (passes it up).
+                _ => unsafe { msg_send![super(self), scrollWheel: event] },
+            }
+        }
     }
 );
 

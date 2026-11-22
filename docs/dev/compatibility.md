@@ -66,7 +66,7 @@ good, whatever the version number says. Between releases, and before the first c
    and at run time alike, and the rest applies: `nsh-cli`'s `package::parse_config` (unknown keys through
    `serde_ignored`, values through `serde_path_to_error`, removed and read again), the
    `from_json_lenient` of `tailwind::Theme`, `nsh_base::Theme` and `StatusBarSetting`,
-   `url_scheme::schemes_from_json_lenient`, the bundler's `resolve`, `Capabilities::from_json_lenient` (a capability or `http` grant it cannot read is not granted, so
+   `url_scheme::schemes_from_json_lenient` and `AppLinks::from_json_lenient` (a web link it cannot read whole is left out whole, so nothing left out widens what opens the app), the bundler's `resolve`, `Capabilities::from_json_lenient` (a capability or `http` grant it cannot read is not granted, so
    nothing left out widens access). Only text that is no JSON object, a file `nsh.json` names that is missing,
    NSH's own `Info.plist` keys, a minimum system version (`MinimumOSVersion`, `LSMinimumSystemVersion`) that is no
    version string or is below the runtime's, an Android `targetSdk` below the minimum, and an `Info.plist`

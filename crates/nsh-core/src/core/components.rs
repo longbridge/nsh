@@ -593,8 +593,8 @@ struct Notifications {
 /// The links that open the app ([`crate::url_scheme`]).
 #[derive(Default)]
 struct UrlScheme {
-    /// The schemes the app claims (lower case).
-    schemes: Vec<String>,
+    /// The links the app claims: its schemes and web links.
+    links: crate::url_scheme::AppLinks,
     /// Links no listener took yet, at most [`crate::url_scheme::MAX_PENDING`].
     pending: std::collections::VecDeque<String>,
     /// The listener waiting for a link.
@@ -792,6 +792,10 @@ pub(super) struct Components {
     /// ([`Core::take_main_thread_tasks`]).
     main_thread: Vec<crate::main_thread::MainThreadTask>,
     next_url_open: u32,
+    /// The app's settings pages being opened (`AppSettings.open`), by
+    /// request id: their answers.
+    app_settings_opens: FxHashMap<u32, AnswerSlot<Result<bool, crate::mobile::AppSettingsError>>>,
+    next_app_settings_open: u32,
     /// Colors being picked on the screen, by request id: their answers.
     screen_colors: FxHashMap<u32, AnswerSlot<Option<crate::Hsla>>>,
     next_screen_color: u32,
@@ -935,6 +939,8 @@ impl Default for Components {
             asks_quit: false,
             main_thread: Vec::new(),
             next_url_open: 0,
+            app_settings_opens: FxHashMap::default(),
+            next_app_settings_open: 1,
             screen_colors: FxHashMap::default(),
             next_screen_color: 1,
             shares: FxHashMap::default(),
@@ -1139,6 +1145,37 @@ impl<M: TextEngine> Core<M> {
         stored.set(translations);
         if crate::i18n::text_locale(&stored.get(), env.locale, env.locale_settings.languages)
             != before
+        {
+            self.localize_menus();
+        }
+    }
+
+    /// Merges `map` into this surface's translations and updates menus if the
+    /// selected language changed.
+    pub(crate) fn add_translations(
+        &mut self,
+        map: std::collections::HashMap<String, std::collections::HashMap<String, String>>,
+    ) {
+        if map.is_empty() {
+            return;
+        }
+        let next = {
+            let _entered = self.components.runtime.enter();
+            crate::element::global::<crate::i18n::Translations>()
+                .get_untracked()
+                .extend(map)
+        };
+        self.set_translations(next);
+    }
+
+    /// Re-localizes menus when translations updated in place changed the
+    /// selected language.
+    fn translations_changed(&mut self, before: &crate::i18n::Translations) {
+        let _entered = self.components.runtime.enter();
+        let current = crate::element::global::<crate::i18n::Translations>().get_untracked();
+        let env = self.components.environment;
+        if crate::i18n::text_locale(&current, env.locale, env.locale_settings.languages)
+            != crate::i18n::text_locale(before, env.locale, env.locale_settings.languages)
         {
             self.localize_menus();
         }
@@ -6021,7 +6058,8 @@ impl<M: TextEngine> Core<M> {
         // app as a file ([`crate::file_type`]), never as a link.
         if !page && change.is_none() && crate::file_type::is_file_url(&url) {
             if !links
-                .schemes
+                .links
+                .schemes()
                 .iter()
                 .any(|s| s == crate::file_type::FILE_SCHEME)
             {
@@ -6050,7 +6088,7 @@ impl<M: TextEngine> Core<M> {
         let checked = if page {
             crate::url_scheme::check_page_url(&url)
         } else {
-            crate::url_scheme::check_url(&url, &links.schemes)
+            links.links.check(&url)
         };
         if let Err(dropped) = checked {
             log::warn!("link dropped: {dropped}");
@@ -6110,11 +6148,17 @@ impl<M: TextEngine> Core<M> {
     /// The schemes the app claims (`nsh.json` `schemes`,
     /// [`crate::url_scheme`]), from the app's own resources: the links the
     /// platform reports of other schemes are dropped. None by default.
+    /// [`Core::set_app_links`] sets them with the app's web links.
     pub fn set_url_schemes(&mut self, schemes: impl IntoIterator<Item = impl Into<String>>) {
-        self.components.url_schemes.schemes = schemes
-            .into_iter()
-            .map(|s| s.into().to_ascii_lowercase())
-            .collect();
+        self.components.url_schemes.links.set_schemes(schemes);
+    }
+
+    /// The links the app claims (`nsh.json` `schemes` and `links`,
+    /// [`crate::url_scheme::AppLinks`]), from the app's own resources: the
+    /// links the platform reports that are none of them (another scheme, an
+    /// `https` link of another host or path) are dropped. None by default.
+    pub fn set_app_links(&mut self, links: crate::url_scheme::AppLinks) {
+        self.components.url_schemes.links = links;
     }
 
     /// Answers what waits for the platform's [`EventKind::Notification`].
@@ -6419,6 +6463,8 @@ impl<M: TextEngine> Core<M> {
             Action::Appearance(appearance) => self.set_appearance(appearance),
             Action::Tokens(tokens) => self.set_tokens(tokens),
             Action::Translations(translations) => self.set_translations(translations),
+            Action::AddTranslations(map) => self.add_translations(map),
+            Action::TranslationsChanged(before) => self.translations_changed(&before),
             Action::Locale(locale) => self.components.locale_request = Some(locale),
             Action::MainThread(task) => self.components.main_thread.push(task),
             Action::BuiltInScrollbars(source, theme) => {
@@ -6603,6 +6649,35 @@ impl<M: TextEngine> Core<M> {
                 self.components.next_url_open = id.wrapping_add(1);
                 self.components.url_opens.insert(id, answer);
                 self.components.url_requests.push((id, url));
+            }
+            Action::OpenAppSettings(answer) => {
+                use crate::mobile::AppSettingsError;
+                // The app's settings page acts on the application as a
+                // whole (the embedding app's, embedded): an app declaring
+                // capabilities needs `application`.
+                let refused = if !self.access.allows_application() {
+                    Some(AppSettingsError::Denied)
+                } else if !self.components.environment.app_settings {
+                    Some(AppSettingsError::Unavailable)
+                } else {
+                    None
+                };
+                if let Some(error) = refused {
+                    answer.borrow_mut().deliver(Err(error));
+                    return;
+                }
+                let id = self.components.next_app_settings_open;
+                self.components.next_app_settings_open = id.wrapping_add(1);
+                self.components.app_settings_opens.insert(id, answer);
+                let _ = self.apply_op(Op::Command {
+                    id: crate::ROOT_ID,
+                    command: Command::OpenAppSettings { id },
+                });
+            }
+            Action::AppSettingsAvailable(answer) => {
+                let available =
+                    self.components.environment.app_settings && self.access.allows_application();
+                answer.borrow_mut().deliver(available);
             }
             Action::Speech(action) => self.speech_action(action),
             Action::Audio(action) => self.audio_action(action),
@@ -6835,7 +6910,14 @@ impl<M: TextEngine> Core<M> {
             Some(AuthSessionError::unavailable(format!(
                 "openAuthSession: no in-app sign-in here, and no link of `{scheme}:` can reach the app on this platform"
             )))
-        } else if !in_app && !self.components.url_schemes.schemes.contains(&scheme) {
+        } else if !in_app
+            && !self
+                .components
+                .url_schemes
+                .links
+                .schemes()
+                .contains(&scheme)
+        {
             // Only a link of a scheme the app claims brings the callback
             // back to it here; without one the session could never end.
             Some(AuthSessionError::unavailable(format!(
@@ -7627,6 +7709,21 @@ impl<M: TextEngine> Core<M> {
                     _ => false,
                 };
                 self.answer_open_url(request as u32, opened);
+                true
+            }
+            EventKind::OpenAppSettings if id == crate::ROOT_ID => {
+                let Some(request) = number("id") else {
+                    return false;
+                };
+                let opened = match payload {
+                    EventPayload::Map(entries) => entries
+                        .iter()
+                        .any(|(k, v)| *k == "opened" && *v == crate::PayloadValue::Bool(true)),
+                    _ => false,
+                };
+                if let Some(answer) = self.components.app_settings_opens.remove(&(request as u32)) {
+                    answer.borrow_mut().deliver(Ok(opened));
+                }
                 true
             }
             EventKind::ScreenColor if id == crate::ROOT_ID => {

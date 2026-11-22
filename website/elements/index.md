@@ -645,6 +645,7 @@ activates its pan, so drags inside scroll views leave the other axis to them
 | `accessibilityDescribedBy` | `.accessibility_described_by(..)` | `ViewRef \| null` | The element whose text describes this one: a field's error line ([Accessibility](../docs/accessibility.md#an-element-that-describes-another)). |
 | `accessibilityValue` | `.accessibility_value(..)` | `{ min?, max?, now?, text? }` | The value of a range or textual element. |
 | `accessibilityElementsHidden` | | `boolean` | Hides the view and its subtree from assistive technologies. |
+| `accessibilityLiveRegion` | `.accessibility_live_region(..)` | `"none" \| "polite" \| "assertive"` | How changes of the view are announced by themselves: TalkBack on Android, VoiceOver on macOS, the web's `aria-live`, a live region on Windows. |
 | `importantForAccessibility` | | `"auto" \| "yes" \| "no" \| "no-hide-descendants"` | Whether the view is exposed. |
 | `accessibilityActions` | | `{ name: string; label?: string }[]` | Custom actions offered to assistive technologies. |
 | `onAccessibilityAction` | `.on_accessibility_action(..)` | `(e: { actionName: string }) => void` | The user invoked one of `accessibilityActions`. |
@@ -668,7 +669,7 @@ their platform.
 |---|---|---|---|
 | `ripple` | `.ripple(Ripple { .. })` | `{ color?, borderless?, radius?, foreground? }` | The material ripple while pressed. |
 | `elevation` | `.elevation(px(2.0))` | `number` | The material shadow (points), from the view's shape. |
-| `accessibilityLiveRegion` | | `"none" \| "polite" \| "assertive"` | How changes of the view are announced to TalkBack. |
+| `accessibilityLiveRegion` | | `"none" \| "polite" \| "assertive"` | The same announcements on Android; the plain `accessibilityLiveRegion` prop does it on the other platforms too. |
 
 | `desktop` key | Rust | Type | Description |
 |---|---|---|---|

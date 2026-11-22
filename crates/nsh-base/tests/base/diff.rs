@@ -399,6 +399,21 @@ fn unified_shows_the_deleted_line_above_the_added_one() {
 }
 
 #[test]
+fn each_line_s_row_has_a_test_id_by_side_and_number() {
+    let mut app = start(HarnessProps {
+        layout: DiffLayout::Unified,
+        ..one_change()
+    });
+    see(&mut app, "line ten");
+    // Old and new line 10 share a number but not a name.
+    app.wait_for("id:diff-line:old:10").unwrap();
+    app.wait_for("id:diff-line:new:10").unwrap();
+    // A context row is named by its new number.
+    app.wait_for("id:diff-line:new:7").unwrap();
+    app.hover("id:diff-line:new:10").unwrap();
+}
+
+#[test]
 fn a_press_on_a_separator_shows_its_lines() {
     let mut app = start(one_change());
     see(&mut app, "⋯ 6");
