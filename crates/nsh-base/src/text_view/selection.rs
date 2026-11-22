@@ -84,6 +84,8 @@ pub(crate) fn selected(
     // copy leaves those out, so they may be missing from `text`.
     let masked = mask_atoms(doc, &mut |_, s| mask(s, ATOM)).plain_text();
     debug_assert_eq!(masked.len(), plain.len());
+    // A copy has the list items' markers, which the document's text has not.
+    let unmarked = without_list_markers(text);
     // A typeset formula in text copies as its source (`$tex$`, its
     // `copyText`), as an app's formula may.
     let mut next = 0;
@@ -95,10 +97,10 @@ pub(crate) fn selected(
     })
     .plain_text();
     debug_assert_eq!(formulas.len(), plain.len());
-    let found = locate(&plain, &shown(&plain), text, reported.start)
-        .or_else(|| locate(&plain, &sourced(&plain, &formulas), text, reported.start))
-        .or_else(|| locate(&plain, &shown(&masked), text, reported.start))
-        .map(|(from, to)| widen(&masked, text, from, to));
+    let found = locate(&plain, &shown(&plain), &unmarked, reported.start)
+        .or_else(|| locate(&plain, &sourced(&plain, &formulas), &unmarked, reported.start))
+        .or_else(|| locate(&plain, &shown(&masked), &unmarked, reported.start))
+        .map(|(from, to)| widen(&masked, &unmarked, from, to));
     let Some((from, to)) = found else {
         // Not found (text the document does not have, such as custom
         // rendered content or a marker made selectable by the app): the
@@ -125,6 +127,30 @@ pub(crate) fn selected(
         TextSelectionFormat::Html => to_html(&part),
         _ => to_markdown(&part),
     }
+}
+
+/// `text` (a copy) without the markers of its list items: a bullet, a
+/// number or a task's box, its own text before the item's text on its line
+/// and a tab after it, as a copy joins the texts of a line
+/// (`view.rs` puts the marker first in the item).
+fn without_list_markers(text: &str) -> std::borrow::Cow<'_, str> {
+    fn marker(line: &str) -> Option<usize> {
+        let (cell, _) = line.split_once('\t')?;
+        let cell_trimmed = cell.trim_end();
+        let is_marker = matches!(cell_trimmed, "•" | "◦" | "▪" | "☐" | "☑")
+            || cell_trimmed
+                .strip_suffix('.')
+                .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
+        is_marker.then_some(cell.len() + 1)
+    }
+    if !text.split('\n').any(|line| marker(line).is_some()) {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    let lines: Vec<&str> = text
+        .split('\n')
+        .map(|line| marker(line).map_or(line, |len| &line[len..]))
+        .collect();
+    std::borrow::Cow::Owned(lines.join("\n"))
 }
 
 /// What [`mask_atoms`] writes in place of each byte of an atom's text.
@@ -1243,6 +1269,31 @@ mod tests {
     fn ordered_list_keeps_its_numbers() {
         let md = "1. a\n2. b\n3. c";
         assert_eq!(sel(md, "b\nc", TextSelectionFormat::Markdown), "2. b\n3. c");
+    }
+
+    // Platforms report a list item's marker before its text, a tab between.
+    #[test]
+    fn list_markers_in_the_copy_are_left_out() {
+        let md = "- one\n- two\n\n1. first\n2. second\n\n- [ ] task";
+        assert_eq!(
+            sel(md, "e\n•\ttw", TextSelectionFormat::Markdown),
+            "- e\n- tw"
+        );
+        assert_eq!(
+            sel(md, "•\tone\n•\ttwo", TextSelectionFormat::Markdown),
+            "- one\n- two"
+        );
+        assert_eq!(
+            sel(md, "rst\n2.\tsec", TextSelectionFormat::Markdown),
+            "1. rst\n2. sec"
+        );
+        assert_eq!(
+            sel(md, "two\n1.\tfirst", TextSelectionFormat::Html),
+            "<ul><li>two</li></ul>\n<ol><li>first</li></ol>"
+        );
+        // A cell of a table row is no marker.
+        assert_eq!(without_list_markers("1\t2"), "1\t2");
+        assert_eq!(without_list_markers("1.5\tx"), "1.5\tx");
     }
 
     #[test]

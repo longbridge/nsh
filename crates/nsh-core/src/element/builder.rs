@@ -12,8 +12,8 @@ use super::{
 use crate::{
     AccessibilityProp, AccessibilityRole, AccessibilityState, AccessibilityValue, Bounds,
     ContextMenuEvent, EdgeInsets, EventKind, EventPayload, Hsla, ImageSource, KeyCapture, KeyEvent,
-    ListContentStyle, MouseEvent, NativeProp, NodeId, PinchEvent, PointerEvents, Points,
-    PressEvent, Prop, Size, Tag, TouchEvent, WheelEvent,
+    ListContentStyle, LiveRegion, MouseEvent, NativeProp, NodeId, PinchEvent, PointerEvents,
+    Points, PressEvent, Prop, Size, Tag, TouchEvent, WheelEvent,
     geometry::{DevicePixels, Radians},
     style::Color,
 };
@@ -1590,6 +1590,20 @@ pub trait Accessible: Element {
             super::host::set_in(
                 &mut a.props,
                 Prop::Accessibility(AccessibilityProp::Level((level > 0).then_some(level))),
+            )
+        });
+        self
+    }
+
+    /// How changes of it the screen reader announces by itself (TS:
+    /// `accessibilityLiveRegion`): TalkBack on Android, VoiceOver on macOS,
+    /// the web's `aria-live`, a live region on Windows; `"polite"` when the
+    /// user is idle, `"assertive"` right away.
+    fn accessibility_live_region(mut self, region: impl IntoReactive<LiveRegion>) -> Self {
+        self.node().bind_attr(region, |a, region| {
+            super::host::set_in(
+                &mut a.props,
+                Prop::Accessibility(AccessibilityProp::LiveRegion(region)),
             )
         });
         self

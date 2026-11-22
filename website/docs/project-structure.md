@@ -35,8 +35,9 @@ my-app/
 ├── nsh.json           name, id, version, icon, Tailwind theme, capabilities
 ├── tsconfig.json      TypeScript settings for editors
 ├── .gitignore         .nsh/ and target/
-├── components/        your own modules (any layout you like)
+├── src/               your own modules (any layout you like)
 │   └── Header.tsx
+├── ext/               the app's Rust, when it has any: one nshm crate per directory (nshm)
 ├── assets/
 │   ├── logo@2x.png    imported images
 │   └── Inter.ttf      imported fonts
@@ -44,7 +45,7 @@ my-app/
 └── .nsh/              generated: type declarations, development host builds, test entries, build output (.nsh/out)
 ```
 
-An app with both lists its crates in `"rust"` and has a TSX entry that imports them ([Building with Rust](./rust.md#extending-a-rust-app-with-tsx)).
+A TSX app extends itself with Rust through nshm crates of its own in `ext/`, listed in `"dependencies"` by path ([An app's own Rust: ext/](./nshm.md#an-apps-own-rust-ext)); `src/` holds its TSX, `ext/` its Rust. A Rust app can also list its crates in `"rust"` and add a TSX entry that imports them ([Building with Rust](./rust.md#extending-a-rust-app-with-tsx)).
 
 Every command takes the app's directory or its entry as its argument (`nsh run my-app`, `nsh run my-app/App.tsx`). The directory of `nsh.json` and the entry is the app's root: `nsh.json` is read from there, asset paths are relative to it, and `.nsh/` is written there. In a Rust app (`nsh.json` `"root"`), the directory runs the root component; naming a TSX entry runs that instead.
 
@@ -130,6 +131,7 @@ Every other key is optional; a TSX app may also leave out the four. A TSX app's 
 | `nsh` | string | every command | The NSH versions the app is written for, as a Cargo-style requirement, e.g. `">=0.5"` or `">=0.5, <0.7"`. Every command that takes the app checks the CLI against it first and stops with one message, `this app requires nsh >=0.5; this is nsh 0.4.0`, instead of type or build errors from the other version. A nightly counts as its release. |
 | `minRuntime` | string | `publish` | The lowest NSH runtime that runs the signed package, e.g. `0.2.0`. Default: the CLI's version ([Signed packages](./signed-packages.md#which-runtimes-run-a-package)). |
 | `schemes` | string[] | `package`, `run` | URL schemes that open the app, e.g. `["myapp"]` for `myapp://…` links, which reach [`UrlScheme`](../modules/nsh.md#urlscheme). Lowercase letters, digits, `+`, `-` and `.`; not one the system or browser owns (`https`, `file`, …). |
+| `links` | object[] | `package`, `run` | Web links that open the app (Universal Links, App Links): `[{ "host": "example.com", "paths": ["/orders/*"] }]`, `host` a domain name or `*.` and one for its subdomains, `paths` whole paths or starts ending in `*` (none: every path). Their `https` links reach [`UrlScheme`](../modules/nsh.md#web-links) as a scheme's do. iOS packages claim the hosts in their associated domains entitlement, Android packages in a verified intent filter per link. |
 | `fileTypes` | object[] | `package`, `run` | The file types the app opens, `[{ "name": "Video", "extensions": ["mp4"], "mimeTypes": ["video/mp4"] }]`, which packages declare to the system; the files reach [`Application.on("openFiles")`](../modules/nsh-desktop.md#opening-files). |
 | `handoff` | boolean | `package` | `true`: on iOS and macOS the address the app sets with [`UrlScheme.setUrl`](../modules/nsh.md#handoff) goes to the system, so Handoff continues it on the user's other devices; packages declare its activity type, `<id>.url`, in `NSUserActivityTypes`. |
 | `singleInstance` | boolean | `package` | `true`: the app runs once on Windows and Linux; a second launch hands its arguments and working directory to the running app and exits ([Single instance](../modules/nsh-desktop.md#single-instance)). |
@@ -266,7 +268,7 @@ Imports of `nsh` and `nsh/...` are not bundled: the runtime provides them native
 | `nsh/base` | The unstyled foundation of an app's UI: navigation stacks and their pages (`NavStack`, `NavPage`, `createNavStack`), dialogs (`Dialog`), a press target (`Button`), a text input (`Input`) and the system's alert dialog (`AlertDialog`); pages and dialogs set the status bar (`statusBar`) ([reference](../modules/nsh-base.md)) |
 | `nsh/mobile` | What iOS and Android have: `TabBar`, `InputAccessoryView` (iOS), `BackHandler` (Android) ([reference](../modules/nsh-mobile.md)) |
 | `nsh/desktop` | What macOS, Windows and Linux have: windows (`Window`, `currentWindow`, `windows`), `titleBar`, `displays`, `Menu`, `Tray`, `GlobalShortcut` ([reference](../modules/nsh-desktop.md)) |
-| `nsh/i18n` | The app's translations (its `locales/` files) and the language it shows: `t`, `setLocale`, `availableLocales` ([I18n](./i18n.md), [reference](../modules/nsh-i18n.md)) |
+| `nsh/i18n` | The app's translations (its `locales/` files or loaded at run time) and the language it shows: `t`, `setLocale`, `availableLocales`, `addTranslations` ([I18n](./i18n.md), [reference](../modules/nsh-i18n.md)) |
 | `nsh/updater` | A packaged app updates itself: `checkForUpdate`, `downloadUpdate`, `installAndRestart`, `installOnQuit` ([reference](../modules/nsh-updater.md)) |
 
 The [modules reference](../modules/index.md) documents each one. Importing a module NSH does not have (`nsh/foo`) is a build error. So is a name your code uses that the module does not export (`import { Buton } from "nsh/base"`): the error points at the import and names the closest export (``did you mean `Button`?``). Names used only as types are checked by `nsh check`.

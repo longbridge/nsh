@@ -1296,6 +1296,84 @@ impl From<crate::screen::ViewStyle> for ViewStyle {
     }
 }
 
+/// Where layout placed a view (`app.layout`), in the root's points.
+#[derive(Debug, Clone, PartialEq, JsObject)]
+#[non_exhaustive]
+pub struct ViewLayout {
+    /// Its left edge.
+    pub x: f64,
+    /// Its top edge.
+    pub y: f64,
+    /// Its width.
+    pub width: f64,
+    /// Its height.
+    pub height: f64,
+    /// It or a view around it is hidden (`visibility: hidden`).
+    pub hidden: bool,
+    /// A view around it that clips (`overflow: hidden`, a scroll view)
+    /// cuts part or all of it.
+    pub clipped: bool,
+}
+
+impl From<nsh_dev::protocol::ViewLayout> for ViewLayout {
+    fn from(l: nsh_dev::protocol::ViewLayout) -> Self {
+        ViewLayout {
+            x: f64::from(l.x),
+            y: f64::from(l.y),
+            width: f64::from(l.width),
+            height: f64::from(l.height),
+            hidden: l.hidden,
+            clipped: l.clipped,
+        }
+    }
+}
+
+/// A node of the accessibility tree (`app.accessibility`).
+#[derive(Debug, Clone, PartialEq, JsObject)]
+#[non_exhaustive]
+pub struct AccessibilityNode {
+    /// Its `role`, absent without one.
+    #[prop(skip_none)]
+    pub role: Option<String>,
+    /// Its `accessibilityLabel`.
+    #[prop(skip_none)]
+    pub label: Option<String>,
+    /// It takes no presses.
+    pub disabled: bool,
+    /// It is selected.
+    pub selected: bool,
+    /// Its checked state: `"true"`, `"false"` or `"mixed"`.
+    #[prop(skip_none)]
+    pub checked: Option<String>,
+    /// Whether it is expanded, for an expandable view.
+    #[prop(skip_none)]
+    pub expanded: Option<bool>,
+    /// Its `accessibilityLevel`.
+    #[prop(skip_none)]
+    pub level: Option<u32>,
+    /// Its `accessibilityDescription`.
+    #[prop(skip_none)]
+    pub description: Option<String>,
+    /// The views inside it with a role or a label, in tree order.
+    pub children: Vec<AccessibilityNode>,
+}
+
+impl From<nsh_dev::protocol::AccessibilityNode> for AccessibilityNode {
+    fn from(n: nsh_dev::protocol::AccessibilityNode) -> Self {
+        AccessibilityNode {
+            role: n.role,
+            label: n.label,
+            disabled: n.disabled,
+            selected: n.selected,
+            checked: n.checked,
+            expanded: n.expanded,
+            level: n.level,
+            description: n.description,
+            children: n.children.into_iter().map(Self::from).collect(),
+        }
+    }
+}
+
 /// What [`WaitOptions`] waits for.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PropEnum)]
 pub enum WaitState {
@@ -2307,6 +2385,30 @@ impl App {
     /// those the app set last, an animation's end value while it runs.
     pub fn view_style(&self, selector: String) -> Result<Option<ViewStyle>, JsError> {
         self.with(|app| app.view_style(&selector).map(|s| s.map(ViewStyle::from)))
+    }
+
+    /// Where layout placed the view `selector` names, in the root's
+    /// points: `x`, `y`, `width`, `height`, whether it is `hidden`, and
+    /// whether a view around it that clips cuts it (`clipped`); `null`
+    /// when none is on screen.
+    pub fn layout(&self, selector: String) -> Result<Option<ViewLayout>, JsError> {
+        self.with(|app| app.layout(&selector).map(|l| l.map(ViewLayout::from)))
+    }
+
+    /// The accessibility tree as assistive technologies read it: the
+    /// views on screen with a role or a label, each with `role`, `label`,
+    /// `disabled`, `selected`, `checked`, `expanded`, `level`,
+    /// `description` and the nodes inside it (`children`). With a
+    /// selector, from the view it names (`null` when none is on screen);
+    /// without, from a root that has no role.
+    pub fn accessibility(
+        &self,
+        selector: Option<String>,
+    ) -> Result<Option<AccessibilityNode>, JsError> {
+        self.with(|app| {
+            app.accessibility(selector.as_deref())
+                .map(|n| n.map(AccessibilityNode::from))
+        })
     }
 
     /// What the app's storage holds now.

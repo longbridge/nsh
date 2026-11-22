@@ -409,6 +409,8 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `app.value(selector)` | 输入框的内容，没有匹配时为 `null`。 |
 | `app.spanStyle(selector)` | 返回匹配到的第一个字符的解析样式（无界面测试和各个 `--target` 都支持）：`color`、可选的 `backgroundColor`、`fontSize`、`fontWeight`、`italic`、`underline` 和 `lineThrough`。颜色为 `#rrggbbaa`，字号单位为 pt。 |
 | `app.viewStyle(selector)` | 返回匹配视图由应用设置的样式（无界面测试和各个 `--target` 都支持）：可选的 `backgroundColor`（透明时不返回）、自身的 `opacity`，以及 `effectiveOpacity`（自身透明度乘以所有祖先视图的透明度）。颜色为 `#rrggbbaa`。没有匹配时返回 `null`，匹配不唯一时报错。 |
+| `app.layout(selector)` | 返回匹配视图的布局位置（根坐标，单位 pt）：`x`、`y`、`width`、`height`，`hidden`（自身或祖先为 `visibility: hidden`），以及 `clipped`（被 `overflow: hidden` 的祖先或滚动视图裁掉一部分）。屏幕上没有匹配时返回 `null`，匹配不唯一时报错。 |
+| `app.accessibility(selector?)` | 返回无障碍树：屏幕上带 `role` 或 `accessibilityLabel` 的视图，每个节点含 `role`、`label`、`disabled`、`selected`、`checked`（`"true"`、`"false"` 或 `"mixed"`）、`expanded`、`level`、`description` 和 `children`。传 selector 时从匹配视图开始（屏幕上没有匹配时返回 `null`）；不传时从没有 role 的根节点开始。 |
 | `app.storage()` | 应用存储当前保存的内容。 |
 | `await app.back()` | 像用户那样返回（导航栏的返回按钮、下滑关闭弹出页；弹出页里推入了页面时按它标题栏的返回按钮）：最新的模态窗口里（没有模态窗口时就在整个屏幕上）最内层、布局尺寸不为零（不在尺寸为零的标签页里）的导航栈弹出栈顶页面（`onDismiss`），栈顶页面设置了 `preventBack` 时改为询问它（`onBackRequest`）；没有可返回的栈时，最新的模态窗口请求关闭（`onRequestClose`）。没有可返回的内容时 reject。 |
 | `await app.forward()` | 像浏览器的前进按钮那样在浏览器历史中前进。仅限 `--target web`；其他情况下以 `ERR_NSH_TEST_UNSUPPORTED` reject。 |

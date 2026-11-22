@@ -78,8 +78,9 @@ trusted: every limit and check is enforced in Rust, never in JS.
   host sends them), `openUrl`
   (`openUrl` of `nsh`: `true`, or `{ "schemes": [...] }` for the schemes listed), `application` (what acts on the application as a whole:
   the application menu, the tray, global shortcuts, quitting, restarting and launching at login,
-  `nsh/desktop`'s; refused commands are dropped in the core with a warning, `setLaunchAtLogin` rejects with
-  `ERR_ACCESS_DENIED`; context menus show in the app's own view and windows the app opens are `windows`', so they need
+  `nsh/desktop`'s, and the app's page in the system's settings, `nsh/mobile`'s `AppSettings` (the embedding app's page
+  for an embedded view); refused commands are dropped in the core with a warning, `setLaunchAtLogin` and
+  `AppSettings.open` reject with `ERR_ACCESS_DENIED`; context menus show in the app's own view and windows the app opens are `windows`', so they need
   none), `homeDir` (`os.homedir()`, which fails with
   `ERR_ACCESS_DENIED` without it). `nsh`'s `Storage`
   is no capability: an app's storage holds only its own data, and the host decides where it is kept. Everything not listed is denied. `nsh.json`, bundles' `capabilities.json`, packages and embedders' grants are all

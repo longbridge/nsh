@@ -68,6 +68,8 @@ expect Hello: Hello
 expect Greet: Hello, Ada!
 expect Missing: en-US.missing
 expect Asked: 你好
+expect Extra: en-US.extra
+expect FrenchHello: Hello
 expect Locales: en zh zh-CN
 expect German: 1.234,5
 expect French: 1,234.5
@@ -78,9 +80,16 @@ expect Greet: 你好，Ada！
 tap id:device
 expect Shown: en-US
 expect Hello: Hello
+tap id:add-translations
+expect Extra: Loaded
+expect Hello: Hello
+expect Asked: 您好
+expect FrenchHello: Bonjour
+expect Locales: en fr zh zh-CN
 covers [nsh/i18n] t
 covers [nsh/i18n] setLocale
 covers [nsh/i18n] availableLocales
+covers [nsh/i18n] addTranslations
 # mod-picker
 tap id:case-mod-picker
 # a pick is a promise that never throws: options out of range reject it with
@@ -112,6 +121,15 @@ expect File: rejected ERR_ACCESS_DENIED
 expect Blank: rejected TypeError
 expect Long URL: rejected RangeError
 covers [nsh] Share
+# mod-app-settings
+tap id:case-mod-app-settings
+# no settings page of the app's own there: AppSettings.available() resolves
+# false and AppSettings.open() rejects as unavailable, never as opened.
+expect Available: false
+expect Settings: not opened
+tap id:settings
+expect Settings: rejected ERR_FEATURE_UNAVAILABLE_ON_PLATFORM
+covers [nsh/mobile] AppSettings
 # mod-speech
 tap id:case-mod-speech
 # nothing recognizes speech there: available() resolves false and a session
@@ -161,7 +179,8 @@ expect Early: 1.2.3
 covers [nsh] appInfo
 # mod-url-scheme
 tap id:case-mod-url-scheme
-# the domain claims `compat`: no link opened it, and the listener stops.
+# the domain claims `compat` and a web link: no link opened it, and the
+# listener stops.
 # The app's own `setUrl` is no change of the address it did not make.
 expect Links: none
 expect Listener: listening

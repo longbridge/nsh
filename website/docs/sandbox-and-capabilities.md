@@ -295,12 +295,13 @@ allowed holds for the whole app, so this capability is what decides which code r
 
 ### `application`
 
-`"application": true` lets the app act on the application as a whole on the desktop
-([`nsh/desktop`](../modules/nsh-desktop.md)): the application menu (`Menu.setApplicationMenu`), the tray, global
+`"application": true` lets the app act on the application as a whole: on the desktop
+([`nsh/desktop`](../modules/nsh-desktop.md)) the application menu (`Menu.setApplicationMenu`), the tray, global
 shortcuts, `Application.quit()`, `Application.setQuitMode()`, `Application.restart()` and
-`Application.setLaunchAtLogin()`. Without it they do
-nothing, `Application.launchAtLogin()` resolves `false` and `setLaunchAtLogin` rejects with `ERR_ACCESS_DENIED`
-(`permission` `"application"`). Context menus (`Menu.popup`) show in the app's own view, and windows the app opens are
+`Application.setLaunchAtLogin()`, and on iOS and Android the app's page in the system's settings
+([`AppSettings.open()`](../modules/nsh-mobile.md#appsettings) of `nsh/mobile`; for an embedded view, the embedding
+app's page). Without it they do nothing, `Application.launchAtLogin()` and `AppSettings.available()` resolve `false`,
+and `setLaunchAtLogin` and `AppSettings.open()` reject with `ERR_ACCESS_DENIED` (`permission` `"application"`). Context menus (`Menu.popup`) show in the app's own view, and windows the app opens are
 granted by [`windows`](#windows), so neither needs it.
 
 ### `homeDir`

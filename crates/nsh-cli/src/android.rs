@@ -240,6 +240,9 @@ pub(crate) struct Apk<'a> {
     /// URL schemes that open the app (nsh.json `schemes`): one
     /// `VIEW` intent filter.
     pub(crate) schemes: &'a [String],
+    /// Web links that open the app (nsh.json `links`): an intent filter
+    /// Android verifies (App Links) for each, with its host and paths.
+    pub(crate) links: &'a [nsh_core::url_scheme::WebLink],
     /// A Rust app: its `libnsh.so` has the root, which `AppActivity` runs
     /// instead of a bundle (manifest meta-data `com.longbridge.nsh.RUST`).
     pub(crate) rust: bool,
@@ -817,6 +820,15 @@ fn compile_resources(sdk: &Sdk, files: &[PathBuf], out: &Path) -> anyhow::Result
     Ok(flat)
 }
 
+/// `value` as the text of a manifest attribute (in double quotes).
+fn xml_attribute(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
 fn manifest_xml(apk: &Apk<'_>) -> String {
     let icon = match apk.icon {
         Some(Icon::Image(_)) => r#" android:icon="@mipmap/ic_launcher""#,
@@ -862,7 +874,7 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
         .collect();
     // A link opens the running app (`onNewIntent`), not another activity in
     // the caller's task.
-    let launch_mode = if apk.schemes.is_empty() {
+    let launch_mode = if apk.schemes.is_empty() && apk.links.is_empty() {
         ""
     } else {
         r#" android:launchMode="singleTask""#
@@ -879,6 +891,34 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
             "\n            <intent-filter>\n                <action android:name=\"android.intent.action.VIEW\" />\n                <category android:name=\"android.intent.category.DEFAULT\" />\n                <category android:name=\"android.intent.category.BROWSABLE\" />{data}\n            </intent-filter>"
         )
     };
+    // App Links: Android checks each host's `/.well-known/assetlinks.json`
+    // as the app installs, and opens their verified links in the app. A
+    // filter's `data` combine (each host with each path), so each link has
+    // its own: one host's paths are not another's.
+    let links: String = apk
+        .links
+        .iter()
+        .map(|link| {
+            let paths: String = link
+                .paths()
+                .iter()
+                .map(|path| {
+                    let (attribute, value) = match path.strip_suffix('*') {
+                        Some(start) => ("pathPrefix", start),
+                        None => ("path", path.as_str()),
+                    };
+                    format!(
+                        "\n                <data android:{attribute}=\"{}\" />",
+                        xml_attribute(value)
+                    )
+                })
+                .collect();
+            format!(
+                "\n            <intent-filter android:autoVerify=\"true\">\n                <action android:name=\"android.intent.action.VIEW\" />\n                <category android:name=\"android.intent.category.DEFAULT\" />\n                <category android:name=\"android.intent.category.BROWSABLE\" />\n                <data android:scheme=\"https\" />\n                <data android:host=\"{}\" />{paths}\n            </intent-filter>",
+                xml_attribute(link.host())
+            )
+        })
+        .collect();
     let elements = |list: &[String], indent: &str| -> String {
         list.iter()
             .map(|e| {
@@ -920,7 +960,7 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>{schemes}
+            </intent-filter>{schemes}{links}
         </activity>{components}
     </application>
 </manifest>
@@ -1645,6 +1685,7 @@ mod tests {
             queries: &[],
             application: &[],
             schemes: &[],
+            links: &[],
             rust,
             dark: false,
             fixed_appearance: false,
@@ -1854,6 +1895,52 @@ mod tests {
         assert!(manifest.contains("android.permission.RECORD_AUDIO"));
         assert!(!manifest.contains("android.permission.CAMERA"));
         assert!(!super::manifest_xml(&apk(false, false)).contains("RECORD_AUDIO"));
+    }
+
+    #[test]
+    fn each_web_link_has_a_filter_android_verifies_with_its_host_and_paths() {
+        let links = nsh_core::url_scheme::AppLinks::from_json(&serde_json::json!({
+            "links": [
+                { "host": "example.com", "paths": ["/orders/*", "/about", "/a&b"] },
+                { "host": "*.shop.example" }
+            ]
+        }));
+        let manifest = super::manifest_xml(&super::Apk {
+            links: links.web(),
+            ..apk(false, false)
+        });
+        let filters: Vec<&str> = manifest
+            .split("<intent-filter android:autoVerify=\"true\">")
+            .skip(1)
+            .map(|rest| rest.split("</intent-filter>").next().unwrap())
+            .collect();
+        assert_eq!(filters.len(), 2, "{manifest}");
+        for filter in &filters {
+            for line in [
+                r#"<action android:name="android.intent.action.VIEW" />"#,
+                r#"<category android:name="android.intent.category.DEFAULT" />"#,
+                r#"<category android:name="android.intent.category.BROWSABLE" />"#,
+                r#"<data android:scheme="https" />"#,
+            ] {
+                assert!(filter.contains(line), "{line} in {filter}");
+            }
+            // Only `https`: Android verifies no other.
+            assert!(!filter.contains(r#"android:scheme="http""#), "{filter}");
+        }
+        // The first host with its paths, and none of another host's.
+        assert!(filters[0].contains(r#"<data android:host="example.com" />"#));
+        assert!(filters[0].contains(r#"<data android:pathPrefix="/orders/" />"#));
+        assert!(filters[0].contains(r#"<data android:path="/about" />"#));
+        assert!(filters[0].contains(r#"<data android:path="/a&amp;b" />"#));
+        assert!(!filters[0].contains("shop.example"));
+        // Every path of the other.
+        assert!(filters[1].contains(r#"<data android:host="*.shop.example" />"#));
+        assert!(!filters[1].contains("android:path"), "{}", filters[1]);
+        // A link opens the running app, as a scheme's does.
+        assert!(manifest.contains(r#"android:launchMode="singleTask""#));
+        let none = super::manifest_xml(&apk(false, false));
+        assert!(!none.contains("autoVerify"), "{none}");
+        assert!(!none.contains("singleTask"), "{none}");
     }
 
     /// A runtime of one dex and one ABI and what `aapt2 link` writes, in a

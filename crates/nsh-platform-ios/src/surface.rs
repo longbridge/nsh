@@ -504,6 +504,11 @@ impl RootView {
             canvas_render: true,
             // `UIActivityViewController` (`crate::share`).
             share: true,
+            // `UIApplication.openSettingsURLString`. A Mac has no settings
+            // page of an iPhone or iPad app's own: Mac Catalyst and an iOS
+            // app running on a Mac ("Designed for iPad") report none.
+            app_settings: !cfg!(target_abi = "macabi")
+                && !objc2_foundation::NSProcessInfo::processInfo().isiOSAppOnMac(),
             // `ASWebAuthenticationSession` (`crate::auth_session`).
             auth_session: true,
             // The Speech framework fed by the microphone.

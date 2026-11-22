@@ -59,7 +59,7 @@ view()
 | `.on_accessibility_action(..)` | `onAccessibilityAction` | `(e: { actionName }) => void` | 执行了某个操作（Rust：操作名称）。 |
 | `.accessibility_elements_hidden(..)` | `accessibilityElementsHidden` | `boolean` | 对辅助技术隐藏该视图及其子树。 |
 | | `importantForAccessibility` | `"auto" \| "yes" \| "no" \| "no-hide-descendants"` | 视图（及其子树）是否暴露。 |
-| | `android={{ accessibilityLiveRegion }}` | `"none" \| "polite" \| "assertive"` | Android：视图的变化如何播报给 TalkBack。 |
+| `.accessibility_live_region(..)` | `accessibilityLiveRegion` | `"none" \| "polite" \| "assertive"` | 视图的变化如何自动播报：Android 上的 TalkBack、macOS 上的 VoiceOver、web 的 `aria-live`、Windows 上的实时区域。 |
 | `.test_id(..)` | `testID` | `string` | UI 测试用的标识（iOS 上的 accessibility identifier，Android 上的 resource id）；不会被朗读。 |
 
 给每个只有图标的控件加上标签：屏幕阅读器无法朗读一个符号或一张图片。标签保持简短，不要包含角色（写 "Play"，不要写 "Play button"）：角色会单独播报。
@@ -377,7 +377,7 @@ function Upload() {
 }
 ```
 
-播报那些用户否则会错过的变化：后台保存完成、在焦点之外出现的错误、计时结束。在 Android 上，给视图设置 `android={{ accessibilityLiveRegion: "polite" }}`，TalkBack 就会自动播报它的变化。
+播报那些用户否则会错过的变化：后台保存完成、在焦点之外出现的错误、计时结束。给视图设置 `accessibilityLiveRegion: "polite"`，屏幕阅读器就会自动播报它的变化——Android 上的 TalkBack、macOS 上的 VoiceOver、web 上的 `aria-live`、Windows 上的实时区域（`"assertive"` 不等用户空闲，立即朗读）。
 
 在 macOS 和 Web 上，警告（`.role(AccessibilityRole::Alert)`、`role="alert"`）会自己被读出：出现时、以及内容变化时，读它的标签，没有标签就读其中的文字，并打断屏幕阅读器正在读的内容。带这个角色显示的错误在这两个平台上不必再自己播报；在 macOS 上，同一次更新里播报的相同文字只读一次。在其他平台上，仍要自己播报。
 
