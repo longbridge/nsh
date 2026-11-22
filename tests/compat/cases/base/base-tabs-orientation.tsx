@@ -9,7 +9,11 @@ import { Tab, Tabs } from "nsh/base";
 function List(props: { name: string; orientation?: "horizontal" | "vertical" }) {
   const selected = signal("one");
   const tab = (value: string) => (
-    <Tab selected={selected() === value} onPress={() => selected.set(value)}>
+    <Tab
+      testID={`${props.name.toLowerCase()}-${value}`}
+      selected={selected() === value}
+      onPress={() => selected.set(value)}
+    >
       <Text>{`${props.name} ${value}`}</Text>
     </Tab>
   );

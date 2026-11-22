@@ -1413,26 +1413,32 @@ expect Default selected: one
 expect Row selected: one
 expect Column selected: one
 # A list with no `orientation` moves with both pairs, as before, and
-# reports no orientation.
-key tab
+# reports no orientation. The base app runs on iOS, where Tab does not
+# stop at views, so the focus reaches the tab through a focus event.
+event id:default-one onFocus
 key right
 expect Default selected: two
 key down
 expect Default selected: three
 key up
 expect Default selected: two
-# `"horizontal"` moves with Left and Right; Up and Down are the page's.
-key tab
+# `"horizontal"` moves with Left and Right; Up and Down are the page's:
+# after the key settles, the tab the other pair would reach is absent.
+event id:row-one onFocus
 key right
 expect Row selected: two
 key down
+wait 300
 expect Row selected: two
+absent Row selected: three
 # `"vertical"` moves with Up and Down; Left and Right are the page's.
-key tab
+event id:column-one onFocus
 key down
 expect Column selected: two
 key right
+wait 300
 expect Column selected: two
+absent Column selected: three
 covers [props] Tabs.orientation
 
 # base-toggle
