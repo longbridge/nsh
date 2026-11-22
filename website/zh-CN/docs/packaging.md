@@ -260,7 +260,9 @@ Rust 通过 JNI 可以调用大多数 Android API，但有些 API 需要应用�
 供 `ServiceLoader` 读取的 `META-INF/services/...`）放到包的根目录。dex 文件按原样放入，不经过 `d8` 合并，所以它和 jar 里重复定义的类在打包时不会被发现。同一个文件被列出两次或被两个 crate
 列出时只放入一次；两个不同的文件定义了同一个类时构建会停止，并指出这两个文件。不列出任何库的应用照旧打包，不会运行 `d8`。
 
-这些库都是本地文件：NSH 不下载它们，也不解析 Maven 依赖，所以 SDK 依赖的库也要一并列出。
+这些库都是本地文件：NSH 不下载它们，也不解析 Maven 依赖，所以 SDK 依赖的库也要一并列出。第三方工具 [nsh-maven](https://github.com/SuperNSH/maven)
+会从 Maven 仓库解析一个库及其依赖（`nsh-maven add com.google.firebase:firebase-messaging:26.0.1`），把文件下载到应用中并在这里列出；
+加上 `--crate` 时则列在 nshm crate 的 `Cargo.toml` 里。
 
 Android 库（`.aar`）带来的不只是类（类按 jar 的方式处理）：它的原生库（`jni/<abi>/*.so`）按包含的 ABI 放入，和 NSH 自己的一样不压缩存放；
 它的 assets 和应用自己的 assets 放在一起；它的资源（`res/`）并入包里的资源，库的代码照它构建时那样通过自己的 `R` 类读取；它 manifest 里的权限、功能、`<queries>` 和组件并入应用的 manifest，相对类名（`.PushService`）
