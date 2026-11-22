@@ -1,7 +1,8 @@
 //! The platform's services for Rust components on the engine: the fonts
 //! the UI sets' crates ship are registered before the first render, tasks
 //! wait for display frames, components set the layout direction and read
-//! the pixel ratio, the device, the locale and whether the app is in use;
+//! the pixel ratio, the device, the locale and whether the app is in use,
+//! and their language reaches the platform's own words;
 //! they speak, move the screen reader and set the status bar with their
 //! dialogs; they read the desktop window's state, a move once it stops,
 //! and the displays.
@@ -715,6 +716,66 @@ fn components_speak_move_the_reader_and_set_the_status_bar() {
     );
     // The reader's focus went to the note's view.
     assert_eq!(focused[0].0, texts["The note"]);
+}
+
+/// Shows the app in Traditional Chinese, or the user's language again.
+#[component]
+fn AppLanguage() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(text("Chinese").on_press(|_: &()| {
+            nsh_core::i18n::set_locale(Some(Locale::parse("zh-Hant-TW").unwrap()))
+        }))
+        .child(text("System").on_press(|_: &()| nsh_core::i18n::set_locale(None)))
+}
+
+#[test]
+fn the_app_language_reaches_the_platform_state_words() {
+    let (engine, rx, _) = start::<AppLanguage>(Environment::default());
+    let mut texts = HashMap::new();
+    // Presses the text `label` (none: only the first render) and returns
+    // the languages of the app's text sent to the platform since.
+    let mut step = |press: Option<&str>| {
+        if let Some(label) = press {
+            engine
+                .control()
+                .dispatch_event(texts[label], EventKind::Press, EventPayload::None);
+        }
+        let mut sent = Vec::new();
+        while let Ok(batch) = rx.recv_timeout(Duration::from_millis(300)) {
+            for item in batch.items {
+                match item {
+                    MountItem::Text { id, text, .. } => {
+                        texts.insert(text.text.clone(), id);
+                    }
+                    MountItem::Command {
+                        id,
+                        command: Command::TextLocale(locale),
+                    } => {
+                        assert_eq!(id, ROOT_ID);
+                        sent.push(locale.to_string());
+                    }
+                    _ => {}
+                }
+            }
+        }
+        sent
+    };
+    // The user's English is the platform's own default: nothing is sent.
+    assert_eq!(step(None), Vec::<String>::new());
+    // The app picks its language whatever the user's (the system's English
+    // stays the user's).
+    assert_eq!(step(Some("Chinese")), ["zh-Hant-TW"]);
+    assert_eq!(step(Some("Chinese")), Vec::<String>::new());
+    assert_eq!(step(Some("System")), ["en-US"]);
+    // The user's language changes while the app follows it.
+    engine.control().set_environment(Environment {
+        locale: Locale::parse("ja-JP").unwrap(),
+        ..Environment::default()
+    });
+    assert_eq!(step(None), ["ja-JP"]);
+    // The app's choice wins over the user's language.
+    assert_eq!(step(Some("Chinese")), ["zh-Hant-TW"]);
 }
 
 /// Shows the window's x, mode and whether it is minimized, and how many

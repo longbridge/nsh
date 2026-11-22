@@ -247,7 +247,7 @@ impl<M: TextEngine> Core<M> {
                 let mut placed = *self.layout.unrounded_layout(layout);
                 placed.location = at;
                 self.layout.set_unrounded(layout, placed);
-                self.emit_frames_in(bar, false, taffy::Point::ZERO);
+                self.emit_frames_in(bar, false, super::Origin::default());
             }
         }
     }
