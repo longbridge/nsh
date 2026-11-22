@@ -12283,11 +12283,12 @@ fn nest(
     Ok(())
 }
 
-/// Runs `f` on a thread with the engine thread's stack, which the depth
-/// quota is sized for (a test thread's is smaller).
+/// Runs `f` on a thread with room for the depth quota's recursion, sized
+/// past the engine's own (`a test thread's is smaller`, and a Windows
+/// debug build drops a deep tree with deeper frames than a release one).
 fn on_engine_stack(f: impl FnOnce() + Send + 'static) {
     std::thread::Builder::new()
-        .stack_size(8 << 20)
+        .stack_size(64 << 20)
         .spawn(f)
         .unwrap()
         .join()
