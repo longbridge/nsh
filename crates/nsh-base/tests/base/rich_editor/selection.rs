@@ -296,6 +296,25 @@ fn backspace_deletes_a_selection_across_blocks() {
     see(&mut app, "Sel 2-2");
 }
 
+/// Notes on `session` for each transaction that sets the selection whether
+/// it carries prosemirror-view's `pointer` meta.
+pub(super) fn note_pointer(session: &EditorSession) -> Arc<Mutex<Vec<bool>>> {
+    let noted = Arc::new(Mutex::new(Vec::new()));
+    let note = noted.clone();
+    session.set_dispatch_transaction(Some(Arc::new(
+        move |session: &EditorSession, tr: Transaction| {
+            if tr.selection_set() {
+                let pointer = tr.get_meta("pointer") == Some(&Value::Bool(true));
+                note.lock().unwrap().push(pointer);
+            }
+            if let Ok((state, applied)) = session.state().apply_transaction(tr) {
+                session.commit(state, &applied);
+            }
+        },
+    )));
+    noted
+}
+
 /// [`start_with`], noting for each transaction that sets the selection
 /// whether it carries prosemirror-view's `pointer` meta.
 pub(super) fn start_noting_pointer(
@@ -303,25 +322,9 @@ pub(super) fn start_noting_pointer(
     os: Os,
     idiom: Idiom,
 ) -> (Headless, Arc<Mutex<Vec<bool>>>) {
-    let noted = Arc::new(Mutex::new(Vec::new()));
-    let note = noted.clone();
-    let make = move || {
-        let session = session(doc.clone());
-        let note = note.clone();
-        session.set_dispatch_transaction(Some(Arc::new(
-            move |session: &EditorSession, tr: Transaction| {
-                if tr.selection_set() {
-                    let pointer = tr.get_meta("pointer") == Some(&Value::Bool(true));
-                    note.lock().unwrap().push(pointer);
-                }
-                if let Ok((state, applied)) = session.state().apply_transaction(tr) {
-                    session.commit(state, &applied);
-                }
-            },
-        )));
-        session
-    };
-    let app = start_session(make, os, os == Os::Ios, idiom);
+    let session = session(doc);
+    let noted = note_pointer(&session);
+    let app = start_session(move || session.clone(), os, os == Os::Ios, idiom);
     (app, noted)
 }
 
