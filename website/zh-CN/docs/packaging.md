@@ -56,7 +56,7 @@ nsh package App.tsx --target ios-simulator --run
 | `build` | number | `1` | 构建号（`CFBundleVersion`、`versionCode`）。每次上传新版本都要递增。 |
 | `icon` | string \| object | 无 | 一张正方形 PNG，最好是 1024×1024，路径相对于 `nsh.json`；也可按平台分别提供（[图标](#图标)）。 |
 
-`nsh.json` 还包含 `rust` 和 `root`（应用的 crate 和根组件，见[用 Rust 开发](./rust.md)）、`theme` 和 `appearance`、`tailwind`（见 [Tailwind](./tailwind.md)）、`capabilities`（见[沙箱与能力](./sandbox-and-capabilities.md)）、`android`（`targetSdk`、`usesCleartextTraffic`、`permissions`、`libraries` 和 `manifestPlaceholders`，见下文“目标 API 级别”“明文 HTTP”“权限”和“Java 代码”）、`ios` 和 `macos`（对应包的 `Info.plist` 键和 entitlements，见[下文](#infoplist-键与-entitlements)；`ios.extensions` 是[应用扩展](#应用扩展)；`macos.activationPolicy` 用于[菜单栏应用](./macos.md#菜单栏应用)）以及让桌面包自我更新、让所有原生包接收 [OTA 更新](./ota-updates.md)的 `updater`（见[应用更新](./app-updates.md)）；[项目结构](./project-structure.md#nshjson)列出了所有键。NSH 读不懂的键或值会给出警告并被略过：为更新的 NSH 写的应用在较旧的 NSH 上照样能构建，拼写错误也会在警告里看到。
+`nsh.json` 还包含 `rust` 和 `root`（应用的 crate 和根组件，见[用 Rust 开发](./rust.md)）、`theme` 和 `appearance`、`tailwind`（见 [Tailwind](./tailwind.md)）、`capabilities`（见[沙箱与能力](./sandbox-and-capabilities.md)）、`android`（`targetSdk`、`usesCleartextTraffic`、`permissions`、`libraries`、`manifestPlaceholders`、`queries` 和 `application`，见下文“目标 API 级别”“明文 HTTP”“权限”“Java 代码”和“组件与 queries”）、`ios` 和 `macos`（对应包的 `Info.plist` 键和 entitlements，见[下文](#infoplist-键与-entitlements)；`ios.extensions` 是[应用扩展](#应用扩展)；`macos.activationPolicy` 用于[菜单栏应用](./macos.md#菜单栏应用)）以及让桌面包自我更新、让所有原生包接收 [OTA 更新](./ota-updates.md)的 `updater`（见[应用更新](./app-updates.md)）；[项目结构](./project-structure.md#nshjson)列出了所有键。NSH 读不懂的键或值会给出警告并被略过：为更新的 NSH 写的应用在较旧的 NSH 上照样能构建，拼写错误也会在警告里看到。
 
 上表中的每个键都可以在命令行上覆盖，这在 CI 中很方便：
 
@@ -308,6 +308,34 @@ application = ['<provider android:name="com.example.push.Init" android:authoriti
 `nsh run --target android` 同样带上这些库：TSX 应用放在开发宿主里，Rust 应用放在它构建的包里。开发宿主对所有应用使用同一个包名，
 所以按包名校验应用的 SDK（推送服务的 SDK、地图 SDK）只能在应用自己的包里使用：用 `nsh package --target android --run` 试。
 TSX 开发宿主（TSX 应用的 `nsh run --target android`）不包含这些文件；Rust 应用的 `nsh run` 会构建它的包，因此会包含。
+
+### 组件与 queries
+
+由系统启动的类（`<service>`、`<receiver>`、`<provider>`）只有在 manifest 中声明后才能工作；SDK 也可能需要 `<meta-data>`，或者需要
+`<queries>` 条目才能看到其他应用。`android.application` 向 manifest 的 `<application>` 添加 `<service>`、`<receiver>`、`<provider>`、
+`<activity>` 和 `<meta-data>` 元素；`android.queries` 向 `<queries>` 添加 `<intent>`、`<package>` 和 `<provider>` 元素。每个条目是
+一个完整写出的元素，其中的 `${applicationId}` 会被替换为应用的包名，其他 `${name}` 替换为 `android.manifestPlaceholders` 给出的值。
+不是这样一个元素、带有 `tools:` 属性（它们属于库的 manifest），
+或者用了 NSH 自己声明的名字（它的 `com.longbridge.nsh.*` 类和 meta-data，以及它的文件 provider 所用的 `${applicationId}.files`
+authority）的条目，会被略过并给出警告：
+
+```json
+{
+  "android": {
+    "libraries": ["java/out/classes.dex"],
+    "application": [
+      "<receiver android:name=\"com.example.orders.SyncReceiver\" android:exported=\"false\"/>",
+      "<provider android:name=\"com.example.orders.Files\" android:authorities=\"${applicationId}.orders\" android:exported=\"false\"/>"
+    ],
+    "queries": ["<package android:name=\"com.example.wallet\"/>"]
+  }
+}
+```
+
+应用链接的 crate 也用同样的方式添加它们的条目（见[打包的应用需要什么](./nshm.md#打包的应用需要什么)），排在应用的之后。
+应用有 Android 库（`.aar`）时，这些条目会与库声明的内容合并：与库中某个元素同名的条目（例如给库声明的 provider 添加的
+`<meta-data>`）会并入该元素。`<application>` 元素自身的属性仍由 NSH 设置。开发宿主（TSX 应用的 `nsh run`，以及 `nsh test --target android`）声明 crate 的条目，
+但不声明应用自己的；Rust 应用的 `nsh run` 会构建它的包，因此会声明。
 
 ### Google Play：App Bundle
 
