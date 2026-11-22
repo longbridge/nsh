@@ -307,13 +307,19 @@ pub(crate) struct AndroidConfig {
     /// TLS. Off by default, as Android has it from API 28 on.
     #[serde(default)]
     pub(crate) uses_cleartext_traffic: bool,
-    /// Java libraries the app ships (`"libraries"`: jar and dex files,
+    /// Java libraries the app ships (`"libraries"`: jar, AAR and dex files,
     /// relative to `nsh.json`), before the ones its crates list
     /// ([`crate::module_meta`]): packaged after the runtime's
     /// `classes.dex`, so the app's class loader finds their classes as it
-    /// finds NSH's.
+    /// finds NSH's. An AAR listed here is the version of its library the
+    /// package takes, whichever its crates list.
     #[serde(default)]
     pub(crate) libraries: Vec<crate::android::Library>,
+    /// The values of the placeholders (`${name}`) the libraries' manifests
+    /// and the crates' manifest entries use: a service's key, for one.
+    /// Only the app sets them; `${applicationId}` is its package.
+    #[serde(default)]
+    pub(crate) manifest_placeholders: std::collections::BTreeMap<String, String>,
     /// Permissions the manifest declares besides the ones NSH declares
     /// itself (`<uses-permission>`): a bare name (`ACCESS_NETWORK_STATE`)
     /// is Android's, `android.permission.<name>`; a dotted one is written
@@ -1809,6 +1815,7 @@ fn package_android(
             camera: config.web_media("camera"),
             libraries: &config.android.libraries,
             library_cache: &library_cache,
+            manifest_placeholders: &config.android.manifest_placeholders,
             permissions: &permissions,
             queries: &config.android.queries,
             application: &config.android.application,

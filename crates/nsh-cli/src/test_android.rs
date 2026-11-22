@@ -35,7 +35,7 @@ pub(crate) fn starter(work: &Path, device: Option<&str>) -> anyhow::Result<Start
     let sdk = Arc::new(Sdk::find()?);
     let serial = crate::android::device(&sdk, device)?;
     // Tests of many apps share the host: it takes their crates' Java
-    // libraries, not one app's `nsh.json` ones.
+    // libraries, not one app's `nsh.json` ones, nor its placeholders.
     crate::run::install_android_host(
         &sdk,
         &serial,
@@ -43,6 +43,7 @@ pub(crate) fn starter(work: &Path, device: Option<&str>) -> anyhow::Result<Start
         &crate::runtime::test_android()?,
         &[],
         &[],
+        &Default::default(),
     )?;
     Ok(Arc::new(move |entry: &Path, options: &HostOptions| {
         start(&sdk, &serial, entry, options).map(|h| Box::new(h) as Box<dyn Host>)

@@ -31,9 +31,10 @@
 //! `android.queries`
 //! (`<intent>`, `<package>` and `<provider>` elements) and
 //! `android.application` (`<service>`, `<receiver>`, `<provider>`,
-//! `<activity>` and `<meta-data>` elements) and `android.libraries` (jar
-//! and dex files, relative to the directory of the crate's `Cargo.toml`,
-//! which [`crate::android`] packages) are read; other keys are
+//! `<activity>` and `<meta-data>` elements) and `android.libraries` (jar,
+//! AAR and dex files, relative to the directory of the crate's `Cargo.toml`,
+//! which [`crate::android`] packages) are read; `android.manifestPlaceholders`
+//! is an error (only the app sets them); other keys are
 //! reported and left out. Each Android entry is one balanced element of
 //! those, so a crate cannot close `<application>` or `<queries>` to write
 //! elsewhere in the manifest.
@@ -330,6 +331,12 @@ impl ModuleMeta {
                         .collect();
                     join_libraries(&mut self.android_libraries, libraries);
                 }
+                // A placeholder's value (a service's key) is the app's: a
+                // crate's default would ship in every app that uses it.
+                "manifestPlaceholders" => bail!(
+                    "{name}: {at} `android.manifestPlaceholders`: only the app sets placeholders, \
+                     in its nsh.json: their values are the app's"
+                ),
                 _ => warnings.push(format!(
                     "{name}: {at} `android.{key}` is not something this nsh reads: left out"
                 )),
@@ -824,6 +831,25 @@ mod tests {
         .to_string();
         assert!(
             error.starts_with("x: [package.metadata.nsh] `android.libraries`"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn only_the_app_sets_manifest_placeholders() {
+        let error = ModuleMeta::from_metadata(&metadata(&[(
+            "push",
+            json!({ "nsh": { "features": { "vendor": { "android": {
+                "manifestPlaceholders": { "PUSH_KEY": "default" },
+            } } } } }),
+            &["vendor"],
+        )]))
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.starts_with(
+                "push: [package.metadata.nsh.features.vendor] `android.manifestPlaceholders`: only the app sets"
+            ),
             "{error}"
         );
     }
