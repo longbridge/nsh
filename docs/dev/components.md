@@ -1066,12 +1066,15 @@ what changed.
 - A part that follows another element (`Tabs`' indicator): a view with `View::follow(move || list.current())`, absolute
   in the list and first among its children (drawn behind the tabs), `pointer-events: none`. The core spans the
   target's frame along the list's main axis after each layout (`core/follow.rs`: the frames from the target up to the
-  follower's parent summed, the follower's margins on that axis taken off; across it the follower's own layout), so a
+  follower's parent summed, through list cells, and scroll views and lists where they last reported being scrolled,
+  cut to their viewports; the follower's margins on that axis taken off; across it the follower's own layout), so a
   selection change is one frame item and its layout animation (`View::follow_transition`), and a resize moves it in
   the batch that moves the tabs. The ref is looked up as the core places it, so the target may render after the
   follower. `Tabs` hides it while no tab is selected (`Roving::current` is `None`) and keeps it on the first of
   several selected; it is `accessibility_elements_hidden` and takes no focus, so screen readers and the roving keys
   see the tabs alone. `ToggleGroup`'s segmented highlight, a pagination's marker or a listbox's highlight are the same view.
+  A highlight that slides over a virtual list's rows follows the row's element from outside the list (it follows the
+  list's scrolling a frame or so behind) or, over a plain scroll view's rows, from inside its content (moved natively).
 
 ## The JS face and the declarations
 

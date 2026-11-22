@@ -2272,6 +2272,9 @@ impl<M: TextEngine> Core<M> {
         if dependents {
             self.dependents_dirty(key);
         }
+        // Views that follow an element in what it scrolls go with it
+        // (`follow.rs`).
+        self.follow_changed |= moved && !self.followers.is_empty();
         // A link's hint placed where the pointer came over it would be left
         // behind by the content (`Core::overlay_scrolled`).
         if moved && !self.overlays.is_empty() {
@@ -10640,6 +10643,9 @@ impl<M: TextEngine> Core<M> {
             return;
         }
         node.spare = spare;
+        // A spare cell shows no row for views to follow (`follow.rs`).
+        self.follow_changed |= !self.followers.is_empty();
+        let node = &self.nodes[key as usize];
         if !node.created {
             // Its new view gets both (`ensure_created`).
             return;
