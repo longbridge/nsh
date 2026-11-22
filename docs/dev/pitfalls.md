@@ -64,7 +64,8 @@ Things that were found the hard way. Read the section of the area you change bef
   (`pixel`, `span`): `round(to) - round(from)` in points differs in its last bits with where the edges are, and a 28 point
   row at 2.625 (73.5 pixels) has every other edge on a half pixel, which an `f32`'s hair rounds either way. As a scroll
   moved DataTable's body a pixel, every frame in it was sent again (460–1000 mount items a frame on a Pixel 10 Pro instead
-  of 3); a half pixel is snapped first, so it always rounds up.
+  of 3); a half pixel is snapped first, so it always rounds up. A box thinner than a pixel never rounds to nothing
+  (`edges`): a 0.5 point rule at one pixel per point keeps a pixel inside its parent, and its neighbours still meet.
 - **The core keeps its own layout tree** (`core/layout_tree.rs`: Taffy's algorithms over the core's nodes through Taffy's low-level
   traits, as `TaffyTree` runs them, call for call). `TaffyTree::mark_dirty` stops at the first node whose cache is already empty, taking
   its ancestors for dirty too; nodes of a `display: none` subtree and absolutely positioned ones always have empty caches while the nodes
