@@ -823,6 +823,9 @@ topmost `<modal>`'s dialog window, else the activity's) as a finger's, with drag
 iOS; typing as a keyboard's `KeyEvent`s to the view focused in that window (`KeyCharacterMap`; what no key types is
 committed through the field's input connection), Ctrl+A first as a shortcut, as the window's input stage offers it;
 back is the activity's back press; dialogs are answered with a tap on the `AlertDialog`'s button (back to close it);
+the system menus of `MenuButton` and `ContextMenu` (`SystemMenus` popup windows) are chosen from with a tap on the
+labelled row in the menu's window once it stays put, submenu by submenu, and closed with the back key; a
+`MenuButton`'s button is pressed by the `testID` of the view it is in or by its label;
 screenshots copy the activity's window and every window over it (each shown `<modal>`'s dialog in order, then the
 system alert) from their surfaces with `PixelCopy` after a frame drawn with the current state, each composited at its
 place over its dim, so they hold what the GPU draws (video, filters, the backdrop's blur), on an emulator without a

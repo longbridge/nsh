@@ -2261,14 +2261,15 @@ impl App {
 
     /// Chooses the open context menu's action labelled `label` (a
     /// submenu's: `"Share > Mail"`), as a click on it: the app hears
-    /// `onMenu`, then the menu closes. On iOS it is a menu the system
-    /// shows (a `MenuButton`'s, a `ContextMenu`'s, a header button's),
-    /// chosen from as a tap does.
+    /// `onMenu`, then the menu closes. On iOS and Android it is a menu the
+    /// system shows (a `MenuButton`'s, a `ContextMenu`'s; on iOS a header
+    /// button's too), chosen from as a tap does.
     pub async fn choose_menu_item(this: Instance<Self>, label: String) -> Result<(), JsError> {
         step(&this, move |app| app.choose_menu_item(&label)).await
     }
 
-    /// Closes the open context menu with nothing chosen, as Escape does.
+    /// Closes the open context menu with nothing chosen, as Escape does (on
+    /// iOS a tap outside the system's menu, on Android the back button).
     pub async fn close_menu(this: Instance<Self>) -> Result<(), JsError> {
         step(&this, move |app| app.close_menu()).await
     }
