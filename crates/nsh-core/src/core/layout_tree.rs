@@ -392,7 +392,7 @@ impl<C> LayoutTree<C> {
         self.nodes[key(node)].children.len()
     }
 
-    #[cfg(test)]
+    /// `node`'s children, in order.
     pub(crate) fn children(&self, node: NodeId) -> &[NodeId] {
         &self.nodes[key(node)].children
     }
@@ -441,7 +441,7 @@ impl<C> LayoutTree<C> {
     }
 
     /// Sets `node`'s unrounded layout; a changed one makes it stale.
-    fn set_unrounded(&mut self, node: NodeId, layout: Layout) {
+    pub(crate) fn set_unrounded(&mut self, node: NodeId, layout: Layout) {
         let n = &mut self.nodes[key(node)];
         if n.unrounded != layout {
             n.unrounded = layout;

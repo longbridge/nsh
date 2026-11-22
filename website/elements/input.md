@@ -96,6 +96,7 @@ view styles apply):
 | `pasteBehavior` | `.paste_behavior(PasteBehavior::Report)` | `"insert" \| "report"` | `"insert"` | What a paste does: `"insert"` inserts the pasted text, `"report"` inserts nothing, for the app to handle what `onPaste` reports. Images and files are never inserted. |
 | `submitBehavior` | `.submit_behavior(SubmitBehavior::Submit)` | `"submit" \| "blurAndSubmit" \| "newline"` | `"blurAndSubmit"` (single line), `"newline"` (multiline) | What return does: `"submit"` reports `onSubmit` and keeps the focus, `"blurAndSubmit"` also unfocuses, `"newline"` inserts a line break (multiline; a single line submits). A multiline input that submits still takes line breaks from Shift+Return or Option / Alt+Return on hardware keyboards. `"submit"` keeps the keyboard up (e.g. to send several messages). |
 | `autoFocus` | `.auto_focus(..)` | `boolean` | `false` | Focused when it appears. |
+| `selectTextOnFocus` | `.select_text_on_focus(..)` | `boolean` | `false` | Selects the whole text when the input takes the focus (a click, Tab, `focus()`, `autoFocus`); a drag, a Shift-click or a double click keeps the user's selection. |
 
 ### Caret and selection
 
@@ -195,7 +196,7 @@ const height = signal(40);
 | `focus()` | `focus()` | Focuses the input and shows the keyboard. |
 | `blur()` | `blur()` | Unfocuses it. |
 | `setSelection(start, end?)` | `set_selection(start, end)` | Selects `start..end` (UTF-16 units); a caret when they are equal. |
-| `insertText(text)` | `insert_text(text)` | Inserts `text` in place of the selection as the user's edit: `maxLength` and the line rules apply, `onChange` reports it, and it is one step of the input's undo history. Linux, the web and headless tests only; other platforms do nothing yet and log a warning. |
+| `insertText(text)` | `insert_text(text)` | Inserts `text` in place of the selection as the user's edit: `maxLength` and the line rules apply, `onChange` reports it, and it is one step of the input's undo history. iOS, macOS, Linux, the web and headless tests; other platforms do nothing yet and log a warning. |
 
 Moving focus to the next field on return:
 

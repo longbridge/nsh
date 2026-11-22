@@ -10,12 +10,12 @@ use nsh_base::{
 };
 use nsh_core::{
     Color, MountItem, StyleKey,
-    element::{Root, Style},
+    element::Style,
     platform::{Idiom, Os},
     prelude::*,
 };
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
+use nsh_testing::{DragOptions, Headless};
 
 #[component]
 fn AnnotatedCode() -> impl IntoElement {
@@ -61,7 +61,10 @@ fn AnnotatedCode() -> impl IntoElement {
 
 #[test]
 fn annotated_code_shows_its_spans_and_hands_its_block_to_actions() {
-    let mut app = Headless::start(EngineConfig::new(Root::of::<AnnotatedCode>())).unwrap();
+    let mut app = Headless::start(EngineConfig::new(
+        nsh_testing::windowed_root::<AnnotatedCode>(),
+    ))
+    .unwrap();
     app.wait_for("prefix 日本語 suffix").unwrap();
     assert_eq!(
         app.screen().span_style("text:日本語").unwrap().font_weight,
@@ -78,7 +81,10 @@ fn annotated_code_shows_its_spans_and_hands_its_block_to_actions() {
 
 #[test]
 fn code_content_that_does_not_spell_the_code_is_ignored() {
-    let mut app = Headless::start(EngineConfig::new(Root::of::<AnnotatedCode>())).unwrap();
+    let mut app = Headless::start(EngineConfig::new(
+        nsh_testing::windowed_root::<AnnotatedCode>(),
+    ))
+    .unwrap();
     app.wait_for("literal <tag>").unwrap();
     assert!(!app.shows("replacement"));
 }
@@ -124,7 +130,8 @@ fn DefaultRoot() -> impl IntoElement {
 
 #[test]
 fn typed_root_styles_are_inherited_by_paragraphs() {
-    let mut app = Headless::start(EngineConfig::new(Root::of::<TypedRoot>())).unwrap();
+    let mut app =
+        Headless::start(EngineConfig::new(nsh_testing::windowed_root::<TypedRoot>())).unwrap();
     app.wait_for("Another paragraph").unwrap();
     for text in ["Hello", "Another paragraph"] {
         assert_eq!(app.screen().span_style(text).unwrap().font_size, px(11.0));
@@ -133,7 +140,10 @@ fn typed_root_styles_are_inherited_by_paragraphs() {
 
 #[test]
 fn root_classes_override_typed_parts_and_inline_styles_override_classes() {
-    let mut app = Headless::start(EngineConfig::new(Root::of::<RootOverrides>())).unwrap();
+    let mut app = Headless::start(EngineConfig::new(
+        nsh_testing::windowed_root::<RootOverrides>(),
+    ))
+    .unwrap();
     app.wait_for("Style wins").unwrap();
     assert_eq!(
         app.screen().span_style("Class wins").unwrap().font_size,
@@ -147,12 +157,49 @@ fn root_classes_override_typed_parts_and_inline_styles_override_classes() {
 
 #[test]
 fn root_without_typed_parts_keeps_the_default_typography() {
-    let mut app = Headless::start(EngineConfig::new(Root::of::<DefaultRoot>())).unwrap();
+    let mut app = Headless::start(EngineConfig::new(
+        nsh_testing::windowed_root::<DefaultRoot>(),
+    ))
+    .unwrap();
     app.wait_for("Default text").unwrap();
     assert_eq!(
         app.screen().span_style("Default text").unwrap().font_size,
         px(15.0)
     );
+}
+
+/// Text in colors the HTML gives it, and the same over the app's
+/// `textStyle` part.
+#[component]
+fn ColoredText() -> impl IntoElement {
+    let classes = TextViewClasses {
+        text_style: Some("text-[#0000ff]".into()),
+        ..Default::default()
+    };
+    view()
+        .child(text_view().html(
+            r##"<p>Plain <span style="color: #e54545">red words</span> and <font color="#00aa00">green words</font></p>"##,
+        ))
+        .child(
+            text_view()
+                .html(r##"<p>Then <span style="color: #e54545">the app's color</span></p>"##)
+                .classes(classes),
+        )
+}
+
+#[test]
+fn text_takes_the_documents_colors_under_the_apps_text_style_part() {
+    let mut app = Headless::start(EngineConfig::new(
+        nsh_testing::windowed_root::<ColoredText>(),
+    ))
+    .unwrap();
+    app.wait_for("Then the app's color").unwrap();
+    let color = |selector: &str| app.screen().span_style(selector).unwrap().color;
+    assert_eq!(color("text:red words"), Color(0xe545_45ff));
+    assert_eq!(color("text:green words"), Color(0x00aa_00ff));
+    // The text around keeps the view's color; the part's classes win.
+    assert_ne!(color("text:Plain"), Color(0xe545_45ff));
+    assert_eq!(color("text:the app's color"), Color(0x0000_ffff));
 }
 
 /// A table whose grid the app frames by `classes`: a border on every
@@ -169,7 +216,10 @@ fn FramedTable() -> impl IntoElement {
 
 #[test]
 fn a_tables_grid_takes_the_apps_frame() {
-    let mut app = Headless::start(EngineConfig::new(Root::of::<FramedTable>())).unwrap();
+    let mut app = Headless::start(EngineConfig::new(
+        nsh_testing::windowed_root::<FramedTable>(),
+    ))
+    .unwrap();
     let styles = Arc::new(Mutex::new(Vec::new()));
     let into = styles.clone();
     app.observe(move |_, batch| {
@@ -230,7 +280,7 @@ fn Links() -> impl IntoElement {
 
 #[test]
 fn tab_reaches_a_documents_links_in_order_and_return_presses_them() {
-    let mut config = EngineConfig::new(Root::of::<Links>());
+    let mut config = EngineConfig::new(nsh_testing::windowed_root::<Links>());
     config.environment.os = Os::MacOs;
     config.environment.idiom = Idiom::Desktop;
     let mut app = Headless::start(config).unwrap();
@@ -265,7 +315,7 @@ fn HoveredLinks() -> impl IntoElement {
 const LONG: &str = "https://example.com/archive/2026/11/09/a-very-long-article-name-that-goes-on-and-on?utm_source=newsletter&page=2";
 
 fn desktop<C: Component<Props = ()>>() -> Headless {
-    let mut config = EngineConfig::new(Root::of::<C>());
+    let mut config = EngineConfig::new(nsh_testing::windowed_root::<C>());
     config.clock = nsh_engine::Clock::manual(std::time::SystemTime::UNIX_EPOCH);
     config.environment.os = Os::Linux;
     config.environment.idiom = Idiom::Desktop;
@@ -314,7 +364,7 @@ fn a_long_links_hint_keeps_its_host_and_the_end_of_its_url() {
 
 #[test]
 fn a_phone_shows_no_hint_for_a_link() {
-    let mut config = EngineConfig::new(Root::of::<HoveredLinks>());
+    let mut config = EngineConfig::new(nsh_testing::windowed_root::<HoveredLinks>());
     config.environment.os = Os::Web;
     config.environment.idiom = Idiom::Phone;
     let mut app = Headless::start(config).unwrap();
@@ -373,7 +423,7 @@ fn LinkModifiers() -> impl IntoElement {
 
 #[test]
 fn a_link_press_reports_the_modifier_keys_held() {
-    let mut config = EngineConfig::new(Root::of::<LinkModifiers>());
+    let mut config = EngineConfig::new(nsh_testing::windowed_root::<LinkModifiers>());
     config.environment.os = Os::MacOs;
     config.environment.idiom = Idiom::Desktop;
     let mut app = Headless::start(config).unwrap();
@@ -411,7 +461,10 @@ fn WrappedInlineImage() -> impl IntoElement {
 
 #[test]
 fn an_image_in_a_wrapped_line_is_inside_the_column() {
-    let mut app = Headless::start(EngineConfig::new(Root::of::<WrappedInlineImage>())).unwrap();
+    let mut app = Headless::start(EngineConfig::new(nsh_testing::windowed_root::<
+        WrappedInlineImage,
+    >()))
+    .unwrap();
     app.wait_for("label:Dot").unwrap();
     let id = app.screen().id("label:Dot").unwrap();
     let nodes = app.screen().layout_nodes();
@@ -487,7 +540,10 @@ fn bounds_of(app: &Headless, test_id: &str) -> Bounds<Points> {
 
 #[test]
 fn an_apps_image_on_its_own_is_at_most_as_wide_as_the_text() {
-    let mut app = Headless::start(EngineConfig::new(Root::of::<WideCustomImages>())).unwrap();
+    let mut app = Headless::start(EngineConfig::new(nsh_testing::windowed_root::<
+        WideCustomImages,
+    >()))
+    .unwrap();
     app.wait_for("label:Inline").unwrap();
     for card in ["card:Alone", "card:Linked"] {
         let bounds = bounds_of(&app, card);
@@ -511,7 +567,8 @@ fn an_apps_image_on_its_own_is_at_most_as_wide_as_the_text() {
 
 #[test]
 fn a_wide_image_on_its_own_is_at_most_as_wide_as_the_text() {
-    let mut app = Headless::start(EngineConfig::new(Root::of::<WideImage>())).unwrap();
+    let mut app =
+        Headless::start(EngineConfig::new(nsh_testing::windowed_root::<WideImage>())).unwrap();
     app.wait_for("label:Wide").unwrap();
     let id = app.screen().id("label:Wide").unwrap();
     let bounds = app
@@ -542,8 +599,7 @@ mod streaming {
 
     use nsh_base::{MarkdownOptions, text_view};
     use nsh_core::{
-        ApproxTextEngine, Core, EventKind, EventPayload, MountItem, ROOT_ID, Size, element::Root,
-        prelude::*,
+        ApproxTextEngine, Core, EventKind, EventPayload, MountItem, ROOT_ID, Size, prelude::*,
     };
 
     thread_local! {
@@ -611,7 +667,7 @@ mod streaming {
     fn stream(source: &str) -> (Vec<Duration>, Vec<usize>) {
         REPLY.set(source.to_owned());
         let mut core = Core::new(ApproxTextEngine, Size::new(px(390.0), px(844.0)));
-        core.mount_root(&Root::new::<Streamed>(|| ()));
+        core.mount_root(&nsh_testing::windowed_root_with::<Streamed>(|| ()));
         let batch = core.commit().expect("the first frame");
         let host = batch
             .items
@@ -1058,7 +1114,10 @@ fn PressableTasks() -> impl IntoElement {
 
 #[test]
 fn a_pressed_task_box_reports_its_place_in_the_document_and_the_state_asked_for() {
-    let mut app = Headless::start(EngineConfig::new(Root::of::<PressableTasks>())).unwrap();
+    let mut app = Headless::start(EngineConfig::new(nsh_testing::windowed_root::<
+        PressableTasks,
+    >()))
+    .unwrap();
     app.wait_for("first").unwrap();
     app.press("label:second").unwrap();
     app.press("label:nested").unwrap();
@@ -1084,14 +1143,468 @@ fn NestedLists() -> impl IntoElement {
 
 #[test]
 fn a_lists_markers_come_before_their_items_in_tree_order() {
-    let mut app = Headless::start(EngineConfig::new(Root::of::<NestedLists>())).unwrap();
+    let mut app = Headless::start(EngineConfig::new(
+        nsh_testing::windowed_root::<NestedLists>(),
+    ))
+    .unwrap();
     app.wait_for("three").unwrap();
-    // A selection across the view takes the texts in this order: a drag
-    // from a number selects on into its item, and a copy reads each
-    // marker before its item's text and its nested list.
+    // Screen readers and tree traversal still see each marker before its
+    // item's text and nested list, even though markers stay out of text
+    // selection (`userSelect: "none"`).
     assert_eq!(
         app.screen().texts(),
         ["1.", "one", "2.", "two", "◦", "nested", "3.", "three"]
+    );
+}
+
+const REPRO_LIST_QUOTE: &str = "\
+- **不想辩论、礼貌结束话题版：**
+
+  > “每个人对安全感的定义不一样，你觉得岗位不动才稳，我觉得自己一直在涨本事才稳。”
+";
+
+#[component]
+fn ReproListQuote() -> impl IntoElement {
+    use nsh_base::{TextSelectionFormat, TextSelectionOptions, TextView, TextViewApi};
+    let doc_ref = component_ref::<TextView>();
+    let selected = signal(String::new());
+    let markdown = signal(String::new());
+    view()
+        .flex_col()
+        .p(px(16.0))
+        .gap(px(12.0))
+        .child(
+            text_view()
+                .component_ref(&doc_ref)
+                .selectable(true)
+                .markdown(REPRO_LIST_QUOTE)
+                .on_selection_change(move |e: &nsh_base::TextViewSelectionEvent| {
+                    selected.set(e.text.to_string());
+                    let md = doc_ref
+                        .api::<TextViewApi>()
+                        .map(|r| {
+                            r.selected_text(Some(TextSelectionOptions::format(
+                                TextSelectionFormat::Markdown,
+                            )))
+                        })
+                        .unwrap_or_default();
+                    markdown.set(md);
+                }),
+        )
+        .child(text(move || format!("Selected: {}", selected.get())))
+        .child(text(move || format!("Markdown: {}", markdown.get())))
+}
+
+#[test]
+fn list_item_blockquote_overshoot_drag_does_not_select_marker() {
+    let mut config = EngineConfig::new(nsh_testing::windowed_root::<ReproListQuote>());
+    config.environment.os = Os::MacOs;
+    config.environment.idiom = Idiom::Desktop;
+    // Wide enough for the blockquote to lay out on one line so `center()` lands
+    // in the middle of the quote and dragging `(+200, +40)` overshoots both its
+    // right and bottom edges.
+    config.viewport = Size::new(px(640.0), px(480.0));
+    let mut app = Headless::start(config).unwrap();
+    let quote = "“每个人对安全感的定义不一样，你觉得岗位不动才稳，我觉得自己一直在涨本事才稳。”";
+    app.wait_for(quote).unwrap();
+    // Tree/reading order puts the bullet before its item's paragraphs.
+    let doc_texts: Vec<&str> = app
+        .screen()
+        .texts()
+        .into_iter()
+        .take_while(|t| !t.starts_with("Selected:"))
+        .collect();
+    assert_eq!(doc_texts, ["•", "不想辩论、礼貌结束话题版：", quote]);
+    // Dragging inside the blockquote and slightly past its bottom/right must
+    // select only the blockquote text, never the bullet marker at top-left.
+    app.drag(
+        &format!("text:{quote}"),
+        point(px(220.0), px(40.0)),
+        DragOptions::default(),
+    )
+    .unwrap();
+    let chosen = app
+        .screen()
+        .texts()
+        .into_iter()
+        .find_map(|t| t.strip_prefix("Selected: "))
+        .unwrap_or_default()
+        .to_owned();
+    assert!(!chosen.is_empty(), "expected a non-empty selection");
+    assert!(
+        !chosen.contains('•'),
+        "list marker leaked into selection: {chosen:?}"
+    );
+    assert!(
+        quote.contains(&chosen),
+        "selection should stay inside the blockquote: {chosen:?}"
+    );
+    let md = app
+        .screen()
+        .texts()
+        .into_iter()
+        .find_map(|t| t.strip_prefix("Markdown: "))
+        .unwrap_or_default()
+        .to_owned();
+    // The selection's Markdown is the quote's line under its list item, not
+    // escaped plain text.
+    assert_eq!(md, format!("- > {chosen}"));
+}
+
+const KITCHEN_SINK: &str = "\
+# Heading
+
+- Bullet one
+  - Nested bullet
+- Bullet two
+
+1. First ordered
+2. Second ordered
+
+- [x] Done task
+- [ ] Open task
+
+> [!NOTE]
+> Alert body
+
+<details open>
+<summary>Toggle summary</summary>
+
+Details body
+
+</details>
+
+```rs
+let x = 1;
+```
+
+| ColA | ColB |
+| --- | --- |
+| Val1 | Val2 |
+
+Ref[^1]
+
+[^1]: Footnote body
+";
+
+#[component]
+fn KitchenSinkSelectable() -> impl IntoElement {
+    use nsh_base::{
+        TextSelectionFormat, TextSelectionOptions, TextView, TextViewApi, TextViewCodeAction,
+    };
+    let doc_ref = component_ref::<TextView>();
+    let selected = signal(String::new());
+    let markdown = signal(String::new());
+    let html = signal(String::new());
+    view()
+        .flex_col()
+        .p(px(16.0))
+        .gap(px(8.0))
+        .child(
+            text_view()
+                .component_ref(&doc_ref)
+                .selectable(true)
+                .markdown(KITCHEN_SINK)
+                .code_block_actions(vec![
+                    TextViewCodeAction::new("copy").with_label("Copy code"),
+                    TextViewCodeAction::new("run").with_label("Run code"),
+                ])
+                .render_table_actions(|_| text("TableAction"))
+                .on_selection_change(move |e: &nsh_base::TextViewSelectionEvent| {
+                    selected.set(e.text.to_string());
+                    if let Some(r) = doc_ref.api::<TextViewApi>() {
+                        markdown.set(r.selected_text(Some(TextSelectionOptions::format(
+                            TextSelectionFormat::Markdown,
+                        ))));
+                        html.set(r.selected_text(Some(TextSelectionOptions::format(
+                            TextSelectionFormat::Html,
+                        ))));
+                    }
+                }),
+        )
+        .child(text(move || format!("Selected: {}", selected.get())))
+        .child(text(move || format!("Markdown: {}", markdown.get())))
+        .child(text(move || format!("Html: {}", html.get())))
+}
+
+/// A text under a batch's selectable view: its content, its `userSelect`
+/// and its top in the view's points.
+struct AreaText {
+    text: String,
+    selectable: Option<bool>,
+    top: Points,
+}
+
+/// The texts under the selectable view of a first mount batch, in tree
+/// order, rebuilt from its `Insert`, `ViewProps`, `Text` and `Frame` items.
+fn selectable_area_texts(items: &[MountItem]) -> Vec<AreaText> {
+    use std::collections::HashMap;
+
+    use nsh_core::{AttributedText, NodeId};
+
+    let mut texts: HashMap<NodeId, &Arc<AttributedText>> = HashMap::new();
+    let mut frames: HashMap<NodeId, Bounds<Points>> = HashMap::new();
+    let mut children: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+    let mut area = None;
+    for item in items {
+        match item {
+            MountItem::Insert {
+                parent,
+                child,
+                before,
+            } => {
+                let kids = children.entry(*parent).or_default();
+                match before.and_then(|b| kids.iter().position(|&id| id == b)) {
+                    Some(at) => kids.insert(at, *child),
+                    None => kids.push(*child),
+                }
+            }
+            MountItem::ViewProps { id, props } if props.selectable_view => area = Some(*id),
+            MountItem::Text { id, text, .. } => {
+                texts.insert(*id, text);
+            }
+            MountItem::Frame { id, frame } => {
+                frames.insert(*id, *frame);
+            }
+            _ => {}
+        }
+    }
+    let area = area.expect("a selectable view");
+    let mut out = Vec::new();
+    let mut stack = vec![(area, Points::ZERO)];
+    while let Some((id, parent_top)) = stack.pop() {
+        let top = match id == area {
+            true => Points::ZERO,
+            false => parent_top + frames.get(&id).copied().unwrap_or_default().origin.y,
+        };
+        if let Some(t) = texts.get(&id) {
+            out.push(AreaText {
+                text: t.text.clone(),
+                selectable: t.selectable,
+                top,
+            });
+        }
+        if let Some(kids) = children.get(&id) {
+            stack.extend(kids.iter().rev().map(|&kid| (kid, top)));
+        }
+    }
+    out
+}
+
+/// Architectural invariant: every generated chrome/marker node in `TextView`
+/// carries `userSelect: "none"`, every selectable content node is in
+/// non-decreasing visual `top` order, and real drags across lists/tasks/
+/// alerts/code/footnotes produce clean text and structured Markdown/HTML.
+#[test]
+fn selectable_text_view_excludes_all_generated_chrome_and_keeps_visual_order() {
+    let mut config = EngineConfig::new(nsh_testing::windowed_root::<KitchenSinkSelectable>());
+    config.environment.os = Os::MacOs;
+    config.environment.idiom = Idiom::Desktop;
+    let mut app = Headless::start(config).unwrap();
+    app.wait_for("Footnote body").unwrap();
+
+    // The mounted tree and frames, straight from `Core`.
+    let mut core =
+        nsh_core::Core::new(nsh_core::ApproxTextEngine, Size::new(px(640.0), px(2000.0)));
+    core.mount_root(&nsh_core::element::Root::of::<KitchenSinkSelectable>());
+    let batch = core.commit().expect("initial batch");
+    let all_texts: Vec<(String, Option<bool>, Points)> = selectable_area_texts(&batch.items)
+        .into_iter()
+        .map(|t| (t.text, t.selectable, t.top))
+        .collect();
+
+    // 1. Every chrome/marker text MUST be excluded (`selectable == Some(false)`).
+    for chrome in [
+        "•",
+        "◦",
+        "1.",
+        "2.",
+        "✓",
+        "i",
+        "▾ ",
+        "Run code",
+        "TableAction",
+    ] {
+        let matches: Vec<_> = all_texts.iter().filter(|(t, _, _)| t == chrome).collect();
+        assert!(
+            !matches.is_empty(),
+            "expected chrome text {chrome:?} in {all_texts:?}"
+        );
+        for (t, sel, _) in matches {
+            assert_eq!(
+                *sel,
+                Some(false),
+                "chrome text {t:?} must have userSelect: none"
+            );
+        }
+    }
+
+    // 2. Every selectable text MUST appear in non-decreasing visual `top` order
+    // (no out-of-flow/absolute selectable element placed after lower content).
+    let selectable_texts: Vec<&(String, Option<bool>, Points)> = all_texts
+        .iter()
+        .filter(|(_, sel, _)| *sel != Some(false))
+        .collect();
+    for pair in selectable_texts.windows(2) {
+        assert!(
+            pair[0].2 <= pair[1].2,
+            "selectable texts out of visual order: {:?} (y={}) before {:?} (y={})",
+            pair[0].0,
+            pair[0].2.0,
+            pair[1].0,
+            pair[1].2.0
+        );
+    }
+
+    // 3. The selectable texts' content matches the document's content alone.
+    let selectable_strings: Vec<&str> = selectable_texts
+        .iter()
+        .map(|(t, _, _)| t.as_str())
+        .collect();
+    assert_eq!(
+        selectable_strings,
+        [
+            "Heading",
+            "Bullet one",
+            "Nested bullet",
+            "Bullet two",
+            "First ordered",
+            "Second ordered",
+            "Done task",
+            "Open task",
+            "Alert body",
+            "Toggle summary",
+            "Details body",
+            "let x = 1;",
+            "ColA",
+            "ColB",
+            "Val1",
+            "Val2",
+            "Ref1",
+            "Footnote body",
+        ]
+    );
+
+    // 4. Dragging across list items reports clean plain text AND valid
+    // structured Markdown/HTML (not escaped plain text fallback).
+    app.drag(
+        "text:Bullet one",
+        point(px(0.0), px(65.0)),
+        DragOptions::default(),
+    )
+    .unwrap();
+    let sel = app
+        .screen()
+        .texts()
+        .into_iter()
+        .find_map(|t| t.strip_prefix("Selected: "))
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        !sel.contains('•') && !sel.contains('◦') && !sel.contains('\t'),
+        "got {sel:?}"
+    );
+    let md = app
+        .screen()
+        .texts()
+        .into_iter()
+        .find_map(|t| t.strip_prefix("Markdown: "))
+        .unwrap_or_default()
+        .to_owned();
+    assert!(md.contains("- "), "expected Markdown list, got {md:?}");
+    let html = app
+        .screen()
+        .texts()
+        .into_iter()
+        .find_map(|t| t.strip_prefix("Html: "))
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        html.contains("<ul><li>"),
+        "expected HTML list, got {html:?}"
+    );
+
+    // 5. Dragging past the bottom of a code block with floating text actions
+    // must never select the floating "Run code" button text.
+    app.drag(
+        "text:let x = 1;",
+        point(px(120.0), px(20.0)),
+        DragOptions::default(),
+    )
+    .unwrap();
+    let code_sel = app
+        .screen()
+        .texts()
+        .into_iter()
+        .find_map(|t| t.strip_prefix("Selected: "))
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        !code_sel.contains("Run code"),
+        "floating code action leaked into code selection: {code_sel:?}"
+    );
+}
+
+#[component]
+fn OverriddenMarker() -> impl IntoElement {
+    let classes = TextViewClasses {
+        list_marker: Some("select-text".into()),
+        ..TextViewClasses::default()
+    };
+    text_view()
+        .selectable(true)
+        .classes(classes)
+        .markdown("- Item")
+}
+
+#[test]
+fn app_part_classes_can_still_override_marker_user_select() {
+    let mut core = nsh_core::Core::new(nsh_core::ApproxTextEngine, Size::new(px(400.0), px(200.0)));
+    core.mount_root(&nsh_core::element::Root::of::<OverriddenMarker>());
+    let batch = core.commit().expect("initial batch");
+    let marker = batch.items.iter().find_map(|item| match item {
+        MountItem::Text { text, .. } if text.text == "•" => Some(text.selectable),
+        _ => None,
+    });
+    assert_eq!(marker, Some(Some(true)));
+}
+
+#[component]
+fn TerminalChromeDoc() -> impl IntoElement {
+    text_view()
+        .selectable(true)
+        .markdown("# Title\n\n- Bullet\n- [x] Done\n\n> Quoted\n\n> [!TIP]\n> Tip\n\n```rs\nfn a() {}\n```\n\n| A | B |\n|---|---|\n| 1 | 2 |")
+}
+
+#[test]
+fn terminal_text_view_excludes_decorative_chrome_from_selection() {
+    let mut core = nsh_core::Core::new(nsh_core::ApproxTextEngine, Size::new(px(480.0), px(600.0)));
+    let env = nsh_core::element::Environment {
+        idiom: Idiom::Terminal,
+        ..Default::default()
+    };
+    core.set_environment(env);
+    core.mount_root(&nsh_core::element::Root::of::<TerminalChromeDoc>());
+    let batch = core.commit().expect("initial batch");
+    let selectable: Vec<String> = selectable_area_texts(&batch.items)
+        .into_iter()
+        .filter(|t| t.selectable != Some(false))
+        .map(|t| t.text)
+        .collect();
+    assert_eq!(
+        selectable,
+        [
+            "Title",
+            "Bullet",
+            "Done",
+            "Quoted",
+            "Tip",
+            "fn a() {}",
+            "A",
+            "B",
+            "1",
+            "2"
+        ]
     );
 }
 

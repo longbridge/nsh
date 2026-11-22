@@ -201,6 +201,8 @@ public class NshView extends FrameLayout {
         super(context);
         density = getResources().getDisplayMetrics().density;
         TextLayouts.cacheDir = context.getCacheDir();
+        // Rust code's permission requests ask through the activity in front.
+        Permissions.track(context);
         mounter = new Mounter(this, new Images(this::readAsset));
         root = mounter.root;
         addView(root, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
@@ -294,6 +296,14 @@ public class NshView extends FrameLayout {
     /** Runs the apps loaded from now on as apps on their own, without limits (nsh's own activities). */
     void useStandaloneLimits() {
         Native.setStandaloneLimits(handle);
+    }
+
+    /**
+     * The activity's system bars are this app's (an app on its own): their default icons follow the app's
+     * appearance, not only the system's. An embedding host keeps its bars unless the app asks for the status bar.
+     */
+    void ownSystemBars() {
+        mounter.ownsSystemBars = true;
     }
 
     /**
@@ -638,7 +648,9 @@ public class NshView extends FrameLayout {
     /**
      * Reports the notification press {@code intent} carries to the app, if it does. The activity showing this view
      * calls it from {@code onCreate} and {@code onNewIntent}, with {@code Notifications} of {@code nsh}: a press opens
-     * the app's launcher activity.
+     * the app's launcher activity. An intent with extras that a notification NSH did not show (a push service's SDK's)
+     * may have opened goes to the handler Rust code sets with {@code nsh::notifications::set_foreign_handler} instead,
+     * once per intent. UI thread.
      *
      * @param intent the activity's intent
      */

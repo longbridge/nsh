@@ -348,6 +348,10 @@ pub enum ServerMessage {
         /// JSON): `nsh_engine::Bundle::with_main_window` reads them.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         window: Option<String>,
+        /// The app's lifecycle (`nsh.json` `"application"`, JSON):
+        /// `nsh_engine::Bundle::with_application` reads it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        application: Option<String>,
         /// The VM limits to run the app with, as an embedding app would
         /// set them (`nsh run --limits`, in `nsh_core::js::HostLimits`'
         /// syntax: `memory=128MB,call=500ms`; empty: the embedding
@@ -481,6 +485,13 @@ pub enum TestStep {
         /// Points downwards.
         #[serde(deserialize_with = "float::f32")]
         y: f32,
+        /// Total milliseconds to rest before moving (100 when omitted).
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "float::option_f64"
+        )]
+        hold_ms: Option<f64>,
     },
     /// Moves the mouse over the view (`app.hover`).
     Hover {
@@ -552,9 +563,18 @@ pub enum TestStep {
         /// What to drag.
         selector: String,
         /// Rightwards.
+        #[serde(deserialize_with = "float::f32")]
         x: f32,
         /// Downwards.
+        #[serde(deserialize_with = "float::f32")]
         y: f32,
+        /// Total milliseconds to rest before moving (100 when omitted).
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "float::option_f64"
+        )]
+        hold_ms: Option<f64>,
     },
     /// Lets go of the pointer `DragAndHold` left down (`app.drop`).
     Drop,
@@ -681,6 +701,9 @@ pub enum TestStep {
     },
     /// Closes the app: the host exits.
     Quit,
+    /// The ids of the app's open windows, in opening order
+    /// (`app.windowIds()`): an array of strings. Desktops.
+    WindowIds,
     /// The state of the app's window `id` as the platform reports it
     /// (`app.window(id).state()`): a `WindowState` object, `null` while it
     /// is not open. Desktops.
@@ -868,6 +891,9 @@ pub struct WireRequest {
     /// Follow redirects.
     #[serde(default)]
     pub follow_redirects: bool,
+    /// The Fetch cache mode (`"no-store"`, ...; empty: `"default"`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub cache: String,
 }
 
 /// What a test answers to an app's request ([`ServerMessage::Fetch`]).
@@ -1100,6 +1126,7 @@ mod tests {
             capabilities: None,
             app_id: None,
             window: None,
+            application: None,
             limits: None,
         };
         // No declaration: the field is left out (older hosts read the same).
@@ -1153,9 +1180,16 @@ mod tests {
                 distance: -120.5,
             }),
             step(TestStep::Drag {
+                hold_ms: Some(600.5),
                 selector: "id:knob".into(),
                 x: 12.25,
                 y: -0.1,
+            }),
+            step(TestStep::DragAndHold {
+                selector: "id:row".into(),
+                x: 1.25,
+                y: -0.5,
+                hold_ms: Some(500.25),
             }),
             step(TestStep::SetViewport {
                 width: 390.5,
@@ -1228,3 +1262,7 @@ mod tests {
         assert!(serde_json::from_str::<ServerMessage>(odd).is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "tests/protocol_drag.rs"]
+mod drag_tests;

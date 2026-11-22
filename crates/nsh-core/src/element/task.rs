@@ -70,6 +70,12 @@ pub(crate) enum Action {
         to: NodeId,
         from: Option<NodeId>,
     },
+    /// A popup that gives the keyboard focus back to node `to` opens: the
+    /// core notes the focus and the input it opens with
+    /// ([`super::ElementRef::focus_back_origin`]).
+    FocusOrigin {
+        to: NodeId,
+    },
     /// A dialog; its answer resolves the slot.
     Dialog(Dialog, Rc<RefCell<Output<DialogReply>>>),
     /// Close the dialog whose answer resolves the slot, answering it as
@@ -125,6 +131,11 @@ pub(crate) enum Action {
     /// [`crate::open_url::check_url`]); whether it opened resolves the
     /// slot.
     OpenUrl(String, AnswerSlot<bool>),
+    /// Puts something on the system clipboard
+    /// ([`crate::Command::SetClipboard`] or
+    /// [`crate::Command::SetClipboardItem`]); the platform's result
+    /// resolves the slot.
+    WriteClipboard(crate::Command, AnswerSlot<ClipboardWrite>),
     /// Lets the user pick a color on the screen; the color (none when
     /// cancelled or not supported) resolves the slot.
     PickScreenColor(AnswerSlot<Option<crate::Hsla>>),
@@ -411,6 +422,23 @@ pub struct ClipboardItem {
     pub html: Option<String>,
 }
 
+/// What became of a clipboard write (`set_clipboard`,
+/// `set_clipboard_item`; TS: what `Clipboard.writeText` and
+/// `Clipboard.write` resolve to). The clipboard is never read back to
+/// find out: a platform that cannot tell answers [`Self::Requested`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, crate::element::PropEnum)]
+pub enum ClipboardWrite {
+    /// The system clipboard took it (Windows, macOS, the web).
+    Written,
+    /// The system clipboard refused it (held by another app, no clipboard,
+    /// the browser declined, the clipboard capability not granted).
+    Failed,
+    /// Handed to the system, which does not say whether it took it (iOS,
+    /// Android, Linux, a GPUI host, a terminal).
+    #[default]
+    Requested,
+}
+
 /// An image read from the system clipboard (`Clipboard.readImage`).
 #[derive(Debug, Clone, Default, PartialEq, super::JsObject)]
 pub struct ClipboardImage {
@@ -515,6 +543,12 @@ pub(crate) struct Executor {
     pub(crate) quitting: Rc<std::cell::Cell<usize>>,
     /// What hears the user ask to quit ([`super::desktop::on_quit_request`]).
     pub(crate) quit_requests: Rc<RefCell<super::quit::QuitRequestListeners>>,
+    /// What hears the OS ask the app to show itself
+    /// ([`super::desktop::on_reopen`]).
+    pub(crate) reopens: Rc<RefCell<super::quit::ReopenListeners>>,
+    /// What hears the app's last window close
+    /// ([`super::desktop::on_last_window_closed`]).
+    pub(crate) last_window_closed: Rc<RefCell<super::quit::LastWindowClosedListeners>>,
     /// The views' keyboard shortcuts.
     pub(crate) keys: Rc<RefCell<super::keys::ViewKeys>>,
     /// The views' menus' handlers.

@@ -55,6 +55,7 @@ pub fn App() -> impl IntoElement {
 ```tsx tabs
 import { mount, Text, View, safeArea } from "nsh";
 import { colorScheme, fontScale, windowSize } from "nsh";
+import { Window } from "nsh/desktop";
 
 function App() {
   return (
@@ -66,12 +67,16 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 ## 窗口尺寸与响应式布局
 
-`window()`（TSX：`windowSize()`）是 NSH 渲染目标 surface 的尺寸：手机上是屏幕，iPad 分屏或 Mac 上是窗口，嵌入时是宿主视图。用它来改变布局，而不只是改变尺寸：
+`window()`（TSX：`windowSize()`）是 NSH 渲染目标 surface 的尺寸：手机上是屏幕，iPad 分屏时是窗口，嵌入时是宿主视图。桌面平台上应用宿主不可见，所以这是宿主 surface 的尺寸，不是调用方窗口的尺寸；窗口内的布局应读取它自己的 `state()?.contentBounds` 和 `state()?.scaleFactor`。用它来改变布局，而不只是改变尺寸：
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -514,6 +519,22 @@ if let Some(dir) = data_dir() {
 }
 ```
 
+## 应用的版本
+
+Rust 中的 `app_info()`、TSX 中 `nsh` 的 `appInfo()`（[`appInfo`](../modules/nsh.md#appinfo)）是应用构建时的信息：id、名称、
+版本号、构建号，以及是否为开发构建。打包产物报告 `nsh package` 给包的名称和版本（包括 `--id`、`--name`、`--version`、
+`--build`），没有给出时版本为 `1.0.0`、构建号为 `1`；其他构建报告 `nsh.json` 中的值，没有的项为 `None`。`nsh run`、`nsh dev`
+和 `nsh test` 构建的 Rust 应用是开发构建；`nsh package` 构建的不是。TSX 应用中 `app_info()` 为
+`None`，由 JS 的 `appInfo()` 报告。
+
+```rust
+use nsh_core::prelude::*;
+
+if let Some(info) = app_info() {
+    let about = format!("{} ({})", info.version.unwrap_or_default(), info.build.unwrap_or(0));
+}
+```
+
 ## 像素密度
 
 Rust 中的 `pixel_ratio()` 和 `round_to_nearest_pixel(points)`，以及 TSX 中 `nsh` 的 `pixelRatio()`，在点与设备像素之间换算。
@@ -538,7 +559,7 @@ import { pixelRatio } from "nsh";
 <View style={{ height: 1 / pixelRatio(), backgroundColor: "#d0d7de" }} />
 ```
 
-`pixel_ratio()` 和 `pixelRatio()` 都是响应式的，窗口被移到另一块密度不同的屏幕上时，细线会随之调整。
+`pixel_ratio()` 和 `pixelRatio()` 都是响应式的。桌面平台上它们报告宿主显示器的缩放比例；窗口被移到另一块密度不同的屏幕上时，它自己的比例在 `state()?.scaleFactor` 中。
 
 ## 从右到左
 

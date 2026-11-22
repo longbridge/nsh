@@ -36,9 +36,9 @@ echo 'await app.press("label:Plan"); await app.wait(500)' | ./target/debug/nsh t
 ./target/debug/nsh test examples/gallery --target web                      # in a headless Chrome / Edge / Chromium (found, or --browser <PATH>): trusted input over CDP
 xvfb-run -a ./target/debug/nsh test examples/gallery --target linux        # in GTK windows (a virtual display here); also windows, gpui
 ./target/debug/nsh test examples/gallery --target ios                      # in an iOS simulator: a finger's touches and the keyboard's typing, as UIKit gets them
-./target/debug/nsh test examples/gallery --target android                  # on the first device adb lists: MotionEvents and KeyEvents at the window's views
+./target/debug/nsh test examples/gallery --target android                  # on the device --device / ANDROID_SERIAL names, else the first adb lists: MotionEvents and KeyEvents at the window's views
 echo 'await app.screenshot("a.png"); await app.press("label:Navigation"); await app.screenshot("b.png")' | ./target/debug/nsh test examples/gallery/App.tsx --target macos   # check a platform change: steps from stdin in its window
-./target/debug/nsh check examples/hopper                                   # type check (TypeScript 7's native tsc, downloaded once; no Node)
+./target/debug/nsh check examples/hopper                                   # type check (TypeScript 7's native tsc, downloaded once; no Node), warning of what nsh.json is ignored or refused
 ./target/debug/nsh run examples/counter --trace                            # dev server + this desktop's native host, hot reload on save
 ./target/debug/nsh run examples/gallery --target ios                       # in an iOS simulator (boots one; needs the nsh-ios-host sim build)
 ./target/debug/nsh run examples/gallery --target android                   # on an emulator / device (needs `cargo xtask android --dev`)
@@ -49,6 +49,7 @@ echo 'await app.screenshot("a.png"); await app.press("label:Navigation"); await 
 ./target/debug/nsh package examples/gallery --target web --run             # a static site (files named by content), served on this machine
 ./target/debug/nsh package examples/gallery --target ios-simulator --run   # installable app (.app / .ipa / .apk)
 cargo xtask android [--release] [--dev]                                            # Android runtime into target/android/<profile>[-dev]
+cargo xtask android-embed [--no-dev] [--abi <abi>]                                 # nsh.aar and nsh-dev.aar into dist/nsh/embed/android
 cargo xtask dist                                                                   # the distribution in dist/nsh
 ./target/debug/nsh dev examples/counter --server-only                      # dev server only (for simulators / devices); prints local and LAN URLs
 ./target/debug/nsh build examples/counter --release                        # writes bundle.js / bundle.nshc
@@ -64,7 +65,7 @@ cargo test --release -p nsh-engine --test engine bench_gallery_scroll -- --ignor
 cargo test --release -p nsh-core bench_ -- --ignored --nocapture                # row / cell relayout benchmarks
 cargo +nightly fmt --all                                                        # .rustfmt.toml uses nightly options
 cargo clippy --workspace --all-targets
-cargo clippy -p nsh-platform-ios -p nsh-ios-host -p nsh-ios-app --target aarch64-apple-ios-macabi --features nsh-platform-ios/embed,nsh-platform-ios/dev
+cargo clippy -p nsh-platform-ios -p nsh-ios-host -p nsh-ios-app -p nsh-extra --target aarch64-apple-ios-macabi --features nsh-platform-ios/embed,nsh-platform-ios/dev,nsh-extra/camera,nsh-extra/push
 cargo xtask ios-embed [--dynamic] [--x86-64-simulator] [--no-catalyst] [--no-dev]   # NativeShell(Dev).xcframework into dist/nsh/embed/ios
 cargo xtask web                                                                 # nsh.wasm + player + website demos into website/public/play
 cargo xtask compat                                                              # tests/compat's apps, and the API every recorded release froze (nsh-compat)

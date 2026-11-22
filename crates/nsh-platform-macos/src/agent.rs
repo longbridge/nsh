@@ -424,7 +424,13 @@ impl Native for MacNative {
         gesture(0, 0, 4);
     }
 
-    fn drag(&self, from: Point<Points>, to: Point<Points>) {
+    fn drag(
+        &self,
+        from: Point<Points>,
+        to: Point<Points>,
+        options: nsh_testing::DragOptions,
+    ) -> Result<(), String> {
+        nsh_testing::agent::refuse_custom_drag("drag", options)?;
         self.activate();
         let (x, y) = (f64::from(from.x.0), f64::from(from.y.0));
         let clicks = self
@@ -447,6 +453,7 @@ impl Native for MacNative {
         }
         let (x, y) = (f64::from(last.x.0), f64::from(last.y.0));
         self.on_target(move |_, window| mouse(window, NSEventType::LeftMouseUp, x, y, clicks));
+        Ok(())
     }
 
     fn type_text(&self, text: &str) {
@@ -633,6 +640,11 @@ impl Native for MacNative {
             .unwrap_or(false)
     }
 
+    fn opening(&self) -> bool {
+        self.on_main(|surface, _| crate::window::opening(surface))
+            .unwrap_or(false)
+    }
+
     fn screenshot(&self) -> Result<Vec<u8>, String> {
         // The window server shows a commit a frame or two after it is
         // made: let it show the last one before taking its picture.
@@ -643,7 +655,16 @@ impl Native for MacNative {
     }
 
     fn resize(&self, width: Points, height: Points) -> Result<(), String> {
-        self.on_main(|_, window| {
+        // `setViewport` resizes the window the app shows, not the hidden
+        // host: the targeted window, else the key one (the frontmost of the
+        // app's own windows).
+        let id = self.target();
+        let which = if id == ROOT_ID {
+            Which::Key
+        } else {
+            Which::Target(id)
+        };
+        self.on_window(which, |_, window| {
             let content = NSSize::new(f64::from(width.0), f64::from(height.0));
             let old = window.frame();
             let size = window

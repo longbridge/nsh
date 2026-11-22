@@ -64,6 +64,13 @@ VM 会继续运行：下一个事件、定时器或帧照常执行。
 动画的 `start` 会让它的 Promise 被拒绝；画布调用会忽略它并给出警告。导航栈最多容纳同样多的页面：超出后 `push` 会抛出
 `RangeError`。子节点、子菜单和样式嵌套超过 64 层会抛出 `TypeError`。`<List>` 的 `each` 行数不受此限。
 
+**视图最多嵌套 1024 层，所有应用都是如此。** 布局和挂载在原生代码中逐层遍历视图树，解释器的栈限制管不到那里。
+视图嵌套得更深的应用会被停止，与超出配额时一样：
+
+```text
+the app nested views more than 1024 deep and was stopped
+```
+
 > [!TIP]
 > 对普通应用来说，这些限制相当宽松。如果你触到了 2 s 的调用预算，说明这项工作本来就不该放在一个事件里：它会让应用的
 > 更新冻结那么久。可以用 `setTimeout` 把它拆开，或者把它移出事件处理函数。
@@ -203,6 +210,10 @@ web view 内的顶层导航也会在加载前由平台的导航代理检查。�
 内嵌创建它的文档的源，因此只有当该源是 `hosts` 中的主机时才允许；页面不能显示的主机的 blob，以及不透明
 blob（`blob:null/…`），都不允许。所有平台的检查方式相同。
 
+来自主机的下载遵循同一规则：响应来自不在 `hosts` 中的主机的下载不会被保存，`onDownload` 报告 `failed`，`code` 为
+`"ERR_ACCESS_DENIED"`。在 iOS、macOS 和 Linux 上，无论经过怎样的重定向都是如此；在 iOS 和 macOS 上，指向这类主机的
+重定向在发出请求之前就会被取消。页面自身内容（`data:` 和 `blob:` URL）的下载不来自任何主机，照常保存。
+
 `input` 与 `hosts` 分开，是因为可信输入带有用户激活，而 `injectJavaScript` 永远得不到它：页面因此可以打开窗口、写入剪贴板、
 打开系统的文件面板、发起 WebAuthn 或权限提示，以及按下任何检查 `isTrusted` 的按钮。没有它时，核心会丢弃 `sendInput`
 并在日志中说明要添加哪个键。
@@ -211,7 +222,7 @@ blob（`blob:null/…`），都不允许。所有平台的检查方式相同。
 系统第一次仍会询问用户，所以安装包要声明系统需要的内容：`nsh package` 会写入 `NSMicrophoneUsageDescription` /
 `NSCameraUsageDescription`（可以用 `ios.infoPlist` / `macos.infoPlist` 改成自己的措辞）、macOS 的
 `com.apple.security.device.audio-input` / `com.apple.security.device.camera` 权利（entitlements），以及 Android 的
-`RECORD_AUDIO` / `CAMERA` 权限，应用会在页面第一次需要时请求它们。页面需要处于安全上下文（`https:` 或 `localhost`）才能使用 `getUserMedia`。
+`RECORD_AUDIO` / `CAMERA` 权限，应用会在页面第一次需要时请求它们。开发宿主（`nsh run`）为任何应用都带有这些用途说明。页面需要处于安全上下文（`https:` 或 `localhost`）才能使用 `getUserMedia`。
 
 ```json
 { "capabilities": { "webview": { "hosts": ["phone.example.com"], "media": ["microphone"] } } }
@@ -247,7 +258,7 @@ blob（`blob:null/…`），都不允许。所有平台的检查方式相同。
 
 ### `application`
 
-`"application": true` 允许应用在桌面上作用于整个应用（[`nsh/desktop`](../modules/nsh-desktop.md)）：主窗口（任何 `<Window>` 之外的 `currentWindow()`、`Window.get("main")`：它的标题、标题栏、模式、位置与大小、层级、置于最前、关闭）、应用菜单（`Menu.setApplicationMenu`）、托盘、全局快捷键、`Application.quit()`、`Application.restart()` 和 `Application.setLaunchAtLogin()`。没有这项能力时它们什么也不做，`Application.launchAtLogin()` 返回 `false`，`setLaunchAtLogin` 以 `ERR_ACCESS_DENIED`（`permission` 为 `"application"`）拒绝。右键菜单（`Menu.popup`）显示在应用自己的视图中，应用打开的窗口由 [`windows`](#windows) 授权，两者都不需要这项能力。
+`"application": true` 允许应用在桌面上作用于整个应用（[`nsh/desktop`](../modules/nsh-desktop.md)）：应用菜单（`Menu.setApplicationMenu`）、托盘、全局快捷键、`Application.quit()`、`Application.setQuitMode()`、`Application.restart()` 和 `Application.setLaunchAtLogin()`。没有这项能力时它们什么也不做，`Application.launchAtLogin()` 返回 `false`，`setLaunchAtLogin` 以 `ERR_ACCESS_DENIED`（`permission` 为 `"application"`）拒绝。右键菜单（`Menu.popup`）显示在应用自己的视图中，应用打开的窗口由 [`windows`](#windows) 授权，两者都不需要这项能力。
 
 ### `homeDir`
 
@@ -266,10 +277,10 @@ blob（`blob:null/…`），都不允许。所有平台的检查方式相同。
 |---|---|---|
 | `kinds` | `string[]` | 可以打开的种类：`"normal"`、`"dialog"`、`"panel"`、`"popup"`、`"overlay"`。缺省：除 `"overlay"` 外的所有种类。 |
 | `levels` | `string[]` | 窗口可以使用的层级：`"normal"`、`"floating"`、`"aboveDock"`、`"desktopIcon"`。缺省：所有层级。 |
-| `max` | `number` | 同时可以打开的自己的窗口数。缺省：不限。 |
+| `max` | `number` | 同时可以打开的自己的窗口数，包含第一个窗口。缺省：不限。 |
 | `overlay` | `boolean` | 浮层和点击穿透的窗口（`pointerEvents: "none"`）。只有声明了才会授予，没有 `"capabilities"` 的应用也不例外。 |
 
-`overlay` 单独列出，是因为一个透明、点击穿透、位于所有窗口之上的窗口可以冒充系统自己的界面。主窗口不需要授权。
+`overlay` 单独列出，是因为一个透明、点击穿透、位于所有窗口之上的窗口可以冒充系统自己的界面。每个窗口都需要授权，第一个窗口也不例外：没有特权窗口。
 
 ### 存储
 

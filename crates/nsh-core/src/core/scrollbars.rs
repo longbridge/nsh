@@ -235,7 +235,7 @@ impl<M: TextEngine> Core<M> {
             // An input's bar follows the input where it moves.
             let bar_node = &self.nodes[bar as usize];
             let moved = (bar_node.beside != NO_KEY && bar_node.frame.origin != origin)
-                || bar_node.emitted.is_some_and(|(was, _)| was != at);
+                || self.layout.unrounded_layout(layout).location != at;
             if restyled || moved || self.layout.dirty(layout) {
                 self.layout_root(
                     layout,
@@ -244,7 +244,10 @@ impl<M: TextEngine> Core<M> {
                         height: taffy::AvailableSpace::Definite(size.height.0),
                     },
                 );
-                self.emit_frames_in(bar, false, at);
+                let mut placed = *self.layout.unrounded_layout(layout);
+                placed.location = at;
+                self.layout.set_unrounded(layout, placed);
+                self.emit_frames_in(bar, false, taffy::Point::ZERO);
             }
         }
     }

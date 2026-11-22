@@ -473,12 +473,28 @@ final class ScrollBox extends FrameLayout implements Node {
 
     /** The platform scroll views, with `scrollable` and snapping. */
     private final class VScroll extends ScrollView {
+        /** Its flings ({@link Glide}). */
+        final Glide glide;
+
         VScroll(Context context) {
             super(context);
+            glide = new Glide(context);
+        }
+
+        @Override
+        public void requestDisallowInterceptTouchEvent(boolean disallow) {
+            childClaimed = disallow;
+            super.requestDisallowInterceptTouchEvent(disallow);
         }
 
         @Override
         public boolean dispatchTouchEvent(MotionEvent e) {
+            // A touch ends a glide, as it ends the platform's fling, and is a drag rather than a tap on what is under
+            // it: the platform decides that from its own scroller, which a zero fling sets running (as `stop`)
+            if (e.getActionMasked() == MotionEvent.ACTION_DOWN && glide.running()) {
+                glide.stop();
+                super.fling(0);
+            }
             if (!claim(this, e)) return super.dispatchTouchEvent(e);
             // Handed over: the platform scroll view would start its own drag on this move and ask the
             // views around not to intercept again, so it ends its touch here.
@@ -506,10 +522,24 @@ final class ScrollBox extends FrameLayout implements Node {
 
         @Override
         public void fling(int velocity) {
-            if (!ScrollBox.this.fling(velocity)) super.fling(velocity);
+            if (ScrollBox.this.fling(velocity) || getChildCount() == 0) return;
+            int height = getHeight() - getPaddingBottom() - getPaddingTop();
+            glide.start(getScrollY(), velocity, getChildAt(0).getHeight() - height, height / 2);
+            postInvalidateOnAnimation();
+        }
+
+        @Override
+        public void computeScroll() {
+            super.computeScroll();
+            int y = glide.step();
+            if (y != Integer.MIN_VALUE) {
+                scrollTo(getScrollX(), y);
+                postInvalidateOnAnimation();
+            }
         }
 
         void stop() {
+            glide.stop();
             // Bypass snapping: a zero-velocity native fling replaces the
             // previous scroller animation at its current position.
             super.fling(0);
@@ -530,12 +560,28 @@ final class ScrollBox extends FrameLayout implements Node {
     }
 
     private final class HScroll extends HorizontalScrollView {
+        /** Its flings ({@link Glide}). */
+        final Glide glide;
+
         HScroll(Context context) {
             super(context);
+            glide = new Glide(context);
+        }
+
+        @Override
+        public void requestDisallowInterceptTouchEvent(boolean disallow) {
+            childClaimed = disallow;
+            super.requestDisallowInterceptTouchEvent(disallow);
         }
 
         @Override
         public boolean dispatchTouchEvent(MotionEvent e) {
+            // A touch ends a glide, as it ends the platform's fling, and is a drag rather than a tap on what is under
+            // it: the platform decides that from its own scroller, which a zero fling sets running (as `stop`)
+            if (e.getActionMasked() == MotionEvent.ACTION_DOWN && glide.running()) {
+                glide.stop();
+                super.fling(0);
+            }
             if (!claim(this, e)) return super.dispatchTouchEvent(e);
             // Handed over: the platform scroll view would start its own drag on this move and ask the
             // views around not to intercept again, so it ends its touch here.
@@ -563,10 +609,24 @@ final class ScrollBox extends FrameLayout implements Node {
 
         @Override
         public void fling(int velocity) {
-            if (!ScrollBox.this.fling(velocity)) super.fling(velocity);
+            if (ScrollBox.this.fling(velocity) || getChildCount() == 0) return;
+            int width = getWidth() - getPaddingRight() - getPaddingLeft();
+            glide.start(getScrollX(), velocity, getChildAt(0).getWidth() - width, width / 2);
+            postInvalidateOnAnimation();
+        }
+
+        @Override
+        public void computeScroll() {
+            super.computeScroll();
+            int x = glide.step();
+            if (x != Integer.MIN_VALUE) {
+                scrollTo(x, getScrollY());
+                postInvalidateOnAnimation();
+            }
         }
 
         void stop() {
+            glide.stop();
             // Bypass snapping: a zero-velocity native fling replaces the
             // previous scroller animation at its current position.
             super.fling(0);
@@ -589,6 +649,11 @@ final class ScrollBox extends FrameLayout implements Node {
     /** Where the touch that {@link #claim} is deciding went down; deciding while true. */
     private float claimX, claimY;
     private boolean claiming, yielded, owning;
+    /**
+     * A view inside asked this one not to intercept the touch going on (an inner scroll view
+     * claiming it): this view then gives up deciding, without ending the touch under it.
+     */
+    private boolean childClaimed;
     /** Owning the drag: where the last move was, to tell when it reaches an edge. */
     private float lastX, lastY;
 
@@ -615,6 +680,7 @@ final class ScrollBox extends FrameLayout implements Node {
                 claimX = e.getX();
                 claimY = e.getY();
                 owning = false;
+                childClaimed = false;
                 claiming = enabled && !jsBlocked && !gateBlocked && (horizontal
                         ? scroller.canScrollHorizontally(1) || scroller.canScrollHorizontally(-1)
                         : scroller.canScrollVertically(1) || scroller.canScrollVertically(-1));
@@ -630,7 +696,7 @@ final class ScrollBox extends FrameLayout implements Node {
                     float along = horizontal ? mx : my;
                     boolean more = horizontal ? scroller.canScrollHorizontally(along < 0 ? 1 : -1)
                             : scroller.canScrollVertically(along < 0 ? 1 : -1);
-                    if (along != 0 && !more) {
+                    if (along != 0 && !more && aroundTakes(mx, my)) {
                         owning = false;
                         parent.requestDisallowInterceptTouchEvent(false);
                         yielded = true;
@@ -643,7 +709,10 @@ final class ScrollBox extends FrameLayout implements Node {
                 int slop = ViewConfiguration.get(scroller.getContext()).getScaledTouchSlop();
                 if (Math.abs(dx) <= slop && Math.abs(dy) <= slop) break;
                 claiming = false;
-                if (!scrolls(dx, dy)) {
+                // An inner scroll view claimed this touch on its down: it decides, and ending the touch
+                // here would cancel it under the finger (a horizontal pager in a vertical list).
+                if (childClaimed) break;
+                if (!scrolls(dx, dy) && aroundTakes(dx, dy)) {
                     parent.requestDisallowInterceptTouchEvent(false);
                     yielded = true;
                     return true;
@@ -659,6 +728,23 @@ final class ScrollBox extends FrameLayout implements Node {
                 break;
             default:
                 break;
+        }
+        return false;
+    }
+
+    /**
+     * Whether something around this view takes a drag by ({@code dx}, {@code dy}) px that this view has no content
+     * to move for: its own pull to refresh, a pan of a view around it, or a scroll view around it that moves that
+     * way (an outer list, a pager, the host's). With none, the drag stays with the platform scroll view, which pulls
+     * its edge (the stretch from Android 12, the glow before) as a scroll view at its end does.
+     */
+    private boolean aroundTakes(float dx, float dy) {
+        if (dy > 0 && Math.abs(dy) > Math.abs(dx) && canPull()) return true;
+        boolean across = Math.abs(dx) > Math.abs(dy);
+        for (ViewParent p = getParent(); p instanceof View; p = p.getParent()) {
+            View v = (View) p;
+            if (v instanceof Box && ((Box) v).takesPan(dx, dy)) return true;
+            if (across ? v.canScrollHorizontally(dx < 0 ? 1 : -1) : v.canScrollVertically(dy < 0 ? 1 : -1)) return true;
         }
         return false;
     }
@@ -740,6 +826,12 @@ final class ScrollBox extends FrameLayout implements Node {
     }
 
     @Override
+    protected void onSizeChanged(int w, int h, int oldW, int oldH) {
+        super.onSizeChanged(w, h, oldW, oldH);
+        if (h < oldH) mounter.scrollShrank(this);
+    }
+
+    @Override
     protected void onLayout(boolean changed, int l, int t, int r, int b) {
         super.onLayout(changed, l, t, r, b);
         if (!rescaling || !rescaledContent) return;
@@ -777,10 +869,60 @@ final class ScrollBox extends FrameLayout implements Node {
             rescaledY += dy;
             return;
         }
-        int x = scroller.getScrollX() + dx + owedX, y = scroller.getScrollY() + dy + owedY;
+        int fromX = scroller.getScrollX(), fromY = scroller.getScrollY();
+        int x = fromX + dx + owedX, y = fromY + dy + owedY;
         scroller.scrollTo(x, y);
         owedX = x - scroller.getScrollX();
         owedY = y - scroller.getScrollY();
+        // A fling in flight moves with the view: its next frame continues from here
+        if (scroller instanceof VScroll) ((VScroll) scroller).glide.shift(scroller.getScrollY() - fromY);
+        else if (scroller instanceof HScroll) ((HScroll) scroller).glide.shift(scroller.getScrollX() - fromX);
+    }
+
+    /**
+     * The fling of the platform scroll views, run here: the same
+     * {@code OverScroller} call as {@code ScrollView.fling} /
+     * {@code HorizontalScrollView.fling} (so the same curve), plus a shift.
+     * The platform's fling keeps its scroller private and sets the position
+     * its curve reached every frame ({@code computeScroll}): a
+     * {@code scrollTo} during it (the core's anchoring {@code ScrollBy}, as
+     * rows above the viewport are measured mid-fling) lasted one frame, and
+     * the content jumped by it (seen flinging up a chat in an inverted list;
+     * a slow drag over the same rows kept them still). Starting the fling
+     * again from the new place doesn't do: a fresh fling at the velocity
+     * reached goes farther than the rest of the curve, and a fling crossing
+     * many rows sped up and ran far past where it would have stopped.
+     */
+    private static final class Glide {
+        private final OverScroller curve;
+        private int shift;
+
+        Glide(Context context) {
+            curve = new OverScroller(context);
+        }
+
+        /** ScrollView.fling's own arguments, along the axis (px, px/s). */
+        void start(int pos, int velocity, int max, int over) {
+            shift = 0;
+            curve.fling(pos, 0, velocity, 0, 0, Math.max(0, max), 0, 0, over, 0);
+        }
+
+        void shift(int d) {
+            if (!curve.isFinished()) shift += d;
+        }
+
+        void stop() {
+            curve.forceFinished(true);
+        }
+
+        boolean running() {
+            return !curve.isFinished();
+        }
+
+        /** The position for this frame, or {@code Integer.MIN_VALUE} when not gliding. */
+        int step() {
+            return curve.computeScrollOffset() ? curve.getCurrX() + shift : Integer.MIN_VALUE;
+        }
     }
 
     /** Pays what clamping kept back, as far as the current size allows. */
@@ -846,6 +988,20 @@ final class ScrollBox extends FrameLayout implements Node {
         return scroller.getHeight();
     }
 
+    /** Room still scrollable left, right, up and down (px), including content insets and zoom. */
+    float[] scrollRoom() {
+        int x = scroller.getScrollX(), y = scroller.getScrollY();
+        int maxX, maxY;
+        if (scroller instanceof ZScroll) {
+            maxX = ((ZScroll) scroller).maxX();
+            maxY = ((ZScroll) scroller).maxY();
+        } else {
+            maxX = horizontal ? Math.max(0, content.getWidth() + scroller.getPaddingLeft() + scroller.getPaddingRight() - scroller.getWidth()) : 0;
+            maxY = horizontal ? 0 : Math.max(0, content.getHeight() + scroller.getPaddingTop() + scroller.getPaddingBottom() - scroller.getHeight());
+        }
+        return new float[] {Math.max(0, x), Math.max(0, maxX - x), Math.max(0, y), Math.max(0, maxY - y)};
+    }
+
     /** Scrolls as the user would: not one of the core's scrolls (`applied`). */
     void hostScrollBy(int dx, int dy, boolean animated) {
         if (scroller instanceof ZScroll) {
@@ -863,6 +1019,8 @@ final class ScrollBox extends FrameLayout implements Node {
 
     /** Ends a fling or a smooth scroll where it is; nothing when at rest. */
     void hostStop() {
+        if (scroller instanceof VScroll) ((VScroll) scroller).glide.stop();
+        else if (scroller instanceof HScroll) ((HScroll) scroller).glide.stop();
         if (!momentum && !hostAnimating) return;
         hostAnimating = false;
         if (scroller instanceof ZScroll) {

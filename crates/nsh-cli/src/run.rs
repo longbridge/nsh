@@ -100,6 +100,10 @@ pub(crate) struct HostWindow<'a> {
     pub(crate) size: Option<&'a str>,
     /// The display the window opens on, from 1 (the primary display).
     pub(crate) display: Option<usize>,
+    /// Never the active app (`--background`): the window shows, the
+    /// keyboard stays with the app the user types in, as `nsh test` runs
+    /// its apps.
+    pub(crate) background: bool,
 }
 
 impl HostWindow<'_> {
@@ -133,10 +137,16 @@ impl HostWindow<'_> {
                 "--window-size needs a desktop host (--target macos, linux, windows or gpui) and a TSX entry"
             );
         }
+        if self.background && (!crate::test_host::runs_in_background(target) || rust_root) {
+            bail!(
+                "--background needs a desktop host (--target macos, linux, windows or gpui) and a TSX entry"
+            );
+        }
         Ok(())
     }
 
-    /// The arguments of the size and the display, for a desktop host.
+    /// The arguments of the size, the display and the background, for a
+    /// desktop host.
     fn args(&self) -> Vec<String> {
         let mut args = Vec::new();
         if let Some(size) = self.size {
@@ -146,6 +156,10 @@ impl HostWindow<'_> {
         if let Some(display) = self.display {
             // One-based, as the host counts them.
             args.extend(["--display".to_owned(), display.to_string()]);
+        }
+        if self.background {
+            // The host the tests run in takes it too (`test_host.rs`).
+            args.push("--background".to_owned());
         }
         args
     }
@@ -215,7 +229,7 @@ pub(crate) fn run(
         return run_rust_app(entry, listen, target, device, &work);
     }
     if target == Target::Android {
-        return run_android(entry, listen, release, limits, &work, trace);
+        return run_android(entry, listen, release, limits, &work, trace, device);
     }
     if target == Target::Web {
         return run_web(entry, listen, release, limits);
@@ -482,14 +496,11 @@ fn run_rust_app(
         Target::Android => {
             use crate::android;
             let sdk = android::Sdk::find()?;
-            let serial = android::device(&sdk)?;
+            let serial = android::device(&sdk, device)?;
             let env = android_app_env(&config);
             let out = run.join("android");
             // The device's ABI alone: each one is a build of the app's crate.
-            let abi = android::device_abis(&sdk, &serial)?
-                .into_iter()
-                .find(|abi| android::ABIS.contains(&abi.as_str()))
-                .with_context(|| format!("{serial} runs none of {}", android::ABIS.join(", ")))?;
+            let abi = android::preferred_abi(&serial, &android::device_abis(&sdk, &serial)?)?;
             package_for_run(
                 &entry,
                 crate::package::PackageTarget::Android,
@@ -535,12 +546,13 @@ fn package_for_run(
         out,
         config,
         sign: None,
-        profile: None,
+        profiles: &[],
         keystore: None,
         abis,
         format: crate::android::Format::Apk,
         arch: None,
         run: false,
+        device: None,
         asset_url: None,
         development: true,
     })
@@ -771,8 +783,8 @@ impl Drop for KillOnClose {
 }
 
 /// Starts a dev session, builds and installs the Android dev host (when
-/// it changed), forwards the dev server port to the device and starts the
-/// host.
+/// it changed) on `device` ([`crate::android::device`]), forwards the dev
+/// server port to the device and starts the host.
 fn run_android(
     entry: &Path,
     listen: crate::dev::Listen,
@@ -780,14 +792,23 @@ fn run_android(
     limits: Option<HostLimits>,
     work: &Path,
     trace: bool,
+    device: Option<&str>,
 ) -> anyhow::Result<()> {
     use crate::android;
     let sdk = android::Sdk::find()?;
-    let serial = android::device(&sdk)?;
+    let serial = android::device(&sdk, device)?;
     // As on iOS: the host of a previous session must not connect first.
     let _ = android::adb(&sdk, &serial, &["shell", "am", "force-stop", BUNDLE_ID]);
     let session = DevSession::start(entry, listen, release, limits)?;
-    install_android_host(&sdk, &serial, work, &crate::runtime::android(true, &[])?)?;
+    // Only the device's ABI: a debug library per ABI makes the APK too
+    // large to build. When the device's ABIs can't be read: every ABI, as
+    // before.
+    let abis = match android::device_abis(&sdk, &serial) {
+        Ok(device) => vec![android::preferred_abi(&serial, &device)?],
+        Err(_) => Vec::new(),
+    };
+    let runtime = crate::runtime::android(true, &abis)?;
+    install_android_host(&sdk, &serial, work, &runtime, &abis)?;
     // The device reaches the dev server on its own 127.0.0.1, until the
     // run ends.
     let _reverse = android::Reverse::add(&sdk, &serial, session.port())?;
@@ -818,12 +839,14 @@ fn run_android(
 
 /// Builds the Android development host (when its runtime changed) into
 /// `work` and installs it on device `serial` (when the device does not have
-/// this build).
+/// this build). It takes the runtime's libraries for `abis` (empty: every
+/// one the runtime has).
 pub(crate) fn install_android_host(
     sdk: &crate::android::Sdk,
     serial: &str,
     work: &Path,
     runtime: &Path,
+    abis: &[String],
 ) -> anyhow::Result<()> {
     use crate::android::{self, Apk, Signing};
     let apk_path = work.join("android/NshDev.apk");
@@ -834,7 +857,22 @@ pub(crate) fn install_android_host(
     // device replaces what this app installed. The device's install time
     // tells whether the host there is still the one this app installed.
     let installed = work.join("android/installed");
-    let version = runtime_version(runtime)?;
+    // What the app's crates declare for the manifest (the apps they start,
+    // their components): part of the build, as the runtime is.
+    let meta = crate::module_meta::for_dev_host(
+        "aarch64-linux-android",
+        crate::module_meta::Platform::Android,
+    );
+    let mut version = runtime_version(runtime, abis)?;
+    for line in meta
+        .android_permissions
+        .iter()
+        .chain(&meta.android_queries)
+        .chain(&meta.android_application)
+    {
+        version.push('\n');
+        version.push_str(line);
+    }
     let built =
         apk_path.exists() && fs::read_to_string(&stamp).ok().as_deref() == Some(version.as_str());
     if !built {
@@ -854,14 +892,21 @@ pub(crate) fn install_android_host(
                 // The host runs any app: its pages may capture media.
                 microphone: true,
                 camera: true,
+                dex: &[],
+                permissions: &meta.android_permissions,
+                queries: &meta.android_queries,
+                application: &meta.android_application,
                 schemes: &[],
                 rust: false,
                 dark: false,
+                fixed_appearance: false,
                 runtime,
-                abis: &[],
+                abis,
                 icon: None,
+                launch_screen: None,
                 assets: Vec::new(),
                 sounds: Vec::new(),
+                res: None,
                 signing: Signing::Debug,
             },
             &apk_path,
@@ -905,11 +950,20 @@ fn installed_host(sdk: &crate::android::Sdk, serial: &str) -> Option<String> {
 }
 
 /// Identifies a runtime build: the sizes and times of its files.
-fn runtime_version(runtime: &Path) -> anyhow::Result<String> {
+fn runtime_version(runtime: &Path, abis: &[String]) -> anyhow::Result<String> {
     let mut parts = Vec::new();
     let mut files = vec![runtime.join("classes.dex")];
     for entry in fs::read_dir(runtime.join("lib"))? {
-        files.push(entry?.path().join("libnsh.so"));
+        let dir = entry?.path();
+        // Libraries of other ABIs left from earlier runs are not in the APK.
+        if !abis.is_empty()
+            && !dir
+                .file_name()
+                .is_some_and(|abi| abis.iter().any(|a| a.as_str() == abi))
+        {
+            continue;
+        }
+        files.push(dir.join("libnsh.so"));
     }
     for file in files {
         if let Ok(meta) = fs::metadata(&file) {
@@ -930,7 +984,10 @@ fn package_catalyst(work: &Path, host: &Path) -> anyhow::Result<PathBuf> {
     let contents = app.join("Contents");
     let macos = contents.join("MacOS");
     fs::create_dir_all(&macos)?;
-    fs::write(contents.join("Info.plist"), info_plist(Target::Catalyst))?;
+    fs::write(
+        contents.join("Info.plist"),
+        with_crates_info(info_plist(Target::Catalyst), "aarch64-apple-ios-macabi")?,
+    )?;
     install_binary(host, &macos.join("nsh-ios-host"))?;
     Ok(app)
 }
@@ -940,8 +997,16 @@ fn package_catalyst(work: &Path, host: &Path) -> anyhow::Result<PathBuf> {
 pub(crate) fn package_ios(work: &Path, host: &Path) -> anyhow::Result<PathBuf> {
     let app = work.join("ios").join(format!("{APP_NAME}.app"));
     fs::create_dir_all(&app)?;
-    fs::write(app.join("Info.plist"), info_plist(Target::Ios))?;
-    if install_binary(host, &app.join("nsh-ios-host"))? || !app.join("_CodeSignature").exists() {
+    // The signature seals the Info.plist too: one changed (the app's crates
+    // declare other keys) is signed again, as a new binary is.
+    let plist = app.join("Info.plist");
+    let info = with_crates_info(info_plist(Target::Ios), "aarch64-apple-ios-sim")?;
+    let info_changed = fs::read_to_string(&plist).ok().as_deref() != Some(info.as_str());
+    if info_changed {
+        fs::write(&plist, &info)?;
+    }
+    let installed = install_binary(host, &app.join("nsh-ios-host"))?;
+    if installed || info_changed || !app.join("_CodeSignature").exists() {
         let status = Command::new("codesign")
             .args(["--force", "--sign", "-", "--timestamp=none"])
             .arg(&app)
@@ -1224,6 +1289,32 @@ fn show_simulators(window: SimulatorWindow) {
     ui::warn("no Simulator or DeviceHub app found: the simulator runs without a window");
 }
 
+/// The development host's `Info.plist` with the keys the app's crates
+/// declare for `triple` ([`crate::module_meta`]) that it does not set.
+fn with_crates_info(plist: String, triple: &str) -> anyhow::Result<String> {
+    let meta = crate::module_meta::for_dev_host(triple, crate::module_meta::Platform::Ios);
+    if meta.ios_info.is_empty() {
+        return Ok(plist);
+    }
+    let crates = crate::apple::AppleConfig {
+        info_plist: meta.ios_info,
+        ..Default::default()
+    }
+    .info_plist(crate::apple::ApplePlatform::Ios)?;
+    let mut value = plist::Value::from_reader_xml(plist.as_bytes())?;
+    let dict = value
+        .as_dictionary_mut()
+        .context("the host's Info.plist is a dictionary")?;
+    for (key, value) in crates {
+        if !dict.contains_key(&key) {
+            dict.insert(key, value);
+        }
+    }
+    let mut out = Vec::new();
+    value.to_writer_xml(&mut out)?;
+    Ok(String::from_utf8(out)?)
+}
+
 fn info_plist(target: Target) -> String {
     let platform = match target {
         // 6 = Mac idiom ("Optimize for Mac"): 1:1 points instead of the 77%
@@ -1488,6 +1579,24 @@ mod tests {
             assert!(placed.check(target, false).is_err(), "{target:?}");
         }
         assert_eq!(placed.args(), ["--display", "2"]);
+    }
+
+    /// `--background` reaches the desktop hosts that run tests in the
+    /// background, for a TSX entry.
+    #[test]
+    fn the_desktop_hosts_run_in_the_background() {
+        let background = HostWindow {
+            background: true,
+            ..HostWindow::default()
+        };
+        for target in [Target::Macos, Target::Linux, Target::Windows, Target::Gpui] {
+            assert!(background.check(target, false).is_ok(), "{target:?}");
+        }
+        assert!(background.check(Target::Macos, true).is_err());
+        for target in [Target::Catalyst, Target::Ios, Target::Android, Target::Web] {
+            assert!(background.check(target, false).is_err(), "{target:?}");
+        }
+        assert_eq!(background.args(), ["--background"]);
     }
 
     /// The desktop hosts get each app's own id, so each keeps its own data.

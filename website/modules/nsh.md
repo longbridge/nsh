@@ -37,6 +37,7 @@ A signal holds a value. Calling it reads the value and, inside a tracking scope 
 
 ```tsx
 import { mount, signal, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
 
 function Counter() {
   const count = signal(0);
@@ -48,7 +49,7 @@ function Counter() {
   );
 }
 
-mount(Counter);
+mount(() => <Window id="main"><Counter /></Window>);
 ```
 
 By default a write that is `===` to the current value does nothing. Pass `equals: false` to notify on every write (useful when you mutate an object in place and set the same object again), or your own comparison:
@@ -157,6 +158,7 @@ A value a component provides to everything it renders, however deep. Calling the
 
 ```tsx
 import { context, mount, signal, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
 
 const Theme = context<"light" | "dark">("light");
 
@@ -176,7 +178,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 ## mount
@@ -185,9 +191,22 @@ mount(App);
 function mount<P extends object>(app: Component<P>, props?: P): () => void;
 ```
 
-Renders `app` into the surface (the window, or the `NshAppView` / `NshView` the app is embedded in) and returns a function that removes it. Every app's entry file ends with `mount(App)`.
+Renders `app` into the app root and returns a function that removes it. Every app's entry file ends with `mount(App)`.
+
+On the desktops the app root has no surface of its own: it owns the app's state, events and window registry, and its top-level children are `<Window>` scenes. An app declares every window it can show, including the first; a plain view returned from the app root, or no top-level `<Window>` at all, throws with a message saying so. The first window takes nsh.json's [`window`](../modules/nsh-desktop.md#the-app-host-and-the-first-window) launch defaults. Off the desktops (a phone, the web page, an embedded `NshAppView`) `<Window>` shows its content in the one surface, so the same app runs there.
 
 ```tsx
+import { mount, View } from "nsh";
+import { Window } from "nsh/desktop";
+
+function App() {
+  return (
+    <Window id="main" title="Counter">
+      <Counter />
+    </Window>
+  );
+}
+
 mount(App);
 ```
 
@@ -330,7 +349,8 @@ without `--release` make development builds; `nsh package`, `nsh publish` and `n
 builds. It reads the same on every platform and in any module, at its top level too: the build hands the information
 to the runtime before the app's modules run.
 
-`nsh/updater`'s [`shellInfo()`](./nsh-updater.md#shellinfo) reports the installed app's version.
+`nsh/updater`'s [`shellInfo()`](./nsh-updater.md#shellinfo) reports the installed app's version. Rust code of a Rust
+app reads the same with `app_info()` ([The app's version](../docs/device-and-environment.md#the-apps-version)).
 
 ```tsx
 import { appInfo, Text } from "nsh";
@@ -457,6 +477,7 @@ pub fn App() -> impl IntoElement {
 ```tsx tabs
 import { mount, Text, View } from "nsh";
 import { createAnimatedValue } from "nsh";
+import { Window } from "nsh/desktop";
 
 function App() {
   const x = createAnimatedValue(0);
@@ -473,7 +494,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 > [!NOTE]
@@ -1288,7 +1313,7 @@ const shadow = platform.select({
 const pixelRatio: Accessor<number>;
 ```
 
-Device pixels per point (e.g. `3` on most iPhones). Reactive: it changes when the window moves to a screen of another density (on Mac Catalyst, the desktops, or an external display) and when Android's display size setting changes the density. Rust: `pixel_ratio() -> f32`, and `round_to_nearest_pixel(points)` for a length on whole device pixels; in TSX that length is `Math.round(x * pixelRatio()) / pixelRatio()`.
+Device pixels per point (e.g. `3` on most iPhones). Reactive: it changes when the surface moves to a screen of another density (on Mac Catalyst or an external display) and when Android's display size setting changes the density. On the desktops it is the host display's scale; a window's own scale is `currentWindow().state()?.scaleFactor`. Rust: `pixel_ratio() -> f32`, and `round_to_nearest_pixel(points)` for a length on whole device pixels; in TSX that length is `Math.round(x * pixelRatio()) / pixelRatio()`.
 
 ```rust tabs
 let hairline = move || px(1.0 / pixel_ratio());
@@ -1436,6 +1461,7 @@ pub fn App() -> impl IntoElement {
 ```tsx tabs
 import { mount, signal, View } from "nsh";
 import { PanResponder } from "nsh";
+import { Window } from "nsh/desktop";
 
 function App() {
   const pos = signal({ x: 0, y: 0 });
@@ -1462,7 +1488,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 ### Callbacks
@@ -1562,8 +1592,8 @@ import { Clipboard } from "nsh";
 
 ```ts
 const Clipboard: {
-  writeText(text: string): Promise<void>;
-  write(item: ClipboardItem): Promise<void>;
+  writeText(text: string): Promise<ClipboardWrite>;
+  write(item: ClipboardItem): Promise<ClipboardWrite>;
   readText(): Promise<string>;
   hasText(): Promise<boolean>;
   writeImage(src: string): Promise<void>;
@@ -1571,6 +1601,8 @@ const Clipboard: {
   hasImage(): Promise<boolean>;
   readFiles(): Promise<string[]>;
 };
+
+type ClipboardWrite = "written" | "failed" | "requested";
 
 interface ClipboardItem {
   text: string; // the content as plain text
@@ -1585,8 +1617,8 @@ interface ClipboardImage {
 
 | TS | Rust (`nsh_core::prelude`) |
 |---|---|
-| `await Clipboard.writeText(text)` | `set_clipboard(text)` |
-| `await Clipboard.write({ text, html })` | `set_clipboard_item(item)` (a `ClipboardItem`) |
+| `await Clipboard.writeText(text)` | `set_clipboard(text).await -> ClipboardWrite` |
+| `await Clipboard.write({ text, html })` | `set_clipboard_item(item).await -> ClipboardWrite` (a `ClipboardItem`) |
 | `await Clipboard.readText()` | `clipboard_string().await -> String` |
 | `await Clipboard.hasText()` | `clipboard_has_string().await -> bool` |
 | `await Clipboard.writeImage(src)` | `set_clipboard_image(src)` |
@@ -1605,10 +1637,16 @@ The user can also copy from a [selectable text](../elements/text.md) themselves;
 ### Clipboard.writeText
 
 ```ts
-writeText(text: string): Promise<void>;
+writeText(text: string): Promise<ClipboardWrite>;
 ```
 
 Puts `text` on the clipboard, replacing what was there. Rust: `set_clipboard(text)`.
+
+It resolves to what became of the write: `"written"` when the system clipboard took it (Windows, macOS, the web),
+`"failed"` when it refused it (another app holds the clipboard, the browser declined), and `"requested"` where the
+platform does not say (iOS, Android, Linux, a GPUI host, a terminal). NSH never reads the clipboard back to find out.
+Show "Copied" only for `"written"`, and keep a way to copy by hand for `"failed"`. In Rust the answer is a
+`ClipboardWrite`; drop it when the result does not matter, the write happens either way.
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -1644,7 +1682,7 @@ const copied = signal(false);
 ### Clipboard.write
 
 ```ts
-write(item: ClipboardItem): Promise<void>;
+write(item: ClipboardItem): Promise<ClipboardWrite>;
 ```
 
 Puts the same content as plain text and as HTML on the clipboard, replacing what was there, as a browser copies a
@@ -2357,8 +2395,14 @@ async function signOut() {
 
 `press` reports the `id` of the notification the user pressed. A press can start the app: it waits for the first
 listener, so listen when the app starts, and keep what the press opens in the `id`. On Android an embedding app's
-activity passes its intents to `NshView.handleNotificationIntent`, in `onCreate` and `onNewIntent`. On Apple platforms an
-embedding app that has a notification center delegate keeps it, and its delegate gets the presses. On Linux a press reaches
+activity passes its intents to `NshView.handleNotificationIntent`, in `onCreate` and `onNewIntent`; presses of the
+notifications other code showed (a push service's SDK's) go to the handler Rust code sets with
+`nsh::notifications::set_foreign_handler` ([Android](../docs/android.md#notifications-from-other-code)), never to
+`press`. On Apple platforms an
+embedding app that has a notification center delegate keeps it, and its delegate gets the presses; otherwise remote
+notifications and those other native code scheduled go to the handler Rust code sets with
+`nsh_platform_apple::notifications::set_foreign_handler` ([iOS](../docs/ios.md#notifications-from-other-code)), never to
+`press`. On Linux a press reaches
 only the running app: one left on screen after the app exits does nothing.
 
 ### Notifications.permission
@@ -2956,6 +3000,7 @@ pub fn App() -> impl IntoElement {
 
 ```tsx tabs
 import { effect, mount, signal, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
 import { Storage } from "nsh";
 
 const count = signal(0);
@@ -2969,9 +3014,11 @@ effect(() => {
 });
 
 mount(() => (
-  <View onPress={() => count.update((n) => n + 1)}>
-    <Text>Pressed {count()} times</Text>
-  </View>
+  <Window id="main">
+    <View onPress={() => count.update((n) => n + 1)}>
+      <Text>Pressed {count()} times</Text>
+    </View>
+  </Window>
 ));
 ```
 
@@ -3082,7 +3129,11 @@ The parameters the embedding app set before it started your app, read synchronou
 
 ```tsx
 const conversation = host.params.conversation as string | undefined;
-mount(() => (conversation ? <Conversation id={conversation} /> : <Inbox />));
+mount(() => (
+  <Window id="main">
+    {conversation ? <Conversation id={conversation} /> : <Inbox />}
+  </Window>
+));
 ```
 
 
@@ -3161,6 +3212,7 @@ const keymap: {
 };
 
 interface KeyBindingOptions {
+  scope?: "window" | "app";
   when?: "always" | "notEditing";
   repeat?: boolean;
   passThrough?: boolean;
@@ -3171,11 +3223,11 @@ interface KeyBindingOptions {
 | TS | Rust |
 |---|---|
 | `keymap.bind(keystroke, handler)` | `on_key(keystroke, handler)` |
-| `keymap.bind(keystroke, handler, { when, repeat, passThrough, forFocus })` | `on_key_with(keystroke, KeyOptions { when, repeat, pass_through, for_focus }, handler)`; `when` is `nsh_core::keymap::When` (`Auto`, `Always`, `NotEditing`) |
+| `keymap.bind(keystroke, handler, { scope, when, repeat, passThrough, forFocus })` | `on_key_with(keystroke, KeyOptions { scope, when, repeat, pass_through, for_focus }, handler)`; `scope` is `KeyScope::Window` (default) or `KeyScope::App`; `when` is `nsh_core::keymap::When` (`Auto`, `Always`, `NotEditing`) |
 | `keymap.bind({ … })` | one `on_key` per keystroke |
 | `keymap.label(keystroke)` | `key_label(keystroke)` |
 
-A Rust binding lives as long as the component (the owner) that made it; the handler gets the keystroke as written.
+A binding made inside a `<Window>` is window-scoped: it fires only while that window has the focus. A binding made in the app root is app-wide; `scope: "app"` makes that explicit, and `scope: "window"` in the app root is an error (there is no window to scope to). A Rust binding lives as long as the component (the owner) that made it; the handler gets the keystroke as written.
 
 Shortcuts work on macOS, Windows, Linux and in browsers (the browser's own keys, such as Ctrl+T or Cmd+W, never reach the page), and on iOS and Android with a hardware keyboard: an iPad's, a Mac's running an iPad app, a tablet's or a Chromebook's, the simulator's and the emulator's. The same code runs everywhere; without a keyboard, no key fires the bindings.
 
@@ -3202,12 +3254,13 @@ pub fn App() -> impl IntoElement {
 ```tsx tabs
 import { mount, signal, Text } from "nsh";
 import { keymap } from "nsh";
+import { Window } from "nsh/desktop";
 
 const open = signal(false);
-keymap.bind("mod+k", () => open.set(true));
-keymap.bind("escape", () => open.set(false));
+keymap.bind("mod+k", () => open.set(true), { scope: "app" });
+keymap.bind("escape", () => open.set(false), { scope: "app" });
 
-mount(() => <Text>{open() ? "Search…" : "Press ⌘K"}</Text>);
+mount(() => <Window id="main"><Text>{open() ? "Search…" : "Press ⌘K"}</Text></Window>);
 ```
 
 Pass an object to bind several keystrokes at once; the function returned removes them all. In Rust, each keystroke is one `on_key`:
@@ -3462,6 +3515,7 @@ pub fn App() -> impl IntoElement {
 ```tsx tabs
 import { mount, type NativeComponentRef, signal, View } from "nsh";
 import { nativeComponent } from "nsh";
+import { Window } from "nsh/desktop";
 
 const Badge = nativeComponent<{ text: string; color?: string }, { tap: { count: number } }>("embed.badge", {
   props: ["text", "color"],
@@ -3487,7 +3541,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 ### nativeModule

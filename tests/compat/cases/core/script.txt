@@ -278,6 +278,12 @@ covers [nsh] untracked
 covers [nsh:rt] cond
 covers [nsh:rt] merge
 covers [nsh:rt] spread
+# core-clear-selection
+tap id:case-core-clear-selection
+expect Cleared: no
+# Clearing a selectable view with nothing selected is no error.
+tap id:clear
+expect Cleared: yes
 # core-ref
 tap id:case-core-ref
 # The signal and the function got their node when the views were made.

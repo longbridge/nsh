@@ -87,6 +87,7 @@ fn sections() -> impl IntoElement {
 import { mount, signal, Text, View } from "nsh";
 import { TabBar } from "nsh/mobile";
 import { platform } from "nsh";
+import { Window } from "nsh/desktop";
 
 function App() {
   const section = signal(0);
@@ -106,7 +107,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 `TabBar` 来自 `nsh/mobile`，在 Rust 中是 `nsh_core::mobile`。选中状态属于应用：一次点按通过 `onChange` 报告该标签的索引（`{ index }`），标签栏像系统的一样立即显示这次选择，应用显示那一部分并把索引作为 `selectedIndex` 传回。样式没有给定高度时，高度是系统的。在 Rust 中，`tab_bar()` 创建它，每个 prop 一个 setter（`.items(..)`、`.selected_index(..)`），每个事件一个监听方法（`.on_change(..)`），以及带类型的样式方法；`TabBarItem::new(title).icon(name).badge(text)` 创建一个标签。
@@ -126,7 +131,7 @@ mount(App);
 | 字段 | Rust | 类型 | 说明 |
 |---|---|---|---|
 | `title` | `TabBarItem::new(title)` | `string` | 标签的标题，屏幕阅读器会读出它。 |
-| `icon` | `.icon(name)` | `string` | 标签的图标，用平台对它的称呼：iOS 上是 [SF Symbol](https://developer.apple.com/sf-symbols/)（`"house"`），Android 上是应用的 drawable（`res/drawable/home.xml` 写作 `"home"`，`"android:ic_menu_search"` 是系统的）。用 `platform.select` 按平台选择。 |
+| `icon` | `.icon(name)` | `string` | 标签的图标，用平台对它的称呼：iOS 上是 [SF Symbol](https://developer.apple.com/sf-symbols/)（`"house"`），Android 上是应用的 drawable（`nsh.json` 旁的 `android/res/drawable/home.xml` 写作 `"home"`，`"android:ic_menu_search"` 是系统的）。`nsh package --target android` 会把 `android/res/` 编译进 APK，目录结构与 Gradle 模块的 `src/main/res/` 相同（矢量 drawable、按密度放置的 PNG）；`nsh run` 的开发宿主只有系统的。用 `platform.select` 按平台选择。 |
 | `badge` | `.badge(text)` | `string` | 标签的角标：一段文字，例如 `"3"` 或 `"New"`，或者 `""` 表示没有文字的角标；不设置（默认）则不显示。采用系统的角标外观，屏幕阅读器会随标签的标题读出它：它的文字；`""` 则读出系统对没有文字的角标的说法（VoiceOver 的；在 Android 上是系统的“新通知”，使用设备的语言）。 |
 
 ### 事件

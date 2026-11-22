@@ -44,6 +44,7 @@ mod live;
 mod menus;
 mod net;
 mod pointer;
+mod selection;
 mod speech;
 mod windows;
 
@@ -55,7 +56,7 @@ use std::{
     io::Write,
     sync::{
         Arc, OnceLock,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -102,6 +103,10 @@ const SCROLL_STEP: Points = Points(10.0);
 /// between two of its frames, for what the app's clock does not bring (a
 /// response a test's function gives).
 const FRAME_LOOK: Duration = Duration::from_millis(1);
+/// On a manual clock: how far a wait moves the clock between two looks. A
+/// display frame would cost a round trip every 16 ms of the app's time
+/// (ten seconds: 625 of them); animations still run on the way.
+const WAIT_STEP: Duration = Duration::from_millis(100);
 
 struct ChannelSink {
     batches: Sender<MountBatch>,
@@ -111,6 +116,8 @@ struct ChannelSink {
     /// On a manual clock: the engine asked for a frame, which the driver
     /// gives it when it moves the clock ([`Headless`]).
     wanted: Option<Arc<AtomicBool>>,
+    /// On the system's clock: frames asked for and not yet given.
+    frames: Arc<AtomicUsize>,
 }
 
 impl MountSink for ChannelSink {
@@ -128,11 +135,14 @@ impl MountSink for ChannelSink {
             return;
         }
         let control = self.control.clone();
+        let frames = self.frames.clone();
+        frames.fetch_add(1, Ordering::SeqCst);
         std::thread::spawn(move || {
             std::thread::sleep(FRAME);
             if let Some(control) = control.get() {
                 control.frame();
             }
+            frames.fetch_sub(1, Ordering::SeqCst);
         });
     }
 }
@@ -153,6 +163,8 @@ struct Launched {
     errors: Receiver<AppError>,
     /// On a manual clock: it asked for a frame.
     wanted: Option<Arc<AtomicBool>>,
+    /// On the system's clock: frames asked for and not yet given.
+    frames: Arc<AtomicUsize>,
 }
 
 /// Reports `url` as a link the system handed the app.
@@ -202,11 +214,13 @@ where
     let (errors, errors_rx) = crossbeam_channel::unbounded();
     let control = Arc::new(OnceLock::new());
     let wanted = config.clock.is_manual().then(Arc::default);
+    let frames = Arc::new(AtomicUsize::new(0));
     let sink = ChannelSink {
         batches,
         errors,
         control: control.clone(),
         wanted: wanted.clone(),
+        frames: frames.clone(),
     };
     let engine = Engine::start_with(config, text_engine, sink, |control| {
         // Steps reach every view of a page, below its fold too.
@@ -224,6 +238,7 @@ where
         batches: batches_rx,
         errors: errors_rx,
         wanted,
+        frames,
     })
 }
 
@@ -305,7 +320,8 @@ const CLICK_INTERVAL: Duration = Duration::from_millis(500);
 /// for what it shows.
 ///
 /// ```ignore
-/// let mut app = Headless::start(EngineConfig::new(Root::of::<my_app::App>())).unwrap();
+/// let mut app =
+///     Headless::start(EngineConfig::new(crate::windowed_root::<my_app::App>())).unwrap();
 /// app.wait_for("Count: 0")?;
 /// app.press("Tap")?;
 /// app.wait_for("Count: 1")?;
@@ -347,6 +363,8 @@ pub struct Headless {
     focus_before: Vec<(NodeId, Option<NodeId>)>,
     /// The finger a `dragAndHold` left down, until `drop()`.
     finger: Option<pointer::Finger>,
+    /// The selection of the selectable view the mouse last pressed in.
+    selection: Option<selection::AreaSelection>,
     screen: Screen,
     animator: Animator,
     dialogs: Dialogs,
@@ -390,6 +408,12 @@ pub struct Headless {
     clock: Clock,
     /// On a manual clock: the engine asked for a frame.
     wanted: Option<Arc<AtomicBool>>,
+    /// On the system's clock: frames the engine asked for, not yet given.
+    frames: Arc<AtomicUsize>,
+    /// The app's `nsh/host` calls handed to the test so far: their answer
+    /// comes from elsewhere, so a step that made one waits for the batches
+    /// to stop, as for a request in flight.
+    host_calls_sent: u64,
     /// The embedding app's channel with the app (`EngineConfig::host`),
     /// which the test plays.
     host: nsh_engine::HostChannel,
@@ -453,20 +477,17 @@ impl Headless {
         if let Some(audio) = &audio {
             config.audio = Some(Arc::new(audio.clone()));
         }
-        // A desktop's windows: the main one, focused, on one display, and
-        // those the app opens. The main one starts hidden when the app's
-        // nsh.json `window` says so, as a runner opens it.
-        let main_hidden = config
-            .app
-            .main_window()
-            .is_some_and(|options| !options.visible_at_launch());
-        let windows = (config.environment.os.is_desktop() && config.windows.is_none()).then(|| {
-            let mut windows = windows::Windows::new(config.viewport);
-            if main_hidden {
+        // A desktop's windows: the invisible app host on one display, and
+        // the windows the app opens. The host is never a user window. A
+        // terminal app fills the terminal: it has no windows and its root
+        // view is the screen.
+        let terminal = config.environment.idiom == nsh_core::platform::Idiom::Terminal;
+        let windows = (config.environment.os.is_desktop() && !terminal && config.windows.is_none())
+            .then(|| {
+                let mut windows = windows::Windows::new(config.viewport);
                 windows.start_hidden();
-            }
-            windows
-        });
+                windows
+            });
         if let Some(windows) = &windows
             && config.environment.window_state.is_none()
         {
@@ -487,13 +508,15 @@ impl Headless {
             batches,
             errors,
             wanted,
+            frames,
         } = launch(config, displays, text_engine, link)?;
         let mut screen = Screen::default();
         screen.set_viewport(viewport);
         if let Some(bar) = system_bar {
             screen.set_system_bar(bar);
         }
-        if main_hidden && windows.is_some() {
+        if windows.is_some() {
+            // The app host's root is not a user window.
             screen.set_window_hidden(ROOT_ID, true);
         }
         Ok(Headless {
@@ -504,6 +527,7 @@ impl Headless {
             held: nsh_core::keymap::Modifiers::default(),
             focus_before: Vec::new(),
             finger: None,
+            selection: None,
             screen,
             animator: Animator::new(clock.clone()),
             dialogs: Dialogs::Default,
@@ -525,6 +549,8 @@ impl Headless {
             observer: None,
             clock,
             wanted,
+            frames,
+            host_calls_sent: 0,
             host,
             last_press: None,
             #[cfg(feature = "js")]
@@ -599,15 +625,21 @@ impl Headless {
     /// sent ([`EngineControl::flush`]): whether it is idle, nothing left to
     /// run and no request in flight. False if it took until `deadline`.
     fn flush(&self, deadline: Instant) -> bool {
+        self.flush_until_due(deadline).0
+    }
+
+    /// [`Headless::flush`], also with when the engine's next timer is due
+    /// ([`EngineControl::flush_until_due`]).
+    fn flush_until_due(&self, deadline: Instant) -> (bool, Option<Instant>) {
         let (tx, rx) = crossbeam_channel::bounded(1);
-        self.engine.control().flush(move |idle| {
-            let _ = tx.send(idle);
+        self.engine.control().flush_until_due(move |idle, due| {
+            let _ = tx.send((idle, due));
         });
         match rx.recv_deadline(deadline) {
-            Ok(idle) => idle,
-            Err(crossbeam_channel::RecvTimeoutError::Timeout) => false,
+            Ok(answer) => answer,
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => (false, None),
             // A gone engine sends nothing more.
-            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => true,
+            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => (true, None),
         }
     }
 
@@ -678,6 +710,33 @@ impl Headless {
     /// link that opens it, as a platform reports it (`UrlScheme.on("open")`
     /// gets it when the app claims its scheme); then waits until the app
     /// is quiet.
+    /// The OS asks the app to show itself: a macOS Dock or Finder reopen,
+    /// or a later launch on Windows and Linux. The app's `reopen` listeners
+    /// run; nothing shows implicitly.
+    pub fn reopen(&mut self) -> Result<(), String> {
+        self.step("reopen");
+        self.engine.control().dispatch_event(
+            ROOT_ID,
+            EventKind::Window,
+            EventPayload::Window(Box::new(nsh_core::desktop::WindowEvent::Reopen)),
+        );
+        self.done()
+    }
+
+    /// The user asked to quit (`Application.on("quitRequest")`): what a
+    /// platform's Quit item or quit key sends.
+    pub fn quit_request(&mut self) -> Result<(), String> {
+        self.step("quitRequest");
+        self.engine.control().dispatch_event(
+            ROOT_ID,
+            EventKind::Window,
+            EventPayload::Window(Box::new(nsh_core::desktop::WindowEvent::QuitRequest)),
+        );
+        self.done()
+    }
+
+    /// The step `open(url)`: the system opens `url` with the app (a link
+    /// of one of its schemes), as a press of such a link would.
     pub fn open_with_url(&mut self, url: &str) -> Result<(), String> {
         self.step(format!("openWithUrl({url})"));
         self.send_url_scheme(url);
@@ -742,10 +801,16 @@ impl Headless {
         self.screen.set_viewport(size);
         self.environment.window = size;
         if let Some(windows) = &mut self.windows {
-            windows.resize_main(size);
+            // A desktop run shows the app's own window: the viewport step
+            // resizes that, not the hidden host. Its report goes on to the
+            // app through the usual drain.
+            if !windows.resize_focused_own(size) {
+                windows.resize_main(size);
+                windows.take_reports();
+            }
             self.environment.window_state = Some(windows.main());
-            windows.take_reports();
         }
+        self.report_windows();
         self.engine.control().resize(size);
         self.engine.control().set_environment(self.environment);
         self.done()
@@ -859,7 +924,9 @@ impl Headless {
     ///
     /// Without it, as on desktops, a session opens the page as `open_url`
     /// does ([`Screen::opened_urls`]) and ends with a link of its callback
-    /// scheme ([`Headless::open_with_url`]).
+    /// scheme ([`Headless::open_with_url`]); on the web, or with
+    /// [`field@nsh_core::platform::Environment::scheme_links`] `Some(false)`,
+    /// where no such link comes, it fails at once.
     pub fn on_auth_session(
         &mut self,
         outcome: nsh_core::auth_session::AuthSessionOutcome,
@@ -1069,6 +1136,10 @@ impl Headless {
                     command: Command::InsertText(text),
                 } => self.insert_text(*id, text),
                 MountItem::Command {
+                    id,
+                    command: Command::ClearSelection,
+                } => self.clear_selection_in(*id),
+                MountItem::Command {
                     id: ROOT_ID,
                     command: Command::SetAppUrl(url),
                 } => self.set_page_url(url, false),
@@ -1107,6 +1178,7 @@ impl Headless {
                     command: Command::HostCall { id, name, args },
                 } = item
                 {
+                    self.host_calls_sent += 1;
                     calls(*id, name, args);
                 }
             }
@@ -1244,6 +1316,7 @@ impl Headless {
                     self.screen.set_window_hidden(root, hidden);
                 }
                 windows::Report::RootSize(root, size) => {
+                    self.screen.set_window_size(root, size);
                     control.set_root_size(root, size, Default::default());
                 }
             }
@@ -1278,6 +1351,14 @@ impl Headless {
         self.report_windows();
     }
 
+    /// The ids of the app's open windows, in opening order
+    /// (`app.windowIds()`).
+    pub fn window_ids(&mut self) -> Result<Vec<String>, String> {
+        self.catch_up();
+        let windows = self.windows.as_ref().ok_or_else(no_windows)?;
+        Ok(windows.ids())
+    }
+
     /// The state of the app's window `id` (`"main"`, or the id it opened
     /// one with) as the platform reports it; `None` while it is not open
     /// (`app.window(id).state()`).
@@ -1291,6 +1372,14 @@ impl Headless {
             .screen
             .window_root(id)
             .and_then(|root| windows.state(root)))
+    }
+
+    /// Whether the app quit (`Application.quit()`, the Quit menu role, or
+    /// the core quitting on the last window's close): the headless platform
+    /// records it, and the test process goes on.
+    pub fn quit(&mut self) -> bool {
+        self.catch_up();
+        self.windows.as_ref().is_some_and(|windows| windows.quit())
     }
 
     /// The step `window(<id>).pressClose()`: the user presses the close
@@ -1326,12 +1415,16 @@ impl Headless {
     }
 
     /// Applies the batches that came, without waiting.
-    fn drain(&mut self) {
+    fn drain(&mut self) -> bool {
+        self.tick_held_press();
+        let mut applied = false;
         while let Ok(batch) = self.batches.try_recv() {
             self.apply(&batch);
+            applied = true;
         }
         self.animator.tick();
         self.report_finished();
+        applied
     }
 
     /// Applies the next batch, waiting until `deadline` at most, while the
@@ -1339,6 +1432,7 @@ impl Headless {
     /// the next check.
     fn pump(&mut self, deadline: Instant) -> Pumped {
         loop {
+            self.tick_held_press();
             if self.exited {
                 return Pumped::Exited;
             }
@@ -1352,6 +1446,12 @@ impl Headless {
                 _ if framed => Instant::now(),
                 Some(frame) if !self.clock.is_manual() => frame.min(deadline),
                 _ => deadline,
+            };
+            let wake = if !self.clock.is_manual() {
+                self.held_press_timeout()
+                    .map_or(wake, |after| wake.min(Instant::now() + after))
+            } else {
+                wake
             };
             let timeout = wake.saturating_duration_since(Instant::now());
             crossbeam_channel::select_biased! {
@@ -1451,7 +1551,7 @@ impl Headless {
             if self.applied != applied || self.wants_frames() || !self.errors.is_empty() {
                 continue;
             }
-            if idle {
+            if idle && self.host.calls_in_flight() == 0 {
                 return true;
             }
             // What comes from elsewhere comes in real time.
@@ -1466,35 +1566,78 @@ impl Headless {
 
     /// Applies batches until the app is done with a step, or for 2 s at
     /// most (an app updating all the time never is): false if the limit
-    /// ended it. On the system's clock it is done once the engine has
-    /// handled what the step sent ([`Headless::caught_up`]) and then no
-    /// batch came for 100 ms and no native animation that ends by itself
-    /// runs; on a manual clock, as soon as the engine says it is idle
-    /// ([`EngineControl::flush`]), without waiting.
+    /// ended it. Either clock asks the engine whether it is idle
+    /// ([`EngineControl::flush`]) instead of waiting for the batches to
+    /// stop; on the system's clock a timer due within 100 ms, a pending
+    /// frame or a native animation that ends by itself is waited for
+    /// ([`Headless::idle_on_system_clock`]).
     pub fn settle(&mut self) -> bool {
         if self.clock.is_manual() {
             self.idle_on_manual_clock(SETTLE)
         } else {
-            let end = Instant::now() + SETTLE;
-            self.caught_up(end);
-            self.quiet(QUIET, end.saturating_duration_since(Instant::now()))
+            self.idle_on_system_clock(SETTLE)
         }
     }
 
-    /// On the system's clock: has the engine run what was sent to it
-    /// ([`EngineControl::flush`]) and applies the batches that brought,
-    /// again while they bring more (what applying them sends back: a
-    /// scroll reported, a focus moved), until `end` at most. The quiet
-    /// that ends a step is then counted from there, so an engine taking
-    /// longer than [`QUIET`] over a step does not end it early, with the
-    /// next step acting on the screen as it was before.
-    fn caught_up(&mut self, end: Instant) {
-        while !self.exited && self.errors.is_empty() && Instant::now() < end {
+    /// On the system's clock: applies batches until the app is done with a
+    /// step, or for `limit` at most: false if the limit ended it. Done is
+    /// asked, as on a manual clock, and means what waiting [`QUIET`] for no
+    /// batch meant: the engine ran everything sent to it and its batches
+    /// were applied, no frame it asked for is pending, no native animation
+    /// that ends by itself runs, and nothing it runs by itself (a timer)
+    /// comes due within [`QUIET`]. Something due sooner is waited for, until
+    /// no batch came for [`QUIET`] as before. A
+    /// request in flight, whose answer comes from elsewhere, is waited for
+    /// by the batches stopping for [`QUIET`], as before.
+    fn idle_on_system_clock(&mut self, limit: Duration) -> bool {
+        let end = Instant::now() + limit;
+        let mut last = Instant::now();
+        let host_calls = self.host_calls_sent;
+        loop {
+            if self.exited || !self.errors.is_empty() {
+                return true;
+            }
+            if Instant::now() >= end {
+                return false;
+            }
             let applied = self.applied;
-            self.flush(end);
+            let (idle, due) = self.flush_until_due(end);
             self.drain();
-            if self.applied == applied {
-                return;
+            if self.applied != applied || !self.errors.is_empty() {
+                last = Instant::now();
+                continue;
+            }
+            let framing = self.frames.load(Ordering::SeqCst) > 0 || self.animator.finishing();
+            if !idle || self.host_calls_sent != host_calls {
+                return self.quiet(QUIET, end.saturating_duration_since(Instant::now()));
+            }
+            // A call a handler (the test's) has not answered yet: its answer
+            // comes from another thread, in real time.
+            if self.host.calls_in_flight() > 0 {
+                match self.pump((Instant::now() + FRAME).min(end)) {
+                    Pumped::Batch => last = Instant::now(),
+                    Pumped::Error | Pumped::Exited => return true,
+                    Pumped::Timeout => {}
+                }
+                continue;
+            }
+            let now = Instant::now();
+            let soon = due.filter(|&at| at < now + QUIET);
+            // What the wait for no batch would have ended, it still ends: a
+            // timer that keeps coming due and renders nothing.
+            let quiet = now >= last + QUIET && !self.animator.finishing();
+            if (!framing && soon.is_none()) || quiet {
+                return true;
+            }
+            // Wait for the frame, the animation's next frame or the timer.
+            let wake = match soon {
+                Some(at) if !framing => at,
+                _ => now + FRAME,
+            };
+            match self.pump(wake.min(last + QUIET).min(end)) {
+                Pumped::Batch => last = Instant::now(),
+                Pumped::Error | Pumped::Exited => return true,
+                Pumped::Timeout => {}
             }
         }
     }
@@ -1773,7 +1916,7 @@ impl Headless {
             let pumped = match clock_end {
                 Some(end) if self.clock.now() < end => {
                     let left = end.saturating_duration_since(self.clock.now());
-                    self.wait_frame(left.min(FRAME))
+                    self.wait_frame(left.min(WAIT_STEP))
                 }
                 _ => self.pump(deadline),
             };
@@ -1846,12 +1989,20 @@ impl Headless {
         if !self.clock.is_manual() {
             return self.next_change(timeout).map(|()| Duration::ZERO);
         }
-        // An app that left takes no frame, but the wait's time runs out.
-        let by = timeout.min(FRAME);
-        if !by.is_zero() {
-            self.wait_frame(by);
+        // The wait looks at the app again only when a step brought
+        // something: a timer due ten seconds away must not cost 625 round
+        // trips (nor 625 frames of 16 ms).
+        let mut moved = Duration::ZERO;
+        while moved < timeout {
+            // An app that left takes no frame, but the wait's time runs out.
+            let by = WAIT_STEP.min(timeout - moved);
+            let pumped = self.wait_frame(by);
+            moved += by;
+            if !matches!(pumped, Pumped::Timeout) {
+                break;
+            }
         }
-        self.check().map(|()| by)
+        self.check().map(|()| moved)
     }
 
     /// On a manual clock: a frame of a wait, `by` after the last, and what
@@ -1862,7 +2013,9 @@ impl Headless {
             return Pumped::Exited;
         }
         self.frame(by);
-        self.drain();
+        if self.drain() {
+            return Pumped::Batch;
+        }
         crossbeam_channel::select_biased! {
             recv(self.errors) -> error => match error {
                 Ok(error) => {
@@ -2077,6 +2230,44 @@ impl Headless {
         })
     }
 
+    /// The step `longPressAt(<selector>, <x>, <y>)`: [`Headless::long_press`]
+    /// with the finger at `at` in the view `selector` names (its top left
+    /// corner), as [`Headless::press_at`] places a press.
+    pub fn long_press_at(&mut self, selector: &str, at: Point<Points>) -> Result<(), String> {
+        let parsed = Selector::parse(selector)?;
+        self.step(format!("longPressAt({selector}, {}, {})", at.x.0, at.y.0));
+        self.input_with(InputModality::Pointer);
+        let pick = self.screen.long_pressable(&parsed);
+        let id = self.picked(pick, selector, "pressable view")?;
+        let delay = self.screen.long_press_delay(id).unwrap_or(500.0).max(0.0);
+        let named = match self.screen.resolve(&parsed)[..] {
+            [named] => named,
+            _ => id,
+        };
+        let page = self
+            .screen
+            .bounds_in_root(named)
+            .map(|bounds| bounds.origin + at);
+        let at = match (page, self.screen.bounds_in_root(id)) {
+            (Some(page), Some(target)) => page - target.origin,
+            _ => at,
+        };
+        self.activate_window_of(id);
+        let path = self.screen.touch_path(id);
+        if !path.is_empty() {
+            self.send_touch(id, nsh_core::TouchPhase::Start, path.clone(), page);
+        }
+        let payload = self.press_payload(id, Some(at));
+        self.send(id, EventKind::PressDown, payload.clone());
+        self.elapse(Duration::from_secs_f64(f64::from(delay) / 1000.0));
+        self.send(id, EventKind::LongPress, payload.clone());
+        self.send(id, EventKind::PressUp, payload);
+        if !path.is_empty() {
+            self.send_touch(id, nsh_core::TouchPhase::End, path, page);
+        }
+        self.done()
+    }
+
     /// The step `longPress(<selector>)`: holds a finger on what `selector`
     /// names (or the nearest view around it that hears long presses or
     /// presses) for its `delayLongPress` (500 ms), as a long press does:
@@ -2116,6 +2307,7 @@ impl Headless {
             && !input.text.is_empty()
         {
             input.text.clear();
+            input.selected_all = false;
             input.count += 1;
             let payload = EventPayload::Text {
                 text: String::new(),
@@ -2130,7 +2322,8 @@ impl Headless {
     }
 
     /// The step `type(<selector>, <text>)`: types `text` at the caret of
-    /// the input `selector` names (here always the end of its text; a view
+    /// the input `selector` names (here always the end of its text, or over
+    /// it all while `selectTextOnFocus` selected it; a view
     /// that keeps its own selection, such as `Editor`, types over it, as
     /// the native drivers do) (the matching view, or the first input in
     /// it; `text:` also matches what an input holds or its placeholder),
@@ -2194,12 +2387,21 @@ impl Headless {
             return;
         }
         let mut text = nsh_core::text_edit::pasted(text, input.config.multiline);
+        // A whole selected text is replaced.
+        let kept = if input.selected_all {
+            0
+        } else {
+            char_len(&input.text)
+        };
         if let Some(max) = input.config.max_length {
-            let room = (max as usize).saturating_sub(char_len(&input.text));
+            let room = (max as usize).saturating_sub(kept);
             text.truncate(clip_chars(&text, room).len());
         }
         if text.is_empty() {
             return;
+        }
+        if std::mem::take(&mut input.selected_all) {
+            input.text.clear();
         }
         input.text.push_str(&text);
         input.count += 1;
@@ -2282,6 +2484,7 @@ impl Headless {
             self.screen.set_focused(Some(id));
             self.set_focused_state(id, true);
             self.send(id, EventKind::Focus, EventPayload::None);
+            self.select_on_focus(id);
         }
         Ok(id)
     }
@@ -2350,13 +2553,21 @@ impl Headless {
         let Some(input) = self.screen.input_mut(id) else {
             return;
         };
-        let length = char_len(&input.text) + 1;
+        // A whole selected text is replaced.
+        let kept = if input.selected_all {
+            0
+        } else {
+            char_len(&input.text)
+        };
         if input
             .config
             .max_length
-            .is_some_and(|max| length > max as usize)
+            .is_some_and(|max| kept + 1 > max as usize)
         {
             return;
+        }
+        if std::mem::take(&mut input.selected_all) {
+            input.text.clear();
         }
         input.text.push(c);
         input.count += 1;
@@ -2370,6 +2581,27 @@ impl Headless {
             .control()
             .dispatch_event(id, EventKind::ChangeText, payload);
         self.report_selection(id);
+    }
+
+    /// Input `id` took the focus: with `selectTextOnFocus` its whole text
+    /// is selected, reported as the platforms report a selection.
+    pub(crate) fn select_on_focus(&mut self, id: NodeId) {
+        let Some(input) = self.screen.input_mut(id) else {
+            return;
+        };
+        if !input.config.select_text_on_focus {
+            return;
+        }
+        input.selected_all = true;
+        let end = input.text.encode_utf16().count() as f64;
+        self.send(
+            id,
+            EventKind::SelectionChange,
+            EventPayload::Map(vec![
+                ("start", PayloadValue::Number(0.0)),
+                ("end", PayloadValue::Number(end)),
+            ]),
+        );
     }
 
     /// `onSelectionChange` and `onCaretMove` of input `id` after an edit,
@@ -2670,6 +2902,7 @@ mod tests {
     };
 
     use super::*;
+    use crate::DragOptions;
 
     /// A paragraph with a link and a marked word.
     #[component]
@@ -2682,7 +2915,7 @@ mod tests {
 
     #[test]
     fn span_styles_are_read_by_test_id_or_text() {
-        let mut app = Headless::start(EngineConfig::new(Root::of::<Linked>())).unwrap();
+        let mut app = Headless::start(EngineConfig::new(crate::windowed_root::<Linked>())).unwrap();
         app.first_render().unwrap();
         let screen = app.screen();
         assert!(screen.span_style("id:guide").unwrap().decoration.underline);
@@ -2709,7 +2942,7 @@ mod tests {
 
     #[test]
     fn hidden_spans_are_not_on_screen() {
-        let mut app = Headless::start(EngineConfig::new(Root::of::<Partly>())).unwrap();
+        let mut app = Headless::start(EngineConfig::new(crate::windowed_root::<Partly>())).unwrap();
         app.first_render().unwrap();
         let screen = app.screen();
         assert_eq!(screen.texts(), ["Shown  end"]);
@@ -2732,7 +2965,8 @@ mod tests {
 
     #[test]
     fn empty_span_styles_do_not_read_neighbouring_characters() {
-        let mut app = Headless::start(EngineConfig::new(Root::of::<EmptySpans>())).unwrap();
+        let mut app =
+            Headless::start(EngineConfig::new(crate::windowed_root::<EmptySpans>())).unwrap();
         app.first_render().unwrap();
         let screen = app.screen();
         for name in ["id:middle", "id:end", "middle", "end", "id:after", "after"] {
@@ -2764,14 +2998,14 @@ mod tests {
         view()
             .on_press(move || {
                 count.update(|c| *c += 1);
-                set_clipboard(format!("copied {}", count.get_untracked()));
+                drop(set_clipboard(format!("copied {}", count.get_untracked())));
             })
             .child(text("Copy"))
     }
 
     #[test]
     fn cleared_commands_are_forgotten_but_their_effects_stay() {
-        let mut app = Headless::start(EngineConfig::new(Root::of::<Copier>())).unwrap();
+        let mut app = Headless::start(EngineConfig::new(crate::windowed_root::<Copier>())).unwrap();
         app.first_render().unwrap();
         let copies = |app: &Headless| {
             app.screen()
@@ -2804,20 +3038,21 @@ mod tests {
                         let mut item = ClipboardItem::default();
                         item.text = "a b".into();
                         item.html = Some("<p>a <b>b</b></p>".into());
-                        set_clipboard_item(item)
+                        drop(set_clipboard_item(item))
                     })
                     .child(text("Rich")),
             )
             .child(
                 view()
-                    .on_press(|| set_clipboard("plain"))
+                    .on_press(|| drop(set_clipboard("plain")))
                     .child(text("Plain")),
             )
     }
 
     #[test]
     fn the_clipboard_keeps_the_html_written_with_its_text() {
-        let mut app = Headless::start(EngineConfig::new(Root::of::<HtmlCopier>())).unwrap();
+        let mut app =
+            Headless::start(EngineConfig::new(crate::windowed_root::<HtmlCopier>())).unwrap();
         app.first_render().unwrap();
         app.press("Rich").unwrap();
         assert_eq!(app.screen().clipboard(), Some("a b"));
@@ -2885,7 +3120,8 @@ mod tests {
 
     #[test]
     fn an_empty_press_target_keeps_its_covering_check() {
-        let mut app = Headless::start(EngineConfig::new(Root::of::<EmptyCovered>())).unwrap();
+        let mut app =
+            Headless::start(EngineConfig::new(crate::windowed_root::<EmptyCovered>())).unwrap();
         app.first_render().unwrap();
         let target = app.screen().press_target("Zero").unwrap().unwrap();
         assert!(app.screen().bounds_in_root(target).unwrap().is_empty());
@@ -2899,7 +3135,8 @@ mod tests {
 
     #[test]
     fn presses_carry_where_the_pointer_was() {
-        let mut app = Headless::start(EngineConfig::new(Root::of::<PressPoint>())).unwrap();
+        let mut app =
+            Headless::start(EngineConfig::new(crate::windowed_root::<PressPoint>())).unwrap();
         app.first_render().unwrap();
         app.press_at("id:pad", point(px(10.0), px(12.0))).unwrap();
         app.wait_for("text:seen: at 10 12 in 10 22").unwrap();
@@ -2928,7 +3165,8 @@ mod tests {
 
     #[test]
     fn retained_layout_listeners_settle_while_new_runs_learn_the_frame() {
-        let mut app = Headless::start(EngineConfig::new(Root::of::<RetainedLayout>())).unwrap();
+        let mut app =
+            Headless::start(EngineConfig::new(crate::windowed_root::<RetainedLayout>())).unwrap();
         app.first_render().unwrap();
         app.wait_for("count 1 width 100").unwrap();
         assert!(!app.shows("count 2 width 100"));
@@ -2965,7 +3203,8 @@ mod tests {
 
     #[test]
     fn a_region_run_replaced_in_a_layout_pass_misses_its_nodes_layout() {
-        let mut app = Headless::start(EngineConfig::new(Root::of::<GrowingBox>())).unwrap();
+        let mut app =
+            Headless::start(EngineConfig::new(crate::windowed_root::<GrowingBox>())).unwrap();
         app.first_render().unwrap();
         app.wait_for("wide false inner 100").unwrap();
         // The box's layout flips the region before the old node's, from the
@@ -3004,14 +3243,15 @@ mod tests {
     /// after it stays in the window, whatever the window's width.
     #[test]
     fn a_desktop_page_header_is_as_wide_as_the_window() {
-        let mut config = EngineConfig::new(Root::of::<LongTitle>());
-        config.viewport = Size::new(px(360.0), px(600.0));
-        config.environment.os = Os::MacOs;
-        config.environment.idiom = nsh_core::platform::Idiom::Desktop;
-        let mut app = Headless::start(config).unwrap();
-        app.first_render().unwrap();
+        // The first window takes the host's size: a width is a launch size,
+        // not a later viewport resize, which the window does not follow.
         for width in [360.0, 600.0] {
-            app.set_viewport(Size::new(px(width), px(600.0))).unwrap();
+            let mut config = EngineConfig::new(crate::windowed_root::<LongTitle>());
+            config.viewport = Size::new(px(width), px(600.0));
+            config.environment.os = Os::MacOs;
+            config.environment.idiom = nsh_core::platform::Idiom::Desktop;
+            let mut app = Headless::start(config).unwrap();
+            app.first_render().unwrap();
             let nodes = app.screen().layout_nodes();
             let bounds = |id: &str| {
                 nodes
@@ -3140,7 +3380,7 @@ mod tests {
     #[test]
     fn on_a_manual_clock_a_step_returns_once_the_app_is_idle() {
         const STEPS: u32 = 20;
-        let mut config = EngineConfig::new(Root::of::<Deferred>());
+        let mut config = EngineConfig::new(crate::windowed_root::<Deferred>());
         config.clock = Clock::manual(std::time::SystemTime::UNIX_EPOCH);
         let mut app = Headless::start(config).unwrap();
         app.first_render().unwrap();
@@ -3192,7 +3432,8 @@ mod tests {
 
     #[test]
     fn a_test_fails_the_loads_of_the_images_it_names() {
-        let mut app = Headless::start(EngineConfig::new(Root::of::<Pictures>())).unwrap();
+        let mut app =
+            Headless::start(EngineConfig::new(crate::windowed_root::<Pictures>())).unwrap();
         app.first_render().unwrap();
         app.wait(Duration::from_millis(50)).unwrap();
         assert!(app.shows("avatar: picture"), "no failure unasked");
@@ -3228,7 +3469,7 @@ mod tests {
 
     #[test]
     fn a_test_fails_the_urls_it_names_to_open() {
-        let mut app = Headless::start(EngineConfig::new(Root::of::<Links>())).unwrap();
+        let mut app = Headless::start(EngineConfig::new(crate::windowed_root::<Links>())).unwrap();
         app.first_render().unwrap();
         app.press("Page").unwrap();
         app.wait_for("text:https://example.com/docs/a true")
@@ -3279,7 +3520,8 @@ mod tests {
 
     #[test]
     fn a_test_answers_the_share_sheet() {
-        let mut app = Headless::start(EngineConfig::new(Root::of::<Sharing>())).unwrap();
+        let mut app =
+            Headless::start(EngineConfig::new(crate::windowed_root::<Sharing>())).unwrap();
         app.first_render().unwrap();
         // No share sheet until the test gives the platform one.
         app.press("Share").unwrap();
@@ -3304,7 +3546,8 @@ mod tests {
 
     #[test]
     fn a_share_never_answered_does_not_hold_the_next_back() {
-        let mut app = Headless::start(EngineConfig::new(Root::of::<Sharing>())).unwrap();
+        let mut app =
+            Headless::start(EngineConfig::new(crate::windowed_root::<Sharing>())).unwrap();
         app.first_render().unwrap();
         app.on_share(nsh_core::share::ShareOutcome::shared(None))
             .unwrap();
@@ -3416,6 +3659,49 @@ mod tests {
     }
 
     #[test]
+    fn where_no_link_of_the_apps_schemes_comes_the_session_fails_at_once() {
+        let start = |os: Os, scheme_links: Option<bool>| {
+            let mut config = EngineConfig::new(Root::of::<SigningIn>().url_schemes(["demo"]));
+            config.environment.os = os;
+            config.environment.scheme_links = scheme_links;
+            let mut app = Headless::start(config).unwrap();
+            app.first_render().unwrap();
+            app
+        };
+        // The app claims `demo`: only the missing links can refuse it.
+        let refused = "text:ERR_FEATURE_UNAVAILABLE_ON_PLATFORM";
+        // The web hears only its page's address: the claimed scheme's link
+        // never comes, so the session fails instead of waiting forever.
+        let mut app = start(Os::Web, None);
+        app.press("Sign in").unwrap();
+        app.wait_for(refused).unwrap();
+        assert!(app.screen().opened_urls().is_empty());
+        // The same where the platform says it hears none, whatever the OS
+        // (the GPUI and terminal backends).
+        let mut app = start(Os::Ios, Some(false));
+        app.press("Sign in").unwrap();
+        app.wait_for(refused).unwrap();
+        assert!(app.screen().opened_urls().is_empty());
+        // A platform that says it hears them waits for the callback.
+        let mut app = start(Os::Web, Some(true));
+        app.press("Sign in").unwrap();
+        assert_eq!(
+            app.screen().opened_urls(),
+            ["https://example.com/authorize"]
+        );
+        app.open_with_url("demo://done?code=9").unwrap();
+        app.wait_for("text:signed in demo://done?code=9").unwrap();
+        // A session the platform shows itself needs no link.
+        let mut app = start(Os::Web, None);
+        app.on_auth_session(nsh_core::auth_session::AuthSessionOutcome::Completed(
+            "demo://done?code=10".into(),
+        ))
+        .unwrap();
+        app.press("Sign in").unwrap();
+        app.wait_for("text:signed in demo://done?code=10").unwrap();
+    }
+
+    #[test]
     fn the_app_closes_its_sign_in_session() {
         let mut app = Headless::start(EngineConfig::new(Root::of::<SigningIn>())).unwrap();
         app.first_render().unwrap();
@@ -3447,7 +3733,7 @@ mod tests {
 
     #[test]
     fn steps_press_what_a_text_is_in_and_wait_for_what_it_shows() {
-        let mut app = Headless::start(EngineConfig::new(Root::of::<Tally>())).unwrap();
+        let mut app = Headless::start(EngineConfig::new(crate::windowed_root::<Tally>())).unwrap();
         let steps = Arc::new(std::sync::Mutex::new(Vec::new()));
         let seen = steps.clone();
         app.observe(move |step, _| seen.lock().unwrap().push(step.to_owned()));
@@ -3530,7 +3816,7 @@ mod tests {
 
     #[test]
     fn a_canvas_nodes_are_found_and_a_press_on_one_reaches_the_view_under_it() {
-        let mut app = Headless::start(EngineConfig::new(Root::of::<Cells>())).unwrap();
+        let mut app = Headless::start(EngineConfig::new(crate::windowed_root::<Cells>())).unwrap();
         app.first_render().unwrap();
         app.wait_for("id:cell-b1").unwrap();
         assert_eq!(app.screen().count("label:Total"), Ok(1));
@@ -3605,7 +3891,8 @@ mod tests {
 
     #[test]
     fn roles_find_groups_and_states_follow_a_toggle() {
-        let mut app = Headless::start(EngineConfig::new(Root::of::<Formatting>())).unwrap();
+        let mut app =
+            Headless::start(EngineConfig::new(crate::windowed_root::<Formatting>())).unwrap();
         app.first_render().unwrap();
         let screen = app.screen();
         assert_eq!(screen.count("role:group[Text style]"), Ok(1));
@@ -3641,7 +3928,8 @@ mod tests {
     /// and the descent is 0.
     #[test]
     fn text_metrics_are_the_engines_line() {
-        let mut app = Headless::start(EngineConfig::new(Root::of::<Metrics>())).unwrap();
+        let mut app =
+            Headless::start(EngineConfig::new(crate::windowed_root::<Metrics>())).unwrap();
         app.first_render().unwrap();
         app.wait_for("33 24 0 24").unwrap();
     }
@@ -3674,7 +3962,7 @@ mod tests {
 
     #[test]
     fn typing_edits_an_input_key_by_key_and_submits_it() {
-        let mut app = Headless::start(EngineConfig::new(Root::of::<Form>())).unwrap();
+        let mut app = Headless::start(EngineConfig::new(crate::windowed_root::<Form>())).unwrap();
         app.first_render().unwrap();
         // By its placeholder, while it is empty.
         app.type_text("text:Your name", "Ada").unwrap();
@@ -3732,7 +4020,8 @@ mod tests {
 
     #[test]
     fn shift_or_alt_return_breaks_the_line_of_a_multiline_input_that_submits() {
-        let mut app = Headless::start(EngineConfig::new(Root::of::<Composer>())).unwrap();
+        let mut app =
+            Headless::start(EngineConfig::new(crate::windowed_root::<Composer>())).unwrap();
         app.first_render().unwrap();
         app.type_text("id:draft", "Hi").unwrap();
         // Shift+Return and Alt (Option)+Return break the line, as on every
@@ -3769,7 +4058,7 @@ mod tests {
 
     #[test]
     fn scrolling_moves_a_scroll_view_within_its_content() {
-        let mut app = Headless::start(EngineConfig::new(Root::of::<Rows>())).unwrap();
+        let mut app = Headless::start(EngineConfig::new(crate::windowed_root::<Rows>())).unwrap();
         app.first_render().unwrap();
         // A row names the scroll view it is in.
         app.scroll("Row 3", px(1000.0)).unwrap();
@@ -3844,22 +4133,31 @@ mod tests {
 
     #[test]
     fn a_drag_goes_to_what_a_finger_would_move() {
-        let mut app = Headless::start(EngineConfig::new(Root::of::<Drags>())).unwrap();
+        let mut app = Headless::start(EngineConfig::new(crate::windowed_root::<Drags>())).unwrap();
         app.first_render().unwrap();
         // A pan follows the finger to the end.
-        app.drag("id:card", point(px(120.0), px(-30.0))).unwrap();
+        app.drag(
+            "id:card",
+            point(px(120.0), px(-30.0)),
+            DragOptions::default(),
+        )
+        .unwrap();
         app.wait_for("Pan 120 -30").unwrap();
         // A finger moving off a button cancels its press: up, no press.
-        app.drag("Button", point(px(0.0), px(40.0))).unwrap();
+        app.drag("Button", point(px(0.0), px(40.0)), DragOptions::default())
+            .unwrap();
         app.wait_for("Presses 0 ups 1").unwrap();
         // A small slip still presses it.
-        app.drag("Button", point(px(0.0), px(4.0))).unwrap();
+        app.drag("Button", point(px(0.0), px(4.0)), DragOptions::default())
+            .unwrap();
         app.wait_for("Presses 1 ups 2").unwrap();
         // The views listening to touches hear the finger down, moving, up.
-        app.drag("id:pad", point(px(0.0), px(30.0))).unwrap();
+        app.drag("id:pad", point(px(0.0), px(30.0)), DragOptions::default())
+            .unwrap();
         assert!(!app.shows("Touches 0"));
         // A list pulled down past its top refreshes; dragged up, it scrolls.
-        app.drag("Row 2", point(px(0.0), px(300.0))).unwrap();
+        app.drag("Row 2", point(px(0.0), px(300.0)), DragOptions::default())
+            .unwrap();
         app.wait_for("Refreshes 1").unwrap();
         let Pick::One(list) = app
             .screen()
@@ -3870,13 +4168,18 @@ mod tests {
         assert_eq!(app.screen().scroll(list).map(|s| s.y), Some(Points::ZERO));
         // It takes the drag over once the finger passed the slop, a frame
         // in, and follows it from there, as the platforms' scroll views do.
-        app.drag("Row 2", point(px(0.0), px(-200.0))).unwrap();
+        app.drag("Row 2", point(px(0.0), px(-200.0)), DragOptions::default())
+            .unwrap();
         assert_eq!(app.screen().scroll(list).map(|s| s.y), Some(px(190.0)));
         // A short pull does not.
-        app.drag("Row 6", point(px(0.0), px(-40.0))).unwrap();
-        app.drag("Row 6", point(px(0.0), px(100.0))).unwrap();
+        app.drag("Row 6", point(px(0.0), px(-40.0)), DragOptions::default())
+            .unwrap();
+        app.drag("Row 6", point(px(0.0), px(100.0)), DragOptions::default())
+            .unwrap();
         assert!(app.shows("Refreshes 1"));
-        let error = app.drag("Nothing", point(px(1.0), px(1.0))).unwrap_err();
+        let error = app
+            .drag("Nothing", point(px(1.0), px(1.0)), DragOptions::default())
+            .unwrap_err();
         assert!(error.starts_with("no view matches `Nothing`"), "{error}");
     }
 
@@ -3899,12 +4202,15 @@ mod tests {
 
     #[test]
     fn a_pull_refreshes_at_its_threshold() {
-        let mut app = Headless::start(EngineConfig::new(Root::of::<FarPull>())).unwrap();
+        let mut app =
+            Headless::start(EngineConfig::new(crate::windowed_root::<FarPull>())).unwrap();
         app.first_render().unwrap();
         // 150 points of finger rubber-band to less than 100 (past 64).
-        app.drag("Row 2", point(px(0.0), px(150.0))).unwrap();
+        app.drag("Row 2", point(px(0.0), px(150.0)), DragOptions::default())
+            .unwrap();
         assert!(app.shows("Refreshes 0"));
-        app.drag("Row 2", point(px(0.0), px(1000.0))).unwrap();
+        app.drag("Row 2", point(px(0.0), px(1000.0)), DragOptions::default())
+            .unwrap();
         app.wait_for("Refreshes 1").unwrap();
     }
 
@@ -3926,7 +4232,7 @@ mod tests {
     }
 
     fn open_shortcuts(os: nsh_core::platform::Os) -> Headless {
-        let mut config = EngineConfig::new(Root::of::<Shortcuts>());
+        let mut config = EngineConfig::new(crate::windowed_root::<Shortcuts>());
         config.environment.os = os;
         config.environment.idiom = nsh_core::platform::Idiom::Desktop;
         let mut app = Headless::start(config).unwrap();
@@ -4042,7 +4348,7 @@ mod tests {
 
     #[test]
     fn tab_stays_in_the_newest_dialog_as_on_the_desktops() {
-        let mut config = EngineConfig::new(Root::of::<PageUnderDialog>());
+        let mut config = EngineConfig::new(crate::windowed_root::<PageUnderDialog>());
         config.environment.os = Os::MacOs;
         config.environment.idiom = nsh_core::platform::Idiom::Desktop;
         let mut app = Headless::start(config).unwrap();
@@ -4101,7 +4407,7 @@ mod tests {
     #[test]
     fn a_closed_dialog_gives_the_focus_back_as_on_the_desktops() {
         for os in [Os::MacOs, Os::Linux, Os::Web] {
-            let mut config = EngineConfig::new(Root::of::<DialogFromButton>());
+            let mut config = EngineConfig::new(crate::windowed_root::<DialogFromButton>());
             config.environment.os = os;
             config.environment.idiom = nsh_core::platform::Idiom::Desktop;
             let mut app = Headless::start(config).unwrap();
@@ -4198,7 +4504,7 @@ mod tests {
     #[test]
     fn a_pushed_page_takes_the_keyboard_focus_off_the_page_it_covers() {
         for os in [Os::MacOs, Os::Linux, Os::Web] {
-            let mut config = EngineConfig::new(Root::of::<PushFromButton>());
+            let mut config = EngineConfig::new(crate::windowed_root::<PushFromButton>());
             config.environment.os = os;
             config.environment.idiom = nsh_core::platform::Idiom::Desktop;
             let mut app = Headless::start(config).unwrap();
@@ -4231,7 +4537,7 @@ mod tests {
     #[test]
     fn a_back_takes_the_keyboard_focus_off_the_page_it_pops() {
         for os in [Os::MacOs, Os::Linux, Os::Web] {
-            let mut config = EngineConfig::new(Root::of::<PushFromButton>());
+            let mut config = EngineConfig::new(crate::windowed_root::<PushFromButton>());
             config.environment.os = os;
             config.environment.idiom = nsh_core::platform::Idiom::Desktop;
             let mut app = Headless::start(config).unwrap();
@@ -4309,7 +4615,7 @@ mod tests {
     #[test]
     fn return_presses_no_control_outside_the_newest_dialog() {
         for os in [Os::MacOs, Os::Linux, Os::Web] {
-            let mut config = EngineConfig::new(Root::of::<FocusUnderDialog>());
+            let mut config = EngineConfig::new(crate::windowed_root::<FocusUnderDialog>());
             config.environment.os = os;
             config.environment.idiom = nsh_core::platform::Idiom::Desktop;
             let mut app = Headless::start(config).unwrap();
@@ -4336,7 +4642,7 @@ mod tests {
 
     #[test]
     fn tab_stops_at_a_focusable_view_that_takes_no_presses() {
-        let mut config = EngineConfig::new(Root::of::<FocusStops>());
+        let mut config = EngineConfig::new(crate::windowed_root::<FocusStops>());
         config.environment.os = Os::MacOs;
         config.environment.idiom = nsh_core::platform::Idiom::Desktop;
         let mut app = Headless::start(config).unwrap();
@@ -4428,7 +4734,7 @@ mod tests {
     #[test]
     fn return_and_space_press_the_focused_control_before_the_shortcuts() {
         for os in [Os::MacOs, Os::Web, Os::Linux] {
-            let mut config = EngineConfig::new(Root::of::<ReturnAllows>());
+            let mut config = EngineConfig::new(crate::windowed_root::<ReturnAllows>());
             config.environment.os = os;
             config.environment.idiom = nsh_core::platform::Idiom::Desktop;
             let mut app = Headless::start(config).unwrap();
@@ -4463,7 +4769,7 @@ mod tests {
 
     #[test]
     fn tab_stops_at_fields_and_controls_on_windows() {
-        let mut config = EngineConfig::new(Root::of::<ReturnAllows>());
+        let mut config = EngineConfig::new(crate::windowed_root::<ReturnAllows>());
         config.environment.os = Os::Windows;
         config.environment.idiom = nsh_core::platform::Idiom::Desktop;
         let mut app = Headless::start(config).unwrap();
@@ -4514,7 +4820,8 @@ mod tests {
     /// its rows in the order they show.
     #[test]
     fn a_lists_recycled_rows_are_found_in_screen_order() {
-        let mut app = Headless::start(EngineConfig::new(Root::of::<LongList>())).unwrap();
+        let mut app =
+            Headless::start(EngineConfig::new(crate::windowed_root::<LongList>())).unwrap();
         app.first_render().unwrap();
         for distance in [
             300.0, 500.0, -200.0, 900.0, -700.0, 1300.0, -400.0, 250.0, -1100.0, 800.0,
@@ -4556,7 +4863,8 @@ mod tests {
     /// page, its cells read in screen order all the same.
     #[test]
     fn a_page_lists_recycled_rows_are_found_in_screen_order() {
-        let mut app = Headless::start(EngineConfig::new(Root::of::<LongPage>())).unwrap();
+        let mut app =
+            Headless::start(EngineConfig::new(crate::windowed_root::<LongPage>())).unwrap();
         app.first_render().unwrap();
         for distance in [
             300.0, 500.0, -200.0, 900.0, -700.0, 1300.0, -400.0, 250.0, -1100.0, 800.0,
@@ -4609,7 +4917,7 @@ mod tests {
     /// Shift+Tab walks them back.
     #[test]
     fn tab_walks_every_row_of_a_list() {
-        let mut config = EngineConfig::new(Root::of::<TabbedList>());
+        let mut config = EngineConfig::new(crate::windowed_root::<TabbedList>());
         config.environment.os = Os::MacOs;
         config.environment.idiom = nsh_core::platform::Idiom::Desktop;
         let mut app = Headless::start(config).unwrap();
@@ -4786,7 +5094,8 @@ mod tests {
     /// end, not to its first visible row.
     #[test]
     fn a_bottom_aligned_list_stays_at_its_end_as_rows_above_are_measured() {
-        let mut app = Headless::start(EngineConfig::new(Root::of::<BottomCards>())).unwrap();
+        let mut app =
+            Headless::start(EngineConfig::new(crate::windowed_root::<BottomCards>())).unwrap();
         app.first_render().unwrap();
         app.wait(Duration::from_millis(500)).unwrap();
         // How far above the viewport's end card 199's text starts: at the
@@ -4867,7 +5176,7 @@ mod tests {
     #[test]
     fn the_save_dialog_answers_with_the_path_the_test_chose() {
         use nsh_core::file_dialog::FileRequest;
-        let mut app = Headless::start(EngineConfig::new(Root::of::<SaveAs>())).unwrap();
+        let mut app = Headless::start(EngineConfig::new(crate::windowed_root::<SaveAs>())).unwrap();
         app.first_render().unwrap();
         // No file dialogs on this platform: unavailable at once.
         app.press("Save").unwrap();
@@ -4876,16 +5185,22 @@ mod tests {
         app.on_pick_save_path(None).unwrap();
         app.press("Save").unwrap();
         app.wait_for("Saved cancelled").unwrap();
-        app.on_pick_save_path(Some("/docs/a.md".into())).unwrap();
+        // Absolute on every OS the tests run on: reveal refuses the rest.
+        let docs = if cfg!(windows) {
+            "C:\\docs\\a.md"
+        } else {
+            "/docs/a.md"
+        };
+        app.on_pick_save_path(Some(docs.into())).unwrap();
         app.press("Save").unwrap();
-        app.wait_for("Saved /docs/a.md true").unwrap();
+        app.wait_for(&format!("Saved {docs} true")).unwrap();
         let requests = app.screen().file_requests();
         assert_eq!(requests.len(), 3);
         assert!(matches!(
             &requests[1],
             FileRequest::SaveDialog(save) if save.file_name.as_deref() == Some("Untitled.md")
         ));
-        assert_eq!(requests[2], FileRequest::RevealPath("/docs/a.md".into()));
+        assert_eq!(requests[2], FileRequest::RevealPath(docs.into()));
     }
 
     /// A clipping box with padding that holds a label, a box wider than it,
@@ -4920,7 +5235,7 @@ mod tests {
 
     #[test]
     fn layout_nodes_give_each_views_box_parent_clip_and_text_box() {
-        let mut app = Headless::start(EngineConfig::new(Root::of::<Laid>())).unwrap();
+        let mut app = Headless::start(EngineConfig::new(crate::windowed_root::<Laid>())).unwrap();
         app.first_render().unwrap();
         let nodes = app.screen().layout_nodes();
 
@@ -4965,7 +5280,7 @@ mod tests {
 
     #[test]
     fn layout_nodes_follow_scroll_offsets() {
-        let mut app = Headless::start(EngineConfig::new(Root::of::<Rows>())).unwrap();
+        let mut app = Headless::start(EngineConfig::new(crate::windowed_root::<Rows>())).unwrap();
         app.first_render().unwrap();
         let row = |app: &Headless| {
             let nodes = app.screen().layout_nodes();
@@ -5009,11 +5324,11 @@ mod tests {
     fn start_with_text_engine_lays_text_out_with_the_given_engine() {
         let counting = Counting::default();
         let seen = counting.0.clone();
-        let mut app =
-            Headless::start_with_text_engine(EngineConfig::new(Root::of::<Laid>()), move || {
-                counting
-            })
-            .unwrap();
+        let mut app = Headless::start_with_text_engine(
+            EngineConfig::new(crate::windowed_root::<Laid>()),
+            move || counting,
+        )
+        .unwrap();
         app.first_render().unwrap();
         assert!(seen.load(Ordering::Relaxed) > 0);
         assert!(app.shows("Label"));
@@ -5048,7 +5363,7 @@ mod tests {
 
     #[test]
     fn a_key_fires_the_bindings_of_the_focused_window() {
-        let mut config = EngineConfig::new(Root::of::<WindowKeys>());
+        let mut config = EngineConfig::new(crate::windowed_root::<WindowKeys>());
         config.environment.os = Os::MacOs;
         let mut app = Headless::start(config).unwrap();
         app.first_render().unwrap();
@@ -5081,7 +5396,7 @@ mod tests {
     }
 
     fn open_by_width(os: nsh_core::platform::Os) -> Headless {
-        let mut config = EngineConfig::new(Root::of::<ByWidth>());
+        let mut config = EngineConfig::new(crate::windowed_root::<ByWidth>());
         config.environment.os = os;
         config.viewport = Size::new(px(800.0), px(600.0));
         let mut app = Headless::start(config).unwrap();
@@ -5181,7 +5496,7 @@ mod tests {
 
     #[test]
     fn a_ref_focuses_a_focusable_view_and_its_keys_reach_it() {
-        let mut app = start_linux(Root::of::<FocusPads>());
+        let mut app = start_linux(crate::windowed_root::<FocusPads>());
         app.first_render().unwrap();
         // `focus()` on the first pad's ref takes the keyboard focus there,
         // and the pad hears the keys while it has it.
@@ -5232,7 +5547,7 @@ mod tests {
 
     #[test]
     fn key_downs_reach_the_focused_view_then_its_ancestors_and_key_ups_come_back() {
-        let mut app = start_linux(Root::of::<KeyBubble>());
+        let mut app = start_linux(crate::windowed_root::<KeyBubble>());
         app.first_render().unwrap();
         // Tab stops at the pad: it has the keyboard focus.
         app.press_key("tab").unwrap();
@@ -5277,7 +5592,7 @@ mod tests {
 
     #[test]
     fn a_key_up_goes_to_the_view_focused_when_the_source_reports_it() {
-        let mut app = start_linux(Root::of::<ReleaseFocus>());
+        let mut app = start_linux(crate::windowed_root::<ReleaseFocus>());
         app.first_render().unwrap();
         // Tab focuses the first pad; the next Tab is heard by it, moves the
         // focus to the second pad, and its release belongs to that one.
@@ -5307,7 +5622,7 @@ mod tests {
 
     #[test]
     fn a_raw_key_reports_the_simulated_source_without_inventing_a_code() {
-        let mut app = start_linux(Root::of::<RawKey>());
+        let mut app = start_linux(crate::windowed_root::<RawKey>());
         app.first_render().unwrap();
         app.press_key("tab").unwrap();
         // Shift's case is the reported logical key, and the simulation has
@@ -5338,7 +5653,7 @@ mod tests {
 
     #[test]
     fn a_native_input_owns_its_keys_and_a_listener_around_it_hears_none() {
-        let mut app = start_linux(Root::of::<InputOwnsKeys>());
+        let mut app = start_linux(crate::windowed_root::<InputOwnsKeys>());
         app.first_render().unwrap();
         app.type_text("id:name", "x").unwrap();
         // The press edits the focused input; the ancestor's raw listener
@@ -5384,7 +5699,7 @@ mod tests {
 
     #[test]
     fn a_captured_key_is_marked_and_its_ancestors_hear_it_too() {
-        let mut app = start_linux(Root::of::<KeyCaptured>());
+        let mut app = start_linux(crate::windowed_root::<KeyCaptured>());
         app.first_render().unwrap();
         app.press_key("tab").unwrap();
         // Captured: the view and its ancestor hear it, marked captured, so
@@ -5458,7 +5773,7 @@ mod tests {
 
     #[test]
     fn a_portaled_view_uses_its_logical_parent_for_keys_and_capture() {
-        let mut app = start_linux(Root::of::<PortalKeys>());
+        let mut app = start_linux(crate::windowed_root::<PortalKeys>());
         app.first_render().unwrap();
         // Tab enters the first portal: its pad has no listener, but the
         // view around the Overlay hears the key and its capture applies.
@@ -5499,7 +5814,7 @@ mod tests {
 
     #[test]
     fn a_listener_above_a_silent_view_hears_the_key_captured_or_not() {
-        let mut app = start_linux(Root::of::<KeyAncestorOnly>());
+        let mut app = start_linux(crate::windowed_root::<KeyAncestorOnly>());
         app.first_render().unwrap();
         app.press_key("tab").unwrap();
         // The pad itself listens to nothing: the view around it hears the
@@ -5556,7 +5871,7 @@ mod tests {
 
     #[test]
     fn an_app_shortcut_beats_a_capture_and_a_passing_one_lets_it_through() {
-        let mut app = start_linux(Root::of::<KeyPrecedence>());
+        let mut app = start_linux(crate::windowed_root::<KeyPrecedence>());
         app.first_render().unwrap();
         app.press_key("tab").unwrap();
         // The shortcut on "a" takes the key first: the view never hears it,
@@ -5600,7 +5915,7 @@ mod tests {
 
     #[test]
     fn the_wheel_reaches_a_listener_and_otherwise_scrolls_the_scroll_view() {
-        let mut app = start_linux(Root::of::<Wheeled>());
+        let mut app = start_linux(crate::windowed_root::<Wheeled>());
         app.first_render().unwrap();
         let Pick::One(rows) = app
             .screen()
@@ -5651,7 +5966,7 @@ mod tests {
 
     #[test]
     fn a_listener_with_a_pan_axis_takes_only_wheels_along_it() {
-        let mut app = start_linux(Root::of::<WheeledTimeline>());
+        let mut app = start_linux(crate::windowed_root::<WheeledTimeline>());
         app.first_render().unwrap();
         let Pick::One(rows) = app
             .screen()
@@ -5692,7 +6007,7 @@ mod tests {
 
     #[test]
     fn a_listener_around_a_scroll_view_observes_the_wheel_and_the_scroll_happens() {
-        let mut app = start_linux(Root::of::<WheelRootObserver>());
+        let mut app = start_linux(crate::windowed_root::<WheelRootObserver>());
         app.first_render().unwrap();
         let Pick::One(rows) = app
             .screen()
@@ -5733,7 +6048,7 @@ mod tests {
 
     #[test]
     fn a_disabled_wheel_listener_lets_the_scroll_view_scroll() {
-        let mut app = start_linux(Root::of::<WheelDisabled>());
+        let mut app = start_linux(crate::windowed_root::<WheelDisabled>());
         app.first_render().unwrap();
         let Pick::One(rows) = app
             .screen()
@@ -5783,7 +6098,7 @@ mod tests {
 
     #[test]
     fn capture_stops_when_the_view_is_built_without_it() {
-        let mut app = start_linux(Root::of::<KeyCaptureLive>());
+        let mut app = start_linux(crate::windowed_root::<KeyCaptureLive>());
         app.first_render().unwrap();
         app.press_key("tab").unwrap();
         // The rule is in the view's props: the press is the platform's.
@@ -5851,7 +6166,7 @@ mod tests {
 
     #[test]
     fn a_capture_rule_goes_away_with_the_view_that_holds_it() {
-        let mut app = start_linux(Root::of::<KeyCaptureUnmounted>());
+        let mut app = start_linux(crate::windowed_root::<KeyCaptureUnmounted>());
         app.first_render().unwrap();
         app.press_key("tab").unwrap();
         app.press_key("a").unwrap();
@@ -5899,7 +6214,7 @@ mod tests {
 
     #[test]
     fn a_listening_view_keeps_tabs_enters_spaces_and_context_menu_keys() {
-        let mut app = start_linux(Root::of::<KeyDefaults>());
+        let mut app = start_linux(crate::windowed_root::<KeyDefaults>());
         app.first_render().unwrap();
         app.press_key("tab").unwrap();
         // Enter and Space press the pad, as the platform does: merely
@@ -5951,7 +6266,7 @@ mod tests {
 
     #[test]
     fn a_view_that_loses_the_focus_to_disabling_takes_no_input_and_comes_back() {
-        let mut app = start_linux(Root::of::<KeyDisabled>());
+        let mut app = start_linux(crate::windowed_root::<KeyDisabled>());
         app.first_render().unwrap();
         app.press_key("tab").unwrap();
         // Its keys reach it while it can hold the focus.
@@ -6024,7 +6339,7 @@ mod tests {
 
     #[test]
     fn a_capture_rule_stops_at_the_root_of_its_window() {
-        let mut app = start_linux(Root::of::<KeyWindows>());
+        let mut app = start_linux(crate::windowed_root::<KeyWindows>());
         app.first_render().unwrap();
         app.press("id:pad").unwrap();
         // The main window captures every key, but the pad is in a window
@@ -6067,7 +6382,7 @@ mod tests {
 
     #[test]
     fn the_wheel_goes_to_the_view_a_pointer_over_the_selector_reaches() {
-        let mut app = start_linux(Root::of::<WheelNested>());
+        let mut app = start_linux(crate::windowed_root::<WheelNested>());
         app.first_render().unwrap();
         // The selector names the container, but a pointer at its center is
         // over the child: the child's listener takes the wheel.
@@ -6099,7 +6414,7 @@ mod tests {
 
     #[test]
     fn a_locked_scroll_view_leaves_the_wheel_to_one_around_it() {
-        let mut app = start_linux(Root::of::<WheelLocked>());
+        let mut app = start_linux(crate::windowed_root::<WheelLocked>());
         app.first_render().unwrap();
         let id = |app: &Headless, s: &str| match app.screen().view(&Selector::parse(s).unwrap()) {
             Pick::One(id) => id,
@@ -6144,7 +6459,7 @@ mod tests {
 
     #[test]
     fn the_release_follows_the_press_it_belongs_to() {
-        let mut app = start_linux(Root::of::<KeyHeld>());
+        let mut app = start_linux(crate::windowed_root::<KeyHeld>());
         app.first_render().unwrap();
         app.press_key("tab").unwrap();
         // Enter and Space press the pad while their key is down; the
@@ -6201,7 +6516,7 @@ mod tests {
 
     #[test]
     fn a_disabled_view_in_the_main_window_is_not_over_another_windows_pad() {
-        let mut app = start_linux(Root::of::<KeyWindowFocus>());
+        let mut app = start_linux(crate::windowed_root::<KeyWindowFocus>());
         app.first_render().unwrap();
         // Activate the pad's own window; Tab stays within the active window.
         // The disabled ancestor in the main window must not suppress it.
@@ -6245,7 +6560,7 @@ mod tests {
 
     #[test]
     fn a_native_view_does_not_hide_a_listener_around_it_from_the_wheel() {
-        let mut app = start_linux(Root::of::<WheelWebView>());
+        let mut app = start_linux(crate::windowed_root::<WheelWebView>());
         app.first_render().unwrap();
         // A web view over the pointer scrolls itself, but the nearest
         // listener around it still hears the wheel: it observes, and no
@@ -6284,7 +6599,7 @@ mod tests {
 
     #[test]
     fn the_wheel_scrolls_along_its_axis_and_passes_on_at_an_edge() {
-        let mut app = start_linux(Root::of::<WheelAxes>());
+        let mut app = start_linux(crate::windowed_root::<WheelAxes>());
         app.first_render().unwrap();
         let id = |app: &Headless, s: &str| match app.screen().view(&Selector::parse(s).unwrap()) {
             Pick::One(id) => id,
@@ -6331,7 +6646,7 @@ mod tests {
 
     #[test]
     fn a_back_attempt_precedes_the_keys_release() {
-        let mut app = start_linux(Root::of::<KeyBack>());
+        let mut app = start_linux(crate::windowed_root::<KeyBack>());
         app.first_render().unwrap();
         app.press_key("tab").unwrap();
         app.press_key("escape").unwrap();

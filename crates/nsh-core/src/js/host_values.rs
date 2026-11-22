@@ -8,8 +8,9 @@ use crate::{
     CellSlot, EdgeInsets, HeaderItem, HeaderItemContent, HeaderSystemItem, ImageScales,
     ImageSource, KeyboardTaps, ListContentStyle, MacOsBackdrop, MacOsBackdropBlending,
     MacOsBackdropMaterial, MacOsBackdropState, ModalProp, Prop, RevealOptions, ScreenProp,
-    ScrollAlignment, ScrollProp, StatusBarSetting, StatusBarStyle, Viewability,
-    element::{ElementTarget, TsTypes},
+    ScrollAlignment, ScrollProp, StatusBarSetting, StatusBarStyle, Viewability, WindowsBackdrop,
+    WindowsBackdropMaterial,
+    element::{ElementTarget, ScrollEdgeTarget, TsTypes},
     geometry::{Bounds, Percentage, Points, point, size},
     mount::ModalConfig,
     ops::OverlayProp,
@@ -136,8 +137,8 @@ impl HostValue for RevealOptions {
     }
 }
 
-/// A list's `contentStyle`: the padding properties (numbers) and
-/// `gap` / `rowGap` / `columnGap`.
+/// A list's `contentStyle`: the padding properties (numbers),
+/// `gap` / `rowGap` / `columnGap`, and cross-axis `alignItems`.
 impl HostValue for ListContentStyle {
     fn decode<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Self> {
         let n = |key| points(input, key);
@@ -145,6 +146,16 @@ impl HostValue for ListContentStyle {
         let inline = n("paddingHorizontal").unwrap_or(all);
         let block = n("paddingVertical").unwrap_or(all);
         let gap = n("gap").unwrap_or_default();
+        let align_items = input
+            .field("alignItems")
+            .and_then(|v| v.as_string())
+            .and_then(|v| match v.as_str() {
+                "stretch" => Some(taffy::AlignItems::STRETCH),
+                "flex-start" => Some(taffy::AlignItems::FLEX_START),
+                "center" => Some(taffy::AlignItems::CENTER),
+                "flex-end" => Some(taffy::AlignItems::FLEX_END),
+                _ => None,
+            });
         Some(ListContentStyle {
             padding: EdgeInsets {
                 top: n("paddingTop").unwrap_or(block),
@@ -154,16 +165,17 @@ impl HostValue for ListContentStyle {
             },
             row_gap: n("rowGap").unwrap_or(gap),
             column_gap: n("columnGap").unwrap_or(gap),
+            align_items,
         })
     }
 
     fn ts_type(types: &mut TsTypes) -> String {
         types.declare("ListContentStyle", |_| {
-            "/** Padding and gaps of a list's content (`contentStyle`). */\n\
+            "/** Padding, gaps and cell alignment of a list's content (`contentStyle`). */\n\
              export interface ListContentStyle {\n  padding?: number;\n  paddingHorizontal?: number;\n  \
              paddingVertical?: number;\n  paddingTop?: number;\n  paddingRight?: number;\n  \
              paddingBottom?: number;\n  paddingLeft?: number;\n  gap?: number;\n  rowGap?: number;\n  \
-             columnGap?: number;\n}"
+             columnGap?: number;\n  alignItems?: \"stretch\" | \"flex-start\" | \"center\" | \"flex-end\";\n}"
                 .into()
         })
     }
@@ -192,6 +204,50 @@ impl HostValue for MacOsBackdrop {
                 "/** The material a view draws with on macOS (`macos={{{{ backdrop }}}}`). */\n\
                  export interface MacOsBackdrop {{\n  material?: {material};\n  \
                  blending?: {blending};\n  state?: {state};\n}}"
+            )
+        })
+    }
+}
+
+/// `ios={{ scrollEdgeElement }}`: `{ scrollView, edge }`, the scroll
+/// view a ref holds and the edge (`"bottom"` when left out or unknown);
+/// without a scroll view it is none.
+impl HostValue for ScrollEdgeTarget {
+    fn decode<I: HostInput>(input: &I, cx: &mut HostCx) -> Option<Self> {
+        let scroll_view = input.field("scrollView")?.node()?;
+        let edge = field::<crate::ScrollEdge, _>(input, "edge", cx).unwrap_or_default();
+        Some(ScrollEdgeTarget::of_node(scroll_view, edge))
+    }
+
+    fn ts_type(types: &mut TsTypes) -> String {
+        let edge = <crate::ScrollEdge as HostValue>::ts_type(types);
+        types.declare("ScrollEdgeElement", |_| {
+            format!(
+                "/** The scroll view a view floats over and the edge of it the view sits at \
+                 (`ios={{{{ scrollEdgeElement }}}}`). */\n\
+                 export interface ScrollEdgeElement {{\n  scrollView: ViewRef;\n  \
+                 edge?: {edge};\n}}"
+            )
+        })
+    }
+}
+
+impl HostValue for WindowsBackdrop {
+    fn decode<I: HostInput>(input: &I, cx: &mut HostCx) -> Option<Self> {
+        if !input.is_object() {
+            return None;
+        }
+        Some(Self {
+            material: field(input, "material", cx)?,
+        })
+    }
+
+    fn ts_type(types: &mut TsTypes) -> String {
+        let material = <WindowsBackdropMaterial as HostValue>::ts_type(types);
+        types.declare("WindowsBackdrop", |_| {
+            format!(
+                "/** The material a view draws with on Windows (`windows={{{{ backdrop }}}}`). */\n\
+                 export interface WindowsBackdrop {{\n  material: {material};\n}}"
             )
         })
     }

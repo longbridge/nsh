@@ -15,6 +15,7 @@ use nsh_dev::protocol::{ClockChange, TestStep};
 use serde_json::Value;
 
 use crate::{
+    DragOptions,
     headless::{DialogAnswer, Headless},
     module::LocaleSettingsOptions,
 };
@@ -29,7 +30,12 @@ pub(crate) trait Driver: Send {
     fn submit(&mut self, selector: &str) -> Result<(), String>;
     fn clear(&mut self, selector: &str) -> Result<(), String>;
     fn scroll(&mut self, selector: &str, distance: Points) -> Result<(), String>;
-    fn drag(&mut self, selector: &str, by: Point<Points>) -> Result<(), String>;
+    fn drag(
+        &mut self,
+        selector: &str,
+        by: Point<Points>,
+        options: DragOptions,
+    ) -> Result<(), String>;
     /// An input method composes `text` in the input `selector` names.
     fn compose(&mut self, selector: &str, text: &str) -> Result<(), String>;
     /// Drops local files (`file:` URLs) on what `selector` names.
@@ -38,9 +44,14 @@ pub(crate) trait Driver: Send {
         Err("`dropFiles` runs headless, on Linux and on macOS for now".into())
     }
     /// Drags without lifting, until [`Driver::drop_held`].
-    fn drag_and_hold(&mut self, selector: &str, by: Point<Points>) -> Result<(), String> {
-        let _ = (selector, by);
-        Err("`dragAndHold` runs headless and on Linux for now".into())
+    fn drag_and_hold(
+        &mut self,
+        selector: &str,
+        by: Point<Points>,
+        options: DragOptions,
+    ) -> Result<(), String> {
+        let _ = (selector, by, options);
+        Err("`dragAndHold` runs headless, on Linux and on iOS for now".into())
     }
     /// Lifts the finger `drag_and_hold` left down.
     fn drop_held(&mut self) -> Result<(), String> {
@@ -88,6 +99,14 @@ pub(crate) trait Driver: Send {
     /// The system wakes from sleep (`wakeCount()`).
     fn wake(&mut self) -> Result<(), String> {
         Err(headless_only("wake"))
+    }
+    /// The OS asks the app to show itself (`Application.on("reopen")`).
+    fn reopen(&mut self) -> Result<(), String> {
+        Err(headless_only("reopen"))
+    }
+    /// The user asks to quit (`Application.on("quitRequest")`).
+    fn quit_request(&mut self) -> Result<(), String> {
+        Err(headless_only("quitRequest"))
     }
     /// The user's locale settings that `settings` names, as the system
     /// reports them (`localeSettings()`).
@@ -191,6 +210,13 @@ pub(crate) trait Driver: Send {
     fn storage(&mut self) -> Result<std::collections::BTreeMap<String, String>, String> {
         Err(headless_only("reading the storage this way"))
     }
+    /// The ids of the app's open windows, in opening order.
+    fn window_ids(&mut self) -> Result<Vec<String>, String>;
+    /// Whether the app quit (`Application.quit()`, its Quit item, or the
+    /// core quitting on its last window's close).
+    fn quit(&mut self) -> Result<bool, String> {
+        Err(headless_only("reading whether the app quit"))
+    }
     /// The state of the app's window `id` as the platform reports it;
     /// `None` while it is not open.
     fn window_state(&mut self, id: &str) -> Result<Option<nsh_core::desktop::WindowState>, String>;
@@ -223,14 +249,24 @@ impl Driver for Headless {
     fn scroll(&mut self, selector: &str, distance: Points) -> Result<(), String> {
         Headless::scroll(self, selector, distance)
     }
-    fn drag(&mut self, selector: &str, by: Point<Points>) -> Result<(), String> {
-        Headless::drag(self, selector, by)
+    fn drag(
+        &mut self,
+        selector: &str,
+        by: Point<Points>,
+        options: DragOptions,
+    ) -> Result<(), String> {
+        Headless::drag(self, selector, by, options)
     }
     fn hold_keys(&mut self, keys: &str, down: bool) -> Result<(), String> {
         Headless::hold_keys(self, keys, down)
     }
-    fn drag_and_hold(&mut self, selector: &str, by: Point<Points>) -> Result<(), String> {
-        Headless::drag_and_hold(self, selector, by)
+    fn drag_and_hold(
+        &mut self,
+        selector: &str,
+        by: Point<Points>,
+        options: DragOptions,
+    ) -> Result<(), String> {
+        Headless::drag_and_hold(self, selector, by, options)
     }
     fn drop_files(&mut self, selector: &str, uris: Vec<String>) -> Result<(), String> {
         Headless::drop_files(self, selector, uris)
@@ -296,6 +332,12 @@ impl Driver for Headless {
     }
     fn wake(&mut self) -> Result<(), String> {
         self.set_environment("wake()", |e| e.wake_count = e.wake_count.wrapping_add(1))
+    }
+    fn reopen(&mut self) -> Result<(), String> {
+        Headless::reopen(self)
+    }
+    fn quit_request(&mut self) -> Result<(), String> {
+        Headless::quit_request(self)
     }
     fn set_locale_settings(&mut self, settings: LocaleSettingsOptions) -> Result<(), String> {
         let pins = settings.pins("setLocaleSettings")?;
@@ -422,6 +464,12 @@ impl Driver for Headless {
                 .into(),
         )
     }
+    fn window_ids(&mut self) -> Result<Vec<String>, String> {
+        Headless::window_ids(self)
+    }
+    fn quit(&mut self) -> Result<bool, String> {
+        Ok(Headless::quit(self))
+    }
     fn window_state(&mut self, id: &str) -> Result<Option<nsh_core::desktop::WindowState>, String> {
         Headless::window_state(self, id)
     }
@@ -527,9 +575,33 @@ fn step_name(step: &TestStep) -> Option<String> {
         TestStep::Scroll { selector, distance } => {
             format!("scroll({selector}, {})", Points(*distance))
         }
-        TestStep::Drag { selector, x, y } => {
-            format!("drag({selector}, {}, {})", Points(*x), Points(*y))
+        TestStep::Drag {
+            selector,
+            x,
+            y,
+            hold_ms,
+        } => {
+            let hold = hold_ms
+                .map(|ms| format!(", hold={ms}ms"))
+                .unwrap_or_default();
+            format!("drag({selector}, {}, {}{hold})", Points(*x), Points(*y))
         }
+        TestStep::DragAndHold {
+            selector,
+            x,
+            y,
+            hold_ms,
+        } => {
+            let hold = hold_ms
+                .map(|ms| format!(", hold={ms}ms"))
+                .unwrap_or_default();
+            format!(
+                "dragAndHold({selector}, {}, {}{hold})",
+                Points(*x),
+                Points(*y)
+            )
+        }
+        TestStep::Drop => String::from("drop()"),
         TestStep::PressKey { keys } => format!("keyboard.press({keys})"),
         TestStep::Hover { selector } => format!("hover({selector})"),
         TestStep::RightClick { selector } => format!("rightClick({selector})"),
@@ -612,8 +684,14 @@ impl Driver for Remote {
             distance: distance.0,
         })
     }
-    fn drag(&mut self, selector: &str, by: Point<Points>) -> Result<(), String> {
+    fn drag(
+        &mut self,
+        selector: &str,
+        by: Point<Points>,
+        options: DragOptions,
+    ) -> Result<(), String> {
         self.action(TestStep::Drag {
+            hold_ms: options.hold_ms(),
             selector: selector.into(),
             x: by.x.0,
             y: by.y.0,
@@ -622,8 +700,14 @@ impl Driver for Remote {
     fn press_key(&mut self, keys: &str) -> Result<(), String> {
         self.action(TestStep::PressKey { keys: keys.into() })
     }
-    fn drag_and_hold(&mut self, selector: &str, by: Point<Points>) -> Result<(), String> {
+    fn drag_and_hold(
+        &mut self,
+        selector: &str,
+        by: Point<Points>,
+        options: DragOptions,
+    ) -> Result<(), String> {
         self.action(TestStep::DragAndHold {
+            hold_ms: options.hold_ms(),
             selector: selector.into(),
             x: by.x.0,
             y: by.y.0,
@@ -849,6 +933,10 @@ impl Driver for Remote {
         self.query(TestStep::Scene {
             query: nsh_dev::protocol::SceneQuery::Storage,
         })
+    }
+    fn window_ids(&mut self) -> Result<Vec<String>, String> {
+        let value = self.query(TestStep::WindowIds)?;
+        serde_json::from_value(value).map_err(|e| format!("the host sent broken window ids: {e}"))
     }
     fn window_state(&mut self, id: &str) -> Result<Option<nsh_core::desktop::WindowState>, String> {
         let value = self.take(TestStep::WindowState { id: id.into() })?;

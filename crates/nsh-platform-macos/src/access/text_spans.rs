@@ -227,8 +227,11 @@ pub(crate) fn selection(view: &NshView, label: Range<u32>) -> Option<(NSRange, S
     }
     let state = view.try_state()?;
     let text = &state.text.as_ref()?.text;
-    let before = text.copied_text(label.start..start).encode_utf16().count();
-    let selected = text.copied_text(start..end);
+    let before = text
+        .text_without_attachments(label.start..start)
+        .encode_utf16()
+        .count();
+    let selected = text.text_without_attachments(start..end);
     Some((
         NSRange::new(before, selected.encode_utf16().count()),
         selected,
@@ -355,7 +358,7 @@ fn snapshot(view: &NshView) -> Option<Rc<Snapshot>> {
             if node.is_none() && !separate_text {
                 return None;
             }
-            let shown = text.copied_text(range.clone());
+            let shown = text.text_without_attachments(range.clone());
             if shown.is_empty() {
                 return None;
             }
@@ -458,7 +461,7 @@ mod tests {
         text.links = vec![link(1, 6, 2), link(3, 5, 3), link(6, 99, 4), link(2, 2, 5)];
         let pieces: Vec<_> = stretches(&text)
             .into_iter()
-            .map(|(range, node)| (text.copied_text(range), node))
+            .map(|(range, node)| (text.text_without_attachments(range), node))
             .collect();
         assert_eq!(
             pieces,
@@ -487,7 +490,7 @@ mod tests {
         text.links = vec![link(5, 18, 2)];
         let labels: Vec<_> = stretches(&text)
             .into_iter()
-            .map(|(range, _)| text.copied_text(range))
+            .map(|(range, _)| text.text_without_attachments(range))
             .filter(|s| !s.is_empty())
             .collect();
         assert_eq!(labels, ["Read ", " guide"]);
@@ -504,7 +507,7 @@ mod tests {
         text.push("fore", ResolvedTextStyle::default());
         text.links = vec![link(0, 7, 2)];
         assert_eq!(stretches(&text), [(0..7, Some(2))]);
-        assert_eq!(text.copied_text(0..7), "before");
+        assert_eq!(text.text_without_attachments(0..7), "before");
     }
 
     #[test]
@@ -518,7 +521,7 @@ mod tests {
         text.push("fore Guide", ResolvedTextStyle::default());
         text.links = vec![link(8, 13, 2)];
         assert_eq!(stretches(&text), [(0..8, None), (8..13, Some(2))]);
-        assert_eq!(text.copied_text(0..8), "before ");
+        assert_eq!(text.text_without_attachments(0..8), "before ");
     }
 
     #[test]

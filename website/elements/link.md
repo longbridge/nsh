@@ -31,6 +31,7 @@ fn docs() -> impl IntoElement {
 ```tsx tabs
 import { mount, Text } from "nsh";
 import { Link } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 function App() {
   return (
@@ -43,7 +44,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 `Link` comes from [`nsh/base`](../modules/nsh-base.md), the `nsh-base` crate in Rust. In Rust, `link()` makes one
