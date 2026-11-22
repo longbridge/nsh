@@ -2666,15 +2666,20 @@ impl View {
     /// indicator on the selected tab): along the main axis of its parent
     /// (vertical in a flex column, else horizontal) it spans that element's
     /// frame, inside its own margins on that axis, wherever the element is
-    /// inside its parent; across it, its style places it (`bottom(px(0.))`
-    /// and a height for an underline, top and bottom insets for a pill),
-    /// so its style makes it [`Styled::absolute`]. The core places it after
-    /// each layout, with no layout of its own and no JS: following another
-    /// element changes its frame alone, and a layout that moves the element
-    /// moves it in the same batch. While `target` is `None`, or no laid
-    /// out element carries it, its style alone places it; hidden
-    /// (`display: none`) and shown again, it is placed at once. A view
-    /// that follows nothing costs no work after layout.
+    /// inside its parent, in a list's row too; across it, its style places
+    /// it (`bottom(px(0.))` and a height for an underline, top and bottom
+    /// insets for a pill), so its style makes it [`Styled::absolute`]. The
+    /// core places it after each layout, with no layout of its own and no
+    /// JS: following another element changes its frame alone, and a layout
+    /// that moves the element moves it in the same batch. Scroll views and
+    /// lists in between count where they are scrolled, and it spans only
+    /// the part of the element they show: outside them, it follows their
+    /// scrolling a frame or so behind; in the same scroll view's content as the
+    /// element, it moves with it natively. While `target` is `None`, or no
+    /// laid out element carries it (a list's row gone, or scrolled out of
+    /// view), its style alone places it; hidden (`display: none`) and shown
+    /// again, it is placed at once. A view that follows nothing costs no
+    /// work after layout.
     pub fn follow(mut self, target: impl IntoReactive<Option<super::ElementRef>>) -> Self {
         let target = (target.into_reactive()).map(|t: Option<super::ElementRef>| {
             t.and_then(|t| t.target()).map(super::FollowTarget)
