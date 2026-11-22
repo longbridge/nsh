@@ -829,6 +829,8 @@ function Note() {
 
 工具栏与窗口等宽，高度由内容决定。输入附件视图是 iOS 的功能：在 Android 上它是一个空的隐藏视图，所以在那里要为这些控件另找位置，例如放在输入框上方（Rust 中判断 `os() == Os::Android`，TSX 中判断 `platform.os === "android"`）。
 
+[`RichEditor`](../elements/rich-editor.md#键盘上方的工具栏) 也以同样方式显示它，Rust 中用 `.input_accessory(id)`，TSX 中用 `inputAccessoryViewID` 指定。
+
 ## 相关内容
 
 - [`Input`](../elements/input.md)：元素参考。

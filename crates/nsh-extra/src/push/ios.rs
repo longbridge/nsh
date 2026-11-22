@@ -43,6 +43,10 @@ unsafe extern "C" {}
 /// leaves those to `Notifications`.
 const NSH_MARKER: &str = "nsh";
 
+/// Why [`super::register`] fails without a push service's binding where
+/// the module does not observe the app.
+pub(super) const UNAVAILABLE: &str = "remote notifications need a standalone iOS app";
+
 thread_local! {
     /// The module observes the app ([`install`]).
     static INSTALLED: Cell<bool> = const { Cell::new(false) };
@@ -51,7 +55,7 @@ thread_local! {
 /// Observes the app's delegate, once. On the main thread, before the app
 /// launches: the crate's `#[native_module]` entry, which may run again
 /// later (its `registry()`), maybe off the main thread.
-pub(super) fn install() {
+pub(super) fn install(_: &mut Registry) {
     if cfg!(target_abi = "macabi") || MainThreadMarker::new().is_none() {
         return;
     }
@@ -91,15 +95,19 @@ fn observe(event: &ApplicationEvent<'_>) {
                 RemoteNotification::background(user_info.to_json()),
                 completion,
             );
-            // A delivery that waits for a JS listener is completed after
-            // the wait even if none comes. The wait counts from its arrival
-            // however often it waits, so this one check covers it.
-            let wait = BACKGROUND_WAIT + std::time::Duration::from_millis(100);
-            let at = DispatchTime::NOW.time(i64::try_from(wait.as_nanos()).unwrap_or(i64::MAX));
-            let _ = DispatchQueue::main().after(at, super::expire_pending);
+            expire_later();
         }
         _ => {}
     }
+}
+
+/// Completes the deliveries that wait for a JS listener once their wait
+/// is over, on the main thread. The wait counts from the arrival however
+/// often a delivery waits, so one check covers it.
+pub(super) fn expire_later() {
+    let wait = BACKGROUND_WAIT + std::time::Duration::from_millis(100);
+    let at = DispatchTime::NOW.time(i64::try_from(wait.as_nanos()).unwrap_or(i64::MAX));
+    let _ = DispatchQueue::main().after(at, super::expire_pending);
 }
 
 /// The handler of the notifications NSH did not show.
@@ -153,9 +161,7 @@ fn center() -> Option<Retained<AnyObject>> {
 /// center answers on a queue of its own, and it is thread-safe.
 pub(super) async fn close_thread(thread_id: String) -> Result<(), PushError> {
     if !super::hub().launched {
-        return Err(PushError::unavailable(
-            "remote notifications need a standalone iOS app",
-        ));
+        return Err(PushError::unavailable(UNAVAILABLE));
     }
     let (answer, removed) = oneshot::channel();
     {
@@ -166,7 +172,7 @@ pub(super) async fn close_thread(thread_id: String) -> Result<(), PushError> {
         let answer = Mutex::new(Some(answer));
         let delivered = RcBlock::new(move |notifications: *mut NSArray<AnyObject>| {
             // SAFETY: the array the framework passes, or nil.
-            let ids = match unsafe { notifications.as_ref() } {
+            let ids: Vec<String> = match unsafe { notifications.as_ref() } {
                 Some(notifications) => {
                     let delivered: Vec<(String, String, bool)> =
                         notifications.iter().map(|n| identify(&n)).collect();
@@ -176,6 +182,9 @@ pub(super) async fn close_thread(thread_id: String) -> Result<(), PushError> {
                             .map(|(id, thread, own)| (&**id, &**thread, *own)),
                         &thread_id,
                     )
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect()
                 }
                 None => Vec::new(),
             };

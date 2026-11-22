@@ -291,6 +291,16 @@ text(move || total.get())
 
 The Tailwind classes `line-clamp-*`, `text-ellipsis` and `text-clip` set the same keys, and `truncate` (`.truncate()`) is one line cut with an ellipsis; as style keys they also take state styles and variants.
 
+`whitespace-nowrap` (`.whitespace_nowrap()`) keeps a text on one line. `text-pretty` (`.text_pretty()`) wraps without leaving a word or two alone on the last line: a last line shorter than a quarter of the box takes words from the lines above, without adding a line. `whitespace-normal` (`.whitespace_normal()`) wraps as usual. Set on a view, they reach the texts inside it, as CSS's `white-space` does:
+
+```rust tabs
+text(description).text_pretty()
+```
+
+```tsx tabs
+<Text class="text-pretty">{description}</Text>
+```
+
 ## System text size
 
 Text follows the user's text size setting (Dynamic Type on iOS, font size on Android) by default.

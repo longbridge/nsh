@@ -10280,6 +10280,41 @@ fn pressed_current_and_level_decode_from_js() {
     }
 }
 
+/// `accessibilityLiveRegion` from its JS shape, on every platform now that
+/// it is one prop (Android's bag took it before).
+#[test]
+fn a_live_region_decodes_from_js() {
+    use crate::{
+        AccessibilityProp, LiveRegion,
+        js::host::{HostCx, HostProps},
+    };
+    let decode = |v: serde_json::Value| {
+        AccessibilityProp::decode("accessibilityLiveRegion", &J(v), &mut HostCx::default())
+            .expect("accessibilityLiveRegion")
+            .expect("a value")
+    };
+    assert_eq!(
+        decode(serde_json::json!("polite")),
+        AccessibilityProp::LiveRegion(LiveRegion::Polite)
+    );
+    assert_eq!(
+        decode(serde_json::json!("assertive")),
+        AccessibilityProp::LiveRegion(LiveRegion::Assertive)
+    );
+    assert_eq!(
+        decode(serde_json::json!("none")),
+        AccessibilityProp::LiveRegion(LiveRegion::None)
+    );
+    assert_eq!(
+        decode(serde_json::Value::Null),
+        AccessibilityProp::LiveRegion(LiveRegion::None)
+    );
+    assert_eq!(
+        decode(serde_json::json!("yes")),
+        AccessibilityProp::LiveRegion(LiveRegion::None)
+    );
+}
+
 /// `accessibilityDescription` from JS, and what platforms with one place
 /// for everything read after the name get from it.
 #[test]
@@ -11394,6 +11429,50 @@ fn a_focus_reported_untracked_survives_a_tracking_change() {
 }
 
 #[test]
+fn a_view_goes_below_its_next_sibling_in_the_parent_not_an_input_accessory() {
+    let mut c = core();
+    let view = |id| Op::Create { id, tag: Tag::View };
+    let insert = |child, before| Op::Insert {
+        parent: ROOT_ID,
+        child,
+        before,
+    };
+    apply(
+        &mut c,
+        vec![
+            view(2),
+            Op::Create {
+                id: 3,
+                tag: Tag::InputAccessory,
+            },
+            Op::SetProp {
+                id: 3,
+                prop: Prop::NativeId(Some("bar".into())),
+            },
+            view(4),
+            insert(2, None),
+            insert(3, None),
+            insert(4, None),
+        ],
+    );
+    c.commit().unwrap();
+    // Between the first view and the accessory: the accessory is over the
+    // keyboard, not among the root's subviews, so the view goes below the
+    // one after it.
+    apply(&mut c, vec![view(5), insert(5, Some(3))]);
+    let batch = c.commit().unwrap();
+    let inserts: Vec<_> = batch
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            MountItem::Insert { child, before, .. } => Some((*child, *before)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(inserts, vec![(5, Some(4))]);
+}
+
+#[test]
 fn input_accessories_are_found_by_native_id() {
     let mut c = core();
     let accessory = |batch: &MountBatch| {
@@ -12283,11 +12362,12 @@ fn nest(
     Ok(())
 }
 
-/// Runs `f` on a thread with the engine thread's stack, which the depth
-/// quota is sized for (a test thread's is smaller).
+/// Runs `f` on a thread with room for the depth quota's recursion, sized
+/// past the engine's own (`a test thread's is smaller`, and a Windows
+/// debug build drops a deep tree with deeper frames than a release one).
 fn on_engine_stack(f: impl FnOnce() + Send + 'static) {
     std::thread::Builder::new()
-        .stack_size(8 << 20)
+        .stack_size(64 << 20)
         .spawn(f)
         .unwrap()
         .join()
@@ -19264,6 +19344,123 @@ mod components {
         ));
         c.run_component_tasks();
         assert!(c.commit().is_none_or(|b| texts(&b).is_empty()));
+    }
+
+    /// Asks whether the app's settings page opens here and opens it when
+    /// its button is pressed; shows both answers.
+    #[component]
+    fn SettingsOpener() -> impl IntoElement {
+        use crate::mobile::{app_settings_available, open_app_settings};
+        let shown = signal(String::new());
+        view()
+            .child(text(move || format!("settings{}", shown.get())))
+            .child(view().h(px(10.0)).on_press(move |_: &()| {
+                let available = app_settings_available();
+                let opened = open_app_settings();
+                spawn(async move {
+                    let available = available.await;
+                    let opened = match opened.await {
+                        Ok(opened) => opened.to_string(),
+                        Err(error) => format!("{error:?}"),
+                    };
+                    shown.set(format!(" {available} {opened}"));
+                });
+            }))
+    }
+
+    /// Mounts [`SettingsOpener`] in `environment` with `capabilities`
+    /// declared (`None`: none), presses its button and returns the requests
+    /// that reached the platform.
+    fn press_settings_opener(
+        environment: crate::element::Environment,
+        capabilities: Option<serde_json::Value>,
+    ) -> (Core<FakeEngine>, Vec<u32>) {
+        let mut c = core();
+        if let Some(capabilities) = capabilities {
+            c.set_access(std::sync::Arc::new(crate::access::Access {
+                declared: crate::access::Capabilities::from_json(&capabilities).unwrap(),
+                granted: None,
+            }));
+        }
+        c.set_environment(environment);
+        c.mount_root(&crate::element::Root::new::<SettingsOpener>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button");
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        let items = c.commit().map(|b| b.items).unwrap_or_default();
+        let requests = items
+            .into_iter()
+            .filter_map(|i| match i {
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::OpenAppSettings { id },
+                } => Some(id),
+                _ => None,
+            })
+            .collect();
+        (c, requests)
+    }
+
+    #[test]
+    fn app_settings_fail_at_once_where_the_platform_has_none() {
+        let (mut c, requests) = press_settings_opener(Default::default(), None);
+        assert!(requests.is_empty(), "nothing reaches the platform");
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("settings ")));
+        assert_eq!(shown.last().unwrap(), "settings false Unavailable");
+    }
+
+    #[test]
+    fn app_settings_open_on_the_platform_and_answer_what_it_reports() {
+        let (mut c, requests) = press_settings_opener(
+            crate::element::Environment {
+                app_settings: true,
+                ..Default::default()
+            },
+            Some(serde_json::json!({ "application": true })),
+        );
+        assert_eq!(requests.len(), 1, "one request reaches the platform");
+        // An answer of another request settles nothing.
+        let answer = |id: u32, opened: bool| {
+            EventPayload::Map(vec![
+                ("id", crate::PayloadValue::Number(f64::from(id))),
+                ("opened", crate::PayloadValue::Bool(opened)),
+            ])
+        };
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::OpenAppSettings,
+            &answer(requests[0].wrapping_add(1), false)
+        ));
+        c.run_component_tasks();
+        assert!(c.commit().is_none_or(|b| texts(&b).is_empty()));
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::OpenAppSettings,
+            &answer(requests[0], true)
+        ));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("settings ")));
+        assert_eq!(shown.last().unwrap(), "settings true true");
+    }
+
+    #[test]
+    fn app_settings_need_the_application_capability_when_capabilities_are_declared() {
+        let (mut c, requests) = press_settings_opener(
+            crate::element::Environment {
+                app_settings: true,
+                ..Default::default()
+            },
+            Some(serde_json::json!({ "share": true })),
+        );
+        assert!(requests.is_empty(), "nothing reaches the platform");
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("settings ")));
+        assert_eq!(shown.last().unwrap(), "settings false Denied");
     }
 
     /// Turns launching at login on, reads it, turns it off and reads it
@@ -28140,6 +28337,67 @@ mod views {
         }
     }
 
+    /// A row whose custom action is named in the interface's language,
+    /// which a press switches.
+    #[derive(Default)]
+    struct Row;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct RowProps {}
+
+    impl Component for Row {
+        type Props = RowProps;
+        type Event = NoEvent;
+
+        fn view(_: RowProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let chinese = signal(false);
+            view()
+                .size_10()
+                .test_id("row")
+                .accessibility_actions(move || {
+                    vec![crate::AccessibilityActionDef {
+                        name: "delete".into(),
+                        label: Some(if chinese.get() { "删除" } else { "Delete" }.into()),
+                    }]
+                })
+                .on_press(move || chinese.set(!chinese.get()))
+        }
+    }
+
+    #[test]
+    fn an_elements_accessibility_actions_follow_their_signals_in_place() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Row>(|| RowProps {}));
+        let batch = c.commit().unwrap();
+        let actions = |batch: &MountBatch| {
+            batch.items.iter().find_map(|i| match i {
+                MountItem::ViewProps { id, props } if props.test_id.as_deref() == Some("row") => {
+                    Some((*id, props.accessibility.actions.clone()))
+                }
+                _ => None,
+            })
+        };
+        let action = |label: &str| crate::AccessibilityActionDef {
+            name: "delete".into(),
+            label: Some(label.into()),
+        };
+        let (id, first) = actions(&batch).expect("the row's props");
+        assert_eq!(first, vec![action("Delete")]);
+        assert!(c.component_event(id, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        // The same view, renamed: nothing is created or removed, so the
+        // screen reader's focus stays on it.
+        assert_eq!(actions(&batch), Some((id, vec![action("删除")])));
+        assert!(
+            !batch
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::Create { .. } | MountItem::Remove { .. })),
+            "{:?}",
+            batch.items
+        );
+    }
+
     #[test]
     fn an_element_hides_from_screen_readers_while_its_signal_holds() {
         let mut c = core();
@@ -30320,6 +30578,17 @@ mod rust_menus {
         let labels = labels_in(&first.commit().unwrap()).unwrap();
         assert_eq!(labels.label(MenuRole::Copy), "Copy");
         assert_eq!(labels.edit_menu.as_deref(), Some("Edit"));
+
+        // Adding Japanese translations at run time switches the menu labels
+        // back to Japanese without resetting the surface.
+        first.add_translations(std::collections::HashMap::from([(
+            "ja".to_owned(),
+            std::collections::HashMap::from([("hello".to_owned(), "こんにちは".to_owned())]),
+        )]));
+        let labels = labels_in(&first.commit().unwrap()).unwrap();
+        assert_eq!(labels.label(MenuRole::Copy), "コピー");
+        assert_eq!(labels.edit_menu.as_deref(), Some("編集"));
+
         // Mobile platforms use the system's own menus.
         env.os = Os::Ios;
         first.set_environment(env);
@@ -33288,6 +33557,15 @@ fn anchored_overlays_go_within_the_area_the_platform_shows_them_in() {
     let pressed = c.presses_beyond_root(point(px(500.0), px(-20.0)));
     assert_eq!(pressed.len(), 1);
     assert_eq!(pressed[0].0, 10);
+
+    // A press a view's native content took (a web view's page): outside
+    // the overlay on another view, inside it on its anchor or its content.
+    let page = point(px(10.0), px(10.0));
+    let pressed = c.presses_on_native(2, page);
+    assert_eq!(pressed.len(), 1);
+    assert_eq!(pressed[0].0, 10);
+    assert!(c.presses_on_native(4, page).is_empty());
+    assert!(c.presses_on_native(12, page).is_empty());
 
     // Back to the root view.
     c.set_overlay_area(None);
@@ -52276,11 +52554,42 @@ fn text_pretty_wraps_and_inherits_with_white_space() {
     assert!(!c.inherited_text_wrap(c.key(3).unwrap()).3);
 }
 
+/// Rust's `text_pretty` on a view reaches the texts in it, as the class
+/// does; a text's own `whitespace_nowrap` takes it back.
+#[test]
+fn rust_text_pretty_inherits_as_the_class() {
+    use crate::{element::Root, prelude::*};
+
+    #[component]
+    fn PrettyTexts() -> impl IntoElement {
+        view()
+            .text_pretty()
+            .child(text("pretty"))
+            .child(text("one line").whitespace_nowrap())
+    }
+
+    let mut c = core();
+    c.mount_root(&Root::new::<PrettyTexts>(|| ()));
+    let batch = c.commit().unwrap();
+    let wrap = |label: &str| {
+        let id = batch
+            .items
+            .iter()
+            .find_map(|item| match item {
+                MountItem::Text { id, text, .. } if &*text.text == label => Some(*id),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no text {label:?}"));
+        let (no_wrap, _, _, pretty) = c.inherited_text_wrap(c.key(id).unwrap());
+        (no_wrap, pretty)
+    };
+    assert_eq!(wrap("pretty"), (Some(false), true));
+    assert_eq!(wrap("one line"), (Some(true), false));
+}
+
 #[test]
 fn an_overlay_leaves_escape_to_focused_content_that_captures_it() {
-    use crate::KeyCapture;
-    use crate::keymap::Keystroke;
-    use crate::tailwind::state::FOCUSED;
+    use crate::{KeyCapture, keymap::Keystroke, tailwind::state::FOCUSED};
     // #2424: an editor in a popover takes Escape first; the overlay binds
     // it again once the focus leaves the editor or the rule drops it.
     let mut c = core();
@@ -52365,9 +52674,7 @@ fn an_overlay_leaves_escape_to_focused_content_that_captures_it() {
 
 #[test]
 fn a_focus_outside_the_overlay_does_not_take_its_escape() {
-    use crate::KeyCapture;
-    use crate::keymap::Keystroke;
-    use crate::tailwind::state::FOCUSED;
+    use crate::{KeyCapture, keymap::Keystroke, tailwind::state::FOCUSED};
     let mut c = core();
     add(&mut c, 2, Tag::View, ROOT_ID, &[]);
     add(&mut c, 4, Tag::Overlay, 2, &[]);

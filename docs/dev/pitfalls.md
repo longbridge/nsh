@@ -291,8 +291,9 @@ Things that were found the hard way. Read the section of the area you change bef
   `ModalHost::dismiss` dismisses through `presentingViewController`, which takes the modal and everything above it.
   So a modal shown while another leaves (one closed and one opened in the same batch) must not be presented over the
   leaving one: the mounter dismisses first and presents the new modal once the old one is gone, and presents again
-  the modals the app still shows that went along. A modal also leaves with the subtree it is in, not only when its
-  own node is removed.
+  the modals the app still shows that went along. A dismissal still waiting for another transition to end counts as
+  leaving too. A modal also leaves with the subtree it is in, not only when its own node is removed, and reports its
+  close (`onClose`) once gone, also when its node was released in the same batch (as JS does when the app closes it).
 
 - **iOS, presses near the top of the window**: UIKit attaches tap recognizers to the window that skip `UIControl`s, and a
   press is a gesture recognizer, not a control. On iOS 26+ the window's `_UIDoubleTapInteraction` (a single-tap

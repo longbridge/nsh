@@ -1142,6 +1142,12 @@ fn raw_pointer(surface: &Rc<Surface>, key: Key, event: &PointerEvent) -> bool {
         // A press anywhere clears a text selection.
         crate::text::window_pressed(surface, x, y);
         crate::selectable_view::window_pressed(surface, x, y);
+        // The page takes the press, not the core's picking: the overlays
+        // watching presses that the web view is outside of (an open menu)
+        // hear `onPressOutside`, as for a press on any other view.
+        let id = view.id();
+        let page = nsh_core::prelude::point(nsh_core::Points(x), nsh_core::Points(y));
+        surface.control(|c| c.press_on_native(id, page));
     }
     let (lx, ly) = local(view, x, y);
     native.item.pointer(&ItemPointer {

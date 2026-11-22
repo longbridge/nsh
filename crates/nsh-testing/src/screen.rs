@@ -407,6 +407,44 @@ pub struct ViewStyle {
     pub effective_opacity: f32,
 }
 
+/// Where layout placed the view [`Screen::layout`] names, in the root's
+/// points (transforms aside, as [`LayoutNode`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub struct ViewLayout {
+    /// Its bounds.
+    pub bounds: Bounds<Points>,
+    /// It or a view around it is hidden (`visibility: hidden`).
+    pub hidden: bool,
+    /// A view around it that clips (`overflow: hidden`, a scroll view's
+    /// viewport) cuts part or all of it.
+    pub clipped: bool,
+}
+
+/// A view as assistive technologies read it ([`Screen::accessibility`]).
+#[derive(Debug, Clone, PartialEq, Default)]
+#[non_exhaustive]
+pub struct AccessibilityNode {
+    /// Its `role`, `None` for a view without one.
+    pub role: Option<AccessibilityRole>,
+    /// Its `accessibilityLabel`.
+    pub label: Option<String>,
+    /// It takes no presses.
+    pub disabled: bool,
+    /// It is selected.
+    pub selected: bool,
+    /// Its `accessibilityState.checked`.
+    pub checked: Option<nsh_core::Checked>,
+    /// Its `accessibilityState.expanded`.
+    pub expanded: Option<bool>,
+    /// Its `accessibilityLevel`.
+    pub level: Option<u32>,
+    /// Its `accessibilityDescription`.
+    pub description: Option<String>,
+    /// The views inside it that have a role or a label, in tree order.
+    pub children: Vec<AccessibilityNode>,
+}
+
 /// A link of a text view's text ([`nsh_core::TextLink`]): a span that takes
 /// presses, or one a hint watches (the pointer only).
 #[derive(Debug, Clone)]
@@ -1139,6 +1177,105 @@ impl Screen {
             opacity,
             effective_opacity: effective,
         }))
+    }
+
+    /// Where layout placed the view `selector` names: its bounds in the
+    /// root's points, whether it is hidden, and whether a view around it
+    /// clips part of it. `None` when no view on screen matches; an error
+    /// when several do.
+    pub fn layout(&self, selector: &str) -> Result<Option<ViewLayout>, String> {
+        let parsed = Selector::parse(selector)?;
+        let id = match self.resolve(&parsed)[..] {
+            [id] => id,
+            [] => return Ok(None),
+            ref all => return Err(format!("`{selector}` matches {} views", all.len())),
+        };
+        let nodes = self.layout_nodes();
+        let by_id: HashMap<NodeId, &LayoutNode> = nodes.iter().map(|n| (n.id, n)).collect();
+        let Some(node) = by_id.get(&id) else {
+            return Ok(None);
+        };
+        let mut clipped = false;
+        let mut parent = node.parent;
+        while let Some(p) = by_id.get(&parent) {
+            if (p.clips || p.scroll.is_some()) && p.bounds.intersect(&node.bounds) != node.bounds {
+                clipped = true;
+                break;
+            }
+            parent = p.parent;
+        }
+        Ok(Some(ViewLayout {
+            bounds: node.bounds,
+            hidden: node.hidden,
+            clipped,
+        }))
+    }
+
+    /// The accessibility tree: the views on screen with a role or a label,
+    /// each holding those inside it, in tree order. With a selector, the
+    /// node of the view it names (whatever its role) and those inside it,
+    /// `None` when no view on screen matches; without, the top nodes under
+    /// a root without role. An error when several views match.
+    pub fn accessibility(
+        &self,
+        selector: Option<&str>,
+    ) -> Result<Option<AccessibilityNode>, String> {
+        let target = match selector {
+            Some(selector) => {
+                let parsed = Selector::parse(selector)?;
+                match self.resolve(&parsed)[..] {
+                    [id] => Some(id),
+                    [] => return Ok(None),
+                    ref all => return Err(format!("`{selector}` matches {} views", all.len())),
+                }
+            }
+            None => None,
+        };
+        let nodes = self.layout_nodes();
+        if target.is_some_and(|id| !nodes.iter().any(|n| n.id == id)) {
+            return Ok(None);
+        }
+        let mut children: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+        for n in &nodes {
+            children.entry(n.parent).or_default().push(n.id);
+        }
+        Ok(Some(
+            self.accessibility_node(target.unwrap_or(ROOT), &children),
+        ))
+    }
+
+    fn accessibility_node(
+        &self,
+        id: NodeId,
+        children: &HashMap<NodeId, Vec<NodeId>>,
+    ) -> AccessibilityNode {
+        let mut node = match self.nodes.get(&id).filter(|_| id != ROOT) {
+            Some(v) => AccessibilityNode {
+                role: Some(v.role).filter(|r| *r != AccessibilityRole::None),
+                label: v.label.as_deref().map(str::to_owned),
+                disabled: v.disabled,
+                selected: v.selected,
+                checked: v.accessibility_state.checked,
+                expanded: v.accessibility_state.expanded,
+                level: v.level,
+                description: v.description.as_deref().map(str::to_owned),
+                children: Vec::new(),
+            },
+            None => AccessibilityNode::default(),
+        };
+        let mut stack: Vec<NodeId> = children.get(&id).cloned().unwrap_or_default();
+        stack.reverse();
+        while let Some(c) = stack.pop() {
+            let Some(v) = self.nodes.get(&c) else {
+                continue;
+            };
+            if v.role != AccessibilityRole::None || v.label.is_some() {
+                node.children.push(self.accessibility_node(c, children));
+            } else if let Some(inner) = children.get(&c) {
+                stack.extend(inner.iter().rev());
+            }
+        }
+        node
     }
 
     /// View `id` leaves the tree with what it holds: none of it is under
@@ -3515,6 +3652,42 @@ impl Screen {
     pub(crate) fn take_scrolled(&mut self) -> Vec<NodeId> {
         std::mem::take(&mut self.scrolled)
     }
+}
+
+/// A [`ViewLayout`] as the test protocol carries it.
+#[cfg(any(feature = "agent", feature = "js"))]
+pub(crate) fn protocol_layout(l: ViewLayout) -> nsh_dev::protocol::ViewLayout {
+    let mut out = nsh_dev::protocol::ViewLayout::default();
+    out.x = l.bounds.origin.x.0;
+    out.y = l.bounds.origin.y.0;
+    out.width = l.bounds.size.width.0;
+    out.height = l.bounds.size.height.0;
+    out.hidden = l.hidden;
+    out.clipped = l.clipped;
+    out
+}
+
+/// An [`AccessibilityNode`] as the test protocol carries it.
+#[cfg(any(feature = "agent", feature = "js"))]
+pub(crate) fn protocol_accessibility(n: AccessibilityNode) -> nsh_dev::protocol::AccessibilityNode {
+    let mut out = nsh_dev::protocol::AccessibilityNode::default();
+    out.role = n.role.map(|r| r.js_name().to_owned());
+    out.label = n.label;
+    out.disabled = n.disabled;
+    out.selected = n.selected;
+    out.checked = n.checked.map(|c| {
+        match c {
+            nsh_core::Checked::True => "true",
+            nsh_core::Checked::False => "false",
+            nsh_core::Checked::Mixed => "mixed",
+        }
+        .to_owned()
+    });
+    out.expanded = n.expanded;
+    out.level = n.level;
+    out.description = n.description;
+    out.children = n.children.into_iter().map(protocol_accessibility).collect();
+    out
 }
 
 #[cfg(test)]

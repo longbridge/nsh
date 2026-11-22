@@ -131,6 +131,13 @@ pub(crate) enum Action {
     /// [`crate::open_url::check_url`]); whether it opened resolves the
     /// slot.
     OpenUrl(String, AnswerSlot<bool>),
+    /// Opens the app's own page in the system's settings
+    /// ([`crate::mobile::open_app_settings`]); whether it opened, or why it
+    /// could not, resolves the slot.
+    OpenAppSettings(AnswerSlot<Result<bool, crate::mobile::AppSettingsError>>),
+    /// Whether the platform opens the app's page in the system's settings
+    /// resolves the slot.
+    AppSettingsAvailable(AnswerSlot<bool>),
     /// Puts something on the system clipboard
     /// ([`crate::Command::SetClipboard`] or
     /// [`crate::Command::SetClipboardItem`]); the platform's result
@@ -250,6 +257,11 @@ pub(crate) enum Action {
     Tokens(super::Tokens),
     /// Sets the app's translations ([`crate::i18n`]).
     Translations(crate::i18n::Translations),
+    /// Merges translations into the app's dictionary ([`crate::i18n`]).
+    AddTranslations(std::collections::HashMap<String, std::collections::HashMap<String, String>>),
+    /// The surface's translations changed in place from the given previous
+    /// dictionary: re-localize menus if the selected language changed.
+    TranslationsChanged(crate::i18n::Translations),
     /// Shows the app in a language whatever the user's (`None`: the
     /// user's again).
     Locale(Option<crate::platform::Locale>),
