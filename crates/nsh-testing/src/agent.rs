@@ -28,7 +28,10 @@ use nsh_core::{
     MountBatch, NodeId,
     geometry::{Bounds, Point, Points, Size, point},
 };
-use nsh_dev::protocol::{PickTarget, SceneQuery, SpanStyle, StepOutcome, TestStep, ViewStyle};
+use nsh_dev::protocol::{
+    AccessibilityNode, PickTarget, SceneQuery, SpanStyle, StepOutcome, TestStep, ViewLayout,
+    ViewStyle,
+};
 
 mod forward;
 
@@ -484,6 +487,12 @@ pub trait Scene: Send + Sync {
     fn span_style(&self, selector: &str) -> Result<SpanStyle, String>;
     /// The style of the view `selector` names, `None` when none matches.
     fn view_style(&self, selector: &str) -> Result<Option<ViewStyle>, String>;
+    /// Where layout placed the view `selector` names, `None` when none
+    /// matches.
+    fn layout(&self, selector: &str) -> Result<Option<ViewLayout>, String>;
+    /// The accessibility tree from the view `selector` names (the root
+    /// without one), `None` when none matches.
+    fn accessibility(&self, selector: Option<&str>) -> Result<Option<AccessibilityNode>, String>;
     /// The input `selector` names.
     fn input_id(&self, selector: &str) -> Result<Option<NodeId>, String>;
     /// The dialogs the app showed.
@@ -686,6 +695,20 @@ impl Scene for Model {
             style
         }))
     }
+    fn layout(&self, selector: &str) -> Result<Option<ViewLayout>, String> {
+        Ok(self
+            .lock()
+            .screen
+            .layout(selector)?
+            .map(crate::screen::protocol_layout))
+    }
+    fn accessibility(&self, selector: Option<&str>) -> Result<Option<AccessibilityNode>, String> {
+        Ok(self
+            .lock()
+            .screen
+            .accessibility(selector)?
+            .map(crate::screen::protocol_accessibility))
+    }
     fn input_id(&self, selector: &str) -> Result<Option<NodeId>, String> {
         self.lock().screen.input_id(selector)
     }
@@ -862,6 +885,10 @@ pub fn answer(model: &Model, step: &TestStep) -> Option<Result<serde_json::Value
         TestStep::ViewStyle { selector } => {
             model.view_style(selector).and_then(|s| json(to_value(s)))
         }
+        TestStep::Layout { selector } => model.layout(selector).and_then(|l| json(to_value(l))),
+        TestStep::Accessibility { selector } => model
+            .accessibility(selector.as_deref())
+            .and_then(|a| json(to_value(a))),
         TestStep::Dialogs => model.dialogs().and_then(|d| json(to_value(d))),
         TestStep::PendingDialog => model.pending_dialog().and_then(|d| json(to_value(d))),
         TestStep::Scene { query } => match query {
@@ -1030,6 +1057,16 @@ impl Scene for RemoteScene {
     fn view_style(&self, selector: &str) -> Result<Option<ViewStyle>, String> {
         self.get(TestStep::ViewStyle {
             selector: selector.into(),
+        })
+    }
+    fn layout(&self, selector: &str) -> Result<Option<ViewLayout>, String> {
+        self.get(TestStep::Layout {
+            selector: selector.into(),
+        })
+    }
+    fn accessibility(&self, selector: Option<&str>) -> Result<Option<AccessibilityNode>, String> {
+        self.get(TestStep::Accessibility {
+            selector: selector.map(Into::into),
         })
     }
     fn input_id(&self, selector: &str) -> Result<Option<NodeId>, String> {
@@ -1805,6 +1842,13 @@ impl Agent {
             }
             TestStep::ViewStyle { selector } => {
                 serde_json::to_value(self.scene.view_style(&selector)?).map_err(|e| e.to_string())
+            }
+            TestStep::Layout { selector } => {
+                serde_json::to_value(self.scene.layout(&selector)?).map_err(|e| e.to_string())
+            }
+            TestStep::Accessibility { selector } => {
+                serde_json::to_value(self.scene.accessibility(selector.as_deref())?)
+                    .map_err(|e| e.to_string())
             }
             TestStep::Value { selector } => {
                 if let Some(text) = self.scene.input_value_text(&selector)? {
@@ -3809,6 +3853,15 @@ mod tests {
         }
         fn view_style(&self, selector: &str) -> Result<Option<ViewStyle>, String> {
             self.inner.view_style(selector)
+        }
+        fn layout(&self, selector: &str) -> Result<Option<ViewLayout>, String> {
+            self.inner.layout(selector)
+        }
+        fn accessibility(
+            &self,
+            selector: Option<&str>,
+        ) -> Result<Option<AccessibilityNode>, String> {
+            self.inner.accessibility(selector)
         }
         fn input_id(&self, selector: &str) -> Result<Option<NodeId>, String> {
             self.inner.input_id(selector)
