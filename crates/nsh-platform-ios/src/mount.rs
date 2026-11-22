@@ -2308,6 +2308,7 @@ impl Mounter {
             (Command::PerfMonitor(true), _) => self.measure(),
             (Command::PerfMonitor(false), _) => self.stop_measuring(),
             (Command::Tokens(tokens), _) => self.alert_tint = crate::system::alert_tint(&tokens),
+            (Command::TextLocale(locale), _) => self.target.set_text_locale(locale),
             (Command::ImageInfo { id, uri }, _) => self.images.info(id, &uri),
             (Command::SetClipboard(text), _) => crate::system::set_clipboard(&text),
             (Command::SetClipboardItem(item), _) => match &item.html {

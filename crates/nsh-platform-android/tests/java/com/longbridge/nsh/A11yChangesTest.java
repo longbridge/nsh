@@ -156,6 +156,7 @@ public final class A11yChangesTest {
         localized("Korean switch off", Locale.KOREAN, 256 | 64, null, true, "끔, 접힘");
         localized("German falls back to English", Locale.GERMAN, 64 | 128, null, false, "expanded");
         localized("no locale is English", null, INVALID, "Medium", false, "Medium, invalid data");
+        localized("the core's tag", Locale.forLanguageTag("zh-Hant-TW"), 64, null, false, "已收合");
 
         System.out.println("A11yChangesTest: " + checks + " passed");
     }

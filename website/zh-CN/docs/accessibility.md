@@ -138,6 +138,8 @@ view()
 
 状态在 Rust 中是 `AccessibilityState { disabled, selected, checked: Option<Checked>, busy, expanded, pressed: Option<Checked>, current: Option<AccessibilityCurrent>, has_popup, invalid }`，在 TSX 中是 `{ disabled?, selected?, checked?: boolean | "mixed", busy?, expanded?, pressed?: boolean | "mixed", current?: boolean | "page" | "step" | "location" | "date" | "time", hasPopup?, invalid? }`。`pressed` 让按钮成为切换按钮（ARIA 的 `aria-pressed`）；`current` 标出一组中的当前项（ARIA 的 `aria-current`）：分页的当前页、向导的当前步骤；`hasPopup` 标出打开弹出层、菜单或列表的触发器（ARIA 的 `aria-haspopup`），它的 `expanded` 表示弹出层是否打开，没有 `hasPopup` 的 `expanded` 元素是就地展开内容的折叠项（`Popover`、`Menu`、`HoverCard`、`Select`、`Combobox` 和 `DatePicker` 会在各自的触发器上设置它）；`invalid` 标出没有通过应用校验的内容（ARIA 的 `aria-invalid`）：文字被拒绝的输入框、必选却留空的下拉选择。读屏随元素一起读出它，`aria-invalid:` 类可以为它设置样式。禁用视图（`.disabled(..)`、`disabled`）也意味着禁用状态。带 `min`、`max` 和 `now` 的 `accessibilityValue` 以百分比朗读；带 `text` 时按原文朗读（"3 of 10"、"Medium"）。
 
+在 iOS 和 Android 上，系统自己没有朗读词的状态（选中、部分选中、展开、收起、当前、无效）由 NSH 提供朗读词。它们使用应用文字显示的语言（[国际化](./i18n.md)），包括 `setLocale` 选择的语言，并随它改变：英文、中文（简体和繁体）、日文或韩文。其他平台用读屏自己的词朗读这些状态。
+
 ### 获得焦点的元素里的活动项
 
 有的控件在用户浏览其中各项时一直保有键盘焦点：方向键走过组合框的列表时，焦点仍在它的输入框里；列表移动的是一行光标。`accessibilityActiveDescendant` 指出当前活动的那一项，`accessibilityControls` 指出控件所控制的元素，这样焦点留在用户打字的地方，屏幕阅读器也会在每一项变为活动时读出它。两者都接受被指元素的 ref（TSX 中是 `ViewRef`，Rust 中是 `ElementRef`），被指的元素可以比控件晚渲染，例如虚拟化列表的行；被指的元素不在屏幕上时，这个关系不指向任何元素。

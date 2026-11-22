@@ -52,6 +52,9 @@ pub(crate) struct TargetIvars {
     tap_start: std::cell::RefCell<Option<(Retained<UITouch>, CGPoint, f64)>>,
     /// The surface's feedback generators.
     haptics: crate::haptics::Haptics,
+    /// The words VoiceOver speaks for states with no trait, in the language
+    /// of the app's text (`Command::TextLocale`).
+    state_words: std::cell::Cell<&'static crate::state_words::StateWords>,
     /// The file drop listeners a drag of files is over (entered, not yet
     /// left or dropped on): each hears `onFileDragLeave` once.
     file_drags: std::cell::RefCell<Vec<NodeId>>,
@@ -675,6 +678,7 @@ impl EventTarget {
             held: Default::default(),
             tap_start: Default::default(),
             haptics: Default::default(),
+            state_words: std::cell::Cell::new(crate::state_words::DEFAULT),
             file_drags: Default::default(),
         });
         // SAFETY: NSObject's designated initializer.
@@ -713,6 +717,19 @@ impl EventTarget {
     /// The surface's feedback generators.
     pub(crate) fn haptics(&self) -> &crate::haptics::Haptics {
         &self.ivars().haptics
+    }
+
+    /// The words VoiceOver speaks for states with no trait.
+    pub(crate) fn state_words(&self) -> &'static crate::state_words::StateWords {
+        self.ivars().state_words.get()
+    }
+
+    /// The app's text shows in `locale` now: the state words of the views
+    /// already mounted follow it the next time VoiceOver reads them.
+    pub(crate) fn set_text_locale(&self, locale: nsh_core::platform::Locale) {
+        self.ivars()
+            .state_words
+            .set(crate::state_words::for_language(locale.as_str()));
     }
 
     /// The app's keyboard shortcuts.

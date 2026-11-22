@@ -474,7 +474,10 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   change that only refreshes the node (a change the app makes by itself to a plain checked or selected state, and a
   tab selected without the focus, are silent, as there is nothing TalkBack reads for them). A first mount, an
   unchanged update, a hidden element and a view not shown send nothing; a list cell recycled for another row may
-  send one, as its props change.
+  send one, as its props change. The state words iOS and Android supply (checked, expanded, current, invalid...)
+  are in the language of the app's text, as NSH's menus on the desktops are (`i18n::text_locale`): the core sends
+  `Command::TextLocale` on the root of those surfaces when it changes, and the words of mounted views follow it the
+  next time a screen reader reads them.
   The `increment` / `decrement` actions make an element adjustable whatever its
   role: iOS adds the adjustable trait to the traits of its role (`native_view.rs` `traits`), so VoiceOver's swipe up /
   down performs them (an `image`, `Plot`'s role, stays an image), Android offers scroll forward / backward, Windows

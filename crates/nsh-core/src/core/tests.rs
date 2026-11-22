@@ -30341,6 +30341,67 @@ mod rust_menus {
         assert!(first.commit().as_ref().and_then(labels_in).is_none());
     }
 
+    #[test]
+    fn mobile_platforms_hear_the_language_the_app_shows() {
+        use crate::platform::{Languages, Locale};
+        let sent = |batch: Option<MountBatch>| -> Vec<String> {
+            batch
+                .map(|batch| {
+                    batch
+                        .items
+                        .iter()
+                        .filter_map(|item| match item {
+                            MountItem::Command {
+                                id: ROOT_ID,
+                                command: Command::TextLocale(locale),
+                            } => Some(locale.to_string()),
+                            _ => None,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let mut c = core();
+        let mut env = crate::element::Environment {
+            os: Os::Android,
+            locale: Locale::parse("ja-JP").unwrap(),
+            ..Default::default()
+        };
+        env.locale_settings.languages = Languages::one(env.locale);
+        c.set_environment(env);
+        assert_eq!(sent(c.commit()), ["ja-JP"]);
+        // Another region of the same language is told; the same one is not.
+        env.locale = Locale::parse("ja").unwrap();
+        env.locale_settings.languages = Languages::one(env.locale);
+        c.set_environment(env);
+        assert_eq!(sent(c.commit()), ["ja"]);
+        env.dark = true;
+        c.set_environment(env);
+        assert_eq!(sent(c.commit()), Vec::<String>::new());
+        // An English-only app shows its text in English.
+        c.set_translations(
+            crate::i18n::Translations::from_json(r#"{"en":{"hello":"Hello"}}"#).unwrap(),
+        );
+        assert_eq!(sent(c.commit()), ["en-US"]);
+        // Translations added at run time bring the user's language back.
+        c.add_translations(std::collections::HashMap::from([(
+            "ja".to_owned(),
+            std::collections::HashMap::from([("hello".to_owned(), "こんにちは".to_owned())]),
+        )]));
+        assert_eq!(sent(c.commit()), ["ja"]);
+
+        // Desktops and browsers speak states in the screen reader's words.
+        for os in [Os::MacOs, Os::Linux, Os::Web] {
+            let mut c = core();
+            c.set_environment(crate::element::Environment {
+                os,
+                locale: Locale::parse("ko").unwrap(),
+                ..Default::default()
+            });
+            assert_eq!(sent(c.commit()), Vec::<String>::new(), "{os:?}");
+        }
+    }
+
     fn menu_event(c: &mut Core<FakeEngine>, fields: Vec<(&'static str, PayloadValue)>) -> bool {
         c.component_event(ROOT_ID, EventKind::Menu, &EventPayload::Map(fields))
     }
@@ -52298,9 +52359,7 @@ fn text_pretty_wraps_and_inherits_with_white_space() {
 
 #[test]
 fn an_overlay_leaves_escape_to_focused_content_that_captures_it() {
-    use crate::KeyCapture;
-    use crate::keymap::Keystroke;
-    use crate::tailwind::state::FOCUSED;
+    use crate::{KeyCapture, keymap::Keystroke, tailwind::state::FOCUSED};
     // #2424: an editor in a popover takes Escape first; the overlay binds
     // it again once the focus leaves the editor or the rule drops it.
     let mut c = core();
@@ -52385,9 +52444,7 @@ fn an_overlay_leaves_escape_to_focused_content_that_captures_it() {
 
 #[test]
 fn a_focus_outside_the_overlay_does_not_take_its_escape() {
-    use crate::KeyCapture;
-    use crate::keymap::Keystroke;
-    use crate::tailwind::state::FOCUSED;
+    use crate::{KeyCapture, keymap::Keystroke, tailwind::state::FOCUSED};
     let mut c = core();
     add(&mut c, 2, Tag::View, ROOT_ID, &[]);
     add(&mut c, 4, Tag::Overlay, 2, &[]);

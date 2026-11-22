@@ -784,6 +784,9 @@ pub(super) struct Components {
     /// The language the app asked to show in (`Some(None)`: the user's
     /// again), for the engine ([`Core::take_locale_request`]).
     pub(super) locale_request: Option<Option<crate::platform::Locale>>,
+    /// The language of the app's text last sent to an iOS or Android
+    /// platform ([`Command::TextLocale`]).
+    text_locale: Option<crate::platform::Locale>,
     /// The app listened to quit requests at the last commit: the platform
     /// was told its quit requests go to the app
     /// ([`crate::desktop::DesktopCommand::SetQuitOnRequest`]).
@@ -932,6 +935,7 @@ impl Default for Components {
             clipboard_writes: Default::default(),
             url_requests: Vec::new(),
             locale_request: None,
+            text_locale: None,
             asks_quit: false,
             main_thread: Vec::new(),
             next_url_open: 0,
@@ -1140,7 +1144,7 @@ impl<M: TextEngine> Core<M> {
         if crate::i18n::text_locale(&stored.get(), env.locale, env.locale_settings.languages)
             != before
         {
-            self.localize_menus();
+            self.localize_platform();
         }
     }
 
@@ -1171,24 +1175,33 @@ impl<M: TextEngine> Core<M> {
         if crate::i18n::text_locale(&current, env.locale, env.locale_settings.languages)
             != crate::i18n::text_locale(before, env.locale, env.locale_settings.languages)
         {
-            self.localize_menus();
+            self.localize_platform();
         }
     }
 
-    /// The menus NSH owns use the same language selection as the app's text.
-    fn localize_menus(&mut self) {
+    /// What NSH says itself on the platform uses the same language
+    /// selection as the app's text: the menus it owns (macOS, Windows) and
+    /// the screen reader's state words (iOS, Android).
+    fn localize_platform(&mut self) {
+        use crate::platform::Os;
         let _entered = self.components.runtime.enter();
-        if !matches!(
-            self.components.environment.os,
-            crate::platform::Os::MacOs | crate::platform::Os::Windows
-        ) || self.components.environment.idiom == crate::platform::Idiom::Terminal
-        {
+        let env = self.components.environment;
+        let desktop = matches!(env.os, Os::MacOs | Os::Windows)
+            && env.idiom != crate::platform::Idiom::Terminal;
+        if !desktop && !matches!(env.os, Os::Ios | Os::Android) {
             return;
         }
         let translations = crate::element::global::<crate::i18n::Translations>().get();
-        let env = self.components.environment;
         let locale =
             crate::i18n::text_locale(&translations, env.locale, env.locale_settings.languages);
+        if !desktop {
+            if self.components.text_locale != Some(locale) {
+                self.components.text_locale = Some(locale);
+                self.commands
+                    .push((crate::ROOT_ID, Command::TextLocale(locale)));
+            }
+            return;
+        }
         let labels = crate::desktop::MenuLabels::for_locale(
             locale,
             self.components.environment.os == crate::platform::Os::MacOs,
@@ -1396,7 +1409,7 @@ impl<M: TextEngine> Core<M> {
             self.components.runtime.set_environment(environment);
         }
         if language_changed {
-            self.localize_menus();
+            self.localize_platform();
         }
         // A main window that keeps its placement saves it as it changes.
         if let Some(state) = environment.window_state {

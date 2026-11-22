@@ -674,6 +674,11 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                         e.int(17);
                         e.string(text);
                     }
+                    // `Mounter.textLocale`: the language tag.
+                    Command::TextLocale(locale) => {
+                        e.int(63);
+                        e.string(locale.as_str().to_owned());
+                    }
                     Command::AccessibilityFocus => e.int(18),
                     // `InputBox.openEditMenu`: the bounds in the root view,
                     // then the actions' bits (cut 1, copy 2, paste 4,
