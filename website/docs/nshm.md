@@ -220,6 +220,10 @@ function closeConversation(threadId: string) {
   `Notifications.close(id)` removes one.
 - `available()` is `true` in a standalone iOS app. Elsewhere it is `false`, and `register` and `closeThread` reject
   with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
+- An app that declares `"capabilities"` grants `Push` with
+  [`"notifications": true`](./sandbox-and-capabilities.md#notifications), the capability `Notifications` uses. The
+  token, the deliveries and how they show belong to the whole app, so every function but `available()` asks for it
+  first.
 
 The feature adds the `remote-notification` background mode to the packaged app. The `aps-environment` entitlement comes
 from the provisioning profile the app is signed with ([iOS devices](./packaging.md#ios-devices)). Rust code, such as

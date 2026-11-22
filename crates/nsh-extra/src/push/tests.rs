@@ -1,5 +1,7 @@
 use std::sync::Mutex;
 
+use nsh_core::access::{Access, Capabilities};
+
 use super::*;
 
 /// The module's state is process-wide: the tests that touch it take turns.
@@ -532,6 +534,124 @@ fn there_are_no_remote_notifications_off_ios() {
 fn an_empty_thread_is_refused() {
     let error = ready(close_thread("")).unwrap_err();
     assert_eq!(error.code, None);
+}
+
+/// The system of a VM whose app declares capabilities without
+/// `notifications`.
+fn undeclared() -> System {
+    let mut sys = System::default();
+    sys.access = Arc::new(Access {
+        declared: Capabilities::default(),
+        granted: None,
+    });
+    sys
+}
+
+/// The system of a VM whose app may do everything, in a host that grants
+/// it nothing.
+fn ungranted() -> System {
+    let mut sys = System::default();
+    sys.access = Arc::new(Access {
+        declared: Capabilities::all(),
+        granted: Some(Capabilities::default()),
+    });
+    sys
+}
+
+/// `error` is the refusal of a VM without the `notifications` capability.
+#[track_caller]
+fn assert_refused(error: &JsError) {
+    assert_eq!(error.code(), Some(codes::ACCESS_DENIED), "{error:?}");
+    let JsError::Fields(fields) = error else {
+        panic!("{error:?} names no permission");
+    };
+    assert_eq!(fields.field("permission"), Some(&"notifications".into()));
+    assert_eq!(fields.field("resource"), Some(&"".into()));
+}
+
+#[test]
+fn the_grant_is_the_declaration_and_the_hosts() {
+    assert!(granted(&System::default()).is_ok());
+    assert_refused(&granted(&undeclared()).unwrap_err());
+    assert_refused(&granted(&ungranted()).unwrap_err());
+}
+
+#[test]
+fn a_vm_without_the_grant_reads_and_sets_nothing() {
+    let _turn = turn();
+    let quiet = ForegroundPresentation::SHOWN.banner(false).sound(false);
+    let thread = || {
+        Some(ForegroundPresentationThread {
+            thread_id: "chat-1".into(),
+        })
+    };
+    let options = || {
+        Some(ForegroundPresentationOptions {
+            banner: Some(false),
+            sound: Some(false),
+            ..Default::default()
+        })
+    };
+    hub().token = Some(DeviceToken::from_bytes([0xab]));
+    for sys in [undeclared, ungranted] {
+        // The token of the app's registration.
+        assert_refused(&Push::token(sys()).unwrap_err());
+        // How the app's notifications show, and changing it.
+        assert_refused(&Push::foreground_presentation(None, sys()).unwrap_err());
+        assert_refused(&Push::foreground_presentation(thread(), sys()).unwrap_err());
+        assert_refused(&Push::set_foreground_presentation(options(), None, sys()).unwrap_err());
+        assert_refused(&Push::set_foreground_presentation(options(), thread(), sys()).unwrap_err());
+        // The grant is asked first: a thread that names none is refused
+        // the same.
+        let empty = Some(ForegroundPresentationThread::default());
+        assert_refused(&Push::set_foreground_presentation(options(), empty, sys()).unwrap_err());
+    }
+    assert_eq!(foreground_presentation(), ForegroundPresentation::SHOWN);
+    assert_eq!(thread_presentation("chat-1"), ForegroundPresentation::SHOWN);
+
+    // With the grant the same calls read and set them.
+    let sys = System::default;
+    assert_eq!(
+        Push::token(sys()).unwrap(),
+        Some(PushToken { token: "ab".into() })
+    );
+    Push::set_foreground_presentation(options(), thread(), sys()).unwrap();
+    assert_eq!(
+        Push::foreground_presentation(thread(), sys()).unwrap(),
+        quiet
+    );
+    assert_eq!(
+        Push::foreground_presentation(None, sys()).unwrap(),
+        ForegroundPresentation::SHOWN
+    );
+    Push::set_foreground_presentation(None, thread(), sys()).unwrap();
+    assert_eq!(thread_presentation("chat-1"), ForegroundPresentation::SHOWN);
+    hub().token = None;
+}
+
+#[cfg(not(target_os = "ios"))]
+#[test]
+fn a_vm_without_the_grant_neither_registers_nor_removes() {
+    let _turn = turn();
+    for sys in [undeclared, ungranted] {
+        // Refused before the platform is asked: not "unavailable", which
+        // is what a VM with the grant hears here.
+        assert_refused(&ready(Push::register(sys())).unwrap_err());
+        assert!(hub().registering.is_empty());
+        assert_refused(&ready(Push::close_thread("chat-1".into(), sys())).unwrap_err());
+        assert_refused(&ready(Push::close_thread(String::new(), sys())).unwrap_err());
+    }
+    let sys = System::default;
+    let error = ready(Push::register(sys())).unwrap_err();
+    assert_eq!(error.code(), Some(UNAVAILABLE));
+    let error = ready(Push::close_thread("chat-1".into(), sys())).unwrap_err();
+    assert_eq!(error.code(), Some(UNAVAILABLE));
+    assert!(matches!(
+        ready(Push::close_thread(String::new(), sys())),
+        Err(JsError::Range(_))
+    ));
+    // What the platform is told needs no capability.
+    assert!(!ready(Push::available()));
 }
 
 #[test]

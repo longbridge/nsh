@@ -130,7 +130,9 @@ and the renames decided so far).
   `on_application_event`, and `nsh-platform-apple`'s `set_foreign_handler` for the notifications NSH did not show;
   Android: `activity`, `permissions`,
   `picker::prepare_image`, `with_env`), the same ones any third-party nshm uses; NSH's runtime gets only such
-  generic hooks, never the feature itself.
+  generic hooks, never the feature itself. A module whose state or system calls are the process's checks the calling
+  VM's capability in each function of its JS face (`sys: System`, as `Push` checks `notifications`): the Cargo
+  feature says what the app links, not which of its VMs may use it.
 - Never a React Native compatibility wrapper. Something released that moves keeps its old name and module as a
   deprecated alias (`compatibility.md`); something unreleased simply moves.
 
