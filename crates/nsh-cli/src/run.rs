@@ -815,8 +815,11 @@ fn run_android(
         work,
         &runtime,
         &abis,
-        &config.libraries,
-        &config.manifest_placeholders,
+        Some(&AppLibraries {
+            libraries: &config.libraries,
+            placeholders: &config.manifest_placeholders,
+            target_sdk: config.target_sdk()?,
+        }),
     )?;
     // The device reaches the dev server on its own 127.0.0.1, until the
     // run ends.
@@ -846,19 +849,30 @@ fn run_android(
     result
 }
 
+/// What one app gives the Android development host it runs in.
+pub(crate) struct AppLibraries<'a> {
+    /// `nsh.json` `android.libraries`, which go before its crates'.
+    pub(crate) libraries: &'a [crate::android::Library],
+    /// `nsh.json` `android.manifestPlaceholders`.
+    pub(crate) placeholders: &'a std::collections::BTreeMap<String, String>,
+    /// `nsh.json` `android.targetSdk`: the host compiles against it when it
+    /// is newer than its own.
+    pub(crate) target_sdk: u32,
+}
+
 /// Builds the Android development host (when its runtime changed) into
 /// `work` and installs it on device `serial` (when the device does not have
 /// this build). It takes the runtime's libraries for `abis` (empty: every
-/// one the runtime has), and the Java `libraries` of the app's `nsh.json`
-/// before its crates', with the values of their manifests' `placeholders`.
+/// one the runtime has), the Java libraries of the app's `nsh.json`
+/// (`app`; `None` for the shared test host, which runs many apps) before
+/// its crates'.
 pub(crate) fn install_android_host(
     sdk: &crate::android::Sdk,
     serial: &str,
     work: &Path,
     runtime: &Path,
     abis: &[String],
-    libraries: &[crate::android::Library],
-    placeholders: &std::collections::BTreeMap<String, String>,
+    app: Option<&AppLibraries<'_>>,
 ) -> anyhow::Result<()> {
     use crate::android::{self, Apk, Signing};
     let apk_path = work.join("android/NshDev.apk");
@@ -888,7 +902,7 @@ pub(crate) fn install_android_host(
     }
     // A library's contents, not its time: a rebuilt jar that is the same
     // keeps the host.
-    let mut libraries = libraries.to_vec();
+    let mut libraries = app.map(|app| app.libraries.to_vec()).unwrap_or_default();
     for library in &meta.android_libraries {
         if !libraries.iter().any(|have| have.path == library.path) {
             libraries.push(library.clone());
@@ -898,7 +912,16 @@ pub(crate) fn install_android_host(
         let sha256 = android::file_sha256(&library.path).unwrap_or_default();
         version.push_str(&format!("\n{} {sha256}", library.path.display()));
     }
-    for (name, value) in placeholders {
+    // The platform the host compiles against: the app's, when newer, which
+    // its libraries may need (`minCompileSdk`).
+    let target_sdk = app.map_or(android::DEFAULT_TARGET_SDK, |app| {
+        app.target_sdk.max(android::DEFAULT_TARGET_SDK)
+    });
+    if target_sdk != android::DEFAULT_TARGET_SDK {
+        version.push_str(&format!("\ntargetSdk {target_sdk}"));
+    }
+    let placeholders = app.map(|app| app.placeholders);
+    for (name, value) in placeholders.into_iter().flatten() {
         version.push_str(&format!("\n${{{name}}}={value}"));
     }
     let built =
@@ -912,7 +935,7 @@ pub(crate) fn install_android_host(
                 label: APP_NAME,
                 version_name: "0.1.0",
                 version_code: 1,
-                target_sdk: android::DEFAULT_TARGET_SDK,
+                target_sdk,
                 activity: "com.longbridge.nsh.DevActivity",
                 dev: true,
                 cleartext: true,

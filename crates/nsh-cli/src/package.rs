@@ -1815,7 +1815,7 @@ fn package_android(
             camera: config.web_media("camera"),
             libraries: &config.android.libraries,
             library_cache: &library_cache,
-            manifest_placeholders: &config.android.manifest_placeholders,
+            manifest_placeholders: Some(&config.android.manifest_placeholders),
             permissions: &permissions,
             queries: &config.android.queries,
             application: &config.android.application,

@@ -196,10 +196,22 @@ fn element(reader: &NsReader<&[u8]>, start: &BytesStart<'_>) -> anyhow::Result<E
 /// package, the others are `nsh.json` `android.manifestPlaceholders`.
 pub(super) struct Placeholders<'a> {
     pub(super) package: &'a str,
-    pub(super) values: &'a BTreeMap<String, String>,
+    /// `None`: the shared test host's, which reads no app's `nsh.json`: a
+    /// placeholder is left empty, and named in [`Placeholders::missing`].
+    pub(super) values: Option<&'a BTreeMap<String, String>>,
+    /// The placeholders left empty.
+    pub(super) missing: std::cell::RefCell<std::collections::BTreeSet<String>>,
 }
 
-impl Placeholders<'_> {
+impl<'a> Placeholders<'a> {
+    pub(super) fn new(package: &'a str, values: Option<&'a BTreeMap<String, String>>) -> Self {
+        Placeholders {
+            package,
+            values,
+            missing: Default::default(),
+        }
+    }
+
     /// `text` with its placeholders filled in, escaped for an attribute
     /// when `text` is XML (a crate's entry) rather than an attribute's value
     /// already read; the name of one without a value is the error.
@@ -212,9 +224,13 @@ impl Placeholders<'_> {
             };
             let name = &rest[at + 2..at + 2 + end];
             out.push_str(&rest[..at]);
-            let value = match name {
-                "applicationId" => self.package,
-                _ => self.values.get(name).ok_or_else(|| name.to_owned())?,
+            let value = match (name, self.values) {
+                ("applicationId", _) => self.package,
+                (_, Some(values)) => values.get(name).ok_or_else(|| name.to_owned())?,
+                (_, None) => {
+                    self.missing.borrow_mut().insert(name.to_owned());
+                    ""
+                }
             };
             if xml {
                 out.push_str(&xml_attribute(value));
@@ -396,6 +412,36 @@ fn resolved(
     })
 }
 
+/// A crate's `element` without the merge tools' attributes, checked as a
+/// library's are.
+fn without_tools(element: Element) -> anyhow::Result<Element> {
+    let mut attributes = Vec::new();
+    for (key, value) in element.attributes {
+        match key.strip_prefix("tools:") {
+            Some(tool) => check_tool(tool, &value, &element_named(&element.name), CRATES)?,
+            None => attributes.push((key, value)),
+        }
+    }
+    Ok(Element {
+        name: element.name,
+        attributes,
+        children: element
+            .children
+            .into_iter()
+            .map(without_tools)
+            .collect::<anyhow::Result<_>>()?,
+    })
+}
+
+/// An element of `name` alone, which errors name.
+fn element_named(name: &str) -> Element {
+    Element {
+        name: name.to_owned(),
+        attributes: Vec::new(),
+        children: Vec::new(),
+    }
+}
+
 /// A class name of a manifest whose package is `package`, in full: `.Foo`
 /// and `Foo` are the package's, as Android reads them.
 fn full_class(package: &str, name: &str) -> String {
@@ -454,45 +500,58 @@ fn add(list: &mut Vec<Merging>, element: Element, from: &str) -> anyhow::Result<
 /// Joins `more` (of `more_from`) into `have` (of `have_from`), the same
 /// element: an attribute both give differently is an error naming both,
 /// but for a permission's `maxSdkVersion` and a feature's `required`, of
-/// which the wider wins (as Gradle has it).
+/// which the wider wins (as Gradle has it), whichever comes first.
 fn join(have: &mut Element, more: Element, have_from: &str, more_from: &str) -> anyhow::Result<()> {
     let permission = matches!(
         have.name.as_str(),
         "uses-permission" | "uses-permission-sdk-23"
     );
     let feature = have.name == "uses-feature";
+    // The attribute of these two whose wider value `wider` gives: `None`
+    // is the attribute left out, the widest of all.
+    type Wider = fn(Option<&str>, Option<&str>) -> Option<Option<String>>;
+    let widest: Option<(&str, Wider)> = if permission {
+        // Declared for every API level by one of them: for every one.
+        Some(("android:maxSdkVersion", |a, b| match (a, b) {
+            (Some(a), Some(b)) => Some(Some(
+                a.parse::<u32>().ok()?.max(b.parse().ok()?).to_string(),
+            )),
+            _ => Some(None),
+        }))
+    } else if feature {
+        // Needed by one of them (`required` left out is `true`): needed.
+        Some(("android:required", |a, b| match (a, b) {
+            (Some("false"), Some("false")) => Some(Some("false".to_owned())),
+            _ => Some(None),
+        }))
+    } else {
+        None
+    };
+    if let Some((key, wider)) = widest {
+        let (a, b) = (have.attribute(key), more.attribute(key));
+        if a != b {
+            match wider(a, b) {
+                Some(Some(value)) => set(have, key, value),
+                Some(None) => have.attributes.retain(|(k, _)| k != key),
+                None => bail!(
+                    "{have_from} and {more_from} both declare {} with different `{key}`",
+                    have.describe()
+                ),
+            }
+        }
+    }
     for (key, value) in &more.attributes {
+        if widest.is_some_and(|(wide, _)| wide == key) {
+            continue;
+        }
         match have.attribute(key) {
             None => have.attributes.push((key.clone(), value.clone())),
             Some(same) if same == value => {}
-            Some(_) if permission && key == "android:maxSdkVersion" => {
-                let wider = match (
-                    have.attribute(key).map(str::parse::<u32>),
-                    value.parse::<u32>(),
-                ) {
-                    (Some(Ok(a)), Ok(b)) => a.max(b),
-                    _ => bail!(
-                        "{have_from} and {more_from} both declare {} with different `{key}`",
-                        have.describe()
-                    ),
-                };
-                set(have, key, wider.to_string());
-            }
-            Some(_) if feature && key == "android:required" => {
-                // One that needs the feature wins.
-                set(have, key, "true".to_owned());
-            }
             Some(other) => bail!(
                 "{have_from} and {more_from} both declare {} with different `{key}`: `{other}` and `{value}`",
                 have.describe()
             ),
         }
-    }
-    // A permission one of them declares for every API level is for every
-    // one.
-    if permission && more.attribute("android:maxSdkVersion").is_none() {
-        have.attributes
-            .retain(|(key, _)| key != "android:maxSdkVersion");
     }
     let mut children: Vec<Merging> = std::mem::take(&mut have.children)
         .into_iter()
@@ -533,12 +592,9 @@ pub(super) struct Additions {
 /// is declared once, as NSH has it.
 pub(super) fn additions(
     apk: &Apk<'_>,
+    placeholders: &Placeholders<'_>,
     libraries: Vec<(Parts, String)>,
 ) -> anyhow::Result<Additions> {
-    let placeholders = Placeholders {
-        package: apk.package,
-        values: apk.manifest_placeholders,
-    };
     let fill = |entry: &str| {
         placeholders.fill(entry.trim(), true).map_err(|name| {
             anyhow::anyhow!(
@@ -568,7 +624,12 @@ pub(super) fn additions(
                 fill(entry)?
             ))
             .with_context(|| format!("{CRATES}: read `{}`", entry.trim()))?;
-            out.extend(fragment.children);
+            for element in fragment.children {
+                // The merged manifest declares no namespace an entry may
+                // declare for itself: the merge tools' attributes go, as
+                // the libraries' do.
+                out.push(without_tools(element)?);
+            }
         }
         Ok(out)
     };
@@ -639,10 +700,7 @@ mod tests {
     /// manifest has them, or the error.
     fn parts(body: &str) -> Result<(String, String, String, Vec<String>), String> {
         let values = placeholders();
-        let placeholders = Placeholders {
-            package: "com.example.app",
-            values: &values,
-        };
+        let placeholders = Placeholders::new("com.example.app", Some(&values));
         let root = parse(&manifest(body)).map_err(|e| e.to_string())?;
         let mut warnings = Vec::new();
         let parts =
@@ -726,11 +784,11 @@ mod tests {
             ),
             // Escaped values stay escaped.
             (
-                r#"<application><meta-data android:name="m" android:value="a &amp; &quot;b&quot;" /></application>"#,
+                r#"<application><meta-data android:name="m" android:value="a &amp; &quot;b&quot; &apos;c&apos;&#10;d&#9;e" /></application>"#,
                 [
                     "",
                     "",
-                    "<meta-data android:name=\"m\" android:value=\"a &amp; &quot;b&quot;\" />",
+                    "<meta-data android:name=\"m\" android:value=\"a &amp; &quot;b&quot; &apos;c&apos;&#10;d&#9;e\" />",
                 ],
             ),
         ];
@@ -793,10 +851,7 @@ mod tests {
         let error = resolve(
             &root,
             FROM,
-            &Placeholders {
-                package: "a",
-                values: &BTreeMap::new(),
-            },
+            &Placeholders::new("a", Some(&BTreeMap::new())),
             &mut Vec::new(),
         )
         .unwrap_err()
@@ -856,10 +911,16 @@ mod tests {
                     "<activity android:name=\"x.A\" android:theme=\"@style/T\">\n    <intent-filter>\n        <action android:name=\"x.OPEN\" />\n    </intent-filter>\n</activity>",
                 ),
             ),
-            // The wider permission and the needed feature win.
+            // The wider permission and the needed feature win, in either
+            // order; one that leaves the attribute out is the widest.
             (
                 r#"<uses-permission android:name="p.X" android:maxSdkVersion="28" />"#,
                 r#"<uses-permission android:name="p.X" android:maxSdkVersion="32" />"#,
+                Ok("<uses-permission android:name=\"p.X\" android:maxSdkVersion=\"32\" />"),
+            ),
+            (
+                r#"<uses-permission android:name="p.X" android:maxSdkVersion="32" />"#,
+                r#"<uses-permission android:name="p.X" android:maxSdkVersion="28" />"#,
                 Ok("<uses-permission android:name=\"p.X\" android:maxSdkVersion=\"32\" />"),
             ),
             (
@@ -868,9 +929,29 @@ mod tests {
                 Ok("<uses-permission android:name=\"p.X\" />"),
             ),
             (
+                r#"<uses-permission android:name="p.X" />"#,
+                r#"<uses-permission android:name="p.X" android:maxSdkVersion="28" />"#,
+                Ok("<uses-permission android:name=\"p.X\" />"),
+            ),
+            (
                 r#"<uses-feature android:name="f.X" android:required="false" />"#,
                 r#"<uses-feature android:name="f.X" android:required="true" />"#,
-                Ok("<uses-feature android:name=\"f.X\" android:required=\"true\" />"),
+                Ok("<uses-feature android:name=\"f.X\" />"),
+            ),
+            (
+                r#"<uses-feature android:name="f.X" />"#,
+                r#"<uses-feature android:name="f.X" android:required="false" />"#,
+                Ok("<uses-feature android:name=\"f.X\" />"),
+            ),
+            (
+                r#"<uses-feature android:name="f.X" android:required="false" />"#,
+                r#"<uses-feature android:name="f.X" />"#,
+                Ok("<uses-feature android:name=\"f.X\" />"),
+            ),
+            (
+                r#"<uses-feature android:name="f.X" android:required="false" />"#,
+                r#"<uses-feature android:name="f.X" android:required="false" />"#,
+                Ok("<uses-feature android:name=\"f.X\" android:required=\"false\" />"),
             ),
             // The same intent filter, once.
             (
@@ -920,11 +1001,8 @@ mod tests {
     #[test]
     fn placeholders_fill_in_or_name_what_is_missing() {
         let mut values = placeholders();
-        values.insert("QUOTED".to_owned(), "a&\"b\"".to_owned());
-        let placeholders = Placeholders {
-            package: "com.example.app",
-            values: &values,
-        };
+        values.insert("QUOTED".to_owned(), "a&\"b\"'c'".to_owned());
+        let placeholders = Placeholders::new("com.example.app", Some(&values));
         assert_eq!(
             placeholders.fill("${applicationId}.push/${PUSH_KEY}", false),
             Ok("com.example.app.push/k-123".to_owned())
@@ -940,11 +1018,103 @@ mod tests {
         // A read value takes it as it is; a crate's XML, escaped.
         assert_eq!(
             placeholders.fill("${QUOTED}", false),
-            Ok("a&\"b\"".to_owned())
+            Ok("a&\"b\"'c'".to_owned())
         );
         assert_eq!(
-            placeholders.fill(r#"<meta-data android:value="${QUOTED}"/>"#, true),
-            Ok(r#"<meta-data android:value="a&amp;&quot;b&quot;"/>"#.to_owned())
+            placeholders.fill(r#"<meta-data android:value='${QUOTED}'/>"#, true),
+            Ok(r#"<meta-data android:value='a&amp;&quot;b&quot;&apos;c&apos;'/>"#.to_owned())
         );
+        assert!(placeholders.missing.borrow().is_empty());
+        // The shared test host reads no app's values: empty, and named.
+        let test_host = Placeholders::new("com.example.app", None);
+        assert_eq!(
+            test_host.fill("${applicationId}/${PUSH_KEY}", false),
+            Ok("com.example.app/".to_owned())
+        );
+        assert_eq!(
+            test_host.missing.borrow().iter().collect::<Vec<_>>(),
+            ["PUSH_KEY"]
+        );
+    }
+
+    #[test]
+    fn a_crates_entry_loses_the_merge_tools_attributes_it_declares() {
+        let values = placeholders();
+        let placeholders = Placeholders::new("com.example.app", Some(&values));
+        let entry = r#"<activity xmlns:tools="http://schemas.android.com/tools" android:name="x.A" tools:ignore="Lint"><meta-data android:name="m" android:value="v" tools:node="merge"/></activity>"#;
+        let application = [entry.to_owned()];
+        let apk = super::super::Apk {
+            application: &application,
+            ..test_apk()
+        };
+        let library = Parts {
+            application: vec![
+                parse(&format!(
+                    r#"<provider xmlns:android="{ANDROID}" android:name="p.P" />"#
+                ))
+                .unwrap(),
+            ],
+            ..Default::default()
+        };
+        let added = additions(&apk, &placeholders, vec![(library, FROM.to_owned())]).unwrap();
+        assert_eq!(
+            added.application,
+            "\n        <activity android:name=\"x.A\">\n            \
+             <meta-data android:name=\"m\" android:value=\"v\" />\n        </activity>\n        \
+             <provider android:name=\"p.P\" />"
+        );
+        // A merge rule is an error, as in a library.
+        let application = [entry.replace("tools:ignore=\"Lint\"", "tools:node=\"remove\"")];
+        let apk = super::super::Apk {
+            application: &application,
+            ..test_apk()
+        };
+        let error = additions(
+            &apk,
+            &placeholders,
+            vec![(Parts::default(), FROM.to_owned())],
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.starts_with(CRATES) && error.contains("`tools:node=\"remove\"`"),
+            "{error}"
+        );
+    }
+
+    /// An app's package without anything else.
+    fn test_apk() -> super::super::Apk<'static> {
+        super::super::Apk {
+            package: "com.example.app",
+            label: "App",
+            version_name: "1.0",
+            version_code: 1,
+            target_sdk: super::super::DEFAULT_TARGET_SDK,
+            activity: "com.example.Main",
+            dev: false,
+            cleartext: false,
+            notifications: false,
+            microphone: false,
+            camera: false,
+            libraries: &[],
+            library_cache: std::path::Path::new("."),
+            manifest_placeholders: None,
+            permissions: &[],
+            queries: &[],
+            application: &[],
+            schemes: &[],
+            links: &[],
+            rust: false,
+            dark: false,
+            fixed_appearance: false,
+            runtime: std::path::Path::new("."),
+            abis: &[],
+            icon: None,
+            launch_screen: None,
+            assets: Vec::new(),
+            sounds: Vec::new(),
+            res: None,
+            signing: super::super::Signing::Debug,
+        }
     }
 }

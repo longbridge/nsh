@@ -229,7 +229,9 @@ pub(crate) struct Apk<'a> {
     /// The values of the placeholders (`${name}`) in the libraries'
     /// manifests and the crates' manifest entries: `nsh.json`
     /// `android.manifestPlaceholders`. `${applicationId}` is `package`.
-    pub(crate) manifest_placeholders: &'a BTreeMap<String, String>,
+    /// `None` in the shared test host, which reads no app's `nsh.json`: a
+    /// placeholder is left empty there, with a warning.
+    pub(crate) manifest_placeholders: Option<&'a BTreeMap<String, String>>,
     /// Where the dex `d8` makes of the jar libraries is kept between builds
     /// (`.nsh/android/libraries`). Unused without jars.
     pub(crate) library_cache: &'a Path,
@@ -832,8 +834,14 @@ fn xml_attribute(value: &str) -> String {
     value
         .replace('&', "&amp;")
         .replace('"', "&quot;")
+        // An attribute in single quotes (a crate's entry) holds it too.
+        .replace('\'', "&apos;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+        // Kept: a parser turns a raw line break or tab into a space.
+        .replace('\n', "&#10;")
+        .replace('\r', "&#13;")
+        .replace('\t', "&#9;")
 }
 
 /// The permissions NSH declares: its own, then the app's
@@ -1030,7 +1038,13 @@ fn write_bundle(
     zip.start_file("base/native.pb", deflate)?;
     zip.write_all(&native_pb(&abis)?)?;
     zip.start_file("BundleConfig.pb", deflate)?;
-    zip.write_all(&bundle_config_pb())?;
+    let stored: Vec<String> = java
+        .assets
+        .iter()
+        .filter(|(path, _)| libraries::stored_asset(path))
+        .map(|(path, _)| format!("assets/{path}"))
+        .collect();
+    zip.write_all(&bundle_config_pb(&stored))?;
     zip.finish()?;
     fs::remove_file(&files)?;
     Ok(())
@@ -1069,12 +1083,30 @@ mod pb {
 /// uncompressed, as `extractNativeLibs="false"` needs).
 const BUNDLETOOL_VERSION: &str = "1.18.1";
 
-/// `BundleConfig { bundletool { version } }` (bundletool's `config.proto`).
-fn bundle_config_pb() -> Vec<u8> {
+/// `BundleConfig { bundletool { version } compression { uncompressed_glob } }`
+/// (bundletool's `config.proto`). Google Play compresses the APKs' assets
+/// as it decides, not as the bundle stores them: the module's `uncompressed`
+/// paths (`assets/...`) are named here to stay stored.
+fn bundle_config_pb(uncompressed: &[String]) -> Vec<u8> {
     let mut bundletool = Vec::new();
     pb::bytes(&mut bundletool, 2, BUNDLETOOL_VERSION.as_bytes());
     let mut config = Vec::new();
     pb::bytes(&mut config, 1, &bundletool);
+    if !uncompressed.is_empty() {
+        let mut compression = Vec::new();
+        for path in uncompressed {
+            // A glob of the path itself: Java's glob syntax.
+            let mut glob = String::with_capacity(path.len());
+            for c in path.chars() {
+                if matches!(c, '\\' | '*' | '?' | '[' | ']' | '{' | '}') {
+                    glob.push('\\');
+                }
+                glob.push(c);
+            }
+            pb::bytes(&mut compression, 1, glob.as_bytes());
+        }
+        pb::bytes(&mut config, 3, &compression);
+    }
     config
 }
 
@@ -1694,7 +1726,12 @@ mod tests {
     fn manifest_of(apk: &super::Apk<'_>) -> String {
         super::manifest_xml(
             apk,
-            &super::library_manifest::additions(apk, Vec::new()).unwrap(),
+            &super::library_manifest::additions(
+                apk,
+                &super::library_manifest::Placeholders::new(apk.package, apk.manifest_placeholders),
+                Vec::new(),
+            )
+            .unwrap(),
         )
     }
 
@@ -1713,7 +1750,7 @@ mod tests {
             camera: false,
             libraries: &[],
             library_cache: std::path::Path::new("."),
-            manifest_placeholders: &NO_PLACEHOLDERS,
+            manifest_placeholders: Some(&NO_PLACEHOLDERS),
             permissions: &[],
             queries: &[],
             application: &[],
@@ -2227,7 +2264,7 @@ mod tests {
                     runtime: &runtime,
                     libraries: &libraries,
                     library_cache: &cache,
-                    manifest_placeholders: placeholders,
+                    manifest_placeholders: Some(placeholders),
                     application: &application,
                     abis,
                     ..apk(false, false)
@@ -2612,7 +2649,14 @@ mod tests {
     fn bundle_metadata_is_what_bundletool_writes() {
         // `bundletool build-bundle` 1.18.1's own `BundleConfig.pb` and, for
         // a module with these two ABIs, `base/native.pb`.
-        assert_eq!(super::bundle_config_pb(), b"\x0a\x08\x12\x061.18.1");
+        assert_eq!(super::bundle_config_pb(&[]), b"\x0a\x08\x12\x061.18.1");
+        // Libraries' assets of the kinds `aapt2` stores stay stored, by
+        // their own paths, escaped as globs.
+        let stored = ["assets/a[1].mp3".to_owned()];
+        assert_eq!(
+            super::bundle_config_pb(&stored),
+            b"\x0a\x08\x12\x061.18.1\x1a\x13\x0a\x11assets/a\\[1\\].mp3"
+        );
         let abis = ["arm64-v8a".to_owned(), "armeabi-v7a".to_owned()];
         let mut expected = b"\x0a\x15\x0a\x0dlib/arm64-v8a\x12\x04\x0a\x02\x08\x03".to_vec();
         expected.extend_from_slice(b"\x0a\x17\x0a\x0flib/armeabi-v7a\x12\x04\x0a\x02\x08\x02");

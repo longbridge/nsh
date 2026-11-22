@@ -293,12 +293,13 @@ The libraries are local files: NSH does not download them or resolve Maven depen
 depends on as well.
 
 An Android library (`.aar`) brings more than its classes, which go the jars' way: its native libraries
-(`jni/<abi>/*.so`) go in for the ABIs the package has, stored uncompressed like NSH's own; its assets go next to the
-app's; and its manifest's permissions, features, `<queries>` and components join the app's manifest, its relative class
+(`jni/<abi>/*.so`) go in for the ABIs the package has, stored uncompressed like NSH's own; its assets join the app's
+own; and its manifest's permissions, features, `<queries>` and components join the app's manifest, its relative class
 names (`.PushService`) completed with its package and `${applicationId}` filled in with the app's. Components that
 several libraries declare under one name (a startup provider each adds an initializer to) become one. Other
 placeholders in its manifest, or in a crate's `android.application`, take their values from
-`android.manifestPlaceholders`, which only the app's `nsh.json` sets: they are the app's, such as a service's key.
+`android.manifestPlaceholders`, which only the app's `nsh.json` sets: they are the app's, such as a service's key. The shared development host that
+`nsh test --target android` installs reads no app's `nsh.json`, so it leaves them empty, with a warning.
 
 ```json
 {
@@ -313,7 +314,7 @@ Each library goes in once, as its manifest's package names it: the same file fro
 versions of one library stop the build naming both, and the version the app lists in its own `nsh.json` is the one the
 package takes. The package also stops, naming the library, when it needs what an NSH app does not have: a minimum API
 level above 26, a newer platform than `android.targetSdk`, an `Application` class of its own, a manifest merge rule
-(`tools:node="remove"`, `tools:replace`), or native libraries for an ABI the package has that it lacks. Android
+(`tools:node="remove"`, `tools:replace`), or native libraries that leave out an ABI the package has. Android
 resources (`res/`) are not packaged yet: an AAR with resources stops the build too.
 
 Compile your own Java sources against the platform's `android.jar` into a jar:

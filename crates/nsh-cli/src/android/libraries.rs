@@ -171,10 +171,7 @@ pub(super) fn prepare(sdk: &Sdk, apk: &Apk<'_>, work: &Path) -> anyhow::Result<C
             files.push(checked);
         }
     }
-    let placeholders = Placeholders {
-        package: apk.package,
-        values: apk.manifest_placeholders,
-    };
+    let placeholders = Placeholders::new(apk.package, apk.manifest_placeholders);
     let mut manifests = Vec::new();
     let mut warnings = Vec::new();
     // Each asset's AAR, for errors.
@@ -230,10 +227,15 @@ pub(super) fn prepare(sdk: &Sdk, apk: &Apk<'_>, work: &Path) -> anyhow::Result<C
             });
         }
     }
+    contents.manifest = library_manifest::additions(apk, &placeholders, manifests)?;
+    for name in placeholders.missing.borrow().iter() {
+        warnings.push(format!(
+            "the placeholder `${{{name}}}` is empty in the shared test host, which reads no app's nsh.json"
+        ));
+    }
     for warning in warnings {
         crate::ui::warn(warning);
     }
-    contents.manifest = library_manifest::additions(apk, manifests)?;
 
     contents.dex.extend(
         files
@@ -352,6 +354,13 @@ fn read_aar(checked: Checked) -> anyhow::Result<Aar> {
                 native.entry(abi).or_default().push((so, read()?));
             }
         } else if let Some(path) = name.strip_prefix("assets/") {
+            // `assets/../classes.dex` would be a file of the package's own.
+            if path.split('/').any(|part| matches!(part, "" | "." | "..")) {
+                bail!(
+                    "{} has `{name}`, an asset path with an empty, `.` or `..` part",
+                    checked.shown
+                );
+            }
             if path.starts_with("nsh/") {
                 bail!("{} has `{name}`: `assets/nsh/` is NSH's own", checked.shown);
             }
@@ -1133,6 +1142,18 @@ mod tests {
                 "has Android resources (`res/values/values.xml`), which this nsh does not package yet",
             ),
             ("assets/nsh/bundle.nshc", "`assets/nsh/` is NSH's own"),
+            (
+                "assets/../classes.dex",
+                "an asset path with an empty, `.` or `..` part",
+            ),
+            (
+                "assets/a/./b.txt",
+                "an asset path with an empty, `.` or `..` part",
+            ),
+            (
+                "assets/a//b.txt",
+                "an asset path with an empty, `.` or `..` part",
+            ),
         ] {
             jar(&path, &[("AndroidManifest.xml", &manifest), (entry, b"x")]);
             let found = read_aar(checked(&[library(&path, CRATE)]).unwrap().remove(0))
