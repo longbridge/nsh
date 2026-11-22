@@ -1325,12 +1325,11 @@ fn preferred_languages() -> nsh_engine::Languages {
 /// languages, the time zone, and Settings' time format (the hours of
 /// `NSDateFormatter`'s format for the `j` template, which 24-hour time
 /// changes), `NSCalendar`'s first weekday, `NSLocale`'s measurement system
-/// and the `AppleTemperatureUnit` default, over the region's.
+/// and the locale identifier's temperature unit override.
 fn locale_settings() -> nsh_engine::LocaleSettings {
-    use nsh_engine::{HourCycle, MeasurementSystem, TemperatureUnit, Weekday};
+    use nsh_engine::{HourCycle, MeasurementSystem, Weekday};
     use objc2_foundation::{
-        NSCalendar, NSDateFormatter, NSLocale, NSLocaleMeasurementSystem, NSString, NSUserDefaults,
-        ns_string,
+        NSCalendar, NSDateFormatter, NSLocale, NSLocaleMeasurementSystem, NSString, ns_string,
     };
     let locale = NSLocale::currentLocale();
     let mut preferences = nsh_engine::LocaleSettings::parse(&locale.localeIdentifier().to_string());
@@ -1362,14 +1361,6 @@ fn locale_settings() -> nsh_engine::LocaleSettings {
         Some("Metric") => preferences.measurement_system = MeasurementSystem::Metric,
         Some("U.S.") => preferences.measurement_system = MeasurementSystem::Us,
         Some("U.K.") => preferences.measurement_system = MeasurementSystem::Uk,
-        _ => {}
-    }
-    // Set once the user picks one.
-    let unit =
-        NSUserDefaults::standardUserDefaults().stringForKey(ns_string!("AppleTemperatureUnit"));
-    match unit.map(|u| u.to_string()).as_deref() {
-        Some("Celsius") => preferences.temperature_unit = TemperatureUnit::Celsius,
-        Some("Fahrenheit") => preferences.temperature_unit = TemperatureUnit::Fahrenheit,
         _ => {}
     }
     preferences
