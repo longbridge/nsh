@@ -55,7 +55,7 @@ view()
 | `.accessibility_active_descendant(..)` | `accessibilityActiveDescendant` | `ViewRef \| null` | The item that is active inside the focused element: a combo box's highlighted option, a list's cursor row. |
 | `.accessibility_controls(..)` | `accessibilityControls` | `ViewRef \| null` | The element whose content this one controls: a combo box's list. |
 | `.accessibility_described_by(..)` | `accessibilityDescribedBy` | `ViewRef \| null` | The element whose text describes this one: a field's error line. |
-| | `accessibilityActions` | `{ name, label? }[]` | Actions offered to assistive technologies. |
+| `.accessibility_actions(..)` | `accessibilityActions` | `{ name, label? }[]` | Actions offered to assistive technologies. |
 | `.on_accessibility_action(..)` | `onAccessibilityAction` | `(e: { actionName }) => void` | An action was performed (Rust: its name). |
 | `.accessibility_elements_hidden(..)` | `accessibilityElementsHidden` | `boolean` | Hides the view and its subtree from assistive technologies. |
 | | `importantForAccessibility` | `"auto" \| "yes" \| "no" \| "no-hide-descendants"` | Whether the view (and its subtree) is exposed. |
@@ -282,6 +282,32 @@ Any other name becomes a custom action, listed in VoiceOver's actions rotor and 
 <View
   accessibilityActions={[{ name: "archive", label: "Archive" }, { name: "delete", label: "Delete" }]}
   onAccessibilityAction={(e) => (e.actionName === "archive" ? archive(mail.id) : remove(mail.id))}
+>
+  …
+</View>
+```
+
+Labels that read signals or [translations](i18n.md) follow them on the mounted element: when the app switches its language, the actions get their new labels while the element, its name in `onAccessibilityAction` and the screen reader's focus stay. In Rust, give `.accessibility_actions(..)` a closure:
+
+```rust tabs
+view()
+    .accessibility_actions(|| {
+        vec![AccessibilityActionDef {
+            name: "delete".into(),
+            label: Some(t!("mail.delete").into()),
+        }]
+    })
+    .on_accessibility_action(move |name: &str| {
+        if name == "delete" {
+            remove(id);
+        }
+    })
+```
+
+```tsx tabs
+<View
+  accessibilityActions={[{ name: "delete", label: t("mail.delete") }]}
+  onAccessibilityAction={() => remove(mail.id)}
 >
   …
 </View>

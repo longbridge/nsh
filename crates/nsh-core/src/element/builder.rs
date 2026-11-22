@@ -1702,11 +1702,19 @@ pub trait Accessible: Element {
     /// `accessibilityActions`): `increment` and `decrement` for an
     /// adjustable element, `activate`, `longpress`, or the app's own with
     /// a label; [`Interactive::on_accessibility_action`] hears them.
-    fn accessibility_actions(mut self, actions: Vec<crate::AccessibilityActionDef>) -> Self {
-        super::host::set(
-            self.node(),
-            Prop::Accessibility(AccessibilityProp::Actions(actions)),
-        );
+    /// Bound to signals, the labels follow them in place (the interface's
+    /// language): the element and the screen reader's focus on it stay,
+    /// and the names its handler hears do not change.
+    fn accessibility_actions(
+        mut self,
+        actions: impl IntoReactive<Vec<crate::AccessibilityActionDef>>,
+    ) -> Self {
+        self.node().bind_attr(actions, |a, actions| {
+            super::host::set_in(
+                &mut a.props,
+                Prop::Accessibility(AccessibilityProp::Actions(actions)),
+            )
+        });
         self
     }
 }
