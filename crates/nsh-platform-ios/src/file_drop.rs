@@ -55,29 +55,107 @@ pub(crate) fn interaction(delegate: &AnyObject) -> Option<Retained<AnyObject>> {
 /// The type identifier of the file `provider` offers: its first registered
 /// type that is data, but not text or a link (those are a text drag's).
 fn file_type(provider: &AnyObject) -> Option<Retained<NSString>> {
+    // SAFETY: NSItemProvider's documented API (iOS 11).
+    let types: Retained<NSArray<NSString>> =
+        unsafe { msg_send![provider, registeredTypeIdentifiers] };
+    types.iter().find(|identifier| is_file_type(identifier))
+}
+
+/// The uniform type `identifier` names (a `UTType`), when the framework
+/// loads and knows it.
+fn uniform_type(identifier: &str) -> Option<Retained<AnyObject>> {
     let type_class = crate::picker::uniform_types()
         .then(|| class(c"UTType"))
         .flatten()?;
-    // SAFETY: NSItemProvider's and UTType's documented API (iOS 11, 14).
-    unsafe {
-        let types: Retained<NSArray<NSString>> = msg_send![provider, registeredTypeIdentifiers];
-        let named = |identifier: &str| -> Option<Retained<AnyObject>> {
-            let identifier = NSString::from_str(identifier);
-            msg_send![type_class, typeWithIdentifier: &*identifier]
-        };
-        let (data, text, url) = (
-            named("public.data")?,
-            named("public.text")?,
-            named("public.url")?,
-        );
-        types.iter().find(|identifier| {
-            let found: Option<Retained<AnyObject>> =
-                msg_send![type_class, typeWithIdentifier: &**identifier];
-            found.is_some_and(|t| {
-                let conforms = |to: &AnyObject| -> bool { msg_send![&t, conformsToType: to] };
-                conforms(&data) && !conforms(&text) && !conforms(&url)
-            })
-        })
+    let identifier = NSString::from_str(identifier);
+    // SAFETY: UTType's documented API (iOS 14).
+    unsafe { msg_send![type_class, typeWithIdentifier: &*identifier] }
+}
+
+/// Whether the type `identifier` conforms to the type `to` (false when
+/// either is unknown).
+pub(crate) fn conforms(identifier: &NSString, to: &str) -> bool {
+    let (Some(kind), Some(to)) = (uniform_type(&identifier.to_string()), uniform_type(to)) else {
+        return false;
+    };
+    // SAFETY: UTType's documented API (iOS 14).
+    unsafe { msg_send![&kind, conformsToType: &*to] }
+}
+
+/// Whether the type `identifier` is a file's: data, but not text or a link.
+pub(crate) fn is_file_type(identifier: &NSString) -> bool {
+    conforms(identifier, "public.data")
+        && !conforms(identifier, "public.text")
+        && !conforms(identifier, "public.url")
+}
+
+/// The MIME type of a file of type `identifier` (`application/octet-stream`
+/// when the type has none) and the file name extension the type prefers.
+pub(crate) fn mime_and_extension(identifier: &NSString) -> (String, Option<String>) {
+    let kind = uniform_type(&identifier.to_string());
+    // SAFETY: UTType's documented getters (iOS 14).
+    let (mime, extension) = kind.map_or((None, None), |kind| unsafe {
+        let mime: Option<Retained<NSString>> = msg_send![&kind, preferredMIMEType];
+        let extension: Option<Retained<NSString>> = msg_send![&kind, preferredFilenameExtension];
+        (
+            mime.map(|m| m.to_string()),
+            extension.map(|e| e.to_string()),
+        )
+    });
+    (
+        mime.unwrap_or_else(|| "application/octet-stream".into()),
+        extension,
+    )
+}
+
+/// The type identifier a file named `name` of MIME type `mime` has: the
+/// type of its extension, else of its MIME type, else `public.data`.
+#[cfg(feature = "dev")]
+pub(crate) fn type_of_file(name: &str, mime: &str) -> String {
+    let found = crate::picker::uniform_types()
+        .then(|| class(c"UTType"))
+        .flatten()
+        .and_then(|type_class| {
+            let extension = std::path::Path::new(name)
+                .extension()
+                .map(|e| NSString::from_str(&e.to_string_lossy()));
+            let mime = NSString::from_str(mime);
+            // SAFETY: UTType's documented API (iOS 14).
+            unsafe {
+                let by_extension: Option<Retained<AnyObject>> = match &extension {
+                    Some(extension) => {
+                        msg_send![type_class, typeWithFilenameExtension: &**extension]
+                    }
+                    None => None,
+                };
+                let found = match by_extension {
+                    Some(found) => Some(found),
+                    None => msg_send![type_class, typeWithMIMEType: &*mime],
+                };
+                // A dynamic type (`dyn.…`) is no type another app reads.
+                found
+                    .map(|found| -> Retained<NSString> { msg_send![&found, identifier] })
+                    .map(|identifier| identifier.to_string())
+                    .filter(|identifier| !identifier.starts_with("dyn."))
+            }
+        });
+    found.unwrap_or_else(|| "public.data".into())
+}
+
+/// The name of a pasted file: the one its item suggests (no folder in it),
+/// else `file`, given the extension of its type when it has none.
+pub(crate) fn pasted_name(suggested: Option<&str>, extension: Option<&str>) -> String {
+    let suggested = suggested.unwrap_or_default().trim().replace('/', "_");
+    let name = if suggested.is_empty() {
+        "file".to_owned()
+    } else {
+        suggested
+    };
+    match extension {
+        Some(extension) if std::path::Path::new(&name).extension().is_none() => {
+            format!("{name}.{extension}")
+        }
+        _ => name,
     }
 }
 

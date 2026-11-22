@@ -512,6 +512,39 @@ pub(crate) fn test_paste(
             return Err("no input of the app has the focus".into());
         };
     let board = objc2_ui_kit::UIPasteboard::pasteboardWithUniqueName();
+    if content
+        .files
+        .iter()
+        .any(|file| image_type(&file.mime).is_none())
+    {
+        // Other files carry their names, as Files copies a document: as
+        // item providers.
+        set_providers(&board, content);
+    } else {
+        set_items(&board, content);
+    }
+    if pasting_from(view, ivars, &board) {
+        paste_text(view, &board);
+    }
+    // SAFETY: a plain getter; the test's pasteboard is not used again.
+    objc2_ui_kit::UIPasteboard::removePasteboardWithName(&*unsafe { board.name() });
+    Ok(())
+}
+
+/// The pasteboard type of an image of MIME type `mime` that a test pastes.
+#[cfg(feature = "dev")]
+fn image_type(mime: &str) -> Option<&'static str> {
+    match mime {
+        "image/png" => Some("public.png"),
+        "image/jpeg" => Some("public.jpeg"),
+        "image/gif" => Some("com.compuserve.gif"),
+        _ => None,
+    }
+}
+
+/// A test's paste of `content` as pasteboard items (type to value).
+#[cfg(feature = "dev")]
+fn set_items(board: &objc2_ui_kit::UIPasteboard, content: &nsh_core::PasteEvent) {
     let mut items: Vec<Retained<NSDictionary<NSString, AnyObject>>> = Vec::new();
     let item = |kind: &str, value: &AnyObject| {
         NSDictionary::from_slices(&[&*NSString::from_str(kind)], &[value])
@@ -533,12 +566,7 @@ pub(crate) fn test_paste(
         items.push(NSDictionary::from_slices(&kinds, &values));
     }
     for file in &content.files {
-        let kind = match file.mime.as_str() {
-            "image/png" => "public.png",
-            "image/jpeg" => "public.jpeg",
-            "image/gif" => "com.compuserve.gif",
-            _ => "public.data",
-        };
+        let kind = image_type(&file.mime).unwrap_or("public.data");
         items.push(item(
             kind,
             &objc2_foundation::NSData::with_bytes(&file.data),
@@ -550,13 +578,55 @@ pub(crate) fn test_paste(
         }
     }
     // SAFETY: UIPasteboard's setter of items (type to value).
-    let _: () = unsafe { msg_send![&board, setItems: &*NSArray::from_retained_slice(&items)] };
-    if pasting_from(view, ivars, &board) {
-        paste_text(view, &board);
+    let _: () = unsafe { msg_send![board, setItems: &*NSArray::from_retained_slice(&items)] };
+}
+
+/// A test's paste of `content` as item providers, one an item: its text,
+/// its HTML, each file under the type of its name (else of its MIME type)
+/// with its name suggested, and each `file:` URL.
+#[cfg(feature = "dev")]
+fn set_providers(board: &objc2_ui_kit::UIPasteboard, content: &nsh_core::PasteEvent) {
+    let Some(class) = AnyClass::get(c"NSItemProvider") else {
+        return;
+    };
+    let provider = |item: &AnyObject, kind: &str| -> Retained<AnyObject> {
+        let kind = NSString::from_str(kind);
+        // SAFETY: NSItemProvider's documented initializer (iOS 8); the item
+        // (a string, data or URL) is secure coding.
+        unsafe {
+            let alloc: Allocated<AnyObject> = msg_send![class, alloc];
+            msg_send![alloc, initWithItem: item, typeIdentifier: &*kind]
+        }
+    };
+    let mut providers = Vec::new();
+    if !content.text.is_empty() {
+        providers.push(provider(
+            &NSString::from_str(&content.text),
+            "public.utf8-plain-text",
+        ));
     }
-    // SAFETY: a plain getter; the test's pasteboard is not used again.
-    objc2_ui_kit::UIPasteboard::removePasteboardWithName(&*unsafe { board.name() });
-    Ok(())
+    if !content.html.is_empty() {
+        providers.push(provider(&NSString::from_str(&content.html), "public.html"));
+    }
+    for file in &content.files {
+        let kind = image_type(&file.mime).map_or_else(
+            || crate::file_drop::type_of_file(&file.name, &file.mime),
+            str::to_owned,
+        );
+        let item = provider(&objc2_foundation::NSData::with_bytes(&file.data), &kind);
+        let name = NSString::from_str(&file.name);
+        // SAFETY: NSItemProvider's `suggestedName` setter (iOS 11).
+        let _: () = unsafe { msg_send![&item, setSuggestedName: &*name] };
+        providers.push(item);
+    }
+    for uri in &content.uris {
+        if let Some(url) = objc2_foundation::NSURL::URLWithString(&NSString::from_str(uri)) {
+            providers.push(provider(&url, "public.file-url"));
+        }
+    }
+    // SAFETY: UIPasteboard's setter of item providers (iOS 11).
+    let _: () =
+        unsafe { msg_send![board, setItemProviders: &*NSArray::from_retained_slice(&providers)] };
 }
 
 /// Pastes `board`'s text into input `view`, cut to what `maxLength` leaves
@@ -733,9 +803,15 @@ pub(crate) fn close_edit_menu(view: &UIView) {
 fn can_paste_more(view: &UIView, ivars: &InputIvars) -> bool {
     let board = objc2_ui_kit::UIPasteboard::generalPasteboard();
     // SAFETY: plain getters, which show no paste notice.
+    // An item that is no text, image or link is a file held as data
+    // (a document copied in Files), which the paste reports.
     ivars.paste_listens.get()
         && view.isFirstResponder()
-        && unsafe { board.hasImages() || board.hasURLs() }
+        && unsafe {
+            board.hasImages()
+                || board.hasURLs()
+                || (board.numberOfItems() > 0 && !board.hasStrings())
+        }
 }
 
 /// Reports `paste` to the app (`onPaste`), through the input's delegate,
