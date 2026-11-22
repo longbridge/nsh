@@ -38,6 +38,8 @@
 //!   ([`LayoutPartialTree::set_unrounded_layout`]): its native view stays
 //!   the holder's child, with the frame it would have as the parent's.
 
+use std::rc::Rc;
+
 use slab::Slab;
 use taffy::{
     AvailableSpace, BlockContext, Cache, CacheTree, DetailedGridInfo, DetailedLayoutInfo, Display,
@@ -53,7 +55,10 @@ use super::terminal_layout::{self, Grid, Role};
 /// A node: its style, place in the tree, cache and layout, and what
 /// measures it when it is a leaf.
 struct LayoutNode<C> {
-    style: Style,
+    /// Shared with the nodes styled alike ([`LayoutTree::share`]): most of
+    /// a page's views are laid out with one of a few styles, and a style is
+    /// large.
+    style: Rc<Style>,
     /// What the core knows of it that its style does not say: in a
     /// terminal a control has no border and some nodes are left out
     /// ([`LayoutTree::set_role`]).
@@ -99,7 +104,7 @@ struct LayoutNode<C> {
 const MEASURED: usize = 8;
 
 impl<C> LayoutNode<C> {
-    fn new(style: Style, context: Option<C>) -> Self {
+    fn new(style: Rc<Style>, context: Option<C>) -> Self {
         LayoutNode {
             style,
             role: Role::default(),
@@ -140,7 +145,13 @@ pub(crate) struct LayoutTree<C> {
     /// What a leaf is measured with in a terminal: the algorithm resolves
     /// its sizes and insets in Cells itself ([`terminal_layout::compute`]).
     plain: Style,
+    /// The styles set last, newest last: what a node styled like one of
+    /// them shares ([`LayoutTree::share`]).
+    shared: Vec<Rc<Style>>,
 }
+
+/// How many recent styles [`LayoutTree::share`] looks among.
+const SHARED: usize = 4;
 
 fn key(node: NodeId) -> usize {
     usize::from(node)
@@ -153,11 +164,28 @@ impl<C> LayoutTree<C> {
             dirty_boundaries: Vec::new(),
             grid: None,
             plain: Style::DEFAULT,
+            shared: Vec::with_capacity(SHARED),
         }
     }
 
+    /// `style`, shared with the nodes styled alike among the last styles
+    /// set: rows of a list, cells of a table and runs of text repeat a few.
+    fn share(&mut self, style: Style) -> Rc<Style> {
+        if let Some(i) = self.shared.iter().rposition(|s| **s == style) {
+            let s = self.shared.remove(i);
+            self.shared.push(s.clone());
+            return s;
+        }
+        if self.shared.len() == SHARED {
+            self.shared.remove(0);
+        }
+        let s = Rc::new(style);
+        self.shared.push(s.clone());
+        s
+    }
+
     fn insert(&mut self, style: Style, context: Option<C>, children: &[NodeId]) -> NodeId {
-        let mut node = LayoutNode::new(style, context);
+        let mut node = LayoutNode::new(self.share(style), context);
         node.children = children.to_vec();
         let id = NodeId::from(self.nodes.insert(node));
         for &child in children {
@@ -353,9 +381,10 @@ impl<C> LayoutTree<C> {
     /// already changes nothing (a restyle that only changed colors), and
     /// no layout is needed for it: returns whether the style changed.
     pub(crate) fn set_style(&mut self, node: NodeId, style: Style) -> bool {
-        if self.nodes[key(node)].style == style {
+        if *self.nodes[key(node)].style == style {
             return false;
         }
+        let style = self.share(style);
         self.mark_stale(node);
         let n = &mut self.nodes[key(node)];
         if n.holder {
@@ -643,7 +672,7 @@ impl<C> LayoutTree<C> {
     {
         let n = &mut self.nodes[key(node)];
         let (mut input, _) = n.last.clone()?;
-        let mut style = n.style.clone();
+        let mut style = Style::clone(&n.style);
         let max = taffy::LengthPercentageAuto::length(cap);
         // The space too: an absolutely placed box's parent gives it the
         // space clamped by its own max size, and an auto size never grows
@@ -664,7 +693,7 @@ impl<C> LayoutTree<C> {
         input.sizing_mode = SizingMode::InherentSize;
         // Its own style, cache and recorded answers are put back: what is
         // computed with the other style is kept nowhere.
-        let own = std::mem::replace(&mut n.style, style);
+        let own = std::mem::replace(&mut n.style, Rc::new(style));
         let cache = std::mem::replace(&mut n.cache, Cache::new());
         let measured = n.measured.take();
         let mut view = View {
@@ -1184,5 +1213,16 @@ where
 
     fn set_detailed_grid_info(&mut self, node: NodeId, info: DetailedGridInfo) {
         self.tree.nodes[key(node)].detailed = DetailedLayoutInfo::Grid(Box::new(info));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn layout_node_size() {
+        // A node's style is shared, not kept in it ([`super::LayoutTree::share`]).
+        let node = std::mem::size_of::<super::LayoutNode<u64>>();
+        eprintln!("LayoutNode {node} B");
+        assert!(node <= 850, "LayoutNode grew to {node} bytes");
     }
 }
