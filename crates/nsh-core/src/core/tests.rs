@@ -11394,6 +11394,50 @@ fn a_focus_reported_untracked_survives_a_tracking_change() {
 }
 
 #[test]
+fn a_view_goes_below_its_next_sibling_in_the_parent_not_an_input_accessory() {
+    let mut c = core();
+    let view = |id| Op::Create { id, tag: Tag::View };
+    let insert = |child, before| Op::Insert {
+        parent: ROOT_ID,
+        child,
+        before,
+    };
+    apply(
+        &mut c,
+        vec![
+            view(2),
+            Op::Create {
+                id: 3,
+                tag: Tag::InputAccessory,
+            },
+            Op::SetProp {
+                id: 3,
+                prop: Prop::NativeId(Some("bar".into())),
+            },
+            view(4),
+            insert(2, None),
+            insert(3, None),
+            insert(4, None),
+        ],
+    );
+    c.commit().unwrap();
+    // Between the first view and the accessory: the accessory is over the
+    // keyboard, not among the root's subviews, so the view goes below the
+    // one after it.
+    apply(&mut c, vec![view(5), insert(5, Some(3))]);
+    let batch = c.commit().unwrap();
+    let inserts: Vec<_> = batch
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            MountItem::Insert { child, before, .. } => Some((*child, *before)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(inserts, vec![(5, Some(4))]);
+}
+
+#[test]
 fn input_accessories_are_found_by_native_id() {
     let mut c = core();
     let accessory = |batch: &MountBatch| {
@@ -52298,9 +52342,7 @@ fn text_pretty_wraps_and_inherits_with_white_space() {
 
 #[test]
 fn an_overlay_leaves_escape_to_focused_content_that_captures_it() {
-    use crate::KeyCapture;
-    use crate::keymap::Keystroke;
-    use crate::tailwind::state::FOCUSED;
+    use crate::{KeyCapture, keymap::Keystroke, tailwind::state::FOCUSED};
     // #2424: an editor in a popover takes Escape first; the overlay binds
     // it again once the focus leaves the editor or the rule drops it.
     let mut c = core();
@@ -52385,9 +52427,7 @@ fn an_overlay_leaves_escape_to_focused_content_that_captures_it() {
 
 #[test]
 fn a_focus_outside_the_overlay_does_not_take_its_escape() {
-    use crate::KeyCapture;
-    use crate::keymap::Keystroke;
-    use crate::tailwind::state::FOCUSED;
+    use crate::{KeyCapture, keymap::Keystroke, tailwind::state::FOCUSED};
     let mut c = core();
     add(&mut c, 2, Tag::View, ROOT_ID, &[]);
     add(&mut c, 4, Tag::Overlay, 2, &[]);

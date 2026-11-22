@@ -7611,14 +7611,23 @@ impl<M: TextEngine> Core<M> {
 
     /// [`Self::native_before`] for `child` at `pos` among its siblings.
     /// When none of them was ever stacked apart, the next made sibling.
+    ///
+    /// A view in its parent never goes below a sibling the platform places
+    /// elsewhere (a screen, a modal, a header item, an input accessory):
+    /// that sibling is not among the parent's native subviews, so the
+    /// platform would add the view on top of the others instead.
     fn native_before_at(&self, parent: Key, child: Key, pos: usize) -> Option<NodeId> {
         let children = &self.nodes[parent as usize].children;
         let z = self.nodes[child as usize].stack_rank();
+        let in_parent = !self.nodes[child as usize].kind.is_root();
+        let anchors = |n: &Node| {
+            n.created && n.layout.is_some() && !n.is_overlay() && !(in_parent && n.kind.is_root())
+        };
         if !self.nodes[parent as usize].ranked_children && z == (0, false) {
             let next = children[pos + 1..].iter().find_map(|&c| {
                 self.placing(1);
                 let n = &self.nodes[c as usize];
-                (n.created && n.layout.is_some() && !n.is_overlay()).then_some(n.id)
+                anchors(n).then_some(n.id)
             });
             return match next {
                 Some(id) => Some(id),
@@ -7630,10 +7639,7 @@ impl<M: TextEngine> Core<M> {
         let mut best: Option<((i32, bool), usize, NodeId)> = None;
         for (i, &c) in children.iter().enumerate() {
             let n = &self.nodes[c as usize];
-            if c == child || !n.created || n.layout.is_none() {
-                continue;
-            }
-            if n.is_overlay() {
+            if c == child || !anchors(n) {
                 continue;
             }
             let rank = n.stack_rank();
