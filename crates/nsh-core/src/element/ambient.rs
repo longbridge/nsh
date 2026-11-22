@@ -1404,6 +1404,13 @@ pub(crate) fn act_locale(locale: Option<crate::platform::Locale>) {
     act(Action::Locale(locale));
 }
 
+/// Tells the core that translations changed in place
+/// ([`crate::i18n::add_translations`]), so menus can re-localize if the
+/// selected language changed.
+pub(crate) fn act_translations_changed(before: crate::i18n::Translations) {
+    act_if_running(Action::TranslationsChanged(before));
+}
+
 /// Shows the surface in `appearance` whatever the system's (TS:
 /// `setColorScheme`).
 pub fn set_color_scheme(appearance: Appearance) {

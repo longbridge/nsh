@@ -250,6 +250,11 @@ pub(crate) enum Action {
     Tokens(super::Tokens),
     /// Sets the app's translations ([`crate::i18n`]).
     Translations(crate::i18n::Translations),
+    /// Merges translations into the app's dictionary ([`crate::i18n`]).
+    AddTranslations(std::collections::HashMap<String, std::collections::HashMap<String, String>>),
+    /// The surface's translations changed in place from the given previous
+    /// dictionary: re-localize menus if the selected language changed.
+    TranslationsChanged(crate::i18n::Translations),
     /// Shows the app in a language whatever the user's (`None`: the
     /// user's again).
     Locale(Option<crate::platform::Locale>),

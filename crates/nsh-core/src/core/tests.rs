@@ -28709,8 +28709,7 @@ mod rust_windows {
     // turn follows the opening, in order; attributes join its options.
     #[test]
     fn requests_made_right_after_open_window_follow_its_opening() {
-        use crate::desktop::WindowMode;
-        use crate::element::desktop::open_window;
+        use crate::{desktop::WindowMode, element::desktop::open_window};
         let mut c = core();
         c.set_environment(crate::element::Environment {
             os: crate::platform::Os::MacOs,
@@ -30275,6 +30274,17 @@ mod rust_menus {
         let labels = labels_in(&first.commit().unwrap()).unwrap();
         assert_eq!(labels.label(MenuRole::Copy), "Copy");
         assert_eq!(labels.edit_menu.as_deref(), Some("Edit"));
+
+        // Adding Japanese translations at run time switches the menu labels
+        // back to Japanese without resetting the surface.
+        first.add_translations(std::collections::HashMap::from([(
+            "ja".to_owned(),
+            std::collections::HashMap::from([("hello".to_owned(), "こんにちは".to_owned())]),
+        )]));
+        let labels = labels_in(&first.commit().unwrap()).unwrap();
+        assert_eq!(labels.label(MenuRole::Copy), "コピー");
+        assert_eq!(labels.edit_menu.as_deref(), Some("編集"));
+
         // Mobile platforms use the system's own menus.
         env.os = Os::Ios;
         first.set_environment(env);

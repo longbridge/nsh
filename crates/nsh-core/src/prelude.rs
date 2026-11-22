@@ -289,6 +289,6 @@ pub use crate::element::{
 pub use crate::element::{background, blocking};
 /// Translations ([`crate::i18n`]).
 pub use crate::{
-    i18n::{available_locales, set_locale},
+    i18n::{add_translations, available_locales, set_locale},
     t,
 };

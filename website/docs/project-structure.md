@@ -266,7 +266,7 @@ Imports of `nsh` and `nsh/...` are not bundled: the runtime provides them native
 | `nsh/base` | The unstyled foundation of an app's UI: navigation stacks and their pages (`NavStack`, `NavPage`, `createNavStack`), dialogs (`Dialog`), a press target (`Button`), a text input (`Input`) and the system's alert dialog (`AlertDialog`); pages and dialogs set the status bar (`statusBar`) ([reference](../modules/nsh-base.md)) |
 | `nsh/mobile` | What iOS and Android have: `TabBar`, `InputAccessoryView` (iOS), `BackHandler` (Android) ([reference](../modules/nsh-mobile.md)) |
 | `nsh/desktop` | What macOS, Windows and Linux have: windows (`Window`, `currentWindow`, `windows`), `titleBar`, `displays`, `Menu`, `Tray`, `GlobalShortcut` ([reference](../modules/nsh-desktop.md)) |
-| `nsh/i18n` | The app's translations (its `locales/` files) and the language it shows: `t`, `setLocale`, `availableLocales` ([I18n](./i18n.md), [reference](../modules/nsh-i18n.md)) |
+| `nsh/i18n` | The app's translations (its `locales/` files or loaded at run time) and the language it shows: `t`, `setLocale`, `availableLocales`, `addTranslations` ([I18n](./i18n.md), [reference](../modules/nsh-i18n.md)) |
 | `nsh/updater` | A packaged app updates itself: `checkForUpdate`, `downloadUpdate`, `installAndRestart`, `installOnQuit` ([reference](../modules/nsh-updater.md)) |
 
 The [modules reference](../modules/index.md) documents each one. Importing a module NSH does not have (`nsh/foo`) is a build error. So is a name your code uses that the module does not export (`import { Buton } from "nsh/base"`): the error points at the import and names the closest export (``did you mean `Button`?``). Names used only as types are checked by `nsh check`.
