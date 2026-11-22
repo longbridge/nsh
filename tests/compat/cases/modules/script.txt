@@ -68,6 +68,8 @@ expect Hello: Hello
 expect Greet: Hello, Ada!
 expect Missing: en-US.missing
 expect Asked: 你好
+expect Extra: en-US.extra
+expect FrenchHello: Hello
 expect Locales: en zh zh-CN
 expect German: 1.234,5
 expect French: 1,234.5
@@ -78,9 +80,16 @@ expect Greet: 你好，Ada！
 tap id:device
 expect Shown: en-US
 expect Hello: Hello
+tap id:add-translations
+expect Extra: Loaded
+expect Hello: Hello
+expect Asked: 您好
+expect FrenchHello: Bonjour
+expect Locales: en fr zh zh-CN
 covers [nsh/i18n] t
 covers [nsh/i18n] setLocale
 covers [nsh/i18n] availableLocales
+covers [nsh/i18n] addTranslations
 # mod-picker
 tap id:case-mod-picker
 # a pick is a promise that never throws: options out of range reject it with

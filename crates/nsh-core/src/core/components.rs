@@ -1144,6 +1144,37 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// Merges `map` into this surface's translations and updates menus if the
+    /// selected language changed.
+    pub(crate) fn add_translations(
+        &mut self,
+        map: std::collections::HashMap<String, std::collections::HashMap<String, String>>,
+    ) {
+        if map.is_empty() {
+            return;
+        }
+        let next = {
+            let _entered = self.components.runtime.enter();
+            crate::element::global::<crate::i18n::Translations>()
+                .get_untracked()
+                .extend(map)
+        };
+        self.set_translations(next);
+    }
+
+    /// Re-localizes menus when translations updated in place changed the
+    /// selected language.
+    fn translations_changed(&mut self, before: &crate::i18n::Translations) {
+        let _entered = self.components.runtime.enter();
+        let current = crate::element::global::<crate::i18n::Translations>().get_untracked();
+        let env = self.components.environment;
+        if crate::i18n::text_locale(&current, env.locale, env.locale_settings.languages)
+            != crate::i18n::text_locale(before, env.locale, env.locale_settings.languages)
+        {
+            self.localize_menus();
+        }
+    }
+
     /// The menus NSH owns use the same language selection as the app's text.
     fn localize_menus(&mut self) {
         let _entered = self.components.runtime.enter();
@@ -6419,6 +6450,8 @@ impl<M: TextEngine> Core<M> {
             Action::Appearance(appearance) => self.set_appearance(appearance),
             Action::Tokens(tokens) => self.set_tokens(tokens),
             Action::Translations(translations) => self.set_translations(translations),
+            Action::AddTranslations(map) => self.add_translations(map),
+            Action::TranslationsChanged(before) => self.translations_changed(&before),
             Action::Locale(locale) => self.components.locale_request = Some(locale),
             Action::MainThread(task) => self.components.main_thread.push(task),
             Action::BuiltInScrollbars(source, theme) => {
