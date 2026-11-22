@@ -1116,13 +1116,19 @@ binaries, cleaning old versions, per-target support checks and an OTA check of t
 ### What crates declare for packages (`[package.metadata.nsh]`)
 
 `crates/nsh-cli/src/module_meta.rs`. A crate the app links (an nshm, the app's own crate or anything they depend on)
-may declare what the packaged app needs, for itself or per feature: `Info.plist` keys and entitlements on iOS,
-permissions, queries and components on Android. The CLI reads them from the app's dependency graph with the features
-Cargo turns on and adds them to iOS and Android packages; `nsh run`'s development hosts get the `Info.plist` keys and
-the Android entries, not the entitlements. The app's `nsh.json` wins and settles what two crates disagree on (for iOS:
-an Android package never stops on an iOS key); keys NSH sets itself stay NSH's. Android permissions are checked and
-spelled out as `nsh.json`'s are. Keys this CLI does not know are
-reported and left out, so the format can grow.
+may declare what the packaged app needs, for itself or per feature: `Info.plist` keys and entitlements on iOS and
+macOS, permissions, queries and components on Android. The CLI reads them from the app's dependency graph with the
+features Cargo turns on (for each architecture of a macOS package) and adds them to iOS, macOS and Android packages;
+`nsh run`'s iOS and Android development hosts get the `Info.plist` keys and the Android entries, not the entitlements
+(the macOS host embeds its own `Info.plist`, `crates/nsh-macos-host/Info.plist`). A universal macOS package reads both
+architectures in one `cargo metadata` run (`--filter-platform` twice), so crates of either one clash as usual. The
+app's `nsh.json` wins and settles what two crates disagree on, per platform: a package never stops on another
+platform's clash. Keys NSH sets itself stay NSH's, and keys only the app chooses are refused from crates
+(`module_meta::app_only`), on every platform since the crate is wrong either way: the minimum system version, and on
+macOS the sandbox, the hardened runtime's exceptions (`com.apple.security.cs.*`), `get-task-allow`, temporary
+exceptions, and the entitlements macOS honors only under a provisioning profile (`apple::needs_profile`), which an ad
+hoc signed package would not launch with. Android permissions are checked and spelled out as `nsh.json`'s are. Keys
+this CLI does not know are reported and left out, so the format can grow.
 
 ## Finding the runtimes
 

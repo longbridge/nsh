@@ -471,6 +471,9 @@ App Store 分类、App Transport Security 例外）和 entitlements（例如 Ass
 值按属性列表（property list）写入：字符串、数字（整数或实数）、布尔值、数组和对象（字典）；`null` 会报错。应用设置的键会替换 NSH
 的默认值，因此应用也可以改写 NSH 添加的权限说明文字、缩小支持的屏幕方向，或提高最低系统版本（见[下文](#最低系统版本)）。
 
+应用链接的 crate（它的 nshm 及其依赖）会把自己需要的键和 entitlements 加到同样的位置（见[打包的应用需要什么](./nshm.md#打包的应用需要什么)）；
+应用在这里设置的值优先。
+
 NSH 根据 `nsh.json` 其他键设置的键、以及打包后的应用所依赖的键由 NSH 掌握。设置其中之一会报错，并说明应改设什么：
 
 | 键 | 来自 |
@@ -494,7 +497,7 @@ entitlements：
   且值在其范围内（描述文件把 Associated Domains 授予为 `*`，把钥匙串分组授予为 `TEAMID.*`）；否则 `nsh package` 停下并指出是哪一项，
   这时为应用的标识符启用对应的 capability，再重新下载描述文件。
 - **iOS 模拟器**包直接用应用写的 entitlements 签名。
-- **macOS** 包用应用的 entitlements 做 ad hoc 签名。带 `com.apple.developer.*` entitlements 或钥匙串分组的应用，macOS 只在授予它们的描述文件下启动：
+- **macOS** 包用应用及其 crate 的 entitlements 做 ad hoc 签名。带 `com.apple.developer.*` entitlements 或钥匙串分组的应用，macOS 只在授予它们的描述文件下启动：
   `nsh package` 会对这些项给出警告，应用要先用 Developer ID 和这样的描述文件重新签名才能运行。
 
 ### 其他语言的 Info.plist 文字

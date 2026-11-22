@@ -532,6 +532,9 @@ Values are written as property list values: strings, numbers (integers or reals)
 descriptions NSH adds, narrow the orientations or raise the minimum system version
 ([below](#minimum-system-version)).
 
+The crates an app links (its nshm and their dependencies) add the keys and entitlements they need to the same sections
+([What the packaged app needs](./nshm.md#what-the-packaged-app-needs)); what the app sets here wins.
+
 NSH keeps the keys it sets from other `nsh.json` keys or that the packaged app depends on. Setting one is an error that
 says what to set instead:
 
@@ -557,7 +560,7 @@ Entitlements:
   grants associated domains as `*` and keychain groups as `TEAMID.*`); otherwise `nsh package` stops and names the
   entitlement, so enable its capability for the app's identifier and download the profile again.
 - **The iOS simulator** is signed with the app's entitlements as they are.
-- **macOS** packages are signed ad hoc with the app's entitlements. macOS launches an app with
+- **macOS** packages are signed ad hoc with the app's entitlements and its crates'. macOS launches an app with
   `com.apple.developer.*` entitlements or keychain access groups only under a provisioning profile that grants them:
   `nsh package` warns about them, and the app is signed again with a Developer ID and such a profile before it runs.
 
