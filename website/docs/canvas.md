@@ -147,7 +147,7 @@ The operations are a subset of the HTML Canvas 2D API: `CanvasRenderingContext2D
 
 **Rectangles**: `fillRect`, `strokeRect`, `clearRect`.
 
-**Text**: `fillText(text, x, y, maxWidth?)`, `strokeText(...)`, `measureText(text)` (measured synchronously by the platform's text engine with the current `font`; only `width`). In Rust, `measure_text(font, text)` gives the width.
+**Text**: `fillText(text, x, y, maxWidth?)`, `strokeText(...)`, `measureText(text)` (measured synchronously by the platform's text engine with the current `font`: `width`, and the font's extent above and below the baseline on that line, `fontBoundingBoxAscent` and `fontBoundingBoxDescent`). In Rust, `measure_text(font, text)` gives the width and `text_metrics(font, text)` all of them.
 
 **Hit testing**: `isPointInPath(path?, x, y, rule?)` and `isPointInStroke(path?, x, y)` (`path_contains`, `stroke_contains`, `is_point_in_path` and `is_point_in_stroke` on a `Painter`) answer synchronously, computed from the recorded geometry (the current transform, path, `lineWidth` and `lineCap`). Keep the drawing and the paths you drew to find the shape under a tap:
 

@@ -106,7 +106,6 @@ export interface MacOSProps extends MacOSHostProps {}
 
 /** Windows-only props of every element (`windows={{…}}`). */
 export interface WindowsProps extends WindowsHostProps {}
-
 /** `<View>` */
 export interface ViewProps extends CommonProps, ViewHostProps {
   style?: StyleProp<ViewStyle>;

@@ -50,7 +50,7 @@ use nsh_core::{
     geometry::point,
     scroll::{
         dragged, ease_out, indicator_alpha, indicator_span_within, projected, rate,
-        reveal_focus_delta, snap_duration, sticky_shift, thumb_scroll,
+        reveal_focus_delta, snap_duration, sticky_shift, thumb_scroll, wheel_glide::Glide,
     },
 };
 use objc2::{MainThreadOnly, define_class, msg_send, rc::Retained};
@@ -89,13 +89,13 @@ const THUMB_SLOP: f32 = 4.0;
 /// A scroll offset, a change of one or a point in a viewport (points).
 /// Scroll views move along their main axis, zoomable ones along both.
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
-struct Offset {
-    x: f32,
-    y: f32,
+pub(crate) struct Offset {
+    pub(crate) x: f32,
+    pub(crate) y: f32,
 }
 
 impl Offset {
-    const fn new(x: f32, y: f32) -> Self {
+    pub(crate) const fn new(x: f32, y: f32) -> Self {
         Self { x, y }
     }
 
@@ -112,13 +112,33 @@ impl Offset {
         }
     }
 
-    fn lerp(self, to: Self, k: f32) -> Self {
+    pub(crate) fn lerp(self, to: Self, k: f32) -> Self {
         Self::new(self.x + (to.x - self.x) * k, self.y + (to.y - self.y) * k)
     }
 
     /// The larger distance along an axis to `to`.
     fn distance(self, to: Self) -> f32 {
         (to.x - self.x).abs().max((to.y - self.y).abs())
+    }
+}
+
+impl From<Offset> for nsh_core::Point<Points> {
+    fn from(o: Offset) -> Self {
+        point(Points(o.x), Points(o.y))
+    }
+}
+
+impl From<nsh_core::Point<Points>> for Offset {
+    fn from(p: nsh_core::Point<Points>) -> Self {
+        Self::new(p.x.0, p.y.0)
+    }
+}
+
+impl std::ops::Sub for Offset {
+    type Output = Self;
+
+    fn sub(self, o: Self) -> Self {
+        Self::new(self.x - o.x, self.y - o.y)
     }
 }
 
@@ -142,12 +162,14 @@ enum Phase {
     /// Wheel or trackpad input: the last at `last` (ms), `total` points
     /// so far; `gesture` for trackpads (began / ended), not mouse wheels;
     /// `raw` is where the gesture's deltas put the offset before the
-    /// rubber band.
+    /// rubber band, or a mouse wheel's target, which it glides to
+    /// (`glide`, [`nsh_core::scroll::wheel_glide`]).
     Wheel {
         last: f64,
         total: f32,
         gesture: bool,
         raw: Offset,
+        glide: Glide,
     },
     /// A trackpad gesture ended at `since` (ms); the system's momentum may
     /// follow.
@@ -1018,8 +1040,9 @@ fn deadline(view: &NshView) -> Option<f64> {
         Phase::Wheel {
             last,
             gesture: false,
+            glide,
             ..
-        } => last + WHEEL_IDLE,
+        } => (last + WHEEL_IDLE).max(glide.end()),
         Phase::AwaitMomentum { since } => since + MOMENTUM_WAIT,
         _ => return None,
     };
@@ -1122,12 +1145,22 @@ fn tick(surface: &Rc<Surface>, view: &NshView, now: f64) -> Tick {
         }
         Phase::Wheel {
             last,
+            gesture: false,
+            raw,
+            glide,
+            ..
+        } if now - last <= WHEEL_IDLE || now < glide.end() => {
+            moved_to(surface, view, glide.value(raw.into(), now).into());
+        }
+        Phase::Wheel {
             total,
             gesture: false,
+            raw,
             ..
-        } if now - last > WHEEL_IDLE => {
+        } => {
             // A mouse wheel came to rest: snapping views move on to the
             // next snap point in the wheel's direction.
+            moved_to(surface, view, raw);
             set_phase(view, Phase::Idle);
             let snaps = view
                 .state()
@@ -1665,11 +1698,13 @@ pub(crate) fn scroll_by(surface: &Rc<Surface>, view: &NshView, dx: f32, dy: f32)
                 total,
                 gesture,
                 raw,
+                glide,
             } => Phase::Wheel {
                 last,
                 total,
                 gesture,
                 raw: raw + d,
+                glide: glide.shifted(d.into()),
             },
             Phase::Animate {
                 from,
@@ -2239,6 +2274,7 @@ pub(crate) fn wheel_begin(surface: &Rc<Surface>, view: &NshView) {
             total: 0.0,
             gesture: true,
             raw,
+            glide: Glide::default(),
         },
     );
     emit(surface, view, EventKind::ScrollDragStart);
@@ -2246,32 +2282,58 @@ pub(crate) fn wheel_begin(surface: &Rc<Surface>, view: &NshView) {
 
 /// A wheel or trackpad scroll by `(dx, dy)` points (positive: the content
 /// moves up / left). Without [`wheel_begin`] it is a mouse wheel, which
-/// settles by itself once it stops.
-pub(crate) fn wheel(surface: &Rc<Surface>, view: &NshView, dx: f32, dy: f32, time: f64) {
+/// settles by itself once it stops; a `notched` one on a `smoothWheel`
+/// view glides there as Chromium's does ([`nsh_core::scroll::wheel_glide`]), others
+/// land at once as AppKit's.
+pub(crate) fn wheel(
+    surface: &Rc<Surface>,
+    view: &NshView,
+    dx: f32,
+    dy: f32,
+    notched: bool,
+    time: f64,
+) {
     if !enabled(view) {
         return;
     }
-    let (gesture, total, raw) = match phase(view) {
+    let (gesture, total, prev, glide) = match phase(view) {
         Phase::Wheel {
             gesture,
             total,
             raw,
+            glide,
             ..
-        } => (gesture, total, raw),
+        } => (gesture, total, raw, Some(glide)),
         _ => {
             interrupt(surface, view);
-            (false, 0.0, current(view))
+            (false, 0.0, current(view), None)
         }
     };
-    let (pos, total, raw) = {
+    let at = now();
+    let (pos, total, raw, smooth) = {
         let state = view.state();
         let Some(s) = &state.scroll else { return };
         let (min, max) = limits(&state);
-        let d = wheel_delta(s, dx, dy);
+        let b = &s.behavior;
+        let smooth = notched
+            && !gesture
+            && b.smooth_wheel
+            && !b.zooms()
+            && !b.snaps()
+            && !b.paging
+            && !surface.environment.get().reduce_motion;
+        // A notch's lines are the view's own (`wheelLineHeight`), not
+        // AppKit's 10 points.
+        let k = if notched && b.wheel_line_height.0 > 0.0 {
+            b.wheel_line_height.0 / crate::input::WHEEL_LINE
+        } else {
+            1.0
+        };
+        let d = wheel_delta(s, dx * k, dy * k);
         let total = total + d.along(s.horizontal);
         if gesture {
             // Trackpads stretch past the edges, as macOS does.
-            let raw = raw + d;
+            let raw = prev + d;
             let stretch = |raw: f32, min: f32, max: f32, horizontal: bool| {
                 let dim = Points(viewport(&state, horizontal));
                 dragged(
@@ -2287,25 +2349,36 @@ pub(crate) fn wheel(surface: &Rc<Surface>, view: &NshView, dx: f32, dy: f32, tim
                 stretch(raw.x, min.x, max.x, true),
                 stretch(raw.y, min.y, max.y, false),
             );
-            (to, total, raw)
+            (to, total, raw, false)
         } else {
-            // Past an edge (the refresh space) wheels only move back.
-            let to = stop_at_edges(pos(s), d, (min, max));
-            (to, total, to)
+            // A smooth wheel's steps add up from where the last one
+            // pointed, not from where its glide has got to. Past an edge
+            // (the refresh space) wheels only move back.
+            let from = if smooth { prev } else { pos(s) };
+            let to = stop_at_edges(from, d, (min, max));
+            (to, total, to, smooth)
         }
+    };
+    // A smooth wheel glides there, in the frames ([`tick`]): on from the
+    // glide in flight, or anew from where it is.
+    let glide = match glide {
+        _ if !smooth => Glide::default(),
+        Some(g) if at < g.end() => g.retargeted(prev.into(), raw.into(), at),
+        _ => Glide::new(current(view).into(), raw.into(), at),
     };
     set_phase(
         view,
         Phase::Wheel {
-            last: now(),
+            last: at,
             total,
             gesture,
             raw,
+            glide,
         },
     );
     if gesture {
         feed(surface, view, pos, time);
-    } else {
+    } else if !smooth {
         moved_to(surface, view, pos);
     }
     ensure_ticking(surface, view);

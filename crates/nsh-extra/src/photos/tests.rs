@@ -9,7 +9,10 @@ use std::{
 
 use nsh_core::ImageData;
 
-use super::*;
+use super::{
+    picker::{PickedSource, Selection},
+    *,
+};
 
 /// The backend and the observers are process-wide: the tests that touch
 /// them take turns.
@@ -362,7 +365,158 @@ fn the_set_declares_the_library() {
         "presentLimitedPicker(",
         "\"notDetermined\"",
         "\"change\"",
+        "pickerViewAvailable(",
+        "loadPicked(",
+        "PhotosPicker",
+        "selectionLimit",
+        "\"livePhotos\"",
+        "deselect(",
     ] {
         assert!(ts.contains(declared), "{declared} is not declared:\n{ts}");
+    }
+}
+
+/// A selected photo the test reads: a PNG, or a failure; counts its reads.
+struct TestSource {
+    fails: bool,
+    reads: AtomicUsize,
+}
+
+impl TestSource {
+    fn new(fails: bool) -> Arc<Self> {
+        Arc::new(Self {
+            fails,
+            reads: AtomicUsize::new(0),
+        })
+    }
+}
+
+impl PickedSource for TestSource {
+    fn load(&self, request: PhotoRequest) -> PhotosFuture<PickedFile> {
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        let file = if self.fails {
+            Err(PhotosError::failed("the provider failed"))
+        } else {
+            let mut file = PickedFile::new("IMG_0001", "", ImageData::from(PNG.to_vec()));
+            // What the platform scaled it to stands in for the request's.
+            file.size = request
+                .max_dimension
+                .map_or(size(2, 1), |max| size(max.0, 1));
+            Ok(file)
+        };
+        Box::pin(std::future::ready(file))
+    }
+}
+
+fn source(source: &Arc<TestSource>) -> Arc<dyn PickedSource> {
+    source.clone()
+}
+
+#[test]
+fn picked_photos_read_while_selected() {
+    let first = TestSource::new(false);
+    let second = TestSource::new(false);
+    let mut selection = Selection::new();
+    let ids = selection
+        .set(vec![
+            ("A/L0/001".into(), source(&first)),
+            ("B/L0/001".into(), source(&second)),
+        ])
+        .unwrap();
+    assert_eq!(ids.len(), 2);
+    assert_eq!(selection.key(&ids[0]), Some("A/L0/001"));
+    assert_eq!(selection.keys(), ["A/L0/001", "B/L0/001"]);
+    // Read as a picked image: its type and extension from its bytes.
+    let file = ready(load_picked(&ids[0], PhotoRequest::default())).unwrap();
+    assert_eq!(file.mime, "image/png");
+    assert_eq!(file.name, "IMG_0001.png");
+    assert_eq!(file.size, size(2, 1));
+    assert_eq!(first.reads.load(Ordering::SeqCst), 1);
+
+    // The same selection again changes nothing.
+    assert_eq!(
+        selection.set(vec![
+            ("A/L0/001".into(), source(&TestSource::new(true))),
+            ("B/L0/001".into(), source(&second)),
+        ]),
+        None
+    );
+    // A photo selected already keeps its source: the system gives none for
+    // one it shows selected in a picker made again.
+    ready(load_picked(&ids[0], PhotoRequest::default())).unwrap();
+    assert_eq!(first.reads.load(Ordering::SeqCst), 2);
+
+    // Deselected in the picker: its id reads no more.
+    assert_eq!(
+        selection.set(vec![("B/L0/001".into(), source(&second))]),
+        Some(vec![ids[1].clone()])
+    );
+    let error = ready(load_picked(&ids[0], PhotoRequest::default())).unwrap_err();
+    assert_eq!(error.code.as_deref(), Some(NOT_FOUND));
+
+    // Deselected by the app.
+    assert_eq!(selection.remove(&ids[1]), Some(Vec::new()));
+    assert_eq!(selection.remove(&ids[1]), None);
+    let error = ready(load_picked(&ids[1], PhotoRequest::default())).unwrap_err();
+    assert_eq!(error.code.as_deref(), Some(NOT_FOUND));
+}
+
+#[test]
+fn each_picker_has_its_own_ids() {
+    let photo = TestSource::new(false);
+    let mut one = Selection::new();
+    let mut other = Selection::new();
+    let first = one.set(vec![("A".into(), source(&photo))]).unwrap();
+    let second = other.set(vec![("A".into(), source(&photo))]).unwrap();
+    assert_ne!(first, second);
+    assert_eq!(one.key(&second[0]), None);
+    // A picker gone takes its selection with it; the other's stays.
+    drop(one);
+    let error = ready(load_picked(&first[0], PhotoRequest::default())).unwrap_err();
+    assert_eq!(error.code.as_deref(), Some(NOT_FOUND));
+    ready(load_picked(&second[0], PhotoRequest::default())).unwrap();
+}
+
+#[test]
+fn a_picked_photo_is_prepared_as_requested() {
+    let photo = TestSource::new(false);
+    let failing = TestSource::new(true);
+    let mut selection = Selection::new();
+    let ids = selection
+        .set(vec![
+            ("A".into(), source(&photo)),
+            ("B".into(), source(&failing)),
+        ])
+        .unwrap();
+    let request = LoadPhotoOptions {
+        max_dimension: Some(DevicePixels(640)),
+        quality: Some(0.5),
+    }
+    .request()
+    .unwrap();
+    let file = ready(load_picked(&ids[0], request)).unwrap();
+    assert_eq!(file.size, size(640, 1));
+    let error = ready(load_picked(&ids[1], request)).unwrap_err();
+    assert_eq!(error.code, None);
+    assert_eq!(error.message, "the provider failed");
+    let error = ready(load_picked("no-such-id", request)).unwrap_err();
+    assert_eq!(error.code.as_deref(), Some(NOT_FOUND));
+}
+
+#[cfg(not(target_os = "ios"))]
+#[test]
+fn the_picker_view_is_ios_only() {
+    assert!(!picker_view_available());
+}
+
+#[test]
+fn the_picker_filter_names() {
+    assert_eq!(PhotosPickerFilter::default(), PhotosPickerFilter::Images);
+    for (filter, name) in [
+        (PhotosPickerFilter::Images, "images"),
+        (PhotosPickerFilter::LivePhotos, "livePhotos"),
+        (PhotosPickerFilter::Screenshots, "screenshots"),
+    ] {
+        assert_eq!(filter.name(), name);
     }
 }

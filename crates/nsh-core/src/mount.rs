@@ -206,6 +206,11 @@ pub struct ScrollBehavior {
     /// A tap at the top of the window scrolls it to its top (iOS:
     /// `UIScrollView.scrollsToTop`).
     pub scrolls_to_top: bool,
+    /// A mouse wheel's notches glide (`smoothWheel`).
+    pub smooth_wheel: bool,
+    /// Points a mouse wheel's line scrolls; 0 for the platform's own
+    /// (`wheelLineHeight`).
+    pub wheel_line_height: Points,
     /// Room around the content.
     pub content_inset: EdgeInsets,
     /// How far the scroll indicator keeps from each edge of the view: its
@@ -253,6 +258,8 @@ impl Default for ScrollBehavior {
             enabled: true,
             bounces: true,
             scrolls_to_top: true,
+            smooth_wheel: false,
+            wheel_line_height: Points::ZERO,
             content_inset: EdgeInsets::default(),
             scrollbar_inset: EdgeInsets::default(),
             keyboard_taps: KeyboardTaps::Never,

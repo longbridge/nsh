@@ -410,7 +410,11 @@ submenu inside it sets its own. A menu whose items are all one choice puts them 
 | `title` | `.title(..)` | `string` | none | iOS and Android: the menu's title, above its items. |
 | `disabled` | `.disabled(..)` | `boolean` | `false` | It cannot be pressed and opens nothing. |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers say for the button. |
+| `accessibilityHint` | `.accessibility_hint(..)` | `string` | none | Explains what opening the menu offers, as a view's `accessibilityHint`. |
 | `class`, `style`, `children` | style methods, `.child(..)` | | none | The trigger the app draws. |
+
+`accessibilityHint` follows reactive values; setting it to `undefined` removes the hint. On iOS and Android, the
+hint reaches the native button that screen readers activate.
 
 `MenuButtonItem` is `{ id, label, icon?, svg?, checked?, disabled?, destructive?, items?, inline?, singleSelection? }`
 (Rust: `MenuButtonItem::new(id, label)`, `::submenu(label, items)`, `::section(label, items)`, then `.icon(..)`,
