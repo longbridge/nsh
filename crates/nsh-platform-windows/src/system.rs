@@ -242,6 +242,7 @@ pub(crate) fn watch_environment(surface: &Rc<Surface>) {
 /// A system setting changed (`WM_SETTINGCHANGE`, `WM_THEMECHANGED`,
 /// `WM_SYSCOLORCHANGE`, `WM_DWMCOLORIZATIONCOLORCHANGED`).
 pub(crate) fn settings_changed(surface: &Rc<Surface>) {
+    crate::text::invalidate_rendering_params();
     refresh_accent();
     update(surface, settings());
     // The taskbar's colors may have changed: a template tray icon follows.
