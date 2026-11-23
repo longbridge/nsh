@@ -25,6 +25,7 @@
 //! | Feature | Rust | TS | What it does |
 //! |---|---|---|---|
 //! | `camera` | [`camera`] | `Camera` | Photos taken with the system's camera (iOS, Android) |
+//! | `photos` | [`photos`] | `Photos` | The user's recent photos, read once the user allows it (iOS) |
 //! | `push` | [`push`] | `Push` | Remote notifications with any push service (iOS; Android through the service's binding) |
 //!
 //! A module is one feature, named as its Rust module (`camera`, `push`);
@@ -38,6 +39,8 @@
 
 #[cfg(feature = "camera")]
 pub mod camera;
+#[cfg(feature = "photos")]
+pub mod photos;
 #[cfg(feature = "push")]
 pub mod push;
 
@@ -50,6 +53,8 @@ use nsh_core::prelude::*;
 fn native(registry: &mut Registry) {
     #[cfg(feature = "camera")]
     registry.module::<camera::Camera>();
+    #[cfg(feature = "photos")]
+    registry.module::<photos::Photos>();
     #[cfg(feature = "push")]
     {
         push::install(registry);

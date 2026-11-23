@@ -61,7 +61,9 @@ trusted: every limit and check is enforced in Rust, never in JS.
   user activation, so never granted without a declaration, `Capabilities::all` leaves it off), `statusBar`, `process` (`execute`: exact executable names or absolute paths; `exit`: host exit requests; `env`: additional
   visible environment names), `fs` (`read` / `write`: trusted path roots), `clipboard` (`nsh`'s `Clipboard`: reading and
   writing the system clipboard; the copy menu of selectable text is the user's own act and needs none), `picker`
-  (`nsh`'s `Picker`: showing the system's picker, whose picked files reach the app; denied, a pick rejects), `share` (`nsh`'s `Share`:
+  (`nsh`'s `Picker`: showing the system's picker, whose picked files reach the app; denied, a pick rejects. Also
+  `nsh-extra`'s `Photos`, checked in each call of its JS face but `access` (`photos/mod.rs` `granted`): its photos
+  reach the app as picked ones do, and the user's permission is the whole app's), `share` (`nsh`'s `Share`:
   showing the system's share sheet; denied, `Share.show` rejects; each shared file also needs `fs.read`), `speech`
   (`nsh`'s `Speech`: the microphone and the system's speech recognizer, whose transcript reaches the app; denied,
   `Speech.start` throws), `audio` (`nsh`'s `Sound` and `AudioPlayer`: making sound; denied, `Sound.load` rejects and
