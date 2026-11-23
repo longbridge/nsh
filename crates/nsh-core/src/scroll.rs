@@ -35,6 +35,7 @@
 //! the spinner, the sticky cells' views, picking which view a key or a
 //! focused field scrolls, and the frame clock.
 
+#[doc(hidden)]
 pub mod wheel_glide;
 
 use std::f32::consts::PI;
@@ -1944,12 +1945,14 @@ pub fn wheel(host: &impl ScrollHost, delta: Point<Points>) {
 /// the glide moves where it goes on from where the last one pointed, at the
 /// speed it has, so a run of notches is one motion. It settles as
 /// [`wheel`] does.
+#[doc(hidden)]
 pub fn wheel_smooth(host: &impl ScrollHost, delta: Point<Points>) {
     wheel_by(host, delta, true);
 }
 
 /// Whether a mouse wheel's notches glide on the view (`smoothWheel`): not
 /// where they step through snap points or pages, or zoom.
+#[doc(hidden)]
 pub fn smooth_wheel(host: &impl ScrollHost) -> bool {
     host.scroll(|s, _| {
         s.behavior.smooth_wheel && !s.zooms() && !s.behavior.snaps() && !s.behavior.paging
@@ -1960,6 +1963,7 @@ pub fn smooth_wheel(host: &impl ScrollHost) -> bool {
 /// A notch's `delta` (points the platform gave it, `line` points a line
 /// along each axis) in the view's own lines (`wheelLineHeight`), when it
 /// sets them.
+#[doc(hidden)]
 pub fn wheel_line(
     host: &impl ScrollHost,
     delta: Point<Points>,
