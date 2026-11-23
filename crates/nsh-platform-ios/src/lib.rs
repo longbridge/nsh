@@ -95,7 +95,7 @@ mod split;
 mod state_words;
 // Sound (`Sound`, `AudioPlayer`) and the notification center, shared with
 // macOS.
-use nsh_platform_apple::{audio, notifications};
+use nsh_platform_apple::{audio, location, notifications};
 mod surface;
 #[cfg(feature = "dev")]
 mod synth;

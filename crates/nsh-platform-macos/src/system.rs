@@ -723,6 +723,7 @@ pub(crate) fn command(surface: &Rc<Surface>, id: NodeId, command: &Command) {
             *scale,
             *format,
         ),
+        Command::Location(command) => surface.control(|c| crate::location::command(c, command)),
         Command::Audio(command) => surface.control(|c| {
             let base = surface.asset_base.borrow().clone();
             crate::audio::command(&surface.audio, c, command, base.as_ref())

@@ -444,6 +444,7 @@ pub(crate) struct LocationEvents {
 
 impl LocationEvents {
     /// The next event, without waiting (`None` after the end was taken).
+    #[cfg(test)]
     pub(crate) fn try_next(&mut self) -> Option<LocationEvent> {
         self.channel
             .lock()

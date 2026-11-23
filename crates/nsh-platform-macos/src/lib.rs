@@ -55,7 +55,7 @@ mod shader;
 mod share;
 mod sight;
 // Shared with iOS.
-use nsh_platform_apple::{audio, notifications};
+use nsh_platform_apple::{audio, location, notifications};
 mod surface;
 #[cfg(feature = "dev")]
 mod synth;

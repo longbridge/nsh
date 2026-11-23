@@ -1518,6 +1518,7 @@ enum Message {
     KeyScrolled(NodeId, nsh_core::scroll::KeyMove),
     Kept(Vec<NodeId>),
     ContentCulling(bool),
+    LocationAuthorization(nsh_core::location::Authorization),
     InputScroll(NodeId, Point<Points>, Size<Points>, Size<Points>),
     InputComposing(NodeId, Option<String>),
     Zoom(NodeId, f32),
@@ -1677,6 +1678,12 @@ impl EngineControl {
     /// every view of a page.
     pub fn set_content_culling(&self, enabled: bool) {
         let _ = self.tx.send(Message::ContentCulling(enabled));
+    }
+
+    /// Reports what the app may read of its location, as the platform says at
+    /// start and on every change (`Location.authorization()` reads it).
+    pub fn set_location_authorization(&self, authorization: nsh_core::location::Authorization) {
+        let _ = self.tx.send(Message::LocationAuthorization(authorization));
     }
 
     /// Reports how far a multiline input's text scrolled: its offset, the
@@ -4410,6 +4417,9 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
         }
         Message::KeyScrolled(id, key_move) => state.core.key_scrolled(id, key_move),
         Message::Kept(nodes) => state.core.set_kept(&nodes),
+        Message::LocationAuthorization(authorization) => {
+            state.core.set_location_authorization(authorization);
+        }
         Message::ContentCulling(enabled) => {
             state.core.set_content_culling(enabled);
             if let Some(script) = script {

@@ -617,6 +617,10 @@ fn initial_environment() -> Environment {
         // `NSSharingServicePicker` (`crate::share`).
         share: true,
         file_requests: true,
+        // CoreLocation (`crate::location`): an app behind its windows is not
+        // suspended, so a watch keeps reporting there.
+        location: true,
+        location_background: true,
         notifications: true,
         audio: true,
         web_input: true,
@@ -1308,6 +1312,7 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     // are now.
     let kept = match &loaded {
         Some(app) if launch.restore_bounds => EngineConfig {
+            location: None,
             support_dir: nsh_engine::support_dir(),
             data_dir: options.data_dir.clone(),
             storage: options.storage.clone(),

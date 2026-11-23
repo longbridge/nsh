@@ -514,6 +514,12 @@ impl RootView {
                 && !objc2_foundation::NSProcessInfo::processInfo().isiOSAppOnMac(),
             // `ASWebAuthenticationSession` (`crate::auth_session`).
             auth_session: true,
+            // The Speech framework fed by the microphone.
+            // CoreLocation (`crate::location`). Background updates need
+            // `allowsBackgroundLocationUpdates`, which this backend does not
+            // set yet: an app is told so rather than left waiting.
+            location: true,
+            location_background: false,
             // The notification center.
             notifications: true,
             // AVAudioEngine and AVPlayer.
@@ -896,6 +902,7 @@ impl RootView {
         let mounter: SharedMounter = Arc::new(MainThreadBound::new(RefCell::new(None), mtm));
         #[allow(unused_mut)]
         let mut config = EngineConfig {
+            location: None,
             app,
             viewport,
             trace: self.ivars().options.trace,

@@ -2285,6 +2285,9 @@ impl Mounter {
                     &self.control,
                 );
             }
+            (Command::Location(command), _) if id == nsh_core::ROOT_ID => {
+                crate::location::command(&self.control, &command);
+            }
             (Command::Audio(command), _) if id == nsh_core::ROOT_ID => {
                 use nsh_core::image::loader::AssetBase as Base;
                 let base = self.images.asset_base().map(|base| match base {

@@ -16,6 +16,11 @@ pub mod handoff;
 // apps': hidden from the docs, so it stays out of what NSH keeps compatible.
 #[doc(hidden)]
 pub mod image_source;
+// The location (`Command::Location`, `Location`), read by the backends'
+// environments and their commands, no API of apps': hidden from the docs, so
+// it stays out of what NSH keeps compatible.
+#[doc(hidden)]
+pub mod location;
 // The path monitor and the cellular data permission behind `network()`,
 // read by the backends' environments, no API of apps': hidden from the
 // docs, so it stays out of what NSH keeps compatible.

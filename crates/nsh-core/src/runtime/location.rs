@@ -97,10 +97,8 @@ impl Location {
         if !sys.access.allows_location() {
             return Err(not_granted());
         }
-        if request.background {
-            if !sys.access.allows_location_background() {
-                return Err(background_not_granted());
-            }
+        if request.background && !sys.access.allows_location_background() {
+            return Err(background_not_granted());
         }
         let call = Rc::new(RefCell::new(crate::prelude::watch_location(request)));
         cx.start(deliver(Rc::downgrade(&call), listener));
@@ -188,12 +186,12 @@ pub(crate) struct WatchOptions {
 
 impl WatchOptions {
     fn request(self) -> Result<LocationRequest, JsError> {
-        if let Some(distance) = self.distance_filter {
-            if !(distance.is_finite() && distance >= 0.0) {
-                return Err(JsError::Range(format!(
-                    "`distanceFilter` must be a number of metres, not {distance}"
-                )));
-            }
+        if let Some(distance) = self.distance_filter
+            && !(distance.is_finite() && distance >= 0.0)
+        {
+            return Err(JsError::Range(format!(
+                "`distanceFilter` must be a number of metres, not {distance}"
+            )));
         }
         LocationRequest {
             accuracy: accuracy(self.accuracy)?,
