@@ -205,6 +205,39 @@ pub(crate) fn show(overlay: &gtk::Overlay, fps: &Rc<Fps>) {
     });
 }
 
+/// Shows the panel of `surface`'s monitor, if it measures, where the app
+/// is seen: in its primary window ([`crate::window::primary_overlay`]),
+/// else the surface's own overlay (an embedded view, or a host whose app
+/// shows no window). The desktop host's window never shows, so a panel
+/// left there would never be seen, nor its frames counted.
+pub(crate) fn follow(surface: &crate::surface::Surface) {
+    let Some(fps) = surface.fps.borrow().clone() else {
+        return;
+    };
+    let target =
+        crate::window::primary_overlay(surface).or_else(|| surface.fps_overlay.borrow().upgrade());
+    let current = fps.hud.borrow().as_ref().and_then(|h| h.overlay.upgrade());
+    if current == target {
+        return;
+    }
+    let Some(target) = target else {
+        fps.hud.borrow_mut().take();
+        return;
+    };
+    let moved = fps.hud.borrow_mut().as_mut().map(|hud| {
+        if let Some(old) = hud.overlay.upgrade() {
+            old.remove_overlay(&hud.panel);
+        }
+        target.add_overlay(&hud.panel);
+        hud.overlay = target.downgrade();
+    });
+    if moved.is_none() {
+        show(&target, &fps);
+    }
+    // Count the frames of the window it shows in.
+    install(target.upcast_ref(), &fps);
+}
+
 /// The panel's size and inner padding (points), and its size collapsed: a
 /// small pill holding the frame rate and the process' CPU.
 const WIDTH: i32 = 288;

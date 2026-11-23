@@ -69,6 +69,9 @@ thread_local! {
     static LAUNCHER: RefCell<Launcher> = RefCell::default();
     /// Counts the windows shown activated ([`AppWindow::shown`]).
     static SHOWN: Cell<u64> = const { Cell::new(0) };
+    /// How many of the app's own windows opened so far: the oldest still
+    /// open is its primary one ([`primary`]).
+    static OPENED: Cell<u64> = const { Cell::new(0) };
     /// The XDG activation token for the next window activation, and when it
     /// came ([`give_activation_token`]).
     static ACTIVATION_TOKEN: RefCell<Option<(String, Instant)>> = const { RefCell::new(None) };
@@ -328,6 +331,8 @@ pub(crate) struct AppWindow {
     shown: u64,
     /// The title bar area reported last (`WindowEvent::TitleBar`).
     title_bar: Option<EdgeInsets>,
+    /// When it opened (a count): the oldest open window is the primary one.
+    opened: u64,
 }
 
 /// What the main window keeps.
@@ -559,12 +564,24 @@ fn open(surface: &Rc<Surface>, view: &NshView, open: &OpenWindow) {
             no_input: false,
             shown: 0,
             title_bar: None,
+            opened: OPENED.with(|n| {
+                n.set(n.get() + 1);
+                n.get()
+            }),
         },
     );
     set_attributes(surface, id, &options.attributes);
     // The root is laid out at the window's size before it shows (the
     // allocation corrects it once mapped).
     resize(surface, view, content.width.0, content.height.0);
+    // Its scale is the app's `pixelRatio()` while it is the primary window.
+    let weak = Rc::downgrade(surface);
+    view.connect_scale_factor_notify(move |_| {
+        if let Some(surface) = weak.upgrade() {
+            crate::system::window_environment(&surface);
+        }
+    });
+    crate::fps::follow(surface);
     let weak = Rc::downgrade(surface);
     glib::timeout_add_local_once(FIRST_FRAME, move || {
         if let Some(surface) = weak.upgrade() {
@@ -773,6 +790,8 @@ fn resize(surface: &Surface, view: &NshView, width: f32, height: f32) {
         view.queue_allocate();
     }
     surface.control(|c| c.set_root_size(id, size, EdgeInsets::default()));
+    // The primary window's size is the app's `windowSize()`.
+    crate::system::window_environment(surface);
     // The dialogs shown in it follow.
     crate::navigation::resize_modals(surface);
     crate::system::root_resized(view, width, height);
@@ -2113,7 +2132,38 @@ pub(crate) fn removed(surface: &Rc<Surface>, view: &NshView) -> bool {
     w.overlay.set_child(None::<&gtk::Widget>);
     lost_key(surface, &w.window);
     w.window.destroy();
+    // Another window may be the primary one now.
+    crate::system::window_environment(surface);
+    crate::fps::follow(surface);
     true
+}
+
+/// The app's primary window: the oldest of its own windows still open
+/// that was given a size. `None` while it shows none.
+fn primary_window(surface: &Surface) -> Option<NodeId> {
+    surface
+        .windows
+        .borrow()
+        .iter()
+        .filter(|(_, w)| w.reported.is_some())
+        .min_by_key(|(_, w)| w.opened)
+        .map(|(id, _)| *id)
+}
+
+/// The size and scale of the app's primary window ([`primary_window`]):
+/// what the app sees as `windowSize()` and `pixelRatio()`.
+pub(crate) fn primary(surface: &Surface) -> Option<(Size<Points>, f32)> {
+    let id = primary_window(surface)?;
+    let windows = surface.windows.borrow();
+    let w = windows.get(&id)?;
+    let view = w.view.upgrade()?;
+    Some((w.reported?, crate::system::pixel_ratio(&view)))
+}
+
+/// The overlay of the app's primary window, which the FPS panel shows in.
+pub(crate) fn primary_overlay(surface: &Surface) -> Option<gtk::Overlay> {
+    let id = primary_window(surface)?;
+    surface.windows.borrow().get(&id).map(|w| w.overlay.clone())
 }
 
 /// The app stopped: its windows go.
@@ -2131,6 +2181,8 @@ pub(crate) fn clear(surface: &Surface) {
         w.overlay.set_child(None::<&gtk::Widget>);
         w.window.destroy();
     }
+    crate::system::window_environment(surface);
+    crate::fps::follow(surface);
     // In the background the main window is the one that would be active
     // for the next app (a development host's reload).
     if in_background() {

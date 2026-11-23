@@ -210,7 +210,7 @@ pub(crate) struct Surface {
     /// ([`crate::selectable_view`]).
     pub(crate) selection: crate::selectable_view::State,
     /// The performance monitor, while it measures ([`crate::fps`]).
-    fps: RefCell<Option<Rc<crate::fps::Fps>>>,
+    pub(crate) fps: RefCell<Option<Rc<crate::fps::Fps>>>,
     pub(crate) fps_overlay: RefCell<glib::WeakRef<gtk::Overlay>>,
 }
 
@@ -338,11 +338,9 @@ impl Surface {
         }
         let fps = Rc::new(crate::fps::Fps::new());
         crate::fps::install(self.root.upcast_ref(), &fps);
-        if let Some(overlay) = self.fps_overlay.borrow().upgrade() {
-            crate::fps::show(&overlay, &fps);
-        }
         self.control(|c| c.set_perf_monitor(Some(fps.monitor.clone())));
         *self.fps.borrow_mut() = Some(fps);
+        crate::fps::follow(self);
     }
 
     #[cfg(test)]
@@ -543,13 +541,8 @@ impl Surface {
             s.frame.size.width.0 = width;
             s.frame.size.height.0 = height;
         }
-        let mut env = self.environment.get();
-        env.window = nsh_core::Size::new(nsh_core::Points(width), nsh_core::Points(height));
-        self.environment.set(env);
-        self.control(|c| {
-            c.resize(Size::new(Points(width), Points(height)));
-            c.set_environment(env);
-        });
+        self.control(|c| c.resize(Size::new(Points(width), Points(height))));
+        crate::system::window_environment(self);
         crate::navigation::surface_resized(self, width, height);
         crate::system::surface_resized(self, width, height);
         crate::window::main_resized(self);
