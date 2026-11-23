@@ -185,7 +185,8 @@ iOS SDK 以 XCFramework（`.xcframework`）或 framework（`.framework`）的形
   "ios": {
     "frameworks": [
       "ios/Vendor/Analytics.xcframework",
-      { "path": "ios/Vendor/Ads.xcframework", "forceLoad": true }
+      { "path": "ios/Vendor/Ads.xcframework", "forceLoad": true },
+      { "path": "ios/Vendor/Push.xcframework", "targets": ["ios", "ios-simulator"], "optional": true }
     ],
     "linkerFlags": ["-ObjC", "-lsqlite3", "-framework", "AdServices"]
   }
@@ -196,9 +197,18 @@ iOS SDK 以 XCFramework（`.xcframework`）或 framework（`.framework`）的形
 |---|---|
 | `path` | `.xcframework` 或 `.framework`。写成字符串的条目就是它的路径。 |
 | `forceLoad` | 链接静态库的全部内容（`-force_load`），而不只是应用代码调用到的部分，用于 SDK 说明里要求这样做的情况。 |
+| `targets` | 链接它的目标：`ios`（真机）、`ios-simulator`、`catalyst`（Mac Catalyst），名字与 `nsh package --target`、`nsh run --target` 相同。默认是全部目标。 |
+| `optional` | 构建时它不存在就略过并给出警告，而不是报错停止。默认 `false`。 |
 
 - 用应用的 crate 构建的每个 iOS 可执行文件都会链接它们：打出的包，以及 `nsh run` 在模拟器和 Mac Catalyst 上的开发宿主。
   每次构建取 XCFramework 里对应目标（真机、模拟器、Mac Catalyst）的库；XCFramework 没有该目标的库时，构建会报错并列出它有的库。
+- SDK 缺某个目标的库时，在 `targets` 里列出它有的目标；其他目标不带它构建，所以 crate 只在链接了它的目标上调用它，例如没有
+  Mac Catalyst 库的 SDK 放在 `#[cfg(not(target_abi = "macabi"))]` 下。两个同名条目的 `targets` 不重叠时，可以分别服务不同的目标。
+- 不放进仓库、由脚本在需要它的构建之前下载的 SDK 标成 `optional`：没有它的构建给出警告，照常链接其余的库；下载之后，它和其他条目一样链接。
+  只有路径不存在才算可选：路径在、却没有当前目标的库，仍然报错。直接引用 SDK 符号的代码只能在带着它的构建里链接；运行时按类名查找它的类的代码，
+  在哪种构建里都能链接。
+- nshm 把 SDK 列在 `[package.metadata.nsh.features.<feature>]` 下，就只在打开这个 feature 时链接它
+  （见[打包的应用需要什么](./nshm.md#打包的应用需要什么)）。
 - 静态库成为应用可执行文件的一部分。动态 framework 会被复制到应用的 `Frameworks/`，并先于应用签名：模拟器用 ad hoc 签名，
   真机用 `--sign` 给出的身份。
 - 动态 framework 的隐私清单留在它自己的 bundle 里，App Store Connect 在那里读取。静态库的代码属于应用，所以 iOS 包会把它的隐私清单

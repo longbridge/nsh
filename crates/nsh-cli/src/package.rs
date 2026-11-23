@@ -3427,7 +3427,12 @@ mod tests {
             r#"{ "ios": {
                 "frameworks": [
                     "ios/Vendor/Sdk.xcframework",
-                    { "path": "ios/Vendor/Ads.xcframework", "forceLoad": true }
+                    { "path": "ios/Vendor/Ads.xcframework", "forceLoad": true },
+                    {
+                        "path": "ios/Vendor/Push.xcframework",
+                        "targets": ["ios", "ios-simulator"],
+                        "optional": true
+                    }
                 ],
                 "linkerFlags": ["-ObjC", "", "-lsqlite3"]
             } }"#,
@@ -3445,8 +3450,18 @@ mod tests {
             [
                 (dir.join("ios/Vendor/Sdk.xcframework"), false),
                 (dir.join("ios/Vendor/Ads.xcframework"), true),
+                (dir.join("ios/Vendor/Push.xcframework"), false),
             ]
         );
+        let push = &config.ios.frameworks[2];
+        assert_eq!(
+            push.targets,
+            [
+                crate::ios_frameworks::Target::Ios,
+                crate::ios_frameworks::Target::IosSimulator
+            ]
+        );
+        assert!(push.optional);
         // The empty flag is left out with a warning.
         assert_eq!(config.ios.linker_flags, ["-ObjC", "-lsqlite3"]);
         std::fs::remove_dir_all(&dir).unwrap();
