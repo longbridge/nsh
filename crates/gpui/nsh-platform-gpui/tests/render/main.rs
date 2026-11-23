@@ -57,7 +57,6 @@ fn app() -> String {
     format!(
         r##"
 import {{ mount, Image, View }} from "nsh";
-import {{ Window }} from "nsh/desktop";
 
 const PHOTO = "{photo}";
 const ICON = "{icon}";
@@ -77,7 +76,7 @@ function App() {{
     </View>
   );
 }}
-mount(() => <Window id="main">{{App}}</Window>);
+mount(App);
 "##,
         photo = halves(40, 20),
         icon = half_icon("#000000"),
@@ -167,7 +166,6 @@ setInterval(() => {
     format!(
         r##"
 import {{ mount, Image, Scroll, type ScrollRef, Text, View }} from "nsh";
-import {{ Window }} from "nsh/desktop";
 
 const PHOTO = "{photo}";
 const LINES = Array.from({{ length: 60 }}, (_, i) => i);
@@ -185,7 +183,7 @@ function App() {{
     </View>
   );
 }}
-mount(() => <Window id="main">{{App}}</Window>);
+mount(App);
 {steps}
 "##,
         photo = halves(100, 80),
@@ -211,13 +209,8 @@ const ZOOMED: &[((f32, f32), [u8; 3], &str)] = &[
 ];
 
 fn main() {
-    // The GPUI host is not migrated to window model v2 (docs/dev/gpui.md):
-    // an app renders in the window it declares, and this offscreen capture
-    // of the embedding window has no app content of its own to show. The
-    // checks run again once the host is migrated (`NSH_GPUI_WINDOW_MODEL_V2=1`
-    // runs them against one).
-    if std::env::var_os("NSH_GPUI_WINDOW_MODEL_V2").is_none() {
-        eprintln!("GPUI's host is not migrated to window model v2: see docs/dev/gpui.md");
+    if !cfg!(feature = "js") {
+        eprintln!("no JS engine here: skipped");
         return;
     }
     let probe = gpui_platform::current_headless_renderer();
@@ -238,14 +231,16 @@ fn main() {
     if let Some(output) = &output {
         std::fs::create_dir_all(output).unwrap();
     }
-    shows(
-        &mut cx,
-        &app(),
-        EXPECTED,
-        "turned-images",
-        output.as_deref(),
-    );
-    println!("render: turned images and icons turn with their views: ok");
+    if cfg!(feature = "svg") {
+        shows(
+            &mut cx,
+            &app(),
+            EXPECTED,
+            "turned-images",
+            output.as_deref(),
+        );
+        println!("render: turned images and icons turn with their views: ok");
+    }
     shows(
         &mut cx,
         &zoom_app(false, false),
@@ -370,7 +365,7 @@ fn embedding_screenshots(cx: &mut HeadlessAppContext, output: &Path) {
 fn open(cx: &mut HeadlessAppContext, code: &str) -> gpui::WindowHandle<AppView> {
     let window = cx
         .open_window(size(px(240.0), px(180.0)), |window, cx| {
-            cx.new(|cx| AppView::new(render_options(), window, cx))
+            cx.new(|cx| AppView::new_inline(render_options(), window, cx))
         })
         .unwrap();
     let code = nsh_bundler::compile_module("App.tsx", code, &[]).unwrap();

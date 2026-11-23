@@ -326,7 +326,7 @@ pub enum CloseRequest {
 /// gpui_platform::application().run(|cx| {
 ///     cx.open_window(WindowOptions::default(), |window, cx| {
 ///         cx.new(|cx| {
-///             let view = AppView::new(AppOptions::default(), window, cx);
+///             let view = AppView::new_inline(AppOptions::default(), window, cx);
 ///             let code = std::fs::read_to_string("app/bundle.js").expect("bundle");
 ///             view.load(App::Js(Bundle::source(code)));
 ///             view
@@ -397,6 +397,19 @@ impl AppView {
             #[cfg(feature = "dev")]
             dev: RefCell::new(None),
         }
+    }
+
+    /// Like [`Self::new`], but a plain JS root mounts in this view instead
+    /// of opening an implicit desktop window. The host controls its own window;
+    /// inline JS cannot move or close it. Explicit windows, the app's platform
+    /// environment and Rust roots are unchanged.
+    pub fn new_inline(options: AppOptions, window: &mut Window, cx: &mut Context<Self>) -> AppView {
+        #[cfg(feature = "js")]
+        let options = AppOptions {
+            context: nsh_engine::with_inline_root(options.context),
+            ..options
+        };
+        Self::new(options, window, cx)
     }
 
     /// Runs `app`, replacing what ran.
@@ -497,10 +510,11 @@ impl AppView {
     }
 
     /// Makes the window this view is drawn in its own, as
-    /// [`open_app_window`]'s is: the app's title (`currentWindow().set({ title })`), title
-    /// bar, application menu (macOS's menu bar, the menu bar drawn above
-    /// the view elsewhere) and window operations act on it, and the
-    /// window's reserved keys are the view's. The embedding app opens the
+    /// [`open_app_window`]'s is: it gets the view's title, title bar,
+    /// application menu (macOS's menu bar, the menu bar drawn above the
+    /// view elsewhere) and reserved keys. This does not change where a JS root
+    /// mounts or let an inline JS root control the host window. Use
+    /// [`Self::new_inline`] for inline mounting. The embedding app opens the
     /// window itself (its bounds, its root element: GPUI Kit's `Root`
     /// around the view, say), best with [`crate::titlebar_options`], and
     /// calls this once, from the window's build closure.
@@ -522,9 +536,8 @@ impl AppView {
 
     /// Hands the quit and close requests of the window the view owns
     /// ([`AppView::own_window`]) to `f`, which decides: the reserved quit
-    /// key, Ctrl+W, the `quit` and `close` menu roles, `Application.quit()`,
-    /// the main window's `WindowRef.close()` and the window's close button no longer quit or
-    /// close by themselves.
+    /// key, Ctrl+W, the `quit` and `close` menu roles, `Application.quit()`
+    /// and the window's close button no longer quit or close by themselves.
     /// `f` runs on the main thread after the event that asked; it quits
     /// with `cx.quit()` or closes with `window.remove_window()` when the
     /// embedding app is ready to. Replaces the handler set before.

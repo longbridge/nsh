@@ -88,7 +88,7 @@
   leave that option false but can request transparency through their window configuration. A view's
   `behindWindow` material does not enable window transparency. An `AppView` never changes its host's window.
   GPUI and GPUI Kit apps use `nsh_platform_gpui::AppView`, a GPUI view (`gpui.md`): `let view = cx.new(|cx|
-  AppView::new(options, window, cx));` inside a window, `view.read(cx).load(App::Js(bundle))`, then put the entity in
+  AppView::new_inline(options, window, cx));` inside a window, `view.read(cx).load(App::Js(bundle))`, then put the entity in
   any element tree (in a GPUI Kit window, as a child of its `Root`); it fills the space its parent gives it and takes
   the focus it is given (`Focusable`). The crate depends on `gpui-fast` 0.1 from crates.io (re-exported as
   `nsh_platform_gpui::gpui`); GPUI Kit's `gpui-fast` feature makes `gpui_component` use that same crate, so both share
@@ -353,12 +353,12 @@ NSH draws (`src/layers.rs`).
   use it too: its `gpui-fast` feature. `cargo tree -i gpui-fast` must show one version, else the app has two GPUIs
   and NSH's views are not the app's elements. `nsh_platform_gpui::gpui` re-exports NSH's. NSH builds with GPUI Fast
   0.1.14 or later, which GPUI Kit is built on from 0.9.1.
-- **A view.** `cx.new(|cx| AppView::new(options, window, cx))`, then `view.read(cx).load(App::Js(bundle))` (or a
-  Rust app's root); the app puts the entity wherever it wants as a child element. The surface fills the space its
-  parent gives it and follows it when resized (each layout reports the size to the engine). Several views run at once,
-  in one window or several, each with its own engine thread; the process shares only the main-thread queue (`rt.rs`)
-  and the key bindings. Dropping the view (its last entity handle) stops its engine and joins its thread, as does
-  `AppView::stop`.
+- **A view.** `cx.new(|cx| AppView::new_inline(options, window, cx))`, then `view.read(cx).load(App::Js(bundle))`
+  for a plain JS root, or `AppView::new` for a Rust root. The host puts the entity wherever it wants as a child element.
+  The surface fills the space its parent gives it and follows it when resized (each layout reports the size to the
+  engine). Several views run at once, in one window or several, each with its own engine thread; the process shares
+  only the main-thread queue (`rt.rs`) and the key bindings. Dropping the view (its last entity handle) stops its
+  engine and joins its thread, as does `AppView::stop`.
 - **Focus.** `AppView` is `Focusable` and a tab stop (a `div` with `track_focus` around the surface element, which
   registers the stop). A press focuses it; keys reach it only while it is focused, so several surfaces and the host's
   inputs never share keys. Its key context `NshAppView` binds Tab and Shift + Tab deeper than GPUI Kit's `Root` (which

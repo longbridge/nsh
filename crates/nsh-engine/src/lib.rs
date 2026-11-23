@@ -74,7 +74,7 @@ pub use nsh_core::{
     time::Clock,
 };
 #[cfg(feature = "js-core")]
-pub use nsh_js::BYTECODE_VERSION;
+pub use nsh_js::{BYTECODE_VERSION, with_inline_root};
 /// Signed packages, release-key certificates, revocations and trust stores.
 #[cfg(feature = "js-core")]
 pub use nsh_package as package;
