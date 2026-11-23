@@ -110,6 +110,8 @@ async function loadSettings(): Promise<string> {
 }
 ```
 
+用户粘贴到输入框或拖放到视图上的文件，在应用本次运行期间可以按精确路径读取，不受 `read` 根目录限制：`onPaste` 或 `onFileDrop` 的处理函数在 `uris` 里收到它的 `file:` URL 之后，`readFile`、`stat`、`exists` 等 `read` 操作接受这个路径（URL 所指的路径或解析后的路径），与在选择器里选中的文件一样。只限这个路径：拖放的文件夹可以列出自身的条目，但其中的内容不授权；文件旁边的其他文件不授权；只是拖入（`onFileDragEnter`）不授权；也不授权任何 `write` 操作。收窄了 `fs.read` 的嵌入宿主同样会收窄这些路径。
+
 根目录可以是绝对路径、`${dataDir}`（宿主为此应用选定的数据目录）、`${pluginDir}`（应用目录）、`${homeDir}`，或相对于应用目录的路径。调用中的相对路径依次在每个授权根目录中解析。嵌入应用可以进一步缩小授权。每个操作都限定在其授权根目录之内，符号链接也是如此；绝对路径按书写形式检查，因此须通过根目录自身的路径（或其解析后的路径）访问，而不能经由根目录之外的符号链接。`lstat`、`readlink`、`exists`、`unlink`、`rename` 和 `rmdir` 作用于符号链接本身：目标不存在的符号链接 `exists` 为 `true`，`unlink` 删除链接并保留其目标。
 
 失败时的错误带有 Node 的错误属性：`code`（`ENOENT`、`EEXIST`、`ENOTDIR`、`EISDIR`、`ENOTEMPTY`、`ELOOP`、`EACCES`、`EPERM` 等；文本不是 UTF-8 时为 `EILSEQ`，超出读取上限时为 `ERR_FS_FILE_TOO_LARGE`）、`syscall` 和 `path`，因此可以用 `error.code === "ENOENT"` 判断文件不存在。授权范围之外的路径以 `ERR_ACCESS_DENIED` 拒绝，在 iOS 或 Android 上（这些平台的应用用 [`Storage`](./nsh.md#storage) 保存数据）的调用以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝，参数错误（未知的编码或选项）以 `TypeError` 拒绝。

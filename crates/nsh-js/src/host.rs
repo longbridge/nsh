@@ -569,6 +569,7 @@ impl Host {
 
     /// Delivers a native event (and its data) to the node's JS handler.
     pub fn dispatch_event(&self, id: NodeId, event: EventKind, payload: &EventPayload) {
+        let payload_in = payload;
         self.guarded(Phase::Call, || {
             self.cx.with(|cx| {
                 // Touches: the responder system is native.
@@ -629,6 +630,7 @@ impl Host {
                     let Some(handler) = crate::dom::handler(raw, id, event) else {
                         return Ok(());
                     };
+                    grant_user_files(raw, event, payload_in);
                     // SAFETY: an owned function value of this context.
                     let handler = unsafe { Value::from_raw(cx.clone(), handler) };
                     match handler.into_function() {
@@ -1278,6 +1280,21 @@ fn video_load<'js>(
     }
     obj.set("size", size)?;
     Ok(obj.into_value())
+}
+
+/// Lets the app read the files the user pasted or dropped, as its handler
+/// gets them (`fs/promises` at their exact paths): not a drag that only
+/// entered.
+fn grant_user_files(raw: *mut qjs::JSContext, event: EventKind, payload: &EventPayload) {
+    let uris = match (event, payload) {
+        (EventKind::Paste, EventPayload::Paste(paste)) => &paste.uris,
+        (
+            EventKind::FileDrop,
+            EventPayload::FileDrop(uris) | EventPayload::FileDropAt { uris, .. },
+        ) => uris,
+        _ => return,
+    };
+    nsh_core::runtime::grant_user_files(&crate::dom::shared(raw).system_locals, uris);
 }
 
 /// The JS object handed to event handlers.
