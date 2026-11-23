@@ -92,7 +92,6 @@ pub(crate) fn press_keys(surface: &Rc<Surface>, stroke: &nsh_core::keymap::Keyst
         ctrl: m.ctrl,
         alt: m.alt,
         meta: m.cmd,
-        alt_graph: false,
     };
     let vk = stroke.key.virtual_key().unwrap_or(0);
     let handled = crate::input::window_key(
