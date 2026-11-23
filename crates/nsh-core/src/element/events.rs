@@ -795,7 +795,7 @@ pub(crate) fn file_drop(p: &EventPayload) -> Option<Cow<'_, FileDropEvent>> {
             files: Vec::new(),
         })),
         EventPayload::FileContents(c) => Some(Cow::Owned(FileDropEvent {
-            uris: Vec::new(),
+            uris: c.uris.clone(),
             mime_types: c.mime_types.clone(),
             page_position: c.page_position,
             files: c.files.clone(),
@@ -813,7 +813,7 @@ pub(crate) fn file_drag(p: &EventPayload) -> Option<Cow<'_, FileDragEvent>> {
             }))
         }
         EventPayload::FileContents(c) => Some(Cow::Owned(FileDragEvent {
-            uris: Vec::new(),
+            uris: c.uris.clone(),
             mime_types: c.mime_types.clone(),
         })),
         _ => None,
@@ -894,6 +894,24 @@ mod tests {
         let drag = super::file_drag(&payload).unwrap();
         assert!(drag.uris.is_empty());
         assert_eq!(drag.mime_types, ["text/plain"]);
+    }
+
+    #[test]
+    fn dropped_contents_keep_the_local_uris_beside_them() {
+        use crate::{EventPayload, FileContents, ImageData, picker::PickedFile};
+        let file = PickedFile::new("a b.png", "image/png", ImageData::new(vec![1, 2]));
+        let uris = vec![
+            "file:///tmp/a%20b.png".to_owned(),
+            "file:///tmp/unread.txt".to_owned(),
+        ];
+        let payload = EventPayload::FileContents(Box::new(
+            FileContents::new(vec![file.clone()], vec!["image/png".into()], None)
+                .with_uris(uris.clone()),
+        ));
+        let drop = super::file_drop(&payload).unwrap();
+        assert_eq!(drop.uris, uris);
+        assert_eq!(drop.files, vec![file]);
+        assert_eq!(super::file_drag(&payload).unwrap().uris, uris);
     }
 
     #[test]
