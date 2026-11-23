@@ -2845,6 +2845,18 @@ fn wheel_input(
                 return false;
             };
             *input.latch.borrow_mut() = Some((view.clone(), horizontal, time));
+            // Lines of 16 points (`WM_MOUSEWHEEL`'s default), or the view's
+            // own (`wheelLineHeight`); a `smoothWheel` view glides them on
+            // Chromium's curve.
+            let notch = if view.kind() == ViewKind::Scroll {
+                let line = nsh_core::geometry::point(Points(16.0), Points(16.0));
+                crate::scroll::wheel_notch(surface, &view, dx, dy, line)
+            } else {
+                Some((dx, dy))
+            };
+            let Some((dx, dy)) = notch else {
+                return true;
+            };
             if view.kind() == ViewKind::Scroll && !surface.environment.get().reduce_motion {
                 // A notch glides, as in Windows' own apps and browsers
                 // (unless the system's animations are off).

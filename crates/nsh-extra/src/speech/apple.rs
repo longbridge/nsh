@@ -352,7 +352,7 @@ unsafe fn recognized(id: u64, result: Option<&AnyObject>, error: Option<&AnyObje
             (text.to_string(), is_final)
         };
         SESSION.with(|s| {
-            if let Some(session) = s.borrow_mut().as_mut() {
+            if let Some(session) = s.borrow_mut().as_mut().filter(|s| s.id == id) {
                 session.text = text.clone();
             }
         });
@@ -370,11 +370,20 @@ unsafe fn recognized(id: u64, result: Option<&AnyObject>, error: Option<&AnyObje
             (domain.to_string(), code)
         };
         log::debug!("speech recognition ended: {domain} {code}");
-        let stopping = SESSION.with(|s| s.borrow().as_ref().is_some_and(|s| s.stopping));
+        let stopping = SESSION.with(|s| {
+            s.borrow()
+                .as_ref()
+                .is_some_and(|s| s.id == id && s.stopping)
+        });
         let error = speech_error(&domain, code, stopping);
         // A stop that heard something ends with it, final.
         if error.is_none() {
-            let text = SESSION.with(|s| s.borrow().as_ref().map(|s| s.text.clone()));
+            let text = SESSION.with(|s| {
+                s.borrow()
+                    .as_ref()
+                    .filter(|s| s.id == id)
+                    .map(|s| s.text.clone())
+            });
             if let Some(text) = text.filter(|t| !t.is_empty()) {
                 sink.result(text, true);
             }

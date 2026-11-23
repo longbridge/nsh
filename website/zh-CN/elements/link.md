@@ -92,6 +92,7 @@ import { Link } from "nsh/base";
 | `disabled` | `.disabled(..)` | `boolean` | `false` | 不响应按压、没有按压反馈、不获得键盘焦点；应用 `disabled:` 样式，屏幕阅读器读出它不可用。 |
 | `current` | `.current(..)` | `boolean` | `false` | 导航或面包屑中指向用户所在页面的链接：屏幕阅读器读出它是当前页。 |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 内容说明不够时（一个图标）屏幕阅读器读出的文字。 |
+| `accessibilityHint` | `.accessibility_hint(..)` | `string` | 无 | 向屏幕阅读器说明激活链接会做什么，与视图的 `accessibilityHint` 相同。 |
 | `hitSlop` | `.hit_slop(..)` | `number \| Partial<Edges>` | 无 | 按压在边界之外多远仍然算数，单位为点：一个数字表示每一边，或分别指定各边。与视图的 `hitSlop` 相同。 |
 | `children` | `.child(..)` | `JSX.Element` | 无 | 内容：一段文字、一个图标，应用要显示的任何东西。 |
 | `class`、`style` | 样式方法 | `string`、`StyleProp<ViewStyle>` | 无 | 链接的外观：颜色、下划线、内边距；文本属性会传给其中的文字。 |
@@ -161,6 +162,7 @@ const visited = signal(new Set<string>());
 
 ## 无障碍
 
+- 标签不能说明打开链接的结果时，设置 `accessibilityHint`。它跟随响应式值变化；设为 `undefined` 会移除提示。
 - 链接对屏幕阅读器是一个元素，角色为 `"link"`；它的标签是子元素的文字，或 `accessibilityLabel`。`href` 只是数据：屏幕阅读器读出的是标签。
 - `current` 读作当前页（ARIA 的 `aria-current="page"`），`disabled` 按平台读出不可用元素的方式读出。
 - 在 macOS 和 Web 上，链接是键盘焦点的一站：Tab 到达它，Return 和 Space 打开它，`focus-visible:` 样式显示焦点所在。

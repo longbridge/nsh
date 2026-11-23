@@ -1977,6 +1977,23 @@ pub enum ScrollProp {
     /// UIKit does it: elsewhere ignored).
     #[prop(js = "scrollsToTop", default = true, on = SCROLLING)]
     ScrollsToTop(bool),
+    /// `smoothWheel`: a mouse wheel's notches glide to where they point,
+    /// eased in and out over 100–200 ms as Chromium's do, a run of notches
+    /// one motion (default false: the platform's own, which lands at once
+    /// on macOS and Linux and glides briefly on Windows). The desktops
+    /// (macOS, Windows, Linux, GPUI); iOS and Android scroll with the
+    /// system's views, the web with the browser's (both ignore it), as
+    /// they do when the system reduces motion.
+    #[prop(js = "smoothWheel", on = SCROLLING)]
+    SmoothWheel(bool),
+    /// `wheelLineHeight`: how far a mouse wheel's line scrolls, in points (0,
+    /// the default: the platform's own, 10 on macOS, 16 on Windows, a
+    /// notch's length after the view's on Linux). A line is the platform's:
+    /// a notch on Linux, a third of one on Windows (the system's default),
+    /// about one per notch on macOS, which accelerates quick runs. The
+    /// desktops; ignored where `smoothWheel` is.
+    #[prop(js = "wheelLineHeight", min = 0, on = SCROLLING)]
+    WheelLineHeight(Points),
     /// `contentInset`: room around the content.
     #[prop(js = "contentInset", on = SCROLLING)]
     ContentInset(EdgeInsets),

@@ -205,6 +205,38 @@ pub fn current_window() -> WindowRef {
     super::use_context::<WindowRef>().unwrap_or_else(main_window)
 }
 
+/// The ref of a window JS opened (`<Window>` of `nsh/desktop`) at node
+/// `node`, under its own owner, for the Rust components rendered inside it:
+/// [`current_window`] finds it as it finds a [`window`]'s, with the state
+/// and title bar area `reported` gives and [`WindowRef::report`] keeps.
+/// Commands go to the node; JS keeps its own handle of the window.
+pub(crate) fn js_window(
+    id: &str,
+    node: crate::NodeId,
+    executor: &Rc<super::Executor>,
+    reported: (Option<WindowState>, Edges<Points>),
+) -> (Owner, WindowRef) {
+    Owner::detached().run(|| {
+        super::create_root(|| {
+            let element = ElementRef::new(executor);
+            if let Some(target) = element.target() {
+                target.attach(node);
+            }
+            let this = WindowRef {
+                id: Rc::from(id),
+                target: Target::Own(element),
+                state: Some(super::signal(reported.0)),
+                title_bar: Some(super::signal(reported.1)),
+                close: None,
+                close_press: None,
+                early: None,
+            };
+            super::provide_context(this.clone());
+            this
+        })
+    })
+}
+
 impl WindowRef {
     /// Its id: the app's (`"main"` is a conventional first-window id, with
     /// no special behavior).
@@ -317,6 +349,24 @@ impl WindowRef {
         match &self.close {
             Some(close) => close(WindowCloseCause::Close),
             None => self.command(DesktopCommand::Request(WindowRequest::Close)),
+        }
+    }
+
+    /// What the platform reported of a window JS opened
+    /// ([`js_window`]): its state and title bar area follow.
+    pub(crate) fn report(&self, event: &WindowEvent) {
+        match event {
+            WindowEvent::State(next) => {
+                if let Some(state) = self.state {
+                    state.try_set(Some(**next));
+                }
+            }
+            WindowEvent::TitleBar(area) => {
+                if let Some(title_bar) = self.title_bar {
+                    title_bar.try_set(*area);
+                }
+            }
+            _ => {}
         }
     }
 

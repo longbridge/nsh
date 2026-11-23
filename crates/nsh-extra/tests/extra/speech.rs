@@ -22,6 +22,17 @@ fn Blank() -> impl IntoElement {
     view()
 }
 
+/// An app that dictates from the start: its Rust code starts a session on
+/// the engine's thread and listens until it ends.
+#[component]
+fn Dictating() -> impl IntoElement {
+    drop(spawn(async {
+        let mut recognition = speech::recognize(SpeechRequest::default());
+        while recognition.next().await.is_some() {}
+    }));
+    view()
+}
+
 /// An app with `nsh-extra` and a registry of its own, as each `#[test]` of
 /// an app crate launches it.
 fn start() -> Headless {
@@ -102,4 +113,37 @@ fn apps_with_the_same_fakes_run_together() {
         .expect("the first app's session still listens");
     drop(recognition);
     drop((first, second));
+}
+
+#[test]
+fn a_session_ends_when_its_app_stops() {
+    // One registry: the app left running shares the fakes and sees the
+    // session of the one that stops.
+    let sets = vec![nsh_extra::registry()];
+    let mut dictating = Headless::start(EngineConfig {
+        ui_sets: sets.clone(),
+        ..EngineConfig::new(nsh_testing::windowed_root::<Dictating>())
+    })
+    .expect("the dictating app starts");
+    dictating.first_render().expect("the dictating app renders");
+    let mut other = Headless::start(EngineConfig {
+        ui_sets: sets.clone(),
+        ..EngineConfig::new(nsh_testing::windowed_root::<Blank>())
+    })
+    .expect("the other app starts");
+    other.first_render().expect("the other app renders");
+    assert_eq!(
+        other.call_fake(FAKE, "requests", &[]).unwrap(),
+        json!([{ "lang": null, "interim": true }]),
+        "the dictating app listens"
+    );
+
+    // Its engine stops (a view loading another app, a closed window): the
+    // session ends with it, so the microphone goes off, though no engine
+    // is left to tell.
+    drop(dictating);
+    assert_eq!(
+        other.call_fake(FAKE, "hear", &[JsonValue::from("late")]),
+        Err("no speech session listens".to_string())
+    );
 }

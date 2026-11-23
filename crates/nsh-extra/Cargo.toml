@@ -20,7 +20,8 @@ workspace = true
 default = []
 # `Camera`: photos taken with the system's camera (iOS, Android).
 camera = ["dep:tokio"]
-# `Photos`: the user's photo library, its recent photos (iOS).
+# `Photos`: the user's photo library, its recent photos, and `PhotosPicker`,
+# the system's photo picker embedded in the layout (iOS).
 photos = ["dep:tokio"]
 # `Push`: remote notifications with any push service (iOS, Android with a
 # push service's binding).

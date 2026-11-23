@@ -1162,3 +1162,98 @@ mount(() => <Text>{`${horizontalSizeClass()} ${verticalSizeClass()}`}</Text>);
     engine.control().set_environment(environment);
     read("regular compact");
 }
+
+const RUST_IN_JS_WINDOWS_APP: &str = r#"import { mount, View } from "nsh";
+import { Window } from "nsh/desktop";
+import { WindowArea } from "test/ui";
+
+mount(() => (
+  <Window id="main">
+    <View>
+      <WindowArea />
+      <Window id="left" title="Left"><View><WindowArea /></View></Window>
+      <Window id="right" title="Right"><WindowArea /></Window>
+    </View>
+  </Window>
+));
+"#;
+
+/// A Rust component in a window JS opened renders in that window:
+/// `current_window()` is it, with its own title bar area, not the main
+/// window's (#2937).
+#[test]
+fn rust_components_in_js_windows_read_their_window() {
+    use nsh_core::{
+        desktop::{DesktopCommand, WindowEvent},
+        geometry::Edges,
+    };
+    let (engine, rx) = crate::components::start_with(
+        RUST_IN_JS_WINDOWS_APP,
+        Environment {
+            os: Os::MacOs,
+            idiom: Idiom::Desktop,
+            ..Environment::default()
+        },
+        None,
+        None,
+    );
+    let mut opened = Vec::new();
+    let mut texts = Vec::new();
+    let mut take = |batches: Vec<nsh_core::MountBatch>| {
+        for b in batches {
+            for item in b.items {
+                match item {
+                    MountItem::Text { text, .. } => texts.push(text.text.to_string()),
+                    MountItem::Command {
+                        id,
+                        command: Command::Desktop(command),
+                    } => {
+                        if let DesktopCommand::OpenWindow(open) = *command {
+                            opened.push((id, open.options.id.clone()));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    };
+    take(crate::components::until(&rx, |b| {
+        crate::components::shows(b, "right 0 0 0")
+    }));
+    assert!(texts.iter().any(|t| t == "left 0 0 0"), "{texts:?}");
+    let id_of = |wanted: &str| {
+        opened
+            .iter()
+            .find(|(_, id)| id == wanted)
+            .map(|(n, _)| *n)
+            .unwrap_or_else(|| panic!("{wanted} opens: {opened:?}"))
+    };
+    let (left, right) = (id_of("left"), id_of("right"));
+    let control = engine.control();
+    let report = |id, top: f32, l: f32, r: f32| {
+        control.dispatch_event(
+            id,
+            EventKind::Window,
+            EventPayload::Window(Box::new(WindowEvent::TitleBar(Edges {
+                top: px(top),
+                left: px(l),
+                right: px(r),
+                ..Default::default()
+            }))),
+        );
+    };
+    // Different controls per window: each component follows its own.
+    report(left, 28.0, 72.0, 0.0);
+    report(right, 32.0, 0.0, 138.0);
+    let mut seen = Vec::new();
+    for b in crate::components::until(&rx, |b| crate::components::shows(b, "right 32 0 138")) {
+        for item in b.items {
+            if let MountItem::Text { text, .. } = item {
+                seen.push(text.text.to_string());
+            }
+        }
+    }
+    assert!(seen.iter().any(|t| t == "left 28 72 0"), "{seen:?}");
+    assert!(seen.iter().any(|t| t == "right 32 0 138"), "{seen:?}");
+    assert!(!seen.iter().any(|t| t.starts_with("main ")), "{seen:?}");
+}

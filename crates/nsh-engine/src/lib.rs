@@ -756,6 +756,23 @@ pub trait MountSink: Send + 'static {
     /// Called once per commit, in order.
     fn submit(&self, batch: MountBatch);
 
+    /// Include the settled logical in-flow content height with mount batches.
+    fn needs_content_height(&self) -> bool {
+        false
+    }
+
+    /// Called instead of [`Self::submit`] when [`Self::needs_content_height`]
+    /// is true. Apply the settled height ([`Core::content_height`]) together
+    /// with the batch before notifying host observers. A height change can
+    /// arrive with an empty batch when there are no mount items to apply.
+    ///
+    /// By default, forwards nonempty batches to [`Self::submit`].
+    fn submit_with_content_height(&self, batch: MountBatch, _content_height: Option<Points>) {
+        if !batch.items.is_empty() {
+            self.submit(batch);
+        }
+    }
+
     /// Include logical tree order when the mounted structure changes. Native
     /// `Insert` items alone describe stacking order, which can differ by `zIndex`.
     fn needs_tree_order(&self) -> bool {
@@ -2583,6 +2600,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         let js_tokens = core.tokens().clone();
         let state = State {
             core,
+            published_content_height: None,
             js_tokens,
             frame_requested: false,
             frame_turn: false,
@@ -2736,15 +2754,13 @@ impl<M: TextEngine + 'static> Driver<M> {
         if script.is_some() {
             state.core.mount_opened_windows();
         }
-        if let Some(batch) = state.commit(script) {
-            if state.trace {
-                log::info!(
-                    target: "nsh::perf",
-                    "first frame: eval {eval_us}µs, total {}µs",
-                    start.elapsed().as_micros()
-                );
-            }
-            sink.submit(batch);
+        let batch = state.commit(script);
+        if state.submit_mount(&**sink, batch) && state.trace {
+            log::info!(
+                target: "nsh::perf",
+                "first frame: eval {eval_us}µs, total {}µs",
+                start.elapsed().as_micros()
+            );
         }
         state.run_on_main_thread(&**sink);
         if let Some(trial) = trial {
@@ -2804,9 +2820,8 @@ impl<M: TextEngine + 'static> Driver<M> {
         if let Some(script) = &self.script {
             script.set_perf_stats(Some(&stats));
         }
-        if let Some(batch) = self.state.commit(self.script.as_ref()) {
-            self.sink.submit(batch);
-        }
+        let batch = self.state.commit(self.script.as_ref());
+        self.state.submit_mount(&*self.sink, batch);
         self.state.run_on_main_thread(&*self.sink);
     }
 
@@ -3025,16 +3040,16 @@ impl<M: TextEngine + 'static> Driver<M> {
         let tasks = turn_start.map(|s| s.elapsed());
         state.load_fonts(script, assets.as_deref(), &**sink);
         let batch = state.commit(script);
-        if let Some(batch) = batch.filter(|_| !self.quitting) {
-            sink.submit(batch);
-            if let (Some(start), Some(tasks)) = (turn_start, tasks) {
-                log::info!(
-                    target: "nsh::perf",
-                    "turn: {}µs (timers and tasks {}µs)",
-                    start.elapsed().as_micros(),
-                    tasks.as_micros(),
-                );
-            }
+        if !self.quitting
+            && state.submit_mount(&**sink, batch)
+            && let (Some(start), Some(tasks)) = (turn_start, tasks)
+        {
+            log::info!(
+                target: "nsh::perf",
+                "turn: {}µs (timers and tasks {}µs)",
+                start.elapsed().as_micros(),
+                tasks.as_micros(),
+            );
         }
         state.run_on_main_thread(&**sink);
         if let Some(size) = state.resized.take() {
@@ -3130,9 +3145,8 @@ impl<M: TextEngine + 'static> Driver<M> {
             }
             self.last_gc = Instant::now();
             self.state.committed_since_gc = false;
-            if let Some(batch) = self.state.commit(Some(script)) {
-                self.sink.submit(batch);
-            }
+            let batch = self.state.commit(Some(script));
+            self.state.submit_mount(&*self.sink, batch);
             self.state.run_on_main_thread(&*self.sink);
         }
     }
@@ -3163,6 +3177,7 @@ struct ScrollEvent {
 
 struct State<M: TextEngine> {
     core: Core<M>,
+    published_content_height: Option<Points>,
     /// The design tokens JS has (`token()`): the core's when they were
     /// last sent.
     js_tokens: Arc<nsh_core::element::Tokens>,
@@ -4038,6 +4053,22 @@ impl<M: TextEngine> State<M> {
             );
         }
         merged
+    }
+
+    /// Publishes the settled turn, even when only its content height changed.
+    fn submit_mount(&mut self, sink: &dyn MountSink, batch: Option<MountBatch>) -> bool {
+        if sink.needs_content_height() {
+            let height = self.core.content_height();
+            if batch.is_some() || height != self.published_content_height {
+                sink.submit_with_content_height(batch.unwrap_or_default(), height);
+                self.published_content_height = height;
+                return true;
+            }
+        } else if let Some(batch) = batch {
+            sink.submit(batch);
+            return true;
+        }
+        false
     }
 }
 

@@ -2905,11 +2905,21 @@ fn wheel_input(
             };
             *input.latch.borrow_mut() = Some((view.clone(), horizontal, time));
             let (dx, dy) = if notches {
-                let s = view.state();
-                (
-                    dx * notch(s.frame.size.width.0),
-                    dy * notch(s.frame.size.height.0),
-                )
+                // A notch is a line, GtkScrolledWindow's length for the
+                // view; a `smoothWheel` view glides it, and
+                // `wheelLineHeight` sets its own.
+                let line = {
+                    let s = view.state();
+                    point(
+                        Points(notch(s.frame.size.width.0)),
+                        Points(notch(s.frame.size.height.0)),
+                    )
+                };
+                match crate::scroll::wheel_notch(surface, &view, dx * line.x.0, dy * line.y.0, line)
+                {
+                    Some(d) => d,
+                    None => return true,
+                }
             } else {
                 (dx, dy)
             };
