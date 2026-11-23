@@ -2411,20 +2411,58 @@ fn wheel_to_host(
     to_host
 }
 
+/// Whether a wheel `event` over the hosted view `native` scrolls the
+/// surface rather than an input's text: always over a single-line input,
+/// and over a multiline one unless its text takes the gesture
+/// ([`wheel_to_host`]). `false` for anything that is not an input.
+pub(crate) fn passes_wheel(surface: &Surface, native: &NSView, event: &NSEvent) -> bool {
+    if native.downcast_ref::<InputPad>().is_none() {
+        return false;
+    }
+    // The editor is the topmost subview (the placeholder is below it).
+    let text = native
+        .subviews()
+        .lastObject()
+        .and_then(|editor| editor.downcast::<NSScrollView>().ok())
+        .and_then(|scroller| scroller.documentView())
+        .and_then(|doc| doc.downcast::<NSTextView>().ok());
+    match text {
+        Some(text) => wheel_to_host(&text, surface, event, |dy| text_scrolls(&text, dy)),
+        None => true,
+    }
+}
+
 /// How far `text` can still move inside its scroll view: `(above, below)`
 /// in points (positive towards the start / end). Uses the clip view's
 /// bounds origin as the offset from the top (same as `scroll_to` /
-/// `report_scroll`), not `documentVisibleRect`, so a vertically
-/// resizable frame that matches the clip does not look like overflow.
+/// `report_scroll`). Document height is the laid-out text height, not
+/// the minSize-stretched frame, so an empty tall field does not look like
+/// it overflows.
 fn text_scroll_room(text: &NSTextView) -> Option<(CGFloat, CGFloat)> {
     let scroller = text.enclosingScrollView()?;
     // SAFETY: a scroll view's clip view (an `NSView`), always present.
     let clip: Retained<NSView> = unsafe { msg_send![&scroller, contentView] };
     let bounds = clip.bounds();
-    let max_y = (text.frame().size.height - bounds.size.height).max(0.0);
+    let max_y = (text_layout_height(text) - bounds.size.height).max(0.0);
     let above = bounds.origin.y.max(0.0);
     let below = (max_y - above).max(0.0);
     Some((above, below))
+}
+
+/// Laid-out height of `text`'s content (TextKit 1 used rect, else frame).
+fn text_layout_height(text: &NSTextView) -> CGFloat {
+    // SAFETY: TextKit 1 objects when the view has them (nil on TextKit 2).
+    unsafe {
+        let manager: Option<Retained<AnyObject>> = msg_send![text, layoutManager];
+        let container: Option<Retained<AnyObject>> = msg_send![text, textContainer];
+        if let (Some(manager), Some(container)) = (manager, container) {
+            let _: () = msg_send![&manager, ensureLayoutForTextContainer: &*container];
+            let used: NSRect = msg_send![&manager, usedRectForTextContainer: &*container];
+            let inset = text.textContainerInset().height;
+            return used.size.height + inset * 2.0;
+        }
+    }
+    text.frame().size.height
 }
 
 /// Whether `text`'s document is taller than its clip (either direction).

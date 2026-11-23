@@ -3605,12 +3605,14 @@ pub(crate) fn scrolling(surface: &Surface, event: &NSEvent) -> bool {
         })
 }
 
-/// Hands `event`, which reached a hosted AppKit view, to the surface's
-/// root as if it came there.
-pub(crate) fn forward_scroll(surface: &Surface, event: &NSEvent) {
-    let root = event_root(surface);
-    // SAFETY: NSResponder's method, on the surface's root view.
-    let _: () = unsafe { objc2::msg_send![root.ns(), scrollWheel: event] };
+/// Hands `ns_event`, which reached a hosted AppKit view, into the surface's
+/// input path as the root's `scrollWheel:` does (not by sending it to the
+/// root, which can no-op when re-entered from a nested AppKit handler).
+pub(crate) fn forward_scroll(surface: &Rc<Surface>, ns_event: &NSEvent) {
+    surface.measure(true, || {
+        event(surface, ns_event);
+        crate::surface::quiet(|| surface.revisit());
+    });
 }
 
 /// A `scrollWheel:` event at `(x, y)`.
