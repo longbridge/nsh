@@ -163,11 +163,13 @@ define_class!(
         fn drop_performed(&self, interaction: &AnyObject, session: &AnyObject) {
             let Some((id, events)) = drop_listener(interaction) else { return };
             let offer = crate::file_drop::offer(session, events);
-            // A file drop's leave follows the drop, once its files are read.
-            self.ivars().file_drags.borrow_mut().retain(|&d| d != id);
             let Some(in_window) = crate::file_drop::location(interaction, session) else {
+                // The view is gone: no drop, but a drag that entered it left.
+                self.file_drag_left(id);
                 return;
             };
+            // A file drop's leave follows the drop, once its files are read.
+            self.ivars().file_drags.borrow_mut().retain(|&d| d != id);
             let shared = self.ivars().mounter.clone();
             let on_main = move |f: Box<dyn FnOnce(&mut crate::mount::Mounter) + Send>| {
                 DispatchQueue::main().exec_async(move || {
@@ -1066,9 +1068,6 @@ impl EventTarget {
         );
     }
 
-    /// Runs `f` on the mounter. UIKit can call back synchronously while the
-    /// mounter applies a batch (e.g. setting `contentOffset`); then the call
-    /// is deferred to the next main-queue turn instead of re-entering.
     /// A drag of files left listener `id`, if it was over it.
     fn file_drag_left(&self, id: NodeId) {
         let mut drags = self.ivars().file_drags.borrow_mut();
@@ -1079,6 +1078,9 @@ impl EventTarget {
         }
     }
 
+    /// Runs `f` on the mounter. UIKit can call back synchronously while the
+    /// mounter applies a batch (e.g. setting `contentOffset`); then the call
+    /// is deferred to the next main-queue turn instead of re-entering.
     fn with_mounter(&self, f: impl FnOnce(&mut crate::mount::Mounter) + Send + 'static) {
         let mtm = self.mtm();
         let shared = &self.ivars().mounter;
