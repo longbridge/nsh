@@ -562,6 +562,17 @@ pub struct Environment {
     /// [`crate::audio`]); without it, sounds and players fail at once
     /// (`unavailable`) unless the core has a [`crate::audio::AudioBackend`].
     pub audio: bool,
+    /// The platform reports the device's location ([`crate::Command::Location`],
+    /// [`crate::location`]); without it, `Location`'s calls fail at once with
+    /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` unless the core has a
+    /// [`crate::location::LocationBackend`].
+    pub location: bool,
+    /// The platform keeps reporting the location while the app is not in
+    /// front: iOS and Android with their own grants, the three desktops (an
+    /// app behind its windows is not suspended). `false` on the web, where a
+    /// hidden page is throttled and a closed one is gone, and with
+    /// [`Self::location`].
+    pub location_background: bool,
     /// The platform shows the system's tab bar on iOS and Android
     /// (`nsh/mobile`'s `TabBar`: it registers [`TAB_BAR_COMPONENT`]). On by
     /// default, as NSH's own iOS and Android backends do; a platform built
@@ -694,6 +705,9 @@ impl Default for Environment {
             auth_session: false,
             scheme_links: None,
             file_requests: false,
+            location: false,
+            location_background: false,
+
             notifications: false,
             audio: false,
             tab_bar: true,
@@ -1890,6 +1904,13 @@ pub enum FetchOp {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn environment_has_no_location_until_a_platform_says_so() {
+        let environment = super::Environment::default();
+        assert!(!environment.location);
+        assert!(!environment.location_background);
+    }
+
     #[test]
     fn app_info_reads_and_writes_app_infos_json() {
         use super::AppInfo;
