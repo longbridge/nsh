@@ -391,6 +391,7 @@ fn main() {
 - 用 `rustc-link-lib`，不要用 `rustc-link-arg`：链接参数只作用于本 crate 自己的目标。
 - 静态库的隐私清单条目写进应用的 `ios.privacyManifest`。
 - NSH 不嵌入动态 framework，优先使用 SDK 的静态版本。对只提供动态 framework 的 SDK，第三方工具 [nsh-frameworks](https://github.com/SuperNSH/frameworks) 可以根据 crate 的 `Cargo.toml` 里列出的 XCFramework 完成链接，并把动态 framework 复制到 `nsh package` 打出的包里并签名（`nsh-frameworks embed .nsh/out/<Name>.app`）。
+- 在 Linux 和 Windows 上，同样由 `build.rs` 链接 SDK（Linux 上是 `.a` 和 `.so`，Windows 上是 `.lib`）。共享库（`.so`、`.dll`）必须放在应用可执行文件旁边，NSH 同样不会这样做：nsh-frameworks 也会链接 crate 为 `linux` 和 `windows` 列出的库，把其中的共享库复制到包目录及其压缩包里（`nsh-frameworks embed .nsh/out/<Name>`），并把 Linux 可执行文件的 rpath 设为 `$ORIGIN`。
 
 ### TSX nshm
 
