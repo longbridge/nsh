@@ -677,11 +677,10 @@ Android 上 `android.launchScreen` 用同样的键。打包时给应用生成一
 
 | 功能 | iOS 和 macOS | Android |
 |---|---|---|
-| [`Speech`](../modules/nsh.md#speech)，应用授予 `speech` 或没有声明 capabilities 时 | `NSMicrophoneUsageDescription`、`NSSpeechRecognitionUsageDescription` | |
 | 采集媒体的网页（[`capabilities.webview.media`](./sandbox-and-capabilities.md#webview)） | `NSMicrophoneUsageDescription`、`NSCameraUsageDescription`；macOS 上还有 entitlements `com.apple.security.device.audio-input` 和 `com.apple.security.device.camera` | `RECORD_AUDIO`、`CAMERA` |
 | [`Notifications`](../modules/nsh.md#notifications)，应用授予 `notifications` 或没有声明 capabilities 时 | | `POST_NOTIFICATIONS` |
 
-每个 Android 包还声明了 `INTERNET` 和 `ACCESS_NETWORK_STATE`。权限说明文字是应用第一次请求时系统显示的内容，应用可以在 `infoPlist` 中改用自己的措辞
+应用安装的 [nshm](./nshm.md) 会加上它们的 feature 需要的条目：比如 `nsh-extra` 的 `speech` 会加上麦克风和语音识别的用途说明以及 `RECORD_AUDIO`。每个 Android 包还声明了 `INTERNET` 和 `ACCESS_NETWORK_STATE`。权限说明文字是应用第一次请求时系统显示的内容，应用可以在 `infoPlist` 中改用自己的措辞
 （见[上文](#infoplist-keys-and-entitlements)）。
 
 在 iOS 和 macOS 上，应用自己的 [Rust crate](./rust.md) 通过系统框架访问其他硬件，所需的权限说明文字写在 `infoPlist` 中，macOS

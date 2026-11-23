@@ -1134,7 +1134,6 @@ fn engine_config(options: &AppOptions, app: App) -> EngineConfig {
         clipboard: None,
         host: options.host.clone(),
         picker: None,
-        speech: None,
         audio: None,
         windows: options.windows.clone(),
         login_item: None,
