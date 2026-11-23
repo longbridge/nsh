@@ -1892,7 +1892,7 @@ impl Hosted for DialogItem {
         }
         if let (Some(footer), Some(card)) = (g.footer, g.cards.first()) {
             // The footer's band, its bottom corners the card's.
-            cx.push_clip_rounded(*card, [RADIUS; 4]);
+            cx.push_clip_rounded_shapes(*card, [RADIUS; 4]);
             // SAFETY: a COM call between BeginDraw and EndDraw.
             unsafe {
                 cx.dc.FillRectangle(

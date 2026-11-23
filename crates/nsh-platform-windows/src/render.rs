@@ -497,32 +497,49 @@ impl<'a> DrawCx<'a> {
 
     /// Draws what follows at `opacity`.
     pub(crate) fn push_opacity(&mut self, opacity: f32) {
-        self.push_layer(opacity, None, INFINITE);
+        self.push_layer(opacity, None, INFINITE, true);
     }
 
     /// Draws what follows at `opacity`, all of it inside `bounds` (current
     /// coordinates): Direct2D sizes the layer's surface to them, where an
     /// unbounded layer takes the whole clip (the window's, often).
     pub(crate) fn push_opacity_within(&mut self, opacity: f32, bounds: D2D_RECT_F) {
-        self.push_layer(opacity, None, bounds);
+        self.push_layer(opacity, None, bounds, true);
     }
 
     /// Clips what follows to `geometry` (in the current coordinates), its
     /// content inside `bounds` (the same coordinates): the layer's
     /// surface, and an opaque clip's background copy, covers them only.
     pub(crate) fn push_clip_geometry(&mut self, geometry: &ID2D1Geometry, bounds: D2D_RECT_F) {
-        self.push_layer(1.0, Some(geometry.clone()), bounds);
+        self.push_layer(1.0, Some(geometry.clone()), bounds, true);
+    }
+
+    /// Clips what follows to `geometry` as [`Self::push_clip_geometry`],
+    /// for clipped drawing that holds no text (fills, borders, images):
+    /// the background copy that keeps ClearType buys nothing then.
+    pub(crate) fn push_clip_shapes(&mut self, geometry: &ID2D1Geometry, bounds: D2D_RECT_F) {
+        self.push_layer(1.0, Some(geometry.clone()), bounds, false);
     }
 
     /// Pushes a layer of `opacity` masked by `mask`, its content inside
-    /// `bounds` (current coordinates).
-    fn push_layer(&mut self, opacity: f32, mask: Option<ID2D1Geometry>, bounds: D2D_RECT_F) {
+    /// `bounds` (current coordinates); `text` whether the content may
+    /// hold text worth keeping ClearType for.
+    fn push_layer(
+        &mut self,
+        opacity: f32,
+        mask: Option<ID2D1Geometry>,
+        bounds: D2D_RECT_F,
+        text: bool,
+    ) {
         // On an opaque target with no open alpha-preserving layers, an opaque
         // geometric clip layer (rounded corners, multi-rect partial frames) can
         // initialize from the background and ignore alpha so Direct2D keeps
         // ClearType subpixel antialiasing instead of falling back to grayscale.
-        let opaque_clip =
-            opacity >= 1.0 && mask.is_some() && self.opaque_target && self.translucent_layers == 0;
+        let opaque_clip = text
+            && opacity >= 1.0
+            && mask.is_some()
+            && self.opaque_target
+            && self.translucent_layers == 0;
         let options = if opaque_clip {
             D2D1_LAYER_OPTIONS1_INITIALIZE_FROM_BACKGROUND | D2D1_LAYER_OPTIONS1_IGNORE_ALPHA
         } else {
@@ -643,6 +660,17 @@ impl<'a> DrawCx<'a> {
     /// Clips what follows to the rounded rectangle `rect` with `radii`
     /// (clockwise from the top left).
     pub(crate) fn push_clip_rounded(&mut self, rect: Bounds<Points>, radii: [f32; 4]) {
+        self.clip_rounded(rect, radii, true);
+    }
+
+    /// [`Self::push_clip_rounded`] for content without text
+    /// ([`Self::push_clip_shapes`]).
+    pub(crate) fn push_clip_rounded_shapes(&mut self, rect: Bounds<Points>, radii: [f32; 4]) {
+        self.clip_rounded(rect, radii, false);
+    }
+
+    /// [`Self::push_clip_rounded`], `text` as in [`Self::push_clip_shapes`].
+    fn clip_rounded(&mut self, rect: Bounds<Points>, radii: [f32; 4], text: bool) {
         if radii.iter().all(|r| *r <= 0.0) {
             return self.push_clip_rect(
                 rect.origin.x.0,
@@ -658,7 +686,8 @@ impl<'a> DrawCx<'a> {
             rect.size.height.0,
         );
         match self.rounded_geometry(rect, radii) {
-            Some(g) => self.push_clip_geometry(&g, bounds),
+            Some(g) if text => self.push_clip_geometry(&g, bounds),
+            Some(g) => self.push_clip_shapes(&g, bounds),
             None => self.push_clip_rect(
                 rect.origin.x.0,
                 rect.origin.y.0,
@@ -2143,6 +2172,8 @@ mod tests {
 
     use super::*;
     use crate::geom::rect;
+
+    mod capture;
 
     thread_local! {
         /// How many views the passes on this thread drew ([`draw_content`]).
