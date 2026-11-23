@@ -579,15 +579,41 @@ impl AppConfig {
 
     /// Adds what the system shows when the app's web pages first ask for
     /// the microphone or the camera (`webview.media`), which it requires
-    /// (it ends an app that asks without them). The app's `infoPlist` may
+    /// (it ends an app that asks without them), and what an app reading the
+    /// device's location explains (`location`). The app's `infoPlist` may
     /// word them its own way. Native modules that use them (`nsh-extra`'s
     /// `speech`) declare theirs in their crate's metadata
     /// ([`crate::module_meta`]).
-    fn usage_descriptions(&self, info: &mut plist::Dictionary) {
+    fn usage_descriptions(&self, info: &mut plist::Dictionary, ios: bool) {
         for (kind, key, text) in WEB_MEDIA_USAGE_DESCRIPTIONS {
             if self.web_media(kind) && !info.contains_key(key) {
                 info.insert(key.into(), plist::Value::String(text.to_owned()));
             }
+        }
+        if self.location() {
+            for (key, text) in LOCATION_USAGE_DESCRIPTIONS {
+                if !info.contains_key(key) {
+                    info.insert(key.into(), plist::Value::String(text.to_owned()));
+                }
+            }
+        }
+        // Background location is iOS's alone: a macOS app behind its windows
+        // is not suspended, and has no background mode to declare.
+        if ios && self.location_background() {
+            for (key, text) in LOCATION_BACKGROUND_USAGE_DESCRIPTIONS {
+                if !info.contains_key(key) {
+                    info.insert(key.into(), plist::Value::String(text.to_owned()));
+                }
+            }
+            let mut modes = match info.get("UIBackgroundModes") {
+                Some(plist::Value::Array(modes)) => modes.clone(),
+                _ => Vec::new(),
+            };
+            let location = plist::Value::String("location".into());
+            if !modes.contains(&location) {
+                modes.push(location);
+            }
+            info.insert("UIBackgroundModes".into(), plist::Value::Array(modes));
         }
     }
 
@@ -604,6 +630,20 @@ impl AppConfig {
         }
     }
 }
+
+/// The usage description of an app that reads the device's location
+/// (`Location`, `"location": true`).
+pub(crate) const LOCATION_USAGE_DESCRIPTIONS: [(&str, &str); 1] = [(
+    "NSLocationWhenInUseUsageDescription",
+    "The app uses your location while you use it.",
+)];
+
+/// The usage descriptions of an app that reads it while it is not in front
+/// (`"location": { "background": true }`), iOS only.
+pub(crate) const LOCATION_BACKGROUND_USAGE_DESCRIPTIONS: [(&str, &str); 1] = [(
+    "NSLocationAlwaysAndWhenInUseUsageDescription",
+    "The app uses your location in the background to keep what it shows up to date.",
+)];
 
 /// The usage descriptions of an app whose web pages capture media
 /// (`webview.media`), by kind.
@@ -2450,7 +2490,7 @@ fn macos_info_plist(
     if config.macos.activation_policy == ActivationPolicy::Accessory {
         d.insert("LSUIElement".into(), true.into());
     }
-    config.usage_descriptions(&mut d);
+    config.usage_descriptions(&mut d, false);
     bundle_localizations(&mut d, config, &config.macos.info_plist_strings);
     // Finder shows a translated name of the app only with it.
     if config
@@ -2631,7 +2671,7 @@ fn info_plist(
         Value::Array(vec![1.into(), 2.into()]),
     );
     d.insert("LSRequiresIPhoneOS".into(), true.into());
-    config.usage_descriptions(&mut d);
+    config.usage_descriptions(&mut d, true);
     bundle_localizations(&mut d, config, &config.ios.info_plist_strings);
     // A launch screen entry opts into the full screen (no letterboxing);
     // the app's color and image are in its asset catalog
@@ -3764,6 +3804,45 @@ mod tests {
                 assert!(!info.contains_key("NSMicrophoneUsageDescription"));
             }
         }
+    }
+
+    #[test]
+    fn apps_that_may_read_the_location_explain_it() {
+        let plists = |capabilities: serde_json::Value| {
+            let config = AppConfig {
+                capabilities: Some(capabilities),
+                ..AppConfig::default()
+            };
+            (
+                macos_info_plist("A", "com.a", "a", &config, false).unwrap(),
+                info_plist("A", "com.a", "a", &config, "iphoneos").unwrap(),
+            )
+        };
+
+        // Declared: the when-in-use text on both platforms.
+        let (macos, ios) = plists(serde_json::json!({ "location": true }));
+        assert!(macos.contains_key("NSLocationWhenInUseUsageDescription"));
+        assert!(ios.contains_key("NSLocationWhenInUseUsageDescription"));
+
+        // When in use only: no always text, no background mode anywhere.
+        for info in [&macos, &ios] {
+            assert!(!info.contains_key("NSLocationAlwaysAndWhenInUseUsageDescription"));
+            assert!(!info.contains_key("UIBackgroundModes"));
+        }
+
+        // Background: the always text and the mode, on iOS only.
+        let (macos, ios) = plists(serde_json::json!({ "location": { "background": true } }));
+        assert!(ios.contains_key("NSLocationAlwaysAndWhenInUseUsageDescription"));
+        assert!(ios.contains_key("UIBackgroundModes"));
+        assert!(!macos.contains_key("UIBackgroundModes"));
+
+        // Not declared: nothing, also for an app with no capabilities block.
+        let (macos, ios) = plists(serde_json::json!({ "picker": true }));
+        for info in [&macos, &ios] {
+            assert!(!info.contains_key("NSLocationWhenInUseUsageDescription"));
+        }
+        let ios = info_plist("A", "com.a", "a", &AppConfig::default(), "iphoneos").unwrap();
+        assert!(!ios.contains_key("NSLocationWhenInUseUsageDescription"));
     }
 
     #[test]

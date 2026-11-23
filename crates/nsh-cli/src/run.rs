@@ -1555,7 +1555,10 @@ fn info_plist(target: Target) -> String {
     // (`with_crates_info`).
     let usage = crate::package::WEB_MEDIA_USAGE_DESCRIPTIONS
         .iter()
-        .map(|(_, key, text)| format!("<key>{key}</key><string>{text}</string>"))
+        .copied()
+        .map(|(_, key, text)| (key, text))
+        .chain(crate::package::LOCATION_USAGE_DESCRIPTIONS)
+        .map(|(key, text)| format!("<key>{key}</key><string>{text}</string>"))
         .collect::<Vec<_>>()
         .join("\n    ");
     format!(
