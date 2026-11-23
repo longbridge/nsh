@@ -1128,7 +1128,6 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::AuthSession,
     EventKind::CanvasImage,
     EventKind::FileRequest,
-    EventKind::Speech,
     EventKind::Notification,
     EventKind::UrlScheme,
     EventKind::SecondInstance,

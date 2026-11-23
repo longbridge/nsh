@@ -554,10 +554,6 @@ pub struct Environment {
     /// dialog and reject operations they do not support. Without it, all
     /// file requests answer at once with an error.
     pub file_requests: bool,
-    /// The platform recognizes speech ([`crate::Command::Speech`],
-    /// [`crate::speech`]); without it, a session ends at once
-    /// (`unavailable`) unless the core has a [`crate::speech::SpeechBackend`].
-    pub speech: bool,
     /// The platform shows notifications ([`crate::Command::Notification`],
     /// [`crate::notifications`]); without it, the permission is
     /// `unavailable` and nothing shows.
@@ -698,7 +694,6 @@ impl Default for Environment {
             auth_session: false,
             scheme_links: None,
             file_requests: false,
-            speech: false,
             notifications: false,
             audio: false,
             tab_bar: true,

@@ -918,9 +918,6 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                         });
                         canvas(&mut e, &drawing);
                     }
-                    // No speech recognizer (`Environment::speech`): the core
-                    // ends the sessions first.
-                    | Command::Speech(_)
                     // Trusted web view input is macOS's for now.
                     | Command::SendInput(_)
                     // No performance monitor on Android yet.

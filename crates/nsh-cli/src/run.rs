@@ -1534,13 +1534,12 @@ fn info_plist(target: Target) -> String {
              <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>"
         }
     };
-    // The host runs any app: it may recognize speech and its pages may
-    // capture media.
-    let usage = crate::package::USAGE_DESCRIPTIONS
+    // The host runs any app: its pages may capture media. What the app's
+    // crates use (`nsh-extra`'s `speech`) they declare
+    // (`with_crates_info`).
+    let usage = crate::package::WEB_MEDIA_USAGE_DESCRIPTIONS
         .iter()
-        .copied()
-        .chain([crate::package::WEB_MEDIA_USAGE_DESCRIPTIONS[1]].map(|(_, key, text)| (key, text)))
-        .map(|(key, text)| format!("<key>{key}</key><string>{text}</string>"))
+        .map(|(_, key, text)| format!("<key>{key}</key><string>{text}</string>"))
         .collect::<Vec<_>>()
         .join("\n    ");
     format!(
