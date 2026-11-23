@@ -1957,7 +1957,7 @@ fn down(
         }
         if gate.is_none()
             && !native
-            && let Some(activation) = activation
+            && let Some(activation) = input::gate_activation(&values, s.events, activation)
         {
             gate = Some(Gate::new(s.id, activation, candidates.len()));
         }
