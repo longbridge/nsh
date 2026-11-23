@@ -372,7 +372,7 @@ impl Hud {
         let target = self
             .surface
             .upgrade()
-            .and_then(|s| crate::window::hud_container(&s))
+            .and_then(|s| crate::window::visible_container(&s))
             .unwrap_or_else(|| self.host_container.clone());
         if crate::view::superview(&self.panel).as_deref() != Some(&*target) {
             target.addSubview(&self.panel);

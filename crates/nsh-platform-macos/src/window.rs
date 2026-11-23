@@ -453,15 +453,18 @@ pub(crate) struct AppWindow {
     focus_requested: Cell<bool>,
 }
 
-/// The container of the app window that should hold `surface`'s FPS HUD,
-/// preferring the key normal window, then the main normal window, then any
-/// normal window, then any visible app window (`None` when no app `<Window>`
-/// is open, e.g. an embedded `AppView` whose host container is visible).
-pub(crate) fn hud_container(surface: &Surface) -> Option<Retained<NSView>> {
+/// The container for surface-wide UI. Among visible windows, prefer the
+/// key normal window, then the main normal window, then another normal
+/// window. An embedded surface may have no app window of its own.
+pub(crate) fn visible_container(surface: &Surface) -> Option<Retained<NSView>> {
     let windows = surface.windows.borrow();
-    let normal = || windows.values().filter(|w| w.kind == WindowKind::Normal);
+    let normal = || {
+        windows
+            .values()
+            .filter(|w| w.kind == WindowKind::Normal && w.window.isVisible())
+    };
     normal()
-        .find(|w| w.window.isKeyWindow())
+        .find(|w| is_key(&w.window))
         .or_else(|| normal().find(|w| w.window.isMainWindow()))
         .or_else(|| normal().next())
         .or_else(|| windows.values().find(|w| w.window.isVisible()))
