@@ -367,7 +367,7 @@ function ClipPath() {
   return (
     <Card icon="styles" title="Clip path" subtitle="clipPath: inset() · transition">
       <Grid>
-        <Tile label={open() ? "Open" : "Closed"} code={open() ? "inset(0 round 16px)" : "inset(0 0 100% 100% round 16px)"} note={hint("Tap to open from the corner", "Click to open from the corner")} onPress={() => open.set(!open())}>
+        <Tile label={open() ? "Open" : "Closed"} code={open() ? "inset(0 round 16px)" : "inset(0 0 100% 100% round 16px)"} note={hint("Tap to open", "Click to open")} onPress={() => open.set(!open())}>
           <View style={{ width: 132, height: 84 }}>
             <View
               style={{
@@ -388,8 +388,8 @@ function ClipPath() {
               <View style={{ height: 6, width: 84, borderRadius: 3, backgroundColor: alpha(colors.accent, 0.35) }} />
               <View style={{ height: 6, width: 60, borderRadius: 3, backgroundColor: alpha(colors.accent, 0.2) }} />
             </View>
-            <View style={{ position: "absolute", right: 6, top: 6, width: 22, height: 22, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: colors.accent }}>
-              <Text style={{ fontSize: 14, fontWeight: "700", color: "#ffffff" }}>{open() ? "×" : "+"}</Text>
+            <View style={{ position: "absolute", right: 6, top: 6, width: 22, height: 22, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentFill }}>
+              <Text style={{ fontSize: 14, fontWeight: "700", color: colors.onAccent }}>{open() ? "×" : "+"}</Text>
             </View>
           </View>
         </Tile>
