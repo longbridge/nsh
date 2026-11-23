@@ -86,8 +86,9 @@ use crate::{
 };
 
 /// Points a mouse wheel line scrolls (`scrollingDeltaY` counts lines for
-/// mice, accelerated by the system), as `NSScrollView`'s line scroll.
-const WHEEL_LINE: f32 = 10.0;
+/// mice, accelerated by the system), as `NSScrollView`'s line scroll. A
+/// view's `wheelLineHeight` takes its place ([`crate::scroll::wheel`]).
+pub(crate) const WHEEL_LINE: f32 = 10.0;
 /// Movement in points before a window press becomes a native drag.
 const WINDOW_DRAG_SLOP: f64 = 3.0;
 /// The mouse's middle button (`buttonNumber`).
@@ -1957,7 +1958,7 @@ fn down(
         }
         if gate.is_none()
             && !native
-            && let Some(activation) = activation
+            && let Some(activation) = input::gate_activation(&values, s.events, activation)
         {
             gate = Some(Gate::new(s.id, activation, candidates.len()));
         }
@@ -2659,6 +2660,7 @@ pub(crate) fn modifiers(flags: NSEventModifierFlags) -> nsh_core::keymap::Modifi
         alt: flags.contains(NSEventModifierFlags::Option),
         shift: flags.contains(NSEventModifierFlags::Shift),
         cmd: flags.contains(NSEventModifierFlags::Command),
+        alt_graph: false,
     }
 }
 
@@ -3591,6 +3593,29 @@ fn embedded(root: &objc2_app_kit::NSView) -> bool {
     crate::view::superview(root).is_some_and(|app| window.contentView().as_ref() != Some(&app))
 }
 
+/// Whether a scroll of `surface` is under way at `event`: a trackpad
+/// gesture, its glide, or wheel steps latched to a view.
+pub(crate) fn scrolling(surface: &Surface, event: &NSEvent) -> bool {
+    let input = &surface.input;
+    let time = event.timestamp() * 1000.0;
+    let horizontal = event.scrollingDeltaX().abs() > event.scrollingDeltaY().abs();
+    input.wheel.borrow().is_some()
+        || (input.momentum.borrow().is_some() && time - input.momentum_last.get() < TOUCHPAD_IDLE)
+        || input.latch.borrow().as_ref().is_some_and(|(view, h, last)| {
+            latch_holds(*h, *last, horizontal, time) && view.ns().window().is_some()
+        })
+}
+
+/// Hands `ns_event`, which reached a hosted AppKit view, into the surface's
+/// input path as the root's `scrollWheel:` does (not by sending it to the
+/// root, which can no-op when re-entered from a nested AppKit handler).
+pub(crate) fn forward_scroll(surface: &Rc<Surface>, ns_event: &NSEvent) {
+    surface.measure(true, || {
+        event(surface, ns_event);
+        crate::surface::quiet(|| surface.revisit());
+    });
+}
+
 /// A `scrollWheel:` event at `(x, y)`.
 fn scroll_event(surface: &Rc<Surface>, event: &NSEvent, x: f32, y: f32, time: f64) {
     let precise = event.hasPreciseScrollingDeltas();
@@ -3629,15 +3654,15 @@ fn scroll_event(surface: &Rc<Surface>, event: &NSEvent, x: f32, y: f32, time: f6
             dx *= WHEEL_LINE;
             dy *= WHEEL_LINE;
         }
-        wheel_step(surface, x, y, dx, dy, time);
+        wheel_step(surface, x, y, dx, dy, !precise, time);
         return;
     }
     gesture_event(surface, phase, x, y, dx, dy, time);
 }
 
-/// A mouse wheel step (or a precise scroll outside a gesture) of `(dx,
-/// dy)` points: one scroll stays on its view while steps keep coming.
-fn wheel_step(surface: &Rc<Surface>, x: f32, y: f32, dx: f32, dy: f32, time: f64) {
+/// A mouse wheel step (`notched`) or a precise scroll outside a gesture of
+/// `(dx, dy)` points: one scroll stays on its view while steps keep coming.
+fn wheel_step(surface: &Rc<Surface>, x: f32, y: f32, dx: f32, dy: f32, notched: bool, time: f64) {
     if dx == 0.0 && dy == 0.0 {
         return;
     }
@@ -3661,7 +3686,7 @@ fn wheel_step(surface: &Rc<Surface>, x: f32, y: f32, dx: f32, dy: f32, time: f64
     *input.latch.borrow_mut() = Some((view.clone(), horizontal, time));
     // Without a begin, the scroll module takes it as a mouse wheel: it
     // settles (and snaps) by itself once the steps stop.
-    crate::scroll::wheel(surface, &view, dx, dy, time);
+    crate::scroll::wheel(surface, &view, dx, dy, notched, time);
 }
 
 fn new_wheel(view: Option<NshView>, time: f64) -> Wheel {
@@ -3723,7 +3748,7 @@ fn gesture_event(
     if phase.intersects(NSEventPhase::Began | NSEventPhase::Changed) {
         if input.wheel.borrow().is_none() {
             // Changes without a begin (synthesized events): steps.
-            wheel_step(surface, x, y, dx, dy, time);
+            wheel_step(surface, x, y, dx, dy, false, time);
             return;
         }
         if dx == 0.0 && dy == 0.0 {
@@ -3770,7 +3795,7 @@ fn gesture_event(
             w.view.clone()
         };
         if let Some(view) = view {
-            crate::scroll::wheel(surface, &view, dx, dy, time);
+            crate::scroll::wheel(surface, &view, dx, dy, false, time);
         }
     }
     if phase.intersects(NSEventPhase::Ended | NSEventPhase::Cancelled) {

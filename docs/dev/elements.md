@@ -404,7 +404,10 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `PanActivation::decide`: a fail offset passed first fails, an active offset passed activates; no active offsets: 10
   points in any direction). `PanActivation::decide_move` judges each move along the line from the previous one, so the
   offset passed first decides even when one move (several points apart) passes both; `nsh_core::input::Gate::step` and
-  the iOS gate use it. iOS: a `PanGate` recognizer on the view (`touch.rs`); the pans of the scroll views around
+  the iOS gate use it. A gate needs something to follow its activation, the view's native pan or its responder
+  (`nsh_core::input::gate_activation`): a view whose pan is off (`pan_enabled(false)`, no `pan` values or pan
+  listeners) and that has no responder decides nothing, so its content and the views around it keep the drags, as a
+  stack's swipe back inside a drawer does. iOS: a `PanGate` recognizer on the view (`touch.rs`); the pans of the scroll views around
   it must wait for it to fail (`shouldBeRequiredToFailByGestureRecognizer:`), so a vertical drag scrolls once it passes
   `failOffsetY` and a horizontal one never scrolls. The scroll views inside it that cannot scroll along its one axis
   (`PanActivation::axis`; content and `alwaysBounce…`) wait too: UIScrollView's pan begins after its slop along the
@@ -487,7 +490,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   send one, as its props change. The state words iOS and Android supply (checked, expanded, current, invalid...)
   are in the language of the app's text, as NSH's menus on the desktops are (`i18n::text_locale`): the core sends
   `Command::TextLocale` on the root of those surfaces when it changes, and the words of mounted views follow it the
-  next time a screen reader reads them.
+  next time a screen reader reads them. Android's date and time dialogs (`DateTimePicker`) show their own words (buttons,
+  month and day names) in that language too, from the next dialog opened.
   The `increment` / `decrement` actions make an element adjustable whatever its
   role: iOS adds the adjustable trait to the traits of its role (`native_view.rs` `traits`), so VoiceOver's swipe up /
   down performs them (an `image`, `Plot`'s role, stays an image), Android offers scroll forward / backward, Windows
@@ -656,7 +660,10 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
 - **Paste**: `onPaste` reports what the user pasted (`EventPayload::Paste`, `PasteEvent`): `text`, `html` (the clipboard's `text/html`, read on Linux, UTF-8 or UTF-16 as Firefox
   writes it, and on the web; `RichEditor` parses it into its schema), `files` (data on
   the clipboard, images: `PastedFile`s whose bytes become JS `File`s in `nsh-js` `payload_object`, never a JS string
-  or base64) and `uris` (local files' `file:` URLs, as `onFileDrop`'s). The platform reads the clipboard in the
+  or base64) and `uris` (local files' `file:` URLs, as `onFileDrop`'s). A file larger than `pasteMaxSize`
+  (`InputConfig::paste_max_size`) goes to `too_large` (JS `tooLarge`: name, type, size) without its bytes: the
+  engine moves any the platform read into it, and platforms that know a file's size first (iOS, Android, web) never
+  copy its bytes. The platform reads the clipboard in the
   paste's own handler, on the user's paste only, and only when the app listens. Whether the input inserts the text is
   answered at once from `pasteBehavior` (`InputConfig::paste_behavior`: `"insert"`, the default, or `"report"`);
   images and files are never inserted. Inserted text is clipped to what `maxLength` leaves room for, as a browser's

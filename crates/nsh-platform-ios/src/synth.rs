@@ -10,10 +10,13 @@
 //! private: they are looked up at run time (development hosts only), as
 //! UI test tools for iOS do.
 
-use std::{ffi::c_void, sync::OnceLock};
+use std::{cell::Cell, ffi::c_void, sync::OnceLock};
 
 use objc2::{
-    MainThreadMarker, MainThreadOnly, Message, msg_send, rc::Retained, runtime::AnyObject,
+    MainThreadMarker, MainThreadOnly, Message, msg_send,
+    rc::Retained,
+    runtime::{AnyObject, Sel},
+    sel,
 };
 use objc2_quartz_core::CAMediaTiming;
 use objc2_ui_kit::{UIApplication, UIWindow};
@@ -83,6 +86,15 @@ const HAND: u32 = 3;
 const RANGE: u32 = 1 << 0;
 const TOUCH: u32 = 1 << 1;
 const POSITION: u32 = 1 << 2;
+/// `IOHIDDigitizerEventMask`'s `FromEdgeTip`: the touch screen's mark on
+/// a finger that came in over the screen's edge. UIKit reads it into the
+/// touch, and screen edge pans (the navigation stack's back swipe among
+/// them) begin only for touches that carry it.
+const FROM_EDGE_TIP: u32 = 1 << 11;
+/// How near the screen's edge (points) a finger lands to come in over it:
+/// its contact reaches the edge, as a real finger's starting a swipe
+/// from the edge does.
+const EDGE: f64 = 10.0;
 /// `kIOHIDEventFieldDigitizerIsDisplayIntegrated`: a touch screen's.
 const DISPLAY_INTEGRATED: u32 = (11 << 16) | 25;
 /// `kIOHIDEventFieldDigitizerMajorRadius`, `…MinorRadius`.
@@ -177,11 +189,39 @@ pub(crate) enum Phase {
     Up,
 }
 
+thread_local! {
+    /// The edge mark of the finger down now: set where it lands, kept on
+    /// all its events as the touch screen keeps it, cleared as it lifts.
+    static FROM_EDGE: Cell<u32> = const { Cell::new(0) };
+}
+
+/// Whether `(x, y)` (the window's points, which the events give as the
+/// screen's) lies at the edge of `window`'s screen.
+fn at_edge(window: &UIWindow, x: f64, y: f64) -> bool {
+    let screen = window.screen().bounds();
+    let (left, top) = (screen.origin.x, screen.origin.y);
+    let (right, bottom) = (left + screen.size.width, top + screen.size.height);
+    x - left <= EDGE || right - x <= EDGE || y - top <= EDGE || bottom - y <= EDGE
+}
+
 /// One finger touching at `(x, y)` (the window's points), in `phase`.
 pub(crate) fn touch(window: &UIWindow, x: f64, y: f64, phase: Phase) -> bool {
     let Some(hid) = hid() else { return false };
     let mtm = window.mtm();
     let touching = u8::from(phase != Phase::Up);
+    if phase == Phase::Down {
+        let edge = if at_edge(window, x, y) {
+            FROM_EDGE_TIP
+        } else {
+            0
+        };
+        FROM_EDGE.set(edge);
+    }
+    let edge = if phase == Phase::Up {
+        FROM_EDGE.replace(0)
+    } else {
+        FROM_EDGE.get()
+    };
     let mask = match phase {
         Phase::Move => POSITION,
         Phase::Down | Phase::Up => RANGE | TOUCH,
@@ -216,7 +256,7 @@ pub(crate) fn touch(window: &UIWindow, x: f64, y: f64, phase: Phase) -> bool {
             time,
             1,
             2,
-            mask,
+            mask | edge,
             x,
             y,
             0.0,
@@ -301,33 +341,53 @@ fn keyboard() -> Option<Retained<AnyObject>> {
     unsafe { msg_send![class, activeInstance] }
 }
 
+/// The first responder, when it implements `action` (`insertText:`,
+/// `deleteBackward`, `selectAll:`), to `what` in. What has the focus need
+/// not be a text input (the root of a sheet over the field has it), and
+/// sending it a message it does not implement raises an exception that
+/// ends the host: the step fails instead.
+fn text_responder(
+    window: &UIWindow,
+    action: Sel,
+    what: &str,
+) -> Result<Retained<AnyObject>, String> {
+    let responder = first_responder(window).ok_or_else(|| format!("no focused input to {what}"))?;
+    // SAFETY: NSObject's method, which every responder has.
+    let takes: bool = unsafe { msg_send![&*responder, respondsToSelector: action] };
+    if !takes {
+        return Err(format!(
+            "the focused view (`{}`) is not a text input to {what}",
+            responder.class().name().to_string_lossy()
+        ));
+    }
+    Ok(responder)
+}
+
 /// Types `text` into the first responder as the software keyboard does.
-pub(crate) fn insert_text(window: &UIWindow, text: &str) {
+pub(crate) fn insert_text(window: &UIWindow, text: &str) -> Result<(), String> {
     let s = objc2_foundation::NSString::from_str(text);
     if let Some(keyboard) = keyboard() {
         // SAFETY: UIKeyboardImpl's method for a typed string.
         let _: () = unsafe { msg_send![&*keyboard, addInputString: &*s] };
-        return;
+        return Ok(());
     }
-    let Some(responder) = first_responder(window) else {
-        return log::warn!("test: no focused input to type into");
-    };
-    // SAFETY: UIKeyInput's method, which text inputs implement.
+    let responder = text_responder(window, sel!(insertText:), "type into")?;
+    // SAFETY: UIKeyInput's method, checked above.
     let _: () = unsafe { msg_send![&*responder, insertText: &*s] };
+    Ok(())
 }
 
 /// Deletes as the keyboard's delete key does.
-pub(crate) fn delete_backward(window: &UIWindow) {
+pub(crate) fn delete_backward(window: &UIWindow) -> Result<(), String> {
     if let Some(keyboard) = keyboard() {
         // SAFETY: UIKeyboardImpl's method for the delete key.
         let _: () = unsafe { msg_send![&*keyboard, deleteFromInput] };
-        return;
+        return Ok(());
     }
-    let Some(responder) = first_responder(window) else {
-        return log::warn!("test: no focused input");
-    };
-    // SAFETY: UIKeyInput's method.
+    let responder = text_responder(window, sel!(deleteBackward), "delete from")?;
+    // SAFETY: UIKeyInput's method, checked above.
     let _: () = unsafe { msg_send![&*responder, deleteBackward] };
+    Ok(())
 }
 
 /// Focuses the text input at `(x, y)` (window points), if a tap there
@@ -351,12 +411,11 @@ pub(crate) fn focus_input_at(window: &UIWindow, x: f64, y: f64) {
 }
 
 /// Selects all the focused input's text (the edit menu's Select All).
-pub(crate) fn select_all(window: &UIWindow) {
-    let Some(responder) = first_responder(window) else {
-        return log::warn!("test: no focused input");
-    };
-    // SAFETY: UIResponderStandardEditActions' method, with no sender.
+pub(crate) fn select_all(window: &UIWindow) -> Result<(), String> {
+    let responder = text_responder(window, sel!(selectAll:), "select the text of")?;
+    // SAFETY: UIResponderStandardEditActions' method, checked above, with no sender.
     let _: () = unsafe { msg_send![&*responder, selectAll: std::ptr::null::<AnyObject>()] };
+    Ok(())
 }
 
 /// Whether something moves in `window`: a finite Core Animation animation

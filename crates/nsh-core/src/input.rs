@@ -169,6 +169,25 @@ impl Candidate {
     }
 }
 
+/// The `panActivation` the gate of a view with gesture `values`, `events`
+/// and `activation` decides with: its activation while something follows
+/// it, the view's own native pan (`pan` values, `onPanStart` /
+/// `onPanEnd`) or its responder (`onTouch`: the responder system, Rust
+/// claims); none otherwise. A view whose pan is off (`pan_enabled(false)`)
+/// then leaves the drags to its content and to the views around it, as
+/// with no activation (a stack's swipe back inside a drawer). For the
+/// backends.
+#[doc(hidden)]
+pub fn gate_activation(
+    values: &GestureValues,
+    events: EventMask,
+    activation: Option<PanActivation>,
+) -> Option<PanActivation> {
+    activation.filter(|_| {
+        events.contains(EventKind::Touch) || Candidate::pan(values, events, None).is_some()
+    })
+}
+
 /// A view's `panActivation` deciding on a pointer's drag.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Gate {
@@ -474,7 +493,8 @@ impl<V: Clone> Grab<V> {
             && pans
             && options.first
             && !options.native
-            && let Some(activation) = link.pan_activation
+            && let Some(activation) =
+                gate_activation(&link.values, link.events, link.pan_activation)
         {
             self.gate = Some(Gate::new(link.id, activation, self.candidates.len()));
         }
@@ -1451,6 +1471,60 @@ mod tests {
     }
 
     #[test]
+    fn only_a_pan_or_a_responder_has_a_gate() {
+        let activation = Some(PanActivation::default().direction(crate::PanDirection::Right));
+        let mask = |kinds: &[EventKind]| {
+            let mut m = EventMask::default();
+            for k in kinds {
+                m.set(*k, true);
+            }
+            m
+        };
+        let none = GestureValues::default();
+        let values = GestureValues {
+            pan_x: Some(3),
+            ..GestureValues::default()
+        };
+        let gated = |values: &GestureValues, kinds: &[EventKind]| {
+            gate_activation(values, mask(kinds), activation) == activation
+        };
+        // Its pan off (`pan_enabled(false)` mounts no values or pan
+        // listeners) and no responder: no gate, the content keeps the drags.
+        assert_eq!(
+            gate_activation(&none, mask(&[EventKind::Press]), activation),
+            None
+        );
+        assert!(gated(&none, &[EventKind::PanStart]));
+        assert!(gated(&none, &[EventKind::PanEnd]));
+        assert!(gated(&values, &[]));
+        assert!(gated(&none, &[EventKind::Touch]));
+        assert_eq!(
+            gate_activation(&values, mask(&[EventKind::Touch]), None),
+            None
+        );
+        // The backends that grab: the pan's view, off, around a stack.
+        let grab = |events: EventMask, values: GestureValues| {
+            let mut grab: Grab<&str> = Grab::default();
+            let options = GrabOptions::new(true, false, false, true);
+            grab.add(
+                &"drawer",
+                &Link::new(2, events, 0, values, None, activation),
+                options,
+            );
+            grab.gate
+        };
+        assert!(grab(EventMask::default(), none).is_none());
+        assert_eq!(
+            grab(mask(&[EventKind::PanStart]), none).map(|g| g.outer()),
+            Some(1)
+        );
+        assert_eq!(
+            grab(mask(&[EventKind::Touch]), none).map(|g| g.outer()),
+            Some(0)
+        );
+    }
+
+    #[test]
     fn grabs_collect_along_the_chain() {
         let mut grab = Grab::default();
         let mut values = GestureValues::default();
@@ -1464,16 +1538,9 @@ mod tests {
         );
         values.pinch = Some(1);
         let activation = PanActivation::horizontal(Points(6.0), Points(8.0));
-        let link = Link::new(
-            6,
-            EventMask::default(),
-            0,
-            values,
-            Some(false),
-            Some(activation),
-        );
+        let link = Link::new(6, events, 0, values, Some(false), Some(activation));
         grab.add(&"scroll", &link, options);
-        assert_eq!(grab.path, vec![4]);
+        assert_eq!(grab.path, vec![4, 6]);
         assert_eq!(grab.pressed, vec!["inner"]);
         assert_eq!(
             grab.candidates,

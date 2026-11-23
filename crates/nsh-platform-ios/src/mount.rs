@@ -2285,9 +2285,6 @@ impl Mounter {
                     &self.control,
                 );
             }
-            (Command::Speech(command), _) if id == nsh_core::ROOT_ID => {
-                crate::speech::command(&self.control, &command);
-            }
             (Command::Audio(command), _) if id == nsh_core::ROOT_ID => {
                 use nsh_core::image::loader::AssetBase as Base;
                 let base = self.images.asset_base().map(|base| match base {
@@ -2855,15 +2852,15 @@ impl Mounter {
             self.touch_listeners = self.touch_listeners.saturating_sub(1);
         }
         let on = self.touch_listeners > 0;
-        if on && self.touch_trackers.is_empty() {
+        // Ensure the root view and every modal still carry a tracker while
+        // touches are listened to. Gating this on `touch_trackers.is_empty()`
+        // left a modal opened after the first tracker set (the root's tracker
+        // outlives every modal) without one, so a modal reopened later never
+        // delivered its JS touch gestures. `add_touch_tracker` dedupes by
+        // node, so re-ensuring here each time is idempotent.
+        if on {
             self.add_touch_tracker(nsh_core::ROOT_ID);
-            let modals: Vec<NodeId> = self
-                .views
-                .iter()
-                .flatten()
-                .filter(|s| matches!(s.native, Native::Modal(_)))
-                .map(|s| s.native.view().tag() as NodeId)
-                .collect();
+            let modals: Vec<NodeId> = self.modal_attached.iter().map(|&(id, _)| id).collect();
             for modal in modals {
                 self.add_touch_tracker(modal);
             }
@@ -3845,6 +3842,8 @@ impl Mounter {
                 r
             });
         }
+        let gated = nsh_core::input::gate_activation(&v, events, activation);
+        sync_gate(&mut g.gate, view, gated, mtm);
         if let Some(press) = &g.press {
             press.set_long_press(events.contains(EventKind::LongPress) || links_long_press);
             press.set_own(own_press, handles_press, nsh_core::input::has_tap(events));
@@ -4556,6 +4555,10 @@ impl Mounter {
     fn wait_for(&mut self, id: NodeId, awaited: &objc2_ui_kit::UIViewController) {
         if !self.waiting_modals.contains(&id) {
             self.waiting_modals.push(id);
+        }
+        // Presented once that modal is gone: its dismissal's end does so.
+        if crate::navigation::held_under_system_ui(awaited) {
+            return;
         }
         let Some(coordinator) = awaited.transitionCoordinator() else {
             return Self::present_waiting(&self.shared);
@@ -5366,15 +5369,8 @@ impl Mounter {
                 s.gestures.pan = Some(pan);
             }
         }
-        toggle(
-            &mut s.gestures.gate,
-            activation.is_some(),
-            s.native.view(),
-            || crate::touch::PanGate::new(mtm, activation.unwrap_or_default()),
-        );
-        if let (Some(gate), Some(a)) = (&s.gestures.gate, activation) {
-            gate.set_activation(a);
-        }
+        let gated = nsh_core::input::gate_activation(&s.values, s.events, activation);
+        sync_gate(&mut s.gestures.gate, s.native.view(), gated, mtm);
         if let Some(press) = &s.gestures.press {
             press.set_long_press_delay(props.long_press_delay);
         }
@@ -6410,6 +6406,26 @@ fn new_pan(
     r
 }
 
+/// Adds or removes the gate of a view's `panActivation` (`PanGate`), which
+/// decides with `activation` (`nsh_core::input::gate_activation`): none
+/// while neither the view's native pan nor its responder follows the
+/// activation, so that a view whose pan is off leaves the drags to its
+/// content, among them a stack's swipe back from the middle of its page,
+/// which the gate would otherwise prevent.
+fn sync_gate(
+    gate: &mut Option<Retained<crate::touch::PanGate>>,
+    view: &UIView,
+    activation: Option<nsh_core::PanActivation>,
+    mtm: MainThreadMarker,
+) {
+    toggle(gate, activation.is_some(), view, || {
+        crate::touch::PanGate::new(mtm, activation.unwrap_or_default())
+    });
+    if let (Some(gate), Some(a)) = (gate.as_ref(), activation) {
+        gate.set_activation(a);
+    }
+}
+
 fn toggle<G: AsRef<UIGestureRecognizer>>(
     slot: &mut Option<Retained<G>>,
     wanted: bool,
@@ -6439,6 +6455,7 @@ fn key_modifiers(flags: isize) -> nsh_core::keymap::Modifiers {
         alt: has(19),
         shift: has(17),
         cmd: has(20),
+        alt_graph: false,
     }
 }
 

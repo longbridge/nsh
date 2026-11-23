@@ -9,6 +9,7 @@
 use std::{
     cell::RefCell,
     rc::Weak,
+    sync::Mutex,
     time::{Duration, Instant},
 };
 
@@ -45,11 +46,12 @@ const FRAME: Duration = Duration::from_millis(16);
 /// swipe's 2500 pt/s, so a gesture takes few frames, each a trip to the
 /// main thread.
 const MOVE_STEP: f64 = 40.0;
-/// How long a finger rests before it lifts at the end of a scroll, so the
-/// scroll view keeps no velocity (no fling after it).
+/// How long a finger rests before it lifts at the end of a scroll or of a
+/// held drag, so the scroll view or gesture keeps no velocity (no fling
+/// after it).
 const REST: Duration = Duration::from_millis(120);
 /// How far a resting finger trembles along its way, in points: the
-/// scroll view moves with it, and so measures it at rest.
+/// scroll view or gesture moves with it, and so measures it at rest.
 const TREMBLE: f64 = 0.25;
 
 thread_local! {
@@ -65,11 +67,17 @@ pub(crate) fn register(key: u64, view: Weak<Inner>) {
 /// The view the agent acts on, by key (its calls must be `Send`).
 pub(crate) struct IosNative {
     key: u64,
+    /// The way the finger `dragAndHold` left down last moved (a unit
+    /// vector), which it trembles along while it rests there.
+    held: Mutex<Option<(f64, f64)>>,
 }
 
 impl IosNative {
     pub(crate) fn new(key: u64) -> Self {
-        IosNative { key }
+        IosNative {
+            key,
+            held: Mutex::new(None),
+        }
     }
 
     /// `f` with the view and its window on the main queue, waited for;
@@ -122,9 +130,36 @@ impl IosNative {
                 return Err(error);
             }
         }
-        if !held {
-            let (x, y) = xy(to);
+        let (x, y) = xy(to);
+        if held {
+            let (dx, dy) = (x - f64::from(from.x.0), y - f64::from(from.y.0));
+            let length = dx.hypot(dy).max(1.0);
+            *self.held.lock().unwrap() = Some((dx / length, dy / length));
+        } else {
             self.try_finger(x, y, Phase::Up)?;
+        }
+        Ok(())
+    }
+
+    /// A finger resting at `at` for `rest`, along the way `way` (a unit
+    /// vector) it came. A resting finger reports where it is every frame,
+    /// trembling a fraction of a point back and forth along its way, as a
+    /// real one does. Gesture recognizers and scroll views take a finger's
+    /// speed from the moves that move it, and reports at the same spot
+    /// change nothing: without them a finger lifts with the speed it had
+    /// before it stopped (a scroll flings past its end, a back swipe
+    /// held short of halfway completes). Each tremble moves it, at almost
+    /// no speed, so it lifts at rest.
+    fn rest(&self, at: (f64, f64), way: (f64, f64), rest: Duration) -> Result<(), String> {
+        let (tx, ty) = (way.0 * TREMBLE, way.1 * TREMBLE);
+        // It rests at `at` last.
+        let resting = Instant::now();
+        let mut back = true;
+        while resting.elapsed() < rest || !back {
+            std::thread::sleep(FRAME);
+            let (x, y) = if back { (at.0 - tx, at.1 - ty) } else { at };
+            self.try_finger(x, y, Phase::Move)?;
+            back = !back;
         }
         Ok(())
     }
@@ -142,24 +177,10 @@ impl IosNative {
             let t = 1.0 - (1.0 - f64::from(i) / f64::from(n)).powi(3);
             self.finger(from.0 + dx * t, from.1 + dy * t, Phase::Move);
         }
-        // A resting finger reports where it is every frame, trembling a
-        // fraction of a point back and forth along its way, as a real one
-        // does. A scroll view takes its speed from the moves that change
-        // its offset, and reports at the same spot change nothing: it
-        // would keep the swipe's speed and fling past the end of the
-        // scroll on lifting. Each tremble moves it, at almost no speed, so
-        // it lifts at rest.
+        // It lifts at rest, with no speed left: no fling past the end of
+        // the scroll.
         let length = dx.hypot(dy).max(1.0);
-        let (tx, ty) = (dx / length * TREMBLE, dy / length * TREMBLE);
-        // It rests at `to` last.
-        let resting = std::time::Instant::now();
-        let mut back = true;
-        while resting.elapsed() < rest || !back {
-            std::thread::sleep(FRAME);
-            let (x, y) = if back { (to.0 - tx, to.1 - ty) } else { to };
-            self.finger(x, y, Phase::Move);
-            back = !back;
-        }
+        let _ = self.rest(to, (dx / length, dy / length), rest);
         self.finger(to.0, to.1, Phase::Up);
     }
 
@@ -600,7 +621,16 @@ impl Native for IosNative {
     }
 
     fn drop_at(&self, at: Point<Points>) -> Result<(), String> {
-        self.try_finger(f64::from(at.x.0), f64::from(at.y.0), Phase::Up)
+        let at = (f64::from(at.x.0), f64::from(at.y.0));
+        // The finger rested since the drag left it down: it lifts at rest,
+        // as a real one held still does, not with the drag's speed.
+        if let Some(way) = self.held.lock().unwrap().take()
+            && let Err(error) = self.rest(at, way, REST)
+        {
+            let _ = self.try_finger(at.0, at.1, Phase::Up);
+            return Err(error);
+        }
+        self.try_finger(at.0, at.1, Phase::Up)
     }
 
     fn focused(&self) -> Option<NodeId> {
@@ -615,6 +645,12 @@ impl Native for IosNative {
     }
 
     fn type_text(&self, text: &str) {
+        if let Err(error) = self.try_type_text(text) {
+            log::warn!("test: {error}");
+        }
+    }
+
+    fn try_type_text(&self, text: &str) -> Result<(), String> {
         // As the software keyboard types, a character at a time, at a
         // quick typist's pace: a controlled input's value comes back from
         // the app between keys, as it does on a device. Each key waits
@@ -627,7 +663,8 @@ impl Native for IosNative {
                 .on_main(|_, window| synth::focused_text(window))
                 .flatten();
             let s = ch.to_string();
-            self.on_main(move |_, window| synth::insert_text(window, &s));
+            self.on_main(move |_, window| synth::insert_text(window, &s))
+                .unwrap_or_else(|| Err("the window is gone".into()))?;
             // Without a focused text there is nothing to watch: waiting
             // would only add `KEY_LANDS` to every key.
             let deadline = Instant::now() + KEY_LANDS;
@@ -643,15 +680,23 @@ impl Native for IosNative {
             }
             std::thread::sleep(KEY);
         }
+        Ok(())
     }
 
     fn key(&self, key: Key) {
+        if let Err(error) = self.try_key(key) {
+            log::warn!("test: {error}");
+        }
+    }
+
+    fn try_key(&self, key: Key) -> Result<(), String> {
         self.on_main(move |_, window| match key {
             // The keyboard's return key types a line break.
             Key::Return => synth::insert_text(window, "\n"),
             Key::Backspace => synth::delete_backward(window),
             Key::SelectAll => synth::select_all(window),
-        });
+        })
+        .unwrap_or_else(|| Err("the window is gone".into()))
     }
 
     fn press_keys(&self, keys: &str) -> Result<(), String> {

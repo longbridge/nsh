@@ -2,7 +2,7 @@
 //! `nsh/mobile`'s `AppSettings`,
 //! `nsh/accessibility`'s commands, `nsh/device`'s `openUrl`, `nsh`'s
 //! `Image` and `WebView` functions, all of `nsh/clipboard`, `nsh/picker`, `nsh`'s `Share`,
-//! `Speech`, `UrlScheme`, `setFpsEnabled` and `nsh/storage`,
+//! `UrlScheme`, `setFpsEnabled` and `nsh/storage`,
 //! `nsh/desktop`'s `Application`, the surface-independent `os` metadata,
 //! `net`'s sockets, `websocket`'s connections, `fs/promises`' files and
 //! `nsh/host`'s calls. Their JS face is made
@@ -33,7 +33,6 @@ mod os;
 mod picker;
 mod process;
 mod share;
-mod speech;
 mod storage;
 mod updater;
 mod url_scheme;
@@ -69,7 +68,6 @@ pub fn registries() -> &'static [Registry] {
             .module::<clipboard::Clipboard>()
             .module::<picker::Picker>()
             .module::<share::Share>()
-            .module::<speech::Speech>()
             .class::<audio::Sound>()
             .class::<audio::AudioPlayer>()
             .module::<notifications::Notifications>()

@@ -100,7 +100,8 @@ const CARET_STYLE = [
 /** `accessibilityRole`s whose ARIA role has another name; others are the same. */
 const ARIA_ROLES = {
   none: null, header: "heading", image: "img", imagebutton: "button", keyboardkey: "button", adjustable: "slider",
-  search: "searchbox", text: null, summary: "status", togglebutton: "button", dropdownlist: "combobox",
+  search: "searchbox", textbox: "textbox", text: null, summary: "status", togglebutton: "button",
+  dropdownlist: "combobox",
 };
 
 /** Reconcile accessibility props with the element's current attributes. */
@@ -5972,10 +5973,13 @@ class Player {
     const text = data?.getData("text/plain") ?? "";
     const html = data?.getData("text/html") ?? "";
     const files = [...(data?.files ?? [])];
+    // A file larger than `pasteMaxSize` is not read: its name, type and size.
+    const max = el._config?.pasteMaxSize ?? Infinity;
+    const read = files.filter((f) => f.size <= max);
     // A file manager's files are local paths the page cannot read: their
     // `file:` URLs, when the browser lists them.
     const uris = (data?.getData("text/uri-list") ?? "").split(/\r?\n/).filter((u) => u.startsWith("file:"));
-    Promise.all(files.map((f) => f.arrayBuffer())).then((buffers) => {
+    Promise.all(read.map((f) => f.arrayBuffer())).then((buffers) => {
       const size = buffers.reduce((n, b) => n + b.byteLength, 0);
       const bytes = new Uint8Array(size);
       let at = 0;
@@ -5986,7 +5990,13 @@ class Player {
       const json = JSON.stringify({
         text,
         html,
-        files: files.map((f, i) => ({ name: f.name || "image.png", type: f.type, size: buffers[i].byteLength })),
+        files: files.map((f) => {
+          const i = read.indexOf(f);
+          const name = f.name || "image.png";
+          return i < 0
+            ? { name, type: f.type, size: f.size, read: false }
+            : { name, type: f.type, size: buffers[i].byteLength };
+        }),
         uris,
       });
       this.call(() => this.withStrings([json, bytes], (jp, jl, bp, bl) => this.wasm.nsh_paste(el._id, jp, jl, bp, bl)));
@@ -9071,6 +9081,13 @@ class Player {
     window.addEventListener("pointermove", (e) => this.pointerMove(e), { passive: false });
     window.addEventListener("pointerup", (e) => this.pointerUp(e, false));
     window.addEventListener("pointercancel", (e) => this.pointerUp(e, true));
+    window.addEventListener("blur", () => {
+      this.hoverButtons = 0;
+      for (const [pointerId, p] of [...this.pointers]) {
+        p.scrolls = null;
+        this.pointerUp({ pointerId, buttons: 0 }, true);
+      }
+    });
     // A drag never drags images or text out of the app.
     root.addEventListener("dragstart", (e) => e.preventDefault());
     root.addEventListener("mousedown", (e) => this.mouseDown(e));

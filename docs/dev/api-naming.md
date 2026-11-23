@@ -483,6 +483,7 @@ and `Input`'s React Native names follow the rules as well.
 | `ItemSeparatorComponent` | `separator` | `Command::separator` | |
 | List `contentContainerStyle` | `contentStyle` (padding and gaps only), `contentClass` (`p-*`, `gap-*`) | *guides* "Let the enclosing name carry the context" | Same names as Scroll's, a narrower type |
 | Scroll `contentContainerStyle`, `contentContainerClass` | `contentStyle`, `contentClass` | as above; *guides* slot `content` | |
+| (none: a notched wheel scrolls as the platform's) | `smoothWheel?: boolean` and `wheelLineHeight?: number` (Rust `smooth_wheel`, `wheel_line_height`) | Chromium's `ScrollOffsetAnimationCurve`; `NSScrollView.verticalLineScroll` and `WM_MOUSEWHEEL`'s lines for the line's length; CSS `scroll-behavior` (and Tailwind's `scroll-smooth`) excludes user scrolls, so no web name fits | Two concepts, as the maintainer asked (2026-11-21): the easing and a line's length, each with the platform's default. `smooth` names what changes (motion, not distance); `LineHeight` is the unit the platforms already count wheels in. Both are props of every platform: the desktops act on them, iOS, Android and the web keep the system's and the browser's scrolling |
 | **Input** | | | |
 | `blurOnSubmit` | (dropped) | | `submitBehavior` covers it |
 | `placeholderTextColor` | style key `placeholderColor`, class `placeholder:text-*` | *guides* `value` vs `presentation`; CSS `::placeholder` | |

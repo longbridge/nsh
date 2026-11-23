@@ -154,8 +154,12 @@ mod imp {
                 log::error!(target: "js", "unhandled rejection: {message}");
             }));
             // Canvas `measureText` measures on this thread.
+            let line_engine = text_engine.clone();
             host.set_text_measurer(Box::new(move |font, text| {
                 nsh_core::canvas::measure_line(&*text_engine, font, text)
+            }));
+            host.set_line_extent_measurer(Box::new(move |font, text| {
+                nsh_core::canvas::line_extent(&*line_engine, font, text)
             }));
             host.set_environment(environment);
             host.set_displays(displays);
