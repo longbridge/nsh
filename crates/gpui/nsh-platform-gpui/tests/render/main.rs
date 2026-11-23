@@ -5,10 +5,16 @@
 //! belongs to the first app a process makes, and the macOS platform that
 //! gives the text system is made on the main thread.
 
-use std::time::{Duration, Instant};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 
+use futures_util::future::{Either, select};
 use gpui::{AppContext as _, HeadlessAppContext, px, size};
-use nsh_platform_gpui::{App, AppOptions, AppView, Bundle};
+use nsh_platform_gpui::{App, AppOptions, AppView, Bundle, Root};
 
 /// A PNG of `w` × `h` pixels, its left half red and its right half green,
 /// as a data URI.
@@ -51,7 +57,6 @@ fn app() -> String {
     format!(
         r##"
 import {{ mount, Image, View }} from "nsh";
-import {{ Window }} from "nsh/desktop";
 
 const PHOTO = "{photo}";
 const ICON = "{icon}";
@@ -71,7 +76,7 @@ function App() {{
     </View>
   );
 }}
-mount(() => <Window id="main">{{App}}</Window>);
+mount(App);
 "##,
         photo = halves(40, 20),
         icon = half_icon("#000000"),
@@ -161,7 +166,6 @@ setInterval(() => {
     format!(
         r##"
 import {{ mount, Image, Scroll, type ScrollRef, Text, View }} from "nsh";
-import {{ Window }} from "nsh/desktop";
 
 const PHOTO = "{photo}";
 const LINES = Array.from({{ length: 60 }}, (_, i) => i);
@@ -179,7 +183,7 @@ function App() {{
     </View>
   );
 }}
-mount(() => <Window id="main">{{App}}</Window>);
+mount(App);
 {steps}
 "##,
         photo = halves(100, 80),
@@ -205,13 +209,8 @@ const ZOOMED: &[((f32, f32), [u8; 3], &str)] = &[
 ];
 
 fn main() {
-    // The GPUI host is not migrated to window model v2 (docs/dev/gpui.md):
-    // an app renders in the window it declares, and this offscreen capture
-    // of the embedding window has no app content of its own to show. The
-    // checks run again once the host is migrated (`NSH_GPUI_WINDOW_MODEL_V2=1`
-    // runs them against one).
-    if std::env::var_os("NSH_GPUI_WINDOW_MODEL_V2").is_none() {
-        eprintln!("GPUI's host is not migrated to window model v2: see docs/dev/gpui.md");
+    if !cfg!(feature = "js") {
+        eprintln!("no JS engine here: skipped");
         return;
     }
     let probe = gpui_platform::current_headless_renderer();
@@ -228,20 +227,149 @@ fn main() {
     );
     // The engine and the image decoders run on threads of their own.
     cx.allow_parking();
-    shows(&mut cx, &app(), EXPECTED, "turned-images");
-    println!("render: turned images and icons turn with their views: ok");
-    shows(&mut cx, &zoom_app(false, false), ZOOMED, "zoomed-scroll");
+    let output = std::env::var_os("NSH_RENDER_OUTPUT_DIR").map(PathBuf::from);
+    if let Some(output) = &output {
+        std::fs::create_dir_all(output).unwrap();
+    }
+    if cfg!(feature = "svg") {
+        shows(
+            &mut cx,
+            &app(),
+            EXPECTED,
+            "turned-images",
+            output.as_deref(),
+        );
+        println!("render: turned images and icons turn with their views: ok");
+    }
+    shows(
+        &mut cx,
+        &zoom_app(false, false),
+        ZOOMED,
+        "zoomed-scroll",
+        output.as_deref(),
+    );
     println!("render: zoomed scroll views draw their content scaled: ok");
+    if let Some(output) = &output {
+        embedding_screenshots(&mut cx, output);
+    }
     if std::env::var_os("NSH_RENDER_BENCH").is_some() {
         zoom_frames(&mut cx);
     }
 }
 
+/// Render fixtures neither read nor write the host's persisted state.
+struct RenderStorage;
+
+impl nsh_engine::StorageBackend for RenderStorage {
+    fn load(&self) -> Result<BTreeMap<String, String>, String> {
+        Ok(BTreeMap::new())
+    }
+
+    fn write(&self, _: nsh_engine::StorageChange) -> Result<(), String> {
+        Err("render fixtures do not persist storage".into())
+    }
+}
+
+fn render_options() -> AppOptions {
+    AppOptions {
+        cache: nsh_engine::CacheOptions::off(),
+        storage: Some(Arc::new(RenderStorage)),
+        data_dir: Some(std::env::temp_dir().join(format!("nsh-render-{}", std::process::id()))),
+        ..Default::default()
+    }
+}
+
+struct LaidOut(Mutex<Option<futures_channel::oneshot::Sender<()>>>);
+
+/// Ordinary NSH text inherits the host's foreground; the last line opts out.
+#[nsh_core::element::component]
+fn EmbeddedTheme() -> impl nsh_core::element::IntoElement {
+    use nsh_core::prelude::*;
+
+    let ready = nsh_core::element::engine_context::<LaidOut>().unwrap();
+    view()
+        .size_full()
+        .p(Points(20.0))
+        .gap(Points(12.0))
+        .child(
+            text("Embedded section")
+                .text_size(Points(20.0))
+                .font_weight(FontWeight::SEMIBOLD),
+        )
+        .child(text("Text follows the host theme."))
+        .child(
+            text("An explicit muted color stays muted.")
+                .text_sm()
+                .text_color(rgb(0x778899)),
+        )
+        .on_layout(move |_: &Bounds<Points>| {
+            if let Some(ready) = ready.0.lock().unwrap().take() {
+                // This acknowledgement follows the commit on GPUI's own queue.
+                drop(nsh_core::element::run_on_main_thread(move || {
+                    let _ = ready.send(());
+                }));
+            }
+        })
+}
+
+/// Save actual NSH embeddings in both host appearances.
+fn embedding_screenshots(cx: &mut HeadlessAppContext, output: &Path) {
+    use nsh_core::platform::Appearance;
+
+    let theme = r##"{ "cssVars": {
+        "light": { "background": "#f8fafc", "foreground": "#172033" },
+        "dark": { "background": "#141821", "foreground": "#edf2f7" }
+    } }"##;
+    for (name, appearance) in [("light", Appearance::Light), ("dark", Appearance::Dark)] {
+        let (tx, rx) = futures_channel::oneshot::channel();
+        let options = AppOptions {
+            context: nsh_engine::EngineContext::default().with(LaidOut(Mutex::new(Some(tx)))),
+            ..render_options()
+        };
+        let window = cx
+            .open_window(size(px(360.0), px(180.0)), |window, cx| {
+                cx.new(|cx| AppView::new(options, window, cx))
+            })
+            .unwrap();
+        // Give the engine the host's viewport before loading the content.
+        draw(cx, window);
+        cx.update(|cx| {
+            window
+                .update(cx, |view, _, cx| {
+                    view.set_theme_json(theme, cx).unwrap();
+                    view.set_appearance(appearance, cx);
+                    view.load(App::Rust(Root::of::<EmbeddedTheme>()));
+                })
+                .unwrap();
+        });
+        // Readiness comes only from layout; this timer just guards against a hang.
+        let deadline = cx.background_executor().timer(Duration::from_secs(10));
+        cx.foreground_executor().block_test(async {
+            match select(rx, deadline).await {
+                Either::Left((ready, _)) => ready.expect("layout acknowledgement dropped"),
+                Either::Right(_) => panic!("timed out waiting for {name} embedding layout"),
+            }
+        });
+        draw(cx, window);
+        let path = output.join(format!("embedding-{name}.png"));
+        cx.capture_screenshot(window.into())
+            .unwrap()
+            .save(&path)
+            .unwrap();
+        println!("render: embedding screenshot: {}", path.display());
+        cx.update(|cx| window.update(cx, |view, _, _| view.stop()).unwrap());
+    }
+}
+
 /// Opens a 240 × 180 window running `code`.
 fn open(cx: &mut HeadlessAppContext, code: &str) -> gpui::WindowHandle<AppView> {
+    let options = AppOptions {
+        inline_root: true,
+        ..render_options()
+    };
     let window = cx
         .open_window(size(px(240.0), px(180.0)), |window, cx| {
-            cx.new(|cx| AppView::new(AppOptions::default(), window, cx))
+            cx.new(|cx| AppView::new(options, window, cx))
         })
         .unwrap();
     let code = nsh_bundler::compile_module("App.tsx", code, &[]).unwrap();
@@ -265,13 +393,14 @@ fn draw(cx: &mut HeadlessAppContext, window: gpui::WindowHandle<AppView>) -> Dur
     .unwrap()
 }
 
-/// Runs `code` until a frame shows what `expected` says (the screenshot is
-/// saved as `nsh-<name>.png` in the temporary directory when none does).
+/// Runs `code` until a frame shows what `expected` says. Saves the last
+/// screenshot on failure only when an output directory was requested.
 fn shows(
     cx: &mut HeadlessAppContext,
     code: &str,
     expected: &[((f32, f32), [u8; 3], &str)],
     name: &str,
+    output: Option<&Path>,
 ) {
     let window = open(cx, code);
     let start = Instant::now();
@@ -290,9 +419,12 @@ fn shows(
             return;
         }
         if start.elapsed() > Duration::from_secs(15) {
-            let path = std::env::temp_dir().join(format!("nsh-{name}.png"));
-            shot.save(&path).unwrap();
-            panic!("{} (screenshot: {})", wrong.join("; "), path.display());
+            if let Some(output) = output {
+                let path = output.join(format!("nsh-{name}.png"));
+                shot.save(&path).unwrap();
+                panic!("{} (screenshot: {})", wrong.join("; "), path.display());
+            }
+            panic!("{}", wrong.join("; "));
         }
         std::thread::sleep(Duration::from_millis(20));
     }

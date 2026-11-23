@@ -236,7 +236,7 @@ fn point(cx: *mut JsContext, p: &TouchPoint, timestamp: f64) -> JsValue {
     o
 }
 
-/// `Modifiers` as a press event's (`{ control, alt, shift, platform }`).
+/// `Modifiers` as a press event's (`{ control, alt, shift, platform, altGraph }`).
 fn modifiers_object(cx: *mut JsContext, m: &Modifiers) -> JsValue {
     // SAFETY: a new object.
     let o = unsafe { qjs::JS_NewObject(cx) };
@@ -245,6 +245,7 @@ fn modifiers_object(cx: *mut JsContext, m: &Modifiers) -> JsValue {
     set(cx, o, c"alt", flag(m.alt));
     set(cx, o, c"shift", flag(m.shift));
     set(cx, o, c"platform", flag(m.cmd));
+    set(cx, o, c"altGraph", flag(m.alt_graph));
     o
 }
 
@@ -992,19 +993,6 @@ export interface ResponderGestureState {
   vx: number;
   vy: number;
   numberActiveTouches: number;
-}
-
-/** When a view's pan activates (`panActivation`; react-native-gesture-handler's
- * `activeOffsetX` / `failOffsetY`), decided natively on the main thread as the
- * finger moves: past an active offset the view becomes the responder and the
- * scroll views around it can no longer take the touches; past a fail offset
- * first it never does, and they keep them. Distances in points along one axis,
- * either direction; without active offsets it activates after 10 points. */
-export interface PanActivation {
-  activeOffsetX?: number;
-  activeOffsetY?: number;
-  failOffsetX?: number;
-  failOffsetY?: number;
 }
 "#;
 

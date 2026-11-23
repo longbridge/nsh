@@ -80,6 +80,7 @@ mount(() => (
 | `disabled` | `.disabled(..)` | `boolean` | `false` | 不响应按压，也没有按压反馈；开关及其部件的 `disabled:` 样式生效，屏幕阅读器会报告它不可用。 |
 | `checkedStyle` | `.checked_style(\|s\| ..)` | `StyleProp<ViewStyle>` | 无 | `checked` 且未禁用时开关自身的样式，与 `checked:` 类相同。 |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 屏幕阅读器读出的文字：子元素没有说明它打开什么的文字时设置。 |
+| `accessibilityHint` | `.accessibility_hint(..)` | `string` | 无 | 向屏幕阅读器说明切换开关会做什么，与视图的 `accessibilityHint` 相同。 |
 | `trackClass`、`trackStyle` | `.track_style(\|s\| ..)` | `string`、`StyleProp<ViewStyle>` | 无 | 轨道，滑块沿着它移动。 |
 | `thumbClass`、`thumbStyle` | `.thumb_style(\|s\| ..)` | `string`、`StyleProp<ViewStyle>` | 无 | 滑块，在轨道里面。 |
 | `hitSlop` | `.hit_slop(..)` | `number \| Partial<Edges>` | 无 | 按压在边界之外多远仍然算数，单位为点：一个数字表示每一边，或分别指定各边。与视图的 `hitSlop` 相同。 |
@@ -165,6 +166,7 @@ mount(() => (
 
 ## 无障碍
 
+- 标签不能说明改变设置的效果时，设置 `accessibilityHint`。它跟随响应式值变化；设为 `undefined` 会移除提示。
 - 开关对屏幕阅读器而言是一个元素，角色是 `"switch"`，带有它的值（开或关）；轨道和滑块是它的部件。它的标签是子元素的文字；没有文字时设置 `accessibilityLabel`。
 - `disabled` 按平台的方式报告（VoiceOver、TalkBack、UI Automation、浏览器的无障碍树）。
 - 在 macOS 和 Web 上，开关是键盘焦点的一站：Tab 可以到达它，Space 和 Return 切换它，`focus-visible:` 样式显示焦点所在。

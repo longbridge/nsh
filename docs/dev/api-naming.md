@@ -231,6 +231,12 @@ component module like GPUI Kit's `gpui_component::table::ColumnFixed`, and follo
 `ColumnFixed::None` represents the unfixed state that GPUI Kit stores as `Option::None`.
 Left-fixed columns lead the order and right-fixed columns close it.
 
+`panActivation`'s `direction` and `edge` have no counterpart in `gpui-kit` or react-native-gesture-handler (which
+says a direction with a one-sided `activeOffsetX` range). `edge` and its `left` / `right` / `top` / `bottom` are
+UIKit's `UIScreenEdgePanGestureRecognizer.edges` and AndroidX `ViewDragHelper`'s `EDGE_*`; `direction` and its
+`left` / `right` / `up` / `down` are UIKit's `UISwipeGestureRecognizer.direction`. `PanEvent`'s `origin` is NSH's own
+`PanGesture::origin`.
+
 ## Shapes that can grow
 
 Apps built once run on every later release (`compatibility.md`): types only widen and inputs only gain optional
@@ -396,6 +402,7 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | `AccessibilityInfo.setAccessibilityFocus(node)` | `setAccessibilityFocus(node)` | Environment | A function of the module; `focus()` is the keyboard's |
 | **`nsh/mobile`: `BackHandler`** | | | |
 | `BackHandler.addEventListener("hardwareBackPress", l)` → `{ remove() }` | `BackHandler.on("press", l)` → `() => void` | Listening | Removed with the component it was added in; `l` returns `true` when it handled the press. As `NavPage`'s `onBackPress` |
+| AndroidX `OnBackPressedCallback.handleOnBackStarted` / `handleOnBackProgressed` / `handleOnBackCancelled`, `BackEventCompat` | `BackHandler.on("progress", l)` → `() => void`; Rust `on_back_progress(f)`, `BackProgressEvent { phase, progress, edge }`, `BackPhase` | Listening | The four callbacks are one event's `phase` (`start`, `move`, `end`, `cancel`), as `PinchPhase` and `TouchPhase` name them; `progress` keeps `BackEventCompat`'s name, `edge` is a `PanEdge` as `panActivation`'s `edge` |
 | **`nsh`: `Clipboard`** | | | |
 | `getString`, `setString`, `hasString` | `readText()`, `writeText(text): Promise<void>`, `write({ text, html }): Promise<void>`, `hasText()` | Where names come from | The DOM's `navigator.clipboard`; GPUI's `read_from_clipboard` / `write_to_clipboard` |
 | `getImage`, `setImage`, `hasImage`, `getFiles` | `readImage()`, `writeImage(src)`, `hasImage()`, `readFiles()` | Where names come from | |
@@ -403,6 +410,7 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | **`nsh`: `Notifications`** | | | |
 | `UNUserNotificationCenterDelegate`'s `willPresentNotification:` / `didReceiveNotificationResponse:` for notifications NSH did not show | Rust `nsh_platform_apple::notifications::set_foreign_handler(impl ForeignNotificationHandler)`: `presentation(&ForeignNotification) -> Presentation`, `pressed(&ForeignNotification)`; `ForeignNotification { id, thread_id, user_info }`, `Presentation { banner, list, sound, badge }` | Listening | 2026-11-20: "foreign" for the notifications other code showed, apart from the app's `press`; `pressed` as `Notifications`' `press` event; `id` as `Notification::id`; `thread_id` and `user_info` keep the platform's `threadIdentifier` / `userInfo` (as `nsh_platform_ios`'s `ApplicationEvent` does); `Presentation`'s fields are `UNNotificationPresentationOptions`' cases. One handler, not observers, because the system takes one presentation |
 | An activity's intent with extras, from a notification NSH did not show (`onCreate` / `onNewIntent`) | Rust `nsh::notifications::set_foreign_handler(impl ForeignNotificationHandler)` (`nsh-platform-android`): `pressed(&ForeignNotification)`; `ForeignNotification { extras, action, data }` | Listening | 2026-11-21: the Apple handler's names, so code serving both reads the same; no `presentation` (the SDK that shows the notification decides how it shows). Android does not say which notification opened an activity, so there is no `id` or `thread_id`, and the fields keep `Intent`'s `getExtras` / `getAction` / `getDataString` names, as `user_info` keeps `userInfo` |
+| TSX's `host.call(name, args, { timeout })`, `host.post(name, data)`, `host.on(event, listener)` | Rust `host_call(name, args)`, `host_call_with(name, args, HostCallOptions)`, `host_post(name, data)`, `on_host_event(event, listener)`; `HostError` with `code()` | Where names come from | 2026-11-22: a runtime module's members are free functions of the prelude named for what they are (`host_` as `app_url` qualifies `url`); `_with` takes the options as `on_key_with` does; listening is `on_<event>` scoped to the owner, as `on_key` and `on_back_press`. `HostError`'s variants are TS's codes (`Failed` is `ERR_NSH_HOST_ERROR`, `Denied` as `LaunchAtLoginError::Denied`), and `HostCallOptions::timeout` is a `Duration` whose zero waits without limit, as TS's `0` |
 | **`nsh`: `Storage`** | | | |
 | `Storage.getAllKeys()` | `Storage.keys()` | Where names come from | `getItem` / `setItem` / `removeItem` / `clear` are the DOM's `Storage`'s |
 | **Styles** | | | |
@@ -475,6 +483,7 @@ and `Input`'s React Native names follow the rules as well.
 | `ItemSeparatorComponent` | `separator` | `Command::separator` | |
 | List `contentContainerStyle` | `contentStyle` (padding and gaps only), `contentClass` (`p-*`, `gap-*`) | *guides* "Let the enclosing name carry the context" | Same names as Scroll's, a narrower type |
 | Scroll `contentContainerStyle`, `contentContainerClass` | `contentStyle`, `contentClass` | as above; *guides* slot `content` | |
+| (none: a notched wheel scrolls as the platform's) | `smoothWheel?: boolean` and `wheelLineHeight?: number` (Rust `smooth_wheel`, `wheel_line_height`) | Chromium's `ScrollOffsetAnimationCurve`; `NSScrollView.verticalLineScroll` and `WM_MOUSEWHEEL`'s lines for the line's length; CSS `scroll-behavior` (and Tailwind's `scroll-smooth`) excludes user scrolls, so no web name fits | Two concepts, as the maintainer asked (2026-11-21): the easing and a line's length, each with the platform's default. `smooth` names what changes (motion, not distance); `LineHeight` is the unit the platforms already count wheels in. Both are props of every platform: the desktops act on them, iOS, Android and the web keep the system's and the browser's scrolling |
 | **Input** | | | |
 | `blurOnSubmit` | (dropped) | | `submitBehavior` covers it |
 | `placeholderTextColor` | style key `placeholderColor`, class `placeholder:text-*` | *guides* `value` vs `presentation`; CSS `::placeholder` | |
@@ -917,6 +926,7 @@ and `Input`'s React Native names follow the rules as well.
 | `set_time`, `time`, `TimeFieldEvent::Change(NaiveTime)` | `value: "HH:MM" \| "HH:MM:SS"` (controlled), `defaultValue`, `onChange({ value })` | `time_field.rs:357`, `:352`, `:100-102`; "Value state" above | 24-hour always, as HTML's `<input type="time">`; `TimeOfDay` in Rust |
 | `precision(TimePrecision)`, `hour_cycle(HourCycle)` | `precision: "minute" \| "second"`, `hourCycle: "h23" \| "h12"` | `time_field.rs:317`, `:335`, `:36`, `:69` | `HourCycle` as the Unicode `hourCycle` values |
 | `disabled` | `disabled` | `time_field.rs:553` | |
+| (none: `gpui-base`'s time field has no bounds) | `min`, `max`: `"HH:MM" \| "HH:MM:SS"` | `time_field.rs:403`, `:405` | As HTML's `<input type="time">`; a step past a bound lands on it, a completed typed time is held to the range, and a `min` after `max` leaves both out |
 | `render_segment(fn(TimeFieldSegment, TimeFieldSegmentState))` | `renderSegment(segment: TimeFieldSegmentEntry)` with `{ segment, value, label }`, parts `segmentClass` / `segmentStyle` (`focus:` on the selected one, `disabled:` with the field, `group-*:` inside), `separatorClass` / `separatorStyle` | `time_field.rs:560`, `:457-481` | The entry adds `label` (two digits, `AM` / `PM`) and leaves the states out (`selected`, `disabled`: the segment's classes, as `Tree`'s `TreeEntry`), so moving between the segments or the focus draws no segment again; `TimeFieldSegment`, `gpui-base`'s element the slot fills, is the segment view the component keeps |
 | `selected_segment`, `focus` | (the component's) | `time_field.rs:364`, `:368` | The selected segment shows through `selected` and `focus:`; focus is the app's element ref |
 | `gpui-base`'s key context (`TimeField`: digits, arrows, Tab, `a` / `p`, Backspace) | the same rules, through one transparent native text field | `time_field.rs:19` | As `OtpInput`: the platforms' typing and the phones' number pad; a press on the selected AM / PM switches it (no `a` / `p` there) |

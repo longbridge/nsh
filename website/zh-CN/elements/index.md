@@ -131,6 +131,7 @@ TSX 从 `nsh/base` 导入，Rust 从 `nsh_base` crate 导入。它们负责行�
 | `<Tab>`、`<Tabs>` | `nsh_base::tab()`、`tabs()` | 标签列表中的一个标签页，以及这个列表 | [Tabs](./tabs.md) |
 | `<TextView>` | `nsh_base::text_view()` | 用文本和视图显示 Markdown 或 HTML 文档 | [TextView](./text-view.md) |
 | `<Toast>`、`<ToastStack>` | `nsh_base::toast()`、`toast_stack()` | toast 的语义根；从一侧边缘排成层叠的 toast | [Toast](./toast.md) |
+| `<TitleBar>` | `nsh_base::title_bar()` | 应用自绘的窗口标题栏，只在碰到窗口按钮的地方让开 | [TitleBar](./title-bar.md) |
 | `<Toggle>`、`<ToggleGroup>` | `nsh_base::toggle()`、`toggle_group()` | 一个处于开或关的按钮，以及由它们组成的工具栏 | [Toggle](./toggle.md) |
 | `<Toolbar>`、`<ToolbarGroup>`、`<ToolbarSeparator>` | `nsh_base::toolbar()`、`toolbar_group()`、`toolbar_separator()` | 由按钮、开关按钮和链接组成的一栏，在键盘焦点里只占一站 | [Toolbar](./toolbar.md) |
 | `<Tooltip>` | `nsh_base::tooltip()` | 悬停或手指按住时显示在触发元素旁的提示 | [Tooltip](./tooltip.md) |
@@ -499,7 +500,7 @@ link()
 | `rotation` | `.rotation_value(&angle)` | `{ angle?: AnimatedValue }` | 双指旋转驱动 `angle`（角度）。 |
 | `onRotationStart` / `onRotationEnd` | `.on_rotation_start(..)` / `.on_rotation_end(..)` | `(e: { rotation: number; velocity: number }) => void` | 旋转开始 / 结束。 |
 
-`PanEvent` 为 `{ cancelled, translation, velocity, value? }`（Rust 中为 `cancelled`、`translation`、`velocity_x`、`velocity_y`、`value_x`、`value_y`）：系统是否取消了拖动、自开始以来的位移和以点每秒计的速度（`Point`），以及此刻所绑定值的数值，即 `pan` 绑定的轴的 `{ x?, y? }`（拖动可能在动画中途抓住一个值）。
+`PanEvent` 为 `{ cancelled, origin, translation, velocity, value? }`（Rust 中为 `cancelled`、`origin`、`translation`、`velocity_x`、`velocity_y`、`value_x`、`value_y`）：系统是否取消了拖动、手指按下的位置（在 surface 中，与触摸的 page 位置相同）、自开始以来的位移和以点每秒计的速度（`Point`），以及此刻所绑定值的数值，即 `pan` 绑定的轴的 `{ x?, y? }`（拖动可能在动画中途抓住一个值）。视图的 `panActivation` 决定拖动何时开始：超过它的偏移、只朝一个 `direction`，或者从屏幕的某条 `edge` 开始（[触摸与手势](../docs/touch-and-gestures.md#单向拖动与屏幕边缘拖动)）。
 
 ### 原始触摸与响应者系统
 

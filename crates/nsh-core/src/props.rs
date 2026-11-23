@@ -40,6 +40,8 @@ pub enum AccessibilityRole {
     Link,
     /// A search field.
     Search,
+    /// A text box: a field the user types text into.
+    Textbox,
     /// An image.
     Image,
     /// An image that acts as a button.
@@ -597,7 +599,49 @@ impl ViewProps {
     }
 }
 
-/// When a pan on a view activates (`panActivation`; react-native-gesture-
+/// The way a finger moves (`PanActivation::direction`): toward the left
+/// edge, the right edge, the top or the bottom.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
+#[non_exhaustive]
+pub enum PanDirection {
+    /// Toward the left edge.
+    Left,
+    /// Toward the right edge.
+    Right,
+    /// Toward the top.
+    Up,
+    /// Toward the bottom.
+    Down,
+}
+
+/// An edge of the screen, or of the window on desktops and the page on
+/// the web, that a pan starts at (`PanActivation::edge`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
+#[non_exhaustive]
+pub enum PanEdge {
+    /// The left edge: the pan moves right.
+    Left,
+    /// The right edge: the pan moves left.
+    Right,
+    /// The top edge: the pan moves down.
+    Top,
+    /// The bottom edge: the pan moves up.
+    Bottom,
+}
+
+impl PanEdge {
+    /// The way a pan from this edge moves: away from it.
+    pub(crate) fn direction(self) -> PanDirection {
+        match self {
+            PanEdge::Left => PanDirection::Right,
+            PanEdge::Right => PanDirection::Left,
+            PanEdge::Top => PanDirection::Down,
+            PanEdge::Bottom => PanDirection::Up,
+        }
+    }
+}
+
+/// When the pans on a view activate (`panActivation`; react-native-gesture-
 /// handler's `activeOffsetX` / `failOffsetY`), decided by the platform on
 /// the main thread as the fingers move: once the finger has moved further
 /// than an active offset from where it went down, the pan activates (the
@@ -606,7 +650,13 @@ impl ViewProps {
 /// first, the pan fails and the scroll views keep the touches. Offsets are
 /// distances in points along one axis, either direction. Without active
 /// offsets, the pan activates after [`PanActivation::MIN_DISTANCE`] in any
-/// direction.
+/// direction. The view's native pan (`pan` values, `on_pan_start`) starts
+/// when it activates too.
+///
+/// A [`direction`](Self::direction) keeps the pan to one way: a drag the
+/// other way, or mostly across it, fails it and stays with the views
+/// around. An [`edge`](Self::edge) keeps it to fingers that go down at
+/// that edge of the screen, moving away from it.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct PanActivation {
     /// Activates once the finger moved further than this horizontally.
@@ -617,12 +667,96 @@ pub struct PanActivation {
     pub fail_offset_x: Option<Points>,
     /// Fails once the finger moved further than this vertically first.
     pub fail_offset_y: Option<Points>,
+    /// The one way the pan activates in: once the finger moved that way
+    /// further than the active offset along its axis
+    /// ([`PanActivation::MIN_DISTANCE`] without one), and more along it
+    /// than across. A move as far the other way fails the pan, and so does
+    /// one mostly across it, unless a fail offset across is given, which
+    /// decides that instead. The active offset across is not used.
+    pub direction: Option<PanDirection>,
+    /// The edge of the screen the pan starts at (of the window on desktops,
+    /// of the page on the web): only a finger that goes down within
+    /// [`PanActivation::EDGE_WIDTH`] of it starts the pan, which then moves
+    /// away from it (that is its direction; `direction` is not used). iOS
+    /// recognizes the native pan with its own screen-edge gesture, whose
+    /// edge is the system's, and a navigation stack that can go back keeps
+    /// its swipe back. On Android, the system's back gesture keeps the left
+    /// and right edges under gesture navigation.
+    pub edge: Option<PanEdge>,
 }
 
 impl PanActivation {
     /// How far the finger moves before a pan without active offsets
     /// activates, in points.
     pub const MIN_DISTANCE: Points = px(10.0);
+
+    /// How far from its edge a finger goes down to start an edge pan
+    /// ([`PanActivation::edge`]), in points.
+    pub const EDGE_WIDTH: Points = px(20.0);
+
+    /// Sets [`PanActivation::active_offset_x`].
+    pub fn active_offset_x(mut self, offset: Points) -> Self {
+        self.active_offset_x = Some(offset);
+        self
+    }
+
+    /// Sets [`PanActivation::active_offset_y`].
+    pub fn active_offset_y(mut self, offset: Points) -> Self {
+        self.active_offset_y = Some(offset);
+        self
+    }
+
+    /// Sets [`PanActivation::fail_offset_x`].
+    pub fn fail_offset_x(mut self, offset: Points) -> Self {
+        self.fail_offset_x = Some(offset);
+        self
+    }
+
+    /// Sets [`PanActivation::fail_offset_y`].
+    pub fn fail_offset_y(mut self, offset: Points) -> Self {
+        self.fail_offset_y = Some(offset);
+        self
+    }
+
+    /// Sets [`PanActivation::direction`]: a drawer opened by a drag to
+    /// the right over its content, `PanActivation::default()
+    /// .direction(PanDirection::Right)`, leaves the drags to the left to
+    /// the content.
+    pub fn direction(mut self, direction: PanDirection) -> Self {
+        self.direction = Some(direction);
+        self
+    }
+
+    /// Sets [`PanActivation::edge`]: a drawer opened from the left edge,
+    /// `PanActivation::default().edge(PanEdge::Left)`.
+    pub fn edge(mut self, edge: PanEdge) -> Self {
+        self.edge = Some(edge);
+        self
+    }
+
+    /// The way the pan activates in, if it has one: away from its edge, or
+    /// its direction. For the backends.
+    #[doc(hidden)]
+    pub fn way(&self) -> Option<PanDirection> {
+        self.edge.map(PanEdge::direction).or(self.direction)
+    }
+
+    /// Whether a finger going down at `at` may start the pan, in an area
+    /// (the screen, the window or the page) of `size` with `at` measured
+    /// from its top left corner: anywhere without an
+    /// [`edge`](Self::edge), else within [`PanActivation::EDGE_WIDTH`] of
+    /// it. For the backends.
+    #[doc(hidden)]
+    pub fn starts_at(&self, at: Point<Points>, size: crate::Size<Points>) -> bool {
+        let w = Self::EDGE_WIDTH.0;
+        match self.edge {
+            None => true,
+            Some(PanEdge::Left) => at.x.0 <= w,
+            Some(PanEdge::Right) => at.x.0 >= size.width.0 - w,
+            Some(PanEdge::Top) => at.y.0 <= w,
+            Some(PanEdge::Bottom) => at.y.0 >= size.height.0 - w,
+        }
+    }
 
     /// A pan that activates horizontally past `active` and fails when it
     /// moves vertically past `fail` first (a scrubber in a vertical scroll
@@ -633,6 +767,8 @@ impl PanActivation {
             active_offset_y: None,
             fail_offset_x: None,
             fail_offset_y: Some(fail),
+            direction: None,
+            edge: None,
         }
     }
 
@@ -644,15 +780,20 @@ impl PanActivation {
             active_offset_y: Some(active),
             fail_offset_x: Some(fail),
             fail_offset_y: None,
+            direction: None,
+            edge: None,
         }
     }
 
-    /// The one axis this pan is for, when its offsets name one: `Some(true)`
-    /// horizontal (an active offset along x, or a fail offset along y),
-    /// `Some(false)` vertical, `None` either. A view listening to `onWheel`
-    /// with a pan along one axis takes only the wheels along it
-    /// ([`crate::input::wheel_along`]).
+    /// The one axis this pan is for, when its way or its offsets name one:
+    /// `Some(true)` horizontal (a way left or right, an active offset along
+    /// x, or a fail offset along y), `Some(false)` vertical, `None` either.
+    /// A view listening to `onWheel` with a pan along one axis takes only
+    /// the wheels along it ([`crate::input::wheel_along`]).
     pub fn axis(&self) -> Option<bool> {
+        if let Some(way) = self.way() {
+            return Some(matches!(way, PanDirection::Left | PanDirection::Right));
+        }
         let x = self.active_offset_x.is_some() || self.fail_offset_y.is_some();
         let y = self.active_offset_y.is_some() || self.fail_offset_x.is_some();
         match (x, y) {
@@ -671,6 +812,23 @@ impl PanActivation {
         let past = |limit: Option<Points>, d: f32| limit.is_some_and(|l| d.abs() > l.0);
         if past(self.fail_offset_x, dx) || past(self.fail_offset_y, dy) {
             return Some(false);
+        }
+        if let Some(way) = self.way() {
+            // How far it moved that way and across, the offset along it, and
+            // whether a fail offset across decides the moves across.
+            let (along, across, active, fail_across) = match way {
+                PanDirection::Right => (dx, dy, self.active_offset_x, self.fail_offset_y),
+                PanDirection::Left => (-dx, dy, self.active_offset_x, self.fail_offset_y),
+                PanDirection::Down => (dy, dx, self.active_offset_y, self.fail_offset_x),
+                PanDirection::Up => (-dy, dx, self.active_offset_y, self.fail_offset_x),
+            };
+            let limit = active.unwrap_or(Self::MIN_DISTANCE).0;
+            let across = across.abs();
+            if along > limit && along >= across {
+                return Some(true);
+            }
+            let across_fails = fail_across.is_none() && across > limit && across > along;
+            return (-along > limit || across_fails).then_some(false);
         }
         let activates = if self.active_offset_x.is_some() || self.active_offset_y.is_some() {
             past(self.active_offset_x, dx) || past(self.active_offset_y, dy)

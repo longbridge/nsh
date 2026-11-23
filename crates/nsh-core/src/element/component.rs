@@ -930,9 +930,13 @@ pub struct BuiltInScrollbar {
     pub target: crate::NodeId,
     /// Whether that view scrolls sideways.
     pub horizontal: bool,
-    /// The view's own theme (its `scrollbar` object, as JSON); `None`: the
-    /// app's.
+    /// The view's own theme (its `scrollbar` object, as JSON); `None`
+    /// with no [`Self::theme_value`]: the app's.
     pub theme: Option<Arc<crate::JsonValue>>,
+    /// The view's own theme as Rust gave it
+    /// ([`ScrollbarSetting::ThemeValue`](crate::ScrollbarSetting::ThemeValue)),
+    /// a value of the set's theme type.
+    pub theme_value: Option<super::AnyValue>,
     /// The app's theme, as the set gave it
     /// ([`set_builtin_scrollbars`](super::set_builtin_scrollbars)).
     pub app_theme: Option<super::AnyValue>,
@@ -943,6 +947,50 @@ pub struct BuiltInScrollbar {
 /// it scrolls; `None` leaves the view the platform's indicator
 /// ([`Registry::scrollbars_from`]).
 pub type ScrollbarSource = fn(&BuiltInScrollbar) -> Option<super::AnyElement>;
+
+/// A theme of one view's own given in Rust
+/// ([`ScrollbarSetting::ThemeValue`](crate::ScrollbarSetting::ThemeValue)):
+/// a value of the theme type of the UI set that makes bars, with the set's
+/// maker, so a Rust app that never registered the set gets the bar too (as
+/// with [`set_builtin_scrollbars`](super::set_builtin_scrollbars)). Two are
+/// equal when they hold the same value.
+#[derive(Clone)]
+pub struct ScrollbarThemeValue {
+    source: ScrollbarSource,
+    theme: super::AnyValue,
+}
+
+impl ScrollbarThemeValue {
+    /// `theme`, drawn by `source` (which reads it as
+    /// [`BuiltInScrollbar::theme_value`]).
+    pub fn new(source: ScrollbarSource, theme: super::AnyValue) -> Self {
+        Self { source, theme }
+    }
+
+    /// What makes the bar.
+    pub fn source(&self) -> ScrollbarSource {
+        self.source
+    }
+
+    /// The theme.
+    pub fn theme(&self) -> &super::AnyValue {
+        &self.theme
+    }
+}
+
+impl PartialEq for ScrollbarThemeValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.theme == other.theme
+    }
+}
+
+impl std::fmt::Debug for ScrollbarThemeValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("ScrollbarThemeValue")
+            .field(&self.theme)
+            .finish()
+    }
+}
 
 /// What a UI set exports to JS: its components and modules, and what it
 /// passes on from the runtime. Cheap to clone.
@@ -974,6 +1022,9 @@ pub struct Registry {
     submodules: Arc<Vec<Registry>>,
     /// What each engine serving the set runs once ([`Registry::setup`]).
     setups: Arc<Vec<Setup>>,
+    /// The stand-ins its modules give headless runs, by name
+    /// ([`Registry::fake`]).
+    fakes: Arc<Vec<(&'static str, Arc<dyn crate::fake::Fake>)>>,
 }
 
 /// A function each engine serving a set runs once ([`Registry::setup`]).
@@ -1172,8 +1223,8 @@ impl Registry {
     ///
     /// # Panics
     ///
-    /// When two sets register the same component or two types of the same
-    /// name.
+    /// When two sets register the same component, two types of the same
+    /// name or two fakes of the same name ([`Registry::fake`]).
     #[track_caller]
     pub fn merged(sets: &[Registry]) -> Self {
         let mut out = Self::default();
@@ -1181,6 +1232,14 @@ impl Registry {
             out.tokens = out.tokens.or(set.tokens);
             out.scrollbars = out.scrollbars.or(set.scrollbars);
             Arc::make_mut(&mut out.setups).extend(set.setups.iter().cloned());
+            let fakes = Arc::make_mut(&mut out.fakes);
+            for (name, fake) in set.fakes.iter() {
+                assert!(
+                    fakes.iter().all(|(n, _)| n != name),
+                    "two fakes are named `{name}`, by two UI sets"
+                );
+                fakes.push((name, fake.clone()));
+            }
             let types = Arc::make_mut(&mut out.types);
             for (name, ty) in set.types.iter() {
                 if let Some(old) = types.insert(name, ty.clone()) {
@@ -1300,6 +1359,38 @@ impl Registry {
     pub fn setup(&mut self, f: impl Fn() + Send + Sync + 'static) -> &mut Self {
         Arc::make_mut(&mut self.setups).push(Arc::new(f));
         self
+    }
+
+    /// Gives headless runs `fake` in place of what a module of the set asks
+    /// of the platform, under `name` (`"nsh-extra/speech"`: the set's
+    /// specifier and the module), which tests call it by
+    /// ([`crate::fake`]). Apps never use it; the headless driver installs
+    /// it before the app starts. An app's crate calls it from its
+    /// `#[native_module]` function.
+    ///
+    /// # Panics
+    ///
+    /// When the set has a fake of that name already. Names are unique
+    /// across the sets an app is served, too ([`Registry::merged`]).
+    #[track_caller]
+    pub fn fake(&mut self, name: &'static str, fake: Arc<dyn crate::fake::Fake>) -> &mut Self {
+        assert!(
+            self.fakes.iter().all(|(n, _)| *n != name),
+            "two fakes are named `{name}`{}",
+            of_set(self.ui_set.or(self.namespace))
+        );
+        Arc::make_mut(&mut self.fakes).push((name, fake));
+        self
+    }
+
+    /// The fakes [`Registry::fake`] gave the set and the sets served under
+    /// it, by name, in order: what the headless driver installs.
+    #[doc(hidden)]
+    pub fn fakes(&self) -> Vec<(&'static str, Arc<dyn crate::fake::Fake>)> {
+        self.sets()
+            .into_iter()
+            .flat_map(|set| set.fakes.iter().cloned())
+            .collect()
     }
 
     /// Runs the functions [`Registry::setup`] gave the set (a merged set's:
@@ -2274,6 +2365,37 @@ mod tests {
             message,
             "component `nsh_core::element::component::tests::Stepper` is registered twice, by two UI sets"
         );
+    }
+
+    struct NoFake;
+
+    impl crate::fake::Fake for NoFake {
+        fn install(&self) {}
+
+        fn call(&self, _: &str, _: &[crate::JsonValue]) -> Result<crate::JsonValue, String> {
+            Ok(crate::JsonValue::Null)
+        }
+    }
+
+    /// A test calls a fake by its name alone: two sets cannot give one name.
+    #[test]
+    fn fake_names_are_unique_across_sets() {
+        let mut a = Registry::ui_set("test/a");
+        a.fake("test/mic", Arc::new(NoFake));
+        let mut b = Registry::ui_set("test/b");
+        b.fake("test/camera", Arc::new(NoFake));
+        let names: Vec<_> = Registry::merged(&[a.clone(), b])
+            .fakes()
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        assert_eq!(names, ["test/mic", "test/camera"]);
+        let mut c = Registry::ui_set("test/c");
+        c.fake("test/mic", Arc::new(NoFake));
+        let twice =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Registry::merged(&[a, c])));
+        let message = *twice.unwrap_err().downcast::<String>().unwrap();
+        assert_eq!(message, "two fakes are named `test/mic`, by two UI sets");
     }
 }
 

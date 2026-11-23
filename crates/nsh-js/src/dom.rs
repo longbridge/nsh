@@ -62,6 +62,9 @@ pub(crate) const MAX_DEPTH: u32 = 64;
 /// at each level of nesting.
 pub(crate) const MAX_ARRAY_ITEMS: u32 = 1 << 20;
 
+/// The host owns the surface: mount plain content without an implicit window.
+pub(crate) struct InlineRoot;
+
 /// The renderer's part of a context's state.
 pub(crate) struct Dom {
     shared: Rc<Shared>,
@@ -73,6 +76,7 @@ pub(crate) struct Dom {
     nodes: RefCell<nsh_core::id_table::IdTable<*mut NodeData>>,
     /// The root view's object (owned).
     root: Cell<JsValue>,
+    inline_root: bool,
     /// The platform: `ios={{…}}` / `android={{…}}` / `web={{…}}` props
     /// apply on it only.
     os: Cell<Os>,
@@ -158,6 +162,11 @@ fn dom<'a>(cx: *mut JsContext) -> &'a Dom {
     // SAFETY: a projection of the state's field; the renderer is only ever
     // reached by shared reference.
     unsafe { &(*crate::state::state(cx)).dom }
+}
+
+/// Whether a plain app root mounts in the host surface.
+pub(crate) fn inline_root(cx: *mut JsContext) -> bool {
+    dom(cx).inline_root
 }
 
 /// Starts counting the app root's `<Window>` declarations.
@@ -246,17 +255,25 @@ pub(crate) fn string_arg(cx: *mut JsContext, v: JsValue) -> Option<String> {
 
 /// A JS value's string (`ToString`), or `None` when that throws.
 fn to_string(cx: *mut JsContext, v: JsValue) -> Option<String> {
-    // SAFETY: a live value; the C string is freed below.
+    with_str(cx, v, str::to_owned)
+}
+
+/// `f` with a JS value's string (`ToString`), borrowed; `None` when that
+/// throws.
+pub(crate) fn with_str<R>(cx: *mut JsContext, v: JsValue, f: impl FnOnce(&str) -> R) -> Option<R> {
+    // SAFETY: a live value; the C string is freed after `f`.
     unsafe {
         let mut len = 0usize;
         let p = qjs::JS_ToCStringLen(cx, &mut len, v);
         if p.is_null() {
             return None;
         }
-        let s =
-            String::from_utf8_lossy(std::slice::from_raw_parts(p.cast::<u8>(), len)).into_owned();
+        let r = f(&String::from_utf8_lossy(std::slice::from_raw_parts(
+            p.cast::<u8>(),
+            len,
+        )));
         qjs::JS_FreeCString(cx, p);
-        Some(s)
+        Some(r)
     }
 }
 
@@ -322,6 +339,7 @@ impl Dom {
             next_id: Cell::new(2),
             nodes: RefCell::new(nsh_core::id_table::IdTable::new()),
             root: Cell::new(UNDEFINED),
+            inline_root: nsh_core::element::engine_context::<InlineRoot>().is_some(),
             os: Cell::new(Os::Ios),
             desktop: Cell::new(false),
             rtl: Cell::new(None),
@@ -3614,7 +3632,7 @@ pub(crate) unsafe extern "C" fn mount(
     let root = d.root.get();
     let windowed = {
         let env = crate::env::current(cx);
-        env.os.is_desktop() && env.idiom != nsh_core::platform::Idiom::Terminal
+        !d.inline_root && env.os.is_desktop() && env.idiom != nsh_core::platform::Idiom::Terminal
     };
     // SAFETY: reads of the root's children; dups for the dispose function.
     let before: Vec<JsValue> = unsafe { &(*node_ptr(cx, root)).children }
@@ -3624,7 +3642,7 @@ pub(crate) unsafe extern "C" fn mount(
     let (owner, result) = reactive::with_root(
         cx,
         || -> Result<Option<crate::window::Implicit>, JsValue> {
-            // A desktop app root is a host: its content is top-level
+            // A standalone desktop app root is a host: its content is top-level
             // `<Window>` scenes, each with a root of its own. A released
             // app that returns views instead is the content of its first
             // window, as it was the main window's before: the runtime
@@ -4318,6 +4336,36 @@ mod tests {
     };
 
     use crate::Host;
+
+    #[test]
+    fn inline_root_keeps_its_window_ref_after_opening_a_detached_main() {
+        use nsh_core::platform::{Environment, Idiom, Os};
+
+        let context = crate::with_inline_root(nsh_core::element::EngineContext::default());
+        let _context = context.enter();
+        let host = Host::new().unwrap();
+        host.set_environment(&Environment {
+            os: Os::MacOs,
+            idiom: Idiom::Desktop,
+            ..Environment::default()
+        });
+        host.eval_source(
+            r#"
+            import { mount } from "nsh";
+            import { currentWindow, Window } from "nsh/desktop";
+            import { element } from "nsh:rt";
+            mount(() => {
+                const surface = currentWindow();
+                Window.open(() => null, { id: "main" });
+                if (currentWindow() !== surface) {
+                    throw new Error("the detached main window replaced the inline root's ref");
+                }
+                return element("view");
+            });
+            "#,
+        )
+        .unwrap();
+    }
 
     #[test]
     fn setup_only_sets_the_status_bar_from_a_json_string() {

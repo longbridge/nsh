@@ -117,7 +117,6 @@ impl Platform {
             clipboard: None,
             host: Default::default(),
             picker: None,
-            speech: None,
             audio: None,
             windows: None,
             login_item: None,
@@ -337,6 +336,7 @@ fn a_release_moves_on_with_the_drags_velocity() {
             card,
             EventKind::PanEnd,
             EventPayload::Pan {
+                origin: nsh_core::geometry::point(px(60.0), px(60.0)),
                 translation: nsh_core::geometry::point(px(80.0), px(20.0)),
                 velocity_x: 300.0,
                 velocity_y: -400.0,

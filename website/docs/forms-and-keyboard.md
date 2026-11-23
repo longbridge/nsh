@@ -617,6 +617,28 @@ Linux the clipboard is read asynchronously, so with `"insert"` the event may com
 inserts; with `"report"` it always comes first.
 Masked inputs on macOS keep AppKit's own paste and report nothing.
 
+A file copied in the macOS Finder leaves its name on the clipboard as text beside its URL, so with `"insert"` the
+input inserts the name, as AppKit's own text fields do. An input that takes files uses `"report"` and inserts the
+text only when the paste held none: `if (e.uris.length === 0 && e.files.length === 0 && e.tooLarge.length === 0) field?.insertText(e.text)`.
+A `uris` entry is a path, not the file's bytes: reading it with `fs/promises` needs a `capabilities.fs.read` root
+that holds it, as for a dropped file.
+
+A pasted file can be large: a video copied in Files or Photos, a document of hundreds of megabytes. Give the input
+the largest file it reads, in bytes, with `pasteMaxSize` (Rust `.paste_max_size(..)`): a larger file is not read,
+and reaches `onPaste` in `tooLarge` with only its `name`, `type` and `size`, so the app can tell the user. On iOS,
+Android and the web the size is checked before the bytes are copied into the app. Without the prop every file is
+read.
+
+```tsx
+<Input
+  pasteMaxSize={20 * 1024 * 1024}
+  onPaste={(e) => {
+    attachments.update((a) => [...a, ...e.files]);
+    if (e.tooLarge.length) notice.set(`${e.tooLarge[0].name} is larger than 20 MB`);
+  }}
+/>;
+```
+
 ## Multiline inputs that grow
 
 A multiline input (`.multiline(true)`, TSX `multiline`) scrolls its text inside its own height. To grow it with its content, feed the content size event's height (`.on_content_size_change(..)`, TSX `onContentSizeChange`) back into its style, with a limit:
@@ -765,6 +787,9 @@ The full height suits a view that reaches the bottom of the surface, as a screen
 
 Overlays keep clear of the keyboard on their own: a [Sheet](../elements/sheet.md#the-software-keyboard) at the bottom,
 a drawer, and the menus, selects and date pickers a phone shows as sheets end at the keyboard's top and move with it.
+A [Popover](../elements/popover.md), and any overlay placed beside an anchor, stays above the keyboard: when the
+keyboard covers the room on its side it moves to the other side of its trigger or gets only the room left, and it is
+placed again as the keyboard moves.
 
 ### The keyboard accessor
 

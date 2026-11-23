@@ -45,7 +45,6 @@ mod menus;
 mod net;
 mod pointer;
 mod selection;
-mod speech;
 mod windows;
 
 pub use audio::AudioCall;
@@ -55,7 +54,7 @@ mod stub;
 use std::{
     io::Write,
     sync::{
-        Arc, OnceLock,
+        Arc, Condvar, Mutex, OnceLock,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
@@ -347,6 +346,14 @@ const CLICK_INTERVAL: Duration = Duration::from_millis(500);
 /// not loaded: no `onLoad` comes, nor an error unless the test fails the
 /// image ([`Headless::fail_images`]), and `Image.getSize` /
 /// `Image.prefetch` fail.
+///
+/// The native modules of the app's sets answer with their fakes
+/// ([`nsh_core::fake`]), which may stand in process-wide: an app whose sets
+/// give fakes waits to start until the apps running with other fakes are
+/// dropped, so two such apps never overlap in one process (two `#[test]`s
+/// that each launch theirs take turns). Apps started with the same fakes,
+/// clones of one registry, run together and share them. A thread holding an
+/// app with fakes must not start one with others: it would wait for itself.
 pub struct Headless {
     engine: Engine,
     batches: Receiver<MountBatch>,
@@ -389,9 +396,9 @@ pub struct Headless {
     failing_images: Vec<stub::Url>,
     /// The URLs that fail to open ([`Headless::fail_open_urls`]).
     failing_url_opens: Vec<stub::Url>,
-    /// The recognizer the test speaks into; `None` when the config gave
-    /// its own (`EngineConfig::speech`).
-    speech: Option<speech::FakeSpeech>,
+    /// The stand-ins the app's sets give headless runs, by name, installed
+    /// when the app started ([`Headless::call_fake`]).
+    fakes: Vec<(&'static str, Arc<dyn nsh_core::fake::Fake>)>,
     /// The speaker the app plays to; `None` when the config gave its own
     /// (`EngineConfig::audio`).
     audio: Option<audio::FakeAudio>,
@@ -431,6 +438,79 @@ pub struct Headless {
     /// The page's history, for an app started at a page's address
     /// ([`Headless::start_at_page`]).
     history: Option<browser::History>,
+    /// The app's turn to have its fakes installed, while its sets give
+    /// any; last, so it ends after the engine stopped.
+    _fakes_turn: Option<FakesTurn>,
+}
+
+/// The fakes installed for the headless apps running in the process, and
+/// how many apps run with them; `None` while none does.
+struct FakesInUse {
+    fakes: Vec<Arc<dyn nsh_core::fake::Fake>>,
+    apps: usize,
+}
+
+static FAKES_IN_USE: Mutex<Option<FakesInUse>> = Mutex::new(None);
+/// Signalled when the last app with the fakes in use is gone.
+static FAKES_FREED: Condvar = Condvar::new();
+
+/// A headless app's turn to have `fakes` installed
+/// ([`Headless`]): taken before they install, given back when the app is
+/// dropped.
+struct FakesTurn;
+
+impl FakesTurn {
+    /// Waits until no app runs with other fakes than `fakes` (the same
+    /// instances, in the same order), then counts the app among those
+    /// running with them; `true` with it when no app ran with them, so
+    /// they are installed now (an app joining others shares their state).
+    /// `None` for no fakes: such an app needs no turn.
+    fn take(fakes: &[(&'static str, Arc<dyn nsh_core::fake::Fake>)]) -> Option<(FakesTurn, bool)> {
+        if fakes.is_empty() {
+            return None;
+        }
+        let same = |in_use: &FakesInUse| {
+            in_use.fakes.len() == fakes.len()
+                && in_use
+                    .fakes
+                    .iter()
+                    .zip(fakes)
+                    .all(|(a, (_, b))| Arc::ptr_eq(a, b))
+        };
+        let mut state = FAKES_IN_USE.lock().unwrap_or_else(|e| e.into_inner());
+        let first = loop {
+            match &mut *state {
+                None => {
+                    *state = Some(FakesInUse {
+                        fakes: fakes.iter().map(|(_, fake)| fake.clone()).collect(),
+                        apps: 1,
+                    });
+                    break true;
+                }
+                Some(in_use) if same(in_use) => {
+                    in_use.apps += 1;
+                    break false;
+                }
+                Some(_) => {
+                    state = FAKES_FREED.wait(state).unwrap_or_else(|e| e.into_inner());
+                }
+            }
+        };
+        Some((FakesTurn, first))
+    }
+}
+
+impl Drop for FakesTurn {
+    fn drop(&mut self) {
+        let mut state = FAKES_IN_USE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(in_use) = &mut *state {
+            in_use.apps -= 1;
+            if in_use.apps == 0 {
+                *state = None;
+                FAKES_FREED.notify_all();
+            }
+        }
+    }
 }
 
 impl Headless {
@@ -469,10 +549,30 @@ impl Headless {
         M: TextEngine + 'static,
         F: FnOnce() -> M + Send + 'static,
     {
-        let speech = config.speech.is_none().then(speech::FakeSpeech::default);
-        if let Some(speech) = &speech {
-            config.speech = Some(Arc::new(speech.clone()));
+        // Before the app runs: its modules answer with their fakes, never
+        // with the machine's devices (a microphone), once no app runs with
+        // other fakes (they may stand in process-wide).
+        let fakes: Vec<_> = config
+            .ui_sets
+            .iter()
+            .flat_map(nsh_core::element::Registry::fakes)
+            .collect();
+        for (n, (name, _)) in fakes.iter().enumerate() {
+            assert!(
+                fakes[..n].iter().all(|(other, _)| other != name),
+                "two fakes are named `{name}`, by two UI sets"
+            );
         }
+        // Installed by the first app with them: one joining an app that runs
+        // shares their state (its sessions), which a reset would take away.
+        let fakes_turn = FakesTurn::take(&fakes).map(|(turn, first)| {
+            if first {
+                for (_, fake) in &fakes {
+                    fake.install();
+                }
+            }
+            turn
+        });
         let audio = config.audio.is_none().then(audio::FakeAudio::default);
         if let Some(audio) = &audio {
             config.audio = Some(Arc::new(audio.clone()));
@@ -539,7 +639,7 @@ impl Headless {
             save_path: None,
             failing_images: Vec::new(),
             failing_url_opens: Vec::new(),
-            speech,
+            fakes,
             audio,
             step: "open".to_owned(),
             applied: 0,
@@ -559,6 +659,7 @@ impl Headless {
             host_posts: None,
             windows,
             history: None,
+            _fakes_turn: fakes_turn,
         })
     }
 
@@ -1001,36 +1102,30 @@ impl Headless {
         Ok(())
     }
 
-    /// What the app's speech recognition sessions (`Speech.start`) asked
-    /// for so far, in order. Headless apps recognize speech: a session
-    /// listens at once (its `start`), and the test speaks for the user
-    /// ([`Headless::hear`]).
-    pub fn speech_requests(&self) -> Vec<nsh_core::speech::SpeechRequest> {
-        self.speech
-            .as_ref()
-            .map(speech::FakeSpeech::requests)
-            .unwrap_or_default()
-    }
-
-    /// The user says `text` (the whole transcript so far) to the session
-    /// listening, which reports it as a result that is not final; then
-    /// waits until the app is quiet. Fails when no session listens.
-    pub fn hear(&mut self, text: &str) -> Result<(), String> {
-        self.fake_speech()?.hear(text)?;
-        self.done()
-    }
-
-    /// Ends the session listening: with `error` (`no-speech`,
-    /// `not-allowed`, ...), or (`None`) as when the user stops talking: the
-    /// transcript as the final result, then the end (`no-speech` when
-    /// nothing was heard). Then waits until the app is quiet. The app's
-    /// `stop()` ends it the same way.
-    pub fn end_speech(
+    /// Calls `method` of the fake named `name` with `args` (JSON): a
+    /// stand-in a native module of the app's sets gives headless runs in
+    /// place of a device ([`nsh_core::fake`]; `"nsh-extra/speech"`'s
+    /// `hear` speaks for the user). Its answer, once the app is quiet
+    /// after it. Fails when no set gives that fake (the app does not turn
+    /// the module on) or the fake refuses the call.
+    pub fn call_fake(
         &mut self,
-        error: Option<nsh_core::speech::SpeechError>,
-    ) -> Result<(), String> {
-        self.fake_speech()?.end(error)?;
-        self.done()
+        name: &str,
+        method: &str,
+        args: &[nsh_core::JsonValue],
+    ) -> Result<nsh_core::JsonValue, String> {
+        self.catch_up();
+        let fake = self
+            .fakes
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, fake)| fake.clone())
+            .ok_or_else(|| {
+                format!("no module of the app gives the fake {name:?}: is the module turned on?")
+            })?;
+        let answer = fake.call(method, args)?;
+        self.done()?;
+        Ok(answer)
     }
 
     /// What the app asked of the speaker so far (`Sound`, `AudioPlayer`),
@@ -1052,12 +1147,6 @@ impl Headless {
             .ok_or_else(|| "the app plays sound with EngineConfig::audio".to_owned())?
             .end()?;
         self.done()
-    }
-
-    fn fake_speech(&self) -> Result<speech::FakeSpeech, String> {
-        self.speech
-            .clone()
-            .ok_or_else(|| "the app recognizes speech with EngineConfig::speech".to_owned())
     }
 
     /// Sends the app's `nsh/host` calls (the root's `Command::HostCall`) to
@@ -4194,6 +4283,79 @@ mod tests {
             .drag("Nothing", point(px(1.0), px(1.0)), DragOptions::default())
             .unwrap_err();
         assert!(error.starts_with("no view matches `Nothing`"), "{error}");
+    }
+
+    /// A drawer's pans: one from the window's left edge across a row (a
+    /// strip at the edge, a block in the middle), and one that opens it to
+    /// the right over a page of a pager, each saying what it heard.
+    #[component]
+    fn DrawerPans() -> impl IntoElement {
+        let edge = signal(String::from("none"));
+        let content = signal(String::from("none"));
+        let said = |e: &PanEvent| format!("{} from {}", e.translation.x.0, e.origin.x.0);
+        view()
+            .flex_1()
+            .child(text(move || format!("Edge {}", edge.get())))
+            .child(text(move || format!("Content {}", content.get())))
+            .child(
+                view()
+                    .flex_row()
+                    .h(px(100.0))
+                    .pan_activation(PanActivation::default().edge(PanEdge::Left))
+                    .on_pan_end(move |e: &PanEvent| edge.set(said(e)))
+                    .child(view().test_id("strip").w(px(16.0)))
+                    .child(view().test_id("middle").w(px(100.0))),
+            )
+            .child(
+                scroll().test_id("pager").horizontal().h(px(200.0)).child(
+                    view()
+                        .test_id("page")
+                        .w(px(1200.0))
+                        .h(px(200.0))
+                        .pan_activation(PanActivation::default().direction(PanDirection::Right))
+                        .on_pan_end(move |e: &PanEvent| content.set(said(e))),
+                ),
+            )
+    }
+
+    #[test]
+    fn a_pan_takes_only_its_way_and_an_edge_pan_only_its_edge() {
+        let mut app =
+            Headless::start(EngineConfig::new(crate::windowed_root::<DrawerPans>())).unwrap();
+        app.first_render().unwrap();
+        let drag = |app: &mut Headless, selector: &str, dx: f32| {
+            app.drag(selector, point(px(dx), px(0.0)), DragOptions::default())
+                .unwrap();
+        };
+        // From the edge (the strip's center, 8 points in), the edge pan
+        // starts, and says where the finger went down.
+        drag(&mut app, "id:strip", 100.0);
+        app.wait_for("Edge 100 from 8").unwrap();
+        // Further in, it does not; toward the edge, neither.
+        drag(&mut app, "id:middle", 100.0);
+        drag(&mut app, "id:strip", -6.0);
+        assert!(app.shows("Edge 100 from 8"));
+        // A drag to the left over the page is the pager's.
+        let Pick::One(pager) = app
+            .screen()
+            .scroll_view(&Selector::parse("id:pager").unwrap())
+        else {
+            panic!("one pager");
+        };
+        drag(&mut app, "id:page", -150.0);
+        assert!(app.shows("Content none"));
+        let scrolled = app.screen().scroll(pager).map(|s| s.x).unwrap();
+        assert!(scrolled > px(100.0), "the pager scrolled: {scrolled:?}");
+        // One to the right is the page's pan, and the pager stays. The
+        // finger goes down at the page's center, as the driver's drags do.
+        let Pick::One(page) = app.screen().view(&Selector::parse("id:page").unwrap()) else {
+            panic!("one page");
+        };
+        let center = app.screen().bounds_in_root(page).unwrap().center();
+        drag(&mut app, "id:page", 120.0);
+        app.wait_for(&format!("Content 120 from {}", center.x.0))
+            .unwrap();
+        assert_eq!(app.screen().scroll(pager).map(|s| s.x), Some(scrolled));
     }
 
     /// A list with a refresh indicator of its own, 100 tall.

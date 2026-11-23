@@ -149,7 +149,13 @@ impl Headless {
         self.screen.reset_js_block();
         let mut grab = Grab::default();
         let pointer = self.pointer();
-        let options = GrabOptions::new(pointer != nsh_core::PointerType::Mouse, false, false, true);
+        let mut options =
+            GrabOptions::new(pointer != nsh_core::PointerType::Mouse, false, false, true);
+        // An edge pan's edges are its window's.
+        if let Some(window) = self.screen.window_area(target) {
+            let at = point(start.x - window.origin.x, start.y - window.origin.y);
+            options = options.start(at, window.size);
+        }
         for &id in &chain {
             if let Some(link) = self.screen.link(id) {
                 grab.add(&id, &link, options);
@@ -269,8 +275,8 @@ impl Headless {
         }
         let activated = Gate::step(&mut finger.gate, &mut finger.candidates, tx, ty);
         // The view's JS responder takes the drag over: nothing native
-        // starts meanwhile.
-        if activated.is_some() && finger.mode == Mode::Idle {
+        // starts meanwhile, but the view's own pan.
+        if finger.mode == Mode::Idle && input::activation_frees(activated, &finger.candidates) {
             finger.mode = Mode::Free;
         }
         if finger.reporting {
@@ -281,7 +287,7 @@ impl Headless {
         // to take the gesture before a native drag starts.
         let js_pending = finger.reporting && first;
         if finger.mode == Mode::Idle && distance > PAN_SLOP && !js_pending {
-            if finger.gate.is_none() {
+            if !input::waits(&finger.candidates, finger.gate.as_ref(), tx, ty) {
                 finger.mode = Mode::Free;
             }
             let started = if self.screen.js_block() {
@@ -418,6 +424,7 @@ impl Headless {
         let (value_x, value_y) = self.animator.pan_values(view);
         let (velocity_x, velocity_y) = finger.velocity.velocity();
         EventPayload::Pan {
+            origin: finger.start,
             translation,
             velocity_x,
             velocity_y,

@@ -449,7 +449,11 @@ pub(crate) fn draw_indicator(cx: &mut DrawCx<'_>, view: &NshView, state: &ViewSt
     // A knob with a thin border of the opposite tone, as UIKit's default
     // indicator style: the appearance says what the window is, not what
     // the content under the knob is, which may be light in a dark app.
-    let a = s.live.alpha;
+    draw_knob(cx, x, y, rw, rh, s.live.alpha);
+}
+
+/// Draws an indicator's knob at `(x, y, w, h)` with `alpha` (0..=1).
+pub(crate) fn draw_knob(cx: &DrawCx<'_>, x: f32, y: f32, rw: f32, rh: f32, a: f32) {
     let (knob, border) = if cx.dark {
         (
             Color::rgba(255, 255, 255, (140.0 * a) as u8),
@@ -475,7 +479,15 @@ pub(crate) fn draw_indicator(cx: &mut DrawCx<'_>, view: &NshView, state: &ViewSt
 }
 
 /// Fills a rounded rectangle with the pass's solid brush.
-fn fill_rounded(cx: &DrawCx<'_>, x: f32, y: f32, w: f32, h: f32, radius: f32, color: Color) {
+pub(crate) fn fill_rounded(
+    cx: &DrawCx<'_>,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    radius: f32,
+    color: Color,
+) {
     let rr = D2D1_ROUNDED_RECT {
         rect: rect_f(x, y, w, h),
         radiusX: radius,
@@ -519,6 +531,26 @@ pub(crate) fn wheel_begin(surface: &Rc<Surface>, view: &NshView) {
 /// [`wheel_begin`] it is a mouse wheel, which settles when idle.
 pub(crate) fn wheel(surface: &Rc<Surface>, view: &NshView, dx: f32, dy: f32) {
     shared::wheel(&Host::new(surface, view), point(Points(dx), Points(dy)));
+}
+
+/// A mouse wheel's notch of `(dx, dy)` points, `line` points a line along
+/// each axis: in the view's own lines (`wheelLineHeight`), and gliding on
+/// a `smoothWheel` view unless the system reduces motion. `None` once it
+/// glides, else the notch for the platform's own wheel to take.
+pub(crate) fn wheel_notch(
+    surface: &Rc<Surface>,
+    view: &NshView,
+    dx: f32,
+    dy: f32,
+    line: Point<Points>,
+) -> Option<(f32, f32)> {
+    let host = Host::new(surface, view);
+    let d = shared::wheel_line(&host, point(Points(dx), Points(dy)), line);
+    if !surface.environment.get().reduce_motion && shared::smooth_wheel(&host) {
+        shared::wheel_smooth(&host, d);
+        return None;
+    }
+    Some((d.x.0, d.y.0))
 }
 
 /// A mouse wheel's notch, `(dx, dy)` points: an animated scroll, which
@@ -654,6 +686,15 @@ fn pick(view: &NshView, x: f32, y: f32) -> Option<NshView> {
     let inside =
         x >= 0.0 && y >= 0.0 && x < state.frame.size.width.0 && y < state.frame.size.height.0;
     if !inside && (state.clips() || state.overflow.is_none()) {
+        return None;
+    }
+    // Outside its clip path, neither it nor anything in it.
+    if state.style.clip_path().is_some_and(|c| {
+        !c.contains(
+            state.frame.size,
+            nsh_core::geometry::point(Points(x), Points(y)),
+        )
+    }) {
         return None;
     }
     let hit = view.with_children(|children| {

@@ -11,15 +11,12 @@
   target); device builds check entitlements against the profile,
   which keeps the app's values in place of its own). iOS: `.app`, `.ipa` with `--sign <identity>
   --profile <file.mobileprovision>` (entitlements come from the profile; icons are compiled by `actool` into `Assets.car`).
-  `ios.extensions` lists prebuilt `.appex` bundles the app builds itself (`crates/nsh-cli/src/app_extensions.rs`):
-  packages copy them into `PlugIns/` with the app's version and sign them before the app; device packages take one
+  `ios.extensions` and `macos.extensions` list prebuilt `.appex` bundles the app builds itself
+  (`crates/nsh-cli/src/app_extensions.rs`): packages copy them into `PlugIns/` (iOS) or `Contents/PlugIns/` (macOS)
+  with the app's version and sign them inside-out before the app; iOS device packages take one
   `--profile` per bundle, chosen by bundle identifier (`crates/nsh-cli/src/provisioning.rs`). `nsh run --target ios`
   copies them into the simulator's development host as well (`run.rs` `dev_host_extensions`), each identifier's app
   prefix replaced by the host's, since iOS installs an extension only under its containing bundle's. NSH builds no Swift.
-  `ios.frameworks` and `ios.linkerFlags`, of `nsh.json` and of the crates' metadata
-  (`crates/nsh-cli/src/ios_frameworks.rs`), reach the link of every generated iOS executable through its `build.rs`
-  (Cargo keeps a dependency's `rustc-link-arg` to that dependency); dynamic frameworks are copied into `Frameworks/`
-  and signed before the app.
   Android: an APK assembled without Gradle (`aapt2 link`, native libraries stored uncompressed and 16 KB ZIP aligned, `apksigner`;
   the debug key unless `--keystore`; `android.launchScreen` becomes a generated launch theme). Linux: a directory `<name>/` with the release runner (`crates/nsh-linux-app`) as
   the executable, `nsh/bundle.nshc`, `nsh/assets/` and `nsh/app.json` (the window title, the GTK application id and
@@ -28,7 +25,9 @@
   WebKitGTK 6.0 (the runner's default `webview` feature, `linux.md`) must be installed where it runs. macOS:
   `<name>.app` with the release runner (`crates/nsh-macos-app`) as `Contents/MacOS/<executable>`,
   `Contents/Resources/nsh/` holding `bundle.nshc`, `assets/` and `app.json` (the window title, appearance and nsh.json
-  `window`), the icon as `AppIcon.icns` (`sips`), signed ad hoc (`codesign -s -`); `--run` opens it.
+  `window`), the icon as `AppIcon.icns` (`sips`), any `macos.extensions` in `Contents/PlugIns/`, signed ad hoc
+  (`codesign -s -`) by default or with `--sign <identity>` (`--options runtime --timestamp`, Hardened Runtime) and
+  verified with `codesign --verify --deep --strict`; `--run` opens it.
   Windows: a directory `<name>\` with the release runner (`crates/nsh-windows-app`, a windowed program: no console)
   as `<name>.exe` (characters Windows forbids in file names dropped), the icon embedded as its icon group 1 (which the
   window class loads, and Explorer and the taskbar show) with Windows' resource update API (`crates/nsh-cli/src/windows.rs`:
@@ -66,7 +65,9 @@
 - Release runtimes' `lib/<abi>/libnsh.so` is stripped with the NDK's `llvm-strip --strip-unneeded` (a quarter of each
   library, which APKs store uncompressed; the dynamic symbols JNI needs stay), and checked again; `symbols/<abi>/`
   keeps the linked library for `ndk-stack` and Play Console. The AARs carry the linked libraries: Gradle strips what
-  it packages and extracts the symbols itself.
+  it packages and extracts the symbols itself. Debug runtimes (and the CLI's debug builds of apps' libraries) are
+  stripped with `--strip-debug` instead: their debug info is most of the library and made development APKs too large
+  to update on emulators; the symbol table stays for crash reports, and `symbols/<abi>/` keeps the linked library.
 - The AARs carry `proguard.txt` (`AAR_KEEP_RULES` in `crates/xtask/src/android.rs`), which an app's minified build
   applies: `libnsh.so` finds `TextLayouts`, `NshView`, `Net` and `TestAgent` and their members by name over JNI
   (`JNI_OnLoad` fails without them) and binds the `native` methods of `Native`, `Net` and `SelectableView` by name,
@@ -86,12 +87,13 @@
   initial default; explicit main-window attributes and later window updates take precedence. Standard hosts
   leave that option false but can request transparency through their window configuration. A view's
   `behindWindow` material does not enable window transparency. An `AppView` never changes its host's window.
-  GPUI and GPUI Kit apps use `nsh_platform_gpui::AppView`, a GPUI view (`gpui.md`): `let view = cx.new(|cx|
-  AppView::new(options, window, cx));` inside a window, `view.read(cx).load(App::Js(bundle))`, then put the entity in
-  any element tree (in a GPUI Kit window, as a child of its `Root`); it fills the space its parent gives it and takes
-  the focus it is given (`Focusable`). The crate depends on `gpui-fast` 0.1 from crates.io (re-exported as
-  `nsh_platform_gpui::gpui`); GPUI Kit's `gpui-fast` feature makes `gpui_component` use that same crate, so both share
-  one GPUI. `open_app_window` opens a window showing an app in a running GPUI app.
+  GPUI and GPUI Kit apps use `nsh_platform_gpui::AppView`, a GPUI view (`gpui.md`): set `AppOptions::inline_root`
+  to `true`, create the view with `cx.new(|cx| AppView::new(options, window, cx))` inside a window, load the plain JS
+  root with `view.read(cx).load(App::Js(bundle))`, then put the entity in any element tree (in a GPUI Kit window, as
+  a child of its `Root`); it fills the space its parent gives it and takes the focus it is given (`Focusable`). The
+  crate depends on `gpui-fast` 0.1 from crates.io (re-exported as `nsh_platform_gpui::gpui`); GPUI Kit's `gpui-fast`
+  feature makes `gpui_component` use that same crate, so both share one GPUI. `open_app_window` opens a window
+  showing an app in a running GPUI app.
 - **An application-owned Tokio runtime (Rust-linked mobile hosts)**: iOS `SurfaceOptions::runtime` and Android
   `nsh::set_runtime(handle, runtime)` (`host.rs`) forward an optional `tokio::runtime::Handle` to
   `EngineConfig::runtime`, per view; `None` keeps the process-wide shared runtime. Both are read each time an engine
@@ -223,8 +225,13 @@
     `destroy`, then joins the engine with the Java lock released. Data crosses the C ABI and JNI as JSON text
     (Swift `JSONSerialization`, Java
     `org.json` as maps and lists), the VM as JSON values converted natively.
-  - A Rust app (`App::Rust`) has no `host`: events reach no one; its own Rust reaches the embedding app's
-    directly ("Native modules", below). The host grants the native functions the app may call through `capabilities.host`.
+  - *Rust code* (`host_call`, `host_call_with`, `host_post`, `on_host_event` of `nsh_core::prelude`; a Rust app, or
+    Rust components in a TSX app) reaches the same channel through the core: the core checks the name and
+    `capabilities.host` and keeps the call by id, and the engine hands each call or post to the channel's handler
+    when the channel is configured, else to the platform's host (`Command::HostCall` / `HostPost`, the web page's),
+    else fails it as `Unavailable`. Answers come back to the core, and the channel's events reach the components'
+    listeners as well as JS's; each language keeps the events of names it does not listen to yet until it does.
+    JS's calls without a channel of their own take the same path.
   - *The URL handler* (`HostChannel::handle_open_url`; Swift `NshAppView.onOpenURL`, C
     `nsh_app_set_open_url_handler`; Java `NshView.setOpenUrlHandler`, `NshView.OpenUrlHandler`): the URLs the app
     opens (`openUrl` of `nsh`, `nsh_core::element::open_url`, a `TextView` with `links="open"`;
@@ -266,13 +273,9 @@
   reaches it. Where no backend is set, the platform's picker shows (`images.md` "Picked images"): on iOS and Android it
   needs nothing of the embedding app (PhotosUI is loaded on first use; Android's result comes to a headless fragment of
   the view's activity).
-- **The host's own recognizer** (`nsh_core::speech::SpeechBackend`): an embedding app that recognizes speech its own
-  way answers the apps' `Speech` with it: `EngineConfig::speech` gets every session's `SpeechRequest` and a
-  `SpeechSink` it reports to from any thread (`start`, `result` with the whole transcript, one `end`), and returns the
-  `SpeechControl` the core stops and aborts it with; `available` answers `Speech.available()`. No `Command::Speech` is
-  sent then. The capability check comes first. Where no backend is set, macOS and iOS recognize with the Speech
-  framework (the app's Info.plist needs `NSMicrophoneUsageDescription` and `NSSpeechRecognitionUsageDescription`,
-  which `nsh package` writes); other platforms end every session with `unavailable`.
+- **The host's own recognizer** (`nsh-extra`'s `speech::SpeechBackend`): an embedding app that recognizes speech
+  its own way gives the module its recognizer with `nsh_extra::speech::set_backend`, process-wide; the apps'
+  `Speech` sessions then reach it instead of the platform's recognizer, after the module's capability check.
 - **The host's locale and text size** (`nsh_core::platform::HostEnvironment`): an embedding app that lets its users
   pick a language or a text size of its own gives them to its views in place of the system's: Rust `AppView::set_locale(Option<Locale>)`
   / `set_font_scale(Option<f32>)` (GPUI, AppKit, GTK, Win32; GPUI's take `cx`), Swift `NshAppView.locale` / `fontScale`
@@ -347,12 +350,13 @@ NSH draws (`src/layers.rs`).
   use it too: its `gpui-fast` feature. `cargo tree -i gpui-fast` must show one version, else the app has two GPUIs
   and NSH's views are not the app's elements. `nsh_platform_gpui::gpui` re-exports NSH's. NSH builds with GPUI Fast
   0.1.14 or later, which GPUI Kit is built on from 0.9.1.
-- **A view.** `cx.new(|cx| AppView::new(options, window, cx))`, then `view.read(cx).load(App::Js(bundle))` (or a
-  Rust app's root); the app puts the entity wherever it wants as a child element. The surface fills the space its
-  parent gives it and follows it when resized (each layout reports the size to the engine). Several views run at once,
-  in one window or several, each with its own engine thread; the process shares only the main-thread queue (`rt.rs`)
-  and the key bindings. Dropping the view (its last entity handle) stops its engine and joins its thread, as does
-  `AppView::stop`.
+- **A view.** `cx.new(|cx| AppView::new(options, window, cx))`, with `options.inline_root = true` for an inline plain JS
+  root. Load the bundle with `view.read(cx).load(App::Js(bundle))`, or a Rust root with
+  `view.read(cx).load(App::Rust(root))`. The host puts the entity wherever it wants as a child element.
+  The surface fills the space its parent gives it and follows it when resized (each layout reports the size to the
+  engine). Several views run at once, in one window or several, each with its own engine thread; the process shares
+  only the main-thread queue (`rt.rs`) and the key bindings. Dropping the view (its last entity handle) stops its
+  engine and joins its thread, as does `AppView::stop`.
 - **Focus.** `AppView` is `Focusable` and a tab stop (a `div` with `track_focus` around the surface element, which
   registers the stop). A press focuses it; keys reach it only while it is focused, so several surfaces and the host's
   inputs never share keys. Its key context `NshAppView` binds Tab and Shift + Tab deeper than GPUI Kit's `Root` (which

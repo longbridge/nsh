@@ -41,8 +41,10 @@ tap id:case-mod-android
 expect Android: false
 expect Exit: function
 expect Calls: not called
+expect Progress: not called
 tap id:call
 expect Calls: done, remove function
+expect Progress: done, stop function
 covers [nsh/mobile] BackHandler
 # mod-clipboard
 tap id:case-mod-clipboard
@@ -130,16 +132,6 @@ expect Settings: not opened
 tap id:settings
 expect Settings: rejected ERR_FEATURE_UNAVAILABLE_ON_PLATFORM
 covers [nsh/mobile] AppSettings
-# mod-speech
-tap id:case-mod-speech
-# nothing recognizes speech there: available() resolves false and a session
-# ends at once with "unavailable"; a lang that is no tag throws a RangeError.
-expect Available: false
-expect Speech: not started
-tap id:start
-expect Refused: threw RangeError
-expect Speech: end unavailable "" true
-covers [nsh] Speech
 # mod-audio
 tap id:case-mod-audio
 # nothing plays sound there: available() resolves false, a sound's load
@@ -290,14 +282,15 @@ covers [nsh] network
 covers [nsh] localeSettings
 # mod-host-channel
 tap id:case-mod-host-channel
-# no embedding app: no parameters, posts go nowhere and calls reject at
-# once with ERR_FEATURE_UNAVAILABLE_ON_PLATFORM.
+# no embedding app: no parameters, posts go nowhere and a call of a name
+# capabilities.host does not grant rejects at once with ERR_ACCESS_DENIED
+# (the grant is checked before whether there is a host).
 expect Params: 0 object
 expect Calls: not called
 expect Call failed: none
 tap id:call
 expect Calls: function, post done
-expect Call failed: Error ERR_FEATURE_UNAVAILABLE_ON_PLATFORM
+expect Call failed: Error ERR_ACCESS_DENIED
 covers [nsh] host
 # mod-ios
 tap id:case-mod-ios
@@ -371,12 +364,13 @@ expect Storage listener stopped function, heard nothing
 covers [nsh] Storage
 # mod-host
 tap id:case-mod-host
-# no host on this platform: the call rejects at once with
-# ERR_FEATURE_UNAVAILABLE_ON_PLATFORM; the root's events reach the listener.
+# no host on this platform and no capabilities.host: the call rejects at
+# once with ERR_ACCESS_DENIED (the grant is checked before whether there
+# is a host); the root's events reach the listener.
 expect Host available: false
 expect Host call: not called
 tap id:call
-expect Host call: rejected Error ERR_FEATURE_UNAVAILABLE_ON_PLATFORM
+expect Host call: rejected Error ERR_ACCESS_DENIED
 event id:heard onHost type=event event=tick payload=1
 expect Host heard: [1]
 # Stopped, the listener hears no more.

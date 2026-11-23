@@ -594,7 +594,7 @@ function Files() {
 
 Escape, Android's back button, a press on the backdrop (TSX's backdrop, a native sheet's in Rust) and a swipe down on a sheet close it natively (`close_on_escape`, `close_on_backdrop_press` and `close_on_swipe`, TSX `closeOnEscape`, `closeOnBackdropPress` and `closeOnSwipe`, each true by default). In Rust, `on_cancel` reports every attempt and `on_close` the close, so leave the dialog out of the view there; a backdrop your app draws closes it with its own press handler, as above. In TSX, `onOpenChange({ open: false, reason })` tells you, so set `open` to `false` there. On iOS, what the dialog shows can close it too, as the close button of a video's system controls does: that is reported as Escape is (`"cancel"`), so the dialog and its video go. To confirm first, set a flag to false and handle the cancel event (`on_cancel`, `onCancel`), which reports every attempt, then close the dialog yourself. On iOS, `.presentation(ModalPresentation::PageSheet)` or `FormSheet` (`presentation="pageSheet"` or `"formSheet"`) presents a sheet that keeps what is behind visible.
 
-See [Dialog](../elements/dialog.md) for every prop. Inside a dialog, the `env(safe-area-inset-*)` variables and the insets are the dialog's own. For system dialogs (an alert with actions, an action sheet) use [`AlertDialog`](../modules/nsh-base.md#alertdialog) from `nsh_base` (TSX: `nsh/base`).
+See [Dialog](../elements/dialog.md) for every prop. Inside a dialog, the `env(safe-area-inset-*)` variables and the insets are the dialog's own. For system dialogs (an alert with actions, an action sheet) use [`AlertDialog`](../modules/nsh-base.md#alertdialog) from `nsh_base` (TSX: `nsh/base`). A press can close a dialog or a sheet and show system UI (an alert, a picker, the share sheet) together, in either order: that UI stays, and on iOS the dialog goes once it closes, its close reported then.
 
 To ask for a short text, such as a new name, give the alert an `input`: iOS, Android, macOS and the web show the system's own text field in it, focused, and the result's `value` is its text. Return chooses the last `"default"` action, and `required` keeps every action but the cancel ones disabled while the field is empty. On Windows, Linux and in the terminal the alert shows without a field and `value` is `null`, so draw your own `Dialog` there.
 
@@ -663,6 +663,67 @@ function Editor() {
 
 A listener made in an effect lasts until the effect runs again or its component goes; in TSX, the function
 `BackHandler.on` returns also stops it. In TSX, `BackHandler.exitApp()` leaves the app; `nsh/mobile` can be imported on iOS too, where `BackHandler`'s calls return at once, so the same code runs on both platforms. See [Platform-specific code](./platform-specific.md).
+
+### Following the back gesture
+
+On Android 14 and later the back gesture reports its progress while the finger moves (predictive back). A view your
+app moves itself, such as a drawer or a sheet, can follow it: `on_back_progress` in Rust,
+`BackHandler.on("progress", listener)` in TSX. Each step has a `phase` (`start`, `move`, `end`, `cancel`), the
+`progress` from 0 to 1, and the `edge` the swipe started at (`left` or `right`). After `end` the press follows and
+your back listeners hear it as above; after `cancel` put the view back. While a progress listener is registered, the
+stacks leave the gesture to your app and do not preview their pop; a gesture a dialog takes is not reported. As with
+back listeners, listen only while the view is open:
+
+```rust tabs
+use nsh_core::prelude::*;
+
+const WIDTH: f32 = 280.0;
+
+pub fn drawer(open: Signal<bool>) -> impl IntoElement {
+    let x = animated_value(0.0);
+    // Listening only while open: the press closes it, the steps move it.
+    effect(move || {
+        if open.get() {
+            on_back_press(move || {
+                open.set(false);
+                true
+            });
+            on_back_progress(move |e: &BackProgressEvent| match e.phase {
+                BackPhase::Start | BackPhase::Move => x.set(-WIDTH * e.progress.0),
+                BackPhase::Cancel => drop(x.spring(0.0, Spring::default())),
+                _ => {}
+            });
+        }
+    });
+    // …
+    view().w(px(WIDTH)).bind_translate_x(&x)
+}
+```
+
+```tsx tabs
+import { createAnimatedValue, effect, type Signal } from "nsh";
+import { BackHandler } from "nsh/mobile";
+
+const WIDTH = 280;
+
+function Drawer({ open }: { open: Signal<boolean> }) {
+  const x = createAnimatedValue(0);
+  // Listening only while open: the press closes it, the steps move it.
+  effect(() => {
+    if (open()) {
+      BackHandler.on("press", () => {
+        open.set(false);
+        return true;
+      });
+      BackHandler.on("progress", (e) => {
+        if (e.phase === "start" || e.phase === "move") x.set(-WIDTH * e.progress);
+        else if (e.phase === "cancel") x.spring(0);
+      });
+    }
+  });
+  // …
+}
+```
 
 ## Tabs and other layouts
 

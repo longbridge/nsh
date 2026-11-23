@@ -12,8 +12,8 @@ use super::{
 use crate::{
     AccessibilityProp, AccessibilityRole, AccessibilityState, AccessibilityValue, Bounds,
     ContextMenuEvent, EdgeInsets, EventKind, EventPayload, Hsla, ImageSource, KeyCapture, KeyEvent,
-    ListContentStyle, LiveRegion, MouseEvent, NativeProp, NodeId, PinchEvent, PointerEvents,
-    Points, PressEvent, Prop, Size, Tag, TouchEvent, WheelEvent,
+    ListContentStyle, LiveRegion, MouseEvent, NativeProp, NodeId, PanActivation, PinchEvent,
+    PointerEvents, Points, PressEvent, Prop, Size, Tag, TouchEvent, WheelEvent,
     geometry::{Axis, DevicePixels, Radians},
     style::Color,
 };
@@ -1539,6 +1539,17 @@ pub trait Accessible: Element {
         self
     }
 
+    /// [`Accessible::hint`] while it is set (`None`: none), for a
+    /// component that hands the app's optional hint on to its element.
+    fn optional_hint(mut self, hint: impl IntoReactive<Option<SharedString>>) -> Self {
+        self.node().bind_attr(hint, |a, hint| {
+            if hint.is_some() || a.rare.is_some() {
+                a.rare_mut().hint = hint;
+            }
+        });
+        self
+    }
+
     /// More about it than its name, which screen readers read after it
     /// (TS: `accessibilityDescription`; `gpui-base`'s `aria_description`):
     /// a dialog's message, what a field expects.
@@ -2047,6 +2058,19 @@ pub trait Interactive: Element {
             super::host::set(self.node(), Prop::PanActivation(Some(pan)));
         }
         super::responder::of(self.node()).claims.push(claim);
+        self
+    }
+
+    /// When its pans activate (TS: `panActivation`), decided on the main
+    /// thread as the finger moves: its native pan (`pan_values`,
+    /// `on_pan_start`) starts then, and only then, so a drawer's pan that
+    /// opens it to the right leaves the drags to the left to its content
+    /// (`PanActivation::default().direction(PanDirection::Right)`), and
+    /// one from the screen's edge takes only those
+    /// (`PanActivation::default().edge(PanEdge::Left)`). A claim on the pan
+    /// ([`TouchClaim::on_pan`](super::TouchClaim::on_pan)) sets it too.
+    fn pan_activation(mut self, activation: PanActivation) -> Self {
+        super::host::set(self.node(), Prop::PanActivation(Some(activation)));
         self
     }
 

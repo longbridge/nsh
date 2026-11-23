@@ -89,6 +89,8 @@ pub(crate) struct Shared {
     /// Measures one line of text for `measureText` (the engine's text
     /// engine).
     pub(crate) measurer: RefCell<Option<TextMeasurer>>,
+    /// Lays one line out for `measureText`'s font extent.
+    pub(crate) line_measurer: RefCell<Option<LineExtentMeasurer>>,
     /// The VM's limits.
     pub(crate) limits: Limits,
     /// Why the VM was stopped (out of memory, over a quota): no JS runs
@@ -108,6 +110,15 @@ impl Shared {
 /// Measures the width of one line of `text` in `font`, in points.
 pub type TextMeasurer =
     Box<dyn Fn(&nsh_core::canvas::CanvasFont, &str) -> nsh_core::geometry::Points>;
+
+/// Lays one line of `text` in `font` out: the font's ascent and descent on
+/// it, in points.
+pub type LineExtentMeasurer = Box<
+    dyn Fn(
+        &nsh_core::canvas::CanvasFont,
+        &str,
+    ) -> (nsh_core::geometry::Points, nsh_core::geometry::Points),
+>;
 
 /// One QuickJS runtime + context with the nsh host APIs installed.
 pub struct Host {
@@ -315,6 +326,12 @@ impl Host {
     /// Sets what canvas `measureText` measures with.
     pub fn set_text_measurer(&mut self, measurer: TextMeasurer) {
         *self.shared.measurer.borrow_mut() = Some(measurer);
+    }
+
+    /// Sets what canvas `measureText`'s `fontBoundingBoxAscent` /
+    /// `fontBoundingBoxDescent` lay the line out with (without it they are 0).
+    pub fn set_line_extent_measurer(&mut self, measurer: LineExtentMeasurer) {
+        *self.shared.line_measurer.borrow_mut() = Some(measurer);
     }
 
     /// Sets the handler for uncaught exceptions (in event handlers, timers and
@@ -1350,7 +1367,7 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
             }
             obj.set("uris", list)?;
             obj.set("mimeTypes", types)?;
-            // Contents come only where there are no paths (the Web).
+            // Contents come only where there are no paths (the Web, macOS file promises).
             obj.set("files", rquickjs::Array::new(cx.clone())?)?;
             if let EventPayload::FileDropAt { page_position, .. } = payload {
                 obj.set("pagePosition", point_object(cx, *page_position)?)?;
@@ -1422,6 +1439,15 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
                 files.set(index, value)?;
             }
             obj.set("files", files)?;
+            let too_large = rquickjs::Array::new(cx.clone())?;
+            for (index, file) in paste.too_large.iter().enumerate() {
+                let unread = rquickjs::Object::new(cx.clone())?;
+                unread.set("name", file.name.as_str())?;
+                unread.set("type", file.mime.as_str())?;
+                unread.set("size", file.len as f64)?;
+                too_large.set(index, unread)?;
+            }
+            obj.set("tooLarge", too_large)?;
             let uris = rquickjs::Array::new(cx.clone())?;
             for (index, uri) in paste.uris.iter().enumerate() {
                 uris.set(index, uri.as_str())?;
@@ -1434,8 +1460,6 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
         EventPayload::FileRequest { id, .. } => obj.set("id", *id)?,
         // And offscreen canvas renders.
         EventPayload::CanvasImage { id, .. } => obj.set("id", *id)?,
-        // And speech sessions' events (`Speech`'s listeners get them).
-        EventPayload::Speech { id, .. } => obj.set("id", *id)?,
         // And sounds' and players' events (their objects' listeners).
         EventPayload::Audio { id, .. } => obj.set("id", *id)?,
         // Handled natively (`crate::window`).
@@ -1465,6 +1489,7 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
         }
         EventPayload::Layout(frame) => obj.set("bounds", bounds_object(cx, *frame)?)?,
         EventPayload::Pan {
+            origin,
             translation,
             velocity_x,
             velocity_y,
@@ -1472,6 +1497,7 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
             value_y,
         }
         | EventPayload::PanCancelled {
+            origin,
             translation,
             velocity_x,
             velocity_y,
@@ -1482,6 +1508,7 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
                 "cancelled",
                 matches!(payload, EventPayload::PanCancelled { .. }),
             )?;
+            obj.set("origin", point_object(cx, *origin)?)?;
             obj.set("translation", point_object(cx, *translation)?)?;
             let velocity = rquickjs::Object::new(cx.clone())?;
             velocity.set("x", *velocity_x)?;
@@ -1617,7 +1644,7 @@ fn bounds_object<'js>(
     Ok(obj)
 }
 
-/// `Modifiers` (`{ control, alt, shift, platform }`, GPUI's names).
+/// `Modifiers` (`{ control, alt, shift, platform, altGraph }`, GPUI's names).
 fn modifiers_object<'js>(
     cx: &Ctx<'js>,
     m: &nsh_core::keymap::Modifiers,
@@ -1627,6 +1654,7 @@ fn modifiers_object<'js>(
     obj.set("alt", m.alt)?;
     obj.set("shift", m.shift)?;
     obj.set("platform", m.cmd)?;
+    obj.set("altGraph", m.alt_graph)?;
     Ok(obj)
 }
 
@@ -2239,6 +2267,7 @@ const report = (v) => text(String(v));
             let modifiers: rquickjs::Object = obj.get("modifiers").unwrap();
             assert!(modifiers.get::<_, bool>("control").unwrap());
             assert!(!modifiers.get::<_, bool>("shift").unwrap());
+            assert!(!modifiers.get::<_, bool>("altGraph").unwrap());
             assert_eq!(obj.get::<_, u32>("clickCount").unwrap(), 2);
         });
     }

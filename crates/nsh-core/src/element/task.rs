@@ -116,7 +116,7 @@ pub(crate) enum Action {
     HostCall {
         name: String,
         args: crate::JsonValue,
-        answer: AnswerSlot<Result<crate::JsonValue, super::JsError>>,
+        answer: AnswerSlot<Result<crate::JsonValue, crate::host_channel::HostError>>,
     },
     /// Hands data to function `name` of the embedding app, with no answer
     /// (`nsh/host`'s `post`).
@@ -173,8 +173,6 @@ pub(crate) enum Action {
         Box<crate::canvas::render::RenderRequest>,
         AnswerSlot<Result<Vec<u8>, super::JsError>>,
     ),
-    /// A speech recognition session's request ([`crate::speech`]).
-    Speech(SpeechAction),
     /// A notification's request ([`crate::notifications`]).
     Notification(NotificationAction),
     /// Reads whether the app launches at login (`None`) or turns it on
@@ -301,24 +299,6 @@ pub(crate) enum Action {
     /// the node, with the layout of the last commit; `None`: the pointer
     /// left.
     HoverAt(NodeId, Option<crate::MouseEvent>),
-}
-
-/// What a speech recognition session asks of the core
-/// ([`Action::Speech`]).
-pub(crate) enum SpeechAction {
-    /// Starts session `id`, reporting to `sink`; the session running is
-    /// aborted first.
-    Start {
-        id: u32,
-        request: crate::speech::SpeechRequest,
-        sink: crate::speech::SpeechSink,
-    },
-    /// Stops session `id`: it finishes what it heard, then ends.
-    Stop(u32),
-    /// Ends session `id` at once, without an error.
-    Abort(u32),
-    /// Whether speech can be recognized; the answer resolves the slot.
-    Available(AnswerSlot<bool>),
 }
 
 /// What a sound or a player asks of the core ([`Action::Audio`]).
@@ -549,6 +529,11 @@ pub(crate) struct Executor {
     derived: RefCell<super::animated::Derived>,
     /// The components' listeners of the back button.
     pub(crate) back: Rc<RefCell<super::back::BackListeners>>,
+    /// The components' listeners of the back gesture's steps.
+    pub(crate) back_progress: Rc<RefCell<super::back::BackProgressListeners>>,
+    /// The components' listeners of the host's events
+    /// ([`super::on_host_event`]).
+    pub(crate) host_events: Rc<RefCell<super::host_events::HostListeners>>,
     /// What runs as the app quits ([`super::desktop::on_app_quit`]).
     pub(crate) quit: Rc<RefCell<super::quit::QuitListeners>>,
     /// The quit listeners' work still running ([`crate::Core::start_quit`]).

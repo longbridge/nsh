@@ -32,6 +32,21 @@ final class StackBox extends FrameLayout implements Node {
     final int id;
     final Decor decor = new Decor();
 
+    // `clipPath`: what it draws shows, and touches reach it and its
+    // children, only inside it (`Decor.drawClipped`, `Decor.clipsOut`).
+    @Override
+    public void draw(android.graphics.Canvas canvas) {
+        decor.drawClipped(canvas, this, () -> super.draw(canvas));
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(android.view.MotionEvent e) {
+        if (e.getActionMasked() == android.view.MotionEvent.ACTION_DOWN && decor.clipsOut(this, e.getX(), e.getY())) {
+            return false;
+        }
+        return super.dispatchTouchEvent(e);
+    }
+
     /** An outer box shadow draws outside the bounds, and compositing the
      * view at alpha < 1 into the bounds-clipped offscreen buffer would cut
      * it; such a view reports no overlapping rendering, so the alpha
@@ -455,25 +470,62 @@ final class StackBox extends FrameLayout implements Node {
             });
             addView(toolbar, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0));
             leadTitle = new android.widget.TextView(context);
-            // The toolbar's own title style, from the same theme (a host's toolbarStyle, the device's font).
-            android.content.res.TypedArray style = context.obtainStyledAttributes(null,
-                    new int[] {android.R.attr.titleTextAppearance}, android.R.attr.toolbarStyle, 0);
-            int appearance = style.getResourceId(0, android.R.style.TextAppearance_Material_Widget_Toolbar_Title);
-            style.recycle();
-            leadTitle.setTextAppearance(appearance);
             leadTitle.setSingleLine(true);
             leadTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            // The gap to the leading item is the title's own padding: a margin on a
-            // toolbar's view left no gap on an API 35 emulator.
-            leadTitle.setPaddingRelative(Math.round(16 * mounter.density), 0, 0, 0);
             leadRow = new HeaderRow(context);
             leadRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
             themeInsetStart = toolbar.getContentInsetStart();
             centerTitle = new android.widget.TextView(context);
-            centerTitle.setTextAppearance(appearance);
             centerTitle.setSingleLine(true);
             centerTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            titleStyle();
             colors();
+        }
+
+        /** The configuration {@link #titleStyle} read its style in. */
+        private android.content.res.Configuration styledIn;
+
+        /**
+         * Styles the titles as the toolbar's own title, from the same theme (a
+         * host's toolbarStyle, the device's font). A text appearance is
+         * resolved when it is set, and its size depends on the configuration:
+         * smaller in landscape, larger with a larger font scale. The activity
+         * keeps its views through those changes, so the titles are styled
+         * again when the configuration they were styled in no longer holds.
+         */
+        private void titleStyle() {
+            styledIn = new android.content.res.Configuration(getResources().getConfiguration());
+            android.content.res.TypedArray style = getContext().obtainStyledAttributes(null,
+                    new int[] {android.R.attr.titleTextAppearance}, android.R.attr.toolbarStyle, 0);
+            int appearance = style.getResourceId(0, android.R.style.TextAppearance_Material_Widget_Toolbar_Title);
+            style.recycle();
+            // The toolbar's own title (a page with a plain title and no leading item).
+            toolbar.setTitleTextAppearance(getContext(), appearance);
+            leadTitle.setTextAppearance(appearance);
+            centerTitle.setTextAppearance(appearance);
+            // The gap to the leading item is the title's own padding: a margin on a
+            // toolbar's view left no gap on an API 35 emulator.
+            leadTitle.setPaddingRelative(Math.round(16 * mounter.density), 0, 0, 0);
+        }
+
+        /** Styles the titles again if the configuration changed since (a text appearance resets their colors). */
+        private void restyle() {
+            if (styledIn.diff(getResources().getConfiguration()) == 0) return;
+            titleStyle();
+            colors();
+        }
+
+        @Override
+        protected void onConfigurationChanged(android.content.res.Configuration config) {
+            super.onConfigurationChanged(config);
+            restyle();
+        }
+
+        /** A screen out of the window misses configuration changes: one coming back catches up. */
+        @Override
+        protected void onAttachedToWindow() {
+            super.onAttachedToWindow();
+            restyle();
         }
 
         /**

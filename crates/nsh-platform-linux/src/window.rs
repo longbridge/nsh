@@ -69,6 +69,9 @@ thread_local! {
     static LAUNCHER: RefCell<Launcher> = RefCell::default();
     /// Counts the windows shown activated ([`AppWindow::shown`]).
     static SHOWN: Cell<u64> = const { Cell::new(0) };
+    /// How many of the app's own windows opened so far: the oldest still
+    /// open is its primary one ([`primary`]).
+    static OPENED: Cell<u64> = const { Cell::new(0) };
     /// The XDG activation token for the next window activation, and when it
     /// came ([`give_activation_token`]).
     static ACTIVATION_TOKEN: RefCell<Option<(String, Instant)>> = const { RefCell::new(None) };
@@ -271,6 +274,9 @@ fn key_changed(surface: &Rc<Surface>, window: &gtk::Window) {
         .find(|(_, w)| &w.window == window)
         .map(|(id, _)| *id);
     if let Some(id) = id {
+        if focused {
+            surface.fps_follow(Some((window.upcast_ref(), &overlay_of(surface, id))));
+        }
         active_changed(surface, id, focused);
         state_changed(surface, id);
     }
@@ -328,6 +334,8 @@ pub(crate) struct AppWindow {
     shown: u64,
     /// The title bar area reported last (`WindowEvent::TitleBar`).
     title_bar: Option<EdgeInsets>,
+    /// When it opened (a count): the oldest open window is the primary one.
+    opened: u64,
 }
 
 /// What the main window keeps.
@@ -407,6 +415,30 @@ fn close_decision(a: &WindowAttributes) -> Decision {
 /// Whether dialog root `id` is shown in a window of its own.
 pub(crate) fn is_window(surface: &Surface, id: NodeId) -> bool {
     surface.windows.borrow().contains_key(&id)
+}
+
+/// The content overlay of app window `id`.
+fn overlay_of(surface: &Surface, id: NodeId) -> gtk::Overlay {
+    surface.windows.borrow()[&id].overlay.clone()
+}
+
+/// The performance monitor follows one of the app's own windows, a
+/// top-level one first, or the host window when none is open (Window Model
+/// v2 hides the host window, so only an app window's frames count).
+pub(crate) fn fps_follow_any(surface: &Surface) {
+    let target = {
+        let windows = surface.windows.borrow();
+        let mut all: Vec<_> = windows.iter().collect();
+        all.sort_by_key(|(id, _)| **id);
+        all.iter()
+            .find(|(_, w)| w.parent.is_none())
+            .or(all.first())
+            .map(|(_, w)| (w.window.clone(), w.overlay.clone()))
+    };
+    match &target {
+        Some((window, overlay)) => surface.fps_follow(Some((window.upcast_ref(), overlay))),
+        None => surface.fps_follow(None),
+    }
 }
 
 /// The window the surface is in.
@@ -559,12 +591,26 @@ fn open(surface: &Rc<Surface>, view: &NshView, open: &OpenWindow) {
             no_input: false,
             shown: 0,
             title_bar: None,
+            opened: OPENED.with(|n| {
+                n.set(n.get() + 1);
+                n.get()
+            }),
         },
     );
     set_attributes(surface, id, &options.attributes);
+    if surface.fps_window().is_none() {
+        surface.fps_follow(Some((window.upcast_ref(), &overlay_of(surface, id))));
+    }
     // The root is laid out at the window's size before it shows (the
     // allocation corrects it once mapped).
     resize(surface, view, content.width.0, content.height.0);
+    // Its scale is the app's `pixelRatio()` while it is the primary window.
+    let weak = Rc::downgrade(surface);
+    view.connect_scale_factor_notify(move |_| {
+        if let Some(surface) = weak.upgrade() {
+            crate::system::window_environment(&surface);
+        }
+    });
     let weak = Rc::downgrade(surface);
     glib::timeout_add_local_once(FIRST_FRAME, move || {
         if let Some(surface) = weak.upgrade() {
@@ -773,6 +819,8 @@ fn resize(surface: &Surface, view: &NshView, width: f32, height: f32) {
         view.queue_allocate();
     }
     surface.control(|c| c.set_root_size(id, size, EdgeInsets::default()));
+    // The primary window's size is the app's `windowSize()`.
+    crate::system::window_environment(surface);
     // The dialogs shown in it follow.
     crate::navigation::resize_modals(surface);
     crate::system::root_resized(view, width, height);
@@ -2007,6 +2055,26 @@ pub(crate) fn holds(surface: &Surface, view: &NshView) -> bool {
     &root != view && view.is_ancestor(&root)
 }
 
+/// The root view whose frame clock drives the surface's animations
+/// ([`Surface::ensure_ticking`]): the main window's while it shows, else
+/// that of a window of the app's own that shows, the one with the keyboard
+/// first. A GDK frame clock does not tick for a window that is not mapped.
+pub(crate) fn tick_root(surface: &Surface) -> NshView {
+    if surface.root.is_mapped() {
+        return surface.root.clone();
+    }
+    let Ok(windows) = surface.windows.try_borrow() else {
+        return surface.ticking_or_root();
+    };
+    let shown = windows
+        .values()
+        .filter(|w| w.window.is_mapped())
+        .filter_map(|w| Some((w.window.is_active(), w.view.upgrade()?)));
+    shown
+        .max_by_key(|(active, _)| *active)
+        .map_or_else(|| surface.root.clone(), |(_, view)| view)
+}
+
 /// The root view of the window keys go to: where announcements come from,
 /// so the screen reader reads them in the window the user is in.
 pub(crate) fn key_root(surface: &Surface) -> NshView {
@@ -2111,9 +2179,36 @@ pub(crate) fn removed(surface: &Rc<Surface>, view: &NshView) -> bool {
         timer.remove();
     }
     w.overlay.set_child(None::<&gtk::Widget>);
+    if surface.fps_window().as_ref() == Some(w.window.upcast_ref()) {
+        fps_follow_any(surface);
+    }
     lost_key(surface, &w.window);
     w.window.destroy();
+    // Another window may be the primary one now.
+    crate::system::window_environment(surface);
     true
+}
+
+/// The app's primary window: the oldest of its own windows still open
+/// that was given a size. `None` while it shows none.
+fn primary_window(surface: &Surface) -> Option<NodeId> {
+    surface
+        .windows
+        .borrow()
+        .iter()
+        .filter(|(_, w)| w.reported.is_some())
+        .min_by_key(|(_, w)| w.opened)
+        .map(|(id, _)| *id)
+}
+
+/// The size and scale of the app's primary window ([`primary_window`]):
+/// what the app sees as `windowSize()` and `pixelRatio()`.
+pub(crate) fn primary(surface: &Surface) -> Option<(Size<Points>, f32)> {
+    let id = primary_window(surface)?;
+    let windows = surface.windows.borrow();
+    let w = windows.get(&id)?;
+    let view = w.view.upgrade()?;
+    Some((w.reported?, crate::system::pixel_ratio(&view)))
 }
 
 /// The app stopped: its windows go.
@@ -2131,6 +2226,8 @@ pub(crate) fn clear(surface: &Surface) {
         w.overlay.set_child(None::<&gtk::Widget>);
         w.window.destroy();
     }
+    crate::system::window_environment(surface);
+    surface.fps_follow(None);
     // In the background the main window is the one that would be active
     // for the next app (a development host's reload).
     if in_background() {
@@ -2478,5 +2575,43 @@ mod tests {
                 "{user}"
             );
         }
+    }
+
+    /// Window Model v2 keeps the host window hidden: the performance
+    /// monitor measures and shows in the app's `<Window>`, and goes back
+    /// to the host window when the last one closes.
+    #[test]
+    fn the_fps_monitor_follows_the_apps_window() {
+        crate::gtk_test::run(|| {
+            let surface = crate::gtk_test::surface();
+            let host = gtk::Overlay::new();
+            host.set_child(Some(&surface.root));
+            *surface.fps_overlay.borrow_mut() = host.downgrade();
+            surface.enable_fps();
+            let fps = surface.fps_for_test();
+            let panel = fps.hud_panel_for_test();
+            assert_eq!(panel.parent().as_ref(), Some(host.upcast_ref()));
+            let view = NshView::new(40, nsh_core::ViewKind::View);
+            open(&surface, &view, &OpenWindow::default());
+            let (window, overlay) = {
+                let windows = surface.windows.borrow();
+                let w = &windows[&40];
+                (w.window.clone(), w.overlay.clone())
+            };
+            assert_eq!(surface.fps_window().as_ref(), Some(window.upcast_ref()));
+            assert_eq!(panel.parent().as_ref(), Some(overlay.upcast_ref()));
+            // A second window does not take it until it becomes active.
+            let second = NshView::new(41, nsh_core::ViewKind::View);
+            open(&surface, &second, &OpenWindow::default());
+            assert_eq!(surface.fps_window().as_ref(), Some(window.upcast_ref()));
+            // Closing the followed window hands it to the one left.
+            assert!(removed(&surface, &view));
+            let other = surface.windows.borrow()[&41].window.clone();
+            assert_eq!(surface.fps_window().as_ref(), Some(other.upcast_ref()));
+            assert!(removed(&surface, &second));
+            assert!(surface.fps_window().is_none());
+            assert_eq!(panel.parent().as_ref(), Some(host.upcast_ref()));
+            surface.disable_fps();
+        });
     }
 }

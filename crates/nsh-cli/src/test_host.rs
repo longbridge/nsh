@@ -33,6 +33,10 @@ const CONNECT: Duration = Duration::from_secs(60);
 /// when there is one: [`opens_on_a_display`]); `foreground` lets the apps of the
 /// hosts that run them in the background ([`runs_in_background`]) become the
 /// active app.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the flags of `nsh test --target`, one each"
+)]
 pub(crate) fn starter(
     target: Target,
     browser: Option<&Path>,
@@ -41,6 +45,7 @@ pub(crate) fn starter(
     device: Option<&str>,
     display: Option<usize>,
     foreground: bool,
+    release: bool,
 ) -> anyhow::Result<StartHost> {
     if browser.is_some() && target != Target::Web {
         anyhow::bail!("--browser goes with --target web");
@@ -63,9 +68,9 @@ pub(crate) fn starter(
         anyhow::bail!("{FOREGROUND_TARGETS}");
     }
     match target {
-        Target::Web => return crate::test_web::starter(browser),
-        Target::Ios => return crate::test_ios::starter(work, fps, device),
-        Target::Android => return crate::test_android::starter(work, device),
+        Target::Web => return crate::test_web::starter(browser, release),
+        Target::Ios => return crate::test_ios::starter(work, fps, device, release),
+        Target::Android => return crate::test_android::starter(work, device, release),
         _ => {}
     }
     if !matches!(
@@ -79,8 +84,10 @@ pub(crate) fn starter(
     // Built (in a checkout) or found once, before the first test.
     let host = crate::runtime::test_host(target.platform())?;
     Ok(Arc::new(move |entry: &Path, options: &HostOptions| {
-        start(target, &host, entry, options, fps, display, foreground)
-            .map(|h| Box::new(h) as Box<dyn Host>)
+        start(
+            target, &host, entry, options, fps, display, foreground, release,
+        )
+        .map(|h| Box::new(h) as Box<dyn Host>)
     }))
 }
 
@@ -177,6 +184,10 @@ impl Drop for TestHost {
 }
 
 /// Builds `entry`, serves it in a test session and starts `host` on it.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the flags of `nsh test --target`, one each"
+)]
 fn start(
     target: Target,
     host: &Path,
@@ -185,8 +196,9 @@ fn start(
     fps: bool,
     display: Option<usize>,
     foreground: bool,
+    release: bool,
 ) -> Result<TestHost, String> {
-    let server = serve(entry, options)?;
+    let server = serve(entry, options, release)?;
     let entry = resolve(entry)?;
     if matches!(
         target,
@@ -194,7 +206,8 @@ fn start(
     ) {
         crate::package::note_hidden_main_window(&entry);
     }
-    let dir = entry.parent().unwrap_or(Path::new("."));
+    let app_dir = nsh_bundler::app_dir::app_dir_of(&entry);
+    let dir = app_dir.as_path();
     let url = format!("ws://{}{WS_PATH}", server.local_addr());
     // A fresh data directory: what the app keeps (its storage) starts empty
     // in every test, as headless runs' does.
@@ -298,20 +311,24 @@ fn resolve(entry: &Path) -> Result<std::path::PathBuf, String> {
 /// serves it (the app's assets, its log lines shown as `nsh run` shows
 /// them); for an app of Rust only, the host's own root, which its
 /// development host is built with.
-pub(crate) fn serve(entry: &Path, options: &HostOptions) -> Result<DevServer, String> {
+pub(crate) fn serve(
+    entry: &Path,
+    options: &HostOptions,
+    release: bool,
+) -> Result<DevServer, String> {
     let entry = &resolve(entry)?;
     let root = crate::rust_app::is_root(entry);
     let built = if root {
         None
     } else {
-        Some(build::compile(entry, false).map_err(|e| e.plain)?)
+        Some(build::compile(entry, release).map_err(|e| e.plain)?)
     };
     // The media files a literal `asset:/` URL names, from where the build
     // named the imported ones: the app's directory, as a package has them.
     let dir = built
         .as_ref()
         .and_then(|built| built.asset_root.clone())
-        .unwrap_or_else(|| entry.parent().unwrap_or(Path::new(".")).to_path_buf());
+        .unwrap_or_else(|| nsh_bundler::app_dir::app_dir_of(entry));
     let trace = options.trace.clone();
     let server = DevServer::start(
         "127.0.0.1:0".parse().expect("an address"),
@@ -410,7 +427,7 @@ mod tests {
     fn foreground_is_for_the_hosts_that_run_in_the_background() {
         for target in [Target::Tui, Target::Web, Target::Ios, Target::Android] {
             assert!(!runs_in_background(target), "{target:?}");
-            let err = starter(target, None, Path::new("."), false, None, None, true).err();
+            let err = starter(target, None, Path::new("."), false, None, None, true, false).err();
             assert_eq!(
                 err.map(|e| e.to_string()).as_deref(),
                 Some(FOREGROUND_TARGETS),
@@ -435,7 +452,17 @@ mod tests {
             Target::Android,
         ] {
             assert!(!opens_on_a_display(target), "{target:?}");
-            let err = starter(target, None, Path::new("."), false, None, Some(2), false).err();
+            let err = starter(
+                target,
+                None,
+                Path::new("."),
+                false,
+                None,
+                Some(2),
+                false,
+                false,
+            )
+            .err();
             assert_eq!(
                 err.map(|e| e.to_string()).as_deref(),
                 Some(DISPLAY_TARGETS),
@@ -466,6 +493,7 @@ mod tests {
                 false,
                 Some("iPhone 16"),
                 None,
+                false,
                 false,
             )
             .err();

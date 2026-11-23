@@ -145,6 +145,7 @@ and take their look from the app.
 | `<Tab>`, `<Tabs>` | `nsh_base::tab()`, `tabs()` | One tab of a tab list, and the list | [Tabs](./tabs.md) |
 | `<TextView>` | `nsh_base::text_view()` | Shows a Markdown or HTML document with texts and views | [TextView](./text-view.md) |
 | `<Toast>`, `<ToastStack>` | `nsh_base::toast()`, `toast_stack()` | A toast's semantic root; toasts laid out as layers from an edge | [Toast](./toast.md) |
+| `<TitleBar>` | `nsh_base::title_bar()` | A window's own title bar row that keeps clear of the window controls where it meets them | [TitleBar](./title-bar.md) |
 | `<Toggle>`, `<ToggleGroup>` | `nsh_base::toggle()`, `toggle_group()` | A button that is on or off, and a toolbar of them | [Toggle](./toggle.md) |
 | `<Toolbar>`, `<ToolbarGroup>`, `<ToolbarSeparator>` | `nsh_base::toolbar()`, `toolbar_group()`, `toolbar_separator()` | A bar of buttons, toggles and links, one stop of the keyboard focus | [Toolbar](./toolbar.md) |
 | `<Tooltip>` | `nsh_base::tooltip()` | A hint next to its trigger, on hover or a held finger | [Tooltip](./tooltip.md) |
@@ -607,10 +608,12 @@ work in the app's code per frame. See [touch and gestures](../docs/touch-and-ges
 | `rotation` | `.rotation_value(&angle)` | `{ angle?: AnimatedValue }` | Two-finger rotations drive `angle` (degrees). |
 | `onRotationStart` / `onRotationEnd` | `.on_rotation_start(..)` / `.on_rotation_end(..)` | `(e: { rotation: number; velocity: number }) => void` | A rotation started / ended. |
 
-`PanEvent` is `{ cancelled, translation, velocity, value? }` (in Rust `cancelled`, `translation`, `velocity_x`,
-`velocity_y`, `value_x`, `value_y`): whether the system cancelled the drag, the translation since the start and the
+`PanEvent` is `{ cancelled, origin, translation, velocity, value? }` (in Rust `cancelled`, `origin`, `translation`,
+`velocity_x`, `velocity_y`, `value_x`, `value_y`): whether the system cancelled the drag, where its finger went down
+(in the surface, as a touch's page position), the translation since the start and the
 velocity in points per second (`Point`s), and the bound values at that moment, `{ x?, y? }` for the axes `pan` binds
-(a drag can grab a value mid-animation).
+(a drag can grab a value mid-animation). A view's `panActivation` decides when its pan starts: past its offsets, one
+`direction` only, or from a screen `edge` ([Touch and gestures](../docs/touch-and-gestures.md#one-way-or-from-a-screen-edge)).
 
 ### Raw touches and the responder system
 

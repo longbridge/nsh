@@ -8,7 +8,8 @@ group: platforms
 # Packaging
 
 `nsh package` turns an app into something you can install: a `.app` for the iOS simulator, a signed `.ipa` for iOS
-devices, a signed `.apk` or `.aab` (Android App Bundle, for Google Play) for Android, an ad hoc signed `.app` for macOS, a directory and `.tar.gz` for Linux, a directory, `.zip` and installer (`<Name>-setup.exe`, with Inno Setup) for Windows, or a static site for the web. It needs no Xcode project and no Gradle.
+devices, a signed `.apk` or `.aab` (Android App Bundle, for Google Play) for Android, a signed `.app` (ad hoc without
+`--sign`) for macOS, a directory and `.tar.gz` for Linux, a directory, `.zip` and installer (`<Name>-setup.exe`, with Inno Setup) for Windows, or a static site for the web. It needs no Xcode project and no Gradle.
 
 - **A Rust app** (`nsh.json` names its `"root"`) is packaged from its directory. `nsh` builds the target's runner in
   release mode with your crate compiled in and the root mounted, with no QuickJS: Cargo, the Rust target of the
@@ -64,7 +65,7 @@ TSX app adds its entry (`nsh package App.tsx --target …`).
 `nsh.json` also holds `rust` and `root` (the app's crates and its root component, [Building with Rust](./rust.md)),
 `theme` and `appearance`, `tailwind` (see [Tailwind](./tailwind.md)), `capabilities` (see
 [Sandbox and capabilities](./sandbox-and-capabilities.md)), `android` (`targetSdk`, `usesCleartextTraffic`, `permissions`, `libraries`, `manifestPlaceholders`, `queries` and `application`, [below](#target-api-level)), `ios` and `macos` (the `Info.plist` keys and entitlements
-of their packages, [below](#infoplist-keys-and-entitlements); `ios.extensions`, [app extensions](#app-extensions); `ios.frameworks` and `ios.linkerFlags`, [frameworks](#frameworks-and-linker-flags); `macos.activationPolicy`, a [menu bar app](./macos.md#menu-bar-apps)) and `updater`, which makes desktop packages update themselves
+of their packages, [below](#infoplist-keys-and-entitlements); `ios.extensions` and `macos.extensions`, [iOS app extensions](#app-extensions) and [macOS app extensions](#macos-app-extensions); `macos.activationPolicy`, a [menu bar app](./macos.md#menu-bar-apps)) and `updater`, which makes desktop packages update themselves
 (see [App Updates](./app-updates.md)) and every native package take [OTA updates](./ota-updates.md); [Project structure](./project-structure.md#nshjson) lists
 every key. A key or value NSH cannot read is reported as a warning and left out, so an app written for a newer NSH
 still builds with an older one, and the warning catches a typo.
@@ -86,7 +87,7 @@ nsh package --target android --app-version 1.4.0 --build 42
 | `--app-version <version>` | Version, such as `1.2.0`. |
 | `--build <n>` | Build number. |
 | `--icon <png>` | App icon: a square PNG, ideally 1024×1024. |
-| `--sign <identity>` | iOS: the code signing identity for devices. |
+| `--sign <identity>` | iOS and macOS: the code signing identity (for iOS devices, or macOS packages with Hardened Runtime and a secure timestamp). |
 | `--profile <file>` | iOS: the provisioning profile for devices (`.mobileprovision`). Repeat it to give each [app extension](#app-extensions) its own. |
 | `--keystore <file>` | Android: a release keystore (default: the debug key). |
 | `--key-alias <alias>` | Android: the key alias in the keystore. |
@@ -189,45 +190,6 @@ data through an app group, which both list in their entitlements. An app that st
   "ios": { "infoPlist": { "NSSupportsLiveActivities": true } }
 }
 ```
-
-### Frameworks and linker flags
-
-An iOS SDK comes as an XCFramework (`.xcframework`) or a framework (`.framework`), with a static or a dynamic library
-inside. The app's [Rust crate](./rust.md) calls it; `ios.frameworks` lists it, relative to `nsh.json`, and
-`ios.linkerFlags` adds what the SDK's instructions ask of the link, such as `-ObjC` and the system libraries and
-frameworks it uses. An nshm lists its own in its `Cargo.toml`
-([What the packaged app needs](./nshm.md#what-the-packaged-app-needs)), and the apps that use it list nothing:
-
-```json
-{
-  "ios": {
-    "frameworks": [
-      "ios/Vendor/Analytics.xcframework",
-      { "path": "ios/Vendor/Ads.xcframework", "forceLoad": true }
-    ],
-    "linkerFlags": ["-ObjC", "-lsqlite3", "-framework", "AdServices"]
-  }
-}
-```
-
-| Key | Meaning |
-|---|---|
-| `path` | The `.xcframework` or `.framework`. An entry that is a string is its path. |
-| `forceLoad` | Links all of a static library (`-force_load`), not only the parts the app's code calls, for SDKs whose instructions ask for it. |
-
-- Every iOS executable built with the app's crates links them: packages, and `nsh run`'s development hosts for the
-  simulator and Mac Catalyst. Each build takes the XCFramework's library for its target (devices, the simulator,
-  Mac Catalyst); an XCFramework without one for the target stops the build with an error naming those it has.
-- A static library becomes part of the app's executable. A dynamic framework is copied into the app's `Frameworks/`
-  and signed before the app: ad hoc for the simulator, with the `--sign` identity for devices.
-- A dynamic framework keeps its privacy manifest in its own bundle, where App Store Connect reads it. A static
-  library's code is the app's, so iOS packages add what its privacy manifest declares to the app's
-  `PrivacyInfo.xcprivacy` ([Privacy manifest](#privacy-manifest)).
-- Each flag is one argument, passed as written after the libraries (`"-framework", "AdServices"` are two). Paths in
-  flags are not resolved against `nsh.json`: list a library in `frameworks` to link it.
-- The same crates also build for other platforms without the SDK: call it under `#[cfg(target_os = "ios")]`.
-- The frameworks are linked with the app's Rust code, so an app without crates (`rust` or an nshm) cannot list them:
-  `nsh package` stops with an error.
 
 ## Android
 
@@ -450,9 +412,19 @@ nsh package --target macos --run
 
 Writes `.nsh/out/<Name>.app`: the executable in `Contents/MacOS/`, and `nsh/assets/…`, `nsh/app.json` (the window
 title, the app's appearance, its activation policy and nsh.json's window options) and a TSX app's `nsh/bundle.nshc` in
-`Contents/Resources/`. The app is signed ad hoc and needs macOS 14 or
-later, or the later version it names ([Minimum system version](#minimum-system-version)); to distribute it, sign it
-with a Developer ID and notarize it. See [macOS](./macos.md#packaging).
+`Contents/Resources/`. Without `--sign`, the app is signed ad hoc; it needs macOS 14 or later, or the later version it
+names ([Minimum system version](#minimum-system-version)). See [macOS](./macos.md#packaging).
+
+To sign the app for distribution, pass `--sign <identity>` (such as `"Developer ID Application: …"` or
+`"Apple Development: …"`):
+
+```sh
+nsh package --target macos --sign "Developer ID Application: Example Inc (ABCDE12345)"
+```
+
+When signed with a certificate, NSH enables Hardened Runtime (`--options runtime`) and a secure timestamp
+(`--timestamp`) as notarization requires, signs any embedded extensions and their nested frameworks/libraries inside-out
+first, signs the `.app`, and verifies the result with `codesign --verify --deep --strict`.
 
 The app runs on this Mac's processor. `--arch` picks another: `x86_64` for Intel Macs, `arm64` for Apple silicon, or
 `universal` for both in one executable. A runner for another processor needs its Rust target:
@@ -461,6 +433,38 @@ The app runs on this Mac's processor. `--arch` picks another: `x86_64` for Intel
 rustup target add x86_64-apple-darwin
 nsh package --target macos --arch universal
 ```
+
+### macOS app extensions
+
+Prebuilt macOS app extensions (`.appex` bundles built with Xcode or `swiftc`) can be listed under `macos.extensions` in
+the app's `nsh.json`, relative to `nsh.json`:
+
+```json
+{
+  "macos": {
+    "extensions": [
+      {
+        "path": "macos/build/Share.appex",
+        "entitlements": {
+          "com.apple.security.app-sandbox": true,
+          "com.apple.security.application-groups": ["TEAM123456.com.example.app"]
+        }
+      }
+    ]
+  }
+}
+```
+
+| Key | Meaning |
+|---|---|
+| `path` | The macOS `.appex` bundle directory, containing `Contents/Info.plist` and `Contents/MacOS/<executable>`. |
+| `entitlements` | The extension's entitlements, as `macos.entitlements` are the app's ([below](#infoplist-keys-and-entitlements)). |
+
+Each package copies the extensions into `Contents/PlugIns/` and syncs their `CFBundleShortVersionString` and
+`CFBundleVersion` to match the app's `version` and `build`. Each extension's bundle identifier must start with the app's
+(`<app_id>.`), and when `CFBundleSupportedPlatforms` is present it must include `MacOSX`. Before signing the `.app`,
+NSH signs each extension inside-out — nested `.framework` and `.dylib` items in `Contents/Frameworks/` first (with no
+entitlements), then the `.appex` with its own entitlements — using the package's signing identity (ad hoc or `--sign`).
 
 ## Linux
 
@@ -559,9 +563,10 @@ Entitlements:
   grants associated domains as `*` and keychain groups as `TEAMID.*`); otherwise `nsh package` stops and names the
   entitlement, so enable its capability for the app's identifier and download the profile again.
 - **The iOS simulator** is signed with the app's entitlements as they are.
-- **macOS** packages are signed ad hoc with the app's entitlements. macOS launches an app with
-  `com.apple.developer.*` entitlements or keychain access groups only under a provisioning profile that grants them:
-  `nsh package` warns about them, and the app is signed again with a Developer ID and such a profile before it runs.
+- **macOS** packages are signed with the app's entitlements, ad hoc by default or with `--sign <identity>` (Hardened
+  Runtime). macOS launches an app with `com.apple.developer.*` entitlements or keychain access groups only under a
+  provisioning profile that grants them: `nsh package` warns about them, and a matching profile must be embedded as
+  `Contents/embedded.provisionprofile` and signed before the app runs.
 
 ### Info.plist text in other languages
 
@@ -641,14 +646,15 @@ wrong type or an entry without all its keys is left out with a warning. What App
 category and reason codes themselves.
 
 NSH's runtime is part of the app's executable, so the APIs it calls count as the app's: declare these with the app's
-own. So is the code of the static libraries in `ios.frameworks`, whose privacy manifests packages add to the app's
-([Frameworks and linker flags](#frameworks-and-linker-flags)).
+own.
 
 | Category | What in NSH calls it | Reason |
 |---|---|---|
 | `NSPrivacyAccessedAPICategoryFileTimestamp` | Rust's standard library reading file metadata; the image cache, which ages its files | `C617.1`; also `3B52.1` when the app reads files people pick |
 | `NSPrivacyAccessedAPICategorySystemBootTime` | the renderer's timer | `35F9.1` |
-| `NSPrivacyAccessedAPICategoryUserDefaults` | reading the temperature unit people choose in Settings, which no reason of Apple's covers ([#2830](https://github.com/longbridge/nsh/issues/2830)) | |
+
+NSH reads no user defaults on iOS (the temperature unit comes from the locale): declare
+`NSPrivacyAccessedAPICategoryUserDefaults` only when the app's own code or an SDK it links calls `NSUserDefaults`.
 
 ### Minimum system version
 
@@ -775,11 +781,11 @@ A packaged app declares the hardware NSH's own features use, from its `nsh.json`
 
 | Feature | iOS and macOS | Android |
 |---|---|---|
-| [`Speech`](../modules/nsh.md#speech), when the app grants `speech` or declares no capabilities | `NSMicrophoneUsageDescription`, `NSSpeechRecognitionUsageDescription` | |
 | Web pages that capture media ([`capabilities.webview.media`](./sandbox-and-capabilities.md#webview)) | `NSMicrophoneUsageDescription`, `NSCameraUsageDescription`; on macOS the entitlements `com.apple.security.device.audio-input` and `com.apple.security.device.camera` | `RECORD_AUDIO`, `CAMERA` |
 | [`Notifications`](../modules/nsh.md#notifications), when the app grants `notifications` or declares no capabilities | | `POST_NOTIFICATIONS` |
 
-Every Android package also declares `INTERNET` and `ACCESS_NETWORK_STATE`. A usage description is what the system shows when the app first asks;
+The [nshm](./nshm.md) an app installs add what their features need: `nsh-extra`'s `speech`, for example, the
+microphone's and speech recognition's usage descriptions and `RECORD_AUDIO`. Every Android package also declares `INTERNET` and `ACCESS_NETWORK_STATE`. A usage description is what the system shows when the app first asks;
 the app's `infoPlist` words it its own way ([above](#infoplist-keys-and-entitlements)).
 
 On iOS and macOS, an app's own [Rust crate](./rust.md) reaches other hardware through the system's frameworks, with the
@@ -807,9 +813,6 @@ assets it imports, next to the prebuilt runtime:
 | Linux | the `nsh-linux-app` executable, renamed `<Name>` | `<Name>/nsh/bundle.nshc`, `nsh/assets/…` |
 | Windows | the `nsh-windows-app.exe` executable, renamed `<Name>.exe` | `<Name>\nsh\bundle.nshc`, `nsh\assets\…` |
 | Web | `nsh.<digest>.wasm`, `nsh.<digest>.js` | `<Name>/app.<digest>.js`, `assets/…`, `index.html` |
-
-An iOS package also carries the dynamic frameworks the app lists in `Frameworks/`
-([Frameworks and linker flags](#frameworks-and-linker-flags)).
 
 A packaged app registers no [native components](./native-components.md); for those, embed NSH in your own app.
 

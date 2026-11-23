@@ -6,7 +6,7 @@ order: 2
 
 # nsh
 
-`nsh` is the core module: the reactive API (signals, computed values, effects, context), `mount`, `token`, `setTheme`, the host elements `View`, `Text`, `Scroll` and `Overlay`, [selectable views](#selectable-views), [the safe area and the keyboard](#safe-area-and-keyboard), [animation](#animation), [the device and its environment](#device), [`PanResponder`](#panresponder), the [clipboard](#clipboard), the [photo picker](#picker), the [share sheet](#share), [speech recognition](#speech), [sound](#sound), [storage](#storage), the [host channel](#host), [keyboard shortcuts](#keymap), [native components and modules](#nativecomponent-and-nativemodule), [accessibility](#accessibility), and the TypeScript types of elements, styles and events. The reactive graph itself runs natively in Rust; reading a signal is a call into the runtime that costs a few nanoseconds, and only your own closures run in the JavaScript interpreter.
+`nsh` is the core module: the reactive API (signals, computed values, effects, context), `mount`, `token`, `setTheme`, the host elements `View`, `Text`, `Scroll` and `Overlay`, [selectable views](#selectable-views), [the safe area and the keyboard](#safe-area-and-keyboard), [animation](#animation), [the device and its environment](#device), [`PanResponder`](#panresponder), the [clipboard](#clipboard), the [photo picker](#picker), the [share sheet](#share), [sound](#sound), [storage](#storage), the [host channel](#host), [keyboard shortcuts](#keymap), [native components and modules](#nativecomponent-and-nativemodule), [accessibility](#accessibility), and the TypeScript types of elements, styles and events. The reactive graph itself runs natively in Rust; reading a signal is a call into the runtime that costs a few nanoseconds, and only your own closures run in the JavaScript interpreter.
 
 ```ts
 import { batch, cleanup, computed, context, effect, ErrorBoundary, mount, Overlay, Scroll, signal, split, Text, token, untracked, View } from "nsh";
@@ -2647,150 +2647,6 @@ kept: `url()` has them. The native platforms, GPUI hosts and terminals have no h
 only on the web. Rust code awaits `next_app_url_change()` of `nsh_core::prelude`, an `AppUrlChange` with the `url` and
 its `reason`.
 
-## Speech
-
-The speech API turns what the user says into text (dictation): the app starts a session, the platform listens to the
-microphone, and the transcript arrives as it grows. macOS and iOS recognize with the system's Speech framework; the
-system asks the user for the microphone and for speech recognition once. On other platforms a session ends at once
-with the error `"unavailable"`, so check `Speech.available()` before showing a microphone button. Rust code calls
-`recognize_speech` of `nsh_core::prelude`; TSX imports `Speech` from `nsh`.
-
-```rust tabs
-use nsh_core::speech::{SpeechEvent, SpeechRequest};
-```
-
-```tsx tabs
-import { Speech, type SpeechSession } from "nsh";
-```
-
-```ts
-const Speech: {
-  available(): Promise<boolean>;
-  start(options?: SpeechOptions): SpeechSession;
-};
-
-interface SpeechOptions {
-  /** The language spoken, a BCP 47 tag ("en-US", "zh-CN"); the user's when left out. */
-  lang?: string;
-  /** Results while the user speaks (true, the default), or only the final one. */
-  interim?: boolean;
-}
-
-interface SpeechSession {
-  on(event: "start", listener: () => void): () => void;
-  on(event: "result", listener: (result: SpeechResult) => void): () => void;
-  on(event: "end", listener: (end: SpeechEnd) => void): () => void;
-  /** The whole transcript so far. */
-  readonly text: string;
-  readonly ended: boolean;
-  stop(): void;
-  abort(): void;
-}
-
-interface SpeechResult { text: string; isFinal: boolean }
-interface SpeechEnd { text: string; error?: SpeechErrorCode }
-
-type SpeechErrorCode =
-  | "not-allowed" | "no-speech" | "audio-capture" | "network"
-  | "language-not-supported" | "unavailable" | "failed";
-```
-
-| TSX | Rust |
-|---|---|
-| `await Speech.available()` | `speech_available().await -> bool` |
-| `Speech.start(options)` | `recognize_speech(request) -> SpeechRecognition` |
-| `session.on("result", ...)` | `recognition.next().await -> Option<SpeechEvent>` |
-| `session.stop()` / `abort()` | `recognition.stop()` / `abort()` (dropping it aborts) |
-
-### Speech.start
-
-Starts a session and returns it at once. A session reports, in this order: `start` when the microphone is on and the
-recognizer listens, `result` each time the transcript changes (`text` is always the whole transcript so far, so the
-app shows it as it is), and one `end`, after which nothing comes. `stop()` stops listening and lets the recognizer
-finish what it heard: a last result with `isFinal: true`, then `end`. `abort()` ends the session at once, without an
-error, and drops what was not reported. One session runs at a time: starting another aborts the one running.
-
-`end` carries the last transcript and, when the session failed, `error`, named as in the Web Speech API:
-
-| `error` | When |
-|---|---|
-| `"not-allowed"` | The user or the system does not allow the microphone or speech recognition. |
-| `"no-speech"` | Nothing was said. |
-| `"audio-capture"` | The microphone could not be used. |
-| `"network"` | The recognizer needs the network and could not reach it. |
-| `"language-not-supported"` | The recognizer does not know `lang`. |
-| `"unavailable"` | This platform recognizes no speech, or not now. |
-| `"failed"` | The recognizer failed for another reason. |
-
-`start` throws a `TypeError` for options of the wrong types and a `RangeError` for a `lang` that is no language tag.
-
-```tsx
-import { signal, Speech, type SpeechSession } from "nsh";
-
-const transcript = signal("");
-let session: SpeechSession | null = null;
-
-function toggle() {
-  if (session && !session.ended) {
-    session.stop();
-    return;
-  }
-  session = Speech.start({ lang: "en-US" });
-  session.on("result", ({ text }) => transcript.set(text));
-  session.on("end", ({ text, error }) => {
-    if (error) console.warn("dictation ended:", error);
-    else transcript.set(text);
-  });
-}
-```
-
-```rust
-use nsh_core::prelude::*;
-use nsh_core::speech::{SpeechEvent, SpeechRequest};
-
-async fn dictate() -> String {
-    let mut recognition = recognize_speech(SpeechRequest::default());
-    let mut text = String::new();
-    while let Some(event) = recognition.next().await {
-        match event {
-            SpeechEvent::Result { text: heard, .. } => text = heard,
-            SpeechEvent::End { .. } => break,
-            _ => {}
-        }
-    }
-    text
-}
-```
-
-### Speech.available
-
-Resolves `true` where a session can run: on macOS and iOS, and wherever the embedding app recognizes speech itself.
-
-### Info.plist
-
-On macOS and iOS the system shows why the app wants the microphone and speech recognition. `nsh package` and
-`nsh run` write `NSMicrophoneUsageDescription` and `NSSpeechRecognitionUsageDescription` into the app's Info.plist
-when the app may use speech (its `capabilities` grant `speech`, or it declares none).
-
-### Embedding apps
-
-An app that embeds NSH and recognizes speech its own way (its own engine or service) answers the sessions itself: in
-Rust, a `SpeechBackend` (`nsh_core::speech`) given to the engine (`EngineConfig::speech`) receives every session's
-`SpeechRequest` and a `SpeechSink` it reports to from any thread, and returns the `SpeechControl` the core stops and
-aborts the session with. The platform's recognizer is not used then.
-
-### Tests
-
-`nsh test` runs sessions on a fake recognizer in headless runs: a session starts at once, `app.hear(text)` reports
-`text` as the transcript so far, `app.endSpeech(error?)` ends it, and `app.speechRequests()` lists the sessions the
-app started. See [Testing](../docs/testing-and-trace.md).
-
-> [!NOTE]
-> When your app declares `capabilities` in `nsh.json`, speech must be granted with `"speech": true`. Without it
-> `Speech.start` throws an `Error` whose `code` is `"ERR_ACCESS_DENIED"`, `permission` `"speech"` and `resource` `""`.
-> In Rust, the session ends with `not-allowed` and the refusal is logged. See
-> [Sandbox and capabilities](../docs/sandbox-and-capabilities.md).
-
 ## Sound
 
 Two primitives make sound, one for each kind of audio. A `Sound` is a short clip (a tap, a notice, an alert) decoded
@@ -3125,9 +2981,13 @@ mount(() => (
 
 ## host
 
-`host` reaches the app that embeds NSH: the native app around an `NshAppView` / `NshView`, or on the web the page that runs the player. The app calls the host's functions by name with JSON arguments and listens to the events the host sends.
+`host` reaches the app that embeds NSH: the native app around an `NshAppView` / `NshView`, or on the web the page that runs the player. The app calls the host's functions by name with JSON arguments and listens to the events the host sends. Rust code calls `host_call`, `host_call_with`, `host_post` and `on_host_event` of `nsh_core::prelude`; TSX imports `host` from `nsh`. Both reach the same host, with the same names, capability and error codes, so an app writes its calls once and each host answers them its own way.
 
-```ts
+```rust tabs
+use nsh_core::prelude::*; // host_call, host_call_with, host_post, on_host_event, HostCallOptions, HostError
+```
+
+```tsx tabs
 import { host } from "nsh";
 ```
 
@@ -3174,6 +3034,8 @@ Calls the host's function `name` with `args` (any JSON value; `null` without one
 
 A name that is no valid name (1 to 128 of `A`–`Z`, `a`–`z`, `0`–`9`, `_`, `.`, `:`, `-`, without `..`) rejects with a `TypeError`.
 
+The checks run in this order, so a call fails with the first that applies: a `TypeError` for a name that is not valid, then `ERR_ACCESS_DENIED` for one the app is not granted, then `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where there is no host. A call the app is not granted rejects with `ERR_ACCESS_DENIED` also where there is no host.
+
 A call waits 30 seconds for the host's answer, then rejects with `ETIMEDOUT`; an answer that comes later is dropped. `options.timeout` sets the wait in milliseconds, `0` for no limit; a timeout so large the clock never gets there (about 1e22 ms) waits without limit too, and a negative, `NaN` or infinite one rejects the call with a `RangeError`. The time is the app's, as its timers': in `nsh test` with a manual clock it moves with the clock.
 
 ```ts
@@ -3182,6 +3044,38 @@ const quote = await host.call("quote.refresh", { symbol: "AAPL" }, { timeout: 50
   if (error.code === "ETIMEDOUT" || error.code === "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM") return null;
   throw error;
 });
+```
+
+In Rust, `host_call(name, args)` is an `async fn` to await in a task, settling with `Result<JsonValue, HostError>`. `HostError`'s variants are the failures above (`Failed` with the host's message, `Denied`, `InvalidName`, `Unavailable`, `TimedOut`, `TooManyCalls`), and `code()` gives the same codes. `host_call_with(name, args, options)` takes `HostCallOptions::default().timeout(duration)`, where `Duration::ZERO` waits as long as the host takes.
+
+```rust
+// use nsh_core::JsonValue; use serde_json::json; use std::time::Duration;
+spawn(async move {
+    let user = host_call("getUserInfo", JsonValue::Null).await;
+    let options = HostCallOptions::default().timeout(Duration::from_secs(5));
+    match host_call_with("quote.refresh", json!({ "symbol": "AAPL" }), options).await {
+        Ok(quote) => show(quote),
+        Err(HostError::TimedOut { .. } | HostError::Unavailable) => {}
+        Err(error) => log::warn!("{error}"),
+    }
+});
+```
+
+### host.post
+
+```ts
+post(name: string, data?: unknown): void;
+```
+
+Hands `data` to the host's function `name` without waiting for an answer: the host's handler of `name` gets it as it gets calls. Where nothing embeds the app, or the host has no handler of `name`, the post goes nowhere. Where there is a host, a name the app is not granted, or no valid name, throws (`ERR_ACCESS_DENIED`, a `TypeError`). Rust's `host_post(name, data)` returns nothing: it checks the name wherever the app runs, and a refused post is logged and dropped.
+
+```rust tabs
+// use serde_json::json;
+host_post("analytics.track", json!({ "event": "signup" }));
+```
+
+```tsx tabs
+host.post("analytics.track", { event: "signup" });
 ```
 
 ### host.on
@@ -3198,6 +3092,12 @@ const stop = host.on("loginChanged", (payload) => console.log(payload));
 stop();
 ```
 
+In Rust, `on_host_event(event, listener)` runs `listener` with each payload (`&JsonValue`) while the component that added it lives, as `on_key` does. An event that comes while no Rust listener of its name is there, including one the host sent before the app started, is kept until one is added (at most 256, the oldest going first), so a listener added after the app loaded something still receives it; an event a listener already received is not replayed to later ones.
+
+```rust
+on_host_event("loginChanged", move |payload| signed_in.set(payload["signedIn"] == true));
+```
+
 ### Capability
 
 Every function the app calls must be listed in `nsh.json`'s `capabilities.host`: exact names or prefixes ending in `*`, or `true` for all of them. This holds for every app, also one without other `capabilities`: the host's functions are never granted by default. A call that is not granted rejects with `ERR_ACCESS_DENIED` and is logged, a `host.post` of such a name to an embedding app throws the same error, and building an app that imports `host` from `nsh` without `capabilities.host` warns. Events need no grant. See [Sandbox and capabilities](../docs/sandbox-and-capabilities.md#host).
@@ -3208,7 +3108,7 @@ Every function the app calls must be listed in `nsh.json`'s `capabilities.host`:
 
 ### The host on the web
 
-On the web the page is the host. `createPlayer`'s `host` option answers the calls, and `player.hostEvent(event, payload)` sends events:
+On the web the page is the host. `createPlayer`'s `host` option answers the calls, and `player.hostEvent(event, payload)` sends events, for TSX and Rust apps alike:
 
 ```js
 const player = await createPlayer(container, {
@@ -3291,7 +3191,7 @@ nsh.send("conversation.open", Map.of("id", "43"));
 See [Embedding on iOS](../docs/ios.md#talking-to-the-app), [Embedding on Android](../docs/android.md#talking-to-the-app) and [GPUI](../docs/gpui.md).
 
 > [!NOTE]
-> Native SDK calls and posts use the same [`host` capability](../docs/sandbox-and-capabilities.md#host) as platform calls. A Rust app reaches the embedding app's Rust directly, through the functions it registers ([`nativeModule`](#nativemodule) and Rust imports).
+> Native SDK calls and posts use the same [`host` capability](../docs/sandbox-and-capabilities.md#host) as platform calls. A Rust app's `host_call`, `host_post` and `on_host_event` reach the same handlers and events, on every platform.
 
 ## keymap
 

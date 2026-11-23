@@ -55,6 +55,10 @@ pub(crate) struct Ambient {
     data_dir: Option<std::path::PathBuf>,
     /// The app as it was built ([`app_info`]).
     app_info: Option<crate::platform::AppInfo>,
+    /// What the app may do ([`access`]).
+    access: Option<Arc<crate::access::Access>>,
+    /// Which engine this is ([`engine_id`]).
+    pub(super) engine_id: Option<EngineId>,
     /// What `nsh/updater` checks with for Rust code
     /// ([`crate::runtime::prompt_for_update`]).
     updater: Option<std::sync::Arc<dyn crate::runtime::UpdaterHost>>,
@@ -187,6 +191,12 @@ impl super::Runtime {
     pub(crate) fn set_app_info(&self, info: Option<crate::platform::AppInfo>) {
         let _entered = self.enter();
         with_data(|d| d.ambient.app_info = info);
+    }
+
+    /// What the app may do ([`access`]).
+    pub(crate) fn set_access(&self, access: Arc<crate::access::Access>) {
+        let _entered = self.enter();
+        with_data(|d| d.ambient.access = Some(access));
     }
 
     /// What Rust code checks for updates with ([`updater_host`]).
@@ -730,6 +740,53 @@ pub fn app_info() -> Option<crate::platform::AppInfo> {
     with_data(|d| d.ambient.app_info.clone())
 }
 
+/// What the app the calling code runs in may do: its capabilities (its
+/// `nsh.json` declaration and what the embedding app grants), as the
+/// engine checks them. A native module that guards a capability of its own
+/// checks it here for Rust callers, as its JS face does with the calling
+/// VM's [`System::access`](super::System) (`nsh-extra`'s `Speech` checks
+/// `speech`). `None` when the calling code does not run on an engine's
+/// thread (a thread of the module's own or of a library, a platform
+/// callback, a test without an engine): no app's grant applies there,
+/// though the code may well act for one. Rust code is trusted, so such a
+/// caller is not limited here; a module that must tie it to an app reads
+/// the access on the engine's thread first and carries it along.
+///
+/// ```ignore
+/// if access().is_some_and(|access| !access.allows_speech()) {
+///     return Err(not_allowed());
+/// }
+/// ```
+pub fn access() -> Option<Arc<crate::access::Access>> {
+    super::reactive::try_with_data(|d| d.ambient.access.clone()).flatten()
+}
+
+/// An engine of the process ([`engine_id`]): opaque, and never the same
+/// for two engines of one process, even after one goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct EngineId(std::num::NonZeroU64);
+
+impl EngineId {
+    /// One no engine had before.
+    pub(crate) fn next() -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Self(std::num::NonZeroU64::new(id).expect("engine ids do not run out"))
+    }
+}
+
+/// The engine the calling code runs in: what a native module whose state
+/// is the process's (one microphone, one device) tells its engines'
+/// requests apart with. `None` outside an engine's Rust code (a thread of
+/// the module's own, a test without an engine).
+///
+/// ```ignore
+/// let displaced_by_another_app = running.owner != engine_id();
+/// ```
+pub fn engine_id() -> Option<EngineId> {
+    super::reactive::try_with_data(|d| d.ambient.engine_id).flatten()
+}
+
 /// What Rust code checks for updates with: the engine's, `None` where the
 /// app does not update.
 pub(crate) fn updater_host() -> Option<std::sync::Arc<dyn crate::runtime::UpdaterHost>> {
@@ -1057,15 +1114,6 @@ pub fn pick_files(
     answer
 }
 
-/// Whether speech can be recognized here (TS: `Speech.available()`): the
-/// platform recognizes speech (macOS, iOS), or the embedding app gave the
-/// core its own recognizer. To await in a task.
-pub fn speech_available() -> Answer<bool> {
-    let (answer, slot) = Answer::new();
-    act(Action::Speech(super::SpeechAction::Available(slot)));
-    answer
-}
-
 /// Whether the app may show notifications (TS: `Notifications.permission`),
 /// without asking the user. To await in a task.
 pub fn notification_permission() -> Answer<crate::notifications::NotificationPermission> {
@@ -1275,119 +1323,97 @@ pub fn web_view_available() -> Answer<bool> {
     answer
 }
 
-/// Starts recognizing what the user says (dictation; TS: `Speech.start`),
-/// as `request` asks: the session's events come from
-/// [`SpeechRecognition::next`], in a task. One session runs at a time:
-/// starting another ends this one (its [`SpeechEvent::End`](crate::speech::SpeechEvent::End),
-/// without an error). The core refuses it (an end with
-/// [`SpeechError::NotAllowed`](crate::speech::SpeechError::NotAllowed))
-/// when the app's capabilities do not grant `speech`, and ends it with
-/// [`SpeechError::Unavailable`](crate::speech::SpeechError::Unavailable)
-/// where nothing recognizes speech ([`speech_available`]).
-pub fn recognize_speech(request: crate::speech::SpeechRequest) -> SpeechRecognition {
-    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
-    let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let (sink, events) = crate::speech::channel();
-    let executor = executor();
-    executor.act(Action::Speech(super::SpeechAction::Start {
-        id,
-        request,
-        sink,
-    }));
-    SpeechRecognition {
-        id,
-        events,
-        executor: Rc::downgrade(&executor),
-        ended: false,
-    }
-}
-
-/// A running speech recognition session ([`recognize_speech`]). Dropping
-/// it before its end aborts it.
-#[must_use = "a dropped recognition is aborted"]
-pub struct SpeechRecognition {
-    id: u32,
-    events: crate::speech::SpeechEvents,
-    executor: std::rc::Weak<Executor>,
-    ended: bool,
-}
-
-impl std::fmt::Debug for SpeechRecognition {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SpeechRecognition")
-            .field("id", &self.id)
-            .field("ended", &self.ended)
-            .finish_non_exhaustive()
-    }
-}
-
-impl SpeechRecognition {
-    /// The session's next event; `None` after its end.
-    pub async fn next(&mut self) -> Option<crate::speech::SpeechEvent> {
-        std::future::poll_fn(|cx| self.poll_next(cx)).await
-    }
-
-    /// Polls for the session's next event ([`Self::next`]).
-    pub fn poll_next(
-        &mut self,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<crate::speech::SpeechEvent>> {
-        let poll = self.events.poll_next(cx);
-        if let std::task::Poll::Ready(None | Some(crate::speech::SpeechEvent::End { .. })) = poll {
-            self.ended = true;
-        }
-        poll
-    }
-
-    /// Stops listening: the recognizer finishes what it heard (a last,
-    /// final result), then the session ends.
-    pub fn stop(&self) {
-        if !self.ended {
-            self.act(super::SpeechAction::Stop(self.id));
-        }
-    }
-
-    /// Ends the session at once, without an error; what was not reported
-    /// is dropped.
-    pub fn abort(&self) {
-        if !self.ended {
-            self.act(super::SpeechAction::Abort(self.id));
-        }
-    }
-
-    fn act(&self, action: super::SpeechAction) {
-        if let Some(executor) = self.executor.upgrade() {
-            executor.act(Action::Speech(action));
-        }
-    }
-}
-
-impl Drop for SpeechRecognition {
-    fn drop(&mut self) {
-        self.abort();
-    }
-}
-
-/// The value function `name` of the embedding app returns for `args`
-/// (TS: `host.call`), to await in a task.
-pub(crate) fn host_call(
-    name: String,
+/// Calls function `name` of the app's host with `args` (TS: `host.call`),
+/// to await in a task: what it returns, or why the call failed. The host
+/// is the embedding app (the native app around the view, whose handlers
+/// answer: `HostChannel::handle` in Rust, `handle` in Swift and Java), or
+/// on the web the page that runs the app (`createPlayer`'s `host`, the
+/// module nsh.json's `web.host` names). A call waits
+/// [`DEFAULT_CALL_TIMEOUT`](crate::host_channel::DEFAULT_CALL_TIMEOUT)
+/// ([`host_call_with`] says otherwise), on the app's clock. `name` must
+/// be granted by `capabilities.host` in nsh.json ([`HostError::Denied`]);
+/// where nothing embeds the app it fails with [`HostError::Unavailable`].
+///
+/// [`HostError::Denied`]: crate::host_channel::HostError::Denied
+/// [`HostError::Unavailable`]: crate::host_channel::HostError::Unavailable
+pub async fn host_call(
+    name: impl Into<String>,
     args: crate::JsonValue,
-) -> Answer<Result<crate::JsonValue, super::JsError>> {
-    let (answer, action) = super::services::host_call(name, args);
+) -> Result<crate::JsonValue, crate::host_channel::HostError> {
+    host_call_with(name, args, crate::host_channel::HostCallOptions::default()).await
+}
+
+/// [`host_call`] as `options` say (TS: `host.call(name, args, options)`).
+pub async fn host_call_with(
+    name: impl Into<String>,
+    args: crate::JsonValue,
+    options: crate::host_channel::HostCallOptions,
+) -> Result<crate::JsonValue, crate::host_channel::HostError> {
+    use crate::host_channel::HostError;
+    let name = name.into();
+    // One so long the clock never gets there waits as `ZERO` does.
+    let timeout = options.timeout;
+    let deadline = (!timeout.is_zero())
+        .then(|| crate::time::now().checked_add(timeout))
+        .flatten();
+    let (answer, action) = super::services::host_call(name.clone(), args);
     act(action);
-    answer
+    let Some(at) = deadline else {
+        return answer.await;
+    };
+    // On the app's clock, as its timers: a manual clock moves it.
+    let answered = {
+        let mut answer = std::pin::pin!(answer);
+        let mut delay = std::pin::pin!(timer_until(at));
+        std::future::poll_fn(|cx| {
+            if let std::task::Poll::Ready(result) = answer.as_mut().poll(cx) {
+                return std::task::Poll::Ready(Some(result));
+            }
+            if delay.as_mut().poll(cx).is_ready() {
+                return std::task::Poll::Ready(None);
+            }
+            std::task::Poll::Pending
+        })
+        .await
+    };
+    answered.unwrap_or_else(|| {
+        // The answer went with the block: the core drops its slot now,
+        // and a late reply finds none (`Core::answer_host`).
+        act(Action::ForgetHostCalls);
+        Err(HostError::TimedOut { name, timeout })
+    })
 }
 
-/// Hands `args` to function `name` of the embedding app, with no answer
-/// (TS: `host.post`).
-pub(crate) fn host_post(name: String, args: crate::JsonValue) {
-    act(Action::HostPost { name, args });
+/// Hands `args` to function `name` of the app's host, with no answer (TS:
+/// `host.post`): its handler of `name` gets it, as [`host_call`]'s calls.
+/// Where nothing embeds the app, or the host has no handler of `name`, the
+/// post goes nowhere; a name `capabilities.host` does not grant, or no
+/// valid one, is refused and logged.
+pub fn host_post(name: impl Into<String>, args: crate::JsonValue) {
+    act(Action::HostPost {
+        name: name.into(),
+        args,
+    });
 }
 
-/// Forgets the host calls whose answers were dropped (they timed out).
-pub(crate) fn forget_host_calls() {
-    act(Action::ForgetHostCalls);
+/// Runs `listener` with the data of every event `event` the app's host
+/// sends while the current owner lives (TS: `host.on`): the embedding
+/// app's (`HostChannel::send` in Rust, `send` in Swift and Java) and on
+/// the web the page's (`player.hostEvent`). An event that comes while no
+/// listener of its name is there is kept (at most
+/// [`MAX_QUEUED_EVENTS`](crate::host_channel::MAX_QUEUED_EVENTS), the
+/// oldest going first) until one is added, which hears it after the
+/// render that added it: a listener added once the app loaded something
+/// still hears what the host sent at its start. An event a listener heard
+/// is not replayed to the ones added later. Events need no capability.
+pub fn on_host_event(event: impl Into<String>, listener: impl Fn(&crate::JsonValue) + 'static) {
+    let owner = Owner::current();
+    let listener: super::host_events::HostListener =
+        Rc::new(move |data: &crate::JsonValue| owner.run(|| listener(data)));
+    let listeners = &executor().host_events;
+    let id = listeners.borrow_mut().add(event.into(), listener);
+    let subscription = super::host_events::HostSubscription::new(listeners, id);
+    cleanup(move || drop(subscription));
 }
 
 /// The size in pixels of the image at `src` (TS: `Image.getSize`).
@@ -2092,7 +2118,25 @@ pub fn on_back_press(f: impl Fn() -> bool + 'static) {
     let listener: super::back::BackListener = Rc::new(move || owner.run(&f));
     let back = &executor().back;
     let id = back.borrow_mut().add(listener);
-    let subscription = super::back::BackSubscription::new(back, id);
+    let subscription = super::back::Subscription::new(back, id);
+    cleanup(move || drop(subscription));
+}
+
+/// Follows the system's back gesture while the current owner lives (TS:
+/// `BackHandler.on("progress", f)`): `f` hears each step of a gesture no
+/// modal takes, from its start to its end (the back press follows, as
+/// [`on_back_press`]'s listeners hear it) or its cancel, as AndroidX's
+/// `OnBackPressedCallback` does. While one listens, the stacks leave the
+/// gesture to the app: none previews its pop, so a view the app moves with
+/// the finger (a drawer closing, a sheet going down) is the only one that
+/// does. Android 14 and later (predictive back) report it; elsewhere it
+/// never comes.
+pub fn on_back_progress(f: impl Fn(&crate::BackProgressEvent) + 'static) {
+    let owner = Owner::current();
+    let listener: super::back::BackProgressListener = Rc::new(move |e| owner.run(|| f(e)));
+    let progress = &executor().back_progress;
+    let id = progress.borrow_mut().add(listener);
+    let subscription = super::back::Subscription::new(progress, id);
     cleanup(move || drop(subscription));
 }
 

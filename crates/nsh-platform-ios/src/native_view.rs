@@ -7,8 +7,9 @@ use std::cell::RefCell;
 
 use block2::RcBlock;
 use nsh_core::{
-    Accessibility, AccessibilityCurrent, AccessibilityRole, Checked, EventKind, EventMask,
-    EventPayload, NodeId, PayloadValue, PointerEvents, ViewProps, keymap::Keystroke,
+    Accessibility, AccessibilityCurrent, AccessibilityRole, Checked, ClipInset, EventKind,
+    EventMask, EventPayload, NodeId, PayloadValue, PointerEvents, Points, ViewProps,
+    keymap::Keystroke,
 };
 use nsh_engine::EngineControl;
 use objc2::{
@@ -51,6 +52,9 @@ pub(crate) struct NshViewIvars {
     /// The area descendants cover outside the bounds (`MountItem::Overflow`):
     /// touches there are looked for in the subviews.
     overflow: std::cell::Cell<Option<CGRect>>,
+    /// `clipPath`: outside it, touches reach neither the view nor its
+    /// subviews.
+    clip: std::cell::Cell<Option<ClipInset>>,
     /// An `increment` / `decrement` reported whose value has not arrived
     /// yet, and the value VoiceOver read since (`Some` once it asked).
     step: RefCell<Option<Option<String>>>,
@@ -350,6 +354,9 @@ impl NshView {
     }
 
     fn hit(&self, point: CGPoint, event: Option<&UIEvent>) -> Option<Retained<UIView>> {
+        if self.clipped_out(point) {
+            return None;
+        }
         let mode = self.ivars().props.borrow().pointer_events;
         // SAFETY: calling the superclass implementation.
         let hit = || -> Option<Retained<UIView>> {
@@ -406,7 +413,24 @@ impl NshView {
         None
     }
 
+    /// The point is outside the view's `clipPath`.
+    fn clipped_out(&self, point: CGPoint) -> bool {
+        self.ivars().clip.get().is_some_and(|clip| {
+            let b = self.bounds();
+            let size =
+                nsh_core::geometry::size(Points(b.size.width as f32), Points(b.size.height as f32));
+            let at = nsh_core::geometry::point(
+                Points((point.x - b.origin.x) as f32),
+                Points((point.y - b.origin.y) as f32),
+            );
+            !clip.contains(size, at)
+        })
+    }
+
     fn inside(&self, point: CGPoint, event: Option<&UIEvent>) -> bool {
+        if self.clipped_out(point) {
+            return false;
+        }
         let slop = self.ivars().props.borrow().hit_slop.map(|v| v.0);
         if slop == Default::default() {
             // SAFETY: calling the superclass implementation.
@@ -698,6 +722,11 @@ impl NshView {
         self.ivars().overflow.set(extent);
     }
 
+    /// `clipPath`: where touches reach the view and its subviews.
+    pub(crate) fn set_clip_path(&self, clip: Option<ClipInset>) {
+        self.ivars().clip.set(clip);
+    }
+
     /// Replaces the label of the props set last (`MountItem::AccessibilityLabel`).
     pub(crate) fn set_accessibility_label(&self, label: Option<std::sync::Arc<str>>) {
         self.ivars().props.borrow_mut().accessibility.label = label;
@@ -844,6 +873,9 @@ fn traits(props: &ViewProps) -> UIAccessibilityTraits {
             | AccessibilityRole::Option => UIAccessibilityTraitButton,
             AccessibilityRole::Link => UIAccessibilityTraitLink,
             AccessibilityRole::Search => UIAccessibilityTraitSearchField,
+            // UIKit has no text field trait: a native text field is one by
+            // its class, and a view given the role keeps no trait of its own.
+            AccessibilityRole::Textbox => UIAccessibilityTraitNone,
             AccessibilityRole::Image => UIAccessibilityTraitImage,
             AccessibilityRole::KeyboardKey => UIAccessibilityTraitKeyboardKey,
             AccessibilityRole::Text => UIAccessibilityTraitStaticText,
@@ -1002,6 +1034,8 @@ mod tests {
             adjustable
         );
         assert_eq!(traits_of(AccessibilityRole::Adjustable, &[]), adjustable);
+        // UIKit has no text field trait to give a text box.
+        assert_eq!(traits_of(AccessibilityRole::Textbox, &[]), 0);
         // Without them every role keeps its traits.
         assert_eq!(traits_of(AccessibilityRole::Image, &[]), image);
         assert_eq!(

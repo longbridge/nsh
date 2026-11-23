@@ -145,7 +145,9 @@ nsh add nsh-extra --features camera
 | Feature | TSX | 作用 |
 |---|---|---|
 | `camera` | `Camera` | 在 iOS 和 Android 上用系统相机拍一张照片 |
+| `photos` | `Photos` | 在用户允许后读取 iOS 上用户最近的照片 |
 | `push` | `Push` | 在 iOS 上接收任意推送服务发来的远程通知，在 Android 上通过该服务的绑定接收 |
+| `speech` | `Speech` | 在 macOS、iOS、Android、Windows 和 Web 上把用户说的话随说随转成文字 |
 
 ```tsx
 import { Camera } from "nsh-extra";
@@ -157,7 +159,79 @@ if (await Camera.available()) {
 }
 ```
 
-用户取消时 `takePhoto` 返回 `null`；用户不允许应用使用相机时，它以错误码 `EACCES` 拒绝。没有相机可用的地方（桌面、Web、模拟器）`available()` 为 `false`，`takePhoto` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝。开启这个 feature 后，打包的应用会带上它需要的条目：iOS 上的相机用途说明（应用可以在 `ios.infoPlist` 里写自己的 `NSCameraUsageDescription` 文案），Android 上对相机应用的查询声明。
+用户取消时 `takePhoto` 返回 `null`；用户不允许应用使用相机时，它以错误码 `EACCES` 拒绝。应用可以在同一次点按里关掉 sheet 并请求拍照：相机会在 sheet 关好之后出现。没有相机可用的地方（桌面、Web、模拟器）`available()` 为 `false`，`takePhoto` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝。开启这个 feature 后，打包的应用会带上它需要的条目：iOS 上的相机用途说明（应用可以在 `ios.infoPlist` 里写自己的 `NSCameraUsageDescription` 文案），Android 上对相机应用的查询声明。
+
+### Photos
+
+`Photos` 在用户允许后读取用户的相册：最近的照片、每张用来显示的缩略图，以及用户选中的那张照片，后者和 `Picker.pickImages` 选出的图片一样交给应用。它用于一条最近照片，用户按一下就能添加；`Picker.pickImages` 不需要权限，仍是从整个相册里挑选的方式。
+
+```sh
+nsh add nsh-extra --features photos
+```
+
+```tsx
+import { Photos } from "nsh-extra";
+
+if (Photos.access() === "notDetermined") await Photos.requestAccess();
+const access = Photos.access();
+if (access === "full" || access === "limited") {
+  const recent = await Photos.recent({ limit: 20 });
+  // 缩略图是小的 JPEG，字节留在原生侧。
+  const thumbs = await Promise.all(recent.map((photo) => Photos.thumbnail(photo.id, { maxDimension: 240 })));
+  const urls = thumbs.map((thumb) => URL.createObjectURL(thumb.file));
+  // 按下时：照片按选中的图片那样准备好。
+  const photo = await Photos.load(recent[0].id, { maxDimension: 2048 });
+  upload(photo.file);
+}
+
+// 拍了新照片、删了照片或改了选择：重新读这条。
+Photos.on("change", () => refreshStrip());
+```
+
+- `access()` 不询问用户，只告诉用户允许了什么：`"full"`、`"limited"`（用户选中的照片）、`"notDetermined"`、`"denied"` 或 `"unavailable"`。`requestAccess()` 第一次时询问用户并以回答 resolve；之后只有系统设置能改。
+- `recent({ limit })` 按从新到旧给出图片（不给时 30 张，最多 1000 张），不含隐藏的照片，每张带 `id` 和 `size`。`thumbnail(id, { maxDimension })` 给出最长边不超过 `maxDimension` 像素（默认 256）、方向已摆正的 JPEG；`load(id, { maxDimension, quality })` 给出和 `Picker.pickImages` 一样准备好的照片。只存在 iCloud 上的照片会下载。没有访问权限时它们以 `EACCES` 拒绝，照片不存在时以 `ENOENT` 拒绝。
+- 有限访问时，`presentLimitedPicker()` 显示系统的选择面板让用户更改选择，并以用户选中的 `id` resolve。
+- `on("change")` 在相册变化时通知应用，用户允许读取后生效。
+- Android、桌面和 Web 上 `access()` 为 `"unavailable"`，读取以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝。Android 只允许以照片为核心用途的应用读取整个相册（Google Play 对 `READ_MEDIA_IMAGES` 的政策）；其他应用使用系统的照片选择器，也就是 `Picker.pickImages` 显示的那个。
+- 声明了 `"capabilities"` 的应用用 [`"picker": true`](./sandbox-and-capabilities.md#picker) 授予 `Photos`，和 `Picker` 用的是同一项能力：除 `access()` 外的每个函数都会先检查它。
+
+开启这个 feature 后，打包的 iOS 应用会带上相册的用途说明（应用可以在 `ios.infoPlist` 里写自己的 `NSPhotoLibraryUsageDescription` 文案）。Rust 代码使用 `nsh_extra::photos`；用 `set_backend` 设置的 `PhotosBackend` 会代替系统相册应答（嵌入方自己的相册，或测试的照片）。
+
+#### 内嵌的照片选择器
+
+`PhotosPicker` 把系统的照片选择器放进应用的布局：iOS 17 及以上是一排相册照片，用户在里面选中照片、也能再取消选中，就像主流聊天应用在附件选项上方显示的那样。它由系统在应用进程外运行，所以不需要相册权限：应用只拿到用户选中的照片。
+
+```tsx
+import { PhotosPicker, Photos } from "nsh-extra";
+import { Picker } from "nsh/picker";
+
+let picker: { deselect(id: string): void } | undefined;
+const selected = signal<string[]>([]);
+
+{Photos.pickerViewAvailable() ? (
+  <PhotosPicker
+    ref={(node) => (picker = node)}
+    selectionLimit={10}
+    onChange={({ ids }) => selected.set(ids)}
+    style={{ height: 120, borderRadius: 16, overflow: "hidden" }}
+  />
+) : (
+  <Button onPress={() => Picker.pickImages({ multiple: true, limit: 10 })}>照片</Button>
+)}
+
+// 发送消息时：每张照片都按选中的图片那样准备好。
+const photos = await Promise.all(selected().map((id) => Photos.loadPicked(id, { maxDimension: 2048 })));
+// 附件上的移除按钮同时在选择器里取消选中。
+picker?.deselect(id);
+```
+
+- 用户每次选中或取消选中一张照片，`onChange` 都给出当前所有选中照片的 id，按用户选中的先后排列，选择器上也按这个顺序给每张照片标序号。id 是不透明的；照片的字节留在原生侧，直到 `loadPicked(id, options)` 读取（选项同 `load`）。照片选中且选择器还在显示时 id 可读；之后以 `ENOENT` 拒绝。
+- `selectionLimit` 限制最多选几张（默认 100，与 `Picker.pickImages` 一致；0 表示系统允许的最多张数），`filter` 显示 `"images"`（默认）、`"livePhotos"` 或 `"screenshots"`。
+- 尺寸由样式决定：给它一个高度，用 `borderRadius` 和 `overflow: "hidden"` 做圆角。
+- `pickerViewAvailable()` 为 `false` 的地方（iOS 16 及以下、Android、桌面和 Web）它不占空间、什么也不显示；应用改用 `Picker.pickImages` 让用户挑选。Android 的照片选择器需要较新设备上的系统扩展才能内嵌，Native Shell 暂未使用。
+- `loadPicked` 和 `Photos` 的其他函数一样需要 `picker` 能力。
+
+Rust 代码用 `photos_picker()` 创建它（`.selection_limit(10).on_change(..)`），通过 `component_ref::<PhotosPicker>()` 的 `PhotosPickerApi` 取消选中，用 `nsh_extra::photos::load_picked` 读取。
 
 ### Push
 
@@ -204,6 +278,110 @@ function closeConversation(threadId: string) {
 - 声明了 `"capabilities"` 的应用用 [`"notifications": true`](./sandbox-and-capabilities.md#notifications) 授予 `Push`，与 `Notifications` 用的是同一项能力。token、投递和它们的显示方式属于整个应用，所以除 `available()` 外的每个函数都先检查这项能力。
 
 开启这个 feature 后，打包的 iOS 应用会带上 `remote-notification` 后台模式。`aps-environment` entitlement 来自应用签名所用的描述文件（[iOS 真机](./packaging.md#ios-真机)）。Android 上它不添加任何条目：推送服务的 SDK 自带它的 manifest 所需。Rust 代码（比如某个推送服务 SDK 的绑定）使用 `nsh_extra::push`：`on_event` 收到同样的事件，并带 token 的原始字节；`set_foreground_presentation_decider` 在原生侧决定每条通知怎么显示；iOS 的启动参数从 `nsh_platform_ios::on_application_event` 取得（[应用事件](./ios.md#应用事件)）。绑定实现 `PushProvider`（向它的服务注册设备），在自己的 `#[native_module]` 入口里用 `set_provider` 设上，再用 `provide_token`、`provide_registration_failure`、`provide_notification` 和 `provide_background` 报告服务送来的内容。点按绑定发出的通知会以 intent 的 extras 携带 payload 打开应用，`press` 收到的 `payload` 就是这些 extras（Android 不告诉是哪条通知，所以没有 `id` 和 `threadId`）。
+
+### Speech
+
+`Speech` 把用户说的话变成文字（听写）：应用开始一个会话，系统监听麦克风，转写文本随说话逐步到达。macOS 和 iOS 使用系统的 Speech 框架识别，Android 使用设备上的语音识别服务（`SpeechRecognizer`），Windows 使用系统的听写（`Windows.Media.SpeechRecognition`），Web 使用浏览器的 Web Speech API；系统或浏览器会向用户请求一次麦克风权限（Apple 平台上还有语音识别权限）。Windows 的听写使用用户的联机语音识别，由用户在“设置 > 隐私和安全性 > 语音”中打开；关闭时会话以 `"not-allowed"` 结束。Linux 上没有识别器，终端应用（TUI 宿主，在任何操作系统上）也没有；用 GPUI 嵌入的应用在 macOS 和 Windows 上使用平台的识别器。显示麦克风按钮前先检查 `Speech.available()`：没有识别器的地方，会话会立即以 `"unavailable"` 结束。
+
+```sh
+nsh add nsh-extra --features speech
+```
+
+```ts
+const Speech: {
+  available(): Promise<boolean>;
+  start(options?: SpeechOptions): SpeechSession;
+};
+
+interface SpeechOptions {
+  /** 说话的语言，BCP 47 标签（"en-US"、"zh-CN"）；省略时为用户的语言。 */
+  lang?: string;
+  /** 用户说话时就报告结果（true，默认），或者只报告最终结果。 */
+  interim?: boolean;
+}
+
+interface SpeechSession {
+  on(event: "start", listener: () => void): () => void;
+  on(event: "result", listener: (result: SpeechResult) => void): () => void;
+  on(event: "end", listener: (end: SpeechEnd) => void): () => void;
+  /** 到目前为止的完整转写。 */
+  readonly text: string;
+  readonly ended: boolean;
+  stop(): void;
+  abort(): void;
+}
+
+interface SpeechResult { text: string; isFinal: boolean }
+interface SpeechEnd { text: string; error?: SpeechErrorCode }
+
+type SpeechErrorCode =
+  | "not-allowed" | "no-speech" | "audio-capture" | "network"
+  | "language-not-supported" | "unavailable" | "failed";
+```
+
+```tsx
+import { signal } from "nsh";
+import { Speech, type SpeechSession } from "nsh-extra";
+
+const transcript = signal("");
+let session: SpeechSession | null = null;
+
+function toggle() {
+  if (session && !session.ended) {
+    session.stop();
+    return;
+  }
+  session = Speech.start({ lang: "en-US" });
+  session.on("result", ({ text }) => transcript.set(text));
+  session.on("end", ({ text, error }) => {
+    if (error) console.warn("dictation ended:", error);
+    else transcript.set(text);
+  });
+}
+```
+
+- `start` 立即返回会话。会话按顺序报告：麦克风打开、识别器开始监听时 `start`；转写每次变化时 `result`（`text` 始终是到目前为止的完整转写，应用照原样显示即可）；最后一次 `end`，之后不再有事件。`stop()` 停止监听，让识别器处理完已听到的内容：最后一个 `isFinal: true` 的结果，然后 `end`。`abort()` 立即结束会话，不带错误。麦克风只有一个，所以同一时间只运行一个会话：开始新会话会结束正在运行的会话。同一个应用在同一个视图里开始的新会话像 `abort()` 一样结束它，不带错误；进程里另一个应用或视图（嵌入应用的另一个 `AppView`）开始的会话以 `"audio-capture"` 结束它，因为麦克风被拿走了。
+- `end` 带有最后的转写，会话失败时还带有 `error`，名称与 Web Speech API 一致：`"not-allowed"`（用户或系统不允许使用麦克风或语音识别，或应用在后台）、`"no-speech"`（没有听到说话）、`"audio-capture"`（无法使用麦克风）、`"network"`（识别器需要网络）、`"language-not-supported"`（识别器不认识 `lang`）、`"unavailable"`（这里没有识别器，或暂时不可用）和 `"failed"`。
+- 选项类型不对时 `start` 抛出 `TypeError`，`lang` 不是语言标签时抛出 `RangeError`。
+- macOS 和 iOS 上、有语音识别服务的 Android 设备上、有听写语言和麦克风的 Windows 上、支持 Web Speech API 的浏览器里（Chrome、Edge 等基于 Chromium 的浏览器，以及 Safari），以及应用给模块设置了自己的识别器的地方，`available()` 为 `true`。Linux 上和终端应用里为 `false`。
+- 在 Web 上，页面需要安全上下文（HTTPS，开发时也可以是 `localhost`）才能使用麦克风；用 iframe 嵌入应用的页面需要允许麦克风（`allow="microphone"`）。Chrome 使用它的在线服务识别，所以连接断开时报告 `"network"`。
+- 声明了 `"capabilities"` 的应用用 [`"speech": true`](./sandbox-and-capabilities.md#speech) 授予 `Speech`。没有授予时 `start` 抛出一个 `Error`，其 `code` 为 `"ERR_ACCESS_DENIED"`，`permission` 为 `"speech"`。
+
+开启这个 feature 后，打包的应用会带上它需要的条目：iOS 和 macOS 上的麦克风和语音识别用途说明（应用可以在 `ios.infoPlist` / `macos.infoPlist` 里写自己的文案），macOS 上的音频输入 entitlement，Android 上的 `RECORD_AUDIO` 权限和对语音识别服务的查询声明。在 Web 上，模块通过 wasm-bindgen 调用浏览器，所以 `nsh` 会用 `wasm-bindgen` CLI 构建应用的 Web 运行时（[在 Rust 中使用浏览器 API](./web.md#在-rust-中使用浏览器-api)）；站点本身不需要任何声明。
+
+Rust 代码使用 `nsh_extra::speech`：`available().await`，以及 `recognize(SpeechRequest)` 返回的会话，它的 `next().await` 给出每个 `SpeechEvent`（`stop()`、`abort()`；丢弃它即中止）。用自己的方式识别语音的应用（自己的引擎或服务，比如嵌入 NSH 的应用）用 `set_backend` 给模块一个 `SpeechBackend`：之后每个会话都交给它，而不是系统的识别器。
+
+```rust
+use nsh_extra::speech::{self, SpeechEvent, SpeechRequest};
+
+async fn dictate() -> String {
+    let mut recognition = speech::recognize(SpeechRequest::default());
+    let mut text = String::new();
+    while let Some(event) = recognition.next().await {
+        match event {
+            SpeechEvent::Result { text: heard, .. } => text = heard,
+            SpeechEvent::End { .. } => break,
+            _ => {}
+        }
+    }
+    text
+}
+```
+
+在 `nsh test`（以及 `nsh_testing::Headless`）中，会话运行在模块的模拟识别器上，它的名称是 `"nsh-extra/speech"`：会话立即开始监听，就像用户允许了麦克风；测试通过 [`app.fake`](./testing-and-trace.md)（Rust 中是 `Headless::call_fake`）调用这个模拟识别器，代替用户说话：
+
+| 方法 | `args` | 作用和回答 |
+|---|---|---|
+| `hear` | `[text]` | 用户说出 `text`，即到目前为止的完整转写：正在运行的会话把它报告为非最终的 `result`（`interim: false` 时先留到结束）。resolve 为 `null`；没有会话运行时以 `no speech session listens` 拒绝。 |
+| `end` | `[]` 或 `[error]` | 结束正在运行的会话：带 `error`（上面的错误码之一）时会话失败，否则像用户停下时一样：转写作为最终的 `result`，然后 `end`（什么都没听到时为 `"no-speech"`）。resolve 为 `null`；没有会话运行或 `error` 不是错误码时拒绝。 |
+| `requests` | `[]` | resolve 为应用开始的会话，按顺序：`[{ lang, interim }]`，用户的语言时 `lang` 为 `null`。 |
+
+```tsx
+await app.press("label:Dictate");
+await app.fake("nsh-extra/speech", "hear", ["hello"]);
+await app.waitFor("text:hello");
+await app.fake("nsh-extra/speech", "end");
+```
 
 ## 应用自己的 Rust：`ext/`
 
@@ -329,7 +507,7 @@ nshm 兼容的 NSH 版本就是它自己对 `nsh-core` 的版本要求（`nsh-co
 
 ### 打包的应用需要什么
 
-用到系统功能的 nshm 在 `Cargo.toml` 里声明打包的应用需要什么：写在 `[package.metadata.nsh]` 下；只有某个 feature 需要时，写在 `[package.metadata.nsh.features.<feature>]` 下。`nsh` 构建安装包时，会把应用链接的每个 crate 的条目（按 Cargo 实际开启的 feature）加进去；开发宿主拿到其中的 `Info.plist` 键和 Android 条目：
+用到系统功能的 nshm 在 `Cargo.toml` 里声明打包的应用需要什么：写在 `[package.metadata.nsh]` 下；只有某个 feature 需要时，写在 `[package.metadata.nsh.features.<feature>]` 下。`nsh` 构建安装包时，会把应用链接的每个 crate 的条目（按 Cargo 实际开启的 feature）加进去；开发宿主拿到其中的 iOS `Info.plist` 键和 Android 条目：
 
 ```toml
 [package.metadata.nsh.features.scanner.ios.infoPlist]
@@ -347,8 +525,9 @@ libraries = ["android/libs/scanner-glue.jar"]
 | `ios.infoPlist` | iOS 应用 `Info.plist` 的键，与 `nsh.json` 的 `ios.infoPlist` 相同 |
 | `ios.infoPlistStrings` | 这些键在其他语言下的文字，按语言给出，与 `nsh.json` 的 `ios.infoPlistStrings` 相同（[打包](./packaging.md#其他语言的-infoplist-文字)） |
 | `ios.entitlements` | iOS 应用的 entitlements |
-| `ios.frameworks` | XCFramework 和 framework，路径相对于 crate 的 `Cargo.toml`，链接和打包方式与 `nsh.json` 的 `ios.frameworks` 相同（[Framework 与链接参数](./packaging.md#framework-与链接参数)） |
-| `ios.linkerFlags` | iOS 可执行文件的链接参数，放在应用自己的之后 |
+| `macos.infoPlist` | macOS 应用 `Info.plist` 的键，与 `nsh.json` 的 `macos.infoPlist` 相同 |
+| `macos.infoPlistStrings` | 这些键在其他语言下的文字，与 `ios.infoPlistStrings` 相同 |
+| `macos.entitlements` | macOS 应用的 entitlements |
 | `android.permissions` | `<uses-permission>` 元素，写法与 `nsh.json` 相同（`CAMERA` 即 `android.permission.CAMERA`） |
 | `android.queries` | manifest `<queries>` 里的 `<intent>`、`<package>`、`<provider>` 元素 |
 | `android.application` | `<application>` 里的 `<service>`、`<receiver>`、`<provider>`、`<activity>`、`<meta-data>` 元素；`${applicationId}` 是应用的包名，其他占位符取应用的 `android.manifestPlaceholders` |
@@ -358,11 +537,40 @@ crate 不能设置 `android.manifestPlaceholders`，设置了会报错：占位�
 两个 crate 带了同一个 Android 库的不同版本时，用应用在自己的 `android.libraries` 里列出的那个版本。两个库定义了同名资源时，
 应用列出的库优先，其次是 crate 名排序靠前的（[Java 代码](./packaging.md#java-代码)）。
 
-应用自己的 `nsh.json` 优先：它设置过的键保留它的值，数组（例如 `UIBackgroundModes`）合并。两个 crate 给同一个键设置了不同的值时（例如两段不同的相机用途说明），由应用在 `ios.infoPlist` 或 `ios.entitlements` 里写这个键来决定；应用没写之前，打包 iOS 应用会报错并指出这两个 crate。NSH 自己设置的键（包标识、版本等）不能由 crate 设置。
+应用自己的 `nsh.json` 优先：它设置过的键保留它的值，数组（例如 `UIBackgroundModes`）合并。两个 crate 给同一个键设置了不同的值时（例如两段不同的相机用途说明），由应用在 `ios.infoPlist`、`ios.entitlements`、`macos.infoPlist` 或 `macos.entitlements` 里写这个键来决定；应用没写之前，打包该平台应用会报错并指出这两个 crate。NSH 自己设置的键（包标识、版本等）不能由 crate 设置。
 
-crate 翻译的是各 crate 在 `ios.infoPlist` 里设置的键，按它们的措辞翻译；按应用开启的 feature 没有 crate 设置的键（例如所在 feature 没开），它的翻译会被略过并给出警告。应用只采用自己支持的语言的 crate 翻译，即 `locales` 里的语言或应用自己 `ios.infoPlistStrings` 里的语言（写一个空的 `{}` 就是只声明语言、不写自己的文字），所以 crate 可以带上很多语言，而不会给应用增加语言。应用自己设置了的键不采用任何 crate 的翻译，因为那些翻译说的不是应用自己的文字。两个 crate 对同一个键给出不同的翻译时，同样由应用在 `ios.infoPlistStrings` 里写这个键来决定。
+crate 翻译的是各 crate 在 `ios.infoPlist`（macOS 是 `macos.infoPlistStrings` 翻译 `macos.infoPlist`）里设置的键，按它们的措辞翻译；按应用开启的 feature 没有 crate 设置的键（例如所在 feature 没开），它的翻译会被略过并给出警告。应用只采用自己支持的语言的 crate 翻译，即 `locales` 里的语言或应用自己 `ios.infoPlistStrings`（`macos.infoPlistStrings`）里的语言（写一个空的 `{}` 就是只声明语言、不写自己的文字），所以 crate 可以带上很多语言，而不会给应用增加语言。应用自己设置了的键不采用任何 crate 的翻译，因为那些翻译说的不是应用自己的文字。两个 crate 对同一个键给出不同的翻译时，同样由应用在 `ios.infoPlistStrings`（`macos.infoPlistStrings`）里写这个键来决定。
 
 在应用旁边开发时用 `nsh add --path ../my-gauge`，按目录当前内容使用。发布方式与普通 crate 相同（`cargo publish`），加上关键词 `nshm`，便于在 [crates.io](https://crates.io/keywords/nshm) 上找到；也可以推送到 Git 并给版本打标签。
+
+### 封装原生 SDK
+
+封装 Apple SDK 的 nshm 在 `#[cfg(target_os = "ios")]` 或 `#[cfg(target_os = "macos")]` 下从 Rust 调用它。通过 `objc2` 系列 crate 使用的系统 framework 无需更多设置。厂商预编译的库（`.xcframework` 或 `.a`）由 nshm 自己的 `build.rs` 链接：Cargo 会把所有依赖的 `rustc-link-lib` 和 `rustc-link-search` 传给应用的可执行文件，应用本身不用写任何配置，NSH 也没有按平台的 SDK 设置。
+
+```rust
+// build.rs
+fn main() {
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("ios") {
+        return;
+    }
+    // 模拟器和 Mac Catalyst（`nsh run --target catalyst`）也是 iOS 目标。
+    let slice = match std::env::var("CARGO_CFG_TARGET_ABI").as_deref() {
+        Ok("sim") => "ios-arm64_x86_64-simulator",
+        Ok("macabi") => "ios-arm64_x86_64-maccatalyst",
+        _ => "ios-arm64",
+    };
+    let root = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    println!("cargo:rustc-link-search=native={root}/vendor/Sdk.xcframework/{slice}");
+    // +whole-archive is -force_load: it keeps Objective-C categories, like -ObjC.
+    println!("cargo:rustc-link-lib=static:+whole-archive=Sdk");
+    println!("cargo:rustc-link-lib=framework=AdSupport");
+}
+```
+
+- 用 `rustc-link-lib`，不要用 `rustc-link-arg`：链接参数只作用于本 crate 自己的目标。
+- 静态库的隐私清单条目写进应用的 `ios.privacyManifest`。
+- NSH 不嵌入动态 framework，优先使用 SDK 的静态版本。
+- 在 Linux 和 Windows 上，同样由 `build.rs` 链接 SDK（Linux 上是 `.a` 和 `.so`，Windows 上是 `.lib`）。NSH 同样不会把共享库（`.so`、`.dll`）放进包里；请优先使用 SDK 的静态版本。
 
 ### TSX nshm
 

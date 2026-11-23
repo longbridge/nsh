@@ -1105,6 +1105,7 @@ mod tests {
             queries: &[],
             application: &[],
             schemes: &[],
+            share_mime_types: &[],
             links: &[],
             rust: false,
             dark: false,

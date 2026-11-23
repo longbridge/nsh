@@ -487,6 +487,16 @@ impl Painter<'_> {
         } else {
             CellBounds::new(frame, cells, area)
         };
+        // `clipPath`: what shows of the view and its children, and where it
+        // is hit, are the Cells of its rectangle (Cells have no rounded
+        // corners).
+        let clip = match view.style.clip_path() {
+            Some(c) => {
+                let (r, _) = c.resolve(view.frame.size);
+                CellBounds::new(Bounds::new(at + r.origin, r.size), cells, area).clipped(clip)
+            }
+            None => clip,
+        };
         let visible = bounds.clipped(clip);
         let cell_origin = bounds.origin(cells, area);
 
@@ -2666,6 +2676,7 @@ fn control(view: &NshView) -> bool {
                 | AccessibilityRole::Adjustable
                 | AccessibilityRole::Combobox
                 | AccessibilityRole::Spinbutton
+                | AccessibilityRole::Textbox
         )
 }
 

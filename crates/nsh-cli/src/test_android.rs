@@ -32,7 +32,11 @@ const CONNECT: Duration = Duration::from_secs(90);
 
 /// Starts the apps tests open on `device` ([`crate::android::device`]),
 /// installing the development host there.
-pub(crate) fn starter(work: &Path, device: Option<&str>) -> anyhow::Result<StartHost> {
+pub(crate) fn starter(
+    work: &Path,
+    device: Option<&str>,
+    release: bool,
+) -> anyhow::Result<StartHost> {
     let sdk = Arc::new(Sdk::find()?);
     let serial = crate::android::device(&sdk, device)?;
     let abis = crate::android::dev_abis(&sdk, &serial)?;
@@ -48,7 +52,7 @@ pub(crate) fn starter(work: &Path, device: Option<&str>) -> anyhow::Result<Start
         None,
     )?;
     Ok(Arc::new(move |entry: &Path, options: &HostOptions| {
-        start(&sdk, &serial, entry, options).map(|h| Box::new(h) as Box<dyn Host>)
+        start(&sdk, &serial, entry, options, release).map(|h| Box::new(h) as Box<dyn Host>)
     }))
 }
 
@@ -125,8 +129,9 @@ fn start(
     serial: &str,
     entry: &Path,
     options: &HostOptions,
+    release: bool,
 ) -> Result<DeviceHost, String> {
-    let server = crate::test_host::serve(entry, options)?;
+    let server = crate::test_host::serve(entry, options, release)?;
     let port = format!("tcp:{}", server.local_addr().port());
     let host = DeviceHost {
         server,
@@ -147,20 +152,9 @@ fn start(
     );
     let config = crate::package::read_config(entry).map_err(|e| format!("{e:#}"))?;
     let env = crate::run::android_app_env(&config);
-    let mut start = vec![
-        "shell",
-        "am",
-        "start",
-        "-S",
-        "-n",
-        "com.longbridge.nsh.host/com.longbridge.nsh.DevActivity",
-        "--es",
-        "url",
-        &url,
-        "--es",
-        "dataDir",
-        &data,
-    ];
+    let mut start =
+        crate::android::dev_start("com.longbridge.nsh.host/com.longbridge.nsh.DevActivity");
+    start.extend(["--es", "url", &url, "--es", "dataDir", &data]);
     start.extend(env.iter().map(String::as_str));
     host.adb(&start)?;
     let deadline = Instant::now() + CONNECT;

@@ -443,8 +443,15 @@ On Android; on iOS its listeners are kept and never called, and `exitApp()` retu
 ```ts
 const BackHandler: {
   on(event: "press", listener: () => boolean | void): () => void;
+  on(event: "progress", listener: (event: BackProgressEvent) => void): () => void;
   exitApp(): void;
 };
+
+interface BackProgressEvent {
+  phase: "start" | "move" | "end" | "cancel";
+  progress: number;
+  edge?: "left" | "right";
+}
 ```
 
 The system back button and back gesture. Dialogs handle the back press first (a dialog closes); then `BackHandler`'s listeners run, the most recently added first; when none of them handles it, the top navigation stack pops, and with no page to go back to the app exits.
@@ -452,6 +459,7 @@ The system back button and back gesture. Dialogs handle the back press first (a 
 | Member | Rust | Description |
 |---|---|---|
 | `on("press", listener)` | `on_back_press(listener)` | `listener` returns `true` when it handled the press. Returns a function that stops listening; a listener added while a component renders (or an effect runs) stops with it, in Rust and TSX alike. |
+| `on("progress", listener)` | `on_back_progress(listener)` | Follows the back gesture on Android 14 and later: `listener` hears each step of a gesture no dialog takes, `start`, `move`, then `end` (the press follows) or `cancel`, with the `progress` from 0 to 1 and the `edge` the swipe started at. While one listens, the stacks leave the gesture to the app and do not preview their pop. See [Following the back gesture](../docs/navigation.md#following-the-back-gesture). |
 | `exitApp()` | the listener returns `false` | Leaves the app. A Rust listener that returns `false` lets the press go on, so the stack goes back or the app exits. |
 
 ```rust tabs

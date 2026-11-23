@@ -6,9 +6,12 @@
 //! views still get their touches. Touches start being tracked when the view
 //! under them, or one around it, listens to `onTouch`.
 //!
-//! A gate sits on each view with a `panActivation` and decides, as the
-//! fingers move, whether its pan activates ([`PanActivation::decide`]): the
-//! pans of the scroll views around it must wait for it to fail
+//! A gate sits on each view with a `panActivation` whose native pan or
+//! responder follows it (`nsh_core::input::gate_activation`; not on one
+//! whose pan is off, which leaves the drags to its content) and decides,
+//! as the fingers move, whether its pan activates
+//! ([`PanActivation::decide`]): the pans of the scroll views around it
+//! must wait for it to fail
 //! (`shouldBeRequiredToFailByGestureRecognizer:`), so they keep the touches
 //! when it fails and never get them when it activates; the activation goes
 //! to the engine with the tracker's touches (`TouchEvent::activated`), and
@@ -23,7 +26,7 @@
 use std::cell::{Cell, RefCell};
 
 use nsh_core::{
-    NodeId, PanActivation, Point, Points, TouchEvent, TouchPhase, TouchPoint, geometry::point,
+    NodeId, PanActivation, Point, Points, Size, TouchEvent, TouchPhase, TouchPoint, geometry::point,
 };
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send, rc::Retained,
@@ -31,7 +34,8 @@ use objc2::{
 use objc2_core_foundation::CGPoint;
 use objc2_foundation::{NSObject, NSObjectProtocol, NSSet};
 use objc2_ui_kit::{
-    UIEvent, UIGestureRecognizer, UIGestureRecognizerState, UIScrollView, UITouch, UIView,
+    UIEvent, UIGestureRecognizer, UIGestureRecognizerState, UIPanGestureRecognizer, UIScrollView,
+    UITouch, UIView,
 };
 
 use crate::target::EventTarget;
@@ -303,14 +307,20 @@ define_class!(
     impl PanGate {
         #[unsafe(method(touchesBegan:withEvent:))]
         fn touches_began(&self, touches: &NSSet<UITouch>, _event: &UIEvent) {
-            let mut finger = self.ivars().finger.borrow_mut();
-            if finger.is_none()
-                && let Some(touch) = touches.iter().next()
-            {
-                let at = touch.locationInView(None);
-                *finger = Some((touch.retain(), at));
-                self.ivars().judged.set(Point::default());
+            if self.ivars().finger.borrow().is_some() {
+                return;
             }
+            let Some(touch) = touches.iter().next() else {
+                return;
+            };
+            let at = touch.locationInView(None);
+            // An edge pan starts only from its edge of the window.
+            if !starts_at(&self.ivars().activation.get(), &touch, at) {
+                self.set_state(UIGestureRecognizerState::Failed);
+                return;
+            }
+            *self.ivars().finger.borrow_mut() = Some((touch.retain(), at));
+            self.ivars().judged.set(Point::default());
         }
 
         #[unsafe(method(touchesMoved:withEvent:))]
@@ -363,6 +373,15 @@ define_class!(
         #[unsafe(method(shouldBeRequiredToFailByGestureRecognizer:))]
         fn should_be_required_to_fail_by(&self, other: &UIGestureRecognizer) -> bool {
             self.holds_back(other)
+        }
+
+        /// An edge pan lets a stack's swipe back go first.
+        #[unsafe(method(shouldRequireFailureOfGestureRecognizer:))]
+        fn should_require_failure_of(&self, other: &UIGestureRecognizer) -> bool {
+            self.ivars().activation.get().edge.is_some()
+                && self
+                    .view()
+                    .is_some_and(|view| crate::navigation::is_back_swipe(&view, other))
         }
 
         /// Recognizers on the same view (`pan`, `pinch`) go on with it.
@@ -472,6 +491,111 @@ impl PanGate {
             }
             current = v.superview();
         }
+    }
+}
+
+/// Whether a finger going down at `at` (window points) may start a pan with
+/// `activation`: an edge pan's finger goes down at its edge of the window.
+fn starts_at(activation: &PanActivation, touch: &UITouch, at: CGPoint) -> bool {
+    let Some(window) = touch.window() else {
+        return true;
+    };
+    let size = window.bounds().size;
+    activation.starts_at(
+        point(Points(at.x as f32), Points(at.y as f32)),
+        Size::new(Points(size.width as f32), Points(size.height as f32)),
+    )
+}
+
+pub(crate) struct ActivatedPanIvars {
+    activation: Cell<PanActivation>,
+    /// The finger the activation follows and where it went down (window
+    /// points).
+    finger: RefCell<Option<(Retained<UITouch>, CGPoint)>>,
+    /// The finger's offset from there at its last move.
+    judged: Cell<Point<Points>>,
+    /// The activation activated: the pan recognizes as usual.
+    active: Cell<bool>,
+}
+
+define_class!(
+    /// A view's own pan (`pan`, `onPanStart`) with a `panActivation` along
+    /// a way or past offsets: it sees the finger's moves only once the
+    /// activation activates, so it begins then, and fails when the
+    /// activation fails. Edge pans use `UIScreenEdgePanGestureRecognizer`.
+    #[unsafe(super(UIPanGestureRecognizer, UIGestureRecognizer, NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = ActivatedPanIvars]
+    pub(crate) struct ActivatedPan;
+
+    unsafe impl NSObjectProtocol for ActivatedPan {}
+
+    impl ActivatedPan {
+        #[unsafe(method(touchesBegan:withEvent:))]
+        fn touches_began(&self, touches: &NSSet<UITouch>, event: &UIEvent) {
+            if self.ivars().finger.borrow().is_none()
+                && let Some(touch) = touches.iter().next()
+            {
+                let at = touch.locationInView(None);
+                *self.ivars().finger.borrow_mut() = Some((touch.retain(), at));
+                self.ivars().judged.set(Point::default());
+            }
+            // SAFETY: calling the superclass implementation.
+            let _: () = unsafe { msg_send![super(self), touchesBegan: touches, withEvent: event] };
+        }
+
+        #[unsafe(method(touchesMoved:withEvent:))]
+        fn touches_moved(&self, touches: &NSSet<UITouch>, event: &UIEvent) {
+            if !self.ivars().active.get() {
+                let Some((touch, start)) = self.ivars().finger.borrow().clone() else {
+                    return;
+                };
+                let at = touch.locationInView(None);
+                let to = point(Points((at.x - start.x) as f32), Points((at.y - start.y) as f32));
+                let from = self.ivars().judged.replace(to);
+                match self.ivars().activation.get().decide_move(from, to) {
+                    Some(true) => self.ivars().active.set(true),
+                    Some(false) => {
+                        // SAFETY: `setState:` is the subclass API of
+                        // UIGestureRecognizer.
+                        let _: () =
+                            unsafe { msg_send![self, setState: UIGestureRecognizerState::Failed] };
+                        return;
+                    }
+                    None => return,
+                }
+            }
+            // SAFETY: calling the superclass implementation.
+            let _: () = unsafe { msg_send![super(self), touchesMoved: touches, withEvent: event] };
+        }
+
+        #[unsafe(method(reset))]
+        fn reset(&self) {
+            // SAFETY: calling the superclass implementation.
+            let _: () = unsafe { msg_send![super(self), reset] };
+            self.ivars().finger.borrow_mut().take();
+            self.ivars().active.set(false);
+        }
+    }
+);
+
+impl ActivatedPan {
+    /// A pan sending `action` to `target`.
+    pub(crate) fn new(
+        mtm: MainThreadMarker,
+        activation: PanActivation,
+        target: &EventTarget,
+        action: objc2::runtime::Sel,
+    ) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(ActivatedPanIvars {
+            activation: Cell::new(activation),
+            finger: RefCell::new(None),
+            judged: Cell::new(Point::default()),
+            active: Cell::new(false),
+        });
+        // SAFETY: the designated initializer; `target` implements `action`
+        // and outlives the recognizer (the mounter keeps both).
+        unsafe { msg_send![super(this), initWithTarget: target, action: action] }
     }
 }
 

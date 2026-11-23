@@ -512,7 +512,7 @@ function Editor() {
 打开文档的应用（播放器、编辑器）在 nsh.json 的 `fileTypes` 中列出文件类型。`nsh package` 把它们声明给系统，应用就会出现在
 「打开方式」中，并打开用户双击或拖到图标上的文件。文件以绝对路径送到 `Application.on("openFiles")`，包括启动应用的文件。
 应用 [scheme](nsh.md#urlscheme) 的链接与之分开，仍由 `UrlScheme.on("open")` 送达。`Application` 从 `nsh/desktop` 导入，
-`openFiles` 在 iOS 上同样送达。
+`openFiles` 在 iOS 和 Android 上同样送达。
 
 ```json
 {
@@ -534,7 +534,7 @@ Application.on("openFiles", ({ paths }) => {
 | --- | --- |
 | `name` | 系统对这种文件的称呼（`"Video"`），必填。 |
 | `extensions` | 扩展名，不带点（`["mp4", "mov"]`）。 |
-| `mimeTypes` | MIME 类型（`["video/mp4"]`）：Linux 按它们列出应用。 |
+| `mimeTypes` | MIME 类型（`["video/mp4"]`）：Linux 按它们列出应用，Android 按它们把应用列入分享面板（可用 `image/*` 这样的通配）。 |
 | `contentTypes` | 统一类型标识符（`["public.movie"]`）：iOS 按它们列出应用。 |
 | `role` | `"viewer"`（默认）或 `"editor"`。 |
 
@@ -548,7 +548,11 @@ Application.on("openFiles", ({ paths }) => {
 | iOS、Mac Catalyst | `Info.plist` 中的 `CFBundleDocumentTypes`（按 `contentTypes`）；系统把文件的副本交给应用 |
 | Windows | 应用每次启动时写在 `HKEY_CURRENT_USER\\Software\\Classes` 下：每种类型一个 ProgID，列在各扩展名的 `OpenWithProgids` 中。带文件的第二次启动把文件交给正在运行的应用 |
 | Linux | 桌面条目的 `MimeType`，`Exec … %U`；应用只运行一份，第二次启动把文件交给正在运行的应用 |
-| Android、Web | 不声明；它们的包不包含 `fileTypes` |
+| Android | 分享面板：为 `mimeTypes` 声明 `SEND` 与 `SEND_MULTIPLE` intent filter；只有 `extensions` 的类型不会列出。`AppActivity` 把每个分享来的流复制到应用缓存，再把副本的路径交给应用 |
+| Web | 不声明；它的包不包含 `fileTypes` |
+
+Android 上，当某个类型给出 `mimeTypes` 时，应用会收到其他应用分享给它的文件：只接收这些类型的 `content://` 流，最多 16 个文件、
+每个 256 MiB（每次分享共 512 MiB）。应用已在运行时，分享会交给现有的 Activity（`singleTask`）。路径指向临时副本，Android 可能清理这些缓存；NSH 收到新分享时也会清理超过一周的副本。
 
 开启 [`singleInstance`](#单实例) 时，第二次启动还会以原样的参数报告 `secondInstance`。
 

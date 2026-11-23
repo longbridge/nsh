@@ -67,8 +67,10 @@ import BaseSwitch from "./base-switch";
 import BaseTabs from "./base-tabs";
 import BaseTabsOrientation from "./base-tabs-orientation";
 import BaseTextView from "./base-text-view";
+import BaseTimeField from "./base-time-field";
 import BaseToast from "./base-toast";
 import BaseToggle from "./base-toggle";
+import BaseTitleBar from "./base-title-bar";
 import BaseToolbar from "./base-toolbar";
 import BaseTree from "./base-tree";
 import BaseTreeSlots from "./base-tree-slots";
@@ -127,6 +129,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-tabs": BaseTabs,
   "base-tabs-orientation": BaseTabsOrientation,
   "base-toggle": BaseToggle,
+  "base-title-bar": BaseTitleBar,
   "base-toolbar": BaseToolbar,
   "base-tree": BaseTree,
   "base-tree-slots": BaseTreeSlots,
@@ -144,6 +147,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-select": BaseSelect,
   "base-slider": BaseSlider,
   "base-table": BaseTable,
+  "base-time-field": BaseTimeField,
   "base-toast": BaseToast,
   "base-token": BaseToken,
   "base-set-theme": BaseSetTheme,

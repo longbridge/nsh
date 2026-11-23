@@ -1091,25 +1091,6 @@ impl From<&nsh_core::share::ShareSheet> for SharedContent {
     }
 }
 
-/// A speech recognition session the app started (`Speech.start`), as a
-/// test reads it.
-#[derive(Debug, Clone, PartialEq, JsObject)]
-pub struct SpeechRequest {
-    /// The language asked for (`"en-US"`); `null`: the user's.
-    pub lang: Option<String>,
-    /// Whether results come while the user speaks.
-    pub interim: bool,
-}
-
-impl From<&nsh_core::speech::SpeechRequest> for SpeechRequest {
-    fn from(request: &nsh_core::speech::SpeechRequest) -> Self {
-        SpeechRequest {
-            lang: request.lang.clone(),
-            interim: request.interim,
-        }
-    }
-}
-
 /// What the app asked of the speaker (`Sound`, `AudioPlayer`), as a test
 /// reads it.
 #[derive(Debug, Clone, PartialEq, JsObject)]
@@ -2261,14 +2242,15 @@ impl App {
 
     /// Chooses the open context menu's action labelled `label` (a
     /// submenu's: `"Share > Mail"`), as a click on it: the app hears
-    /// `onMenu`, then the menu closes. On iOS it is a menu the system
-    /// shows (a `MenuButton`'s, a `ContextMenu`'s, a header button's),
-    /// chosen from as a tap does.
+    /// `onMenu`, then the menu closes. On iOS and Android it is a menu the
+    /// system shows (a `MenuButton`'s, a `ContextMenu`'s; on iOS a header
+    /// button's too), chosen from as a tap does.
     pub async fn choose_menu_item(this: Instance<Self>, label: String) -> Result<(), JsError> {
         step(&this, move |app| app.choose_menu_item(&label)).await
     }
 
-    /// Closes the open context menu with nothing chosen, as Escape does.
+    /// Closes the open context menu with nothing chosen, as Escape does (on
+    /// iOS a tap outside the system's menu, on Android the back button).
     pub async fn close_menu(this: Instance<Self>) -> Result<(), JsError> {
         step(&this, move |app| app.close_menu()).await
     }
@@ -2510,43 +2492,31 @@ impl App {
         self.with(|app| Ok(app.picks()?.iter().map(PickRequest::from).collect()))
     }
 
-    /// The speech recognition sessions the app started (`Speech.start`),
-    /// in order. Headless apps recognize speech: a session listens at once
-    /// (its `start`), and `hear` speaks for the user. Headless runs only.
-    pub fn speech_requests(&self) -> Result<Vec<SpeechRequest>, JsError> {
-        self.with(|app| {
-            Ok(app
-                .speech_requests()?
-                .iter()
-                .map(SpeechRequest::from)
-                .collect())
+    /// Calls `method` of the fake named `name` with `args`: the stand-in a
+    /// native module the app turns on gives headless runs in place of a
+    /// device (`"nsh-extra/speech"`: the recognizer the test speaks into;
+    /// its methods are documented with the module).
+    /// Resolves with its answer once the app is quiet. Rejects when no
+    /// module of the app gives that fake, or the fake refuses the call.
+    /// Headless runs only.
+    pub async fn fake(
+        this: Instance<Self>,
+        name: String,
+        method: String,
+        args: Option<Vec<JsonValue>>,
+    ) -> Result<JsonValue, JsError> {
+        let answer = Arc::new(Mutex::new(JsonValue::Null));
+        let out = answer.clone();
+        let args = args.unwrap_or_default();
+        step(&this, move |app| {
+            *out.lock().unwrap_or_else(|e| e.into_inner()) =
+                app.call_fake(&name, &method, &args)?;
+            Ok(())
         })
-    }
-
-    /// The user says `text`, the whole transcript so far, to the speech
-    /// session listening: the app gets it as a `result` that is not final.
-    /// Then waits until the app is quiet. Rejects when no session listens.
-    /// Headless runs only.
-    pub async fn hear(this: Instance<Self>, text: String) -> Result<(), JsError> {
-        step(&this, move |app| app.hear(&text)).await
-    }
-
-    /// Ends the speech session listening: with `error` (`"no-speech"`,
-    /// `"not-allowed"`, `"audio-capture"`, `"network"`,
-    /// `"language-not-supported"`, `"unavailable"`, `"failed"`), or without
-    /// one as when the user stops talking: the transcript as the final
-    /// `result`, then `end` (`no-speech` when nothing was heard). Then
-    /// waits until the app is quiet. Rejects when no session listens.
-    /// Headless runs only.
-    pub async fn end_speech(this: Instance<Self>, error: Option<String>) -> Result<(), JsError> {
-        let error = match error {
-            None => None,
-            Some(name) => Some(
-                nsh_core::speech::SpeechError::from_name(&name)
-                    .ok_or_else(|| JsError::Type(format!("no speech error {name:?}")))?,
-            ),
-        };
-        step(&this, move |app| app.end_speech(error)).await
+        .await?;
+        Ok(std::mem::take(
+            &mut *answer.lock().unwrap_or_else(|e| e.into_inner()),
+        ))
     }
 
     /// What the app asked of the speaker (`Sound`, `AudioPlayer`), in

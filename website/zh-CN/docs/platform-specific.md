@@ -121,6 +121,7 @@ TSX 的这些对象和其他属性一样是响应式的；从对象中移除的�
 | Rust | TSX | 说明 |
 |---|---|---|
 | `on_back_press(listener)` | `BackHandler.on("press", listener)` | 在对话框之后、导航栈之前监听返回键；处理了就返回 `true`。监听器随添加它的组件（或 effect）一起结束；在 TSX 中，调用还会返回一个函数，用来提前停止监听。 |
+| `on_back_progress(listener)` | `BackHandler.on("progress", listener)` | 跟随返回手势（Android 14 及更高版本）：`start`、`move`，然后是 `end`（紧接着是返回操作）或 `cancel`，带有从 0 到 1 的 `progress` 和手势开始的边缘 `edge`。有监听器时，导航栈不再预览弹出。 |
 | | `BackHandler.exitApp()` | 退出应用。 |
 
 ```rust tabs

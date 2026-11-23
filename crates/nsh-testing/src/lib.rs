@@ -166,9 +166,13 @@ fn build(
 #[cfg(feature = "bundle")]
 pub fn compiler(ui_sets: Vec<Registry>) -> Compile {
     Arc::new(move |entry: &Path, kind: Entry| {
-        // An app's directory: its `App.tsx`.
+        // An app's directory: the entry its `nsh.json` names, else its
+        // `App.tsx`.
         let entry = &if entry.is_dir() {
-            entry.join("App.tsx")
+            nsh_bundler::app_dir::config_entry(entry)
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| entry.join(nsh_bundler::app_dir::ENTRY))
         } else {
             entry.to_owned()
         };

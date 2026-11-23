@@ -755,7 +755,6 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
             host
         },
         picker: None,
-        speech: None,
         audio: None,
         windows: None,
         login_item: None,
@@ -1245,8 +1244,9 @@ pub unsafe extern "C" fn nsh_event(
 }
 
 /// `onPaste` of input `id`: what the user pasted, as JSON `{ text, files:
-/// [{ name, type, size }], uris }` and the files' bytes one after the other
-/// (they never cross as JS strings).
+/// [{ name, type, size, read }], uris }` and the bytes of the files read
+/// one after the other (they never cross as JS strings); a file with
+/// `read: false` is larger than the input's `pasteMaxSize`.
 ///
 /// # Safety
 ///
@@ -1284,7 +1284,17 @@ pub unsafe extern "C" fn nsh_paste(
         .into_iter()
         .flatten()
     {
-        let size = file.get("size").and_then(|s| s.as_u64()).unwrap_or(0) as usize;
+        let size = file.get("size").and_then(|s| s.as_u64()).unwrap_or(0);
+        // Not read: larger than the input's `pasteMaxSize`.
+        if file.get("read").and_then(|r| r.as_bool()) == Some(false) {
+            paste.too_large.push(nsh_core::PastedFile::too_large(
+                text(file, "name"),
+                text(file, "type"),
+                size,
+            ));
+            continue;
+        }
+        let size = size as usize;
         let Some(part) = bytes.get(at..at + size) else {
             break;
         };
@@ -1631,6 +1641,7 @@ pub unsafe extern "C" fn nsh_touch(ptr: *const u8, len: usize) -> f64 {
                 alt: on("alt"),
                 shift: on("shift"),
                 cmd: on("platform"),
+                alt_graph: false,
             }
         },
         activated: value
@@ -1695,6 +1706,7 @@ pub extern "C" fn nsh_key(key: u32, modifiers: u32, focus: u32, repeat: u32) -> 
             alt: modifiers & 2 != 0,
             shift: modifiers & 4 != 0,
             cmd: modifiers & 8 != 0,
+            alt_graph: false,
         },
         key,
     };
@@ -1776,6 +1788,7 @@ pub unsafe extern "C" fn nsh_key_event(
         alt: modifiers & 2 != 0,
         shift: modifiers & 4 != 0,
         cmd: modifiers & 8 != 0,
+        alt_graph: false,
     };
     let stroke = key_of(stroke).map(|key| Keystroke { key, modifiers });
     let mut event = nsh_core::keyboard::KeyEvent::default();
@@ -1913,10 +1926,20 @@ pub extern "C" fn nsh_zoom(id: u32, scale: f32) -> f64 {
 }
 
 /// A drag on a view with native pan values (`phase`: 0 start, 1 move, 2
-/// end), translated `(tx, ty)` since it began, at velocity `(vx, vy)`
-/// points per second.
+/// end, 3 cancelled), translated `(tx, ty)` since it began at `(ox, oy)`
+/// in the root, at velocity `(vx, vy)` points per second.
 #[unsafe(no_mangle)]
-pub extern "C" fn nsh_pan(id: u32, phase: u32, tx: f32, ty: f32, vx: f32, vy: f32) -> f64 {
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn nsh_pan(
+    id: u32,
+    phase: u32,
+    tx: f32,
+    ty: f32,
+    vx: f32,
+    vy: f32,
+    ox: f32,
+    oy: f32,
+) -> f64 {
     send(|app| {
         match phase {
             0 => app.animation.pan_began(id),
@@ -1928,8 +1951,10 @@ pub extern "C" fn nsh_pan(id: u32, phase: u32, tx: f32, ty: f32, vx: f32, vy: f3
             ffi::submit(&out.finish());
         }
         let (value_x, value_y) = app.animation.pan_values(id);
+        let origin = point(Points(ox), Points(oy));
         let payload = if phase == 3 {
             EventPayload::PanCancelled {
+                origin,
                 translation: point(Points(tx), Points(ty)),
                 velocity_x: vx,
                 velocity_y: vy,
@@ -1938,6 +1963,7 @@ pub extern "C" fn nsh_pan(id: u32, phase: u32, tx: f32, ty: f32, vx: f32, vy: f3
             }
         } else {
             EventPayload::Pan {
+                origin,
                 translation: point(Points(tx), Points(ty)),
                 velocity_x: vx,
                 velocity_y: vy,

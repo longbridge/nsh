@@ -147,6 +147,7 @@ impl Modifiers {
             alt: self.alt,
             shift: self.shift,
             cmd: self.meta,
+            alt_graph: false,
         }
     }
 }
@@ -1732,20 +1733,22 @@ fn pick_in(view: &NshView, x: f32, y: f32, items: bool) -> Option<Hit> {
         return None;
     }
     let pe = s.props.pointer_events;
-    let clip = s.clips();
+    let clip = s.clips() || s.style.clip_path().is_some();
+    let at = nsh_core::geometry::point(Points(x), Points(y));
     let HitArea {
         inside,
         in_slop,
         children,
         ..
     } = input::hit_area(
-        nsh_core::geometry::point(Points(x), Points(y)),
+        at,
         s.frame.size,
         s.props.hit_slop,
         s.overflow,
-        clip,
+        s.clips(),
         laid_out(s.kind, s.id),
-    );
+    )
+    .clipped(s.style.clip_path(), at, s.frame.size);
     // Hosted items are drawn above the children, clipped with them.
     if items && !s.natives.is_empty() && (!clip || inside) {
         let natives = s.natives.clone();
@@ -2005,7 +2008,10 @@ fn down(
     }
     // The gate follows the first pointer only, as on the other platforms.
     let first = input.pointers.borrow().is_empty();
-    let options = GrabOptions::new(touch, native, selects, first);
+    // Where the pointer is from the edges of the root it is measured in.
+    let root_size = surface.input_root().state().frame.size;
+    let options = GrabOptions::new(touch, native, selects, first)
+        .start(nsh_core::geometry::point(Points(x), Points(y)), root_size);
     let mut grab = Grab::default();
     for v in &views {
         let s = v.state();
@@ -2125,8 +2131,8 @@ fn motion(surface: &Rc<Surface>, key: Key, x: f32, y: f32, time: f64) {
     let (tx, ty) = (x - p.start.0, y - p.start.1);
     let activated = Gate::step(&mut p.gate, &mut p.candidates, Points(tx), Points(ty));
     // The view's JS responder takes the drag over: nothing native starts
-    // meanwhile.
-    if activated.is_some() && p.mode == Mode::Idle {
+    // meanwhile, but the view's own pan.
+    if p.mode == Mode::Idle && input::activation_frees(activated, &p.candidates) {
         p.mode = Mode::Free;
     }
     if p.reporting {
@@ -2142,9 +2148,10 @@ fn motion(surface: &Rc<Surface>, key: Key, x: f32, y: f32, time: f64) {
     // take the gesture (and block native drags) before one starts.
     let js_pending = p.reporting && !moved;
     if p.mode == Mode::Idle && distance > PAN_SLOP.0 && !js_pending {
-        // While the gate decides, the candidates around it wait (the
-        // pointer stays idle and they are asked again on the next move).
-        if p.gate.is_none() {
+        // While the gate decides, or a pan's `panActivation`, the candidates
+        // around wait (the pointer stays idle and they are asked again on
+        // the next move).
+        if !input::waits(&p.candidates, p.gate.as_ref(), Points(tx), Points(ty)) {
             p.mode = Mode::Free;
         }
         let started = if surface.input.js_block.get() {
@@ -2464,9 +2471,11 @@ fn released_inside(view: &NshView, x: f32, y: f32) -> bool {
 
 // --- Pans ---------------------------------------------------------------------------
 
-fn pan_payload(surface: &Surface, id: NodeId, t: (f32, f32), v: (f32, f32)) -> EventPayload {
+fn pan_payload(surface: &Surface, id: NodeId, p: &Pointer, t: (f32, f32)) -> EventPayload {
     let (value_x, value_y) = surface.anim.borrow().pan_values(id);
+    let v = p.velocity.velocity();
     EventPayload::Pan {
+        origin: nsh_core::geometry::point(Points(p.start.0), Points(p.start.1)),
         translation: nsh_core::geometry::point(Points(t.0), Points(t.1)),
         velocity_x: v.0,
         velocity_y: v.1,
@@ -2482,7 +2491,7 @@ fn pan_start(surface: &Rc<Surface>, view: &NshView, p: &Pointer) {
     };
     surface.anim.borrow_mut().pan_began(id);
     if events.contains(EventKind::PanStart) {
-        let payload = pan_payload(surface, id, (0.0, 0.0), p.velocity.velocity());
+        let payload = pan_payload(surface, id, p, (0.0, 0.0));
         surface.event(id, EventKind::PanStart, payload);
     }
 }
@@ -2506,7 +2515,7 @@ fn pan_end(surface: &Rc<Surface>, view: &NshView, p: &Pointer, write: bool) {
     }
     if events.contains(EventKind::PanEnd) {
         let t = (p.x - p.start.0, p.y - p.start.1);
-        let payload = pan_payload(surface, id, t, p.velocity.velocity());
+        let payload = pan_payload(surface, id, p, t);
         surface.event(id, EventKind::PanEnd, payload);
     }
 }
@@ -3129,6 +3138,18 @@ fn wheel_input(
                 return false;
             };
             *input.latch.borrow_mut() = Some((view.clone(), horizontal, time));
+            // Lines of `LINE` points, or the view's own (`wheelLineHeight`);
+            // a `smoothWheel` view glides them on Chromium's curve.
+            let (dx, dy) = if view.kind() == ViewKind::Scroll {
+                let line = crate::events::LINE;
+                let line = nsh_core::geometry::point(Points(line), Points(line));
+                match crate::scroll::wheel_notch(surface, &view, dx, dy, line) {
+                    Some(d) => d,
+                    None => return true,
+                }
+            } else {
+                (dx, dy)
+            };
             // Without a begin, the scroll module takes it as a mouse wheel:
             // it settles (and snaps) by itself once the notches stop.
             scroll_wheel(surface, &view, dx, dy);

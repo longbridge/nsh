@@ -6,7 +6,7 @@ use crate::{
     geometry::{Bounds, DevicePixels, Percentage, Point, Points, Size},
     js::host::HostProps,
     overlay::{Align, OverlayAnchor, Placement, TooltipContent},
-    props::{AccessibilityProp, EdgeInsets, LayoutAnimation, PointerEvents},
+    props::{AccessibilityProp, EdgeInsets, LayoutAnimation, PanEdge, PointerEvents},
     style::{Color, Style, StylePatch},
 };
 
@@ -233,8 +233,8 @@ events! {
     Menu = "onMenu": "A menu item was chosen: the application menu's or a context menu's (root only; desktops; payload: `id`), or a context menu closed (`closed`: true, after its item).",
     MouseEnter = "onMouseEnter": "The mouse came over the view or a view inside it (never on touches; payload: [`EventPayload::Mouse`]).",
     MouseLeave = "onMouseLeave": "The mouse left the view and the views inside it, or the window (payload: [`EventPayload::Mouse`], where it was last).",
-    FileDragEnter = "onFileDragEnter": "A local file drag entered an eligible drop destination, on desktops and iOS (payload: [`EventPayload::FileDrop`]).",
-    FileDragLeave = "onFileDragLeave": "A local file drag left its drop destination, on desktops and iOS.",
+    FileDragEnter = "onFileDragEnter": "A local file drag entered an eligible drop destination, on desktops, iOS and Android (payload: [`EventPayload::FileDrop`]).",
+    FileDragLeave = "onFileDragLeave": "A local file drag left its drop destination, on desktops, iOS and Android.",
     FileDrop = "onFileDrop": "Local files were dropped (payload: [`EventPayload::FileDrop`]).",
     MouseMove = "onMouseMove": "The mouse moved over the view or a view inside it, with or without a button down, or a modifier key changed while it rests there with none down (payload: [`EventPayload::Mouse`]; at most one per frame).",
     ContextMenu = "onContextMenu": "The secondary button was pressed over the view (payload: [`EventPayload::ContextMenu`]): the nearest listener around the view under the pointer hears it, unless a text input or selectable text is nearer.",
@@ -251,7 +251,6 @@ events! {
     ClipboardWrite = "onClipboardWrite": "A [`Command::SetClipboard`] or [`Command::SetClipboardItem`] finished, in the order of the writes (root only, platforms with [`crate::platform::Environment::clipboard_write_result`]; payload: `written`: whether the system clipboard took it).",
     ScreenColor = "onScreenColor": "A [`Command::PickScreenColor`] request finished (root only; payload: `id`, `color`: the color picked, packed `0xRRGGBBAA`, absent when cancelled).",
     FileRequest = "onFileRequest": "A [`Command::FileRequest`] finished (root only; payload: [`EventPayload::FileRequest`]).",
-    Speech = "onSpeech": "A speech recognition session reported (root only; payload: [`EventPayload::Speech`]).",
     Download = "onDownload": "A web view's download started, finished, failed or was cancelled (payload: `state`, `id`, `url`, `filename`, `path`, `source`; `bytes` once finished, `code` and `message` when it failed, `reason` when it was cancelled).",
     Notification = "onNotification": "The platform answered a [`Command::Notification`], or the user pressed a notification (root only; payload: the fields of [`crate::notifications::NotificationEvent`]).",
     UrlScheme = "onUrlScheme": "The system handed the app a URL that opens it (root only; payload: `url`, [`crate::url_scheme::URL`]); the core keeps those of the schemes the app claims ([`crate::url_scheme`]).",
@@ -279,6 +278,7 @@ events! {
     FocusOut = "onFocusOut": "The keyboard focus left the view: from it or a view inside it to one outside, or to none (it left `focus-within`; raised by the core).",
     TextDrop = "onTextDrop" as "": "Text dragged from another app or view was dropped on the view (payload: [`EventPayload::TextDrop`]): a Rust component's, such as `RichEditor`'s, which inserts it where it was let go (iOS).",
     OpenAppSettings = "onOpenAppSettings" as "": "A [`Command::OpenAppSettings`] request finished (root only; payload: `id`, `opened`: whether the system opened the app's page in its settings; [`crate::mobile::open_app_settings`]; never reaches a listener).",
+    BackProgress = "onBackProgress" as "": "A step of the system's back gesture that no modal takes, while the app listens (root only; Android 14 and later; payload: [`BackProgressEvent::payload`], `phase`, `progress` and `edge`).",
 }
 
 /// What an input holds, for the system's autofill and suggestions
@@ -620,6 +620,119 @@ impl PinchPhase {
     }
 }
 
+/// A step of the system's back gesture that the app follows
+/// ([`crate::element::on_back_progress`]; TS: `BackHandler.on("progress",
+/// l)`), as AndroidX's `BackEventCompat`: Android 14 and later (predictive
+/// back) report it while the finger moves ([`EventKind::BackProgress`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[non_exhaustive]
+pub struct BackProgressEvent {
+    /// Where it is in the gesture.
+    pub phase: BackPhase,
+    /// How far the gesture went, from 0 to 1 (all the way), as the system
+    /// reports it.
+    pub progress: Percentage,
+    /// The screen edge the swipe started at ([`PanEdge::Left`] or
+    /// [`PanEdge::Right`]); none when the system names no edge.
+    pub edge: Option<PanEdge>,
+}
+
+impl BackProgressEvent {
+    /// A step in `phase` at `progress` (0 to 1) of a swipe from `edge`.
+    pub fn new(phase: BackPhase, progress: Percentage, edge: Option<PanEdge>) -> Self {
+        Self {
+            phase,
+            progress,
+            edge,
+        }
+    }
+
+    /// The payload of [`EventKind::BackProgress`] (`{ phase, progress,
+    /// edge? }`, the object JS listeners get).
+    pub fn payload(&self) -> EventPayload {
+        let mut fields = vec![
+            ("phase", PayloadValue::Str(self.phase.name().into())),
+            ("progress", PayloadValue::Number(f64::from(self.progress.0))),
+        ];
+        let edge = match self.edge {
+            Some(PanEdge::Left) => Some("left"),
+            Some(PanEdge::Right) => Some("right"),
+            _ => None,
+        };
+        if let Some(edge) = edge {
+            fields.push(("edge", PayloadValue::Str(edge.into())));
+        }
+        EventPayload::Map(fields)
+    }
+
+    /// The step a [`Self::payload`] carries.
+    pub(crate) fn from_payload(payload: &EventPayload) -> Option<Self> {
+        let EventPayload::Map(fields) = payload else {
+            return None;
+        };
+        let mut event = Self::default();
+        let mut phase = None;
+        for (key, value) in fields {
+            match (*key, value) {
+                ("phase", PayloadValue::Str(name)) => phase = BackPhase::from_name(name),
+                ("progress", PayloadValue::Number(n)) => event.progress = Percentage(*n as f32),
+                ("edge", PayloadValue::Str(edge)) => {
+                    event.edge = match edge.as_str() {
+                        "left" => Some(PanEdge::Left),
+                        "right" => Some(PanEdge::Right),
+                        _ => None,
+                    }
+                }
+                _ => {}
+            }
+        }
+        event.phase = phase?;
+        Some(event)
+    }
+}
+
+/// Where the back gesture is ([`BackProgressEvent::phase`]; TS: `"start"`,
+/// `"move"`, `"end"`, `"cancel"`), as AndroidX's `OnBackPressedCallback`'s
+/// started, progressed, pressed and cancelled.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum BackPhase {
+    /// The finger started the gesture.
+    Start,
+    /// The finger moved.
+    #[default]
+    Move,
+    /// The finger let go and the gesture goes back: the back press
+    /// follows.
+    End,
+    /// The finger let go without going back, or the system cancelled the
+    /// gesture.
+    Cancel,
+}
+
+impl BackPhase {
+    /// Its TS name.
+    pub fn name(self) -> &'static str {
+        match self {
+            BackPhase::Start => "start",
+            BackPhase::Move => "move",
+            BackPhase::End => "end",
+            BackPhase::Cancel => "cancel",
+        }
+    }
+
+    /// The phase named `name` (its TS name).
+    pub fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "start" => BackPhase::Start,
+            "move" => BackPhase::Move,
+            "end" => BackPhase::End,
+            "cancel" => BackPhase::Cancel,
+            _ => return None,
+        })
+    }
+}
+
 /// A mouse button, as GPUI's `MouseButton` (TS: `"left"`, `"right"`,
 /// `"middle"`, `"back"`, `"forward"`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -865,6 +978,10 @@ pub struct PasteEvent {
     /// Files with their bytes: images (a screenshot, an image copied from a
     /// page or an app), in the platform's order.
     pub files: Vec<PastedFile>,
+    /// Files larger than the input's `pasteMaxSize`, whose bytes were not
+    /// read: each with its name, type and size ([`PastedFile::len`]) only,
+    /// in the platform's order.
+    pub too_large: Vec<PastedFile>,
     /// Absolute `file:` URLs of local files copied in a file manager, in the
     /// platform's order (as [`EventPayload::FileDrop`]'s).
     pub uris: Vec<String>,
@@ -930,11 +1047,29 @@ impl PasteEvent {
         self.text.is_empty()
             && self.html.is_empty()
             && self.files.is_empty()
+            && self.too_large.is_empty()
             && self.uris.is_empty()
+    }
+
+    /// Moves the files larger than `max_size` bytes to
+    /// [`Self::too_large`], without their bytes.
+    pub(crate) fn limit_files(&mut self, max_size: u64) {
+        if self.files.iter().all(|file| file.len <= max_size) {
+            return;
+        }
+        let (read, over): (Vec<_>, Vec<_>) = std::mem::take(&mut self.files)
+            .into_iter()
+            .partition(|file| file.len <= max_size);
+        self.files = read;
+        self.too_large.extend(
+            over.into_iter()
+                .map(|file| PastedFile::too_large(file.name, file.mime, file.len)),
+        );
     }
 }
 
 /// A file pasted with its bytes ([`PasteEvent::files`]): JS gets a `File`.
+/// One too large to read ([`PasteEvent::too_large`]) has no bytes.
 #[derive(Debug, Clone, Default, PartialEq)]
 #[non_exhaustive]
 pub struct PastedFile {
@@ -944,6 +1079,9 @@ pub struct PastedFile {
     pub mime: String,
     /// Its bytes.
     pub data: Vec<u8>,
+    /// Its size in bytes: its bytes' length, or for one not read, the size
+    /// its platform gave.
+    pub len: u64,
 }
 
 impl PastedFile {
@@ -952,7 +1090,19 @@ impl PastedFile {
         PastedFile {
             name: name.into(),
             mime: mime.into(),
+            len: data.len() as u64,
             data,
+        }
+    }
+
+    /// The file `name` of type `mime` and `len` bytes, too large to read
+    /// ([`PasteEvent::too_large`]): no bytes.
+    pub fn too_large(name: impl Into<String>, mime: impl Into<String>, len: u64) -> PastedFile {
+        PastedFile {
+            name: name.into(),
+            mime: mime.into(),
+            data: Vec::new(),
+            len,
         }
     }
 
@@ -1115,6 +1265,8 @@ pub enum EventPayload {
     Layout(Bounds<Points>),
     /// A drag: translation since the start and velocity (points / second).
     Pan {
+        /// Where the finger went down, in the surface.
+        origin: Point<Points>,
         /// The translation.
         translation: Point<Points>,
         /// Horizontal velocity.
@@ -1128,6 +1280,8 @@ pub enum EventPayload {
     },
     /// A system-cancelled drag, with the same last values as `Pan`.
     PanCancelled {
+        /// Where the finger went down, in the surface.
+        origin: Point<Points>,
         /// The translation.
         translation: Point<Points>,
         /// Horizontal velocity.
@@ -1203,14 +1357,6 @@ pub enum EventPayload {
         id: u32,
         /// The files, in the order picked; none when cancelled.
         files: Vec<crate::picker::PickedFile>,
-    },
-    /// What a speech recognition session reported ([`EventKind::Speech`],
-    /// [`crate::speech`]).
-    Speech {
-        /// The session ([`crate::speech::SpeechCommand::Start`]).
-        id: u32,
-        /// What it reported.
-        event: crate::speech::SpeechEvent,
     },
     /// What a sound or a player reported ([`EventKind::Audio`],
     /// [`crate::audio`]).
@@ -1803,6 +1949,10 @@ pub enum ScrollbarSetting {
     /// The app's built-in bar drawn as this theme says (an object): the
     /// `ScrollbarTheme` of `nsh/base`, which reads it.
     Themed(Arc<crate::JsonValue>),
+    /// The app's built-in bar drawn as this theme says, as Rust gave it: a
+    /// value of the theme type of the UI set that makes bars, with its
+    /// maker (`nsh_base::ScrollbarTheme` converts into this).
+    ThemeValue(crate::element::ScrollbarThemeValue),
 }
 
 impl From<bool> for ScrollbarSetting {
@@ -1810,6 +1960,8 @@ impl From<bool> for ScrollbarSetting {
         if shows { Self::Shown } else { Self::Hidden }
     }
 }
+
+crate::static_reactive!(ScrollbarSetting: ScrollbarSetting, bool);
 
 /// How an `<image>` is shown, besides its source.
 #[derive(Debug, Clone, PartialEq, HostProps)]
@@ -1862,6 +2014,23 @@ pub enum ScrollProp {
     /// UIKit does it: elsewhere ignored).
     #[prop(js = "scrollsToTop", default = true, on = SCROLLING)]
     ScrollsToTop(bool),
+    /// `smoothWheel`: a mouse wheel's notches glide to where they point,
+    /// eased in and out over 100–200 ms as Chromium's do, a run of notches
+    /// one motion (default false: the platform's own, which lands at once
+    /// on macOS and Linux and glides briefly on Windows). The desktops
+    /// (macOS, Windows, Linux, GPUI); iOS and Android scroll with the
+    /// system's views, the web with the browser's (both ignore it), as
+    /// they do when the system reduces motion.
+    #[prop(js = "smoothWheel", on = SCROLLING)]
+    SmoothWheel(bool),
+    /// `wheelLineHeight`: how far a mouse wheel's line scrolls, in points (0,
+    /// the default: the platform's own, 10 on macOS, 16 on Windows, a
+    /// notch's length after the view's on Linux). A line is the platform's:
+    /// a notch on Linux, a third of one on Windows (the system's default),
+    /// about one per notch on macOS, which accelerates quick runs. The
+    /// desktops; ignored where `smoothWheel` is.
+    #[prop(js = "wheelLineHeight", min = 0, on = SCROLLING)]
+    WheelLineHeight(Points),
     /// `contentInset`: room around the content.
     #[prop(js = "contentInset", on = SCROLLING)]
     ContentInset(EdgeInsets),
@@ -2934,11 +3103,6 @@ pub enum Command {
         /// What to do.
         request: Box<crate::file_dialog::FileRequest>,
     },
-    /// Start, stop or abort a speech recognition session (on the root;
-    /// `Speech` of `nsh`, [`crate::speech`]) and report it as
-    /// [`EventKind::Speech`] ([`EventPayload::Speech`]). Sent only on
-    /// platforms whose [`crate::platform::Environment::speech`] is set.
-    Speech(crate::speech::SpeechCommand),
     /// Load, play and free sounds, open and drive players (on the root;
     /// `Sound` and `AudioPlayer` of `nsh`, [`crate::audio`]) and report
     /// what happens as [`EventKind::Audio`] ([`EventPayload::Audio`]). Sent
@@ -3562,6 +3726,13 @@ pub enum Prop {
     /// either way. Decided natively when the user pastes.
     #[prop(js = "pasteBehavior", on = INPUT)]
     PasteBehavior(PasteBehavior),
+    /// `pasteMaxSize`: the largest pasted file read, in bytes; a larger
+    /// one reaches `onPaste` in `tooLarge`, its name, type and size only,
+    /// so the app can tell the user. Decided natively when the user
+    /// pastes, before the file is read where the platform says its size.
+    /// Default: every file is read.
+    #[prop(js = "pasteMaxSize", on = INPUT)]
+    PasteMaxSize(Option<u64>),
     /// `autoFocus`: focused when it appears.
     #[prop(js = "autoFocus", on = INPUT)]
     AutoFocus(bool),

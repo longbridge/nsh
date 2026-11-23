@@ -119,7 +119,9 @@ another engine, a fresh one each time, so tests never share state; the apps a te
 test fails when it throws, when the promise it returns rejects, and after its timeout: 30 seconds, or the milliseconds
 `test`'s third argument gives (`test("syncs", body, 60_000)`). An app with Rust crates of its own
 (`nsh.json` `"rust"`) runs its tests in a headless runner NSH builds with them, the same way; in a Rust app
-(`nsh.json` `"root"`, [Building with Rust](./rust.md)), `open(".")` starts its root component.
+(`nsh.json` `"root"`, [Building with Rust](./rust.md)), `open(".")` starts its root component. Pass `--release` to run
+`cargo test --release` on its crates, build its headless runner and development hosts optimized (`--release`), and
+minify and strip debug info from the app bundles under test.
 
 ### Grouping tests and setting them up
 
@@ -429,13 +431,13 @@ one: a selector matching several fails the step, and the error says how to narro
 | `await app.rightClick(selector)` | The mouse's secondary button over the middle of the view: it, or the nearest view around it listening, hears `onContextMenu`. The desktops and the web (headless: a desktop `platform`); a phone has no mouse: there it rejects. |
 | `await app.paste(selector, { text?, html?, files?, uris? })` | Pastes into the input as the user does with that on the clipboard: it takes the focus and hears `onPaste` (`html` the same content with its formatting, `files` are paths whose bytes it gets as `File`s, `uris` `file:` URLs), then its text goes in as `pasteBehavior` says. Headless, on macOS, on iOS and on the web; the machine's clipboard stays as it was. |
 | `app.menu()` | The actions of the context menu the app shows (`Menu.popup`), or of the system's edit menu an editor shows over its selection on a phone (`RichEditor`'s, labelled as the platform labels them: `Cut`, `Copy`, `Paste`, `Select All`): `label` (a submenu's after its own, `"Share > Mail"`), `disabled`, and `checked` for a checkable item; `null` when none is open. |
-| `await app.chooseMenuItem(label)` | Chooses the open context menu's action, as a click on it does: the app hears `onMenu` (its `onSelect` runs), then the menu closes. From an edit menu, the editor carries out the action; Paste pastes the test's clipboard. On iOS it chooses from the menu the system shows (a `MenuButton`'s, a `ContextMenu`'s, a header button's), as a tap does. Rejects when the item is disabled or missing. |
-| `await app.closeMenu()` | Closes the open context menu with nothing chosen, as Escape does (on iOS, a tap outside the system's menu). |
+| `await app.chooseMenuItem(label)` | Chooses the open context menu's action, as a click on it does: the app hears `onMenu` (its `onSelect` runs), then the menu closes. From an edit menu, the editor carries out the action; Paste pastes the test's clipboard. On iOS and Android it chooses from the menu the system shows (a `MenuButton`'s, a `ContextMenu`'s; on iOS a header button's too), as a tap does. Rejects when the item is disabled or missing. |
+| `await app.closeMenu()` | Closes the open context menu with nothing chosen, as Escape does (on iOS, a tap outside the system's menu; on Android, the back button). |
 | `await app.keyboard.press(keys)` | Presses a key with its modifiers, as `keymap` names it (`"mod+k"`, `"shift+/"`, `"escape"`; `mod` is the platform's command key), on a hardware keyboard, on every platform (phones and tablets have one too): the app's shortcut of it hears it (`keymap.bind`, `onKeyCommand`), else on a desktop the application menu's item with that shortcut is chosen (`Menu.setApplicationMenu`, its `when` kept while an input has the focus), else on macOS and the web Tab and Shift+Tab move the keyboard focus between the inputs and the views that take presses (`onFocus`, `onBlur`, `focus:` styles), inside the newest dialog while one is open (it gives the focus back to what had it when it closes), and Return or Space presses the view it is on when that view is in the newest dialog (or no dialog is open; else the key goes to the shortcuts); a page pushed onto a `NavStack`, or a back that pops one, takes the focus off the page that no longer shows (its view hears `onBlur`), and on the web (`platform: "web"`) Shift+F10 asks it for its context menu (`onContextMenu` with `pointerType: null`), else the focused input takes a character, Backspace or the return key, else Escape goes back. |
 | `await app.keyboard.down(keys)` / `up(keys)` | Holds modifier keys (`"mod"`, `"shift"`, `"alt"`, `"ctrl"`, `"meta"`, joined by `+`) down until `up`: the presses, drags and hovers meanwhile carry them, as a Mod-click or a Shift-drag does. Headless and on Linux for now. |
-| `await app.dragAndHold(selector, by, options?)` / `app.drop()` | Drags as `drag` does and keeps the finger down until `drop()`, which lifts it where it is: the steps between look at the screen mid-drag (a drag preview, a drop line). Headless, on Linux and on iOS. |
+| `await app.dragAndHold(selector, by, options?)` / `app.drop()` | Drags as `drag` does and keeps the finger down until `drop()`, which lifts it where it is, at rest as a finger held still (a back swipe held short of halfway goes back): the steps between look at the screen mid-drag (a drag preview, a drop line). Headless, on Linux and on iOS. |
 | `await app.dropFiles(selector, uris)` | Drops local files (`file:` URLs, as a file manager drags them) on the middle of the view: it, or the nearest view around it listening, hears `onFileDrop`. Desktops, headless, on Linux and on macOS for now. |
-| `await app.drag(selector, { x, y }, options?)` | A finger lands on the middle of the view, rests for 100 ms, moves by `x`, `y` points, 10 per frame, and lifts, as the platform's input takes it: a pan follows it (`pan={{ x, y }}`, `onPanStart`, `onPanEnd` with the release velocity), the views listening to touches hear it (`onTouchStart`, `PanResponder`), a scroll view scrolls with it and, pulled far enough past its top, refreshes (`onRefresh`), and a press under it is cancelled once it moves away. On the desktops and the web it is the mouse, headless too: the touches say `pointerType: "mouse"` and no scroll view scrolls with it, as on those platforms. Started in a selectable view (`View selectable`, a `selectable` `TextView`), it selects across the view's texts, which hears `onSelectionChange` (the selected text as Copy gives it, where it starts and its box); started elsewhere, it clears the selection. |
+| `await app.drag(selector, { x, y }, options?)` | A finger lands on the middle of the view, rests for 100 ms, moves by `x`, `y` points, 10 per frame, and lifts, as the platform's input takes it: a pan follows it (`pan={{ x, y }}`, `onPanStart`, `onPanEnd` with the release velocity), the views listening to touches hear it (`onTouchStart`, `PanResponder`), a scroll view scrolls with it and, pulled far enough past its top, refreshes (`onRefresh`), and a press under it is cancelled once it moves away. It lifts while it moves, as a quick swipe does. On iOS a drag that starts at the screen's edge comes in over it, as a swipe from the edge does: it starts screen edge pans (`panActivation={{ edge }}`) and the system back swipe. On the desktops and the web it is the mouse, headless too: the touches say `pointerType: "mouse"` and no scroll view scrolls with it, as on those platforms. Started in a selectable view (`View selectable`, a `selectable` `TextView`), it selects across the view's texts, which hears `onSelectionChange` (the selected text as Copy gives it, where it starts and its box); started elsewhere, it clears the selection. |
 | `await app.wait(ms)` | Lets the app run for `ms` milliseconds: timers, animations, requests. On a manual clock, moves it by `ms` (`app.clock.runFor`). |
 | `await app.waitFor(selector, options?)` | Resolves once a view matches, or with `{ state: "gone" }` once none does; rejects after `timeout` ms (5000). On a manual clock, moves it a display frame at a time while it waits, by `timeout` at most. |
 | `await app.waitUntil(condition, options?)` | Resolves once `condition()` returns true, looking again after each change of the app: for what no selector says (`() => app.storage().note === "Milk"`). On a manual clock, moves it a display frame between two looks, by `timeout` at most. |
@@ -457,9 +459,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `app.picks()` | The picks the app asked for, in order. |
 | `app.onShare({ action, target })` | Gives the run a share sheet and answers the shares the app shows from now on (`Share.show`): `action` `"shared"` (to `target`) or `"dismissed"`. Headless runs. |
 | `app.shares()` | What the app shared, in order (`{ title, text, url, files }`). |
-| `app.hear(text)` | The user says `text` into the running speech session (`Speech.start`): its `result` reports `text` as the whole transcript so far. Headless runs. |
-| `app.endSpeech(error?)` | Ends the running speech session: with `error` (`"no-speech"`, `"network"`, ...) it fails, else a last final result and `end` come, `no-speech` when nothing was heard. Headless runs. |
-| `app.speechRequests()` | The speech sessions the app started, in order: `lang` (`null` for the user's) and `interim`. |
+| `await app.fake(name, method, args?)` | Calls the fake a native module gives headless runs in place of a device, by its name, with `args` (an array), and resolves with its JSON answer once the app is quiet. The module documents its fake's methods: `nsh-extra`'s speech recognizer is `"nsh-extra/speech"` ([`Speech`](./nshm.md#speech): `app.fake("nsh-extra/speech", "hear", ["hello"])` speaks for the user). Headless runs. |
 | `app.audio()` | What the app asked of the speaker (`Sound`, `AudioPlayer`), in order: `command` (`"load"`, `"play"`, `"stop"`, `"unload"`, `"open"`, `"preload"`, `"resume"`, `"pause"`, `"seek"`, `"set"`, `"close"`), `src`, and `volume`, `rate`, `position` where they apply. Headless runs. |
 | `app.endAudio()` | The players playing reach their end (`end`; those that loop start again). Headless runs. |
 | `app.clipboard()` | The text on the clipboard now, `null` when it holds none. |
@@ -544,7 +544,10 @@ that only a real platform can do:
 - **Picks are answered**: with the test's files (`onPick`), else cancelled, so `Picker.pickImages` and `Picker.pickFiles` resolve `[]`.
 - **Shares are the test's**: a run has a share sheet once `onShare` gives it one, which answers each share as it says;
   before that `Share.available()` resolves `false`.
-- **Speech is the test's**: `Speech.available()` resolves `true`, a session starts at once and hears what `hear` says.
+- **Native modules run on their fakes**: a module that reaches a device gives headless runs a fake in its place, which
+  the test drives (`app.fake`). With `nsh-extra`'s `speech`, `Speech.available()` resolves `true`, a session starts
+  at once and hears what the fake's `hear` says. Rust tests that launch `Headless` apps whose modules give fakes take
+  turns in one process, as a fake stands in process-wide; apps started with clones of one registry run together.
 - **Sound plays to a fake speaker**: sounds decode as WAV (their length from the header; other bytes fail with `decode`), players play a minute of their source at once and end at `endAudio()`.
 - **Modals show at once**: `onShow` comes when one is presented.
 - **Images are not loaded**: no `onLoad` comes, nor `onError` unless the test fails the image (`app.failImages`), and `Image.getSize` and `Image.prefetch` reject, in the app and in the test file alike. A `blob:` URL's size is read from its bytes, so `Image.getSize` of one resolves.
@@ -629,7 +632,7 @@ own input at the views their selectors name, as Playwright does in a browser:
   they find the same views;
 - dialogs are the platform's own: `app.dialogs()` reads them, and answering one (`onDialog`, or its cancel button
   when the test says nothing) presses its button;
-- `app.screenshot(path)` takes a picture of the window, `app.window(id).screenshot(path)` of another window of the app.
+- `app.screenshot(path)` takes a picture of the window the app shows (the one the test targets, else the frontmost), `app.window(id).screenshot(path)` of another window of the app.
 
 ```sh
 nsh test --target macos                       # the app's tests in macOS windows
@@ -841,7 +844,8 @@ perf commit: 55 ops, 1667µs (list js 771µs), 46 mount items, 414 nodes
 ```
 
 For a [list](./lists.md), this shows the virtualization at work: which frames bind new rows, how many operations a row
-costs, and that frames revealing no new row produce nothing. Use it with a release build (`cargo test --release`, or `./target/release/nsh` in a checkout) for meaningful
+costs, and that frames revealing no new row produce nothing. Use it with a release build (`cargo test --release`,
+`nsh test --release` for an app with Rust crates, or `./target/release/nsh` in a checkout) for meaningful
 timings.
 
 ### In CI

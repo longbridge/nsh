@@ -128,6 +128,20 @@ test("views are drawn as headings and links by their role, else the element they
   assert.equal(elementTag({}), "div");
 });
 
+test("a textbox role is ARIA's textbox", () => {
+  const { player } = fakePlayer();
+  const attrs = new Map();
+  const el = {
+    attrs,
+    getAttribute: (name) => attrs.get(name) ?? null,
+    setAttribute: (name, value) => attrs.set(name, value),
+    removeAttribute: (name) => attrs.delete(name),
+  };
+  el._props = { role: "textbox" };
+  player.updateAria(el);
+  assert.equal(el.attrs.get("role"), "textbox");
+});
+
 test("links the app shows no menu for keep the browser's context menu", () => {
   const { player } = fakePlayer();
   const link = {
@@ -206,6 +220,81 @@ test("a field's maxlength lets in what fits by characters, an emoji counting onc
   // No maxLength, no limit.
   player.op_in(["in", 1, { multiline: false }, null]);
   assert.equal(field.maxLength, undefined);
+});
+
+test("a pasted file larger than pasteMaxSize is not read, only named", async () => {
+  const { player } = fakePlayer();
+  const pasted = [];
+  player.wasm.nsh_paste = (_id, jp, jl, bp, bl) => {
+    const memory = player.wasm.memory.buffer;
+    pasted.push([JSON.parse(new TextDecoder().decode(new Uint8Array(memory, jp, jl))), [...new Uint8Array(memory, bp, bl)]]);
+    return -1;
+  };
+  const read = [];
+  const file = (name, type, bytes) => ({
+    name,
+    type,
+    size: bytes.length,
+    arrayBuffer() {
+      read.push(name);
+      return Promise.resolve(new Uint8Array(bytes).buffer);
+    },
+  });
+  const el = { _id: 7, _events: new Set(["onPaste"]), _config: { pasteMaxSize: 4 } };
+  player.pasted(el, {
+    preventDefault() {},
+    clipboardData: {
+      getData: () => "",
+      files: [file("a.png", "image/png", [1, 2, 3, 4]), file("clip.mp4", "video/mp4", [1, 2, 3, 4, 5])],
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(read, ["a.png"]);
+  assert.deepEqual(pasted, [
+    [
+      {
+        text: "",
+        html: "",
+        files: [
+          { name: "a.png", type: "image/png", size: 4 },
+          { name: "clip.mp4", type: "video/mp4", size: 5, read: false },
+        ],
+        uris: [],
+      },
+      [1, 2, 3, 4],
+    ],
+  ]);
+});
+
+test("a textarea reports its scrolling only while a bar of the app's follows it", () => {
+  const { player } = fakePlayer();
+  const field = {
+    tagName: "TEXTAREA",
+    value: "",
+    scrollTop: 40,
+    clientWidth: 280,
+    scrollHeight: 400,
+    clientHeight: 90,
+    classList: { toggle() {} },
+    getAttribute: () => null,
+    setAttribute() {},
+    removeAttribute() {},
+  };
+  const el = { _id: 6, _field: field, getAttribute: () => null };
+  player.view = () => el;
+  const reports = [];
+  player.call = (f) => f({ nsh_input_scroll: (...args) => reports.push(args) });
+  player.op_in(["in", 6, { multiline: true }, null]);
+  assert.deepEqual(reports, [], "nothing follows it");
+  player.op_in(["in", 6, { multiline: true, noIndicator: true, reportScroll: true }, null]);
+  assert.deepEqual(reports, [[6, 40, 280, 400, 90]]);
+  field.scrollTop = 60;
+  player.inputScrolled(el, field);
+  assert.deepEqual(reports.at(-1), [6, 60, 280, 400, 90]);
+  player.op_in(["in", 6, { multiline: true }, null]);
+  field.scrollTop = 80;
+  player.inputScrolled(el, field);
+  assert.equal(reports.length, 2, "no longer followed");
 });
 
 test("input autofill hints are set, changed and cleared on both field kinds", () => {
@@ -700,8 +789,59 @@ test("a browser-cancelled pan reports cancellation rather than a release", () =>
     player.velocity = () => [0, 400];
     player.call = (f) => f({ nsh_pan: (...args) => sent.push(args) });
     player.pointerUp({ pointerId: 7 }, cancelled);
-    assert.deepEqual(sent, [[12, phase, 0, 100, 0, 400]]);
+    assert.deepEqual(sent, [[12, phase, 0, 100, 0, 400, 10, 20]]);
     assert.equal(player.pointers.size, 0);
+  }
+});
+
+test("a pan activation with a way or an edge decides as PanActivation does", () => {
+  const { player } = fakePlayer();
+  const right = [null, null, null, null, "right", null];
+  assert.equal(player.decideActivation(right, 6, 2), undefined);
+  assert.equal(player.decideActivation(right, 11, 4), true);
+  // The other way, or mostly across, fails.
+  assert.equal(player.decideActivation(right, -11, 0), false);
+  assert.equal(player.decideActivation(right, 3, 12), false);
+  // Its axis's active offset; a fail offset across decides across.
+  const up = [null, 20, 30, null, "up", null];
+  assert.equal(player.decideActivation(up, 0, -15), undefined);
+  assert.equal(player.decideActivation(up, 0, -21), true);
+  assert.equal(player.decideActivation(up, 0, 21), false);
+  assert.equal(player.decideActivation(up, 25, -5), undefined);
+  assert.equal(player.decideActivation(up, 31, -5), false);
+  // An edge pan moves away from its edge, whatever the direction says.
+  const edge = [null, null, null, null, "left", "left"];
+  assert.equal(player.decideActivation(edge, 12, 1), true);
+  assert.equal(player.decideActivation(edge, -12, 1), false);
+  assert.equal(player.startsAt(edge, 20, 400, 390, 844), true);
+  assert.equal(player.startsAt(edge, 21, 400, 390, 844), false);
+  assert.equal(player.startsAt([null, null, null, null, null, "bottom"], 200, 830, 390, 844), true);
+  assert.equal(player.startsAt([null, null, null, null, null, "bottom"], 200, 800, 390, 844), false);
+  assert.equal(player.startsAt(right, 200, 400, 390, 844), true);
+  assert.equal(player.startsAt(undefined, 200, 400, 390, 844), true);
+  // The offsets alone, as before.
+  assert.equal(player.decideActivation([10, null, null, 8], -11, 3), true);
+  assert.equal(player.decideActivation([10, null, null, 8], 4, -9), false);
+});
+
+test("a native pan with a way starts only that way, and its start says where it began", () => {
+  for (const [dx, started] of [[30, true], [-30, false]]) {
+    const { player } = fakePlayer();
+    const sent = [];
+    const pan = { _id: 12, _props: { panActivation: [null, null, null, null, "right", null] } };
+    player.pointers = new Map([[7, {
+      pan, touchPath: [], states: [], mode: null, gate: null, gateState: 0,
+      startX: 10, startY: 20, x: 10, y: 20, t: 0, layer: null,
+    }]]);
+    player.point = (e) => [e.x, e.y];
+    player.track = () => {};
+    player.velocity = () => [0, 0];
+    player.pressOut = () => {};
+    player.call = (f) => f({ nsh_pan: (...args) => sent.push(args) });
+    player.pointerMove({ pointerId: 7, x: 10 + dx, y: 20, preventDefault() {} });
+    assert.equal(sent.length > 0, started);
+    if (started) assert.deepEqual(sent[0], [12, 0, 0, 0, 0, 0, 10, 20]);
+    else assert.equal(player.pointers.get(7).pan, null);
   }
 });
 
@@ -956,6 +1096,55 @@ test("a touch whose press focused a field leaves the focus there", () => {
   assert.equal(kept("touch", pressable, {}, true), false, "the field no longer has the focus");
   delete globalThis.document;
   delete globalThis.window;
+});
+
+test("an autoFocus input is focused as the batch that shows it is applied, not after it", () => {
+  const { player } = fakePlayer();
+  Object.assign(player, {
+    views: new Map(),
+    changedStacks: new Set(),
+    removals: [],
+    endLayoutAnimation() {},
+  });
+  const focused = [];
+  const input = (id) => {
+    const field = {
+      tagName: "INPUT",
+      classList: { toggle() {} },
+      getAttribute: () => null,
+      setAttribute() {},
+      removeAttribute() {},
+      focus: () => focused.push(id),
+    };
+    const el = { _id: id, _field: field, isConnected: false, getAttribute: () => null };
+    player.views.set(id, el);
+    return el;
+  };
+  // Shown by this batch: focused when it is applied, in the same turn (an
+  // event's handler: iOS Safari raises the keyboard only there), and the
+  // press's, so the mouse events of a touch leave it there.
+  const shown = input(1);
+  player.op_x = () => (shown.isConnected = true);
+  player.apply([["in", 1, { multiline: false, autoFocus: true }, null], ["x"]]);
+  assert.deepEqual(focused, [1]);
+  assert.equal(player.pressFocus, shown._field);
+  // Shown again: focused once only, as it appeared.
+  player.apply([["in", 1, { multiline: false, autoFocus: true }, null]]);
+  assert.deepEqual(focused, [1]);
+  // Not in the page yet: it waits for the batch that puts it there.
+  const later = input(2);
+  player.apply([["in", 2, { multiline: false, autoFocus: true }, null]]);
+  assert.deepEqual(focused, [1]);
+  later.isConnected = true;
+  player.apply([]);
+  assert.deepEqual(focused, [1, 2]);
+  // Removed before it was shown: forgotten.
+  input(3);
+  player.apply([["in", 3, { multiline: false, autoFocus: true }, null]]);
+  player.views.delete(3);
+  player.apply([]);
+  assert.deepEqual(focused, [1, 2]);
+  assert.equal(player.autoFocusing.size, 0);
 });
 
 test("Return presses a focused pressable, not a focused stop that takes no presses", () => {
@@ -4443,6 +4632,53 @@ test("a text drawn as a heading after its links keeps their hover", () => {
   }
 });
 
+test("a click with a modifier key on a link is the browser's: the link takes no press", () => {
+  inPage(() => {
+    globalThis.document.elementFromPoint = () => null;
+    const { player, sent } = dialogPlayer(false);
+    player.editable = () => false;
+    // A `Link` with an `href` (drawn as an `a`) and a pressable that is no link.
+    const pressable = (id, link) => {
+      const el = {
+        _id: id,
+        _events: new Set(["onPressIn", "onPress"]),
+        _props: {},
+        _tracked: 0,
+        getBoundingClientRect: () => ({ left: 600, top: 300, right: 700, bottom: 340 }),
+        closest: (selector) => (link && selector === "a.nsh-v[href]" ? el : null),
+      };
+      return el;
+    };
+    const link = pressable(9, true);
+    const button = pressable(10, false);
+    /** What a click on `target` sends, holding `keys`. */
+    const click = (target, keys = {}) => {
+      sent.length = 0;
+      player.viewOf = () => target;
+      player.ancestors = () => [target];
+      const e = {
+        pointerId: 1, pointerType: "mouse", button: 0, buttons: 1, clientX: 640, clientY: 320, target,
+        metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, ...keys,
+      };
+      player.pointerDown(e);
+      player.pointerUp({ ...e, buttons: 0 }, false);
+      return sent.map(([name, payload]) => [name, payload?.modifiers?.platform]);
+    };
+    // A plain click presses the link: the app opens it.
+    assert.deepEqual(click(link), [["onPressIn", false], ["onPress", false]]);
+    // With Cmd, Ctrl, Shift or Alt the browser opens it (a new tab or
+    // window, a download), as it does on a middle click: the link hears
+    // nothing, so nothing opens it a second time.
+    for (const key of ["metaKey", "ctrlKey", "shiftKey", "altKey"]) {
+      assert.deepEqual(click(link, { [key]: true }), [], key);
+    }
+    assert.deepEqual(click(link, { button: 1 }), []);
+    // A pressable that is no link still takes a press with a modifier, and
+    // reports the key.
+    assert.deepEqual(click(button, { metaKey: true }), [["onPressIn", true], ["onPress", true]]);
+  });
+});
+
 test("a web view's relative URL is the site's where the page names its base", () => {
   const savedLocation = globalThis.location;
   // Opened at one of the app's routes, below the site's base.
@@ -4513,5 +4749,46 @@ test("share reports shared, dismissed and unavailable, never shared when it coul
   } finally {
     if (saved) Object.defineProperty(globalThis, "navigator", saved);
     else delete globalThis.navigator;
+  }
+});
+
+test("window blur resets hoverButtons and cancels all active pointers", () => {
+  const windowListeners = new Map();
+  const savedWindow = globalThis.window;
+  const savedDocument = globalThis.document;
+  const noop = () => {};
+  globalThis.window = {
+    addEventListener: (type, fn) => windowListeners.set(type, fn),
+  };
+  globalThis.document = {
+    addEventListener: noop,
+    createElement: (tag) => fakeElement(tag),
+  };
+  try {
+    const { player } = fakePlayer();
+    player.root = fakeElement("div");
+    player.installFileDrop = noop;
+    player.installInput();
+    const canceled = [];
+    const p1 = { scrolls: { active: true } };
+    const p2 = { scrolls: null };
+    player.hoverButtons = 1;
+    player.pointers = new Map([[11, p1], [12, p2]]);
+    player.pointerUp = (e, cancel) => {
+      canceled.push([e.pointerId, e.buttons, cancel]);
+      player.pointers.delete(e.pointerId);
+    };
+    const onBlur = windowListeners.get("blur");
+    assert.equal(typeof onBlur, "function", "registers window blur listener");
+    onBlur();
+    assert.equal(player.hoverButtons, 0);
+    assert.equal(p1.scrolls, null);
+    assert.deepEqual(canceled, [[11, 0, true], [12, 0, true]]);
+    assert.equal(player.pointers.size, 0);
+  } finally {
+    if (savedWindow === undefined) delete globalThis.window;
+    else globalThis.window = savedWindow;
+    if (savedDocument === undefined) delete globalThis.document;
+    else globalThis.document = savedDocument;
   }
 });

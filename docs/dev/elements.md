@@ -404,7 +404,10 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `PanActivation::decide`: a fail offset passed first fails, an active offset passed activates; no active offsets: 10
   points in any direction). `PanActivation::decide_move` judges each move along the line from the previous one, so the
   offset passed first decides even when one move (several points apart) passes both; `nsh_core::input::Gate::step` and
-  the iOS gate use it. iOS: a `PanGate` recognizer on the view (`touch.rs`); the pans of the scroll views around
+  the iOS gate use it. A gate needs something to follow its activation, the view's native pan or its responder
+  (`nsh_core::input::gate_activation`): a view whose pan is off (`pan_enabled(false)`, no `pan` values or pan
+  listeners) and that has no responder decides nothing, so its content and the views around it keep the drags, as a
+  stack's swipe back inside a drawer does. iOS: a `PanGate` recognizer on the view (`touch.rs`); the pans of the scroll views around
   it must wait for it to fail (`shouldBeRequiredToFailByGestureRecognizer:`), so a vertical drag scrolls once it passes
   `failOffsetY` and a horizontal one never scrolls. The scroll views inside it that cannot scroll along its one axis
   (`PanActivation::axis`; content and `alwaysBounce…`) wait too: UIScrollView's pan begins after its slop along the
@@ -419,6 +422,12 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   becomes the responder (its termination request is honored as for any claim). Its own `…ShouldSetResponder`
   handlers (and a Rust element's other claims) are never asked: the view is a responder exactly when its pan is
   active, so `PanResponder`'s `panHandlers` work unchanged next to the prop.
+  A `direction` keeps the activation to one way and an `edge` to fingers that go down at that edge of the screen
+  (the window on desktops, the page on the web; `PanActivation::starts_at`), and the view's own native pan (`pan`
+  values, `onPanStart`) starts when its activation activates (Rust: `.pan_activation(..)`), so a drawer's edge pan
+  and its one-way content pan need no hot zone of their own. iOS uses the system's screen edge recognizer and lets
+  a navigation stack's swipe back go first; Android leaves the edges the system's back gesture takes to it.
+  `PanEvent::origin` is where the drag's finger went down, in the surface.
 - **Accessibility**: `accessible`, `role`, `accessibilityLabel` / `Hint` / `Description` / `State` / `Value` / `Actions` / `Level` +
   `onAccessibilityAction`, `accessibilityElementsHidden`, `importantForAccessibility`, `accessibilityLiveRegion`, `testID`
   (Android: resource id). `accessibilityDescription` (ARIA's `aria-description`, `gpui-base`'s `aria_description`;
@@ -477,7 +486,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   send one, as its props change. The state words iOS and Android supply (checked, expanded, current, invalid...)
   are in the language of the app's text, as NSH's menus on the desktops are (`i18n::text_locale`): the core sends
   `Command::TextLocale` on the root of those surfaces when it changes, and the words of mounted views follow it the
-  next time a screen reader reads them.
+  next time a screen reader reads them. Android's date and time dialogs (`DateTimePicker`) show their own words (buttons,
+  month and day names) in that language too, from the next dialog opened.
   The `increment` / `decrement` actions make an element adjustable whatever its
   role: iOS adds the adjustable trait to the traits of its role (`native_view.rs` `traits`), so VoiceOver's swipe up /
   down performs them (an `image`, `Plot`'s role, stays an image), Android offers scroll forward / backward, Windows
@@ -486,7 +496,11 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
 - **Back button** (`nsh/mobile`): `BackHandler.on("press", listener)` (returns the function that removes it; a
   listener added while a component renders goes with it, as `keymap.bind`'s bindings do), after modals, the top
   overlay listening to `onCancel` and stacks; the app exits when nothing handles it. Rust components listen with `cx.on_back_press(..)`, before JS's listeners; the root wants
-  the button while either side listens (`docs/dev/components.md`).
+  the button while either side listens (`docs/dev/components.md`). `BackHandler.on("progress", listener)` /
+  `on_back_progress(..)` follow the predictive back gesture (the root's `BackProgress`, Android 14+): while one
+  listens, a gesture no modal takes goes to the app and the stacks do not preview their pop; the core decides at the
+  gesture's start whether the app follows it (not when an overlay takes the press), so a gesture's steps reach the
+  app whole or not at all (`element/back.rs`).
 - **Keyboard shortcuts** (`nsh`'s `keymap`): the root's `Prop::Keymap` mounts the surface's whole table
   (`MountItem::Keymap`); the platform matches a key against it on the spot, consumes it and reports the root's
   `KeyCommand` (the binding's id), so the main thread never waits for JS (`docs/dev/js-modules.md`, the macOS and
@@ -642,7 +656,10 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
 - **Paste**: `onPaste` reports what the user pasted (`EventPayload::Paste`, `PasteEvent`): `text`, `html` (the clipboard's `text/html`, read on Linux, UTF-8 or UTF-16 as Firefox
   writes it, and on the web; `RichEditor` parses it into its schema), `files` (data on
   the clipboard, images: `PastedFile`s whose bytes become JS `File`s in `nsh-js` `payload_object`, never a JS string
-  or base64) and `uris` (local files' `file:` URLs, as `onFileDrop`'s). The platform reads the clipboard in the
+  or base64) and `uris` (local files' `file:` URLs, as `onFileDrop`'s). A file larger than `pasteMaxSize`
+  (`InputConfig::paste_max_size`) goes to `too_large` (JS `tooLarge`: name, type, size) without its bytes: the
+  engine moves any the platform read into it, and platforms that know a file's size first (iOS, Android, web) never
+  copy its bytes. The platform reads the clipboard in the
   paste's own handler, on the user's paste only, and only when the app listens. Whether the input inserts the text is
   answered at once from `pasteBehavior` (`InputConfig::paste_behavior`: `"insert"`, the default, or `"report"`);
   images and files are never inserted. Inserted text is clipped to what `maxLength` leaves room for, as a browser's
@@ -707,8 +724,9 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   (`nsh_core::overlay::place`): `placement` (`"top"`, `"bottom"` (default), `"left"`, `"right"`), on the other
   side when only that one has room, the side with more room when neither has; `align` along it (`"start"`,
   `"center"` (default), `"end"`; start and end follow the direction above and below); `offset` from the anchor; then
-  moved along the side to stay inside the root view's safe area less `margin` (or, for the main root view's overlays,
-  the area the platform shows them in, `Core::set_overlay_area`: the web's `overlays: "viewport"`, the window). An anchored overlay is laid out in
+  moved along the side to stay inside the root view's safe area less `margin` (for the main root view's overlays, less
+  what the software keyboard covers of its bottom too, placed again as the keyboard moves; or the area the platform
+  shows them in, `Core::set_overlay_area`: the web's `overlays: "viewport"`, the window). An anchored overlay is laid out in
   that area rather than the whole root view, so content wider than it (a paragraph) wraps within it; in a terminal,
   within that area less the frame drawn a Cell outside its box. A side placement (`"left"`, `"right"`) is laid out in
   the whole area too: the side's room is the `available` of `onPosition`, which an overlay follows to fit it. Rust's

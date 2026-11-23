@@ -153,6 +153,7 @@ impl Modifiers {
             alt: self.alt,
             shift: self.shift,
             cmd: self.meta,
+            alt_graph: false,
         }
     }
 }
@@ -1512,20 +1513,22 @@ fn pick_in(view: &NshView, x: f32, y: f32, items: bool) -> Option<Hit> {
         return None;
     }
     let pe = s.props.pointer_events;
-    let clip = s.clips();
+    let clip = s.clips() || s.style.clip_path().is_some();
+    let at = point(Points(x), Points(y));
     let HitArea {
         inside,
         in_slop,
         children,
         ..
     } = input::hit_area(
-        point(Points(x), Points(y)),
+        at,
         s.frame.size,
         s.props.hit_slop,
         s.overflow,
-        clip,
+        s.clips(),
         laid_out(s.kind, s.id),
-    );
+    )
+    .clipped(s.style.clip_path(), at, s.frame.size);
     // Hosted items are drawn above the children, clipped with them.
     if items && !s.natives.is_empty() && (!clip || inside) {
         let natives = s.natives.clone();
@@ -1720,6 +1723,15 @@ fn down(
         _ => {
             if let Some(target) = crate::keyboard::focus_target(surface, &hit.view) {
                 crate::keyboard::focus_pointer(surface, &target);
+            } else if let Some(field) = crate::text_input::focused(surface)
+                && crate::app_window::window_of(surface, &field)
+                    == crate::app_window::window_of(surface, &hit.view)
+            {
+                // A press on no stop (blank space) leaves the field of its
+                // window, as one on a stop does: the field is drawn here,
+                // not a system control that would lose the focus to the
+                // click itself.
+                crate::text_input::blur(&field);
             }
         }
     }
@@ -1732,7 +1744,10 @@ fn down(
     let views = chain(&hit.view);
     // The gate follows the first pointer only, as on the other platforms.
     let first = input.pointers.borrow().is_empty();
-    let options = GrabOptions::new(touch, native, selects, first);
+    // Where the pointer is from the edges of the root it is measured in.
+    let root_size = surface.input_root().state().frame.size;
+    let options = GrabOptions::new(touch, native, selects, first)
+        .start(point(Points(x), Points(y)), root_size);
     let mut grab = Grab::default();
     for v in &views {
         let s = v.state();
@@ -1859,8 +1874,8 @@ fn motion(surface: &Rc<Surface>, key: Key, x: f32, y: f32, time: f64) {
     let (tx, ty) = (x - p.start.0, y - p.start.1);
     let activated = Gate::step(&mut p.gate, &mut p.candidates, Points(tx), Points(ty));
     // The view's JS responder takes the drag over: nothing native starts
-    // meanwhile.
-    if activated.is_some() && p.mode == Mode::Idle {
+    // meanwhile, but the view's own pan.
+    if p.mode == Mode::Idle && input::activation_frees(activated, &p.candidates) {
         p.mode = Mode::Free;
     }
     if p.reporting {
@@ -1876,9 +1891,10 @@ fn motion(surface: &Rc<Surface>, key: Key, x: f32, y: f32, time: f64) {
     // take the gesture (and block native drags) before one starts.
     let js_pending = p.reporting && !moved;
     if p.mode == Mode::Idle && distance > PAN_SLOP.0 && !js_pending {
-        // While the gate decides, the candidates around it wait (the
-        // pointer stays idle and they are asked again on the next move).
-        if p.gate.is_none() {
+        // While the gate decides, or a pan's `panActivation`, the candidates
+        // around wait (the pointer stays idle and they are asked again on
+        // the next move).
+        if !input::waits(&p.candidates, p.gate.as_ref(), Points(tx), Points(ty)) {
             p.mode = Mode::Free;
         }
         let started = if surface.input.js_block.get() {
@@ -2205,9 +2221,11 @@ fn released_inside(view: &NshView, x: f32, y: f32) -> bool {
 
 // --- Pans ---------------------------------------------------------------------------
 
-fn pan_payload(surface: &Surface, id: NodeId, t: (f32, f32), v: (f32, f32)) -> EventPayload {
+fn pan_payload(surface: &Surface, id: NodeId, p: &Pointer, t: (f32, f32)) -> EventPayload {
     let (value_x, value_y) = surface.anim.borrow().pan_values(id);
+    let v = p.velocity.velocity();
     EventPayload::Pan {
+        origin: point(Points(p.start.0), Points(p.start.1)),
         translation: point(Points(t.0), Points(t.1)),
         velocity_x: v.0,
         velocity_y: v.1,
@@ -2223,7 +2241,7 @@ fn pan_start(surface: &Rc<Surface>, view: &NshView, p: &Pointer) {
     };
     surface.anim.borrow_mut().pan_began(id);
     if events.contains(EventKind::PanStart) {
-        let payload = pan_payload(surface, id, (0.0, 0.0), p.velocity.velocity());
+        let payload = pan_payload(surface, id, p, (0.0, 0.0));
         surface.event(id, EventKind::PanStart, payload);
     }
 }
@@ -2247,7 +2265,7 @@ fn pan_end(surface: &Rc<Surface>, view: &NshView, p: &Pointer, write: bool) {
     }
     if events.contains(EventKind::PanEnd) {
         let t = (p.x - p.start.0, p.y - p.start.1);
-        let payload = pan_payload(surface, id, t, p.velocity.velocity());
+        let payload = pan_payload(surface, id, p, t);
         surface.event(id, EventKind::PanEnd, payload);
     }
 }
@@ -2837,6 +2855,18 @@ fn wheel_input(
                 return false;
             };
             *input.latch.borrow_mut() = Some((view.clone(), horizontal, time));
+            // Lines of 16 points (`WM_MOUSEWHEEL`'s default), or the view's
+            // own (`wheelLineHeight`); a `smoothWheel` view glides them on
+            // Chromium's curve.
+            let notch = if view.kind() == ViewKind::Scroll {
+                let line = nsh_core::geometry::point(Points(16.0), Points(16.0));
+                crate::scroll::wheel_notch(surface, &view, dx, dy, line)
+            } else {
+                Some((dx, dy))
+            };
+            let Some((dx, dy)) = notch else {
+                return true;
+            };
             if view.kind() == ViewKind::Scroll && !surface.environment.get().reduce_motion {
                 // A notch glides, as in Windows' own apps and browsers
                 // (unless the system's animations are off).
@@ -3022,6 +3052,59 @@ mod tests {
         assert_eq!(pressed(10.0), Some(4));
         // A field that does not listen: the row around it is not pressed.
         assert_eq!(pressed(60.0), None);
+    }
+
+    /// A click on blank space (no stop of the keyboard focus) blurs the
+    /// field that has the focus; a click on the field keeps it.
+    #[test]
+    fn a_click_on_blank_space_blurs_the_field() {
+        let surface = Surface::new(nsh_core::platform::Environment::default());
+        surface.root.state_mut().frame = rect(0.0, 0.0, 400.0, 400.0);
+        let field = view(
+            &surface.root,
+            2,
+            ViewKind::Input,
+            rect(0.0, 0.0, 200.0, 40.0),
+        );
+        crate::text_input::create(&surface, &field);
+        // A field left focused reaches thread-locals the test thread has
+        // already dropped as it ends: blurred however the test ends.
+        struct Blurred(Rc<Surface>);
+        impl Drop for Blurred {
+            fn drop(&mut self) {
+                crate::text_input::blur_all(&self.0);
+            }
+        }
+        let _blurred = Blurred(surface.clone());
+        view(
+            &surface.root,
+            4,
+            ViewKind::View,
+            rect(0.0, 100.0, 400.0, 300.0),
+        );
+        let click = |x: f32, y: f32| {
+            let event = |kind| PointerEvent {
+                kind,
+                x,
+                y,
+                button: 0,
+                buttons: if kind == PointerKind::Down { 1 } else { 0 },
+                pointer: 1,
+                touch: false,
+                pen: false,
+                time: 0.0,
+                clicks: 1,
+                modifiers: Modifiers::default(),
+            };
+            pointer(&surface, event(PointerKind::Down));
+            pointer(&surface, event(PointerKind::Up));
+        };
+        click(10.0, 10.0);
+        assert_eq!(crate::text_input::focused(&surface), Some(field.clone()));
+        click(10.0, 10.0);
+        assert_eq!(crate::text_input::focused(&surface), Some(field.clone()));
+        click(200.0, 200.0);
+        assert_eq!(crate::text_input::focused(&surface), None);
     }
 
     #[test]

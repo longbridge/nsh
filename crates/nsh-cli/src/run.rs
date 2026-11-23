@@ -207,10 +207,9 @@ pub(crate) fn run(
         // package: a debug host measures debug code.
         crate::rust_app::set_release_hosts();
     }
-    let work = dunce::canonicalize(entry)?
-        .parent()
-        .context("entry has no directory")?
-        .join(".nsh");
+    // The app's directory: its `nsh.json`'s, which may be above the entry
+    // (`"entry"`).
+    let work = nsh_bundler::app_dir::app_dir_of(&dunce::canonicalize(entry)?).join(".nsh");
     if target == Target::Tui {
         return run_tui(
             entry,
@@ -512,9 +511,9 @@ fn run_rust_app(
             )?;
             let apk = out.join(format!("{name}.apk"));
             let step = ui::Step::start(format!("installing {id} on {serial}"));
-            android::adb(&sdk, &serial, &["install", "-r", &apk.to_string_lossy()])?;
+            android::install(&sdk, &serial, &apk, &id, &["-r"], android::AppData::Kept)?;
             let activity = format!("{id}/com.longbridge.nsh.AppActivity");
-            let mut start = vec!["shell", "am", "start", "-S", "-n", activity.as_str()];
+            let mut start = android::dev_start(&activity);
             start.extend(env.iter().map(String::as_str));
             android::adb(&sdk, &serial, &start)?;
             step.done(format!("launched {id} on {serial}"));
@@ -821,17 +820,8 @@ fn run_android(
     // run ends.
     let _reverse = android::Reverse::add(&sdk, &serial, session.port())?;
     let url = session.local_url();
-    let mut start = vec![
-        "shell",
-        "am",
-        "start",
-        "-S",
-        "-n",
-        "com.longbridge.nsh.host/com.longbridge.nsh.DevActivity",
-        "--es",
-        "url",
-        &url,
-    ];
+    let mut start = android::dev_start("com.longbridge.nsh.host/com.longbridge.nsh.DevActivity");
+    start.extend(["--es", "url", &url]);
     if trace {
         start.extend(["--ez", "trace", "true"]);
     }
@@ -950,6 +940,7 @@ pub(crate) fn install_android_host(
                 queries: &meta.android_queries,
                 application: &meta.android_application,
                 schemes: &[],
+                share_mime_types: &[],
                 links: &[],
                 rust: false,
                 dark: false,
@@ -975,10 +966,15 @@ pub(crate) fn install_android_host(
     let current = fs::read_to_string(&installed).ok();
     if current.is_none() || current != on_device(sdk) {
         let step = ui::Step::start(format!("installing it on {serial}"));
-        android::adb(
+        // The host keeps only what apps under test and in development
+        // write, which they start without again.
+        android::install(
             sdk,
             serial,
-            &["install", "-r", "-t", &apk_path.to_string_lossy()],
+            &apk_path,
+            BUNDLE_ID,
+            &["-r", "-t"],
+            android::AppData::Disposable,
         )?;
         step.done(format!(
             "installed the Android development host on {serial}"
@@ -1056,39 +1052,7 @@ fn package_catalyst(
     )?;
     crate::apple::write_localized_info(&contents.join("Resources"), &localized)?;
     install_binary(host, &macos.join("nsh-ios-host"))?;
-    let (frameworks, changed) = dev_host_frameworks(
-        config,
-        &meta,
-        "aarch64-apple-ios-macabi",
-        &contents.join("Frameworks"),
-        &work.join("frameworks.json"),
-    )?;
-    // macOS runs signed code only, ad hoc at least: a framework that came
-    // without a signature gets one.
-    if changed {
-        crate::ios_frameworks::sign(&frameworks, "-")?;
-    }
     Ok(app)
-}
-
-/// Makes the development host's `Frameworks/` (`dir`) hold the dynamic
-/// frameworks of the app's `nsh.json` (`config`) and its crates' (`meta`)
-/// for `triple`, which the host built with the app's crates linked
-/// (`ios_frameworks`); `record` remembers the copies. A host without the
-/// app's crates (a TSX app's prebuilt one) links none.
-fn dev_host_frameworks(
-    config: &crate::package::AppConfig,
-    meta: &crate::module_meta::ModuleMeta,
-    triple: &str,
-    dir: &Path,
-    record: &Path,
-) -> anyhow::Result<(Vec<PathBuf>, bool)> {
-    let frameworks = if crate::rust_app::current().is_some() {
-        crate::module_meta::ios_link(&config.ios.frameworks, &[], meta).0
-    } else {
-        Vec::new()
-    };
-    crate::ios_frameworks::sync(&frameworks, triple, dir, Some(record))
 }
 
 /// Creates (or refreshes) `<work>/ios/NshDev.app`, a flat iOS app bundle,
@@ -1119,13 +1083,6 @@ pub(crate) fn package_ios(
     }
     let strings_changed = crate::apple::write_localized_info(&app, &localized)?;
     let installed = install_binary(host, &app.join("nsh-ios-host"))?;
-    let (frameworks, frameworks_changed) = dev_host_frameworks(
-        config,
-        &meta,
-        "aarch64-apple-ios-sim",
-        &app.join("Frameworks"),
-        &work.join("ios").join("frameworks.json"),
-    )?;
     let (extensions, extensions_changed) = dev_host_extensions(config, &app, &info)?;
     // The app's entitlements, as its simulator package has them: an app
     // group the host shares with the app's extensions, for one.
@@ -1145,15 +1102,13 @@ pub(crate) fn package_ios(
     if installed
         || info_changed
         || strings_changed
-        || frameworks_changed
         || extensions_changed
         || entitlements_changed
         || !app.join("_CodeSignature").exists()
     {
-        // The app's signature seals its extensions' and frameworks': they
+        // The app's signature seals its extensions': they
         // are signed first.
         crate::app_extensions::sign_ad_hoc(&extensions, &work.join("ios"))?;
-        crate::ios_frameworks::sign(&frameworks, "-")?;
         let mut codesign = Command::new("codesign");
         codesign.args(["--force", "--sign", "-", "--timestamp=none"]);
         if entitlements_file.exists() {
@@ -1482,7 +1437,10 @@ fn dev_host_strings(
     meta: &crate::module_meta::ModuleMeta,
 ) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
     let mut strings = config.ios.info_plist_strings.clone();
-    crate::module_meta::add_strings(&mut strings, &meta.crate_strings(config));
+    crate::module_meta::add_strings(
+        &mut strings,
+        &meta.crate_strings(config, crate::apple::ApplePlatform::Ios),
+    );
     // Checked as `nsh.json`'s are.
     crate::apple::AppleConfig {
         info_plist_strings: strings.clone(),
@@ -1576,13 +1534,12 @@ fn info_plist(target: Target) -> String {
              <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>"
         }
     };
-    // The host runs any app: it may recognize speech and its pages may
-    // capture media.
-    let usage = crate::package::USAGE_DESCRIPTIONS
+    // The host runs any app: its pages may capture media. What the app's
+    // crates use (`nsh-extra`'s `speech`) they declare
+    // (`with_crates_info`).
+    let usage = crate::package::WEB_MEDIA_USAGE_DESCRIPTIONS
         .iter()
-        .copied()
-        .chain([crate::package::WEB_MEDIA_USAGE_DESCRIPTIONS[1]].map(|(_, key, text)| (key, text)))
-        .map(|(key, text)| format!("<key>{key}</key><string>{text}</string>"))
+        .map(|(_, key, text)| format!("<key>{key}</key><string>{text}</string>"))
         .collect::<Vec<_>>()
         .join("\n    ");
     format!(

@@ -15,7 +15,6 @@ mod dev;
 mod dev_port;
 mod entry;
 mod init;
-mod ios_frameworks;
 mod logger;
 mod module_meta;
 mod native_features;
@@ -129,7 +128,7 @@ enum Command {
     /// (`nsh.json` `"root"`): build its crates and gather the files they ship.
     Build {
         /// The entry module, or the app's directory (default: the current one),
-        /// whose `App.tsx` is the entry.
+        /// whose `nsh.json` `"entry"` is the entry (default: its `App.tsx`).
         #[arg(default_value = ".")]
         entry: PathBuf,
         /// Output directory.
@@ -161,6 +160,12 @@ enum Command {
         /// too).
         #[arg(long)]
         filter: Option<String>,
+        /// Build and run in release mode: minify and strip debug info from the
+        /// app bundles under test, run the crates' Rust tests with
+        /// `cargo test --release`, and build an app with Rust crates' headless
+        /// runner and development hosts optimized (`--release`).
+        #[arg(long)]
+        release: bool,
         /// Print every mount batch of the apps the tests open, under the
         /// step it came in, and the time of every commit.
         #[arg(long)]
@@ -228,7 +233,7 @@ enum Command {
     /// Rust app (`"root"`) without a `tsconfig.json` only that.
     Check {
         /// The entry module, or the app's directory (default: the current one),
-        /// whose `App.tsx` is the entry.
+        /// whose `nsh.json` `"entry"` is the entry (default: its `App.tsx`).
         #[arg(default_value = ".")]
         entry: PathBuf,
         /// The `tsc` to run instead of the pinned TypeScript 7.
@@ -241,7 +246,7 @@ enum Command {
     /// Run an app in this system’s native host with hot reload.
     Dev {
         /// The entry module, or the app's directory (default: the current one),
-        /// whose `App.tsx` is the entry.
+        /// whose `nsh.json` `"entry"` is the entry (default: its `App.tsx`).
         #[arg(default_value = ".")]
         entry: PathBuf,
         /// Dev server port (replaces the previous NSH development session on
@@ -281,7 +286,7 @@ enum Command {
     /// hosts, Mac Catalyst, GPUI, a terminal or a browser with --target.
     Run {
         /// The entry module, or the app's directory (default: the current one),
-        /// whose `App.tsx` is the entry.
+        /// whose `nsh.json` `"entry"` is the entry (default: its `App.tsx`).
         #[arg(default_value = ".")]
         entry: PathBuf,
         /// Dev server port (replaces the previous NSH development session on
@@ -481,7 +486,8 @@ enum Command {
         #[command(subcommand)]
         store: Option<PublishStore>,
         /// The entry module, the app's directory (default: the current one),
-        /// whose `App.tsx` is the entry, or a package (`.nshpkg`) to sign again.
+        /// whose `nsh.json` `"entry"` is the entry (default: its `App.tsx`),
+        /// or a package (`.nshpkg`) to sign again.
         #[arg(default_value = ".")]
         entry: PathBuf,
         /// The release key's secret key (`.secret`).
@@ -595,7 +601,7 @@ enum PublishStore {
 #[derive(Args, Clone)]
 struct PackageArgs {
     /// The entry module, or the app's directory (default: the current one),
-    /// whose `App.tsx` is the entry.
+    /// whose `nsh.json` `"entry"` is the entry (default: its `App.tsx`).
     #[arg(default_value = ".")]
     entry: PathBuf,
     /// What to build for.
@@ -619,7 +625,8 @@ struct PackageArgs {
     /// App icon: a square PNG, ideally 1024×1024.
     #[arg(long)]
     icon: Option<PathBuf>,
-    /// Code signing identity for devices, e.g. "Apple Development: …".
+    /// Code signing identity for iOS devices or macOS packages, e.g.
+    /// "Apple Development: …" or "Developer ID Application: …".
     #[arg(long)]
     sign: Option<String>,
     /// Provisioning profile for devices (`.mobileprovision`). Repeat it to
@@ -1000,6 +1007,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             path,
             entry,
             filter,
+            release,
             trace,
             fps,
             junit,
@@ -1014,6 +1022,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             &path,
             &entry,
             filter,
+            release,
             trace,
             fps,
             junit.as_deref(),
@@ -1433,6 +1442,22 @@ mod command_tests {
         for value in ["x86-64", "i386", "x86_64-apple-darwin"] {
             assert!(arch(&["--arch", value]).is_err(), "{value}");
         }
+        let cli = Cli::try_parse_from([
+            "nsh",
+            "package",
+            "--target",
+            "macos",
+            "--sign",
+            "Developer ID Application: Example Inc (ABCDE12345)",
+        ])
+        .unwrap();
+        let Command::Package(args) = cli.command else {
+            panic!("expected nsh package");
+        };
+        assert_eq!(
+            args.sign.as_deref(),
+            Some("Developer ID Application: Example Inc (ABCDE12345)")
+        );
     }
 
     #[test]
@@ -1486,5 +1511,36 @@ mod command_tests {
             }
         ));
         assert!(Cli::try_parse_from(["nsh", "dev", "--server-only", "--target", "ios"]).is_err());
+    }
+
+    #[test]
+    fn test_accepts_release_flag() {
+        let default = Cli::try_parse_from(["nsh", "test"]).unwrap();
+        assert!(matches!(
+            default.command,
+            Command::Test { release: false, .. }
+        ));
+        let release = Cli::try_parse_from(["nsh", "test", "--release"]).unwrap();
+        assert!(matches!(
+            release.command,
+            Command::Test { release: true, .. }
+        ));
+        let targeted = Cli::try_parse_from([
+            "nsh",
+            "test",
+            "App.test.tsx",
+            "--release",
+            "--target",
+            "windows",
+        ])
+        .unwrap();
+        assert!(matches!(
+            targeted.command,
+            Command::Test {
+                release: true,
+                target: Some(Target::Windows),
+                ..
+            }
+        ));
     }
 }

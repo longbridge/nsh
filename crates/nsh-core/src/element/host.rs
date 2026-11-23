@@ -772,9 +772,13 @@ impl Input {
     }
 
     /// Whether a multiline input's scroll bar shows (default yes): the
-    /// platform's indicator, or the app's built-in bar once it set one.
-    pub fn scrollbar(self, shows: impl IntoReactive<bool>) -> Self {
-        self.bind_prop(shows, |shows: bool| Prop::Scrollbar(shows.into()))
+    /// platform's indicator, or the app's built-in bar once it set one; or
+    /// a built-in bar of this input's own theme (TS `scrollbar={theme}`:
+    /// `nsh_base::ScrollbarTheme` converts into a setting). The built-in
+    /// bar lies over the input's frame, padding included, while the text
+    /// stays in the content box.
+    pub fn scrollbar(self, setting: impl IntoReactive<crate::ScrollbarSetting>) -> Self {
+        self.bind_prop(setting, Prop::Scrollbar)
     }
 
     /// At most `length` characters, counted as Unicode scalar values
@@ -802,6 +806,14 @@ impl Input {
     /// [`Self::on_paste`] hears what was pasted either way.
     pub fn paste_behavior(self, behavior: impl IntoReactive<PasteBehavior>) -> Self {
         self.bind_prop(behavior, Prop::PasteBehavior)
+    }
+
+    /// Reads pasted files of at most `bytes` bytes (`pasteMaxSize`); a
+    /// larger one reaches [`Self::on_paste`] in
+    /// [`PasteEvent::too_large`], its name, type and size only. Default:
+    /// every file is read.
+    pub fn paste_max_size(self, bytes: impl IntoReactive<u64>) -> Self {
+        self.bind_prop(bytes, |bytes: u64| Prop::PasteMaxSize(Some(bytes)))
     }
 
     /// The user pasted: the text, the files with their bytes (a
@@ -884,7 +896,8 @@ impl Input {
         )
     }
 
-    /// A key was pressed: the character, `Backspace` or `Enter`.
+    /// A key was pressed: the character, `Backspace`, `Enter`, `Escape`,
+    /// `ArrowUp` or `ArrowDown`.
     pub fn on_key_press<M>(self, listener: impl IntoListener<str, M>) -> Self {
         self.listen(EventKind::KeyPress, listener.into_listener(), events::key)
     }
@@ -916,9 +929,11 @@ impl Scroll {
         self.set(Prop::Horizontal(true))
     }
 
-    /// Whether the scroll indicator shows (default yes).
-    pub fn scrollbar(self, shows: impl IntoReactive<bool>) -> Self {
-        self.bind_prop(shows, |shows: bool| Prop::Scrollbar(shows.into()))
+    /// Whether the scroll indicator shows (default yes); or a built-in bar
+    /// of this view's own theme (TS `scrollbar={theme}`:
+    /// `nsh_base::ScrollbarTheme` converts into a setting).
+    pub fn scrollbar(self, setting: impl IntoReactive<crate::ScrollbarSetting>) -> Self {
+        self.bind_prop(setting, Prop::Scrollbar)
     }
 
     /// Pinch zoom between `min` and `max`.

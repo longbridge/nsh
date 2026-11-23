@@ -245,7 +245,10 @@ pub(crate) fn pick_files(
 pub(crate) fn host_call(
     name: String,
     args: crate::JsonValue,
-) -> (Answer<Result<crate::JsonValue, super::JsError>>, Action) {
+) -> (
+    Answer<Result<crate::JsonValue, crate::host_channel::HostError>>,
+    Action,
+) {
     let (answer, slot) = Answer::new();
     (
         answer,

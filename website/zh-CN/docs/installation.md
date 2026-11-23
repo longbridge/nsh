@@ -20,7 +20,7 @@ NSH 的所有操作都通过一个命令 `nsh` 完成：构建用 Rust 或 TSX �
 | Linux | Linux | GTK 4.14+（构建运行时还需要它的开发包） |
 | [GPUI](./gpui.md)（嵌入 GPUI 应用） | macOS、Windows 或 Linux | GPU（Metal、DirectX 或 Vulkan）；Linux 上需要 Wayland 或 X11 |
 
-macOS 上的默认目标为 AppKit。Mac Catalyst（`--target catalyst`）和 iOS 一样需要 Xcode。详见[平台工具](#平台工具)。
+macOS 上的默认目标为 AppKit。Mac Catalyst（`--target catalyst`）是用于 Catalyst 特有工作的开发工具，和 iOS 一样需要 Xcode。详见[平台工具](#平台工具)。
 
 ## 安装发布版本
 
@@ -254,7 +254,6 @@ sdkmanager "platforms;android-35" "build-tools;35.0.1" "platform-tools"
 | 命令 | macOS | Linux | Windows |
 |---|---|---|---|
 | `nsh init`, `nsh build`, `nsh test`, `nsh dev`, `nsh check` | 可以 | 可以 | 可以 |
-| `nsh run --target catalyst`（Mac Catalyst） | 可以 | 不可以 | 不可以 |
 | `nsh run --target macos`, `nsh package --target macos` | 可以 | 不可以 | 不可以 |
 | `nsh run --target linux`（Linux 上的默认目标）, `nsh package --target linux` | 不可以 | 可以 | 不可以 |
 | `nsh run --target windows`（Windows 上的默认目标）, `nsh package --target windows` | 不可以 | 不可以 | 可以 |
@@ -262,6 +261,7 @@ sdkmanager "platforms;android-35" "build-tools;35.0.1" "platform-tools"
 | `nsh run --target ios`, `nsh package --target ios` / `ios-simulator` | 可以，需要 Xcode | 不可以 | 不可以 |
 | `nsh run --target android`, `nsh package --target android` | 可以 | 可以，需从源码构建 | 可以，需有 Android 运行时 |
 | `nsh keygen`, `certify`, `publish`, `verify`, `revoke` | 可以 | 可以 | 可以 |
+| `nsh run --target catalyst`（Mac Catalyst） | 可以 | 不可以 | 不可以 |
 
 在 Linux 上，请从源码构建 CLI 和 Android 运行时（`cargo build -p nsh-cli` 与 `cargo xtask android --dev`）；会自动使用 NDK 的 Linux 工具链。在 Windows 上同样会使用 NDK 的 Windows 工具链，`cargo xtask dist` 找到 Android SDK 时会包含 Android 运行时。
 

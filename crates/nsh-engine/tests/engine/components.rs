@@ -108,7 +108,6 @@ fn app_config(
         clipboard: None,
         host: Default::default(),
         picker: None,
-        speech: None,
         audio: None,
         windows: None,
         login_item: None,
@@ -561,6 +560,53 @@ fn unhandled_back_presses_go_back_natively_on((engine, rx): (Engine, Receiver<Mo
         1,
         "not handled: the platform goes back (a stack pops, or the app exits)"
     );
+}
+
+#[test]
+fn js_back_progress_listeners_follow_the_back_gesture() {
+    let (engine, rx) = start(BACK_PROGRESS);
+    let root_listens = |batches: &[MountBatch]| {
+        batches
+            .iter()
+            .flat_map(|b| &b.items)
+            .rev()
+            .find_map(|i| match i {
+                MountItem::Events {
+                    id: ROOT_ID,
+                    events,
+                } => Some(events.contains(EventKind::BackProgress)),
+                _ => None,
+            })
+    };
+    let first = until(&rx, |b| shows(b, "step none"));
+    assert_eq!(root_listens(&first), Some(true), "the root listens");
+    let control = engine.control();
+    let step = |phase, progress, edge| {
+        nsh_core::BackProgressEvent::new(phase, nsh_core::geometry::Percentage(progress), edge)
+            .payload()
+    };
+    use nsh_core::{BackPhase, PanEdge};
+    let mut batches = Vec::new();
+    for (phase, progress, shown) in [
+        (BackPhase::Start, 0.0, "step start 0 left"),
+        (BackPhase::Move, 0.5, "step move 0.5 left"),
+        (BackPhase::End, 0.5, "step end 0.5 left"),
+    ] {
+        control.dispatch_event(
+            ROOT_ID,
+            EventKind::BackProgress,
+            step(phase, progress, Some(PanEdge::Left)),
+        );
+        batches = until(&rx, |b| shows(b, shown));
+        assert!(batches.iter().any(|b| shows(b, shown)), "{shown}");
+    }
+    // The listener stopped at the end: the root no longer listens.
+    if root_listens(&batches).is_none() {
+        batches.extend(until(&rx, |b| {
+            root_listens(std::slice::from_ref(b)).is_some()
+        }));
+    }
+    assert_eq!(root_listens(&batches), Some(false));
 }
 
 #[test]
@@ -1947,6 +1993,68 @@ fn picked_files_past_the_apps_limit_reach_js_unread() {
     assert_eq!(asked.expect("a pick").max_size, Some(4));
 }
 
+const PASTE_LIMIT: &str = r#"import { mount, signal, Text, View } from "nsh";
+import { Input } from "nsh/base";
+
+const shown = signal("");
+
+mount(() => (
+  <View>
+    <Input
+      testID="field"
+      pasteMaxSize={4}
+      onPaste={(e) =>
+        shown.set(
+          `read ${e.files.map((f) => `${f.name}:${f.size}`).join(",")} ` +
+            `unread ${e.tooLarge.map((f) => `${f.name}:${f.type}:${f.size}`).join(",")}`,
+        )
+      }
+    />
+    <Text>{shown()}</Text>
+  </View>
+));
+"#;
+
+#[test]
+fn pasted_files_past_the_inputs_limit_reach_js_unread() {
+    let (engine, rx) = start(PASTE_LIMIT);
+    let control = engine.control();
+    let mut field = None;
+    let mut config = None;
+    until(&rx, |batch| {
+        for item in &batch.items {
+            if let MountItem::Input { id, config: c } = item {
+                field = Some(*id);
+                config = Some(c.clone());
+            }
+        }
+        field.is_some()
+    });
+    let field = field.expect("the field");
+    // The platform reads up to the limit before it reads a file.
+    assert_eq!(config.expect("its config").paste_max_size, Some(4));
+    let mut paste = nsh_core::PasteEvent::new("");
+    // Read, read but past the limit (a platform that could not tell its
+    // size first), and not read.
+    paste.files = vec![
+        nsh_core::PastedFile::new("a.txt", "text/plain", b"abcd".to_vec()),
+        nsh_core::PastedFile::new("b.txt", "text/plain", b"abcde".to_vec()),
+    ];
+    paste.too_large = vec![nsh_core::PastedFile::too_large(
+        "clip.mp4",
+        "video/mp4",
+        400_000_000,
+    )];
+    control.dispatch_event(
+        field,
+        EventKind::Paste,
+        EventPayload::Paste(Box::new(paste)),
+    );
+    let wanted = "read a.txt:4 unread clip.mp4:video/mp4:400000000,b.txt:text/plain:5";
+    let batches = until(&rx, |batch| shows(batch, wanted));
+    assert!(batches.iter().any(|b| shows(b, wanted)), "{wanted}");
+}
+
 const PICK: &str = r#"import { mount, signal, Text } from "nsh";
 import { Picker } from "nsh";
 
@@ -2293,6 +2401,18 @@ BackHandler.on("press", () => {
 });
 
 mount(() => <Text>{`presses ${presses()}`}</Text>);
+"#;
+
+const BACK_PROGRESS: &str = r#"import { mount, signal, Text } from "nsh";
+import { BackHandler } from "nsh/mobile";
+
+const step = signal("none");
+const stop = BackHandler.on("progress", (e) => {
+  step.set(`${e.phase} ${e.progress} ${e.edge ?? "-"}`);
+  if (e.phase === "end") stop();
+});
+
+mount(() => <Text>{`step ${step()}`}</Text>);
 "#;
 
 const FIELD: &str = r#"import { mount, signal, Text, View } from "nsh";
@@ -12462,6 +12582,7 @@ const chosen = signal("none");
 const dark = signal(false);
 mount(() => <Window id="main"><View>
   <MenuButton accessibilityLabel="Account" title="me@example.com"
+    accessibilityHint={dark() ? undefined : "Choose an appearance"}
     items={[
       { id: "settings", label: "Settings", icon: "gearshape" },
       { id: "", label: "Appearance", inline: true, singleSelection: true, items: [
@@ -12519,6 +12640,10 @@ fn the_menu_button_gives_the_mobile_systems_their_menu_and_reports_the_choice() 
             component_prop(&initial, button, "accessibilityLabel"),
             Some(serde_json::json!("Account"))
         );
+        assert_eq!(
+            component_prop(&initial, button, "accessibilityHint"),
+            Some(serde_json::json!("Choose an appearance"))
+        );
         engine.control().dispatch_event(
             button,
             EventKind::NativeEvent,
@@ -12531,6 +12656,10 @@ fn the_menu_button_gives_the_mobile_systems_their_menu_and_reports_the_choice() 
         assert_eq!(
             component_prop(&updates, button, "items"),
             Some(appearance(true))
+        );
+        assert_eq!(
+            component_prop(&updates, button, "accessibilityHint"),
+            Some(serde_json::Value::Null)
         );
     }
 }

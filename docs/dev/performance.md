@@ -4,6 +4,26 @@ Performance is the project's first priority; the rules are in `AGENTS.md`. Chang
 after `nsh test --trace` timings and item counts (`nsh trace` before it, in the records below). Current baselines
 (Apple Silicon except where noted):
 
+Sibling position classes looked at once per parent (`core/classes.rs`, 2026-11-23, macOS arm64, release, the change on
+`cc19b8b38` against `main` at `2c17143e7`): every child inserted or removed ran `positions_changed` over all of its
+siblings at once (cloning the list and counting them), so mounting N rows with `odd:` or `last:` classes looked at
+N²/2 siblings, although only the rows whose bits moved were restyled (the 2026-11-15 change below). A parent whose
+children move is now queued once and its children's positions looked at before the next flush (`flush_positions`, once
+a commit round's components rendered and at each flush), and restyling a row (its hover, its press) takes the bits it
+was last styled at while its siblings did not move (`known_position`) instead of counting them. Headless
+`nsh test --trace` of an `<Each>` of rows with `odd:bg-neutral-100 last:border-b-0 border-b`, the first commit, three
+alternating rounds (the same rows without the positional classes are the control, untouched by this change and by the
+commits between the two bases); every mount item is the same:
+
+| Rows | Before | After | Without positional classes |
+|---:|---:|---:|---:|
+| 1,000 | 6.7–8.9 ms | 4.5–5.8 ms | 4.2–4.7 ms |
+| 4,000 | 53–57 ms | 19–21 ms | 17–21 ms |
+| 8,000 | 174–184 ms | 43–50 ms | 36–42 ms |
+
+`positions_are_looked_at_once_per_parent_as_rows_mount` keeps the siblings looked at in step with the rows (80,200 and
+1,280,800 for 400 and 1,600 rows before, sixteen times).
+
 A long RichEditor document with tables (2026-11-21, Linux x86_64, Intel Core Ultra 7 270K Plus, debug, against
 `ca7b8fba3`): every block reports its frame in a layout event of its own, and each event went through all of the
 component's handlers to find the block's (a list of every node's), then ran the tables' controls again, one region
@@ -27,6 +47,26 @@ The rows were measured with the same app mounted without a `Window` (the bench f
 runs of the last four, from 409–703 µs (list js 96–134 µs) to 386–610 µs (79–95 µs). The counter keeps 56 / 10 ops,
 50 / 7 mount items and 15 / 18 nodes. `an_event_looks_only_at_its_nodes_handlers` keeps an event's handler lookups the
 same at 50, 200 and 800 rows.
+
+Rust components' events read by atom (`nsh-js` `components.rs`, 2026-11-20, macOS arm64, release, against the
+change below): a Rust component's event reached its `on<Event>` prop through two `String`s of its name, a `format!`
+of the handler's name, a `CString` per property read and a `Vec` of one argument; its creation checked each event's
+handler the same way, and slot and children readers made a `String` and a `CString` per read. Handler atoms are now
+made once per event name (`Components::handlers`), names are compared borrowed (`dom::with_str`), and the other reads
+take atoms without a `CString`. `bench_components`, JS time of three rounds of each version run in turn (a press: the
+mean of 2,000; a first frame: the least of 40); ops and mount items are the same:
+
+| Entry | Before | After |
+|---|---:|---:|
+| `PressRust.tsx`, a press delivered to `onPress` | 552–575 ns | 433–449 ns |
+| `GridRust.tsx` first frame | 588–604 µs | 573–583 µs |
+
+`PressTs.tsx` (990–1,039 ns a press) is the control. GridRust's update of 200 titles, a path this change does not
+touch, read 114–116 µs before and 117–118 µs after; the other entries stay within the runs' spread.
+
+Render keys holding a NUL: the table of what a render function rendered was written and cleared through a
+`CString`, which made every such key `""`, so two of them replaced each other's content. The table is now keyed
+by the whole key (`keys_holding_a_nul_render_and_go_as_others`).
 
 Rust components' props read by atom (`nsh-js` `components.rs`, 2026-11-19, macOS arm64, release, against
 `2ede573ac`): a Rust component's props effect read each of its keys (its value and renderer props and the about 20
@@ -276,7 +316,8 @@ sibling. Mounting N rows with `odd:` + `last:` classes, one insert per row, then
 | 500 | 277.0 | 18.6 |
 | 2,000 | 4109.1 | 98.5 |
 
-Mounting is now linear in the row count. Results match a full per-child restyle after every tree edit
+Mounting was then still quadratic in the passes over the siblings, one per insert (the 2026-11-23 entry above).
+Results match a full per-child restyle after every tree edit
 (`positional_regressions`). `examples/bench/PositionalClasses.tsx` (`COUNT`, `CLASSES`, `EACH`) reproduces
 the workload headless with `nsh test --trace`; these Core timings exclude QuickJS and native mounting and drawing.
 

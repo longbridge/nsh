@@ -6,7 +6,7 @@ order: 2
 
 # nsh
 
-`nsh` 是核心模块：响应式 API（signal、computed、effect、context）、`mount`、`token`、`setTheme`、宿主元素 `View`、`Text`、`Scroll` 和 `Overlay`，[可选择的视图](#selectable-views)、[安全区域与键盘](#safe-area-and-keyboard)，[动画](#animation)、[设备与环境](#device)、[`PanResponder`](#panresponder)、[剪贴板](#clipboard)、[照片选择器](#picker)、[分享面板](#share)、[语音识别](#speech)、[声音](#sound)、[存储](#storage)、[宿主通道](#host)、[键盘快捷键](#keymap)、[原生组件与模块](#nativecomponent-and-nativemodule)、[无障碍](#accessibility)，以及元素、样式和事件的 TypeScript 类型。响应式图本身以 Rust 原生运行；读取一个 signal 是一次对运行时的调用，只需几纳秒，只有你自己写的闭包会在 JavaScript 解释器中执行。
+`nsh` 是核心模块：响应式 API（signal、computed、effect、context）、`mount`、`token`、`setTheme`、宿主元素 `View`、`Text`、`Scroll` 和 `Overlay`，[可选择的视图](#selectable-views)、[安全区域与键盘](#safe-area-and-keyboard)，[动画](#animation)、[设备与环境](#device)、[`PanResponder`](#panresponder)、[剪贴板](#clipboard)、[照片选择器](#picker)、[分享面板](#share)、[声音](#sound)、[存储](#storage)、[宿主通道](#host)、[键盘快捷键](#keymap)、[原生组件与模块](#nativecomponent-and-nativemodule)、[无障碍](#accessibility)，以及元素、样式和事件的 TypeScript 类型。响应式图本身以 Rust 原生运行；读取一个 signal 是一次对运行时的调用，只需几纳秒，只有你自己写的闭包会在 JavaScript 解释器中执行。
 
 ```ts
 import { batch, cleanup, computed, context, effect, ErrorBoundary, mount, Overlay, Scroll, signal, split, Text, token, untracked, View } from "nsh";
@@ -2518,145 +2518,6 @@ UrlScheme.on("change", ({ url }) => tab.set(tabOf(url)));
 `change` 只在 Web 上出现。Rust 代码 await `nsh_core::prelude` 的 `next_app_url_change()`，得到带有 `url` 和 `reason` 的
 `AppUrlChange`。
 
-## Speech
-
-语音 API 把用户说的话变成文字（听写）：应用开始一个会话，平台监听麦克风，转写文本随说话逐步到达。macOS 和 iOS 使用系统的
-Speech 框架识别；系统会向用户请求一次麦克风和语音识别的权限。在其他平台上，会话会立即以错误 `"unavailable"` 结束，所以
-显示麦克风按钮前先检查 `Speech.available()`。Rust 代码调用 `nsh_core::prelude` 的 `recognize_speech`；TSX 从 `nsh` 导入
-`Speech`。
-
-```rust tabs
-use nsh_core::speech::{SpeechEvent, SpeechRequest};
-```
-
-```tsx tabs
-import { Speech, type SpeechSession } from "nsh";
-```
-
-```ts
-const Speech: {
-  available(): Promise<boolean>;
-  start(options?: SpeechOptions): SpeechSession;
-};
-
-interface SpeechOptions {
-  /** The language spoken, a BCP 47 tag ("en-US", "zh-CN"); the user's when left out. */
-  lang?: string;
-  /** Results while the user speaks (true, the default), or only the final one. */
-  interim?: boolean;
-}
-
-interface SpeechSession {
-  on(event: "start", listener: () => void): () => void;
-  on(event: "result", listener: (result: SpeechResult) => void): () => void;
-  on(event: "end", listener: (end: SpeechEnd) => void): () => void;
-  /** The whole transcript so far. */
-  readonly text: string;
-  readonly ended: boolean;
-  stop(): void;
-  abort(): void;
-}
-
-interface SpeechResult { text: string; isFinal: boolean }
-interface SpeechEnd { text: string; error?: SpeechErrorCode }
-
-type SpeechErrorCode =
-  | "not-allowed" | "no-speech" | "audio-capture" | "network"
-  | "language-not-supported" | "unavailable" | "failed";
-```
-
-| TSX | Rust |
-|---|---|
-| `await Speech.available()` | `speech_available().await -> bool` |
-| `Speech.start(options)` | `recognize_speech(request) -> SpeechRecognition` |
-| `session.on("result", ...)` | `recognition.next().await -> Option<SpeechEvent>` |
-| `session.stop()` / `abort()` | `recognition.stop()` / `abort()` （drop 它即中止） |
-
-### Speech.start
-
-开始一个会话并立即返回它。会话依次报告：麦克风打开、识别器开始监听时的 `start`；每次转写变化时的 `result`（`text` 始终是
-到目前为止的完整转写，应用照原样显示即可）；以及一次 `end`，之后不再有任何事件。`stop()` 停止监听，让识别器把听到的内容
-识别完：最后一个 `isFinal: true` 的结果，然后是 `end`。`abort()` 立即结束会话，不带错误，并丢弃尚未报告的内容。同一时间只运行
-一个会话：开始另一个会中止正在运行的会话。
-
-`end` 带有最后的转写，会话失败时还带有 `error`，名称与 Web Speech API 一致：
-
-| `error` | 何时 |
-|---|---|
-| `"not-allowed"` | 用户或系统不允许使用麦克风或语音识别。 |
-| `"no-speech"` | 没有听到说话。 |
-| `"audio-capture"` | 无法使用麦克风。 |
-| `"network"` | 识别器需要网络但无法连接。 |
-| `"language-not-supported"` | 识别器不认识 `lang`。 |
-| `"unavailable"` | 这个平台不识别语音，或此刻不能识别。 |
-| `"failed"` | 识别器因其他原因失败。 |
-
-选项类型不对时 `start` 抛出 `TypeError`，`lang` 不是语言标签时抛出 `RangeError`。
-
-```tsx
-import { signal, Speech, type SpeechSession } from "nsh";
-
-const transcript = signal("");
-let session: SpeechSession | null = null;
-
-function toggle() {
-  if (session && !session.ended) {
-    session.stop();
-    return;
-  }
-  session = Speech.start({ lang: "en-US" });
-  session.on("result", ({ text }) => transcript.set(text));
-  session.on("end", ({ text, error }) => {
-    if (error) console.warn("dictation ended:", error);
-    else transcript.set(text);
-  });
-}
-```
-
-```rust
-use nsh_core::prelude::*;
-use nsh_core::speech::{SpeechEvent, SpeechRequest};
-
-async fn dictate() -> String {
-    let mut recognition = recognize_speech(SpeechRequest::default());
-    let mut text = String::new();
-    while let Some(event) = recognition.next().await {
-        match event {
-            SpeechEvent::Result { text: heard, .. } => text = heard,
-            SpeechEvent::End { .. } => break,
-            _ => {}
-        }
-    }
-    text
-}
-```
-
-### Speech.available
-
-在可以运行会话的地方 resolve 为 `true`：macOS 和 iOS，以及嵌入应用自己识别语音的地方。
-
-### Info.plist
-
-在 macOS 和 iOS 上，系统会显示应用为什么需要麦克风和语音识别。应用可能使用语音时（它的 `capabilities` 授予了 `speech`，
-或者没有声明 capabilities），`nsh package` 和 `nsh run` 会把 `NSMicrophoneUsageDescription` 和
-`NSSpeechRecognitionUsageDescription` 写入应用的 Info.plist。
-
-### 嵌入 NSH 的应用
-
-嵌入 NSH、并且用自己的方式识别语音（自己的引擎或服务）的应用可以自己回答会话：在 Rust 中，把 `SpeechBackend`
-（`nsh_core::speech`）交给引擎（`EngineConfig::speech`），它会收到每个会话的 `SpeechRequest` 和一个可以从任意线程报告事件的
-`SpeechSink`，并返回 core 用来停止和中止会话的 `SpeechControl`。这时不使用平台的识别器。
-
-### 测试
-
-`nsh test` 在无界面运行时用一个模拟识别器运行会话：会话立即开始，`app.hear(text)` 把 `text` 报告为到目前为止的转写，
-`app.endSpeech(error?)` 结束会话，`app.speechRequests()` 列出应用开始的会话。见[测试](../docs/testing-and-trace.md)。
-
-> [!NOTE]
-> 应用在 `nsh.json` 中声明了 `capabilities` 时，需要用 `"speech": true` 授予语音。没有授予时 `Speech.start` 抛出一个
-> `Error`，其 `code` 为 `"ERR_ACCESS_DENIED"`，`permission` 为 `"speech"`，`resource` 为 `""`。在 Rust 中，会话以
-> `not-allowed` 结束，拒绝会记录在日志中。见[沙箱与能力](../docs/sandbox-and-capabilities.md)。
-
 ## Sound
 
 两个原语负责出声，各管一类音频。`Sound` 是短音效（点击、提示、告警）：一次解码进内存，之后可以播放任意多次、彼此叠加，调用后一帧之内开始发声——提前加载，在事件处理里播放。`AudioPlayer` 播放长音频（语音消息、音乐、录音），边播边从源读取，具备播放器的状态：位置、时长、暂停、跳转、速率和循环。macOS 和 iOS 用 AVFoundation 播放（音效用 `AVAudioEngine`，播放器用 `AVPlayer`；iOS 上音频会话为 `ambient`，与其他应用的声音混音并遵循静音开关），Windows 用 XAudio2 和 Media Foundation，Android 用 `SoundPool` 和 `MediaPlayer`，Linux 的音效用 GStreamer、播放器用 GTK 的媒体流（播放器的速率保持为 1），Web 用 Web Audio API 和音频元素（页面上用户第一次操作之后才出声）。在平台可能不出声的地方先检查 `Sound.available()`；那里 `load` 和 `play()` 以 `"unavailable"` 失败。Rust 代码调用 `nsh_core::prelude` 的 `load_sound` 和 `audio_player`；TSX 从 `nsh` 导入 `Sound` 和 `AudioPlayer`。
@@ -2960,9 +2821,13 @@ mount(() => (
 
 ## host
 
-`host` 连接嵌入 NSH 的应用：`NshAppView` / `NshView` 所在的原生应用，或在 Web 上运行播放器的页面。应用按名字调用宿主的函数（参数是 JSON），并监听宿主发来的事件。
+`host` 连接嵌入 NSH 的应用：`NshAppView` / `NshView` 所在的原生应用，或在 Web 上运行播放器的页面。应用按名字调用宿主的函数（参数是 JSON），并监听宿主发来的事件。Rust 代码调用 `nsh_core::prelude` 的 `host_call`、`host_call_with`、`host_post` 和 `on_host_event`；TSX 从 `nsh` 导入 `host`。两者连到同一个宿主，名字、能力和错误码都相同，所以应用只写一份调用，由各个宿主各自应答。
 
-```ts
+```rust tabs
+use nsh_core::prelude::*; // host_call, host_call_with, host_post, on_host_event, HostCallOptions, HostError
+```
+
+```tsx tabs
 import { host } from "nsh";
 ```
 
@@ -3009,6 +2874,8 @@ call(name: string, args?: unknown, options?: { timeout?: number }): Promise<unkn
 
 不是合法名字（由 `A`–`Z`、`a`–`z`、`0`–`9`、`_`、`.`、`:`、`-` 组成，长度 1 到 128，不含 `..`）的 `name` 以 `TypeError` 拒绝。
 
+检查按以下顺序进行，调用以最先命中的一项失败：名字不合法时是 `TypeError`，其次未获授权时是 `ERR_ACCESS_DENIED`，最后没有宿主时是 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`。因此即使没有宿主，未获授权的调用也以 `ERR_ACCESS_DENIED` 拒绝。
+
 调用最多等待宿主应答 30 秒，之后以 `ETIMEDOUT` 拒绝，之后才到的应答会被丢弃。`options.timeout` 以毫秒设置等待时间，`0` 表示不限时；大到时钟永远走不到的值（约 1e22 毫秒）同样不限时，负数、`NaN` 或无穷大则以 `RangeError` 拒绝调用。计时用的是应用的时间，与它的定时器一致：在使用手动时钟的 `nsh test` 中随时钟推进。
 
 ```ts
@@ -3017,6 +2884,38 @@ const quote = await host.call("quote.refresh", { symbol: "AAPL" }, { timeout: 50
   if (error.code === "ETIMEDOUT" || error.code === "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM") return null;
   throw error;
 });
+```
+
+在 Rust 中，`host_call(name, args)` 是在任务中等待的 `async fn`，结果是 `Result<JsonValue, HostError>`。`HostError` 的各个变体就是上表的失败（带宿主消息的 `Failed`、`Denied`、`InvalidName`、`Unavailable`、`TimedOut`、`TooManyCalls`），`code()` 给出相同的错误码。`host_call_with(name, args, options)` 接受 `HostCallOptions::default().timeout(duration)`，`Duration::ZERO` 表示宿主用多久就等多久。
+
+```rust
+// use nsh_core::JsonValue; use serde_json::json; use std::time::Duration;
+spawn(async move {
+    let user = host_call("getUserInfo", JsonValue::Null).await;
+    let options = HostCallOptions::default().timeout(Duration::from_secs(5));
+    match host_call_with("quote.refresh", json!({ "symbol": "AAPL" }), options).await {
+        Ok(quote) => show(quote),
+        Err(HostError::TimedOut { .. } | HostError::Unavailable) => {}
+        Err(error) => log::warn!("{error}"),
+    }
+});
+```
+
+### host.post
+
+```ts
+post(name: string, data?: unknown): void;
+```
+
+把 `data` 交给宿主的函数 `name`，不等待应答：宿主处理 `name` 的 handler 像收到调用一样收到它。没有嵌入应用，或宿主没有处理 `name` 的 handler 时，投递被丢弃。有宿主时，未获授权的名字或不合法的名字会抛出（`ERR_ACCESS_DENIED`、`TypeError`）。Rust 的 `host_post(name, data)` 没有返回值：无论应用运行在哪里都会检查名字，被拒绝的投递会记录日志并丢弃。
+
+```rust tabs
+// use serde_json::json;
+host_post("analytics.track", json!({ "event": "signup" }));
+```
+
+```tsx tabs
+host.post("analytics.track", { event: "signup" });
 ```
 
 ### host.on
@@ -3033,6 +2932,12 @@ const stop = host.on("loginChanged", (payload) => console.log(payload));
 stop();
 ```
 
+在 Rust 中，`on_host_event(event, listener)` 在添加它的组件存在期间，以每次事件的数据（`&JsonValue`）调用 `listener`，与 `on_key` 相同。还没有该名字的 Rust 监听器时到达的事件（包括宿主在应用启动前发送的）会被保留（最多 256 个，超出时丢弃最早的），直到添加了监听器，所以应用加载完某些内容后才添加的监听器也能收到；已经被监听器收到的事件不会补发给之后添加的监听器。
+
+```rust
+on_host_event("loginChanged", move |payload| signed_in.set(payload["signedIn"] == true));
+```
+
 ### 能力
 
 应用调用的每个函数都必须列在 `nsh.json` 的 `capabilities.host` 中：精确的名字、以 `*` 结尾的前缀，或者用 `true` 允许全部。所有应用都是如此，没有声明其他 `capabilities` 的应用也一样：宿主的函数从不默认授予。未授权的调用会以 `ERR_ACCESS_DENIED` 拒绝并记录日志，向嵌入应用 `host.post` 这样的名字会抛出同样的错误；构建从 `nsh` 导入了 `host` 却没有声明 `capabilities.host` 的应用时会给出警告。事件无需授权。参见[沙箱与能力](../docs/sandbox-and-capabilities.md#host)。
@@ -3043,7 +2948,7 @@ stop();
 
 ### Web 上的宿主
 
-在 Web 上，页面就是宿主。`createPlayer` 的 `host` 选项应答调用，`player.hostEvent(event, payload)` 发送事件：
+在 Web 上，页面就是宿主。`createPlayer` 的 `host` 选项应答调用，`player.hostEvent(event, payload)` 发送事件，TSX 应用和 Rust 应用都一样：
 
 ```js
 const player = await createPlayer(container, {
@@ -3126,7 +3031,7 @@ nsh.send("conversation.open", Map.of("id", "43"));
 参见 [iOS 嵌入](../docs/ios.md#与应用通信)、[Android 嵌入](../docs/android.md#与应用通信) 和 [GPUI](../docs/gpui.md)。
 
 > [!NOTE]
-> 原生 SDK 的调用和投递与平台调用一样，需要 [`host` 能力](../docs/sandbox-and-capabilities.md#host)授权。Rust 应用直接通过嵌入方注册的函数调用其 Rust 代码（[`nativeModule`](#nativemodule) 和 Rust 导入）。
+> 原生 SDK 的调用和投递与平台调用一样，需要 [`host` 能力](../docs/sandbox-and-capabilities.md#host)授权。Rust 应用的 `host_call`、`host_post` 和 `on_host_event` 在每个平台上都连到同样的 handler 和事件。
 
 ## keymap
 

@@ -181,7 +181,7 @@ view()
 | `onContextMenu` | `.on_context_menu` | `ContextMenuEvent` | A context menu was asked for over the view: the secondary button, the keyboard in the browser or a screen reader on macOS and Windows ([context menus](./index.md#context-menus)). |
 | `onFileDragEnter` | `.on_file_drag_enter` | `{ uris: string[], mimeTypes: string[] }` (`FileDragEvent`) | A local-file drag entered the active desktop destination with its offered file list and their types. |
 | `onFileDragLeave` | `.on_file_drag_leave` | none | A local-file drag left the active desktop destination. |
-| `onFileDrop` | `.on_file_drop` | `{ uris: string[], mimeTypes: string[] }` (`FileDropEvent`) | Local files or directories were dropped on the destination (desktops and iOS). |
+| `onFileDrop` | `.on_file_drop` | `{ uris: string[], mimeTypes: string[] }` (`FileDropEvent`) | Local files or directories were dropped on the destination (desktops, iOS and Android). |
 | `onLayout` | `.on_layout` | `{ bounds }` (`Bounds<Points>`) | The frame relative to the parent changed. |
 | `onPanStart` / `onPanEnd` | `.on_pan_start` / `.on_pan_end` | `PanEvent` | A drag bound with `pan` started / ended; `cancelled` is true when the system cancels it. |
 | `onPinchStart` / `onPinchEnd` | `.on_pinch_start` / `.on_pinch_end` | `{ scale, velocity }` | A pinch bound with `pinch` started / ended. |
@@ -205,13 +205,30 @@ file-list preload finishes, including when the pointer stays still, and ignores 
 Moving between destinations reports leave then entry with the same offered list. `onFileDragLeave` clears the
 preview. Rust entry handlers receive `&FileDragEvent`; existing `||`, `|_: &()|` and `Listener<()>` handlers work too.
 
+On AppKit, a drag that carries no file URLs but promises files, such as an image dragged out of a page in Safari or
+Chrome or an attachment from Mail, is taken as well. Its files are only written once dropped, so `onFileDragEnter`
+gives `uris: []` with the promised files' `mimeTypes`, and `onFileDrop` gives `uris: []` and the files' contents in
+`files` (the same `{ file, name, type, size, status }` entries as on the Web and `Picker.pickFiles`), in the drag's
+order, with `pagePosition`. NSH writes them to a temporary folder and removes it once they are read. A drag that also
+carries file URLs, such as the screenshot thumbnail, drops its `uris` as above.
+
 On iOS (and iPadOS), a view with `onFileDrop` takes the files of a drag, such as images and documents dragged from Photos,
 Files, Safari or the app's own web views. The closest view
 that listens takes them, as on desktops. A drag's items carry no file URLs, only data in types that are read
 when they are dropped, so `onFileDragEnter` gives `uris: []` there, and `onFileDrop` gives the `file:` URLs of copies
-in the app's temporary directory (`pagePosition` too), in the drag's order. An item that offers only text or a link
+in the app's temporary directory (`pagePosition` too), in the drag's order. NSH leaves the copies there, where the
+system removes them in time: move or upload what the app keeps. An item that offers only text or a link
 is no file, and is not offered. A text input inside the view keeps what it accepts: UIKit's text drop takes text and
 links, so an image that also carries its link (from a web page) goes into the input as its link.
+
+On Android, a view with `onFileDrop` takes the files another app drags into it in split screen or a freeform window,
+such as photos from the gallery or documents from a file manager. The closest view that listens takes them, by the
+same hit testing as touches. As on iOS, Android opens a drag's data only at the drop: `onFileDragEnter` gives
+`uris: []`, and `onFileDrop` gives the `file:` URLs of copies in the app's cache directory, named as the providing app
+names them (with the extension of their type when the name has none), in the drag's order, with `pagePosition`;
+then the view hears `onFileDragLeave`. NSH leaves the copies there, where the system removes them in time: move or
+upload what the app keeps. A drag that offers only text or links is no file drag and stays with text inputs; a drag
+of files over a text input inside the view goes to the view.
 
 ```rust tabs
 let hint = signal(String::new());

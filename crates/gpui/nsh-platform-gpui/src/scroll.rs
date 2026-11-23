@@ -509,6 +509,26 @@ pub(crate) fn wheel(surface: &Rc<Surface>, view: &NshView, dx: f32, dy: f32) {
     shared::wheel(&Host::new(surface, view), point(Points(dx), Points(dy)));
 }
 
+/// A mouse wheel's notch of `(dx, dy)` points, `line` points a line along
+/// each axis: in the view's own lines (`wheelLineHeight`), and gliding on
+/// a `smoothWheel` view unless the system reduces motion. `None` once it
+/// glides, else the notch for the platform's own wheel to take.
+pub(crate) fn wheel_notch(
+    surface: &Rc<Surface>,
+    view: &NshView,
+    dx: f32,
+    dy: f32,
+    line: Point<Points>,
+) -> Option<(f32, f32)> {
+    let host = Host::new(surface, view);
+    let d = shared::wheel_line(&host, point(Points(dx), Points(dy)), line);
+    if !surface.environment.get().reduce_motion && shared::smooth_wheel(&host) {
+        shared::wheel_smooth(&host, d);
+        return None;
+    }
+    Some((d.x.0, d.y.0))
+}
+
 /// The wheel scroll ended (velocity in points per second; 0 for wheels
 /// without momentum).
 pub(crate) fn wheel_end(surface: &Rc<Surface>, view: &NshView, vx: f32, vy: f32) {
@@ -639,6 +659,15 @@ fn pick(view: &NshView, x: f32, y: f32) -> Option<NshView> {
     let inside =
         x >= 0.0 && y >= 0.0 && x < state.frame.size.width.0 && y < state.frame.size.height.0;
     if !inside && (state.clips() || state.overflow.is_none()) {
+        return None;
+    }
+    // Outside its clip path, neither it nor anything in it.
+    if state.style.clip_path().is_some_and(|c| {
+        !c.contains(
+            state.frame.size,
+            nsh_core::geometry::point(Points(x), Points(y)),
+        )
+    }) {
         return None;
     }
     let hit = view.with_children(|children| {

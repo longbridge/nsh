@@ -65,8 +65,8 @@ use nsh_core::{
     desktop::{ResizeEdge, WindowControl},
     geometry::{Points, point},
     input::{
-        self, Gate, HitArea, PAN_SLOP, PRESS_SLOP, TOUCHPAD_IDLE, VelocityTracker, WheelLatch,
-        WheelStep, ZOOM_IDLE, has_press, laid_out, latch_holds, transforms,
+        self, Candidate, Gate, HitArea, PAN_SLOP, PRESS_SLOP, TOUCHPAD_IDLE, VelocityTracker,
+        WheelLatch, WheelStep, ZOOM_IDLE, has_press, laid_out, latch_holds, transforms,
     },
     platform::InputModality,
     tailwind::state::{FOCUSED, HOVERED, PRESSED},
@@ -86,8 +86,9 @@ use crate::{
 };
 
 /// Points a mouse wheel line scrolls (`scrollingDeltaY` counts lines for
-/// mice, accelerated by the system), as `NSScrollView`'s line scroll.
-const WHEEL_LINE: f32 = 10.0;
+/// mice, accelerated by the system), as `NSScrollView`'s line scroll. A
+/// view's `wheelLineHeight` takes its place ([`crate::scroll::wheel`]).
+pub(crate) const WHEEL_LINE: f32 = 10.0;
 /// Movement in points before a window press becomes a native drag.
 const WINDOW_DRAG_SLOP: f64 = 3.0;
 /// The mouse's middle button (`buttonNumber`).
@@ -242,25 +243,6 @@ impl MouseMark {
             event: event as *const NSEvent as usize,
             kind: event.r#type(),
             time_bits: event.timestamp().to_bits(),
-        }
-    }
-}
-
-/// What a drag on a view may start.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Candidate {
-    /// A pan with these values (both when it only has listeners).
-    Pan { x: bool, y: bool },
-}
-
-impl Candidate {
-    /// Whether a drag by `(dx, dy)` starts it: single-axis pans take
-    /// mostly-along-their-axis movements, so a horizontal pan coexists
-    /// with a vertical one around it.
-    fn accepts(self, dx: f32, dy: f32) -> bool {
-        let horizontal = dx.abs() > dy.abs();
-        match self {
-            Candidate::Pan { x, y } => (x && y) || (x && horizontal) || (y && !horizontal),
         }
     }
 }
@@ -1604,16 +1586,18 @@ fn pick_in(view: &NshView, p: (f32, f32)) -> Option<Hit> {
     }
     let (pe, in_slop, children) = {
         let s = view.state();
+        let at = point(Points(p.0), Points(p.1));
         let HitArea {
             in_slop, children, ..
         } = input::hit_area(
-            point(Points(p.0), Points(p.1)),
+            at,
             s.frame.size,
             s.props.hit_slop,
             s.overflow,
             s.clips(),
             laid_out(s.kind, s.id),
-        );
+        )
+        .clipped(s.style.clip_path(), at, s.frame.size);
         (s.props.pointer_events, in_slop, children)
     };
     let own = || {
@@ -1950,6 +1934,8 @@ fn down(
     let mut candidates = Vec::new();
     let mut pressed = Vec::new();
     let mut gate = None;
+    // An edge pan's edges are those of the root the pointer is measured in.
+    let root_size = event_root(surface).state().frame.size;
     for v in &views {
         let s = v.state();
         if s.events.contains(EventKind::Touch) {
@@ -1958,23 +1944,21 @@ fn down(
         if s.tracked & PRESSED != 0 {
             pressed.push(v.clone());
         }
+        // A pointer away from an edge pan's edge starts neither of its pans.
+        let activation = s.props.pan_activation;
+        if activation.is_some_and(|a| !a.starts_at(point(Points(x), Points(y)), root_size)) {
+            continue;
+        }
         let values = gesture_values(surface, v, s.id);
         if !native
             && selecting.is_none()
-            && (values.pan_x.is_some()
-                || values.pan_y.is_some()
-                || s.events.contains(EventKind::PanStart)
-                || s.events.contains(EventKind::PanEnd))
+            && let Some(pan) = Candidate::pan(&values, s.events, activation)
         {
-            let (x, y) = match (values.pan_x.is_some(), values.pan_y.is_some()) {
-                (false, false) => (true, true),
-                axes => axes,
-            };
-            candidates.push((v.clone(), Candidate::Pan { x, y }));
+            candidates.push((v.clone(), pan));
         }
         if gate.is_none()
             && !native
-            && let Some(activation) = s.props.pan_activation
+            && let Some(activation) = input::gate_activation(&values, s.events, activation)
         {
             gate = Some(Gate::new(s.id, activation, candidates.len()));
         }
@@ -2088,8 +2072,8 @@ fn motion(surface: &Rc<Surface>, x: f32, y: f32, time: f64) {
     }
     let activated = Gate::step(&mut p.gate, &mut p.candidates, Points(tx), Points(ty));
     // The view's JS responder takes the drag over: nothing native starts
-    // meanwhile.
-    if activated.is_some() && p.mode == Mode::Idle {
+    // meanwhile, but the view's own pan.
+    if p.mode == Mode::Idle && input::activation_frees(activated, &p.candidates) {
         p.mode = Mode::Free;
     }
     if p.reporting {
@@ -2100,20 +2084,17 @@ fn motion(surface: &Rc<Surface>, x: f32, y: f32, time: f64) {
     // take the gesture (and block native drags) before one starts.
     let js_pending = p.reporting && !moved;
     if p.mode == Mode::Idle && distance > PAN_SLOP.0 && !js_pending {
-        // While the gate decides, the candidates around it wait (the
-        // pointer stays idle and they are asked again on the next move).
-        let waiting = p.gate.as_ref().map(Gate::outer);
-        if waiting.is_none() {
+        // While the gate decides, or a pan's `panActivation`, the candidates
+        // around wait (the pointer stays idle and they are asked again on
+        // the next move).
+        let (dx, dy) = (Points(tx), Points(ty));
+        if !input::waits(&p.candidates, p.gate.as_ref(), dx, dy) {
             p.mode = Mode::Free;
         }
         let started = if surface.input.js_block.get() {
             None
         } else {
-            let open = waiting.unwrap_or(p.candidates.len());
-            p.candidates[..open]
-                .iter()
-                .find(|(_, c)| c.accepts(tx, ty))
-                .cloned()
+            input::startable(&p.candidates, p.gate.as_ref(), dx, dy).cloned()
         };
         if let Some((view, Candidate::Pan { .. })) = started {
             p.gate = None;
@@ -2679,6 +2660,7 @@ pub(crate) fn modifiers(flags: NSEventModifierFlags) -> nsh_core::keymap::Modifi
         alt: flags.contains(NSEventModifierFlags::Option),
         shift: flags.contains(NSEventModifierFlags::Shift),
         cmd: flags.contains(NSEventModifierFlags::Command),
+        alt_graph: false,
     }
 }
 
@@ -2696,9 +2678,11 @@ fn released_inside(surface: &Surface, view: &NshView, x: f32, y: f32) -> bool {
 
 // --- Pans ---------------------------------------------------------------------------
 
-fn pan_payload(surface: &Surface, id: NodeId, t: (f32, f32), v: (f32, f32)) -> EventPayload {
+fn pan_payload(surface: &Surface, id: NodeId, p: &Pointer, t: (f32, f32)) -> EventPayload {
     let (value_x, value_y) = surface.anim.borrow().pan_values(id);
+    let v = p.velocity.velocity();
     EventPayload::Pan {
+        origin: point(Points(p.start.0), Points(p.start.1)),
         translation: point(Points(t.0), Points(t.1)),
         velocity_x: v.0,
         velocity_y: v.1,
@@ -2714,7 +2698,7 @@ fn pan_start(surface: &Rc<Surface>, view: &NshView, p: &Pointer) {
     };
     surface.anim.borrow_mut().pan_began(id);
     if events.contains(EventKind::PanStart) {
-        let payload = pan_payload(surface, id, (0.0, 0.0), p.velocity.velocity());
+        let payload = pan_payload(surface, id, p, (0.0, 0.0));
         surface.event(id, EventKind::PanStart, payload);
     }
 }
@@ -2738,7 +2722,7 @@ fn pan_end(surface: &Rc<Surface>, view: &NshView, p: &Pointer, write: bool) {
     }
     if events.contains(EventKind::PanEnd) {
         let t = (p.x - p.start.0, p.y - p.start.1);
-        let payload = pan_payload(surface, id, t, p.velocity.velocity());
+        let payload = pan_payload(surface, id, p, t);
         surface.event(id, EventKind::PanEnd, payload);
     }
 }
@@ -3608,6 +3592,33 @@ fn embedded(root: &objc2_app_kit::NSView) -> bool {
     crate::view::superview(root).is_some_and(|app| window.contentView().as_ref() != Some(&app))
 }
 
+/// Whether a scroll of `surface` is under way at `event`: a trackpad
+/// gesture, its glide, or wheel steps latched to a view.
+pub(crate) fn scrolling(surface: &Surface, event: &NSEvent) -> bool {
+    let input = &surface.input;
+    let time = event.timestamp() * 1000.0;
+    let horizontal = event.scrollingDeltaX().abs() > event.scrollingDeltaY().abs();
+    input.wheel.borrow().is_some()
+        || (input.momentum.borrow().is_some() && time - input.momentum_last.get() < TOUCHPAD_IDLE)
+        || input
+            .latch
+            .borrow()
+            .as_ref()
+            .is_some_and(|(view, h, last)| {
+                latch_holds(*h, *last, horizontal, time) && view.ns().window().is_some()
+            })
+}
+
+/// Hands `ns_event`, which reached a hosted AppKit view, into the surface's
+/// input path as the root's `scrollWheel:` does (not by sending it to the
+/// root, which can no-op when re-entered from a nested AppKit handler).
+pub(crate) fn forward_scroll(surface: &Rc<Surface>, ns_event: &NSEvent) {
+    surface.measure(true, || {
+        event(surface, ns_event);
+        crate::surface::quiet(|| surface.revisit());
+    });
+}
+
 /// A `scrollWheel:` event at `(x, y)`.
 fn scroll_event(surface: &Rc<Surface>, event: &NSEvent, x: f32, y: f32, time: f64) {
     let precise = event.hasPreciseScrollingDeltas();
@@ -3646,15 +3657,15 @@ fn scroll_event(surface: &Rc<Surface>, event: &NSEvent, x: f32, y: f32, time: f6
             dx *= WHEEL_LINE;
             dy *= WHEEL_LINE;
         }
-        wheel_step(surface, x, y, dx, dy, time);
+        wheel_step(surface, x, y, dx, dy, !precise, time);
         return;
     }
     gesture_event(surface, phase, x, y, dx, dy, time);
 }
 
-/// A mouse wheel step (or a precise scroll outside a gesture) of `(dx,
-/// dy)` points: one scroll stays on its view while steps keep coming.
-fn wheel_step(surface: &Rc<Surface>, x: f32, y: f32, dx: f32, dy: f32, time: f64) {
+/// A mouse wheel step (`notched`) or a precise scroll outside a gesture of
+/// `(dx, dy)` points: one scroll stays on its view while steps keep coming.
+fn wheel_step(surface: &Rc<Surface>, x: f32, y: f32, dx: f32, dy: f32, notched: bool, time: f64) {
     if dx == 0.0 && dy == 0.0 {
         return;
     }
@@ -3678,7 +3689,7 @@ fn wheel_step(surface: &Rc<Surface>, x: f32, y: f32, dx: f32, dy: f32, time: f64
     *input.latch.borrow_mut() = Some((view.clone(), horizontal, time));
     // Without a begin, the scroll module takes it as a mouse wheel: it
     // settles (and snaps) by itself once the steps stop.
-    crate::scroll::wheel(surface, &view, dx, dy, time);
+    crate::scroll::wheel(surface, &view, dx, dy, notched, time);
 }
 
 fn new_wheel(view: Option<NshView>, time: f64) -> Wheel {
@@ -3740,7 +3751,7 @@ fn gesture_event(
     if phase.intersects(NSEventPhase::Began | NSEventPhase::Changed) {
         if input.wheel.borrow().is_none() {
             // Changes without a begin (synthesized events): steps.
-            wheel_step(surface, x, y, dx, dy, time);
+            wheel_step(surface, x, y, dx, dy, false, time);
             return;
         }
         if dx == 0.0 && dy == 0.0 {
@@ -3787,7 +3798,7 @@ fn gesture_event(
             w.view.clone()
         };
         if let Some(view) = view {
-            crate::scroll::wheel(surface, &view, dx, dy, time);
+            crate::scroll::wheel(surface, &view, dx, dy, false, time);
         }
     }
     if phase.intersects(NSEventPhase::Ended | NSEventPhase::Cancelled) {
@@ -4023,12 +4034,23 @@ mod tests {
 
     #[test]
     fn candidates_take_their_axis() {
-        let horizontal = Candidate::Pan { x: true, y: false };
-        assert!(horizontal.accepts(8.0, 2.0));
-        assert!(!horizontal.accepts(2.0, 8.0));
-        let vertical = Candidate::Pan { x: false, y: true };
-        assert!(vertical.accepts(1.0, -7.0));
-        assert!(!vertical.accepts(-7.0, 1.0));
+        let pans = |values: GestureValues| {
+            let mut events = nsh_core::EventMask::default();
+            events.set(EventKind::PanEnd, true);
+            Candidate::pan(&values, events, None).unwrap()
+        };
+        let horizontal = pans(GestureValues {
+            pan_x: Some(1),
+            ..GestureValues::default()
+        });
+        assert!(horizontal.accepts(Points(8.0), Points(2.0)));
+        assert!(!horizontal.accepts(Points(2.0), Points(8.0)));
+        let vertical = pans(GestureValues {
+            pan_y: Some(1),
+            ..GestureValues::default()
+        });
+        assert!(vertical.accepts(Points(1.0), Points(-7.0)));
+        assert!(!vertical.accepts(Points(-7.0), Points(1.0)));
     }
 
     #[test]

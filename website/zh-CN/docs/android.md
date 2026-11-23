@@ -31,6 +31,10 @@ nsh run App.tsx --target android       # TSX 应用
 安装 APK 并启动它；修改 crate 的 Rust 代码会重新构建并安装。对 TSX 应用，`nsh` 会安装一个开发宿主 APK（只在运行时变化时重新构建），并通过
 `adb reverse` 转发开发服务器的端口，因此通过 USB 即可工作，无需共享网络；你保存时应用会更新，日志显示在终端中。
 
+这些开发构建中的 `libnsh.so` 不带调试信息，APK 因此小到能在模拟器上更新；完整的库在它旁边的 `symbols/<abi>/` 中，供 `ndk-stack`
+和调试器使用。设备没有空间更新开发宿主时，NSH 会先卸载它再重新安装：它只保存所运行应用写下的数据。应用自己的 APK 从不会被自动卸载：
+错误信息会说明如何腾出空间。
+
 ## 打包
 
 ```sh
@@ -379,6 +383,16 @@ file provider 写入的 `content://` URI（`MediaStore.EXTRA_OUTPUT`）；`picke
 `Picker.pickImages` 一样处理一个图片文件。`with_env(f)` 用当前线程的 JNI 环境运行 `f`（供应用和它的 nshm 的代码使用；其他 crate 通过上面的 `ndk-context` 获取 VM），返回它的结果或 JNI 错误（Java 异常会记录到日志并清除）。应用在后台时发起的请求以
 `ActivityError::NoActivity` 失败。`nsh-extra` 的相机
 （`crates/nsh-extra/src/camera/android.rs`）用到了它们全部。
+
+## 用 Rust 实现 Java 监听器
+
+通过接口回调的 Android API（投递到 UI 线程的 `Runnable`、框架的各种 `...Listener`）可以接收
+`proxy::implement(env, &["android.speech.RecognitionListener"], handler)` 创建的对象：一个实现这些接口的 Java 对象，它的调用会在
+Java 发起调用的线程上交给 `handler`（方法名和参数），所以 crate 不需要自带 Java 代码。Java 可能调用它期间要一直持有返回的 `Proxy`；
+丢弃之后，它的调用什么都不做。`nsh-extra` 的语音识别（`crates/nsh-extra/src/speech/android.rs`）就是这样监听 `SpeechRecognizer` 的。
+这种方式只能实现接口：接收抽象类的 API（`UtteranceProgressListener`）需要一个 Java 子类，由 crate 作为库自带（[Java 代码](./packaging.md#java-代码)）。
+返回基本类型的方法必须得到装箱成对应类型的值（`boolean` 对应 `java.lang.Boolean`）：在这里返回 `None`，或在 `Proxy` 丢弃后被调用，都会在 Java 中抛出
+`NullPointerException`。
 
 ## 来自其他代码的通知
 

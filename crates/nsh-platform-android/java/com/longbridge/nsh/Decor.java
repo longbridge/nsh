@@ -31,6 +31,112 @@ final class Decor extends Drawable {
     final int[] borderColors = new int[4];
     /** 0 solid, 1 dashed, 2 dotted. */
     int borderStyle;
+    /**
+     * `clipPath` (CSS's `inset()`), or null: each edge's offset (px) top,
+     * right, bottom, left, then each edge's fraction of the width or height
+     * in the same order, then the radii (px) from the top left. As the
+     * core's `ClipInset`.
+     */
+    float[] clipPath;
+
+    private final Path clipShape = new Path();
+    private final RectF clipRect = new RectF();
+    private final float[] clipRadii = new float[8];
+
+    /** The decoration of a view NSH styles, or null. */
+    static Decor of(View v) {
+        if (v instanceof StackBox.ScreenBox) return ((StackBox.ScreenBox) v).root.decor;
+        if (v instanceof StackBox) return ((StackBox) v).decor;
+        if (v instanceof Box) return ((Box) v).decor;
+        if (v instanceof TextBox) return ((TextBox) v).decor;
+        if (v instanceof ImageBox) return ((ImageBox) v).decor;
+        if (v instanceof ScrollBox) return ((ScrollBox) v).decor;
+        if (v instanceof InputBox) return ((InputBox) v).decor;
+        return null;
+    }
+
+    /**
+     * The clip path's rectangle in a box of {@code w} x {@code h} into
+     * {@link #clipRect} and its radii into {@link #clipRadii}, as the core's
+     * `ClipInset::resolve`: opposite edges that would pass each other meet
+     * in proportion, radii that do not fit are scaled down together.
+     */
+    private void resolveClip(float w, float h) {
+        float[] c = clipPath;
+        w = Math.max(0, w);
+        h = Math.max(0, h);
+        float top = c[0] + c[4] * h, right = c[1] + c[5] * w, bottom = c[2] + c[6] * h, left = c[3] + c[7] * w;
+        float v = top + bottom;
+        if (v > h && v > 0) {
+            top *= h / v;
+            bottom *= h / v;
+        }
+        float hz = left + right;
+        if (hz > w && hz > 0) {
+            left *= w / hz;
+            right *= w / hz;
+        }
+        float rw = Math.max(0, w - left - right), rh = Math.max(0, h - top - bottom);
+        clipRect.set(left, top, left + rw, top + rh);
+        float tl = Math.max(0, c[8]), tr = Math.max(0, c[9]), br = Math.max(0, c[10]), bl = Math.max(0, c[11]);
+        float f = 1;
+        if (tl + tr > rw) f = Math.min(f, rw / (tl + tr));
+        if (bl + br > rw) f = Math.min(f, rw / (bl + br));
+        if (tl + bl > rh) f = Math.min(f, rh / (tl + bl));
+        if (tr + br > rh) f = Math.min(f, rh / (tr + br));
+        f = Math.max(0, f);
+        float[] r = {tl * f, tr * f, br * f, bl * f};
+        for (int i = 0; i < 4; i++) {
+            clipRadii[i * 2] = r[i];
+            clipRadii[i * 2 + 1] = r[i];
+        }
+    }
+
+    /** The clip path's outline in a box of {@code w} x {@code h}. */
+    Path clipShape(float w, float h) {
+        resolveClip(w, h);
+        clipShape.reset();
+        clipShape.addRoundRect(clipRect, clipRadii, Path.Direction.CW);
+        return clipShape;
+    }
+
+    /**
+     * Whether ({@code x}, {@code y}) of {@code v} is outside its clip path:
+     * neither it nor its children take a touch there.
+     */
+    boolean clipsOut(View v, float x, float y) {
+        if (clipPath == null) return false;
+        resolveClip(v.getWidth(), v.getHeight());
+        RectF b = clipRect;
+        if (!(x >= b.left && y >= b.top && x < b.right && y < b.bottom)) return true;
+        // In a corner's square, outside its circle.
+        float[] r = clipRadii;
+        return outsideCorner(x, y, b.left + r[0], b.top + r[0], r[0], x < b.left + r[0] && y < b.top + r[0])
+                || outsideCorner(x, y, b.right - r[2], b.top + r[2], r[2], x > b.right - r[2] && y < b.top + r[2])
+                || outsideCorner(x, y, b.right - r[4], b.bottom - r[4], r[4], x > b.right - r[4] && y > b.bottom - r[4])
+                || outsideCorner(x, y, b.left + r[6], b.bottom - r[6], r[6], x < b.left + r[6] && y > b.bottom - r[6]);
+    }
+
+    private static boolean outsideCorner(float x, float y, float cx, float cy, float r, boolean inSquare) {
+        if (r <= 0 || !inSquare) return false;
+        float dx = x - cx, dy = y - cy;
+        return dx * dx + dy * dy > r * r;
+    }
+
+    /**
+     * Runs {@code draw} (a view's whole `draw`: its background, shadows,
+     * content and children) clipped to the view's clip path, if any.
+     */
+    void drawClipped(Canvas canvas, View v, Runnable draw) {
+        if (clipPath == null) {
+            draw.run();
+            return;
+        }
+        int save = canvas.save();
+        canvas.clipPath(clipShape(v.getWidth(), v.getHeight()));
+        draw.run();
+        canvas.restoreToCount(save);
+    }
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path path = new Path();

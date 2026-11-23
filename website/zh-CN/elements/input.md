@@ -68,7 +68,7 @@ function NameField() {
 | `value` | `.value(..)` | `string` | | 由应用控制的文本。 |
 | `defaultValue` | `.default_value(..)` | `string` | | 初始文本。 |
 | `placeholder` | `.placeholder(..)` | `string` | | 输入框为空时显示的提示。 |
-| `multiline` | `.multiline(..)` | `boolean` | `false` | 多行；回车插入换行（`submitBehavior` 另有设置时除外）。 |
+| `multiline` | `.multiline(..)` | `boolean` | `false` | 多行；回车插入换行（`submitBehavior` 另有设置时除外）。文字在内边距以内滚动：滚出去的行不会出现在内边距里或边框下面。 |
 | `scrollbar` | `.scrollbar(..)` | `boolean \| ScrollbarTheme` | `true` | 多行输入框的滚动条：平台的滚动指示器，应用设置主题后则是内置滚动条（见 [Scrollbar](./scrollbar.md#built-in-bars)）；对象是它自己的主题，`false` 表示不显示。 |
 | `maxLength` | `.max_length(..)` | `number` | | 用户最多能输入的字符数，各平台都按 Unicode 码点计数：像 😀 这样的表情或一个生僻汉字都算一个。超出的粘贴只插入放得下的部分，与浏览器一致，不会把带肤色的表情这类字符从中间截开。 |
 | `readonly` | `.readonly(..)` | `boolean` | `false` | 用户可以选择和复制文本，但不能修改。 |
@@ -86,6 +86,7 @@ function NameField() {
 | `autoCorrect` | `.auto_correct(..)` | `boolean` | `true` | 系统的自动更正：拼写，以及 iOS、macOS 上的智能引号、破折号和文本替换。输入代码或标识符时关掉它。 |
 | `autoComplete` | `.auto_fill(AutoFill::OneTimeCode)` | `AutoComplete \| TextContentType` | | 输入框内容的类型，用于 iOS、Android 和 Web 上的自动填充：`"username"`、`"current-password"`、`"new-password"`、`"one-time-code"`、`"email"`、`"tel"`、`"postal-code"`、`"cc-number"`、`"off"` 等。 |
 | `pasteBehavior` | `.paste_behavior(PasteBehavior::Report)` | `"insert" \| "report"` | `"insert"` | 粘贴做什么：`"insert"` 插入粘贴的文本，`"report"` 不插入任何内容，由应用处理 `onPaste` 报告的内容。图片和文件从不插入。 |
+| `pasteMaxSize` | `.paste_max_size(20 << 20)` | `number` | 读取所有文件 | 读取的粘贴文件的最大字节数。更大的文件只带名称、类型和大小，在 `onPaste` 的 `tooLarge` 中到达；iOS、Android 和 Web 在复制字节前先检查大小（[表单与键盘](../docs/forms-and-keyboard.md#粘贴图片和文件)）。 |
 | `submitBehavior` | `.submit_behavior(SubmitBehavior::Submit)` | `"submit" \| "blurAndSubmit" \| "newline"` | `"blurAndSubmit"`（单行），`"newline"`（多行） | 回车键做什么：`"submit"` 触发 `onSubmit` 并保持焦点，`"blurAndSubmit"` 提交后再失去焦点，`"newline"` 插入换行（多行；单行总是提交）。会提交的多行输入框在硬件键盘上仍可用 Shift+Return 或 Option / Alt+Return 换行。`"submit"` 让键盘保持弹出（例如连续发送多条消息）。 |
 | `autoFocus` | `.auto_focus(..)` | `boolean` | `false` | 出现时自动获得焦点。 |
 | `selectTextOnFocus` | `.select_text_on_focus(..)` | `boolean` | `false` | 输入框获得焦点时（点击、Tab、`focus()`、`autoFocus`）选中全部文本；拖动选择、Shift 点击或双击选词时保留用户的选区。 |
@@ -150,7 +151,7 @@ input().auto_fill(AutoFill::OneTimeCode).keyboard_type(KeyboardType::Number)
 | `onSubmit` | `.on_submit(\|text: &str\| ..)` | `{ text }` | 在会提交的输入框中按下了回车键（单行，或 `submitBehavior` 为 `"submit"` / `"blurAndSubmit"`）。 |
 | `onFocus` / `onBlur` | `.on_focus` / `.on_blur` | 无 | 输入框获得 / 失去焦点。 |
 | `onSelectionChange` | `.on_selection_change(\|s: &Selection\| ..)` | `{ start, end }` | 光标或选区移动（UTF-16 单位）。 |
-| `onPaste` | `.on_paste(\|e: &PasteEvent\| ..)` | `{ text, html, files, uris }` | 用户粘贴了内容：文本、带格式的 HTML（Linux、Web）、作为 `File` 的图片（如截图）、本地文件的 `file:` URL。在它插入的文本的 `onChange` 之前（[表单与键盘](../docs/forms-and-keyboard.md#粘贴图片和文件)）。 |
+| `onPaste` | `.on_paste(\|e: &PasteEvent\| ..)` | `{ text, html, files, tooLarge, uris }` | 用户粘贴了内容：文本、带格式的 HTML（Linux、Web）、作为 `File` 的图片（如截图）、超过 `pasteMaxSize` 的文件的名称、类型和大小（`tooLarge`）、本地文件的 `file:` URL。在它插入的文本的 `onChange` 之前（[表单与键盘](../docs/forms-and-keyboard.md#粘贴图片和文件)）。 |
 | `onCaretMove` | `.on_caret_move(\|e: &CaretEvent\| ..)` | `{ bounds, pageBounds }` | 光标随选区移动，或因文本滚动、重新换行而移动：`bounds` 是它在输入框中的位置，`pageBounds` 是它在窗口中的位置，可作为 `Overlay` 的 `anchor`（[表单与键盘](../docs/forms-and-keyboard.md#光标位置)）。 |
 | `onKeyPress` | `.on_key_press(\|key: &str\| ..)` | `{ key }` | 文本变化之前：`key` 是输入的文本、`"Backspace"` 或 `"Enter"`。 |
 | `onContentSizeChange` | `.on_content_size_change(\|size: &Size<Points>\| ..)` | `{ size }` | 文本尺寸变化（多行时按输入框宽度计算），随输入报告；输入框为空时报告一行空行的尺寸，与占位文字无关。 |

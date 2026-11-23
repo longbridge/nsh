@@ -75,6 +75,9 @@ pub use nsh_core::{
 };
 #[cfg(feature = "js-core")]
 pub use nsh_js::BYTECODE_VERSION;
+#[cfg(feature = "js-core")]
+#[doc(hidden)]
+pub use nsh_js::with_inline_root;
 /// Signed packages, release-key certificates, revocations and trust stores.
 #[cfg(feature = "js-core")]
 pub use nsh_package as package;
@@ -82,11 +85,14 @@ use rustc_hash::FxHashMap;
 #[cfg(not(target_arch = "wasm32"))]
 pub use storage::{FileStorage, resolve_data_dir, support_dir};
 
-use crate::script::{NetworkQueue, RequestId, Script};
 pub use crate::{
     cache::{ByteSize, CacheLocation, CacheOptions, CachePolicy},
     error::{AppError, AppErrorKind, PackageInfo},
     host_channel::{HostCall, HostChannel, HostReply, OpenUrlRequest},
+};
+use crate::{
+    host_channel::HostRefusal,
+    script::{NetworkQueue, RequestId, Script},
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -753,6 +759,23 @@ pub trait MountSink: Send + 'static {
     /// Called once per commit, in order.
     fn submit(&self, batch: MountBatch);
 
+    /// Include the settled logical in-flow content height with mount batches.
+    fn needs_content_height(&self) -> bool {
+        false
+    }
+
+    /// Called instead of [`Self::submit`] when [`Self::needs_content_height`]
+    /// is true. Apply the settled height ([`Core::content_height`]) together
+    /// with the batch before notifying host observers. A height change can
+    /// arrive with an empty batch when there are no mount items to apply.
+    ///
+    /// By default, forwards nonempty batches to [`Self::submit`].
+    fn submit_with_content_height(&self, batch: MountBatch, _content_height: Option<Points>) {
+        if !batch.items.is_empty() {
+            self.submit(batch);
+        }
+    }
+
     /// Include logical tree order when the mounted structure changes. Native
     /// `Insert` items alone describe stacking order, which can differ by `zIndex`.
     fn needs_tree_order(&self) -> bool {
@@ -1232,11 +1255,6 @@ pub struct EngineConfig {
     /// platform's picker: the embedding app's own picker, or a test's
     /// files; `None`: the platform's.
     pub picker: Option<Arc<dyn nsh_core::picker::PickerBackend>>,
-    /// Recognizes the app's speech (`Speech.start`) instead of the
-    /// platform's recognizer: the embedding app's own, or a test's fake
-    /// (`nsh_testing`'s). `None` (the default): the platform's, where it
-    /// has one (`Environment::speech`).
-    pub speech: Option<Arc<dyn nsh_core::speech::SpeechBackend>>,
     /// Plays the app's sound (`Sound`, `AudioPlayer`) instead of the
     /// platform: the embedding app's own audio stack, or a test's fake
     /// (`nsh_testing`'s). `None` (the default): the platform's, where it
@@ -1387,7 +1405,6 @@ impl EngineConfig {
             clipboard: None,
             host: HostChannel::default(),
             picker: None,
-            speech: None,
             audio: None,
             windows: None,
             login_item: None,
@@ -1473,7 +1490,6 @@ impl std::fmt::Debug for EngineConfig {
             .field("clipboard", &self.clipboard.is_some())
             .field("host", &self.host)
             .field("picker", &self.picker.is_some())
-            .field("speech", &self.speech.is_some())
             .field("audio", &self.audio.is_some())
             .field("login_item", &self.login_item.is_some())
             .field("windows", &self.windows.is_some())
@@ -1551,6 +1567,10 @@ enum Message {
     HostEvent(String, nsh_core::JsonValue),
     /// The embedding app's answer to call `.0` (`host.call`).
     HostReply(u64, Result<nsh_core::JsonValue, String>),
+    /// The embedding app's answer to call `.0` the core made
+    /// ([`nsh_core::element::host_call`], and JS's calls without a
+    /// channel of their own).
+    CoreHostReply(u64, Result<nsh_core::JsonValue, String>),
     /// The embedding app's URL handler answered URL request `id`: it took
     /// the URL, or the platform opens it.
     UrlHandled {
@@ -1656,8 +1676,8 @@ impl EngineControl {
 
     /// Reports how far a multiline input's text scrolled: its offset, the
     /// size of the text it scrolls and of its viewport. Sent while a
-    /// built-in bar takes the place of its indicator
-    /// (`InputConfig::replaced`), on every change.
+    /// bar of the app's follows the text (`InputConfig::report_scroll`), on
+    /// every change.
     pub fn input_scroll(
         &self,
         id: NodeId,
@@ -2476,7 +2496,6 @@ impl<M: TextEngine + 'static> Driver<M> {
         });
         core.set_clipboard(config.clipboard.clone());
         core.set_picker(config.picker.clone());
-        core.set_speech(config.speech.clone());
         core.set_app_links(config.app.links().clone());
         core.set_app_info(config.app.app_info().cloned());
         // Every VM reads the core's address where it is (`UrlScheme.url()`).
@@ -2584,6 +2603,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         let js_tokens = core.tokens().clone();
         let state = State {
             core,
+            published_content_height: None,
             js_tokens,
             frame_requested: false,
             frame_turn: false,
@@ -2617,6 +2637,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             app_locale: None,
             host: config.host.clone(),
             url_opens: Vec::new(),
+            host_requests: Vec::new(),
             net: Net {
                 network: config.network.clone(),
                 tx,
@@ -2736,15 +2757,13 @@ impl<M: TextEngine + 'static> Driver<M> {
         if script.is_some() {
             state.core.mount_opened_windows();
         }
-        if let Some(batch) = state.commit(script) {
-            if state.trace {
-                log::info!(
-                    target: "nsh::perf",
-                    "first frame: eval {eval_us}µs, total {}µs",
-                    start.elapsed().as_micros()
-                );
-            }
-            sink.submit(batch);
+        let batch = state.commit(script);
+        if state.submit_mount(&**sink, batch) && state.trace {
+            log::info!(
+                target: "nsh::perf",
+                "first frame: eval {eval_us}µs, total {}µs",
+                start.elapsed().as_micros()
+            );
         }
         state.run_on_main_thread(&**sink);
         if let Some(trial) = trial {
@@ -2804,9 +2823,8 @@ impl<M: TextEngine + 'static> Driver<M> {
         if let Some(script) = &self.script {
             script.set_perf_stats(Some(&stats));
         }
-        if let Some(batch) = self.state.commit(self.script.as_ref()) {
-            self.sink.submit(batch);
-        }
+        let batch = self.state.commit(self.script.as_ref());
+        self.state.submit_mount(&*self.sink, batch);
         self.state.run_on_main_thread(&*self.sink);
     }
 
@@ -3025,16 +3043,16 @@ impl<M: TextEngine + 'static> Driver<M> {
         let tasks = turn_start.map(|s| s.elapsed());
         state.load_fonts(script, assets.as_deref(), &**sink);
         let batch = state.commit(script);
-        if let Some(batch) = batch.filter(|_| !self.quitting) {
-            sink.submit(batch);
-            if let (Some(start), Some(tasks)) = (turn_start, tasks) {
-                log::info!(
-                    target: "nsh::perf",
-                    "turn: {}µs (timers and tasks {}µs)",
-                    start.elapsed().as_micros(),
-                    tasks.as_micros(),
-                );
-            }
+        if !self.quitting
+            && state.submit_mount(&**sink, batch)
+            && let (Some(start), Some(tasks)) = (turn_start, tasks)
+        {
+            log::info!(
+                target: "nsh::perf",
+                "turn: {}µs (timers and tasks {}µs)",
+                start.elapsed().as_micros(),
+                tasks.as_micros(),
+            );
         }
         state.run_on_main_thread(&**sink);
         if let Some(size) = state.resized.take() {
@@ -3130,9 +3148,8 @@ impl<M: TextEngine + 'static> Driver<M> {
             }
             self.last_gc = Instant::now();
             self.state.committed_since_gc = false;
-            if let Some(batch) = self.state.commit(Some(script)) {
-                self.sink.submit(batch);
-            }
+            let batch = self.state.commit(Some(script));
+            self.state.submit_mount(&*self.sink, batch);
             self.state.run_on_main_thread(&*self.sink);
         }
     }
@@ -3163,6 +3180,7 @@ struct ScrollEvent {
 
 struct State<M: TextEngine> {
     core: Core<M>,
+    published_content_height: Option<Points>,
     /// The design tokens JS has (`token()`): the core's when they were
     /// last sent.
     js_tokens: Arc<nsh_core::element::Tokens>,
@@ -3205,6 +3223,9 @@ struct State<M: TextEngine> {
     host: HostChannel,
     /// URLs the app asked to open, taken from the core (a reused buffer).
     url_opens: Vec<(u32, String)>,
+    /// The app's host calls and posts, taken from the core (a reused
+    /// buffer).
+    host_requests: Vec<nsh_core::host_channel::HostRequest>,
     net: Net,
     /// Development updates to apply.
     hot: Vec<HotUpdate>,
@@ -3811,6 +3832,28 @@ impl<M: TextEngine> State<M> {
         platform
     }
 
+    /// Hands the app's host calls and posts to the embedding app's channel
+    /// where it is configured, else to the platform's host
+    /// ([`nsh_core::Core::host_request_on_platform`]), and the host's
+    /// events kept for want of a listener to the components' listeners
+    /// added since; true when the platform has a call or post (the core's
+    /// commit sends it) or the listeners heard events.
+    fn host_requests(&mut self) -> bool {
+        let mut more = self.core.release_host_events();
+        self.core.take_host_requests(&mut self.host_requests);
+        for request in self.host_requests.drain(..) {
+            match self.host.start_request(request, &self.net.tx) {
+                Ok(()) => {}
+                Err(HostRefusal::NoHandler(id, error)) => self.core.answer_host(id, Err(error)),
+                Err(HostRefusal::Unconfigured(request)) => {
+                    self.core.host_request_on_platform(request);
+                    more = true;
+                }
+            }
+        }
+        more
+    }
+
     fn commit(&mut self, script: Option<&Script>) -> Option<MountBatch> {
         let start = Instant::now();
         let mut merged: Option<MountBatch> = None;
@@ -3947,6 +3990,9 @@ impl<M: TextEngine> State<M> {
             self.core.take_events(&mut self.events);
             // URLs the platform opens go out in another round.
             let urls = self.open_urls();
+            // Host calls the platform answers go out, and what the kept
+            // events' new listeners changed shows, in another round.
+            let host = self.host_requests();
             // Posts the ops queued (in program order) run in another round.
             let posted = script.is_some_and(Script::has_posted);
             // New tokens (the app's theme, the embedding app's) reach what
@@ -3981,6 +4027,7 @@ impl<M: TextEngine> State<M> {
                 && !relocale
                 && !more_paced
                 && !urls
+                && !host
                 && !answers
             {
                 break;
@@ -4009,6 +4056,22 @@ impl<M: TextEngine> State<M> {
             );
         }
         merged
+    }
+
+    /// Publishes the settled turn, even when only its content height changed.
+    fn submit_mount(&mut self, sink: &dyn MountSink, batch: Option<MountBatch>) -> bool {
+        if sink.needs_content_height() {
+            let height = self.core.content_height();
+            if batch.is_some() || height != self.published_content_height {
+                sink.submit_with_content_height(batch.unwrap_or_default(), height);
+                self.published_content_height = height;
+                return true;
+            }
+        } else if let Some(batch) = batch {
+            sink.submit(batch);
+            return true;
+        }
+        false
     }
 }
 
@@ -4054,7 +4117,6 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         auth_session: env.auth_session,
         scheme_links: env.scheme_links(),
         file_requests: env.file_requests,
-        speech: env.speech,
         notifications: env.notifications,
         audio: env.audio,
         tab_bar: env.tab_bar,
@@ -4267,6 +4329,7 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             }
             if event == EventKind::Paste {
                 payload = payload.into_paste();
+                state.core.limit_paste(id, &mut payload);
             }
             // A secondary click goes down as a press does: the overlays it
             // is outside of hear `onPressOutside` first, then the view its
@@ -4481,8 +4544,9 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
                 log::error!("font failed: {err}");
             }
         }
-        // A Rust app has no `nsh/host`: what the host sends it goes.
+        // The components' listeners hear it, then JS's.
         Message::HostEvent(name, data) => {
+            state.core.host_event(&name, &data);
             if let Some(script) = script {
                 script.host_event(&name, data);
             }
@@ -4492,6 +4556,10 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
                 script.host_reply(id, result);
             }
         }
+        Message::CoreHostReply(id, result) => state.core.answer_host(
+            id,
+            result.map_err(nsh_core::host_channel::HostError::Failed),
+        ),
         Message::UrlHandled { id, url, handled } => {
             if handled {
                 state.core.answer_open_url(id, true);

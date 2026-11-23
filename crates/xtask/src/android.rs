@@ -114,9 +114,11 @@ pub(crate) fn root() -> PathBuf {
 /// `target/android/<profile>[-dev]`, returning that directory.
 ///
 /// Release libraries go into `lib/<abi>` without their symbol tables and
-/// debug info, which APKs store uncompressed (a quarter of each library);
-/// `symbols/<abi>` keeps them whole, for `ndk-stack`, Play Console and the
-/// AAR (Gradle strips what it packages and keeps the symbols itself).
+/// debug info, which APKs store uncompressed (a quarter of each library),
+/// debug ones without their debug info (most of them), keeping the symbol
+/// table for the names in crash reports; `symbols/<abi>` keeps them whole,
+/// for `ndk-stack`, debuggers, Play Console and the AAR (Gradle strips what
+/// it packages and keeps the symbols itself).
 pub(crate) fn build(release: bool, dev: bool, abis: &[String]) -> anyhow::Result<PathBuf> {
     let sdk = Sdk::find()?;
     let profile = if release { "release" } else { "debug" };
@@ -135,17 +137,22 @@ pub(crate) fn build(release: bool, dev: bool, abis: &[String]) -> anyhow::Result
         // reinstalls the development host when they change.
         let dest = dest.join("libnsh.so");
         let symbols = out.join("symbols").join(abi).join("libnsh.so");
-        if up_to_date(&dest, std::slice::from_ref(&so)) && (!release || symbols.exists()) {
+        if up_to_date(&dest, std::slice::from_ref(&so)) && symbols.exists() {
             continue;
         }
-        if release {
-            fs::create_dir_all(symbols.parent().context("symbols directory")?)?;
-            fs::copy(&so, &symbols)?;
-            strip(&sdk, &so, &dest)?;
-            check_alignment(&sdk, &dest)?;
-        } else {
-            fs::copy(&so, &dest)?;
-        }
+        fs::create_dir_all(symbols.parent().context("symbols directory")?)?;
+        fs::copy(&so, &symbols)?;
+        strip(
+            &sdk,
+            if release {
+                "--strip-unneeded"
+            } else {
+                "--strip-debug"
+            },
+            &so,
+            &dest,
+        )?;
+        check_alignment(&sdk, &dest)?;
     }
     let java_dir = root().join("crates/nsh-platform-android/java");
     let mut sources = Vec::new();
@@ -162,12 +169,13 @@ pub(crate) fn build(release: bool, dev: bool, abis: &[String]) -> anyhow::Result
     Ok(out)
 }
 
-/// Writes `library` to `to` without the symbols nothing links against: the
-/// dynamic ones (`JNI_OnLoad`, the `Java_*` natives) stay.
-fn strip(sdk: &Sdk, library: &Path, to: &Path) -> anyhow::Result<()> {
+/// Writes `library` to `to` stripped as `how` says: `--strip-unneeded`
+/// leaves only the symbols something links against (the dynamic ones,
+/// `JNI_OnLoad` and the `Java_*` natives), `--strip-debug` the symbol table.
+fn strip(sdk: &Sdk, how: &str, library: &Path, to: &Path) -> anyhow::Result<()> {
     term::run(
         Command::new(sdk.toolchain().join("bin/llvm-strip"))
-            .arg("--strip-unneeded")
+            .arg(how)
             .arg("-o")
             .arg(to)
             .arg(library),
@@ -314,7 +322,7 @@ pub(crate) fn clippy() -> anyhow::Result<()> {
             "-p",
             "nsh-extra",
             "--features",
-            "nsh-extra/camera",
+            "nsh-extra/camera,nsh-extra/speech",
             "--target",
             "aarch64-linux-android",
             "--all-targets",

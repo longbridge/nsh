@@ -75,7 +75,9 @@ struct Run {
 
 /// A view's built-in scroll bar (`scrollbars.rs`) and the theme of its own
 /// it was made with.
-type Bar = (NodeId, Option<Arc<crate::JsonValue>>);
+/// A view's built-in bar, and the theme of the view's own it was made
+/// with (`None`: the app's).
+type Bar = (NodeId, Option<crate::ScrollbarSetting>);
 
 const NO_KEY: Key = Key::MAX;
 
@@ -464,8 +466,12 @@ struct InputState {
     scrollbar: crate::ScrollbarSetting,
     /// Its built-in bar ([`Core::sync_scrollbars`]), beside it.
     bar: Option<Bar>,
+    /// A scroll watch follows it (a bar of the app's own placed beside it,
+    /// `watch_scroll`): its platform reports its scrolling as for a
+    /// built-in bar ([`Core::sync_watched_inputs`]).
+    watched: bool,
     /// How far the platform scrolled its text, while it has a built-in
-    /// bar ([`Core::set_input_scroll`]).
+    /// bar or a watch ([`Core::set_input_scroll`]).
     scroll: Option<InputScroll>,
 }
 
@@ -587,6 +593,34 @@ impl<T: SharedDefault> PartialEq<T> for Sparse<T> {
     }
 }
 
+/// A node's flags about its children's positions among them (`first:`,
+/// `odd:`…), kept in a byte: the core keeps one record per node.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Positional(u8);
+
+impl Positional {
+    const NONE: Self = Self(0);
+    /// A child's classes read their position among siblings.
+    const CHILDREN: Self = Self(1);
+    /// Its children moved, and it waits in `Core::position_parents` for
+    /// their positions to be looked at (`classes.rs` `flush_positions`).
+    const QUEUED: Self = Self(2);
+
+    fn has(self, flag: Self) -> bool {
+        self.0 & flag.0 != 0
+    }
+
+    fn remove(&mut self, flag: Self) {
+        self.0 &= !flag.0;
+    }
+}
+
+impl std::ops::BitOrAssign for Positional {
+    fn bitor_assign(&mut self, flag: Self) {
+        self.0 |= flag.0;
+    }
+}
+
 struct Node {
     id: NodeId,
     kind: Kind,
@@ -646,8 +680,9 @@ struct Node {
     /// What only some nodes have: state styles, the styles of a page's
     /// header or a list's content ([`classes::NodeParts`]).
     parts: Option<Box<classes::NodeParts>>,
-    /// A child's classes read their position among siblings.
-    positional_children: bool,
+    /// What its children's positions among them are to it
+    /// ([`Positional`]).
+    positional: Positional,
     /// Styled with the margin its parent's `space-*` gives it.
     spaced: bool,
     /// The text color it inherits (`None`: React Native's black), CSS's
@@ -992,7 +1027,7 @@ impl Node {
             resting_fill: None,
             data: Box::default(),
             parts: None,
-            positional_children: false,
+            positional: Positional::NONE,
             spaced: false,
             inherited_color: None,
             child_perspective: None,
@@ -1372,6 +1407,9 @@ pub struct Core<M: TextEngine> {
     /// Scroll views and lists whose built-in bar may come or go
     /// ([`Core::sync_scrollbars`]).
     scrollbars_pending: Vec<Key>,
+    /// The multiline inputs scroll watches follow, sorted
+    /// ([`Core::sync_watched_inputs`]).
+    watched_inputs: Vec<NodeId>,
     /// Canvases fitting a view box into their box
     /// ([`crate::canvas::ViewPaint::Fit`]) to send once this round's
     /// layout gave them their size ([`Core::send_fitted`]).
@@ -1588,6 +1626,10 @@ pub struct Core<M: TextEngine> {
     /// `--font-sans`.
     default_font: Option<crate::style::FontFamily>,
     queue: Vec<Key>,
+    /// Parents whose children moved, each once: their children's positions
+    /// are looked at before the next flush (`classes.rs` `flush_positions`),
+    /// once however many joined or left.
+    position_parents: Vec<Key>,
     needs_layout: bool,
     /// Parsed classes and the theme.
     tailwind: Tailwind,
@@ -1649,9 +1691,6 @@ pub struct Core<M: TextEngine> {
     /// Opens and applies the app's windows of its own in place of the
     /// platform ([`Core::set_window_backend`]).
     window_backend: Option<Arc<dyn crate::desktop::WindowBackend>>,
-    /// Recognizes the app's speech in place of the platform
-    /// ([`Core::set_speech`]).
-    speech: Option<Arc<dyn crate::speech::SpeechBackend>>,
     /// Plays the app's sound in place of the platform ([`Core::set_audio`]).
     audio: Option<Arc<dyn crate::audio::AudioBackend>>,
     /// The app's login item ([`Core::set_login_item`]); without one the app
@@ -1737,7 +1776,6 @@ impl<M: TextEngine> Core<M> {
             clipboard: None,
             picker: None,
             window_backend: None,
-            speech: None,
             audio: None,
             login_item: None,
             components: components::Components::for_viewport(viewport),
@@ -1763,6 +1801,7 @@ impl<M: TextEngine> Core<M> {
             sticky_scrollers: Vec::new(),
             builtin_scrollbars: None,
             scrollbars_pending: Vec::new(),
+            watched_inputs: Vec::new(),
             fitted_pending: Vec::new(),
             decorated: Vec::new(),
             sticky_changed: false,
@@ -1839,6 +1878,7 @@ impl<M: TextEngine> Core<M> {
             font_scale: 1.0,
             default_font: None,
             queue: Vec::new(),
+            position_parents: Vec::new(),
             needs_layout: true,
             tailwind: Tailwind::new(),
             class_env: ClassEnvironment::default(),
@@ -2002,6 +2042,7 @@ impl<M: TextEngine> Core<M> {
             crate::element::global::<crate::element::desktop::WindowAccess>()
                 .set(crate::element::desktop::WindowAccess(Some(access.clone())));
         }
+        self.components.runtime.set_access(access.clone());
         self.access = access;
         self.canvas_images.clear();
     }
@@ -2087,13 +2128,6 @@ impl<M: TextEngine> Core<M> {
     /// stay with the platform.
     pub fn set_window_backend(&mut self, backend: Option<Arc<dyn crate::desktop::WindowBackend>>) {
         self.window_backend = backend;
-    }
-
-    /// Recognizes the app's speech (`Speech.start`) with `backend`, an
-    /// embedding app's own recognizer or a test's fake, instead of the
-    /// platform's (`None`: the platform's, the default).
-    pub fn set_speech(&mut self, backend: Option<Arc<dyn crate::speech::SpeechBackend>>) {
-        self.speech = backend;
     }
 
     /// Plays the app's sound (`Sound`, `AudioPlayer`) with `backend`, an
@@ -2431,7 +2465,7 @@ impl<M: TextEngine> Core<M> {
 
     /// The platform scrolled the text of multiline input `id` to `offset`,
     /// its text `content` large in a `viewport` (reported while a built-in
-    /// bar takes the place of its indicator, `InputConfig::replaced`).
+    /// bar or a scroll watch follows it, `InputConfig::report_scroll`).
     pub fn set_input_scroll(
         &mut self,
         id: NodeId,
@@ -2671,6 +2705,24 @@ impl<M: TextEngine> Core<M> {
         self.needs_layout = true;
     }
 
+    /// A paste into input `id` (`onPaste`): its files larger than the
+    /// input's `pasteMaxSize` go to [`crate::PasteEvent::too_large`],
+    /// whichever platform read them, so every platform gives the app the
+    /// same files.
+    pub fn limit_paste(&self, id: NodeId, payload: &mut EventPayload) {
+        let EventPayload::Paste(paste) = payload else {
+            return;
+        };
+        let max = self
+            .key(id)
+            .ok()
+            .and_then(|key| self.nodes[key as usize].input.as_ref())
+            .and_then(|input| input.config.paste_max_size);
+        if let Some(max) = max {
+            paste.limit_files(max);
+        }
+    }
+
     /// The user edited input `id` (before JS sees the edit): keeps the text
     /// for layout and for stale-value detection.
     pub fn input_changed(&mut self, id: NodeId, text: &str, count: u32) {
@@ -2718,7 +2770,7 @@ impl<M: TextEngine> Core<M> {
                     ..
                 } | Op::Listen {
                     id: ROOT_ID,
-                    event: EventKind::BackPress | EventKind::KeyCommand,
+                    event: EventKind::BackPress | EventKind::BackProgress | EventKind::KeyCommand,
                     ..
                 } | Op::SetProp {
                     id: ROOT_ID,
@@ -2745,7 +2797,7 @@ impl<M: TextEngine> Core<M> {
             | Op::Placeholder { id }
             | Op::Command { id, .. } = op
         {
-            self.materialize_run(id);
+            self.materialize_run(id)?;
         }
         match op {
             Op::Evaluate {
@@ -2773,6 +2825,9 @@ impl<M: TextEngine> Core<M> {
                 }
                 self.check_id_range(id)?;
                 if self.fold_runs {
+                    if self.nodes.len().saturating_add(self.runs.len()) >= self.max_nodes {
+                        return Err(ApplyError::TooManyNodes(self.max_nodes));
+                    }
                     self.runs.insert(
                         id,
                         Run {
@@ -3197,7 +3252,14 @@ impl<M: TextEngine> Core<M> {
             .windows
             .keys()
             .copied()
-            .filter(|&id| self.key(id).is_err())
+            // Released, or out of the tree: a closed window's root that
+            // something still holds (a development host keeps the mounted
+            // app for hot updates) is not released yet, but it is gone.
+            .filter(|&id| {
+                !self.key(id).is_ok_and(|k| {
+                    id == crate::ROOT_ID || self.nodes[k as usize].parent != NO_KEY
+                })
+            })
             .collect();
         for id in gone {
             self.windows.remove(&id);
@@ -3369,6 +3431,36 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// The bottom edge of the logical root's in-flow children, in surface points.
+    ///
+    /// Read after [`Self::commit`] for settled geometry, from the same frames
+    /// reported to layout listeners. Detached layout roots (such as overlays
+    /// and modals) and fixed or absolutely positioned children do not contribute.
+    /// `None` means there is no laid-out in-flow content. This does not run an
+    /// intrinsic-size pass or change the viewport.
+    pub fn content_height(&self) -> Option<Points> {
+        self.nodes[self.root as usize]
+            .children
+            .iter()
+            .filter_map(|&key| {
+                let node = &self.nodes[key as usize];
+                let layout = node.layout?;
+                if node.is_layout_root()
+                    || self.layout.displays_none(layout)
+                    || matches!(
+                        self.layout.style(layout).position,
+                        Position::Absolute | Position::Fixed
+                    )
+                    || node.frame.origin.y.0.is_nan()
+                {
+                    return None;
+                }
+                Some(node.frame.origin.y.0 + node.frame.size.height.0)
+            })
+            .reduce(f32::max)
+            .map(Points)
+    }
+
     /// Finishes a turn: rebuilds text, runs layout, updates lists and
     /// returns the mount items, or `None` when nothing changed.
     pub fn commit(&mut self) -> Option<MountBatch> {
@@ -3501,6 +3593,10 @@ impl<M: TextEngine> Core<M> {
         }
         // The views' patches and the views to make first.
         self.render_components();
+        // The children that moved, the app's and those the components just
+        // placed, styled at their places before anything reads their styles
+        // (`position: fixed`, the color they pass on).
+        self.flush_positions();
         self.prepare_reveals();
         // The focus reported since, after the components made and released
         // what they did: one change of the chain, the views both chains
@@ -3534,6 +3630,7 @@ impl<M: TextEngine> Core<M> {
             self.sync_kept();
         }
         self.sync_back();
+        self.sync_back_progress();
         self.sync_keys();
         // Platforms animate the frames, insertions and removals that follow
         // in the batch; ops may already have queued some.
@@ -3867,27 +3964,14 @@ impl<M: TextEngine> Core<M> {
                 }
                 // Checked before the grants: a host may put the name in a
                 // path or a URL, where `user.x/../admin` leaves `user.*`.
-                Command::HostCall { id: call, name, .. }
-                    if !crate::access::valid_host_name(name) =>
-                {
-                    let error = crate::host_channel::invalid_name(name);
-                    self.deny(error.message().to_owned());
-                    self.answer_host(*call, Err(error));
-                    continue;
-                }
-                Command::HostCall { id: call, name, .. } if !self.access.allows_host(name) => {
-                    let error = crate::host_channel::not_granted(name);
-                    self.deny(error.message().to_owned());
-                    self.answer_host(*call, Err(error));
-                    continue;
-                }
-                Command::HostPost { name, .. }
-                    if crate::host_channel::check_call(&self.access, name).is_err() =>
-                {
-                    let error = crate::host_channel::check_call(&self.access, name)
-                        .expect_err("a refused name");
-                    self.deny(error.message().to_owned());
-                    continue;
+                Command::HostCall { name, .. } | Command::HostPost { name, .. } => {
+                    if let Some(error) = crate::host_channel::refusal(&self.access, name) {
+                        self.deny(error.to_string());
+                        if let Command::HostCall { id: call, .. } = command {
+                            self.answer_host(call, Err(error));
+                        }
+                        continue;
+                    }
                 }
                 Command::SendInput(_) if !self.access.allows_web_input() => {
                     self.deny("trusted web view input is not granted: add `\"input\": true` to capabilities.webview in nsh.json".into());
@@ -3988,11 +4072,11 @@ impl<M: TextEngine> Core<M> {
 
     fn alloc(&mut self, id: NodeId, kind: Kind) -> Result<Key, ApplyError> {
         let idx = id as usize;
-        if self.nodes.len() >= self.max_nodes {
+        if self.nodes.len().saturating_add(self.runs.len()) >= self.max_nodes {
             return Err(ApplyError::TooManyNodes(self.max_nodes));
         }
         self.check_id_range(id)?;
-        if self.slots.contains(idx) {
+        if self.slots.contains(idx) || self.runs.contains_key(&id) {
             return Err(ApplyError::DuplicateNode(id));
         }
         let key = self.nodes.insert(Node::new(id, kind)) as Key;
@@ -4104,6 +4188,7 @@ impl<M: TextEngine> Core<M> {
                         | R::ImageButton
                         | R::Link
                         | R::Search
+                        | R::Textbox
                         | R::Checkbox
                         | R::Radio
                         | R::Switch
@@ -5796,7 +5881,9 @@ impl<M: TextEngine> Core<M> {
                 )
                 | Prop::Native(NativeProp::Scrollable(false)) => list::ignored::BEHAVIOR,
                 Prop::Scrollbar(
-                    crate::ScrollbarSetting::Hidden | crate::ScrollbarSetting::Themed(_),
+                    crate::ScrollbarSetting::Hidden
+                    | crate::ScrollbarSetting::Themed(_)
+                    | crate::ScrollbarSetting::ThemeValue(_),
                 ) => list::ignored::SCROLLBAR,
                 Prop::Refreshing(true) => list::ignored::REFRESH,
                 Prop::ScrollValue(Some(_)) => list::ignored::SCROLL_VALUE,
@@ -5893,6 +5980,8 @@ impl<M: TextEngine> Core<M> {
                         ScrollProp::Deceleration(r) => b.deceleration = r,
                         ScrollProp::Bounces(on) => b.bounces = on,
                         ScrollProp::ScrollsToTop(on) => b.scrolls_to_top = on,
+                        ScrollProp::SmoothWheel(on) => b.smooth_wheel = on,
+                        ScrollProp::WheelLineHeight(h) => b.wheel_line_height = h.max(Points::ZERO),
                         ScrollProp::ContentInset(i) => b.content_inset = i,
                         ScrollProp::ScrollbarInset(i) => {
                             // Negative insets count as none.
@@ -6596,6 +6685,17 @@ impl<M: TextEngine> Core<M> {
             }
             Prop::Overlay(prop) => {
                 use crate::OverlayProp;
+                // A hint makes an overlay a tooltip's, which counts among no
+                // siblings (`is_element_child`): theirs move.
+                let parent = node.parent;
+                if matches!(prop, OverlayProp::Hint(_))
+                    && parent != NO_KEY
+                    && self.nodes[parent as usize]
+                        .positional
+                        .has(Positional::CHILDREN)
+                {
+                    self.queue_positions(parent);
+                }
                 self.set_overlay_config(key, |c| match prop {
                     OverlayProp::Anchor(v) => c.anchor = v,
                     OverlayProp::Placement(v) => c.placement = v,
@@ -6824,6 +6924,10 @@ impl<M: TextEngine> Core<M> {
                         c.paste_behavior = behavior;
                         false
                     }
+                    Prop::PasteMaxSize(max) => {
+                        c.paste_max_size = max;
+                        false
+                    }
                     Prop::AutoFocus(on) => {
                         c.auto_focus = on;
                         false
@@ -6934,13 +7038,19 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// Gives run `id` its node, in its block if it is in one (for any use
-    /// other than holding text as a block's only child).
-    pub(super) fn materialize_run(&mut self, id: NodeId) {
+    /// other than holding text as a block's only child). Remove it from
+    /// `runs` during allocation so the quota counts it only once, and
+    /// restore it on failure so its block keeps its text.
+    pub(super) fn materialize_run(&mut self, id: NodeId) -> Result<(), ApplyError> {
         let Some(run) = self.runs.remove(&id) else {
-            return;
+            return Ok(());
         };
-        let Ok(key) = self.alloc(id, Kind::RawText) else {
-            return;
+        let key = match self.alloc(id, Kind::RawText) {
+            Ok(key) => key,
+            Err(e) => {
+                self.runs.insert(id, run);
+                return Err(e);
+            }
         };
         self.nodes[key as usize].text = run.text;
         if run.block != NO_KEY {
@@ -6948,6 +7058,7 @@ impl<M: TextEngine> Core<M> {
             let parent = self.nodes[run.block as usize].id;
             let _ = self.insert(parent, id, None);
         }
+        Ok(())
     }
 
     /// The text of the run text block or span `key` holds without a node.
@@ -6970,12 +7081,12 @@ impl<M: TextEngine> Core<M> {
             if self.fold_run(parent, parent_id, child_id, before) {
                 return Ok(());
             }
-            self.materialize_run(child_id);
+            self.materialize_run(child_id)?;
             if let Some(b) = before {
-                self.materialize_run(b);
+                self.materialize_run(b)?;
             }
             if let Some(&run) = self.folded.get(&parent) {
-                self.materialize_run(run);
+                self.materialize_run(run)?;
             }
         }
         let child = self.key(child_id)?;
@@ -7092,10 +7203,13 @@ impl<M: TextEngine> Core<M> {
             .as_ref()
             .is_some_and(|c| c.deps() & crate::tailwind::deps::POSITION != 0)
         {
-            self.nodes[parent as usize].positional_children = true;
+            self.nodes[parent as usize].positional |= Positional::CHILDREN;
         }
-        if self.nodes[parent as usize].positional_children {
-            self.positions_changed(parent);
+        if self.nodes[parent as usize]
+            .positional
+            .has(Positional::CHILDREN)
+        {
+            self.queue_positions(parent);
         }
         self.spacing_changed(parent, child);
         if self.pointer_none_classes > 0 {
@@ -7212,8 +7326,11 @@ impl<M: TextEngine> Core<M> {
         if let Some(list) = self.nodes[parent as usize].list.as_mut() {
             list.remove_cell(key);
         }
-        if self.nodes[parent as usize].positional_children {
-            self.positions_changed(parent);
+        if self.nodes[parent as usize]
+            .positional
+            .has(Positional::CHILDREN)
+        {
+            self.queue_positions(parent);
         }
         self.nodes[key as usize].parent = NO_KEY;
         if self.nodes[key as usize].states & crate::tailwind::state::FOCUS_WITHIN != 0 {
@@ -8086,6 +8203,8 @@ impl<M: TextEngine> Core<M> {
 
     fn flush_dirty(&mut self) {
         loop {
+            // The children that moved since, each parent's once.
+            self.flush_positions();
             self.flush_dirty_once();
             // Text blocks create the views of new attachments while
             // flushing, which queues them; texts inside attachments built
@@ -8392,7 +8511,7 @@ impl<M: TextEngine> Core<M> {
                     // A built-in bar takes the indicator's place.
                     config.scrollbar_visible =
                         input.scrollbar != crate::ScrollbarSetting::Hidden && input.bar.is_none();
-                    config.replaced = input.bar.is_some();
+                    config.report_scroll = input.bar.is_some() || input.watched;
                     self.mount.push(MountItem::Input {
                         id,
                         config: Box::new(config),
@@ -12494,7 +12613,6 @@ fn shown_by(item: &MountItem) -> Shown {
                 | C::Share { .. }
                 | C::RenderCanvas { .. }
                 | C::FileRequest { .. }
-                | C::Speech { .. }
                 | C::Audio { .. }
                 | C::Notification { .. }
                 | C::Desktop { .. }

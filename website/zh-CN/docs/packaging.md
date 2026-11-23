@@ -8,7 +8,7 @@ group: platforms
 # 打包
 
 `nsh package` 把应用变成可以安装的产物：用于 iOS 模拟器的 `.app`、用于 iOS 真机的已签名 `.ipa`、用于 Android 的已签名
-`.apk` 或 `.aab`（Android App Bundle，用于 Google Play）、用于 macOS 的 ad hoc 签名 `.app`、用于 Linux 的目录和 `.tar.gz`、用于 Windows 的目录、`.zip` 和安装程序（`<Name>-setup.exe`，需 Inno Setup），或用于 Web 的静态站点。它不需要 Xcode 项目，也不需要 Gradle。
+`.apk` 或 `.aab`（Android App Bundle，用于 Google Play）、用于 macOS 的已签名 `.app`（不带 `--sign` 时为 ad hoc 签名）、用于 Linux 的目录和 `.tar.gz`、用于 Windows 的目录、`.zip` 和安装程序（`<Name>-setup.exe`，需 Inno Setup），或用于 Web 的静态站点。它不需要 Xcode 项目，也不需要 Gradle。
 
 - **Rust 应用**（`nsh.json` 写明 `"root"`）在自己的目录里打包。`nsh` 以 release 模式为目标构建 runner，编译进你的 crate 并挂载根组件，
   不带 QuickJS：需要 Cargo、该平台的 Rust 目标（`rustup target add …`），Android 还需要 NDK。
@@ -56,7 +56,7 @@ nsh package App.tsx --target ios-simulator --run
 | `build` | number | `1` | 构建号（`CFBundleVersion`、`versionCode`）。每次上传新版本都要递增。 |
 | `icon` | string \| object | 无 | 一张正方形 PNG，最好是 1024×1024，路径相对于 `nsh.json`；也可按平台分别提供（[图标](#图标)）。 |
 
-`nsh.json` 还包含 `rust` 和 `root`（应用的 crate 和根组件，见[用 Rust 开发](./rust.md)）、`theme` 和 `appearance`、`tailwind`（见 [Tailwind](./tailwind.md)）、`capabilities`（见[沙箱与能力](./sandbox-and-capabilities.md)）、`android`（`targetSdk`、`usesCleartextTraffic`、`permissions`、`libraries`、`manifestPlaceholders`、`queries` 和 `application`，见下文“目标 API 级别”“明文 HTTP”“权限”“Java 代码”和“组件与 queries”）、`ios` 和 `macos`（对应包的 `Info.plist` 键和 entitlements，见[下文](#infoplist-键与-entitlements)；`ios.extensions` 是[应用扩展](#应用扩展)；`ios.frameworks` 和 `ios.linkerFlags` 见 [Framework 与链接参数](#framework-与链接参数)；`macos.activationPolicy` 用于[菜单栏应用](./macos.md#菜单栏应用)）以及让桌面包自我更新、让所有原生包接收 [OTA 更新](./ota-updates.md)的 `updater`（见[应用更新](./app-updates.md)）；[项目结构](./project-structure.md#nshjson)列出了所有键。NSH 读不懂的键或值会给出警告并被略过：为更新的 NSH 写的应用在较旧的 NSH 上照样能构建，拼写错误也会在警告里看到。
+`nsh.json` 还包含 `rust` 和 `root`（应用的 crate 和根组件，见[用 Rust 开发](./rust.md)）、`theme` 和 `appearance`、`tailwind`（见 [Tailwind](./tailwind.md)）、`capabilities`（见[沙箱与能力](./sandbox-and-capabilities.md)）、`android`（`targetSdk`、`usesCleartextTraffic`、`permissions`、`libraries`、`manifestPlaceholders`、`queries` 和 `application`，见下文“目标 API 级别”“明文 HTTP”“权限”“Java 代码”和“组件与 queries”）、`ios` 和 `macos`（对应包的 `Info.plist` 键和 entitlements，见[下文](#infoplist-键与-entitlements)；`ios.extensions` 和 `macos.extensions` 分别是 [iOS 应用扩展](#应用扩展)和 [macOS 应用扩展](#macos-应用扩展)；`macos.activationPolicy` 用于[菜单栏应用](./macos.md#菜单栏应用)）以及让桌面包自我更新、让所有原生包接收 [OTA 更新](./ota-updates.md)的 `updater`（见[应用更新](./app-updates.md)）；[项目结构](./project-structure.md#nshjson)列出了所有键。NSH 读不懂的键或值会给出警告并被略过：为更新的 NSH 写的应用在较旧的 NSH 上照样能构建，拼写错误也会在警告里看到。
 
 上表中的每个键都可以在命令行上覆盖，这在 CI 中很方便：
 
@@ -75,7 +75,7 @@ nsh package --target android --app-version 1.4.0 --build 42
 | `--app-version <version>` | 版本号，如 `1.2.0`。 |
 | `--build <n>` | 构建号。 |
 | `--icon <png>` | 应用图标：一张正方形 PNG，最好是 1024×1024。 |
-| `--sign <identity>` | iOS：用于真机的代码签名身份。 |
+| `--sign <identity>` | iOS 和 macOS：代码签名身份（用于 iOS 真机，或启用 Hardened Runtime 和安全时间戳的 macOS 包）。 |
 | `--profile <file>` | iOS：用于真机的描述文件（`.mobileprovision`）。可以重复传入，给每个[应用扩展](#应用扩展)各传一个。 |
 | `--keystore <file>` | Android：release keystore（默认使用 debug 密钥）。 |
 | `--key-alias <alias>` | Android：keystore 中的密钥别名。 |
@@ -172,41 +172,6 @@ nsh package --target ios \
   "ios": { "infoPlist": { "NSSupportsLiveActivities": true } }
 }
 ```
-
-### Framework 与链接参数
-
-iOS SDK 以 XCFramework（`.xcframework`）或 framework（`.framework`）的形式提供，里面是静态库或动态库。应用的
-[Rust crate](./rust.md) 调用它；`ios.frameworks` 列出它，路径相对于 `nsh.json`；`ios.linkerFlags` 加上 SDK 说明里要求的链接参数，
-例如 `-ObjC` 以及它用到的系统库和系统 framework。nshm 在自己的 `Cargo.toml` 里列出自己的
-（见[打包的应用需要什么](./nshm.md#打包的应用需要什么)），使用它的应用无需再列：
-
-```json
-{
-  "ios": {
-    "frameworks": [
-      "ios/Vendor/Analytics.xcframework",
-      { "path": "ios/Vendor/Ads.xcframework", "forceLoad": true }
-    ],
-    "linkerFlags": ["-ObjC", "-lsqlite3", "-framework", "AdServices"]
-  }
-}
-```
-
-| 键 | 含义 |
-|---|---|
-| `path` | `.xcframework` 或 `.framework`。写成字符串的条目就是它的路径。 |
-| `forceLoad` | 链接静态库的全部内容（`-force_load`），而不只是应用代码调用到的部分，用于 SDK 说明里要求这样做的情况。 |
-
-- 用应用的 crate 构建的每个 iOS 可执行文件都会链接它们：打出的包，以及 `nsh run` 在模拟器和 Mac Catalyst 上的开发宿主。
-  每次构建取 XCFramework 里对应目标（真机、模拟器、Mac Catalyst）的库；XCFramework 没有该目标的库时，构建会报错并列出它有的库。
-- 静态库成为应用可执行文件的一部分。动态 framework 会被复制到应用的 `Frameworks/`，并先于应用签名：模拟器用 ad hoc 签名，
-  真机用 `--sign` 给出的身份。
-- 动态 framework 的隐私清单留在它自己的 bundle 里，App Store Connect 在那里读取。静态库的代码属于应用，所以 iOS 包会把它的隐私清单
-  声明的内容加进应用的 `PrivacyInfo.xcprivacy`（见[隐私清单](#隐私清单)）。
-- 每个参数是一个独立的参数，按原样放在库之后传给链接器（`"-framework", "AdServices"` 是两个）。参数里的路径不会相对于 `nsh.json`
-  解析：要链接一个库，请把它列进 `frameworks`。
-- 同样的 crate 也会在没有这个 SDK 的其他平台上构建：请在 `#[cfg(target_os = "ios")]` 下调用它。
-- 这些 framework 与应用的 Rust 代码一起链接，所以没有 crate（`rust` 或 nshm）的应用不能列出它们：`nsh package` 会报错停止。
 
 ## Android
 
@@ -398,9 +363,16 @@ nsh package --target macos --run
 ```
 
 写出 `.nsh/out/<Name>.app`：可执行文件位于 `Contents/MacOS/`，`nsh/assets/…`、`nsh/app.json`（窗口标题、应用的外观、激活策略和 nsh.json 中的窗口设置）以及
-TSX 应用的 `nsh/bundle.nshc` 位于 `Contents/Resources/`。应用使用 ad hoc 签名，要求 macOS 14 及以上，或应用指定的更高版本（见[最低系统版本](#最低系统版本)）；
-要分发它，请用 Developer ID 签名并进行公证。见
+TSX 应用的 `nsh/bundle.nshc` 位于 `Contents/Resources/`。不传 `--sign` 时应用使用 ad hoc 签名，要求 macOS 14 及以上，或应用指定的更高版本（见[最低系统版本](#最低系统版本)）。见
 [macOS](./macos.md#打包)。
+
+要为分发签名，传入 `--sign <identity>`（例如 `"Developer ID Application: …"` 或 `"Apple Development: …"`）：
+
+```sh
+nsh package --target macos --sign "Developer ID Application: Example Inc (ABCDE12345)"
+```
+
+使用证书签名时，NSH 会按公证要求启用 Hardened Runtime（`--options runtime`）和安全时间戳（`--timestamp`），先由内向外签名所有嵌套扩展及其内嵌框架/动态库，再签名 `.app`，并用 `codesign --verify --deep --strict` 校验结果。
 
 应用运行在本机的处理器上。`--arch` 可以换成别的：`x86_64` 面向 Intel Mac，`arm64` 面向 Apple 芯片，`universal` 把两者合在一个可执行文件里。为另一种处理器编 runner
 需要它的 Rust target：
@@ -409,6 +381,33 @@ TSX 应用的 `nsh/bundle.nshc` 位于 `Contents/Resources/`。应用使用 ad h
 rustup target add x86_64-apple-darwin
 nsh package --target macos --arch universal
 ```
+
+### macOS 应用扩展
+
+预构建的 macOS 应用扩展（用 Xcode 或 `swiftc` 构建的 `.appex` bundle）可以在应用的 `nsh.json` 中通过 `macos.extensions` 列出，路径相对于 `nsh.json`：
+
+```json
+{
+  "macos": {
+    "extensions": [
+      {
+        "path": "macos/build/Share.appex",
+        "entitlements": {
+          "com.apple.security.app-sandbox": true,
+          "com.apple.security.application-groups": ["TEAM123456.com.example.app"]
+        }
+      }
+    ]
+  }
+}
+```
+
+| 键 | 含义 |
+|---|---|
+| `path` | macOS `.appex` bundle 目录，包含 `Contents/Info.plist` 和 `Contents/MacOS/<executable>`。 |
+| `entitlements` | 扩展的 entitlements，和应用的 `macos.entitlements` 一样（见[下文](#infoplist-键与-entitlements)）。 |
+
+打包时会把扩展复制进 `Contents/PlugIns/`，并将它们的 `CFBundleShortVersionString` 和 `CFBundleVersion` 同步为应用的 `version` 和 `build`。每个扩展的 bundle identifier 必须以应用的开头（`<app_id>.`），且若存在 `CFBundleSupportedPlatforms` 必须包含 `MacOSX`。在签名 `.app` 之前，NSH 会用本次打包的签名身份（ad hoc 或 `--sign`）由内向外签名每个扩展：先无 entitlements 签名 `Contents/Frameworks/` 下的 `.framework` 和 `.dylib`，再带扩展自身的 entitlements 签名 `.appex`。
 
 ## Linux
 
@@ -496,8 +495,8 @@ entitlements：
   且值在其范围内（描述文件把 Associated Domains 授予为 `*`，把钥匙串分组授予为 `TEAMID.*`）；否则 `nsh package` 停下并指出是哪一项，
   这时为应用的标识符启用对应的 capability，再重新下载描述文件。
 - **iOS 模拟器**包直接用应用写的 entitlements 签名。
-- **macOS** 包用应用的 entitlements 做 ad hoc 签名。带 `com.apple.developer.*` entitlements 或钥匙串分组的应用，macOS 只在授予它们的描述文件下启动：
-  `nsh package` 会对这些项给出警告，应用要先用 Developer ID 和这样的描述文件重新签名才能运行。
+- **macOS** 包用应用的 entitlements 签名（默认 ad hoc，传入 `--sign <identity>` 时启用 Hardened Runtime）。带
+  `com.apple.developer.*` entitlements 或钥匙串分组的应用，macOS 只在授予它们的描述文件下启动：`nsh package` 会对这些项给出警告，运行前需要先嵌入对应的描述文件（`Contents/embedded.provisionprofile`）并重新签名。
 
 ### 其他语言的 Info.plist 文字
 
@@ -567,14 +566,15 @@ entitlements：
 `NSPrivacyAccessedAPITypes`）及其条目里的键。未知的键、类型不对的值或缺少键的条目会被略过并给出警告；App Store Connect
 按原样会拒绝的内容（没有理由的条目、开启跟踪却没有域名）也会给出警告。类别和理由代码本身仍由 App Store Connect 检查。
 
-NSH 的运行时是应用可执行文件的一部分，所以它调用的 API 也算作应用的：请把下面这些和应用自己的一起声明。`ios.frameworks` 里静态库的代码
-同样属于应用，打包时会把它们的隐私清单加进应用的清单（见 [Framework 与链接参数](#framework-与链接参数)）。
+NSH 的运行时是应用可执行文件的一部分，所以它调用的 API 也算作应用的：请把下面这些和应用自己的一起声明。
 
 | 类别 | NSH 中调用它的部分 | 理由 |
 |---|---|---|
 | `NSPrivacyAccessedAPICategoryFileTimestamp` | Rust 标准库读取文件元数据；图片缓存按时间淘汰文件 | `C617.1`；应用读取用户选择的文件时再加 `3B52.1` |
 | `NSPrivacyAccessedAPICategorySystemBootTime` | 渲染器的计时器 | `35F9.1` |
-| `NSPrivacyAccessedAPICategoryUserDefaults` | 读取用户在设置中选择的温度单位，Apple 的理由都不涵盖这种读取（[#2830](https://github.com/longbridge/nsh/issues/2830)） | |
+
+NSH 在 iOS 上不读取用户默认设置（温度单位取自区域设置），所以只有应用自己的代码或它链接的 SDK 调用 `NSUserDefaults` 时，
+才需要声明 `NSPrivacyAccessedAPICategoryUserDefaults`。
 
 ### 最低系统版本
 
@@ -679,11 +679,10 @@ Android 上 `android.launchScreen` 用同样的键。打包时给应用生成一
 
 | 功能 | iOS 和 macOS | Android |
 |---|---|---|
-| [`Speech`](../modules/nsh.md#speech)，应用授予 `speech` 或没有声明 capabilities 时 | `NSMicrophoneUsageDescription`、`NSSpeechRecognitionUsageDescription` | |
 | 采集媒体的网页（[`capabilities.webview.media`](./sandbox-and-capabilities.md#webview)） | `NSMicrophoneUsageDescription`、`NSCameraUsageDescription`；macOS 上还有 entitlements `com.apple.security.device.audio-input` 和 `com.apple.security.device.camera` | `RECORD_AUDIO`、`CAMERA` |
 | [`Notifications`](../modules/nsh.md#notifications)，应用授予 `notifications` 或没有声明 capabilities 时 | | `POST_NOTIFICATIONS` |
 
-每个 Android 包还声明了 `INTERNET` 和 `ACCESS_NETWORK_STATE`。权限说明文字是应用第一次请求时系统显示的内容，应用可以在 `infoPlist` 中改用自己的措辞
+应用安装的 [nshm](./nshm.md) 会加上它们的 feature 需要的条目：比如 `nsh-extra` 的 `speech` 会加上麦克风和语音识别的用途说明以及 `RECORD_AUDIO`。每个 Android 包还声明了 `INTERNET` 和 `ACCESS_NETWORK_STATE`。权限说明文字是应用第一次请求时系统显示的内容，应用可以在 `infoPlist` 中改用自己的措辞
 （见[上文](#infoplist-keys-and-entitlements)）。
 
 在 iOS 和 macOS 上，应用自己的 [Rust crate](./rust.md) 通过系统框架访问其他硬件，所需的权限说明文字写在 `infoPlist` 中，macOS
@@ -707,8 +706,6 @@ Rust 应用的包就是它的 runner：用你的 crate 构建，挂载好根组�
 | Linux | `nsh-linux-app` 可执行文件，重命名为 `<Name>` | `<Name>/nsh/bundle.nshc`、`nsh/assets/…` |
 | Windows | `nsh-windows-app.exe` 可执行文件，重命名为 `<Name>.exe` | `<Name>\nsh\bundle.nshc`、`nsh\assets\…` |
 | Web | `nsh.<digest>.wasm`、`nsh.<digest>.js` | `<Name>/app.<digest>.js`、`assets/…`、`index.html` |
-
-iOS 包还会在 `Frameworks/` 里带上应用列出的动态 framework（见 [Framework 与链接参数](#framework-与链接参数)）。
 
 打包出的应用不注册任何[原生组件](./native-components.md)；如需使用原生组件，请把 NSH 嵌入你自己的应用。
 

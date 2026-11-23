@@ -19,7 +19,7 @@ trusted: every limit and check is enforced in Rust, never in JS.
   rendering it causes, one list bind, one timer, one frame's callbacks, the microtask drain; nested calls share the
   outermost budget), and quotas for what the heap limit does not cover: changes at once (the op queue,
   `max_op_values`: ops are Rust memory), ops per canvas drawing, nodes in the core (`Core::set_max_nodes`; each may hold a native view) and dense
-  node ids (an id far past the ids in use would grow the id table: `ApplyError::IdOutOfRange`). Views nest
+  node ids (an id far past the ids in use would grow the id table: `ApplyError::IdOutOfRange`). Folded text runs count toward the node quota while they have no node of their own. Views nest
   `nsh_core::MAX_TREE_DEPTH` (1024) levels deep in every app, standalone ones too (`ApplyError::TooDeep`, checked in
   `Core::insert` against the depth above the parent and the height kept on the child): layout, mounting and the tree's
   walks recurse once per level on the native stack, which no other limit bounds; sized for the engine thread's
@@ -61,10 +61,13 @@ trusted: every limit and check is enforced in Rust, never in JS.
   user activation, so never granted without a declaration, `Capabilities::all` leaves it off), `statusBar`, `process` (`execute`: exact executable names or absolute paths; `exit`: host exit requests; `env`: additional
   visible environment names), `fs` (`read` / `write`: trusted path roots), `clipboard` (`nsh`'s `Clipboard`: reading and
   writing the system clipboard; the copy menu of selectable text is the user's own act and needs none), `picker`
-  (`nsh`'s `Picker`: showing the system's picker, whose picked files reach the app; denied, a pick rejects), `share` (`nsh`'s `Share`:
+  (`nsh`'s `Picker`: showing the system's picker, whose picked files reach the app; denied, a pick rejects. Also
+  `nsh-extra`'s `Photos`, checked in each call of its JS face but `access` (`photos/mod.rs` `granted`): its photos
+  reach the app as picked ones do, and the user's permission is the whole app's), `share` (`nsh`'s `Share`:
   showing the system's share sheet; denied, `Share.show` rejects; each shared file also needs `fs.read`), `speech`
-  (`nsh`'s `Speech`: the microphone and the system's speech recognizer, whose transcript reaches the app; denied,
-  `Speech.start` throws), `audio` (`nsh`'s `Sound` and `AudioPlayer`: making sound; denied, `Sound.load` rejects and
+  (`nsh-extra`'s `Speech`: the microphone and the system's speech recognizer, whose transcript reaches the app; checked
+  in its JS face's `start` (`speech/mod.rs` `granted`) and in its Rust `recognize` against the engine's access; denied,
+  `Speech.start` throws and a Rust session ends with `not-allowed`), `audio` (`nsh`'s `Sound` and `AudioPlayer`: making sound; denied, `Sound.load` rejects and
   `new AudioPlayer` throws; a remote source also needs `network`), `notifications` (`nsh`'s `Notifications`: showing
   system notifications and the badge; denied, each function rejects or throws. Also `nsh-extra`'s `Push`, checked in
   each call of its JS face but `available` (`push/mod.rs` `granted`): its token, its hub of deliveries, the
@@ -98,7 +101,7 @@ trusted: every limit and check is enforced in Rust, never in JS.
   followed by the engine with `follow_redirects` off for the platform, so every hop is checked — hops are issued on the
   engine thread when a hop's head arrives; a streamed request body is not sent again, so a 307 / 308 then fails; a hop to another origin, `nsh_core::access::is_same_origin`, drops `Authorization`, `Cookie` and `Proxy-Authorization` from it and every later hop, as Fetch drops `Authorization`); remote images, placeholders, canvas images, `Image.getSize` / `prefetch`, video sources, web view
   sources and inline HTML's base URLs, trusted web view input (`Command::SendInput`), the status bar, the clipboard, the picker, the share sheet, the application menu and window opening (`Command::Desktop` but `PopupMenu`, `OpenWindow` and
-  the app's own windows' commands), speech sessions, sounds and players (`AudioAction::Open`) and host calls in the core (`Core::check_prop`, the commit's commands and actions;
+  the app's own windows' commands), sounds and players (`AudioAction::Open`) and host calls in the core (`Core::check_prop`, the commit's commands and actions;
   each refusal is logged once, target `js`, saying which key to add); top-level web view navigations on the platforms
   (`WKNavigationDelegate decidePolicyForNavigationAction` / `WebViewClient.shouldOverrideUrlLoading` → `Native.allowsWebview`).
   A web view download takes the grant a page at its URL would: the core checks the offer's URL, the response's after
@@ -111,7 +114,7 @@ trusted: every limit and check is enforced in Rust, never in JS.
 - What a refusal does: every call JS makes fails with `JsError::access_denied` (`ERR_ACCESS_DENIED`, `permission` the
   capability's key, `resource` what was asked for, `""` when the capability has none), which its promise rejects with.
   The modules check in the call, on the `System` the call gets, so the error is typed and nothing is queued:
-  `Clipboard`'s functions (`runtime/clipboard.rs`), `Picker.pickImages`, `Picker.pickFiles`, `Speech.start` (`runtime/speech.rs`; it throws), `Sound.load` / `new AudioPlayer` (`runtime/audio.rs`), `openUrl` (`runtime/device.rs`,
+  `Clipboard`'s functions (`runtime/clipboard.rs`), `Picker.pickImages`, `Picker.pickFiles`, `Sound.load` / `new AudioPlayer` (`runtime/audio.rs`), `openUrl` (`runtime/device.rs`,
   `open_url::not_granted`) and `Image.getSize` / `prefetch` (`runtime/image.rs`, `resource` the URL). `host.call` is
   refused by the core (the commit's `Command::HostCall`) and by the SDK channel (`nsh-js` `host_channel.rs`) with
   `nsh_core::host_channel::not_granted`. A refused `fetch` rejects as every failed fetch, with a `TypeError`, which
