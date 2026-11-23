@@ -443,6 +443,47 @@ fn selection_is_a_select_band_and_bold_and_focus_the_accent_on_surfaces() {
     );
 }
 
+/// A sidebar's row for the shown page, a column of padding before its
+/// label, as the gallery's.
+#[component]
+fn CurrentPage() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(
+            view()
+                .w(px(96.0))
+                .h(px(16.0))
+                .px(px(8.0))
+                .on_press(|_: &()| {})
+                .accessibility_state(nsh_core::AccessibilityState {
+                    selected: true,
+                    current: Some(nsh_core::AccessibilityCurrent::Page),
+                    ..Default::default()
+                })
+                .child(text("page")),
+        )
+        .child(text("ready"))
+}
+
+/// A list's chosen row with a free leading column is Bubbles' selection:
+/// an accent rail there and its label in the accent, bold, no band.
+#[test]
+fn a_current_row_is_an_accent_rail_and_label_not_a_band() {
+    let (mut view, rx) = surfaces();
+    let mut terminal = Terminal::new(TestBackend::new(14, 4)).unwrap();
+    view.load(App::Rust(Root::new::<CurrentPage>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let buffer = terminal.backend().buffer();
+    assert_eq!(buffer[(0, 0)].symbol(), "\u{258c}", "the rail");
+    assert_eq!(buffer[(0, 0)].fg, Color::Blue);
+    assert_eq!(buffer[(1, 0)].symbol(), "p");
+    assert_eq!(buffer[(1, 0)].fg, Color::Blue, "the label in the accent");
+    assert!(buffer[(1, 0)].modifier.contains(Modifier::BOLD));
+    assert_ne!(buffer[(1, 0)].bg, Color::Rgb(56, 56, 56), "no select band");
+    assert_ne!(buffer[(1, 0)].bg, Color::Blue, "no accent band");
+}
+
 /// A framed card holding a button, as a menu bar's or a form's.
 #[component]
 fn FramedCard() -> impl IntoElement {
