@@ -265,6 +265,11 @@ pub(crate) struct Apk<'a> {
     /// URL schemes that open the app (nsh.json `schemes`): one
     /// `VIEW` intent filter.
     pub(crate) schemes: &'a [String],
+    /// The MIME types of the files the app opens (nsh.json `fileTypes`,
+    /// their `mimeTypes`, each once): one `SEND` and one `SEND_MULTIPLE`
+    /// intent filter, so the app is in the share sheet for them, and the
+    /// accepted types `AppActivity` checks a share against. Empty: none.
+    pub(crate) share_mime_types: &'a [String],
     /// Web links that open the app (nsh.json `links`): an intent filter
     /// Android verifies (App Links) for each, with its host and paths.
     pub(crate) links: &'a [nsh_core::url_scheme::WebLink],
@@ -928,11 +933,12 @@ fn manifest_xml(apk: &Apk<'_>, additions: &library_manifest::Additions) -> Strin
     let permissions = format!("{permissions}{}", additions.top);
     // A link opens the running app (`onNewIntent`), not another activity in
     // the caller's task.
-    let launch_mode = if apk.schemes.is_empty() && apk.links.is_empty() {
-        ""
-    } else {
-        r#" android:launchMode="singleTask""#
-    };
+    let launch_mode =
+        if apk.schemes.is_empty() && apk.links.is_empty() && apk.share_mime_types.is_empty() {
+            ""
+        } else {
+            r#" android:launchMode="singleTask""#
+        };
     let schemes = if apk.schemes.is_empty() {
         String::new()
     } else {
@@ -973,6 +979,41 @@ fn manifest_xml(apk: &Apk<'_>, additions: &library_manifest::Additions) -> Strin
             )
         })
         .collect();
+    // Files shared to the app (the share sheet): the types its `fileTypes`
+    // name by MIME type. A filter's `data` are alternatives, so one filter
+    // serves them all.
+    let shares: String = if apk.share_mime_types.is_empty() {
+        String::new()
+    } else {
+        let data: String = apk
+            .share_mime_types
+            .iter()
+            .map(|m| {
+                format!(
+                    "\n                <data android:mimeType=\"{}\" />",
+                    xml_attribute(m)
+                )
+            })
+            .collect();
+        ["SEND", "SEND_MULTIPLE"]
+            .iter()
+            .map(|action| {
+                format!(
+                    "\n            <intent-filter>\n                <action android:name=\"android.intent.action.{action}\" />\n                <category android:name=\"android.intent.category.DEFAULT\" />{data}\n            </intent-filter>"
+                )
+            })
+            .collect()
+    };
+    // What `AppActivity` accepts of a share: the manifest's own list, as
+    // the intent filters are not readable at run time.
+    let share_meta = if apk.share_mime_types.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n        <meta-data android:name=\"com.longbridge.nsh.SHARE_MIME_TYPES\" android:value=\"{}\" />",
+            xml_attribute(&apk.share_mime_types.join(" "))
+        )
+    };
     let queries = &additions.queries;
     let components = &additions.application;
     format!(
@@ -990,7 +1031,7 @@ fn manifest_xml(apk: &Apk<'_>, additions: &library_manifest::Additions) -> Strin
         android:extractNativeLibs="false"
         android:enableOnBackInvokedCallback="true"
         android:supportsRtl="true"
-        android:theme="{theme}">{rust}
+        android:theme="{theme}">{rust}{share_meta}
         <!-- Serves the app's own files to the apps that open them
             (`SystemUi.openPath`): the authority matches what
             `FilesProvider.uriFor` builds. -->
@@ -1004,7 +1045,7 @@ fn manifest_xml(apk: &Apk<'_>, additions: &library_manifest::Additions) -> Strin
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>{schemes}{links}
+            </intent-filter>{schemes}{links}{shares}
         </activity>{components}
     </application>
 </manifest>
@@ -1924,6 +1965,7 @@ mod tests {
             queries: &[],
             application: &[],
             schemes: &[],
+            share_mime_types: &[],
             links: &[],
             rust,
             dark: false,
@@ -2094,6 +2136,59 @@ mod tests {
         let at = manifest.find(flag).unwrap();
         assert!(application < at && at < activity, "{manifest}");
         assert!(!manifest_of(&apk(false, false)).contains("com.longbridge.nsh.RUST"));
+    }
+
+    #[test]
+    fn mime_types_of_file_types_open_the_share_sheet() {
+        let types = nsh_core::file_type::file_types_from_json(&serde_json::json!([
+            { "name": "Images", "extensions": ["png"], "mimeTypes": ["image/png"] },
+            { "name": "Documents", "extensions": ["pdf"], "mimeTypes": ["application/pdf", "image/png"] },
+            { "name": "Notes", "extensions": ["note"] }
+        ]));
+        let mime_types = crate::package::file_mime_types(&types);
+        assert_eq!(mime_types, ["image/png", "application/pdf"]);
+        let manifest = manifest_of(&super::Apk {
+            share_mime_types: &mime_types,
+            ..apk(false, false)
+        });
+        let filters: Vec<&str> = manifest
+            .split("<intent-filter>")
+            .skip(1)
+            .map(|rest| rest.split("</intent-filter>").next().unwrap())
+            .filter(|filter| filter.contains("android.intent.action.SEND"))
+            .collect();
+        assert_eq!(filters.len(), 2, "{manifest}");
+        assert!(filters[0].contains(r#"android.intent.action.SEND" />"#));
+        assert!(filters[1].contains(r#"android.intent.action.SEND_MULTIPLE" />"#));
+        for filter in &filters {
+            assert!(
+                filter.contains(r#"<category android:name="android.intent.category.DEFAULT" />"#)
+            );
+            assert!(filter.contains(r#"<data android:mimeType="image/png" />"#));
+            assert!(filter.contains(r#"<data android:mimeType="application/pdf" />"#));
+            assert!(!filter.contains("BROWSABLE"), "{filter}");
+        }
+        // The running app gets the share (`onNewIntent`), and `AppActivity`
+        // checks it against the same list.
+        assert!(manifest.contains(r#"android:launchMode="singleTask""#));
+        assert!(manifest.contains(
+            r#"<meta-data android:name="com.longbridge.nsh.SHARE_MIME_TYPES" android:value="image/png application/pdf" />"#
+        ));
+        let application = manifest.find("<application").unwrap();
+        let activity = manifest.find("<activity").unwrap();
+        let at = manifest.find("SHARE_MIME_TYPES").unwrap();
+        assert!(application < at && at < activity, "{manifest}");
+        // Opt in: neither an absent declaration nor extensions alone adds share filters.
+        let extensions_only = crate::package::file_mime_types(&types[2..]);
+        for share_mime_types in [&[][..], &extensions_only] {
+            let none = manifest_of(&super::Apk {
+                share_mime_types,
+                ..apk(false, false)
+            });
+            assert!(!none.contains("action.SEND"), "{none}");
+            assert!(!none.contains("SHARE_MIME_TYPES"), "{none}");
+            assert!(!none.contains("singleTask"), "{none}");
+        }
     }
 
     #[test]

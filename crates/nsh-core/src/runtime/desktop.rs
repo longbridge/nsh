@@ -43,7 +43,7 @@ fn launch_at_login_error(error: LaunchAtLoginError) -> JsError {
 }
 
 /// The application as a whole (desktops; its functions do nothing elsewhere,
-/// and of its events only `openFiles` comes on iOS too).
+/// and of its events only `openFiles` comes on iOS and Android too).
 #[module]
 pub(crate) struct Application;
 
@@ -142,12 +142,12 @@ impl Application {
     /// instance of an app on its own and reports nothing; files and links
     /// come as `openFiles`, links through `UrlScheme`. `openFiles`: the
     /// system opened the app with files of the types it declares (nsh.json
-    /// `fileTypes`: Open With, a double click, a drop on its icon) on macOS,
-    /// iOS, Windows or Linux, at launch or while it runs; `paths` are
-    /// absolute. Files that came while nothing listened, those that launched
-    /// the app included, go to the next listener at once (at most 64, the
-    /// oldest dropped). The app reads them with `fs`, which their opening
-    /// does not grant. On the desktops a link, a file or a second launch that
+    /// `fileTypes`) on macOS, iOS, Windows or Linux, or another app shared
+    /// files to it on Android. This can happen at launch or while the app
+    /// runs; `paths` are absolute. Files that came while nothing listened,
+    /// including those that launched the app, go to the next listener at
+    /// once (at most 64, the oldest dropped). Opening a file does not grant
+    /// the `fs` capability. On desktops a link, a file or a second launch that
     /// brings the app forward also reports `reopen` first. `quit`: the app is quitting (its Quit
     /// item, `quit()`, its last window closing, the system ending it, a host
     /// app removing its view, on the web the page going, once, however the
