@@ -286,7 +286,6 @@ impl Native for WindowsNative {
             ctrl: m.ctrl,
             alt: m.alt,
             meta: m.cmd,
-            alt_graph: false,
         };
         self.in_focused(move |s| synth::press(s, vk, modifiers))
             .ok_or_else(|| "the window is gone".to_owned())
