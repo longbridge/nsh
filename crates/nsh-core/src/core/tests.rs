@@ -43651,12 +43651,12 @@ mod terminal_layout {
             ],
         );
         ops.extend(text(3, 2, "Search"));
-        ops.extend(node(4, Tag::Scroll, 2, &[("flexGrow", V::Number(1.0))]));
-        ops.extend(text(5, 4, "Grid"));
+        ops.extend(node(5, Tag::Scroll, 2, &[("flexGrow", V::Number(1.0))]));
+        ops.extend(text(6, 5, "Grid"));
         let batch = laid_out(ops);
         // Ten rows: one for the search, nine for the grid.
         assert_eq!(frame_of(&batch, 2).map(|f| f.size.height.0), Some(160.0));
-        assert_eq!(frame_of(&batch, 4).map(|f| f.size.height.0), Some(144.0));
+        assert_eq!(frame_of(&batch, 5).map(|f| f.size.height.0), Some(144.0));
     }
 
     #[test]
@@ -52652,6 +52652,89 @@ mod folded_runs {
             c.apply(run(5, "dup")),
             Err(ApplyError::DuplicateNode(5))
         ));
+    }
+
+    #[test]
+    fn folded_runs_count_for_the_node_quota() {
+        let mut c = core();
+        c.set_max_nodes(3);
+        apply(&mut c, vec![run(2, "a"), run(3, "b")]);
+        assert!(matches!(
+            c.apply(run(4, "c")),
+            Err(ApplyError::TooManyNodes(3))
+        ));
+        assert!(matches!(
+            c.apply(Op::Create {
+                id: 4,
+                tag: Tag::View
+            }),
+            Err(ApplyError::TooManyNodes(3))
+        ));
+        apply(&mut c, vec![Op::Release { id: 3 }]);
+        apply(
+            &mut c,
+            vec![Op::Create {
+                id: 4,
+                tag: Tag::View,
+            }],
+        );
+        assert!(matches!(
+            c.apply(run(5, "d")),
+            Err(ApplyError::TooManyNodes(3))
+        ));
+    }
+
+    #[test]
+    fn a_node_cannot_reuse_a_folded_runs_id() {
+        let mut c = core();
+        block(&mut c, 2);
+        apply(&mut c, vec![run(3, "hello")]);
+        for folded in [false, true] {
+            if folded {
+                apply(&mut c, vec![insert(2, 3, None)]);
+            }
+            assert!(matches!(
+                c.apply(Op::Create {
+                    id: 3,
+                    tag: Tag::Scroll
+                }),
+                Err(ApplyError::DuplicateNode(3))
+            ));
+            assert!(c.runs.contains_key(&3));
+            assert!(!c.slots.contains(3));
+        }
+        assert_eq!(c.text_content(2), "hello");
+        apply(&mut c, vec![style_op(3, &[])]);
+        assert_eq!(raw_nodes(&c), 1);
+        assert_eq!(c.text_content(2), "hello");
+    }
+
+    #[test]
+    fn a_full_slab_keeps_a_blocks_folded_text() {
+        let mut c = core();
+        block(&mut c, 2);
+        apply(&mut c, vec![run(3, "hello"), insert(2, 3, None)]);
+        apply(
+            &mut c,
+            vec![Op::Create {
+                id: 4,
+                tag: Tag::View,
+            }],
+        );
+        c.commit();
+        c.set_max_nodes(3);
+        assert!(matches!(
+            c.apply(insert(2, 4, None)),
+            Err(ApplyError::TooManyNodes(3))
+        ));
+        assert_eq!(c.text_content(2), "hello");
+        assert_eq!(c.folded.len(), 1);
+        assert_eq!(raw_nodes(&c), 0);
+        c.set_max_nodes(10);
+        apply(&mut c, vec![insert(2, 4, None)]);
+        assert_eq!(raw_nodes(&c), 1);
+        assert_eq!(c.text_content(2), "hello");
+        assert!(c.folded.is_empty());
     }
 
     #[test]
