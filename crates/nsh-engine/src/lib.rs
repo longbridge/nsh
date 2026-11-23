@@ -75,6 +75,9 @@ pub use nsh_core::{
 };
 #[cfg(feature = "js-core")]
 pub use nsh_js::BYTECODE_VERSION;
+#[cfg(feature = "js-core")]
+#[doc(hidden)]
+pub use nsh_js::with_inline_root;
 /// Signed packages, release-key certificates, revocations and trust stores.
 #[cfg(feature = "js-core")]
 pub use nsh_package as package;
