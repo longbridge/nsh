@@ -409,7 +409,7 @@ function Upload() {
 
 播报那些用户否则会错过的变化：后台保存完成、在焦点之外出现的错误、计时结束。给视图设置 `accessibilityLiveRegion: "polite"`，屏幕阅读器就会自动播报它的变化——Android 上的 TalkBack、macOS 上的 VoiceOver、web 上的 `aria-live`、Windows 上的实时区域（`"assertive"` 不等用户空闲，立即朗读）。
 
-在 macOS 和 Web 上，警告（`.role(AccessibilityRole::Alert)`、`role="alert"`）会自己被读出：出现时、以及内容变化时，读它的标签，没有标签就读其中的文字，并打断屏幕阅读器正在读的内容。带这个角色显示的错误在这两个平台上不必再自己播报；在 macOS 上，同一次更新里播报的相同文字只读一次。在其他平台上，仍要自己播报。
+在 macOS 和 Web 上，警告（`.role(AccessibilityRole::Alert)`、`role="alert"`）会自己被读出：出现时、以及内容变化时，读它的标签，没有标签就读其中的文字，并打断屏幕阅读器正在读的内容。带这个角色显示的错误在这两个平台上不必再自己播报；在 macOS 上，同一次更新里播报的相同文字只读一次，同一次更新里拿掉又以相同文字重建的警告（移到另一个父节点下）也不会再读。在其他平台上，仍要自己播报。
 
 ## 文字大小
 

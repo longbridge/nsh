@@ -812,8 +812,6 @@ browsers' touches into what phones report:
   `Dialog` or alert are `inert`; the focus one took comes back when it closes.
 - **Accessibility**: `op_vp` sets ARIA from the accessibility props (roles mapped by `ARIA_ROLES`, `aria-disabled`,
   `-selected`, `-checked`, `-busy`, `-expanded`, `-value*`, `-live`, `-hidden`, the hint as `aria-description`);
-  a view a batch makes an alert takes `role="alert"` once the batch is in, and one that takes the place of an alert the
-  batch deletes with the same text (the app moved it) a frame later, which browsers do not read as an alert appearing;
   `Command::Announce` writes into a polite live region, `Command::AccessibilityFocus` focuses the view.
 - **Going back** (`back`) is decided from what is mounted, as on Android and the desktops: a stack inside the newest
   dialog pops, else the dialog gets the close attempt (`onCancel`, reason `"cancel"`) and closes natively when

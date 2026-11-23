@@ -112,11 +112,6 @@ function setAriaAttribute(el, name, value) {
   else el.setAttribute(name, next);
 }
 
-/** What an alert reads: its label, else its content's text. */
-function alertText(el) {
-  return (el.getAttribute("aria-label") ?? el.textContent ?? "").trim();
-}
-
 /** Elements a browser's Tab stops at without a `tabindex` (`elementTag`'s
  * links and `web={{ element }}` values). */
 const NATIVE_STOPS = "a[href], button, input, select, textarea, summary, [contenteditable]";
@@ -2441,14 +2436,9 @@ class Player {
   // Mounting ------------------------------------------------------------
 
   apply(batch) {
-    this.applying = true;
-    try {
-      for (const item of batch) {
-        const handler = this[`op_${item[0]}`];
-        if (handler) handler.call(this, item);
-      }
-    } finally {
-      this.applying = false;
+    for (const item of batch) {
+      const handler = this[`op_${item[0]}`];
+      if (handler) handler.call(this, item);
     }
     this.endLayoutAnimation();
     if (this.changedStacks.size) this.reconcileStacks();
@@ -2457,39 +2447,6 @@ class Player {
     if (this.relating?.size) this.linkRelations();
     if (this.viewportOverlays) this.syncFloats();
     if (this.autoFocusing?.size) this.focusAppeared();
-    if (this.alerting?.size) this.settleAlerts();
-    this.goneAlerts = null;
-  }
-
-  /** An alert the batch deletes: what it read, for an alert it moved to
-   * (`settleAlerts`). */
-  alertGone(el) {
-    if (el._alert) (this.goneAlerts ??= []).push(alertText(el));
-  }
-
-  /** The views that became alerts in the batch take the role, which has
-   * the browser read them as they appear. One that takes the place of an
-   * alert the batch deleted, with its text, moved: the app rebuilt it
-   * under another parent in one update (a toast stack drawn in the topmost
-   * modal as one opens), and it was read. It takes the role once the
-   * frame that shows it is past, which browsers do not read as an alert
-   * appearing. */
-  settleAlerts() {
-    const pending = this.alerting;
-    this.alerting = null;
-    const gone = this.goneAlerts ?? [];
-    for (const el of pending) {
-      if (!el._alert || this.views.get(el._id) !== el) continue;
-      if (!gone.includes(alertText(el))) {
-        el.setAttribute("role", "alert");
-        continue;
-      }
-      el._alertLater = true;
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        el._alertLater = false;
-        if (el._alert && this.views.get(el._id) === el) el.setAttribute("role", "alert");
-      }));
-    }
   }
 
   /** The `autoFocus` inputs the batch put in the page take the focus now,
@@ -2798,7 +2755,6 @@ class Player {
   op_d([, id]) {
     const el = this.view(id);
     if (!el) return;
-    this.alertGone(el);
     this.views.delete(id);
     this.mouseTracked.delete(id);
     this.wheelTracked.delete(id);
@@ -3346,15 +3302,7 @@ class Player {
     const role = ARIA_ROLES[p.role] ?? (p.role && p.role !== "none" ? p.role : el._pressable ? "button" : null);
     // A combo box that is an input is its field, which keeps the focus
     // (`fieldAria`).
-    let shown = el._field && p.role === "combobox" ? null : role;
-    // An alert a batch makes takes its role once the batch is in
-    // (`settleAlerts`), or a moved one a frame later.
-    el._alert = shown === "alert";
-    if (el._alert && el.getAttribute("role") !== "alert" && (this.applying || el._alertLater)) {
-      if (!el._alertLater) (this.alerting ??= new Set()).add(el);
-      shown = null;
-    }
-    set("role", shown);
+    set("role", el._field && p.role === "combobox" ? null : role);
     if (!el._field) {
       set("aria-label", p.label ?? el._textLabel);
       set("aria-description", p.hint);

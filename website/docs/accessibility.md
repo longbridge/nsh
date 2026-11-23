@@ -412,7 +412,7 @@ function Upload() {
 
 Announce changes the user would otherwise miss: a background save finishing, an error appearing away from the focus, a timer ending. `accessibilityLiveRegion: "polite"` on a view has the screen reader announce its changes by itself — TalkBack on Android, VoiceOver on macOS, `aria-live` on the web, a live region on Windows (`"assertive"` reads right away instead of when the user is idle).
 
-An alert (`.role(AccessibilityRole::Alert)`, `role="alert"`) is read by itself on macOS and the web: its label, or else the texts inside it, as it appears and again when its content changes, ahead of what the screen reader was saying. An error shown with the role needs no announcement of its own there; on macOS the same text announced in the same update is read once. On the other platforms, announce it as well.
+An alert (`.role(AccessibilityRole::Alert)`, `role="alert"`) is read by itself on macOS and the web: its label, or else the texts inside it, as it appears and again when its content changes, ahead of what the screen reader was saying. An error shown with the role needs no announcement of its own there; on macOS the same text announced in the same update is read once, and an alert the update takes down and makes again with the same text (moved to another parent) is not read again. On the other platforms, announce it as well.
 
 ## Text size
 

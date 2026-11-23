@@ -2406,12 +2406,28 @@ impl<M: TextEngine> Core<M> {
             let failed = self.report_failures();
             let woke = self.wake_waiting();
             let called = self.run_parked_methods();
-            if !changed && !rendered && !failed && !woke && !called {
+            if !changed && !rendered && !failed && !woke && !called && !self.run_after_render() {
                 break;
             }
         }
         self.flush_renders();
         self.end_retags();
+    }
+
+    /// Runs what waited for the commit's views ([`crate::element::after_render`]);
+    /// whether there was any (what it asked for and changed renders in this
+    /// round too).
+    fn run_after_render(&mut self) -> bool {
+        let rendered = self.components.executor.take_rendered();
+        if rendered.is_empty() {
+            return false;
+        }
+        for crate::element::AfterAnswer { f, .. } in rendered {
+            if let Err(message) = caught(f) {
+                log::error!(target: "js", "a closure after the views rendered failed: {message}");
+            }
+        }
+        true
     }
 
     /// Node `id` goes: what the views' renders and the app's classes knew

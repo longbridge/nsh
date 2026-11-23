@@ -559,6 +559,9 @@ pub(crate) struct Executor {
     /// What waits for the app to answer the events emitted before it
     /// ([`super::after_answer`]).
     answers: RefCell<Answers>,
+    /// What waits for the views of the commit being made
+    /// ([`super::after_render`]).
+    rendered: RefCell<Vec<AfterAnswer>>,
     /// The engine's sounds ([`super::audio`]).
     pub(crate) sounds: RefCell<super::audio::Sounds>,
 }
@@ -573,7 +576,8 @@ struct Answers {
     due: Vec<AfterAnswer>,
 }
 
-/// A closure of [`super::after_answer`] and the owner it runs under.
+/// A closure of [`super::after_answer`] or [`super::after_render`] and the
+/// owner it runs under.
 pub(crate) struct AfterAnswer {
     pub(crate) owner: super::Owner,
     pub(crate) f: Box<dyn FnOnce()>,
@@ -834,6 +838,17 @@ impl Executor {
     /// The closures whose events JS has handled, in order.
     pub(crate) fn take_due_answers(&self) -> Vec<AfterAnswer> {
         std::mem::take(&mut self.answers.borrow_mut().due)
+    }
+
+    /// Keeps `f` until the components of the commit being made have
+    /// rendered ([`super::after_render`]).
+    pub(crate) fn after_render(&self, f: AfterAnswer) {
+        self.rendered.borrow_mut().push(f);
+    }
+
+    /// The closures waiting for the commit's views, in order.
+    pub(crate) fn take_rendered(&self) -> Vec<AfterAnswer> {
+        std::mem::take(&mut self.rendered.borrow_mut())
     }
 }
 

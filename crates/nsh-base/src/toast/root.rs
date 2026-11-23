@@ -1,16 +1,8 @@
 //! `Toast`: the unstyled semantic root of a toast.
 
-use std::{
-    rc::Rc,
-    sync::atomic::{AtomicU64, Ordering},
-    time::Duration,
-};
+use std::{rc::Rc, time::Duration};
 
-use nsh_core::{
-    TouchEvent, TouchPhase,
-    prelude::*,
-    time::{Instant, now},
-};
+use nsh_core::{TouchEvent, TouchPhase, prelude::*};
 
 use super::ToastTransitionStatus;
 use crate::popup::important;
@@ -26,10 +18,6 @@ const SETTLE_MS: f32 = 200.0;
 /// How long a toast waits for its first display frame before it counts as
 /// past it without one (a surface not on screen).
 const FIRST_FRAME_MS: u64 = 50;
-/// How long a toast taken down while it enters (`starting`) stays the one
-/// a toast mounted with its label is: the app rebuilt it under another
-/// parent, in the same update.
-const MOVED: Duration = Duration::from_millis(50);
 
 /// The direction a toast is swiped away in.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PropEnum)]
@@ -85,75 +73,83 @@ pub enum ToastEvent {
     DismissRequest,
 }
 
-/// The surface's toasts that are entering (`starting`), by label.
+/// The surface's toasts the update being made mounted and took down, by
+/// label: what tells a toast the app moved from a new one once the update's
+/// views are made ([`settle`]).
 #[derive(Clone, Default)]
-struct Entering(Vec<EnteringToast>);
-
-#[derive(Clone)]
-struct EnteringToast {
-    id: u64,
-    label: SharedString,
-    /// When it was taken down; `None`: it is mounted.
-    left: Option<Instant>,
-}
-
-impl EnteringToast {
-    /// Whether it is still one a toast mounted at `at` can be.
-    fn current(&self, at: Instant) -> bool {
-        self.left
-            .is_none_or(|left| at.saturating_duration_since(left) < MOVED)
-    }
+struct Moves {
+    /// The toasts mounted in the update, by id, not read yet.
+    mounted: Vec<(u64, SharedString)>,
+    /// The labels of the toasts the update took down, which were read.
+    gone: Vec<SharedString>,
+    /// The id of the next toast mounted.
+    next: u64,
+    /// Whether [`settle`] waits for the update's views.
+    settling: bool,
 }
 
 /// Reads `label` as a toast shows, once per toast however often the app
 /// rebuilds it (moves it to another parent, as a stack drawn in the
-/// topmost modal is when a modal opens or closes). A toast mounted past
-/// its entrance (`present`, `ending`) was read before it moved; one
-/// entering while a toast with its label enters, or was taken down
-/// entering a moment ago, is that toast.
-fn announce_once(label: Option<SharedString>, status: Prop<ToastTransitionStatus>) {
+/// topmost modal is when a modal opens or closes): a toast mounted in the
+/// update that takes down a toast with its label is that toast, in either
+/// order. The decision waits for the update's views, and its announcement
+/// goes out with them.
+fn announce_once(label: Option<SharedString>) {
     let Some(label) = label else {
         return;
     };
-    if status.get_untracked() != ToastTransitionStatus::Starting {
+    let moves = global::<Moves>();
+    let id = moves.with_untracked(|m| m.next);
+    moves.update(|m| {
+        m.next += 1;
+        m.mounted.push((id, label.clone()));
+    });
+    settle_later(moves);
+    cleanup(move || {
+        // The engine going away takes down every toast: nothing to read.
+        if try_global::<Moves>().is_none() {
+            return;
+        }
+        moves.update(|m| match m.mounted.iter().position(|(t, _)| *t == id) {
+            // Taken down in the update that mounted it: never shown, so a
+            // toast mounted with its label in its place is a new one.
+            Some(at) => {
+                m.mounted.remove(at);
+            }
+            None => m.gone.push(label),
+        });
+        settle_later(moves);
+    });
+}
+
+/// Has [`settle`] run once the update's views are made.
+fn settle_later(moves: Signal<Moves>) {
+    if moves.with_untracked(|m| m.settling) {
         return;
     }
-    // Unique among every surface's toasts, which is all it needs.
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let id = NEXT.fetch_add(1, Ordering::Relaxed);
-    let entering = global::<Entering>();
-    let at = now();
-    let moved = entering.with_untracked(|e| e.0.iter().any(|t| t.label == label && t.current(at)));
-    if !moved {
+    moves.update(|m| m.settling = true);
+    nsh_core::element::after_render(move || settle(moves));
+}
+
+/// The update's views are made: each toast it mounted is read, unless it
+/// took down a toast with its label (one each), which the app moved.
+fn settle(moves: Signal<Moves>) {
+    let mut read = Vec::new();
+    moves.update(|m| {
+        for (_, label) in m.mounted.drain(..) {
+            match m.gone.iter().position(|g| *g == label) {
+                Some(at) => {
+                    m.gone.swap_remove(at);
+                }
+                None => read.push(label),
+            }
+        }
+        m.gone.clear();
+        m.settling = false;
+    });
+    for label in read {
         announce_for_accessibility(label.to_string());
     }
-    entering.update(|e| {
-        e.0.retain(|t| t.current(at));
-        e.0.push(EnteringToast {
-            id,
-            label,
-            left: None,
-        });
-    });
-    // Entered (or ending): a toast with its label mounted later is another.
-    effect(move || {
-        if status.get() != ToastTransitionStatus::Starting
-            && entering.with_untracked(|e| e.0.iter().any(|t| t.id == id))
-        {
-            entering.update(|e| e.0.retain(|t| t.id != id));
-        }
-    });
-    // Taken down while entering: the toast the app rebuilds elsewhere.
-    cleanup(move || {
-        if entering.with_untracked(|e| e.0.iter().any(|t| t.id == id)) {
-            let left = now();
-            entering.update(|e| {
-                if let Some(t) = e.0.iter_mut().find(|t| t.id == id) {
-                    t.left = Some(left);
-                }
-            });
-        }
-    });
 }
 
 /// An unstyled semantic toast root (`role` alert), as `gpui-base`'s
@@ -170,7 +166,7 @@ fn announce_once(label: Option<SharedString>, status: Prop<ToastTransitionStatus
 #[component]
 pub fn Toast(props: ToastProps, cx: Scope<ToastEvent>) -> impl IntoElement {
     let status = props.transition_status;
-    announce_once(props.accessibility_label.get_untracked(), status);
+    announce_once(props.accessibility_label.get_untracked());
 
     // Past its first frame: the next display frame, or a frame's time where
     // none comes, whichever is first.
