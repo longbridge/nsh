@@ -3200,7 +3200,14 @@ impl<M: TextEngine> Core<M> {
             .windows
             .keys()
             .copied()
-            .filter(|&id| self.key(id).is_err())
+            // Released, or out of the tree: a closed window's root that
+            // something still holds (a development host keeps the mounted
+            // app for hot updates) is not released yet, but it is gone.
+            .filter(|&id| {
+                !self.key(id).is_ok_and(|k| {
+                    id == crate::ROOT_ID || self.nodes[k as usize].parent != NO_KEY
+                })
+            })
             .collect();
         for id in gone {
             self.windows.remove(&id);
