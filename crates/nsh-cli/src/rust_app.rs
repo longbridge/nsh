@@ -318,6 +318,9 @@ pub(crate) struct RustApp {
     /// local crates they depend on by path ([`path_dependencies`]), watched
     /// in development.
     watched: Vec<PathBuf>,
+    /// The directories `nsh.json`'s `"watch"` skips (`WatchConfig`):
+    /// events inside them are not the app's.
+    watch_ignored: Vec<PathBuf>,
     /// A Rust app (`nsh.json` `"root"`, the entry is `nsh.json`): what its
     /// runners mount, with no JS.
     root: Option<RootConfig>,
@@ -1099,6 +1102,8 @@ pub(crate) fn runner_only(entry: &Path) -> anyhow::Result<RustApp> {
         nsh,
         crates: Vec::new(),
         watched,
+        // A TSX app packaged from flags alone has no manifest of its own.
+        watch_ignored: Vec::new(),
         root: None,
         retargeted: false,
         unify: true,
@@ -1161,6 +1166,14 @@ pub(crate) fn of(entry: &Path, unify: bool) -> anyhow::Result<Option<RustApp>> {
     }
     let own: Vec<AppCrate> = crates.iter().filter(|c| !c.is_fetched()).cloned().collect();
     let watched = watched(&own, nsh.source());
+    let watch_ignored = crate::dev::ignored_dirs(
+        &config
+            .get("watch")
+            .and_then(|w| serde_json::from_value::<crate::package::WatchConfig>(w.clone()).ok())
+            .map(|w| w.ignore)
+            .unwrap_or_default(),
+        dir,
+    );
     let minimums = AppleMinimums::of(&config)?;
     // Only installed nshm, with a released nsh: nothing of the build is the
     // app's, so every app with these nshm shares it.
@@ -1194,6 +1207,7 @@ pub(crate) fn of(entry: &Path, unify: bool) -> anyhow::Result<Option<RustApp>> {
         nsh,
         crates,
         watched,
+        watch_ignored,
         root,
         retargeted,
         unify,
@@ -2307,6 +2321,12 @@ impl RustApp {
         &self.watched
     }
 
+    /// Whether `path` is inside a directory `nsh.json`'s `"watch"` skips:
+    /// its edits are not the app's.
+    pub(crate) fn in_watch_ignore(&self, path: &Path) -> bool {
+        self.watch_ignored.iter().any(|dir| path.starts_with(dir))
+    }
+
     /// Watches the app's Rust code with `watcher`.
     fn watch_with(&self, watcher: &mut impl notify::Watcher) -> anyhow::Result<()> {
         for dir in &self.watched {
@@ -2343,7 +2363,10 @@ impl RustApp {
             };
             // Reads (inotify reports them) change nothing.
             if !matches!(event.kind, notify::EventKind::Access(_))
-                && event.paths.iter().any(|p| self.is_rust(p))
+                && event
+                    .paths
+                    .iter()
+                    .any(|p| self.is_rust(p) && !self.in_watch_ignore(p))
             {
                 // Editors save in several writes: let them settle.
                 std::thread::sleep(std::time::Duration::from_millis(100));
@@ -3744,7 +3767,10 @@ opt-level = \"s\"
             };
             // Reads (inotify reports them) change nothing.
             if !matches!(event.kind, notify::EventKind::Access(_))
-                && event.paths.iter().any(|p| self.is_rust(p))
+                && event
+                    .paths
+                    .iter()
+                    .any(|p| self.is_rust(p) && !self.in_watch_ignore(p))
             {
                 return Err(Restart.into());
             }
@@ -4693,6 +4719,25 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
+    /// What `nsh.json`'s `"watch"` names is out of the watcher's events.
+    #[test]
+    fn a_watch_ignore_takes_its_events_out() {
+        let dir = std::env::temp_dir().join(format!("nsh-watch-ignore-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let native = dir.join("native");
+        std::fs::create_dir_all(&native).unwrap();
+        let mut app = app(&dir, &[("app_native", native.clone())], None);
+        app.watch_ignored = vec![dir.join("vendor"), dir.join("third/jpeg")];
+        assert!(app.in_watch_ignore(&dir.join("vendor/lib.rs")));
+        assert!(app.in_watch_ignore(&dir.join("third/jpeg/src/lib.rs")));
+        // A sibling with a longer name is not inside it.
+        assert!(!app.in_watch_ignore(&dir.join("vendors/lib.rs")));
+        assert!(!app.in_watch_ignore(&dir.join("third/jpeg-turbo/lib.rs")));
+        // The crate's own code stays in.
+        assert!(!app.in_watch_ignore(&native.join("src/lib.rs")));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     /// An app in `dir` with `crates` (package, directory), built against
     /// this checkout.
     fn app(dir: &Path, crates: &[(&str, PathBuf)], root: Option<RootConfig>) -> RustApp {
@@ -4704,6 +4749,7 @@ mod tests {
             workspace: dir.join(".nsh/rust"),
             nsh: Nsh::Source(Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")),
             watched: crates.iter().map(|c| c.dir.clone()).collect(),
+            watch_ignored: Vec::new(),
             crates,
             root,
             retargeted: false,
