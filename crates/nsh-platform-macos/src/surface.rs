@@ -631,6 +631,37 @@ impl Surface {
         }
     }
 
+    /// Tells the engine the window size and scale the app sees
+    /// (`windowSize()`, `pixelRatio()`, the size classes): its primary
+    /// window's ([`crate::window::primary`]), as the user resizes or moves
+    /// it, else this surface's (an embedded view, or a host whose app shows
+    /// no window). The desktop host's own window never shows: reporting it
+    /// would lay the app out for a window nobody sees.
+    pub(crate) fn window_environment(&self) {
+        let (size, scale) = crate::window::primary(self).unwrap_or_else(|| {
+            let root = self.root.ns();
+            let scale = root
+                .window()
+                .map_or(self.environment.get().pixel_ratio, |w| {
+                    w.backingScaleFactor() as f32
+                });
+            (self.root.state().frame.size, scale)
+        });
+        let mut env = self.environment.get();
+        if env.window == size && env.pixel_ratio == scale {
+            return;
+        }
+        if env.pixel_ratio != scale {
+            self.set_raster_scale(f64::from(scale));
+        }
+        env.window = size;
+        env.pixel_ratio = scale;
+        // Only the size and scale: the appearance stays as it was applied,
+        // which a live resize would otherwise apply again on every step.
+        self.environment.set(env);
+        self.control(|c| c.set_environment(env));
+    }
+
     /// The root view got a new size (the window's content area): the
     /// layout at that size is applied before this returns, unless the
     /// engine takes longer than [`RESIZE_WAIT`] (see the module doc).
@@ -643,13 +674,8 @@ impl Surface {
             s.frame.size.width.0 = width;
             s.frame.size.height.0 = height;
         }
-        let mut env = self.environment.get();
-        env.window = nsh_core::Size::new(nsh_core::Points(width), nsh_core::Points(height));
-        self.environment.set(env);
-        self.control(|c| {
-            c.resize(Size::new(Points(width), Points(height)));
-            c.set_environment(env);
-        });
+        self.control(|c| c.resize(Size::new(Points(width), Points(height))));
+        self.window_environment();
         crate::navigation::surface_resized(self, width, height);
         // Full screen and the window's size change the title bar's area.
         crate::chrome::update_area(self);

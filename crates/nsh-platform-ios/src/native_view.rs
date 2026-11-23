@@ -873,6 +873,9 @@ fn traits(props: &ViewProps) -> UIAccessibilityTraits {
             | AccessibilityRole::Option => UIAccessibilityTraitButton,
             AccessibilityRole::Link => UIAccessibilityTraitLink,
             AccessibilityRole::Search => UIAccessibilityTraitSearchField,
+            // UIKit has no text field trait: a native text field is one by
+            // its class, and a view given the role keeps no trait of its own.
+            AccessibilityRole::Textbox => UIAccessibilityTraitNone,
             AccessibilityRole::Image => UIAccessibilityTraitImage,
             AccessibilityRole::KeyboardKey => UIAccessibilityTraitKeyboardKey,
             AccessibilityRole::Text => UIAccessibilityTraitStaticText,
@@ -1031,6 +1034,8 @@ mod tests {
             adjustable
         );
         assert_eq!(traits_of(AccessibilityRole::Adjustable, &[]), adjustable);
+        // UIKit has no text field trait to give a text box.
+        assert_eq!(traits_of(AccessibilityRole::Textbox, &[]), 0);
         // Without them every role keeps its traits.
         assert_eq!(traits_of(AccessibilityRole::Image, &[]), image);
         assert_eq!(

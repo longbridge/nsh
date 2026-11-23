@@ -30,7 +30,13 @@
   visibility preference (`WhenScrolling` suppresses content-hover reveal). `scrollbar={false}` hides the
   indicator on either axis (the platforms' `scroll::config`; on the web `barShown`, in the desktop idiom): a mouse
   without a horizontal wheel moves a horizontal view with Shift + wheel, with the vertical wheel where nothing
-  around it scrolls vertically (`scroll_target`), and with the keys. With a
+  around it scrolls vertically (`scroll_target`), and with the keys. A notched wheel moves as the platform's (at once
+  on macOS and Linux, a short glide on Windows) unless the view sets `smoothWheel`: then each notch glides on
+  Chromium's curve (`nsh_core::scroll::wheel_glide`; `wheel_smooth` for the shared backends, macOS's `scroll.rs` for
+  its own), a run of notches one motion, except where notches step through snap points or pages, zoom, or the system
+  reduces motion. `wheelLineHeight` sets a wheel line's length in points instead of the platform's (each backend
+  hands `wheel_line` its own line). iOS, Android and the web ignore both: their scroll views are the system's and the
+  browser's, whose wheels already scroll as theirs do. With a
   mouse alone, pull to refresh needs a touchpad that rubber-bands (macOS): apps offer another way on the desktop.
 - **Scroll bars of the app's own** (`nsh/base`'s `Scrollbar`, `docs/dev/components.md` "Scroll bars"): a view the
   app places that names a scroll view or a list (`scroll={ref}`), with its look (`class`, `thumbClass`) and `mode`;

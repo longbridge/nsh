@@ -591,6 +591,7 @@ fn open_app(path: &Path, window: &mut Window, cx: &mut App) -> Option<Entity<App
         }
     };
     let options = AppOptions {
+        inline_root: true,
         // The build copies imported assets next to the bundle.
         asset_base: path
             .parent()

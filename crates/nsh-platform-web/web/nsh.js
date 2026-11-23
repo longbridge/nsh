@@ -77,6 +77,18 @@ const MOUSE_BUTTON_NAMES = ["left", "middle", "right", "back", "forward"];
 const MOUSE_BUTTON_BITS = [1, 4, 2, 8, 16];
 /** The keys whose press or release is reported as a mouse move. */
 const MOUSE_MODIFIER_KEYS = new Set(["Control", "Alt", "Shift", "Meta"]);
+/** A link the browser can open itself: a `Link` with an `href`, drawn as an `a`. */
+const LINK_SELECTOR = "a.nsh-v[href]";
+
+/**
+ * Whether pointer event `e` holds a modifier key. A click with one on a link
+ * (`LINK_SELECTOR`) is the browser's, which opens the link in a new tab (Cmd
+ * or Ctrl), a new window (Shift) or downloads it (Alt); a plain one is the
+ * app's (`installInput`, `pointerDown`).
+ */
+function heldModifier(e) {
+  return e.metaKey || e.ctrlKey || e.shiftKey || e.altKey;
+}
 // What lays out a field's text, copied to the hidden copy that finds its
 // caret (`caretBounds`).
 const CARET_STYLE = [
@@ -88,7 +100,8 @@ const CARET_STYLE = [
 /** `accessibilityRole`s whose ARIA role has another name; others are the same. */
 const ARIA_ROLES = {
   none: null, header: "heading", image: "img", imagebutton: "button", keyboardkey: "button", adjustable: "slider",
-  search: "searchbox", text: null, summary: "status", togglebutton: "button", dropdownlist: "combobox",
+  search: "searchbox", textbox: "textbox", text: null, summary: "status", togglebutton: "button",
+  dropdownlist: "combobox",
 };
 
 /** Reconcile accessibility props with the element's current attributes. */
@@ -5960,10 +5973,13 @@ class Player {
     const text = data?.getData("text/plain") ?? "";
     const html = data?.getData("text/html") ?? "";
     const files = [...(data?.files ?? [])];
+    // A file larger than `pasteMaxSize` is not read: its name, type and size.
+    const max = el._config?.pasteMaxSize ?? Infinity;
+    const read = files.filter((f) => f.size <= max);
     // A file manager's files are local paths the page cannot read: their
     // `file:` URLs, when the browser lists them.
     const uris = (data?.getData("text/uri-list") ?? "").split(/\r?\n/).filter((u) => u.startsWith("file:"));
-    Promise.all(files.map((f) => f.arrayBuffer())).then((buffers) => {
+    Promise.all(read.map((f) => f.arrayBuffer())).then((buffers) => {
       const size = buffers.reduce((n, b) => n + b.byteLength, 0);
       const bytes = new Uint8Array(size);
       let at = 0;
@@ -5974,7 +5990,13 @@ class Player {
       const json = JSON.stringify({
         text,
         html,
-        files: files.map((f, i) => ({ name: f.name || "image.png", type: f.type, size: buffers[i].byteLength })),
+        files: files.map((f) => {
+          const i = read.indexOf(f);
+          const name = f.name || "image.png";
+          return i < 0
+            ? { name, type: f.type, size: f.size, read: false }
+            : { name, type: f.type, size: buffers[i].byteLength };
+        }),
         uris,
       });
       this.call(() => this.withStrings([json, bytes], (jp, jl, bp, bl) => this.wasm.nsh_paste(el._id, jp, jl, bp, bl)));
@@ -9050,14 +9072,22 @@ class Player {
     }, { passive: false });
     // A link (`Link` with an `href`) is the app's to press: a plain click
     // stays in the app (its `onPress`), a click with a modifier or the
-    // middle button opens its `href` as the browser would.
+    // middle button opens its `href` as the browser would, and the link
+    // takes no press then (`pointerDown`).
     root.addEventListener("click", (e) => {
-      const link = e.target instanceof Element ? e.target.closest("a.nsh-v[href]") : null;
-      if (link && e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) e.preventDefault();
+      const link = e.target instanceof Element ? e.target.closest(LINK_SELECTOR) : null;
+      if (link && e.button === 0 && !heldModifier(e)) e.preventDefault();
     });
     window.addEventListener("pointermove", (e) => this.pointerMove(e), { passive: false });
     window.addEventListener("pointerup", (e) => this.pointerUp(e, false));
     window.addEventListener("pointercancel", (e) => this.pointerUp(e, true));
+    window.addEventListener("blur", () => {
+      this.hoverButtons = 0;
+      for (const [pointerId, p] of [...this.pointers]) {
+        p.scrolls = null;
+        this.pointerUp({ pointerId, buttons: 0 }, true);
+      }
+    });
     // A drag never drags images or text out of the app.
     root.addEventListener("dragstart", (e) => e.preventDefault());
     root.addEventListener("mousedown", (e) => this.mouseDown(e));
@@ -10227,6 +10257,11 @@ class Player {
     if (e.pointerType === "mouse") this.hoverButtons = e.buttons;
     Player.active = this;
     if (e.button > 0) return;
+    // A click with a modifier key on a link is the browser's, as a middle
+    // click is: it opens the link in a new tab or window (the click
+    // listener of `installInput` leaves it to the browser), so the link
+    // does not also take the press and open it here.
+    if (heldModifier(e) && e.target?.closest?.(LINK_SELECTOR)) return;
     if (e.pointerType === "mouse" && this.desktopUI && this.grabBar(e)) return;
     // A drag selects in selectable text and fields instead of panning a
     // zoomable view.

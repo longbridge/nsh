@@ -268,6 +268,10 @@ for when a page first needs them. The development hosts (`nsh run`) carry the us
 `"picker": true` lets the app show the system's picker for photos ([`Picker`](../modules/nsh.md#picker)): the user
 picks what reaches the app.
 
+It also grants the photo library to an app that turns on `nsh-extra`'s [`Photos`](./nshm.md#photos): reading the
+recent photos, their thumbnails and the photos themselves. What the user allows holds for the whole app, so this
+capability is what decides which code reaches them.
+
 ### `share`
 
 `"share": true` lets the app show the system's share sheet ([`Share`](../modules/nsh.md#share)): the user chooses
@@ -275,8 +279,8 @@ where the content goes. A shared file must also be readable under `fs.read`.
 
 ### `speech`
 
-`"speech": true` lets the app recognize what the user says ([`Speech`](../modules/nsh.md#speech)): the microphone and
-the system's speech recognizer, whose transcript reaches the app. The system still asks the user once.
+`"speech": true` lets the app recognize what the user says (`nsh-extra`'s [`Speech`](./nshm.md#speech)): the
+microphone and the system's speech recognizer, whose transcript reaches the app. The system still asks the user once.
 
 ### `audio`
 
@@ -374,6 +378,7 @@ if (host.available()) {
 | Speech | `Speech.start` throws `ERR_ACCESS_DENIED`, `permission` `"speech"` and `resource` `""`; the microphone stays off. |
 | Sound | `Sound.load` rejects and `new AudioPlayer` throws `ERR_ACCESS_DENIED`, `permission` `"audio"` and `resource` the source; nothing is read or played. |
 | Notifications | Each function of `Notifications` rejects or throws `ERR_ACCESS_DENIED`, `permission` `"notifications"` and `resource` `""`; nothing shows. |
+| Photos | Each function of `nsh-extra`'s `Photos` but `access()` rejects or throws `ERR_ACCESS_DENIED`, `permission` `"picker"` and `resource` `""`; the library is not read and the user is not asked. |
 | Push | Each function of `nsh-extra`'s `Push` but `available()` rejects or throws `ERR_ACCESS_DENIED`, `permission` `"notifications"` and `resource` `""`; the device is not registered, and no token or delivery reaches the app. |
 | `openUrl` | The promise rejects with `ERR_ACCESS_DENIED`, `permission` `"openUrl"` and `resource` the URL; nothing opens. |
 | Host call | `host.call` rejects with `ERR_ACCESS_DENIED`, `permission` `"host"` and `resource` the function's name (`host.post` throws it); the call never reaches the host. |

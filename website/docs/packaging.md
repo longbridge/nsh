@@ -65,7 +65,7 @@ TSX app adds its entry (`nsh package App.tsx --target …`).
 `nsh.json` also holds `rust` and `root` (the app's crates and its root component, [Building with Rust](./rust.md)),
 `theme` and `appearance`, `tailwind` (see [Tailwind](./tailwind.md)), `capabilities` (see
 [Sandbox and capabilities](./sandbox-and-capabilities.md)), `android` (`targetSdk`, `usesCleartextTraffic`, `permissions`, `libraries`, `manifestPlaceholders`, `queries` and `application`, [below](#target-api-level)), `ios` and `macos` (the `Info.plist` keys and entitlements
-of their packages, [below](#infoplist-keys-and-entitlements); `ios.extensions` and `macos.extensions`, [iOS app extensions](#app-extensions) and [macOS app extensions](#macos-app-extensions); `ios.frameworks` and `ios.linkerFlags`, [frameworks](#frameworks-and-linker-flags); `macos.activationPolicy`, a [menu bar app](./macos.md#menu-bar-apps)) and `updater`, which makes desktop packages update themselves
+of their packages, [below](#infoplist-keys-and-entitlements); `ios.extensions` and `macos.extensions`, [iOS app extensions](#app-extensions) and [macOS app extensions](#macos-app-extensions); `macos.activationPolicy`, a [menu bar app](./macos.md#menu-bar-apps)) and `updater`, which makes desktop packages update themselves
 (see [App Updates](./app-updates.md)) and every native package take [OTA updates](./ota-updates.md); [Project structure](./project-structure.md#nshjson) lists
 every key. A key or value NSH cannot read is reported as a warning and left out, so an app written for a newer NSH
 still builds with an older one, and the warning catches a typo.
@@ -191,57 +191,6 @@ data through an app group, which both list in their entitlements. An app that st
 }
 ```
 
-### Frameworks and linker flags
-
-An iOS SDK comes as an XCFramework (`.xcframework`) or a framework (`.framework`), with a static or a dynamic library
-inside. The app's [Rust crate](./rust.md) calls it; `ios.frameworks` lists it, relative to `nsh.json`, and
-`ios.linkerFlags` adds what the SDK's instructions ask of the link, such as `-ObjC` and the system libraries and
-frameworks it uses. An nshm lists its own in its `Cargo.toml`
-([What the packaged app needs](./nshm.md#what-the-packaged-app-needs)), and the apps that use it list nothing:
-
-```json
-{
-  "ios": {
-    "frameworks": [
-      "ios/Vendor/Analytics.xcframework",
-      { "path": "ios/Vendor/Ads.xcframework", "forceLoad": true },
-      { "path": "ios/Vendor/Push.xcframework", "targets": ["ios", "ios-simulator"], "optional": true }
-    ],
-    "linkerFlags": ["-ObjC", "-lsqlite3", "-framework", "AdServices"]
-  }
-}
-```
-
-| Key | Meaning |
-|---|---|
-| `path` | The `.xcframework` or `.framework`. An entry that is a string is its path. |
-| `forceLoad` | Links all of a static library (`-force_load`), not only the parts the app's code calls, for SDKs whose instructions ask for it. |
-| `targets` | The targets it is linked for: `ios` (devices), `ios-simulator`, `catalyst` (Mac Catalyst), named as `nsh package --target` and `nsh run --target` name them. Default: all of them. |
-| `optional` | A build it is not there for leaves it out with a warning, rather than stopping. Default `false`. |
-
-- Every iOS executable built with the app's crates links them: packages, and `nsh run`'s development hosts for the
-  simulator and Mac Catalyst. Each build takes the XCFramework's library for its target (devices, the simulator,
-  Mac Catalyst); an XCFramework without one for the target stops the build with an error naming those it has.
-- An SDK without a library for a target lists the targets it has in `targets`; the other targets build without it, so
-  the crate calls it only where it is linked, such as under `#[cfg(not(target_abi = "macabi"))]` for an SDK without
-  Mac Catalyst. Two entries of one name serve different targets when their `targets` do not overlap.
-- An SDK that is not in the repository, which a script fetches before the builds that use it, is `optional`: a build
-  without it warns and links the rest. Once fetched, it is linked as any other. Only a missing path is optional: one
-  that is there without a library for the target is still an error. Code that refers to the SDK's symbols links only
-  in the builds that have it; code that looks its classes up by name at run time links in all of them.
-- An nshm links an SDK only with one of its features by listing it under `[package.metadata.nsh.features.<feature>]`
-  ([What the packaged app needs](./nshm.md#what-the-packaged-app-needs)).
-- A static library becomes part of the app's executable. A dynamic framework is copied into the app's `Frameworks/`
-  and signed before the app: ad hoc for the simulator, with the `--sign` identity for devices.
-- A dynamic framework keeps its privacy manifest in its own bundle, where App Store Connect reads it. A static
-  library's code is the app's, so iOS packages add what its privacy manifest declares to the app's
-  `PrivacyInfo.xcprivacy` ([Privacy manifest](#privacy-manifest)).
-- Each flag is one argument, passed as written after the libraries (`"-framework", "AdServices"` are two). Paths in
-  flags are not resolved against `nsh.json`: list a library in `frameworks` to link it.
-- The same crates also build for other platforms without the SDK: call it under `#[cfg(target_os = "ios")]`.
-- The frameworks are linked with the app's Rust code, so an app without crates (`rust` or an nshm) cannot list them:
-  `nsh package` stops with an error.
-
 ## Android
 
 ```sh
@@ -346,7 +295,9 @@ crates, goes in once; a class that two different files define stops the build, n
 no libraries is packaged as before, without `d8`.
 
 The libraries are local files: NSH does not download them or resolve Maven dependencies, so list the libraries an SDK
-depends on as well.
+depends on as well. The third-party tool [nsh-maven](https://github.com/SuperNSH/maven) resolves a library from Maven
+repositories with what it depends on (`nsh-maven add com.google.firebase:firebase-messaging:26.0.1`), downloads the
+files into the app and lists them here; with `--crate` it lists them in an nshm crate's `Cargo.toml`.
 
 An Android library (`.aar`) brings more than its classes, which go the jars' way: its native libraries
 (`jni/<abi>/*.so`) go in for the ABIs the package has, stored uncompressed like NSH's own; its assets join the app's
@@ -695,14 +646,15 @@ wrong type or an entry without all its keys is left out with a warning. What App
 category and reason codes themselves.
 
 NSH's runtime is part of the app's executable, so the APIs it calls count as the app's: declare these with the app's
-own. So is the code of the static libraries in `ios.frameworks`, whose privacy manifests packages add to the app's
-([Frameworks and linker flags](#frameworks-and-linker-flags)).
+own.
 
 | Category | What in NSH calls it | Reason |
 |---|---|---|
 | `NSPrivacyAccessedAPICategoryFileTimestamp` | Rust's standard library reading file metadata; the image cache, which ages its files | `C617.1`; also `3B52.1` when the app reads files people pick |
 | `NSPrivacyAccessedAPICategorySystemBootTime` | the renderer's timer | `35F9.1` |
-| `NSPrivacyAccessedAPICategoryUserDefaults` | reading the temperature unit people choose in Settings, which no reason of Apple's covers ([#2830](https://github.com/longbridge/nsh/issues/2830)) | |
+
+NSH reads no user defaults on iOS (the temperature unit comes from the locale): declare
+`NSPrivacyAccessedAPICategoryUserDefaults` only when the app's own code or an SDK it links calls `NSUserDefaults`.
 
 ### Minimum system version
 
@@ -829,11 +781,11 @@ A packaged app declares the hardware NSH's own features use, from its `nsh.json`
 
 | Feature | iOS and macOS | Android |
 |---|---|---|
-| [`Speech`](../modules/nsh.md#speech), when the app grants `speech` or declares no capabilities | `NSMicrophoneUsageDescription`, `NSSpeechRecognitionUsageDescription` | |
 | Web pages that capture media ([`capabilities.webview.media`](./sandbox-and-capabilities.md#webview)) | `NSMicrophoneUsageDescription`, `NSCameraUsageDescription`; on macOS the entitlements `com.apple.security.device.audio-input` and `com.apple.security.device.camera` | `RECORD_AUDIO`, `CAMERA` |
 | [`Notifications`](../modules/nsh.md#notifications), when the app grants `notifications` or declares no capabilities | | `POST_NOTIFICATIONS` |
 
-Every Android package also declares `INTERNET` and `ACCESS_NETWORK_STATE`. A usage description is what the system shows when the app first asks;
+The [nshm](./nshm.md) an app installs add what their features need: `nsh-extra`'s `speech`, for example, the
+microphone's and speech recognition's usage descriptions and `RECORD_AUDIO`. Every Android package also declares `INTERNET` and `ACCESS_NETWORK_STATE`. A usage description is what the system shows when the app first asks;
 the app's `infoPlist` words it its own way ([above](#infoplist-keys-and-entitlements)).
 
 On iOS and macOS, an app's own [Rust crate](./rust.md) reaches other hardware through the system's frameworks, with the
@@ -861,9 +813,6 @@ assets it imports, next to the prebuilt runtime:
 | Linux | the `nsh-linux-app` executable, renamed `<Name>` | `<Name>/nsh/bundle.nshc`, `nsh/assets/…` |
 | Windows | the `nsh-windows-app.exe` executable, renamed `<Name>.exe` | `<Name>\nsh\bundle.nshc`, `nsh\assets\…` |
 | Web | `nsh.<digest>.wasm`, `nsh.<digest>.js` | `<Name>/app.<digest>.js`, `assets/…`, `index.html` |
-
-An iOS package also carries the dynamic frameworks the app lists in `Frameworks/`
-([Frameworks and linker flags](#frameworks-and-linker-flags)).
 
 A packaged app registers no [native components](./native-components.md); for those, embed NSH in your own app.
 

@@ -397,9 +397,9 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `await app.closeMenu()` | 关闭已打开的上下文菜单，不选择任何项，如同按下 Escape（iOS 上是点按系统菜单之外，Android 上是返回键）。 |
 | `await app.keyboard.press(keys)` | 按下一个带修饰键的按键，写法同 `keymap`（`"mod+k"`、`"shift+/"`、`"escape"`；`mod` 是平台的命令键），如同硬件键盘，在所有平台上都可用（手机和平板也可以接硬件键盘）：由应用的对应快捷键接收（`keymap.bind`、`onKeyCommand`），否则在桌面上选中应用菜单里带这个快捷键的项（`Menu.setApplicationMenu`，输入框有焦点时遵守它的 `when`），否则在 macOS 和 Web 上由 Tab 和 Shift+Tab 在输入框和可按压的视图之间移动键盘焦点（`onFocus`、`onBlur`、`focus:` 样式；有对话框开着时只在最新的对话框里移动，对话框关闭后焦点回到打开前所在的视图），Return 或空格按下焦点所在的视图（该视图须在最新的对话框里，或没有对话框开着；否则按键交给快捷键）；`NavStack` 推入新页面或返回弹出页面时，焦点离开不再显示的页面（它的视图收到 `onBlur`），在 Web 上（`platform: "web"`）Shift+F10 为它请求上下文菜单（`onContextMenu`，`pointerType` 为 `null`），否则由获得焦点的输入框接收字符、Backspace 或回车，否则 Escape 执行返回。 |
 | `await app.keyboard.down(keys)` / `up(keys)` | 按住修饰键（`"mod"`、`"shift"`、`"alt"`、`"ctrl"`、`"meta"`，用 `+` 连接）直到 `up`：期间的按压、拖动和悬停都带着这些键，如同 Mod 加点击或 Shift 加拖动。目前在 headless 和 Linux 上可用。 |
-| `await app.dragAndHold(selector, by, options?)` / `app.drop()` | 像 `drag` 一样拖动，但手指一直按着，直到 `drop()` 在当前位置抬起：其间的步骤可以查看拖动中的画面（拖动预览、放置线）。目前在 headless、Linux 和 iOS 上可用。 |
+| `await app.dragAndHold(selector, by, options?)` / `app.drop()` | 像 `drag` 一样拖动，但手指一直按着，直到 `drop()` 在当前位置抬起，抬起时手指已停稳，和按住不动的手指一样（没拖过一半的返回手势会退回）：其间的步骤可以查看拖动中的画面（拖动预览、放置线）。目前在 headless、Linux 和 iOS 上可用。 |
 | `await app.dropFiles(selector, uris)` | 把本地文件（`file:` URL，如同从文件管理器拖来）放到视图中央：它或外层最近一个监听的视图收到 `onFileDrop`。桌面平台，目前在 headless、Linux 和 macOS 上可用。 |
-| `await app.drag(selector, { x, y }, options?)` | 手指落在视图中央，停留 100 ms，再移动 `x`、`y` 点（每帧 10 点）后抬起，由平台的输入系统处理：pan 跟随手指（`pan={{ x, y }}`、`onPanStart`，以及带松手速度的 `onPanEnd`），监听触摸的视图会收到触摸事件（`onTouchStart`、`PanResponder`），滚动视图随手指滚动，拉过顶部足够远时触发刷新（`onRefresh`），手指移开后其下的按压会被取消。在桌面和 web 上由鼠标完成，无头测试里也一样：触摸事件的 `pointerType` 是 `"mouse"`，滚动视图不随它滚动，和这些平台上一样。从可选择视图（`View selectable`、设置了 `selectable` 的 `TextView`）里开始的拖动会跨视图里的文字选择，该视图收到 `onSelectionChange`（复制会得到的文字、它的起始位置和外框）；从别处开始的拖动会清除选区。 |
+| `await app.drag(selector, { x, y }, options?)` | 手指落在视图中央，停留 100 ms，再移动 `x`、`y` 点（每帧 10 点）后抬起，由平台的输入系统处理：pan 跟随手指（`pan={{ x, y }}`、`onPanStart`，以及带松手速度的 `onPanEnd`），监听触摸的视图会收到触摸事件（`onTouchStart`、`PanResponder`），滚动视图随手指滚动，拉过顶部足够远时触发刷新（`onRefresh`），手指移开后其下的按压会被取消。手指在移动中抬起，和快速轻扫一样。在 iOS 上从屏幕边缘开始的拖动按从边缘划入处理，和从边缘轻扫一样：会触发屏幕边缘 pan（`panActivation={{ edge }}`）和系统的返回手势。在桌面和 web 上由鼠标完成，无头测试里也一样：触摸事件的 `pointerType` 是 `"mouse"`，滚动视图不随它滚动，和这些平台上一样。从可选择视图（`View selectable`、设置了 `selectable` 的 `TextView`）里开始的拖动会跨视图里的文字选择，该视图收到 `onSelectionChange`（复制会得到的文字、它的起始位置和外框）；从别处开始的拖动会清除选区。 |
 | `await app.wait(ms)` | 让应用运行 `ms` 毫秒：定时器、动画、请求。在手动时钟上，把时钟推进 `ms`（`app.clock.runFor`）。 |
 | `await app.waitFor(selector, options?)` | 有视图匹配时 resolve；传 `{ state: "gone" }` 时，等到没有视图匹配才 resolve；`timeout` 毫秒（5000）后 reject。在手动时钟上，等待时每次把时钟推进一个显示帧，最多推进 `timeout`。 |
 | `await app.waitUntil(condition, options?)` | 应用每发生一次变化就重新检查，`condition()` 返回 true 时 resolve：用于选择器表达不了的条件（`() => app.storage().note === "Milk"`）。在手动时钟上，两次检查之间把时钟推进一个显示帧，最多推进 `timeout`。 |
@@ -421,9 +421,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `app.picks()` | 应用发起过的选取，按顺序排列。 |
 | `app.onShare({ action, target })` | 给这次运行一个分享面板，并回答应用之后显示的分享（`Share.show`）：`action` 为 `"shared"`（分享到 `target`）或 `"dismissed"`。仅限无界面运行。 |
 | `app.shares()` | 应用分享过的内容，按顺序排列（`{ title, text, url, files }`）。 |
-| `app.hear(text)` | 用户对正在运行的语音会话（`Speech.start`）说出 `text`：它的 `result` 把 `text` 报告为到目前为止的完整转写。仅限无界面运行。 |
-| `app.endSpeech(error?)` | 结束正在运行的语音会话：带 `error`（`"no-speech"`、`"network"` 等）时会话失败，否则先到达最后一个最终结果再到达 `end`，什么都没听到时为 `no-speech`。仅限无界面运行。 |
-| `app.speechRequests()` | 应用开始的语音会话，按顺序：`lang`（用户的语言时为 `null`）和 `interim`。 |
+| `await app.fake(name, method, args?)` | 按名称调用原生模块在无界面运行中代替设备的模拟实现，`args` 是一个数组，应用静止后 resolve 为它的 JSON 回答。模拟实现有哪些方法由模块自己的文档说明：`nsh-extra` 的语音识别器是 `"nsh-extra/speech"`（[`Speech`](./nshm.md#speech)：`app.fake("nsh-extra/speech", "hear", ["hello"])` 代替用户说话）。仅限无界面运行。 |
 | `app.audio()` | 应用对扬声器发出的请求（`Sound`、`AudioPlayer`），按顺序：`command`（`"load"`、`"play"`、`"stop"`、`"unload"`、`"open"`、`"preload"`、`"resume"`、`"pause"`、`"seek"`、`"set"`、`"close"`）、`src`，以及适用时的 `volume`、`rate`、`position`。仅限无界面运行。 |
 | `app.endAudio()` | 正在播放的播放器播到结尾（`end`；循环的从头再播）。仅限无界面运行。 |
 | `app.clipboard()` | 剪贴板当前的文字，没有时为 `null`。 |
@@ -497,7 +495,7 @@ await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISAB
 - **URL 只被记录**：应用打开的 URL 以“已打开”回报（测试用 `app.failOpenUrls` 让它失败的除外），`app.openedUrls()` 列出它们。
 - **选取会被回答**：用测试给的文件（`onPick`），否则视为取消，`Picker.pickImages` 和 `Picker.pickFiles` resolve 为 `[]`。
 - **分享由测试决定**：`onShare` 给出分享面板后，每次分享都按它的回答；在此之前 `Share.available()` resolve 为 `false`。
-- **语音由测试决定**：`Speech.available()` resolve 为 `true`，会话立即开始，听到 `hear` 说的内容。
+- **原生模块运行在模拟实现上**：会访问设备的模块在无界面运行中提供一个模拟实现代替设备，由测试驱动（`app.fake`）。开启 `nsh-extra` 的 `speech` 时，`Speech.available()` resolve 为 `true`，会话立即开始，听到模拟实现的 `hear` 说的内容。模拟实现在整个进程内生效，所以启动带模拟实现模块的 `Headless` 应用的 Rust 测试在同一进程里轮流运行；用同一个 registry 的克隆启动的应用可以同时运行。
 - **声音交给假扬声器**：音效按 WAV 解码（时长取自文件头，其他字节以 `decode` 失败），播放器立即播放其源的一分钟，在 `endAudio()` 时播到结尾。
 - **模态窗口立即出现**：弹出时就会触发 `onShow`。
 - **图片不会加载**：不会有 `onLoad`，也不会有 `onError`，除非测试让这张图片加载失败（`app.failImages`）；`Image.getSize` 和 `Image.prefetch` 会 reject，app 里和测试文件里都一样。`blob:` URL 的尺寸直接从它的数据读取，所以对它调用 `Image.getSize` 会 resolve。
@@ -567,7 +565,7 @@ test("calls reach the page's host", async () => {
 - 不在屏幕上的视图会先被滚动到可见，每次一个手势；在触摸屏上，手指像用户那样落在页面本身接收拖动的地方，避开跟随拖动的视图（滑块、绘图区域）；滚动视图已经到头时，贴在它边缘的视图就地操作，不会把滚动视图拖过头（那样会触发下拉刷新或关掉页面 sheet）；滚动视图内容从边缘下面经过的部分（iOS 上透明的标题栏、Tab 栏、键盘）里的视图会先被滚出来，仍留在那下面、被系统绘制的栏或选区的编辑菜单盖住的视图，操作会以 `ERR_NSH_TEST_COVERED` 失败，而不是按到盖住它的东西上；
 - 选择器、等待和查询看到的应用模型与 headless 相同，由 host 绘制的内容建立，所以找到的是同样的视图；
 - 对话框是平台自己的：`app.dialogs()` 读取它们，回答对话框（`onDialog`，或测试没有回答时按它的取消按钮）会按下对应的按钮；
-- `app.screenshot(path)` 截取窗口，`app.window(id).screenshot(path)` 截取应用的其他窗口。
+- `app.screenshot(path)` 截取应用显示的窗口（测试指定的窗口，否则最前面的那个），`app.window(id).screenshot(path)` 截取应用的其他窗口。
 
 ```sh
 nsh test --target macos                       # 在 macOS 窗口里运行应用的测试

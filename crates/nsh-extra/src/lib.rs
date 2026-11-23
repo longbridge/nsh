@@ -25,7 +25,9 @@
 //! | Feature | Rust | TS | What it does |
 //! |---|---|---|---|
 //! | `camera` | [`camera`] | `Camera` | Photos taken with the system's camera (iOS, Android) |
+//! | `photos` | [`photos`] | `Photos`, `PhotosPicker` | The user's recent photos, read once the user allows it, and the system's photo picker embedded in the layout (iOS) |
 //! | `push` | [`push`] | `Push` | Remote notifications with any push service (iOS; Android through the service's binding) |
+//! | `speech` | [`speech`] | `Speech` | Speech recognized as the user talks, with interim transcripts (macOS, iOS, Android, Windows, the web) |
 //!
 //! A module is one feature, named as its Rust module (`camera`, `push`);
 //! its TS namespace is that name in PascalCase (`Camera`, `Push`); its code
@@ -38,8 +40,12 @@
 
 #[cfg(feature = "camera")]
 pub mod camera;
+#[cfg(feature = "photos")]
+pub mod photos;
 #[cfg(feature = "push")]
 pub mod push;
+#[cfg(feature = "speech")]
+pub mod speech;
 
 use nsh_core::prelude::*;
 
@@ -50,10 +56,28 @@ use nsh_core::prelude::*;
 fn native(registry: &mut Registry) {
     #[cfg(feature = "camera")]
     registry.module::<camera::Camera>();
+    #[cfg(feature = "photos")]
+    {
+        registry.module::<photos::Photos>();
+        registry.register::<photos::PhotosPicker>();
+    }
     #[cfg(feature = "push")]
     {
         push::install(registry);
         registry.module::<push::Push>();
     }
+    #[cfg(feature = "speech")]
+    registry.module::<speech::Speech>().fake(
+        speech::fake::NAME,
+        std::sync::Arc::new(speech::FakeSpeech::default()),
+    );
     let _ = registry;
+}
+
+/// The native components of the features on, registered for each view the
+/// hosts nsh builds make: the system's photo picker ([`photos::PhotosPicker`]).
+#[cfg(feature = "photos")]
+#[native_components(ios)]
+fn components(components: &nsh_platform_ios::Components) {
+    photos::register_components(components);
 }

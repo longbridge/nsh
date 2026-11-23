@@ -15,7 +15,6 @@ mod dev;
 mod dev_port;
 mod entry;
 mod init;
-mod ios_frameworks;
 mod logger;
 mod module_meta;
 mod native_features;
@@ -129,7 +128,7 @@ enum Command {
     /// (`nsh.json` `"root"`): build its crates and gather the files they ship.
     Build {
         /// The entry module, or the app's directory (default: the current one),
-        /// whose `App.tsx` is the entry.
+        /// whose `nsh.json` `"entry"` is the entry (default: its `App.tsx`).
         #[arg(default_value = ".")]
         entry: PathBuf,
         /// Output directory.
@@ -234,7 +233,7 @@ enum Command {
     /// Rust app (`"root"`) without a `tsconfig.json` only that.
     Check {
         /// The entry module, or the app's directory (default: the current one),
-        /// whose `App.tsx` is the entry.
+        /// whose `nsh.json` `"entry"` is the entry (default: its `App.tsx`).
         #[arg(default_value = ".")]
         entry: PathBuf,
         /// The `tsc` to run instead of the pinned TypeScript 7.
@@ -247,7 +246,7 @@ enum Command {
     /// Run an app in this system’s native host with hot reload.
     Dev {
         /// The entry module, or the app's directory (default: the current one),
-        /// whose `App.tsx` is the entry.
+        /// whose `nsh.json` `"entry"` is the entry (default: its `App.tsx`).
         #[arg(default_value = ".")]
         entry: PathBuf,
         /// Dev server port (replaces the previous NSH development session on
@@ -287,7 +286,7 @@ enum Command {
     /// hosts, Mac Catalyst, GPUI, a terminal or a browser with --target.
     Run {
         /// The entry module, or the app's directory (default: the current one),
-        /// whose `App.tsx` is the entry.
+        /// whose `nsh.json` `"entry"` is the entry (default: its `App.tsx`).
         #[arg(default_value = ".")]
         entry: PathBuf,
         /// Dev server port (replaces the previous NSH development session on
@@ -487,7 +486,8 @@ enum Command {
         #[command(subcommand)]
         store: Option<PublishStore>,
         /// The entry module, the app's directory (default: the current one),
-        /// whose `App.tsx` is the entry, or a package (`.nshpkg`) to sign again.
+        /// whose `nsh.json` `"entry"` is the entry (default: its `App.tsx`),
+        /// or a package (`.nshpkg`) to sign again.
         #[arg(default_value = ".")]
         entry: PathBuf,
         /// The release key's secret key (`.secret`).
@@ -601,7 +601,7 @@ enum PublishStore {
 #[derive(Args, Clone)]
 struct PackageArgs {
     /// The entry module, or the app's directory (default: the current one),
-    /// whose `App.tsx` is the entry.
+    /// whose `nsh.json` `"entry"` is the entry (default: its `App.tsx`).
     #[arg(default_value = ".")]
     entry: PathBuf,
     /// What to build for.

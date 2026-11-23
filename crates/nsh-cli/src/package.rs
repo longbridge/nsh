@@ -195,7 +195,8 @@ pub(crate) struct AppConfig {
     #[serde(default, rename = "tailwind")]
     _tailwind: Option<serde_json::Value>,
     /// Read and checked by the bundler; packages read only what the
-    /// system must be told ahead (`speech`'s usage descriptions).
+    /// system must be told ahead (`webview.media`'s usage descriptions,
+    /// `notifications`).
     #[serde(default)]
     pub(crate) capabilities: Option<serde_json::Value>,
     /// `"light"` / `"dark"` / `"system"`: the app's appearance (checked by
@@ -220,6 +221,11 @@ pub(crate) struct AppConfig {
     /// Read and checked by the bundler.
     #[serde(default, rename = "resolve")]
     _resolve: Option<serde_json::Value>,
+    /// The entry module, relative to `nsh.json` (`"app/App.tsx"`; `App.tsx`
+    /// beside it by default): read by `entry::resolve`, checked by
+    /// `nsh_bundler::app_dir::config_entry`.
+    #[serde(default, rename = "entry")]
+    _entry: Option<String>,
     /// The app's Rust crate: its builds are the app's own (`rust_app.rs`).
     #[serde(default, rename = "rust")]
     _rust: Option<serde_json::Value>,
@@ -237,6 +243,9 @@ pub(crate) struct AppConfig {
     /// Terminal layout options.
     #[serde(default)]
     pub(crate) tui: TuiConfig,
+    /// What the development watcher skips.
+    #[serde(default)]
+    pub(crate) watch: WatchConfig,
     /// URL schemes that open the app (`"myapp"`: `myapp://...`), which
     /// packages register with the system; the app hears them through
     /// `UrlScheme.on("open", ...)`. [`read_config`] checks them and lowers
@@ -438,18 +447,19 @@ pub(crate) struct TuiConfig {
     pub(crate) points_per_cell: Option<String>,
 }
 
-impl AppConfig {
-    /// Whether the app may recognize speech: it declares no capabilities
-    /// (it gets them all) or grants `speech`.
-    fn speech(&self) -> bool {
-        match &self.capabilities {
-            None => true,
-            Some(capabilities) => {
-                capabilities.get("speech") == Some(&serde_json::Value::Bool(true))
-            }
-        }
-    }
+/// `nsh.json` `"watch"`: what `nsh run` and `nsh dev` leave out of the
+/// watcher ([`crate::dev`], [`crate::rust_app`]).
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct WatchConfig {
+    /// Directories whose file events the watcher skips: paths relative to
+    /// `nsh.json` (`"vendor"`, `"third/jpeg-turbo"`), absolute ones as they
+    /// are. One inside the watch (the app's directory, a crate's) that
+    /// holds generated code or another checkout is the usual one.
+    #[serde(default)]
+    pub(crate) ignore: Vec<String>,
+}
 
+impl AppConfig {
     /// Whether the app may show notifications: it declares no capabilities
     /// (it gets them all) or grants `notifications`.
     pub(crate) fn notifications(&self) -> bool {
@@ -545,17 +555,13 @@ impl AppConfig {
             .is_some_and(|m| m.iter().any(|k| k.as_str() == Some(kind)))
     }
 
-    /// Adds what the system shows when the app first asks for the
-    /// microphone, the camera and speech recognition, which it requires
-    /// (it ends an app that asks without them): for speech recognition and
-    /// web pages' media capture (`webview.media`). The app's `infoPlist`
-    /// may word them its own way.
+    /// Adds what the system shows when the app's web pages first ask for
+    /// the microphone or the camera (`webview.media`), which it requires
+    /// (it ends an app that asks without them). The app's `infoPlist` may
+    /// word them its own way. Native modules that use them (`nsh-extra`'s
+    /// `speech`) declare theirs in their crate's metadata
+    /// ([`crate::module_meta`]).
     fn usage_descriptions(&self, info: &mut plist::Dictionary) {
-        if self.speech() {
-            for (key, text) in USAGE_DESCRIPTIONS {
-                info.insert(key.into(), plist::Value::String(text.to_owned()));
-            }
-        }
         for (kind, key, text) in WEB_MEDIA_USAGE_DESCRIPTIONS {
             if self.web_media(kind) && !info.contains_key(key) {
                 info.insert(key.into(), plist::Value::String(text.to_owned()));
@@ -576,18 +582,6 @@ impl AppConfig {
         }
     }
 }
-
-/// The usage descriptions of an app that recognizes speech (`Speech`).
-pub(crate) const USAGE_DESCRIPTIONS: [(&str, &str); 2] = [
-    (
-        "NSMicrophoneUsageDescription",
-        "The app listens to the microphone while you dictate.",
-    ),
-    (
-        "NSSpeechRecognitionUsageDescription",
-        "The app turns what you say into text.",
-    ),
-];
 
 /// The usage descriptions of an app whose web pages capture media
 /// (`webview.media`), by kind.
@@ -927,13 +921,12 @@ impl AppConfig {
     }
 }
 
-/// Fails when the `nsh.json` next to `entry` asks for NSH versions
+/// Fails when the `nsh.json` of `entry` asks for NSH versions
 /// (`"nsh": ">=0.5"`) this CLI is not one of, with one message that names
 /// both, before a build fails on what the other version lacks.
 pub(crate) fn check_nsh_version(entry: &Path) -> anyhow::Result<()> {
-    let dir = entry.parent().unwrap_or(Path::new("."));
-    let path = dir.join("nsh.json");
-    let Ok(text) = fs::read_to_string(&path) else {
+    let path = nsh_bundler::app_dir::config_dir_of(entry).join("nsh.json");
+    let Ok(text) = nsh_bundler::app_dir::read(&path) else {
         return Ok(());
     };
     // A file that does not read is reported by the command itself.
@@ -967,11 +960,14 @@ fn nsh_version_error(required: &serde_json::Value, version: &str) -> Option<Stri
     (!req.matches(&this)).then(|| format!("this app requires nsh {text}; this is nsh {version}"))
 }
 
-/// Reads `nsh.json` next to `entry`, if any; relative paths become absolute.
+/// Reads the `nsh.json` of `entry`, if any: beside it, or the one above
+/// that names it (`"entry"`, `nsh_bundler::app_dir::config_dir_of`);
+/// relative paths become absolute, from its directory.
 pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
-    let dir = entry.parent().unwrap_or(Path::new("."));
+    let config_dir = nsh_bundler::app_dir::config_dir_of(entry);
+    let dir = config_dir.as_path();
     let path = dir.join("nsh.json");
-    let Ok(text) = fs::read_to_string(&path) else {
+    let Ok(text) = nsh_bundler::app_dir::read(&path) else {
         return Ok(AppConfig {
             localizations: app_localizations(dir, None),
             ..AppConfig::default()
@@ -1047,18 +1043,6 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
         ApplePlatform::Macos,
         &mut ignored,
     );
-    config.ios.frameworks = crate::ios_frameworks::read(
-        std::mem::take(&mut config.ios.frameworks),
-        dir,
-        &mut ignored,
-    );
-    config.ios.linker_flags.retain(|flag| {
-        let checked = crate::ios_frameworks::check_flag(flag);
-        if let Err(why) = &checked {
-            ignored.push(format!("ios.linkerFlags: {why}: left out"));
-        }
-        checked.is_ok()
-    });
     config.icon = match config.icon {
         Some(AppIcon::All(icon)) => Some(AppIcon::All(dir.join(icon))),
         Some(AppIcon::Platforms(icons)) => Some(AppIcon::Platforms(
@@ -1288,9 +1272,7 @@ fn warn_ignored(path: &Path, ignored: &[String]) {
 /// file must be inside the app's directory, symbolic links resolved, as the
 /// page ships it as it is.
 pub(crate) fn web_host_module(entry: &Path, host: &Path) -> anyhow::Result<PathBuf> {
-    // `App.tsx`'s parent is the empty path, which does not canonicalize.
-    let dir = entry.parent().filter(|d| !d.as_os_str().is_empty());
-    let dir = dunce::canonicalize(dir.unwrap_or(Path::new(".")))
+    let dir = dunce::canonicalize(nsh_bundler::app_dir::config_dir_of(entry))
         .with_context(|| format!("the app's directory of {}", entry.display()))?;
     let module = dunce::canonicalize(host)
         .with_context(|| format!("nsh.json web.host {}", host.display()))?;
@@ -1304,13 +1286,12 @@ pub(crate) fn web_host_module(entry: &Path, host: &Path) -> anyhow::Result<PathB
     Ok(module)
 }
 
-/// The app's display name and id: from the config, else the entry's
-/// directory name and `com.example.<name>`.
+/// The app's display name and id: from the config, else the name of its
+/// directory (`nsh.json`'s, else the entry's) and `com.example.<name>`.
 pub(crate) fn name_and_id(entry: &Path, config: &AppConfig) -> (String, String) {
     let name = config.name.clone().unwrap_or_else(|| {
-        entry
-            .parent()
-            .and_then(|d| d.file_name())
+        nsh_bundler::app_dir::config_dir_of(entry)
+            .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "App".to_owned())
     });
@@ -1506,7 +1487,6 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
     // its bundle can reach, and those `nsh.json` keeps. A TSX app does too
     // where cargo is, else it ships the prebuilt runner, which has all.
     let has_crates = crate::rust_app::current().is_some();
-    check_ios_link(config, options.target, has_crates)?;
     let mut own_runner = false;
     if options.target != PackageTarget::Web
         && !crate::rust_app::is_root(&entry)
@@ -1665,31 +1645,16 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
         options.target == PackageTarget::IosSimulator,
         None,
     )?;
-    // The runner linked the frameworks for this target
-    // (`rust_app::RustApp::ios_link_env`); the dynamic ones go with it.
-    let (frameworks, _) = crate::ios_frameworks::sync(
-        &config.ios.frameworks,
-        platform.triple().context("an iOS target")?,
-        &app.join("Frameworks"),
-        None,
-    )?;
     let localized = config.ios.localized_info(ApplePlatform::Ios, &info)?;
     crate::apple::write_localized_info(&app, &localized)?;
     plist::Value::Dictionary(info).to_file_xml(app.join("Info.plist"))?;
-    let mut privacy = config.ios.privacy_manifest.clone();
-    crate::ios_frameworks::add_static_privacy(
-        &config.ios.frameworks,
-        platform.triple().context("an iOS target")?,
-        &mut privacy,
-    )?;
-    crate::apple::write_privacy_manifest(&privacy, &app)?;
+    crate::apple::write_privacy_manifest(&config.ios.privacy_manifest, &app)?;
 
     match options.target {
         PackageTarget::IosSimulator => {
-            // The app's signature seals its extensions' and frameworks':
-            // they are signed first.
+            // The app's signature seals its extensions': they are signed
+            // first.
             crate::app_extensions::sign_ad_hoc(&extensions, options.out)?;
-            crate::ios_frameworks::sign(&frameworks, "-")?;
             // The simulator takes the app's entitlements without a profile.
             let mut entitlements = config.ios.entitlements(ApplePlatform::Ios)?;
             config.add_links_to_entitlements(&mut entitlements)?;
@@ -1737,10 +1702,9 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
                 .iter()
                 .map(|path| Profile::read(path))
                 .collect::<anyhow::Result<Vec<_>>>()?;
-            // The app's signature seals its extensions' and frameworks':
-            // they are signed first.
+            // The app's signature seals its extensions': they are signed
+            // first.
             crate::app_extensions::sign_device(&extensions, identity, &profiles, options.out)?;
-            crate::ios_frameworks::sign(&frameworks, identity)?;
             let profile = Profile::choose(&profiles, &id, false)?;
             crate::provisioning::warn_unused(&profiles);
             fs::copy(&profile.path, app.join("embedded.mobileprovision"))
@@ -1756,29 +1720,6 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
             make_ipa(&app, &ipa)?;
             ui::done(format!("packaged {}", ui::path(&ipa)));
         }
-    }
-    Ok(())
-}
-
-/// `ios.frameworks` and `ios.linkerFlags` are linked with the app's Rust
-/// code, which is what calls a framework: an iOS package of an app
-/// without crates (`has_crates`), whose runner is NSH's own, has nothing
-/// to link them with.
-fn check_ios_link(
-    config: &AppConfig,
-    target: PackageTarget,
-    has_crates: bool,
-) -> anyhow::Result<()> {
-    let ios = matches!(target, PackageTarget::Ios | PackageTarget::IosSimulator);
-    if ios
-        && !has_crates
-        && (!config.ios.frameworks.is_empty() || !config.ios.linker_flags.is_empty())
-    {
-        bail!(
-            "nsh.json ios.frameworks and ios.linkerFlags are linked with the app's Rust code, \
-             which calls the frameworks, and the app has none: add the crate that calls them \
-             (nsh.json `rust`, or an nshm with `nsh add`)"
-        );
     }
     Ok(())
 }
@@ -1911,7 +1852,8 @@ fn package_android(
         .join(format!("{name}.{}", options.format.extension()));
     let version = config.version.as_deref().unwrap_or("1.0.0");
     // `android/res/` next to `nsh.json`: the app's own resources.
-    let app_dir = options.entry.parent().unwrap_or(Path::new("."));
+    let config_dir = nsh_bundler::app_dir::config_dir_of(options.entry);
+    let app_dir = config_dir.as_path();
     let res = Some(app_dir.join("android").join("res")).filter(|dir| dir.is_dir());
     let library_cache = app_dir.join(".nsh/android/libraries");
     let step = ui::Step::start(format!("packaging {}", ui::path(&apk_path)));
@@ -3036,6 +2978,23 @@ fn make_ipa(app: &Path, ipa: &Path) -> anyhow::Result<()> {
 mod tests {
     use super::*;
 
+    /// `watch.ignore` reads as the watcher's skip list; without it there
+    /// is nothing to skip.
+    #[test]
+    fn watch_ignore_is_read_from_nsh_json() {
+        let (config, ignored) = parse_config(
+            r#"{
+                "watch": { "ignore": ["vendor", "third/jpeg-turbo"] }
+            }"#,
+        )
+        .unwrap();
+        assert!(ignored.is_empty(), "{ignored:?}");
+        assert_eq!(config.watch.ignore, ["vendor", "third/jpeg-turbo"]);
+        let (config, ignored) = parse_config("{}").unwrap();
+        assert!(ignored.is_empty(), "{ignored:?}");
+        assert!(config.watch.ignore.is_empty());
+    }
+
     /// Without `ios.launchScreen` the launch screen is the system's
     /// background; with it `UILaunchScreen` names the catalog's color and
     /// image, which are sets for both appearances or one for each.
@@ -3504,70 +3463,6 @@ mod tests {
     }
 
     #[test]
-    fn ios_frameworks_need_the_apps_crates() {
-        let mut config = AppConfig::default();
-        assert!(check_ios_link(&config, PackageTarget::Ios, false).is_ok());
-        config.ios.linker_flags.push("-ObjC".into());
-        let error = check_ios_link(&config, PackageTarget::IosSimulator, false).unwrap_err();
-        assert!(error.to_string().contains("add the crate"), "{error}");
-        assert!(check_ios_link(&config, PackageTarget::Ios, true).is_ok());
-        // Other packages do not link them.
-        assert!(check_ios_link(&config, PackageTarget::Android, false).is_ok());
-    }
-
-    #[test]
-    fn ios_frameworks_are_relative_to_nsh_json() {
-        let dir = std::env::temp_dir().join(format!(
-            "nsh-cli-ios-frameworks-config-{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
-            dir.join("nsh.json"),
-            r#"{ "ios": {
-                "frameworks": [
-                    "ios/Vendor/Sdk.xcframework",
-                    { "path": "ios/Vendor/Ads.xcframework", "forceLoad": true },
-                    {
-                        "path": "ios/Vendor/Push.xcframework",
-                        "targets": ["ios", "ios-simulator"],
-                        "optional": true
-                    }
-                ],
-                "linkerFlags": ["-ObjC", "", "-lsqlite3"]
-            } }"#,
-        )
-        .unwrap();
-        let config = read_config(&dir.join("App.tsx")).unwrap();
-        let frameworks: Vec<(PathBuf, bool)> = config
-            .ios
-            .frameworks
-            .iter()
-            .map(|f| (f.path.clone(), f.force_load))
-            .collect();
-        assert_eq!(
-            frameworks,
-            [
-                (dir.join("ios/Vendor/Sdk.xcframework"), false),
-                (dir.join("ios/Vendor/Ads.xcframework"), true),
-                (dir.join("ios/Vendor/Push.xcframework"), false),
-            ]
-        );
-        let push = &config.ios.frameworks[2];
-        assert_eq!(
-            push.targets,
-            [
-                crate::ios_frameworks::Target::Ios,
-                crate::ios_frameworks::Target::IosSimulator
-            ]
-        );
-        assert!(push.optional);
-        // The empty flag is left out with a warning.
-        assert_eq!(config.ios.linker_flags, ["-ObjC", "-lsqlite3"]);
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
     fn ios_extensions_are_relative_to_nsh_json() {
         let dir = std::env::temp_dir().join(format!(
             "nsh-cli-ios-extensions-config-{}",
@@ -3802,23 +3697,23 @@ mod tests {
     }
 
     #[test]
-    fn apps_that_may_recognize_speech_explain_it() {
-        let usage = |capabilities: Option<serde_json::Value>| {
+    fn the_speech_capability_adds_no_usage_description() {
+        // Recognizing speech is `nsh-extra`'s `speech`, whose crate
+        // declares its usage descriptions: the capability alone (or no
+        // declaration) adds none.
+        for capabilities in [None, Some(serde_json::json!({ "speech": true }))] {
             let config = AppConfig {
                 capabilities,
                 ..AppConfig::default()
             };
-            let info = macos_info_plist("A", "com.a", "a", &config, false).unwrap();
-            let ios = info_plist("A", "com.a", "a", &config, "iphoneos").unwrap();
-            assert_eq!(
-                info.contains_key("NSMicrophoneUsageDescription"),
-                ios.contains_key("NSSpeechRecognitionUsageDescription")
-            );
-            info.contains_key("NSSpeechRecognitionUsageDescription")
-        };
-        assert!(usage(None));
-        assert!(usage(Some(serde_json::json!({ "speech": true }))));
-        assert!(!usage(Some(serde_json::json!({ "picker": true }))));
+            for info in [
+                macos_info_plist("A", "com.a", "a", &config, false).unwrap(),
+                info_plist("A", "com.a", "a", &config, "iphoneos").unwrap(),
+            ] {
+                assert!(!info.contains_key("NSSpeechRecognitionUsageDescription"));
+                assert!(!info.contains_key("NSMicrophoneUsageDescription"));
+            }
+        }
     }
 
     #[test]

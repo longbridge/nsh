@@ -1539,6 +1539,17 @@ pub trait Accessible: Element {
         self
     }
 
+    /// [`Accessible::hint`] while it is set (`None`: none), for a
+    /// component that hands the app's optional hint on to its element.
+    fn optional_hint(mut self, hint: impl IntoReactive<Option<SharedString>>) -> Self {
+        self.node().bind_attr(hint, |a, hint| {
+            if hint.is_some() || a.rare.is_some() {
+                a.rare_mut().hint = hint;
+            }
+        });
+        self
+    }
+
     /// More about it than its name, which screen readers read after it
     /// (TS: `accessibilityDescription`; `gpui-base`'s `aria_description`):
     /// a dialog's message, what a field expects.

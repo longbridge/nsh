@@ -48,7 +48,6 @@ fn stop_spinning(code: &str) -> (Duration, Vec<String>) {
         clipboard: None,
         host: Default::default(),
         picker: None,
-        speech: None,
         audio: None,
         windows: None,
         login_item: None,

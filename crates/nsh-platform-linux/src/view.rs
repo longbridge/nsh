@@ -464,7 +464,18 @@ mod imp {
             let soft = crate::decor::soft_shadows(obj.upcast_ref(), &state);
             crate::decor::draw_background(snapshot, &state, soft, obj.upcast_ref());
             let clip = state.clips();
-            if clip {
+            // A continuous-cornered clip is drawn in pieces from a node of
+            // what it clips ([`crate::decor::append_clipped`]), not as a
+            // path mask over all of it.
+            let piecewise = if clip {
+                crate::decor::piecewise_clip(obj.upcast_ref(), &state)
+            } else {
+                None
+            };
+            let outer = snapshot;
+            let inner = piecewise.as_ref().map(|_| gtk::Snapshot::new());
+            let snapshot = inner.as_ref().unwrap_or(outer);
+            if clip && piecewise.is_none() {
                 crate::decor::push_clip(snapshot, &state);
             }
             // The view's own content stays inside it, as a UIKit view's
@@ -501,9 +512,14 @@ mod imp {
             if !above {
                 crate::scroll::draw_indicator(snapshot, &state);
             }
-            if clip {
+            if let (Some(piecewise), Some(inner)) = (&piecewise, &inner) {
+                if let Some(node) = inner.clone().to_node() {
+                    crate::decor::append_clipped(outer, piecewise, &node);
+                }
+            } else if clip {
                 snapshot.pop();
             }
+            let snapshot = outer;
             if !above {
                 crate::decor::draw_border(snapshot, &state);
             }

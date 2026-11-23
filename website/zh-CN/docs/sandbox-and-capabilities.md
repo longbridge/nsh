@@ -240,13 +240,15 @@ blob（`blob:null/…`），都不允许。所有平台的检查方式相同。
 
 `"picker": true` 允许应用显示系统的照片选择器（[`Picker`](../modules/nsh.md#picker)）：由用户决定哪些内容交给应用。
 
+开启了 `nsh-extra` 的 [`Photos`](./nshm.md#photos) 的应用，也由它授予相册：读取最近的照片、它们的缩略图和照片本身。用户允许的范围对整个应用有效，所以由这项能力决定哪些代码能拿到照片。
+
 ### `share`
 
 `"share": true` 允许应用显示系统的分享面板（[`Share`](../modules/nsh.md#share)）：由用户决定内容发往哪里。分享的文件还需要能在 `fs.read` 下读取。
 
 ### `speech`
 
-`"speech": true` 允许应用识别用户说的话（[`Speech`](../modules/nsh.md#speech)）：使用麦克风和系统的语音识别器，转写文本交给应用。系统仍会向用户请求一次权限。
+`"speech": true` 允许应用识别用户说的话（`nsh-extra` 的 [`Speech`](./nshm.md#speech)）：使用麦克风和系统的语音识别器，转写文本交给应用。系统仍会向用户请求一次权限。
 
 ### `audio`
 
@@ -325,6 +327,7 @@ if (host.available()) {
 | 声音 | `Sound.load` reject、`new AudioPlayer` 抛出 `ERR_ACCESS_DENIED`，`permission` 为 `"audio"`，`resource` 为音源；不读取也不播放任何内容。 |
 | 语音 | `Speech.start` 抛出 `ERR_ACCESS_DENIED`，`permission` 为 `"speech"`，`resource` 为 `""`；麦克风不会打开。 |
 | 通知 | `Notifications` 的函数 reject 或抛出 `ERR_ACCESS_DENIED`，`permission` 为 `"notifications"`，`resource` 为 `""`；不会显示任何东西。 |
+| 相册 | `nsh-extra` 的 `Photos` 除 `access()` 外的函数 reject 或抛出 `ERR_ACCESS_DENIED`，`permission` 为 `"picker"`，`resource` 为 `""`；不读取相册，也不询问用户。 |
 | 推送 | `nsh-extra` 的 `Push` 除 `available()` 外的函数 reject 或抛出 `ERR_ACCESS_DENIED`，`permission` 为 `"notifications"`，`resource` 为 `""`；设备不会注册，token 和投递都不会到达应用。 |
 | `openUrl` | Promise 以 `ERR_ACCESS_DENIED` 被 reject，`permission` 为 `"openUrl"`，`resource` 为该 URL；不会打开任何东西。 |
 | 宿主调用 | `host.call` 以 `ERR_ACCESS_DENIED` 被 reject，`permission` 为 `"host"`，`resource` 为函数名（`host.post` 抛出同样的错误）；调用不会到达宿主。 |

@@ -270,13 +270,26 @@ fn web_view_at(window: &NSWindow, event: &NSEvent) -> Option<Retained<NSView>> {
 }
 
 /// Which of the surface's windows a call acts in.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Which {
     Main,
     /// A window by its root node (the main one's is the root).
     Target(NodeId),
     /// The window that has the keyboard.
     Key,
+}
+
+/// The window the app shows that a call about the app's window acts in
+/// (a screenshot, a resize), with the agent targeting `target`: that
+/// window, else the key one (the frontmost of the app's own). In window
+/// model v2 the surface's own window is a host that never shows, and the
+/// app's `<Window>`s are windows of their own.
+fn shown(target: NodeId) -> Which {
+    if target == ROOT_ID {
+        Which::Key
+    } else {
+        Which::Target(target)
+    }
 }
 
 /// `rect` of view `ns` in its window's content, from its top left; `None`
@@ -650,7 +663,7 @@ impl Native for MacNative {
         // made: let it show the last one before taking its picture.
         self.on_main(|_, _| objc2_quartz_core::CATransaction::flush());
         std::thread::sleep(PRESENT);
-        self.on_main(|_, window| synth::shot(window))
+        self.on_window(shown(self.target()), |_, window| synth::shot(window))
             .unwrap_or_else(|| Err("the window is gone".into()))
     }
 
@@ -658,13 +671,7 @@ impl Native for MacNative {
         // `setViewport` resizes the window the app shows, not the hidden
         // host: the targeted window, else the key one (the frontmost of the
         // app's own windows).
-        let id = self.target();
-        let which = if id == ROOT_ID {
-            Which::Key
-        } else {
-            Which::Target(id)
-        };
-        self.on_window(which, |_, window| {
+        self.on_window(shown(self.target()), |_, window| {
             let content = NSSize::new(f64::from(width.0), f64::from(height.0));
             let old = window.frame();
             let size = window
@@ -740,5 +747,18 @@ impl Native for MacNative {
 
     fn quit(&self) {
         self.on_main(|_, window| window.close());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_screenshot_is_of_the_window_the_app_shows() {
+        // The surface's own window is a host that never shows: without a
+        // target, the window with the keyboard (the frontmost shown one).
+        assert_eq!(shown(ROOT_ID), Which::Key);
+        assert_eq!(shown(7), Which::Target(7));
     }
 }

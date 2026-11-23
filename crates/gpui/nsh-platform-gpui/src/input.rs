@@ -147,6 +147,7 @@ impl Modifiers {
             alt: self.alt,
             shift: self.shift,
             cmd: self.meta,
+            alt_graph: false,
         }
     }
 }
@@ -3137,6 +3138,18 @@ fn wheel_input(
                 return false;
             };
             *input.latch.borrow_mut() = Some((view.clone(), horizontal, time));
+            // Lines of `LINE` points, or the view's own (`wheelLineHeight`);
+            // a `smoothWheel` view glides them on Chromium's curve.
+            let (dx, dy) = if view.kind() == ViewKind::Scroll {
+                let line = crate::events::LINE;
+                let line = nsh_core::geometry::point(Points(line), Points(line));
+                match crate::scroll::wheel_notch(surface, &view, dx, dy, line) {
+                    Some(d) => d,
+                    None => return true,
+                }
+            } else {
+                (dx, dy)
+            };
             // Without a begin, the scroll module takes it as a mouse wheel:
             // it settles (and snaps) by itself once the notches stop.
             scroll_wheel(surface, &view, dx, dy);

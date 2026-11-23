@@ -81,7 +81,9 @@ final class Mounter {
     final int[] dialogColors = new int[10];
     /**
      * The language the app's text shows in ({@code encode.rs} {@code Command::TextLocale}), which
-     * the state words services read follow ({@link A11y}); null, English, until the core names one.
+     * the state words services read ({@link A11y}) and the date and time dialogs' words
+     * ({@link DateTimePickerComponent}) follow; null until the core names one (English state words,
+     * the system's dialogs).
      */
     java.util.Locale textLocale;
     /** The alerts shown and not answered yet, by dialog id: what {@link SystemUi#closeDialog} takes back. */
@@ -314,7 +316,8 @@ final class Mounter {
         this.images = images;
         components.put(TabBarComponent.NAME, c -> new TabBarComponent(context, c, this::night));
         components.put(SwitchComponent.NAME, c -> new SwitchComponent(context, c, this::night));
-        components.put(DateTimePickerComponent.NAME, c -> new DateTimePickerComponent(context, c, this::night));
+        components.put(DateTimePickerComponent.NAME,
+                c -> new DateTimePickerComponent(context, c, this::night, () -> textLocale));
         components.put(MenuButtonComponent.NAME, c -> new MenuButtonComponent(context, c, this::night));
         components.put(ContextMenuComponent.NAME, c -> new ContextMenuComponent(context, c, this::night));
         images.redirects = (base, location) -> Native.mediaRedirect(handle(), base, location);
@@ -2428,11 +2431,13 @@ final class Mounter {
         boolean inputRtl = b.getInt() != 0;
         boolean caretHidden = b.getInt() != 0;
         boolean pasteInserts = b.getInt() != 0;
+        int pasteMaxSize = b.getInt();
         boolean scrollbarVisible = b.getInt() != 0, reportScroll = b.getInt() != 0;
         int fontVariant = b.getInt();
         if (!(v instanceof InputBox)) return;
         if (autoFocus && !((InputBox) v).isConfigured()) focusAsked = true;
         ((InputBox) v).pasteInserts = pasteInserts;
+        ((InputBox) v).pasteMaxSize = pasteMaxSize;
         ((InputBox) v).setScrollbar(scrollbarVisible, reportScroll);
         ((InputBox) v).edit.setCursorVisible(!caretHidden);
         ((InputBox) v).setAutofill(autofill);
@@ -3798,8 +3803,9 @@ final class Mounter {
     }
 
     /** An event with an object payload. */
-    void paste(int id, String text, byte[][] images, String[] uris) {
-        Native.paste(handle(), id, text, images, uris);
+    void paste(int id, String text, byte[][] images, String[] uris, String[] largeNames, String[] largeTypes,
+               long[] largeLengths) {
+        Native.paste(handle(), id, text, images, uris, largeNames, largeTypes, largeLengths);
     }
 
     /** A file drag's enter or drop for {@code id} ({@link FileDrops}); a drop's point in the surface's pixels. */

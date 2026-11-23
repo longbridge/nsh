@@ -106,6 +106,8 @@ scroll().horizontal().scrollbar(false).child(
 | `horizontal` | `.horizontal()` | `boolean` | `false` | 横向滚动。 |
 | `scrollable` | `.scrollable(..)` | `boolean` | `true` | 用户可以滚动。从代码滚动不受影响。 |
 | `bounces` | `.bounces(..)` | `boolean` | `true` | 允许越过边缘回弹。 |
+| `smoothWheel` | `.smooth_wheel(..)` | `boolean` | `false` | 鼠标滚轮每一格平滑滑到目标位置，像 Chrome 那样在 100–200 ms 内先加速后减速，连续拨动是一整段滑动。macOS、Windows、Linux 和 GPUI 生效（系统开启减弱动态效果时不滑）；iOS、Android 和 Web 沿用系统和浏览器自己的滚动。触控板不受影响。 |
+| `wheelLineHeight` | `.wheel_line_height(px(..))` | `number` | `0` | 鼠标滚轮每行滚动多少点；0 保持平台默认（macOS 10，Windows 16，Linux 随视图大小）。Chrome 和 Safari 在 macOS 上每行 40 点。桌面平台生效。 |
 | `scrollbar` | `.scrollbar(..)` | `boolean` | `true` | 显示滚动条。 |
 | `contentInset` | `.content_inset(EdgeInsets { .. })` | `Partial<Edges>` | | 内容四周可以滚动进入的留白。 |
 | `scrollbarInset` | `.scrollbar_inset(EdgeInsets { .. })` | `Partial<Edges>` | | 滚动指示条与视图各边保持的距离。 |

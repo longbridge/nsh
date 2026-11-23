@@ -10,6 +10,7 @@ import android.graphics.drawable.RippleDrawable;
 import android.os.Build;
 import android.text.format.DateFormat;
 import android.util.TypedValue;
+import android.view.ContextThemeWrapper;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
@@ -17,8 +18,10 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import java.util.Calendar;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 
 /**
  * {@code nsh/mobile}'s {@code DateTimePicker} on Android: the value in a field
@@ -27,7 +30,8 @@ import java.util.function.BooleanSupplier;
  * framework's {@link DatePickerDialog} or {@link TimePickerDialog}; the
  * picked value shows at once and is reported as {@code change} with its
  * fields ({@code year}, {@code month}, {@code day}, {@code hour},
- * {@code minute}). The app owns the value.
+ * {@code minute}). The app owns the value. The dialogs' own words (their
+ * buttons, month and day names) are in the language of the app's text.
  */
 final class DateTimePickerComponent implements NshComponent {
     /** Its name ({@code nsh_core::platform::DATE_TIME_PICKER_COMPONENT}). */
@@ -39,6 +43,8 @@ final class DateTimePickerComponent implements NshComponent {
     private final Context context;
     private final NshComponentContext events;
     private final BooleanSupplier night;
+    /** The language of the app's text ({@link Mounter#textLocale}; null: the system's). */
+    private final Supplier<Locale> textLocale;
     private final float density;
     private final Row row;
     private final Field dateField, timeField;
@@ -52,10 +58,12 @@ final class DateTimePickerComponent implements NshComponent {
     /** What screen readers say with each field's value (null: the value alone). */
     private String label;
 
-    DateTimePickerComponent(Context context, NshComponentContext events, BooleanSupplier night) {
+    DateTimePickerComponent(Context context, NshComponentContext events, BooleanSupplier night,
+            Supplier<Locale> textLocale) {
         this.context = context;
         this.events = events;
         this.night = night;
+        this.textLocale = textLocale;
         this.density = context.getResources().getDisplayMetrics().density;
         this.row = new Row(context);
         this.dateField = new Field(context);
@@ -176,9 +184,30 @@ final class DateTimePickerComponent implements NshComponent {
                 : android.R.style.Theme_DeviceDefault_Light_Dialog_Alert;
     }
 
+    /**
+     * What the dialogs are made in: the framework's dialogs take their words
+     * from the context's resources, the system's language, while an app that
+     * shows itself in another one ({@code setLocale}, its translations) has
+     * the rest of its text in that, as the screen reader's state words are.
+     * The direction stays the window's, which the dialog's views lay out in.
+     */
+    private Context dialogContext() {
+        Locale locale = textLocale.get();
+        if (locale == null) return context;
+        Configuration config = new Configuration(context.getResources().getConfiguration());
+        int direction = config.screenLayout & Configuration.SCREENLAYOUT_LAYOUTDIR_MASK;
+        config.setLocale(locale);
+        config.screenLayout = (config.screenLayout & ~Configuration.SCREENLAYOUT_LAYOUTDIR_MASK) | direction;
+        // A wrapper, not createConfigurationContext: the dialog's window needs
+        // the activity's window manager (its token) that the wrapper hands on.
+        ContextThemeWrapper localized = new ContextThemeWrapper(context, dialogTheme());
+        localized.applyOverrideConfiguration(config);
+        return localized;
+    }
+
     private void pickDate() {
         if (disabled) return;
-        DatePickerDialog dialog = new DatePickerDialog(context, dialogTheme(), (picker, y, m, d) -> {
+        DatePickerDialog dialog = new DatePickerDialog(dialogContext(), dialogTheme(), (picker, y, m, d) -> {
             year = y;
             month = m + 1;
             day = d;
@@ -196,7 +225,7 @@ final class DateTimePickerComponent implements NshComponent {
 
     private void pickTime() {
         if (disabled) return;
-        new TimePickerDialog(context, dialogTheme(), (picker, h, m) -> {
+        new TimePickerDialog(dialogContext(), dialogTheme(), (picker, h, m) -> {
             hour = h;
             // The dialog offers every minute: a pick between steps takes the
             // step before it.
@@ -296,6 +325,10 @@ final class DateTimePickerComponent implements NshComponent {
         protected void onConfigurationChanged(Configuration config) {
             super.onConfigurationChanged(config);
             appearanceChanged();
+            // A size in sp is resolved when it is set: a font scale changed since takes
+            // setting it again, before `show` measures the fields.
+            dateField.setTextSize(TypedValue.COMPLEX_UNIT_SP, TEXT_SP);
+            timeField.setTextSize(TypedValue.COMPLEX_UNIT_SP, TEXT_SP);
             // The user's formats or clock may have changed with it.
             show();
         }

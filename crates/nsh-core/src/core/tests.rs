@@ -3040,6 +3040,94 @@ fn scrolls_to_top_reaches_the_scroll_behavior() {
     assert_eq!(behavior(&batch).map(|b| b.scrolls_to_top), Some(true));
 }
 
+/// `smoothWheel` and `wheelLineHeight` reach the scroll view's mounted
+/// behavior (the desktops scroll mouse wheels from it): off and the
+/// platform's line by default, set when the app says so (a negative height
+/// as none), and back to the defaults once the app drops them (the reset
+/// the runtime sets for a removed prop).
+#[test]
+fn smooth_wheel_and_wheel_line_height_reach_the_scroll_behavior() {
+    use crate::js::host::{HostCx, HostProps};
+    fn behavior(batch: &MountBatch) -> Option<ScrollBehavior> {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::ScrollBehavior { id: 2, behavior } => Some((**behavior).clone()),
+            _ => None,
+        })
+    }
+    let b = ScrollBehavior::default();
+    assert!(!b.smooth_wheel);
+    assert_eq!(b.wheel_line_height, Points::ZERO);
+    // Props of every platform: their own names decode.
+    let mut cx = HostCx::for_element(Tag::Scroll);
+    let smooth = <Prop as HostProps>::decode("smoothWheel", &HostTestValue::Bool(true), &mut cx)
+        .expect("a scroll prop")
+        .expect("a value");
+    assert_eq!(smooth, Prop::Scroll(ScrollProp::SmoothWheel(true)));
+    let line =
+        <Prop as HostProps>::decode("wheelLineHeight", &HostTestValue::Number(40.0), &mut cx)
+            .expect("a scroll prop")
+            .expect("a value");
+    assert_eq!(
+        line,
+        Prop::Scroll(ScrollProp::WheelLineHeight(Points(40.0)))
+    );
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Scroll,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: smooth.clone(),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: line.clone(),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let b = behavior(&c.commit().unwrap()).unwrap();
+    assert!(b.smooth_wheel);
+    assert_eq!(b.wheel_line_height, Points(40.0));
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::Scroll(ScrollProp::WheelLineHeight(Points(-5.0))),
+        }],
+    );
+    let b = behavior(&c.commit().unwrap()).unwrap();
+    assert_eq!(
+        b.wheel_line_height,
+        Points::ZERO,
+        "a negative height is none"
+    );
+    apply(
+        &mut c,
+        vec![
+            Op::SetProp {
+                id: 2,
+                prop: <Prop as HostProps>::reset(&smooth).unwrap(),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: <Prop as HostProps>::reset(&line).unwrap(),
+            },
+        ],
+    );
+    let b = behavior(&c.commit().unwrap()).unwrap();
+    assert!(!b.smooth_wheel);
+    assert_eq!(b.wheel_line_height, Points::ZERO);
+}
+
 /// `scrollbarInset` reaches the scroll view's mounted behavior (the platforms
 /// keep their indicators within it), negative edges as none, and leaves the
 /// content inset alone.
@@ -9221,6 +9309,58 @@ fn inputs_report_their_focus_to_the_views_around_them() {
 }
 
 #[test]
+fn host_foreground_is_inherited_without_resizing_the_viewport() {
+    use crate::{element::AdaptiveColor, platform::Appearance};
+
+    let mut c = core();
+    view_with_classes(&mut c, 2, "w-full h-full");
+    for (id, classes) in [(3, ""), (5, "text-[#0000ff]")] {
+        apply(
+            &mut c,
+            vec![
+                Op::Create { id, tag: Tag::Text },
+                class_op(id, classes),
+                Op::CreateText {
+                    id: id + 1,
+                    text: "hello".into(),
+                },
+                Op::Insert {
+                    parent: id,
+                    child: id + 1,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: id,
+                    before: None,
+                },
+            ],
+        );
+    }
+    let tokens = tokens_with(&[("foreground", AdaptiveColor::rgb(0x111111, 0xeeeeee))]);
+    let mut colors = [None; 2];
+    for (host, appearance, inherited) in [
+        (Some(tokens.clone()), Appearance::Light, Color(0x1111_11ff)),
+        (None, Appearance::Light, Color(0x0000_00ff)),
+        (Some(tokens.clone()), Appearance::Light, Color(0x1111_11ff)),
+        (Some(tokens), Appearance::Dark, Color(0xeeee_eeff)),
+    ] {
+        c.set_host_tokens(host);
+        c.set_appearance(appearance);
+        let batch = c.commit().unwrap();
+        for item in &batch.items {
+            if let MountItem::Text { id, text, .. } = item
+                && let Some(index) = [3, 5].iter().position(|at| at == id)
+            {
+                colors[index] = Some(text.spans[0].style.color);
+            }
+        }
+        assert_eq!(colors, [Some(inherited), Some(Color(0x0000_ffff))]);
+        assert_eq!(c.measure(2).unwrap().frame, rect(0.0, 0.0, 320.0, 480.0));
+    }
+}
+
+#[test]
 fn text_inherits_from_views_and_classes_set_props() {
     let mut c = core();
     view_with_classes(&mut c, 2, "text-white text-lg text-center");
@@ -10266,6 +10406,7 @@ fn pressed_current_and_level_decode_from_js() {
     };
     use crate::AccessibilityRole as R;
     for (name, r) in [
+        ("textbox", R::Textbox),
         ("group", R::Group),
         ("region", R::Region),
         ("navigation", R::Navigation),
@@ -19627,193 +19768,6 @@ mod components {
         assert_eq!(shown, "login Unavailable false Unavailable false");
     }
 
-    /// Starts a speech session when its first button is pressed (a new
-    /// one each press), stops the last one with its second; shows every
-    /// event.
-    #[component]
-    fn Dictation() -> impl IntoElement {
-        use std::{cell::RefCell, rc::Rc};
-        let heard = signal(String::new());
-        let last: Rc<RefCell<Option<Rc<RefCell<crate::element::SpeechRecognition>>>>> =
-            Rc::default();
-        let stopping = last.clone();
-        view()
-            .child(text(move || format!("heard{}", heard.get())))
-            .child(view().h(px(10.0)).on_press(move |_: &()| {
-                let request = crate::speech::SpeechRequest {
-                    lang: Some("en-US".into()),
-                    ..Default::default()
-                };
-                let recognition = Rc::new(RefCell::new(recognize_speech(request)));
-                *last.borrow_mut() = Some(recognition.clone());
-                spawn(async move {
-                    loop {
-                        let event =
-                            std::future::poll_fn(|cx| recognition.borrow_mut().poll_next(cx)).await;
-                        let Some(event) = event else { break };
-                        let shown = match event {
-                            crate::speech::SpeechEvent::Start => "start".to_owned(),
-                            crate::speech::SpeechEvent::Result { text, is_final } => {
-                                format!("{text}{}", if is_final { "." } else { "" })
-                            }
-                            crate::speech::SpeechEvent::End { error } => {
-                                format!("end {}", error.map_or("ok", |e| e.as_str()))
-                            }
-                        };
-                        heard.set(format!("{} {shown}", untracked(|| heard.get())));
-                    }
-                });
-            }))
-            .child(view().h(px(10.0)).on_press(move |_: &()| {
-                if let Some(recognition) = &*stopping.borrow() {
-                    recognition.borrow().stop();
-                }
-            }))
-    }
-
-    /// Mounts [`Dictation`]: its start and stop buttons.
-    fn mount_dictation(c: &mut Core<FakeEngine>) -> (NodeId, NodeId) {
-        c.mount_root(&crate::element::Root::new::<Dictation>(|| ()));
-        let batch = c.commit().unwrap();
-        let buttons: Vec<NodeId> = batch
-            .items
-            .iter()
-            .filter_map(|i| match i {
-                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
-                _ => None,
-            })
-            .collect();
-        (buttons[0], buttons[1])
-    }
-
-    fn press(c: &mut Core<FakeEngine>, button: NodeId) -> Vec<crate::speech::SpeechCommand> {
-        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
-        c.commit()
-            .map(|b| b.items)
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|i| match i {
-                MountItem::Command {
-                    id: ROOT_ID,
-                    command: Command::Speech(command),
-                } => Some(command),
-                _ => None,
-            })
-            .collect()
-    }
-
-    fn hear(c: &mut Core<FakeEngine>, id: u32, event: crate::speech::SpeechEvent) {
-        assert!(c.component_event(
-            ROOT_ID,
-            EventKind::Speech,
-            &EventPayload::Speech { id, event }
-        ));
-    }
-
-    #[test]
-    fn the_platform_recognizes_speech() {
-        use crate::speech::{SpeechCommand, SpeechError, SpeechEvent};
-        let mut c = core();
-        c.set_environment(crate::element::Environment {
-            speech: true,
-            ..Default::default()
-        });
-        let (start, stop) = mount_dictation(&mut c);
-        let commands = press(&mut c, start);
-        let [SpeechCommand::Start { id, request }] = &commands[..] else {
-            panic!("one start: {commands:?}");
-        };
-        let id = *id;
-        assert_eq!(request.lang.as_deref(), Some("en-US"));
-        hear(&mut c, id, SpeechEvent::Start);
-        hear(
-            &mut c,
-            id,
-            SpeechEvent::Result {
-                text: "hel".into(),
-                is_final: false,
-            },
-        );
-        // Another session's events are dropped.
-        hear(
-            &mut c,
-            id + 100,
-            SpeechEvent::End {
-                error: Some(SpeechError::Failed),
-            },
-        );
-        assert_eq!(press(&mut c, stop), vec![SpeechCommand::Stop { id }]);
-        hear(
-            &mut c,
-            id,
-            SpeechEvent::Result {
-                text: "hello".into(),
-                is_final: true,
-            },
-        );
-        hear(&mut c, id, SpeechEvent::End { error: None });
-        let shown = run_until(&mut c, |s| s.iter().any(|t| t.contains("end")));
-        assert_eq!(shown.last().unwrap(), "heard start hel hello. end ok");
-        // Nothing comes after the end; stopping it asks nothing.
-        hear(
-            &mut c,
-            id,
-            SpeechEvent::Result {
-                text: "late".into(),
-                is_final: true,
-            },
-        );
-        assert_eq!(press(&mut c, stop), vec![]);
-
-        // A new session aborts the one running: it ends for the app at once.
-        let first = press(&mut c, start);
-        let [SpeechCommand::Start { id: first, .. }] = first[..] else {
-            panic!("{first:?}");
-        };
-        hear(&mut c, first, SpeechEvent::Start);
-        let second = press(&mut c, start);
-        let [
-            SpeechCommand::Abort { id: aborted },
-            SpeechCommand::Start { id: second, .. },
-        ] = second[..]
-        else {
-            panic!("{second:?}");
-        };
-        assert_eq!(aborted, first);
-        assert_ne!(second, first);
-        let shown = run_until(&mut c, |s| s.iter().any(|t| t.ends_with("start end ok")));
-        assert!(
-            shown.last().unwrap().ends_with("end ok start end ok"),
-            "{shown:?}"
-        );
-    }
-
-    #[test]
-    fn speech_ends_unavailable_where_nothing_recognizes_it() {
-        let mut c = core();
-        let (start, _) = mount_dictation(&mut c);
-        assert_eq!(press(&mut c, start), vec![]);
-        let shown = run_until(&mut c, |s| s.iter().any(|t| t.contains("end")));
-        assert_eq!(shown.last().unwrap(), "heard end unavailable");
-    }
-
-    #[test]
-    fn speech_needs_the_capability() {
-        let mut c = core();
-        c.set_environment(crate::element::Environment {
-            speech: true,
-            ..Default::default()
-        });
-        c.set_access(std::sync::Arc::new(crate::access::Access {
-            declared: crate::access::Capabilities::from_json(&serde_json::json!({})).unwrap(),
-            granted: None,
-        }));
-        let (start, _) = mount_dictation(&mut c);
-        assert_eq!(press(&mut c, start), vec![]);
-        let shown = run_until(&mut c, |s| s.iter().any(|t| t.contains("end")));
-        assert_eq!(shown.last().unwrap(), "heard end not-allowed");
-    }
-
     /// Shows the later launches of the app it hears.
     #[component]
     fn Relaunched() -> impl IntoElement {
@@ -20272,64 +20226,6 @@ mod components {
             ..Default::default()
         });
         assert_eq!(texts(&c.commit().unwrap()), ["shaders false", "canvas"]);
-    }
-
-    /// Recognizes "a b" as the user speaks; stopping it gives "a b c".
-    #[derive(Default)]
-    struct TestSpeech {
-        stopped: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    }
-
-    struct TestSession {
-        sink: crate::speech::SpeechSink,
-        stopped: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    }
-
-    impl crate::speech::SpeechControl for TestSession {
-        fn stop(&mut self) {
-            self.stopped
-                .store(true, std::sync::atomic::Ordering::SeqCst);
-            self.sink.result("a b c", true);
-            self.sink.end(None);
-        }
-
-        fn abort(&mut self) {}
-    }
-
-    impl crate::speech::SpeechBackend for TestSpeech {
-        fn start(
-            &self,
-            request: crate::speech::SpeechRequest,
-            sink: crate::speech::SpeechSink,
-        ) -> Box<dyn crate::speech::SpeechControl> {
-            assert!(request.interim);
-            sink.start();
-            // From another thread, as a recognizer reports.
-            let from = sink.clone();
-            std::thread::spawn(move || from.result("a b", false))
-                .join()
-                .unwrap();
-            Box::new(TestSession {
-                sink,
-                stopped: self.stopped.clone(),
-            })
-        }
-    }
-
-    #[test]
-    fn a_recognizer_of_the_embedder_runs_in_place_of_the_platform() {
-        let mut c = core();
-        let backend = TestSpeech::default();
-        let stopped = backend.stopped.clone();
-        c.set_speech(Some(std::sync::Arc::new(backend)));
-        let (start, stop) = mount_dictation(&mut c);
-        assert_eq!(press(&mut c, start), vec![], "nothing reaches the platform");
-        let shown = run_until(&mut c, |s| s.iter().any(|t| t.contains("a b")));
-        assert_eq!(shown.last().unwrap(), "heard start a b");
-        assert_eq!(press(&mut c, stop), vec![]);
-        assert!(stopped.load(std::sync::atomic::Ordering::SeqCst));
-        let shown = run_until(&mut c, |s| s.iter().any(|t| t.contains("end")));
-        assert_eq!(shown.last().unwrap(), "heard start a b a b c. end ok");
     }
 
     /// Picks Markdown files, then trashes the first one picked and opens a
@@ -25220,6 +25116,51 @@ mod views {
         c.commit().unwrap();
         assert!(c.key(b).is_err(), "released");
         assert_eq!(holding(&c), 0, "no component keeps it");
+    }
+
+    #[test]
+    fn positional_js_children_a_component_places_are_styled_before_the_commit_reads_them() {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Forward>();
+        c.set_components(registry);
+        let mut ops = vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Component(std::any::type_name::<Forward>().into()),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ];
+        for id in [6, 8, 10] {
+            ops.extend([
+                Op::Create { id, tag: Tag::View },
+                class_op(id, "w-10 h-4 last:fixed"),
+                Op::Insert {
+                    parent: 2,
+                    child: id,
+                    before: None,
+                },
+            ]);
+        }
+        apply(&mut c, ops);
+        // Placed by the component as it renders, in the commit: the last
+        // is `position: fixed` in that same commit.
+        c.commit();
+        for id in [6, 8, 10] {
+            assert_eq!(
+                c.nodes[c.key(id).unwrap() as usize].fixed_view,
+                id == 10,
+                "{id}"
+            );
+        }
     }
 
     #[test]
@@ -33435,6 +33376,77 @@ fn static_views_ignore_their_insets() {
     c.set_viewport(size_pt(800.0, 480.0));
     let batch = c.commit().unwrap();
     assert_eq!(frame_of(&batch, 4), Some(rect(0.0, 36.0, 10.0, 10.0)));
+}
+
+#[test]
+fn content_height_uses_committed_in_flow_geometry_when_overlays_open_and_close() {
+    use StyleValue::{Number, Str};
+
+    let mut c = core();
+    assert_eq!(c.content_height(), None);
+    add(&mut c, 2, Tag::View, ROOT_ID, &[("height", Number(100.0))]);
+    add(&mut c, 4, Tag::View, 2, &[("padding", Number(5.0))]);
+    c.commit().unwrap();
+    assert_eq!(c.content_height(), Some(Points(100.0)));
+
+    // The overlay is mounted under the surface root, not its logical parent.
+    add(
+        &mut c,
+        6,
+        Tag::Overlay,
+        4,
+        &[("left", Number(10.0)), ("top", Number(300.0))],
+    );
+    add(
+        &mut c,
+        8,
+        Tag::View,
+        6,
+        &[("width", Number(50.0)), ("height", Number(20.0))],
+    );
+    // Out-of-flow views directly in the logical root do not size it either.
+    for (id, position) in [(10, "absolute"), (12, "fixed")] {
+        add(
+            &mut c,
+            id,
+            Tag::View,
+            ROOT_ID,
+            &[
+                ("position", Str(position)),
+                ("top", Number(400.0)),
+                ("height", Number(20.0)),
+            ],
+        );
+    }
+    // A top-level modal is a separate layout root even without out-of-flow styling.
+    add(&mut c, 14, Tag::Modal, ROOT_ID, &[]);
+    c.set_root_size(14, size_pt(200.0, 300.0), EdgeInsets::default());
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 6), Some(rect(10.0, 300.0, 50.0, 20.0)));
+    assert_eq!(frame_of(&batch, 14), Some(rect(0.0, 0.0, 200.0, 300.0)));
+    assert_eq!(c.content_height(), Some(Points(100.0)));
+    apply(
+        &mut c,
+        vec![Op::Remove {
+            parent: 4,
+            child: 6,
+        }],
+    );
+    c.commit().unwrap();
+    assert_eq!(c.content_height(), Some(Points(100.0)));
+
+    apply(&mut c, vec![style_op(2, &[("height", Number(160.0))])]);
+    c.commit().unwrap();
+    assert_eq!(c.content_height(), Some(Points(160.0)));
+    apply(
+        &mut c,
+        vec![Op::Remove {
+            parent: ROOT_ID,
+            child: 2,
+        }],
+    );
+    c.commit().unwrap();
+    assert_eq!(c.content_height(), None);
 }
 
 #[test]
@@ -52601,13 +52613,17 @@ mod positional_regressions {
             .collect()
     }
 
-    // The ordinary resolver still queries the actual sibling list for each
-    // child. Compare the shared-position pass with that independent path.
+    // The ordinary resolver counts the actual sibling list while the
+    // parent's children moved (otherwise it takes the bits each child was
+    // last styled at). Compare the shared-position pass with that
+    // independent path.
     fn check(c: &mut Core<FakeEngine>, parent: NodeId) {
         let parent = c.key(parent).unwrap();
         c.positions_changed(parent);
         let children = c.nodes[parent as usize].children.clone();
         let expected = snapshot(c, &children);
+        let flags = c.nodes[parent as usize].positional;
+        c.nodes[parent as usize].positional |= super::Positional::QUEUED;
         for &key in &children {
             if c.nodes[key as usize]
                 .classes
@@ -52617,7 +52633,139 @@ mod positional_regressions {
                 c.restyle(key);
             }
         }
+        c.nodes[parent as usize].positional = flags;
         assert_eq!(snapshot(c, &children), expected);
+    }
+
+    /// What restyling each of `parent`'s children on its own (a hover, a
+    /// press) gives, taking the bits each was last styled at, is what
+    /// counting its siblings gives.
+    fn kept_positions_match_counted(c: &mut Core<FakeEngine>, parent: NodeId) {
+        let parent = c.key(parent).unwrap();
+        let children = c.nodes[parent as usize].children.clone();
+        for &key in &children {
+            c.restyle(key);
+        }
+        let kept = snapshot(c, &children);
+        let flags = c.nodes[parent as usize].positional;
+        c.nodes[parent as usize].positional |= super::Positional::QUEUED;
+        for &key in &children {
+            c.restyle(key);
+        }
+        c.nodes[parent as usize].positional = flags;
+        assert_eq!(kept, snapshot(c, &children));
+    }
+
+    /// A child restyled on its own after its siblings moved takes the bits
+    /// its last styling counted: also one whose classes were cleared while
+    /// they moved, and given back after.
+    #[test]
+    fn a_child_restyled_on_its_own_keeps_its_counted_position() {
+        let mut c = core();
+        view_with_classes(&mut c, 2, "");
+        for id in [4, 6, 8] {
+            child(&mut c, id, 2);
+        }
+        c.commit();
+        c.apply(Op::Insert {
+            parent: 2,
+            child: 4,
+            before: None,
+        })
+        .unwrap();
+        c.commit();
+        kept_positions_match_counted(&mut c, 2);
+        // 6, first, loses its classes; a row comes before it; it gets them
+        // back: second.
+        c.apply(class_op(6, "")).unwrap();
+        c.commit();
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 10,
+                    tag: Tag::View,
+                },
+                class_op(10, CLASSES),
+                Op::Insert {
+                    parent: 2,
+                    child: 10,
+                    before: Some(6),
+                },
+            ],
+        );
+        c.commit();
+        c.apply(class_op(6, CLASSES)).unwrap();
+        c.commit();
+        kept_positions_match_counted(&mut c, 2);
+    }
+
+    /// An overlay given a hint becomes a tooltip's, which counts among no
+    /// siblings: the rows after it move up a place.
+    #[test]
+    fn an_overlay_given_a_hint_moves_its_siblings_up() {
+        let mut c = core();
+        view_with_classes(&mut c, 2, "");
+        child(&mut c, 4, 2);
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 6,
+                    tag: Tag::Overlay,
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: 6,
+                    before: None,
+                },
+            ],
+        );
+        child(&mut c, 8, 2);
+        c.commit();
+        let third = c.nodes[c.key(8).unwrap() as usize].position_used;
+        c.apply(overlay_prop(
+            6,
+            crate::OverlayProp::Hint(Some(std::time::Duration::from_millis(300))),
+        ))
+        .unwrap();
+        c.commit();
+        assert_ne!(c.nodes[c.key(8).unwrap() as usize].position_used, third);
+        kept_positions_match_counted(&mut c, 2);
+    }
+
+    /// Rows mounted one insert at a time have their positions looked at
+    /// once per parent before the commit styles them: the siblings looked
+    /// at grow with the rows, not with their square.
+    #[test]
+    fn positions_are_looked_at_once_per_parent_as_rows_mount() {
+        let work = |rows: NodeId| {
+            let mut c = core();
+            view_with_classes(&mut c, 2, "");
+            for i in 0..rows {
+                let id = 10 + 2 * i;
+                apply(
+                    &mut c,
+                    vec![
+                        Op::Create { id, tag: Tag::View },
+                        class_op(id, "w-10 h-4 odd:bg-red-500 last:bg-blue-500"),
+                        Op::Insert {
+                            parent: 2,
+                            child: id,
+                            before: None,
+                        },
+                    ],
+                );
+            }
+            c.commit();
+            c.components.position_work.get()
+        };
+        let (few, many) = (work(400), work(1_600));
+        // Four times the rows: about four times the work (sixteen before).
+        assert!(
+            many <= few * 6,
+            "{few} siblings looked at for 400 rows, {many} for 1,600"
+        );
     }
 
     fn child(c: &mut Core<FakeEngine>, id: NodeId, parent: NodeId) {
@@ -52711,7 +52859,11 @@ mod positional_regressions {
         })
         .unwrap();
         c.apply(class_op(48, CLASSES)).unwrap();
-        assert!(c.nodes[c.key(100).unwrap() as usize].positional_children);
+        assert!(
+            c.nodes[c.key(100).unwrap() as usize]
+                .positional
+                .has(super::Positional::CHILDREN)
+        );
         child(&mut c, 50, 100);
 
         for op in [
