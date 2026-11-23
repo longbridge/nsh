@@ -3,7 +3,9 @@
 //! accessor), the windows (`crate::window`) and `Menu`, `Tray` and
 //! `GlobalShortcut`, whose items call the app's functions: the menus are decoded natively
 //! into [`MenuItem`]s with an id per item, the functions kept by id, and
-//! the platform's [`EventKind::Menu`] calls the chosen item's.
+//! the platform's [`EventKind::Menu`] calls the chosen item's. Replacing
+//! the application menu keeps its previous functions for one replacement
+//! so queued clicks can still resolve their original items.
 
 use std::{
     cell::{Cell, RefCell},
@@ -43,6 +45,8 @@ type Functions = Vec<(u32, JsValue)>;
 pub(crate) struct Menus {
     /// The application menu's functions (id, owned function).
     app: RefCell<Vec<(u32, JsValue)>>,
+    /// The previous application menu's functions, for queued clicks.
+    retired: RefCell<Vec<(u32, JsValue)>>,
     /// The last context menu's functions.
     popup: RefCell<Vec<(u32, JsValue)>>,
     /// Trailing iOS header bar button functions, by screen node id.
@@ -66,6 +70,7 @@ impl Default for Menus {
     fn default() -> Self {
         Menus {
             app: RefCell::default(),
+            retired: RefCell::default(),
             popup: RefCell::default(),
             header: RefCell::default(),
             tray: RefCell::default(),
@@ -142,6 +147,7 @@ impl Menus {
             .app
             .get_mut()
             .drain(..)
+            .chain(self.retired.get_mut().drain(..))
             .chain(self.popup.get_mut().drain(..))
             .chain(self.tray.get_mut().drain(..))
             .chain(
@@ -437,6 +443,15 @@ fn keep(cx: *mut JsContext, slot: &RefCell<Vec<(u32, JsValue)>>, functions: Vec<
     }
 }
 
+/// Keeps one replaced application menu alive for clicks already queued.
+fn keep_app(cx: *mut JsContext, functions: Vec<(u32, JsValue)>) {
+    let m = menus(cx);
+    let retired = m.retired.replace(m.app.replace(functions));
+    for (_, f) in retired {
+        free(cx, f);
+    }
+}
+
 fn send(cx: *mut JsContext, command: DesktopCommand) -> Result<(), JsValue> {
     send_to(cx, ROOT_ID, command)
 }
@@ -478,12 +493,12 @@ unsafe extern "C" fn set_application_menu(
     }
     let list = arg(argc, argv, 0);
     let result = if nullish(list) {
-        keep(cx, &menus(cx).app, Vec::new());
+        keep_app(cx, Vec::new());
         send(cx, DesktopCommand::SetMenu(None))
     } else {
         match decode(cx, list) {
             Ok((items, functions)) => {
-                keep(cx, &menus(cx).app, functions);
+                keep_app(cx, functions);
                 let items = MenuItem::with_inline_expanded(&items).into();
                 listen(cx).and_then(|()| send(cx, DesktopCommand::SetMenu(Some(items))))
             }
@@ -612,7 +627,7 @@ unsafe extern "C" fn on_menu(
         return UNDEFINED;
     }
     let m = menus(cx);
-    let f = [&m.app, &m.popup, &m.tray]
+    let f = [&m.app, &m.retired, &m.popup, &m.tray]
         .into_iter()
         .find_map(|slot| {
             slot.borrow()
@@ -1685,5 +1700,75 @@ mod tests {
         names.sort();
         roles.sort();
         assert_eq!(names, roles);
+    }
+
+    #[test]
+    fn a_click_queued_before_the_menu_was_replaced_still_runs() {
+        use std::{cell::Cell, ffi::c_int};
+
+        use super::{UNDEFINED, keep_app, on_menu, reactive};
+
+        thread_local! {
+            static CALLS: Cell<u32> = const { Cell::new(0) };
+        }
+        unsafe extern "C" fn record(
+            _cx: *mut super::qjs::JSContext,
+            _this: super::JsValue,
+            _argc: c_int,
+            _argv: *mut super::JsValue,
+        ) -> super::JsValue {
+            CALLS.with(|c| c.set(c.get() + 1));
+            UNDEFINED
+        }
+
+        let host = crate::Host::new().unwrap();
+        host.with_raw(|cx| {
+            CALLS.with(|c| c.set(0));
+            let event = |id: u32| {
+                // SAFETY: `cx` is the host's live context.
+                let e = unsafe { super::qjs::JS_NewObject(cx) };
+                // SAFETY: `e` is this block's live object, in `cx`.
+                unsafe {
+                    super::qjs::JS_SetPropertyStr(
+                        cx,
+                        e,
+                        c"id".as_ptr(),
+                        super::qjs::JS_NewFloat64(f64::from(id)),
+                    )
+                };
+                e
+            };
+            // SAFETY: `e` is a live object owned here; its result and
+            // `e` are freed once read.
+            let on = |id: u32| unsafe {
+                let mut e = event(id);
+                let r = on_menu(cx, UNDEFINED, 1, &mut e);
+                super::qjs::JS_FreeValue(cx, r);
+                super::qjs::JS_FreeValue(cx, e);
+            };
+            let function = || reactive::new_function(cx, c"f", record, 0);
+            let calls = || CALLS.with(|c| c.get());
+
+            // A preceding click replaced the menu while item 7's click
+            // was queued against the old menu.
+            keep_app(cx, vec![(7, function())]);
+            keep_app(cx, vec![(9, function())]);
+            on(7);
+            assert_eq!(calls(), 1, "the click's item still resolves");
+            on(9);
+            assert_eq!(calls(), 2);
+            // One replacement later, the first menu's functions retire.
+            keep_app(cx, vec![(11, function())]);
+            on(7);
+            assert_eq!(calls(), 2, "a freed function cannot run");
+            on(11);
+            assert_eq!(calls(), 3);
+            // Clearing the menu retains the previous generation too.
+            keep_app(cx, Vec::new());
+            on(11);
+            assert_eq!(calls(), 4, "a click of the previous menu still runs");
+            on(9);
+            assert_eq!(calls(), 4);
+        });
     }
 }
