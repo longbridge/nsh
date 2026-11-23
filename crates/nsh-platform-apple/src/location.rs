@@ -52,6 +52,8 @@ struct Running {
     reported: Option<f64>,
     /// Whether the system's refusal was reported.
     refused: bool,
+    /// The authorization last reported to the core.
+    reported_authorization: Authorization,
 }
 
 /// An authorization the user is deciding.
@@ -175,6 +177,20 @@ fn poll_authorization() {
 fn start(id: u32, control: &EngineControl, request: &LocationRequest, watch: bool) {
     let manager = manager();
     // SAFETY: on the main thread, the manager made there.
+    let status = unsafe { manager.authorizationStatus() };
+    if authorization(status) == Authorization::NotDetermined {
+        // The app's own prompt, as the design says: a request asks for
+        // when-in-use itself, and never for more than that.
+        // SAFETY: on the main thread, the manager made there.
+        unsafe {
+            if request.background {
+                manager.requestAlwaysAuthorization();
+            } else {
+                manager.requestWhenInUseAuthorization();
+            }
+        }
+    }
+    // SAFETY: on the main thread, the manager made there.
     unsafe {
         manager.setDesiredAccuracy(desired_accuracy(request.accuracy));
         manager.setDistanceFilter(request.distance_filter.unwrap_or(-1.0));
@@ -190,6 +206,7 @@ fn start(id: u32, control: &EngineControl, request: &LocationRequest, watch: boo
             deadline,
             reported: None,
             refused: false,
+            reported_authorization: Authorization::NotDetermined,
         });
     });
     after(poll_interval(watch));
@@ -232,6 +249,10 @@ fn poll() {
     let next = RUNNING.with(|slot| {
         let mut slot = slot.borrow_mut();
         let running = slot.as_mut()?;
+        if running.reported_authorization != status {
+            running.reported_authorization = status;
+            running.control.set_location_authorization(status);
+        }
         if matches!(status, Authorization::Denied | Authorization::Restricted) {
             if !running.refused {
                 running.refused = true;
