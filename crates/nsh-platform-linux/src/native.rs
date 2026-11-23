@@ -171,7 +171,7 @@ impl ComponentScroll {
         if !offset.0.is_finite() || !gtk::is_initialized_main_thread() {
             return;
         }
-        if let Some(surface) = Surface::with_key(self.surface) {
+        if let Some(surface) = Surface::by_key(self.surface) {
             surface
                 .native
                 .set_scroll_offset(&surface, id, &self.token, offset);
@@ -363,7 +363,7 @@ impl NativeState {
         let key = surface.key();
         // Present through the normal animation write path, ahead of GTK's frame.
         glib::idle_add_local_full(glib::Priority::HIGH_IDLE, move || {
-            if let Some(surface) = Surface::with_key(key) {
+            if let Some(surface) = Surface::by_key(key) {
                 let native = &surface.native;
                 native.scroll_write_scheduled.set(false);
                 if native.scroll_write_needed.get() {

@@ -83,7 +83,7 @@ impl Sink {
         if !self.pending.swap(true, Ordering::AcqRel) {
             let key = self.key;
             glib::MainContext::default().invoke_with_priority(DRAIN_PRIORITY, move || {
-                if let Some(surface) = Surface::with_key(key) {
+                if let Some(surface) = Surface::by_key(key) {
                     surface.drain();
                 }
             });
@@ -241,7 +241,7 @@ impl Surface {
     }
 
     /// Resolves a surface on its owning thread without keeping it alive.
-    pub(crate) fn with_key(key: u64) -> Option<Rc<Self>> {
+    pub(crate) fn by_key(key: u64) -> Option<Rc<Self>> {
         SURFACES
             .try_with(|surfaces| surfaces.borrow().get(&key).and_then(Weak::upgrade))
             .ok()
@@ -385,18 +385,6 @@ impl Surface {
         if self.fps.take().is_some() {
             self.control(|c| c.set_perf_monitor(None));
         }
-    }
-
-    /// Its key ([`Surface::by_key`]).
-    #[cfg(feature = "dev")]
-    pub(crate) fn key(&self) -> u64 {
-        self.key
-    }
-
-    /// The surface `key` names, while it exists.
-    #[cfg(feature = "dev")]
-    pub(crate) fn by_key(key: u64) -> Option<Rc<Surface>> {
-        SURFACES.with(|s| s.borrow().get(&key).and_then(Weak::upgrade))
     }
 
     /// Whether a native animation runs: the graph's (not one looping
