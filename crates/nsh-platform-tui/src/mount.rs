@@ -576,6 +576,7 @@ impl Mounter {
                         }
                     }
                 }
+                MountItem::NativeScrollValue { .. } => {}
                 MountItem::Overflow { .. } | MountItem::LayoutDirection { .. } => {}
                 other => {
                     if self.unhandled.insert(discriminant(&other)) {

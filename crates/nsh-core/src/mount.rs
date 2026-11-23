@@ -890,6 +890,14 @@ pub enum MountItem {
         /// stay left to right).
         mirrored: bool,
     },
+    /// Binds a registered native component's reported vertical offset to the
+    /// UI thread animator. The component owns its scrolling.
+    NativeScrollValue {
+        /// Native component view.
+        id: NodeId,
+        /// Destination value. `None` clears the binding.
+        value: Option<crate::animation::NodeId>,
+    },
     /// Set the scrollable content size.
     ScrollContent {
         /// Scroll view.

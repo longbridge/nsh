@@ -83,8 +83,7 @@ impl Sink {
         if !self.pending.swap(true, Ordering::AcqRel) {
             let key = self.key;
             glib::MainContext::default().invoke_with_priority(DRAIN_PRIORITY, move || {
-                let surface = SURFACES.with(|s| s.borrow().get(&key).and_then(Weak::upgrade));
-                if let Some(surface) = surface {
+                if let Some(surface) = Surface::with_key(key) {
                     surface.drain();
                 }
             });
@@ -126,6 +125,7 @@ pub(crate) struct Surface {
     pub(crate) mounter: RefCell<Mounter>,
     /// The native animation graph.
     pub(crate) anim: RefCell<UiAnimation>,
+    writing_animations: RefCell<()>,
     /// Stacks, screens and modals.
     pub(crate) nav: RefCell<crate::navigation::Nav>,
     /// The app's own windows (`<Window>`, `Window.open`), by the dialog
@@ -235,6 +235,19 @@ pub(crate) enum Next {
 }
 
 impl Surface {
+    /// Identity of this surface for handles that can cross threads.
+    pub(crate) fn key(&self) -> u64 {
+        self.key
+    }
+
+    /// Resolves a surface on its owning thread without keeping it alive.
+    pub(crate) fn with_key(key: u64) -> Option<Rc<Self>> {
+        SURFACES
+            .try_with(|surfaces| surfaces.borrow().get(&key).and_then(Weak::upgrade))
+            .ok()
+            .flatten()
+    }
+
     /// The GPU device shader views render with ([`crate::shader`]), opened
     /// the first time one asks; without one the app hears that shader views
     /// draw nothing (`shadersAvailable()`).
@@ -269,6 +282,7 @@ impl Surface {
             root: root.clone(),
             mounter: RefCell::new(Mounter::new(root.clone())),
             anim: RefCell::new(UiAnimation::default()),
+            writing_animations: RefCell::default(),
             nav: RefCell::default(),
             windows: RefCell::default(),
             main_window: RefCell::default(),
@@ -486,6 +500,7 @@ impl Surface {
         self.control.borrow_mut().take();
         self.engine.borrow_mut().take();
         self.rx.borrow_mut().take();
+        self.native.clear_scroll_sources();
         self.mounter.borrow_mut().clear();
         self.native.clear();
         crate::system::clear(self);
@@ -626,13 +641,25 @@ impl Surface {
         self.ensure_ticking();
     }
 
-    fn apply(self: &Rc<Self>, batch: &MountBatch) {
+    /// Applies the engine's mount items in order.
+    pub(crate) fn apply(self: &Rc<Self>, batch: &MountBatch) {
         crate::access::prepare(batch);
         for item in &batch.items {
-            self.anim.borrow_mut().apply(item);
+            {
+                let mut anim = self.anim.borrow_mut();
+                if matches!(item, MountItem::NativeScrollValue { .. }) {
+                    self.native.flush_deferred_scrolls(&mut anim);
+                }
+                anim.apply(item);
+                if let MountItem::NativeScrollValue { id, value: Some(_) } = item {
+                    self.native.scroll_binding_applied(&mut anim, *id);
+                }
+            }
             if !matches!(
                 item,
-                MountItem::Animation(_) | MountItem::AnimationBindings { .. }
+                MountItem::Animation(_)
+                    | MountItem::AnimationBindings { .. }
+                    | MountItem::NativeScrollValue { .. }
             ) {
                 self.mounter.borrow_mut().apply(self, item);
             }
@@ -649,8 +676,10 @@ impl Surface {
     /// Writes the animated values to the views and reports finished
     /// animations.
     pub(crate) fn write_animations(&self) {
+        let writing = self.writing_animations.try_borrow_mut().ok();
         let (finished, moved) = {
             let mut anim = self.anim.borrow_mut();
+            self.native.apply_deferred_scrolls(&mut anim);
             anim.write(&self.mounter.borrow());
             let mut moved = Vec::new();
             anim.write_components(
@@ -664,6 +693,19 @@ impl Surface {
         crate::scroll::pin_animated_sticky(self);
         if !finished.is_empty() {
             self.control(|c| c.animations_finished(finished));
+        }
+        drop(writing);
+        self.native.schedule_scroll_write(self);
+    }
+
+    /// A nested GTK loop can run the scroll idle during a mount or write.
+    /// Those paths flush or reschedule after releasing their borrows.
+    pub(crate) fn write_native_scroll_animations(&self) {
+        if self.writing_animations.try_borrow_mut().is_ok()
+            && self.anim.try_borrow_mut().is_ok()
+            && self.mounter.try_borrow_mut().is_ok()
+        {
+            self.write_animations();
         }
     }
 

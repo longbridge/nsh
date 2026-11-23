@@ -132,6 +132,7 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
     };
     for item in batch.items {
         match item {
+            MountItem::NativeScrollValue { .. } => {}
             MountItem::TreeOrder(_) | MountItem::ProjectStates { .. } => {}
             MountItem::Create { id, kind } => {
                 e.int(CREATE);

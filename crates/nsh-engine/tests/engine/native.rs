@@ -658,3 +658,54 @@ fn a_web_view_ref_loads_a_page_with_headers() {
         "{shown}"
     );
 }
+
+#[test]
+fn native_scroll_value_drives_a_sibling_and_preserves_own_props() -> Result<(), String> {
+    use nsh_core::{Point, Points, animation::Animator};
+
+    let (_engine, rx) = start(
+        r#"import { mount, View, createAnimatedValue, nativeComponent } from "nsh";
+const Source = nativeComponent("example.source", {});
+const Sink = nativeComponent("example.sink", { props: ["progress", "scrollValue"] });
+function App() {
+  const offset = createAnimatedValue(0);
+  return <View><Source scrollValue={offset} /><Sink progress={offset} scrollValue="own" /></View>;
+}
+mount(App);"#,
+    );
+    let batch = rx
+        .recv_timeout(Duration::from_secs(5))
+        .map_err(|e| e.to_string())?;
+    let component = |name: &str| {
+        batch
+            .items
+            .iter()
+            .find_map(|item| match item {
+                MountItem::Component { id, name: found } if found.as_ref() == name => Some(*id),
+                _ => None,
+            })
+            .ok_or_else(|| format!("missing {name}"))
+    };
+    let source = component("example.source")?;
+    let sink = component("example.sink")?;
+    assert!(component_props(&batch, sink).contains(&("scrollValue".into(), Some(json!("own")))));
+    let mut animator = Animator::default();
+    for item in &batch.items {
+        animator.apply(item);
+    }
+    assert!(animator.scrolled(source, Point::new(Points(0.0), Points(27.5))));
+    let mut output = None;
+    animator.write_components(
+        |id| Some(id),
+        |id, name, value| {
+            if id == sink && name == "progress" {
+                output = Some(value);
+            }
+        },
+    );
+    assert_eq!(
+        output,
+        Some(nsh_core::animation::AnimatedPropValue::Number(27.5))
+    );
+    Ok(())
+}

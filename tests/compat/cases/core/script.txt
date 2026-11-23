@@ -128,6 +128,9 @@ frame id:video 0 248 160 90
 frame id:web 0 338 180 60
 frame id:map 0 398 100 50
 frame id:map-animated 0 448 100 50
+# The placeholder still mounts and its animation reads the initial offset.
+# The runner has no registered native component to publish updates.
+animated id:map-animated opacity 0.5
 frame id:pan 0 498 50 50
 expect Missing module: ReferenceError
 expect Base module: object

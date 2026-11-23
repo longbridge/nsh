@@ -173,6 +173,31 @@ const pull = createAnimatedValue(0);
 `setProp`，所以没有实现它们的组件也能收到值。Rust 组件实现 `set_animated_number` 和 `set_animated_color`，Rust 代码用
 `native(name).bind_animated_prop("progress", &value)` 绑定 prop。重新给该 prop 一个普通值即解除绑定，并发送这个值。Web 上没有注册的原生组件。
 
+### 上报滚动偏移量
+
+在 macOS、Linux（GTK）和 Windows 上，自行处理滚动的已注册原生组件可以用垂直滚动偏移量驱动 `AnimatedValue`。
+在 TSX 中绑定组件的 `scrollValue`，在 Rust 中调用 `native(name).scroll_value(&value)`。
+`scrollValue` 是宿主 prop，无需列入 `spec.props`。已有组件若在 `spec.props` 中列出了 `scrollValue`，这个名称仍指它的自有 prop。
+
+```tsx tabs
+import { createAnimatedValue, nativeComponent } from "nsh";
+
+const LogView = nativeComponent<{ source: string }>("acme.log", { props: ["source"] });
+const offset = createAnimatedValue(0);
+
+<LogView source="build" scrollValue={offset} />;
+```
+
+```rust tabs
+let offset = animated_value(0.0);
+native("acme.log").prop("source", serde_json::json!("build")).scroll_value(&offset)
+```
+
+保留原生工厂收到的 `ComponentContext`。每当组件滚动时（包括程序触发的滚动），在组件的 UI 线程上调用
+`context.set_scroll_offset(offset)`，传入以逻辑点（`Points`）为单位的当前垂直偏移量。
+只有存在绑定时，这个调用才会生效。NSH 在同一线程将偏移量写入动画图，绑定到 `offset` 的样式或动画 prop
+无需经过 JS 事件即可跟随滚动。滚动位置仍由组件控制。
+
 ## 事件
 
 组件按名称发出事件，可附带一个 JSON 负载。NSH 把它投递到引擎线程，并用该负载调用对应的处理函数（在 Rust 中是那个 `on_native_event` 监听函数，带着事件的 `name` 和 `data`）：

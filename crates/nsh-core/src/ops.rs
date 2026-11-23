@@ -3614,9 +3614,10 @@ pub enum Prop {
     /// each bind, in the same batch as the cell's new content).
     #[prop(js = "cellIndex", internal)]
     CellIndex(u32),
-    /// `scrollValue`: an animated value fed with the scroll offset (main axis), for
-    /// scroll-linked effects.
-    #[prop(js = "scrollValue", with = crate::js::host_values::scroll_value, reset = Prop::ScrollValue(None), ts = "AnimatedValue", on = SCROLL | LIST)]
+    /// `scrollValue`: an animated value fed with the scroll offset in points.
+    /// Follows the main axis of a scroll view or list, or the vertical offset
+    /// reported by a registered native component on supported platforms.
+    #[prop(js = "scrollValue", with = crate::js::host_values::scroll_value, reset = Prop::ScrollValue(None), ts = "AnimatedValue", on = SCROLL | LIST | NATIVE)]
     ScrollValue(Option<crate::animation::NodeId>),
     /// `pullValue`: an animated value fed with how far a vertical scroll
     /// view is pulled past its top (0 at rest, growing with the pull; the

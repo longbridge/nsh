@@ -142,12 +142,14 @@ pub trait NativeComponent {
     }
 }
 
-/// What a component can tell its app. Cheap to clone; usable from any
-/// thread.
+/// What a component can tell its app. Cheap to clone and safe to share
+/// across threads. Publishing scroll offsets requires the AppKit main thread.
 #[derive(Clone)]
 pub struct ComponentContext {
     id: NodeId,
     control: EngineControl,
+    surface: u64,
+    instance: Arc<()>,
 }
 
 impl std::fmt::Debug for ComponentContext {
@@ -176,6 +178,27 @@ impl ComponentContext {
     pub fn set_size(&self, width: f32, height: f32) {
         self.control
             .set_component_size(self.id, Size::new(Points(width), Points(height)));
+    }
+
+    /// Publishes the component's current vertical scroll offset in points.
+    /// Its `scrollValue` drives animations on the AppKit main thread.
+    ///
+    /// Calls from other threads, stale contexts and non-finite offsets are
+    /// ignored. During a mount or animation callback, the current UI pass
+    /// may need to finish before animated views can be updated.
+    pub fn set_scroll_offset(&self, offset: Points) {
+        if MainThreadMarker::new().is_none() || !offset.0.is_finite() {
+            return;
+        }
+        let Some(surface) = Surface::with_key(self.surface) else {
+            return;
+        };
+        if surface
+            .native
+            .record_scroll(self.id, &self.instance, offset)
+        {
+            surface.native_scrolled(self.id, offset);
+        }
     }
 }
 
@@ -244,6 +267,10 @@ pub(crate) struct NativeState {
     access: RefCell<Option<Arc<Access>>>,
     /// The controls, by node.
     hosts: RefCell<FxHashMap<NodeId, Host>>,
+    /// Offset publishers, independent of `hosts` so AppKit callbacks can
+    /// publish while a native control is borrowed or temporarily taken out.
+    scroll_sources: RefCell<FxHashMap<NodeId, ScrollSource>>,
+    deferred_scrolls: RefCell<Vec<(NodeId, Points)>>,
     /// What the videos and web views not made yet were sent, by node
     /// ([`start_later`]).
     waiting: RefCell<FxHashMap<NodeId, Waiting>>,
@@ -251,7 +278,61 @@ pub(crate) struct NativeState {
     serial: Cell<u64>,
 }
 
+struct ScrollSource {
+    instance: Arc<()>,
+    offset: Option<Points>,
+}
+
 impl NativeState {
+    fn begin_component(&self, id: NodeId) -> Arc<()> {
+        self.end_component(id);
+        let instance = Arc::new(());
+        self.scroll_sources.borrow_mut().insert(
+            id,
+            ScrollSource {
+                instance: instance.clone(),
+                offset: None,
+            },
+        );
+        instance
+    }
+
+    fn end_component(&self, id: NodeId) {
+        if self.scroll_sources.borrow_mut().remove(&id).is_some() {
+            self.deferred_scrolls
+                .borrow_mut()
+                .retain(|(source, _)| *source != id);
+        }
+    }
+
+    fn record_scroll(&self, id: NodeId, instance: &Arc<()>, offset: Points) -> bool {
+        let mut sources = self.scroll_sources.borrow_mut();
+        let Some(source) = sources.get_mut(&id) else {
+            return false;
+        };
+        if !Arc::ptr_eq(&source.instance, instance) {
+            return false;
+        }
+        source.offset = Some(offset);
+        true
+    }
+
+    pub(crate) fn replay_scroll(&self, id: NodeId, anim: &mut crate::animation::UiAnimation) {
+        if let Some(offset) = self.scroll_sources.borrow().get(&id).and_then(|s| s.offset) {
+            anim.scrolled(id, 0.0, offset.0);
+        }
+    }
+
+    pub(crate) fn defer_scroll(&self, id: NodeId, offset: Points) {
+        self.deferred_scrolls.borrow_mut().push((id, offset));
+    }
+
+    pub(crate) fn apply_deferred_scrolls(&self, anim: &mut crate::animation::UiAnimation) {
+        for (id, offset) in self.deferred_scrolls.borrow_mut().drain(..) {
+            anim.scrolled(id, 0.0, offset.0);
+        }
+    }
+
     /// Uses `components` (an [`crate::AppOptions`]'s registry).
     pub(crate) fn set_components(&self, components: Components) {
         *self.components.borrow_mut() = components;
@@ -282,6 +363,12 @@ impl NativeState {
     /// its image loads check their redirects against.
     pub(crate) fn access(&self) -> Arc<Access> {
         self.access.borrow().clone().unwrap_or_default()
+    }
+
+    /// Invalidates scroll publishers before removing their views.
+    pub(crate) fn detach_scroll_sources(&self) {
+        self.scroll_sources.borrow_mut().clear();
+        self.deferred_scrolls.borrow_mut().clear();
     }
 
     /// Drops every control (the app stopped): media stops playing.
@@ -350,6 +437,9 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
 /// A view was deleted: its control stops (a removal animation may keep
 /// the view on screen a little longer).
 pub(crate) fn deleted(surface: &Rc<Surface>, view: &NshView) {
+    if view.kind() == ViewKind::Native {
+        surface.native.end_component(view.id());
+    }
     surface.native.waiting.borrow_mut().remove(&view.id());
     let host = surface.native.hosts.borrow_mut().remove(&view.id());
     drop(host);
@@ -774,9 +864,12 @@ pub(crate) fn component(surface: &Rc<Surface>, view: &NshView, name: &Arc<str>) 
     let mut control = None;
     surface.control(|c| control = Some(c.clone()));
     let Some(control) = control else { return };
+    let instance = surface.native.begin_component(view.id());
     let made = factory(ComponentContext {
         id: view.id(),
         control,
+        surface: surface.key(),
+        instance,
     });
     fill(view, &made.view());
     surface
@@ -3063,5 +3156,57 @@ mod tests {
         assert!(components.factory(&"com.example.map".into()).is_some());
         assert!(components.factory(&"com.example.none".into()).is_none());
         assert_eq!(format!("{components:?}"), r#"{"com.example.map"}"#);
+    }
+
+    #[test]
+    fn a_new_binding_replays_its_components_vertical_offset() {
+        use nsh_core::{MountItem, animation::AnimationOp};
+
+        let native = NativeState::default();
+        let mut anim = crate::animation::UiAnimation::default();
+        let first = native.begin_component(4);
+        let second = native.begin_component(5);
+        assert!(native.record_scroll(4, &first, Points(12.5)));
+        assert!(native.record_scroll(5, &second, Points(81.0)));
+
+        anim.apply(&MountItem::Animation(AnimationOp::CreateValue {
+            node: 2,
+            value: 0.0,
+        }));
+        anim.apply(&MountItem::NativeScrollValue {
+            id: 4,
+            value: Some(2),
+        });
+        native.replay_scroll(4, &mut anim);
+
+        assert_eq!(anim.value(2), 12.5);
+    }
+
+    #[test]
+    fn a_reused_node_rejects_its_previous_components_scroll_writes() {
+        use nsh_core::{MountItem, animation::AnimationOp};
+
+        let native = NativeState::default();
+        let mut anim = crate::animation::UiAnimation::default();
+        let stale = native.begin_component(4);
+        assert!(native.record_scroll(4, &stale, Points(20.0)));
+        native.defer_scroll(4, Points(20.0));
+        native.end_component(4);
+        let current = native.begin_component(4);
+        assert!(!native.record_scroll(4, &stale, Points(40.0)));
+        assert!(native.record_scroll(4, &current, Points(80.0)));
+
+        anim.apply(&MountItem::Animation(AnimationOp::CreateValue {
+            node: 2,
+            value: 0.0,
+        }));
+        anim.apply(&MountItem::NativeScrollValue {
+            id: 4,
+            value: Some(2),
+        });
+        native.replay_scroll(4, &mut anim);
+        native.apply_deferred_scrolls(&mut anim);
+
+        assert_eq!(anim.value(2), 80.0);
     }
 }

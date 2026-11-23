@@ -118,6 +118,14 @@ impl Animator {
                     }
                 }
             }
+            MountItem::NativeScrollValue { id, value } => match value {
+                Some(node) => {
+                    self.scrolls.insert(*id, (*node, false));
+                }
+                None => {
+                    self.scrolls.remove(id);
+                }
+            },
             MountItem::StickyCells { id, cells } => {
                 let animated = cells.iter().any(|c| c.offset.is_some());
                 let at = self.sticky.iter().position(|v| v == id);
@@ -191,8 +199,8 @@ impl Animator {
         self.graph.is_finishing()
     }
 
-    /// A scroll view moved to `offset`: feeds its scroll value. False if no
-    /// value is bound to it.
+    /// A scroll view or native component moved to `offset`: feeds its
+    /// scroll value. False if no value is bound to it.
     pub fn scrolled(&mut self, id: u32, offset: Point<Points>) -> bool {
         let Some(&(node, horizontal)) = self.scrolls.get(&id) else {
             return false;
@@ -499,6 +507,49 @@ mod tests {
             cells: vec![cell(None)],
         });
         assert!(a.sticky_views().is_empty());
+    }
+
+    #[test]
+    fn a_native_scroll_value_uses_the_vertical_offset_until_unbound() {
+        let mut a = Animator::default();
+        for node in [2, 4] {
+            a.apply(&MountItem::Animation(AnimationOp::CreateValue {
+                node,
+                value: 0.0,
+            }));
+        }
+        a.apply(&MountItem::NativeScrollValue {
+            id: 8,
+            value: Some(2),
+        });
+        assert!(a.scrolled(8, point(px(3.0), px(21.0))));
+        assert_eq!(a.value(2), 21.0);
+        a.apply(&MountItem::NativeScrollValue {
+            id: 8,
+            value: Some(4),
+        });
+        assert!(a.scrolled(8, point(px(5.0), px(32.0))));
+        assert_eq!(a.value(2), 21.0);
+        assert_eq!(a.value(4), 32.0);
+        a.apply(&MountItem::NativeScrollValue { id: 8, value: None });
+        assert!(!a.scrolled(8, point(px(9.0), px(45.0))));
+        assert_eq!(a.value(4), 32.0);
+    }
+
+    #[test]
+    fn deleting_a_native_view_drops_its_scroll_binding() {
+        let mut a = Animator::default();
+        a.apply(&MountItem::Animation(AnimationOp::CreateValue {
+            node: 2,
+            value: 0.0,
+        }));
+        a.apply(&MountItem::NativeScrollValue {
+            id: 8,
+            value: Some(2),
+        });
+        a.apply(&MountItem::Delete { id: 8 });
+        assert!(!a.scrolled(8, point(px(3.0), px(21.0))));
+        assert_eq!(a.value(2), 0.0);
     }
 
     #[test]

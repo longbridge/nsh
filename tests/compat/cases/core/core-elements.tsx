@@ -18,6 +18,10 @@ const Map = nativeComponent<{ zoom: number }, { regionChange: { zoom: number } }
   events: ["regionChange"],
 });
 
+const LegacyMap = nativeComponent<{ zoom: number; scrollValue: string }>("CompatLegacyMap", {
+  props: ["zoom", "scrollValue"],
+});
+
 function missingModule(): string {
   try {
     nativeModule<object>("host/compat-missing");
@@ -31,6 +35,8 @@ function missingModule(): string {
 
 function App() {
   const base = nativeModule<Record<string, unknown>>("nsh/base");
+  const offset = createAnimatedValue(16);
+  const opacity = offset.interpolate({ inputRange: [0, 32], outputRange: [1, 0] });
   const pan = PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onPanResponderMove: () => {},
@@ -46,9 +52,14 @@ function App() {
       <Image testID="image" src="https://example.com/compat.png" style={{ width: 64, height: 48 }} />
       <Video testID="video" src="https://example.com/compat.mp4" paused style={{ width: 160, height: 90 }} />
       <WebView testID="web" html="<p>compat</p>" style={{ width: 180, height: 60 }} />
-      <Map testID="map" zoom={3} style={{ width: 100, height: 50 }} />
+      <LegacyMap testID="map" zoom={3} scrollValue="top" style={{ width: 100, height: 50 }} />
       {/* An own prop bound to an animated value: pushed natively, not sent as JSON. */}
-      <Map testID="map-animated" zoom={createAnimatedValue(2).interpolate({ inputRange: [0, 4], outputRange: [1, 5] })} style={{ width: 100, height: 50 }} />
+      <Map
+        testID="map-animated"
+        zoom={createAnimatedValue(2).interpolate({ inputRange: [0, 4], outputRange: [1, 5] })}
+        scrollValue={offset}
+        style={{ width: 100, height: 50, opacity }}
+      />
       <View testID="pan" {...pan.panHandlers} style={{ width: 50, height: 50 }} />
       <Text>Missing module: {missingModule()}</Text>
       <Text>Base module: {typeof base === "object" && base !== null ? "object" : typeof base}</Text>

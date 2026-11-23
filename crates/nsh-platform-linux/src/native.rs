@@ -22,9 +22,9 @@
 //! - **Registered components**: [`AppView::register_component`] names a
 //!   factory; the core creates a [`ViewKind::Native`] container, names the
 //!   component ([`MountItem::Component`]) and sends its props as JSON as
-//!   they change. Components emit events and report their own size through
-//!   their [`ComponentContext`]. Registries belong to one `AppView` (and
-//!   the views made from the same [`AppOptions`]): no globals.
+//!   they change. Components emit events, report their own size and publish
+//!   scroll offsets through their [`ComponentContext`]. Registries belong
+//!   to one `AppView` (and the views made from the same [`AppOptions`]).
 //!
 //! [`AppView::register_component`]: crate::AppView::register_component
 //! [`AppOptions`]: crate::AppOptions
@@ -105,12 +105,13 @@ pub trait NativeComponent {
     }
 }
 
-/// What a component can tell its app. Cheap to clone; usable from any
-/// thread.
+/// What a component can tell its app. Cheap to clone. Events and size
+/// reports can be sent from any thread.
 #[derive(Clone)]
 pub struct ComponentContext {
     id: NodeId,
     control: EngineControl,
+    scroll: ComponentScroll,
 }
 
 impl std::fmt::Debug for ComponentContext {
@@ -140,6 +141,16 @@ impl ComponentContext {
         self.control
             .set_component_size(self.id, Size::new(Points(width), Points(height)));
     }
+
+    /// Publishes the component's vertical scroll offset in points to its
+    /// bound `scrollValue` on the GTK thread.
+    ///
+    /// An offset reported before the binding is installed is applied when
+    /// it mounts. Calls from other threads, retired contexts, and non-finite
+    /// offsets are ignored.
+    pub fn set_scroll_offset(&self, offset: Points) {
+        self.scroll.set_offset(self.id, offset);
+    }
 }
 
 // Components may emit from any thread (their own callbacks, workers).
@@ -147,6 +158,37 @@ const _: () = {
     const fn send_sync<T: Send + Sync>() {}
     send_sync::<ComponentContext>();
 };
+
+#[derive(Clone)]
+struct ComponentScroll {
+    surface: u64,
+    // Identity of this particular mount, even if an id is reused.
+    token: Arc<()>,
+}
+
+impl ComponentScroll {
+    fn set_offset(&self, id: NodeId, offset: Points) {
+        if !offset.0.is_finite() || !gtk::is_initialized_main_thread() {
+            return;
+        }
+        if let Some(surface) = Surface::with_key(self.surface) {
+            surface
+                .native
+                .set_scroll_offset(&surface, id, &self.token, offset);
+        }
+    }
+}
+
+struct ScrollSource {
+    token: Arc<()>,
+    offset: Option<Points>,
+}
+
+struct DeferredScroll {
+    id: NodeId,
+    token: Arc<()>,
+    offset: Points,
+}
 
 /// Makes a component for an element, given its context.
 pub type ComponentFactory = Rc<dyn Fn(ComponentContext) -> Box<dyn NativeComponent>>;
@@ -211,9 +253,127 @@ pub(crate) struct NativeState {
     app_id: RefCell<String>,
     /// The controls, by node.
     hosts: RefCell<FxHashMap<NodeId, Host>>,
+    /// Current mounts, independent of the host map used to call component code.
+    scroll_sources: RefCell<FxHashMap<NodeId, ScrollSource>>,
+    deferred_scrolls: RefCell<Vec<DeferredScroll>>,
+    scroll_write_needed: Cell<bool>,
+    scroll_write_scheduled: Cell<bool>,
 }
 
 impl NativeState {
+    fn component_scroll(&self, surface: &Surface, id: NodeId) -> ComponentScroll {
+        let token = Arc::new(());
+        self.scroll_sources.borrow_mut().insert(
+            id,
+            ScrollSource {
+                token: token.clone(),
+                offset: None,
+            },
+        );
+        ComponentScroll {
+            surface: surface.key(),
+            token,
+        }
+    }
+
+    fn set_scroll_offset(&self, surface: &Surface, id: NodeId, token: &Arc<()>, offset: Points) {
+        let moved = {
+            let mut sources = self.scroll_sources.borrow_mut();
+            let Some(source) = sources
+                .get_mut(&id)
+                .filter(|source| Arc::ptr_eq(&source.token, token))
+            else {
+                return;
+            };
+            source.offset = Some(offset);
+            if let Ok(mut anim) = surface.anim.try_borrow_mut() {
+                self.flush_scrolls(&mut anim, &sources);
+                anim.scrolled(id, 0.0, offset.0)
+            } else {
+                self.deferred_scrolls.borrow_mut().push(DeferredScroll {
+                    id,
+                    token: token.clone(),
+                    offset,
+                });
+                true
+            }
+        };
+        if moved {
+            self.scroll_write_needed.set(true);
+            self.schedule_scroll_write(surface);
+        }
+    }
+
+    /// Restores the offset when this view first binds or changes its value.
+    pub(crate) fn scroll_binding_applied(
+        &self,
+        anim: &mut crate::animation::UiAnimation,
+        id: NodeId,
+    ) {
+        if let Some(offset) = self
+            .scroll_sources
+            .borrow()
+            .get(&id)
+            .and_then(|source| source.offset)
+        {
+            anim.scrolled(id, 0.0, offset.0);
+        }
+    }
+
+    /// GTK can call a component back while the Animator is writing views.
+    /// An offset published then reaches the graph on the next safe write.
+    pub(crate) fn apply_deferred_scrolls(&self, anim: &mut crate::animation::UiAnimation) {
+        self.scroll_write_needed.set(false);
+        self.flush_deferred_scrolls(anim);
+    }
+
+    /// Sends queued offsets in publication order while their mounts are live.
+    pub(crate) fn flush_deferred_scrolls(&self, anim: &mut crate::animation::UiAnimation) {
+        if !self.deferred_scrolls.borrow().is_empty() {
+            self.flush_scrolls(anim, &self.scroll_sources.borrow());
+        }
+    }
+
+    fn flush_scrolls(
+        &self,
+        anim: &mut crate::animation::UiAnimation,
+        sources: &FxHashMap<NodeId, ScrollSource>,
+    ) {
+        for DeferredScroll { id, token, offset } in self.deferred_scrolls.borrow_mut().drain(..) {
+            if sources
+                .get(&id)
+                .is_some_and(|source| Arc::ptr_eq(&source.token, &token))
+            {
+                anim.scrolled(id, 0.0, offset.0);
+            }
+        }
+    }
+
+    /// Schedules one GTK idle to present the published animation values.
+    pub(crate) fn schedule_scroll_write(&self, surface: &Surface) {
+        if !self.scroll_write_needed.get() || self.scroll_write_scheduled.replace(true) {
+            return;
+        }
+        let key = surface.key();
+        // Present through the normal animation write path, ahead of GTK's frame.
+        glib::idle_add_local_full(glib::Priority::HIGH_IDLE, move || {
+            if let Some(surface) = Surface::with_key(key) {
+                let native = &surface.native;
+                native.scroll_write_scheduled.set(false);
+                if native.scroll_write_needed.get() {
+                    surface.write_native_scroll_animations();
+                }
+            }
+            glib::ControlFlow::Break
+        });
+    }
+
+    pub(crate) fn clear_scroll_sources(&self) {
+        self.scroll_sources.borrow_mut().clear();
+        self.deferred_scrolls.borrow_mut().clear();
+        self.scroll_write_needed.set(false);
+    }
+
     /// Uses `components` (an [`crate::AppOptions`]'s registry).
     pub(crate) fn set_components(&self, components: Components) {
         *self.components.borrow_mut() = components;
@@ -327,6 +487,11 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
 /// A view was deleted: its control stops (a removal animation may keep
 /// the view on screen a little longer).
 pub(crate) fn deleted(surface: &Rc<Surface>, view: &NshView) {
+    surface
+        .native
+        .scroll_sources
+        .borrow_mut()
+        .remove(&view.id());
     let host = surface.native.hosts.borrow_mut().remove(&view.id());
     drop(host);
 }
@@ -374,6 +539,7 @@ pub(crate) fn component(surface: &Rc<Surface>, view: &NshView, name: &Arc<str>) 
     let made = factory(ComponentContext {
         id: view.id(),
         control,
+        scroll: surface.native.component_scroll(surface, view.id()),
     });
     fill(view, &made.widget());
     surface
@@ -1026,5 +1192,126 @@ mod tests {
         assert!(components.factory(&"com.example.map".into()).is_some());
         assert!(components.factory(&"com.example.none".into()).is_none());
         assert_eq!(format!("{components:?}"), r#"{"com.example.map"}"#);
+    }
+
+    const SCROLL_SOURCE: NodeId = 10;
+    const SCROLL_NODE: nsh_core::animation::NodeId = 2;
+    const FOLLOWER: NodeId = 11;
+
+    fn scroll_source(surface: &Rc<Surface>) -> ComponentScroll {
+        surface.apply(&nsh_core::MountBatch {
+            items: vec![nsh_core::MountItem::Create {
+                id: SCROLL_SOURCE,
+                kind: ViewKind::Native,
+            }],
+        });
+        surface.native.component_scroll(surface, SCROLL_SOURCE)
+    }
+
+    fn bind_scroll(surface: &Rc<Surface>) {
+        use nsh_core::{MountBatch, MountItem, animation::AnimationOp};
+
+        surface.apply(&MountBatch {
+            items: vec![
+                MountItem::Animation(AnimationOp::CreateValue {
+                    node: SCROLL_NODE,
+                    value: 0.0,
+                }),
+                MountItem::NativeScrollValue {
+                    id: SCROLL_SOURCE,
+                    value: Some(SCROLL_NODE),
+                },
+            ],
+        });
+    }
+
+    #[test]
+    fn native_scroll_updates_the_graph_even_while_mounting() {
+        use nsh_core::{MountBatch, MountItem, animation::AnimationProp};
+
+        crate::gtk_test::run(|| {
+            let surface = crate::gtk_test::surface();
+            let publisher = scroll_source(&surface);
+            publisher.set_offset(SCROLL_SOURCE, Points(0.25));
+            bind_scroll(&surface);
+            assert_eq!(surface.anim.borrow().value(SCROLL_NODE), 0.25);
+            surface.apply(&MountBatch {
+                items: vec![
+                    MountItem::Create {
+                        id: FOLLOWER,
+                        kind: ViewKind::View,
+                    },
+                    MountItem::AnimationBindings {
+                        id: FOLLOWER,
+                        bindings: vec![(AnimationProp::Opacity, SCROLL_NODE)],
+                    },
+                ],
+            });
+
+            let mounter = surface.mounter.borrow_mut();
+            publisher.set_offset(SCROLL_SOURCE, Points(0.5));
+            assert_eq!(surface.anim.borrow().value(SCROLL_NODE), 0.5);
+            drop(mounter);
+
+            surface.write_animations();
+            let follower = crate::gtk_test::view(&surface, FOLLOWER);
+            assert_eq!(follower.state().anim.opacity, Some(0.5));
+
+            let anim = surface.anim.borrow_mut();
+            publisher.set_offset(SCROLL_SOURCE, Points(0.75));
+            drop(anim);
+            surface.write_animations();
+            assert_eq!(follower.state().anim.opacity, Some(0.75));
+        });
+    }
+
+    #[test]
+    fn native_scroll_routes_to_its_surface_and_ignores_retired_sources() {
+        use nsh_core::{MountBatch, MountItem};
+
+        crate::gtk_test::run(|| {
+            let first = crate::gtk_test::surface();
+            let second = crate::gtk_test::surface();
+            let stale = scroll_source(&first);
+            let other = scroll_source(&second);
+            bind_scroll(&first);
+            bind_scroll(&second);
+            stale.set_offset(SCROLL_SOURCE, Points(8.0));
+            other.set_offset(SCROLL_SOURCE, Points(4.0));
+            assert_eq!(first.anim.borrow().value(SCROLL_NODE), 8.0);
+            assert_eq!(second.anim.borrow().value(SCROLL_NODE), 4.0);
+
+            let anim = first.anim.borrow_mut();
+            stale.set_offset(SCROLL_SOURCE, Points(12.0));
+            drop(anim);
+            first.apply(&MountBatch {
+                items: vec![MountItem::Delete { id: SCROLL_SOURCE }],
+            });
+            let current = scroll_source(&first);
+            bind_scroll(&first);
+            stale.set_offset(SCROLL_SOURCE, Points(16.0));
+            assert_eq!(first.anim.borrow().value(SCROLL_NODE), 0.0);
+            current.set_offset(SCROLL_SOURCE, Points(24.0));
+            assert_eq!(first.anim.borrow().value(SCROLL_NODE), 24.0);
+            assert_eq!(second.anim.borrow().value(SCROLL_NODE), 4.0);
+        });
+    }
+
+    #[test]
+    fn native_scroll_ignores_worker_threads() {
+        let result = crate::gtk_test::run(|| -> Result<(), String> {
+            let surface = crate::gtk_test::surface();
+            let publisher = scroll_source(&surface);
+            bind_scroll(&surface);
+            std::thread::Builder::new()
+                .spawn(move || publisher.set_offset(SCROLL_SOURCE, Points(42.0)))
+                .map_err(|error| error.to_string())?
+                .join()
+                .map_err(|_| "scroll publisher panicked on worker thread")?;
+            surface.write_animations();
+            assert_eq!(surface.anim.borrow().value(SCROLL_NODE), 0.0);
+            Ok(())
+        });
+        assert!(result.as_ref().is_none_or(Result::is_ok), "{result:?}");
     }
 }

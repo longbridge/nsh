@@ -26549,6 +26549,91 @@ mod views {
         assert!(props, "its props reach it");
     }
 
+    #[derive(Default)]
+    struct NativeScrollHost;
+
+    impl Component for NativeScrollHost {
+        type Props = NativeHostProps;
+        type Event = NoEvent;
+
+        fn view(_: NativeHostProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let value = animated_value(0.0);
+            crate::element::native("test.native").scroll_value(&value)
+        }
+    }
+
+    #[test]
+    fn native_scroll_value_does_not_make_a_scroll_container() -> Result<(), &'static str> {
+        let mut c = core();
+        c.mount_root(&Root::new::<NativeScrollHost>(|| NativeHostProps {}));
+        let batch = c.commit().ok_or("native component batch")?;
+        let (id, value) = batch
+            .items
+            .iter()
+            .find_map(|item| match item {
+                MountItem::NativeScrollValue {
+                    id,
+                    value: Some(value),
+                } => Some((*id, *value)),
+                _ => None,
+            })
+            .ok_or("missing native scroll binding")?;
+        assert!(batch.items.iter().any(|item| matches!(
+            item,
+            MountItem::Create { id: view, kind: ViewKind::Native } if *view == id
+        )));
+        assert!(!batch.items.iter().any(|item| matches!(
+            item,
+            MountItem::ScrollConfig { id: view, .. } | MountItem::ScrollContent { id: view, .. }
+                if *view == id
+        )));
+        assert!(batch.items.iter().any(|item| matches!(
+            item,
+            MountItem::Animation(crate::animation::AnimationOp::CreateValue { node, .. })
+                if *node == value
+        )));
+        assert!(!batch.items.iter().any(|item| matches!(
+            item,
+            MountItem::Animation(crate::animation::AnimationOp::Release { node })
+                if *node == value
+        )));
+        Ok(())
+    }
+
+    #[test]
+    fn a_native_scroll_binding_is_replaced_and_cleared() -> Result<(), &'static str> {
+        let mut c = core();
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::Native,
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        for value in [Some(2), Some(4), None] {
+            apply(
+                &mut c,
+                vec![Op::SetProp {
+                    id: 2,
+                    prop: Prop::ScrollValue(value),
+                }],
+            );
+            let batch = c.commit().ok_or("native scroll binding batch")?;
+            assert!(batch.items.iter().any(|item| matches!(
+                item,
+                MountItem::NativeScrollValue { id: 2, value: binding } if *binding == value
+            )));
+        }
+        Ok(())
+    }
+
     /// A Rust component that binds a native component's prop.
     #[derive(Default)]
     struct AnimatedNativeHost;

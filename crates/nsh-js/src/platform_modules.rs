@@ -739,6 +739,7 @@ unsafe extern "C" fn render_native(
         skip.extend(events.iter().map(|e| handler_name(e)));
         skip.push("children".into());
         let skip_refs: Vec<&str> = skip.iter().map(String::as_str).collect();
+        // A declared custom `scrollValue` keeps its `$scrollValue` route.
         dom::spread_except(cx, node, props, &skip_refs)?;
         // Its own props, as the component's (`$name`), followed.
         for key in &own {
@@ -882,8 +883,10 @@ export type NativeEventHandlers<E> = { [K in keyof E & string as `on${Capitalize
  * accessibility, `ref`), its own `P` and handlers of its events `E`. Each
  * number or string (color) prop may also be an animated value: the
  * platform then pushes its value (a number or a color) to the component
- * on every frame it changes, without JS. */
-export type NativeComponentProps<P, E> = Omit<ViewProps, "children" | "ref"> & { ref?: NativeComponentRef | ((node: NativeComponentRef) => void) } & { [K in keyof P]: NonNullable<P[K]> extends number | string ? P[K] | AnimatedNode : P[K] } & NativeEventHandlers<E>;
+ * on every frame it changes, without JS. If the component does not declare
+ * its own `scrollValue` prop, the host prop follows the component's reported
+ * vertical scroll offset on supported platforms. */
+export type NativeComponentProps<P, E> = Omit<ViewProps, "children" | "ref"> & Omit<NativeHostProps, keyof P> & { ref?: NativeComponentRef | ((node: NativeComponentRef) => void) } & { [K in keyof P]: NonNullable<P[K]> extends number | string ? P[K] | AnimatedNode : P[K] } & NativeEventHandlers<E>;
 
 /** What a native component takes and emits. */
 export interface NativeComponentSpec<P, E> {

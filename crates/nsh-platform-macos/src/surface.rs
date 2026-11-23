@@ -223,6 +223,12 @@ pub(crate) struct Surface {
     pub(crate) mounter: RefCell<Mounter>,
     /// The native animation graph.
     pub(crate) anim: RefCell<UiAnimation>,
+    /// Spans the whole write, including callbacks made after releasing `anim`.
+    writing_animations: RefCell<()>,
+    /// A native scroll arrived while mounting or writing animated views.
+    scroll_write_pending: Cell<bool>,
+    /// Whether a follow-up animation write already waits on the main queue.
+    scroll_write_scheduled: Cell<bool>,
     /// Stacks, screens and modals.
     pub(crate) nav: RefCell<crate::navigation::Nav>,
     /// The app's own windows (`Window.open`), by the dialog root each
@@ -401,6 +407,9 @@ impl Surface {
             root: root.clone(),
             mounter: RefCell::new(Mounter::new(root.clone())),
             anim: RefCell::new(UiAnimation::default()),
+            writing_animations: RefCell::default(),
+            scroll_write_pending: Cell::default(),
+            scroll_write_scheduled: Cell::default(),
             nav: RefCell::default(),
             windows: RefCell::default(),
             share: Default::default(),
@@ -557,8 +566,10 @@ impl Surface {
         self.control.borrow_mut().take();
         self.engine.borrow_mut().take();
         self.rx.borrow_mut().take();
+        self.native.detach_scroll_sources();
         self.mounter.borrow_mut().clear();
         self.native.clear();
+        self.scroll_write_pending.set(false);
         crate::system::clear(self);
         *self.anim.borrow_mut() = UiAnimation::default();
         self.nav.borrow_mut().reset();
@@ -876,10 +887,18 @@ impl Surface {
         crate::access::prepare(batch);
         self.mounter.borrow_mut().begin_batch(&batch.items);
         for item in &batch.items {
-            self.anim.borrow_mut().apply(item);
+            {
+                let mut anim = self.anim.borrow_mut();
+                anim.apply(item);
+                if let MountItem::NativeScrollValue { id, value: Some(_) } = item {
+                    self.native.replay_scroll(*id, &mut anim);
+                }
+            }
             if !matches!(
                 item,
-                MountItem::Animation(_) | MountItem::AnimationBindings { .. }
+                MountItem::Animation(_)
+                    | MountItem::AnimationBindings { .. }
+                    | MountItem::NativeScrollValue { .. }
             ) {
                 self.mounter.borrow_mut().apply(self, item);
             }
@@ -897,11 +916,37 @@ impl Surface {
         }
     }
 
+    /// Feeds a native scroll source on this thread. The current batch or
+    /// animation write flushes it if it already owns the relevant state.
+    pub(crate) fn native_scrolled(&self, id: NodeId, offset: Points) {
+        let fed = match self.anim.try_borrow_mut() {
+            Ok(mut anim) => {
+                self.native.apply_deferred_scrolls(&mut anim);
+                anim.scrolled(id, 0.0, offset.0)
+            }
+            Err(_) => {
+                self.native.defer_scroll(id, offset);
+                true
+            }
+        };
+        if fed {
+            self.scroll_write_pending.set(true);
+            if self.writing_animations.try_borrow().is_ok() && self.mounter.try_borrow().is_ok() {
+                quiet(|| self.write_animations());
+            }
+        }
+    }
+
     /// Writes the animated values to the views and reports finished
     /// animations.
     pub(crate) fn write_animations(&self) {
+        let Ok(_writing) = self.writing_animations.try_borrow_mut() else {
+            return;
+        };
+        self.scroll_write_pending.set(false);
         let (finished, moved) = {
             let mut anim = self.anim.borrow_mut();
+            self.native.apply_deferred_scrolls(&mut anim);
             anim.write(&self.mounter.borrow());
             let mut moved = Vec::new();
             anim.write_components(
@@ -912,11 +957,26 @@ impl Surface {
         };
         // Shaders whose animated uniforms moved render from the next frame.
         crate::shader::wake(self);
-        // No surface state borrowed while the app's components run.
+        // No mounter or Animator state borrowed while the app's components run.
         crate::native::component_animated(self, moved);
         crate::scroll::pin_animated_sticky(self);
         if !finished.is_empty() {
             self.control(|c| c.animations_finished(finished));
+        }
+        // A native callback can publish from inside this pass. A follow-up
+        // pass must start after the callbacks restore their components, and
+        // must yield between passes if animated props feed back into a source.
+        if self.scroll_write_pending.get() && !self.scroll_write_scheduled.replace(true) {
+            let key = self.key();
+            DispatchQueue::main().exec_async(move || {
+                let Some(surface) = Surface::with_key(key) else {
+                    return;
+                };
+                surface.scroll_write_scheduled.set(false);
+                if surface.scroll_write_pending.get() && surface.mounter.try_borrow().is_ok() {
+                    quiet(|| surface.write_animations());
+                }
+            });
         }
     }
 

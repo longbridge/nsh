@@ -184,6 +184,33 @@ gets the value. Rust components implement `set_animated_number` and `set_animate
 with `native(name).bind_animated_prop("progress", &value)`. Giving the prop a plain value again unbinds it and sends that
 value. The web has no registered components.
 
+### Publishing a scroll offset
+
+A registered native component that owns its scrolling can drive an `AnimatedValue` with its vertical offset
+on macOS, Linux (GTK), and Windows. Bind `scrollValue` on the TSX component or call
+`native(name).scroll_value(&value)` in Rust. `scrollValue` is a host prop, so leave it out of `spec.props`.
+If an existing component lists `scrollValue` in `spec.props`, that name still refers to its own prop.
+
+```tsx tabs
+import { createAnimatedValue, nativeComponent } from "nsh";
+
+const LogView = nativeComponent<{ source: string }>("acme.log", { props: ["source"] });
+const offset = createAnimatedValue(0);
+
+<LogView source="build" scrollValue={offset} />;
+```
+
+```rust tabs
+let offset = animated_value(0.0);
+native("acme.log").prop("source", serde_json::json!("build")).scroll_value(&offset)
+```
+
+Keep the `ComponentContext` supplied to the native factory. On the component's UI thread, call
+`context.set_scroll_offset(offset)` with its current vertical offset in logical `Points` whenever it scrolls,
+including after a programmatic scroll. The call only acts while a binding is present. NSH feeds the value
+into its animation graph on that thread, so a style or animated prop bound to `offset` can follow the scroll
+without JS events. The component stays in control of its scroll position.
+
 ## Events
 
 The component emits an event by name with an optional JSON payload. NSH delivers it to the engine thread and calls the

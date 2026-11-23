@@ -99,7 +99,7 @@ mod dirty {
     pub(super) const TEXT_MOUNT: u32 = 1 << 3;
     /// Emit [`crate::MountItem::Image`].
     pub(super) const IMAGE: u32 = 1 << 4;
-    /// Emit [`crate::MountItem::ScrollConfig`].
+    /// Emit a scroll view's config or a native component's scroll binding.
     pub(super) const SCROLL: u32 = 1 << 5;
     /// Emit [`crate::MountItem::Refreshing`].
     pub(super) const REFRESHING: u32 = 1 << 6;
@@ -334,6 +334,8 @@ struct ComponentState {
     props: Vec<(Arc<str>, crate::JsonValue)>,
     /// Properties changed since the last commit.
     changed: Vec<Arc<str>>,
+    /// Value driven by the native component's own vertical offset.
+    scroll_value: Option<crate::animation::NodeId>,
     /// The names of its animated prop slots (`AnimationProp::ComponentSlot`):
     /// a name keeps its slot once given one.
     slots: Vec<Arc<str>>,
@@ -5959,6 +5961,11 @@ impl<M: TextEngine> Core<M> {
                 if let Some(scroll) = node.scroll.as_mut() {
                     scroll.scroll_value = value;
                     flags |= dirty::SCROLL;
+                } else if let Some(component) = &mut node.component
+                    && component.scroll_value != value
+                {
+                    component.scroll_value = value;
+                    flags |= dirty::SCROLL;
                 }
             }
             Prop::PullValue(value) => {
@@ -8052,6 +8059,9 @@ impl<M: TextEngine> Core<M> {
             component.changed = component.props.iter().map(|(k, _)| k.clone()).collect();
             component.slots_changed.set(!component.slots.is_empty());
             flags |= dirty::COMPONENT;
+            if component.scroll_value.is_some() {
+                flags |= dirty::SCROLL;
+            }
         }
         flags
     }
@@ -8191,6 +8201,14 @@ impl<M: TextEngine> Core<M> {
                         refreshing: scroll.refreshing,
                     });
                 }
+            }
+            if flags & dirty::SCROLL != 0
+                && let Some(component) = &node.component
+            {
+                self.mount.push(MountItem::NativeScrollValue {
+                    id,
+                    value: component.scroll_value,
+                });
             }
             if flags & dirty::ANIMATION != 0 {
                 let mut bindings = node.animated.clone();
@@ -12460,6 +12478,7 @@ fn shown_by(item: &MountItem) -> Shown {
         | M::ShaderInput { .. }
         | M::LayoutAnimation(_)
         | M::Animation(_)
+        | M::NativeScrollValue { .. }
         | M::ComponentPropSlots { .. }
         | M::TrackStates { .. }
         | M::InputContent { .. }

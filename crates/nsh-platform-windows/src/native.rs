@@ -323,8 +323,8 @@ pub struct Wheel {
     pub alt: bool,
 }
 
-/// What a component can tell its app. Cheap to clone; usable from any
-/// thread.
+/// What a component can tell its app. Cheap to clone. Except for
+/// [`Self::set_scroll_offset`], its methods can be called from any thread.
 #[derive(Clone)]
 pub struct ComponentContext {
     id: NodeId,
@@ -333,6 +333,7 @@ pub struct ComponentContext {
     /// from any thread.
     surface: u64,
     ui: crate::window::UiThread,
+    scroll: ComponentScroll,
 }
 
 impl std::fmt::Debug for ComponentContext {
@@ -363,6 +364,14 @@ impl ComponentContext {
             .set_component_size(self.id, Size::new(Points(width), Points(height)));
     }
 
+    /// Publishes the component's vertical scroll offset in points to its
+    /// `scrollValue` animation binding. Call on the component's UI thread.
+    /// Calls from other threads, after unmounting, or with a nonfinite offset
+    /// are ignored.
+    pub fn set_scroll_offset(&self, offset: Points) {
+        self.scroll.set(offset);
+    }
+
     /// What the component draws changed: the window draws again (from any
     /// thread).
     pub fn redraw(&self) {
@@ -372,6 +381,51 @@ impl ComponentContext {
                 surface.invalidate();
             }
         });
+    }
+}
+
+/// Identifies one factory invocation without carrying UI-thread state
+/// across threads. Node ids can be reused when an app restarts.
+#[derive(Clone)]
+struct ComponentScroll {
+    surface: u64,
+    id: NodeId,
+    token: Arc<()>,
+}
+
+impl ComponentScroll {
+    fn set(&self, offset: Points) {
+        if !offset.0.is_finite() {
+            return;
+        }
+        // The surface registry is thread-local. A worker cannot look up
+        // this surface, even when it owns another window with the same id.
+        let Some(surface) = Surface::by_key(self.surface) else {
+            return;
+        };
+        let Some(item) = component_item(&surface, self.id) else {
+            return;
+        };
+        let current = item.scroll_token.borrow();
+        let is_current = current
+            .as_ref()
+            .is_some_and(|token| Arc::ptr_eq(token, &self.token));
+        drop(current);
+        if !is_current || surface.view(self.id).is_none() {
+            return;
+        }
+        item.scroll_offset.set(Some(offset));
+        if let Ok(mut anim) = surface.anim.try_borrow_mut() {
+            surface.native.pending_scrolls.borrow_mut().remove(&self.id);
+            if !anim.scrolled(self.id, 0.0, offset.0) {
+                return;
+            }
+        } else {
+            // A nested callback during animation application leaves the
+            // latest offset for the next animation write.
+            surface.native.pending_scrolls.borrow_mut().insert(self.id);
+        }
+        surface.request_native_scroll_write();
     }
 }
 
@@ -441,6 +495,8 @@ pub(crate) struct NativeState {
     app_id: RefCell<String>,
     /// The controls, by node.
     hosts: RefCell<FxHashMap<NodeId, Host>>,
+    /// Offsets reported while the animator was temporarily borrowed.
+    pending_scrolls: RefCell<FxHashSet<NodeId>>,
 }
 
 impl NativeState {
@@ -480,6 +536,7 @@ impl NativeState {
     /// Drops every control (the app stopped): media stops playing, pages
     /// close.
     pub(crate) fn clear(&self) {
+        self.pending_scrolls.borrow_mut().clear();
         let hosts = std::mem::take(&mut *self.hosts.borrow_mut());
         #[cfg(feature = "webview")]
         for host in hosts.values() {
@@ -546,6 +603,8 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
         _ => Host::Component(Rc::new(ComponentItem {
             surface: Rc::downgrade(surface),
             id,
+            scroll_token: RefCell::new(None),
+            scroll_offset: Cell::new(None),
             component: RefCell::new(None),
             window: Cell::new(None),
             parent: Cell::new(None),
@@ -561,6 +620,11 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
 /// A view was deleted: its control stops (a removal animation may keep
 /// the view on screen a little longer).
 pub(crate) fn deleted(surface: &Rc<Surface>, view: &NshView) {
+    surface
+        .native
+        .pending_scrolls
+        .borrow_mut()
+        .remove(&view.id());
     let host = surface.native.hosts.borrow_mut().remove(&view.id());
     drop(host);
 }
@@ -606,11 +670,13 @@ pub(crate) fn component(surface: &Rc<Surface>, view: &NshView, name: &Arc<str>) 
         _ => return,
     };
     // Made with no borrow held: the app's code may reach the surface.
+    let scroll = item.scroll_source(surface.key());
     let made = factory(ComponentContext {
         id: view.id(),
         control,
         surface: surface.key(),
         ui: surface.ui_thread(),
+        scroll,
     });
     if let Some(hwnd) = made.window() {
         // A child of the window its view shows in (it moves with the view
@@ -623,6 +689,25 @@ pub(crate) fn component(surface: &Rc<Surface>, view: &NshView, name: &Arc<str>) 
     item.composes.set(made.composed());
     *item.component.borrow_mut() = Some(made);
     view.changed();
+}
+
+/// A new scroll binding takes the offset reported before it was mounted.
+pub(crate) fn bind_scroll(surface: &Surface, id: NodeId) {
+    if let Some(offset) = component_item(surface, id).and_then(|item| item.scroll_offset.get()) {
+        surface.native.pending_scrolls.borrow_mut().remove(&id);
+        surface.anim.borrow_mut().scrolled(id, 0.0, offset.0);
+    }
+}
+
+/// Applies offsets reported while writing animations held the graph.
+pub(crate) fn write_pending_scrolls(surface: &Surface, anim: &mut crate::animation::UiAnimation) {
+    let mut pending = surface.native.pending_scrolls.borrow_mut();
+    for id in pending.drain() {
+        if let Some(offset) = component_item(surface, id).and_then(|item| item.scroll_offset.get())
+        {
+            anim.scrolled(id, 0.0, offset.0);
+        }
+    }
 }
 
 /// `ComponentProps`.
@@ -724,7 +809,11 @@ fn web_item(surface: &Surface, id: NodeId) -> Option<Rc<web::WebItem>> {
 /// Whether view `id` holds a made component (its animated props wait until
 /// it does).
 pub(crate) fn has_component(surface: &Surface, id: NodeId) -> bool {
-    component_item(surface, id).is_some_and(|item| item.component.borrow().is_some())
+    component_item(surface, id).is_some_and(|item| {
+        item.component
+            .try_borrow()
+            .is_ok_and(|component| component.is_some())
+    })
 }
 
 /// Bound props that moved (`Animator::write_components`): handed to their
@@ -786,6 +875,8 @@ fn view_of(surface: &Surface, id: NodeId) -> Option<NshView> {
 struct ComponentItem {
     surface: Weak<Surface>,
     id: NodeId,
+    scroll_token: RefCell<Option<Arc<()>>>,
+    scroll_offset: Cell<Option<Points>>,
     /// `None` until named (or when no factory has the name), and while the
     /// app's code runs.
     component: RefCell<Option<Box<dyn NativeComponent>>>,
@@ -802,6 +893,17 @@ struct ComponentItem {
 }
 
 impl ComponentItem {
+    fn scroll_source(&self, surface: u64) -> ComponentScroll {
+        let token = Arc::new(());
+        *self.scroll_token.borrow_mut() = Some(Arc::clone(&token));
+        self.scroll_offset.set(None);
+        ComponentScroll {
+            surface,
+            id: self.id,
+            token,
+        }
+    }
+
     /// Puts `component` back, unless the view was deleted meanwhile (then
     /// it drops).
     fn put(&self, component: Box<dyn NativeComponent>) {
@@ -1285,7 +1387,140 @@ fn error(message: String) -> EventPayload {
 
 #[cfg(test)]
 mod tests {
+    use nsh_core::{
+        MountItem, ViewKind,
+        animation::{AnimationOp, AnimationProp},
+    };
+
     use super::*;
+
+    const SCROLL_VIEW: NodeId = 2;
+    const FOLLOWER: NodeId = 3;
+    const SCROLL_NODE: NodeId = 4;
+
+    fn mount(surface: &Rc<Surface>, item: MountItem) {
+        surface.anim.borrow_mut().apply(&item);
+        surface.mounter.borrow_mut().apply(surface, &item);
+    }
+
+    fn scroll_source(surface: &Rc<Surface>) -> Option<ComponentScroll> {
+        mount(
+            surface,
+            MountItem::Create {
+                id: SCROLL_VIEW,
+                kind: ViewKind::Native,
+            },
+        );
+        let item = component_item(surface, SCROLL_VIEW)?;
+        Some(item.scroll_source(surface.key()))
+    }
+
+    fn bind(surface: &Rc<Surface>) {
+        mount(
+            surface,
+            MountItem::Animation(AnimationOp::CreateValue {
+                node: SCROLL_NODE,
+                value: 0.0,
+            }),
+        );
+        mount(
+            surface,
+            MountItem::NativeScrollValue {
+                id: SCROLL_VIEW,
+                value: Some(SCROLL_NODE),
+            },
+        );
+    }
+
+    #[test]
+    fn native_scroll_updates_the_graph_during_mount() -> Result<(), &'static str> {
+        let surface = Surface::new(Default::default());
+        let source = scroll_source(&surface).ok_or("native scroll source")?;
+        // The first report can happen inside the factory, before its
+        // NativeScrollValue mount item arrives.
+        {
+            let _mounting = surface.mounter.borrow_mut();
+            source.set(Points(0.25));
+        }
+        bind(&surface);
+        assert_eq!(surface.anim.borrow().value(SCROLL_NODE), 0.25);
+        mount(
+            &surface,
+            MountItem::Create {
+                id: FOLLOWER,
+                kind: ViewKind::View,
+            },
+        );
+        mount(
+            &surface,
+            MountItem::AnimationBindings {
+                id: FOLLOWER,
+                bindings: vec![(AnimationProp::Opacity, SCROLL_NODE)],
+            },
+        );
+        {
+            let _mounting = surface.mounter.borrow_mut();
+            source.set(Points(0.75));
+            assert_eq!(surface.anim.borrow().value(SCROLL_NODE), 0.75);
+        }
+        surface.write_animations();
+        let follower = surface.view(FOLLOWER).ok_or("animation follower")?;
+        assert_eq!(follower.state().anim.opacity, Some(0.75));
+        Ok(())
+    }
+
+    #[test]
+    fn native_scroll_keeps_the_latest_offset_if_the_graph_is_borrowed() -> Result<(), &'static str>
+    {
+        let surface = Surface::new(Default::default());
+        let source = scroll_source(&surface).ok_or("native scroll source")?;
+        bind(&surface);
+        {
+            let anim = surface.anim.borrow_mut();
+            source.set(Points(10.0));
+            source.set(Points(20.0));
+            assert_eq!(anim.value(SCROLL_NODE), 0.0);
+        }
+        surface.write_animations();
+        assert_eq!(surface.anim.borrow().value(SCROLL_NODE), 20.0);
+        Ok(())
+    }
+
+    #[test]
+    fn native_scroll_ignores_workers_and_reused_view_ids() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let surface = Surface::new(Default::default());
+        let source = scroll_source(&surface).ok_or("native scroll source")?;
+        bind(&surface);
+        let other = Surface::new(Default::default());
+        let other_source = scroll_source(&other).ok_or("other native scroll source")?;
+        bind(&other);
+        other_source.set(Points(12.0));
+        source.set(Points(20.0));
+
+        let worker_source = source.clone();
+        std::thread::Builder::new()
+            .spawn(move || worker_source.set(Points(99.0)))?
+            .join()
+            .map_err(|_| std::io::Error::other("worker thread panicked"))?;
+        assert_eq!(surface.anim.borrow().value(SCROLL_NODE), 20.0);
+        assert_eq!(other.anim.borrow().value(SCROLL_NODE), 12.0);
+
+        mount(&surface, MountItem::Delete { id: SCROLL_VIEW });
+        let replacement = scroll_source(&surface).ok_or("replacement native scroll source")?;
+        mount(
+            &surface,
+            MountItem::NativeScrollValue {
+                id: SCROLL_VIEW,
+                value: Some(SCROLL_NODE),
+            },
+        );
+        replacement.set(Points(30.0));
+        source.set(Points(99.0));
+        assert_eq!(surface.anim.borrow().value(SCROLL_NODE), 30.0);
+        assert_eq!(other.anim.borrow().value(SCROLL_NODE), 12.0);
+        Ok(())
+    }
 
     #[test]
     fn locates_sources() {
@@ -1411,6 +1646,8 @@ mod tests {
         ComponentItem {
             surface: Weak::new(),
             id: 1,
+            scroll_token: RefCell::new(None),
+            scroll_offset: Cell::new(None),
             component: RefCell::new(component),
             window: Cell::new(None),
             parent: Cell::new(None),

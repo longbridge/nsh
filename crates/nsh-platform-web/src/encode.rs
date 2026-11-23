@@ -1510,6 +1510,7 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
         // No registered native components on the web.
         MountItem::ComponentProps { .. }
         | MountItem::ComponentPropSlots { .. }
+        | MountItem::NativeScrollValue { .. }
         | MountItem::Keymap(_)
         | MountItem::TreeOrder(_)
         | MountItem::ProjectStates { .. }

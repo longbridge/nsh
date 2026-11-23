@@ -405,6 +405,11 @@ impl Mounter {
                 }
             }
             MountItem::Command { id, command } => self.command(surface, *id, command),
+            MountItem::NativeScrollValue { id, value } => {
+                if value.is_some() {
+                    crate::native::bind_scroll(surface, *id);
+                }
+            }
             // The animator's (`Surface::apply`).
             MountItem::Animation(_)
             | MountItem::AnimationBindings { .. }
@@ -561,6 +566,7 @@ fn redrawn(item: &MountItem) -> Redraw {
         | MountItem::LayoutAnimation(_)
         | MountItem::Animation(_)
         | MountItem::AnimationBindings { .. }
+        | MountItem::NativeScrollValue { .. }
         | MountItem::ComponentPropSlots { .. }
         | MountItem::TreeOrder(_)
         | MountItem::ProjectStates { .. }

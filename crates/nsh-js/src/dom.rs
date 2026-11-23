@@ -5286,6 +5286,74 @@ mod tests {
     }
 
     #[test]
+    fn native_component_passes_host_scroll_value_through_reactively() -> Result<(), crate::JsError>
+    {
+        let host = Host::new()?;
+        host.eval_source(
+            r#"
+            import { AnimatedValue, nativeComponent, signal } from "nsh";
+            const Native = nativeComponent("test.native", { props: [] });
+            const value = signal(new AnimatedValue(0));
+            globalThis.changeScrollValue = (bind) => value.set(bind ? new AnimatedValue(0) : undefined);
+            globalThis.native = Native({ get scrollValue() { return value(); } });
+            "#,
+        )?;
+        host.eval_script("update.js", "changeScrollValue(true);")?;
+        host.eval_script("clear.js", "changeScrollValue(false);")?;
+        let mut ops = Vec::new();
+        host.take_ops(&mut ops);
+        let bindings: Vec<_> = ops
+            .iter()
+            .filter_map(|op| match op {
+                Op::SetProp {
+                    prop: nsh_core::Prop::ScrollValue(value),
+                    ..
+                } => Some(*value),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            matches!(bindings.as_slice(), [Some(first), Some(second), None] if first != second),
+            "{ops:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn declared_native_component_scroll_value_remains_a_custom_prop() -> Result<(), crate::JsError>
+    {
+        let host = Host::new()?;
+        host.eval_source(
+            r#"
+            import { nativeComponent } from "nsh";
+            const Native = nativeComponent("test.native", { props: ["scrollValue"] });
+            globalThis.native = Native({ scrollValue: "custom" });
+            "#,
+        )?;
+        let mut ops = Vec::new();
+        host.take_ops(&mut ops);
+        assert!(
+            ops.iter().any(|op| matches!(
+                op,
+                Op::SetProp { prop: nsh_core::Prop::ComponentProp(name, Some(value)), .. }
+                    if &**name == "scrollValue" && value.as_str() == Some("custom")
+            )),
+            "{ops:?}"
+        );
+        assert!(
+            !ops.iter().any(|op| matches!(
+                op,
+                Op::SetProp {
+                    prop: nsh_core::Prop::ScrollValue(_),
+                    ..
+                }
+            )),
+            "{ops:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn component_prop_unbinds_when_set_to_a_value() {
         let host = Host::new().unwrap();
         // `prop` passes no previous value: the node knows it was bound.

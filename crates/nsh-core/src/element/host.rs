@@ -1880,6 +1880,17 @@ impl Video {
 }
 
 impl NativeView {
+    /// Follows this component's reported vertical scroll offset in points
+    /// on the UI thread (TS: `scrollValue`). The native component owns
+    /// scrolling and must report its offset for the value to change.
+    pub fn scroll_value(mut self, value: &super::AnimatedValue) -> Self {
+        if let Some(node) = value.node().live() {
+            set(&mut self.0, Prop::ScrollValue(Some(node.id())));
+            self.0.attrs.rare_mut().bound.push(node);
+        }
+        self
+    }
+
     /// Its prop `name` (any JSON value), as JS's `nativeComponent` passes it;
     /// a bound one is passed again when it changes.
     pub fn prop(self, name: &str, value: impl IntoReactive<JsonValue>) -> Self {

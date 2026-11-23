@@ -694,6 +694,7 @@ impl Mounter {
             MountItem::Animation(_)
             | MountItem::AnimationBindings { .. }
             | MountItem::ComponentPropSlots { .. }
+            | MountItem::NativeScrollValue { .. }
             | MountItem::TreeOrder(_)
             | MountItem::ProjectStates { .. } => {}
         }

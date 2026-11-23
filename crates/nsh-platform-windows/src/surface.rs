@@ -163,6 +163,11 @@ pub(crate) struct Surface {
     views: Rc<crate::mount::Views>,
     /// The native animation graph.
     pub(crate) anim: RefCell<UiAnimation>,
+    /// Native scroll inputs update the graph before their outputs can be
+    /// written safely (a component callback can run inside a mount or draw).
+    native_scroll_dirty: Cell<bool>,
+    native_scroll_posted: Cell<bool>,
+    writing_animations: Cell<bool>,
     /// Stacks, screens and modals.
     pub(crate) nav: RefCell<crate::navigation::Nav>,
     /// Pointer input state ([`crate::input`]).
@@ -305,6 +310,9 @@ impl Surface {
             views: mounter.views.clone(),
             mounter: RefCell::new(mounter),
             anim: RefCell::new(UiAnimation::default()),
+            native_scroll_dirty: Cell::new(false),
+            native_scroll_posted: Cell::new(false),
+            writing_animations: Cell::new(false),
             nav: RefCell::default(),
             input: Default::default(),
             keyboard: Default::default(),
@@ -554,6 +562,7 @@ impl Surface {
         self.native.clear();
         crate::system::clear(self);
         *self.anim.borrow_mut() = UiAnimation::default();
+        self.native_scroll_dirty.set(false);
         self.nav.borrow_mut().reset();
         crate::input::reset(self);
         crate::text_input::stopped(self);
@@ -830,6 +839,7 @@ impl Surface {
         // `invalid` stays set (no second `WM_PAINT` meanwhile).
         let deferred = crate::render::frame(self);
         self.painting.set(false);
+        self.post_native_scroll_write();
         if deferred {
             self.invalid.set(true);
         } else if self.repaint.replace(false) {
@@ -1004,11 +1014,42 @@ impl Surface {
         crate::input::batch_applied(self);
     }
 
+    /// The scroll input already reached the graph. Write its outputs once
+    /// the component callback has returned.
+    pub(crate) fn request_native_scroll_write(&self) {
+        self.native_scroll_dirty.set(true);
+        self.post_native_scroll_write();
+    }
+
+    fn post_native_scroll_write(&self) {
+        if !self.native_scroll_dirty.get() || self.native_scroll_posted.replace(true) {
+            return;
+        }
+        let key = self.key;
+        self.ui_thread.invoke(move || {
+            let Some(surface) = Self::by_key(key) else {
+                return;
+            };
+            surface.native_scroll_posted.set(false);
+            if surface.native_scroll_dirty.get()
+                && !surface.painting.get()
+                && !surface.writing_animations.get()
+                && surface.mounter.try_borrow_mut().is_ok()
+                && surface.anim.try_borrow_mut().is_ok()
+            {
+                surface.write_animations();
+            }
+        });
+    }
+
     /// Writes the animated values to the views and reports finished
     /// animations.
     pub(crate) fn write_animations(&self) {
+        self.native_scroll_dirty.set(false);
+        let was_writing = self.writing_animations.replace(true);
         let (finished, moved) = {
             let mut anim = self.anim.borrow_mut();
+            crate::native::write_pending_scrolls(self, &mut anim);
             anim.write(&self.mounter.borrow());
             let mut moved = Vec::new();
             anim.write_components(
@@ -1026,6 +1067,8 @@ impl Surface {
         if !finished.is_empty() {
             self.control(|c| c.animations_finished(finished));
         }
+        self.writing_animations.set(was_writing);
+        self.post_native_scroll_write();
     }
 
     /// Calls `f` on every frame (with the frame's time) until it is done
