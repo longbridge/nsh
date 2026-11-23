@@ -40,14 +40,6 @@ final class ScrollBox extends FrameLayout implements Node {
         decor.drawClipped(canvas, this, () -> super.draw(canvas));
     }
 
-    @Override
-    public boolean dispatchTouchEvent(android.view.MotionEvent e) {
-        if (e.getActionMasked() == android.view.MotionEvent.ACTION_DOWN && decor.clipsOut(this, e.getX(), e.getY())) {
-            return false;
-        }
-        return super.dispatchTouchEvent(e);
-    }
-
     /** An outer box shadow draws outside the bounds, and compositing the
      * view at alpha < 1 into the bounds-clipped offscreen buffer would cut
      * it; such a view reports no overlapping rendering, so the alpha
@@ -1522,6 +1514,8 @@ final class ScrollBox extends FrameLayout implements Node {
     @Override
     public boolean dispatchTouchEvent(MotionEvent e) {
         int action = e.getActionMasked();
+        // Where its clip path cuts it away, the touch goes to the views below.
+        if (action == MotionEvent.ACTION_DOWN && decor.clipsOut(this, e.getX(), e.getY())) return false;
         touching = action != MotionEvent.ACTION_UP && action != MotionEvent.ACTION_CANCEL;
         if (action == MotionEvent.ACTION_DOWN) {
             // The user scrolls now: what was owed no longer applies.
