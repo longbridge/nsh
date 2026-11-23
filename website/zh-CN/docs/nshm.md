@@ -196,6 +196,42 @@ Photos.on("change", () => refreshStrip());
 
 开启这个 feature 后，打包的 iOS 应用会带上相册的用途说明（应用可以在 `ios.infoPlist` 里写自己的 `NSPhotoLibraryUsageDescription` 文案）。Rust 代码使用 `nsh_extra::photos`；用 `set_backend` 设置的 `PhotosBackend` 会代替系统相册应答（嵌入方自己的相册，或测试的照片）。
 
+#### 内嵌的照片选择器
+
+`PhotosPicker` 把系统的照片选择器放进应用的布局：iOS 17 及以上是一排相册照片，用户在里面选中照片、也能再取消选中，就像主流聊天应用在附件选项上方显示的那样。它由系统在应用进程外运行，所以不需要相册权限：应用只拿到用户选中的照片。
+
+```tsx
+import { PhotosPicker, Photos } from "nsh-extra";
+import { Picker } from "nsh/picker";
+
+let picker: { deselect(id: string): void } | undefined;
+const selected = signal<string[]>([]);
+
+{Photos.pickerViewAvailable() ? (
+  <PhotosPicker
+    ref={(node) => (picker = node)}
+    selectionLimit={10}
+    onChange={({ ids }) => selected.set(ids)}
+    style={{ height: 120, borderRadius: 16, overflow: "hidden" }}
+  />
+) : (
+  <Button onPress={() => Picker.pickImages({ multiple: true, limit: 10 })}>照片</Button>
+)}
+
+// 发送消息时：每张照片都按选中的图片那样准备好。
+const photos = await Promise.all(selected().map((id) => Photos.loadPicked(id, { maxDimension: 2048 })));
+// 附件上的移除按钮同时在选择器里取消选中。
+picker?.deselect(id);
+```
+
+- 用户每次选中或取消选中一张照片，`onChange` 都给出当前所有选中照片的 id，按用户选中的先后排列，选择器上也按这个顺序给每张照片标序号。id 是不透明的；照片的字节留在原生侧，直到 `loadPicked(id, options)` 读取（选项同 `load`）。照片选中且选择器还在显示时 id 可读；之后以 `ENOENT` 拒绝。
+- `selectionLimit` 限制最多选几张（默认 100，与 `Picker.pickImages` 一致；0 表示系统允许的最多张数），`filter` 显示 `"images"`（默认）、`"livePhotos"` 或 `"screenshots"`。
+- 尺寸由样式决定：给它一个高度，用 `borderRadius` 和 `overflow: "hidden"` 做圆角。
+- `pickerViewAvailable()` 为 `false` 的地方（iOS 16 及以下、Android、桌面和 Web）它不占空间、什么也不显示；应用改用 `Picker.pickImages` 让用户挑选。Android 的照片选择器需要较新设备上的系统扩展才能内嵌，Native Shell 暂未使用。
+- `loadPicked` 和 `Photos` 的其他函数一样需要 `picker` 能力。
+
+Rust 代码用 `photos_picker()` 创建它（`.selection_limit(10).on_change(..)`），通过 `component_ref::<PhotosPicker>()` 的 `PhotosPickerApi` 取消选中，用 `nsh_extra::photos::load_picked` 读取。
+
 ### Push
 
 `Push` 向推送服务注册设备，把设备 token 交给应用，应用再把它发给自己的服务器。之后通知以事件的形式到达。iOS 上用的是系统的推送服务；Android 没有每台设备都有的推送服务，因此应用要链接一个推送服务的绑定，即基于 `nsh_extra::push`、封装该服务 SDK 的 crate：
