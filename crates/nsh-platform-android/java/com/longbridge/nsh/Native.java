@@ -77,33 +77,37 @@ final class Native {
     static final int OPEN_URL = 65;
     static final int CARET_MOVE = 66;
     static final int PASTE = 67;
-    static final int SCREEN_COLOR = 68;
-    static final int FILE_REQUEST = 69;
-    static final int SPEECH = 70;
-    static final int DOWNLOAD = 71;
-    static final int NOTIFICATION = 72;
-    static final int URL_SCHEME = 73;
-    static final int SECOND_INSTANCE = 74;
-    static final int AUDIO = 75;
-    static final int WINDOW = 76;
-    static final int EDIT_ACTION = 77;
-    static final int WHEEL = 78;
-    static final int PINCH = 79;
-    static final int WEB_EVALUATION = 80;
-    static final int MOUSE_UP = 81;
-    static final int CANVAS_IMAGE = 82;
-    static final int KEY_DOWN = 83;
-    static final int KEY_UP = 84;
-    static final int WEB_VIEW_REPLY = 85;
-    static final int DOWNLOAD_PENDING = 86;
-    static final int DOWNLOAD_OFFER = 87;
-    static final int DOWNLOAD_PROGRESS = 88;
-    static final int DOWNLOAD_END = 89;
-    static final int SHARE = 90;
-    static final int DETENT_CHANGE = 91;
-    static final int AUTH_SESSION = 92;
-    static final int FOCUS_IN = 93;
-    static final int FOCUS_OUT = 94;
+    static final int CLIPBOARD_WRITE = 68;
+    static final int SCREEN_COLOR = 69;
+    static final int FILE_REQUEST = 70;
+    static final int SPEECH = 71;
+    static final int DOWNLOAD = 72;
+    static final int NOTIFICATION = 73;
+    static final int URL_SCHEME = 74;
+    static final int SECOND_INSTANCE = 75;
+    static final int AUDIO = 76;
+    static final int WINDOW = 77;
+    static final int EDIT_ACTION = 78;
+    static final int WHEEL = 79;
+    static final int PINCH = 80;
+    static final int WEB_EVALUATION = 81;
+    static final int MOUSE_UP = 82;
+    static final int CANVAS_IMAGE = 83;
+    static final int KEY_DOWN = 84;
+    static final int KEY_UP = 85;
+    static final int WEB_VIEW_REPLY = 86;
+    static final int DOWNLOAD_PENDING = 87;
+    static final int DOWNLOAD_OFFER = 88;
+    static final int DOWNLOAD_PROGRESS = 89;
+    static final int DOWNLOAD_END = 90;
+    static final int SHARE = 91;
+    static final int DETENT_CHANGE = 92;
+    static final int AUTH_SESSION = 93;
+    static final int FOCUS_IN = 94;
+    static final int FOCUS_OUT = 95;
+    static final int TEXT_DROP = 96;
+    static final int OPEN_APP_SETTINGS = 97;
+    static final int BACK_PROGRESS = 98;
 
     /**
      * Draws the SVG {@code bytes} for a view {@code maxPx} pixels on its longer side, with its shorter side that long
@@ -355,6 +359,13 @@ final class Native {
     static native void paste(long handle, int id, String text, byte[][] images, String[] uris);
 
     /**
+     * A file drag for node {@code id}: {@link #FILE_DRAG_ENTER} with the files offered (none yet on Android, which
+     * opens a drag's data only at the drop) or {@link #FILE_DROP} with the dropped files' app-owned copies, as
+     * {@code file:} URLs; a drop's point ({@code x}, {@code y}) in the surface's points.
+     */
+    static native void fileDrop(long handle, int id, int kind, String[] uris, float x, float y);
+
+    /**
      * {@link #CANVAS_IMAGE} on the root: the answer to `OffscreenCanvas` render {@code request}, the encoded image
      * {@code bytes}, or when they are null why not: {@code failure} ({@link CanvasRender#RENDER_FAILED},
      * {@link CanvasRender#RENDER_TOO_LARGE}) and the message {@code error}.
@@ -448,8 +459,8 @@ final class Native {
 
     static native boolean hasPan(long handle, int id);
 
-    /** state: 0 began, 1 moved, 2 ended, 3 cancelled. */
-    static native float[] pan(long handle, int id, int state, float tx, float ty, float vx, float vy);
+    /** state: 0 began, 1 moved, 2 ended, 3 cancelled; (ox, oy): where the finger went down in the root (dp). */
+    static native float[] pan(long handle, int id, int state, float tx, float ty, float vx, float vy, float ox, float oy);
 
     /** A pinch (scale) or two-finger rotation (degrees); state as for pan. */
     static native float[] transformGesture(long handle, int id, boolean rotation, int state, float amount, float velocity);

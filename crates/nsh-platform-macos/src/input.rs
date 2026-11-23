@@ -65,8 +65,8 @@ use nsh_core::{
     desktop::{ResizeEdge, WindowControl},
     geometry::{Points, point},
     input::{
-        self, Gate, HitArea, PAN_SLOP, PRESS_SLOP, TOUCHPAD_IDLE, VelocityTracker, WheelLatch,
-        WheelStep, ZOOM_IDLE, has_press, laid_out, latch_holds, transforms,
+        self, Candidate, Gate, HitArea, PAN_SLOP, PRESS_SLOP, TOUCHPAD_IDLE, VelocityTracker,
+        WheelLatch, WheelStep, ZOOM_IDLE, has_press, laid_out, latch_holds, transforms,
     },
     platform::InputModality,
     tailwind::state::{FOCUSED, HOVERED, PRESSED},
@@ -244,25 +244,6 @@ impl MouseMark {
             event: event as *const NSEvent as usize,
             kind: event.r#type(),
             time_bits: event.timestamp().to_bits(),
-        }
-    }
-}
-
-/// What a drag on a view may start.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Candidate {
-    /// A pan with these values (both when it only has listeners).
-    Pan { x: bool, y: bool },
-}
-
-impl Candidate {
-    /// Whether a drag by `(dx, dy)` starts it: single-axis pans take
-    /// mostly-along-their-axis movements, so a horizontal pan coexists
-    /// with a vertical one around it.
-    fn accepts(self, dx: f32, dy: f32) -> bool {
-        let horizontal = dx.abs() > dy.abs();
-        match self {
-            Candidate::Pan { x, y } => (x && y) || (x && horizontal) || (y && !horizontal),
         }
     }
 }
@@ -712,13 +693,13 @@ fn set_cursor_at(surface: &Surface, x: f32, y: f32, always: bool) {
     // The same pick says which link of a text the mouse is over.
     hover_link(
         surface,
-        hit.as_ref().filter(|h| !h.native).map(|h| &h.view),
+        hit.as_ref().filter(|h| h.native.is_none()).map(|h| &h.view),
         x,
         y,
     );
     let cursor = match hit {
         // the hosted view sets its own: the next one is set again
-        Some(hit) if hit.native => return surface.input.cursor.set(None),
+        Some(hit) if hit.native.is_some() => return surface.input.cursor.set(None),
         Some(hit) => {
             if over_link(surface, &hit.view, x, y) {
                 Cursor::Pointer
@@ -1094,7 +1075,7 @@ fn context_menu(surface: &Surface, x: f32, y: f32, flags: NSEventModifierFlags) 
     let Some(hit) = pick(&event_root(surface), x, y) else {
         return;
     };
-    if !hit.native {
+    if hit.native.is_none() {
         let (lx, ly) = local(surface, &hit.view, x, y);
         let span = {
             let state = hit.view.state();
@@ -1584,10 +1565,13 @@ fn input_point(surface: &Surface) -> (f32, f32) {
 
 /// What is under a point.
 struct Hit {
-    /// The innermost view.
+    /// The innermost view; for a hosted view, the view whose input it
+    /// edits, which is not the view hosting it when an input's pad is
+    /// lifted above a transform (`crate::text_input::pad_owner`).
     view: NshView,
-    /// The point is on a hosted AppKit view of it.
-    native: bool,
+    /// The hosted AppKit view the point is on, as picking found it in its
+    /// host's stacking order and coordinates.
+    native: Option<Retained<objc2_app_kit::NSView>>,
 }
 
 /// The innermost view at `(x, y)` (root coordinates).
@@ -1603,22 +1587,24 @@ fn pick_in(view: &NshView, p: (f32, f32)) -> Option<Hit> {
     }
     let (pe, in_slop, children) = {
         let s = view.state();
+        let at = point(Points(p.0), Points(p.1));
         let HitArea {
             in_slop, children, ..
         } = input::hit_area(
-            point(Points(p.0), Points(p.1)),
+            at,
             s.frame.size,
             s.props.hit_slop,
             s.overflow,
             s.clips(),
             laid_out(s.kind, s.id),
-        );
+        )
+        .clipped(s.style.clip_path(), at, s.frame.size);
         (s.props.pointer_events, in_slop, children)
     };
     let own = || {
         (pe != PointerEvents::BoxNone && in_slop).then(|| Hit {
             view: view.clone(),
-            native: false,
+            native: None,
         })
     };
     if !children {
@@ -1671,7 +1657,7 @@ fn native_hit(view: &NshView, sub: &objc2_app_kit::NSView, p: (f32, f32)) -> Opt
         .any(|n| &*n.view == sub && native_contains(n, p))
         .then(|| Hit {
             view: crate::text_input::pad_owner(sub).unwrap_or_else(|| view.clone()),
-            native: true,
+            native: Some(Retained::from(sub)),
         })
 }
 
@@ -1874,7 +1860,7 @@ fn down(
     let hit = pick(&event_root(surface), x, y);
     // A selectable view around the view selects across its texts; else a
     // selectable text selects alone.
-    let selecting = hit.as_ref().filter(|h| !h.native).and_then(|h| {
+    let selecting = hit.as_ref().filter(|h| h.native.is_none()).and_then(|h| {
         crate::selectable_view::target(&h.view)
             .or_else(|| crate::text::selectable(&h.view.state()).then(|| h.view.clone()))
     });
@@ -1883,13 +1869,20 @@ fn down(
         return;
     };
     // A press moves the keyboard focus to an explicitly `focusable` view
-    // under it, as the other desktops' widgets and browsers do. A field
-    // that edits keeps the focus (the root refuses the first responder
-    // during a press, `NshView::acceptsFirstResponder`), and a press on a
-    // view that is not focusable leaves it where it is.
-    if !hit.native
+    // under it that takes no presses (a chart that takes keys), as the
+    // other desktops' widgets and browsers do. A control, a view that
+    // takes presses (a button, a select's trigger, a slider), takes no
+    // focus from a pointer, as AppKit's and Safari's do, so Return and
+    // Space stay the app's shortcuts. A field that edits keeps the focus
+    // (the root refuses the first responder during a press,
+    // `NshView::acceptsFirstResponder`), and a press on a view that is not
+    // focusable leaves it where it is.
+    if hit.native.is_none()
         && let Some(window) = hit.view.ns().window()
-        && let Some(target) = chain(&hit.view).into_iter().find(explicitly_focusable)
+        && let Some(target) = chain(&hit.view)
+            .into_iter()
+            .take_while(|view| !view.state().events.contains(EventKind::Press))
+            .find(explicitly_focusable)
     {
         window.makeFirstResponder(Some(target.ns()));
     }
@@ -1899,7 +1892,7 @@ fn down(
     // it lands; the press still registers (`catch` below is for the app's
     // own glides on views under the pointer, and swallows it).
     end_momentum(surface);
-    let native = hit.native;
+    let native = hit.native.is_some();
     let views = chain(&hit.view);
     // The mouse drags an indicator as a scroll bar: its thumb follows the
     // pointer, where a drag on the content moves the content with it.
@@ -1942,6 +1935,8 @@ fn down(
     let mut candidates = Vec::new();
     let mut pressed = Vec::new();
     let mut gate = None;
+    // An edge pan's edges are those of the root the pointer is measured in.
+    let root_size = event_root(surface).state().frame.size;
     for v in &views {
         let s = v.state();
         if s.events.contains(EventKind::Touch) {
@@ -1950,23 +1945,21 @@ fn down(
         if s.tracked & PRESSED != 0 {
             pressed.push(v.clone());
         }
+        // A pointer away from an edge pan's edge starts neither of its pans.
+        let activation = s.props.pan_activation;
+        if activation.is_some_and(|a| !a.starts_at(point(Points(x), Points(y)), root_size)) {
+            continue;
+        }
         let values = gesture_values(surface, v, s.id);
         if !native
             && selecting.is_none()
-            && (values.pan_x.is_some()
-                || values.pan_y.is_some()
-                || s.events.contains(EventKind::PanStart)
-                || s.events.contains(EventKind::PanEnd))
+            && let Some(pan) = Candidate::pan(&values, s.events, activation)
         {
-            let (x, y) = match (values.pan_x.is_some(), values.pan_y.is_some()) {
-                (false, false) => (true, true),
-                axes => axes,
-            };
-            candidates.push((v.clone(), Candidate::Pan { x, y }));
+            candidates.push((v.clone(), pan));
         }
         if gate.is_none()
             && !native
-            && let Some(activation) = s.props.pan_activation
+            && let Some(activation) = activation
         {
             gate = Some(Gate::new(s.id, activation, candidates.len()));
         }
@@ -2080,8 +2073,8 @@ fn motion(surface: &Rc<Surface>, x: f32, y: f32, time: f64) {
     }
     let activated = Gate::step(&mut p.gate, &mut p.candidates, Points(tx), Points(ty));
     // The view's JS responder takes the drag over: nothing native starts
-    // meanwhile.
-    if activated.is_some() && p.mode == Mode::Idle {
+    // meanwhile, but the view's own pan.
+    if p.mode == Mode::Idle && input::activation_frees(activated, &p.candidates) {
         p.mode = Mode::Free;
     }
     if p.reporting {
@@ -2092,20 +2085,17 @@ fn motion(surface: &Rc<Surface>, x: f32, y: f32, time: f64) {
     // take the gesture (and block native drags) before one starts.
     let js_pending = p.reporting && !moved;
     if p.mode == Mode::Idle && distance > PAN_SLOP.0 && !js_pending {
-        // While the gate decides, the candidates around it wait (the
-        // pointer stays idle and they are asked again on the next move).
-        let waiting = p.gate.as_ref().map(Gate::outer);
-        if waiting.is_none() {
+        // While the gate decides, or a pan's `panActivation`, the candidates
+        // around wait (the pointer stays idle and they are asked again on
+        // the next move).
+        let (dx, dy) = (Points(tx), Points(ty));
+        if !input::waits(&p.candidates, p.gate.as_ref(), dx, dy) {
             p.mode = Mode::Free;
         }
         let started = if surface.input.js_block.get() {
             None
         } else {
-            let open = waiting.unwrap_or(p.candidates.len());
-            p.candidates[..open]
-                .iter()
-                .find(|(_, c)| c.accepts(tx, ty))
-                .cloned()
+            input::startable(&p.candidates, p.gate.as_ref(), dx, dy).cloned()
         };
         if let Some((view, Candidate::Pan { .. })) = started {
             p.gate = None;
@@ -2201,7 +2191,7 @@ enum WindowPart {
 /// AppKit view or a view with press or touch handlers is nearer.
 fn window_part(surface: &Surface, x: f32, y: f32) -> Option<(NshView, WindowPart)> {
     let hit = pick(&event_root(surface), x, y)?;
-    if hit.native {
+    if hit.native.is_some() {
         return None;
     }
     let mut view = Some(hit.view);
@@ -2688,9 +2678,11 @@ fn released_inside(surface: &Surface, view: &NshView, x: f32, y: f32) -> bool {
 
 // --- Pans ---------------------------------------------------------------------------
 
-fn pan_payload(surface: &Surface, id: NodeId, t: (f32, f32), v: (f32, f32)) -> EventPayload {
+fn pan_payload(surface: &Surface, id: NodeId, p: &Pointer, t: (f32, f32)) -> EventPayload {
     let (value_x, value_y) = surface.anim.borrow().pan_values(id);
+    let v = p.velocity.velocity();
     EventPayload::Pan {
+        origin: point(Points(p.start.0), Points(p.start.1)),
         translation: point(Points(t.0), Points(t.1)),
         velocity_x: v.0,
         velocity_y: v.1,
@@ -2706,7 +2698,7 @@ fn pan_start(surface: &Rc<Surface>, view: &NshView, p: &Pointer) {
     };
     surface.anim.borrow_mut().pan_began(id);
     if events.contains(EventKind::PanStart) {
-        let payload = pan_payload(surface, id, (0.0, 0.0), p.velocity.velocity());
+        let payload = pan_payload(surface, id, p, (0.0, 0.0));
         surface.event(id, EventKind::PanStart, payload);
     }
 }
@@ -2730,7 +2722,7 @@ fn pan_end(surface: &Rc<Surface>, view: &NshView, p: &Pointer, write: bool) {
     }
     if events.contains(EventKind::PanEnd) {
         let t = (p.x - p.start.0, p.y - p.start.1);
-        let payload = pan_payload(surface, id, t, p.velocity.velocity());
+        let payload = pan_payload(surface, id, p, t);
         surface.event(id, EventKind::PanEnd, payload);
     }
 }
@@ -3172,11 +3164,36 @@ pub(crate) fn install(surface: &Rc<Surface>) {
         unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(mask, &block) };
 }
 
-/// True when `event` was already observed by [`hosted_mouse`] or
-/// [`hosted_press_began`], preventing duplicate dispatch if a hosted view
-/// forwards the event up the responder chain.
+/// True when `event` was already observed by [`hosted_mouse`],
+/// [`hosted_press_began`] or [`report_hosted`], preventing duplicate
+/// dispatch if a hosted view forwards the event up the responder chain.
 pub(crate) fn saw_hosted(surface: &Surface, event: &NSEvent) -> bool {
     surface.input.hosted_last.get() == Some(MouseMark::of(event))
+}
+
+/// Reports a mouse event a hosted input's pad observed to the surface,
+/// unless the event monitor or the editor's press tracking already did:
+/// one press is one press for the views around it (an overlay's
+/// `onPressOutside` counts it). A press it reports is tracked as theirs
+/// are, so whichever path sees the release ends it once.
+pub(crate) fn report_hosted(surface: &Rc<Surface>, root: Option<NshView>, event: &NSEvent) {
+    if saw_hosted(surface, event) {
+        return;
+    }
+    let input = &surface.input;
+    match event.r#type() {
+        NSEventType::LeftMouseDown => input.hosted_left_down.set(
+            !event
+                .modifierFlags()
+                .contains(NSEventModifierFlags::Control),
+        ),
+        NSEventType::LeftMouseDragged if input.hosted_left_down.get() => {}
+        NSEventType::LeftMouseUp if input.hosted_left_down.replace(false) => {}
+        _ => return,
+    }
+    input.hosted_last.set(Some(MouseMark::of(event)));
+    enter(surface, root);
+    self::event(surface, event);
 }
 
 fn window_root_for(surface: &Surface, window: &NSWindow) -> Option<Option<NshView>> {
@@ -3484,7 +3501,7 @@ fn wheel_event(
                     .modifierFlags()
                     .contains(NSEventModifierFlags::Control),
             );
-            Some((view, takes && along && !hit.native))
+            Some((view, takes && along && hit.native.is_none()))
         },
     );
     let Some((view, takes)) = routed else {
@@ -3809,7 +3826,7 @@ pub(crate) fn window_drag(surface: &Surface, x: f32, y: f32) -> bool {
     let Some(hit) = pick(&event_root(surface), x, y) else {
         return false;
     };
-    if hit.native {
+    if hit.native.is_some() {
         return false;
     }
     let mut view = Some(hit.view);
@@ -3846,22 +3863,11 @@ fn in_hidden_title_bar(surface: &Surface, y: f32) -> bool {
 /// coordinates) when nsh's own picking lands on one: the root's `hitTest:`
 /// hands it the mouse, past app views that let the pointer through
 /// (`pointerEvents: none` overlays), which AppKit's picking would stop at.
+/// The view picking found, not one looked up again in the hit view's own
+/// hosted views: a lifted input's pad is hosted by the view above the
+/// transform, and its input's view hosts nothing.
 pub(crate) fn native_at(root: &NshView, x: f32, y: f32) -> Option<Retained<objc2_app_kit::NSView>> {
-    let hit = pick(root, x, y)?;
-    if !hit.native {
-        return None;
-    }
-    let local = hit.view.ns().convertPoint_fromView(
-        objc2_foundation::NSPoint::new(x as f64, y as f64),
-        Some(root.ns()),
-    );
-    let (lx, ly) = (local.x as f32, local.y as f32);
-    let s = hit.view.state();
-    s.natives
-        .iter()
-        .rev()
-        .find(|n| native_contains(n, (lx, ly)))
-        .map(|n| n.view.clone())
+    pick(root, x, y)?.native
 }
 
 /// The closest file-drop listener under the pointer, within its modal root.
@@ -4002,12 +4008,23 @@ mod tests {
 
     #[test]
     fn candidates_take_their_axis() {
-        let horizontal = Candidate::Pan { x: true, y: false };
-        assert!(horizontal.accepts(8.0, 2.0));
-        assert!(!horizontal.accepts(2.0, 8.0));
-        let vertical = Candidate::Pan { x: false, y: true };
-        assert!(vertical.accepts(1.0, -7.0));
-        assert!(!vertical.accepts(-7.0, 1.0));
+        let pans = |values: GestureValues| {
+            let mut events = nsh_core::EventMask::default();
+            events.set(EventKind::PanEnd, true);
+            Candidate::pan(&values, events, None).unwrap()
+        };
+        let horizontal = pans(GestureValues {
+            pan_x: Some(1),
+            ..GestureValues::default()
+        });
+        assert!(horizontal.accepts(Points(8.0), Points(2.0)));
+        assert!(!horizontal.accepts(Points(2.0), Points(8.0)));
+        let vertical = pans(GestureValues {
+            pan_y: Some(1),
+            ..GestureValues::default()
+        });
+        assert!(vertical.accepts(Points(1.0), Points(-7.0)));
+        assert!(!vertical.accepts(Points(-7.0), Points(1.0)));
     }
 
     #[test]

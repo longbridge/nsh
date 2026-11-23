@@ -24,15 +24,15 @@ use super::{
     reactive::with_data,
     signal_with,
     task::{
-        self, Action, Answer, ClipboardImage, ClipboardItem, DialogAnswer, Executor, FileAnswer,
-        ImageSize,
+        self, Action, Answer, ClipboardImage, ClipboardItem, ClipboardWrite, DialogAnswer,
+        Executor, FileAnswer, ImageSize,
     },
 };
 use crate::{
     Command, Dialog, EdgeInsets, LayoutAnimation, NodeId, Points, Size,
     canvas::CanvasFont,
     color::Hsla,
-    platform::{Appearance, Idiom, Lifecycle, Locale, LocaleSettings, Os},
+    platform::{Appearance, Idiom, Lifecycle, Locale, LocaleSettings, Network, Os},
     time::Instant,
 };
 
@@ -102,6 +102,7 @@ struct EnvSignals {
     locale_settings: Memo<LocaleSettings>,
     lifecycle: Memo<Lifecycle>,
     wake_count: Memo<u32>,
+    network: Memo<Network>,
     screen_color: Memo<bool>,
     shaders: Memo<bool>,
 }
@@ -147,6 +148,7 @@ impl EnvSignals {
                 locale_settings: part!(locale_settings),
                 lifecycle: part!(lifecycle),
                 wake_count: part!(wake_count),
+                network: part!(network),
                 screen_color: part!(screen_color),
                 shaders: part!(shaders),
             }
@@ -307,7 +309,7 @@ pub(super) fn executor() -> Rc<Executor> {
     with_data(|d| d.ambient.executor.clone()).expect("the core sets the executor")
 }
 
-fn act(action: Action) {
+pub(crate) fn act(action: Action) {
     executor().act(action);
 }
 
@@ -469,6 +471,24 @@ pub fn lifecycle() -> Lifecycle {
 /// to the background, which [`lifecycle`] reports.
 pub fn wake_count() -> u32 {
     env(|e| e.wake_count)
+}
+
+/// How the device reaches the network now (TS: `network()`): the kind of
+/// link its default route takes
+/// ([`NetworkKind::None`](crate::platform::NetworkKind::None) offline),
+/// whether that link costs the user or the user asked to save data on it,
+/// and on iOS whether the user lets the app use cellular data. Reading it
+/// subscribes, so an effect that reads it runs again when the route
+/// changes: a request that failed offline can wait for
+/// [`Network::online`] and try again at once, and one refused while
+/// [`CellularData::Restricted`](crate::platform::CellularData::Restricted)
+/// points the user to the system's settings instead of retrying. iOS and
+/// macOS follow the system's path monitor, Android its default network,
+/// the web `navigator.onLine` and `navigator.connection`; elsewhere it
+/// stays [`NetworkKind::Unknown`](crate::platform::NetworkKind::Unknown),
+/// which counts as online.
+pub fn network() -> Network {
+    env(|e| e.network)
 }
 
 /// The operating system (TS: `platform.os`); it does not change.
@@ -744,17 +764,27 @@ pub fn open_url(url: impl Into<String>) -> Answer<bool> {
     answer
 }
 
-/// Puts `text` on the system clipboard (TS: `Clipboard.writeText`).
-pub fn set_clipboard(text: impl Into<String>) {
-    act(super::services::set_clipboard(text.into()));
+/// Puts `text` on the system clipboard (TS: `Clipboard.writeText`). The
+/// answer says whether the system clipboard took it
+/// ([`ClipboardWrite`]); drop it when that does not matter, the write
+/// happens either way.
+pub fn set_clipboard(text: impl Into<String>) -> Answer<ClipboardWrite> {
+    let (answer, action) = super::services::set_clipboard(text.into());
+    act(action);
+    answer
 }
 
 /// Puts `item` on the system clipboard (TS: `Clipboard.write`): its
 /// text, and its HTML as the platform's HTML type, which apps that read
 /// formatting paste. Where the platform has no HTML on the clipboard (a
 /// terminal) the text only.
-pub fn set_clipboard_item(item: ClipboardItem) {
-    act(super::services::set_clipboard_item(item));
+///
+/// The answer says whether the system clipboard took it
+/// ([`ClipboardWrite`]); drop it when that does not matter.
+pub fn set_clipboard_item(item: ClipboardItem) -> Answer<ClipboardWrite> {
+    let (answer, action) = super::services::set_clipboard_item(item);
+    act(action);
+    answer
 }
 
 /// The text on the system clipboard, `""` when it holds none (TS:
@@ -862,15 +892,17 @@ pub fn share(
 /// Opens a web sign-in session for `request` ([`crate::auth_session`]):
 /// the provider's sign-in page, which redirects to a URL of the request's
 /// callback scheme when the user is done. iOS shows it in an
-/// `ASWebAuthenticationSession`, Android in a Custom Tab, other platforms
-/// in the system browser. To await in a task: the
+/// `ASWebAuthenticationSession`, Android in a Custom Tab, the macOS,
+/// Windows and Linux backends in the system browser. To await in a task: the
 /// [`AuthSessionOutcome`](crate::auth_session::AuthSessionOutcome) is the
 /// callback URL, or a cancellation (the user closed the page or came back
 /// without signing in, or a later session replaced it). Outside iOS the
 /// callback comes back as a link of a scheme the app claims (`nsh.json`
 /// `schemes`), which the session takes instead of
-/// [`next_url_scheme_open`]; where neither brings it back, the session
-/// fails with the [`AuthSessionError`](crate::auth_session::AuthSessionError)
+/// [`next_url_scheme_open`]; where nothing brings it back (an unclaimed
+/// scheme, or a platform that hears no links of the app's schemes: the
+/// web, the GPUI and terminal backends), the session fails at once with the
+/// [`AuthSessionError`](crate::auth_session::AuthSessionError)
 /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. It fails with `ERR_ACCESS_DENIED`
 /// where the app's `openUrl` capability does not grant the page's URL, and
 /// with no code for a request
@@ -1336,26 +1368,97 @@ impl Drop for SpeechRecognition {
     }
 }
 
-/// The value function `name` of the embedding app returns for `args`
-/// (TS: `host.call`), to await in a task.
-pub(crate) fn host_call(
-    name: String,
+/// Calls function `name` of the app's host with `args` (TS: `host.call`),
+/// to await in a task: what it returns, or why the call failed. The host
+/// is the embedding app (the native app around the view, whose handlers
+/// answer: `HostChannel::handle` in Rust, `handle` in Swift and Java), or
+/// on the web the page that runs the app (`createPlayer`'s `host`, the
+/// module nsh.json's `web.host` names). A call waits
+/// [`DEFAULT_CALL_TIMEOUT`](crate::host_channel::DEFAULT_CALL_TIMEOUT)
+/// ([`host_call_with`] says otherwise), on the app's clock. `name` must
+/// be granted by `capabilities.host` in nsh.json ([`HostError::Denied`]);
+/// where nothing embeds the app it fails with [`HostError::Unavailable`].
+///
+/// [`HostError::Denied`]: crate::host_channel::HostError::Denied
+/// [`HostError::Unavailable`]: crate::host_channel::HostError::Unavailable
+pub async fn host_call(
+    name: impl Into<String>,
     args: crate::JsonValue,
-) -> Answer<Result<crate::JsonValue, super::JsError>> {
-    let (answer, action) = super::services::host_call(name, args);
+) -> Result<crate::JsonValue, crate::host_channel::HostError> {
+    host_call_with(name, args, crate::host_channel::HostCallOptions::default()).await
+}
+
+/// [`host_call`] as `options` say (TS: `host.call(name, args, options)`).
+pub async fn host_call_with(
+    name: impl Into<String>,
+    args: crate::JsonValue,
+    options: crate::host_channel::HostCallOptions,
+) -> Result<crate::JsonValue, crate::host_channel::HostError> {
+    use crate::host_channel::HostError;
+    let name = name.into();
+    // One so long the clock never gets there waits as `ZERO` does.
+    let timeout = options.timeout;
+    let deadline = (!timeout.is_zero())
+        .then(|| crate::time::now().checked_add(timeout))
+        .flatten();
+    let (answer, action) = super::services::host_call(name.clone(), args);
     act(action);
-    answer
+    let Some(at) = deadline else {
+        return answer.await;
+    };
+    // On the app's clock, as its timers: a manual clock moves it.
+    let answered = {
+        let mut answer = std::pin::pin!(answer);
+        let mut delay = std::pin::pin!(timer_until(at));
+        std::future::poll_fn(|cx| {
+            if let std::task::Poll::Ready(result) = answer.as_mut().poll(cx) {
+                return std::task::Poll::Ready(Some(result));
+            }
+            if delay.as_mut().poll(cx).is_ready() {
+                return std::task::Poll::Ready(None);
+            }
+            std::task::Poll::Pending
+        })
+        .await
+    };
+    answered.unwrap_or_else(|| {
+        // The answer went with the block: the core drops its slot now,
+        // and a late reply finds none (`Core::answer_host`).
+        act(Action::ForgetHostCalls);
+        Err(HostError::TimedOut { name, timeout })
+    })
 }
 
-/// Hands `args` to function `name` of the embedding app, with no answer
-/// (TS: `host.post`).
-pub(crate) fn host_post(name: String, args: crate::JsonValue) {
-    act(Action::HostPost { name, args });
+/// Hands `args` to function `name` of the app's host, with no answer (TS:
+/// `host.post`): its handler of `name` gets it, as [`host_call`]'s calls.
+/// Where nothing embeds the app, or the host has no handler of `name`, the
+/// post goes nowhere; a name `capabilities.host` does not grant, or no
+/// valid one, is refused and logged.
+pub fn host_post(name: impl Into<String>, args: crate::JsonValue) {
+    act(Action::HostPost {
+        name: name.into(),
+        args,
+    });
 }
 
-/// Forgets the host calls whose answers were dropped (they timed out).
-pub(crate) fn forget_host_calls() {
-    act(Action::ForgetHostCalls);
+/// Runs `listener` with the data of every event `event` the app's host
+/// sends while the current owner lives (TS: `host.on`): the embedding
+/// app's (`HostChannel::send` in Rust, `send` in Swift and Java) and on
+/// the web the page's (`player.hostEvent`). An event that comes while no
+/// listener of its name is there is kept (at most
+/// [`MAX_QUEUED_EVENTS`](crate::host_channel::MAX_QUEUED_EVENTS), the
+/// oldest going first) until one is added, which hears it after the
+/// render that added it: a listener added once the app loaded something
+/// still hears what the host sent at its start. An event a listener heard
+/// is not replayed to the ones added later. Events need no capability.
+pub fn on_host_event(event: impl Into<String>, listener: impl Fn(&crate::JsonValue) + 'static) {
+    let owner = Owner::current();
+    let listener: super::host_events::HostListener =
+        Rc::new(move |data: &crate::JsonValue| owner.run(|| listener(data)));
+    let listeners = &executor().host_events;
+    let id = listeners.borrow_mut().add(event.into(), listener);
+    let subscription = super::host_events::HostSubscription::new(listeners, id);
+    cleanup(move || drop(subscription));
 }
 
 /// The size in pixels of the image at `src` (TS: `Image.getSize`).
@@ -1390,6 +1493,13 @@ pub fn fetch(request: impl Into<crate::platform::HttpRequest>) -> super::Fetch {
 /// Asks for the app to show in `locale` ([`crate::i18n::set_locale`]).
 pub(crate) fn act_locale(locale: Option<crate::platform::Locale>) {
     act(Action::Locale(locale));
+}
+
+/// Tells the core that translations changed in place
+/// ([`crate::i18n::add_translations`]), so menus can re-localize if the
+/// selected language changed.
+pub(crate) fn act_translations_changed(before: crate::i18n::Translations) {
+    act_if_running(Action::TranslationsChanged(before));
 }
 
 /// Shows the surface in `appearance` whatever the system's (TS:
@@ -1749,6 +1859,11 @@ pub struct KeyOptions {
     /// give way to the control the focus is on (default)
     /// ([`crate::keymap::KeyBinding::for_focus`]).
     pub for_focus: bool,
+    /// Comes before the views' bindings of the keystroke, so it takes a key
+    /// a focused component binds itself (a query editor's mod+enter over
+    /// the editor's own) while it is kept (default: the views' come first)
+    /// ([`crate::keymap::KeyBinding::over_focused`]).
+    pub over_focused: bool,
 }
 
 /// Where a keyboard shortcut fires ([`on_key_with`]; TS: `keymap.bind`'s
@@ -1796,6 +1911,12 @@ pub fn try_apple_keys() -> Option<bool> {
 ///
 /// On a keystroke that is not one, or one the platform keeps (Command+Q
 /// on Apple platforms, Alt+F4 elsewhere, ...), as TS's `bind` throws.
+///
+/// The panic is not fatal to the app: like any panic in a component, it
+/// ends the component that made the call (its error boundary hears it, or
+/// it is logged) and the engine goes on. To take keystrokes from user
+/// settings, check them first with
+/// [`Shortcut::parse`](crate::desktop::Shortcut::parse).
 #[track_caller]
 pub fn on_key(keystroke: &str, handler: impl Fn(&str) + 'static) {
     on_key_with(keystroke, KeyOptions::default(), handler);
@@ -1833,6 +1954,7 @@ pub fn on_key_with(keystroke: &str, options: KeyOptions, handler: impl Fn(&str) 
             crate::keymap::KeyBinding::new(id, parsed, options.when, options.repeat)
                 .passing_through(options.pass_through)
                 .focus_keys(options.for_focus)
+                .over_focused(options.over_focused)
         },
         keystroke.into(),
         handler,
@@ -2002,6 +2124,12 @@ fn add_watch(target: Rc<dyn Fn() -> Option<NodeId>>, handler: super::watch::Scro
 /// # Panics
 ///
 /// On a keystroke that is not one.
+///
+/// The panic is not fatal to the app: like any panic in a component, it
+/// ends the component that made the call (its error boundary hears it, or
+/// it is logged) and the engine goes on. To take keystrokes from user
+/// settings, check them first with
+/// [`Shortcut::parse`](crate::desktop::Shortcut::parse).
 #[track_caller]
 pub fn key_label(keystroke: &str) -> String {
     let parsed = crate::keymap::Keystroke::parse_with(keystroke, apple_keys())
@@ -2035,7 +2163,25 @@ pub fn on_back_press(f: impl Fn() -> bool + 'static) {
     let listener: super::back::BackListener = Rc::new(move || owner.run(&f));
     let back = &executor().back;
     let id = back.borrow_mut().add(listener);
-    let subscription = super::back::BackSubscription::new(back, id);
+    let subscription = super::back::Subscription::new(back, id);
+    cleanup(move || drop(subscription));
+}
+
+/// Follows the system's back gesture while the current owner lives (TS:
+/// `BackHandler.on("progress", f)`): `f` hears each step of a gesture no
+/// modal takes, from its start to its end (the back press follows, as
+/// [`on_back_press`]'s listeners hear it) or its cancel, as AndroidX's
+/// `OnBackPressedCallback` does. While one listens, the stacks leave the
+/// gesture to the app: none previews its pop, so a view the app moves with
+/// the finger (a drawer closing, a sheet going down) is the only one that
+/// does. Android 14 and later (predictive back) report it; elsewhere it
+/// never comes.
+pub fn on_back_progress(f: impl Fn(&crate::BackProgressEvent) + 'static) {
+    let owner = Owner::current();
+    let listener: super::back::BackProgressListener = Rc::new(move |e| owner.run(|| f(e)));
+    let progress = &executor().back_progress;
+    let id = progress.borrow_mut().add(listener);
+    let subscription = super::back::Subscription::new(progress, id);
     cleanup(move || drop(subscription));
 }
 

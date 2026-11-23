@@ -14,6 +14,7 @@ mod node_view_presses;
 mod selection;
 mod sizing;
 mod structure;
+mod tables;
 mod tiptap;
 mod touch;
 mod typing;
@@ -185,13 +186,23 @@ fn start_on(doc: Value, os: Os, apple_keyboard: bool) -> Headless {
 
 /// [`start_on`] in `idiom` (a phone: touch selection).
 fn start_with(doc: Value, os: Os, apple_keyboard: bool, idiom: Idiom) -> Headless {
+    start_session(move || session(doc.clone()), os, apple_keyboard, idiom)
+}
+
+/// [`start_with`] on the session `make` makes.
+fn start_session(
+    make: impl Fn() -> EditorSession + Send + Sync + 'static,
+    os: Os,
+    apple_keyboard: bool,
+    idiom: Idiom,
+) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(900.0)),
         // Made in the engine, so its keymaps are the platform's the engine
         // says, not the machine's.
         ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>(move || {
             HarnessProps {
-                session: Some(session(doc.clone())),
+                session: Some(make()),
             }
         }))
     };

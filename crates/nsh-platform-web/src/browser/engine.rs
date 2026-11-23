@@ -227,6 +227,10 @@ impl Host for Runtime {
             "fontScale":e.font_scale,"rtl":e.rtl,"reduceMotion":e.reduce_motion,"pixelRatio":e.pixel_ratio,
             "screenReader":e.screen_reader,"locale":e.locale.as_str(),"host":e.host,"lifecycle":e.lifecycle.name(),
             "shaders":e.shaders,"wakeCount":e.wake_count,
+            "network":{
+                "online":e.network.online(),"kind":e.network.kind.name(),"expensive":e.network.expensive,
+                "constrained":e.network.constrained,"cellularData":e.network.cellular_data.name()
+            },
             "horizontalSizeClass":e.horizontal_size_class().name(),
             "verticalSizeClass":e.vertical_size_class().name(),
             "localeSettings":{

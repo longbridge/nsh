@@ -975,6 +975,8 @@ fn initial_environment() -> Environment {
         web_views: cfg!(feature = "webview"),
         // wgpu, until it finds no GPU.
         shaders: nsh_engine::shader::LINKED,
+        // GPUI hands the app no links of its schemes.
+        scheme_links: Some(false),
         ..Environment::default()
     }
 }

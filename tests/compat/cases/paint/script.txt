@@ -268,6 +268,21 @@ style id:changed objectPosition left 50% top 0%
 tap id:flip
 style id:changed objectPosition left 50% top 100%
 covers [styles] objectPosition
+# paint-clip-path
+tap id:case-paint-clip-path
+expect Clip path
+style id:one clipPath inset(4 4 4 4 round 0 0 0 0)
+style id:two clipPath inset(10% 2 10% 2 round 0 0 0 0)
+style id:four clipPath inset(1 2 3 4 round 6 6 6 6)
+style id:corners clipPath inset(0 0 0 0 round 2 4 6 8)
+nostyle id:none clipPath
+nostyle id:unclipped clipPath
+style id:panel clipPath inset(0 0 100% 100% round 12 12 12 12)
+style id:panel transitionProperty clip-path
+style id:panel transitionDuration 420
+tap id:open
+style id:panel clipPath inset(0 0 0 0 round 12 12 12 12)
+covers [styles] clipPath
 # paint-motion
 tap id:case-paint-motion
 expect Motion

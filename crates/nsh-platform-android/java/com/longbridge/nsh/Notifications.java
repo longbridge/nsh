@@ -13,12 +13,18 @@ import android.content.pm.PackageManager;
 import android.media.AudioAttributes;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Bundle;
 import android.service.notification.StatusBarNotification;
 import android.util.Log;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.WeakHashMap;
 
 /**
  * {@code Notifications} of {@code nsh}: the system's notifications. They show in one channel; a press opens the app's
@@ -50,6 +56,8 @@ final class Notifications {
     private static int badge;
     /** The permission requests waiting for the prompt showing: their mounters and ids. UI thread. */
     private static final List<Object[]> waiting = new ArrayList<>();
+    /** The intents {@link #foreign} looked at, by identity, for as long as their activities keep them. UI thread. */
+    private static final Set<Intent> foreignHandled = Collections.newSetFromMap(new WeakHashMap<>());
 
     private Notifications() {}
 
@@ -116,15 +124,84 @@ final class Notifications {
         if (listener == mounter) listener = null;
     }
 
-    /** Reports the press an activity's {@code intent} carries, if any. UI thread. */
+    /**
+     * Reports the press an activity's {@code intent} carries, if any: one of NSH's notifications to the app, one that
+     * other code showed (an intent {@link ForeignIntents#isPress} takes for one) to the handler Rust code set
+     * ({@code notifications.rs}). UI thread.
+     */
     static void handleIntent(Intent intent) {
         if (intent == null) return;
         String id = intent.getStringExtra(EXTRA);
-        if (id == null) return;
+        if (id == null) {
+            foreign(intent);
+            return;
+        }
         // Once: an activity recreated with the same intent has not been pressed again.
         intent.removeExtra(EXTRA);
         pressed(id);
     }
+
+    /**
+     * Hands {@code intent} to the handler of the notifications NSH did not show if it may be a press of one, once:
+     * an activity recreated with the same intent object has not been pressed again. Its extras stay as they are for
+     * the app's other code, such as the SDK that showed the notification. UI thread.
+     */
+    private static void foreign(Intent intent) {
+        if (!foreignHandled.add(intent)) return;
+        Bundle extras;
+        Set<String> keys;
+        try {
+            extras = intent.getExtras();
+            keys = extras == null ? null : extras.keySet();
+        } catch (RuntimeException e) {
+            // A value of a class this process cannot load fails the whole bundle on older Android versions.
+            Log.w(TAG, "cannot read the extras of the activity's intent", e);
+            return;
+        }
+        if (!ForeignIntents.isPress(intent.getAction(), intent.getFlags(), keys)) return;
+        String action = intent.getAction();
+        String data = intent.getDataString();
+        nativeForeignPressed(ForeignIntents.json(plain(extras)), action == null ? "" : action, data == null ? "" : data);
+    }
+
+    /**
+     * {@code extras} as plain Java values for {@link ForeignIntents#json}, without NSH's own: bundles as maps,
+     * parcelable arrays and lists as lists. A value that cannot be read is {@code null}.
+     */
+    @SuppressWarnings("deprecation")
+    private static Map<String, Object> plain(Bundle extras) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        for (String key : extras.keySet()) {
+            if (key == null || ForeignIntents.own(key)) continue;
+            Object value;
+            try {
+                value = extras.get(key);
+            } catch (RuntimeException e) {
+                Log.w(TAG, "cannot read the extra " + key + " of the activity's intent", e);
+                value = null;
+            }
+            map.put(key, plainValue(value));
+        }
+        return map;
+    }
+
+    private static Object plainValue(Object value) {
+        if (value instanceof Bundle) return plain((Bundle) value);
+        if (value instanceof Object[]) {
+            List<Object> list = new ArrayList<>();
+            for (Object item : (Object[]) value) list.add(plainValue(item));
+            return list;
+        }
+        if (value instanceof List) {
+            List<Object> list = new ArrayList<>();
+            for (Object item : (List<?>) value) list.add(plainValue(item));
+            return list;
+        }
+        return value;
+    }
+
+    /** The extras ({@code extras}, JSON), action and data URI ({@code ""} for none) of a press. UI thread. */
+    private static native void nativeForeignPressed(String extras, String action, String data);
 
     private static void pressed(String id) {
         if (listener == null) {
@@ -233,12 +310,19 @@ final class Notifications {
     private static void ask(Activity activity, Mounter mounter, int request) {
         waiting.add(new Object[] {mounter, request});
         if (waiting.size() > 1) return;
-        Permissions.ask(activity, new String[] {Manifest.permission.POST_NOTIFICATIONS}, results -> {
+        boolean asked = Permissions.ask(activity, new String[] {Manifest.permission.POST_NOTIFICATIONS}, results -> {
             // Empty: the prompt was cancelled, so the user can still be asked.
             if (results != null && results.length > 0) preferences(activity).edit().putBoolean(ASKED, true).apply();
-            List<Object[]> answered = new ArrayList<>(waiting);
-            waiting.clear();
-            for (Object[] w : answered) answerPermission((Mounter) w[0], (Integer) w[1]);
+            answerWaiting();
         });
+        // In the background: answered with the state as it is, the user still to be asked.
+        if (!asked) answerWaiting();
+    }
+
+    /** Answers every request waiting for the prompt with the permission's state now. UI thread. */
+    private static void answerWaiting() {
+        List<Object[]> answered = new ArrayList<>(waiting);
+        waiting.clear();
+        for (Object[] w : answered) answerPermission((Mounter) w[0], (Integer) w[1]);
     }
 }

@@ -442,6 +442,18 @@ mod imp {
             }
             // Masked after the filters, as CSS does.
             let masked = crate::decor::push_mask(snapshot, &state);
+            // `clipPath`: everything below is drawn inside it, the view's
+            // shadows, border and children included.
+            let clip_path = state.style.clip_path().map(|c| c.resolve(state.frame.size));
+            if let Some((r, radii)) = clip_path {
+                let rect = graphene::Rect::new(
+                    r.origin.x.0,
+                    r.origin.y.0,
+                    r.size.width.0,
+                    r.size.height.0,
+                );
+                snapshot.push_rounded_clip(&rounded(rect, radii.to_array().map(|r| r.0)));
+            }
             let filters = crate::decor::push_filters(snapshot, &state);
             let (phase, changed) = self.damage.get();
             let phase = phase ^ changed;
@@ -496,6 +508,9 @@ mod imp {
                 crate::decor::draw_border(snapshot, &state);
             }
             for _ in 0..filters {
+                snapshot.pop();
+            }
+            if clip_path.is_some() {
                 snapshot.pop();
             }
             if masked {
@@ -616,10 +631,13 @@ mod imp {
                 return false;
             }
             let h = s.props.hit_slop.map(|v| v.0);
+            let at = nsh_core::geometry::point(Points(x as f32), Points(y as f32));
             x >= -(h.left as f64)
                 && y >= -(h.top as f64)
                 && x < (s.frame.size.width.0 + h.right) as f64
                 && y < (s.frame.size.height.0 + h.bottom) as f64
+                // Outside its clip path, nothing of it is hit.
+                && s.style.clip_path().is_none_or(|c| c.contains(s.frame.size, at))
         }
     }
 }

@@ -158,7 +158,7 @@
   context isolates it); `block` boxes never collapse margins with their children (an unset `align-content` resolves to
   `flex-start`, which makes taffy's block a formatting context); strings keep their whitespace (`whitespace-*` sets
   wrapping only; the JSX compiler collapses literal JSX text); `transition` / `transition-all` animate their groups
-  (`TransitionProps`: colors, opacity, transform, shadows, shape), and filters, backdrop filters, gradients and layout
+  (`TransitionProps`: colors, opacity, transform, shadows, shape; `transition-all` adds the clip path), and filters, backdrop filters, gradients and layout
   take their new values at once; `focus-visible:` (`state::FOCUS_VISIBLE`) is the focus that shows, after the
   browsers' `:focus-visible`: the platforms report only how the user last gave input (`InputModality`: a key, or a
   pointer, pen or finger going down; `EngineControl::set_input_modality`), and the core decides (`classes.rs`
@@ -234,8 +234,9 @@
   the control prefers it over the theme color it is otherwise given. Set on the control, not inherited. `nsh/mobile`'s
   `Switch` reads it (its track when on); the system's segmented control and tab bar could later.
 - **Text style inheritance** (CSS-like): a view's text properties (color, font, size, alignment, ...) pass to the texts and inputs
-  inside it, so `class="text-white"` on a button styles its label. So do its `whitespace-*` / `text-wrap` / `text-nowrap`
-  (and `truncate`'s no wrapping) and `select-*` classes, as CSS's `white-space` and `user-select: auto` (`Core::inherited_text_props`:
+  inside it, so `class="text-white"` on a button styles its label. So do its `whitespace-*` / `text-wrap` / `text-nowrap` / `text-pretty`
+  (and `truncate`'s no wrapping; typed `.whitespace_nowrap()` / `.whitespace_normal()` / `.text_pretty()`, which have no
+  style key) and `select-*` classes, as CSS's `white-space` and `user-select: auto` (`Core::inherited_text_props`:
   the text's own, else the nearest view's that says; `select-auto` says none, so it takes the view's). Inset padding / margin (set by Rust
   components with `.inset_padding(..)` / `.inset_margin(..)`) and `env()` terms ("Environment variables") are added to the resolved padding / margin, so classes and
   styles keep their own.
@@ -266,7 +267,10 @@
   (Apple's Liquid Glass, drawn in the `backdropFilter`'s place on iOS 26 and macOS 26 and later (`UIGlassEffect`, `NSGlassEffectView`, both looked up at run time) and nowhere else, so give a glass
   view a blur to fall back to), `glassTintColor` (the tint of the native glass on iOS 26 and macOS 26;
   `null` restores its native default, an explicit transparent color remains a tint, and the earlier-system blur fallback is unchanged), `maskImage` (a gradient whose alpha decides how much of the view is drawn, its backdrop
-  filter included; iOS, macOS, Android, Linux and web, the topmost layer of several. A masked `backdropFilter` blurs by its exact radius on iOS and macOS, without the material's tint (`PlainBlur` in their `visual.rs`), so layers of them stack into a progressive blur), `mixBlendMode`, `outline*`, `visibility`, `cursor`, `transition*` (CSS: property groups,
+  filter included; iOS, macOS, Android, Linux and web, the topmost layer of several. A masked `backdropFilter` blurs by its exact radius on iOS and macOS, without the material's tint (`PlainBlur` in their `visual.rs`), so layers of them stack into a progressive blur), `clipPath` (CSS's `inset()` shape only, a rounded rectangle and no arbitrary
+  path: `ClipInset` in `effects.rs` resolves it against the view's size and is what every backend clips drawing and hit
+  testing to, `HitArea::clipped` for the desktops; it transitions between two insets and changes at once to or from
+  `none`), `mixBlendMode`, `outline*`, `visibility`, `cursor`, `transition*` (CSS: property groups,
   duration, delay, easing) and `animation*` (Tailwind's `spin` / `ping` / `pulse` / `bounce`), `display: grid` with
   `gridTemplateColumns/Rows` (line names: `grid.rs` turns them into taffy's `grid_template_*_names`, one set per
   line between components, a `repeat()` counting as one), `gridAutoFlow/Columns/Rows`, `gridColumn/Row(Start/End)` (by
@@ -294,6 +298,8 @@
   ancestor's background and the siblings drawn before the next ancestor, never the view itself; at the size where the
   blur's deviation is 4 px, nothing off screen) and blurred by a `RenderEffect`, drawn stretched and clipped under the
   view's background; box shadows are drawn once into small bitmaps and stretched in slices (`Decor.drawCachedShadow`).
+  WebViews sampled by a backdrop share a hardware layer so their functor renders at the page's size, not the smaller
+  filter layer's viewport. The layer is released when no backdrop samples the page; ordinary WebViews keep no extra layer.
   Known limits: iOS has no CSS filters on views (only `opacity`, `brightness` ≤ 1 and `drop-shadow`; images take every color filter
   and `blur`, applied while decoding); iOS texts draw no gradients or inset shadows; Android has no backdrop blur, `blur` or
   `drop-shadow` before API 31; Linux and GPUI draw no backdrop filter, GPUI no `blur()` or `mixBlendMode`; iOS, macOS and Android draw one `drop-shadow()`,

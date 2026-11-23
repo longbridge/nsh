@@ -659,10 +659,11 @@ pub struct InputConfig {
     /// A multiline input shows its scroll indicator (`scrollbar`; false
     /// while a built-in bar takes its place).
     pub scrollbar_visible: bool,
-    /// A built-in bar of the app's takes the indicator's place: the
+    /// A bar of the app's follows a multiline input's text (its built-in
+    /// bar, or one the app placed that watches it, `watch_scroll`): the
     /// platform reports how far the text scrolled
-    /// (`EngineControl::input_scroll`) and takes `Command::ScrollTo`.
-    pub replaced: bool,
+    /// (`EngineControl::input_scroll`). Off, it reports nothing.
+    pub report_scroll: bool,
 }
 
 impl InputConfig {
@@ -723,7 +724,7 @@ impl Default for InputConfig {
             accessory_id: None,
             accessory: None,
             scrollbar_visible: true,
-            replaced: false,
+            report_scroll: false,
         }
     }
 }

@@ -21,6 +21,8 @@ mod download_redirect;
 #[cfg(target_os = "macos")]
 mod embedded_scroll;
 #[cfg(target_os = "macos")]
+mod fitting_input;
+#[cfg(target_os = "macos")]
 mod focus_selection;
 #[cfg(target_os = "macos")]
 mod fps_collapse;
@@ -28,6 +30,8 @@ mod fps_collapse;
 mod hover_cursor;
 #[cfg(target_os = "macos")]
 mod ime;
+#[cfg(target_os = "macos")]
+mod input_clip;
 #[cfg(target_os = "macos")]
 mod input_focus;
 #[cfg(target_os = "macos")]
@@ -59,6 +63,8 @@ mod shader_content;
 #[cfg(target_os = "macos")]
 mod tap_feedback;
 #[cfg(target_os = "macos")]
+mod text_view_selection;
+#[cfg(target_os = "macos")]
 mod title_bar;
 #[cfg(target_os = "macos")]
 mod window_alert;
@@ -68,6 +74,8 @@ mod window_dialog;
 mod window_frames;
 #[cfg(target_os = "macos")]
 mod window_hover;
+#[cfg(target_os = "macos")]
+mod window_layout;
 #[cfg(target_os = "macos")]
 mod window_press;
 #[cfg(target_os = "macos")]
@@ -80,6 +88,8 @@ fn main() {
         {
             if std::env::var_os("NSH_TAP_FEEDBACK_CHECK_ONLY").is_some() {
                 tap_feedback::run();
+            } else if std::env::var_os("NSH_TEXT_VIEW_SELECTION_CHECK_ONLY").is_some() {
+                text_view_selection::run();
             } else if std::env::var_os("NSH_QUIT_CHECK_CASE").is_some() {
                 quit_requests::run_case();
             } else if std::env::var_os("NSH_QUIT_CHECK_ONLY").is_some() {
@@ -109,14 +119,20 @@ fn main() {
                 window_dialog::run();
             } else if std::env::var_os("NSH_WINDOW_FRAMES_CHECK_ONLY").is_some() {
                 window_frames::run();
+            } else if std::env::var_os("NSH_WINDOW_LAYOUT_CHECK_ONLY").is_some() {
+                window_layout::run();
             } else if std::env::var_os("NSH_WINDOW_ALERT_CHECK_ONLY").is_some() {
                 window_alert::run();
             } else if std::env::var_os("NSH_FOCUS_SELECTION_CHECK_ONLY").is_some() {
                 focus_selection::run();
             } else if std::env::var_os("NSH_INPUT_FOCUS_CHECK_ONLY").is_some() {
                 input_focus::run();
+            } else if std::env::var_os("NSH_INPUT_CLIP_CHECK_ONLY").is_some() {
+                input_clip::run();
             } else if std::env::var_os("NSH_INPUT_HIDDEN_CHECK_ONLY").is_some() {
                 input_hidden::run();
+            } else if std::env::var_os("NSH_FITTING_INPUT_CHECK_ONLY").is_some() {
+                fitting_input::run();
             } else if std::env::var_os("NSH_FPS_COLLAPSE_CHECK_ONLY").is_some() {
                 fps_collapse::run();
             } else if std::env::var_os("NSH_SCALED_INPUT_CHECK_ONLY").is_some() {
@@ -138,6 +154,8 @@ fn main() {
                 download_redirect::run();
             } else if std::env::var_os("NSH_EMBEDDED_SCROLL_CHECK_ONLY").is_some() {
                 embedded_scroll::run();
+            } else if std::env::var_os("NSH_VIEW_SCALE_CHECK_ONLY").is_some() {
+                canvas_bounds::run_scale();
             } else if std::env::var_os("NSH_CANVAS_BOUNDS_CHECK_ONLY").is_some() {
                 canvas_bounds::run();
             } else if std::env::var_os("NSH_HOVER_CURSOR_CHECK_ONLY").is_some() {
@@ -157,14 +175,19 @@ fn main() {
                 #[cfg(feature = "shader")]
                 shader_content::run();
                 canvas_bounds::run();
+                canvas_bounds::run_scale();
                 menu_labels::run();
                 menu_lifetime::run();
                 window_frames::run();
+                window_layout::run();
                 keyboard::run();
                 ime::run();
                 input_hidden::run();
+                input_clip::run();
+                fitting_input::run();
                 input_focus::run();
                 focus_selection::run();
+                text_view_selection::run();
                 fps_collapse::run();
                 scaled_input::run();
                 zoom::run();

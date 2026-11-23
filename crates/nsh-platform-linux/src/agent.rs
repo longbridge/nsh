@@ -237,7 +237,13 @@ impl Native for LinuxNative {
         }
     }
 
-    fn drag(&self, from: Point<Points>, to: Point<Points>) {
+    fn drag(
+        &self,
+        from: Point<Points>,
+        to: Point<Points>,
+        options: nsh_testing::DragOptions,
+    ) -> Result<(), String> {
+        nsh_testing::agent::refuse_custom_drag("drag", options)?;
         let (x, y) = (from.x.0, from.y.0);
         self.sim(true, move |s| {
             crate::input::simulate(s, Simulated::Hover(x, y));
@@ -257,9 +263,16 @@ impl Native for LinuxNative {
         self.sim(false, move |s| {
             crate::input::simulate(s, Simulated::Up(x, y))
         });
+        Ok(())
     }
 
-    fn drag_and_hold(&self, from: Point<Points>, to: Point<Points>) -> Result<(), String> {
+    fn drag_and_hold(
+        &self,
+        from: Point<Points>,
+        to: Point<Points>,
+        options: nsh_testing::DragOptions,
+    ) -> Result<(), String> {
+        nsh_testing::agent::refuse_custom_drag("dragAndHold", options)?;
         let (x, y) = (from.x.0, from.y.0);
         self.sim(true, move |s| {
             crate::input::simulate(s, Simulated::Hover(x, y));
@@ -563,8 +576,18 @@ impl Native for LinuxNative {
     fn screenshot(&self) -> Result<Vec<u8>, String> {
         let (tx, rx) = mpsc::channel();
         let key = self.key;
+        let target = self.target.load(Ordering::Relaxed);
         glib::MainContext::default().invoke_with_priority(glib::Priority::DEFAULT, move || {
-            let Some(window) = Surface::by_key(key).and_then(|s| synth::window(&s)) else {
+            // The window the app shows, as `resize`: in window model v2 the
+            // surface's own window is a host that never shows, and the
+            // app's `<Window>` is one of its own.
+            let Some(window) = Surface::by_key(key).and_then(|s| {
+                if target != ROOT_ID {
+                    crate::window::native_window(&s, target)
+                } else {
+                    crate::window::key_window(&s)
+                }
+            }) else {
                 let _ = tx.send(Err("the window is gone".to_owned()));
                 return;
             };

@@ -14,7 +14,7 @@ Native Shell (NSH for short) is a native UI framework for every platform. You bu
 
 ## What native means
 
-Native in NSH has two layers: the platform's foundations, and the platform's interaction.
+Native in NSH has two layers: the platform's foundations, and the platform's interaction. Apps define their own visual style and can opt into system materials such as Liquid Glass on supported platforms.
 
 **The platform's foundations.** Each platform has a backend of its own, built on the UI that platform already has:
 
@@ -170,7 +170,7 @@ NSH began as a way for native apps to take UI after release, and that stays one 
 
 - **Delivered after release.** A module is a signed package (`.nshpkg`) the app downloads at run time. The app checks its signature against the keys it trusts and against a revocation list before running it ([Signed packages](./signed-packages.md)). The host app ships the runtime; teams build modules against its API and deliver them on their own schedule.
 - **The host stays in control.** Each module runs in its own QuickJS VM, with memory, call-time and node limits, and reaches only what the host grants: network hosts, web pages, the status bar ([Sandbox and capabilities](./sandbox-and-capabilities.md)). Several modules run side by side.
-- **It looks like the rest of the app.** Modules render with the platform's own UI, and the host can register its own native views — a map, a player, a design-system component — for modules to use ([Native components](./native-components.md)).
+- **Modules can match the rest of the app.** Modules can reuse the app’s component styles, and the host can register its own native views — a map, a player, a design-system component — for modules to use ([Native components](./native-components.md)).
 
 The same mechanism lets an app **answer with an interface**. A model writes a small TSX module (a form, a chart, a booking card), your server checks, builds and signs it, and the app shows it natively:
 

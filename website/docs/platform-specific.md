@@ -84,9 +84,10 @@ What exists today:
 |---|---|---|---|
 | `.ripple(Ripple { .. })` | `android={{ ripple }}` | every element | The material ripple while pressed: color, borderless, radius, foreground. |
 | `.elevation(..)` | `android={{ elevation }}` | every element | The material shadow, in points, from the view's shape. |
-| | `android={{ accessibilityLiveRegion }}` | every element | `"none"`, `"polite"` or `"assertive"`: TalkBack announces the view's changes. |
+| | `android={{ accessibilityLiveRegion }}` | every element | `"none"`, `"polite"` or `"assertive"`: TalkBack announces the view's changes. The same prop without the bag does it on the other platforms too (`aria-live` on the web, a live region on Windows, an announcement on macOS). |
 | `.status_bar_translucent(..)` | `android={{ statusBarTranslucent }}` | `Dialog` | The dialog's content reaches under the status bar. |
 | `.input_accessory(..)` | `ios={{ inputAccessoryViewID }}` | `Input` | The `InputAccessoryView` shown over the keyboard. |
+| `.input_accessory(..)` | `inputAccessoryViewID` | `RichEditor` | The `InputAccessoryView` shown over the keyboard while the editor has the focus. |
 | `.auto_fill(..)` | `ios={{ textContentType }}` | `Input` | iOS's names for autofill types (Rust's `AutoFill` covers both platforms). |
 | `.supported_orientations(..)` | `ios={{ supportedOrientations }}` | `Dialog` | The orientations it allows. |
 | `.supported_orientations(..)` | `ios={{ supportedOrientations }}`, `android={{ supportedOrientations }}` | `NavPage` | The orientations the screen may take while the page is shown ([NavPage](../elements/nav-stack.md#navpage-props)). |
@@ -120,6 +121,7 @@ In Rust, the APIs only one platform has are functions of `nsh_core::prelude` (`o
 | Rust | TSX | Description |
 |---|---|---|
 | `on_back_press(listener)` | `BackHandler.on("press", listener)` | Listens to the back button after dialogs, before stacks; return `true` when handled. The listener goes with the component (or effect) that added it; in TSX the call also returns a function that stops it earlier. |
+| `on_back_progress(listener)` | `BackHandler.on("progress", listener)` | Follows the back gesture (Android 14 and later): `start`, `move`, then `end` (the press follows) or `cancel`, with the `progress` from 0 to 1 and the `edge` it started at. While one listens, the stacks do not preview their pop. |
 | | `BackHandler.exitApp()` | Leaves the app. |
 
 ```rust tabs

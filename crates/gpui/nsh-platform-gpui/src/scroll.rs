@@ -641,6 +641,15 @@ fn pick(view: &NshView, x: f32, y: f32) -> Option<NshView> {
     if !inside && (state.clips() || state.overflow.is_none()) {
         return None;
     }
+    // Outside its clip path, neither it nor anything in it.
+    if state.style.clip_path().is_some_and(|c| {
+        !c.contains(
+            state.frame.size,
+            nsh_core::geometry::point(Points(x), Points(y)),
+        )
+    }) {
+        return None;
+    }
     let hit = view.with_children(|children| {
         children.iter().rev().find_map(|child| {
             let local = state.child_matrix(&child.state());

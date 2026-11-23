@@ -41,6 +41,7 @@ unsafe extern "C" {
         data: *const u8,
         data_len: usize,
         weight: u32,
+        max_weight: u32,
         italic: u32,
     );
     #[link_name = "submit"]
@@ -201,8 +202,9 @@ pub(crate) fn font_x_height(font: &str) -> f32 {
     unsafe { js_font_x_height(font.as_ptr(), font.len()) as f32 }
 }
 
-/// Adds a font (`FontFace`) to the document.
-pub(crate) fn register_font(family: &str, data: &[u8], weight: u16, italic: bool) {
+/// Adds a font (`FontFace`) to the document, covering weights
+/// `weight..=max_weight` (a variable font's `wght` axis).
+pub(crate) fn register_font(family: &str, data: &[u8], weight: u16, max_weight: u16, italic: bool) {
     // SAFETY: the slices are valid for the call; JS copies them.
     unsafe {
         js_register_font(
@@ -211,6 +213,7 @@ pub(crate) fn register_font(family: &str, data: &[u8], weight: u16, italic: bool
             data.as_ptr(),
             data.len(),
             weight as u32,
+            max_weight as u32,
             italic as u32,
         )
     }

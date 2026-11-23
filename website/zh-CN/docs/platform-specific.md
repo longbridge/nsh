@@ -84,9 +84,10 @@ TSX 的这些对象和其他属性一样是响应式的；从对象中移除的�
 |---|---|---|---|
 | `.ripple(Ripple { .. })` | `android={{ ripple }}` | 所有元素 | 按下时的 Material 水波纹：颜色、无边界、半径、前景。 |
 | `.elevation(..)` | `android={{ elevation }}` | 所有元素 | 根据视图形状生成的 Material 阴影，单位为点。 |
-| | `android={{ accessibilityLiveRegion }}` | 所有元素 | `"none"`、`"polite"` 或 `"assertive"`：TalkBack 播报视图的变化。 |
+| | `android={{ accessibilityLiveRegion }}` | 所有元素 | `"none"`、`"polite"` 或 `"assertive"`：TalkBack 播报视图的变化。不带 bag 的同名 prop 在其他平台也一样（web 的 `aria-live`、Windows 的实时区域、macOS 的播报）。 |
 | `.status_bar_translucent(..)` | `android={{ statusBarTranslucent }}` | `Dialog` | 对话框的内容延伸到状态栏下方。 |
 | `.input_accessory(..)` | `ios={{ inputAccessoryViewID }}` | `Input` | 显示在键盘上方的 `InputAccessoryView`。 |
+| `.input_accessory(..)` | `inputAccessoryViewID` | `RichEditor` | 编辑器获得焦点时显示在键盘上方的 `InputAccessoryView`。 |
 | `.auto_fill(..)` | `ios={{ textContentType }}` | `Input` | iOS 对自动填充类型的叫法（Rust 的 `AutoFill` 覆盖两个平台）。 |
 | `.supported_orientations(..)` | `ios={{ supportedOrientations }}` | `Dialog` | 允许的方向。 |
 | `.supported_orientations(..)` | `ios={{ supportedOrientations }}`、`android={{ supportedOrientations }}` | `NavPage` | 页面显示时屏幕可以采用的方向（[NavPage](../elements/nav-stack.md#navpage-props)）。 |
@@ -120,6 +121,7 @@ TSX 的这些对象和其他属性一样是响应式的；从对象中移除的�
 | Rust | TSX | 说明 |
 |---|---|---|
 | `on_back_press(listener)` | `BackHandler.on("press", listener)` | 在对话框之后、导航栈之前监听返回键；处理了就返回 `true`。监听器随添加它的组件（或 effect）一起结束；在 TSX 中，调用还会返回一个函数，用来提前停止监听。 |
+| `on_back_progress(listener)` | `BackHandler.on("progress", listener)` | 跟随返回手势（Android 14 及更高版本）：`start`、`move`，然后是 `end`（紧接着是返回操作）或 `cancel`，带有从 0 到 1 的 `progress` 和手势开始的边缘 `edge`。有监听器时，导航栈不再预览弹出。 |
 | | `BackHandler.exitApp()` | 退出应用。 |
 
 ```rust tabs

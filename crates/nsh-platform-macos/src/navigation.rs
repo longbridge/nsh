@@ -580,11 +580,10 @@ fn image_of(surface: &Surface, view: &NshView) -> Option<CFRetained<CGImage>> {
     if f.size.width.0 <= 0.0 || f.size.height.0 <= 0.0 {
         return None;
     }
-    let scale = view
-        .ns()
-        .window()
-        .or_else(|| surface.root.ns().window())
-        .map_or(2.0, |w| w.backingScaleFactor());
+    let scale = match view.ns().window() {
+        Some(_) => crate::view::backing_scale_of(view.ns()),
+        None => crate::view::backing_scale_of(surface.root.ns()),
+    };
     let (pw, ph) = (
         (f.size.width.0 as f64 * scale).ceil() as usize,
         (f.size.height.0 as f64 * scale).ceil() as usize,
@@ -1443,6 +1442,7 @@ impl Nav {
     /// Sizes modal `id` to the surface and reports it (with the surface's
     /// safe area).
     fn size_modal(&mut self, surface: &Surface, id: NodeId) {
+        let presenting = self.presenting.contains(&id);
         let Some(m) = self.modals.get_mut(&id) else {
             return;
         };
@@ -1460,6 +1460,13 @@ impl Nav {
         } else {
             EdgeInsets::default()
         };
+        // Reported once its batch is applied ([`end_batch`]): a window
+        // of the app's own (`Window.open`) is presented first and only
+        // claimed by the batch's commands, and must not be laid out at the
+        // surface's size in between.
+        if presenting {
+            return;
+        }
         report(surface, id, &mut m.reported, size, insets);
     }
 
@@ -1851,6 +1858,7 @@ pub(crate) fn end_batch(surface: &Rc<Surface>) {
         nav.reconcile(surface, stack);
     }
     for id in std::mem::take(&mut nav.presenting) {
+        nav.size_modal(surface, id);
         nav.show_modal(surface, id);
     }
     // Screen sizes change with the app's layout.

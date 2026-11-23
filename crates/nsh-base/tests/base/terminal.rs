@@ -23,7 +23,7 @@ use nsh_core::{
     prelude::*,
 };
 use nsh_engine::EngineConfig;
-use nsh_testing::{Headless, Screen};
+use nsh_testing::{DragOptions, Headless, Screen};
 
 fn start<C: Component<Props = ()>>(idiom: Idiom) -> Headless {
     let viewport = Size::new(px(390.0), px(844.0));
@@ -1111,7 +1111,12 @@ fn a_color_slider_is_a_row_of_its_colors_with_a_thumb() {
     assert_eq!(app.screen().count("label:Hue").unwrap(), 1);
     // A drag to the start picks the smallest hue, its thumb on the first
     // Cell; End the largest, on the last.
-    app.drag("label:Hue", point(px(-400.0), px(0.0))).unwrap();
+    app.drag(
+        "label:Hue",
+        point(px(-400.0), px(0.0)),
+        DragOptions::default(),
+    )
+    .unwrap();
     let wait = Duration::from_secs(1);
     app.wait_until("the thumb at the start", wait, |s| {
         hue_track(s).starts_with('│')

@@ -99,6 +99,9 @@ pub(crate) struct AppWindow {
     scale: Cell<f32>,
     /// A `WM_PAINT` is asked for.
     invalid: Cell<bool>,
+    /// It was sized and placed as the app opened it ([`place`]): until
+    /// then its size is the system's default, which is reported to nobody.
+    positioned: Cell<bool>,
     /// The size last reported to the core.
     reported: Cell<Option<Size<Points>>>,
     /// It was shown once (its first frame drawn).
@@ -343,6 +346,7 @@ fn open(surface: &Rc<Surface>, view: &NshView, open: &OpenWindow) {
         pixels: Cell::new((0, 0)),
         scale: Cell::new(1.0),
         invalid: Cell::new(false),
+        positioned: Cell::new(false),
         reported: Cell::new(None),
         opened: Cell::new(false),
         closed: Cell::new(false),
@@ -358,6 +362,7 @@ fn open(surface: &Rc<Surface>, view: &NshView, open: &OpenWindow) {
     surface.windows.borrow_mut().push(window.clone());
     crate::shell::sync(surface, hwnd, None, resolved);
     place(&window, open);
+    window.positioned.set(true);
     hold_owner(&window);
     resized(surface, &window);
     // Shown once the engine has laid out and drawn what it shows: after
@@ -533,6 +538,12 @@ fn fill_background(surface: &Surface, id: NodeId, hwnd: HWND) {
 /// The window's client area was resized or moved to another scale: the
 /// root view takes its size, which the core lays the root out at.
 fn resized(surface: &Surface, window: &AppWindow) {
+    // Made at the system's default size (`CW_USEDEFAULT`, most of the
+    // screen), which its styles report before it is placed: the app would
+    // lay itself out for a window nobody sees.
+    if !window.positioned.get() {
+        return;
+    }
     let mut rect = RECT::default();
     // SAFETY: plain call with a local out value.
     let _ = unsafe { GetClientRect(window.hwnd, &mut rect) };
@@ -561,6 +572,8 @@ fn resized(surface: &Surface, window: &AppWindow) {
         crate::navigation::surface_resized(surface, size.width.0, size.height.0);
         crate::system::window_resized(surface, window.id, size.width.0, size.height.0);
     }
+    // The primary window's size and scale are the app's `windowSize()`.
+    surface.window_environment();
     invalidate(window);
 }
 
@@ -908,7 +921,20 @@ pub(crate) fn removed(surface: &Surface, view: &NshView) -> bool {
     // The windows it owns close with it, and stay until their roots go.
     release_children(surface, window.hwnd, !window.closed.get());
     destroy(surface, &window);
+    // Another window may be the primary one now.
+    surface.window_environment();
     true
+}
+
+/// The size and scale of the app's primary window: the first of its own
+/// windows still open that has a size (not minimized when it opened).
+/// `None` while it shows none.
+pub(crate) fn primary(surface: &Surface) -> Option<(Size<Points>, f32)> {
+    surface
+        .windows
+        .borrow()
+        .iter()
+        .find_map(|w| w.reported.get().map(|size| (size, w.scale.get())))
 }
 
 /// Closes every window of the app's own (the app stopped).
@@ -917,6 +943,7 @@ pub(crate) fn close_all(surface: &Surface) {
     for window in &windows {
         destroy(surface, window);
     }
+    surface.window_environment();
 }
 
 fn destroy(surface: &Surface, window: &AppWindow) {
@@ -989,6 +1016,7 @@ mod tests {
             pixels: Cell::new((0, 0)),
             scale: Cell::new(1.0),
             invalid: Cell::new(false),
+            positioned: Cell::new(true),
             reported: Cell::new(None),
             opened: Cell::new(false),
             closed: Cell::new(false),
