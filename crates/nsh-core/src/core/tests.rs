@@ -33885,6 +33885,99 @@ fn anchored_overlays_go_within_the_area_the_platform_shows_them_in() {
 }
 
 #[test]
+fn anchored_overlays_keep_clear_of_the_software_keyboard() {
+    use StyleValue::{Number, Str};
+    // A 320 × 480 root with a 34 point bottom safe area, and a 40 point
+    // trigger 240 points from its top.
+    let mut c = core();
+    c.set_environment(env_with_keyboard(0.0, 250.0));
+    c.set_safe_area(EdgeInsets {
+        bottom: px(34.0),
+        ..EdgeInsets::default()
+    });
+    add(
+        &mut c,
+        4,
+        Tag::View,
+        ROOT_ID,
+        &[
+            ("width", Number(80.0)),
+            ("height", Number(40.0)),
+            ("marginTop", Number(240.0)),
+        ],
+    );
+    // A popover below the trigger, and one as tall as its room lets it be.
+    add(&mut c, 10, Tag::Overlay, 4, &[]);
+    add(
+        &mut c,
+        12,
+        Tag::View,
+        10,
+        &[("width", Number(120.0)), ("height", Number(150.0))],
+    );
+    add(&mut c, 20, Tag::Overlay, 4, &[("maxHeight", Str("100%"))]);
+    add(
+        &mut c,
+        22,
+        Tag::View,
+        20,
+        &[("width", Number(120.0)), ("height", Number(600.0))],
+    );
+    for id in [10, 20] {
+        apply(
+            &mut c,
+            vec![
+                overlay_prop(
+                    id,
+                    crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(4)),
+                ),
+                overlay_prop(id, crate::OverlayProp::Align(crate::overlay::Align::Start)),
+                overlay_prop(id, crate::OverlayProp::Margin(px(8.0))),
+            ],
+        );
+    }
+    // Room below the trigger above the safe area: there.
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(8.0, 280.0, 120.0, 150.0)));
+    assert_eq!(
+        frame_of(&batch, 20).map(|f| f.size.height),
+        Some(px(480.0 - 34.0 - 16.0))
+    );
+
+    // The keyboard comes up 200 points (the safe area under it included):
+    // no room left below the trigger above it, so the popover flips above,
+    // and the tall one gets only the room above the keyboard.
+    c.set_environment(env_with_keyboard(200.0, 250.0));
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(8.0, 90.0, 120.0, 150.0)));
+    assert_eq!(
+        frame_of(&batch, 20).map(|f| f.size.height),
+        Some(px(480.0 - 200.0 - 16.0))
+    );
+    let room = c.nodes[c.key(20).unwrap() as usize].frame;
+    assert!(room.bottom() <= px(480.0 - 200.0 - 8.0), "{room:?}");
+    // It moves with the keyboard's own motion.
+    assert!(
+        matches!(
+            &batch.items[0],
+            MountItem::LayoutAnimation(crate::LayoutAnimation {
+                update: Some(t), .. }) if t.curve == crate::LayoutCurve::Keyboard
+        ),
+        "{:?}",
+        batch.items
+    );
+
+    // The keyboard goes: back below the trigger.
+    c.set_environment(env_with_keyboard(0.0, 250.0));
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(8.0, 280.0, 120.0, 150.0)));
+    assert_eq!(
+        frame_of(&batch, 20).map(|f| f.size.height),
+        Some(px(480.0 - 34.0 - 16.0))
+    );
+}
+
+#[test]
 fn an_anchored_overlay_wider_than_its_room_wraps_within_the_margin() {
     use StyleValue::Number;
     let mut c = core();

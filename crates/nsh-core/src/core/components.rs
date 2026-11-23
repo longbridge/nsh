@@ -1408,8 +1408,14 @@ impl<M: TextEngine> Core<M> {
             || self.components.environment.locale != environment.locale
             || self.components.environment.locale_settings.languages
                 != environment.locale_settings.languages;
-        self.keyboard_moved |=
+        let keyboard_moved =
             self.components.environment.keyboard_height != environment.keyboard_height;
+        self.keyboard_moved |= keyboard_moved;
+        // The room the root view's anchored overlays keep to leaves the
+        // keyboard out (`Core::overlay_area`): laid out and placed again.
+        if keyboard_moved && self.root_overlay_shown() {
+            self.needs_layout = true;
+        }
         let ratio = self.components.environment.pixel_ratio;
         self.components.environment = environment;
         if ratio != environment.pixel_ratio {
