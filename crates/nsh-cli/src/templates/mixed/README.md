@@ -37,6 +37,31 @@ Register more in `__EXT__/src/lib.rs` with `registry.register::<…>()` (compone
 The `nsh` commands build the app's hosts with the nshm linked in, from the NSH crates its `Cargo.toml` depends on: crates.io's at the version of the
 `nsh` you run (keep the `nsh-*` dependencies at that version when you upgrade `nsh`), or an NSH checkout's by path.
 
+## A title bar of your own
+
+The window keeps the system's title bar. To draw your own in its place (the window's background up to its top edge,
+your controls beside the window's), hide the system's and lay out a `TitleBar` row at the top: it moves the window
+and keeps its content clear of the window controls where it meets them, so a bar over each pane of a split view only
+steps aside on the pane at the window's edge.
+
+```tsx
+import { mount, Text, View } from "nsh";
+import { TitleBar } from "nsh/base";
+import { Window } from "nsh/desktop";
+
+mount(() => (
+  <Window id="main" titleBar={{ style: "hidden" }}>
+    <View class="flex-1">
+      <TitleBar class="h-11 border-b border-border">
+        <Text class="px-3 font-semibold">__APP_NAME__</Text>
+      </TitleBar>
+    </View>
+  </Window>
+));
+```
+
+Its own padding goes on a view inside it; see [TitleBar](https://nsh.dev/elements/title-bar).
+
 NSH-generated files stay in `.nsh/`: runner sources in `.nsh/rust/` and default packages in `.nsh/out/`.
 Cargo keeps its normal `target/` directory and respects your existing `CARGO_TARGET_DIR`.
 
