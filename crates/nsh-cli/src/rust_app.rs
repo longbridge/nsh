@@ -531,6 +531,8 @@ enum Nsh {
     /// crates.io, at this `nsh`'s version ([`VERSION`]): the app's crates
     /// ask for it (`nsh-core = "0.1.1"`, what `nsh init --template rust` writes).
     Registry,
+    /// The installed nightly builds a TSX runner at its own commit.
+    Nightly(&'static str),
     /// The checkout the app's crates depend on by path (`nsh init
     /// --template rust --nsh-source <dir>`): nsh's own examples, or an app
     /// trying changes to nsh.
@@ -549,6 +551,20 @@ enum Nsh {
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 impl Nsh {
+    /// The source of a runner generated for an app with no Rust crates.
+    fn for_runner(
+        checkout: Option<PathBuf>,
+        channel: &str,
+        revision: &'static str,
+    ) -> anyhow::Result<Self> {
+        match (checkout, channel, revision) {
+            (Some(dir), _, _) => Ok(Self::Source(dir)),
+            (None, "nightly", "unknown") => bail!("this nightly has no source revision"),
+            (None, "nightly", rev) => Ok(Self::Nightly(rev)),
+            _ => Ok(Self::Registry),
+        }
+    }
+
     /// Where the app's `crates` take nsh's crates from, as their
     /// dependencies say (`cargo metadata --no-deps`): from crates.io, or by
     /// path from one checkout, whatever its version. A direct Git dependency
@@ -619,7 +635,7 @@ impl Nsh {
     /// The checkout, if it is one.
     fn source(&self) -> Option<&Path> {
         match self {
-            Nsh::Registry => None,
+            Nsh::Registry | Nsh::Nightly(_) => None,
             Nsh::Source(dir) | Nsh::Git { checkout: dir, .. } => Some(dir),
         }
     }
@@ -630,6 +646,9 @@ impl Nsh {
     fn dep(&self, name: &str, extra: &str) -> String {
         match self {
             Nsh::Registry => format!("{{ version = \"={VERSION}\"{extra} }}"),
+            Nsh::Nightly(rev) => {
+                format!("{{ git = \"https://github.com/longbridge/nsh\", rev = {rev:?}{extra} }}")
+            }
             Nsh::Source(dir) | Nsh::Git { checkout: dir, .. } => format!(
                 "{{ path = {:?}{extra} }}",
                 nsh_crate(dir, name).to_string_lossy()
@@ -1103,13 +1122,16 @@ pub(crate) fn is_root(entry: &Path) -> bool {
 /// A workspace with no crates of the app's, for `nsh package` of a TSX
 /// app: its release runner built here with only the native features its
 /// bundle reaches, instead of the prebuilt one that has all of them. nsh's
-/// crates come from the checkout this CLI was built in, else from
-/// crates.io at this CLI's version.
+/// crates come from the local checkout, the nightly commit, or the published release.
 pub(crate) fn runner_only(entry: &Path) -> anyhow::Result<RustApp> {
     let entry = dunce::canonicalize(entry)
         .with_context(|| format!("entry not found: {}", entry.display()))?;
     let dir = entry.parent().context("entry has no directory")?;
-    let nsh = crate::runtime::cli_checkout().map_or(Nsh::Registry, Nsh::Source);
+    let nsh = Nsh::for_runner(
+        crate::runtime::cli_checkout(),
+        env!("NSH_CHANNEL"),
+        env!("NSH_GIT_SHA_FULL"),
+    )?;
     let watched = watched(&[], nsh.source());
     // A TSX app packaged from flags alone has no `nsh.json`: the runtime's.
     let minimums = match fs::read_to_string(dir.join("nsh.json")) {
@@ -3172,14 +3194,14 @@ opt-level = \"s\"
         let mut runtime = crate::runtime::WebRuntime {
             glue: glue.exists().then_some(glue),
             wasm,
-            // A checkout's own, so edits to it apply; from crates.io the
-            // published crate's, copied next to the module when it is built.
+            // Use a checkout's JS directly so edits apply. For Cargo dependencies,
+            // copy the resolved crate's JS next to the built module below.
             js: match &self.nsh {
                 Nsh::Source(source)
                 | Nsh::Git {
                     checkout: source, ..
                 } => source.join("crates/nsh-platform-web/web/nsh.js"),
-                Nsh::Registry => out.join("nsh.js"),
+                Nsh::Registry | Nsh::Nightly(_) => out.join("nsh.js"),
             },
             syntaxes: crate::runtime::syntaxes_in(&out),
         };
@@ -3225,8 +3247,8 @@ opt-level = \"s\"
         // Both kinds build to the same file: each keeps a copy of its own,
         // through wasm-bindgen when the app's crates call JS through it.
         runtime.glue = crate::bindgen::install(&built, &out, &stem)?;
-        if self.nsh == Nsh::Registry {
-            let js = self.registry_crate("nsh-platform-web")?.join("web/nsh.js");
+        if self.nsh.source().is_none() {
+            let js = self.resolved_crate("nsh-platform-web")?.join("web/nsh.js");
             crate::runtime::copy_browser_host(
                 js.parent().context("web runtime has no parent")?,
                 &out,
@@ -3242,9 +3264,8 @@ opt-level = \"s\"
         Ok(Some(runtime))
     }
 
-    /// The directory Cargo unpacked nsh's crate `name` (from crates.io, at
-    /// [`VERSION`]) into for the workspace, as `cargo metadata` reports it.
-    fn registry_crate(&self, name: &str) -> anyhow::Result<PathBuf> {
+    /// Where Cargo resolved nsh's crate `name` at [`VERSION`] for this workspace.
+    fn resolved_crate(&self, name: &str) -> anyhow::Result<PathBuf> {
         crate::runtime::package_dir(&self.workspace.join("Cargo.toml"), name, Some(VERSION))
     }
 
@@ -5756,6 +5777,25 @@ mod tests {
             { "id": "sv1-git", "name": "smallvec", "version": "1.15.1", "source": "git+https://example.com/smallvec#abc", "manifest_path": "/g/Cargo.toml" }
         ));
         assert_eq!(hack_of(&metadata, DESCRIBE_TREE), "");
+    }
+
+    #[test]
+    fn a_packaged_tsx_runner_uses_the_installed_nightly_commit() {
+        let rev = "f577c51901a2857956f8ba0580da4db9ce3a3311";
+        let nightly = Nsh::for_runner(None, "nightly", rev).unwrap();
+        assert_eq!(
+            nightly.dep("nsh-platform-macos", ", default-features = false"),
+            format!(
+                r#"{{ git = "https://github.com/longbridge/nsh", rev = "{rev}", default-features = false }}"#
+            ),
+        );
+        assert_eq!(Nsh::for_runner(None, "stable", rev).unwrap(), Nsh::Registry);
+        assert!(Nsh::for_runner(None, "nightly", "unknown").is_err());
+        let local = PathBuf::from("checkout");
+        assert_eq!(
+            Nsh::for_runner(Some(local.clone()), "nightly", rev).unwrap(),
+            Nsh::Source(local),
+        );
     }
 
     #[test]
