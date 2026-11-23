@@ -146,7 +146,7 @@ pub use crate::{
         SheetDetent, SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle,
         SubmitBehavior, Tag, TextDrop, TouchEvent, TouchPhase, TouchPoint, TransitionFallback,
         Viewability, WebElement, WebInput, WebKey, WebLoad, WebSource, WheelDelta, WheelEvent,
-        WheelStyle, dialog_default_button,
+        dialog_default_button,
     },
     props::{
         Accessibility, AccessibilityActionDef, AccessibilityCurrent, AccessibilityProp,

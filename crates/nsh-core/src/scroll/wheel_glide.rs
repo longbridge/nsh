@@ -6,8 +6,62 @@
 //! where the glide is, at the speed it has there, so a run of steps flows
 //! into one motion instead of restarting each time. Without it every step
 //! landed at once, a jump per event. Times are ms, offsets points.
+//!
+//! `smoothWheel` glides a scroll view's notches with it on every desktop:
+//! the shared scroll views (Linux, Windows, GPUI: [`super::wheel_smooth`])
+//! and macOS's own.
 
-use crate::scroll::Offset;
+use crate::geometry::{Point, Points, point};
+
+/// An offset or a change of one (points).
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+struct Offset {
+    x: f32,
+    y: f32,
+}
+
+impl Offset {
+    fn lerp(self, to: Self, k: f32) -> Self {
+        Self {
+            x: self.x + (to.x - self.x) * k,
+            y: self.y + (to.y - self.y) * k,
+        }
+    }
+}
+
+impl std::ops::Add for Offset {
+    type Output = Self;
+
+    fn add(self, o: Self) -> Self {
+        Self {
+            x: self.x + o.x,
+            y: self.y + o.y,
+        }
+    }
+}
+
+impl std::ops::Sub for Offset {
+    type Output = Self;
+
+    fn sub(self, o: Self) -> Self {
+        Self {
+            x: self.x - o.x,
+            y: self.y - o.y,
+        }
+    }
+}
+
+impl From<Point<Points>> for Offset {
+    fn from(p: Point<Points>) -> Self {
+        Self { x: p.x.0, y: p.y.0 }
+    }
+}
+
+impl From<Offset> for Point<Points> {
+    fn from(o: Offset) -> Self {
+        point(Points(o.x), Points(o.y))
+    }
+}
 
 /// One 60 Hz frame (ms): Chromium counts its durations in them.
 const FRAME: f64 = 1000.0 / 60.0;
@@ -27,7 +81,7 @@ const EPSILON: f64 = 0.01;
 /// The glide in flight. `target` is kept by the caller (the wheel phase's
 /// `raw`), so a shift of the content moves it with the rest.
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
-pub(crate) struct Glide {
+pub struct Glide {
     /// Where the current segment starts.
     initial: Offset,
     /// The curve's time origin (ms, the frames' clock).
@@ -63,7 +117,8 @@ impl Glide {
     /// A glide from `initial` to `target` starting `now`: one frame in
     /// already, as Chromium starts it (`animation_start_offset`), so the
     /// first frame drawn has moved.
-    pub(crate) fn new(initial: Offset, target: Offset, now: f64) -> Self {
+    pub fn new(initial: Point<Points>, target: Point<Points>, now: f64) -> Self {
+        let (initial, target) = (Offset::from(initial), Offset::from(target));
         Self {
             initial,
             start: now - FRAME,
@@ -74,14 +129,14 @@ impl Glide {
     }
 
     /// When it arrives (ms, the frames' clock).
-    pub(crate) fn end(&self) -> f64 {
+    pub fn end(&self) -> f64 {
         self.start + self.total
     }
 
     /// Moved with the content by `d` (`ApplyAdjustment`).
-    pub(crate) fn shifted(self, d: Offset) -> Self {
+    pub fn shifted(self, d: Point<Points>) -> Self {
         Self {
-            initial: self.initial + d,
+            initial: self.initial + d.into(),
             ..self
         }
     }
@@ -91,7 +146,11 @@ impl Glide {
     }
 
     /// Where it is at `now` on its way to `target` (`GetValue`).
-    pub(crate) fn value(&self, target: Offset, now: f64) -> Offset {
+    pub fn value(&self, target: Point<Points>, now: f64) -> Point<Points> {
+        self.at(target.into(), now).into()
+    }
+
+    fn at(&self, target: Offset, now: f64) -> Offset {
         let duration = self.total - self.retarget;
         let t = now - self.start - self.retarget;
         if duration <= 0.0 || t >= duration {
@@ -116,14 +175,18 @@ impl Glide {
 
     /// A step during the glide moved its target from `old` to `new` at
     /// `now` (`UpdateTarget`).
-    pub(crate) fn retargeted(mut self, old: Offset, new: Offset, now: f64) -> Self {
+    pub fn retargeted(self, old: Point<Points>, new: Point<Points>, now: f64) -> Self {
+        self.moved_on(old.into(), new.into(), now)
+    }
+
+    fn moved_on(mut self, old: Offset, new: Offset, now: f64) -> Self {
         let mut t = now - self.start;
         let late = (self.retarget - t).max(0.0);
         t = t.max(self.retarget);
         if major(old - new).abs() < EPSILON {
             return self;
         }
-        let here = self.value(old, self.start + t);
+        let here = self.at(old, self.start + t);
         let delta = new - here;
         if major(delta).abs() < EPSILON {
             self.initial = here;
@@ -257,9 +320,13 @@ impl Bezier {
 mod tests {
     use super::*;
 
+    fn y(v: f32) -> Offset {
+        Offset { x: 0.0, y: v }
+    }
+
     #[test]
     fn durations_follow_the_step() {
-        let d = |y: f32| segment(Offset::new(0.0, y), 0.0);
+        let d = |v: f32| segment(y(v), 0.0);
         assert!((d(40.0) - 200.0).abs() < 0.01);
         assert!((d(300.0) - 150.0).abs() < 0.01);
         assert!((d(1000.0) - 100.0).abs() < 0.01);
@@ -267,25 +334,24 @@ mod tests {
 
     #[test]
     fn eases_in_and_out_and_arrives() {
-        let to = Offset::new(0.0, 100.0);
-        let g = Glide::new(Offset::default(), to, 0.0);
-        assert_eq!(g.value(to, -FRAME), Offset::default());
-        let mid = g.value(to, g.start + g.total / 2.0).y;
+        let to = y(100.0);
+        let g = Glide::new(Offset::default().into(), to.into(), 0.0);
+        assert_eq!(g.at(to, -FRAME), Offset::default());
+        let mid = g.at(to, g.start + g.total / 2.0).y;
         assert!((mid - 50.0).abs() < 0.5);
-        assert_eq!(g.value(to, g.end()), to);
+        assert_eq!(g.at(to, g.end()), to);
     }
 
     #[test]
     fn a_step_mid_glide_keeps_its_speed() {
-        let a = Offset::new(0.0, 100.0);
-        let b = Offset::new(0.0, 200.0);
-        let g = Glide::new(Offset::default(), a, 0.0);
+        let (a, b) = (y(100.0), y(200.0));
+        let g = Glide::new(Offset::default().into(), a.into(), 0.0);
         let now = g.start + g.total / 2.0;
         let before = g.velocity(a, now - g.start);
-        let h = g.retargeted(a, b, now);
-        assert!((h.value(b, now).y - g.value(a, now).y).abs() < 0.01);
+        let h = g.moved_on(a, b, now);
+        assert!((h.at(b, now).y - g.at(a, now).y).abs() < 0.01);
         let after = h.velocity(b, now - h.start);
         assert!((after - before).abs() / before < 0.02, "{before} {after}");
-        assert_eq!(h.value(b, h.end()), b);
+        assert_eq!(h.at(b, h.end()), b);
     }
 }

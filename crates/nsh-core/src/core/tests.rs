@@ -3040,37 +3040,37 @@ fn scrolls_to_top_reaches_the_scroll_behavior() {
     assert_eq!(behavior(&batch).map(|b| b.scrolls_to_top), Some(true));
 }
 
-/// `macos={{ wheelStyle }}` reaches the scroll view's mounted behavior
-/// (macOS glides mouse wheels from it): native by default, browser when the
-/// app says so, and native again once the app drops it (the reset the
-/// runtime sets for a removed prop).
+/// `smoothWheel` and `wheelLineHeight` reach the scroll view's mounted
+/// behavior (the desktops scroll mouse wheels from it): off and the
+/// platform's line by default, set when the app says so (a negative height
+/// as none), and back to the defaults once the app drops them (the reset
+/// the runtime sets for a removed prop).
 #[test]
-fn wheel_style_reaches_the_scroll_behavior() {
-    use crate::WheelStyle;
+fn smooth_wheel_and_wheel_line_height_reach_the_scroll_behavior() {
+    use crate::js::host::{HostCx, HostProps};
     fn behavior(batch: &MountBatch) -> Option<ScrollBehavior> {
         batch.items.iter().rev().find_map(|i| match i {
             MountItem::ScrollBehavior { id: 2, behavior } => Some((**behavior).clone()),
             _ => None,
         })
     }
-    assert_eq!(ScrollBehavior::default().wheel_style, WheelStyle::Native);
-    let browser = Prop::Scroll(ScrollProp::WheelStyle(WheelStyle::Browser));
-    // `macos={{ wheelStyle }}` decodes `"native"` and `"browser"` (the
-    // runtime hands a platform object's props over by their own names).
-    {
-        use crate::js::host::{HostCx, HostProps};
-        let decode = |name: &str, value: &str| {
-            let mut cx = HostCx::for_element(Tag::Scroll);
-            <Prop as HostProps>::decode(name, &HostTestValue::String(value), &mut cx)
-        };
-        assert_eq!(decode("wheelStyle", "browser"), Some(Some(browser.clone())));
-        assert_eq!(
-            decode("wheelStyle", "native"),
-            Some(Some(Prop::Scroll(ScrollProp::WheelStyle(
-                WheelStyle::Native
-            ))))
-        );
-    }
+    let b = ScrollBehavior::default();
+    assert!(!b.smooth_wheel);
+    assert_eq!(b.wheel_line_height, Points::ZERO);
+    // Props of every platform: their own names decode.
+    let mut cx = HostCx::for_element(Tag::Scroll);
+    let smooth = <Prop as HostProps>::decode("smoothWheel", &HostTestValue::Bool(true), &mut cx)
+        .expect("a scroll prop")
+        .expect("a value");
+    assert_eq!(smooth, Prop::Scroll(ScrollProp::SmoothWheel(true)));
+    let line =
+        <Prop as HostProps>::decode("wheelLineHeight", &HostTestValue::Number(40.0), &mut cx)
+            .expect("a scroll prop")
+            .expect("a value");
+    assert_eq!(
+        line,
+        Prop::Scroll(ScrollProp::WheelLineHeight(Points(40.0)))
+    );
     let mut c = core();
     apply(
         &mut c,
@@ -3081,7 +3081,11 @@ fn wheel_style_reaches_the_scroll_behavior() {
             },
             Op::SetProp {
                 id: 2,
-                prop: browser.clone(),
+                prop: smooth.clone(),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: line.clone(),
             },
             Op::Insert {
                 parent: ROOT_ID,
@@ -3090,23 +3094,38 @@ fn wheel_style_reaches_the_scroll_behavior() {
             },
         ],
     );
-    let batch = c.commit().unwrap();
-    assert_eq!(
-        behavior(&batch).map(|b| b.wheel_style),
-        Some(WheelStyle::Browser)
-    );
+    let b = behavior(&c.commit().unwrap()).unwrap();
+    assert!(b.smooth_wheel);
+    assert_eq!(b.wheel_line_height, Points(40.0));
     apply(
         &mut c,
         vec![Op::SetProp {
             id: 2,
-            prop: <Prop as crate::js::host::HostProps>::reset(&browser).unwrap(),
+            prop: Prop::Scroll(ScrollProp::WheelLineHeight(Points(-5.0))),
         }],
     );
-    let batch = c.commit().unwrap();
+    let b = behavior(&c.commit().unwrap()).unwrap();
     assert_eq!(
-        behavior(&batch).map(|b| b.wheel_style),
-        Some(WheelStyle::Native)
+        b.wheel_line_height,
+        Points::ZERO,
+        "a negative height is none"
     );
+    apply(
+        &mut c,
+        vec![
+            Op::SetProp {
+                id: 2,
+                prop: <Prop as HostProps>::reset(&smooth).unwrap(),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: <Prop as HostProps>::reset(&line).unwrap(),
+            },
+        ],
+    );
+    let b = behavior(&c.commit().unwrap()).unwrap();
+    assert!(!b.smooth_wheel);
+    assert_eq!(b.wheel_line_height, Points::ZERO);
 }
 
 /// `scrollbarInset` reaches the scroll view's mounted behavior (the platforms

@@ -47,11 +47,10 @@ use std::{f32::consts::PI, rc::Rc};
 
 use nsh_core::{
     Command, EventKind, EventPayload, Points, ScrollBehavior, Size, StickyCell, ViewKind,
-    WheelStyle,
     geometry::point,
     scroll::{
         dragged, ease_out, indicator_alpha, indicator_span_within, projected, rate,
-        reveal_focus_delta, snap_duration, sticky_shift, thumb_scroll,
+        reveal_focus_delta, snap_duration, sticky_shift, thumb_scroll, wheel_glide::Glide,
     },
 };
 use objc2::{MainThreadOnly, define_class, msg_send, rc::Retained};
@@ -65,14 +64,8 @@ use crate::{
     input::later,
     surface::{Next, Surface},
     view::{NshView, ScrollState, ViewState},
-    wheel_glide::Glide,
 };
 
-/// Points a mouse wheel line scrolls a `wheelStyle: "browser"` view, as browsers on
-/// macOS take one (WebKit's `pixelsPerLineStep`, Chromium's
-/// `kScrollbarPixelsPerCocoaTick`): with AppKit's 10 a slow notch
-/// (`scrollingDeltaY` ~0.1) would glide one point.
-const BROWSER_WHEEL_LINE: f32 = 40.0;
 /// A wheel without a gesture (a mouse) has settled after this many ms.
 const WHEEL_IDLE: f64 = 150.0;
 /// After a trackpad gesture ends, the system's momentum begins within this
@@ -129,6 +122,18 @@ impl Offset {
     }
 }
 
+impl From<Offset> for nsh_core::Point<Points> {
+    fn from(o: Offset) -> Self {
+        point(Points(o.x), Points(o.y))
+    }
+}
+
+impl From<nsh_core::Point<Points>> for Offset {
+    fn from(p: nsh_core::Point<Points>) -> Self {
+        Self::new(p.x.0, p.y.0)
+    }
+}
+
 impl std::ops::Sub for Offset {
     type Output = Self;
 
@@ -158,7 +163,7 @@ enum Phase {
     /// so far; `gesture` for trackpads (began / ended), not mouse wheels;
     /// `raw` is where the gesture's deltas put the offset before the
     /// rubber band, or a mouse wheel's target, which it glides to
-    /// (`glide`, [`crate::wheel_glide`]).
+    /// (`glide`, [`nsh_core::scroll::wheel_glide`]).
     Wheel {
         last: f64,
         total: f32,
@@ -1145,7 +1150,7 @@ fn tick(surface: &Rc<Surface>, view: &NshView, now: f64) -> Tick {
             glide,
             ..
         } if now - last <= WHEEL_IDLE || now < glide.end() => {
-            moved_to(surface, view, glide.value(raw, now));
+            moved_to(surface, view, glide.value(raw.into(), now).into());
         }
         Phase::Wheel {
             total,
@@ -1699,7 +1704,7 @@ pub(crate) fn scroll_by(surface: &Rc<Surface>, view: &NshView, dx: f32, dy: f32)
                 total,
                 gesture,
                 raw: raw + d,
-                glide: glide.shifted(d),
+                glide: glide.shifted(d.into()),
             },
             Phase::Animate {
                 from,
@@ -2277,8 +2282,8 @@ pub(crate) fn wheel_begin(surface: &Rc<Surface>, view: &NshView) {
 
 /// A wheel or trackpad scroll by `(dx, dy)` points (positive: the content
 /// moves up / left). Without [`wheel_begin`] it is a mouse wheel, which
-/// settles by itself once it stops; a `notched` one on a `wheelStyle:
-/// "browser"` view glides there as Chromium's does ([`crate::wheel_glide`]), others
+/// settles by itself once it stops; a `notched` one on a `smoothWheel`
+/// view glides there as Chromium's does ([`nsh_core::scroll::wheel_glide`]), others
 /// land at once as AppKit's.
 pub(crate) fn wheel(
     surface: &Rc<Surface>,
@@ -2309,10 +2314,18 @@ pub(crate) fn wheel(
         let state = view.state();
         let Some(s) = &state.scroll else { return };
         let (min, max) = limits(&state);
-        let smooth = notched && !gesture && s.behavior.wheel_style == WheelStyle::Browser;
-        // Browsers' lines are longer than AppKit's.
-        let k = if smooth {
-            BROWSER_WHEEL_LINE / crate::input::WHEEL_LINE
+        let b = &s.behavior;
+        let smooth = notched
+            && !gesture
+            && b.smooth_wheel
+            && !b.zooms()
+            && !b.snaps()
+            && !b.paging
+            && !surface.environment.get().reduce_motion;
+        // A notch's lines are the view's own (`wheelLineHeight`), not
+        // AppKit's 10 points.
+        let k = if notched && b.wheel_line_height.0 > 0.0 {
+            b.wheel_line_height.0 / crate::input::WHEEL_LINE
         } else {
             1.0
         };
@@ -2350,8 +2363,8 @@ pub(crate) fn wheel(
     // glide in flight, or anew from where it is.
     let glide = match glide {
         _ if !smooth => Glide::default(),
-        Some(g) if at < g.end() => g.retargeted(prev, raw, at),
-        _ => Glide::new(current(view), raw, at),
+        Some(g) if at < g.end() => g.retargeted(prev.into(), raw.into(), at),
+        _ => Glide::new(current(view).into(), raw.into(), at),
     };
     set_phase(
         view,

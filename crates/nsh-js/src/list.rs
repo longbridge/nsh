@@ -65,6 +65,8 @@ const FORWARDED: &[&str] = &[
     "scrollable",
     "bounces",
     "scrollsToTop",
+    "smoothWheel",
+    "wheelLineHeight",
     "contentInset",
     "scrollbarInset",
     "contentOffset",
@@ -1408,7 +1410,6 @@ export interface ViewabilityConfig {
  * id, accessibility, classes, touch and layout events, ...), which it
  * passes on as they are. */
 export interface ListProps<T> extends Omit<ViewProps, "children" | "ref">, ScrollingHostProps, ListHostProps {
-  macos?: MacOSScrollingProps;
   each: readonly T[];
   /** Above the items, scrolling with them. */
   header?: ListSlot;

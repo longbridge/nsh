@@ -106,10 +106,6 @@ export interface MacOSProps extends MacOSHostProps {}
 
 /** Windows-only props of every element (`windows={{…}}`). */
 export interface WindowsProps extends WindowsHostProps {}
-
-/** macOS-only props of `<Scroll>` and `<List>` (`macos={{…}}`). */
-export interface MacOSScrollingProps extends MacOSProps, MacOSScrollingHostProps {}
-
 /** `<View>` */
 export interface ViewProps extends CommonProps, ViewHostProps {
   style?: StyleProp<ViewStyle>;
@@ -184,7 +180,6 @@ export interface ScreenTransitionProps extends ShaderHostProps, ShaderTransition
 /** `<Scroll>` */
 export interface ScrollProps extends CommonProps<ViewStyle, ScrollRef>, ScrollingHostProps, ScrollHostProps {
   style?: StyleProp<ViewStyle>;
-  macos?: MacOSScrollingProps;
   /** The style of a view around the content: it scrolls with the
    * content, `flexGrow: 1` makes it at least as tall as the viewport (a
    * centered empty state). Without it or `contentClass`, the children are

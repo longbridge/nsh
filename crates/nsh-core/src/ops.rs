@@ -1894,25 +1894,6 @@ pub enum SnapAlignment {
     End,
 }
 
-/// How a notched mouse wheel scrolls a view (`macos={{ wheelStyle }}`).
-///
-/// macOS only for now, as only macOS scrolls with its own code
-/// (`nsh-platform-macos`'s `scroll.rs`, `wheel_glide.rs`). It can become a
-/// prop of every desktop: Linux, Windows and GPUI share
-/// `nsh_core::scroll::wheel`, where the same glide would go, with each
-/// platform's browser line (Chrome moves a notch further on Windows than
-/// on macOS); the web scrolls as the browser does already.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
-pub enum WheelStyle {
-    /// The platform's own: AppKit's 10-point lines, landing at once.
-    #[default]
-    Native,
-    /// As browsers on macOS: 40-point lines (WebKit's `pixelsPerLineStep`,
-    /// Chromium's `kScrollbarPixelsPerCocoaTick`), each notch eased in and
-    /// out over 100–200 ms (Chromium's curve), a run of notches one motion.
-    Browser,
-}
-
 /// Whether a tap in a scroll view dismisses the keyboard
 /// (`keyboardShouldPersistTaps`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -2005,11 +1986,23 @@ pub enum ScrollProp {
     /// UIKit does it: elsewhere ignored).
     #[prop(js = "scrollsToTop", default = true, on = SCROLLING)]
     ScrollsToTop(bool),
-    /// `macos={{ wheelStyle }}`: how a notched mouse wheel scrolls it on
-    /// macOS: `"native"` (default, AppKit's lines landing at once) or
-    /// `"browser"` (as Chrome and Safari: longer lines, eased).
-    #[prop(macos = "wheelStyle", on = SCROLLING)]
-    WheelStyle(WheelStyle),
+    /// `smoothWheel`: a mouse wheel's notches glide to where they point,
+    /// eased in and out over 100–200 ms as Chromium's do, a run of notches
+    /// one motion (default false: the platform's own, which lands at once
+    /// on macOS and Linux and glides briefly on Windows). The desktops
+    /// (macOS, Windows, Linux, GPUI); iOS and Android scroll with the
+    /// system's views, the web with the browser's (both ignore it), as
+    /// they do when the system reduces motion.
+    #[prop(js = "smoothWheel", on = SCROLLING)]
+    SmoothWheel(bool),
+    /// `wheelLineHeight`: how far a mouse wheel's line scrolls, in points (0,
+    /// the default: the platform's own, 10 on macOS, 16 on Windows, a
+    /// notch's length after the view's on Linux). A line is the platform's:
+    /// a notch on Linux, a third of one on Windows (the system's default),
+    /// about one per notch on macOS, which accelerates quick runs. The
+    /// desktops; ignored where `smoothWheel` is.
+    #[prop(js = "wheelLineHeight", min = 0, on = SCROLLING)]
+    WheelLineHeight(Points),
     /// `contentInset`: room around the content.
     #[prop(js = "contentInset", on = SCROLLING)]
     ContentInset(EdgeInsets),

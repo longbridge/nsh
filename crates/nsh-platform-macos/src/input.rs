@@ -87,8 +87,7 @@ use crate::{
 
 /// Points a mouse wheel line scrolls (`scrollingDeltaY` counts lines for
 /// mice, accelerated by the system), as `NSScrollView`'s line scroll. A
-/// `wheelStyle: "browser"` view takes browsers' longer line instead
-/// ([`crate::scroll::wheel`]).
+/// view's `wheelLineHeight` takes its place ([`crate::scroll::wheel`]).
 pub(crate) const WHEEL_LINE: f32 = 10.0;
 /// Movement in points before a window press becomes a native drag.
 const WINDOW_DRAG_SLOP: f64 = 3.0;
