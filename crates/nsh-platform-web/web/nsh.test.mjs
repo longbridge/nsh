@@ -4693,3 +4693,44 @@ test("share reports shared, dismissed and unavailable, never shared when it coul
     else delete globalThis.navigator;
   }
 });
+
+test("window blur resets hoverButtons and cancels all active pointers", () => {
+  const windowListeners = new Map();
+  const savedWindow = globalThis.window;
+  const savedDocument = globalThis.document;
+  const noop = () => {};
+  globalThis.window = {
+    addEventListener: (type, fn) => windowListeners.set(type, fn),
+  };
+  globalThis.document = {
+    addEventListener: noop,
+    createElement: (tag) => fakeElement(tag),
+  };
+  try {
+    const { player } = fakePlayer();
+    player.root = fakeElement("div");
+    player.installFileDrop = noop;
+    player.installInput();
+    const canceled = [];
+    const p1 = { scrolls: { active: true } };
+    const p2 = { scrolls: null };
+    player.hoverButtons = 1;
+    player.pointers = new Map([[11, p1], [12, p2]]);
+    player.pointerUp = (e, cancel) => {
+      canceled.push([e.pointerId, e.buttons, cancel]);
+      player.pointers.delete(e.pointerId);
+    };
+    const onBlur = windowListeners.get("blur");
+    assert.equal(typeof onBlur, "function", "registers window blur listener");
+    onBlur();
+    assert.equal(player.hoverButtons, 0);
+    assert.equal(p1.scrolls, null);
+    assert.deepEqual(canceled, [[11, 0, true], [12, 0, true]]);
+    assert.equal(player.pointers.size, 0);
+  } finally {
+    if (savedWindow === undefined) delete globalThis.window;
+    else globalThis.window = savedWindow;
+    if (savedDocument === undefined) delete globalThis.document;
+    else globalThis.document = savedDocument;
+  }
+});
