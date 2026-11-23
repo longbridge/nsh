@@ -451,8 +451,8 @@ final class Native {
 
     static native boolean hasPan(long handle, int id);
 
-    /** state: 0 began, 1 moved, 2 ended, 3 cancelled. */
-    static native float[] pan(long handle, int id, int state, float tx, float ty, float vx, float vy);
+    /** state: 0 began, 1 moved, 2 ended, 3 cancelled; (ox, oy): where the finger went down in the root (dp). */
+    static native float[] pan(long handle, int id, int state, float tx, float ty, float vx, float vy, float ox, float oy);
 
     /** A pinch (scale) or two-finger rotation (degrees); state as for pan. */
     static native float[] transformGesture(long handle, int id, boolean rotation, int state, float amount, float velocity);

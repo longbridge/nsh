@@ -231,6 +231,12 @@ component module like GPUI Kit's `gpui_component::table::ColumnFixed`, and follo
 `ColumnFixed::None` represents the unfixed state that GPUI Kit stores as `Option::None`.
 Left-fixed columns lead the order and right-fixed columns close it.
 
+`panActivation`'s `direction` and `edge` have no counterpart in `gpui-kit` or react-native-gesture-handler (which
+says a direction with a one-sided `activeOffsetX` range). `edge` and its `left` / `right` / `top` / `bottom` are
+UIKit's `UIScreenEdgePanGestureRecognizer.edges` and AndroidX `ViewDragHelper`'s `EDGE_*`; `direction` and its
+`left` / `right` / `up` / `down` are UIKit's `UISwipeGestureRecognizer.direction`. `PanEvent`'s `origin` is NSH's own
+`PanGesture::origin`.
+
 ## Shapes that can grow
 
 Apps built once run on every later release (`compatibility.md`): types only widen and inputs only gain optional

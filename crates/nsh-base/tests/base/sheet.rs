@@ -134,6 +134,7 @@ fn a_cancelled_drag_does_not_close_even_past_the_release_threshold() {
         id,
         EventKind::PanEnd,
         EventPayload::PanCancelled {
+            origin: point(px(180.0), px(500.0)),
             translation: point(px(0.0), px(150.0)),
             velocity_x: 0.0,
             velocity_y: 2000.0,
@@ -565,6 +566,7 @@ fn a_long_swipe_exit_keeps_fading_the_backdrop() {
         panel,
         EventKind::PanEnd,
         EventPayload::Pan {
+            origin: point(px(180.0), px(500.0)),
             translation: point(px(0.0), px(200.0)),
             velocity_x: 0.0,
             velocity_y: 0.0,

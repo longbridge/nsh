@@ -4196,6 +4196,79 @@ mod tests {
         assert!(error.starts_with("no view matches `Nothing`"), "{error}");
     }
 
+    /// A drawer's pans: one from the window's left edge across a row (a
+    /// strip at the edge, a block in the middle), and one that opens it to
+    /// the right over a page of a pager, each saying what it heard.
+    #[component]
+    fn DrawerPans() -> impl IntoElement {
+        let edge = signal(String::from("none"));
+        let content = signal(String::from("none"));
+        let said = |e: &PanEvent| format!("{} from {}", e.translation.x.0, e.origin.x.0);
+        view()
+            .flex_1()
+            .child(text(move || format!("Edge {}", edge.get())))
+            .child(text(move || format!("Content {}", content.get())))
+            .child(
+                view()
+                    .flex_row()
+                    .h(px(100.0))
+                    .pan_activation(PanActivation::default().edge(PanEdge::Left))
+                    .on_pan_end(move |e: &PanEvent| edge.set(said(e)))
+                    .child(view().test_id("strip").w(px(16.0)))
+                    .child(view().test_id("middle").w(px(100.0))),
+            )
+            .child(
+                scroll().test_id("pager").horizontal().h(px(200.0)).child(
+                    view()
+                        .test_id("page")
+                        .w(px(1200.0))
+                        .h(px(200.0))
+                        .pan_activation(PanActivation::default().direction(PanDirection::Right))
+                        .on_pan_end(move |e: &PanEvent| content.set(said(e))),
+                ),
+            )
+    }
+
+    #[test]
+    fn a_pan_takes_only_its_way_and_an_edge_pan_only_its_edge() {
+        let mut app =
+            Headless::start(EngineConfig::new(crate::windowed_root::<DrawerPans>())).unwrap();
+        app.first_render().unwrap();
+        let drag = |app: &mut Headless, selector: &str, dx: f32| {
+            app.drag(selector, point(px(dx), px(0.0)), DragOptions::default())
+                .unwrap();
+        };
+        // From the edge (the strip's center, 8 points in), the edge pan
+        // starts, and says where the finger went down.
+        drag(&mut app, "id:strip", 100.0);
+        app.wait_for("Edge 100 from 8").unwrap();
+        // Further in, it does not; toward the edge, neither.
+        drag(&mut app, "id:middle", 100.0);
+        drag(&mut app, "id:strip", -6.0);
+        assert!(app.shows("Edge 100 from 8"));
+        // A drag to the left over the page is the pager's.
+        let Pick::One(pager) = app
+            .screen()
+            .scroll_view(&Selector::parse("id:pager").unwrap())
+        else {
+            panic!("one pager");
+        };
+        drag(&mut app, "id:page", -150.0);
+        assert!(app.shows("Content none"));
+        let scrolled = app.screen().scroll(pager).map(|s| s.x).unwrap();
+        assert!(scrolled > px(100.0), "the pager scrolled: {scrolled:?}");
+        // One to the right is the page's pan, and the pager stays. The
+        // finger goes down at the page's center, as the driver's drags do.
+        let Pick::One(page) = app.screen().view(&Selector::parse("id:page").unwrap()) else {
+            panic!("one page");
+        };
+        let center = app.screen().bounds_in_root(page).unwrap().center();
+        drag(&mut app, "id:page", 120.0);
+        app.wait_for(&format!("Content 120 from {}", center.x.0))
+            .unwrap();
+        assert_eq!(app.screen().scroll(pager).map(|s| s.x), Some(scrolled));
+    }
+
     /// A list with a refresh indicator of its own, 100 tall.
     #[component]
     fn FarPull() -> impl IntoElement {

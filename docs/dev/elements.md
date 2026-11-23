@@ -419,6 +419,12 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   becomes the responder (its termination request is honored as for any claim). Its own `…ShouldSetResponder`
   handlers (and a Rust element's other claims) are never asked: the view is a responder exactly when its pan is
   active, so `PanResponder`'s `panHandlers` work unchanged next to the prop.
+  A `direction` keeps the activation to one way and an `edge` to fingers that go down at that edge of the screen
+  (the window on desktops, the page on the web; `PanActivation::starts_at`), and the view's own native pan (`pan`
+  values, `onPanStart`) starts when its activation activates (Rust: `.pan_activation(..)`), so a drawer's edge pan
+  and its one-way content pan need no hot zone of their own. iOS uses the system's screen edge recognizer and lets
+  a navigation stack's swipe back go first; Android leaves the edges the system's back gesture takes to it.
+  `PanEvent::origin` is where the drag's finger went down, in the surface.
 - **Accessibility**: `accessible`, `role`, `accessibilityLabel` / `Hint` / `Description` / `State` / `Value` / `Actions` / `Level` +
   `onAccessibilityAction`, `accessibilityElementsHidden`, `importantForAccessibility`, `accessibilityLiveRegion`, `testID`
   (Android: resource id). `accessibilityDescription` (ARIA's `aria-description`, `gpui-base`'s `aria_description`;

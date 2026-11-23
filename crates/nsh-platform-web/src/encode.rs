@@ -765,14 +765,18 @@ fn props_json(p: &ViewProps) -> String {
         let _ = write!(s, ",\"longPressDelay\":{d}");
     }
     if let Some(a) = p.pan_activation {
+        use nsh_core::element::PropEnum as _;
         let n = |v: Option<f32>| v.map_or("null".to_owned(), |v| v.to_string());
+        let name = |v: Option<&'static str>| v.map_or("null".to_owned(), |v| format!("\"{v}\""));
         let _ = write!(
             s,
-            ",\"panActivation\":[{},{},{},{}]",
+            ",\"panActivation\":[{},{},{},{},{},{}]",
             n(a.active_offset_x.map(|v| v.0)),
             n(a.active_offset_y.map(|v| v.0)),
             n(a.fail_offset_x.map(|v| v.0)),
-            n(a.fail_offset_y.map(|v| v.0))
+            n(a.fail_offset_y.map(|v| v.0)),
+            name(a.direction.map(|d| d.js_name())),
+            name(a.edge.map(|e| e.js_name()))
         );
     }
     if let Some(l) = &a.label {
