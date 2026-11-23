@@ -13,10 +13,10 @@ configuring. `curl -fsSL https://huacnlee.github.io/cargo/install.sh | sh` insta
 `rust-toolchain.toml` keep working.
 
 ```sh
-cargo run [-- <app>] [-- --target ios|android|gpui|catalyst]                       # the gallery on this machine's backend (AppKit / GTK / Win32), hot reload; rebuilt and restarted on Rust changes
+cargo run [-- <app>] [-- --target macos|linux|windows|ios|android|gpui|catalyst]  # the gallery; default: this machine's backend (macos / linux / windows), hot reload; rebuilt and restarted on Rust changes
 cargo run -- accordion [--section settings]                                        # the gallery opened at one demo (by name), only its section with that title: no taps or scrolling
 NSH_GALLERY_DEMO=accordion NSH_GALLERY_SECTION=settings ./target/debug/nsh test examples/gallery/App.tsx --target linux   # the same under nsh test (steps on stdin)
-cargo xtask [<app>] [--target ios|android|gpui|catalyst] [-v]                      # the same without cargo's own two lines; -v (any nsh / xtask command): all output
+cargo xtask [<app>] [--target macos|linux|windows|ios|android|gpui|catalyst] [-v] # the same without cargo's own two lines; -v (any nsh / xtask command): all output
 cargo build -p nsh-cli                                                             # build the nsh CLI
 ./target/debug/nsh init my-app --template ts|rust|mixed                            # new app: TSX, Rust (a Cargo project, "root"), or TSX that is also a crate ("rust": "."); asks on a terminal without --template
 cargo build -p nsh-ios-host --target aarch64-apple-ios-macabi                          # the Catalyst development host (nsh run builds it in a checkout)
