@@ -41,7 +41,7 @@ use crate::{
 
 /// What the engine thread sends the main thread.
 enum Message {
-    Batch(MountBatch),
+    Batch(MountBatch, Option<Points>),
     Error(AppError),
     Frame,
     HotUpdateFailed,
@@ -83,7 +83,15 @@ impl Sink {
 
 impl MountSink for Sink {
     fn submit(&self, batch: MountBatch) {
-        self.send(Message::Batch(batch));
+        self.submit_with_content_height(batch, None);
+    }
+
+    fn needs_content_height(&self) -> bool {
+        true
+    }
+
+    fn submit_with_content_height(&self, batch: MountBatch, content_height: Option<Points>) {
+        self.send(Message::Batch(batch, content_height));
     }
 
     fn report(&self, error: &AppError) {
@@ -156,6 +164,8 @@ pub(crate) struct Surface {
     key: u64,
     /// The root view (node [`ROOT_ID`]): fills the window.
     pub(crate) root: NshView,
+    /// Logical in-flow root geometry, applied with its mount batch.
+    pub(crate) content_height: Cell<Option<Points>>,
     /// Views by node id, and what mounting needs between items.
     pub(crate) mounter: RefCell<Mounter>,
     /// The views by node id (the mounter's, readable while it applies a
@@ -304,6 +314,7 @@ impl Surface {
         let surface = Rc::new(Surface {
             key,
             root: root.clone(),
+            content_height: Cell::new(None),
             views: mounter.views.clone(),
             mounter: RefCell::new(mounter),
             anim: RefCell::new(UiAnimation::default()),
@@ -492,6 +503,7 @@ impl Surface {
         self.rx.borrow_mut().take();
         crate::window::close_all(self);
         self.mounter.borrow_mut().clear();
+        self.content_height.set(None);
         self.native.clear();
         crate::system::clear(self);
         crate::key_focus::forget(self);
@@ -688,8 +700,11 @@ impl Surface {
                 return;
             }
             match message {
-                Message::Batch(batch) => {
+                Message::Batch(batch, content_height) => {
                     self.apply(&batch);
+                    if self.content_height.replace(content_height) != content_height {
+                        self.invalidate();
+                    }
                     applied = true;
                     self.batches.set(self.batches.get() + 1);
                 }
@@ -971,8 +986,81 @@ pub(crate) fn flush_all(cx: &mut gpui::App) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    /// Runs with the other window tests so all sinks share their GPUI queue.
+    #[cfg(feature = "shot")]
+    pub(crate) fn committed_content_height_reaches_host_observers(cx: &mut gpui::TestAppContext) {
+        use gpui::AppContext as _;
+        use nsh_core::{ApproxTextEngine, Core, Op, Prop, Tag};
+
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            crate::AppView::new(crate::AppOptions::default(), window, cx)
+        });
+        cx.run_until_parked();
+        let surface = view.read_with(cx, |view, _| view.surface().clone());
+        let observed = cx.new(|cx| {
+            cx.observe(&view, |seen: &mut Vec<_>, view, cx| {
+                let view = view.read(cx);
+                let mounted = view.surface().root.child_views().first().map(|child| {
+                    let frame = child.state().frame;
+                    Points(frame.origin.y.0 + frame.size.height.0)
+                });
+                seen.push((view.content_height(), mounted));
+            })
+            .detach();
+            Vec::new()
+        });
+        let (tx, rx) = crossbeam_channel::unbounded();
+        *surface.rx.borrow_mut() = Some(rx);
+        let sink = Sink {
+            key: surface.key,
+            tx,
+            pending: surface.pending.borrow().clone(),
+        };
+        let mut core = Core::new(
+            ApproxTextEngine,
+            nsh_core::geometry::size(Points(320.0), Points(480.0)),
+        );
+        core.apply(Op::Create {
+            id: 2,
+            tag: Tag::View,
+        })
+        .unwrap();
+        core.apply(Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        })
+        .unwrap();
+        for height in [100, 160] {
+            core.apply(Op::SetProp {
+                id: 2,
+                prop: Prop::Class(format!("h-[{height}px]").into()),
+            })
+            .unwrap();
+            let previous = view.read_with(cx, |view, _| view.content_height());
+            let batch = core.commit().unwrap();
+            sink.submit_with_content_height(batch, core.content_height());
+            // Queuing a commit alone must not publish geometry ahead of its views.
+            assert_eq!(
+                view.read_with(cx, |view, _| view.content_height()),
+                previous
+            );
+            cx.run_until_parked();
+            assert_eq!(
+                observed.read_with(cx, |seen, _| seen.last().copied()),
+                Some((Some(Points(height as f32)), Some(Points(height as f32))))
+            );
+        }
+        view.update(cx, |view, _| view.stop());
+        cx.run_until_parked();
+        assert_eq!(
+            observed.read_with(cx, |seen, _| seen.last().copied()),
+            Some((None, None))
+        );
+    }
 
     fn error(text: &str) -> AppError {
         AppError::new(nsh_engine::AppErrorKind::Uncaught, text)
@@ -1059,7 +1147,7 @@ mod tests {
             &surface,
             vec![
                 Message::Error(error("boom")),
-                Message::Batch(MountBatch::default()),
+                Message::Batch(MountBatch::default(), None),
             ],
         );
         surface.drain();
@@ -1076,7 +1164,7 @@ mod tests {
             &surface,
             vec![
                 Message::Error(error("first")),
-                Message::Batch(MountBatch::default()),
+                Message::Batch(MountBatch::default(), None),
                 Message::Error(error("second")),
             ],
         );

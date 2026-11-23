@@ -1269,9 +1269,17 @@ impl<M: TextEngine> Core<M> {
 
     /// The embedding app's design tokens (`None`: the app's again): an app
     /// embedded in a native app looks like it, whatever the app sets.
+    /// Text inherits its `foreground` token unless it sets its own color.
     pub fn set_host_tokens(&mut self, tokens: Option<Tokens>) {
         self.components.host_tokens = tokens.map(Arc::new);
         self.tokens_changed();
+        // Embedded content inherits the host's foreground unless it sets its own.
+        let classes = if self.components.host_tokens.is_some() {
+            vec!["text-foreground".into()]
+        } else {
+            Vec::new()
+        };
+        self.set_classes(self.root, None, Some(classes));
     }
 
     /// What [`Core::tokens`] become when the root's `uiTheme` (the app's
