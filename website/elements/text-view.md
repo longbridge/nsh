@@ -639,6 +639,8 @@ same fields (`MarkdownOptions { streaming: true, ..Default::default() }`):
 | `math` | `boolean` | `true` | Formulas: `$…$` and `\(…\)` in text, `$$…$$` and `\[…\]` blocks. Escaped brackets around a reference number or CJK words (`\[1\]\[3\]`, `\[注\]`) show as text. |
 | `html` | `boolean` | `true` | HTML inside the Markdown is read as the `html` prop reads it; `false` shows it as text. |
 | `alerts` | `boolean` | `true` | GitHub's alerts: `> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, `[!CAUTION]`. |
+| `links` | `boolean` | `true` | Links: `[text](url)`, bare URLs and `<a href>`; `false` shows their text, not a link. |
+| `images` | `boolean` | `true` | Images: `![alt](src)` and `<img>`; `false` shows their `alt` text. |
 | `frontmatter` | `boolean` | `false` | YAML front matter (`---` … `---` first) becomes a custom node `frontmatter` whose `text` is the YAML. |
 | `mdx` | `boolean` | `false` | MDX: JSX elements are custom nodes named by their tag, `{expressions}` custom nodes `expression`; raw HTML is then read as text. |
 | `streaming` | `boolean` | `false` | The text is still arriving: syntax its end leaves open shows as if it were closed. |
