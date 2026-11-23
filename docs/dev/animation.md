@@ -20,7 +20,7 @@
   for the whole tree; leaf animations get internal ids (`LEAF_IDS`) that never reach JS. Stopping, setting, releasing, or
   starting another animation on a value also cancels any composite waiting to animate it before its leaf starts (queued
   before the first tick, in a delay, or in a trailing delay hold), while active leaves still end through `leaf_ends` so
-  replacement drivers keep velocity. Composites are released when JS
+  replacement drivers keep velocity. Leaf ends stay queued while `run_programs` holds the programs locally to advance them. Composites are released when JS
   lets go of them (their finalizers queue `ReleaseComposite`); a run goes on after that. A run does not keep its
   composite (or the values it animates) alive: `nsh-js` remembers live composites by key (`Animations::composites`),
   not in the run's promise, so an endless `Animated.loop` whose values its component released stops with them (a step on
