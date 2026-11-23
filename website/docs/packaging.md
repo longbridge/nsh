@@ -333,9 +333,7 @@ crates, goes in once; a class that two different files define stops the build, n
 no libraries is packaged as before, without `d8`.
 
 The libraries are local files: NSH does not download them or resolve Maven dependencies, so list the libraries an SDK
-depends on as well. The third-party tool [nsh-maven](https://github.com/SuperNSH/maven) resolves a library from Maven
-repositories with what it depends on (`nsh-maven add com.google.firebase:firebase-messaging:26.0.1`), downloads the
-files into the app and lists them here; with `--crate` it lists them in an nshm crate's `Cargo.toml`.
+depends on as well.
 
 An Android library (`.aar`) brings more than its classes, which go the jars' way: its native libraries
 (`jni/<abi>/*.so`) go in for the ABIs the package has, stored uncompressed like NSH's own; its assets join the app's
