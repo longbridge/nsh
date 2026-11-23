@@ -100,7 +100,8 @@ const CARET_STYLE = [
 /** `accessibilityRole`s whose ARIA role has another name; others are the same. */
 const ARIA_ROLES = {
   none: null, header: "heading", image: "img", imagebutton: "button", keyboardkey: "button", adjustable: "slider",
-  search: "searchbox", text: null, summary: "status", togglebutton: "button", dropdownlist: "combobox",
+  search: "searchbox", textbox: "textbox", text: null, summary: "status", togglebutton: "button",
+  dropdownlist: "combobox",
 };
 
 /** Reconcile accessibility props with the element's current attributes. */

@@ -2676,6 +2676,7 @@ fn control(view: &NshView) -> bool {
                 | AccessibilityRole::Adjustable
                 | AccessibilityRole::Combobox
                 | AccessibilityRole::Spinbutton
+                | AccessibilityRole::Textbox
         )
 }
 

@@ -28,6 +28,9 @@ const DEBOUNCE: Duration = Duration::from_millis(30);
 pub(crate) struct DevSession {
     entry: PathBuf,
     src_dir: PathBuf,
+    /// Directories `nsh.json`'s `"watch"` skips: events inside them are
+    /// not the app's.
+    watch_ignored: Vec<PathBuf>,
     release: bool,
     server: DevServer,
     /// Whether other machines may connect.
@@ -74,6 +77,11 @@ impl DevSession {
         // The app's directory: its `nsh.json`'s, which may be above the
         // entry (`"entry"`); its assets are named from it.
         let app_dir = nsh_bundler::app_dir::app_dir_of(&entry);
+        // What its `"watch"` leaves out of the watcher.
+        let watch_ignored = crate::package::read_config(&entry)
+            .ok()
+            .map(|config| ignored_dirs(&config.watch.ignore, &app_dir))
+            .unwrap_or_default();
         let server = start_server(listen, &app_dir, devices.clone())?;
         server.serve_files(crate::build::crate_assets().map(|a| (a.path, a.source)));
         server.install_commands(install_commands(&app_dir));
@@ -89,6 +97,7 @@ impl DevSession {
         let session = DevSession {
             entry,
             src_dir,
+            watch_ignored,
             release,
             server,
             network: listen.network,
@@ -199,18 +208,24 @@ impl DevSession {
                 continue;
             }
             if let Some(app) = &rust
-                && event.paths.iter().any(|p| app.is_rust(p))
+                && event
+                    .paths
+                    .iter()
+                    .any(|p| app.is_rust(p) && !app.in_watch_ignore(p))
             {
                 return Err(crate::rust_app::Restart.into());
             }
-            if !is_source(&event, &self.src_dir) {
+            if !is_source(&event, &self.src_dir, &self.watch_ignored) {
                 continue;
             }
             // A Rust change saved with this one (a checkout, a formatter)
             // starts the session again, which builds the TSX too: built
             // now, it would check its imports against the old UI sets.
             let deadline = Instant::now() + DEBOUNCE;
-            let is_rust = |p: &Path| rust.as_ref().is_some_and(|app| app.is_rust(p));
+            let is_rust = |p: &Path| {
+                rust.as_ref()
+                    .is_some_and(|app| app.is_rust(p) && !app.in_watch_ignore(p))
+            };
             if rust_changed_until(&rx, deadline, is_rust) {
                 return Err(crate::rust_app::Restart.into());
             }
@@ -527,16 +542,33 @@ fn rust_changed_until(
     false
 }
 
-fn is_source(event: &notify::Event, root: &Path) -> bool {
+fn is_source(event: &notify::Event, root: &Path, ignored: &[PathBuf]) -> bool {
     event.paths.iter().any(|p| {
         !p.components()
             .any(|c| c.as_os_str() == ".nsh" || c.as_os_str() == "node_modules")
             && !in_nested_checkout(root, p)
+            && !ignored.iter().any(|dir| p.starts_with(dir))
             && matches!(
                 p.extension().and_then(|e| e.to_str()),
                 Some("ts" | "tsx" | "js" | "jsx" | "json")
             )
     })
+}
+
+/// The absolute directories `ignore` names (`nsh.json`'s `"watch.ignore"`):
+/// entries are relative to `dir`, absolute ones as they are.
+pub(crate) fn ignored_dirs(ignore: &[String], dir: &Path) -> Vec<PathBuf> {
+    ignore
+        .iter()
+        .map(|entry| {
+            let path = Path::new(entry);
+            if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                dir.join(path)
+            }
+        })
+        .collect()
 }
 
 /// Whether `path` is in another Git checkout kept below `root` (a
@@ -788,13 +820,66 @@ mod tests {
         let saved = |path: std::path::PathBuf| {
             Event::new(EventKind::Modify(ModifyKind::Data(DataChange::Content))).add_path(path)
         };
-        assert!(super::is_source(&saved(dir.join("App.tsx")), &dir));
-        assert!(super::is_source(&saved(dir.join("src/view.tsx")), &dir));
-        assert!(!super::is_source(&saved(nested.join("App.tsx")), &dir));
-        assert!(!super::is_source(&saved(nested.join("src/view.tsx")), &dir));
+        let no_ignored: Vec<std::path::PathBuf> = Vec::new();
+        assert!(super::is_source(
+            &saved(dir.join("App.tsx")),
+            &dir,
+            &no_ignored
+        ));
+        assert!(super::is_source(
+            &saved(dir.join("src/view.tsx")),
+            &dir,
+            &no_ignored
+        ));
+        assert!(!super::is_source(
+            &saved(nested.join("App.tsx")),
+            &dir,
+            &no_ignored
+        ));
+        assert!(!super::is_source(
+            &saved(nested.join("src/view.tsx")),
+            &dir,
+            &no_ignored
+        ));
         // The app's own `.git` is not a checkout below it.
         std::fs::create_dir_all(dir.join(".git")).unwrap();
-        assert!(super::is_source(&saved(dir.join("App.tsx")), &dir));
+        assert!(super::is_source(
+            &saved(dir.join("App.tsx")),
+            &dir,
+            &no_ignored
+        ));
+        // What `watch.ignore` names is skipped, however it is spelled.
+        let ignored = super::ignored_dirs(
+            &[
+                "vendor".into(),
+                "third/jpeg".into(),
+                nested.to_string_lossy().into(),
+            ],
+            &dir,
+        );
+        assert_eq!(
+            ignored,
+            vec![
+                dir.join("vendor"),
+                dir.join("third/jpeg"),
+                dir.join(".worktrees/feature")
+            ]
+        );
+        assert!(!super::is_source(
+            &saved(dir.join("vendor/lib.ts")),
+            &dir,
+            &ignored
+        ));
+        assert!(!super::is_source(
+            &saved(dir.join("third/jpeg/turbo.ts")),
+            &dir,
+            &ignored
+        ));
+        assert!(super::is_source(
+            &saved(dir.join("third/png.ts")),
+            &dir,
+            &ignored
+        ));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

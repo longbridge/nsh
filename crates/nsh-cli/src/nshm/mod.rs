@@ -215,8 +215,8 @@ impl App {
     fn open(cwd: &Path) -> anyhow::Result<Self> {
         let dir = app_dir(cwd)?;
         let path = dir.join("nsh.json");
-        let text =
-            fs::read_to_string(&path).with_context(|| format!("can't read {}", path.display()))?;
+        let text = nsh_bundler::app_dir::read(&path)
+            .with_context(|| format!("can't read {}", path.display()))?;
         let config = serde_json::from_str(&text).context("nsh.json is not JSON")?;
         Ok(App { dir, config })
     }
