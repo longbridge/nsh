@@ -23,6 +23,8 @@ cargo clippy -p nsh-platform-macos -p nsh-macos-host -p nsh-macos-app --all-targ
 cargo test -p nsh-platform-macos --features dev   # needs no window server: tests do not start AppKit
 cargo build -p nsh-macos-host                     # ./target/debug/nsh-macos-host
 cargo test -p nsh-platform-macos --test native -- --ignored # desktop session required
+# Host bounds scaling, composed with NSH scroll zoom:
+NSH_VIEW_SCALE_CHECK_ONLY=1 cargo test -p nsh-platform-macos --test native -- --ignored
 # Editor/RichEditor focus restoration and stale-target checks:
 NSH_MODAL_FOCUS_CHECK_ONLY=1 cargo test -p nsh-platform-macos --test native -- --ignored
 # A navigator taken away whole frees its stack and pages (tests/native/navigation_unmount.rs):
@@ -153,7 +155,12 @@ before each redirect and cancels one the grant does not allow, reporting it to t
   (`NshView::redraw`: a plain `CALayer` sublayer whose delegate draws in `drawLayer:inContext:`, above the decoration
   behind the view and below its children); no view uses `drawRect:`, every view uses `updateLayer` and gets no backing
   store. Implicit animations are off for every change NSH makes (`surface::quiet`; the content layer's delegate
-  answers no action). A backdrop (a material from `macos={{ backdrop }}`, glass or a blur) is the view's first
+  answers no action). Content layers include the host's bounds scale in their backing density; NSH's transforms
+  and scroll zooms compose with it through the existing quantized sharpening path, without counting zoom twice.
+  Images, shader frames and transition snapshots use `view::backing_scale_of`, the device pixels per point in
+  the view's coordinates. Content layers refresh when created, reattached or notified of backing changes;
+  changing only a host ancestor's bounds later does not itself trigger a redraw.
+  A backdrop (a material from `macos={{ backdrop }}`, glass or a blur) is the view's first
   subview, below its fill layer and effects; see "Not implemented, or different".
 - **Why not `drawRect:`**: `drawRect:` views are redrawn by AppKit's display pass whenever a scroll moves their
   container; plain content layers are not, and are drawn again only when their content or size changes. A canvas
