@@ -419,7 +419,8 @@ fn update(surface: &Surface) {
     env.reduce_motion = workspace.accessibilityDisplayShouldReduceMotion();
     env.screen_reader = workspace.isVoiceOverEnabled();
     env.rtl = preferred_language_rtl();
-    env.pixel_ratio = pixel_ratio(surface);
+    env.pixel_ratio =
+        crate::window::primary(surface).map_or_else(|| pixel_ratio(surface), |(_, scale)| scale);
     env.os = Os::MacOs;
     env.os_version = os_version();
     env.idiom = Idiom::Desktop;

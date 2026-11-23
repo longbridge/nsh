@@ -339,6 +339,7 @@ impl Surface {
         }
         let fps = Rc::new(crate::fps::Fps::new());
         crate::fps::install(self.root.upcast_ref(), &fps);
+        crate::fps::start_logging(&fps);
         if let Some(overlay) = self.fps_overlay.borrow().upgrade() {
             crate::fps::show(&overlay, &fps);
         }
@@ -558,13 +559,8 @@ impl Surface {
             s.frame.size.width.0 = width;
             s.frame.size.height.0 = height;
         }
-        let mut env = self.environment.get();
-        env.window = nsh_core::Size::new(nsh_core::Points(width), nsh_core::Points(height));
-        self.environment.set(env);
-        self.control(|c| {
-            c.resize(Size::new(Points(width), Points(height)));
-            c.set_environment(env);
-        });
+        self.control(|c| c.resize(Size::new(Points(width), Points(height))));
+        crate::system::window_environment(self);
         crate::navigation::surface_resized(self, width, height);
         crate::system::surface_resized(self, width, height);
         crate::window::main_resized(self);

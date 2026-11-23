@@ -631,19 +631,33 @@ impl Surface {
         }
     }
 
-    /// Tells the engine the window size the app sees (`windowSize()`, the
-    /// size classes): its primary window's, the first of its own windows
-    /// still open ([`crate::window::primary`]), else this surface's (an
-    /// embedded view, or a host whose app shows no window). The host's own
-    /// window stays hidden under the window model: its size is not the one
-    /// the user sees.
+    /// Tells the engine the window size and scale the app sees
+    /// (`windowSize()`, `pixelRatio()`, the size classes): its primary
+    /// window's ([`crate::window::primary`]), as the user resizes or moves
+    /// it, else this surface's (an embedded view, or a host whose app shows
+    /// no window). The desktop host's own window never shows: reporting it
+    /// would lay the app out for a window nobody sees.
     pub(crate) fn window_environment(&self) {
-        let size = crate::window::primary(self).unwrap_or_else(|| self.root.state().frame.size);
+        let (size, scale) = crate::window::primary(self).unwrap_or_else(|| {
+            let root = self.root.ns();
+            let scale = root
+                .window()
+                .map_or(self.environment.get().pixel_ratio, |w| {
+                    w.backingScaleFactor() as f32
+                });
+            (self.root.state().frame.size, scale)
+        });
         let mut env = self.environment.get();
-        if env.window == size {
+        if env.window == size && env.pixel_ratio == scale {
             return;
         }
+        if env.pixel_ratio != scale {
+            self.set_raster_scale(f64::from(scale));
+        }
         env.window = size;
+        env.pixel_ratio = scale;
+        // Only the size and scale: the appearance stays as it was applied,
+        // which a live resize would otherwise apply again on every step.
         self.environment.set(env);
         self.control(|c| c.set_environment(env));
     }
