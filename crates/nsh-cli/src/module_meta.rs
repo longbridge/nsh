@@ -46,8 +46,6 @@
 //! `ios.infoPlist`, `ios.infoPlistStrings`, `ios.entitlements`,
 //! `macos.infoPlist`, `macos.infoPlistStrings`, `macos.entitlements` (named
 //! as in `nsh.json`),
-//! `ios.frameworks` (relative to the directory of the crate's
-//! `Cargo.toml`) and `ios.linkerFlags` ([`crate::ios_frameworks`]),
 //! `android.permissions` (checked and spelled out as `nsh.json`'s are),
 //! `android.queries`
 //! (`<intent>`, `<package>` and `<provider>` elements) and
@@ -65,9 +63,7 @@ use std::{collections::BTreeMap, path::Path, process::Command};
 use anyhow::{Context as _, bail};
 use serde_json::{Map, Value};
 
-use crate::{
-    android::Library, apple::ApplePlatform, ios_frameworks::Framework, package::AppConfig, ui,
-};
+use crate::{android::Library, apple::ApplePlatform, package::AppConfig, ui};
 
 /// The elements `android.queries` takes.
 const QUERY_ELEMENTS: &[&str] = &["intent", "package", "provider"];
@@ -86,11 +82,6 @@ pub(crate) struct ModuleMeta {
     pub(crate) ios_strings: Map<String, Value>,
     /// Entitlements of iOS packages.
     pub(crate) ios_entitlements: Map<String, Value>,
-    /// Libraries the iOS executables link, each once
-    /// ([`crate::ios_frameworks`]).
-    pub(crate) ios_frameworks: Vec<Framework>,
-    /// Arguments of the iOS executables' link, in the crates' order.
-    pub(crate) ios_linker_flags: Vec<String>,
     /// `Info.plist` keys of macOS packages.
     pub(crate) macos_info: Map<String, Value>,
     /// Entitlements of macOS packages.
@@ -263,10 +254,8 @@ impl ModuleMeta {
             match key.as_str() {
                 // Read by itself: a feature's section is merged only when on.
                 "features" if at == "[package.metadata.nsh]" => {}
-                "ios" => self.merge_apple(name, dir, at, ApplePlatform::Ios, value, warnings)?,
-                "macos" => {
-                    self.merge_apple(name, dir, at, ApplePlatform::Macos, value, warnings)?
-                }
+                "ios" => self.merge_apple(name, at, ApplePlatform::Ios, value, warnings)?,
+                "macos" => self.merge_apple(name, at, ApplePlatform::Macos, value, warnings)?,
                 "android" => self.merge_android(name, dir, at, value, warnings)?,
                 _ => warnings.push(format!(
                     "{name}: {at} `{key}` is not something this nsh reads: left out"
@@ -279,7 +268,6 @@ impl ModuleMeta {
     fn merge_apple(
         &mut self,
         name: &str,
-        dir: Option<&Path>,
         at: &str,
         platform: ApplePlatform,
         table: &Value,
@@ -291,28 +279,6 @@ impl ModuleMeta {
             .with_context(|| format!("{name}: {at} `{section}` is a table"))?;
         for (key, value) in table {
             let kind = match (platform, key.as_str()) {
-                (ApplePlatform::Ios, "frameworks") => {
-                    let listed = format!("{name}: {at} `ios.frameworks`");
-                    let dir = dir.with_context(|| {
-                        format!("{listed}: cargo metadata names no Cargo.toml for the crate")
-                    })?;
-                    let frameworks =
-                        crate::ios_frameworks::of_crate(value, dir, &listed, warnings)?;
-                    for framework in frameworks {
-                        if !self.ios_frameworks.iter().any(|f| f.path == framework.path) {
-                            self.ios_frameworks.push(framework);
-                        }
-                    }
-                    continue;
-                }
-                (ApplePlatform::Ios, "linkerFlags") => {
-                    let listed = format!("{name}: {at} `ios.linkerFlags`");
-                    // Kept as written, repeats too: a flag's argument
-                    // (`-framework`, `StoreKit`) may repeat another's.
-                    self.ios_linker_flags
-                        .extend(crate::ios_frameworks::linker_flags(value, &listed)?);
-                    continue;
-                }
                 (ApplePlatform::Ios, "infoPlist") => "ios.infoPlist",
                 (ApplePlatform::Ios, "infoPlistStrings") => "ios.infoPlistStrings",
                 (ApplePlatform::Ios, "entitlements") => "ios.entitlements",
@@ -634,29 +600,8 @@ impl ModuleMeta {
             &mut config.android.libraries,
             self.android_libraries.clone(),
         );
-        (config.ios.frameworks, config.ios.linker_flags) =
-            ios_link(&config.ios.frameworks, &config.ios.linker_flags, self);
         Ok(())
     }
-}
-
-/// The frameworks and linker flags of the app's iOS executables: the
-/// app's own (`frameworks`, `flags`, from its `nsh.json`) first, then the
-/// crates' (`meta`); a framework two list is linked once.
-pub(crate) fn ios_link(
-    frameworks: &[Framework],
-    flags: &[String],
-    meta: &ModuleMeta,
-) -> (Vec<Framework>, Vec<String>) {
-    let mut all = frameworks.to_vec();
-    for framework in &meta.ios_frameworks {
-        if !all.iter().any(|f| f.path == framework.path) {
-            all.push(framework.clone());
-        }
-    }
-    let mut all_flags = flags.to_vec();
-    all_flags.extend(meta.ios_linker_flags.iter().cloned());
-    (all, all_flags)
 }
 
 /// What the current app's crates declare for a development host built for
@@ -1481,99 +1426,6 @@ mod tests {
             error.starts_with("x: [package.metadata.nsh] `android.libraries`"),
             "{error}"
         );
-    }
-
-    #[test]
-    fn crates_frameworks_and_linker_flags_join_the_apps() {
-        let ads = json!({ "nsh": {
-            "ios": {
-                "frameworks": ["ios/Ads.xcframework"],
-                "linkerFlags": ["-ObjC"],
-            },
-            "features": { "attribution": { "ios": {
-                "frameworks": [{ "path": "ios/Attribution.xcframework", "forceLoad": true }],
-                "linkerFlags": ["-framework", "AdServices"],
-            } } },
-        } });
-        let (meta, warnings) =
-            ModuleMeta::from_metadata(&metadata(&[("ads", ads, &["attribution"])])).unwrap();
-        assert!(warnings.is_empty(), "{warnings:?}");
-        let found: Vec<(&Path, bool, &str)> = meta
-            .ios_frameworks
-            .iter()
-            .map(|f| (f.path.as_path(), f.force_load, f.listed.as_str()))
-            .collect();
-        assert_eq!(
-            found,
-            [
-                (
-                    Path::new("/work/ads/ios/Ads.xcframework"),
-                    false,
-                    "ads: [package.metadata.nsh] `ios.frameworks`[0]"
-                ),
-                (
-                    Path::new("/work/ads/ios/Attribution.xcframework"),
-                    true,
-                    "ads: [package.metadata.nsh.features.attribution] `ios.frameworks`[0]"
-                ),
-            ]
-        );
-        assert_eq!(meta.ios_linker_flags, ["-ObjC", "-framework", "AdServices"]);
-
-        // The app's own first; a framework both list is linked once.
-        let mut config = AppConfig::default();
-        config.ios.frameworks = crate::ios_frameworks::read(
-            serde_json::from_value(json!(["/work/ads/ios/Ads.xcframework"])).unwrap(),
-            Path::new("/app"),
-            &mut Vec::new(),
-        );
-        config.ios.linker_flags = vec!["-lz".into()];
-        meta.apply(&mut config, Platform::Ios).unwrap();
-        let listed: Vec<&str> = config
-            .ios
-            .frameworks
-            .iter()
-            .map(|f| f.listed.as_str())
-            .collect();
-        assert_eq!(
-            listed,
-            [
-                "nsh.json `ios.frameworks[0]`",
-                "ads: [package.metadata.nsh.features.attribution] `ios.frameworks`[0]",
-            ]
-        );
-        assert_eq!(
-            config.ios.linker_flags,
-            ["-lz", "-ObjC", "-framework", "AdServices"]
-        );
-
-        // Another form is an error naming the crate.
-        for (ios, wrong) in [
-            (
-                json!({ "frameworks": "ios/Ads.xcframework" }),
-                "`ios.frameworks` is a list",
-            ),
-            (
-                json!({ "frameworks": [7] }),
-                "`ios.frameworks`[0]: a framework is a path",
-            ),
-            (
-                json!({ "linkerFlags": "-ObjC" }),
-                "`ios.linkerFlags` is a list of strings",
-            ),
-        ] {
-            let error = ModuleMeta::from_metadata(&metadata(&[(
-                "x",
-                json!({ "nsh": { "ios": ios } }),
-                &[],
-            )]))
-            .unwrap_err();
-            let error = format!("{error:#}");
-            assert!(
-                error.starts_with(&format!("x: [package.metadata.nsh] {wrong}")),
-                "{error}"
-            );
-        }
     }
 
     #[test]

@@ -567,7 +567,7 @@ test("calls reach the page's host", async () => {
 - 不在屏幕上的视图会先被滚动到可见，每次一个手势；在触摸屏上，手指像用户那样落在页面本身接收拖动的地方，避开跟随拖动的视图（滑块、绘图区域）；滚动视图已经到头时，贴在它边缘的视图就地操作，不会把滚动视图拖过头（那样会触发下拉刷新或关掉页面 sheet）；滚动视图内容从边缘下面经过的部分（iOS 上透明的标题栏、Tab 栏、键盘）里的视图会先被滚出来，仍留在那下面、被系统绘制的栏或选区的编辑菜单盖住的视图，操作会以 `ERR_NSH_TEST_COVERED` 失败，而不是按到盖住它的东西上；
 - 选择器、等待和查询看到的应用模型与 headless 相同，由 host 绘制的内容建立，所以找到的是同样的视图；
 - 对话框是平台自己的：`app.dialogs()` 读取它们，回答对话框（`onDialog`，或测试没有回答时按它的取消按钮）会按下对应的按钮；
-- `app.screenshot(path)` 截取窗口，`app.window(id).screenshot(path)` 截取应用的其他窗口。
+- `app.screenshot(path)` 截取应用显示的窗口（测试指定的窗口，否则最前面的那个），`app.window(id).screenshot(path)` 截取应用的其他窗口。
 
 ```sh
 nsh test --target macos                       # 在 macOS 窗口里运行应用的测试

@@ -343,6 +343,20 @@ impl Surface {
         }
         self.control(|c| c.set_perf_monitor(Some(fps.monitor.clone())));
         *self.fps.borrow_mut() = Some(fps);
+        crate::window::fps_follow_any(self);
+    }
+
+    /// The performance monitor measures and shows in app `<Window>`
+    /// `window` (content in `overlay`), or the host window for `None`.
+    pub(crate) fn fps_follow(&self, window: Option<(&gtk::Widget, &gtk::Overlay)>) {
+        if let Some(fps) = self.fps.borrow().as_ref() {
+            crate::fps::follow(fps, window, self.fps_overlay.borrow().upgrade());
+        }
+    }
+
+    /// The app `<Window>` the performance monitor follows, if any.
+    pub(crate) fn fps_window(&self) -> Option<gtk::Widget> {
+        self.fps.borrow().as_ref().and_then(|f| f.window())
     }
 
     #[cfg(test)]

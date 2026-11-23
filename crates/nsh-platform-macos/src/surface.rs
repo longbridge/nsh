@@ -631,6 +631,23 @@ impl Surface {
         }
     }
 
+    /// Tells the engine the window size the app sees (`windowSize()`, the
+    /// size classes): its primary window's, the first of its own windows
+    /// still open ([`crate::window::primary`]), else this surface's (an
+    /// embedded view, or a host whose app shows no window). The host's own
+    /// window stays hidden under the window model: its size is not the one
+    /// the user sees.
+    pub(crate) fn window_environment(&self) {
+        let size = crate::window::primary(self).unwrap_or_else(|| self.root.state().frame.size);
+        let mut env = self.environment.get();
+        if env.window == size {
+            return;
+        }
+        env.window = size;
+        self.environment.set(env);
+        self.control(|c| c.set_environment(env));
+    }
+
     /// The root view got a new size (the window's content area): the
     /// layout at that size is applied before this returns, unless the
     /// engine takes longer than [`RESIZE_WAIT`] (see the module doc).
@@ -643,13 +660,8 @@ impl Surface {
             s.frame.size.width.0 = width;
             s.frame.size.height.0 = height;
         }
-        let mut env = self.environment.get();
-        env.window = nsh_core::Size::new(nsh_core::Points(width), nsh_core::Points(height));
-        self.environment.set(env);
-        self.control(|c| {
-            c.resize(Size::new(Points(width), Points(height)));
-            c.set_environment(env);
-        });
+        self.control(|c| c.resize(Size::new(Points(width), Points(height))));
+        self.window_environment();
         crate::navigation::surface_resized(self, width, height);
         // Full screen and the window's size change the title bar's area.
         crate::chrome::update_area(self);
