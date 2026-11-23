@@ -1,18 +1,21 @@
-// Dictation with `Speech`: the headless recognizer listens at once, the
-// test speaks for the user (`app.hear`), and the app's `stop()` (or
-// `app.endSpeech`) ends the session with the transcript as its final result.
+// Dictation with `nsh-extra`'s `Speech`: the module's fake recognizer
+// listens at once in headless runs, the test speaks for the user
+// (`app.hear`), and the app's `stop()` (or `app.endSpeech`) ends the session
+// with the transcript as its final result.
 import { beforeEach, expect, open, test } from "nsh/test";
 import type { App } from "nsh/test";
 
 let app: App;
 beforeEach(async () => {
-  app = await open("./fixtures/speech.tsx");
+  app = await open("../App.tsx");
   await app.press("label:Dictate");
   await app.waitFor("text:state: listening");
 });
 
 test("the transcript grows as the user speaks, and stopping finishes it", async () => {
   expect(app.speechRequests()).toEqual([{ lang: "zh-CN", interim: true }]);
+  // The same, through the module's fake by its name.
+  expect(await app.fake("nsh-extra/speech", "requests")).toEqual([{ lang: "zh-CN", interim: true }]);
   await app.hear("你好");
   await app.waitFor("text:transcript: 你好");
   await app.hear("你好世界");

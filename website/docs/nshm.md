@@ -151,6 +151,7 @@ crate, imported from `nsh-extra` in TSX and called as `nsh_extra::<module>` in R
 | `camera` | `Camera` | Takes a photo with the system's camera on iOS and Android |
 | `photos` | `Photos` | Reads the user's recent photos on iOS, once the user allows it |
 | `push` | `Push` | Receives remote notifications from any push service on iOS, and on Android through the service's binding |
+| `speech` | `Speech` | Turns what the user says into text as they speak, on macOS, iOS, Android, Windows and the web |
 
 ```tsx
 import { Camera } from "nsh-extra";
@@ -293,6 +294,127 @@ implements `PushProvider` (it registers the device with its service), sets it wi
 `provide_registration_failure`, `provide_notification` and `provide_background`. A press of a notification the binding
 posted opens the app with the payload as the intent's extras, and reaches `press` with them as its `payload` (Android
 does not say which notification it was, so it has no `id` or `threadId`).
+
+### Speech
+
+`Speech` turns what the user says into text (dictation): the app starts a session, the system listens to the
+microphone, and the transcript arrives as it grows. macOS and iOS recognize with the system's Speech framework,
+Android with the device's recognition service (`SpeechRecognizer`), Windows with its dictation
+(`Windows.Media.SpeechRecognition`), the web with the browser's Web Speech API; the system or the browser asks the
+user for the microphone (and on Apple platforms for speech recognition) once. Windows dictates with the user's online
+speech recognition, which they turn on in Settings > Privacy & security > Speech; while it is off, a session ends with
+`"not-allowed"`. Check `Speech.available()` before showing a microphone button:
+where nothing recognizes speech, a session ends at once with `"unavailable"`.
+
+```sh
+nsh add nsh-extra --features speech
+```
+
+```ts
+const Speech: {
+  available(): Promise<boolean>;
+  start(options?: SpeechOptions): SpeechSession;
+};
+
+interface SpeechOptions {
+  /** The language spoken, a BCP 47 tag ("en-US", "zh-CN"); the user's when left out. */
+  lang?: string;
+  /** Results while the user speaks (true, the default), or only the final one. */
+  interim?: boolean;
+}
+
+interface SpeechSession {
+  on(event: "start", listener: () => void): () => void;
+  on(event: "result", listener: (result: SpeechResult) => void): () => void;
+  on(event: "end", listener: (end: SpeechEnd) => void): () => void;
+  /** The whole transcript so far. */
+  readonly text: string;
+  readonly ended: boolean;
+  stop(): void;
+  abort(): void;
+}
+
+interface SpeechResult { text: string; isFinal: boolean }
+interface SpeechEnd { text: string; error?: SpeechErrorCode }
+
+type SpeechErrorCode =
+  | "not-allowed" | "no-speech" | "audio-capture" | "network"
+  | "language-not-supported" | "unavailable" | "failed";
+```
+
+```tsx
+import { signal } from "nsh";
+import { Speech, type SpeechSession } from "nsh-extra";
+
+const transcript = signal("");
+let session: SpeechSession | null = null;
+
+function toggle() {
+  if (session && !session.ended) {
+    session.stop();
+    return;
+  }
+  session = Speech.start({ lang: "en-US" });
+  session.on("result", ({ text }) => transcript.set(text));
+  session.on("end", ({ text, error }) => {
+    if (error) console.warn("dictation ended:", error);
+    else transcript.set(text);
+  });
+}
+```
+
+- `start` returns the session at once. It reports, in this order: `start` when the microphone is on and the recognizer
+  listens, `result` each time the transcript changes (`text` is always the whole transcript so far, so the app shows
+  it as it is), and one `end`, after which nothing comes. `stop()` stops listening and lets the recognizer finish
+  what it heard: a last result with `isFinal: true`, then `end`. `abort()` ends the session at once, without an
+  error. One session runs at a time, as there is one microphone: starting another ends the one running.
+- `end` carries the last transcript and, when the session failed, `error`, named as in the Web Speech API:
+  `"not-allowed"` (the user or the system does not allow the microphone or speech recognition, or the app is in the
+  background), `"no-speech"` (nothing was said), `"audio-capture"` (the microphone could not be used), `"network"`
+  (the recognizer needs the network), `"language-not-supported"` (the recognizer does not know `lang`),
+  `"unavailable"` (nothing recognizes speech here, or not now) and `"failed"`.
+- `start` throws a `TypeError` for options of the wrong types and a `RangeError` for a `lang` that is no language tag.
+- `available()` is `true` on macOS and iOS, on Android devices with a recognition service, in browsers with the Web
+  Speech API (Chromium-based browsers such as Chrome and Edge, and Safari), and wherever the app gave the module a
+  recognizer of its own.
+- On the web the page needs a secure context (HTTPS, or `localhost` while developing) for the microphone, and a page
+  that embeds the app in an iframe allows it (`allow="microphone"`). Chrome recognizes with its online service, so
+  `"network"` reports a lost connection.
+- An app that declares `"capabilities"` grants `Speech` with
+  [`"speech": true`](./sandbox-and-capabilities.md#speech). Without it `start` throws an `Error` whose `code` is
+  `"ERR_ACCESS_DENIED"`, `permission` `"speech"`.
+
+The feature adds what the packaged app needs: the microphone's and speech recognition's usage descriptions on iOS
+and macOS (an app sets its own wording with `ios.infoPlist` / `macos.infoPlist`), the audio input entitlement on
+macOS, and on Android the `RECORD_AUDIO` permission and the query of recognition services. On the web the module
+calls the browser through wasm-bindgen, so `nsh` builds the app's web runtime with the `wasm-bindgen` CLI
+([browser APIs from Rust](./web.md#browser-apis-from-rust)); the site itself needs no declaration.
+
+Rust code uses `nsh_extra::speech`: `available().await`, and `recognize(SpeechRequest)`, a session whose
+`next().await` gives each `SpeechEvent` (`stop()`, `abort()`; dropping it aborts). An app that recognizes speech its
+own way (its own engine or service, an embedding app's) gives the module a `SpeechBackend` with `set_backend`: every
+session then reaches it instead of the system's recognizer.
+
+```rust
+use nsh_extra::speech::{self, SpeechEvent, SpeechRequest};
+
+async fn dictate() -> String {
+    let mut recognition = speech::recognize(SpeechRequest::default());
+    let mut text = String::new();
+    while let Some(event) = recognition.next().await {
+        match event {
+            SpeechEvent::Result { text: heard, .. } => text = heard,
+            SpeechEvent::End { .. } => break,
+            _ => {}
+        }
+    }
+    text
+}
+```
+
+In `nsh test`, sessions run on the module's fake recognizer: a session starts listening at once, `app.hear(text)`
+reports `text` as the transcript so far, `app.endSpeech(error?)` ends it, and `app.speechRequests()` lists the
+sessions the app started ([Testing](./testing-and-trace.md)).
 
 ## An app's own Rust: `ext/`
 

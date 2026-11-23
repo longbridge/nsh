@@ -3968,6 +3968,8 @@ version = "0.6.0"
 dependencies = [
  "block2",
  "dispatch2",
+ "js-sys",
+ "libc",
  "log",
  "ndk-context",
  "nsh-core",
@@ -3978,7 +3980,11 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-foundation",
  "objc2-ui-kit",
+ "serde_json",
  "tokio",
+ "wasm-bindgen",
+ "web-sys",
+ "windows",
 ]
 
 [[package]]

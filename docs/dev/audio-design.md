@@ -15,8 +15,8 @@ platforms' engines and what `nsh.json` grants.
 Apps need to make sound: a trade confirmation, a price alert, a message
 arriving, a voice message, a recording played back. NSH has no way to do that
 today except `<Video>`, which is a view that takes a frame on the screen.
-`Speech` is the other direction only (the microphone to a transcript) and
-synthesizes nothing.
+`nsh-extra`'s `Speech` is the other direction only (the microphone to a
+transcript) and synthesizes nothing.
 
 Two capabilities are added to `nsh`, as two separate primitives, because they
 are two different things on every platform (the browser has the Web Audio API

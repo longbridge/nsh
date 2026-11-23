@@ -23,6 +23,7 @@ mod css_named;
 pub mod desktop;
 mod effects;
 pub mod element;
+pub mod fake;
 mod fenwick;
 pub mod file_dialog;
 pub mod file_type;
@@ -63,7 +64,6 @@ pub mod shader;
 pub mod shape;
 pub mod share;
 pub mod single_instance;
-pub mod speech;
 pub mod storage;
 mod style;
 #[cfg(feature = "svg")]

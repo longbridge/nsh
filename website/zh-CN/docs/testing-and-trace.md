@@ -421,7 +421,8 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `app.picks()` | 应用发起过的选取，按顺序排列。 |
 | `app.onShare({ action, target })` | 给这次运行一个分享面板，并回答应用之后显示的分享（`Share.show`）：`action` 为 `"shared"`（分享到 `target`）或 `"dismissed"`。仅限无界面运行。 |
 | `app.shares()` | 应用分享过的内容，按顺序排列（`{ title, text, url, files }`）。 |
-| `app.hear(text)` | 用户对正在运行的语音会话（`Speech.start`）说出 `text`：它的 `result` 把 `text` 报告为到目前为止的完整转写。仅限无界面运行。 |
+| `await app.fake(name, method, args?)` | 按名称（`"nsh-extra/speech"`）调用原生模块在无界面运行中代替设备的模拟实现，`args` 是一个数组，resolve 为它的 JSON 回答。下面的 `hear`、`endSpeech` 和 `speechRequests` 调用的就是 `nsh-extra` 的语音模拟实现。仅限无界面运行。 |
+| `app.hear(text)` | 用户对正在运行的语音会话（`nsh-extra` 的 `Speech.start`）说出 `text`：它的 `result` 把 `text` 报告为到目前为止的完整转写。仅限无界面运行。 |
 | `app.endSpeech(error?)` | 结束正在运行的语音会话：带 `error`（`"no-speech"`、`"network"` 等）时会话失败，否则先到达最后一个最终结果再到达 `end`，什么都没听到时为 `no-speech`。仅限无界面运行。 |
 | `app.speechRequests()` | 应用开始的语音会话，按顺序：`lang`（用户的语言时为 `null`）和 `interim`。 |
 | `app.audio()` | 应用对扬声器发出的请求（`Sound`、`AudioPlayer`），按顺序：`command`（`"load"`、`"play"`、`"stop"`、`"unload"`、`"open"`、`"preload"`、`"resume"`、`"pause"`、`"seek"`、`"set"`、`"close"`）、`src`，以及适用时的 `volume`、`rate`、`position`。仅限无界面运行。 |
@@ -497,7 +498,7 @@ await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISAB
 - **URL 只被记录**：应用打开的 URL 以“已打开”回报（测试用 `app.failOpenUrls` 让它失败的除外），`app.openedUrls()` 列出它们。
 - **选取会被回答**：用测试给的文件（`onPick`），否则视为取消，`Picker.pickImages` 和 `Picker.pickFiles` resolve 为 `[]`。
 - **分享由测试决定**：`onShare` 给出分享面板后，每次分享都按它的回答；在此之前 `Share.available()` resolve 为 `false`。
-- **语音由测试决定**：`Speech.available()` resolve 为 `true`，会话立即开始，听到 `hear` 说的内容。
+- **原生模块运行在模拟实现上**：会访问设备的模块在无界面运行中提供一个模拟实现代替设备，由测试驱动（`app.fake`）。开启 `nsh-extra` 的 `speech` 时，`Speech.available()` resolve 为 `true`，会话立即开始，听到 `hear` 说的内容。
 - **声音交给假扬声器**：音效按 WAV 解码（时长取自文件头，其他字节以 `decode` 失败），播放器立即播放其源的一分钟，在 `endAudio()` 时播到结尾。
 - **模态窗口立即出现**：弹出时就会触发 `onShow`。
 - **图片不会加载**：不会有 `onLoad`，也不会有 `onError`，除非测试让这张图片加载失败（`app.failImages`）；`Image.getSize` 和 `Image.prefetch` 会 reject，app 里和测试文件里都一样。`blob:` URL 的尺寸直接从它的数据读取，所以对它调用 `Image.getSize` 会 resolve。

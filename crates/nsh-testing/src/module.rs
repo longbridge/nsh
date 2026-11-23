@@ -1091,8 +1091,8 @@ impl From<&nsh_core::share::ShareSheet> for SharedContent {
     }
 }
 
-/// A speech recognition session the app started (`Speech.start`), as a
-/// test reads it.
+/// A speech recognition session the app started (`Speech.start` of
+/// `nsh-extra`), as a test reads it.
 #[derive(Debug, Clone, PartialEq, JsObject)]
 pub struct SpeechRequest {
     /// The language asked for (`"en-US"`); `null`: the user's.
@@ -1101,14 +1101,26 @@ pub struct SpeechRequest {
     pub interim: bool,
 }
 
-impl From<&nsh_core::speech::SpeechRequest> for SpeechRequest {
-    fn from(request: &nsh_core::speech::SpeechRequest) -> Self {
-        SpeechRequest {
-            lang: request.lang.clone(),
-            interim: request.interim,
-        }
+impl SpeechRequest {
+    /// The request the speech fake reports as `{ lang, interim }`.
+    fn from_json(value: &JsonValue) -> Result<Self, String> {
+        Ok(SpeechRequest {
+            lang: value
+                .get("lang")
+                .and_then(JsonValue::as_str)
+                .map(str::to_owned),
+            interim: value
+                .get("interim")
+                .and_then(JsonValue::as_bool)
+                .ok_or("the speech fake reported a request without `interim`")?,
+        })
     }
 }
+
+/// The fake `nsh-extra`'s `speech` gives headless runs
+/// ([`nsh_core::fake`]), which `hear`, `endSpeech` and `speechRequests`
+/// call.
+const SPEECH_FAKE: &str = "nsh-extra/speech";
 
 /// What the app asked of the speaker (`Sound`, `AudioPlayer`), as a test
 /// reads it.
@@ -2511,43 +2523,73 @@ impl App {
         self.with(|app| Ok(app.picks()?.iter().map(PickRequest::from).collect()))
     }
 
-    /// The speech recognition sessions the app started (`Speech.start`),
-    /// in order. Headless apps recognize speech: a session listens at once
+    /// Calls `method` of the fake named `name` with `args`: the stand-in a
+    /// native module the app turns on gives headless runs in place of a
+    /// device (`"nsh-extra/speech"`: the recognizer `hear` speaks into).
+    /// Resolves with its answer once the app is quiet. Rejects when no
+    /// module of the app gives that fake, or the fake refuses the call.
+    /// Headless runs only.
+    pub async fn fake(
+        this: Instance<Self>,
+        name: String,
+        method: String,
+        args: Option<Vec<JsonValue>>,
+    ) -> Result<JsonValue, JsError> {
+        let answer = Arc::new(Mutex::new(JsonValue::Null));
+        let out = answer.clone();
+        let args = args.unwrap_or_default();
+        step(&this, move |app| {
+            *out.lock().unwrap_or_else(|e| e.into_inner()) =
+                app.call_fake(&name, &method, &args)?;
+            Ok(())
+        })
+        .await?;
+        Ok(std::mem::take(
+            &mut *answer.lock().unwrap_or_else(|e| e.into_inner()),
+        ))
+    }
+
+    /// The speech recognition sessions the app started (`Speech.start` of
+    /// `nsh-extra`, with the feature `speech`), in order. Headless apps
+    /// recognize speech with the module's fake: a session listens at once
     /// (its `start`), and `hear` speaks for the user. Headless runs only.
     pub fn speech_requests(&self) -> Result<Vec<SpeechRequest>, JsError> {
         self.with(|app| {
-            Ok(app
-                .speech_requests()?
+            let requests = app.call_fake(SPEECH_FAKE, "requests", &[])?;
+            requests
+                .as_array()
+                .ok_or("the speech fake reported no list of requests")?
                 .iter()
-                .map(SpeechRequest::from)
-                .collect())
+                .map(SpeechRequest::from_json)
+                .collect()
         })
     }
 
     /// The user says `text`, the whole transcript so far, to the speech
-    /// session listening: the app gets it as a `result` that is not final.
-    /// Then waits until the app is quiet. Rejects when no session listens.
-    /// Headless runs only.
+    /// session listening (`nsh-extra`'s `Speech`): the app gets it as a
+    /// `result` that is not final. Then waits until the app is quiet.
+    /// Rejects when no session listens. Headless runs only.
     pub async fn hear(this: Instance<Self>, text: String) -> Result<(), JsError> {
-        step(&this, move |app| app.hear(&text)).await
+        step(&this, move |app| {
+            app.call_fake(SPEECH_FAKE, "hear", &[JsonValue::String(text)])
+                .map(drop)
+        })
+        .await
     }
 
-    /// Ends the speech session listening: with `error` (`"no-speech"`,
-    /// `"not-allowed"`, `"audio-capture"`, `"network"`,
-    /// `"language-not-supported"`, `"unavailable"`, `"failed"`), or without
-    /// one as when the user stops talking: the transcript as the final
-    /// `result`, then `end` (`no-speech` when nothing was heard). Then
-    /// waits until the app is quiet. Rejects when no session listens.
-    /// Headless runs only.
+    /// Ends the speech session listening (`nsh-extra`'s `Speech`): with
+    /// `error` (`"no-speech"`, `"not-allowed"`, `"audio-capture"`,
+    /// `"network"`, `"language-not-supported"`, `"unavailable"`,
+    /// `"failed"`), or without one as when the user stops talking: the
+    /// transcript as the final `result`, then `end` (`no-speech` when
+    /// nothing was heard). Then waits until the app is quiet. Rejects when
+    /// no session listens or `error` is none of those. Headless runs only.
     pub async fn end_speech(this: Instance<Self>, error: Option<String>) -> Result<(), JsError> {
-        let error = match error {
-            None => None,
-            Some(name) => Some(
-                nsh_core::speech::SpeechError::from_name(&name)
-                    .ok_or_else(|| JsError::Type(format!("no speech error {name:?}")))?,
-            ),
-        };
-        step(&this, move |app| app.end_speech(error)).await
+        let args: Vec<JsonValue> = error.into_iter().map(JsonValue::String).collect();
+        step(&this, move |app| {
+            app.call_fake(SPEECH_FAKE, "end", &args).map(drop)
+        })
+        .await
     }
 
     /// What the app asked of the speaker (`Sound`, `AudioPlayer`), in

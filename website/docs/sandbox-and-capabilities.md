@@ -279,8 +279,8 @@ where the content goes. A shared file must also be readable under `fs.read`.
 
 ### `speech`
 
-`"speech": true` lets the app recognize what the user says ([`Speech`](../modules/nsh.md#speech)): the microphone and
-the system's speech recognizer, whose transcript reaches the app. The system still asks the user once.
+`"speech": true` lets the app recognize what the user says (`nsh-extra`'s [`Speech`](./nshm.md#speech)): the
+microphone and the system's speech recognizer, whose transcript reaches the app. The system still asks the user once.
 
 ### `audio`
 

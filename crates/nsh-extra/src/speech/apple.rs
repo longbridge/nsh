@@ -1,32 +1,33 @@
-//! Speech recognition on Apple platforms (`Command::Speech`, `nsh`'s
-//! `Speech`): the Speech framework's `SFSpeechRecognizer` fed by the
-//! microphone through an `AVAudioEngine` tap. Shared by macOS and iOS (the
-//! iOS crate includes this file): the frameworks are loaded and messaged
-//! dynamically, as the rest of these crates do with optional frameworks.
+//! Speech recognition on macOS and iOS: the Speech framework's
+//! `SFSpeechRecognizer` fed by the microphone through an `AVAudioEngine`
+//! tap. The frameworks are loaded and messaged dynamically, so an app that
+//! does not turn the module on links neither.
 //!
 //! A session asks for speech recognition, then for the microphone (the
 //! system's prompts, the first time; the app's `Info.plist` must explain
 //! both: `NSSpeechRecognitionUsageDescription` and
-//! `NSMicrophoneUsageDescription`, which `nsh package` writes for apps
-//! granted `speech`), listens, and reports to the root as
-//! [`EventKind::Speech`] events. One session runs at a time, on the main
-//! thread: the microphone is one.
+//! `NSMicrophoneUsageDescription`, which `nsh` adds from the crate's
+//! metadata when the feature is on), listens, and reports to the session's
+//! sink. Sessions run on the main thread, where the module's calls are
+//! taken: one at a time, the microphone is one.
 
-use std::{cell::RefCell, ffi::CStr, ptr, sync::OnceLock};
+use std::{
+    cell::{Cell, RefCell},
+    ffi::CStr,
+    ptr,
+    sync::OnceLock,
+};
 
 use block2::RcBlock;
 use dispatch2::DispatchQueue;
-use nsh_core::{
-    EventKind, EventPayload, ROOT_ID,
-    speech::{SpeechCommand, SpeechError, SpeechEvent, SpeechRequest},
-};
-use nsh_engine::EngineControl;
 use objc2::{
     msg_send,
     rc::{Allocated, Retained},
     runtime::{AnyClass, AnyObject, Bool},
 };
 use objc2_foundation::NSString;
+
+use super::{SpeechControl, SpeechError, SpeechRequest, SpeechSink};
 
 /// The usage descriptions the system requires before it asks the user.
 const USAGE_KEYS: [&str; 2] = [
@@ -40,13 +41,15 @@ const AUTHORIZED: isize = 3;
 thread_local! {
     /// The session running, on the main thread.
     static SESSION: RefCell<Option<Session>> = const { RefCell::new(None) };
+    /// The id the next session takes, on the main thread.
+    static NEXT: Cell<u64> = const { Cell::new(1) };
 }
 
 /// The session running.
 struct Session {
-    id: u32,
+    id: u64,
     request: SpeechRequest,
-    control: EngineControl,
+    sink: SpeechSink,
     /// Set once it listens; `None` while the user is asked.
     audio: Option<Audio>,
     /// `stop()` came: the recognizer finishes what it heard.
@@ -65,37 +68,69 @@ struct Audio {
     _recognizer: Retained<AnyObject>,
 }
 
-/// Applies `command`, reporting through `control`. On the main thread.
-pub fn command(control: &EngineControl, command: &SpeechCommand) {
-    match command {
-        SpeechCommand::Start { id, request } => start(control, *id, request.clone()),
-        SpeechCommand::Stop { id } => stop(*id),
-        SpeechCommand::Abort { id } => abort(*id),
-        _ => {}
+/// Whether the frameworks load: the system recognizes speech. Whether the
+/// user allows it is asked when a session starts.
+pub(super) async fn available() -> bool {
+    frameworks() && AnyClass::get(c"SFSpeechRecognizer").is_some()
+}
+
+/// Starts a session on the main thread, reporting to `events`.
+pub(super) fn start(request: SpeechRequest, events: SpeechSink) -> Box<dyn SpeechControl> {
+    let control = Control::default();
+    let id = control.id.clone();
+    main(move || {
+        let session = NEXT.with(|next| {
+            let session = next.get();
+            next.set(session + 1);
+            session
+        });
+        *id.lock().unwrap_or_else(|e| e.into_inner()) = Some(session);
+        begin(session, request, events);
+    });
+    Box::new(control)
+}
+
+/// A session as the module controls it, from any thread: each call is
+/// taken to the main thread, after the session's start.
+#[derive(Default)]
+struct Control {
+    /// The session's id, once it started on the main thread.
+    id: std::sync::Arc<std::sync::Mutex<Option<u64>>>,
+}
+
+impl Control {
+    /// Runs `f` with the session's id on the main thread.
+    fn on_main(&self, f: impl FnOnce(u64) + Send + 'static) {
+        let id = self.id.clone();
+        main(move || {
+            if let Some(id) = *id.lock().unwrap_or_else(|e| e.into_inner()) {
+                f(id);
+            }
+        });
     }
 }
 
-fn report(control: &EngineControl, id: u32, event: SpeechEvent) {
-    control.dispatch_event(
-        ROOT_ID,
-        EventKind::Speech,
-        EventPayload::Speech { id, event },
-    );
+impl SpeechControl for Control {
+    fn stop(&mut self) {
+        self.on_main(stop);
+    }
+
+    fn abort(&mut self) {
+        self.on_main(abort);
+    }
 }
 
-fn start(control: &EngineControl, id: u32, request: SpeechRequest) {
-    // The one running is aborted first: the core already ended it.
+fn begin(id: u64, request: SpeechRequest, sink: SpeechSink) {
+    // The module ended the one running before it started this one; one
+    // left here ends now all the same: the microphone is one.
     if let Some(running) = SESSION.with(|s| s.borrow().as_ref().map(|s| s.id)) {
-        abort(running);
+        finish(running, None);
+    }
+    if sink.is_ended() {
+        return;
     }
     if !frameworks() {
-        report(
-            control,
-            id,
-            SpeechEvent::End {
-                error: Some(SpeechError::Unavailable),
-            },
-        );
+        sink.end(Some(SpeechError::Unavailable));
         return;
     }
     if !usage_described() {
@@ -103,20 +138,14 @@ fn start(control: &EngineControl, id: u32, request: SpeechRequest) {
             "speech recognition needs NSSpeechRecognitionUsageDescription and \
              NSMicrophoneUsageDescription in the app's Info.plist"
         );
-        report(
-            control,
-            id,
-            SpeechEvent::End {
-                error: Some(SpeechError::NotAllowed),
-            },
-        );
+        sink.end(Some(SpeechError::NotAllowed));
         return;
     }
     SESSION.with(|s| {
         *s.borrow_mut() = Some(Session {
             id,
             request,
-            control: control.clone(),
+            sink,
             audio: None,
             stopping: false,
             text: String::new(),
@@ -144,7 +173,7 @@ fn start(control: &EngineControl, id: u32, request: SpeechRequest) {
 }
 
 /// Asks for the microphone, then listens.
-fn ask_microphone(id: u32) {
+fn ask_microphone(id: u64) {
     if !running(id) {
         return;
     }
@@ -176,12 +205,12 @@ fn ask_microphone(id: u32) {
 }
 
 /// Starts the microphone and the recognizer for session `id`.
-fn listen(id: u32) {
-    let Some((request, control, stopping)) = SESSION.with(|s| {
+fn listen(id: u64) {
+    let Some((request, sink, stopping)) = SESSION.with(|s| {
         s.borrow()
             .as_ref()
             .filter(|s| s.id == id)
-            .map(|s| (s.request.clone(), s.control.clone(), s.stopping))
+            .map(|s| (s.request.clone(), s.sink.clone(), s.stopping))
     }) else {
         return;
     };
@@ -196,14 +225,14 @@ fn listen(id: u32) {
                     session.audio = Some(audio);
                 }
             });
-            report(&control, id, SpeechEvent::Start);
+            sink.start();
         }
         Err(error) => finish(id, Some(error)),
     }
 }
 
 /// The recognizer and the microphone listening for session `id`.
-fn open(id: u32, request: &SpeechRequest) -> Result<Audio, SpeechError> {
+fn open(id: u64, request: &SpeechRequest) -> Result<Audio, SpeechError> {
     let (Some(recognizer_class), Some(request_class), Some(engine_class), Some(queue_class)) = (
         AnyClass::get(c"SFSpeechRecognizer"),
         AnyClass::get(c"SFSpeechAudioBufferRecognitionRequest"),
@@ -302,12 +331,12 @@ fn open(id: u32, request: &SpeechRequest) -> Result<Audio, SpeechError> {
 ///
 /// `result` is an `SFSpeechRecognitionResult` and `error` an `NSError`; on
 /// the main thread.
-unsafe fn recognized(id: u32, result: Option<&AnyObject>, error: Option<&AnyObject>) {
-    let Some(control) = SESSION.with(|s| {
+unsafe fn recognized(id: u64, result: Option<&AnyObject>, error: Option<&AnyObject>) {
+    let Some(sink) = SESSION.with(|s| {
         s.borrow()
             .as_ref()
             .filter(|s| s.id == id)
-            .map(|s| s.control.clone())
+            .map(|s| s.sink.clone())
     }) else {
         return;
     };
@@ -324,7 +353,7 @@ unsafe fn recognized(id: u32, result: Option<&AnyObject>, error: Option<&AnyObje
                 session.text = text.clone();
             }
         });
-        report(&control, id, SpeechEvent::Result { text, is_final });
+        sink.result(text, is_final);
         if is_final {
             finish(id, None);
             return;
@@ -344,14 +373,7 @@ unsafe fn recognized(id: u32, result: Option<&AnyObject>, error: Option<&AnyObje
         if error.is_none() {
             let text = SESSION.with(|s| s.borrow().as_ref().map(|s| s.text.clone()));
             if let Some(text) = text.filter(|t| !t.is_empty()) {
-                report(
-                    &control,
-                    id,
-                    SpeechEvent::Result {
-                        text,
-                        is_final: true,
-                    },
-                );
+                sink.result(text, true);
             }
         }
         finish(id, error);
@@ -378,7 +400,7 @@ fn speech_error(domain: &str, code: isize, stopping: bool) -> Option<SpeechError
 }
 
 /// Stops listening to session `id`: the recognizer finishes what it heard.
-fn stop(id: u32) {
+fn stop(id: u64) {
     let listening = SESSION.with(|s| {
         let mut s = s.borrow_mut();
         let Some(session) = s.as_mut().filter(|s| s.id == id) else {
@@ -400,18 +422,11 @@ fn stop(id: u32) {
                 s.borrow()
                     .as_ref()
                     .filter(|s| s.id == id)
-                    .map(|s| (s.text.clone(), s.control.clone()))
+                    .map(|s| (s.text.clone(), s.sink.clone()))
             });
-            if let Some((text, control)) = text {
+            if let Some((text, sink)) = text {
                 if !text.is_empty() {
-                    report(
-                        &control,
-                        id,
-                        SpeechEvent::Result {
-                            text,
-                            is_final: true,
-                        },
-                    );
+                    sink.result(text, true);
                 }
                 finish(id, None);
             }
@@ -419,8 +434,8 @@ fn stop(id: u32) {
     }
 }
 
-/// Ends session `id` at once; the core already reported its end.
-fn abort(id: u32) {
+/// Ends session `id` at once; the module already ended its sink.
+fn abort(id: u64) {
     let session = SESSION.with(|s| {
         let mut s = s.borrow_mut();
         if s.as_ref().is_some_and(|s| s.id == id) {
@@ -435,7 +450,7 @@ fn abort(id: u32) {
 }
 
 /// Ends session `id`, reporting its end (with `error`).
-fn finish(id: u32, error: Option<SpeechError>) {
+fn finish(id: u64, error: Option<SpeechError>) {
     let session = SESSION.with(|s| {
         let mut s = s.borrow_mut();
         if s.as_ref().is_some_and(|s| s.id == id) {
@@ -445,9 +460,9 @@ fn finish(id: u32, error: Option<SpeechError>) {
         }
     });
     if let Some(session) = session {
-        let control = session.control.clone();
+        let sink = session.sink.clone();
         close(session);
-        report(&control, id, SpeechEvent::End { error });
+        sink.end(error);
     }
 }
 
@@ -483,11 +498,11 @@ unsafe fn silence(audio: &Audio) {
     }
 }
 
-fn running(id: u32) -> bool {
+fn running(id: u64) -> bool {
     SESSION.with(|s| s.borrow().as_ref().is_some_and(|s| s.id == id))
 }
 
-/// Runs `f` on the main thread.
+/// Runs `f` on the main thread, after what was queued there before.
 fn main(f: impl FnOnce() + Send + 'static) {
     DispatchQueue::main().exec_async(f);
 }

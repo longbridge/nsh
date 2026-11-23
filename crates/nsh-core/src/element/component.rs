@@ -1022,6 +1022,9 @@ pub struct Registry {
     submodules: Arc<Vec<Registry>>,
     /// What each engine serving the set runs once ([`Registry::setup`]).
     setups: Arc<Vec<Setup>>,
+    /// The stand-ins its modules give headless runs, by name
+    /// ([`Registry::fake`]).
+    fakes: Arc<Vec<(&'static str, Arc<dyn crate::fake::Fake>)>>,
 }
 
 /// A function each engine serving a set runs once ([`Registry::setup`]).
@@ -1229,6 +1232,7 @@ impl Registry {
             out.tokens = out.tokens.or(set.tokens);
             out.scrollbars = out.scrollbars.or(set.scrollbars);
             Arc::make_mut(&mut out.setups).extend(set.setups.iter().cloned());
+            Arc::make_mut(&mut out.fakes).extend(set.fakes.iter().cloned());
             let types = Arc::make_mut(&mut out.types);
             for (name, ty) in set.types.iter() {
                 if let Some(old) = types.insert(name, ty.clone()) {
@@ -1348,6 +1352,36 @@ impl Registry {
     pub fn setup(&mut self, f: impl Fn() + Send + Sync + 'static) -> &mut Self {
         Arc::make_mut(&mut self.setups).push(Arc::new(f));
         self
+    }
+
+    /// Gives headless runs `fake` in place of what a module of the set asks
+    /// of the platform, under `name` (`"nsh-extra/speech"`: the set's
+    /// specifier and the module), which tests call it by
+    /// ([`crate::fake`]). Apps never use it; the headless driver installs
+    /// it before the app starts. An app's crate calls it from its
+    /// `#[native_module]` function.
+    ///
+    /// # Panics
+    ///
+    /// When the set has a fake of that name already.
+    #[track_caller]
+    pub fn fake(&mut self, name: &'static str, fake: Arc<dyn crate::fake::Fake>) -> &mut Self {
+        assert!(
+            self.fakes.iter().all(|(n, _)| *n != name),
+            "two fakes are named `{name}`{}",
+            of_set(self.ui_set.or(self.namespace))
+        );
+        Arc::make_mut(&mut self.fakes).push((name, fake));
+        self
+    }
+
+    /// The fakes [`Registry::fake`] gave the set and the sets served under
+    /// it, by name, in order.
+    pub fn fakes(&self) -> Vec<(&'static str, Arc<dyn crate::fake::Fake>)> {
+        self.sets()
+            .into_iter()
+            .flat_map(|set| set.fakes.iter().cloned())
+            .collect()
     }
 
     /// Runs the functions [`Registry::setup`] gave the set (a merged set's:

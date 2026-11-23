@@ -384,6 +384,13 @@ file provider 写入的 `content://` URI（`MediaStore.EXTRA_OUTPUT`）；`picke
 `ActivityError::NoActivity` 失败。`nsh-extra` 的相机
 （`crates/nsh-extra/src/camera/android.rs`）用到了它们全部。
 
+## 用 Rust 实现 Java 监听器
+
+通过接口回调的 Android API（投递到 UI 线程的 `Runnable`、框架的各种 `...Listener`）可以接收
+`proxy::implement(env, &["android.speech.RecognitionListener"], handler)` 创建的对象：一个实现这些接口的 Java 对象，它的调用会在
+Java 发起调用的线程上交给 `handler`（方法名和参数），所以 crate 不需要自带 Java 代码。Java 可能调用它期间要一直持有返回的 `Proxy`；
+丢弃之后，它的调用什么都不做。`nsh-extra` 的语音识别（`crates/nsh-extra/src/speech/android.rs`）就是这样监听 `SpeechRecognizer` 的。
+
 ## 来自其他代码的通知
 
 [`Notifications`](../modules/nsh.md#notifications) 报告应用自己显示的通知的点击。推送 SDK 等其他代码显示的通知，点击时打开应用的启动

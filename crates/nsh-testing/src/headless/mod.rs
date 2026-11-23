@@ -45,7 +45,6 @@ mod menus;
 mod net;
 mod pointer;
 mod selection;
-mod speech;
 mod windows;
 
 pub use audio::AudioCall;
@@ -389,9 +388,9 @@ pub struct Headless {
     failing_images: Vec<stub::Url>,
     /// The URLs that fail to open ([`Headless::fail_open_urls`]).
     failing_url_opens: Vec<stub::Url>,
-    /// The recognizer the test speaks into; `None` when the config gave
-    /// its own (`EngineConfig::speech`).
-    speech: Option<speech::FakeSpeech>,
+    /// The stand-ins the app's sets give headless runs, by name, installed
+    /// when the app started ([`Headless::call_fake`]).
+    fakes: Vec<(&'static str, Arc<dyn nsh_core::fake::Fake>)>,
     /// The speaker the app plays to; `None` when the config gave its own
     /// (`EngineConfig::audio`).
     audio: Option<audio::FakeAudio>,
@@ -469,9 +468,15 @@ impl Headless {
         M: TextEngine + 'static,
         F: FnOnce() -> M + Send + 'static,
     {
-        let speech = config.speech.is_none().then(speech::FakeSpeech::default);
-        if let Some(speech) = &speech {
-            config.speech = Some(Arc::new(speech.clone()));
+        // Before the app runs: its modules answer with their fakes, never
+        // with the machine's devices (a microphone).
+        let fakes: Vec<_> = config
+            .ui_sets
+            .iter()
+            .flat_map(nsh_core::element::Registry::fakes)
+            .collect();
+        for (_, fake) in &fakes {
+            fake.install();
         }
         let audio = config.audio.is_none().then(audio::FakeAudio::default);
         if let Some(audio) = &audio {
@@ -539,7 +544,7 @@ impl Headless {
             save_path: None,
             failing_images: Vec::new(),
             failing_url_opens: Vec::new(),
-            speech,
+            fakes,
             audio,
             step: "open".to_owned(),
             applied: 0,
@@ -1001,36 +1006,30 @@ impl Headless {
         Ok(())
     }
 
-    /// What the app's speech recognition sessions (`Speech.start`) asked
-    /// for so far, in order. Headless apps recognize speech: a session
-    /// listens at once (its `start`), and the test speaks for the user
-    /// ([`Headless::hear`]).
-    pub fn speech_requests(&self) -> Vec<nsh_core::speech::SpeechRequest> {
-        self.speech
-            .as_ref()
-            .map(speech::FakeSpeech::requests)
-            .unwrap_or_default()
-    }
-
-    /// The user says `text` (the whole transcript so far) to the session
-    /// listening, which reports it as a result that is not final; then
-    /// waits until the app is quiet. Fails when no session listens.
-    pub fn hear(&mut self, text: &str) -> Result<(), String> {
-        self.fake_speech()?.hear(text)?;
-        self.done()
-    }
-
-    /// Ends the session listening: with `error` (`no-speech`,
-    /// `not-allowed`, ...), or (`None`) as when the user stops talking: the
-    /// transcript as the final result, then the end (`no-speech` when
-    /// nothing was heard). Then waits until the app is quiet. The app's
-    /// `stop()` ends it the same way.
-    pub fn end_speech(
+    /// Calls `method` of the fake named `name` with `args` (JSON): a
+    /// stand-in a native module of the app's sets gives headless runs in
+    /// place of a device ([`nsh_core::fake`]; `"nsh-extra/speech"`'s
+    /// `hear` speaks for the user). Its answer, once the app is quiet
+    /// after it. Fails when no set gives that fake (the app does not turn
+    /// the module on) or the fake refuses the call.
+    pub fn call_fake(
         &mut self,
-        error: Option<nsh_core::speech::SpeechError>,
-    ) -> Result<(), String> {
-        self.fake_speech()?.end(error)?;
-        self.done()
+        name: &str,
+        method: &str,
+        args: &[nsh_core::JsonValue],
+    ) -> Result<nsh_core::JsonValue, String> {
+        self.catch_up();
+        let fake = self
+            .fakes
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, fake)| fake.clone())
+            .ok_or_else(|| {
+                format!("no module of the app gives the fake {name:?}: is the module turned on?")
+            })?;
+        let answer = fake.call(method, args)?;
+        self.done()?;
+        Ok(answer)
     }
 
     /// What the app asked of the speaker so far (`Sound`, `AudioPlayer`),
@@ -1052,12 +1051,6 @@ impl Headless {
             .ok_or_else(|| "the app plays sound with EngineConfig::audio".to_owned())?
             .end()?;
         self.done()
-    }
-
-    fn fake_speech(&self) -> Result<speech::FakeSpeech, String> {
-        self.speech
-            .clone()
-            .ok_or_else(|| "the app recognizes speech with EngineConfig::speech".to_owned())
     }
 
     /// Sends the app's `nsh/host` calls (the root's `Command::HostCall`) to
