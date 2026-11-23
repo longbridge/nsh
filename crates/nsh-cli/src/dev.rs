@@ -31,7 +31,6 @@ pub(crate) struct DevSession {
     release: bool,
     server: DevServer,
     /// Whether other machines may connect.
-    network: bool,
     devices: Arc<Devices>,
     /// The modules of the last good development build: updates are
     /// computed against it.
@@ -50,8 +49,18 @@ pub(crate) struct DevSession {
 pub(crate) struct Listen {
     /// Its port, zero for one the OS allocates.
     pub(crate) port: u16,
-    /// Whether other machines may connect, or only this one.
-    pub(crate) network: bool,
+    pub(crate) host: Ipv4Addr,
+}
+
+impl Listen {
+    pub(crate) fn new(port: u16, network: bool) -> Self {
+        let host = if network {
+            Ipv4Addr::UNSPECIFIED
+        } else {
+            Ipv4Addr::LOCALHOST
+        };
+        Self { port, host }
+    }
 }
 
 impl DevSession {
@@ -91,7 +100,6 @@ impl DevSession {
             src_dir,
             release,
             server,
-            network: listen.network,
             devices,
             hot: Default::default(),
             watch_files: Default::default(),
@@ -114,20 +122,30 @@ impl DevSession {
 
     /// WebSocket URL for hosts on this machine.
     pub(crate) fn local_url(&self) -> String {
-        format!(
-            "ws://127.0.0.1:{}{WS_PATH}",
-            self.server.local_addr().port()
-        )
+        format!("ws://{}{WS_PATH}", self.local_endpoint())
     }
 
     /// The web host's page for browsers on this machine.
     pub(crate) fn web_url(&self) -> String {
-        format!("http://127.0.0.1:{}/", self.server.local_addr().port())
+        format!("http://{}/", self.local_endpoint())
+    }
+
+    fn local_endpoint(&self) -> SocketAddr {
+        let addr = self.server.local_addr();
+        if addr.ip().is_unspecified() {
+            SocketAddr::from((Ipv4Addr::LOCALHOST, addr.port()))
+        } else {
+            addr
+        }
     }
 
     /// This machine's addresses other machines reach the server on.
     fn network_ips(&self) -> Vec<Ipv4Addr> {
-        if self.network { lan_ips() } else { Vec::new() }
+        match self.server.local_addr().ip() {
+            std::net::IpAddr::V4(ip) if ip.is_unspecified() => lan_ips(),
+            std::net::IpAddr::V4(ip) if !ip.is_loopback() => vec![ip],
+            _ => Vec::new(),
+        }
     }
 
     /// Prints where hosts can connect.
@@ -478,18 +496,11 @@ fn start_server(
     assets_root: &Path,
     devices: Arc<Devices>,
 ) -> anyhow::Result<DevServer> {
-    let Listen { port, network } = listen;
+    let Listen { port, host } = listen;
     if ui::stop_requested() {
         anyhow::bail!("development session is stopping");
     }
-    let addr = SocketAddr::from((
-        if network {
-            [0, 0, 0, 0]
-        } else {
-            [127, 0, 0, 1]
-        },
-        port,
-    ));
+    let addr = SocketAddr::from((host, port));
     DevServer::start(
         addr,
         nsh_js::BYTECODE_VERSION,
@@ -668,26 +679,33 @@ fn lan_ips() -> Vec<Ipv4Addr> {
 
 #[cfg(test)]
 mod tests {
+    use std::net::Ipv4Addr;
+
     use super::Listen;
 
     fn on_network(port: u16) -> Listen {
-        Listen {
-            port,
-            network: true,
-        }
+        Listen::new(port, true)
     }
 
     #[test]
     fn only_a_network_listen_is_open_to_other_machines() {
         let dir = std::env::temp_dir();
-        let local = Listen {
-            port: 0,
-            network: false,
-        };
+        let local = Listen::new(0, false);
         let server = super::start_server(local, &dir, Default::default()).unwrap();
         assert!(server.local_addr().ip().is_loopback());
         let server = super::start_server(on_network(0), &dir, Default::default()).unwrap();
         assert!(server.local_addr().ip().is_unspecified());
+    }
+
+    #[test]
+    fn explicit_host_is_the_bound_address() {
+        let listen = Listen {
+            port: 0,
+            host: Ipv4Addr::LOCALHOST,
+        };
+        let server =
+            super::start_server(listen, &std::env::temp_dir(), Default::default()).unwrap();
+        assert_eq!(server.local_addr().ip(), listen.host);
     }
 
     #[test]
