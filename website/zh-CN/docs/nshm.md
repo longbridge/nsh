@@ -374,8 +374,12 @@ fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("ios") {
         return;
     }
-    let sim = std::env::var("CARGO_CFG_TARGET_ABI").as_deref() == Ok("sim");
-    let slice = if sim { "ios-arm64_x86_64-simulator" } else { "ios-arm64" };
+    // 模拟器和 Mac Catalyst（`nsh run --target catalyst`）也是 iOS 目标。
+    let slice = match std::env::var("CARGO_CFG_TARGET_ABI").as_deref() {
+        Ok("sim") => "ios-arm64_x86_64-simulator",
+        Ok("macabi") => "ios-arm64_x86_64-maccatalyst",
+        _ => "ios-arm64",
+    };
     let root = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     println!("cargo:rustc-link-search=native={root}/vendor/Sdk.xcframework/{slice}");
     // +whole-archive is -force_load: it keeps Objective-C categories, like -ObjC.
