@@ -1393,7 +1393,7 @@ pub(crate) fn pasted(pasteboard: &NSPasteboard) -> nsh_core::PasteEvent {
 fn paste_item(item: &objc2_app_kit::NSPasteboardItem, paste: &mut nsh_core::PasteEvent) {
     let uri = item
         .stringForType(ns_string!("public.file-url"))
-        .and_then(|uri| crate::file_drop::local_file_uri(&uri));
+        .and_then(|uri| crate::file_drop::item_file_uri(&uri));
     if let Some(uri) = &uri {
         let types = item.types();
         // Finder can supply a file icon alongside the URL. Only probe
@@ -1570,6 +1570,19 @@ pub(crate) fn has_pasted_files(pasteboard: &NSPasteboard) -> bool {
             .map(|(_, kind)| *kind)
             .chain(["public.file-url"])
             .any(|kind| types.containsObject(&NSString::from_str(kind)))
+    })
+}
+
+/// Whether every item of `pasteboard` is a local file (a Finder copy, with
+/// the files' names as text beside them).
+pub(crate) fn holds_only_files(pasteboard: &NSPasteboard) -> bool {
+    let kind = NSString::from_str("public.file-url");
+    pasteboard.pasteboardItems().is_some_and(|items| {
+        !items.is_empty()
+            && items.iter().all(|item| {
+                item.stringForType(&kind)
+                    .is_some_and(|uri| crate::file_drop::item_file_uri(&uri).is_some())
+            })
     })
 }
 

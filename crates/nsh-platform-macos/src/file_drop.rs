@@ -359,7 +359,7 @@ impl PromisedDrop {
             .filter_map(|(_, path)| path)
             .collect::<Vec<_>>();
         drop(written);
-        let files = read_promised(&paths);
+        let files = read_files(&paths);
         if let Err(e) = std::fs::remove_dir_all(&self.folder) {
             log::warn!("cannot remove {}: {e}", self.folder.display());
         }
@@ -374,7 +374,7 @@ impl PromisedDrop {
 
 /// The files at `paths`, as a pick of up to as many files as one takes
 /// reads them (too large ones keep only their names and sizes).
-fn read_promised(paths: &[PathBuf]) -> Vec<PickedFile> {
+pub(crate) fn read_files(paths: &[PathBuf]) -> Vec<PickedFile> {
     let request = FilePickRequest::new(true, 0);
     finish_files(&request, read_picked_files(paths, &request))
 }
@@ -468,7 +468,7 @@ pub(crate) fn drop_uris(surface: &Surface, x: f32, y: f32, uris: Vec<String>) ->
                 .map(|uri| nsh_core::platform::file_mime_type(uri).to_owned())
                 .collect();
             let contents =
-                FileContents::new(read_promised(&paths), mime_types, Some(at)).with_uris(uris);
+                FileContents::new(read_files(&paths), mime_types, Some(at)).with_uris(uris);
             control.dispatch_event(
                 id,
                 EventKind::FileDrop,

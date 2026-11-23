@@ -690,11 +690,11 @@ export interface PasteEvent {
   text: string;
   /** The same content as HTML (`text/html`), with its formatting: what a browser, an office suite or a rich text editor copied; `""` when there was none. */
   html: string;
-  /** Files with their bytes: images (a screenshot, an image copied from a page or an app), as `File`s an app can upload. */
+  /** Files with their bytes: images (a screenshot, an image copied from a page or an app), and on macOS the files copied in Finder (up to 100 files and 512 MiB a paste), as `File`s an app can upload. */
   files: File[];
   /** Files larger than the input's `pasteMaxSize`, whose bytes were not read: their names, types and sizes, so the app can tell the user. */
   tooLarge: UnreadFile[];
-  /** `file:` URLs of local files copied in a file manager (as `onFileDrop`'s). */
+  /** `file:` URLs of local files copied in a file manager (as `onFileDrop`'s); one whose bytes are not in `files` or `tooLarge` could not be read. */
   uris: string[];
 }
 
@@ -1035,7 +1035,7 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         EventKind::Paste,
         on::INPUT,
         "(e: PasteEvent) => void",
-        "The user pasted (the keyboard's shortcut, a menu's Paste, a keyboard's image): the text, images as `File`s (files larger than `pasteMaxSize` in `tooLarge`, unread), local files' `file:` URLs. It comes before the `onChange` of the text it inserts; `pasteBehavior` decides whether the input inserts the text (images and files never are).",
+        "The user pasted (the keyboard's shortcut, a menu's Paste, a keyboard's image): the text, images as `File`s (files larger than `pasteMaxSize` in `tooLarge`, unread), local files' `file:` URLs. It comes before the `onChange` of the text it inserts, except on macOS for files copied in Finder, which comes once they are read; `pasteBehavior` decides whether the input inserts the text (images and files never are; on macOS neither are the names Finder copies beside its files, when the input listens to `onPaste`).",
     ),
     (
         EventKind::CaretMove,

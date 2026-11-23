@@ -624,11 +624,55 @@ impl Ctx {
             let s = view.state();
             (s.id, s.events.contains(EventKind::Paste))
         };
-        if listens {
-            let paste = crate::system::pasted(pasteboard);
-            surface.event(id, EventKind::Paste, EventPayload::Paste(Box::new(paste)));
+        if !listens {
+            return input.config.borrow().paste_behavior == nsh_core::PasteBehavior::Insert;
         }
-        input.config.borrow().paste_behavior == nsh_core::PasteBehavior::Insert
+        let paste = crate::system::pasted(pasteboard);
+        let paths: Vec<_> = paste
+            .uris
+            .iter()
+            .filter_map(|uri| crate::file_drop::file_path(uri))
+            .collect();
+        let mut control = None;
+        surface.control(|c| control = Some(c.clone()));
+        match control.filter(|_| !paths.is_empty()) {
+            // Local files (a Finder copy): read on a thread, as a drop's
+            // are, and reported once read; one that could not be read stays
+            // only in `uris` (the input's `pasteMaxSize` applies as to any
+            // pasted file).
+            Some(control) => {
+                let spawned = std::thread::Builder::new()
+                    .name("nsh-paste-files".into())
+                    .spawn(move || {
+                        let mut paste = paste;
+                        paste.files.extend(
+                            crate::file_drop::read_files(&paths)
+                                .into_iter()
+                                .filter(|file| file.status == nsh_core::picker::PickedStatus::Read)
+                                .map(|file| {
+                                    nsh_core::PastedFile::new(
+                                        file.name,
+                                        file.mime,
+                                        file.data.to_vec(),
+                                    )
+                                }),
+                        );
+                        control.dispatch_event(
+                            id,
+                            EventKind::Paste,
+                            EventPayload::Paste(Box::new(paste)),
+                        );
+                    });
+                if let Err(e) = spawned {
+                    log::warn!("cannot read the pasted files: {e}");
+                }
+            }
+            None => surface.event(id, EventKind::Paste, EventPayload::Paste(Box::new(paste))),
+        }
+        // A Finder copy also holds the files' names as text: the app that
+        // listens gets the files, the field not their names.
+        !crate::system::holds_only_files(pasteboard)
+            && input.config.borrow().paste_behavior == nsh_core::PasteBehavior::Insert
     }
 
     /// Whether the editor offers Paste for what a text view's own paste
