@@ -2366,7 +2366,6 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
     view.state_mut().input = Some(input);
 }
 
-
 thread_local! {
     /// The text view the last wheel event reached, whether it passed the
     /// event on, and the event's time (seconds).
