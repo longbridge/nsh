@@ -768,6 +768,12 @@ pub(super) struct Components {
     next_pick: u32,
     /// The sounds and players open, by id: where their events go.
     audio: FxHashMap<u32, crate::audio::AudioSink>,
+    /// The location requests waiting, by id: where their events go, and
+    /// whether one position ends the request (`current` does, a watch does
+    /// not).
+    location: FxHashMap<u32, (crate::location::LocationSink, bool)>,
+    /// The backend's watches running, by id.
+    location_watches: Vec<(u32, Box<dyn crate::location::LocationControl>)>,
     /// What notifications wait for ([`crate::notifications`]).
     notifications: Notifications,
     /// The links that open the app ([`crate::url_scheme`]).
@@ -977,6 +983,8 @@ impl Default for Components {
             picks: FxHashMap::default(),
             next_pick: 1,
             audio: FxHashMap::default(),
+            location: FxHashMap::default(),
+            location_watches: Vec::new(),
             notifications: Notifications::default(),
             url_schemes: UrlScheme::default(),
             second_instances: SecondInstances::default(),
@@ -6311,14 +6319,18 @@ impl<M: TextEngine> Core<M> {
     /// it gave one, else as commands on the root the platform answers with
     /// [`EventKind::Location`].
     fn location_action(&mut self, action: crate::element::LocationAction) {
-        use crate::element::LocationAction;
-        match action {
+        use crate::{
+            element::LocationAction,
+            location::{LocationCommand, LocationError},
+        };
+        let (id, command, sink, once) = match action {
             LocationAction::Available(answer) => {
                 let available = match &self.location {
                     Some(backend) => backend.available(),
                     None => self.components.environment.location,
                 };
                 answer.borrow_mut().deliver(available);
+                return;
             }
             LocationAction::Authorization(answer) => {
                 let authorization = match &self.location {
@@ -6326,7 +6338,134 @@ impl<M: TextEngine> Core<M> {
                     None => self.location_authorization,
                 };
                 answer.borrow_mut().deliver(authorization);
+                return;
             }
+            LocationAction::RequestAuthorization {
+                id,
+                background,
+                sink,
+            } => (
+                id,
+                LocationCommand::RequestAuthorization { id, background },
+                sink,
+                true,
+            ),
+            LocationAction::Current { id, request, sink } => {
+                (id, LocationCommand::Current { id, request }, sink, true)
+            }
+            LocationAction::Watch { id, request, sink } => {
+                (id, LocationCommand::Watch { id, request }, sink, false)
+            }
+            LocationAction::Stop(id) => {
+                if let Some((sink, _)) = self.components.location.remove(&id) {
+                    sink.end(id, None);
+                }
+                if let Some(index) = self
+                    .components
+                    .location_watches
+                    .iter()
+                    .position(|(watch, _)| *watch == id)
+                {
+                    self.components.location_watches.remove(index);
+                }
+                if self.location.is_none() {
+                    let _ = self.apply_op(Op::Command {
+                        id: crate::ROOT_ID,
+                        command: Command::Location(LocationCommand::Stop { id }),
+                    });
+                }
+                return;
+            }
+        };
+        if !self.access.allows_location() {
+            sink.end(
+                id,
+                Some(LocationError::new(
+                    crate::element::codes::ACCESS_DENIED,
+                    "the device's location is not granted: add `\"location\": true` to \
+                     capabilities in nsh.json",
+                )),
+            );
+            self.deny("the device's location is not granted: add `\"location\": true` to capabilities in nsh.json".into());
+            return;
+        }
+        let background = match &command {
+            LocationCommand::RequestAuthorization { background, .. } => *background,
+            LocationCommand::Current { request, .. } | LocationCommand::Watch { request, .. } => {
+                request.background
+            }
+            _ => false,
+        };
+        if background {
+            if !self.access.allows_location_background() {
+                sink.end(
+                    id,
+                    Some(LocationError::new(
+                        crate::element::codes::ACCESS_DENIED,
+                        "background location is not granted: add \"location\": \
+                         { \"background\": true } to capabilities in nsh.json",
+                    )),
+                );
+                return;
+            }
+            if !self.components.environment.location_background {
+                sink.end(
+                    id,
+                    Some(LocationError::unavailable(
+                        "this platform does not report the location while the app is not in front",
+                    )),
+                );
+                return;
+            }
+        }
+        self.components.location.insert(id, (sink.clone(), once));
+        match self.location.clone() {
+            Some(backend) => match command {
+                LocationCommand::RequestAuthorization { id, background } => {
+                    backend.request_authorization(id, background, sink)
+                }
+                LocationCommand::Current { id, request } => backend.current(id, request, sink),
+                LocationCommand::Watch { id, request } => {
+                    let control = backend.watch(id, request, sink);
+                    self.components.location_watches.push((id, control));
+                }
+                _ => {}
+            },
+            None => {
+                if !self.components.environment.location {
+                    self.components.location.remove(&id);
+                    sink.end(
+                        id,
+                        Some(LocationError::unavailable(
+                            "this platform reports no location",
+                        )),
+                    );
+                    return;
+                }
+                let _ = self.apply_op(Op::Command {
+                    id: crate::ROOT_ID,
+                    command: Command::Location(command),
+                });
+            }
+        }
+    }
+
+    /// Hands `event` to request `id`, and forgets it once it ended.
+    fn location_event(&mut self, id: u32, event: crate::location::LocationEvent) {
+        use crate::location::LocationEvent;
+        let Some((sink, once)) = self.components.location.get(&id).cloned() else {
+            return;
+        };
+        let ends = matches!(
+            event,
+            LocationEvent::Failed { .. } | LocationEvent::Ended { .. }
+        ) || (once && matches!(event, LocationEvent::Position { .. }));
+        sink.send(event);
+        if ends {
+            self.components.location.remove(&id);
+            self.components
+                .location_watches
+                .retain(|(watch, _)| *watch != id);
         }
     }
 
@@ -7801,6 +7940,13 @@ impl<M: TextEngine> Core<M> {
                     (_, _, error) => Err(error.unwrap_or_else(|| "no size".into())),
                 };
                 self.answer_image_info(request as u32, size);
+                true
+            }
+            EventKind::Location if id == crate::ROOT_ID => {
+                let EventPayload::Location { id: request, event } = payload else {
+                    return false;
+                };
+                self.location_event(*request, event.clone());
                 true
             }
             EventKind::Audio if id == crate::ROOT_ID => {

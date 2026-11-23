@@ -310,6 +310,28 @@ pub(crate) enum LocationAction {
     Available(AnswerSlot<bool>),
     /// What the app may read now; the answer resolves the slot.
     Authorization(AnswerSlot<crate::location::Authorization>),
+    /// Ask the user, for when-in-use or (with `background`) for the location
+    /// while the app is not in front, reporting the answer to `sink` as `id`.
+    RequestAuthorization {
+        id: u32,
+        background: bool,
+        sink: crate::location::LocationSink,
+    },
+    /// Report one position to `sink` as `id`, then end.
+    Current {
+        id: u32,
+        request: crate::location::LocationRequest,
+        sink: crate::location::LocationSink,
+    },
+    /// Report a position to `sink` as `id` each time it changes, until
+    /// [`Self::Stop`].
+    Watch {
+        id: u32,
+        request: crate::location::LocationRequest,
+        sink: crate::location::LocationSink,
+    },
+    /// Stop request `id`: what comes after it is dropped.
+    Stop(u32),
 }
 
 /// What a sound or a player asks of the core ([`Action::Audio`]).

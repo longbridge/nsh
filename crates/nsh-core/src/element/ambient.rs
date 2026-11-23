@@ -1131,6 +1131,104 @@ pub fn location_authorization() -> Answer<crate::location::Authorization> {
     answer
 }
 
+/// Reads the device's location once (TS: `Location.current()`): the call
+/// reports its position and then ends. Dropping it stops waiting.
+pub fn current_location(request: crate::location::LocationRequest) -> LocationCall {
+    location_call(|id, sink| super::LocationAction::Current { id, request, sink })
+}
+
+/// Asks the user (TS: `Location.requestAuthorization`): the call's first event
+/// is the answer, `Authorized` or `Failed`.
+pub fn request_location_authorization(background: bool) -> LocationCall {
+    location_call(|id, sink| super::LocationAction::RequestAuthorization {
+        id,
+        background,
+        sink,
+    })
+}
+
+/// Watches the device's location (TS: `Location.watch`): a position each time
+/// it changes, until the call is stopped or a failure ends it.
+pub fn watch_location(request: crate::location::LocationRequest) -> LocationCall {
+    location_call(|id, sink| super::LocationAction::Watch { id, request, sink })
+}
+
+/// Starts a location request, its events read through [`LocationCall`].
+fn location_call(
+    make: impl FnOnce(u32, crate::location::LocationSink) -> super::LocationAction,
+) -> LocationCall {
+    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+    let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let (sink, events) = crate::location::channel();
+    let executor = executor();
+    executor.act(Action::Location(make(id, sink)));
+    LocationCall {
+        id,
+        events,
+        executor: Rc::downgrade(&executor),
+        ended: false,
+    }
+}
+
+/// A location request the core runs ([`current_location`],
+/// [`request_location_authorization`], [`watch_location`]).
+pub struct LocationCall {
+    id: u32,
+    events: crate::location::LocationEvents,
+    executor: std::rc::Weak<Executor>,
+    ended: bool,
+}
+
+impl std::fmt::Debug for LocationCall {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocationCall")
+            .field("id", &self.id)
+            .field("ended", &self.ended)
+            .finish()
+    }
+}
+
+impl LocationCall {
+    /// The next event: `Pending` until one comes or the request ends.
+    pub fn poll_next(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<crate::location::LocationEvent>> {
+        if self.ended {
+            return std::task::Poll::Ready(None);
+        }
+        let polled = self.events.poll_next(cx);
+        if matches!(
+            polled,
+            std::task::Poll::Ready(None)
+                | std::task::Poll::Ready(Some(
+                    crate::location::LocationEvent::Failed { .. }
+                        | crate::location::LocationEvent::Ended { .. }
+                ))
+        ) {
+            self.ended = true;
+        }
+        polled
+    }
+
+    /// Stops the request: a watch stops reporting, a `current` stops waiting.
+    pub fn stop(&mut self) {
+        if self.ended {
+            return;
+        }
+        self.ended = true;
+        if let Some(executor) = self.executor.upgrade() {
+            executor.act(Action::Location(super::LocationAction::Stop(self.id)));
+        }
+    }
+}
+
+impl Drop for LocationCall {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
 /// Whether the app may show notifications (TS: `Notifications.permission`),
 /// without asking the user. To await in a task.
 pub fn notification_permission() -> Answer<crate::notifications::NotificationPermission> {
