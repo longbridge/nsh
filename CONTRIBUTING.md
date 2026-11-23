@@ -301,16 +301,19 @@ under `crates/` changes (components and modules are Rust and live in the host). 
 ```sh
 cargo run                                      # the gallery in an AppKit (macOS), GTK (Linux) or Win32 (Windows) window
 cargo run -- examples/counter                  # another app: its directory (App.tsx is the entry) or entry module
-cargo run -- --target catalyst                 # in the Mac Catalyst window (UIKit, phone-style)
 cargo run -- --target ios                      # in an iOS simulator
 cargo run -- --target android                  # on an Android device or emulator
 ```
+
+`--target catalyst` runs the iOS backend in a Mac Catalyst window. Use it only for work on Catalyst itself (its
+`macabi` code paths, the embedding SDK's Catalyst slice); on macOS the default AppKit host is the Mac app, and the
+iOS simulator shows what a phone shows.
 
 `nsh run` itself works too; in a checkout it builds the host it needs first:
 
 ```sh
 cargo build -p nsh-cli
-./target/debug/nsh run examples/gallery                    # Mac Catalyst window
+./target/debug/nsh run examples/gallery                    # AppKit window (the default on macOS)
 ./target/debug/nsh run examples/gallery --target ios       # iOS simulator
 ./target/debug/nsh run examples/gallery --target android   # emulator or device
 ./target/debug/nsh run examples/gallery --target linux     # GTK window (the default on Linux)

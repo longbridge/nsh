@@ -143,7 +143,6 @@ Run either app on your chosen platform:
 
 ```sh
 nsh run my-app --target ios        # iOS simulator; requires Xcode
-nsh run my-app --target catalyst   # Mac Catalyst window on macOS
 ```
 
 </details>

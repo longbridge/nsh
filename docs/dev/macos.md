@@ -5,8 +5,9 @@ its development host (`nsh run --target macos`), `crates/nsh-macos-app` the rele
 macos`. It follows the Linux backend's desktop design (`linux.md`: NSH picks views itself, scroll views keep offsets of
 their own, NSH moves pages and dialogs, draws no header or dialog look of its own, `desktop={{…}}` props apply) with the iOS
 backend's Apple drawing (CoreText, Core Graphics, Core Animation layers, ImageIO, `NSURLSession`, AVFoundation, WebKit).
-Mac Catalyst (`nsh-platform-ios` on `aarch64-apple-ios-macabi`) is selected with `--target catalyst`: it is
-UIKit, phone-style. In a checkout, `cargo run` runs the gallery here (`--target catalyst` for Catalyst). User-facing page: `website/docs/macos.md`.
+AppKit is the macOS target and the default. Mac Catalyst (`nsh-platform-ios` on `aarch64-apple-ios-macabi`,
+`--target catalyst`) is UIKit, phone-style, and only for Catalyst-specific work: its `macabi` paths and embedding in
+Catalyst apps. In a checkout, `cargo run` runs the gallery here. User-facing page: `website/docs/macos.md`.
 
 **Window model v2:** the main window this page describes is the invisible app host. It is made and never shown:
 the windows the app declares with `<Window>` (each an `NSWindow` of its own) are what shows, and a launch shows no
