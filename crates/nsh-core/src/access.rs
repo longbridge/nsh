@@ -47,8 +47,9 @@
 //! host's events need no grant, the host sends them. `application` lets
 //! the app act on the application as a whole (`nsh/desktop`'s main window,
 //! application menu, tray, global shortcuts, `Application.quit`, `restart`
-//! and `setLaunchAtLogin`; context menus, shown in the app's own view, and
-//! the windows `windows` grants need none); `homeDir` lets `os.homedir()` tell the
+//! and `setLaunchAtLogin`, and `nsh/mobile`'s `AppSettings.open`, the app's
+//! page in the system's settings; context menus, shown in the app's own
+//! view, and the windows `windows` grants need none); `homeDir` lets `os.homedir()` tell the
 //! user's home directory. An app without `"capabilities"` (a standalone
 //! app, its developer's own) retains unrestricted HTTP, web views, the
 //! status bar, the clipboard, the picker, the share sheet, speech
@@ -662,9 +663,10 @@ pub struct Capabilities {
     pub notifications: bool,
     /// The app may play sound (`Sound` and `AudioPlayer` of `nsh`).
     pub audio: bool,
-    /// The app may act on the application as a whole (`nsh/desktop`): the
-    /// main window, the application menu, the tray, global shortcuts,
-    /// quitting, restarting and launching at login.
+    /// The app may act on the application as a whole: the main window, the
+    /// application menu, the tray, global shortcuts, quitting, restarting
+    /// and launching at login (`nsh/desktop`), and the app's page in the
+    /// system's settings (`nsh/mobile`'s `AppSettings`).
     pub application: bool,
     /// `os.homedir()` may tell the user's home directory.
     pub home_dir: bool,
@@ -2494,7 +2496,8 @@ impl Access {
 
     /// Whether the app may act on the application as a whole: the main
     /// window, the application menu, the tray, global shortcuts, quitting,
-    /// restarting and launching at login (`nsh/desktop`).
+    /// restarting and launching at login (`nsh/desktop`), and the app's page
+    /// in the system's settings (`nsh/mobile`'s `AppSettings`).
     pub fn allows_application(&self) -> bool {
         self.each(|c| c.application)
     }

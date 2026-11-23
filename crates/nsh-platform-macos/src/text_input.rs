@@ -28,7 +28,8 @@
 //! selection changes and the end of editing; it also learns when it takes
 //! the focus. Text views are subclassed for their focus; the rest comes to
 //! an [`InputDelegate`] (`NSTextFieldDelegate` / `NSTextViewDelegate`):
-//! changes, return, Escape and Tab.
+//! changes, return, Escape, Tab and Up/Down (reported without taking
+//! AppKit's caret movement away).
 //!
 //! Every user edit increments the input's edit count and reports
 //! `onChangeText` with it (always, as the engine keeps the text); a value
@@ -78,10 +79,10 @@ use objc2_app_kit::{
     NSDraggingInfo, NSEvent, NSEventModifierFlags, NSEventType, NSFocusRingType,
     NSFontAttributeName, NSForegroundColorAttributeName, NSGestureRecognizer,
     NSGestureRecognizerState, NSLineBreakMode, NSMutableParagraphStyle,
-    NSParagraphStyleAttributeName, NSPasteboard, NSResponder, NSScrollView, NSSecureTextField,
-    NSSpellChecker, NSText, NSTextAlignment, NSTextDelegate, NSTextField, NSTextFieldDelegate,
-    NSTextInputClient, NSTextStorage, NSTextView, NSTextViewDelegate, NSValidatedUserInterfaceItem,
-    NSView, NSWritingDirection,
+    NSParagraphStyleAttributeName, NSPasteboard, NSResponder, NSScrollElasticity, NSScrollView,
+    NSSecureTextField, NSSpellChecker, NSText, NSTextAlignment, NSTextDelegate, NSTextField,
+    NSTextFieldDelegate, NSTextInputClient, NSTextStorage, NSTextView, NSTextViewDelegate,
+    NSValidatedUserInterfaceItem, NSView, NSWritingDirection,
 };
 use objc2_core_foundation::{CGAffineTransform, CGFloat, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGPath;
@@ -403,6 +404,22 @@ impl Ctx {
     /// A text view's text scrolled, or its size or the viewport's changed.
     fn scrolled(&self) {
         if let Some((surface, view, input)) = self.get() {
+            report_scroll(&surface, &view, &input);
+        }
+    }
+
+    /// A text view or its viewport changed size: it bounces only while its
+    /// text overflows, then reports where it is.
+    fn resized(&self) {
+        if let Some((surface, view, input)) = self.get() {
+            if let Editor::Area {
+                scroller,
+                view: text,
+                ..
+            } = &*input.editor.borrow()
+            {
+                fit_elasticity(scroller, text);
+            }
             report_scroll(&surface, &view, &input);
         }
     }
@@ -821,7 +838,7 @@ impl Ctx {
     }
 
     /// A command of the editor's key bindings: return, Escape, Tab,
-    /// backspace. True if it was handled here.
+    /// backspace and Up/Down. True if it was handled here.
     fn command(&self, text_view: &NSTextView, command: Sel, multiline: bool) -> bool {
         let Some(input) = self.input.upgrade() else {
             return false;
@@ -871,6 +888,13 @@ impl Ctx {
                 tab(&surface, &from, backward);
             }
             return true;
+        }
+        // Report navigation for a list under the field without taking
+        // AppKit's caret movement away.
+        if command == sel!(moveUp:) {
+            self.key_press("ArrowUp");
+        } else if command == sel!(moveDown:) {
+            self.key_press("ArrowDown");
         }
         // Backspace in an empty input deletes nothing, so no change
         // reports it.
@@ -1799,8 +1823,11 @@ impl InputPointer {
             return;
         };
         let root = crate::input::root_in(&surface, &window);
-        crate::input::enter(&surface, (root.id() != nsh_core::ROOT_ID).then_some(root));
-        crate::input::event(&surface, event);
+        crate::input::report_hosted(
+            &surface,
+            (root.id() != nsh_core::ROOT_ID).then_some(root),
+            event,
+        );
     }
 }
 
@@ -1850,6 +1877,24 @@ define_class!(
                     self.forward(event);
                 }
                 self.ivars().forwarding.set(false);
+            }
+        }
+
+        /// A scroll over the padding goes to the editor, as one over its
+        /// text does: a multiline input scrolls its text, and what it does
+        /// not take goes up the editor's responder chain (through this
+        /// pad) to the input's views, never to a view under the input (a
+        /// web view the input floats over).
+        #[unsafe(method(scrollWheel:))]
+        fn scroll_wheel(&self, event: &NSEvent) {
+            // The editor is the topmost subview (the placeholder is below it).
+            match self.subviews().lastObject() {
+                Some(editor) if !self.ivars().forwarding.replace(true) => {
+                    editor.scrollWheel(event);
+                    self.ivars().forwarding.set(false);
+                }
+                // SAFETY: NSResponder's own handling (passes it up).
+                _ => unsafe { msg_send![super(self), scrollWheel: event] },
             }
         }
     }
@@ -1977,7 +2022,7 @@ define_class!(
         /// viewport a built-in bar shows.
         #[unsafe(method(textFrameChanged:))]
         fn text_frame_changed(&self, _notification: &NSNotification) {
-            self.ivars().scrolled();
+            self.ivars().resized();
         }
     }
 
@@ -2337,8 +2382,8 @@ fn new_editor(
                     Some(&clip),
                 );
         }
-        // A built-in bar also follows the text's height and the viewport's
-        // (`InputConfig::replaced`).
+        // A bar of the app's also follows the text's height and the
+        // viewport's (`InputConfig::report_scroll`).
         view.setPostsFrameChangedNotifications(true);
         clip.setPostsFrameChangedNotifications(true);
         for object in [&***view as &NSView, &*clip] {
@@ -2584,10 +2629,26 @@ pub(crate) fn deleted(view: &NshView) {
     input.clear_undo(&editor);
 }
 
-/// Reports how far a multiline input's text scrolled while a built-in bar
-/// takes the place of its indicator (`InputConfig::replaced`).
+/// A multiline input's text bounces at its ends only while it is taller than
+/// its viewport. AppKit's vertical scroll views bounce whatever their content,
+/// so a text that fits, as a field growing with its text always does, would
+/// still move with every swipe over it, while a browser's text area that fits
+/// does not move.
+fn fit_elasticity(scroller: &NSScrollView, text: &NSTextView) {
+    let elasticity = if text.frame().size.height > scroller.contentSize().height {
+        NSScrollElasticity::Automatic
+    } else {
+        NSScrollElasticity::None
+    };
+    if scroller.verticalScrollElasticity() != elasticity {
+        scroller.setVerticalScrollElasticity(elasticity);
+    }
+}
+
+/// Reports how far a multiline input's text scrolled while a bar of the
+/// app's follows it (`InputConfig::report_scroll`).
 fn report_scroll(surface: &Surface, view: &NshView, input: &InputState) {
-    if !input.config.borrow().replaced {
+    if !input.config.borrow().report_scroll {
         return;
     }
     let Editor::Area {

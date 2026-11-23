@@ -1225,7 +1225,7 @@ fn wait_for_frame(surface: &Rc<Surface>, view: &NshView) {
 
 /// The size `view` shows its image at, and the look its filters give it.
 fn want(view: &NshView) -> (Want, Look) {
-    let scale = view.ns().window().map_or(2.0, |w| w.backingScaleFactor());
+    let scale = crate::view::backing_scale_of(view.ns());
     let s = view.state();
     let filters = s
         .style

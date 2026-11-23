@@ -173,6 +173,11 @@ pub(super) struct Overlays {
     pub(super) cancel: bool,
     /// A hint is shown: Escape is bound (it hides it).
     pub(super) hint_escape: bool,
+    /// The keyboard focus is inside the top overlay listening to
+    /// `onCancel`, on a view whose `captureKeys` (or an enabled
+    /// ancestor's within that overlay) takes Escape: the key is the
+    /// content's, so the overlay does not bind it (#2424).
+    pub(super) escape_to_focus: bool,
     /// The anchors of the hints in the view listening to the pointer
     /// (desktops), checked by id.
     pub(super) hinting: Vec<(Key, NodeId)>,
@@ -1242,6 +1247,10 @@ impl<M: TextEngine> Core<M> {
         if !self.overlay_state.cancel && !self.overlay_state.hint_escape {
             return None;
         }
+        // The focused content takes Escape itself: no binding above it.
+        if self.overlay_state.escape_to_focus && !self.overlay_state.hint_escape {
+            return None;
+        }
         let escape = Keystroke::parse_with("escape", false).ok()?;
         Some(KeyBinding::new(ESCAPE_BINDING, escape, When::Always, false))
     }
@@ -1261,7 +1270,11 @@ impl<M: TextEngine> Core<M> {
             return;
         };
         if self.overlay(key).is_some_and(|s| s.config.hint.is_none()) {
-            self.overlay_cancel();
+            // Bound for a hint lower down: the focused content of this
+            // overlay keeps Escape.
+            if !self.overlay_state.escape_to_focus {
+                self.overlay_cancel();
+            }
             return;
         }
         let state = self.overlay_mut(key).expect("overlay");
@@ -1273,6 +1286,61 @@ impl<M: TextEngine> Core<M> {
         // Shown by the app (`open`) or the pointer and focus: it asks to
         // hide either way.
         self.hint_changed(key, false, HintReason::Escape);
+    }
+
+    /// Whether the keyboard focus is inside the top shown overlay listening
+    /// to `onCancel` and it, or an enabled ancestor within that overlay,
+    /// captures Escape (`captureKeys`): the content, like an editor in a
+    /// popover, handles Escape first, as a focused element does on the
+    /// Web before the page's own handlers. Back and the screen reader's
+    /// escape gesture still cancel the overlay.
+    pub(super) fn focus_takes_escape(&self) -> bool {
+        if !self.overlay_state.cancel {
+            return false;
+        }
+        let Some((focus, focus_id)) = self.focus else {
+            return false;
+        };
+        if self
+            .nodes
+            .get(focus as usize)
+            .is_none_or(|n| n.id != focus_id)
+        {
+            return false;
+        }
+        let top = self.overlays.iter().rev().copied().find(|&k| {
+            self.overlay(k).is_some_and(|s| s.host.is_some())
+                && self.nodes[k as usize].events.contains(EventKind::Cancel)
+        });
+        let Some(top) = top else {
+            return false;
+        };
+        let Ok(escape) = Keystroke::parse_with("escape", false) else {
+            return false;
+        };
+        // A native text input keeps its own keys and captures none.
+        if self.nodes[focus as usize].kind == Kind::Input {
+            return false;
+        }
+        let mut key = focus;
+        let mut captured = false;
+        loop {
+            if key == top {
+                return captured;
+            }
+            let node = &self.nodes[key as usize];
+            if !captured
+                && node.props.as_ref().is_some_and(|p| {
+                    !p.accessibility.state.disabled && p.key_capture.captures_key(Some(&escape))
+                })
+            {
+                captured = true;
+            }
+            if node.parent == NO_KEY {
+                return false;
+            }
+            key = node.parent;
+        }
     }
 
     /// Escape or back: `onCancel` of the top overlay listening to it;
@@ -1331,6 +1399,31 @@ impl<M: TextEngine> Core<M> {
         if event.pointer_type != Some(PointerType::Mouse) || self.overlay_state.watched.is_empty() {
             return Vec::new();
         }
+        self.presses_on(id, event.page_position)
+    }
+
+    /// A press at `page` that went to view `id`'s hosted native content
+    /// (a web view's page takes its presses, and the platform does not
+    /// pick them through the core): the shown overlays watching presses
+    /// that `id` is outside of hear `onPressOutside`, as for a press on
+    /// any other view.
+    ///
+    /// Returns those events for the caller to hand out, as
+    /// [`Core::context_menu_presses_outside`].
+    pub fn presses_on_native(
+        &mut self,
+        id: NodeId,
+        page: Point<Points>,
+    ) -> Vec<(NodeId, EventPayload)> {
+        if self.overlay_state.watched.is_empty() {
+            return Vec::new();
+        }
+        self.presses_on(id, page)
+    }
+
+    /// The `onPressOutside` events of a press at `page` on `id` and its
+    /// ancestors.
+    fn presses_on(&mut self, id: NodeId, page: Point<Points>) -> Vec<(NodeId, EventPayload)> {
         let Ok(mut key) = self.key(id) else {
             return Vec::new();
         };
@@ -1339,7 +1432,7 @@ impl<M: TextEngine> Core<M> {
             path.push(self.nodes[key as usize].id);
             key = self.nodes[key as usize].parent;
         }
-        self.presses_outside(event.page_position, &path)
+        self.presses_outside(page, &path)
     }
 
     /// A press beyond the root view, at `page` in its coordinates: on what
@@ -1426,7 +1519,14 @@ impl<M: TextEngine> Core<M> {
     /// The room overlay `key` shown in `host` keeps to beside its anchor:
     /// the root view's safe area less the overlay's `margin`, or the area
     /// the platform shows the root view's overlays in
-    /// ([`Core::set_overlay_area`]).
+    /// ([`Core::set_overlay_area`]). In the surface's root view it also
+    /// leaves out what the software keyboard covers of the view's bottom
+    /// (the environment's keyboard height, which includes the bottom safe
+    /// area under it), so a popover flips or shrinks above the keyboard
+    /// rather than go under it, as a panel docked to the bottom is lifted
+    /// above it. That height is measured over the surface's root view, so
+    /// a modal's root view keeps to its own insets; the platform's area
+    /// leaves the keyboard out already.
     fn overlay_area(&self, key: Key, host: NodeId) -> Option<Bounds<Points>> {
         let config = self.overlay(key)?.config;
         let m = config.margin.0;
@@ -1438,12 +1538,18 @@ impl<M: TextEngine> Core<M> {
             return Some(inset(area, [m, m, m, m]));
         }
         let (size, insets) = self.overlay_host_size(host)?;
+        let bottom = match host {
+            ROOT_ID => insets
+                .bottom
+                .max(self.components.environment.keyboard_height),
+            _ => insets.bottom,
+        };
         Some(inset(
             rect(0.0, 0.0, size.width.0, size.height.0),
             [
                 insets.top.0 + m,
                 insets.right.0 + m,
-                insets.bottom.0 + m,
+                bottom.0 + m,
                 insets.left.0 + m,
             ],
         ))

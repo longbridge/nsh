@@ -182,7 +182,7 @@ fn open_sets_the_environment_and_routes_answer_requests() {
     let results = run_file(&run, &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
-    assert_eq!(results.len(), 14);
+    assert_eq!(results.len(), 15);
 }
 
 #[test]
@@ -387,6 +387,15 @@ fn a_press_fails_on_a_view_another_covers() {
     let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 4);
+}
+
+#[test]
+fn comments_beside_flow_function_children_keep_their_accessors() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/flow-comments");
+    let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
     assert_eq!(results.len(), 3);
 }
 
@@ -446,7 +455,7 @@ fn a_mouse_drag_selects_in_a_selectable_view() {
     let results = run_file(&run, &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
-    assert_eq!(results.len(), 5);
+    assert_eq!(results.len(), 6);
 }
 
 #[test]
@@ -622,7 +631,7 @@ fn a_test_plays_the_embedding_app() {
     let results = run_file(&run, &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
-    assert_eq!(results.len(), 5);
+    assert_eq!(results.len(), 6);
 }
 
 #[test]
@@ -636,6 +645,14 @@ fn span_styles_follow_id_updates_and_reject_empty_spans() {
 #[test]
 fn view_styles_read_background_and_opacity() {
     let file = todo().parent().unwrap().join("queries/ViewStyles.test.tsx");
+    let results = run_file(&test_run(None), &file, &mut |_| {}).unwrap();
+    assert_eq!(results.len(), 1);
+    assert!(results[0].failure.is_none(), "{:?}", results[0]);
+}
+
+#[test]
+fn layout_and_accessibility_read_what_is_on_screen() {
+    let file = todo().parent().unwrap().join("queries/Layout.test.tsx");
     let results = run_file(&test_run(None), &file, &mut |_| {}).unwrap();
     assert_eq!(results.len(), 1);
     assert!(results[0].failure.is_none(), "{:?}", results[0]);
@@ -672,3 +689,5 @@ fn input_targets_report_document_values_and_do_not_edit_covering_fields() {
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
 }
+
+mod drag;

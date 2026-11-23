@@ -18,6 +18,16 @@ function App() {
         <Text testID="second">Gamma delta</Text>
       </View>
       <TextView testID="notes" selectable onSelectionChange={heard} markdown={"- one\n- two"} />
+      <View testID="formulas" selectable onSelectionChange={heard} style={{ alignItems: "flex-start" }}>
+        <Text testID="lead">Lead in</Text>
+        <Text testID="inline">
+          Area is <View copyText="$x^2$" style={{ width: 20, height: 10 }} /> here.
+        </Text>
+        <TextView
+          markdown={"Side $y$ end."}
+          renderMath={(math) => <View copyText={`$${math.tex}$`} style={{ width: 10, height: 10 }} />}
+        />
+      </View>
       <Text testID="outside">Elsewhere</Text>
       <View testID="clear" onPress={() => article.clearSelection()}>
         <Text>Clear</Text>

@@ -105,7 +105,10 @@ are its [spans](./text.md#spans); inline code is a span with a [span background]
 
 With `selectable`, the whole document selects as one, as a web page does: a drag (or, on touch screens, a long press
 and the handles) runs from one paragraph, list item, cell or code block to the next, and Copy takes the text of them
-all. A `selectable` `TextView` selects as one of its own; inside a
+all, leaving generated markers and controls (bullets, numbers, task checkmarks, alert icons, disclosure triangles and
+action buttons) out of the selection. A part's classes or styles can take one back in: with
+`classes={{ listMarker: "select-text" }}`, bullets and numbers are selected and copied with their items. A
+`selectable` `TextView` selects as one of its own; inside a
 [selectable view](./text-selection.md), its selection also runs on into the texts and other `TextView`s around it.
 
 What `TextView` adds is the rest: reading Markdown, HTML or a document into blocks, the views around the texts (lists,
@@ -494,6 +497,12 @@ start of the line. An image in a line of text keeps the size it asks for.
 
 `Highlighted` and `MathView` (`highlighted` and `math_view` in Rust) stand for the app's own components (a
 highlighter, a formula renderer, or a component of its Rust crate). Without `renderMath` `TextView` typesets a formula itself (`math` and `mathBlock` parts) with KaTeX's TeX support and fonts, in the text's color, the same on every platform; TeX it cannot read shows as its source in monospace.
+
+A copy of a selected paragraph gives a formula in its text (`$…$`) as its source, `$x^2$`. Formula blocks (`$$…$$`)
+are not in a text and stay out of a copy. A formula of `renderMath` copies as its source when the
+view it returns has that as its [`copyText`](./text.md#inline-views-and-images):
+`` renderMath={(math) => <MathView tex={math.tex} copyText={`$${math.tex}$`} />} `` (in Rust,
+`.copy_text(format!("${}$", math.tex))`).
 
 ## Markdown extensions
 

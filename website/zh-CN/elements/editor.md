@@ -179,6 +179,8 @@ keymap.bind({
 });
 ```
 
+编辑器有焦点时，它自己的绑定排在应用的绑定之前：无论应用把 Mod+Enter 绑给了什么，它都会在下方插入一行。要拿到这样的按键（例如查询编辑器用 Mod+Enter 执行其中的文本），在编辑器有焦点时（`onFocus` / `onBlur`）用 [`keymap`](../modules/nsh.md#keymap) 的 `overFocused: true` 绑定它。
+
 <a id="find-and-replace"></a>
 
 ## 查找与替换

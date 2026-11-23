@@ -978,7 +978,7 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// The padding and gaps a list's `contentClass` sets.
+    /// The padding, gaps and cell alignment a list's `contentClass` sets.
     fn list_content(&self, key: Key) -> crate::ListContentStyle {
         let Some(style) = self.part_resolved(key, Part::Content) else {
             return crate::ListContentStyle::default();
@@ -988,6 +988,12 @@ impl<M: TextEngine> Core<M> {
             _ => crate::geometry::Points::ZERO,
         };
         let p = &style.layout.padding;
+        let align = style.layout.align_items;
+        let align_items = (align == taffy::AlignItems::STRETCH
+            || align == taffy::AlignItems::FLEX_START
+            || align == taffy::AlignItems::CENTER
+            || align == taffy::AlignItems::FLEX_END)
+            .then_some(align);
         crate::ListContentStyle {
             padding: crate::EdgeInsets {
                 top: px(p.top),
@@ -997,6 +1003,7 @@ impl<M: TextEngine> Core<M> {
             },
             row_gap: px(style.layout.gap.height),
             column_gap: px(style.layout.gap.width),
+            align_items,
         }
     }
 
@@ -1968,7 +1975,8 @@ impl<M: TextEngine> Core<M> {
         let paragraph = old.number_of_lines != props.number_of_lines
             || old.selectable != props.selectable
             || old.ellipsize != props.ellipsize
-            || old.no_wrap != props.no_wrap;
+            || old.no_wrap != props.no_wrap
+            || old.pretty != props.pretty;
         let pointer = old.pointer_events != props.pointer_events;
         let none = Some(crate::props::PointerEvents::None);
         match (old.pointer_events == none, props.pointer_events == none) {
@@ -1983,12 +1991,16 @@ impl<M: TextEngine> Core<M> {
             || old.selection_color != props.selection_color;
         let selection = old.selection_color != props.selection_color;
         let (props_no_wrap, props_selectable) = (props.no_wrap, props.selectable);
+        let pretty = old.pretty != props.pretty;
         node.class_props = (props != ClassProps::default()).then(|| Box::new(props));
         let kind = node.kind;
         if paragraph && kind == Kind::Text {
             self.mark_text_block(key);
         }
-        if (old.no_wrap != props_no_wrap || old.selectable != props_selectable || selection)
+        if (old.no_wrap != props_no_wrap
+            || old.selectable != props_selectable
+            || selection
+            || pretty)
             && kind != Kind::Text
         {
             // The texts inside inherit them.

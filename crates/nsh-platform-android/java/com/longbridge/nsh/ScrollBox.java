@@ -33,6 +33,13 @@ final class ScrollBox extends FrameLayout implements Node {
     final int id;
     final Decor decor = new Decor();
 
+    // `clipPath`: what it draws shows, and touches reach it and its
+    // children, only inside it (`Decor.drawClipped`, `Decor.clipsOut`).
+    @Override
+    public void draw(android.graphics.Canvas canvas) {
+        decor.drawClipped(canvas, this, () -> super.draw(canvas));
+    }
+
     /** An outer box shadow draws outside the bounds, and compositing the
      * view at alpha < 1 into the bounds-clipped offscreen buffer would cut
      * it; such a view reports no overlapping rendering, so the alpha
@@ -988,6 +995,20 @@ final class ScrollBox extends FrameLayout implements Node {
         return scroller.getHeight();
     }
 
+    /** Room still scrollable left, right, up and down (px), including content insets and zoom. */
+    float[] scrollRoom() {
+        int x = scroller.getScrollX(), y = scroller.getScrollY();
+        int maxX, maxY;
+        if (scroller instanceof ZScroll) {
+            maxX = ((ZScroll) scroller).maxX();
+            maxY = ((ZScroll) scroller).maxY();
+        } else {
+            maxX = horizontal ? Math.max(0, content.getWidth() + scroller.getPaddingLeft() + scroller.getPaddingRight() - scroller.getWidth()) : 0;
+            maxY = horizontal ? 0 : Math.max(0, content.getHeight() + scroller.getPaddingTop() + scroller.getPaddingBottom() - scroller.getHeight());
+        }
+        return new float[] {Math.max(0, x), Math.max(0, maxX - x), Math.max(0, y), Math.max(0, maxY - y)};
+    }
+
     /** Scrolls as the user would: not one of the core's scrolls (`applied`). */
     void hostScrollBy(int dx, int dy, boolean animated) {
         if (scroller instanceof ZScroll) {
@@ -1493,6 +1514,8 @@ final class ScrollBox extends FrameLayout implements Node {
     @Override
     public boolean dispatchTouchEvent(MotionEvent e) {
         int action = e.getActionMasked();
+        // Where its clip path cuts it away, the touch goes to the views below.
+        if (action == MotionEvent.ACTION_DOWN && decor.clipsOut(this, e.getX(), e.getY())) return false;
         touching = action != MotionEvent.ACTION_UP && action != MotionEvent.ACTION_CANCEL;
         if (action == MotionEvent.ACTION_DOWN) {
             // The user scrolls now: what was owed no longer applies.

@@ -22,8 +22,9 @@ use nsh_core::{
     Checked, Color, Command, DialogButtonStyle, EditAction, HeaderTitleAlign, InputConfig,
     KeyCapture, KeyboardDismissMode, KeyboardTaps, KeyboardType, LayoutCurve, LayoutProperty,
     LayoutTransition, LiveRegion, ModalAnimation, ModalPresentation, MountBatch, MountItem,
-    NativeProps, PointerEvents, ResizeMode, ReturnKeyType, ScreenAnimation, ScreenConfig,
-    SnapAlignment, StatusBarStyle, SubmitBehavior, ViewKind, ViewProps, ViewStyle, WebSource,
+    NativeProps, PanDirection, PanEdge, PointerEvents, ResizeMode, ReturnKeyType, ScreenAnimation,
+    ScreenConfig, SnapAlignment, StatusBarStyle, SubmitBehavior, ViewKind, ViewProps, ViewStyle,
+    WebSource,
     audio::AudioCommand,
     geometry::{DefiniteLength, REM_SIZE},
 };
@@ -234,6 +235,13 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                 // The one color all of it is drawn in, if there is one: a
                 // change of it transitions (`transition-colors`, `TextBox`).
                 opt_color(&mut e, text.uniform_color());
+                // What attachments copy as: offset, then the string's
+                // object (`TextBox.copied`).
+                e.int(text.copy_texts.len() as i32);
+                for copy in &text.copy_texts {
+                    e.int(copy.index as i32);
+                    e.string(copy.text.to_string());
+                }
             }
             MountItem::Events { id, events } => {
                 e.int(EVENTS);
@@ -667,6 +675,11 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                         e.int(17);
                         e.string(text);
                     }
+                    // `Mounter.textLocale`: the language tag.
+                    Command::TextLocale(locale) => {
+                        e.int(64);
+                        e.string(locale.as_str().to_owned());
+                    }
                     Command::AccessibilityFocus => e.int(18),
                     // `InputBox.openEditMenu`: the bounds in the root view,
                     // then the actions' bits (cut 1, copy 2, paste 4,
@@ -762,6 +775,11 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                         e.int(26);
                         e.int(id as i32);
                         e.string(url);
+                    }
+                    // `SystemUi.java` `openAppSettings`: the request.
+                    Command::OpenAppSettings { id } => {
+                        e.int(63);
+                        e.int(id as i32);
                     }
                     // `Share.java`: the request, the title and the text
                     // (the text and the URL on lines of their own), each
@@ -1137,6 +1155,21 @@ fn view_style(e: &mut Encoded, s: &ViewStyle) {
         }
     }
     e.bool(s.backface_hidden);
+    // `clipPath`: whether there is one, then each edge's offset (points)
+    // and fraction (top, right, bottom, left), then the radii from the top
+    // left (`Mounter.style`).
+    let clip = s.clip_path();
+    e.bool(clip.is_some());
+    let clip = clip.copied().unwrap_or_default();
+    for v in clip.offsets.to_array() {
+        e.float(v.0);
+    }
+    for v in clip.fractions.to_array() {
+        e.float(v.0);
+    }
+    for v in clip.radii.to_array() {
+        e.float(v.0);
+    }
     effects(e, s);
 }
 
@@ -1564,6 +1597,22 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
             ] {
                 e.float(v.map_or(f32::NAN, |v| v.0));
             }
+            // The way it activates in and its edge (Mounter.java
+            // `panActivation`): -1 none.
+            e.int(match a.way() {
+                Some(PanDirection::Left) => 0,
+                Some(PanDirection::Right) => 1,
+                Some(PanDirection::Up) => 2,
+                Some(PanDirection::Down) => 3,
+                _ => -1,
+            });
+            e.int(match a.edge {
+                Some(PanEdge::Left) => 0,
+                Some(PanEdge::Right) => 1,
+                Some(PanEdge::Top) => 2,
+                Some(PanEdge::Bottom) => 3,
+                _ => -1,
+            });
         }
         None => e.int(0),
     }
@@ -1793,10 +1842,10 @@ fn input(e: &mut Encoded, c: &InputConfig) {
     e.bool(c.caret_hidden);
     // `pasteBehavior`: whether a paste inserts its text.
     e.bool(c.paste_behavior == nsh_core::PasteBehavior::Insert);
-    // A multiline input's own scroll bar shows; a built-in bar replaces it
-    // (the input then reports how far its text scrolled).
+    // A multiline input's own scroll bar shows; whether it reports how far
+    // its text scrolled (a bar of the app's follows it).
     e.bool(c.scrollbar_visible);
-    e.bool(c.replaced);
+    e.bool(c.report_scroll);
     e.int(s.font_variant.0 as i32);
 }
 

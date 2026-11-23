@@ -131,6 +131,9 @@ prop scroll:text:"Sticky 0" stickyHeaderIndices start=0 end=80, start=120 end=In
 # Items not measured yet count 100 points each: 30 items are 3000 tall.
 scroll scroll:text:"Estimated 0" 0 10
 expect Content: 3000
+# Cells align at their natural cross-axis size, from either style form.
+origin id:align-center 40 704
+origin id:align-end 0 794
 covers [props] numColumns
 covers [props] inverted
 covers [props] stickyHeaderIndices
@@ -319,6 +322,9 @@ covers [props] zoomable
 covers [props] centerContent
 covers [props] zoomScale
 covers [props] scrollValue
+# props-text-copy
+tap id:case-props-text-copy
+expect Copy text
 # props-text-lines
 tap id:case-props-text-lines
 style id:two numberOfLines 2
@@ -366,6 +372,10 @@ prop id:value accessibilityValue min=0 max=10 now=4 text=four
 noprop id:plain accessibilityValue
 prop id:hidden accessibilityElementsHidden true
 prop id:plain accessibilityElementsHidden false
+# How changes of the view are announced, on every platform now (Android's
+# bag took it before).
+prop id:live accessibilityLiveRegion polite
+prop id:plain accessibilityLiveRegion none
 # "no-hide-descendants": not an element, and its subtree hidden.
 prop id:important-no accessible false
 prop id:important-no accessibilityElementsHidden true
@@ -396,6 +406,7 @@ covers [props] accessibilityDescription
 covers [props] accessibilityState
 covers [props] accessibilityValue
 covers [props] accessibilityElementsHidden
+covers [props] accessibilityLiveRegion
 covers [props] importantForAccessibility
 covers [props] accessibilityActions
 # props-view-styling
@@ -446,6 +457,8 @@ prop id:long delayLongPress 800
 listens id:long onLongPress
 noprop id:plain delayLongPress
 prop id:pan panActivation activeOffsetX=20 failOffsetY=10
+prop id:pan-way panActivation activeOffsetX=16 direction=right
+prop id:pan-edge panActivation edge=left
 noprop id:plain panActivation
 prop id:unfocusable focusable false
 prop id:stop focusable true

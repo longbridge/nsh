@@ -734,6 +734,15 @@ pub(crate) fn set_foreground(hwnd: HWND) {
             None => crate::window_state::report_main(&surface),
         }
     }
+    // The window that lost the keyboard hears its blur as on a deactivation
+    // (`WM_ACTIVATE`, which a background app never gets): `closeOnBlur`.
+    if let Some(old) = old
+        && app_window_root(old).is_some()
+        && shell(old).is_some_and(|s| s.attrs().close_on_blur)
+    {
+        // SAFETY: posting to a live window of this thread.
+        let _ = unsafe { PostMessageW(Some(old), WM_NSH_BLUR, WPARAM(0), LPARAM(0)) };
+    }
 }
 
 /// Window `hwnd` hides or goes: in a background app, when it was the

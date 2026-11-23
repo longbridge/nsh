@@ -246,17 +246,25 @@ pub(crate) fn string_arg(cx: *mut JsContext, v: JsValue) -> Option<String> {
 
 /// A JS value's string (`ToString`), or `None` when that throws.
 fn to_string(cx: *mut JsContext, v: JsValue) -> Option<String> {
-    // SAFETY: a live value; the C string is freed below.
+    with_str(cx, v, str::to_owned)
+}
+
+/// `f` with a JS value's string (`ToString`), borrowed; `None` when that
+/// throws.
+pub(crate) fn with_str<R>(cx: *mut JsContext, v: JsValue, f: impl FnOnce(&str) -> R) -> Option<R> {
+    // SAFETY: a live value; the C string is freed after `f`.
     unsafe {
         let mut len = 0usize;
         let p = qjs::JS_ToCStringLen(cx, &mut len, v);
         if p.is_null() {
             return None;
         }
-        let s =
-            String::from_utf8_lossy(std::slice::from_raw_parts(p.cast::<u8>(), len)).into_owned();
+        let r = f(&String::from_utf8_lossy(std::slice::from_raw_parts(
+            p.cast::<u8>(),
+            len,
+        )));
         qjs::JS_FreeCString(cx, p);
-        Some(s)
+        Some(r)
     }
 }
 

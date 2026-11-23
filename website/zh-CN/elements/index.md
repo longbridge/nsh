@@ -448,6 +448,7 @@ view().on_press(open_page).child(
 | `ref` | `.element_ref(&handle)` | `ViewRef \| (node: ViewRef) => void` | 元素的 ref（参见 [ref 方法](#ref-方法)）：`ViewRef`，或元素自己基于它的类型。`ref={el}` 赋值给变量，`ref={fn}` 调用函数。 |
 | `nativeID` | `.native_id(id)` | `string` | 为视图命名，供其他元素引用，例如输入框引用的 `InputAccessoryView`。 |
 | `testID` | `.test_id(id)` | `string` | UI 测试使用的标识（在 Android 上是视图的 resource id）。 |
+| `copyText` | `.copy_text(text)` | `string` | 用在文本中的视图或图片（行内附件）上：复制这段文本时在它的位置给出的文字（例如行内公式的源码）。不设置时复制结果不包含它。嵌套的文本片段和不在文本中的元素会忽略它。见[行内视图和图片](./text.md#行内视图和图片)。 |
 | `key` | `.key(key)` | `string` | 元素在兄弟元素之间的标识。 |
 
 ### 页面的标记
@@ -498,7 +499,7 @@ link()
 | `rotation` | `.rotation_value(&angle)` | `{ angle?: AnimatedValue }` | 双指旋转驱动 `angle`（角度）。 |
 | `onRotationStart` / `onRotationEnd` | `.on_rotation_start(..)` / `.on_rotation_end(..)` | `(e: { rotation: number; velocity: number }) => void` | 旋转开始 / 结束。 |
 
-`PanEvent` 为 `{ cancelled, translation, velocity, value? }`（Rust 中为 `cancelled`、`translation`、`velocity_x`、`velocity_y`、`value_x`、`value_y`）：系统是否取消了拖动、自开始以来的位移和以点每秒计的速度（`Point`），以及此刻所绑定值的数值，即 `pan` 绑定的轴的 `{ x?, y? }`（拖动可能在动画中途抓住一个值）。
+`PanEvent` 为 `{ cancelled, origin, translation, velocity, value? }`（Rust 中为 `cancelled`、`origin`、`translation`、`velocity_x`、`velocity_y`、`value_x`、`value_y`）：系统是否取消了拖动、手指按下的位置（在 surface 中，与触摸的 page 位置相同）、自开始以来的位移和以点每秒计的速度（`Point`），以及此刻所绑定值的数值，即 `pan` 绑定的轴的 `{ x?, y? }`（拖动可能在动画中途抓住一个值）。视图的 `panActivation` 决定拖动何时开始：超过它的偏移、只朝一个 `direction`，或者从屏幕的某条 `edge` 开始（[触摸与手势](../docs/touch-and-gestures.md#单向拖动与屏幕边缘拖动)）。
 
 ### 原始触摸与响应者系统
 
@@ -530,6 +531,7 @@ stopPropagation() }`）；`…ShouldSetResponder` 回调还会收到 `gestureSta
 | `accessibilityDescribedBy` | `.accessibility_described_by(..)` | `ViewRef \| null` | 文字用来说明这个元素的元素：输入框的错误提示行（[无障碍](../docs/accessibility.md#说明另一个元素的元素)）。 |
 | `accessibilityValue` | `.accessibility_value(..)` | `{ min?, max?, now?, text? }` | 范围类或文本类元素的值。 |
 | `accessibilityElementsHidden` | | `boolean` | 对辅助技术隐藏该视图及其子树。 |
+| `accessibilityLiveRegion` | `.accessibility_live_region(..)` | `"none" \| "polite" \| "assertive"` | 视图的变化如何自动播报：Android 上的 TalkBack、macOS 上的 VoiceOver、web 的 `aria-live`、Windows 上的实时区域。 |
 | `importantForAccessibility` | | `"auto" \| "yes" \| "no" \| "no-hide-descendants"` | 是否暴露该视图。 |
 | `accessibilityActions` | | `{ name: string; label?: string }[]` | 提供给辅助技术的自定义操作。 |
 | `onAccessibilityAction` | `.on_accessibility_action(..)` | `(e: { actionName: string }) => void` | 用户触发了 `accessibilityActions` 中的某个操作。 |
@@ -551,7 +553,7 @@ stopPropagation() }`）；`…ShouldSetResponder` 回调还会收到 `gestureSta
 |---|---|---|---|
 | `ripple` | `.ripple(Ripple { .. })` | `{ color?, borderless?, radius?, foreground? }` | 按下时的 Material 水波纹。 |
 | `elevation` | `.elevation(px(2.0))` | `number` | 根据视图形状生成的 Material 阴影（单位为点）。 |
-| `accessibilityLiveRegion` | | `"none" \| "polite" \| "assertive"` | 视图变化如何播报给 TalkBack。 |
+| `accessibilityLiveRegion` | | `"none" \| "polite" \| "assertive"` | 在 Android 上的播报方式；不带 bag 的同名 prop 在其他平台也一样。 |
 
 | `desktop` 键 | Rust | 类型 | 说明 |
 |---|---|---|---|

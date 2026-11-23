@@ -1477,6 +1477,7 @@ pub(crate) struct DrawnText {
 /// A text view got new text or a new layout, and the picture of it the
 /// engine thread painted, if it did ([`prerender`]).
 pub(crate) fn set(
+    surface: &crate::surface::Surface,
     view: &crate::view::NshView,
     text: &std::sync::Arc<AttributedText>,
     layout: &TextLayout,
@@ -1518,7 +1519,7 @@ pub(crate) fn set(
     });
     if was != text.is_selectable() {
         // The I-beam.
-        crate::input::style_changed(view);
+        crate::input::cursor_changed(surface);
     }
     // The mounter draws it, when it shows.
     view.restyle();
@@ -2797,7 +2798,7 @@ pub(crate) fn selected_range(view: &crate::view::NshView) -> Option<std::ops::Ra
     Some(start..end)
 }
 
-/// The selected text, without attachments' placeholders and hidden runs.
+/// The selected text as a copy gives it ([`nsh_core::AttributedText::copied_text`]).
 fn selected_text(view: &crate::view::NshView) -> Option<String> {
     let state = view.state();
     let drawn = state.text.as_ref()?;

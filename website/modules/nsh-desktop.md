@@ -532,7 +532,7 @@ An app that opens documents (a media player, an editor) lists their types under 
 declares them to the system, so the app shows in Open With and opens the files the user double-clicks or drops on its
 icon. The files come to `Application.on("openFiles")` as absolute paths, those that launched the app included. Links of
 the app's [schemes](nsh.md#urlscheme) stay apart, on `UrlScheme.on("open")`. `Application` is imported from
-`nsh/desktop`, and `openFiles` also comes on iOS.
+`nsh/desktop`, and `openFiles` also comes on iOS and Android.
 
 ```json
 {
@@ -554,7 +554,7 @@ Application.on("openFiles", ({ paths }) => {
 | --- | --- |
 | `name` | What the system calls the kind of file (`"Video"`). Required. |
 | `extensions` | The extensions, without the dot (`["mp4", "mov"]`). |
-| `mimeTypes` | The MIME types (`["video/mp4"]`): Linux lists the app for them. |
+| `mimeTypes` | The MIME types (`["video/mp4"]`): Linux lists the app for them, and Android lists it in the share sheet (wildcards such as `image/*` work there). |
 | `contentTypes` | Uniform Type Identifiers (`["public.movie"]`): iOS lists the app for them. |
 | `role` | `"viewer"` (the default) or `"editor"`. |
 
@@ -568,7 +568,13 @@ NSH takes opened files only for an app that declares file types.
 | iOS, Mac Catalyst | `CFBundleDocumentTypes` in `Info.plist` (by `contentTypes`); the system hands the app a copy of the file |
 | Windows | The app, under `HKEY_CURRENT_USER\\Software\\Classes`, each time it starts: a ProgID per type, listed in each extension's `OpenWithProgids`. A second launch with files hands them to the running app |
 | Linux | `MimeType` of the desktop entry, with `Exec … %U`; the app runs once and a second launch hands its files to the running app |
-| Android, web | Not declared; `fileTypes` is left out of their packages |
+| Android | The share sheet: `SEND` and `SEND_MULTIPLE` intent filters for the `mimeTypes`; a type with only `extensions` is not listed. `AppActivity` copies each shared stream into the app's cache and hands the app the copy's path |
+| Web | Not declared; `fileTypes` is left out of its packages |
+
+On Android the app receives the files other apps share to it (Share, Send to), when a type names `mimeTypes`: only
+`content://` streams of those types are taken, at most 16 files and 256 MiB each (512 MiB per share), and a running app
+keeps its activity (`singleTask`). The paths point to temporary cache copies, which Android can evict.
+NSH also removes copies older than one week when it receives another share.
 
 With [`singleInstance`](#single-instance) a second launch also reports `secondInstance`, with its arguments as given.
 

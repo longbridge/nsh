@@ -569,6 +569,8 @@ fn initial_environment() -> Environment {
         color_scheme: ColorScheme::Light,
         os: Os::Windows,
         idiom: Idiom::Desktop,
+        // `SetClipboardData` says whether it took the write.
+        clipboard_write_result: true,
         canvas_render: true,
         file_requests: true,
         notifications: true,

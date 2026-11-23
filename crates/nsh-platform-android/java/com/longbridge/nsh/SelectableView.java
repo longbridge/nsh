@@ -360,13 +360,12 @@ final class SelectableView implements SelectionHandle.Owner {
 
     /**
      * The UTF-16 range {@code start..end} of text {@code i} as a copy gives
-     * it (called from Rust within a native call): without attachments and
-     * hidden runs.
+     * it (called from Rust within a native call): attachments as their copy
+     * texts, without hidden runs ({@link TextBox#copied}).
      */
     String copiedText(int i, int start, int end) {
         if (i < 0 || i >= texts.size()) return "";
-        Layout layout = texts.get(i).layout();
-        return layout == null ? "" : TextLayouts.shown(layout.getText(), start, end);
+        return texts.get(i).copied(start, end);
     }
 
     /**
