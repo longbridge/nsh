@@ -507,9 +507,11 @@ impl<'a> DrawCx<'a> {
         self.push_layer(opacity, None, bounds);
     }
 
-    /// Clips what follows to `geometry` (in the current coordinates).
-    pub(crate) fn push_clip_geometry(&mut self, geometry: &ID2D1Geometry) {
-        self.push_layer(1.0, Some(geometry.clone()), INFINITE);
+    /// Clips what follows to `geometry` (in the current coordinates), its
+    /// content inside `bounds` (the same coordinates): the layer's
+    /// surface, and an opaque clip's background copy, covers them only.
+    pub(crate) fn push_clip_geometry(&mut self, geometry: &ID2D1Geometry, bounds: D2D_RECT_F) {
+        self.push_layer(1.0, Some(geometry.clone()), bounds);
     }
 
     /// Pushes a layer of `opacity` masked by `mask`, its content inside
@@ -632,7 +634,7 @@ impl<'a> DrawCx<'a> {
                 rect,
             });
         } else if let Some(g) = self.rounded_geometry(crate::geom::rect(x, y, w, h), [0.0; 4]) {
-            self.push_clip_geometry(&g);
+            self.push_clip_geometry(&g, rect_f(x, y, w, h));
         } else {
             self.push_opacity(1.0);
         }
@@ -649,8 +651,14 @@ impl<'a> DrawCx<'a> {
                 rect.size.height.0,
             );
         }
+        let bounds = rect_f(
+            rect.origin.x.0,
+            rect.origin.y.0,
+            rect.size.width.0,
+            rect.size.height.0,
+        );
         match self.rounded_geometry(rect, radii) {
-            Some(g) => self.push_clip_geometry(&g),
+            Some(g) => self.push_clip_geometry(&g, bounds),
             None => self.push_clip_rect(
                 rect.origin.x.0,
                 rect.origin.y.0,
@@ -1636,6 +1644,16 @@ fn clear_areas(dc: &ID2D1DeviceContext, areas: &[D2D_RECT_F], background: &D2D1_
     }
 }
 
+/// The smallest rectangle covering every one of `rects` (non-empty).
+fn union_rect(rects: &[D2D_RECT_F]) -> D2D_RECT_F {
+    rects[1..].iter().fold(rects[0], |u, r| D2D_RECT_F {
+        left: u.left.min(r.left),
+        top: u.top.min(r.top),
+        right: u.right.max(r.right),
+        bottom: u.bottom.max(r.bottom),
+    })
+}
+
 /// The union of `rects` as one geometry.
 fn rects_geometry(gfx: &Gfx, rects: &[D2D_RECT_F]) -> windows::core::Result<ID2D1Geometry> {
     // SAFETY: COM calls on the live factory.
@@ -2022,7 +2040,7 @@ fn draw_into(
             match areas {
                 [a] => cx.push_clip_rect(a.left, a.top, a.right - a.left, a.bottom - a.top),
                 _ => match rects_geometry(gfx, areas) {
-                    Ok(group) => cx.push_clip_geometry(&group),
+                    Ok(group) => cx.push_clip_geometry(&group, union_rect(areas)),
                     Err(err) => {
                         // SAFETY: closes the `BeginDraw` above.
                         let _ = unsafe { dc.EndDraw(None, None) };
@@ -2420,7 +2438,7 @@ mod tests {
             gfx.dc.Clear(Some(&color_f(Color(0xff00_00ff))));
             if old_way {
                 let mut cx = DrawCx::new(gfx, 1.0, false, 0.0).unwrap();
-                cx.push_clip_geometry(&rects_geometry(gfx, areas).unwrap());
+                cx.push_clip_geometry(&rects_geometry(gfx, areas).unwrap(), union_rect(areas));
                 gfx.dc.Clear(Some(&transparent));
                 cx.pop();
             } else {
