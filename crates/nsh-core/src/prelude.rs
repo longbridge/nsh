@@ -282,6 +282,7 @@ pub use crate::{
         effect, element_ref, engine_context, fetch, font_scale, fps_enabled, global, haptic,
         horizontal_size_class, idiom, image_size, is_catalyst, is_desktop, key_label,
         keyboard_duration, keyboard_height, keystroke_label, lifecycle, locale, locale_settings,
+        location_authorization, location_available,
         log_file, measure_text, motion, move_to_trash, network, next_app_url_change, next_frame,
         next_notification_press, next_open_files, next_second_instance, next_url_scheme_open,
         notification_permission, on_back_press, on_back_progress, on_key, on_key_with,

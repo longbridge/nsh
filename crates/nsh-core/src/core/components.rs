@@ -6307,6 +6307,29 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// Applies a location request: through the embedding app's provider when
+    /// it gave one, else as commands on the root the platform answers with
+    /// [`EventKind::Location`].
+    fn location_action(&mut self, action: crate::element::LocationAction) {
+        use crate::element::LocationAction;
+        match action {
+            LocationAction::Available(answer) => {
+                let available = match &self.location {
+                    Some(backend) => backend.available(),
+                    None => self.components.environment.location,
+                };
+                answer.borrow_mut().deliver(available);
+            }
+            LocationAction::Authorization(answer) => {
+                let authorization = match &self.location {
+                    Some(backend) => backend.authorization(),
+                    None => self.location_authorization,
+                };
+                answer.borrow_mut().deliver(authorization);
+            }
+        }
+    }
+
     /// Applies a sound's or a player's request: through the embedding
     /// app's audio stack when it gave one, else as commands on the root the
     /// platform answers with [`EventKind::Audio`].
@@ -6700,6 +6723,7 @@ impl<M: TextEngine> Core<M> {
                     self.components.environment.app_settings && self.access.allows_application();
                 answer.borrow_mut().deliver(available);
             }
+            Action::Location(action) => self.location_action(action),
             Action::Audio(action) => self.audio_action(action),
             Action::Notification(action) => self.notification_action(action),
             Action::LoginItem(enabled, answer) => self.login_item_action(enabled, answer),

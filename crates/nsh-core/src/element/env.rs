@@ -98,6 +98,12 @@ pub struct Environment {
     /// The platform shows file dialogs and opens, reveals and trashes local
     /// paths ([`crate::platform::Environment::file_requests`]).
     pub file_requests: bool,
+    /// The platform reports the device's location
+    /// ([`crate::platform::Environment::location`]).
+    pub location: bool,
+    /// The platform reports it while the app is not in front
+    /// ([`crate::platform::Environment::location_background`]).
+    pub location_background: bool,
     /// The platform shows notifications
     /// ([`crate::platform::Environment::notifications`]).
     pub notifications: bool,
@@ -173,6 +179,8 @@ impl Default for Environment {
             auth_session: false,
             scheme_links: true,
             file_requests: false,
+            location: false,
+            location_background: false,
             notifications: false,
             audio: false,
             tab_bar: true,

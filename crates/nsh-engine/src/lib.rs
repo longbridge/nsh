@@ -4122,6 +4122,8 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         auth_session: env.auth_session,
         scheme_links: env.scheme_links(),
         file_requests: env.file_requests,
+        location: env.location,
+        location_background: env.location_background,
         notifications: env.notifications,
         audio: env.audio,
         tab_bar: env.tab_bar,

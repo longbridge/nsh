@@ -27,6 +27,7 @@ pub(crate) mod fs;
 mod haptics;
 mod host;
 mod image;
+mod location;
 mod net;
 mod notifications;
 mod os;
@@ -68,6 +69,7 @@ pub fn registries() -> &'static [Registry] {
             .module::<clipboard::Clipboard>()
             .module::<picker::Picker>()
             .module::<share::Share>()
+            .module::<location::Location>()
             .class::<audio::Sound>()
             .class::<audio::AudioPlayer>()
             .module::<notifications::Notifications>()

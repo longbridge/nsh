@@ -1114,6 +1114,23 @@ pub fn pick_files(
     answer
 }
 
+/// Whether the device's location can be read here (TS: `Location.available()`):
+/// the platform reports one, or the embedding app gave the core its own
+/// provider. To await in a task.
+pub fn location_available() -> Answer<bool> {
+    let (answer, slot) = Answer::new();
+    act(Action::Location(super::LocationAction::Available(slot)));
+    answer
+}
+
+/// What the app may read of its location (TS: `Location.authorization()`),
+/// without asking the user. To await in a task.
+pub fn location_authorization() -> Answer<crate::location::Authorization> {
+    let (answer, slot) = Answer::new();
+    act(Action::Location(super::LocationAction::Authorization(slot)));
+    answer
+}
+
 /// Whether the app may show notifications (TS: `Notifications.permission`),
 /// without asking the user. To await in a task.
 pub fn notification_permission() -> Answer<crate::notifications::NotificationPermission> {

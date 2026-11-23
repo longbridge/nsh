@@ -116,7 +116,7 @@ pub(crate) use self::{
     component::{AnyInstance, caught, panic_message},
     task::{
         Action, AfterAnswer, AnswerSlot, AudioAction, ClipboardRead, Executor, FileAnswer,
-        NotificationAction,
+        LocationAction, NotificationAction,
     },
 };
 pub use self::{

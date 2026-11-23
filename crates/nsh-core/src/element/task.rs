@@ -173,6 +173,8 @@ pub(crate) enum Action {
         Box<crate::canvas::render::RenderRequest>,
         AnswerSlot<Result<Vec<u8>, super::JsError>>,
     ),
+    /// The device's location's request ([`crate::location`]).
+    Location(LocationAction),
     /// A notification's request ([`crate::notifications`]).
     Notification(NotificationAction),
     /// Reads whether the app launches at login (`None`) or turns it on
@@ -299,6 +301,15 @@ pub(crate) enum Action {
     /// the node, with the layout of the last commit; `None`: the pointer
     /// left.
     HoverAt(NodeId, Option<crate::MouseEvent>),
+}
+
+/// What `Location` asks of the core ([`Action::Location`]).
+pub(crate) enum LocationAction {
+    /// Whether the device's location can be read here; the answer resolves
+    /// the slot.
+    Available(AnswerSlot<bool>),
+    /// What the app may read now; the answer resolves the slot.
+    Authorization(AnswerSlot<crate::location::Authorization>),
 }
 
 /// What a sound or a player asks of the core ([`Action::Audio`]).
