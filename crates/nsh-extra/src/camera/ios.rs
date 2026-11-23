@@ -3,7 +3,9 @@
 //! (`nsh_platform_ios::presenting_controller`). One camera shows at a time,
 //! its permission prompt included:
 //! another photo asked meanwhile fails, and every photo is answered once,
-//! also when the picker cannot be shown or other code dismisses it. The camera needs the user's
+//! also when the picker cannot be shown or other code dismisses it. Asked
+//! while a sheet over the surface closes (or one opens), the camera shows
+//! once that transition ends. The camera needs the user's
 //! permission and the app's `NSCameraUsageDescription`: without the key
 //! the system would end the app, so the photo fails instead (an embedding
 //! app may lack it). The permission is asked once, before the camera
@@ -13,19 +15,24 @@
 
 use std::{
     cell::{Cell, RefCell},
+    ptr::NonNull,
+    rc::Rc,
     sync::Mutex,
 };
 
 use block2::RcBlock;
-use dispatch2::{DispatchQueue, MainThreadBound};
+use dispatch2::{DispatchQueue, DispatchTime, MainThreadBound};
 use nsh_core::{picker::PickedFile, prelude::*};
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send,
     rc::Retained,
-    runtime::{AnyClass, AnyObject, Bool},
+    runtime::{AnyClass, AnyObject, Bool, ProtocolObject},
 };
 use objc2_foundation::{NSArray, NSBundle, NSDictionary, NSObject, NSObjectProtocol, NSString};
-use objc2_ui_kit::{UIImage, UIModalPresentationStyle, UIViewController};
+use objc2_ui_kit::{
+    UIImage, UIModalPresentationStyle, UIViewController, UIViewControllerTransitionCoordinator,
+    UIViewControllerTransitionCoordinatorContext, UIWindow,
+};
 use tokio::sync::oneshot;
 
 use super::{PhotoError, PhotoRequest};
@@ -214,6 +221,8 @@ pub(crate) struct CameraIvars {
     answer: RefCell<Option<Answer>>,
     /// The picker it answers for.
     picker: RefCell<Option<Retained<UIViewController>>>,
+    /// The picker waits for a transition to end before it is presented.
+    waiting: Cell<bool>,
 }
 
 define_class!(
@@ -259,8 +268,12 @@ impl CameraDelegate {
         SHOWN.with_borrow_mut(|shown| shown.retain(|d| !std::ptr::eq(&**d, this)));
     }
 
-    /// Whether its picker is on screen (or on its way there).
+    /// Whether its picker is on screen, on its way there or waiting for a
+    /// transition to end before it is presented.
     fn presented(&self) -> bool {
+        if self.ivars().waiting.get() {
+            return true;
+        }
         self.ivars().picker.borrow().as_ref().is_some_and(|picker| {
             // SAFETY: UIKit's documented property, read on the main thread.
             let presenting: Option<Retained<UIViewController>> =
@@ -294,7 +307,7 @@ fn show(answer: Answer, top: &UIViewController) {
         return;
     };
     // SAFETY: UIKit's documented API, sent dynamically.
-    unsafe {
+    let delegate = unsafe {
         let picker: Retained<AnyObject> = msg_send![class, new];
         let picker: Retained<UIViewController> = Retained::cast_unchecked(picker);
         let _: () = msg_send![&picker, setSourceType: SOURCE_CAMERA];
@@ -303,26 +316,130 @@ fn show(answer: Answer, top: &UIViewController) {
         let delegate = CameraDelegate::alloc(mtm).set_ivars(CameraIvars {
             answer: RefCell::new(Some(answer)),
             picker: RefCell::new(Some(picker.clone())),
+            waiting: Cell::new(true),
         });
         let delegate: Retained<CameraDelegate> = msg_send![super(delegate), init];
         let _: () = msg_send![&picker, setDelegate: &*delegate];
         // Full screen everywhere: an iPad would show the camera in a form
         // sheet otherwise.
         picker.setModalPresentationStyle(UIModalPresentationStyle::FullScreen);
-        SHOWN.with_borrow_mut(|shown| shown.push(delegate.clone()));
-        top.presentViewController_animated_completion(&picker, true, None);
-        // UIKit refuses a presentation silently (`top` is presenting or
-        // being dismissed): then nothing would answer the photo.
-        let delegate = MainThreadBound::new(delegate, mtm);
-        DispatchQueue::main().exec_async(move || {
-            let mtm = MainThreadMarker::new().expect("the main queue runs on the main thread");
-            let delegate = delegate.into_inner(mtm);
-            if delegate.ivars().answer.borrow().is_some() && !delegate.presented() {
-                delegate.finish(Taken::Failed(PhotoError::failed(
-                    "the camera cannot be shown over the app's view",
-                )));
-            }
+        delegate
+    };
+    SHOWN.with_borrow_mut(|shown| shown.push(delegate.clone()));
+    let window = top.viewIfLoaded().and_then(|view| view.window());
+    present_settled(delegate, window, 0);
+}
+
+/// The most waits the camera makes for transitions before it gives up: a
+/// transition takes one, a look for one ending takes [`LOOK_MS`].
+const MAX_WAITS: u32 = 120;
+
+/// How long the camera waits before it looks again at a transition that
+/// cannot tell when it ends, in milliseconds (a frame).
+const LOOK_MS: u64 = 16;
+
+/// Presents the delegate's picker over the top controller of `window`
+/// (the surface's), once no transition runs there. UIKit postpones a
+/// presentation over a controller whose presented one is being dismissed
+/// (a sheet closing as the photo is asked for) until that dismissal ends,
+/// telling nothing of it meanwhile, and refuses one over a controller
+/// being presented. Waiting here first, a picker not presented by the next
+/// turn is one UIKit refused.
+fn present_settled(
+    delegate: Retained<CameraDelegate>,
+    window: Option<Retained<UIWindow>>,
+    waits: u32,
+) {
+    if delegate.ivars().answer.borrow().is_none() {
+        return;
+    }
+    let refused = |delegate: &CameraDelegate| {
+        delegate.ivars().waiting.set(false);
+        delegate.finish(Taken::Failed(PhotoError::failed(
+            "the camera cannot be shown over the app's view",
+        )));
+    };
+    // Found again after each wait: what closed meanwhile uncovered its
+    // presenter, what was presented covers it.
+    let Some(mut top) = window.as_ref().and_then(|w| w.rootViewController()) else {
+        return refused(&delegate);
+    };
+    while let Some(next) = top.presentedViewController() {
+        if next.isBeingDismissed() {
+            break;
+        }
+        top = next;
+    }
+    let moving = match top.presentedViewController() {
+        Some(leaving) => Some(leaving),
+        None if top.isBeingPresented() => Some(top.clone()),
+        None => None,
+    };
+    if let Some(moving) = moving {
+        if waits >= MAX_WAITS {
+            return refused(&delegate);
+        }
+        return after_transition(&moving, move || {
+            present_settled(delegate, window, waits + 1);
         });
+    }
+    delegate.ivars().waiting.set(false);
+    let Some(picker) = delegate.ivars().picker.borrow().clone() else {
+        return;
+    };
+    top.presentViewController_animated_completion(&picker, true, None);
+    // UIKit refuses a presentation silently: then nothing would answer the
+    // photo.
+    let mtm = MainThreadMarker::from(&*top);
+    let delegate = MainThreadBound::new(delegate, mtm);
+    DispatchQueue::main().exec_async(move || {
+        let mtm = MainThreadMarker::new().expect("the main queue runs on the main thread");
+        let delegate = delegate.into_inner(mtm);
+        if delegate.ivars().answer.borrow().is_some() && !delegate.presented() {
+            refused(&delegate);
+        }
+    });
+}
+
+/// Runs `then` on the main queue once the transition `moving` is in ends,
+/// or a frame later when it cannot tell.
+fn after_transition(moving: &UIViewController, then: impl FnOnce() + 'static) {
+    let mtm = MainThreadMarker::from(moving);
+    let once = Rc::new(Cell::new(Some(then)));
+    let done = {
+        let once = once.clone();
+        RcBlock::new(
+            move |_: NonNull<ProtocolObject<dyn UIViewControllerTransitionCoordinatorContext>>| {
+                // The main queue's next turn: the transition is over by
+                // then, and what it postponed has begun.
+                if let Some(then) = once.take() {
+                    later(mtm, 0, then);
+                }
+            },
+        )
+    };
+    // Refused when the transition is already ending: look again shortly.
+    let waiting = moving.transitionCoordinator().is_some_and(|coordinator| {
+        coordinator.animateAlongsideTransition_completion(None, Some(&done))
+    });
+    if !waiting && let Some(then) = once.take() {
+        later(mtm, LOOK_MS, then);
+    }
+}
+
+/// Runs `f` on the main queue after `ms` milliseconds, or on its next turn.
+fn later(mtm: MainThreadMarker, ms: u64, f: impl FnOnce() + 'static) {
+    let f = MainThreadBound::new(f, mtm);
+    let run = move || {
+        let mtm = MainThreadMarker::new().expect("the main queue runs on the main thread");
+        (f.into_inner(mtm))();
+    };
+    if ms == 0 {
+        return DispatchQueue::main().exec_async(run);
+    }
+    let when = DispatchTime::NOW.time((ms * 1_000_000) as i64);
+    if let Err(error) = DispatchQueue::main().after(when, run) {
+        log::warn!("the camera cannot wait for a transition: {error:?}");
     }
 }
 

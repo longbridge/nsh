@@ -163,7 +163,8 @@ if (await Camera.available()) {
 ```
 
 `takePhoto` resolves with `null` when the user cancels and rejects with the code `EACCES` when the user does not let
-the app use the camera. `available()` is `false` where there is no camera to show (the desktops, the web, a simulator),
+the app use the camera. An app can close a sheet and ask for the photo in the same press: the camera shows once the
+sheet has closed. `available()` is `false` where there is no camera to show (the desktops, the web, a simulator),
 and there `takePhoto` rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. The feature adds what the packaged app needs:
 the camera's usage description on iOS (an app sets its own wording with `ios.infoPlist`'s
 `NSCameraUsageDescription`) and the query of camera apps on Android.
