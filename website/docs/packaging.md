@@ -652,7 +652,9 @@ own.
 |---|---|---|
 | `NSPrivacyAccessedAPICategoryFileTimestamp` | Rust's standard library reading file metadata; the image cache, which ages its files | `C617.1`; also `3B52.1` when the app reads files people pick |
 | `NSPrivacyAccessedAPICategorySystemBootTime` | the renderer's timer | `35F9.1` |
-| `NSPrivacyAccessedAPICategoryUserDefaults` | reading the temperature unit people choose in Settings, which no reason of Apple's covers ([#2830](https://github.com/longbridge/nsh/issues/2830)) | |
+
+NSH reads no user defaults on iOS (the temperature unit comes from the locale): declare
+`NSPrivacyAccessedAPICategoryUserDefaults` only when the app's own code or an SDK it links calls `NSUserDefaults`.
 
 ### Minimum system version
 
