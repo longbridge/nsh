@@ -243,7 +243,7 @@ webkit6 = "0.6"
 gstreamer = "0.25"
 gstreamer-app = "0.25"
 gstreamer-audio = "0.25"
-taffy = { version = "0.15", default-features = false, features = ["std", "flexbox", "grid", "block_layout", "content_size"] }
+taffy = { version = "0.16", default-features = false, features = ["std", "flexbox", "grid", "block_layout", "content_size"] }
 # Features per crate: the runtime's binaries get only what they use.
 tokio = { version = "1", default-features = false }
 
