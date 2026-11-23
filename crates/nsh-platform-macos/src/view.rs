@@ -1322,6 +1322,10 @@ define_class!(
             }
             NshView(self.retain()).set_layer_geometry();
             NshView(self.retain()).rescale();
+            // Leaves (#2066) are in no window for AppKit to tell.
+            for leaf in NshView(self.retain()).leaf_children() {
+                leaf.rescale();
+            }
             if self.ivars().window.borrow().strong_count() > 0 {
                 self.install_tracking();
             }
@@ -1369,6 +1373,9 @@ define_class!(
         #[unsafe(method(viewDidChangeBackingProperties))]
         fn view_did_change_backing_properties(&self) {
             NshView(self.retain()).rescale();
+            for leaf in NshView(self.retain()).leaf_children() {
+                leaf.rescale();
+            }
             if let Some(surface) = self.surface() {
                 crate::system::window_changed(&surface);
             }
@@ -2748,7 +2755,14 @@ impl NshView {
         }
         *self.ivars().leaf_parent.borrow_mut() = Some(objc2::rc::Weak::from_retained(&parent.0));
         parent.adjust_waiting(self.ivars().waiting.get(), true);
+        // What AppKit's `viewDidMoveToSuperview` / `viewDidMoveToWindow`
+        // do for a view.
+        crate::sight::moved();
         self.place();
+        self.sharpen();
+        if parent.ns().window().is_some() {
+            self.rescale();
+        }
     }
 
     /// Whether its children can be leaves: a plain view with no child views
@@ -2785,6 +2799,17 @@ impl NshView {
             && s.tracked == 0
             && s.natives.is_empty()
             && s.input_count == 0
+    }
+
+    /// Whether it is `ancestor` or in its subtree: `isDescendantOf:`, which
+    /// for a leaf (in no view hierarchy) asks of its parent.
+    pub(crate) fn is_within(&self, ancestor: &NSView) -> bool {
+        match self.parent_view().filter(|_| self.is_leaf_layer()) {
+            Some(parent) => {
+                std::ptr::eq::<NSView>(self.ns(), ancestor) || parent.ns().isDescendantOf(ancestor)
+            }
+            None => self.ns().isDescendantOf(ancestor),
+        }
     }
 
     /// Whether its layer is in its parent's with no view in the hierarchy.
@@ -2832,6 +2857,7 @@ impl NshView {
             if let Some(layer) = self.ns().layer() {
                 layer.removeFromSuperlayer();
             }
+            crate::sight::moved();
             return;
         }
         if let Some(parent) = self.parent_view() {

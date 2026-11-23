@@ -376,7 +376,7 @@ fn update_hover_tracking(surface: &Surface, view: &NshView) {
 /// handlers must not run.
 pub(crate) fn removed(surface: &Surface, view: &NshView) {
     let input = &surface.input;
-    let inside = |v: &NshView| v.ns().isDescendantOf(view.ns());
+    let inside = |v: &NshView| v.is_within(view.ns());
     if !input.hovered.borrow().is_empty() {
         let left: Vec<NshView> = input
             .hovered
