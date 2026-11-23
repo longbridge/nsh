@@ -700,8 +700,59 @@ test("a browser-cancelled pan reports cancellation rather than a release", () =>
     player.velocity = () => [0, 400];
     player.call = (f) => f({ nsh_pan: (...args) => sent.push(args) });
     player.pointerUp({ pointerId: 7 }, cancelled);
-    assert.deepEqual(sent, [[12, phase, 0, 100, 0, 400]]);
+    assert.deepEqual(sent, [[12, phase, 0, 100, 0, 400, 10, 20]]);
     assert.equal(player.pointers.size, 0);
+  }
+});
+
+test("a pan activation with a way or an edge decides as PanActivation does", () => {
+  const { player } = fakePlayer();
+  const right = [null, null, null, null, "right", null];
+  assert.equal(player.decideActivation(right, 6, 2), undefined);
+  assert.equal(player.decideActivation(right, 11, 4), true);
+  // The other way, or mostly across, fails.
+  assert.equal(player.decideActivation(right, -11, 0), false);
+  assert.equal(player.decideActivation(right, 3, 12), false);
+  // Its axis's active offset; a fail offset across decides across.
+  const up = [null, 20, 30, null, "up", null];
+  assert.equal(player.decideActivation(up, 0, -15), undefined);
+  assert.equal(player.decideActivation(up, 0, -21), true);
+  assert.equal(player.decideActivation(up, 0, 21), false);
+  assert.equal(player.decideActivation(up, 25, -5), undefined);
+  assert.equal(player.decideActivation(up, 31, -5), false);
+  // An edge pan moves away from its edge, whatever the direction says.
+  const edge = [null, null, null, null, "left", "left"];
+  assert.equal(player.decideActivation(edge, 12, 1), true);
+  assert.equal(player.decideActivation(edge, -12, 1), false);
+  assert.equal(player.startsAt(edge, 20, 400, 390, 844), true);
+  assert.equal(player.startsAt(edge, 21, 400, 390, 844), false);
+  assert.equal(player.startsAt([null, null, null, null, null, "bottom"], 200, 830, 390, 844), true);
+  assert.equal(player.startsAt([null, null, null, null, null, "bottom"], 200, 800, 390, 844), false);
+  assert.equal(player.startsAt(right, 200, 400, 390, 844), true);
+  assert.equal(player.startsAt(undefined, 200, 400, 390, 844), true);
+  // The offsets alone, as before.
+  assert.equal(player.decideActivation([10, null, null, 8], -11, 3), true);
+  assert.equal(player.decideActivation([10, null, null, 8], 4, -9), false);
+});
+
+test("a native pan with a way starts only that way, and its start says where it began", () => {
+  for (const [dx, started] of [[30, true], [-30, false]]) {
+    const { player } = fakePlayer();
+    const sent = [];
+    const pan = { _id: 12, _props: { panActivation: [null, null, null, null, "right", null] } };
+    player.pointers = new Map([[7, {
+      pan, touchPath: [], states: [], mode: null, gate: null, gateState: 0,
+      startX: 10, startY: 20, x: 10, y: 20, t: 0, layer: null,
+    }]]);
+    player.point = (e) => [e.x, e.y];
+    player.track = () => {};
+    player.velocity = () => [0, 0];
+    player.pressOut = () => {};
+    player.call = (f) => f({ nsh_pan: (...args) => sent.push(args) });
+    player.pointerMove({ pointerId: 7, x: 10 + dx, y: 20, preventDefault() {} });
+    assert.equal(sent.length > 0, started);
+    if (started) assert.deepEqual(sent[0], [12, 0, 0, 0, 0, 0, 10, 20]);
+    else assert.equal(player.pointers.get(7).pan, null);
   }
 });
 

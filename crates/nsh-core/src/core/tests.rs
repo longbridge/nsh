@@ -16832,6 +16832,7 @@ mod components {
 
         // Let go: a spring starts; its end resolves the task.
         let payload = EventPayload::Pan {
+            origin: point(px(40.0), px(300.0)),
             translation: point(px(0.0), px(120.0)),
             velocity_x: 0.0,
             velocity_y: 300.0,
@@ -21426,6 +21427,60 @@ mod touch {
         let any = crate::PanActivation::default();
         assert_eq!(any.decide(px(6.0), px(6.0)), None);
         assert_eq!(any.decide(px(8.0), px(8.0)), Some(true));
+    }
+
+    #[test]
+    fn a_pan_activation_with_a_direction_takes_only_that_way() {
+        use crate::{PanActivation, PanDirection};
+        let right = PanActivation::default().direction(PanDirection::Right);
+        assert_eq!(right.decide(px(6.0), px(2.0)), None);
+        assert_eq!(right.decide(px(11.0), px(4.0)), Some(true));
+        // The other way, or mostly across, fails: the views around keep it.
+        assert_eq!(right.decide(px(-11.0), px(0.0)), Some(false));
+        assert_eq!(right.decide(px(3.0), px(12.0)), Some(false));
+        assert_eq!(right.decide(px(3.0), px(-12.0)), Some(false));
+        assert_eq!(right.axis(), Some(true));
+        // Its axis's active offset; a fail offset across decides across.
+        let up = PanActivation::vertical(px(20.0), px(30.0)).direction(PanDirection::Up);
+        assert_eq!(up.decide(px(0.0), px(-15.0)), None);
+        assert_eq!(up.decide(px(0.0), px(-21.0)), Some(true));
+        assert_eq!(up.decide(px(0.0), px(21.0)), Some(false));
+        assert_eq!(up.decide(px(25.0), px(-5.0)), None);
+        assert_eq!(up.decide(px(31.0), px(-5.0)), Some(false));
+        assert_eq!(up.axis(), Some(false));
+        // Judged along the line: a move that swings back still fails.
+        assert_eq!(
+            right.decide_move(point(px(0.0), px(0.0)), point(px(-12.0), px(0.0))),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn an_edge_pan_starts_at_its_edge_and_moves_away_from_it() {
+        use crate::{PanActivation, PanDirection, PanEdge};
+        let screen = crate::geometry::size(px(390.0), px(844.0));
+        let at = |x: f32, y: f32| point(px(x), px(y));
+        let left = PanActivation::default().edge(PanEdge::Left);
+        assert!(left.starts_at(at(0.0, 400.0), screen));
+        assert!(left.starts_at(at(20.0, 400.0), screen));
+        assert!(!left.starts_at(at(21.0, 400.0), screen));
+        assert_eq!(left.way(), Some(PanDirection::Right));
+        assert_eq!(left.decide(px(12.0), px(1.0)), Some(true));
+        assert_eq!(left.decide(px(-12.0), px(1.0)), Some(false));
+        // The edge decides the way, whatever `direction` says.
+        let both = left.direction(PanDirection::Left);
+        assert_eq!(both.decide(px(12.0), px(1.0)), Some(true));
+        let right = PanActivation::default().edge(PanEdge::Right);
+        assert!(right.starts_at(at(380.0, 10.0), screen));
+        assert!(!right.starts_at(at(360.0, 10.0), screen));
+        let bottom = PanActivation::default().edge(PanEdge::Bottom);
+        assert!(bottom.starts_at(at(200.0, 830.0), screen));
+        assert!(!bottom.starts_at(at(200.0, 800.0), screen));
+        assert_eq!(bottom.decide(px(0.0), px(-11.0)), Some(true));
+        let top = PanActivation::default().edge(PanEdge::Top);
+        assert!(top.starts_at(at(200.0, 5.0), screen) && !top.starts_at(at(200.0, 40.0), screen));
+        // Without an edge, anywhere.
+        assert!(PanActivation::default().starts_at(at(200.0, 400.0), screen));
     }
 
     #[test]

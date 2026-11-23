@@ -151,7 +151,8 @@ pub use crate::{
         Accessibility, AccessibilityActionDef, AccessibilityCurrent, AccessibilityProp,
         AccessibilityRole, AccessibilityState, AccessibilityValue, Checked, EdgeInsets,
         GestureValues, LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition, LiveRegion,
-        PanActivation, PointerEvents, Ripple, ScrollEdge, ScrollEdgeElement, ViewProps,
+        PanActivation, PanDirection, PanEdge, PointerEvents, Ripple, ScrollEdge, ScrollEdgeElement,
+        ViewProps,
     },
     style::{
         BorderStyle, Borders, Color, CornerRadii, DecorationStyle, EllipsizeMode, EnvVar,

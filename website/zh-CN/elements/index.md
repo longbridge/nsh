@@ -499,7 +499,7 @@ link()
 | `rotation` | `.rotation_value(&angle)` | `{ angle?: AnimatedValue }` | 双指旋转驱动 `angle`（角度）。 |
 | `onRotationStart` / `onRotationEnd` | `.on_rotation_start(..)` / `.on_rotation_end(..)` | `(e: { rotation: number; velocity: number }) => void` | 旋转开始 / 结束。 |
 
-`PanEvent` 为 `{ cancelled, translation, velocity, value? }`（Rust 中为 `cancelled`、`translation`、`velocity_x`、`velocity_y`、`value_x`、`value_y`）：系统是否取消了拖动、自开始以来的位移和以点每秒计的速度（`Point`），以及此刻所绑定值的数值，即 `pan` 绑定的轴的 `{ x?, y? }`（拖动可能在动画中途抓住一个值）。
+`PanEvent` 为 `{ cancelled, origin, translation, velocity, value? }`（Rust 中为 `cancelled`、`origin`、`translation`、`velocity_x`、`velocity_y`、`value_x`、`value_y`）：系统是否取消了拖动、手指按下的位置（在 surface 中，与触摸的 page 位置相同）、自开始以来的位移和以点每秒计的速度（`Point`），以及此刻所绑定值的数值，即 `pan` 绑定的轴的 `{ x?, y? }`（拖动可能在动画中途抓住一个值）。视图的 `panActivation` 决定拖动何时开始：超过它的偏移、只朝一个 `direction`，或者从屏幕的某条 `edge` 开始（[触摸与手势](../docs/touch-and-gestures.md#单向拖动与屏幕边缘拖动)）。
 
 ### 原始触摸与响应者系统
 

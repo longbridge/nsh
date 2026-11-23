@@ -136,6 +136,8 @@ pub use crate::element::{
     OverlayPosition,
     Painter,
     PanActivation,
+    PanDirection,
+    PanEdge,
     PanEvent,
     PanGesture,
     ParentElement,

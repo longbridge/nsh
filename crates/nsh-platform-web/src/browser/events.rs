@@ -262,6 +262,7 @@ pub(super) fn payload(host: &Bindings, payload: &EventPayload) -> Result<Value, 
             object([("lines", Value::array(values)?)])?
         }
         EventPayload::Pan {
+            origin,
             translation,
             velocity_x,
             velocity_y,
@@ -269,6 +270,7 @@ pub(super) fn payload(host: &Bindings, payload: &EventPayload) -> Result<Value, 
             value_y,
         }
         | EventPayload::PanCancelled {
+            origin,
             translation,
             velocity_x,
             velocity_y,
@@ -280,6 +282,7 @@ pub(super) fn payload(host: &Bindings, payload: &EventPayload) -> Result<Value, 
                     "cancelled",
                     boolean(matches!(payload, EventPayload::PanCancelled { .. })),
                 ),
+                ("origin", point(*origin)?),
                 ("translation", point(*translation)?),
                 (
                     "velocity",

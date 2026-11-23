@@ -1800,7 +1800,9 @@ final class Mounter {
             rippleRadius = b.getFloat();
         }
         if (b.getInt() != 0) {
-            panActivations.put(id, new float[] {b.getFloat(), b.getFloat(), b.getFloat(), b.getFloat()});
+            // The offsets, then the way it activates in and its edge (`encode.rs`).
+            panActivations.put(id, new float[] {
+                b.getFloat(), b.getFloat(), b.getFloat(), b.getFloat(), b.getInt(), b.getInt()});
         } else {
             panActivations.remove(id);
         }
@@ -3664,7 +3666,10 @@ final class Mounter {
         Native.touch(handle(), phase, ids, targets, pathLengths, paths, coords, changed, time, activated);
     }
 
-    /** `panActivation` of view {@code id} (points: active x, y, fail x, y; NaN: none), or null. */
+    /**
+     * `panActivation` of view {@code id}, or null: points (active x, y, fail x, y; NaN: none), then the way it
+     * activates in (0 left, 1 right, 2 up, 3 down; -1 any) and its edge (0 left, 1 right, 2 top, 3 bottom; -1 none).
+     */
     float[] panActivation(int id) {
         return panActivations.get(id);
     }
@@ -3812,11 +3817,21 @@ final class Mounter {
         outputs(Native.scrollEnded(handle, id));
     }
 
-    void pan(int id, int state, float tx, float ty, float vx, float vy) {
+    /**
+     * The pan of {@code id} (view {@code v}) moved ({@code state}: 0 began, 1 moved, 2 ended, 3 cancelled), the
+     * finger having gone down at the screen point ({@code downRawX}, {@code downRawY}) px: its origin in the view's
+     * root view, as presses report theirs.
+     */
+    void pan(int id, int state, float tx, float ty, float vx, float vy, View v, float downRawX, float downRawY) {
         if (state == 0) for (TouchTracker t : touchTrackers) t.cancelFeedback();
         long handle = handle();
         if (handle == 0) return;
-        outputs(Native.pan(handle, id, state, tx, ty, vx, vy));
+        // The surface, or the window of the modal the view is in.
+        View root = v.getRootView() == host.getRootView() ? host : v.getRootView();
+        int[] rootAt = new int[2];
+        root.getLocationOnScreen(rootAt);
+        float d = density;
+        outputs(Native.pan(handle, id, state, tx, ty, vx, vy, (downRawX - rootAt[0]) / d, (downRawY - rootAt[1]) / d));
     }
 
     void transformGesture(int id, boolean rotation, int state, float amount, float velocity) {

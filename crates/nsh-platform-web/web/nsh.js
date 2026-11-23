@@ -252,6 +252,13 @@ const KEYFRAMES = `
 .nsh-pan { touch-action: none; }
 .nsh-pan-x { touch-action: pan-y; }
 .nsh-pan-y { touch-action: pan-x; }
+/* A pan of one way leaves the other way to the browser where it can tell
+   them apart (CSS's pan-right scrolls right: the finger moves left), else
+   the other axis only. */
+.nsh-pan-right { touch-action: pan-y; touch-action: pan-right pan-y; }
+.nsh-pan-left { touch-action: pan-y; touch-action: pan-left pan-y; }
+.nsh-pan-down { touch-action: pan-x; touch-action: pan-x pan-down; }
+.nsh-pan-up { touch-action: pan-x; touch-action: pan-x pan-up; }
 .nsh-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 /* Scroll indicators: a thin, translucent thumb with no track, as on phones,
    rather than the platform's scrollbar (with arrow buttons on Windows).
@@ -3426,18 +3433,22 @@ class Player {
 
   /** What touches on `el` leave to the browser: nothing on views with
    * native pans, pinches or rotations; a `panActivation` gate along one
-   * axis leaves scrolling along the other. Views that take presses or
-   * touches are marked: text in them is not selected by default. */
+   * axis leaves scrolling along the other, and one with a way the drags
+   * the other way too, where the browser offers it. Views that take
+   * presses or touches are marked: text in them is not selected by
+   * default. */
   updateTouchAction(el) {
     const pan = el._gestures?.pan || el._events.has("onPanStart") || el._events.has("onPanEnd");
     const pinch = el._gestures?.pinch || el._gestures?.rotation;
     el.classList.toggle("nsh-press", !!(el._pressable || pan || pinch || el._events.has("onTouch")));
     const gate = el._props?.panActivation;
-    const horizontal = gate && gate[0] != null && gate[1] == null;
-    const vertical = gate && gate[1] != null && gate[0] == null;
+    const way = gate ? this.panWay(gate) : undefined;
+    const horizontal = gate && (way ? way === "left" || way === "right" : gate[0] != null && gate[1] == null);
+    const vertical = gate && (way ? way === "up" || way === "down" : gate[1] != null && gate[0] == null);
     el.classList.toggle("nsh-pan", !!(pinch || (pan && !horizontal && !vertical)));
-    el.classList.toggle("nsh-pan-x", !pinch && !!horizontal);
-    el.classList.toggle("nsh-pan-y", !pinch && !!vertical);
+    el.classList.toggle("nsh-pan-x", !pinch && !way && !!horizontal);
+    el.classList.toggle("nsh-pan-y", !pinch && !way && !!vertical);
+    for (const w of ["left", "right", "up", "down"]) el.classList.toggle(`nsh-pan-${w}`, !pinch && way === w);
   }
 
   // Layout animations (`LayoutAnimation`): frames move, new views appear
@@ -9739,8 +9750,9 @@ class Player {
     const a = el._props?.panActivation;
     if (!a) return true;
     const [ax, ay, fx, fy] = a;
-    const x = ax != null || fy != null;
-    const y = ay != null || fx != null;
+    const way = this.panWay(a);
+    const x = way ? way === "left" || way === "right" : ax != null || fy != null;
+    const y = way ? !x : ay != null || fx != null;
     if (x === y) return true;
     let [dx, dy] = [e.deltaX, e.deltaY];
     if (e.shiftKey && !dx) [dx, dy] = [dy, 0];
@@ -10238,6 +10250,10 @@ class Player {
     // pinch here.
     const scrollView = isField ? null : chain.find((v) => v._kind === "scroll") ?? null;
     const link = isField ? null : this.linkPress(e.target, target);
+    // An edge pan starts only from its edge of the page (of the window for
+    // a dialog over it): away from it, neither of its pans does.
+    const [w, h] = layer ? [innerWidth, innerHeight] : [this.root.clientWidth, this.root.clientHeight];
+    const admits = (v) => this.startsAt(v._props?.panActivation, x, y, w, h);
     const p = {
       x, y, layer, startX: x, startY: y, t: performance.now(), vx: 0, vy: 0,
       pointerType: e.pointerType,
@@ -10247,14 +10263,14 @@ class Player {
       // What presses report: the modifier keys at the press and its clicks.
       modifiers: { control: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, platform: e.metaKey },
       clicks: e.pointerType === "mouse" ? this.clickCount(x, y) : 1,
-      pan: chain.find((v) => v._gestures?.pan || v._events.has("onPanStart") || v._events.has("onPanEnd")) ?? null,
+      pan: chain.find((v) => (v._gestures?.pan || v._events.has("onPanStart") || v._events.has("onPanEnd")) && admits(v)) ?? null,
       scroll: !selects && scrollView && e.pointerType !== "mouse" && this.zooms(scrollView) ? scrollView : null,
       // Touch scrolling is the browser's, reported from here (`touchScroll`).
       scrolls: e.pointerType === "touch" ? chain.filter((v) => v._kind === "scroll") : null,
       zoom: chain.find((v) => this.zooms(v) && v._behavior.pinch) ?? null,
       pinch: chain.find((v) => v._gestures?.pinch || v._gestures?.rotation) ?? null,
       // `panActivation`: decided here as the pointer moves (PanActivation::decide).
-      gate: chain.find((v) => v._props?.panActivation) ?? null,
+      gate: chain.find((v) => v._props?.panActivation && admits(v)) ?? null,
       gateState: 0,
       states: chain.filter((v) => v._tracked & PRESSED),
       mode: null,
@@ -10406,10 +10422,15 @@ class Player {
     const gated = p.gate && p.gateState !== 2;
     if (gated && p.gateState === 1) e.preventDefault();
     if (!p.mode && Math.hypot(tx, ty) > 6) {
-      if (p.pan) {
+      // A pan with a `panActivation` starts when that activates; failed, the
+      // drag is the views' around it.
+      const activation = p.pan?._props?.panActivation;
+      const decision = !p.pan || !activation ? !!p.pan : this.decideActivation(activation, tx, ty);
+      if (decision === false) p.pan = null;
+      if (decision) {
         p.mode = "pan";
-        this.call((w) => w.nsh_pan(p.pan._id, 0, 0, 0, 0, 0));
-      } else if (p.scroll && !gated) {
+        this.call((w) => w.nsh_pan(p.pan._id, 0, 0, 0, 0, 0, p.startX, p.startY));
+      } else if (!p.pan && p.scroll && !gated) {
         p.mode = "scroll";
         p.at = [p.scroll.scrollLeft, p.scroll.scrollTop];
         p.dragged = [0, 0];
@@ -10426,7 +10447,7 @@ class Player {
     if (p.mode === "pan") {
       e.preventDefault();
       const [vx, vy] = this.velocity(p);
-      this.call((w) => w.nsh_pan(p.pan._id, 1, tx, ty, vx, vy));
+      this.call((w) => w.nsh_pan(p.pan._id, 1, tx, ty, vx, vy, p.startX, p.startY));
     } else if (p.mode === "scroll") {
       e.preventDefault();
       const d = [p.dragged[0] - tx, p.dragged[1] - ty];
@@ -10518,17 +10539,56 @@ class Player {
   /** The gate's node id when its pan activates with this move (else undefined). */
   decideGate(p, dx, dy) {
     if (!p.gate || p.gateState !== 0) return undefined;
-    const [ax, ay, fx, fy] = p.gate._props.panActivation;
-    const past = (limit, d) => limit != null && Math.abs(d) > limit;
-    if (past(fx, dx) || past(fy, dy)) {
+    const decision = this.decideActivation(p.gate._props.panActivation, dx, dy);
+    if (decision === false) {
       p.gateState = 2;
       return undefined;
     }
-    const active = ax == null && ay == null ? Math.hypot(dx, dy) > 10 : past(ax, dx) || past(ay, dy);
-    if (!active) return undefined;
+    if (!decision) return undefined;
     p.gateState = 1;
     this.pressOut(p, false);
     return p.gate._id;
+  }
+
+  /** The way `panActivation` `a` (`[activeX, activeY, failX, failY,
+   * direction, edge]`) activates in, if any: away from its edge, else its
+   * direction (`PanActivation::way`). */
+  panWay(a) {
+    const away = { left: "right", right: "left", top: "down", bottom: "up" };
+    return a[5] != null ? away[a[5]] : a[4] ?? undefined;
+  }
+
+  /** `PanActivation::decide` on a drag by (dx, dy): true activates, false
+   * fails, undefined waits. */
+  decideActivation(a, dx, dy) {
+    const [ax, ay, fx, fy] = a;
+    const past = (limit, d) => limit != null && Math.abs(d) > limit;
+    if (past(fx, dx) || past(fy, dy)) return false;
+    const way = this.panWay(a);
+    if (way) {
+      const horizontal = way === "left" || way === "right";
+      const along = (way === "right" || way === "down" ? 1 : -1) * (horizontal ? dx : dy);
+      const across = Math.abs(horizontal ? dy : dx);
+      const limit = (horizontal ? ax : ay) ?? 10;
+      if (along > limit && along >= across) return true;
+      const acrossFails = (horizontal ? fy : fx) == null && across > limit && across > along;
+      return -along > limit || acrossFails ? false : undefined;
+    }
+    const active = ax == null && ay == null ? Math.hypot(dx, dy) > 10 : past(ax, dx) || past(ay, dy);
+    return active ? true : undefined;
+  }
+
+  /** `PanActivation::starts_at`: whether a pointer going down at (x, y) in
+   * an area of `w` × `h` may start the pans of a view with `panActivation`
+   * `a`: anywhere without an edge, else within 20 points of it. */
+  startsAt(a, x, y, w, h) {
+    switch (a?.[5]) {
+      case "left": return x <= 20;
+      case "right": return x >= w - 20;
+      case "top": return y <= 20;
+      case "bottom": return y >= h - 20;
+      default: return true;
+    }
   }
 
   pointerUp(e, cancelled) {
@@ -10558,7 +10618,7 @@ class Player {
       // Released after a pause: no speed left.
       this.track(p, performance.now());
       const [vx, vy] = this.velocity(p);
-      this.call((w) => w.nsh_pan(p.pan._id, cancelled ? 3 : 2, p.x - p.startX, p.y - p.startY, vx, vy));
+      this.call((w) => w.nsh_pan(p.pan._id, cancelled ? 3 : 2, p.x - p.startX, p.y - p.startY, vx, vy, p.startX, p.startY));
     } else if (p.mode === "scroll") {
       this.scrollEvent(p.scroll, "onScrollDragEnd");
       this.track(p, performance.now());
