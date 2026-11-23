@@ -144,3 +144,68 @@ fn a_tables_handles_follow_it_and_the_quote_it_is_in() {
         )
     });
 }
+
+/// The column grips' bands, as laid out (24 x 12 on the active table's top
+/// border).
+fn col_grips(screen: &Screen) -> Vec<Bounds<Points>> {
+    let mut out: Vec<Bounds<Points>> = screen
+        .layout_nodes()
+        .iter()
+        .map(|n| n.bounds)
+        .filter(|b| b.size.width.0 == 24.0 && b.size.height.0 == 12.0)
+        .collect();
+    out.sort_by(|a, b| a.origin.x.0.partial_cmp(&b.origin.x.0).unwrap());
+    out
+}
+
+#[test]
+fn a_table_grip_press_selects_with_the_pointer_meta() {
+    let session = table_session();
+    let noted = super::selection::note_pointer(&session);
+    let held = session.clone();
+    let mut config = EngineConfig {
+        viewport: Size::new(px(800.0), px(900.0)),
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Tables>(move || {
+            HarnessProps {
+                session: Some(session.clone()),
+            }
+        }))
+    };
+    config.environment.os = Os::Linux;
+    config.environment.idiom = Idiom::Desktop;
+    let mut app = Headless::start(config).expect("the engine starts");
+    see(&mut app, "Ready");
+
+    // Pressing a cell activates its table so its column and row grips show.
+    app.press_at("text:a1", Point::new(px(1.0), px(1.0)))
+        .unwrap();
+    app.wait_until("the column grips", Duration::from_secs(5), |s| {
+        col_grips(s).len() == 2
+    })
+    .unwrap();
+    assert_eq!(noted.lock().unwrap().last(), Some(&true));
+
+    let grip = col_grips(app.screen())[0];
+    let above = app
+        .screen()
+        .layout_nodes()
+        .iter()
+        .find(|n| n.text.as_ref().is_some_and(|t| t.text.text == "above"))
+        .expect("the paragraph above the table")
+        .bounds;
+    let at = Point::new(
+        grip.origin.x + grip.size.width * 0.5 - above.origin.x,
+        grip.origin.y + grip.size.height * 0.5 - above.origin.y,
+    );
+    let before = noted.lock().unwrap().len();
+    // Past the double-click window so the grip press lands as a single click.
+    app.wait(Duration::from_millis(600)).unwrap();
+    app.press_at("text:above", at).unwrap();
+    app.wait_until("the column selection", Duration::from_secs(5), |_| {
+        held.state().selection().json_id() == "cell"
+    })
+    .unwrap();
+    let notes = noted.lock().unwrap();
+    assert!(notes.len() > before);
+    assert_eq!(notes.last(), Some(&true));
+}

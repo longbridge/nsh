@@ -88,3 +88,13 @@ fn a_long_press_on_blank_space_places_the_caret_with_its_menu() {
     see(&mut app, &format!("Sel 0-{}", line.len() + 2));
     assert_eq!(labels(&app), ["Cut", "Copy"]);
 }
+
+#[test]
+fn a_long_press_selects_with_the_pointer_meta() {
+    let (mut app, noted) =
+        super::selection::start_noting_pointer(paragraphs(&[LINE]), Os::Ios, Idiom::Phone);
+    let at = char_point(&app, LINE, 7);
+    app.long_press_at(&format!("text:{LINE}"), at).unwrap();
+    see(&mut app, "Sel 7-11");
+    assert_eq!(noted.lock().unwrap().last(), Some(&true));
+}
