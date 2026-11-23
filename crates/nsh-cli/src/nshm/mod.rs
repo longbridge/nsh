@@ -700,7 +700,10 @@ fn copy_dir(from: &Path, to: &Path) -> anyhow::Result<()> {
         let dest = to.join(entry.file_name());
         let kind = entry.file_type()?;
         if kind.is_dir() {
-            if ["target", ".git", ".nsh"].iter().any(|n| entry.file_name() == *n) {
+            if ["target", ".git", ".nsh"]
+                .iter()
+                .any(|n| entry.file_name() == *n)
+            {
                 continue;
             }
             copy_dir(&path, &dest)?;
@@ -720,7 +723,12 @@ mod tests {
         let root = std::env::temp_dir().join(format!("nsh-copy-dir-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let from = root.join("platform");
-        for dir in ["src", "target/release", ".git", "examples/app/.nsh/platforms/x"] {
+        for dir in [
+            "src",
+            "target/release",
+            ".git",
+            "examples/app/.nsh/platforms/x",
+        ] {
             fs::create_dir_all(from.join(dir)).unwrap();
         }
         fs::write(from.join("src/main.rs"), "fn main() {}").unwrap();

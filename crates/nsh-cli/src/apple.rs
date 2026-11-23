@@ -320,15 +320,14 @@ const RESERVED_INFO: [(&str, Owner); 9] = [
     ("CFBundlePackageType", Owner::Package),
 ];
 
-/// Whether `key` of an iOS app's `Info.plist` is one NSH sets itself
-/// ([`RESERVED_INFO`], [`RESERVED_IOS_INFO`]).
-pub(crate) fn is_reserved_ios_info(key: &str) -> bool {
-    ApplePlatform::Ios.reserved().any(|(k, _)| *k == key)
+/// Whether `key` of an Apple app's `Info.plist` is one NSH sets itself.
+pub(crate) fn is_reserved_info(platform: ApplePlatform, key: &str) -> bool {
+    platform.reserved().any(|(k, _)| *k == key)
 }
 
-/// Whether `key` of an iOS app's entitlements is one NSH sets itself
+/// Whether `key` of an Apple app's entitlements is one NSH sets itself
 /// ([`RESERVED_ENTITLEMENTS`]).
-pub(crate) fn is_reserved_ios_entitlement(key: &str) -> bool {
+pub(crate) fn is_reserved_entitlement(key: &str) -> bool {
     RESERVED_ENTITLEMENTS.iter().any(|(k, _)| *k == key)
 }
 
@@ -366,7 +365,7 @@ const RESERVED_ENTITLEMENTS: [(&str, Owner); 3] = [
 
 impl ApplePlatform {
     /// Its key in `nsh.json`.
-    fn key(self) -> &'static str {
+    pub(crate) fn key(self) -> &'static str {
         match self {
             ApplePlatform::Ios => "ios",
             ApplePlatform::Macos => "macos",

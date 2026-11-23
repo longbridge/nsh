@@ -1119,13 +1119,13 @@ binaries, cleaning old versions, per-target support checks and an OTA check of t
 ### What crates declare for packages (`[package.metadata.nsh]`)
 
 `crates/nsh-cli/src/module_meta.rs`. A crate the app links (an nshm, the app's own crate or anything they depend on)
-may declare what the packaged app needs, for itself or per feature: `Info.plist` keys and entitlements on iOS,
+may declare what the packaged app needs, for itself or per feature: `Info.plist` keys and entitlements on iOS and macOS,
 permissions, queries and components on Android. The CLI reads them from the app's dependency graph with the features
-Cargo turns on and adds them to iOS and Android packages; `nsh run`'s development hosts get the `Info.plist` keys and
-the Android entries, not the entitlements. The app's `nsh.json` wins and settles what two crates disagree on (for iOS:
-an Android package never stops on an iOS key); keys NSH sets itself stay NSH's. Android permissions are checked and
-spelled out as `nsh.json`'s are. Keys this CLI does not know are
-reported and left out, so the format can grow.
+Cargo turns on and adds them to iOS, macOS and Android packages; `nsh run`'s development hosts get the iOS `Info.plist`
+keys and the Android entries, not the entitlements. The app's `nsh.json` wins and settles what two crates disagree on
+(checked per target platform: an iOS clash never stops a macOS or Android package, nor does a macOS clash stop an iOS or
+Android one); keys NSH sets itself stay NSH's. Android permissions are checked and spelled out as `nsh.json`'s are. Keys
+this CLI does not know are reported and left out, so the format can grow.
 
 ## Finding the runtimes
 

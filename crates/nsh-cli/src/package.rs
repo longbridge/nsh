@@ -55,12 +55,13 @@ pub(crate) enum PackageTarget {
 
 impl PackageTarget {
     /// The platform [`crate::module_meta`] reads the app's dependency
-    /// graph for: iOS and Android, where crates declare package entries.
+    /// graph for: iOS, macOS and Android, where crates declare package entries.
     fn module_meta_triple(self) -> Option<(&'static str, crate::module_meta::Platform)> {
         use crate::module_meta::Platform;
         match self {
             PackageTarget::Ios => Some(("aarch64-apple-ios", Platform::Ios)),
             PackageTarget::IosSimulator => Some(("aarch64-apple-ios-sim", Platform::Ios)),
+            PackageTarget::Macos => Some((host_macos_triple(), Platform::Macos)),
             PackageTarget::Android => Some(("aarch64-linux-android", Platform::Android)),
             _ => None,
         }
@@ -1435,6 +1436,11 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
             Some(triple),
         )?
         .apply(&mut options.config, platform)?;
+        match platform {
+            crate::module_meta::Platform::Ios => options.config.ios.check(ApplePlatform::Ios)?,
+            crate::module_meta::Platform::Macos => options.config.macos.check()?,
+            crate::module_meta::Platform::Android => {}
+        }
     }
     let config = &options.config;
     let (name, id) = release_name_and_id(&entry, config)?;
@@ -4588,5 +4594,57 @@ mod tests {
             ]
         );
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn macos_package_merges_and_checks_module_metadata() {
+        assert_eq!(
+            PackageTarget::Macos.module_meta_triple(),
+            Some((host_macos_triple(), crate::module_meta::Platform::Macos))
+        );
+        let mut config = AppConfig::default();
+        let mut meta = crate::module_meta::ModuleMeta::default();
+        meta.macos_info.insert(
+            "NSBluetoothAlwaysUsageDescription".into(),
+            serde_json::json!("Connects to peripherals."),
+        );
+        meta.macos_info
+            .insert("LSMinimumSystemVersion".into(), serde_json::json!("15.0"));
+        meta.macos_entitlements.insert(
+            "com.apple.security.network.client".into(),
+            serde_json::json!(true),
+        );
+        meta.apply(&mut config, crate::module_meta::Platform::Macos)
+            .unwrap();
+        config.macos.check().unwrap();
+        let info = macos_info_plist("Demo", "com.example.demo", "Demo", &config, false).unwrap();
+        assert_eq!(
+            info["NSBluetoothAlwaysUsageDescription"],
+            plist::Value::String("Connects to peripherals.".into())
+        );
+        assert_eq!(
+            info["LSMinimumSystemVersion"],
+            plist::Value::String("15.0".into())
+        );
+        let entitlements = config.macos.entitlements().unwrap();
+        assert_eq!(
+            entitlements["com.apple.security.network.client"],
+            plist::Value::Boolean(true)
+        );
+
+        // An invalid merged minimum macOS version is caught by `config.macos.check()`.
+        let mut bad_config = AppConfig::default();
+        let mut bad_meta = crate::module_meta::ModuleMeta::default();
+        bad_meta
+            .macos_info
+            .insert("LSMinimumSystemVersion".into(), serde_json::json!("13.0"));
+        bad_meta
+            .apply(&mut bad_config, crate::module_meta::Platform::Macos)
+            .unwrap();
+        let error = bad_config.macos.check().unwrap_err().to_string();
+        assert!(
+            error.contains("macos.infoPlist.LSMinimumSystemVersion: \"13.0\" is below"),
+            "{error}"
+        );
     }
 }
