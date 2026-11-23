@@ -3040,6 +3040,94 @@ fn scrolls_to_top_reaches_the_scroll_behavior() {
     assert_eq!(behavior(&batch).map(|b| b.scrolls_to_top), Some(true));
 }
 
+/// `smoothWheel` and `wheelLineHeight` reach the scroll view's mounted
+/// behavior (the desktops scroll mouse wheels from it): off and the
+/// platform's line by default, set when the app says so (a negative height
+/// as none), and back to the defaults once the app drops them (the reset
+/// the runtime sets for a removed prop).
+#[test]
+fn smooth_wheel_and_wheel_line_height_reach_the_scroll_behavior() {
+    use crate::js::host::{HostCx, HostProps};
+    fn behavior(batch: &MountBatch) -> Option<ScrollBehavior> {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::ScrollBehavior { id: 2, behavior } => Some((**behavior).clone()),
+            _ => None,
+        })
+    }
+    let b = ScrollBehavior::default();
+    assert!(!b.smooth_wheel);
+    assert_eq!(b.wheel_line_height, Points::ZERO);
+    // Props of every platform: their own names decode.
+    let mut cx = HostCx::for_element(Tag::Scroll);
+    let smooth = <Prop as HostProps>::decode("smoothWheel", &HostTestValue::Bool(true), &mut cx)
+        .expect("a scroll prop")
+        .expect("a value");
+    assert_eq!(smooth, Prop::Scroll(ScrollProp::SmoothWheel(true)));
+    let line =
+        <Prop as HostProps>::decode("wheelLineHeight", &HostTestValue::Number(40.0), &mut cx)
+            .expect("a scroll prop")
+            .expect("a value");
+    assert_eq!(
+        line,
+        Prop::Scroll(ScrollProp::WheelLineHeight(Points(40.0)))
+    );
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Scroll,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: smooth.clone(),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: line.clone(),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let b = behavior(&c.commit().unwrap()).unwrap();
+    assert!(b.smooth_wheel);
+    assert_eq!(b.wheel_line_height, Points(40.0));
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::Scroll(ScrollProp::WheelLineHeight(Points(-5.0))),
+        }],
+    );
+    let b = behavior(&c.commit().unwrap()).unwrap();
+    assert_eq!(
+        b.wheel_line_height,
+        Points::ZERO,
+        "a negative height is none"
+    );
+    apply(
+        &mut c,
+        vec![
+            Op::SetProp {
+                id: 2,
+                prop: <Prop as HostProps>::reset(&smooth).unwrap(),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: <Prop as HostProps>::reset(&line).unwrap(),
+            },
+        ],
+    );
+    let b = behavior(&c.commit().unwrap()).unwrap();
+    assert!(!b.smooth_wheel);
+    assert_eq!(b.wheel_line_height, Points::ZERO);
+}
+
 /// `scrollbarInset` reaches the scroll view's mounted behavior (the platforms
 /// keep their indicators within it), negative edges as none, and leaves the
 /// content inset alone.

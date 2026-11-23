@@ -35,9 +35,9 @@ use crate::{
 /// 48 points as the Windows backend does; macOS reports lines of its own
 /// (about one per notch, accelerated), counted as the macOS backend does.
 #[cfg(target_os = "macos")]
-const LINE: f32 = 10.0;
+pub(crate) const LINE: f32 = 10.0;
 #[cfg(not(target_os = "macos"))]
-const LINE: f32 = 16.0;
+pub(crate) const LINE: f32 = 16.0;
 
 fn gesture_phase(phase: TouchPhase) -> GesturePhase {
     match phase {
