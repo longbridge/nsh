@@ -128,6 +128,20 @@ test("views are drawn as headings and links by their role, else the element they
   assert.equal(elementTag({}), "div");
 });
 
+test("a textbox role is ARIA's textbox", () => {
+  const { player } = fakePlayer();
+  const attrs = new Map();
+  const el = {
+    attrs,
+    getAttribute: (name) => attrs.get(name) ?? null,
+    setAttribute: (name, value) => attrs.set(name, value),
+    removeAttribute: (name) => attrs.delete(name),
+  };
+  el._props = { role: "textbox" };
+  player.updateAria(el);
+  assert.equal(el.attrs.get("role"), "textbox");
+});
+
 test("links the app shows no menu for keep the browser's context menu", () => {
   const { player } = fakePlayer();
   const link = {

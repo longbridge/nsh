@@ -4105,6 +4105,7 @@ impl<M: TextEngine> Core<M> {
                         | R::ImageButton
                         | R::Link
                         | R::Search
+                        | R::Textbox
                         | R::Checkbox
                         | R::Radio
                         | R::Switch

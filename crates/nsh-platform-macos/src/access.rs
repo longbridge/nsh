@@ -375,6 +375,8 @@ enum Ax {
     Toggle,
     Link,
     Text,
+    /// A text field.
+    TextField,
     Image,
     Group,
     Heading,
@@ -1076,6 +1078,7 @@ fn ax_role(role: Ax) -> (Option<Retained<NSString>>, Option<Retained<NSString>>)
             ),
             Ax::Link => (constant(NSAccessibilityLinkRole), None),
             Ax::Text => (constant(NSAccessibilityStaticTextRole), None),
+            Ax::TextField => (constant(NSAccessibilityTextFieldRole), None),
             Ax::Image => (constant(NSAccessibilityImageRole), None),
             Ax::Group => (constant(NSAccessibilityGroupRole), None),
             // WebKit's role for headings, which VoiceOver's rotor lists.
@@ -1275,6 +1278,7 @@ fn base_role(a: &Accessibility, kind: ViewKind, pressable: bool) -> Ax {
         Role::Button | Role::ImageButton | Role::KeyboardKey => Ax::Button,
         Role::Link => Ax::Link,
         Role::Search => Ax::Search,
+        Role::Textbox => Ax::TextField,
         Role::Image => Ax::Image,
         Role::Text => Ax::Text,
         Role::Adjustable => Ax::Slider,
@@ -1434,6 +1438,10 @@ mod tests {
         assert_eq!(
             role_for(&with_role(Role::Option), ViewKind::View, true),
             Ax::Option
+        );
+        assert_eq!(
+            role_for(&with_role(Role::Textbox), ViewKind::View, false),
+            Ax::TextField
         );
     }
 
