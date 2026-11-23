@@ -8,8 +8,7 @@
 //!   at 100% / 125% / 150% scale into `NSH_CAPTURE_DIR` (the temp dir by
 //!   default).
 
-use std::sync::Arc;
-use std::time::Instant;
+use std::{sync::Arc, time::Instant};
 
 use nsh_core::{AttributedText, ResolvedTextStyle, TextEngine, TextSpan};
 use windows::Win32::Graphics::Direct2D::Common::D2D1_ALPHA_MODE_IGNORE;
@@ -80,7 +79,16 @@ fn pixels(gfx: &Gfx, bitmap: &ID2D1Bitmap1, size: (u32, u32)) -> Vec<u8> {
     }
 }
 
-fn laid_out(engine: &crate::text::DWriteTextEngine, s: &str, font_size: f32, color: Color) -> (std::sync::Arc<AttributedText>, nsh_core::TextLayout, Size<Points>) {
+fn laid_out(
+    engine: &crate::text::DWriteTextEngine,
+    s: &str,
+    font_size: f32,
+    color: Color,
+) -> (
+    std::sync::Arc<AttributedText>,
+    nsh_core::TextLayout,
+    Size<Points>,
+) {
     let text = Arc::new(AttributedText {
         text: s.into(),
         spans: vec![TextSpan {
@@ -190,7 +198,13 @@ fn sized(surface: &Rc<Surface>, scale: f32) -> (u32, u32) {
     pixels
 }
 
-fn draw_frame(surface: &Rc<Surface>, gfx: &Gfx, back: &ID2D1Bitmap1, scale: f32, areas: Option<&[D2D_RECT_F]>) {
+fn draw_frame(
+    surface: &Rc<Surface>,
+    gfx: &Gfx,
+    back: &ID2D1Bitmap1,
+    scale: f32,
+    areas: Option<&[D2D_RECT_F]>,
+) {
     draw_into(surface, gfx, back, scale, false, None, areas, None).unwrap();
     // A frame's commands are queued at EndDraw; a Flush inside a fresh
     // frame pushes them through, so the timing covers the rasterization.
@@ -267,7 +281,8 @@ fn capture_dpi_scales() {
     let Ok(gfx) = gfx::get() else {
         return;
     };
-    let dir = std::env::var("NSH_CAPTURE_DIR").unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned());
+    let dir = std::env::var("NSH_CAPTURE_DIR")
+        .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned());
     std::fs::create_dir_all(&dir).unwrap();
     for pct in [100u32, 125, 150] {
         let scale = pct as f32 / 100.0;
