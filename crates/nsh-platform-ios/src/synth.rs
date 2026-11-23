@@ -207,7 +207,11 @@ pub(crate) fn touch(window: &UIWindow, x: f64, y: f64, phase: Phase) -> bool {
     let mtm = window.mtm();
     let touching = u8::from(phase != Phase::Up);
     if phase == Phase::Down {
-        let edge = if at_edge(window, x, y) { FROM_EDGE_TIP } else { 0 };
+        let edge = if at_edge(window, x, y) {
+            FROM_EDGE_TIP
+        } else {
+            0
+        };
         FROM_EDGE.set(edge);
     }
     let edge = if phase == Phase::Up {
