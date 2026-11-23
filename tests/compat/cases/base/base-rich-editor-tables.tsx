@@ -153,6 +153,16 @@ function App() {
       });
       return `${without.run(insertTable({ rows: 1, cols: 1, withHeaderRow: false }))}`;
     });
+    step("Active cell grips", () => {
+      const current = RichTable.configure({ activeCellGrips: true });
+      const configured = createRichEditor({
+        extensions: [StarterKit, current, RichTableRow, RichTableHeader, RichTableCell],
+      });
+      configured.run(insertTable({ rows: 1, cols: 2, withHeaderRow: true }));
+      const defaults = RichTable.configure().options as { activeCellGrips: boolean };
+      const options = current.options as { activeCellGrips: boolean };
+      return `${defaults.activeCellGrips} ${options.activeCellGrips} ${shapeOf(configured.getJSON() as NodeJSON)}`;
+    });
     lines.set(out);
   };
 

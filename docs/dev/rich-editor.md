@@ -272,7 +272,10 @@ the new size in the grid's tracks and commits `setColumnWidth` / `setRowHeight` 
 `cellMinWidth`, rows 16 points). The table the selection is in has grips (a bar of the `tableGrip` part, the theme's
 `muted-foreground`) centered on its top border over each column and on its left border beside each row: a press
 selects the column or row (a cell selection), a drag on desktops shows the drop line (`tableDropIndicator`, `primary`)
-and moves it with `moveTableColumn` / `moveTableRow` on release. Table gestures come before the content box's
+and moves it with `moveTableColumn` / `moveTableRow` on release. With the `activeCellGrips` table option only the
+hovered cell’s column and row have grips; without a hover the selection supplies the cell. An editor session may
+provide measured column widths with `set_table_column_measurer`; dragging a track previews its new width over those
+measurements. Table gestures come before the content box's
 selecting (`Rv::table_target` at the press).
 
 Each table's handles and grips are a region of their own (`table_controls`), placed from that table's layout alone

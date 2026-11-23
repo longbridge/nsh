@@ -23,7 +23,11 @@ fn table(rows: &[&[&str]]) -> Value {
 
 /// A paragraph, a table, and a quote holding another table.
 fn table_session() -> EditorSession {
-    let manager = ExtensionManager::with_core(vec![kit::starter_kit(), kit::table_kit()]).unwrap();
+    session_with_tables(kit::table_kit())
+}
+
+fn session_with_tables(tables: nsh_base::rich_editor::extensions::Extension) -> EditorSession {
+    let manager = ExtensionManager::with_core(vec![kit::starter_kit(), tables]).unwrap();
     let schema = manager.schema().clone();
     let doc = schema
         .node_from_json(&json!({"type": "doc", "content": [
@@ -95,6 +99,48 @@ fn top(screen: &Screen, text: &str) -> f32 {
         .find(|n| n.text.as_ref().is_some_and(|t| t.text.text == text))
         .map(|n| n.bounds.origin.y.0)
         .unwrap_or_else(|| panic!("no text reads {text:?}"))
+}
+
+#[test]
+fn host_column_measurements_size_the_cells_without_changing_the_document() {
+    let session = table_session();
+    let state = session.state();
+    let table = state.doc().child(1);
+    assert_eq!(session.measured_table_columns(table), None);
+    let original = state.doc().to_json();
+    session.set_table_column_measurer(|_| vec![px(160.0), px(250.0)]);
+    assert_eq!(
+        session.measured_table_columns(table),
+        Some(vec![px(160.0), px(250.0)])
+    );
+    let held = session.clone();
+    let mut app = Headless::start(EngineConfig {
+        viewport: Size::new(px(800.0), px(900.0)),
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Tables>(move || {
+            HarnessProps {
+                session: Some(session.clone()),
+            }
+        }))
+    })
+    .unwrap();
+    app.wait_until(
+        "the second cell starts after the measured first column",
+        Duration::from_secs(5),
+        |screen| {
+            let nodes = screen.layout_nodes();
+            let left = |label: &str| {
+                nodes
+                    .iter()
+                    .find(|n| n.text.as_ref().is_some_and(|t| t.text.text == label))
+                    .map(|n| n.bounds.origin.x.0)
+            };
+            left("a1")
+                .zip(left("a2"))
+                .is_some_and(|(first, second)| (second - first - 160.0).abs() < 1.0)
+        },
+    )
+    .unwrap();
+    assert_eq!(held.state().doc().to_json(), original);
 }
 
 #[test]
@@ -208,4 +254,68 @@ fn a_table_grip_press_selects_with_the_pointer_meta() {
     let notes = noted.lock().unwrap();
     assert!(notes.len() > before);
     assert_eq!(notes.last(), Some(&true));
+}
+
+#[test]
+fn scoped_grips_follow_the_hovered_or_pressed_cell() {
+    for (os, idiom) in [(Os::Linux, Idiom::Desktop), (Os::Android, Idiom::Phone)] {
+        let mut config = EngineConfig {
+            viewport: Size::new(px(800.0), px(900.0)),
+            ..EngineConfig::new(nsh_testing::windowed_root_with::<Tables>(|| HarnessProps {
+                session: Some(session_with_tables(kit::table_kit().configure(json!({
+                    "table": {"activeCellGrips": true, "resizable": false}
+                })))),
+            }))
+        };
+        config.environment.os = os;
+        config.environment.idiom = idiom;
+        let mut app = Headless::start(config).unwrap();
+        see(&mut app, "Ready");
+        let grips = |s: &Screen| -> Option<(f32, f32)> {
+            let cols = col_grips(s);
+            let rows: Vec<_> = s
+                .layout_nodes()
+                .into_iter()
+                .map(|n| n.bounds)
+                .filter(|b| b.size.width.0 == 12. && b.size.height.0 == 24.)
+                .collect();
+            match (cols.as_slice(), rows.as_slice()) {
+                ([c], [r]) => Some((c.origin.x.0, r.origin.y.0)),
+                _ => None,
+            }
+        };
+        if idiom == Idiom::Desktop {
+            app.hover("text:a1").unwrap();
+        } else {
+            app.press("text:a1").unwrap();
+        }
+        app.wait_until("one row and one column grip", Duration::from_secs(5), |s| {
+            grips(s).is_some()
+        })
+        .unwrap();
+        let first = grips(app.screen()).unwrap();
+        if idiom == Idiom::Desktop {
+            app.hover("text:b2").unwrap();
+        } else {
+            app.press("text:b2").unwrap();
+        }
+        app.wait_until(
+            "the other row and column replace the previous grips",
+            Duration::from_secs(5),
+            |s| grips(s).is_some_and(|(x, y)| x > first.0 && y > first.1),
+        )
+        .unwrap();
+        app.press("text:b2").unwrap();
+        if idiom == Idiom::Desktop {
+            app.hover("text:above").unwrap();
+            assert!(grips(app.screen()).is_some_and(|(x, y)| x > first.0 && y > first.1));
+        }
+        app.press("text:above").unwrap();
+        app.wait_until(
+            "grips leave with the selection",
+            Duration::from_secs(5),
+            |s| col_grips(s).is_empty(),
+        )
+        .unwrap();
+    }
 }

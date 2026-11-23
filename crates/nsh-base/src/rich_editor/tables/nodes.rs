@@ -43,7 +43,11 @@ pub fn table(options: &Value) -> (String, NodeSpec) {
     // The editor's view lays it out as a grid.
     extra.insert("render".into(), Value::from("table"));
     extra.insert("cellMinWidth".into(), Value::from(cell_min_width));
-    for (key, default) in [("resizable", true), ("lastColumnResizable", true)] {
+    for (key, default) in [
+        ("resizable", true),
+        ("lastColumnResizable", true),
+        ("activeCellGrips", false),
+    ] {
         let value = options.get(key).and_then(Value::as_bool).unwrap_or(default);
         extra.insert(key.into(), Value::Bool(value));
     }
