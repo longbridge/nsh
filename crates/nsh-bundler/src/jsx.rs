@@ -1308,6 +1308,8 @@ impl<'a> Compiler<'a, '_> {
         for child in el.children {
             match child {
                 JSXChild::Text(t) if clean_text(&t.value).is_none() => {}
+                JSXChild::ExpressionContainer(c)
+                    if matches!(c.expression, JSXExpression::EmptyExpression(_)) => {}
                 JSXChild::ExpressionContainer(c) if render.is_none() => {
                     if let Some(e) = self.expression(c.unbox().expression) {
                         render = Some(g.hole(e));
@@ -1340,9 +1342,13 @@ impl<'a> Compiler<'a, '_> {
 /// Whether `children` are one function written in place, whitespace aside
 /// (`<If>`'s `{(value) => …}`).
 fn lone_function_child(children: &[JSXChild<'_>]) -> bool {
-    let mut meaningful = children
-        .iter()
-        .filter(|c| !matches!(c, JSXChild::Text(t) if clean_text(&t.value).is_none()));
+    let mut meaningful = children.iter().filter(|c| match c {
+        JSXChild::Text(t) => clean_text(&t.value).is_some(),
+        JSXChild::ExpressionContainer(c) => {
+            !matches!(c.expression, JSXExpression::EmptyExpression(_))
+        }
+        JSXChild::Element(_) | JSXChild::Fragment(_) | JSXChild::Spread(_) => true,
+    });
     match (meaningful.next(), meaningful.next()) {
         (Some(JSXChild::ExpressionContainer(c)), None) => matches!(
             c.expression,
@@ -1782,6 +1788,42 @@ mod tests {
         // Called with the accessor; `else` as it was; `when` read through it.
         assert!(code.contains("})())(__nsh_hw), () => (() => {"), "{code}");
         assert!(code.contains("))(() => user());"), "{code}");
+    }
+
+    #[test]
+    fn an_if_with_a_comment_beside_its_function_child_still_hands_it_an_accessor() {
+        let code = flat(
+            &compile(
+                r#"import { Text } from "nsh";
+            declare const user: () => { name: string } | null;
+            export const a = <If when={user()}>
+              {/* the user's name */}
+              {(u) => <Text>{u().name}</Text>}
+            </If>;"#,
+            )
+            .unwrap(),
+        );
+        assert!(
+            code.contains("((__nsh_hw) => _$cond(__nsh_hw, () => ((u) => (() => {"),
+            "{code}"
+        );
+        assert!(code.contains("))(() => user());"), "{code}");
+    }
+
+    #[test]
+    fn an_each_with_a_comment_after_its_function_child_compiles() {
+        let code = flat(
+            &compile(
+                r#"import { Text } from "nsh";
+            declare const items: () => string[];
+            export const a = <Each of={items()}>
+              {(item) => <Text>{item}</Text>}
+              {/* one row per item */}
+            </Each>;"#,
+            )
+            .unwrap(),
+        );
+        assert!(code.contains("_$each(() => items(), (item) =>"), "{code}");
     }
 
     #[test]
