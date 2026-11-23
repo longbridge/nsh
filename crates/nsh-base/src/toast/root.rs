@@ -1,8 +1,16 @@
 //! `Toast`: the unstyled semantic root of a toast.
 
-use std::{rc::Rc, time::Duration};
+use std::{
+    rc::Rc,
+    sync::atomic::{AtomicU64, Ordering},
+    time::Duration,
+};
 
-use nsh_core::{TouchEvent, TouchPhase, prelude::*};
+use nsh_core::{
+    TouchEvent, TouchPhase,
+    prelude::*,
+    time::{Instant, now},
+};
 
 use super::ToastTransitionStatus;
 use crate::popup::important;
@@ -18,6 +26,10 @@ const SETTLE_MS: f32 = 200.0;
 /// How long a toast waits for its first display frame before it counts as
 /// past it without one (a surface not on screen).
 const FIRST_FRAME_MS: u64 = 50;
+/// How long a toast taken down while it enters (`starting`) stays the one
+/// a toast mounted with its label is: the app rebuilt it under another
+/// parent, in the same update.
+const MOVED: Duration = Duration::from_millis(50);
 
 /// The direction a toast is swiped away in.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PropEnum)]
@@ -73,6 +85,77 @@ pub enum ToastEvent {
     DismissRequest,
 }
 
+/// The surface's toasts that are entering (`starting`), by label.
+#[derive(Clone, Default)]
+struct Entering(Vec<EnteringToast>);
+
+#[derive(Clone)]
+struct EnteringToast {
+    id: u64,
+    label: SharedString,
+    /// When it was taken down; `None`: it is mounted.
+    left: Option<Instant>,
+}
+
+impl EnteringToast {
+    /// Whether it is still one a toast mounted at `at` can be.
+    fn current(&self, at: Instant) -> bool {
+        self.left
+            .is_none_or(|left| at.saturating_duration_since(left) < MOVED)
+    }
+}
+
+/// Reads `label` as a toast shows, once per toast however often the app
+/// rebuilds it (moves it to another parent, as a stack drawn in the
+/// topmost modal is when a modal opens or closes). A toast mounted past
+/// its entrance (`present`, `ending`) was read before it moved; one
+/// entering while a toast with its label enters, or was taken down
+/// entering a moment ago, is that toast.
+fn announce_once(label: Option<SharedString>, status: Prop<ToastTransitionStatus>) {
+    let Some(label) = label else {
+        return;
+    };
+    if status.get_untracked() != ToastTransitionStatus::Starting {
+        return;
+    }
+    // Unique among every surface's toasts, which is all it needs.
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let id = NEXT.fetch_add(1, Ordering::Relaxed);
+    let entering = global::<Entering>();
+    let at = now();
+    let moved = entering.with_untracked(|e| e.0.iter().any(|t| t.label == label && t.current(at)));
+    if !moved {
+        announce_for_accessibility(label.to_string());
+    }
+    entering.update(|e| {
+        e.0.retain(|t| t.current(at));
+        e.0.push(EnteringToast {
+            id,
+            label,
+            left: None,
+        });
+    });
+    // Entered (or ending): a toast with its label mounted later is another.
+    effect(move || {
+        if status.get() != ToastTransitionStatus::Starting
+            && entering.with_untracked(|e| e.0.iter().any(|t| t.id == id))
+        {
+            entering.update(|e| e.0.retain(|t| t.id != id));
+        }
+    });
+    // Taken down while entering: the toast the app rebuilds elsewhere.
+    cleanup(move || {
+        if entering.with_untracked(|e| e.0.iter().any(|t| t.id == id)) {
+            let left = now();
+            entering.update(|e| {
+                if let Some(t) = e.0.iter_mut().find(|t| t.id == id) {
+                    t.left = Some(left);
+                }
+            });
+        }
+    });
+}
+
 /// An unstyled semantic toast root (`role` alert), as `gpui-base`'s
 /// `Toast`: the app owns its presentation and motion, by its
 /// `transitionStatus` and the state classes (`startingClass`,
@@ -80,15 +163,14 @@ pub enum ToastEvent {
 /// dragged toward `swipeDirection` moves it, and a release past
 /// `swipeThreshold` or a flick asks to dismiss it (`onDismissRequest`);
 /// short of it, it goes back. The screen reader reads its
-/// `accessibilityLabel` as it shows. Placed in a `ToastStack`, which lays
+/// `accessibilityLabel` as it shows, once: rebuilt under another parent
+/// (moved), it is not read again. Placed in a `ToastStack`, which lays
 /// toasts out. In a terminal it shows and goes in one frame: its state
 /// classes do not apply.
 #[component]
 pub fn Toast(props: ToastProps, cx: Scope<ToastEvent>) -> impl IntoElement {
     let status = props.transition_status;
-    if let Some(label) = props.accessibility_label.get_untracked() {
-        announce_for_accessibility(label.to_string());
-    }
+    announce_once(props.accessibility_label.get_untracked(), status);
 
     // Past its first frame: the next display frame, or a frame's time where
     // none comes, whichever is first.

@@ -4792,3 +4792,63 @@ test("window blur resets hoverButtons and cancels all active pointers", () => {
     else globalThis.document = savedDocument;
   }
 });
+
+/** A view element as `updateAria` and the alerts' settling see it. */
+function ariaView(id, props) {
+  const attrs = new Map();
+  return {
+    _id: id,
+    _props: props,
+    textContent: "",
+    getAttribute: (name) => attrs.get(name) ?? null,
+    setAttribute: (name, value) => attrs.set(name, String(value)),
+    removeAttribute: (name) => attrs.delete(name),
+  };
+}
+
+test("an alert rebuilt under another parent in one batch is not read as appearing again", () => {
+  const { player } = fakePlayer();
+  Object.assign(player, { views: new Map(), changedStacks: new Set(), removals: [], endLayoutAnimation() {} });
+  // A batch that runs `turn` as its ops.
+  player.op_turn = ([, turn]) => turn();
+  const frames = [];
+  const savedFrame = globalThis.requestAnimationFrame;
+  globalThis.requestAnimationFrame = (f) => frames.push(f);
+  try {
+    const saved = ariaView(1, { role: "alert", label: "Saved" });
+    player.views.set(1, saved);
+    player.apply([["turn", () => {
+      player.updateAria(saved);
+      assert.equal(saved.getAttribute("role"), null, "not before the batch is in");
+    }]]);
+    assert.equal(saved.getAttribute("role"), "alert", "a new alert is one as the batch is in");
+    // Deleted, and rebuilt with its text under another parent, in one batch.
+    const moved = ariaView(2, { role: "alert", label: "Saved" });
+    player.views.set(2, moved);
+    player.apply([["turn", () => {
+      player.updateAria(moved);
+      player.alertGone(saved);
+      player.views.delete(1);
+    }]]);
+    assert.equal(moved.getAttribute("role"), null, "not an alert appearing");
+    assert.equal(moved.getAttribute("aria-label"), "Saved", "still named");
+    player.updateAria(moved);
+    assert.equal(moved.getAttribute("role"), null, "not before the frame is past");
+    frames.shift()();
+    frames.shift()();
+    assert.equal(moved.getAttribute("role"), "alert", "an alert once the frame that shows it is past");
+    // Another alert in a deleted one's place is read.
+    const failed = ariaView(3, { role: "alert", label: "Not saved" });
+    player.views.set(3, failed);
+    player.apply([["turn", () => {
+      player.updateAria(failed);
+      player.alertGone(moved);
+      player.views.delete(2);
+    }]]);
+    assert.equal(failed.getAttribute("role"), "alert");
+    assert.equal(frames.length, 0);
+  } finally {
+    if (savedFrame === undefined) delete globalThis.requestAnimationFrame;
+    else globalThis.requestAnimationFrame = savedFrame;
+  }
+});
