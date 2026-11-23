@@ -514,7 +514,7 @@ fn run_rust_app(
             let step = ui::Step::start(format!("installing {id} on {serial}"));
             android::install(&sdk, &serial, &apk, &id, &["-r"], android::AppData::Kept)?;
             let activity = format!("{id}/com.longbridge.nsh.AppActivity");
-            let mut start = vec!["shell", "am", "start", "-S", "-n", activity.as_str()];
+            let mut start = android::dev_start(&activity);
             start.extend(env.iter().map(String::as_str));
             android::adb(&sdk, &serial, &start)?;
             step.done(format!("launched {id} on {serial}"));
@@ -821,17 +821,8 @@ fn run_android(
     // run ends.
     let _reverse = android::Reverse::add(&sdk, &serial, session.port())?;
     let url = session.local_url();
-    let mut start = vec![
-        "shell",
-        "am",
-        "start",
-        "-S",
-        "-n",
-        "com.longbridge.nsh.host/com.longbridge.nsh.DevActivity",
-        "--es",
-        "url",
-        &url,
-    ];
+    let mut start = android::dev_start("com.longbridge.nsh.host/com.longbridge.nsh.DevActivity");
+    start.extend(["--es", "url", &url]);
     if trace {
         start.extend(["--ez", "trace", "true"]);
     }
