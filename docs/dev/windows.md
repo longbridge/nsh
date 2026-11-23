@@ -262,7 +262,9 @@ focused text field counts as editing (`when`). With feature `dev`, Ctrl+R is nev
 **Hardware keys on custom views** (`keyboard.rs`): a view that is a focus stop (`focusable`, or one that takes
 presses, `ViewProps::focus_stop`) takes the keyboard focus with Tab / Shift+Tab — the same traversal as fields, in
 the newest dialog of the window the input is in — a click (the view or its nearest focusable ancestor), `ref.focus()`
-/ `blur()`, or UI Automation's `SetFocus`. While it has it, every `WM_KEYDOWN` / `WM_KEYUP` becomes a
+/ `blur()`, or UI Automation's `SetFocus`. A click on no stop (blank space) blurs the field of its window: a
+field is drawn here, not a system control that loses the focus to the click by itself. While it has it, every
+`WM_KEYDOWN` / `WM_KEYUP` becomes a
 `nsh_core::KeyEvent` (`KeyDown` / `KeyUp`) dispatched at that view, which the engine bubbles to enabled listening
 ancestors within the same window:
 

@@ -572,7 +572,9 @@ NSH 的运行时是应用可执行文件的一部分，所以它调用的 API �
 |---|---|---|
 | `NSPrivacyAccessedAPICategoryFileTimestamp` | Rust 标准库读取文件元数据；图片缓存按时间淘汰文件 | `C617.1`；应用读取用户选择的文件时再加 `3B52.1` |
 | `NSPrivacyAccessedAPICategorySystemBootTime` | 渲染器的计时器 | `35F9.1` |
-| `NSPrivacyAccessedAPICategoryUserDefaults` | 读取用户在设置中选择的温度单位，Apple 的理由都不涵盖这种读取（[#2830](https://github.com/longbridge/nsh/issues/2830)） | |
+
+NSH 在 iOS 上不读取用户默认设置（温度单位取自区域设置），所以只有应用自己的代码或它链接的 SDK 调用 `NSUserDefaults` 时，
+才需要声明 `NSPrivacyAccessedAPICategoryUserDefaults`。
 
 ### 最低系统版本
 

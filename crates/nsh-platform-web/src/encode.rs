@@ -943,6 +943,9 @@ fn input_json(c: &InputConfig) -> String {
     if c.paste_behavior != nsh_core::PasteBehavior::Insert {
         s.push_str(",\"pasteInserts\":false");
     }
+    if let Some(max) = c.paste_max_size {
+        let _ = write!(s, ",\"pasteMaxSize\":{max}");
+    }
     if !c.scrollbar_visible {
         s.push_str(",\"noIndicator\":true");
     }

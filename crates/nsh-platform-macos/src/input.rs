@@ -2660,6 +2660,7 @@ pub(crate) fn modifiers(flags: NSEventModifierFlags) -> nsh_core::keymap::Modifi
         alt: flags.contains(NSEventModifierFlags::Option),
         shift: flags.contains(NSEventModifierFlags::Shift),
         cmd: flags.contains(NSEventModifierFlags::Command),
+        alt_graph: false,
     }
 }
 
@@ -3590,6 +3591,29 @@ fn embedded(root: &objc2_app_kit::NSView) -> bool {
         return false;
     };
     crate::view::superview(root).is_some_and(|app| window.contentView().as_ref() != Some(&app))
+}
+
+/// Whether a scroll of `surface` is under way at `event`: a trackpad
+/// gesture, its glide, or wheel steps latched to a view.
+pub(crate) fn scrolling(surface: &Surface, event: &NSEvent) -> bool {
+    let input = &surface.input;
+    let time = event.timestamp() * 1000.0;
+    let horizontal = event.scrollingDeltaX().abs() > event.scrollingDeltaY().abs();
+    input.wheel.borrow().is_some()
+        || (input.momentum.borrow().is_some() && time - input.momentum_last.get() < TOUCHPAD_IDLE)
+        || input.latch.borrow().as_ref().is_some_and(|(view, h, last)| {
+            latch_holds(*h, *last, horizontal, time) && view.ns().window().is_some()
+        })
+}
+
+/// Hands `ns_event`, which reached a hosted AppKit view, into the surface's
+/// input path as the root's `scrollWheel:` does (not by sending it to the
+/// root, which can no-op when re-entered from a nested AppKit handler).
+pub(crate) fn forward_scroll(surface: &Rc<Surface>, ns_event: &NSEvent) {
+    surface.measure(true, || {
+        event(surface, ns_event);
+        crate::surface::quiet(|| surface.revisit());
+    });
 }
 
 /// A `scrollWheel:` event at `(x, y)`.

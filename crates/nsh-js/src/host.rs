@@ -1384,7 +1384,7 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
             }
             obj.set("uris", list)?;
             obj.set("mimeTypes", types)?;
-            // Contents come only where there are no paths (the Web).
+            // Contents come only where there are no paths (the Web, macOS file promises).
             obj.set("files", rquickjs::Array::new(cx.clone())?)?;
             if let EventPayload::FileDropAt { page_position, .. } = payload {
                 obj.set("pagePosition", point_object(cx, *page_position)?)?;
@@ -1456,6 +1456,15 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
                 files.set(index, value)?;
             }
             obj.set("files", files)?;
+            let too_large = rquickjs::Array::new(cx.clone())?;
+            for (index, file) in paste.too_large.iter().enumerate() {
+                let unread = rquickjs::Object::new(cx.clone())?;
+                unread.set("name", file.name.as_str())?;
+                unread.set("type", file.mime.as_str())?;
+                unread.set("size", file.len as f64)?;
+                too_large.set(index, unread)?;
+            }
+            obj.set("tooLarge", too_large)?;
             let uris = rquickjs::Array::new(cx.clone())?;
             for (index, uri) in paste.uris.iter().enumerate() {
                 uris.set(index, uri.as_str())?;
@@ -1652,7 +1661,7 @@ fn bounds_object<'js>(
     Ok(obj)
 }
 
-/// `Modifiers` (`{ control, alt, shift, platform }`, GPUI's names).
+/// `Modifiers` (`{ control, alt, shift, platform, altGraph }`, GPUI's names).
 fn modifiers_object<'js>(
     cx: &Ctx<'js>,
     m: &nsh_core::keymap::Modifiers,
@@ -1662,6 +1671,7 @@ fn modifiers_object<'js>(
     obj.set("alt", m.alt)?;
     obj.set("shift", m.shift)?;
     obj.set("platform", m.cmd)?;
+    obj.set("altGraph", m.alt_graph)?;
     Ok(obj)
 }
 
@@ -2274,6 +2284,7 @@ const report = (v) => text(String(v));
             let modifiers: rquickjs::Object = obj.get("modifiers").unwrap();
             assert!(modifiers.get::<_, bool>("control").unwrap());
             assert!(!modifiers.get::<_, bool>("shift").unwrap());
+            assert!(!modifiers.get::<_, bool>("altGraph").unwrap());
             assert_eq!(obj.get::<_, u32>("clickCount").unwrap(), 2);
         });
     }
