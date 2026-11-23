@@ -22,6 +22,8 @@ struct HarnessProps {
     controlled: bool,
     seconds: bool,
     h12: bool,
+    min: Option<TimeOfDay>,
+    max: Option<TimeOfDay>,
 }
 
 fn props() -> HarnessProps {
@@ -29,7 +31,13 @@ fn props() -> HarnessProps {
         controlled: false,
         seconds: false,
         h12: false,
+        min: None,
+        max: None,
     }
+}
+
+fn at(h: u32, m: u32) -> Option<TimeOfDay> {
+    Some(TimeOfDay(NaiveTime::from_hms_opt(h, m, 0).unwrap()))
 }
 
 /// A field at 09:30 whose segments show their label (`renderSegment`) and
@@ -43,6 +51,8 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
     let controlled = props.controlled;
     let mut el = time_field()
         .accessibility_label("Start time")
+        .min(props.min)
+        .max(props.max)
         .precision(if props.seconds {
             TimePrecision::Second
         } else {
@@ -204,6 +214,96 @@ fn up_and_down_step_the_segment_and_backspace_resets_it() {
     app.press_key("backspace").unwrap();
     see(&mut app, "00^");
     assert_eq!(log(&app), "09:31:00 09:30:00 09:29:00 08:29:00 00:29:00");
+}
+
+#[test]
+fn steps_land_on_and_stop_at_the_bounds() {
+    let mut app = start(HarnessProps {
+        min: at(9, 0),
+        max: at(17, 45),
+        ..props()
+    });
+    app.press("text:09").unwrap();
+    see(&mut app, "09^");
+    // An hour down from 09:30 would be 08:30: on the minimum's 09:00.
+    app.press_key("down").unwrap();
+    see(&mut app, "09^");
+    see(&mut app, "00");
+    // Already on the minimum: nothing more down, not even a minute that
+    // would wrap to 09:59.
+    app.press_key("down").unwrap();
+    app.press_key("right").unwrap();
+    app.press_key("down").unwrap();
+    app.press_key("left").unwrap();
+    app.idle(Duration::from_millis(50)).unwrap();
+    // Up to 17:00, then an hour up lands on the maximum's 17:45; another
+    // one stays there.
+    for _ in 0..9 {
+        app.press_key("up").unwrap();
+    }
+    see(&mut app, "17^");
+    see(&mut app, "45");
+    app.press_key("up").unwrap();
+    app.idle(Duration::from_millis(50)).unwrap();
+    assert_eq!(
+        log(&app),
+        "09:00:00 10:00:00 11:00:00 12:00:00 13:00:00 14:00:00 15:00:00 16:00:00 17:00:00 17:45:00"
+    );
+}
+
+#[test]
+fn typed_digits_outside_the_bounds_are_held_to_them() {
+    let mut app = start(HarnessProps {
+        min: at(9, 15),
+        max: at(17, 45),
+        ..props()
+    });
+    app.press("text:09").unwrap();
+    // 08:30 is before the minimum: held to 09:15 when the hour completes.
+    app.press_key("0").unwrap();
+    app.press_key("8").unwrap();
+    see(&mut app, "09");
+    see(&mut app, "15");
+    app.press("text:09").unwrap();
+    // 18:15 is after the maximum: held to 17:45 when the hour completes.
+    app.press_key("1").unwrap();
+    app.press_key("8").unwrap();
+    see(&mut app, "17");
+    see(&mut app, "45");
+    // The minute, now selected, is held too: 17:50 is after 17:45.
+    app.press_key("5").unwrap();
+    app.press_key("0").unwrap();
+    see(&mut app, "17");
+    see(&mut app, "45");
+    assert_eq!(
+        log(&app),
+        "00:30:00 09:15:00 01:15:00 17:45:00 17:05:00 17:45:00"
+    );
+}
+
+#[test]
+fn without_bounds_steps_and_typed_digits_are_unchanged() {
+    let mut app = start(props());
+    app.press("text:09").unwrap();
+    app.press_key("down").unwrap();
+    see(&mut app, "08^");
+    app.press_key("0").unwrap();
+    app.press_key("7").unwrap();
+    see(&mut app, "07");
+    assert_eq!(log(&app), "08:30:00 00:30:00 07:30:00");
+}
+
+#[test]
+fn a_min_after_max_leaves_both_out() {
+    let mut app = start(HarnessProps {
+        min: at(17, 45),
+        max: at(9, 15),
+        ..props()
+    });
+    app.press("text:09").unwrap();
+    app.press_key("down").unwrap();
+    see(&mut app, "08^");
+    assert_eq!(log(&app), "08:30:00");
 }
 
 #[test]

@@ -2235,6 +2235,28 @@ covers [events] onChange
 covers [events] onFocus
 covers [events] onBlur
 covers [events] onSubmit
+
+# base-time-field
+tap id:case-base-time-field
+# The time the app owns, within `min` and `max`: typed digits before the
+# minimum are held to it when the hour completes.
+expect Appointment 09:30
+prop label:Appointment value 09:30
+type label:Appointment 08
+expect Appointment 09:00
+# After the maximum, held to it.
+expect Office 09:30
+type label:Office 18
+expect Office 17:30
+# A `min` after `max` leaves both out.
+expect Inverted 12:00
+type label:Inverted 08
+expect Inverted 08:00
+covers [nsh/base] TimeField
+covers [props] value
+covers [props] TimeField.min
+covers [props] TimeField.max
+covers [events] onChange
 # base-combobox
 tap id:case-base-combobox
 # The input is a combobox whose value is the selected titles.
