@@ -6,9 +6,12 @@
 //! views still get their touches. Touches start being tracked when the view
 //! under them, or one around it, listens to `onTouch`.
 //!
-//! A gate sits on each view with a `panActivation` and decides, as the
-//! fingers move, whether its pan activates ([`PanActivation::decide`]): the
-//! pans of the scroll views around it must wait for it to fail
+//! A gate sits on each view with a `panActivation` whose native pan or
+//! responder follows it (`nsh_core::input::gate_activation`; not on one
+//! whose pan is off, which leaves the drags to its content) and decides,
+//! as the fingers move, whether its pan activates
+//! ([`PanActivation::decide`]): the pans of the scroll views around it
+//! must wait for it to fail
 //! (`shouldBeRequiredToFailByGestureRecognizer:`), so they keep the touches
 //! when it fails and never get them when it activates; the activation goes
 //! to the engine with the tracker's touches (`TouchEvent::activated`), and
