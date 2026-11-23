@@ -43418,7 +43418,7 @@ mod terminal_layout {
     }
 
     #[test]
-    fn a_card_has_its_border_and_no_padding_rows() {
+    fn a_card_has_its_border_and_a_padding_row_from_12_points() {
         let mut ops = view(
             2,
             ROOT_ID,
@@ -43434,12 +43434,12 @@ mod terminal_layout {
         ops.extend(view(8, 2, &[]));
         ops.extend(text(9, 8, "Two"));
         let batch = laid_out(ops);
-        // A border Cell each side, a column of padding, no padding row:
-        // 1 + 3 + 1 rows, 1 + 1 + 5 + 1 + 1 columns.
-        assert_eq!(frame_of(&batch, 2), Some(rect(0.0, 0.0, 72.0, 80.0)));
-        assert_eq!(frame_of(&batch, 3), Some(rect(16.0, 16.0, 40.0, 16.0)));
-        assert_eq!(frame_of(&batch, 5), Some(rect(16.0, 32.0, 40.0, 16.0)));
-        assert_eq!(frame_of(&batch, 8), Some(rect(16.0, 48.0, 40.0, 16.0)));
+        // A border Cell each side, a column and a row of padding:
+        // 1 + 1 + 3 + 1 + 1 rows, 1 + 1 + 5 + 1 + 1 columns.
+        assert_eq!(frame_of(&batch, 2), Some(rect(0.0, 0.0, 72.0, 112.0)));
+        assert_eq!(frame_of(&batch, 3), Some(rect(16.0, 32.0, 40.0, 16.0)));
+        assert_eq!(frame_of(&batch, 5), Some(rect(16.0, 48.0, 40.0, 16.0)));
+        assert_eq!(frame_of(&batch, 8), Some(rect(16.0, 64.0, 40.0, 16.0)));
     }
 
     #[test]
@@ -43470,7 +43470,7 @@ mod terminal_layout {
     }
 
     #[test]
-    fn sections_keep_one_blank_row_and_cards_none() {
+    fn sections_and_card_rows_keep_one_blank_row() {
         let mut ops = view(2, ROOT_ID, &[("rowGap", V::Number(24.0))]);
         // A card: a border, its rows 16pt apart inside.
         ops.extend(view(
@@ -43495,11 +43495,12 @@ mod terminal_layout {
         ops.extend(view(10, 9, &[]));
         ops.extend(text(11, 10, "Three"));
         let batch = laid_out(ops);
-        // Inside the card no blank row; between the cards one, the gap
-        // and the margin collapsed into it.
-        assert_eq!(frame_of(&batch, 7).map(|f| f.origin.y), Some(Points(16.0)));
-        assert_eq!(frame_of(&batch, 3), Some(rect(0.0, 0.0, 320.0, 64.0)));
-        assert_eq!(frame_of(&batch, 9), Some(rect(0.0, 80.0, 320.0, 48.0)));
+        // Inside the card a blank row between its rows; between the cards
+        // one, the gap and the margin collapsed into it; the second card's
+        // 12pt padding a row above and below.
+        assert_eq!(frame_of(&batch, 7).map(|f| f.origin.y), Some(Points(32.0)));
+        assert_eq!(frame_of(&batch, 3), Some(rect(0.0, 0.0, 320.0, 80.0)));
+        assert_eq!(frame_of(&batch, 9), Some(rect(0.0, 96.0, 320.0, 80.0)));
     }
 
     #[test]
