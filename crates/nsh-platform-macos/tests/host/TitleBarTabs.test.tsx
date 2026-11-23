@@ -10,6 +10,11 @@ function bar(app: { texts(): string[] }, window: string) {
   return { height, left, right };
 }
 
+// AppKit animates into and out of full screen and ignores `toggleFullScreen:`
+// and clicks at the right place until the animation is over, though the mode
+// and the title bar area are reported as it starts.
+const transition = () => new Promise((resolve) => setTimeout(resolve, 2500));
+
 test("a header with no padding lies under the traffic lights", async () => {
   const app = await open("./TitleBarTabs.tsx");
   await app.waitFor("Selected main: ");
@@ -44,6 +49,7 @@ test("full screen has no title bar area, and leaving it brings the area back", a
   await app.press("label:Full screen main");
   await app.waitFor("Mode main: fullScreen", { timeout: 10000 });
   await app.waitFor("Bar main: 0 0 0", { timeout: 10000 });
+  await transition();
   await app.press("label:Normal main");
   await app.waitFor("Mode main: normal", { timeout: 10000 });
   await app.waitFor(`Bar main: 44 ${main.left} 0`, { timeout: 10000 });
@@ -86,9 +92,11 @@ test("nsh/base's TitleBar drops its inset in full screen and takes it back after
   await app.press("label:Full screen main");
   await app.waitFor("Bar main: 0 0 0", { timeout: 10000 });
   await app.waitUntil(() => (app.layout("label:Tab !1113 main")?.x ?? -1) < area.left, { timeout: 5000 });
+  await transition();
   await app.press("label:Normal main");
   await app.waitFor(`Bar main: 44 ${area.left} 0`, { timeout: 10000 });
   await app.waitUntil(() => (app.layout("label:Tab !1113 main")?.x ?? -1) >= area.left, { timeout: 5000 });
+  await transition();
   await app.press("label:Close !1113 main");
   await app.waitFor("Closed main: !1113");
 });
