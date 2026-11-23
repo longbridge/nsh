@@ -31,6 +31,13 @@ final class InputBox extends FrameLayout implements Node {
     final int id;
     final Decor decor = new Decor();
 
+    // `clipPath`: what it draws shows, and touches reach it and its
+    // children, only inside it (`Decor.drawClipped`, `Decor.clipsOut`).
+    @Override
+    public void draw(android.graphics.Canvas canvas) {
+        decor.drawClipped(canvas, this, () -> super.draw(canvas));
+    }
+
     /** An outer box shadow draws outside the bounds, and compositing the
      * view at alpha < 1 into the bounds-clipped offscreen buffer would cut
      * it; such a view reports no overlapping rendering, so the alpha
@@ -89,6 +96,8 @@ final class InputBox extends FrameLayout implements Node {
         // selection's handles): the touch goes to the views below. It
         // still takes focus and typed text.
         if (pointerEvents == 1 || pointerEvents == 2) return false;
+        // Where its clip path cuts it away, the touch goes to the views below.
+        if (e.getActionMasked() == MotionEvent.ACTION_DOWN && decor.clipsOut(this, e.getX(), e.getY())) return false;
         return super.dispatchTouchEvent(e);
     }
 

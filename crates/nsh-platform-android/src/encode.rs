@@ -1155,6 +1155,21 @@ fn view_style(e: &mut Encoded, s: &ViewStyle) {
         }
     }
     e.bool(s.backface_hidden);
+    // `clipPath`: whether there is one, then each edge's offset (points)
+    // and fraction (top, right, bottom, left), then the radii from the top
+    // left (`Mounter.style`).
+    let clip = s.clip_path();
+    e.bool(clip.is_some());
+    let clip = clip.copied().unwrap_or_default();
+    for v in clip.offsets.to_array() {
+        e.float(v.0);
+    }
+    for v in clip.fractions.to_array() {
+        e.float(v.0);
+    }
+    for v in clip.radii.to_array() {
+        e.float(v.0);
+    }
     effects(e, s);
 }
 

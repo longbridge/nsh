@@ -12,12 +12,12 @@
 use std::{cell::RefCell, fmt::Write as _};
 
 use nsh_core::{
-    BorderStyle, Color, Command, EventKind, EventMask, Filter, Gradient, GradientKind,
+    BorderStyle, ClipInset, Color, Command, EventKind, EventMask, Filter, Gradient, GradientKind,
     GradientSize, ImageSource, InputConfig, Keyframes, LayoutCurve, LayoutTransition, MountItem,
     NativeProps, ObjectPosition, Points, ResizeMode, ScreenAnimation, ScrollBehavior, Transform,
     TransformKind, TransitionProps, ViewKind, ViewProps, ViewStyle, WebSource,
     element::PropEnum,
-    geometry::{DefiniteLength, REM_SIZE, Radians, Size, relative},
+    geometry::{DefiniteLength, Percentage, REM_SIZE, Radians, Size, relative},
 };
 use rustc_hash::FxHashMap;
 
@@ -502,6 +502,9 @@ pub(crate) fn view_css(s: &ViewStyle) -> (String, Option<String>) {
             // `-webkit-mask-image` for WebKit, which still needs the prefix.
             let _ = write!(css, "mask-image:{m};-webkit-mask-image:{m};");
         }
+        if let Some(clip) = &effects.clip_path {
+            let _ = write!(css, "clip-path:{};", clip_path(clip));
+        }
     }
     if !shadows.is_empty() {
         let _ = write!(css, "box-shadow:{};", shadows.join(","));
@@ -560,6 +563,9 @@ pub(crate) fn view_css(s: &ViewStyle) -> (String, Option<String>) {
         }
         if p.has(TransitionProps::SHAPE) {
             props.extend(["border-radius", "outline-width"]);
+        }
+        if p.has(TransitionProps::CLIP_PATH) {
+            props.push("clip-path");
         }
         let easing = match t.spring {
             // It times itself: its progress over the time it settles in.
@@ -630,6 +636,29 @@ pub(crate) fn view_css(s: &ViewStyle) -> (String, Option<String>) {
         None
     };
     (css, border)
+}
+
+/// CSS's `inset()` of a clip path: each edge its points plus its fraction
+/// of the box (`calc()` when it has both, as an interpolated inset does),
+/// then the corners' radii.
+fn clip_path(clip: &ClipInset) -> String {
+    let edge = |o: Points, f: Percentage| match (o.0 != 0.0, f.0 != 0.0) {
+        (true, true) => format!("calc({}px + {}%)", o.0, f.0 * 100.0),
+        (false, true) => format!("{}%", f.0 * 100.0),
+        _ => format!("{}px", o.0),
+    };
+    let (o, f, r) = (clip.offsets, clip.fractions, clip.radii);
+    format!(
+        "inset({} {} {} {} round {}px {}px {}px {}px)",
+        edge(o.top, f.top),
+        edge(o.right, f.right),
+        edge(o.bottom, f.bottom),
+        edge(o.left, f.left),
+        r.top_left.0,
+        r.top_right.0,
+        r.bottom_right.0,
+        r.bottom_left.0
+    )
 }
 
 fn border_style(s: BorderStyle) -> &'static str {
@@ -1961,6 +1990,39 @@ mod tests {
     use nsh_core::desktop::{DesktopCommand, WindowAttributes, WindowRequest};
 
     use super::*;
+
+    #[test]
+    fn a_clip_path_is_css_clip_path_and_transitions_by_name() {
+        let mut style = nsh_core::Style::default();
+        style
+            .set(
+                "clipPath",
+                nsh_core::StyleValue::Str("inset(0 8px 100% 50% round 12px 0 4px 2px)"),
+            )
+            .unwrap();
+        style
+            .set("transitionProperty", nsh_core::StyleValue::Str("clip-path"))
+            .unwrap();
+        let (css, _) = view_css(&style.view);
+        assert!(
+            css.contains("clip-path:inset(0px 8px 100% 50% round 12px 0px 4px 2px);"),
+            "{css}"
+        );
+        assert!(css.contains("transition-property:clip-path;"), "{css}");
+        // Between a length and a percentage, an edge is both: `calc()`.
+        let half = ClipInset::new()
+            .bottom(nsh_core::geometry::percentage(1.0))
+            .lerp(&ClipInset::new().bottom(Points(10.0)), 0.5);
+        assert_eq!(
+            clip_path(&half),
+            "inset(0px 0px calc(5px + 50%) 0px round 0px 0px 0px 0px)"
+        );
+        // `none` writes nothing.
+        style
+            .set("clipPath", nsh_core::StyleValue::Str("none"))
+            .unwrap();
+        assert!(!view_css(&style.view).0.contains("clip-path:inset"));
+    }
 
     fn commands(id: u32, command: DesktopCommand) -> String {
         let mut out = Out::new();

@@ -1436,16 +1436,18 @@ fn pick_in(view: &NshView, p: graphene::Point) -> Option<Hit> {
                 s.kind,
                 ViewKind::Scroll | ViewKind::Image | ViewKind::Stack | ViewKind::Input
             );
+        let at = point(Points(p.x()), Points(p.y()));
         let HitArea {
             in_slop, children, ..
         } = input::hit_area(
-            point(Points(p.x()), Points(p.y())),
+            at,
             s.frame.size,
             s.props.hit_slop,
             s.overflow,
             clip,
             laid_out(s.kind, s.id),
-        );
+        )
+        .clipped(s.style.clip_path(), at, s.frame.size);
         (s.props.pointer_events, in_slop, children)
     };
     let own = || (pe != PointerEvents::BoxNone && in_slop).then(|| hit(view, None));

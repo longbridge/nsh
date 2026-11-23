@@ -5,6 +5,7 @@
 import { type JSX, View, mount, signal } from "nsh";
 import { Window } from "nsh/desktop";
 import PaintBorders from "./paint-borders";
+import PaintClipPath from "./paint-clip-path";
 import PaintCurrentColor from "./paint-current-color";
 import PaintEffects from "./paint-effects";
 import PaintInlineAlign from "./paint-inline-align";
@@ -24,6 +25,7 @@ import StateFocusWithin from "./state-focus-within";
 
 const cases: Record<string, () => JSX.Element> = {
   "paint-borders": PaintBorders,
+  "paint-clip-path": PaintClipPath,
   "paint-current-color": PaintCurrentColor,
   "paint-effects": PaintEffects,
   "paint-misc": PaintMisc,
