@@ -3256,9 +3256,9 @@ impl<M: TextEngine> Core<M> {
             // something still holds (a development host keeps the mounted
             // app for hot updates) is not released yet, but it is gone.
             .filter(|&id| {
-                !self.key(id).is_ok_and(|k| {
-                    id == crate::ROOT_ID || self.nodes[k as usize].parent != NO_KEY
-                })
+                !self
+                    .key(id)
+                    .is_ok_and(|k| id == crate::ROOT_ID || self.nodes[k as usize].parent != NO_KEY)
             })
             .collect();
         for id in gone {
@@ -12008,7 +12008,8 @@ fn measure_leaf_size<M: TextEngine>(
         }
         inset
     };
-    taffy::compute_leaf_layout(
+    let image = matches!(cx, Some(LeafContext::Image(_)));
+    let mut output = taffy::compute_leaf_layout(
         input,
         style,
         |_, _| 0.0,
@@ -12019,7 +12020,18 @@ fn measure_leaf_size<M: TextEngine>(
             };
             measure_content(engine, cache, cx, known, available, input_max_height)
         },
-    )
+    );
+    // An image is drawn inside its box whatever its fit (CSS's replaced
+    // elements have no scrollable overflow). Taffy lays a leaf out without
+    // the sizes its style gives it (`RunMode::PerformLayout`), so what was
+    // measured is the natural size: a 24 point icon in a 14 point box
+    // would give the scroll view around it 10 points to scroll.
+    if image {
+        let o = &mut output.scrollable_overflow_rect;
+        o.right = o.right.min(output.size.width);
+        o.bottom = o.bottom.min(output.size.height);
+    }
+    output
 }
 
 /// The size of a leaf's content: `known` and `available` are its content
