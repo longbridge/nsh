@@ -37,6 +37,7 @@ fn start(app_theme: Option<Theme>, host_theme: Option<Theme>) -> (Engine, Receiv
         root = root.tokens(theme.into_tokens());
     }
     let config = EngineConfig {
+        location: None,
         app: App::Rust(root),
         viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
@@ -143,6 +144,7 @@ fn a_tsx_apps_token_classes_follow_the_host_theme() {
     let bytecode = nsh_js::compile_bytecode(&bundle.code, false).unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
+        location: None,
         // SAFETY: compiled just now by this runtime.
         app: App::Js(unsafe { nsh_engine::Bundle::bytecode(bytecode) }),
         viewport: Size::new(px(390.0), px(844.0)),
@@ -233,6 +235,7 @@ fn a_hosts_theme_overrides_win_over_the_apps_tokens_they_set_and_keep_the_rest()
     let bytecode = nsh_js::compile_bytecode(&bundle.code, false).unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
+        location: None,
         // SAFETY: compiled just now by this runtime.
         app: App::Js(unsafe { nsh_engine::Bundle::bytecode(bytecode) }),
         viewport: Size::new(px(390.0), px(844.0)),
@@ -354,6 +357,7 @@ fn start_branded(
     let bytecode = nsh_js::compile_bytecode(&bundle.code, false).unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
+        location: None,
         // SAFETY: compiled just now by this runtime.
         app: App::Js(unsafe { nsh_engine::Bundle::bytecode(bytecode) }),
         viewport: Size::new(px(390.0), px(844.0)),

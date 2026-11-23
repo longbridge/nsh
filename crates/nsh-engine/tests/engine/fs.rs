@@ -67,6 +67,7 @@ mount(() => <Text>{{shown()}}</Text>);
         .unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
+        location: None,
         app: nsh_engine::App::Js(bundle),
         viewport: Size::new(nsh_core::geometry::px(400.0), nsh_core::geometry::px(300.0)),
         trace: false,
@@ -650,6 +651,7 @@ mount(() => <Text>{shown()}</Text>);
         .unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
+        location: None,
         app: nsh_engine::App::Js(bundle),
         viewport: Size::new(nsh_core::geometry::px(400.0), nsh_core::geometry::px(300.0)),
         trace: false,

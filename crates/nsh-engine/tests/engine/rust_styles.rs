@@ -68,6 +68,7 @@ fn start() -> (Engine, Receiver<MountBatch>) {
 fn start_root(root: Root) -> (Engine, Receiver<MountBatch>) {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
+        location: None,
         app: App::Rust(root),
         viewport: Size::new(px(390.0), px(844.0)),
         trace: false,

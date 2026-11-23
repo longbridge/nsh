@@ -33,6 +33,7 @@ impl MountSink for ReportSink {
 
 fn config(bundle: Bundle, limits: nsh_engine::Limits) -> EngineConfig {
     EngineConfig {
+        location: None,
         app: nsh_engine::App::Js(bundle),
         viewport: Size::new(px(100.0), px(100.0)),
         trace: false,
@@ -123,6 +124,7 @@ fn first_error(bundle: Bundle) -> String {
         errors: Arc::new(Mutex::new(tx)),
     };
     let config = EngineConfig {
+        location: None,
         app: nsh_engine::App::Js(bundle),
         viewport: Size::new(px(100.0), px(100.0)),
         trace: false,

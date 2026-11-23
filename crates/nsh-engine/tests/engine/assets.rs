@@ -21,6 +21,7 @@ use crate::ChannelSink;
 
 fn config(app: App) -> EngineConfig {
     EngineConfig {
+        location: None,
         app,
         viewport: Size::new(px(390.0), px(844.0)),
         trace: false,

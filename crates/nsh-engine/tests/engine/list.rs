@@ -110,6 +110,7 @@ fn config(app: &str) -> (EngineConfig, std::path::PathBuf) {
     .unwrap();
     let bytecode = nsh_js::compile_bytecode(&bundle.code, false).unwrap();
     let config = EngineConfig {
+        location: None,
         // SAFETY: compiled just now by this runtime.
         app: nsh_engine::App::Js(unsafe { Bundle::bytecode(bytecode) }),
         viewport: Size::new(px(320.0), px(500.0)),

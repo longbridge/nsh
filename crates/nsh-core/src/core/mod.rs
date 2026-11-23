@@ -1691,6 +1691,12 @@ pub struct Core<M: TextEngine> {
     /// Opens and applies the app's windows of its own in place of the
     /// platform ([`Core::set_window_backend`]).
     window_backend: Option<Arc<dyn crate::desktop::WindowBackend>>,
+    /// Reports the app's location in place of the platform
+    /// ([`Core::set_location`]).
+    location: Option<Arc<dyn crate::location::LocationBackend>>,
+    /// What the app may read of its location, as the platform last said
+    /// ([`Core::set_location_authorization`], `Location.authorization()`).
+    location_authorization: crate::location::Authorization,
     /// Plays the app's sound in place of the platform ([`Core::set_audio`]).
     audio: Option<Arc<dyn crate::audio::AudioBackend>>,
     /// The app's login item ([`Core::set_login_item`]); without one the app
@@ -1776,6 +1782,8 @@ impl<M: TextEngine> Core<M> {
             clipboard: None,
             picker: None,
             window_backend: None,
+            location: None,
+            location_authorization: crate::location::Authorization::NotDetermined,
             audio: None,
             login_item: None,
             components: components::Components::for_viewport(viewport),
@@ -2130,6 +2138,21 @@ impl<M: TextEngine> Core<M> {
         self.window_backend = backend;
     }
 
+    /// Reports the app's location (`Location`) with `backend`, an embedding
+    /// app's own provider or a test's fake, instead of the platform's
+    /// (`None`: the platform's, the default).
+    pub fn set_location(&mut self, backend: Option<Arc<dyn crate::location::LocationBackend>>) {
+        if let Some(backend) = &backend {
+            self.location_authorization = backend.authorization();
+        }
+        self.location = backend;
+    }
+
+    /// Records what the app may read of its location, as the platform says at
+    /// start and on every change (`Location.authorization()` reads it).
+    pub fn set_location_authorization(&mut self, authorization: crate::location::Authorization) {
+        self.location_authorization = authorization;
+    }
     /// Plays the app's sound (`Sound`, `AudioPlayer`) with `backend`, an
     /// embedding app's own audio stack or a test's fake, instead of the
     /// platform's (`None`: the platform's, the default).

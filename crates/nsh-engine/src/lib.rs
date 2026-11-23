@@ -1260,6 +1260,10 @@ pub struct EngineConfig {
     /// (`nsh_testing`'s). `None` (the default): the platform's, where it
     /// has one (`Environment::audio`).
     pub audio: Option<Arc<dyn nsh_core::audio::AudioBackend>>,
+    /// Reports the app's location (`Location`) instead of the platform: the
+    /// embedding app's own provider, or a test's fake. `None` (the default):
+    /// the platform's, where it has one (`Environment::location`).
+    pub location: Option<Arc<dyn nsh_core::location::LocationBackend>>,
     /// Opens and applies the app's windows of its own (`<Window>`,
     /// `Window.open`) instead of the platform: the embedding app's own
     /// windows, or a test's fake. `None` (the default): the platform's
@@ -1406,6 +1410,7 @@ impl EngineConfig {
             host: HostChannel::default(),
             picker: None,
             audio: None,
+            location: None,
             windows: None,
             login_item: None,
         }

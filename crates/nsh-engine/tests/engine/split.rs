@@ -90,6 +90,7 @@ fn bundle(name: &str) -> nsh_bundler::Bundle {
 
 fn config(bundle: Bundle) -> EngineConfig {
     EngineConfig {
+        location: None,
         app: nsh_engine::App::Js(bundle),
         viewport: Size::new(px(390.0), px(844.0)),
         trace: false,

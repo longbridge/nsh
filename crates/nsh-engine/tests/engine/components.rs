@@ -80,6 +80,7 @@ fn app_config(
     .unwrap();
     let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, &described).unwrap();
     EngineConfig {
+        location: None,
         // SAFETY: compiled just now by this runtime.
         app: nsh_engine::App::Js(
             unsafe { Bundle::bytecode(bytecode) }

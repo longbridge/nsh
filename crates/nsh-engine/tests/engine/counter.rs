@@ -30,6 +30,7 @@ fn config() -> EngineConfig {
     .unwrap();
     let bytecode = nsh_js::compile_bytecode(&bundle.code, false).unwrap();
     EngineConfig {
+        location: None,
         // SAFETY: compiled just now by this runtime.
         app: nsh_engine::App::Js(unsafe { Bundle::bytecode(bytecode) }),
         viewport: Size::new(px(390.0), px(844.0)),

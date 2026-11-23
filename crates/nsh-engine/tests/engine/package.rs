@@ -41,6 +41,7 @@ fn counter(build_number: u64, bytecode_version: &str) -> Contents {
 fn first_texts(bundle: nsh_engine::Bundle) -> Vec<String> {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
+        location: None,
         app: nsh_engine::App::Js(bundle),
         viewport: Size::new(px(390.0), px(844.0)),
         trace: false,

@@ -140,6 +140,7 @@ fn start(
     let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, &[]).unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
+        location: None,
         // SAFETY: compiled just now by this runtime.
         app: nsh_engine::App::Js(unsafe { Bundle::bytecode(bytecode) }),
         viewport: Size::new(px(390.0), px(844.0)),

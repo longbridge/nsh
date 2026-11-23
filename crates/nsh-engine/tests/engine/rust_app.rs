@@ -40,6 +40,7 @@ fn Counter(props: CounterProps) -> impl IntoElement {
 fn start() -> (Engine, Receiver<MountBatch>) {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
+        location: None,
         app: App::Rust(Root::new::<Counter>(|| CounterProps {
             label: "Taps".into(),
         })),
@@ -122,6 +123,7 @@ fn a_rust_app_renders_handles_presses_and_runs_tasks() {
 fn a_rust_app_starts_in_its_appearance() {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
+        location: None,
         // `nsh.json` `"appearance": "dark"` of a Rust app (`nsh.json` "root").
         app: App::Rust(Root::of::<WithCard>().appearance(nsh_core::platform::Appearance::Dark)),
         viewport: Size::new(px(390.0), px(844.0)),
@@ -186,6 +188,7 @@ fn Navigation() -> impl IntoElement {
 fn rust_components_navigate_with_native_stacks() {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
+        location: None,
         app: App::Rust(Root::of::<Navigation>()),
         viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
@@ -283,6 +286,7 @@ fn WithCard() -> impl IntoElement {
 fn rust_components_pass_content_to_rust_components() {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
+        location: None,
         app: App::Rust(Root::of::<WithCard>()),
         viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
@@ -390,6 +394,7 @@ fn BackCounter() -> impl IntoElement {
 fn rust_components_take_the_back_button() {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
+        location: None,
         app: App::Rust(Root::of::<BackCounter>()),
         viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
@@ -550,6 +555,7 @@ fn Measured() -> impl IntoElement {
 fn rust_components_hear_layouts_and_scrolls() {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
+        location: None,
         app: App::Rust(Root::of::<Measured>()),
         viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
@@ -633,6 +639,7 @@ fn ButtonRows() -> impl IntoElement {
 fn nested_components_in_list_rows_reach_the_list_owner() {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
+        location: None,
         app: App::Rust(Root::of::<ButtonRows>()),
         viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
@@ -703,6 +710,7 @@ fn WithSheet() -> impl IntoElement {
 fn content_a_component_does_not_place_is_not_shown() {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
+        location: None,
         app: App::Rust(Root::of::<WithSheet>()),
         viewport: Size::new(px(390.0), px(844.0)),
         trace: false,

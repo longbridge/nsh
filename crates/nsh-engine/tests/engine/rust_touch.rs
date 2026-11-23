@@ -126,6 +126,7 @@ fn command(batches: &[MountBatch]) -> Option<(u32, Command)> {
 fn a_rust_element_claims_touches_in_a_scroll_view() {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
+        location: None,
         app: App::Rust(Root::of::<Sketch>()),
         viewport: Size::new(px(390.0), px(844.0)),
         trace: false,

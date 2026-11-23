@@ -79,6 +79,7 @@ fn start_in(
     app.policy.declared = declared;
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
+        location: None,
         app: nsh_engine::App::Js(app),
         viewport: Size::new(px(320.0), px(480.0)),
         trace: false,

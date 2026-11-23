@@ -279,6 +279,7 @@ events! {
     TextDrop = "onTextDrop" as "": "Text dragged from another app or view was dropped on the view (payload: [`EventPayload::TextDrop`]): a Rust component's, such as `RichEditor`'s, which inserts it where it was let go (iOS).",
     OpenAppSettings = "onOpenAppSettings" as "": "A [`Command::OpenAppSettings`] request finished (root only; payload: `id`, `opened`: whether the system opened the app's page in its settings; [`crate::mobile::open_app_settings`]; never reaches a listener).",
     BackProgress = "onBackProgress" as "": "A step of the system's back gesture that no modal takes, while the app listens (root only; Android 14 and later; payload: [`BackProgressEvent::payload`], `phase`, `progress` and `edge`).",
+    Location = "onLocation": "A [`Command::Location`] request or watch reported (root only; payload: [`EventPayload::Location`]).",
 }
 
 /// What an input holds, for the system's autofill and suggestions
@@ -1357,6 +1358,14 @@ pub enum EventPayload {
         id: u32,
         /// The files, in the order picked; none when cancelled.
         files: Vec<crate::picker::PickedFile>,
+    },
+    /// What a location request or watch reported ([`EventKind::Location`],
+    /// [`crate::location`]).
+    Location {
+        /// The request or watch ([`crate::location::LocationCommand`]).
+        id: u32,
+        /// What it reported.
+        event: crate::location::LocationEvent,
     },
     /// What a sound or a player reported ([`EventKind::Audio`],
     /// [`crate::audio`]).
@@ -3103,6 +3112,11 @@ pub enum Command {
         /// What to do.
         request: Box<crate::file_dialog::FileRequest>,
     },
+    /// Report the device's location (on the root; `Location` of `nsh`,
+    /// [`crate::location`]) and report it as [`EventKind::Location`]
+    /// ([`EventPayload::Location`]). Sent only on platforms whose
+    /// [`crate::platform::Environment::location`] is set.
+    Location(crate::location::LocationCommand),
     /// Load, play and free sounds, open and drive players (on the root;
     /// `Sound` and `AudioPlayer` of `nsh`, [`crate::audio`]) and report
     /// what happens as [`EventKind::Audio`] ([`EventPayload::Audio`]). Sent

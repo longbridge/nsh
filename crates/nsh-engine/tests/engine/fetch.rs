@@ -120,6 +120,7 @@ fn fetch_round_trips_through_the_platform_network() {
     let cancelled = network.cancelled.clone();
     let (tx, rx) = mpsc::channel();
     let config = EngineConfig {
+        location: None,
         // SAFETY: compiled just now by this runtime.
         app: nsh_engine::App::Js(unsafe {
             Bundle::bytecode(nsh_js::compile_bytecode(&bundle.code, false).unwrap())
@@ -246,6 +247,7 @@ fn fetch_stays_within_the_capabilities() {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let (tx, rx) = mpsc::channel();
     let config = EngineConfig {
+        location: None,
         // SAFETY: compiled just now by this runtime.
         app: nsh_engine::App::Js(
             unsafe { Bundle::bytecode(nsh_js::compile_bytecode(&bundle.code, false).unwrap()) }
@@ -353,6 +355,7 @@ fn path_rules_hold_for_every_request() {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let (tx, rx) = mpsc::channel();
     let config = EngineConfig {
+        location: None,
         // SAFETY: compiled just now by this runtime.
         app: nsh_engine::App::Js(
             unsafe { Bundle::bytecode(nsh_js::compile_bytecode(&bundle.code, false).unwrap()) }
@@ -435,6 +438,7 @@ fn rust_components_fetch_through_the_platform_network() {
     let follows = network.follows.clone();
     let (tx, rx) = mpsc::channel();
     let config = EngineConfig {
+        location: None,
         app: nsh_engine::App::Rust(nsh_core::element::Root::of::<Fetcher>()),
         viewport: Size::new(px(320.0), px(480.0)),
         trace: false,

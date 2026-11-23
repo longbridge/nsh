@@ -43,6 +43,7 @@ fn start(app: &str) -> (Engine, Receiver<MountBatch>) {
     .unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
+        location: None,
         // SAFETY: compiled just now by this runtime.
         app: nsh_engine::App::Js(unsafe { Bundle::bytecode(bytecode) }),
         viewport: Size::new(px(800.0), px(600.0)),

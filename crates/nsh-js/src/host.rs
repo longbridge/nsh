@@ -1460,6 +1460,8 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
         EventPayload::FileRequest { id, .. } => obj.set("id", *id)?,
         // And offscreen canvas renders.
         EventPayload::CanvasImage { id, .. } => obj.set("id", *id)?,
+        // And location requests' and watches' events (`Location`'s).
+        EventPayload::Location { id, .. } => obj.set("id", *id)?,
         // And sounds' and players' events (their objects' listeners).
         EventPayload::Audio { id, .. } => obj.set("id", *id)?,
         // Handled natively (`crate::window`).

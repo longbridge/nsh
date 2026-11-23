@@ -159,6 +159,7 @@ fn edits_replace_modules_and_keep_unrelated_state() {
     let (failed_tx, failed) = crossbeam_channel::unbounded();
     let (errors_tx, errors) = crossbeam_channel::unbounded();
     let config = EngineConfig {
+        location: None,
         app: nsh_engine::App::Js(Bundle::source(code).with_source_map(map.unwrap())),
         viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
@@ -323,6 +324,7 @@ fn entry_edits_keep_navigation_and_state() {
         let (failed_tx, failed) = crossbeam_channel::unbounded();
         let (errors_tx, errors) = crossbeam_channel::unbounded();
         let config = EngineConfig {
+            location: None,
             app: nsh_engine::App::Js(Bundle::source(code).with_source_map(map.unwrap())),
             viewport: Size::new(px(390.0), px(844.0)),
             trace: false,
@@ -471,6 +473,7 @@ fn nested_hot_components_render_the_stacks_screen() {
     let (failed_tx, _failed) = crossbeam_channel::unbounded();
     let (errors_tx, errors) = crossbeam_channel::unbounded();
     let config = EngineConfig {
+        location: None,
         app: nsh_engine::App::Js(Bundle::source(code).with_source_map(map.unwrap())),
         viewport: Size::new(px(390.0), px(844.0)),
         trace: false,

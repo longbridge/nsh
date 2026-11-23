@@ -20,6 +20,7 @@ use crate::{
 fn start(root: Root) -> (Engine, Receiver<MountBatch>) {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
+        location: None,
         app: App::Rust(root),
         viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
@@ -390,6 +391,7 @@ fn start_js(app: &str) -> (Engine, Receiver<MountBatch>) {
     .unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
+        location: None,
         // SAFETY: compiled just now by this runtime.
         app: App::Js(unsafe { nsh_engine::Bundle::bytecode(bytecode) }),
         viewport: Size::new(px(390.0), px(844.0)),

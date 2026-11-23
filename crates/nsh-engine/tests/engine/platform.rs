@@ -58,6 +58,7 @@ fn first_frame_of(app: &str, tag: &str, os: Os, idiom: Idiom) -> Vec<MountItem> 
     .unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
+        location: None,
         app: nsh_engine::App::Js(Bundle::source(bundle.code)),
         viewport: Size::new(px(320.0), px(480.0)),
         trace: false,

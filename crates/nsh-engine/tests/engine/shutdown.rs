@@ -25,6 +25,7 @@ impl MountSink for Sink {
 /// took and the errors reported.
 fn stop_spinning(code: &str) -> (Duration, Vec<String>) {
     let config = EngineConfig {
+        location: None,
         app: nsh_engine::App::Js(Bundle::source(code.to_owned())),
         viewport: Size::new(px(390.0), px(844.0)),
         trace: false,

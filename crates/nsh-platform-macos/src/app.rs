@@ -457,6 +457,7 @@ impl AppView {
     pub fn load(&self, app: App) {
         let options = self.options.borrow();
         let config = EngineConfig {
+            location: None,
             app,
             viewport: nsh_core::Size::new(px(0.0), px(0.0)),
             trace: options.trace,

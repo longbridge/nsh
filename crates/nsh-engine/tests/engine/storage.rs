@@ -53,6 +53,7 @@ fn launch(
     let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, &[]).unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
+        location: None,
         // SAFETY: compiled just now by this runtime.
         app: nsh_engine::App::Js(
             unsafe { Bundle::bytecode(bytecode) }
@@ -174,6 +175,7 @@ fn rust_shares_the_entries_of_js() {
     drop(engine);
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
+        location: None,
         app: App::Rust(Root::new::<Reader>(|| ReaderProps {})),
         viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
@@ -279,6 +281,7 @@ fn Editor(_props: EditorProps) -> impl IntoElement {
 fn rust_edits_the_storage() {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
+        location: None,
         app: App::Rust(Root::new::<Editor>(|| EditorProps {})),
         viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
@@ -370,6 +373,7 @@ fn a_rust_root_keeps_its_data_under_its_id() {
     let root = scratch("rust-root");
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
+        location: None,
         app: App::Rust(Root::new::<Writer>(|| WriterProps {}).app_id("com.example.rusty")),
         viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
@@ -424,6 +428,7 @@ fn a_built_bundle_carries_its_apps_id() {
 fn start_rust(root: Root, data: &PathBuf) -> (Engine, Receiver<MountBatch>) {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
+        location: None,
         app: App::Rust(root),
         viewport: Size::new(px(390.0), px(844.0)),
         trace: false,

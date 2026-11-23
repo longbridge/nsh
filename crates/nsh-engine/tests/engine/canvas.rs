@@ -68,6 +68,7 @@ pub(crate) fn start(app: &str) -> (Engine, crossbeam_channel::Receiver<MountBatc
     let app = unsafe { Bundle::bytecode(bytecode) };
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
+        location: None,
         app: nsh_engine::App::Js(app),
         viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
