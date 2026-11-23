@@ -7,6 +7,11 @@
 //! press; `Picker.pickImages`, which needs no permission, stays the way to
 //! let the user choose from the whole library.
 //!
+//! [`PhotosPicker`] embeds the system's own picker in the layout instead
+//! (iOS 17 and later, [`picker_view_available`]): a row of the library the
+//! user selects photos in, which needs no permission either. The app reads
+//! the photos selected with [`load_picked`] (`picker.rs`).
+//!
 //! iOS reads the library with the Photos framework (`ios.rs`), after the
 //! user allows it ([`request_access`]): all of it ([`Access::Full`]) or the
 //! photos the user selected ([`Access::Limited`]), which the user changes
@@ -32,6 +37,9 @@
 
 #[cfg(target_os = "ios")]
 mod ios;
+#[cfg(target_os = "ios")]
+mod ios_picker;
+mod picker;
 
 use std::{
     fmt,
@@ -43,11 +51,17 @@ use std::{
     },
 };
 
+#[cfg(target_os = "ios")]
+pub(crate) use ios_picker::register as register_components;
 use nsh_core::{
     element::codes,
     geometry::{DevicePixels, Percentage, Size},
     picker::{DEFAULT_QUALITY, PickFormat, PickRequest, PickedFile, PickedImage},
     prelude::*,
+};
+pub use picker::{
+    PICKER_COMPONENT, PhotosPicker, PhotosPickerApi, PhotosPickerElement, PhotosPickerEvent,
+    PhotosPickerFilter, PhotosPickerProps, load_picked, photos_picker, picker_view_available,
 };
 use tokio::sync::Notify;
 
@@ -637,6 +651,34 @@ impl Photos {
         crate::photos::present_limited_picker()
             .await
             .map_err(|error| error.to_js())
+    }
+
+    /// Whether `PhotosPicker` shows the system's picker here: on iOS 17
+    /// and later. Elsewhere it takes no room, and the app lets the user
+    /// choose with `Picker.pickImages`. Needs no capability.
+    pub(crate) fn picker_view_available() -> bool {
+        crate::photos::picker_view_available()
+    }
+
+    /// Resolves with the photo `id` selected in a `PhotosPicker` (its
+    /// `change`), as `Picker.pickImages` gives a picked image, its bytes
+    /// native: upright, a JPEG without its metadata (HEIC becomes one)
+    /// unless it is a PNG, GIF or WebP. Takes `load`'s options. Needs no
+    /// access to the library. A photo stored only in iCloud is downloaded.
+    /// Rejects with `ENOENT` for an id that is not selected (any longer) in
+    /// a picker shown, `ERR_ACCESS_DENIED` when the `picker` capability is
+    /// not granted, and a `RangeError` for options out of range.
+    pub(crate) async fn load_picked(
+        id: String,
+        options: Option<LoadPhotoOptions>,
+        sys: System,
+    ) -> Result<PickedImage, JsError> {
+        granted(&sys)?;
+        let request = options.unwrap_or_default().request()?;
+        match crate::photos::load_picked(&id, request).await {
+            Ok(file) => Ok(PickedImage::new(file)),
+            Err(error) => Err(error.to_js()),
+        }
     }
 
     /// Listens to `change`: the photo library changed (a photo added,

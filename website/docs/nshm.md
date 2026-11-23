@@ -220,6 +220,50 @@ The feature adds the library's usage description to the packaged iOS app (an app
 `ios.infoPlist`'s `NSPhotoLibraryUsageDescription`). Rust code uses `nsh_extra::photos`, and a `PhotosBackend` set with
 `set_backend` answers in place of the system's library (an embedding app's own, or a test's).
 
+#### The embedded picker
+
+`PhotosPicker` puts the system's photo picker in the app's layout: on iOS 17 and later, a row of the library the user
+selects photos in and deselects them again, as mainstream chat apps show above their attachment options. The system runs
+it outside the app, so it needs no access to the library: the app gets only what the user selects.
+
+```tsx
+import { PhotosPicker, Photos } from "nsh-extra";
+import { Picker } from "nsh/picker";
+
+let picker: { deselect(id: string): void } | undefined;
+const selected = signal<string[]>([]);
+
+{Photos.pickerViewAvailable() ? (
+  <PhotosPicker
+    ref={(node) => (picker = node)}
+    selectionLimit={10}
+    onChange={({ ids }) => selected.set(ids)}
+    style={{ height: 120, borderRadius: 16, overflow: "hidden" }}
+  />
+) : (
+  <Button onPress={() => Picker.pickImages({ multiple: true, limit: 10 })}>Photos</Button>
+)}
+
+// When the message is sent: each photo, prepared as a picked one.
+const photos = await Promise.all(selected().map((id) => Photos.loadPicked(id, { maxDimension: 2048 })));
+// The attachment's remove button deselects it in the picker too.
+picker?.deselect(id);
+```
+
+- `onChange` hands over the ids of every photo selected now, each time the user selects or deselects one. The ids are
+  opaque; the photos' bytes stay native until `loadPicked(id, options)` reads one, with `load`'s options. An id reads
+  while its photo is selected and its picker shown; after that it rejects with `ENOENT`.
+- `selectionLimit` caps the selection (100 by default, as `Picker.pickImages`; 0 lets the user select as many as the
+  system allows), and `filter` shows `"images"` (default), `"livePhotos"` or `"screenshots"`.
+- The style sizes it: give it a height, and round it with `borderRadius` and `overflow: "hidden"`.
+- Where `pickerViewAvailable()` is `false` (iOS 16 and earlier, Android, the desktops, the web) it takes no room and
+  shows nothing; the app lets the user choose with `Picker.pickImages`. Android's photo picker embeds only with a
+  system extension recent devices have, which Native Shell does not use yet.
+- `loadPicked` needs the `picker` capability, as the rest of `Photos` does.
+
+Rust code makes it with `photos_picker()` (`.selection_limit(10).on_change(..)`), deselects through a
+`component_ref::<PhotosPicker>()`'s `PhotosPickerApi`, and reads with `nsh_extra::photos::load_picked`.
+
 ### Push
 
 `Push` registers the device with a push service and hands the app its token, which the app sends to its server.
