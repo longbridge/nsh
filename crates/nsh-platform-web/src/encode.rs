@@ -913,8 +913,8 @@ fn input_json(c: &InputConfig) -> String {
     if !c.scrollbar_visible {
         s.push_str(",\"noIndicator\":true");
     }
-    if c.replaced {
-        s.push_str(",\"replaced\":true");
+    if c.report_scroll {
+        s.push_str(",\"reportScroll\":true");
     }
     if c.select_text_on_focus {
         s.push_str(",\"selectTextOnFocus\":true");

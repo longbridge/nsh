@@ -1663,8 +1663,8 @@ impl EngineControl {
 
     /// Reports how far a multiline input's text scrolled: its offset, the
     /// size of the text it scrolls and of its viewport. Sent while a
-    /// built-in bar takes the place of its indicator
-    /// (`InputConfig::replaced`), on every change.
+    /// bar of the app's follows the text (`InputConfig::report_scroll`), on
+    /// every change.
     pub fn input_scroll(
         &self,
         id: NodeId,

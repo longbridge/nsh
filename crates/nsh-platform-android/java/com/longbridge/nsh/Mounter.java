@@ -2383,12 +2383,12 @@ final class Mounter {
         boolean inputRtl = b.getInt() != 0;
         boolean caretHidden = b.getInt() != 0;
         boolean pasteInserts = b.getInt() != 0;
-        boolean scrollbarVisible = b.getInt() != 0, replaced = b.getInt() != 0;
+        boolean scrollbarVisible = b.getInt() != 0, reportScroll = b.getInt() != 0;
         int fontVariant = b.getInt();
         if (!(v instanceof InputBox)) return;
         if (autoFocus && !((InputBox) v).isConfigured()) focusAsked = true;
         ((InputBox) v).pasteInserts = pasteInserts;
-        ((InputBox) v).setScrollbar(scrollbarVisible, replaced);
+        ((InputBox) v).setScrollbar(scrollbarVisible, reportScroll);
         ((InputBox) v).edit.setCursorVisible(!caretHidden);
         ((InputBox) v).setAutofill(autofill);
         ((InputBox) v).edit.setLayoutDirection(inputRtl ? View.LAYOUT_DIRECTION_RTL : View.LAYOUT_DIRECTION_LTR);

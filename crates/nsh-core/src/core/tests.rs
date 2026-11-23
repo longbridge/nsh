@@ -41595,7 +41595,7 @@ mod built_in_scrollbars {
         assert_eq!(frame_of(&batch, bar), frame_of(&batch, 6));
         assert_eq!(frame_of(&batch, bar), Some(rect(0.0, 50.0, 300.0, 100.0)));
         let config = input_config(&batch).expect("the input's config");
-        assert!(config.replaced && !config.scrollbar_visible);
+        assert!(config.report_scroll && !config.scrollbar_visible);
         // Not one of the view's children, nor pinned as a scroll view's.
         let key = c.key(2).unwrap();
         assert_eq!(c.nodes[key as usize].children.len(), 3);
@@ -41612,7 +41612,7 @@ mod built_in_scrollbars {
         let (_, batch) = input_view(false);
         assert!(bars_beside(&batch).is_empty());
         let config = input_config(&batch).expect("the input's config");
-        assert!(!config.replaced && config.scrollbar_visible);
+        assert!(!config.report_scroll && config.scrollbar_visible);
     }
 
     #[test]
@@ -41675,6 +41675,96 @@ mod built_in_scrollbars {
         assert_eq!(report.offset, point(px(0.0), px(40.0)));
         assert_eq!(report.content_size, size_pt(280.0, 400.0));
         assert_eq!(report.size, size_pt(280.0, 90.0));
+    }
+
+    thread_local! {
+        static INPUT_WATCHED: Cell<Option<Signal<bool>>> = const { Cell::new(None) };
+        static INPUT_HEARD: Cell<Option<f32>> = const { Cell::new(None) };
+    }
+
+    /// A multiline input without a bar of its own, and a scroll bar of the
+    /// app's (a watch of the input's scrolling) while `INPUT_WATCHED` holds.
+    #[component]
+    fn WatchedInput() -> impl IntoElement {
+        let watching = signal(true);
+        INPUT_WATCHED.with(|w| w.set(Some(watching)));
+        let field = element_ref();
+        view()
+            .child(
+                input()
+                    .element_ref(&field)
+                    .multiline(true)
+                    .scrollbar(false)
+                    .w(px(300.0))
+                    .h(px(100.0)),
+            )
+            .child(dynamic(move || {
+                if watching.get() {
+                    watch_scroll(
+                        move || field.node(),
+                        |e: &ScrollEvent| INPUT_HEARD.with(|h| h.set(Some(e.offset.y.0))),
+                    );
+                }
+                view()
+            }))
+    }
+
+    /// The config the last batch sent an input, if it sent one.
+    fn any_input_config(batch: &MountBatch) -> Option<crate::InputConfig> {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::Input { config, .. } => Some((**config).clone()),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn a_watched_input_reports_its_scrolling_without_a_bar_of_its_own() {
+        INPUT_HEARD.with(|h| h.set(None));
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<WatchedInput>(|| ()));
+        let mut batch = c.commit().unwrap();
+        let id = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Create {
+                    id,
+                    kind: ViewKind::Input,
+                } => Some(*id),
+                _ => None,
+            })
+            .expect("the input");
+        // The watch finds its target once it is mounted, in a later round.
+        while let Some(next) = c.commit() {
+            batch.items.extend(next.items);
+        }
+        let config = any_input_config(&batch).expect("the input's config");
+        assert!(config.report_scroll, "watched: its scrolling is reported");
+        assert!(!config.scrollbar_visible, "`scrollbar(false)`");
+        c.set_input_scroll(
+            id,
+            point(px(0.0), px(30.0)),
+            size_pt(300.0, 400.0),
+            size_pt(300.0, 100.0),
+        );
+        let _ = c.commit();
+        assert_eq!(
+            INPUT_HEARD.with(Cell::get),
+            Some(30.0),
+            "the watch hears it"
+        );
+        // No watch left: the platform stops reporting.
+        let watching = INPUT_WATCHED.with(Cell::get).unwrap();
+        {
+            let _entered = c.components.runtime.enter();
+            watching.set(false);
+        }
+        let mut batch = c.commit().unwrap();
+        while let Some(next) = c.commit() {
+            batch.items.extend(next.items);
+        }
+        let config = any_input_config(&batch).expect("the input's config again");
+        assert!(!config.report_scroll);
     }
 
     #[test]

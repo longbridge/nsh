@@ -698,8 +698,8 @@ impl EventTarget {
             .or_default() += 1;
     }
 
-    /// Reports how far text area `view` scrolled, if a built-in bar takes
-    /// the place of its indicator and it changed (`input::report_scroll`).
+    /// Reports how far text area `view` scrolled, if a bar of the app's
+    /// follows it and it changed (`input::report_scroll`).
     pub(crate) fn input_scrolled(&self, view: &UIView) {
         input::report_scroll(view, &self.ivars().control);
     }

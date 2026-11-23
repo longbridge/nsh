@@ -153,7 +153,7 @@ pub use self::{
     component::{
         Api, BuiltInScrollbar, Component, ComponentError, ComponentSpec, Event, EventSpec,
         HOST_PROPS, Method, MethodSpec, Methods, NoEvent, Param, PropDecode, PropKind, PropSpec,
-        Props, Registry, Root, ScrollbarSource, declarations,
+        Props, Registry, Root, ScrollbarSource, ScrollbarThemeValue, declarations,
     },
     element_ref::{
         ComponentRef, ElementRef, ElementTarget, EvaluateOptions, Evaluation, FollowTarget,

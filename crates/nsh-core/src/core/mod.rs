@@ -75,7 +75,9 @@ struct Run {
 
 /// A view's built-in scroll bar (`scrollbars.rs`) and the theme of its own
 /// it was made with.
-type Bar = (NodeId, Option<Arc<crate::JsonValue>>);
+/// A view's built-in bar, and the theme of the view's own it was made
+/// with (`None`: the app's).
+type Bar = (NodeId, Option<crate::ScrollbarSetting>);
 
 const NO_KEY: Key = Key::MAX;
 
@@ -464,8 +466,12 @@ struct InputState {
     scrollbar: crate::ScrollbarSetting,
     /// Its built-in bar ([`Core::sync_scrollbars`]), beside it.
     bar: Option<Bar>,
+    /// A scroll watch follows it (a bar of the app's own placed beside it,
+    /// `watch_scroll`): its platform reports its scrolling as for a
+    /// built-in bar ([`Core::sync_watched_inputs`]).
+    watched: bool,
     /// How far the platform scrolled its text, while it has a built-in
-    /// bar ([`Core::set_input_scroll`]).
+    /// bar or a watch ([`Core::set_input_scroll`]).
     scroll: Option<InputScroll>,
 }
 
@@ -1372,6 +1378,9 @@ pub struct Core<M: TextEngine> {
     /// Scroll views and lists whose built-in bar may come or go
     /// ([`Core::sync_scrollbars`]).
     scrollbars_pending: Vec<Key>,
+    /// The multiline inputs scroll watches follow, sorted
+    /// ([`Core::sync_watched_inputs`]).
+    watched_inputs: Vec<NodeId>,
     /// Canvases fitting a view box into their box
     /// ([`crate::canvas::ViewPaint::Fit`]) to send once this round's
     /// layout gave them their size ([`Core::send_fitted`]).
@@ -1763,6 +1772,7 @@ impl<M: TextEngine> Core<M> {
             sticky_scrollers: Vec::new(),
             builtin_scrollbars: None,
             scrollbars_pending: Vec::new(),
+            watched_inputs: Vec::new(),
             fitted_pending: Vec::new(),
             decorated: Vec::new(),
             sticky_changed: false,
@@ -2431,7 +2441,7 @@ impl<M: TextEngine> Core<M> {
 
     /// The platform scrolled the text of multiline input `id` to `offset`,
     /// its text `content` large in a `viewport` (reported while a built-in
-    /// bar takes the place of its indicator, `InputConfig::replaced`).
+    /// bar or a scroll watch follows it, `InputConfig::report_scroll`).
     pub fn set_input_scroll(
         &mut self,
         id: NodeId,
@@ -5783,7 +5793,9 @@ impl<M: TextEngine> Core<M> {
                 )
                 | Prop::Native(NativeProp::Scrollable(false)) => list::ignored::BEHAVIOR,
                 Prop::Scrollbar(
-                    crate::ScrollbarSetting::Hidden | crate::ScrollbarSetting::Themed(_),
+                    crate::ScrollbarSetting::Hidden
+                    | crate::ScrollbarSetting::Themed(_)
+                    | crate::ScrollbarSetting::ThemeValue(_),
                 ) => list::ignored::SCROLLBAR,
                 Prop::Refreshing(true) => list::ignored::REFRESH,
                 Prop::ScrollValue(Some(_)) => list::ignored::SCROLL_VALUE,
@@ -8379,7 +8391,7 @@ impl<M: TextEngine> Core<M> {
                     // A built-in bar takes the indicator's place.
                     config.scrollbar_visible =
                         input.scrollbar != crate::ScrollbarSetting::Hidden && input.bar.is_none();
-                    config.replaced = input.bar.is_some();
+                    config.report_scroll = input.bar.is_some() || input.watched;
                     self.mount.push(MountItem::Input {
                         id,
                         config: Box::new(config),

@@ -76,7 +76,7 @@ view styles apply):
 | `value` | `.value(..)` | `string` | | The text, controlled by the app. |
 | `defaultValue` | `.default_value(..)` | `string` | | The initial text. |
 | `placeholder` | `.placeholder(..)` | `string` | | Shown while the input is empty. |
-| `multiline` | `.multiline(..)` | `boolean` | `false` | Several lines; return inserts a line break unless `submitBehavior` says otherwise. |
+| `multiline` | `.multiline(..)` | `boolean` | `false` | Several lines; return inserts a line break unless `submitBehavior` says otherwise. The text scrolls inside the padding: lines scrolled past it never show in the padding or under the border. |
 | `scrollbar` | `.scrollbar(..)` | `boolean \| ScrollbarTheme` | `true` | A multiline input's scroll bar: the platform's indicator, or the app's built-in bar once it set one ([Scrollbar](./scrollbar.md#built-in-bars)); an object is a theme of its own, `false` none. |
 | `maxLength` | `.max_length(..)` | `number` | | The most characters the user can enter, counted as Unicode code points on every platform: an emoji such as 😀 or a rare CJK character counts once. A longer paste goes in cut to what fits, as in a browser, never inside a character such as an emoji with its skin tone. |
 | `readonly` | `.readonly(..)` | `boolean` | `false` | The user can select and copy the text but not change it. |

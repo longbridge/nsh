@@ -208,6 +208,37 @@ test("a field's maxlength lets in what fits by characters, an emoji counting onc
   assert.equal(field.maxLength, undefined);
 });
 
+test("a textarea reports its scrolling only while a bar of the app's follows it", () => {
+  const { player } = fakePlayer();
+  const field = {
+    tagName: "TEXTAREA",
+    value: "",
+    scrollTop: 40,
+    clientWidth: 280,
+    scrollHeight: 400,
+    clientHeight: 90,
+    classList: { toggle() {} },
+    getAttribute: () => null,
+    setAttribute() {},
+    removeAttribute() {},
+  };
+  const el = { _id: 6, _field: field, getAttribute: () => null };
+  player.view = () => el;
+  const reports = [];
+  player.call = (f) => f({ nsh_input_scroll: (...args) => reports.push(args) });
+  player.op_in(["in", 6, { multiline: true }, null]);
+  assert.deepEqual(reports, [], "nothing follows it");
+  player.op_in(["in", 6, { multiline: true, noIndicator: true, reportScroll: true }, null]);
+  assert.deepEqual(reports, [[6, 40, 280, 400, 90]]);
+  field.scrollTop = 60;
+  player.inputScrolled(el, field);
+  assert.deepEqual(reports.at(-1), [6, 60, 280, 400, 90]);
+  player.op_in(["in", 6, { multiline: true }, null]);
+  field.scrollTop = 80;
+  player.inputScrolled(el, field);
+  assert.equal(reports.length, 2, "no longer followed");
+});
+
 test("input autofill hints are set, changed and cleared on both field kinds", () => {
   const { player } = fakePlayer();
   const attrs = new Map();

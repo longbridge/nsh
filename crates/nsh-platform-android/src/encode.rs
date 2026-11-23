@@ -1810,10 +1810,10 @@ fn input(e: &mut Encoded, c: &InputConfig) {
     e.bool(c.caret_hidden);
     // `pasteBehavior`: whether a paste inserts its text.
     e.bool(c.paste_behavior == nsh_core::PasteBehavior::Insert);
-    // A multiline input's own scroll bar shows; a built-in bar replaces it
-    // (the input then reports how far its text scrolled).
+    // A multiline input's own scroll bar shows; whether it reports how far
+    // its text scrolled (a bar of the app's follows it).
     e.bool(c.scrollbar_visible);
-    e.bool(c.replaced);
+    e.bool(c.report_scroll);
     e.int(s.font_variant.0 as i32);
 }
 

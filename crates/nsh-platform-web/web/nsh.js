@@ -5867,9 +5867,9 @@ class Player {
   }
 
   /** Reports how far `el`'s textarea scrolled, and its text's height and
-   * its viewport's, while a built-in bar takes its indicator's place. */
+   * its viewport's, while a bar of the app's follows it (`reportScroll`). */
   inputScrolled(el, field) {
-    if (!el._config?.replaced || field.tagName !== "TEXTAREA") return;
+    if (!el._config?.reportScroll || field.tagName !== "TEXTAREA") return;
     const now = [field.scrollTop, field.clientWidth, field.scrollHeight, field.clientHeight];
     if (field._scrolled?.every((v, i) => v === now[i])) return;
     field._scrolled = now;
