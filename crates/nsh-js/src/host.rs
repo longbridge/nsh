@@ -89,6 +89,8 @@ pub(crate) struct Shared {
     /// Measures one line of text for `measureText` (the engine's text
     /// engine).
     pub(crate) measurer: RefCell<Option<TextMeasurer>>,
+    /// Lays one line out for `measureText`'s font extent.
+    pub(crate) line_measurer: RefCell<Option<LineExtentMeasurer>>,
     /// The VM's limits.
     pub(crate) limits: Limits,
     /// Why the VM was stopped (out of memory, over a quota): no JS runs
@@ -108,6 +110,15 @@ impl Shared {
 /// Measures the width of one line of `text` in `font`, in points.
 pub type TextMeasurer =
     Box<dyn Fn(&nsh_core::canvas::CanvasFont, &str) -> nsh_core::geometry::Points>;
+
+/// Lays one line of `text` in `font` out: the font's ascent and descent on
+/// it, in points.
+pub type LineExtentMeasurer = Box<
+    dyn Fn(
+        &nsh_core::canvas::CanvasFont,
+        &str,
+    ) -> (nsh_core::geometry::Points, nsh_core::geometry::Points),
+>;
 
 /// One QuickJS runtime + context with the nsh host APIs installed.
 pub struct Host {
@@ -315,6 +326,12 @@ impl Host {
     /// Sets what canvas `measureText` measures with.
     pub fn set_text_measurer(&mut self, measurer: TextMeasurer) {
         *self.shared.measurer.borrow_mut() = Some(measurer);
+    }
+
+    /// Sets what canvas `measureText`'s `fontBoundingBoxAscent` /
+    /// `fontBoundingBoxDescent` lay the line out with (without it they are 0).
+    pub fn set_line_extent_measurer(&mut self, measurer: LineExtentMeasurer) {
+        *self.shared.line_measurer.borrow_mut() = Some(measurer);
     }
 
     /// Sets the handler for uncaught exceptions (in event handlers, timers and

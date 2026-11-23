@@ -9221,6 +9221,58 @@ fn inputs_report_their_focus_to_the_views_around_them() {
 }
 
 #[test]
+fn host_foreground_is_inherited_without_resizing_the_viewport() {
+    use crate::{element::AdaptiveColor, platform::Appearance};
+
+    let mut c = core();
+    view_with_classes(&mut c, 2, "w-full h-full");
+    for (id, classes) in [(3, ""), (5, "text-[#0000ff]")] {
+        apply(
+            &mut c,
+            vec![
+                Op::Create { id, tag: Tag::Text },
+                class_op(id, classes),
+                Op::CreateText {
+                    id: id + 1,
+                    text: "hello".into(),
+                },
+                Op::Insert {
+                    parent: id,
+                    child: id + 1,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: id,
+                    before: None,
+                },
+            ],
+        );
+    }
+    let tokens = tokens_with(&[("foreground", AdaptiveColor::rgb(0x111111, 0xeeeeee))]);
+    let mut colors = [None; 2];
+    for (host, appearance, inherited) in [
+        (Some(tokens.clone()), Appearance::Light, Color(0x1111_11ff)),
+        (None, Appearance::Light, Color(0x0000_00ff)),
+        (Some(tokens.clone()), Appearance::Light, Color(0x1111_11ff)),
+        (Some(tokens), Appearance::Dark, Color(0xeeee_eeff)),
+    ] {
+        c.set_host_tokens(host);
+        c.set_appearance(appearance);
+        let batch = c.commit().unwrap();
+        for item in &batch.items {
+            if let MountItem::Text { id, text, .. } = item
+                && let Some(index) = [3, 5].iter().position(|at| at == id)
+            {
+                colors[index] = Some(text.spans[0].style.color);
+            }
+        }
+        assert_eq!(colors, [Some(inherited), Some(Color(0x0000_ffff))]);
+        assert_eq!(c.measure(2).unwrap().frame, rect(0.0, 0.0, 320.0, 480.0));
+    }
+}
+
+#[test]
 fn text_inherits_from_views_and_classes_set_props() {
     let mut c = core();
     view_with_classes(&mut c, 2, "text-white text-lg text-center");
@@ -33435,6 +33487,77 @@ fn static_views_ignore_their_insets() {
     c.set_viewport(size_pt(800.0, 480.0));
     let batch = c.commit().unwrap();
     assert_eq!(frame_of(&batch, 4), Some(rect(0.0, 36.0, 10.0, 10.0)));
+}
+
+#[test]
+fn content_height_uses_committed_in_flow_geometry_when_overlays_open_and_close() {
+    use StyleValue::{Number, Str};
+
+    let mut c = core();
+    assert_eq!(c.content_height(), None);
+    add(&mut c, 2, Tag::View, ROOT_ID, &[("height", Number(100.0))]);
+    add(&mut c, 4, Tag::View, 2, &[("padding", Number(5.0))]);
+    c.commit().unwrap();
+    assert_eq!(c.content_height(), Some(Points(100.0)));
+
+    // The overlay is mounted under the surface root, not its logical parent.
+    add(
+        &mut c,
+        6,
+        Tag::Overlay,
+        4,
+        &[("left", Number(10.0)), ("top", Number(300.0))],
+    );
+    add(
+        &mut c,
+        8,
+        Tag::View,
+        6,
+        &[("width", Number(50.0)), ("height", Number(20.0))],
+    );
+    // Out-of-flow views directly in the logical root do not size it either.
+    for (id, position) in [(10, "absolute"), (12, "fixed")] {
+        add(
+            &mut c,
+            id,
+            Tag::View,
+            ROOT_ID,
+            &[
+                ("position", Str(position)),
+                ("top", Number(400.0)),
+                ("height", Number(20.0)),
+            ],
+        );
+    }
+    // A top-level modal is a separate layout root even without out-of-flow styling.
+    add(&mut c, 14, Tag::Modal, ROOT_ID, &[]);
+    c.set_root_size(14, size_pt(200.0, 300.0), EdgeInsets::default());
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 6), Some(rect(10.0, 300.0, 50.0, 20.0)));
+    assert_eq!(frame_of(&batch, 14), Some(rect(0.0, 0.0, 200.0, 300.0)));
+    assert_eq!(c.content_height(), Some(Points(100.0)));
+    apply(
+        &mut c,
+        vec![Op::Remove {
+            parent: 4,
+            child: 6,
+        }],
+    );
+    c.commit().unwrap();
+    assert_eq!(c.content_height(), Some(Points(100.0)));
+
+    apply(&mut c, vec![style_op(2, &[("height", Number(160.0))])]);
+    c.commit().unwrap();
+    assert_eq!(c.content_height(), Some(Points(160.0)));
+    apply(
+        &mut c,
+        vec![Op::Remove {
+            parent: ROOT_ID,
+            child: 2,
+        }],
+    );
+    c.commit().unwrap();
+    assert_eq!(c.content_height(), None);
 }
 
 #[test]

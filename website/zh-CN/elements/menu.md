@@ -341,7 +341,10 @@ import { MenuButton } from "nsh/base";
 | `title` | `.title(..)` | `string` | 无 | iOS 和 Android：菜单的标题，显示在条目上方。 |
 | `disabled` | `.disabled(..)` | `boolean` | `false` | 不能按下，不打开任何内容。 |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 读屏软件为这个按钮朗读的内容。 |
+| `accessibilityHint` | `.accessibility_hint(..)` | `string` | 无 | 向屏幕阅读器说明打开菜单后可以做什么，与视图的 `accessibilityHint` 相同。 |
 | `class`、`style`、`children` | 样式方法、`.child(..)` | | 无 | 应用绘制的触发器。 |
+
+`accessibilityHint` 跟随响应式值变化；设为 `undefined` 会移除提示。在 iOS 和 Android 上，提示传给屏幕阅读器激活的原生按钮。
 
 `MenuButtonItem` 为 `{ id, label, icon?, svg?, checked?, disabled?, destructive?, items?, inline?, singleSelection? }`（Rust：`MenuButtonItem::new(id, label)`、`::submenu(label, items)`、`::section(label, items)`，再加 `.icon(..)`、`.svg(..)`、`.checked(..)`、`.disabled(..)`、`.destructive(..)`、`.single_selection(..)`）。唯一的事件是 `onSelect({ id })`（Rust：`.on_select(|id: &SharedString| ..)`），在菜单关闭后触发。
 

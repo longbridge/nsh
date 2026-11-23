@@ -341,6 +341,8 @@ pub(crate) struct Surface {
     pub(crate) asset_base: RefCell<Option<crate::image::AssetBase>>,
     /// The engine's sounds and players ([`crate::audio`]).
     pub(crate) audio: crate::audio::Speaker,
+    /// The engine's speech recognition session ([`crate::speech`]).
+    pub(crate) speech: crate::speech::Listener,
     /// The disk cache of downloaded images ([`crate::image::set_disk_cache`]).
     pub(crate) image_cache: RefCell<Option<nsh_core::image::DiskCache>>,
     /// The roots the app's `<Image>` files are read under
@@ -447,6 +449,7 @@ impl Surface {
             on_hot_update_failed: RefCell::new(None),
             asset_base: RefCell::new(None),
             audio: Default::default(),
+            speech: Default::default(),
             image_cache: RefCell::new(None),
             media_files: RefCell::default(),
             native: Default::default(),
@@ -556,6 +559,9 @@ impl Surface {
         // Dropping the engine joins its thread.
         self.control.borrow_mut().take();
         self.engine.borrow_mut().take();
+        // The core's abort dies with the engine: the microphone goes off
+        // here.
+        self.speech.end();
         self.rx.borrow_mut().take();
         self.mounter.borrow_mut().clear();
         self.native.clear();

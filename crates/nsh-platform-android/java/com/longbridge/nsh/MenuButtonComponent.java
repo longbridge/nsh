@@ -1,10 +1,15 @@
 package com.longbridge.nsh;
 
 import android.content.Context;
+import android.os.Build;
 import android.view.View;
+import android.view.ViewParent;
+import android.view.accessibility.AccessibilityEvent;
+import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.Button;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.BooleanSupplier;
 
 /**
@@ -13,7 +18,8 @@ import java.util.function.BooleanSupplier;
  * opens the system menu below the content at once, without asking
  * JS ({@link SystemMenus}). A chosen action emits {@code select} with the
  * app's id. The button is what TalkBack reaches (named by
- * {@code accessibilityLabel}): the content under it is drawn, not read twice
+ * {@code accessibilityLabel}, with {@code accessibilityHint} describing its
+ * action): the content under it is drawn, not read twice
  * ({@link Box#addChildrenForAccessibility}).
  */
 final class MenuButtonComponent implements NshComponent {
@@ -26,6 +32,7 @@ final class MenuButtonComponent implements NshComponent {
     private final View button;
     private List<SystemMenus.Entry> items = new ArrayList<>();
     private String title;
+    private String accessibilityHint;
     /** The menu shown (null: none). */
     private SystemMenus.Popup shown;
 
@@ -37,6 +44,12 @@ final class MenuButtonComponent implements NshComponent {
             @Override
             public CharSequence getAccessibilityClassName() {
                 return Button.class.getName();
+            }
+
+            @Override
+            public void onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo info) {
+                super.onInitializeAccessibilityNodeInfo(info);
+                if (Build.VERSION.SDK_INT >= 26) info.setHintText(accessibilityHint);
             }
         };
         button.setClickable(true);
@@ -65,6 +78,19 @@ final class MenuButtonComponent implements NshComponent {
             case "accessibilityLabel":
                 button.setContentDescription(value instanceof String ? (String) value : null);
                 break;
+            case "accessibilityHint": {
+                String hint = value instanceof String ? (String) value : null;
+                if (!Objects.equals(accessibilityHint, hint)) {
+                    accessibilityHint = hint;
+                    // Refresh TalkBack's cached node after a bound hint changes.
+                    ViewParent parent = button.getParent();
+                    if (parent != null) {
+                        parent.notifySubtreeAccessibilityStateChanged(button, button,
+                                AccessibilityEvent.CONTENT_CHANGE_TYPE_UNDEFINED);
+                    }
+                }
+                break;
+            }
             default:
                 break;
         }

@@ -154,6 +154,18 @@ xvfb-run -a dbus-run-session -- sh -c '
   screen reader does (Python's `gi.repository.Atspi`: the application under `Atspi.get_desktop(0)`, then an
   element's `get_action_iface().do_action(0)`).
 
+The `render` test binary runs pixel checks without writing screenshots by default. Set `NSH_RENDER_OUTPUT_DIR`
+to also save `embedding-light.png` and `embedding-dark.png`: real NSH text with no color of its own, plus
+explicitly muted text, under a host's light/dark theme. For example, from the repository root (add
+`runtime-shaders` on a Mac without the Metal Toolchain):
+
+```sh
+NSH_RENDER_OUTPUT_DIR=/tmp/nsh-embedding cargo test --manifest-path crates/gpui/Cargo.toml -p nsh-platform-gpui --no-default-features --features js,shot,svg --test render
+```
+
+These fixtures disable disk caches and use inert storage. They wait for the app's layout acknowledgement on
+the same GPUI queue as its commit before drawing the screenshots; the deadline only guards against a hang.
+
 ## Architecture
 
 - **One element per surface.** A surface (`surface.rs`) is drawn by one GPUI element, `render::SurfaceElement`, which
@@ -260,6 +272,18 @@ xvfb-run -a dbus-run-session -- sh -c '
   are opened with `inactive_frame_interval: None` (GPUI draws unfocused windows at 30 fps by default); a host must set
   it in its own `WindowOptions` too. Embedding in a GPUI Kit app (one GPUI, focus and Tab, overlays, themes, frame
   rate): `embedding.md` "GPUI and GPUI Kit apps", `examples/embed-gpui`.
+
+`AppView::content_height()` reads the bottom edge of the logical root's in-flow children in surface points
+(`None` without laid-out in-flow content). Detached layout roots such as overlays and modals, as well as fixed
+or absolutely positioned children, do not contribute. Core reads the settled frames used by `on_layout`.
+GPUI opts in through `MountSink::needs_content_height`; the engine sends the height with mount items, or on
+its own with an empty batch when only the height changes, through `MountSink::submit_with_content_height`.
+GPUI applies the batch and caches its height together before its normal flush notifies Rust host observers.
+Read the getter again in the view's GPUI observer. When the host owns the app, its root's `.on_layout(..)`
+can report its frame directly; there is no parallel TSX getter. This is current layout, not an intrinsic-size
+pass: viewport-relative heights and flex growth still use the host's viewport.
+With host tokens, the synthetic root supplies `text-foreground` for text inheritance and keeps its viewport
+layout when tokens are cleared, reinstalled or switched between light and dark.
 
 ## How each area maps to GPUI
 

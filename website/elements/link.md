@@ -119,6 +119,7 @@ gives its users this check.
 | `disabled` | `.disabled(..)` | `boolean` | `false` | No presses, no press feedback, no keyboard focus; `disabled:` styles apply, and screen readers say it is dimmed. |
 | `current` | `.current(..)` | `boolean` | `false` | The link to the page the user is on, in a navigation or a breadcrumb: screen readers say it is the current page. |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers say, when the content says too little (an icon). |
+| `accessibilityHint` | `.accessibility_hint(..)` | `string` | none | Explains what activating the link does, as a view's `accessibilityHint`. |
 | `hitSlop` | `.hit_slop(..)` | `number \| Partial<Edges>` | none | How far outside its bounds presses still count, in points: one number for every side, or the sides named. As a view's `hitSlop`. |
 | `children` | `.child(..)` | `JSX.Element` | none | The content: a label, an icon, anything the app shows. |
 | `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | none | The link's look: its color, underline, padding; text properties pass to the texts inside it. |
@@ -193,6 +194,8 @@ past each side, without changing its layout or its look: one number for every si
 
 ## Accessibility
 
+- Give `accessibilityHint` when the label does not explain what opening the link does. It follows reactive values;
+  setting it to `undefined` removes the hint.
 - A link is one element for screen readers, with the role `"link"`; its label is the text of its children, or
   `accessibilityLabel`. `href` stays data: screen readers say the label.
 - `current` is said as the current page (ARIA's `aria-current="page"`), and `disabled` as the platform says a dimmed
