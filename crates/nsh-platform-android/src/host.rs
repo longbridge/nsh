@@ -2387,7 +2387,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_scroll(
 }
 
 /// A multiline input's text scrolled, or its text or size changed, while a
-/// built-in bar replaces its indicator (`InputConfig::replaced`): the engine
+/// bar of the app's follows it (`InputConfig::report_scroll`): the engine
 /// learns the offset, the text's size and the viewport's (points).
 #[unsafe(no_mangle)]
 extern "system" fn Java_com_longbridge_nsh_Native_inputScroll(
@@ -2480,8 +2480,10 @@ extern "system" fn Java_com_longbridge_nsh_Native_hasPan(
 }
 
 /// A drag on view `id`: `state` 0 began, 1 moved, 2 ended, 3 cancelled;
-/// translation and velocity in points (per second).
+/// translation and velocity in points (per second), from where the finger
+/// went down in the root view, `(ox, oy)`.
 #[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
 extern "system" fn Java_com_longbridge_nsh_Native_pan(
     mut env: JNIEnv<'_>,
     _: JClass<'_>,
@@ -2492,6 +2494,8 @@ extern "system" fn Java_com_longbridge_nsh_Native_pan(
     ty: jfloat,
     vx: jfloat,
     vy: jfloat,
+    ox: jfloat,
+    oy: jfloat,
 ) -> jfloatArray {
     // SAFETY: Java passes its live handle.
     let host = unsafe { host(handle) };
@@ -2504,8 +2508,10 @@ extern "system" fn Java_com_longbridge_nsh_Native_pan(
         ui.pan_moved(id as u32, tx, ty);
     }
     let (value_x, value_y) = ui.pan_values(id as u32);
+    let origin = point(px(ox), px(oy));
     let payload = if state == 3 {
         EventPayload::PanCancelled {
+            origin,
             translation: point(px(tx), px(ty)),
             velocity_x: vx,
             velocity_y: vy,
@@ -2514,6 +2520,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_pan(
         }
     } else {
         EventPayload::Pan {
+            origin,
             translation: point(px(tx), px(ty)),
             velocity_x: vx,
             velocity_y: vy,
@@ -3021,6 +3028,17 @@ fn with_app_json(bundle: Bundle, json: &str) -> Bundle {
     for what in ignored {
         log::warn!("app.json: {what}, ignored");
     }
+    let mut links = links;
+    // The files it opens (the share sheet's) come as `file:` URLs
+    // (`nsh_core::file_type`).
+    if nsh_core::file_type::declares_file_types(&app) {
+        let schemes = links.schemes().to_vec();
+        links.set_schemes(
+            schemes
+                .into_iter()
+                .chain([nsh_core::file_type::FILE_SCHEME.to_owned()]),
+        );
+    }
     bundle.with_links(links)
 }
 
@@ -3037,6 +3055,17 @@ mod app_json_tests {
         assert_eq!(bundle.app_id.as_deref(), Some("dev.example.links"));
         assert_eq!(bundle.links.schemes(), ["example.links"]);
         assert!(bundle.links.web().is_empty());
+    }
+
+    #[test]
+    fn a_packaged_app_with_file_types_takes_files() {
+        let bundle = with_app_json(
+            Bundle::source(String::new()),
+            r#"{"id":"dev.example.files","schemes":["example"],"fileTypes":[{"name":"Image","extensions":["png"],"mimeTypes":["image/png"]}]}"#,
+        );
+        assert_eq!(bundle.links.schemes(), ["example", "file"]);
+        let none = with_app_json(Bundle::source(String::new()), r#"{"id":"dev.example"}"#);
+        assert!(none.links.schemes().is_empty());
     }
 
     #[test]

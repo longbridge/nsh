@@ -171,8 +171,8 @@ pub(crate) struct InputState {
     /// several.
     scroll: Cell<f32>,
     reveal_on_layout: Cell<bool>,
-    /// The scroll of several lines as last reported to a built-in bar
-    /// (`InputConfig::replaced`): offset, text height, width, viewport
+    /// The scroll of several lines as last reported to a bar of the app's
+    /// (`InputConfig::report_scroll`): offset, text height, width, viewport
     /// height. `None` until reported (again).
     reported_scroll: Cell<Option<(f32, f32, f32, f32)>>,
     /// The x the caret keeps while it moves up and down lines.
@@ -418,13 +418,13 @@ impl InputState {
     }
 
     /// Reports how far several lines scrolled, the text's height and the
-    /// viewport's to the built-in bar that takes the place of an
-    /// indicator (`InputConfig::replaced`), when any of them changed since
+    /// viewport's to a bar of the app's that follows them
+    /// (`InputConfig::report_scroll`), when any of them changed since
     /// last reported. Called with the clamped scroll ([`InputState::origin`]).
     fn report_scroll(&self, layout: &Layout) {
         {
             let config = self.config.borrow();
-            if !config.replaced || !config.multiline {
+            if !config.report_scroll || !config.multiline {
                 return;
             }
         }
@@ -1693,10 +1693,10 @@ pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig
         auto_focus(surface, view);
     }
     place(view, &input);
-    // A built-in bar (newly) taking the indicator's place hears where the
-    // text is now, once placed (else on the first draw).
+    // A bar of the app's (newly) following the text hears where it is
+    // now, once placed (else on the first draw).
     input.reported_scroll.set(None);
-    if config.replaced
+    if config.report_scroll
         && config.multiline
         && let Some(layout) = input.layout()
     {

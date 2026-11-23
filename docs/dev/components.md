@@ -1468,8 +1468,9 @@ to turn off (`scrollbar={false}`).
 **Built-in bars.** A view needs no bar placed for one: `set_scrollbar_theme` (TS `Scrollbar.setTheme`, a module
 function: an `Action::BuiltInScrollbars` that carries the theme as an `AnyValue` and the UI set's maker, so a Rust app
 that never registered `nsh-base` gets bars too) has the core draw the bar of every view whose `scrollbar` is `true`,
-and a view's own theme is its `scrollbar` prop (`ScrollbarSetting::Themed`, kept as JSON; the registry's
-`scrollbars_from` names the UI set that makes its bars). The maker returns no bar for an axis the theme has no look
+and a view's own theme is its `scrollbar` prop (`ScrollbarSetting::Themed` from JS, kept as JSON; the registry's
+`scrollbars_from` names the UI set that makes its bars; from Rust a `ScrollbarTheme` converts into
+`ScrollbarSetting::ThemeValue`, which carries the value and the set's maker as `set_scrollbar_theme` does). The maker returns no bar for an axis the theme has no look
 for, and the view keeps the platform's indicator. The core (`core/scrollbars.rs`) makes the bar as a component of
 its own, a child of the view marked `decoration`: last among the children, so it draws above them and what JS
 appends goes before it; out of what counts as the view's children (`first:`, `last:`, `space-*`); a layout root of
@@ -1483,8 +1484,12 @@ made for `true` again. A component's given class (`app_class`) now reaches its r
 A multiline input scrolls its text natively, so its bar is a sibling instead (`Node::beside`): inserted just after the
 input in its parent, stacked with it, laid out at its frame and made again where the input moves. Its
 `InputConfig` turns the text view's indicator off (`scrollbar_visible`) and asks the platform to report its scrolling
-(`replaced`: `EngineControl::input_scroll`, the offset, the text's size and the viewport's, `Core::set_input_scroll`),
-which the bar's `watch_scroll` reads as a scroll view's; the bar's `ScrollTo` commands scroll the text.
+(`report_scroll`: `EngineControl::input_scroll`, the offset, the text's size and the viewport's, `Core::set_input_scroll`),
+which the bar's `watch_scroll` reads as a scroll view's; the bar's `ScrollTo` commands scroll the text. A `Scrollbar`
+the app places itself over an input (its own indicator off) gets the same reports: at the end of each commit round the
+core notes the multiline inputs scroll watches follow (`Core::sync_watched_inputs`) and sends `report_scroll` while
+one does, so an input nothing follows reports nothing. Every platform places the text view at the input's content box
+and clips its text there, so the bar can lie over the whole frame, padding included.
 
 ## Toasts
 

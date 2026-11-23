@@ -240,6 +240,10 @@ pub(crate) struct MacosConfig {
     /// development host (`--activation-policy`).
     #[serde(default)]
     pub(crate) activation_policy: ActivationPolicy,
+    /// App extensions the app builds itself, which macOS packages carry in
+    /// `Contents/PlugIns/` ([`crate::app_extensions`]).
+    #[serde(default)]
+    pub(crate) extensions: Vec<crate::app_extensions::AppExtension>,
 }
 
 /// `nsh.json` `macos.activationPolicy`, as GPUI's `ActivationPolicy`. Read
@@ -311,15 +315,14 @@ const RESERVED_INFO: [(&str, Owner); 9] = [
     ("CFBundlePackageType", Owner::Package),
 ];
 
-/// Whether `key` of an iOS app's `Info.plist` is one NSH sets itself
-/// ([`RESERVED_INFO`], [`RESERVED_IOS_INFO`]).
-pub(crate) fn is_reserved_ios_info(key: &str) -> bool {
-    ApplePlatform::Ios.reserved().any(|(k, _)| *k == key)
+/// Whether `key` of an Apple app's `Info.plist` is one NSH sets itself.
+pub(crate) fn is_reserved_info(platform: ApplePlatform, key: &str) -> bool {
+    platform.reserved().any(|(k, _)| *k == key)
 }
 
-/// Whether `key` of an iOS app's entitlements is one NSH sets itself
+/// Whether `key` of an Apple app's entitlements is one NSH sets itself
 /// ([`RESERVED_ENTITLEMENTS`]).
-pub(crate) fn is_reserved_ios_entitlement(key: &str) -> bool {
+pub(crate) fn is_reserved_entitlement(key: &str) -> bool {
     RESERVED_ENTITLEMENTS.iter().any(|(k, _)| *k == key)
 }
 
@@ -357,7 +360,7 @@ const RESERVED_ENTITLEMENTS: [(&str, Owner); 3] = [
 
 impl ApplePlatform {
     /// Its key in `nsh.json`.
-    fn key(self) -> &'static str {
+    pub(crate) fn key(self) -> &'static str {
         match self {
             ApplePlatform::Ios => "ios",
             ApplePlatform::Macos => "macos",
@@ -445,7 +448,7 @@ impl AppleConfig {
         self.info_plist_strings(platform)?;
         self.entitlements(platform)?;
         for extension in &self.extensions {
-            extension_entitlements(extension)?;
+            extension_entitlements(extension, platform)?;
         }
         if self.launch_screen.is_some() && self.info_plist.contains_key("UILaunchScreen") {
             bail!(
@@ -489,6 +492,9 @@ impl MacosConfig {
         self.info_plist()?;
         self.info_plist_strings()?;
         self.entitlements()?;
+        for extension in &self.extensions {
+            extension_entitlements(extension, ApplePlatform::Macos)?;
+        }
         Ok(())
     }
 
@@ -942,13 +948,18 @@ fn entitlements(
     convert(entries, &section, RESERVED_ENTITLEMENTS.iter())
 }
 
-/// The entitlements of one of `ios.extensions` as property list values,
-/// refusing the keys `ios.entitlements` refuses, with the `nsh.json` key
-/// they come from, for errors.
+/// The entitlements of one of `ios.extensions` or `macos.extensions` as
+/// property list values, refusing the keys `<platform>.entitlements` refuses,
+/// with the `nsh.json` key they come from, for errors.
 pub(crate) fn extension_entitlements(
     extension: &crate::app_extensions::AppExtension,
+    platform: ApplePlatform,
 ) -> anyhow::Result<(plist::Dictionary, String)> {
-    let section = format!("ios.extensions[{}].entitlements", extension.index);
+    let section = format!(
+        "{}.extensions[{}].entitlements",
+        platform.key(),
+        extension.index
+    );
     let dictionary = convert(
         &extension.entitlements,
         &section,

@@ -74,12 +74,15 @@ impl Default for ScrollEvent {
     }
 }
 
-/// A drag (`on_pan_start` / `on_pan_end`): translation since it started and
-/// velocity, in points (per second).
+/// A drag (`on_pan_start` / `on_pan_end`): where it started, translation
+/// since then and velocity, in points (per second).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct PanEvent {
     /// The system cancelled the drag rather than releasing it.
     pub cancelled: bool,
+    /// Where the finger (or the pointer) went down, in the surface's points
+    /// as a touch's `page`: the same at the start and at the end.
+    pub origin: Point<Points>,
     /// The translation.
     pub translation: Point<Points>,
     /// Horizontal velocity.
@@ -626,6 +629,7 @@ pub(crate) fn offset(p: &EventPayload) -> Option<Cow<'_, Point<Points>>> {
 pub(crate) fn pan(p: &EventPayload) -> Option<Cow<'_, PanEvent>> {
     match *p {
         EventPayload::Pan {
+            origin,
             translation,
             velocity_x,
             velocity_y,
@@ -633,6 +637,7 @@ pub(crate) fn pan(p: &EventPayload) -> Option<Cow<'_, PanEvent>> {
             value_y,
         }
         | EventPayload::PanCancelled {
+            origin,
             translation,
             velocity_x,
             velocity_y,
@@ -640,6 +645,7 @@ pub(crate) fn pan(p: &EventPayload) -> Option<Cow<'_, PanEvent>> {
             value_y,
         } => Some(Cow::Owned(PanEvent {
             cancelled: matches!(p, EventPayload::PanCancelled { .. }),
+            origin,
             translation,
             velocity_x,
             velocity_y,
@@ -818,6 +824,7 @@ mod tests {
     fn a_cancelled_pan_preserves_its_final_values() {
         use crate::{EventPayload, Points, geometry::point};
         let payload = EventPayload::PanCancelled {
+            origin: point(Points(12.0), Points(30.0)),
             translation: point(Points(4.0), Points(150.0)),
             velocity_x: 0.0,
             velocity_y: 900.0,
@@ -826,6 +833,7 @@ mod tests {
         };
         let event = super::pan(&payload).unwrap();
         assert!(event.cancelled);
+        assert_eq!(event.origin, point(Points(12.0), Points(30.0)));
         assert_eq!(event.translation, point(Points(4.0), Points(150.0)));
         assert_eq!(event.value_y, Some(150.0));
         assert_eq!(event.velocity_y, 900.0);
@@ -871,11 +879,7 @@ mod tests {
         use crate::{
             EventPayload, FileContents, ImageData, Points, geometry::point, picker::PickedFile,
         };
-        let file = PickedFile::new(
-            "a.txt",
-            "text/plain",
-            ImageData::new(b"hi".to_vec()),
-        );
+        let file = PickedFile::new("a.txt", "text/plain", ImageData::new(b"hi".to_vec()));
         let payload = EventPayload::FileContents(Box::new(FileContents::new(
             vec![file.clone()],
             vec!["text/plain".into()],

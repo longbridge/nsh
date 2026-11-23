@@ -11,8 +11,9 @@
   target); device builds check entitlements against the profile,
   which keeps the app's values in place of its own). iOS: `.app`, `.ipa` with `--sign <identity>
   --profile <file.mobileprovision>` (entitlements come from the profile; icons are compiled by `actool` into `Assets.car`).
-  `ios.extensions` lists prebuilt `.appex` bundles the app builds itself (`crates/nsh-cli/src/app_extensions.rs`):
-  packages copy them into `PlugIns/` with the app's version and sign them before the app; device packages take one
+  `ios.extensions` and `macos.extensions` list prebuilt `.appex` bundles the app builds itself
+  (`crates/nsh-cli/src/app_extensions.rs`): packages copy them into `PlugIns/` (iOS) or `Contents/PlugIns/` (macOS)
+  with the app's version and sign them inside-out before the app; iOS device packages take one
   `--profile` per bundle, chosen by bundle identifier (`crates/nsh-cli/src/provisioning.rs`). `nsh run --target ios`
   copies them into the simulator's development host as well (`run.rs` `dev_host_extensions`), each identifier's app
   prefix replaced by the host's, since iOS installs an extension only under its containing bundle's. NSH builds no Swift.
@@ -24,7 +25,9 @@
   WebKitGTK 6.0 (the runner's default `webview` feature, `linux.md`) must be installed where it runs. macOS:
   `<name>.app` with the release runner (`crates/nsh-macos-app`) as `Contents/MacOS/<executable>`,
   `Contents/Resources/nsh/` holding `bundle.nshc`, `assets/` and `app.json` (the window title, appearance and nsh.json
-  `window`), the icon as `AppIcon.icns` (`sips`), signed ad hoc (`codesign -s -`); `--run` opens it.
+  `window`), the icon as `AppIcon.icns` (`sips`), any `macos.extensions` in `Contents/PlugIns/`, signed ad hoc
+  (`codesign -s -`) by default or with `--sign <identity>` (`--options runtime --timestamp`, Hardened Runtime) and
+  verified with `codesign --verify --deep --strict`; `--run` opens it.
   Windows: a directory `<name>\` with the release runner (`crates/nsh-windows-app`, a windowed program: no console)
   as `<name>.exe` (characters Windows forbids in file names dropped), the icon embedded as its icon group 1 (which the
   window class loads, and Explorer and the taskbar show) with Windows' resource update API (`crates/nsh-cli/src/windows.rs`:

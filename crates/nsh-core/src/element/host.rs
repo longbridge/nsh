@@ -772,9 +772,13 @@ impl Input {
     }
 
     /// Whether a multiline input's scroll bar shows (default yes): the
-    /// platform's indicator, or the app's built-in bar once it set one.
-    pub fn scrollbar(self, shows: impl IntoReactive<bool>) -> Self {
-        self.bind_prop(shows, |shows: bool| Prop::Scrollbar(shows.into()))
+    /// platform's indicator, or the app's built-in bar once it set one; or
+    /// a built-in bar of this input's own theme (TS `scrollbar={theme}`:
+    /// `nsh_base::ScrollbarTheme` converts into a setting). The built-in
+    /// bar lies over the input's frame, padding included, while the text
+    /// stays in the content box.
+    pub fn scrollbar(self, setting: impl IntoReactive<crate::ScrollbarSetting>) -> Self {
+        self.bind_prop(setting, Prop::Scrollbar)
     }
 
     /// At most `length` characters, counted as Unicode scalar values
@@ -916,9 +920,11 @@ impl Scroll {
         self.set(Prop::Horizontal(true))
     }
 
-    /// Whether the scroll indicator shows (default yes).
-    pub fn scrollbar(self, shows: impl IntoReactive<bool>) -> Self {
-        self.bind_prop(shows, |shows: bool| Prop::Scrollbar(shows.into()))
+    /// Whether the scroll indicator shows (default yes); or a built-in bar
+    /// of this view's own theme (TS `scrollbar={theme}`:
+    /// `nsh_base::ScrollbarTheme` converts into a setting).
+    pub fn scrollbar(self, setting: impl IntoReactive<crate::ScrollbarSetting>) -> Self {
+        self.bind_prop(setting, Prop::Scrollbar)
     }
 
     /// Pinch zoom between `min` and `max`.

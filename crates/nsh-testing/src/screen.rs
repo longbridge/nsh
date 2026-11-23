@@ -1897,6 +1897,20 @@ impl Screen {
         }
     }
 
+    /// Where the window that view `id` is in lies, in the root's points: the
+    /// edges an edge pan starts at. `None` before the window has a size.
+    pub(crate) fn window_area(&self, id: NodeId) -> Option<Bounds<Points>> {
+        let window = self.window_of(id);
+        let size = self.window_sizes.get(&window).copied().or(self.viewport)?;
+        let origin = match window {
+            ROOT => Point::default(),
+            own => self
+                .bounds_in_root(own)
+                .map_or(Point::default(), |b| b.origin),
+        };
+        Some(Bounds::new(origin, size))
+    }
+
     /// The ids of the app's open windows, in opening order.
     #[cfg(feature = "agent")]
     pub(crate) fn window_ids(&self) -> Vec<String> {

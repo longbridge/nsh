@@ -308,7 +308,7 @@ mount(() => (
 | `.on_pinch_start` / `.on_pinch_end` | `onPinchStart` / `onPinchEnd` | 捏合开始 / 结束：缩放倍数和速度（`GestureEvent`）。 |
 | `.on_rotation_start` / `.on_rotation_end` | `onRotationStart` / `onRotationEnd` | 旋转开始 / 结束：角度（Rust 中为 `GestureEvent<Radians>`）和速度。 |
 
-拖动事件包含位移（`translation`，一个 `Point`：自开始以来移动的点数）、速度（`velocity_x` / `velocity_y`；TSX：`velocity`，一个 `Point`：每**秒**的点数）以及此刻所绑定的值（`value_x` / `value_y`；TSX：`value`，`{ x?, y? }`，含 `pan` 绑定的轴）。
+拖动事件包含拖动开始的位置（`origin`，一个 `Point`，以 surface 的点为单位，与触摸的 page 位置相同；开始和结束时一样）、位移（`translation`，一个 `Point`：自开始以来移动的点数）、速度（`velocity_x` / `velocity_y`；TSX：`velocity`，一个 `Point`：每**秒**的点数）以及此刻所绑定的值（`value_x` / `value_y`；TSX：`value`，`{ x?, y? }`，含 `pan` 绑定的轴）。
 
 原生端替你做了这些事：
 
@@ -646,8 +646,39 @@ view()
 |---|---|---|
 | `active_offset_x`、`active_offset_y` | `activeOffsetX`、`activeOffsetY` | 手指沿该轴离按下的位置超过这个距离（任一方向，单位点）时，拖动激活。 |
 | `fail_offset_x`、`fail_offset_y` | `failOffsetX`、`failOffsetY` | 手指先超过这个距离时拖动失败：触摸留给滚动视图。 |
+| `direction` | `direction` | 只在这一个方向上激活（`left`、`right`、`up`、`down`）：反方向的拖动，或者主要横穿这个方向的拖动，会失败并留给外层的视图。 |
+| `edge` | `edge` | 只有在这条边（`left`、`right`、`top`、`bottom`）按下的手指才能开始拖动，方向为离开这条边。 |
 
 `PanActivation::horizontal(active, fail)` 和 `PanActivation::vertical(active, fail)` 设置常用的组合。没有激活偏移时，任一方向移动 10 点后激活。激活之前，外层的滚动视图会等待它（iOS），视图的其他接管声明也不会被询问。视图里面不能沿拖动所在方向滚动的滚动视图（横向拖动的视图里的纵向列表）只接手拖动失败的手势，与其他平台相同：斜向拖动归手指先超过的那个偏移。激活后，滚动视图不能再拿走这些触摸，视图成为响应者（先 grant，再收到移动）；失败时滚动视图照常滚动。在 TSX 中，`PanResponder` 的 `panHandlers` 也可以一起用：和这个属性放在同一个视图上，`onPanResponderGrant` 在激活时运行。
+
+### 单向拖动与屏幕边缘拖动
+
+视图自己的拖动（`pan` 值、`onPanStart` / `onPanEnd`）同样遵循它的拖动激活设置：激活时才开始。比如抽屉从屏幕左边缘拖出来打开，打开后的内容只在向左拖时关闭，其他方向的拖动交给下面的分页或列表：
+
+```rust tabs
+// 从屏幕左边缘拖出来打开。
+let opener = view()
+    .pan_activation(PanActivation::default().edge(PanEdge::Left))
+    .pan_values(Some(&offset), None)
+    .on_pan_end(move |e: &PanEvent| settle(e));
+// 打开的抽屉：只有向左拖才关闭。
+let content = view()
+    .pan_activation(PanActivation::default().direction(PanDirection::Left))
+    .pan_values(Some(&offset), None)
+    .on_pan_end(move |e: &PanEvent| settle(e));
+```
+
+```tsx tabs
+{/* 从屏幕左边缘拖出来打开。 */}
+<View panActivation={{ edge: "left" }} pan={{ x: offset }} onPanEnd={settle} />
+{/* 打开的抽屉：只有向左拖才关闭。 */}
+<View panActivation={{ direction: "left" }} pan={{ x: offset }} onPanEnd={settle} />
+```
+
+边缘拖动只在手指按在离这条边 20 点以内时开始：手机和平板上是屏幕的边，桌面上是窗口的边，Web 上是页面的边。拖动事件的 `origin` 给出按下的位置。
+
+- **iOS** 用系统的屏幕边缘拖动手势识别。在导航栈里，返回手势优先：从左边缘拖动时，能返回的页面会返回，栈里的第一个页面则由这个拖动接手。
+- **Android** 在手势导航下把左右两边留给系统的返回手势：系统在那里接手的滑动会执行返回，已经开始的拖动以 `cancelled` 结束。使用三键导航时，从这条边开始的拖动都归这个拖动。
 
 > [!NOTE]
 > 所有速度的单位都是每秒的点数：响应者手势的 `vx` / `vy`、拖动的速度以及弹簧或衰减的速度都是，所以 `vx` 可以直接传给弹簧或衰减。

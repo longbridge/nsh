@@ -563,10 +563,12 @@ export interface OverlayPosition {
   available: Size;
 }
 
-/** A drag: translation since the start and velocity (points / second). */
+/** A drag: where it started, translation since then and velocity (points / second). */
 export interface PanEvent {
   /** The system cancelled the drag rather than releasing it. */
   cancelled: boolean;
+  /** Where the finger (or the pointer) went down, in the surface (as a touch's `pageX` / `pageY`). */
+  origin: Point;
   /** How far the finger moved since the drag started. */
   translation: Point;
   /** How fast it moves, in points per second. */

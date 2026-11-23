@@ -22,8 +22,9 @@ use nsh_core::{
     Checked, Color, Command, DialogButtonStyle, EditAction, HeaderTitleAlign, InputConfig,
     KeyCapture, KeyboardDismissMode, KeyboardTaps, KeyboardType, LayoutCurve, LayoutProperty,
     LayoutTransition, LiveRegion, ModalAnimation, ModalPresentation, MountBatch, MountItem,
-    NativeProps, PointerEvents, ResizeMode, ReturnKeyType, ScreenAnimation, ScreenConfig,
-    SnapAlignment, StatusBarStyle, SubmitBehavior, ViewKind, ViewProps, ViewStyle, WebSource,
+    NativeProps, PanDirection, PanEdge, PointerEvents, ResizeMode, ReturnKeyType, ScreenAnimation,
+    ScreenConfig, SnapAlignment, StatusBarStyle, SubmitBehavior, ViewKind, ViewProps, ViewStyle,
+    WebSource,
     audio::AudioCommand,
     geometry::{DefiniteLength, REM_SIZE},
 };
@@ -1581,6 +1582,22 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
             ] {
                 e.float(v.map_or(f32::NAN, |v| v.0));
             }
+            // The way it activates in and its edge (Mounter.java
+            // `panActivation`): -1 none.
+            e.int(match a.way() {
+                Some(PanDirection::Left) => 0,
+                Some(PanDirection::Right) => 1,
+                Some(PanDirection::Up) => 2,
+                Some(PanDirection::Down) => 3,
+                _ => -1,
+            });
+            e.int(match a.edge {
+                Some(PanEdge::Left) => 0,
+                Some(PanEdge::Right) => 1,
+                Some(PanEdge::Top) => 2,
+                Some(PanEdge::Bottom) => 3,
+                _ => -1,
+            });
         }
         None => e.int(0),
     }
@@ -1810,10 +1827,10 @@ fn input(e: &mut Encoded, c: &InputConfig) {
     e.bool(c.caret_hidden);
     // `pasteBehavior`: whether a paste inserts its text.
     e.bool(c.paste_behavior == nsh_core::PasteBehavior::Insert);
-    // A multiline input's own scroll bar shows; a built-in bar replaces it
-    // (the input then reports how far its text scrolled).
+    // A multiline input's own scroll bar shows; whether it reports how far
+    // its text scrolled (a bar of the app's follows it).
     e.bool(c.scrollbar_visible);
-    e.bool(c.replaced);
+    e.bool(c.report_scroll);
     e.int(s.font_variant.0 as i32);
 }
 

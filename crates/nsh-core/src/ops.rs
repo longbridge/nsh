@@ -1115,6 +1115,8 @@ pub enum EventPayload {
     Layout(Bounds<Points>),
     /// A drag: translation since the start and velocity (points / second).
     Pan {
+        /// Where the finger went down, in the surface.
+        origin: Point<Points>,
         /// The translation.
         translation: Point<Points>,
         /// Horizontal velocity.
@@ -1128,6 +1130,8 @@ pub enum EventPayload {
     },
     /// A system-cancelled drag, with the same last values as `Pan`.
     PanCancelled {
+        /// Where the finger went down, in the surface.
+        origin: Point<Points>,
         /// The translation.
         translation: Point<Points>,
         /// Horizontal velocity.
@@ -1803,6 +1807,10 @@ pub enum ScrollbarSetting {
     /// The app's built-in bar drawn as this theme says (an object): the
     /// `ScrollbarTheme` of `nsh/base`, which reads it.
     Themed(Arc<crate::JsonValue>),
+    /// The app's built-in bar drawn as this theme says, as Rust gave it: a
+    /// value of the theme type of the UI set that makes bars, with its
+    /// maker (`nsh_base::ScrollbarTheme` converts into this).
+    ThemeValue(crate::element::ScrollbarThemeValue),
 }
 
 impl From<bool> for ScrollbarSetting {
@@ -1810,6 +1818,8 @@ impl From<bool> for ScrollbarSetting {
         if shows { Self::Shown } else { Self::Hidden }
     }
 }
+
+crate::static_reactive!(ScrollbarSetting: ScrollbarSetting, bool);
 
 /// How an `<image>` is shown, besides its source.
 #[derive(Debug, Clone, PartialEq, HostProps)]

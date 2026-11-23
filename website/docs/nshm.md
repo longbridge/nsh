@@ -369,7 +369,7 @@ The NSH versions an nshm builds with are its own `nsh-core` requirement (`nsh-co
 An nshm that uses a system feature declares what the packaged app needs in its `Cargo.toml`, under
 `[package.metadata.nsh]`, or under a feature's `[package.metadata.nsh.features.<feature>]` when only that feature
 needs it. `nsh` adds the entries of every crate the app links, with the features Cargo turns on, to the packages it builds,
-and the `Info.plist` keys and Android entries to its development hosts:
+and the iOS `Info.plist` keys and Android entries to its development hosts:
 
 ```toml
 [package.metadata.nsh.features.scanner.ios.infoPlist]
@@ -387,6 +387,8 @@ libraries = ["android/libs/scanner-glue.jar"]
 | `ios.infoPlist` | Keys of the iOS app's `Info.plist`, as `nsh.json`'s `ios.infoPlist` |
 | `ios.infoPlistStrings` | The text of those keys in other languages, by language, as `nsh.json`'s `ios.infoPlistStrings` ([Packaging](./packaging.md#infoplist-text-in-other-languages)) |
 | `ios.entitlements` | The iOS app's entitlements |
+| `macos.infoPlist` | Keys of the macOS app's `Info.plist`, as `nsh.json`'s `macos.infoPlist` |
+| `macos.entitlements` | The macOS app's entitlements |
 | `android.permissions` | `<uses-permission>` elements, named as in `nsh.json` (`CAMERA` is `android.permission.CAMERA`) |
 | `android.queries` | `<intent>`, `<package>` and `<provider>` elements of the manifest's `<queries>` |
 | `android.application` | `<service>`, `<receiver>`, `<provider>`, `<activity>` and `<meta-data>` elements of `<application>`; `${applicationId}` is the app's package, other placeholders the app's `android.manifestPlaceholders` |
@@ -399,8 +401,9 @@ lists wins, then the crate whose name sorts first ([Java code](./packaging.md#ja
 
 The app's own `nsh.json` wins: a key it sets keeps its value, and arrays (such as `UIBackgroundModes`) are joined. When
 two crates set one key to different values (two usage descriptions of the camera), the app chooses by setting the key
-in `ios.infoPlist` or `ios.entitlements`; until it does, packaging for iOS stops with an error naming both crates. Keys NSH
-sets itself (the bundle's identifier, version and the like) are not the crates'.
+in `ios.infoPlist`, `ios.entitlements`, `macos.infoPlist` or `macos.entitlements`; until it does, packaging for that
+platform stops with an error naming both crates. Keys NSH sets itself (the bundle's identifier, version and the like)
+are not the crates'.
 
 A crate translates the keys the crates set in `ios.infoPlist`, as they word them; a translation of a key no crate sets
 with the app's features (one of a feature that is off) is left out with a warning. The app takes the crates'

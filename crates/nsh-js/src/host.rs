@@ -1465,6 +1465,7 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
         }
         EventPayload::Layout(frame) => obj.set("bounds", bounds_object(cx, *frame)?)?,
         EventPayload::Pan {
+            origin,
             translation,
             velocity_x,
             velocity_y,
@@ -1472,6 +1473,7 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
             value_y,
         }
         | EventPayload::PanCancelled {
+            origin,
             translation,
             velocity_x,
             velocity_y,
@@ -1482,6 +1484,7 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
                 "cancelled",
                 matches!(payload, EventPayload::PanCancelled { .. }),
             )?;
+            obj.set("origin", point_object(cx, *origin)?)?;
             obj.set("translation", point_object(cx, *translation)?)?;
             let velocity = rquickjs::Object::new(cx.clone())?;
             velocity.set("x", *velocity_x)?;

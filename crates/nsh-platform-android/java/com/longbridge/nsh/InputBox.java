@@ -74,10 +74,10 @@ final class InputBox extends FrameLayout implements Node {
     /** Platform hint colors before any explicit `placeholderTextColor` override. */
     private final android.content.res.ColorStateList defaultHintColors;
     /**
-     * A built-in bar replaces the scroll indicator (`InputConfig::replaced`):
+     * A bar of the app's follows the text (`InputConfig::report_scroll`):
      * how far the text scrolled is reported to the engine.
      */
-    private boolean replaced;
+    private boolean reportsScroll;
     /** What was last reported (px): offset, text height, viewport width and height; -1 for nothing. */
     private int reportedY = -1, reportedContent = -1, reportedWidth = -1, reportedHeight = -1;
     /** `pointerEvents` (`Box`'s codes): `none` and `box-none` let touches through to the views below. */
@@ -164,7 +164,7 @@ final class InputBox extends FrameLayout implements Node {
             protected void onScrollChanged(int left, int top, int oldLeft, int oldTop) {
                 super.onScrollChanged(left, top, oldLeft, oldTop);
                 reportCaret(this);
-                if (replaced) reportScroll();
+                if (reportsScroll) reportScroll();
             }
 
             @Override
@@ -173,21 +173,21 @@ final class InputBox extends FrameLayout implements Node {
                 // The text wraps again once laid out at the new size.
                 post(() -> {
                     reportCaret(this);
-                    if (replaced) reportScroll();
+                    if (reportsScroll) reportScroll();
                 });
             }
 
             @Override
             protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
                 super.onLayout(changed, left, top, right, bottom);
-                if (replaced) reportScroll();
+                if (reportsScroll) reportScroll();
             }
 
             @Override
             protected void onTextChanged(CharSequence text, int start, int before, int after) {
                 super.onTextChanged(text, start, before, after);
                 // The text's height is known once it is laid out again.
-                if (replaced) post(InputBox.this::reportScroll);
+                if (reportsScroll) post(InputBox.this::reportScroll);
             }
         };
         edit.setBackground(new ColorDrawable(0));
@@ -787,14 +787,14 @@ final class InputBox extends FrameLayout implements Node {
 
     /**
      * `InputConfig`'s `scrollbarVisible` (whether the text's own scroll bar
-     * shows; the text scrolls either way) and `replaced` (a built-in bar takes
-     * its place: how far the text scrolled is reported, at once and on every
-     * change).
+     * shows; the text scrolls either way) and `reportScroll` (a bar of the
+     * app's follows the text: how far it scrolled is reported, at once and on
+     * every change).
      */
-    void setScrollbar(boolean visible, boolean replaced) {
+    void setScrollbar(boolean visible, boolean reportScroll) {
         edit.setVerticalScrollBarEnabled(visible && defaultVerticalBar);
-        this.replaced = replaced;
-        if (!replaced) return;
+        this.reportsScroll = reportScroll;
+        if (!reportScroll) return;
         reportedY = reportedContent = reportedWidth = reportedHeight = -1;
         // After the rest of the config (multiline, font) is applied.
         post(this::reportScroll);
@@ -809,7 +809,7 @@ final class InputBox extends FrameLayout implements Node {
 
     /** Reports how far the text scrolled when that, its height or the viewport changed. */
     private void reportScroll() {
-        if (!replaced || mounter == null) return;
+        if (!reportsScroll || mounter == null) return;
         int y = edit.getScrollY(), content = textHeight(), width = edit.getWidth(), height = edit.getHeight();
         if (y == reportedY && content == reportedContent && width == reportedWidth && height == reportedHeight) {
             return;

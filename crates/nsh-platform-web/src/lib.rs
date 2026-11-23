@@ -1913,10 +1913,20 @@ pub extern "C" fn nsh_zoom(id: u32, scale: f32) -> f64 {
 }
 
 /// A drag on a view with native pan values (`phase`: 0 start, 1 move, 2
-/// end), translated `(tx, ty)` since it began, at velocity `(vx, vy)`
-/// points per second.
+/// end, 3 cancelled), translated `(tx, ty)` since it began at `(ox, oy)`
+/// in the root, at velocity `(vx, vy)` points per second.
 #[unsafe(no_mangle)]
-pub extern "C" fn nsh_pan(id: u32, phase: u32, tx: f32, ty: f32, vx: f32, vy: f32) -> f64 {
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn nsh_pan(
+    id: u32,
+    phase: u32,
+    tx: f32,
+    ty: f32,
+    vx: f32,
+    vy: f32,
+    ox: f32,
+    oy: f32,
+) -> f64 {
     send(|app| {
         match phase {
             0 => app.animation.pan_began(id),
@@ -1928,8 +1938,10 @@ pub extern "C" fn nsh_pan(id: u32, phase: u32, tx: f32, ty: f32, vx: f32, vy: f3
             ffi::submit(&out.finish());
         }
         let (value_x, value_y) = app.animation.pan_values(id);
+        let origin = point(Points(ox), Points(oy));
         let payload = if phase == 3 {
             EventPayload::PanCancelled {
+                origin,
                 translation: point(Points(tx), Points(ty)),
                 velocity_x: vx,
                 velocity_y: vy,
@@ -1938,6 +1950,7 @@ pub extern "C" fn nsh_pan(id: u32, phase: u32, tx: f32, ty: f32, vx: f32, vy: f3
             }
         } else {
             EventPayload::Pan {
+                origin,
                 translation: point(Points(tx), Points(ty)),
                 velocity_x: vx,
                 velocity_y: vy,

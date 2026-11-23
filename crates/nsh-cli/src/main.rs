@@ -624,7 +624,8 @@ struct PackageArgs {
     /// App icon: a square PNG, ideally 1024×1024.
     #[arg(long)]
     icon: Option<PathBuf>,
-    /// Code signing identity for devices, e.g. "Apple Development: …".
+    /// Code signing identity for iOS devices or macOS packages, e.g.
+    /// "Apple Development: …" or "Developer ID Application: …".
     #[arg(long)]
     sign: Option<String>,
     /// Provisioning profile for devices (`.mobileprovision`). Repeat it to
@@ -1440,6 +1441,22 @@ mod command_tests {
         for value in ["x86-64", "i386", "x86_64-apple-darwin"] {
             assert!(arch(&["--arch", value]).is_err(), "{value}");
         }
+        let cli = Cli::try_parse_from([
+            "nsh",
+            "package",
+            "--target",
+            "macos",
+            "--sign",
+            "Developer ID Application: Example Inc (ABCDE12345)",
+        ])
+        .unwrap();
+        let Command::Package(args) = cli.command else {
+            panic!("expected nsh package");
+        };
+        assert_eq!(
+            args.sign.as_deref(),
+            Some("Developer ID Application: Example Inc (ABCDE12345)")
+        );
     }
 
     #[test]

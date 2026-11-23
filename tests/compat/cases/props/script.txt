@@ -457,6 +457,8 @@ prop id:long delayLongPress 800
 listens id:long onLongPress
 noprop id:plain delayLongPress
 prop id:pan panActivation activeOffsetX=20 failOffsetY=10
+prop id:pan-way panActivation activeOffsetX=16 direction=right
+prop id:pan-edge panActivation edge=left
 noprop id:plain panActivation
 prop id:unfocusable focusable false
 prop id:stop focusable true

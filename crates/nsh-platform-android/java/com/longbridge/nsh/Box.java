@@ -811,6 +811,8 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
     // --- Gestures ----------------------------------------------------------
 
     private float downRawX, downRawY;
+    /** This touch never starts the pan: it went down away from an edge pan's edge, or its activation failed. */
+    private boolean panRefused;
     /** Where the press went down (for the ripple). */
     private float pressX, pressY;
     /** The touch, for the press events' payload. */
@@ -899,15 +901,41 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
 
     /** Whether this view's pan would start for a drag by ({@code dx}, {@code dy}) px (a scroll view inside asks). */
     boolean takesPan(float dx, float dy) {
-        return pannable() && panStarts(dx, dy, 0);
+        if (!pannable() || panRefused) return false;
+        float[] a = mounter.panActivation(id);
+        if (a == null) return panStarts(dx, dy, 0);
+        float d = mounter.density;
+        return TouchTracker.mayActivate(a, dx / d, dy / d);
     }
 
-    /** Whether a movement of (dx, dy) starts this view's pan. */
+    /**
+     * Whether a movement of (dx, dy) px starts this view's pan: past the slop, along its axis, or as its
+     * `panActivation` decides when it has one (once that fails, never for this touch).
+     */
     private boolean panStarts(float dx, float dy, float slop) {
-        if (Math.hypot(dx, dy) <= slop) return false;
+        if (panRefused || Math.hypot(dx, dy) <= slop) return false;
+        float[] a = mounter.panActivation(id);
+        if (a != null) {
+            float d = mounter.density;
+            Boolean decision = TouchTracker.decideActivation(a, dx / d, dy / d);
+            if (decision == null) return false;
+            panRefused = !decision;
+            return decision;
+        }
         if (panAxis == 1) return Math.abs(dx) > Math.abs(dy);
         if (panAxis == 2) return Math.abs(dy) > Math.abs(dx);
         return true;
+    }
+
+    /**
+     * A finger went down at the screen point ({@code rawX}, {@code rawY}): away from the edge of an edge pan
+     * (`PanActivation::edge`), the pan does not start for this touch.
+     */
+    private void panDown(float rawX, float rawY) {
+        downRawX = rawX;
+        downRawY = rawY;
+        float[] a = mounter.panActivation(id);
+        panRefused = a != null && !TouchTracker.startsAt(a, this, rawX, rawY, mounter.density);
     }
 
     /**
@@ -937,10 +965,7 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
         if (contentWrapper) return false;
         if (pointerEvents == 3) return true;
         int action = e.getActionMasked();
-        if (action == MotionEvent.ACTION_DOWN) {
-            downRawX = e.getRawX();
-            downRawY = e.getRawY();
-        }
+        if (action == MotionEvent.ACTION_DOWN) panDown(e.getRawX(), e.getRawY());
         if (action == MotionEvent.ACTION_POINTER_DOWN && twoFinger() && e.getPointerCount() == 2) {
             // A second finger: take over from the child for pinch / rotation.
             tracking = false;
@@ -961,7 +986,7 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
                 panning = true;
                 getParent().requestDisallowInterceptTouchEvent(true);
                 float density = mounter.density;
-                mounter.pan(id, 0, dx / density, dy / density, 0, 0);
+                mounter.pan(id, 0, dx / density, dy / density, 0, 0, this, downRawX, downRawY);
                 return true;
             }
         }
@@ -986,8 +1011,7 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
         if (pressable) longOnly.forward(e, mounter.handlesTap(id), mounter);
         switch (e.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
-                downRawX = e.getRawX();
-                downRawY = e.getRawY();
+                panDown(e.getRawX(), e.getRawY());
                 tracking = true;
                 pressedIn = false;
                 longPressed = false;
@@ -1024,9 +1048,9 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
                     tracking = false;
                     pressOut();
                     getParent().requestDisallowInterceptTouchEvent(true);
-                    mounter.pan(id, 0, dx / density, dy / density, 0, 0);
+                    mounter.pan(id, 0, dx / density, dy / density, 0, 0, this, downRawX, downRawY);
                 } else if (panning) {
-                    mounter.pan(id, 1, dx / density, dy / density, 0, 0);
+                    mounter.pan(id, 1, dx / density, dy / density, 0, 0, this, downRawX, downRawY);
                 } else if (tracking && !inside(e)) {
                     tracking = false;
                     pressOut();
@@ -1046,7 +1070,8 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
                     float dx = e.getRawX() - downRawX, dy = e.getRawY() - downRawY;
                     // Velocity in the parent's space, like the translation.
                     mounter.pan(id, up ? 2 : 3, dx / density, dy / density,
-                            velocity.getXVelocity() / density, velocity.getYVelocity() / density);
+                            velocity.getXVelocity() / density, velocity.getYVelocity() / density,
+                            this, downRawX, downRawY);
                 } else if (up && tracking) {
                     if (!pressedIn) onPressIn();
                     boolean press = !longPressed && wants(Native.PRESS);

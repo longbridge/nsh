@@ -950,6 +950,7 @@ pub(crate) fn install_android_host(
                 queries: &meta.android_queries,
                 application: &meta.android_application,
                 schemes: &[],
+                share_mime_types: &[],
                 links: &[],
                 rust: false,
                 dark: false,
