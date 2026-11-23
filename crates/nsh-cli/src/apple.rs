@@ -249,6 +249,10 @@ pub(crate) struct MacosConfig {
     /// development host (`--activation-policy`).
     #[serde(default)]
     pub(crate) activation_policy: ActivationPolicy,
+    /// App extensions the app builds itself, which macOS packages carry in
+    /// `Contents/PlugIns/` ([`crate::app_extensions`]).
+    #[serde(default)]
+    pub(crate) extensions: Vec<crate::app_extensions::AppExtension>,
 }
 
 /// `nsh.json` `macos.activationPolicy`, as GPUI's `ActivationPolicy`. Read
@@ -453,7 +457,7 @@ impl AppleConfig {
         self.info_plist_strings(platform)?;
         self.entitlements(platform)?;
         for extension in &self.extensions {
-            extension_entitlements(extension)?;
+            extension_entitlements(extension, platform)?;
         }
         if self.launch_screen.is_some() && self.info_plist.contains_key("UILaunchScreen") {
             bail!(
@@ -497,6 +501,9 @@ impl MacosConfig {
         self.info_plist()?;
         self.info_plist_strings()?;
         self.entitlements()?;
+        for extension in &self.extensions {
+            extension_entitlements(extension, ApplePlatform::Macos)?;
+        }
         Ok(())
     }
 
@@ -950,13 +957,18 @@ fn entitlements(
     convert(entries, &section, RESERVED_ENTITLEMENTS.iter())
 }
 
-/// The entitlements of one of `ios.extensions` as property list values,
-/// refusing the keys `ios.entitlements` refuses, with the `nsh.json` key
-/// they come from, for errors.
+/// The entitlements of one of `ios.extensions` or `macos.extensions` as
+/// property list values, refusing the keys `<platform>.entitlements` refuses,
+/// with the `nsh.json` key they come from, for errors.
 pub(crate) fn extension_entitlements(
     extension: &crate::app_extensions::AppExtension,
+    platform: ApplePlatform,
 ) -> anyhow::Result<(plist::Dictionary, String)> {
-    let section = format!("ios.extensions[{}].entitlements", extension.index);
+    let section = format!(
+        "{}.extensions[{}].entitlements",
+        platform.key(),
+        extension.index
+    );
     let dictionary = convert(
         &extension.entitlements,
         &section,
