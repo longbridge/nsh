@@ -568,7 +568,9 @@ the agent targets (the main one or a window of the app's own), keys to the windo
 the background never activates, so AppKit makes none of its windows key: the window that would be, the one last
 shown, focused or pressed, is the focused one in its state and gets the keys), a view's bounds are in its own window's content, a window's state is read
 from it as it would be reported, pressing a window's close button clicks its standard close button, so the
-window's close policy answers it; a window's screenshot is its content, as the main window's, a viewport's size is
+window's close policy answers it; `app.screenshot` is of the window the app shows (the targeted window, else the key
+one, as for a viewport: the invisible host never shows) and `app.window(id).screenshot` of that window, each its
+content, and a window not on screen has no picture (the step fails), a viewport's size is
 the content size, the window then moved only as far as it takes to stay within its display's visible frame (a larger
 one keeps its top left corner in it; grown from that corner it could reach past the edge, where a screenshot shows
 nothing), and dark mode is the
@@ -596,11 +598,11 @@ Animation and waits 50 ms (`agent.rs` `PRESENT`): taken at once, the picture was
 In-process rendering cannot do this: `CARenderer` renders a layer tree only in a context of its own, and given the
 window's tree (or a keyed-archive copy of it) it rendered and left the window's content blank on screen.
 
-Where the window server gives no picture (the function is missing, the window is not visible, or the picture is all
-black or clear, as a locked screen may make it), the screenshot falls back to drawing the window's content in process
-(`drawn`: `cacheDisplayInRect:`), logged at debug. `cacheDisplayInRect:` draws sublayers in their order and ignores
-`zPosition`, so the fallback first orders every layer's sublayers by `zPosition` (as Core Animation composites them;
-the window does not change): without that, a decoration added before a layer it sits above (a border's stroke before
+Where the window server gives no picture of a window on screen (the function is missing, or the picture is all black
+or clear), the screenshot falls back to drawing the window's content in process (`drawn`: `cacheDisplayInRect:`),
+with a warning in the test's output, since that picture differs from the screen (below). `cacheDisplayInRect:`
+draws sublayers in their order and ignores `zPosition`, so the fallback first orders every layer's sublayers by
+`zPosition` (as Core Animation composites them; the window does not change): without that, a decoration added before a layer it sits above (a border's stroke before
 a finish's gradient) looked covered. That rendering is not Core Animation's own: it ignores `maskedCorners`, cuts
 masks at their layer's bounds, ignores `shadowPath` and Core Image filters, flattens 3D transforms (perspective,
 `rotateX`, `rotateY`), and does not show backdrop blur, sheets or `AVPlayerLayer` content (`WKWebView` pages show:
@@ -613,8 +615,8 @@ see: the window's rounded bottom corners are clear, and a sheet dims the window 
 Tests run while the screen is locked (an agent can run them while the user is away), as they run unlocked: nothing
 the agent does goes through the window server's input or screen capture. Input is posted to the
 app's own event queue or handed to its window, keys go to the window whether or not it is key (`synth::key_event`),
-screenshots render in process, and frames the display link no longer gives come from the surface's deadline timer,
-which a test's app runs as it would on screen (`Surface::keep_deadline`). The agent finds a locked screen, or a
+screenshots are still the window server's pictures of the test's windows (checked on macOS 27 with the screen
+locked), and frames the display link no longer gives come from the surface's deadline timer, which a test's app runs as it would on screen (`Surface::keep_deadline`). The agent finds a locked screen, or a
 session that is not the console's, with `CGSessionCopyCurrentDictionary` (`system::screen_locked`): with
 `--foreground` it does not wait for the app's activation then (the system never gives it), and the app's
 `lifecycle()` does not turn `background` because the lock covers its windows. A left button press into a web view
