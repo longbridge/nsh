@@ -62,7 +62,12 @@ fn utf16(bytes: &[u8], le: bool) -> std::io::Result<String> {
             }
         })
         .collect();
-    Ok(String::from_utf16_lossy(&units))
+    // Strict: replacement characters would have the JSON parse name a
+    // column inside a file that is not text at all.
+    match String::from_utf16(&units) {
+        Ok(text) => Ok(text),
+        Err(e) => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
+    }
 }
 
 /// The entry module of an app directory whose `nsh.json` names none.
