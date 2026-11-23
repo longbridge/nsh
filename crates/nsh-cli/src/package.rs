@@ -460,6 +460,28 @@ pub(crate) struct WatchConfig {
 }
 
 impl AppConfig {
+    /// Whether the app may read the device's location: it declares
+    /// `"location": true` (or an object, `{ "background": true }`). Unlike
+    /// every other capability here, it is never granted for the asking
+    /// alone: an app without a `capabilities` block reads no location, and
+    /// `nsh package` writes no purpose string and no permission for it.
+    fn location(&self) -> bool {
+        self.capabilities
+            .as_ref()
+            .and_then(|capabilities| capabilities.get("location"))
+            .is_some_and(|location| location != &serde_json::Value::Bool(false))
+    }
+
+    /// Whether the app may read the location while it is not in front:
+    /// `"location": { "background": true }`.
+    fn location_background(&self) -> bool {
+        self.capabilities
+            .as_ref()
+            .and_then(|capabilities| capabilities.pointer("/location/background"))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+    }
+
     /// Whether the app may show notifications: it declares no capabilities
     /// (it gets them all) or grants `notifications`.
     pub(crate) fn notifications(&self) -> bool {
@@ -3694,6 +3716,34 @@ mod tests {
         assert!(lower_case_android_name("access_network_state"));
         assert!(!lower_case_android_name("ACCESS_NETWORK_STATE"));
         assert!(!lower_case_android_name("com.example.permission.read"));
+    }
+
+    #[test]
+    fn location_is_declared_and_never_granted_by_default() {
+        let config = |capabilities: Option<serde_json::Value>| AppConfig {
+            capabilities,
+            ..AppConfig::default()
+        };
+
+        // Never without a declaration, also for an app that declares nothing.
+        assert!(!config(None).location());
+        assert!(!config(None).location_background());
+        assert!(!config(Some(serde_json::json!({ "picker": true }))).location());
+
+        assert!(config(Some(serde_json::json!({ "location": true }))).location());
+        assert!(!config(Some(serde_json::json!({ "location": true }))).location_background());
+        assert!(!config(Some(serde_json::json!({ "location": false }))).location());
+
+        let background = config(Some(
+            serde_json::json!({ "location": { "background": true } }),
+        ));
+        assert!(background.location());
+        assert!(background.location_background());
+
+        // An object without `background` is when-in-use only.
+        let foreground = config(Some(serde_json::json!({ "location": {} })));
+        assert!(foreground.location());
+        assert!(!foreground.location_background());
     }
 
     #[test]
