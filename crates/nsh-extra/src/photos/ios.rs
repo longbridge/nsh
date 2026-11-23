@@ -545,5 +545,23 @@ pub(super) fn observe() {
             let _: () = msg_send![&library, registerChangeObserver: &*observer];
         }
         std::mem::forget(observer);
+        // Photos reports only the changes to what the app holds a fetch
+        // of, and `recent`'s go when it returns: the library's images are
+        // held for the process's life. The fetch must have run (its count
+        // read; its objects still load only when asked): one never read
+        // hears nothing.
+        if let Some(asset_class) = AnyClass::get(c"PHAsset") {
+            // SAFETY: Photos' documented API.
+            let images: Retained<AnyObject> = unsafe {
+                msg_send![
+                    asset_class,
+                    fetchAssetsWithMediaType: MEDIA_IMAGE,
+                    options: Option::<&AnyObject>::None
+                ]
+            };
+            // SAFETY: `PHFetchResult`'s documented property.
+            let _: usize = unsafe { msg_send![&images, count] };
+            std::mem::forget(images);
+        }
     });
 }
