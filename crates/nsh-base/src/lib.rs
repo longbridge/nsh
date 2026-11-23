@@ -95,6 +95,7 @@ pub use crate::emoji_picker::EMOJI_DATA;
 pub const MATH_FONTS: &[u8] = include_bytes!("../fonts/katex.pack.zst");
 mod theme;
 mod time_field;
+mod title_bar;
 mod toast;
 mod toggle;
 mod toolbar;
@@ -255,6 +256,7 @@ pub use crate::{
         HourCycle, TimeField, TimeFieldElement, TimeFieldEvent, TimeFieldProps,
         TimeFieldSegmentEntry, TimeOfDay, TimePrecision, TimeSegment, time_field,
     },
+    title_bar::{TitleBar, TitleBarElement, TitleBarProps, title_bar, title_bar_insets},
     toast::{
         Anchor, SwipeDirection, Toast, ToastAdvance, ToastElement, ToastEvent, ToastManager,
         ToastMotion, ToastOptions, ToastProps, ToastStack, ToastStackElement, ToastStackEvent,
@@ -341,8 +343,8 @@ pub mod parts {
         MenuButton, MenuItem, MenuSeparator, NumberInput, OtpInput, Pagination, Popover, Progress,
         Radio, RadioGroup, ResizablePanel, ResizablePanelGroup, Scrollbar, Select, Sheet, Slider,
         SplitView, Submenu, Switch, Tab, Table, TableBody, TableCaption, TableCell, TableFooter,
-        TableHead, TableHeader, TableRow, Tabs, TextView, TimeField, Toast, ToastStack, Toggle,
-        ToggleGroup, Toolbar, ToolbarGroup, ToolbarSeparator, Tooltip, Tree,
+        TableHead, TableHeader, TableRow, Tabs, TextView, TimeField, TitleBar, Toast, ToastStack,
+        Toggle, ToggleGroup, Toolbar, ToolbarGroup, ToolbarSeparator, Tooltip, Tree,
     };
     #[cfg(feature = "editor")]
     use crate::{DiffView, Editor};
@@ -415,6 +417,7 @@ pub mod parts {
             .register::<Tabs>()
             .register::<Toggle>()
             .register::<ToggleGroup>()
+            .register::<TitleBar>()
             .register::<Toolbar>()
             .register::<ToolbarGroup>()
             .register::<ToolbarSeparator>()
@@ -680,6 +683,7 @@ mod tests {
                 "TimeField",
                 "Toast",
                 "ToastStack",
+                "TitleBar",
                 "Toggle",
                 "ToggleGroup",
                 "Toolbar",
