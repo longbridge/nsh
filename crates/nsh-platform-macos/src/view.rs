@@ -455,6 +455,10 @@ pub(crate) struct Ivars {
     /// Its children that are leaves, bottom to top. A view has either these
     /// or child views, never both, so the layer order is the child order.
     leaves: RefCell<Vec<Retained<ViewObj>>>,
+    /// The plain layer its leaves' layers are in, in its container's layer.
+    /// AppKit takes a view's layer out of a view-backed layer that has no
+    /// such subview, but leaves a layer of no view alone.
+    leaf_host: RefCell<Option<Retained<CALayer>>>,
 }
 
 define_class!(
@@ -1824,6 +1828,7 @@ impl NshView {
             sharpened: Cell::new(0.0),
             leaf_parent: RefCell::new(None),
             leaves: RefCell::new(Vec::new()),
+            leaf_host: RefCell::new(None),
         });
         // SAFETY: NSView's designated initializer.
         let obj: Retained<ViewObj> = unsafe { msg_send![super(obj), initWithFrame: NSRect::ZERO] };
@@ -1935,8 +1940,14 @@ impl NshView {
             ),
             None => self.ns().addSubview(&c),
         }
-        for child in children {
-            c.addSubview(child.ns());
+        if self.ivars().leaves.borrow().is_empty() {
+            for child in children {
+                c.addSubview(child.ns());
+            }
+        }
+        // Leaves (#2066) move with the layer they are in, and stay leaves.
+        if let (Some(host), Some(to)) = (&*self.ivars().leaf_host.borrow(), c.layer()) {
+            to.addSublayer(host);
         }
         *self.ivars().container.borrow_mut() = Some(c.clone());
         self.size_container();
@@ -2734,8 +2745,7 @@ impl NshView {
     /// with no view in the hierarchy (#2066): AppKit's per-subview cost
     /// (geometry, display and accessibility bookkeeping) is skipped.
     fn insert_leaf(&self, parent: &NshView, before: Option<&NshView>) {
-        let (Some(parent_layer), Some(layer)) = (parent.container().layer(), self.ns().layer())
-        else {
+        let (Some(parent_layer), Some(layer)) = (parent.leaf_host(), self.ns().layer()) else {
             return self.insert_view(parent, before);
         };
         {
@@ -2763,6 +2773,22 @@ impl NshView {
         if parent.ns().window().is_some() {
             self.rescale();
         }
+    }
+
+    /// The layer its leaves are in ([`Ivars::leaf_host`]), made on first use.
+    fn leaf_host(&self) -> Option<Retained<CALayer>> {
+        if let Some(host) = &*self.ivars().leaf_host.borrow() {
+            return Some(host.clone());
+        }
+        let container = self.container().layer()?;
+        let host = CALayer::new();
+        // At the container's origin with no size: its sublayers are placed
+        // in the container's space.
+        host.setAnchorPoint(CGPoint::new(0.0, 0.0));
+        host.setPosition(CGPoint::new(0.0, 0.0));
+        container.addSublayer(&host);
+        *self.ivars().leaf_host.borrow_mut() = Some(host.clone());
+        Some(host)
     }
 
     /// Whether its children can be leaves: a plain view with no child views
