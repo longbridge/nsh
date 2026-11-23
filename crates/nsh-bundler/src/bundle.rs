@@ -1990,6 +1990,38 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    /// UTF-16 (PowerShell's `>` and Out-File write it on Windows) reads:
+    /// with a BOM, and without one, where a NUL in the first two bytes
+    /// says UTF-16.
+    #[test]
+    fn a_utf16_config_reads_too() {
+        let dir = std::env::temp_dir().join(format!("nsh-utf16-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let json = r#"{ "capabilities": { "network": { "hosts": ["api.example.com"] } } }"#;
+        let encoded = |le: bool, bom: bool| -> Vec<u8> {
+            let mut out = Vec::new();
+            if bom {
+                out.extend_from_slice(if le { &[0xFF, 0xFE] } else { &[0xFE, 0xFF] });
+            }
+            for unit in json.encode_utf16() {
+                let bytes = if le {
+                    unit.to_le_bytes()
+                } else {
+                    unit.to_be_bytes()
+                };
+                out.extend_from_slice(&bytes);
+            }
+            out
+        };
+        for (le, bom) in [(true, true), (false, true), (true, false)] {
+            std::fs::write(dir.join("nsh.json"), encoded(le, bom)).unwrap();
+            let caps = capabilities(&dir).unwrap().unwrap();
+            assert_eq!(caps.network.hosts.len(), 1, "le {le} bom {bom}");
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn nsh_json_keys_of_a_newer_nsh_are_ignored() {
         let dir = std::env::temp_dir().join(format!("nsh-newer-keys-{}", std::process::id()));

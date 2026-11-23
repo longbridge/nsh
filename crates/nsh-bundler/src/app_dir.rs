@@ -13,17 +13,56 @@ use std::path::{Component, Path, PathBuf};
 /// An app's configuration file.
 pub const CONFIG: &str = "nsh.json";
 
-/// The text of the file at `path`, a leading UTF-8 BOM taken off: editors
-/// and PowerShell's UTF-8 on Windows write one, and JSON parsers reject it
-/// (`nsh.json`, the theme file it names).
+/// The text of the file at `path`, read as UTF-8 or UTF-16: editors and
+/// PowerShell's UTF-8 on Windows write a BOM, which JSON parsers reject,
+/// and its `>` and Out-File write UTF-16 with one by default. A UTF-16
+/// BOM (`FF FE` / `FE FF`) names the byte order; without one, a NUL in
+/// the first two bytes does, and cannot (a NUL appears in no UTF-8 JSON's
+/// first two bytes). Anything else must be UTF-8.
 pub fn read(path: &Path) -> std::io::Result<String> {
-    let text = std::fs::read_to_string(path)?;
-    Ok(strip_bom(&text).to_owned())
+    let bytes = std::fs::read(path)?;
+    match (bytes.first(), bytes.get(1), bytes.get(2)) {
+        (Some(0xEF), Some(0xBB), Some(0xBF)) => match String::from_utf8(bytes[3..].to_vec()) {
+            Ok(text) => Ok(text),
+            Err(e) => Err(not_utf8(e.utf8_error())),
+        },
+        (Some(0xFF), Some(0xFE), _) => utf16(&bytes[2..], true),
+        (Some(0xFE), Some(0xFF), _) => utf16(&bytes[2..], false),
+        // Little endian: an ASCII character, then its NUL.
+        (_, Some(0x00), _) => utf16(&bytes, true),
+        // Big endian: a NUL, then an ASCII character.
+        (Some(0x00), _, _) => utf16(&bytes, false),
+        _ => match String::from_utf8(bytes) {
+            Ok(text) => Ok(text),
+            Err(e) => Err(not_utf8(e.utf8_error())),
+        },
+    }
 }
 
-/// `text` without its leading UTF-8 BOM (`U+FEFF`).
-fn strip_bom(text: &str) -> &str {
-    text.strip_prefix('\u{feff}').unwrap_or(text)
+fn not_utf8(e: std::str::Utf8Error) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidData, e)
+}
+
+/// Decodes `bytes` as UTF-16, most significant byte last when `le`.
+fn utf16(bytes: &[u8], le: bool) -> std::io::Result<String> {
+    if !bytes.len().is_multiple_of(2) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "odd number of bytes for UTF-16",
+        ));
+    }
+    let (pairs, _) = bytes.as_chunks::<2>();
+    let units: Vec<u16> = pairs
+        .iter()
+        .map(|pair| {
+            if le {
+                u16::from_le_bytes(*pair)
+            } else {
+                u16::from_be_bytes(*pair)
+            }
+        })
+        .collect();
+    Ok(String::from_utf16_lossy(&units))
 }
 
 /// The entry module of an app directory whose `nsh.json` names none.
@@ -161,6 +200,32 @@ mod tests {
         assert_eq!(config_entry(&dir), Ok(Some(dir.join("app/App.tsx"))));
         std::fs::write(dir.join(CONFIG), r#"{ "entry": "app/App.tsx" }"#).unwrap();
         assert_eq!(config_entry(&dir), Ok(Some(dir.join("app/App.tsx"))));
+        // UTF-16 (PowerShell's `>` and Out-File on Windows): with a BOM,
+        // and without one, where a NUL in the first two bytes says UTF-16.
+        let utf16 = |text: &str, le: bool| -> Vec<u8> {
+            let mut out = Vec::new();
+            if le {
+                out.extend_from_slice(&[0xFF, 0xFE]);
+            } else {
+                out.extend_from_slice(&[0xFE, 0xFF]);
+            }
+            for unit in text.encode_utf16() {
+                let bytes = if le {
+                    unit.to_le_bytes()
+                } else {
+                    unit.to_be_bytes()
+                };
+                out.extend_from_slice(&bytes);
+            }
+            out
+        };
+        for le in [true, false] {
+            let raw = utf16(r#"{ "entry": "app/App.tsx" }"#, le);
+            std::fs::write(dir.join(CONFIG), &raw).unwrap();
+            assert_eq!(config_entry(&dir), Ok(Some(dir.join("app/App.tsx"))));
+            std::fs::write(dir.join(CONFIG), &raw[2..]).unwrap();
+            assert_eq!(config_entry(&dir), Ok(Some(dir.join("app/App.tsx"))));
+        }
         for bad in [
             r#"1"#,
             r#""""#,
