@@ -645,7 +645,7 @@ impl JsValue for crate::geometry::Edges<crate::geometry::Points> {
 }
 
 /// The modifier keys held: TS's `Modifiers` (`{ control, alt, shift,
-/// platform }`, GPUI's names), as press events carry them. A missing key
+/// platform, altGraph }`, GPUI's names), as press events carry them. A missing key
 /// is not held.
 impl JsValue for crate::keymap::Modifiers {
     fn ts_type(_types: &mut TsTypes) -> String {
@@ -664,6 +664,7 @@ impl JsValue for crate::keymap::Modifiers {
             alt: held("alt")?,
             shift: held("shift")?,
             cmd: held("platform")?,
+            alt_graph: held("altGraph")?,
         })
     }
 
@@ -675,6 +676,7 @@ impl JsValue for crate::keymap::Modifiers {
             ("alt", self.alt),
             ("shift", self.shift),
             ("platform", self.cmd),
+            ("altGraph", self.alt_graph),
         ] {
             host.set_field(object, key, held.to_js(host)?.into_raw())?;
         }

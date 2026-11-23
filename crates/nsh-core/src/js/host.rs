@@ -538,6 +538,8 @@ export interface Modifiers {
   shift: boolean;
   /** Command on Apple platforms, the Windows / Super key elsewhere. */
   platform: boolean;
+  /** AltGr (the DOM's `getModifierState("AltGraph")`): the key's character came from the layout's AltGr level, so `control` and `alt` are held to type text, not for a shortcut. Set by key events on Windows; `false` elsewhere. */
+  altGraph: boolean;
 }
 
 /** A hardware key transition on the focused view: the payload of `onKeyDown` and `onKeyUp` (`nsh_core::KeyEvent`). */

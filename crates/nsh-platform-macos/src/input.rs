@@ -2660,6 +2660,7 @@ pub(crate) fn modifiers(flags: NSEventModifierFlags) -> nsh_core::keymap::Modifi
         alt: flags.contains(NSEventModifierFlags::Option),
         shift: flags.contains(NSEventModifierFlags::Shift),
         cmd: flags.contains(NSEventModifierFlags::Command),
+        alt_graph: false,
     }
 }
 

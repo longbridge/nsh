@@ -169,6 +169,7 @@ pub(crate) fn key(surface: &Surface, event: &KeyEvent) -> bool {
         alt: m.alt,
         shift: m.shift,
         cmd: m.meta,
+        alt_graph: false,
     };
     if !event.down || !nsh_core::input::presses_focused_control(key, held) {
         return false;

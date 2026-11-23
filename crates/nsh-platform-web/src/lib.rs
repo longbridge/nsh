@@ -1630,6 +1630,7 @@ pub unsafe extern "C" fn nsh_touch(ptr: *const u8, len: usize) -> f64 {
                 alt: on("alt"),
                 shift: on("shift"),
                 cmd: on("platform"),
+                alt_graph: false,
             }
         },
         activated: value
@@ -1694,6 +1695,7 @@ pub extern "C" fn nsh_key(key: u32, modifiers: u32, focus: u32, repeat: u32) -> 
             alt: modifiers & 2 != 0,
             shift: modifiers & 4 != 0,
             cmd: modifiers & 8 != 0,
+            alt_graph: false,
         },
         key,
     };
@@ -1775,6 +1777,7 @@ pub unsafe extern "C" fn nsh_key_event(
         alt: modifiers & 2 != 0,
         shift: modifiers & 4 != 0,
         cmd: modifiers & 8 != 0,
+        alt_graph: false,
     };
     let stroke = key_of(stroke).map(|key| Keystroke { key, modifiers });
     let mut event = nsh_core::keyboard::KeyEvent::default();
