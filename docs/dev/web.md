@@ -806,7 +806,9 @@ browsers' touches into what phones report:
   text, selectable views and hosted pages), as in native apps; it focuses the app's window in an iframe. A touch moves
   the focus as the browser does (a tap outside a field closes the keyboard), unless its press made the app focus a field
   (an editor's text): the mouse events the browser makes of the touch then leave the focus in the field (`mouseDown`,
-  `pressFocus`), so the keyboard stays open. The views under the newest
+  `pressFocus`), so the keyboard stays open. An `autoFocus` input takes the focus at the end of the batch that put it in
+  the page (`focusAppeared`), in the same turn, never from a timer: iOS Safari raises the keyboard only for a focus inside
+  the event's handler, and the focus is the press's (`pressFocus`) as a focus command's is. The views under the newest
   `Dialog` or alert are `inert`; the focus one took comes back when it closes.
 - **Accessibility**: `op_vp` sets ARIA from the accessibility props (roles mapped by `ARIA_ROLES`, `aria-disabled`,
   `-selected`, `-checked`, `-busy`, `-expanded`, `-value*`, `-live`, `-hidden`, the hint as `aria-description`);
@@ -1095,7 +1097,7 @@ scroll events postpone it, and the browser's `scrollend` cancels it.
   `{ type: "reply", id, ok, value?, error? }` (`EventPayload::Json`, `nsh_event`): `ok: false` with the error's message when the page has no host, `call` throws or
   its promise rejects, or the result is not JSON, since the app's call waits until it is answered; the app's call
   rejects with that message and `code` `ERR_NSH_HOST_ERROR` (`nsh_core::host_channel::host_error`). A page without a
-  host sets the environment's `host` to `false`, so the core rejects the calls first, with
+  host sets the environment's `host` to `false`, so the core rejects the calls it checked (name, then grant) with
   `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. A `host.post` without the native SDK channel (`browser/host.js`) goes to the
   platform module's `post` (`nsh-core` `runtime/host.rs`), which checks the name and grant in Rust and throws
   synchronously, then the core sends `Command::HostPost` (command `hostPost`) where the environment has a host;

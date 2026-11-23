@@ -3867,27 +3867,14 @@ impl<M: TextEngine> Core<M> {
                 }
                 // Checked before the grants: a host may put the name in a
                 // path or a URL, where `user.x/../admin` leaves `user.*`.
-                Command::HostCall { id: call, name, .. }
-                    if !crate::access::valid_host_name(name) =>
-                {
-                    let error = crate::host_channel::invalid_name(name);
-                    self.deny(error.message().to_owned());
-                    self.answer_host(*call, Err(error));
-                    continue;
-                }
-                Command::HostCall { id: call, name, .. } if !self.access.allows_host(name) => {
-                    let error = crate::host_channel::not_granted(name);
-                    self.deny(error.message().to_owned());
-                    self.answer_host(*call, Err(error));
-                    continue;
-                }
-                Command::HostPost { name, .. }
-                    if crate::host_channel::check_call(&self.access, name).is_err() =>
-                {
-                    let error = crate::host_channel::check_call(&self.access, name)
-                        .expect_err("a refused name");
-                    self.deny(error.message().to_owned());
-                    continue;
+                Command::HostCall { name, .. } | Command::HostPost { name, .. } => {
+                    if let Some(error) = crate::host_channel::refusal(&self.access, name) {
+                        self.deny(error.to_string());
+                        if let Command::HostCall { id: call, .. } = command {
+                            self.answer_host(call, Err(error));
+                        }
+                        continue;
+                    }
                 }
                 Command::SendInput(_) if !self.access.allows_web_input() => {
                     self.deny("trusted web view input is not granted: add `\"input\": true` to capabilities.webview in nsh.json".into());
