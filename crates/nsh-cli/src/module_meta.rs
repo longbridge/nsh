@@ -15,6 +15,9 @@
 //! [package.metadata.nsh.features.camera.ios.infoPlistStrings.zh-Hans]
 //! NSCameraUsageDescription = "..."
 //!
+//! [package.metadata.nsh.features.camera.macos.infoPlistStrings.zh-Hans]
+//! NSCameraUsageDescription = "..."
+//!
 //! [package.metadata.nsh.features.camera.android]
 //! permissions = ["android.permission.CAMERA"]
 //! queries = ['<intent><action android:name="android.media.action.IMAGE_CAPTURE"/></intent>']
@@ -33,14 +36,16 @@
 //! naming both crates. Keys NSH sets itself are refused, naming the crate.
 //!
 //! A crate's `ios.infoPlistStrings` translates the keys the crates set in
-//! `ios.infoPlist`, as the crates word them; a translation of a key no
+//! `ios.infoPlist`, as the crates word them, and its
+//! `macos.infoPlistStrings` those of `macos.infoPlist`; a translation of a key no
 //! crate sets (its feature off) is left out with a warning. The app takes
 //! them for the languages it declares only, and none for a key it sets
 //! itself, which the crates' translations would not say
 //! ([`ModuleMeta::crate_strings`]).
 //!
 //! `ios.infoPlist`, `ios.infoPlistStrings`, `ios.entitlements`,
-//! `macos.infoPlist`, `macos.entitlements` (named as in `nsh.json`),
+//! `macos.infoPlist`, `macos.infoPlistStrings`, `macos.entitlements` (named
+//! as in `nsh.json`),
 //! `ios.frameworks` (relative to the directory of the crate's
 //! `Cargo.toml`) and `ios.linkerFlags` ([`crate::ios_frameworks`]),
 //! `android.permissions` (checked and spelled out as `nsh.json`'s are),
@@ -90,6 +95,9 @@ pub(crate) struct ModuleMeta {
     pub(crate) macos_info: Map<String, Value>,
     /// Entitlements of macOS packages.
     pub(crate) macos_entitlements: Map<String, Value>,
+    /// `Info.plist` strings of macOS packages in other languages, as
+    /// [`Self::ios_strings`] (`nsh.json`'s `macos.infoPlistStrings`).
+    pub(crate) macos_strings: Map<String, Value>,
     /// Android permissions (`<uses-permission>`).
     pub(crate) android_permissions: Vec<String>,
     /// Elements of the manifest's `<queries>`.
@@ -119,9 +127,10 @@ pub(crate) enum Platform {
 #[derive(Debug, Clone, PartialEq)]
 struct Clash {
     /// `ios.infoPlist`, `ios.infoPlistStrings`, `ios.entitlements`,
-    /// `macos.infoPlist` or `macos.entitlements`, the same in `nsh.json`.
+    /// `macos.infoPlist`, `macos.infoPlistStrings` or `macos.entitlements`,
+    /// the same in `nsh.json`.
     kind: &'static str,
-    /// The key; a language's, `<lang>.<key>`, in `ios.infoPlistStrings`.
+    /// The key; a language's, `<lang>.<key>`, in `infoPlistStrings`.
     key: String,
     /// The crate whose value is kept, and the one that disagrees.
     first: String,
@@ -135,7 +144,10 @@ impl Clash {
             (
                 Platform::Ios,
                 "ios.infoPlist" | "ios.infoPlistStrings" | "ios.entitlements"
-            ) | (Platform::Macos, "macos.infoPlist" | "macos.entitlements")
+            ) | (
+                Platform::Macos,
+                "macos.infoPlist" | "macos.infoPlistStrings" | "macos.entitlements"
+            )
         )
     }
 }
@@ -152,9 +164,11 @@ impl std::fmt::Display for Clash {
 
 impl ModuleMeta {
     /// What the packages of the generated workspace `manifest` declare, as
-    /// Cargo resolves it for `triple` (`None`: every platform).
-    pub(crate) fn of_workspace(manifest: &Path, triple: Option<&str>) -> anyhow::Result<Self> {
-        let (meta, warnings) = Self::read_workspace(manifest, triple)?;
+    /// Cargo resolves it for `triples` together (none: every platform): a
+    /// universal macOS package links the crates of both its architectures,
+    /// so one reading of both finds what two of them disagree on.
+    pub(crate) fn of_workspace(manifest: &Path, triples: &[&str]) -> anyhow::Result<Self> {
+        let (meta, warnings) = Self::read_workspace(manifest, triples)?;
         for warning in warnings {
             ui::warn(warning);
         }
@@ -165,12 +179,12 @@ impl ModuleMeta {
     /// returned rather than shown.
     pub(crate) fn read_workspace(
         manifest: &Path,
-        triple: Option<&str>,
+        triples: &[&str],
     ) -> anyhow::Result<(Self, Vec<String>)> {
         let mut cmd = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
         cmd.args(["metadata", "--format-version", "1", "--manifest-path"])
             .arg(manifest);
-        if let Some(triple) = triple {
+        for triple in triples {
             cmd.args(["--filter-platform", triple]);
         }
         let out = cmd
@@ -303,6 +317,7 @@ impl ModuleMeta {
                 (ApplePlatform::Ios, "infoPlistStrings") => "ios.infoPlistStrings",
                 (ApplePlatform::Ios, "entitlements") => "ios.entitlements",
                 (ApplePlatform::Macos, "infoPlist") => "macos.infoPlist",
+                (ApplePlatform::Macos, "infoPlistStrings") => "macos.infoPlistStrings",
                 (ApplePlatform::Macos, "entitlements") => "macos.entitlements",
                 _ => {
                     warnings.push(format!(
@@ -315,7 +330,7 @@ impl ModuleMeta {
                 .as_object()
                 .with_context(|| format!("{name}: {at} `{kind}` is a table"))?;
             match kind {
-                "ios.infoPlistStrings" => {
+                "ios.infoPlistStrings" | "macos.infoPlistStrings" => {
                     for (language, texts) in entries {
                         crate::apple::check_language(language)
                             .map_err(|why| anyhow::anyhow!("{name}: {at} `{kind}`: {why}"))?;
@@ -323,7 +338,7 @@ impl ModuleMeta {
                             format!("{name}: {at} `{kind}.{language}` is a table")
                         })?;
                         for (entry, text) in texts {
-                            if !crate::apple::is_translatable_ios_info(entry) {
+                            if !crate::apple::is_translatable_info(platform, entry) {
                                 bail!(
                                     "{name}: {at} `{kind}.{language}.{entry}` is a key NSH sets itself"
                                 );
@@ -332,8 +347,11 @@ impl ModuleMeta {
                                 bail!("{name}: {at} `{kind}.{language}.{entry}` is a string");
                             }
                         }
-                        let target = self
-                            .ios_strings
+                        let strings = match platform {
+                            ApplePlatform::Ios => &mut self.ios_strings,
+                            ApplePlatform::Macos => &mut self.macos_strings,
+                        };
+                        let target = strings
                             .entry(language.clone())
                             .or_insert_with(|| Value::Object(Map::new()))
                             .as_object_mut()
@@ -390,55 +408,79 @@ impl ModuleMeta {
     }
 
     /// Leaves out, with a warning, the translations of keys no crate sets
-    /// in `ios.infoPlist` as Cargo resolved the app: their translations are
-    /// of the crates' wording. A translation outside the feature that sets
-    /// its key is no error, so an app without the feature, or an Android
-    /// package, is not stopped by it.
+    /// in `ios.infoPlist` (`macos.infoPlist` for macOS's) as Cargo
+    /// resolved the app: their translations are of the crates' wording. A
+    /// translation outside the feature that sets its key is no error, so an
+    /// app without the feature, or an Android package, is not stopped by
+    /// it.
     fn drop_untranslatable(&mut self, warnings: &mut Vec<String>) {
-        for (language, texts) in &mut self.ios_strings {
-            let Some(texts) = texts.as_object_mut() else {
-                continue;
-            };
-            texts.retain(|key, _| {
-                if self.ios_info.contains_key(key) {
-                    return true;
-                }
-                let owner = self
-                    .owners
-                    .get(&format!("ios.infoPlistStrings.{language}.{key}"))
-                    .map_or("a crate", String::as_str);
-                warnings.push(format!(
-                    "{owner}: `ios.infoPlistStrings.{language}.{key}` translates a key no crate \
-                     sets in `ios.infoPlist` (with the features on): left out"
-                ));
-                self.clashes.retain(|clash| {
-                    clash.kind != "ios.infoPlistStrings" || clash.key != format!("{language}.{key}")
+        for (strings, info, section) in [
+            (&mut self.ios_strings, &self.ios_info, "ios"),
+            (&mut self.macos_strings, &self.macos_info, "macos"),
+        ] {
+            for (language, texts) in strings.iter_mut() {
+                let Some(texts) = texts.as_object_mut() else {
+                    continue;
+                };
+                texts.retain(|key, _| {
+                    if info.contains_key(key) {
+                        return true;
+                    }
+                    let owner = self
+                        .owners
+                        .get(&format!("{section}.infoPlistStrings.{language}.{key}"))
+                        .map_or("a crate", String::as_str);
+                    warnings.push(format!(
+                        "{owner}: `{section}.infoPlistStrings.{language}.{key}` translates a key \
+                         no crate sets in `{section}.infoPlist` (with the features on): left out"
+                    ));
+                    let (kind, at) = (
+                        format!("{section}.infoPlistStrings"),
+                        format!("{language}.{key}"),
+                    );
+                    self.clashes
+                        .retain(|clash| clash.kind != kind || clash.key != at);
+                    false
                 });
-                false
-            });
+            }
+            strings.retain(|_, texts| texts.as_object().is_some_and(|texts| !texts.is_empty()));
         }
-        self.ios_strings
-            .retain(|_, texts| texts.as_object().is_some_and(|texts| !texts.is_empty()));
     }
 
-    /// The crates' translations the app takes, by language: those of the
-    /// languages the app declares (its `locales`, or its own
-    /// `ios.infoPlistStrings`), so a crate never adds a language to the
-    /// app; and none of a key the app words itself in `ios.infoPlist`,
-    /// which the crates' translations of their own wording would not say.
-    pub(crate) fn crate_strings(&self, config: &AppConfig) -> Map<String, Value> {
-        let declared = |language: &str| {
-            config.localizations.iter().any(|l| l == language)
-                || config.ios.info_plist_strings.contains_key(language)
+    /// The crates' translations `platform`'s packages take, by language:
+    /// those of the languages the app declares (its `locales`, or its own
+    /// `<platform>.infoPlistStrings`), so a crate never adds a language to
+    /// the app; and none of a key the app words itself in its
+    /// `<platform>.infoPlist`, which the crates' translations of their own
+    /// wording would not say.
+    pub(crate) fn crate_strings(
+        &self,
+        config: &AppConfig,
+        platform: ApplePlatform,
+    ) -> Map<String, Value> {
+        let (crates, info, own) = match platform {
+            ApplePlatform::Ios => (
+                &self.ios_strings,
+                &config.ios.info_plist,
+                &config.ios.info_plist_strings,
+            ),
+            ApplePlatform::Macos => (
+                &self.macos_strings,
+                &config.macos.info_plist,
+                &config.macos.info_plist_strings,
+            ),
         };
-        self.ios_strings
+        let declared = |language: &str| {
+            config.localizations.iter().any(|l| l == language) || own.contains_key(language)
+        };
+        crates
             .iter()
             .filter(|(language, _)| declared(language))
             .filter_map(|(language, texts)| {
                 let texts: Map<String, Value> = texts
                     .as_object()?
                     .iter()
-                    .filter(|(key, _)| !config.ios.info_plist.contains_key(*key))
+                    .filter(|(key, _)| !info.contains_key(*key))
                     .map(|(key, text)| (key.clone(), text.clone()))
                     .collect();
                 (!texts.is_empty()).then(|| (language.clone(), Value::Object(texts)))
@@ -537,15 +579,26 @@ impl ModuleMeta {
         for clash in self.clashes.iter().filter(|c| c.applies_to(platform)) {
             let settled = match clash.kind {
                 "ios.infoPlist" => config.ios.info_plist.contains_key(&clash.key),
-                "ios.infoPlistStrings" => {
+                "ios.infoPlistStrings" | "macos.infoPlistStrings" => {
+                    let (apple, info, own) = if clash.kind.starts_with("macos.") {
+                        (
+                            ApplePlatform::Macos,
+                            &config.macos.info_plist,
+                            &config.macos.info_plist_strings,
+                        )
+                    } else {
+                        (
+                            ApplePlatform::Ios,
+                            &config.ios.info_plist,
+                            &config.ios.info_plist_strings,
+                        )
+                    };
                     let (language, key) = clash.key.split_once('.').unwrap_or_default();
                     // A language the app does not declare and a key
                     // the app words itself take none of the crates'.
-                    !self.crate_strings(config).contains_key(language)
-                        || config.ios.info_plist.contains_key(key)
-                        || config
-                            .ios
-                            .info_plist_strings
+                    !self.crate_strings(config, apple).contains_key(language)
+                        || info.contains_key(key)
+                        || own
                             .get(language)
                             .and_then(Value::as_object)
                             .is_some_and(|texts| texts.contains_key(key))
@@ -559,8 +612,10 @@ impl ModuleMeta {
             }
         }
         // Before the crates' keys join the app's ([`Self::crate_strings`]).
-        let strings = self.crate_strings(config);
-        add_strings(&mut config.ios.info_plist_strings, &strings);
+        let ios_strings = self.crate_strings(config, ApplePlatform::Ios);
+        let macos_strings = self.crate_strings(config, ApplePlatform::Macos);
+        add_strings(&mut config.ios.info_plist_strings, &ios_strings);
+        add_strings(&mut config.macos.info_plist_strings, &macos_strings);
         under(&mut config.ios.info_plist, &self.ios_info);
         under(&mut config.ios.entitlements, &self.ios_entitlements);
         under(&mut config.macos.info_plist, &self.macos_info);
@@ -611,7 +666,7 @@ pub(crate) fn for_dev_host(triple: &str, platform: Platform) -> ModuleMeta {
     let Some(app) = crate::rust_app::current() else {
         return ModuleMeta::default();
     };
-    let meta = ModuleMeta::of_workspace(&app.workspace().join("Cargo.toml"), Some(triple))
+    let meta = ModuleMeta::of_workspace(&app.workspace().join("Cargo.toml"), &[triple])
         .unwrap_or_else(|e| {
             ui::warn(format!(
                 "the development host leaves out what the app's crates declare: {e:#}"
@@ -630,7 +685,8 @@ pub(crate) fn for_dev_host(triple: &str, platform: Platform) -> ModuleMeta {
 }
 
 /// Adds the crates' translations (`from`, by language) to the app's
-/// (`app`, `ios.infoPlistStrings`): the app's text wins.
+/// (`app`, `ios.infoPlistStrings` or `macos.infoPlistStrings`): the app's
+/// text wins.
 pub(crate) fn add_strings(app: &mut Map<String, Value>, from: &Map<String, Value>) {
     for (language, texts) in from {
         // Another form is refused when `nsh.json` is read.
@@ -1090,6 +1146,109 @@ mod tests {
         assert_eq!(
             settled.ios.info_plist_strings["zh-Hans"]["NSCameraUsageDescription"],
             "拍摄收据。"
+        );
+    }
+
+    /// A crate's `macos.infoPlistStrings` follows iOS's rules for macOS
+    /// packages: taken for the app's languages, the app's own text winning,
+    /// a clash the app's to settle, a key no crate sets left out; the two
+    /// platforms' translations stay apart.
+    #[test]
+    fn crates_translate_their_macos_keys() {
+        let camera = |zh: &str| {
+            json!({ "nsh": {
+                "macos": {
+                    "infoPlist": { "NSCameraUsageDescription": "The app takes photos with the camera." },
+                    "infoPlistStrings": {
+                        "zh-Hans": { "NSCameraUsageDescription": zh },
+                        "de": { "NSCameraUsageDescription": "Die App macht Fotos." },
+                    },
+                },
+                "ios": { "infoPlistStrings": { "zh-Hans": { "NSCameraUsageDescription": "iOS 的。" } } },
+            } })
+        };
+        let (meta, warnings) =
+            ModuleMeta::from_metadata(&metadata(&[("camera", camera("用相机拍照。"), &[])]))
+                .unwrap();
+        // iOS's translation is of a key no crate sets in `ios.infoPlist`.
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].starts_with("camera: `ios.infoPlistStrings.zh-Hans.NSCameraUsageDescription` translates a key no crate sets in `ios.infoPlist`"),
+            "{warnings:?}"
+        );
+        assert!(meta.ios_strings.is_empty());
+        assert_eq!(
+            meta.macos_strings["zh-Hans"]["NSCameraUsageDescription"],
+            "用相机拍照。"
+        );
+        let chinese = || {
+            let mut config = AppConfig::default();
+            config.localizations = vec!["zh-Hans".into()];
+            config
+        };
+        let mut config = chinese();
+        meta.apply(&mut config, Platform::Macos).unwrap();
+        assert_eq!(
+            config.macos.info_plist_strings["zh-Hans"],
+            json!({ "NSCameraUsageDescription": "用相机拍照。" })
+        );
+        // `de` is no language of the app's; iOS's take none of macOS's.
+        assert!(!config.macos.info_plist_strings.contains_key("de"));
+        assert!(config.ios.info_plist_strings.is_empty());
+        // The app words the key itself on macOS: no crate translation.
+        let mut own = chinese();
+        own.macos.info_plist.insert(
+            "NSCameraUsageDescription".into(),
+            json!("Photos of receipts."),
+        );
+        meta.apply(&mut own, Platform::Macos).unwrap();
+        assert!(own.macos.info_plist_strings.is_empty());
+
+        // Two crates translate differently: the app's macOS translation
+        // settles it, an iOS one does not; an iOS package is not stopped.
+        let (meta, _) = ModuleMeta::from_metadata(&metadata(&[
+            ("camera", camera("用相机拍照。"), &[]),
+            ("scanner", camera("扫描二维码。"), &[]),
+        ]))
+        .unwrap();
+        meta.apply(&mut chinese(), Platform::Ios).unwrap();
+        let mut ios_only = chinese();
+        ios_only.ios.info_plist_strings.insert(
+            "zh-Hans".into(),
+            json!({ "NSCameraUsageDescription": "拍摄收据。" }),
+        );
+        let error = meta
+            .apply(&mut ios_only, Platform::Macos)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains(
+                "camera and scanner set `zh-Hans.NSCameraUsageDescription` (macos.infoPlistStrings)"
+            ),
+            "{error}"
+        );
+        let mut settled = chinese();
+        settled.macos.info_plist_strings.insert(
+            "zh-Hans".into(),
+            json!({ "NSCameraUsageDescription": "拍摄收据。" }),
+        );
+        meta.apply(&mut settled, Platform::Macos).unwrap();
+        assert_eq!(
+            settled.macos.info_plist_strings["zh-Hans"]["NSCameraUsageDescription"],
+            "拍摄收据。"
+        );
+
+        // A key NSH sets on macOS is not a crate's to translate.
+        let error = ModuleMeta::from_metadata(&metadata(&[(
+            "x",
+            json!({ "nsh": { "macos": { "infoPlistStrings": { "ja": { "NSPrincipalClass": "x" } } } } }),
+            &[],
+        )]))
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.contains("`macos.infoPlistStrings.ja.NSPrincipalClass` is a key NSH sets itself"),
+            "{error}"
         );
     }
 
