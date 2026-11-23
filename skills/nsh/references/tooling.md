@@ -82,7 +82,7 @@ nsh dev --server-only            # TSX and mixed: serve hosts you start yourself
 - **Rust edits:** rebuild and restart; state starts afresh. Build errors print in the terminal, and the next save that compiles runs.
 - **TSX edits:** a patch of changed modules, about 120 ms. Edited components render again; the others keep their state. Top-level `signal(..)` and `createNavStack(..)` keep their values while the initializer is unchanged.
 - **Full reload instead:** first import of a new NSH module, a `capabilities` change, a host on an older build, or a patch that cannot apply.
-- **`--release`:** minified, no hot updates. Hardening stays off for anything loaded from a dev server.
+- **`--release`:** minified, no hot updates. Hardening stays off for anything loaded from a dev server. On `nsh run` and `nsh test`, an app with Rust crates also builds its development hosts (and `nsh test`'s headless runner and `cargo test`) in release mode (`--release`).
 - **Devices:** the server prints LAN URLs. A device needs the port reachable. Android uses `adb reverse`, which `nsh run` sets up.
 
 **Reading the terminal:** `✓` done, `→` where to connect, `•` what a device did, `warn` and `error` problems, plain lines the app's own output.

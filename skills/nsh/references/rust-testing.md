@@ -207,6 +207,7 @@ test("counts taps", async () => {
 
 ```sh
 nsh test                       # cargo test for each crate, then every test file
+nsh test --release             # release cargo test, optimized runner/hosts, minified bundles
 nsh test --filter "counts"     # by name
 nsh test nsh.json --trace      # headless: what the root mounts, and the time of each commit
 ```
