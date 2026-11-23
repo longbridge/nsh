@@ -411,6 +411,35 @@ crates translating a key differently are settled by the app as above, in `ios.in
 
 Develop it beside an app with `nsh add --path ../my-gauge`, which reads the directory as it is. Publish it as any crate (`cargo publish`), with the keyword `nshm` so that it can be found on [crates.io](https://crates.io/keywords/nshm), or push it to Git and tag its versions.
 
+### Wrapping a native SDK
+
+An nshm that wraps an Apple SDK calls it from Rust under `#[cfg(target_os = "ios")]` or `#[cfg(target_os = "macos")]`. System frameworks used through the `objc2` crates need nothing more. A vendor's prebuilt library (an `.xcframework` or `.a`) is linked from the nshm's own `build.rs`: Cargo passes the `rustc-link-lib` and `rustc-link-search` of every dependency to the app's executable, so the app lists nothing and NSH has no per-platform SDK settings.
+
+```rust
+// build.rs
+fn main() {
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("ios") {
+        return;
+    }
+    // The simulator's and Mac Catalyst's (`nsh run --target catalyst`) are iOS too.
+    let slice = match std::env::var("CARGO_CFG_TARGET_ABI").as_deref() {
+        Ok("sim") => "ios-arm64_x86_64-simulator",
+        Ok("macabi") => "ios-arm64_x86_64-maccatalyst",
+        _ => "ios-arm64",
+    };
+    let root = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    println!("cargo:rustc-link-search=native={root}/vendor/Sdk.xcframework/{slice}");
+    // +whole-archive is -force_load: it keeps Objective-C categories, like -ObjC.
+    println!("cargo:rustc-link-lib=static:+whole-archive=Sdk");
+    println!("cargo:rustc-link-lib=framework=AdSupport");
+}
+```
+
+- Use `rustc-link-lib`, not `rustc-link-arg`: link arguments only apply to the crate's own targets.
+- Put a static library's privacy manifest entries in the app's `ios.privacyManifest`.
+- NSH does not embed dynamic frameworks; prefer the SDK's static build.
+- On Linux and Windows the same `build.rs` links the SDK (`.a` and `.so` on Linux, `.lib` on Windows). NSH does not carry shared libraries (`.so`, `.dll`) into the package either; prefer the SDK's static build.
+
 ### A TSX nshm
 
 A TSX nshm is a Git repository whose `nsh.json` describes it: its package name and version, the NSH versions it works with, and what it exports, each specifier with its TSX entry file:

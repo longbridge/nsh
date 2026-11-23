@@ -209,7 +209,8 @@ On iOS (and iPadOS), a view with `onFileDrop` takes the files of a drag, such as
 Files, Safari or the app's own web views. The closest view
 that listens takes them, as on desktops. A drag's items carry no file URLs, only data in types that are read
 when they are dropped, so `onFileDragEnter` gives `uris: []` there, and `onFileDrop` gives the `file:` URLs of copies
-in the app's temporary directory (`pagePosition` too), in the drag's order. An item that offers only text or a link
+in the app's temporary directory (`pagePosition` too), in the drag's order. NSH leaves the copies there, where the
+system removes them in time: move or upload what the app keeps. An item that offers only text or a link
 is no file, and is not offered. A text input inside the view keeps what it accepts: UIKit's text drop takes text and
 links, so an image that also carries its link (from a web page) goes into the input as its link.
 

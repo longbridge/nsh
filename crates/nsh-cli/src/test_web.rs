@@ -43,13 +43,13 @@ const SCROLL_STEP: f32 = 20.0;
 
 /// Starts the apps tests open in pages of `browser` (`--browser`), else of
 /// the Chrome, Edge or Chromium found on this machine.
-pub(crate) fn starter(browser: Option<&Path>) -> anyhow::Result<StartHost> {
+pub(crate) fn starter(browser: Option<&Path>, release: bool) -> anyhow::Result<StartHost> {
     let exe = cdp::find(browser)?;
     // Built (in a checkout) or found once, before the first test.
     let runtime = crate::runtime::test_web()?;
     let host = Arc::new(crate::web::dev_host(&runtime, false)?);
     Ok(Arc::new(move |entry: &Path, options: &HostOptions| {
-        start(&exe, &host, entry, options).map(|h| Box::new(h) as Box<dyn Host>)
+        start(&exe, &host, entry, options, release).map(|h| Box::new(h) as Box<dyn Host>)
     }))
 }
 
@@ -96,8 +96,9 @@ fn start(
     host: &(String, Vec<(String, Vec<u8>)>),
     entry: &Path,
     options: &HostOptions,
+    release: bool,
 ) -> Result<WebHost, String> {
-    let server = Arc::new(crate::test_host::serve(entry, options)?);
+    let server = Arc::new(crate::test_host::serve(entry, options, release)?);
     let (page, files) =
         crate::web::with_page_host(host.clone(), entry).map_err(|e| format!("{e:#}"))?;
     server.serve_web(page, files);

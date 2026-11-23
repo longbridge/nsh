@@ -391,6 +391,15 @@ fn a_press_fails_on_a_view_another_covers() {
 }
 
 #[test]
+fn comments_beside_flow_function_children_keep_their_accessors() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/flow-comments");
+    let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 3);
+}
+
+#[test]
 fn a_press_reaches_a_header_button_above_a_large_title_page_s_content() {
     let run = TestRun {
         ui_sets: vec![nsh_base::registry()],
