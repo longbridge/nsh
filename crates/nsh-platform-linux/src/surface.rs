@@ -338,6 +338,7 @@ impl Surface {
         }
         let fps = Rc::new(crate::fps::Fps::new());
         crate::fps::install(self.root.upcast_ref(), &fps);
+        crate::fps::start_logging(&fps);
         if let Some(overlay) = self.fps_overlay.borrow().upgrade() {
             crate::fps::show(&overlay, &fps);
         }
