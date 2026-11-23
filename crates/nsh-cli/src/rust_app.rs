@@ -1091,7 +1091,7 @@ pub(crate) fn runner_only(entry: &Path) -> anyhow::Result<RustApp> {
     )?;
     let watched = watched(&[], nsh.source());
     // A TSX app packaged from flags alone has no `nsh.json`: the runtime's.
-    let minimums = match fs::read_to_string(dir.join("nsh.json")) {
+    let minimums = match nsh_bundler::app_dir::read(&dir.join("nsh.json")) {
         Ok(text) => {
             AppleMinimums::of(&serde_json::from_str(&text).context("nsh.json is not JSON")?)?
         }
@@ -1123,7 +1123,7 @@ pub(crate) fn of(entry: &Path, unify: bool) -> anyhow::Result<Option<RustApp>> {
         .with_context(|| format!("entry not found: {}", entry.display()))?;
     // The app's directory: its `nsh.json`'s (`entry` may be below it).
     let dir = &nsh_bundler::app_dir::app_dir_of(&entry);
-    let Ok(text) = fs::read_to_string(dir.join("nsh.json")) else {
+    let Ok(text) = nsh_bundler::app_dir::read(&dir.join("nsh.json")) else {
         return Ok(None);
     };
     let config: serde_json::Value = serde_json::from_str(&text).context("nsh.json is not JSON")?;
@@ -1679,7 +1679,7 @@ fn root_config(
         }
     };
     if let Some(theme) = &theme {
-        let json = fs::read_to_string(theme)?;
+        let json = nsh_bundler::app_dir::read(theme)?;
         let (_, ignored) = nsh_base::Theme::from_json_lenient(&json)
             .map_err(|e| anyhow::anyhow!("nsh.json: theme: {e}"))?;
         for what in ignored {

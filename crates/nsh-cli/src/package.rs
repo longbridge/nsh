@@ -926,7 +926,7 @@ impl AppConfig {
 /// both, before a build fails on what the other version lacks.
 pub(crate) fn check_nsh_version(entry: &Path) -> anyhow::Result<()> {
     let path = nsh_bundler::app_dir::config_dir_of(entry).join("nsh.json");
-    let Ok(text) = fs::read_to_string(&path) else {
+    let Ok(text) = nsh_bundler::app_dir::read(&path) else {
         return Ok(());
     };
     // A file that does not read is reported by the command itself.
@@ -967,7 +967,7 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
     let config_dir = nsh_bundler::app_dir::config_dir_of(entry);
     let dir = config_dir.as_path();
     let path = dir.join("nsh.json");
-    let Ok(text) = fs::read_to_string(&path) else {
+    let Ok(text) = nsh_bundler::app_dir::read(&path) else {
         return Ok(AppConfig {
             localizations: app_localizations(dir, None),
             ..AppConfig::default()
