@@ -6,8 +6,8 @@
 //! action emits `select` with the app's id.
 //!
 //! The button is what VoiceOver reaches inside the element (named by
-//! `accessibilityLabel`): the app's content under it is drawn, not read
-//! twice.
+//! `accessibilityLabel`, with `accessibilityHint` describing its action):
+//! the app's content under it is drawn, not read twice.
 
 use std::{cell::Cell, ptr::NonNull, rc::Rc};
 
@@ -359,6 +359,12 @@ impl NativeComponent for SystemMenuButton {
                 // property, which every NSObject has.
                 let () =
                     unsafe { msg_send![&*self.button, setAccessibilityLabel: label.as_deref()] };
+            }
+            "accessibilityHint" => {
+                let hint = value.and_then(JsonValue::as_str).map(NSString::from_str);
+                // SAFETY: `accessibilityHint` is UIAccessibility's NSString
+                // property, which every NSObject has. Nil clears the hint.
+                let () = unsafe { msg_send![&*self.button, setAccessibilityHint: hint.as_deref()] };
             }
             _ => {}
         }

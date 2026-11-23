@@ -596,6 +596,24 @@ pub fn specs() -> Vec<Arc<ComponentSpec>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn press_controls_declare_optional_accessibility_hints() {
+        let declarations = nsh_core::element::declarations(&super::registry(), &[]);
+        for name in ["Button", "Link", "Switch", "Checkbox", "MenuButton"] {
+            let props = declarations
+                .split_once(&format!("export interface {name}Props"))
+                .unwrap()
+                .1
+                .split_once("\n}")
+                .unwrap()
+                .0;
+            assert!(
+                props.contains("accessibilityHint?: string | null;"),
+                "{props}"
+            );
+        }
+    }
+
     /// The exports are named after the types (`std::any::type_name`): a
     /// renamed type, or a compiler that formats type names differently,
     /// changes what apps import.
