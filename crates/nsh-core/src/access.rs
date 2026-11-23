@@ -677,6 +677,10 @@ pub struct Capabilities {
     /// The URLs the app may open outside it (`openUrl` of `nsh/device`);
     /// `None`: none.
     pub open_url: Option<OpenUrlGrant>,
+    /// The device's location the app may read (`Location` of `nsh`);
+    /// `None`: not at all, also for an app without a declaration
+    /// ([`Capabilities::all`]).
+    pub location: Option<LocationGrants>,
     /// The windows the app may open and what they may do (`nsh/desktop`'s
     /// `Window`); `None`: no window of the app's own. The first window needs
     /// the grant too: no window is privileged.
@@ -729,6 +733,17 @@ impl OpenUrlGrant {
     pub fn allows(&self, scheme: &str) -> bool {
         self.schemes.is_empty() || self.schemes.iter().any(|s| s == scheme)
     }
+}
+
+/// The device's location an app may read (`capabilities.location`).
+/// Background location — the position while the app is not in front — is
+/// what App Store review and Play Console's sensitive-permission declaration
+/// ask an app to justify, so it is granted only when declared.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct LocationGrants {
+    /// Background location: reporting while the app is not in front.
+    pub background: bool,
 }
 
 /// The parts of a URL the checks look at.
@@ -1162,7 +1177,7 @@ impl Capabilities {
     /// `dropped`: lenient, recording what unknown keys dropped; `None`:
     /// strict.
     fn parse(value: &Value, mut dropped: Option<&mut Vec<String>>) -> Result<Self, String> {
-        const KNOWN: [&str; 16] = [
+        const KNOWN: [&str; 17] = [
             "windows",
             "network",
             "webview",
@@ -1176,6 +1191,7 @@ impl Capabilities {
             "application",
             "homeDir",
             "openUrl",
+            "location",
             "process",
             "fs",
             "host",
@@ -1340,6 +1356,35 @@ impl Capabilities {
             caps.home_dir = home_dir
                 .as_bool()
                 .ok_or("capabilities.homeDir must be a boolean")?;
+        }
+        if let Some(location) = obj.get("location") {
+            match location {
+                Value::Bool(granted) => {
+                    caps.location = granted.then(LocationGrants::default);
+                }
+                Value::Object(grant) => {
+                    if check(
+                        grant,
+                        "capabilities.location",
+                        &["background"],
+                        "capabilities.location",
+                    )? {
+                        let background = match grant.get("background") {
+                            Some(background) => background
+                                .as_bool()
+                                .ok_or("capabilities.location.background must be a boolean")?,
+                            None => false,
+                        };
+                        caps.location = Some(LocationGrants { background });
+                    }
+                }
+                _ => {
+                    return Err(
+                        "capabilities.location must be a boolean or an object of `background`"
+                            .into(),
+                    );
+                }
+            }
         }
         if let Some(open_url) = obj.get("openUrl") {
             match open_url {
@@ -1605,6 +1650,14 @@ impl Capabilities {
         if !self.host.is_empty() {
             obj.insert("host".into(), self.host.clone().into());
         }
+        obj.insert(
+            "location".into(),
+            match &self.location {
+                None => false.into(),
+                Some(grant) if !grant.background => true.into(),
+                Some(_) => serde_json::json!({ "background": true }),
+            },
+        );
         obj.insert(
             "openUrl".into(),
             match &self.open_url {
@@ -2476,6 +2529,18 @@ impl Access {
     /// Whether the app may show the system's picker (`nsh/picker`).
     pub fn allows_picker(&self) -> bool {
         self.each(|c| c.picker)
+    }
+
+    /// Whether the app may read the device's location (`Location` of
+    /// `nsh`), when in use.
+    pub fn allows_location(&self) -> bool {
+        self.each(|c| c.location.is_some())
+    }
+
+    /// Whether the app may read the location while it is not in front
+    /// (`"location": { "background": true }`).
+    pub fn allows_location_background(&self) -> bool {
+        self.each(|c| c.location.is_some_and(|grant| grant.background))
     }
 
     /// Whether the app may recognize the user's speech (`Speech` of
@@ -4450,5 +4515,73 @@ mod tests {
             let c = caps(serde_json::json!({ "openUrl": json }));
             assert_eq!(c.to_json()["openUrl"], json);
         }
+    }
+}
+
+#[cfg(test)]
+mod location_tests {
+    use super::*;
+
+    fn caps(json: &str) -> Capabilities {
+        Capabilities::from_json(&serde_json::from_str(json).unwrap()).unwrap()
+    }
+
+    fn declared(json: &str) -> Access {
+        Access {
+            declared: caps(json),
+            granted: None,
+        }
+    }
+
+    #[test]
+    fn location_is_foreground_or_background_by_declaration() {
+        assert!(!declared("{}").allows_location());
+        assert!(!declared("{}").allows_location_background());
+
+        let foreground = declared(r#"{ "location": true }"#);
+        assert!(foreground.allows_location());
+        assert!(!foreground.allows_location_background());
+
+        let background = declared(r#"{ "location": { "background": true } }"#);
+        assert!(background.allows_location());
+        assert!(background.allows_location_background());
+
+        assert!(!declared(r#"{ "location": false }"#).allows_location());
+        assert!(!declared(r#"{ "location": {} }"#).allows_location_background());
+    }
+
+    #[test]
+    fn location_is_never_granted_without_a_declaration() {
+        // A standalone app keeps every other capability it always had.
+        assert!(Capabilities::all().location.is_none());
+        assert!(Access::default().allows_share());
+        assert!(!Access::default().allows_location());
+    }
+
+    #[test]
+    fn location_round_trips_in_one_form() {
+        for (json, written) in [
+            (r#"{ "location": true }"#, serde_json::json!(true)),
+            (
+                r#"{ "location": { "background": true } }"#,
+                serde_json::json!({ "background": true }),
+            ),
+            ("{}", serde_json::json!(false)),
+        ] {
+            let capabilities = caps(json);
+            assert_eq!(capabilities.to_json()["location"], written, "{json}");
+            let again = Capabilities::from_json(&capabilities.to_json()).unwrap();
+            assert_eq!(again, capabilities, "{json}");
+        }
+    }
+
+    #[test]
+    fn an_unknown_key_inside_location_is_an_error() {
+        assert!(
+            Capabilities::from_json(&serde_json::json!({
+                "location": { "background": true, "always": true }
+            }))
+            .is_err()
+        );
     }
 }
