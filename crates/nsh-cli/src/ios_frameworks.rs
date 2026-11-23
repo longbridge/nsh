@@ -17,6 +17,14 @@
 //! static library's code is the app's, and so is what its privacy
 //! manifest declares: packages add it to the app's own
 //! ([`add_static_privacy`]).
+//!
+//! An entry may be for some targets only (`targets`): an SDK without a
+//! Mac Catalyst library is linked for devices and the simulator, and
+//! another entry of the same name may serve Catalyst. An entry may be
+//! `optional`: an SDK the app fetches before some builds only (it is not
+//! in the repository) is left out, with a warning, of the builds it is
+//! not there for. Both are settled per build ([`Framework::for_target`]),
+//! before `cargo build`, which links what this module resolved.
 
 use std::{
     fs,
@@ -60,7 +68,34 @@ fn main() {
 }
 "#;
 
-/// One of `ios.frameworks`: a path, or `{ "path": .., "forceLoad": true }`.
+/// An iOS target an entry of `ios.frameworks` is linked for, named as
+/// `nsh package --target` and `nsh run --target` name them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub(crate) enum Target {
+    /// iOS devices.
+    #[serde(rename = "ios")]
+    Ios,
+    /// The iOS simulator.
+    #[serde(rename = "ios-simulator")]
+    IosSimulator,
+    /// Mac Catalyst.
+    #[serde(rename = "catalyst")]
+    Catalyst,
+}
+
+impl Target {
+    /// The target of the iOS `triple`.
+    fn of(triple: &str) -> anyhow::Result<Target> {
+        Ok(match xcframework_target(triple)?.0 {
+            None => Target::Ios,
+            Some("simulator") => Target::IosSimulator,
+            Some(_) => Target::Catalyst,
+        })
+    }
+}
+
+/// One of `ios.frameworks`: a path, or `{ "path": .., "forceLoad": true,
+/// "targets": [..], "optional": true }`.
 /// It is read from any value, so an entry the reader cannot take is left
 /// out by [`read`] where it stands: the others keep the index the app
 /// wrote, which errors name.
@@ -75,6 +110,11 @@ pub(crate) struct Framework {
     /// those the app's code refers to: the Objective-C categories and
     /// classes an SDK only looks up at run time.
     pub(crate) force_load: bool,
+    /// The targets it is linked for; empty: every target.
+    pub(crate) targets: Vec<Target>,
+    /// A build it is not there for leaves it out, with a warning, rather
+    /// than stopping: an SDK a script fetches before some builds only.
+    pub(crate) optional: bool,
     /// Who lists it, for errors: `nsh.json `ios.frameworks[0]`` or
     /// `<crate>: [package.metadata.nsh] `ios.frameworks[0]``.
     pub(crate) listed: String,
@@ -92,6 +132,9 @@ impl From<serde_json::Value> for Framework {
             path: PathBuf,
             #[serde(default)]
             force_load: bool,
+            targets: Option<Vec<Target>>,
+            #[serde(default)]
+            optional: bool,
         }
         if let serde_json::Value::String(path) = &value {
             return Framework {
@@ -100,20 +143,31 @@ impl From<serde_json::Value> for Framework {
             };
         }
         let mut unknown = Vec::new();
+        let invalid = |why: String| Framework {
+            invalid: Some(why),
+            ..Framework::default()
+        };
         match serde_ignored::deserialize::<_, _, Entry>(&value, |key| unknown.push(key.to_string()))
         {
+            Ok(Entry {
+                targets: Some(targets),
+                ..
+            }) if targets.is_empty() => invalid(
+                "`targets` names at least one target (`ios`, `ios-simulator`, `catalyst`); \
+                 leave it out for all of them"
+                    .to_owned(),
+            ),
             Ok(entry) => Framework {
                 path: entry.path,
                 force_load: entry.force_load,
+                targets: entry.targets.unwrap_or_default(),
+                optional: entry.optional,
                 unknown,
                 ..Framework::default()
             },
-            Err(e) => Framework {
-                invalid: Some(format!(
-                    "a framework is a path or {{ \"path\", \"forceLoad\" }}: {e}"
-                )),
-                ..Framework::default()
-            },
+            Err(e) => invalid(format!(
+                "a framework is a path or {{ \"path\", \"forceLoad\", \"targets\", \"optional\" }}: {e}"
+            )),
         }
     }
 }
@@ -275,6 +329,28 @@ impl Framework {
         format!("{} ({})", self.path.display(), self.listed)
     }
 
+    /// What it links for `triple`: nothing for a target it is not for
+    /// (`targets`), nor when it is `optional` and not there; else
+    /// [`Self::library`].
+    pub(crate) fn for_target(&self, triple: &str) -> anyhow::Result<Option<Library>> {
+        if !self.is_for(triple)? || self.is_missing() {
+            return Ok(None);
+        }
+        self.library(triple).map(Some)
+    }
+
+    /// `triple` is one of its `targets`.
+    fn is_for(&self, triple: &str) -> anyhow::Result<bool> {
+        Ok(self.targets.is_empty() || self.targets.contains(&Target::of(triple)?))
+    }
+
+    /// It is `optional` and not there.
+    fn is_missing(&self) -> bool {
+        // A broken link or one that cannot be read is there: its error
+        // tells more than leaving it out would.
+        self.optional && fs::symlink_metadata(&self.path).is_err()
+    }
+
     /// What it links for `triple`: an XCFramework's library for that
     /// target, or the framework as it is.
     pub(crate) fn library(&self, triple: &str) -> anyhow::Result<Library> {
@@ -370,7 +446,8 @@ impl Framework {
             available.push(identifier);
         }
         bail!(
-            "{}: {} has no library for {} (it has {})",
+            "{}: {} has no library for {} (it has {}): name the targets it is for in the \
+             entry's `targets`",
             self.listed,
             self.path.display(),
             target_name(triple),
@@ -463,10 +540,16 @@ pub(crate) struct Link {
     pub(crate) args: Vec<String>,
     /// The libraries they link.
     pub(crate) inputs: Vec<PathBuf>,
+    /// The `optional` frameworks left out, not being there, which the
+    /// build warns of.
+    pub(crate) warnings: Vec<String>,
 }
 
 /// The link of an executable for `triple` with `frameworks` and `flags`:
-/// the libraries first, then the flags as the app wrote them.
+/// the libraries first, then the flags as the app wrote them. Frameworks
+/// that are not for `triple`, or `optional` and not there, are left out
+/// ([`Framework::for_target`]); two of one name are an error only when
+/// both are linked.
 pub(crate) fn link(
     frameworks: &[Framework],
     flags: &[String],
@@ -477,7 +560,16 @@ pub(crate) fn link(
     let mut names: Vec<(String, &Framework)> = Vec::new();
     let mut dynamic = false;
     for framework in frameworks {
-        let library = framework.library(triple)?;
+        let Some(library) = framework.for_target(triple)? else {
+            if framework.is_missing() && framework.is_for(triple)? {
+                link.warnings.push(format!(
+                    "{}: {} is not there: this build leaves it out (`optional`)",
+                    framework.listed,
+                    framework.path.display()
+                ));
+            }
+            continue;
+        };
         let name = match &library {
             Library::Archive(path) => path.file_name(),
             Library::Framework { bundle, .. } => bundle.file_name(),
@@ -584,15 +676,15 @@ fn stamp(path: &Path) -> String {
 }
 
 /// The dynamic frameworks of `frameworks` for `triple`, which a bundle
-/// carries.
+/// carries: those [`link`] linked.
 pub(crate) fn dynamic(frameworks: &[Framework], triple: &str) -> anyhow::Result<Vec<PathBuf>> {
     let mut bundles = Vec::new();
     for framework in frameworks {
-        if let Library::Framework {
+        if let Some(Library::Framework {
             bundle,
             dynamic: true,
             ..
-        } = framework.library(triple)?
+        }) = framework.for_target(triple)?
         {
             bundles.push(bundle);
         }
@@ -693,7 +785,7 @@ fn privacy_manifest(library: &Library) -> Option<PathBuf> {
 }
 
 /// Adds what the privacy manifests of the static libraries of
-/// `frameworks` for `triple` declare to the app's (`manifest`, `nsh.json`
+/// `frameworks` [`link`] linked for `triple` declare to the app's (`manifest`, `nsh.json`
 /// `ios.privacyManifest`): their code is part of the app's executable, so
 /// App Store Connect counts the APIs it calls as the app's. Tracking is
 /// the app's when any says so; domains, collected data and the reasons
@@ -705,7 +797,9 @@ pub(crate) fn add_static_privacy(
     manifest: &mut serde_json::Map<String, serde_json::Value>,
 ) -> anyhow::Result<()> {
     for framework in frameworks {
-        let library = framework.library(triple)?;
+        let Some(library) = framework.for_target(triple)? else {
+            continue;
+        };
         if matches!(library, Library::Framework { dynamic: true, .. }) {
             continue;
         }
@@ -932,6 +1026,217 @@ mod tests {
         assert_eq!(ignored.len(), 2, "{ignored:?}");
         assert!(ignored[0].starts_with("ios.frameworks[1]: a framework is a path"));
         assert_eq!(ignored[1], "unknown key `ios.frameworks[2].embed`");
+    }
+
+    /// `targets` names the targets as `nsh package` and `nsh run` do;
+    /// one the reader does not know, or none at all, leaves the entry out
+    /// of `nsh.json` and is an error in a crate.
+    #[test]
+    fn frameworks_name_their_targets_and_may_be_optional() {
+        let entries: Vec<Framework> = serde_json::from_value(serde_json::json!([
+            { "path": "Sdk.xcframework", "targets": ["ios", "ios-simulator"], "optional": true },
+            { "path": "Mac.xcframework", "targets": ["catalyst"] },
+            { "path": "Typo.xcframework", "targets": ["maccatalyst"] },
+            { "path": "None.xcframework", "targets": [] },
+        ]))
+        .unwrap();
+        let mut ignored = Vec::new();
+        let read = read(entries, Path::new("/app"), &mut ignored);
+        assert_eq!(read.len(), 2, "{ignored:?}");
+        assert_eq!(read[0].targets, [Target::Ios, Target::IosSimulator]);
+        assert!(read[0].optional);
+        assert_eq!(read[1].targets, [Target::Catalyst]);
+        assert!(!read[1].optional);
+        assert_eq!(ignored.len(), 2, "{ignored:?}");
+        assert!(ignored[0].starts_with("ios.frameworks[2]: "), "{ignored:?}");
+        assert!(ignored[0].contains("maccatalyst"), "{ignored:?}");
+        assert!(ignored[1].starts_with("ios.frameworks[3]: "), "{ignored:?}");
+        assert!(ignored[1].contains("at least one target"), "{ignored:?}");
+
+        let at = "sdk: [package.metadata.nsh] `ios.frameworks`";
+        let crate_entries = serde_json::json!([{ "path": "Sdk.xcframework", "targets": ["tv"] }]);
+        let error = of_crate(&crate_entries, Path::new("/sdk"), at, &mut Vec::new())
+            .unwrap_err()
+            .to_string();
+        assert!(error.starts_with(&format!("{at}[0]: ")), "{error}");
+    }
+
+    /// An entry limited to some targets links nothing for the others,
+    /// whether its XCFramework has a library for them or not; a missing
+    /// one names `targets` as the way out.
+    #[test]
+    fn frameworks_link_only_for_their_targets() {
+        let dir = temp("targets");
+        // An SDK without a Mac Catalyst library, as many are.
+        let sdk = xcframework(
+            &dir,
+            "Sdk",
+            &[
+                ("ios-arm64", "libSdk.a", None, archive()),
+                (
+                    "ios-arm64_x86_64-simulator",
+                    "libSdk.a",
+                    Some("simulator"),
+                    archive(),
+                ),
+            ],
+        );
+        let error = link(&[listed(sdk.clone())], &[], "aarch64-apple-ios-macabi")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("`targets`"), "{error}");
+
+        let mobile = Framework {
+            targets: vec![Target::Ios, Target::IosSimulator],
+            ..listed(sdk.clone())
+        };
+        let catalyst = link(
+            std::slice::from_ref(&mobile),
+            &["-ObjC".to_owned()],
+            "aarch64-apple-ios-macabi",
+        )
+        .unwrap();
+        assert_eq!(catalyst.args, ["-ObjC"]);
+        assert!(catalyst.inputs.is_empty());
+        assert!(catalyst.warnings.is_empty(), "{:?}", catalyst.warnings);
+        for (triple, slice) in [
+            ("aarch64-apple-ios", "ios-arm64"),
+            ("aarch64-apple-ios-sim", "ios-arm64_x86_64-simulator"),
+            ("x86_64-apple-ios", "ios-arm64_x86_64-simulator"),
+        ] {
+            let linked = link(std::slice::from_ref(&mobile), &[], triple).unwrap();
+            assert_eq!(
+                linked.inputs,
+                [sdk.join(slice).join("libSdk.a")],
+                "{triple}"
+            );
+        }
+
+        // Devices only: the simulator links nothing of it either.
+        let devices = Framework {
+            targets: vec![Target::Ios],
+            ..listed(sdk.clone())
+        };
+        assert!(
+            link(std::slice::from_ref(&devices), &[], "aarch64-apple-ios-sim")
+                .unwrap()
+                .args
+                .is_empty()
+        );
+
+        // One name per target: each target takes the entry that is its.
+        let ui_mobile = xcframework(
+            &dir.join("mobile"),
+            "Ui",
+            &[("ios-arm64", "Ui.framework", None, mach_o(MH_DYLIB))],
+        );
+        let ui_mac = framework(&dir.join("mac"), "Ui", &mach_o(MH_DYLIB));
+        let both = [
+            Framework {
+                targets: vec![Target::Ios],
+                ..listed(ui_mobile.clone())
+            },
+            Framework {
+                targets: vec![Target::Catalyst],
+                ..listed(ui_mac.clone())
+            },
+        ];
+        let device = link(&both, &[], "aarch64-apple-ios").unwrap();
+        assert_eq!(device.inputs, [ui_mobile.join("ios-arm64/Ui.framework/Ui")]);
+        let mac = link(&both, &[], "aarch64-apple-ios-macabi").unwrap();
+        assert_eq!(mac.inputs, [ui_mac.join("Ui")]);
+        assert_eq!(
+            dynamic(&both, "aarch64-apple-ios-macabi").unwrap(),
+            [ui_mac]
+        );
+        assert!(dynamic(&both[1..], "aarch64-apple-ios").unwrap().is_empty());
+
+        // Nor does a target it is not for take its privacy manifest.
+        fs::write(
+            sdk.join("ios-arm64/PrivacyInfo.xcprivacy"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict><key>NSPrivacyTracking</key><true/>
+<key>NSPrivacyTrackingDomains</key><array><string>sdk.example.com</string></array>
+</dict></plist>"#,
+        )
+        .unwrap();
+        let mut manifest = serde_json::Map::new();
+        add_static_privacy(
+            std::slice::from_ref(&devices),
+            "aarch64-apple-ios-sim",
+            &mut manifest,
+        )
+        .unwrap();
+        assert!(manifest.is_empty());
+        add_static_privacy(&[devices], "aarch64-apple-ios", &mut manifest).unwrap();
+        assert_eq!(manifest["NSPrivacyTracking"], true);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// An optional entry whose path is not there (an SDK a script fetches
+    /// for some builds) is left out of the link with a warning; once
+    /// there, it links as any. Only a missing path is optional: one that
+    /// is there and wrong is still an error.
+    #[test]
+    fn optional_frameworks_that_are_not_there_are_left_out() {
+        let dir = temp("optional");
+        let path = dir.join("Vendor/Push.xcframework");
+        let push = Framework {
+            optional: true,
+            ..listed(path.clone())
+        };
+        let flags = ["-lsqlite3".to_owned()];
+        let left_out = link(std::slice::from_ref(&push), &flags, "aarch64-apple-ios").unwrap();
+        assert_eq!(left_out.args, ["-lsqlite3"]);
+        assert!(left_out.inputs.is_empty());
+        assert_eq!(left_out.warnings.len(), 1, "{:?}", left_out.warnings);
+        assert!(
+            left_out.warnings[0].starts_with("nsh.json `ios.frameworks[0]`: "),
+            "{:?}",
+            left_out.warnings
+        );
+        assert!(
+            left_out.warnings[0].contains(&path.display().to_string()),
+            "{:?}",
+            left_out.warnings
+        );
+        assert!(
+            dynamic(std::slice::from_ref(&push), "aarch64-apple-ios")
+                .unwrap()
+                .is_empty()
+        );
+        let mut manifest = serde_json::Map::new();
+        add_static_privacy(
+            std::slice::from_ref(&push),
+            "aarch64-apple-ios",
+            &mut manifest,
+        )
+        .unwrap();
+        assert!(manifest.is_empty());
+
+        // Nor does a target it is not for warn of it.
+        let devices = Framework {
+            targets: vec![Target::Ios],
+            ..push.clone()
+        };
+        let other = link(&[devices], &[], "aarch64-apple-ios-macabi").unwrap();
+        assert!(other.warnings.is_empty(), "{:?}", other.warnings);
+
+        // Not optional, the same entry stops the build.
+        assert!(link(&[listed(path.clone())], &[], "aarch64-apple-ios").is_err());
+
+        // Fetched: it links, without a warning.
+        xcframework(
+            &dir.join("Vendor"),
+            "Push",
+            &[("ios-arm64", "libPush.a", None, archive())],
+        );
+        let linked = link(std::slice::from_ref(&push), &[], "aarch64-apple-ios").unwrap();
+        assert_eq!(linked.inputs, [path.join("ios-arm64/libPush.a")]);
+        assert!(linked.warnings.is_empty(), "{:?}", linked.warnings);
+        // There, but without the target's library: an error still.
+        assert!(link(std::slice::from_ref(&push), &[], "aarch64-apple-ios-sim").is_err());
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     /// A flag is one argument on one line.

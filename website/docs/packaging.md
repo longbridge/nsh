@@ -203,7 +203,8 @@ frameworks it uses. An nshm lists its own in its `Cargo.toml`
   "ios": {
     "frameworks": [
       "ios/Vendor/Analytics.xcframework",
-      { "path": "ios/Vendor/Ads.xcframework", "forceLoad": true }
+      { "path": "ios/Vendor/Ads.xcframework", "forceLoad": true },
+      { "path": "ios/Vendor/Push.xcframework", "targets": ["ios", "ios-simulator"], "optional": true }
     ],
     "linkerFlags": ["-ObjC", "-lsqlite3", "-framework", "AdServices"]
   }
@@ -214,10 +215,21 @@ frameworks it uses. An nshm lists its own in its `Cargo.toml`
 |---|---|
 | `path` | The `.xcframework` or `.framework`. An entry that is a string is its path. |
 | `forceLoad` | Links all of a static library (`-force_load`), not only the parts the app's code calls, for SDKs whose instructions ask for it. |
+| `targets` | The targets it is linked for: `ios` (devices), `ios-simulator`, `catalyst` (Mac Catalyst), named as `nsh package --target` and `nsh run --target` name them. Default: all of them. |
+| `optional` | A build it is not there for leaves it out with a warning, rather than stopping. Default `false`. |
 
 - Every iOS executable built with the app's crates links them: packages, and `nsh run`'s development hosts for the
   simulator and Mac Catalyst. Each build takes the XCFramework's library for its target (devices, the simulator,
   Mac Catalyst); an XCFramework without one for the target stops the build with an error naming those it has.
+- An SDK without a library for a target lists the targets it has in `targets`; the other targets build without it, so
+  the crate calls it only where it is linked, such as under `#[cfg(not(target_abi = "macabi"))]` for an SDK without
+  Mac Catalyst. Two entries of one name serve different targets when their `targets` do not overlap.
+- An SDK that is not in the repository, which a script fetches before the builds that use it, is `optional`: a build
+  without it warns and links the rest. Once fetched, it is linked as any other. Only a missing path is optional: one
+  that is there without a library for the target is still an error. Code that refers to the SDK's symbols links only
+  in the builds that have it; code that looks its classes up by name at run time links in all of them.
+- An nshm links an SDK only with one of its features by listing it under `[package.metadata.nsh.features.<feature>]`
+  ([What the packaged app needs](./nshm.md#what-the-packaged-app-needs)).
 - A static library becomes part of the app's executable. A dynamic framework is copied into the app's `Frameworks/`
   and signed before the app: ad hoc for the simulator, with the `--sign` identity for devices.
 - A dynamic framework keeps its privacy manifest in its own bundle, where App Store Connect reads it. A static

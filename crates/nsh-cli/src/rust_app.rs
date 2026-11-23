@@ -3653,6 +3653,9 @@ opt-level = \"s\"
             return Ok(Vec::new());
         }
         let link = crate::ios_frameworks::link(&frameworks, &flags, triple)?;
+        for warning in &link.warnings {
+            ui::warn(warning);
+        }
         Ok(crate::ios_frameworks::link_env(&link))
     }
 
