@@ -41,8 +41,10 @@ tap id:case-mod-android
 expect Android: false
 expect Exit: function
 expect Calls: not called
+expect Progress: not called
 tap id:call
 expect Calls: done, remove function
+expect Progress: done, stop function
 covers [nsh/mobile] BackHandler
 # mod-clipboard
 tap id:case-mod-clipboard

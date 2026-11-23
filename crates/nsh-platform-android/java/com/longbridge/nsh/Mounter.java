@@ -2253,6 +2253,31 @@ final class Mounter {
         return wants(1, Native.BACK_PRESS);
     }
 
+    /**
+     * Whether the app follows the back gesture itself: it listens to the
+     * gesture's steps ({@code BackHandler.on("progress")}) and no modal
+     * takes the gesture. The stacks then leave it to the app.
+     */
+    boolean followsBack() {
+        return shownModals.isEmpty() && wants(1, Native.BACK_PROGRESS);
+    }
+
+    /**
+     * A step of the back gesture the app follows: {@code phase} is
+     * {@code "start"}, {@code "move"}, {@code "end"} or {@code "cancel"},
+     * {@code progress} from 0 to 1, {@code edge} {@code "left"},
+     * {@code "right"} or null.
+     */
+    void backProgress(String phase, float progress, String edge) {
+        if (edge == null) {
+            eventMap(1, Native.BACK_PROGRESS, new String[] {"phase", "progress"},
+                    new Object[] {phase, (double) progress});
+        } else {
+            eventMap(1, Native.BACK_PROGRESS, new String[] {"phase", "progress", "edge"},
+                    new Object[] {phase, (double) progress, edge});
+        }
+    }
+
     /** The back button: the newest modal asks to close, else the app's
      * listeners hear it (and send {@code Command::Back} when none takes it),
      * else the innermost stack pops. Returns false if nothing did. */

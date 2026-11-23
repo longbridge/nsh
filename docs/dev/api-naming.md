@@ -402,6 +402,7 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | `AccessibilityInfo.setAccessibilityFocus(node)` | `setAccessibilityFocus(node)` | Environment | A function of the module; `focus()` is the keyboard's |
 | **`nsh/mobile`: `BackHandler`** | | | |
 | `BackHandler.addEventListener("hardwareBackPress", l)` → `{ remove() }` | `BackHandler.on("press", l)` → `() => void` | Listening | Removed with the component it was added in; `l` returns `true` when it handled the press. As `NavPage`'s `onBackPress` |
+| AndroidX `OnBackPressedCallback.handleOnBackStarted` / `handleOnBackProgressed` / `handleOnBackCancelled`, `BackEventCompat` | `BackHandler.on("progress", l)` → `() => void`; Rust `on_back_progress(f)`, `BackProgressEvent { phase, progress, edge }`, `BackPhase` | Listening | The four callbacks are one event's `phase` (`start`, `move`, `end`, `cancel`), as `PinchPhase` and `TouchPhase` name them; `progress` keeps `BackEventCompat`'s name, `edge` is a `PanEdge` as `panActivation`'s `edge` |
 | **`nsh`: `Clipboard`** | | | |
 | `getString`, `setString`, `hasString` | `readText()`, `writeText(text): Promise<void>`, `write({ text, html }): Promise<void>`, `hasText()` | Where names come from | The DOM's `navigator.clipboard`; GPUI's `read_from_clipboard` / `write_to_clipboard` |
 | `getImage`, `setImage`, `hasImage`, `getFiles` | `readImage()`, `writeImage(src)`, `hasImage()`, `readFiles()` | Where names come from | |

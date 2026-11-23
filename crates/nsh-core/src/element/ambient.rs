@@ -2163,7 +2163,25 @@ pub fn on_back_press(f: impl Fn() -> bool + 'static) {
     let listener: super::back::BackListener = Rc::new(move || owner.run(&f));
     let back = &executor().back;
     let id = back.borrow_mut().add(listener);
-    let subscription = super::back::BackSubscription::new(back, id);
+    let subscription = super::back::Subscription::new(back, id);
+    cleanup(move || drop(subscription));
+}
+
+/// Follows the system's back gesture while the current owner lives (TS:
+/// `BackHandler.on("progress", f)`): `f` hears each step of a gesture no
+/// modal takes, from its start to its end (the back press follows, as
+/// [`on_back_press`]'s listeners hear it) or its cancel, as AndroidX's
+/// `OnBackPressedCallback` does. While one listens, the stacks leave the
+/// gesture to the app: none previews its pop, so a view the app moves with
+/// the finger (a drawer closing, a sheet going down) is the only one that
+/// does. Android 14 and later (predictive back) report it; elsewhere it
+/// never comes.
+pub fn on_back_progress(f: impl Fn(&crate::BackProgressEvent) + 'static) {
+    let owner = Owner::current();
+    let listener: super::back::BackProgressListener = Rc::new(move |e| owner.run(|| f(e)));
+    let progress = &executor().back_progress;
+    let id = progress.borrow_mut().add(listener);
+    let subscription = super::back::Subscription::new(progress, id);
     cleanup(move || drop(subscription));
 }
 

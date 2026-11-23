@@ -549,6 +549,8 @@ pub(crate) struct Executor {
     derived: RefCell<super::animated::Derived>,
     /// The components' listeners of the back button.
     pub(crate) back: Rc<RefCell<super::back::BackListeners>>,
+    /// The components' listeners of the back gesture's steps.
+    pub(crate) back_progress: Rc<RefCell<super::back::BackProgressListeners>>,
     /// The components' listeners of the host's events
     /// ([`super::on_host_event`]).
     pub(crate) host_events: Rc<RefCell<super::host_events::HostListeners>>,
