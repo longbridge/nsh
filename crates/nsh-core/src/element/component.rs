@@ -930,9 +930,13 @@ pub struct BuiltInScrollbar {
     pub target: crate::NodeId,
     /// Whether that view scrolls sideways.
     pub horizontal: bool,
-    /// The view's own theme (its `scrollbar` object, as JSON); `None`: the
-    /// app's.
+    /// The view's own theme (its `scrollbar` object, as JSON); `None`
+    /// with no [`Self::theme_value`]: the app's.
     pub theme: Option<Arc<crate::JsonValue>>,
+    /// The view's own theme as Rust gave it
+    /// ([`ScrollbarSetting::ThemeValue`](crate::ScrollbarSetting::ThemeValue)),
+    /// a value of the set's theme type.
+    pub theme_value: Option<super::AnyValue>,
     /// The app's theme, as the set gave it
     /// ([`set_builtin_scrollbars`](super::set_builtin_scrollbars)).
     pub app_theme: Option<super::AnyValue>,
@@ -943,6 +947,50 @@ pub struct BuiltInScrollbar {
 /// it scrolls; `None` leaves the view the platform's indicator
 /// ([`Registry::scrollbars_from`]).
 pub type ScrollbarSource = fn(&BuiltInScrollbar) -> Option<super::AnyElement>;
+
+/// A theme of one view's own given in Rust
+/// ([`ScrollbarSetting::ThemeValue`](crate::ScrollbarSetting::ThemeValue)):
+/// a value of the theme type of the UI set that makes bars, with the set's
+/// maker, so a Rust app that never registered the set gets the bar too (as
+/// with [`set_builtin_scrollbars`](super::set_builtin_scrollbars)). Two are
+/// equal when they hold the same value.
+#[derive(Clone)]
+pub struct ScrollbarThemeValue {
+    source: ScrollbarSource,
+    theme: super::AnyValue,
+}
+
+impl ScrollbarThemeValue {
+    /// `theme`, drawn by `source` (which reads it as
+    /// [`BuiltInScrollbar::theme_value`]).
+    pub fn new(source: ScrollbarSource, theme: super::AnyValue) -> Self {
+        Self { source, theme }
+    }
+
+    /// What makes the bar.
+    pub fn source(&self) -> ScrollbarSource {
+        self.source
+    }
+
+    /// The theme.
+    pub fn theme(&self) -> &super::AnyValue {
+        &self.theme
+    }
+}
+
+impl PartialEq for ScrollbarThemeValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.theme == other.theme
+    }
+}
+
+impl std::fmt::Debug for ScrollbarThemeValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("ScrollbarThemeValue")
+            .field(&self.theme)
+            .finish()
+    }
+}
 
 /// What a UI set exports to JS: its components and modules, and what it
 /// passes on from the runtime. Cheap to clone.

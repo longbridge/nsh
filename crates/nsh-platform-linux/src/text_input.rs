@@ -1114,10 +1114,10 @@ pub(crate) fn config(_surface: &Rc<Surface>, view: &NshView, config: &InputConfi
     place(view, &input);
 }
 
-/// Reports how far a multiline input's text scrolled while a built-in bar
-/// takes the place of its indicator (`InputConfig::replaced`).
+/// Reports how far a multiline input's text scrolled while a bar of the
+/// app's follows it (`InputConfig::report_scroll`).
 fn report_scroll(surface: &Surface, view: &NshView, input: &InputState) {
-    if !input.config.borrow().replaced {
+    if !input.config.borrow().report_scroll {
         return;
     }
     let Editor::Area { scroller, .. } = &*input.editor.borrow() else {

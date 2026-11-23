@@ -2387,7 +2387,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_scroll(
 }
 
 /// A multiline input's text scrolled, or its text or size changed, while a
-/// built-in bar replaces its indicator (`InputConfig::replaced`): the engine
+/// bar of the app's follows it (`InputConfig::report_scroll`): the engine
 /// learns the offset, the text's size and the viewport's (points).
 #[unsafe(no_mangle)]
 extern "system" fn Java_com_longbridge_nsh_Native_inputScroll(

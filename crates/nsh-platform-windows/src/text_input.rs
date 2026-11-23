@@ -231,8 +231,8 @@ pub(crate) struct InputState {
     active: Cell<bool>,
     /// The blinking caret's phase.
     caret_on: Cell<bool>,
-    /// The scroll of several lines as last reported to a built-in bar
-    /// (`InputConfig::replaced`): offset, text height, width, viewport
+    /// The scroll of several lines as last reported to a bar of the app's
+    /// (`InputConfig::report_scroll`): offset, text height, width, viewport
     /// height. `None` until reported (again).
     reported_scroll: Cell<Option<(f32, f32, f32, f32)>>,
     /// A press is selecting.
@@ -904,8 +904,8 @@ impl InputState {
     }
 
     /// Reports how far several lines scrolled, the text's height and the
-    /// viewport's to the built-in bar that takes the place of an
-    /// indicator (`InputConfig::replaced`), when any of them changed since
+    /// viewport's to a bar of the app's that follows them
+    /// (`InputConfig::report_scroll`), when any of them changed since
     /// last reported.
     fn report_scroll(&self) {
         self.with_editor(|e| self.report_scroll_on(e));
@@ -914,7 +914,7 @@ impl InputState {
     fn report_scroll_on(&self, e: &Editor) {
         {
             let config = self.config.borrow();
-            if !config.replaced || !config.multiline {
+            if !config.report_scroll || !config.multiline {
                 return;
             }
         }
