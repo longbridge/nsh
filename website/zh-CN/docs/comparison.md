@@ -9,7 +9,11 @@ group: start
 
 NSH 是一个在 iOS、Android、macOS、Windows、Linux 和 Web 上编写完整应用的框架，也是向已发布应用下发界面的运行时。本页先把它与人们编写应用所用的跨平台框架比较，再与应用承载安装包之外的界面的几种做法比较。绿色表示具备该能力，黄色表示需要应用自己做更多工作或依赖独立项目，红色表示不提供；这些标记描述的是能力是否具备，而不是性能。版本号是各框架在撰写时文档写明的最低要求，请以你使用的版本为准。
 
-本页写给正在用 Electron、React Native、Flutter 或 GPUI 的团队：NSH 从哪里来，比较表里每一格的依据，换到 NSH 能得到什么、要付出什么，以及哪些情况下其他方案更合适。
+本页写给正在用 Electron、Tauri、React Native、Flutter、GPUI、Qt 或 Slint 的团队：NSH 从哪里来，比较表里每一格的依据，NSH 向每个框架提出的挑战，换到 NSH 能得到什么、要付出什么，以及哪些情况下其他方案更合适。
+
+**Native UI、Web 风格的开发体验、Rust 的性能、低资源开销，以及桌面、手机、Web 和终端的统一支持。**
+
+跨平台 UI 框架长期面对同一道选择题：开发体验、原生交互、平台覆盖、性能和资源开销，究竟先要哪一项？Electron 选择了浏览器；Tauri 保留 Web 界面、改用系统 Web View；React Native 把 React 带到原生视图；Flutter 用自己的渲染体系换取一致性；GPUI 用 Rust 和 GPU 为桌面应用提供高性能界面；Qt 积累了成熟的专业桌面与嵌入式体系；Slint 在轻量、嵌入式和声明式界面上持续探索。它们都有值得肯定的能力，也都有明确的架构取舍。**NSH 要回答的问题是：能不能不再让开发者在这些核心需求之间反复二选一？**
 
 ## NSH 从哪里来
 
@@ -120,11 +124,16 @@ GPUI 与 GPUI Fast 合为一列：两者运行的平台相同，GPUI Fast 在 GP
 | 500 行行情表，每秒 1,000 条更新（Linux） | NSH Rust 18% 单核 CPU，GPUI Fast 20% |
 | Stocks 演示：22 条实时走势线、分时图、盘口、逐笔成交（Linux） | 117–120 FPS，25–29% CPU |
 
-## 从各个方案转到 NSH
+## 挑战主流 UI 框架
 
-下面逐个比较迁移时会遇到的技术取舍，以及 NSH 如何处理同一问题。性能数据见上文的[实测数字](#实测数字)。
+下面逐个向主流框架提问：它在哪里做得好，代价在哪里，NSH 如何处理同一问题，迁移时能沿用什么、要付出什么。性能数据见上文的[实测数字](#实测数字)。
 
-### Electron
+> 这里比较的是架构选择和典型应用的适配度，不是宣称任何框架在所有负载下都落后。性能数字来自 NSH 项目已有的测试或开发实践；只有在同一设备、同一应用、同一负载和同一测量口径下，才构成严格的横向基准。
+
+## 挑战 Electron：开发原生应用，为什么要带上整个浏览器？
+
+Electron 的成功毋庸置疑：HTML、CSS、JavaScript、React 和成熟的 Web 生态，让桌面应用开发变得非常高效。但它的代价同样明显。
+
 
 **Electron 应用自带 Chromium 和 Node.js。** Electron 的多进程架构“继承自 Chromium”：每个应用有一个运行 Node.js 的主进程，并且“为每个打开的 `BrowserWindow` 启动一个独立的渲染进程”（[Electron 进程模型](https://www.electronjs.org/docs/latest/tutorial/process-model)）。也就是说，每个 Electron 应用都自带一份 Chromium 和 Node.js。
 
@@ -157,7 +166,12 @@ NSH 怎么解决：
 
 迁移多面板审阅工具时，可以先列出现有的 Web 表格、停靠布局和差异视图，分别映射到 DataTable、Dock 和 DiffView，再移植业务单元格和审阅动作。已有 DOM 控件需要替换或放进 WebView。
 
-### Tauri
+**挑战宣言：The Web development experience. Without the browser.**
+
+## 挑战 Tauri：去掉了自带的 Chromium，为什么界面仍然是 Web View？
+
+Tauri 用系统 Web View 和 Rust 后端，显著改变了 Electron 的运行时成本结构，适合已经有 Web 应用、想快速交付轻量桌面或手机客户端的团队。但界面仍然是网页。
+
 
 **Tauri 使用系统提供的 Web View。** Tauri 不打包 Chromium，而是用操作系统提供的：Windows 上是 WebView2（Chromium），macOS 和 iOS 上是 WKWebView（WebKit），Linux 上是 `webkit2gtk`（WebKit），Android 上是设备的 Android WebView（[Tauri webview 版本](https://v2.tauri.app/reference/webview-versions/)）。应用变小了，界面仍然是网页。
 
@@ -176,7 +190,12 @@ NSH 怎么解决：界面是平台自己的视图，在平台支持的每个系�
 
 可沿用 Rust 后端生成的报告数据，先把一个 Markdown 网页面板换成 TextView，再用同一份报告逐端核对链接、表格和流式更新。
 
-### React Native
+**挑战宣言：Rust at the core. Native UI, not a WebView.**
+
+## 挑战 React Native：同样是原生框架，为什么桌面、手机和 Web 仍然分散？
+
+React Native 是 NSH 最直接的竞争对手之一。它已经证明 TypeScript/JavaScript 可以和平台原生视图很好地结合，iOS 和 Android 生态也非常成熟。问题不在于它不够原生，而在于它的平台组织方式和默认的更新模型。
+
 
 **React Native 用 JavaScript 驱动原生视图。** React Native 的目标和 NSH 最接近：都想减少重复的客户端工作，都使用平台视图。但应用逻辑和 React 协调始终跑在 JavaScript 引擎里，新架构（Fabric、TurboModules、JSI）让桥更快，并没有改变这一点（[React Native 架构](https://reactnative.dev/architecture/landing-page)）。
 
@@ -208,7 +227,12 @@ Fabric、JSI、TurboModules 和 Reanimated 已经消除了不少瓶颈，React N
 
 [React Native 核心组件](https://reactnative.dev/docs/components-and-apis)包括列表和文本输入。要做可冻结列的双向虚拟行情表，或带撤销的结构化编辑器，还需要选库或自行组合。NSH 可直接从 DataTable 和 RichEditor 开始，迁移数据源、文档结构和产品样式，再到目标设备上验收选区与撤销。
 
-### Flutter
+**挑战宣言：Beyond React Native. One framework for desktop, mobile, and Web.**
+
+## 挑战 Flutter：为什么要重新实现操作系统已经做好的界面？
+
+Flutter 用自己的渲染引擎实现高度可控、跨平台一致的视觉，这是它的长处，尤其适合高度定制的界面。但自绘也意味着许多系统行为要由框架自己适配。
+
 
 **Flutter 使用自己的渲染引擎绘制控件。** Flutter 自己渲染整个界面，所以应用在哪里看起来都一样——也因此没有一处是平台自己的。
 
@@ -223,7 +247,12 @@ NSH 怎么解决：每个后端用的都是平台自己的视图——UIKit、An
 
 Flutter 已有表格和输入控件。迁移代码审阅页时，值得比较的是上层工作量：Editor 提供诊断与折叠，DiffView 提供差异对齐与批注，现有 Dart 控件实现仍需移植。
 
-### GPUI 和 GPUI Fast
+**挑战宣言：Why recreate what the operating system already does best?**
+
+## 挑战 GPUI：高性能的界面，为什么还要持续消耗 CPU 和 GPU？
+
+GPUI 证明了 Rust 和 GPU 能构建 Zed 这样复杂的专业桌面应用，在高性能自绘、复杂编辑器界面和 GPU 控制上都有重要价值。但真正的高性能不只是高帧率，还包括静止时的低开销、低功耗和更长的电池续航。
+
 
 **GPUI 为 Zed 桌面编辑器提供 GPU 渲染。** [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) 是 Zed 编辑器的 Rust UI 框架；[GPUI Fast](https://github.com/longbridge/gpui-fast) 是 Longbridge 的分支，加入了保留式渲染、滚动图层和原生窗口合成，NSH 出自同一个团队。
 
@@ -255,7 +284,10 @@ GPU 功耗还没有单独测量，CPU 的下降比例不能直接当作 GPU 功�
 
 GPUI Kit 用户在桌面上已经拥有成熟组件。迁移的收益在于把熟悉的交互模型带到更多平台。可先嵌入一个 NSH 面板，验证文档状态和键盘操作，再迁移外围工作区。
 
-### Qt
+**挑战宣言：Less CPU. Less GPU work. More Native. Desktop, Mobile, Web, and TUI.**
+
+## 挑战 Qt：成熟的专业桌面能力，能不能真正延伸到手机和 Web？
+
 
 **Qt 提供 Widgets 和 Qt Quick 两套 UI 技术。** Qt Widgets 和 Qt Quick 自己绘制控件，并按各平台风格做样式，工具链积累多年。NSH 的根基和模型不同：用平台控件而不是仿制样式；核心是 Rust 并提供 TSX 路径，而不是 C++ 和 QML；Web 上输出 HTML；一套组件模型在手机、桌面和 Web 上自动适配交互；工具链为自动化和 AI 驱动的开发设计；任何用途都是 Apache-2.0 许可。
 
@@ -272,7 +304,10 @@ NSH 的做法：桌面上提供多窗口、Dock、DataTable、Editor、RichEdito
 
 迁移 Qt Widgets 工作区时，可将停靠窗口映射到 Dock，优先验证布局恢复与面板状态；已有 Qt 控件代码仍需适配或重写。
 
-### Slint
+**挑战宣言：Professional Desktop. Native Mobile. Real HTML Web. Apache 2.0.**
+
+## 挑战 Slint：轻量之外，谁来支撑一款完整的跨平台产品？
+
 
 **Slint 提供自己的声明式语言和渲染器**，面向桌面和嵌入式设备，可从 Rust、C++、JavaScript 或 Python 使用。两者都重视原生性能；NSH 的路线是每个平台自己的 UI 和交互、Web 上的 HTML、用 Rust 和 TSX 写应用而不是另一门标记语言，并且手机是一等目标。
 
@@ -287,7 +322,9 @@ Slint 的专用 DSL 不是缺陷，而是为了得到可分析、可优化的界
 
 对于以表格为主的 Slint 工具，可用同一数据模型对照 DataTable，先验证分页、冻结列和键盘选区，再移植自定义单元格。
 
-### 小结：每个框架一行
+**挑战宣言：从轻量界面走向完整的应用平台——专业桌面组件、系统原生的手机交互、真正的 HTML Web，以及统一的布局与开发体系。**
+
+## 小结：每个框架一行
 
 | 框架 | 结构性短板 | NSH 的做法 |
 |---|---|---|
@@ -301,7 +338,28 @@ Slint 的专用 DSL 不是缺陷，而是为了得到可分析、可优化的界
 
 ## 一个框架，覆盖更多场景
 
-真正做产品时，需求不会按框架边界出现：桌面、手机、Web、终端都要；原生体验、低功耗、小体积也不能少。NSH 不是把现有框架拼在一起，而是在同一个 Rust 核心上组织这些能力：
+每一种主流框架都证明了一种重要的能力：
+
+- **Electron**：Web 开发体验能大幅降低桌面应用的开发门槛。
+- **Tauri**：Rust 加系统 Web View 能减少 Electron 的运行时成本。
+- **React Native**：TSX/JavaScript 能和原生界面结合。
+- **Flutter**：统一的渲染体系能带来高度一致的视觉。
+- **GPUI**：Rust 和 GPU 能构建复杂的高性能桌面应用。
+- **Qt**：专业桌面应用能拥有极其成熟的组件与工程体系。
+- **Slint**：轻量的声明式界面能覆盖嵌入式和资源受限的设备。
+
+但真正做产品时，需求不会按框架边界出现。产品会上常有这样一份清单：
+
+- 要 macOS、Windows、Linux，也要 iOS、Android，还要 Web，甚至终端。
+- 要一份代码，尽可能共享组件、布局、业务逻辑和开发工具。
+- 要原生界面，而不是把整个应用做成网页套壳。
+- 要 TSX 和 CSS 风格的开发体验，也要 Rust 的性能和系统能力。
+- 要低 CPU、低 GPU 开销、低功耗、启动快、体积小。
+- 要专业桌面应用的 Dock、表格、编辑器、复杂布局和多窗口，也要手机上自然的触摸、输入法、焦点和无障碍。
+- 要用 Rust 扩展文件索引、音视频处理、复杂计算和系统 API。
+- 要能嵌入现有应用，也要可签名、可授权、可吊销的受控动态界面。
+
+NSH 的目标，是让这些需求不再迫使团队同时维护几套互不兼容的 UI 框架。它不是把现有框架拼在一起，而是在同一个 Rust 核心上，把原生界面、Web 风格的开发体验、细粒度的 Retained Mode、专业组件、跨平台后端和模块扩展组织成一个完整的应用体系：
 
 | 你想要 | NSH 的做法 |
 |---|---|
@@ -316,6 +374,10 @@ Slint 的专用 DSL 不是缺陷，而是为了得到可分析、可优化的界
 | 完整的原生交互 | 尽可能复用系统视图、输入、焦点和无障碍 |
 | 简单的工程体系 | 一个 `nsh` CLI，Apache-2.0 核心许可 |
 | 发布后下发界面 | 签名包、能力授权、沙箱与吊销（受平台和应用商店规则约束） |
+
+这些需求不是彼此独立的清单，而是一个真实产品可能同时面对的约束。
+
+**Build once, native everywhere.**
 
 ## 如何评估：先做一个试点
 
@@ -351,7 +413,7 @@ NSH 的界面以自定义外观为主。应用决定组件的样式，也可以�
 
 ## 其他方案更合适的情况
 
-- 界面以数千个视图持续、密集的更新为主——每秒推送数万条行情的交易终端、每帧重画的自定义可视化：GPUI Fast 的 Retained GPU 渲染只占用其中一小部分 CPU（见 [GPUI 与 GPUI Fast](#gpui-和-gpui-fast)）。
+- 界面以数千个视图持续、密集的更新为主——每秒推送数万条行情的交易终端、每帧重画的自定义可视化：GPUI Fast 的 Retained GPU 渲染只占用其中一小部分 CPU（见上文“挑战 GPUI”一节）。
 - 应用必须在每个平台上像素级一致：Flutter、Slint 这类自己绘制一切的框架天生如此。
 - 你现在就需要庞大的第三方包生态：React Native、Flutter 和 Qt 积累了多年。
 - 界面是一份文档或一个现成的网页：WebView 能原样显示它。

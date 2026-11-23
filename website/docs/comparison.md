@@ -9,7 +9,11 @@ group: start
 
 NSH is a framework for whole apps on iOS, Android, macOS, Windows, Linux and the web, and a runtime for UI delivered to apps after release. This page compares it first with the cross-platform frameworks people write apps in, then with the ways apps take UI they did not ship with. Green means the capability is available, yellow that it needs more of the app's own work or a separate project, and red that it is not provided; the marks describe availability, not performance. Versions are each framework's documented minimums at the time of writing: check them for the release you use.
 
-This page is written for teams on Electron, React Native, Flutter or GPUI: where NSH comes from, what each cell of the comparison rests on, what moving to NSH gains and costs, and when another option fits better.
+This page is written for teams on Electron, Tauri, React Native, Flutter, GPUI, Qt or Slint: where NSH comes from, what each cell of the comparison rests on, the challenge NSH puts to each framework, what moving to NSH gains and costs, and when another option fits better.
+
+**Native UI, a web-style developer experience, Rust performance, low resource use, and one framework for desktop, mobile, web and terminal.**
+
+Cross-platform UI frameworks have long faced the same trade-off: developer experience, native interaction, platform reach, performance or resource use — which comes first? Electron chose the browser; Tauri kept web UI but switched to the system web view; React Native brought React to native views; Flutter traded for consistency with its own renderer; GPUI gives desktop apps high-performance UI with Rust and the GPU; Qt built a mature system for professional desktop and embedded software; Slint keeps pushing lightweight, embedded and declarative UI. Each has real strengths and clear architectural trade-offs. **The question NSH sets out to answer: can developers stop having to pick one of these needs over the others?**
 
 ## Where NSH comes from
 
@@ -120,11 +124,16 @@ These come from the [performance report](./performance-report.md) and the [NSH p
 | 500-row quote table, 1,000 updates a second (Linux) | NSH Rust 18% of one core, GPUI Fast 20% |
 | Stocks demo: 22 live sparklines, intraday chart, order book, trades (Linux) | 117–120 FPS, 25–29% CPU |
 
-## Moving to NSH
+## Challenging the mainstream UI frameworks
 
-The following sections compare the trade-offs teams face when migrating and how NSH handles the same problems. For performance data, see the [measured numbers](#measured-numbers) above.
+Each section below puts a question to one framework: what it does well, where it costs, how NSH handles the same problem, and what carries over or costs when moving. For performance data, see the [measured numbers](#measured-numbers) above.
 
-### Electron
+> This compares architectural choices and fit for typical apps; it does not claim any framework loses under every workload. Performance numbers come from NSH's own tests or development experience, and are a strict cross-framework benchmark only when device, app, workload and measurement method are the same.
+
+## Challenging Electron: why ship a whole browser to build a native app?
+
+Electron's success is beyond question: HTML, CSS, JavaScript, React and the web ecosystem made desktop development very productive. Its costs are just as clear.
+
 
 **Electron apps bundle Chromium and Node.js.** Electron "inherits its multi-process architecture from Chromium": every app has a Node.js main process and spawns "a separate renderer process for each open `BrowserWindow`" ([Electron process model](https://www.electronjs.org/docs/latest/tutorial/process-model)). Every Electron app therefore carries its own copy of Chromium and Node.js.
 
@@ -157,7 +166,12 @@ Chat and AI apps gain the most. Many AI products render their conversations as w
 
 For a multi-pane review tool, inventory the web grid, docking library and diff renderer separately. Map them to DataTable, Dock and DiffView, then port custom cells and review actions. Existing DOM widgets need replacement or an embedded web view.
 
-### Tauri
+**The challenge: The Web development experience. Without the browser.**
+
+## Challenging Tauri: Chromium is gone, so why is the UI still a web view?
+
+Tauri's system web view and Rust backend changed Electron's runtime cost structure, and suit teams that already have a web app and want a light desktop or mobile client quickly. The UI is still a web page.
+
 
 **Tauri uses the system webview.** Tauri avoids bundling Chromium by using whatever the OS provides: WebView2 (Chromium) on Windows, WKWebView (WebKit) on macOS and iOS, `webkit2gtk` (WebKit) on Linux, and the device's Android WebView ([Tauri webview versions](https://v2.tauri.app/reference/webview-versions/)). Apps get smaller; the UI is still a web page.
 
@@ -176,7 +190,12 @@ On native NSH targets, a chart can draw into a native Canvas and tie its update 
 
 A Rust backend can keep producing report data. Replace a Markdown web panel with TextView first, then check links, tables and streamed updates using the same documents on each target.
 
-### React Native
+**The challenge: Rust at the core. Native UI, not a WebView.**
+
+## Challenging React Native: a native framework, so why are desktop, mobile and web still separate?
+
+React Native is one of NSH's most direct competitors. It proved that TypeScript/JavaScript and native platform views fit together well, and its iOS and Android ecosystem is mature. The issue is not that it is not native enough; it is how its platforms are organized and its default update model.
+
 
 **React Native drives native views from JavaScript.** React Native is closest to NSH in intent: both aim to cut duplicated client work and both use platform views. But app logic and React reconciliation always run in a JavaScript engine, and the New Architecture (Fabric, TurboModules, JSI) makes the bridge faster without changing that ([React Native architecture](https://reactnative.dev/architecture/landing-page)).
 
@@ -208,7 +227,12 @@ Fabric, JSI, TurboModules and Reanimated have removed many bottlenecks, and Reac
 
 The [core component catalog](https://reactnative.dev/docs/components-and-apis) includes lists and text inputs. A virtualized two-axis quote grid with pinned columns, or a schema-driven editor with undo, requires additional choices. With NSH the starting points are DataTable and RichEditor. Port the data source, document schema and product styling, and test selection and undo on the target devices.
 
-### Flutter
+**The challenge: Beyond React Native. One framework for desktop, mobile, and Web.**
+
+## Challenging Flutter: why reimplement UI the operating system already does well?
+
+Flutter draws with its own engine for highly controllable, consistent visuals across platforms — a strength, especially for heavily customized UI. Drawing everything also means the framework has to adapt many system behaviours itself.
+
 
 **Flutter draws widgets with its own rendering engine.** Flutter renders the whole UI itself, so an app looks the same everywhere — and none of it is the platform's.
 
@@ -223,7 +247,12 @@ How NSH answers: each backend is the platform's own views — UIKit, Android vie
 
 Flutter already offers tables and text fields. For a code-review screen, compare the work above those widgets: Editor supplies diagnostics and folding, and DiffView supplies aligned hunks and annotations. Dart widget implementations still need porting.
 
-### GPUI and GPUI Fast
+**The challenge: Why recreate what the operating system already does best?**
+
+## Challenging GPUI: high-performance UI, so why keep the CPU and GPU busy?
+
+GPUI proved that Rust and the GPU can build an app as complex as Zed, and it matters for high-performance custom drawing, complex editor UI and GPU control. But real performance is more than frame rate: it is also low idle cost, low power and longer battery life.
+
 
 **GPUI provides GPU rendering for the Zed desktop editor.** [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) is the Rust UI framework of the Zed editor; [GPUI Fast](https://github.com/longbridge/gpui-fast) is Longbridge's fork with retained rendering, scroll layers and native window compositing, and NSH comes from the same team.
 
@@ -255,7 +284,10 @@ For a desktop-only terminal dominated by thousands of views updated every frame,
 
 GPUI Kit users already have advanced desktop components. The gain is carrying the same interaction model to additional hosts. Embed one NSH panel first and verify its document state and keyboard behavior before moving the surrounding workspace.
 
-### Qt
+**The challenge: Less CPU. Less GPU work. More Native. Desktop, Mobile, Web, and TUI.**
+
+## Challenging Qt: can mature professional desktop reach phones and the web?
+
 
 **Qt offers two UI technologies, Widgets and Qt Quick.** Qt Widgets and Qt Quick draw their own controls styled to resemble each platform, with long-built tooling. NSH differs in foundation and model: platform controls rather than styled look-alikes, Rust at the core with a TSX path instead of C++ and QML, HTML on the web, one component model that adapts interaction across mobile, desktop and web, a toolchain designed for automated and AI-driven development, and an Apache-2.0 license for every use.
 
@@ -272,7 +304,10 @@ NSH's approach: on the desktop it provides multiple windows, Dock, DataTable, Ed
 
 For a Qt Widgets workspace, map dock widgets to Dock and test saved layouts and panel state; existing Qt widget code still needs an integration or rewrite.
 
-### Slint
+**The challenge: Professional Desktop. Native Mobile. Real HTML Web. Apache 2.0.**
+
+## Challenging Slint: beyond lightweight, who carries a complete cross-platform product?
+
 
 **Slint provides its own declarative language and renderer**, aimed at desktop and embedded devices and usable from Rust, C++, JavaScript or Python. Both value native performance; NSH's path is each platform's own UI and interaction, HTML on the web, Rust and TSX as app languages instead of a separate markup language, and phones as first-class targets.
 
@@ -287,7 +322,9 @@ On embedded and very low-resource devices Slint keeps its edge; NSH's main groun
 
 For a table-heavy tool, compare the existing table with DataTable using the same model and check paging, column pinning and keyboard selection before porting custom cells.
 
-### Summary: one row per framework
+**The challenge: From lightweight UI to a complete application platform: professional desktop components, native mobile interaction, real HTML on the web, and one layout and development model.**
+
+## Summary: one row per framework
 
 | Framework | Its structural limit | What NSH does instead |
 |---|---|---|
@@ -301,7 +338,28 @@ For a table-heavy tool, compare the existing table with DataTable using the same
 
 ## One framework, more of the product
 
-Real products do not respect framework boundaries: desktop, phones, web and terminal, plus native feel, low power and small size. NSH does not stitch existing frameworks together; it organizes these capabilities on one Rust core:
+Each mainstream framework proved something important:
+
+- **Electron**: a web developer experience can greatly lower the bar for desktop apps.
+- **Tauri**: Rust plus the system web view can cut Electron's runtime cost.
+- **React Native**: TSX/JavaScript and native UI can work together.
+- **Flutter**: one rendering system can give highly consistent visuals.
+- **GPUI**: Rust and the GPU can build complex, high-performance desktop apps.
+- **Qt**: professional desktop apps can have a deeply mature component and engineering system.
+- **Slint**: lightweight declarative UI can cover embedded and resource-constrained devices.
+
+But real product requirements do not arrive along framework boundaries. A typical product meeting produces a list like this:
+
+- macOS, Windows and Linux, and iOS and Android, and the web, and even the terminal.
+- One codebase, sharing as much of the components, layout, business logic and tooling as possible.
+- Native UI, not the whole app wrapped as a web page.
+- A TSX and CSS-style developer experience, and Rust's performance and system access.
+- Low CPU, low GPU work, low power, fast start-up and a small package.
+- Professional desktop Dock, tables, editors, complex layouts and multiple windows, and natural touch, input methods, focus and accessibility on phones.
+- Rust extensions for file indexing, audio and video processing, heavy computation and OS APIs.
+- Embedding into existing apps, and dynamic UI that is signed, authorized and revocable.
+
+NSH aims to stop these needs forcing a team to maintain several incompatible UI frameworks at once. It does not stitch existing frameworks together; on one Rust core it organizes native UI, a web-style developer experience, fine-grained retained mode, professional components, cross-platform backends and module extensions into one application system:
 
 | You want | How NSH does it |
 |---|---|
@@ -316,6 +374,10 @@ Real products do not respect framework boundaries: desktop, phones, web and term
 | Full native interaction | System views, input, focus and accessibility reused where possible |
 | A simpler toolchain | One `nsh` CLI, an Apache-2.0 core |
 | UI delivered after release | Signed packages, capability grants, sandboxing and revocation (subject to platform and app store rules) |
+
+These are not independent wish-list items; a real product can face all of them at once.
+
+**Build once, native everywhere.**
 
 ## Evaluating it: start with a pilot
 
@@ -352,7 +414,7 @@ NSH is designed for custom UI. The app styles its components and can use system 
 
 ## When another option fits better
 
-- The screen is dominated by sustained, dense updates of thousands of views — a market-data terminal streaming tens of thousands of quotes a second, a custom visualization redrawn every frame: GPUI Fast's retained GPU rendering uses a fraction of the CPU (see [GPUI and GPUI Fast](#gpui-and-gpui-fast)).
+- The screen is dominated by sustained, dense updates of thousands of views — a market-data terminal streaming tens of thousands of quotes a second, a custom visualization redrawn every frame: GPUI Fast's retained GPU rendering uses a fraction of the CPU (see the GPUI section above).
 - The app must look pixel-identical on every platform: a framework that draws everything itself, such as Flutter or Slint, gives that by design.
 - You need a large ecosystem of third-party packages today: React Native, Flutter and Qt have years of them.
 - The UI is a document or an existing web page: a web view shows it as it is.
