@@ -2175,6 +2175,35 @@ final class Mounter {
         return windows;
     }
 
+    /**
+     * The control a native component draws for the app (a {@code MenuButton}'s
+     * button) that the test agent presses: in the view of a node whose
+     * {@code testID} is {@code testId}, or labelled {@code label}; null when
+     * none shows.
+     */
+    View componentControl(String testId, String label) {
+        for (int i = 0; i < views.size(); i++) {
+            View v = views.valueAt(i);
+            if (!(v instanceof ComponentBox) || ((ComponentBox) v).component == null) continue;
+            View control = ((ComponentBox) v).component.view();
+            if (!control.isClickable() || !control.isShown()) continue;
+            if (label != null) {
+                CharSequence name = control.getContentDescription();
+                if (name != null && label.contentEquals(name)) return control;
+                continue;
+            }
+            for (int j = 0; j < a11y.size(); j++) {
+                if (!testId.equals(a11y.valueAt(j).testId)) continue;
+                View named = views.get(a11y.keyAt(j));
+                for (View at = v; named != null && at != null;
+                        at = at.getParent() instanceof View ? (View) at.getParent() : null) {
+                    if (at == named) return control;
+                }
+            }
+        }
+        return null;
+    }
+
     /** The window of the topmost dialog shown, or null. */
     View topModalWindow() {
         for (int i = shownModals.size() - 1; i >= 0; i--) {
@@ -2897,7 +2926,7 @@ final class Mounter {
                 (v != null ? v : host).announceForAccessibility(text);
                 break;
             }
-            case 63: {
+            case 64: {
                 textLocale = java.util.Locale.forLanguageTag((String) objects[b.getInt()]);
                 // Services keep copies of the nodes: those with state words read them again.
                 android.view.accessibility.AccessibilityManager manager = host.accessibility();

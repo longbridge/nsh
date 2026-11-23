@@ -278,7 +278,7 @@ pub use crate::{
         effect, element_ref, engine_context, fetch, font_scale, fps_enabled, global, haptic,
         horizontal_size_class, idiom, image_size, is_catalyst, is_desktop, key_label,
         keyboard_duration, keyboard_height, keystroke_label, lifecycle, locale, locale_settings,
-        log_file, measure_text, motion, move_to_trash, next_app_url_change, next_frame,
+        log_file, measure_text, motion, move_to_trash, network, next_app_url_change, next_frame,
         next_notification_press, next_open_files, next_second_instance, next_url_scheme_open,
         notification_permission, on_back_press, on_key, on_key_with, open_auth_session, open_path,
         open_url, os, os_version, perf_stats, pick_files, pick_images, pick_paths, pick_save_path,

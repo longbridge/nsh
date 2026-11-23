@@ -260,6 +260,7 @@ expect Size classes: compact regular
 expect Scheme: light
 expect Lifecycle: active
 expect Wakes: 0
+expect Network: true unknown false false unknown
 expect Time zone: UTC
 expect Intl local time: its zone
 expect Languages: en-US
@@ -285,6 +286,7 @@ covers [nsh] horizontalSizeClass
 covers [nsh] verticalSizeClass
 covers [nsh] lifecycle
 covers [nsh] wakeCount
+covers [nsh] network
 covers [nsh] localeSettings
 # mod-host-channel
 tap id:case-mod-host-channel

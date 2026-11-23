@@ -8,9 +8,28 @@ import test from "node:test";
 
 const source = await readFile(new URL("nsh.js", import.meta.url), "utf8");
 // `Player` is not exported; the page only gets it from `createPlayer`.
-const { Player, keyCode, elementTag, runtimeSheet, charLength, clipChars } = await import(
-  `data:text/javascript,${encodeURIComponent(`${source}\nexport { Player, keyCode, runtimeSheet, charLength, clipChars };`)}`
+const { Player, keyCode, elementTag, runtimeSheet, charLength, clipChars, webNetwork } = await import(
+  `data:text/javascript,${encodeURIComponent(`${source}\nexport { Player, keyCode, runtimeSheet, charLength, clipChars, webNetwork };`)}`
 );
+
+test("the network is the browser's link, none while it is offline", () => {
+  const network = (onLine, connection) => webNetwork({ onLine, connection });
+  // A desktop browser names no link: online, of an unknown kind.
+  assert.deepEqual(network(true, undefined), { kind: "unknown", expensive: false, constrained: false });
+  assert.deepEqual(network(false, undefined), { kind: "none", expensive: false, constrained: false });
+  assert.deepEqual(network(true, { type: "wifi" }), { kind: "wifi", expensive: false, constrained: false });
+  assert.deepEqual(network(true, { type: "ethernet" }), { kind: "wired", expensive: false, constrained: false });
+  assert.deepEqual(network(true, { type: "cellular", saveData: true }), {
+    kind: "cellular",
+    expensive: true,
+    constrained: true,
+  });
+  assert.deepEqual(network(true, { type: "bluetooth" }).kind, "other");
+  assert.deepEqual(network(true, { type: "unknown" }).kind, "unknown");
+  // Offline wins over the link the connection last named.
+  assert.deepEqual(network(false, { type: "wifi" }).kind, "none");
+  assert.deepEqual(webNetwork(undefined).kind, "unknown");
+});
 
 /** A player on a fake engine; `sent` holds `[name, payload]` of the events it got. */
 function fakePlayer(options = {}) {

@@ -64,7 +64,7 @@ TSX app adds its entry (`nsh package App.tsx --target …`).
 `nsh.json` also holds `rust` and `root` (the app's crates and its root component, [Building with Rust](./rust.md)),
 `theme` and `appearance`, `tailwind` (see [Tailwind](./tailwind.md)), `capabilities` (see
 [Sandbox and capabilities](./sandbox-and-capabilities.md)), `android` (`targetSdk`, `usesCleartextTraffic`, `permissions`, `libraries`, `manifestPlaceholders`, `queries` and `application`, [below](#target-api-level)), `ios` and `macos` (the `Info.plist` keys and entitlements
-of their packages, [below](#infoplist-keys-and-entitlements); `ios.extensions`, [app extensions](#app-extensions); `macos.activationPolicy`, a [menu bar app](./macos.md#menu-bar-apps)) and `updater`, which makes desktop packages update themselves
+of their packages, [below](#infoplist-keys-and-entitlements); `ios.extensions`, [app extensions](#app-extensions); `ios.frameworks` and `ios.linkerFlags`, [frameworks](#frameworks-and-linker-flags); `macos.activationPolicy`, a [menu bar app](./macos.md#menu-bar-apps)) and `updater`, which makes desktop packages update themselves
 (see [App Updates](./app-updates.md)) and every native package take [OTA updates](./ota-updates.md); [Project structure](./project-structure.md#nshjson) lists
 every key. A key or value NSH cannot read is reported as a warning and left out, so an app written for a newer NSH
 still builds with an older one, and the warning catches a typo.
@@ -168,7 +168,9 @@ Widgets, Live Activities, notification service extensions and other app extensio
 Each package copies the extensions into `PlugIns/` and gives them the app's `version` and `build`: an extension's
 version should match its app's (App Store Connect flags a mismatch). An extension's identifier must start with the app's (`com.example.app.Widget` for
 `com.example.app`). The simulator package signs them ad hoc; the device package signs each one with the profile for its
-identifier, which it carries as `embedded.mobileprovision`, before it signs the app. Pass one `--profile` for the app
+identifier, which it carries as `embedded.mobileprovision`, before it signs the app. `nsh run --target ios` carries them
+too: the simulator's development host runs every TSX app, so each extension takes the host's identifier in place of
+the app's (`com.longbridge.nsh.host.Widget`).  Pass one `--profile` for the app
 and one for each extension; a profile that names a bundle's identifier is taken before a wildcard that covers it:
 
 ```sh
@@ -187,6 +189,45 @@ data through an app group, which both list in their entitlements. An app that st
   "ios": { "infoPlist": { "NSSupportsLiveActivities": true } }
 }
 ```
+
+### Frameworks and linker flags
+
+An iOS SDK comes as an XCFramework (`.xcframework`) or a framework (`.framework`), with a static or a dynamic library
+inside. The app's [Rust crate](./rust.md) calls it; `ios.frameworks` lists it, relative to `nsh.json`, and
+`ios.linkerFlags` adds what the SDK's instructions ask of the link, such as `-ObjC` and the system libraries and
+frameworks it uses. An nshm lists its own in its `Cargo.toml`
+([What the packaged app needs](./nshm.md#what-the-packaged-app-needs)), and the apps that use it list nothing:
+
+```json
+{
+  "ios": {
+    "frameworks": [
+      "ios/Vendor/Analytics.xcframework",
+      { "path": "ios/Vendor/Ads.xcframework", "forceLoad": true }
+    ],
+    "linkerFlags": ["-ObjC", "-lsqlite3", "-framework", "AdServices"]
+  }
+}
+```
+
+| Key | Meaning |
+|---|---|
+| `path` | The `.xcframework` or `.framework`. An entry that is a string is its path. |
+| `forceLoad` | Links all of a static library (`-force_load`), not only the parts the app's code calls, for SDKs whose instructions ask for it. |
+
+- Every iOS executable built with the app's crates links them: packages, and `nsh run`'s development hosts for the
+  simulator and Mac Catalyst. Each build takes the XCFramework's library for its target (devices, the simulator,
+  Mac Catalyst); an XCFramework without one for the target stops the build with an error naming those it has.
+- A static library becomes part of the app's executable. A dynamic framework is copied into the app's `Frameworks/`
+  and signed before the app: ad hoc for the simulator, with the `--sign` identity for devices.
+- A dynamic framework keeps its privacy manifest in its own bundle, where App Store Connect reads it. A static
+  library's code is the app's, so iOS packages add what its privacy manifest declares to the app's
+  `PrivacyInfo.xcprivacy` ([Privacy manifest](#privacy-manifest)).
+- Each flag is one argument, passed as written after the libraries (`"-framework", "AdServices"` are two). Paths in
+  flags are not resolved against `nsh.json`: list a library in `frameworks` to link it.
+- The same crates also build for other platforms without the SDK: call it under `#[cfg(target_os = "ios")]`.
+- The frameworks are linked with the app's Rust code, so an app without crates (`rust` or an nshm) cannot list them:
+  `nsh package` stops with an error.
 
 ## Android
 
@@ -253,18 +294,19 @@ Development builds (`nsh run --target android`) always allow plain HTTP: they lo
 
 ### Permissions
 
-The manifest declares the permissions NSH's own features need: `INTERNET`, `POST_NOTIFICATIONS` for
+The manifest declares the permissions NSH's own features need: `INTERNET`, `ACCESS_NETWORK_STATE` for
+[`network()`](./device-and-environment.md#the-network), `POST_NOTIFICATIONS` for
 [notifications](./sandbox-and-capabilities.md#notifications), `RECORD_AUDIO` and `CAMERA` for a web view's `media`. `android.permissions` adds
 others, for code of the app or an extension that calls Android itself: a bare name is one of Android's
 (`android.permission.<NAME>`), a dotted one is written as it is.
 
 ```json
 {
-  "android": { "permissions": ["ACCESS_NETWORK_STATE", "com.example.permission.READ_ORDERS"] }
+  "android": { "permissions": ["ACCESS_WIFI_STATE", "com.example.permission.READ_ORDERS"] }
 }
 ```
 
-A normal permission such as `ACCESS_NETWORK_STATE` is granted when the app is installed. A runtime permission
+A normal permission such as `ACCESS_WIFI_STATE` is granted when the app is installed. A runtime permission
 (`ACCESS_FINE_LOCATION`, say) is only declared: the app's own code still asks the user for it. The TSX development
 host (`nsh run --target android` of a TSX app) declares none of these; a Rust app's `nsh run` builds its package and
 declares them.
@@ -284,13 +326,16 @@ Android library (`.aar`) and dex files, relative to `nsh.json`. An nshm lists it
 
 The package turns the jars into dex with the SDK's `d8` and carries their classes after NSH's runtime, where the
 app's class loader finds them. The files a jar carries besides its classes (`META-INF/services/...` for
-`ServiceLoader`, for one) go to the root of the package. A dex file goes in as it is, without `d8`, so a class it defines again besides a jar is not found
+`ServiceLoader`, for one) go to the root of the package; those under `assets/` are the package's assets, as Android's
+Gradle plugin makes them. A dex file goes in as it is, without `d8`, so a class it defines again besides a jar is not found
 when packaging. A file listed twice, or by two
 crates, goes in once; a class that two different files define stops the build, naming both files. An app that lists
 no libraries is packaged as before, without `d8`.
 
 The libraries are local files: NSH does not download them or resolve Maven dependencies, so list the libraries an SDK
-depends on as well.
+depends on as well. The third-party tool [nsh-maven](https://github.com/SuperNSH/maven) resolves a library from Maven
+repositories with what it depends on (`nsh-maven add com.google.firebase:firebase-messaging:26.0.1`), downloads the
+files into the app and lists them here; with `--crate` it lists them in an nshm crate's `Cargo.toml`.
 
 An Android library (`.aar`) brings more than its classes, which go the jars' way: its native libraries
 (`jni/<abi>/*.so`) go in for the ABIs the package has, stored uncompressed like NSH's own; its assets join the app's
@@ -323,8 +368,9 @@ Resources share one namespace, as in any Android app. When several define a reso
 lists, an earlier one over a later one, then its crates' libraries, the crate whose name sorts first over the others.
 A style is taken whole from the one that wins, not item by item. What NSH makes for the package (its icon, launch
 screen and notification sounds) is the package's in every configuration: a library's resources of those names are left
-out, with a warning. A library's code that reads a resource no library listed defines stops the build, naming the
-library and the resource: list the library that has it.
+out, with a warning. A library's `R.txt` also lists the resources of the libraries it was built with; those no library
+listed defines are left out of its `R` class, with one note. A library's code that reads such a resource stops the
+build, naming the library, the class and the resource: list the library that has it.
 
 Compile your own Java sources against the platform's `android.jar` into a jar:
 
@@ -595,7 +641,8 @@ wrong type or an entry without all its keys is left out with a warning. What App
 category and reason codes themselves.
 
 NSH's runtime is part of the app's executable, so the APIs it calls count as the app's: declare these with the app's
-own.
+own. So is the code of the static libraries in `ios.frameworks`, whose privacy manifests packages add to the app's
+([Frameworks and linker flags](#frameworks-and-linker-flags)).
 
 | Category | What in NSH calls it | Reason |
 |---|---|---|
@@ -732,7 +779,7 @@ A packaged app declares the hardware NSH's own features use, from its `nsh.json`
 | Web pages that capture media ([`capabilities.webview.media`](./sandbox-and-capabilities.md#webview)) | `NSMicrophoneUsageDescription`, `NSCameraUsageDescription`; on macOS the entitlements `com.apple.security.device.audio-input` and `com.apple.security.device.camera` | `RECORD_AUDIO`, `CAMERA` |
 | [`Notifications`](../modules/nsh.md#notifications), when the app grants `notifications` or declares no capabilities | | `POST_NOTIFICATIONS` |
 
-Every Android package also declares `INTERNET`. A usage description is what the system shows when the app first asks;
+Every Android package also declares `INTERNET` and `ACCESS_NETWORK_STATE`. A usage description is what the system shows when the app first asks;
 the app's `infoPlist` words it its own way ([above](#infoplist-keys-and-entitlements)).
 
 On iOS and macOS, an app's own [Rust crate](./rust.md) reaches other hardware through the system's frameworks, with the
@@ -760,6 +807,9 @@ assets it imports, next to the prebuilt runtime:
 | Linux | the `nsh-linux-app` executable, renamed `<Name>` | `<Name>/nsh/bundle.nshc`, `nsh/assets/…` |
 | Windows | the `nsh-windows-app.exe` executable, renamed `<Name>.exe` | `<Name>\nsh\bundle.nshc`, `nsh\assets\…` |
 | Web | `nsh.<digest>.wasm`, `nsh.<digest>.js` | `<Name>/app.<digest>.js`, `assets/…`, `index.html` |
+
+An iOS package also carries the dynamic frameworks the app lists in `Frameworks/`
+([Frameworks and linker flags](#frameworks-and-linker-flags)).
 
 A packaged app registers no [native components](./native-components.md); for those, embed NSH in your own app.
 

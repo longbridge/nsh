@@ -823,6 +823,9 @@ topmost `<modal>`'s dialog window, else the activity's) as a finger's, with drag
 iOS; typing as a keyboard's `KeyEvent`s to the view focused in that window (`KeyCharacterMap`; what no key types is
 committed through the field's input connection), Ctrl+A first as a shortcut, as the window's input stage offers it;
 back is the activity's back press; dialogs are answered with a tap on the `AlertDialog`'s button (back to close it);
+the system menus of `MenuButton` and `ContextMenu` (`SystemMenus` popup windows) are chosen from with a tap on the
+labelled row in the menu's window once it stays put, submenu by submenu, and closed with the back key; a
+`MenuButton`'s button is pressed by the `testID` of the view it is in or by its label;
 screenshots copy the activity's window and every window over it (each shown `<modal>`'s dialog in order, then the
 system alert) from their surfaces with `PixelCopy` after a frame drawn with the current state, each composited at its
 place over its dim, so they hold what the GPU draws (video, filters, the backdrop's blur), on an emulator without a
@@ -1087,6 +1090,11 @@ for the release runner in both. The test runner links QuickJS, so the first `nsh
   `nsh.lock` and the app crate's `[dependencies]` (`cargo_toml.rs`), restoring them on error. `platform_program`
   builds a platform nshm's `nsh-platform-<name>` from a copy in the app's `.nsh/platforms/<name>` (so Cargo writes
   nothing into the shared installation); `platforms::dispatch` tries it before `PATH`.
+- `rust_app::cargo_nshm`: the Rust nshm the app's own crates (`"rust"`) reach through Cargo alone are linked as well,
+  after the listed crates, by package name: packages of the crates' graph (normal dependencies) that depend on
+  `nsh-core` and have a `#[native_module]` at their root (`specifier_of`, the test `manifest.rs` applies). The
+  generated crates depend on each where Cargo takes it for the app (its path, registry version or Git reference), with
+  no features of their own; one `"dependencies"` lists too is linked once, as listed (`with_found`).
 - The bundler aliases each locked TSX export to its installed file (`ResolveSetup::with_nshm`, after the app's own
   `resolve.alias`), so it compiles into the app's bundle; `init::write_types` writes `.nsh/types/<specifier>.d.ts`
   re-exporting the source for `nsh check`.
@@ -1105,7 +1113,7 @@ Builds that link nothing of the app's own (`rust_app.rs`):
   with the binary's size and time in `<workspace>/.built/`, and returns the binary while both hold. Even a no-op Cargo
   takes a moment, and a Cargo that copies its binaries anew each time makes macOS check the signature again on launch.
 
-`nsh check` does not `cargo check` nshm (only crates outside `~/.nsh/nshms`). Not yet: a registry of TSX nshm, prebuilt
+`nsh check` does not `cargo check` nshm (only `nsh.json`'s crates outside `~/.nsh/nshms`). Not yet: a registry of TSX nshm, prebuilt
 binaries, cleaning old versions, per-target support checks and an OTA check of the shell's linked modules.
 
 ### What crates declare for packages (`[package.metadata.nsh]`)

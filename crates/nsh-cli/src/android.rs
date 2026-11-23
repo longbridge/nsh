@@ -16,6 +16,7 @@ use serde::Deserialize;
 
 use crate::apple::{Color, LaunchScreen, Themed};
 
+mod class_file;
 mod libraries;
 mod library_manifest;
 mod library_resources;
@@ -171,6 +172,18 @@ impl Sdk {
     pub(crate) fn strip(&self, library: &Path, to: &Path) -> anyhow::Result<()> {
         run(Command::new(self.ndk_toolchain()?.join("bin/llvm-strip"))
             .arg("--strip-unneeded")
+            .arg("-o")
+            .arg(to)
+            .arg(library))
+    }
+
+    /// Writes `library` to `to` without its debug info, keeping its symbol
+    /// table (the names in crash reports and backtraces): an app's or the
+    /// development host's debug `libnsh.so`, whose debug info is most of it
+    /// and which APKs store uncompressed.
+    pub(crate) fn strip_debug(&self, library: &Path, to: &Path) -> anyhow::Result<()> {
+        run(Command::new(self.ndk_toolchain()?.join("bin/llvm-strip"))
+            .arg("--strip-debug")
             .arg("-o")
             .arg(to)
             .arg(library))
@@ -859,7 +872,11 @@ fn xml_attribute(value: &str) -> String {
 /// The permissions NSH declares: its own, then the app's
 /// (`android.permissions`), each once.
 fn declared_permissions(apk: &Apk<'_>) -> Vec<String> {
-    let mut permissions = vec!["android.permission.INTERNET".to_owned()];
+    // `ACCESS_NETWORK_STATE`: the default network's callback (`network()`).
+    let mut permissions = vec![
+        "android.permission.INTERNET".to_owned(),
+        "android.permission.ACCESS_NETWORK_STATE".to_owned(),
+    ];
     for (declared, name) in [
         (apk.notifications, "POST_NOTIFICATIONS"),
         (apk.microphone, "RECORD_AUDIO"),
@@ -1575,6 +1592,107 @@ impl Drop for Reverse {
                 "could not remove the adb reverse of {} on {}",
                 self.port, self.serial
             ));
+        }
+    }
+}
+
+/// Whose data an installed package holds: what `install` may do when the
+/// device has no room for an update.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AppData {
+    /// The development host's: apps under test and in development start
+    /// from it again, so the old install may go to make room.
+    Disposable,
+    /// An app's own: never removed without the user.
+    Kept,
+}
+
+/// What a failed `adb install` leads to.
+#[derive(Debug, PartialEq, Eq)]
+enum InstallFailure {
+    /// Uninstall the package and install again.
+    Reinstall,
+    /// Stop with this message.
+    Error(String),
+}
+
+/// What `adb install` printed when it failed, without the Java stack trace
+/// the package manager adds to an exception.
+fn install_reason(output: &str) -> String {
+    output
+        .lines()
+        .take_while(|line| !line.trim_start().starts_with("at "))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_owned()
+}
+
+/// Decides what follows a failed `adb install` of `package` on `serial`
+/// that printed `output`: an update the device has no room for (the old
+/// and the new APK side by side) is installed again after the old one goes,
+/// when its data is [`AppData::Disposable`].
+fn install_failure(output: &str, package: &str, serial: &str, data: AppData) -> InstallFailure {
+    let output = install_reason(output);
+    // `Failure [INSTALL_FAILED_INSUFFICIENT_STORAGE]`, or the session's
+    // own check before any APK is written.
+    let no_room = output.contains("INSTALL_FAILED_INSUFFICIENT_STORAGE")
+        || output.contains("not enough space");
+    match (no_room, data) {
+        (true, AppData::Disposable) => InstallFailure::Reinstall,
+        (true, AppData::Kept) => InstallFailure::Error(format!(
+            "{serial} has no room to update {package}: free space on it, or uninstall the \
+             app first (this deletes its data): adb -s {serial} uninstall {package}\n{output}"
+        )),
+        (false, _) => InstallFailure::Error(format!("adb install failed: {output}")),
+    }
+}
+
+/// Installs (or updates) `apk`, package `package`, on `serial` with `adb
+/// install` and `flags` (`-r`, `-t`). A [`AppData::Disposable`] package
+/// whose update the device has no room for is uninstalled and installed
+/// again; for an app's own the error says how to make room.
+pub(crate) fn install(
+    sdk: &Sdk,
+    serial: &str,
+    apk: &Path,
+    package: &str,
+    flags: &[&str],
+    data: AppData,
+) -> anyhow::Result<()> {
+    let attempt = || -> anyhow::Result<Option<String>> {
+        let output = Command::new(sdk.adb())
+            .args(["-s", serial, "install"])
+            .args(flags)
+            .arg(apk)
+            .output()
+            .context("run adb")?;
+        if output.status.success() {
+            return Ok(None);
+        }
+        let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+        text.push_str(&String::from_utf8_lossy(&output.stderr));
+        Ok(Some(text))
+    };
+    let Some(output) = attempt()? else {
+        return Ok(());
+    };
+    match install_failure(&output, package, serial, data) {
+        InstallFailure::Error(message) => bail!(message),
+        InstallFailure::Reinstall => {
+            crate::ui::warn(format!(
+                "{serial} has no room to update {package}: uninstalling it to install again"
+            ));
+            // Not installed (removed meanwhile) is no reason to stop.
+            let _ = adb(sdk, serial, &["uninstall", package]);
+            match attempt()? {
+                None => Ok(()),
+                Some(output) => bail!(
+                    "{serial} has no room for {package} even when it is not installed: free \
+                     space on it (an emulator: a larger data partition, or wipe its data)\n{}",
+                    install_reason(&output)
+                ),
+            }
         }
     }
 }
@@ -2377,7 +2495,7 @@ mod tests {
         assert_eq!(manifest.matches("android.permission.INTERNET").count(), 1);
         assert!(
             manifest.contains(
-                "<uses-permission android:name=\"android.permission.INTERNET\" />\n    \
+                "<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\" />\n    \
              <uses-permission android:name=\"android.permission.WAKE_LOCK\" />\n    <!--"
             ),
             "{manifest}"
@@ -2447,6 +2565,7 @@ mod tests {
     const MANIFEST: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.app">
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Text actions (Translate and the like) the selection menu offers,
         as TextView's: Android 11+ hides other apps' activities otherwise. -->
     <queries>
@@ -2482,6 +2601,7 @@ mod tests {
     #[test]
     fn an_app_declares_the_permissions_it_lists_once() {
         let listed = [
+            "android.permission.READ_CONTACTS".to_owned(),
             "android.permission.ACCESS_NETWORK_STATE".to_owned(),
             "android.permission.POST_NOTIFICATIONS".to_owned(),
             "com.example.permission.READ".to_owned(),
@@ -2497,7 +2617,7 @@ mod tests {
                 .count()
         };
         assert_eq!(
-            declared("android.permission.ACCESS_NETWORK_STATE"),
+            declared("android.permission.READ_CONTACTS"),
             1,
             "{manifest}"
         );
@@ -2505,15 +2625,30 @@ mod tests {
         // NSH's own stay, once, even when the app lists them too.
         assert_eq!(declared("android.permission.INTERNET"), 1, "{manifest}");
         assert_eq!(
+            declared("android.permission.ACCESS_NETWORK_STATE"),
+            1,
+            "{manifest}"
+        );
+        let own = manifest_of(&apk(false, false));
+        for name in [
+            "android.permission.INTERNET",
+            "android.permission.ACCESS_NETWORK_STATE",
+        ] {
+            assert!(
+                own.contains(&format!("<uses-permission android:name=\"{name}\" />")),
+                "{own}"
+            );
+        }
+        assert_eq!(
             declared("android.permission.POST_NOTIFICATIONS"),
             1,
             "{manifest}"
         );
         // Permissions go before the application, as Android reads them.
         let application = manifest.find("<application").unwrap();
-        let at = manifest.find("ACCESS_NETWORK_STATE").unwrap();
+        let at = manifest.find("READ_CONTACTS").unwrap();
         assert!(at < application, "{manifest}");
-        assert!(!manifest_of(&apk(false, false)).contains("ACCESS_NETWORK_STATE"));
+        assert!(!manifest_of(&apk(false, false)).contains("READ_CONTACTS"));
     }
 
     #[test]
@@ -2733,5 +2868,62 @@ mod tests {
         let mut expected = b"\x0a\x15\x0a\x0dlib/arm64-v8a\x12\x04\x0a\x02\x08\x03".to_vec();
         expected.extend_from_slice(b"\x0a\x17\x0a\x0flib/armeabi-v7a\x12\x04\x0a\x02\x08\x02");
         assert_eq!(super::native_pb(&abis).unwrap(), expected);
+    }
+
+    /// An update the device has no room for: the development host's old
+    /// install goes and it is installed again; an app's own stays, and the
+    /// error says how to make room. Other failures stop as they were.
+    #[test]
+    fn an_install_without_room_reinstalls_only_the_development_host() {
+        use super::{AppData, InstallFailure, install_failure};
+        let full = "Performing Streamed Install\n\
+                    adb: failed to install /w/NshDev.apk: Failure \
+                    [INSTALL_FAILED_INSUFFICIENT_STORAGE: Failed to override installation location]\n";
+        // API 36's, when the install session finds no room.
+        let session = "Performing Streamed Install\n\
+                       adb: failed to install /w/NshDev.apk: \n\
+                       Exception occurred while executing 'install':\n\
+                       android.os.ParcelableException: java.io.IOException: Requested internal \
+                       only, but not enough space\n\
+                       \tat android.util.ExceptionUtils.wrap(ExceptionUtils.java:34)\n\
+                       \tat com.android.server.pm.PackageInstallerService.createSession(\
+                       PackageInstallerService.java:671)\n";
+        for output in [full, session] {
+            assert_eq!(
+                install_failure(
+                    output,
+                    "com.example.host",
+                    "emulator-5554",
+                    AppData::Disposable
+                ),
+                InstallFailure::Reinstall
+            );
+            let InstallFailure::Error(message) =
+                install_failure(output, "com.example.app", "emulator-5554", AppData::Kept)
+            else {
+                panic!("an app's own install is never removed");
+            };
+            assert!(
+                message.starts_with("emulator-5554 has no room to update com.example.app"),
+                "{message}"
+            );
+            assert!(
+                message.contains("adb -s emulator-5554 uninstall com.example.app"),
+                "{message}"
+            );
+            assert!(!message.contains("ExceptionUtils"), "{message}");
+        }
+        let signatures = "Performing Streamed Install\n\
+                          adb: failed to install /w/NshDev.apk: Failure \
+                          [INSTALL_FAILED_UPDATE_INCOMPATIBLE: Existing package signatures do not match]";
+        assert_eq!(
+            install_failure(
+                signatures,
+                "com.example.host",
+                "emulator-5554",
+                AppData::Disposable
+            ),
+            InstallFailure::Error(format!("adb install failed: {signatures}"))
+        );
     }
 }

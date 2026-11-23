@@ -387,6 +387,19 @@ fn system_bar(view: &UIView) -> Option<(Retained<UIView>, &'static str)> {
     None
 }
 
+/// Whether `view` is in the edit menu UIKit shows for a selection
+/// (`UIEditMenuInteraction`'s; its views are private, found by name).
+fn in_edit_menu(view: &UIView) -> bool {
+    let mut at = Some(view.retain());
+    while let Some(v) = at {
+        if crate::navigation::class_named(&v, "EditMenuContainerView") {
+            return true;
+        }
+        at = v.superview();
+    }
+    false
+}
+
 /// The bars ([`bar_kind`]) showing in `view`'s subtree.
 fn shown_bars(view: &UIView, out: &mut Vec<Retained<UIView>>) {
     if view.isHidden() || view.alpha() < 0.01 {
@@ -526,6 +539,11 @@ impl Native for IosNative {
             // around it that takes the touch for it.
             if hit.isDescendantOfView(&target) || target.isDescendantOfView(&hit) {
                 return None;
+            }
+            // A selection's edit menu (Copy, Select All) stays up after the
+            // long press that opened it, over the app in the same window.
+            if in_edit_menu(&hit) {
+                return Some("the edit menu".to_owned());
             }
             // Another of the app's views is the model's to find
             // (`Scene::pick`), a `TabBar` it mounts too; only what UIKit

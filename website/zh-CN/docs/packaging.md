@@ -56,7 +56,7 @@ nsh package App.tsx --target ios-simulator --run
 | `build` | number | `1` | 构建号（`CFBundleVersion`、`versionCode`）。每次上传新版本都要递增。 |
 | `icon` | string \| object | 无 | 一张正方形 PNG，最好是 1024×1024，路径相对于 `nsh.json`；也可按平台分别提供（[图标](#图标)）。 |
 
-`nsh.json` 还包含 `rust` 和 `root`（应用的 crate 和根组件，见[用 Rust 开发](./rust.md)）、`theme` 和 `appearance`、`tailwind`（见 [Tailwind](./tailwind.md)）、`capabilities`（见[沙箱与能力](./sandbox-and-capabilities.md)）、`android`（`targetSdk`、`usesCleartextTraffic`、`permissions`、`libraries`、`manifestPlaceholders`、`queries` 和 `application`，见下文“目标 API 级别”“明文 HTTP”“权限”“Java 代码”和“组件与 queries”）、`ios` 和 `macos`（对应包的 `Info.plist` 键和 entitlements，见[下文](#infoplist-键与-entitlements)；`ios.extensions` 是[应用扩展](#应用扩展)；`macos.activationPolicy` 用于[菜单栏应用](./macos.md#菜单栏应用)）以及让桌面包自我更新、让所有原生包接收 [OTA 更新](./ota-updates.md)的 `updater`（见[应用更新](./app-updates.md)）；[项目结构](./project-structure.md#nshjson)列出了所有键。NSH 读不懂的键或值会给出警告并被略过：为更新的 NSH 写的应用在较旧的 NSH 上照样能构建，拼写错误也会在警告里看到。
+`nsh.json` 还包含 `rust` 和 `root`（应用的 crate 和根组件，见[用 Rust 开发](./rust.md)）、`theme` 和 `appearance`、`tailwind`（见 [Tailwind](./tailwind.md)）、`capabilities`（见[沙箱与能力](./sandbox-and-capabilities.md)）、`android`（`targetSdk`、`usesCleartextTraffic`、`permissions`、`libraries`、`manifestPlaceholders`、`queries` 和 `application`，见下文“目标 API 级别”“明文 HTTP”“权限”“Java 代码”和“组件与 queries”）、`ios` 和 `macos`（对应包的 `Info.plist` 键和 entitlements，见[下文](#infoplist-键与-entitlements)；`ios.extensions` 是[应用扩展](#应用扩展)；`ios.frameworks` 和 `ios.linkerFlags` 见 [Framework 与链接参数](#framework-与链接参数)；`macos.activationPolicy` 用于[菜单栏应用](./macos.md#菜单栏应用)）以及让桌面包自我更新、让所有原生包接收 [OTA 更新](./ota-updates.md)的 `updater`（见[应用更新](./app-updates.md)）；[项目结构](./project-structure.md#nshjson)列出了所有键。NSH 读不懂的键或值会给出警告并被略过：为更新的 NSH 写的应用在较旧的 NSH 上照样能构建，拼写错误也会在警告里看到。
 
 上表中的每个键都可以在命令行上覆盖，这在 CI 中很方便：
 
@@ -152,6 +152,8 @@ security find-identity -v -p codesigning
 App Store Connect 会给出提示）。扩展的
 identifier 必须以应用的开头（应用为 `com.example.app` 时，扩展为 `com.example.app.Widget`）。模拟器包用 ad hoc 签名；
 真机包先用各扩展 identifier 对应的描述文件给它签名，并把描述文件作为 `embedded.mobileprovision` 放进扩展，再签名应用。
+`nsh run --target ios` 也会带上扩展：模拟器里的开发宿主运行所有 TSX 应用，所以每个扩展的 identifier 改用宿主的开头
+（`com.longbridge.nsh.host.Widget`）。
 给应用传一个 `--profile`，每个扩展再各传一个；写明了 bundle identifier 的描述文件优先于覆盖它的通配描述文件：
 
 ```sh
@@ -170,6 +172,41 @@ nsh package --target ios \
   "ios": { "infoPlist": { "NSSupportsLiveActivities": true } }
 }
 ```
+
+### Framework 与链接参数
+
+iOS SDK 以 XCFramework（`.xcframework`）或 framework（`.framework`）的形式提供，里面是静态库或动态库。应用的
+[Rust crate](./rust.md) 调用它；`ios.frameworks` 列出它，路径相对于 `nsh.json`；`ios.linkerFlags` 加上 SDK 说明里要求的链接参数，
+例如 `-ObjC` 以及它用到的系统库和系统 framework。nshm 在自己的 `Cargo.toml` 里列出自己的
+（见[打包的应用需要什么](./nshm.md#打包的应用需要什么)），使用它的应用无需再列：
+
+```json
+{
+  "ios": {
+    "frameworks": [
+      "ios/Vendor/Analytics.xcframework",
+      { "path": "ios/Vendor/Ads.xcframework", "forceLoad": true }
+    ],
+    "linkerFlags": ["-ObjC", "-lsqlite3", "-framework", "AdServices"]
+  }
+}
+```
+
+| 键 | 含义 |
+|---|---|
+| `path` | `.xcframework` 或 `.framework`。写成字符串的条目就是它的路径。 |
+| `forceLoad` | 链接静态库的全部内容（`-force_load`），而不只是应用代码调用到的部分，用于 SDK 说明里要求这样做的情况。 |
+
+- 用应用的 crate 构建的每个 iOS 可执行文件都会链接它们：打出的包，以及 `nsh run` 在模拟器和 Mac Catalyst 上的开发宿主。
+  每次构建取 XCFramework 里对应目标（真机、模拟器、Mac Catalyst）的库；XCFramework 没有该目标的库时，构建会报错并列出它有的库。
+- 静态库成为应用可执行文件的一部分。动态 framework 会被复制到应用的 `Frameworks/`，并先于应用签名：模拟器用 ad hoc 签名，
+  真机用 `--sign` 给出的身份。
+- 动态 framework 的隐私清单留在它自己的 bundle 里，App Store Connect 在那里读取。静态库的代码属于应用，所以 iOS 包会把它的隐私清单
+  声明的内容加进应用的 `PrivacyInfo.xcprivacy`（见[隐私清单](#隐私清单)）。
+- 每个参数是一个独立的参数，按原样放在库之后传给链接器（`"-framework", "AdServices"` 是两个）。参数里的路径不会相对于 `nsh.json`
+  解析：要链接一个库，请把它列进 `frameworks`。
+- 同样的 crate 也会在没有这个 SDK 的其他平台上构建：请在 `#[cfg(target_os = "ios")]` 下调用它。
+- 这些 framework 与应用的 Rust 代码一起链接，所以没有 crate（`rust` 或 nshm）的应用不能列出它们：`nsh package` 会报错停止。
 
 ## Android
 
@@ -231,17 +268,17 @@ platform（`sdkmanager "platforms;android-36"`）：
 
 ### 权限
 
-manifest 会声明 NSH 自身功能需要的权限：`INTERNET`，[通知](./sandbox-and-capabilities.md#notifications)用的 `POST_NOTIFICATIONS`，web view 的 `media`
+manifest 会声明 NSH 自身功能需要的权限：`INTERNET`，[`network()`](./device-and-environment.md#网络) 用的 `ACCESS_NETWORK_STATE`，[通知](./sandbox-and-capabilities.md#notifications)用的 `POST_NOTIFICATIONS`，web view 的 `media`
 用的 `RECORD_AUDIO` 和 `CAMERA`。`android.permissions` 用来添加其他权限，供应用或扩展中直接调用 Android 的代码使用：不带点的名字是
 Android 自己的权限（`android.permission.<NAME>`），带点的名字按原样写入。
 
 ```json
 {
-  "android": { "permissions": ["ACCESS_NETWORK_STATE", "com.example.permission.READ_ORDERS"] }
+  "android": { "permissions": ["ACCESS_WIFI_STATE", "com.example.permission.READ_ORDERS"] }
 }
 ```
 
-`ACCESS_NETWORK_STATE` 这样的普通权限在安装应用时授予。运行时权限（例如 `ACCESS_FINE_LOCATION`）只是被声明：仍需应用自己的代码向用户
+`ACCESS_WIFI_STATE` 这样的普通权限在安装应用时授予。运行时权限（例如 `ACCESS_FINE_LOCATION`）只是被声明：仍需应用自己的代码向用户
 申请。TSX 开发宿主（TSX 应用的 `nsh run --target android`）不声明这些权限；Rust 应用的 `nsh run` 会构建它的包，因此会声明。
 
 ### Java 代码
@@ -257,10 +294,12 @@ Rust 通过 JNI 可以调用大多数 Android API，但有些 API 需要应用�
 ```
 
 打包时用 SDK 的 `d8` 把 jar 转换成 dex，把其中的类放在 NSH 运行时之后，应用的类加载器因此能找到它们。jar 里类以外的文件（例如
-供 `ServiceLoader` 读取的 `META-INF/services/...`）放到包的根目录。dex 文件按原样放入，不经过 `d8` 合并，所以它和 jar 里重复定义的类在打包时不会被发现。同一个文件被列出两次或被两个 crate
+供 `ServiceLoader` 读取的 `META-INF/services/...`）放到包的根目录；其中 `assets/` 下的文件和 Android 的 Gradle 插件一样作为包的 asset。dex 文件按原样放入，不经过 `d8` 合并，所以它和 jar 里重复定义的类在打包时不会被发现。同一个文件被列出两次或被两个 crate
 列出时只放入一次；两个不同的文件定义了同一个类时构建会停止，并指出这两个文件。不列出任何库的应用照旧打包，不会运行 `d8`。
 
-这些库都是本地文件：NSH 不下载它们，也不解析 Maven 依赖，所以 SDK 依赖的库也要一并列出。
+这些库都是本地文件：NSH 不下载它们，也不解析 Maven 依赖，所以 SDK 依赖的库也要一并列出。第三方工具 [nsh-maven](https://github.com/SuperNSH/maven)
+会从 Maven 仓库解析一个库及其依赖（`nsh-maven add com.google.firebase:firebase-messaging:26.0.1`），把文件下载到应用中并在这里列出；
+加上 `--crate` 时则列在 nshm crate 的 `Cargo.toml` 里。
 
 Android 库（`.aar`）带来的不只是类（类按 jar 的方式处理）：它的原生库（`jni/<abi>/*.so`）按包含的 ABI 放入，和 NSH 自己的一样不压缩存放；
 它的 assets 和应用自己的 assets 放在一起；它的资源（`res/`）并入包里的资源，库的代码照它构建时那样通过自己的 `R` 类读取；它 manifest 里的权限、功能、`<queries>` 和组件并入应用的 manifest，相对类名（`.PushService`）
@@ -285,7 +324,8 @@ Android 库（`.aar`）带来的不只是类（类按 jar 的方式处理）：�
 和所有 Android 应用一样，资源共用一个命名空间。几处为同一配置（密度、夜间模式、语言等）定义了同名资源时，包自己的资源（`android/res/`）
 优先，其次是应用 `nsh.json` 列出的库（先列的优先于后列的），再次是各 crate 的库（crate 名排序靠前的优先）。样式整个取自胜出的一方，
 不逐条合并。NSH 为包生成的资源（图标、启动画面和通知音）在所有配置下都归包自己：库里同名的资源会被去掉，并给出警告。
-库的代码读取的某个资源如果没有任何列出的库定义，构建会停止并指出这个库和资源：把定义它的库也列上。
+库的 `R.txt` 也会列出它构建时所依赖的库的资源；没有任何列出的库定义的那些不会进入它的 `R` 类，只汇总提示一次。库的代码读取了这样的资源时，
+构建会停止并指出这个库、读取它的类和资源：把定义它的库也列上。
 
 自己的 Java 源码先针对平台的 `android.jar` 编译，再打成 jar：
 
@@ -527,7 +567,8 @@ entitlements：
 `NSPrivacyAccessedAPITypes`）及其条目里的键。未知的键、类型不对的值或缺少键的条目会被略过并给出警告；App Store Connect
 按原样会拒绝的内容（没有理由的条目、开启跟踪却没有域名）也会给出警告。类别和理由代码本身仍由 App Store Connect 检查。
 
-NSH 的运行时是应用可执行文件的一部分，所以它调用的 API 也算作应用的：请把下面这些和应用自己的一起声明。
+NSH 的运行时是应用可执行文件的一部分，所以它调用的 API 也算作应用的：请把下面这些和应用自己的一起声明。`ios.frameworks` 里静态库的代码
+同样属于应用，打包时会把它们的隐私清单加进应用的清单（见 [Framework 与链接参数](#framework-与链接参数)）。
 
 | 类别 | NSH 中调用它的部分 | 理由 |
 |---|---|---|
@@ -642,7 +683,7 @@ Android 上 `android.launchScreen` 用同样的键。打包时给应用生成一
 | 采集媒体的网页（[`capabilities.webview.media`](./sandbox-and-capabilities.md#webview)） | `NSMicrophoneUsageDescription`、`NSCameraUsageDescription`；macOS 上还有 entitlements `com.apple.security.device.audio-input` 和 `com.apple.security.device.camera` | `RECORD_AUDIO`、`CAMERA` |
 | [`Notifications`](../modules/nsh.md#notifications)，应用授予 `notifications` 或没有声明 capabilities 时 | | `POST_NOTIFICATIONS` |
 
-每个 Android 包还声明了 `INTERNET`。权限说明文字是应用第一次请求时系统显示的内容，应用可以在 `infoPlist` 中改用自己的措辞
+每个 Android 包还声明了 `INTERNET` 和 `ACCESS_NETWORK_STATE`。权限说明文字是应用第一次请求时系统显示的内容，应用可以在 `infoPlist` 中改用自己的措辞
 （见[上文](#infoplist-keys-and-entitlements)）。
 
 在 iOS 和 macOS 上，应用自己的 [Rust crate](./rust.md) 通过系统框架访问其他硬件，所需的权限说明文字写在 `infoPlist` 中，macOS
@@ -666,6 +707,8 @@ Rust 应用的包就是它的 runner：用你的 crate 构建，挂载好根组�
 | Linux | `nsh-linux-app` 可执行文件，重命名为 `<Name>` | `<Name>/nsh/bundle.nshc`、`nsh/assets/…` |
 | Windows | `nsh-windows-app.exe` 可执行文件，重命名为 `<Name>.exe` | `<Name>\nsh\bundle.nshc`、`nsh\assets\…` |
 | Web | `nsh.<digest>.wasm`、`nsh.<digest>.js` | `<Name>/app.<digest>.js`、`assets/…`、`index.html` |
+
+iOS 包还会在 `Frameworks/` 里带上应用列出的动态 framework（见 [Framework 与链接参数](#framework-与链接参数)）。
 
 打包出的应用不注册任何[原生组件](./native-components.md)；如需使用原生组件，请把 NSH 嵌入你自己的应用。
 

@@ -1121,6 +1121,28 @@ effect(() => {
 });
 ```
 
+### network
+
+```ts
+const network: Accessor<NetworkState>;
+```
+
+设备现在怎样连到网络：`online`（只有系统确知没有路由时才为 false）、路由所走链路的 `kind`（`"wifi"`、`"cellular"`、`"wired"`、`"other"`，离线为 `"none"`，平台不报告时为 `"unknown"`，按在线处理）、这条链路是否 `expensive` 或 `constrained`（低数据模式、流量节省程序），以及在 iOS 上用户是否允许应用使用蜂窝数据（`cellularData`：用户决定之前为 `"unknown"`，另有 `"restricted"`、`"notRestricted"`）。响应式：读取它的 effect 会在路由变化时重新运行，离线时失败的请求就在这里重试。iOS 和 macOS 跟随系统的路径监视器，Android 跟随默认网络，Web 读取 `navigator.onLine` 和 `navigator.connection`；Windows、Linux、GPUI 和终端报告 `"unknown"`（[网络](../docs/device-and-environment.md#网络)）。Rust：`network() -> Network`（`network().online()`、`.kind`、`.expensive`、`.constrained`、`.cellular_data`）。
+
+```rust tabs
+effect(move || {
+    if network().online() && sync.failed_offline() {
+        sync.retry();
+    }
+});
+```
+
+```tsx tabs
+effect(() => {
+  if (network().online && sync.failedOffline()) sync.retry();
+});
+```
+
 ### setColorScheme
 
 ```ts

@@ -13,7 +13,13 @@
   --profile <file.mobileprovision>` (entitlements come from the profile; icons are compiled by `actool` into `Assets.car`).
   `ios.extensions` lists prebuilt `.appex` bundles the app builds itself (`crates/nsh-cli/src/app_extensions.rs`):
   packages copy them into `PlugIns/` with the app's version and sign them before the app; device packages take one
-  `--profile` per bundle, chosen by bundle identifier (`crates/nsh-cli/src/provisioning.rs`). NSH builds no Swift.
+  `--profile` per bundle, chosen by bundle identifier (`crates/nsh-cli/src/provisioning.rs`). `nsh run --target ios`
+  copies them into the simulator's development host as well (`run.rs` `dev_host_extensions`), each identifier's app
+  prefix replaced by the host's, since iOS installs an extension only under its containing bundle's. NSH builds no Swift.
+  `ios.frameworks` and `ios.linkerFlags`, of `nsh.json` and of the crates' metadata
+  (`crates/nsh-cli/src/ios_frameworks.rs`), reach the link of every generated iOS executable through its `build.rs`
+  (Cargo keeps a dependency's `rustc-link-arg` to that dependency); dynamic frameworks are copied into `Frameworks/`
+  and signed before the app.
   Android: an APK assembled without Gradle (`aapt2 link`, native libraries stored uncompressed and 16 KB ZIP aligned, `apksigner`;
   the debug key unless `--keystore`; `android.launchScreen` becomes a generated launch theme). Linux: a directory `<name>/` with the release runner (`crates/nsh-linux-app`) as
   the executable, `nsh/bundle.nshc`, `nsh/assets/` and `nsh/app.json` (the window title, the GTK application id and
@@ -60,7 +66,9 @@
 - Release runtimes' `lib/<abi>/libnsh.so` is stripped with the NDK's `llvm-strip --strip-unneeded` (a quarter of each
   library, which APKs store uncompressed; the dynamic symbols JNI needs stay), and checked again; `symbols/<abi>/`
   keeps the linked library for `ndk-stack` and Play Console. The AARs carry the linked libraries: Gradle strips what
-  it packages and extracts the symbols itself.
+  it packages and extracts the symbols itself. Debug runtimes (and the CLI's debug builds of apps' libraries) are
+  stripped with `--strip-debug` instead: their debug info is most of the library and made development APKs too large
+  to update on emulators; the symbol table stays for crash reports, and `symbols/<abi>/` keeps the linked library.
 - The AARs carry `proguard.txt` (`AAR_KEEP_RULES` in `crates/xtask/src/android.rs`), which an app's minified build
   applies: `libnsh.so` finds `TextLayouts`, `NshView`, `Net` and `TestAgent` and their members by name over JNI
   (`JNI_OnLoad` fails without them) and binds the `native` methods of `Native`, `Net` and `SelectableView` by name,

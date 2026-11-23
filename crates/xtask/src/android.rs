@@ -114,9 +114,11 @@ pub(crate) fn root() -> PathBuf {
 /// `target/android/<profile>[-dev]`, returning that directory.
 ///
 /// Release libraries go into `lib/<abi>` without their symbol tables and
-/// debug info, which APKs store uncompressed (a quarter of each library);
-/// `symbols/<abi>` keeps them whole, for `ndk-stack`, Play Console and the
-/// AAR (Gradle strips what it packages and keeps the symbols itself).
+/// debug info, which APKs store uncompressed (a quarter of each library),
+/// debug ones without their debug info (most of them), keeping the symbol
+/// table for the names in crash reports; `symbols/<abi>` keeps them whole,
+/// for `ndk-stack`, debuggers, Play Console and the AAR (Gradle strips what
+/// it packages and keeps the symbols itself).
 pub(crate) fn build(release: bool, dev: bool, abis: &[String]) -> anyhow::Result<PathBuf> {
     let sdk = Sdk::find()?;
     let profile = if release { "release" } else { "debug" };
@@ -135,17 +137,22 @@ pub(crate) fn build(release: bool, dev: bool, abis: &[String]) -> anyhow::Result
         // reinstalls the development host when they change.
         let dest = dest.join("libnsh.so");
         let symbols = out.join("symbols").join(abi).join("libnsh.so");
-        if up_to_date(&dest, std::slice::from_ref(&so)) && (!release || symbols.exists()) {
+        if up_to_date(&dest, std::slice::from_ref(&so)) && symbols.exists() {
             continue;
         }
-        if release {
-            fs::create_dir_all(symbols.parent().context("symbols directory")?)?;
-            fs::copy(&so, &symbols)?;
-            strip(&sdk, &so, &dest)?;
-            check_alignment(&sdk, &dest)?;
-        } else {
-            fs::copy(&so, &dest)?;
-        }
+        fs::create_dir_all(symbols.parent().context("symbols directory")?)?;
+        fs::copy(&so, &symbols)?;
+        strip(
+            &sdk,
+            if release {
+                "--strip-unneeded"
+            } else {
+                "--strip-debug"
+            },
+            &so,
+            &dest,
+        )?;
+        check_alignment(&sdk, &dest)?;
     }
     let java_dir = root().join("crates/nsh-platform-android/java");
     let mut sources = Vec::new();
@@ -162,12 +169,13 @@ pub(crate) fn build(release: bool, dev: bool, abis: &[String]) -> anyhow::Result
     Ok(out)
 }
 
-/// Writes `library` to `to` without the symbols nothing links against: the
-/// dynamic ones (`JNI_OnLoad`, the `Java_*` natives) stay.
-fn strip(sdk: &Sdk, library: &Path, to: &Path) -> anyhow::Result<()> {
+/// Writes `library` to `to` stripped as `how` says: `--strip-unneeded`
+/// leaves only the symbols something links against (the dynamic ones,
+/// `JNI_OnLoad` and the `Java_*` natives), `--strip-debug` the symbol table.
+fn strip(sdk: &Sdk, how: &str, library: &Path, to: &Path) -> anyhow::Result<()> {
     term::run(
         Command::new(sdk.toolchain().join("bin/llvm-strip"))
-            .arg("--strip-unneeded")
+            .arg(how)
             .arg("-o")
             .arg(to)
             .arg(library),
@@ -534,6 +542,8 @@ pub(crate) fn make_aar(built: &Path, abis: &[String], dev: bool, aar: &Path) -> 
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.longbridge.nsh">
     <uses-sdk android:minSdkVersion="{MIN_SDK}" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- The default network's callback (`network()`). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Text actions (Translate and the like) the selection menu offers,
         as TextView's: Android 11+ hides other apps' activities otherwise. -->
     <queries>
@@ -657,5 +667,85 @@ mod tests {
         assert_eq!(rules, AAR_KEEP_RULES);
         assert!(rules.contains("-keep class com.longbridge.nsh.** { *; }"));
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The opcodes of `Command` in `encode.rs`, and the `case` labels of
+    /// `Mounter.command`, are numbers two PRs can pick at once: a duplicate
+    /// label is a `javac` error, a duplicate opcode a command that runs as
+    /// another one. `nsh-platform-android` is empty off Android, so this
+    /// reads both sources as text.
+    #[test]
+    fn a_command_opcode_is_used_once() {
+        let dir = super::root().join("crates/nsh-platform-android");
+        let java = fs::read_to_string(dir.join("java/com/longbridge/nsh/Mounter.java")).unwrap();
+        let rust = fs::read_to_string(dir.join("src/encode.rs")).unwrap();
+
+        let start = java
+            .find("    private void command(")
+            .expect("Mounter.command");
+        let body = &java[start..];
+        let body = &body[..body.find("\n    }\n").expect("end of Mounter.command")];
+        // A line is `case 1:`, `case 3: stop(); break;` or `case 4: case 5:`.
+        let mut labels = Vec::new();
+        for line in body.lines() {
+            let Some(mut rest) = line.strip_prefix("            case ") else {
+                continue;
+            };
+            loop {
+                let (number, after) = rest.split_once(':').expect("a case label ends in a colon");
+                labels.push(number.parse::<u32>().expect("a numeric case label"));
+                match after.trim_start().strip_prefix("case ") {
+                    Some(next) => rest = next,
+                    None => break,
+                }
+            }
+        }
+        assert!(labels.len() > 40, "found only {} case labels", labels.len());
+        assert_eq!(
+            duplicates(&labels),
+            Vec::<u32>::new(),
+            "Mounter.command: duplicate case labels"
+        );
+
+        // The first `e.int(N)` after each `Command::` arm is its opcode;
+        // arms that write -1 are not carried out and have none.
+        let start = rust
+            .find("MountItem::Command { id, command }")
+            .expect("the command arm");
+        let mut opcodes = Vec::new();
+        let mut open = false;
+        for line in rust[start..].lines() {
+            let indent = line.len() - line.trim_start().len();
+            if indent == 20 && line.trim_start().starts_with("Command::") {
+                open = true;
+            }
+            if open && let Some(rest) = line.split("e.int(").nth(1) {
+                let number = rest.split(')').next().unwrap();
+                if let Ok(n) = number.parse::<u32>() {
+                    opcodes.push(n);
+                }
+                open = false;
+            }
+            if indent < 20 && line.trim() == "}" && !opcodes.is_empty() && opcodes.len() > 40 {
+                break;
+            }
+        }
+        assert!(opcodes.len() > 40, "found only {} opcodes", opcodes.len());
+        assert_eq!(
+            duplicates(&opcodes),
+            Vec::<u32>::new(),
+            "encode.rs: duplicate command opcodes"
+        );
+    }
+
+    fn duplicates(numbers: &[u32]) -> Vec<u32> {
+        let mut seen = std::collections::BTreeSet::new();
+        let mut again = std::collections::BTreeSet::new();
+        for n in numbers {
+            if !seen.insert(*n) {
+                again.insert(*n);
+            }
+        }
+        again.into_iter().collect()
     }
 }

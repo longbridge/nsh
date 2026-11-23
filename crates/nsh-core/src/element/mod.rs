@@ -243,9 +243,9 @@ pub use crate::{
     main_thread::{MainThreadError, OnMainThread},
     overlay::{Align, Placement},
     platform::{
-        Appearance, HourCycle, HttpBody, HttpHead, HttpRequest, Idiom, Languages, Lifecycle,
-        Locale, LocaleSettings, MeasurementSystem, Os, PerfStats, SizeClass, TemperatureUnit,
-        TimeZone, Weekday,
+        Appearance, CellularData, HourCycle, HttpBody, HttpHead, HttpRequest, Idiom, Languages,
+        Lifecycle, Locale, LocaleSettings, MeasurementSystem, Network, NetworkKind, Os, PerfStats,
+        SizeClass, TemperatureUnit, TimeZone, Weekday,
     },
     style::Color,
 };

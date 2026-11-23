@@ -45,6 +45,8 @@
 //!   follows the embedding app's, which is the application;
 //! - the wake count (`wakeCount()`): one more on every
 //!   `NSWorkspaceDidWakeNotification`, for every surface;
+//! - the network (`network()`): the system's path monitor
+//!   (`nsh_platform_apple::network`), live;
 //! - the pixel ratio: the window's backing scale factor;
 //! - the window's bounds, mode and display ([`crate::window_state`]), and
 //!   the displays, sent again when they change;
@@ -254,6 +256,14 @@ fn install(mtm: MainThreadMarker) {
                 Some(&queue),
                 &block,
             ),
+            // The route to the network changed (`network()`): posted by
+            // the shared path monitor on the main thread.
+            NSNotificationCenter::defaultCenter().addObserverForName_object_queue_usingBlock(
+                Some(&nsh_platform_apple::network::changed_name()),
+                None,
+                Some(&queue),
+                &block,
+            ),
         ]
     };
     // The time zone: Foundation caches the system's until it is reset.
@@ -417,6 +427,7 @@ fn update(surface: &Surface) {
     env.keyboard_height = px(0.0);
     env.lifecycle = lifecycle(surface.mtm, surface.testing());
     env.window_state = crate::window_state::read(surface);
+    env.network = nsh_platform_apple::network::network(surface.mtm);
     surface.set_environment(env);
 }
 

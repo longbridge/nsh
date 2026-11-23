@@ -596,7 +596,12 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   the system's wakes from sleep, which `lifecycle()` may not show (a lid closed and opened with the app in front):
   the desktop backends add one to each surface's on the system's report (macOS `NSWorkspaceDidWakeNotification`,
   Windows `WM_POWERBROADCAST` / `PBT_APMRESUMEAUTOMATIC`, Linux `logind`'s `PrepareForSleep(false)`); headless tests
-  wake with `app.wake()`. `padding-bottom: env(keyboard-inset-height)` pads a view by the keyboard's height, animated with the keyboard
+  wake with `app.wake()`. `network()` (`Environment::network`, `Network`: the default route's `NetworkKind`,
+  expensive, constrained, iOS's `CellularData`) is the process's route, which each surface reports in its environment:
+  iOS and macOS from one shared path monitor (`nsh_platform_apple::network`, iOS adding `CTCellularData`), Android
+  from one default-network callback (`NetworkState.java`), the web from `navigator.onLine` / `navigator.connection`;
+  the other backends leave it `Unknown`, which counts as online. Headless tests change it with
+  `app.setNetworkState`. `padding-bottom: env(keyboard-inset-height)` pads a view by the keyboard's height, animated with the keyboard
   natively, for content outside scroll views (message bars). Inputs inside a scroll view are kept clear of the keyboard natively (bottom inset + scroll to the
   focused input), with no JS involved. iOS measures what the keyboard covers where layout puts the input and its scroll
   view, without the layers' transforms: a sheet whose input takes the focus as it comes in is not moved up again by

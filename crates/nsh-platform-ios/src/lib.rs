@@ -108,6 +108,7 @@ mod system_switch;
 mod system_tab_bar;
 mod target;
 mod text;
+mod text_access;
 mod text_selection;
 mod text_view;
 mod touch;

@@ -185,6 +185,7 @@ const page = signal({ start: 0, rows: load(0) });
 | Tab、Shift+Tab | 移动到下一列或上一列。 |
 | Page Up、Page Down | 按页移动行。 |
 | Home、End | 移动到第一个或最后一个。 |
+| Enter、Return | 激活获得焦点的行（`onRowActivate({ row })`），除非表格内的输入框或控件先接住了按键。 |
 | Escape | 先清除选择，再交出键盘。 |
 | 复制快捷键 | 把选中内容的文字放到剪贴板（`copy()`）。 |
 
@@ -410,6 +411,7 @@ const columns: DataTableColumn[] = [
 | `onRowPress` | `.on_row_press(\|event: &DataTablePress\| ..)` | 按下了一行或一个单元格：`{ row, column?, clicks, shift, control, alt, platform }`。 |
 | `onColumnPress` | `.on_column_press(\|event: &DataTableColumnPress\| ..)` | 按下了一个标题：`{ column, clicks, shift, control, alt, platform }`。 |
 | `onDoublePress` | `.on_double_press(\|target: &DataTableTarget\| ..)` | 一行、一个单元格或一个标题被连按两次：`{ target }`，一个 `{ row?, column? }`。 |
+| `onRowActivate` | `.on_row_activate(\|row: &u32\| ..)` | 获得焦点的行被激活（Enter / Return）：`{ row }`，与 `onRowPress` 报告的数字相同。 |
 | `onContextMenu` | `.on_context_menu(\|event: &DataTableContextMenu\| ..)` | 请求了上下文菜单：`{ row?, column?, x, y }`，位置位于根视图中。 |
 | `onSortChange` | `.on_sort_change(\|sort: &Option<DataTableSort>\| ..)` | 按下了排序按钮：`{ sort }`，下一个排序 `{ key, direction }` 或 `null`。 |
 | `onColumnResize` | `.on_column_resize(\|key: &SharedString, width: &Points\| ..)` | 列被调整宽度（`{ key, width }`），拖动的每一步都会触发，适配设置宽度时再触发一次。 |

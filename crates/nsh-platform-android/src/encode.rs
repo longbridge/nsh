@@ -676,7 +676,7 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                     }
                     // `Mounter.textLocale`: the language tag.
                     Command::TextLocale(locale) => {
-                        e.int(63);
+                        e.int(64);
                         e.string(locale.as_str().to_owned());
                     }
                     Command::AccessibilityFocus => e.int(18),
