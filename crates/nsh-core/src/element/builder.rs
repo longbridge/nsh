@@ -2269,8 +2269,8 @@ pub trait Interactive: Element {
     }
 
     /// Where the view goes as a link, carried to the platform as data
-    /// ([`Prop::Href`]). `nsh-base`'s `Link` sets it from its `href`;
-    /// apps use `Link`.
+    /// ([`Prop::Href`]). `nsh-base`'s `Link` sets it from its `href`, and
+    /// `TextView` on the span of each of its links; apps use those.
     #[doc(hidden)]
     fn __link_href(mut self, href: impl IntoReactive<Option<SharedString>>) -> Self {
         super::host::bind_prop(self.node(), href, |href: Option<SharedString>| {
