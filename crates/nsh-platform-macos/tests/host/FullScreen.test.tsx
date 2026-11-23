@@ -50,3 +50,15 @@ test("full screen right after leaving it enters again once out", async () => {
   await app.keyboard.press("n");
   await app.waitFor("Mode: normal", { timeout: 10000 });
 });
+
+test("hidden on its way into full screen, it leaves it and goes", async () => {
+  const app = await open("./FullScreen.tsx");
+  await app.waitFor("Visible: true");
+  await app.keyboard.press("f");
+  await app.waitFor("Mode: fullScreen", { timeout: 10000 });
+  // Still animating in.
+  await app.keyboard.press("h");
+  await app.waitFor("Visible: false", { timeout: 10000 });
+  await transition();
+  expect(app.texts()).toContain("Mode: normal");
+});

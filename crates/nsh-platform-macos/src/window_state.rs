@@ -28,6 +28,7 @@ use std::{
 };
 
 use block2::RcBlock;
+use dispatch2::DispatchQueue;
 use nsh_core::{
     NodeId,
     desktop::{self, Display, DisplayId, WindowMode, WindowPlacement, WindowState},
@@ -414,22 +415,30 @@ pub(crate) fn observe(surface: &Surface, target: Target, watch: &Watch, window: 
         if step == Some(Step::OrderOut) {
             crate::window::hidden_after_full_screen(&surface, target);
         }
-        apply_held(&surface, target);
+        apply_held(key, target);
     });
     let entered_full_screen = RcBlock::new(move |_: NonNull<NSNotification>| {
         let Some(surface) = Surface::with_key(key) else {
             return;
         };
-        // Hidden on its way into full screen: it leaves at once.
+        // Hidden on its way into full screen: it leaves at once (on the
+        // main queue's next turn, as AppKit ignores `toggleFullScreen:`
+        // from within this notification), unless shown again meanwhile.
         let leave = with_watch(&surface, target, |w| {
-            (w.full_screen_step(FullScreenHide::entered) == Step::Leave)
-                .then(|| w.window())
-                .flatten()
+            w.full_screen_step(FullScreenHide::entered) == Step::Leave
         });
-        if let Some(Some(window)) = leave {
-            window.toggleFullScreen(None);
+        if leave == Some(true) {
+            DispatchQueue::main().exec_async(move || {
+                if let Some(surface) = Surface::with_key(key)
+                    && let Some(Some(window)) = with_watch(&surface, target, |w| {
+                        w.full_screen.get().hiding().then(|| w.window()).flatten()
+                    })
+                {
+                    window.toggleFullScreen(None);
+                }
+            });
         } else {
-            apply_held(&surface, target);
+            apply_held(key, target);
         }
         report(&surface, target);
         surface.follow_windows();
@@ -496,20 +505,27 @@ pub(crate) fn observe(surface: &Surface, target: Target, watch: &Watch, window: 
 
 /// A full screen transition of `target`'s window ended: the last mode or
 /// placement asked for during it applies, unless another transition began
-/// (hidden on its way in, it leaves first).
-fn apply_held(surface: &Surface, target: Target) {
-    let applied = with_watch(surface, target, |w| {
-        let held = w.full_screen_step(FullScreenHide::take_held)?;
-        let window = w.window()?;
-        match held {
-            Request::Mode(mode) => apply_mode(w, &window, mode),
-            Request::Placement(placement) => apply_placement(w, &window, placement),
+/// (hidden on its way in, it leaves first). AppKit still ignores
+/// `toggleFullScreen:` from within its did-enter notification, so it
+/// applies on the main queue's next turn.
+fn apply_held(key: u64, target: Target) {
+    DispatchQueue::main().exec_async(move || {
+        let Some(surface) = Surface::with_key(key) else {
+            return;
+        };
+        let applied = with_watch(&surface, target, |w| {
+            let held = w.full_screen_step(FullScreenHide::take_held)?;
+            let window = w.window()?;
+            match held {
+                Request::Mode(mode) => apply_mode(w, &window, mode),
+                Request::Placement(placement) => apply_placement(w, &window, placement),
+            }
+            Some(())
+        });
+        if applied.flatten().is_some() {
+            report(&surface, target);
         }
-        Some(())
     });
-    if applied.flatten().is_some() {
-        report(surface, target);
-    }
 }
 
 /// `target`'s window changed: its state is read and reported.
