@@ -697,6 +697,10 @@ pub(super) struct Components {
     /// ([`Core::preceding`], `native_before_at`, `first_overlay_in`).
     #[cfg(test)]
     pub(super) placing_work: std::cell::Cell<usize>,
+    /// Siblings looked at to find children's positions among them
+    /// ([`Core::positions_changed`], `position_bits`).
+    #[cfg(test)]
+    pub(super) position_work: std::cell::Cell<usize>,
     /// Mount items looked at when views take the kind of their
     /// component's root ([`Core::retag`]).
     #[cfg(test)]
@@ -926,6 +930,8 @@ impl Default for Components {
             handler_visits: Default::default(),
             #[cfg(test)]
             placing_work: Default::default(),
+            #[cfg(test)]
+            position_work: Default::default(),
             #[cfg(test)]
             retag_work: Default::default(),
             #[cfg(test)]
