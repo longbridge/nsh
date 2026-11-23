@@ -12521,6 +12521,7 @@ const chosen = signal("none");
 const dark = signal(false);
 mount(() => <Window id="main"><View>
   <MenuButton accessibilityLabel="Account" title="me@example.com"
+    accessibilityHint={dark() ? undefined : "Choose an appearance"}
     items={[
       { id: "settings", label: "Settings", icon: "gearshape" },
       { id: "", label: "Appearance", inline: true, singleSelection: true, items: [
@@ -12578,6 +12579,10 @@ fn the_menu_button_gives_the_mobile_systems_their_menu_and_reports_the_choice() 
             component_prop(&initial, button, "accessibilityLabel"),
             Some(serde_json::json!("Account"))
         );
+        assert_eq!(
+            component_prop(&initial, button, "accessibilityHint"),
+            Some(serde_json::json!("Choose an appearance"))
+        );
         engine.control().dispatch_event(
             button,
             EventKind::NativeEvent,
@@ -12590,6 +12595,10 @@ fn the_menu_button_gives_the_mobile_systems_their_menu_and_reports_the_choice() 
         assert_eq!(
             component_prop(&updates, button, "items"),
             Some(appearance(true))
+        );
+        assert_eq!(
+            component_prop(&updates, button, "accessibilityHint"),
+            Some(serde_json::Value::Null)
         );
     }
 }

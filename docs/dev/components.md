@@ -839,6 +839,11 @@ menu, which has one listener: a root that handles it keeps it. Wheels, pinches, 
 stay a component's own: on its host they would take the wheel from its scroll views, or mean what its own events
 mean.
 
+`Button`, `Link`, `Switch`, `Checkbox` and `MenuButton` take `accessibilityHint` beside their label. Their
+`accessibility_hint: Prop<Option<SharedString>>` binds the hint to the press target with `optional_hint`, so changes
+and clearing reach the platform as a view's hint does. `MenuButton` also forwards it to its native button on iOS
+and Android, where that button is the accessible press target.
+
 A root that is a component (a view that is `press()`) is made on the same host, as a TSX function component returning
 another is that one: the nested instance's host is an alias of the host's node (`Core::alias`: another id naming the
 same node, no node of its own; what the core sends names the node by its own id, `native_id`), and its view makes

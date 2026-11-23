@@ -32,6 +32,9 @@ pub struct CheckboxProps {
     /// What screen readers say: what the checkbox selects, when its
     /// children have no text that says it.
     pub accessibility_label: Prop<Option<SharedString>>,
+    /// What activating the checkbox does, for screen readers, as a view's
+    /// `accessibilityHint`.
+    pub accessibility_hint: Prop<Option<SharedString>>,
     /// The value does not pass the app's checks (a required box left
     /// unchecked): screen readers say it is invalid each time they reach
     /// it. No look of its own; the app styles the error.
@@ -99,6 +102,7 @@ pub fn Checkbox(props: CheckboxProps, cx: Scope<CheckboxEvent>) -> impl IntoElem
         .disabled(props.disabled)
         .role(move || props.role.get().unwrap_or(AccessibilityRole::Checkbox))
         .optional_label(props.accessibility_label)
+        .optional_hint(props.accessibility_hint)
         .accessibility_state(move || AccessibilityState {
             checked: Some(if indeterminate.get() {
                 Checked::Mixed
