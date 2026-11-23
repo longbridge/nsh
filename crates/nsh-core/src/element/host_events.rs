@@ -4,7 +4,9 @@
 //! The core hands each event to the listeners of its name that are there
 //! when it comes, oldest first (`Core::host_event`): the embedding app's
 //! (the engine's channel) and the web page's (the root's `Host` event of
-//! `type: "event"`, which JS's listeners hear too).
+//! `type: "event"`, which JS's listeners hear too). An event no listener
+//! of its name hears is kept until one is added, as JS keeps the embedding
+//! app's (`Core::release_host_events`).
 
 use std::{cell::RefCell, rc::Rc};
 
@@ -18,13 +20,34 @@ pub(crate) type HostListener = Rc<dyn Fn(&JsonValue)>;
 pub(crate) struct HostListeners {
     next: u64,
     list: Vec<(u64, String, HostListener)>,
+    /// A listener was added since the core last looked for the events kept
+    /// for it (`Core::release_host_events`).
+    pub(crate) added: bool,
 }
 
 impl HostListeners {
     pub(crate) fn add(&mut self, event: String, listener: HostListener) -> u64 {
         self.next += 1;
         self.list.push((self.next, event, listener));
+        self.added = true;
         self.next
+    }
+
+    /// Whether a listener of `event` is there.
+    pub(crate) fn listens(&self, event: &str) -> bool {
+        self.list.iter().any(|(_, e, _)| e == event)
+    }
+
+    /// The names listened to, each once, in the order their first
+    /// listeners were added.
+    pub(crate) fn names(&self) -> Vec<String> {
+        let mut names: Vec<String> = Vec::new();
+        for (_, event, _) in &self.list {
+            if !names.contains(event) {
+                names.push(event.clone());
+            }
+        }
+        names
     }
 
     /// Removes listener `id`; returns it so it is dropped outside the

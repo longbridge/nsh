@@ -296,6 +296,41 @@ fn a_listener_stops_with_its_owner() {
     assert!(!texts(&after).iter().any(|t| t.contains("ticks 2")));
 }
 
+/// Listens to `greet` only once `ready` came, as an app that loads first;
+/// `ready`'s listener is there from the start.
+#[component]
+fn LateListener() -> impl IntoElement {
+    let ready = signal(false);
+    let heard = signal(Vec::<String>::new());
+    on_host_event("ready", move |_: &JsonValue| ready.set(true));
+    view()
+        .child(when(ready, move || {
+            on_host_event("greet", move |payload: &JsonValue| {
+                heard.update(|h| h.push(payload.to_string()))
+            });
+            view()
+        }))
+        .child(text(move || {
+            format!("ready {} heard {}", ready.get(), heard.get().join(","))
+        }))
+}
+
+#[test]
+fn a_listener_added_late_hears_the_events_kept_for_it() {
+    let host = HostChannel::new();
+    // One before the app starts and one after: no listener of `greet` is
+    // there for either, so both wait for the first.
+    host.send("greet", json!("early")).unwrap();
+    let (_engine, rx) = start(Root::of::<LateListener>(), Environment::default(), &host);
+    wait_for(&rx, "ready false heard ");
+    host.send("greet", json!("started")).unwrap();
+    host.send("ready", JsonValue::Null).unwrap();
+    wait_for(&rx, r#"ready true heard "early","started""#);
+    // Heard, they are not kept: later events follow them.
+    host.send("greet", json!("live")).unwrap();
+    wait_for(&rx, r#"heard "early","started","live""#);
+}
+
 #[test]
 fn a_call_answered_later_from_another_thread_settles() {
     let host = HostChannel::new();

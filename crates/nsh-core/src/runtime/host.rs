@@ -7,9 +7,11 @@
 //! `{ type: "reply" }`). A call needs a valid
 //! name (`crate::access::valid_host_name`; else a `TypeError`), granted by
 //! the `host` capability, also when the app declares no capabilities
-//! (else `ERR_ACCESS_DENIED`); platforms whose environment has no host
-//! ([`crate::platform::Environment::host`]) reject every call
-//! (`ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`). A call the host does not answer
+//! (else `ERR_ACCESS_DENIED`); both are checked before where the call goes,
+//! so where nothing hosts the app (no configured channel, and no host in
+//! the platform's environment, [`crate::platform::Environment::host`]) only
+//! a granted call rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. A
+//! refused call is logged as a denial. A call the host does not answer
 //! in time rejects (`ETIMEDOUT`,
 //! [`crate::host_channel::DEFAULT_CALL_TIMEOUT`]); its answer, when it
 //! comes, is dropped. The host's own error rejects with its message
@@ -49,9 +51,10 @@ pub(crate) struct Host;
 impl Host {
     /// Calls the host's function `name` with `args`: what it returns, or a
     /// rejection with its error (`code` `ERR_NSH_HOST_ERROR`), or once
-    /// `options.timeout` passed (`ETIMEDOUT`). A name `capabilities.host`
-    /// does not grant rejects with `ERR_ACCESS_DENIED`, any call on a
-    /// platform without a host with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
+    /// `options.timeout` passed (`ETIMEDOUT`). A name that is not valid
+    /// rejects with a `TypeError`, then one `capabilities.host` does not
+    /// grant with `ERR_ACCESS_DENIED`, then a call where nothing hosts the
+    /// app with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
     pub(crate) async fn call(
         name: String,
         args: Option<JsonValue>,

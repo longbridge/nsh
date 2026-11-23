@@ -1444,10 +1444,13 @@ pub fn host_post(name: impl Into<String>, args: crate::JsonValue) {
 /// Runs `listener` with the data of every event `event` the app's host
 /// sends while the current owner lives (TS: `host.on`): the embedding
 /// app's (`HostChannel::send` in Rust, `send` in Swift and Java) and on
-/// the web the page's (`player.hostEvent`). The events the host sent
-/// before the app started reach the listeners the app's first render
-/// adds; an event that comes before a listener of its name is not
-/// replayed to it. Events need no capability.
+/// the web the page's (`player.hostEvent`). An event that comes while no
+/// listener of its name is there is kept (at most
+/// [`MAX_QUEUED_EVENTS`](crate::host_channel::MAX_QUEUED_EVENTS), the
+/// oldest going first) until one is added, which hears it after the
+/// render that added it: a listener added once the app loaded something
+/// still hears what the host sent at its start. An event a listener heard
+/// is not replayed to the ones added later. Events need no capability.
 pub fn on_host_event(event: impl Into<String>, listener: impl Fn(&crate::JsonValue) + 'static) {
     let owner = Owner::current();
     let listener: super::host_events::HostListener =

@@ -77,13 +77,7 @@ pub fn not_granted(name: &str) -> JsError {
 /// Checks a call or post of `name` against the host names' rules and the
 /// app's `access`, before it crosses into the embedding app's code.
 pub fn check_call(access: &crate::access::Access, name: &str) -> Result<(), JsError> {
-    if !crate::access::valid_host_name(name) {
-        return Err(invalid_name(name));
-    }
-    if !access.allows_host(name) {
-        return Err(not_granted(name));
-    }
-    Ok(())
+    refusal(access, name).map_or(Ok(()), |error| Err(error.into()))
 }
 
 /// What a call of `name` rejects with when the embedding app did not answer
@@ -186,8 +180,9 @@ impl std::fmt::Display for HostError {
 
 impl std::error::Error for HostError {}
 
-/// Checks a call or post of `name` against the host names' rules and the
-/// app's `access` ([`check_call`]), as a [`HostError`].
+/// Checks a call or post of `name` against the host names' rules (first:
+/// a host may put the name in a path or a URL, where `user.x/../admin`
+/// leaves `user.*`) and the app's `access`, as a [`HostError`].
 pub(crate) fn refusal(access: &crate::access::Access, name: &str) -> Option<HostError> {
     if !crate::access::valid_host_name(name) {
         Some(HostError::InvalidName { name: name.into() })
@@ -228,7 +223,9 @@ impl HostCallOptions {
 
 /// A call or post of the app's Rust or JS, checked and granted, that the
 /// engine hands to the embedding app's channel where it is configured,
-/// else to the platform's host ([`crate::Core::take_host_requests`]).
+/// else to the platform's host ([`crate::Core::take_host_requests`]). The
+/// engine's, not part of the app's API.
+#[doc(hidden)]
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum HostRequest {

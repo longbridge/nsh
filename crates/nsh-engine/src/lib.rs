@@ -3825,8 +3825,8 @@ impl<M: TextEngine> State<M> {
     /// Hands the app's host calls and posts to the embedding app's channel
     /// where it is configured, else to the platform's host
     /// ([`nsh_core::Core::host_request_on_platform`]), and the host's
-    /// events that came before the first commit to the components'
-    /// listeners; true when the platform has a call or post (the core's
+    /// events kept for want of a listener to the components' listeners
+    /// added since; true when the platform has a call or post (the core's
     /// commit sends it) or the listeners heard events.
     fn host_requests(&mut self) -> bool {
         let mut more = self.core.release_host_events();
@@ -3980,8 +3980,8 @@ impl<M: TextEngine> State<M> {
             self.core.take_events(&mut self.events);
             // URLs the platform opens go out in another round.
             let urls = self.open_urls();
-            // Host calls the platform answers go out, and what the first
-            // events' listeners changed shows, in another round.
+            // Host calls the platform answers go out, and what the kept
+            // events' new listeners changed shows, in another round.
             let host = self.host_requests();
             // Posts the ops queued (in program order) run in another round.
             let posted = script.is_some_and(Script::has_posted);

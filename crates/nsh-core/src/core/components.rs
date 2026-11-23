@@ -777,9 +777,9 @@ pub(super) struct Components {
     /// The calls and posts not handed to the engine yet
     /// ([`Core::take_host_requests`]).
     host_requests: Vec<crate::host_channel::HostRequest>,
-    /// The host's events until the first commit
-    /// ([`Core::release_host_events`]); `None` after it.
-    held_host_events: Option<crate::host_channel::HostInbox>,
+    /// The host's events no Rust listener heard, until one of their names
+    /// is added ([`Core::release_host_events`]).
+    host_inbox: crate::host_channel::HostInbox,
     /// URLs being opened (`openUrl`), by request id: their answers.
     url_opens: FxHashMap<u32, AnswerSlot<bool>>,
     /// The clipboard writes sent to the platform waiting for its result,
@@ -970,7 +970,7 @@ impl Default for Components {
             host_calls: FxHashMap::default(),
             next_host_call: 1,
             host_requests: Vec::new(),
-            held_host_events: Some(Default::default()),
+            host_inbox: Default::default(),
             web_evaluations: Default::default(),
             canvas_renders: Default::default(),
             fetches: FxHashMap::default(),
@@ -7403,6 +7403,7 @@ impl<M: TextEngine> Core<M> {
     /// The answer to host call `id`: the host's value, or its error. A
     /// call that timed out ([`crate::element::host_call_with`]) takes none:
     /// its late answer is dropped.
+    #[doc(hidden)]
     pub fn answer_host(
         &mut self,
         id: u64,
@@ -7424,6 +7425,7 @@ impl<M: TextEngine> Core<M> {
     /// each to the embedding app's channel where it is configured (its
     /// answers come with [`Core::answer_host`]), else to
     /// [`Core::host_request_on_platform`].
+    #[doc(hidden)]
     pub fn take_host_requests(&mut self, out: &mut Vec<crate::host_channel::HostRequest>) {
         out.append(&mut self.components.host_requests);
     }
@@ -7436,6 +7438,7 @@ impl<M: TextEngine> Core<M> {
     /// a post goes nowhere, as a channel without a handler drops it.
     ///
     /// [`Environment::host`]: crate::platform::Environment::host
+    #[doc(hidden)]
     pub fn host_request_on_platform(&mut self, request: crate::host_channel::HostRequest) {
         use crate::host_channel::{HostError, HostRequest};
         let host = self.components.environment.host;
@@ -7457,21 +7460,69 @@ impl<M: TextEngine> Core<M> {
     /// The host's event `event` with `data`: the components' listeners of
     /// it ([`crate::element::on_host_event`]) run, oldest first. The
     /// engine calls it for the embedding app's events; the web page's come
-    /// as the root's [`EventKind::Host`] events. Those that come before
-    /// the first commit wait for it ([`Core::release_host_events`]), so
-    /// the listeners the first render adds hear what the host sent before
-    /// the app started.
+    /// as the root's [`EventKind::Host`] events. Without a listener of its
+    /// name the event is kept until one is added
+    /// ([`Core::release_host_events`]), as JS keeps the embedding app's.
+    #[doc(hidden)]
     pub fn host_event(&mut self, event: &str, data: &crate::JsonValue) {
-        if let Some(held) = &mut self.components.held_host_events {
-            if let Some((dropped, _)) = held.push(event.to_owned(), data.clone()) {
-                log::warn!(target: "js", "nsh/host: the app had not started; its oldest event (\"{dropped}\") was dropped");
+        if !self.components.executor.host_events.borrow().listens(event) {
+            // Quietly: in an app whose listeners are JS's, the events no
+            // Rust code listens to fill this inbox, and JS warns of its own.
+            if let Some((dropped, _)) = self
+                .components
+                .host_inbox
+                .push(event.to_owned(), data.clone())
+            {
+                log::debug!(target: "js", "nsh/host: no Rust listener heard \"{dropped}\"; the oldest kept event was dropped");
             }
             return;
         }
-        let listeners = self.components.executor.host_events.borrow().of(event);
-        if listeners.is_empty() {
-            return;
+        // Those kept for a listener added since the last commit go first.
+        self.deliver_kept_host_events(event);
+        self.dispatch_host_event(event, data);
+    }
+
+    /// Hands the host's events kept for want of a listener
+    /// ([`Core::host_event`]) to the listeners of their names added since
+    /// the last call, so listeners added after the app started (once it
+    /// loaded something, say) hear what came before them. The engine calls
+    /// it after each commit. True when some were delivered: what their
+    /// listeners changed shows in another round.
+    #[doc(hidden)]
+    pub fn release_host_events(&mut self) -> bool {
+        let names = {
+            let mut listeners = self.components.executor.host_events.borrow_mut();
+            if !std::mem::take(&mut listeners.added) || self.components.host_inbox.is_empty() {
+                return false;
+            }
+            listeners.names()
+        };
+        let mut delivered = false;
+        for name in names {
+            delivered |= self.deliver_kept_host_events(&name);
         }
+        delivered
+    }
+
+    /// Hands the kept events of `event` to its listeners, oldest first,
+    /// while one is there: one that stops listening leaves the rest kept
+    /// for the next. True when one was delivered.
+    fn deliver_kept_host_events(&mut self, event: &str) -> bool {
+        let mut delivered = false;
+        while self.components.executor.host_events.borrow().listens(event) {
+            let Some(data) = self.components.host_inbox.pop(event) else {
+                break;
+            };
+            self.dispatch_host_event(event, &data);
+            delivered = true;
+        }
+        delivered
+    }
+
+    /// Runs the listeners of `event` there now with `data`, oldest first;
+    /// one that panics is reported and the others still run.
+    fn dispatch_host_event(&mut self, event: &str, data: &crate::JsonValue) {
+        let listeners = self.components.executor.host_events.borrow().of(event);
         let _entered = self.components.runtime.enter();
         for listener in listeners {
             let result = caught(|| listener(data));
@@ -7480,21 +7531,6 @@ impl<M: TextEngine> Core<M> {
                 log::error!(target: "js", "a listener of the host's \"{event}\" failed: {message}");
             }
         }
-    }
-
-    /// Hands the host's events that came before the first commit to the
-    /// listeners there now ([`Core::host_event`]); the engine calls it
-    /// after each commit. True when some were delivered: what their
-    /// listeners changed shows in another round.
-    pub fn release_host_events(&mut self) -> bool {
-        let Some(mut held) = self.components.held_host_events.take() else {
-            return false;
-        };
-        let events = held.take_all();
-        for (event, data) in &events {
-            self.host_event(event, data);
-        }
-        !events.is_empty()
     }
 
     /// Events the components handle before anything else: dialog answers

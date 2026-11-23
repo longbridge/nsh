@@ -185,8 +185,9 @@ impl HostChannel {
     }
 
     /// Sends event `name` with `data` to the running app (`host.on(name,
-    /// listener)`). The app keeps events of names it does not listen to
-    /// yet until it does; while no app runs, events wait for the next one
+    /// listener)`, Rust's `on_host_event`). The app keeps events of names
+    /// it does not listen to yet until it does; while no app runs, events
+    /// wait for the next one
     /// (up to [`nsh_core::host_channel::MAX_QUEUED_EVENTS`] each, then the
     /// oldest go). Any thread; it never waits for the app. `Err` for a name
     /// that is empty or longer than
