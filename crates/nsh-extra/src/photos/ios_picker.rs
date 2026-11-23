@@ -1,5 +1,5 @@
 //! The embedded picker on iOS: `PHPickerViewController` in its compact
-//! mode (iOS 17), selecting continuously, as a child of the view controller
+//! mode (iOS 17), selecting continuously and in order, as a child of the view controller
 //! its component's view is in. The picker runs out of the app's process,
 //! so the app needs no access to the library. It is made for the shared
 //! library, which gives each result the photo's identifier (the key of its
@@ -43,9 +43,10 @@ use super::{
 /// JPEG, as `Picker.pickImages` asks.
 const COMPATIBLE: isize = 2;
 
-/// `PHPickerConfigurationSelectionContinuous` (iOS 17): each change is
-/// reported as it happens.
-const CONTINUOUS: isize = 2;
+/// `PHPickerConfigurationSelectionContinuousAndOrdered` (iOS 17): each
+/// change is reported as it happens, and each photo selected shows its
+/// number in the order the user selected it.
+const CONTINUOUS_AND_ORDERED: isize = 3;
 
 /// `PHPickerModeCompact` (iOS 17): one row.
 const COMPACT: isize = 1;
@@ -181,7 +182,7 @@ impl State {
             };
             let _: () = msg_send![&config, setFilter: &*filter];
             let _: () = msg_send![&config, setPreferredAssetRepresentationMode: COMPATIBLE];
-            let _: () = msg_send![&config, setSelection: CONTINUOUS];
+            let _: () = msg_send![&config, setSelection: CONTINUOUS_AND_ORDERED];
             let _: () = msg_send![&config, setMode: COMPACT];
             let _: () = msg_send![&config, setEdgesWithoutContentMargins: ALL_EDGES];
             let _: () = msg_send![&config, setDisabledCapabilities: WITHOUT];

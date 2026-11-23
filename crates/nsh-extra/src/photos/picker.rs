@@ -221,7 +221,8 @@ pub struct PhotosPickerProps {
 #[derive(Debug, Clone, PartialEq, Event)]
 pub enum PhotosPickerEvent {
     /// The user selected or deselected a photo: the ids of every photo
-    /// selected now, in the order the system shows them. Each reads with
+    /// selected now, in the order the user selected them (the picker
+    /// numbers them so). Each reads with
     /// `Photos.loadPicked` ([`load_picked`]) while it is selected.
     #[args(ids)]
     Change(Vec<SharedString>),
