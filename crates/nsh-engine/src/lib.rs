@@ -4326,6 +4326,7 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             }
             if event == EventKind::Paste {
                 payload = payload.into_paste();
+                state.core.limit_paste(id, &mut payload);
             }
             // A secondary click goes down as a press does: the overlays it
             // is outside of hear `onPressOutside` first, then the view its

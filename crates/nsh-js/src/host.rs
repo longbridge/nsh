@@ -1439,6 +1439,15 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
                 files.set(index, value)?;
             }
             obj.set("files", files)?;
+            let too_large = rquickjs::Array::new(cx.clone())?;
+            for (index, file) in paste.too_large.iter().enumerate() {
+                let unread = rquickjs::Object::new(cx.clone())?;
+                unread.set("name", file.name.as_str())?;
+                unread.set("type", file.mime.as_str())?;
+                unread.set("size", file.len as f64)?;
+                too_large.set(index, unread)?;
+            }
+            obj.set("tooLarge", too_large)?;
             let uris = rquickjs::Array::new(cx.clone())?;
             for (index, uri) in paste.uris.iter().enumerate() {
                 uris.set(index, uri.as_str())?;

@@ -590,6 +590,18 @@ const attachments = signal<File[]>([]);
 
 像上传任何 `File` 一样上传粘贴的文件，使用 `fetch` 和 `FormData`（`form.append("image", file)`）；它的字节在发送前一直留在原生侧。在 Android 上，插入图片的键盘（GIF、贴纸）也以同样方式报告。在 Linux 上剪贴板是异步读取的，因此 `"insert"` 时事件可能在它插入的文本的 `onChange` 之后到达；`"report"` 时它总是先到。macOS 上的密码输入框保留 AppKit 自己的粘贴，不报告任何内容。
 
+粘贴的文件可能很大：在“文件”或“照片”里复制的视频、几百 MB 的文档。用 `pasteMaxSize`（Rust 的 `.paste_max_size(..)`）给输入框指定读取的最大文件，单位为字节：更大的文件不读取，在 `onPaste` 的 `tooLarge` 中只带 `name`、`type` 和 `size` 到达，应用可以据此提示用户。在 iOS、Android 和 Web 上，先检查大小，再把字节复制进应用。不设置这个属性时所有文件都会读取。
+
+```tsx
+<Input
+  pasteMaxSize={20 * 1024 * 1024}
+  onPaste={(e) => {
+    attachments.update((a) => [...a, ...e.files]);
+    if (e.tooLarge.length) notice.set(`${e.tooLarge[0].name} 超过 20 MB`);
+  }}
+/>;
+```
+
 ## 自动增高的多行输入框
 
 多行输入框（`.multiline(true)`，TSX 的 `multiline`）在自身高度内滚动文本。要让它随内容增高，把内容尺寸事件（`.on_content_size_change(..)`，TSX 的 `onContentSizeChange`）报告的高度加上上限后写回样式：

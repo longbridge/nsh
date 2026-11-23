@@ -808,6 +808,14 @@ impl Input {
         self.bind_prop(behavior, Prop::PasteBehavior)
     }
 
+    /// Reads pasted files of at most `bytes` bytes (`pasteMaxSize`); a
+    /// larger one reaches [`Self::on_paste`] in
+    /// [`PasteEvent::too_large`], its name, type and size only. Default:
+    /// every file is read.
+    pub fn paste_max_size(self, bytes: impl IntoReactive<u64>) -> Self {
+        self.bind_prop(bytes, |bytes: u64| Prop::PasteMaxSize(Some(bytes)))
+    }
+
     /// The user pasted: the text, the files with their bytes (a
     /// screenshot) and local files' URLs, before the text it inserts is
     /// reported.

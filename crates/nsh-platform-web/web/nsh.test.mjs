@@ -208,6 +208,50 @@ test("a field's maxlength lets in what fits by characters, an emoji counting onc
   assert.equal(field.maxLength, undefined);
 });
 
+test("a pasted file larger than pasteMaxSize is not read, only named", async () => {
+  const { player } = fakePlayer();
+  const pasted = [];
+  player.wasm.nsh_paste = (_id, jp, jl, bp, bl) => {
+    const memory = player.wasm.memory.buffer;
+    pasted.push([JSON.parse(new TextDecoder().decode(new Uint8Array(memory, jp, jl))), [...new Uint8Array(memory, bp, bl)]]);
+    return -1;
+  };
+  const read = [];
+  const file = (name, type, bytes) => ({
+    name,
+    type,
+    size: bytes.length,
+    arrayBuffer() {
+      read.push(name);
+      return Promise.resolve(new Uint8Array(bytes).buffer);
+    },
+  });
+  const el = { _id: 7, _events: new Set(["onPaste"]), _config: { pasteMaxSize: 4 } };
+  player.pasted(el, {
+    preventDefault() {},
+    clipboardData: {
+      getData: () => "",
+      files: [file("a.png", "image/png", [1, 2, 3, 4]), file("clip.mp4", "video/mp4", [1, 2, 3, 4, 5])],
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(read, ["a.png"]);
+  assert.deepEqual(pasted, [
+    [
+      {
+        text: "",
+        html: "",
+        files: [
+          { name: "a.png", type: "image/png", size: 4 },
+          { name: "clip.mp4", type: "video/mp4", size: 5, read: false },
+        ],
+        uris: [],
+      },
+      [1, 2, 3, 4],
+    ],
+  ]);
+});
+
 test("a textarea reports its scrolling only while a bar of the app's follows it", () => {
   const { player } = fakePlayer();
   const field = {

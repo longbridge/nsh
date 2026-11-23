@@ -617,6 +617,22 @@ Linux the clipboard is read asynchronously, so with `"insert"` the event may com
 inserts; with `"report"` it always comes first.
 Masked inputs on macOS keep AppKit's own paste and report nothing.
 
+A pasted file can be large: a video copied in Files or Photos, a document of hundreds of megabytes. Give the input
+the largest file it reads, in bytes, with `pasteMaxSize` (Rust `.paste_max_size(..)`): a larger file is not read,
+and reaches `onPaste` in `tooLarge` with only its `name`, `type` and `size`, so the app can tell the user. On iOS,
+Android and the web the size is checked before the bytes are copied into the app. Without the prop every file is
+read.
+
+```tsx
+<Input
+  pasteMaxSize={20 * 1024 * 1024}
+  onPaste={(e) => {
+    attachments.update((a) => [...a, ...e.files]);
+    if (e.tooLarge.length) notice.set(`${e.tooLarge[0].name} is larger than 20 MB`);
+  }}
+/>;
+```
+
 ## Multiline inputs that grow
 
 A multiline input (`.multiline(true)`, TSX `multiline`) scrolls its text inside its own height. To grow it with its content, feed the content size event's height (`.on_content_size_change(..)`, TSX `onContentSizeChange`) back into its style, with a limit:

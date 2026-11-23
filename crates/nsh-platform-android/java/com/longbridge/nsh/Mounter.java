@@ -2428,11 +2428,13 @@ final class Mounter {
         boolean inputRtl = b.getInt() != 0;
         boolean caretHidden = b.getInt() != 0;
         boolean pasteInserts = b.getInt() != 0;
+        int pasteMaxSize = b.getInt();
         boolean scrollbarVisible = b.getInt() != 0, reportScroll = b.getInt() != 0;
         int fontVariant = b.getInt();
         if (!(v instanceof InputBox)) return;
         if (autoFocus && !((InputBox) v).isConfigured()) focusAsked = true;
         ((InputBox) v).pasteInserts = pasteInserts;
+        ((InputBox) v).pasteMaxSize = pasteMaxSize;
         ((InputBox) v).setScrollbar(scrollbarVisible, reportScroll);
         ((InputBox) v).edit.setCursorVisible(!caretHidden);
         ((InputBox) v).setAutofill(autofill);
@@ -3798,8 +3800,9 @@ final class Mounter {
     }
 
     /** An event with an object payload. */
-    void paste(int id, String text, byte[][] images, String[] uris) {
-        Native.paste(handle(), id, text, images, uris);
+    void paste(int id, String text, byte[][] images, String[] uris, String[] largeNames, String[] largeTypes,
+               long[] largeLengths) {
+        Native.paste(handle(), id, text, images, uris, largeNames, largeTypes, largeLengths);
     }
 
     /** A file drag's enter or drop for {@code id} ({@link FileDrops}); a drop's point in the surface's pixels. */

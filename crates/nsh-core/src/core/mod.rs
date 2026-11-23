@@ -2671,6 +2671,24 @@ impl<M: TextEngine> Core<M> {
         self.needs_layout = true;
     }
 
+    /// A paste into input `id` (`onPaste`): its files larger than the
+    /// input's `pasteMaxSize` go to [`crate::PasteEvent::too_large`],
+    /// whichever platform read them, so every platform gives the app the
+    /// same files.
+    pub fn limit_paste(&self, id: NodeId, payload: &mut EventPayload) {
+        let EventPayload::Paste(paste) = payload else {
+            return;
+        };
+        let max = self
+            .key(id)
+            .ok()
+            .and_then(|key| self.nodes[key as usize].input.as_ref())
+            .and_then(|input| input.config.paste_max_size);
+        if let Some(max) = max {
+            paste.limit_files(max);
+        }
+    }
+
     /// The user edited input `id` (before JS sees the edit): keeps the text
     /// for layout and for stale-value detection.
     pub fn input_changed(&mut self, id: NodeId, text: &str, count: u32) {
@@ -6847,6 +6865,10 @@ impl<M: TextEngine> Core<M> {
                     }
                     Prop::PasteBehavior(behavior) => {
                         c.paste_behavior = behavior;
+                        false
+                    }
+                    Prop::PasteMaxSize(max) => {
+                        c.paste_max_size = max;
                         false
                     }
                     Prop::AutoFocus(on) => {
