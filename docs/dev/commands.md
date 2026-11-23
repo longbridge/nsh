@@ -13,10 +13,10 @@ configuring. `curl -fsSL https://huacnlee.github.io/cargo/install.sh | sh` insta
 `rust-toolchain.toml` keep working.
 
 ```sh
-cargo run [-- <app>] [-- --target catalyst|ios|android|gpui]                       # the gallery on this machine's backend (AppKit / GTK / Win32), hot reload; rebuilt and restarted on Rust changes
+cargo run [-- <app>] [-- --target macos|linux|windows|ios|android|gpui|catalyst]  # the gallery; default: this machine's backend (macos / linux / windows), hot reload; rebuilt and restarted on Rust changes
 cargo run -- accordion [--section settings]                                        # the gallery opened at one demo (by name), only its section with that title: no taps or scrolling
 NSH_GALLERY_DEMO=accordion NSH_GALLERY_SECTION=settings ./target/debug/nsh test examples/gallery/App.tsx --target linux   # the same under nsh test (steps on stdin)
-cargo xtask [<app>] [--target catalyst|ios|android|gpui] [-v]                      # the same without cargo's own two lines; -v (any nsh / xtask command): all output
+cargo xtask [<app>] [--target macos|linux|windows|ios|android|gpui|catalyst] [-v] # the same without cargo's own two lines; -v (any nsh / xtask command): all output
 cargo build -p nsh-cli                                                             # build the nsh CLI
 ./target/debug/nsh init my-app --template ts|rust|mixed                            # new app: TSX, Rust (a Cargo project, "root"), or TSX that is also a crate ("rust": "."); asks on a terminal without --template
 cargo build -p nsh-ios-host --target aarch64-apple-ios-macabi                          # the Catalyst development host (nsh run builds it in a checkout)
@@ -81,7 +81,8 @@ cd website && bun run dev                                                       
 ```
 
 `nsh-platform-ios` only compiles for `target_os = "ios"` (iOS devices, the iOS simulator and Catalyst); on a macOS
-host it is an empty crate, so always run clippy on platform code with the Catalyst target. Likewise
+host it is an empty crate, so always run clippy on platform code with the Catalyst target. That target is for
+compiling; to run an app on macOS use the default AppKit host, and `--target catalyst` only for Catalyst-specific work. Likewise
 `nsh-platform-android` is empty off Android: check it with `cargo xtask android` (which sets up the NDK linker, `CC`,
 `AR` and bindgen's sysroot) and `cargo xtask clippy-android`. `nsh-platform-linux` and its hosts are empty off Linux:
 check them on Linux, with the GTK 4 (≥ 4.14) and GStreamer (core and base plug-ins, for sounds) development packages

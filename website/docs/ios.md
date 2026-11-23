@@ -31,9 +31,9 @@ nsh run App.tsx --target ios                          # a TSX app
 `nsh` uses a booted simulator, or boots the newest iPhone. For a Rust app it builds the app's own runner with your
 crate, installs it and shows its logs in the terminal; a change to the crate's Rust code builds it again and restarts
 the app. For a TSX app it installs the development host and keeps the app up to date as you save, with logs in the
-terminal. `--device` picks a simulator by name or UDID. For a quicker loop
-without a simulator, `nsh run --target catalyst` on a Mac opens the same UIKit backend in an iPhone-sized
-[Mac Catalyst](./getting-started.md#mac-catalyst) window.
+terminal. `--device` picks a simulator by name or UDID. The simulator is where to check an app
+as an iPhone shows it; [Mac Catalyst](./getting-started.md#mac-catalyst) (`--target catalyst`) is for
+Catalyst-specific work.
 
 ## Notifications from other code
 
