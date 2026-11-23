@@ -342,7 +342,8 @@ from `chrono`'s `NaiveDate`, `NaiveTime` and `NaiveDateTime`.
 - **iOS and Mac Catalyst**: `UIDatePicker` in its compact style; with `dateTime` the day and the time are two capsules.
   The calendar and the time wheels are the system's, in the user's locale, calendar and clock.
 - **Android**: the value in the system's formats and the user's 12- or 24-hour clock, in a field per part; a press
-  opens the system's date or time dialog. The time dialog offers every minute: a pick between two steps of
+  opens the system's date or time dialog. The fields and the dialogs are in the app's language
+  ([I18n](../docs/i18n.md)), including one `setLocale` picks. The time dialog offers every minute: a pick between two steps of
   `minuteInterval` takes the step before it, and a pick past `min` or `max` takes the bound.
 - **The desktops and the web**: `DateTimePicker` takes no room and shows nothing, so one layout holds both: pick with
   [DatePicker](../elements/date-picker.md) or [TimeField](../elements/time-field.md) there, chosen by `platform.os`.
