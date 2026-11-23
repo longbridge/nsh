@@ -278,7 +278,7 @@ const at = signal("2026-11-17T09:30");
 ### 平台说明
 
 - **iOS 和 Mac Catalyst**：紧凑样式的 `UIDatePicker`；`dateTime` 时日期和时刻是两个胶囊。日历和时间滚轮是系统的，使用用户的语言区域、日历和时钟制式。
-- **Android**：值以系统的格式和用户的 12 或 24 小时制显示，每部分一个字段；按下时打开系统的日期或时间对话框。字段和对话框使用应用的语言（[国际化](../docs/i18n.md)），包括 `setLocale` 选的语言。时间对话框提供每一分钟：落在 `minuteInterval` 两档之间的选择取前一档，超出 `min` 或 `max` 的选择取边界。
+- **Android**：值以应用语言（[国际化](../docs/i18n.md)，包括 `setLocale` 选的语言）的格式和用户的 12 或 24 小时制显示，每部分一个字段；按下时打开系统的日期或时间对话框，使用同一语言。时间对话框提供每一分钟：落在 `minuteInterval` 两档之间的选择取前一档，超出 `min` 或 `max` 的选择取边界。
 - **桌面和 Web**：`DateTimePicker` 不占空间、不显示，因此同一布局可兼顾两者：在这些平台上用 [DatePicker](../elements/date-picker.md) 或 [TimeField](../elements/time-field.md) 选择，按 `platform.os` 选用。
 
 ## InputAccessoryView
