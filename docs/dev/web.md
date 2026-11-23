@@ -1142,7 +1142,8 @@ before the props that name its tag: `retag` adds the old element's listeners to 
 browser's margins, fonts, colors, underlines and list markers off those tags, so the view looks as a `div` does. A
 link gets `href` and is not draggable; a plain click on it stays the app's (`Link`'s press; the root's `click`
 listener prevents the browser's navigation), a click with a modifier key or the middle button opens `href` as the
-browser does, and a context menu on it is the browser's (open in a new tab, copy the link) unless the link or a view
+browser does and starts no press (`pointerDown`: the link does not open it again, nor hear `onOpen` or `onPress`),
+and a context menu on it is the browser's (open in a new tab, copy the link) unless the link or a view
 in it listens for `onContextMenu` (`contextMenu`, where the runtime otherwise prevents the browser's menu). The other
 backends store `web_element` and draw nothing differently.
 
