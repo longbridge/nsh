@@ -354,6 +354,7 @@ reasons: `reactive-components.md`.
   | (none: a JS app's scroll view or list is its own; Rust views watch one they did not make) | `watch_scroll(target, \|e: &ScrollEvent\| ..)` (offset, content size and viewport, when first found and on every change, whoever listens to its `on_scroll`), while the current owner lives; `target` (`\|\| r.node()`) is resolved again in every commit, so a ref set later in the render is found; `NodeRef(id).scroll_to(offset, animated)` scrolls a node such a target names. The core runs a scroll watch at the end of the commit round that changed what it reports, and another round sends what it changed; a hover watch has the node listen to the pointer, as a hint's anchor (`element/watch.rs`, `core/watch.rs`; `nsh_base::Scrollbar`) |
   | (none: JS's elements are in the order JS makes them) | `nsh_core::element::watch_order(\|\| refs, \|order: &[usize]\| ..)` (`#[doc(hidden)]`, for `nsh-base`'s roving focus; not in the prelude), while the current owner lives: the order the tree has the elements in, as indices into the list `refs` gives (those no node in the tree carries last), heard only when it differs from the list's; the core looks at the end of the commit round the watch is made in, of one after the returned `OrderWatch` is `invalidate()`d (an item came) and of one that moved a node inside the subtree the elements share (`Core::insert` of a node with a parent notes the parents it left and joined; a watch looks again when its elements' nearest common ancestor at its last look is one of them or above one: an app's keyed reorder of its elements, never a list of rows each with a group of its own reordered), and another round sends what the handler changed. A round that moved nothing there and invalidated nothing costs nothing (`element/watch.rs`, `core/watch.rs`) |
   | `BackHandler.on("press", f)`, the function it returns | `on_back_press(\|\| -> bool)`: registered while the current owner lives (only while a signal holds: inside an `effect`). After modals and before stacks, the views' listeners run newest first, then JS's; when none returns true the core sends `Command::Back`: the top stack pops, else the app exits (`element/back.rs`) |
+  | `BackHandler.on("progress", f)`, the function it returns | `on_back_progress(\|e: &BackProgressEvent\| ..)`: registered while the current owner lives; every listener hears every step of a gesture the app follows, the views' newest first, then JS's (`element/back.rs`) |
   | `<ErrorBoundary fallback>` | `catch_error(\|\| view, \|error, reset\| fallback)` |
   | a class TS uses (`new Tally(3)`, `tally.add(2)`, `tally.count`, `await tally.save(p)`) | `#[class]` on the struct and its `impl`, `registry.class::<Tally>()`: synchronous members run in the call, `async fn`s return promises |
   | a function returning its value (`checksum(bytes)`) | a `#[module]` function without `cx` (not `async`): it runs in the call |
@@ -1468,8 +1469,9 @@ to turn off (`scrollbar={false}`).
 **Built-in bars.** A view needs no bar placed for one: `set_scrollbar_theme` (TS `Scrollbar.setTheme`, a module
 function: an `Action::BuiltInScrollbars` that carries the theme as an `AnyValue` and the UI set's maker, so a Rust app
 that never registered `nsh-base` gets bars too) has the core draw the bar of every view whose `scrollbar` is `true`,
-and a view's own theme is its `scrollbar` prop (`ScrollbarSetting::Themed`, kept as JSON; the registry's
-`scrollbars_from` names the UI set that makes its bars). The maker returns no bar for an axis the theme has no look
+and a view's own theme is its `scrollbar` prop (`ScrollbarSetting::Themed` from JS, kept as JSON; the registry's
+`scrollbars_from` names the UI set that makes its bars; from Rust a `ScrollbarTheme` converts into
+`ScrollbarSetting::ThemeValue`, which carries the value and the set's maker as `set_scrollbar_theme` does). The maker returns no bar for an axis the theme has no look
 for, and the view keeps the platform's indicator. The core (`core/scrollbars.rs`) makes the bar as a component of
 its own, a child of the view marked `decoration`: last among the children, so it draws above them and what JS
 appends goes before it; out of what counts as the view's children (`first:`, `last:`, `space-*`); a layout root of
@@ -1483,8 +1485,12 @@ made for `true` again. A component's given class (`app_class`) now reaches its r
 A multiline input scrolls its text natively, so its bar is a sibling instead (`Node::beside`): inserted just after the
 input in its parent, stacked with it, laid out at its frame and made again where the input moves. Its
 `InputConfig` turns the text view's indicator off (`scrollbar_visible`) and asks the platform to report its scrolling
-(`replaced`: `EngineControl::input_scroll`, the offset, the text's size and the viewport's, `Core::set_input_scroll`),
-which the bar's `watch_scroll` reads as a scroll view's; the bar's `ScrollTo` commands scroll the text.
+(`report_scroll`: `EngineControl::input_scroll`, the offset, the text's size and the viewport's, `Core::set_input_scroll`),
+which the bar's `watch_scroll` reads as a scroll view's; the bar's `ScrollTo` commands scroll the text. A `Scrollbar`
+the app places itself over an input (its own indicator off) gets the same reports: at the end of each commit round the
+core notes the multiline inputs scroll watches follow (`Core::sync_watched_inputs`) and sends `report_scroll` while
+one does, so an input nothing follows reports nothing. Every platform places the text view at the input's content box
+and clips its text there, so the bar can lie over the whole frame, padding included.
 
 ## Toasts
 

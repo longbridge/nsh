@@ -31,6 +31,10 @@ nsh run App.tsx --target android       # TSX 应用
 安装 APK 并启动它；修改 crate 的 Rust 代码会重新构建并安装。对 TSX 应用，`nsh` 会安装一个开发宿主 APK（只在运行时变化时重新构建），并通过
 `adb reverse` 转发开发服务器的端口，因此通过 USB 即可工作，无需共享网络；你保存时应用会更新，日志显示在终端中。
 
+这些开发构建中的 `libnsh.so` 不带调试信息，APK 因此小到能在模拟器上更新；完整的库在它旁边的 `symbols/<abi>/` 中，供 `ndk-stack`
+和调试器使用。设备没有空间更新开发宿主时，NSH 会先卸载它再重新安装：它只保存所运行应用写下的数据。应用自己的 APK 从不会被自动卸载：
+错误信息会说明如何腾出空间。
+
 ## 打包
 
 ```sh
@@ -92,8 +96,8 @@ cargo xtask android-embed    # writes dist/nsh/embed/android/{nsh,nsh-dev}.aar
 `--no-dev` 不构建 `nsh-dev.aar`。默认包含 `arm64-v8a`、`armeabi-v7a` 和 `x86_64`；重复 `--abi` 可以少构建几个。
 
 AAR 包含 Java 运行时以及适用于 `arm64-v8a`、`armeabi-v7a` 和 `x86_64` 的 `libnsh.so`，库中带有符号：应用的 Gradle
-构建在打包时去除符号，并保留它们用于崩溃报告。它声明了 `INTERNET`
-权限，要求 **API 26**（Android 8）或更高版本。它自带 R8 规则（`proguard.txt`），开启混淆的构建会自动应用：原生库按名字
+构建在打包时去除符号，并保留它们用于崩溃报告。它声明了 `INTERNET` 和
+`ACCESS_NETWORK_STATE` 权限，要求 **API 26**（Android 8）或更高版本。它自带 R8 规则（`proguard.txt`），开启混淆的构建会自动应用：原生库按名字
 查找运行时的类，因此 `com.longbridge.nsh` 保持原样。
 
 把它加入应用模块，例如从 `libs` 文件夹引入：

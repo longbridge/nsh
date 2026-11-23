@@ -16,8 +16,10 @@ use serde::Deserialize;
 
 use crate::apple::{Color, LaunchScreen, Themed};
 
+mod class_file;
 mod libraries;
 mod library_manifest;
+mod library_resources;
 
 pub(crate) use libraries::{Library, file_sha256};
 
@@ -60,18 +62,20 @@ impl Sdk {
         Ok(Sdk { root, build_tools })
     }
 
-    /// The platform an app targeting `level` compiles against.
+    /// The platform an app targeting `level` compiles against: in
+    /// `platforms/android-<level>`, or in `android-<level>.0`, the
+    /// directory of a package `sdkmanager` names so (`platforms;android-37.0`).
     fn android_jar(&self, level: u32) -> anyhow::Result<PathBuf> {
-        let jar = self
-            .root
-            .join(format!("platforms/android-{level}/android.jar"));
-        if !jar.exists() {
-            bail!(
-                "{} missing: install it with `sdkmanager \"platforms;android-{level}\"`",
-                jar.display()
-            );
+        let dirs = [format!("android-{level}"), format!("android-{level}.0")];
+        let jars = dirs.map(|dir| self.root.join("platforms").join(dir).join("android.jar"));
+        match jars.iter().find(|jar| jar.exists()) {
+            Some(jar) => Ok(jar.clone()),
+            None => bail!(
+                "{} missing: install it with `sdkmanager \"platforms;android-{level}\"` \
+                 (`\"platforms;android-{level}.0\"` in SDKs that name it so, as they do API level 37)",
+                jars[0].display()
+            ),
         }
-        Ok(jar)
     }
 
     pub(crate) fn adb(&self) -> PathBuf {
@@ -173,6 +177,18 @@ impl Sdk {
             .arg(library))
     }
 
+    /// Writes `library` to `to` without its debug info, keeping its symbol
+    /// table (the names in crash reports and backtraces): an app's or the
+    /// development host's debug `libnsh.so`, whose debug info is most of it
+    /// and which APKs store uncompressed.
+    pub(crate) fn strip_debug(&self, library: &Path, to: &Path) -> anyhow::Result<()> {
+        run(Command::new(self.ndk_toolchain()?.join("bin/llvm-strip"))
+            .arg("--strip-debug")
+            .arg("-o")
+            .arg(to)
+            .arg(library))
+    }
+
     fn tool(&self, name: &str) -> PathBuf {
         // On Windows, the Java tools are batch files.
         if cfg!(windows) && matches!(name, "apksigner" | "d8") {
@@ -224,7 +240,7 @@ pub(crate) struct Apk<'a> {
     pub(crate) camera: bool,
     /// The Java libraries of the app and its crates (`android.libraries`):
     /// jar, dex and AAR files, packaged after the runtime's
-    /// ([`libraries::prepare`]).
+    /// ([`libraries::prepare`], [`libraries::dex`]).
     pub(crate) libraries: &'a [Library],
     /// The values of the placeholders (`${name}`) in the libraries'
     /// manifests and the crates' manifest entries: `nsh.json`
@@ -249,6 +265,11 @@ pub(crate) struct Apk<'a> {
     /// URL schemes that open the app (nsh.json `schemes`): one
     /// `VIEW` intent filter.
     pub(crate) schemes: &'a [String],
+    /// The MIME types of the files the app opens (nsh.json `fileTypes`,
+    /// their `mimeTypes`, each once): one `SEND` and one `SEND_MULTIPLE`
+    /// intent filter, so the app is in the share sheet for them, and the
+    /// accepted types `AppActivity` checks a share against. Empty: none.
+    pub(crate) share_mime_types: &'a [String],
     /// Web links that open the app (nsh.json `links`): an intent filter
     /// Android verifies (App Links) for each, with its host and paths.
     pub(crate) links: &'a [nsh_core::url_scheme::WebLink],
@@ -489,7 +510,7 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
     fs::create_dir_all(&work)?;
 
     // The libraries first: a missing file stops the build early.
-    let java = libraries::prepare(sdk, apk, &work)?;
+    let mut java = libraries::prepare(apk, &work)?;
 
     // Resources: the launcher icon, and the launch screen's theme below.
     let mut flat = Vec::new();
@@ -592,8 +613,17 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
     if format == Format::Aab {
         link.arg("--proto-format");
     }
-    link.args(&flat);
+    // The AARs' resources under the package's own (NSH wrote its own to
+    // `work/res`); the ids it gives them for the `R` classes of the AARs
+    // whose code reads any.
+    libraries::compile_res(sdk, apk, &mut java, &work.join("res"))?;
+    link.args(library_resources::link_inputs(&flat, &java.res));
+    let symbols = java.needs_symbols().then(|| work.join("R.txt"));
+    if let Some(symbols) = &symbols {
+        link.arg("--output-text-symbols").arg(symbols);
+    }
     run(&mut link)?;
+    libraries::dex(sdk, apk, &work, &mut java, symbols.as_deref())?;
 
     if format == Format::Aab {
         let unsigned = work.join("unsigned.aab");
@@ -847,7 +877,11 @@ fn xml_attribute(value: &str) -> String {
 /// The permissions NSH declares: its own, then the app's
 /// (`android.permissions`), each once.
 fn declared_permissions(apk: &Apk<'_>) -> Vec<String> {
-    let mut permissions = vec!["android.permission.INTERNET".to_owned()];
+    // `ACCESS_NETWORK_STATE`: the default network's callback (`network()`).
+    let mut permissions = vec![
+        "android.permission.INTERNET".to_owned(),
+        "android.permission.ACCESS_NETWORK_STATE".to_owned(),
+    ];
     for (declared, name) in [
         (apk.notifications, "POST_NOTIFICATIONS"),
         (apk.microphone, "RECORD_AUDIO"),
@@ -899,11 +933,12 @@ fn manifest_xml(apk: &Apk<'_>, additions: &library_manifest::Additions) -> Strin
     let permissions = format!("{permissions}{}", additions.top);
     // A link opens the running app (`onNewIntent`), not another activity in
     // the caller's task.
-    let launch_mode = if apk.schemes.is_empty() && apk.links.is_empty() {
-        ""
-    } else {
-        r#" android:launchMode="singleTask""#
-    };
+    let launch_mode =
+        if apk.schemes.is_empty() && apk.links.is_empty() && apk.share_mime_types.is_empty() {
+            ""
+        } else {
+            r#" android:launchMode="singleTask""#
+        };
     let schemes = if apk.schemes.is_empty() {
         String::new()
     } else {
@@ -944,6 +979,41 @@ fn manifest_xml(apk: &Apk<'_>, additions: &library_manifest::Additions) -> Strin
             )
         })
         .collect();
+    // Files shared to the app (the share sheet): the types its `fileTypes`
+    // name by MIME type. A filter's `data` are alternatives, so one filter
+    // serves them all.
+    let shares: String = if apk.share_mime_types.is_empty() {
+        String::new()
+    } else {
+        let data: String = apk
+            .share_mime_types
+            .iter()
+            .map(|m| {
+                format!(
+                    "\n                <data android:mimeType=\"{}\" />",
+                    xml_attribute(m)
+                )
+            })
+            .collect();
+        ["SEND", "SEND_MULTIPLE"]
+            .iter()
+            .map(|action| {
+                format!(
+                    "\n            <intent-filter>\n                <action android:name=\"android.intent.action.{action}\" />\n                <category android:name=\"android.intent.category.DEFAULT\" />{data}\n            </intent-filter>"
+                )
+            })
+            .collect()
+    };
+    // What `AppActivity` accepts of a share: the manifest's own list, as
+    // the intent filters are not readable at run time.
+    let share_meta = if apk.share_mime_types.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n        <meta-data android:name=\"com.longbridge.nsh.SHARE_MIME_TYPES\" android:value=\"{}\" />",
+            xml_attribute(&apk.share_mime_types.join(" "))
+        )
+    };
     let queries = &additions.queries;
     let components = &additions.application;
     format!(
@@ -961,7 +1031,7 @@ fn manifest_xml(apk: &Apk<'_>, additions: &library_manifest::Additions) -> Strin
         android:extractNativeLibs="false"
         android:enableOnBackInvokedCallback="true"
         android:supportsRtl="true"
-        android:theme="{theme}">{rust}
+        android:theme="{theme}">{rust}{share_meta}
         <!-- Serves the app's own files to the apps that open them
             (`SystemUi.openPath`): the authority matches what
             `FilesProvider.uriFor` builds. -->
@@ -975,7 +1045,7 @@ fn manifest_xml(apk: &Apk<'_>, additions: &library_manifest::Additions) -> Strin
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>{schemes}{links}
+            </intent-filter>{schemes}{links}{shares}
         </activity>{components}
     </application>
 </manifest>
@@ -1512,6 +1582,23 @@ pub(crate) fn preferred_abi(serial: &str, device: &[String]) -> anyhow::Result<S
         .with_context(|| format!("{serial} runs none of {}", ABIS.join(", ")))
 }
 
+/// The ABIs a development build for device `serial` takes
+/// ([`dev_abis_of`] its ABIs).
+pub(crate) fn dev_abis(sdk: &Sdk, serial: &str) -> anyhow::Result<Vec<String>> {
+    dev_abis_of(serial, device_abis(sdk, serial).ok().as_deref())
+}
+
+/// The ABIs a development build for device `serial`, whose ABIs are
+/// `device`, takes: its preferred one ([`preferred_abi`]), as a debug
+/// library per ABI makes the APK too large to build. When the device's ABIs
+/// can't be read (`None`): every ABI of the runtime (empty).
+fn dev_abis_of(serial: &str, device: Option<&[String]>) -> anyhow::Result<Vec<String>> {
+    match device {
+        Some(device) => Ok(vec![preferred_abi(serial, device)?]),
+        None => Ok(Vec::new()),
+    }
+}
+
 /// A port of the device forwarded to this machine (`adb reverse`), removed
 /// when dropped, however the command ends (Ctrl-C too: it is
 /// [`ui::Stoppable`] meanwhile): a dev host left on the device would
@@ -1550,6 +1637,128 @@ impl Drop for Reverse {
     }
 }
 
+/// Whose data an installed package holds: what `install` may do when the
+/// device has no room for an update.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AppData {
+    /// The development host's: apps under test and in development start
+    /// from it again, so the old install may go to make room.
+    Disposable,
+    /// An app's own: never removed without the user.
+    Kept,
+}
+
+/// What a failed `adb install` leads to.
+#[derive(Debug, PartialEq, Eq)]
+enum InstallFailure {
+    /// Uninstall the package and install again.
+    Reinstall,
+    /// Stop with this message.
+    Error(String),
+}
+
+/// What `adb install` printed when it failed, without the Java stack trace
+/// the package manager adds to an exception.
+fn install_reason(output: &str) -> String {
+    output
+        .lines()
+        .take_while(|line| !line.trim_start().starts_with("at "))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_owned()
+}
+
+/// Decides what follows a failed `adb install` of `package` on `serial`
+/// that printed `output`: an update the device has no room for (the old
+/// and the new APK side by side) is installed again after the old one goes,
+/// when its data is [`AppData::Disposable`].
+fn install_failure(output: &str, package: &str, serial: &str, data: AppData) -> InstallFailure {
+    let output = install_reason(output);
+    // `Failure [INSTALL_FAILED_INSUFFICIENT_STORAGE]`, or the session's
+    // own check before any APK is written.
+    let no_room = output.contains("INSTALL_FAILED_INSUFFICIENT_STORAGE")
+        || output.contains("not enough space");
+    match (no_room, data) {
+        (true, AppData::Disposable) => InstallFailure::Reinstall,
+        (true, AppData::Kept) => InstallFailure::Error(format!(
+            "{serial} has no room to update {package}: free space on it, or uninstall the \
+             app first (this deletes its data): adb -s {serial} uninstall {package}\n{output}"
+        )),
+        (false, _) => InstallFailure::Error(format!("adb install failed: {output}")),
+    }
+}
+
+/// Installs (or updates) `apk`, package `package`, on `serial` with `adb
+/// install` and `flags` (`-r`, `-t`). A [`AppData::Disposable`] package
+/// whose update the device has no room for is uninstalled and installed
+/// again; for an app's own the error says how to make room.
+pub(crate) fn install(
+    sdk: &Sdk,
+    serial: &str,
+    apk: &Path,
+    package: &str,
+    flags: &[&str],
+    data: AppData,
+) -> anyhow::Result<()> {
+    let attempt = || -> anyhow::Result<Option<String>> {
+        let output = Command::new(sdk.adb())
+            .args(["-s", serial, "install"])
+            .args(flags)
+            .arg(apk)
+            .output()
+            .context("run adb")?;
+        if output.status.success() {
+            return Ok(None);
+        }
+        let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+        text.push_str(&String::from_utf8_lossy(&output.stderr));
+        Ok(Some(text))
+    };
+    let Some(output) = attempt()? else {
+        return Ok(());
+    };
+    match install_failure(&output, package, serial, data) {
+        InstallFailure::Error(message) => bail!(message),
+        InstallFailure::Reinstall => {
+            crate::ui::warn(format!(
+                "{serial} has no room to update {package}: uninstalling it to install again"
+            ));
+            // Not installed (removed meanwhile) is no reason to stop.
+            let _ = adb(sdk, serial, &["uninstall", package]);
+            match attempt()? {
+                None => Ok(()),
+                Some(output) => bail!(
+                    "{serial} has no room for {package} even when it is not installed: free \
+                     space on it (an emulator: a larger data partition, or wipe its data)\n{}",
+                    install_reason(&output)
+                ),
+            }
+        }
+    }
+}
+
+/// The `adb` arguments that start `component` (`<package>/<activity>`) for a
+/// development run (`nsh run`, `nsh test`): `-S` stops the previous run's
+/// process first, and `--activity-clear-task` (with the `NEW_TASK` flag
+/// `am start` always sets) starts the activity in an emptied task.
+/// Without it, an activity of another app that the previous run left on top
+/// of the task (the system's settings the app opened, a share sheet's
+/// target) is what comes to the front, and the new run's activity never
+/// starts. A development run keeps no state in the task to lose: the
+/// previous process is stopped either way.
+pub(crate) fn dev_start(component: &str) -> Vec<&str> {
+    vec![
+        "shell",
+        "am",
+        "start",
+        "-S",
+        "--activity-clear-task",
+        "-n",
+        component,
+    ]
+}
+
 pub(crate) fn adb(sdk: &Sdk, serial: &str, args: &[&str]) -> anyhow::Result<String> {
     let output = Command::new(sdk.adb())
         .args(["-s", serial])
@@ -1568,7 +1777,7 @@ pub(crate) fn adb(sdk: &Sdk, serial: &str, args: &[&str]) -> anyhow::Result<Stri
 
 #[cfg(test)]
 mod tests {
-    use super::{AdbDevice, Chosen, Wanted, choose_device, parse_devices};
+    use super::{AdbDevice, Chosen, Wanted, choose_device, dev_start, parse_devices};
 
     fn devices(list: &[(&str, &str)]) -> Vec<AdbDevice> {
         list.iter()
@@ -1588,6 +1797,25 @@ mod tests {
 
     fn error(result: anyhow::Result<Chosen>) -> String {
         result.err().map(|e| e.to_string()).unwrap_or_default()
+    }
+
+    /// A development run stops the previous process and starts its
+    /// activity in an emptied task, not under what another app left on top
+    /// of it.
+    #[test]
+    fn dev_start_clears_the_task() {
+        assert_eq!(
+            dev_start("com.example/com.longbridge.nsh.AppActivity"),
+            [
+                "shell",
+                "am",
+                "start",
+                "-S",
+                "--activity-clear-task",
+                "-n",
+                "com.example/com.longbridge.nsh.AppActivity",
+            ]
+        );
     }
 
     /// `adb devices` lists a device per line after its header, with the
@@ -1719,6 +1947,28 @@ mod tests {
         assert_eq!(abi(&[]), None);
     }
 
+    /// A development build takes the device's preferred ABI alone, every
+    /// ABI of the runtime when the device's ABIs can't be read, and none
+    /// for a device that runs none NSH builds for.
+    #[test]
+    fn a_development_build_takes_the_devices_abi() {
+        let abis = |list: Option<&[&str]>| {
+            let device: Option<Vec<String>> =
+                list.map(|list| list.iter().map(|abi| abi.to_string()).collect());
+            super::dev_abis_of("emulator-5554", device.as_deref()).ok()
+        };
+        assert_eq!(
+            abis(Some(&["x86_64", "arm64-v8a"])),
+            Some(vec!["x86_64".to_owned()])
+        );
+        assert_eq!(
+            abis(Some(&["arm64-v8a", "armeabi-v7a", "armeabi"])),
+            Some(vec!["arm64-v8a".to_owned()])
+        );
+        assert_eq!(abis(None), Some(Vec::new()));
+        assert_eq!(abis(Some(&["x86"])), None);
+    }
+
     static NO_PLACEHOLDERS: std::collections::BTreeMap<String, String> =
         std::collections::BTreeMap::new();
 
@@ -1755,6 +2005,7 @@ mod tests {
             queries: &[],
             application: &[],
             schemes: &[],
+            share_mime_types: &[],
             links: &[],
             rust,
             dark: false,
@@ -1928,6 +2179,59 @@ mod tests {
     }
 
     #[test]
+    fn mime_types_of_file_types_open_the_share_sheet() {
+        let types = nsh_core::file_type::file_types_from_json(&serde_json::json!([
+            { "name": "Images", "extensions": ["png"], "mimeTypes": ["image/png"] },
+            { "name": "Documents", "extensions": ["pdf"], "mimeTypes": ["application/pdf", "image/png"] },
+            { "name": "Notes", "extensions": ["note"] }
+        ]));
+        let mime_types = crate::package::file_mime_types(&types);
+        assert_eq!(mime_types, ["image/png", "application/pdf"]);
+        let manifest = manifest_of(&super::Apk {
+            share_mime_types: &mime_types,
+            ..apk(false, false)
+        });
+        let filters: Vec<&str> = manifest
+            .split("<intent-filter>")
+            .skip(1)
+            .map(|rest| rest.split("</intent-filter>").next().unwrap())
+            .filter(|filter| filter.contains("android.intent.action.SEND"))
+            .collect();
+        assert_eq!(filters.len(), 2, "{manifest}");
+        assert!(filters[0].contains(r#"android.intent.action.SEND" />"#));
+        assert!(filters[1].contains(r#"android.intent.action.SEND_MULTIPLE" />"#));
+        for filter in &filters {
+            assert!(
+                filter.contains(r#"<category android:name="android.intent.category.DEFAULT" />"#)
+            );
+            assert!(filter.contains(r#"<data android:mimeType="image/png" />"#));
+            assert!(filter.contains(r#"<data android:mimeType="application/pdf" />"#));
+            assert!(!filter.contains("BROWSABLE"), "{filter}");
+        }
+        // The running app gets the share (`onNewIntent`), and `AppActivity`
+        // checks it against the same list.
+        assert!(manifest.contains(r#"android:launchMode="singleTask""#));
+        assert!(manifest.contains(
+            r#"<meta-data android:name="com.longbridge.nsh.SHARE_MIME_TYPES" android:value="image/png application/pdf" />"#
+        ));
+        let application = manifest.find("<application").unwrap();
+        let activity = manifest.find("<activity").unwrap();
+        let at = manifest.find("SHARE_MIME_TYPES").unwrap();
+        assert!(application < at && at < activity, "{manifest}");
+        // Opt in: neither an absent declaration nor extensions alone adds share filters.
+        let extensions_only = crate::package::file_mime_types(&types[2..]);
+        for share_mime_types in [&[][..], &extensions_only] {
+            let none = manifest_of(&super::Apk {
+                share_mime_types,
+                ..apk(false, false)
+            });
+            assert!(!none.contains("action.SEND"), "{none}");
+            assert!(!none.contains("SHARE_MIME_TYPES"), "{none}");
+            assert!(!none.contains("singleTask"), "{none}");
+        }
+    }
+
+    #[test]
     fn a_packaged_app_declares_the_files_provider() {
         // `SystemUi.openPath` hands the system's viewer a `content:` URI
         // of this authority; without the declaration the provider is not
@@ -2058,26 +2362,45 @@ mod tests {
         bytes
     }
 
-    /// An SDK that is not there: a build that needed one of its tools fails.
-    fn no_sdk() -> super::Sdk {
-        super::Sdk {
-            root: "/nsh-no-sdk".into(),
-            build_tools: "/nsh-no-sdk/build-tools/36.1.0".into(),
+    #[test]
+    fn a_platform_is_found_under_either_name_sdkmanager_gives_it() {
+        let root = std::env::temp_dir().join(format!("nsh-cli-platforms-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for dir in ["android-35", "android-37.0"] {
+            let dir = root.join("platforms").join(dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("android.jar"), b"").unwrap();
         }
+        let sdk = super::Sdk {
+            root: root.clone(),
+            build_tools: root.join("build-tools/36.1.0"),
+        };
+        assert_eq!(
+            sdk.android_jar(35).unwrap(),
+            root.join("platforms/android-35/android.jar")
+        );
+        assert_eq!(
+            sdk.android_jar(37).unwrap(),
+            root.join("platforms/android-37.0/android.jar")
+        );
+        let error = sdk.android_jar(36).unwrap_err().to_string();
+        assert!(
+            error.contains("platforms;android-36\"") && error.contains("platforms;android-36.0"),
+            "{error}"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
     fn the_libraries_dex_and_java_resources_follow_the_runtimes() {
         let (dir, base) = runtime_and_base("libraries");
         let runtime = dir.join("runtime");
-        let java = super::libraries::Contents {
-            dex: vec![dir.join("a.dex"), dir.join("b.dex")],
-            resources: vec![(
-                "META-INF/services/com.example.Greeter".to_owned(),
-                b"com.example.Hello\n".to_vec(),
-            )],
-            ..Default::default()
-        };
+        let mut java = super::libraries::Contents::default();
+        java.dex = vec![dir.join("a.dex"), dir.join("b.dex")];
+        java.resources = vec![(
+            "META-INF/services/com.example.Greeter".to_owned(),
+            b"com.example.Hello\n".to_vec(),
+        )];
         std::fs::write(&java.dex[0], b"dex\n035\0a").unwrap();
         std::fs::write(&java.dex[1], b"dex\n035\0b").unwrap();
         for (layout, prefix, root) in [
@@ -2133,6 +2456,7 @@ mod tests {
             super::Library {
                 path,
                 listed: "nsh.json `android.libraries`".into(),
+                owner: None,
             }
         };
         let libraries = [
@@ -2148,7 +2472,7 @@ mod tests {
             ..apk(false, false)
         };
         // Dex files only: no SDK tool runs, no cache is made.
-        let java = super::libraries::prepare(&no_sdk(), &apk, &dir).unwrap();
+        let java = super::libraries::prepare(&apk, &dir).unwrap();
         assert_eq!(java.dex, [dir.join("b.dex"), dir.join("a.dex")]);
         assert!(java.resources.is_empty());
         assert!(!cache.exists());
@@ -2167,7 +2491,7 @@ mod tests {
             ..apk(false, false)
         };
         // Nothing for d8: no SDK tool runs, no cache is made.
-        let java = super::libraries::prepare(&no_sdk(), &apk, &dir).unwrap();
+        let java = super::libraries::prepare(&apk, &dir).unwrap();
         assert!(java.dex.is_empty() && java.resources.is_empty());
         assert!(java.native.is_empty() && java.assets.is_empty());
         assert!(!cache.exists());
@@ -2250,6 +2574,7 @@ mod tests {
         let libraries = [super::Library {
             path: push.clone(),
             listed: "push: [package.metadata.nsh] `android.libraries`".into(),
+            owner: Some("push".into()),
         }];
         // A crate adds its own initializer to the provider the library
         // declares.
@@ -2273,7 +2598,7 @@ mod tests {
         let placeholders: &'static _ = Box::leak(Box::new(placeholders));
         let apk = with(&[], placeholders);
         // No classes: no SDK tool runs.
-        let java = super::libraries::prepare(&no_sdk(), &apk, &dir).unwrap();
+        let java = super::libraries::prepare(&apk, &dir).unwrap();
         assert!(java.dex.is_empty() && !cache.exists());
         for (layout, lib, assets) in [
             (&super::Layout::APK, "lib/", "assets/"),
@@ -2305,7 +2630,7 @@ mod tests {
         assert_eq!(manifest.matches("android.permission.INTERNET").count(), 1);
         assert!(
             manifest.contains(
-                "<uses-permission android:name=\"android.permission.INTERNET\" />\n    \
+                "<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\" />\n    \
              <uses-permission android:name=\"android.permission.WAKE_LOCK\" />\n    <!--"
             ),
             "{manifest}"
@@ -2344,7 +2669,7 @@ mod tests {
             "{error}"
         );
         // A placeholder nsh.json does not set.
-        let error = super::libraries::prepare(&no_sdk(), &with(&[], &NO_PLACEHOLDERS), &dir)
+        let error = super::libraries::prepare(&with(&[], &NO_PLACEHOLDERS), &dir)
             .unwrap_err()
             .to_string();
         assert!(error.contains("the placeholder `${PUSH_KEY}`"), "{error}");
@@ -2358,7 +2683,7 @@ mod tests {
                 b"minCompileSdk=36\n",
             )],
         );
-        let error = super::libraries::prepare(&no_sdk(), &apk, &dir)
+        let error = super::libraries::prepare(&apk, &dir)
             .unwrap_err()
             .to_string();
         assert!(
@@ -2375,6 +2700,7 @@ mod tests {
     const MANIFEST: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.app">
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Text actions (Translate and the like) the selection menu offers,
         as TextView's: Android 11+ hides other apps' activities otherwise. -->
     <queries>
@@ -2410,6 +2736,7 @@ mod tests {
     #[test]
     fn an_app_declares_the_permissions_it_lists_once() {
         let listed = [
+            "android.permission.READ_CONTACTS".to_owned(),
             "android.permission.ACCESS_NETWORK_STATE".to_owned(),
             "android.permission.POST_NOTIFICATIONS".to_owned(),
             "com.example.permission.READ".to_owned(),
@@ -2425,7 +2752,7 @@ mod tests {
                 .count()
         };
         assert_eq!(
-            declared("android.permission.ACCESS_NETWORK_STATE"),
+            declared("android.permission.READ_CONTACTS"),
             1,
             "{manifest}"
         );
@@ -2433,15 +2760,30 @@ mod tests {
         // NSH's own stay, once, even when the app lists them too.
         assert_eq!(declared("android.permission.INTERNET"), 1, "{manifest}");
         assert_eq!(
+            declared("android.permission.ACCESS_NETWORK_STATE"),
+            1,
+            "{manifest}"
+        );
+        let own = manifest_of(&apk(false, false));
+        for name in [
+            "android.permission.INTERNET",
+            "android.permission.ACCESS_NETWORK_STATE",
+        ] {
+            assert!(
+                own.contains(&format!("<uses-permission android:name=\"{name}\" />")),
+                "{own}"
+            );
+        }
+        assert_eq!(
             declared("android.permission.POST_NOTIFICATIONS"),
             1,
             "{manifest}"
         );
         // Permissions go before the application, as Android reads them.
         let application = manifest.find("<application").unwrap();
-        let at = manifest.find("ACCESS_NETWORK_STATE").unwrap();
+        let at = manifest.find("READ_CONTACTS").unwrap();
         assert!(at < application, "{manifest}");
-        assert!(!manifest_of(&apk(false, false)).contains("ACCESS_NETWORK_STATE"));
+        assert!(!manifest_of(&apk(false, false)).contains("READ_CONTACTS"));
     }
 
     #[test]
@@ -2661,5 +3003,62 @@ mod tests {
         let mut expected = b"\x0a\x15\x0a\x0dlib/arm64-v8a\x12\x04\x0a\x02\x08\x03".to_vec();
         expected.extend_from_slice(b"\x0a\x17\x0a\x0flib/armeabi-v7a\x12\x04\x0a\x02\x08\x02");
         assert_eq!(super::native_pb(&abis).unwrap(), expected);
+    }
+
+    /// An update the device has no room for: the development host's old
+    /// install goes and it is installed again; an app's own stays, and the
+    /// error says how to make room. Other failures stop as they were.
+    #[test]
+    fn an_install_without_room_reinstalls_only_the_development_host() {
+        use super::{AppData, InstallFailure, install_failure};
+        let full = "Performing Streamed Install\n\
+                    adb: failed to install /w/NshDev.apk: Failure \
+                    [INSTALL_FAILED_INSUFFICIENT_STORAGE: Failed to override installation location]\n";
+        // API 36's, when the install session finds no room.
+        let session = "Performing Streamed Install\n\
+                       adb: failed to install /w/NshDev.apk: \n\
+                       Exception occurred while executing 'install':\n\
+                       android.os.ParcelableException: java.io.IOException: Requested internal \
+                       only, but not enough space\n\
+                       \tat android.util.ExceptionUtils.wrap(ExceptionUtils.java:34)\n\
+                       \tat com.android.server.pm.PackageInstallerService.createSession(\
+                       PackageInstallerService.java:671)\n";
+        for output in [full, session] {
+            assert_eq!(
+                install_failure(
+                    output,
+                    "com.example.host",
+                    "emulator-5554",
+                    AppData::Disposable
+                ),
+                InstallFailure::Reinstall
+            );
+            let InstallFailure::Error(message) =
+                install_failure(output, "com.example.app", "emulator-5554", AppData::Kept)
+            else {
+                panic!("an app's own install is never removed");
+            };
+            assert!(
+                message.starts_with("emulator-5554 has no room to update com.example.app"),
+                "{message}"
+            );
+            assert!(
+                message.contains("adb -s emulator-5554 uninstall com.example.app"),
+                "{message}"
+            );
+            assert!(!message.contains("ExceptionUtils"), "{message}");
+        }
+        let signatures = "Performing Streamed Install\n\
+                          adb: failed to install /w/NshDev.apk: Failure \
+                          [INSTALL_FAILED_UPDATE_INCOMPATIBLE: Existing package signatures do not match]";
+        assert_eq!(
+            install_failure(
+                signatures,
+                "com.example.host",
+                "emulator-5554",
+                AppData::Disposable
+            ),
+            InstallFailure::Error(format!("adb install failed: {signatures}"))
+        );
     }
 }

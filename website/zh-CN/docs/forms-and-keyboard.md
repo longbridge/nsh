@@ -736,7 +736,7 @@ function ChatScreen() {
 
 完整的键盘高度适合延伸到 surface 底部的视图，页面内容通常如此。在会为键盘缩小窗口的 Android 宿主上，窗口本身已经变小，该变量为 0。见[键盘](../elements/keyboard.md)。
 
-浮层自己会避开键盘：底部的 [Sheet](../elements/sheet.md#the-software-keyboard)、抽屉，以及手机上以 sheet 呈现的菜单、选择器和日期选择器都贴在键盘上沿，并随键盘移动。
+浮层自己会避开键盘：底部的 [Sheet](../elements/sheet.md#the-software-keyboard)、抽屉，以及手机上以 sheet 呈现的菜单、选择器和日期选择器都贴在键盘上沿，并随键盘移动。[Popover](../elements/popover.md) 以及其他锚在某个元素旁的浮层始终在键盘之上：键盘盖住它那一侧的空间时，它换到触发元素的另一侧，或只用剩下的空间，并随键盘移动重新放置。
 
 ### 键盘访问器
 

@@ -31,6 +31,8 @@ mod hover_cursor;
 #[cfg(target_os = "macos")]
 mod ime;
 #[cfg(target_os = "macos")]
+mod input_clip;
+#[cfg(target_os = "macos")]
 mod input_focus;
 #[cfg(target_os = "macos")]
 mod input_hidden;
@@ -125,6 +127,8 @@ fn main() {
                 focus_selection::run();
             } else if std::env::var_os("NSH_INPUT_FOCUS_CHECK_ONLY").is_some() {
                 input_focus::run();
+            } else if std::env::var_os("NSH_INPUT_CLIP_CHECK_ONLY").is_some() {
+                input_clip::run();
             } else if std::env::var_os("NSH_INPUT_HIDDEN_CHECK_ONLY").is_some() {
                 input_hidden::run();
             } else if std::env::var_os("NSH_FITTING_INPUT_CHECK_ONLY").is_some() {
@@ -150,6 +154,8 @@ fn main() {
                 download_redirect::run();
             } else if std::env::var_os("NSH_EMBEDDED_SCROLL_CHECK_ONLY").is_some() {
                 embedded_scroll::run();
+            } else if std::env::var_os("NSH_VIEW_SCALE_CHECK_ONLY").is_some() {
+                canvas_bounds::run_scale();
             } else if std::env::var_os("NSH_CANVAS_BOUNDS_CHECK_ONLY").is_some() {
                 canvas_bounds::run();
             } else if std::env::var_os("NSH_HOVER_CURSOR_CHECK_ONLY").is_some() {
@@ -169,6 +175,7 @@ fn main() {
                 #[cfg(feature = "shader")]
                 shader_content::run();
                 canvas_bounds::run();
+                canvas_bounds::run_scale();
                 menu_labels::run();
                 menu_lifetime::run();
                 window_frames::run();
@@ -176,6 +183,7 @@ fn main() {
                 keyboard::run();
                 ime::run();
                 input_hidden::run();
+                input_clip::run();
                 fitting_input::run();
                 input_focus::run();
                 focus_selection::run();

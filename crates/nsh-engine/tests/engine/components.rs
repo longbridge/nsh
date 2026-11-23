@@ -564,6 +564,53 @@ fn unhandled_back_presses_go_back_natively_on((engine, rx): (Engine, Receiver<Mo
 }
 
 #[test]
+fn js_back_progress_listeners_follow_the_back_gesture() {
+    let (engine, rx) = start(BACK_PROGRESS);
+    let root_listens = |batches: &[MountBatch]| {
+        batches
+            .iter()
+            .flat_map(|b| &b.items)
+            .rev()
+            .find_map(|i| match i {
+                MountItem::Events {
+                    id: ROOT_ID,
+                    events,
+                } => Some(events.contains(EventKind::BackProgress)),
+                _ => None,
+            })
+    };
+    let first = until(&rx, |b| shows(b, "step none"));
+    assert_eq!(root_listens(&first), Some(true), "the root listens");
+    let control = engine.control();
+    let step = |phase, progress, edge| {
+        nsh_core::BackProgressEvent::new(phase, nsh_core::geometry::Percentage(progress), edge)
+            .payload()
+    };
+    use nsh_core::{BackPhase, PanEdge};
+    let mut batches = Vec::new();
+    for (phase, progress, shown) in [
+        (BackPhase::Start, 0.0, "step start 0 left"),
+        (BackPhase::Move, 0.5, "step move 0.5 left"),
+        (BackPhase::End, 0.5, "step end 0.5 left"),
+    ] {
+        control.dispatch_event(
+            ROOT_ID,
+            EventKind::BackProgress,
+            step(phase, progress, Some(PanEdge::Left)),
+        );
+        batches = until(&rx, |b| shows(b, shown));
+        assert!(batches.iter().any(|b| shows(b, shown)), "{shown}");
+    }
+    // The listener stopped at the end: the root no longer listens.
+    if root_listens(&batches).is_none() {
+        batches.extend(until(&rx, |b| {
+            root_listens(std::slice::from_ref(b)).is_some()
+        }));
+    }
+    assert_eq!(root_listens(&batches), Some(false));
+}
+
+#[test]
 fn a_rust_text_field_clears_after_typing() {
     a_rust_text_field_clears_after_typing_on(start(FIELD));
 }
@@ -2295,6 +2342,18 @@ BackHandler.on("press", () => {
 mount(() => <Text>{`presses ${presses()}`}</Text>);
 "#;
 
+const BACK_PROGRESS: &str = r#"import { mount, signal, Text } from "nsh";
+import { BackHandler } from "nsh/mobile";
+
+const step = signal("none");
+const stop = BackHandler.on("progress", (e) => {
+  step.set(`${e.phase} ${e.progress} ${e.edge ?? "-"}`);
+  if (e.phase === "end") stop();
+});
+
+mount(() => <Text>{`step ${step()}`}</Text>);
+"#;
+
 const FIELD: &str = r#"import { mount, signal, Text, View } from "nsh";
 import { TextField } from "test/ui";
 
@@ -3952,10 +4011,15 @@ fn a_base_tab_reports_presses_and_its_list_holds_no_value() {
     let initial = std::slice::from_ref(&first);
 
     // The list: a tab list for screen readers, named by the app
-    // (`accessibilityLabel`) and laid out by it.
+    // (`accessibilityLabel`) and laid out by it; with no `orientation` it
+    // reports none, and both pairs of arrows move.
     let list = view_props(&first, sections).unwrap();
     assert_eq!(list.accessibility.role, AccessibilityRole::Tablist);
     assert_eq!(list.accessibility.label.as_deref(), Some("Sections"));
+    assert_eq!(
+        list.accessibility.orientation, None,
+        "a list with no orientation reports none"
+    );
 
     // The selected tab: selected for screen readers, its `selectedStyle`,
     // and the app's marker `group-selected:`.
@@ -4044,7 +4108,7 @@ function App() {
   );
   return (
     <View>
-      <Tabs class="flex-row">
+      <Tabs testID="sections" orientation="horizontal" class="flex-row">
         {tab("a")}
         {tab("b")}
         {tab("c", true)}
@@ -4095,7 +4159,21 @@ fn base_tabs_and_radio_groups_rove_the_keyboard_focus() {
             })
             .expect(test_id)
     };
-    let [a, b, c, d, x, y, z] = ["a", "b", "c", "d", "x", "y", "z"].map(|t| id(&batches, t));
+    let [sections, a, b, c, d, x, y, z] =
+        ["sections", "a", "b", "c", "d", "x", "y", "z"].map(|t| id(&batches, t));
+    let list = batches
+        .iter()
+        .flat_map(|b| b.items.iter())
+        .find_map(|i| match i {
+            MountItem::ViewProps { id, props } if *id == sections => Some(props.clone()),
+            _ => None,
+        })
+        .expect("the list's props");
+    assert_eq!(
+        list.accessibility.orientation,
+        Some(nsh_core::geometry::Axis::Horizontal),
+        "the app's orientation reaches the accessibility props"
+    );
     // The newest `focusable` of each view.
     let stops = |batches: &[MountBatch], views: &[u32]| -> Vec<u32> {
         views
@@ -4171,8 +4249,12 @@ fn base_tabs_and_radio_groups_rove_the_keyboard_focus() {
             .any(|i| matches!(i, MountItem::Keymap(_)))
     }));
     let keys = keymap(&batches).expect("the list's keys");
-    for keystroke in ["left", "right", "up", "down", "home", "end"] {
+    for keystroke in ["left", "right", "home", "end"] {
         assert!(bound(&keys, keystroke).is_some(), "{keystroke}");
+    }
+    // A horizontal list leaves Up and Down to the page.
+    for keystroke in ["up", "down"] {
+        assert!(bound(&keys, keystroke).is_none(), "{keystroke}");
     }
     // Right passes the disabled tab: d becomes the stop, gets the focus
     // and reports a press.

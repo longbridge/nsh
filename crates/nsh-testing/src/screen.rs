@@ -347,6 +347,9 @@ struct View {
     level: Option<u32>,
     /// Its `accessibilityDescription`.
     description: Option<Arc<str>>,
+    /// The orientation it reports to assistive technologies (a tab list's),
+    /// ARIA's `aria-orientation`.
+    orientation: Option<nsh_core::geometry::Axis>,
     /// The view its `accessibilityActiveDescendant` names.
     active_descendant: Option<NodeId>,
     /// The view its `accessibilityControls` names.
@@ -371,6 +374,8 @@ struct View {
     hidden: bool,
     /// It clips what it holds to its bounds (`overflow: hidden`).
     clips: bool,
+    /// `clipPath`: outside it, neither it nor what it holds is hit.
+    clip_path: Option<nsh_core::ClipInset>,
     /// Its own `opacity`, `None` until its style arrives (fully opaque).
     opacity: Option<f32>,
     /// Its `backgroundColor`, `0xRRGGBBAA`; transparent is `0`.
@@ -738,6 +743,7 @@ impl Screen {
                 let view = self.nodes.entry(*id).or_default();
                 view.hidden = style.hidden;
                 view.clips = style.overflow_hidden;
+                view.clip_path = style.clip_path().copied();
                 view.opacity = Some(style.opacity);
                 view.background = style.background_color.0;
             }
@@ -767,6 +773,7 @@ impl Screen {
                     .and_then(|v| v.text.clone());
                 view.level = props.accessibility.level;
                 view.description = props.accessibility.description.clone();
+                view.orientation = props.accessibility.orientation;
                 view.active_descendant = props.accessibility.active_descendant;
                 view.controls = props.accessibility.controls;
                 view.described_by = props.accessibility.described_by;
@@ -1893,6 +1900,20 @@ impl Screen {
         }
     }
 
+    /// Where the window that view `id` is in lies, in the root's points: the
+    /// edges an edge pan starts at. `None` before the window has a size.
+    pub(crate) fn window_area(&self, id: NodeId) -> Option<Bounds<Points>> {
+        let window = self.window_of(id);
+        let size = self.window_sizes.get(&window).copied().or(self.viewport)?;
+        let origin = match window {
+            ROOT => Point::default(),
+            own => self
+                .bounds_in_root(own)
+                .map_or(Point::default(), |b| b.origin),
+        };
+        Some(Bounds::new(origin, size))
+    }
+
     /// The ids of the app's open windows, in opening order.
     #[cfg(feature = "agent")]
     pub(crate) fn window_ids(&self) -> Vec<String> {
@@ -2419,6 +2440,17 @@ impl Screen {
         }
     }
 
+    /// The orientation the view `selector` names reports to assistive
+    /// technologies (a tab list's, ARIA's `aria-orientation`); `None` for a
+    /// view without one. An error when none or several match.
+    pub fn accessibility_orientation(
+        &self,
+        selector: &str,
+    ) -> Result<Option<nsh_core::geometry::Axis>, String> {
+        let id = self.id(selector)?;
+        Ok(self.nodes.get(&id).and_then(|v| v.orientation))
+    }
+
     /// The detent the dialog `selector` names rests at as an iOS sheet
     /// with `detents` (`presentation` `"pageSheet"` / `"formSheet"`): the
     /// app's `detent`, else `defaultDetent`, else the smallest, until the
@@ -2720,6 +2752,13 @@ impl Screen {
         let inside = id == ROOT
             || self.is_window(id)
             || self.bounds_in_root(id).is_some_and(|b| b.contains(&at));
+        // Outside its clip path, neither it nor what it holds.
+        if let Some(clip) = view.and_then(|v| v.clip_path)
+            && let Some(b) = self.bounds_in_root(id)
+            && !clip.contains(b.size, at - b.origin)
+        {
+            return None;
+        }
         // Unclipped children can receive a pointer outside their parent's box.
         if !inside
             && (receives == PointerEvents::BoxOnly

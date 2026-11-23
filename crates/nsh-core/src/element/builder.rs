@@ -12,9 +12,9 @@ use super::{
 use crate::{
     AccessibilityProp, AccessibilityRole, AccessibilityState, AccessibilityValue, Bounds,
     ContextMenuEvent, EdgeInsets, EventKind, EventPayload, Hsla, ImageSource, KeyCapture, KeyEvent,
-    ListContentStyle, LiveRegion, MouseEvent, NativeProp, NodeId, PinchEvent, PointerEvents,
-    Points, PressEvent, Prop, Size, Tag, TouchEvent, WheelEvent,
-    geometry::{DevicePixels, Radians},
+    ListContentStyle, LiveRegion, MouseEvent, NativeProp, NodeId, PanActivation, PinchEvent,
+    PointerEvents, Points, PressEvent, Prop, Size, Tag, TouchEvent, WheelEvent,
+    geometry::{Axis, DevicePixels, Radians},
     style::Color,
 };
 
@@ -1595,6 +1595,20 @@ pub trait Accessible: Element {
         self
     }
 
+    /// The list's orientation for screen readers (ARIA's
+    /// `aria-orientation`, reported on the web): `"horizontal"` or
+    /// `"vertical"`, for a tab list or toolbar laid out along that axis;
+    /// `None` has none.
+    fn accessibility_orientation(mut self, orientation: impl IntoReactive<Option<Axis>>) -> Self {
+        self.node().bind_attr(orientation, |a, orientation| {
+            super::host::set_in(
+                &mut a.props,
+                Prop::Accessibility(AccessibilityProp::Orientation(orientation)),
+            )
+        });
+        self
+    }
+
     /// How changes of it the screen reader announces by itself (TS:
     /// `accessibilityLiveRegion`): TalkBack on Android, VoiceOver on macOS,
     /// the web's `aria-live`, a live region on Windows; `"polite"` when the
@@ -2033,6 +2047,19 @@ pub trait Interactive: Element {
             super::host::set(self.node(), Prop::PanActivation(Some(pan)));
         }
         super::responder::of(self.node()).claims.push(claim);
+        self
+    }
+
+    /// When its pans activate (TS: `panActivation`), decided on the main
+    /// thread as the finger moves: its native pan (`pan_values`,
+    /// `on_pan_start`) starts then, and only then, so a drawer's pan that
+    /// opens it to the right leaves the drags to the left to its content
+    /// (`PanActivation::default().direction(PanDirection::Right)`), and
+    /// one from the screen's edge takes only those
+    /// (`PanActivation::default().edge(PanEdge::Left)`). A claim on the pan
+    /// ([`TouchClaim::on_pan`](super::TouchClaim::on_pan)) sets it too.
+    fn pan_activation(mut self, activation: PanActivation) -> Self {
+        super::host::set(self.node(), Prop::PanActivation(Some(activation)));
         self
     }
 

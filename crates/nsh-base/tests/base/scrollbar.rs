@@ -12,8 +12,8 @@ use std::{
 };
 
 use nsh_base::{
-    ScrollbarEntrance, ScrollbarLook, ScrollbarMode, ScrollbarMotion, ScrollbarTheme, scrollbar,
-    set_scrollbar_theme,
+    ScrollbarEntrance, ScrollbarLook, ScrollbarMode, ScrollbarMotion, ScrollbarTheme, input,
+    scrollbar, set_scrollbar_theme,
 };
 use nsh_core::{
     MountItem, NodeId, PointerEvents, Size, Transform,
@@ -516,4 +516,87 @@ fn a_list_has_its_built_in_bar_too() {
     app.wait_for("text:Offset 600").unwrap();
     let indicators = indicators.lock().unwrap();
     assert_eq!(indicators.values().copied().collect::<Vec<_>>(), [false]);
+}
+
+#[derive(Clone, PartialEq, Props)]
+struct OwnThemeProps {
+    /// A multiline input rather than a scroll view.
+    input: bool,
+}
+
+/// A scroll view (or a multiline input) of 1000 points in 200 with a theme
+/// of its own, its bar labelled `Own bar`, in an app that set no theme for
+/// every view.
+#[component]
+fn OwnTheme(props: OwnThemeProps) -> impl IntoElement {
+    let mut look = ScrollbarLook::default();
+    look.class = Some("absolute top-0 right-0 bottom-0 w-[10px]".into());
+    look.thumb_class = Some("w-full".into());
+    look.accessibility_label = Some("Own bar".into());
+    let mut theme = ScrollbarTheme::default();
+    theme.mode = ScrollbarMode::Always;
+    theme.vertical = Some(look);
+    let target = if props.input {
+        input()
+            .test_id("content")
+            .multiline(true)
+            .default_value("Line\n".repeat(60))
+            .scrollbar(theme)
+            .w(px(300.0))
+            .h(px(200.0))
+            .into_element()
+    } else {
+        scroll()
+            .test_id("content")
+            .scrollbar(theme)
+            .w(px(300.0))
+            .h(px(200.0))
+            .child(view().w_full().h(px(1000.0)))
+            .into_element()
+    };
+    view().child(target).child(text("Ready"))
+}
+
+/// [`OwnTheme`] headless; whether the platform's indicator of the scroll
+/// view or the input shows, as last sent.
+fn start_own_theme(input: bool) -> (Headless, Arc<Mutex<Vec<bool>>>) {
+    let mut config = EngineConfig {
+        viewport: Size::new(px(400.0), px(844.0)),
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<OwnTheme>(move || {
+            OwnThemeProps { input }
+        }))
+    };
+    config.environment.os = Os::MacOs;
+    let mut app = Headless::start(config).expect("the engine starts");
+    let indicators = Arc::new(Mutex::new(Vec::new()));
+    let record = indicators.clone();
+    app.observe(move |_, batch| {
+        for item in &batch.items {
+            match item {
+                MountItem::ScrollConfig {
+                    scrollbar_visible, ..
+                } => record.lock().unwrap().push(*scrollbar_visible),
+                MountItem::Input { config, .. } if config.multiline => {
+                    record.lock().unwrap().push(config.scrollbar_visible)
+                }
+                _ => {}
+            }
+        }
+    });
+    app.wait_for("text:Ready").unwrap();
+    (app, indicators)
+}
+
+#[test]
+fn a_rust_scroll_view_draws_its_bar_with_a_theme_of_its_own() {
+    let (mut app, indicators) = start_own_theme(false);
+    app.wait_for("label:Own bar").unwrap();
+    assert_eq!(indicators.lock().unwrap().last(), Some(&false));
+}
+
+#[test]
+fn a_rust_multiline_input_draws_its_bar_with_a_theme_of_its_own() {
+    let (mut app, indicators) = start_own_theme(true);
+    app.wait_for("label:Own bar").unwrap();
+    assert_eq!(indicators.lock().unwrap().last(), Some(&false));
 }

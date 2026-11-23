@@ -122,6 +122,8 @@ nsh remove nsh-omarchy     # 从 nsh.json、nsh.lock 和应用的 crate 中移�
 
 应用有自己的 crate 时，Rust nshm 还会加入该 crate 的 `[dependencies]`，应用的 Rust 代码可以直接使用。只要应用的 nshm 里有 Rust nshm，nsh 就会像对带 crate 的应用一样用它构建宿主，因此开发机和 CI 需要 Rust 工具链（[用 Rust 开发](./rust.md)）。nshm 全是 TSX 的应用只需 `nsh` 即可构建。
 
+有自己 crate 的应用也可以只在 `Cargo.toml` 里依赖 Rust nshm，和依赖其他 crate 一样，来自 crates.io、Git（仓库子目录里的 crate 也可以）或本地路径。`nsh` 会在该 crate 的依赖（直接或间接）里找出 Rust nshm，像 `"dependencies"` 里的一样链接：它们的 `#[native_module]` 入口在应用启动时运行，启用该 crate 打开的 feature，`nsh run`、`nsh test` 和打包都一样，TSX 也按标识导入它们。同时列在 `"dependencies"` 里的只链接一次。
+
 包含多个模块的 crate 把每个模块放在一个 Cargo feature 后面，应用只开启自己用到的，也只承担这些模块的体积、权限和商店声明。`--features` 用来开启它们，条目随之写成对象形式：
 
 ```sh
@@ -327,7 +329,7 @@ nshm 兼容的 NSH 版本就是它自己对 `nsh-core` 的版本要求（`nsh-co
 
 ### 打包的应用需要什么
 
-用到系统功能的 nshm 在 `Cargo.toml` 里声明打包的应用需要什么：写在 `[package.metadata.nsh]` 下；只有某个 feature 需要时，写在 `[package.metadata.nsh.features.<feature>]` 下。`nsh` 构建安装包时，会把应用链接的每个 crate 的条目（按 Cargo 实际开启的 feature）加进去；开发宿主拿到其中的 `Info.plist` 键和 Android 条目：
+用到系统功能的 nshm 在 `Cargo.toml` 里声明打包的应用需要什么：写在 `[package.metadata.nsh]` 下；只有某个 feature 需要时，写在 `[package.metadata.nsh.features.<feature>]` 下。`nsh` 构建安装包时，会把应用链接的每个 crate 的条目（按 Cargo 实际开启的 feature）加进去；开发宿主拿到其中的 iOS `Info.plist` 键和 Android 条目：
 
 ```toml
 [package.metadata.nsh.features.scanner.ios.infoPlist]
@@ -345,19 +347,54 @@ libraries = ["android/libs/scanner-glue.jar"]
 | `ios.infoPlist` | iOS 应用 `Info.plist` 的键，与 `nsh.json` 的 `ios.infoPlist` 相同 |
 | `ios.infoPlistStrings` | 这些键在其他语言下的文字，按语言给出，与 `nsh.json` 的 `ios.infoPlistStrings` 相同（[打包](./packaging.md#其他语言的-infoplist-文字)） |
 | `ios.entitlements` | iOS 应用的 entitlements |
+| `ios.frameworks` | XCFramework 和 framework，路径相对于 crate 的 `Cargo.toml`，链接和打包方式与 `nsh.json` 的 `ios.frameworks` 相同（[Framework 与链接参数](./packaging.md#framework-与链接参数)） |
+| `ios.linkerFlags` | iOS 可执行文件的链接参数，放在应用自己的之后 |
+| `macos.infoPlist` | macOS 应用 `Info.plist` 的键，与 `nsh.json` 的 `macos.infoPlist` 相同 |
+| `macos.infoPlistStrings` | 这些键在其他语言下的文字，与 `ios.infoPlistStrings` 相同 |
+| `macos.entitlements` | macOS 应用的 entitlements |
 | `android.permissions` | `<uses-permission>` 元素，写法与 `nsh.json` 相同（`CAMERA` 即 `android.permission.CAMERA`） |
 | `android.queries` | manifest `<queries>` 里的 `<intent>`、`<package>`、`<provider>` 元素 |
 | `android.application` | `<application>` 里的 `<service>`、`<receiver>`、`<provider>`、`<activity>`、`<meta-data>` 元素；`${applicationId}` 是应用的包名，其他占位符取应用的 `android.manifestPlaceholders` |
 | `android.libraries` | Java 库：jar、Android 库（`.aar`）和 dex 文件，路径相对于 crate 的 `Cargo.toml`，打包方式与 `nsh.json` 的 `android.libraries` 相同（[Java 代码](./packaging.md#java-代码)） |
 
 crate 不能设置 `android.manifestPlaceholders`，设置了会报错：占位符的值（例如某个服务的 key）属于应用，写在应用的 `nsh.json` 里。
-两个 crate 带了同一个 Android 库的不同版本时，用应用在自己的 `android.libraries` 里列出的那个版本。
+两个 crate 带了同一个 Android 库的不同版本时，用应用在自己的 `android.libraries` 里列出的那个版本。两个库定义了同名资源时，
+应用列出的库优先，其次是 crate 名排序靠前的（[Java 代码](./packaging.md#java-代码)）。
 
-应用自己的 `nsh.json` 优先：它设置过的键保留它的值，数组（例如 `UIBackgroundModes`）合并。两个 crate 给同一个键设置了不同的值时（例如两段不同的相机用途说明），由应用在 `ios.infoPlist` 或 `ios.entitlements` 里写这个键来决定；应用没写之前，打包 iOS 应用会报错并指出这两个 crate。NSH 自己设置的键（包标识、版本等）不能由 crate 设置。
+应用自己的 `nsh.json` 优先：它设置过的键保留它的值，数组（例如 `UIBackgroundModes`）合并。两个 crate 给同一个键设置了不同的值时（例如两段不同的相机用途说明），由应用在 `ios.infoPlist`、`ios.entitlements`、`macos.infoPlist` 或 `macos.entitlements` 里写这个键来决定；应用没写之前，打包该平台应用会报错并指出这两个 crate。NSH 自己设置的键（包标识、版本等）不能由 crate 设置。
 
-crate 翻译的是各 crate 在 `ios.infoPlist` 里设置的键，按它们的措辞翻译；按应用开启的 feature 没有 crate 设置的键（例如所在 feature 没开），它的翻译会被略过并给出警告。应用只采用自己支持的语言的 crate 翻译，即 `locales` 里的语言或应用自己 `ios.infoPlistStrings` 里的语言（写一个空的 `{}` 就是只声明语言、不写自己的文字），所以 crate 可以带上很多语言，而不会给应用增加语言。应用自己设置了的键不采用任何 crate 的翻译，因为那些翻译说的不是应用自己的文字。两个 crate 对同一个键给出不同的翻译时，同样由应用在 `ios.infoPlistStrings` 里写这个键来决定。
+crate 翻译的是各 crate 在 `ios.infoPlist`（macOS 是 `macos.infoPlistStrings` 翻译 `macos.infoPlist`）里设置的键，按它们的措辞翻译；按应用开启的 feature 没有 crate 设置的键（例如所在 feature 没开），它的翻译会被略过并给出警告。应用只采用自己支持的语言的 crate 翻译，即 `locales` 里的语言或应用自己 `ios.infoPlistStrings`（`macos.infoPlistStrings`）里的语言（写一个空的 `{}` 就是只声明语言、不写自己的文字），所以 crate 可以带上很多语言，而不会给应用增加语言。应用自己设置了的键不采用任何 crate 的翻译，因为那些翻译说的不是应用自己的文字。两个 crate 对同一个键给出不同的翻译时，同样由应用在 `ios.infoPlistStrings`（`macos.infoPlistStrings`）里写这个键来决定。
 
 在应用旁边开发时用 `nsh add --path ../my-gauge`，按目录当前内容使用。发布方式与普通 crate 相同（`cargo publish`），加上关键词 `nshm`，便于在 [crates.io](https://crates.io/keywords/nshm) 上找到；也可以推送到 Git 并给版本打标签。
+
+### 封装原生 SDK
+
+封装 Apple SDK 的 nshm 在 `#[cfg(target_os = "ios")]` 或 `#[cfg(target_os = "macos")]` 下从 Rust 调用它。通过 `objc2` 系列 crate 使用的系统 framework 无需更多设置。厂商预编译的库（`.xcframework` 或 `.a`）由 nshm 自己的 `build.rs` 链接：Cargo 会把所有依赖的 `rustc-link-lib` 和 `rustc-link-search` 传给应用的可执行文件，应用本身不用写任何配置，NSH 也没有按平台的 SDK 设置。
+
+```rust
+// build.rs
+fn main() {
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("ios") {
+        return;
+    }
+    // 模拟器和 Mac Catalyst（`nsh run --target catalyst`）也是 iOS 目标。
+    let slice = match std::env::var("CARGO_CFG_TARGET_ABI").as_deref() {
+        Ok("sim") => "ios-arm64_x86_64-simulator",
+        Ok("macabi") => "ios-arm64_x86_64-maccatalyst",
+        _ => "ios-arm64",
+    };
+    let root = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    println!("cargo:rustc-link-search=native={root}/vendor/Sdk.xcframework/{slice}");
+    // +whole-archive is -force_load: it keeps Objective-C categories, like -ObjC.
+    println!("cargo:rustc-link-lib=static:+whole-archive=Sdk");
+    println!("cargo:rustc-link-lib=framework=AdSupport");
+}
+```
+
+- 用 `rustc-link-lib`，不要用 `rustc-link-arg`：链接参数只作用于本 crate 自己的目标。
+- 静态库的隐私清单条目写进应用的 `ios.privacyManifest`。
+- NSH 不嵌入动态 framework，优先使用 SDK 的静态版本。
+- 在 Linux 和 Windows 上，同样由 `build.rs` 链接 SDK（Linux 上是 `.a` 和 `.so`，Windows 上是 `.lib`）。NSH 同样不会把共享库（`.so`、`.dll`）放进包里；请优先使用 SDK 的静态版本。
 
 ### TSX nshm
 

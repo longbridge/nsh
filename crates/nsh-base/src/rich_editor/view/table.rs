@@ -778,7 +778,7 @@ impl Rv {
             _ => None,
         };
         if let Some(selection) = selection {
-            self.set_selection(selection, false);
+            self.set_pointer_selection(selection, false);
         }
         if is_desktop() {
             *self.table_gesture.borrow_mut() = Some(TableGesture {

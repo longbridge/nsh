@@ -12,6 +12,7 @@ NSH renders with native views, so the platforms' assistive technologies (VoiceOv
 ## What you get without doing anything
 
 - **Text is read.** A text element is an accessibility element whose label is its text. A view without a label is read as the texts inside it.
+- **Links and inline views inside text are reached one by one.** With VoiceOver on iOS and macOS, each span of a text that takes presses (a nested `<Text onPress>`, a Markdown link) is a link of its own that activating presses, and the Links rotor moves between them; each inline view inside a text is an element of its own, read in its place in the sentence. On iOS, a text you give a label, a role or a press of its own stays one element.
 - **Pressable views are elements.** A view with a press or long press handler (`.on_press`, `onPress`) is an accessibility element by default, and activating it (double tap with VoiceOver or TalkBack) presses it.
 - **Inputs are text fields**, with their placeholder, value and keyboard.
 - **Text follows the user's size setting.** See [Text size](#text-size).

@@ -2,11 +2,11 @@
 //! app's `nsh.json` and of its crates' `[package.metadata.nsh]`): jar files,
 //! which the SDK's `d8` turns into dex; prebuilt dex files; and Android
 //! libraries (AARs), whose classes go the jars' way and whose native
-//! libraries, assets and manifest the package takes as well. A package
-//! without libraries runs none of this.
+//! libraries, assets, resources ([`library_resources`]) and manifest the
+//! package takes as well. A package without libraries runs none of this.
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     io::Read as _,
     path::{Path, PathBuf},
@@ -18,8 +18,9 @@ use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
 
 use super::{
-    Apk, MIN_SDK, Sdk,
+    Apk, MIN_SDK, Sdk, class_file,
     library_manifest::{self, Additions, Element, Placeholders},
+    library_resources::{self, Symbols},
 };
 
 /// Where `nsh.json` lists its libraries, as errors name it.
@@ -36,6 +37,8 @@ pub(crate) struct Library {
     /// Who lists it, for errors: `nsh.json `android.libraries`` or
     /// `<crate>: [package.metadata.nsh] `android.libraries``.
     pub(crate) listed: String,
+    /// The crate that lists it; `None`: the app's `nsh.json`.
+    pub(crate) owner: Option<String>,
 }
 
 impl From<PathBuf> for Library {
@@ -43,6 +46,7 @@ impl From<PathBuf> for Library {
         Library {
             path,
             listed: NSH_JSON.to_owned(),
+            owner: None,
         }
     }
 }
@@ -91,10 +95,81 @@ pub(super) struct Contents {
     pub(super) resources: Vec<(String, Vec<u8>)>,
     /// The native libraries of the AARs that have any ([`native_for`]).
     pub(super) native: Vec<Native>,
-    /// The AARs' assets: (path under `assets/`, contents).
+    /// The AARs' assets, and the jars' Java resources under `assets/`:
+    /// (path under `assets/`, contents).
     pub(super) assets: Vec<(String, Vec<u8>)>,
+    /// Each asset's index in `assets` and the library it came from.
+    asset_from: BTreeMap<String, (usize, String)>,
     /// What the manifest gets: the crates' entries and the AARs' manifests.
     pub(super) manifest: Additions,
+    /// The AARs' resources, compiled ([`compile_res`]): overlays of `aapt2
+    /// link`, lowest priority first ([`library_resources::link_inputs`]).
+    pub(super) res: Vec<PathBuf>,
+    /// The AARs' resources [`compile_res`] compiles.
+    res_files: Vec<LibraryRes>,
+    /// The AARs whose code was compiled against `R` fields: (package, its
+    /// `R.txt`, the AAR and who lists it).
+    r_classes: Vec<(String, Symbols, String)>,
+    /// The jars [`dex`] turns into dex.
+    jars: Vec<Checked>,
+}
+
+/// The resources of an AAR, to compile.
+#[derive(Debug)]
+struct LibraryRes {
+    /// The crate that lists the AAR; `None`: the app's own `nsh.json`.
+    owner: Option<String>,
+    /// The AAR and who lists it, for errors.
+    from: String,
+    /// The AAR's contents, which the compiled resources are cached by.
+    sha256: String,
+    /// `res/`: (path under it, contents).
+    files: Vec<(String, Vec<u8>)>,
+    /// Where they are written out to compile.
+    dir: PathBuf,
+}
+
+impl Contents {
+    /// Whether [`dex`] needs the ids `aapt2 link` gave the resources
+    /// (`--output-text-symbols`).
+    pub(super) fn needs_symbols(&self) -> bool {
+        !self.r_classes.is_empty()
+    }
+
+    /// Adds the asset `path` (under `assets/`) of the library `from`, once:
+    /// another library with the same path and different contents is an
+    /// error naming both.
+    fn add_asset(&mut self, path: String, bytes: Vec<u8>, from: &str) -> anyhow::Result<()> {
+        match self.asset_from.get(&path) {
+            None => {
+                self.asset_from
+                    .insert(path.clone(), (self.assets.len(), from.to_owned()));
+                self.assets.push((path, bytes));
+            }
+            Some((at, _)) if self.assets[*at].1 == bytes => {}
+            Some((_, first)) => bail!(
+                "{first} and {from} both have the asset `{path}`, with different contents: list one of them"
+            ),
+        }
+        Ok(())
+    }
+}
+
+/// The path under `assets/` of the entry `name` (`assets/<path>`) of the
+/// library `shown`, which the package can take: one with an empty, `.` or
+/// `..` part would land elsewhere, and `assets/nsh/` is NSH's own.
+fn asset_path(shown: &str, name: &str) -> anyhow::Result<Option<String>> {
+    let Some(path) = name.strip_prefix("assets/") else {
+        return Ok(None);
+    };
+    // `assets/../classes.dex` would be a file of the package's own.
+    if path.split('/').any(|part| matches!(part, "" | "." | "..")) {
+        bail!("{shown} has `{name}`, an asset path with an empty, `.` or `..` part");
+    }
+    if path.starts_with("nsh/") {
+        bail!("{shown} has `{name}`: `assets/nsh/` is NSH's own");
+    }
+    Ok(Some(path.to_owned()))
 }
 
 /// The native libraries of an AAR.
@@ -114,10 +189,17 @@ struct Checked {
     listed: String,
     /// The file and who lists it, which errors name it by.
     shown: String,
-    /// The app's own `nsh.json` lists it.
-    apps: bool,
+    /// The crate that lists it; `None`: the app's own `nsh.json`.
+    owner: Option<String>,
     kind: Kind,
     sha256: String,
+}
+
+impl Checked {
+    /// The app's own `nsh.json` lists it.
+    fn apps(&self) -> bool {
+        self.owner.is_none()
+    }
 }
 
 /// The libraries of `apk`, checked and each file once: a missing file or
@@ -145,7 +227,7 @@ fn checked(libraries: &[Library]) -> anyhow::Result<Vec<Checked>> {
             path: library.path.clone(),
             listed: library.listed.clone(),
             shown: library.describe(),
-            apps: library.listed == NSH_JSON,
+            owner: library.owner.clone(),
             kind,
             sha256,
         });
@@ -160,7 +242,7 @@ fn checked(libraries: &[Library]) -> anyhow::Result<Vec<Checked>> {
 /// which fails on a class two libraries define; and the AARs' native
 /// libraries, assets and manifests. Without libraries, only the crates'
 /// manifest entries.
-pub(super) fn prepare(sdk: &Sdk, apk: &Apk<'_>, work: &Path) -> anyhow::Result<Contents> {
+pub(super) fn prepare(apk: &Apk<'_>, work: &Path) -> anyhow::Result<Contents> {
     let mut contents = Contents::default();
     let mut files = Vec::new();
     let mut aars = Vec::new();
@@ -174,9 +256,21 @@ pub(super) fn prepare(sdk: &Sdk, apk: &Apk<'_>, work: &Path) -> anyhow::Result<C
     let placeholders = Placeholders::new(apk.package, apk.manifest_placeholders);
     let mut manifests = Vec::new();
     let mut warnings = Vec::new();
-    // Each asset's AAR, for errors.
-    let mut assets: BTreeMap<String, (usize, String)> = BTreeMap::new();
     for (i, aar) in choose(aars)?.into_iter().enumerate() {
+        if !aar.res.is_empty() {
+            contents.res_files.push(LibraryRes {
+                owner: aar.checked.owner.clone(),
+                from: aar.checked.shown.clone(),
+                sha256: aar.checked.sha256.clone(),
+                files: aar.res,
+                dir: work.join("aar").join(i.to_string()),
+            });
+        }
+        if let Some(symbols) = aar.r_txt {
+            contents
+                .r_classes
+                .push((aar.package, symbols, aar.checked.shown.clone()));
+        }
         let from = aar.checked.shown;
         if let Some(level) = aar.min_compile_sdk
             && level > apk.target_sdk
@@ -203,22 +297,13 @@ pub(super) fn prepare(sdk: &Sdk, apk: &Apk<'_>, work: &Path) -> anyhow::Result<C
                 path,
                 listed: aar.checked.listed.clone(),
                 shown: format!("`{name}` of {from}"),
-                apps: aar.checked.apps,
+                owner: aar.checked.owner.clone(),
                 kind: Kind::Jar,
                 sha256,
             });
         }
         for (path, bytes) in aar.assets {
-            match assets.get(&path) {
-                None => {
-                    assets.insert(path.clone(), (contents.assets.len(), from.clone()));
-                    contents.assets.push((path, bytes));
-                }
-                Some((at, _)) if contents.assets[*at].1 == bytes => {}
-                Some((_, first)) => bail!(
-                    "{first} and {from} both have the asset `{path}`, with different contents: list one of them"
-                ),
-            }
+            contents.add_asset(path, bytes, &from)?;
         }
         if !aar.native.is_empty() {
             contents.native.push(Native {
@@ -243,9 +328,37 @@ pub(super) fn prepare(sdk: &Sdk, apk: &Apk<'_>, work: &Path) -> anyhow::Result<C
             .filter(|c| c.kind == Kind::Dex)
             .map(|c| c.path.clone()),
     );
-    let jars: Vec<&Checked> = files.iter().filter(|c| c.kind == Kind::Jar).collect();
+    contents.jars = files.into_iter().filter(|c| c.kind == Kind::Jar).collect();
+    Ok(contents)
+}
+
+/// Adds the dex of the jars [`prepare`] found to `contents.dex`, with the
+/// `R` classes of the AARs whose code reads any, their fields the ids of
+/// `symbols` (what `aapt2 link --output-text-symbols` wrote): each jar
+/// through `d8 --intermediate` (kept in `apk.library_cache` by contents,
+/// `d8` version, API level and mode), then merged by one `d8` run into
+/// `work`, which fails on a class two libraries define.
+pub(super) fn dex(
+    sdk: &Sdk,
+    apk: &Apk<'_>,
+    work: &Path,
+    contents: &mut Contents,
+    symbols: Option<&Path>,
+) -> anyhow::Result<()> {
+    let r_classes = match symbols {
+        Some(symbols) if contents.needs_symbols() => Some(r_classes(
+            sdk,
+            apk,
+            work,
+            &contents.r_classes,
+            &contents.jars,
+            symbols,
+        )?),
+        _ => None,
+    };
+    let jars: Vec<&Checked> = contents.jars.iter().chain(&r_classes).collect();
     if jars.is_empty() {
-        return Ok(contents);
+        return Ok(());
     }
     let android_jar = sdk.android_jar(apk.target_sdk)?;
     // Each intermediate dex, with the library it is made of.
@@ -279,8 +392,12 @@ pub(super) fn prepare(sdk: &Sdk, apk: &Apk<'_>, work: &Path) -> anyhow::Result<C
         );
     }
     contents.dex.extend(dex_files(&merged)?);
-    contents.resources = java_resources(&jars)?;
-    Ok(contents)
+    let found = java_resources(&jars)?;
+    contents.resources = found.root;
+    for (path, bytes, from) in found.assets {
+        contents.add_asset(path, bytes, &from)?;
+    }
+    Ok(())
 }
 
 /// Where an AAR keeps what its build was made for.
@@ -299,14 +416,19 @@ struct Aar {
     native: BTreeMap<String, Vec<(String, Vec<u8>)>>,
     /// `assets/`: (path under it, contents).
     assets: Vec<(String, Vec<u8>)>,
+    /// `res/`: (path under it, contents).
+    res: Vec<(String, Vec<u8>)>,
+    /// The `R` fields its code was compiled against (`R.txt`), when there
+    /// are any.
+    r_txt: Option<Symbols>,
     /// The API level an app must compile against (`minCompileSdk`).
     min_compile_sdk: Option<u32>,
 }
 
 /// Reads what the package takes of an AAR: its classes, native
-/// libraries, assets and manifest. Resources (`res/`) are an error, which
-/// this does not package yet; what only a build reads (`R.txt`,
-/// `proguard.txt`, `lint.jar`, ...) is left out.
+/// libraries, assets, resources, the `R` fields its code reads and its
+/// manifest; what only a build reads (`public.txt`, `proguard.txt`,
+/// `lint.jar`, ...) is left out.
 fn read_aar(checked: Checked) -> anyhow::Result<Aar> {
     let file = fs::File::open(&checked.path)
         .with_context(|| format!("{}: read {}", checked.listed, checked.path.display()))?;
@@ -321,6 +443,10 @@ fn read_aar(checked: Checked) -> anyhow::Result<Aar> {
     let mut jars = Vec::new();
     let mut native: BTreeMap<String, Vec<(String, Vec<u8>)>> = BTreeMap::new();
     let mut assets = Vec::new();
+    let mut res = Vec::new();
+    // Each resource path in lower case: the path.
+    let mut res_paths: BTreeMap<String, String> = BTreeMap::new();
+    let mut r_txt = None;
     let mut min_compile_sdk = None;
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i)?;
@@ -353,24 +479,32 @@ fn read_aar(checked: Checked) -> anyhow::Result<Aar> {
                 let (abi, so) = (abi.to_owned(), so.to_owned());
                 native.entry(abi).or_default().push((so, read()?));
             }
-        } else if let Some(path) = name.strip_prefix("assets/") {
-            // `assets/../classes.dex` would be a file of the package's own.
+        } else if let Some(path) = asset_path(&checked.shown, &name)? {
+            assets.push((path, read()?));
+        } else if let Some(path) = name.strip_prefix("res/") {
+            // Written out for `aapt2 compile --dir`, under the AAR's own
+            // directory.
             if path.split('/').any(|part| matches!(part, "" | "." | "..")) {
                 bail!(
-                    "{} has `{name}`, an asset path with an empty, `.` or `..` part",
+                    "{} has `{name}`, a resource path with an empty, `.` or `..` part",
                     checked.shown
                 );
             }
-            if path.starts_with("nsh/") {
-                bail!("{} has `{name}`: `assets/nsh/` is NSH's own", checked.shown);
+            // On a file system that ignores case, one would overwrite the
+            // other.
+            if let Some(other) = res_paths.insert(path.to_lowercase(), path.to_owned()) {
+                bail!(
+                    "{} has `res/{other}` and `{name}`, whose paths differ only in case",
+                    checked.shown
+                );
             }
-            assets.push((path.to_owned(), read()?));
-        } else if name.starts_with("res/") {
-            bail!(
-                "{} has Android resources (`{name}`), which this nsh does not package yet: \
-                 the next version will",
-                checked.shown
-            );
+            res.push((path.to_owned(), read()?));
+        } else if name == "R.txt" {
+            let text = String::from_utf8(read()?)
+                .with_context(|| format!("{}: its R.txt is not UTF-8", checked.shown))?;
+            let symbols = library_resources::parse_symbols(&text)
+                .map_err(|e| anyhow::anyhow!("{}: its R.txt, {e}", checked.shown))?;
+            r_txt = Some(symbols);
         } else if name == AAR_METADATA {
             let text = String::from_utf8_lossy(&read()?).into_owned();
             if let Some(value) = text
@@ -397,6 +531,16 @@ fn read_aar(checked: Checked) -> anyhow::Result<Aar> {
         .filter(|package| !package.is_empty())
         .with_context(|| format!("{}: its manifest names no package", checked.shown))?
         .to_owned();
+    // Android's build writes one with the resources; without it, which of
+    // the package's fields the code reads is unknown, and an `R` of all of
+    // them would be every library's resources over again.
+    if !res.is_empty() && r_txt.is_none() {
+        bail!(
+            "{} has resources (`res/`) but no R.txt, which lists those its code uses: \
+             list an AAR as Android's build makes it",
+            checked.shown
+        );
+    }
     Ok(Aar {
         checked,
         package,
@@ -404,6 +548,8 @@ fn read_aar(checked: Checked) -> anyhow::Result<Aar> {
         jars,
         native,
         assets,
+        res,
+        r_txt: r_txt.filter(|symbols| !symbols.is_empty()),
         min_compile_sdk,
     })
 }
@@ -419,10 +565,10 @@ fn choose(aars: Vec<Aar>) -> anyhow::Result<Vec<Aar>> {
             continue;
         };
         // The app lists its own first.
-        if have.checked.apps && !aar.checked.apps {
+        if have.checked.apps() && !aar.checked.apps() {
             continue;
         }
-        let settle = if have.checked.apps {
+        let settle = if have.checked.apps() {
             "list one of them"
         } else {
             "list the one to package in nsh.json `android.libraries`"
@@ -498,25 +644,24 @@ pub(super) fn stored_asset(path: &str) -> bool {
         .is_some_and(|e| STORED.contains(&e.to_ascii_lowercase().as_str()))
 }
 
-/// The directory of `jar`'s intermediate dex in the cache, made when
-/// missing.
-fn intermediate_dex(
-    sdk: &Sdk,
-    jar: &Checked,
-    android_jar: &Path,
-    apk: &Apk<'_>,
-) -> anyhow::Result<PathBuf> {
-    let d8_version = sdk
-        .build_tools
+/// The version of the SDK's build tools (`d8`, `aapt2`), which the cache
+/// keys take.
+fn build_tools_version(sdk: &Sdk) -> String {
+    sdk.build_tools
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let key = hex(&Sha256::digest(format!(
-        "{}\0{d8_version}\0{MIN_SDK}\0{}\0{}",
-        jar.sha256,
-        mode(apk.dev),
-        apk.target_sdk
-    )));
+        .unwrap_or_default()
+}
+
+/// The directory `key` names in `apk.library_cache`, which `make` fills
+/// when it is missing.
+fn cached(
+    apk: &Apk<'_>,
+    key: &str,
+    what: &str,
+    make: impl FnOnce(&Path) -> anyhow::Result<()>,
+) -> anyhow::Result<PathBuf> {
+    let key = hex(&Sha256::digest(key));
     let dir = apk.library_cache.join(&key[..32]);
     if dir.join("done").exists() {
         return Ok(dir);
@@ -530,37 +675,325 @@ fn intermediate_dex(
         fs::remove_dir_all(&partial)?;
     }
     fs::create_dir_all(&partial)?;
-    let output = intermediate_command(sdk, &jar.path, android_jar, apk.dev, &partial)
-        .output()
-        .context("run the SDK's d8 (is a JDK installed?)")?;
-    if !output.status.success() {
+    if let Err(e) = make(&partial) {
         let _ = fs::remove_dir_all(&partial);
-        bail!(
-            "{}: d8 could not read {}:\n{}",
-            jar.listed,
-            jar.shown,
-            d8_message(&format!(
-                "{}{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            ))
-        );
+        return Err(e);
     }
     fs::write(partial.join("done"), b"")?;
-    // Another run may have moved its own copy in meanwhile, the same dex,
-    // which it or a third run may be reading: keep it, never remove it.
+    // Another run may have moved its own copy in meanwhile, the same
+    // files, which it or a third run may be reading: keep it, never
+    // remove it.
     if !dir.join("done").exists() && fs::rename(&partial, &dir).is_ok() {
         return Ok(dir);
     }
     let _ = fs::remove_dir_all(&partial);
     if !dir.join("done").exists() {
-        bail!(
-            "could not keep the dex of {} in {}",
-            jar.shown,
-            dir.display()
-        );
+        bail!("could not keep {what} in {}", dir.display());
     }
     Ok(dir)
+}
+
+/// The directory of `jar`'s intermediate dex in the cache, made when
+/// missing.
+fn intermediate_dex(
+    sdk: &Sdk,
+    jar: &Checked,
+    android_jar: &Path,
+    apk: &Apk<'_>,
+) -> anyhow::Result<PathBuf> {
+    // `dex-v1`: what this makes; a change to the `d8` command takes a new
+    // version, which leaves the entries of the old one unused.
+    let key = format!(
+        "dex-v1\0{}\0{}\0{MIN_SDK}\0{}\0{}",
+        jar.sha256,
+        build_tools_version(sdk),
+        mode(apk.dev),
+        apk.target_sdk
+    );
+    cached(apk, &key, &format!("the dex of {}", jar.shown), |out| {
+        let output = intermediate_command(sdk, &jar.path, android_jar, apk.dev, out)
+            .output()
+            .context("run the SDK's d8 (is a JDK installed?)")?;
+        if !output.status.success() {
+            bail!(
+                "{}: d8 could not read {}:\n{}",
+                jar.listed,
+                jar.shown,
+                d8_message(&format!(
+                    "{}{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                ))
+            );
+        }
+        Ok(())
+    })
+}
+
+/// Compiles the AARs' resources into `contents.res`, lowest priority first,
+/// once NSH wrote its own under `own` ([`library_resources::left_out`]
+/// leaves out a library's of the same names, with a warning).
+pub(super) fn compile_res(
+    sdk: &Sdk,
+    apk: &Apk<'_>,
+    contents: &mut Contents,
+    own: &Path,
+) -> anyhow::Result<()> {
+    if contents.res_files.is_empty() {
+        return Ok(());
+    }
+    let own = library_resources::generated(own)?;
+    let mut compiled = Vec::new();
+    for library in &contents.res_files {
+        let left_out = library_resources::left_out(&own, &library.files)
+            .map_err(|e| anyhow::anyhow!("{}: {e}", library.from))?;
+        if !left_out.is_empty() {
+            crate::ui::warn(format!(
+                "{}: {} left out: NSH makes these resources for the package",
+                library.from,
+                left_out
+                    .iter()
+                    .map(|path| format!("`res/{path}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        if left_out.len() == library.files.len() {
+            continue;
+        }
+        let path = compiled_res(sdk, apk, library, &left_out)?;
+        compiled.push((library.owner.clone(), path));
+    }
+    contents.res = library_resources::lowest_first(compiled);
+    Ok(())
+}
+
+/// `library`'s resources but `left_out`, compiled by `aapt2 compile --dir`
+/// (kept in `apk.library_cache` by the AAR's contents, what is left out and
+/// the build tools' version), written out first when they are not.
+fn compiled_res(
+    sdk: &Sdk,
+    apk: &Apk<'_>,
+    library: &LibraryRes,
+    left_out: &[String],
+) -> anyhow::Result<PathBuf> {
+    // `res-v1`: what this makes; a change to the `aapt2 compile` command
+    // takes a new version.
+    let key = format!(
+        "res-v1\0{}\0{}\0{}",
+        library.sha256,
+        build_tools_version(sdk),
+        left_out.join("\0")
+    );
+    let from = &library.from;
+    let cache = cached(apk, &key, &format!("the resources of {from}"), |out| {
+        let res = library.dir.join("res");
+        for (path, bytes) in &library.files {
+            if left_out.contains(path) {
+                continue;
+            }
+            let file = res.join(path);
+            fs::create_dir_all(file.parent().unwrap_or(&res))?;
+            fs::write(&file, bytes)?;
+        }
+        let output = Command::new(sdk.tool("aapt2"))
+            .arg("compile")
+            .arg("--dir")
+            .arg(&res)
+            .arg("-o")
+            .arg(out.join("res.zip"))
+            .output()
+            .context("run the SDK's aapt2")?;
+        if !output.status.success() {
+            bail!(
+                "aapt2 could not compile the resources of {from}:\n{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        Ok(())
+    })?;
+    Ok(cache.join("res.zip"))
+}
+
+/// The `R` classes of `libraries` (package, `R.txt`, the AAR), their
+/// fields the ids of `symbols`, compiled by the JDK's `javac` into a jar
+/// in `work`. An `R.txt` lists the resources of the libraries an AAR was
+/// built with as well: those no library listed defines are left out, with
+/// one note, unless the code of `jars` reads them, which is an error.
+fn r_classes(
+    sdk: &Sdk,
+    apk: &Apk<'_>,
+    work: &Path,
+    libraries: &[(String, Symbols, String)],
+    jars: &[Checked],
+    symbols: &Path,
+) -> anyhow::Result<Checked> {
+    let text = fs::read_to_string(symbols)
+        .with_context(|| format!("read what aapt2 wrote to {}", symbols.display()))?;
+    let linked = library_resources::parse_linked(&text)
+        .map_err(|e| anyhow::anyhow!("read what aapt2 wrote to {}: {e}", symbols.display()))?;
+    let packages = libraries.iter().map(|(p, _, _)| p.as_str()).collect();
+    let mut reads = r_reads(jars, &packages)?;
+    let dir = work.join("r");
+    let sources = dir.join("src");
+    let classes = dir.join("classes");
+    fs::create_dir_all(&classes)?;
+    let mut files = Vec::new();
+    let mut errors = Vec::new();
+    let (mut left_out, mut leaving_out) = (0, 0);
+    for (package, wanted, from) in libraries {
+        let read = reads.remove(package).unwrap_or_default();
+        let (java, left) = match library_resources::r_java(package, wanted, &read, &linked) {
+            Ok(r) => r,
+            Err(found) => {
+                errors.extend(found.into_iter().map(|e| format!("{from}: {e}")));
+                continue;
+            }
+        };
+        if left > 0 {
+            left_out += left;
+            leaving_out += 1;
+        }
+        let path = library_resources::r_java_path(&sources, package);
+        fs::create_dir_all(path.parent().unwrap_or(&sources))?;
+        fs::write(&path, java)?;
+        files.push(path);
+    }
+    if !errors.is_empty() {
+        bail!(
+            "{}\nlist the Android libraries that define them",
+            errors.join("\n")
+        );
+    }
+    if left_out > 0 {
+        crate::ui::note(format!(
+            "left out of the `R` classes of {leaving_out} Android {}: {left_out} resources their R.txt \
+             lists, which no library listed defines and no code reads",
+            if leaving_out == 1 {
+                "library"
+            } else {
+                "libraries"
+            }
+        ));
+    }
+    let output = Command::new(super::java_tool("javac"))
+        .args(["--release", "11", "-encoding", "UTF-8", "-nowarn", "-d"])
+        .arg(&classes)
+        .arg("-classpath")
+        .arg(sdk.android_jar(apk.target_sdk)?)
+        .args(&files)
+        .output()
+        .context("run javac to compile the AARs' `R` classes (is a JDK installed?)")?;
+    if !output.status.success() {
+        bail!(
+            "javac could not compile the AARs' `R` classes:\n{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let jar = dir.join("R.jar");
+    write_jar(&classes, &jar)?;
+    Ok(Checked {
+        sha256: file_sha256(&jar)?,
+        path: jar,
+        listed: "the AARs' R.txt".to_owned(),
+        shown: "the `R` classes of the AARs".to_owned(),
+        owner: None,
+        kind: Kind::Jar,
+    })
+}
+
+/// What the classes of `jars` read of the `R` classes of `packages`: by
+/// package, each field and the first class that reads it. A class file
+/// that cannot be read is left out, with one warning a jar.
+fn r_reads(
+    jars: &[Checked],
+    packages: &BTreeSet<&str>,
+) -> anyhow::Result<BTreeMap<String, library_resources::Reads>> {
+    let mut out: BTreeMap<String, library_resources::Reads> = BTreeMap::new();
+    for jar in jars {
+        let file = fs::File::open(&jar.path)
+            .with_context(|| format!("{}: read {}", jar.listed, jar.shown))?;
+        let mut archive = zip::ZipArchive::new(file)
+            .with_context(|| format!("{}: {} is not a jar", jar.listed, jar.shown))?;
+        let mut unread: Vec<(String, String)> = Vec::new();
+        for i in 0..archive.len() {
+            let mut entry = archive.by_index(i)?;
+            let name = entry.name()?.into_owned();
+            if entry.is_dir() || !name.ends_with(".class") {
+                continue;
+            }
+            let mut bytes = Vec::new();
+            entry.read_to_end(&mut bytes)?;
+            let (this, fields) = match class_file::field_refs(&bytes) {
+                Ok(found) => found,
+                Err(e) => {
+                    unread.push((name, e));
+                    continue;
+                }
+            };
+            // An `R` class's own initializer sets every field it has.
+            if library_resources::r_type(&this).is_some() {
+                continue;
+            }
+            for field in fields {
+                let Some((package, kind_of)) = library_resources::r_type(&field.class) else {
+                    continue;
+                };
+                if packages.contains(package.as_str()) {
+                    out.entry(package)
+                        .or_default()
+                        .entry((kind_of.to_owned(), field.name))
+                        .or_insert_with(|| this.replace('/', "."));
+                }
+            }
+        }
+        if let Some((name, e)) = unread.first() {
+            crate::ui::warn(format!(
+                "{}: {} of its class files cannot be read, such as `{name}` ({e}): \
+                 the `R` fields they read are not checked",
+                jar.shown,
+                unread.len()
+            ));
+        }
+    }
+    Ok(out)
+}
+
+/// A jar of the class files under `dir`, the same bytes for the same
+/// classes, which keeps its dex in the cache.
+fn write_jar(dir: &Path, jar: &Path) -> anyhow::Result<()> {
+    fn add(dir: &Path, files: &mut Vec<PathBuf>) -> anyhow::Result<()> {
+        for entry in fs::read_dir(dir)? {
+            let path = entry?.path();
+            if path.is_dir() {
+                add(&path, files)?;
+            } else {
+                files.push(path);
+            }
+        }
+        Ok(())
+    }
+    let mut files = Vec::new();
+    add(dir, &mut files)?;
+    files.sort();
+    let mut zip = zip::ZipWriter::new(fs::File::create(jar)?);
+    let options = zip::write::SimpleFileOptions::default()
+        .last_modified_time(zip::DateTime::default())
+        .compression_method(zip::CompressionMethod::Deflated);
+    for file in files {
+        let name = file
+            .strip_prefix(dir)?
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/");
+        zip.start_file(name, options)?;
+        std::io::Write::write_all(&mut zip, &fs::read(&file)?)?;
+    }
+    zip.finish()?;
+    Ok(())
 }
 
 fn mode(dev: bool) -> &'static str {
@@ -704,9 +1137,18 @@ fn left_out(name: &str) -> bool {
             .any(|n| upper == *n || upper.starts_with(&format!("{n}.")))
 }
 
+/// The Java resources of jars ([`java_resources`]).
+#[derive(Debug, Default)]
+struct JavaResources {
+    /// At the package's root: (path, contents).
+    root: Vec<(String, Vec<u8>)>,
+    /// Under `assets/`: (path under it, contents, the jar).
+    assets: Vec<(String, Vec<u8>, String)>,
+}
+
 /// Paths at a package's root that are the package's own.
 fn reserved(name: &str) -> bool {
-    ["lib/", "assets/", "res/", "dex/", "manifest/", "root/"]
+    ["lib/", "res/", "dex/", "manifest/", "root/"]
         .iter()
         .any(|dir| name.starts_with(dir))
         || matches!(name, "AndroidManifest.xml" | "resources.arsc")
@@ -717,9 +1159,12 @@ fn reserved(name: &str) -> bool {
 /// [`left_out`] names, each path once. Service files
 /// (`META-INF/services/<interface>`) of several jars are joined, as
 /// `ServiceLoader` reads every provider they list; another path two jars
-/// have with different contents is an error naming both.
-fn java_resources(jars: &[&Checked]) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
+/// have with different contents is an error naming both. Those under
+/// `assets/` are the package's assets, as at the root of an APK, where
+/// Android's Gradle plugin puts Java resources.
+fn java_resources(jars: &[&Checked]) -> anyhow::Result<JavaResources> {
     let mut out: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut assets = Vec::new();
     // Each path's index in `out`, and the jar it came from.
     let mut seen: BTreeMap<String, (usize, &Checked)> = BTreeMap::new();
     for jar in jars {
@@ -734,6 +1179,12 @@ fn java_resources(jars: &[&Checked]) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
             }
             let name = entry.name()?.into_owned();
             if name.ends_with(".class") || left_out(&name) {
+                continue;
+            }
+            if let Some(path) = asset_path(&jar.shown, &name)? {
+                let mut bytes = Vec::new();
+                entry.read_to_end(&mut bytes)?;
+                assets.push((path, bytes, jar.shown.clone()));
                 continue;
             }
             if entry.enclosed_name().is_none() || reserved(&name) {
@@ -766,7 +1217,7 @@ fn java_resources(jars: &[&Checked]) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
             }
         }
     }
-    Ok(out)
+    Ok(JavaResources { root: out, assets })
 }
 
 /// The SHA-256 of `path`'s contents, in hex.
@@ -809,6 +1260,10 @@ mod tests {
         Library {
             path: path.to_owned(),
             listed: listed.to_owned(),
+            owner: listed
+                .split_once(": ")
+                .filter(|_| listed != NSH_JSON)
+                .map(|(name, _)| name.to_owned()),
         }
     }
 
@@ -818,7 +1273,7 @@ mod tests {
             path: path.to_owned(),
             listed: listed.to_owned(),
             shown: library(path, listed).describe(),
-            apps: listed == NSH_JSON,
+            owner: library(path, listed).owner,
             kind: Kind::Jar,
             sha256: String::new(),
         }
@@ -862,7 +1317,7 @@ mod tests {
         let checked_ = checked(&listed).unwrap();
         assert_eq!(checked_.len(), 1);
         assert_eq!(checked_[0].path, a);
-        assert!(checked_[0].apps);
+        assert!(checked_[0].apps());
         // A missing file names who lists it.
         let missing = [library(
             &dir.join("gone.jar"),
@@ -1004,6 +1459,64 @@ mod tests {
     }
 
     #[test]
+    fn the_r_fields_classes_read_are_found_in_their_jars() {
+        use super::class_file::tests::class_file;
+        let dir = dir("r-reads");
+        let classes = dir.join("classes.jar");
+        let vendor = dir.join("vendor.jar");
+        let banner = class_file(
+            "com/example/push/Banner",
+            &[
+                ("com/example/push/R$string", "title", "I"),
+                ("com/example/push/R$styleable", "Banner", "[I"),
+                ("com/example/push/R$styleable", "Banner_tint", "I"),
+                // Another library's `R`, which the package has none of.
+                ("com/example/other/R$string", "x", "I"),
+                ("com/example/push/Config", "level", "I"),
+            ],
+        );
+        // An `R` class in the jar: its initializer sets its own fields.
+        let r = class_file(
+            "com/example/push/R$anim",
+            &[("com/example/push/R$anim", "abc_fade_in", "I")],
+        );
+        jar(
+            &classes,
+            &[
+                ("com/example/push/Banner.class", &banner),
+                ("com/example/push/R$anim.class", &r),
+                ("com/example/push/broken.class", b"\xca\xfe\xba\xbe\0"),
+                ("com/example/push/notes.txt", b"x"),
+            ],
+        );
+        let menu = class_file(
+            "com/vendor/Menu",
+            &[("com/example/push/R$anim", "abc_fade_in", "I")],
+        );
+        jar(&vendor, &[("com/vendor/Menu.class", &menu)]);
+        let jars = [checked_file(&classes, CRATE), checked_file(&vendor, CRATE)];
+        let reads = r_reads(&jars, &BTreeSet::from(["com.example.push"])).unwrap();
+        let found: Vec<String> = reads
+            .iter()
+            .flat_map(|(package, fields)| {
+                fields
+                    .iter()
+                    .map(move |((k, n), by)| format!("{package} {k}.{n} {by}"))
+            })
+            .collect();
+        assert_eq!(
+            found,
+            [
+                "com.example.push anim.abc_fade_in com.vendor.Menu",
+                "com.example.push string.title com.example.push.Banner",
+                "com.example.push styleable.Banner com.example.push.Banner",
+                "com.example.push styleable.Banner_tint com.example.push.Banner",
+            ]
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn jars_bring_their_java_resources() {
         let dir = dir("resources");
         let a = dir.join("a.jar");
@@ -1022,6 +1535,7 @@ mod tests {
                 ),
                 ("com/example/a/Hello.class", b"class"),
                 ("com/example/a/messages.properties", b"hi=a"),
+                ("assets/sdk/plugin.properties", b"a=1"),
                 (
                     "kotlin/collections/collections.kotlin_builtins",
                     b"builtins",
@@ -1032,6 +1546,7 @@ mod tests {
             &b,
             &[
                 ("META-INF/LICENSE.txt", b"license b"),
+                ("assets/sdk/plugin.properties", b"a=1"),
                 (
                     "META-INF/services/com.example.Greeter",
                     b"com.example.b.Hello",
@@ -1046,7 +1561,10 @@ mod tests {
             checked_file(&a, NSH_JSON),
             checked_file(&b, "x: [package.metadata.nsh] `android.libraries`"),
         );
-        let resources = java_resources(&[&la, &lb]).unwrap();
+        let JavaResources {
+            root: resources,
+            assets,
+        } = java_resources(&[&la, &lb]).unwrap();
         let names: Vec<&str> = resources.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(
             names,
@@ -1058,6 +1576,19 @@ mod tests {
         );
         // Both jars' providers.
         assert_eq!(resources[0].1, b"com.example.a.Hello\ncom.example.b.Hello");
+        // Under `assets/`: assets, as at the root of an APK Android's
+        // Gradle plugin makes, the same in both jars.
+        let assets: Vec<String> = assets
+            .iter()
+            .map(|(path, bytes, from)| format!("{path} {} {from}", String::from_utf8_lossy(bytes)))
+            .collect();
+        assert_eq!(
+            assets,
+            [
+                format!("sdk/plugin.properties a=1 {}", la.shown),
+                format!("sdk/plugin.properties a=1 {}", lb.shown),
+            ]
+        );
         // Another file the two have with different contents: an error
         // naming both.
         jar(&b, &[("com/example/a/messages.properties", b"hi=b")]);
@@ -1069,17 +1600,56 @@ mod tests {
             "{error}"
         );
         // A path the package keeps for its own files.
-        for name in [
-            "lib/arm64-v8a/libx.so",
-            "classes2.dex",
-            "assets/x",
-            "AndroidManifest.xml",
+        for (name, error) in [
+            ("lib/arm64-v8a/libx.so", "keeps for its own files"),
+            ("classes2.dex", "keeps for its own files"),
+            ("AndroidManifest.xml", "keeps for its own files"),
+            ("assets/nsh/bundle.nshc", "`assets/nsh/` is NSH's own"),
+            (
+                "assets/../classes.dex",
+                "an asset path with an empty, `.` or `..` part",
+            ),
         ] {
             jar(&b, &[(name, b"x")]);
-            let error = java_resources(&[&lb]).unwrap_err().to_string();
-            assert!(error.contains("keeps for its own files"), "{name}: {error}");
+            let found = java_resources(&[&lb]).unwrap_err().to_string();
+            assert!(
+                found.contains(&lb.shown) && found.contains(error),
+                "{name}: {found}"
+            );
         }
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn an_asset_goes_in_once_from_an_aar_or_a_jar() {
+        let mut contents = Contents::default();
+        let add = |contents: &mut Contents, bytes: &[u8], from: &str| {
+            contents.add_asset("sdk/plugin.properties".into(), bytes.to_vec(), from)
+        };
+        add(
+            &mut contents,
+            b"a=1",
+            "push.aar (nsh.json `android.libraries`)",
+        )
+        .unwrap();
+        // The same contents: once.
+        add(&mut contents, b"a=1", "`classes.jar` of push.aar").unwrap();
+        assert_eq!(
+            contents.assets,
+            [("sdk/plugin.properties".into(), b"a=1".to_vec())]
+        );
+        let error = add(
+            &mut contents,
+            b"a=2",
+            "vendor.jar (nsh.json `android.libraries`)",
+        )
+        .unwrap_err()
+        .to_string();
+        assert_eq!(
+            error,
+            "push.aar (nsh.json `android.libraries`) and vendor.jar (nsh.json `android.libraries`) \
+             both have the asset `sdk/plugin.properties`, with different contents: list one of them"
+        );
     }
 
     /// The manifest of an AAR of `package`, with `application`'s children.
@@ -1135,12 +1705,55 @@ mod tests {
         );
         assert_eq!(aar.assets, [("push/config.json".into(), b"{}".to_vec())]);
         assert_eq!(aar.min_compile_sdk, Some(34));
-        // What the package cannot take yet, or that is NSH's.
+        // An empty R.txt: its code reads no `R` field.
+        assert!(aar.res.is_empty() && aar.r_txt.is_none());
+        // Its resources, and the `R` fields its code reads.
+        jar(
+            &path,
+            &[
+                ("AndroidManifest.xml", &manifest),
+                ("res/values/values.xml", b"<resources/>"),
+                ("R.txt", b"int string push_title 0x7f0b0001\n"),
+            ],
+        );
+        let aar = read_aar(checked(&[library(&path, CRATE)]).unwrap().remove(0)).unwrap();
+        assert_eq!(
+            aar.res,
+            [("values/values.xml".into(), b"<resources/>".to_vec())]
+        );
+        let symbols: Vec<&(String, String)> = aar.r_txt.as_ref().unwrap().keys().collect();
+        assert_eq!(symbols, [&("string".into(), "push_title".into())]);
+        // Two that one would overwrite on a file system ignoring case.
+        jar(
+            &path,
+            &[
+                ("AndroidManifest.xml", &manifest),
+                ("res/drawable/logo.png", b"a"),
+                ("res/drawable/Logo.png", b"b"),
+                ("R.txt", b""),
+            ],
+        );
+        let found = read_aar(checked(&[library(&path, CRATE)]).unwrap().remove(0))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(
+            found.contains(
+                "has `res/drawable/logo.png` and `res/drawable/Logo.png`, whose paths differ only in case"
+            ),
+            "{found}"
+        );
+        // What the package cannot take, or that is NSH's.
         for (entry, error) in [
             (
                 "res/values/values.xml",
-                "has Android resources (`res/values/values.xml`), which this nsh does not package yet",
+                "has resources (`res/`) but no R.txt, which lists those its code uses",
             ),
+            (
+                "res/../classes.dex",
+                "a resource path with an empty, `.` or `..` part",
+            ),
+            ("R.txt", "its R.txt, line 1: `x` is no symbol"),
             ("assets/nsh/bundle.nshc", "`assets/nsh/` is NSH's own"),
             (
                 "assets/../classes.dex",

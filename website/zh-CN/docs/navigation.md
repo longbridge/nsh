@@ -667,6 +667,64 @@ function Editor() {
 
 在 effect 中创建的监听器一直有效，直到 effect 再次运行或它的组件消失；在 TSX 中，调用 `BackHandler.on` 返回的函数也会停止它。在 TSX 中，`BackHandler.exitApp()` 退出应用；在 iOS 上也可以导入 `nsh/mobile`，`BackHandler` 的调用会立即返回，所以同一份代码可以在两个平台上运行。见[平台特定代码](./platform-specific.md)。
 
+### 跟随返回手势
+
+在 Android 14 及更高版本上，返回手势会在手指移动时报告进度（预测性返回）。应用自己移动的视图，例如抽屉或底部面板，可以跟随它：Rust
+中用 `on_back_progress`，TSX 中用 `BackHandler.on("progress", listener)`。每一步带有 `phase`（`start`、`move`、`end`、
+`cancel`）、从 0 到 1 的 `progress`，以及滑动开始的屏幕边缘 `edge`（`left` 或 `right`）。`end` 之后紧接着是返回操作，你的返回监听器像上面那样收到它；
+`cancel` 之后把视图放回原处。注册了进度监听器时，导航栈把手势交给应用，不再预览弹出；对话框接管的手势不会报告。和返回监听器一样，只在视图打开时监听：
+
+```rust tabs
+use nsh_core::prelude::*;
+
+const WIDTH: f32 = 280.0;
+
+pub fn drawer(open: Signal<bool>) -> impl IntoElement {
+    let x = animated_value(0.0);
+    // 只在打开时监听：按下关闭它，手势的各步移动它。
+    effect(move || {
+        if open.get() {
+            on_back_press(move || {
+                open.set(false);
+                true
+            });
+            on_back_progress(move |e: &BackProgressEvent| match e.phase {
+                BackPhase::Start | BackPhase::Move => x.set(-WIDTH * e.progress.0),
+                BackPhase::Cancel => drop(x.spring(0.0, Spring::default())),
+                _ => {}
+            });
+        }
+    });
+    // …
+    view().w(px(WIDTH)).bind_translate_x(&x)
+}
+```
+
+```tsx tabs
+import { createAnimatedValue, effect, type Signal } from "nsh";
+import { BackHandler } from "nsh/mobile";
+
+const WIDTH = 280;
+
+function Drawer({ open }: { open: Signal<boolean> }) {
+  const x = createAnimatedValue(0);
+  // 只在打开时监听：按下关闭它，手势的各步移动它。
+  effect(() => {
+    if (open()) {
+      BackHandler.on("press", () => {
+        open.set(false);
+        return true;
+      });
+      BackHandler.on("progress", (e) => {
+        if (e.phase === "start" || e.phase === "move") x.set(-WIDTH * e.progress);
+        else if (e.phase === "cancel") x.spring(0);
+      });
+    }
+  });
+  // …
+}
+```
+
 ## 标签页与其他布局
 
 标签栏是应用自己的界面，用基础元素绘制：一排可按压的视图加一个保存当前标签的 signal；用 [`when` / `<If>`](../elements/control-flow.md)（或 TSX 中的函数子元素）渲染选中标签的内容。要在切换时保留每个标签的状态，给每个标签一个独立的栈和路由，并让它们都保持挂载，用 `display: none` 隐藏未选中的标签。

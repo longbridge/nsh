@@ -1159,6 +1159,28 @@ effect(() => {
 });
 ```
 
+### network
+
+```ts
+const network: Accessor<NetworkState>;
+```
+
+How the device reaches the network now: `online` (false only while the system knows there is no route), the `kind` of link the route takes (`"wifi"`, `"cellular"`, `"wired"`, `"other"`, `"none"` offline, `"unknown"` where the platform does not say, which counts as online), whether that link is `expensive` or `constrained` (Low Data Mode, Data Saver), and on iOS whether the user lets the app use cellular data (`cellularData`: `"unknown"` until the user decides, `"restricted"`, `"notRestricted"`). Reactive: an effect that reads it runs again when the route changes, where a request that failed offline tries again. iOS and macOS follow the system's path monitor, Android its default network, the web `navigator.onLine` and `navigator.connection`; Windows, Linux, GPUI and terminals report `"unknown"` ([The network](../docs/device-and-environment.md#the-network)). Rust: `network() -> Network` (`network().online()`, `.kind`, `.expensive`, `.constrained`, `.cellular_data`).
+
+```rust tabs
+effect(move || {
+    if network().online() && sync.failed_offline() {
+        sync.retry();
+    }
+});
+```
+
+```tsx tabs
+effect(() => {
+  if (network().online && sync.failedOffline()) sync.retry();
+});
+```
+
 ### setColorScheme
 
 ```ts
@@ -3103,9 +3125,13 @@ mount(() => (
 
 ## host
 
-`host` reaches the app that embeds NSH: the native app around an `NshAppView` / `NshView`, or on the web the page that runs the player. The app calls the host's functions by name with JSON arguments and listens to the events the host sends.
+`host` reaches the app that embeds NSH: the native app around an `NshAppView` / `NshView`, or on the web the page that runs the player. The app calls the host's functions by name with JSON arguments and listens to the events the host sends. Rust code calls `host_call`, `host_call_with`, `host_post` and `on_host_event` of `nsh_core::prelude`; TSX imports `host` from `nsh`. Both reach the same host, with the same names, capability and error codes, so an app writes its calls once and each host answers them its own way.
 
-```ts
+```rust tabs
+use nsh_core::prelude::*; // host_call, host_call_with, host_post, on_host_event, HostCallOptions, HostError
+```
+
+```tsx tabs
 import { host } from "nsh";
 ```
 
@@ -3152,6 +3178,8 @@ Calls the host's function `name` with `args` (any JSON value; `null` without one
 
 A name that is no valid name (1 to 128 of `A`–`Z`, `a`–`z`, `0`–`9`, `_`, `.`, `:`, `-`, without `..`) rejects with a `TypeError`.
 
+The checks run in this order, so a call fails with the first that applies: a `TypeError` for a name that is not valid, then `ERR_ACCESS_DENIED` for one the app is not granted, then `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where there is no host. A call the app is not granted rejects with `ERR_ACCESS_DENIED` also where there is no host.
+
 A call waits 30 seconds for the host's answer, then rejects with `ETIMEDOUT`; an answer that comes later is dropped. `options.timeout` sets the wait in milliseconds, `0` for no limit; a timeout so large the clock never gets there (about 1e22 ms) waits without limit too, and a negative, `NaN` or infinite one rejects the call with a `RangeError`. The time is the app's, as its timers': in `nsh test` with a manual clock it moves with the clock.
 
 ```ts
@@ -3160,6 +3188,38 @@ const quote = await host.call("quote.refresh", { symbol: "AAPL" }, { timeout: 50
   if (error.code === "ETIMEDOUT" || error.code === "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM") return null;
   throw error;
 });
+```
+
+In Rust, `host_call(name, args)` is an `async fn` to await in a task, settling with `Result<JsonValue, HostError>`. `HostError`'s variants are the failures above (`Failed` with the host's message, `Denied`, `InvalidName`, `Unavailable`, `TimedOut`, `TooManyCalls`), and `code()` gives the same codes. `host_call_with(name, args, options)` takes `HostCallOptions::default().timeout(duration)`, where `Duration::ZERO` waits as long as the host takes.
+
+```rust
+// use nsh_core::JsonValue; use serde_json::json; use std::time::Duration;
+spawn(async move {
+    let user = host_call("getUserInfo", JsonValue::Null).await;
+    let options = HostCallOptions::default().timeout(Duration::from_secs(5));
+    match host_call_with("quote.refresh", json!({ "symbol": "AAPL" }), options).await {
+        Ok(quote) => show(quote),
+        Err(HostError::TimedOut { .. } | HostError::Unavailable) => {}
+        Err(error) => log::warn!("{error}"),
+    }
+});
+```
+
+### host.post
+
+```ts
+post(name: string, data?: unknown): void;
+```
+
+Hands `data` to the host's function `name` without waiting for an answer: the host's handler of `name` gets it as it gets calls. Where nothing embeds the app, or the host has no handler of `name`, the post goes nowhere. Where there is a host, a name the app is not granted, or no valid name, throws (`ERR_ACCESS_DENIED`, a `TypeError`). Rust's `host_post(name, data)` returns nothing: it checks the name wherever the app runs, and a refused post is logged and dropped.
+
+```rust tabs
+// use serde_json::json;
+host_post("analytics.track", json!({ "event": "signup" }));
+```
+
+```tsx tabs
+host.post("analytics.track", { event: "signup" });
 ```
 
 ### host.on
@@ -3176,6 +3236,12 @@ const stop = host.on("loginChanged", (payload) => console.log(payload));
 stop();
 ```
 
+In Rust, `on_host_event(event, listener)` runs `listener` with each payload (`&JsonValue`) while the component that added it lives, as `on_key` does. An event that comes while no Rust listener of its name is there, including one the host sent before the app started, is kept until one is added (at most 256, the oldest going first), so a listener added after the app loaded something still receives it; an event a listener already received is not replayed to later ones.
+
+```rust
+on_host_event("loginChanged", move |payload| signed_in.set(payload["signedIn"] == true));
+```
+
 ### Capability
 
 Every function the app calls must be listed in `nsh.json`'s `capabilities.host`: exact names or prefixes ending in `*`, or `true` for all of them. This holds for every app, also one without other `capabilities`: the host's functions are never granted by default. A call that is not granted rejects with `ERR_ACCESS_DENIED` and is logged, a `host.post` of such a name to an embedding app throws the same error, and building an app that imports `host` from `nsh` without `capabilities.host` warns. Events need no grant. See [Sandbox and capabilities](../docs/sandbox-and-capabilities.md#host).
@@ -3186,7 +3252,7 @@ Every function the app calls must be listed in `nsh.json`'s `capabilities.host`:
 
 ### The host on the web
 
-On the web the page is the host. `createPlayer`'s `host` option answers the calls, and `player.hostEvent(event, payload)` sends events:
+On the web the page is the host. `createPlayer`'s `host` option answers the calls, and `player.hostEvent(event, payload)` sends events, for TSX and Rust apps alike:
 
 ```js
 const player = await createPlayer(container, {
@@ -3269,7 +3335,7 @@ nsh.send("conversation.open", Map.of("id", "43"));
 See [Embedding on iOS](../docs/ios.md#talking-to-the-app), [Embedding on Android](../docs/android.md#talking-to-the-app) and [GPUI](../docs/gpui.md).
 
 > [!NOTE]
-> Native SDK calls and posts use the same [`host` capability](../docs/sandbox-and-capabilities.md#host) as platform calls. A Rust app reaches the embedding app's Rust directly, through the functions it registers ([`nativeModule`](#nativemodule) and Rust imports).
+> Native SDK calls and posts use the same [`host` capability](../docs/sandbox-and-capabilities.md#host) as platform calls. A Rust app's `host_call`, `host_post` and `on_host_event` reach the same handlers and events, on every platform.
 
 ## keymap
 

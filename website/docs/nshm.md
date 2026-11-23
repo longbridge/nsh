@@ -122,6 +122,8 @@ Each version is installed once per machine, in `~/.nsh/nshms` (`NSH_HOME` moves 
 
 A Rust nshm is also added to the `[dependencies]` of the app's own crate when it has one, so the app's Rust uses it directly. An app whose nshm include a Rust one gets hosts built with it, as an app with a crate of its own does, so its development machine and CI need the Rust toolchain ([Building with Rust](./rust.md)). An app whose nshm are all TSX builds with `nsh` alone.
 
+An app with a crate of its own can also depend on a Rust nshm in its `Cargo.toml` alone, as on any other crate, from crates.io, Git (a crate in a subdirectory of the repository too) or a path. `nsh` finds the Rust nshm among the crate's dependencies, direct or not, and links them as it links those of `"dependencies"`: their `#[native_module]` entries run when the app starts, with the features the crate turns on, in `nsh run`, `nsh test` and the packages alike, and TSX imports them by their specifiers. One listed in `"dependencies"` too is linked once.
+
 A crate that holds several modules keeps each behind a Cargo feature, so an app turns on only those it uses and pays
 only their size, permissions and store declarations. `--features` turns them on, and the entry takes the object form:
 
@@ -367,7 +369,7 @@ The NSH versions an nshm builds with are its own `nsh-core` requirement (`nsh-co
 An nshm that uses a system feature declares what the packaged app needs in its `Cargo.toml`, under
 `[package.metadata.nsh]`, or under a feature's `[package.metadata.nsh.features.<feature>]` when only that feature
 needs it. `nsh` adds the entries of every crate the app links, with the features Cargo turns on, to the packages it builds,
-and the `Info.plist` keys and Android entries to its development hosts:
+and the iOS `Info.plist` keys and Android entries to its development hosts:
 
 ```toml
 [package.metadata.nsh.features.scanner.ios.infoPlist]
@@ -385,6 +387,11 @@ libraries = ["android/libs/scanner-glue.jar"]
 | `ios.infoPlist` | Keys of the iOS app's `Info.plist`, as `nsh.json`'s `ios.infoPlist` |
 | `ios.infoPlistStrings` | The text of those keys in other languages, by language, as `nsh.json`'s `ios.infoPlistStrings` ([Packaging](./packaging.md#infoplist-text-in-other-languages)) |
 | `ios.entitlements` | The iOS app's entitlements |
+| `ios.frameworks` | XCFrameworks and frameworks relative to the crate's `Cargo.toml`, linked and packaged as `nsh.json`'s `ios.frameworks` are ([Frameworks and linker flags](./packaging.md#frameworks-and-linker-flags)) |
+| `ios.linkerFlags` | Arguments of the iOS executable's link, after the app's own |
+| `macos.infoPlist` | Keys of the macOS app's `Info.plist`, as `nsh.json`'s `macos.infoPlist` |
+| `macos.infoPlistStrings` | The text of those keys in other languages, as `ios.infoPlistStrings` |
+| `macos.entitlements` | The macOS app's entitlements |
 | `android.permissions` | `<uses-permission>` elements, named as in `nsh.json` (`CAMERA` is `android.permission.CAMERA`) |
 | `android.queries` | `<intent>`, `<package>` and `<provider>` elements of the manifest's `<queries>` |
 | `android.application` | `<service>`, `<receiver>`, `<provider>`, `<activity>` and `<meta-data>` elements of `<application>`; `${applicationId}` is the app's package, other placeholders the app's `android.manifestPlaceholders` |
@@ -392,21 +399,53 @@ libraries = ["android/libs/scanner-glue.jar"]
 
 A crate does not set `android.manifestPlaceholders`, which is an error: the values of placeholders (a service's key) are
 the app's, set in its `nsh.json`. The version of an Android library two crates carry in different versions is the one
-the app lists in its own `android.libraries`.
+the app lists in its own `android.libraries`. When two libraries define a resource of one name, a library the app
+lists wins, then the crate whose name sorts first ([Java code](./packaging.md#java-code)).
 
 The app's own `nsh.json` wins: a key it sets keeps its value, and arrays (such as `UIBackgroundModes`) are joined. When
 two crates set one key to different values (two usage descriptions of the camera), the app chooses by setting the key
-in `ios.infoPlist` or `ios.entitlements`; until it does, packaging for iOS stops with an error naming both crates. Keys NSH
-sets itself (the bundle's identifier, version and the like) are not the crates'.
+in `ios.infoPlist`, `ios.entitlements`, `macos.infoPlist` or `macos.entitlements`; until it does, packaging for that
+platform stops with an error naming both crates. Keys NSH sets itself (the bundle's identifier, version and the like)
+are not the crates'.
 
-A crate translates the keys the crates set in `ios.infoPlist`, as they word them; a translation of a key no crate sets
-with the app's features (one of a feature that is off) is left out with a warning. The app takes the crates'
-translations for the languages it has only, those of its `locales` or its own `ios.infoPlistStrings` (an empty `{}`
-names a language without text of its own), so a crate may carry many languages without adding any to the app. A key
-the app sets itself takes none of the crates' translations, which would say something else than the app's text. Two
-crates translating a key differently are settled by the app as above, in `ios.infoPlistStrings`.
+A crate translates the keys the crates set in `ios.infoPlist` (`macos.infoPlist` in `macos.infoPlistStrings`), as
+they word them; a translation of a key no crate sets with the app's features (one of a feature that is off) is left out
+with a warning. The app takes the crates' translations for the languages it has only, those of its `locales` or its own
+`ios.infoPlistStrings` (`macos.infoPlistStrings`; an empty `{}` names a language without text of its own), so a crate
+may carry many languages without adding any to the app. A key the app sets itself takes none of the crates'
+translations, which would say something else than the app's text. Two crates translating a key differently are settled
+by the app as above, in `ios.infoPlistStrings` (`macos.infoPlistStrings`).
 
 Develop it beside an app with `nsh add --path ../my-gauge`, which reads the directory as it is. Publish it as any crate (`cargo publish`), with the keyword `nshm` so that it can be found on [crates.io](https://crates.io/keywords/nshm), or push it to Git and tag its versions.
+
+### Wrapping a native SDK
+
+An nshm that wraps an Apple SDK calls it from Rust under `#[cfg(target_os = "ios")]` or `#[cfg(target_os = "macos")]`. System frameworks used through the `objc2` crates need nothing more. A vendor's prebuilt library (an `.xcframework` or `.a`) is linked from the nshm's own `build.rs`: Cargo passes the `rustc-link-lib` and `rustc-link-search` of every dependency to the app's executable, so the app lists nothing and NSH has no per-platform SDK settings.
+
+```rust
+// build.rs
+fn main() {
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("ios") {
+        return;
+    }
+    // The simulator's and Mac Catalyst's (`nsh run --target catalyst`) are iOS too.
+    let slice = match std::env::var("CARGO_CFG_TARGET_ABI").as_deref() {
+        Ok("sim") => "ios-arm64_x86_64-simulator",
+        Ok("macabi") => "ios-arm64_x86_64-maccatalyst",
+        _ => "ios-arm64",
+    };
+    let root = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    println!("cargo:rustc-link-search=native={root}/vendor/Sdk.xcframework/{slice}");
+    // +whole-archive is -force_load: it keeps Objective-C categories, like -ObjC.
+    println!("cargo:rustc-link-lib=static:+whole-archive=Sdk");
+    println!("cargo:rustc-link-lib=framework=AdSupport");
+}
+```
+
+- Use `rustc-link-lib`, not `rustc-link-arg`: link arguments only apply to the crate's own targets.
+- Put a static library's privacy manifest entries in the app's `ios.privacyManifest`.
+- NSH does not embed dynamic frameworks; prefer the SDK's static build.
+- On Linux and Windows the same `build.rs` links the SDK (`.a` and `.so` on Linux, `.lib` on Windows). NSH does not carry shared libraries (`.so`, `.dll`) into the package either; prefer the SDK's static build.
 
 ### A TSX nshm
 

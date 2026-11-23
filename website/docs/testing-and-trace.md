@@ -119,7 +119,9 @@ another engine, a fresh one each time, so tests never share state; the apps a te
 test fails when it throws, when the promise it returns rejects, and after its timeout: 30 seconds, or the milliseconds
 `test`'s third argument gives (`test("syncs", body, 60_000)`). An app with Rust crates of its own
 (`nsh.json` `"rust"`) runs its tests in a headless runner NSH builds with them, the same way; in a Rust app
-(`nsh.json` `"root"`, [Building with Rust](./rust.md)), `open(".")` starts its root component.
+(`nsh.json` `"root"`, [Building with Rust](./rust.md)), `open(".")` starts its root component. Pass `--release` to run
+`cargo test --release` on its crates, build its headless runner and development hosts optimized (`--release`), and
+minify and strip debug info from the app bundles under test.
 
 ### Grouping tests and setting them up
 
@@ -429,8 +431,8 @@ one: a selector matching several fails the step, and the error says how to narro
 | `await app.rightClick(selector)` | The mouse's secondary button over the middle of the view: it, or the nearest view around it listening, hears `onContextMenu`. The desktops and the web (headless: a desktop `platform`); a phone has no mouse: there it rejects. |
 | `await app.paste(selector, { text?, html?, files?, uris? })` | Pastes into the input as the user does with that on the clipboard: it takes the focus and hears `onPaste` (`html` the same content with its formatting, `files` are paths whose bytes it gets as `File`s, `uris` `file:` URLs), then its text goes in as `pasteBehavior` says. Headless, on macOS, on iOS and on the web; the machine's clipboard stays as it was. |
 | `app.menu()` | The actions of the context menu the app shows (`Menu.popup`), or of the system's edit menu an editor shows over its selection on a phone (`RichEditor`'s, labelled as the platform labels them: `Cut`, `Copy`, `Paste`, `Select All`): `label` (a submenu's after its own, `"Share > Mail"`), `disabled`, and `checked` for a checkable item; `null` when none is open. |
-| `await app.chooseMenuItem(label)` | Chooses the open context menu's action, as a click on it does: the app hears `onMenu` (its `onSelect` runs), then the menu closes. From an edit menu, the editor carries out the action; Paste pastes the test's clipboard. On iOS it chooses from the menu the system shows (a `MenuButton`'s, a `ContextMenu`'s, a header button's), as a tap does. Rejects when the item is disabled or missing. |
-| `await app.closeMenu()` | Closes the open context menu with nothing chosen, as Escape does (on iOS, a tap outside the system's menu). |
+| `await app.chooseMenuItem(label)` | Chooses the open context menu's action, as a click on it does: the app hears `onMenu` (its `onSelect` runs), then the menu closes. From an edit menu, the editor carries out the action; Paste pastes the test's clipboard. On iOS and Android it chooses from the menu the system shows (a `MenuButton`'s, a `ContextMenu`'s; on iOS a header button's too), as a tap does. Rejects when the item is disabled or missing. |
+| `await app.closeMenu()` | Closes the open context menu with nothing chosen, as Escape does (on iOS, a tap outside the system's menu; on Android, the back button). |
 | `await app.keyboard.press(keys)` | Presses a key with its modifiers, as `keymap` names it (`"mod+k"`, `"shift+/"`, `"escape"`; `mod` is the platform's command key), on a hardware keyboard, on every platform (phones and tablets have one too): the app's shortcut of it hears it (`keymap.bind`, `onKeyCommand`), else on a desktop the application menu's item with that shortcut is chosen (`Menu.setApplicationMenu`, its `when` kept while an input has the focus), else on macOS and the web Tab and Shift+Tab move the keyboard focus between the inputs and the views that take presses (`onFocus`, `onBlur`, `focus:` styles), inside the newest dialog while one is open (it gives the focus back to what had it when it closes), and Return or Space presses the view it is on when that view is in the newest dialog (or no dialog is open; else the key goes to the shortcuts); a page pushed onto a `NavStack`, or a back that pops one, takes the focus off the page that no longer shows (its view hears `onBlur`), and on the web (`platform: "web"`) Shift+F10 asks it for its context menu (`onContextMenu` with `pointerType: null`), else the focused input takes a character, Backspace or the return key, else Escape goes back. |
 | `await app.keyboard.down(keys)` / `up(keys)` | Holds modifier keys (`"mod"`, `"shift"`, `"alt"`, `"ctrl"`, `"meta"`, joined by `+`) down until `up`: the presses, drags and hovers meanwhile carry them, as a Mod-click or a Shift-drag does. Headless and on Linux for now. |
 | `await app.dragAndHold(selector, by, options?)` / `app.drop()` | Drags as `drag` does and keeps the finger down until `drop()`, which lifts it where it is: the steps between look at the screen mid-drag (a drag preview, a drop line). Headless, on Linux and on iOS. |
@@ -475,6 +477,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `await app.setColorScheme(scheme)` | Switches the system's appearance to `"light"` or `"dark"`, as the user does. |
 | `await app.setLifecycle(state)` | Moves the app to `"background"`, `"inactive"` or `"active"`, as the system does when the user leaves it, switches to another app or window and comes back (`lifecycle()`). Headless runs only. |
 | `await app.wake()` | Wakes the system from sleep, as when the user opens a laptop's lid: `wakeCount()` counts one more and `lifecycle()` stays as it was. Headless runs only. |
+| `await app.setNetworkState(state)` | Changes how the device reaches the network as `state` names (`{ kind: "none" }` offline, `{ kind: "cellular", expensive: true }`, `{ cellularData: "restricted" }`; also `constrained`), as the system reports when the route or the user's settings change; what it does not name stays (`network()`). A headless app starts with the kind `"unknown"`, which counts as online. Requests still get their routes (`open`'s `network`). Headless runs only. |
 | `await app.setLocaleSettings(settings)` | Changes the locale settings `settings` names (`{ hourCycle: "h23", timeZone: "Asia/Tokyo" }`; also `languages`, `firstDayOfWeek`, `measurementSystem` and `temperatureUnit`, as `open`'s `localeSettings` takes them), as when the user changes the system's or travels; the others stay (`localeSettings()`). Headless runs only. |
 | `await app.screenshot(path?)` | A picture of the app as a `Uint8Array`: PNG of its window on graphical targets, UTF-8 Cell JSON on `tui`, also saved at `path` on this machine when given (relative to the current directory). Only a real platform draws the app: see [On a real platform](#on-a-real-platform). |
 | `app.windowIds()` | The ids of the app's open windows, in opening order; empty off the desktops and while the app has none. |
@@ -506,7 +509,7 @@ a test matches the code:
 |---|---|
 | `ERR_NSH_TEST_NOT_FOUND` | Nothing on screen matches the selector, or the open menu has no such item. |
 | `ERR_NSH_TEST_DISABLED` | The view the selector names is disabled (a scroll view the user cannot scroll, a disabled menu item). |
-| `ERR_NSH_TEST_COVERED` | Another view is drawn over the one `press` names and would take a finger there (an overlay over a button, a bar over a row scrolled under it). |
+| `ERR_NSH_TEST_COVERED` | Another view is drawn over the one `press` names and would take a finger there (an overlay over a button, a bar over a row scrolled under it, a selection's edit menu over a view). |
 | `ETIMEDOUT` | `waitFor` or `waitUntil` ran out of time, or the app rendered nothing after `open`. |
 | `ERR_NSH_TEST_NO_BACK` | `back()` found nothing to go back from. |
 | `ERR_NSH_TEST_UNSUPPORTED` | `open` with `--target` was given an option the target's platform cannot honor: `width` or `height` on iOS and Android, a phone's `platform` on a desktop or the web, a desktop's or the other phone's on iOS or Android, `host.handlers`, `modules`, `url`. The message names it. Also `forward()` off `--target web`. |
@@ -622,7 +625,8 @@ own input at the views their selectors name, as Playwright does in a browser:
   edge of a scroll view already at its end is acted on where it is, without pulling the scroll view past that end
   (where a pull to refresh starts or a page sheet closes); a view a scroll view's content passes under at its edges
   (on iOS a transparent header, a tab bar, the keyboard) is scrolled out from under them, and a step on one
-  left under them, or under a bar the system draws, fails with `ERR_NSH_TEST_COVERED` instead of pressing the bar;
+  left under them, or under a bar the system draws or a selection's edit menu, fails with `ERR_NSH_TEST_COVERED`
+  instead of pressing what covers it;
 - selectors, waits and queries see the same model of the app as headless runs, built from what the host draws, so
   they find the same views;
 - dialogs are the platform's own: `app.dialogs()` reads them, and answering one (`onDialog`, or its cancel button
@@ -664,7 +668,7 @@ is written or says what it needs. A desktop's `platform` (`"macos"` for a deskto
 desktop target and the web, as that target's platform and always as a desktop: in the browser the page starts in the
 desktop idiom whatever its width, where without a `platform` (or with `"web"`) it measures its idiom as a browser does
 (a desktop from 600 points wide). An app with Rust crates of its own runs in a development host built with its crates, which NSH
-builds for the platform; a Rust app's host runs its root, so `open(".")` starts it there as it does headless.
+builds for the platform (on Android for the device's ABI, as `nsh run` does); a Rust app's host runs its root, so `open(".")` starts it there as it does headless.
 
 `nsh test --target tui` runs the tests against the terminal renderer in an in-memory terminal, suitable for CI.
 Each `open` uses its own surface and data directory. Set its point dimensions with `open(entry, { width, height })`;
@@ -839,7 +843,8 @@ perf commit: 55 ops, 1667µs (list js 771µs), 46 mount items, 414 nodes
 ```
 
 For a [list](./lists.md), this shows the virtualization at work: which frames bind new rows, how many operations a row
-costs, and that frames revealing no new row produce nothing. Use it with a release build (`cargo test --release`, or `./target/release/nsh` in a checkout) for meaningful
+costs, and that frames revealing no new row produce nothing. Use it with a release build (`cargo test --release`,
+`nsh test --release` for an app with Rust crates, or `./target/release/nsh` in a checkout) for meaningful
 timings.
 
 ### In CI

@@ -110,7 +110,8 @@ error 2 tests: 1 passed, 1 failed (0.9s)
 共享状态；测试结束时，它打开的应用会被关闭。测试在抛出异常、返回的 promise 被 reject 或超时时失败：超时默认 30 秒，
 也可以用 `test` 的第三个参数按毫秒指定（`test("syncs", body, 60_000)`）。带有自己
 Rust crate 的应用（`nsh.json` 的 `"rust"`）以同样的方式，在 NSH 用这些 crate 构建的无界面运行器中运行测试；在 Rust 应用
-（`nsh.json` 的 `"root"`，[用 Rust 开发](./rust.md)）中，`open(".")` 启动它的根组件。
+（`nsh.json` 的 `"root"`，[用 Rust 开发](./rust.md)）中，`open(".")` 启动它的根组件。加上 `--release` 会以
+`cargo test --release` 运行其 crate 测试，以优化模式（`--release`）构建无界面运行器和开发宿主，并对被测应用 bundle 压缩代码、去掉调试信息。
 
 ### 分组与准备测试
 
@@ -392,8 +393,8 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `await app.rightClick(selector)` | 在视图中央按下鼠标右键：该视图或其外层最近的监听视图收到 `onContextMenu`。用于桌面和 web（headless 时使用桌面 `platform`）；手机没有鼠标，在那里会 reject。 |
 | `await app.paste(selector, { text?, html?, files?, uris? })` | 像剪贴板上有这些内容时用户粘贴一样粘贴到输入框：输入框获得焦点并收到 `onPaste`（`html` 是带格式的同一内容，`files` 是文件路径，其字节以 `File` 交给它，`uris` 是 `file:` URL），然后按 `pasteBehavior` 插入文本。支持 headless、macOS、iOS 和 web；本机剪贴板保持不变。 |
 | `app.menu()` | 应用显示的上下文菜单（`Menu.popup`）中的操作，或编辑器在手机上于选区处显示的系统编辑菜单（`RichEditor` 的，标签与平台一致：`Cut`、`Copy`、`Paste`、`Select All`）中的操作：`label`（子菜单中的项写在子菜单名之后，如 `"Share > Mail"`）、`disabled`，可勾选项还有 `checked`；没有打开的菜单时为 `null`。 |
-| `await app.chooseMenuItem(label)` | 选择已打开上下文菜单中的操作，如同点击它：应用收到 `onMenu`（其 `onSelect` 运行），然后菜单关闭。在编辑菜单中选择时，由编辑器执行该操作；Paste 粘贴测试自己的剪贴板。在 iOS 上从系统显示的菜单（`MenuButton`、`ContextMenu`、标题栏按钮的菜单）里选，如同点按。该项被禁用或不存在时 reject。 |
-| `await app.closeMenu()` | 关闭已打开的上下文菜单，不选择任何项，如同按下 Escape（iOS 上是点按系统菜单之外）。 |
+| `await app.chooseMenuItem(label)` | 选择已打开上下文菜单中的操作，如同点击它：应用收到 `onMenu`（其 `onSelect` 运行），然后菜单关闭。在编辑菜单中选择时，由编辑器执行该操作；Paste 粘贴测试自己的剪贴板。在 iOS 和 Android 上从系统显示的菜单（`MenuButton`、`ContextMenu` 的菜单；iOS 上还有标题栏按钮的菜单）里选，如同点按。该项被禁用或不存在时 reject。 |
+| `await app.closeMenu()` | 关闭已打开的上下文菜单，不选择任何项，如同按下 Escape（iOS 上是点按系统菜单之外，Android 上是返回键）。 |
 | `await app.keyboard.press(keys)` | 按下一个带修饰键的按键，写法同 `keymap`（`"mod+k"`、`"shift+/"`、`"escape"`；`mod` 是平台的命令键），如同硬件键盘，在所有平台上都可用（手机和平板也可以接硬件键盘）：由应用的对应快捷键接收（`keymap.bind`、`onKeyCommand`），否则在桌面上选中应用菜单里带这个快捷键的项（`Menu.setApplicationMenu`，输入框有焦点时遵守它的 `when`），否则在 macOS 和 Web 上由 Tab 和 Shift+Tab 在输入框和可按压的视图之间移动键盘焦点（`onFocus`、`onBlur`、`focus:` 样式；有对话框开着时只在最新的对话框里移动，对话框关闭后焦点回到打开前所在的视图），Return 或空格按下焦点所在的视图（该视图须在最新的对话框里，或没有对话框开着；否则按键交给快捷键）；`NavStack` 推入新页面或返回弹出页面时，焦点离开不再显示的页面（它的视图收到 `onBlur`），在 Web 上（`platform: "web"`）Shift+F10 为它请求上下文菜单（`onContextMenu`，`pointerType` 为 `null`），否则由获得焦点的输入框接收字符、Backspace 或回车，否则 Escape 执行返回。 |
 | `await app.keyboard.down(keys)` / `up(keys)` | 按住修饰键（`"mod"`、`"shift"`、`"alt"`、`"ctrl"`、`"meta"`，用 `+` 连接）直到 `up`：期间的按压、拖动和悬停都带着这些键，如同 Mod 加点击或 Shift 加拖动。目前在 headless 和 Linux 上可用。 |
 | `await app.dragAndHold(selector, by, options?)` / `app.drop()` | 像 `drag` 一样拖动，但手指一直按着，直到 `drop()` 在当前位置抬起：其间的步骤可以查看拖动中的画面（拖动预览、放置线）。目前在 headless、Linux 和 iOS 上可用。 |
@@ -438,6 +439,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `await app.setColorScheme(scheme)` | 像用户那样把系统外观切换为 `"light"` 或 `"dark"`。 |
 | `await app.setLifecycle(state)` | 把应用移到 `"background"`、`"inactive"` 或 `"active"`，就像用户离开应用、切换到另一个应用或窗口、再回来时系统所做的那样（`lifecycle()`）。仅限 headless 运行。 |
 | `await app.wake()` | 让系统从睡眠中唤醒，就像用户打开笔记本的盖子：`wakeCount()` 加一，`lifecycle()` 保持不变。仅限 headless 运行。 |
+| `await app.setNetworkState(state)` | 按 `state` 修改设备连到网络的方式（`{ kind: "none" }` 离线、`{ kind: "cellular", expensive: true }`、`{ cellularData: "restricted" }`；还有 `constrained`），就像路由或用户设置变化时系统报告的那样；没列出的保持不变（`network()`）。headless 应用启动时 kind 为 `"unknown"`，按在线处理。请求仍按路由应答（`open` 的 `network`）。仅限 headless 运行。 |
 | `await app.setLocaleSettings(settings)` | 修改 `settings` 中列出的语言与地区设置（`{ hourCycle: "h23", timeZone: "Asia/Tokyo" }`；还有 `languages`、`firstDayOfWeek`、`measurementSystem` 和 `temperatureUnit`，与 `open` 的 `localeSettings` 相同），就像用户修改系统设置或出行时那样；其余不变（`localeSettings()`）。仅限 headless 运行。 |
 | `await app.screenshot(path?)` | 应用截图（`Uint8Array`）：图形平台返回应用窗口的 PNG，`tui` 返回 UTF-8 Cell JSON；给出 `path` 时同时保存到本机的这个路径（相对当前目录）。只有真实平台会绘制应用：见[在真实平台上运行](#在真实平台上运行)。 |
 | `app.windowIds()` | 应用已打开窗口的 id，按打开顺序；非桌面平台或没有窗口时为空。 |
@@ -464,7 +466,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 |---|---|
 | `ERR_NSH_TEST_NOT_FOUND` | 屏幕上没有视图匹配选择器，或者打开的菜单没有这一项。 |
 | `ERR_NSH_TEST_DISABLED` | 选择器指向的视图已禁用（用户不能滚动的滚动视图、已禁用的菜单项）。 |
-| `ERR_NSH_TEST_COVERED` | `press` 指向的视图上面盖着另一个视图，手指按在那里会按到它（盖住按钮的浮层、滚到底栏下面的行）。 |
+| `ERR_NSH_TEST_COVERED` | `press` 指向的视图上面盖着另一个视图，手指按在那里会按到它（盖住按钮的浮层、滚到底栏下面的行、盖住视图的选区编辑菜单）。 |
 | `ETIMEDOUT` | `waitFor` 或 `waitUntil` 超时，或者应用在 `open` 之后没有渲染任何内容。 |
 | `ERR_NSH_TEST_NO_BACK` | `back()` 没有可以返回的地方。 |
 | `ERR_NSH_TEST_UNSUPPORTED` | 使用 `--target` 时，`open` 收到了目标平台无法满足的选项：iOS 和 Android 上的 `width` 或 `height`、桌面或 web 上的手机 `platform`、iOS 或 Android 上的桌面平台或另一种手机的 `platform`、`host.handlers`、`modules`、`url`。消息会指出是哪一个。不使用 `--target web` 时的 `forward()` 也是如此。 |
@@ -562,7 +564,7 @@ test("calls reach the page's host", async () => {
 数据目录；步骤用平台自己的输入作用在选择器指向的视图上，就像 Playwright 在浏览器里那样：
 
 - 按压是在视图中心点击，长按是按住不放，`type` 先点击输入框再逐键输入，`scroll` 是在滚动视图上的触控板手势，`back` 是用户的操作（macOS 和 Linux 上按 Escape，Windows 和 GPUI 里按鼠标的后退键，web 上是浏览器的后退按钮，iOS 上是把 sheet 往下滑，菜单、弹出框或 `Sheet` 打开时是 VoiceOver 的退出手势，否则点标题栏的返回按钮，Android 上是返回键）；
-- 不在屏幕上的视图会先被滚动到可见，每次一个手势；在触摸屏上，手指像用户那样落在页面本身接收拖动的地方，避开跟随拖动的视图（滑块、绘图区域）；滚动视图已经到头时，贴在它边缘的视图就地操作，不会把滚动视图拖过头（那样会触发下拉刷新或关掉页面 sheet）；滚动视图内容从边缘下面经过的部分（iOS 上透明的标题栏、Tab 栏、键盘）里的视图会先被滚出来，仍留在那下面或被系统绘制的栏盖住的视图，操作会以 `ERR_NSH_TEST_COVERED` 失败，而不是按到那条栏上；
+- 不在屏幕上的视图会先被滚动到可见，每次一个手势；在触摸屏上，手指像用户那样落在页面本身接收拖动的地方，避开跟随拖动的视图（滑块、绘图区域）；滚动视图已经到头时，贴在它边缘的视图就地操作，不会把滚动视图拖过头（那样会触发下拉刷新或关掉页面 sheet）；滚动视图内容从边缘下面经过的部分（iOS 上透明的标题栏、Tab 栏、键盘）里的视图会先被滚出来，仍留在那下面、被系统绘制的栏或选区的编辑菜单盖住的视图，操作会以 `ERR_NSH_TEST_COVERED` 失败，而不是按到盖住它的东西上；
 - 选择器、等待和查询看到的应用模型与 headless 相同，由 host 绘制的内容建立，所以找到的是同样的视图；
 - 对话框是平台自己的：`app.dialogs()` 读取它们，回答对话框（`onDialog`，或测试没有回答时按它的取消按钮）会按下对应的按钮；
 - `app.screenshot(path)` 截取窗口，`app.window(id).screenshot(path)` 截取应用的其他窗口。
@@ -592,7 +594,7 @@ nsh test tests/form.test.tsx --target macos   # 只运行一个文件
 `height`、属于另一类设备的 `platform`（桌面或 web 上的手机平台，iOS 或 Android 上的桌面平台或另一种手机）、`host.handlers`、`modules` 以及 `url` 会以
 `ERR_NSH_TEST_UNSUPPORTED` reject，这样测试要么按写的那样运行，要么说明它需要什么。桌面平台的 `platform`（例如用 `"macos"` 获得桌面的鼠标和按键）
 可以在任何桌面目标和 web 上运行，应用以该目标的平台运行，且总是桌面形态：在浏览器中页面无论宽度都以桌面形态启动；
-不给 `platform`（或给 `"web"`）时，页面像浏览器一样自己判断形态（宽度至少 600 点时为桌面）。带有自己 Rust crate 的应用运行在 NSH 为该平台用这些 crate 构建的开发 host 中；
+不给 `platform`（或给 `"web"`）时，页面像浏览器一样自己判断形态（宽度至少 600 点时为桌面）。带有自己 Rust crate 的应用运行在 NSH 为该平台用这些 crate 构建的开发 host 中（Android 上和 `nsh run` 一样，只为设备的 ABI 构建）；
 Rust 应用的 host 运行它的 root，所以 `open(".")` 在那里启动它，和 headless 时一样。
 
 `nsh test --target tui` 在内存终端中使用终端渲染器运行测试，适合 CI。每次 `open` 使用独立的 surface 和数据目录。
@@ -760,7 +762,7 @@ perf commit: 55 ops, 1667µs (list js 771µs), 46 mount items, 414 nodes
 ```
 
 对于[列表](./lists.md)，这能展示虚拟化的实际效果：哪些帧绑定了新行、一行需要多少操作，以及没有露出新行的帧不产生任何
-内容。要得到有意义的耗时，请使用 release 构建（`cargo test --release`，或源码检出中的 `./target/release/nsh`）。
+内容。要得到有意义的耗时，请使用 release 构建（`cargo test --release`、带 Rust crate 的应用用 `nsh test --release`，或源码检出中的 `./target/release/nsh`）。
 
 ### 在 CI 中
 

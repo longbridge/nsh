@@ -664,6 +664,67 @@ function Editor() {
 A listener made in an effect lasts until the effect runs again or its component goes; in TSX, the function
 `BackHandler.on` returns also stops it. In TSX, `BackHandler.exitApp()` leaves the app; `nsh/mobile` can be imported on iOS too, where `BackHandler`'s calls return at once, so the same code runs on both platforms. See [Platform-specific code](./platform-specific.md).
 
+### Following the back gesture
+
+On Android 14 and later the back gesture reports its progress while the finger moves (predictive back). A view your
+app moves itself, such as a drawer or a sheet, can follow it: `on_back_progress` in Rust,
+`BackHandler.on("progress", listener)` in TSX. Each step has a `phase` (`start`, `move`, `end`, `cancel`), the
+`progress` from 0 to 1, and the `edge` the swipe started at (`left` or `right`). After `end` the press follows and
+your back listeners hear it as above; after `cancel` put the view back. While a progress listener is registered, the
+stacks leave the gesture to your app and do not preview their pop; a gesture a dialog takes is not reported. As with
+back listeners, listen only while the view is open:
+
+```rust tabs
+use nsh_core::prelude::*;
+
+const WIDTH: f32 = 280.0;
+
+pub fn drawer(open: Signal<bool>) -> impl IntoElement {
+    let x = animated_value(0.0);
+    // Listening only while open: the press closes it, the steps move it.
+    effect(move || {
+        if open.get() {
+            on_back_press(move || {
+                open.set(false);
+                true
+            });
+            on_back_progress(move |e: &BackProgressEvent| match e.phase {
+                BackPhase::Start | BackPhase::Move => x.set(-WIDTH * e.progress.0),
+                BackPhase::Cancel => drop(x.spring(0.0, Spring::default())),
+                _ => {}
+            });
+        }
+    });
+    // …
+    view().w(px(WIDTH)).bind_translate_x(&x)
+}
+```
+
+```tsx tabs
+import { createAnimatedValue, effect, type Signal } from "nsh";
+import { BackHandler } from "nsh/mobile";
+
+const WIDTH = 280;
+
+function Drawer({ open }: { open: Signal<boolean> }) {
+  const x = createAnimatedValue(0);
+  // Listening only while open: the press closes it, the steps move it.
+  effect(() => {
+    if (open()) {
+      BackHandler.on("press", () => {
+        open.set(false);
+        return true;
+      });
+      BackHandler.on("progress", (e) => {
+        if (e.phase === "start" || e.phase === "move") x.set(-WIDTH * e.progress);
+        else if (e.phase === "cancel") x.spring(0);
+      });
+    }
+  });
+  // …
+}
+```
+
 ## Tabs and other layouts
 
 A tab bar is your own UI, drawn from primitives: a row of pressable views and a signal holding the selected tab; render the selected tab's content with [`when` / `<If>`](../elements/control-flow.md) (or a function child in TSX). To keep each tab's state while switching, give each tab its own stack and routes and keep all of them mounted, hiding the inactive ones with `display: none`.

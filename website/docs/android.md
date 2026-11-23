@@ -34,6 +34,11 @@ and installs it again. For a TSX app, it installs a development host APK (rebuil
 forwards the dev server's port with `adb reverse`, so it works over USB without a shared network; the app updates as
 you save, with logs in the terminal.
 
+These development builds carry `libnsh.so` without its debug info, which keeps their APKs small enough to update on an
+emulator; the complete library is in `symbols/<abi>/` next to it, for `ndk-stack` and debuggers. When the device has no
+room to update the development host, NSH uninstalls it and installs it again: it holds only what the apps it runs
+wrote. An app's own APK is never uninstalled for you: the error says how to make room.
+
 ## Packaging
 
 ```sh
@@ -101,7 +106,7 @@ cargo xtask android-embed    # writes dist/nsh/embed/android/{nsh,nsh-dev}.aar
 
 The AAR holds the Java runtime and `libnsh.so` for `arm64-v8a`, `armeabi-v7a` and `x86_64`, with their symbols: the
 app's Gradle build strips them when it packages the app and keeps the symbols for its crash reports. It declares the
-`INTERNET` permission and needs **API 26** (Android 8) or newer. It carries its R8 rules (`proguard.txt`), which a
+`INTERNET` and `ACCESS_NETWORK_STATE` permissions and needs **API 26** (Android 8) or newer. It carries its R8 rules (`proguard.txt`), which a
 minified build applies on its own: the native library finds the runtime's classes by name, so `com.longbridge.nsh`
 stays as it is.
 

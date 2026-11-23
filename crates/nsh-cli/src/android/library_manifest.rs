@@ -24,8 +24,9 @@ use super::{Apk, MIN_SDK, xml_attribute};
 const ANDROID: &str = "http://schemas.android.com/apk/res/android";
 const TOOLS: &str = "http://schemas.android.com/tools";
 
-/// Who lists the crates' manifest entries, as errors name them.
-const CRATES: &str = "the crates' `android.queries` and `android.application`";
+/// Who lists the app's and the crates' manifest entries, as errors name
+/// them.
+const CRATES: &str = "nsh.json's and the crates' `android.queries` and `android.application`";
 
 /// An element of a manifest.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -584,7 +585,8 @@ pub(super) struct Additions {
     pub(super) application: String,
 }
 
-/// What the crates' entries (`apk.queries`, `apk.application`) and the
+/// What the app's and the crates' entries (`apk.queries`,
+/// `apk.application`) and the
 /// libraries' manifests (`libraries`: what each adds, and who lists it)
 /// add to `apk`'s manifest. Without libraries the entries go in as the
 /// crates write them, placeholders filled in; with libraries they are
@@ -1103,6 +1105,7 @@ mod tests {
             queries: &[],
             application: &[],
             schemes: &[],
+            share_mime_types: &[],
             links: &[],
             rust: false,
             dark: false,

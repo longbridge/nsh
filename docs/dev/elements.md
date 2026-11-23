@@ -424,6 +424,12 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   becomes the responder (its termination request is honored as for any claim). Its own `…ShouldSetResponder`
   handlers (and a Rust element's other claims) are never asked: the view is a responder exactly when its pan is
   active, so `PanResponder`'s `panHandlers` work unchanged next to the prop.
+  A `direction` keeps the activation to one way and an `edge` to fingers that go down at that edge of the screen
+  (the window on desktops, the page on the web; `PanActivation::starts_at`), and the view's own native pan (`pan`
+  values, `onPanStart`) starts when its activation activates (Rust: `.pan_activation(..)`), so a drawer's edge pan
+  and its one-way content pan need no hot zone of their own. iOS uses the system's screen edge recognizer and lets
+  a navigation stack's swipe back go first; Android leaves the edges the system's back gesture takes to it.
+  `PanEvent::origin` is where the drag's finger went down, in the surface.
 - **Accessibility**: `accessible`, `role`, `accessibilityLabel` / `Hint` / `Description` / `State` / `Value` / `Actions` / `Level` +
   `onAccessibilityAction`, `accessibilityElementsHidden`, `importantForAccessibility`, `accessibilityLiveRegion`, `testID`
   (Android: resource id). `accessibilityDescription` (ARIA's `aria-description`, `gpui-base`'s `aria_description`;
@@ -491,7 +497,11 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
 - **Back button** (`nsh/mobile`): `BackHandler.on("press", listener)` (returns the function that removes it; a
   listener added while a component renders goes with it, as `keymap.bind`'s bindings do), after modals, the top
   overlay listening to `onCancel` and stacks; the app exits when nothing handles it. Rust components listen with `cx.on_back_press(..)`, before JS's listeners; the root wants
-  the button while either side listens (`docs/dev/components.md`).
+  the button while either side listens (`docs/dev/components.md`). `BackHandler.on("progress", listener)` /
+  `on_back_progress(..)` follow the predictive back gesture (the root's `BackProgress`, Android 14+): while one
+  listens, a gesture no modal takes goes to the app and the stacks do not preview their pop; the core decides at the
+  gesture's start whether the app follows it (not when an overlay takes the press), so a gesture's steps reach the
+  app whole or not at all (`element/back.rs`).
 - **Keyboard shortcuts** (`nsh`'s `keymap`): the root's `Prop::Keymap` mounts the surface's whole table
   (`MountItem::Keymap`); the platform matches a key against it on the spot, consumes it and reports the root's
   `KeyCommand` (the binding's id), so the main thread never waits for JS (`docs/dev/js-modules.md`, the macOS and
@@ -601,7 +611,12 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   the system's wakes from sleep, which `lifecycle()` may not show (a lid closed and opened with the app in front):
   the desktop backends add one to each surface's on the system's report (macOS `NSWorkspaceDidWakeNotification`,
   Windows `WM_POWERBROADCAST` / `PBT_APMRESUMEAUTOMATIC`, Linux `logind`'s `PrepareForSleep(false)`); headless tests
-  wake with `app.wake()`. `padding-bottom: env(keyboard-inset-height)` pads a view by the keyboard's height, animated with the keyboard
+  wake with `app.wake()`. `network()` (`Environment::network`, `Network`: the default route's `NetworkKind`,
+  expensive, constrained, iOS's `CellularData`) is the process's route, which each surface reports in its environment:
+  iOS and macOS from one shared path monitor (`nsh_platform_apple::network`, iOS adding `CTCellularData`), Android
+  from one default-network callback (`NetworkState.java`), the web from `navigator.onLine` / `navigator.connection`;
+  the other backends leave it `Unknown`, which counts as online. Headless tests change it with
+  `app.setNetworkState`. `padding-bottom: env(keyboard-inset-height)` pads a view by the keyboard's height, animated with the keyboard
   natively, for content outside scroll views (message bars). Inputs inside a scroll view are kept clear of the keyboard natively (bottom inset + scroll to the
   focused input), with no JS involved. iOS measures what the keyboard covers where layout puts the input and its scroll
   view, without the layers' transforms: a sheet whose input takes the focus as it comes in is not moved up again by
@@ -658,7 +673,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   During an input method's composition Linux and the web insert nothing and log a warning. With `"insert"` the
   input has inserted the paste already, so an `insertText` from `onPaste` inserts it a second time. Where Paste is offered, it is offered for images and files too while
   the app listens. iOS: `Field` / `Area` override `paste:` (`system::pasted`: strings, `IMAGE_TYPES` data else
-  `UIImage` PNGs, file URLs) and `canPerformAction:withSender:`; with a `maxLength` they insert the clipped text
+  `UIImage` PNGs, file URLs, and the data of items that are no text, link or image, as a document copied in Files,
+  named as its item provider suggests) and `canPerformAction:withSender:`; with a `maxLength` they insert the clipped text
   themselves (`paste_text`, the test agent's paste too) instead of UIKit's `paste:`; Android: `setOnReceiveContentListener` (API 31;
   the clipboard and keyboards' rich content; images read from their content URIs, through `Native.paste`; the text
   goes back to the EditText while it inserts) and `onTextContextMenuItem` before; macOS: `TextArea` and a field
@@ -706,8 +722,9 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   (`nsh_core::overlay::place`): `placement` (`"top"`, `"bottom"` (default), `"left"`, `"right"`), on the other
   side when only that one has room, the side with more room when neither has; `align` along it (`"start"`,
   `"center"` (default), `"end"`; start and end follow the direction above and below); `offset` from the anchor; then
-  moved along the side to stay inside the root view's safe area less `margin` (or, for the main root view's overlays,
-  the area the platform shows them in, `Core::set_overlay_area`: the web's `overlays: "viewport"`, the window). An anchored overlay is laid out in
+  moved along the side to stay inside the root view's safe area less `margin` (for the main root view's overlays, less
+  what the software keyboard covers of its bottom too, placed again as the keyboard moves; or the area the platform
+  shows them in, `Core::set_overlay_area`: the web's `overlays: "viewport"`, the window). An anchored overlay is laid out in
   that area rather than the whole root view, so content wider than it (a paragraph) wraps within it; in a terminal,
   within that area less the frame drawn a Cell outside its box. A side placement (`"left"`, `"right"`) is laid out in
   the whole area too: the side's room is the `available` of `onPosition`, which an overlay follows to fit it. Rust's

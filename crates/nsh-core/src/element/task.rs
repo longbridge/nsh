@@ -116,7 +116,7 @@ pub(crate) enum Action {
     HostCall {
         name: String,
         args: crate::JsonValue,
-        answer: AnswerSlot<Result<crate::JsonValue, super::JsError>>,
+        answer: AnswerSlot<Result<crate::JsonValue, crate::host_channel::HostError>>,
     },
     /// Hands data to function `name` of the embedding app, with no answer
     /// (`nsh/host`'s `post`).
@@ -549,6 +549,11 @@ pub(crate) struct Executor {
     derived: RefCell<super::animated::Derived>,
     /// The components' listeners of the back button.
     pub(crate) back: Rc<RefCell<super::back::BackListeners>>,
+    /// The components' listeners of the back gesture's steps.
+    pub(crate) back_progress: Rc<RefCell<super::back::BackProgressListeners>>,
+    /// The components' listeners of the host's events
+    /// ([`super::on_host_event`]).
+    pub(crate) host_events: Rc<RefCell<super::host_events::HostListeners>>,
     /// What runs as the app quits ([`super::desktop::on_app_quit`]).
     pub(crate) quit: Rc<RefCell<super::quit::QuitListeners>>,
     /// The quit listeners' work still running ([`crate::Core::start_quit`]).

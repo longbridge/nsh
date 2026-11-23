@@ -82,11 +82,14 @@ use rustc_hash::FxHashMap;
 #[cfg(not(target_arch = "wasm32"))]
 pub use storage::{FileStorage, resolve_data_dir, support_dir};
 
-use crate::script::{NetworkQueue, RequestId, Script};
 pub use crate::{
     cache::{ByteSize, CacheLocation, CacheOptions, CachePolicy},
     error::{AppError, AppErrorKind, PackageInfo},
     host_channel::{HostCall, HostChannel, HostReply, OpenUrlRequest},
+};
+use crate::{
+    host_channel::HostRefusal,
+    script::{NetworkQueue, RequestId, Script},
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1551,6 +1554,10 @@ enum Message {
     HostEvent(String, nsh_core::JsonValue),
     /// The embedding app's answer to call `.0` (`host.call`).
     HostReply(u64, Result<nsh_core::JsonValue, String>),
+    /// The embedding app's answer to call `.0` the core made
+    /// ([`nsh_core::element::host_call`], and JS's calls without a
+    /// channel of their own).
+    CoreHostReply(u64, Result<nsh_core::JsonValue, String>),
     /// The embedding app's URL handler answered URL request `id`: it took
     /// the URL, or the platform opens it.
     UrlHandled {
@@ -1656,8 +1663,8 @@ impl EngineControl {
 
     /// Reports how far a multiline input's text scrolled: its offset, the
     /// size of the text it scrolls and of its viewport. Sent while a
-    /// built-in bar takes the place of its indicator
-    /// (`InputConfig::replaced`), on every change.
+    /// bar of the app's follows the text (`InputConfig::report_scroll`), on
+    /// every change.
     pub fn input_scroll(
         &self,
         id: NodeId,
@@ -2617,6 +2624,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             app_locale: None,
             host: config.host.clone(),
             url_opens: Vec::new(),
+            host_requests: Vec::new(),
             net: Net {
                 network: config.network.clone(),
                 tx,
@@ -3205,6 +3213,9 @@ struct State<M: TextEngine> {
     host: HostChannel,
     /// URLs the app asked to open, taken from the core (a reused buffer).
     url_opens: Vec<(u32, String)>,
+    /// The app's host calls and posts, taken from the core (a reused
+    /// buffer).
+    host_requests: Vec<nsh_core::host_channel::HostRequest>,
     net: Net,
     /// Development updates to apply.
     hot: Vec<HotUpdate>,
@@ -3811,6 +3822,28 @@ impl<M: TextEngine> State<M> {
         platform
     }
 
+    /// Hands the app's host calls and posts to the embedding app's channel
+    /// where it is configured, else to the platform's host
+    /// ([`nsh_core::Core::host_request_on_platform`]), and the host's
+    /// events kept for want of a listener to the components' listeners
+    /// added since; true when the platform has a call or post (the core's
+    /// commit sends it) or the listeners heard events.
+    fn host_requests(&mut self) -> bool {
+        let mut more = self.core.release_host_events();
+        self.core.take_host_requests(&mut self.host_requests);
+        for request in self.host_requests.drain(..) {
+            match self.host.start_request(request, &self.net.tx) {
+                Ok(()) => {}
+                Err(HostRefusal::NoHandler(id, error)) => self.core.answer_host(id, Err(error)),
+                Err(HostRefusal::Unconfigured(request)) => {
+                    self.core.host_request_on_platform(request);
+                    more = true;
+                }
+            }
+        }
+        more
+    }
+
     fn commit(&mut self, script: Option<&Script>) -> Option<MountBatch> {
         let start = Instant::now();
         let mut merged: Option<MountBatch> = None;
@@ -3947,6 +3980,9 @@ impl<M: TextEngine> State<M> {
             self.core.take_events(&mut self.events);
             // URLs the platform opens go out in another round.
             let urls = self.open_urls();
+            // Host calls the platform answers go out, and what the kept
+            // events' new listeners changed shows, in another round.
+            let host = self.host_requests();
             // Posts the ops queued (in program order) run in another round.
             let posted = script.is_some_and(Script::has_posted);
             // New tokens (the app's theme, the embedding app's) reach what
@@ -3981,6 +4017,7 @@ impl<M: TextEngine> State<M> {
                 && !relocale
                 && !more_paced
                 && !urls
+                && !host
                 && !answers
             {
                 break;
@@ -4045,6 +4082,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         host: env.host,
         lifecycle: env.lifecycle,
         wake_count: env.wake_count,
+        network: env.network,
         screen_color: env.screen_color,
         clipboard_write_result: env.clipboard_write_result,
         canvas_render: env.canvas_render,
@@ -4480,8 +4518,9 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
                 log::error!("font failed: {err}");
             }
         }
-        // A Rust app has no `nsh/host`: what the host sends it goes.
+        // The components' listeners hear it, then JS's.
         Message::HostEvent(name, data) => {
+            state.core.host_event(&name, &data);
             if let Some(script) = script {
                 script.host_event(&name, data);
             }
@@ -4491,6 +4530,10 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
                 script.host_reply(id, result);
             }
         }
+        Message::CoreHostReply(id, result) => state.core.answer_host(
+            id,
+            result.map_err(nsh_core::host_channel::HostError::Failed),
+        ),
         Message::UrlHandled { id, url, handled } => {
             if handled {
                 state.core.answer_open_url(id, true);

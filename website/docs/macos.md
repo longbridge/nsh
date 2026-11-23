@@ -112,14 +112,18 @@ Writes an app bundle:
 .nsh/out/<Name>.app/Contents/
   Info.plist
   MacOS/<Name>               the executable: a Rust app's own runner, built with its crate; nsh's release runner for TSX
+  PlugIns/<Ext>.appex        prebuilt app extensions listed in nsh.json `macos.extensions`, when set
   Resources/nsh/bundle.nshc  a TSX app, compiled
   Resources/nsh/assets/…     the assets it imports (a Rust crate's `assets!()` too)
   Resources/nsh/app.json     the window title, the app's appearance, its activation policy and nsh.json's window options
   Resources/AppIcon.icns     the icon, when nsh.json names one (converted with sips)
 ```
 
-The `.app` is signed ad hoc, so it runs on the Mac that built it. To distribute it, sign it with a Developer ID and
-notarize it. `--run` opens the app after packaging it.
+Without `--sign`, the `.app` is signed ad hoc so it runs on the Mac that built it. Pass `--sign <identity>` (for
+example `"Developer ID Application: …"`) to sign any nested extensions and the app with Hardened Runtime and a secure
+timestamp (`codesign --options runtime --timestamp`), ready to notarize and distribute; NSH verifies the signed bundle
+with `codesign --verify --deep --strict`. `--run` opens the app after packaging it. See
+[Packaging: macOS](./packaging.md#macos).
 
 The app logs its warnings, its errors and its `console.log` and `console.info` lines to the unified log, with its id
 as the subsystem: Console shows them, and so does `log stream --predicate 'subsystem == "com.example.notes"'`. Its

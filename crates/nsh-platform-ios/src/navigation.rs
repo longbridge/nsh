@@ -804,6 +804,30 @@ pub(crate) fn back_swipes(nav: &UINavigationController) -> Vec<Retained<UIGestur
         .collect()
 }
 
+/// Whether `other` is the swipe back of a stack `view` is in (or of a stack
+/// around that one): an edge pan waits for it to fail, so a swipe that can
+/// go back does, and the pan takes the swipes of a screen with nothing to
+/// go back to.
+pub(crate) fn is_back_swipe(view: &UIView, other: &UIGestureRecognizer) -> bool {
+    let Some(controller) = controller_of(view) else {
+        return false;
+    };
+    let mut nav = match controller.clone().downcast::<UINavigationController>() {
+        Ok(nav) => Some(nav),
+        Err(_) => controller.navigationController(),
+    };
+    while let Some(n) = nav {
+        if back_swipes(&n)
+            .iter()
+            .any(|r| std::ptr::eq::<UIGestureRecognizer>(&**r, other))
+        {
+            return true;
+        }
+        nav = n.navigationController();
+    }
+    false
+}
+
 /// A drag that starts at the screen's edge belongs to the stack: the top
 /// screen's scroll views wait for the back gesture to fail before they pan,
 /// so a swipe at the edge goes back instead of scrolling the page. The
@@ -1200,9 +1224,11 @@ define_class!(
                 && let Some(view) = controller.view()
                 && editor.isDescendantOfView(&view)
                 && let Some(window) = editor.window()
-                && first_responder(&window).is_none()
+                && first_responder(&window).is_none_or(|r| crate::keyboard::is_root_focus(&r))
             {
-                // The swipe was cancelled. Another control's focus wins.
+                // The swipe was cancelled. Another control's focus wins; the
+                // surface root, which took the keys when the editor
+                // resigned, is no control's focus.
                 editor.becomeFirstResponder();
             }
             // An animated change of screens is deferred to a layout pass of

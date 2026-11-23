@@ -1170,10 +1170,11 @@ pub trait Native: Send + Sync {
     }
     /// What a press at `at` (in the window's content, as
     /// [`Native::bounds`]) would reach in place of view `id`, a view the
-    /// system draws over the app's (a navigation bar, a tab bar), described
-    /// for a failure; `None` when the press reaches the view, a view inside
-    /// it or one around it, or the platform cannot tell. Asked before a
-    /// step acts on a view, so it fails rather than pressing the bar.
+    /// system draws over the app's (a navigation bar, a tab bar, a
+    /// selection's edit menu), described for a failure; `None` when the
+    /// press reaches the view, a view inside it or one around it, or the
+    /// platform cannot tell. Asked before a step acts on a view, so it fails
+    /// rather than pressing what covers it.
     fn covered(&self, id: NodeId, at: Point<Points>) -> Option<String> {
         let _ = (id, at);
         None
@@ -1314,7 +1315,8 @@ pub trait Native: Send + Sync {
     }
     /// Whether a menu the system draws for one of the app's views is open
     /// (on iOS: a `MenuButton`'s, a `ContextMenu`'s or a header button's
-    /// `UIMenu`), one the app's model does not hold: then
+    /// `UIMenu`; on Android: a `MenuButton`'s or a `ContextMenu`'s popup
+    /// window), one the app's model does not hold: then
     /// [`Native::choose_menu_item`] chooses from it and
     /// [`Native::close_menu`] closes it.
     fn system_menu_open(&self) -> bool {
@@ -1323,7 +1325,8 @@ pub trait Native: Send + Sync {
     /// Where a control the system draws for the app is on screen, one the
     /// app's views do not press (on iOS: a header button of
     /// `ios.headerRightItems`, by its `key` or its label; a `MenuButton`'s
-    /// `UIButton`, by the `testID` of the view it covers or its label), in
+    /// `UIButton`, by the `testID` of the view it covers or its label; on
+    /// Android: a `MenuButton`'s button, named the same ways), in
     /// the window's content as [`Native::bounds`]: a press there reaches it
     /// as the user's does. `None` when the platform shows none so named.
     fn system_control(&self, name: SystemName<'_>) -> Option<Bounds<Points>> {

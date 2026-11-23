@@ -163,11 +163,13 @@ define_class!(
         fn drop_performed(&self, interaction: &AnyObject, session: &AnyObject) {
             let Some((id, events)) = drop_listener(interaction) else { return };
             let offer = crate::file_drop::offer(session, events);
-            // A file drop's leave follows the drop, once its files are read.
-            self.ivars().file_drags.borrow_mut().retain(|&d| d != id);
             let Some(in_window) = crate::file_drop::location(interaction, session) else {
+                // The view is gone: no drop, but a drag that entered it left.
+                self.file_drag_left(id);
                 return;
             };
+            // A file drop's leave follows the drop, once its files are read.
+            self.ivars().file_drags.borrow_mut().retain(|&d| d != id);
             let shared = self.ivars().mounter.clone();
             let on_main = move |f: Box<dyn FnOnce(&mut crate::mount::Mounter) + Send>| {
                 DispatchQueue::main().exec_async(move || {
@@ -437,6 +439,17 @@ define_class!(
             self.pan_should_begin(recognizer)
         }
 
+        /// A view's own edge pan lets a stack's swipe back go first: the
+        /// swipe goes back when there is a screen to go back to, and fails at
+        /// once otherwise, leaving the drag to the pan.
+        #[unsafe(method(gestureRecognizer:shouldRequireFailureOfGestureRecognizer:))]
+        fn requires_failure_of(&self, recognizer: &UIGestureRecognizer, other: &UIGestureRecognizer) -> bool {
+            recognizer.isKindOfClass(objc2_ui_kit::UIScreenEdgePanGestureRecognizer::class())
+                && recognizer
+                    .view()
+                    .is_some_and(|view| crate::navigation::is_back_swipe(&view, other))
+        }
+
         /// Taps the views inside the scroll view recognize (a web view's
         /// link) wait for its keyboard tap to fail: a tap that only dismisses
         /// the keyboard does nothing else.
@@ -461,7 +474,13 @@ define_class!(
                 && let Ok(mut m) = self.ivars().mounter.get(self.mtm()).try_borrow_mut()
                 && let Some(m) = m.as_mut()
             {
-                m.pan_touch(view.tag() as NodeId, &touched);
+                let first = recognizer.state() == UIGestureRecognizerState::Possible
+                    && recognizer.numberOfTouches() == 0;
+                m.pan_touch(
+                    view.tag() as NodeId,
+                    &touched,
+                    first.then(|| touch.locationInView(None)),
+                );
             }
             if !recognizer.isKindOfClass(UITapGestureRecognizer::class()) {
                 return true.into();
@@ -696,8 +715,8 @@ impl EventTarget {
             .or_default() += 1;
     }
 
-    /// Reports how far text area `view` scrolled, if a built-in bar takes
-    /// the place of its indicator and it changed (`input::report_scroll`).
+    /// Reports how far text area `view` scrolled, if a bar of the app's
+    /// follows it and it changed (`input::report_scroll`).
     pub(crate) fn input_scrolled(&self, view: &UIView) {
         input::report_scroll(view, &self.ivars().control);
     }
@@ -1066,9 +1085,6 @@ impl EventTarget {
         );
     }
 
-    /// Runs `f` on the mounter. UIKit can call back synchronously while the
-    /// mounter applies a batch (e.g. setting `contentOffset`); then the call
-    /// is deferred to the next main-queue turn instead of re-entering.
     /// A drag of files left listener `id`, if it was over it.
     fn file_drag_left(&self, id: NodeId) {
         let mut drags = self.ivars().file_drags.borrow_mut();
@@ -1079,6 +1095,9 @@ impl EventTarget {
         }
     }
 
+    /// Runs `f` on the mounter. UIKit can call back synchronously while the
+    /// mounter applies a batch (e.g. setting `contentOffset`); then the call
+    /// is deferred to the next main-queue turn instead of re-entering.
     fn with_mounter(&self, f: impl FnOnce(&mut crate::mount::Mounter) + Send + 'static) {
         let mtm = self.mtm();
         let shared = &self.ivars().mounter;

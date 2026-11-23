@@ -140,9 +140,11 @@ The table is one stop of Tab, as gpui-component's (a `tab_stop` focus handle): i
 `onFocus` / `onBlur` set the table's focus (`Dt::set_focus`), which binds its keys; its rows, titles and sort buttons
 are `focusable(false)`, and so are its columns' resize handles in a terminal, where a lone `ResizeHandle` is a stop
 (`PointerOnly`, provided around them: resizing is the mouse's, as gpui-component's). While it has the keyboard Tab moves the selection, as gpui-component's, and Escape gives it
-back; in a terminal Tab and Shift+Tab are not bound and move the focus on, out of the table, the arrows moving
-between the columns (`docs/dev/tui.md` "Interaction"). A press, `focus()` and `blur()` set the same flag. Tab stops at pressables and `focusable(true)` views on macOS
-and the web (`ViewProps::focus_stop`).
+back; Enter / Return activates the selection's row (`onRowActivate`), bound like a list's (`for_focus`) and not while a
+text input edits or a control inside the table has the focus. In a terminal Tab and Shift+Tab are not bound and move
+the focus on, out of the table, the arrows moving between the columns (`docs/dev/tui.md` "Interaction"). A press,
+`focus()` and `blur()` set the same flag. Tab stops at pressables and `focusable(true)` views on macOS and the web
+(`ViewProps::focus_stop`).
 
 ## Compared with gpui-component
 

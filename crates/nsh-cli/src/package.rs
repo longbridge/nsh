@@ -38,7 +38,7 @@ pub(crate) enum PackageTarget {
     /// Linux (GTK): a directory with the runner, the bundle and a `.desktop`
     /// file, and the same as a `.tar.gz`.
     Linux,
-    /// macOS (AppKit): an ad hoc signed `.app`.
+    /// macOS (AppKit): a signed `.app` (ad hoc without `--sign`).
     Macos,
     /// Windows: a directory with the runner as `<name>.exe` (the app's
     /// icon embedded) and the bundle, and the same as a `.zip`.
@@ -55,13 +55,23 @@ pub(crate) enum PackageTarget {
 
 impl PackageTarget {
     /// The platform [`crate::module_meta`] reads the app's dependency
-    /// graph for: iOS and Android, where crates declare package entries.
-    fn module_meta_triple(self) -> Option<(&'static str, crate::module_meta::Platform)> {
+    /// graph for, and the Rust targets it reads it for: iOS, macOS and
+    /// Android, where crates declare package entries. A macOS package is
+    /// read for each architecture it is built for (`arch`; `None`: this
+    /// Mac's), so a crate only another architecture links counts.
+    fn module_meta_triples(
+        self,
+        arch: Option<Arch>,
+    ) -> Option<(&'static [&'static str], crate::module_meta::Platform)> {
         use crate::module_meta::Platform;
         match self {
-            PackageTarget::Ios => Some(("aarch64-apple-ios", Platform::Ios)),
-            PackageTarget::IosSimulator => Some(("aarch64-apple-ios-sim", Platform::Ios)),
-            PackageTarget::Android => Some(("aarch64-linux-android", Platform::Android)),
+            PackageTarget::Ios => Some((&["aarch64-apple-ios"], Platform::Ios)),
+            PackageTarget::IosSimulator => Some((&["aarch64-apple-ios-sim"], Platform::Ios)),
+            PackageTarget::Macos => Some((
+                arch.unwrap_or_else(Arch::host).macos_triples(),
+                Platform::Macos,
+            )),
+            PackageTarget::Android => Some((&["aarch64-linux-android"], Platform::Android)),
             _ => None,
         }
     }
@@ -100,6 +110,15 @@ const MACOS_ARM64: &str = "aarch64-apple-darwin";
 const MACOS_X86_64: &str = "x86_64-apple-darwin";
 
 impl Arch {
+    /// This machine's processor.
+    fn host() -> Self {
+        if cfg!(target_arch = "aarch64") {
+            Arch::Arm64
+        } else {
+            Arch::X86_64
+        }
+    }
+
     /// The Rust targets of its builds, one per architecture.
     fn macos_triples(self) -> &'static [&'static str] {
         match self {
@@ -112,11 +131,7 @@ impl Arch {
 
 /// The Rust target of macOS on this machine's processor.
 fn host_macos_triple() -> &'static str {
-    if cfg!(target_arch = "aarch64") {
-        MACOS_ARM64
-    } else {
-        MACOS_X86_64
-    }
+    Arch::host().macos_triples()[0]
 }
 
 /// What cargo builds the runner for `triple` with: nothing for this
@@ -326,13 +341,17 @@ pub(crate) struct AndroidConfig {
     /// as it is. Declaring a runtime permission does not grant it.
     #[serde(default)]
     pub(crate) permissions: Vec<String>,
-    /// Elements of the manifest's `<queries>` the app's crates declare
-    /// ([`crate::module_meta`]); not an `nsh.json` key.
-    #[serde(skip)]
+    /// Elements of the manifest's `<queries>`: `<intent>`, `<package>` and
+    /// `<provider>`, one balanced element each. The app's crates add theirs
+    /// after the app's ([`crate::module_meta`]).
+    #[serde(default)]
     pub(crate) queries: Vec<String>,
-    /// Elements of the manifest's `<application>` the app's crates declare
-    /// ([`crate::module_meta`]); not an `nsh.json` key.
-    #[serde(skip)]
+    /// Elements of the manifest's `<application>`: `<service>`,
+    /// `<receiver>`, `<provider>`, `<activity>` and `<meta-data>`, one
+    /// balanced element each; `${applicationId}` in them is the app's
+    /// package. The app's crates add theirs after the app's
+    /// ([`crate::module_meta`]).
+    #[serde(default)]
     pub(crate) application: Vec<String>,
     /// What the app's window shows from the tap on its icon until its first
     /// frame, the same keys as `ios.launchScreen`: the window's background
@@ -771,7 +790,7 @@ pub(crate) struct PackageOptions<'a> {
     pub(crate) target: PackageTarget,
     pub(crate) out: &'a Path,
     pub(crate) config: AppConfig,
-    /// Code signing identity (device builds).
+    /// Code signing identity (iOS device builds and macOS packages).
     pub(crate) sign: Option<&'a str>,
     /// Provisioning profiles (device builds): the app's, and one for each of
     /// its app extensions (`ios.extensions`), found by bundle identifier.
@@ -960,6 +979,11 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
     };
     let (mut config, mut ignored) =
         parse_config(&text).with_context(|| format!("invalid {}", path.display()))?;
+    crate::module_meta::keep_app_android_elements(
+        &mut config.android.queries,
+        &mut config.android.application,
+        &mut ignored,
+    );
     if let Some(value) = &config.tui.points_per_cell
         && let Err(e) = crate::run::parse_points_per_cell(value)
     {
@@ -1014,8 +1038,27 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
     config.ios.extensions = crate::app_extensions::read(
         std::mem::take(&mut config.ios.extensions),
         dir,
+        ApplePlatform::Ios,
         &mut ignored,
     );
+    config.macos.extensions = crate::app_extensions::read(
+        std::mem::take(&mut config.macos.extensions),
+        dir,
+        ApplePlatform::Macos,
+        &mut ignored,
+    );
+    config.ios.frameworks = crate::ios_frameworks::read(
+        std::mem::take(&mut config.ios.frameworks),
+        dir,
+        &mut ignored,
+    );
+    config.ios.linker_flags.retain(|flag| {
+        let checked = crate::ios_frameworks::check_flag(flag);
+        if let Err(why) = &checked {
+            ignored.push(format!("ios.linkerFlags: {why}: left out"));
+        }
+        checked.is_ok()
+    });
     config.icon = match config.icon {
         Some(AppIcon::All(icon)) => Some(AppIcon::All(dir.join(icon))),
         Some(AppIcon::Platforms(icons)) => Some(AppIcon::Platforms(
@@ -1406,14 +1449,16 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
     let entry = dunce::canonicalize(options.entry)?;
     // What the app's crates and nshm declare for the package (an
     // `Info.plist` key, a manifest entry), under what `nsh.json` sets.
-    if let Some((triple, platform)) = options.target.module_meta_triple()
+    if let Some((triples, platform)) = options.target.module_meta_triples(options.arch)
         && let Some(app) = crate::rust_app::current()
     {
-        crate::module_meta::ModuleMeta::of_workspace(
-            &app.workspace().join("Cargo.toml"),
-            Some(triple),
-        )?
-        .apply(&mut options.config, platform)?;
+        crate::module_meta::ModuleMeta::of_workspace(&app.workspace().join("Cargo.toml"), triples)?
+            .apply(&mut options.config, platform)?;
+        match platform {
+            crate::module_meta::Platform::Ios => options.config.ios.check(ApplePlatform::Ios)?,
+            crate::module_meta::Platform::Macos => options.config.macos.check()?,
+            crate::module_meta::Platform::Android => {}
+        }
     }
     let config = &options.config;
     let (name, id) = release_name_and_id(&entry, config)?;
@@ -1461,6 +1506,7 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
     // its bundle can reach, and those `nsh.json` keeps. A TSX app does too
     // where cargo is, else it ships the prebuilt runner, which has all.
     let has_crates = crate::rust_app::current().is_some();
+    check_ios_link(config, options.target, has_crates)?;
     let mut own_runner = false;
     if options.target != PackageTarget::Web
         && !crate::rust_app::is_root(&entry)
@@ -1617,17 +1663,33 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
         &app,
         &info,
         options.target == PackageTarget::IosSimulator,
+        None,
+    )?;
+    // The runner linked the frameworks for this target
+    // (`rust_app::RustApp::ios_link_env`); the dynamic ones go with it.
+    let (frameworks, _) = crate::ios_frameworks::sync(
+        &config.ios.frameworks,
+        platform.triple().context("an iOS target")?,
+        &app.join("Frameworks"),
+        None,
     )?;
     let localized = config.ios.localized_info(ApplePlatform::Ios, &info)?;
     crate::apple::write_localized_info(&app, &localized)?;
     plist::Value::Dictionary(info).to_file_xml(app.join("Info.plist"))?;
-    crate::apple::write_privacy_manifest(&config.ios.privacy_manifest, &app)?;
+    let mut privacy = config.ios.privacy_manifest.clone();
+    crate::ios_frameworks::add_static_privacy(
+        &config.ios.frameworks,
+        platform.triple().context("an iOS target")?,
+        &mut privacy,
+    )?;
+    crate::apple::write_privacy_manifest(&privacy, &app)?;
 
     match options.target {
         PackageTarget::IosSimulator => {
-            // The app's signature seals its extensions': they are signed
-            // first.
+            // The app's signature seals its extensions' and frameworks':
+            // they are signed first.
             crate::app_extensions::sign_ad_hoc(&extensions, options.out)?;
+            crate::ios_frameworks::sign(&frameworks, "-")?;
             // The simulator takes the app's entitlements without a profile.
             let mut entitlements = config.ios.entitlements(ApplePlatform::Ios)?;
             config.add_links_to_entitlements(&mut entitlements)?;
@@ -1675,9 +1737,10 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
                 .iter()
                 .map(|path| Profile::read(path))
                 .collect::<anyhow::Result<Vec<_>>>()?;
-            // The app's signature seals its extensions': they are signed
-            // first.
+            // The app's signature seals its extensions' and frameworks':
+            // they are signed first.
             crate::app_extensions::sign_device(&extensions, identity, &profiles, options.out)?;
+            crate::ios_frameworks::sign(&frameworks, identity)?;
             let profile = Profile::choose(&profiles, &id, false)?;
             crate::provisioning::warn_unused(&profiles);
             fs::copy(&profile.path, app.join("embedded.mobileprovision"))
@@ -1693,6 +1756,29 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
             make_ipa(&app, &ipa)?;
             ui::done(format!("packaged {}", ui::path(&ipa)));
         }
+    }
+    Ok(())
+}
+
+/// `ios.frameworks` and `ios.linkerFlags` are linked with the app's Rust
+/// code, which is what calls a framework: an iOS package of an app
+/// without crates (`has_crates`), whose runner is NSH's own, has nothing
+/// to link them with.
+fn check_ios_link(
+    config: &AppConfig,
+    target: PackageTarget,
+    has_crates: bool,
+) -> anyhow::Result<()> {
+    let ios = matches!(target, PackageTarget::Ios | PackageTarget::IosSimulator);
+    if ios
+        && !has_crates
+        && (!config.ios.frameworks.is_empty() || !config.ios.linker_flags.is_empty())
+    {
+        bail!(
+            "nsh.json ios.frameworks and ios.linkerFlags are linked with the app's Rust code, \
+             which calls the frameworks, and the app has none: add the crate that calls them \
+             (nsh.json `rust`, or an nshm with `nsh add`)"
+        );
     }
     Ok(())
 }
@@ -1794,6 +1880,7 @@ fn package_android(
                 if let Some(application) = &config.application {
                     info["application"] = application.clone();
                 }
+                config.add_file_types_to_app_json(&mut info);
                 info
             },
             &config.app_links(),
@@ -1849,6 +1936,7 @@ fn package_android(
             queries: &config.android.queries,
             application: &config.android.application,
             schemes: &config.schemes,
+            share_mime_types: &file_mime_types(&config.file_types()),
             links: config.app_links().web(),
             rust: built.rust_root,
             dark: config.appearance.as_deref() == Some("dark"),
@@ -1872,10 +1960,13 @@ fn package_android(
     ));
     if let Some(serial) = serial {
         let step = ui::Step::start(format!("installing {id} on {serial}"));
-        android::adb(
+        android::install(
             &sdk,
             &serial,
-            &["install", "-r", &apk_path.to_string_lossy()],
+            &apk_path,
+            id,
+            &["-r"],
+            android::AppData::Kept,
         )?;
         android::adb(
             &sdk,
@@ -2060,8 +2151,10 @@ fn android_sounds(config: &AppConfig, built: &crate::build::Built) -> Vec<(Strin
 /// `Contents/MacOS/<executable>`, the bundle and assets in
 /// `Contents/Resources/nsh/` (where the runner looks), `nsh/app.json` (the
 /// window's title and the app's appearance, which the window opens in),
-/// the icon as `AppIcon.icns`; signed ad hoc (Apple silicon runs no
-/// unsigned code; distribute it signed with a Developer ID instead).
+/// the icon as `AppIcon.icns`, and any `macos.extensions` in
+/// `Contents/PlugIns/`; signed ad hoc by default (Apple silicon runs no
+/// unsigned code) or with `--sign` (Hardened Runtime and secure timestamp),
+/// then verified with `codesign --verify --deep --strict`.
 fn package_macos(
     options: &PackageOptions<'_>,
     config: &AppConfig,
@@ -2133,35 +2226,40 @@ fn package_macos(
     document_types(&mut plist, &config.file_types());
     let localized = config.macos.localized_info(&plist)?;
     crate::apple::write_localized_info(&resources, &localized)?;
+    let extensions = crate::app_extensions::embed_macos(&config.macos.extensions, &app, &plist)?;
     plist::Value::Dictionary(plist)
         .to_file_xml(contents.join("Info.plist"))
         .context("write Info.plist")?;
     let mut entitlements = config.macos.entitlements()?;
     config.web_media_entitlements(&mut entitlements);
+    let identity = options.sign.unwrap_or("-");
     for key in entitlements.keys() {
         if crate::apple::needs_profile(key) {
-            ui::warn(format!(
-                "macOS launches an app signed with `{key}` (nsh.json macos.entitlements) only under a provisioning profile that grants it: \
-                 sign {} again with your Developer ID and such a profile before running it",
-                ui::path(&app)
-            ));
+            if identity == "-" {
+                ui::warn(format!(
+                    "macOS launches an app signed with `{key}` (nsh.json macos.entitlements) only under a provisioning profile that grants it: \
+                     sign {} again with your Developer ID and such a profile before running it",
+                    ui::path(&app)
+                ));
+            } else {
+                ui::warn(format!(
+                    "macOS launches an app signed with `{key}` (nsh.json macos.entitlements) only under a provisioning profile that grants it: \
+                     embed such a profile in {} as Contents/embedded.provisionprofile and sign it again before running it",
+                    ui::path(&app)
+                ));
+            }
         }
     }
-    let mut codesign = Command::new("codesign");
-    codesign.args(["--force", "--sign", "-", "--timestamp=none"]);
+    // The app's signature seals its extensions': sign them inside-out first.
+    crate::app_extensions::sign_macos(&extensions, identity, options.out)?;
+    let mut entitlements_path = None;
     if !entitlements.is_empty() {
         let path = options.out.join(format!("{executable}.entitlements"));
         plist::Value::Dictionary(entitlements).to_file_xml(&path)?;
-        codesign.arg("--entitlements").arg(path);
+        entitlements_path = Some(path);
     }
-    let output = codesign.arg(&app).output().context("run codesign")?;
-    if !output.status.success() {
-        bail!(
-            "codesign failed for {}: {}",
-            app.display(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-    }
+    codesign_macos(&app, identity, entitlements_path.as_deref())?;
+    codesign_verify(&app)?;
     crate::updater::archive_macos_app(
         config,
         name,
@@ -2404,7 +2502,8 @@ fn macos_info_plist(
     Ok(d)
 }
 
-/// The MIME types of `types`, each once, for a Linux desktop entry.
+/// The MIME types of `types`, each once, for a Linux desktop entry and
+/// Android's share sheet (a type with only extensions has none).
 pub(crate) fn file_mime_types(types: &[nsh_core::file_type::FileType]) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for mime in types.iter().flat_map(|t| &t.mime_types) {
@@ -2837,6 +2936,72 @@ pub(crate) fn codesign(
     Ok(())
 }
 
+/// The arguments passed to `codesign` for a macOS bundle or nested binary.
+/// Certificate-signed builds enable Hardened Runtime (`--options runtime`)
+/// and a secure timestamp (`--timestamp`), as notarization and Developer ID
+/// distribution require; ad-hoc builds (`"-"`) disable timestamping.
+pub(crate) fn codesign_macos_args(
+    bundle: &Path,
+    identity: &str,
+    entitlements: Option<&Path>,
+) -> Vec<OsString> {
+    let mut args: Vec<OsString> = vec!["--force".into(), "--sign".into(), identity.into()];
+    if identity == "-" {
+        args.push("--timestamp=none".into());
+    } else {
+        args.push("--options".into());
+        args.push("runtime".into());
+        args.push("--timestamp".into());
+    }
+    if let Some(e) = entitlements {
+        args.push("--entitlements".into());
+        args.push(e.as_os_str().to_os_string());
+    }
+    args.push(bundle.as_os_str().to_os_string());
+    args
+}
+
+/// Signs a macOS bundle or nested code item with `identity` (enabling
+/// Hardened Runtime and secure timestamping when signed with a certificate).
+pub(crate) fn codesign_macos(
+    bundle: &Path,
+    identity: &str,
+    entitlements: Option<&Path>,
+) -> anyhow::Result<()> {
+    let output = Command::new("codesign")
+        .args(codesign_macos_args(bundle, identity, entitlements))
+        .stdout(Stdio::null())
+        .output()
+        .context("run codesign")?;
+    if !output.status.success() {
+        bail!(
+            "codesign failed for {}: {}",
+            bundle.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(())
+}
+
+/// Verifies a signed macOS app bundle and all nested extensions/code with
+/// `codesign --verify --deep --strict`.
+pub(crate) fn codesign_verify(app: &Path) -> anyhow::Result<()> {
+    let output = Command::new("codesign")
+        .args(["--verify", "--deep", "--strict"])
+        .arg(app)
+        .stdout(Stdio::null())
+        .output()
+        .context("run codesign --verify")?;
+    if !output.status.success() {
+        bail!(
+            "codesign verification failed for {}: {}",
+            app.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(())
+}
+
 /// `Payload/<App>.app` zipped, keeping permissions and symlinks.
 fn make_ipa(app: &Path, ipa: &Path) -> anyhow::Result<()> {
     let staging = ipa.with_extension("payload");
@@ -3229,6 +3394,56 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// `android.queries` and `android.application` are the app's to write
+    /// too; a value of another form is left out with a warning, as any
+    /// `nsh.json` value is.
+    #[test]
+    fn the_app_writes_android_queries_and_components() {
+        let (config, ignored) = parse_config(
+            r#"{ "android": {
+                "queries": ["<package android:name=\"com.singular.sdk\"/>"],
+                "application": ["<service android:name=\"${applicationId}.Sync\" android:exported=\"false\"/>"]
+            } }"#,
+        )
+        .unwrap();
+        assert!(ignored.is_empty(), "{ignored:?}");
+        assert_eq!(
+            config.android.queries,
+            [r#"<package android:name="com.singular.sdk"/>"#]
+        );
+        assert_eq!(config.android.application.len(), 1);
+        let (config, ignored) =
+            parse_config(r#"{ "android": { "queries": "<package android:name=\"a\"/>" } }"#)
+                .unwrap();
+        assert!(config.android.queries.is_empty());
+        assert!(
+            ignored.len() == 1 && ignored[0].starts_with("android.queries"),
+            "{ignored:?}"
+        );
+        // Read from the app: an entry that is not one element of those
+        // allowed is left out, never an error, and the rest is kept.
+        let dir = std::env::temp_dir().join(format!(
+            "nsh-cli-android-elements-config-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("nsh.json"),
+            r#"{ "android": {
+                "queries": ["<service android:name=\"a.B\"/>", "<package android:name=\"com.example.wallet\"/>"],
+                "application": ["<receiver android:name=\"a.Boot\" android:exported=\"false\"/></application><application>"]
+            } }"#,
+        )
+        .unwrap();
+        let config = read_config(&dir.join("App.tsx")).unwrap();
+        assert_eq!(
+            config.android.queries,
+            [r#"<package android:name="com.example.wallet"/>"#]
+        );
+        assert!(config.android.application.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn android_cleartext_traffic_is_off_unless_asked_for() {
         let cleartext = |json: serde_json::Value| {
@@ -3289,6 +3504,70 @@ mod tests {
     }
 
     #[test]
+    fn ios_frameworks_need_the_apps_crates() {
+        let mut config = AppConfig::default();
+        assert!(check_ios_link(&config, PackageTarget::Ios, false).is_ok());
+        config.ios.linker_flags.push("-ObjC".into());
+        let error = check_ios_link(&config, PackageTarget::IosSimulator, false).unwrap_err();
+        assert!(error.to_string().contains("add the crate"), "{error}");
+        assert!(check_ios_link(&config, PackageTarget::Ios, true).is_ok());
+        // Other packages do not link them.
+        assert!(check_ios_link(&config, PackageTarget::Android, false).is_ok());
+    }
+
+    #[test]
+    fn ios_frameworks_are_relative_to_nsh_json() {
+        let dir = std::env::temp_dir().join(format!(
+            "nsh-cli-ios-frameworks-config-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("nsh.json"),
+            r#"{ "ios": {
+                "frameworks": [
+                    "ios/Vendor/Sdk.xcframework",
+                    { "path": "ios/Vendor/Ads.xcframework", "forceLoad": true },
+                    {
+                        "path": "ios/Vendor/Push.xcframework",
+                        "targets": ["ios", "ios-simulator"],
+                        "optional": true
+                    }
+                ],
+                "linkerFlags": ["-ObjC", "", "-lsqlite3"]
+            } }"#,
+        )
+        .unwrap();
+        let config = read_config(&dir.join("App.tsx")).unwrap();
+        let frameworks: Vec<(PathBuf, bool)> = config
+            .ios
+            .frameworks
+            .iter()
+            .map(|f| (f.path.clone(), f.force_load))
+            .collect();
+        assert_eq!(
+            frameworks,
+            [
+                (dir.join("ios/Vendor/Sdk.xcframework"), false),
+                (dir.join("ios/Vendor/Ads.xcframework"), true),
+                (dir.join("ios/Vendor/Push.xcframework"), false),
+            ]
+        );
+        let push = &config.ios.frameworks[2];
+        assert_eq!(
+            push.targets,
+            [
+                crate::ios_frameworks::Target::Ios,
+                crate::ios_frameworks::Target::IosSimulator
+            ]
+        );
+        assert!(push.optional);
+        // The empty flag is left out with a warning.
+        assert_eq!(config.ios.linker_flags, ["-ObjC", "-lsqlite3"]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn ios_extensions_are_relative_to_nsh_json() {
         let dir = std::env::temp_dir().join(format!(
             "nsh-cli-ios-extensions-config-{}",
@@ -3313,11 +3592,12 @@ mod tests {
             Some(dir.join("ios/sim/Widget.appex").as_path())
         );
         assert_eq!(extensions[1].simulator_path, None);
-        let (entitlements, section) = crate::apple::extension_entitlements(&extensions[0]).unwrap();
+        let (entitlements, section) =
+            crate::apple::extension_entitlements(&extensions[0], ApplePlatform::Ios).unwrap();
         assert_eq!(section, "ios.extensions[0].entitlements");
         assert!(entitlements.contains_key("com.apple.security.application-groups"));
         assert!(
-            crate::apple::extension_entitlements(&extensions[1])
+            crate::apple::extension_entitlements(&extensions[1], ApplePlatform::Ios)
                 .unwrap()
                 .0
                 .is_empty()
@@ -3352,6 +3632,133 @@ mod tests {
             "{error}"
         );
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn macos_extensions_are_relative_to_nsh_json() {
+        let dir = std::env::temp_dir().join(format!(
+            "nsh-cli-macos-extensions-config-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("nsh.json"),
+            r#"{ "macos": { "extensions": [
+                { "path": "macos/Widgets.appex", "simulatorPath": "macos/sim/Widgets.appex",
+                  "entitlements": {
+                    "com.apple.security.app-sandbox": true,
+                    "com.apple.security.application-groups": ["TEAM123456.com.example.widgets"]
+                  } },
+                { "path": "macos/Share.appex" }
+            ] } }"#,
+        )
+        .unwrap();
+        let config = read_config(&dir.join("App.tsx")).unwrap();
+        let extensions = &config.macos.extensions;
+        assert_eq!(extensions.len(), 2);
+        assert_eq!(extensions[0].path, dir.join("macos/Widgets.appex"));
+        assert_eq!(extensions[0].simulator_path, None);
+        let (entitlements, section) =
+            crate::apple::extension_entitlements(&extensions[0], ApplePlatform::Macos).unwrap();
+        assert_eq!(section, "macos.extensions[0].entitlements");
+        assert!(entitlements.contains_key("com.apple.security.app-sandbox"));
+        assert!(entitlements.contains_key("com.apple.security.application-groups"));
+        assert!(
+            crate::apple::extension_entitlements(&extensions[1], ApplePlatform::Macos)
+                .unwrap()
+                .0
+                .is_empty()
+        );
+
+        // An extension's identity is NSH's to sign, as the app's is.
+        std::fs::write(
+            dir.join("nsh.json"),
+            r#"{ "macos": { "extensions": [
+                { "path": "Widgets.appex", "entitlements": { "application-identifier": "T.x" } }
+            ] } }"#,
+        )
+        .unwrap();
+        let error = read_config(&dir.join("App.tsx")).unwrap_err().to_string();
+        assert!(
+            error.contains("macos.extensions[0].entitlements: `application-identifier`"),
+            "{error}"
+        );
+
+        // An entry left out keeps the next one's index as the app wrote it.
+        std::fs::write(
+            dir.join("nsh.json"),
+            r#"{ "macos": { "extensions": [
+                { "simulatorPath": "sim/A.appex" },
+                { "path": "B.appex", "entitlements": { "application-identifier": "T.x" } }
+            ] } }"#,
+        )
+        .unwrap();
+        let error = read_config(&dir.join("App.tsx")).unwrap_err().to_string();
+        assert!(
+            error.contains("macos.extensions[1].entitlements: `application-identifier`"),
+            "{error}"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn codesign_macos_args_enables_hardened_runtime_for_certificates() {
+        let app = Path::new("/tmp/Pulse.app");
+        let ent = Path::new("/tmp/Pulse.entitlements");
+        let to_strings = |args: Vec<OsString>| -> Vec<String> {
+            args.into_iter()
+                .map(|s| s.to_string_lossy().into_owned())
+                .collect()
+        };
+        assert_eq!(
+            to_strings(codesign_macos_args(app, "-", None)),
+            [
+                "--force",
+                "--sign",
+                "-",
+                "--timestamp=none",
+                "/tmp/Pulse.app"
+            ]
+        );
+        assert_eq!(
+            to_strings(codesign_macos_args(app, "-", Some(ent))),
+            [
+                "--force",
+                "--sign",
+                "-",
+                "--timestamp=none",
+                "--entitlements",
+                "/tmp/Pulse.entitlements",
+                "/tmp/Pulse.app",
+            ]
+        );
+        let id = "Developer ID Application: Example (TEAM123456)";
+        assert_eq!(
+            to_strings(codesign_macos_args(app, id, None)),
+            [
+                "--force",
+                "--sign",
+                id,
+                "--options",
+                "runtime",
+                "--timestamp",
+                "/tmp/Pulse.app",
+            ]
+        );
+        assert_eq!(
+            to_strings(codesign_macos_args(app, id, Some(ent))),
+            [
+                "--force",
+                "--sign",
+                id,
+                "--options",
+                "runtime",
+                "--timestamp",
+                "--entitlements",
+                "/tmp/Pulse.entitlements",
+                "/tmp/Pulse.app",
+            ]
+        );
     }
 
     #[test]
@@ -4406,5 +4813,114 @@ mod tests {
             ]
         );
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// What crates declare is read for the Rust targets a package is built
+    /// for: each architecture of a macOS one.
+    #[test]
+    fn crates_are_read_for_every_target_a_package_builds() {
+        use crate::module_meta::Platform;
+        let read = |target: PackageTarget, arch| target.module_meta_triples(arch);
+        assert_eq!(
+            read(PackageTarget::Macos, Some(Arch::Universal)),
+            Some((&[MACOS_ARM64, MACOS_X86_64][..], Platform::Macos))
+        );
+        assert_eq!(
+            read(PackageTarget::Macos, Some(Arch::X86_64)),
+            Some((&[MACOS_X86_64][..], Platform::Macos))
+        );
+        assert_eq!(
+            read(PackageTarget::Macos, None),
+            Some((&[host_macos_triple()][..], Platform::Macos))
+        );
+        assert_eq!(
+            read(PackageTarget::Ios, None),
+            Some((&["aarch64-apple-ios"][..], Platform::Ios))
+        );
+        assert_eq!(read(PackageTarget::Windows, None), None);
+    }
+
+    /// A crate's macOS translation reaches the package's `InfoPlist.strings`
+    /// for the app's languages.
+    #[test]
+    fn crates_macos_translations_reach_the_package() {
+        use crate::module_meta::{ModuleMeta, Platform};
+        let mut meta = ModuleMeta::default();
+        meta.macos_info.insert(
+            "NSBluetoothAlwaysUsageDescription".into(),
+            serde_json::json!("Connects to peripherals."),
+        );
+        meta.macos_strings.insert(
+            "zh-Hans".into(),
+            serde_json::json!({ "NSBluetoothAlwaysUsageDescription": "连接外设。" }),
+        );
+        let mut config = AppConfig {
+            localizations: vec!["zh-Hans".into()],
+            ..Default::default()
+        };
+        meta.apply(&mut config, Platform::Macos).unwrap();
+        config.macos.check().unwrap();
+        let info = macos_info_plist("Demo", "com.example.demo", "Demo", &config, false).unwrap();
+        let localized = config.macos.localized_info(&info).unwrap();
+        assert!(
+            localized["zh-Hans"]
+                .contains("\"NSBluetoothAlwaysUsageDescription\" = \"连接外设。\";"),
+            "{localized:?}"
+        );
+    }
+
+    #[test]
+    fn macos_package_merges_and_checks_module_metadata() {
+        assert_eq!(
+            PackageTarget::Macos.module_meta_triples(None),
+            Some((
+                &[host_macos_triple()][..],
+                crate::module_meta::Platform::Macos
+            ))
+        );
+        let mut config = AppConfig::default();
+        let mut meta = crate::module_meta::ModuleMeta::default();
+        meta.macos_info.insert(
+            "NSBluetoothAlwaysUsageDescription".into(),
+            serde_json::json!("Connects to peripherals."),
+        );
+        meta.macos_info
+            .insert("LSMinimumSystemVersion".into(), serde_json::json!("15.0"));
+        meta.macos_entitlements.insert(
+            "com.apple.security.network.client".into(),
+            serde_json::json!(true),
+        );
+        meta.apply(&mut config, crate::module_meta::Platform::Macos)
+            .unwrap();
+        config.macos.check().unwrap();
+        let info = macos_info_plist("Demo", "com.example.demo", "Demo", &config, false).unwrap();
+        assert_eq!(
+            info["NSBluetoothAlwaysUsageDescription"],
+            plist::Value::String("Connects to peripherals.".into())
+        );
+        assert_eq!(
+            info["LSMinimumSystemVersion"],
+            plist::Value::String("15.0".into())
+        );
+        let entitlements = config.macos.entitlements().unwrap();
+        assert_eq!(
+            entitlements["com.apple.security.network.client"],
+            plist::Value::Boolean(true)
+        );
+
+        // An invalid merged minimum macOS version is caught by `config.macos.check()`.
+        let mut bad_config = AppConfig::default();
+        let mut bad_meta = crate::module_meta::ModuleMeta::default();
+        bad_meta
+            .macos_info
+            .insert("LSMinimumSystemVersion".into(), serde_json::json!("13.0"));
+        bad_meta
+            .apply(&mut bad_config, crate::module_meta::Platform::Macos)
+            .unwrap();
+        let error = bad_config.macos.check().unwrap_err().to_string();
+        assert!(
+            error.contains("macos.infoPlist.LSMinimumSystemVersion: \"13.0\" is below"),
+            "{error}"
+        );
     }
 }

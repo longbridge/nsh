@@ -17,7 +17,7 @@ use serde_json::Value;
 use crate::{
     DragOptions,
     headless::{DialogAnswer, Headless},
-    module::LocaleSettingsOptions,
+    module::{LocaleSettingsOptions, NetworkStateOptions},
 };
 
 /// An app a test opened, driven by steps and read by queries.
@@ -99,6 +99,11 @@ pub(crate) trait Driver: Send {
     /// The system wakes from sleep (`wakeCount()`).
     fn wake(&mut self) -> Result<(), String> {
         Err(headless_only("wake"))
+    }
+    /// The device's network changes as `state` names (`network()`).
+    fn set_network_state(&mut self, state: NetworkStateOptions) -> Result<(), String> {
+        let _ = state;
+        Err(headless_only("setNetworkState"))
     }
     /// The OS asks the app to show itself (`Application.on("reopen")`).
     fn reopen(&mut self) -> Result<(), String> {
@@ -337,6 +342,10 @@ impl Driver for Headless {
     }
     fn wake(&mut self) -> Result<(), String> {
         self.set_environment("wake()", |e| e.wake_count = e.wake_count.wrapping_add(1))
+    }
+    fn set_network_state(&mut self, state: NetworkStateOptions) -> Result<(), String> {
+        let what = format!("setNetworkState({})", state.label());
+        self.set_environment(&what, |e| state.apply(&mut e.network))
     }
     fn reopen(&mut self) -> Result<(), String> {
         Headless::reopen(self)

@@ -236,6 +236,155 @@ impl Lifecycle {
     }
 }
 
+/// How the device reaches the network now (`network()`), as the system's
+/// path monitor reports it: the kind of link its default route takes,
+/// whether that link costs the user (`expensive`) or the user asked to save
+/// data on it (`constrained`), and on iOS whether the user lets the app use
+/// cellular data. Platforms that cannot tell report
+/// [`NetworkKind::Unknown`], which counts as online: the app tries and
+/// learns from its requests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct Network {
+    /// The kind of link the default route takes, [`NetworkKind::None`]
+    /// without one.
+    pub kind: NetworkKind,
+    /// The link costs the user: cellular data, a phone's hotspot, a
+    /// metered connection (Apple's `isExpensive`, Android's metered
+    /// networks, the browser's `cellular` connection).
+    pub expensive: bool,
+    /// The user asked to use less data on this link: Low Data Mode (iOS,
+    /// macOS), Data Saver (Android), the browser's `saveData`.
+    pub constrained: bool,
+    /// Whether the user lets the app use cellular data (iOS:
+    /// `CTCellularData`; on devices sold in mainland China, the system's
+    /// prompt for wireless data). [`CellularData::Unknown`] elsewhere.
+    pub cellular_data: CellularData,
+}
+
+impl Network {
+    /// A network of `kind`, neither expensive nor constrained, with the
+    /// cellular data permission unknown.
+    pub fn new(kind: NetworkKind) -> Self {
+        Self {
+            kind,
+            ..Self::default()
+        }
+    }
+
+    /// The link costs the user.
+    pub fn expensive(mut self, expensive: bool) -> Self {
+        self.expensive = expensive;
+        self
+    }
+
+    /// The user asked to use less data on this link.
+    pub fn constrained(mut self, constrained: bool) -> Self {
+        self.constrained = constrained;
+        self
+    }
+
+    /// Whether the user lets the app use cellular data.
+    pub fn cellular_data(mut self, cellular_data: CellularData) -> Self {
+        self.cellular_data = cellular_data;
+        self
+    }
+
+    /// Whether a route to the network exists (TS: `network().online`):
+    /// false only when the platform knows there is none, true while it
+    /// does not know ([`NetworkKind::Unknown`]).
+    pub fn online(&self) -> bool {
+        self.kind != NetworkKind::None
+    }
+}
+
+/// The kind of link the device's default route takes (`network().kind`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, crate::element::PropEnum)]
+#[non_exhaustive]
+pub enum NetworkKind {
+    /// The platform does not say (it has no monitor, or has not answered
+    /// yet).
+    #[default]
+    Unknown,
+    /// No route to the network: offline.
+    None,
+    /// Wi-Fi.
+    Wifi,
+    /// Cellular data.
+    Cellular,
+    /// A wired link: Ethernet.
+    Wired,
+    /// Another link: a VPN without a known link beneath, Bluetooth, a
+    /// USB tether, loopback only.
+    Other,
+}
+
+impl NetworkKind {
+    /// Its `network().kind` name.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::None => "none",
+            Self::Wifi => "wifi",
+            Self::Cellular => "cellular",
+            Self::Wired => "wired",
+            Self::Other => "other",
+        }
+    }
+
+    /// The kind named `name` ([`Self::name`]).
+    pub fn parse(name: &str) -> Option<Self> {
+        Some(match name {
+            "unknown" => Self::Unknown,
+            "none" => Self::None,
+            "wifi" => Self::Wifi,
+            "cellular" => Self::Cellular,
+            "wired" => Self::Wired,
+            "other" => Self::Other,
+            _ => return None,
+        })
+    }
+}
+
+/// Whether the user lets the app use cellular data
+/// (`network().cellularData`): iOS's `CTCellularData.restrictedState`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, crate::element::PropEnum)]
+#[non_exhaustive]
+pub enum CellularData {
+    /// Not known: the user has not decided yet (the first launch on a
+    /// device that asks), or the platform does not report it (every
+    /// platform but iOS).
+    #[default]
+    Unknown,
+    /// The user turned cellular data off for the app (on devices that ask
+    /// for wireless data, also "Off" or "WLAN" only): its requests over
+    /// cellular fail, and only the system's settings change it.
+    Restricted,
+    /// The app may use cellular data.
+    NotRestricted,
+}
+
+impl CellularData {
+    /// Its `network().cellularData` name.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::Restricted => "restricted",
+            Self::NotRestricted => "notRestricted",
+        }
+    }
+
+    /// The state named `name` ([`Self::name`]).
+    pub fn parse(name: &str) -> Option<Self> {
+        Some(match name {
+            "unknown" => Self::Unknown,
+            "restricted" => Self::Restricted,
+            "notRestricted" => Self::NotRestricted,
+            _ => return None,
+        })
+    }
+}
+
 /// The space available along one axis of a surface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SizeClass {
@@ -353,6 +502,11 @@ pub struct Environment {
     /// app in front), while its network connections and timers did not
     /// live through it.
     pub wake_count: u32,
+    /// How the device reaches the network (TS: `network()`): the platform
+    /// reports each change of the system's default route and, on iOS, of
+    /// the cellular data permission. [`NetworkKind::Unknown`] where it has
+    /// no monitor.
+    pub network: Network,
     /// The platform picks a color from the screen
     /// ([`crate::Command::PickScreenColor`]); without it, a pick answers
     /// no color at once.
@@ -535,6 +689,7 @@ impl Default for Environment {
             host: false,
             lifecycle: Lifecycle::Active,
             wake_count: 0,
+            network: Network::default(),
             screen_color: false,
             clipboard_write_result: false,
             canvas_render: false,

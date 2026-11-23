@@ -6,7 +6,7 @@ use crate::{
     geometry::{Bounds, DevicePixels, Percentage, Point, Points, Size},
     js::host::HostProps,
     overlay::{Align, OverlayAnchor, Placement, TooltipContent},
-    props::{AccessibilityProp, EdgeInsets, LayoutAnimation, PointerEvents},
+    props::{AccessibilityProp, EdgeInsets, LayoutAnimation, PanEdge, PointerEvents},
     style::{Color, Style, StylePatch},
 };
 
@@ -233,8 +233,8 @@ events! {
     Menu = "onMenu": "A menu item was chosen: the application menu's or a context menu's (root only; desktops; payload: `id`), or a context menu closed (`closed`: true, after its item).",
     MouseEnter = "onMouseEnter": "The mouse came over the view or a view inside it (never on touches; payload: [`EventPayload::Mouse`]).",
     MouseLeave = "onMouseLeave": "The mouse left the view and the views inside it, or the window (payload: [`EventPayload::Mouse`], where it was last).",
-    FileDragEnter = "onFileDragEnter": "A local file drag entered an eligible drop destination, on desktops and iOS (payload: [`EventPayload::FileDrop`]).",
-    FileDragLeave = "onFileDragLeave": "A local file drag left its drop destination, on desktops and iOS.",
+    FileDragEnter = "onFileDragEnter": "A local file drag entered an eligible drop destination, on desktops, iOS and Android (payload: [`EventPayload::FileDrop`]).",
+    FileDragLeave = "onFileDragLeave": "A local file drag left its drop destination, on desktops, iOS and Android.",
     FileDrop = "onFileDrop": "Local files were dropped (payload: [`EventPayload::FileDrop`]).",
     MouseMove = "onMouseMove": "The mouse moved over the view or a view inside it, with or without a button down, or a modifier key changed while it rests there with none down (payload: [`EventPayload::Mouse`]; at most one per frame).",
     ContextMenu = "onContextMenu": "The secondary button was pressed over the view (payload: [`EventPayload::ContextMenu`]): the nearest listener around the view under the pointer hears it, unless a text input or selectable text is nearer.",
@@ -279,6 +279,7 @@ events! {
     FocusOut = "onFocusOut": "The keyboard focus left the view: from it or a view inside it to one outside, or to none (it left `focus-within`; raised by the core).",
     TextDrop = "onTextDrop" as "": "Text dragged from another app or view was dropped on the view (payload: [`EventPayload::TextDrop`]): a Rust component's, such as `RichEditor`'s, which inserts it where it was let go (iOS).",
     OpenAppSettings = "onOpenAppSettings" as "": "A [`Command::OpenAppSettings`] request finished (root only; payload: `id`, `opened`: whether the system opened the app's page in its settings; [`crate::mobile::open_app_settings`]; never reaches a listener).",
+    BackProgress = "onBackProgress" as "": "A step of the system's back gesture that no modal takes, while the app listens (root only; Android 14 and later; payload: [`BackProgressEvent::payload`], `phase`, `progress` and `edge`).",
 }
 
 /// What an input holds, for the system's autofill and suggestions
@@ -615,6 +616,119 @@ impl PinchPhase {
             "start" => PinchPhase::Start,
             "move" => PinchPhase::Move,
             "end" => PinchPhase::End,
+            _ => return None,
+        })
+    }
+}
+
+/// A step of the system's back gesture that the app follows
+/// ([`crate::element::on_back_progress`]; TS: `BackHandler.on("progress",
+/// l)`), as AndroidX's `BackEventCompat`: Android 14 and later (predictive
+/// back) report it while the finger moves ([`EventKind::BackProgress`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[non_exhaustive]
+pub struct BackProgressEvent {
+    /// Where it is in the gesture.
+    pub phase: BackPhase,
+    /// How far the gesture went, from 0 to 1 (all the way), as the system
+    /// reports it.
+    pub progress: Percentage,
+    /// The screen edge the swipe started at ([`PanEdge::Left`] or
+    /// [`PanEdge::Right`]); none when the system names no edge.
+    pub edge: Option<PanEdge>,
+}
+
+impl BackProgressEvent {
+    /// A step in `phase` at `progress` (0 to 1) of a swipe from `edge`.
+    pub fn new(phase: BackPhase, progress: Percentage, edge: Option<PanEdge>) -> Self {
+        Self {
+            phase,
+            progress,
+            edge,
+        }
+    }
+
+    /// The payload of [`EventKind::BackProgress`] (`{ phase, progress,
+    /// edge? }`, the object JS listeners get).
+    pub fn payload(&self) -> EventPayload {
+        let mut fields = vec![
+            ("phase", PayloadValue::Str(self.phase.name().into())),
+            ("progress", PayloadValue::Number(f64::from(self.progress.0))),
+        ];
+        let edge = match self.edge {
+            Some(PanEdge::Left) => Some("left"),
+            Some(PanEdge::Right) => Some("right"),
+            _ => None,
+        };
+        if let Some(edge) = edge {
+            fields.push(("edge", PayloadValue::Str(edge.into())));
+        }
+        EventPayload::Map(fields)
+    }
+
+    /// The step a [`Self::payload`] carries.
+    pub(crate) fn from_payload(payload: &EventPayload) -> Option<Self> {
+        let EventPayload::Map(fields) = payload else {
+            return None;
+        };
+        let mut event = Self::default();
+        let mut phase = None;
+        for (key, value) in fields {
+            match (*key, value) {
+                ("phase", PayloadValue::Str(name)) => phase = BackPhase::from_name(name),
+                ("progress", PayloadValue::Number(n)) => event.progress = Percentage(*n as f32),
+                ("edge", PayloadValue::Str(edge)) => {
+                    event.edge = match edge.as_str() {
+                        "left" => Some(PanEdge::Left),
+                        "right" => Some(PanEdge::Right),
+                        _ => None,
+                    }
+                }
+                _ => {}
+            }
+        }
+        event.phase = phase?;
+        Some(event)
+    }
+}
+
+/// Where the back gesture is ([`BackProgressEvent::phase`]; TS: `"start"`,
+/// `"move"`, `"end"`, `"cancel"`), as AndroidX's `OnBackPressedCallback`'s
+/// started, progressed, pressed and cancelled.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum BackPhase {
+    /// The finger started the gesture.
+    Start,
+    /// The finger moved.
+    #[default]
+    Move,
+    /// The finger let go and the gesture goes back: the back press
+    /// follows.
+    End,
+    /// The finger let go without going back, or the system cancelled the
+    /// gesture.
+    Cancel,
+}
+
+impl BackPhase {
+    /// Its TS name.
+    pub fn name(self) -> &'static str {
+        match self {
+            BackPhase::Start => "start",
+            BackPhase::Move => "move",
+            BackPhase::End => "end",
+            BackPhase::Cancel => "cancel",
+        }
+    }
+
+    /// The phase named `name` (its TS name).
+    pub fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "start" => BackPhase::Start,
+            "move" => BackPhase::Move,
+            "end" => BackPhase::End,
+            "cancel" => BackPhase::Cancel,
             _ => return None,
         })
     }
@@ -1074,6 +1188,34 @@ pub enum PayloadValue {
     Bounds(Bounds<Points>),
 }
 
+/// Files dragged in with their contents ([`EventPayload::FileContents`]).
+#[derive(Debug, Clone, PartialEq, Default)]
+#[non_exhaustive]
+pub struct FileContents {
+    /// The regular files, in the drag's order: read ones with their bytes,
+    /// ones over the limit `tooLarge`; on drag entry, none are read yet.
+    pub files: Vec<crate::picker::PickedFile>,
+    /// The MIME type of each offered item, as the platform reports them.
+    pub mime_types: Vec<String>,
+    /// Where the files were let go, in the window's coordinates.
+    pub page_position: Option<Point<Points>>,
+}
+
+impl FileContents {
+    /// Contents of `files`, typed `mime_types`, let go at `page_position`.
+    pub fn new(
+        files: Vec<crate::picker::PickedFile>,
+        mime_types: Vec<String>,
+        page_position: Option<Point<Points>>,
+    ) -> Self {
+        Self {
+            files,
+            mime_types,
+            page_position,
+        }
+    }
+}
+
 /// Data delivered with an event.
 #[derive(Debug, Clone, PartialEq)]
 pub enum EventPayload {
@@ -1087,6 +1229,8 @@ pub enum EventPayload {
     Layout(Bounds<Points>),
     /// A drag: translation since the start and velocity (points / second).
     Pan {
+        /// Where the finger went down, in the surface.
+        origin: Point<Points>,
         /// The translation.
         translation: Point<Points>,
         /// Horizontal velocity.
@@ -1100,6 +1244,8 @@ pub enum EventPayload {
     },
     /// A system-cancelled drag, with the same last values as `Pan`.
     PanCancelled {
+        /// Where the finger went down, in the surface.
+        origin: Point<Points>,
         /// The translation.
         translation: Point<Points>,
         /// Horizontal velocity.
@@ -1157,6 +1303,11 @@ pub enum EventPayload {
         /// The drop point in the window's coordinates.
         page_position: Point<Points>,
     },
+    /// Files a drag offers or drops where the platform hands over their
+    /// contents rather than local paths (the Web): `files` in the drag's
+    /// order, unread on drag entry (types only), and where they were let
+    /// go. Boxed, as [`Self::Paste`], to keep every payload small.
+    FileContents(Box<FileContents>),
     /// What the user pasted into an input.
     Paste(Box<PasteEvent>),
     /// Text dropped on a view ([`EventKind::TextDrop`]); boxed, as
@@ -1770,6 +1921,10 @@ pub enum ScrollbarSetting {
     /// The app's built-in bar drawn as this theme says (an object): the
     /// `ScrollbarTheme` of `nsh/base`, which reads it.
     Themed(Arc<crate::JsonValue>),
+    /// The app's built-in bar drawn as this theme says, as Rust gave it: a
+    /// value of the theme type of the UI set that makes bars, with its
+    /// maker (`nsh_base::ScrollbarTheme` converts into this).
+    ThemeValue(crate::element::ScrollbarThemeValue),
 }
 
 impl From<bool> for ScrollbarSetting {
@@ -1777,6 +1932,8 @@ impl From<bool> for ScrollbarSetting {
         if shows { Self::Shown } else { Self::Hidden }
     }
 }
+
+crate::static_reactive!(ScrollbarSetting: ScrollbarSetting, bool);
 
 /// How an `<image>` is shown, besides its source.
 #[derive(Debug, Clone, PartialEq, HostProps)]
