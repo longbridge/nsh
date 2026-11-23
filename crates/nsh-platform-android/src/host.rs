@@ -1691,8 +1691,10 @@ extern "system" fn Java_com_longbridge_nsh_Native_touch(
 }
 
 /// `onPaste`: the text, the images' encoded bytes (each a `File` in JS, the
-/// bytes never through JS strings) and local files' `file:` URLs.
+/// bytes never through JS strings), local files' `file:` URLs and the
+/// images too large to read, by name, type and size (`tooLarge`).
 #[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
 extern "system" fn Java_com_longbridge_nsh_Native_paste(
     mut env: JNIEnv<'_>,
     _: JClass<'_>,
@@ -1701,6 +1703,9 @@ extern "system" fn Java_com_longbridge_nsh_Native_paste(
     text: JString<'_>,
     images: jni::objects::JObjectArray<'_>,
     uris: jni::objects::JObjectArray<'_>,
+    large_names: jni::objects::JObjectArray<'_>,
+    large_types: jni::objects::JObjectArray<'_>,
+    large_lengths: jni::objects::JLongArray<'_>,
 ) {
     // SAFETY: Java passes its live handle.
     let host = unsafe { host(handle) };
@@ -1722,6 +1727,25 @@ extern "system" fn Java_com_longbridge_nsh_Native_paste(
         if let Ok(uri) = env.get_string(&JString::from(uri)) {
             paste.uris.push(uri.into());
         }
+    }
+    let count = env.get_array_length(&large_names).unwrap_or(0).max(0);
+    let mut lengths = vec![0; count as usize];
+    let _ = env.get_long_array_region(&large_lengths, 0, &mut lengths);
+    let string = |env: &mut JNIEnv<'_>, array: &jni::objects::JObjectArray<'_>, i: i32| {
+        env.get_object_array_element(array, i)
+            .ok()
+            .filter(|v| !v.is_null())
+            .and_then(|v| env.get_string(&JString::from(v)).ok().map(String::from))
+            .unwrap_or_default()
+    };
+    for (i, len) in lengths.into_iter().enumerate() {
+        let name = string(&mut env, &large_names, i as i32);
+        let mime = string(&mut env, &large_types, i as i32);
+        paste.too_large.push(nsh_core::PastedFile::too_large(
+            name,
+            mime,
+            u64::try_from(len).unwrap_or(0),
+        ));
     }
     if let Some(control) = host.control() {
         control.dispatch_event(

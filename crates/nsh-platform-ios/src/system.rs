@@ -822,7 +822,12 @@ pub(crate) fn read_clipboard_image(id: u32, has_only: bool) -> EventPayload {
 /// its text, the same content as HTML ([`pasted_html`]), its images (as
 /// they are in [`IMAGE_TYPES`], else PNG), its local files' `file:` URLs
 /// (Mac Catalyst) and the other files it holds as data ([`pasted_files`]).
-pub(crate) fn pasted(board: &objc2_ui_kit::UIPasteboard) -> nsh_core::PasteEvent {
+/// A file larger than `max_size` (`pasteMaxSize`) is not copied out of the
+/// pasteboard's data: only its name, type and size are reported.
+pub(crate) fn pasted(
+    board: &objc2_ui_kit::UIPasteboard,
+    max_size: Option<u64>,
+) -> nsh_core::PasteEvent {
     // SAFETY: plain getters of the pasteboard, read on the user's paste.
     unsafe {
         let mut paste = nsh_core::PasteEvent::new(
@@ -834,22 +839,29 @@ pub(crate) fn pasted(board: &objc2_ui_kit::UIPasteboard) -> nsh_core::PasteEvent
                 .unwrap_or_default(),
         );
         paste.html = pasted_html(board).unwrap_or_default();
+        let mut add = |file: Pasted| match file {
+            Pasted::Read(file) => paste.files.push(file),
+            Pasted::TooLarge(file) => paste.too_large.push(file),
+        };
         if board.hasImages() {
             let first = IMAGE_TYPES
                 .iter()
                 .find_map(|(_, kind)| board.dataForPasteboardType(&NSString::from_str(kind)));
             match first {
                 Some(data) if board.numberOfItems() <= 1 => {
-                    paste.files.push(nsh_core::PastedFile::image(data.to_vec()));
+                    add(pasted_data(&data, max_size, nsh_core::PastedFile::image));
                 }
                 _ => {
                     for image in board.images().map(|i| i.to_vec()).unwrap_or_default() {
                         if let Some(png) = image.png_representation() {
-                            paste.files.push(nsh_core::PastedFile::image(png.to_vec()));
+                            add(pasted_data(&png, max_size, nsh_core::PastedFile::image));
                         }
                     }
                 }
             }
+        }
+        for file in pasted_files(board, max_size) {
+            add(file);
         }
         if let Some(urls) = board.hasURLs().then(|| board.URLs()).flatten() {
             paste.uris = urls
@@ -859,17 +871,48 @@ pub(crate) fn pasted(board: &objc2_ui_kit::UIPasteboard) -> nsh_core::PasteEvent
                 .map(|s| s.to_string())
                 .collect();
         }
-        paste.files.extend(pasted_files(board));
         paste
     }
+}
+
+/// A pasted file, read or too large to read ([`pasted_data`]).
+enum Pasted {
+    Read(nsh_core::PastedFile),
+    TooLarge(nsh_core::PastedFile),
+}
+
+/// `data` as the pasted file `make` names and types from its bytes; when
+/// it is larger than `max_size`, the same file unread, typed from its first
+/// bytes only (its bytes stay in the pasteboard's `NSData`).
+fn pasted_data(
+    data: &NSData,
+    max_size: Option<u64>,
+    make: impl FnOnce(Vec<u8>) -> nsh_core::PastedFile,
+) -> Pasted {
+    let len = data.length() as u64;
+    if max_size.is_none_or(|max| len <= max) {
+        return Pasted::Read(make(data.to_vec()));
+    }
+    // Enough for every signature `PastedFile::image` sniffs.
+    let mut head = vec![0u8; data.length().min(32)];
+    // SAFETY: `head` holds `head.len()` bytes, at most `data`'s length.
+    unsafe {
+        data.getBytes_length(
+            std::ptr::NonNull::new_unchecked(head.as_mut_ptr().cast()),
+            head.len(),
+        );
+    }
+    let file = make(head);
+    Pasted::TooLarge(nsh_core::PastedFile::too_large(file.name, file.mime, len))
 }
 
 /// The files `board` holds as data: an item that is no text, link or image
 /// (a document copied in Files offers `com.adobe.pdf` or
 /// `org.openxmlformats.spreadsheetml.sheet`, no file URL) gives its first
 /// file type's data, named as its item provider suggests and typed by its
-/// uniform type's MIME type. Text, links and images are read above.
-fn pasted_files(board: &objc2_ui_kit::UIPasteboard) -> Vec<nsh_core::PastedFile> {
+/// uniform type's MIME type ([`pasted_data`] with `max_size`). Text, links
+/// and images are read above.
+fn pasted_files(board: &objc2_ui_kit::UIPasteboard, max_size: Option<u64>) -> Vec<Pasted> {
     let other = |kind: &NSString| {
         crate::file_drop::conforms(kind, "public.text")
             || crate::file_drop::conforms(kind, "public.url")
@@ -909,7 +952,9 @@ fn pasted_files(board: &objc2_ui_kit::UIPasteboard) -> Vec<nsh_core::PastedFile>
                     suggested.map(|s| s.to_string()).as_deref(),
                     extension.as_deref(),
                 );
-                Some(nsh_core::PastedFile::new(name, mime, data.to_vec()))
+                Some(pasted_data(&data, max_size, |bytes| {
+                    nsh_core::PastedFile::new(name, mime, bytes)
+                }))
             })
             .collect()
     }

@@ -76,6 +76,8 @@ final class InputBox extends FrameLayout implements Node {
     private boolean watching;
     /** `pasteBehavior` is `"insert"`: a paste inserts its text. */
     boolean pasteInserts = true;
+    /** `pasteMaxSize`: the largest pasted file read, in bytes (-1: any the heap holds). */
+    int pasteMaxSize = -1;
     /** Whether the EditText shows a vertical scroll bar of its own by default. */
     private final boolean defaultVerticalBar;
     /** Platform hint colors before any explicit `placeholderTextColor` override. */
@@ -285,14 +287,20 @@ final class InputBox extends FrameLayout implements Node {
 
     /**
      * Reports what {@code clip} holds (`onPaste`), if the app listens: its text,
-     * its images' bytes (read from their content URIs as the user pastes) and local
-     * files' URLs. True when it reported.
+     * its images' bytes (read from their content URIs as the user pastes; one
+     * larger than {@link #pasteMaxSize} or the Java heap holds is not read, only
+     * its name, type and size reported) and local files' URLs. True when it
+     * reported.
      */
     boolean pasted(android.content.ClipData clip) {
         if (!mounter.wants(id, Native.PASTE)) return false;
         StringBuilder text = new StringBuilder();
         java.util.ArrayList<byte[]> images = new java.util.ArrayList<>();
         java.util.ArrayList<String> uris = new java.util.ArrayList<>();
+        java.util.ArrayList<String> largeNames = new java.util.ArrayList<>();
+        java.util.ArrayList<String> largeTypes = new java.util.ArrayList<>();
+        java.util.ArrayList<Long> largeLengths = new java.util.ArrayList<>();
+        int maxBytes = pasteMaxSize < 0 ? Integer.MAX_VALUE : pasteMaxSize;
         android.content.ContentResolver resolver = getContext().getContentResolver();
         for (int i = 0; i < clip.getItemCount(); i++) {
             android.content.ClipData.Item item = clip.getItemAt(i);
@@ -308,9 +316,16 @@ final class InputBox extends FrameLayout implements Node {
             }
             String type = resolver.getType(uri);
             if (type != null && type.startsWith("image/")) {
-                try (java.io.InputStream in = resolver.openInputStream(uri)) {
-                    if (in != null) images.add(readAll(in));
-                } catch (java.io.IOException | SecurityException e) {
+                try {
+                    Picker.Picked file = Picker.readFile(resolver, uri, maxBytes);
+                    if (file.bytes != null) {
+                        images.add(file.bytes);
+                    } else {
+                        largeNames.add(file.name);
+                        largeTypes.add(file.type);
+                        largeLengths.add(file.length);
+                    }
+                } catch (Exception e) {
                     android.util.Log.w("nsh", "a pasted image could not be read: " + e);
                 }
             } else {
@@ -318,15 +333,11 @@ final class InputBox extends FrameLayout implements Node {
                 if (t != null) text.append(t);
             }
         }
-        mounter.paste(id, text.toString(), images.toArray(new byte[0][]), uris.toArray(new String[0]));
+        long[] lengths = new long[largeLengths.size()];
+        for (int i = 0; i < lengths.length; i++) lengths[i] = largeLengths.get(i);
+        mounter.paste(id, text.toString(), images.toArray(new byte[0][]), uris.toArray(new String[0]),
+                largeNames.toArray(new String[0]), largeTypes.toArray(new String[0]), lengths);
         return true;
-    }
-
-    private static byte[] readAll(java.io.InputStream in) throws java.io.IOException {
-        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
-        byte[] buffer = new byte[64 * 1024];
-        for (int n; (n = in.read(buffer)) > 0; ) out.write(buffer, 0, n);
-        return out.toByteArray();
     }
 
     void configure(float fontSizeDp, int weight, boolean italic, int color, String family, float letterSpacingDp,

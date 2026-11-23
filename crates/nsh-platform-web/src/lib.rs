@@ -1244,8 +1244,9 @@ pub unsafe extern "C" fn nsh_event(
 }
 
 /// `onPaste` of input `id`: what the user pasted, as JSON `{ text, files:
-/// [{ name, type, size }], uris }` and the files' bytes one after the other
-/// (they never cross as JS strings).
+/// [{ name, type, size, read }], uris }` and the bytes of the files read
+/// one after the other (they never cross as JS strings); a file with
+/// `read: false` is larger than the input's `pasteMaxSize`.
 ///
 /// # Safety
 ///
@@ -1283,7 +1284,17 @@ pub unsafe extern "C" fn nsh_paste(
         .into_iter()
         .flatten()
     {
-        let size = file.get("size").and_then(|s| s.as_u64()).unwrap_or(0) as usize;
+        let size = file.get("size").and_then(|s| s.as_u64()).unwrap_or(0);
+        // Not read: larger than the input's `pasteMaxSize`.
+        if file.get("read").and_then(|r| r.as_bool()) == Some(false) {
+            paste.too_large.push(nsh_core::PastedFile::too_large(
+                text(file, "name"),
+                text(file, "type"),
+                size,
+            ));
+            continue;
+        }
+        let size = size as usize;
         let Some(part) = bytes.get(at..at + size) else {
             break;
         };
