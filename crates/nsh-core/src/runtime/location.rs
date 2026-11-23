@@ -7,7 +7,12 @@
 //! each change, and both ask the user for when-in-use location themselves when
 //! nobody has been asked yet.
 
-use std::{cell::RefCell, rc::Rc, task::Poll, time::Duration};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+    task::Poll,
+    time::Duration,
+};
 
 use crate::{
     element::{CallCx, Callback, JsError, JsObject, Later, Stop, System, codes, module},
@@ -45,7 +50,7 @@ impl Location {
         options: Option<RequestAuthorizationOptions>,
         sys: System,
     ) -> Result<Later<String>, JsError> {
-        let background = options.unwrap_or_default().background;
+        let background = options.unwrap_or_default().background.unwrap_or(false);
         if !sys.access.allows_location() {
             return Err(not_granted());
         }
@@ -100,10 +105,22 @@ impl Location {
         if request.background && !sys.access.allows_location_background() {
             return Err(background_not_granted());
         }
-        let call = Rc::new(RefCell::new(crate::prelude::watch_location(request)));
-        cx.start(deliver(Rc::downgrade(&call), listener));
+        // The watch starts in its task: a JS call that resumes after an
+        // `await` has no reactive graph entered, and starting a request needs
+        // the engine's executor.
+        let call: Rc<RefCell<Option<crate::prelude::LocationCall>>> = Rc::new(RefCell::new(None));
+        let stopped = Rc::new(Cell::new(false));
+        cx.start(deliver(
+            Rc::downgrade(&call),
+            Rc::clone(&stopped),
+            request,
+            listener,
+        ));
         Ok(Stop::new(move || {
-            if let Ok(mut call) = call.try_borrow_mut() {
+            stopped.set(true);
+            if let Ok(mut call) = call.try_borrow_mut()
+                && let Some(call) = call.as_mut()
+            {
                 call.stop();
             }
         }))
@@ -181,7 +198,7 @@ pub(crate) struct WatchOptions {
     /// Report one at most this often, in milliseconds.
     interval: Option<f64>,
     /// Keep reporting while the app is not in front.
-    background: bool,
+    background: Option<bool>,
 }
 
 impl WatchOptions {
@@ -197,7 +214,7 @@ impl WatchOptions {
             accuracy: accuracy(self.accuracy)?,
             distance_filter: self.distance_filter,
             interval: millis("interval", self.interval)?,
-            background: self.background,
+            background: self.background.unwrap_or(false),
             ..LocationRequest::default()
         }
         .checked()
@@ -210,7 +227,7 @@ impl WatchOptions {
 #[prop(exact)]
 pub(crate) struct RequestAuthorizationOptions {
     /// Ask for the location while the app is not in front.
-    background: bool,
+    background: Option<bool>,
 }
 
 /// A position's `accuracy` name to its value.
@@ -271,26 +288,42 @@ async fn current_request(request: LocationRequest) -> Result<crate::location::Po
     }
 }
 
-/// Reports a watch's positions to its listener until it ends.
+/// Starts a watch in its task and reports its positions to `listener` until
+/// it ends or `stopped` is set.
 async fn deliver(
-    call: std::rc::Weak<RefCell<crate::prelude::LocationCall>>,
+    slot: std::rc::Weak<RefCell<Option<crate::prelude::LocationCall>>>,
+    stopped: Rc<Cell<bool>>,
+    request: LocationRequest,
     listener: Callback<Position>,
 ) {
+    let Some(shared) = slot.upgrade() else {
+        return;
+    };
+    if stopped.get() {
+        return;
+    }
+    *shared.borrow_mut() = Some(crate::prelude::watch_location(request));
     loop {
-        let event = std::future::poll_fn(|cx| match call.upgrade() {
-            Some(call) => match call.try_borrow_mut() {
-                Ok(mut call) => call.poll_next(cx),
-                Err(_) => Poll::Pending,
+        if stopped.get() {
+            break;
+        }
+        let event = std::future::poll_fn(|cx| match shared.try_borrow_mut() {
+            Ok(mut call) => match call.as_mut() {
+                Some(call) => call.poll_next(cx),
+                None => Poll::Ready(None),
             },
-            None => Poll::Ready(None),
+            Err(_) => Poll::Pending,
         })
         .await;
         let Some(event) = event else {
-            return;
+            break;
         };
         if let LocationEvent::Position { position, .. } = event {
             listener.post(Position::from(position));
         }
+    }
+    if let Some(mut call) = shared.borrow_mut().take() {
+        call.stop();
     }
 }
 
