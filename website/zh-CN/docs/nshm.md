@@ -364,13 +364,29 @@ crate 翻译的是各 crate 在 `ios.infoPlist` 里设置的键，按它们的�
 
 在应用旁边开发时用 `nsh add --path ../my-gauge`，按目录当前内容使用。发布方式与普通 crate 相同（`cargo publish`），加上关键词 `nshm`，便于在 [crates.io](https://crates.io/keywords/nshm) 上找到；也可以推送到 Git 并给版本打标签。
 
-### Apple SDK
+### 封装原生 SDK
 
-封装 Apple SDK 的 nshm 在 `#[cfg(target_os = "ios")]` 或 `#[cfg(target_os = "macos")]` 下从 Rust 调用它。系统 framework
-无需更多设置（`objc2` 系列 crate 会链接它们）。厂商预编译的库由 nshm 自己的 `build.rs` 链接，其中的 `cargo:rustc-link-search`
-和 `cargo:rustc-link-lib` 会传到应用可执行文件的链接。第三方工具 [nsh-frameworks](https://github.com/SuperNSH/frameworks)
-根据 crate 的 `Cargo.toml` 里列出的 XCFramework 完成这一步，为每个目标取对应的库，并把其中的动态 framework 复制到
-`nsh package` 打出的包里并签名（`nsh-frameworks embed .nsh/out/<Name>.app`）。
+封装 Apple SDK 的 nshm 在 `#[cfg(target_os = "ios")]` 或 `#[cfg(target_os = "macos")]` 下从 Rust 调用它。通过 `objc2` 系列 crate 使用的系统 framework 无需更多设置。厂商预编译的库（`.xcframework` 或 `.a`）由 nshm 自己的 `build.rs` 链接：Cargo 会把所有依赖的 `rustc-link-lib` 和 `rustc-link-search` 传给应用的可执行文件，应用本身不用写任何配置，NSH 也没有按平台的 SDK 设置。
+
+```rust
+// build.rs
+fn main() {
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("ios") {
+        return;
+    }
+    let sim = std::env::var("CARGO_CFG_TARGET_ABI").as_deref() == Ok("sim");
+    let slice = if sim { "ios-arm64_x86_64-simulator" } else { "ios-arm64" };
+    let root = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    println!("cargo:rustc-link-search=native={root}/vendor/Sdk.xcframework/{slice}");
+    // +whole-archive is -force_load: it keeps Objective-C categories, like -ObjC.
+    println!("cargo:rustc-link-lib=static:+whole-archive=Sdk");
+    println!("cargo:rustc-link-lib=framework=AdSupport");
+}
+```
+
+- 用 `rustc-link-lib`，不要用 `rustc-link-arg`：链接参数只作用于本 crate 自己的目标。
+- 静态库的隐私清单条目写进应用的 `ios.privacyManifest`。
+- NSH 不嵌入动态 framework，优先使用 SDK 的静态版本。对只提供动态 framework 的 SDK，第三方工具 [nsh-frameworks](https://github.com/SuperNSH/frameworks) 可以根据 crate 的 `Cargo.toml` 里列出的 XCFramework 完成链接，并把动态 framework 复制到 `nsh package` 打出的包里并签名（`nsh-frameworks embed .nsh/out/<Name>.app`）。
 
 ### TSX nshm
 

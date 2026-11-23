@@ -413,14 +413,29 @@ crates translating a key differently are settled by the app as above, in `ios.in
 
 Develop it beside an app with `nsh add --path ../my-gauge`, which reads the directory as it is. Publish it as any crate (`cargo publish`), with the keyword `nshm` so that it can be found on [crates.io](https://crates.io/keywords/nshm), or push it to Git and tag its versions.
 
-### Apple SDKs
+### Wrapping a native SDK
 
-An nshm that wraps an Apple SDK calls it from Rust under `#[cfg(target_os = "ios")]` or `#[cfg(target_os = "macos")]`.
-System frameworks need nothing more (the `objc2` crates link them). A vendor's prebuilt library is linked from the
-nshm's own `build.rs`, whose `cargo:rustc-link-search` and `cargo:rustc-link-lib` reach the link of the app's
-executables. The third-party tool [nsh-frameworks](https://github.com/SuperNSH/frameworks) does this from a list of
-XCFrameworks in the crate's `Cargo.toml`, taking each target's library, and copies the dynamic ones into the package
-`nsh package` made and signs them (`nsh-frameworks embed .nsh/out/<Name>.app`).
+An nshm that wraps an Apple SDK calls it from Rust under `#[cfg(target_os = "ios")]` or `#[cfg(target_os = "macos")]`. System frameworks used through the `objc2` crates need nothing more. A vendor's prebuilt library (an `.xcframework` or `.a`) is linked from the nshm's own `build.rs`: Cargo passes the `rustc-link-lib` and `rustc-link-search` of every dependency to the app's executable, so the app lists nothing and NSH has no per-platform SDK settings.
+
+```rust
+// build.rs
+fn main() {
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("ios") {
+        return;
+    }
+    let sim = std::env::var("CARGO_CFG_TARGET_ABI").as_deref() == Ok("sim");
+    let slice = if sim { "ios-arm64_x86_64-simulator" } else { "ios-arm64" };
+    let root = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    println!("cargo:rustc-link-search=native={root}/vendor/Sdk.xcframework/{slice}");
+    // +whole-archive is -force_load: it keeps Objective-C categories, like -ObjC.
+    println!("cargo:rustc-link-lib=static:+whole-archive=Sdk");
+    println!("cargo:rustc-link-lib=framework=AdSupport");
+}
+```
+
+- Use `rustc-link-lib`, not `rustc-link-arg`: link arguments only apply to the crate's own targets.
+- Put a static library's privacy manifest entries in the app's `ios.privacyManifest`.
+- NSH does not embed dynamic frameworks; prefer the SDK's static build. For an SDK that only ships dynamic frameworks, the third-party tool [nsh-frameworks](https://github.com/SuperNSH/frameworks) links XCFrameworks listed in the crate's `Cargo.toml` and copies and signs the dynamic ones into the package `nsh package` made (`nsh-frameworks embed .nsh/out/<Name>.app`).
 
 ### A TSX nshm
 
