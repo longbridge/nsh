@@ -3975,6 +3975,7 @@ dependencies = [
  "nsh-platform-apple",
  "nsh-platform-ios",
  "objc2",
+ "objc2-core-foundation",
  "objc2-foundation",
  "objc2-ui-kit",
  "tokio",

@@ -65,7 +65,7 @@ cargo test --release -p nsh-engine --test engine bench_gallery_scroll -- --ignor
 cargo test --release -p nsh-core bench_ -- --ignored --nocapture                # row / cell relayout benchmarks
 cargo +nightly fmt --all                                                        # .rustfmt.toml uses nightly options
 cargo clippy --workspace --all-targets
-cargo clippy -p nsh-platform-ios -p nsh-ios-host -p nsh-ios-app -p nsh-extra --target aarch64-apple-ios-macabi --features nsh-platform-ios/embed,nsh-platform-ios/dev,nsh-extra/camera,nsh-extra/push
+cargo clippy -p nsh-platform-ios -p nsh-ios-host -p nsh-ios-app -p nsh-extra --target aarch64-apple-ios-macabi --features nsh-platform-ios/embed,nsh-platform-ios/dev,nsh-extra/camera,nsh-extra/photos,nsh-extra/push
 cargo xtask ios-embed [--dynamic] [--x86-64-simulator] [--no-catalyst] [--no-dev]   # NativeShell(Dev).xcframework into dist/nsh/embed/ios
 cargo xtask web                                                                 # nsh.wasm + player + website demos into website/public/play
 cargo xtask compat                                                              # tests/compat's apps, and the API every recorded release froze (nsh-compat)

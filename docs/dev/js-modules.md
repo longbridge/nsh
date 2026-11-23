@@ -123,7 +123,7 @@ and the renames decided so far).
 - Something only mobile platforms have (iOS, Android or both): `nsh/mobile`; only the desktops: `nsh/desktop`; or a prop in `ios={{…}}` / `android={{…}}` /
   `desktop={{…}}`.
 - A system feature only some apps use, which would add permissions, store declarations or size to every app (the
-  camera, push notifications): a module of `nsh-extra` (`crates/nsh-extra`, an nshm apps install with `nsh add
+  camera, the photo library, push notifications): a module of `nsh-extra` (`crates/nsh-extra`, an nshm apps install with `nsh add
   nsh-extra --features <name>`), one Cargo feature per module, its TS namespace the name in PascalCase, what the
   packaged app needs declared under the feature in `[package.metadata.nsh]`. It is built on the platform crates'
   public extension points (iOS: `presenting_controller`, `prepare_image`, the application delegate's callbacks
@@ -131,7 +131,8 @@ and the renames decided so far).
   Android: `activity`, `permissions`,
   `picker::prepare_image`, `with_env`), the same ones any third-party nshm uses; NSH's runtime gets only such
   generic hooks, never the feature itself. A module whose state or system calls are the process's checks the calling
-  VM's capability in each function of its JS face (`sys: System`, as `Push` checks `notifications`): the Cargo
+  VM's capability in each function of its JS face (`sys: System`, as `Push` checks `notifications` and `Photos`
+  `picker`): the Cargo
   feature says what the app links, not which of its VMs may use it.
 - Never a React Native compatibility wrapper. Something released that moves keeps its old name and module as a
   deprecated alias (`compatibility.md`); something unreleased simply moves.

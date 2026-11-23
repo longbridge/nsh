@@ -149,6 +149,7 @@ crate, imported from `nsh-extra` in TSX and called as `nsh_extra::<module>` in R
 | Feature | TSX | What it does |
 |---|---|---|
 | `camera` | `Camera` | Takes a photo with the system's camera on iOS and Android |
+| `photos` | `Photos` | Reads the user's recent photos on iOS, once the user allows it |
 | `push` | `Push` | Receives remote notifications from any push service on iOS, and on Android through the service's binding |
 
 ```tsx
@@ -166,6 +167,58 @@ the app use the camera. `available()` is `false` where there is no camera to sho
 and there `takePhoto` rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. The feature adds what the packaged app needs:
 the camera's usage description on iOS (an app sets its own wording with `ios.infoPlist`'s
 `NSCameraUsageDescription`) and the query of camera apps on Android.
+
+### Photos
+
+`Photos` reads the user's photo library once the user allows it: the most recent photos, a thumbnail of each to show,
+and the photo the user chooses, which arrives as `Picker.pickImages` gives an image. It serves a strip of recent photos
+the user adds with one press; `Picker.pickImages` needs no permission and stays the way to choose from the whole
+library.
+
+```sh
+nsh add nsh-extra --features photos
+```
+
+```tsx
+import { Photos } from "nsh-extra";
+
+if (Photos.access() === "notDetermined") await Photos.requestAccess();
+const access = Photos.access();
+if (access === "full" || access === "limited") {
+  const recent = await Photos.recent({ limit: 20 });
+  // Thumbnails are small JPEGs whose bytes stay native.
+  const thumbs = await Promise.all(recent.map((photo) => Photos.thumbnail(photo.id, { maxDimension: 240 })));
+  const urls = thumbs.map((thumb) => URL.createObjectURL(thumb.file));
+  // On a press: the photo, prepared as a picked one.
+  const photo = await Photos.load(recent[0].id, { maxDimension: 2048 });
+  upload(photo.file);
+}
+
+// A photo taken, removed, or a selection changed: read the strip again.
+Photos.on("change", () => refreshStrip());
+```
+
+- `access()` tells what the user allows, without asking: `"full"`, `"limited"` (the photos the user selected),
+  `"notDetermined"`, `"denied"` or `"unavailable"`. `requestAccess()` asks the user the first time and resolves with
+  the answer; after that only the system's settings change it.
+- `recent({ limit })` resolves with the newest images first (30 when not given, at most 1000), without the hidden
+  ones, each with its `id` and its `size`. `thumbnail(id, { maxDimension })` resolves with an upright JPEG of at most
+  `maxDimension` pixels (256 by default), `load(id, { maxDimension, quality })` with the photo as `Picker.pickImages`
+  prepares a picked one. A photo stored only in iCloud is downloaded. They reject with `EACCES` without access and
+  with `ENOENT` for a photo that is not there.
+- With limited access, `presentLimitedPicker()` shows the system's sheet where the user changes the selection, and
+  resolves with the `id`s the user selected.
+- `on("change")` reports that the library changed, once the user allows reading it.
+- On Android, the desktops and the web `access()` is `"unavailable"` and the reads reject with
+  `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. Android lets only apps whose core purpose is photos read the whole library
+  (Google Play's policy on `READ_MEDIA_IMAGES`); other apps use the system's Photo Picker, which `Picker.pickImages`
+  shows.
+- An app that declares `"capabilities"` grants `Photos` with [`"picker": true`](./sandbox-and-capabilities.md#picker),
+  the capability `Picker` uses: every function but `access()` asks for it first.
+
+The feature adds the library's usage description to the packaged iOS app (an app sets its own wording with
+`ios.infoPlist`'s `NSPhotoLibraryUsageDescription`). Rust code uses `nsh_extra::photos`, and a `PhotosBackend` set with
+`set_backend` answers in place of the system's library (an embedding app's own, or a test's).
 
 ### Push
 
