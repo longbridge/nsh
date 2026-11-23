@@ -63,6 +63,9 @@ pub(crate) struct WindowsNative {
     ui: UiThread,
     /// Whether the last call that got nothing back waited [`MAIN`] in vain
     /// (the window's thread busy) rather than finding the surface gone.
+    /// One flag for every call: an agent's steps run one at a time on its
+    /// worker thread (`nsh_testing`'s `Worker`), so the error a call builds
+    /// reads its own wait.
     late: AtomicBool,
 }
 
