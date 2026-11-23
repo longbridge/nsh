@@ -125,7 +125,7 @@ fn borders_draw_box_lines_dim_or_in_the_accent_of_each_side() {
     assert_eq!(row(buffer, 4, 0..6), "└────┘");
     assert_eq!(buffer[(2, 0)].fg, Color::Red, "top");
     assert_eq!(buffer[(5, 1)].fg, Color::Green, "right");
-    assert_eq!(buffer[(2, 4)].fg, Color::Blue, "bottom");
+    assert_eq!(buffer[(2, 4)].fg, crate::ACCENT, "bottom");
     assert_eq!(buffer[(0, 1)].fg, Color::Reset, "left");
     assert!(dim(buffer, 0, 1), "a neutral side is dim");
     assert!(!dim(buffer, 2, 0), "an accent is not");
