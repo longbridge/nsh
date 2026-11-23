@@ -164,9 +164,11 @@ impl std::fmt::Display for Clash {
 
 impl ModuleMeta {
     /// What the packages of the generated workspace `manifest` declare, as
-    /// Cargo resolves it for `triple` (`None`: every platform).
-    pub(crate) fn of_workspace(manifest: &Path, triple: Option<&str>) -> anyhow::Result<Self> {
-        let (meta, warnings) = Self::read_workspace(manifest, triple)?;
+    /// Cargo resolves it for `triples` together (none: every platform): a
+    /// universal macOS package links the crates of both its architectures,
+    /// so one reading of both finds what two of them disagree on.
+    pub(crate) fn of_workspace(manifest: &Path, triples: &[&str]) -> anyhow::Result<Self> {
+        let (meta, warnings) = Self::read_workspace(manifest, triples)?;
         for warning in warnings {
             ui::warn(warning);
         }
@@ -177,12 +179,12 @@ impl ModuleMeta {
     /// returned rather than shown.
     pub(crate) fn read_workspace(
         manifest: &Path,
-        triple: Option<&str>,
+        triples: &[&str],
     ) -> anyhow::Result<(Self, Vec<String>)> {
         let mut cmd = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
         cmd.args(["metadata", "--format-version", "1", "--manifest-path"])
             .arg(manifest);
-        if let Some(triple) = triple {
+        for triple in triples {
             cmd.args(["--filter-platform", triple]);
         }
         let out = cmd
@@ -664,7 +666,7 @@ pub(crate) fn for_dev_host(triple: &str, platform: Platform) -> ModuleMeta {
     let Some(app) = crate::rust_app::current() else {
         return ModuleMeta::default();
     };
-    let meta = ModuleMeta::of_workspace(&app.workspace().join("Cargo.toml"), Some(triple))
+    let meta = ModuleMeta::of_workspace(&app.workspace().join("Cargo.toml"), &[triple])
         .unwrap_or_else(|e| {
             ui::warn(format!(
                 "the development host leaves out what the app's crates declare: {e:#}"

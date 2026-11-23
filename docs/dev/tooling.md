@@ -1121,7 +1121,8 @@ binaries, cleaning old versions, per-target support checks and an OTA check of t
 `crates/nsh-cli/src/module_meta.rs`. A crate the app links (an nshm, the app's own crate or anything they depend on)
 may declare what the packaged app needs, for itself or per feature: `Info.plist` keys, their translations and
 entitlements on iOS and macOS, permissions, queries and components on Android. The CLI reads them from the app's dependency graph with the features
-Cargo turns on and adds them to iOS, macOS and Android packages; `nsh run`'s development hosts get the iOS `Info.plist`
+Cargo turns on (for each architecture of a macOS package, in one `cargo metadata` run with `--filter-platform` once per
+triple) and adds them to iOS, macOS and Android packages; `nsh run`'s development hosts get the iOS `Info.plist`
 keys and the Android entries, not the entitlements. The app's `nsh.json` wins and settles what two crates disagree on
 (checked per target platform: an iOS clash never stops a macOS or Android package, nor does a macOS clash stop an iOS or
 Android one); keys NSH sets itself stay NSH's. Android permissions are checked and spelled out as `nsh.json`'s are. Keys

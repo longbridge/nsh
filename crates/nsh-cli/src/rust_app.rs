@@ -3655,7 +3655,7 @@ opt-level = \"s\"
     ) -> anyhow::Result<Vec<(&'static str, String)>> {
         let (crates, _) = crate::module_meta::ModuleMeta::read_workspace(
             &workspace.join("Cargo.toml"),
-            Some(triple),
+            &[triple],
         )?;
         let (frameworks, flags) = crate::module_meta::ios_link(
             &self.ios_link.frameworks,
