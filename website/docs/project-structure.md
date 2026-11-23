@@ -47,7 +47,25 @@ my-app/
 
 A TSX app extends itself with Rust through nshm crates of its own in `ext/`, listed in `"dependencies"` by path ([An app's own Rust: ext/](./nshm.md#an-apps-own-rust-ext)); `src/` holds its TSX, `ext/` its Rust. A Rust app can also list its crates in `"rust"` and add a TSX entry that imports them ([Building with Rust](./rust.md#extending-a-rust-app-with-tsx)).
 
-Every command takes the app's directory or its entry as its argument (`nsh run my-app`, `nsh run my-app/App.tsx`). The directory of `nsh.json` and the entry is the app's root: `nsh.json` is read from there, asset paths are relative to it, and `.nsh/` is written there. In a Rust app (`nsh.json` `"root"`), the directory runs the root component; naming a TSX entry runs that instead.
+Every command takes the app's directory or its entry as its argument (`nsh run my-app`, `nsh run my-app/App.tsx`). The directory of `nsh.json` is the app's root: `nsh.json` is read from there, the paths it names and asset paths are relative to it, and `.nsh/` is written there. The entry is `App.tsx` beside it, unless `nsh.json` names another with `"entry"`. In a Rust app (`nsh.json` `"root"`), the directory runs the root component; naming a TSX entry runs that instead.
+
+### An app in a larger project
+
+A project that also has other code, a server or a website, can keep `nsh.json` at its root, beside `package.json` or `Cargo.toml`, and its app's code in a directory of its own, which `"entry"` names:
+
+```text
+my-project/
+├── nsh.json           { "name": "…", "entry": "app/App.tsx", "theme": "app/theme.json", … }
+├── package.json       the server's
+├── server/
+└── app/
+    ├── App.tsx        the entry
+    ├── App.test.tsx   its tests
+    ├── tsconfig.json  TypeScript settings for the app's modules
+    └── theme.json
+```
+
+`nsh run`, `nsh test` and the other commands then work from the project's root as from an app's directory: the root is the app's root (`.nsh/`, `locales/` and the paths `nsh.json` names, such as `theme`, `icon` and `web.host`, are relative to it), while `nsh test` looks for test files in the entry's directory (`app/`, not the server's tests), and `nsh check` and `.nsh/types` follow the entry's `tsconfig.json`.
 
 ## The root component
 
@@ -124,7 +142,8 @@ Every other key is optional; a TSX app may also leave out the four. A TSX app's 
 
 | Key | Type | Used by | Description |
 |---|---|---|---|
-| `name` | string | `package` | The display name under the app icon. Default: the entry directory's name. |
+| `name` | string | `package` | The display name under the app icon. Default: the name of `nsh.json`'s directory. |
+| `entry` | string | every command | The TSX entry module, relative to `nsh.json` and inside its directory, e.g. `"app/App.tsx"` ([An app in a larger project](#an-app-in-a-larger-project)). Default: `App.tsx` beside `nsh.json`. An entry named on the command line (`nsh run app/Other.tsx`) takes precedence. |
 | `id` | string | `package`, `publish`, `Storage` | Bundle identifier / application id in reverse-DNS form, e.g. `com.yourcompany.app`; required by `package` and `publish`. `nsh run` uses `com.example.<name>` without one. |
 | `version` | string | `package`, `publish` | The user-visible version, e.g. `1.2.0` (`CFBundleShortVersionString`, Android `versionName`). |
 | `build` | number | `package`, `publish` | The build number (`CFBundleVersion`, Android `versionCode`). Signed packages require it to grow with every release. |

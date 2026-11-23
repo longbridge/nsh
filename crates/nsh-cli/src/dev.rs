@@ -71,9 +71,12 @@ impl DevSession {
             .context("entry has no directory")?
             .to_path_buf();
         let devices = Arc::<Devices>::default();
-        let server = start_server(listen, &src_dir, devices.clone())?;
+        // The app's directory: its `nsh.json`'s, which may be above the
+        // entry (`"entry"`); its assets are named from it.
+        let app_dir = nsh_bundler::app_dir::app_dir_of(&entry);
+        let server = start_server(listen, &app_dir, devices.clone())?;
         server.serve_files(crate::build::crate_assets().map(|a| (a.path, a.source)));
-        server.install_commands(install_commands(&src_dir));
+        server.install_commands(install_commands(&app_dir));
         server.set_limits(limits.map(|l| l.to_string()));
         // Browsers too, when there is a web runtime to serve (`nsh run
         // --target web` builds it in a checkout).

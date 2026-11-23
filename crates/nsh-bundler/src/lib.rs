@@ -6,6 +6,7 @@
 //! ES module holding only the app's code. The runtime is native, so apps
 //! need no `node_modules` for it.
 
+pub mod app_dir;
 #[cfg(feature = "bundle")]
 mod bundle;
 #[cfg(feature = "bundle")]
