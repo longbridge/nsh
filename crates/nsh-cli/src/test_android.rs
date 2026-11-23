@@ -152,20 +152,9 @@ fn start(
     );
     let config = crate::package::read_config(entry).map_err(|e| format!("{e:#}"))?;
     let env = crate::run::android_app_env(&config);
-    let mut start = vec![
-        "shell",
-        "am",
-        "start",
-        "-S",
-        "-n",
-        "com.longbridge.nsh.host/com.longbridge.nsh.DevActivity",
-        "--es",
-        "url",
-        &url,
-        "--es",
-        "dataDir",
-        &data,
-    ];
+    let mut start =
+        crate::android::dev_start("com.longbridge.nsh.host/com.longbridge.nsh.DevActivity");
+    start.extend(["--es", "url", &url, "--es", "dataDir", &data]);
     start.extend(env.iter().map(String::as_str));
     host.adb(&start)?;
     let deadline = Instant::now() + CONNECT;

@@ -492,7 +492,11 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
 - **Back button** (`nsh/mobile`): `BackHandler.on("press", listener)` (returns the function that removes it; a
   listener added while a component renders goes with it, as `keymap.bind`'s bindings do), after modals, the top
   overlay listening to `onCancel` and stacks; the app exits when nothing handles it. Rust components listen with `cx.on_back_press(..)`, before JS's listeners; the root wants
-  the button while either side listens (`docs/dev/components.md`).
+  the button while either side listens (`docs/dev/components.md`). `BackHandler.on("progress", listener)` /
+  `on_back_progress(..)` follow the predictive back gesture (the root's `BackProgress`, Android 14+): while one
+  listens, a gesture no modal takes goes to the app and the stacks do not preview their pop; the core decides at the
+  gesture's start whether the app follows it (not when an overlay takes the press), so a gesture's steps reach the
+  app whole or not at all (`element/back.rs`).
 - **Keyboard shortcuts** (`nsh`'s `keymap`): the root's `Prop::Keymap` mounts the surface's whole table
   (`MountItem::Keymap`); the platform matches a key against it on the spot, consumes it and reports the root's
   `KeyCommand` (the binding's id), so the main thread never waits for JS (`docs/dev/js-modules.md`, the macOS and
@@ -713,8 +717,9 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   (`nsh_core::overlay::place`): `placement` (`"top"`, `"bottom"` (default), `"left"`, `"right"`), on the other
   side when only that one has room, the side with more room when neither has; `align` along it (`"start"`,
   `"center"` (default), `"end"`; start and end follow the direction above and below); `offset` from the anchor; then
-  moved along the side to stay inside the root view's safe area less `margin` (or, for the main root view's overlays,
-  the area the platform shows them in, `Core::set_overlay_area`: the web's `overlays: "viewport"`, the window). An anchored overlay is laid out in
+  moved along the side to stay inside the root view's safe area less `margin` (for the main root view's overlays, less
+  what the software keyboard covers of its bottom too, placed again as the keyboard moves; or the area the platform
+  shows them in, `Core::set_overlay_area`: the web's `overlays: "viewport"`, the window). An anchored overlay is laid out in
   that area rather than the whole root view, so content wider than it (a paragraph) wraps within it; in a terminal,
   within that area less the frame drawn a Cell outside its box. A side placement (`"left"`, `"right"`) is laid out in
   the whole area too: the side's room is the `available` of `onPosition`, which an overlay follows to fit it. Rust's

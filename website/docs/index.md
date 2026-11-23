@@ -209,7 +209,8 @@ NSH is designed for software written with AI, whole apps as much as generated sc
 | [Web](./web.md) | Modern browsers | HTML | `createPlayer`, iframe |
 | [TUI](./tui.md) | Terminals on macOS, Windows and Linux | ratatui | `AppView` (ratatui area) |
 | [GPUI](./gpui.md) | Desktops | GPUI | `AppView` (GPUI, GPUI Kit apps) |
-| Mac Catalyst | macOS | UIKit | For development (`--target catalyst`) |
+
+As a development tool, Mac Catalyst (`--target catalyst`) runs the iOS backend on a Mac for Catalyst-specific work.
 
 <div class="diagram-scroll">
 <img class="diagram diagram-light" src="/diagrams/platforms-light.svg" alt="One module, many hosts: the same bundle and Rust runtime on iOS, Android, Linux, macOS with AppKit and Windows with Win32 / Direct2D, GPUI on all three desktops, and web pages drawn with HTML.">

@@ -27939,6 +27939,89 @@ mod views {
         assert_eq!(texts(&c.commit().unwrap()), ["caught 1"]);
     }
 
+    /// Shows the back gesture's last step while its view lives.
+    #[derive(Default)]
+    struct Follower;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct FollowerProps {}
+
+    impl Component for Follower {
+        type Props = FollowerProps;
+        type Event = NoEvent;
+
+        fn view(_: FollowerProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let step = signal(String::from("none"));
+            on_back_progress(move |e: &BackProgressEvent| {
+                let edge = match e.edge {
+                    Some(PanEdge::Left) => "left",
+                    Some(PanEdge::Right) => "right",
+                    _ => "-",
+                };
+                step.set(format!("{} {} {edge}", e.phase.name(), e.progress.0));
+            });
+            view().child(text(move || step.get()))
+        }
+    }
+
+    fn back_step(phase: BackPhase, progress: f32, edge: Option<PanEdge>) -> EventPayload {
+        BackProgressEvent::new(phase, Percentage(progress), edge).payload()
+    }
+
+    #[test]
+    fn a_views_back_progress_listener_follows_the_back_gesture() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Follower>(|| FollowerProps {}));
+        let batch = c.commit().unwrap();
+        assert_eq!(texts(&batch), ["none"]);
+        // The root listens, so the platform hands the gesture to the app.
+        assert!(batch.items.iter().any(|i| matches!(
+            i,
+            MountItem::Events { id: ROOT_ID, events } if events.contains(EventKind::BackProgress)
+        )));
+        for (phase, progress, shown) in [
+            (BackPhase::Start, 0.0, "start 0 left"),
+            (BackPhase::Move, 0.25, "move 0.25 left"),
+            (BackPhase::Move, 0.5, "move 0.5 left"),
+            (BackPhase::End, 0.5, "end 0.5 left"),
+        ] {
+            let step = back_step(phase, progress, Some(PanEdge::Left));
+            // Without JS listening, the views took it.
+            assert!(c.component_event(ROOT_ID, EventKind::BackProgress, &step));
+            assert_eq!(texts(&c.commit().unwrap()), [shown]);
+        }
+        // A step outside a gesture (a move after its end) is dropped.
+        let late = back_step(BackPhase::Move, 0.75, Some(PanEdge::Left));
+        assert!(c.component_event(ROOT_ID, EventKind::BackProgress, &late));
+        assert!(c.commit().is_none_or(|b| texts(&b).is_empty()));
+        // A cancelled gesture from the right edge.
+        for (phase, progress, shown) in [
+            (BackPhase::Start, 0.0, "start 0 right"),
+            (BackPhase::Cancel, 0.0, "cancel 0 right"),
+        ] {
+            let step = back_step(phase, progress, Some(PanEdge::Right));
+            assert!(c.component_event(ROOT_ID, EventKind::BackProgress, &step));
+            assert_eq!(texts(&c.commit().unwrap()), [shown]);
+        }
+    }
+
+    #[test]
+    fn js_back_progress_listeners_hear_the_gesture_after_the_views() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Follower>(|| FollowerProps {}));
+        c.commit();
+        c.apply(Op::Listen {
+            id: ROOT_ID,
+            event: EventKind::BackProgress,
+            enabled: true,
+        })
+        .unwrap();
+        let start = back_step(BackPhase::Start, 0.0, None);
+        // The views heard it, then JS's listeners do.
+        assert!(!c.component_event(ROOT_ID, EventKind::BackProgress, &start));
+        assert_eq!(texts(&c.commit().unwrap()), ["start 0 -"]);
+    }
+
     thread_local! {
         /// What the quitter's listener did.
         static QUIT_LOG: std::cell::RefCell<Vec<&'static str>> = const { std::cell::RefCell::new(Vec::new()) };
@@ -33885,6 +33968,99 @@ fn anchored_overlays_go_within_the_area_the_platform_shows_them_in() {
 }
 
 #[test]
+fn anchored_overlays_keep_clear_of_the_software_keyboard() {
+    use StyleValue::{Number, Str};
+    // A 320 × 480 root with a 34 point bottom safe area, and a 40 point
+    // trigger 240 points from its top.
+    let mut c = core();
+    c.set_environment(env_with_keyboard(0.0, 250.0));
+    c.set_safe_area(EdgeInsets {
+        bottom: px(34.0),
+        ..EdgeInsets::default()
+    });
+    add(
+        &mut c,
+        4,
+        Tag::View,
+        ROOT_ID,
+        &[
+            ("width", Number(80.0)),
+            ("height", Number(40.0)),
+            ("marginTop", Number(240.0)),
+        ],
+    );
+    // A popover below the trigger, and one as tall as its room lets it be.
+    add(&mut c, 10, Tag::Overlay, 4, &[]);
+    add(
+        &mut c,
+        12,
+        Tag::View,
+        10,
+        &[("width", Number(120.0)), ("height", Number(150.0))],
+    );
+    add(&mut c, 20, Tag::Overlay, 4, &[("maxHeight", Str("100%"))]);
+    add(
+        &mut c,
+        22,
+        Tag::View,
+        20,
+        &[("width", Number(120.0)), ("height", Number(600.0))],
+    );
+    for id in [10, 20] {
+        apply(
+            &mut c,
+            vec![
+                overlay_prop(
+                    id,
+                    crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(4)),
+                ),
+                overlay_prop(id, crate::OverlayProp::Align(crate::overlay::Align::Start)),
+                overlay_prop(id, crate::OverlayProp::Margin(px(8.0))),
+            ],
+        );
+    }
+    // Room below the trigger above the safe area: there.
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(8.0, 280.0, 120.0, 150.0)));
+    assert_eq!(
+        frame_of(&batch, 20).map(|f| f.size.height),
+        Some(px(480.0 - 34.0 - 16.0))
+    );
+
+    // The keyboard comes up 200 points (the safe area under it included):
+    // no room left below the trigger above it, so the popover flips above,
+    // and the tall one gets only the room above the keyboard.
+    c.set_environment(env_with_keyboard(200.0, 250.0));
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(8.0, 90.0, 120.0, 150.0)));
+    assert_eq!(
+        frame_of(&batch, 20).map(|f| f.size.height),
+        Some(px(480.0 - 200.0 - 16.0))
+    );
+    let room = c.nodes[c.key(20).unwrap() as usize].frame;
+    assert!(room.bottom() <= px(480.0 - 200.0 - 8.0), "{room:?}");
+    // It moves with the keyboard's own motion.
+    assert!(
+        matches!(
+            &batch.items[0],
+            MountItem::LayoutAnimation(crate::LayoutAnimation {
+                update: Some(t), .. }) if t.curve == crate::LayoutCurve::Keyboard
+        ),
+        "{:?}",
+        batch.items
+    );
+
+    // The keyboard goes: back below the trigger.
+    c.set_environment(env_with_keyboard(0.0, 250.0));
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(8.0, 280.0, 120.0, 150.0)));
+    assert_eq!(
+        frame_of(&batch, 20).map(|f| f.size.height),
+        Some(px(480.0 - 34.0 - 16.0))
+    );
+}
+
+#[test]
 fn an_anchored_overlay_wider_than_its_room_wraps_within_the_margin() {
     use StyleValue::Number;
     let mut c = core();
@@ -34121,6 +34297,53 @@ fn touch_down(path: Vec<NodeId>) -> EventPayload {
         modifiers: Default::default(),
         activated: None,
     }))
+}
+
+#[test]
+fn a_back_gesture_an_overlay_takes_stays_the_overlays() {
+    use crate::{BackPhase, BackProgressEvent, PanEdge, geometry::Percentage};
+    let mut c = core();
+    add(&mut c, 2, Tag::View, ROOT_ID, &[]);
+    add(&mut c, 4, Tag::Overlay, 2, &[]);
+    apply(
+        &mut c,
+        vec![
+            overlay_prop(
+                4,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(2)),
+            ),
+            Op::Listen {
+                id: 4,
+                event: EventKind::Cancel,
+                enabled: true,
+            },
+            Op::Listen {
+                id: ROOT_ID,
+                event: EventKind::BackProgress,
+                enabled: true,
+            },
+        ],
+    );
+    c.commit();
+    let step =
+        |phase| BackProgressEvent::new(phase, Percentage(0.5), Some(PanEdge::Left)).payload();
+    // The overlay takes the press: JS's listeners hear none of the steps,
+    // even once the overlay stops listening during the gesture.
+    assert!(c.component_event(ROOT_ID, EventKind::BackProgress, &step(BackPhase::Start)));
+    apply(
+        &mut c,
+        vec![Op::Listen {
+            id: 4,
+            event: EventKind::Cancel,
+            enabled: false,
+        }],
+    );
+    c.commit();
+    assert!(c.component_event(ROOT_ID, EventKind::BackProgress, &step(BackPhase::Move)));
+    assert!(c.component_event(ROOT_ID, EventKind::BackProgress, &step(BackPhase::Cancel)));
+    // Without it, the next gesture is the app's.
+    assert!(!c.component_event(ROOT_ID, EventKind::BackProgress, &step(BackPhase::Start)));
+    assert!(!c.component_event(ROOT_ID, EventKind::BackProgress, &step(BackPhase::Move)));
 }
 
 #[test]
@@ -43864,12 +44087,12 @@ mod terminal_layout {
             ],
         );
         ops.extend(text(3, 2, "Search"));
-        ops.extend(node(4, Tag::Scroll, 2, &[("flexGrow", V::Number(1.0))]));
-        ops.extend(text(5, 4, "Grid"));
+        ops.extend(node(5, Tag::Scroll, 2, &[("flexGrow", V::Number(1.0))]));
+        ops.extend(text(6, 5, "Grid"));
         let batch = laid_out(ops);
         // Ten rows: one for the search, nine for the grid.
         assert_eq!(frame_of(&batch, 2).map(|f| f.size.height.0), Some(160.0));
-        assert_eq!(frame_of(&batch, 4).map(|f| f.size.height.0), Some(144.0));
+        assert_eq!(frame_of(&batch, 5).map(|f| f.size.height.0), Some(144.0));
     }
 
     #[test]
@@ -52865,6 +53088,89 @@ mod folded_runs {
             c.apply(run(5, "dup")),
             Err(ApplyError::DuplicateNode(5))
         ));
+    }
+
+    #[test]
+    fn folded_runs_count_for_the_node_quota() {
+        let mut c = core();
+        c.set_max_nodes(3);
+        apply(&mut c, vec![run(2, "a"), run(3, "b")]);
+        assert!(matches!(
+            c.apply(run(4, "c")),
+            Err(ApplyError::TooManyNodes(3))
+        ));
+        assert!(matches!(
+            c.apply(Op::Create {
+                id: 4,
+                tag: Tag::View
+            }),
+            Err(ApplyError::TooManyNodes(3))
+        ));
+        apply(&mut c, vec![Op::Release { id: 3 }]);
+        apply(
+            &mut c,
+            vec![Op::Create {
+                id: 4,
+                tag: Tag::View,
+            }],
+        );
+        assert!(matches!(
+            c.apply(run(5, "d")),
+            Err(ApplyError::TooManyNodes(3))
+        ));
+    }
+
+    #[test]
+    fn a_node_cannot_reuse_a_folded_runs_id() {
+        let mut c = core();
+        block(&mut c, 2);
+        apply(&mut c, vec![run(3, "hello")]);
+        for folded in [false, true] {
+            if folded {
+                apply(&mut c, vec![insert(2, 3, None)]);
+            }
+            assert!(matches!(
+                c.apply(Op::Create {
+                    id: 3,
+                    tag: Tag::Scroll
+                }),
+                Err(ApplyError::DuplicateNode(3))
+            ));
+            assert!(c.runs.contains_key(&3));
+            assert!(!c.slots.contains(3));
+        }
+        assert_eq!(c.text_content(2), "hello");
+        apply(&mut c, vec![style_op(3, &[])]);
+        assert_eq!(raw_nodes(&c), 1);
+        assert_eq!(c.text_content(2), "hello");
+    }
+
+    #[test]
+    fn a_full_slab_keeps_a_blocks_folded_text() {
+        let mut c = core();
+        block(&mut c, 2);
+        apply(&mut c, vec![run(3, "hello"), insert(2, 3, None)]);
+        apply(
+            &mut c,
+            vec![Op::Create {
+                id: 4,
+                tag: Tag::View,
+            }],
+        );
+        c.commit();
+        c.set_max_nodes(3);
+        assert!(matches!(
+            c.apply(insert(2, 4, None)),
+            Err(ApplyError::TooManyNodes(3))
+        ));
+        assert_eq!(c.text_content(2), "hello");
+        assert_eq!(c.folded.len(), 1);
+        assert_eq!(raw_nodes(&c), 0);
+        c.set_max_nodes(10);
+        apply(&mut c, vec![insert(2, 4, None)]);
+        assert_eq!(raw_nodes(&c), 1);
+        assert_eq!(c.text_content(2), "hello");
+        assert!(c.folded.is_empty());
     }
 
     #[test]

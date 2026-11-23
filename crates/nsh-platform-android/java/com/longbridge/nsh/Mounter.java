@@ -2253,6 +2253,31 @@ final class Mounter {
         return wants(1, Native.BACK_PRESS);
     }
 
+    /**
+     * Whether the app follows the back gesture itself: it listens to the
+     * gesture's steps ({@code BackHandler.on("progress")}) and no modal
+     * takes the gesture. The stacks then leave it to the app.
+     */
+    boolean followsBack() {
+        return shownModals.isEmpty() && wants(1, Native.BACK_PROGRESS);
+    }
+
+    /**
+     * A step of the back gesture the app follows: {@code phase} is
+     * {@code "start"}, {@code "move"}, {@code "end"} or {@code "cancel"},
+     * {@code progress} from 0 to 1, {@code edge} {@code "left"},
+     * {@code "right"} or null.
+     */
+    void backProgress(String phase, float progress, String edge) {
+        if (edge == null) {
+            eventMap(1, Native.BACK_PROGRESS, new String[] {"phase", "progress"},
+                    new Object[] {phase, (double) progress});
+        } else {
+            eventMap(1, Native.BACK_PROGRESS, new String[] {"phase", "progress", "edge"},
+                    new Object[] {phase, (double) progress, edge});
+        }
+    }
+
     /** The back button: the newest modal asks to close, else the app's
      * listeners hear it (and send {@code Command::Back} when none takes it),
      * else the innermost stack pops. Returns false if nothing did. */
@@ -3164,6 +3189,11 @@ final class Mounter {
         return (events.get(id) & (1L << kind)) != 0;
     }
 
+    /** Whether {@code id} is a file drop destination: it listens to `onFileDrop` and is enabled. */
+    boolean takesFileDrops(int id) {
+        return wants(id, Native.FILE_DROP) && keyEnabled(id);
+    }
+
     /** Whether `id`'s own state lets it hear keys (a disabled view captures and listens to none). */
     private boolean keyEnabled(int id) {
         A11y a = a11y.get(id);
@@ -3770,6 +3800,13 @@ final class Mounter {
     /** An event with an object payload. */
     void paste(int id, String text, byte[][] images, String[] uris) {
         Native.paste(handle(), id, text, images, uris);
+    }
+
+    /** A file drag's enter or drop for {@code id} ({@link FileDrops}); a drop's point in the surface's pixels. */
+    void fileDrop(int id, int kind, String[] uris, float x, float y) {
+        long handle = handle();
+        if (handle == 0) return;
+        Native.fileDrop(handle, id, kind, uris, x / density, y / density);
     }
 
     /**

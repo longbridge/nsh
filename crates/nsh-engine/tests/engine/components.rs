@@ -564,6 +564,53 @@ fn unhandled_back_presses_go_back_natively_on((engine, rx): (Engine, Receiver<Mo
 }
 
 #[test]
+fn js_back_progress_listeners_follow_the_back_gesture() {
+    let (engine, rx) = start(BACK_PROGRESS);
+    let root_listens = |batches: &[MountBatch]| {
+        batches
+            .iter()
+            .flat_map(|b| &b.items)
+            .rev()
+            .find_map(|i| match i {
+                MountItem::Events {
+                    id: ROOT_ID,
+                    events,
+                } => Some(events.contains(EventKind::BackProgress)),
+                _ => None,
+            })
+    };
+    let first = until(&rx, |b| shows(b, "step none"));
+    assert_eq!(root_listens(&first), Some(true), "the root listens");
+    let control = engine.control();
+    let step = |phase, progress, edge| {
+        nsh_core::BackProgressEvent::new(phase, nsh_core::geometry::Percentage(progress), edge)
+            .payload()
+    };
+    use nsh_core::{BackPhase, PanEdge};
+    let mut batches = Vec::new();
+    for (phase, progress, shown) in [
+        (BackPhase::Start, 0.0, "step start 0 left"),
+        (BackPhase::Move, 0.5, "step move 0.5 left"),
+        (BackPhase::End, 0.5, "step end 0.5 left"),
+    ] {
+        control.dispatch_event(
+            ROOT_ID,
+            EventKind::BackProgress,
+            step(phase, progress, Some(PanEdge::Left)),
+        );
+        batches = until(&rx, |b| shows(b, shown));
+        assert!(batches.iter().any(|b| shows(b, shown)), "{shown}");
+    }
+    // The listener stopped at the end: the root no longer listens.
+    if root_listens(&batches).is_none() {
+        batches.extend(until(&rx, |b| {
+            root_listens(std::slice::from_ref(b)).is_some()
+        }));
+    }
+    assert_eq!(root_listens(&batches), Some(false));
+}
+
+#[test]
 fn a_rust_text_field_clears_after_typing() {
     a_rust_text_field_clears_after_typing_on(start(FIELD));
 }
@@ -2293,6 +2340,18 @@ BackHandler.on("press", () => {
 });
 
 mount(() => <Text>{`presses ${presses()}`}</Text>);
+"#;
+
+const BACK_PROGRESS: &str = r#"import { mount, signal, Text } from "nsh";
+import { BackHandler } from "nsh/mobile";
+
+const step = signal("none");
+const stop = BackHandler.on("progress", (e) => {
+  step.set(`${e.phase} ${e.progress} ${e.edge ?? "-"}`);
+  if (e.phase === "end") stop();
+});
+
+mount(() => <Text>{`step ${step()}`}</Text>);
 "#;
 
 const FIELD: &str = r#"import { mount, signal, Text, View } from "nsh";

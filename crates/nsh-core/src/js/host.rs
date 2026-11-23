@@ -797,19 +797,19 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         EventKind::FileDragEnter,
         on::ALL,
         "(e: { uris: string[]; mimeTypes: string[] }) => void",
-        "A local file drag entered this destination (desktops and iOS) with its offered file URLs and each one's MIME type by its name (`\"\"` when the name says none); no file is read. GTK waits for its file-list preload; iOS reads files only on drop, so it offers no URLs; the Web offers no URLs, only the types the browser shows.",
+        "A local file drag entered this destination (desktops, iOS and Android) with its offered file URLs and each one's MIME type by its name (`\"\"` when the name says none); no file is read. GTK waits for its file-list preload; iOS and Android read files only on drop, so they offer no URLs; the Web offers no URLs, only the types the browser shows.",
     ),
     (
         EventKind::FileDragLeave,
         on::ALL,
         "() => void",
-        "A local file drag left this destination (desktops, iOS and the Web).",
+        "A local file drag left this destination (desktops, iOS, Android and the Web).",
     ),
     (
         EventKind::FileDrop,
         on::ALL,
         "(e: { uris: string[]; mimeTypes: string[]; pagePosition?: { x: number; y: number }; files: { file: File | null; name: string; type: string; size: number; status: \"read\" | \"tooLarge\" }[] }) => void",
-        "Local file URLs dropped on this destination (desktops, iOS and the Web), with each one's MIME type by its name (`\"\"` when the name says none); `pagePosition`: where, in the window's coordinates, on backends that know it (Linux, iOS, Web). On the Web `uris` is empty and `files` holds the dropped regular files with their contents (`status` `\"tooLarge\"` past 512 MiB a drop; at most 100); elsewhere `files` is empty.",
+        "Local file URLs dropped on this destination (desktops, iOS, Android and the Web), with each one's MIME type by its name (`\"\"` when the name says none); `pagePosition`: where, in the window's coordinates, on backends that know it (Linux, iOS, Android, Web). On the Web `uris` is empty and `files` holds the dropped regular files with their contents (`status` `\"tooLarge\"` past 512 MiB a drop; at most 100); elsewhere `files` is empty.",
     ),
     (
         EventKind::Layout,
@@ -1099,7 +1099,7 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
     ),
 ];
 
-/// The events no element's props declare: the root's (`BackHandler`,
+/// The events no element's props declare: the root's (`BackHandler`'s,
 /// `nsh/keymap`, dialogs, `Image.getSize`, clipboard reads, menus, `nsh/host`'s replies and events, links), the runtime's own (touches, insets, native
 /// components' events) and those whose payload a module makes
 /// (`List`'s viewable items, with the app's items).
@@ -1109,6 +1109,7 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::NativeEvent,
     EventKind::Dialog,
     EventKind::BackPress,
+    EventKind::BackProgress,
     EventKind::ImageInfo,
     EventKind::WebEvaluation,
     EventKind::WebViewReply,

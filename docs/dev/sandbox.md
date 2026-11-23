@@ -19,7 +19,7 @@ trusted: every limit and check is enforced in Rust, never in JS.
   rendering it causes, one list bind, one timer, one frame's callbacks, the microtask drain; nested calls share the
   outermost budget), and quotas for what the heap limit does not cover: changes at once (the op queue,
   `max_op_values`: ops are Rust memory), ops per canvas drawing, nodes in the core (`Core::set_max_nodes`; each may hold a native view) and dense
-  node ids (an id far past the ids in use would grow the id table: `ApplyError::IdOutOfRange`). Views nest
+  node ids (an id far past the ids in use would grow the id table: `ApplyError::IdOutOfRange`). Folded text runs count toward the node quota while they have no node of their own. Views nest
   `nsh_core::MAX_TREE_DEPTH` (1024) levels deep in every app, standalone ones too (`ApplyError::TooDeep`, checked in
   `Core::insert` against the depth above the parent and the height kept on the child): layout, mounting and the tree's
   walks recurse once per level on the native stack, which no other limit bounds; sized for the engine thread's

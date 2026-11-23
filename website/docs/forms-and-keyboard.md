@@ -765,6 +765,9 @@ The full height suits a view that reaches the bottom of the surface, as a screen
 
 Overlays keep clear of the keyboard on their own: a [Sheet](../elements/sheet.md#the-software-keyboard) at the bottom,
 a drawer, and the menus, selects and date pickers a phone shows as sheets end at the keyboard's top and move with it.
+A [Popover](../elements/popover.md), and any overlay placed beside an anchor, stays above the keyboard: when the
+keyboard covers the room on its side it moves to the other side of its trigger or gets only the room left, and it is
+placed again as the keyboard moves.
 
 ### The keyboard accessor
 

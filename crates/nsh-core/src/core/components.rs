@@ -869,6 +869,12 @@ pub(super) struct Components {
     insets: FxHashMap<NodeId, EdgeInsets>,
     /// JS listens to the back button (`BackHandler`) on the root.
     js_back: bool,
+    /// JS listens to the back gesture's steps (`BackHandler.on("progress",
+    /// ..)`) on the root.
+    js_back_progress: bool,
+    /// The app's listeners follow the back gesture under way: decided as it
+    /// starts, so a gesture an overlay takes stays the overlay's to its end.
+    back_gesture: bool,
     /// JS's keyboard shortcuts (`nsh/keymap`: the root's `Prop::Keymap`),
     /// which the root's table joins with the views'.
     js_keymap: Arc<crate::keymap::Keymap>,
@@ -992,6 +998,8 @@ impl Default for Components {
             list_layouts: FxHashMap::default(),
             insets: FxHashMap::default(),
             js_back: false,
+            js_back_progress: false,
+            back_gesture: false,
             js_keymap: Arc::new(crate::keymap::Keymap::default()),
             js_keys: false,
             touch: super::touch::TouchState::default(),
@@ -1408,8 +1416,14 @@ impl<M: TextEngine> Core<M> {
             || self.components.environment.locale != environment.locale
             || self.components.environment.locale_settings.languages
                 != environment.locale_settings.languages;
-        self.keyboard_moved |=
+        let keyboard_moved =
             self.components.environment.keyboard_height != environment.keyboard_height;
+        self.keyboard_moved |= keyboard_moved;
+        // The room the root view's anchored overlays keep to leaves the
+        // keyboard out (`Core::overlay_area`): laid out and placed again.
+        if keyboard_moved && self.root_overlay_shown() {
+            self.needs_layout = true;
+        }
         let ratio = self.components.environment.pixel_ratio;
         self.components.environment = environment;
         if ratio != environment.pixel_ratio {
@@ -1902,6 +1916,27 @@ impl<M: TextEngine> Core<M> {
                 Ok(Some(Op::Listen {
                     id: crate::ROOT_ID,
                     event: EventKind::BackPress,
+                    enabled: enabled || rust,
+                }))
+            }
+            // The root listens to the back gesture's steps while JS or a
+            // component does.
+            Op::Listen {
+                id: crate::ROOT_ID,
+                event: EventKind::BackProgress,
+                enabled,
+            } => {
+                self.components.js_back_progress = enabled;
+                let rust = !self
+                    .components
+                    .executor
+                    .back_progress
+                    .borrow()
+                    .list
+                    .is_empty();
+                Ok(Some(Op::Listen {
+                    id: crate::ROOT_ID,
+                    event: EventKind::BackProgress,
                     enabled: enabled || rust,
                 }))
             }
@@ -7696,6 +7731,41 @@ impl<M: TextEngine> Core<M> {
                 });
                 true
             }
+            EventKind::BackProgress if id == crate::ROOT_ID => {
+                let Some(event) = crate::BackProgressEvent::from_payload(payload) else {
+                    return true;
+                };
+                // The press of a gesture the top overlay listening to
+                // `onCancel` takes is the overlay's: the app follows only
+                // the gestures that start without one.
+                if event.phase == crate::BackPhase::Start {
+                    self.components.back_gesture = !self.overlay_state.cancel;
+                }
+                if !self.components.back_gesture {
+                    return true;
+                }
+                if matches!(
+                    event.phase,
+                    crate::BackPhase::End | crate::BackPhase::Cancel
+                ) {
+                    self.components.back_gesture = false;
+                }
+                let listeners = self
+                    .components
+                    .executor
+                    .back_progress
+                    .borrow()
+                    .newest_first();
+                for listener in listeners {
+                    let result = caught(|| listener(&event));
+                    self.apply_actions();
+                    if let Err(message) = result {
+                        log::error!(target: "js", "a back progress listener failed: {message}");
+                    }
+                }
+                // JS's listeners hear it next.
+                !self.components.js_back_progress
+            }
             EventKind::WebEvaluation => {
                 self.answer_web_evaluation(id, payload);
                 true
@@ -8042,6 +8112,23 @@ impl<M: TextEngine> Core<M> {
             id: crate::ROOT_ID,
             event: EventKind::BackPress,
             enabled: rust || self.components.js_back || self.overlay_state.cancel,
+        });
+    }
+
+    /// The root listens to the back gesture's steps while JS or a component
+    /// does: follows the components' listeners coming and going.
+    pub(super) fn sync_back_progress(&mut self) {
+        let rust = {
+            let mut progress = self.components.executor.back_progress.borrow_mut();
+            if !std::mem::take(&mut progress.changed) {
+                return;
+            }
+            !progress.list.is_empty()
+        };
+        let _ = self.apply_op(Op::Listen {
+            id: crate::ROOT_ID,
+            event: EventKind::BackProgress,
+            enabled: rust || self.components.js_back_progress,
         });
     }
 

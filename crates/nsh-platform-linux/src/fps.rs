@@ -84,6 +84,11 @@ pub(crate) struct Fps {
     /// The panel shows only the frame rate and CPU (a click toggles it; per
     /// window, for the session).
     collapsed: Cell<bool>,
+    /// The app `<Window>` it measures and shows in ([`follow`]); `None`
+    /// for the surface's host window.
+    window: RefCell<Option<glib::WeakRef<gtk::Widget>>>,
+    /// The windows whose frame clocks carry its handlers ([`install`]).
+    hooked: RefCell<Vec<glib::WeakRef<gtk::Widget>>>,
 }
 
 impl Drop for Fps {
@@ -109,6 +114,27 @@ impl Fps {
             logged: Cell::new(Instant::now()),
             hud: RefCell::default(),
             collapsed: Cell::new(false),
+            window: RefCell::default(),
+            hooked: RefCell::default(),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn hud_panel_for_test(&self) -> gtk::DrawingArea {
+        self.hud.borrow().as_ref().unwrap().panel.clone()
+    }
+
+    /// The app `<Window>` it follows, while that window lives.
+    pub(crate) fn window(&self) -> Option<gtk::Widget> {
+        self.window.borrow().as_ref().and_then(|w| w.upgrade())
+    }
+
+    /// Whether frames of `clock` are the ones it measures: those of the
+    /// followed window, or of the host window when it follows none.
+    fn measures(&self, clock: &gdk::FrameClock) -> bool {
+        match self.window() {
+            Some(window) => window.frame_clock().as_ref() == Some(clock),
+            None => true,
         }
     }
 
@@ -486,10 +512,52 @@ fn curve(cx: &cairo::Context, width: f64, height: f64, s: &PerfSnapshot) {
     let _ = cx.stroke();
 }
 
+/// Measures and shows in app `<Window>` `window` (its content in
+/// `overlay`), or, for `None`, in the surface's host window (`host`
+/// overlay): with Window Model v2 the host window stays hidden, so its
+/// frames say nothing about the app's.
+pub(crate) fn follow(
+    fps: &Rc<Fps>,
+    window: Option<(&gtk::Widget, &gtk::Overlay)>,
+    host: Option<gtk::Overlay>,
+) {
+    let overlay = match window {
+        Some((window, overlay)) => {
+            install(window, fps);
+            *fps.window.borrow_mut() = Some(window.downgrade());
+            Some(overlay.clone())
+        }
+        None => {
+            *fps.window.borrow_mut() = None;
+            host
+        }
+    };
+    if let Some(hud) = fps.hud.borrow_mut().as_mut() {
+        let current = hud.overlay.upgrade();
+        if current != overlay {
+            if let Some(current) = current {
+                current.remove_overlay(&hud.panel);
+            }
+            if let Some(overlay) = &overlay {
+                overlay.add_overlay(&hud.panel);
+            }
+            hud.overlay = overlay.map(|o| o.downgrade()).unwrap_or_default();
+        }
+    }
+}
+
 /// Measures `widget`'s frames into `fps` once it has a frame clock. Each
 /// handler runs after GTK's own of its phase (connected when the window
 /// was realized, before the surface's view): it marks the phase's end.
 pub(crate) fn install(widget: &gtk::Widget, fps: &Rc<Fps>) {
+    {
+        let mut hooked = fps.hooked.borrow_mut();
+        hooked.retain(|w| w.upgrade().is_some());
+        if hooked.iter().any(|w| w.upgrade().as_ref() == Some(widget)) {
+            return;
+        }
+        hooked.push(widget.downgrade());
+    }
     let hook = {
         let fps = Rc::downgrade(fps);
         move |widget: &gtk::Widget| {
@@ -533,8 +601,8 @@ pub(crate) fn log_first_frame(clock: &gdk::FrameClock) {
 
 fn connect(clock: &gdk::FrameClock, fps: &Weak<Fps>) {
     let weak = fps.clone();
-    clock.connect_before_paint(move |_| {
-        if let Some(fps) = weak.upgrade() {
+    clock.connect_before_paint(move |clock| {
+        if let Some(fps) = weak.upgrade().filter(|f| f.measures(clock)) {
             let now = Instant::now();
             fps.painting.set(Some(now));
             fps.mark.set(Some(now));
@@ -546,22 +614,22 @@ fn connect(clock: &gdk::FrameClock, fps: &Weak<Fps>) {
         }
     });
     let weak = fps.clone();
-    clock.connect_update(move |_| {
-        if let Some(fps) = weak.upgrade() {
+    clock.connect_update(move |clock| {
+        if let Some(fps) = weak.upgrade().filter(|f| f.measures(clock)) {
             fps.update.set(fps.phase());
         }
     });
     let weak = fps.clone();
-    clock.connect_layout(move |_| {
-        if let Some(fps) = weak.upgrade() {
+    clock.connect_layout(move |clock| {
+        if let Some(fps) = weak.upgrade().filter(|f| f.measures(clock)) {
             fps.layout.set(fps.phase());
         }
     });
     // The paint phase runs only when a surface asked to be drawn (GTK's
     // own `render` handler stops that signal's emission).
     let weak = fps.clone();
-    clock.connect_paint(move |_| {
-        if let Some(fps) = weak.upgrade() {
+    clock.connect_paint(move |clock| {
+        if let Some(fps) = weak.upgrade().filter(|f| f.measures(clock)) {
             fps.rendered.set(true);
             let paint = fps.phase();
             let mut phases = fps.phases.borrow_mut();
@@ -574,7 +642,7 @@ fn connect(clock: &gdk::FrameClock, fps: &Weak<Fps>) {
     });
     let weak = fps.clone();
     clock.connect_after_paint(move |clock| {
-        if let Some(fps) = weak.upgrade() {
+        if let Some(fps) = weak.upgrade().filter(|f| f.measures(clock)) {
             after_paint(&fps, clock);
         }
     });

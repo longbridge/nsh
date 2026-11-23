@@ -107,6 +107,7 @@ final class Native {
     static final int FOCUS_OUT = 95;
     static final int TEXT_DROP = 96;
     static final int OPEN_APP_SETTINGS = 97;
+    static final int BACK_PROGRESS = 98;
 
     /**
      * Draws the SVG {@code bytes} for a view {@code maxPx} pixels on its longer side, with its shorter side that long
@@ -356,6 +357,13 @@ final class Native {
 
     /** `onPaste`: the pasted text, the images' encoded bytes and local files' {@code file:} URLs. */
     static native void paste(long handle, int id, String text, byte[][] images, String[] uris);
+
+    /**
+     * A file drag for node {@code id}: {@link #FILE_DRAG_ENTER} with the files offered (none yet on Android, which
+     * opens a drag's data only at the drop) or {@link #FILE_DROP} with the dropped files' app-owned copies, as
+     * {@code file:} URLs; a drop's point ({@code x}, {@code y}) in the surface's points.
+     */
+    static native void fileDrop(long handle, int id, int kind, String[] uris, float x, float y);
 
     /**
      * {@link #CANVAS_IMAGE} on the root: the answer to `OffscreenCanvas` render {@code request}, the encoded image

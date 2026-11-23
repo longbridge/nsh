@@ -121,6 +121,7 @@ In Rust, the APIs only one platform has are functions of `nsh_core::prelude` (`o
 | Rust | TSX | Description |
 |---|---|---|
 | `on_back_press(listener)` | `BackHandler.on("press", listener)` | Listens to the back button after dialogs, before stacks; return `true` when handled. The listener goes with the component (or effect) that added it; in TSX the call also returns a function that stops it earlier. |
+| `on_back_progress(listener)` | `BackHandler.on("progress", listener)` | Follows the back gesture (Android 14 and later): `start`, `move`, then `end` (the press follows) or `cancel`, with the `progress` from 0 to 1 and the `edge` it started at. While one listens, the stacks do not preview their pop. |
 | | `BackHandler.exitApp()` | Leaves the app. |
 
 ```rust tabs
