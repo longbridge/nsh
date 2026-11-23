@@ -125,6 +125,12 @@ impl DevSession {
         format!("ws://{}{WS_PATH}", self.local_endpoint())
     }
 
+    /// WebSocket URL for a host reaching the server through `127.0.0.1`
+    /// (such as an Android device over `adb reverse`).
+    pub(crate) fn loopback_url(&self) -> String {
+        format!("ws://{}:{}{WS_PATH}", Ipv4Addr::LOCALHOST, self.port())
+    }
+
     /// The web host's page for browsers on this machine.
     pub(crate) fn web_url(&self) -> String {
         format!("http://{}/", self.local_endpoint())
@@ -706,6 +712,19 @@ mod tests {
         let server =
             super::start_server(listen, &std::env::temp_dir(), Default::default()).unwrap();
         assert_eq!(server.local_addr().ip(), listen.host);
+    }
+
+    #[test]
+    fn loopback_url_targets_127_0_0_1_even_when_bound_to_all_interfaces() {
+        let dir = std::env::temp_dir().join(format!("nsh-loopback-url-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let entry = dir.join("App.tsx");
+        std::fs::write(&entry, "export default function App() { return null; }\n").unwrap();
+        let session = super::DevSession::start(&entry, on_network(0), false, None).unwrap();
+        let expected = format!("ws://127.0.0.1:{}{}", session.port(), super::WS_PATH);
+        assert_eq!(session.loopback_url(), expected);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

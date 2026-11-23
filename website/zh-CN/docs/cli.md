@@ -115,10 +115,10 @@ nsh run my-app/App.tsx --target web
 ## nsh dev
 
 ```sh
-nsh dev [ENTRY] [--target macos|linux|windows|ios|android|gpui|tui|web|catalyst] [--device <DEVICE>] [--server-only] [--port <PORT>] [--release] [--limits [<LIMITS>]]
+nsh dev [ENTRY] [--target macos|linux|windows|ios|android|gpui|tui|web|catalyst] [--device <DEVICE>] [--server-only] [--port <PORT>] [--host <HOST>] [--release] [--limits [<LIMITS>]]
 ```
 
-启动开发服务器并打开当前系统的原生宿主：macOS 使用 AppKit，Linux 使用 GTK，Windows 使用 Win32。开发 iOS 或 Android 应用时显式指定 `--target ios` 或 `--target android`。用 `--server-only` 为自己启动的宿主提供服务。服务器构建应用、监视入口所在目录以及应用的 `nsh.json`、主题和翻译文件，并把每次重新构建推送给连接到它的宿主。使用 `--server-only` 时，它会打印本机宿主使用的 URL、每个局域网地址对应的设备 URL，以及在 Web 运行时存在时，浏览器运行应用要打开的页面（[Web](./web.md#在浏览器里开发)）：
+启动开发服务器并打开当前系统的原生宿主：macOS 使用 AppKit，Linux 使用 GTK，Windows 使用 Win32。开发 iOS 或 Android 应用时显式指定 `--target ios` 或 `--target android`。用 `--server-only` 为自己启动的宿主提供服务。服务器构建应用、监视入口所在目录以及应用的 `nsh.json`、主题和翻译文件，并把每次重新构建推送给连接到它的宿主。使用 `--server-only` 时，它会打印本机宿主使用的 URL，未绑定回环地址时还会打印每个局域网地址对应的设备 URL，以及在 Web 运行时存在时，浏览器运行应用要打开的页面（[Web](./web.md#在浏览器里开发)）：
 
 ```text
 ✓ built App.tsx (3.2 KB js, 9.8 KB bytecode, 21ms)
@@ -128,7 +128,7 @@ nsh dev [ENTRY] [--target macos|linux|windows|ios|android|gpui|tui|web|catalyst]
   browsers on this network: http://192.168.1.20:8790/
 ```
 
-用 `nsh dev --server-only` 连接嵌入了开发版 SDK（`NativeShellDev.xcframework`、`nsh-dev.aar`）的应用。`--target`、`--device`、`--port`、`--release` 和 `--limits` 的含义与 `nsh run` 相同。
+用 `nsh dev --server-only` 连接嵌入了开发版 SDK（`NativeShellDev.xcframework`、`nsh-dev.aar`）的应用。`--target`、`--device`、`--port`、`--release` 和 `--limits` 的含义与 `nsh run` 相同。`--host <HOST>` 用于将开发服务器绑定到指定的 IPv4 地址，覆盖默认行为（`--server-only` 以及 `--target ios`、`android`、`web` 默认绑定 `0.0.0.0`；本机目标默认绑定 `127.0.0.1`），例如用 `nsh dev App.tsx --server-only --host 127.0.0.1` 仅监听本机回环地址。使用 `--target android` 时，由于 `adb reverse` 将设备的 `127.0.0.1` 转发到本机的 `127.0.0.1`，`--host` 只能指定为 `127.0.0.1` 或 `0.0.0.0`。
 
 ## nsh test
 
