@@ -205,6 +205,13 @@ file-list preload finishes, including when the pointer stays still, and ignores 
 Moving between destinations reports leave then entry with the same offered list. `onFileDragLeave` clears the
 preview. Rust entry handlers receive `&FileDragEvent`; existing `||`, `|_: &()|` and `Listener<()>` handlers work too.
 
+On AppKit, a drag that carries no file URLs but promises files, such as an image dragged out of a page in Safari or
+Chrome or an attachment from Mail, is taken as well. Its files are only written once dropped, so `onFileDragEnter`
+gives `uris: []` with the promised files' `mimeTypes`, and `onFileDrop` gives `uris: []` and the files' contents in
+`files` (the same `{ file, name, type, size, status }` entries as on the Web and `Picker.pickFiles`), in the drag's
+order, with `pagePosition`. NSH writes them to a temporary folder and removes it once they are read. A drag that also
+carries file URLs, such as the screenshot thumbnail, drops its `uris` as above.
+
 On iOS (and iPadOS), a view with `onFileDrop` takes the files of a drag, such as images and documents dragged from Photos,
 Files, Safari or the app's own web views. The closest view
 that listens takes them, as on desktops. A drag's items carry no file URLs, only data in types that are read
