@@ -81,7 +81,9 @@ final class Mounter {
     final int[] dialogColors = new int[10];
     /**
      * The language the app's text shows in ({@code encode.rs} {@code Command::TextLocale}), which
-     * the state words services read follow ({@link A11y}); null, English, until the core names one.
+     * the state words services read ({@link A11y}) and the date and time dialogs' words
+     * ({@link DateTimePickerComponent}) follow; null until the core names one (English state words,
+     * the system's dialogs).
      */
     java.util.Locale textLocale;
     /** The alerts shown and not answered yet, by dialog id: what {@link SystemUi#closeDialog} takes back. */
@@ -314,7 +316,8 @@ final class Mounter {
         this.images = images;
         components.put(TabBarComponent.NAME, c -> new TabBarComponent(context, c, this::night));
         components.put(SwitchComponent.NAME, c -> new SwitchComponent(context, c, this::night));
-        components.put(DateTimePickerComponent.NAME, c -> new DateTimePickerComponent(context, c, this::night));
+        components.put(DateTimePickerComponent.NAME,
+                c -> new DateTimePickerComponent(context, c, this::night, () -> textLocale));
         components.put(MenuButtonComponent.NAME, c -> new MenuButtonComponent(context, c, this::night));
         components.put(ContextMenuComponent.NAME, c -> new ContextMenuComponent(context, c, this::night));
         images.redirects = (base, location) -> Native.mediaRedirect(handle(), base, location);
