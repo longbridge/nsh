@@ -10406,6 +10406,7 @@ fn pressed_current_and_level_decode_from_js() {
     };
     use crate::AccessibilityRole as R;
     for (name, r) in [
+        ("textbox", R::Textbox),
         ("group", R::Group),
         ("region", R::Region),
         ("navigation", R::Navigation),
