@@ -250,8 +250,8 @@ const photos = await Promise.all(selected().map((id) => Photos.loadPicked(id, { 
 picker?.deselect(id);
 ```
 
-- `onChange` hands over the ids of every photo selected now, each time the user selects or deselects one. The ids are
-  opaque; the photos' bytes stay native until `loadPicked(id, options)` reads one, with `load`'s options. An id reads
+- `onChange` hands over the ids of every photo selected now, each time the user selects or deselects one, in the order the
+  user selected them; the picker shows each photo's number in that order. The ids are opaque; the photos' bytes stay native until `loadPicked(id, options)` reads one, with `load`'s options. An id reads
   while its photo is selected and its picker shown; after that it rejects with `ENOENT`.
 - `selectionLimit` caps the selection (100 by default, as `Picker.pickImages`; 0 lets the user select as many as the
   system allows), and `filter` shows `"images"` (default), `"livePhotos"` or `"screenshots"`.

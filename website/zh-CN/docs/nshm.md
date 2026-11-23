@@ -224,7 +224,7 @@ const photos = await Promise.all(selected().map((id) => Photos.loadPicked(id, { 
 picker?.deselect(id);
 ```
 
-- 用户每次选中或取消选中一张照片，`onChange` 都给出当前所有选中照片的 id。id 是不透明的；照片的字节留在原生侧，直到 `loadPicked(id, options)` 读取（选项同 `load`）。照片选中且选择器还在显示时 id 可读；之后以 `ENOENT` 拒绝。
+- 用户每次选中或取消选中一张照片，`onChange` 都给出当前所有选中照片的 id，按用户选中的先后排列，选择器上也按这个顺序给每张照片标序号。id 是不透明的；照片的字节留在原生侧，直到 `loadPicked(id, options)` 读取（选项同 `load`）。照片选中且选择器还在显示时 id 可读；之后以 `ENOENT` 拒绝。
 - `selectionLimit` 限制最多选几张（默认 100，与 `Picker.pickImages` 一致；0 表示系统允许的最多张数），`filter` 显示 `"images"`（默认）、`"livePhotos"` 或 `"screenshots"`。
 - 尺寸由样式决定：给它一个高度，用 `borderRadius` 和 `overflow: "hidden"` 做圆角。
 - `pickerViewAvailable()` 为 `false` 的地方（iOS 16 及以下、Android、桌面和 Web）它不占空间、什么也不显示；应用改用 `Picker.pickImages` 让用户挑选。Android 的照片选择器需要较新设备上的系统扩展才能内嵌，Native Shell 暂未使用。
