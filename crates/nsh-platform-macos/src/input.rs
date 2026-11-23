@@ -1604,16 +1604,18 @@ fn pick_in(view: &NshView, p: (f32, f32)) -> Option<Hit> {
     }
     let (pe, in_slop, children) = {
         let s = view.state();
+        let at = point(Points(p.0), Points(p.1));
         let HitArea {
             in_slop, children, ..
         } = input::hit_area(
-            point(Points(p.0), Points(p.1)),
+            at,
             s.frame.size,
             s.props.hit_slop,
             s.overflow,
             s.clips(),
             laid_out(s.kind, s.id),
-        );
+        )
+        .clipped(s.style.clip_path(), at, s.frame.size);
         (s.props.pointer_events, in_slop, children)
     };
     let own = || {

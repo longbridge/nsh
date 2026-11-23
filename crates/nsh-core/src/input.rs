@@ -649,6 +649,23 @@ pub fn hit_area(
     }
 }
 
+impl HitArea {
+    /// The area left by a view's `clipPath` (`clip`) at `p` on a view of
+    /// `size`: outside it, neither the view nor anything in it is hit, its
+    /// hit slop and its children's overflow included (CSS's `clip-path`).
+    pub fn clipped(
+        self,
+        clip: Option<&crate::ClipInset>,
+        p: Point<Points>,
+        size: Size<Points>,
+    ) -> Self {
+        match clip {
+            Some(clip) if !clip.contains(size, p) => HitArea::default(),
+            _ => self,
+        }
+    }
+}
+
 // --- Pans, pinches and rotations ----------------------------------------------------
 
 /// Whether a view pinches / rotates natively or listens to it.
@@ -1371,6 +1388,29 @@ mod tests {
         let a = hit_area(p(5.0, 40.0), s, slop, Some(overflow), false, true);
         assert!(!a.in_slop && a.children);
         assert!(hit_area(p(500.0, 500.0), s, slop, None, false, false).children);
+    }
+
+    #[test]
+    fn a_clip_path_bounds_the_view_and_its_children() {
+        let s = size(Points(100.0), Points(100.0));
+        let slop = EdgeInsets::all(Points(5.0));
+        let overflow = Bounds::new(p(0.0, 100.0), size(Points(100.0), Points(50.0)));
+        let clip = crate::ClipInset::new()
+            .left(crate::geometry::percentage(0.5))
+            .rounded(Points(10.0));
+        let at = |x, y| {
+            hit_area(p(x, y), s, slop, Some(overflow), false, true).clipped(Some(&clip), p(x, y), s)
+        };
+        let a = at(75.0, 50.0);
+        assert!(a.inside && a.in_slop && a.children);
+        // Clipped out: inside the box, in its slop, in its children's
+        // overflow, and in a rounded corner.
+        for (x, y) in [(25.0, 50.0), (102.0, 50.0), (75.0, 120.0), (51.0, 1.0)] {
+            assert_eq!(at(x, y), HitArea::default(), "{x}, {y}");
+        }
+        // Without one, nothing changes.
+        let a = hit_area(p(25.0, 50.0), s, slop, None, false, true);
+        assert_eq!(a.clipped(None, p(25.0, 50.0), s), a);
     }
 
     #[test]

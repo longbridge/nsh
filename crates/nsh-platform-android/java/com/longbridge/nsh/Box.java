@@ -553,8 +553,11 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
 
     @Override
     public void draw(Canvas canvas) {
-        if (decor.masks.length == 0) super.draw(canvas);
-        else decor.drawMasked(canvas, this, () -> super.draw(canvas));
+        // `clipPath` clips everything, its shadows and children included.
+        decor.drawClipped(canvas, this, () -> {
+            if (decor.masks.length == 0) super.draw(canvas);
+            else decor.drawMasked(canvas, this, () -> super.draw(canvas));
+        });
     }
 
     @Override
@@ -655,6 +658,12 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
     public boolean dispatchTouchEvent(MotionEvent e) {
         if (pointerEvents == 1) return false;
         int action = e.getActionMasked();
+        // Outside its clip path, neither the box nor its children: the touch
+        // goes on to what is under it.
+        if (action == MotionEvent.ACTION_DOWN && decor.clipsOut(this, e.getX(), e.getY())) {
+            overflowTarget = null;
+            return false;
+        }
         if (action == MotionEvent.ACTION_DOWN) {
             overflowTarget = null;
             // ViewGroup only delivers a touch to a child that contains it: a
@@ -743,6 +752,9 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
             View c = group.getChildAt(i);
             if (c.getVisibility() != VISIBLE) continue;
             float[] pt = inChild(c, x, y);
+            // Clipped out of the child: the point is for those under it.
+            Decor clipped = Decor.of(c);
+            if (clipped != null && clipped.clipsOut(c, pt[0], pt[1])) continue;
             if (pt[0] >= 0 && pt[1] >= 0 && pt[0] < c.getWidth() && pt[1] < c.getHeight()) {
                 return inBounds ? c : null;
             }

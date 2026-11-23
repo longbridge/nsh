@@ -3109,6 +3109,9 @@ impl Mounter {
         let transition = style
             .transition
             .filter(|t| t.run_ms() > 0.0 && s.styled && view.window().is_some());
+        if let Some(nsh) = s.native.nsh() {
+            nsh.set_clip_path(style.clip_path().copied());
+        }
         s.style = style;
         s.styled = true;
         view.setHidden(s.style.hidden);
