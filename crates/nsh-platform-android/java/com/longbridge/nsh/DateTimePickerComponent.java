@@ -325,6 +325,10 @@ final class DateTimePickerComponent implements NshComponent {
         protected void onConfigurationChanged(Configuration config) {
             super.onConfigurationChanged(config);
             appearanceChanged();
+            // A size in sp is resolved when it is set: a font scale changed since takes
+            // setting it again, before `show` measures the fields.
+            dateField.setTextSize(TypedValue.COMPLEX_UNIT_SP, TEXT_SP);
+            timeField.setTextSize(TypedValue.COMPLEX_UNIT_SP, TEXT_SP);
             // The user's formats or clock may have changed with it.
             show();
         }
