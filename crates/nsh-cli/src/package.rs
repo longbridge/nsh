@@ -4804,6 +4804,35 @@ mod tests {
         fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// A crate's macOS translation reaches the package's `InfoPlist.strings`
+    /// for the app's languages.
+    #[test]
+    fn crates_macos_translations_reach_the_package() {
+        use crate::module_meta::{ModuleMeta, Platform};
+        let mut meta = ModuleMeta::default();
+        meta.macos_info.insert(
+            "NSBluetoothAlwaysUsageDescription".into(),
+            serde_json::json!("Connects to peripherals."),
+        );
+        meta.macos_strings.insert(
+            "zh-Hans".into(),
+            serde_json::json!({ "NSBluetoothAlwaysUsageDescription": "连接外设。" }),
+        );
+        let mut config = AppConfig {
+            localizations: vec!["zh-Hans".into()],
+            ..Default::default()
+        };
+        meta.apply(&mut config, Platform::Macos).unwrap();
+        config.macos.check().unwrap();
+        let info = macos_info_plist("Demo", "com.example.demo", "Demo", &config, false).unwrap();
+        let localized = config.macos.localized_info(&info).unwrap();
+        assert!(
+            localized["zh-Hans"]
+                .contains("\"NSBluetoothAlwaysUsageDescription\" = \"连接外设。\";"),
+            "{localized:?}"
+        );
+    }
+
     #[test]
     fn macos_package_merges_and_checks_module_metadata() {
         assert_eq!(

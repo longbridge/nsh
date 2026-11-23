@@ -708,10 +708,10 @@ pub(crate) type InfoPlistStrings = BTreeMap<String, BTreeMap<String, String>>;
 /// from `name` in the language of `Info.plist`.
 const TRANSLATED_RESERVED_INFO: [&str; 2] = ["CFBundleDisplayName", "CFBundleName"];
 
-/// Whether an app or a crate may translate `key` of an iOS app's
+/// Whether an app or a crate may translate `key` of `platform`'s
 /// `Info.plist` ([`ApplePlatform::translatable`]).
-pub(crate) fn is_translatable_ios_info(key: &str) -> bool {
-    ApplePlatform::Ios.translatable(key)
+pub(crate) fn is_translatable_info(platform: ApplePlatform, key: &str) -> bool {
+    platform.translatable(key)
 }
 
 /// `nsh.json` `<platform>.infoPlistStrings`, checked: each language's code
