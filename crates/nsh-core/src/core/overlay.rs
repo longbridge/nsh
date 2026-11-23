@@ -1519,7 +1519,14 @@ impl<M: TextEngine> Core<M> {
     /// The room overlay `key` shown in `host` keeps to beside its anchor:
     /// the root view's safe area less the overlay's `margin`, or the area
     /// the platform shows the root view's overlays in
-    /// ([`Core::set_overlay_area`]).
+    /// ([`Core::set_overlay_area`]). In the surface's root view it also
+    /// leaves out what the software keyboard covers of the view's bottom
+    /// (the environment's keyboard height, which includes the bottom safe
+    /// area under it), so a popover flips or shrinks above the keyboard
+    /// rather than go under it, as a panel docked to the bottom is lifted
+    /// above it. That height is measured over the surface's root view, so
+    /// a modal's root view keeps to its own insets; the platform's area
+    /// leaves the keyboard out already.
     fn overlay_area(&self, key: Key, host: NodeId) -> Option<Bounds<Points>> {
         let config = self.overlay(key)?.config;
         let m = config.margin.0;
@@ -1531,12 +1538,18 @@ impl<M: TextEngine> Core<M> {
             return Some(inset(area, [m, m, m, m]));
         }
         let (size, insets) = self.overlay_host_size(host)?;
+        let bottom = match host {
+            ROOT_ID => insets
+                .bottom
+                .max(self.components.environment.keyboard_height),
+            _ => insets.bottom,
+        };
         Some(inset(
             rect(0.0, 0.0, size.width.0, size.height.0),
             [
                 insets.top.0 + m,
                 insets.right.0 + m,
-                insets.bottom.0 + m,
+                bottom.0 + m,
                 insets.left.0 + m,
             ],
         ))

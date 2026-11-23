@@ -9,8 +9,8 @@ demo: el-popover
 
 A popover shows content next to its trigger, on top of everything else: details, a small form, a color picker.
 Pressing the trigger opens and closes it; a press outside, Escape, the Android back button and VoiceOver's escape gesture close it. It is placed
-on a side of the trigger, moves to the other side when there is no room, stays inside the safe area and follows the
-trigger as it scrolls. It draws nothing of its own: the popup and its content are the app's.
+on a side of the trigger, moves to the other side when there is no room, stays inside the safe area and above the
+software keyboard, and follows the trigger as it scrolls. It draws nothing of its own: the popup and its content are the app's.
 
 ```rust tabs
 use nsh_base::{OpenChangeReason, PopoverEvent, popover};
