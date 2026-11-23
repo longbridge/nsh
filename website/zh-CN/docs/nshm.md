@@ -362,6 +362,31 @@ crate 翻译的是各 crate 在 `ios.infoPlist` 里设置的键，按它们的�
 
 在应用旁边开发时用 `nsh add --path ../my-gauge`，按目录当前内容使用。发布方式与普通 crate 相同（`cargo publish`），加上关键词 `nshm`，便于在 [crates.io](https://crates.io/keywords/nshm) 上找到；也可以推送到 Git 并给版本打标签。
 
+### 封装原生 SDK
+
+nshm 像普通 Rust crate 一样，在自己的 `build.rs` 里链接原生 SDK（`.xcframework`、`.a` 或系统 framework）。Cargo 会把所有依赖的 `rustc-link-lib` 和 `rustc-link-search` 传给应用的可执行文件，应用本身不用写任何配置，NSH 也没有按平台的 SDK 设置。
+
+```rust
+// build.rs
+fn main() {
+    let os = std::env::var("CARGO_CFG_TARGET_OS").unwrap();
+    if os != "ios" {
+        return;
+    }
+    let sim = std::env::var("CARGO_CFG_TARGET_ABI").as_deref() == Ok("sim");
+    let slice = if sim { "ios-arm64_x86_64-simulator" } else { "ios-arm64" };
+    let root = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    println!("cargo:rustc-link-search=native={root}/vendor/Sdk.xcframework/{slice}");
+    // +whole-archive is -force_load: it keeps Objective-C categories, like -ObjC.
+    println!("cargo:rustc-link-lib=static:+whole-archive=Sdk");
+    println!("cargo:rustc-link-lib=framework=AdSupport");
+}
+```
+
+- 用 `rustc-link-lib`，不要用 `rustc-link-arg`：链接参数只作用于本 crate 自己的目标。
+- 静态库的隐私清单条目写进应用的 `ios.privacyManifest`。
+- 不支持动态 framework，请使用 SDK 的静态版本。
+
 ### TSX nshm
 
 TSX nshm 是一个 Git 仓库，由其中的 `nsh.json` 描述：包名和版本、适用的 NSH 版本，以及导出的内容，即每个标识对应的 TSX 入口文件：

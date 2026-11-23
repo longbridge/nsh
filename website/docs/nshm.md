@@ -411,6 +411,31 @@ crates translating a key differently are settled by the app as above, in `ios.in
 
 Develop it beside an app with `nsh add --path ../my-gauge`, which reads the directory as it is. Publish it as any crate (`cargo publish`), with the keyword `nshm` so that it can be found on [crates.io](https://crates.io/keywords/nshm), or push it to Git and tag its versions.
 
+### Wrapping a native SDK
+
+An nshm links a native SDK (an `.xcframework`, `.a` or system framework) the way any Rust crate does: from its `build.rs`. Cargo passes the `rustc-link-lib` and `rustc-link-search` of every dependency to the app's executable, so the app itself lists nothing and NSH has no per-platform SDK settings.
+
+```rust
+// build.rs
+fn main() {
+    let os = std::env::var("CARGO_CFG_TARGET_OS").unwrap();
+    if os != "ios" {
+        return;
+    }
+    let sim = std::env::var("CARGO_CFG_TARGET_ABI").as_deref() == Ok("sim");
+    let slice = if sim { "ios-arm64_x86_64-simulator" } else { "ios-arm64" };
+    let root = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    println!("cargo:rustc-link-search=native={root}/vendor/Sdk.xcframework/{slice}");
+    // +whole-archive is -force_load: it keeps Objective-C categories, like -ObjC.
+    println!("cargo:rustc-link-lib=static:+whole-archive=Sdk");
+    println!("cargo:rustc-link-lib=framework=AdSupport");
+}
+```
+
+- Use `rustc-link-lib`, not `rustc-link-arg`: link arguments only apply to the crate's own targets.
+- Put a static library's privacy manifest entries in the app's `ios.privacyManifest`.
+- Dynamic frameworks are not supported; use the SDK's static build.
+
 ### A TSX nshm
 
 A TSX nshm is a Git repository whose `nsh.json` describes it: its package name and version, the NSH versions it works with, and what it exports, each specifier with its TSX entry file:
