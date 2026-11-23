@@ -2413,15 +2413,17 @@ fn wheel_to_host(
 }
 
 /// How far `text` can still move inside its scroll view: `(above, below)`
-/// in points (positive towards the start / end). Uses the document visible
-/// rect so a vertically-resizable frame that matches the clip does not
-/// look like overflow.
+/// in points (positive towards the start / end). Uses the clip view's
+/// bounds origin as the offset from the top (same as `scroll_to` /
+/// `report_scroll`), not `documentVisibleRect`, so a vertically
+/// resizable frame that matches the clip does not look like overflow.
 fn text_scroll_room(text: &NSTextView) -> Option<(CGFloat, CGFloat)> {
     let scroller = text.enclosingScrollView()?;
-    let visible = scroller.documentVisibleRect();
-    let doc_h = text.bounds().size.height;
-    let max_y = (doc_h - visible.size.height).max(0.0);
-    let above = visible.origin.y.max(0.0);
+    // SAFETY: a scroll view's clip view (an `NSView`), always present.
+    let clip: Retained<NSView> = unsafe { msg_send![&scroller, contentView] };
+    let bounds = clip.bounds();
+    let max_y = (text.frame().size.height - bounds.size.height).max(0.0);
+    let above = bounds.origin.y.max(0.0);
     let below = (max_y - above).max(0.0);
     Some((above, below))
 }
