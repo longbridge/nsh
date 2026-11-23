@@ -156,6 +156,17 @@ final class InputBox extends FrameLayout implements Node {
             }
 
             @Override
+            public boolean onDragEvent(android.view.DragEvent event) {
+                // Files go to the file drop destination around the input
+                // (`FileDrops`), never in as their content URIs' text.
+                if (event.getAction() == android.view.DragEvent.ACTION_DRAG_STARTED
+                        && FileDrops.offersFiles(event.getClipDescription())) {
+                    return false;
+                }
+                return super.onDragEvent(event);
+            }
+
+            @Override
             public boolean onTextContextMenuItem(int item) {
                 // Before Android 12 a paste comes here (the menu, Ctrl+V);
                 // from then on `receiveContent` hears it.

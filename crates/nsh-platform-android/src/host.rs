@@ -1731,6 +1731,48 @@ extern "system" fn Java_com_longbridge_nsh_Native_paste(
     }
 }
 
+/// A file drag's enter or drop (`FileDrops.java`): `kind` is
+/// `onFileDragEnter` or `onFileDrop`, `uris` the files' `file:` URLs; a
+/// drop's point (`x`, `y`) is in the surface's points, as `pageX` / `pageY`.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_fileDrop(
+    mut env: JNIEnv<'_>,
+    _: JClass<'_>,
+    handle: jlong,
+    id: jint,
+    kind: jint,
+    uris: jni::objects::JObjectArray<'_>,
+    x: jfloat,
+    y: jfloat,
+) {
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    let Some(kind @ (EventKind::FileDragEnter | EventKind::FileDrop)) = encode::kind_from(kind)
+    else {
+        return;
+    };
+    let mut list = Vec::new();
+    for i in 0..env.get_array_length(&uris).unwrap_or(0) {
+        let Ok(uri) = env.get_object_array_element(&uris, i) else {
+            continue;
+        };
+        if let Ok(uri) = env.get_string(&JString::from(uri)) {
+            list.push(String::from(uri));
+        }
+    }
+    let payload = if kind == EventKind::FileDrop {
+        EventPayload::FileDropAt {
+            uris: list,
+            page_position: point(px(x), px(y)),
+        }
+    } else {
+        EventPayload::FileDrop(list)
+    };
+    if let Some(control) = host.control() {
+        control.dispatch_event(id as NodeId, kind, payload);
+    }
+}
+
 /// `Native.canvasImage`'s `failure`: the image could not be drawn or
 /// encoded. `CanvasRender.java`'s `RENDER_FAILED`.
 const RENDER_FAILED: jint = 0;

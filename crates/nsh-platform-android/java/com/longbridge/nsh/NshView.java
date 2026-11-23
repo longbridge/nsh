@@ -208,6 +208,8 @@ public class NshView extends FrameLayout {
         addView(root, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
         touches = new TouchTracker(mounter, this);
         mounter.touchTrackers.add(touches);
+        // Files dragged in from other apps (`onFileDrop`).
+        setOnDragListener(new FileDrops(mounter, this));
         keys = new KeyDispatch(mounter, root, 1);
         setClipChildren(false);
         // Holds focus when no input does (see InputBox.blur).

@@ -20,7 +20,7 @@ Apps written in Rust also need a Rust toolchain ([below](#for-apps-written-in-ru
 | Linux | Linux | GTK 4.14+ (and its development packages to build the runtime) |
 | [GPUI](./gpui.md) (embedding in GPUI apps) | macOS, Windows or Linux | A GPU (Metal, DirectX or Vulkan); on Linux, Wayland or X11 |
 
-The AppKit host is the default on macOS. Mac Catalyst (`--target catalyst`) needs Xcode like iOS. Details are under [Platform tools](#platform-tools).
+The AppKit host is the default on macOS. Mac Catalyst (`--target catalyst`), a development tool for Catalyst-specific work, needs Xcode like iOS. Details are under [Platform tools](#platform-tools).
 
 ## Installing a release
 
@@ -253,7 +253,6 @@ Building the Android runtime from a checkout (`cargo xtask android`) additionall
 | Command | macOS | Linux | Windows |
 |---|---|---|---|
 | `nsh init`, `nsh build`, `nsh test`, `nsh dev`, `nsh check` | Yes | Yes | Yes |
-| `nsh run --target catalyst` (Mac Catalyst) | Yes | No | No |
 | `nsh run --target macos`, `nsh package --target macos` | Yes | No | No |
 | `nsh run --target linux` (the default on Linux), `nsh package --target linux` | No | Yes | No |
 | `nsh run --target windows` (the default on Windows), `nsh package --target windows` | No | No | Yes |
@@ -261,6 +260,7 @@ Building the Android runtime from a checkout (`cargo xtask android`) additionall
 | `nsh run --target ios`, `nsh package --target ios` / `ios-simulator` | Yes, with Xcode | No | No |
 | `nsh run --target android`, `nsh package --target android` | Yes | Yes, from a checkout | Yes, with the Android runtime |
 | `nsh keygen`, `certify`, `publish`, `verify`, `revoke` | Yes | Yes | Yes |
+| `nsh run --target catalyst` (Mac Catalyst) | Yes | No | No |
 
 On Linux, build the CLI and the Android runtime from a checkout (`cargo build -p nsh-cli` and `cargo xtask android --dev`); the NDK's Linux toolchain is used automatically. On Windows the NDK's Windows toolchain is used the same way, and `cargo xtask dist` includes the Android runtime when it finds the Android SDK.
 

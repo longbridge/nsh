@@ -3189,6 +3189,11 @@ final class Mounter {
         return (events.get(id) & (1L << kind)) != 0;
     }
 
+    /** Whether {@code id} is a file drop destination: it listens to `onFileDrop` and is enabled. */
+    boolean takesFileDrops(int id) {
+        return wants(id, Native.FILE_DROP) && keyEnabled(id);
+    }
+
     /** Whether `id`'s own state lets it hear keys (a disabled view captures and listens to none). */
     private boolean keyEnabled(int id) {
         A11y a = a11y.get(id);
@@ -3795,6 +3800,13 @@ final class Mounter {
     /** An event with an object payload. */
     void paste(int id, String text, byte[][] images, String[] uris) {
         Native.paste(handle(), id, text, images, uris);
+    }
+
+    /** A file drag's enter or drop for {@code id} ({@link FileDrops}); a drop's point in the surface's pixels. */
+    void fileDrop(int id, int kind, String[] uris, float x, float y) {
+        long handle = handle();
+        if (handle == 0) return;
+        Native.fileDrop(handle, id, kind, uris, x / density, y / density);
     }
 
     /**

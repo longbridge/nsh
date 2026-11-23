@@ -209,7 +209,8 @@ NSH 为用 AI 编写的软件而设计，完整的应用和生成的界面都是
 | [Web](./web.md) | 现代浏览器 | HTML | `createPlayer`、iframe |
 | [TUI](./tui.md) | macOS、Windows、Linux 上的终端 | ratatui | `AppView`（ratatui 区域） |
 | [GPUI](./gpui.md) | 桌面平台 | GPUI | `AppView`（GPUI、GPUI Kit 应用） |
-| Mac Catalyst | macOS | UIKit | 开发用（`--target catalyst`） |
+
+作为开发工具，Mac Catalyst（`--target catalyst`）在 Mac 上运行 iOS 后端，用于 Catalyst 特有的工作。
 
 <div class="diagram-scroll">
 <img class="diagram diagram-light" src="/diagrams/platforms-light.svg" alt="一个模块，多个宿主：同一个 bundle 和 Rust 运行时运行在 iOS、Android、Linux、使用 AppKit 的 macOS 和使用 Win32 / Direct2D 的 Windows 上，GPUI 覆盖三个桌面平台，网页则用 HTML 绘制。">
