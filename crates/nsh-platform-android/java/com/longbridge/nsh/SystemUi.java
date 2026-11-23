@@ -179,7 +179,10 @@ final class SystemUi {
         android.content.Context context = b.getContext();
         android.widget.EditText field = new android.widget.EditText(context);
         field.setSingleLine(true);
-        field.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE);
+        // Not full screen in landscape: the alert stays in sight, as the app's inputs do (InputBox).
+        field.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE
+                | android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI
+                | android.view.inputmethod.EditorInfo.IME_FLAG_NO_FULLSCREEN);
         field.setText(input);
         if (placeholder != null) field.setHint(placeholder);
         if (textColor != 0) field.setTextColor(textColor);
