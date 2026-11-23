@@ -5780,7 +5780,7 @@ mod tests {
                 Nsh::Source(checkout.clone()),
                 format!(
                     "path = {:?}",
-                    checkout.join("crates/nsh-extra").to_string_lossy()
+                    checkout.join("crates").join("nsh-extra").to_string_lossy()
                 ),
             ),
         ];
