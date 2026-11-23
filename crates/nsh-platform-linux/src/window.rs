@@ -2037,6 +2037,26 @@ pub(crate) fn holds(surface: &Surface, view: &NshView) -> bool {
     &root != view && view.is_ancestor(&root)
 }
 
+/// The root view whose frame clock drives the surface's animations
+/// ([`Surface::ensure_ticking`]): the main window's while it shows, else
+/// that of a window of the app's own that shows, the one with the keyboard
+/// first. A GDK frame clock does not tick for a window that is not mapped.
+pub(crate) fn tick_root(surface: &Surface) -> NshView {
+    if surface.root.is_mapped() {
+        return surface.root.clone();
+    }
+    let Ok(windows) = surface.windows.try_borrow() else {
+        return surface.ticking_or_root();
+    };
+    let shown = windows
+        .values()
+        .filter(|w| w.window.is_mapped())
+        .filter_map(|w| Some((w.window.is_active(), w.view.upgrade()?)));
+    shown
+        .max_by_key(|(active, _)| *active)
+        .map_or_else(|| surface.root.clone(), |(_, view)| view)
+}
+
 /// The root view of the window keys go to: where announcements come from,
 /// so the screen reader reads them in the window the user is in.
 pub(crate) fn key_root(surface: &Surface) -> NshView {
