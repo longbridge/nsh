@@ -195,7 +195,8 @@ pub(crate) struct AppConfig {
     #[serde(default, rename = "tailwind")]
     _tailwind: Option<serde_json::Value>,
     /// Read and checked by the bundler; packages read only what the
-    /// system must be told ahead (`speech`'s usage descriptions).
+    /// system must be told ahead (`webview.media`'s usage descriptions,
+    /// `notifications`).
     #[serde(default)]
     pub(crate) capabilities: Option<serde_json::Value>,
     /// `"light"` / `"dark"` / `"system"`: the app's appearance (checked by
@@ -242,6 +243,9 @@ pub(crate) struct AppConfig {
     /// Terminal layout options.
     #[serde(default)]
     pub(crate) tui: TuiConfig,
+    /// What the development watcher skips.
+    #[serde(default)]
+    pub(crate) watch: WatchConfig,
     /// URL schemes that open the app (`"myapp"`: `myapp://...`), which
     /// packages register with the system; the app hears them through
     /// `UrlScheme.on("open", ...)`. [`read_config`] checks them and lowers
@@ -443,18 +447,19 @@ pub(crate) struct TuiConfig {
     pub(crate) points_per_cell: Option<String>,
 }
 
-impl AppConfig {
-    /// Whether the app may recognize speech: it declares no capabilities
-    /// (it gets them all) or grants `speech`.
-    fn speech(&self) -> bool {
-        match &self.capabilities {
-            None => true,
-            Some(capabilities) => {
-                capabilities.get("speech") == Some(&serde_json::Value::Bool(true))
-            }
-        }
-    }
+/// `nsh.json` `"watch"`: what `nsh run` and `nsh dev` leave out of the
+/// watcher ([`crate::dev`], [`crate::rust_app`]).
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct WatchConfig {
+    /// Directories whose file events the watcher skips: paths relative to
+    /// `nsh.json` (`"vendor"`, `"third/jpeg-turbo"`), absolute ones as they
+    /// are. One inside the watch (the app's directory, a crate's) that
+    /// holds generated code or another checkout is the usual one.
+    #[serde(default)]
+    pub(crate) ignore: Vec<String>,
+}
 
+impl AppConfig {
     /// Whether the app may show notifications: it declares no capabilities
     /// (it gets them all) or grants `notifications`.
     pub(crate) fn notifications(&self) -> bool {
@@ -550,17 +555,13 @@ impl AppConfig {
             .is_some_and(|m| m.iter().any(|k| k.as_str() == Some(kind)))
     }
 
-    /// Adds what the system shows when the app first asks for the
-    /// microphone, the camera and speech recognition, which it requires
-    /// (it ends an app that asks without them): for speech recognition and
-    /// web pages' media capture (`webview.media`). The app's `infoPlist`
-    /// may word them its own way.
+    /// Adds what the system shows when the app's web pages first ask for
+    /// the microphone or the camera (`webview.media`), which it requires
+    /// (it ends an app that asks without them). The app's `infoPlist` may
+    /// word them its own way. Native modules that use them (`nsh-extra`'s
+    /// `speech`) declare theirs in their crate's metadata
+    /// ([`crate::module_meta`]).
     fn usage_descriptions(&self, info: &mut plist::Dictionary) {
-        if self.speech() {
-            for (key, text) in USAGE_DESCRIPTIONS {
-                info.insert(key.into(), plist::Value::String(text.to_owned()));
-            }
-        }
         for (kind, key, text) in WEB_MEDIA_USAGE_DESCRIPTIONS {
             if self.web_media(kind) && !info.contains_key(key) {
                 info.insert(key.into(), plist::Value::String(text.to_owned()));
@@ -581,18 +582,6 @@ impl AppConfig {
         }
     }
 }
-
-/// The usage descriptions of an app that recognizes speech (`Speech`).
-pub(crate) const USAGE_DESCRIPTIONS: [(&str, &str); 2] = [
-    (
-        "NSMicrophoneUsageDescription",
-        "The app listens to the microphone while you dictate.",
-    ),
-    (
-        "NSSpeechRecognitionUsageDescription",
-        "The app turns what you say into text.",
-    ),
-];
 
 /// The usage descriptions of an app whose web pages capture media
 /// (`webview.media`), by kind.
@@ -937,7 +926,7 @@ impl AppConfig {
 /// both, before a build fails on what the other version lacks.
 pub(crate) fn check_nsh_version(entry: &Path) -> anyhow::Result<()> {
     let path = nsh_bundler::app_dir::config_dir_of(entry).join("nsh.json");
-    let Ok(text) = fs::read_to_string(&path) else {
+    let Ok(text) = nsh_bundler::app_dir::read(&path) else {
         return Ok(());
     };
     // A file that does not read is reported by the command itself.
@@ -978,7 +967,7 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
     let config_dir = nsh_bundler::app_dir::config_dir_of(entry);
     let dir = config_dir.as_path();
     let path = dir.join("nsh.json");
-    let Ok(text) = fs::read_to_string(&path) else {
+    let Ok(text) = nsh_bundler::app_dir::read(&path) else {
         return Ok(AppConfig {
             localizations: app_localizations(dir, None),
             ..AppConfig::default()
@@ -2989,6 +2978,23 @@ fn make_ipa(app: &Path, ipa: &Path) -> anyhow::Result<()> {
 mod tests {
     use super::*;
 
+    /// `watch.ignore` reads as the watcher's skip list; without it there
+    /// is nothing to skip.
+    #[test]
+    fn watch_ignore_is_read_from_nsh_json() {
+        let (config, ignored) = parse_config(
+            r#"{
+                "watch": { "ignore": ["vendor", "third/jpeg-turbo"] }
+            }"#,
+        )
+        .unwrap();
+        assert!(ignored.is_empty(), "{ignored:?}");
+        assert_eq!(config.watch.ignore, ["vendor", "third/jpeg-turbo"]);
+        let (config, ignored) = parse_config("{}").unwrap();
+        assert!(ignored.is_empty(), "{ignored:?}");
+        assert!(config.watch.ignore.is_empty());
+    }
+
     /// Without `ios.launchScreen` the launch screen is the system's
     /// background; with it `UILaunchScreen` names the catalog's color and
     /// image, which are sets for both appearances or one for each.
@@ -3691,23 +3697,23 @@ mod tests {
     }
 
     #[test]
-    fn apps_that_may_recognize_speech_explain_it() {
-        let usage = |capabilities: Option<serde_json::Value>| {
+    fn the_speech_capability_adds_no_usage_description() {
+        // Recognizing speech is `nsh-extra`'s `speech`, whose crate
+        // declares its usage descriptions: the capability alone (or no
+        // declaration) adds none.
+        for capabilities in [None, Some(serde_json::json!({ "speech": true }))] {
             let config = AppConfig {
                 capabilities,
                 ..AppConfig::default()
             };
-            let info = macos_info_plist("A", "com.a", "a", &config, false).unwrap();
-            let ios = info_plist("A", "com.a", "a", &config, "iphoneos").unwrap();
-            assert_eq!(
-                info.contains_key("NSMicrophoneUsageDescription"),
-                ios.contains_key("NSSpeechRecognitionUsageDescription")
-            );
-            info.contains_key("NSSpeechRecognitionUsageDescription")
-        };
-        assert!(usage(None));
-        assert!(usage(Some(serde_json::json!({ "speech": true }))));
-        assert!(!usage(Some(serde_json::json!({ "picker": true }))));
+            for info in [
+                macos_info_plist("A", "com.a", "a", &config, false).unwrap(),
+                info_plist("A", "com.a", "a", &config, "iphoneos").unwrap(),
+            ] {
+                assert!(!info.contains_key("NSSpeechRecognitionUsageDescription"));
+                assert!(!info.contains_key("NSMicrophoneUsageDescription"));
+            }
+        }
     }
 
     #[test]

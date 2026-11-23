@@ -918,9 +918,6 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                         });
                         canvas(&mut e, &drawing);
                     }
-                    // No speech recognizer (`Environment::speech`): the core
-                    // ends the sessions first.
-                    | Command::Speech(_)
                     // Trusted web view input is macOS's for now.
                     | Command::SendInput(_)
                     // No performance monitor on Android yet.
@@ -1701,6 +1698,7 @@ fn role_index(role: AccessibilityRole) -> i32 {
         MenuItemRadio => 42,
         Dialog => 43,
         AlertDialog => 44,
+        Textbox => 45,
     }
 }
 
@@ -2182,6 +2180,16 @@ mod tests {
     use nsh_core::file_dialog::{self, FileRequest};
 
     use super::*;
+
+    /// A text box is the edit text class, after the roles `A11y.java`
+    /// already names.
+    #[test]
+    fn a_textbox_follows_the_roles_a11y_java_names() {
+        assert_eq!(
+            role_index(AccessibilityRole::Textbox),
+            role_index(AccessibilityRole::AlertDialog) + 1
+        );
+    }
 
     /// `drawImage(uri, 1, 2)` encoded for `CanvasPainter.java`: the URI,
     /// no source, the source's four floats, the file name's density, then

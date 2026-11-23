@@ -482,7 +482,6 @@ impl AppView {
             clipboard: None,
             host: options.host.clone(),
             picker: None,
-            speech: None,
             audio: None,
             // The app's windows of its own are this backend's.
             windows: None,
@@ -617,7 +616,6 @@ fn initial_environment() -> Environment {
         // `NSSharingServicePicker` (`crate::share`).
         share: true,
         file_requests: true,
-        speech: true,
         notifications: true,
         audio: true,
         web_input: true,

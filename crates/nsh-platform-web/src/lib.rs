@@ -755,7 +755,6 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
             host
         },
         picker: None,
-        speech: None,
         audio: None,
         windows: None,
         login_item: None,

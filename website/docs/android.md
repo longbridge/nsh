@@ -417,6 +417,19 @@ file as `Picker.pickImages` does. `with_env(f)` runs `f` with the thread's JNI e
 logged and cleared). A request made while the app is in the background fails with `ActivityError::NoActivity`. `nsh-extra`'s camera
 (`crates/nsh-extra/src/camera/android.rs`) uses all of them.
 
+## Java listeners in Rust
+
+An Android API that calls back through an interface (a `Runnable` posted to the UI thread, a framework's
+`...Listener`) takes an object `proxy::implement(env, &["android.speech.RecognitionListener"], handler)` makes: a Java
+object implementing those interfaces whose calls reach `handler` (the method's name and its arguments) on the thread
+Java makes them on, so the crate ships no Java of its own. Keep the `Proxy` it returns as long as Java may call it;
+once it is dropped, its calls do nothing. `nsh-extra`'s speech recognition (`crates/nsh-extra/src/speech/android.rs`)
+listens to `SpeechRecognizer` this way. Only interfaces can be implemented so: an API that takes an abstract class
+(`UtteranceProgressListener`) needs a Java subclass, which the crate ships as a library
+([Java code](./packaging.md#java-code)). A method that returns a primitive must get a value boxed as its type
+(`java.lang.Boolean` for `boolean`): returning `None` there, or a call after the `Proxy` is dropped, throws a
+`NullPointerException` in Java.
+
 ## Notifications from other code
 
 [`Notifications`](../modules/nsh.md#notifications) reports presses of the notifications the app showed. Notifications

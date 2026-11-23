@@ -265,7 +265,6 @@ impl Host {
             clipboard: None,
             host: self.host.clone(),
             picker: None,
-            speech: None,
             audio: None,
             windows: None,
             login_item: None,

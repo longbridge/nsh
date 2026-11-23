@@ -1658,9 +1658,6 @@ pub struct Core<M: TextEngine> {
     /// Opens and applies the app's windows of its own in place of the
     /// platform ([`Core::set_window_backend`]).
     window_backend: Option<Arc<dyn crate::desktop::WindowBackend>>,
-    /// Recognizes the app's speech in place of the platform
-    /// ([`Core::set_speech`]).
-    speech: Option<Arc<dyn crate::speech::SpeechBackend>>,
     /// Plays the app's sound in place of the platform ([`Core::set_audio`]).
     audio: Option<Arc<dyn crate::audio::AudioBackend>>,
     /// The app's login item ([`Core::set_login_item`]); without one the app
@@ -1746,7 +1743,6 @@ impl<M: TextEngine> Core<M> {
             clipboard: None,
             picker: None,
             window_backend: None,
-            speech: None,
             audio: None,
             login_item: None,
             components: components::Components::for_viewport(viewport),
@@ -2012,6 +2008,7 @@ impl<M: TextEngine> Core<M> {
             crate::element::global::<crate::element::desktop::WindowAccess>()
                 .set(crate::element::desktop::WindowAccess(Some(access.clone())));
         }
+        self.components.runtime.set_access(access.clone());
         self.access = access;
         self.canvas_images.clear();
     }
@@ -2097,13 +2094,6 @@ impl<M: TextEngine> Core<M> {
     /// stay with the platform.
     pub fn set_window_backend(&mut self, backend: Option<Arc<dyn crate::desktop::WindowBackend>>) {
         self.window_backend = backend;
-    }
-
-    /// Recognizes the app's speech (`Speech.start`) with `backend`, an
-    /// embedding app's own recognizer or a test's fake, instead of the
-    /// platform's (`None`: the platform's, the default).
-    pub fn set_speech(&mut self, backend: Option<Arc<dyn crate::speech::SpeechBackend>>) {
-        self.speech = backend;
     }
 
     /// Plays the app's sound (`Sound`, `AudioPlayer`) with `backend`, an
@@ -4135,6 +4125,7 @@ impl<M: TextEngine> Core<M> {
                         | R::ImageButton
                         | R::Link
                         | R::Search
+                        | R::Textbox
                         | R::Checkbox
                         | R::Radio
                         | R::Switch
@@ -12536,7 +12527,6 @@ fn shown_by(item: &MountItem) -> Shown {
                 | C::Share { .. }
                 | C::RenderCanvas { .. }
                 | C::FileRequest { .. }
-                | C::Speech { .. }
                 | C::Audio { .. }
                 | C::Notification { .. }
                 | C::Desktop { .. }
