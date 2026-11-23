@@ -55,14 +55,23 @@ pub(crate) enum PackageTarget {
 
 impl PackageTarget {
     /// The platform [`crate::module_meta`] reads the app's dependency
-    /// graph for: iOS, macOS and Android, where crates declare package entries.
-    fn module_meta_triple(self) -> Option<(&'static str, crate::module_meta::Platform)> {
+    /// graph for, and the Rust targets it reads it for: iOS, macOS and
+    /// Android, where crates declare package entries. A macOS package is
+    /// read for each architecture it is built for (`arch`; `None`: this
+    /// Mac's), so a crate only another architecture links counts.
+    fn module_meta_triples(
+        self,
+        arch: Option<Arch>,
+    ) -> Option<(&'static [&'static str], crate::module_meta::Platform)> {
         use crate::module_meta::Platform;
         match self {
-            PackageTarget::Ios => Some(("aarch64-apple-ios", Platform::Ios)),
-            PackageTarget::IosSimulator => Some(("aarch64-apple-ios-sim", Platform::Ios)),
-            PackageTarget::Macos => Some((host_macos_triple(), Platform::Macos)),
-            PackageTarget::Android => Some(("aarch64-linux-android", Platform::Android)),
+            PackageTarget::Ios => Some((&["aarch64-apple-ios"], Platform::Ios)),
+            PackageTarget::IosSimulator => Some((&["aarch64-apple-ios-sim"], Platform::Ios)),
+            PackageTarget::Macos => Some((
+                arch.unwrap_or_else(Arch::host).macos_triples(),
+                Platform::Macos,
+            )),
+            PackageTarget::Android => Some((&["aarch64-linux-android"], Platform::Android)),
             _ => None,
         }
     }
@@ -101,6 +110,15 @@ const MACOS_ARM64: &str = "aarch64-apple-darwin";
 const MACOS_X86_64: &str = "x86_64-apple-darwin";
 
 impl Arch {
+    /// This machine's processor.
+    fn host() -> Self {
+        if cfg!(target_arch = "aarch64") {
+            Arch::Arm64
+        } else {
+            Arch::X86_64
+        }
+    }
+
     /// The Rust targets of its builds, one per architecture.
     fn macos_triples(self) -> &'static [&'static str] {
         match self {
@@ -113,11 +131,7 @@ impl Arch {
 
 /// The Rust target of macOS on this machine's processor.
 fn host_macos_triple() -> &'static str {
-    if cfg!(target_arch = "aarch64") {
-        MACOS_ARM64
-    } else {
-        MACOS_X86_64
-    }
+    Arch::host().macos_triples()[0]
 }
 
 /// What cargo builds the runner for `triple` with: nothing for this
@@ -1423,14 +1437,11 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
     let entry = dunce::canonicalize(options.entry)?;
     // What the app's crates and nshm declare for the package (an
     // `Info.plist` key, a manifest entry), under what `nsh.json` sets.
-    if let Some((triple, platform)) = options.target.module_meta_triple()
+    if let Some((triples, platform)) = options.target.module_meta_triples(options.arch)
         && let Some(app) = crate::rust_app::current()
     {
-        crate::module_meta::ModuleMeta::of_workspace(
-            &app.workspace().join("Cargo.toml"),
-            Some(triple),
-        )?
-        .apply(&mut options.config, platform)?;
+        crate::module_meta::ModuleMeta::of_workspace(&app.workspace().join("Cargo.toml"), triples)?
+            .apply(&mut options.config, platform)?;
         match platform {
             crate::module_meta::Platform::Ios => options.config.ios.check(ApplePlatform::Ios)?,
             crate::module_meta::Platform::Macos => options.config.macos.check()?,
@@ -4688,11 +4699,68 @@ mod tests {
         fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// What crates declare is read for the Rust targets a package is built
+    /// for: each architecture of a macOS one.
+    #[test]
+    fn crates_are_read_for_every_target_a_package_builds() {
+        use crate::module_meta::Platform;
+        let read = |target: PackageTarget, arch| target.module_meta_triples(arch);
+        assert_eq!(
+            read(PackageTarget::Macos, Some(Arch::Universal)),
+            Some((&[MACOS_ARM64, MACOS_X86_64][..], Platform::Macos))
+        );
+        assert_eq!(
+            read(PackageTarget::Macos, Some(Arch::X86_64)),
+            Some((&[MACOS_X86_64][..], Platform::Macos))
+        );
+        assert_eq!(
+            read(PackageTarget::Macos, None),
+            Some((&[host_macos_triple()][..], Platform::Macos))
+        );
+        assert_eq!(
+            read(PackageTarget::Ios, None),
+            Some((&["aarch64-apple-ios"][..], Platform::Ios))
+        );
+        assert_eq!(read(PackageTarget::Windows, None), None);
+    }
+
+    /// A crate's macOS translation reaches the package's `InfoPlist.strings`
+    /// for the app's languages.
+    #[test]
+    fn crates_macos_translations_reach_the_package() {
+        use crate::module_meta::{ModuleMeta, Platform};
+        let mut meta = ModuleMeta::default();
+        meta.macos_info.insert(
+            "NSBluetoothAlwaysUsageDescription".into(),
+            serde_json::json!("Connects to peripherals."),
+        );
+        meta.macos_strings.insert(
+            "zh-Hans".into(),
+            serde_json::json!({ "NSBluetoothAlwaysUsageDescription": "连接外设。" }),
+        );
+        let mut config = AppConfig {
+            localizations: vec!["zh-Hans".into()],
+            ..Default::default()
+        };
+        meta.apply(&mut config, Platform::Macos).unwrap();
+        config.macos.check().unwrap();
+        let info = macos_info_plist("Demo", "com.example.demo", "Demo", &config, false).unwrap();
+        let localized = config.macos.localized_info(&info).unwrap();
+        assert!(
+            localized["zh-Hans"]
+                .contains("\"NSBluetoothAlwaysUsageDescription\" = \"连接外设。\";"),
+            "{localized:?}"
+        );
+    }
+
     #[test]
     fn macos_package_merges_and_checks_module_metadata() {
         assert_eq!(
-            PackageTarget::Macos.module_meta_triple(),
-            Some((host_macos_triple(), crate::module_meta::Platform::Macos))
+            PackageTarget::Macos.module_meta_triples(None),
+            Some((
+                &[host_macos_triple()][..],
+                crate::module_meta::Platform::Macos
+            ))
         );
         let mut config = AppConfig::default();
         let mut meta = crate::module_meta::ModuleMeta::default();

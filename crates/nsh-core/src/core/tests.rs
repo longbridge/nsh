@@ -22423,6 +22423,74 @@ fn measures_in_root_coordinates() {
     assert_eq!(c.measure(1000), None);
 }
 
+/// Outside a view's `clipPath` a press reaches neither the view nor the
+/// views in it: the view under it is pressed (CSS's `clip-path`).
+#[test]
+fn presses_outside_a_clip_path_pass_through() {
+    let mut c = core();
+    let listen = |id| Op::Listen {
+        id,
+        event: EventKind::Press,
+        enabled: true,
+    };
+    let insert = |parent, child| Op::Insert {
+        parent,
+        child,
+        before: None,
+    };
+    let size = |id| {
+        style_op(
+            id,
+            &[
+                ("width", StyleValue::Number(100.0)),
+                ("height", StyleValue::Number(100.0)),
+            ],
+        )
+    };
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            Op::Create {
+                id: 4,
+                tag: Tag::View,
+            },
+            Op::Create {
+                id: 6,
+                tag: Tag::View,
+            },
+            size(2),
+            size(4),
+            style_op(
+                4,
+                &[
+                    ("position", StyleValue::Str("absolute")),
+                    ("clipPath", StyleValue::Str("inset(0 0 50% 50% round 10px)")),
+                ],
+            ),
+            size(6),
+            listen(2),
+            listen(6),
+            insert(4, 6),
+            insert(2, 4),
+            insert(ROOT_ID, 2),
+        ],
+    );
+    c.commit().unwrap();
+    // Inside the clip (the top right quarter): the view in the clipped one.
+    assert_eq!(
+        c.press_target(2, point(px(75.0), px(25.0))),
+        Some((6, point(px(75.0), px(25.0))))
+    );
+    // Clipped out, and in its rounded corner: the view behind.
+    for at in [point(px(25.0), px(75.0)), point(px(51.0), px(1.0))] {
+        assert_eq!(c.press_target(2, at), Some((2, at)));
+    }
+}
+
 /// A press passed on into an element (`ElementRef::press_at`) goes to the
 /// innermost view under it that hears presses, in a subtree that takes no
 /// pointer itself, and skips views that take none.

@@ -388,6 +388,7 @@ libraries = ["android/libs/scanner-glue.jar"]
 | `ios.infoPlistStrings` | The text of those keys in other languages, by language, as `nsh.json`'s `ios.infoPlistStrings` ([Packaging](./packaging.md#infoplist-text-in-other-languages)) |
 | `ios.entitlements` | The iOS app's entitlements |
 | `macos.infoPlist` | Keys of the macOS app's `Info.plist`, as `nsh.json`'s `macos.infoPlist` |
+| `macos.infoPlistStrings` | The text of those keys in other languages, as `ios.infoPlistStrings` |
 | `macos.entitlements` | The macOS app's entitlements |
 | `android.permissions` | `<uses-permission>` elements, named as in `nsh.json` (`CAMERA` is `android.permission.CAMERA`) |
 | `android.queries` | `<intent>`, `<package>` and `<provider>` elements of the manifest's `<queries>` |
@@ -405,12 +406,13 @@ in `ios.infoPlist`, `ios.entitlements`, `macos.infoPlist` or `macos.entitlements
 platform stops with an error naming both crates. Keys NSH sets itself (the bundle's identifier, version and the like)
 are not the crates'.
 
-A crate translates the keys the crates set in `ios.infoPlist`, as they word them; a translation of a key no crate sets
-with the app's features (one of a feature that is off) is left out with a warning. The app takes the crates'
-translations for the languages it has only, those of its `locales` or its own `ios.infoPlistStrings` (an empty `{}`
-names a language without text of its own), so a crate may carry many languages without adding any to the app. A key
-the app sets itself takes none of the crates' translations, which would say something else than the app's text. Two
-crates translating a key differently are settled by the app as above, in `ios.infoPlistStrings`.
+A crate translates the keys the crates set in `ios.infoPlist` (`macos.infoPlist` in `macos.infoPlistStrings`), as
+they word them; a translation of a key no crate sets with the app's features (one of a feature that is off) is left out
+with a warning. The app takes the crates' translations for the languages it has only, those of its `locales` or its own
+`ios.infoPlistStrings` (`macos.infoPlistStrings`; an empty `{}` names a language without text of its own), so a crate
+may carry many languages without adding any to the app. A key the app sets itself takes none of the crates'
+translations, which would say something else than the app's text. Two crates translating a key differently are settled
+by the app as above, in `ios.infoPlistStrings` (`macos.infoPlistStrings`).
 
 Develop it beside an app with `nsh add --path ../my-gauge`, which reads the directory as it is. Publish it as any crate (`cargo publish`), with the keyword `nshm` so that it can be found on [crates.io](https://crates.io/keywords/nshm), or push it to Git and tag its versions.
 

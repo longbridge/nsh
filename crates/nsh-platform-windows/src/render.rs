@@ -787,6 +787,9 @@ pub(crate) fn draw_view(cx: &mut DrawCx<'_>, view: &NshView, parent: Mat4, place
     // view paints a single shape, fading that shape's color is the same
     // and needs no layer.
     let faded = opacity < 1.0 && !layered && paints_one_shape(view, &state);
+    // `clipPath`: everything below is drawn inside it, the view's shadows,
+    // border and children included.
+    let clip_path = state.style.clip_path().map(|c| c.resolve(state.frame.size));
     drop(state);
     cx.set_transform(world);
     let grouped = opacity < 1.0 && !faded;
@@ -795,6 +798,9 @@ pub(crate) fn draw_view(cx: &mut DrawCx<'_>, view: &NshView, parent: Mat4, place
             Some(area) => cx.push_opacity_within(opacity, area),
             None => cx.push_opacity(opacity),
         }
+    }
+    if let Some((rect, radii)) = clip_path {
+        cx.push_clip_rounded(rect, radii.to_array().map(|r| r.0));
     }
     let (alpha, fade) = (cx.alpha, cx.fade);
     cx.alpha *= opacity;
@@ -816,6 +822,9 @@ pub(crate) fn draw_view(cx: &mut DrawCx<'_>, view: &NshView, parent: Mat4, place
     }
     cx.alpha = alpha;
     cx.fade = fade;
+    if clip_path.is_some() {
+        cx.pop();
+    }
     if grouped {
         cx.pop();
     }

@@ -21,7 +21,8 @@ use std::{
 
 use super::{IntoReactive, Reactive, SharedString};
 use crate::{
-    BlendMode, BoxShadow, Cursor, FontVariant, ObjectPosition, TransformOrigin, TransitionProps,
+    BlendMode, BoxShadow, ClipInset, Cursor, FontVariant, ObjectPosition, TransformOrigin,
+    TransitionProps,
     color::{Hsla, Rgba, transparent_black},
     effects::{
         ColorStop, Filter, Gradient, GradientKind, GradientSize, KeyframeAnimation, Keyframes,
@@ -855,6 +856,7 @@ crate::static_reactive!(Radians: Radians);
 crate::static_reactive!(Percentage: Percentage);
 crate::static_reactive!(u16: u16);
 crate::static_reactive!(i16: i16);
+crate::static_reactive!(ClipInset: ClipInset);
 
 /// A bound part of a style: it adds its declarations to a style, reading
 /// the signals it binds (run again when they change).
@@ -3010,6 +3012,27 @@ pub trait Styled: Sized {
         self
     }
 
+    /// Clips everything it draws, the elements in it included, to `clip`
+    /// (CSS's `clip-path: inset(..)`): a rectangle inset from its box with
+    /// rounded corners, outside which presses reach neither it nor what is
+    /// in it. Its changes animate with [`Styled::transition_clip_path`]
+    /// (or [`Styled::transition_all`]), so a panel opens out of a corner:
+    /// `.clip_path(ClipInset::new().bottom(percentage(1.0)).left(percentage(1.0)).rounded(px(12.0)))`
+    /// while closed, `.clip_path(ClipInset::new().rounded(px(12.0)))` open.
+    fn clip_path(mut self, clip: impl IntoReactive<ClipInset>) -> Self {
+        self.style().bind_value(clip, |s, clip| {
+            s.value(StyleKey::ClipPath, PropertyValue::ClipPath(Some(clip)));
+        });
+        self
+    }
+
+    /// Clears the clip path, including in state styles.
+    fn clip_path_none(mut self) -> Self {
+        self.style()
+            .value(StyleKey::ClipPath, PropertyValue::ClipPath(None));
+        self
+    }
+
     /// Blurs it and its content by `radius` (Tailwind's `blur-sm` is 8
     /// points).
     fn blur(self, radius: impl Into<Points>) -> Self {
@@ -3216,6 +3239,12 @@ pub trait Styled: Sized {
     /// Changes of the transform animate.
     fn transition_transform(self) -> Self {
         transition(self, TransitionProps::TRANSFORM)
+    }
+
+    /// Changes of the clip path animate (CSS's `transition-property:
+    /// clip-path`).
+    fn transition_clip_path(self) -> Self {
+        transition(self, TransitionProps::CLIP_PATH)
     }
 
     /// Changes jump.

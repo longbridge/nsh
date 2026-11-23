@@ -1215,14 +1215,7 @@ final class Mounter {
     }
 
     private Decor decor(View v) {
-        if (v instanceof StackBox.ScreenBox) return ((StackBox.ScreenBox) v).root.decor;
-        if (v instanceof StackBox) return ((StackBox) v).decor;
-        if (v instanceof Box) return ((Box) v).decor;
-        if (v instanceof TextBox) return ((TextBox) v).decor;
-        if (v instanceof ImageBox) return ((ImageBox) v).decor;
-        if (v instanceof ScrollBox) return ((ScrollBox) v).decor;
-        if (v instanceof InputBox) return ((InputBox) v).decor;
-        return null;
+        return Decor.of(v);
     }
 
     private void style(ByteBuffer b) {
@@ -1253,6 +1246,15 @@ final class Mounter {
         boolean originYFraction = b.getInt() == 1;
         float originY = b.getFloat();
         boolean backfaceHidden = b.getInt() != 0;
+        // `clipPath`: whether there is one, then its offsets, fractions and
+        // radii (`encode.rs` `view_style`).
+        boolean hasClip = b.getInt() != 0;
+        float[] clip = new float[12];
+        for (int i = 0; i < 12; i++) clip[i] = b.getFloat();
+        for (int i = 0; i < 4; i++) {
+            clip[i] *= density;
+            clip[8 + i] *= density;
+        }
         Effects fx = Effects.read(b, density);
         d.opacity = opacity;
         d.background = background;
@@ -1279,6 +1281,7 @@ final class Mounter {
             decor.originY = originYFraction ? originY : originY * density;
             decor.originYFraction = originYFraction;
             decor.backfaceHidden = backfaceHidden;
+            decor.clipPath = hasClip ? clip : null;
             decor.hidden = fx.hidden;
             decor.boxShadows = fx.shadows;
             decor.boxShadowColors = fx.shadowColors;
@@ -1329,10 +1332,13 @@ final class Mounter {
         final int[] borderColors = new int[4];
         final float[] radii = new float[4];
         final float[] borderWidths = new float[4];
+        /** The clip path on screen (mid-transition included), or null. */
+        final float[] clipPath;
         final float opacity, tx, ty, sx, sy, rotate;
 
         Snapshot(View v, Decor decor, Dynamic d) {
             fill = decor != null ? decor.fill : 0;
+            clipPath = decor != null && decor.clipPath != null ? decor.clipPath.clone() : null;
             if (decor != null) {
                 System.arraycopy(decor.borderColors, 0, borderColors, 0, 4);
                 System.arraycopy(decor.radii, 0, radii, 0, 4);
@@ -1379,6 +1385,12 @@ final class Mounter {
         final float[] widths = decor != null ? decor.borderWidths.clone() : new float[4];
         final int props = fx.transitionProps;
         boolean colors = (props & 1) != 0, opacity = (props & 2) != 0, transform = (props & 4) != 0, shape = (props & 16) != 0;
+        // The clip path moves edge by edge (`TransitionProps::CLIP_PATH`);
+        // to or from none it changes at once, as in CSS.
+        final float[] clipTo = decor != null ? decor.clipPath : null;
+        final boolean clip = (props & 32) != 0 && clipTo != null && from.clipPath != null
+                && !java.util.Arrays.equals(clipTo, from.clipPath);
+        final float[] clipNow = clip ? from.clipPath.clone() : null;
         ValueAnimator a = ValueAnimator.ofFloat(0, 1);
         a.setDuration((long) fx.transitionDuration);
         a.setStartDelay((long) fx.transitionDelay);
@@ -1399,6 +1411,11 @@ final class Mounter {
                     // Same as above: the ripple's cached mask must follow the
                     // animated shape (e.g. the press corner morph).
                     rippleMaskDirty(id);
+                }
+                if (clip) {
+                    for (int i = 0; i < 12; i++) clipNow[i] = from.clipPath[i] + (clipTo[i] - from.clipPath[i]) * t;
+                    for (int i = 8; i < 12; i++) clipNow[i] = Math.max(0, clipNow[i]);
+                    decor.clipPath = clipNow;
                 }
             }
             now.opacity = opacity ? from.opacity + (to.opacity - from.opacity) * t : to.opacity;
@@ -1432,6 +1449,7 @@ final class Mounter {
             decor.fill = from.fill;
             System.arraycopy(from.borderColors, 0, decor.borderColors, 0, 4);
         }
+        if (clip) decor.clipPath = clipNow;
         a.start();
     }
 

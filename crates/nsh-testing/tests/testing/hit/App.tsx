@@ -33,6 +33,13 @@ function App() {
       <View style={box(10, 240, 120, 44)}>
         <Text>Unbound</Text>
       </View>
+      {/* Under a view whose clip path leaves it out: the press reaches it. */}
+      <View style={box(10, 310, 120, 44)} onPress={() => pressed.set("through")}>
+        <Text>Through</Text>
+      </View>
+      <View style={{ ...box(0, 300, 200, 70), clipPath: "inset(0 0 0 70% round 8px)" }}>
+        <Text>Clipped</Text>
+      </View>
       <Text>{`Pressed: ${pressed()}`}</Text>
     </View>
   );

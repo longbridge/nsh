@@ -1447,7 +1447,10 @@ fn dev_host_strings(
     meta: &crate::module_meta::ModuleMeta,
 ) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
     let mut strings = config.ios.info_plist_strings.clone();
-    crate::module_meta::add_strings(&mut strings, &meta.crate_strings(config));
+    crate::module_meta::add_strings(
+        &mut strings,
+        &meta.crate_strings(config, crate::apple::ApplePlatform::Ios),
+    );
     // Checked as `nsh.json`'s are.
     crate::apple::AppleConfig {
         info_plist_strings: strings.clone(),

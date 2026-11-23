@@ -1732,20 +1732,22 @@ fn pick_in(view: &NshView, x: f32, y: f32, items: bool) -> Option<Hit> {
         return None;
     }
     let pe = s.props.pointer_events;
-    let clip = s.clips();
+    let clip = s.clips() || s.style.clip_path().is_some();
+    let at = nsh_core::geometry::point(Points(x), Points(y));
     let HitArea {
         inside,
         in_slop,
         children,
         ..
     } = input::hit_area(
-        nsh_core::geometry::point(Points(x), Points(y)),
+        at,
         s.frame.size,
         s.props.hit_slop,
         s.overflow,
-        clip,
+        s.clips(),
         laid_out(s.kind, s.id),
-    );
+    )
+    .clipped(s.style.clip_path(), at, s.frame.size);
     // Hosted items are drawn above the children, clipped with them.
     if items && !s.natives.is_empty() && (!clip || inside) {
         let natives = s.natives.clone();
