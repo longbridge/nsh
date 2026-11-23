@@ -390,6 +390,8 @@ impl Mounter {
                 }
             }
             MountItem::Remove { id } => {
+                // A detached view can be inserted again with the same native
+                // component. `Delete` invalidates its scroll publisher.
                 if let Some(view) = self.get(*id) {
                     crate::input::removed(surface, view);
                     // A removal animation detaches the view when it ends.

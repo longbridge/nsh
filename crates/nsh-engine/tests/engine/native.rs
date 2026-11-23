@@ -695,14 +695,11 @@ mount(App);"#,
     }
     assert!(animator.scrolled(source, Point::new(Points(0.0), Points(27.5))));
     let mut output = None;
-    animator.write_components(
-        |id| Some(id),
-        |id, name, value| {
-            if id == sink && name == "progress" {
-                output = Some(value);
-            }
-        },
-    );
+    animator.write_components(Some, |id, name, value| {
+        if id == sink && name == "progress" {
+            output = Some(value);
+        }
+    });
     assert_eq!(
         output,
         Some(nsh_core::animation::AnimatedPropValue::Number(27.5))

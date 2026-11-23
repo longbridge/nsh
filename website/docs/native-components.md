@@ -207,9 +207,10 @@ native("acme.log").prop("source", serde_json::json!("build")).scroll_value(&offs
 
 Keep the `ComponentContext` supplied to the native factory. On the component's UI thread, call
 `context.set_scroll_offset(offset)` with its current vertical offset in logical `Points` whenever it scrolls,
-including after a programmatic scroll. The call only acts while a binding is present. NSH feeds the value
-into its animation graph on that thread, so a style or animated prop bound to `offset` can follow the scroll
-without JS events. The component stays in control of its scroll position.
+including after a programmatic scroll. NSH remembers the latest offset even before the first binding
+and writes it to the animated value as soon as a binding attaches. NSH updates its animation graph on
+the UI thread, so a style or animated prop bound to `offset` can follow the scroll without JS events.
+The component stays in control of its scroll position.
 
 ## Events
 

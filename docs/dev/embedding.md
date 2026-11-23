@@ -136,8 +136,9 @@
   A native component can also provide a vertical scroll offset to the graph. TSX binds an `AnimatedValue` as the
   host prop `scrollValue` (without listing it in `spec.props`), and Rust uses `NativeView::scroll_value`. On AppKit,
   GTK, and Win32, the component calls `ComponentContext::set_scroll_offset(offset: Points)` on its owning UI
-  thread. The offset is the component's current vertical position in logical points. Its `Animator` writes to the
-  current binding without an engine or JS event. Calls with no binding have no effect. A custom `scrollValue`
+  thread. The offset is the component's current vertical position in logical points. The host caches the most recent
+  offset even before the first binding. When a binding is attached, the host immediately writes the cached offset
+  to the new animated value. `Animator` writes to the graph without an engine or JS event. A custom `scrollValue`
   listed in `spec.props` still goes through the ordinary `$scrollValue` prop path.
   On the GPUI backend (`nsh-platform-gpui`, `native.rs`) a component renders a GPUI element
   (`NativeComponent::render(window, cx) -> Option<AnyElement>`, any GPUI / GPUI Kit element or `Entity` view): the

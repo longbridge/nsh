@@ -195,8 +195,9 @@ native("acme.log").prop("source", serde_json::json!("build")).scroll_value(&offs
 
 保留原生工厂收到的 `ComponentContext`。每当组件滚动时（包括程序触发的滚动），在组件的 UI 线程上调用
 `context.set_scroll_offset(offset)`，传入以逻辑点（`Points`）为单位的当前垂直偏移量。
-只有存在绑定时，这个调用才会生效。NSH 在同一线程将偏移量写入动画图，绑定到 `offset` 的样式或动画 prop
-无需经过 JS 事件即可跟随滚动。滚动位置仍由组件控制。
+即使首次绑定尚未建立，NSH 也会保留最近一次上报的偏移量，并在建立绑定时立即写入动画值。
+NSH 在 UI 线程更新动画图，绑定到 `offset` 的样式或动画 prop 无需经过 JS 事件即可跟随滚动。
+滚动位置仍由组件控制。
 
 ## 事件
 

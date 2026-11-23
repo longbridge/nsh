@@ -168,6 +168,7 @@ pub(crate) struct Surface {
     native_scroll_dirty: Cell<bool>,
     native_scroll_posted: Cell<bool>,
     writing_animations: Cell<bool>,
+    painting_secondary: Cell<bool>,
     /// Stacks, screens and modals.
     pub(crate) nav: RefCell<crate::navigation::Nav>,
     /// Pointer input state ([`crate::input`]).
@@ -313,6 +314,7 @@ impl Surface {
             native_scroll_dirty: Cell::new(false),
             native_scroll_posted: Cell::new(false),
             writing_animations: Cell::new(false),
+            painting_secondary: Cell::new(false),
             nav: RefCell::default(),
             input: Default::default(),
             keyboard: Default::default(),
@@ -833,12 +835,13 @@ impl Surface {
 
     /// Draws the window (`WM_PAINT`).
     pub(crate) fn paint(self: &Rc<Self>) {
+        self.flush_native_scroll();
         self.invalid.set(false);
-        self.painting.set(true);
+        let was_painting = self.painting.replace(true);
         // Deferred: the swap chain posts `WM_NSH_PAINT` when it has room, so
         // `invalid` stays set (no second `WM_PAINT` meanwhile).
         let deferred = crate::render::frame(self);
-        self.painting.set(false);
+        self.painting.set(was_painting);
         self.post_native_scroll_write();
         if deferred {
             self.invalid.set(true);
@@ -980,10 +983,17 @@ impl Surface {
         false
     }
 
+    /// Applies animation mount state after any earlier native reports.
+    pub(crate) fn apply_animation_item(&self, item: &MountItem) {
+        let mut anim = self.anim.borrow_mut();
+        crate::native::write_pending_scrolls(self, &mut anim);
+        anim.apply(item);
+    }
+
     fn apply(self: &Rc<Self>, batch: &MountBatch) {
         crate::access::prepare(batch);
         for item in &batch.items {
-            self.anim.borrow_mut().apply(item);
+            self.apply_animation_item(item);
             if !matches!(
                 item,
                 MountItem::Animation(_) | MountItem::AnimationBindings { .. }
@@ -1006,6 +1016,7 @@ impl Surface {
             }
         }
         self.mounter.borrow_mut().end_batch(self);
+        crate::native::write_pending_scrolls(self, &mut self.anim.borrow_mut());
         #[cfg(feature = "dev")]
         if let Some(model) = &*self.test_model.borrow() {
             model.apply(batch);
@@ -1031,15 +1042,32 @@ impl Surface {
                 return;
             };
             surface.native_scroll_posted.set(false);
-            if surface.native_scroll_dirty.get()
-                && !surface.painting.get()
-                && !surface.writing_animations.get()
-                && surface.mounter.try_borrow_mut().is_ok()
-                && surface.anim.try_borrow_mut().is_ok()
-            {
-                surface.write_animations();
-            }
+            surface.flush_native_scroll();
         });
+    }
+
+    /// A swap chain's wake may already be queued ahead of the animation
+    /// write. Flush before drawing either window.
+    pub(crate) fn flush_native_scroll(&self) {
+        if self.native_scroll_dirty.get()
+            && !self.painting.get()
+            && !self.painting_secondary.get()
+            && !self.writing_animations.get()
+            && self.mounter.try_borrow_mut().is_ok()
+            && self.anim.try_borrow_mut().is_ok()
+        {
+            self.write_animations();
+        }
+    }
+
+    /// Holds animation writes until a secondary window's render returns.
+    pub(crate) fn paint_secondary<R>(&self, draw: impl FnOnce() -> R) -> R {
+        self.flush_native_scroll();
+        let was_painting = self.painting_secondary.replace(true);
+        let result = draw();
+        self.painting_secondary.set(was_painting);
+        self.post_native_scroll_write();
+        result
     }
 
     /// Writes the animated values to the views and reports finished

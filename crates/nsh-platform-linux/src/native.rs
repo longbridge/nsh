@@ -299,7 +299,8 @@ impl NativeState {
             }
         };
         if moved {
-            self.scroll_write_needed.set(true);
+            self.request_scroll_write();
+            surface.try_write_native_scroll_animations(false);
             self.schedule_scroll_write(surface);
         }
     }
@@ -349,6 +350,11 @@ impl NativeState {
         }
     }
 
+    /// Leaves any presentation or completion work for the next safe write.
+    pub(crate) fn request_scroll_write(&self) {
+        self.scroll_write_needed.set(true);
+    }
+
     /// Schedules one GTK idle to present the published animation values.
     pub(crate) fn schedule_scroll_write(&self, surface: &Surface) {
         if !self.scroll_write_needed.get() || self.scroll_write_scheduled.replace(true) {
@@ -361,7 +367,7 @@ impl NativeState {
                 let native = &surface.native;
                 native.scroll_write_scheduled.set(false);
                 if native.scroll_write_needed.get() {
-                    surface.write_native_scroll_animations();
+                    surface.try_write_native_scroll_animations(true);
                 }
             }
             glib::ControlFlow::Break
@@ -1222,6 +1228,54 @@ mod tests {
                     value: Some(SCROLL_NODE),
                 },
             ],
+        });
+    }
+
+    #[test]
+    fn native_scroll_writes_follower_before_returning() {
+        use nsh_core::{MountBatch, MountItem, animation::AnimationProp};
+
+        crate::gtk_test::run(|| {
+            let surface = crate::gtk_test::surface();
+            let publisher = scroll_source(&surface);
+            bind_scroll(&surface);
+            surface.apply(&MountBatch {
+                items: vec![MountItem::AnimationBindings {
+                    id: nsh_core::ROOT_ID,
+                    bindings: vec![(AnimationProp::Opacity, SCROLL_NODE)],
+                }],
+            });
+
+            publisher.set_offset(SCROLL_SOURCE, Points(0.5));
+            assert_eq!(surface.root.state().anim.opacity, Some(0.5));
+            assert!(!surface.native.scroll_write_scheduled.get());
+        });
+    }
+
+    #[test]
+    fn native_scroll_binding_survives_remove_and_insert() {
+        use nsh_core::{MountBatch, MountItem, ROOT_ID};
+
+        crate::gtk_test::run(|| {
+            let surface = crate::gtk_test::surface();
+            let publisher = scroll_source(&surface);
+            bind_scroll(&surface);
+            let insert = || MountItem::Insert {
+                parent: ROOT_ID,
+                child: SCROLL_SOURCE,
+                before: None,
+            };
+            surface.apply(&MountBatch {
+                items: vec![insert(), MountItem::Remove { id: SCROLL_SOURCE }],
+            });
+            let view = crate::gtk_test::view(&surface, SCROLL_SOURCE);
+            assert!(view.parent().is_none());
+            publisher.set_offset(SCROLL_SOURCE, Points(8.0));
+            surface.apply(&MountBatch {
+                items: vec![insert()],
+            });
+            assert!(view.parent().is_some());
+            assert_eq!(surface.anim.borrow().value(SCROLL_NODE), 8.0);
         });
     }
 

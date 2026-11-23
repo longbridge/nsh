@@ -411,19 +411,28 @@ impl ComponentScroll {
             .as_ref()
             .is_some_and(|token| Arc::ptr_eq(token, &self.token));
         drop(current);
-        if !is_current || surface.view(self.id).is_none() {
+        let Some(view) = surface.view(self.id).filter(|_| is_current) else {
+            return;
+        };
+        if !scroll_attached(&view) {
+            item.scroll_offset.set(Some(offset));
+            remember_unattached_scroll(&surface, self.id);
             return;
         }
-        item.scroll_offset.set(Some(offset));
         if let Ok(mut anim) = surface.anim.try_borrow_mut() {
-            surface.native.pending_scrolls.borrow_mut().remove(&self.id);
-            if !anim.scrolled(self.id, 0.0, offset.0) {
+            let pending = write_pending_scrolls(&surface, &mut anim);
+            item.scroll_offset.set(Some(offset));
+            if !anim.scrolled(self.id, 0.0, offset.0) && !pending {
                 return;
             }
         } else {
-            // A nested callback during animation application leaves the
-            // latest offset for the next animation write.
-            surface.native.pending_scrolls.borrow_mut().insert(self.id);
+            item.scroll_offset.set(Some(offset));
+            // Preserve report order when several views drive one value.
+            surface
+                .native
+                .pending_scrolls
+                .borrow_mut()
+                .push((self.id, offset));
         }
         surface.request_native_scroll_write();
     }
@@ -496,7 +505,9 @@ pub(crate) struct NativeState {
     /// The controls, by node.
     hosts: RefCell<FxHashMap<NodeId, Host>>,
     /// Offsets reported while the animator was temporarily borrowed.
-    pending_scrolls: RefCell<FxHashSet<NodeId>>,
+    pending_scrolls: RefCell<Vec<(NodeId, Points)>>,
+    /// Latest reports waiting for their views to enter a window.
+    unattached_scrolls: RefCell<Vec<NodeId>>,
 }
 
 impl NativeState {
@@ -537,6 +548,7 @@ impl NativeState {
     /// close.
     pub(crate) fn clear(&self) {
         self.pending_scrolls.borrow_mut().clear();
+        self.unattached_scrolls.borrow_mut().clear();
         let hosts = std::mem::take(&mut *self.hosts.borrow_mut());
         #[cfg(feature = "webview")]
         for host in hosts.values() {
@@ -624,7 +636,12 @@ pub(crate) fn deleted(surface: &Rc<Surface>, view: &NshView) {
         .native
         .pending_scrolls
         .borrow_mut()
-        .remove(&view.id());
+        .retain(|(id, _)| *id != view.id());
+    surface
+        .native
+        .unattached_scrolls
+        .borrow_mut()
+        .retain(|id| *id != view.id());
     let host = surface.native.hosts.borrow_mut().remove(&view.id());
     drop(host);
 }
@@ -691,23 +708,70 @@ pub(crate) fn component(surface: &Rc<Surface>, view: &NshView, name: &Arc<str>) 
     view.changed();
 }
 
+fn scroll_attached(view: &NshView) -> bool {
+    if !view.attached() {
+        return false;
+    }
+    let mut ancestor = Some(view.clone());
+    while let Some(view) = ancestor {
+        if view
+            .try_state()
+            .is_some_and(|s| s.live.as_ref().is_some_and(|live| live.dying()))
+        {
+            return false;
+        }
+        ancestor = view.parent_view();
+    }
+    true
+}
+
+fn remember_unattached_scroll(surface: &Surface, id: NodeId) {
+    let mut waiting = surface.native.unattached_scrolls.borrow_mut();
+    waiting.retain(|existing| *existing != id);
+    waiting.push(id);
+}
+
 /// A new scroll binding takes the offset reported before it was mounted.
 pub(crate) fn bind_scroll(surface: &Surface, id: NodeId) {
     if let Some(offset) = component_item(surface, id).and_then(|item| item.scroll_offset.get()) {
-        surface.native.pending_scrolls.borrow_mut().remove(&id);
-        surface.anim.borrow_mut().scrolled(id, 0.0, offset.0);
+        if surface.view(id).is_some_and(|view| scroll_attached(&view)) {
+            surface.anim.borrow_mut().scrolled(id, 0.0, offset.0);
+        } else {
+            remember_unattached_scroll(surface, id);
+        }
     }
 }
 
-/// Applies offsets reported while writing animations held the graph.
-pub(crate) fn write_pending_scrolls(surface: &Surface, anim: &mut crate::animation::UiAnimation) {
-    let mut pending = surface.native.pending_scrolls.borrow_mut();
-    for id in pending.drain() {
-        if let Some(offset) = component_item(surface, id).and_then(|item| item.scroll_offset.get())
-        {
-            anim.scrolled(id, 0.0, offset.0);
+/// Applies queued reports in order. An unattached view cannot drive the
+/// graph until it enters a window.
+pub(crate) fn write_pending_scrolls(
+    surface: &Surface,
+    anim: &mut crate::animation::UiAnimation,
+) -> bool {
+    let mut wrote = false;
+    for (id, offset) in surface.native.pending_scrolls.borrow_mut().drain(..) {
+        if surface.view(id).is_some_and(|view| scroll_attached(&view)) {
+            wrote |= anim.scrolled(id, 0.0, offset.0);
+        } else {
+            remember_unattached_scroll(surface, id);
         }
     }
+    surface
+        .native
+        .unattached_scrolls
+        .borrow_mut()
+        .retain(|&id| {
+            if !surface.view(id).is_some_and(|view| scroll_attached(&view)) {
+                return true;
+            }
+            if let Some(offset) =
+                component_item(surface, id).and_then(|item| item.scroll_offset.get())
+            {
+                wrote |= anim.scrolled(id, 0.0, offset.0);
+            }
+            false
+        });
+    wrote
 }
 
 /// `ComponentProps`.
@@ -1399,19 +1463,30 @@ mod tests {
     const SCROLL_NODE: NodeId = 4;
 
     fn mount(surface: &Rc<Surface>, item: MountItem) {
-        surface.anim.borrow_mut().apply(&item);
+        surface.apply_animation_item(&item);
         surface.mounter.borrow_mut().apply(surface, &item);
     }
 
-    fn scroll_source(surface: &Rc<Surface>) -> Option<ComponentScroll> {
+    fn insert(surface: &Rc<Surface>, id: NodeId) {
+        mount(
+            surface,
+            MountItem::Insert {
+                parent: nsh_core::ROOT_ID,
+                child: id,
+                before: None,
+            },
+        );
+    }
+
+    fn scroll_source(surface: &Rc<Surface>, id: NodeId) -> Option<ComponentScroll> {
         mount(
             surface,
             MountItem::Create {
-                id: SCROLL_VIEW,
+                id,
                 kind: ViewKind::Native,
             },
         );
-        let item = component_item(surface, SCROLL_VIEW)?;
+        let item = component_item(surface, id)?;
         Some(item.scroll_source(surface.key()))
     }
 
@@ -1435,7 +1510,7 @@ mod tests {
     #[test]
     fn native_scroll_updates_the_graph_during_mount() -> Result<(), &'static str> {
         let surface = Surface::new(Default::default());
-        let source = scroll_source(&surface).ok_or("native scroll source")?;
+        let source = scroll_source(&surface, SCROLL_VIEW).ok_or("native scroll source")?;
         // The first report can happen inside the factory, before its
         // NativeScrollValue mount item arrives.
         {
@@ -1443,6 +1518,8 @@ mod tests {
             source.set(Points(0.25));
         }
         bind(&surface);
+        insert(&surface, SCROLL_VIEW);
+        surface.write_animations();
         assert_eq!(surface.anim.borrow().value(SCROLL_NODE), 0.25);
         mount(
             &surface,
@@ -1463,7 +1540,8 @@ mod tests {
             source.set(Points(0.75));
             assert_eq!(surface.anim.borrow().value(SCROLL_NODE), 0.75);
         }
-        surface.write_animations();
+        // Paint may run before the dispatcher has delivered the write.
+        surface.flush_native_scroll();
         let follower = surface.view(FOLLOWER).ok_or("animation follower")?;
         assert_eq!(follower.state().anim.opacity, Some(0.75));
         Ok(())
@@ -1473,7 +1551,8 @@ mod tests {
     fn native_scroll_keeps_the_latest_offset_if_the_graph_is_borrowed() -> Result<(), &'static str>
     {
         let surface = Surface::new(Default::default());
-        let source = scroll_source(&surface).ok_or("native scroll source")?;
+        let source = scroll_source(&surface, SCROLL_VIEW).ok_or("native scroll source")?;
+        insert(&surface, SCROLL_VIEW);
         bind(&surface);
         {
             let anim = surface.anim.borrow_mut();
@@ -1487,13 +1566,98 @@ mod tests {
     }
 
     #[test]
+    fn native_scroll_orders_reports_from_views_sharing_a_value() -> Result<(), &'static str> {
+        let surface = Surface::new(Default::default());
+        let first = scroll_source(&surface, SCROLL_VIEW).ok_or("first source")?;
+        let second = scroll_source(&surface, FOLLOWER).ok_or("second source")?;
+        insert(&surface, SCROLL_VIEW);
+        insert(&surface, FOLLOWER);
+        bind(&surface);
+        mount(
+            &surface,
+            MountItem::NativeScrollValue {
+                id: FOLLOWER,
+                value: Some(SCROLL_NODE),
+            },
+        );
+        {
+            let _anim = surface.anim.borrow_mut();
+            first.set(Points(1.0));
+            second.set(Points(2.0));
+            first.set(Points(3.0));
+        }
+        surface.write_animations();
+        assert_eq!(surface.anim.borrow().value(SCROLL_NODE), 3.0);
+        {
+            let _anim = surface.anim.borrow_mut();
+            first.set(Points(4.0));
+        }
+        second.set(Points(5.0));
+        assert_eq!(surface.anim.borrow().value(SCROLL_NODE), 5.0);
+        surface.write_animations();
+        assert_eq!(surface.anim.borrow().value(SCROLL_NODE), 5.0);
+        Ok(())
+    }
+
+    #[test]
+    fn native_scroll_drains_reports_before_rebinding() -> Result<(), &'static str> {
+        const NEW_NODE: NodeId = 5;
+        let surface = Surface::new(Default::default());
+        let source = scroll_source(&surface, SCROLL_VIEW).ok_or("native scroll source")?;
+        insert(&surface, SCROLL_VIEW);
+        bind(&surface);
+        mount(
+            &surface,
+            MountItem::Animation(AnimationOp::CreateValue {
+                node: NEW_NODE,
+                value: 0.0,
+            }),
+        );
+        {
+            let _anim = surface.anim.borrow_mut();
+            source.set(Points(10.0));
+        }
+        mount(
+            &surface,
+            MountItem::NativeScrollValue {
+                id: SCROLL_VIEW,
+                value: Some(NEW_NODE),
+            },
+        );
+        let anim = surface.anim.borrow();
+        assert_eq!(anim.value(SCROLL_NODE), 10.0);
+        assert_eq!(anim.value(NEW_NODE), 10.0);
+        Ok(())
+    }
+
+    #[test]
+    fn native_scroll_replays_after_reattachment() -> Result<(), &'static str> {
+        let surface = Surface::new(Default::default());
+        let source = scroll_source(&surface, SCROLL_VIEW).ok_or("native scroll source")?;
+        insert(&surface, SCROLL_VIEW);
+        bind(&surface);
+        source.set(Points(10.0));
+        mount(&surface, MountItem::Remove { id: SCROLL_VIEW });
+        source.set(Points(20.0));
+        surface.write_animations();
+        assert_eq!(surface.anim.borrow().value(SCROLL_NODE), 10.0);
+        insert(&surface, SCROLL_VIEW);
+        surface.write_animations();
+        assert_eq!(surface.anim.borrow().value(SCROLL_NODE), 20.0);
+        Ok(())
+    }
+
+    #[test]
     fn native_scroll_ignores_workers_and_reused_view_ids() -> Result<(), Box<dyn std::error::Error>>
     {
         let surface = Surface::new(Default::default());
-        let source = scroll_source(&surface).ok_or("native scroll source")?;
+        let source = scroll_source(&surface, SCROLL_VIEW).ok_or("native scroll source")?;
+        insert(&surface, SCROLL_VIEW);
         bind(&surface);
         let other = Surface::new(Default::default());
-        let other_source = scroll_source(&other).ok_or("other native scroll source")?;
+        let other_source =
+            scroll_source(&other, SCROLL_VIEW).ok_or("other native scroll source")?;
+        insert(&other, SCROLL_VIEW);
         bind(&other);
         other_source.set(Points(12.0));
         source.set(Points(20.0));
@@ -1507,7 +1671,8 @@ mod tests {
         assert_eq!(other.anim.borrow().value(SCROLL_NODE), 12.0);
 
         mount(&surface, MountItem::Delete { id: SCROLL_VIEW });
-        let replacement = scroll_source(&surface).ok_or("replacement native scroll source")?;
+        let replacement = scroll_source(&surface, SCROLL_VIEW).ok_or("replacement source")?;
+        insert(&surface, SCROLL_VIEW);
         mount(
             &surface,
             MountItem::NativeScrollValue {

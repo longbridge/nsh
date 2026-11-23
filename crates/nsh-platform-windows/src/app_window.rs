@@ -583,21 +583,23 @@ fn paint(surface: &Rc<Surface>, window: &AppWindow) {
     let web = window.web.borrow().upgrade();
     // Deferred: the swap chain posts `WM_NSH_PAINT` when it has room, so
     // `invalid` stays set (no second `WM_PAINT` meanwhile).
-    let deferred = crate::render::window_frame(
-        surface,
-        crate::render::WindowFrame {
-            root: &window.view,
-            hwnd: window.hwnd,
-            base: window.composition.as_deref(),
-            composition: web.as_deref(),
-            swap: &mut window.swap.borrow_mut(),
-            target_scale: &window.target_scale,
-            size: window.pixels.get(),
-            scale: window.scale.get(),
-            placed: &window.placed,
-            composed: &window.composed,
-        },
-    );
+    let deferred = surface.paint_secondary(|| {
+        crate::render::window_frame(
+            surface,
+            crate::render::WindowFrame {
+                root: &window.view,
+                hwnd: window.hwnd,
+                base: window.composition.as_deref(),
+                composition: web.as_deref(),
+                swap: &mut window.swap.borrow_mut(),
+                target_scale: &window.target_scale,
+                size: window.pixels.get(),
+                scale: window.scale.get(),
+                placed: &window.placed,
+                composed: &window.composed,
+            },
+        )
+    });
     if deferred {
         window.invalid.set(true);
     }

@@ -90,11 +90,11 @@ impl ScrollHost for Host<'_> {
     fn moved(&self, offset: Point<Points>) {
         self.view.moved();
         pin_sticky(self.surface, self.view);
-        let scrolled =
-            self.surface
-                .anim
-                .borrow_mut()
-                .scrolled(self.view.id(), offset.x.0, offset.y.0);
+        let scrolled = {
+            let mut anim = self.surface.anim.borrow_mut();
+            let pending = crate::native::write_pending_scrolls(self.surface, &mut anim);
+            anim.scrolled(self.view.id(), offset.x.0, offset.y.0) || pending
+        };
         if scrolled && self.surface.mounter.try_borrow().is_ok() {
             // While a batch is applied the surface writes animations after it.
             self.surface.write_animations();

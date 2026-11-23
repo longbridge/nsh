@@ -676,6 +676,10 @@ impl Surface {
     /// Writes the animated values to the views and reports finished
     /// animations.
     pub(crate) fn write_animations(&self) {
+        self.write_animations_with_reporting(true);
+    }
+
+    fn write_animations_with_reporting(&self, report_finished: bool) {
         let writing = self.writing_animations.try_borrow_mut().ok();
         let (finished, moved) = {
             let mut anim = self.anim.borrow_mut();
@@ -686,7 +690,15 @@ impl Surface {
                 |id| crate::native::has_component(self, id),
                 |id, name, value| moved.push((id, std::sync::Arc::<str>::from(name), value)),
             );
-            (std::mem::take(&mut anim.finished), moved)
+            let finished = if report_finished {
+                std::mem::take(&mut anim.finished)
+            } else {
+                if !anim.finished.is_empty() {
+                    self.native.request_scroll_write();
+                }
+                Vec::new()
+            };
+            (finished, moved)
         };
         // No surface state borrowed while the app's components run.
         crate::native::component_animated(self, moved);
@@ -698,14 +710,14 @@ impl Surface {
         self.native.schedule_scroll_write(self);
     }
 
-    /// A nested GTK loop can run the scroll idle during a mount or write.
-    /// Those paths flush or reschedule after releasing their borrows.
-    pub(crate) fn write_native_scroll_animations(&self) {
+    /// Publishes to the views immediately if GTK is outside a mount or write.
+    /// The publisher leaves completion events for the ordinary idle write.
+    pub(crate) fn try_write_native_scroll_animations(&self, report_finished: bool) {
         if self.writing_animations.try_borrow_mut().is_ok()
             && self.anim.try_borrow_mut().is_ok()
             && self.mounter.try_borrow_mut().is_ok()
         {
-            self.write_animations();
+            self.write_animations_with_reporting(report_finished);
         }
     }
 

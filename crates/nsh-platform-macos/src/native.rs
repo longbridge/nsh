@@ -317,14 +317,34 @@ impl NativeState {
         true
     }
 
-    pub(crate) fn replay_scroll(&self, id: NodeId, anim: &mut crate::animation::UiAnimation) {
-        if let Some(offset) = self.scroll_sources.borrow().get(&id).and_then(|s| s.offset) {
+    pub(crate) fn apply_scroll_binding(
+        &self,
+        id: NodeId,
+        value: Option<nsh_core::animation::NodeId>,
+        anim: &mut crate::animation::UiAnimation,
+    ) {
+        self.apply_deferred_scrolls(anim);
+        anim.apply(&nsh_core::MountItem::NativeScrollValue { id, value });
+        if value.is_some()
+            && let Some(offset) = self.scroll_sources.borrow().get(&id).and_then(|s| s.offset)
+        {
             anim.scrolled(id, 0.0, offset.0);
         }
     }
 
-    pub(crate) fn defer_scroll(&self, id: NodeId, offset: Points) {
-        self.deferred_scrolls.borrow_mut().push((id, offset));
+    /// Feeds the graph, or queues the report and returns `None` when busy.
+    pub(crate) fn feed_scroll(
+        &self,
+        id: NodeId,
+        offset: Points,
+        anim: &RefCell<crate::animation::UiAnimation>,
+    ) -> Option<bool> {
+        let Ok(mut anim) = anim.try_borrow_mut() else {
+            self.deferred_scrolls.borrow_mut().push((id, offset));
+            return None;
+        };
+        self.apply_deferred_scrolls(&mut anim);
+        Some(anim.scrolled(id, 0.0, offset.0))
     }
 
     pub(crate) fn apply_deferred_scrolls(&self, anim: &mut crate::animation::UiAnimation) {
@@ -3173,11 +3193,7 @@ mod tests {
             node: 2,
             value: 0.0,
         }));
-        anim.apply(&MountItem::NativeScrollValue {
-            id: 4,
-            value: Some(2),
-        });
-        native.replay_scroll(4, &mut anim);
+        native.apply_scroll_binding(4, Some(2), &mut anim);
 
         assert_eq!(anim.value(2), 12.5);
     }
@@ -3190,8 +3206,9 @@ mod tests {
         let mut anim = crate::animation::UiAnimation::default();
         let stale = native.begin_component(4);
         assert!(native.record_scroll(4, &stale, Points(20.0)));
-        native.defer_scroll(4, Points(20.0));
+        native.deferred_scrolls.borrow_mut().push((4, Points(20.0)));
         native.end_component(4);
+        assert!(native.deferred_scrolls.borrow().is_empty());
         let current = native.begin_component(4);
         assert!(!native.record_scroll(4, &stale, Points(40.0)));
         assert!(native.record_scroll(4, &current, Points(80.0)));
@@ -3200,13 +3217,34 @@ mod tests {
             node: 2,
             value: 0.0,
         }));
-        anim.apply(&MountItem::NativeScrollValue {
-            id: 4,
-            value: Some(2),
-        });
-        native.replay_scroll(4, &mut anim);
-        native.apply_deferred_scrolls(&mut anim);
+        native.apply_scroll_binding(4, Some(2), &mut anim);
 
         assert_eq!(anim.value(2), 80.0);
+    }
+
+    #[test]
+    fn a_rebind_drains_reports_for_the_previous_binding_first() {
+        use nsh_core::{MountItem, animation::AnimationOp};
+
+        let native = NativeState::default();
+        let anim = RefCell::new(crate::animation::UiAnimation::default());
+        let instance = native.begin_component(4);
+        let mut graph = anim.borrow_mut();
+        for node in [2, 3] {
+            graph.apply(&MountItem::Animation(AnimationOp::CreateValue {
+                node,
+                value: 0.0,
+            }));
+        }
+        native.apply_scroll_binding(4, Some(2), &mut graph);
+
+        assert!(native.record_scroll(4, &instance, Points(21.0)));
+        assert_eq!(native.feed_scroll(4, Points(21.0), &anim), None);
+        assert_eq!(graph.value(2), 0.0);
+
+        native.apply_scroll_binding(4, Some(3), &mut graph);
+        assert_eq!(graph.value(2), 21.0);
+        assert_eq!(graph.value(3), 21.0);
+        assert!(native.deferred_scrolls.borrow().is_empty());
     }
 }

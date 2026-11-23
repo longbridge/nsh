@@ -889,9 +889,11 @@ impl Surface {
         for item in &batch.items {
             {
                 let mut anim = self.anim.borrow_mut();
-                anim.apply(item);
-                if let MountItem::NativeScrollValue { id, value: Some(_) } = item {
-                    self.native.replay_scroll(*id, &mut anim);
+                match item {
+                    MountItem::NativeScrollValue { id, value } => {
+                        self.native.apply_scroll_binding(*id, *value, &mut anim);
+                    }
+                    _ => anim.apply(item),
                 }
             }
             if !matches!(
@@ -919,21 +921,28 @@ impl Surface {
     /// Feeds a native scroll source on this thread. The current batch or
     /// animation write flushes it if it already owns the relevant state.
     pub(crate) fn native_scrolled(&self, id: NodeId, offset: Points) {
-        let fed = match self.anim.try_borrow_mut() {
-            Ok(mut anim) => {
-                self.native.apply_deferred_scrolls(&mut anim);
-                anim.scrolled(id, 0.0, offset.0)
+        match self.native.feed_scroll(id, offset, &self.anim) {
+            Some(true) => {
+                self.scroll_write_pending.set(true);
+                self.write_scroll_if_ready();
             }
-            Err(_) => {
-                self.native.defer_scroll(id, offset);
-                true
+            Some(false) => {}
+            None => {
+                self.scroll_write_pending.set(true);
+                if self.writing_animations.try_borrow().is_ok() {
+                    self.schedule_scroll_write();
+                }
             }
-        };
-        if fed {
-            self.scroll_write_pending.set(true);
-            if self.writing_animations.try_borrow().is_ok() && self.mounter.try_borrow().is_ok() {
-                quiet(|| self.write_animations());
-            }
+        }
+    }
+
+    fn write_scroll_if_ready(&self) {
+        if self.scroll_write_pending.get()
+            && self.writing_animations.try_borrow().is_ok()
+            && self.mounter.try_borrow().is_ok()
+            && self.anim.try_borrow_mut().is_ok()
+        {
+            quiet(|| self.write_animations());
         }
     }
 
@@ -966,6 +975,10 @@ impl Surface {
         // A native callback can publish from inside this pass. A follow-up
         // pass must start after the callbacks restore their components, and
         // must yield between passes if animated props feed back into a source.
+        self.schedule_scroll_write();
+    }
+
+    fn schedule_scroll_write(&self) {
         if self.scroll_write_pending.get() && !self.scroll_write_scheduled.replace(true) {
             let key = self.key();
             DispatchQueue::main().exec_async(move || {
@@ -973,9 +986,7 @@ impl Surface {
                     return;
                 };
                 surface.scroll_write_scheduled.set(false);
-                if surface.scroll_write_pending.get() && surface.mounter.try_borrow().is_ok() {
-                    quiet(|| surface.write_animations());
-                }
+                surface.write_scroll_if_ready();
             });
         }
     }
