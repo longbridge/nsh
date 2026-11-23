@@ -404,7 +404,10 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `PanActivation::decide`: a fail offset passed first fails, an active offset passed activates; no active offsets: 10
   points in any direction). `PanActivation::decide_move` judges each move along the line from the previous one, so the
   offset passed first decides even when one move (several points apart) passes both; `nsh_core::input::Gate::step` and
-  the iOS gate use it. iOS: a `PanGate` recognizer on the view (`touch.rs`); the pans of the scroll views around
+  the iOS gate use it. A gate needs something to follow its activation, the view's native pan or its responder
+  (`nsh_core::input::gate_activation`): a view whose pan is off (`pan_enabled(false)`, no `pan` values or pan
+  listeners) and that has no responder decides nothing, so its content and the views around it keep the drags, as a
+  stack's swipe back inside a drawer does. iOS: a `PanGate` recognizer on the view (`touch.rs`); the pans of the scroll views around
   it must wait for it to fail (`shouldBeRequiredToFailByGestureRecognizer:`), so a vertical drag scrolls once it passes
   `failOffsetY` and a horizontal one never scrolls. The scroll views inside it that cannot scroll along its one axis
   (`PanActivation::axis`; content and `alwaysBounce…`) wait too: UIScrollView's pan begins after its slop along the

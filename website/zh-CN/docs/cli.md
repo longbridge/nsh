@@ -118,7 +118,7 @@ nsh run my-app/App.tsx --target web
 nsh dev [ENTRY] [--target macos|linux|windows|ios|android|gpui|tui|web|catalyst] [--device <DEVICE>] [--server-only] [--port <PORT>] [--release] [--limits [<LIMITS>]]
 ```
 
-启动开发服务器并打开当前系统的原生宿主：macOS 使用 AppKit，Linux 使用 GTK，Windows 使用 Win32。开发 iOS 或 Android 应用时显式指定 `--target ios` 或 `--target android`。用 `--server-only` 为自己启动的宿主提供服务。服务器构建应用、监视入口所在目录，并把每次重新构建推送给连接到它的宿主。使用 `--server-only` 时，它会打印本机宿主使用的 URL、每个局域网地址对应的设备 URL，以及在 Web 运行时存在时，浏览器运行应用要打开的页面（[Web](./web.md#在浏览器里开发)）：
+启动开发服务器并打开当前系统的原生宿主：macOS 使用 AppKit，Linux 使用 GTK，Windows 使用 Win32。开发 iOS 或 Android 应用时显式指定 `--target ios` 或 `--target android`。用 `--server-only` 为自己启动的宿主提供服务。服务器构建应用、监视入口所在目录以及应用的 `nsh.json`、主题和翻译文件，并把每次重新构建推送给连接到它的宿主。使用 `--server-only` 时，它会打印本机宿主使用的 URL、每个局域网地址对应的设备 URL，以及在 Web 运行时存在时，浏览器运行应用要打开的页面（[Web](./web.md#在浏览器里开发)）：
 
 ```text
 ✓ built App.tsx (3.2 KB js, 9.8 KB bytecode, 21ms)

@@ -451,6 +451,27 @@ pub(crate) struct AppWindow {
     /// The app called `focus()` while it waited for its first frame
     /// (`Window.open(..).focus()`): it shows focused.
     focus_requested: Cell<bool>,
+    /// When it opened (a count): the oldest normal window still open is
+    /// the app's primary one ([`primary`]).
+    opened: u64,
+}
+
+thread_local! {
+    /// How many of the app's own windows opened so far.
+    static OPENED: Cell<u64> = const { Cell::new(0) };
+}
+
+/// The size and scale of the app's primary window: the oldest of its own
+/// normal windows still open that was given a size. What the app sees as
+/// `windowSize()` and `pixelRatio()`; `None` while it shows none.
+pub(crate) fn primary(surface: &Surface) -> Option<(Size<Points>, f32)> {
+    let windows = surface.windows.try_borrow().ok()?;
+    windows
+        .values()
+        .filter(|w| w.kind == WindowKind::Normal)
+        .filter_map(|w| w.reported.get().map(|size| (w, size)))
+        .min_by_key(|(w, _)| w.opened)
+        .map(|(w, size)| (size, w.window.backingScaleFactor() as f32))
 }
 
 /// The container for surface-wide UI. Among visible windows, prefer the
@@ -1501,6 +1522,10 @@ fn open_window(surface: &Rc<Surface>, view: &NshView, open: &OpenWindow) {
             title_bar_area: Cell::new(None),
             showing: Cell::new(Showing::Waiting(0)),
             focus_requested: Cell::new(false),
+            opened: OPENED.with(|n| {
+                n.set(n.get() + 1);
+                n.get()
+            }),
         },
     );
     {
@@ -1862,18 +1887,6 @@ pub(crate) fn resized(surface: &Surface, view: &NshView) {
     surface.window_environment();
 }
 
-/// The size of the app's primary window: the first of its own windows
-/// still open (the earliest root) that has a size, as on Windows. `None`
-/// while it shows none.
-pub(crate) fn primary(surface: &Surface) -> Option<Size<Points>> {
-    let windows = surface.windows.try_borrow().ok()?;
-    windows
-        .iter()
-        .filter_map(|(id, w)| w.reported.get().map(|size| (*id, size)))
-        .min_by_key(|(id, _)| *id)
-        .map(|(_, size)| size)
-}
-
 /// The displays changed: the windows of the app's own read their state
 /// again.
 pub(crate) fn screens_changed(surface: &Surface) {
@@ -1885,6 +1898,8 @@ pub(crate) fn screens_changed(surface: &Surface) {
     for id in ids {
         state_changed(surface, id);
     }
+    // The primary window may be on a display of another scale now.
+    surface.window_environment();
 }
 
 // --- The key window in the background -----------------------------------------------------

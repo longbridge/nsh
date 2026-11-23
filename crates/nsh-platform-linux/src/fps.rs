@@ -79,7 +79,6 @@ pub(crate) struct Fps {
     phases: RefCell<Phases>,
     /// Batch drains since the last line: their main-thread costs.
     drains: RefCell<Vec<Duration>>,
-    logged: Cell<Instant>,
     hud: RefCell<Option<Hud>>,
     /// The panel shows only the frame rate and CPU (a click toggles it; per
     /// window, for the session).
@@ -89,10 +88,16 @@ pub(crate) struct Fps {
     window: RefCell<Option<glib::WeakRef<gtk::Widget>>>,
     /// The windows whose frame clocks carry its handlers ([`install`]).
     hooked: RefCell<Vec<glib::WeakRef<gtk::Widget>>>,
+    /// Logs a line every [`PERIOD`] ([`start_logging`]), whether or not
+    /// any window draws.
+    log_timer: Cell<Option<glib::SourceId>>,
 }
 
 impl Drop for Fps {
     fn drop(&mut self) {
+        if let Some(timer) = self.log_timer.take() {
+            timer.remove();
+        }
         self.hud.get_mut().take();
         MEASURING.set(false);
     }
@@ -111,11 +116,11 @@ impl Fps {
             layout: Cell::default(),
             phases: RefCell::default(),
             drains: RefCell::default(),
-            logged: Cell::new(Instant::now()),
             hud: RefCell::default(),
             collapsed: Cell::new(false),
             window: RefCell::default(),
             hooked: RefCell::default(),
+            log_timer: Cell::new(None),
         }
     }
 
@@ -657,10 +662,28 @@ fn after_paint(fps: &Fps, clock: &gdk::FrameClock) {
     let (interval, _) = clock.refresh_info(clock.frame_time());
     let interval = Duration::from_micros(interval.max(0) as u64);
     fps.monitor.vsync(now, interval);
-    if now.duration_since(fps.logged.get()) < PERIOD {
-        return;
+}
+
+/// Logs one `nsh::fps` line every [`PERIOD`] from a timer, as the other
+/// platforms do: a line comes each second while the monitor is on, also
+/// when no window draws (an idle app, a window on another workspace), and
+/// says so with its frame count.
+pub(crate) fn start_logging(fps: &Rc<Fps>) {
+    if let Some(timer) = fps.log_timer.take() {
+        timer.remove();
     }
-    fps.logged.set(now);
+    let weak = Rc::downgrade(fps);
+    let timer = glib::timeout_add_local(PERIOD, move || match weak.upgrade() {
+        Some(fps) => {
+            log_line(&fps);
+            glib::ControlFlow::Continue
+        }
+        None => glib::ControlFlow::Break,
+    });
+    fps.log_timer.set(Some(timer));
+}
+
+fn log_line(fps: &Fps) {
     fps.monitor.set_process(fps.sampler.borrow_mut().sample());
     let drains = stat(&mut fps.drains.borrow_mut());
     let mut phases = fps.phases.borrow_mut();

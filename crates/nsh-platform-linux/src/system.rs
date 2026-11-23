@@ -471,7 +471,8 @@ fn update(surface: &Surface, appearance: Appearance) {
     env.reduce_motion = appearance.reduce_motion;
     env.rtl = appearance.rtl;
     env.screen_reader = appearance.screen_reader;
-    env.pixel_ratio = pixel_ratio(&surface.root);
+    env.pixel_ratio = crate::window::primary(surface)
+        .map_or_else(|| pixel_ratio(&surface.root), |(_, ratio)| ratio);
     env.os_version = OS_VERSION.with(|v| *v);
     env.safe_area = Edges::default();
     env.keyboard_height = px(0.0);
@@ -556,8 +557,33 @@ fn interface_scheme(settings: &gtk::Settings) -> Option<String> {
     glib::EnumValue::from_value(&value).map(|(_, v)| v.nick().to_owned())
 }
 
+/// Tells the engine the window size and scale the app sees (`windowSize()`,
+/// `pixelRatio()`, the size classes): its primary window's
+/// ([`crate::window::primary`]), as the user resizes it, else the
+/// surface's (an embedded view, or a host whose app shows no window). The
+/// host's own window never shows under the desktop window model: reporting
+/// it would lay the app out for a window nobody sees.
+pub(crate) fn window_environment(surface: &Surface) {
+    let (size, ratio) = crate::window::primary(surface)
+        .unwrap_or_else(|| (surface.root.state().frame.size, pixel_ratio(&surface.root)));
+    let mut env = surface.environment.get();
+    if env.window == size && env.pixel_ratio == ratio {
+        return;
+    }
+    let rescaled = env.pixel_ratio != ratio;
+    env.window = size;
+    env.pixel_ratio = ratio;
+    // Only the size and scale: the appearance stays as it was applied,
+    // which a live resize would otherwise apply again on every step.
+    surface.environment.set(env);
+    surface.control(|c| c.set_environment(env));
+    if rescaled {
+        crate::image::rescaled(surface);
+    }
+}
+
 /// Device pixels per point of `root`'s window.
-fn pixel_ratio(root: &NshView) -> f32 {
+pub(crate) fn pixel_ratio(root: &NshView) -> f32 {
     root.native()
         .and_then(|n| n.surface())
         .map_or(root.scale_factor() as f64, |s| s.scale()) as f32

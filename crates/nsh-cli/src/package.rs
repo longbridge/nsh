@@ -220,6 +220,11 @@ pub(crate) struct AppConfig {
     /// Read and checked by the bundler.
     #[serde(default, rename = "resolve")]
     _resolve: Option<serde_json::Value>,
+    /// The entry module, relative to `nsh.json` (`"app/App.tsx"`; `App.tsx`
+    /// beside it by default): read by `entry::resolve`, checked by
+    /// `nsh_bundler::app_dir::config_entry`.
+    #[serde(default, rename = "entry")]
+    _entry: Option<String>,
     /// The app's Rust crate: its builds are the app's own (`rust_app.rs`).
     #[serde(default, rename = "rust")]
     _rust: Option<serde_json::Value>,
@@ -927,12 +932,11 @@ impl AppConfig {
     }
 }
 
-/// Fails when the `nsh.json` next to `entry` asks for NSH versions
+/// Fails when the `nsh.json` of `entry` asks for NSH versions
 /// (`"nsh": ">=0.5"`) this CLI is not one of, with one message that names
 /// both, before a build fails on what the other version lacks.
 pub(crate) fn check_nsh_version(entry: &Path) -> anyhow::Result<()> {
-    let dir = entry.parent().unwrap_or(Path::new("."));
-    let path = dir.join("nsh.json");
+    let path = nsh_bundler::app_dir::config_dir_of(entry).join("nsh.json");
     let Ok(text) = fs::read_to_string(&path) else {
         return Ok(());
     };
@@ -967,9 +971,12 @@ fn nsh_version_error(required: &serde_json::Value, version: &str) -> Option<Stri
     (!req.matches(&this)).then(|| format!("this app requires nsh {text}; this is nsh {version}"))
 }
 
-/// Reads `nsh.json` next to `entry`, if any; relative paths become absolute.
+/// Reads the `nsh.json` of `entry`, if any: beside it, or the one above
+/// that names it (`"entry"`, `nsh_bundler::app_dir::config_dir_of`);
+/// relative paths become absolute, from its directory.
 pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
-    let dir = entry.parent().unwrap_or(Path::new("."));
+    let config_dir = nsh_bundler::app_dir::config_dir_of(entry);
+    let dir = config_dir.as_path();
     let path = dir.join("nsh.json");
     let Ok(text) = fs::read_to_string(&path) else {
         return Ok(AppConfig {
@@ -1276,9 +1283,7 @@ fn warn_ignored(path: &Path, ignored: &[String]) {
 /// file must be inside the app's directory, symbolic links resolved, as the
 /// page ships it as it is.
 pub(crate) fn web_host_module(entry: &Path, host: &Path) -> anyhow::Result<PathBuf> {
-    // `App.tsx`'s parent is the empty path, which does not canonicalize.
-    let dir = entry.parent().filter(|d| !d.as_os_str().is_empty());
-    let dir = dunce::canonicalize(dir.unwrap_or(Path::new(".")))
+    let dir = dunce::canonicalize(nsh_bundler::app_dir::config_dir_of(entry))
         .with_context(|| format!("the app's directory of {}", entry.display()))?;
     let module = dunce::canonicalize(host)
         .with_context(|| format!("nsh.json web.host {}", host.display()))?;
@@ -1292,13 +1297,12 @@ pub(crate) fn web_host_module(entry: &Path, host: &Path) -> anyhow::Result<PathB
     Ok(module)
 }
 
-/// The app's display name and id: from the config, else the entry's
-/// directory name and `com.example.<name>`.
+/// The app's display name and id: from the config, else the name of its
+/// directory (`nsh.json`'s, else the entry's) and `com.example.<name>`.
 pub(crate) fn name_and_id(entry: &Path, config: &AppConfig) -> (String, String) {
     let name = config.name.clone().unwrap_or_else(|| {
-        entry
-            .parent()
-            .and_then(|d| d.file_name())
+        nsh_bundler::app_dir::config_dir_of(entry)
+            .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "App".to_owned())
     });
@@ -1859,7 +1863,8 @@ fn package_android(
         .join(format!("{name}.{}", options.format.extension()));
     let version = config.version.as_deref().unwrap_or("1.0.0");
     // `android/res/` next to `nsh.json`: the app's own resources.
-    let app_dir = options.entry.parent().unwrap_or(Path::new("."));
+    let config_dir = nsh_bundler::app_dir::config_dir_of(options.entry);
+    let app_dir = config_dir.as_path();
     let res = Some(app_dir.join("android").join("res")).filter(|dir| dir.is_dir());
     let library_cache = app_dir.join(".nsh/android/libraries");
     let step = ui::Step::start(format!("packaging {}", ui::path(&apk_path)));
