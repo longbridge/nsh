@@ -344,6 +344,7 @@ pub(crate) fn track_states(surface: &Rc<Surface>, view: &NshView, states: u16) {
         // whatever is tracked, so it stays.
         s.states &= input::reported_states(states);
     }
+    view.settle_leaf();
     update_hover_tracking(surface, view);
 }
 
@@ -1610,6 +1611,10 @@ fn pick_in(view: &NshView, p: (f32, f32)) -> Option<Hit> {
         return own();
     }
     if pe != PointerEvents::BoxOnly {
+        // Leaves (#2066) are its only children when it has them.
+        if !view.leaf_children().is_empty() {
+            return pick_children(view, p).or_else(own);
+        }
         // Hosted views and children in their AppKit order, topmost first:
         // hosted views are usually above the children, but not always (a
         // modal is above the image of one leaving, which the root hosts).
@@ -1636,8 +1641,15 @@ fn pick_in(view: &NshView, p: (f32, f32)) -> Option<Hit> {
 /// `view`'s container, and any native raised among them (a lifted input's
 /// pad, which stacks there rather than over the whole view).
 fn pick_children(view: &NshView, p: (f32, f32)) -> Option<Hit> {
-    let container = view.container();
     let cp = into_container(view, p);
+    let leaves = view.leaf_children();
+    if !leaves.is_empty() {
+        return leaves
+            .iter()
+            .rev()
+            .find_map(|child| into_child(child, cp).and_then(|c| pick_in(child, c)));
+    }
+    let container = view.container();
     let subviews: Vec<_> = container.subviews().iter().collect();
     subviews
         .into_iter()
