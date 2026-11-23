@@ -1635,7 +1635,7 @@ fn bounds_object<'js>(
     Ok(obj)
 }
 
-/// `Modifiers` (`{ control, alt, shift, platform }`, GPUI's names).
+/// `Modifiers` (`{ control, alt, shift, platform, altGraph }`, GPUI's names).
 fn modifiers_object<'js>(
     cx: &Ctx<'js>,
     m: &nsh_core::keymap::Modifiers,
@@ -1645,6 +1645,7 @@ fn modifiers_object<'js>(
     obj.set("alt", m.alt)?;
     obj.set("shift", m.shift)?;
     obj.set("platform", m.cmd)?;
+    obj.set("altGraph", m.alt_graph)?;
     Ok(obj)
 }
 
@@ -2257,6 +2258,7 @@ const report = (v) => text(String(v));
             let modifiers: rquickjs::Object = obj.get("modifiers").unwrap();
             assert!(modifiers.get::<_, bool>("control").unwrap());
             assert!(!modifiers.get::<_, bool>("shift").unwrap());
+            assert!(!modifiers.get::<_, bool>("altGraph").unwrap());
             assert_eq!(obj.get::<_, u32>("clickCount").unwrap(), 2);
         });
     }

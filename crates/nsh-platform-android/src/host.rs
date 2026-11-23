@@ -1534,6 +1534,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_mouse(
         alt: modifiers & 2 != 0,
         shift: modifiers & 4 != 0,
         cmd: modifiers & 8 != 0,
+        alt_graph: false,
     };
     // Android's hover events only come with no button down.
     let event = nsh_core::MouseEvent::new(
@@ -1579,6 +1580,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_press(
             alt: modifiers & 2 != 0,
             shift: modifiers & 4 != 0,
             cmd: modifiers & 8 != 0,
+            alt_graph: false,
         },
         clicks: clicks.max(1) as u32,
     };
