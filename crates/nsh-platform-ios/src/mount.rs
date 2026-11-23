@@ -4563,6 +4563,10 @@ impl Mounter {
         if !self.waiting_modals.contains(&id) {
             self.waiting_modals.push(id);
         }
+        // Presented once that modal is gone: its dismissal's end does so.
+        if crate::navigation::held_under_system_ui(awaited) {
+            return;
+        }
         let Some(coordinator) = awaited.transitionCoordinator() else {
             return Self::present_waiting(&self.shared);
         };

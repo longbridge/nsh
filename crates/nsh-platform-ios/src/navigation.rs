@@ -19,7 +19,7 @@ use std::{
 };
 
 use block2::RcBlock;
-use dispatch2::{DispatchQueue, MainThreadBound};
+use dispatch2::{DispatchQueue, DispatchTime, MainThreadBound};
 use nsh_core::{
     Color, EdgeInsets, EventKind, EventPayload, HeaderItem, HeaderItemContent, HeaderSystemItem,
     ModalAnimation, ModalConfig, ModalPresentation, NavShader, NodeId, PayloadValue, Points,
@@ -336,6 +336,10 @@ pub(crate) struct ModalIvars {
     /// ([`dismiss_settled`]): a modal presented over it meanwhile would go
     /// with it once it runs ([`transition_over`]).
     deferred: Cell<bool>,
+    /// Its dismissal waits for the system UI presented over it (an alert,
+    /// a picker, a share sheet) to close ([`hold_under_system_ui`]): a
+    /// modal presented over it meanwhile would go with it once it runs.
+    held: Cell<bool>,
     /// The identifiers of the sheet's UIKit detents and the detents
     /// (`detents`) they stand for, to report the one the user picks.
     detents: RefCell<Vec<(Retained<NSString>, SheetDetent)>>,
@@ -533,6 +537,7 @@ impl ModalController {
             closed: Cell::new(false),
             dismissing: Cell::new(false),
             deferred: Cell::new(false),
+            held: Cell::new(false),
             detents: RefCell::new(Vec::new()),
             screen: Cell::new(0.0),
         });
@@ -2583,6 +2588,10 @@ impl ModalHost {
         self.taken = false;
         self.controller.ivars().closed.set(false);
         self.controller.ivars().dismissing.set(false);
+        // Kept under system UI last time it went (`hold_under_system_ui`).
+        if let Some(view) = self.controller.view() {
+            view.setUserInteractionEnabled(true);
+        }
         let Some(mut presenter) = controller_of(from) else {
             return log::warn!("cannot present a modal: no view controller shows the app");
         };
@@ -2756,12 +2765,71 @@ fn dismiss_settled(
             return;
         }
     }
+    if system_ui_over(&controller) {
+        return hold_under_system_ui(controller, animated, done);
+    }
     match controller.presentingViewController() {
         Some(presenter) => {
             presenter.dismissViewControllerAnimated_completion(animated, Some(&done))
         }
         None if waited => done.call(()),
         None => controller.dismissViewControllerAnimated_completion(animated, Some(&done)),
+    }
+}
+
+/// Whether system UI, and only that, is presented over `controller`: an
+/// alert, a picker, a share sheet or what else is not one of NSH's modals
+/// (those over it are dismissed with it, and come back if the app still
+/// shows them).
+fn system_ui_over(controller: &UIViewController) -> bool {
+    let mut next = controller.presentedViewController();
+    let mut any = false;
+    while let Some(c) = next {
+        if c.isKindOfClass(ModalController::class()) {
+            return false;
+        }
+        any = true;
+        next = c.presentedViewController();
+    }
+    any
+}
+
+/// How often a modal kept under system UI looks whether it closed, in
+/// milliseconds.
+const HELD_LOOK_MS: u64 = 250;
+
+/// Keeps `controller` presented, its content gone and taking no touches,
+/// until the system UI over it closes, then dismisses it. Dismissed through
+/// its presenter now, it would take that UI along, and UIKit tells no one:
+/// an alert's actions, a picker's delegate, a share sheet's completion
+/// never run, and what the app awaits never settles. That happens when the
+/// app shows system UI as it closes a modal: over a sheet drawn by the app,
+/// whose motion out ends after the UI came, or over a modal the app closes
+/// on a later turn. The modal's close is reported once it is gone, as
+/// always.
+fn hold_under_system_ui(
+    controller: Retained<ModalController>,
+    animated: bool,
+    done: RcBlock<dyn Fn()>,
+) {
+    controller.ivars().held.set(true);
+    if let Some(view) = controller.view() {
+        view.setUserInteractionEnabled(false);
+    }
+    let mtm = controller.mtm();
+    let bound = MainThreadBound::new((controller, done), mtm);
+    let when = DispatchTime::NOW.time((HELD_LOOK_MS * 1_000_000) as i64);
+    let scheduled = DispatchQueue::main().after(when, move || {
+        let mtm = MainThreadMarker::new().expect("the main queue");
+        let (controller, done) = bound.into_inner(mtm);
+        if system_ui_over(&controller) {
+            return hold_under_system_ui(controller, animated, done);
+        }
+        controller.ivars().held.set(false);
+        dismiss_settled(controller, animated, done, true);
+    });
+    if let Err(err) = scheduled {
+        log::warn!("cannot wait for the system UI over a modal: {err:?}");
     }
 }
 
@@ -2935,7 +3003,9 @@ pub(crate) fn presented_sheet(window: &objc2_ui_kit::UIWindow) -> Option<Retaine
 /// transition may not have started yet), or whose dismissal waits for a
 /// transition to end ([`dismiss_settled`], from an earlier pass): for that
 /// one, the transition it waits for, or itself once that has ended and its
-/// dismissal is about to run. Presented over a leaving one, the modal
+/// dismissal is about to run; or whose dismissal waits for the system UI
+/// over it to close ([`hold_under_system_ui`]). Presented over a leaving
+/// one, the modal
 /// would go with it (UIKit dismisses everything above the controller it
 /// dismisses); over a moving one UIKit refuses it. A dismissal UIKit
 /// refused leaves its modal in place, with no transition: no longer
@@ -2956,9 +3026,20 @@ pub(crate) fn transition_over(
         if modal.is_some_and(|m| m.deferred.get()) {
             return Some(transition_at(&c).unwrap_or(c));
         }
+        if modal.is_some_and(|m| m.held.get()) {
+            return Some(c);
+        }
         next = c.presentedViewController();
     }
     None
+}
+
+/// Whether `controller` is a modal whose dismissal waits for the system UI
+/// over it to close ([`hold_under_system_ui`]).
+pub(crate) fn held_under_system_ui(controller: &UIViewController) -> bool {
+    controller
+        .downcast_ref::<ModalController>()
+        .is_some_and(|m| m.ivars().held.get())
 }
 
 /// The view controller whose view contains `view`.
