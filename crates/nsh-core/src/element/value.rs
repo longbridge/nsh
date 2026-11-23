@@ -222,6 +222,10 @@ pub trait PropEnum: JsValue {
 /// in the JS call or when JS receives it) and its TypeScript type.
 /// `#[derive(PropEnum)]` implements it for enums of unit variants,
 /// `#[derive(JsObject)]` for structs.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` cannot cross to JS",
+    note = "a `#[class]` / `#[module]` member returning `Later<T>` (or `Result<Later<T>, E>`) must spell that type out: the macro reads the signature's tokens and does not see through a type alias"
+)]
 pub trait JsValue: Sized {
     /// Its TypeScript type (`string`, `AlertButton`), declaring the named
     /// types it uses in `types`.
