@@ -2426,6 +2426,29 @@ class Player {
     if (this.readingHosts?.size) this.orderReading();
     if (this.relating?.size) this.linkRelations();
     if (this.viewportOverlays) this.syncFloats();
+    if (this.autoFocusing?.size) this.focusAppeared();
+  }
+
+  /** The `autoFocus` inputs the batch put in the page take the focus now,
+   * in the turn that applied it: a batch an event's handler made is still
+   * in that event, where iOS Safari raises the keyboard for a focus (and
+   * only there: not from a timer after it). One not in the page yet (its
+   * container comes in a later batch) waits for that batch; one removed
+   * meanwhile is forgotten. Like a focus command's, the focus is this
+   * press's (`pressFocus`): the mouse events the browser makes of a touch
+   * would otherwise take it away, the finger being over the views the
+   * press replaced. */
+  focusAppeared() {
+    for (const el of this.autoFocusing) {
+      if (this.views.get(el._id) !== el) {
+        this.autoFocusing.delete(el);
+        continue;
+      }
+      if (!el.isConnected) continue;
+      this.autoFocusing.delete(el);
+      el._field?.focus();
+      this.pressFocus = el._field ?? null;
+    }
   }
 
   /** The DOM id of view `id`: unique on the page, beside other players. */
@@ -5747,7 +5770,8 @@ class Player {
     this.inputScrolled(el, field);
     if (config.autoFocus && !el._autoFocused) {
       el._autoFocused = true;
-      setTimeout(() => field.focus(), 0);
+      // Focused once the batch has put it in the page (`focusAppeared`).
+      (this.autoFocusing ??= new Set()).add(el);
     }
   }
 

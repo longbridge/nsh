@@ -806,7 +806,9 @@ browsers' touches into what phones report:
   text, selectable views and hosted pages), as in native apps; it focuses the app's window in an iframe. A touch moves
   the focus as the browser does (a tap outside a field closes the keyboard), unless its press made the app focus a field
   (an editor's text): the mouse events the browser makes of the touch then leave the focus in the field (`mouseDown`,
-  `pressFocus`), so the keyboard stays open. The views under the newest
+  `pressFocus`), so the keyboard stays open. An `autoFocus` input takes the focus at the end of the batch that put it in
+  the page (`focusAppeared`), in the same turn, never from a timer: iOS Safari raises the keyboard only for a focus inside
+  the event's handler, and the focus is the press's (`pressFocus`) as a focus command's is. The views under the newest
   `Dialog` or alert are `inert`; the focus one took comes back when it closes.
 - **Accessibility**: `op_vp` sets ARIA from the accessibility props (roles mapped by `ARIA_ROLES`, `aria-disabled`,
   `-selected`, `-checked`, `-busy`, `-expanded`, `-value*`, `-live`, `-hidden`, the hint as `aria-description`);

@@ -958,6 +958,55 @@ test("a touch whose press focused a field leaves the focus there", () => {
   delete globalThis.window;
 });
 
+test("an autoFocus input is focused as the batch that shows it is applied, not after it", () => {
+  const { player } = fakePlayer();
+  Object.assign(player, {
+    views: new Map(),
+    changedStacks: new Set(),
+    removals: [],
+    endLayoutAnimation() {},
+  });
+  const focused = [];
+  const input = (id) => {
+    const field = {
+      tagName: "INPUT",
+      classList: { toggle() {} },
+      getAttribute: () => null,
+      setAttribute() {},
+      removeAttribute() {},
+      focus: () => focused.push(id),
+    };
+    const el = { _id: id, _field: field, isConnected: false, getAttribute: () => null };
+    player.views.set(id, el);
+    return el;
+  };
+  // Shown by this batch: focused when it is applied, in the same turn (an
+  // event's handler: iOS Safari raises the keyboard only there), and the
+  // press's, so the mouse events of a touch leave it there.
+  const shown = input(1);
+  player.op_x = () => (shown.isConnected = true);
+  player.apply([["in", 1, { multiline: false, autoFocus: true }, null], ["x"]]);
+  assert.deepEqual(focused, [1]);
+  assert.equal(player.pressFocus, shown._field);
+  // Shown again: focused once only, as it appeared.
+  player.apply([["in", 1, { multiline: false, autoFocus: true }, null]]);
+  assert.deepEqual(focused, [1]);
+  // Not in the page yet: it waits for the batch that puts it there.
+  const later = input(2);
+  player.apply([["in", 2, { multiline: false, autoFocus: true }, null]]);
+  assert.deepEqual(focused, [1]);
+  later.isConnected = true;
+  player.apply([]);
+  assert.deepEqual(focused, [1, 2]);
+  // Removed before it was shown: forgotten.
+  input(3);
+  player.apply([["in", 3, { multiline: false, autoFocus: true }, null]]);
+  player.views.delete(3);
+  player.apply([]);
+  assert.deepEqual(focused, [1, 2]);
+  assert.equal(player.autoFocusing.size, 0);
+});
+
 test("Return presses a focused pressable, not a focused stop that takes no presses", () => {
   const { player } = fakePlayer();
   player.wasm.nsh_key = () => -1;
