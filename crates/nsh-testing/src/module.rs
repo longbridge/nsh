@@ -1231,6 +1231,15 @@ fn mime_of(name: &str) -> &'static str {
     }
 }
 
+/// Where a press lands ([`App::press`]), in points from the view's top left
+/// corner.
+#[derive(Debug, Default, Clone, Copy, PartialEq, JsObject)]
+#[non_exhaustive]
+pub struct PressOptions {
+    /// The point in the view the press lands on; its middle when omitted.
+    pub position: Option<Point<Points>>,
+}
+
 /// How far a drag moves the finger ([`App::drag`]), in points.
 #[derive(Debug, Default, Clone, Copy, PartialEq, JsObject)]
 pub struct DragBy {
@@ -2135,11 +2144,19 @@ const CLOSED: &str = "the app is closed: the test that opened it ended";
 #[class]
 impl App {
     /// Presses what `selector` names (or the nearest view around it that
-    /// hears presses, as a tap on a button's text does). On iOS, a header
-    /// button of `ios.headerRightItems` is pressed too, by `id:<key>` or
-    /// its label: it presses it, or opens its menu.
-    pub async fn press(this: Instance<Self>, selector: String) -> Result<(), JsError> {
-        step(&this, move |app| app.press(&selector)).await
+    /// hears presses, as a tap on a button's text does), at
+    /// `options.position` in it when given: points from its top left
+    /// corner, so a press can land on a part another view does not cover
+    /// (a sheet's backdrop around its panel). On iOS, a header button of
+    /// `ios.headerRightItems` is pressed too, by `id:<key>` or its label:
+    /// it presses it, or opens its menu.
+    pub async fn press(
+        this: Instance<Self>,
+        selector: String,
+        options: Option<PressOptions>,
+    ) -> Result<(), JsError> {
+        let at = options.and_then(|options| options.position);
+        step(&this, move |app| app.press(&selector, at)).await
     }
 
     /// Types `text` at the end of the input `selector` names (or the first

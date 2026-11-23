@@ -328,8 +328,11 @@ and more than one fails the step; a press whose match, or a view between it and 
 views that report it:
 
 - `press`: the match or its nearest pressable ancestor gets `PressIn`, `PressOut`, `Press`, at the match's center
-  (a press of a text inside a pressable view lands on the text, as a finger does); presses of one view within
-  500 ms count up (`clicks` 2 is a double press), as the platforms count them;
+  (a press of a text inside a pressable view lands on the text, as a finger does); with `app.press`'s `position` it
+  is that point in the view the selector names, in points from its top left corner, checked against what draws over
+  it there as the center is (`Screen::covering`, `Native::covered`); presses of one view within 500 ms count up
+  (`clicks` 2 is a double press), as the platforms count them; `TestStep::PressAt` carries a point to a real host,
+  `Headless::press_with` places it headless;
 - `long_press`: the match or its nearest ancestor hearing long presses or presses gets `PressIn`, then after its
   `delayLongPress` (500 ms) `LongPress` and `PressOut`, at the match's center as `press` does;
 - `clear`: the input takes the focus, gets a `KeyPress` of `Backspace` and an edit to nothing;

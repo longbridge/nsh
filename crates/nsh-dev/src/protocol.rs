@@ -487,6 +487,18 @@ pub enum TestStep {
         /// The view.
         selector: String,
     },
+    /// Presses the view at a point in it (`app.press`'s `position`), in
+    /// points from its top left corner.
+    PressAt {
+        /// The view.
+        selector: String,
+        /// Points right of its left edge.
+        #[serde(deserialize_with = "float::f32")]
+        x: f32,
+        /// Points below its top edge.
+        #[serde(deserialize_with = "float::f32")]
+        y: f32,
+    },
     /// Holds a press on the view for its long press delay (`app.longPress`).
     LongPress {
         /// The view.

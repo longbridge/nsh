@@ -421,7 +421,7 @@ one: a selector matching several fails the step, and the error says how to narro
 
 | Step | Description |
 |---|---|
-| `await app.press(selector)` | Presses the view, or the nearest view around it that hears presses (the button around a text): `onPressDown`, `onPressUp`, `onPress`, inside a finger going down and lifting, which the views around it that listen to touches hear (an overlay's `onPressOutside`). A span of a text is pressed on its characters (`await app.press("Privacy policy")`), headless and on iOS, Android and the desktops. A second press of the same view within 500 ms is its second click (`clicks: 2`, a double press), as the platforms count them. On iOS, a header button of `ios.headerRightItems` (which UIKit draws) is pressed by `id:<key>` or its label: it presses, or opens its menu. Rejects when it is disabled. |
+| `await app.press(selector, options?)` | Presses the view, or the nearest view around it that hears presses (the button around a text): `onPressDown`, `onPressUp`, `onPress`, inside a finger going down and lifting, which the views around it that listen to touches hear (an overlay's `onPressOutside`). `options.position` presses at that point in the view, in points from its top left corner, instead of its middle: a part another view does not cover, as a sheet's backdrop around its panel is. What draws over that point still fails the step (`ERR_NSH_TEST_COVERED`), as a press at the middle does. A span of a text is pressed on its characters (`await app.press("Privacy policy")`), headless and on iOS, Android and the desktops. A second press of the same view within 500 ms is its second click (`clicks: 2`, a double press), as the platforms count them. On iOS, a header button of `ios.headerRightItems` (which UIKit draws) is pressed by `id:<key>` or its label: it presses, or opens its menu. Rejects when it is disabled. |
 | `await app.longPress(selector)` | Holds a finger on it (or the nearest view around it that hears presses or touches) for its `delayLongPress` (500 ms): `onPressDown`, `onLongPress`, `onPressUp`; no `onPress` follows. The touches' handlers hear the finger (a `ContextMenu` or `Tooltip` opens). |
 | `await app.clear(selector)` | Empties the input, as selecting all and deleting does. |
 | `await app.type(selector, text)` | Types into the input (or the first input inside the view; `text:` also matches an input's text or placeholder) key by key, as the user's typing does: an input that does not have the focus is pressed to take it (on a device, where the press lands puts the caret; headless, the caret is at the end of what it holds), one that has it is not, so the text goes in at its caret and replaces its selection (after `keyboard.press("mod+a")`, say; headless, only a view that keeps its own selection, such as `Editor`, has one). Each character is an `onKeyPress` and an `onChange`, within `maxLength`. A `\n` in a single-line input is the return key. |
@@ -524,6 +524,18 @@ await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISAB
 of that match. Scope queries with `id:note >> text:word` and select repeated matches with `>> nth=0`.
 The query reports an error for a missing, ambiguous or empty span. Updating a span’s `testID` reuses its text
 layout and preserves the `onTextLayout` callback count.
+
+The optional second argument of `press` is `PressOptions`: `{ position?: { x: number; y: number } }`. `position` is
+where in the view the press lands, in points from its top left corner; omitting it presses the middle, as before.
+It reaches a part of a view another view does not cover, such as a dialog's backdrop around its panel:
+
+```tsx
+await app.press("id:backdrop", { position: { x: 12, y: 12 } });
+```
+
+The point is in the view the selector names (a text view, for a span). A press at a point something else draws over
+fails with `ERR_NSH_TEST_COVERED`, as a press at the middle does. Headless runs and `--target` hosts place it the
+same way.
 
 The optional third argument of `drag` and `dragAndHold` is `DragOptions`: `{ hold?: number }`. `hold` is the total rest in milliseconds after the pointer lands and before it moves; omitting it keeps 100 ms. Headless and iOS support custom timing. Unsupported custom timing rejects with `ERR_NSH_TEST_UNSUPPORTED` before a new pointer goes down. Negative, non-finite and unrepresentable durations reject. For a long-press drag, use `{ hold: 600 }` and put `drop()` in `finally` so an assertion failure still lifts the same finger.
 
