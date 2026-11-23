@@ -1,7 +1,7 @@
 // A hidden title bar whose header is a plain View with no padding of its
 // own, the way an app written on Linux forgets the traffic lights: its first
 // tab ("!1113", with a close button) starts at the window's left edge, under
-// the close, minimize and zoom buttons. `TitleBar.test.tsx` runs it on the
+// the close, minimize and zoom buttons. `TitleBarTabs.test.tsx` runs it on the
 // macOS host and records where the tab and the buttons are; a second window
 // with a taller bar shows each window reports its own area.
 import { mount, signal, Text, View } from "nsh";
