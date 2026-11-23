@@ -569,6 +569,22 @@ impl Host {
 
     /// Delivers a native event (and its data) to the node's JS handler.
     pub fn dispatch_event(&self, id: NodeId, event: EventKind, payload: &EventPayload) {
+        // The files of a drop are the user's to give the app, as picked
+        // ones are: reading them needs no `fs.read` root for their folder
+        // (longbridge/nsh#2478). Recorded before the handler runs, so its
+        // `fs/promises` reads see the grant.
+        if let EventKind::FileDrop = event
+            && let EventPayload::FileDrop(uris) | EventPayload::FileDropAt { uris, .. } = payload
+        {
+            nsh_core::element::System::new(
+                std::sync::Arc::new(self.shared.system_access.borrow().clone()),
+                self.shared.system_data_dir.borrow().clone(),
+                self.shared.system_paths.borrow().clone(),
+                self.shared.system_quotas.clone(),
+            )
+            .with_locals(self.shared.system_locals.clone())
+            .grant_file_drop(uris);
+        }
         self.guarded(Phase::Call, || {
             self.cx.with(|cx| {
                 // Touches: the responder system is native.
@@ -2520,6 +2536,87 @@ const report = (v) => text(String(v));
             let types: Vec<String> = value.as_object().unwrap().get("mimeTypes").unwrap();
             assert_eq!(types, ["text/plain", ""]);
         });
+    }
+
+    /// A dropped file reads like a picked one, with no `fs.read` root for
+    /// its folder (longbridge/nsh#2478): here, where the bare host drives
+    /// no I/O task, that shows as the dropped read passing the grant check
+    /// (it stays pending instead of denying), while a drag entering grants
+    /// nothing, a sibling stays unreadable and a drop grants no writes.
+    #[test]
+    fn a_file_drop_grants_reads_without_a_wide_fs_grant() {
+        let base = std::env::temp_dir().join(format!("nsh-js-file-drop-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::write(base.join("probe.md"), "# Hallo").unwrap();
+        std::fs::write(base.join("sibling.txt"), "private").unwrap();
+        let host = Host::new().unwrap();
+        let uri = |name: &str| {
+            url::Url::from_file_path(base.join(name))
+                .unwrap()
+                .to_string()
+        };
+        // Entering with the sibling's URL is a preview, not a transfer: it
+        // must grant nothing.
+        host.dispatch_event(
+            1,
+            EventKind::FileDragEnter,
+            &EventPayload::FileDrop(vec![uri("sibling.txt")]),
+        );
+        host.dispatch_event(
+            1,
+            EventKind::FileDrop,
+            &EventPayload::FileDrop(vec![uri("probe.md")]),
+        );
+        host.eval_source(&format!(
+            r#"import {{ readFile, writeFile }} from "fs/promises";
+            globalThis.outcome = [];
+            readFile({:?}, "utf8").then(
+                (text) => outcome.push("read:" + text),
+                (error) => outcome.push("read:" + error.code),
+            );
+            readFile({:?}, "utf8").then(
+                () => outcome.push("sibling:read"),
+                (error) => outcome.push("sibling:" + error.code),
+            );
+            writeFile({:?}, "changed").then(
+                () => outcome.push("write:ok"),
+                (error) => outcome.push("write:" + error.code),
+            );"#,
+            base.join("probe.md").to_string_lossy(),
+            base.join("sibling.txt").to_string_lossy(),
+            base.join("probe.md").to_string_lossy(),
+        ))
+        .unwrap();
+        // The two denials settle in-call; the dropped read passed its
+        // grant check and waits on the I/O this bare host does not run.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            host.run_system();
+            let outcome: Vec<String> = host.cx.with(|cx| cx.globals().get("outcome")).unwrap();
+            if outcome.len() == 2 {
+                assert_eq!(
+                    outcome,
+                    ["sibling:ERR_ACCESS_DENIED", "write:ERR_ACCESS_DENIED"]
+                );
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the in-call denials did not settle: {outcome:?}"
+            );
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        for _ in 0..3 {
+            host.run_system();
+        }
+        let outcome: Vec<String> = host.cx.with(|cx| cx.globals().get("outcome")).unwrap();
+        assert_eq!(
+            outcome,
+            ["sibling:ERR_ACCESS_DENIED", "write:ERR_ACCESS_DENIED"],
+            "the dropped file's read denied or wrote: {outcome:?}"
+        );
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]

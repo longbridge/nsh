@@ -524,6 +524,81 @@ impl Roots {
     }
 }
 
+/// The local files and directories the user dropped on the app: theirs to
+/// give it, as a picked file is, so readable while the VM runs without
+/// their folder being declared. Each is resolved through its links as it
+/// is dropped, so the grant names what the user dropped then, never where
+/// a link swapped in later leads. It grants paths, as manifest roots do:
+/// what later replaces a dropped file in its folder reads as that file.
+/// Reads only: a drop grants no writes.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Default)]
+pub(crate) struct Dropped {
+    /// Dropped files by the path the drop named and by their real one,
+    /// each to the real one: a file grants itself, not its folder.
+    files: std::cell::RefCell<rustc_hash::FxHashMap<PathBuf, PathBuf>>,
+    /// Dropped directories as (path the drop named, real path): what is
+    /// inside one is granted, as inside a manifest root.
+    directories: std::cell::RefCell<Vec<(PathBuf, PathBuf)>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl crate::element::Local for Dropped {}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Dropped {
+    /// Grants this VM reads of the local files and directories `uris`
+    /// name (a drop's `file:` URLs). A URL that names no local path, or a
+    /// path that is gone or is neither file nor directory, adds nothing;
+    /// so does the file system's root, which would grant the whole disk.
+    pub(crate) fn approve(locals: &crate::element::Locals, uris: &[String]) {
+        let dropped = locals.get::<Dropped>();
+        for uri in uris {
+            let Some(path) = crate::access::file_url_path(uri) else {
+                continue;
+            };
+            let path = lexical(&path);
+            let Ok(real) = crate::access::canonicalize(&path) else {
+                continue;
+            };
+            let Ok(meta) = std::fs::metadata(&real) else {
+                continue;
+            };
+            if real.parent().is_none() {
+                continue;
+            }
+            if meta.is_file() {
+                let mut files = dropped.files.borrow_mut();
+                files.insert(path, real.clone());
+                files.insert(real.clone(), real);
+            } else if meta.is_dir() {
+                let mut directories = dropped.directories.borrow_mut();
+                if !directories.iter().any(|(_, known)| *known == real) {
+                    directories.push((path, real));
+                }
+            }
+        }
+    }
+
+    /// The (root, relative) pairs the lexical absolute path `candidate`
+    /// reads under among the dropped paths: a dropped file in its real
+    /// folder, by its real name; a path in a dropped directory under it.
+    fn within(&self, candidate: &Path) -> Vec<(PathBuf, PathBuf)> {
+        let mut within = Vec::new();
+        if let Some(real) = self.files.borrow().get(candidate)
+            && let (Some(folder), Some(name)) = (real.parent(), real.file_name())
+        {
+            within.push((folder.to_path_buf(), PathBuf::from(name)));
+        }
+        for directory in self.directories.borrow().iter() {
+            if let Some(relative) = in_root(candidate, directory) {
+                within.push((directory.1.clone(), relative));
+            }
+        }
+        within
+    }
+}
+
 /// A capability-checked path in the host's private virtual filesystem.
 #[cfg(any(target_arch = "wasm32", test))]
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
@@ -596,6 +671,21 @@ fn grant(sys: &System, path: &str, write: bool) -> Result<Grant, JsError> {
                 }
             }
             within.push((base, relative));
+        }
+        // What the user dropped on the app is theirs to give it, as a
+        // picked file is: readable without the folder being declared
+        // (longbridge/nsh#2478). Reads only, and only a path the drop
+        // covers: a dropped file grants no sibling, a relative path names
+        // nothing dropped. An embedding host's grant still narrows it, as
+        // it narrows a root.
+        if !write && crate::access::native_files(sys.os) {
+            let candidate = lexical(&requested);
+            let hosted = host
+                .as_ref()
+                .is_none_or(|host| host.iter().any(|h| in_root(&candidate, h).is_some()));
+            if hosted {
+                within.extend(sys.locals.get::<Dropped>().within(&candidate));
+            }
         }
         if let Some((_, first)) = within.first() {
             let name = if first.as_os_str().is_empty() {
@@ -1686,6 +1776,188 @@ mod tests {
         assert_eq!(check(&sys, "/outside", false), None);
         Arc::make_mut(&mut sys.access).declared.fs.read.clear();
         assert_eq!(check(&sys, "notes/allowed/a.txt", false), None);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    use super::{JsError, Path, PathBuf, System, codes};
+
+    /// A VM declaring no `fs` roots, for the drop tests, and a fresh
+    /// directory of their own.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn drop_fixture(name: &str) -> (System, PathBuf) {
+        use std::sync::Arc;
+
+        use crate::access::{Access, Capabilities};
+        let base = std::env::temp_dir().join(format!("nsh-fs-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let mut declared = Capabilities::all();
+        declared.fs.read.clear();
+        declared.fs.write.clear();
+        let sys = System::new(
+            Arc::new(Access {
+                declared,
+                granted: None,
+            }),
+            None,
+            Default::default(),
+            Default::default(),
+        );
+        (sys, base)
+    }
+
+    /// Drops `paths` on `sys`, as the engine does for an `onFileDrop`.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn drop_paths(sys: &System, paths: &[&Path]) {
+        let uris: Vec<String> = paths
+            .iter()
+            .map(|path| url::Url::from_file_path(path).unwrap().to_string())
+            .collect();
+        sys.grant_file_drop(&uris);
+    }
+
+    /// Reads `path` as `fs/promises`' `readFile` does: its text, or the
+    /// error's code.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn read_text(sys: &System, path: &Path) -> Result<String, String> {
+        let code = |e: JsError| e.code().unwrap_or("none").to_owned();
+        let grant = super::grant(sys, &path.to_string_lossy(), false).map_err(code)?;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let holding = grant.read(&sys.quotas, true).await.map_err(code)?;
+            let super::FileData::Text(text) = holding.value else {
+                panic!("text");
+            };
+            Ok(text)
+        })
+    }
+
+    /// Dropped files read like picked ones, without their folder being
+    /// declared (longbridge/nsh#2478): the dropped file itself, by the
+    /// path dropped or its real one, nothing next to it, and no writes.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn dropped_files_are_readable_without_a_declared_root() {
+        let (sys, base) = drop_fixture("drop");
+        std::fs::write(base.join("probe.md"), "# Hallo").unwrap();
+        std::fs::write(base.join("sibling.txt"), "private").unwrap();
+        let denied = Err(codes::ACCESS_DENIED.to_owned());
+        assert_eq!(read_text(&sys, &base.join("probe.md")), denied);
+
+        drop_paths(&sys, &[&base.join("probe.md")]);
+        let granted = sys.locals.get::<super::Dropped>().files.borrow().len();
+        // The same path dropped again adds nothing.
+        drop_paths(&sys, &[&base.join("probe.md")]);
+        let dropped = sys.locals.get::<super::Dropped>();
+        assert_eq!(dropped.files.borrow().len(), granted);
+        // As dropped, and by its resolved path (`/var` is `/private/var`
+        // on macOS).
+        assert_eq!(read_text(&sys, &base.join("probe.md")).unwrap(), "# Hallo");
+        let real = std::fs::canonicalize(&base).unwrap();
+        assert_eq!(read_text(&sys, &real.join("probe.md")).unwrap(), "# Hallo");
+        // Nothing next to it, its folder neither, not by `..` either.
+        assert_eq!(read_text(&sys, &base.join("sibling.txt")), denied);
+        assert_eq!(
+            read_text(&sys, &base.join("probe.md/../sibling.txt")),
+            denied
+        );
+        assert!(super::grant(&sys, &base.to_string_lossy(), false).is_err());
+        assert!(super::grant(&sys, "probe.md", false).is_err());
+        // No write.
+        assert!(super::grant(&sys, &base.join("probe.md").to_string_lossy(), true).is_err());
+        // A drop that names no local file, or a gone one, adds nothing; nor
+        // does the disk's root.
+        let gone = base.join("gone.md");
+        let root = Path::new("/");
+        drop_paths(&sys, &[&gone, root]);
+        sys.grant_file_drop(&["https://example.com/probe.md".into()]);
+        assert_eq!(dropped.files.borrow().len(), granted);
+        assert!(dropped.directories.borrow().is_empty());
+        std::fs::write(&gone, "later").unwrap();
+        assert_eq!(read_text(&sys, &gone), denied);
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// A dropped directory grants what is inside it, and nothing outside,
+    /// a symlink in it leading out included.
+    #[cfg(unix)]
+    #[test]
+    fn dropped_directories_grant_what_is_inside_them() {
+        let (sys, base) = drop_fixture("drop-dir");
+        std::fs::create_dir_all(base.join("folder/nested")).unwrap();
+        std::fs::write(base.join("folder/nested/a.txt"), "in").unwrap();
+        std::fs::write(base.join("outside.txt"), "out").unwrap();
+        std::os::unix::fs::symlink(base.join("outside.txt"), base.join("folder/away")).unwrap();
+        drop_paths(&sys, &[&base.join("folder")]);
+
+        let denied = Err(codes::ACCESS_DENIED.to_owned());
+        assert_eq!(
+            read_text(&sys, &base.join("folder/nested/a.txt")).unwrap(),
+            "in"
+        );
+        assert_eq!(read_text(&sys, &base.join("outside.txt")), denied);
+        assert_eq!(read_text(&sys, &base.join("folder/../outside.txt")), denied);
+        // Granted by its path, the link leads out of the dropped folder.
+        assert!(read_text(&sys, &base.join("folder/away")).is_err());
+        assert!(super::grant(&sys, &base.join("folder/a.txt").to_string_lossy(), true).is_err());
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// A drop is resolved as it is dropped: a dropped link grants its
+    /// target alone, and a link swapped in for a dropped directory later
+    /// leads nowhere new.
+    #[cfg(unix)]
+    #[test]
+    fn a_drop_grants_what_it_named_when_dropped() {
+        let (sys, base) = drop_fixture("drop-link");
+        std::fs::create_dir_all(base.join("docs")).unwrap();
+        std::fs::create_dir_all(base.join("desk")).unwrap();
+        std::fs::create_dir_all(base.join("secret")).unwrap();
+        std::fs::write(base.join("docs/real.md"), "real").unwrap();
+        std::fs::write(base.join("docs/other.md"), "other").unwrap();
+        std::fs::write(base.join("secret/key"), "key").unwrap();
+        std::os::unix::fs::symlink(base.join("docs/real.md"), base.join("desk/link.md")).unwrap();
+        std::fs::create_dir_all(base.join("desk/folder")).unwrap();
+        drop_paths(
+            &sys,
+            &[&base.join("desk/link.md"), &base.join("desk/folder")],
+        );
+
+        let denied = Err(codes::ACCESS_DENIED.to_owned());
+        assert_eq!(read_text(&sys, &base.join("desk/link.md")).unwrap(), "real");
+        let real = std::fs::canonicalize(base.join("docs")).unwrap();
+        assert_eq!(read_text(&sys, &real.join("real.md")).unwrap(), "real");
+        assert_eq!(read_text(&sys, &real.join("other.md")), denied);
+        // The dropped folder replaced by a link to another one.
+        std::fs::remove_dir(base.join("desk/folder")).unwrap();
+        std::os::unix::fs::symlink(base.join("secret"), base.join("desk/folder")).unwrap();
+        assert!(read_text(&sys, &base.join("desk/folder/key")).is_err());
+        assert_eq!(read_text(&sys, &base.join("secret/key")), denied);
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// An embedding host's grant narrows a drop as it narrows a root.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_host_grant_narrows_dropped_files() {
+        use crate::access::Capabilities;
+        let (mut sys, base) = drop_fixture("drop-host");
+        std::fs::create_dir_all(base.join("allowed")).unwrap();
+        std::fs::write(base.join("allowed/a.txt"), "a").unwrap();
+        std::fs::write(base.join("b.txt"), "b").unwrap();
+        let mut host = Capabilities::all();
+        host.fs.read = vec![base.join("allowed").to_string_lossy().into_owned()];
+        std::sync::Arc::make_mut(&mut sys.access).granted = Some(host);
+        drop_paths(&sys, &[&base.join("allowed/a.txt"), &base.join("b.txt")]);
+
+        assert_eq!(read_text(&sys, &base.join("allowed/a.txt")).unwrap(), "a");
+        assert_eq!(
+            read_text(&sys, &base.join("b.txt")),
+            Err(codes::ACCESS_DENIED.to_owned())
+        );
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     use crate::element::{Registry, declarations};

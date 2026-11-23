@@ -112,6 +112,8 @@ async function loadSettings(): Promise<string> {
 
 根目录可以是绝对路径、`${dataDir}`（宿主为此应用选定的数据目录）、`${pluginDir}`（应用目录）、`${homeDir}`，或相对于应用目录的路径。调用中的相对路径依次在每个授权根目录中解析。嵌入应用可以进一步缩小授权。每个操作都限定在其授权根目录之内，符号链接也是如此；绝对路径按书写形式检查，因此须通过根目录自身的路径（或其解析后的路径）访问，而不能经由根目录之外的符号链接。`lstat`、`readlink`、`exists`、`unlink`、`rename` 和 `rmdir` 作用于符号链接本身：目标不存在的符号链接 `exists` 为 `true`，`unlink` 删除链接并保留其目标。
 
+用户拖入应用的文件就是用户主动给予的，与从选择器挑选的一样：在应用运行期间，读取被拖入的路径（以及被拖入目录中的内容）自动获得授权，无需在其文件夹上声明 `read` 根目录，也不需要任何声明。该授权恰好只覆盖被拖入的路径，不包括旁边的其他文件，并以拖入那一刻的路径为准（符号链接在拖入时解析，之后不再重新解析）；写入仍然需要授权，嵌入应用的授权也会像缩小根目录一样缩小它。
+
 失败时的错误带有 Node 的错误属性：`code`（`ENOENT`、`EEXIST`、`ENOTDIR`、`EISDIR`、`ENOTEMPTY`、`ELOOP`、`EACCES`、`EPERM` 等；文本不是 UTF-8 时为 `EILSEQ`，超出读取上限时为 `ERR_FS_FILE_TOO_LARGE`）、`syscall` 和 `path`，因此可以用 `error.code === "ENOENT"` 判断文件不存在。授权范围之外的路径以 `ERR_ACCESS_DENIED` 拒绝，在 iOS 或 Android 上（这些平台的应用用 [`Storage`](./nsh.md#storage) 保存数据）的调用以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝，参数错误（未知的编码或选项）以 `TypeError` 拒绝。
 
 `readFile` 返回 `Uint8Array`，指定 `"utf8"` 时返回字符串，可读取最大 64 MiB 的文件。`writeFile` 写入最多 8 MiB 的字符串或 `Uint8Array`，创建或替换一个普通文件。`readdir` 最多列出 10 000 个按名称排序的条目名（名称合计最多 1 MiB；更大的目录以 `code` 为 `ERR_OUT_OF_RANGE` 的 `RangeError` 拒绝），传入 `{ withFileTypes: true }` 时返回 `Dirent`（`name`、`isDirectory()`）。`stat` 和 `lstat` 返回 `Stats`，包含 `size`、`mode`、`mtimeMs` / `atimeMs` / `birthtimeMs`、`Date` 类型的 `mtime` / `atime` / `birthtime`，以及 `isFile()`、`isDirectory()` 和 `isSymbolicLink()`。`rmdir` 删除一个空目录。每个 VM 同时最多进行 1024 个操作，进行中的文件数据最多 64 MiB（交给 `writeFile` 直到写完的数据，以及读取后直到 Promise 完成的数据）；超出这些限制的调用以 `ERR_NSH_QUOTA_EXCEEDED` 拒绝，超过 8 MiB 的 `writeFile` 以 `RangeError`（`code` 为 `ERR_OUT_OF_RANGE`）拒绝。

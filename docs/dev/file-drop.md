@@ -51,6 +51,14 @@ would carry `File`s rather than `file:` URLs and needs its own payload design.
   layer that receives the drag appears with the drag's next frame.
 - The operation is Copy. Delivery means the user dropped the URI list, not that
   the application accepted or read the files. No transfer starts automatically.
+- A dropped file is the user's to give the app, as a picked one is: as the core
+  hands a drop to JS, the engine records a read grant for the dropped paths
+  (`System::grant_file_drop`, a per-VM local `nsh-core` `runtime::fs` checks
+  beside `capabilities.fs.read`). The grant lasts while the app runs, covers
+  exactly the dropped paths (a dropped directory covers what is inside it; a
+  dropped file grants no sibling), each resolved through its links as it is
+  dropped, and reads only — writes still need a declared root. A host's grant
+  (`Access::granted`) narrows it as it narrows a root (longbridge/nsh#2478).
 
 ## Implementation sequence
 

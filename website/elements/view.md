@@ -269,6 +269,11 @@ removes file-drag/drop listeners; leaving, cancellation, completion and destinat
 Acceptance uses the Copy operation and mounted native state. The app decides whether to read, open or transfer the
 received files.
 
+A file the user drops is theirs to give the app, as a picked one is: reading it (and, for a directory, what is inside
+it) needs no `capabilities.fs.read` root for its folder, and writing it still needs a grant. The grant lasts while the
+app runs and covers exactly the dropped paths — nothing next to them. So `fs/promises`' `readFile` of a dropped path
+works in an app whose `fs` grants name other folders only.
+
 Text inputs belong to the destination around them: files dropped on an input's text reach that destination as
 anywhere else in it, with the same enter and leave events, and the input keeps its text as it was. Text dragged
 into an input, and files dropped on an input outside any destination, behave as the platform's text fields do.

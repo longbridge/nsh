@@ -184,6 +184,21 @@ impl System {
         self.exit = exit;
         self
     }
+
+    /// Approves the local files and directories `uris` name (the `file:`
+    /// URLs of an `onFileDrop` event) for reading while this VM runs: a
+    /// dropped file is the user's to give the app, as a picked one is, so
+    /// reading it needs no `capabilities.fs.read` root for its folder.
+    /// URLs that name no local path add nothing. Reads only: writes still
+    /// need a grant, and an embedding host's grant narrows it. The engine
+    /// calls this as it delivers a file drop.
+    #[doc(hidden)]
+    pub fn grant_file_drop(&self, uris: &[String]) {
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::runtime::fs::Dropped::approve(&self.locals, uris);
+        #[cfg(target_arch = "wasm32")]
+        let _ = uris;
+    }
 }
 
 /// One VM's state of a runtime module (a [`Locals`] entry): made on first

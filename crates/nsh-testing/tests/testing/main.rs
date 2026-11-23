@@ -611,6 +611,24 @@ fn apps_run_under_the_capabilities_their_nsh_json_declares() {
     assert_eq!(results.len(), 1);
 }
 
+/// The reproduction of longbridge/nsh#2478: a dropped file is user-approved,
+/// as a picked one is, so reading it needs no `fs.read` root for its folder.
+/// The fixture grants `${dataDir}` only; the probe file lives in the OS
+/// temp dir, outside it. POSIX paths, as `dropFiles` itself (headless, on
+/// Linux and on macOS).
+#[cfg(unix)]
+#[test]
+fn a_dropped_file_reads_without_a_wide_filesystem_grant() {
+    let probe = std::path::Path::new("/tmp/nsh-file-drop-probe.md");
+    std::fs::write(probe, "# Hallo").unwrap();
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/file-drop");
+    let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
+    let _ = std::fs::remove_file(probe);
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 1);
+}
+
 #[test]
 fn sockets_and_websockets_reach_the_network_only_when_the_test_says() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/network");

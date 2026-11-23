@@ -1,0 +1,5 @@
+{
+  "capabilities": {
+    "fs": { "read": ["${dataDir}"], "write": ["${dataDir}"] }
+  }
+}
