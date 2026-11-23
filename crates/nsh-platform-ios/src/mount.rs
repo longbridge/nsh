@@ -2852,15 +2852,15 @@ impl Mounter {
             self.touch_listeners = self.touch_listeners.saturating_sub(1);
         }
         let on = self.touch_listeners > 0;
-        if on && self.touch_trackers.is_empty() {
+        // Ensure the root view and every modal still carry a tracker while
+        // touches are listened to. Gating this on `touch_trackers.is_empty()`
+        // left a modal opened after the first tracker set (the root's tracker
+        // outlives every modal) without one, so a modal reopened later never
+        // delivered its JS touch gestures. `add_touch_tracker` dedupes by
+        // node, so re-ensuring here each time is idempotent.
+        if on {
             self.add_touch_tracker(nsh_core::ROOT_ID);
-            let modals: Vec<NodeId> = self
-                .views
-                .iter()
-                .flatten()
-                .filter(|s| matches!(s.native, Native::Modal(_)))
-                .map(|s| s.native.view().tag() as NodeId)
-                .collect();
+            let modals: Vec<NodeId> = self.modal_attached.iter().map(|&(id, _)| id).collect();
             for modal in modals {
                 self.add_touch_tracker(modal);
             }
