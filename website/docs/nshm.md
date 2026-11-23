@@ -387,8 +387,6 @@ libraries = ["android/libs/scanner-glue.jar"]
 | `ios.infoPlist` | Keys of the iOS app's `Info.plist`, as `nsh.json`'s `ios.infoPlist` |
 | `ios.infoPlistStrings` | The text of those keys in other languages, by language, as `nsh.json`'s `ios.infoPlistStrings` ([Packaging](./packaging.md#infoplist-text-in-other-languages)) |
 | `ios.entitlements` | The iOS app's entitlements |
-| `ios.frameworks` | XCFrameworks and frameworks relative to the crate's `Cargo.toml`, linked and packaged as `nsh.json`'s `ios.frameworks` are ([Frameworks and linker flags](./packaging.md#frameworks-and-linker-flags)) |
-| `ios.linkerFlags` | Arguments of the iOS executable's link, after the app's own |
 | `android.permissions` | `<uses-permission>` elements, named as in `nsh.json` (`CAMERA` is `android.permission.CAMERA`) |
 | `android.queries` | `<intent>`, `<package>` and `<provider>` elements of the manifest's `<queries>` |
 | `android.application` | `<service>`, `<receiver>`, `<provider>`, `<activity>` and `<meta-data>` elements of `<application>`; `${applicationId}` is the app's package, other placeholders the app's `android.manifestPlaceholders` |

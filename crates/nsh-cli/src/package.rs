@@ -1025,18 +1025,6 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
         dir,
         &mut ignored,
     );
-    config.ios.frameworks = crate::ios_frameworks::read(
-        std::mem::take(&mut config.ios.frameworks),
-        dir,
-        &mut ignored,
-    );
-    config.ios.linker_flags.retain(|flag| {
-        let checked = crate::ios_frameworks::check_flag(flag);
-        if let Err(why) = &checked {
-            ignored.push(format!("ios.linkerFlags: {why}: left out"));
-        }
-        checked.is_ok()
-    });
     config.icon = match config.icon {
         Some(AppIcon::All(icon)) => Some(AppIcon::All(dir.join(icon))),
         Some(AppIcon::Platforms(icons)) => Some(AppIcon::Platforms(
@@ -1482,7 +1470,6 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
     // its bundle can reach, and those `nsh.json` keeps. A TSX app does too
     // where cargo is, else it ships the prebuilt runner, which has all.
     let has_crates = crate::rust_app::current().is_some();
-    check_ios_link(config, options.target, has_crates)?;
     let mut own_runner = false;
     if options.target != PackageTarget::Web
         && !crate::rust_app::is_root(&entry)
@@ -1641,31 +1628,16 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
         options.target == PackageTarget::IosSimulator,
         None,
     )?;
-    // The runner linked the frameworks for this target
-    // (`rust_app::RustApp::ios_link_env`); the dynamic ones go with it.
-    let (frameworks, _) = crate::ios_frameworks::sync(
-        &config.ios.frameworks,
-        platform.triple().context("an iOS target")?,
-        &app.join("Frameworks"),
-        None,
-    )?;
     let localized = config.ios.localized_info(ApplePlatform::Ios, &info)?;
     crate::apple::write_localized_info(&app, &localized)?;
     plist::Value::Dictionary(info).to_file_xml(app.join("Info.plist"))?;
-    let mut privacy = config.ios.privacy_manifest.clone();
-    crate::ios_frameworks::add_static_privacy(
-        &config.ios.frameworks,
-        platform.triple().context("an iOS target")?,
-        &mut privacy,
-    )?;
-    crate::apple::write_privacy_manifest(&privacy, &app)?;
+    crate::apple::write_privacy_manifest(&config.ios.privacy_manifest, &app)?;
 
     match options.target {
         PackageTarget::IosSimulator => {
-            // The app's signature seals its extensions' and frameworks':
-            // they are signed first.
+            // The app's signature seals its extensions': they are signed
+            // first.
             crate::app_extensions::sign_ad_hoc(&extensions, options.out)?;
-            crate::ios_frameworks::sign(&frameworks, "-")?;
             // The simulator takes the app's entitlements without a profile.
             let mut entitlements = config.ios.entitlements(ApplePlatform::Ios)?;
             config.add_links_to_entitlements(&mut entitlements)?;
@@ -1713,10 +1685,9 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
                 .iter()
                 .map(|path| Profile::read(path))
                 .collect::<anyhow::Result<Vec<_>>>()?;
-            // The app's signature seals its extensions' and frameworks':
-            // they are signed first.
+            // The app's signature seals its extensions': they are signed
+            // first.
             crate::app_extensions::sign_device(&extensions, identity, &profiles, options.out)?;
-            crate::ios_frameworks::sign(&frameworks, identity)?;
             let profile = Profile::choose(&profiles, &id, false)?;
             crate::provisioning::warn_unused(&profiles);
             fs::copy(&profile.path, app.join("embedded.mobileprovision"))
@@ -1732,29 +1703,6 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
             make_ipa(&app, &ipa)?;
             ui::done(format!("packaged {}", ui::path(&ipa)));
         }
-    }
-    Ok(())
-}
-
-/// `ios.frameworks` and `ios.linkerFlags` are linked with the app's Rust
-/// code, which is what calls a framework: an iOS package of an app
-/// without crates (`has_crates`), whose runner is NSH's own, has nothing
-/// to link them with.
-fn check_ios_link(
-    config: &AppConfig,
-    target: PackageTarget,
-    has_crates: bool,
-) -> anyhow::Result<()> {
-    let ios = matches!(target, PackageTarget::Ios | PackageTarget::IosSimulator);
-    if ios
-        && !has_crates
-        && (!config.ios.frameworks.is_empty() || !config.ios.linker_flags.is_empty())
-    {
-        bail!(
-            "nsh.json ios.frameworks and ios.linkerFlags are linked with the app's Rust code, \
-             which calls the frameworks, and the app has none: add the crate that calls them \
-             (nsh.json `rust`, or an nshm with `nsh add`)"
-        );
     }
     Ok(())
 }
@@ -3400,55 +3348,6 @@ mod tests {
                 .libraries
                 .is_empty()
         );
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
-    fn ios_frameworks_need_the_apps_crates() {
-        let mut config = AppConfig::default();
-        assert!(check_ios_link(&config, PackageTarget::Ios, false).is_ok());
-        config.ios.linker_flags.push("-ObjC".into());
-        let error = check_ios_link(&config, PackageTarget::IosSimulator, false).unwrap_err();
-        assert!(error.to_string().contains("add the crate"), "{error}");
-        assert!(check_ios_link(&config, PackageTarget::Ios, true).is_ok());
-        // Other packages do not link them.
-        assert!(check_ios_link(&config, PackageTarget::Android, false).is_ok());
-    }
-
-    #[test]
-    fn ios_frameworks_are_relative_to_nsh_json() {
-        let dir = std::env::temp_dir().join(format!(
-            "nsh-cli-ios-frameworks-config-{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
-            dir.join("nsh.json"),
-            r#"{ "ios": {
-                "frameworks": [
-                    "ios/Vendor/Sdk.xcframework",
-                    { "path": "ios/Vendor/Ads.xcframework", "forceLoad": true }
-                ],
-                "linkerFlags": ["-ObjC", "", "-lsqlite3"]
-            } }"#,
-        )
-        .unwrap();
-        let config = read_config(&dir.join("App.tsx")).unwrap();
-        let frameworks: Vec<(PathBuf, bool)> = config
-            .ios
-            .frameworks
-            .iter()
-            .map(|f| (f.path.clone(), f.force_load))
-            .collect();
-        assert_eq!(
-            frameworks,
-            [
-                (dir.join("ios/Vendor/Sdk.xcframework"), false),
-                (dir.join("ios/Vendor/Ads.xcframework"), true),
-            ]
-        );
-        // The empty flag is left out with a warning.
-        assert_eq!(config.ios.linker_flags, ["-ObjC", "-lsqlite3"]);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

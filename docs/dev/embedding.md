@@ -16,10 +16,6 @@
   `--profile` per bundle, chosen by bundle identifier (`crates/nsh-cli/src/provisioning.rs`). `nsh run --target ios`
   copies them into the simulator's development host as well (`run.rs` `dev_host_extensions`), each identifier's app
   prefix replaced by the host's, since iOS installs an extension only under its containing bundle's. NSH builds no Swift.
-  `ios.frameworks` and `ios.linkerFlags`, of `nsh.json` and of the crates' metadata
-  (`crates/nsh-cli/src/ios_frameworks.rs`), reach the link of every generated iOS executable through its `build.rs`
-  (Cargo keeps a dependency's `rustc-link-arg` to that dependency); dynamic frameworks are copied into `Frameworks/`
-  and signed before the app.
   Android: an APK assembled without Gradle (`aapt2 link`, native libraries stored uncompressed and 16 KB ZIP aligned, `apksigner`;
   the debug key unless `--keystore`; `android.launchScreen` becomes a generated launch theme). Linux: a directory `<name>/` with the release runner (`crates/nsh-linux-app`) as
   the executable, `nsh/bundle.nshc`, `nsh/assets/` and `nsh/app.json` (the window title, the GTK application id and

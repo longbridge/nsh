@@ -56,7 +56,7 @@ nsh package App.tsx --target ios-simulator --run
 | `build` | number | `1` | 构建号（`CFBundleVersion`、`versionCode`）。每次上传新版本都要递增。 |
 | `icon` | string \| object | 无 | 一张正方形 PNG，最好是 1024×1024，路径相对于 `nsh.json`；也可按平台分别提供（[图标](#图标)）。 |
 
-`nsh.json` 还包含 `rust` 和 `root`（应用的 crate 和根组件，见[用 Rust 开发](./rust.md)）、`theme` 和 `appearance`、`tailwind`（见 [Tailwind](./tailwind.md)）、`capabilities`（见[沙箱与能力](./sandbox-and-capabilities.md)）、`android`（`targetSdk`、`usesCleartextTraffic`、`permissions`、`libraries`、`manifestPlaceholders`、`queries` 和 `application`，见下文“目标 API 级别”“明文 HTTP”“权限”“Java 代码”和“组件与 queries”）、`ios` 和 `macos`（对应包的 `Info.plist` 键和 entitlements，见[下文](#infoplist-键与-entitlements)；`ios.extensions` 是[应用扩展](#应用扩展)；`ios.frameworks` 和 `ios.linkerFlags` 见 [Framework 与链接参数](#framework-与链接参数)；`macos.activationPolicy` 用于[菜单栏应用](./macos.md#菜单栏应用)）以及让桌面包自我更新、让所有原生包接收 [OTA 更新](./ota-updates.md)的 `updater`（见[应用更新](./app-updates.md)）；[项目结构](./project-structure.md#nshjson)列出了所有键。NSH 读不懂的键或值会给出警告并被略过：为更新的 NSH 写的应用在较旧的 NSH 上照样能构建，拼写错误也会在警告里看到。
+`nsh.json` 还包含 `rust` 和 `root`（应用的 crate 和根组件，见[用 Rust 开发](./rust.md)）、`theme` 和 `appearance`、`tailwind`（见 [Tailwind](./tailwind.md)）、`capabilities`（见[沙箱与能力](./sandbox-and-capabilities.md)）、`android`（`targetSdk`、`usesCleartextTraffic`、`permissions`、`libraries`、`manifestPlaceholders`、`queries` 和 `application`，见下文“目标 API 级别”“明文 HTTP”“权限”“Java 代码”和“组件与 queries”）、`ios` 和 `macos`（对应包的 `Info.plist` 键和 entitlements，见[下文](#infoplist-键与-entitlements)；`ios.extensions` 是[应用扩展](#应用扩展)；`macos.activationPolicy` 用于[菜单栏应用](./macos.md#菜单栏应用)）以及让桌面包自我更新、让所有原生包接收 [OTA 更新](./ota-updates.md)的 `updater`（见[应用更新](./app-updates.md)）；[项目结构](./project-structure.md#nshjson)列出了所有键。NSH 读不懂的键或值会给出警告并被略过：为更新的 NSH 写的应用在较旧的 NSH 上照样能构建，拼写错误也会在警告里看到。
 
 上表中的每个键都可以在命令行上覆盖，这在 CI 中很方便：
 
@@ -172,41 +172,6 @@ nsh package --target ios \
   "ios": { "infoPlist": { "NSSupportsLiveActivities": true } }
 }
 ```
-
-### Framework 与链接参数
-
-iOS SDK 以 XCFramework（`.xcframework`）或 framework（`.framework`）的形式提供，里面是静态库或动态库。应用的
-[Rust crate](./rust.md) 调用它；`ios.frameworks` 列出它，路径相对于 `nsh.json`；`ios.linkerFlags` 加上 SDK 说明里要求的链接参数，
-例如 `-ObjC` 以及它用到的系统库和系统 framework。nshm 在自己的 `Cargo.toml` 里列出自己的
-（见[打包的应用需要什么](./nshm.md#打包的应用需要什么)），使用它的应用无需再列：
-
-```json
-{
-  "ios": {
-    "frameworks": [
-      "ios/Vendor/Analytics.xcframework",
-      { "path": "ios/Vendor/Ads.xcframework", "forceLoad": true }
-    ],
-    "linkerFlags": ["-ObjC", "-lsqlite3", "-framework", "AdServices"]
-  }
-}
-```
-
-| 键 | 含义 |
-|---|---|
-| `path` | `.xcframework` 或 `.framework`。写成字符串的条目就是它的路径。 |
-| `forceLoad` | 链接静态库的全部内容（`-force_load`），而不只是应用代码调用到的部分，用于 SDK 说明里要求这样做的情况。 |
-
-- 用应用的 crate 构建的每个 iOS 可执行文件都会链接它们：打出的包，以及 `nsh run` 在模拟器和 Mac Catalyst 上的开发宿主。
-  每次构建取 XCFramework 里对应目标（真机、模拟器、Mac Catalyst）的库；XCFramework 没有该目标的库时，构建会报错并列出它有的库。
-- 静态库成为应用可执行文件的一部分。动态 framework 会被复制到应用的 `Frameworks/`，并先于应用签名：模拟器用 ad hoc 签名，
-  真机用 `--sign` 给出的身份。
-- 动态 framework 的隐私清单留在它自己的 bundle 里，App Store Connect 在那里读取。静态库的代码属于应用，所以 iOS 包会把它的隐私清单
-  声明的内容加进应用的 `PrivacyInfo.xcprivacy`（见[隐私清单](#隐私清单)）。
-- 每个参数是一个独立的参数，按原样放在库之后传给链接器（`"-framework", "AdServices"` 是两个）。参数里的路径不会相对于 `nsh.json`
-  解析：要链接一个库，请把它列进 `frameworks`。
-- 同样的 crate 也会在没有这个 SDK 的其他平台上构建：请在 `#[cfg(target_os = "ios")]` 下调用它。
-- 这些 framework 与应用的 Rust 代码一起链接，所以没有 crate（`rust` 或 nshm）的应用不能列出它们：`nsh package` 会报错停止。
 
 ## Android
 
@@ -567,8 +532,7 @@ entitlements：
 `NSPrivacyAccessedAPITypes`）及其条目里的键。未知的键、类型不对的值或缺少键的条目会被略过并给出警告；App Store Connect
 按原样会拒绝的内容（没有理由的条目、开启跟踪却没有域名）也会给出警告。类别和理由代码本身仍由 App Store Connect 检查。
 
-NSH 的运行时是应用可执行文件的一部分，所以它调用的 API 也算作应用的：请把下面这些和应用自己的一起声明。`ios.frameworks` 里静态库的代码
-同样属于应用，打包时会把它们的隐私清单加进应用的清单（见 [Framework 与链接参数](#framework-与链接参数)）。
+NSH 的运行时是应用可执行文件的一部分，所以它调用的 API 也算作应用的：请把下面这些和应用自己的一起声明。
 
 | 类别 | NSH 中调用它的部分 | 理由 |
 |---|---|---|
@@ -707,8 +671,6 @@ Rust 应用的包就是它的 runner：用你的 crate 构建，挂载好根组�
 | Linux | `nsh-linux-app` 可执行文件，重命名为 `<Name>` | `<Name>/nsh/bundle.nshc`、`nsh/assets/…` |
 | Windows | `nsh-windows-app.exe` 可执行文件，重命名为 `<Name>.exe` | `<Name>\nsh\bundle.nshc`、`nsh\assets\…` |
 | Web | `nsh.<digest>.wasm`、`nsh.<digest>.js` | `<Name>/app.<digest>.js`、`assets/…`、`index.html` |
-
-iOS 包还会在 `Frameworks/` 里带上应用列出的动态 framework（见 [Framework 与链接参数](#framework-与链接参数)）。
 
 打包出的应用不注册任何[原生组件](./native-components.md)；如需使用原生组件，请把 NSH 嵌入你自己的应用。
 
