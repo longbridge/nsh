@@ -196,6 +196,7 @@ mount(() => (
 
 - 标签页对屏幕阅读器而言是一个元素，角色是 `"tab"`，带有它的选中状态。它的标签是子元素的文字，或 `accessibilityLabel`。它的 `accessibilityDescription` 在名称之后读出，所以名称可以只是标签页的标题：把标签页除了被选中之外还能做的事写在这里（例如可关闭的标签页按 Delete 关闭）。
 - `Tabs` 的角色是 `"tablist"`：屏幕阅读器把其中的标签页当作一组播报，每个标签页仍然是独立的元素。它的 `accessibilityLabel` 是这个列表的名字；列表旁没有文字说明这些标签页切换的是什么时，都应给一个。
+- 应用为选中标签页显示的内容可以说明自己是什么：给它的视图加上 `role="tabpanel"`（Rust 为 `.role(AccessibilityRole::TabPanel)`），屏幕阅读器进入时会说这是一个标签页面板。
 - `disabled` 按平台的方式报告（VoiceOver、TalkBack、UI Automation、浏览器的无障碍树）。
 - 平台有列表方向的属性时，屏幕阅读器会听到它：应用设置了 `orientation` 时，Web 的 `aria-orientation` 跟随它。
 - 在 macOS 和 Web 上，整个列表是键盘焦点的一站，方向键在它的标签页之间移动（见下文）。

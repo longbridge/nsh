@@ -821,8 +821,9 @@ fn is_element(a: &Accessibility, pressable: bool) -> bool {
 /// Roles of groups whose elements stay VoiceOver's own: a semantic
 /// group, which VoiceOver names by its label as it moves into it. A
 /// dialog is one (UIKit has no dialog trait): its title is said as the
-/// focus enters it, and its controls stay reachable. So is a list: a
-/// labelled list names its items, which are reached one by one.
+/// focus enters it, and its controls stay reachable, and so is a tab's
+/// panel (UIKit has no tab panel trait either). So is a list: a labelled
+/// list names its items, which are reached one by one.
 fn is_container(a: &Accessibility) -> bool {
     matches!(
         a.role,
@@ -837,6 +838,7 @@ fn is_container(a: &Accessibility) -> bool {
             | AccessibilityRole::Tablist
             | AccessibilityRole::Dialog
             | AccessibilityRole::AlertDialog
+            | AccessibilityRole::TabPanel
     )
 }
 
@@ -1089,6 +1091,10 @@ mod tests {
         ));
         assert!(is_container(
             &props(AccessibilityRole::AlertDialog, &[]).accessibility
+        ));
+        // A tab's panel keeps its content reachable.
+        assert!(is_container(
+            &props(AccessibilityRole::TabPanel, &[]).accessibility
         ));
         assert!(!is_container(
             &props(AccessibilityRole::Button, &[]).accessibility

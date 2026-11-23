@@ -400,6 +400,7 @@ prop id:role-menuitemcheckbox role menuitemcheckbox
 prop id:role-menuitemradio role menuitemradio
 prop id:role-dialog role dialog
 prop id:role-alertdialog role alertdialog
+prop id:role-tabpanel role tabpanel
 covers [props] accessible
 covers [props] accessibilityHint
 covers [props] accessibilityDescription

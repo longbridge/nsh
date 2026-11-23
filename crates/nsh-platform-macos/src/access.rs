@@ -415,6 +415,8 @@ enum Ax {
     Dialog,
     /// An alert dialog (ARIA's `alertdialog`).
     AlertDialog,
+    /// The content of a tab (ARIA's `tabpanel`).
+    TabPanel,
     /// A view standing for the window's close button (`windowControl`).
     CloseButton,
     /// ... its minimize button.
@@ -1149,6 +1151,8 @@ fn ax_role(role: Ax) -> (Option<Retained<NSString>>, Option<Retained<NSString>>)
                 constant(NSAccessibilityGroupRole),
                 named("AXApplicationAlertDialog"),
             ),
+            // As AccessKit (and WebKit) map ARIA's `tabpanel`.
+            Ax::TabPanel => (constant(NSAccessibilityGroupRole), named("AXTabPanel")),
             // As an option: AppKit's outline rows need the outline's rows
             // and columns; an item of a tree is static text that reports
             // its expanded state and its disclosure level.
@@ -1314,6 +1318,7 @@ fn base_role(a: &Accessibility, kind: ViewKind, pressable: bool) -> Ax {
         Role::TreeItem => Ax::TreeItem,
         Role::Dialog => Ax::Dialog,
         Role::AlertDialog => Ax::AlertDialog,
+        Role::TabPanel => Ax::TabPanel,
     }
 }
 
@@ -1547,6 +1552,7 @@ mod tests {
             (Role::MenuItemRadio, Ax::MenuItem),
             (Role::Dialog, Ax::Dialog),
             (Role::AlertDialog, Ax::AlertDialog),
+            (Role::TabPanel, Ax::TabPanel),
         ] {
             assert_eq!(role_for(&with_role(role), ViewKind::View, false), ax);
         }

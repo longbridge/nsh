@@ -10275,6 +10275,7 @@ fn pressed_current_and_level_decode_from_js() {
         ("menuitemradio", R::MenuItemRadio),
         ("dialog", R::Dialog),
         ("alertdialog", R::AlertDialog),
+        ("tabpanel", R::TabPanel),
     ] {
         assert_eq!(role(name), r);
     }

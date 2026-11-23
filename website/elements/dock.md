@@ -414,6 +414,8 @@ rest of the area.
 
 - Each tab is a tab with its selected state for screen readers, as [`Tab`](./tabs.md) is, and activating it selects
   it. Its label is the text `renderTab` draws.
+- Each group's content is a tab panel, which its tabs name as what they control: screen readers say they enter the
+  panel of the selected tab.
 - Every handle, between a split's groups and at each dock's edge, is an adjustable element labeled
   `handleAccessibilityLabel`. The handles between a split's groups are [Resizable](./resizable.md)'s: a screen reader
   moves them 10 points at a time, reported with `onLayoutChange`.
