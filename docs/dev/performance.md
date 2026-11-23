@@ -28,6 +28,26 @@ runs of the last four, from 409–703 µs (list js 96–134 µs) to 386–610 µ
 50 / 7 mount items and 15 / 18 nodes. `an_event_looks_only_at_its_nodes_handlers` keeps an event's handler lookups the
 same at 50, 200 and 800 rows.
 
+Rust components' events read by atom (`nsh-js` `components.rs`, 2026-11-20, macOS arm64, release, against the
+change below): a Rust component's event reached its `on<Event>` prop through two `String`s of its name, a `format!`
+of the handler's name, a `CString` per property read and a `Vec` of one argument; its creation checked each event's
+handler the same way, and slot and children readers made a `String` and a `CString` per read. Handler atoms are now
+made once per event name (`Components::handlers`), names are compared borrowed (`dom::with_str`), and the other reads
+take atoms without a `CString`. `bench_components`, JS time of three rounds of each version run in turn (a press: the
+mean of 2,000; a first frame: the least of 40); ops and mount items are the same:
+
+| Entry | Before | After |
+|---|---:|---:|
+| `PressRust.tsx`, a press delivered to `onPress` | 552–575 ns | 433–449 ns |
+| `GridRust.tsx` first frame | 588–604 µs | 573–583 µs |
+
+`PressTs.tsx` (990–1,039 ns a press) is the control. GridRust's update of 200 titles, a path this change does not
+touch, read 114–116 µs before and 117–118 µs after; the other entries stay within the runs' spread.
+
+Render keys holding a NUL: the table of what a render function rendered was written and cleared through a
+`CString`, which made every such key `""`, so two of them replaced each other's content. The table is now keyed
+by the whole key (`keys_holding_a_nul_render_and_go_as_others`).
+
 Rust components' props read by atom (`nsh-js` `components.rs`, 2026-11-19, macOS arm64, release, against
 `2ede573ac`): a Rust component's props effect read each of its keys (its value and renderer props and the about 20
 host props it does not declare) by name on every run, making the key list again (`ComponentSpec::host_props`, one
