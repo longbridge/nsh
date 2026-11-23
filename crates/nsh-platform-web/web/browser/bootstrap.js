@@ -5387,6 +5387,7 @@
 			pixelRatio: 1,
 			locale: "en-US",
 			reduceMotion: false,
+			reduceTransparency: false,
 			screenReader: false,
 			host: false,
 			lifecycle: "active",
@@ -5462,6 +5463,7 @@
 		};
 		const accessibility = {
 			reduceMotion: () => fields.reduceMotion(),
+			reduceTransparency: () => fields.reduceTransparency(),
 			screenReaderEnabled: () => fields.screenReader()
 		};
 		let appInfo = readAppInfo("{}");

@@ -11,6 +11,7 @@ test("the environment is what open asks for", async () => {
       temperatureUnit: "fahrenheit",
     },
     reducedMotion: true,
+    reducedTransparency: true,
     platform: "android",
     width: 320,
     height: 640,
@@ -23,6 +24,7 @@ test("the environment is what open asks for", async () => {
   // What open does not set is the locale's region's.
   expect(app.shows("Regional: h12 1 metric fahrenheit")).toBe(true);
   expect(app.shows("Motion: reduced")).toBe(true);
+  expect(app.shows("Transparency: reduced")).toBe(true);
   expect(app.shows("OS: android")).toBe(true);
   expect(app.shows("Size: 320x640")).toBe(true);
 });
@@ -32,6 +34,7 @@ test("the defaults are a light iPhone in en-US", async () => {
   expect(app.shows("Scheme: light")).toBe(true);
   expect(app.shows("Locale: en-US")).toBe(true);
   expect(app.shows("Motion: full")).toBe(true);
+  expect(app.shows("Transparency: full")).toBe(true);
   expect(app.shows("OS: ios")).toBe(true);
   expect(app.shows("Size: 390x844")).toBe(true);
   expect(app.shows("App: active")).toBe(true);

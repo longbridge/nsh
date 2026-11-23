@@ -31,6 +31,8 @@ pub struct Environment {
     pub font_scale: f32,
     /// Less motion asked for.
     pub reduce_motion: bool,
+    /// Less transparency asked for.
+    pub reduce_transparency: bool,
     /// A screen reader runs.
     pub screen_reader: bool,
     /// The platform's screen readers follow active descendants
@@ -152,6 +154,7 @@ impl Default for Environment {
             dark: false,
             font_scale: 1.0,
             reduce_motion: false,
+            reduce_transparency: false,
             screen_reader: false,
             reads_active_descendants: false,
             rtl: false,

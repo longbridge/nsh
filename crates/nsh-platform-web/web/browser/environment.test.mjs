@@ -36,7 +36,8 @@ const engine = (changes = {}) => ({
   horizontalSizeClass: "compact", verticalSizeClass: "regular",
   window: { width: 390, height: 844 }, safeArea: { top: 0, right: 0, bottom: 0, left: 0 },
   titleBar: { height: 0, left: 0, right: 0 }, keyboard: { height: 0, duration: 250 },
-  colorScheme: "light", fontScale: 1, rtl: false, reduceMotion: false, pixelRatio: 2, screenReader: false,
+  colorScheme: "light", fontScale: 1, rtl: false, reduceMotion: false, reduceTransparency: false, pixelRatio: 2,
+  screenReader: false,
   locale: "de-AT", host: false, lifecycle: "active", shaders: true, wakeCount: 0, localeSettings: settings(),
   network: { online: true, kind: "wifi", expensive: false, constrained: false, cellularData: "unknown" },
   platform: { name: "web", os: "web", version: "0.0", idiom: "desktop", desktop: true, appleKeyboard: false },
@@ -69,6 +70,17 @@ test("the environment serves every export of nsh/device and nsh/accessibility", 
       assert.equal(namespace[name], env.api[name], `${specifier}'s \`${name}\` is nsh's`);
     }
   }
+});
+
+test("reduced transparency is the engine's", () => {
+  const { env } = environment();
+  // Before the engine reports, the native environment's default.
+  assert.equal(env.api.reduceTransparency(), false);
+  env.update(engine({ reduceTransparency: true }));
+  assert.equal(env.api.reduceTransparency(), true);
+  assert.equal(env.modules["nsh/accessibility"].reduceTransparency(), true);
+  env.update(engine());
+  assert.equal(env.api.reduceTransparency(), false);
 });
 
 test("the browser reports no system wakes", () => {

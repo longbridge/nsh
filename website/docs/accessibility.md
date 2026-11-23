@@ -351,12 +351,13 @@ Hide what adds nothing: decorative images, dividers, an icon next to a text that
 
 ## The screen reader and the user's settings
 
-In Rust, the prelude reports the user's settings and talks to the screen reader: `screen_reader()` and `reduce_motion()` are reactive, `announce_for_accessibility(message)` has the screen reader read a message, and an element's `element_ref()` moves the screen reader's focus to it with `set_accessibility_focus()`. In TSX, `nsh`'s accessibility API reports the user's settings and lets you talk to the screen reader.
+In Rust, the prelude reports the user's settings and talks to the screen reader: `screen_reader()`, `reduce_motion()` and `reduce_transparency()` are reactive, `announce_for_accessibility(message)` has the screen reader read a message, and an element's `element_ref()` moves the screen reader's focus to it with `set_accessibility_focus()`. In TSX, `nsh`'s accessibility API reports the user's settings and lets you talk to the screen reader.
 
 | Member | Description |
 |---|---|
 | `screenReaderEnabled()` | Whether VoiceOver or TalkBack runs (reactive). |
 | `reduceMotion()` | Whether the user asked for less motion (reactive). |
+| `reduceTransparency()` | Whether the user asked for less transparency (reactive). |
 | `announce(message)` | The screen reader reads `message`. |
 | `setAccessibilityFocus(ref)` | Moves the screen reader's focus to a view. |
 
@@ -454,6 +455,38 @@ const toggle = () => {
 <View onPress={open} class="transition active:scale-95 motion-reduce:transition-none" />
 <View class="motion-safe:animate-bounce" />
 ```
+
+## Reduced transparency
+
+`reduce_transparency()` (Rust) and `reduceTransparency()` (TSX) are `true` when the user asked for less transparency:
+Reduce Transparency on iOS, iPadOS and macOS, transparency effects turned off on Windows, and
+`prefers-reduced-transparency: reduce` in browsers that report it. Android and Linux desktops have no such setting, so
+it is `false` there. Translucent backgrounds and `backdropFilter` blurs draw as you write them, so read it and give
+floating bars, sheets and buttons an opaque fill: text then keeps its contrast over the content scrolling beneath.
+Like the other settings it is reactive, so the surface changes as soon as the user turns the setting on or off:
+
+```rust tabs
+use nsh_core::prelude::*;
+
+view()
+    .bg(rgba(0xffffffb3))
+    .backdrop_blur(px(20.0))
+    .style_when(reduce_transparency, |s| s.bg(rgb(0xffffff)).backdrop_filter_none())
+```
+
+```tsx tabs
+import { View, reduceTransparency } from "nsh";
+
+<View
+  style={{
+    backgroundColor: reduceTransparency() ? "#ffffff" : "rgba(255, 255, 255, 0.7)",
+    backdropFilter: reduceTransparency() ? "none" : "blur(20px)",
+  }}
+/>
+```
+
+In tests, open the app with `reducedTransparency: true` ([Testing](./testing-and-trace.md)); Rust tests set
+`reduce_transparency` in the environment they give the headless app.
 
 ## Touch targets
 

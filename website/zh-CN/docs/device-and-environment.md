@@ -25,7 +25,7 @@ demo: guide-device
 | `lifecycle()` | `lifecycle()`（`nsh`） | 应用是否正在使用：`active`、`inactive`（可见但没有焦点）或 `background`（[在后台](#在后台)）。 |
 | `wake_count()` | `wakeCount()`（`nsh`） | 应用运行期间系统从睡眠中唤醒的次数（[睡眠之后](#睡眠之后)）。 |
 | `network()` | `network()`（`nsh`） | 设备怎样连到网络：是否在线，Wi-Fi、蜂窝还是有线，是否昂贵或受限，以及在 iOS 上应用能否使用蜂窝数据（[网络](#网络)）。 |
-| `reduce_motion()`、`screen_reader()` | `reduceMotion()`、`screenReaderEnabled()`（`nsh`） | 见[无障碍](./accessibility.md)。 |
+| `reduce_motion()`、`reduce_transparency()`、`screen_reader()` | `reduceMotion()`、`reduceTransparency()`、`screenReaderEnabled()`（`nsh`） | 见[无障碍](./accessibility.md)。 |
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -511,16 +511,17 @@ const hapticsSupported = platform.os === "ios" || (platform.os === "android" && 
 
 在 [macOS](./macos.md)（AppKit 后端）上，`platform.os` 为 `"macos"`，界面风格为 `"desktop"`，
 `platform.version` 为 macOS 的版本号。安全区域和键盘高度为 0，`colorScheme()` 实时跟随系统外观，`fontScale()` 为 1，
-`pixelRatio()` 为显示器的缩放比例（backing scale）。
+`reduceMotion()` 和 `reduceTransparency()` 实时跟随辅助功能的显示设置，`pixelRatio()` 为显示器的缩放比例（backing scale）。
 
 在 [Windows](./windows.md) 上，`platform.os` 为 `"windows"`，界面风格为 `"desktop"`，`platform.version` 为 `"10.0"`，Windows 11
 上也是如此（Windows 沿用了这个版本号）。安全区域和键盘高度为 0，`colorScheme()` 实时跟随“设置 > 个性化 > 颜色”，`fontScale()`
-跟随“文本大小”设置（1 到 2.25），`reduceMotion()` 跟随“动画效果”设置，`pixelRatio()` 为显示器的缩放比例，`Intl`
-按用户的区域格式进行格式化。
+跟随“文本大小”设置（1 到 2.25），`reduceMotion()` 跟随“动画效果”设置，`reduceTransparency()` 跟随“透明效果”设置，
+`pixelRatio()` 为显示器的缩放比例，`Intl` 按用户的区域格式进行格式化。
 
 在浏览器中（[Web 运行时](./web.md)），`platform.os` 为 `"web"`，`platform.version` 为 `"0.0"`。有鼠标且窗口宽度至少 600 点时界面风格为
 `"desktop"`，平板上为 `"pad"`，手机上为 `"phone"`，在应用启动时确定。区域设置、`localeSettings()`（浏览器的首选语言、浏览器按其语言给出的地区偏好和它的时区）、`lifecycle()`（标签页隐藏时为
-`"background"`，失去焦点时为 `"inactive"`）、`reduceMotion()`、`fontScale()`（浏览器的文字大小）、`pixelRatio()`、
+`"background"`，失去焦点时为 `"inactive"`）、`reduceMotion()`、`reduceTransparency()`（`prefers-reduced-transparency`，
+不报告它的浏览器里为 `false`）、`fontScale()`（浏览器的文字大小）、`pixelRatio()`、
 安全区域和键盘高度都来自浏览器，并实时跟随。
 
 在终端中（[终端后端](./tui.md)），`platform.idiom` 为 `"terminal"`，`platform.desktop` 为 `true`，`platform.os` 是本机自己的系统。

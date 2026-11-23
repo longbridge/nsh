@@ -320,7 +320,9 @@ view().backdrop_blur(px(30.0)).backdrop_material(BackdropMaterial::Regular)
 
 `glassEffect` draws Liquid Glass behind a view's content on iOS 26 and macOS 26 and later. `"regular"` uses the standard material;
 `"clear"` takes less color from the background. Pair it with `backdropFilter` for the blur shown on earlier iOS
-versions and other platforms. The glass follows the view's size and rounded corners.
+versions and other platforms. The glass follows the view's size and rounded corners. While the user asks for less
+transparency (`reduceTransparency()`), give such surfaces an opaque fill instead
+([Accessibility](./accessibility.md#reduced-transparency)).
 
 `glassTintColor` tints that glass on iOS 26 and macOS 26: `null` (or removing the key) restores the system's default.
 An explicit transparent color is a tint, not a reset. It draws nothing without `glassEffect`, and the blur fallback

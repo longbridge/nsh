@@ -408,6 +408,7 @@ export async function createHost(player) {
 | 时区（`Date` 的本地时间、`Intl` 默认的 `timeZone`） | 浏览器的时区（`Intl.DateTimeFormat().resolvedOptions().timeZone`），包括夏令时 |
 | 布局方向（`rtl:` / `ltr:`） | 设置了 `<html dir>` 时取它，否则取区域设置的书写方向 |
 | `reduceMotion()` | `prefers-reduced-motion` |
+| `reduceTransparency()` | `prefers-reduced-transparency`（浏览器不报告它时为 `false`） |
 | `fontScale()` | 根元素字号 / 16 px（浏览器的文字大小设置） |
 | `pixelRatio()` | `devicePixelRatio`（随缩放和屏幕变化） |
 | `colorScheme()` | `prefers-color-scheme` |

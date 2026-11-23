@@ -1,12 +1,10 @@
-//! The surface's environment: one signal per part
-//! (window, safe area, keyboard, color scheme, font scale, screen reader,
-//! reduced motion, pixel ratio, locale, locale settings, lifecycle, the
-//! wake count, the network, the
-//! desktop window's state and the displays)
-//! written when the platform reports a
-//! change, read through read-only accessors; `nsh/device` (`platform`) and
-//! `nsh/accessibility`; the layout direction, which follows the user's
-//! language; the insets
+//! The surface's environment: one signal per part (window, safe area,
+//! keyboard, color scheme, font scale, screen reader, reduced motion,
+//! reduced transparency, pixel ratio, locale, locale settings, lifecycle,
+//! the wake count, the network, the desktop window's state and the
+//! displays) written when the platform reports a change, read through
+//! read-only accessors; `nsh/device` (`platform`) and `nsh/accessibility`;
+//! the layout direction, which follows the user's language; the insets
 //! context screens and modals provide (`safeAreaInsets`); the design
 //! tokens the app is drawn with (`token()` of `nsh`).
 
@@ -44,6 +42,7 @@ enum Part {
     FontScale,
     ScreenReader,
     ReduceMotion,
+    ReduceTransparency,
     PixelRatio,
     TitleBar,
     Locale,
@@ -60,7 +59,7 @@ enum Part {
     VerticalSizeClass,
 }
 
-const PARTS: usize = 21;
+const PARTS: usize = 22;
 
 /// The environment's part of a context's state.
 pub(crate) struct Env {
@@ -588,6 +587,9 @@ pub(crate) fn set_environment(cx: *mut JsContext, next: &Environment) -> Result<
     }
     if changed(&|p| p.reduce_motion == next.reduce_motion) {
         writes.push((Part::ReduceMotion, boolean(next.reduce_motion)));
+    }
+    if changed(&|p| p.reduce_transparency == next.reduce_transparency) {
+        writes.push((Part::ReduceTransparency, boolean(next.reduce_transparency)));
     }
     if changed(&|p| p.pixel_ratio == next.pixel_ratio) {
         writes.push((Part::PixelRatio, number(next.pixel_ratio)));
@@ -1230,6 +1232,14 @@ pub(crate) const ACCESSIBILITY_EXPORTS: &[Item] = &[
         Export::Value(|cx| accessor(cx, Part::ReduceMotion)),
         Ts::value(
             "Whether the user asked for less motion (reactive; also `motion-reduce:`).",
+            "Accessor<boolean>",
+        ),
+    ),
+    (
+        "reduceTransparency",
+        Export::Value(|cx| accessor(cx, Part::ReduceTransparency)),
+        Ts::value(
+            "Whether the user asked for less transparency (reactive): draw opaque\nsurfaces where the app would draw translucent or blurred ones, so text\nkeeps its contrast over what scrolls beneath. iOS and macOS follow\nReduce Transparency, Windows its transparency effects, the web\n`prefers-reduced-transparency`; Android and Linux have no such setting\nand report `false`.",
             "Accessor<boolean>",
         ),
     ),

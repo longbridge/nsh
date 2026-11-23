@@ -3783,14 +3783,14 @@ nsh_platform_gpui::set_ui_sets(vec![nsh_base::registry(), trading]);
 
 ## Accessibility
 
-The accessibility API reads the user's accessibility settings (is a screen reader running, did they ask for less motion) and talks to the screen reader. Rust code calls `screen_reader()`, `reduce_motion()` and `announce_for_accessibility()` from `nsh_core::prelude` and moves the focus with an `ElementRef`; TSX imports `screenReaderEnabled()`, `reduceMotion()`, `announce()` and `setAccessibilityFocus()` from `nsh`. The settings are reactive: read them in a binding, `computed` or `effect`, and what reads them updates when the user changes them. The accessibility props of elements (`accessibilityLabel`, `role`, ...) are documented under [Elements](../elements/index.md); the guide is [Accessibility](../docs/accessibility.md).
+The accessibility API reads the user's accessibility settings (is a screen reader running, did they ask for less motion or less transparency) and talks to the screen reader. Rust code calls `screen_reader()`, `reduce_motion()`, `reduce_transparency()` and `announce_for_accessibility()` from `nsh_core::prelude` and moves the focus with an `ElementRef`; TSX imports `screenReaderEnabled()`, `reduceMotion()`, `reduceTransparency()`, `announce()` and `setAccessibilityFocus()` from `nsh`. The settings are reactive: read them in a binding, `computed` or `effect`, and what reads them updates when the user changes them. The accessibility props of elements (`accessibilityLabel`, `role`, ...) are documented under [Elements](../elements/index.md); the guide is [Accessibility](../docs/accessibility.md).
 
 ```rust tabs
-use nsh_core::prelude::*; // screen_reader, reduce_motion, announce_for_accessibility, element_ref
+use nsh_core::prelude::*; // screen_reader, reduce_motion, reduce_transparency, announce_for_accessibility, element_ref
 ```
 
 ```tsx tabs
-import { announce, reduceMotion, screenReaderEnabled, setAccessibilityFocus } from "nsh";
+import { announce, reduceMotion, reduceTransparency, screenReaderEnabled, setAccessibilityFocus } from "nsh";
 ```
 
 ### screenReaderEnabled
@@ -3835,6 +3835,30 @@ const open = () => {
   if (reduceMotion()) panel.set(0);
   else panel.spring(0);
 };
+```
+
+### reduceTransparency
+
+```ts
+const reduceTransparency: Accessor<boolean>;
+```
+
+Whether the user asked for less transparency (Reduce Transparency on iOS, iPadOS and macOS, transparency effects off on Windows, `prefers-reduced-transparency` in browsers). Reactive. Rust: `reduce_transparency() -> bool`. Android and Linux have no such setting: it is `false` there. Give translucent and blurred surfaces an opaque fill while it holds, so text keeps its contrast.
+
+```rust tabs
+view()
+    .bg(rgba(0xffffffb3))
+    .backdrop_blur(px(20.0))
+    .style_when(reduce_transparency, |s| s.bg(rgb(0xffffff)).backdrop_filter_none())
+```
+
+```tsx tabs
+<View
+  style={{
+    backgroundColor: reduceTransparency() ? "#ffffff" : "rgba(255, 255, 255, 0.7)",
+    backdropFilter: reduceTransparency() ? "none" : "blur(20px)",
+  }}
+/>
 ```
 
 ### announce

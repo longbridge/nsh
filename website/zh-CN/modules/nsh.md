@@ -3618,14 +3618,14 @@ nsh_platform_gpui::set_ui_sets(vec![nsh_base::registry(), trading]);
 
 ## Accessibility
 
-无障碍 API 读取用户的无障碍设置（屏幕阅读器是否在运行、是否要求减弱动态效果），并与屏幕阅读器交互。Rust 代码调用 `nsh_core::prelude` 中的 `screen_reader()`、`reduce_motion()` 和 `announce_for_accessibility()`，用 `ElementRef` 移动焦点；TSX 从 `nsh` 导入 `screenReaderEnabled()`、`reduceMotion()`、`announce()` 和 `setAccessibilityFocus()`。这些设置是响应式的：在绑定、`computed` 或 `effect` 中读取它们，用户修改设置时，读取它们的地方会随之更新。元素的无障碍属性（`accessibilityLabel`、`role` 等）见[元素](../elements/index.md)；教程见[无障碍](../docs/accessibility.md)。
+无障碍 API 读取用户的无障碍设置（屏幕阅读器是否在运行、是否要求减弱动态效果或降低透明度），并与屏幕阅读器交互。Rust 代码调用 `nsh_core::prelude` 中的 `screen_reader()`、`reduce_motion()`、`reduce_transparency()` 和 `announce_for_accessibility()`，用 `ElementRef` 移动焦点；TSX 从 `nsh` 导入 `screenReaderEnabled()`、`reduceMotion()`、`reduceTransparency()`、`announce()` 和 `setAccessibilityFocus()`。这些设置是响应式的：在绑定、`computed` 或 `effect` 中读取它们，用户修改设置时，读取它们的地方会随之更新。元素的无障碍属性（`accessibilityLabel`、`role` 等）见[元素](../elements/index.md)；教程见[无障碍](../docs/accessibility.md)。
 
 ```rust tabs
-use nsh_core::prelude::*; // screen_reader、reduce_motion、announce_for_accessibility、element_ref
+use nsh_core::prelude::*; // screen_reader、reduce_motion、reduce_transparency、announce_for_accessibility、element_ref
 ```
 
 ```tsx tabs
-import { announce, reduceMotion, screenReaderEnabled, setAccessibilityFocus } from "nsh";
+import { announce, reduceMotion, reduceTransparency, screenReaderEnabled, setAccessibilityFocus } from "nsh";
 ```
 
 ### screenReaderEnabled
@@ -3670,6 +3670,30 @@ const open = () => {
   if (reduceMotion()) panel.set(0);
   else panel.spring(0);
 };
+```
+
+### reduceTransparency
+
+```ts
+const reduceTransparency: Accessor<boolean>;
+```
+
+用户是否要求降低透明度（iOS、iPadOS 和 macOS 的“降低透明度”，Windows 关闭“透明效果”，浏览器的 `prefers-reduced-transparency`）。响应式。Rust：`reduce_transparency() -> bool`。Android 和 Linux 没有这项设置，那里为 `false`。它为真时给半透明和模糊的界面换上不透明的底色，让文字保持对比度。
+
+```rust tabs
+view()
+    .bg(rgba(0xffffffb3))
+    .backdrop_blur(px(20.0))
+    .style_when(reduce_transparency, |s| s.bg(rgb(0xffffff)).backdrop_filter_none())
+```
+
+```tsx tabs
+<View
+  style={{
+    backgroundColor: reduceTransparency() ? "#ffffff" : "rgba(255, 255, 255, 0.7)",
+    backdropFilter: reduceTransparency() ? "none" : "blur(20px)",
+  }}
+/>
 ```
 
 ### announce

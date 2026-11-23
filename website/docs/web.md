@@ -467,6 +467,7 @@ The page reports the rest of the environment, and keeps it current:
 | Time zone (`Date`'s local time, `Intl`'s default `timeZone`) | the browser's (`Intl.DateTimeFormat().resolvedOptions().timeZone`), daylight saving time included |
 | The layout direction (`rtl:` / `ltr:`) | `<html dir>` when set, else the locale's script |
 | `reduceMotion()` | `prefers-reduced-motion` |
+| `reduceTransparency()` | `prefers-reduced-transparency` (`false` where the browser does not report it) |
 | `fontScale()` | the root element's font size / 16 px (the browser's text size setting) |
 | `pixelRatio()` | `devicePixelRatio` (it changes with zoom and screens) |
 | `colorScheme()` | `prefers-color-scheme` |

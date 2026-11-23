@@ -25,15 +25,17 @@ covers [net] Socket
 covers [websocket] WebSocketConnection
 # mod-accessibility
 tap id:case-mod-accessibility
-# no screen reader and asks for no less motion.
+# no screen reader and asks for no less motion or transparency.
 expect Screen reader: false
 expect Reduce motion: false
+expect Reduce transparency: false
 expect Calls: not called
 tap id:call
 expect Calls: done
 covers [nsh] announce
 covers [nsh] setAccessibilityFocus
 covers [nsh] reduceMotion
+covers [nsh] reduceTransparency
 covers [nsh] screenReaderEnabled
 # mod-android
 tap id:case-mod-android

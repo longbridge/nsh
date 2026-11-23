@@ -502,8 +502,8 @@ fn page() -> Environment {
 
 /// What the page knows about the user and the device, as JSON: `idiom`
 /// (`"phone"`, `"pad"`, `"desktop"`), `locale` (a BCP 47 tag), `rtl`,
-/// `reduceMotion`, `fontScale`, `pixelRatio`, `safeArea` (`[top, right,
-/// bottom, left]`), `keyboard` (the height the on-screen keyboard
+/// `reduceMotion`, `reduceTransparency`, `fontScale`, `pixelRatio`,
+/// `safeArea` (`[top, right, bottom, left]`), `keyboard` (the height the on-screen keyboard
 /// covers), `appleKeyboard` (the browser runs on an Apple platform: its
 /// shortcuts are Apple's), `network` (`{ kind, expensive, constrained }`:
 /// `network()`, from `navigator.onLine` and `navigator.connection`),
@@ -587,6 +587,7 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
     env.rtl = flag("rtl").unwrap_or(env.rtl);
     env.apple_keyboard = flag("appleKeyboard").unwrap_or(env.apple_keyboard);
     env.reduce_motion = flag("reduceMotion").unwrap_or(env.reduce_motion);
+    env.reduce_transparency = flag("reduceTransparency").unwrap_or(env.reduce_transparency);
     if let Some(scale) = num("fontScale").filter(|s| *s > 0.0) {
         env.font_scale = scale;
     }
@@ -632,6 +633,7 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
         e.rtl = env.rtl;
         e.apple_keyboard = env.apple_keyboard;
         e.reduce_motion = env.reduce_motion;
+        e.reduce_transparency = env.reduce_transparency;
         e.font_scale = env.font_scale;
         let rescaled = e.pixel_ratio != env.pixel_ratio;
         e.pixel_ratio = env.pixel_ratio;

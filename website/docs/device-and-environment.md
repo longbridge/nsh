@@ -25,7 +25,7 @@ In Rust the accessors are functions of `nsh_core::prelude`; in TSX they come fro
 | `lifecycle()` | `lifecycle()` (`nsh`) | Whether the app is in use: `active`, `inactive` (visible without the focus) or `background` ([In the background](#in-the-background)). |
 | `wake_count()` | `wakeCount()` (`nsh`) | How many times the system woke from sleep while the app ran ([After a sleep](#after-a-sleep)). |
 | `network()` | `network()` (`nsh`) | How the device reaches the network: online or not, Wi-Fi, cellular or wired, expensive or constrained, and on iOS whether the app may use cellular data ([The network](#the-network)). |
-| `reduce_motion()`, `screen_reader()` | `reduceMotion()`, `screenReaderEnabled()` (`nsh`) | See [Accessibility](./accessibility.md). |
+| `reduce_motion()`, `reduce_transparency()`, `screen_reader()` | `reduceMotion()`, `reduceTransparency()`, `screenReaderEnabled()` (`nsh`) | See [Accessibility](./accessibility.md). |
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -524,18 +524,21 @@ area and the keyboard height are 0, `colorScheme()` follows the desktop's settin
 
 On [macOS](./macos.md) (the AppKit backend), `platform.os` is `"macos"`, the idiom `"desktop"` and
 `platform.version` the macOS version. The safe area and the keyboard height are 0, `colorScheme()` follows the
-system's appearance live, `fontScale()` is 1 and `pixelRatio()` the display's backing scale.
+system's appearance live, `fontScale()` is 1, `reduceMotion()` and `reduceTransparency()` follow the accessibility
+display settings live, and `pixelRatio()` is the display's backing scale.
 
 On [Windows](./windows.md), `platform.os` is `"windows"`, the idiom `"desktop"` and `platform.version` `"10.0"`, on
 Windows 11 too (Windows kept the version number). The safe area and the keyboard height are 0, `colorScheme()` follows
 Settings > Personalization > Colors live, `fontScale()` the Text size setting (1 to 2.25), `reduceMotion()` the
-animation effects setting, `pixelRatio()` the monitor's scale, and `Intl` formats in the user's regional format.
+animation effects setting, `reduceTransparency()` the transparency effects setting, `pixelRatio()` the monitor's scale,
+and `Intl` formats in the user's regional format.
 
 In a browser ([the web runtime](./web.md)), `platform.os` is `"web"` and `platform.version` `"0.0"`. The idiom is
 `"desktop"` with a mouse and a window at least 600 points wide, `"pad"` on a tablet and `"phone"` on a phone, decided
 when the app starts. The locale, `localeSettings()` (the browser's preferred languages, its regional preferences for
 its language and its time zone), `lifecycle()` (`"background"` in a hidden tab, `"inactive"` without the
-focus), `reduceMotion()`, `fontScale()` (the browser's text size), `pixelRatio()`, the safe area and the keyboard height
+focus), `reduceMotion()`, `reduceTransparency()` (`prefers-reduced-transparency`, `false` in browsers that do not
+report it), `fontScale()` (the browser's text size), `pixelRatio()`, the safe area and the keyboard height
 come from the browser and follow it live.
 
 In a terminal ([the terminal backend](./tui.md)), `platform.idiom` is `"terminal"`, `platform.desktop` is `true` and

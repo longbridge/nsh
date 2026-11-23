@@ -24153,6 +24153,69 @@ mod views {
     }
 
     thread_local! {
+        static TRANSPARENCY_RUNS: Cell<u32> = const { Cell::new(0) };
+    }
+
+    /// A frosted bar, opaque while the user asks for less transparency
+    /// (`website/docs/accessibility.md`'s example), showing which it is;
+    /// its effect counts its runs.
+    #[component]
+    fn Glass() -> impl IntoElement {
+        effect(move || {
+            reduce_transparency();
+            TRANSPARENCY_RUNS.with(|n| n.set(n.get() + 1));
+        });
+        view()
+            .bg(rgba(0xffffffb3))
+            .backdrop_blur(px(20.0))
+            .style_when(reduce_transparency, |s| {
+                s.bg(rgb(0xffffff)).backdrop_filter_none()
+            })
+            .child(text(move || {
+                if reduce_transparency() {
+                    "opaque".to_owned()
+                } else {
+                    "translucent".to_owned()
+                }
+            }))
+    }
+
+    #[test]
+    fn an_effect_reading_reduce_transparency_runs_again_when_the_setting_changes_only() {
+        TRANSPARENCY_RUNS.with(|n| n.set(0));
+        let mut c = core();
+        c.mount_root(&Root::new::<Glass>(|| ()));
+        assert_eq!(texts(&c.commit().unwrap()), ["translucent"]);
+        assert_eq!(TRANSPARENCY_RUNS.with(Cell::get), 1);
+        // Another part of the environment changes: the effect stays.
+        c.set_environment(crate::element::Environment {
+            reduce_motion: true,
+            ..Default::default()
+        });
+        c.commit();
+        assert_eq!(TRANSPARENCY_RUNS.with(Cell::get), 1);
+        let reduced = crate::element::Environment {
+            reduce_motion: true,
+            reduce_transparency: true,
+            ..Default::default()
+        };
+        c.set_environment(reduced);
+        assert_eq!(texts(&c.commit().unwrap()), ["opaque"]);
+        assert_eq!(TRANSPARENCY_RUNS.with(Cell::get), 2);
+        // The same setting reported again changes nothing.
+        c.set_environment(reduced);
+        c.commit();
+        assert_eq!(TRANSPARENCY_RUNS.with(Cell::get), 2);
+        // The user turned it off again.
+        c.set_environment(crate::element::Environment {
+            reduce_motion: true,
+            ..Default::default()
+        });
+        assert_eq!(texts(&c.commit().unwrap()), ["translucent"]);
+        assert_eq!(TRANSPARENCY_RUNS.with(Cell::get), 3);
+    }
+
+    thread_local! {
         static NETWORK_RUNS: Cell<u32> = const { Cell::new(0) };
     }
 

@@ -695,6 +695,7 @@ impl Session {
                 // preferences) in UTC, but for what the test sets.
                 locale_settings: LocaleSettings::of(locale.unwrap_or(Locale::EN_US)),
                 reduce_motion: launch.reduced_motion.unwrap_or(false),
+                reduce_transparency: launch.reduced_transparency.unwrap_or(false),
                 os: match platform {
                     Platform::Ios => Os::Ios,
                     Platform::Android => Os::Android,
@@ -790,6 +791,7 @@ impl Session {
         environment.measurement_system = settings.measurement_system.map(|s| s.name().to_owned());
         environment.temperature_unit = settings.temperature_unit.map(|u| u.name().to_owned());
         environment.reduced_motion = launch.reduced_motion;
+        environment.reduced_transparency = launch.reduced_transparency;
         environment.safe_area = launch.safe_area.map(|safe_area| {
             [
                 safe_area.top.0,
@@ -1325,6 +1327,7 @@ mod tests {
             locale: None,
             locale_settings: Default::default(),
             reduced_motion: None,
+            reduced_transparency: None,
             platform: None,
             clock: None,
             host: nsh_engine::HostChannel::new(),
@@ -1355,6 +1358,7 @@ mod tests {
         plain.clock = Some(std::time::SystemTime::UNIX_EPOCH);
         plain.locale = Some("fr-FR".into());
         plain.reduced_motion = Some(true);
+        plain.reduced_transparency = Some(true);
         assert_eq!(check(&plain, &ios), Ok(()));
         assert_eq!(check(&plain, &macos), Ok(()));
 

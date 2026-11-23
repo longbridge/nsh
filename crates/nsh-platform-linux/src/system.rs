@@ -30,6 +30,7 @@
 //!   schema is installed), live; the time zone, below;
 //! - the font scale: `gtk-xft-dpi` over 96 dpi;
 //! - reduce motion: `gtk-enable-animations` off;
+//! - reduce transparency: `false`, as GNOME and KDE have no such setting;
 //! - the pixel ratio: the root's surface scale (fractional scales too);
 //! - right to left: GTK's default text direction (the locale's);
 //! - the screen reader: the AT-SPI bus's `ScreenReaderEnabled`;

@@ -95,6 +95,7 @@ struct EnvSignals {
     dark: Memo<bool>,
     font_scale: Memo<f32>,
     reduce_motion: Memo<bool>,
+    reduce_transparency: Memo<bool>,
     screen_reader: Memo<bool>,
     rtl: Memo<bool>,
     pixel_ratio: Memo<f32>,
@@ -141,6 +142,7 @@ impl EnvSignals {
                 dark: part!(dark),
                 font_scale: part!(font_scale),
                 reduce_motion: part!(reduce_motion),
+                reduce_transparency: part!(reduce_transparency),
                 screen_reader: part!(screen_reader),
                 rtl: part!(rtl),
                 pixel_ratio: part!(pixel_ratio),
@@ -378,6 +380,14 @@ pub fn font_scale() -> f32 {
 /// The user asked for less motion (TS: `reduceMotion()`).
 pub fn reduce_motion() -> bool {
     env(|e| e.reduce_motion)
+}
+
+/// The user asked for less transparency (TS: `reduceTransparency()`): draw
+/// opaque surfaces where the app would draw translucent or blurred ones,
+/// so text keeps its contrast over what scrolls beneath. Reading
+/// subscribes: what read it runs again when the user changes the setting.
+pub fn reduce_transparency() -> bool {
+    env(|e| e.reduce_transparency)
 }
 
 /// A screen reader runs (TS: `screenReaderEnabled()`).

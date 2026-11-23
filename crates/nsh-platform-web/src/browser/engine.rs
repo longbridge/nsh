@@ -224,7 +224,8 @@ impl Host for Runtime {
             "titleBar":{"height":e.title_bar.top.0,"left":e.title_bar.left.0,"right":e.title_bar.right.0},
             "keyboard":{"height":e.keyboard_height.0,"duration":e.keyboard_duration},
             "colorScheme":if e.color_scheme==nsh_engine::ColorScheme::Dark {"dark"}else{"light"},
-            "fontScale":e.font_scale,"rtl":e.rtl,"reduceMotion":e.reduce_motion,"pixelRatio":e.pixel_ratio,
+            "fontScale":e.font_scale,"rtl":e.rtl,"reduceMotion":e.reduce_motion,
+            "reduceTransparency":e.reduce_transparency,"pixelRatio":e.pixel_ratio,
             "screenReader":e.screen_reader,"locale":e.locale.as_str(),"host":e.host,"lifecycle":e.lifecycle.name(),
             "shaders":e.shaders,"wakeCount":e.wake_count,
             "network":{

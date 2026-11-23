@@ -319,7 +319,8 @@ view().backdrop_blur(px(30.0)).backdrop_material(BackdropMaterial::Regular)
 
 `glassEffect` 在 iOS 26、macOS 26 及更高版本中，于视图内容背后绘制 Liquid Glass。`"regular"` 使用标准材质，
 `"clear"` 从背景获取的颜色更少。配合 `backdropFilter`，可在更早的 iOS 版本及其他平台上显示模糊效果。
-玻璃层随视图的尺寸和圆角更新。
+玻璃层随视图的尺寸和圆角更新。用户要求降低透明度时（`reduceTransparency()`），给这类界面换上不透明的底色
+（[无障碍](./accessibility.md#降低透明度)）。
 
 ```tsx
 <View style={{ height: 80, borderRadius: 16, backdropFilter: "blur(12px)", glassEffect: "regular" }} />

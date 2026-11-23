@@ -449,6 +449,12 @@ pub struct Environment {
     /// The user asked for less motion (iOS Reduce Motion, Android's
     /// animator duration scale at 0).
     pub reduce_motion: bool,
+    /// The user asked for less transparency: opaque surfaces in place of
+    /// translucent or blurred ones (iOS and macOS Reduce Transparency,
+    /// Windows' transparency effects off, the web's
+    /// `prefers-reduced-transparency`). `false` where the system has no
+    /// such setting (Android, Linux).
+    pub reduce_transparency: bool,
     /// Device pixels per point.
     pub pixel_ratio: f32,
     /// A screen reader runs (VoiceOver, TalkBack).
@@ -675,6 +681,7 @@ impl Default for Environment {
             font_scale: 1.0,
             rtl: false,
             reduce_motion: false,
+            reduce_transparency: false,
             pixel_ratio: 1.0,
             screen_reader: false,
             reads_active_descendants: false,

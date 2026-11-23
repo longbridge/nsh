@@ -88,7 +88,7 @@ fn configured() -> Headless {
 | Field | For |
 |---|---|
 | `viewport` | The window. Test the desktop layout by making it wide; `app.set_viewport(..)` changes it mid-test |
-| `environment` | `color_scheme`, `safe_area`, `reduce_motion`, `font_scale`, `rtl`, `keyboard_height`. `app.set_environment(..)` changes it |
+| `environment` | `color_scheme`, `safe_area`, `reduce_motion`, `reduce_transparency`, `font_scale`, `rtl`, `keyboard_height`. `app.set_environment(..)` changes it |
 | `network` | A `StubNetwork`. Routes are `"<METHOD> <URL>"`, a bare URL is a `GET`, the URL matches whole with its query, and `*` matches anything |
 | `storage` | `MemoryStorage::new(entries)`: start with saved state and assert persistence |
 | `clock` | `Clock::manual(time)`: time moves only when the test moves it, with `app.run_for(d)` and `app.fast_forward(d)` |

@@ -4564,3 +4564,65 @@ test("share reports shared, dismissed and unavailable, never shared when it coul
     else delete globalThis.navigator;
   }
 });
+
+/** Runs `fn` with `stubs` in place of the globals of those names. */
+function withGlobals(stubs, fn) {
+  const saved = Object.keys(stubs).map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]);
+  for (const [name, value] of Object.entries(stubs)) {
+    Object.defineProperty(globalThis, name, { value, configurable: true, writable: true });
+  }
+  try {
+    return fn();
+  } finally {
+    for (const [name, descriptor] of saved) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else delete globalThis[name];
+    }
+  }
+}
+
+test("the page reports the user's reduced transparency and follows its changes", () => {
+  // The media queries the page asks, each answering `matches` from `media`.
+  const media = { "(prefers-reduced-motion: reduce)": false, "(prefers-reduced-transparency: reduce)": true };
+  const queries = new Map();
+  const matchMedia = (query) => {
+    const list = { listeners: [], get matches() { return media[query] ?? false; } };
+    list.addEventListener = (type, listener) => type === "change" && list.listeners.push(listener);
+    queries.set(query, list);
+    return list;
+  };
+  const target = { addEventListener() {} };
+  const element = { className: "", getAttribute: () => null };
+  const document = { ...target, documentElement: element, createElement: () => ({}), body: { append() {} } };
+  withGlobals(
+    {
+      matchMedia,
+      document,
+      window: target,
+      addEventListener() {},
+      visualViewport: undefined,
+      devicePixelRatio: 2,
+      MutationObserver: class { observe() {} },
+      getComputedStyle: () => ({ fontSize: "16px" }),
+    },
+    () => {
+      let changes = 0;
+      const player = Object.create(Player.prototype);
+      Object.assign(player, {
+        idiom: "phone",
+        options: {},
+        environmentChanged: () => changes++,
+        safeArea: () => [0, 0, 0, 0],
+        keyboardHeight: () => 0,
+        lifecycle: () => "active",
+      });
+      player.installEnvironment();
+      assert.equal(player.environment().reduceTransparency, true);
+      // The user turns it off: the page reports the change.
+      media["(prefers-reduced-transparency: reduce)"] = false;
+      for (const listener of queries.get("(prefers-reduced-transparency: reduce)").listeners) listener();
+      assert.equal(changes, 1);
+      assert.equal(player.environment().reduceTransparency, false);
+    },
+  );
+});

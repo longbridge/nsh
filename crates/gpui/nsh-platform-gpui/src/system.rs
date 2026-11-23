@@ -33,6 +33,9 @@
 //! - reduce motion: Windows' animation effects
 //!   (`SPI_GETCLIENTAREAANIMATION`), macOS' universal access
 //!   `reduceMotion`, the portal's `enable-animations` off on Linux;
+//! - reduce transparency: Windows' transparency effects off
+//!   (`EnableTransparency`), macOS' universal access `reduceTransparency`;
+//!   `false` on Linux, whose desktops have no such setting;
 //! - right to left: the reading direction of the UI language on Windows,
 //!   of the locale's language elsewhere;
 //! - the screen reader: `SPI_GETSCREENREADER` on Windows, VoiceOver's
@@ -156,6 +159,7 @@ fn with_watched<R>(key: u64, f: impl FnOnce(&mut Watched) -> R) -> Option<R> {
 struct Settings {
     font_scale: f32,
     reduce_motion: bool,
+    reduce_transparency: bool,
     rtl: bool,
     screen_reader: bool,
     locale: Locale,
@@ -412,6 +416,7 @@ fn update(surface: &Surface) {
     env.locale_settings = settings.locale_settings;
     env.font_scale = settings.font_scale;
     env.reduce_motion = settings.reduce_motion;
+    env.reduce_transparency = settings.reduce_transparency;
     env.rtl = settings.rtl;
     env.screen_reader = settings.screen_reader;
     env.os_version = settings.os_version;
@@ -627,6 +632,8 @@ mod os {
         Settings {
             font_scale: desktop.font_scale,
             reduce_motion: desktop.reduce_motion,
+            // GNOME and KDE have no such setting.
+            reduce_transparency: false,
             rtl: rtl_language(locale.as_str()),
             screen_reader: desktop.screen_reader,
             locale,
@@ -893,6 +900,11 @@ mod os {
             )),
             // Animation effects off is Windows' reduce motion.
             reduce_motion: spi_bool(SPI_GETCLIENTAREAANIMATION) == Some(false),
+            // Transparency effects off.
+            reduce_transparency: reg_dword(
+                "Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                "EnableTransparency",
+            ) == Some(0),
             rtl: ui_language().is_some_and(|l| rtl_language(&l)),
             screen_reader: spi_bool(SPI_GETSCREENREADER) == Some(true),
             locale,
@@ -1200,6 +1212,7 @@ mod os {
         Settings {
             font_scale: 1.0,
             reduce_motion: universal_access(c"reduceMotion"),
+            reduce_transparency: universal_access(c"reduceTransparency"),
             rtl: rtl_language(locale.as_str()),
             screen_reader: universal_access(c"voiceOverOnOffKey"),
             locale,

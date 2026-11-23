@@ -34,6 +34,10 @@
 //!   (`TextScaleFactor`, 100 to 225 percent);
 //! - reduce motion: Settings > Accessibility > Visual effects > Animation
 //!   effects off (`SPI_GETCLIENTAREAANIMATION`);
+//! - reduce transparency: Settings > Accessibility > Visual effects >
+//!   Transparency effects off (`EnableTransparency` 0 under
+//!   `Themes\Personalize`), re-read on the `WM_SETTINGCHANGE` that change
+//!   sends;
 //! - right to left: the reading direction of the UI language (what the
 //!   shell's own layout follows);
 //! - the screen reader: `SPI_GETSCREENREADER` (Narrator, NVDA and JAWS set
@@ -177,6 +181,7 @@ struct Settings {
     dark: bool,
     font_scale: f32,
     reduce_motion: bool,
+    reduce_transparency: bool,
     rtl: bool,
     screen_reader: bool,
     locale: Locale,
@@ -289,6 +294,11 @@ fn settings() -> Settings {
         )),
         // Animation effects off is Windows' reduce motion.
         reduce_motion: spi_bool(SPI_GETCLIENTAREAANIMATION) == Some(false),
+        reduce_transparency: transparency_reduced(reg_dword(
+            HKEY_CURRENT_USER,
+            w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"),
+            w!("EnableTransparency"),
+        )),
         rtl: ui_language_rtl(),
         screen_reader: spi_bool(SPI_GETSCREENREADER) == Some(true),
         locale,
@@ -452,6 +462,7 @@ fn update(surface: &Surface, settings: Settings) {
     env.locale_settings.time_zone = time_zone();
     env.font_scale = settings.font_scale;
     env.reduce_motion = settings.reduce_motion;
+    env.reduce_transparency = settings.reduce_transparency;
     env.rtl = settings.rtl;
     env.screen_reader = settings.screen_reader;
     if !surface.hwnd().is_invalid() {
@@ -561,6 +572,13 @@ fn text_scale(percent: Option<u32>) -> f32 {
     percent
         .filter(|p| (100..=225).contains(p))
         .map_or(1.0, |p| p as f32 / 100.0)
+}
+
+/// Whether `EnableTransparency` (Settings > Personalization > Colors,
+/// and Accessibility > Visual effects > Transparency effects) asks for
+/// less transparency: only when it is 0; unset means the effects are on.
+fn transparency_reduced(enabled: Option<u32>) -> bool {
+    enabled == Some(0)
 }
 
 /// The user's regional format (`de-DE`), if the system has one.
@@ -2571,6 +2589,14 @@ mod tests {
         assert_eq!(text_scale(Some(225)), 2.25);
         assert_eq!(text_scale(Some(0)), 1.0);
         assert_eq!(text_scale(Some(1000)), 1.0);
+    }
+
+    #[test]
+    fn transparency_effects_off_reduce_transparency() {
+        assert!(transparency_reduced(Some(0)));
+        assert!(!transparency_reduced(Some(1)));
+        // Unset: the system's default, the effects on.
+        assert!(!transparency_reduced(None));
     }
 
     #[test]

@@ -498,7 +498,7 @@ first), `regional` (the locale's hour cycle and first day of the week from `Intl
 (`Intl.DateTimeFormat().resolvedOptions().timeZone`), `lifecycle` (`background` while `document.visibilityState` is
 `hidden` or the page is in the back / forward cache, from a `persisted` `pagehide` to a `persisted` `pageshow`, else
 `active` with the focus and `inactive` without), `rtl` (`<html dir>`, else the locale's script),
-`reduceMotion`, `fontScale` (the root font size / 16), `pixelRatio`, `safeArea` (`env(safe-area-inset-*)` read through a
+`reduceMotion`, `reduceTransparency` (`prefers-reduced-transparency`), `fontScale` (the root font size / 16), `pixelRatio`, `safeArea` (`env(safe-area-inset-*)` read through a
 hidden probe element, clipped to the container) and `keyboard` (the container's part below `visualViewport`). The Rust
 side keeps it (`PAGE`) for the next start; the appearance and the window keep their own calls (`nsh_set_dark`,
 `nsh_resize`). Changes come from media query listeners, `languagechange`, `visibilitychange`, `focus` and `blur` (the

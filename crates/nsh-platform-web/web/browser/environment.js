@@ -22,7 +22,8 @@ function readAppInfo(json) {
 export function createEnvironment(reactive, invoke, dom) {
   const initial = { window: { width: 0, height: 0 }, safeArea: { top: 0, right: 0, bottom: 0, left: 0 },
     titleBar: { height: 0, left: 0, right: 0 }, keyboard: { height: 0, duration: 0.25 },
-    colorScheme: "light", fontScale: 1, pixelRatio: 1, locale: "en-US", reduceMotion: false, screenReader: false, host: false,
+    colorScheme: "light", fontScale: 1, pixelRatio: 1, locale: "en-US", reduceMotion: false, reduceTransparency: false,
+    screenReader: false, host: false,
     lifecycle: "active", shaders: true, wakeCount: 0,
     network: { online: true, kind: "unknown", expensive: false, constrained: false, cellularData: "unknown" },
     horizontalSizeClass: "compact", verticalSizeClass: "compact",
@@ -73,7 +74,10 @@ export function createEnvironment(reactive, invoke, dom) {
     fpsEnabled: () => false,
     perfStats: () => null,
   };
-  const accessibility = { reduceMotion: () => fields.reduceMotion(), screenReaderEnabled: () => fields.screenReader() };
+  const accessibility = {
+    reduceMotion: () => fields.reduceMotion(), reduceTransparency: () => fields.reduceTransparency(),
+    screenReaderEnabled: () => fields.screenReader(),
+  };
   // nsh-js's `appInfo` (`env.rs`): what the build wrote, handed over by
   // `setup` before the app's modules run.
   let appInfo = readAppInfo("{}");

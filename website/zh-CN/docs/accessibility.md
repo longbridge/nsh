@@ -349,12 +349,13 @@ view()
 
 ## 屏幕阅读器与用户的设置
 
-在 Rust 中，prelude 报告用户的设置并与屏幕阅读器交互：`screen_reader()` 和 `reduce_motion()` 是响应式的，`announce_for_accessibility(message)` 让屏幕阅读器朗读一条消息，元素的 `element_ref()` 用 `set_accessibility_focus()` 把屏幕阅读器的焦点移到它上面。在 TSX 中，`nsh` 的无障碍 API 报告用户的设置，并让你与屏幕阅读器交互。
+在 Rust 中，prelude 报告用户的设置并与屏幕阅读器交互：`screen_reader()`、`reduce_motion()` 和 `reduce_transparency()` 是响应式的，`announce_for_accessibility(message)` 让屏幕阅读器朗读一条消息，元素的 `element_ref()` 用 `set_accessibility_focus()` 把屏幕阅读器的焦点移到它上面。在 TSX 中，`nsh` 的无障碍 API 报告用户的设置，并让你与屏幕阅读器交互。
 
 | 成员 | 说明 |
 |---|---|
 | `screenReaderEnabled()` | VoiceOver 或 TalkBack 是否在运行（响应式）。 |
 | `reduceMotion()` | 用户是否要求减少动态效果（响应式）。 |
+| `reduceTransparency()` | 用户是否要求降低透明度（响应式）。 |
 | `announce(message)` | 屏幕阅读器朗读 `message`。 |
 | `setAccessibilityFocus(ref)` | 把屏幕阅读器的焦点移到某个视图。 |
 
@@ -452,6 +453,37 @@ const toggle = () => {
 <View onPress={open} class="transition active:scale-95 motion-reduce:transition-none" />
 <View class="motion-safe:animate-bounce" />
 ```
+
+## 降低透明度
+
+用户要求降低透明度时，`reduce_transparency()`（Rust）和 `reduceTransparency()`（TSX）为 `true`：iOS、iPadOS 和
+macOS 的"降低透明度"，Windows 关闭"透明效果"，以及支持它的浏览器里的 `prefers-reduced-transparency: reduce`。Android 和
+Linux 桌面没有这项设置，那里它为 `false`。半透明背景和 `backdropFilter` 模糊按你编写的方式绘制，所以读取它，给浮动的栏、
+面板和按钮换上不透明的底色：文字压在下面滚动的内容上时仍保持对比度。它和其他设置一样是响应式的，用户打开或关闭这项设置时界面
+立即跟着变化：
+
+```rust tabs
+use nsh_core::prelude::*;
+
+view()
+    .bg(rgba(0xffffffb3))
+    .backdrop_blur(px(20.0))
+    .style_when(reduce_transparency, |s| s.bg(rgb(0xffffff)).backdrop_filter_none())
+```
+
+```tsx tabs
+import { View, reduceTransparency } from "nsh";
+
+<View
+  style={{
+    backgroundColor: reduceTransparency() ? "#ffffff" : "rgba(255, 255, 255, 0.7)",
+    backdropFilter: reduceTransparency() ? "none" : "blur(20px)",
+  }}
+/>
+```
+
+测试中用 `reducedTransparency: true` 打开应用（[测试](./testing-and-trace.md)）；Rust 测试在交给无头应用的环境里设置
+`reduce_transparency`。
 
 ## 触摸目标
 

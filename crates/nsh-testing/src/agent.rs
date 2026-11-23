@@ -232,6 +232,7 @@ impl Model {
             .as_deref()
             .and_then(nsh_core::platform::TemperatureUnit::parse);
         pins.reduce_motion = environment.reduced_motion;
+        pins.reduce_transparency = environment.reduced_transparency;
         pins.safe_area =
             environment
                 .safe_area

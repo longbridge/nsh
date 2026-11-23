@@ -52,7 +52,7 @@ loader). Where each one is implemented and declared: `js-modules.md`.
   (`${pluginDir}` as a `file:` URL), else the page's URL (`HostOptions::base_url`), else `asset:/`. `import.meta`
   itself is left as it is.
 - `nsh`'s `windowSize`, `colorScheme`, `fontScale`, `pixelRatio`, `locale`, `platform` and
-  `reduceMotion`, `screenReaderEnabled`, `announce`, `setAccessibilityFocus`: the environment (`env.rs`), one
+  `reduceMotion`, `reduceTransparency`, `screenReaderEnabled`, `announce`, `setAccessibilityFocus`: the environment (`env.rs`), one
   signal per part written when the platform reports a change, read through read-only accessors.
 - `nsh`'s primitives `List`, `Canvas` (with `Path2D`, `CanvasRenderingContext2D`, `CanvasGradient`), `WebView`,
   `Video` and `Image` (the image element's component with the `nsh` registry's `Image` functions on it): internal
