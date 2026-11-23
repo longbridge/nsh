@@ -375,6 +375,14 @@ const TSCONFIG_BASE: &str = ".nsh/tsconfig.json";
 /// removed. An app's `tsconfig.json` from an earlier `nsh init`, unchanged,
 /// becomes one extending `.nsh/tsconfig.json` ([`migrate_tsconfig`]).
 pub(crate) fn write_types(dir: &Path) {
+    write_types_of(dir, dir);
+}
+
+/// [`write_types`] in `dir`, the directory of the app's TypeScript project
+/// (its entry's, with its `tsconfig.json`), for the app in `app` (its
+/// `nsh.json`'s directory, whose theme and nshm the declarations name):
+/// they differ when `nsh.json` names an entry below it (`"entry"`).
+fn write_types_of(dir: &Path, app: &Path) {
     let types = dir.join(".nsh/types");
     // The app's sets, and `nsh/test` for its test files.
     let mut sets = crate::ui_sets().to_vec();
@@ -386,14 +394,14 @@ pub(crate) fn write_types(dir: &Path) {
     // The theme's errors are the build's to report: its names are the
     // default's meanwhile.
     let tokens =
-        nsh_bundler::theme_tokens(dir).unwrap_or_else(|_| nsh_base::Theme::default().into_tokens());
+        nsh_bundler::theme_tokens(app).unwrap_or_else(|_| nsh_base::Theme::default().into_tokens());
     definitions.push((
         "nsh/tokens.d.ts".to_owned(),
         nsh_bundler::tokens_declaration(&tokens),
     ));
     // The TSX nshm the app installed (`nsh.lock`): their declarations are
     // their sources, so the checker reads them as the bundler does.
-    match nsh_bundler::nshm::exports(dir) {
+    match nsh_bundler::nshm::exports(app) {
         Ok(exports) => definitions.extend(
             exports
                 .iter()
@@ -513,11 +521,10 @@ fn remove_stale(types: &Path, dir: &Path, definitions: &[(String, String)]) {
 
 /// [`write_types`] for the app whose entry is `entry`.
 pub(crate) fn write_types_for(entry: &Path) {
-    if let Some(dir) = dunce::canonicalize(entry)
-        .ok()
-        .and_then(|e| e.parent().map(Path::to_path_buf))
+    if let Ok(entry) = dunce::canonicalize(entry)
+        && let Some(dir) = entry.parent()
     {
-        write_types(&dir);
+        write_types_of(dir, &nsh_bundler::app_dir::app_dir_of(&entry));
     }
 }
 

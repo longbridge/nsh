@@ -26,10 +26,10 @@ host's window rather than the focused window; macOS's responder chain acts on
 the key window. **GPUI** is not migrated: its host and Linux window behavior
 follow the old model. **`windowSize()`/`pixelRatio()`** report the host
 surface and the host display, not the calling window's, except on Windows,
-where they follow the app's primary window (the first of its own windows
-still open) as the user resizes or moves it, and the host's only while it
-shows none. macOS follows the same primary window for `windowSize()`;
-`pixelRatio()` there still reports the host display. **`defaultVisible`**
+Linux and macOS, where they follow the app's primary window (the first of
+its own windows still open) as the user resizes or moves it, and the host's
+only while it shows none. On Linux the FPS panel (`--fps`) shows in that
+window too, and counts its frames, as it does on macOS (#2866). **`defaultVisible`**
 no longer applies: the host never shows, and an app that starts without a
 window opens none; the key is still parsed but has no effect.
 

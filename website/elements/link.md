@@ -209,8 +209,8 @@ See [Accessibility](../docs/accessibility.md) for labels, roles and announcement
   open the link that has the keyboard focus. The pointer resting on a link shows its URL ([Where it
   goes](#where-it-goes)).
 - The web renders a link with an `href` as an `<a href>` (crawlers follow it; a click with a modifier key or the
-  middle button opens it in a new tab, and a right click shows the browser's menu for links), one without as an
-  element with `role="link"`.
+  middle button opens it in a new tab or window as the browser does, with no `onOpen` or `onPress`, and a right click
+  shows the browser's menu for links), one without as an element with `role="link"`.
 - Terminal: the text inside an enabled link whose `href` is a URL (not a path of the app's) is an OSC 8 hyperlink
   to it, which the terminal emulator opens itself on a modified click, outside `openWith`. The Linux console
   (`TERM=linux`) shows plain text.

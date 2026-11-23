@@ -4574,6 +4574,53 @@ test("a text drawn as a heading after its links keeps their hover", () => {
   }
 });
 
+test("a click with a modifier key on a link is the browser's: the link takes no press", () => {
+  inPage(() => {
+    globalThis.document.elementFromPoint = () => null;
+    const { player, sent } = dialogPlayer(false);
+    player.editable = () => false;
+    // A `Link` with an `href` (drawn as an `a`) and a pressable that is no link.
+    const pressable = (id, link) => {
+      const el = {
+        _id: id,
+        _events: new Set(["onPressIn", "onPress"]),
+        _props: {},
+        _tracked: 0,
+        getBoundingClientRect: () => ({ left: 600, top: 300, right: 700, bottom: 340 }),
+        closest: (selector) => (link && selector === "a.nsh-v[href]" ? el : null),
+      };
+      return el;
+    };
+    const link = pressable(9, true);
+    const button = pressable(10, false);
+    /** What a click on `target` sends, holding `keys`. */
+    const click = (target, keys = {}) => {
+      sent.length = 0;
+      player.viewOf = () => target;
+      player.ancestors = () => [target];
+      const e = {
+        pointerId: 1, pointerType: "mouse", button: 0, buttons: 1, clientX: 640, clientY: 320, target,
+        metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, ...keys,
+      };
+      player.pointerDown(e);
+      player.pointerUp({ ...e, buttons: 0 }, false);
+      return sent.map(([name, payload]) => [name, payload?.modifiers?.platform]);
+    };
+    // A plain click presses the link: the app opens it.
+    assert.deepEqual(click(link), [["onPressIn", false], ["onPress", false]]);
+    // With Cmd, Ctrl, Shift or Alt the browser opens it (a new tab or
+    // window, a download), as it does on a middle click: the link hears
+    // nothing, so nothing opens it a second time.
+    for (const key of ["metaKey", "ctrlKey", "shiftKey", "altKey"]) {
+      assert.deepEqual(click(link, { [key]: true }), [], key);
+    }
+    assert.deepEqual(click(link, { button: 1 }), []);
+    // A pressable that is no link still takes a press with a modifier, and
+    // reports the key.
+    assert.deepEqual(click(button, { metaKey: true }), [["onPressIn", true], ["onPress", true]]);
+  });
+});
+
 test("a web view's relative URL is the site's where the page names its base", () => {
   const savedLocation = globalThis.location;
   // Opened at one of the app's routes, below the site's base.
