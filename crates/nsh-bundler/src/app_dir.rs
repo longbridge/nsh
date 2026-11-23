@@ -13,6 +13,19 @@ use std::path::{Component, Path, PathBuf};
 /// An app's configuration file.
 pub const CONFIG: &str = "nsh.json";
 
+/// The text of the file at `path`, a leading UTF-8 BOM taken off: editors
+/// and PowerShell's UTF-8 on Windows write one, and JSON parsers reject it
+/// (`nsh.json`, the theme file it names).
+pub fn read(path: &Path) -> std::io::Result<String> {
+    let text = std::fs::read_to_string(path)?;
+    Ok(strip_bom(&text).to_owned())
+}
+
+/// `text` without its leading UTF-8 BOM (`U+FEFF`).
+fn strip_bom(text: &str) -> &str {
+    text.strip_prefix('\u{feff}').unwrap_or(text)
+}
+
 /// The entry module of an app directory whose `nsh.json` names none.
 pub const ENTRY: &str = "App.tsx";
 
@@ -20,7 +33,7 @@ pub const ENTRY: &str = "App.tsx";
 /// when it has no `nsh.json` or names no entry, an error when `"entry"` is
 /// not a relative path inside `dir` (a string with no `..`).
 pub fn config_entry(dir: &Path) -> Result<Option<PathBuf>, String> {
-    let Ok(text) = std::fs::read_to_string(dir.join(CONFIG)) else {
+    let Ok(text) = read(&dir.join(CONFIG)) else {
         return Ok(None);
     };
     // An `nsh.json` that is not JSON is reported where it is read.
@@ -143,6 +156,9 @@ mod tests {
         assert_eq!(config_entry(&dir), Ok(None));
         std::fs::write(dir.join(CONFIG), r#"{ "name": "A" }"#).unwrap();
         assert_eq!(config_entry(&dir), Ok(None));
+        // A BOM (a Windows editor's UTF-8) does not hide the config.
+        std::fs::write(dir.join(CONFIG), "\u{feff}{ \"entry\": \"app/App.tsx\" }").unwrap();
+        assert_eq!(config_entry(&dir), Ok(Some(dir.join("app/App.tsx"))));
         std::fs::write(dir.join(CONFIG), r#"{ "entry": "app/App.tsx" }"#).unwrap();
         assert_eq!(config_entry(&dir), Ok(Some(dir.join("app/App.tsx"))));
         for bad in [
