@@ -387,8 +387,6 @@ libraries = ["android/libs/scanner-glue.jar"]
 | `ios.infoPlist` | Keys of the iOS app's `Info.plist`, as `nsh.json`'s `ios.infoPlist` |
 | `ios.infoPlistStrings` | The text of those keys in other languages, by language, as `nsh.json`'s `ios.infoPlistStrings` ([Packaging](./packaging.md#infoplist-text-in-other-languages)) |
 | `ios.entitlements` | The iOS app's entitlements |
-| `ios.frameworks` | XCFrameworks and frameworks relative to the crate's `Cargo.toml`, linked and packaged as `nsh.json`'s `ios.frameworks` are ([Frameworks and linker flags](./packaging.md#frameworks-and-linker-flags)) |
-| `ios.linkerFlags` | Arguments of the iOS executable's link, after the app's own |
 | `macos.infoPlist` | Keys of the macOS app's `Info.plist`, as `nsh.json`'s `macos.infoPlist` |
 | `macos.infoPlistStrings` | The text of those keys in other languages, as `ios.infoPlistStrings` |
 | `macos.entitlements` | The macOS app's entitlements |

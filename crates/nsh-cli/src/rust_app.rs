@@ -81,22 +81,14 @@ static CURRENT: std::sync::Mutex<Option<RustApp>> = std::sync::Mutex::new(None);
 /// of ending the session ([`RustApp::build_with`]).
 static RESTARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Set by `nsh run --release` and `nsh test --release`: the development
-/// hosts and headless test runner are optimized (`--release`) builds too, so
-/// the session or test run exercises optimized Rust code
-/// ([`RustApp::host`], [`RustApp::test_runner`], [`RustApp::android_runtime`]).
+/// Set by `nsh run --release`: the development host is an optimized
+/// (`--release`) build too, so what the session shows runs at the speed
+/// the app ships at ([`RustApp::host`]).
 static RELEASE_HOSTS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Builds this command's development hosts and headless test runner optimized
-/// ([`RELEASE_HOSTS`]).
+/// Builds this command's development hosts optimized ([`RELEASE_HOSTS`]).
 pub(crate) fn set_release_hosts() {
     RELEASE_HOSTS.store(true, std::sync::atomic::Ordering::Relaxed);
-}
-
-/// Whether `--release` was requested for development hosts and the headless
-/// test runner ([`RELEASE_HOSTS`]).
-fn release_hosts() -> bool {
-    RELEASE_HOSTS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// What `nsh package` names and versions the app (`--id`, `--name`,
@@ -346,49 +338,10 @@ pub(crate) struct RustApp {
     /// The oldest Apple systems its packages declare, which its builds for
     /// them compile for ([`set_deployment_target`]).
     minimums: AppleMinimums,
-    /// `nsh.json` `ios.frameworks` and `ios.linkerFlags`, which its builds
-    /// for iOS link with the crates' ([`RustApp::ios_link_env`]).
-    ios_link: IosLink,
     /// Its Rust is nshm installed in `~/.nsh/nshms` only, which never
     /// change: its workspace is one every app with the same nshm shares
     /// ([`shared_workspace`]), built once, optimized throughout.
     shared: bool,
-}
-
-/// What the app's `nsh.json` links into its iOS executables.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-struct IosLink {
-    /// `ios.frameworks`, relative to `nsh.json`'s directory.
-    frameworks: Vec<crate::ios_frameworks::Framework>,
-    /// `ios.linkerFlags`.
-    linker_flags: Vec<String>,
-}
-
-impl IosLink {
-    /// Those of the `nsh.json` `config` in `dir`. What cannot be read is
-    /// left out here; reading the whole `nsh.json` warns of it
-    /// (`package::read_config`).
-    fn of(dir: &Path, config: &serde_json::Value) -> Self {
-        let ios = config.get("ios");
-        let frameworks = ios
-            .and_then(|ios| ios.get("frameworks"))
-            .and_then(|list| serde_json::from_value(list.clone()).ok())
-            .map(|entries| crate::ios_frameworks::read(entries, dir, &mut Vec::new()))
-            .unwrap_or_default();
-        let linker_flags = ios
-            .and_then(|ios| ios.get("linkerFlags"))
-            .and_then(serde_json::Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(serde_json::Value::as_str)
-            .filter(|flag| crate::ios_frameworks::check_flag(flag).is_ok())
-            .map(str::to_owned)
-            .collect();
-        IosLink {
-            frameworks,
-            linker_flags,
-        }
-    }
 }
 
 /// A crate of the app (`nsh.json` `"rust"`).
@@ -1128,9 +1081,6 @@ pub(crate) fn runner_only(entry: &Path) -> anyhow::Result<RustApp> {
         unify: true,
         modules: Vec::new(),
         minimums,
-        // A TSX app without crates has no code that calls a framework:
-        // `nsh package` refuses them.
-        ios_link: IosLink::default(),
         shared: false,
     };
     app.write_workspace()?;
@@ -1188,7 +1138,6 @@ pub(crate) fn of(entry: &Path, unify: bool) -> anyhow::Result<Option<RustApp>> {
     let own: Vec<AppCrate> = crates.iter().filter(|c| !c.is_fetched()).cloned().collect();
     let watched = watched(&own, nsh.source());
     let minimums = AppleMinimums::of(&config)?;
-    let ios_link = IosLink::of(dir, &config);
     // Only installed nshm, with a released nsh: nothing of the build is the
     // app's, so every app with these nshm shares it.
     let installed = nsh_bundler::nshm::installed_dir().and_then(|d| dunce::canonicalize(d).ok());
@@ -1226,7 +1175,6 @@ pub(crate) fn of(entry: &Path, unify: bool) -> anyhow::Result<Option<RustApp>> {
         unify,
         modules: module_patches,
         minimums,
-        ios_link,
         shared,
     };
     app.write_workspace()?;
@@ -2438,30 +2386,14 @@ impl RustApp {
 
     /// The app's headless runner (`nsh test`), built for this machine.
     pub(crate) fn test_runner(&self) -> anyhow::Result<PathBuf> {
-        let (release, what) = self.test_runner_build(release_hosts());
         self.build(
             &self.workspace,
             &self.bin("test"),
             None,
-            release,
+            false,
             &[],
-            &what,
+            &format!("the headless runner of {}", self.packages()),
         )
-    }
-
-    /// Whether [`Self::test_runner`] builds with `--release` and the step
-    /// label it reports when `asked` is set (`nsh test --release`). A shared
-    /// workspace's `dev` profile is optimized already
-    /// (`write_workspace_manifest`), so one build serves both.
-    fn test_runner_build(&self, asked: bool) -> (bool, String) {
-        let base = format!("the headless runner of {}", self.packages());
-        let release = asked && !self.shared;
-        let what = if asked {
-            format!("{base} (release build)")
-        } else {
-            base
-        };
-        (release, what)
     }
 
     /// The generated workspace.
@@ -2972,12 +2904,6 @@ panic = \"abort\"
                 self.nsh.dep(platform, &rust_app_platform(platform)),
             ),
         )?;
-        if dir == "rust-ios" {
-            write(
-                &ws.join(dir).join("build.rs"),
-                crate::ios_frameworks::BUILD_RS,
-            )?;
-        }
         let lib = lib.replace('-', "_");
         let platform = platform.replace('-', "_");
         let cfg = format!("#[cfg({os})]\n");
@@ -3491,14 +3417,6 @@ opt-level = \"s\"
                 src("nsh-core"),
             ),
         )?;
-        // The app's iOS frameworks and linker flags reach the executable's
-        // link through it.
-        if dir.starts_with("ios") {
-            write(
-                &ws.join(dir).join("build.rs"),
-                crate::ios_frameworks::BUILD_RS,
-            )?;
-        }
         let lib = lib.replace('-', "_");
         let platform = platform.replace('-', "_");
         // A windowed program: no console opens with the app.
@@ -3603,11 +3521,6 @@ opt-level = \"s\"
         } else if release {
             cmd.arg("--release");
         }
-        if let Some(triple) = triple
-            && triple.contains("-apple-ios")
-        {
-            cmd.envs(self.ios_link_env(workspace, triple)?);
-        }
         // Built once with what cannot change since: nothing to ask Cargo.
         let once = BuiltOnce::of(workspace, package, &cmd);
         if let Some(path) = once.as_ref().and_then(BuiltOnce::built) {
@@ -3623,7 +3536,18 @@ opt-level = \"s\"
             }
             return Err(error);
         }
-        let place = |path: PathBuf| artifact_path(path, triple, release, profile, artifact);
+        let place = |mut path: PathBuf| {
+            if let Some(triple) = triple {
+                path.push(triple);
+            }
+            path.push(match profile {
+                Some(profile) => profile,
+                None if release => "release",
+                None => "debug",
+            });
+            path.push(artifact);
+            path
+        };
         let path = place(self.target_dir()?);
         // A cargo that keeps its own target directory (a wrapper ignoring
         // CARGO_TARGET_DIR) built it elsewhere: Cargo says where, or it is
@@ -3643,33 +3567,6 @@ opt-level = \"s\"
             once.record(&path);
         }
         Ok(path)
-    }
-
-    /// The variables of a build of the generated `workspace` for the iOS
-    /// `triple` that link the frameworks and flags of the app's `nsh.json`
-    /// and its crates' into its executables (`ios_frameworks::BUILD_RS`).
-    fn ios_link_env(
-        &self,
-        workspace: &Path,
-        triple: &str,
-    ) -> anyhow::Result<Vec<(&'static str, String)>> {
-        let (crates, _) = crate::module_meta::ModuleMeta::read_workspace(
-            &workspace.join("Cargo.toml"),
-            &[triple],
-        )?;
-        let (frameworks, flags) = crate::module_meta::ios_link(
-            &self.ios_link.frameworks,
-            &self.ios_link.linker_flags,
-            &crates,
-        );
-        if frameworks.is_empty() && flags.is_empty() {
-            return Ok(Vec::new());
-        }
-        let link = crate::ios_frameworks::link(&frameworks, &flags, triple)?;
-        for warning in &link.warnings {
-            ui::warn(warning);
-        }
-        Ok(crate::ios_frameworks::link_env(&link))
     }
 
     /// The development host (`runner` false) or release runner of the app,
@@ -3744,7 +3641,7 @@ opt-level = \"s\"
             _ => (self.workspace.clone(), &trimmed[..]),
         };
         let package = self.bin(name);
-        let asked = release_hosts();
+        let asked = RELEASE_HOSTS.load(std::sync::atomic::Ordering::Relaxed);
         // A shared workspace's development host is optimized as a release
         // one already (`write_workspace_manifest`): one build serves both.
         let release = runner || asked && !self.shared;
@@ -3899,16 +3796,19 @@ opt-level = \"s\"
             };
             let package = self.bin(if rust { "rust-android" } else { "android" });
             let artifact = format!("lib{}.so", self.android_lib(rust));
-            let (release, what) = self.android_build(dev, &abi, release_hosts());
             let build = Build {
                 workspace: &self.workspace,
                 package: &package,
                 triple: Some(triple),
-                release,
+                release: !dev,
                 profile: None,
                 extra: features,
                 artifact: &artifact,
-                what: &what,
+                what: &match self.packages() {
+                    // A TSX app's own library (`runner_only`) has no crates.
+                    p if p.is_empty() => format!("libnsh.so for {abi}"),
+                    p => format!("libnsh.so of {p} for {abi}"),
+                },
             };
             let lib = self.build_with(sdk.ndk_cargo(triple)?, &build)?;
             let dir = out.join("lib").join(&abi);
@@ -3930,47 +3830,6 @@ opt-level = \"s\"
         }
         Ok(out)
     }
-
-    /// Whether [`Self::android_runtime`] builds with `--release` and the step
-    /// label it reports for `abi`. Release packages (`!dev`) always use
-    /// `--release`; development libraries use it when `asked` is set
-    /// (`nsh run --release`, `nsh test --release`) and the workspace is not
-    /// shared (a shared workspace's `dev` profile is optimized already).
-    fn android_build(&self, dev: bool, abi: &str, asked: bool) -> (bool, String) {
-        let base = match self.packages() {
-            // A TSX app's own library (`runner_only`) has no crates.
-            p if p.is_empty() => format!("libnsh.so for {abi}"),
-            p => format!("libnsh.so of {p} for {abi}"),
-        };
-        let release = !dev || asked && !self.shared;
-        let what = if dev && asked {
-            format!("{base} (release build)")
-        } else {
-            base
-        };
-        (release, what)
-    }
-}
-
-/// Where Cargo writes `artifact` under `target_dir` for `triple` and the
-/// chosen profile (`profile`, else `"release"` or `"debug"`).
-fn artifact_path(
-    mut target_dir: PathBuf,
-    triple: Option<&str>,
-    release: bool,
-    profile: Option<&str>,
-    artifact: &str,
-) -> PathBuf {
-    if let Some(triple) = triple {
-        target_dir.push(triple);
-    }
-    target_dir.push(match profile {
-        Some(profile) => profile,
-        None if release => "release",
-        None => "debug",
-    });
-    target_dir.push(artifact);
-    target_dir
 }
 
 /// A `cargo build` of a package of the workspace ([`RustApp::build_with`]).
@@ -4828,7 +4687,6 @@ mod tests {
             unify: true,
             modules: Vec::new(),
             minimums: crate::apple::AppleMinimums::default(),
-            ios_link: super::IosLink::default(),
             shared: false,
         }
     }
@@ -5345,27 +5203,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// The app's `nsh.json` frameworks and flags, relative to its
-    /// directory; what cannot be read is left out, as reading the whole
-    /// `nsh.json` reports.
-    #[test]
-    fn the_apps_ios_link_is_read_from_nsh_json() {
-        let link = super::IosLink::of(
-            Path::new("/app"),
-            &serde_json::json!({ "ios": {
-                "frameworks": ["ios/Sdk.xcframework", 3],
-                "linkerFlags": ["-ObjC", "", 4],
-            } }),
-        );
-        let paths: Vec<&Path> = link.frameworks.iter().map(|f| f.path.as_path()).collect();
-        assert_eq!(paths, [Path::new("/app/ios/Sdk.xcframework")]);
-        assert_eq!(link.linker_flags, ["-ObjC"]);
-        assert_eq!(
-            super::IosLink::of(Path::new("/app"), &serde_json::json!({})),
-            super::IosLink::default()
-        );
-    }
-
     #[test]
     fn a_rust_app_gets_runners_without_js() {
         let dir = std::env::temp_dir().join(format!("nsh-rust-runners-{}", std::process::id()));
@@ -5418,18 +5255,6 @@ mod tests {
                 main.contains("nsh_core::element::Root::of::<app_app_native::App>()"),
                 "{main}"
             );
-        }
-        // The iOS executables take the app's frameworks and linker flags
-        // through a `build.rs` (`ios_frameworks::BUILD_RS`); the others
-        // have none.
-        for dir in ["ios-host", "ios-app", "rust-ios"] {
-            assert_eq!(
-                read(&format!("{dir}/build.rs")),
-                crate::ios_frameworks::BUILD_RS
-            );
-        }
-        for dir in ["macos-host", "macos-app", "rust-macos", "rust-linux"] {
-            assert!(!app.workspace.join(dir).join("build.rs").exists(), "{dir}");
         }
         // Optional platform features come from the app, not its runner.
         assert!(!read("rust-linux/Cargo.toml").contains("webview"));
@@ -7035,81 +6860,6 @@ panic = \"abort\"
         assert_eq!(
             extra.dependency(),
             r#"app_nsh_extra = { package = "nsh-extra", path = "/cache/nsh-extra", features = ["camera", "push"] }"#
-        );
-    }
-
-    #[test]
-    fn test_runner_uses_release_profile_only_when_requested_and_not_shared() {
-        let dir = std::env::temp_dir().join(format!("nsh-rust-test-rel-{}", std::process::id()));
-        let mut own = app(&dir, &[("app-native", dir.join("native"))], None);
-        assert_eq!(
-            own.test_runner_build(false),
-            (false, "the headless runner of app-native".into())
-        );
-        assert_eq!(
-            own.test_runner_build(true),
-            (
-                true,
-                "the headless runner of app-native (release build)".into()
-            )
-        );
-        // A shared nshm-only workspace already optimizes its `dev` profile,
-        // so `--release` reuses that build instead of passing `--release`.
-        own.shared = true;
-        assert_eq!(
-            own.test_runner_build(true),
-            (
-                false,
-                "the headless runner of app-native (release build)".into()
-            )
-        );
-        let target = PathBuf::from("/app/target");
-        assert_eq!(
-            super::artifact_path(target.clone(), None, false, None, "nsh-app-test"),
-            PathBuf::from("/app/target/debug/nsh-app-test")
-        );
-        assert_eq!(
-            super::artifact_path(target.clone(), None, true, None, "nsh-app-test"),
-            PathBuf::from("/app/target/release/nsh-app-test")
-        );
-        assert_eq!(
-            super::artifact_path(
-                target,
-                Some("aarch64-linux-android"),
-                true,
-                None,
-                "libnsh_app.so",
-            ),
-            PathBuf::from("/app/target/aarch64-linux-android/release/libnsh_app.so")
-        );
-    }
-
-    #[test]
-    fn android_dev_build_uses_release_profile_when_requested_and_not_shared() {
-        let dir = std::env::temp_dir().join(format!("nsh-rust-and-rel-{}", std::process::id()));
-        let mut own = app(&dir, &[("app-native", dir.join("native"))], None);
-        assert_eq!(
-            own.android_build(true, "arm64-v8a", false),
-            (false, "libnsh.so of app-native for arm64-v8a".into())
-        );
-        assert_eq!(
-            own.android_build(true, "arm64-v8a", true),
-            (
-                true,
-                "libnsh.so of app-native for arm64-v8a (release build)".into()
-            )
-        );
-        assert_eq!(
-            own.android_build(false, "arm64-v8a", false),
-            (true, "libnsh.so of app-native for arm64-v8a".into())
-        );
-        own.shared = true;
-        assert_eq!(
-            own.android_build(true, "arm64-v8a", true),
-            (
-                false,
-                "libnsh.so of app-native for arm64-v8a (release build)".into()
-            )
         );
     }
 }
