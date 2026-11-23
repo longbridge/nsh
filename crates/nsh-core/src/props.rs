@@ -629,7 +629,7 @@ pub enum PanEdge {
 
 impl PanEdge {
     /// The way a pan from this edge moves: away from it.
-    pub fn direction(self) -> PanDirection {
+    pub(crate) fn direction(self) -> PanDirection {
         match self {
             PanEdge::Left => PanDirection::Right,
             PanEdge::Right => PanDirection::Left,
@@ -733,7 +733,8 @@ impl PanActivation {
     }
 
     /// The way the pan activates in, if it has one: away from its edge, or
-    /// its direction.
+    /// its direction. For the backends.
+    #[doc(hidden)]
     pub fn way(&self) -> Option<PanDirection> {
         self.edge.map(PanEdge::direction).or(self.direction)
     }
@@ -742,7 +743,8 @@ impl PanActivation {
     /// (the screen, the window or the page) of `size` with `at` measured
     /// from its top left corner: anywhere without an
     /// [`edge`](Self::edge), else within [`PanActivation::EDGE_WIDTH`] of
-    /// it.
+    /// it. For the backends.
+    #[doc(hidden)]
     pub fn starts_at(&self, at: Point<Points>, size: crate::Size<Points>) -> bool {
         let w = Self::EDGE_WIDTH.0;
         match self.edge {

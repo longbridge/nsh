@@ -118,6 +118,7 @@ pub enum Candidate {
         /// It pans vertically.
         y: bool,
         /// The view's `panActivation`, which decides instead of the axes.
+        #[doc(hidden)]
         activation: Option<PanActivation>,
     },
     /// A scroll view.
@@ -146,7 +147,9 @@ impl Candidate {
 
     /// The pan a view with gesture `values`, `events` and `activation`
     /// starts: along the axes it drives values of, or both when it only
-    /// listens, as its activation decides when it has one.
+    /// listens, as its activation decides when it has one. For the
+    /// backends.
+    #[doc(hidden)]
     pub fn pan(
         values: &GestureValues,
         events: EventMask,
@@ -259,7 +262,8 @@ pub fn startable<'a, V>(
 /// Whether a drag by `(dx, dy)` past the pan slop that starts nothing
 /// leaves the pointer waiting for a later move: while its gate decides, or
 /// a pan whose `panActivation` has not decided yet comes before any
-/// candidate that starts. Otherwise its drags are over.
+/// candidate that starts. Otherwise its drags are over. For the backends.
+#[doc(hidden)]
 pub fn waits<V>(
     candidates: &[(V, Candidate)],
     gate: Option<&Gate>,
@@ -273,7 +277,9 @@ pub fn waits<V>(
 /// pointer's drag as its JS responder alone, so that nothing native starts:
 /// unless its own native pan (`pan` values, `onPanStart`) follows the
 /// activation, the one pan with a `panActivation` among the `candidates`
-/// the gate left (those inside the gated view, and its own).
+/// the gate left (those inside the gated view, and its own). For the
+/// backends.
+#[doc(hidden)]
 pub fn activation_frees<V>(activated: Option<NodeId>, candidates: &[(V, Candidate)]) -> bool {
     activated.is_some()
         && !candidates.iter().any(|(_, c)| {
@@ -367,6 +373,7 @@ pub struct GrabOptions {
     /// Where the pointer went down in the surface, and the surface's size:
     /// an edge pan ([`PanActivation::edge`]) starts only at its edge, and
     /// never without these.
+    #[doc(hidden)]
     pub start: Option<(Point<Points>, Size<Points>)>,
 }
 
@@ -384,6 +391,7 @@ impl GrabOptions {
 
     /// The pointer went down `at` in a surface of `size`
     /// ([`GrabOptions::start`]).
+    #[doc(hidden)]
     pub fn start(mut self, at: Point<Points>, size: Size<Points>) -> GrabOptions {
         self.start = Some((at, size));
         self
