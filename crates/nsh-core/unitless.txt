@@ -472,3 +472,20 @@ element::rows::RowAccessor::values ->                                 # the app'
 element::rows::RowAccessor::values_now ->                             # the app's data: numbers of any unit, which a component scales
 
 style::TextStyle.line_height_em                                  # a line-height length in multiples of the element font size
+location::LocationRequest.distance_filter                          # metres
+location::Position::new(accuracy)                                  # metres
+location::Position::new(latitude)                                  # degrees of latitude: a geographic coordinate, not a layout length
+location::Position::new(longitude)                                 # degrees of longitude: a geographic coordinate, not a layout length
+location::Position::new(timestamp)                                 # milliseconds since the Unix epoch
+location::Position::with_altitude(accuracy)                        # metres
+location::Position::with_altitude(altitude)                        # metres above sea level
+location::Position::with_heading(heading)                          # degrees clockwise from true north
+location::Position::with_speed(speed)                              # metres per second
+location::Position.accuracy                                        # metres
+location::Position.altitude                                        # metres above sea level
+location::Position.altitude_accuracy                               # metres
+location::Position.heading                                         # degrees clockwise from true north
+location::Position.latitude                                        # degrees of latitude: a geographic coordinate, not a layout length
+location::Position.longitude                                       # degrees of longitude: a geographic coordinate, not a layout length
+location::Position.speed                                           # metres per second
+location::Position.timestamp                                       # milliseconds since the Unix epoch
