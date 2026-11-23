@@ -145,6 +145,7 @@ nsh add nsh-extra --features camera
 | Feature | TSX | 作用 |
 |---|---|---|
 | `camera` | `Camera` | 在 iOS 和 Android 上用系统相机拍一张照片 |
+| `photos` | `Photos` | 在用户允许后读取 iOS 上用户最近的照片 |
 | `push` | `Push` | 在 iOS 上接收任意推送服务发来的远程通知，在 Android 上通过该服务的绑定接收 |
 
 ```tsx
@@ -158,6 +159,42 @@ if (await Camera.available()) {
 ```
 
 用户取消时 `takePhoto` 返回 `null`；用户不允许应用使用相机时，它以错误码 `EACCES` 拒绝。没有相机可用的地方（桌面、Web、模拟器）`available()` 为 `false`，`takePhoto` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝。开启这个 feature 后，打包的应用会带上它需要的条目：iOS 上的相机用途说明（应用可以在 `ios.infoPlist` 里写自己的 `NSCameraUsageDescription` 文案），Android 上对相机应用的查询声明。
+
+### Photos
+
+`Photos` 在用户允许后读取用户的相册：最近的照片、每张用来显示的缩略图，以及用户选中的那张照片，后者和 `Picker.pickImages` 选出的图片一样交给应用。它用于一条最近照片，用户按一下就能添加；`Picker.pickImages` 不需要权限，仍是从整个相册里挑选的方式。
+
+```sh
+nsh add nsh-extra --features photos
+```
+
+```tsx
+import { Photos } from "nsh-extra";
+
+if (Photos.access() === "notDetermined") await Photos.requestAccess();
+const access = Photos.access();
+if (access === "full" || access === "limited") {
+  const recent = await Photos.recent({ limit: 20 });
+  // 缩略图是小的 JPEG，字节留在原生侧。
+  const thumbs = await Promise.all(recent.map((photo) => Photos.thumbnail(photo.id, { maxDimension: 240 })));
+  const urls = thumbs.map((thumb) => URL.createObjectURL(thumb.file));
+  // 按下时：照片按选中的图片那样准备好。
+  const photo = await Photos.load(recent[0].id, { maxDimension: 2048 });
+  upload(photo.file);
+}
+
+// 拍了新照片、删了照片或改了选择：重新读这条。
+Photos.on("change", () => refreshStrip());
+```
+
+- `access()` 不询问用户，只告诉用户允许了什么：`"full"`、`"limited"`（用户选中的照片）、`"notDetermined"`、`"denied"` 或 `"unavailable"`。`requestAccess()` 第一次时询问用户并以回答 resolve；之后只有系统设置能改。
+- `recent({ limit })` 按从新到旧给出图片（不给时 30 张，最多 1000 张），不含隐藏的照片，每张带 `id` 和 `size`。`thumbnail(id, { maxDimension })` 给出最长边不超过 `maxDimension` 像素（默认 256）、方向已摆正的 JPEG；`load(id, { maxDimension, quality })` 给出和 `Picker.pickImages` 一样准备好的照片。只存在 iCloud 上的照片会下载。没有访问权限时它们以 `EACCES` 拒绝，照片不存在时以 `ENOENT` 拒绝。
+- 有限访问时，`presentLimitedPicker()` 显示系统的选择面板让用户更改选择，并以用户选中的 `id` resolve。
+- `on("change")` 在相册变化时通知应用，用户允许读取后生效。
+- Android、桌面和 Web 上 `access()` 为 `"unavailable"`，读取以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝。Android 只允许以照片为核心用途的应用读取整个相册（Google Play 对 `READ_MEDIA_IMAGES` 的政策）；其他应用使用系统的照片选择器，也就是 `Picker.pickImages` 显示的那个。
+- 声明了 `"capabilities"` 的应用用 [`"picker": true`](./sandbox-and-capabilities.md#picker) 授予 `Photos`，和 `Picker` 用的是同一项能力：除 `access()` 外的每个函数都会先检查它。
+
+开启这个 feature 后，打包的 iOS 应用会带上相册的用途说明（应用可以在 `ios.infoPlist` 里写自己的 `NSPhotoLibraryUsageDescription` 文案）。Rust 代码使用 `nsh_extra::photos`；用 `set_backend` 设置的 `PhotosBackend` 会代替系统相册应答（嵌入方自己的相册，或测试的照片）。
 
 ### Push
 
@@ -347,8 +384,6 @@ libraries = ["android/libs/scanner-glue.jar"]
 | `ios.infoPlist` | iOS 应用 `Info.plist` 的键，与 `nsh.json` 的 `ios.infoPlist` 相同 |
 | `ios.infoPlistStrings` | 这些键在其他语言下的文字，按语言给出，与 `nsh.json` 的 `ios.infoPlistStrings` 相同（[打包](./packaging.md#其他语言的-infoplist-文字)） |
 | `ios.entitlements` | iOS 应用的 entitlements |
-| `ios.frameworks` | XCFramework 和 framework，路径相对于 crate 的 `Cargo.toml`，链接和打包方式与 `nsh.json` 的 `ios.frameworks` 相同（[Framework 与链接参数](./packaging.md#framework-与链接参数)） |
-| `ios.linkerFlags` | iOS 可执行文件的链接参数，放在应用自己的之后 |
 | `macos.infoPlist` | macOS 应用 `Info.plist` 的键，与 `nsh.json` 的 `macos.infoPlist` 相同 |
 | `macos.infoPlistStrings` | 这些键在其他语言下的文字，与 `ios.infoPlistStrings` 相同 |
 | `macos.entitlements` | macOS 应用的 entitlements |

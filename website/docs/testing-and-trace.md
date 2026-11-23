@@ -631,7 +631,7 @@ own input at the views their selectors name, as Playwright does in a browser:
   they find the same views;
 - dialogs are the platform's own: `app.dialogs()` reads them, and answering one (`onDialog`, or its cancel button
   when the test says nothing) presses its button;
-- `app.screenshot(path)` takes a picture of the window, `app.window(id).screenshot(path)` of another window of the app.
+- `app.screenshot(path)` takes a picture of the window the app shows (the one the test targets, else the frontmost), `app.window(id).screenshot(path)` of another window of the app.
 
 ```sh
 nsh test --target macos                       # the app's tests in macOS windows
