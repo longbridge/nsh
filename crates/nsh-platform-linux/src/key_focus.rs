@@ -530,10 +530,13 @@ pub(crate) fn press(
 
 /// Whether a key types text into an input (`captureKeys="text"`): a
 /// printable character or a dead key, with no Control, Alt or Super held.
-/// An input method composes from these same keys.
+/// An input method composes from these same keys. Space stays: it
+/// activates the focused button.
 fn types_text(keyval: gdk::Key, modifiers: gdk::ModifierType) -> bool {
     use gdk::ModifierType as M;
-    if modifiers.intersects(M::CONTROL_MASK | M::ALT_MASK | M::SUPER_MASK | M::META_MASK) {
+    if modifiers.intersects(M::CONTROL_MASK | M::ALT_MASK | M::SUPER_MASK | M::META_MASK)
+        || keyval == gdk::Key::space
+    {
         return false;
     }
     is_dead_key(keyval) || keyval.to_unicode().is_some_and(|c| !c.is_control())
@@ -1597,6 +1600,7 @@ mod tests {
             assert!(!key(gdk::Key::a, gdk::ModifierType::CONTROL_MASK));
             assert!(!key(gdk::Key::Escape, none));
             assert!(!key(gdk::Key::Left, none));
+            assert!(!key(gdk::Key::space, none));
             assert!(stop.is_focus());
             assert!(TYPE_INTO.take().is_none());
 

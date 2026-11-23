@@ -93,10 +93,12 @@ pub enum KeyCapture {
     Keys(Arc<[Keystroke]>),
     /// Typing moves into the view's first enabled text `Input`: a key that
     /// would type text (a character, a dead key, or a key an input method
-    /// composes) with no Control, Alt or platform modifier, pressed while a
-    /// non-input view inside this one has the keyboard, focuses that input
-    /// and is delivered to it before any native default, so the input
-    /// method and dead keys compose there as if the input had been focused.
+    /// composes; not Space, which activates a focused button) with no
+    /// Control, Alt or platform modifier (macOS's Option, which types
+    /// characters there, still moves), pressed while a non-input view
+    /// inside this one has the keyboard, focuses that input and is
+    /// delivered to it before any native default, so the input method and
+    /// dead keys compose there as if the input had been focused.
     /// Other keys are not captured. A chat screen's selectable transcript
     /// uses it so the first key typed goes to the message field.
     Text,
