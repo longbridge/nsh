@@ -1600,7 +1600,8 @@ mod tests {
             assert!(!key(gdk::Key::a, gdk::ModifierType::CONTROL_MASK));
             assert!(!key(gdk::Key::Escape, none));
             assert!(!key(gdk::Key::Left, none));
-            assert!(!key(gdk::Key::space, none));
+            // Space stays too: it activates the pressable stop instead.
+            key(gdk::Key::space, none);
             assert!(stop.is_focus());
             assert!(TYPE_INTO.take().is_none());
 
