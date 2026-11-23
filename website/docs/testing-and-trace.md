@@ -459,10 +459,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `app.picks()` | The picks the app asked for, in order. |
 | `app.onShare({ action, target })` | Gives the run a share sheet and answers the shares the app shows from now on (`Share.show`): `action` `"shared"` (to `target`) or `"dismissed"`. Headless runs. |
 | `app.shares()` | What the app shared, in order (`{ title, text, url, files }`). |
-| `await app.fake(name, method, args?)` | Calls the fake a native module gives headless runs in place of a device, by its name (`"nsh-extra/speech"`), with `args` (an array), and resolves with its JSON answer. `hear`, `endSpeech` and `speechRequests` below call `nsh-extra`'s speech fake. Headless runs. |
-| `app.hear(text)` | The user says `text` into the running speech session (`nsh-extra`'s `Speech.start`): its `result` reports `text` as the whole transcript so far. Headless runs. |
-| `app.endSpeech(error?)` | Ends the running speech session: with `error` (`"no-speech"`, `"network"`, ...) it fails, else a last final result and `end` come, `no-speech` when nothing was heard. Headless runs. |
-| `app.speechRequests()` | The speech sessions the app started, in order: `lang` (`null` for the user's) and `interim`. |
+| `await app.fake(name, method, args?)` | Calls the fake a native module gives headless runs in place of a device, by its name, with `args` (an array), and resolves with its JSON answer once the app is quiet. The module documents its fake's methods: `nsh-extra`'s speech recognizer is `"nsh-extra/speech"` ([`Speech`](./nshm.md#speech): `app.fake("nsh-extra/speech", "hear", ["hello"])` speaks for the user). Headless runs. |
 | `app.audio()` | What the app asked of the speaker (`Sound`, `AudioPlayer`), in order: `command` (`"load"`, `"play"`, `"stop"`, `"unload"`, `"open"`, `"preload"`, `"resume"`, `"pause"`, `"seek"`, `"set"`, `"close"`), `src`, and `volume`, `rate`, `position` where they apply. Headless runs. |
 | `app.endAudio()` | The players playing reach their end (`end`; those that loop start again). Headless runs. |
 | `app.clipboard()` | The text on the clipboard now, `null` when it holds none. |
@@ -549,7 +546,8 @@ that only a real platform can do:
   before that `Share.available()` resolves `false`.
 - **Native modules run on their fakes**: a module that reaches a device gives headless runs a fake in its place, which
   the test drives (`app.fake`). With `nsh-extra`'s `speech`, `Speech.available()` resolves `true`, a session starts
-  at once and hears what `hear` says.
+  at once and hears what the fake's `hear` says. Rust tests that launch `Headless` apps whose modules give fakes take
+  turns in one process, as a fake stands in process-wide; apps started with clones of one registry run together.
 - **Sound plays to a fake speaker**: sounds decode as WAV (their length from the header; other bytes fail with `decode`), players play a minute of their source at once and end at `endAudio()`.
 - **Modals show at once**: `onShow` comes when one is presented.
 - **Images are not loaded**: no `onLoad` comes, nor `onError` unless the test fails the image (`app.failImages`), and `Image.getSize` and `Image.prefetch` reject, in the app and in the test file alike. A `blob:` URL's size is read from its bytes, so `Image.getSize` of one resolves.

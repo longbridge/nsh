@@ -57,6 +57,8 @@ pub(crate) struct Ambient {
     app_info: Option<crate::platform::AppInfo>,
     /// What the app may do ([`access`]).
     access: Option<Arc<crate::access::Access>>,
+    /// Which engine this is ([`engine_id`]).
+    pub(super) engine_id: Option<EngineId>,
     /// What `nsh/updater` checks with for Rust code
     /// ([`crate::runtime::prompt_for_update`]).
     updater: Option<std::sync::Arc<dyn crate::runtime::UpdaterHost>>,
@@ -743,8 +745,12 @@ pub fn app_info() -> Option<crate::platform::AppInfo> {
 /// engine checks them. A native module that guards a capability of its own
 /// checks it here for Rust callers, as its JS face does with the calling
 /// VM's [`System::access`](super::System) (`nsh-extra`'s `Speech` checks
-/// `speech`). `None` outside an engine's Rust code (a thread of the
-/// module's own, a test without an engine): native code no app runs.
+/// `speech`). `None` when the calling code does not run on an engine's
+/// thread (a thread of the module's own or of a library, a platform
+/// callback, a test without an engine): no app's grant applies there,
+/// though the code may well act for one. Rust code is trusted, so such a
+/// caller is not limited here; a module that must tie it to an app reads
+/// the access on the engine's thread first and carries it along.
 ///
 /// ```ignore
 /// if access().is_some_and(|access| !access.allows_speech()) {
@@ -753,6 +759,32 @@ pub fn app_info() -> Option<crate::platform::AppInfo> {
 /// ```
 pub fn access() -> Option<Arc<crate::access::Access>> {
     super::reactive::try_with_data(|d| d.ambient.access.clone()).flatten()
+}
+
+/// An engine of the process ([`engine_id`]): opaque, and never the same
+/// for two engines of one process, even after one goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct EngineId(std::num::NonZeroU64);
+
+impl EngineId {
+    /// One no engine had before.
+    pub(crate) fn next() -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Self(std::num::NonZeroU64::new(id).expect("engine ids do not run out"))
+    }
+}
+
+/// The engine the calling code runs in: what a native module whose state
+/// is the process's (one microphone, one device) tells its engines'
+/// requests apart with. `None` outside an engine's Rust code (a thread of
+/// the module's own, a test without an engine).
+///
+/// ```ignore
+/// let displaced_by_another_app = running.owner != engine_id();
+/// ```
+pub fn engine_id() -> Option<EngineId> {
+    super::reactive::try_with_data(|d| d.ambient.engine_id).flatten()
 }
 
 /// What Rust code checks for updates with: the engine's, `None` where the

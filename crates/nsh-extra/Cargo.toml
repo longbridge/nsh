@@ -28,6 +28,7 @@ push = ["dep:tokio"]
 # `Speech`: speech recognized as the user talks (macOS, iOS, Android,
 # Windows, the web).
 speech = [
+  "dep:tokio",
   "dep:block2",
   "dep:dispatch2",
   "dep:objc2",
@@ -94,6 +95,15 @@ web-sys = { workspace = true, optional = true, features = [
 [dev-dependencies]
 nsh-core = { workspace = true, features = ["declarations"] }
 serde_json.workspace = true
+# The modules' tests run apps headless (`tests/extra`), without QuickJS.
+# Path only, as nsh-base's: `cargo publish` drops a dev-dependency without a
+# version, so the crate packages before these are on crates.io.
+nsh-engine = { path = "../nsh-engine", default-features = false }
+nsh-testing = { path = "../nsh-testing", default-features = false }
+
+[[test]]
+name = "extra"
+path = "tests/extra/main.rs"
 
 # What the packaged app needs of the system for each module: `nsh` merges the
 # entries of the features an app turns on into its Info.plist and Android

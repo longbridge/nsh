@@ -11,14 +11,19 @@
 //! it heard (a last, final result, then the end); aborting it ends it at
 //! once and drops what was not reported. One session runs at a time in the
 //! process, whichever surface started it: the microphone is one, so
-//! starting another ends the one running (its end, without an error).
+//! starting another ends the one running. A session its own engine
+//! replaces ends without an error (the app started another); one another
+//! engine (another app or `AppView`) displaces ends with
+//! [`SpeechError::AudioCapture`]: the microphone could not be used.
 //!
 //! The `speech` capability guards it when the app declares capabilities:
 //! `Speech.start` throws `ERR_ACCESS_DENIED` without it (checked against
 //! the calling VM's grant), and a session Rust code starts in an app
 //! without it ends at once with [`SpeechError::NotAllowed`] (checked
-//! against the engine's, [`nsh_core::element::access`]).
-//! `Speech.available()` tells the platform only, so it needs none.
+//! against the engine's, [`nsh_core::element::access`]), leaving the
+//! session running alone. Rust code that runs on no engine's thread is
+//! trusted and not checked. `Speech.available()` tells the platform only,
+//! so it needs none.
 //!
 //! # Platforms
 //!
@@ -27,10 +32,15 @@
 //! (`android.speech.SpeechRecognizer`), `winrt.rs` (Windows:
 //! `Windows.Media.SpeechRecognition`'s continuous dictation, which needs
 //! the user's online speech recognition setting on), `web.rs` (the
-//! browser's Web Speech API, through wasm-bindgen); elsewhere (Linux, the
-//! TUI, GPUI, headless runs) nothing recognizes speech: [`available`] is
-//! false and a session ends at once with [`SpeechError::Unavailable`]. A
-//! platform's file gives two functions, which this module calls:
+//! browser's Web Speech API, through wasm-bindgen). The file follows the
+//! target OS, so GPUI on macOS and Windows uses the platform's recognizer
+//! too. Elsewhere nothing recognizes speech: [`available`] is false and a
+//! session ends at once with [`SpeechError::Unavailable`]. That is Linux
+//! (GTK or GPUI), headless runs without the fake, and the terminal host
+//! (the TUI) on every OS: an engine whose idiom is
+//! [`Idiom::Terminal`](nsh_core::platform::Idiom::Terminal) runs no
+//! platform recognizer, whose prompts and run loop a terminal does not
+//! have. A platform's file gives two functions, which this module calls:
 //!
 //! ```ignore
 //! /// Whether the platform recognizes speech now (TS: `Speech.available()`),
@@ -53,9 +63,10 @@
 //! An embedding app recognizes speech its own way with a [`SpeechBackend`]
 //! ([`set_backend`]): it runs every session, and the platform's recognizer
 //! is never used. Headless runs (`nsh test`) use the module's fake
-//! recognizer, which the test speaks into (`app.hear`, `app.endSpeech`,
-//! `app.speechRequests`): the module gives it as the fake
-//! `"nsh-extra/speech"` ([`nsh_core::fake`]).
+//! recognizer, which the test speaks into through `nsh/test`'s
+//! `app.fake("nsh-extra/speech", method, args)`: the module gives it as
+//! the fake `"nsh-extra/speech"` ([`nsh_core::fake`]); its methods are
+//! documented in `fake.rs`.
 //!
 //! The packaged app needs the microphone's and the recognizer's usage
 //! descriptions on iOS and macOS (and the microphone's entitlement under
@@ -99,6 +110,14 @@ use self::android as platform;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 use self::apple as platform;
 pub(crate) use self::fake::FakeSpeech;
+#[cfg(not(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "android",
+    target_os = "windows",
+    target_arch = "wasm32"
+)))]
+use self::none as platform;
 #[cfg(target_arch = "wasm32")]
 use self::web as platform;
 #[cfg(target_os = "windows")]
@@ -173,8 +192,8 @@ pub enum SpeechError {
 }
 
 impl SpeechError {
-    /// Every error, in declaration order.
-    pub const ALL: [SpeechError; 7] = [
+    /// Every error, in declaration order (a slice: more may come).
+    pub const ALL: &'static [SpeechError] = &[
         SpeechError::NotAllowed,
         SpeechError::NoSpeech,
         SpeechError::AudioCapture,
@@ -199,7 +218,7 @@ impl SpeechError {
 
     /// The error named `name` ([`Self::as_str`]).
     pub fn from_name(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|e| e.as_str() == name)
+        Self::ALL.iter().copied().find(|e| e.as_str() == name)
     }
 }
 
@@ -354,19 +373,33 @@ fn backend() -> Option<Arc<dyn SpeechBackend>> {
 /// Windows devices with a recognizer (Android: a recognition service
 /// installed; Windows: a dictation language and a microphone), in browsers
 /// with the Web Speech API, or with a [`SpeechBackend`] that recognizes
-/// it. Whether the user allows
-/// the microphone is asked when a session starts. In a task.
+/// it; not on Linux nor in a terminal (the TUI host, on every OS). Whether
+/// the user allows the microphone is asked when a session starts. In a
+/// task.
 pub async fn available() -> bool {
     match backend() {
         Some(backend) => backend.available(),
+        None if in_terminal() => none::available().await,
         None => platform::available().await,
     }
+}
+
+/// Whether the calling engine draws in a terminal (the TUI host, on any
+/// OS): no platform recognizer runs there, whose prompts and main run
+/// loop a terminal host does not have.
+fn in_terminal() -> bool {
+    // `idiom` needs an engine's environment, which `try_os` tells is there.
+    nsh_core::element::try_os().is_some()
+        && nsh_core::element::idiom() == nsh_core::platform::Idiom::Terminal
 }
 
 /// The session running in the process, until the next one replaces it or
 /// its owner sees its end.
 struct Running {
     id: u64,
+    /// The engine that started it; `None`: Rust code on no engine's
+    /// thread, an owner of its own.
+    owner: Option<nsh_core::element::EngineId>,
     sink: SpeechSink,
     control: Box<dyn SpeechControl>,
 }
@@ -377,52 +410,102 @@ fn running() -> MutexGuard<'static, Option<Running>> {
     RUNNING.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Ends the session `running` at once, without an error, and turns its
+/// Ends the session `running` at once, with `error`, and turns its
 /// recognizer off (unless it already ended).
-fn abort(running: Running) {
+fn abort(running: Running, error: Option<SpeechError>) {
     let Running {
         sink, mut control, ..
     } = running;
-    if sink.end(None) {
+    if sink.end(error) {
         control.abort();
     }
+}
+
+/// How a session `owner` starts ends the one `running`: without an error
+/// when its own engine replaces it, with [`SpeechError::AudioCapture`]
+/// when another engine takes the microphone.
+fn displaced(running: &Running, owner: Option<nsh_core::element::EngineId>) -> Option<SpeechError> {
+    (running.owner != owner).then_some(SpeechError::AudioCapture)
 }
 
 /// Starts recognizing what the user says (TS: `Speech.start`), as
 /// `request` asks: the session's events come from
 /// [`SpeechRecognition::next`], in a task. One session runs at a time:
-/// starting another ends this one (its [`SpeechEvent::End`], without an
-/// error). It ends at once with [`SpeechError::NotAllowed`] when the app
-/// the calling code runs in does not grant `speech`
-/// ([`nsh_core::element::access`]), and with [`SpeechError::Unavailable`]
-/// where nothing recognizes speech ([`available`]).
+/// starting another ends the one running (its [`SpeechEvent::End`]:
+/// without an error when the same engine started it, with
+/// [`SpeechError::AudioCapture`] when another did). It ends at once with
+/// [`SpeechError::NotAllowed`] when the app whose engine thread calls does
+/// not grant `speech` ([`nsh_core::element::access`]; the session running
+/// is left alone then), and with [`SpeechError::Unavailable`] where
+/// nothing recognizes speech ([`available`]). Code on no engine's thread
+/// is trusted: nothing is checked for it.
 pub fn recognize(request: SpeechRequest) -> SpeechRecognition {
     static NEXT: AtomicU64 = AtomicU64::new(1);
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
     let (sink, events) = channel();
-    // Held while the session starts: one started meanwhile on another
-    // engine's thread waits, then replaces this one.
-    let mut running = running();
-    if let Some(old) = running.take() {
-        abort(old);
-    }
+    let recognition = SpeechRecognition {
+        id,
+        events,
+        ended: false,
+    };
+    // Refused before anything else: a refused request ends no session.
     if nsh_core::element::access().is_some_and(|access| !access.allows_speech()) {
         log::warn!(
             target: "js",
             "speech recognition is not granted: add `\"speech\": true` to capabilities in nsh.json"
         );
         sink.end(Some(SpeechError::NotAllowed));
-    } else {
-        let control = match backend() {
-            Some(backend) => backend.start(request, sink.clone()),
-            None => platform::start(request, sink.clone()),
-        };
-        *running = Some(Running { id, sink, control });
+        return recognition;
     }
-    SpeechRecognition {
+    let owner = nsh_core::element::engine_id();
+    // Held while the session starts: one started meanwhile on another
+    // engine's thread waits, then replaces this one.
+    let mut running = running();
+    if let Some(old) = running.take() {
+        let error = displaced(&old, owner);
+        abort(old, error);
+    }
+    let control = match backend() {
+        Some(backend) => backend.start(request, sink.clone()),
+        None if in_terminal() => none::start(request, sink.clone()),
+        None => platform::start(request, sink.clone()),
+    };
+    *running = Some(Running {
         id,
-        events,
-        ended: false,
+        owner,
+        sink,
+        control,
+    });
+    recognition
+}
+
+/// What a platform does with a session when its start reaches the
+/// recognizer's thread, maybe late (after a permission prompt).
+#[cfg(any(target_os = "android", target_os = "macos", target_os = "ios", test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Begin {
+    /// The module ended it meanwhile (aborted, replaced, its owner gone): a
+    /// stale start changes nothing, and the session running keeps running.
+    Skip,
+    /// The app stopped it before it listened: it ends without an error,
+    /// and the session running keeps running.
+    End,
+    /// It listens: whatever still runs on that thread ends first (the
+    /// microphone is one).
+    Listen,
+}
+
+/// How a platform begins the session of `sink` ([`Begin`]), `stop_asked`
+/// when the app stopped it before it listened. Decided before the platform
+/// touches the session running.
+#[cfg(any(target_os = "android", target_os = "macos", target_os = "ios", test))]
+fn begin_as(sink: &SpeechSink, stop_asked: bool) -> Begin {
+    if sink.is_ended() {
+        Begin::Skip
+    } else if stop_asked {
+        Begin::End
+    } else {
+        Begin::Listen
     }
 }
 
@@ -495,7 +578,7 @@ impl SpeechRecognition {
             }
         };
         if let Some(session) = session {
-            abort(session);
+            abort(session, None);
         }
     }
 }
@@ -506,16 +589,10 @@ impl Drop for SpeechRecognition {
     }
 }
 
-/// Where NSH recognizes no speech: Linux, the TUI and headless
-/// runs (whose sessions the fake recognizer runs, [`FakeSpeech`]).
-#[cfg(not(any(
-    target_os = "macos",
-    target_os = "ios",
-    target_os = "android",
-    target_os = "windows",
-    target_arch = "wasm32"
-)))]
-mod platform {
+/// Where NSH recognizes no speech: Linux, the terminal host on every OS
+/// ([`in_terminal`]) and headless runs (whose sessions the fake recognizer
+/// runs when the test installs it, [`FakeSpeech`]).
+mod none {
     use super::{SpeechControl, SpeechError, SpeechRequest, SpeechSink};
 
     pub(super) async fn available() -> bool {
@@ -558,14 +635,15 @@ pub(crate) struct Speech;
 
 #[module]
 impl Speech {
-    /// Resolves with whether speech can be recognized here: on macOS, iOS
-    /// and Android devices with a recognizer (on Android, a speech
-    /// recognition service installed), in browsers with the Web Speech API
-    /// (Chromium-based browsers and Safari), or where the embedding app
-    /// gave its own; `false` elsewhere, where a session ends at once with
-    /// `error: "unavailable"`. Whether the user allows the microphone is
-    /// asked when a session starts. It tells the platform only, so it needs
-    /// no capability.
+    /// Resolves with whether speech can be recognized here: on macOS, iOS,
+    /// Android and Windows devices with a recognizer (on Android, a speech
+    /// recognition service installed; on Windows, a dictation language and
+    /// a microphone), in browsers with the Web Speech API (Chromium-based
+    /// browsers and Safari), or where the embedding app gave its own;
+    /// `false` elsewhere (Linux, an app in a terminal), where a session ends
+    /// at once with `error: "unavailable"`. Whether the user allows the
+    /// microphone is asked when a session starts. It tells the platform
+    /// only, so it needs no capability.
     pub(crate) async fn available() -> bool {
         crate::speech::available().await
     }
@@ -573,8 +651,10 @@ impl Speech {
     /// Starts recognizing what the user says and returns the session: its
     /// `start`, `result` and `end` events report it. The system asks the
     /// user for the microphone and speech recognition the first time. One
-    /// session runs at a time: starting one ends the one running (its
-    /// `end`, without an error). Throws `ERR_ACCESS_DENIED` (`permission`
+    /// session runs at a time, in the whole process: starting one ends the
+    /// one running, with `end` without an error when this app started it,
+    /// and with `error: "audio-capture"` when another app (another
+    /// `AppView`) did. Throws `ERR_ACCESS_DENIED` (`permission`
     /// `"speech"`) when the `speech` capability is not granted, a
     /// `TypeError` for options of the wrong type, and a `RangeError` for a
     /// `lang` that is no language tag.

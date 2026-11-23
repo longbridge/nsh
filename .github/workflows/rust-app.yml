@@ -184,6 +184,10 @@ jobs:
         uses: ./.github/actions/cargo
         with:
           cache: rust-app-web
+      # nsh-extra's web code (the browser's Web Speech API), which no other
+      # job compiles: the native jobs build it empty.
+      - name: Clippy nsh-extra for the web
+        run: cargo clippy -p nsh-extra --target wasm32-unknown-unknown --features nsh-extra/speech --locked -- -D warnings
       - name: Build the command line
         run: cargo build -p nsh-cli --locked
       - name: Publish the Rust gallery for the web

@@ -22,8 +22,18 @@ use crate::JsonValue;
 pub trait Fake: Send + Sync {
     /// Takes the platform's place from now on: the headless driver calls
     /// it when it starts an app whose sets register the fake, before the
-    /// app runs, and again for each app it starts. Process-wide state is
-    /// reset here (what an earlier app left).
+    /// app runs, and again for each app it starts after the earlier ones
+    /// are gone. Process-wide state is reset here (what an earlier app
+    /// left). Apps running together with the same fake (below) share what
+    /// the first one installed: it is not installed again for the others.
+    ///
+    /// A fake may install itself process-wide (a module's backend), so the
+    /// headless driver never runs apps with different fakes at once in one
+    /// process: an app whose sets give fakes waits to start until the apps
+    /// running with other fakes are gone (two `#[test]`s, each launching
+    /// its app with a registry of its own, take turns). Apps started with
+    /// the same fakes, clones of one registry (the apps one `nsh test`
+    /// file opens), run together and share them.
     fn install(&self);
 
     /// What a test asks of it: `method` with `args`, the test's arguments

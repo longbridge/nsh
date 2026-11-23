@@ -35,7 +35,7 @@ use nsh::{
     proxy::{self, Proxy},
 };
 
-use super::{SpeechControl, SpeechError, SpeechRequest, SpeechSink};
+use super::{Begin, SpeechControl, SpeechError, SpeechRequest, SpeechSink};
 
 const RECORD_AUDIO: &str = "android.permission.RECORD_AUDIO";
 const RECOGNITION_LISTENER: &str = "android.speech.RecognitionListener";
@@ -174,18 +174,20 @@ fn begin(
     sink: SpeechSink,
     stop_asked: &AtomicBool,
 ) {
+    // Aborted, replaced or stopped while the user was asked: decided before
+    // the session running is touched, which a stale start must not end.
+    match super::begin_as(&sink, stop_asked.load(Ordering::Acquire)) {
+        Begin::Skip => return,
+        Begin::End => {
+            sink.end(None);
+            return;
+        }
+        Begin::Listen => {}
+    }
     // The module ended the one running before it started this one; one
     // left here ends now all the same: the microphone is one.
     if let Some(running) = SESSION.with(|s| s.borrow().as_ref().map(|s| s.id)) {
         finish(env, running, None);
-    }
-    // Aborted, or stopped, while the user was asked.
-    if sink.is_ended() {
-        return;
-    }
-    if stop_asked.load(Ordering::Acquire) {
-        sink.end(None);
-        return;
     }
     match open(env, id, &request) {
         Ok(Some((recognizer, listener))) => SESSION.with(|s| {

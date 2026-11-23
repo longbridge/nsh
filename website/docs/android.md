@@ -424,7 +424,11 @@ An Android API that calls back through an interface (a `Runnable` posted to the 
 object implementing those interfaces whose calls reach `handler` (the method's name and its arguments) on the thread
 Java makes them on, so the crate ships no Java of its own. Keep the `Proxy` it returns as long as Java may call it;
 once it is dropped, its calls do nothing. `nsh-extra`'s speech recognition (`crates/nsh-extra/src/speech/android.rs`)
-listens to `SpeechRecognizer` this way.
+listens to `SpeechRecognizer` this way. Only interfaces can be implemented so: an API that takes an abstract class
+(`UtteranceProgressListener`) needs a Java subclass, which the crate ships as a library
+([Java code](./packaging.md#java-code)). A method that returns a primitive must get a value boxed as its type
+(`java.lang.Boolean` for `boolean`): returning `None` there, or a call after the `Proxy` is dropped, throws a
+`NullPointerException` in Java.
 
 ## Notifications from other code
 

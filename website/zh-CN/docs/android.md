@@ -390,6 +390,9 @@ file provider 写入的 `content://` URI（`MediaStore.EXTRA_OUTPUT`）；`picke
 `proxy::implement(env, &["android.speech.RecognitionListener"], handler)` 创建的对象：一个实现这些接口的 Java 对象，它的调用会在
 Java 发起调用的线程上交给 `handler`（方法名和参数），所以 crate 不需要自带 Java 代码。Java 可能调用它期间要一直持有返回的 `Proxy`；
 丢弃之后，它的调用什么都不做。`nsh-extra` 的语音识别（`crates/nsh-extra/src/speech/android.rs`）就是这样监听 `SpeechRecognizer` 的。
+这种方式只能实现接口：接收抽象类的 API（`UtteranceProgressListener`）需要一个 Java 子类，由 crate 作为库自带（[Java 代码](./packaging.md#java-代码)）。
+返回基本类型的方法必须得到装箱成对应类型的值（`boolean` 对应 `java.lang.Boolean`）：在这里返回 `None`，或在 `Proxy` 丢弃后被调用，都会在 Java 中抛出
+`NullPointerException`。
 
 ## 来自其他代码的通知
 

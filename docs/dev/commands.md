@@ -71,6 +71,7 @@ cargo xtask web                                                                 
 cargo xtask compat                                                              # tests/compat's apps, and the API every recorded release froze (nsh-compat)
 cargo xtask compat record <version>                                             # record this checkout as a release in nsh-compat (at release time)
 cargo clippy -p nsh-platform-web --target wasm32-unknown-unknown --features compiler   # the web backend (empty off WebAssembly)
+cargo clippy -p nsh-extra --target wasm32-unknown-unknown --features nsh-extra/speech   # nsh-extra's web code (empty off WebAssembly)
 cargo clippy -p nsh-platform-linux -p nsh-linux-host -p nsh-linux-app --all-targets      # the Linux backend (on Linux; empty elsewhere)
 cargo clippy -p nsh-platform-macos -p nsh-macos-host -p nsh-macos-app -p nsh-extra --all-targets --features nsh-platform-macos/dev,nsh-extra/speech   # the macOS backend (on macOS)
 cargo clippy -p nsh-platform-windows -p nsh-windows-host -p nsh-windows-app -p nsh-extra --all-targets --features nsh-extra/speech   # the Windows backend (on Windows; empty elsewhere)

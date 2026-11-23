@@ -95,6 +95,7 @@ cargo clippy -p nsh-platform-linux -p nsh-linux-host -p nsh-linux-app --all-targ
 cargo clippy -p nsh-platform-macos -p nsh-macos-host -p nsh-macos-app -p nsh-extra --all-targets --features nsh-platform-macos/dev,nsh-extra/speech
 cargo clippy -p nsh-platform-windows -p nsh-windows-host -p nsh-windows-app -p nsh-extra --all-targets --features nsh-extra/speech
 cargo clippy -p nsh-platform-web --target wasm32-unknown-unknown --features compiler
+cargo clippy -p nsh-extra --target wasm32-unknown-unknown --features nsh-extra/speech
 cargo clippy --manifest-path crates/gpui/Cargo.toml --all-targets --features nsh-platform-gpui/dev
 cargo test --manifest-path crates/gpui/Cargo.toml
 cargo +nightly fmt --manifest-path crates/gpui/Cargo.toml --all

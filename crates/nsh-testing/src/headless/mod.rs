@@ -54,7 +54,7 @@ mod stub;
 use std::{
     io::Write,
     sync::{
-        Arc, OnceLock,
+        Arc, Condvar, Mutex, OnceLock,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
@@ -346,6 +346,14 @@ const CLICK_INTERVAL: Duration = Duration::from_millis(500);
 /// not loaded: no `onLoad` comes, nor an error unless the test fails the
 /// image ([`Headless::fail_images`]), and `Image.getSize` /
 /// `Image.prefetch` fail.
+///
+/// The native modules of the app's sets answer with their fakes
+/// ([`nsh_core::fake`]), which may stand in process-wide: an app whose sets
+/// give fakes waits to start until the apps running with other fakes are
+/// dropped, so two such apps never overlap in one process (two `#[test]`s
+/// that each launch theirs take turns). Apps started with the same fakes,
+/// clones of one registry, run together and share them. A thread holding an
+/// app with fakes must not start one with others: it would wait for itself.
 pub struct Headless {
     engine: Engine,
     batches: Receiver<MountBatch>,
@@ -430,6 +438,79 @@ pub struct Headless {
     /// The page's history, for an app started at a page's address
     /// ([`Headless::start_at_page`]).
     history: Option<browser::History>,
+    /// The app's turn to have its fakes installed, while its sets give
+    /// any; last, so it ends after the engine stopped.
+    _fakes_turn: Option<FakesTurn>,
+}
+
+/// The fakes installed for the headless apps running in the process, and
+/// how many apps run with them; `None` while none does.
+struct FakesInUse {
+    fakes: Vec<Arc<dyn nsh_core::fake::Fake>>,
+    apps: usize,
+}
+
+static FAKES_IN_USE: Mutex<Option<FakesInUse>> = Mutex::new(None);
+/// Signalled when the last app with the fakes in use is gone.
+static FAKES_FREED: Condvar = Condvar::new();
+
+/// A headless app's turn to have `fakes` installed
+/// ([`Headless`]): taken before they install, given back when the app is
+/// dropped.
+struct FakesTurn;
+
+impl FakesTurn {
+    /// Waits until no app runs with other fakes than `fakes` (the same
+    /// instances, in the same order), then counts the app among those
+    /// running with them; `true` with it when no app ran with them, so
+    /// they are installed now (an app joining others shares their state).
+    /// `None` for no fakes: such an app needs no turn.
+    fn take(fakes: &[(&'static str, Arc<dyn nsh_core::fake::Fake>)]) -> Option<(FakesTurn, bool)> {
+        if fakes.is_empty() {
+            return None;
+        }
+        let same = |in_use: &FakesInUse| {
+            in_use.fakes.len() == fakes.len()
+                && in_use
+                    .fakes
+                    .iter()
+                    .zip(fakes)
+                    .all(|(a, (_, b))| Arc::ptr_eq(a, b))
+        };
+        let mut state = FAKES_IN_USE.lock().unwrap_or_else(|e| e.into_inner());
+        let first = loop {
+            match &mut *state {
+                None => {
+                    *state = Some(FakesInUse {
+                        fakes: fakes.iter().map(|(_, fake)| fake.clone()).collect(),
+                        apps: 1,
+                    });
+                    break true;
+                }
+                Some(in_use) if same(in_use) => {
+                    in_use.apps += 1;
+                    break false;
+                }
+                Some(_) => {
+                    state = FAKES_FREED.wait(state).unwrap_or_else(|e| e.into_inner());
+                }
+            }
+        };
+        Some((FakesTurn, first))
+    }
+}
+
+impl Drop for FakesTurn {
+    fn drop(&mut self) {
+        let mut state = FAKES_IN_USE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(in_use) = &mut *state {
+            in_use.apps -= 1;
+            if in_use.apps == 0 {
+                *state = None;
+                FAKES_FREED.notify_all();
+            }
+        }
+    }
 }
 
 impl Headless {
@@ -469,15 +550,29 @@ impl Headless {
         F: FnOnce() -> M + Send + 'static,
     {
         // Before the app runs: its modules answer with their fakes, never
-        // with the machine's devices (a microphone).
+        // with the machine's devices (a microphone), once no app runs with
+        // other fakes (they may stand in process-wide).
         let fakes: Vec<_> = config
             .ui_sets
             .iter()
             .flat_map(nsh_core::element::Registry::fakes)
             .collect();
-        for (_, fake) in &fakes {
-            fake.install();
+        for (n, (name, _)) in fakes.iter().enumerate() {
+            assert!(
+                fakes[..n].iter().all(|(other, _)| other != name),
+                "two fakes are named `{name}`, by two UI sets"
+            );
         }
+        // Installed by the first app with them: one joining an app that runs
+        // shares their state (its sessions), which a reset would take away.
+        let fakes_turn = FakesTurn::take(&fakes).map(|(turn, first)| {
+            if first {
+                for (_, fake) in &fakes {
+                    fake.install();
+                }
+            }
+            turn
+        });
         let audio = config.audio.is_none().then(audio::FakeAudio::default);
         if let Some(audio) = &audio {
             config.audio = Some(Arc::new(audio.clone()));
@@ -564,6 +659,7 @@ impl Headless {
             host_posts: None,
             windows,
             history: None,
+            _fakes_turn: fakes_turn,
         })
     }
 

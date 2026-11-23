@@ -169,19 +169,42 @@ mod platform {
     /// the session.
     const STOP_LIMIT: Duration = Duration::from_secs(3);
 
+    /// Asks WinRT on a short-lived thread of its own, in the
+    /// multithreaded apartment: making a recognizer loads its language
+    /// data, which the engine's thread never waits for.
     pub(in crate::speech) async fn available() -> bool {
-        match recognizer_available() {
-            Ok(available) => available,
-            Err(error) => {
+        let (sender, answer) = tokio::sync::oneshot::channel();
+        let spawned = std::thread::Builder::new()
+            .name("nsh-speech-available".into())
+            .spawn(move || {
+                // SAFETY: the thread is new and its own: nothing else set
+                // its apartment, and every WinRT object of it (the error's
+                // too, made a string) is gone before the matching
+                // `RoUninitialize`.
+                let initialized = unsafe { RoInitialize(RO_INIT_MULTITHREADED) }.is_ok();
+                let available = recognizer_available().map_err(|error| error.to_string());
+                if initialized {
+                    // SAFETY: pairs the `RoInitialize` above.
+                    unsafe { RoUninitialize() };
+                }
+                let _ = sender.send(available);
+            });
+        if let Err(error) = spawned {
+            log::error!("speech recognition cannot tell whether it is available: {error}");
+            return false;
+        }
+        match answer.await {
+            Ok(Ok(available)) => available,
+            Ok(Err(error)) => {
                 log::debug!("speech recognition is not available: {error}");
                 false
             }
+            Err(_) => false,
         }
     }
 
     /// Whether a dictation language is installed, a recognizer can be
     /// made and a microphone is there; none of it asks the user anything.
-    /// WinRT's objects here are agile: any thread's apartment calls them.
     fn recognizer_available() -> windows::core::Result<bool> {
         if SpeechRecognizer::SupportedTopicLanguages()?.Size()? == 0 {
             return Ok(false);

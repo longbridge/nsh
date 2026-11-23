@@ -4,6 +4,13 @@
 //! `java.lang.reflect.Proxy` (`NativeProxy.java`) whose calls reach a Rust
 //! function, so the crate ships no Java class of its own.
 //!
+//! Only interfaces can be implemented so, as `java.lang.reflect.Proxy`
+//! implements nothing else: an API that takes an abstract class
+//! (`UtteranceProgressListener`) needs a Java subclass, which an nshm ships
+//! as a library. A method that returns a primitive must get a value boxed
+//! as its type (`java.lang.Boolean` for `boolean`): `None` there, or any
+//! call once the proxy is dropped, throws a `NullPointerException` in Java.
+//!
 //! ```no_run
 //! // The library of the `nsh-platform-android` crate is `nsh`.
 //! use nsh::{jni::objects::JValue, proxy};
@@ -55,11 +62,8 @@ use rustc_hash::FxHashMap;
 
 use crate::java::java;
 
-/// What answers a proxy's calls: the env of the thread Java calls on, the
-/// method's name and its arguments (a null array for none); the value it
-/// returns (`None`: `null`), boxed for a method that returns a primitive
-/// (`java.lang.Boolean` for `boolean`), which must return one.
-pub type Handler = dyn Fn(&mut JNIEnv<'_>, &str, &JObjectArray<'_>) -> jni::errors::Result<Option<GlobalRef>>
+/// What answers a proxy's calls ([`implement`]'s `handler`).
+pub(crate) type Handler = dyn Fn(&mut JNIEnv<'_>, &str, &JObjectArray<'_>) -> jni::errors::Result<Option<GlobalRef>>
     + Send
     + Sync;
 
@@ -70,6 +74,7 @@ static NEXT: AtomicI64 = AtomicI64::new(1);
 /// A Java object implementing interfaces in Rust ([`implement`]). Its
 /// handler lives as long as it: once it is dropped, the object's calls do
 /// nothing and answer `null`, wherever Java still holds it.
+#[must_use = "dropping the proxy makes the Java object's calls do nothing"]
 pub struct Proxy {
     object: GlobalRef,
     handle: i64,
@@ -98,11 +103,16 @@ impl Drop for Proxy {
     }
 }
 
-/// A Java object implementing `interfaces` (binary names:
-/// `"android.speech.RecognitionListener"`), whose calls reach `handler` on
-/// the thread Java makes them on. `Object`'s own `equals`, `hashCode` and
-/// `toString` are the proxy's. A Java exception `handler` leaves pending
-/// is logged and cleared, and the call answers `null`. Any thread.
+/// A Java object implementing `interfaces` (binary names of interfaces
+/// only: `"android.speech.RecognitionListener"`), whose calls reach
+/// `handler` on the thread Java makes them on, with the env of that
+/// thread, the method's name and its arguments (a null array for none).
+/// `handler` returns the call's value (`None`: `null`), boxed for a method
+/// that returns a primitive (`java.lang.Boolean` for `boolean`), which
+/// must return one: `null` there throws a `NullPointerException` in Java.
+/// `Object`'s own `equals`, `hashCode` and `toString` are the proxy's. A
+/// Java exception `handler` leaves pending is logged and cleared, and the
+/// call answers `null`. Any thread.
 pub fn implement(
     env: &mut JNIEnv<'_>,
     interfaces: &[&str],

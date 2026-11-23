@@ -69,7 +69,7 @@ crates/
                        per module (`camera`: `Camera`, photos from the system's camera on iOS and Android; `photos`:
                        `Photos`, the recent photos of the user's library on iOS; `push`: `Push`,
                        remote notifications on iOS and, through a push service's binding, Android; `speech`:
-                       `Speech`, speech recognized as the user talks on macOS, iOS and Android), its code in
+                       `Speech`, speech recognized as the user talks on macOS, iOS, Android, Windows and the web), its code in
                        `src/<name>/` on the platform crates' extension points, what the packaged app needs under
                        `[package.metadata.nsh.features.<name>]` (merged into packages by `nsh-cli`'s `module_meta.rs`)
   nsh-bundler/         Bundler: rolldown + Oxc (TS stripping) + NSH's JSX compiler (`jsx.rs`, docs/dev/native-pipeline.md) + source maps;

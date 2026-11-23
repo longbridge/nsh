@@ -10,7 +10,7 @@ import { Speech } from "nsh-extra";
 
 | Feature | What the example shows | Tests |
 |---|---|---|
-| `speech` | Dictation: a session with interim transcripts, stopped or aborted (`App.tsx`) | `tests/speech.test.tsx`, with the module's fake recognizer speaking for the user (`app.hear`, `app.endSpeech`) |
+| `speech` | Dictation: a session with interim transcripts, stopped or aborted (`App.tsx`) | `tests/speech.test.tsx`, with the module's fake recognizer speaking for the user (`app.fake("nsh-extra/speech", "hear", [text])`) |
 
 ```sh
 nsh run examples/extra

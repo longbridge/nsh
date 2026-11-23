@@ -1,10 +1,12 @@
 //! The recognizer of headless runs (`nsh test`): the fake
 //! `"nsh-extra/speech"` ([`nsh_core::fake`]), which the headless driver
-//! installs as the module's backend before the app starts. The test speaks
-//! for the user (`hear`, TS `app.hear`) and ends the session (`end`, TS
-//! `app.endSpeech`); the app's sessions start listening at once, as if the
-//! user allowed the microphone; `requests` lists what they asked for (TS
-//! `app.speechRequests`).
+//! installs as the module's backend before the app starts. A test calls it
+//! by name (TS `app.fake("nsh-extra/speech", method, args)`, Rust
+//! `Headless::call_fake`): `hear` `[text]` speaks for the user, `end`
+//! `[]` / `[error]` ends the session, and `requests` `[]` lists what the
+//! sessions asked for (`[{ lang, interim }]`); the app's sessions start
+//! listening at once, as if the user allowed the microphone. The website's
+//! `Speech` section documents the methods for apps.
 
 use std::sync::{Arc, Mutex, MutexGuard};
 

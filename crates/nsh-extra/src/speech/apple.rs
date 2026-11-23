@@ -27,7 +27,7 @@ use objc2::{
 };
 use objc2_foundation::NSString;
 
-use super::{SpeechControl, SpeechError, SpeechRequest, SpeechSink};
+use super::{Begin, SpeechControl, SpeechError, SpeechRequest, SpeechSink};
 
 /// The usage descriptions the system requires before it asks the user.
 const USAGE_KEYS: [&str; 2] = [
@@ -121,13 +121,16 @@ impl SpeechControl for Control {
 }
 
 fn begin(id: u64, request: SpeechRequest, sink: SpeechSink) {
+    // Ended before it reached the main thread: decided before the session
+    // running is touched, which a stale start must not end. A stop comes
+    // after the start on the main queue, so none was asked yet.
+    if super::begin_as(&sink, false) != Begin::Listen {
+        return;
+    }
     // The module ended the one running before it started this one; one
     // left here ends now all the same: the microphone is one.
     if let Some(running) = SESSION.with(|s| s.borrow().as_ref().map(|s| s.id)) {
         finish(running, None);
-    }
-    if sink.is_ended() {
-        return;
     }
     if !frameworks() {
         sink.end(Some(SpeechError::Unavailable));

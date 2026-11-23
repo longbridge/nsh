@@ -54,7 +54,7 @@ fn end(error: Option<SpeechError>) -> SpeechEvent {
 
 #[test]
 fn errors_are_named_as_the_web_speech_api_names_them() {
-    for error in SpeechError::ALL {
+    for &error in SpeechError::ALL {
         assert_eq!(SpeechError::from_name(error.as_str()), Some(error));
     }
     assert_eq!(SpeechError::NotAllowed.as_str(), "not-allowed");
@@ -66,7 +66,7 @@ fn errors_are_named_as_the_web_speech_api_names_them() {
 #[test]
 fn web_errors_are_the_browsers() {
     use super::web::speech_error;
-    for error in SpeechError::ALL {
+    for &error in SpeechError::ALL {
         assert_eq!(speech_error(error.as_str(), false, false), Some(error));
     }
     assert_eq!(speech_error("aborted", false, true), None);
@@ -261,6 +261,58 @@ fn a_new_session_ends_the_one_running() {
     second.stop();
     assert_eq!(backend.stopped.load(Ordering::SeqCst), 1);
     set_backend(None);
+}
+
+/// Another engine (another app or `AppView`) taking the microphone ends
+/// the session running with `audio-capture`; its own engine, without.
+#[test]
+fn another_engines_session_ends_the_one_running_with_audio_capture() {
+    let _turn = turn();
+    let backend = test_backend();
+    let (app_a, app_b) = (
+        nsh_core::element::Runtime::default(),
+        nsh_core::element::Runtime::default(),
+    );
+    let mut first = {
+        let _entered = app_a.enter();
+        recognize(SpeechRequest::default())
+    };
+    let mut second = {
+        let _entered = app_b.enter();
+        recognize(SpeechRequest::default())
+    };
+    assert_eq!(
+        events(&mut first),
+        [
+            SpeechEvent::Start,
+            result("a b", false),
+            end(Some(SpeechError::AudioCapture))
+        ]
+    );
+    assert_eq!(backend.aborted.load(Ordering::SeqCst), 1);
+    // App B replacing its own session: no error.
+    let third = {
+        let _entered = app_b.enter();
+        recognize(SpeechRequest::default())
+    };
+    assert_eq!(
+        events(&mut second),
+        [SpeechEvent::Start, result("a b", false), end(None)]
+    );
+    drop(third);
+    set_backend(None);
+}
+
+/// A start that reaches the recognizer's thread after its session ended
+/// leaves the session running alone.
+#[test]
+fn a_stale_start_changes_nothing() {
+    let (sink, _events) = channel();
+    assert_eq!(begin_as(&sink, false), Begin::Listen);
+    assert_eq!(begin_as(&sink, true), Begin::End);
+    sink.end(None);
+    assert_eq!(begin_as(&sink, false), Begin::Skip);
+    assert_eq!(begin_as(&sink, true), Begin::Skip);
 }
 
 #[test]

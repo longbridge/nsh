@@ -303,8 +303,9 @@ Android with the device's recognition service (`SpeechRecognizer`), Windows with
 (`Windows.Media.SpeechRecognition`), the web with the browser's Web Speech API; the system or the browser asks the
 user for the microphone (and on Apple platforms for speech recognition) once. Windows dictates with the user's online
 speech recognition, which they turn on in Settings > Privacy & security > Speech; while it is off, a session ends with
-`"not-allowed"`. Check `Speech.available()` before showing a microphone button:
-where nothing recognizes speech, a session ends at once with `"unavailable"`.
+`"not-allowed"`. Linux has no recognizer, nor have terminal apps (the TUI host, on every OS); an app embedded with
+GPUI recognizes with the platform's recognizer on macOS and Windows. Check `Speech.available()` before showing a
+microphone button: where nothing recognizes speech, a session ends at once with `"unavailable"`.
 
 ```sh
 nsh add nsh-extra --features speech
@@ -367,16 +368,20 @@ function toggle() {
   listens, `result` each time the transcript changes (`text` is always the whole transcript so far, so the app shows
   it as it is), and one `end`, after which nothing comes. `stop()` stops listening and lets the recognizer finish
   what it heard: a last result with `isFinal: true`, then `end`. `abort()` ends the session at once, without an
-  error. One session runs at a time, as there is one microphone: starting another ends the one running.
+  error. One session runs at a time, as there is one microphone: starting another ends the one running. A new
+  session of the same app in the same view ends it as `abort()` does, without an error; one that another app or
+  view of the process starts (an embedding app's other `AppView`) ends it with `"audio-capture"`, as the microphone
+  was taken from it.
 - `end` carries the last transcript and, when the session failed, `error`, named as in the Web Speech API:
   `"not-allowed"` (the user or the system does not allow the microphone or speech recognition, or the app is in the
   background), `"no-speech"` (nothing was said), `"audio-capture"` (the microphone could not be used), `"network"`
   (the recognizer needs the network), `"language-not-supported"` (the recognizer does not know `lang`),
   `"unavailable"` (nothing recognizes speech here, or not now) and `"failed"`.
 - `start` throws a `TypeError` for options of the wrong types and a `RangeError` for a `lang` that is no language tag.
-- `available()` is `true` on macOS and iOS, on Android devices with a recognition service, in browsers with the Web
-  Speech API (Chromium-based browsers such as Chrome and Edge, and Safari), and wherever the app gave the module a
-  recognizer of its own.
+- `available()` is `true` on macOS and iOS, on Android devices with a recognition service, on Windows with a
+  dictation language and a microphone, in browsers with the Web Speech API (Chromium-based browsers such as Chrome
+  and Edge, and Safari), and wherever the app gave the module a recognizer of its own. It is `false` on Linux and in
+  terminal apps.
 - On the web the page needs a secure context (HTTPS, or `localhost` while developing) for the microphone, and a page
   that embeds the app in an iframe allows it (`allow="microphone"`). Chrome recognizes with its online service, so
   `"network"` reports a lost connection.
@@ -412,9 +417,22 @@ async fn dictate() -> String {
 }
 ```
 
-In `nsh test`, sessions run on the module's fake recognizer: a session starts listening at once, `app.hear(text)`
-reports `text` as the transcript so far, `app.endSpeech(error?)` ends it, and `app.speechRequests()` lists the
-sessions the app started ([Testing](./testing-and-trace.md)).
+In `nsh test` (and `nsh_testing::Headless`), sessions run on the module's fake recognizer, named
+`"nsh-extra/speech"`: a session starts listening at once, as if the user allowed the microphone, and the test speaks
+for the user through the fake with [`app.fake`](./testing-and-trace.md) (`Headless::call_fake` in Rust):
+
+| Method | `args` | What it does, and its answer |
+|---|---|---|
+| `hear` | `[text]` | The user says `text`, the whole transcript so far: the running session reports it as a `result` that is not final (with `interim: false`, it keeps it for the end). Resolves with `null`; rejects with `no speech session listens` when none runs. |
+| `end` | `[]` or `[error]` | Ends the running session: with `error` (one of the codes above), or as when the user stops: the transcript as the final `result`, then `end` (`"no-speech"` when nothing was heard). Resolves with `null`; rejects when no session runs or `error` is no code. |
+| `requests` | `[]` | Resolves with the sessions the app started, in order: `[{ lang, interim }]`, `lang` `null` for the user's language. |
+
+```tsx
+await app.press("label:Dictate");
+await app.fake("nsh-extra/speech", "hear", ["hello"]);
+await app.waitFor("text:hello");
+await app.fake("nsh-extra/speech", "end");
+```
 
 ## An app's own Rust: `ext/`
 

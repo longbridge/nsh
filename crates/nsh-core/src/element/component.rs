@@ -1223,8 +1223,8 @@ impl Registry {
     ///
     /// # Panics
     ///
-    /// When two sets register the same component or two types of the same
-    /// name.
+    /// When two sets register the same component, two types of the same
+    /// name or two fakes of the same name ([`Registry::fake`]).
     #[track_caller]
     pub fn merged(sets: &[Registry]) -> Self {
         let mut out = Self::default();
@@ -1232,7 +1232,14 @@ impl Registry {
             out.tokens = out.tokens.or(set.tokens);
             out.scrollbars = out.scrollbars.or(set.scrollbars);
             Arc::make_mut(&mut out.setups).extend(set.setups.iter().cloned());
-            Arc::make_mut(&mut out.fakes).extend(set.fakes.iter().cloned());
+            let fakes = Arc::make_mut(&mut out.fakes);
+            for (name, fake) in set.fakes.iter() {
+                assert!(
+                    fakes.iter().all(|(n, _)| n != name),
+                    "two fakes are named `{name}`, by two UI sets"
+                );
+                fakes.push((name, fake.clone()));
+            }
             let types = Arc::make_mut(&mut out.types);
             for (name, ty) in set.types.iter() {
                 if let Some(old) = types.insert(name, ty.clone()) {
@@ -1363,7 +1370,8 @@ impl Registry {
     ///
     /// # Panics
     ///
-    /// When the set has a fake of that name already.
+    /// When the set has a fake of that name already. Names are unique
+    /// across the sets an app is served, too ([`Registry::merged`]).
     #[track_caller]
     pub fn fake(&mut self, name: &'static str, fake: Arc<dyn crate::fake::Fake>) -> &mut Self {
         assert!(
@@ -1376,7 +1384,8 @@ impl Registry {
     }
 
     /// The fakes [`Registry::fake`] gave the set and the sets served under
-    /// it, by name, in order.
+    /// it, by name, in order: what the headless driver installs.
+    #[doc(hidden)]
     pub fn fakes(&self) -> Vec<(&'static str, Arc<dyn crate::fake::Fake>)> {
         self.sets()
             .into_iter()
@@ -2356,6 +2365,37 @@ mod tests {
             message,
             "component `nsh_core::element::component::tests::Stepper` is registered twice, by two UI sets"
         );
+    }
+
+    struct NoFake;
+
+    impl crate::fake::Fake for NoFake {
+        fn install(&self) {}
+
+        fn call(&self, _: &str, _: &[crate::JsonValue]) -> Result<crate::JsonValue, String> {
+            Ok(crate::JsonValue::Null)
+        }
+    }
+
+    /// A test calls a fake by its name alone: two sets cannot give one name.
+    #[test]
+    fn fake_names_are_unique_across_sets() {
+        let mut a = Registry::ui_set("test/a");
+        a.fake("test/mic", Arc::new(NoFake));
+        let mut b = Registry::ui_set("test/b");
+        b.fake("test/camera", Arc::new(NoFake));
+        let names: Vec<_> = Registry::merged(&[a.clone(), b])
+            .fakes()
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        assert_eq!(names, ["test/mic", "test/camera"]);
+        let mut c = Registry::ui_set("test/c");
+        c.fake("test/mic", Arc::new(NoFake));
+        let twice =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Registry::merged(&[a, c])));
+        let message = *twice.unwrap_err().downcast::<String>().unwrap();
+        assert_eq!(message, "two fakes are named `test/mic`, by two UI sets");
     }
 }
 
