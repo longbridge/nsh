@@ -2960,9 +2960,13 @@ mount(() => (
 
 ## host
 
-`host` 连接嵌入 NSH 的应用：`NshAppView` / `NshView` 所在的原生应用，或在 Web 上运行播放器的页面。应用按名字调用宿主的函数（参数是 JSON），并监听宿主发来的事件。
+`host` 连接嵌入 NSH 的应用：`NshAppView` / `NshView` 所在的原生应用，或在 Web 上运行播放器的页面。应用按名字调用宿主的函数（参数是 JSON），并监听宿主发来的事件。Rust 代码调用 `nsh_core::prelude` 的 `host_call`、`host_call_with`、`host_post` 和 `on_host_event`；TSX 从 `nsh` 导入 `host`。两者连到同一个宿主，名字、能力和错误码都相同，所以应用只写一份调用，由各个宿主各自应答。
 
-```ts
+```rust tabs
+use nsh_core::prelude::*; // host_call, host_call_with, host_post, on_host_event, HostCallOptions, HostError
+```
+
+```tsx tabs
 import { host } from "nsh";
 ```
 
@@ -3009,6 +3013,8 @@ call(name: string, args?: unknown, options?: { timeout?: number }): Promise<unkn
 
 不是合法名字（由 `A`–`Z`、`a`–`z`、`0`–`9`、`_`、`.`、`:`、`-` 组成，长度 1 到 128，不含 `..`）的 `name` 以 `TypeError` 拒绝。
 
+检查按以下顺序进行，调用以最先命中的一项失败：名字不合法时是 `TypeError`，其次未获授权时是 `ERR_ACCESS_DENIED`，最后没有宿主时是 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`。因此即使没有宿主，未获授权的调用也以 `ERR_ACCESS_DENIED` 拒绝。
+
 调用最多等待宿主应答 30 秒，之后以 `ETIMEDOUT` 拒绝，之后才到的应答会被丢弃。`options.timeout` 以毫秒设置等待时间，`0` 表示不限时；大到时钟永远走不到的值（约 1e22 毫秒）同样不限时，负数、`NaN` 或无穷大则以 `RangeError` 拒绝调用。计时用的是应用的时间，与它的定时器一致：在使用手动时钟的 `nsh test` 中随时钟推进。
 
 ```ts
@@ -3017,6 +3023,38 @@ const quote = await host.call("quote.refresh", { symbol: "AAPL" }, { timeout: 50
   if (error.code === "ETIMEDOUT" || error.code === "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM") return null;
   throw error;
 });
+```
+
+在 Rust 中，`host_call(name, args)` 是在任务中等待的 `async fn`，结果是 `Result<JsonValue, HostError>`。`HostError` 的各个变体就是上表的失败（带宿主消息的 `Failed`、`Denied`、`InvalidName`、`Unavailable`、`TimedOut`、`TooManyCalls`），`code()` 给出相同的错误码。`host_call_with(name, args, options)` 接受 `HostCallOptions::default().timeout(duration)`，`Duration::ZERO` 表示宿主用多久就等多久。
+
+```rust
+// use nsh_core::JsonValue; use serde_json::json; use std::time::Duration;
+spawn(async move {
+    let user = host_call("getUserInfo", JsonValue::Null).await;
+    let options = HostCallOptions::default().timeout(Duration::from_secs(5));
+    match host_call_with("quote.refresh", json!({ "symbol": "AAPL" }), options).await {
+        Ok(quote) => show(quote),
+        Err(HostError::TimedOut { .. } | HostError::Unavailable) => {}
+        Err(error) => log::warn!("{error}"),
+    }
+});
+```
+
+### host.post
+
+```ts
+post(name: string, data?: unknown): void;
+```
+
+把 `data` 交给宿主的函数 `name`，不等待应答：宿主处理 `name` 的 handler 像收到调用一样收到它。没有嵌入应用，或宿主没有处理 `name` 的 handler 时，投递被丢弃。有宿主时，未获授权的名字或不合法的名字会抛出（`ERR_ACCESS_DENIED`、`TypeError`）。Rust 的 `host_post(name, data)` 没有返回值：无论应用运行在哪里都会检查名字，被拒绝的投递会记录日志并丢弃。
+
+```rust tabs
+// use serde_json::json;
+host_post("analytics.track", json!({ "event": "signup" }));
+```
+
+```tsx tabs
+host.post("analytics.track", { event: "signup" });
 ```
 
 ### host.on
@@ -3033,6 +3071,12 @@ const stop = host.on("loginChanged", (payload) => console.log(payload));
 stop();
 ```
 
+在 Rust 中，`on_host_event(event, listener)` 在添加它的组件存在期间，以每次事件的数据（`&JsonValue`）调用 `listener`，与 `on_key` 相同。还没有该名字的 Rust 监听器时到达的事件（包括宿主在应用启动前发送的）会被保留（最多 256 个，超出时丢弃最早的），直到添加了监听器，所以应用加载完某些内容后才添加的监听器也能收到；已经被监听器收到的事件不会补发给之后添加的监听器。
+
+```rust
+on_host_event("loginChanged", move |payload| signed_in.set(payload["signedIn"] == true));
+```
+
 ### 能力
 
 应用调用的每个函数都必须列在 `nsh.json` 的 `capabilities.host` 中：精确的名字、以 `*` 结尾的前缀，或者用 `true` 允许全部。所有应用都是如此，没有声明其他 `capabilities` 的应用也一样：宿主的函数从不默认授予。未授权的调用会以 `ERR_ACCESS_DENIED` 拒绝并记录日志，向嵌入应用 `host.post` 这样的名字会抛出同样的错误；构建从 `nsh` 导入了 `host` 却没有声明 `capabilities.host` 的应用时会给出警告。事件无需授权。参见[沙箱与能力](../docs/sandbox-and-capabilities.md#host)。
@@ -3043,7 +3087,7 @@ stop();
 
 ### Web 上的宿主
 
-在 Web 上，页面就是宿主。`createPlayer` 的 `host` 选项应答调用，`player.hostEvent(event, payload)` 发送事件：
+在 Web 上，页面就是宿主。`createPlayer` 的 `host` 选项应答调用，`player.hostEvent(event, payload)` 发送事件，TSX 应用和 Rust 应用都一样：
 
 ```js
 const player = await createPlayer(container, {
@@ -3126,7 +3170,7 @@ nsh.send("conversation.open", Map.of("id", "43"));
 参见 [iOS 嵌入](../docs/ios.md#与应用通信)、[Android 嵌入](../docs/android.md#与应用通信) 和 [GPUI](../docs/gpui.md)。
 
 > [!NOTE]
-> 原生 SDK 的调用和投递与平台调用一样，需要 [`host` 能力](../docs/sandbox-and-capabilities.md#host)授权。Rust 应用直接通过嵌入方注册的函数调用其 Rust 代码（[`nativeModule`](#nativemodule) 和 Rust 导入）。
+> 原生 SDK 的调用和投递与平台调用一样，需要 [`host` 能力](../docs/sandbox-and-capabilities.md#host)授权。Rust 应用的 `host_call`、`host_post` 和 `on_host_event` 在每个平台上都连到同样的 handler 和事件。
 
 ## keymap
 

@@ -225,8 +225,13 @@
     `destroy`, then joins the engine with the Java lock released. Data crosses the C ABI and JNI as JSON text
     (Swift `JSONSerialization`, Java
     `org.json` as maps and lists), the VM as JSON values converted natively.
-  - A Rust app (`App::Rust`) has no `host`: events reach no one; its own Rust reaches the embedding app's
-    directly ("Native modules", below). The host grants the native functions the app may call through `capabilities.host`.
+  - *Rust code* (`host_call`, `host_call_with`, `host_post`, `on_host_event` of `nsh_core::prelude`; a Rust app, or
+    Rust components in a TSX app) reaches the same channel through the core: the core checks the name and
+    `capabilities.host` and keeps the call by id, and the engine hands each call or post to the channel's handler
+    when the channel is configured, else to the platform's host (`Command::HostCall` / `HostPost`, the web page's),
+    else fails it as `Unavailable`. Answers come back to the core, and the channel's events reach the components'
+    listeners as well as JS's; each language keeps the events of names it does not listen to yet until it does.
+    JS's calls without a channel of their own take the same path.
   - *The URL handler* (`HostChannel::handle_open_url`; Swift `NshAppView.onOpenURL`, C
     `nsh_app_set_open_url_handler`; Java `NshView.setOpenUrlHandler`, `NshView.OpenUrlHandler`): the URLs the app
     opens (`openUrl` of `nsh`, `nsh_core::element::open_url`, a `TextView` with `links="open"`;
