@@ -1856,6 +1856,7 @@ fn package_android(
                 if let Some(application) = &config.application {
                     info["application"] = application.clone();
                 }
+                config.add_file_types_to_app_json(&mut info);
                 info
             },
             &config.app_links(),
@@ -1911,6 +1912,7 @@ fn package_android(
             queries: &config.android.queries,
             application: &config.android.application,
             schemes: &config.schemes,
+            share_mime_types: &file_mime_types(&config.file_types()),
             links: config.app_links().web(),
             rust: built.rust_root,
             dark: config.appearance.as_deref() == Some("dark"),
@@ -2469,7 +2471,8 @@ fn macos_info_plist(
     Ok(d)
 }
 
-/// The MIME types of `types`, each once, for a Linux desktop entry.
+/// The MIME types of `types`, each once, for a Linux desktop entry and
+/// Android's share sheet (a type with only extensions has none).
 pub(crate) fn file_mime_types(types: &[nsh_core::file_type::FileType]) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for mime in types.iter().flat_map(|t| &t.mime_types) {
