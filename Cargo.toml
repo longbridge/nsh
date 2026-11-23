@@ -570,6 +570,7 @@ objc2-app-kit = { version = "0.3.2", default-features = false, features = [
   "NSControl",
   "NSCursor",
   "NSDragging",
+  "NSFilePromiseReceiver",
   "NSEvent",
   "NSFont",
   "NSFontDescriptor",
