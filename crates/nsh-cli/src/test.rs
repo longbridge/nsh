@@ -72,7 +72,7 @@ pub(crate) fn test(
     display: Option<usize>,
     foreground: bool,
 ) -> anyhow::Result<()> {
-    let app_dir = entry.parent().unwrap_or(Path::new(".")).to_path_buf();
+    let app_dir = nsh_bundler::app_dir::app_dir_of(entry);
     let work_dir = app_dir.join(".nsh/test");
     // The app's crates in the directory, which `cargo test` tests.
     let crates: Vec<AppCrate> = match crate::rust_app::current() {
@@ -88,7 +88,7 @@ pub(crate) fn test(
         vec![path.to_owned()]
     } else if path.is_dir() {
         let mut files = Vec::new();
-        find_tests(path, &mut files);
+        find_tests(&test_root(path), &mut files);
         files.sort();
         if files.is_empty() && (crates.is_empty() || target.is_some()) {
             bail!(
@@ -839,6 +839,19 @@ pub(crate) fn app_entry(path: &Path) -> anyhow::Result<PathBuf> {
         "{}: no app around it (an App.tsx or nsh.json)",
         ui::path(path)
     )
+}
+
+/// Where the test files of the directory `path` are: the directory of the
+/// entry its `nsh.json` names (`"entry": "app/App.tsx"`: `app/`), the rest
+/// of such a project being other code (a server's, with tests of its own);
+/// else `path` itself.
+fn test_root(path: &Path) -> PathBuf {
+    match nsh_bundler::app_dir::config_entry(path) {
+        Ok(Some(entry)) => entry
+            .parent()
+            .map_or_else(|| path.to_owned(), Path::to_path_buf),
+        _ => path.to_owned(),
+    }
 }
 
 fn is_test_file(path: &Path) -> bool {

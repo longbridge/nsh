@@ -207,10 +207,9 @@ pub(crate) fn run(
         // package: a debug host measures debug code.
         crate::rust_app::set_release_hosts();
     }
-    let work = dunce::canonicalize(entry)?
-        .parent()
-        .context("entry has no directory")?
-        .join(".nsh");
+    // The app's directory: its `nsh.json`'s, which may be above the entry
+    // (`"entry"`).
+    let work = nsh_bundler::app_dir::app_dir_of(&dunce::canonicalize(entry)?).join(".nsh");
     if target == Target::Tui {
         return run_tui(
             entry,

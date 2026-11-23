@@ -13,7 +13,7 @@ use rolldown::{
 };
 use rolldown_common::{ChunkFilenamesOutputOption, CodeSplittingMode, Output};
 
-use crate::{compile, compile::strip_ansi, plugin};
+use crate::{app_dir::app_dir, compile, compile::strip_ansi, plugin};
 
 /// What to bundle and how.
 #[derive(Debug, Clone, Default)]
@@ -280,8 +280,8 @@ pub fn application(dir: &std::path::Path) -> Result<Option<String>, BundleError>
         .map(serde_json::Value::to_string))
 }
 
-/// How bare imports resolve: the `"resolve"` of the `nsh.json` next to the
-/// entry, checked.
+/// How bare imports resolve: the `"resolve"` of the app's `nsh.json`,
+/// checked.
 #[derive(Debug, Default)]
 struct ResolveSetup {
     /// The export conditions of npm packages (`None`: `browser`).
@@ -578,36 +578,6 @@ fn warn_ignored(section: &str, ignored: &[String]) {
     }
 }
 
-/// The directory of the app whose entry is in `dir`, where its `nsh.json`
-/// is: `dir` itself, or, when `dir` has neither an `nsh.json` nor an
-/// `App.tsx`, the nearest directory up with an `nsh.json`, else the nearest
-/// one up with an `App.tsx`, else `dir`. An entry a test opens
-/// (`tests/MenuApp.tsx`), or the one `nsh test` makes for a test file
-/// (`.nsh/test/<file>.run.js`), is built with its app's theme, translations
-/// and the rest of its `nsh.json`, as the app is, and names its assets
-/// from the app's directory ([`Bundle::asset_root`]).
-fn app_dir(dir: &std::path::Path) -> PathBuf {
-    let has_config = |d: &std::path::Path| d.join("nsh.json").is_file();
-    let has_entry = |d: &std::path::Path| {
-        std::fs::read_dir(d).is_ok_and(|entries| {
-            entries.filter_map(Result::ok).any(|e| {
-                e.file_name()
-                    .to_str()
-                    .is_some_and(|n| n.eq_ignore_ascii_case("App.tsx"))
-            })
-        })
-    };
-    if has_config(dir) || has_entry(dir) {
-        return dir.to_owned();
-    }
-    dir.ancestors()
-        .skip(1)
-        .find(|d| has_config(d))
-        .or_else(|| dir.ancestors().skip(1).find(|d| has_entry(d)))
-        .unwrap_or(dir)
-        .to_owned()
-}
-
 /// Bundles an app, blocking the current thread.
 pub fn bundle(options: &BundleOptions) -> Result<Bundle, BundleError> {
     tokio::runtime::Builder::new_current_thread()
@@ -627,17 +597,19 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
         .ok_or_else(|| BundleError::other("entry has no parent directory"))?
         .to_path_buf();
     let cwd_for_errors = cwd.clone();
-    let cwd_root = cwd.clone();
     // Canonical: `cwd` is, and so is each directory above it.
     let app = app_dir(&cwd);
+    let watch_root = app.clone();
     let tailwind = tailwind_setup(&app, options.development, &options.app)?;
     let capabilities = capabilities(&app)?;
     let links = app_links(&app)?;
-    // Beside the entry, as `app.json`, `nsh run` and `nsh test`'s
-    // real-window hosts read it (the CLI's `read_config`): an app a test
-    // opens below its app's root starts alike headless and in a window.
-    let main_window = main_window(&cwd)?;
-    let application = application(&cwd)?;
+    // The entry's own `nsh.json` (beside it, or the one above that names
+    // it), as `app.json`, `nsh run` and `nsh test`'s real-window hosts read
+    // it (the CLI's `read_config`): an app a test opens below its app's
+    // root starts alike headless and in a window.
+    let config_dir = crate::app_dir::config_dir_of(&entry);
+    let main_window = main_window(&config_dir)?;
+    let application = application(&config_dir)?;
     let resolve = ResolveSetup::read(&app)?.with_nshm(&app)?;
     let asset_root = match &options.asset_root_from {
         Some(file) => {
@@ -766,7 +738,7 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
         entry_imports,
         assets,
         asset_root,
-        watch_files: watch_files(&bundler, &cwd_root),
+        watch_files: watch_files(&bundler, &watch_root),
         natives: natives.into_iter().collect(),
         native_use,
         entry_native_use,
@@ -801,6 +773,11 @@ fn watch_files(bundler: &rolldown::Bundler, dir: &std::path::Path) -> Vec<PathBu
         .map(|path| PathBuf::from(path.key().as_str()))
         .filter(|path| path.is_file())
         .collect();
+    // The app's `nsh.json` itself, which may be above the entry's directory
+    // (`"entry"`) and so outside what the development server watches.
+    if let Ok(path) = dunce::canonicalize(dir.join("nsh.json")) {
+        files.push(path);
+    }
     if let Ok(config) = std::fs::read_to_string(dir.join("nsh.json"))
         && let Ok(config) = serde_json::from_str::<serde_json::Value>(&config)
         && let Some(theme) = config.get("theme").and_then(|v| v.as_str())
@@ -808,7 +785,7 @@ fn watch_files(bundler: &rolldown::Bundler, dir: &std::path::Path) -> Vec<PathBu
     {
         files.push(path);
     }
-    // The translations come with the entry: a change rebuilds it.
+    // The app's translations: a change rebuilds it.
     files.extend(nsh_i18n::locale_files(dir));
     files.sort();
     files.dedup();
@@ -1145,8 +1122,8 @@ pub async fn bundle_hot_async(
             .collect(),
         entry: entry_id.ok_or_else(|| BundleError::other("bundle produced no entry chunk"))?,
         assets,
+        watch_files: watch_files(&bundler, &app),
         asset_root: app,
-        watch_files: watch_files(&bundler, &cwd),
         capabilities,
         links,
         elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,

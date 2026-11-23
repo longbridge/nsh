@@ -47,7 +47,25 @@ my-app/
 
 TSX 应用通过 `ext/` 里自己的 nshm crate 用 Rust 扩展自己，在 `"dependencies"` 中按路径列出（[应用自己的 Rust：ext/](./nshm.md#应用自己的-rustext)）；`src/` 放 TSX，`ext/` 放 Rust。Rust 应用也可以在 `"rust"` 中列出它的 crate，再加一个导入它们的 TSX 入口（[用 Rust 开发](./rust.md#用-tsx-扩展-rust-应用)）。
 
-每个命令都以应用目录或它的入口作为参数（`nsh run my-app`、`nsh run my-app/App.tsx`）。`nsh.json` 和入口所在的目录就是应用的根目录：`nsh.json` 从这里读取，资源路径相对于它，`.nsh/` 也写在这里。在 Rust 应用中（`nsh.json` 带 `"root"`），目录运行根组件；指定 TSX 入口则运行该入口。
+每个命令都以应用目录或它的入口作为参数（`nsh run my-app`、`nsh run my-app/App.tsx`）。`nsh.json` 所在的目录就是应用的根目录：`nsh.json` 从这里读取，它写的路径和资源路径都相对于它，`.nsh/` 也写在这里。入口默认是它旁边的 `App.tsx`，`nsh.json` 也可以用 `"entry"` 指定别的入口。在 Rust 应用中（`nsh.json` 带 `"root"`），目录运行根组件；指定 TSX 入口则运行该入口。
+
+### 放在更大项目里的应用
+
+同时包含其他代码（服务端、网站）的项目，可以把 `nsh.json` 放在项目根目录，与 `package.json` 或 `Cargo.toml` 同级，应用代码放在单独的目录里，由 `"entry"` 指定：
+
+```text
+my-project/
+├── nsh.json           { "name": "…", "entry": "app/App.tsx", "theme": "app/theme.json", … }
+├── package.json       服务端的
+├── server/
+└── app/
+    ├── App.tsx        入口
+    ├── App.test.tsx   它的测试
+    ├── tsconfig.json  应用模块的 TypeScript 设置
+    └── theme.json
+```
+
+这样 `nsh run`、`nsh test` 等命令在项目根目录执行，和在应用目录执行一样：根目录就是应用的根目录（`.nsh/`、`locales/` 以及 `nsh.json` 写的 `theme`、`icon`、`web.host` 等路径都相对于它）；`nsh test` 只在入口所在目录（`app/`）里找测试文件，不会扫到服务端的测试；`nsh check` 和 `.nsh/types` 跟随入口目录的 `tsconfig.json`。
 
 ## 根组件
 
@@ -124,7 +142,8 @@ mount(() => <Window id="main"><App /></Window>);
 
 | 键 | 类型 | 使用者 | 说明 |
 |---|---|---|---|
-| `name` | string | `package` | 应用图标下显示的名称。默认：入口所在目录的名称。 |
+| `name` | string | `package` | 应用图标下显示的名称。默认：`nsh.json` 所在目录的名称。 |
+| `entry` | string | 每个命令 | TSX 入口模块，路径相对于 `nsh.json` 且在它的目录之内，例如 `"app/App.tsx"`（[放在更大项目里的应用](#放在更大项目里的应用)）。默认：`nsh.json` 旁边的 `App.tsx`。命令行上指定的入口（`nsh run app/Other.tsx`）优先。 |
 | `id` | string | `package`, `publish`, `Storage` | Bundle identifier / application id，反向 DNS 形式，例如 `com.yourcompany.app`；`package` 和 `publish` 必须提供。没有时 `nsh run` 使用 `com.example.<name>`。 |
 | `version` | string | `package`, `publish` | 用户可见的版本号，例如 `1.2.0`（`CFBundleShortVersionString`，Android 的 `versionName`）。 |
 | `build` | number | `package`, `publish` | 构建号（`CFBundleVersion`，Android 的 `versionCode`）。签名包要求它在每次发布时递增。 |

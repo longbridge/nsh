@@ -206,7 +206,8 @@ fn start(
     ) {
         crate::package::note_hidden_main_window(&entry);
     }
-    let dir = entry.parent().unwrap_or(Path::new("."));
+    let app_dir = nsh_bundler::app_dir::app_dir_of(&entry);
+    let dir = app_dir.as_path();
     let url = format!("ws://{}{WS_PATH}", server.local_addr());
     // A fresh data directory: what the app keeps (its storage) starts empty
     // in every test, as headless runs' does.
@@ -327,7 +328,7 @@ pub(crate) fn serve(
     let dir = built
         .as_ref()
         .and_then(|built| built.asset_root.clone())
-        .unwrap_or_else(|| entry.parent().unwrap_or(Path::new(".")).to_path_buf());
+        .unwrap_or_else(|| nsh_bundler::app_dir::app_dir_of(entry));
     let trace = options.trace.clone();
     let server = DevServer::start(
         "127.0.0.1:0".parse().expect("an address"),

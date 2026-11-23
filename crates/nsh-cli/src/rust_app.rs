@@ -1079,7 +1079,8 @@ pub(crate) fn is_root(entry: &Path) -> bool {
 pub(crate) fn runner_only(entry: &Path) -> anyhow::Result<RustApp> {
     let entry = dunce::canonicalize(entry)
         .with_context(|| format!("entry not found: {}", entry.display()))?;
-    let dir = entry.parent().context("entry has no directory")?;
+    // The app's directory: its `nsh.json`'s (`entry` may be below it).
+    let dir = &nsh_bundler::app_dir::app_dir_of(&entry);
     let nsh = Nsh::for_runner(
         crate::runtime::cli_checkout(),
         env!("NSH_CHANNEL"),
@@ -1115,7 +1116,8 @@ pub(crate) fn runner_only(entry: &Path) -> anyhow::Result<RustApp> {
 pub(crate) fn of(entry: &Path, unify: bool) -> anyhow::Result<Option<RustApp>> {
     let entry = dunce::canonicalize(entry)
         .with_context(|| format!("entry not found: {}", entry.display()))?;
-    let dir = entry.parent().context("entry has no directory")?;
+    // The app's directory: its `nsh.json`'s (`entry` may be below it).
+    let dir = &nsh_bundler::app_dir::app_dir_of(&entry);
     let Ok(text) = fs::read_to_string(dir.join("nsh.json")) else {
         return Ok(None);
     };
