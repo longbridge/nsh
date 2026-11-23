@@ -440,7 +440,7 @@ fn main() {
 - Use `rustc-link-lib`, not `rustc-link-arg`: link arguments only apply to the crate's own targets.
 - Put a static library's privacy manifest entries in the app's `ios.privacyManifest`.
 - NSH does not embed dynamic frameworks; prefer the SDK's static build.
-- On Linux and Windows the same `build.rs` links the SDK (`.a` and `.so` on Linux, `.lib` on Windows). A shared library (`.so`, `.dll`) must sit next to the app's executable, which NSH does not do either: nsh-frameworks also links the libraries a crate lists for `linux` and `windows`, copies the shared ones into the package directory and its archive (`nsh-frameworks embed .nsh/out/<Name>`), and sets a Linux executable's rpath to `$ORIGIN`.
+- On Linux and Windows the same `build.rs` links the SDK (`.a` and `.so` on Linux, `.lib` on Windows). NSH does not carry shared libraries (`.so`, `.dll`) into the package either; prefer the SDK's static build.
 
 ### A TSX nshm
 
