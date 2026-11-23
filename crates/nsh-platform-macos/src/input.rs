@@ -3592,6 +3592,27 @@ fn embedded(root: &objc2_app_kit::NSView) -> bool {
     crate::view::superview(root).is_some_and(|app| window.contentView().as_ref() != Some(&app))
 }
 
+/// Whether a scroll of `surface` is under way at `event`: a trackpad
+/// gesture, its glide, or wheel steps latched to a view.
+pub(crate) fn scrolling(surface: &Surface, event: &NSEvent) -> bool {
+    let input = &surface.input;
+    let time = event.timestamp() * 1000.0;
+    let horizontal = event.scrollingDeltaX().abs() > event.scrollingDeltaY().abs();
+    input.wheel.borrow().is_some()
+        || (input.momentum.borrow().is_some() && time - input.momentum_last.get() < TOUCHPAD_IDLE)
+        || input.latch.borrow().as_ref().is_some_and(|(view, h, last)| {
+            latch_holds(*h, *last, horizontal, time) && view.ns().window().is_some()
+        })
+}
+
+/// Hands `event`, which reached a hosted AppKit view, to the surface's
+/// root as if it came there.
+pub(crate) fn forward_scroll(surface: &Surface, event: &NSEvent) {
+    let root = event_root(surface);
+    // SAFETY: NSResponder's method, on the surface's root view.
+    let _: () = unsafe { objc2::msg_send![root.ns(), scrollWheel: event] };
+}
+
 /// A `scrollWheel:` event at `(x, y)`.
 fn scroll_event(surface: &Rc<Surface>, event: &NSEvent, x: f32, y: f32, time: f64) {
     let precise = event.hasPreciseScrollingDeltas();
