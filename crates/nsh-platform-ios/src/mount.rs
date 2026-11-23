@@ -2867,13 +2867,7 @@ impl Mounter {
         // node, so re-ensuring here each time is idempotent.
         if on {
             self.add_touch_tracker(nsh_core::ROOT_ID);
-            let modals: Vec<NodeId> = self
-                .views
-                .iter()
-                .flatten()
-                .filter(|s| matches!(s.native, Native::Modal(_)))
-                .map(|s| s.native.view().tag() as NodeId)
-                .collect();
+            let modals: Vec<NodeId> = self.modal_attached.iter().map(|&(id, _)| id).collect();
             for modal in modals {
                 self.add_touch_tracker(modal);
             }
