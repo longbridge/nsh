@@ -1855,6 +1855,20 @@ pub(crate) fn resized(surface: &Surface, view: &NshView) {
     view.state_mut().frame = Bounds::new(point(Points(0.0), Points(0.0)), size);
     surface.control(|c| c.set_root_size(id, size, EdgeInsets::default()));
     crate::navigation::window_resized(surface, view);
+    // The primary window's size is the app's `windowSize()`.
+    surface.window_environment();
+}
+
+/// The size of the app's primary window: the first of its own windows
+/// still open (the earliest root) that has a size, as on Windows. `None`
+/// while it shows none.
+pub(crate) fn primary(surface: &Surface) -> Option<Size<Points>> {
+    let windows = surface.windows.try_borrow().ok()?;
+    windows
+        .iter()
+        .filter_map(|(id, w)| w.reported.get().map(|size| (*id, size)))
+        .min_by_key(|(id, _)| *id)
+        .map(|(_, size)| size)
 }
 
 /// The displays changed: the windows of the app's own read their state
@@ -2179,6 +2193,8 @@ pub(crate) fn removed(surface: &Surface, view: &NshView) -> bool {
     lost_key(surface, &window);
     // A link made from its root would neither fire nor let the root go.
     surface.follow_windows();
+    // Another window may be the primary one now.
+    surface.window_environment();
     true
 }
 
@@ -2193,6 +2209,7 @@ pub(crate) fn close_all(surface: &Surface) {
     dock::set(surface.key(), ROOT_ID, None);
     surface.main_window.reset();
     surface.follow_windows();
+    surface.window_environment();
 }
 
 fn close(w: AppWindow) {
