@@ -358,6 +358,13 @@ final class Native {
     static native void paste(long handle, int id, String text, byte[][] images, String[] uris);
 
     /**
+     * A file drag for node {@code id}: {@link #FILE_DRAG_ENTER} with the files offered (none yet on Android, which
+     * opens a drag's data only at the drop) or {@link #FILE_DROP} with the dropped files' app-owned copies, as
+     * {@code file:} URLs; a drop's point ({@code x}, {@code y}) in the surface's points.
+     */
+    static native void fileDrop(long handle, int id, int kind, String[] uris, float x, float y);
+
+    /**
      * {@link #CANVAS_IMAGE} on the root: the answer to `OffscreenCanvas` render {@code request}, the encoded image
      * {@code bytes}, or when they are null why not: {@code failure} ({@link CanvasRender#RENDER_FAILED},
      * {@link CanvasRender#RENDER_TOO_LARGE}) and the message {@code error}.
