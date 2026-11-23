@@ -2,7 +2,7 @@
 // Kit window. Its controls are its own (`ui.tsx`) and follow the host's
 // light or dark mode (`AppView::set_appearance`).
 //
-// The host uses `AppView::new_inline` so `mount(App)` renders
+// The host sets `AppOptions::inline_root` so `mount(App)` renders
 // in the pane. `<Window>` would open a separate OS window.
 //
 // The host provides the rest by name, at run time, so this app builds with

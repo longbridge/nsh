@@ -87,12 +87,13 @@
   initial default; explicit main-window attributes and later window updates take precedence. Standard hosts
   leave that option false but can request transparency through their window configuration. A view's
   `behindWindow` material does not enable window transparency. An `AppView` never changes its host's window.
-  GPUI and GPUI Kit apps use `nsh_platform_gpui::AppView`, a GPUI view (`gpui.md`): `let view = cx.new(|cx|
-  AppView::new_inline(options, window, cx));` inside a window, `view.read(cx).load(App::Js(bundle))`, then put the entity in
-  any element tree (in a GPUI Kit window, as a child of its `Root`); it fills the space its parent gives it and takes
-  the focus it is given (`Focusable`). The crate depends on `gpui-fast` 0.1 from crates.io (re-exported as
-  `nsh_platform_gpui::gpui`); GPUI Kit's `gpui-fast` feature makes `gpui_component` use that same crate, so both share
-  one GPUI. `open_app_window` opens a window showing an app in a running GPUI app.
+  GPUI and GPUI Kit apps use `nsh_platform_gpui::AppView`, a GPUI view (`gpui.md`): set `AppOptions::inline_root`
+  to `true`, create the view with `cx.new(|cx| AppView::new(options, window, cx))` inside a window, load the plain JS
+  root with `view.read(cx).load(App::Js(bundle))`, then put the entity in any element tree (in a GPUI Kit window, as
+  a child of its `Root`); it fills the space its parent gives it and takes the focus it is given (`Focusable`). The
+  crate depends on `gpui-fast` 0.1 from crates.io (re-exported as `nsh_platform_gpui::gpui`); GPUI Kit's `gpui-fast`
+  feature makes `gpui_component` use that same crate, so both share one GPUI. `open_app_window` opens a window
+  showing an app in a running GPUI app.
 - **An application-owned Tokio runtime (Rust-linked mobile hosts)**: iOS `SurfaceOptions::runtime` and Android
   `nsh::set_runtime(handle, runtime)` (`host.rs`) forward an optional `tokio::runtime::Handle` to
   `EngineConfig::runtime`, per view; `None` keeps the process-wide shared runtime. Both are read each time an engine
@@ -353,8 +354,9 @@ NSH draws (`src/layers.rs`).
   use it too: its `gpui-fast` feature. `cargo tree -i gpui-fast` must show one version, else the app has two GPUIs
   and NSH's views are not the app's elements. `nsh_platform_gpui::gpui` re-exports NSH's. NSH builds with GPUI Fast
   0.1.14 or later, which GPUI Kit is built on from 0.9.1.
-- **A view.** `cx.new(|cx| AppView::new_inline(options, window, cx))`, then `view.read(cx).load(App::Js(bundle))`
-  for a plain JS root, or `AppView::new` for a Rust root. The host puts the entity wherever it wants as a child element.
+- **A view.** `cx.new(|cx| AppView::new(options, window, cx))`, with `options.inline_root = true` for an inline plain JS
+  root. Load the bundle with `view.read(cx).load(App::Js(bundle))`, or a Rust root with
+  `view.read(cx).load(App::Rust(root))`. The host puts the entity wherever it wants as a child element.
   The surface fills the space its parent gives it and follows it when resized (each layout reports the size to the
   engine). Several views run at once, in one window or several, each with its own engine thread; the process shares
   only the main-thread queue (`rt.rs`) and the key bindings. Dropping the view (its last entity handle) stops its

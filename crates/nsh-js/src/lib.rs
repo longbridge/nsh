@@ -78,6 +78,7 @@ pub use crate::{
 /// Marks an engine context to mount plain JS roots on the host's surface
 /// instead of opening an implicit desktop window. Explicit windows and
 /// the platform environment are unchanged.
+#[doc(hidden)]
 #[must_use]
 pub fn with_inline_root(
     context: nsh_core::element::EngineContext,

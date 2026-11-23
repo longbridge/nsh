@@ -10,8 +10,8 @@ retained view per node, NSH draws every view itself, and the input, scrolling, t
 the Windows backend's, platform-free. Only drawing, text, the main-thread queue, events and the window are GPUI's.
 User-facing page: `website/docs/gpui.md`.
 
-Use `AppView::new_inline(options, window, cx)` to render a plain JS root (`mount(App)`) in the hosting view, as in
-`examples/embed-gpui`. The constructor is independent of `AppView::own_window` and the order in which
+Set `AppOptions::inline_root` to `true` when calling `AppView::new` to render a plain JS root (`mount(App)`) in the
+hosting view, as in `examples/embed-gpui`. The option is independent of `AppView::own_window` and the order in which
 it and `AppView::load` are called. It only suppresses the implicit first window: the desktop OS and idiom are unchanged,
 and explicit `<Window>` and `Window.open` windows remain separate native windows. The `tests::windows` suite checks the
 host's content height and window count with and without the opt-in, in both call orders. The offscreen render tests
@@ -19,8 +19,9 @@ host's content height and window count with and without the opt-in, in both call
 
 **Standalone window model v2: not migrated.** GPUI still uses the old host window rather than a hidden app host in
 `open_app_window` and `nsh run --target gpui`. On Linux GPUI shows that window as it opens, so a launch shows an empty
-host before the app's `<Window>` windows. By default a plain JS root keeps the implicit first window (`window-model.md`),
-which the backend opens separately. `tests::standalone_windows` is still ignored: it assumes the old host is the app's
+host before the app's `<Window>` windows. Both `open_app_window` and `run_app` ignore `AppOptions::inline_root`: a plain
+JS root keeps the implicit first window (`window-model.md`), which the backend opens separately. `tests::windows`
+checks this using `open_app_window`. `tests::standalone_windows` is still ignored: it assumes the old host is the app's
 window for title, sizing and focus. This backend is 待平台验证; the rest of this page describes the code as it is.
 
 Every area of the other desktop backends is ported; "Not implemented, or different" lists where GPUI's primitives make
@@ -253,8 +254,8 @@ the same GPUI queue as its commit before drawing the screenshots; the deadline o
   dispatches the key on the window's thread before its own default (and before the app's key engine hands the
   notification to JS and Rust callbacks), so the value is observable state for that transition, never a
   synchronous veto the UI thread waits for.
-- **Embedding**: `AppView` (`app.rs`) is one surface as a GPUI view: `cx.new(|cx| AppView::new_inline(options, window,
-  cx))`, then `load(App::Js(bundle))` for a plain JS root. Rust roots use `AppView::new` and `load(App::Rust(root))`.
+- **Embedding**: `AppView` (`app.rs`) is one surface as a GPUI view: `cx.new(|cx| AppView::new(options, window, cx))`,
+  with `options.inline_root = true` for an inline plain JS root, then `load(App::Js(bundle))` or `load(App::Rust(root))`.
   The view renders a `SurfaceElement` and is `Focusable`.
   `open_app_window` opens one in a window of a running GPUI app; `run_app` runs one app on its own, as the development
   host does (one `AppView` filling a window, the process quits when the last window closes). A host that opens the

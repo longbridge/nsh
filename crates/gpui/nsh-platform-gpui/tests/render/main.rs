@@ -363,9 +363,13 @@ fn embedding_screenshots(cx: &mut HeadlessAppContext, output: &Path) {
 
 /// Opens a 240 × 180 window running `code`.
 fn open(cx: &mut HeadlessAppContext, code: &str) -> gpui::WindowHandle<AppView> {
+    let options = AppOptions {
+        inline_root: true,
+        ..render_options()
+    };
     let window = cx
         .open_window(size(px(240.0), px(180.0)), |window, cx| {
-            cx.new(|cx| AppView::new_inline(render_options(), window, cx))
+            cx.new(|cx| AppView::new(options, window, cx))
         })
         .unwrap();
     let code = nsh_bundler::compile_module("App.tsx", code, &[]).unwrap();

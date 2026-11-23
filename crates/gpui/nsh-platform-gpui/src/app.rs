@@ -162,6 +162,11 @@ pub struct AppOptions {
     /// functions read it with `nsh_core::element::engine_context`, so each view
     /// reaches its own part of the embedding app.
     pub context: nsh_engine::EngineContext,
+    /// Mounts a plain JS root in the view instead of opening an implicit
+    /// desktop window. The host still controls its own window; explicit
+    /// windows, the platform environment and Rust roots are unchanged.
+    /// False by default; [`open_app_window`] and [`run_app`] ignore this option.
+    pub inline_root: bool,
     /// The embedding app's channel with the apps the view runs
     /// (`nsh/host`): their launch parameters, events to them and handlers of
     /// their calls and posts ([`AppView::host`]). One for every app the view
@@ -233,6 +238,7 @@ impl std::fmt::Debug for AppOptions {
             .field("cache", &self.cache)
             .field("storage", &self.storage)
             .field("context", &self.context)
+            .field("inline_root", &self.inline_root)
             .field("host", &self.host)
             .field("transparent", &self.transparent)
             .field("windows", &self.windows.is_some())
@@ -259,6 +265,7 @@ impl Default for AppOptions {
             data_dir: None,
             storage: None,
             context: Default::default(),
+            inline_root: false,
             host: nsh_engine::HostChannel::default(),
             transparent: false,
             windows: None,
@@ -326,7 +333,11 @@ pub enum CloseRequest {
 /// gpui_platform::application().run(|cx| {
 ///     cx.open_window(WindowOptions::default(), |window, cx| {
 ///         cx.new(|cx| {
-///             let view = AppView::new_inline(AppOptions::default(), window, cx);
+///             let options = AppOptions {
+///                 inline_root: true,
+///                 ..AppOptions::default()
+///             };
+///             let view = AppView::new(options, window, cx);
 ///             let code = std::fs::read_to_string("app/bundle.js").expect("bundle");
 ///             view.load(App::Js(Bundle::source(code)));
 ///             view
@@ -351,8 +362,18 @@ pub struct AppView {
 }
 
 impl AppView {
-    /// A view with no app yet (in `cx.new(|cx| AppView::new(...))`).
+    /// A view with no app yet (in `cx.new(|cx| AppView::new(...))`). Set
+    /// [`AppOptions::inline_root`] to embed a plain JS root in the view.
     pub fn new(options: AppOptions, window: &mut Window, cx: &mut Context<Self>) -> AppView {
+        #[cfg(feature = "js")]
+        let options = if options.inline_root {
+            AppOptions {
+                context: nsh_engine::with_inline_root(options.context),
+                ..options
+            }
+        } else {
+            options
+        };
         crate::rt::init(cx);
         // The focused field's caret follows the window's activation
         // (`text_input::window_focus`, checked as the view is drawn).
@@ -397,19 +418,6 @@ impl AppView {
             #[cfg(feature = "dev")]
             dev: RefCell::new(None),
         }
-    }
-
-    /// Like [`Self::new`], but a plain JS root mounts in this view instead
-    /// of opening an implicit desktop window. The host controls its own window;
-    /// inline JS cannot move or close it. Explicit windows, the app's platform
-    /// environment and Rust roots are unchanged.
-    pub fn new_inline(options: AppOptions, window: &mut Window, cx: &mut Context<Self>) -> AppView {
-        #[cfg(feature = "js")]
-        let options = AppOptions {
-            context: nsh_engine::with_inline_root(options.context),
-            ..options
-        };
-        Self::new(options, window, cx)
     }
 
     /// Runs `app`, replacing what ran.
@@ -514,7 +522,7 @@ impl AppView {
     /// application menu (macOS's menu bar, the menu bar drawn above the
     /// view elsewhere) and reserved keys. This does not change where a JS root
     /// mounts or let an inline JS root control the host window. Use
-    /// [`Self::new_inline`] for inline mounting. The embedding app opens the
+    /// [`AppOptions::inline_root`] for inline mounting. The embedding app opens the
     /// window itself (its bounds, its root element: GPUI Kit's `Root`
     /// around the view, say), best with [`crate::titlebar_options`], and
     /// calls this once, from the window's build closure.
@@ -1019,9 +1027,11 @@ pub fn open_app_window(
 /// [`open_app_window`], and whether the window shows as it opens.
 fn open(
     source: AppSource,
-    options: AppOptions,
+    mut options: AppOptions,
     cx: &mut GpuiApp,
 ) -> anyhow::Result<(gpui::WindowHandle<AppView>, bool)> {
+    // A standalone launch keeps the implicit desktop window.
+    options.inline_root = false;
     // nsh.json `window` (a JS bundle's or a Rust root's), read before the
     // window is made so that its first frame has them (a dev server's
     // comes with its first bundle, and the engine applies its attributes

@@ -123,7 +123,11 @@ the window's build closure:
 use gpui::AppContext;
 use nsh_platform_gpui::{App, AppOptions, AppView, Bundle};
 
-let view = cx.new(|cx| AppView::new_inline(AppOptions::default(), window, cx));
+let options = AppOptions {
+    inline_root: true,
+    ..AppOptions::default()
+};
+let view = cx.new(|cx| AppView::new(options, window, cx));
 let code = std::fs::read_to_string(".nsh/out/bundle.js").expect("bundle");
 view.read(cx).load(App::Js(Bundle::source(code)));
 ```
@@ -134,13 +138,14 @@ URIs resolve (`AssetBase::Directory` or `AssetBase::Http`). Bytecode bundles (`b
 `unsafe { Bundle::bytecode(bytes) }` (or `Bundle::read_trusted(path)`, unsafe too): QuickJS bytecode is trusted input,
 so only load it from your own app's files.
 
-`AppView::new_inline` renders the plain root inside the view, as in `examples/embed-gpui`. With `AppView::new`,
-that root opens in an implicit first window. The app still sees the same desktop platform, and explicit `<Window>`
-and `Window.open` windows are still separate GPUI windows. Inline rendering works whether or not the view owns its
-host window (`AppView::own_window`), regardless of whether you call `own_window` before or after `load`.
+Set `AppOptions::inline_root` to `true` to render the plain root inside the view, as in `examples/embed-gpui`.
+When it is `false` (the default), the root opens in an implicit first window. The app still sees the same desktop platform, and
+explicit `<Window>` and `Window.open` windows are still separate GPUI windows. Inline rendering works whether or not
+the view owns its host window (`AppView::own_window`), regardless of whether you call `own_window` before or after
+`load`. `open_app_window` and `run_app` ignore `inline_root`.
 
 - `open_app_window(source, options, cx)` opens a host window with one `AppView` in a running GPUI app, with the app's
-  nsh.json `window` settings applied before its first frame. By default, a plain JS root opens in an
+  nsh.json `window` settings applied before its first frame. A plain JS root opens in an
   implicit first window ([The app host and the first window](../modules/nsh-desktop.md#the-app-host-and-the-first-window)).
   GPUI's host window still follows the old main-window model: it is not a v2 hidden host. On Linux the empty host
   shows as it opens, before the app's windows. The legacy `"defaultVisible"` key no longer controls host visibility.

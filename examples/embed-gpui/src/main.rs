@@ -591,13 +591,14 @@ fn open_app(path: &Path, window: &mut Window, cx: &mut App) -> Option<Entity<App
         }
     };
     let options = AppOptions {
+        inline_root: true,
         // The build copies imported assets next to the bundle.
         asset_base: path
             .parent()
             .map(|dir| AssetBase::Directory(dir.join("assets"))),
         ..AppOptions::default()
     };
-    let view = cx.new(|cx| AppView::new_inline(options, window, cx));
+    let view = cx.new(|cx| AppView::new(options, window, cx));
     // The app's switch is GPUI Kit's, drawn by this app.
     view.read(cx)
         .register_component(switch::NAME, std::rc::Rc::new(switch::HostSwitch::make));

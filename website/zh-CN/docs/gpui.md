@@ -106,7 +106,11 @@ TSX bundle，请从 NSH 项目目录运行宿主，并在窗口的构建闭包�
 use gpui::AppContext;
 use nsh_platform_gpui::{App, AppOptions, AppView, Bundle};
 
-let view = cx.new(|cx| AppView::new_inline(AppOptions::default(), window, cx));
+let options = AppOptions {
+    inline_root: true,
+    ..AppOptions::default()
+};
+let view = cx.new(|cx| AppView::new(options, window, cx));
 let code = std::fs::read_to_string(".nsh/out/bundle.js").expect("bundle");
 view.read(cx).load(App::Js(Bundle::source(code)));
 ```
@@ -116,12 +120,13 @@ view.read(cx).load(App::Js(Bundle::source(code)));
 `AssetBase::Http`）。字节码 bundle（`bundle.nshc`）用 `unsafe { Bundle::bytecode(bytes) }`（或同样是 unsafe 的
 `Bundle::read_trusted(path)`）加载：QuickJS 字节码是受信任的输入，只应从你自己应用的文件中加载。
 
-`AppView::new_inline` 在视图内绘制普通 JS 根视图，参见 `examples/embed-gpui`。使用 `AppView::new` 时，普通根视图
-会在隐式的第一个窗口中显示。应用看到的桌面平台不变，显式声明的 `<Window>` 或通过 `Window.open` 打开的窗口仍是独立的
-GPUI 窗口。无论视图是否接管宿主窗口（`AppView::own_window`），内嵌渲染都有效；`own_window` 可以在 `load` 之前或之后调用。
+将 `AppOptions::inline_root` 设为 `true`，可在视图内绘制普通 JS 根视图，参见 `examples/embed-gpui`。该选项默认为
+`false`，此时普通根视图会在隐式的第一个窗口中显示。应用看到的桌面平台不变，显式声明的 `<Window>` 或通过 `Window.open`
+打开的窗口仍是独立的 GPUI 窗口。无论视图是否接管宿主窗口（`AppView::own_window`），内嵌渲染都有效；`own_window` 可以在
+`load` 之前或之后调用。`open_app_window` 和 `run_app` 会忽略 `inline_root`。
 
 - `open_app_window(source, options, cx)` 在运行中的 GPUI 应用里打开一个带 `AppView` 的宿主窗口，并在第一帧之前应用
-  nsh.json 中 `window` 的设置。默认情况下，普通 JS 根视图会在隐式的第一个窗口中显示（[应用宿主与第一个窗口](../modules/nsh-desktop.md#应用宿主与第一个窗口)）。
+  nsh.json 中 `window` 的设置。普通 JS 根视图会在隐式的第一个窗口中显示（[应用宿主与第一个窗口](../modules/nsh-desktop.md#应用宿主与第一个窗口)）。
   GPUI 的宿主窗口仍然沿用旧的主窗口模型，不是 v2 的隐藏宿主。在 Linux 上，空白的宿主窗口会先于应用窗口显示。
   旧的 `"defaultVisible"` 键不再控制宿主窗口是否显示。该后端待平台验证。
 - `run_app(source, options)` 启动 GPUI，在一个窗口中运行一个应用直到窗口关闭（开发宿主就是这样做的）。
