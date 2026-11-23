@@ -593,6 +593,34 @@ impl<T: SharedDefault> PartialEq<T> for Sparse<T> {
     }
 }
 
+/// A node's flags about its children's positions among them (`first:`,
+/// `odd:`…), kept in a byte: the core keeps one record per node.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Positional(u8);
+
+impl Positional {
+    const NONE: Self = Self(0);
+    /// A child's classes read their position among siblings.
+    const CHILDREN: Self = Self(1);
+    /// Its children moved, and it waits in `Core::position_parents` for
+    /// their positions to be looked at (`classes.rs` `flush_positions`).
+    const QUEUED: Self = Self(2);
+
+    fn has(self, flag: Self) -> bool {
+        self.0 & flag.0 != 0
+    }
+
+    fn remove(&mut self, flag: Self) {
+        self.0 &= !flag.0;
+    }
+}
+
+impl std::ops::BitOrAssign for Positional {
+    fn bitor_assign(&mut self, flag: Self) {
+        self.0 |= flag.0;
+    }
+}
+
 struct Node {
     id: NodeId,
     kind: Kind,
@@ -652,8 +680,9 @@ struct Node {
     /// What only some nodes have: state styles, the styles of a page's
     /// header or a list's content ([`classes::NodeParts`]).
     parts: Option<Box<classes::NodeParts>>,
-    /// A child's classes read their position among siblings.
-    positional_children: bool,
+    /// What its children's positions among them are to it
+    /// ([`Positional`]).
+    positional: Positional,
     /// Styled with the margin its parent's `space-*` gives it.
     spaced: bool,
     /// The text color it inherits (`None`: React Native's black), CSS's
@@ -998,7 +1027,7 @@ impl Node {
             resting_fill: None,
             data: Box::default(),
             parts: None,
-            positional_children: false,
+            positional: Positional::NONE,
             spaced: false,
             inherited_color: None,
             child_perspective: None,
@@ -1597,6 +1626,10 @@ pub struct Core<M: TextEngine> {
     /// `--font-sans`.
     default_font: Option<crate::style::FontFamily>,
     queue: Vec<Key>,
+    /// Parents whose children moved, each once: their children's positions
+    /// are looked at before the next flush (`classes.rs` `flush_positions`),
+    /// once however many joined or left.
+    position_parents: Vec<Key>,
     needs_layout: bool,
     /// Parsed classes and the theme.
     tailwind: Tailwind,
@@ -1845,6 +1878,7 @@ impl<M: TextEngine> Core<M> {
             font_scale: 1.0,
             default_font: None,
             queue: Vec::new(),
+            position_parents: Vec::new(),
             needs_layout: true,
             tailwind: Tailwind::new(),
             class_env: ClassEnvironment::default(),
@@ -3541,6 +3575,10 @@ impl<M: TextEngine> Core<M> {
         }
         // The views' patches and the views to make first.
         self.render_components();
+        // The children that moved, the app's and those the components just
+        // placed, styled at their places before anything reads their styles
+        // (`position: fixed`, the color they pass on).
+        self.flush_positions();
         self.prepare_reveals();
         // The focus reported since, after the components made and released
         // what they did: one change of the chain, the views both chains
@@ -6629,6 +6667,17 @@ impl<M: TextEngine> Core<M> {
             }
             Prop::Overlay(prop) => {
                 use crate::OverlayProp;
+                // A hint makes an overlay a tooltip's, which counts among no
+                // siblings (`is_element_child`): theirs move.
+                let parent = node.parent;
+                if matches!(prop, OverlayProp::Hint(_))
+                    && parent != NO_KEY
+                    && self.nodes[parent as usize]
+                        .positional
+                        .has(Positional::CHILDREN)
+                {
+                    self.queue_positions(parent);
+                }
                 self.set_overlay_config(key, |c| match prop {
                     OverlayProp::Anchor(v) => c.anchor = v,
                     OverlayProp::Placement(v) => c.placement = v,
@@ -7132,10 +7181,13 @@ impl<M: TextEngine> Core<M> {
             .as_ref()
             .is_some_and(|c| c.deps() & crate::tailwind::deps::POSITION != 0)
         {
-            self.nodes[parent as usize].positional_children = true;
+            self.nodes[parent as usize].positional |= Positional::CHILDREN;
         }
-        if self.nodes[parent as usize].positional_children {
-            self.positions_changed(parent);
+        if self.nodes[parent as usize]
+            .positional
+            .has(Positional::CHILDREN)
+        {
+            self.queue_positions(parent);
         }
         self.spacing_changed(parent, child);
         if self.pointer_none_classes > 0 {
@@ -7252,8 +7304,11 @@ impl<M: TextEngine> Core<M> {
         if let Some(list) = self.nodes[parent as usize].list.as_mut() {
             list.remove_cell(key);
         }
-        if self.nodes[parent as usize].positional_children {
-            self.positions_changed(parent);
+        if self.nodes[parent as usize]
+            .positional
+            .has(Positional::CHILDREN)
+        {
+            self.queue_positions(parent);
         }
         self.nodes[key as usize].parent = NO_KEY;
         if self.nodes[key as usize].states & crate::tailwind::state::FOCUS_WITHIN != 0 {
@@ -8126,6 +8181,8 @@ impl<M: TextEngine> Core<M> {
 
     fn flush_dirty(&mut self) {
         loop {
+            // The children that moved since, each parent's once.
+            self.flush_positions();
             self.flush_dirty_once();
             // Text blocks create the views of new attachments while
             // flushing, which queues them; texts inside attachments built

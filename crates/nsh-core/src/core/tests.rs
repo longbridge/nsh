@@ -25119,6 +25119,51 @@ mod views {
     }
 
     #[test]
+    fn positional_js_children_a_component_places_are_styled_before_the_commit_reads_them() {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Forward>();
+        c.set_components(registry);
+        let mut ops = vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Component(std::any::type_name::<Forward>().into()),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ];
+        for id in [6, 8, 10] {
+            ops.extend([
+                Op::Create { id, tag: Tag::View },
+                class_op(id, "w-10 h-4 last:fixed"),
+                Op::Insert {
+                    parent: 2,
+                    child: id,
+                    before: None,
+                },
+            ]);
+        }
+        apply(&mut c, ops);
+        // Placed by the component as it renders, in the commit: the last
+        // is `position: fixed` in that same commit.
+        c.commit();
+        for id in [6, 8, 10] {
+            assert_eq!(
+                c.nodes[c.key(id).unwrap() as usize].fixed_view,
+                id == 10,
+                "{id}"
+            );
+        }
+    }
+
+    #[test]
     fn js_children_through_a_forward() {
         let mut c = core();
         let mut registry = Registry::new();
@@ -52568,13 +52613,17 @@ mod positional_regressions {
             .collect()
     }
 
-    // The ordinary resolver still queries the actual sibling list for each
-    // child. Compare the shared-position pass with that independent path.
+    // The ordinary resolver counts the actual sibling list while the
+    // parent's children moved (otherwise it takes the bits each child was
+    // last styled at). Compare the shared-position pass with that
+    // independent path.
     fn check(c: &mut Core<FakeEngine>, parent: NodeId) {
         let parent = c.key(parent).unwrap();
         c.positions_changed(parent);
         let children = c.nodes[parent as usize].children.clone();
         let expected = snapshot(c, &children);
+        let flags = c.nodes[parent as usize].positional;
+        c.nodes[parent as usize].positional |= super::Positional::QUEUED;
         for &key in &children {
             if c.nodes[key as usize]
                 .classes
@@ -52584,7 +52633,139 @@ mod positional_regressions {
                 c.restyle(key);
             }
         }
+        c.nodes[parent as usize].positional = flags;
         assert_eq!(snapshot(c, &children), expected);
+    }
+
+    /// What restyling each of `parent`'s children on its own (a hover, a
+    /// press) gives, taking the bits each was last styled at, is what
+    /// counting its siblings gives.
+    fn kept_positions_match_counted(c: &mut Core<FakeEngine>, parent: NodeId) {
+        let parent = c.key(parent).unwrap();
+        let children = c.nodes[parent as usize].children.clone();
+        for &key in &children {
+            c.restyle(key);
+        }
+        let kept = snapshot(c, &children);
+        let flags = c.nodes[parent as usize].positional;
+        c.nodes[parent as usize].positional |= super::Positional::QUEUED;
+        for &key in &children {
+            c.restyle(key);
+        }
+        c.nodes[parent as usize].positional = flags;
+        assert_eq!(kept, snapshot(c, &children));
+    }
+
+    /// A child restyled on its own after its siblings moved takes the bits
+    /// its last styling counted: also one whose classes were cleared while
+    /// they moved, and given back after.
+    #[test]
+    fn a_child_restyled_on_its_own_keeps_its_counted_position() {
+        let mut c = core();
+        view_with_classes(&mut c, 2, "");
+        for id in [4, 6, 8] {
+            child(&mut c, id, 2);
+        }
+        c.commit();
+        c.apply(Op::Insert {
+            parent: 2,
+            child: 4,
+            before: None,
+        })
+        .unwrap();
+        c.commit();
+        kept_positions_match_counted(&mut c, 2);
+        // 6, first, loses its classes; a row comes before it; it gets them
+        // back: second.
+        c.apply(class_op(6, "")).unwrap();
+        c.commit();
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 10,
+                    tag: Tag::View,
+                },
+                class_op(10, CLASSES),
+                Op::Insert {
+                    parent: 2,
+                    child: 10,
+                    before: Some(6),
+                },
+            ],
+        );
+        c.commit();
+        c.apply(class_op(6, CLASSES)).unwrap();
+        c.commit();
+        kept_positions_match_counted(&mut c, 2);
+    }
+
+    /// An overlay given a hint becomes a tooltip's, which counts among no
+    /// siblings: the rows after it move up a place.
+    #[test]
+    fn an_overlay_given_a_hint_moves_its_siblings_up() {
+        let mut c = core();
+        view_with_classes(&mut c, 2, "");
+        child(&mut c, 4, 2);
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 6,
+                    tag: Tag::Overlay,
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: 6,
+                    before: None,
+                },
+            ],
+        );
+        child(&mut c, 8, 2);
+        c.commit();
+        let third = c.nodes[c.key(8).unwrap() as usize].position_used;
+        c.apply(overlay_prop(
+            6,
+            crate::OverlayProp::Hint(Some(std::time::Duration::from_millis(300))),
+        ))
+        .unwrap();
+        c.commit();
+        assert_ne!(c.nodes[c.key(8).unwrap() as usize].position_used, third);
+        kept_positions_match_counted(&mut c, 2);
+    }
+
+    /// Rows mounted one insert at a time have their positions looked at
+    /// once per parent before the commit styles them: the siblings looked
+    /// at grow with the rows, not with their square.
+    #[test]
+    fn positions_are_looked_at_once_per_parent_as_rows_mount() {
+        let work = |rows: NodeId| {
+            let mut c = core();
+            view_with_classes(&mut c, 2, "");
+            for i in 0..rows {
+                let id = 10 + 2 * i;
+                apply(
+                    &mut c,
+                    vec![
+                        Op::Create { id, tag: Tag::View },
+                        class_op(id, "w-10 h-4 odd:bg-red-500 last:bg-blue-500"),
+                        Op::Insert {
+                            parent: 2,
+                            child: id,
+                            before: None,
+                        },
+                    ],
+                );
+            }
+            c.commit();
+            c.components.position_work.get()
+        };
+        let (few, many) = (work(400), work(1_600));
+        // Four times the rows: about four times the work (sixteen before).
+        assert!(
+            many <= few * 6,
+            "{few} siblings looked at for 400 rows, {many} for 1,600"
+        );
     }
 
     fn child(c: &mut Core<FakeEngine>, id: NodeId, parent: NodeId) {
@@ -52678,7 +52859,11 @@ mod positional_regressions {
         })
         .unwrap();
         c.apply(class_op(48, CLASSES)).unwrap();
-        assert!(c.nodes[c.key(100).unwrap() as usize].positional_children);
+        assert!(
+            c.nodes[c.key(100).unwrap() as usize]
+                .positional
+                .has(super::Positional::CHILDREN)
+        );
         child(&mut c, 50, 100);
 
         for op in [
