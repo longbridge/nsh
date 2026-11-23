@@ -9071,6 +9071,13 @@ class Player {
     window.addEventListener("pointermove", (e) => this.pointerMove(e), { passive: false });
     window.addEventListener("pointerup", (e) => this.pointerUp(e, false));
     window.addEventListener("pointercancel", (e) => this.pointerUp(e, true));
+    window.addEventListener("blur", () => {
+      this.hoverButtons = 0;
+      for (const [pointerId, p] of [...this.pointers]) {
+        p.scrolls = null;
+        this.pointerUp({ pointerId, buttons: 0 }, true);
+      }
+    });
     // A drag never drags images or text out of the app.
     root.addEventListener("dragstart", (e) => e.preventDefault());
     root.addEventListener("mousedown", (e) => this.mouseDown(e));
