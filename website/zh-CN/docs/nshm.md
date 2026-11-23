@@ -364,6 +364,14 @@ crate 翻译的是各 crate 在 `ios.infoPlist` 里设置的键，按它们的�
 
 在应用旁边开发时用 `nsh add --path ../my-gauge`，按目录当前内容使用。发布方式与普通 crate 相同（`cargo publish`），加上关键词 `nshm`，便于在 [crates.io](https://crates.io/keywords/nshm) 上找到；也可以推送到 Git 并给版本打标签。
 
+### Apple SDK
+
+封装 Apple SDK 的 nshm 在 `#[cfg(target_os = "ios")]` 或 `#[cfg(target_os = "macos")]` 下从 Rust 调用它。系统 framework
+无需更多设置（`objc2` 系列 crate 会链接它们）。厂商预编译的库由 nshm 自己的 `build.rs` 链接，其中的 `cargo:rustc-link-search`
+和 `cargo:rustc-link-lib` 会传到应用可执行文件的链接。第三方工具 [nsh-frameworks](https://github.com/SuperNSH/frameworks)
+根据 crate 的 `Cargo.toml` 里列出的 XCFramework 完成这一步，为每个目标取对应的库，并把其中的动态 framework 复制到
+`nsh package` 打出的包里并签名（`nsh-frameworks embed .nsh/out/<Name>.app`）。
+
 ### TSX nshm
 
 TSX nshm 是一个 Git 仓库，由其中的 `nsh.json` 描述：包名和版本、适用的 NSH 版本，以及导出的内容，即每个标识对应的 TSX 入口文件：

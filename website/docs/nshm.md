@@ -413,6 +413,15 @@ crates translating a key differently are settled by the app as above, in `ios.in
 
 Develop it beside an app with `nsh add --path ../my-gauge`, which reads the directory as it is. Publish it as any crate (`cargo publish`), with the keyword `nshm` so that it can be found on [crates.io](https://crates.io/keywords/nshm), or push it to Git and tag its versions.
 
+### Apple SDKs
+
+An nshm that wraps an Apple SDK calls it from Rust under `#[cfg(target_os = "ios")]` or `#[cfg(target_os = "macos")]`.
+System frameworks need nothing more (the `objc2` crates link them). A vendor's prebuilt library is linked from the
+nshm's own `build.rs`, whose `cargo:rustc-link-search` and `cargo:rustc-link-lib` reach the link of the app's
+executables. The third-party tool [nsh-frameworks](https://github.com/SuperNSH/frameworks) does this from a list of
+XCFrameworks in the crate's `Cargo.toml`, taking each target's library, and copies the dynamic ones into the package
+`nsh package` made and signs them (`nsh-frameworks embed .nsh/out/<Name>.app`).
+
 ### A TSX nshm
 
 A TSX nshm is a Git repository whose `nsh.json` describes it: its package name and version, the NSH versions it works with, and what it exports, each specifier with its TSX entry file:
