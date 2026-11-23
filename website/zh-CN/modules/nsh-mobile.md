@@ -377,8 +377,15 @@ function Note() {
 ```ts
 const BackHandler: {
   on(event: "press", listener: () => boolean | void): () => void;
+  on(event: "progress", listener: (event: BackProgressEvent) => void): () => void;
   exitApp(): void;
 };
+
+interface BackProgressEvent {
+  phase: "start" | "move" | "end" | "cancel";
+  progress: number;
+  edge?: "left" | "right";
+}
 ```
 
 系统返回键和返回手势。对话框先处理返回操作（关闭对话框）；然后运行 `BackHandler` 的监听器，最后添加的最先运行；都不处理时，最上层的导航栈出栈，没有可返回的页面时应用退出。
@@ -386,6 +393,7 @@ const BackHandler: {
 | 成员 | Rust | 说明 |
 |---|---|---|
 | `on("press", listener)` | `on_back_press(listener)` | `listener` 处理了这次返回时返回 `true`。返回一个停止监听的函数；在组件渲染（或 effect 运行）期间添加的监听器随之停止，Rust 与 TSX 都是如此。 |
+| `on("progress", listener)` | `on_back_progress(listener)` | 在 Android 14 及更高版本上跟随返回手势：对话框没有接管的手势，`listener` 收到它的每一步，`start`、`move`，然后是 `end`（紧接着是返回操作）或 `cancel`，带有从 0 到 1 的 `progress` 和滑动开始的边缘 `edge`。有监听器时，导航栈把手势交给应用，不再预览弹出。见[跟随返回手势](../docs/navigation.md#跟随返回手势)。 |
 | `exitApp()` | 监听器返回 `false` | 退出应用。Rust 监听器返回 `false` 时，返回操作继续传递，由导航栈返回或应用退出。 |
 
 ```rust tabs

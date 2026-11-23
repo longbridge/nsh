@@ -27939,6 +27939,89 @@ mod views {
         assert_eq!(texts(&c.commit().unwrap()), ["caught 1"]);
     }
 
+    /// Shows the back gesture's last step while its view lives.
+    #[derive(Default)]
+    struct Follower;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct FollowerProps {}
+
+    impl Component for Follower {
+        type Props = FollowerProps;
+        type Event = NoEvent;
+
+        fn view(_: FollowerProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let step = signal(String::from("none"));
+            on_back_progress(move |e: &BackProgressEvent| {
+                let edge = match e.edge {
+                    Some(PanEdge::Left) => "left",
+                    Some(PanEdge::Right) => "right",
+                    _ => "-",
+                };
+                step.set(format!("{} {} {edge}", e.phase.name(), e.progress.0));
+            });
+            view().child(text(move || step.get()))
+        }
+    }
+
+    fn back_step(phase: BackPhase, progress: f32, edge: Option<PanEdge>) -> EventPayload {
+        BackProgressEvent::new(phase, Percentage(progress), edge).payload()
+    }
+
+    #[test]
+    fn a_views_back_progress_listener_follows_the_back_gesture() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Follower>(|| FollowerProps {}));
+        let batch = c.commit().unwrap();
+        assert_eq!(texts(&batch), ["none"]);
+        // The root listens, so the platform hands the gesture to the app.
+        assert!(batch.items.iter().any(|i| matches!(
+            i,
+            MountItem::Events { id: ROOT_ID, events } if events.contains(EventKind::BackProgress)
+        )));
+        for (phase, progress, shown) in [
+            (BackPhase::Start, 0.0, "start 0 left"),
+            (BackPhase::Move, 0.25, "move 0.25 left"),
+            (BackPhase::Move, 0.5, "move 0.5 left"),
+            (BackPhase::End, 0.5, "end 0.5 left"),
+        ] {
+            let step = back_step(phase, progress, Some(PanEdge::Left));
+            // Without JS listening, the views took it.
+            assert!(c.component_event(ROOT_ID, EventKind::BackProgress, &step));
+            assert_eq!(texts(&c.commit().unwrap()), [shown]);
+        }
+        // A step outside a gesture (a move after its end) is dropped.
+        let late = back_step(BackPhase::Move, 0.75, Some(PanEdge::Left));
+        assert!(c.component_event(ROOT_ID, EventKind::BackProgress, &late));
+        assert!(c.commit().is_none_or(|b| texts(&b).is_empty()));
+        // A cancelled gesture from the right edge.
+        for (phase, progress, shown) in [
+            (BackPhase::Start, 0.0, "start 0 right"),
+            (BackPhase::Cancel, 0.0, "cancel 0 right"),
+        ] {
+            let step = back_step(phase, progress, Some(PanEdge::Right));
+            assert!(c.component_event(ROOT_ID, EventKind::BackProgress, &step));
+            assert_eq!(texts(&c.commit().unwrap()), [shown]);
+        }
+    }
+
+    #[test]
+    fn js_back_progress_listeners_hear_the_gesture_after_the_views() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Follower>(|| FollowerProps {}));
+        c.commit();
+        c.apply(Op::Listen {
+            id: ROOT_ID,
+            event: EventKind::BackProgress,
+            enabled: true,
+        })
+        .unwrap();
+        let start = back_step(BackPhase::Start, 0.0, None);
+        // The views heard it, then JS's listeners do.
+        assert!(!c.component_event(ROOT_ID, EventKind::BackProgress, &start));
+        assert_eq!(texts(&c.commit().unwrap()), ["start 0 -"]);
+    }
+
     thread_local! {
         /// What the quitter's listener did.
         static QUIT_LOG: std::cell::RefCell<Vec<&'static str>> = const { std::cell::RefCell::new(Vec::new()) };
@@ -34121,6 +34204,53 @@ fn touch_down(path: Vec<NodeId>) -> EventPayload {
         modifiers: Default::default(),
         activated: None,
     }))
+}
+
+#[test]
+fn a_back_gesture_an_overlay_takes_stays_the_overlays() {
+    use crate::{BackPhase, BackProgressEvent, PanEdge, geometry::Percentage};
+    let mut c = core();
+    add(&mut c, 2, Tag::View, ROOT_ID, &[]);
+    add(&mut c, 4, Tag::Overlay, 2, &[]);
+    apply(
+        &mut c,
+        vec![
+            overlay_prop(
+                4,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(2)),
+            ),
+            Op::Listen {
+                id: 4,
+                event: EventKind::Cancel,
+                enabled: true,
+            },
+            Op::Listen {
+                id: ROOT_ID,
+                event: EventKind::BackProgress,
+                enabled: true,
+            },
+        ],
+    );
+    c.commit();
+    let step =
+        |phase| BackProgressEvent::new(phase, Percentage(0.5), Some(PanEdge::Left)).payload();
+    // The overlay takes the press: JS's listeners hear none of the steps,
+    // even once the overlay stops listening during the gesture.
+    assert!(c.component_event(ROOT_ID, EventKind::BackProgress, &step(BackPhase::Start)));
+    apply(
+        &mut c,
+        vec![Op::Listen {
+            id: 4,
+            event: EventKind::Cancel,
+            enabled: false,
+        }],
+    );
+    c.commit();
+    assert!(c.component_event(ROOT_ID, EventKind::BackProgress, &step(BackPhase::Move)));
+    assert!(c.component_event(ROOT_ID, EventKind::BackProgress, &step(BackPhase::Cancel)));
+    // Without it, the next gesture is the app's.
+    assert!(!c.component_event(ROOT_ID, EventKind::BackProgress, &step(BackPhase::Start)));
+    assert!(!c.component_event(ROOT_ID, EventKind::BackProgress, &step(BackPhase::Move)));
 }
 
 #[test]

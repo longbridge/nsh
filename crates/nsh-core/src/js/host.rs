@@ -1099,7 +1099,7 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
     ),
 ];
 
-/// The events no element's props declare: the root's (`BackHandler`,
+/// The events no element's props declare: the root's (`BackHandler`'s,
 /// `nsh/keymap`, dialogs, `Image.getSize`, clipboard reads, menus, `nsh/host`'s replies and events, links), the runtime's own (touches, insets, native
 /// components' events) and those whose payload a module makes
 /// (`List`'s viewable items, with the app's items).
@@ -1109,6 +1109,7 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::NativeEvent,
     EventKind::Dialog,
     EventKind::BackPress,
+    EventKind::BackProgress,
     EventKind::ImageInfo,
     EventKind::WebEvaluation,
     EventKind::WebViewReply,
