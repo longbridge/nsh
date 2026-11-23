@@ -22,7 +22,7 @@ use std::{
 use crate::element::codes;
 
 /// What the app may read, as the system says (TS: `Location.authorization()`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, crate::element::PropEnum)]
 #[non_exhaustive]
 pub enum Authorization {
     /// The user has not been asked yet: a call asks.

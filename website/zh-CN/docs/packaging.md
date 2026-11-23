@@ -442,6 +442,12 @@ nsh package --target web --run
 （Rust 应用的引擎和 crate；TSX 应用则是运行时，旁边是应用的 ES 模块 `app.<digest>.js`）、资源和图标，每个文件都以其内容命名，托管方可以永久缓存它们。把目录部署到任意 Web 服务器或 CDN
 即可；`--run` 在 `http://127.0.0.1:4173/` 上提供服务，自行在浏览器中打开即可。缓存头和嵌入方式见 [Web](./web.md#发布应用)。
 
+## 定位
+
+声明了 `"location"` 的应用会得到 `NSLocationWhenInUseUsageDescription`（iOS 与 macOS）以及 Android 的 `ACCESS_COARSE_LOCATION` 与 `ACCESS_FINE_LOCATION`；声明 `"location": { "background": true }` 时还会得到 `NSLocationAlwaysAndWhenInUseUsageDescription`、`UIBackgroundModes: ["location"]`、`ACCESS_BACKGROUND_LOCATION`、`FOREGROUND_SERVICE`、`FOREGROUND_SERVICE_LOCATION`、`POST_NOTIFICATIONS` 与定位服务。应用自己的 `ios.infoPlist` 仍然决定该键的措辞。
+
+商店会要求应用自己说明的部分：App Store 审核要应用说明后台定位为用户提供什么，Play Console 要 `ACCESS_BACKGROUND_LOCATION` 的敏感权限声明才能上架。这两件 NSH 都没法替应用回答。
+
 ## Info.plist 键与 entitlements
 
 iOS 和 macOS 包的 `Info.plist` 由 NSH 写出，签名也由它完成。应用在 `nsh.json` 的 `ios` 和 `macos` 下添加自己的键（例如出口合规、

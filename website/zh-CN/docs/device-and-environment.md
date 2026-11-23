@@ -416,6 +416,39 @@ effect(() => {
 
 iOS 和 macOS 跟随系统的路径监视器（Network.framework），iOS 另外跟随 CoreTelephony 的蜂窝数据状态。Android 跟随默认网络（`ConnectivityManager`，需要 `ACCESS_NETWORK_STATE` 权限，`nsh package` 和 Android SDK 的 AAR 都会声明；没有这个权限时 kind 保持 `"unknown"`）。Web 读取 `navigator.onLine`，以及浏览器提供时的 `navigator.connection`（桌面浏览器不报告链路：在线时为 `"unknown"`）。Windows、Linux、GPUI 和终端报告 `"unknown"`。有路由不代表一定能连上：`online` 的链路上服务器仍可能不可达，应用仍要处理失败的请求。在测试中，`nsh/test` 的 `app.setNetworkState({ kind: "none" })` 让设备离线（[测试](./testing-and-trace.md#操作步骤)）。
 
+## 设备的位置
+
+`Location` 读取设备的位置，并说明应用能读到什么。它是一项能力，不声明就永远不给（[沙箱与能力](./sandbox-and-capabilities.md#location)）：
+
+```tsx tabs
+const stop = Location.watch({ accuracy: "high", distanceFilter: 10 }, ({ coords }) => {
+  centre.run(() => [coords.latitude, coords.longitude]);
+});
+cleanup(stop);
+
+const here = await Location.current({ timeout: 5000 });
+```
+
+```rust tabs
+let request = LocationRequest { accuracy: LocationAccuracy::High, ..Default::default() };
+let position = current_location(request).await?;
+let watch = watch_location(request, move |position| {
+    // 每次变化，在引擎线程上。
+});
+```
+
+- `available()`（Promise）说明平台到底能不能报告位置：嵌入它的应用提供的 provider，或系统自己的。
+- `authorization()`（Promise）是系统允许应用读到的范围：`"notDetermined"`、`"whenInUse"`、`"always"`、`"denied"` 或 `"restricted"`。只有能在应用不在前台时也报告位置的平台才会给出 `"always"`。
+- `requestAuthorization({ background })` 询问用户，并以答案 resolve。`background: true` 请求应用不在前台时的位置，需要 `"location": { "background": true }`。
+- `current({ accuracy, timeout })` resolve 一个位置：它的 `coords`（`latitude`、`longitude`、以米为单位的 `accuracy`，以及设备报告时的 `altitude`、`altitudeAccuracy`、`heading`、`speed`）和 `timestamp`。
+- `watch({ accuracy, distanceFilter, interval, background }, listener)` 每次变化都报告，并返回一个停止它的函数。同时只有一个 watch：第二个会停掉第一个。
+
+`current` 与 `watch` 在还没人问过用户时自己请求"使用期间"授权；它们不会请求更多。`accuracy` 取 `"best"`、`"high"`、`"balanced"`（默认）、`"low"` 或 `"passive"`，即 Android `LocationRequest` 的说法，各平台映射到自己的精度。
+
+**失败。** 能力未授予时 `ERR_ACCESS_DENIED`（`permission: "location"`）；用户拒绝时 `EACCES`；`current` 在超时内没有拿到位置时 `ETIMEDOUT`；没有平台报告位置时 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`；选项越界时 `RangeError`。
+
+**平台。** 今天 iOS 与 macOS 读取 CoreLocation，macOS 在应用位于窗口之后时仍然报告。iOS 只在应用运行时报告：后台更新（`allowsBackgroundLocationUpdates`）尚未实现，因此那里的 `watch` 进入后台就结束了。Android、Windows、Linux、web、GPUI 与终端目前都不报告：`available()` 为 false，两个调用都以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝。`nsh package` 会写入声明了 `location` 的应用所需的用途说明（`NSLocationWhenInUseUsageDescription`，声明 `background` 时还有 always 键与 `UIBackgroundModes`）和 Android 权限；商店还会要求应用自己说明后台定位的理由（[打包](./packaging.md#location)）。
+
 ## 安全区域
 
 刘海、Home 指示条、状态栏、Android 导航栏、Mac Catalyst 的标题栏以及窗口化 iPad 应用的窗口控件会遮挡 surface 的一部分。NSH 应用在所有平台上都是全屏绘制，被遮挡的部分以 inset 的形式提供。在 iPadOS 26 及更高版本上，窗口化应用的前缘 inset 与其顶部前缘角落的窗口控件一样宽，覆盖整条前缘；全屏和 iPhone 上就是普通的安全区。

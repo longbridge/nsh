@@ -34,11 +34,8 @@ impl Location {
     /// Resolves with what the app may read now, as the system says:
     /// `"notDetermined"`, `"whenInUse"`, `"always"`, `"denied"` or
     /// `"restricted"`.
-    pub(crate) fn authorization() -> Later<String> {
-        Later::new(async {
-            let authorization: Authorization = crate::prelude::location_authorization().await;
-            Ok::<_, JsError>(authorization.as_str().to_owned())
-        })
+    pub(crate) fn authorization() -> Later<Authorization> {
+        Later::new(async { Ok::<_, JsError>(crate::prelude::location_authorization().await) })
     }
 
     /// Asks the user for the app's location, resolving with what they
@@ -49,7 +46,7 @@ impl Location {
     pub(crate) fn request_authorization(
         options: Option<RequestAuthorizationOptions>,
         sys: System,
-    ) -> Result<Later<String>, JsError> {
+    ) -> Result<Later<Authorization>, JsError> {
         let background = options.unwrap_or_default().background.unwrap_or(false);
         if !sys.access.allows_location() {
             return Err(not_granted());
@@ -60,9 +57,7 @@ impl Location {
         Ok(Later::new(async move {
             let mut call = crate::prelude::request_location_authorization(background);
             match std::future::poll_fn(|cx| call.poll_next(cx)).await {
-                Some(LocationEvent::Authorized { authorization, .. }) => {
-                    Ok(authorization.as_str().to_owned())
-                }
+                Some(LocationEvent::Authorized { authorization, .. }) => Ok(authorization),
                 Some(LocationEvent::Failed { error, .. }) => Err(js_error(error)),
                 _ => Err(unavailable()),
             }

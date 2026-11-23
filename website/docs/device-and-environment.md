@@ -428,6 +428,39 @@ On iPhones sold in mainland China, the system asks the user whether the app may 
 
 iOS and macOS follow the system's path monitor (Network.framework) and, on iOS, CoreTelephony's cellular data state. Android follows the default network (`ConnectivityManager`, with the `ACCESS_NETWORK_STATE` permission that `nsh package` and the Android SDK's AAR declare; without it the kind stays `"unknown"`). The web reads `navigator.onLine` and, where the browser has it, `navigator.connection` (a desktop browser names no link: `"unknown"` while online). Windows, Linux, GPUI and terminals report `"unknown"`. A route is not a promise: a server may still be out of reach on a link that is `online`, so the app keeps handling failed requests. In tests, `app.setNetworkState({ kind: "none" })` of `nsh/test` takes the device offline ([Testing](./testing-and-trace.md#steps)).
 
+## The device's location
+
+`Location` reads where the device is and says what the app may read of it. It is a capability, and it is never granted without a declaration ([Sandbox and capabilities](./sandbox-and-capabilities.md#location)):
+
+```tsx tabs
+const stop = Location.watch({ accuracy: "high", distanceFilter: 10 }, ({ coords }) => {
+  centre.run(() => [coords.latitude, coords.longitude]);
+});
+cleanup(stop);
+
+const here = await Location.current({ timeout: 5000 });
+```
+
+```rust tabs
+let request = LocationRequest { accuracy: LocationAccuracy::High, ..Default::default() };
+let position = current_location(request).await?;
+let watch = watch_location(request, move |position| {
+    // Each change, on the engine thread.
+});
+```
+
+- `available()` (a promise) says whether the platform reports a position at all: the embedding app's own provider, or the system's.
+- `authorization()` (a promise) is what the system lets the app read: `"notDetermined"`, `"whenInUse"`, `"always"`, `"denied"` or `"restricted"`. `"always"` comes only from a platform that reports a position while the app is not in front.
+- `requestAuthorization({ background })` asks the user, and resolves with the answer. `background: true` asks for the position while the app is not in front, which needs `"location": { "background": true }`.
+- `current({ accuracy, timeout })` resolves with one position, its `coords` (`latitude`, `longitude`, `accuracy` in metres, and `altitude`, `altitudeAccuracy`, `heading`, `speed` where the device reports them) and its `timestamp`.
+- `watch({ accuracy, distanceFilter, interval, background }, listener)` reports each change and returns a function that stops it. One watch runs at a time: a second stops the first.
+
+`current` and `watch` ask for when-in-use authorization themselves when nobody has been asked; they never ask for more than that. `accuracy` is `"best"`, `"high"`, `"balanced"` (the default), `"low"` or `"passive"`, the words Android's `LocationRequest` uses, each platform mapping them onto its own.
+
+**Failures.** `ERR_ACCESS_DENIED` when the capability is not granted (`permission: "location"`); `EACCES` when the user refused; `ETIMEDOUT` when `current` found nothing within its timeout; `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where no platform reports a position; a `RangeError` for an option out of range.
+
+**Platforms.** iOS and macOS read CoreLocation today, and macOS keeps reporting with the app behind its windows. iOS reports while the app runs: background updates (`allowsBackgroundLocationUpdates`) are not implemented yet, so a `watch` there ends in the background. Android, Windows, Linux, the web, GPUI and terminals report nothing yet: `available()` is false and both calls refuse with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. `nsh package` writes the purpose strings an app declaring `location` needs (`NSLocationWhenInUseUsageDescription`, and with `background` the always-key and `UIBackgroundModes`) and the Android permissions; a store asks the app itself to justify background location ([Packaging](./packaging.md#location)).
+
 ## Safe areas
 
 Notches, the home indicator, the status bar, Android's navigation bar, the Mac Catalyst title bar and the window controls of an iPad app in a window cover parts of the surface. NSH apps draw edge to edge on every platform, and get the covered parts as insets. On iPadOS 26 and later, a windowed app's leading inset is as wide as the window controls in its top-leading corner, over the whole leading edge; in full screen and on iPhone it is the plain safe area.

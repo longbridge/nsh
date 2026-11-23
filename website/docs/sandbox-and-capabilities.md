@@ -297,6 +297,24 @@ device and reading its token, listening to deliveries and presses, deciding how 
 removing a thread's delivered ones. Registering and background deliveries never ask the user, and what the user
 allowed holds for the whole app, so this capability is what decides which code reaches them.
 
+### `location`
+
+`"location": true` lets the app read the device's location
+([`Location`](../modules/nsh.md#location), [The device's location](./device-and-environment.md#the-devices-location)).
+It is never granted without a declaration, also for an app with no `capabilities` block, as `webview.input` has it:
+the purpose string and the manifest permissions a platform needs are written for the apps that ask
+([Packaging](./packaging.md#location)).
+
+```json
+"capabilities": { "location": true }
+"capabilities": { "location": { "background": true } }
+```
+
+`{ "background": true }` adds the location while the app is not in front: iOS's always-key and
+`UIBackgroundModes: ["location"]`, Android's foreground service. The system asks the user on top of it, and a store
+asks the app to justify it. Without the declaration, `current` and `watch` refuse with `ERR_ACCESS_DENIED`
+(`permission: "location"`).
+
 ### `application`
 
 `"application": true` lets the app act on the application as a whole: on the desktop

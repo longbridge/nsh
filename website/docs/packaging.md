@@ -191,6 +191,69 @@ data through an app group, which both list in their entitlements. An app that st
 }
 ```
 
+### Location
+
+An app that declares `"location"` gets `NSLocationWhenInUseUsageDescription` (iOS and macOS) and Android's
+`ACCESS_COARSE_LOCATION` and `ACCESS_FINE_LOCATION`; with `"location": { "background": true }` it also gets
+`NSLocationAlwaysAndWhenInUseUsageDescription`, `UIBackgroundModes: ["location"]`, `ACCESS_BACKGROUND_LOCATION`,
+`FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_LOCATION`, `POST_NOTIFICATIONS` and the location service. The app's own
+`ios.infoPlist` still words the key.
+
+What the stores ask of the app itself: App Store review wants the reason background location serves the user, and Play
+Console wants a sensitive-permission declaration for `ACCESS_BACKGROUND_LOCATION` before the app ships. NSH cannot
+answer either for the app.
+
+## Frameworks and linker flags
+
+An iOS SDK comes as an XCFramework (`.xcframework`) or a framework (`.framework`), with a static or a dynamic library
+inside. The app's [Rust crate](./rust.md) calls it; `ios.frameworks` lists it, relative to `nsh.json`, and
+`ios.linkerFlags` adds what the SDK's instructions ask of the link, such as `-ObjC` and the system libraries and
+frameworks it uses. An nshm lists its own in its `Cargo.toml`
+([What the packaged app needs](./nshm.md#what-the-packaged-app-needs)), and the apps that use it list nothing:
+
+```json
+{
+  "ios": {
+    "frameworks": [
+      "ios/Vendor/Analytics.xcframework",
+      { "path": "ios/Vendor/Ads.xcframework", "forceLoad": true },
+      { "path": "ios/Vendor/Push.xcframework", "targets": ["ios", "ios-simulator"], "optional": true }
+    ],
+    "linkerFlags": ["-ObjC", "-lsqlite3", "-framework", "AdServices"]
+  }
+}
+```
+
+| Key | Meaning |
+|---|---|
+| `path` | The `.xcframework` or `.framework`. An entry that is a string is its path. |
+| `forceLoad` | Links all of a static library (`-force_load`), not only the parts the app's code calls, for SDKs whose instructions ask for it. |
+| `targets` | The targets it is linked for: `ios` (devices), `ios-simulator`, `catalyst` (Mac Catalyst), named as `nsh package --target` and `nsh run --target` name them. Default: all of them. |
+| `optional` | A build it is not there for leaves it out with a warning, rather than stopping. Default `false`. |
+
+- Every iOS executable built with the app's crates links them: packages, and `nsh run`'s development hosts for the
+  simulator and Mac Catalyst. Each build takes the XCFramework's library for its target (devices, the simulator,
+  Mac Catalyst); an XCFramework without one for the target stops the build with an error naming those it has.
+- An SDK without a library for a target lists the targets it has in `targets`; the other targets build without it, so
+  the crate calls it only where it is linked, such as under `#[cfg(not(target_abi = "macabi"))]` for an SDK without
+  Mac Catalyst. Two entries of one name serve different targets when their `targets` do not overlap.
+- An SDK that is not in the repository, which a script fetches before the builds that use it, is `optional`: a build
+  without it warns and links the rest. Once fetched, it is linked as any other. Only a missing path is optional: one
+  that is there without a library for the target is still an error. Code that refers to the SDK's symbols links only
+  in the builds that have it; code that looks its classes up by name at run time links in all of them.
+- An nshm links an SDK only with one of its features by listing it under `[package.metadata.nsh.features.<feature>]`
+  ([What the packaged app needs](./nshm.md#what-the-packaged-app-needs)).
+- A static library becomes part of the app's executable. A dynamic framework is copied into the app's `Frameworks/`
+  and signed before the app: ad hoc for the simulator, with the `--sign` identity for devices.
+- A dynamic framework keeps its privacy manifest in its own bundle, where App Store Connect reads it. A static
+  library's code is the app's, so iOS packages add what its privacy manifest declares to the app's
+  `PrivacyInfo.xcprivacy` ([Privacy manifest](#privacy-manifest)).
+- Each flag is one argument, passed as written after the libraries (`"-framework", "AdServices"` are two). Paths in
+  flags are not resolved against `nsh.json`: list a library in `frameworks` to link it.
+- The same crates also build for other platforms without the SDK: call it under `#[cfg(target_os = "ios")]`.
+- The frameworks are linked with the app's Rust code, so an app without crates (`rust` or an nshm) cannot list them:
+  `nsh package` stops with an error.
+
 ## Android
 
 ```sh

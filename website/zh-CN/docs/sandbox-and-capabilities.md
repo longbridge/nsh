@@ -260,6 +260,17 @@ blob（`blob:null/…`），都不允许。所有平台的检查方式相同。
 
 开启了 `nsh-extra` 的 [`Push`](./nshm.md#push) 的应用，也由它授予远程通知：注册设备并读取 token、监听投递和点按、决定通知在前台怎么显示、移除某个 thread 里已送达的通知。注册和后台投递从不询问用户，用户允许的权限又属于整个应用，所以由这项能力决定哪些代码能用到它们。
 
+### `location`
+
+`"location": true` 允许应用读取设备的位置（[`Location`](../modules/nsh.md#location)、[设备的位置](./device-and-environment.md#设备的位置)）。它不声明就永远不给，对没有 `capabilities` 块的应用也一样，与 `webview.input` 相同：平台需要的用途说明与清单权限只为声明了它的应用写入（[打包](./packaging.md#location)）。
+
+```json
+"capabilities": { "location": true }
+"capabilities": { "location": { "background": true } }
+```
+
+`{ "background": true }` 追加应用不在前台时的位置：iOS 的 always 键与 `UIBackgroundModes: ["location"]`、Android 的前台服务。系统还会在其上询问用户，商店也会要求应用自己说明理由。没有声明时，`current` 与 `watch` 以 `ERR_ACCESS_DENIED`（`permission: "location"`）拒绝。
+
 ### `application`
 
 `"application": true` 允许应用作用于整个应用：在桌面上（[`nsh/desktop`](../modules/nsh-desktop.md)）是应用菜单（`Menu.setApplicationMenu`）、托盘、全局快捷键、`Application.quit()`、`Application.setQuitMode()`、`Application.restart()` 和 `Application.setLaunchAtLogin()`，在 iOS 和 Android 上是系统设置中本应用的页面（`nsh/mobile` 的 [`AppSettings.open()`](../modules/nsh-mobile.md#appsettings)；嵌入的视图打开宿主应用的页面）。没有这项能力时它们什么也不做，`Application.launchAtLogin()` 和 `AppSettings.available()` 返回 `false`，`setLaunchAtLogin` 和 `AppSettings.open()` 以 `ERR_ACCESS_DENIED`（`permission` 为 `"application"`）拒绝。右键菜单（`Menu.popup`）显示在应用自己的视图中，应用打开的窗口由 [`windows`](#windows) 授权，两者都不需要这项能力。
