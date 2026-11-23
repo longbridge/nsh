@@ -154,6 +154,8 @@ fn main() {
                 download_redirect::run();
             } else if std::env::var_os("NSH_EMBEDDED_SCROLL_CHECK_ONLY").is_some() {
                 embedded_scroll::run();
+            } else if std::env::var_os("NSH_VIEW_SCALE_CHECK_ONLY").is_some() {
+                canvas_bounds::run_scale();
             } else if std::env::var_os("NSH_CANVAS_BOUNDS_CHECK_ONLY").is_some() {
                 canvas_bounds::run();
             } else if std::env::var_os("NSH_HOVER_CURSOR_CHECK_ONLY").is_some() {
@@ -173,6 +175,7 @@ fn main() {
                 #[cfg(feature = "shader")]
                 shader_content::run();
                 canvas_bounds::run();
+                canvas_bounds::run_scale();
                 menu_labels::run();
                 menu_lifetime::run();
                 window_frames::run();
