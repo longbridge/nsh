@@ -3,9 +3,11 @@
 //! events to the app and the app's calls and posts to it, as JSON values.
 //!
 //! The pieces every side shares live here: the names' rules, the limits,
-//! [`HostBridge`] (what the app's module reaches of the embedding app; the
-//! engine's `HostChannel` implements it) and [`HostInbox`] (the events kept
-//! until a listener is there). The engine (`nsh_engine::HostChannel`) owns
+//! [`HostCall`] / [`HostReply`] (what a handler of a name gets, the
+//! embedding app's or the app's own crates'), [`HostBridge`] (what the
+//! app's module reaches of the embedding app; the engine's `HostChannel`
+//! implements it) and [`HostInbox`] (the events kept until a listener is
+//! there). The engine (`nsh_engine::HostChannel`) owns
 //! the embedding app's side, `nsh-js` (`host_channel.rs`) the app's.
 
 use std::{collections::VecDeque, time::Duration};
@@ -247,6 +249,151 @@ pub enum HostRequest {
     },
 }
 
+/// A call (`host.call(name, data)`) or a post (`host.post(name, data)`) of
+/// the app, as a handler of its name gets it: the embedding app's
+/// (`nsh_engine::HostChannel::handle`) or the one an app's crate registers
+/// ([`crate::element::Registry::host_handler`]). A call is answered once,
+/// from any thread; dropped unanswered, it fails in the app.
+#[derive(Default)]
+#[non_exhaustive]
+pub struct HostCall {
+    name: String,
+    data: JsonValue,
+    reply: Option<HostReply>,
+}
+
+impl std::fmt::Debug for HostCall {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HostCall")
+            .field("name", &self.name)
+            .field("data", &self.data)
+            .field("post", &self.is_post())
+            .finish()
+    }
+}
+
+impl HostCall {
+    /// A call of `name` with `data` answered through `reply`, or a post
+    /// without one. The engine makes them, not part of the app's API.
+    #[doc(hidden)]
+    pub fn new(name: String, data: JsonValue, reply: Option<HostReply>) -> Self {
+        Self { name, data, reply }
+    }
+
+    /// Its name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Its data (`null` when the app sent none).
+    pub fn data(&self) -> &JsonValue {
+        &self.data
+    }
+
+    /// Takes its data, leaving `null`.
+    pub fn take_data(&mut self) -> JsonValue {
+        std::mem::take(&mut self.data)
+    }
+
+    /// Whether it is a post, whose answer goes nowhere.
+    pub fn is_post(&self) -> bool {
+        self.reply.is_none()
+    }
+
+    /// Answers the call: the app's promise resolves with `value`.
+    pub fn resolve(self, value: JsonValue) {
+        self.reply(Ok(value));
+    }
+
+    /// Fails the call: the app's promise rejects with an `Error` of
+    /// `message`.
+    pub fn reject(self, message: impl Into<String>) {
+        self.reply(Err(message.into()));
+    }
+
+    /// Answers the call with `result` ([`HostCall::resolve`],
+    /// [`HostCall::reject`]).
+    pub fn reply(mut self, result: Result<JsonValue, String>) {
+        if let Some(reply) = self.reply.take() {
+            reply.reply(result);
+        }
+    }
+
+    /// The reply alone, to answer from elsewhere (`None` for a post).
+    pub fn into_reply(mut self) -> Option<HostReply> {
+        self.reply.take()
+    }
+}
+
+/// Where a [`HostReply`]'s answer goes: the engine that made the call.
+type Answer = Box<dyn FnOnce(Result<JsonValue, String>) + Send + Sync>;
+
+/// How a call is answered (a [`HostCall`]'s): once, from any thread.
+/// Dropped unanswered, the call fails in the app.
+#[derive(Default)]
+#[non_exhaustive]
+pub struct HostReply {
+    name: String,
+    /// `None` once answered.
+    answer: Option<Answer>,
+}
+
+impl std::fmt::Debug for HostReply {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HostReply")
+            .field("name", &self.name)
+            .finish()
+    }
+}
+
+impl HostReply {
+    /// The reply to a call of `name`, whose answer goes to `answer` (also
+    /// when it is dropped unanswered). The engine makes them, not part of
+    /// the app's API.
+    #[doc(hidden)]
+    pub fn new(
+        name: String,
+        answer: impl FnOnce(Result<JsonValue, String>) + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            name,
+            answer: Some(Box::new(answer)),
+        }
+    }
+
+    /// The app's promise resolves with `value`.
+    pub fn resolve(self, value: JsonValue) {
+        self.reply(Ok(value));
+    }
+
+    /// The app's promise rejects with an `Error` of `message`.
+    pub fn reject(self, message: impl Into<String>) {
+        self.reply(Err(message.into()));
+    }
+
+    /// Answers with `result`. An app that stopped meanwhile drops it.
+    pub fn reply(mut self, result: Result<JsonValue, String>) {
+        if let Some(answer) = self.answer.take() {
+            answer(result);
+        }
+    }
+}
+
+impl Drop for HostReply {
+    fn drop(&mut self) {
+        if let Some(answer) = self.answer.take() {
+            answer(Err(format!(
+                "host.call(\"{}\"): its handler did not answer",
+                self.name
+            )));
+        }
+    }
+}
+
+/// A handler of the app's calls and posts of one name
+/// ([`crate::element::Registry::host_handler`]).
+pub(crate) type HostHandler = std::sync::Arc<dyn Fn(HostCall) + Send + Sync>;
+
 /// What an app's `nsh/host` reaches of the embedding app, on the engine
 /// thread: the launch parameters, and where its calls and posts go. The
 /// engine implements it over the embedding app's channel; the answer to a
@@ -272,6 +419,14 @@ pub trait HostBridge {
     /// Hands a post (`host.post(name, data)`) to the embedding app's
     /// handler of `name`; without one it is dropped.
     fn post(&self, name: &str, data: JsonValue);
+
+    /// Whether the app's own crates handle `name`
+    /// ([`crate::element::Registry::host_handler`]): its posts reach their
+    /// handler also where nothing embeds the app.
+    fn app_handles(&self, name: &str) -> bool {
+        let _ = name;
+        false
+    }
 
     /// The stand-ins for exports of native module `specifier`
     /// ([`ModuleFake`]), by export (`"save"`) or member of one

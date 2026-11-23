@@ -1373,7 +1373,10 @@ impl Drop for SpeechRecognition {
 /// is the embedding app (the native app around the view, whose handlers
 /// answer: `HostChannel::handle` in Rust, `handle` in Swift and Java), or
 /// on the web the page that runs the app (`createPlayer`'s `host`, the
-/// module nsh.json's `web.host` names). A call waits
+/// module nsh.json's `web.host` names); the app's own crates answer the
+/// names they handle where the embedding app does not
+/// ([`Registry::host_handler`](super::Registry::host_handler)), as in a
+/// packaged app, which nothing embeds. A call waits
 /// [`DEFAULT_CALL_TIMEOUT`](crate::host_channel::DEFAULT_CALL_TIMEOUT)
 /// ([`host_call_with`] says otherwise), on the app's clock. `name` must
 /// be granted by `capabilities.host` in nsh.json ([`HostError::Denied`]);
@@ -1431,8 +1434,8 @@ pub async fn host_call_with(
 
 /// Hands `args` to function `name` of the app's host, with no answer (TS:
 /// `host.post`): its handler of `name` gets it, as [`host_call`]'s calls.
-/// Where nothing embeds the app, or the host has no handler of `name`, the
-/// post goes nowhere; a name `capabilities.host` does not grant, or no
+/// Where nothing embeds the app and its crates do not handle `name`, or
+/// the host has no handler of `name`, the post goes nowhere; a name `capabilities.host` does not grant, or no
 /// valid one, is refused and logged.
 pub fn host_post(name: impl Into<String>, args: crate::JsonValue) {
     act(Action::HostPost {

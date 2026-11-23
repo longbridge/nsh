@@ -88,7 +88,7 @@ pub use crate::{
     host_channel::{HostCall, HostChannel, HostReply, OpenUrlRequest},
 };
 use crate::{
-    host_channel::HostRefusal,
+    host_channel::{AppHandlers, HostRefusal},
     script::{NetworkQueue, RequestId, Script},
 };
 
@@ -2234,10 +2234,9 @@ impl<M: TextEngine + 'static> LocalEngine<M> {
             .chain(ui_sets)
             .cloned()
             .collect();
-        self.driver
-            .state
-            .core
-            .extend_components(nsh_core::element::Registry::merged(&sets));
+        let merged = nsh_core::element::Registry::merged(&sets);
+        self.driver.state.app_handlers.set(&merged);
+        self.driver.state.core.extend_components(merged);
     }
 
     /// Hands one key transition of the focused view `id` to the engine now,
@@ -2413,8 +2412,11 @@ impl<M: TextEngine + 'static> Driver<M> {
         };
         #[cfg(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32")))]
         let system_tx = tx.clone();
+        // The UI sets' handlers of the host's names, filled once the sets
+        // are merged below.
+        let app_handlers = AppHandlers::default();
         #[cfg(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32")))]
-        let host_bridge = config.host.bridge(tx.clone());
+        let host_bridge = config.host.bridge(tx.clone(), app_handlers.clone());
         let host_tx = tx.clone();
         let text_engine = Rc::new(text_engine);
         let access = Arc::new(app_access(&config.app));
@@ -2439,7 +2441,9 @@ impl<M: TextEngine + 'static> Driver<M> {
             .chain(&config.ui_sets)
             .cloned()
             .collect();
-        core.set_components(nsh_core::element::Registry::merged(&sets));
+        let merged = nsh_core::element::Registry::merged(&sets);
+        app_handlers.set(&merged);
+        core.set_components(merged);
         // The JS calls Rust posts queue in one place, which the core
         // releases in order with the ops (a post during a synchronous call)
         // and the script runs.
@@ -2623,6 +2627,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             shaders_unavailable: false,
             app_locale: None,
             host: config.host.clone(),
+            app_handlers,
             url_opens: Vec::new(),
             host_requests: Vec::new(),
             net: Net {
@@ -3211,6 +3216,9 @@ struct State<M: TextEngine> {
     /// The embedding app's channel: its URL handler sees the app's URLs
     /// first.
     host: HostChannel,
+    /// The UI sets' handlers of the host's names, for those the channel
+    /// does not handle.
+    app_handlers: AppHandlers,
     /// URLs the app asked to open, taken from the core (a reused buffer).
     url_opens: Vec<(u32, String)>,
     /// The app's host calls and posts, taken from the core (a reused
@@ -3822,8 +3830,10 @@ impl<M: TextEngine> State<M> {
         platform
     }
 
-    /// Hands the app's host calls and posts to the embedding app's channel
-    /// where it is configured, else to the platform's host
+    /// Hands the app's host calls and posts to the handler of their name,
+    /// the embedding app's or else the UI sets', and the others to the
+    /// embedding app's channel where it is configured, else to the
+    /// platform's host
     /// ([`nsh_core::Core::host_request_on_platform`]), and the host's
     /// events kept for want of a listener to the components' listeners
     /// added since; true when the platform has a call or post (the core's
@@ -3832,7 +3842,10 @@ impl<M: TextEngine> State<M> {
         let mut more = self.core.release_host_events();
         self.core.take_host_requests(&mut self.host_requests);
         for request in self.host_requests.drain(..) {
-            match self.host.start_request(request, &self.net.tx) {
+            match self
+                .host
+                .start_request(request, &self.net.tx, &self.app_handlers)
+            {
                 Ok(()) => {}
                 Err(HostRefusal::NoHandler(id, error)) => self.core.answer_host(id, Err(error)),
                 Err(HostRefusal::Unconfigured(request)) => {

@@ -442,6 +442,8 @@ fn main() {
 - NSH does not embed dynamic frameworks; prefer the SDK's static build.
 - On Linux and Windows the same `build.rs` links the SDK (`.a` and `.so` on Linux, `.lib` on Windows). NSH does not carry shared libraries (`.so`, `.dll`) into the package either; prefer the SDK's static build.
 
+An app that reaches the SDK through `host` (`host.post("conversion.report", ...)`, answered by the page's `web.host` on the web) lets the nshm answer the same names in its packages: `registry.host_handler(name, handler)` in its `#[native_module]` function handles them where no embedding app does ([The app's own handlers](../modules/nsh.md#the-apps-own-handlers)).
+
 ### A TSX nshm
 
 A TSX nshm is a Git repository whose `nsh.json` describes it: its package name and version, the NSH versions it works with, and what it exports, each specifier with its TSX entry file:

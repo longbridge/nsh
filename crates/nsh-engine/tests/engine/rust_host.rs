@@ -1,6 +1,7 @@
 //! A Rust app's `host_call`, `host_post` and `on_host_event` (TS: `nsh`'s
 //! `host`): the embedding app's `HostChannel` answers them where it has
-//! handlers or sent events, the platform's host (the web page's) where it
+//! handlers or sent events, the app's own crates the names they handle
+//! (`Registry::host_handler`), the platform's host (the web page's) where it
 //! has one, and calls fail with `Unavailable` elsewhere. The same
 //! capability and errors as TSX's.
 
@@ -12,7 +13,8 @@ use std::{
 use crossbeam_channel::Receiver;
 use nsh_core::{
     ApproxTextEngine, Command, EventKind, EventPayload, JsonValue, MountBatch, MountItem, ROOT_ID,
-    element::Root, prelude::*,
+    element::{Registry, Root},
+    prelude::*,
 };
 use nsh_engine::{App, Engine, EngineConfig, Environment, HostChannel};
 use serde_json::json;
@@ -69,10 +71,22 @@ fn start(
     environment: Environment,
     host: &HostChannel,
 ) -> (Engine, Receiver<MountBatch>) {
+    start_with(root, environment, host, Vec::new())
+}
+
+/// [`start`] with the UI sets `ui_sets`, as a generated host passes the
+/// app's crates'.
+fn start_with(
+    root: Root,
+    environment: Environment,
+    host: &HostChannel,
+    ui_sets: Vec<Registry>,
+) -> (Engine, Receiver<MountBatch>) {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         environment,
         host: host.clone(),
+        ui_sets,
         ..EngineConfig::new(App::Rust(root))
     };
     (
@@ -344,4 +358,127 @@ fn a_call_answered_later_from_another_thread_settles() {
     let root = Root::of::<Slow>().capabilities_json(r#"{ "host": true }"#);
     let (_engine, rx) = start(root, Environment::default(), &host);
     wait_for(&rx, r#""later""#);
+}
+
+/// The app's crate as a packaged app links it: it handles `user.profile`
+/// (as `name`), fails `user.fail`, takes the `analytics` posts into
+/// `posts`, and handles `admin.wipe` and `admin.log`, which the app is not
+/// granted.
+fn app_set(name: &'static str, posts: Arc<Mutex<Vec<JsonValue>>>) -> Registry {
+    let mut set = Registry::ui_set("app/native");
+    set.host_handler("user.profile", move |call| {
+        let id = call.data()["id"].clone();
+        call.resolve(json!({ "id": id, "name": name }));
+    });
+    set.host_handler("user.fail", |call| call.reject("boom"));
+    let seen = posts.clone();
+    set.host_handler("analytics", move |call| {
+        assert!(call.is_post());
+        seen.lock().unwrap().push(call.data().clone());
+    });
+    set.host_handler("admin.wipe", |call| call.resolve(json!("wiped")));
+    set.host_handler("admin.log", move |call| {
+        posts.lock().unwrap().push(call.data().clone())
+    });
+    set
+}
+
+#[test]
+fn a_packaged_app_s_crates_handle_its_calls_and_posts() {
+    let posts = Arc::new(Mutex::new(Vec::new()));
+    // Nothing embeds it: no channel handlers, no platform host.
+    let (_engine, rx) = start_with(
+        root(),
+        Environment::default(),
+        &HostChannel::new(),
+        vec![app_set("Ada", posts.clone())],
+    );
+    let batches = wait_for(
+        &rx,
+        r#"{"id":7,"name":"Ada"} | ERR_NSH_HOST_ERROR | ERR_FEATURE_UNAVAILABLE_ON_PLATFORM | ERR_ACCESS_DENIED | TypeError"#,
+    );
+    // Granted names only: `admin.log` never reaches its handler.
+    assert_eq!(*posts.lock().unwrap(), vec![json!({ "event": "open" })]);
+    let sent = batches.iter().flat_map(|b| &b.items).any(|i| {
+        matches!(
+            i,
+            MountItem::Command {
+                command: Command::HostPost { .. } | Command::HostCall { .. },
+                ..
+            }
+        )
+    });
+    assert!(!sent);
+}
+
+#[test]
+fn the_embedding_app_s_handler_of_a_name_comes_before_the_app_s() {
+    let host = HostChannel::new();
+    host.handle("user.profile", |call| {
+        call.resolve(json!({ "id": 7, "name": "Embedder" }))
+    });
+    let posts = Arc::new(Mutex::new(Vec::new()));
+    let (_engine, rx) = start_with(
+        root(),
+        Environment::default(),
+        &host,
+        vec![app_set("Ada", posts.clone())],
+    );
+    // `user.fail` falls back to the app's handler; `user.missing`, which
+    // nobody handles, fails as the configured channel fails it.
+    wait_for(
+        &rx,
+        r#"{"id":7,"name":"Embedder"} | ERR_NSH_HOST_ERROR | ERR_NSH_HOST_ERROR | ERR_ACCESS_DENIED | TypeError"#,
+    );
+    assert_eq!(*posts.lock().unwrap(), vec![json!({ "event": "open" })]);
+}
+
+#[test]
+fn the_page_s_host_takes_the_names_the_app_does_not_handle() {
+    let environment = Environment {
+        host: true,
+        ..Environment::default()
+    };
+    let posts = Arc::new(Mutex::new(Vec::new()));
+    let (engine, rx) = start_with(
+        root(),
+        environment,
+        &HostChannel::new(),
+        vec![app_set("Ada", posts.clone())],
+    );
+    let control = engine.control();
+    let mut names = Vec::new();
+    let done = r#"{"id":7,"name":"Ada"} | ERR_NSH_HOST_ERROR | ERR_NSH_HOST_ERROR | ERR_ACCESS_DENIED | TypeError ; heard "#;
+    until(&rx, |batch| {
+        for item in &batch.items {
+            if let MountItem::Command {
+                id: ROOT_ID,
+                command: Command::HostCall { id, name, .. },
+            } = item
+            {
+                names.push(name.clone());
+                let reply =
+                    json!({ "type": "reply", "id": id, "ok": false, "error": "no such function" });
+                control.dispatch_event(ROOT_ID, EventKind::Host, EventPayload::Json(reply));
+            }
+        }
+        shows(batch, done)
+    });
+    assert_eq!(names, ["user.missing"]);
+    assert_eq!(*posts.lock().unwrap(), vec![json!({ "event": "open" })]);
+}
+
+#[test]
+#[should_panic(expected = "a host function's name is")]
+fn a_handler_of_no_valid_name_is_refused() {
+    Registry::ui_set("app/native").host_handler("user/../x", drop);
+}
+
+#[test]
+#[should_panic(expected = "two UI sets handle the host's `user.profile`")]
+fn two_sets_handling_one_name_are_refused() {
+    let posts = Arc::new(Mutex::new(Vec::new()));
+    let mut other = Registry::ui_set("other/native");
+    other.host_handler("user.profile", drop);
+    Registry::merged(&[app_set("Ada", posts), other]);
 }

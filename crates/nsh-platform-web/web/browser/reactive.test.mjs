@@ -818,6 +818,12 @@ test("host events preserve order, owner cleanup and platform calls", { skip: !pa
   assert.deepEqual(posts, [["note", { b: 2 }]]);
   // Without the page's host, posts go nowhere.
   createHost(invoke, api, dom, { host: () => false }, () => true, { post: () => assert.fail("posted without a host") }).host.post("note");
+  // A name the app's own crates handle takes its posts without the page's host.
+  const own = [];
+  const handles = (op, args) => (op === 433 ? args[0] === "app.note" : invoke(op, args));
+  const standalone = createHost(handles, api, dom, { host: () => false }, () => true, { post: (...args) => own.push(args) }).host;
+  standalone.post("app.note", { c: 3 }); standalone.post("note", { d: 4 });
+  assert.deepEqual(own, [["app.note", { c: 3 }]]);
   dispose(); channel.event("ready", 3); assert.deepEqual(heard, [1, 2]);
   const top = [];
   channel.host.on("top", value => top.push(value));

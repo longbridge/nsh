@@ -41,10 +41,21 @@ fn bundle(app: &str) -> Bundle {
 }
 
 fn start(bundle: Bundle, host: &HostChannel) -> (Engine, Receiver<MountBatch>) {
+    start_with(bundle, host, Vec::new())
+}
+
+/// [`start`] with the UI sets `ui_sets`, as a generated host passes the
+/// app's crates'.
+fn start_with(
+    bundle: Bundle,
+    host: &HostChannel,
+    ui_sets: Vec<nsh_core::element::Registry>,
+) -> (Engine, Receiver<MountBatch>) {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         viewport: Size::new(px(400.0), px(600.0)),
         host: host.clone(),
+        ui_sets,
         ..EngineConfig::new(bundle)
     };
     (
@@ -156,7 +167,7 @@ fn the_app_and_its_host_talk() {
             "echo 1",
             "fail true ERR_NSH_HOST_ERROR nope",
             "missing ERR_NSH_HOST_ERROR host.call(\"missing\"): the embedding app handles no \"missing\"",
-            "dropped ERR_NSH_HOST_ERROR host.call(\"dropped\"): the embedding app did not answer",
+            "dropped ERR_NSH_HOST_ERROR host.call(\"dropped\"): its handler did not answer",
             "later 42",
             "bad TypeError",
             "not a name TypeError",
@@ -186,6 +197,86 @@ const seen = signal<string[]>([]);
 host.on("open", (d: any) => seen.set([...seen(), d.id]));
 mount(() => <Text>{`opened ${seen().join(",")}`}</Text>);
 "#;
+
+const PACKAGED: &str = r#"import { mount, signal, Text } from "nsh";
+import { host } from "nsh";
+
+const log = signal<string[]>([]);
+const say = (s: string) => log.set([...log(), s]);
+
+say(`available ${host.available()}`);
+host.call("app.echo", { n: 1 }).then((v: any) => say(`echo ${v.got.n}`));
+host.call("app.missing").catch((e) => say(`missing ${e.code}`));
+host.post("app.track", { screen: "home" });
+host.post("app.other", { screen: "away" });
+
+mount(() => <Text>{log().join(" | ")}</Text>);
+"#;
+
+/// The app's crate as a packaged app links it: it answers `app.echo` and
+/// takes the `app.track` posts into `posts`.
+fn app_set(posts: crossbeam_channel::Sender<JsonValue>) -> nsh_core::element::Registry {
+    let mut set = nsh_core::element::Registry::ui_set("app/native");
+    set.host_handler("app.echo", |call| {
+        let data = call.data().clone();
+        call.resolve(json!({ "got": data }));
+    })
+    .host_handler("app.track", move |mut call| {
+        assert!(call.is_post());
+        let _ = posts.send(call.take_data());
+    });
+    set
+}
+
+#[test]
+fn a_packaged_app_s_crates_handle_its_calls_and_posts() {
+    let (posts_tx, posts) = crossbeam_channel::unbounded();
+    // Nothing embeds it: the app's own handlers answer, the rest has no
+    // host, and `available()` says so.
+    let (engine, rx) = start_with(
+        bundle(PACKAGED),
+        &HostChannel::new(),
+        vec![app_set(posts_tx)],
+    );
+    wait_for(
+        &rx,
+        &[
+            "available false",
+            "echo 1",
+            "missing ERR_FEATURE_UNAVAILABLE_ON_PLATFORM",
+        ],
+    );
+    assert_eq!(
+        posts.recv_timeout(Duration::from_secs(1)).unwrap(),
+        json!({ "screen": "home" })
+    );
+    assert!(posts.recv_timeout(Duration::from_millis(200)).is_err());
+    drop(engine);
+}
+
+#[test]
+fn the_app_s_handlers_take_the_names_the_embedding_app_does_not() {
+    let host = HostChannel::new();
+    let (embedder_tx, embedder) = crossbeam_channel::unbounded();
+    host.handle("app.other", move |mut call| {
+        let _ = embedder_tx.send(call.take_data());
+    });
+    let (posts_tx, posts) = crossbeam_channel::unbounded();
+    let (engine, rx) = start_with(bundle(PACKAGED), &host, vec![app_set(posts_tx)]);
+    wait_for(
+        &rx,
+        &["available true", "echo 1", "missing ERR_NSH_HOST_ERROR"],
+    );
+    assert_eq!(
+        posts.recv_timeout(Duration::from_secs(1)).unwrap(),
+        json!({ "screen": "home" })
+    );
+    assert_eq!(
+        embedder.recv_timeout(Duration::from_secs(1)).unwrap(),
+        json!({ "screen": "away" })
+    );
+    drop(engine);
+}
 
 #[test]
 fn events_wait_for_the_next_app() {

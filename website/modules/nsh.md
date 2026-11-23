@@ -3125,7 +3125,7 @@ mount(() => (
 
 ## host
 
-`host` reaches the app that embeds NSH: the native app around an `NshAppView` / `NshView`, or on the web the page that runs the player. The app calls the host's functions by name with JSON arguments and listens to the events the host sends. Rust code calls `host_call`, `host_call_with`, `host_post` and `on_host_event` of `nsh_core::prelude`; TSX imports `host` from `nsh`. Both reach the same host, with the same names, capability and error codes, so an app writes its calls once and each host answers them its own way.
+`host` reaches the app that embeds NSH: the native app around an `NshAppView` / `NshView`, or on the web the page that runs the player. A packaged app, which nothing embeds, answers names in its own Rust crates ([The app's own handlers](#the-apps-own-handlers)). The app calls the host's functions by name with JSON arguments and listens to the events the host sends. Rust code calls `host_call`, `host_call_with`, `host_post` and `on_host_event` of `nsh_core::prelude`; TSX imports `host` from `nsh`. Both reach the same host, with the same names, capability and error codes, so an app writes its calls once and each host answers them its own way.
 
 ```rust tabs
 use nsh_core::prelude::*; // host_call, host_call_with, host_post, on_host_event, HostCallOptions, HostError
@@ -3211,7 +3211,7 @@ spawn(async move {
 post(name: string, data?: unknown): void;
 ```
 
-Hands `data` to the host's function `name` without waiting for an answer: the host's handler of `name` gets it as it gets calls. Where nothing embeds the app, or the host has no handler of `name`, the post goes nowhere. Where there is a host, a name the app is not granted, or no valid name, throws (`ERR_ACCESS_DENIED`, a `TypeError`). Rust's `host_post(name, data)` returns nothing: it checks the name wherever the app runs, and a refused post is logged and dropped.
+Hands `data` to the host's function `name` without waiting for an answer: the host's handler of `name` gets it as it gets calls. Where nothing embeds the app and its own crates do not handle `name`, or the host has no handler of `name`, the post goes nowhere. Where there is a host, a name the app is not granted, or no valid name, throws (`ERR_ACCESS_DENIED`, a `TypeError`). Rust's `host_post(name, data)` returns nothing: it checks the name wherever the app runs, and a refused post is logged and dropped.
 
 ```rust tabs
 // use serde_json::json;
@@ -3267,6 +3267,40 @@ A published app names its host in `nsh.json`: `web.host` is a JS module in the a
 ```json
 { "web": { "host": "./host.js", "connect": ["api.example.com"] } }
 ```
+
+### The app's own handlers
+
+A packaged app (`nsh package`) runs in a host NSH generates, which embeds nothing, so no embedding app answers its calls. The app's own Rust crates answer them instead: an nshm, or a crate in the app's `ext/`, handles names with `registry.host_handler(name, handler)` in its `#[native_module]` function, and `nsh` links it into every host it builds. The app keeps one call site, `host.post("conversion.report", ...)` in TSX or `host_post` in Rust, and each platform answers it its own way: native code (an SDK) in the iOS, Android and desktop packages, the page's `web.host` on the web.
+
+```rust
+// ext/my-app-native/src/lib.rs
+use nsh_core::prelude::*;
+
+#[native_module("my-app-native")]
+fn native(registry: &mut Registry) {
+    // Only where the SDK is: elsewhere the name goes to the page's host,
+    // or nowhere.
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    registry.host_handler("conversion.report", |mut call| {
+        let event = call.take_data();
+        // On the engine thread: hand the event to the SDK and return.
+        sdk::report(event);
+        // A post has no answer; a call answers with `call.resolve(value)`
+        // or `call.reject(message)`, here or from any thread later.
+        call.resolve(nsh_core::JsonValue::Null);
+    });
+}
+```
+
+```json
+{ "capabilities": { "host": ["conversion.*"] } }
+```
+
+- `capabilities.host` grants the names as it grants the embedding app's: a name the app is not granted never reaches its handler.
+- The embedding app's handler comes first: where the app is embedded and the embedding app handles the name ([The embedding app's side](#the-embedding-apps-side)), its handler takes the name's calls and posts; the crate's handler takes them everywhere else. Names no crate handles go to the embedding app or the page as before.
+- The handler runs on the engine thread and must return quickly. Work that takes time, or has to run on the main thread (most SDKs' calls), moves the call there and answers it from there (`call.into_reply()` keeps the reply alone). A call dropped unanswered fails in the app.
+- `host.available()` still says whether something embeds the app: in a packaged app it is `false`, and the names the app's crates handle are answered all the same. A call of a name nothing handles there rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
+- A name is handled by one crate: two crates of an app that handle the same name stop the app when it starts.
 
 ### host.params
 

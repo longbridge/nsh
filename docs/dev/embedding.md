@@ -232,6 +232,13 @@
     else fails it as `Unavailable`. Answers come back to the core, and the channel's events reach the components'
     listeners as well as JS's; each language keeps the events of names it does not listen to yet until it does.
     JS's calls without a channel of their own take the same path.
+  - *The app's own handlers* (`Registry::host_handler`, `nsh_core::host_channel::HostCall` / `HostReply`, which
+    `nsh_engine` re-exports): an app's crates (an nshm, `ext/`) handle names in their `#[native_module]`, so a
+    packaged app, which nothing embeds, answers its own `host` calls natively. They travel with the UI sets the
+    generated hosts already pass, so no platform or generated host registers anything. The engine routes a name to
+    the embedding app's handler first, then to the sets' (on both the core's path and JS's channel), and only names
+    neither handles go on as before (`HostRefusal`, the platform's host). `host.available()` keeps meaning that
+    something embeds the app; a post where nothing does reaches a name the sets handle (`HostBridge::app_handles`).
   - *The URL handler* (`HostChannel::handle_open_url`; Swift `NshAppView.onOpenURL`, C
     `nsh_app_set_open_url_handler`; Java `NshView.setOpenUrlHandler`, `NshView.OpenUrlHandler`): the URLs the app
     opens (`openUrl` of `nsh`, `nsh_core::element::open_url`, a `TextView` with `links="open"`;

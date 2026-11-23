@@ -974,6 +974,9 @@ pub struct Registry {
     submodules: Arc<Vec<Registry>>,
     /// What each engine serving the set runs once ([`Registry::setup`]).
     setups: Arc<Vec<Setup>>,
+    /// The handlers of the app's host calls and posts, by name
+    /// ([`Registry::host_handler`]).
+    host_handlers: Arc<FxHashMap<String, crate::host_channel::HostHandler>>,
 }
 
 /// A function each engine serving a set runs once ([`Registry::setup`]).
@@ -1181,6 +1184,16 @@ impl Registry {
             out.tokens = out.tokens.or(set.tokens);
             out.scrollbars = out.scrollbars.or(set.scrollbars);
             Arc::make_mut(&mut out.setups).extend(set.setups.iter().cloned());
+            if !set.host_handlers.is_empty() {
+                let handlers = Arc::make_mut(&mut out.host_handlers);
+                for (name, handler) in set.host_handlers.iter() {
+                    if let Some(old) = handlers.insert(name.clone(), handler.clone())
+                        && !Arc::ptr_eq(&old, handler)
+                    {
+                        panic!("two UI sets handle the host's `{name}`: keep one handler");
+                    }
+                }
+            }
             let types = Arc::make_mut(&mut out.types);
             for (name, ty) in set.types.iter() {
                 if let Some(old) = types.insert(name, ty.clone()) {
@@ -1300,6 +1313,77 @@ impl Registry {
     pub fn setup(&mut self, f: impl Fn() + Send + Sync + 'static) -> &mut Self {
         Arc::make_mut(&mut self.setups).push(Arc::new(f));
         self
+    }
+
+    /// Handles the app's host calls (`host.call(name, data)` in TSX,
+    /// [`host_call`](super::host_call) in Rust) and posts (`host.post`,
+    /// [`host_post`](super::host_post)) of `name` in the apps that link
+    /// the set, where the embedding app has no handler of `name`: in a
+    /// packaged app, which nothing embeds, the app's crates are its host,
+    /// and a handler passes what the app sends to native code (an SDK).
+    /// The embedding app's handler of `name` comes first
+    /// (`HostChannel::handle`, `handle` in Swift and Java), and names no
+    /// set handles go to the embedding app or the page as before.
+    ///
+    /// `capabilities.host` still has to grant `name`. `handler` runs on
+    /// the engine thread and must return quickly: it answers a call with
+    /// [`HostCall::resolve`](crate::host_channel::HostCall::resolve) /
+    /// [`HostCall::reject`](crate::host_channel::HostCall::reject) at
+    /// once, or moves the call (or its reply) to where its answer comes
+    /// from, such as the main thread, and answers there. A post's answer
+    /// goes nowhere; a call dropped unanswered fails in the app. An app's
+    /// crate calls it from its `#[native_module]` function, under `cfg`
+    /// for the platforms whose native code it reaches.
+    ///
+    /// ```
+    /// use nsh_core::element::Registry;
+    ///
+    /// let mut registry = Registry::ui_set("my-app/native");
+    /// registry.host_handler("conversion.report", |mut call| {
+    ///     let event = call.take_data();
+    ///     // Hand `event` to the platform's SDK here.
+    ///     # let _ = event;
+    ///     call.resolve(serde_json::Value::Null);
+    /// });
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// When `name` is no valid host function name (1 to 128 of `A`–`Z`,
+    /// `a`–`z`, `0`–`9`, `_`, `.`, `:`, `-`, without `..`: the app could
+    /// not call it), or the set handles `name` already; two sets an app
+    /// links that handle the same name panic when the engine takes them.
+    #[track_caller]
+    pub fn host_handler(
+        &mut self,
+        name: impl Into<String>,
+        handler: impl Fn(crate::host_channel::HostCall) + Send + Sync + 'static,
+    ) -> &mut Self {
+        let name = name.into();
+        assert!(
+            crate::access::valid_host_name(&name),
+            "host handler `{name}`{}: a host function's name is {}",
+            of_set(self.ui_set.or(self.namespace)),
+            crate::access::HOST_NAME_CHARS,
+        );
+        let handlers = Arc::make_mut(&mut self.host_handlers);
+        assert!(
+            !handlers.contains_key(&name),
+            "the host's `{name}` is handled twice{}: keep one handler",
+            of_set(self.ui_set.or(self.namespace)),
+        );
+        handlers.insert(name, Arc::new(handler));
+        self
+    }
+
+    /// The set's handler of the host's `name` ([`Registry::host_handler`]):
+    /// the engine's, not part of the app's API.
+    #[doc(hidden)]
+    pub fn host_handler_of(
+        &self,
+        name: &str,
+    ) -> Option<Arc<dyn Fn(crate::host_channel::HostCall) + Send + Sync>> {
+        self.host_handlers.get(name).cloned()
     }
 
     /// Runs the functions [`Registry::setup`] gave the set (a merged set's:

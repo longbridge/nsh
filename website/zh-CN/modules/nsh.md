@@ -2960,7 +2960,7 @@ mount(() => (
 
 ## host
 
-`host` 连接嵌入 NSH 的应用：`NshAppView` / `NshView` 所在的原生应用，或在 Web 上运行播放器的页面。应用按名字调用宿主的函数（参数是 JSON），并监听宿主发来的事件。Rust 代码调用 `nsh_core::prelude` 的 `host_call`、`host_call_with`、`host_post` 和 `on_host_event`；TSX 从 `nsh` 导入 `host`。两者连到同一个宿主，名字、能力和错误码都相同，所以应用只写一份调用，由各个宿主各自应答。
+`host` 连接嵌入 NSH 的应用：`NshAppView` / `NshView` 所在的原生应用，或在 Web 上运行播放器的页面。没有被嵌入的打包应用由它自己的 Rust crate 应答（[应用自己的 handler](#应用自己的-handler)）。应用按名字调用宿主的函数（参数是 JSON），并监听宿主发来的事件。Rust 代码调用 `nsh_core::prelude` 的 `host_call`、`host_call_with`、`host_post` 和 `on_host_event`；TSX 从 `nsh` 导入 `host`。两者连到同一个宿主，名字、能力和错误码都相同，所以应用只写一份调用，由各个宿主各自应答。
 
 ```rust tabs
 use nsh_core::prelude::*; // host_call, host_call_with, host_post, on_host_event, HostCallOptions, HostError
@@ -3046,7 +3046,7 @@ spawn(async move {
 post(name: string, data?: unknown): void;
 ```
 
-把 `data` 交给宿主的函数 `name`，不等待应答：宿主处理 `name` 的 handler 像收到调用一样收到它。没有嵌入应用，或宿主没有处理 `name` 的 handler 时，投递被丢弃。有宿主时，未获授权的名字或不合法的名字会抛出（`ERR_ACCESS_DENIED`、`TypeError`）。Rust 的 `host_post(name, data)` 没有返回值：无论应用运行在哪里都会检查名字，被拒绝的投递会记录日志并丢弃。
+把 `data` 交给宿主的函数 `name`，不等待应答：宿主处理 `name` 的 handler 像收到调用一样收到它。没有嵌入应用且应用自己的 crate 也不处理 `name`，或宿主没有处理 `name` 的 handler 时，投递被丢弃。有宿主时，未获授权的名字或不合法的名字会抛出（`ERR_ACCESS_DENIED`、`TypeError`）。Rust 的 `host_post(name, data)` 没有返回值：无论应用运行在哪里都会检查名字，被拒绝的投递会记录日志并丢弃。
 
 ```rust tabs
 // use serde_json::json;
@@ -3102,6 +3102,39 @@ player.hostEvent("loginChanged", { signedIn: true });
 ```json
 { "web": { "host": "./host.js", "connect": ["api.example.com"] } }
 ```
+
+### 应用自己的 handler
+
+打包的应用（`nsh package`）运行在 NSH 生成的宿主里，没有嵌入方，也就没有嵌入应用来应答它的调用。这时由应用自己的 Rust crate 应答：nshm，或应用 `ext/` 里的 crate，在它的 `#[native_module]` 函数中用 `registry.host_handler(name, handler)` 处理这些名字，`nsh` 会把它链接进构建的每个宿主。应用只保留一处调用（TSX 的 `host.post("conversion.report", ...)` 或 Rust 的 `host_post`），各平台各自应答：iOS、Android 和桌面包里交给原生代码（如某个 SDK），Web 上交给页面的 `web.host`。
+
+```rust
+// ext/my-app-native/src/lib.rs
+use nsh_core::prelude::*;
+
+#[native_module("my-app-native")]
+fn native(registry: &mut Registry) {
+    // 只在有 SDK 的平台上注册：其他平台上这个名字交给页面的宿主，或被丢弃。
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    registry.host_handler("conversion.report", |mut call| {
+        let event = call.take_data();
+        // 在引擎线程上：把事件交给 SDK 后返回。
+        sdk::report(event);
+        // 投递没有应答；调用用 `call.resolve(value)` 或 `call.reject(message)`
+        // 应答，可以当场应答，也可以稍后在任意线程应答。
+        call.resolve(nsh_core::JsonValue::Null);
+    });
+}
+```
+
+```json
+{ "capabilities": { "host": ["conversion.*"] } }
+```
+
+- `capabilities.host` 像授权嵌入应用的名字一样授权这些名字：应用未获授权的名字到不了它的 handler。
+- 嵌入应用的 handler 优先：应用被嵌入、且嵌入应用处理这个名字时（[嵌入方的一侧](#嵌入方的一侧)），这个名字的调用和投递交给嵌入应用的 handler；其他情况都交给 crate 的 handler。没有 crate 处理的名字照旧交给嵌入应用或页面。
+- handler 在引擎线程上运行，必须很快返回。耗时的工作，或必须在主线程上做的工作（大多数 SDK 的调用），把调用移到那里再从那里应答（`call.into_reply()` 只留下应答）。没有应答就被丢掉的调用在应用里失败。
+- `host.available()` 仍然表示应用是否被嵌入：打包的应用里它是 `false`，但应用的 crate 处理的名字照样有应答。那里没有任何一方处理的名字，调用以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝。
+- 一个名字只由一个 crate 处理：应用的两个 crate 处理同一个名字时，应用启动时就会停下。
 
 ### host.params
 

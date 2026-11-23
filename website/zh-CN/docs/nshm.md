@@ -393,6 +393,8 @@ fn main() {
 - NSH 不嵌入动态 framework，优先使用 SDK 的静态版本。
 - 在 Linux 和 Windows 上，同样由 `build.rs` 链接 SDK（Linux 上是 `.a` 和 `.so`，Windows 上是 `.lib`）。NSH 同样不会把共享库（`.so`、`.dll`）放进包里；请优先使用 SDK 的静态版本。
 
+应用通过 `host` 使用 SDK 时（`host.post("conversion.report", ...)`，Web 上由页面的 `web.host` 应答），nshm 可以在打包的应用里应答同样的名字：在它的 `#[native_module]` 函数中用 `registry.host_handler(name, handler)` 处理没有嵌入应用处理的名字（[应用自己的 handler](../modules/nsh.md#应用自己的-handler)）。
+
 ### TSX nshm
 
 TSX nshm 是一个 Git 仓库，由其中的 `nsh.json` 描述：包名和版本、适用的 NSH 版本，以及导出的内容，即每个标识对应的 TSX 入口文件：

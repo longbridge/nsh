@@ -146,6 +146,18 @@ impl Runtime {
                     Value(params.0[0] as u32),
                 ])
             }
+            // Whether the app's own crates handle a name
+            // (`Registry::host_handler`): `host.js` hands them its posts also
+            // where the page gives no host.
+            433 => {
+                let name = args.index(0)?.as_string().unwrap_or_default();
+                let handles = self
+                    .host
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|host| host.app_handles(&name));
+                Ok(Value(if handles { 3 } else { 2 }))
+            }
             // The SDK channel's calls and posts (`host.js`): what fails is
             // thrown as `nsh-js`'s channel throws it, with its class and
             // `code` (`nsh_core::host_channel`'s errors).

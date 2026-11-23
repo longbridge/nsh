@@ -173,16 +173,21 @@ pub(crate) fn extend(cx: Ctx, host: Raw) -> Raw {
             .filter(JsonValue::is_object)
             .unwrap_or_else(|| JsonValue::Object(Default::default()));
         js::define(cx, obj.raw(), "params", from_json(cx, &params), true)?;
-        // Without an SDK channel, a post goes to the platform's host (the
-        // web page's), which checks it as it checks calls.
+        // Without an SDK channel, a post goes through the core to the app's
+        // own handler of its name or the platform's host (the web page's),
+        // which check it as they check calls; where neither is there it is
+        // dropped unchecked.
         let platform_post = js::get(cx, obj.raw(), "post")?;
         let post = closure(cx, vec![platform_post], |cx, captures, args| {
             let name = name_arg(cx, args.get(0), "host.post")?;
             let data = to_json(cx, args.get(1))?;
-            if let Some(bridge) = bridge(cx).filter(|b| b.available()) {
+            let bridge = bridge(cx);
+            if let Some(bridge) = bridge.as_ref().filter(|b| b.available()) {
                 check_call(cx, &name)?;
                 bridge.post(&name, data);
-            } else if crate::env::current(cx).host && js::is_function(cx, captures[0].raw()) {
+            } else if (crate::env::current(cx).host || bridge.is_some_and(|b| b.app_handles(&name)))
+                && js::is_function(cx, captures[0].raw())
+            {
                 js::call(
                     cx,
                     captures[0].raw(),
@@ -520,7 +525,8 @@ export interface Host {
    * a function that stops listening; a listener added while a component
    * renders stops with the component. */
   on<T = HostValue>(name: string, listener: (data: T) => void): () => void;
-  /** Calls the embedding app's handler of `name` with `data`: the promise
+  /** Calls the embedding app's handler of `name` with `data`, or where it
+   * has none the one the app's native modules register: the promise
    * resolves with its answer, or rejects with an `Error` with the message the
    * handler gave and `code` `"ERR_NSH_HOST_ERROR"`, also at once when the
    * embedding app handles no `name`. It rejects with `code`
@@ -532,9 +538,9 @@ export interface Host {
    * for answers already; with a `TypeError` for a wrong name and a
    * `RangeError` for a negative timeout. It never throws. */
   call<T = HostValue>(name: string, data?: unknown, options?: { timeout?: number }): Promise<T>;
-  /** Hands `data` to the embedding app's handler of `name`, without an
-   * answer; it is dropped when the embedding app handles no `name` or there
-   * is no embedding app. Throws a `TypeError` for a wrong name and an `Error`
+  /** Hands `data` to the embedding app's handler of `name`, or where it has
+   * none the one the app's native modules register, without an answer; it is
+   * dropped when nothing handles `name` or there is no host. Throws a `TypeError` for a wrong name and an `Error`
    * with `code` `"ERR_ACCESS_DENIED"` when `capabilities.host` does not
    * grant `name`. */
   post(name: string, data?: unknown): void;

@@ -117,7 +117,7 @@
 			post(name, data) {
 				nameOf(name);
 				if (initial[0]) invoke(432, [name, data]);
-				else if (environment.host()) platform.post(name, data);
+				else if (environment.host() || invoke(433, [name])) platform.post(name, data);
 			}
 		};
 		dom.rootProp("onHost", (value) => {

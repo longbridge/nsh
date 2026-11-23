@@ -19,8 +19,8 @@
 //! [`crate::host_channel`]'s functions. A post
 //! ([`crate::Command::HostPost`]) has no answer: a wrong or refused name
 //! throws at once, and without a host it is dropped (`nsh-js` and the
-//! browser's `host.js` call it only where the environment has one, and
-//! only without a native SDK channel). The host's events and
+//! browser's `host.js` call it only where the environment has one or the
+//! app's crates handle the name, and only without a native SDK channel). The host's events and
 //! `available()` are `nsh-js`'s (`platform_modules.rs`): its listeners are
 //! JS functions.
 

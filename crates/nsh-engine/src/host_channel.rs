@@ -12,6 +12,12 @@
 //! there. The SDKs' handlers (Swift, Java) run on the main thread: their
 //! glue hops there.
 //!
+//! The app's own crates handle names too
+//! ([`nsh_core::element::Registry::host_handler`]): an engine hands the
+//! calls and posts of a name its channel has no handler of to its UI
+//! sets' ([`AppHandlers`]), which is how a packaged app, embedded by
+//! nothing, reaches native code through `host`.
+//!
 //! The channel also carries the embedding app's URL handler
 //! ([`HostChannel::handle_open_url`]): the URLs the app opens (`openUrl` of
 //! `nsh/device`) reach it before the system, so a host routes them through
@@ -20,7 +26,9 @@
 //! capability, and no app's `host.call` name can reach it.
 
 use std::{
+    cell::RefCell,
     collections::HashMap,
+    rc::Rc,
     sync::{
         Arc, Mutex, MutexGuard,
         atomic::{AtomicU64, AtomicUsize, Ordering},
@@ -30,6 +38,7 @@ use std::{
 use crossbeam_channel::{Receiver, Sender};
 #[cfg(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32")))]
 use nsh_core::host_channel::HostBridge;
+pub use nsh_core::host_channel::{HostCall, HostReply};
 use nsh_core::{
     JsonValue,
     host_channel::{HostError, HostInbox, HostRequest, ModuleFake, check_name},
@@ -43,11 +52,52 @@ type Handler = Arc<dyn Fn(HostCall) + Send + Sync>;
 /// Runs `handler` with `call`; a handler that panics drops the call, which
 /// fails it in the app.
 fn run_handler(handler: &Handler, call: HostCall) {
-    let name = call.name.clone();
+    let name = call.name().to_owned();
     let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(call)));
     if ran.is_err() {
-        log::error!("nsh/host: the embedding app's handler of \"{name}\" panicked");
+        log::error!("nsh/host: the handler of \"{name}\" panicked");
     }
+}
+
+/// The handlers an engine's UI sets give the host's names
+/// ([`nsh_core::element::Registry::host_handler`], of the sets merged), on
+/// the engine thread: its core's requests and its JS bridge take them
+/// where the channel has no handler of the name.
+#[derive(Clone, Default)]
+pub(crate) struct AppHandlers(Rc<RefCell<nsh_core::element::Registry>>);
+
+impl AppHandlers {
+    /// Takes the handlers of `sets` (merged), in place of those it had.
+    pub(crate) fn set(&self, sets: &nsh_core::element::Registry) {
+        *self.0.borrow_mut() = sets.clone();
+    }
+
+    fn get(&self, name: &str) -> Option<Handler> {
+        self.0.borrow().host_handler_of(name)
+    }
+}
+
+/// The reply to call `id` of `name`, answered on the queue `tx` of the
+/// engine that made it (to its core when `to_core`, else to JS's channel)
+/// and counted in `calls` until then.
+fn reply_to(
+    id: u64,
+    name: String,
+    tx: Sender<Message>,
+    calls: Arc<CallCount>,
+    to_core: bool,
+) -> HostReply {
+    calls.in_flight.fetch_add(1, Ordering::SeqCst);
+    HostReply::new(name, move |result| {
+        let _ = tx.send(if to_core {
+            Message::CoreHostReply(id, result)
+        } else {
+            Message::HostReply(id, result)
+        });
+        // Counted once its answer is on the engine's queue.
+        calls.answered.fetch_add(1, Ordering::SeqCst);
+        calls.in_flight.fetch_sub(1, Ordering::SeqCst);
+    })
 }
 
 /// Why [`HostChannel::start_request`] did not hand a request to a handler.
@@ -281,68 +331,48 @@ impl HostChannel {
     }
 
     /// Hands a call or post of the core (the app's Rust, or JS's without
-    /// a channel of its own) to the handler of its name, answered back to
-    /// the core through `tx` (`Message::CoreHostReply`). Without handlers
-    /// or events the channel is not configured: the request comes back for
-    /// the platform's host. A configured channel without a handler of the
-    /// name fails the call at once and drops the post, as it does JS's.
+    /// a channel of its own) to the handler of its name, the channel's or
+    /// else the app's (`app`), answered back to the core through `tx`
+    /// (`Message::CoreHostReply`). Without a handler of the name the request
+    /// comes back for the platform's host while the channel is not
+    /// configured (no handlers or events); a configured channel fails the
+    /// call at once and drops the post, as it does JS's.
     pub(crate) fn start_request(
         &self,
         request: HostRequest,
         tx: &Sender<Message>,
+        app: &AppHandlers,
     ) -> Result<(), HostRefusal> {
+        let name = match &request {
+            HostRequest::Call { name, .. } | HostRequest::Post { name, .. } => name,
+            _ => return Err(HostRefusal::Unconfigured(request)),
+        };
         let (handler, configured) = {
             let inner = self.lock();
-            let name = match &request {
-                HostRequest::Call { name, .. } | HostRequest::Post { name, .. } => name,
-                _ => return Err(HostRefusal::Unconfigured(request)),
-            };
             (inner.handlers.get(name).cloned(), inner.configured)
         };
-        if !configured {
-            return Err(HostRefusal::Unconfigured(request));
-        }
-        match request {
-            HostRequest::Call { id, name, args } => {
-                let Some(handler) = handler else {
-                    return Err(HostRefusal::NoHandler(
-                        id,
-                        HostError::Failed(format!(
-                            "host.call(\"{name}\"): the embedding app handles no \"{name}\""
-                        )),
-                    ));
-                };
-                self.calls.in_flight.fetch_add(1, Ordering::SeqCst);
-                let reply = HostReply {
-                    id,
-                    name: name.clone(),
-                    tx: Some(tx.clone()),
-                    calls: Some(self.calls.clone()),
-                    to_core: true,
-                };
-                run_handler(
-                    &handler,
-                    HostCall {
-                        name,
-                        data: args,
-                        reply: Some(reply),
-                    },
-                );
+        let handler = handler.or_else(|| app.get(name));
+        match (request, handler) {
+            (HostRequest::Call { id, name, args }, Some(handler)) => {
+                let reply = reply_to(id, name.clone(), tx.clone(), self.calls.clone(), true);
+                run_handler(&handler, HostCall::new(name, args, Some(reply)));
             }
-            HostRequest::Post { name, args } => match handler {
-                Some(handler) => run_handler(
-                    &handler,
-                    HostCall {
-                        name,
-                        data: args,
-                        reply: None,
-                    },
-                ),
-                None => log::debug!(
-                    "nsh/host: the embedding app handles no \"{name}\"; the post was dropped"
-                ),
-            },
-            _ => {}
+            (HostRequest::Post { name, args }, Some(handler)) => {
+                run_handler(&handler, HostCall::new(name, args, None));
+            }
+            (request, None) if !configured => return Err(HostRefusal::Unconfigured(request)),
+            (HostRequest::Call { id, name, .. }, None) => {
+                return Err(HostRefusal::NoHandler(
+                    id,
+                    HostError::Failed(format!(
+                        "host.call(\"{name}\"): the embedding app handles no \"{name}\""
+                    )),
+                ));
+            }
+            (HostRequest::Post { name, .. }, None) => log::debug!(
+                "nsh/host: the embedding app handles no \"{name}\"; the post was dropped"
+            ),
+            (request, _) => return Err(HostRefusal::Unconfigured(request)),
         }
         Ok(())
     }
@@ -425,12 +455,13 @@ impl HostChannel {
     /// the engine whose queue is `tx`: its parameters and module stand-ins
     /// as they are now.
     #[cfg(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32")))]
-    pub(crate) fn bridge(&self, tx: Sender<Message>) -> EngineBridge {
+    pub(crate) fn bridge(&self, tx: Sender<Message>, app: AppHandlers) -> EngineBridge {
         let inner = self.lock();
         EngineBridge {
             params: JsonValue::Object(inner.params.clone()),
             module_fakes: inner.module_fakes.clone(),
             channel: self.clone(),
+            app,
             tx,
         }
     }
@@ -482,6 +513,8 @@ pub(crate) struct EngineBridge {
     // A copy, so making a module's exports takes no lock.
     module_fakes: Vec<(String, String, ModuleFake)>,
     channel: HostChannel,
+    /// The app's own handlers, for names the channel has none of.
+    app: AppHandlers,
     tx: Sender<Message>,
 }
 
@@ -490,20 +523,19 @@ impl EngineBridge {
     /// Runs `handler` with call `id` of `name`, answered back to this
     /// engine.
     fn start(&self, handler: &Handler, id: u64, name: &str, data: JsonValue) {
-        let calls = self.channel.calls.clone();
-        calls.in_flight.fetch_add(1, Ordering::SeqCst);
-        let call = HostCall {
-            name: name.to_owned(),
-            data,
-            reply: Some(HostReply {
-                id,
-                name: name.to_owned(),
-                tx: Some(self.tx.clone()),
-                calls: Some(calls),
-                to_core: false,
-            }),
-        };
-        run_handler(handler, call);
+        let reply = reply_to(
+            id,
+            name.to_owned(),
+            self.tx.clone(),
+            self.channel.calls.clone(),
+            false,
+        );
+        run_handler(handler, HostCall::new(name.to_owned(), data, Some(reply)));
+    }
+
+    /// The handler of `name`: the embedding app's, else the app's own.
+    fn handler(&self, name: &str) -> Option<Handler> {
+        self.channel.handler(name).or_else(|| self.app.get(name))
     }
 }
 
@@ -518,13 +550,17 @@ impl HostBridge for EngineBridge {
     }
 
     fn call(&self, id: u64, name: &str, data: JsonValue) -> Result<(), String> {
-        let Some(handler) = self.channel.handler(name) else {
+        let Some(handler) = self.handler(name) else {
             return Err(format!(
                 "host.call(\"{name}\"): the embedding app handles no \"{name}\""
             ));
         };
         self.start(&handler, id, name, data);
         Ok(())
+    }
+
+    fn app_handles(&self, name: &str) -> bool {
+        self.app.get(name).is_some()
     }
 
     fn module_fakes(&self, specifier: &str) -> Vec<(String, ModuleFake)> {
@@ -544,86 +580,12 @@ impl HostBridge for EngineBridge {
     }
 
     fn post(&self, name: &str, data: JsonValue) {
-        match self.channel.handler(name) {
-            Some(handler) => run_handler(
-                &handler,
-                HostCall {
-                    name: name.to_owned(),
-                    data,
-                    reply: None,
-                },
-            ),
+        match self.handler(name) {
+            Some(handler) => run_handler(&handler, HostCall::new(name.to_owned(), data, None)),
             None => log::debug!(
                 "nsh/host: the embedding app handles no \"{name}\"; the post was dropped"
             ),
         }
-    }
-}
-
-/// A call (`host.call(name, data)`) or a post (`host.post(name, data)`) of
-/// the app, as the embedding app's handler gets it. A call is answered once,
-/// from any thread; dropped unanswered, it fails in the app.
-#[derive(Default)]
-#[non_exhaustive]
-pub struct HostCall {
-    name: String,
-    data: JsonValue,
-    reply: Option<HostReply>,
-}
-
-impl std::fmt::Debug for HostCall {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("HostCall")
-            .field("name", &self.name)
-            .field("data", &self.data)
-            .field("post", &self.is_post())
-            .finish()
-    }
-}
-
-impl HostCall {
-    /// Its name.
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    /// Its data (`null` when the app sent none).
-    pub fn data(&self) -> &JsonValue {
-        &self.data
-    }
-
-    /// Takes its data, leaving `null`.
-    pub fn take_data(&mut self) -> JsonValue {
-        std::mem::take(&mut self.data)
-    }
-
-    /// Whether it is a post, whose answer goes nowhere.
-    pub fn is_post(&self) -> bool {
-        self.reply.is_none()
-    }
-
-    /// Answers the call: the app's promise resolves with `value`.
-    pub fn resolve(self, value: JsonValue) {
-        self.reply(Ok(value));
-    }
-
-    /// Fails the call: the app's promise rejects with an `Error` of
-    /// `message`.
-    pub fn reject(self, message: impl Into<String>) {
-        self.reply(Err(message.into()));
-    }
-
-    /// Answers the call with `result` ([`HostCall::resolve`],
-    /// [`HostCall::reject`]).
-    pub fn reply(mut self, result: Result<JsonValue, String>) {
-        if let Some(reply) = self.reply.take() {
-            reply.reply(result);
-        }
-    }
-
-    /// The reply alone, to answer from elsewhere (`None` for a post).
-    pub fn into_reply(mut self) -> Option<HostReply> {
-        self.reply.take()
     }
 }
 
@@ -694,80 +656,6 @@ impl Drop for OpenUrlRequest {
                 handled: false,
             });
         }
-    }
-}
-
-/// How a call is answered (a [`HostCall`]'s): once, from any thread.
-/// Dropped unanswered, the call fails in the app.
-#[derive(Default)]
-#[non_exhaustive]
-pub struct HostReply {
-    id: u64,
-    name: String,
-    /// The queue of the engine that made the call; `None` once answered.
-    tx: Option<Sender<Message>>,
-    /// Its channel's count of calls, until answered.
-    calls: Option<Arc<CallCount>>,
-    /// The core made the call (`Message::CoreHostReply`), not JS's channel
-    /// (`Message::HostReply`).
-    to_core: bool,
-}
-
-impl std::fmt::Debug for HostReply {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("HostReply")
-            .field("name", &self.name)
-            .finish()
-    }
-}
-
-impl HostReply {
-    /// The app's promise resolves with `value`.
-    pub fn resolve(self, value: JsonValue) {
-        self.reply(Ok(value));
-    }
-
-    /// The app's promise rejects with an `Error` of `message`.
-    pub fn reject(self, message: impl Into<String>) {
-        self.reply(Err(message.into()));
-    }
-
-    /// Answers with `result`. An app that stopped meanwhile drops it.
-    pub fn reply(mut self, result: Result<JsonValue, String>) {
-        self.send(result);
-        self.answered();
-    }
-
-    /// Puts `result` on the queue of the engine that made the call, once.
-    fn send(&mut self, result: Result<JsonValue, String>) {
-        if let Some(tx) = self.tx.take() {
-            let _ = tx.send(if self.to_core {
-                Message::CoreHostReply(self.id, result)
-            } else {
-                Message::HostReply(self.id, result)
-            });
-        }
-    }
-
-    /// Counts the call answered, once its answer is on the engine's queue.
-    fn answered(&mut self) {
-        if let Some(calls) = self.calls.take() {
-            calls.answered.fetch_add(1, Ordering::SeqCst);
-            calls.in_flight.fetch_sub(1, Ordering::SeqCst);
-        }
-    }
-}
-
-impl Drop for HostReply {
-    fn drop(&mut self) {
-        if self.tx.is_some() {
-            let message = format!(
-                "host.call(\"{}\"): the embedding app did not answer",
-                self.name
-            );
-            self.send(Err(message));
-        }
-        self.answered();
     }
 }
 
