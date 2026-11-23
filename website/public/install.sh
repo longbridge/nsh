@@ -56,9 +56,7 @@ step() {
         mb = $1 / 1048576
         if (total > 0) {
           pct = int($1 * 100 / total); if (pct > 100) pct = 100
-          filled = int(pct * 24 / 100); bar = ""
-          for (j = 0; j < 24; j++) bar = bar (j < filled ? "\033[36m━" : "\033[2m━")
-          printf "  %s\033[0m %3d%%  \033[2m%.1f / %.1f MB\033[0m", bar, pct, mb, total / 1048576
+          printf "  \033[2m%.1f / %.1f MB\033[0m  %d%%", mb, total / 1048576, pct
         } else {
           printf "  \033[2m%.1f MB\033[0m", mb
         }
