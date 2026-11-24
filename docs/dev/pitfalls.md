@@ -157,6 +157,12 @@ Things that were found the hard way. Read the section of the area you change bef
   callbacks. Visibility changes synchronize the newly visible stack after the batch. `TabBar.hidden` and the
   visible stack's request are independent reasons: each updates its own state, and either keeps the bar hidden.
 
+- **A `TabBar`'s element takes no press of its own** (`pointerEvents: box-none`, `mobile.rs`): the bar's view fills it
+  while the bar shows, and the bar takes every press. An element left `auto` answers UIKit's hit test in the strip it
+  keeps while the bar is out of sight (`hidden`, or a pushed page's `hidesBottomBarWhenPushed` moving it below the
+  bottom), and swallows the presses of a control the app draws there (a floating action bar); turning the bar's
+  `userInteractionEnabled` off in `apply_bottom_hidden` does not help, the element still hit-tests to itself (#3043).
+
 - **A standalone `UITabBar` can establish its natural height before its native component host is sized** (verified on
   the iOS 27 simulator). Flexible-height autoresizing then adds the host's height to that initial height. In
   `system_tab_bar.rs`, fill the immediate host's bounds exactly during layout, and report intrinsic height with
