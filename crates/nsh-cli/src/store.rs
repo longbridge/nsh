@@ -40,6 +40,34 @@ pub(crate) struct StoreConfig {
     /// App Store Connect settings.
     #[serde(default)]
     pub ios: IosStore,
+    /// Flathub and the AppStream metainfo of Linux packages.
+    #[serde(default)]
+    pub linux: LinuxStore,
+}
+
+/// `store.linux`. Flathub names the app by `nsh.json` `id`; the summary,
+/// description and keywords come from the listing (`subtitle`,
+/// `description`, `keywords`).
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LinuxStore {
+    /// The app's license as an SPDX expression (`MIT`, `Apache-2.0`).
+    pub license: Option<String>,
+    /// Who makes the app.
+    pub developer: Option<String>,
+    /// The app's web site (default: the listing's `marketingUrl`).
+    pub homepage: Option<String>,
+    /// Freedesktop categories (`["Development", "Utility"]`; default
+    /// `Utility`).
+    #[serde(default)]
+    pub categories: Vec<String>,
+    /// Screenshot image URLs (Flathub downloads them), the first being the
+    /// default one.
+    #[serde(default)]
+    pub screenshots: Vec<String>,
+    /// Where each release archive is downloaded from, with `{version}` for
+    /// `nsh.json` `version`, so `nsh publish linux` needs no `--url`.
+    pub archive_url: Option<String>,
 }
 
 /// One locale's listing. Every field is optional: a store leaves what is

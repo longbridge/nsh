@@ -15,6 +15,7 @@ mod dev;
 mod dev_port;
 mod entry;
 mod init;
+mod linux_store;
 mod logger;
 mod module_meta;
 mod native_features;
@@ -598,6 +599,8 @@ enum PublishStore {
     /// (default: internal testing), or promote a release between tracks,
     /// with a service account's JSON key.
     Android(play::PublishArgs),
+    /// Write or update the app's Flathub manifest for a release archive.
+    Linux(linux_store::Args),
 }
 
 /// The stores `nsh publish status` reports on.
@@ -609,6 +612,16 @@ enum StatusStore {
     Android {
         #[command(flatten)]
         app: play::AppArgs,
+        /// Print JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// The app's version on Flathub against `nsh.json`'s. Exits 1 when
+    /// they differ.
+    Linux {
+        /// The app's directory or entry.
+        #[arg(long, default_value = ".")]
+        entry: PathBuf,
         /// Print JSON.
         #[arg(long)]
         json: bool,
@@ -627,6 +640,12 @@ enum DoctorStore {
         /// The store directory (default: `store` in the app's directory).
         #[arg(long)]
         store: Option<PathBuf>,
+    },
+    /// Flathub: the app's metadata and the tools Linux packages need.
+    Linux {
+        /// The app's directory or entry.
+        #[arg(long, default_value = ".")]
+        entry: PathBuf,
     },
 }
 
@@ -680,8 +699,9 @@ struct PackageArgs {
     /// arm64-v8a and armeabi-v7a; with --run also the device's).
     #[arg(long, value_delimiter = ',', value_parser = crate::android::ABIS)]
     abi: Vec<String>,
-    /// Android: what to write, an APK (installed directly) or an Android
-    /// App Bundle (`aab`, uploaded to Google Play).
+    /// What to write: on Android an APK (installed directly) or an Android
+    /// App Bundle (`aab`, uploaded to Google Play); on Linux also an
+    /// AppImage (`appimage`) or a Flatpak (`flatpak`).
     #[arg(long, value_enum, default_value_t)]
     format: crate::android::Format,
     /// macOS: the processors the app runs on, `arm64` (Apple silicon),
@@ -833,6 +853,13 @@ fn run(mut command: Command) -> anyhow::Result<()> {
                 store: DoctorStore::Android { app, store },
             } => play::doctor(&app, store.as_deref()),
             PublishStore::Android(args) => play::publish(&args),
+            PublishStore::Linux(args) => linux_store::publish(&args),
+            PublishStore::Status {
+                store: StatusStore::Linux { entry, json },
+            } => linux_store::status(&entry, json),
+            PublishStore::Doctor {
+                store: DoctorStore::Linux { entry },
+            } => linux_store::doctor(&entry),
         };
     }
     // A package given to `nsh publish` has no app to resolve or build.
@@ -1458,6 +1485,9 @@ mod command_tests {
             }
         ));
         assert!(Cli::try_parse_from(["nsh", "publish", "doctor", "android"]).is_ok());
+        assert!(Cli::try_parse_from(["nsh", "publish", "status", "linux", "--json"]).is_ok());
+        assert!(Cli::try_parse_from(["nsh", "publish", "doctor", "linux"]).is_ok());
+        assert!(Cli::try_parse_from(["nsh", "publish", "linux", "a.tar.gz"]).is_ok());
         assert!(Cli::try_parse_from(["nsh", "publish", "."]).is_err());
         assert!(Cli::try_parse_from(["nsh", "publish", "android", "a.aab", "--key", "k"]).is_err());
     }

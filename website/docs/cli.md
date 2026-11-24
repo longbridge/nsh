@@ -224,7 +224,7 @@ Builds an installable app in release mode. A Rust app (`nsh.json` `"root"`) is p
 | `--keystore <FILE>` | Android: release keystore. Default: the debug key in `~/.android/debug.keystore` (created if missing). |
 | `--key-alias <ALIAS>` | Android: key alias in the keystore. |
 | `--keystore-password <PASSWORD>` | Android: keystore password. Also read from `NSH_KEYSTORE_PASSWORD`. |
-| `--format <FORMAT>` | Android: `apk` (default) or `aab`, an Android App Bundle for Google Play, signed with `jarsigner`. Not with `--run`. |
+| `--format <FORMAT>` | Android: `apk` (default) or `aab`, an Android App Bundle for Google Play, signed with `jarsigner`. Linux: `appimage` or `flatpak`, besides the directory and archive ([Linux](./linux.md#appimage-and-flatpak)). Not with `--run`. |
 | `--abi <ABI>` | Android: the ABIs of the APK (`arm64-v8a`, `armeabi-v7a`, `x86_64`), repeated or separated by commas. Default: `arm64-v8a` and `armeabi-v7a`, plus the device's with `--run`. |
 | `--arch <ARCH>` | macOS: the processors the app runs on, `arm64` (Apple silicon), `x86_64` (Intel) or `universal` (both, in one executable). Default: this Mac's. A runner for another processor needs its Rust target (`rustup target add x86_64-apple-darwin`). |
 | `--run` | Install and launch the app afterwards: in the simulator (`ios-simulator`) or on the connected Android device; `macos`, `linux` and `windows` launch it; `web` serves the site on this machine at the address it prints. |
@@ -427,6 +427,25 @@ nsh publish doctor android [--entry <DIR>] [--package <NAME>] [--credentials <KE
 Checks, without changing anything on Play, what `nsh publish android` needs: the service account key, the package
 name, the store directory, signing in, and access to the app (it opens an edit and deletes it). Exits with an error if
 a check fails.
+
+### nsh publish linux
+
+```sh
+nsh publish linux <ARCHIVE.tar.gz> [--url <URL>] [--entry <DIR>] [--out <DIR>]
+nsh publish status linux [--entry <DIR>] [--json]
+nsh publish doctor linux [--entry <DIR>]
+```
+
+Writes or updates the app's Flathub manifest (`<id>.yml`) for a release archive: its download URL and SHA-256. It opens
+no pull request; commit the manifest to `flathub/<id>` yourself ([Linux](./linux.md#publishing-to-flathub)). `status`
+prints the app's version on Flathub and exits 1 until it is `nsh.json`'s; `doctor` checks the metadata Flathub asks for
+(`id`, the store listing, `store.linux`, the icon), validates the metainfo and desktop entry, and finds `appimagetool` and `flatpak-builder`.
+
+| Flag | Description |
+|---|---|
+| `--url <URL>` | Where the archive is downloaded from (HTTPS): the release asset's URL. Default: `nsh.json` `store.linux.archiveUrl`, with `{version}` replaced. |
+| `--entry <DIR>` | The app's directory or entry. Default: `.`. |
+| `--out <DIR>` | The checkout of the app's Flathub repository to write `<id>.yml` into. Default: `.nsh/out/flathub/<id>`. |
 
 ### nsh verify
 
