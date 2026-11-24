@@ -1266,7 +1266,22 @@ impl<'p> ParseContext<'p> {
                 }
             }
             Target::Mark(ty) => {
-                if let Ok(mark) = ty.create(attrs) {
+                let merged_attrs = if ty.name() == "textStyle"
+                    && let Some(outer) = marks.iter().rev().find(|m| m.ty() == ty)
+                {
+                    let mut combined = outer.attrs().clone();
+                    if let Some(inner) = attrs {
+                        for (k, v) in inner {
+                            if !v.is_null() {
+                                combined.insert(k, v);
+                            }
+                        }
+                    }
+                    Some(combined)
+                } else {
+                    attrs
+                };
+                if let Ok(mark) = ty.create(merged_attrs) {
                     marks.push(mark);
                 }
             }

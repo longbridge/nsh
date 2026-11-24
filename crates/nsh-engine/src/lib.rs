@@ -829,6 +829,14 @@ pub trait MountSink: Send + 'static {
     /// show it in the frame the window takes the size, stops waiting here.
     fn resized(&self, _size: Size<Points>) {}
 
+    /// The engine laid root `id` out at `size`
+    /// ([`EngineControl::set_root_size`]: a window of the app's own, a
+    /// modal): called as [`MountSink::resized`] is, after the commit of the
+    /// turn that applied the size, once per turn and root, with its latest
+    /// size. A platform that waits for the layout of a window at its new
+    /// size stops waiting here.
+    fn root_resized(&self, _id: NodeId, _size: Size<Points>) {}
+
     /// The engine has handled the first `events` events sent with
     /// [`EngineControl::dispatch_event`]. Called after the commit of the
     /// turn that handled them (what they changed came before), once per
@@ -1741,8 +1749,9 @@ impl EngineControl {
         let _ = self.tx.send(Message::Displays(displays.into()));
     }
 
-    /// The platform presents root `id` (a modal) at `size`, with `insets`
-    /// of it covered by system UI.
+    /// The platform presents root `id` (a modal, a window of the app's
+    /// own) at `size`, with `insets` of it covered by system UI. Reported
+    /// back after its layout ([`MountSink::root_resized`]).
     pub fn set_root_size(&self, id: NodeId, size: Size<Points>, insets: EdgeInsets) {
         let _ = self.tx.send(Message::RootSize(id, size, insets));
     }
@@ -2628,6 +2637,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             key_path: Vec::new(),
             sets_seen: FxHashMap::default(),
             resized: None,
+            roots_resized: Vec::new(),
             resize_burst_ends: None,
             window_state: WindowStateReport {
                 shown: config.environment.window_state,
@@ -2778,6 +2788,9 @@ impl<M: TextEngine + 'static> Driver<M> {
         // layout at that size waits until something else wakes the engine.
         if let Some(size) = state.resized.take() {
             sink.resized(size);
+        }
+        for (id, size) in state.roots_resized.drain(..) {
+            sink.root_resized(id, size);
         }
         state.report_handled(&**sink);
         state.net.pump(script, &mut state.core);
@@ -3062,6 +3075,9 @@ impl<M: TextEngine + 'static> Driver<M> {
         if let Some(size) = state.resized.take() {
             sink.resized(size);
         }
+        for (id, size) in state.roots_resized.drain(..) {
+            sink.root_resized(id, size);
+        }
         state.report_handled(&**sink);
         state.net.pump(script, &mut state.core);
         state.load_chunks(script, &**sink);
@@ -3251,6 +3267,9 @@ struct State<M: TextEngine> {
     sets_seen: FxHashMap<(u8, NodeId, u32), usize>,
     /// The viewport size a resize set this turn ([`MountSink::resized`]).
     resized: Option<Size<Points>>,
+    /// The roots [`EngineControl::set_root_size`] sized this turn, each
+    /// with its latest size ([`MountSink::root_resized`]).
+    roots_resized: Vec<(NodeId, Size<Points>)>,
     /// A resize before this time continues a burst of them
     /// ([`RESIZE_BURST_GAP`]).
     resize_burst_ends: Option<Instant>,
@@ -4462,7 +4481,13 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
                 script.set_displays(&displays);
             }
         }
-        Message::RootSize(id, size, insets) => state.core.set_root_size(id, size, insets),
+        Message::RootSize(id, size, insets) => {
+            state.core.set_root_size(id, size, insets);
+            match state.roots_resized.iter_mut().find(|(i, _)| *i == id) {
+                Some((_, latest)) => *latest = size,
+                None => state.roots_resized.push((id, size)),
+            }
+        }
         Message::OverlayArea(area) => state.core.set_overlay_area(area),
         Message::PressBeyondRoot(page) => {
             let pressed = state.core.presses_beyond_root(page);

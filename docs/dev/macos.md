@@ -178,6 +178,11 @@ before each redirect and cancels one the grant does not allow, reporting it to t
   to their 32-point-tile-aligned bounds (`CanvasState::content_bounds`, translating the context by `-frame.origin`),
   and a canvas that paints nothing visible removes its content layer instead of allocating a backing store. Both
   surfaces follow the view's clipping, opacity, scale and visibility. Contents stay in the screen's format.
+- **Canvas text is laid out once** (`canvas/lines.rs`): a canvas keeps the `CTLine` of each text and font it
+  draws, and the fonts, as Windows and Linux keep their DirectWrite / Pango layouts. The line takes its color from
+  the context, so a fill or stroke in any color reuses it. A new drawing keeps only the lines the previous one drew,
+  at most 1024 per canvas; registering a font drops them all. Before, every paint made a font, an attributed string
+  and a line per text on the main thread, most of a text-heavy canvas's replay while a window resizes.
 - **No masks on what scrolls, where avoidable** (`visual.rs`): the window server pays for a mask on every frame its
   layer moves, so shadows and inset shadows avoid masks where their background allows.
 - **Out-of-sight content is not drawn** (`Mounter::draw_when_shown`): text and canvases whose content changes (a
@@ -204,9 +209,10 @@ before each redirect and cancels one the grant does not allow, reporting it to t
   scroll's frames are not delayed (`FRAME_BATCHES`), always in order; a resize applies the waiting ones first.
   Dispatched closures must be `Send`, so they find their surface by key in a thread-local map; no globals are shared
   between surfaces.
-- **Resizes are shown at once** (`Surface::resized`, the one place the main thread waits for the engine): when the
-  window resizes the root, the main thread waits for the layout at the new size (the engine reports it after its
-  commit: `MountSink::resized`), at most 16 ms, and applies it before AppKit draws the window. AppKit's animated
+- **Resizes are shown at once** (`Surface::await_layout`, the one place the main thread waits for the engine): when the
+  window resizes the root (`Surface::resized`) or a window of the app's own resizes its root (`window::resized`), the
+  main thread waits for the layout at the new size (the engine reports it after its commit: `MountSink::resized`,
+  `MountSink::root_resized` for a window's root), at most 16 ms, and applies it before AppKit draws the window. AppKit's animated
   resizes (zoom, the green button, a double click on the title bar) and live resizes take this path, so the window
   never grows around stale content. An engine that misses the deadline (JS busy) is not waited for again until it
   reports a resize done, so a busy app resizes as before.
