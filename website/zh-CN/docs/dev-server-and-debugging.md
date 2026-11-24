@@ -76,10 +76,11 @@ nsh dev App.tsx --server-only
 | 参数 | 说明 |
 |---|---|
 | `--port <port>` | 开发服务器端口。规则与 `nsh run` 相同；使用 `--server-only` 时默认 8790，并替换该端口上之前的 NSH 会话。 |
+| `--host <ipv4>` | 绑定的 IPv4 地址。`--server-only` 以及 `--target ios`、`android`、`web` 默认绑定 `0.0.0.0`，本机目标默认绑定 `127.0.0.1`。使用 `--target android` 时仅支持 `127.0.0.1` 和 `0.0.0.0`（`adb reverse` 转发到本机 `127.0.0.1`）。 |
 | `--release` | 提供 release 构建。 |
 
-`nsh dev --server-only` 监听这台电脑的所有地址，网络中的手机和其他电脑都可以连接。`nsh run` 和 `nsh dev` 在这台电脑上启动宿主
-（窗口、终端、Catalyst）时监听 `127.0.0.1`；使用 `--target ios`、`android` 或 `web` 时与 `--server-only` 一样监听所有地址。
+默认情况下，`nsh dev --server-only` 监听这台电脑的所有地址（`0.0.0.0`），网络中的手机和其他电脑都可以连接。`nsh run` 和 `nsh dev` 在这台电脑上启动宿主
+（窗口、终端、Catalyst）时默认监听 `127.0.0.1`；使用 `--target ios`、`android` 或 `web` 时与 `--server-only` 一样默认监听所有地址。传入 `--host <ipv4>` 可覆盖绑定地址，例如 `nsh dev App.tsx --server-only --host 127.0.0.1` 让 `--server-only` 仅监听本机回环地址。
 
 将宿主连接到打印出的 URL：
 

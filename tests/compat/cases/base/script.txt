@@ -746,6 +746,7 @@ expect Extended: text,custom
 expect CJK emphasis: strong,text
 expect CJK URL: https://example.com,text
 expect Math off: Math $x$
+expect Links off: a i
 expect From HTML: Hi there
 expect Text style: textStyle red
 expect Unknown tag: <US tech> up
