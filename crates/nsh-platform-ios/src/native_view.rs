@@ -71,12 +71,17 @@ define_class!(
     pub(crate) struct NshView;
 
     impl NshView {
-        /// Sets this class's ivars for subclasses (`TextView`) too.
+        /// Sets this class's ivars for subclasses (`TextView`, `CanvasView`) too.
         #[unsafe(method_id(initWithFrame:))]
         fn init_with_frame(this: objc2::rc::Allocated<Self>, frame: CGRect) -> Retained<Self> {
             let this = this.set_ivars(NshViewIvars::default());
             // SAFETY: UIView's designated initializer.
-            unsafe { msg_send![super(this), initWithFrame: frame] }
+            let view: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
+            // UIKit defaults `multipleTouchEnabled` to false and drops a second
+            // finger hitting the view before `TouchTracker` sees it, breaking
+            // multi-finger `onTouch` streams (e.g. pinch-to-zoom on a canvas).
+            view.setMultipleTouchEnabled(true);
+            view
         }
 
         #[unsafe(method_id(hitTest:withEvent:))]
