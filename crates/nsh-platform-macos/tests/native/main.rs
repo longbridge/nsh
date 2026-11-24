@@ -67,6 +67,8 @@ mod text_view_selection;
 #[cfg(target_os = "macos")]
 mod title_bar;
 #[cfg(target_os = "macos")]
+mod tray_owner;
+#[cfg(target_os = "macos")]
 mod window_alert;
 #[cfg(target_os = "macos")]
 mod window_dialog;
@@ -113,6 +115,9 @@ fn main() {
             } else if std::env::var_os("NSH_MENU_LIFETIME_CHECK_ONLY").is_some() {
                 window_press::run();
                 menu_lifetime::run();
+            } else if std::env::var_os("NSH_TRAY_OWNER_CHECK_ONLY").is_some() {
+                window_press::run();
+                tray_owner::run();
             } else if std::env::var_os("NSH_MOUNT_CHECK_ONLY").is_some() {
                 mount::run();
             } else if std::env::var_os("NSH_WINDOW_DIALOG_CHECK_ONLY").is_some() {
@@ -178,6 +183,7 @@ fn main() {
                 canvas_bounds::run_scale();
                 menu_labels::run();
                 menu_lifetime::run();
+                tray_owner::run();
                 window_frames::run();
                 window_layout::run();
                 keyboard::run();
