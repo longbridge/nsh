@@ -496,6 +496,12 @@ impl WebHost {
         // is unregistered when the host is dropped.
         let web = unsafe {
             let config: Retained<AnyObject> = msg_send![class(c"WKWebViewConfiguration"), new];
+            // A phone's WKWebViewConfiguration answers `false` here, and a
+            // page's `playsinline` does not help: the first frame of a video
+            // the page plays takes the screen. The iPad, the Mac and the
+            // other engines NSH embeds all play inline, so the iPhone does
+            // too; a page whose own control asks for the whole screen gets it.
+            let _: () = msg_send![&config, setAllowsInlineMediaPlayback: true];
             if p.incognito {
                 let store: Retained<AnyObject> =
                     msg_send![class(c"WKWebsiteDataStore"), nonPersistentDataStore];

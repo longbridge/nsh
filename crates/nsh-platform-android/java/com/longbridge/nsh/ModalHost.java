@@ -108,7 +108,21 @@ final class ModalHost {
         finishChange();
         closing = false;
         Context context = mounter.context;
-        dialog = new Dialog(context, android.R.style.Theme_DeviceDefault_Light_NoActionBar);
+        dialog = new Dialog(context, android.R.style.Theme_DeviceDefault_Light_NoActionBar) {
+            /**
+             * Android 13's dialog registers this as an {@code OnBackInvokedCallback}
+             * of the default priority as it shows, after (so above) the
+             * modal's own, and the window hands it every back press: key,
+             * button and gesture. From Android 14 it is the system fallback,
+             * under the modal's, and is not reached. Not cancelable, the
+             * dialog would drop the press: it goes back as the modal's does.
+             */
+            @Override
+            @SuppressWarnings("deprecation")
+            public void onBackPressed() {
+                backPressed();
+            }
+        };
         if (container.getParent() instanceof ViewGroup) ((ViewGroup) container.getParent()).removeView(container);
         dialog.setContentView(container);
         Window window = dialog.getWindow();
@@ -267,7 +281,8 @@ final class ModalHost {
      * The back key, as the dialog's window hands it to its key listener: the
      * dialog takes every Back event, and a press goes back on its release.
      * With an {@code OnBackInvokedCallback} in effect the window turns that
-     * release into the callback ({@link #backPressed}), and Android 15 QPR1
+     * release into the callback ({@link #backPressed}, through the dialog's
+     * own {@code onBackPressed} on Android 13), and Android 15 QPR1
      * to 16 still send the key-up after it, marked cancelled: only a key-up
      * whose down came here and that is not cancelled goes back, so one
      * press is reported once, as {@code NshView} does for the activity.

@@ -497,6 +497,58 @@ fn links_images_and_references() {
 }
 
 #[test]
+fn links_and_images_can_be_left_out() {
+    let source = "[a](https://a.com) [b][ref] ![i](i.png) [![linked](i.png)](https://x.y) <a href=\"https://h.dev\">**html**</a> <img src=\"x.png\" alt=\"Alt\">\n\n[ref]: https://ref.dev";
+    let parser = Parser::new().options(MarkdownOptions {
+        links: false,
+        images: false,
+        ..options()
+    });
+    // A link is its text, an image its `alt` text; what is around them
+    // stays as it is.
+    assert_eq!(
+        parser.markdown(source).blocks,
+        vec![p(vec![
+            t("a b i linked "),
+            strong(vec![t("html")]),
+            t(" Alt"),
+        ])]
+    );
+}
+
+#[test]
+fn images_off_keeps_their_links() {
+    let parser = Parser::new().options(MarkdownOptions {
+        images: false,
+        ..options()
+    });
+    assert_eq!(
+        parser.markdown("[![alt](i.png)](https://x.y)").blocks,
+        vec![p(vec![link("https://x.y", vec![t("alt")])])]
+    );
+    // A reference image too.
+    assert_eq!(
+        parser.markdown("![r][img]\n\n[img]: r.png").blocks,
+        vec![p(vec![t("r")])]
+    );
+}
+
+#[test]
+fn links_off_keeps_their_images() {
+    let parser = Parser::new().options(MarkdownOptions {
+        links: false,
+        ..options()
+    });
+    assert_eq!(
+        parser.markdown("[![alt](i.png)](https://x.y)").blocks,
+        vec![p(vec![Inline::Image(Image {
+            alt: "alt".into(),
+            ..Image::new("i.png")
+        })])]
+    );
+}
+
+#[test]
 fn entities_are_decoded() {
     assert_eq!(
         blocks("a &amp; b &copy; &#65;"),

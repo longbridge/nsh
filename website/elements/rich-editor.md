@@ -628,8 +628,9 @@ next cell; Shift with an arrow, or a drag across cells, selects a rectangle of c
 `"cell"`, whose `anchor` and `head` are the positions before its first and last cells). Backspace and Delete empty
 the selected cells, and delete the table when all its cells are selected.
 
-In the editor a table is a grid of its cells: each column as wide as its cells' `colwidth`, columns without one
-sharing the room (at least `cellMinWidth` wide), each row at least its `height`. Its look starts from the theme: a
+Columns fit the text and components in their cells. Long paragraphs wrap, and a table wider than the editor
+scrolls horizontally inside the document. A saved or dragged column width takes precedence. Each column is at
+least `cellMinWidth` wide and each row is at least its saved `height`. Its look starts from the theme: a
 1-point `border` grid, header cells on `muted`, padded cells, and each selected cell under the `selectedCell` part in
 the selection color. `classes.nodes` (`table`, `tableCell`, `tableHeader`) and the parts restyle
 all of it. Up and Down on a cell's first or last line go to the cell above or below.
