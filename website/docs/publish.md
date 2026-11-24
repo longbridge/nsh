@@ -34,7 +34,7 @@ NSH prepares the manifest, you open the pull request.
   (`flatpak install flathub org.gnome.Platform//49 org.gnome.Sdk//49`).
 - Optional, for `doctor`: `appstreamcli` and `desktop-file-validate` (packages `appstream` and `desktop-file-utils`).
 
-`nsh publish linux doctor` reports each of these.
+`nsh publish doctor linux` reports each of these.
 
 ### Configuration
 
@@ -45,14 +45,21 @@ NSH prepares the manifest, you open the pull request.
   "version": "1.2.0",
   "icon": "icon.png",
   "store": {
-    "summary": "Count things up and down",
-    "description": "A small counter.\n\nParagraphs are separated by blank lines.",
-    "homepage": "https://example.com",
-    "license": "MIT",
-    "developer": "Example",
-    "categories": ["Utility"],
-    "keywords": ["count", "tally"],
-    "screenshots": ["https://example.com/counter.png"]
+    "locales": {
+      "en-US": {
+        "subtitle": "Count things up and down",
+        "description": "A small counter.\n\nParagraphs are separated by blank lines.",
+        "keywords": "count,tally",
+        "marketingUrl": "https://example.com"
+      }
+    },
+    "linux": {
+      "license": "MIT",
+      "developer": "Example",
+      "categories": ["Utility"],
+      "screenshots": ["https://example.com/counter.png"],
+      "archiveUrl": "https://github.com/example/counter/releases/download/v{version}/Counter.tar.gz"
+    }
   },
   "linux": {
     "flatpak": {
@@ -69,18 +76,21 @@ NSH prepares the manifest, you open the pull request.
 | `id` | The desktop entry, metainfo and manifest file names (`<id>.desktop`, `<id>.metainfo.xml`, `<id>.yml`) and `StartupWMClass` |
 | `version` | The metainfo release, and what `status` compares with Flathub |
 | `icon` | `<id>.png` at 256×256 |
-| `store.summary` | The one-line summary. Flathub: at most 35 characters, no trailing period |
-| `store.description` | The long description; blank lines separate paragraphs |
-| `store.homepage` | The metainfo `homepage` link |
-| `store.license` | `project_license`, an SPDX expression |
-| `store.developer` | The developer name shown in software centres |
-| `store.categories` | freedesktop categories for the desktop entry and metainfo. Default `Utility` |
-| `store.keywords` | Search keywords |
-| `store.screenshots` | Image URLs; the first is the default screenshot. Flathub requires at least one |
+| `store.locales.en-US.subtitle` | The one-line AppStream summary. Flathub: at most 35 characters, no trailing period |
+| `store.locales.en-US.description` | The long description; blank lines separate paragraphs |
+| `store.locales.en-US.keywords` | Search keywords, comma separated (a list works too) |
+| `store.locales.en-US.marketingUrl` | The metainfo `homepage` link, unless `store.linux.homepage` is set |
+| `store.linux.license` | `project_license`, an SPDX expression |
+| `store.linux.developer` | The developer name shown in software centres |
+| `store.linux.categories` | freedesktop categories for the desktop entry and metainfo. Default `Utility` |
+| `store.linux.screenshots` | Image URLs; the first is the default screenshot. Flathub requires at least one |
+| `store.linux.archiveUrl` | Where each release archive is downloaded from; `{version}` is `nsh.json` `version` |
 | `linux.flatpak.runtimeVersion` | The GNOME runtime version. Default: the one NSH is tested with |
 | `linux.flatpak.finishArgs` | Replaces the sandbox permissions. Default: Wayland with X11 fallback, IPC, the GPU and the network |
 
-`store` is shared by every store `nsh publish` targets; fill it once.
+`store` is shared by every store `nsh publish` targets; fill it once ([Store listing](./packaging.md#store-listing)).
+The listing texts come from the `en-US` locale (else the first one), and may also be files in `store/en-US/`
+(`subtitle.txt`, `description.txt`, `keywords.txt`). Flathub names the app by `id`.
 
 ### AppImage
 
@@ -119,17 +129,16 @@ URL and SHA-256; Flathub builds and publishes every change merged there.
 
 #### First release
 
-1. `nsh publish linux doctor` until it passes.
+1. `nsh publish doctor linux` until it passes.
 2. `nsh package --target linux` and upload `.nsh/out/<Name>.tar.gz` to a release with a stable URL, such as a GitHub
    release asset.
 3. Write the manifest:
 
    ```sh
-   nsh publish linux .nsh/out/Counter.tar.gz \
-     --url https://github.com/example/counter/releases/download/v1.2.0/Counter.tar.gz
+   nsh publish linux .nsh/out/Counter.tar.gz
    ```
 
-   This writes `.nsh/out/flathub/<id>/<id>.yml`.
+   The archive's URL is `store.linux.archiveUrl` with the version filled in (or `--url`). This writes `.nsh/out/flathub/<id>/<id>.yml`.
 4. Submit it as described in [Flathub's submission guide](https://docs.flathub.org/docs/for-app-authors/submission): a
    pull request to `flathub/flathub` with the manifest. Flathub reviews it and creates `flathub/<id>`.
 
@@ -138,9 +147,7 @@ URL and SHA-256; Flathub builds and publishes every change merged there.
 Bump `version`, package, upload the new archive, then point `--out` at your checkout of `flathub/<id>`:
 
 ```sh
-nsh publish linux .nsh/out/Counter.tar.gz \
-  --url https://github.com/example/counter/releases/download/v1.3.0/Counter.tar.gz \
-  --out ../flathub-io.github.example.Counter
+nsh publish linux .nsh/out/Counter.tar.gz --out ../flathub-io.github.example.Counter
 ```
 
 When the manifest exists, only the archive source marked `# nsh: release archive` is updated (`url` and `sha256`); the
@@ -150,7 +157,7 @@ pull requests for you.
 #### Status
 
 ```sh
-nsh publish linux status [--json]
+nsh publish status linux [--json]
 ```
 
 Prints the version Flathub lists for the app and exits 1 until it equals `nsh.json`'s `version`, so CI can wait on a
@@ -159,10 +166,10 @@ release going live. An app not on Flathub yet is reported as such.
 #### Doctor
 
 ```sh
-nsh publish linux doctor
+nsh publish doctor linux
 ```
 
-Checks the `id`, the `store` fields Flathub requires (summary length, license, screenshots), that the icon is square (warning when it is under 256×256), validates
+Checks the `id`, the store fields Flathub requires (summary length, license, screenshots), that the icon is square (warning when it is under 256×256), validates
 the generated metainfo with `appstreamcli` and the desktop entry with `desktop-file-validate` when installed, and finds
 `appimagetool` and `flatpak-builder`. It exits non-zero while something Flathub requires is missing.
 
@@ -170,14 +177,14 @@ the generated metainfo with `appstreamcli` and the desktop entry with `desktop-f
 
 ```sh
 nsh package --target linux [--format appimage|flatpak]
-nsh publish linux <ARCHIVE.tar.gz> --url <URL> [--entry <DIR>] [--out <DIR>]
-nsh publish linux status [--entry <DIR>] [--json]
-nsh publish linux doctor [--entry <DIR>]
+nsh publish linux <ARCHIVE.tar.gz> [--url <URL>] [--entry <DIR>] [--out <DIR>]
+nsh publish status linux [--entry <DIR>] [--json]
+nsh publish doctor linux [--entry <DIR>]
 ```
 
 | Flag | Description |
 |---|---|
-| `--url <URL>` | Where the archive is downloaded from (HTTPS) |
+| `--url <URL>` | Where the archive is downloaded from (HTTPS). Default: `store.linux.archiveUrl` |
 | `--entry <DIR>` | The app's directory or entry. Default `.` |
 | `--out <DIR>` | Where to write `<id>.yml`. Default `.nsh/out/flathub/<id>` |
 | `--json` | `status` only: machine-readable output |
@@ -190,9 +197,10 @@ nsh publish linux doctor [--entry <DIR>]
 | AppImage fails with `fuse: failed to open /dev/fuse` | Set `APPIMAGE_EXTRACT_AND_RUN=1`, or install `libfuse2` |
 | AppImage starts but no window appears | GTK 4 or WebKitGTK 6.0 is missing on that system; use the Flatpak, which brings them |
 | `--format flatpak` writes only the manifest | `flatpak-builder` is not installed; install it, or let Flathub build the manifest |
-| `doctor`: summary too long | Flathub allows 35 characters; shorten `store.summary` |
-| `doctor`: no screenshots | Add at least one URL to `store.screenshots` |
+| `doctor`: summary too long | Flathub allows 35 characters; shorten the `en-US` listing's `subtitle` |
+| `doctor`: no screenshots | Add at least one URL to `store.linux.screenshots` |
 | Flathub build fails on architecture | The archive is built for this machine's processor (`only-arches`); build and add an archive per architecture |
+| `nsh publish linux` asks for `--url` | Set `store.linux.archiveUrl` |
 | `status` says not on Flathub | The first submission isn't merged yet, or the `id` differs from the Flathub repository name |
 
 ### What is not covered
