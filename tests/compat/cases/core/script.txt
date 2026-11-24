@@ -84,7 +84,7 @@ drawing id:canvas rect 120 10 60 40
 nodrawing id:canvas clearRect...
 expect Not checked
 tap id:check
-expect size 200x100 canvas 200x100 drawn true context true gradient true in true out false added true current true stroke true dash 3,1 measured true
+expect size 200x100 canvas 200x100 drawn true context true gradient true in true out false added true current true stroke true dash 3,1 measured true extent true
 covers [nsh] Canvas
 covers [nsh] CanvasGradient
 covers [nsh] CanvasRenderingContext2D

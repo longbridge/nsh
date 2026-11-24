@@ -2,8 +2,8 @@ import { type Bounds, type JSX, computed, effect, type InputRef, mount, Scroll, 
 import { Animated, createAnimatedValue, Easing } from "nsh";
 import { fpsEnabled, platform, setFpsEnabled, windowSize } from "nsh";
 import process from "process";
-import { Window, Application, isAvailable as desktopWindows, Menu as AppMenu, titleBar } from "nsh/desktop";
-import { AlertDialog, Input, Menu, MenuItem, NavPage, NavStack, Scrollbar } from "nsh/base";
+import { Window, Application, isAvailable as desktopWindows, Menu as AppMenu } from "nsh/desktop";
+import { AlertDialog, Input, Menu, MenuItem, NavPage, NavStack, Scrollbar, TitleBar as WindowTitleBar } from "nsh/base";
 import { keymap } from "nsh";
 import { Storage } from "nsh";
 import { Icon, LucideIcon, type LucideIconName } from "./icons";
@@ -350,7 +350,7 @@ function SidebarRow(props: { demo: DemoEntry; focused: boolean; onLayout: (bound
         onLayout={({ bounds }) => props.onLayout(bounds)}
         role="button"
         accessibilityLabel={props.demo.name}
-        accessibilityState={{ selected: active() }}
+        accessibilityState={{ selected: active(), current: active() ? "page" : undefined }}
         style={{ height: TERMINAL_ROW, flexDirection: "row", alignItems: "center", paddingHorizontal: TERMINAL_COLUMN }}
       >
         <Text style={{ numberOfLines: 1, flex: 1, fontSize: 14, fontWeight: active() ? "600" : "400", color: colors.text }}>
@@ -366,7 +366,7 @@ function SidebarRow(props: { demo: DemoEntry; focused: boolean; onLayout: (bound
       onLayout={({ bounds }) => props.onLayout(bounds)}
       role="button"
       accessibilityLabel={props.demo.name}
-      accessibilityState={{ selected: active() }}
+      accessibilityState={{ selected: active(), current: active() ? "page" : undefined }}
       hoverStyle={active() ? undefined : hovered()}
       style={{
         height: 28,
@@ -595,20 +595,21 @@ function Sidebar() {
           borderEndColor: colors.sidebarBorder,
         }}
       >
-        <View
-          desktop={{ windowDrag: true }}
-          style={
-            terminal
-              ? { height: TERMINAL_ROW, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", paddingHorizontal: TERMINAL_COLUMN, marginBottom: TERMINAL_ROW }
-              : { height: 44, flexDirection: "row", alignItems: "center", paddingStart: (rtl() ? 0 : titleBar().left) + 16, paddingEnd: 10 }
-          }
-        >
-          {/* The mark at the sidebar's top start, past the window's controls (at the left, so right to left the sidebar is clear of them). */}
-          {!terminal && <Logo size={22} />}
-          {!terminal && <Text style={{ marginStart: 8, fontSize: 15, fontWeight: "600", color: colors.text, letterSpacing: -0.2 }}>NSH</Text>}
-          <View style={{ flex: 1 }} />
-          <SidebarToggle />
-        </View>
+        {/* The sidebar's part of the window's title bar: it steps aside of the window's controls only where it meets them (at the left, so right to left the sidebar is clear of them). */}
+        <WindowTitleBar>
+          <View
+            style={
+              terminal
+                ? { flex: 1, height: TERMINAL_ROW, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", paddingHorizontal: TERMINAL_COLUMN, marginBottom: TERMINAL_ROW }
+                : { flex: 1, height: 44, flexDirection: "row", alignItems: "center", paddingStart: 16, paddingEnd: 10 }
+            }
+          >
+            {!terminal && <Logo size={22} />}
+            {!terminal && <Text style={{ marginStart: 8, fontSize: 15, fontWeight: "600", color: colors.text, letterSpacing: -0.2 }}>NSH</Text>}
+            <View style={{ flex: 1 }} />
+            <SidebarToggle />
+          </View>
+        </WindowTitleBar>
         <Search />
         <DemoList />
         <View
@@ -729,23 +730,13 @@ function DemoPane() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <View style={terminal ? { height: 2 * TERMINAL_ROW, borderBottomWidth: 1, borderBottomColor: colors.line } : undefined}>
+        {/* The content pane's part of the window's title bar: clear of the window's controls only while it meets them (the sidebar hidden, or right to left). */}
+        <WindowTitleBar style={terminal ? undefined : { borderBottomWidth: 1, borderBottomColor: colors.line }}>
         <View
-          desktop={{ windowDrag: true }}
           style={
             terminal
-              ? { height: TERMINAL_ROW, flexDirection: "row", alignItems: "center", gap: TERMINAL_COLUMN, paddingHorizontal: TERMINAL_COLUMN }
-              : {
-                  height: 44,
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 6,
-                  // Clear of the window's controls, at the left: the start
-                  // while the sidebar is hidden, the end right to left.
-                  paddingStart: sidebarOpen() ? 32 : (rtl() ? 0 : titleBar().left) + 12,
-                  paddingEnd: rtl() ? titleBar().left + 12 : 16,
-                  borderBottomWidth: 1,
-                  borderBottomColor: colors.line,
-                }
+              ? { flex: 1, height: TERMINAL_ROW, flexDirection: "row", alignItems: "center", gap: TERMINAL_COLUMN, paddingHorizontal: TERMINAL_COLUMN }
+              : { flex: 1, height: 43, flexDirection: "row", alignItems: "center", gap: 6, paddingStart: sidebarOpen() ? 32 : 12, paddingEnd: 16 }
           }
         >
           <If when={!sidebarOpen()}>
@@ -759,6 +750,7 @@ function DemoPane() {
           </If>
           <Text style={{ numberOfLines: 1, flex: 1, fontSize: 13, fontWeight: "600", color: colors.text }}>{selected().name}</Text>
         </View>
+        </WindowTitleBar>
       </View>
       <View style={{ flex: 1 }}>
         {(() => {
@@ -784,7 +776,7 @@ function Desktop() {
   wasDesktop.set(true);
   effect(() => shownDemo.set(selected()));
   keymap.bind("mod+b", toggleSidebar);
-  return (
+  const panes = (
     <View style={{ flex: 1, flexDirection: "row", backgroundColor: colors.background, direction: demoDirection() }}>
       <Sidebar />
       <NavStack state={nav} style={{ flex: 1 }}>
@@ -800,6 +792,39 @@ function Desktop() {
           return <Page />;
         }}
       </NavStack>
+    </View>
+  );
+  if (!terminal) return panes;
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      {panes}
+      <KeyHelp />
+    </View>
+  );
+}
+
+/** The keys a terminal's gallery answers, as a TUI's help line has them. */
+const KEY_HELP: [string, string][] = [
+  ["tab", "next"],
+  ["enter", "press"],
+  ["ctrl+k", "search"],
+  ["ctrl+b", "sidebar"],
+  ["ctrl+c", "quit"],
+];
+
+/**
+ * The terminal's help line under the panes, as Bubbles' `help` draws it: each
+ * key muted, what it does fainter, ` • ` between them, a column in from the edge.
+ */
+function KeyHelp() {
+  return (
+    <View style={{ flexDirection: "row", height: TERMINAL_ROW, paddingHorizontal: TERMINAL_COLUMN, overflow: "hidden" }}>
+      {KEY_HELP.map(([key, does], i) => (
+        <Text style={{ numberOfLines: 1, color: colors.faint }}>
+          {i > 0 ? " • " : ""}
+          <Text style={{ color: colors.muted }}>{key}</Text> {does}
+        </Text>
+      ))}
     </View>
   );
 }

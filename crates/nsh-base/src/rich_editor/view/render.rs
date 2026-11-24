@@ -140,6 +140,7 @@ fn content(rv: Rv) -> impl IntoElement {
     let (down, tap, mov, up, end) = (rv.clone(), rv.clone(), rv.clone(), rv.clone(), rv.clone());
     let (long, lift, armed, sweep) = (rv.clone(), rv.clone(), rv.clone(), rv.clone());
     let over = rv.clone();
+    let hovered = rv.hovered_table_cell;
     let dropped = rv.clone();
     let claim = rv.clone();
     let placed = rv.clone();
@@ -182,6 +183,12 @@ fn content(rv: Rv) -> impl IntoElement {
     .on(EventKind::MouseMove, move |p: &EventPayload| {
         if let EventPayload::Mouse(e) = p {
             over.note_pointer(e.position, e.page_position);
+            over.clear_table_hover_outside(e.position);
+        }
+    })
+    .on_mouse_leave(move |_: &MouseEvent| {
+        if hovered.get_untracked().is_some() {
+            hovered.set(None);
         }
     })
     .on(EventKind::Press, move |p: &EventPayload| {
@@ -380,7 +387,12 @@ struct Window {
 fn doc_window(rv: &Rv, items: &[BlockItem]) -> Window {
     let n = items.len();
     if n <= WINDOWED_BLOCKS {
-        return Window { start: 0, end: n, above: 0.0, below: 0.0 };
+        return Window {
+            start: 0,
+            end: n,
+            above: 0.0,
+            below: 0.0,
+        };
     }
     let geo = rv.geo.borrow();
     let frame = |i: usize| {
@@ -406,7 +418,11 @@ fn doc_window(rv: &Rv, items: &[BlockItem]) -> Window {
         }
     }
     let average = if count > 0 { sum / count as f32 } else { 24.0 };
-    let gap = if gap_count > 0 { gaps / gap_count as f32 } else { 0.0 };
+    let gap = if gap_count > 0 {
+        gaps / gap_count as f32
+    } else {
+        0.0
+    };
     let pitch = |i: usize| frame(i).map_or(average, |b| b.size.height.0) + gap;
     let viewport = rv.viewport.get().height.0;
     let viewport = if viewport > 0.0 { viewport } else { 1000.0 };
@@ -448,7 +464,12 @@ fn doc_window(rv: &Rv, items: &[BlockItem]) -> Window {
     let end = end.min(n);
     let above = (0..start).map(pitch).sum();
     let below = (end..n).map(pitch).sum();
-    Window { start, end, above, below }
+    Window {
+        start,
+        end,
+        above,
+        below,
+    }
 }
 
 /// The document's blocks: every one, or, in a long document, those near
@@ -460,7 +481,11 @@ fn doc_blocks(rv: Rv) -> Vec<AnyElement> {
         window_rv.layout_rev.get();
         window_rv.sel_rev.get();
         let tree = window_rv.tree.borrow();
-        let items = tree.children.get(&DOC).map(Vec::as_slice).unwrap_or_default();
+        let items = tree
+            .children
+            .get(&DOC)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
         let items = items.to_vec();
         drop(tree);
         doc_window(&window_rv, &items)
@@ -470,7 +495,11 @@ fn doc_blocks(rv: Rv) -> Vec<AnyElement> {
         list_rv.doc_rev.get();
         let w = window.get();
         let tree = list_rv.tree.borrow();
-        let items = tree.children.get(&DOC).map(Vec::as_slice).unwrap_or_default();
+        let items = tree
+            .children
+            .get(&DOC)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
         items[w.start.min(items.len())..w.end.min(items.len())].to_vec()
     });
     // A spacer is there only while it stands for blocks, so a short
@@ -492,7 +521,11 @@ fn doc_blocks(rv: Rv) -> Vec<AnyElement> {
     };
     vec![
         spacer(true),
-        each(list, |b: &BlockItem| b.id, move |item, _| block(rv.clone(), item)),
+        each(
+            list,
+            |b: &BlockItem| b.id,
+            move |item, _| block(rv.clone(), item),
+        ),
         spacer(false),
     ]
 }
@@ -542,13 +575,27 @@ fn block(rv: Rv, item: ReadSignal<BlockItem>) -> AnyElement {
         }
         _ => None,
     };
+    let scroll_table =
+        table_role(first.node.ty()) == Some(TableRole::Table) && !matches!(kind, Kind::View(_));
+    let scroll_frame = scroll_table.then(|| {
+        signal((
+            Bounds::<Points>::default(),
+            Bounds::<Points>::default(),
+            px(0.),
+        ))
+    });
     let wrapper = match slotted {
         Some((block_ref, _)) => view().element_ref(&block_ref),
         None => view(),
     };
     let wrapper = wrapper
         .on_layout(move |b: &Bounds<Points>| {
-            layout_rv.set_frame(id, Some(parent), *b);
+            if let Some(frame) = scroll_frame {
+                frame.update(|parts| parts.1 = *b);
+                update_scrolled_table(&layout_rv, id, parent, frame);
+            } else {
+                layout_rv.set_frame(id, Some(parent), *b);
+            }
             if let Some((_, size)) = slotted
                 && size.get_untracked() != b.size
             {
@@ -646,7 +693,58 @@ fn block(rv: Rv, item: ReadSignal<BlockItem>) -> AnyElement {
     if marked && terminal {
         return wrapper.child(holder(content)).into_element();
     }
-    wrapper.children(content).into_element()
+    let block = wrapper.children(content);
+    if let Some(frame) = scroll_frame {
+        let layout_rv = rv.clone();
+        let geo = rv.geo.clone();
+        let handle = element_ref();
+        geo.borrow_mut().table_scroll_handles.insert(id, handle);
+        cleanup(move || {
+            let mut geo = geo.borrow_mut();
+            geo.table_scroll.remove(&id);
+            geo.table_scroll_handles.remove(&id);
+        });
+        return scroll()
+            .element_ref(&handle)
+            .horizontal()
+            .w_full()
+            .flex_shrink_0()
+            .keyboard_taps(KeyboardTaps::Always)
+            .test_id("rich-editor-table-scroll")
+            .on_layout(move |b: &Bounds<Points>| {
+                frame.update(|parts| parts.0 = *b);
+                update_scrolled_table(&layout_rv, id, parent, frame);
+            })
+            .on_scroll(move |e: &ScrollEvent| {
+                if frame.with_untracked(|parts| parts.2 == e.offset.x) {
+                    return;
+                }
+                frame.update(|parts| parts.2 = e.offset.x);
+                update_scrolled_table(&rv, id, parent, frame);
+                rv.cx.emit(super::RichEditorEvent::TableScroll);
+            })
+            .child(block)
+            .into_element();
+    }
+    block.into_element()
+}
+
+fn update_scrolled_table(
+    rv: &Rv,
+    id: u64,
+    parent: u64,
+    frame: Signal<(Bounds<Points>, Bounds<Points>, Points)>,
+) {
+    let (viewport, grid, offset) = frame.get_untracked();
+    let visible = (offset, viewport.size.width);
+    if rv.geo.borrow_mut().table_scroll.insert(id, visible) != Some(visible) {
+        rv.table_moved(id, Some(parent));
+    }
+    let origin = Point::new(
+        viewport.origin.x + grid.origin.x - offset,
+        viewport.origin.y + grid.origin.y,
+    );
+    rv.set_frame(id, Some(parent), Bounds::new(origin, grid.size));
 }
 
 /// The tag of the element the node's spec renders as (`to_dom`), when it
@@ -1775,6 +1873,13 @@ fn caret(rv: Rv) -> impl IntoElement {
             return None;
         }
         let b = rv.caret_glyph_rect()?;
+        if let Some(table) =
+            crate::rich_editor::tables::find_table(rv.st.borrow().selection().resolved_head())
+            && let Some(visible) = rv.session.table_viewport(table.pos)
+            && (b.origin.x < visible.origin.x || b.origin.x > visible.origin.x + visible.size.width)
+        {
+            return None;
+        }
         // On whole device pixels: a caret between pixels is drawn smeared
         // over two, wider or narrower as it moves (gpui-kit's fix).
         let snap = nsh_core::element::round_to_nearest_pixel;
@@ -1784,6 +1889,7 @@ fn caret(rv: Rv) -> impl IntoElement {
                 Point::new(snap(b.origin.x - width * 0.5), snap(b.origin.y)),
                 Size::new(width, snap(b.size.height)),
             ))
+            .test_id("rich-editor-caret")
             .bg(move || theme().foreground)
             .opacity(visible),
             &rv,
@@ -1836,6 +1942,7 @@ fn sink(rv: Rv) -> impl IntoElement {
         rv.clone(),
     );
     let menu = rv.clone();
+    let moved = rv.clone();
     let value = rv.sink_value;
     input()
         .element_ref(&rv.input)
@@ -1869,6 +1976,9 @@ fn sink(rv: Rv) -> impl IntoElement {
                 .with(|id| id.as_deref().unwrap_or_default().to_owned())
         })
         .on_change(move |text: &str| change.sink_changed(text))
+        .on_selection_change(move |selection: &nsh_core::element::Selection| {
+            moved.sink_selection(selection)
+        })
         .on_composition_change(move |c: &Composition| {
             composition.composition_changed(c.composing, &c.text)
         })

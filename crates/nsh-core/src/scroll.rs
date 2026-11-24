@@ -35,6 +35,9 @@
 //! the spinner, the sticky cells' views, picking which view a key or a
 //! focused field scrolls, and the frame clock.
 
+#[doc(hidden)]
+pub mod wheel_glide;
+
 use std::f32::consts::PI;
 
 use crate::{
@@ -121,6 +124,18 @@ impl std::ops::Add for Offset {
     }
 }
 
+impl From<Offset> for Point<Points> {
+    fn from(o: Offset) -> Self {
+        point(Points(o.x), Points(o.y))
+    }
+}
+
+impl From<Point<Points>> for Offset {
+    fn from(p: Point<Points>) -> Self {
+        Offset::new(p.x.0, p.y.0)
+    }
+}
+
 /// What a scroll view is doing.
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 enum Phase {
@@ -135,10 +150,14 @@ enum Phase {
     Thumb { start: f32 },
     /// Wheel or touchpad input: the last at `last` (ms), `total` points
     /// so far; `gesture` for touchpads (begin / end), not mouse wheels.
+    /// A `smoothWheel` view's notches glide (`glide`, [`wheel_glide`]) to
+    /// `raw`, where they point; otherwise `raw` is where the view is.
     Wheel {
         last: f64,
         total: f32,
         gesture: bool,
+        raw: Offset,
+        glide: wheel_glide::Glide,
     },
     /// Momentum after a fling: `velocity` points per ms at `last` (ms).
     Glide { velocity: Offset, last: f64 },
@@ -477,6 +496,19 @@ fn shifted(phase: Phase, d: Offset, horizontal: bool) -> Phase {
             duration,
             momentum,
             end,
+        },
+        Phase::Wheel {
+            last,
+            total,
+            gesture,
+            raw,
+            glide,
+        } => Phase::Wheel {
+            last,
+            total,
+            gesture,
+            raw: raw + d,
+            glide: glide.shifted(d.into()),
         },
         other => other,
     }
@@ -1183,8 +1215,9 @@ pub fn deadline(host: &impl ScrollHost, now: f64) -> Option<f64> {
         Phase::Wheel {
             last,
             gesture: false,
+            glide,
             ..
-        } => last + WHEEL_IDLE,
+        } => (last + WHEEL_IDLE).max(glide.end()),
         _ => return None,
     };
     // A millisecond past it: a frame there finds it ended whatever the
@@ -1271,12 +1304,26 @@ fn tick(host: &impl ScrollHost, now: f64) -> bool {
             }
         }
         Phase::Wheel {
+            gesture: false,
+            raw,
+            glide,
+            ..
+        } if now < glide.end() => {
+            moved_to(host, glide.value(raw.into(), now).into());
+        }
+        Phase::Wheel {
             last,
             total,
             gesture: false,
+            raw,
+            glide,
         } if now - last > WHEEL_IDLE => {
-            // A mouse wheel came to rest: snapping views move on to the
-            // next snap point in the wheel's direction.
+            // A mouse wheel came to rest (a glide where it was going):
+            // snapping views move on to the next snap point in the wheel's
+            // direction.
+            if glide != wheel_glide::Glide::default() {
+                moved_to(host, raw);
+            }
             set_phase(host, Phase::Idle);
             let snaps = host
                 .scroll(|s, _| s.behavior.snaps() || s.behavior.paging)
@@ -1880,6 +1927,8 @@ pub fn wheel_begin(host: &impl ScrollHost) {
             last: host.now(),
             total: 0.0,
             gesture: true,
+            raw: Offset::default(),
+            glide: wheel_glide::Glide::default(),
         },
     );
     emit(host, EventKind::ScrollDragStart);
@@ -1888,18 +1937,73 @@ pub fn wheel_begin(host: &impl ScrollHost) {
 /// Scrolls the view by `delta` (positive toward the end). Without
 /// [`wheel_begin`] it is a mouse wheel, which settles when idle.
 pub fn wheel(host: &impl ScrollHost, delta: Point<Points>) {
+    wheel_by(host, delta, false);
+}
+
+/// A mouse wheel's notch of `delta` on a view that [`smooth_wheel`]s: it
+/// glides there as Chromium's does ([`wheel_glide`]), and a notch during
+/// the glide moves where it goes on from where the last one pointed, at the
+/// speed it has, so a run of notches is one motion. It settles as
+/// [`wheel`] does.
+#[doc(hidden)]
+pub fn wheel_smooth(host: &impl ScrollHost, delta: Point<Points>) {
+    wheel_by(host, delta, true);
+}
+
+/// Whether a mouse wheel's notches glide on the view (`smoothWheel`): not
+/// where they step through snap points or pages, or zoom.
+#[doc(hidden)]
+pub fn smooth_wheel(host: &impl ScrollHost) -> bool {
+    host.scroll(|s, _| {
+        s.behavior.smooth_wheel && !s.zooms() && !s.behavior.snaps() && !s.behavior.paging
+    })
+    .unwrap_or(false)
+}
+
+/// A notch's `delta` (points the platform gave it, `line` points a line
+/// along each axis) in the view's own lines (`wheelLineHeight`), when it
+/// sets them.
+#[doc(hidden)]
+pub fn wheel_line(
+    host: &impl ScrollHost,
+    delta: Point<Points>,
+    line: Point<Points>,
+) -> Point<Points> {
+    let height = host
+        .scroll(|s, _| s.behavior.wheel_line_height)
+        .unwrap_or(Points::ZERO)
+        .0;
+    let axis = |d: Points, line: Points| {
+        if height > 0.0 && line.0 > 0.0 {
+            Points(d.0 * height / line.0)
+        } else {
+            d
+        }
+    };
+    point(axis(delta.x, line.x), axis(delta.y, line.y))
+}
+
+fn wheel_by(host: &impl ScrollHost, delta: Point<Points>, smooth: bool) {
     let (dx, dy) = (delta.x.0, delta.y.0);
     if !enabled(host) {
         return;
     }
-    let (gesture, total) = match phase(host) {
-        Phase::Wheel { gesture, total, .. } => (gesture, total),
+    let (gesture, total, last) = match phase(host) {
+        Phase::Wheel {
+            gesture,
+            total,
+            raw,
+            glide,
+            ..
+        } => (gesture, total, (!gesture).then_some((raw, glide))),
         _ => {
             interrupt(host);
-            (false, 0.0)
+            (false, 0.0, None)
         }
     };
-    let Some((pos, total)) = host.scroll(|s, size| {
+    let smooth = smooth && !gesture;
+    let now = host.now();
+    let Some((pos, to, total)) = host.scroll(|s, size| {
         let (min, max) = s.range(size);
         let d = if s.zooms() {
             Offset::new(dx, dy)
@@ -1912,25 +2016,44 @@ pub fn wheel(host: &impl ScrollHost, delta: Point<Points>) {
             Offset::new(dy, 0.0)
         };
         let pos = s.pos();
+        // A smooth wheel's notches add up from where the last one pointed,
+        // not from where its glide has got to.
+        let from = match last {
+            Some((raw, _)) if smooth => raw,
+            _ => pos,
+        };
         // Past an edge (the refresh space) wheels only move back.
         let one =
             |p: f32, d: f32, min: f32, max: f32| (p + d).clamp(min.min(p), max.max(min).max(p));
         (
-            Offset::new(one(pos.x, d.x, min.x, max.x), one(pos.y, d.y, min.y, max.y)),
+            pos,
+            Offset::new(
+                one(from.x, d.x, min.x, max.x),
+                one(from.y, d.y, min.y, max.y),
+            ),
             total + d.along(s.horizontal),
         )
     }) else {
         return;
     };
+    let glide = match last {
+        _ if !smooth => wheel_glide::Glide::default(),
+        Some((raw, g)) if now < g.end() => g.retargeted(raw.into(), to.into(), now),
+        _ => wheel_glide::Glide::new(pos.into(), to.into(), now),
+    };
     set_phase(
         host,
         Phase::Wheel {
-            last: host.now(),
+            last: now,
             total,
             gesture,
+            raw: to,
+            glide,
         },
     );
-    moved_to(host, pos);
+    if !smooth {
+        moved_to(host, to);
+    }
     ensure_ticking(host);
 }
 
@@ -2820,6 +2943,66 @@ mod tests {
             host.state.borrow().live.phase,
             Phase::Wheel { gesture: false, .. }
         ));
+    }
+
+    #[test]
+    fn smooth_wheel_notches_glide_on_chromiums_curve() {
+        let mut smooth = scroll_state((300.0, 10_000.0), false);
+        smooth.behavior.smooth_wheel = true;
+        let host = TestHost::new(smooth);
+        assert!(smooth_wheel(&host));
+        wheel_smooth(&host, pt(0.0, 40.0));
+        // It eases there instead of jumping.
+        assert_eq!(host.state.borrow().y.0, 0.0);
+        frame(&host, 60.0);
+        let y = host.state.borrow().y.0;
+        assert!(y > 0.0 && y < 40.0, "{y}");
+        // A notch during the glide goes on from where the last pointed.
+        wheel_smooth(&host, pt(0.0, 40.0));
+        assert!(matches!(
+            host.state.borrow().live.phase,
+            Phase::Wheel { gesture: false, raw, .. } if raw.y == 80.0
+        ));
+        // It arrives, then rests there once the notches stop.
+        let mut now = 60.0;
+        while let Some(next) = deadline(&host, now) {
+            now = next;
+            frame(&host, now);
+        }
+        assert_eq!(host.state.borrow().y.0, 80.0);
+        assert!(matches!(host.state.borrow().live.phase, Phase::Idle));
+
+        // Without it, or where notches step through snap points, they do
+        // not glide.
+        let host = TestHost::new(scroll_state((300.0, 10_000.0), false));
+        assert!(!smooth_wheel(&host));
+        let mut paging = scroll_state((300.0, 10_000.0), false);
+        paging.behavior.smooth_wheel = true;
+        paging.behavior.paging = true;
+        assert!(!smooth_wheel(&TestHost::new(paging)));
+    }
+
+    #[test]
+    fn wheel_line_height_rescales_a_notch() {
+        let mut lines = scroll_state((300.0, 10_000.0), false);
+        let host = TestHost::new(lines.clone());
+        // The platform's own line by default.
+        assert_eq!(
+            wheel_line(&host, pt(0.0, 30.0), pt(10.0, 10.0)),
+            pt(0.0, 30.0)
+        );
+        lines.behavior.wheel_line_height = Points(40.0);
+        let host = TestHost::new(lines);
+        // Three lines of 10 points become three of 40.
+        assert_eq!(
+            wheel_line(&host, pt(0.0, 30.0), pt(10.0, 10.0)),
+            pt(0.0, 120.0)
+        );
+        // Each axis by its own line (Linux's grow with the view).
+        assert_eq!(
+            wheel_line(&host, pt(25.0, 30.0), pt(25.0, 15.0)),
+            pt(40.0, 80.0)
+        );
     }
 
     #[test]

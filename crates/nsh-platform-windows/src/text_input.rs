@@ -111,12 +111,12 @@ use windows::{
                 CFM_WEIGHT, EM_CANREDO, EM_EXSETSEL, EM_GETLANGOPTIONS, EM_GETSCROLLPOS, EM_REDO,
                 EM_SETEDITSTYLE, EM_SETEVENTMASK, EM_SETLANGOPTIONS, EM_SETSCROLLPOS,
                 EM_SETTEXTMODE, EM_SETTYPOGRAPHYOPTIONS, EM_STOPGROUPTYPING, ENM_CHANGE,
-                ENM_ENDCOMPOSITION, ENM_SELCHANGE, ENM_STARTCOMPOSITION, IMF_SPELLCHECKING,
-                IMF_TKBPREDICTION, PFA_CENTER, PFA_JUSTIFY, PFA_LEFT, PFA_RIGHT, PFM_ALIGNMENT,
-                PFM_LINESPACING, PFM_RTLPARA, SES_USECTF, TM_MULTICODEPAGE, TM_MULTILEVELUNDO,
-                TM_RICHTEXT, TO_ADVANCEDTYPOGRAPHY, TXTBIT_AUTOWORDSEL, TXTBIT_CHARFORMATCHANGE,
-                TXTBIT_CLIENTRECTCHANGE, TXTBIT_D2DDWRITE, TXTBIT_DISABLEDRAG,
-                TXTBIT_HIDESELECTION, TXTBIT_MAXLENGTHCHANGE, TXTBIT_MULTILINE,
+                ENM_ENDCOMPOSITION, ENM_SELCHANGE, ENM_STARTCOMPOSITION, IMF_IMEALWAYSSENDNOTIFY,
+                IMF_SPELLCHECKING, IMF_TKBPREDICTION, PFA_CENTER, PFA_JUSTIFY, PFA_LEFT, PFA_RIGHT,
+                PFM_ALIGNMENT, PFM_LINESPACING, PFM_RTLPARA, SES_USECTF, TM_MULTICODEPAGE,
+                TM_MULTILEVELUNDO, TM_RICHTEXT, TO_ADVANCEDTYPOGRAPHY, TXTBIT_AUTOWORDSEL,
+                TXTBIT_CHARFORMATCHANGE, TXTBIT_CLIENTRECTCHANGE, TXTBIT_D2DDWRITE,
+                TXTBIT_DISABLEDRAG, TXTBIT_HIDESELECTION, TXTBIT_MAXLENGTHCHANGE, TXTBIT_MULTILINE,
                 TXTBIT_PARAFORMATCHANGE, TXTBIT_READONLY, TXTBIT_RICHTEXT, TXTBIT_SCROLLBARCHANGE,
                 TXTBIT_USEPASSWORD, TXTBIT_WORDWRAP,
             },
@@ -293,6 +293,16 @@ fn make_editor(
         // Text Services Framework input: dictation, the emoji
         // panel, the touch keyboard, reconversion, spelling.
         e.send(EM_SETEDITSTYLE, SES_USECTF as usize, SES_USECTF as isize);
+        // Without `IMF_IMEALWAYSSENDNOTIFY`, RichEdit suppresses `EN_CHANGE`
+        // and `EN_SELCHANGE` while an IME composes undetermined text, leaving
+        // `onCompositionChange` (and a rich editor's inline preedit) empty
+        // until commit.
+        let (lang, _) = e.send(EM_GETLANGOPTIONS, 0, 0);
+        e.send(
+            EM_SETLANGOPTIONS,
+            0,
+            (lang.0 as u32 | IMF_IMEALWAYSSENDNOTIFY) as isize,
+        );
         e.send(
             EM_SETTYPOGRAPHYOPTIONS,
             TO_ADVANCEDTYPOGRAPHY as usize,
@@ -383,6 +393,22 @@ impl InputState {
 
     fn text(&self) -> String {
         String::from_utf16_lossy(&self.units())
+    }
+
+    /// The text outside any composition in progress (all of it when none).
+    fn committed_text(&self) -> String {
+        let units = self.units();
+        let Some((before, after)) = self.composing.get() else {
+            return String::from_utf16_lossy(&units);
+        };
+        let Some(end) = units.len().checked_sub(after as usize) else {
+            return String::from_utf16_lossy(&units);
+        };
+        let start = (before as usize).min(end);
+        let mut committed = Vec::with_capacity(start + (units.len() - end));
+        committed.extend_from_slice(&units[..start]);
+        committed.extend_from_slice(&units[end..]);
+        String::from_utf16_lossy(&committed)
     }
 
     fn selection(&self) -> (u32, u32) {
@@ -1043,6 +1069,8 @@ impl InputState {
                 let list = dc.CreateCommandList().ok()?;
                 dc.SetTarget(&list);
                 dc.SetDpi(96.0 * s, 96.0 * s);
+                let params = cx.dc.GetTextRenderingParams().ok();
+                dc.SetTextRenderingParams(params.as_ref());
                 dc.BeginDraw();
                 // RichEdit draws its client pixels in units of GDI's DPI,
                 // not the target's: scaled to the target's (nothing on a
@@ -1187,7 +1215,17 @@ impl Hosted for InputState {
                 );
             }
         }
+        let indicator = multiline && config.scrollbar_visible;
         drop(config);
+        if indicator {
+            // RichEdit has no window of its own: the `WS_VSCROLL` bar it
+            // keeps the range of is never drawn, so the field draws the
+            // platform's indicator over its text, as a scroll view does.
+            let (min, max, pos, page) = e.vscroll();
+            if let Some((x, y, bw, bh)) = indicator_thumb((w, h), min, max, pos, page, cx.scale) {
+                crate::scroll::draw_knob(cx, x, y, bw, bh, 1.0);
+            }
+        }
         cx.pop();
     }
 
@@ -1271,6 +1309,40 @@ fn copy_face_name(dst: &mut [u16; 32], face: &str) {
 #[cfg(test)]
 fn family(name: Option<&str>) -> String {
     crate::text::resolve_family(name, 400, false).gdi_name
+}
+
+/// Where a multiline field of `size` points draws its scroll indicator's
+/// thumb, from RichEdit's vertical range (`min..max`, position `pos` and
+/// page `page`, in pixels at `scale`); `None` when all the text fits.
+fn indicator_thumb(
+    size: (f32, f32),
+    min: i32,
+    max: i32,
+    pos: i32,
+    page: i32,
+    scale: f32,
+) -> Option<(f32, f32, f32, f32)> {
+    use nsh_core::scroll::INDICATOR_THICK;
+    const MARGIN: f32 = 2.0;
+    const MIN_THUMB: f32 = 20.0;
+    let (w, h) = size;
+    let s = scale.max(0.01);
+    let content = (max - min) as f32 / s;
+    let viewport = if page > 0 { page as f32 / s } else { h };
+    if content <= viewport + 0.5 || h <= 2.0 * MARGIN {
+        return None;
+    }
+    let track = h - 2.0 * MARGIN;
+    let thumb = (track * viewport / content).clamp(MIN_THUMB.min(track), track);
+    let travel = (content - viewport).max(1.0);
+    let at = ((pos - min) as f32 / s / travel).clamp(0.0, 1.0);
+    let thick = INDICATOR_THICK.0;
+    Some((
+        w - thick - MARGIN,
+        MARGIN + (track - thumb) * at,
+        thick,
+        thumb,
+    ))
 }
 
 fn scroll_flags(config: &InputConfig) -> u32 {
@@ -1505,23 +1577,30 @@ fn set_focus(surface: &Rc<Surface>, view: Option<&NshView>) {
 
 // --- The IME -----------------------------------------------------------------
 
-/// Enables the IME while an editable, non-secure field has the focus.
+/// Enables the IME on the window showing the focused editable, non-secure
+/// field and on the host window RichEdit reads its input context from, and
+/// detaches it from every other window of the surface.
 fn update_ime(surface: &Surface) {
-    let hwnd = surface.hwnd();
-    if hwnd.is_invalid() {
-        return;
-    }
-    let wants = FOCUS
+    let shown = FOCUS
         .with(|f| f.borrow().get(&surface.key()).and_then(|f| f.view.clone()))
-        .and_then(|v| input_of(&v))
-        .is_some_and(|input| {
-            let c = input.config.borrow();
-            c.editable && !c.secure
-        });
-    // SAFETY: plain calls on the surface's window; a null context with no
-    // flags detaches the IME, IACE_DEFAULT restores the window's own.
-    unsafe {
-        let _ = ImmAssociateContextEx(hwnd, HIMC::default(), if wants { IACE_DEFAULT } else { 0 });
+        .filter(|v| {
+            input_of(v).is_some_and(|input| {
+                let c = input.config.borrow();
+                c.editable && !c.secure
+            })
+        })
+        .map(|v| crate::app_window::hwnd_showing(surface, &v));
+    let host = surface.hwnd();
+    for hwnd in crate::app_window::hwnds(surface).into_iter().chain([host]) {
+        if hwnd.is_invalid() {
+            continue;
+        }
+        let on = shown.is_some_and(|w| hwnd == w || hwnd == host);
+        // SAFETY: plain calls on the surface's live windows; a null context
+        // with no flags detaches the IME, IACE_DEFAULT restores the window's own.
+        unsafe {
+            let _ = ImmAssociateContextEx(hwnd, HIMC::default(), if on { IACE_DEFAULT } else { 0 });
+        }
     }
 }
 
@@ -1649,8 +1728,7 @@ fn caret_bounds(view: &NshView, input: &InputState) -> Bounds<Points> {
 }
 
 /// Reports the composition if it started, changed or ended since last
-/// reported (and JS listens); once it ended, applies the value JS set
-/// meanwhile.
+/// reported (and JS listens).
 fn report_composition(surface: &Surface, view: &NshView, input: &InputState) {
     let now = input.composed_text();
     if *input.composed.borrow() != now {
@@ -1662,18 +1740,12 @@ fn report_composition(surface: &Surface, view: &NshView, input: &InputState) {
             ])
         });
     }
-    if input.composing.get().is_none() {
-        let pending = input.pending.borrow_mut().take();
-        if let Some((text, count)) = pending {
-            set_value(view, input, &text, count);
-        }
-    }
 }
 
-/// Reports the text with a new edit count if it differs from what the
-/// engine has.
+/// Reports the committed text with a new edit count if it differs from what
+/// the engine has.
 fn report_text(surface: &Surface, view: &NshView, input: &InputState) -> bool {
-    let text = input.text();
+    let text = input.committed_text();
     if *input.reported_text.borrow() == text {
         return false;
     }
@@ -1691,30 +1763,39 @@ fn report_text(surface: &Surface, view: &NshView, input: &InputState) -> bool {
 }
 
 /// Turns what RichEdit noted since the last time into the field's events:
-/// a composition's start, edits (the text, or what is composed), its end,
-/// the selection and the caret. Returns whether the text changed.
+/// a composition's end, a new composition's start, edits (the text, or what
+/// is composed), the selection and the caret. Returns whether the text changed.
 fn process(surface: &Surface, view: &NshView, input: &InputState) -> bool {
     let Some(notes) = input.with_editor(Editor::take_notes) else {
         return false;
     };
-    if let Some((start, end, len)) = notes.composition_start {
-        input.composing.set(Some((start, len.saturating_sub(end))));
-    }
+    let started = notes
+        .composition_start
+        .map(|(start, end, len)| (start, len.saturating_sub(end)));
     let mut changed = false;
-    if notes.changed && !input.programmatic.get() {
+    if notes.composition_end {
+        // The commit's `onChangeText`, then the composition's end; any
+        // composition started since belongs to the next span, not the commit.
+        input.composing.set(started);
+        changed = report_text(surface, view, input);
+        input.composing.set(None);
+        report_composition(surface, view, input);
+    }
+    if started.is_some() {
+        input.composing.set(started);
+    }
+    if (notes.changed || started.is_some()) && !input.programmatic.get() {
         if input.composing.get().is_some() {
             report_composition(surface, view, input);
         } else {
-            changed = report_text(surface, view, input);
+            changed |= report_text(surface, view, input);
         }
     }
-    if notes.composition_end {
-        // The commit's `onChangeText`, then the composition's end.
-        changed |= report_text(surface, view, input);
-        input.composing.set(None);
-        report_composition(surface, view, input);
-    } else if notes.composition_start.is_some() {
-        report_composition(surface, view, input);
+    if input.composing.get().is_none() {
+        let pending = input.pending.borrow_mut().take();
+        if let Some((text, count)) = pending {
+            set_value(view, input, &text, count);
+        }
     }
     if notes.changed || notes.composition_end {
         input.follow_limit();
@@ -2091,7 +2172,17 @@ pub(crate) fn pointer(surface: &Rc<Surface>, view: &NshView, event: &ItemPointer
     };
     if matches!(event.kind, PointerKind::Down) {
         let arrives = focused(surface).as_ref() != Some(view);
+        // Focus scrolls RichEdit to its caret (the text's end after the
+        // value was set); the press is hit against what shows, so the
+        // field stays where it was until the press places the caret.
+        let mut scroll = windows::Win32::Foundation::POINT::default();
+        if arrives {
+            input.send(EM_GETSCROLLPOS, 0, &mut scroll as *mut _ as isize);
+        }
         set_focus(surface, Some(view));
+        if arrives {
+            input.send(EM_SETSCROLLPOS, 0, &mut scroll as *mut _ as isize);
+        }
         // The press, sent to RichEdit after the focus arrived, places the
         // caret where it lands (or extends the selection, or starts a
         // drag): `selectTextOnFocus` waits for its release. A Shift or
@@ -2639,6 +2730,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn indicator_thumb_follows_the_text_scroll() {
+        // All the text fits: no thumb.
+        assert_eq!(indicator_thumb((100.0, 50.0), 0, 50, 0, 50, 1.0), None);
+        // 4 pages of text at 175%: a quarter of the track, at the top, then at the bottom.
+        let s = 1.75;
+        let page = (50.0 * s) as i32;
+        let max = page * 4;
+        let (x, y, _, h) = indicator_thumb((100.0, 50.0), 0, max, 0, page, s).unwrap();
+        assert!(x > 90.0 && (y - 2.0).abs() < 0.01 && (h - 20.0).abs() < 0.5);
+        let (_, y, _, h) = indicator_thumb((100.0, 50.0), 0, max, max - page, page, s).unwrap();
+        assert!((y + h - 48.0).abs() < 0.01);
+    }
+
+    #[test]
     fn multiline_scrollbars_have_native_overflow_ranges() {
         for editable in [false, true] {
             let config = InputConfig {
@@ -2939,6 +3044,316 @@ mod tests {
             0,
             "a wide input does not wrap"
         );
+    }
+
+    fn composition_payload(composing: bool, text: &str) -> EventPayload {
+        EventPayload::Map(vec![
+            ("composing", PayloadValue::Bool(composing)),
+            ("text", PayloadValue::Str(text.to_owned())),
+        ])
+    }
+
+    #[test]
+    fn an_input_asks_richedit_for_notes_while_composing() {
+        let surface = Surface::new(Default::default());
+        let view = NshView::new(6, nsh_core::ViewKind::Input);
+        create(&surface, &view);
+        let input = input_of(&view).expect("input");
+        let has_flag = || {
+            let (lang, _) = input
+                .with_editor(|e| e.send(EM_GETLANGOPTIONS, 0, 0))
+                .expect("RichEdit");
+            lang.0 as u32 & IMF_IMEALWAYSSENDNOTIFY != 0
+        };
+        assert!(has_flag(), "IMF_IMEALWAYSSENDNOTIFY missing after create");
+        for auto_correct in [false, true] {
+            config(
+                &surface,
+                &view,
+                &InputConfig {
+                    auto_correct,
+                    ..Default::default()
+                },
+            );
+            assert!(
+                has_flag(),
+                "IMF_IMEALWAYSSENDNOTIFY missing with auto_correct={auto_correct}"
+            );
+        }
+        input.ensure_editor_mode(true);
+        assert!(
+            has_flag(),
+            "IMF_IMEALWAYSSENDNOTIFY missing after GDI rebuild"
+        );
+    }
+
+    #[test]
+    fn a_composition_is_reported_as_it_is_typed() {
+        let surface = Surface::new(Default::default());
+        surface.record_events();
+        let view = NshView::new(7, nsh_core::ViewKind::Input);
+        view.state_mut()
+            .events
+            .set(EventKind::CompositionChange, true);
+        create(&surface, &view);
+        let input = input_of(&view).expect("input");
+        let id = view.id();
+
+        input.with_editor(Editor::start_composition);
+        replace_selection(&input, "n");
+        process(&surface, &view, &input);
+        assert_eq!(
+            surface.take_events(),
+            vec![(
+                id,
+                EventKind::CompositionChange,
+                composition_payload(true, "n")
+            )]
+        );
+        assert_eq!(input.count.get(), 0);
+
+        replace_selection(&input, "i");
+        process(&surface, &view, &input);
+        assert_eq!(
+            surface.take_events(),
+            vec![(
+                id,
+                EventKind::CompositionChange,
+                composition_payload(true, "ni")
+            )]
+        );
+        assert_eq!(input.count.get(), 0);
+
+        input.send(EM_SETSEL, 0, 2);
+        replace_selection(&input, "你");
+        input.with_editor(Editor::end_composition);
+        process(&surface, &view, &input);
+        assert_eq!(
+            surface.take_events(),
+            vec![
+                (
+                    id,
+                    EventKind::ChangeText,
+                    EventPayload::Text {
+                        text: "你".into(),
+                        count: 1,
+                    },
+                ),
+                (
+                    id,
+                    EventKind::CompositionChange,
+                    composition_payload(false, "")
+                ),
+            ]
+        );
+
+        // Replacing a selection while composing reports only the composition
+        // text until commit.
+        value(&view, "ab", 1);
+        surface.take_events();
+        input.send(EM_SETSEL, 1, 2);
+        input.with_editor(Editor::take_notes);
+        input.with_editor(Editor::start_composition);
+        replace_selection(&input, "n");
+        process(&surface, &view, &input);
+        assert_eq!(
+            surface.take_events(),
+            vec![(
+                id,
+                EventKind::CompositionChange,
+                composition_payload(true, "n")
+            )]
+        );
+        assert_eq!(input.count.get(), 1);
+
+        input.send(EM_SETSEL, 1, 2);
+        replace_selection(&input, "你");
+        input.with_editor(Editor::end_composition);
+        process(&surface, &view, &input);
+        assert_eq!(
+            surface.take_events(),
+            vec![
+                (
+                    id,
+                    EventKind::ChangeText,
+                    EventPayload::Text {
+                        text: "a你".into(),
+                        count: 2,
+                    },
+                ),
+                (
+                    id,
+                    EventKind::CompositionChange,
+                    composition_payload(false, "")
+                ),
+            ]
+        );
+
+        // Cancelling a composition emits no `ChangeText`.
+        input.with_editor(Editor::start_composition);
+        replace_selection(&input, "x");
+        process(&surface, &view, &input);
+        assert_eq!(
+            surface.take_events(),
+            vec![(
+                id,
+                EventKind::CompositionChange,
+                composition_payload(true, "x")
+            )]
+        );
+
+        input.send(EM_SETSEL, 2, 3);
+        replace_selection(&input, "");
+        input.with_editor(Editor::end_composition);
+        process(&surface, &view, &input);
+        assert_eq!(
+            surface.take_events(),
+            vec![(
+                id,
+                EventKind::CompositionChange,
+                composition_payload(false, "")
+            )]
+        );
+        assert_eq!(input.count.get(), 2);
+    }
+
+    #[test]
+    fn a_commit_followed_at_once_by_the_next_composition_reports_both() {
+        let surface = Surface::new(Default::default());
+        surface.record_events();
+        let view = NshView::new(8, nsh_core::ViewKind::Input);
+        view.state_mut()
+            .events
+            .set(EventKind::CompositionChange, true);
+        create(&surface, &view);
+        let input = input_of(&view).expect("input");
+        let id = view.id();
+
+        value(&view, "ab", 0);
+        surface.take_events();
+        input.send(EM_SETSEL, 1, 1);
+        input.with_editor(Editor::take_notes);
+
+        input.with_editor(Editor::start_composition);
+        replace_selection(&input, "n");
+        process(&surface, &view, &input);
+        assert_eq!(
+            surface.take_events(),
+            vec![(
+                id,
+                EventKind::CompositionChange,
+                composition_payload(true, "n")
+            )]
+        );
+
+        // One coalesced batch: commit "你", end the first composition, start
+        // the next one at the caret before "b", and type "h".
+        input.send(EM_SETSEL, 1, 2);
+        replace_selection(&input, "你");
+        input.with_editor(Editor::end_composition);
+        input.with_editor(Editor::start_composition);
+        replace_selection(&input, "h");
+        process(&surface, &view, &input);
+        assert_eq!(
+            surface.take_events(),
+            vec![
+                (
+                    id,
+                    EventKind::ChangeText,
+                    EventPayload::Text {
+                        text: "a你b".into(),
+                        count: 1,
+                    },
+                ),
+                (
+                    id,
+                    EventKind::CompositionChange,
+                    composition_payload(false, "")
+                ),
+                (
+                    id,
+                    EventKind::CompositionChange,
+                    composition_payload(true, "h")
+                ),
+            ]
+        );
+
+        // Commit the second composition.
+        input.send(EM_SETSEL, 2, 3);
+        replace_selection(&input, "好");
+        input.with_editor(Editor::end_composition);
+        process(&surface, &view, &input);
+        assert_eq!(
+            surface.take_events(),
+            vec![
+                (
+                    id,
+                    EventKind::ChangeText,
+                    EventPayload::Text {
+                        text: "a你好b".into(),
+                        count: 2,
+                    },
+                ),
+                (
+                    id,
+                    EventKind::CompositionChange,
+                    composition_payload(false, "")
+                ),
+            ]
+        );
+
+        // A composition that starts and ends before `process` runs commits as
+        // plain text without spurious composition events.
+        input.with_editor(Editor::start_composition);
+        replace_selection(&input, "!");
+        input.with_editor(Editor::end_composition);
+        process(&surface, &view, &input);
+        assert_eq!(
+            surface.take_events(),
+            vec![(
+                id,
+                EventKind::ChangeText,
+                EventPayload::Text {
+                    text: "a你好!b".into(),
+                    count: 3,
+                },
+            )]
+        );
+    }
+
+    #[test]
+    fn a_value_set_while_composing_waits_for_the_last_composition() {
+        let surface = Surface::new(Default::default());
+        let view = NshView::new(9, nsh_core::ViewKind::Input);
+        create(&surface, &view);
+        let input = input_of(&view).expect("input");
+
+        input.with_editor(Editor::start_composition);
+        replace_selection(&input, "n");
+        process(&surface, &view, &input);
+        value(&view, "from-js", 0);
+        assert_eq!(input.text(), "n");
+
+        // Cancel the first composition and immediately start a second one in
+        // the same batch: the pending value stays deferred while composing.
+        input.send(EM_SETSEL, 0, 1);
+        replace_selection(&input, "");
+        input.with_editor(Editor::end_composition);
+        input.with_editor(Editor::start_composition);
+        replace_selection(&input, "h");
+        process(&surface, &view, &input);
+        assert_eq!(input.text(), "h");
+        assert_eq!(input.composed.borrow().as_deref(), Some("h"));
+        assert_eq!(input.count.get(), 0);
+
+        // Once the final composition ends, the deferred value applies.
+        input.send(EM_SETSEL, 0, 1);
+        replace_selection(&input, "");
+        input.with_editor(Editor::end_composition);
+        process(&surface, &view, &input);
+        assert!(input.composing.get().is_none());
+        assert!(input.composed.borrow().is_none());
+        assert_eq!(input.text(), "from-js");
     }
 
     #[test]

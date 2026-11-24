@@ -248,7 +248,7 @@ blob（`blob:null/…`），都不允许。所有平台的检查方式相同。
 
 ### `speech`
 
-`"speech": true` 允许应用识别用户说的话（[`Speech`](../modules/nsh.md#speech)）：使用麦克风和系统的语音识别器，转写文本交给应用。系统仍会向用户请求一次权限。
+`"speech": true` 允许应用识别用户说的话（`nsh-extra` 的 [`Speech`](./nshm.md#speech)）：使用麦克风和系统的语音识别器，转写文本交给应用。系统仍会向用户请求一次权限。
 
 ### `audio`
 

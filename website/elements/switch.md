@@ -12,6 +12,33 @@ activation, the disabled state, and the switch role and its value for screen rea
 `Switch` has no colors, sizes, motion or label of its own. It is made of a track with a thumb inside it, then its
 children (a label), and the app styles each part, with `checked:` and `disabled:` classes that follow the switch.
 
+```tsx tabs
+import { mount, signal, Text } from "nsh";
+import { Switch } from "nsh/base";
+import { Window } from "nsh/desktop";
+
+function App() {
+  const on = signal(false);
+  return (
+    <Switch
+      checked={on()}
+      onChange={({ checked }) => on.set(checked)}
+      class="flex-row items-center gap-3"
+      trackClass="w-11 rounded-full bg-muted p-0.5 transition-colors checked:bg-primary"
+      thumbClass="size-5 rounded-full bg-background shadow-sm transition-transform checked:translate-x-5"
+    >
+      <Text>Wi-Fi</Text>
+    </Switch>
+  );
+}
+
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
+```
+
 ```rust tabs
 use nsh_base::{switch, theme};
 use nsh_core::prelude::*;
@@ -44,33 +71,6 @@ fn wifi() -> impl IntoElement {
 }
 ```
 
-```tsx tabs
-import { mount, signal, Text } from "nsh";
-import { Switch } from "nsh/base";
-import { Window } from "nsh/desktop";
-
-function App() {
-  const on = signal(false);
-  return (
-    <Switch
-      checked={on()}
-      onChange={({ checked }) => on.set(checked)}
-      class="flex-row items-center gap-3"
-      trackClass="w-11 rounded-full bg-muted p-0.5 transition-colors checked:bg-primary"
-      thumbClass="size-5 rounded-full bg-background shadow-sm transition-transform checked:translate-x-5"
-    >
-      <Text>Wi-Fi</Text>
-    </Switch>
-  );
-}
-
-mount(() => (
-  <Window id="main">
-    <App />
-  </Window>
-));
-```
-
 `Switch` comes from [`nsh/base`](../modules/nsh-base.md), the `nsh-base` crate in Rust. The value is the app's: a
 press reports the next value with `onChange`, and the switch shows the `checked` the app passes back. In Rust,
 `switch()` makes one with a setter per prop (`.checked(..)`, `.track_style(..)`), a listener per event
@@ -85,6 +85,7 @@ the state methods (`.checked(..)`, `.disabled_style(..)`) that follow the switch
 | `disabled` | `.disabled(..)` | `boolean` | `false` | No presses and no press feedback; `disabled:` styles apply to the switch and its parts, and screen readers say it is dimmed. |
 | `checkedStyle` | `.checked_style(\|s\| ..)` | `StyleProp<ViewStyle>` | none | The switch's style while `checked` and not disabled, as `checked:` classes. |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers say: what the switch turns on, when its children have no text that says it. |
+| `accessibilityHint` | `.accessibility_hint(..)` | `string` | none | Explains what changing the switch does, as a view's `accessibilityHint`. |
 | `trackClass`, `trackStyle` | `.track_style(\|s\| ..)` | `string`, `StyleProp<ViewStyle>` | none | The track, the part the thumb moves along. |
 | `thumbClass`, `thumbStyle` | `.thumb_style(\|s\| ..)` | `string`, `StyleProp<ViewStyle>` | none | The thumb, inside the track. |
 | `hitSlop` | `.hit_slop(..)` | `number \| Partial<Edges>` | none | How far outside its bounds presses still count, in points: one number for every side, or the sides named. As a view's `hitSlop`. |
@@ -168,6 +169,8 @@ points past each side, without changing its layout or its look: one number for e
 
 ## Accessibility
 
+- Give `accessibilityHint` when the label does not explain the effect of changing the setting. It follows reactive
+  values; setting it to `undefined` removes the hint.
 - A switch is one element for screen readers, with the role `"switch"` and its value (on or off); the track and the
   thumb are parts of it. Its label is the text of its children; give `accessibilityLabel` when it has none.
 - `disabled` is announced as the platform announces it (VoiceOver, TalkBack, UI Automation, the browser's accessibility

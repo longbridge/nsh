@@ -30,6 +30,11 @@
 //! `nsh.lock` beside `nsh.json` pins it (the app commits both); a build
 //! takes only what the lock pins. Each version is installed once in
 //! `~/.nsh/nshms/` ([`fetch`]) and shared by every app on the machine.
+//!
+//! nsh's own nshm (`nsh-extra`, [`rust_app::OWN_NSHM`]) are released with
+//! nsh: one asked for by version is the one of the nsh the app builds with
+//! ([`rust_app::Nsh`]), from where that nsh's crates come: crates.io at its
+//! version, its nightly's commit, or its checkout.
 
 mod cargo_toml;
 mod dep;
@@ -49,7 +54,11 @@ pub(crate) use dep::Added;
 use dep::{Dep, Origin};
 use resolve::{Lock, Resolved};
 
-use crate::rust_app::{self, AppCrate};
+use crate::rust_app::{self, AppCrate, Nsh};
+
+/// Gives the nsh the app builds with ([`Nsh::for_app`]), asked only when one
+/// of nsh's own nshm needs it.
+pub(crate) type NshOf<'a> = dyn Fn() -> anyhow::Result<Nsh> + 'a;
 
 /// The lock file beside `nsh.json`.
 pub(crate) const LOCK: &str = nsh_bundler::nshm::LOCK;
@@ -77,15 +86,15 @@ fn root() -> anyhow::Result<PathBuf> {
 
 /// The app's nshm, resolved where the lock no longer fits, installed and
 /// locked (`nsh.lock` written when it changed). `config` is the `nsh.json`
-/// in `dir`.
-fn ensure(dir: &Path, config: &serde_json::Value) -> anyhow::Result<Vec<Resolved>> {
+/// in `dir`; `nsh` the nsh it builds with.
+fn ensure(dir: &Path, config: &serde_json::Value, nsh: &NshOf) -> anyhow::Result<Vec<Resolved>> {
     let deps = dep::read_all(config)?;
     let lock = Lock::read(dir)?;
     if deps.is_empty() && lock.packages.is_empty() {
         return Ok(Vec::new());
     }
     let mut net = fetch::Net::new(root()?);
-    let resolved = resolve::resolve(dir, &deps, &lock, &|_| false, &mut net)?;
+    let resolved = resolve::resolve(dir, &deps, &lock, &|_| false, nsh, &mut net)?;
     write_lock(dir, &lock, &resolved)?;
     Ok(resolved)
 }
@@ -112,19 +121,28 @@ fn patch_id(r: &Resolved) -> String {
     }
 }
 
-/// The Rust nshm of the app in `dir` (`config` its `nsh.json`), each
-/// installed at its locked version, with how the workspace patches it: its
-/// TSX nshm are the bundler's. Resolved and locked first where needed.
+/// The Rust nshm of the app in `dir` (`config` its `nsh.json`, `nsh` the
+/// nsh it builds with), each installed at its locked version, with how the
+/// workspace patches it: its TSX nshm are the bundler's. Resolved and
+/// locked first where needed.
 pub(crate) fn crates(
     dir: &Path,
     config: &serde_json::Value,
+    nsh: &NshOf,
 ) -> anyhow::Result<Vec<(String, AppCrate)>> {
     let deps = dep::read_all(config)?;
-    let resolved = ensure(dir, config)?;
-    Ok(rust_crates(&resolved, &deps))
+    let resolved = ensure(dir, config, nsh)?;
+    rust_crates(&resolved, &deps, Some(nsh))
 }
 
-fn rust_crates(resolved: &[Resolved], deps: &[Dep]) -> Vec<(String, AppCrate)> {
+/// The crates of the Rust nshm in `resolved`; nsh's own linked as nsh's
+/// crates are ([`AppCrate::linked_with`]) when `nsh` says where from.
+fn rust_crates(
+    resolved: &[Resolved],
+    deps: &[Dep],
+    nsh: Option<&NshOf>,
+) -> anyhow::Result<Vec<(String, AppCrate)>> {
+    let mut own = None;
     resolved
         .iter()
         .filter(|r| r.manifest.module.is_some())
@@ -134,10 +152,27 @@ fn rust_crates(resolved: &[Resolved], deps: &[Dep]) -> Vec<(String, AppCrate)> {
                 .find(|d| d.name == r.locked.name)
                 .map(|d| d.features.clone())
                 .unwrap_or_default();
-            let krate = AppCrate::new(r.locked.name.clone(), r.dir.clone()).with_features(features);
-            (patch_id(r), krate)
+            let mut krate =
+                AppCrate::new(r.locked.name.clone(), r.dir.clone()).with_features(features);
+            if r.own
+                && let Some(nsh) = nsh
+            {
+                let nsh: &Nsh = match &own {
+                    Some(n) => n,
+                    None => own.insert(nsh()?),
+                };
+                krate = krate.linked_with(nsh);
+            }
+            Ok((patch_id(r), krate))
         })
         .collect()
+}
+
+/// The nsh the app `app` builds with: where its own crates take nsh's
+/// crates from, or this command line's.
+fn nsh_of(app: &App) -> anyhow::Result<Nsh> {
+    let crates: Vec<AppCrate> = app.own_crates()?.into_iter().map(|(_, c)| c).collect();
+    Nsh::for_app(&crates)
 }
 
 /// The `[patch]` table that sends the app's dependency on the nshm
@@ -215,8 +250,8 @@ impl App {
     fn open(cwd: &Path) -> anyhow::Result<Self> {
         let dir = app_dir(cwd)?;
         let path = dir.join("nsh.json");
-        let text =
-            fs::read_to_string(&path).with_context(|| format!("can't read {}", path.display()))?;
+        let text = nsh_bundler::app_dir::read(&path)
+            .with_context(|| format!("can't read {}", path.display()))?;
         let config = serde_json::from_str(&text).context("nsh.json is not JSON")?;
         Ok(App { dir, config })
     }
@@ -348,7 +383,7 @@ fn say_rust_needed(app: &App, lock: &Lock, resolved: &[Resolved]) {
 /// packages or modules is reported here, before a build.
 fn check_rust(app: &App, resolved: &[Resolved], deps: &[Dep]) -> anyhow::Result<()> {
     let mut all = app.own_crates()?;
-    all.extend(rust_crates(resolved, deps));
+    all.extend(rust_crates(resolved, deps, None)?);
     if all.len() > 1 {
         rust_app::check_crates(&all)?;
     }
@@ -422,15 +457,18 @@ fn add_to(app: &mut App, backup: &mut Backup, added: Added) -> anyhow::Result<()
     }
     let lock = Lock::read(&app.dir)?;
     // `nsh add` again: resolved anew, the newest its requirement accepts.
-    let resolved = resolve::resolve(&app.dir, &deps, &lock, &|n| n == name, &mut net)?;
+    let nsh = || nsh_of(app);
+    let resolved = resolve::resolve(&app.dir, &deps, &lock, &|n| n == name, &nsh, &mut net)?;
     let this = resolved
         .iter()
         .find(|r| r.locked.name == name)
         .context("the nshm is not resolved")?
         .clone();
     // Listed without a version: what it resolved to, as `cargo add`
-    // writes `^0.3.2`. A commit has no version to require.
+    // writes `^0.3.2`. A commit has no version to require; nsh's own nshm
+    // has its nsh's.
     let versioned = match &this.origin {
+        _ if this.own => true,
         Origin::Registry => true,
         Origin::Git { .. } => this
             .dir
@@ -511,7 +549,8 @@ pub(crate) fn remove(cwd: &Path, names: &[String]) -> anyhow::Result<()> {
         let lock = Lock::read(&app.dir)?;
         deps.retain(|d| !names.contains(&d.name));
         let mut net = fetch::Net::new(root()?);
-        let resolved = resolve::resolve(&app.dir, &deps, &lock, &|_| false, &mut net)?;
+        let nsh = || nsh_of(&app);
+        let resolved = resolve::resolve(&app.dir, &deps, &lock, &|_| false, &nsh, &mut net)?;
         app.write_dependencies(&deps)?;
         write_lock(&app.dir, &lock, &resolved)?;
         if let Some(crate_dir) = app.own_crate()? {
@@ -565,6 +604,7 @@ pub(crate) fn upgrade(cwd: &Path, names: &[String]) -> anyhow::Result<()> {
             &deps,
             &lock,
             &|n| names.is_empty() || names.iter().any(|x| x == n),
+            &|| nsh_of(&app),
             &mut net,
         )?;
         check_rust(&app, &resolved, &deps)?;
@@ -636,7 +676,7 @@ pub(crate) fn platform_program(cwd: &Path, name: &str) -> anyhow::Result<Option<
     if app.config.get("dependencies").is_none() {
         return Ok(None);
     }
-    let resolved = ensure(&app.dir, &app.config)?;
+    let resolved = ensure(&app.dir, &app.config, &|| nsh_of(&app))?;
     let Some(r) = resolved
         .iter()
         .find(|r| r.manifest.platform.as_deref() == Some(name))
@@ -837,7 +877,7 @@ mod tests {
         assert_eq!(exports[0].0, "acme-ui");
         assert!(exports[0].1.starts_with(&installed));
         // A build with the lock in place reads nothing new: unchanged.
-        let again = crates(&app, &config).unwrap();
+        let again = crates(&app, &config, &|| Ok(Nsh::Registry)).unwrap();
         assert!(again.is_empty(), "a TSX nshm is no crate");
         assert_eq!(Lock::read(&app).unwrap(), lock);
         // A new version within the requirement: `nsh upgrade` takes it.

@@ -160,6 +160,7 @@ fn ime(
 
 /// Runs the window (and waits for the engine's thread) until the focused
 /// field reads `text`.
+#[track_caller]
 fn wait_for(view: &Entity<AppView>, cx: &mut VisualTestContext, text: &str) {
     let start = Instant::now();
     loop {
@@ -176,22 +177,121 @@ fn wait_for(view: &Entity<AppView>, cx: &mut VisualTestContext, text: &str) {
     }
 }
 
-/// The tests in windows, one after the other in one app: the main
-/// thread's queue (`crate::rt`) is made once per process, for the first
-/// app, so every window's engine must post to that app.
-///
-/// The cases mount pre-v2 plain roots, which now open in the implicit
-/// first window: the GPUI host is not migrated to window model v2 and does
-/// not show app windows yet (`docs/dev/gpui.md`), so this suite is kept
-/// for the migration and does not run.
+fn test_options() -> AppOptions {
+    AppOptions {
+        cache: nsh_engine::CacheOptions::off(),
+        data_dir: Some(std::env::temp_dir().join(format!("nsh-gpui-test-{}", std::process::id()))),
+        ..Default::default()
+    }
+}
+
+fn inline_options() -> AppOptions {
+    AppOptions {
+        inline_root: true,
+        ..test_options()
+    }
+}
+
+fn plain_js_root_respects_inline_opt_in(cx: &mut TestAppContext) {
+    use gpui::AppContext as _;
+
+    let code = nsh_bundler::compile_module(
+        "App.tsx",
+        r#"
+import { mount, platform, View } from "nsh";
+mount(() => <View style={{ height: platform.idiom === "desktop" ? 96 : 0, flexShrink: 0 }} />);
+"#,
+        &[],
+    )
+    .unwrap();
+    let bundle = Bundle::source(code).with_policy(nsh_engine::Policy {
+        declared: Some(nsh_engine::Capabilities::default()),
+        ..Default::default()
+    });
+    // The engine acknowledges after queuing the first mount batch.
+    let acknowledge_mount = |view: &AppView, done: std::sync::mpsc::Sender<()>| {
+        view.surface().control(|control| {
+            control.flush(move |_| {
+                let _ = done.send(());
+            });
+        });
+    };
+    for inline in [true, false] {
+        for own_first in [true, false] {
+            let options = if inline {
+                inline_options()
+            } else {
+                test_options()
+            };
+            let bundle = bundle.clone();
+            let (done, settled) = std::sync::mpsc::channel();
+            let (host, cx) = cx.add_window_view(|window, cx| {
+                Framed(cx.new(|cx| {
+                    let view = AppView::new(options, window, cx);
+                    if own_first {
+                        view.own_window(window, cx);
+                    }
+                    view.load(App::Js(bundle));
+                    if !own_first {
+                        view.own_window(window, cx);
+                    }
+                    acknowledge_mount(&view, done);
+                    view
+                }))
+            });
+            let ready = settled.recv();
+            cx.run_until_parked();
+            let view = host.read_with(cx, |host, _| host.0.clone());
+            let height = view.read_with(cx, |view, _| view.content_height());
+            let count = cx.windows().len();
+            view.update(cx, |view, _| view.stop());
+            cx.update(|window, _| window.remove_window());
+            cx.run_until_parked();
+
+            ready.expect("the embedded engine did not start");
+            let expected = if inline { (96.0, 1) } else { (0.0, 2) };
+            assert_eq!(
+                (height.map_or(0.0, |height| height.0), count),
+                expected,
+                "inline={inline}, own_first={own_first}"
+            );
+        }
+    }
+
+    let (done, settled) = std::sync::mpsc::channel();
+    let window = cx.update(|cx| {
+        crate::open_app_window(crate::AppSource::Bundle(bundle), inline_options(), cx).unwrap()
+    });
+    window
+        .update(cx, |view, _, _| acknowledge_mount(view, done))
+        .unwrap();
+    let ready = settled.recv();
+    cx.run_until_parked();
+    let count = cx.windows().len();
+    window
+        .update(cx, |view, window, _| {
+            view.stop();
+            window.remove_window();
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    ready.expect("the standalone engine did not start");
+    assert_eq!(count, 2, "standalone launches keep the implicit window");
+}
+
+/// One app runs all the engine cases: the main thread's queue (`crate::rt`)
+/// is made once per process, for the first app.
 #[gpui::test]
-#[ignore = "the GPUI host is not migrated to window model v2 yet (docs/dev/gpui.md)"]
+#[cfg_attr(not(feature = "js"), ignore = "the window suite needs the JS engine")]
 fn windows(cx: &mut TestAppContext) {
     // The engine (and the settings portal) run on threads of their own.
     cx.executor().allow_parking();
     // The tests' JS imports all of `nsh/base` (Popover etc.), not only the
     // core part a host serves by default.
     crate::set_ui_sets(vec![nsh_base::registry()]);
+    plain_js_root_respects_inline_opt_in(cx);
+    crate::surface::tests::committed_content_height_reaches_host_observers(cx);
     keys_reach_the_fields_of_a_surface_showing_a_native_component(cx);
     a_captured_key_release_is_kept_from_the_window(cx);
     compositions_are_reported_and_hold_values_until_they_end(cx);
@@ -208,17 +308,28 @@ fn windows(cx: &mut TestAppContext) {
     the_app_s_shortcuts_reach_it_while_a_native_component_has_the_keyboard(cx);
     js_and_rust_view_shortcuts_fire_together_in_either_order(cx);
     each_view_s_functions_read_the_context_its_options_gave_its_engine(cx);
-    an_embedded_view_that_owns_its_window_sets_its_title_and_menu(cx);
     quit_and_close_requests_go_to_the_handler_instead_of_acting(cx);
     an_auto_hidden_menu_bar_shows_on_alt_alone_and_while_a_menu_is_open(cx);
     asset_uris_resolve_in_the_first_directory_that_has_the_file(cx);
     the_host_s_theme_overrides_win_over_the_app_s_tokens_they_name(cx);
     releasing_shift_before_alt_keeps_the_auto_hidden_menu_bar_hidden(cx);
     the_app_s_state_follows_its_window_s_activation_and_visibility(cx);
-    set_bounds_sizes_the_window_and_keeps_the_size_it_leaves_out(cx);
     a_secondary_click_on_a_drag_area_reaches_its_on_context_menu(cx);
     props_and_commands_reach_a_native_component_whose_view_is_not_drawn(cx);
     a_command_without_a_search_field_takes_the_keyboard_on_focus(cx);
+}
+
+/// These cases exercise window state or attributes through `currentWindow()`.
+/// The plain root renders in its own implicit window without the opt-in,
+/// and with it the desktop runtime does not treat the host as an app window.
+/// Run this group separately from `windows` when migrating the standalone host.
+#[gpui::test]
+#[ignore = "the GPUI host is not migrated to window model v2 yet (docs/dev/gpui.md)"]
+fn standalone_windows(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    crate::set_ui_sets(vec![nsh_base::registry()]);
+    an_embedded_view_that_owns_its_window_sets_its_title_and_menu(cx);
+    set_bounds_sizes_the_window_and_keeps_the_size_it_leaves_out(cx);
     // GPUI's test platform cannot minimize, which hides on Linux.
     #[cfg(not(target_os = "linux"))]
     a_background_app_s_hidden_main_window_is_not_focused(cx);
@@ -226,8 +337,7 @@ fn windows(cx: &mut TestAppContext) {
 
 fn keys_reach_the_fields_of_a_surface_showing_a_native_component(cx: &mut TestAppContext) {
     let code = nsh_bundler::compile_module("App.tsx", FIELD_AFTER_COMPONENT, &[]).unwrap();
-    let (view, cx) =
-        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    let (view, cx) = cx.add_window_view(|window, cx| AppView::new(inline_options(), window, cx));
     view.update(cx, |view, _| {
         view.register_component("test.square", Rc::new(|_| Box::new(Square)));
         view.load(App::Js(Bundle::source(code)));
@@ -286,8 +396,7 @@ fn wait_for_focus_stop(
 }
 
 fn a_captured_key_release_is_kept_from_the_window(cx: &mut TestAppContext) {
-    let (view, cx) =
-        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    let (view, cx) = cx.add_window_view(|window, cx| AppView::new(test_options(), window, cx));
     view.update(cx, |view, _| {
         view.load(App::Rust(Root::of::<captured_keys::CapturedKeys>()))
     });
@@ -342,8 +451,7 @@ fn a_captured_key_release_is_kept_from_the_window(cx: &mut TestAppContext) {
 
 fn compositions_are_reported_and_hold_values_until_they_end(cx: &mut TestAppContext) {
     let code = nsh_bundler::compile_module("App.tsx", COMPOSING_FIELD, &[]).unwrap();
-    let (view, cx) =
-        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    let (view, cx) = cx.add_window_view(|window, cx| AppView::new(inline_options(), window, cx));
     view.update(cx, |view, _| view.load(App::Js(Bundle::source(code))));
     cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
     wait_for(&view, cx, "abcd");
@@ -371,7 +479,7 @@ fn an_embedded_surface_takes_the_keyboard_when_its_app_focuses_a_field(cx: &mut 
     let code = nsh_bundler::compile_module("App.tsx", FIELD_AFTER_COMPONENT, &[]).unwrap();
     use gpui::AppContext as _;
     let (host, cx) = cx.add_window_view(|window, cx| {
-        let view = cx.new(|cx| AppView::new(AppOptions::default(), window, cx));
+        let view = cx.new(|cx| AppView::new(inline_options(), window, cx));
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
         Host { view, focus }
@@ -449,8 +557,7 @@ fn down(vk: u16, modifiers: crate::input::Modifiers) -> crate::input::KeyEvent {
 /// has the keyboard.
 fn typed_ahead(cx: &mut TestAppContext, key: crate::input::KeyEvent) {
     let code = nsh_bundler::compile_module("App.tsx", TWO_FIELDS, &[]).unwrap();
-    let (view, cx) =
-        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    let (view, cx) = cx.add_window_view(|window, cx| AppView::new(inline_options(), window, cx));
     view.update(cx, |view, _| view.load(App::Js(Bundle::source(code))));
     cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
     wait_for(&view, cx, "A");
@@ -515,8 +622,7 @@ mount(App);
 
 fn a_popovers_field_follows_its_trigger_in_the_tab_order(cx: &mut TestAppContext) {
     let code = nsh_bundler::compile_module("App.tsx", POPOVER_FIELDS, &[]).unwrap();
-    let (view, cx) =
-        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    let (view, cx) = cx.add_window_view(|window, cx| AppView::new(inline_options(), window, cx));
     view.update(cx, |view, _| view.load(App::Js(Bundle::source(code))));
     cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
     wait_for(&view, cx, "before");
@@ -652,7 +758,7 @@ fn the_app_s_shortcuts_reach_it_while_a_native_component_has_the_keyboard(cx: &m
     let focus = Rc::new(RefCell::new(None));
     let (component_keys, component_focus) = (keys.clone(), focus.clone());
     let (view, cx) = cx.add_window_view(|window, cx| {
-        let view = AppView::new(AppOptions::default(), window, cx);
+        let view = AppView::new(inline_options(), window, cx);
         let title = window.window_title();
         crate::chrome::set_standalone(view.surface(), &title, window.window_handle());
         view
@@ -783,7 +889,7 @@ fn props_and_commands_reach_a_native_component_whose_view_is_not_drawn(cx: &mut 
     let rendered = Rc::new(std::cell::Cell::new(false));
     let (component_log, component_rendered) = (log.clone(), rendered.clone());
     let (unshown, cx) = cx.add_window_view(|window, cx| {
-        Unshown(cx.new(|cx| AppView::new(AppOptions::default(), window, cx)))
+        Unshown(cx.new(|cx| AppView::new(inline_options(), window, cx)))
     });
     let view = unshown.read_with(cx, |unshown, _| unshown.0.clone());
     view.update(cx, |view, _| {
@@ -898,7 +1004,7 @@ fn each_view_s_functions_read_the_context_its_options_gave_its_engine(cx: &mut T
         let view = |desk: &'static str, window: &mut Window, cx: &mut gpui::Context<Pair>| {
             let options = AppOptions {
                 context: nsh_engine::EngineContext::default().with(Desk(desk)),
-                ..AppOptions::default()
+                ..inline_options()
             };
             cx.new(|cx| AppView::new(options, window, cx))
         };
@@ -1000,7 +1106,7 @@ fn js_and_rust_view_shortcuts_fire_together_in_either_order(cx: &mut TestAppCont
 
     let code = nsh_bundler::compile_module("App.tsx", &js_and_rust_view(false), &sets).unwrap();
     let (view, window) =
-        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+        cx.add_window_view(|window, cx| AppView::new(inline_options(), window, cx));
     view.update(window, |view, _| view.load(App::Js(Bundle::source(code))));
     window.update(|w, cx| w.focus(&view.focus_handle(cx), cx));
     wait_for(&view, window, "fired");
@@ -1016,7 +1122,7 @@ fn js_and_rust_view_shortcuts_fire_together_in_either_order(cx: &mut TestAppCont
 
     let code = nsh_bundler::compile_module("App.tsx", &js_and_rust_view(true), &sets).unwrap();
     let (view, window) =
-        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+        cx.add_window_view(|window, cx| AppView::new(inline_options(), window, cx));
     view.update(window, |view, _| view.load(App::Js(Bundle::source(code))));
     window.update(|w, cx| w.focus(&view.focus_handle(cx), cx));
     wait_for(&view, window, "fired bound");
@@ -1091,8 +1197,7 @@ mod select_on_focus {
 }
 
 fn a_click_that_focuses_a_field_selecting_on_focus_selects_its_text(cx: &mut TestAppContext) {
-    let (view, cx) =
-        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    let (view, cx) = cx.add_window_view(|window, cx| AppView::new(test_options(), window, cx));
     view.update(cx, |view, _| {
         view.load(App::Rust(Root::of::<select_on_focus::SelectOnFocus>()))
     });
@@ -1146,8 +1251,7 @@ mount(() => <View style={{ flex: 1 }}>
 </View>);
 "#;
     let code = nsh_bundler::compile_module("App.tsx", source, &[]).unwrap();
-    let (view, cx) =
-        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    let (view, cx) = cx.add_window_view(|window, cx| AppView::new(inline_options(), window, cx));
     view.update(cx, |view, _| view.load(App::Js(Bundle::source(code))));
     cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
     wait_for(&view, cx, "none");
@@ -1256,8 +1360,7 @@ mount(() => <View style={{ flex: 1 }}>
 }
 
 fn presses_carry_where_the_pointer_was(cx: &mut TestAppContext) {
-    let (view, cx) =
-        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    let (view, cx) = cx.add_window_view(|window, cx| AppView::new(test_options(), window, cx));
     view.update(cx, |view, _| {
         view.load(App::Rust(Root::of::<press_point::PressPoint>()))
     });
@@ -1272,6 +1375,7 @@ fn presses_carry_where_the_pointer_was(cx: &mut TestAppContext) {
 
 /// Runs the window until the focused field's text satisfies `done`, and
 /// returns it.
+#[track_caller]
 fn wait_until(
     view: &Entity<AppView>,
     cx: &mut VisualTestContext,
@@ -1306,13 +1410,14 @@ impl gpui::Render for Framed {
 /// running `code`, with the keyboard in the view.
 fn owned_view(
     cx: &mut TestAppContext,
+    options: AppOptions,
     code: String,
     setup: impl FnOnce(&AppView),
 ) -> (Entity<AppView>, &mut VisualTestContext) {
     use gpui::AppContext as _;
     let (framed, cx) = cx.add_window_view(|window, cx| {
         let view = cx.new(|cx| {
-            let view = AppView::new(AppOptions::default(), window, cx);
+            let view = AppView::new(options, window, cx);
             view.own_window(window, cx);
             view
         });
@@ -1413,7 +1518,7 @@ fn app_height(view: &Entity<AppView>, cx: &mut VisualTestContext) -> f32 {
 
 fn an_embedded_view_that_owns_its_window_sets_its_title_and_menu(cx: &mut TestAppContext) {
     let code = nsh_bundler::compile_module("App.tsx", OWNED_WINDOW, &[]).unwrap();
-    let (view, cx) = owned_view(cx, code, |_| {});
+    let (view, cx) = owned_view(cx, test_options(), code, |_| {});
     wait_until_window(cx, "the app's title on the window", |cx| {
         cx.window_title().as_deref() == Some("Owned")
     });
@@ -1429,7 +1534,7 @@ fn quit_and_close_requests_go_to_the_handler_instead_of_acting(cx: &mut TestAppC
     let code = nsh_bundler::compile_module("App.tsx", OWNED_WINDOW, &[]).unwrap();
     let asked = Rc::new(std::cell::RefCell::new(Vec::new()));
     let log = asked.clone();
-    let (view, cx) = owned_view(cx, code, move |view| {
+    let (view, cx) = owned_view(cx, inline_options(), code, move |view| {
         view.on_close_request(move |request, _, _| log.borrow_mut().push(request))
     });
     app_height(&view, cx);
@@ -1494,7 +1599,7 @@ fn an_auto_hidden_menu_bar_shows_on_alt_alone_and_while_a_menu_is_open(cx: &mut 
         return;
     }
     let code = nsh_bundler::compile_module("App.tsx", AUTO_HIDDEN_BAR, &[]).unwrap();
-    let (view, cx) = owned_view(cx, code, |_| {});
+    let (view, cx) = owned_view(cx, inline_options(), code, |_| {});
     let full = height_below_title_bar(cx);
     let (hidden, shown) = (format!("h {full}"), format!("h {}", full - 28.0));
     wait_for(&view, cx, &hidden);
@@ -1585,8 +1690,7 @@ fn asset_uris_resolve_in_the_first_directory_that_has_the_file(cx: &mut TestAppC
     // first.
     png(archive.join("app.png"), 7, 7);
     let code = nsh_bundler::compile_module("App.tsx", TWO_ASSET_ROOTS, &[]).unwrap();
-    let (view, cx) =
-        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    let (view, cx) = cx.add_window_view(|window, cx| AppView::new(inline_options(), window, cx));
     view.update(cx, |view, _| {
         view.set_asset_base(Some(crate::AssetBase::Directories(vec![app, archive])));
         view.load(App::Js(Bundle::source(code)));
@@ -1643,8 +1747,7 @@ fn the_host_s_theme_overrides_win_over_the_app_s_tokens_they_name(cx: &mut TestA
     let code = |label| {
         nsh_bundler::compile_module("App.tsx", &THEMED_FIELD.replace("LABEL", label), &[]).unwrap()
     };
-    let (view, cx) =
-        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    let (view, cx) = cx.add_window_view(|window, cx| AppView::new(inline_options(), window, cx));
     view.update(cx, |view, _| {
         view.load(App::Js(Bundle::source(code("first"))))
     });
@@ -1682,7 +1785,7 @@ fn releasing_shift_before_alt_keeps_the_auto_hidden_menu_bar_hidden(cx: &mut Tes
         return;
     }
     let code = nsh_bundler::compile_module("App.tsx", AUTO_HIDDEN_BAR, &[]).unwrap();
-    let (view, cx) = owned_view(cx, code, |_| {});
+    let (view, cx) = owned_view(cx, inline_options(), code, |_| {});
     let full = height_below_title_bar(cx);
     wait_for(&view, cx, &format!("h {full}"));
     for shift_first in [false, true] {
@@ -1748,7 +1851,7 @@ mount(App);
 fn menu_shortcuts_leave_a_focused_field_the_keys_it_uses(cx: &mut TestAppContext) {
     let code = nsh_bundler::compile_module("App.tsx", MENU_OVER_FIELD, &[]).unwrap();
     let (view, cx) = cx.add_window_view(|window, cx| {
-        let view = AppView::new(AppOptions::default(), window, cx);
+        let view = AppView::new(inline_options(), window, cx);
         let title = window.window_title();
         crate::chrome::set_standalone(view.surface(), &title, window.window_handle());
         crate::system::own_window(view.surface());
@@ -1835,8 +1938,7 @@ mount(App);
 
 fn presses_carry_the_modifier_keys_and_click_count(cx: &mut TestAppContext) {
     let code = nsh_bundler::compile_module("App.tsx", PRESS_MODIFIERS, &[]).unwrap();
-    let (view, cx) =
-        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    let (view, cx) = cx.add_window_view(|window, cx| AppView::new(inline_options(), window, cx));
     view.update(cx, |view, _| view.load(App::Js(Bundle::source(code))));
     cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
     wait_for(&view, cx, "none");
@@ -1888,8 +1990,7 @@ mount(App);
 
 fn mouse_events_carry_the_position_button_and_modifiers(cx: &mut TestAppContext) {
     let code = nsh_bundler::compile_module("App.tsx", MOUSE_EVENTS, &[]).unwrap();
-    let (view, cx) =
-        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    let (view, cx) = cx.add_window_view(|window, cx| AppView::new(inline_options(), window, cx));
     view.update(cx, |view, _| view.load(App::Js(Bundle::source(code))));
     cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
     wait_for(&view, cx, "- | - | -");
@@ -1978,8 +2079,7 @@ mount(App);
 
 fn a_view_removed_under_the_mouse_hears_no_leave(cx: &mut TestAppContext) {
     let code = nsh_bundler::compile_module("App.tsx", HOVER_REMOVED, &[]).unwrap();
-    let (view, cx) =
-        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    let (view, cx) = cx.add_window_view(|window, cx| AppView::new(inline_options(), window, cx));
     view.update(cx, |view, _| view.load(App::Js(Bundle::source(code))));
     cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
     wait_for(&view, cx, "a:");
@@ -2012,8 +2112,7 @@ fn click(cx: &mut VisualTestContext, position: gpui::Point<gpui::Pixels>, count:
 
 fn the_app_s_state_follows_its_window_s_activation_and_visibility(cx: &mut TestAppContext) {
     let code = nsh_bundler::compile_module("App.tsx", LIFECYCLE_FIELD, &[]).unwrap();
-    let (view, cx) =
-        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    let (view, cx) = cx.add_window_view(|window, cx| AppView::new(inline_options(), window, cx));
     view.update(cx, |view, _| view.load(App::Js(Bundle::source(code))));
     cx.update(|window, cx| {
         window.activate_window();
@@ -2066,7 +2165,7 @@ mount(App);
 
 fn set_bounds_sizes_the_window_and_keeps_the_size_it_leaves_out(cx: &mut TestAppContext) {
     let code = nsh_bundler::compile_module("App.tsx", SIZED_WINDOW, &[]).unwrap();
-    let (view, cx) = owned_view(cx, code, |_| {});
+    let (view, cx) = owned_view(cx, test_options(), code, |_| {});
     wait_for(&view, cx, "sized");
     let size = |cx: &mut VisualTestContext| {
         cx.update(|window, _| {
@@ -2113,7 +2212,7 @@ mount(App);
 
 fn a_secondary_click_on_a_drag_area_reaches_its_on_context_menu(cx: &mut TestAppContext) {
     let code = nsh_bundler::compile_module("App.tsx", DRAG_AREA_MENU, &[]).unwrap();
-    let (view, cx) = owned_view(cx, code, |_| {});
+    let (view, cx) = owned_view(cx, inline_options(), code, |_| {});
     wait_for(&view, cx, "-");
     // Not the window menu (Linux): the view's own menu. The surface starts
     // below the platform's title bar (macOS, Windows).
@@ -2167,8 +2266,7 @@ mount(App);
 
 fn a_command_without_a_search_field_takes_the_keyboard_on_focus(cx: &mut TestAppContext) {
     let code = nsh_bundler::compile_module("App.tsx", UNSEARCHABLE_COMMAND, &[]).unwrap();
-    let (view, cx) =
-        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    let (view, cx) = cx.add_window_view(|window, cx| AppView::new(inline_options(), window, cx));
     view.update(cx, |view, _| view.load(App::Js(Bundle::source(code))));
     cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
     // `focus()` moves the keyboard from the field to the command.
@@ -2222,7 +2320,7 @@ fn a_background_app_s_hidden_main_window_is_not_focused(cx: &mut TestAppContext)
     use nsh_core::desktop::WindowRequest;
     let code = nsh_bundler::compile_module("App.tsx", FOCUSED_WINDOW, &[]).unwrap();
     cx.update(|cx| crate::window::set_in_background(true, cx));
-    let (view, cx) = owned_view(cx, code, |_| {});
+    let (view, cx) = owned_view(cx, test_options(), code, |_| {});
     // Only the window that would have the keyboard in a background app
     // has it: the system's active window is another app's.
     cx.deactivate_window();

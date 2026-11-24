@@ -11,28 +11,6 @@ A button is a press target. It owns the behavior: presses, press feedback throug
 disabled and selected states, keyboard focus, and its role for screen readers. The look is the app's: a `Button` has no colors, sizes, paddings or label of its own, so one component becomes a primary button,
 an icon button, a menu's trigger or the row of a list, depending on the styles and children you give it.
 
-```rust tabs
-use nsh_base::button;
-use nsh_core::prelude::*;
-
-fn counter() -> impl IntoElement {
-    let count = signal(0_u32);
-    button()
-        .on_press(move || count.update(|n| *n += 1))
-        .self_center()
-        .px_5()
-        .py_3()
-        .rounded_xl()
-        .bg(rgb(0x2563eb))
-        .active(|s| s.bg(rgb(0x1d4ed8)))
-        .child(
-            text(move || format!("Pressed {}", count.get()))
-                .text_color(white())
-                .font_weight(FontWeight::SEMIBOLD),
-        )
-}
-```
-
 ```tsx tabs
 import { mount, signal, Text } from "nsh";
 import { Button } from "nsh/base";
@@ -57,6 +35,28 @@ mount(() => (
 ));
 ```
 
+```rust tabs
+use nsh_base::button;
+use nsh_core::prelude::*;
+
+fn counter() -> impl IntoElement {
+    let count = signal(0_u32);
+    button()
+        .on_press(move || count.update(|n| *n += 1))
+        .self_center()
+        .px_5()
+        .py_3()
+        .rounded_xl()
+        .bg(rgb(0x2563eb))
+        .active(|s| s.bg(rgb(0x1d4ed8)))
+        .child(
+            text(move || format!("Pressed {}", count.get()))
+                .text_color(white())
+                .font_weight(FontWeight::SEMIBOLD),
+        )
+}
+```
+
 `Button` comes from [`nsh/base`](../modules/nsh-base.md), the `nsh-base` crate in Rust. In TSX its look is `class` and
 `style`, with the state variants `active:`, `hover:`, `focus-visible:`, `selected:` and `disabled:` (or the matching
 `activeStyle`, `hoverStyle`, `focusVisibleStyle`, `selectedStyle` and `disabledStyle`). In Rust, `button()` makes one as
@@ -73,6 +73,7 @@ the typed style methods (`.px_4()`, `.bg(..)`) for its look, the state methods (
 | `selectedStyle` | `.selected_style(\|s\| ..)` | `StyleProp<ViewStyle>` | none | The style while `selected` and not disabled, as `selected:` classes. |
 | `busy` | `.busy(..)` | `boolean` | `false` | Busy: its action is running, as a "Saving…" button. Screen readers say so. Presses still count; set `disabled` too to refuse them. |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers say when the content is not enough, as for an icon. |
+| `accessibilityHint` | `.accessibility_hint(..)` | `string` | none | Explains what activating the button does, as a view's `accessibilityHint`. |
 | `role` | `.role(..)` | `AccessibilityRole` | `"button"` | What it is for screen readers when no `nsh/base` component is that control: `"link"` (it opens a URL), ... |
 | `hitSlop` | `.hit_slop(..)` | `number \| Partial<Edges>` | none | How far outside its bounds presses still count, in points: one number for every side, or the sides named. As a view's `hitSlop`. |
 | `children` | `.child(..)` | `JSX.Element` | none | The content: text, an icon, any layout. |
@@ -102,6 +103,34 @@ styles do not express. A disabled button reports none of them.
 
 The look of a button is your app's: the app decides what a primary or a secondary button is. A pair of small components keeps
 that decision in one place:
+
+```tsx tabs
+import { Text } from "nsh";
+import { Button } from "nsh/base";
+
+function Primary(props: { label: string; onPress: () => void; disabled?: boolean }) {
+  return (
+    <Button
+      onPress={props.onPress}
+      disabled={props.disabled}
+      class="items-center rounded-lg bg-blue-600 px-4 py-3 active:bg-blue-700 disabled:opacity-40"
+    >
+      <Text class="font-semibold text-white">{props.label}</Text>
+    </Button>
+  );
+}
+
+function Secondary(props: { label: string; onPress: () => void }) {
+  return (
+    <Button
+      onPress={props.onPress}
+      class="items-center rounded-lg border border-neutral-300 px-4 py-3 active:bg-neutral-100 hover:bg-neutral-50"
+    >
+      <Text class="text-neutral-900">{props.label}</Text>
+    </Button>
+  );
+}
+```
 
 ```rust tabs
 use nsh_base::button;
@@ -137,34 +166,6 @@ fn secondary(label: &'static str, on_press: impl Fn() + 'static) -> impl IntoEle
 }
 ```
 
-```tsx tabs
-import { Text } from "nsh";
-import { Button } from "nsh/base";
-
-function Primary(props: { label: string; onPress: () => void; disabled?: boolean }) {
-  return (
-    <Button
-      onPress={props.onPress}
-      disabled={props.disabled}
-      class="items-center rounded-lg bg-blue-600 px-4 py-3 active:bg-blue-700 disabled:opacity-40"
-    >
-      <Text class="font-semibold text-white">{props.label}</Text>
-    </Button>
-  );
-}
-
-function Secondary(props: { label: string; onPress: () => void }) {
-  return (
-    <Button
-      onPress={props.onPress}
-      class="items-center rounded-lg border border-neutral-300 px-4 py-3 active:bg-neutral-100 hover:bg-neutral-50"
-    >
-      <Text class="text-neutral-900">{props.label}</Text>
-    </Button>
-  );
-}
-```
-
 The state variants are applied natively: a press darkens the button on the main thread with no JS or Rust running.
 In Rust the state methods are the same variants: `.active(..)`, `.hover(..)`, `.focus(..)`, `.selected_style(..)` and
 `.disabled_style(..)` follow the button's own states. Your theme's colors work the same way: `bg-primary` in TSX,
@@ -174,6 +175,12 @@ In Rust the state methods are the same variants: `.active(..)`, `.hover(..)`, `.
 
 A disabled button takes no presses and gives no feedback, and screen readers announce it as dimmed. Its look while
 disabled is yours, with `disabled:` classes or `disabledStyle`:
+
+```tsx tabs
+<Button disabled={saving()} onPress={save} class="rounded-lg bg-blue-600 px-4 py-3 disabled:opacity-40">
+  <Text class="text-white">Save</Text>
+</Button>
+```
 
 ```rust tabs
 fn save(saving: Signal<bool>) -> impl IntoElement {
@@ -189,17 +196,21 @@ fn save(saving: Signal<bool>) -> impl IntoElement {
 }
 ```
 
-```tsx tabs
-<Button disabled={saving()} onPress={save} class="rounded-lg bg-blue-600 px-4 py-3 disabled:opacity-40">
-  <Text class="text-white">Save</Text>
-</Button>
-```
-
 ## The current item with selected
 
 `selected` shows a button as the current one of its kind or as the trigger of what is open: the folder a sidebar
 shows, the active filter, a menu button while its menu is open (Design Guides, "Interaction states"). The app holds
 the value and styles the selected state; screen readers announce the button as selected.
+
+```tsx tabs
+<Button
+  selected={folder() === "Inbox"}
+  onPress={() => folder.set("Inbox")}
+  class="rounded-(--radius) px-3 py-2 selected:bg-accent"
+>
+  <Text>Inbox</Text>
+</Button>
+```
 
 ```rust tabs
 use nsh_base::{button, theme};
@@ -217,16 +228,6 @@ fn folder(name: &'static str, current: Signal<&'static str>) -> impl IntoElement
 }
 ```
 
-```tsx tabs
-<Button
-  selected={folder() === "Inbox"}
-  onPress={() => folder.set("Inbox")}
-  class="rounded-(--radius) px-3 py-2 selected:bg-accent"
->
-  <Text>Inbox</Text>
-</Button>
-```
-
 Something that is on or off (bold in a toolbar, a favorite, a view option) is a [`Toggle`](./toggle.md): it owns
 the pressed state, and screen readers announce it as a toggle button. A row of tabs is [`Tabs`](./tabs.md) and a
 setting that is on or off is [`Switch`](./switch.md), from `nsh/base`: they own the role, the state and the keyboard
@@ -237,6 +238,12 @@ of their kind, which a `Button` with `role="tab"` or `role="switch"` does not.
 An icon button can be smaller than a finger. `hitSlop` makes presses that land near it count, in points past each side,
 without changing its layout or its look: one number for every side, or the sides named (`{ top: 8, bottom: 8 }`), as
 a [view's `hitSlop`](./index.md#presses-and-feedback) takes them.
+
+```tsx tabs
+<Button hitSlop={12} accessibilityLabel="Close" onPress={() => open.set(false)} class="size-5 items-center justify-center">
+  <Text>×</Text>
+</Button>
+```
 
 ```rust tabs
 fn close(open: Signal<bool>) -> impl IntoElement {
@@ -251,14 +258,10 @@ fn close(open: Signal<bool>) -> impl IntoElement {
 }
 ```
 
-```tsx tabs
-<Button hitSlop={12} accessibilityLabel="Close" onPress={() => open.set(false)} class="size-5 items-center justify-center">
-  <Text>×</Text>
-</Button>
-```
-
 ## Accessibility
 
+- Give `accessibilityHint` when the label does not explain the result of pressing the button. It follows reactive
+  values; setting it to `undefined` removes the hint.
 - A button is one element for screen readers, with the role `"button"` unless `role` says otherwise. Its label is its
   text content; give `accessibilityLabel` when the content is an icon or says too little.
 - `disabled`, `selected` and `busy` are announced as the platform announces them (VoiceOver, TalkBack, UI Automation, the

@@ -500,6 +500,10 @@ pub(crate) struct ComponentEl {
     pub(crate) props: Box<dyn AnyProps>,
     /// The handlers of its events in the view that has it, in order.
     pub(crate) on_event: Vec<Listener<dyn Any>>,
+    /// Made by its registered type, not by `make` and `spec`
+    /// ([`ComponentElement::by_name`]): the code of the component is only
+    /// what registers it (a web runtime's side module).
+    pub(crate) by_name: Option<std::any::TypeId>,
 }
 
 impl Clone for ComponentEl {
@@ -510,6 +514,7 @@ impl Clone for ComponentEl {
             spec: self.spec,
             props: self.props.clone_box(),
             on_event: self.on_event.clone(),
+            by_name: self.by_name,
         }
     }
 }
@@ -1539,6 +1544,17 @@ pub trait Accessible: Element {
         self
     }
 
+    /// [`Accessible::hint`] while it is set (`None`: none), for a
+    /// component that hands the app's optional hint on to its element.
+    fn optional_hint(mut self, hint: impl IntoReactive<Option<SharedString>>) -> Self {
+        self.node().bind_attr(hint, |a, hint| {
+            if hint.is_some() || a.rare.is_some() {
+                a.rare_mut().hint = hint;
+            }
+        });
+        self
+    }
+
     /// More about it than its name, which screen readers read after it
     /// (TS: `accessibilityDescription`; `gpui-base`'s `aria_description`):
     /// a dialog's message, what a field expects.
@@ -2269,8 +2285,8 @@ pub trait Interactive: Element {
     }
 
     /// Where the view goes as a link, carried to the platform as data
-    /// ([`Prop::Href`]). `nsh-base`'s `Link` sets it from its `href`;
-    /// apps use `Link`.
+    /// ([`Prop::Href`]). `nsh-base`'s `Link` sets it from its `href`, and
+    /// `TextView` on the span of each of its links; apps use those.
     #[doc(hidden)]
     fn __link_href(mut self, href: impl IntoReactive<Option<SharedString>>) -> Self {
         super::host::bind_prop(self.node(), href, |href: Option<SharedString>| {
@@ -3088,6 +3104,39 @@ impl<C: Component> ComponentElement<C> {
             spec: ComponentSpec::of::<C>,
             props: Box::new(props),
             on_event: Vec::new(),
+            by_name: None,
+        });
+        Self {
+            node,
+            _component: PhantomData,
+        }
+    }
+
+    /// The element of `C` given `props`, made by the component its UI set
+    /// registered, as a TSX app's `<RichEditor>`: this code does not name
+    /// `C`'s own code, so a web runtime keeps it in the side module of the
+    /// part that registers it and loads that module when the element is
+    /// first mounted. Until the part is registered it shows nothing; it
+    /// then becomes the component, with the props and handlers set here.
+    /// Off WebAssembly, where nothing is loaded later, it is made by type,
+    /// as [`Self::__new`] makes it.
+    pub fn by_name(props: C::Props) -> Self {
+        if cfg!(not(target_arch = "wasm32")) {
+            return Self::new(props);
+        }
+        Self::named(props)
+    }
+
+    /// [`Self::by_name`] on every target (its tests).
+    pub(crate) fn named(props: C::Props) -> Self {
+        let mut node = ElNode::new(Tag::View);
+        node.kind = ElKind::Component(ComponentEl {
+            name: super::component::name_of::<C>(),
+            make: super::component::missing_instance,
+            spec: super::component::missing_spec,
+            props: Box::new(props),
+            on_event: Vec::new(),
+            by_name: Some(std::any::TypeId::of::<C>()),
         });
         Self {
             node,

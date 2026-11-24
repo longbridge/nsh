@@ -394,6 +394,10 @@ current default (the window the component renders in) stays.
   and examples say so; a per-window module singleton is an app bug, not a
   framework feature.
 - `currentWindow()` inside a window returns that window's `WindowRef`.
+  A Rust component inside a JS `<Window>` (one the app's TSX uses) gets that window too: with no Rust
+  component above it, the core renders it under an owner per window that provides a `WindowRef` for that window's
+  node, whose state and title bar area follow what the platform reports of it (`Core::js_window_owner`), so
+  `current_window().title_bar()` there is the window's, not the hidden host's.
   `focusedWindow()` and `windows()` work in the app root and in any window.
 - A `<Window>` unmount disposes its owner, its effects and its bindings; the
   app root is not disposed.

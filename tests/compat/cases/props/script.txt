@@ -261,6 +261,11 @@ absent Scrolled: 200
 expect Scrolled: 100
 expect Scrolled: 200
 prop id:throttled contentOffset y=200
+# Its mouse wheel glides, 40 points a line; the others keep the platform's.
+prop id:throttled smoothWheel true
+prop id:throttled wheelLineHeight 40
+prop id:paged smoothWheel false
+prop id:paged wheelLineHeight 0
 covers [props] pagingEnabled
 covers [props] snapToInterval
 covers [props] snapToOffsets
@@ -273,6 +278,8 @@ covers [props] contentOffset
 covers [props] keyboardShouldPersistTaps
 covers [props] disableIntervalMomentum
 covers [props] scrollbar
+covers [props] smoothWheel
+covers [props] wheelLineHeight
 covers [props] keyboardDismissMode
 covers [props] horizontal
 covers [props] scrollable
@@ -400,6 +407,8 @@ prop id:role-menuitemcheckbox role menuitemcheckbox
 prop id:role-menuitemradio role menuitemradio
 prop id:role-dialog role dialog
 prop id:role-alertdialog role alertdialog
+prop id:role-textbox role textbox
+prop id:role-tabpanel role tabpanel
 covers [props] accessible
 covers [props] accessibilityHint
 covers [props] accessibilityDescription

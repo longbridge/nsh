@@ -71,9 +71,20 @@ pub use crate::{
     },
     declarations::type_definitions,
     error::JsError,
-    host::{ErrorHandler, Host, HostOptions, TextMeasurer},
+    host::{ErrorHandler, Host, HostOptions, LineExtentMeasurer, TextMeasurer},
     net::{FetchEvent, FetchOp, HttpBody, HttpHead, HttpRequest, NetworkQueue, RequestId},
 };
+
+/// Marks an engine context to mount plain JS roots on the host's surface
+/// instead of opening an implicit desktop window. Explicit windows and
+/// the platform environment are unchanged.
+#[doc(hidden)]
+#[must_use]
+pub fn with_inline_root(
+    context: nsh_core::element::EngineContext,
+) -> nsh_core::element::EngineContext {
+    context.with(dom::InlineRoot)
+}
 
 /// The names native module `specifier` exports, if it is one: nsh's own
 /// modules, the runtime's and those of `ui_sets` (a bundler checks named

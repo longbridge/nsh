@@ -3172,6 +3172,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "jiff-tzdb"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12e71a1b68a875a44a33bb7a1dd84392cb77145a3367a552a3cfe6a4f5cf3afc"
+
+[[package]]
 name = "jni"
 version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3839,6 +3845,7 @@ dependencies = [
  "image",
  "libc",
  "log",
+ "md-5 0.10.6",
  "notify",
  "nsh-base",
  "nsh-bundler",
@@ -3968,23 +3975,33 @@ version = "0.6.0"
 dependencies = [
  "block2",
  "dispatch2",
+ "js-sys",
+ "libc",
  "log",
  "ndk-context",
  "nsh-core",
+ "nsh-engine",
  "nsh-platform-android",
  "nsh-platform-apple",
  "nsh-platform-ios",
+ "nsh-testing",
  "objc2",
  "objc2-core-foundation",
+ "objc2-core-location",
  "objc2-foundation",
  "objc2-ui-kit",
+ "serde_json",
  "tokio",
+ "wasm-bindgen",
+ "web-sys",
+ "windows",
 ]
 
 [[package]]
 name = "nsh-i18n"
 version = "0.6.0"
 dependencies = [
+ "jiff-tzdb",
  "rust-i18n-support",
  "serde_json",
 ]
@@ -4105,7 +4122,6 @@ dependencies = [
  "base64 0.22.1",
  "ed25519-dalek 2.2.0",
  "getrandom 0.3.4",
- "nsh-core",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -4514,6 +4530,16 @@ dependencies = [
  "objc2",
  "objc2-core-foundation",
  "objc2-io-surface",
+]
+
+[[package]]
+name = "objc2-core-location"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ca347214e24bc973fc025fd0d36ebb179ff30536ed1f80252706db19ee452009"
+dependencies = [
+ "objc2",
+ "objc2-foundation",
 ]
 
 [[package]]
@@ -7636,9 +7662,9 @@ dependencies = [
 
 [[package]]
 name = "taffy"
-version = "0.15.0"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c8480887e8803986d96a7173729565520d4bbb721ad6b7ad6941a22897207aa"
+checksum = "cae92eb1b204bfd239b5c463e1bd2c3ce4913d2d3abfb5c64f5cfee9d65e5c68"
 dependencies = [
  "serde",
  "slotmap",

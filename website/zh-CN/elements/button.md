@@ -9,28 +9,6 @@ demo: el-button
 
 按钮是一个按压目标。它负责行为：按压、通过应用的状态样式呈现的按压反馈、禁用和选中状态、键盘焦点，以及它对屏幕阅读器而言的角色。外观由应用决定：`Button` 没有自己的颜色、尺寸、内边距或文字，所以同一个组件可以按你给它的样式和子元素，成为主按钮、图标按钮、菜单的触发按钮或列表的一行。
 
-```rust tabs
-use nsh_base::button;
-use nsh_core::prelude::*;
-
-fn counter() -> impl IntoElement {
-    let count = signal(0_u32);
-    button()
-        .on_press(move || count.update(|n| *n += 1))
-        .self_center()
-        .px_5()
-        .py_3()
-        .rounded_xl()
-        .bg(rgb(0x2563eb))
-        .active(|s| s.bg(rgb(0x1d4ed8)))
-        .child(
-            text(move || format!("Pressed {}", count.get()))
-                .text_color(white())
-                .font_weight(FontWeight::SEMIBOLD),
-        )
-}
-```
-
 ```tsx tabs
 import { mount, signal, Text } from "nsh";
 import { Button } from "nsh/base";
@@ -55,6 +33,28 @@ mount(() => (
 ));
 ```
 
+```rust tabs
+use nsh_base::button;
+use nsh_core::prelude::*;
+
+fn counter() -> impl IntoElement {
+    let count = signal(0_u32);
+    button()
+        .on_press(move || count.update(|n| *n += 1))
+        .self_center()
+        .px_5()
+        .py_3()
+        .rounded_xl()
+        .bg(rgb(0x2563eb))
+        .active(|s| s.bg(rgb(0x1d4ed8)))
+        .child(
+            text(move || format!("Pressed {}", count.get()))
+                .text_color(white())
+                .font_weight(FontWeight::SEMIBOLD),
+        )
+}
+```
+
 `Button` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中来自 `nsh-base` crate。在 TSX 中，它的外观是 `class` 和 `style`，配合状态变体 `active:`、`hover:`、`focus-visible:`、`selected:` 和 `disabled:`（或对应的 `activeStyle`、`hoverStyle`、`focusVisibleStyle`、`selectedStyle` 和 `disabledStyle`）。在 Rust 中，`button()` 像 `view()` 创建视图那样创建按钮：每个属性一个设置方法（`.disabled(..)`、`.selected(..)`），每个事件一个监听方法（`.on_press(..)`），类型化的样式方法（`.px_4()`、`.bg(..)`）决定外观，状态方法（`.active(..)`、`.hover(..)`、`.focus(..)`、`.selected_style(..)`、`.disabled_style(..)`）设置各状态的样式，`.child(..)` 添加内容。
 
 <a id="props"></a>
@@ -68,6 +68,7 @@ mount(() => (
 | `selectedStyle` | `.selected_style(\|s\| ..)` | `StyleProp<ViewStyle>` | 无 | `selected` 且未禁用时的样式，与 `selected:` 类相同。 |
 | `busy` | `.busy(..)` | `boolean` | `false` | 忙碌：它的操作正在进行，比如“保存中…”按钮。屏幕阅读器会报告。按压仍然有效；要拒绝按压，同时设置 `disabled`。 |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 内容不足以说明时（比如只有图标），屏幕阅读器读出的文字。 |
+| `accessibilityHint` | `.accessibility_hint(..)` | `string` | 无 | 向屏幕阅读器说明激活按钮会做什么，与视图的 `accessibilityHint` 相同。 |
 | `role` | `.role(..)` | `AccessibilityRole` | `"button"` | 当 `nsh/base` 没有对应的组件时，它对屏幕阅读器而言是什么：`"link"`（打开一个 URL）等。 |
 | `hitSlop` | `.hit_slop(..)` | `number \| Partial<Edges>` | 无 | 按压在边界之外多远仍然算数，单位为点：一个数字表示每一边，或分别指定各边。与视图的 `hitSlop` 相同。 |
 | `children` | `.child(..)` | `JSX.Element` | 无 | 内容：文字、图标或任意布局。 |
@@ -99,6 +100,34 @@ button()
 ## 样式
 
 按钮的外观属于你的应用：什么是主按钮、什么是次按钮，由应用决定。用两个小组件就能把这个决定集中在一处：
+
+```tsx tabs
+import { Text } from "nsh";
+import { Button } from "nsh/base";
+
+function Primary(props: { label: string; onPress: () => void; disabled?: boolean }) {
+  return (
+    <Button
+      onPress={props.onPress}
+      disabled={props.disabled}
+      class="items-center rounded-lg bg-blue-600 px-4 py-3 active:bg-blue-700 disabled:opacity-40"
+    >
+      <Text class="font-semibold text-white">{props.label}</Text>
+    </Button>
+  );
+}
+
+function Secondary(props: { label: string; onPress: () => void }) {
+  return (
+    <Button
+      onPress={props.onPress}
+      class="items-center rounded-lg border border-neutral-300 px-4 py-3 active:bg-neutral-100 hover:bg-neutral-50"
+    >
+      <Text class="text-neutral-900">{props.label}</Text>
+    </Button>
+  );
+}
+```
 
 ```rust tabs
 use nsh_base::button;
@@ -134,34 +163,6 @@ fn secondary(label: &'static str, on_press: impl Fn() + 'static) -> impl IntoEle
 }
 ```
 
-```tsx tabs
-import { Text } from "nsh";
-import { Button } from "nsh/base";
-
-function Primary(props: { label: string; onPress: () => void; disabled?: boolean }) {
-  return (
-    <Button
-      onPress={props.onPress}
-      disabled={props.disabled}
-      class="items-center rounded-lg bg-blue-600 px-4 py-3 active:bg-blue-700 disabled:opacity-40"
-    >
-      <Text class="font-semibold text-white">{props.label}</Text>
-    </Button>
-  );
-}
-
-function Secondary(props: { label: string; onPress: () => void }) {
-  return (
-    <Button
-      onPress={props.onPress}
-      class="items-center rounded-lg border border-neutral-300 px-4 py-3 active:bg-neutral-100 hover:bg-neutral-50"
-    >
-      <Text class="text-neutral-900">{props.label}</Text>
-    </Button>
-  );
-}
-```
-
 状态变体在原生侧应用：按下时按钮在主线程上变暗，不需要运行任何 JS 或 Rust。在 Rust 中，状态方法就是这些变体：`.active(..)`、`.hover(..)`、`.focus(..)`、`.selected_style(..)` 和 `.disabled_style(..)` 跟随按钮自身的状态。主题颜色的用法相同：TSX 中写 `bg-primary`，Rust 中写 `theme().primary`（见[主题 token](../docs/tailwind.md#主题-token)）。
 
 <a id="disabled"></a>
@@ -169,6 +170,12 @@ function Secondary(props: { label: string; onPress: () => void }) {
 ## 禁用
 
 禁用的按钮不响应按压，也没有反馈，屏幕阅读器会报告它不可用。它禁用时的外观由你决定，使用 `disabled:` 类或 `disabledStyle`：
+
+```tsx tabs
+<Button disabled={saving()} onPress={save} class="rounded-lg bg-blue-600 px-4 py-3 disabled:opacity-40">
+  <Text class="text-white">Save</Text>
+</Button>
+```
 
 ```rust tabs
 fn save(saving: Signal<bool>) -> impl IntoElement {
@@ -184,17 +191,21 @@ fn save(saving: Signal<bool>) -> impl IntoElement {
 }
 ```
 
-```tsx tabs
-<Button disabled={saving()} onPress={save} class="rounded-lg bg-blue-600 px-4 py-3 disabled:opacity-40">
-  <Text class="text-white">Save</Text>
-</Button>
-```
-
 <a id="the-current-item-with-selected"></a>
 
 ## 用 selected 标出当前项
 
 `selected` 把按钮标为同类中的当前项，或正在打开的内容的触发器：侧栏当前显示的文件夹、生效中的筛选条件、菜单打开期间的菜单按钮（见设计指南的“交互状态”）。值由应用持有，选中状态的样式也由应用设置；屏幕阅读器会报告按钮已选中。
+
+```tsx tabs
+<Button
+  selected={folder() === "Inbox"}
+  onPress={() => folder.set("Inbox")}
+  class="rounded-(--radius) px-3 py-2 selected:bg-accent"
+>
+  <Text>Inbox</Text>
+</Button>
+```
 
 ```rust tabs
 use nsh_base::{button, theme};
@@ -212,16 +223,6 @@ fn folder(name: &'static str, current: Signal<&'static str>) -> impl IntoElement
 }
 ```
 
-```tsx tabs
-<Button
-  selected={folder() === "Inbox"}
-  onPress={() => folder.set("Inbox")}
-  class="rounded-(--radius) px-3 py-2 selected:bg-accent"
->
-  <Text>Inbox</Text>
-</Button>
-```
-
 开或关的东西（工具栏的加粗、收藏、视图选项）用 [`Toggle`](./toggle.md)：它自带按下状态，屏幕阅读器会把它报告为切换按钮。标签行用 [`Tabs`](./tabs.md)，开或关的设置项用 [`Switch`](./switch.md)（均来自 `nsh/base`）：它们自带该类控件的角色、状态和键盘行为，用 `role="tab"` 或 `role="switch"` 的 `Button` 做不到这些。
 
 <a id="a-small-target-with-hitslop"></a>
@@ -229,6 +230,12 @@ fn folder(name: &'static str, current: Signal<&'static str>) -> impl IntoElement
 ## 用 hitSlop 扩大小目标
 
 图标按钮可能比手指还小。`hitSlop` 让落在它附近的按压也算数，单位为超出每一边的点数，不改变它的布局和外观：一个数字表示每一边，或分别指定各边（`{ top: 8, bottom: 8 }`），与[视图的 `hitSlop`](./index.md#按压与反馈) 取值相同。
+
+```tsx tabs
+<Button hitSlop={12} accessibilityLabel="Close" onPress={() => open.set(false)} class="size-5 items-center justify-center">
+  <Text>×</Text>
+</Button>
+```
 
 ```rust tabs
 fn close(open: Signal<bool>) -> impl IntoElement {
@@ -243,16 +250,11 @@ fn close(open: Signal<bool>) -> impl IntoElement {
 }
 ```
 
-```tsx tabs
-<Button hitSlop={12} accessibilityLabel="Close" onPress={() => open.set(false)} class="size-5 items-center justify-center">
-  <Text>×</Text>
-</Button>
-```
-
 <a id="accessibility"></a>
 
 ## 无障碍
 
+- 标签不能说明按下按钮的结果时，设置 `accessibilityHint`。它跟随响应式值变化；设为 `undefined` 会移除提示。
 - 对屏幕阅读器而言，按钮是一个元素，角色为 `"button"`，除非 `role` 另有指定。它的标签是它的文字内容；内容是图标或说明不足时，设置 `accessibilityLabel`。
 - `disabled`、`selected` 和 `busy` 按平台的方式播报（VoiceOver、TalkBack、UI Automation、浏览器的无障碍树）。
 - 在 macOS 和 Web 上，按钮是键盘焦点的一站：Tab 可以到达它，Return 和空格按下它，`focus-visible:` 样式显示焦点所在。

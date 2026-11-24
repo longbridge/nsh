@@ -654,7 +654,7 @@ pub struct Capabilities {
     /// text, links and files it shares leave the app where the user sends
     /// them.
     pub share: bool,
-    /// The app may recognize the user's speech (`Speech` of `nsh`): the
+    /// The app may recognize the user's speech (`Speech` of `nsh-extra`): the
     /// microphone listens while a session runs, and the transcript reaches
     /// the app.
     pub speech: bool,
@@ -2478,7 +2478,8 @@ impl Access {
         self.each(|c| c.picker)
     }
 
-    /// Whether the app may recognize the user's speech (`Speech` of `nsh`).
+    /// Whether the app may recognize the user's speech (`Speech` of
+    /// `nsh-extra`, which checks it).
     pub fn allows_speech(&self) -> bool {
         self.each(|c| c.speech)
     }
@@ -4302,16 +4303,35 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn file_urls_name_their_decoded_path() {
-        assert_eq!(
-            file_url_path("file:///tmp/a%20b.png"),
-            Some(PathBuf::from("/tmp/a b.png"))
-        );
-        assert_eq!(
-            file_url_path("file://localhost/tmp/a.png"),
-            Some(PathBuf::from("/tmp/a.png"))
-        );
         #[cfg(unix)]
-        assert_eq!(file_url_path("file://host/tmp/a.png"), None);
+        {
+            assert_eq!(
+                file_url_path("file:///tmp/a%20b.png"),
+                Some(PathBuf::from("/tmp/a b.png"))
+            );
+            assert_eq!(
+                file_url_path("file://localhost/tmp/a.png"),
+                Some(PathBuf::from("/tmp/a.png"))
+            );
+            assert_eq!(file_url_path("file://host/tmp/a.png"), None);
+        }
+        #[cfg(windows)]
+        {
+            // A `file:` URL there names a drive: a path without one is no
+            // Windows path (this is what the URL standard says, and what
+            // the loaders resolve), and `localhost` is still no host to
+            // refuse.
+            assert_eq!(
+                file_url_path("file:///C:/a%20b.png"),
+                Some(PathBuf::from("C:\\a b.png"))
+            );
+            assert_eq!(
+                file_url_path("file://localhost/C:/a.png"),
+                Some(PathBuf::from("C:\\a.png"))
+            );
+            assert_eq!(file_url_path("file:///tmp/a.png"), None);
+            assert_eq!(file_url_path("file://localhost/tmp/a.png"), None);
+        }
         assert_eq!(file_url_path("not a url"), None);
         assert_eq!(file_url_path("https://a/b"), None);
     }

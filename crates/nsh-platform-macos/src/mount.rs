@@ -403,6 +403,7 @@ impl Mounter {
             MountItem::Delete { id } => {
                 crate::file_drop::deleted(surface, *id);
                 if let Some(view) = self.views.remove(id) {
+                    crate::access::deleted(&view);
                     crate::text_input::deleted(&view);
                     crate::native::deleted(surface, &view);
                     crate::shader::deleted(surface, &view);
@@ -537,6 +538,7 @@ impl Mounter {
             MountItem::Events { id, events } => {
                 if let Some(view) = self.get(*id) {
                     view.state_mut().events = *events;
+                    view.settle_leaf();
                     crate::file_drop::events_changed(surface, view);
                     crate::input::events_changed(surface, view);
                     crate::access::events_changed(view);
@@ -647,6 +649,7 @@ impl Mounter {
             MountItem::ViewProps { id, props } => {
                 let Some(view) = self.get(*id) else { return };
                 let old = std::mem::replace(&mut view.state_mut().props, props.clone());
+                view.settle_leaf();
                 crate::input::props_changed(surface, view, &old);
                 crate::access::props_changed(view);
             }

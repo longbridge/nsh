@@ -64,6 +64,8 @@ mod roving;
 mod scrollbar;
 mod select;
 mod sheet;
+#[cfg(any(feature = "editor", feature = "rich-editor"))]
+mod sink_text;
 mod slider;
 mod sort;
 mod split_view;
@@ -95,6 +97,7 @@ pub use crate::emoji_picker::EMOJI_DATA;
 pub const MATH_FONTS: &[u8] = include_bytes!("../fonts/katex.pack.zst");
 mod theme;
 mod time_field;
+mod title_bar;
 mod toast;
 mod toggle;
 mod toolbar;
@@ -255,6 +258,7 @@ pub use crate::{
         HourCycle, TimeField, TimeFieldElement, TimeFieldEvent, TimeFieldProps,
         TimeFieldSegmentEntry, TimeOfDay, TimePrecision, TimeSegment, time_field,
     },
+    title_bar::{TitleBar, TitleBarElement, TitleBarProps, title_bar, title_bar_insets},
     toast::{
         Anchor, SwipeDirection, Toast, ToastAdvance, ToastElement, ToastEvent, ToastManager,
         ToastMotion, ToastOptions, ToastProps, ToastStack, ToastStackElement, ToastStackEvent,
@@ -341,8 +345,8 @@ pub mod parts {
         MenuButton, MenuItem, MenuSeparator, NumberInput, OtpInput, Pagination, Popover, Progress,
         Radio, RadioGroup, ResizablePanel, ResizablePanelGroup, Scrollbar, Select, Sheet, Slider,
         SplitView, Submenu, Switch, Tab, Table, TableBody, TableCaption, TableCell, TableFooter,
-        TableHead, TableHeader, TableRow, Tabs, TextView, TimeField, Toast, ToastStack, Toggle,
-        ToggleGroup, Toolbar, ToolbarGroup, ToolbarSeparator, Tooltip, Tree,
+        TableHead, TableHeader, TableRow, Tabs, TextView, TimeField, TitleBar, Toast, ToastStack,
+        Toggle, ToggleGroup, Toolbar, ToolbarGroup, ToolbarSeparator, Tooltip, Tree,
     };
     #[cfg(feature = "editor")]
     use crate::{DiffView, Editor};
@@ -415,6 +419,7 @@ pub mod parts {
             .register::<Tabs>()
             .register::<Toggle>()
             .register::<ToggleGroup>()
+            .register::<TitleBar>()
             .register::<Toolbar>()
             .register::<ToolbarGroup>()
             .register::<ToolbarSeparator>()
@@ -593,6 +598,24 @@ pub fn specs() -> Vec<Arc<ComponentSpec>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn press_controls_declare_optional_accessibility_hints() {
+        let declarations = nsh_core::element::declarations(&super::registry(), &[]);
+        for name in ["Button", "Link", "Switch", "Checkbox", "MenuButton"] {
+            let props = declarations
+                .split_once(&format!("export interface {name}Props"))
+                .unwrap()
+                .1
+                .split_once("\n}")
+                .unwrap()
+                .0;
+            assert!(
+                props.contains("accessibilityHint?: string | null;"),
+                "{props}"
+            );
+        }
+    }
+
     /// The exports are named after the types (`std::any::type_name`): a
     /// renamed type, or a compiler that formats type names differently,
     /// changes what apps import.
@@ -678,6 +701,7 @@ mod tests {
                 "Terminal",
                 "TextView",
                 "TimeField",
+                "TitleBar",
                 "Toast",
                 "ToastStack",
                 "Toggle",
@@ -780,5 +804,179 @@ mod tests {
         assert_eq!(super::registry().undocumented(), Vec::<String>::new());
         #[cfg(feature = "plot")]
         assert_eq!(super::plot::registry().undocumented(), Vec::<String>::new());
+    }
+}
+
+/// The part ([`parts::ALL`]) that registers each component besides the
+/// core's, by the component's registered name: what a web runtime of a
+/// Rust app loads for a component made by name
+/// (`ComponentElement::by_name`).
+pub const COMPONENT_PARTS: &[(&str, &str)] = &[
+    ("ContextMenu", "menu"),
+    ("Menu", "menu"),
+    ("MenuButton", "menu"),
+    ("MenuItem", "menu"),
+    ("MenuSeparator", "menu"),
+    ("Submenu", "menu"),
+    ("HoverCard", "overlays"),
+    ("Popover", "overlays"),
+    ("Sheet", "overlays"),
+    ("Tooltip", "overlays"),
+    ("Select", "select"),
+    ("Command", "command"),
+    ("Combobox", "combobox"),
+    ("Toast", "toast"),
+    ("ToastStack", "toast"),
+    ("Calendar", "pickers"),
+    ("DatePicker", "pickers"),
+    ("TimeField", "pickers"),
+    ("ColorArea", "color_picker"),
+    ("ColorEyeDropper", "color_picker"),
+    ("ColorField", "color_picker"),
+    ("ColorPicker", "color_picker"),
+    ("ColorSlider", "color_picker"),
+    ("ColorSwatch", "color_picker"),
+    #[cfg(feature = "emoji-picker")]
+    ("EmojiPicker", "emoji_picker"),
+    ("Carousel", "carousel"),
+    ("CarouselContent", "carousel"),
+    ("CarouselItem", "carousel"),
+    ("CarouselNext", "carousel"),
+    ("CarouselPagination", "carousel"),
+    ("CarouselPaginationItem", "carousel"),
+    ("CarouselPrevious", "carousel"),
+    ("Tree", "tree"),
+    ("NumberInput", "fields"),
+    ("OtpInput", "fields"),
+    ("TextView", "text_view"),
+    #[cfg(feature = "editor")]
+    ("Editor", "editor"),
+    #[cfg(feature = "editor")]
+    ("DiffView", "diff"),
+    #[cfg(feature = "rich-editor")]
+    ("RichEditor", "rich_editor"),
+    ("DataTable", "data_table"),
+    ("Table", "table"),
+    ("TableBody", "table"),
+    ("TableCaption", "table"),
+    ("TableCell", "table"),
+    ("TableFooter", "table"),
+    ("TableHead", "table"),
+    ("TableHeader", "table"),
+    ("TableRow", "table"),
+    ("DockArea", "dock"),
+    ("SplitView", "dock"),
+    ("ResizablePanel", "resizable"),
+    ("ResizablePanelGroup", "resizable"),
+    #[cfg(feature = "term")]
+    ("Terminal", "term"),
+];
+
+/// The part that registers component `name` ([`COMPONENT_PARTS`]); `None`
+/// for the core's and for names `nsh/base` does not register.
+pub fn part_of_component(name: &str) -> Option<&'static str> {
+    COMPONENT_PARTS
+        .iter()
+        .find(|(component, _)| *component == name)
+        .map(|(_, part)| *part)
+}
+
+/// One `nsh_part_<name>` export per part but the core, for the web runtime
+/// of a Rust app (feature `web-gates`): the app makes the components of a
+/// part by name, and the part's code is only reachable from its gate, so
+/// `nsh package` keeps it in a side module the page loads the first time
+/// one of them mounts. The gate adds the part to [`gated_parts`].
+#[cfg(all(target_arch = "wasm32", feature = "web-gates"))]
+mod web_gates {
+    use std::cell::RefCell;
+
+    use crate::parts::{self, Part};
+
+    thread_local! {
+        static GATED: RefCell<Vec<Part>> = const { RefCell::new(Vec::new()) };
+    }
+
+    /// The parts whose gates ran, in order.
+    pub fn gated_parts() -> Vec<Part> {
+        GATED.with(|g| g.borrow().clone())
+    }
+
+    macro_rules! gates {
+        ($($(#[$cfg:meta])* $name:ident => $export:ident,)*) => {
+            $(
+            $(#[$cfg])*
+            #[unsafe(no_mangle)]
+            #[allow(unreachable_pub)]
+            pub extern "C" fn $export() {
+                GATED.with(|g| {
+                    let mut gated = g.borrow_mut();
+                    let part = parts::$name as Part;
+                    if !gated.iter().any(|p| std::ptr::fn_addr_eq(*p, part)) {
+                        gated.push(part);
+                    }
+                });
+            }
+            )*
+        };
+    }
+
+    gates!(
+    menu => nsh_part_menu,
+    overlays => nsh_part_overlays,
+    select => nsh_part_select,
+    command => nsh_part_command,
+    combobox => nsh_part_combobox,
+    toast => nsh_part_toast,
+    pickers => nsh_part_pickers,
+    color_picker => nsh_part_color_picker,
+    #[cfg(feature = "emoji-picker")] emoji_picker => nsh_part_emoji_picker,
+    carousel => nsh_part_carousel,
+    tree => nsh_part_tree,
+    fields => nsh_part_fields,
+    text_view => nsh_part_text_view,
+    #[cfg(feature = "editor")] editor => nsh_part_editor,
+    #[cfg(feature = "editor")] diff => nsh_part_diff,
+    #[cfg(feature = "rich-editor")] rich_editor => nsh_part_rich_editor,
+    data_table => nsh_part_data_table,
+    table => nsh_part_table,
+    dock => nsh_part_dock,
+    resizable => nsh_part_resizable,
+    #[cfg(feature = "plot")] plot => nsh_part_plot,
+    #[cfg(feature = "term")] term => nsh_part_term,
+    );
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "web-gates"))]
+pub use web_gates::gated_parts;
+
+#[cfg(test)]
+mod component_parts {
+    /// [`super::COMPONENT_PARTS`] names every component each part
+    /// registers besides the core's, and no other.
+    #[test]
+    fn every_part_s_components_are_listed() {
+        let core = || crate::parts::core as crate::parts::Part;
+        let names = |set: crate::Registry| -> std::collections::BTreeSet<String> {
+            set.specs().iter().map(|s| s.export.to_string()).collect()
+        };
+        let in_core = names(crate::registry_of([core()]));
+        let mut listed: Vec<(String, String)> = super::COMPONENT_PARTS
+            .iter()
+            .map(|(c, p)| ((*c).to_owned(), (*p).to_owned()))
+            .collect();
+        listed.sort();
+        let mut made = Vec::new();
+        for (name, part) in crate::parts::ALL {
+            if *name == "core" {
+                continue;
+            }
+            for c in names(crate::registry_of([core(), *part])) {
+                if !in_core.contains(&c) {
+                    made.push((c, (*name).to_owned()));
+                }
+            }
+        }
+        made.sort();
+        assert_eq!(listed, made);
     }
 }

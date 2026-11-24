@@ -47,6 +47,7 @@ mod mount;
 mod native;
 mod navigation;
 mod net;
+mod panels;
 mod picker;
 mod screen_color;
 mod scroll;
@@ -55,7 +56,7 @@ mod shader;
 mod share;
 mod sight;
 // Shared with iOS.
-use nsh_platform_apple::{audio, notifications, speech};
+use nsh_platform_apple::{audio, notifications};
 mod surface;
 #[cfg(feature = "dev")]
 mod synth;

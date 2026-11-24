@@ -16,6 +16,8 @@ Web 视图和视频播放器把平台自己的网页引擎和媒体播放器作�
 
 它们背后的框架（WebKit、AVFoundation）在应用第一次用到时才加载，所以从不显示网页或视频的应用不会在启动时为它们付出代价。
 
+页面播放的视频在每个平台上都在 Web 视图里播放，iPhone 也一样——否则 WebKit 会把第一帧交给系统的全屏播放器（页面上的 `playsinline` 拦不住）。页面自己的控件要求全屏时，仍然交给系统全屏。
+
 在 [macOS](./macos.md) 上，Web 视图没有自己的滚动视图：`scrollable={false}` 时，鼠标滚轮和触控板滚动的是它外面的应用滚动视图，
 而不是页面；页面仍可用键盘和它自己的脚本滚动。
 
@@ -31,15 +33,6 @@ NSH 内容（对话框、sheet）会被它遮住。它需要 WebView2 Runtime（
 
 ## WebView
 
-```rust tabs
-use nsh_core::prelude::*;
-
-#[component]
-pub fn App() -> impl IntoElement {
-    web_view("https://en.m.wikipedia.org/wiki/Swift_(programming_language)").flex_1()
-}
-```
-
 ```tsx tabs
 import { mount, WebView } from "nsh";
 import { Window } from "nsh/desktop";
@@ -53,6 +46,15 @@ mount(() => (
     <App />
   </Window>
 ));
+```
+
+```rust tabs
+use nsh_core::prelude::*;
+
+#[component]
+pub fn App() -> impl IntoElement {
+    web_view("https://en.m.wikipedia.org/wiki/Swift_(programming_language)").flex_1()
+}
 ```
 
 ### 来源
@@ -101,6 +103,46 @@ mount(() => (
 
 Web 视图的 ref（Rust 中用 `.element_ref(&web)` 挂上的 `element_ref()`，TSX 中的 `ref`）提供 `reload`、`go_back` / `goBack`、`go_forward` / `goForward`、`stop_loading` / `stopLoading`、`inject_java_script` / `injectJavaScript(script)`、`post_message` / `postMessage(data)`、`load` / `load({ src, headers })`（见[下文](#已登录的页面请求头)）和 `send_input` / `sendInput(input)`（见[下文](#像用户一样输入)）：
 
+```tsx tabs
+import { mount, signal, Text, View, WebView, type WebViewNavigation, type WebViewRef } from "nsh";
+import { Window } from "nsh/desktop";
+
+function Browser() {
+  let web!: WebViewRef;
+  const nav = signal<WebViewNavigation | null>(null);
+  const button = (label: string, enabled: boolean, action: () => void) => (
+    <Text onPress={enabled ? action : undefined} style={{ padding: 12, color: enabled ? "#0969da" : "#8c959f" }}>
+      {label}
+    </Text>
+  );
+  return (
+    <View style={{ flex: 1, paddingTop: 50 }}>
+      <Text style={{ numberOfLines: 1, paddingHorizontal: 12, color: "#57606a" }}>
+        {nav()?.loading ? "Loading…" : nav()?.title ?? ""}
+      </Text>
+      <WebView
+        ref={web}
+        src="https://developer.mozilla.org/"
+        style={{ flex: 1 }}
+        onNavigationStateChange={(n) => nav.set(n)}
+        ios={{ allowsBackForwardNavigationGestures: true }}
+      />
+      <View style={{ flexDirection: "row", justifyContent: "space-around" }}>
+        {button("Back", !!nav()?.canGoBack, () => web.goBack())}
+        {button("Forward", !!nav()?.canGoForward, () => web.goForward())}
+        {button("Reload", true, () => web.reload())}
+      </View>
+    </View>
+  );
+}
+
+mount(() => (
+  <Window id="main">
+    <Browser />
+  </Window>
+));
+```
+
 ```rust tabs
 use nsh_core::prelude::*;
 
@@ -148,93 +190,9 @@ pub fn browser() -> impl IntoElement {
 }
 ```
 
-```tsx tabs
-import { mount, signal, Text, View, WebView, type WebViewNavigation, type WebViewRef } from "nsh";
-import { Window } from "nsh/desktop";
-
-function Browser() {
-  let web!: WebViewRef;
-  const nav = signal<WebViewNavigation | null>(null);
-  const button = (label: string, enabled: boolean, action: () => void) => (
-    <Text onPress={enabled ? action : undefined} style={{ padding: 12, color: enabled ? "#0969da" : "#8c959f" }}>
-      {label}
-    </Text>
-  );
-  return (
-    <View style={{ flex: 1, paddingTop: 50 }}>
-      <Text style={{ numberOfLines: 1, paddingHorizontal: 12, color: "#57606a" }}>
-        {nav()?.loading ? "Loading…" : nav()?.title ?? ""}
-      </Text>
-      <WebView
-        ref={web}
-        src="https://developer.mozilla.org/"
-        style={{ flex: 1 }}
-        onNavigationStateChange={(n) => nav.set(n)}
-        ios={{ allowsBackForwardNavigationGestures: true }}
-      />
-      <View style={{ flexDirection: "row", justifyContent: "space-around" }}>
-        {button("Back", !!nav()?.canGoBack, () => web.goBack())}
-        {button("Forward", !!nav()?.canGoForward, () => web.goForward())}
-        {button("Reload", true, () => web.reload())}
-      </View>
-    </View>
-  );
-}
-
-mount(() => (
-  <Window id="main">
-    <Browser />
-  </Window>
-));
-```
-
 ### 页面与应用之间的消息
 
 页面通过 `window.nsh.postMessage(string)` 向应用发消息，应用收到 `on_message`（`onMessage`）。应用通过 ref 的 `post_message`（`postMessage(string)`）向页面发消息，页面在 `window` 上收到 `message` 事件。消息是字符串；结构化数据请发送 JSON。收到的消息要当作不可信的数据，检查后再处理：页面运行的任何脚本都能发消息，而在 Android 上，页面的每个 frame（包括 `iframe`）都有 `window.nsh`。
-
-```rust tabs
-use nsh_core::prelude::*;
-
-const PAGE: &str = r#"<!doctype html>
-<html><head><meta name="viewport" content="width=device-width"></head>
-<body style="font-family: -apple-system, sans-serif; margin: 16px">
-  <button onclick="window.nsh.postMessage(JSON.stringify({ type: 'hello', at: Date.now() }))">
-    Post to the app
-  </button>
-  <p id="got">Nothing from the app yet.</p>
-  <script>
-    window.addEventListener("message", (e) => {
-      document.getElementById("got").textContent = "The app says: " + e.data;
-    });
-  </script>
-</body></html>"#;
-
-#[component]
-pub fn App() -> impl IntoElement {
-    let web = element_ref();
-    let last = signal(String::new());
-    view()
-        .flex_1()
-        .pt(px(50.0))
-        .gap(px(12.0))
-        .child(
-            web_view_html(PAGE, None)
-                .element_ref(&web)
-                .h(px(240.0))
-                .on_message(move |data: &str| {
-                    let message: serde_json::Value = serde_json::from_str(data).unwrap_or_default();
-                    last.set(message["type"].as_str().unwrap_or_default().to_owned());
-                }),
-        )
-        .child(
-            text("Post to the page")
-                .p(px(16.0))
-                .text_color(rgb(0x0969da))
-                .on_press(move || web.post_message("hi from nsh")),
-        )
-        .child(text(move || format!("Last message: {}", last.get())).px(px(16.0)))
-}
-```
 
 ```tsx tabs
 import { mount, signal, Text, View, WebView, type WebViewRef } from "nsh";
@@ -280,14 +238,51 @@ mount(() => (
 ));
 ```
 
-ref 的 `inject_java_script`（`injectJavaScript(script)`）可以随时在当前页面中运行代码；`injected_java_script` 和 `injected_java_script_before_content`（`injectedJavaScript`、`injectedJavaScriptBeforeContentLoaded`）在每次页面加载时运行，分别在页面自己的脚本之后或之前，适合用来安装钩子：
-
 ```rust tabs
-web_view("https://example.com")
-    .injected_java_script_before_content("window.isNativeApp = true;")
-    .injected_java_script("window.nsh.postMessage(document.title);")
-    .on_message(|title: &str| log::info!("title {title}"))
+use nsh_core::prelude::*;
+
+const PAGE: &str = r#"<!doctype html>
+<html><head><meta name="viewport" content="width=device-width"></head>
+<body style="font-family: -apple-system, sans-serif; margin: 16px">
+  <button onclick="window.nsh.postMessage(JSON.stringify({ type: 'hello', at: Date.now() }))">
+    Post to the app
+  </button>
+  <p id="got">Nothing from the app yet.</p>
+  <script>
+    window.addEventListener("message", (e) => {
+      document.getElementById("got").textContent = "The app says: " + e.data;
+    });
+  </script>
+</body></html>"#;
+
+#[component]
+pub fn App() -> impl IntoElement {
+    let web = element_ref();
+    let last = signal(String::new());
+    view()
+        .flex_1()
+        .pt(px(50.0))
+        .gap(px(12.0))
+        .child(
+            web_view_html(PAGE, None)
+                .element_ref(&web)
+                .h(px(240.0))
+                .on_message(move |data: &str| {
+                    let message: serde_json::Value = serde_json::from_str(data).unwrap_or_default();
+                    last.set(message["type"].as_str().unwrap_or_default().to_owned());
+                }),
+        )
+        .child(
+            text("Post to the page")
+                .p(px(16.0))
+                .text_color(rgb(0x0969da))
+                .on_press(move || web.post_message("hi from nsh")),
+        )
+        .child(text(move || format!("Last message: {}", last.get())).px(px(16.0)))
+}
 ```
+
+ref 的 `inject_java_script`（`injectJavaScript(script)`）可以随时在当前页面中运行代码；`injected_java_script` 和 `injected_java_script_before_content`（`injectedJavaScript`、`injectedJavaScriptBeforeContentLoaded`）在每次页面加载时运行，分别在页面自己的脚本之后或之前，适合用来安装钩子：
 
 ```tsx tabs
 <WebView
@@ -296,6 +291,13 @@ web_view("https://example.com")
   injectedJavaScript={`window.nsh.postMessage(document.title);`}
   onMessage={(e) => console.log("title", e.data)}
 />
+```
+
+```rust tabs
+web_view("https://example.com")
+    .injected_java_script_before_content("window.isNativeApp = true;")
+    .injected_java_script("window.nsh.postMessage(document.title);")
+    .on_message(|title: &str| log::info!("title {title}"))
 ```
 
 ### 应用提供的资源
@@ -336,6 +338,10 @@ macOS 和 Linux 提供它们（WebKit 的 `WKURLSchemeHandler` 和 `webkit_web_c
 
 要显示应用已登录的某个服务的页面，把凭据放在页面请求的请求头里，而不是 URL 里：URL 会留在历史记录、日志和 `Referer` 中。ref 的 `load` 加载一个页面，并只给这一个请求带上请求头：
 
+```tsx tabs
+web.load({ src: "https://docs.example.com/", headers: { Authorization: `Bearer ${token}` } });
+```
+
 ```rust tabs
 use nsh_core::{WebLoad, prelude::*};
 
@@ -345,10 +351,6 @@ fn open(web: &ElementRef, token: &str) {
         web.load(load);
     }
 }
-```
-
-```tsx tabs
-web.load({ src: "https://docs.example.com/", headers: { Authorization: `Bearer ${token}` } });
 ```
 
 - 只有页面自身的请求带这些请求头：它的图片、脚本等子资源不带，之后的导航和 `reload()` 也不带，所以凭据不会发给页面用到的其他主机。页面再次需要它时（点链接、重新加载），用 `load` 再加载一次，并为那次请求生成新值（DPoP proof 与 URL 绑定）。
@@ -365,6 +367,14 @@ web.load({ src: "https://docs.example.com/", headers: { Authorization: `Bearer $
 - `{ type: "text", text }` 把文本逐键输入到页面中当前有焦点的元素：每个字符用 US 布局上对应的键，换行按 Enter，US 键盘打不出的字符（`é`、中日韩文字、emoji）不对应任何键（`code` 为 `"Unidentified"`）。
 - `{ type: "key", key }` 按下 `Enter`、`Tab`、`Escape` 或 `Backspace`。
 
+```tsx tabs
+web.sendInput({ type: "click", x: 120, y: 40 });
+setTimeout(() => {
+  web.sendInput({ type: "text", text: "espresso" });
+  web.sendInput({ type: "key", key: "Enter" });
+}, 50);
+```
+
 ```rust tabs
 use nsh_core::{WebInput, WebKey, prelude::*};
 use std::time::Duration;
@@ -379,14 +389,6 @@ fn search(web: &ElementRef) {
 }
 ```
 
-```tsx tabs
-web.sendInput({ type: "click", x: 120, y: 40 });
-setTimeout(() => {
-  web.sendInput({ type: "text", text: "espresso" });
-  web.sendInput({ type: "key", key: "Enter" });
-}, 50);
-```
-
 在 Rust 中它们是 `WebInput::Click { x, y }`、`WebInput::Text(text)` 和 `WebInput::Key(WebKey::Enter)`。
 
 可信输入带有用户激活（它可以打开窗口、写入剪贴板、打开系统的文件面板，或按下页面的确认按钮），所以它是一项单独的能力：应用需要在 `nsh.json` 的 `capabilities` 中声明 `"webview": { "input": true }`（见 [`webview`](./sandbox-and-capabilities.md#webview)），没有声明任何能力的应用也一样，否则核心会丢弃这次调用。
@@ -395,18 +397,18 @@ setTimeout(() => {
 
 在提供依赖它的功能之前，先确认它在当前环境下可用：`web_input_available()`（`WebView.inputAvailable()`）只有在平台会投递输入、并且应用拥有 `webview.input` 授权时才得到 `true`；在忽略这个调用的平台上，或者应用没有这项授权时，结果都是 `false`。
 
-```rust tabs
-use nsh_core::prelude::*;
-
-let input = signal(false);
-spawn(async move { input.set(web_input_available().await) });
-```
-
 ```tsx tabs
 import { signal, WebView } from "nsh";
 
 const input = signal(false);
 WebView.inputAvailable().then((available) => input.set(available));
+```
+
+```rust tabs
+use nsh_core::prelude::*;
+
+let input = signal(false);
+spawn(async move { input.set(web_input_available().await) });
 ```
 
 ### 网站数据
@@ -415,12 +417,12 @@ WebView.inputAvailable().then((available) => input.set(available));
 应用重启后也还是登录状态。显示应用不信任的页面（别人生成的 HTML、一次性的登录页）的网页视图加上 `incognito`：它的页面使用一份
 自己的存储，只在内存里，随网页视图一起销毁。
 
-```rust tabs
-web_view("https://example.com/preview").incognito(true).flex_1()
-```
-
 ```tsx tabs
 <WebView src="https://example.com/preview" incognito style={{ flex: 1 }} />
+```
+
+```rust tabs
+web_view("https://example.com/preview").incognito(true).flex_1()
 ```
 
 `incognito` 在网页视图创建时读取，所以在 Rust 里它接收一个值；在 TSX 里之后再改它，网页视图保留原来的存储并打印一条警告。
@@ -454,18 +456,18 @@ web_view("https://example.com/preview").incognito(true).flex_1()
 
 可以先用 `web_view_available()`（`WebView.available()`）询问：平台在启动时就知道自己无法显示网页视图时，或应用的能力未授予 `webview` 时，它得到 `false`。
 
-```rust tabs
-use nsh_core::prelude::*;
-
-let web = signal(true);
-spawn(async move { web.set(web_view_available().await) });
-```
-
 ```tsx tabs
 import { signal, WebView } from "nsh";
 
 const web = signal(true);
 WebView.available().then((available) => web.set(available));
+```
+
+```rust tabs
+use nsh_core::prelude::*;
+
+let web = signal(true);
+spawn(async move { web.set(web_view_available().await) });
 ```
 
 有些引擎要到网页视图启动时才会失败（Windows 上的 WebView2），所以网页视图自己也会报告：平台一旦知道，就触发 `onError`，其 `code` 为 `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"`。
@@ -510,6 +512,45 @@ function Diagram(props: { html: string }) {
 ```
 
 ## Video
+
+```tsx tabs
+import { mount, signal, Text, Video, type VideoRef, View } from "nsh";
+import { Window } from "nsh/desktop";
+
+function Player() {
+  let video!: VideoRef;
+  const paused = signal(true);
+  const time = signal("");
+  return (
+    <View style={{ flex: 1, justifyContent: "center", padding: 16, gap: 12 }}>
+      <Video
+        ref={video}
+        src="https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"
+        paused={paused()}
+        repeat
+        style={{ height: 220, borderRadius: 12, overflow: "hidden", backgroundColor: "#000000" }}
+        onProgress={(e) => time.set(`${e.currentTime.toFixed(1)} / ${e.duration.toFixed(1)} s`)}
+        onEnd={() => paused.set(true)}
+      />
+      <View style={{ flexDirection: "row", gap: 16, alignItems: "center" }}>
+        <Text onPress={() => paused.set(!paused())} style={{ color: "#0969da", fontWeight: "600" }}>
+          {paused() ? "Play" : "Pause"}
+        </Text>
+        <Text onPress={() => video.seek(0)} style={{ color: "#0969da" }}>
+          Restart
+        </Text>
+        <Text style={{ color: "#57606a" }}>{time()}</Text>
+      </View>
+    </View>
+  );
+}
+
+mount(() => (
+  <Window id="main">
+    <Player />
+  </Window>
+));
+```
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -556,45 +597,6 @@ pub fn player() -> impl IntoElement {
 }
 ```
 
-```tsx tabs
-import { mount, signal, Text, Video, type VideoRef, View } from "nsh";
-import { Window } from "nsh/desktop";
-
-function Player() {
-  let video!: VideoRef;
-  const paused = signal(true);
-  const time = signal("");
-  return (
-    <View style={{ flex: 1, justifyContent: "center", padding: 16, gap: 12 }}>
-      <Video
-        ref={video}
-        src="https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"
-        paused={paused()}
-        repeat
-        style={{ height: 220, borderRadius: 12, overflow: "hidden", backgroundColor: "#000000" }}
-        onProgress={(e) => time.set(`${e.currentTime.toFixed(1)} / ${e.duration.toFixed(1)} s`)}
-        onEnd={() => paused.set(true)}
-      />
-      <View style={{ flexDirection: "row", gap: 16, alignItems: "center" }}>
-        <Text onPress={() => paused.set(!paused())} style={{ color: "#0969da", fontWeight: "600" }}>
-          {paused() ? "Play" : "Pause"}
-        </Text>
-        <Text onPress={() => video.seek(0)} style={{ color: "#0969da" }}>
-          Restart
-        </Text>
-        <Text style={{ color: "#57606a" }}>{time()}</Text>
-      </View>
-    </View>
-  );
-}
-
-mount(() => (
-  <Window id="main">
-    <Player />
-  </Window>
-));
-```
-
 播放由属性控制：用 signal 设置 `paused`、`muted`、`volume` 和 `rate`，播放器随之变化。已播放到结尾的视频，取消暂停后从头再播。ref 提供 `seek(seconds)`。
 
 在 Rust 中，`video(url)` 创建播放器（URL 可以是值、signal 或闭包），每个属性是一个蛇形命名的构建方法（`paused`、`repeat(true)`、`object_fit(ResizeMode::Contain)`，`progressUpdateInterval` 对应 `progress_interval`）；`on_load` 收到 `VideoInfo`（`duration`、`size`），`on_progress` 收到 `VideoProgress`（`current_time`、`duration`），`on_buffer` 收到 `bool`。
@@ -622,6 +624,20 @@ mount(() => (
 
 设置 `controls` 时，平台会绘制自己的播放按钮、进度条和全屏按钮。不设置时，用视图在视频上方或下方画你自己的控件；由于视频是布局中的原生视图，覆盖层可以自然地叠在上面：
 
+```tsx tabs
+<View style={{ height: 220 }}>
+  <Video src={url} paused={paused()} style={{ flex: 1 }} />
+  <View
+    onPress={() => paused.set(!paused())}
+    style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center" }}
+  >
+    <If when={paused()}>
+      <Text style={{ fontSize: 48, color: "#ffffff" }}>▶</Text>
+    </If>
+  </View>
+</View>
+```
+
 ```rust tabs
 view()
     .h(px(220.0))
@@ -637,20 +653,6 @@ view()
                 text("▶").text_size(px(48.0)).text_color(rgb(0xffffff))
             })),
     )
-```
-
-```tsx tabs
-<View style={{ height: 220 }}>
-  <Video src={url} paused={paused()} style={{ flex: 1 }} />
-  <View
-    onPress={() => paused.set(!paused())}
-    style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center" }}
-  >
-    <If when={paused()}>
-      <Text style={{ fontSize: 48, color: "#ffffff" }}>▶</Text>
-    </If>
-  </View>
-</View>
 ```
 
 视频来源是网络请求：声明了能力时，视频所在的主机必须在 `nsh.json` 的 `network` 下得到允许，与 `fetch` 和远程图片相同。被拒绝的来源不显示任何内容，并且会记录一次日志，指出需要添加的键。

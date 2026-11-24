@@ -65,6 +65,8 @@ const FORWARDED: &[&str] = &[
     "scrollable",
     "bounces",
     "scrollsToTop",
+    "smoothWheel",
+    "wheelLineHeight",
     "contentInset",
     "scrollbarInset",
     "contentOffset",
@@ -963,6 +965,10 @@ pub(crate) fn bind(
                         reactive::set_signal(cx, signal, qjs::JS_NewFloat64(index as f64));
                     }
                 }
+                // The data shrank after the core asked for this row: a new
+                // cell has no previous item to fall back on, so make none.
+                // The core unbinds the slot once it sees the new count.
+                None if !in_range(cx, list, index) => {}
                 None => {
                     if let Err(e) = make_cell(cx, list, slot, index) {
                         // SAFETY: the pending exception is reported below.
@@ -993,6 +999,20 @@ pub(crate) fn bind(
         }
     }
     Some(if failed { Err(()) } else { Ok(()) })
+}
+
+/// Whether `index` is within the list's current data.
+fn in_range(cx: *mut JsContext, list: NodeId, index: u32) -> bool {
+    let Some(items) = lists(cx).map.borrow().get(&list).map(|d| d.items) else {
+        return false;
+    };
+    // SAFETY: the items getter, called untracked; the result is freed.
+    let each = reactive::untracked_with(cx, || unsafe {
+        qjs::JS_Call(cx, items, UNDEFINED, 0, ptr::null_mut())
+    });
+    let len = length(cx, each);
+    unsafe { qjs::JS_FreeValue(cx, each) };
+    (index as i64) < len
 }
 
 /// A new cell for `slot`, showing item `first`.
@@ -1566,6 +1586,66 @@ mod tests {
         check(
             "separators.color.set('black'); separators.colors.join() === 'green,green,green,green'",
         );
+    }
+
+    /// Binds the core asked for before the data shrank: a new cell past the
+    /// end is not made (its row would read `undefined`), a recycled one keeps
+    /// its last item, and the slot binds normally once the data grows again.
+    #[test]
+    fn binds_past_the_end_after_the_data_shrank_make_no_cell() {
+        let host = Host::with_options(HostOptions::default()).unwrap();
+        host.eval_source(
+            r#"
+            import { List, mount, signal } from "nsh";
+            import { text } from "nsh:rt";
+            const all = Array.from({ length: 6 }, (_, i) => ({ id: `r${i}` }));
+            const items = signal(all);
+            const state = globalThis.shrink = { all, items, made: 0, undef: 0 };
+            mount(() => List({
+                get each() { return items(); },
+                keyExtractor: item => item.id,
+                children: item => {
+                    state.made++;
+                    return text(() => {
+                        const it = item();
+                        if (it === undefined) { state.undef++; return ""; }
+                        return it.id;
+                    });
+                },
+            }));
+            "#,
+        )
+        .unwrap();
+        let mut ops = Vec::new();
+        host.take_ops(&mut ops);
+        let list = ops
+            .iter()
+            .find_map(|op| match op {
+                Op::Create {
+                    id,
+                    tag: nsh_core::Tag::List,
+                } => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        let check = |source| assert!(host.eval_script("shrink", source).unwrap(), "{source}");
+        host.bind_list(list, &[(0, 0), (1, 1)]);
+        check("shrink.made === 2");
+        // Shrunk, then the core's pending binds arrive: slots 2..4 are new.
+        check("shrink.items.set(shrink.all.slice(0, 2)); true");
+        host.bind_list(list, &[(1, 1), (2, 2), (3, 3), (4, 4)]);
+        check("shrink.made === 2 && shrink.undef === 0");
+        // Cleared: a recycled cell past the end keeps its last item.
+        check("shrink.items.set([]); true");
+        host.bind_list(list, &[(0, 3), (1, 4)]);
+        check("shrink.made === 2 && shrink.undef === 0");
+        // Grown again: the skipped slots get cells and existing ones rebind.
+        check("shrink.items.set(shrink.all); true");
+        host.bind_list(list, &[(0, 0), (1, 1), (2, 2), (3, 3), (4, 4), (5, 5)]);
+        check("shrink.made === 6 && shrink.undef === 0");
+        // Scrolled: cells are reused for other rows, none made.
+        host.bind_list(list, &[(0, 5), (1, 4)]);
+        check("shrink.made === 6 && shrink.undef === 0");
     }
 
     /// A list's slots are its own: it makes each once and never passes

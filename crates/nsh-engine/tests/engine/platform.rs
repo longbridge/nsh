@@ -85,7 +85,6 @@ fn first_frame_of(app: &str, tag: &str, os: Os, idiom: Idiom) -> Vec<MountItem> 
         clipboard: None,
         host: Default::default(),
         picker: None,
-        speech: None,
         audio: None,
         windows: None,
         login_item: None,
@@ -765,6 +764,127 @@ fn js_popovers_in_a_window_are_placed_in_it() {
     );
 }
 
+const WINDOW_RESIZE_APP: &str = r#"import { mount, View } from "nsh";
+import { Window } from "nsh/desktop";
+
+mount(() => (
+  <Window id="main">
+    <View />
+    <Window id="tools" defaultSize={{ width: 300, height: 100 }}>
+      <View style={{ flexGrow: 1 }} />
+    </Window>
+  </Window>
+));
+"#;
+
+/// What the engine handed a [`RootResizeSink`].
+#[derive(Debug)]
+enum RootSent {
+    Batch(MountBatch),
+    RootResized(nsh_core::NodeId, Size<nsh_core::Points>),
+}
+
+/// Hands batches and root resize reports to the test, in order.
+struct RootResizeSink(crossbeam_channel::Sender<RootSent>);
+
+impl nsh_engine::MountSink for RootResizeSink {
+    fn submit(&self, batch: MountBatch) {
+        let _ = self.0.send(RootSent::Batch(batch));
+    }
+
+    fn root_resized(&self, id: nsh_core::NodeId, size: Size<nsh_core::Points>) {
+        let _ = self.0.send(RootSent::RootResized(id, size));
+    }
+}
+
+/// A window of the app's own the platform resizes is reported laid out at
+/// its new size after the batch with that layout: what the macOS platform
+/// waits for, to show the window's content at the size AppKit animates it
+/// to (full screen, zoom).
+#[test]
+fn a_window_resize_is_reported_after_its_layout() {
+    use nsh_core::{Command, EdgeInsets, NodeId, desktop::DesktopCommand};
+    let dir = std::env::temp_dir().join(format!("nsh-window-resize-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let entry = dir.join("App.tsx");
+    std::fs::write(&entry, WINDOW_RESIZE_APP).unwrap();
+    let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
+        entry,
+        minify: false,
+        split: false,
+        ui_sets: vec![nsh_base::registry().into()],
+        ..Default::default()
+    })
+    .unwrap();
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let config = EngineConfig {
+        environment: Environment {
+            os: Os::MacOs,
+            idiom: Idiom::Desktop,
+            ..Environment::default()
+        },
+        ..EngineConfig::new(nsh_engine::App::Js(Bundle::source(bundle.code)))
+    };
+    let engine =
+        Engine::start_with(config, || ApproxTextEngine, RootResizeSink(tx), |_| {}).unwrap();
+    let next = || rx.recv_timeout(Duration::from_secs(5)).expect("a message");
+    // The tools window (the one in the main window) and its view.
+    let mut window: Option<NodeId> = None;
+    let mut inserted: Vec<(NodeId, NodeId)> = Vec::new();
+    while let Ok(sent) = rx.recv_timeout(Duration::from_millis(500)) {
+        let RootSent::Batch(batch) = sent else {
+            continue;
+        };
+        for item in batch.items {
+            match item {
+                MountItem::Command {
+                    id,
+                    command: Command::Desktop(command),
+                } if matches!(&*command, DesktopCommand::OpenWindow(open) if open.options.id == "tools") =>
+                {
+                    window = Some(id);
+                }
+                MountItem::Insert { parent, child, .. } => inserted.push((parent, child)),
+                _ => {}
+            }
+        }
+    }
+    let window = window.expect("the tools window opens");
+    let content = inserted
+        .iter()
+        .find(|(p, _)| *p == window)
+        .map(|(_, c)| *c)
+        .expect("the tools window's view");
+
+    // The layout at the new size comes first, then the report.
+    let size = Size::new(px(640.0), px(480.0));
+    engine
+        .control()
+        .set_root_size(window, size, EdgeInsets::default());
+    let RootSent::Batch(batch) = next() else {
+        panic!("the layout at the new size first");
+    };
+    assert!(
+        batch.items.iter().any(|i| matches!(
+            i,
+            MountItem::Frame { id, frame, .. }
+                if *id == content && frame.size.width.0 == 640.0 && frame.size.height.0 == 480.0
+        )),
+        "the window's content takes its size: {:?}",
+        batch.items
+    );
+    assert!(
+        matches!(next(), RootSent::RootResized(id, s) if id == window && s == size),
+        "then the report"
+    );
+
+    // Reported even when nothing changes: the platform waits for it.
+    engine
+        .control()
+        .set_root_size(window, size, EdgeInsets::default());
+    assert!(matches!(next(), RootSent::RootResized(id, s) if id == window && s == size));
+}
+
 const WINDOW_LATE_DIALOG_APP: &str = r#"import { mount, signal, Text, View } from "nsh";
 import { Dialog } from "nsh/base";
 import { Window } from "nsh/desktop";
@@ -1162,4 +1282,153 @@ mount(() => <Text>{`${horizontalSizeClass()} ${verticalSizeClass()}`}</Text>);
     environment.vertical_size_class = None;
     engine.control().set_environment(environment);
     read("regular compact");
+}
+
+const RUST_IN_JS_WINDOWS_APP: &str = r#"import { mount, View } from "nsh";
+import { Window } from "nsh/desktop";
+import { WindowArea } from "test/ui";
+
+mount(() => (
+  <Window id="main">
+    <View>
+      <WindowArea />
+      <Window id="left" title="Left"><View><WindowArea /></View></Window>
+      <Window id="right" title="Right"><WindowArea /></Window>
+    </View>
+  </Window>
+));
+"#;
+
+const RUST_IN_TOP_LEVEL_JS_WINDOWS_APP: &str = r#"import { mount, View } from "nsh";
+import { Window } from "nsh/desktop";
+import { HidesTitleBar, WindowArea } from "test/ui";
+
+function Content() {
+  return <View><HidesTitleBar /><WindowArea /></View>;
+}
+
+mount(() => (
+  <>
+    <Window id="devices" title="Devices">{() => <Content />}</Window>
+  </>
+));
+"#;
+
+/// An app root of windows alone has no main window: a Rust component in one
+/// of them, under a JS component, reads and changes that window, and opens
+/// no other.
+#[test]
+fn rust_components_in_top_level_js_windows_open_no_main_window() {
+    use nsh_core::desktop::DesktopCommand;
+    let (_engine, rx) = crate::components::start_with(
+        RUST_IN_TOP_LEVEL_JS_WINDOWS_APP,
+        Environment {
+            os: Os::MacOs,
+            idiom: Idiom::Desktop,
+            ..Environment::default()
+        },
+        None,
+        None,
+    );
+    let mut opened = Vec::new();
+    let mut texts = Vec::new();
+    for b in crate::components::until(&rx, |b| crate::components::shows(b, "devices 0 0 0")) {
+        for item in b.items {
+            match item {
+                MountItem::Text { text, .. } => texts.push(text.text.to_string()),
+                MountItem::Command {
+                    command: Command::Desktop(command),
+                    ..
+                } => {
+                    if let DesktopCommand::OpenWindow(open) = *command {
+                        opened.push(open.options.id.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    assert!(texts.iter().any(|t| t == "hidden in devices"), "{texts:?}");
+    assert!(!texts.iter().any(|t| t.starts_with("main ")), "{texts:?}");
+    assert_eq!(opened, ["devices"]);
+}
+
+/// A Rust component in a window JS opened renders in that window:
+/// `current_window()` is it, with its own title bar area, not the main
+/// window's (#2937).
+#[test]
+fn rust_components_in_js_windows_read_their_window() {
+    use nsh_core::{
+        desktop::{DesktopCommand, WindowEvent},
+        geometry::Edges,
+    };
+    let (engine, rx) = crate::components::start_with(
+        RUST_IN_JS_WINDOWS_APP,
+        Environment {
+            os: Os::MacOs,
+            idiom: Idiom::Desktop,
+            ..Environment::default()
+        },
+        None,
+        None,
+    );
+    let mut opened = Vec::new();
+    let mut texts = Vec::new();
+    let mut take = |batches: Vec<nsh_core::MountBatch>| {
+        for b in batches {
+            for item in b.items {
+                match item {
+                    MountItem::Text { text, .. } => texts.push(text.text.to_string()),
+                    MountItem::Command {
+                        id,
+                        command: Command::Desktop(command),
+                    } => {
+                        if let DesktopCommand::OpenWindow(open) = *command {
+                            opened.push((id, open.options.id.clone()));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    };
+    take(crate::components::until(&rx, |b| {
+        crate::components::shows(b, "right 0 0 0")
+    }));
+    assert!(texts.iter().any(|t| t == "left 0 0 0"), "{texts:?}");
+    let id_of = |wanted: &str| {
+        opened
+            .iter()
+            .find(|(_, id)| id == wanted)
+            .map(|(n, _)| *n)
+            .unwrap_or_else(|| panic!("{wanted} opens: {opened:?}"))
+    };
+    let (left, right) = (id_of("left"), id_of("right"));
+    let control = engine.control();
+    let report = |id, top: f32, l: f32, r: f32| {
+        control.dispatch_event(
+            id,
+            EventKind::Window,
+            EventPayload::Window(Box::new(WindowEvent::TitleBar(Edges {
+                top: px(top),
+                left: px(l),
+                right: px(r),
+                ..Default::default()
+            }))),
+        );
+    };
+    // Different controls per window: each component follows its own.
+    report(left, 28.0, 72.0, 0.0);
+    report(right, 32.0, 0.0, 138.0);
+    let mut seen = Vec::new();
+    for b in crate::components::until(&rx, |b| crate::components::shows(b, "right 32 0 138")) {
+        for item in b.items {
+            if let MountItem::Text { text, .. } = item {
+                seen.push(text.text.to_string());
+            }
+        }
+    }
+    assert!(seen.iter().any(|t| t == "left 28 72 0"), "{seen:?}");
+    assert!(seen.iter().any(|t| t == "right 32 0 138"), "{seen:?}");
+    assert!(!seen.iter().any(|t| t.starts_with("main ")), "{seen:?}");
 }
