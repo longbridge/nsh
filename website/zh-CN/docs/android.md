@@ -68,7 +68,7 @@ Play Console 中完成首次发布之前，请加 `--draft`。Bundle 的 version
 
 ### 商店信息和更新说明
 
-`nsh.json` 旁的 `store` 目录按语言存放文字和图片，目录名为 BCP 47 标签；每个文件都可省略，`nsh publish ios` 读取同一个目录：
+`nsh.json` 旁的 `store` 目录按语言存放文字和图片，目录名为 BCP 47 标签；每个文件都可省略，所有商店读取同一份文案。这些字段也可以写在 `nsh.json` 的 `store.locales`（`name`、`shortDescription`、`description`、`releaseNotes`），优先于文件（见[商店文案](./packaging.md#商店文案)）：
 
 ```text
 store/

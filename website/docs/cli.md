@@ -447,6 +447,27 @@ prints the app's version on Flathub and exits 1 until it is `nsh.json`'s; `docto
 | `--entry <DIR>` | The app's directory or entry. Default: `.`. |
 | `--out <DIR>` | The checkout of the app's Flathub repository to write `<id>.yml` into. Default: `.nsh/out/flathub/<id>`. |
 
+### nsh publish windows
+
+```sh
+nsh publish windows <APP.msix> [--entry <DIR>] [--product-id <ID>] [--notes <FILE>|<LANG>=<FILE>]... [--wait]
+nsh publish status windows [--entry <DIR>] [--product-id <ID>] [--submission <ID>] [--json]
+nsh publish doctor windows [--entry <DIR>] [--product-id <ID>]
+```
+
+Submits an MSIX package (`nsh package --target windows --format msix`) to the Microsoft Store with the Store
+submission API: creates a submission from the last published one, replaces its package, sets the release notes of
+its listings (each locale's `releaseNotes` of the [store listing](./packaging.md#store-listing), or `--notes`), uploads the package and commits it to certification. A failed submission is deleted before
+it is committed; an app with a pending submission (a draft in Partner Center) is refused, so nothing a person
+started is overwritten. `--wait` polls until certification ends and fails when the Store rejects it. `status` prints
+the latest submission's status and exits 0 when published, 2 while in progress, 1 when failed. `doctor` checks
+`nsh.json`, the credentials and the Store ID without changing anything.
+
+Credentials are an Azure AD app associated with Partner Center (Account settings → User management → Azure AD
+applications, role Manager), read only from `NSH_MS_TENANT_ID`, `NSH_MS_CLIENT_ID` and `NSH_MS_CLIENT_SECRET`. The
+Store ID is `nsh.json` `store.windows.productId` (or `--product-id`). The app's first submission (pricing, age ratings, store
+listing) is made in Partner Center; later ones go through this command.
+
 ### nsh verify
 
 ```sh

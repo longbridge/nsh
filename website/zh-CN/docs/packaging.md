@@ -470,6 +470,15 @@ Build Tools 构建。请在 Windows 上打包：运行器是为构建它的机�
 Windows 能嵌入图标。应用可以从目录被复制到的任何位置运行。`nsh package` 还会写出 Inno Setup 脚本 `.nsh\out\<Name>.iss`，装有 Inno Setup 6
 时编译成 `.nsh\out\<Name>-setup.exe`：按用户安装（不需要管理员权限），带开始菜单快捷方式和“已安装的应用”条目，并支持原地升级。见 [Windows](./windows.md#打包)。
 
+### MSIX 与 Microsoft Store
+
+```sh
+nsh package --target windows --format msix                  # .nsh/out/<Name>.msix，用于 Store
+nsh package --target windows --format msix --sign cert.pfx  # 签名后可在 Store 之外安装
+```
+
+`--format msix` 额外写出 `.nsh\out\<Name>.msix`：打包目录加上 `AppxManifest.xml`（full-trust 桌面应用）、由应用图标生成的 logo 和 block map。不需要 Windows SDK，Linux 和 macOS 的 CI 也能生成。包标识来自 `nsh.json` 的 `windows`：`identityName`、`publisher`、`publisherDisplayName`，前两项从 Partner Center 的 Product identity 复制（默认分别为应用 id 与 `CN=<name>`）。Store ID 写在 `store.windows.productId`。版本号为 `version` 加第四位 0。Store 会自行签名，上传未签名的包即可（`nsh publish windows`）；Store 之外分发需 `--sign <cert.pfx>`（Windows 上用 `signtool`，其他系统用 `osslsigncode` 2.6+，密码放在 `NSH_WINDOWS_CERT_PASSWORD`），证书主题必须等于 `windows.publisher`。
+
 ## Web
 
 ```sh
@@ -836,15 +845,36 @@ Apple 在处理构建时验证签名和 provisioning profile。
 
 ```json
 {
+  "id": "com.example.notes",
+  "version": "1.2.0",
   "store": {
     "locales": {
       "en-US": {
         "name": "My App",
+        "subtitle": "Notes that sync",
+        "shortDescription": "Write notes on every device and keep them in sync.",
+        "description": "My App keeps your notes in sync.\n\nWrite once, read anywhere.",
+        "keywords": "notes,sync",
         "releaseNotes": "Faster sync.",
+        "supportUrl": "https://example.com/support",
+        "marketingUrl": "https://example.com",
         "screenshots": { "phone": ["store/en-US/phone-1.png"] }
       }
     },
-    "ios": { "usesNonExemptEncryption": false, "betaGroups": ["QA"], "release": "phased" }
+    "ios": {
+      "appId": "6835723652",
+      "usesNonExemptEncryption": false,
+      "betaGroups": ["QA"],
+      "release": "phased"
+    },
+    "linux": {
+      "license": "MIT",
+      "developer": "Example Inc.",
+      "categories": ["Office"],
+      "screenshots": ["https://example.com/screenshot.png"],
+      "archiveUrl": "https://github.com/example/notes/releases/download/v{version}/MyApp.tar.gz"
+    },
+    "windows": { "productId": "9NBLGGH4R315" }
   }
 }
 ```
@@ -854,7 +884,20 @@ store/en-US/description.txt        # 另有 name、subtitle、keywords、promoti
 store/en-US/release_notes.txt      # release_notes、support_url、marketing_url、privacy_policy_url
 store/en-US/screenshots/phone/01.png
 store/en-US/screenshots/tablet/01.png
+store/en-US/short_description.txt  # Google Play
+store/en-US/android/phoneScreenshots/1.png   # 各商店自己的图片类型，按平台分目录
 ```
+
+每个商店的应用标识都从这里或应用的 `id` 读取，配置好的应用发布时只需给出产物，凭据来自环境变量或默认的密钥路径：
+
+| 商店 | 标识 | 发布 |
+|---|---|---|
+| App Store | `store.ios.appId` | `nsh publish ios <App.ipa>` |
+| Google Play | `id`（包名） | `nsh publish android <App.aab>` |
+| Flathub | `id`；压缩包下载地址 `store.linux.archiveUrl` | `nsh publish linux <App.tar.gz>` |
+| Microsoft Store | `store.windows.productId`（包标识在 `windows`） | `nsh publish windows <App.msix>` |
+
+`nsh publish status <store>` 与 `nsh publish doctor <store>` 读取同一份配置。Google Play 使用 `shortDescription` 和 `store/<locale>/android/<type>/` 中的图片；Linux 商店以 `en-US` 文案的 `subtitle` 作为 AppStream summary。
 
 语言使用 App Store Connect 的 BCP 47 标签（`en-US`、`zh-Hans`）。截图按设备类别分组、按显示顺序排列：
 `phone` 对应 6.9 英寸 iPhone（`APP_IPHONE_67`），`tablet` 对应 13 英寸 iPad（`APP_IPAD_PRO_3GEN_129`）；

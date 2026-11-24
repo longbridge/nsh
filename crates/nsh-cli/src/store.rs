@@ -43,6 +43,21 @@ pub(crate) struct StoreConfig {
     /// Flathub and the AppStream metainfo of Linux packages.
     #[serde(default)]
     pub linux: LinuxStore,
+    /// The Microsoft Store.
+    #[serde(default)]
+    pub windows: WindowsStore,
+}
+
+/// `store.windows`. The package identity (`identityName`, `publisher`)
+/// stays in `nsh.json` `windows`, which MSIX packaging reads.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WindowsStore {
+    /// The app's Store ID in Partner Center (Product identity → Store ID,
+    /// e.g. `9NBLGGH4R315`), which `nsh publish windows` submits to.
+    /// `storeId` is taken too.
+    #[serde(alias = "storeId")]
+    pub product_id: Option<String>,
 }
 
 /// `store.linux`. Flathub names the app by `nsh.json` `id`; the summary,
@@ -540,6 +555,26 @@ mod tests {
         assert_eq!(locales[1].release_notes.as_deref(), Some("修复"));
         assert!(read(&dir).unwrap().locales("ios")[0].images.is_empty());
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn every_store_identity_is_under_its_platform() {
+        let store: StoreConfig = serde_json::from_value(serde_json::json!({
+            "ios": { "appId": 6835723652u64 },
+            "linux": { "license": "MIT", "archiveUrl": "https://example.com/{version}.tar.gz" },
+            "windows": { "storeId": "9NBLGGH4R315" }
+        }))
+        .unwrap();
+        assert_eq!(store.ios.app_id.as_deref(), Some("6835723652"));
+        assert_eq!(store.linux.license.as_deref(), Some("MIT"));
+        assert_eq!(
+            store.linux.archive_url.as_deref(),
+            Some("https://example.com/{version}.tar.gz")
+        );
+        assert_eq!(store.windows.product_id.as_deref(), Some("9NBLGGH4R315"));
+        let store: StoreConfig =
+            serde_json::from_value(serde_json::json!({"windows": {"productId": "9N"}})).unwrap();
+        assert_eq!(store.windows.product_id.as_deref(), Some("9N"));
     }
 
     #[test]

@@ -323,6 +323,10 @@ pub(crate) struct AppConfig {
     /// and permissions.
     #[serde(default)]
     pub(crate) linux: crate::linux_store::LinuxConfig,
+    /// The identity of Windows' MSIX packages (`msix.rs`) and the app's
+    /// Microsoft Store id (`nsh publish windows`).
+    #[serde(default)]
+    pub(crate) windows: crate::msix::WindowsConfig,
 }
 
 /// The file name of a desktop package's executable: the app's name
@@ -1451,6 +1455,12 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
     if !options.abis.is_empty() && options.target != PackageTarget::Android {
         bail!("--abi only applies to --target android");
     }
+    if options.target == PackageTarget::Windows
+        && options.sign.is_some()
+        && options.format != crate::android::Format::Msix
+    {
+        bail!("--sign signs the MSIX package on Windows: add --format msix");
+    }
     if options.arch.is_some() && options.target != PackageTarget::Macos {
         bail!("--arch only applies to --target macos");
     }
@@ -1465,7 +1475,11 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
             bail!("--device is where --run installs the app: add --run");
         }
     }
-    if options.format.is_linux() {
+    if options.format == crate::android::Format::Msix {
+        if options.target != PackageTarget::Windows {
+            bail!("--format msix only applies to --target windows");
+        }
+    } else if options.format.is_linux() {
         if options.target != PackageTarget::Linux {
             bail!("--format appimage and flatpak only apply to --target linux");
         }

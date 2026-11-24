@@ -77,7 +77,9 @@ in Play Console, pass `--draft`. The bundle's version code must be higher than a
 ### Store listing and release notes
 
 The `store` directory next to `nsh.json` holds the texts and images of each locale, named with its BCP 47 tag; every
-file is optional, and `nsh publish ios` reads the same directory:
+file is optional, and every store reads the same listing. The same fields can be written in `nsh.json`
+`store.locales` (`name`, `shortDescription`, `description`, `releaseNotes`), which win over the files
+([Store listing](./packaging.md#store-listing)):
 
 ```text
 store/

@@ -18,6 +18,7 @@ mod init;
 mod linux_store;
 mod logger;
 mod module_meta;
+mod msix;
 mod native_features;
 mod nshm;
 mod package;
@@ -25,6 +26,7 @@ mod platforms;
 mod play;
 mod provisioning;
 mod publish_ios;
+mod publish_windows;
 mod run;
 mod runtime;
 mod rust_app;
@@ -601,6 +603,8 @@ enum PublishStore {
     Android(play::PublishArgs),
     /// Write or update the app's Flathub manifest for a release archive.
     Linux(linux_store::Args),
+    /// Submit an MSIX package to the Microsoft Store.
+    Windows(publish_windows::Args),
 }
 
 /// The stores `nsh publish status` reports on.
@@ -626,6 +630,9 @@ enum StatusStore {
         #[arg(long)]
         json: bool,
     },
+    /// The app's latest Microsoft Store submission. Exits 0 published, 2
+    /// in progress, 1 failed.
+    Windows(publish_windows::StatusArgs),
 }
 
 /// The stores `nsh publish doctor` checks.
@@ -647,6 +654,9 @@ enum DoctorStore {
         #[arg(long, default_value = ".")]
         entry: PathBuf,
     },
+    /// Microsoft Store: the package identity, the Store ID and the
+    /// credentials.
+    Windows(publish_windows::AppArgs),
 }
 
 /// Arguments of `nsh package`.
@@ -678,7 +688,10 @@ struct PackageArgs {
     #[arg(long)]
     icon: Option<PathBuf>,
     /// Code signing identity for iOS devices or macOS packages, e.g.
-    /// "Apple Development: …" or "Developer ID Application: …".
+    /// "Apple Development: …" or "Developer ID Application: …"; for a
+    /// Windows MSIX package, a certificate (`.pfx`, its password in
+    /// `NSH_WINDOWS_CERT_PASSWORD`) to sign it for installing outside the
+    /// Store.
     #[arg(long)]
     sign: Option<String>,
     /// Provisioning profile for devices (`.mobileprovision`). Repeat it to
@@ -701,7 +714,9 @@ struct PackageArgs {
     abi: Vec<String>,
     /// What to write: on Android an APK (installed directly) or an Android
     /// App Bundle (`aab`, uploaded to Google Play); on Linux also an
-    /// AppImage (`appimage`) or a Flatpak (`flatpak`).
+    /// AppImage (`appimage`) or a Flatpak (`flatpak`); on Windows also an
+    /// MSIX package (`msix`, the Microsoft Store), signed with `--sign
+    /// <cert.pfx>` when given.
     #[arg(long, value_enum, default_value_t)]
     format: crate::android::Format,
     /// macOS: the processors the app runs on, `arm64` (Apple silicon),
@@ -860,6 +875,13 @@ fn run(mut command: Command) -> anyhow::Result<()> {
             PublishStore::Doctor {
                 store: DoctorStore::Linux { entry },
             } => linux_store::doctor(&entry),
+            PublishStore::Windows(args) => publish_windows::publish(&args),
+            PublishStore::Status {
+                store: StatusStore::Windows(args),
+            } => publish_windows::status(&args),
+            PublishStore::Doctor {
+                store: DoctorStore::Windows(app),
+            } => publish_windows::doctor(&app),
         };
     }
     // A package given to `nsh publish` has no app to resolve or build.
@@ -1488,6 +1510,9 @@ mod command_tests {
         assert!(Cli::try_parse_from(["nsh", "publish", "status", "linux", "--json"]).is_ok());
         assert!(Cli::try_parse_from(["nsh", "publish", "doctor", "linux"]).is_ok());
         assert!(Cli::try_parse_from(["nsh", "publish", "linux", "a.tar.gz"]).is_ok());
+        assert!(Cli::try_parse_from(["nsh", "publish", "windows", "a.msix"]).is_ok());
+        assert!(Cli::try_parse_from(["nsh", "publish", "status", "windows", "--json"]).is_ok());
+        assert!(Cli::try_parse_from(["nsh", "publish", "doctor", "windows"]).is_ok());
         assert!(Cli::try_parse_from(["nsh", "publish", "."]).is_err());
         assert!(Cli::try_parse_from(["nsh", "publish", "android", "a.aab", "--key", "k"]).is_err());
     }

@@ -534,6 +534,36 @@ embed the icon. The app runs from wherever its directory is copied. `nsh package
 installer (no administrator rights) with a Start menu shortcut, an Installed apps entry, and in-place upgrades. See
 [Windows](./windows.md#packaging).
 
+### MSIX and the Microsoft Store
+
+```sh
+nsh package --target windows --format msix                  # .nsh/out/<Name>.msix, for the Store
+nsh package --target windows --format msix --sign cert.pfx  # signed, to install outside the Store
+```
+
+`--format msix` also writes `.nsh\out\<Name>.msix`: the packaged directory with `AppxManifest.xml` (a full-trust
+desktop app), the logos made from the app's icon, and the block map. It needs no Windows SDK, so Linux and macOS CI
+can make it (the icon is then not embedded in the `.exe`, but the Start menu and the Store use the logos). The
+package's identity comes from `nsh.json`:
+
+```json
+{
+  "windows": {
+    "identityName": "12345Example.MyApp",
+    "publisher": "CN=0A1B2C3D-1234-5678-9ABC-0123456789AB",
+    "publisherDisplayName": "Example Inc."
+  },
+  "store": { "windows": { "productId": "9NBLGGH4R315" } }
+}
+```
+
+Copy `identityName` and `publisher` from Partner Center (the app → Product identity: Package/Identity/Name and
+Package/Identity/Publisher); defaults are the app id and `CN=<name>`. The version is `version` with a fourth part 0,
+which the Store reserves. The Store signs what it publishes, so upload the unsigned package with
+`nsh publish windows` ([CLI](./cli.md#nsh-publish-windows)). Outside the Store, Windows installs only signed
+packages: `--sign <cert.pfx>` signs it with `signtool` on Windows or `osslsigncode` (2.6 or newer) elsewhere, its
+password in `NSH_WINDOWS_CERT_PASSWORD`; the certificate's subject must equal `windows.publisher`.
+
 ## Web
 
 ```sh
@@ -954,18 +984,36 @@ directory beside `nsh.json`, or both; a value in `nsh.json` wins over the file.
 
 ```json
 {
+  "id": "com.example.notes",
+  "version": "1.2.0",
   "store": {
     "locales": {
       "en-US": {
         "name": "My App",
         "subtitle": "Notes that sync",
-        "releaseNotes": "Faster sync.",
+        "shortDescription": "Write notes on every device and keep them in sync.",
+        "description": "My App keeps your notes in sync.\n\nWrite once, read anywhere.",
         "keywords": "notes,sync",
+        "releaseNotes": "Faster sync.",
         "supportUrl": "https://example.com/support",
+        "marketingUrl": "https://example.com",
         "screenshots": { "phone": ["store/en-US/phone-1.png"] }
       }
     },
-    "ios": { "usesNonExemptEncryption": false, "betaGroups": ["QA"], "release": "phased" }
+    "ios": {
+      "appId": "6835723652",
+      "usesNonExemptEncryption": false,
+      "betaGroups": ["QA"],
+      "release": "phased"
+    },
+    "linux": {
+      "license": "MIT",
+      "developer": "Example Inc.",
+      "categories": ["Office"],
+      "screenshots": ["https://example.com/screenshot.png"],
+      "archiveUrl": "https://github.com/example/notes/releases/download/v{version}/MyApp.tar.gz"
+    },
+    "windows": { "productId": "9NBLGGH4R315" }
   }
 }
 ```
@@ -975,7 +1023,23 @@ store/en-US/description.txt        # also name, subtitle, keywords, promotional_
 store/en-US/release_notes.txt      # release_notes, support_url, marketing_url, privacy_policy_url
 store/en-US/screenshots/phone/01.png
 store/en-US/screenshots/tablet/01.png
+store/en-US/short_description.txt  # Google Play
+store/en-US/android/phoneScreenshots/1.png   # a store's own image types, by platform
 ```
+
+Every store reads its identity from here or from the app's `id`, so a configured app publishes with the artifact
+alone, credentials coming from the environment or their usual key paths:
+
+| Store | Identity | Publish |
+|---|---|---|
+| App Store | `store.ios.appId` | `nsh publish ios <App.ipa>` |
+| Google Play | `id` (the package name) | `nsh publish android <App.aab>` |
+| Flathub | `id`; the archive URL `store.linux.archiveUrl` | `nsh publish linux <App.tar.gz>` |
+| Microsoft Store | `store.windows.productId` (package identity: `windows`) | `nsh publish windows <App.msix>` |
+
+`nsh publish status <store>` and `nsh publish doctor <store>` take the same configuration. Google Play uses
+`shortDescription` and the images in `store/<locale>/android/<type>/`; Linux stores use the `en-US` listing's
+`subtitle` as the AppStream summary.
 
 Locales are BCP 47 tags as App Store Connect names them (`en-US`, `zh-Hans`). Screenshots are grouped
 by device class in display order: `phone` is the 6.9" iPhone size (`APP_IPHONE_67`), `tablet` the 13"

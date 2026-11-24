@@ -425,6 +425,16 @@ nsh publish doctor linux [--entry <DIR>]
 
 为发布压缩包写入或更新应用的 Flathub manifest（`<id>.yml`）：下载 URL 与 SHA-256。下载 URL 默认取 `nsh.json` 的 `store.linux.archiveUrl`（其中 `{version}` 替换为版本号），也可用 `--url` 指定。不会创建 Pull Request，需自行提交到 `flathub/<id>` 仓库。`status` 显示 Flathub 上的版本，与 `nsh.json` 不一致时退出码为 1；`doctor` 检查 Flathub 要求的元数据（`id`、商店文案、`store.linux`、图标），并校验 metainfo 与 desktop 文件。
 
+### nsh publish windows
+
+```sh
+nsh publish windows <APP.msix> [--entry <DIR>] [--product-id <ID>] [--notes <FILE>|<LANG>=<FILE>]... [--wait]
+nsh publish status windows [--entry <DIR>] [--product-id <ID>] [--submission <ID>] [--json]
+nsh publish doctor windows [--entry <DIR>] [--product-id <ID>]
+```
+
+用 Store submission API 把 MSIX 包提交到 Microsoft Store：基于上次发布创建 submission、替换包、设置各 listing 的更新说明（默认取商店文案各语言的 `releaseNotes`，也可用 `--notes` 指定）、上传并提交认证。提交前失败会删除该 submission；已有 pending submission 时拒绝执行。`--wait` 轮询直到认证结束。`status` 退出码：已发布 0、进行中 2、失败 1。`doctor` 只读检查 `nsh.json`、凭据和 Store ID。Store ID 写在 `nsh.json` 的 `store.windows.productId`（或用 `--product-id`）。凭据为关联 Partner Center 的 Azure AD 应用，只从 `NSH_MS_TENANT_ID`、`NSH_MS_CLIENT_ID`、`NSH_MS_CLIENT_SECRET` 读取。首次提交（定价、分级、商店页）需在 Partner Center 完成。
+
 ### nsh verify
 
 ```sh

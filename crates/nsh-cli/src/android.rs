@@ -317,6 +317,8 @@ pub(crate) enum Format {
     /// Linux: a Flatpak manifest (Flathub) and, with `flatpak-builder`, a
     /// `.flatpak` bundle, besides the directory and `.tar.gz`.
     Flatpak,
+    /// Windows: an MSIX package, for the Microsoft Store (`msix.rs`).
+    Msix,
 }
 
 impl Format {
@@ -326,6 +328,7 @@ impl Format {
             Format::Aab => "aab",
             Format::Appimage => "AppImage",
             Format::Flatpak => "flatpak",
+            Format::Msix => "msix",
         }
     }
 
