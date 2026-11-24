@@ -462,10 +462,13 @@ Headless runs play the platform's part NSH's protocol defines, and refuse what o
   platform shows its own picker, which the driver does not answer;
 - shares (`Command::Share`) are answered as `onShare` says (`Headless::on_share`, `app.onShare`, which also turns
   `Environment::share` on), and `app.shares()` lists what was shared;
-- speech sessions run on a fake recognizer (`headless/speech.rs`, unless the test's `EngineConfig::speech` is set): a
-  session starts at once, `Headless::hear` (`app.hear(text)`) reports `text` as the transcript so far, `stop` and
-  `Headless::end_speech` (`app.endSpeech(error?)`) end it with the last transcript as final (`no-speech` when nothing
-  was heard), and `app.speechRequests()` lists what was asked (`lang`, `interim`);
+- native modules' fakes (`nsh_core::fake::Fake`, which a set registers with `Registry::fake` under a name) are
+  installed before each app launches, in place of the device they reach; a test calls one by name with
+  `Headless::call_fake` (`app.fake(name, method, args?)`, a JSON answer). `nsh/test` knows no module's fake: their
+  names, methods and answers are the module's (`nsh-extra`'s `"nsh-extra/speech"` is documented with `Speech`).
+  A fake may stand in process-wide, so `Headless` takes a turn for its fakes: apps with other fakes never overlap in
+  one process, while apps started with the same fakes (clones of one registry, as one test file's apps) run
+  together; fake names are unique across an app's sets (`Registry::merged`);
 - the clipboard holds text (`SetClipboard`, `ReadClipboard` answered with `onClipboard`), modals get `onShow` when
   inserted;
 - with `TestRun::page_host` (`nsh test`'s `--web-host`, else `nsh.json` `web.host`; `TestRequest::page_host` for an

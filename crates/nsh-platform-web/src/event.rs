@@ -238,6 +238,7 @@ fn pointer_at(
         alt: flag("alt"),
         shift: flag("shift"),
         cmd: flag("platform"),
+        alt_graph: false,
     };
     (at("position"), at("pagePosition"), modifiers)
 }

@@ -251,7 +251,6 @@ events! {
     ClipboardWrite = "onClipboardWrite": "A [`Command::SetClipboard`] or [`Command::SetClipboardItem`] finished, in the order of the writes (root only, platforms with [`crate::platform::Environment::clipboard_write_result`]; payload: `written`: whether the system clipboard took it).",
     ScreenColor = "onScreenColor": "A [`Command::PickScreenColor`] request finished (root only; payload: `id`, `color`: the color picked, packed `0xRRGGBBAA`, absent when cancelled).",
     FileRequest = "onFileRequest": "A [`Command::FileRequest`] finished (root only; payload: [`EventPayload::FileRequest`]).",
-    Speech = "onSpeech": "A speech recognition session reported (root only; payload: [`EventPayload::Speech`]).",
     Download = "onDownload": "A web view's download started, finished, failed or was cancelled (payload: `state`, `id`, `url`, `filename`, `path`, `source`; `bytes` once finished, `code` and `message` when it failed, `reason` when it was cancelled).",
     Notification = "onNotification": "The platform answered a [`Command::Notification`], or the user pressed a notification (root only; payload: the fields of [`crate::notifications::NotificationEvent`]).",
     UrlScheme = "onUrlScheme": "The system handed the app a URL that opens it (root only; payload: `url`, [`crate::url_scheme::URL`]); the core keeps those of the schemes the app claims ([`crate::url_scheme`]).",
@@ -979,6 +978,10 @@ pub struct PasteEvent {
     /// Files with their bytes: images (a screenshot, an image copied from a
     /// page or an app), in the platform's order.
     pub files: Vec<PastedFile>,
+    /// Files larger than the input's `pasteMaxSize`, whose bytes were not
+    /// read: each with its name, type and size ([`PastedFile::len`]) only,
+    /// in the platform's order.
+    pub too_large: Vec<PastedFile>,
     /// Absolute `file:` URLs of local files copied in a file manager, in the
     /// platform's order (as [`EventPayload::FileDrop`]'s).
     pub uris: Vec<String>,
@@ -1044,11 +1047,29 @@ impl PasteEvent {
         self.text.is_empty()
             && self.html.is_empty()
             && self.files.is_empty()
+            && self.too_large.is_empty()
             && self.uris.is_empty()
+    }
+
+    /// Moves the files larger than `max_size` bytes to
+    /// [`Self::too_large`], without their bytes.
+    pub(crate) fn limit_files(&mut self, max_size: u64) {
+        if self.files.iter().all(|file| file.len <= max_size) {
+            return;
+        }
+        let (read, over): (Vec<_>, Vec<_>) = std::mem::take(&mut self.files)
+            .into_iter()
+            .partition(|file| file.len <= max_size);
+        self.files = read;
+        self.too_large.extend(
+            over.into_iter()
+                .map(|file| PastedFile::too_large(file.name, file.mime, file.len)),
+        );
     }
 }
 
 /// A file pasted with its bytes ([`PasteEvent::files`]): JS gets a `File`.
+/// One too large to read ([`PasteEvent::too_large`]) has no bytes.
 #[derive(Debug, Clone, Default, PartialEq)]
 #[non_exhaustive]
 pub struct PastedFile {
@@ -1058,6 +1079,9 @@ pub struct PastedFile {
     pub mime: String,
     /// Its bytes.
     pub data: Vec<u8>,
+    /// Its size in bytes: its bytes' length, or for one not read, the size
+    /// its platform gave.
+    pub len: u64,
 }
 
 impl PastedFile {
@@ -1066,7 +1090,19 @@ impl PastedFile {
         PastedFile {
             name: name.into(),
             mime: mime.into(),
+            len: data.len() as u64,
             data,
+        }
+    }
+
+    /// The file `name` of type `mime` and `len` bytes, too large to read
+    /// ([`PasteEvent::too_large`]): no bytes.
+    pub fn too_large(name: impl Into<String>, mime: impl Into<String>, len: u64) -> PastedFile {
+        PastedFile {
+            name: name.into(),
+            mime: mime.into(),
+            data: Vec::new(),
+            len,
         }
     }
 
@@ -1321,14 +1357,6 @@ pub enum EventPayload {
         id: u32,
         /// The files, in the order picked; none when cancelled.
         files: Vec<crate::picker::PickedFile>,
-    },
-    /// What a speech recognition session reported ([`EventKind::Speech`],
-    /// [`crate::speech`]).
-    Speech {
-        /// The session ([`crate::speech::SpeechCommand::Start`]).
-        id: u32,
-        /// What it reported.
-        event: crate::speech::SpeechEvent,
     },
     /// What a sound or a player reported ([`EventKind::Audio`],
     /// [`crate::audio`]).
@@ -1986,6 +2014,23 @@ pub enum ScrollProp {
     /// UIKit does it: elsewhere ignored).
     #[prop(js = "scrollsToTop", default = true, on = SCROLLING)]
     ScrollsToTop(bool),
+    /// `smoothWheel`: a mouse wheel's notches glide to where they point,
+    /// eased in and out over 100–200 ms as Chromium's do, a run of notches
+    /// one motion (default false: the platform's own, which lands at once
+    /// on macOS and Linux and glides briefly on Windows). The desktops
+    /// (macOS, Windows, Linux, GPUI); iOS and Android scroll with the
+    /// system's views, the web with the browser's (both ignore it), as
+    /// they do when the system reduces motion.
+    #[prop(js = "smoothWheel", on = SCROLLING)]
+    SmoothWheel(bool),
+    /// `wheelLineHeight`: how far a mouse wheel's line scrolls, in points (0,
+    /// the default: the platform's own, 10 on macOS, 16 on Windows, a
+    /// notch's length after the view's on Linux). A line is the platform's:
+    /// a notch on Linux, a third of one on Windows (the system's default),
+    /// about one per notch on macOS, which accelerates quick runs. The
+    /// desktops; ignored where `smoothWheel` is.
+    #[prop(js = "wheelLineHeight", min = 0, on = SCROLLING)]
+    WheelLineHeight(Points),
     /// `contentInset`: room around the content.
     #[prop(js = "contentInset", on = SCROLLING)]
     ContentInset(EdgeInsets),
@@ -3058,11 +3103,6 @@ pub enum Command {
         /// What to do.
         request: Box<crate::file_dialog::FileRequest>,
     },
-    /// Start, stop or abort a speech recognition session (on the root;
-    /// `Speech` of `nsh`, [`crate::speech`]) and report it as
-    /// [`EventKind::Speech`] ([`EventPayload::Speech`]). Sent only on
-    /// platforms whose [`crate::platform::Environment::speech`] is set.
-    Speech(crate::speech::SpeechCommand),
     /// Load, play and free sounds, open and drive players (on the root;
     /// `Sound` and `AudioPlayer` of `nsh`, [`crate::audio`]) and report
     /// what happens as [`EventKind::Audio`] ([`EventPayload::Audio`]). Sent
@@ -3686,6 +3726,13 @@ pub enum Prop {
     /// either way. Decided natively when the user pastes.
     #[prop(js = "pasteBehavior", on = INPUT)]
     PasteBehavior(PasteBehavior),
+    /// `pasteMaxSize`: the largest pasted file read, in bytes; a larger
+    /// one reaches `onPaste` in `tooLarge`, its name, type and size only,
+    /// so the app can tell the user. Decided natively when the user
+    /// pastes, before the file is read where the platform says its size.
+    /// Default: every file is read.
+    #[prop(js = "pasteMaxSize", on = INPUT)]
+    PasteMaxSize(Option<u64>),
     /// `autoFocus`: focused when it appears.
     #[prop(js = "autoFocus", on = INPUT)]
     AutoFocus(bool),

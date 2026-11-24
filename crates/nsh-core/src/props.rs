@@ -40,6 +40,8 @@ pub enum AccessibilityRole {
     Link,
     /// A search field.
     Search,
+    /// A text box: a field the user types text into.
+    Textbox,
     /// An image.
     Image,
     /// An image that acts as a button.

@@ -147,6 +147,7 @@ nsh add nsh-extra --features camera
 | `camera` | `Camera` | 在 iOS 和 Android 上用系统相机拍一张照片 |
 | `photos` | `Photos` | 在用户允许后读取 iOS 上用户最近的照片 |
 | `push` | `Push` | 在 iOS 上接收任意推送服务发来的远程通知，在 Android 上通过该服务的绑定接收 |
+| `speech` | `Speech` | 在 macOS、iOS、Android、Windows 和 Web 上把用户说的话随说随转成文字 |
 
 ```tsx
 import { Camera } from "nsh-extra";
@@ -277,6 +278,110 @@ function closeConversation(threadId: string) {
 - 声明了 `"capabilities"` 的应用用 [`"notifications": true`](./sandbox-and-capabilities.md#notifications) 授予 `Push`，与 `Notifications` 用的是同一项能力。token、投递和它们的显示方式属于整个应用，所以除 `available()` 外的每个函数都先检查这项能力。
 
 开启这个 feature 后，打包的 iOS 应用会带上 `remote-notification` 后台模式。`aps-environment` entitlement 来自应用签名所用的描述文件（[iOS 真机](./packaging.md#ios-真机)）。Android 上它不添加任何条目：推送服务的 SDK 自带它的 manifest 所需。Rust 代码（比如某个推送服务 SDK 的绑定）使用 `nsh_extra::push`：`on_event` 收到同样的事件，并带 token 的原始字节；`set_foreground_presentation_decider` 在原生侧决定每条通知怎么显示；iOS 的启动参数从 `nsh_platform_ios::on_application_event` 取得（[应用事件](./ios.md#应用事件)）。绑定实现 `PushProvider`（向它的服务注册设备），在自己的 `#[native_module]` 入口里用 `set_provider` 设上，再用 `provide_token`、`provide_registration_failure`、`provide_notification` 和 `provide_background` 报告服务送来的内容。点按绑定发出的通知会以 intent 的 extras 携带 payload 打开应用，`press` 收到的 `payload` 就是这些 extras（Android 不告诉是哪条通知，所以没有 `id` 和 `threadId`）。
+
+### Speech
+
+`Speech` 把用户说的话变成文字（听写）：应用开始一个会话，系统监听麦克风，转写文本随说话逐步到达。macOS 和 iOS 使用系统的 Speech 框架识别，Android 使用设备上的语音识别服务（`SpeechRecognizer`），Windows 使用系统的听写（`Windows.Media.SpeechRecognition`），Web 使用浏览器的 Web Speech API；系统或浏览器会向用户请求一次麦克风权限（Apple 平台上还有语音识别权限）。Windows 的听写使用用户的联机语音识别，由用户在“设置 > 隐私和安全性 > 语音”中打开；关闭时会话以 `"not-allowed"` 结束。Linux 上没有识别器，终端应用（TUI 宿主，在任何操作系统上）也没有；用 GPUI 嵌入的应用在 macOS 和 Windows 上使用平台的识别器。显示麦克风按钮前先检查 `Speech.available()`：没有识别器的地方，会话会立即以 `"unavailable"` 结束。
+
+```sh
+nsh add nsh-extra --features speech
+```
+
+```ts
+const Speech: {
+  available(): Promise<boolean>;
+  start(options?: SpeechOptions): SpeechSession;
+};
+
+interface SpeechOptions {
+  /** 说话的语言，BCP 47 标签（"en-US"、"zh-CN"）；省略时为用户的语言。 */
+  lang?: string;
+  /** 用户说话时就报告结果（true，默认），或者只报告最终结果。 */
+  interim?: boolean;
+}
+
+interface SpeechSession {
+  on(event: "start", listener: () => void): () => void;
+  on(event: "result", listener: (result: SpeechResult) => void): () => void;
+  on(event: "end", listener: (end: SpeechEnd) => void): () => void;
+  /** 到目前为止的完整转写。 */
+  readonly text: string;
+  readonly ended: boolean;
+  stop(): void;
+  abort(): void;
+}
+
+interface SpeechResult { text: string; isFinal: boolean }
+interface SpeechEnd { text: string; error?: SpeechErrorCode }
+
+type SpeechErrorCode =
+  | "not-allowed" | "no-speech" | "audio-capture" | "network"
+  | "language-not-supported" | "unavailable" | "failed";
+```
+
+```tsx
+import { signal } from "nsh";
+import { Speech, type SpeechSession } from "nsh-extra";
+
+const transcript = signal("");
+let session: SpeechSession | null = null;
+
+function toggle() {
+  if (session && !session.ended) {
+    session.stop();
+    return;
+  }
+  session = Speech.start({ lang: "en-US" });
+  session.on("result", ({ text }) => transcript.set(text));
+  session.on("end", ({ text, error }) => {
+    if (error) console.warn("dictation ended:", error);
+    else transcript.set(text);
+  });
+}
+```
+
+- `start` 立即返回会话。会话按顺序报告：麦克风打开、识别器开始监听时 `start`；转写每次变化时 `result`（`text` 始终是到目前为止的完整转写，应用照原样显示即可）；最后一次 `end`，之后不再有事件。`stop()` 停止监听，让识别器处理完已听到的内容：最后一个 `isFinal: true` 的结果，然后 `end`。`abort()` 立即结束会话，不带错误。麦克风只有一个，所以同一时间只运行一个会话：开始新会话会结束正在运行的会话。同一个应用在同一个视图里开始的新会话像 `abort()` 一样结束它，不带错误；进程里另一个应用或视图（嵌入应用的另一个 `AppView`）开始的会话以 `"audio-capture"` 结束它，因为麦克风被拿走了。
+- `end` 带有最后的转写，会话失败时还带有 `error`，名称与 Web Speech API 一致：`"not-allowed"`（用户或系统不允许使用麦克风或语音识别，或应用在后台）、`"no-speech"`（没有听到说话）、`"audio-capture"`（无法使用麦克风）、`"network"`（识别器需要网络）、`"language-not-supported"`（识别器不认识 `lang`）、`"unavailable"`（这里没有识别器，或暂时不可用）和 `"failed"`。
+- 选项类型不对时 `start` 抛出 `TypeError`，`lang` 不是语言标签时抛出 `RangeError`。
+- macOS 和 iOS 上、有语音识别服务的 Android 设备上、有听写语言和麦克风的 Windows 上、支持 Web Speech API 的浏览器里（Chrome、Edge 等基于 Chromium 的浏览器，以及 Safari），以及应用给模块设置了自己的识别器的地方，`available()` 为 `true`。Linux 上和终端应用里为 `false`。
+- 在 Web 上，页面需要安全上下文（HTTPS，开发时也可以是 `localhost`）才能使用麦克风；用 iframe 嵌入应用的页面需要允许麦克风（`allow="microphone"`）。Chrome 使用它的在线服务识别，所以连接断开时报告 `"network"`。
+- 声明了 `"capabilities"` 的应用用 [`"speech": true`](./sandbox-and-capabilities.md#speech) 授予 `Speech`。没有授予时 `start` 抛出一个 `Error`，其 `code` 为 `"ERR_ACCESS_DENIED"`，`permission` 为 `"speech"`。
+
+开启这个 feature 后，打包的应用会带上它需要的条目：iOS 和 macOS 上的麦克风和语音识别用途说明（应用可以在 `ios.infoPlist` / `macos.infoPlist` 里写自己的文案），macOS 上的音频输入 entitlement，Android 上的 `RECORD_AUDIO` 权限和对语音识别服务的查询声明。在 Web 上，模块通过 wasm-bindgen 调用浏览器，所以 `nsh` 会用 `wasm-bindgen` CLI 构建应用的 Web 运行时（[在 Rust 中使用浏览器 API](./web.md#在-rust-中使用浏览器-api)）；站点本身不需要任何声明。
+
+Rust 代码使用 `nsh_extra::speech`：`available().await`，以及 `recognize(SpeechRequest)` 返回的会话，它的 `next().await` 给出每个 `SpeechEvent`（`stop()`、`abort()`；丢弃它即中止）。用自己的方式识别语音的应用（自己的引擎或服务，比如嵌入 NSH 的应用）用 `set_backend` 给模块一个 `SpeechBackend`：之后每个会话都交给它，而不是系统的识别器。
+
+```rust
+use nsh_extra::speech::{self, SpeechEvent, SpeechRequest};
+
+async fn dictate() -> String {
+    let mut recognition = speech::recognize(SpeechRequest::default());
+    let mut text = String::new();
+    while let Some(event) = recognition.next().await {
+        match event {
+            SpeechEvent::Result { text: heard, .. } => text = heard,
+            SpeechEvent::End { .. } => break,
+            _ => {}
+        }
+    }
+    text
+}
+```
+
+在 `nsh test`（以及 `nsh_testing::Headless`）中，会话运行在模块的模拟识别器上，它的名称是 `"nsh-extra/speech"`：会话立即开始监听，就像用户允许了麦克风；测试通过 [`app.fake`](./testing-and-trace.md)（Rust 中是 `Headless::call_fake`）调用这个模拟识别器，代替用户说话：
+
+| 方法 | `args` | 作用和回答 |
+|---|---|---|
+| `hear` | `[text]` | 用户说出 `text`，即到目前为止的完整转写：正在运行的会话把它报告为非最终的 `result`（`interim: false` 时先留到结束）。resolve 为 `null`；没有会话运行时以 `no speech session listens` 拒绝。 |
+| `end` | `[]` 或 `[error]` | 结束正在运行的会话：带 `error`（上面的错误码之一）时会话失败，否则像用户停下时一样：转写作为最终的 `result`，然后 `end`（什么都没听到时为 `"no-speech"`）。resolve 为 `null`；没有会话运行或 `error` 不是错误码时拒绝。 |
+| `requests` | `[]` | resolve 为应用开始的会话，按顺序：`[{ lang, interim }]`，用户的语言时 `lang` 为 `null`。 |
+
+```tsx
+await app.press("label:Dictate");
+await app.fake("nsh-extra/speech", "hear", ["hello"]);
+await app.waitFor("text:hello");
+await app.fake("nsh-extra/speech", "end");
+```
 
 ## 应用自己的 Rust：`ext/`
 
