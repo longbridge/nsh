@@ -236,7 +236,8 @@ DebugView and Visual Studio show) and Linux apps to their standard error.
 #### Log files and levels on the desktop
 
 A packaged macOS, Windows or Linux app also writes its log lines to a file in its data directory, `logs/app.log`,
-beside the platform's log:
+beside the platform's log. An app can choose another directory for the files with `nsh.json` `logDir`
+([Project structure](./project-structure.md)); the table is the default:
 
 | Platform | Log file |
 |---|---|
