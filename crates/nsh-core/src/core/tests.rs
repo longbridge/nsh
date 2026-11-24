@@ -20525,6 +20525,78 @@ mod components {
         assert_eq!(t.text, "Tapped 1 the link, bold and more\u{fffc}");
     }
 
+    /// A sentence with a link going somewhere (as `TextView` gives its
+    /// links their URL), a link that is only pressed, and a span with an
+    /// `href` that takes no presses. Each press on the second link moves
+    /// the first one's `href` on: another URL, then none.
+    #[component]
+    fn LinksGoingSomewhere() -> impl IntoElement {
+        let presses = signal(0);
+        let href = move || match presses.get() {
+            0 => Some(SharedString::from("https://example.com/a")),
+            1 => Some(SharedString::from("https://example.com/b")),
+            _ => None,
+        };
+        view().child(
+            text("Read ")
+                .child(text("the docs").on_press(|_: &()| {}).__link_href(href))
+                .child(" or ")
+                .child(
+                    text("this")
+                        .on_press(move |_: &()| presses.update(|p| *p += 1))
+                        .__link_href(|| None::<SharedString>),
+                )
+                .child(" and ")
+                .child(text("that").__link_href(|| Some(SharedString::from("/that")))),
+        )
+    }
+
+    #[test]
+    fn a_links_href_is_in_its_blocks_text_as_metadata() {
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<LinksGoingSomewhere>(|| ()));
+        let text = |batch: &MountBatch| {
+            batch.items.iter().find_map(|i| match i {
+                MountItem::Text { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+        };
+        let t = text(&c.commit().unwrap()).expect("one paragraph");
+        assert_eq!(t.text, "Read the docs or this and that");
+        // Two links: "the docs" goes somewhere, "this" nowhere; "that"
+        // takes no presses, so it is no link and its `href` is not kept.
+        assert_eq!(
+            t.links.iter().map(|l| (l.start, l.end)).collect::<Vec<_>>(),
+            [(5, 13), (17, 21)]
+        );
+        assert_eq!(
+            t.link_hrefs,
+            [crate::LinkHref::new(0, "https://example.com/a")]
+        );
+        assert_eq!(t.link_href(0), Some("https://example.com/a"));
+        assert_eq!(t.link_href(1), None);
+
+        // A new `href` is metadata: the text is mounted again with it, its
+        // typesetting and layout kept.
+        let this = t.links[1].node;
+        let prepares = c.text_engine.prepares.get();
+        let layouts = c.text_engine.layouts.get();
+        assert!(c.component_event(this, EventKind::Press, &EventPayload::None));
+        let t = text(&c.commit().unwrap()).expect("mounted again");
+        assert_eq!(
+            t.link_hrefs,
+            [crate::LinkHref::new(0, "https://example.com/b")]
+        );
+        assert_eq!(c.text_engine.prepares.get(), prepares);
+        assert_eq!(c.text_engine.layouts.get(), layouts);
+        // None: the link stays a link, going nowhere.
+        assert!(c.component_event(this, EventKind::Press, &EventPayload::None));
+        let t = text(&c.commit().unwrap()).expect("mounted again");
+        assert_eq!(t.links.len(), 2);
+        assert_eq!(t.link_hrefs, []);
+        assert_eq!(c.text_engine.layouts.get(), layouts);
+    }
+
     /// A sentence whose link has a hint (as `nsh-base` gives a link its
     /// URL): an overlay inside the span.
     #[component]
@@ -40569,6 +40641,104 @@ fn span_test_ids_reuse_fitted_and_hidden_layouts() {
             counts
         );
     }
+}
+
+#[test]
+fn a_links_href_reaches_the_spans_a_fitted_text_draws() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Text,
+            },
+            style_op(
+                2,
+                &[
+                    ("width", StyleValue::Number(30.0)),
+                    ("height", StyleValue::Number(16.0)),
+                    ("fontSize", StyleValue::Number(20.0)),
+                ],
+            ),
+            Op::SetProp {
+                id: 2,
+                prop: Prop::AdjustsFontSizeToFit(true),
+            },
+            // A link: a span taking presses.
+            Op::Create {
+                id: 4,
+                tag: Tag::Text,
+            },
+            Op::Listen {
+                id: 4,
+                event: EventKind::Press,
+                enabled: true,
+            },
+            Op::CreateText {
+                id: 6,
+                text: "long enough to shrink".into(),
+            },
+            Op::Insert {
+                parent: 4,
+                child: 6,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 4,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let text_of = |batch: &MountBatch| {
+        batch.items.iter().find_map(|i| match i {
+            MountItem::Text {
+                id: 2,
+                text,
+                layout,
+                ..
+            } => Some((text.clone(), layout.clone())),
+            _ => None,
+        })
+    };
+    let (old_text, old_layout) = text_of(&c.commit().unwrap()).unwrap();
+    assert_eq!(old_text.links.len(), 1);
+    assert_eq!(old_text.link_hrefs, []);
+    let counts = (
+        c.text_engine.prepares.get(),
+        c.text_engine.layouts.get(),
+        c.text_engine.measures.get(),
+    );
+    // Its `href` given: the drawn (shrunk) spans take it, as they take a
+    // test id, laid out as they were.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 4,
+            prop: Prop::Href(Some("https://example.com/fitted".into())),
+        }],
+    );
+    let (text, layout) = text_of(&c.commit().unwrap()).unwrap();
+    assert_eq!(text.link_href(0), Some("https://example.com/fitted"));
+    assert_eq!(
+        text.spans, old_text.spans,
+        "keep the actual drawn font size"
+    );
+    assert!(Arc::ptr_eq(&old_layout.0, &layout.0));
+    assert_eq!(
+        (
+            c.text_engine.prepares.get(),
+            c.text_engine.layouts.get(),
+            c.text_engine.measures.get()
+        ),
+        counts
+    );
 }
 
 /// What a node's `env()` terms came to: its padding and margin insets.

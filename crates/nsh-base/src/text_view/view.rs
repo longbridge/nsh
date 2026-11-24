@@ -5,7 +5,7 @@ use std::rc::Rc;
 use nsh_core::{
     ResizeMode,
     color::Hsla,
-    element::{Renderer, Style, StyleRefinement},
+    element::{Reactive, Renderer, Style, StyleRefinement},
     geometry::{DefiniteLength, Length},
     keymap::Modifiers,
     prelude::*,
@@ -1835,6 +1835,10 @@ impl Cx {
                     .role(AccessibilityRole::Link)
                     .when_some(title.clone(), |t, title| t.hint(title))
                     .when_some(hint, |t, hint| t.child(hint))
+                    // Where it goes, as data for the platform (the web
+                    // draws its characters as an `<a href>`), as a `Link`
+                    // carries its `href`.
+                    .__link_href(Reactive::Static(Some(url.clone())))
                     .on_press(self.link_press(url));
                 self.part(el, Part::Link).into_element()
             }
