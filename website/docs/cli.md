@@ -439,7 +439,7 @@ nsh publish doctor linux [--entry <DIR>]
 Writes or updates the app's Flathub manifest (`<id>.yml`) for a release archive: its download URL and SHA-256. It opens
 no pull request; commit the manifest to `flathub/<id>` yourself ([Publishing](./publish.md#flathub)). `status`
 prints the app's version on Flathub and exits 1 until it is `nsh.json`'s; `doctor` checks the metadata Flathub asks for
-(`id`, the store listing, `store.linux`, the icon), validates the metainfo and desktop entry, and finds `appimagetool` and `flatpak-builder`.
+(`id`, the store listing, `store.linux`, the icon), and validates the metainfo and desktop entry.
 
 | Flag | Description |
 |---|---|
