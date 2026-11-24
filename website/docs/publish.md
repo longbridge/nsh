@@ -1,11 +1,15 @@
 ---
-title: Publishing on Linux
-description: Ship a Linux NSH app as an AppImage, a Flatpak or on Flathub, with metadata from nsh.json, nsh publish linux, status and doctor.
+title: Publishing
+description: Publish NSH apps to app stores and distribution channels. Linux: ship an AppImage, a Flatpak or on Flathub, with metadata from nsh.json, nsh publish linux, status and doctor.
 order: 21
 group: delivery
 ---
 
-# Publishing on Linux
+# Publishing
+
+`nsh publish <platform>` prepares and uploads releases. Each platform has its own section below.
+
+## Linux
 
 A Linux app reaches users three ways:
 
@@ -18,7 +22,7 @@ A Linux app reaches users three ways:
 All three are built from the same package and read the same `nsh.json`. Flathub builds and signs the app itself:
 NSH prepares the manifest, you open the pull request.
 
-## Before you start
+### Before you start
 
 - The app packages on Linux: `nsh package --target linux` works ([Linux](./linux.md#packaging)).
 - `nsh.json` has an `id` in reverse-DNS form. On Flathub it must be a domain you control, or
@@ -32,7 +36,7 @@ NSH prepares the manifest, you open the pull request.
 
 `nsh publish linux doctor` reports each of these.
 
-## Configuration
+### Configuration
 
 ```json
 {
@@ -78,7 +82,7 @@ NSH prepares the manifest, you open the pull request.
 
 `store` is shared by every store `nsh publish` targets; fill it once.
 
-## AppImage
+### AppImage
 
 ```sh
 nsh package --target linux --format appimage
@@ -93,7 +97,7 @@ chmod +x Counter-x86_64.AppImage
 ./Counter-x86_64.AppImage
 ```
 
-## Flatpak
+### Flatpak
 
 ```sh
 nsh package --target linux --format flatpak
@@ -108,12 +112,12 @@ flatpak install --user .nsh/out/Counter.flatpak
 flatpak run io.github.example.Counter
 ```
 
-## Flathub
+### Flathub
 
 Flathub takes no uploads. Each app is a GitHub repository, `flathub/<id>`, whose manifest names the release archive by
 URL and SHA-256; Flathub builds and publishes every change merged there.
 
-### First release
+#### First release
 
 1. `nsh publish linux doctor` until it passes.
 2. `nsh package --target linux` and upload `.nsh/out/<Name>.tar.gz` to a release with a stable URL, such as a GitHub
@@ -129,7 +133,7 @@ URL and SHA-256; Flathub builds and publishes every change merged there.
 4. Submit it as described in [Flathub's submission guide](https://docs.flathub.org/docs/for-app-authors/submission): a
    pull request to `flathub/flathub` with the manifest. Flathub reviews it and creates `flathub/<id>`.
 
-### Later releases
+#### Later releases
 
 Bump `version`, package, upload the new archive, then point `--out` at your checkout of `flathub/<id>`:
 
@@ -143,7 +147,7 @@ When the manifest exists, only the archive source marked `# nsh: release archive
 rest stays as you or Flathub's reviewers edited it. Commit and open a pull request on `flathub/<id>`. NSH never opens
 pull requests for you.
 
-### Status
+#### Status
 
 ```sh
 nsh publish linux status [--json]
@@ -152,7 +156,7 @@ nsh publish linux status [--json]
 Prints the version Flathub lists for the app and exits 1 until it equals `nsh.json`'s `version`, so CI can wait on a
 release going live. An app not on Flathub yet is reported as such.
 
-### Doctor
+#### Doctor
 
 ```sh
 nsh publish linux doctor
@@ -162,7 +166,7 @@ Checks the `id`, the `store` fields Flathub requires (summary length, license, s
 the generated metainfo with `appstreamcli` and the desktop entry with `desktop-file-validate` when installed, and finds
 `appimagetool` and `flatpak-builder`. It exits non-zero while something Flathub requires is missing.
 
-## Commands
+### Commands
 
 ```sh
 nsh package --target linux [--format appimage|flatpak]
@@ -178,7 +182,7 @@ nsh publish linux doctor [--entry <DIR>]
 | `--out <DIR>` | Where to write `<id>.yml`. Default `.nsh/out/flathub/<id>` |
 | `--json` | `status` only: machine-readable output |
 
-## Troubleshooting
+### Troubleshooting
 
 | Symptom | Cause and fix |
 |---|---|
@@ -191,7 +195,7 @@ nsh publish linux doctor [--entry <DIR>]
 | Flathub build fails on architecture | The archive is built for this machine's processor (`only-arches`); build and add an archive per architecture |
 | `status` says not on Flathub | The first submission isn't merged yet, or the `id` differs from the Flathub repository name |
 
-## What is not covered
+### What is not covered
 
 - No `.deb`, `.rpm`, Snap or AUR packages.
 - No upload to Flathub or opening pull requests: Flathub builds from the manifest you submit.
