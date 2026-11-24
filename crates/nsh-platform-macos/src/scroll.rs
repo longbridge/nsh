@@ -31,8 +31,10 @@
 //! as on iOS. Snapping and paging use [`ScrollBehavior::snap_target`].
 //!
 //! Trackpads follow the system: a gesture (`phase`) rubber-bands past the
-//! edges when `bounces` and the content overflows (or the view pulls to
-//! refresh) and springs back when the fingers lift, and the
+//! edges when `bounces`, as AppKit's `.automatic` elasticity does (a
+//! horizontal view only while its content overflows, a vertical one whose
+//! content fits only when no outer vertical view takes the stretch; see
+//! [`bounce_target`]), and springs back when the fingers lift, and the
 //! momentum after it is the system's (`momentumPhase` events), not a glide
 //! of ours; snapping views snap from the release instead. Mouse wheels (no
 //! phases) stop at the edges and settle when the notches stop. Mouse drags
@@ -540,22 +542,19 @@ fn movable_in(s: &ScrollState, viewport: (f32, f32)) -> bool {
 ///    stretch to the list around it.
 pub(crate) fn bounce_target(chain: &[NshView], dx: f32, dy: f32) -> Option<NshView> {
     let horizontal = dx.abs() > dy.abs();
-    let kinds: Vec<Option<Bounce>> = chain
-        .iter()
-        .map(|v| {
-            let state = v.state();
-            let refreshes = state.events.contains(EventKind::Refresh);
-            state.scroll.as_ref().map(|s| {
-                bounce_kind(
-                    s,
-                    (state.frame.size.width.0, state.frame.size.height.0),
-                    horizontal,
-                    refreshes,
-                )
-            })
+    let kind = |i: usize| {
+        let state = chain[i].state();
+        let refreshes = state.events.contains(EventKind::Refresh);
+        state.scroll.as_ref().map(|s| {
+            bounce_kind(
+                s,
+                (state.frame.size.width.0, state.frame.size.height.0),
+                horizontal,
+                refreshes,
+            )
         })
-        .collect();
-    let idx = bounce_index(&kinds, horizontal)?;
+    };
+    let idx = bounce_index(chain.len(), kind, horizontal)?;
     Some(chain[idx].clone())
 }
 
@@ -606,17 +605,23 @@ fn bounce_kind(s: &ScrollState, viewport: (f32, f32), horizontal: bool, refreshe
     }
 }
 
-fn bounce_index(kinds: &[Option<Bounce>], horizontal: bool) -> Option<usize> {
-    if let Some(i) = kinds.iter().position(|k| *k == Some(Bounce::Primary)) {
+/// The index [`bounce_target`] picks among `len` views (innermost first)
+/// whose [`Bounce`] classification is `kind(i)`, without collecting them.
+fn bounce_index(
+    len: usize,
+    kind: impl Fn(usize) -> Option<Bounce>,
+    horizontal: bool,
+) -> Option<usize> {
+    if let Some(i) = (0..len).find(|&i| kind(i) == Some(Bounce::Primary)) {
         return Some(i);
     }
     if horizontal {
         return None;
     }
-    let outermost = kinds
-        .iter()
-        .rposition(|k| matches!(k, Some(Bounce::VerticalFit | Bounce::VerticalRigid)))?;
-    (kinds[outermost] == Some(Bounce::VerticalFit)).then_some(outermost)
+    let outermost = (0..len)
+        .rev()
+        .find(|&i| matches!(kind(i), Some(Bounce::VerticalFit | Bounce::VerticalRigid)))?;
+    (kind(outermost) == Some(Bounce::VerticalFit)).then_some(outermost)
 }
 
 /// Sends `kind` with the offset if JS listens to it.
@@ -2794,6 +2799,11 @@ mod tests {
 
     /// A scroll view's [`Bounce`] classification for `content` points in a
     /// 300 x 200 viewport along `horizontal`.
+    /// [`bounce_index`] over already classified views.
+    fn bounce_in(kinds: &[Option<Bounce>], horizontal: bool) -> Option<usize> {
+        bounce_index(kinds.len(), |i| kinds[i], horizontal)
+    }
+
     fn bounce_kind_with(
         content: (f32, f32),
         view_horizontal: bool,
@@ -2821,8 +2831,8 @@ mod tests {
     fn standalone_bounce_matches_appkit_axes() {
         let short_v = bounce_kind_with((300.0, 120.0), false, false, false, true);
         let short_h = bounce_kind_with((300.0, 200.0), true, true, false, true);
-        assert_eq!(bounce_index(&[Some(short_v)], false), Some(0));
-        assert_eq!(bounce_index(&[Some(short_h)], true), None);
+        assert_eq!(bounce_in(&[Some(short_v)], false), Some(0));
+        assert_eq!(bounce_in(&[Some(short_h)], true), None);
     }
 
     /// An inner vertical scroll view whose content fits (an editor as tall as
@@ -2834,14 +2844,11 @@ mod tests {
         let fit = bounce_kind_with((300.0, 120.0), false, false, false, true);
         let overflow = bounce_kind_with((300.0, 800.0), false, false, false, true);
         let no_bounce = bounce_kind_with((300.0, 800.0), false, false, false, false);
-        assert_eq!(bounce_index(&[Some(fit), Some(overflow)], false), Some(1));
-        assert_eq!(bounce_index(&[Some(fit), Some(fit)], false), Some(1));
-        assert_eq!(bounce_index(&[Some(fit), Some(no_bounce)], false), None);
+        assert_eq!(bounce_in(&[Some(fit), Some(overflow)], false), Some(1));
+        assert_eq!(bounce_in(&[Some(fit), Some(fit)], false), Some(1));
+        assert_eq!(bounce_in(&[Some(fit), Some(no_bounce)], false), None);
         // When the inner view itself overflows, it keeps its edge stretch.
-        assert_eq!(
-            bounce_index(&[Some(overflow), Some(overflow)], false),
-            Some(0)
-        );
+        assert_eq!(bounce_in(&[Some(overflow), Some(overflow)], false), Some(0));
     }
 
     #[test]
@@ -2849,9 +2856,9 @@ mod tests {
         let tall_v = bounce_kind_with((300.0, 800.0), false, false, false, true);
         let wide_h = bounce_kind_with((900.0, 200.0), true, true, false, true);
         let wrong_axis = bounce_kind_with((300.0, 800.0), false, true, false, true);
-        assert_eq!(bounce_index(&[Some(tall_v)], false), Some(0));
-        assert_eq!(bounce_index(&[Some(wide_h)], true), Some(0));
-        assert_eq!(bounce_index(&[Some(wrong_axis)], true), None);
+        assert_eq!(bounce_in(&[Some(tall_v)], false), Some(0));
+        assert_eq!(bounce_in(&[Some(wide_h)], true), Some(0));
+        assert_eq!(bounce_in(&[Some(wrong_axis)], true), None);
     }
 
     /// Pulling to refresh needs the stretch, however short the content, even
@@ -2860,9 +2867,9 @@ mod tests {
     fn a_scroll_view_that_refreshes_bounces_when_its_content_fits() {
         let refreshes = bounce_kind_with((300.0, 120.0), false, false, true, true);
         let outer_fit = bounce_kind_with((300.0, 120.0), false, false, false, true);
-        assert_eq!(bounce_index(&[Some(refreshes)], false), Some(0));
+        assert_eq!(bounce_in(&[Some(refreshes)], false), Some(0));
         assert_eq!(
-            bounce_index(&[Some(refreshes), Some(outer_fit)], false),
+            bounce_in(&[Some(refreshes), Some(outer_fit)], false),
             Some(0)
         );
     }
