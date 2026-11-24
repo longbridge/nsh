@@ -232,6 +232,7 @@ Different, or not supported:
 
 ## See also
 
+- [Publish for Windows](./publish-windows.md)
 - [CLI](./cli.md): `nsh run --target windows`, `nsh package --target windows`
 - [Packaging](./packaging.md)
 - [Platform-specific code](./platform-specific.md)

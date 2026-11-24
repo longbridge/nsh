@@ -2,7 +2,7 @@
 title: Packaging
 description: Build installable Rust and TSX apps with nsh package for iOS devices, the iOS simulator, Android, macOS, Windows, Linux and the web, with app metadata, icons and signing.
 order: 19
-group: platforms
+group: publishing
 ---
 
 # Packaging
@@ -833,55 +833,19 @@ machine in `target/<profile>` (`cargo build -p nsh-macos-app`, `cargo build -p n
 points the CLI at another directory laid out like the distribution's `runtime/` (`ios/iphoneos`,
 `ios/iphonesimulator`, `android/release`, `macos`, `linux`, `windows`, `gpui`, `web`, ...).
 
+## Publish
+
+`nsh package` stops at the installable file. Uploading it to the App Store or Google Play, notarizing a Mac app,
+signing a Windows installer and deploying a web app are covered per platform in [Publishing](./publishing.md):
+[iOS](./publish-ios.md), [Android](./publish-android.md), [macOS](./publish-macos.md),
+[Windows](./publish-windows.md), [Linux](./publish-linux.md) and [Web](./publish-web.md).
+
 ## See also
 
+- [Publishing](./publishing.md): from a package to the app's users, per platform
 - [CLI](./cli.md): every command
 - [App Updates](./app-updates.md): packaged apps that update themselves
 - [OTA Updates](./ota-updates.md): new TSX for packaged apps, iOS and Android included, without a new build
 - [Signed packages](./signed-packages.md): updates apps download
 - [Project structure](./project-structure.md): `nsh.json` and the files of an app
 - [Native components](./native-components.md): views of the host app inside an NSH app
-
-## Upload to TestFlight
-
-`nsh publish ios <IPA>` uploads an App Store-signed IPA to App Store Connect using its
-[build uploads API](https://developer.apple.com/documentation/appstoreconnectapi/build-uploads).
-It runs on macOS and uses the IPA produced by `nsh package`, for Rust, Rust + TSX and TSX apps alike.
-
-Create the app record in App Store Connect first. Use an Apple Distribution signing identity and an
-App Store provisioning profile for that bundle identifier. Set `version` and increment `build` in
-`nsh.json` before packaging. Create a **team API key** in App Store Connect with permission to upload
-builds (Developer, App Manager or Admin), and keep its `.p8` file outside the repository. Supply
-credentials from your shell or CI secret environment; keep them out of `nsh.json` and version control.
-
-```sh
-nsh package --target ios --sign "Apple Distribution: Your Team (TEAMID)" \
-  --profile /secure/AppStore.mobileprovision
-
-export NSH_APP_STORE_APP_ID=1234567890
-export NSH_APP_STORE_ISSUER_ID=your-issuer-id
-export NSH_APP_STORE_KEY_ID=your-key-id
-export NSH_APP_STORE_PRIVATE_KEY=/secure/AuthKey_YOURKEY.p8
-nsh publish ios .nsh/out/MyApp.ipa
-```
-
-| Flag | Environment variable | Meaning |
-|---|---|---|
-| `--app-id <ID>` | `NSH_APP_STORE_APP_ID` | Numeric Apple ID of the existing App Store Connect app. |
-| `--issuer-id <ID>` | `NSH_APP_STORE_ISSUER_ID` | Team API key issuer ID. |
-| `--key-id <ID>` | `NSH_APP_STORE_KEY_ID` | API key ID. |
-| `--private-key <PATH>` | `NSH_APP_STORE_PRIVATE_KEY` | Path to the `.p8` private key. |
-
-All four values are required; flags override environment variables. The CLI reads the bundle ID,
-version and build number from the IPA and checks that the bundle ID matches the App Store Connect
-app. It signs short-lived ES256 tokens, streams the IPA in the requested parts, and commits its
-SHA-256 checksum. The final message includes the upload ID and the app's TestFlight link.
-
-A successful command means Apple accepted the upload for processing. Follow processing status,
-export compliance, tester groups and any beta review in App Store Connect. App Store review submission
-and production release remain manual. If an upload is interrupted, check its printed upload ID in
-App Store Connect before retrying; each invocation starts a new upload. Apple validates signing
-and provisioning while processing the build.
-
-`nsh publish <ENTRY> --key … --cert …` continues to produce a signed `.nshpkg` for embedding.
-Use `./ios` to name a local entry directory called `ios`.

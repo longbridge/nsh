@@ -2,7 +2,7 @@
 title: 打包
 description: 用 nsh package 为 iOS 真机、iOS 模拟器、Android、macOS、Windows、Linux 和 Web 构建可安装的 Rust 和 TSX 应用，包括应用元数据、图标和签名。
 order: 19
-group: platforms
+group: publishing
 ---
 
 # 打包
@@ -723,52 +723,18 @@ Rust 应用构建自己的 runner。对 TSX 应用，`nsh package` 会在 CLI �
 构建它们（release 版 CLI 需加上 `--release`）；`nsh-macos-app`（在 macOS 上）、`nsh-linux-app`（在 Linux 上）和 `nsh-windows-app`（在 Windows 上）为本机构建，位于 `target/<profile>`（`cargo build -p nsh-macos-app`、`cargo build -p nsh-linux-app`、`cargo build -p nsh-windows-app`）；Web 运行时不论 CLI 的 profile 如何，都以 `web` profile 构建，位于 `target/wasm32-unknown-unknown/web/`。环境变量 `NSH_RUNTIME` 可以让 CLI 改用另一个目录，其结构与发行包的
 `runtime/` 相同（`ios/iphoneos`、`ios/iphonesimulator`、`android/release`、`macos`、`linux`、`windows`、`gpui`、`web` 等）。
 
+## 发布
+
+`nsh package` 只负责生成可安装的文件。上传到 App Store 或 Google Play、公证 Mac 应用、签名 Windows 安装程序以及部署 Web
+应用，按平台分别在[发布](./publishing.md)中介绍：[iOS](./publish-ios.md)、[Android](./publish-android.md)、
+[macOS](./publish-macos.md)、[Windows](./publish-windows.md)、[Linux](./publish-linux.md) 和 [Web](./publish-web.md)。
+
 ## 另请参阅
 
+- [发布](./publishing.md)：按平台介绍从安装包到用户手中的全过程
 - [CLI](./cli.md)：所有命令
 - [应用更新](./app-updates.md)：自我更新的打包应用
 - [OTA 更新](./ota-updates.md)：无需新构建，为打包应用（包括 iOS 和 Android）下发新的 TSX
 - [签名包](./signed-packages.md)：应用下载的更新
 - [项目结构](./project-structure.md)：`nsh.json` 与应用的各个文件
 - [原生组件](./native-components.md)：NSH 应用中宿主应用的视图
-
-## 上传到 TestFlight
-
-`nsh publish ios <IPA>` 使用 App Store Connect 的
-[构建上传 API](https://developer.apple.com/documentation/appstoreconnectapi/build-uploads)
-上传经过 App Store 签名的 IPA。在 macOS 上运行，接收 `nsh package` 生成的 IPA，适用于 Rust、Rust + TSX 和 TSX 应用。
-
-先在 App Store Connect 创建应用记录，准备对应 bundle identifier 的 Apple Distribution 签名证书和
-App Store provisioning profile。在 `nsh.json` 中设置 `version`，并在打包前递增 `build`。
-在 App Store Connect 创建有构建上传权限的团队 API Key（Developer、App Manager 或 Admin），
-将 `.p8` 文件保存在仓库外。通过 shell 或 CI 的秘密环境变量提供凭据，保持 `nsh.json` 和版本控制中没有凭据。
-
-```sh
-nsh package --target ios --sign "Apple Distribution: Your Team (TEAMID)" \
-  --profile /secure/AppStore.mobileprovision
-
-export NSH_APP_STORE_APP_ID=1234567890
-export NSH_APP_STORE_ISSUER_ID=your-issuer-id
-export NSH_APP_STORE_KEY_ID=your-key-id
-export NSH_APP_STORE_PRIVATE_KEY=/secure/AuthKey_YOURKEY.p8
-nsh publish ios .nsh/out/MyApp.ipa
-```
-
-| 参数 | 环境变量 | 含义 |
-|---|---|---|
-| `--app-id <ID>` | `NSH_APP_STORE_APP_ID` | 已创建的 App Store Connect 应用的数字 Apple ID。 |
-| `--issuer-id <ID>` | `NSH_APP_STORE_ISSUER_ID` | 团队 API Key 的 issuer ID。 |
-| `--key-id <ID>` | `NSH_APP_STORE_KEY_ID` | API Key ID。 |
-| `--private-key <PATH>` | `NSH_APP_STORE_PRIVATE_KEY` | `.p8` 私钥文件路径。 |
-
-四项均必填，命令行参数优先于环境变量。CLI 从 IPA 读取 bundle ID、版本和构建号，
-核对 bundle ID 与 App Store Connect 应用一致，然后签发短期 ES256 token、按指定分段流式上传，
-最后提交 SHA-256 校验和。完成消息包含 upload ID 和应用的 TestFlight 链接。
-
-命令成功表示 Apple 已接受上传，等待处理。在 App Store Connect 查看处理状态、填写出口合规信息、
-设置测试组并处理可能需要的 Beta 审核；App Store 提审和正式发布仍由你手动操作。
-上传中断时，先根据输出的 upload ID 在 App Store Connect 核实状态，再决定是否重试；每次运行都会创建新上传。
-Apple 在处理构建时验证签名和 provisioning profile。
-
-`nsh publish <ENTRY> --key … --cert …` 继续为嵌入场景生成签名 `.nshpkg`。
-本地入口目录名为 `ios` 时，写作 `./ios`。

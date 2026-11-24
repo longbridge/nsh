@@ -388,7 +388,7 @@ nsh publish android <BUNDLE.aab> [--entry <DIR>] [--package <NAME>] [--credentia
 Uploads an Android App Bundle to Google Play and releases it to the **internal testing** track, in one edit (insert,
 upload, track update, commit; a failed edit is deleted). It never goes further: promote the release to closed, open or
 production testing in Play Console. Signs in as a Google Cloud service account that has release permission for the app
-in Play Console ([Android](./android.md#upload-to-google-play)).
+in Play Console ([Publish to Google Play](./publish-android.md)).
 
 | Flag | Description |
 |---|---|
@@ -453,4 +453,4 @@ nsh publish ios <IPA> --app-id <ID> --issuer-id <ID> --key-id <ID> --private-key
 
 Uploads an App Store-signed IPA on macOS to App Store Connect for TestFlight. Flags also accept
 `NSH_APP_STORE_APP_ID`, `NSH_APP_STORE_ISSUER_ID`, `NSH_APP_STORE_KEY_ID` and
-`NSH_APP_STORE_PRIVATE_KEY`. See [Upload to TestFlight](./packaging.md#upload-to-testflight) for signing, credentials and processing.
+`NSH_APP_STORE_PRIVATE_KEY`. See [Publish to the App Store](./publish-ios.md#upload-to-testflight) for signing, credentials and processing.

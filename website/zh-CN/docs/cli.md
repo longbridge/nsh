@@ -377,7 +377,7 @@ nsh publish android <BUNDLE.aab> [--entry <DIR>] [--package <NAME>] [--credentia
 
 把 Android App Bundle 上传到 Google Play，并发布到**内部测试**轨道，全程在一次 edit 中完成（创建、上传、更新轨道、提交；失败的 edit
 会被删除）。它不会走得更远：要发布到封闭测试、开放测试或正式版，请在 Play Console 中推进。登录身份是一个在 Play Console
-中有该应用发布权限的 Google Cloud 服务账号（[Android](./android.md#上传到-google-play)）。
+中有该应用发布权限的 Google Cloud 服务账号（[发布到 Google Play](./publish-android.md)）。
 
 | 参数 | 说明 |
 |---|---|
@@ -442,4 +442,4 @@ nsh publish ios <IPA> --app-id <ID> --issuer-id <ID> --key-id <ID> --private-key
 
 在 macOS 上将经过 App Store 签名的 IPA 上传到 App Store Connect，用于 TestFlight。参数也可通过
 `NSH_APP_STORE_APP_ID`、`NSH_APP_STORE_ISSUER_ID`、`NSH_APP_STORE_KEY_ID` 和
-`NSH_APP_STORE_PRIVATE_KEY` 环境变量提供。签名、凭据和处理流程见[上传到 TestFlight](./packaging.md#上传到-testflight)。
+`NSH_APP_STORE_PRIVATE_KEY` 环境变量提供。签名、凭据和处理流程见[发布到 App Store](./publish-ios.md#upload-to-testflight)。
