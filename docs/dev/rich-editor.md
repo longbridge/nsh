@@ -179,7 +179,9 @@ and input methods. The sink is the editor's one stop of Tab; the content box tak
 (`focusable(false)`), and a press in it focuses the sink. The keyboard is the sink's, so the editor's
 `input_accessory` (`inputAccessoryViewID`) is set on the sink, as an `Input`'s. A node selection of a block atom has no caret: the sink is at the node's box, where a platform
 that scrolls a field into view as it focuses it (a browser) finds it, and scrolling the selection into view
-(`scroll_into_view`) brings the node in whole, as ProseMirror scrolls a node selection's DOM node. Typed text goes to plugins' `handle_text_input` (input rules), else is inserted with the stored
+(`scroll_into_view`) brings the node in whole, as ProseMirror scrolls a node selection's DOM node. The sink's changes are replayed at the caret as the code `Editor`'s are (`sink_text.rs`), and a caret the
+platform moves in the sink without a key (an input method that puts its caret between the brackets it typed) moves
+the editor's by as much, within the textblock and over text the document shows the same way. Typed text goes to plugins' `handle_text_input` (input rules), else is inserted with the stored
 marks (origin `Input`). While an input method composes, its text shows in the line at the caret with the block's
 typography, and the document waits; the commit is one transaction tagged with the composition's id (`composition`
 meta, which the history groups). `RichEditorEvent::CompositionChange(bool)` (Rust
