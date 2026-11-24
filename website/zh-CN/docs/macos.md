@@ -306,7 +306,7 @@ Return 不会提交。`onKeyPress` 报告的内容与 React Native 一致：输�
 
 ## 另见
 
-- [发布 macOS 应用](./publish.md#publish-for-macos)
+- [签名、公证与分发](./packaging.md#sign-notarize-and-distribute)
 - [CLI](./cli.md)：`nsh run --target macos`、`nsh package --target macos`
 - [打包](./packaging.md)
 - [平台特定代码](./platform-specific.md)

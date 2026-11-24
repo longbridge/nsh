@@ -1,60 +1,43 @@
 ---
 title: Publishing
-description: "How an NSH app gets from nsh package to its users on every platform: app stores, installers, web hosting, credentials, release CI and what each platform supports today."
+description: "Publishing an NSH app to app stores: App Store Connect and TestFlight for iOS, Google Play for Android, store credentials and release CI."
 order: 18.5
 group: publishing
 ---
 
 # Publishing
 
-Publishing is everything after the app works: building a release, signing it, getting it into an app store or onto a
-download page, and keeping it up to date. [Packaging](./packaging.md) covers the first part, `nsh package`, for every
-platform; this page covers the rest, with one section per platform:
+Publishing is uploading a packaged app to an app store: App Store Connect for iOS and Google Play for Android, with
+`nsh publish ios` and `nsh publish android`. [Packaging](./packaging.md) builds the file first, and also covers the
+platforms without a store upload: signing, notarizing and distributing macOS, Windows and Linux apps, and hosting a
+web app.
 
 - [iOS](#publish-to-the-app-store): App Store Connect and TestFlight
 - [Android](#publish-to-google-play): Google Play
-- [macOS](#publish-for-macos): Developer ID, notarization and direct download
-- [Windows](#publish-for-windows): installer, code signing and direct download
-- [Linux](#publish-for-linux): archive, desktop entry and direct download
-- [Web](#publish-on-the-web): a static site on any host
 
-## What each platform supports
+## What each store supports
 
-| Platform | What `nsh package` writes | Where it goes | What `nsh publish` does |
+| Platform | What `nsh package` writes | Store | What `nsh publish` does |
 |---|---|---|---|
 | iOS | A signed `.ipa` | App Store Connect: TestFlight, then the App Store | Uploads the IPA for TestFlight (`nsh publish ios`) |
 | Android | A signed `.aab` (or `.apk`) | Google Play | Uploads the bundle and releases it to the internal testing track (`nsh publish android`) |
-| macOS | A signed `.app` | Direct download, notarized with Apple's tools | Nothing yet: notarize and upload it yourself |
-| Windows | A directory, `.zip` and an Inno Setup installer | Direct download | Nothing yet: sign and upload it yourself |
-| Linux | A directory and `.tar.gz` with a desktop entry | Direct download | Nothing yet: upload it yourself |
-| Web | A static site | Any web server or CDN | Nothing: copy the directory to the host |
 
-What the table says "yourself" is a step outside NSH, described on the platform's page with the commands it takes.
 Store review submissions, phased rollouts and production releases are made in each store's console; no `nsh` command
-makes them.
+makes them. macOS, Windows, Linux and the web have no store upload in NSH yet; they ship as direct downloads or a
+static site, described in Packaging: [macOS](./packaging.md#sign-notarize-and-distribute),
+[Windows](./packaging.md#sign-and-distribute), [Linux](./packaging.md#distribute) and [Web](./packaging.md#host-the-site).
 
-Apart from the stores, three ways to deliver an app that is already installed work on every native platform:
-
-| Delivers | How | Page |
-|---|---|---|
-| A new version of the whole app (macOS, Windows, Linux) | `nsh/updater`, from GitHub Releases or your host | [App Updates](./app-updates.md) |
-| New TSX for an installed app, without a store release | Signed packages the app downloads | [OTA Updates](./ota-updates.md) |
-| NSH screens inside another app | Signed packages a host app verifies | [Signed packages](./signed-packages.md) |
-
-`nsh publish <ENTRY> --key … --cert …`, without a platform, makes such a signed package; `nsh publish ios` and
-`nsh publish android` are the store uploads described here.
+`nsh publish <ENTRY> --key … --cert …`, without a platform, makes a signed package for
+[OTA Updates](./ota-updates.md) and [Signed packages](./signed-packages.md), not a store upload.
 
 ## One release, step by step
 
 1. **Set the version in `nsh.json`.** `version` is what users see (`1.4.0`); `build` is a whole number that must grow
    with every upload to a store, on every platform (`CFBundleVersion` on Apple platforms, `versionCode` on Android).
    Both can also be given on the command line (`--app-version`, `--build`), which is handy when CI numbers builds.
-2. **Package on each platform.** iOS and macOS need a Mac with Xcode; Windows packages are built on Windows (only
-   Windows can embed the icon); Linux packages on Linux; Android and the web anywhere. See
-   [Packaging](./packaging.md).
-3. **Sign.** iOS, Android and macOS sign as they package when given an identity or keystore; a Windows executable is
-   signed afterwards with `signtool`. Each platform's page has the details.
-4. **Publish.** Upload to the store, or attach the files to a release.
+2. **Package.** iOS needs a Mac with Xcode; Android packages anywhere. See [Packaging](./packaging.md).
+3. **Sign.** Both sign as they package, given an Apple Distribution identity and profile, or an upload keystore.
+4. **Publish.** Upload to the store with `nsh publish ios` or `nsh publish android`.
 5. **Follow it up.** Processing, review and the move from testing to production happen in the store's console.
 
 ```json
@@ -82,8 +65,6 @@ release CI fills from its secrets:
 | iOS | App Store Connect team API key: issuer ID, key ID, `.p8` file | `NSH_APP_STORE_ISSUER_ID`, `NSH_APP_STORE_KEY_ID`, `NSH_APP_STORE_PRIVATE_KEY` |
 | Android | Upload keystore and its password | `nsh package --keystore … --key-alias …`, `NSH_KEYSTORE_PASSWORD` |
 | Android | Google Cloud service account JSON key | `NSH_PLAY_CREDENTIALS` or `--credentials` |
-| macOS | Developer ID Application certificate; an App Store Connect API key or app-specific password for notarization | `nsh package --sign …`; `xcrun notarytool` |
-| Windows | A code signing certificate | `signtool` |
 
 ## Automate it
 
@@ -414,395 +395,9 @@ In Play Console:
 | `Google Play refused the bundle` … signed with the wrong key | The bundle was signed with the debug key or another upload key: package with the upload keystore registered for the app. |
 | `Google Play refused the internal testing release` … draft | The app has had no release made in Play Console yet: pass `--draft` and roll it out in Play Console. |
 
-## Publish for macOS
-
-A Mac app is distributed outside the Mac App Store as a signed and notarized `.app`, downloaded from your site or a
-GitHub Release. `nsh package --target macos --sign …` builds the app and signs it with your Developer ID;
-notarization, stapling and uploading are done with Apple's command line tools and your release host.
-[App Updates](./app-updates.md) then keeps installed copies up to date.
-
-`nsh publish` has no macOS store upload: NSH does not package for the Mac App Store yet.
-
-### Before the first release
-
-Once per developer account:
-
-1. **Join the Apple Developer Program.**
-2. **Create a Developer ID Application certificate** (Certificates, Identifiers & Profiles → Certificates; only the
-   account holder can create one) and install it in the login keychain of the Mac (or CI runner) that packages the
-   app. `security find-identity -v -p codesigning` lists it as
-   `Developer ID Application: Example Inc (ABCDE12345)`.
-3. **Set up notarization credentials** for `notarytool`, stored once in the keychain under a profile name. With an App
-   Store Connect team API key (the same kind [iOS uploads](#before-the-first-release) use):
-
-   ```sh
-   xcrun notarytool store-credentials notes-notary \
-     --key /secure/AuthKey_ABC123DEFG.p8 --key-id ABC123DEFG --issuer 69a6de70-0000-0000-0000-000000000000
-   ```
-
-   or with an Apple ID and an app-specific password: `xcrun notarytool store-credentials notes-notary --apple-id
-   you@example.com --team-id ABCDE12345`.
-
-### Configure the app
-
-| Key | In the build | Notes |
-|---|---|---|
-| `id` | `CFBundleIdentifier` | Also the app's [storage](../modules/nsh.md#storage) location; keep it stable. |
-| `name` | The `.app` name and `CFBundleName` | |
-| `version`, `build` | `CFBundleShortVersionString`, `CFBundleVersion` | `version` must be semver and grow for [self-updates](./app-updates.md). |
-| `icon` (or `icon.macos`) | `AppIcon.icns` | macOS artwork sits inset on a transparent canvas ([Icons](./packaging.md#icons)). |
-| `macos.infoPlist` | `Info.plist` keys | Usage descriptions and other keys ([Info.plist keys](./packaging.md#infoplist-keys-and-entitlements)). |
-| `macos.entitlements` | The app's entitlements | Signed into the app with Hardened Runtime; add the exceptions it needs, such as camera access. |
-| `LSMinimumSystemVersion` in `macos.infoPlist` | The lowest macOS that opens the app | Default macOS 14 ([Minimum system version](./packaging.md#minimum-system-version)). |
-| `macos.extensions` | `Contents/PlugIns/` | Prebuilt `.appex` bundles, signed inside-out ([macOS app extensions](./packaging.md#macos-app-extensions)). |
-
-### Build and sign
-
-```sh
-nsh package --target macos --arch universal \
-  --sign "Developer ID Application: Example Inc (ABCDE12345)"
-```
-
-This writes `.nsh/out/<Name>.app`. With a certificate, NSH signs nested frameworks and extensions first, then the app,
-with Hardened Runtime (`--options runtime`) and a secure timestamp (`--timestamp`) as notarization requires, and
-verifies the result with `codesign --verify --deep --strict`. `--arch universal` runs on both Apple silicon and Intel
-Macs (it needs `rustup target add x86_64-apple-darwin` for a Rust app); leave it out for this Mac's processor only.
-Without `--sign` the app is signed ad hoc, which runs on the Mac that built it but is stopped by Gatekeeper elsewhere.
-
-### Notarize and staple
-
-Apple scans a notarized app for malicious content and records it, so Gatekeeper opens it without a warning. Submit a
-zip of the app, wait for the result, then staple the ticket to the app so it opens offline too:
-
-```sh
-cd .nsh/out
-ditto -c -k --keepParent Notes.app Notes-notarize.zip
-xcrun notarytool submit Notes-notarize.zip --keychain-profile notes-notary --wait
-xcrun stapler staple Notes.app
-spctl --assess --type execute --verbose Notes.app   # "accepted, source=Notarized Developer ID"
-```
-
-If the submission is `Invalid`, `xcrun notarytool log <submission-id> --keychain-profile notes-notary` lists every
-problem.
-
-### Distribute it
-
-Archive the stapled app for download. A zip made with `ditto` keeps its signature and extended attributes:
-
-```sh
-ditto -c -k --keepParent Notes.app Notes-1.4.0-macos.zip
-```
-
-With [`"updater"`](./app-updates.md#set-the-source) in `nsh.json`, `nsh package` also writes
-`<Name>-<version>-macos-<arch>.tar.gz` for self-updates. It holds the app as packaged, before notarization: archive the
-stapled app again under the same name, then write the manifest, as [App Updates](./app-updates.md#publish-a-release)
-describes:
-
-```sh
-tar -czf Notes-1.4.0-macos-aarch64.tar.gz Notes.app
-nsh update-manifest *.tar.gz --notes CHANGES.md --key keys/update.secret
-```
-
-Upload the archives, `latest.json` and its signature to the GitHub Release or your host. Installed copies check the
-manifest, download the archive, verify it and the app's code signature, and replace themselves.
-
-### Common errors
-
-| Problem | What to do |
-|---|---|
-| `codesign` cannot find the identity | The certificate is not in the keychain the build uses, or its private key is missing: import the `.p12` exported with the key. |
-| `errSecInternalComponent` while signing on CI | The keychain is locked: unlock it (`security unlock-keychain`) and allow `codesign` to use the key (`security set-key-partition-list`). |
-| Notarization `Invalid`: not signed with a valid Developer ID certificate | The app was signed ad hoc or with an Apple Development certificate: package with `--sign "Developer ID Application: …"`. |
-| Notarization `Invalid`: the signature does not include a secure timestamp | Sign through `nsh package --sign`, which adds it; do not re-sign by hand without `--timestamp`. |
-| "Notes is damaged and can't be opened" after download | The archive lost the signature (zipped with a tool that drops attributes, or modified after signing): archive with `ditto` or `tar` after stapling. |
-| Gatekeeper warns although notarization succeeded | The ticket was not stapled and the Mac is offline, or the downloaded app is not the one notarized: staple, then archive again. |
-| The app cannot use the camera, microphone or other protected resources | Add the usage description to `macos.infoPlist` and the Hardened Runtime exception to `macos.entitlements`. |
-
-## Publish for Windows
-
-`nsh package --target windows` writes everything a Windows release needs for direct download: the app's directory, a
-`.zip` of it, and a per-user installer built with Inno Setup. You sign the executables with your code signing
-certificate and upload them to your site or a GitHub Release; [App Updates](./app-updates.md) keeps installed copies
-up to date.
-
-`nsh publish` has no Windows store upload: NSH does not package MSIX for the Microsoft Store yet.
-
-### Before the first release
-
-On the Windows machine (or CI runner) that packages the app:
-
-1. **Install the tools.** A TSX app needs none; a Rust app's runner is built with Visual Studio Build Tools. For the
-   installer, install Inno Setup 6: `winget install JRSoftware.InnoSetup`.
-2. **Get a code signing certificate** from a certificate authority, or use a cloud signing service such as Azure
-   Trusted Signing. Unsigned executables still run, but SmartScreen warns about an unknown publisher, and some
-   antivirus products treat them with suspicion.
-3. **Install the Windows SDK** for `signtool.exe` (it comes with the Visual Studio installer's Windows SDK component).
-
-### Configure the app
-
-| Key | In the build | Notes |
-|---|---|---|
-| `id` | The installer's AppId, the Start menu shortcut's AppUserModelID | Groups the app's windows in the taskbar and identifies it for notifications; a newer installer with the same id upgrades the installed app. Keep it stable. |
-| `name` | `<Name>.exe`, the install directory and the Start menu entry | |
-| `version` | The installer's version and the Installed apps entry | Must be semver and grow for [self-updates](./app-updates.md). |
-| `icon` (or `icon.windows`) | Embedded in `<Name>.exe`, written as `nsh\icon.ico` | Package on Windows: only Windows can embed the icon ([Icons](./packaging.md#icons)). |
-
-### Build
-
-```powershell
-nsh package --target windows
-```
-
-```text
-.nsh\out\<Name>\           the app: <Name>.exe and nsh\
-.nsh\out\<Name>.zip        the same, as an archive
-.nsh\out\<Name>.iss        the Inno Setup script
-.nsh\out\<Name>-setup.exe  the installer, when Inno Setup 6 is installed
-```
-
-The installer needs no administrator rights: it installs for the current user in `%LOCALAPPDATA%\Programs\<Name>`,
-adds a Start menu shortcut and an Installed apps entry that uninstalls it, and upgrades an installed copy in place,
-closing the app first. The app's data is never touched, by upgrades or by the uninstaller.
-[Packaging: Windows](./packaging.md#windows) has the details.
-
-### Sign
-
-Sign the app's executable before the installer is built, so the installed app is signed too, then sign the installer.
-With a certificate in the Windows certificate store:
-
-```powershell
-signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /n "Example Inc" .nsh\out\Notes\Notes.exe
-& "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" .nsh\out\Notes.iss
-signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /n "Example Inc" .nsh\out\Notes-setup.exe
-signtool verify /pa .nsh\out\Notes-setup.exe
-```
-
-`ISCC.exe` compiles the installer again from the script `nsh package` wrote, now with the signed executable; its path
-depends on where Inno Setup is installed (`C:\Program Files (x86)\Inno Setup 6\ISCC.exe` for a machine-wide install).
-Make the `.zip` again from the signed directory too if you publish it. Always timestamp (`/tr`): the signature then
-stays valid after the certificate expires.
-
-### Distribute it
-
-Upload `Notes-setup.exe` (and the `.zip`, for people who prefer a portable copy) to your site or a GitHub Release.
-
-With [`"updater"`](./app-updates.md#set-the-source) in `nsh.json`, `nsh package` also writes
-`<Name>-<version>-windows-<arch>.zip` for self-updates. Put the signed app in it, then write the manifest with the other
-platforms' archives ([App Updates](./app-updates.md#publish-a-release)):
-
-```powershell
-nsh update-manifest *.zip *.tar.gz --notes CHANGES.md --key keys\update.secret
-```
-
-### SmartScreen
-
-SmartScreen decides by reputation, which grows as people download and run files signed with the same certificate. A
-new certificate, or a new kind of certificate, can show the "Windows protected your PC" warning for a while even when
-the file is signed. Keep signing every release with the same certificate so the reputation carries over.
-
-### Common errors
-
-| Problem | What to do |
-|---|---|
-| No `<Name>-setup.exe` in `.nsh\out` | Inno Setup 6 is not installed, or not where `nsh package` looks: install it with `winget install JRSoftware.InnoSetup`, or compile `.nsh\out\<Name>.iss` with `ISCC.exe`. |
-| The executable shows the default icon | It was packaged on macOS or Linux: package on Windows to embed the icon. |
-| `signtool` is not recognized | Run it from a Developer PowerShell, or add the Windows SDK's `bin\<version>\x64` directory to `PATH`. |
-| `SignTool Error: No certificates were found that met all the given criteria` | The certificate is not in the store `signtool` searches, or `/n` does not match its subject: list them with `certutil -user -store My`. |
-| "Windows protected your PC" on a signed installer | SmartScreen reputation is still building for the certificate (above). |
-| The installer asks to close the app | It upgrades in place and closes the running copy first; this is expected. |
-
-## Publish for Linux
-
-`nsh package --target linux` writes the app as a directory and a `.tar.gz` of it, with a desktop entry and the icon.
-You upload the archive to your site or a GitHub Release, and users unpack it and install the desktop entry;
-[App Updates](./app-updates.md) keeps installed copies up to date.
-
-`nsh publish` has no Linux store upload, and `nsh package` does not write Flatpak, AppImage, `.deb` or `.rpm`
-packages yet.
-
-### Before the first release
-
-Package on Linux: the runner is built for the machine it is built on, so package on the processor you publish for
-(`x86_64` or `aarch64`), on a distribution old enough for the users you support, as a newer glibc than theirs stops the
-app from starting. Ubuntu 24.04 is a good base for current desktops. The build needs the development packages of
-GTK 4 (4.14 or later), Pango and WebKitGTK 6.0 ([Linux: Requirements](./linux.md#requirements)).
-
-### Configure the app
-
-| Key | In the package | Notes |
-|---|---|---|
-| `id` | `<id>.desktop`, `StartupWMClass`, the GTK application id, `<id>.png` | Desktops match the app's windows to its launcher by it; reverse-DNS, as `com.example.notes`. Keep it stable. |
-| `name` | The executable `<Name>`, the directory, and the desktop entry's `Name` | |
-| `version` | Self-update archives | Must be semver and grow for [self-updates](./app-updates.md). |
-| `icon` (or `icon.linux`) | `<id>.png`, named by the desktop entry's `Icon` | A square PNG that fills its canvas ([Icons](./packaging.md#icons)). |
-
-### Build
-
-```sh
-nsh package --target linux
-```
-
-```text
-.nsh/out/<Name>/
-  <Name>          the executable
-  nsh/            the app's code, assets and app.json
-  <id>.desktop    the desktop entry
-  <id>.png        the icon
-.nsh/out/<Name>.tar.gz
-```
-
-[Packaging: Linux](./packaging.md#linux) has the details.
-
-### Distribute it
-
-Upload `<Name>.tar.gz` to your site or a GitHub Release, and tell users which libraries to install. The runtime needs
-GTK 4, Pango and WebKitGTK 6.0:
-
-| Distribution | Install |
-|---|---|
-| Debian, Ubuntu | `sudo apt install libgtk-4-1 libwebkitgtk-6.0-4` |
-| Fedora | `sudo dnf install gtk4 webkitgtk6.0` |
-| Arch | `sudo pacman -S gtk4 webkitgtk-6.0` |
-
-Installing for one user takes four steps, which an install script can run: unpack the directory somewhere stable, link
-the executable onto the `PATH`, and copy the desktop entry and the icon where desktops find them.
-
-```sh
-mkdir -p ~/.local/opt ~/.local/bin ~/.local/share/applications ~/.local/share/icons/hicolor/256x256/apps
-tar -xzf Notes.tar.gz -C ~/.local/opt
-ln -sf ~/.local/opt/Notes/Notes ~/.local/bin/Notes
-cp ~/.local/opt/Notes/com.example.notes.desktop ~/.local/share/applications/
-cp ~/.local/opt/Notes/com.example.notes.png ~/.local/share/icons/hicolor/256x256/apps/
-```
-
-The executable finds its `nsh/` directory through the link. Check the desktop entry with
-`desktop-file-validate ~/.local/share/applications/com.example.notes.desktop` before you ship it.
-
-With [`"updater"`](./app-updates.md#set-the-source) in `nsh.json`, `nsh package` also writes
-`<Name>-<version>-linux-<arch>.tar.gz` for self-updates. Upload it with the manifest
-([App Updates](./app-updates.md#publish-a-release)):
-
-```sh
-nsh update-manifest *.tar.gz *.zip --notes CHANGES.md --key keys/update.secret
-```
-
-### Common errors
-
-| Problem | What to do |
-|---|---|
-| `error while loading shared libraries: libgtk-4.so.1` (or `libwebkitgtk-6.0.so.4`) | Install the runtime libraries above. |
-| `version 'GLIBC_2.39' not found` | The app was packaged on a newer distribution than the user's: package on an older one. |
-| The app does not show in the launcher | The desktop entry is not in `~/.local/share/applications`, or its `Exec` does not find the executable: link it onto the `PATH`. |
-| The launcher shows a generic icon, or a second icon while the app runs | The icon is not in an icon theme directory, or the desktop entry was renamed: keep the file name `<id>.desktop`, which `StartupWMClass` matches. |
-| `exec format error` | The archive was built for another processor: package on `x86_64` and `aarch64` separately. |
-
-## Publish on the web
-
-On the web an app is a static site. `nsh package --target web` writes it; you copy the directory to any web server,
-object store or static host. There is no store, no signing and no review, and a deploy updates every user on their next
-load. `nsh publish` has nothing to do here.
-
-### Configure the app
-
-| Key | In the site | Notes |
-|---|---|---|
-| `name` | The page title and the web app manifest's name | |
-| `id` | The web app manifest's id | |
-| `icon` (or `icon.web`) | The favicon, `apple-touch-icon` and manifest icons | Resized to 32, 180, 192 and 512 pixels ([Icons](./packaging.md#icons)). |
-| `appearance` | The page's colors while it loads | |
-| `web.base` | The path the site is served under | Needed when the app is opened at its own paths ([Links into the app](./web.md#links-into-the-app)). |
-| `web.host` | The page's host script | [The host's functions](./web.md#the-hosts-functions). |
-
-### Build
-
-```sh
-nsh package --target web            # a Rust app, from its directory
-nsh package App.tsx --target web    # a TSX app
-nsh package --target web --run      # and serve it on http://127.0.0.1:4173/ to try it
-```
-
-This writes `.nsh/out/<Name>/` (`--out` for another directory): `index.html`, `manifest.webmanifest`, and every other
-file named after its content (`nsh.<digest>.wasm`, `app.<digest>.js`, `assets/…`), with Brotli and gzip copies
-beside them. A release changes only `index.html` and the files that really changed. The full list of files and the
-runtime's size: [Web: Publish an app](./web.md#publish-an-app).
-
-By default the site uses relative URLs, so it works from any directory of any host. To serve the files from a CDN while
-the page stays at the app's own address, pass `--asset-url https://cdn.example.com/notes/`.
-
-### Deploy
-
-Any static host works. Two rules make the app load fast and update at once:
-
-| Files | `Cache-Control` |
-|---|---|
-| `index.html`, `manifest.webmanifest` | `no-cache` |
-| everything else | `public, max-age=31536000, immutable` |
-
-Serve `.wasm` as `application/wasm`, and send the precompressed `.br` and `.gz` copies to browsers that accept them
-([Deploy it](./web.md#deploy-it) has nginx and Caddy settings). Upload the hashed files before `index.html`, so a
-visitor never gets a page whose files are not there yet.
-
-#### GitHub Pages
-
-```yaml
-on:
-  push:
-    tags: ["v*"]
-
-permissions:
-  pages: write
-  id-token: write
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    environment: github-pages
-    steps:
-      - uses: actions/checkout@v4
-      # Install nsh (pin the version), then:
-      - run: nsh package --target web --out site
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-      - uses: actions/deploy-pages@v4
-```
-
-A project site lives under `/<repo>/`; relative URLs handle that. An app opened at its own paths sets
-`"web": { "base": "/<repo>/" }` and adds a copy of `index.html` as `404.html` (`cp site/index.html site/404.html`
-before the upload), which GitHub Pages answers unknown paths with. GitHub Pages cannot set `Cache-Control` per file, so returning visitors revalidate
-the hashed files too; a host that lets you set headers loads faster.
-
-#### An object store and a CDN
-
-```sh
-nsh package --target web --out site
-aws s3 sync site s3://example-notes --exclude index.html --exclude manifest.webmanifest \
-  --cache-control "public, max-age=31536000, immutable"
-aws s3 cp site/index.html s3://example-notes/ --cache-control no-cache
-aws s3 cp site/manifest.webmanifest s3://example-notes/ --cache-control no-cache
-```
-
-Configure the CDN to serve `.wasm` as `application/wasm` and to compress with Brotli, or to serve the `.br` copies.
-
-### Supported browsers
-
-Safari 16.4 (iOS and iPadOS 16.4), Chrome and Edge 97, and Firefox 108 or later. Earlier browsers show a blank page
-([Supported browsers](./web.md#supported-browsers)).
-
-### Common errors
-
-| Problem | What to do |
-|---|---|
-| A blank page and `Failed to load module script` in the console | The host serves `.js` or `.wasm` with the wrong content type, or the files were not uploaded: check the Network panel. |
-| `WebAssembly.instantiateStreaming` fails with an incorrect response MIME type | Serve `.wasm` as `application/wasm`. |
-| Opening a path of the app, or reloading on one, gives 404 | Answer every path under the app with `index.html` and set `web.base` ([Links into the app](./web.md#links-into-the-app)). |
-| Users see the old version after a deploy | `index.html` is cached: serve it with `Cache-Control: no-cache`. |
-| Files from the CDN are blocked by CORS | The CDN must answer with `Access-Control-Allow-Origin` for the page's origin when `--asset-url` names it. |
-| A blank page on an older iPhone or Android WebView | The browser is older than the supported ones. |
-
 ## See also
 
-- [Packaging](./packaging.md): `nsh package` for every platform
+- [Packaging](./packaging.md): `nsh package` for every platform, and distributing apps without a store
 - [CLI](./cli.md): every command and flag
 - [App Updates](./app-updates.md): apps that update themselves
 - [OTA Updates](./ota-updates.md): new TSX without a store release

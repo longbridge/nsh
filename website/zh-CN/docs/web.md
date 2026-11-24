@@ -518,7 +518,7 @@ fn show_title(title: &str) {
 
 ## 另请参阅
 
-- [发布到 Web](./publish.md#publish-on-the-web)
+- [托管站点](./packaging.md#host-the-site)
 - [打包](./packaging.md)：`nsh package` 的其他目标。
 - [架构](./architecture.md)：Web 版复用的引擎、核心和挂载批次。
 - [测试](./testing-and-trace.md)：`nsh test` 以近似的文本引擎无界面地运行同一个引擎。
