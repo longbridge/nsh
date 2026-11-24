@@ -2996,6 +2996,105 @@ fn scroll_reports_content_size() {
     )));
 }
 
+/// A scroll view's content extent is its content's own, even below the
+/// viewport (#2901): the frame floor made a short list under an iOS large
+/// title scroll by the insets UIKit adds around the viewport.
+#[test]
+fn scroll_content_below_the_viewport_is_the_content() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Scroll,
+            },
+            style_op(2, &[("height", StyleValue::Number(200.0))]),
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            style_op(3, &[("height", StyleValue::Number(100.0))]),
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+        ],
+    );
+    let content = |batch: &MountBatch| {
+        batch.items.iter().find_map(|i| match i {
+            MountItem::ScrollContent { id: 2, size } => Some(*size),
+            _ => None,
+        })
+    };
+    let batch = c.commit().unwrap();
+    // The row is the content, not the 200-point viewport it lies in.
+    assert_eq!(content(&batch), Some(size_pt(320.0, 100.0)));
+
+    // Growing past the viewport reports the grown content.
+    apply(
+        &mut c,
+        vec![style_op(3, &[("height", StyleValue::Number(500.0))])],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(content(&batch), Some(size_pt(320.0, 500.0)));
+}
+
+/// A horizontal scroll view's main axis is its width: content narrower
+/// than the viewport is its own extent there too, while the height it
+/// spans stays the viewport's.
+#[test]
+fn horizontal_scroll_content_below_the_viewport_is_the_content() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Scroll,
+            },
+            style_op(
+                2,
+                &[
+                    ("width", StyleValue::Number(200.0)),
+                    ("height", StyleValue::Number(100.0)),
+                ],
+            ),
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Horizontal(true),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            style_op(3, &[("width", StyleValue::Number(50.0))]),
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    let content = batch.items.iter().find_map(|i| match i {
+        MountItem::ScrollContent { id: 2, size } => Some(*size),
+        _ => None,
+    });
+    assert_eq!(content, Some(size_pt(50.0, 100.0)));
+}
+
 /// `scrollsToTop` reaches the scroll view's mounted behavior (iOS sets
 /// `UIScrollView.scrollsToTop` from it): on by default, off when the app
 /// says so, and on again.

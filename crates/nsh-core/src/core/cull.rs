@@ -192,7 +192,7 @@ impl<M: TextEngine> Core<M> {
             if node.kind == Kind::Scroll
                 && let Some(scroll) = node.scroll.as_mut()
             {
-                scroll.culled_content = Some(scroll_extent(&l));
+                scroll.culled_content = Some(scroll_extent(&l, scroll.horizontal));
             }
             if let Some(parent) = self.nodes.get(self.nodes[key as usize].parent as usize)
                 && parent.rtl

@@ -10602,7 +10602,11 @@ impl<M: TextEngine> Core<M> {
             }
         }
         if kind == Kind::Scroll {
-            self.set_scroll_content(key, scroll_extent(&l));
+            let horizontal = self.nodes[key as usize]
+                .scroll
+                .as_ref()
+                .is_some_and(|s| s.horizontal);
+            self.set_scroll_content(key, scroll_extent(&l, horizontal));
         }
         // List cells are positioned by `update_lists`, roots by
         // `layout_roots`.
@@ -11679,17 +11683,22 @@ fn ceil_to_pixel(value: Points, ratio: f32) -> Points {
 /// A scroll view's scrollable extent from its rounded layout: the overflow
 /// rectangle is measured from the padding box origin and stops at the
 /// children's border boxes, so the leading border and trailing padding are
-/// added.
-fn scroll_extent(l: &taffy::Layout) -> Size<Points> {
+/// added. The cross axis keeps the viewport's length, which the content
+/// spans (a vertical scroll view's width, a horizontal one's height). The
+/// main axis is the content's own extent, below the viewport too: a platform
+/// adds its own insets around the viewport (iOS's bars under a large title),
+/// and a floor there gives it a range to scroll over content that fits.
+fn scroll_extent(l: &taffy::Layout, horizontal: bool) -> Size<Points> {
     let o = l.scrollable_overflow_rect;
-    size_pt(
-        l.size
-            .width
-            .max(l.border.left + o.right() + l.padding.right),
-        l.size
-            .height
-            .max(l.border.top + o.bottom() + l.padding.bottom),
-    )
+    let (width, height) = (
+        l.border.left + o.right() + l.padding.right,
+        l.border.top + o.bottom() + l.padding.bottom,
+    );
+    if horizontal {
+        size_pt(width, height.max(l.size.height))
+    } else {
+        size_pt(width.max(l.size.width), height)
+    }
 }
 
 /// `layout` rounded as Taffy's rounding pass (`taffy::round_layout`) rounds

@@ -5,6 +5,10 @@
   shows moved, with a `ScrollBy` in the same batch, clamped to its content. Text above the viewport wrapping onto more
   lines moves nothing on screen, through a window's drag and when text that waited catches up (`docs/dev/text.md`).
   Lists keep their rows themselves.
+- **Content extent** (`scroll_extent` in `core/mod.rs`): a scroll view's content size is its content's own extent along
+  its axis, below the viewport too. A platform adds its own insets around the viewport (iOS's bars under a large
+  title), so a floor there would leave it a range to scroll over content that fits. The cross axis keeps the
+  viewport's length, which the content spans.
 - **Scrolling**: `pagingEnabled`, `snapToInterval` / `snapToOffsets` / `snapToAlignment`, `disableIntervalMomentum`,
   `decelerationRate`, `scrollable`, `bounces`, `contentInset`, `scrollbarInset`, `contentOffset`, `keyboardShouldPersistTaps`
   (`never` / `handled` / `always`), `onScroll` (+ `scrollEventThrottle`; at most once per engine turn), `onScrollDragStart` /
