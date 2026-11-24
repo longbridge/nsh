@@ -1592,7 +1592,7 @@ pub struct Core<M: TextEngine> {
     focus_by_keyboard: bool,
     /// A pointer moved the focus where it is (a press, a popup a press
     /// used giving it back), decided when it was reported and kept until
-    /// it moves again: the keymap's [`crate::keymap::Keymap::pointer_focus`].
+    /// it moves again: the keymap's `Keymap::pointer_focus`.
     focus_by_pointer: bool,
     /// The keymap the app mounted last, while one of its bindings asks
     /// how the focus came ([`crate::keymap::Keymap::takes_over_pointer_focus`]),
@@ -7688,7 +7688,7 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// The app's keymap as mounted: with how the focus came
-    /// ([`crate::keymap::Keymap::pointer_focus`]) when a binding asks for
+    /// (`Keymap::pointer_focus`) when a binding asks for
     /// it, kept to mount again as the focus moves (`sync_pointer_keymap`).
     fn keymap_with_focus(
         &mut self,

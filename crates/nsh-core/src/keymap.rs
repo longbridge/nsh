@@ -908,7 +908,7 @@ impl Keymap {
     }
 
     /// The table with the keyboard focus given by a pointer when
-    /// `pointer_focus` ([`Self::pointer_focus`]).
+    /// `pointer_focus` (`Keymap::pointer_focus`).
     pub(crate) fn with_pointer_focus(mut self, pointer_focus: bool) -> Keymap {
         self.pointer_focus = pointer_focus;
         self
@@ -919,13 +919,14 @@ impl Keymap {
     /// it as the focus moves, in the table it mounts, while a binding
     /// asks for it ([`OverFocused::Pointer`]); the keys that
     /// follow are matched with it on the spot.
+    #[cfg(test)]
     pub(crate) fn pointer_focus(&self) -> bool {
         self.pointer_focus
     }
 
     /// Whether a binding asks how the focus came
     /// ([`OverFocused::Pointer`]): the core keeps
-    /// [`Self::pointer_focus`] in the table only then.
+    /// `Keymap::pointer_focus` in the table only then.
     pub(crate) fn takes_over_pointer_focus(&self) -> bool {
         self.bindings.iter().any(KeyBinding::over_pointer_focus)
     }
