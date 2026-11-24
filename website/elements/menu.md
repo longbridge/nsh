@@ -400,7 +400,9 @@ submenu inside it sets its own. A menu whose items are all one choice puts them 
 - **Android**: a transparent button over the trigger opens the system's popup menu below it at once, lined up with the
   trigger's end when the trigger is in the end half of the window. `title` is the menu's first row, which cannot be
   chosen (TalkBack reads it as a disabled item); `svg`, an SVG document, is the item's icon, drawn in the item's text
-  color on Android 10 and later (`icon` is iOS's). Checks, radio buttons, submenus and sections are the system's.
+  color on Android 10 and later (`icon` is iOS's). Checks, radio buttons, submenus and sections are the system's. A
+  tap outside closes the menu as the finger lifts; the back button and the back gesture close only the menu, so a
+  dialog under it stays open.
 - **The web**: there is no system menu for a view; the trigger shows and opens nothing. Use `Menu` there, picked by
   `platform.os`.
 
