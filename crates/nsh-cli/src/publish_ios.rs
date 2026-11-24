@@ -23,7 +23,7 @@ use ring::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
+use sha2::Digest;
 
 use crate::{
     play::{Http, Request, Transport},
@@ -150,7 +150,7 @@ fn file_request(upload_id: &str, name: &str, size: u64) -> Value {
 
 fn complete_request(file_id: &str, checksum: &str) -> Value {
     json!({"data":{"type":"buildUploadFiles", "id":file_id, "attributes":{
-        "uploaded":true, "sourceFileChecksums":{"file":{"algorithm":"SHA_256", "hash":checksum}}
+        "uploaded":true, "sourceFileChecksums":{"file":{"algorithm":"MD5", "hash":checksum}}
     }}})
 }
 
@@ -1044,7 +1044,8 @@ pub(crate) fn publish(args: &Args) -> anyhow::Result<()> {
         "IPA bundle identifier does not match --app-id"
     );
     file.rewind()?;
-    let mut digest = Sha256::new();
+    // App Store Connect rejects SHA_256 here with HTTP 409 (`sourceFileChecksums` is not valid) and accepts MD5.
+    let mut digest = Md5::new();
     let mut buffer = [0; 64 * 1024];
     loop {
         let n = file.read(&mut buffer)?;
@@ -1753,7 +1754,7 @@ mod tests {
     }
 
     #[test]
-    fn requests_link_the_app_upload_and_ipa_and_commit_sha256() {
+    fn requests_link_the_app_upload_and_ipa_and_commit_md5() {
         let ipa = Ipa {
             bundle_id: "com.example.app".into(),
             version: "1.2.3".into(),
@@ -1776,7 +1777,7 @@ mod tests {
         assert_eq!(
             complete_request("file-1", "abcd"),
             json!({"data":{
-                "type":"buildUploadFiles", "id":"file-1", "attributes":{"uploaded":true,"sourceFileChecksums":{"file":{"algorithm":"SHA_256","hash":"abcd"}}}
+                "type":"buildUploadFiles", "id":"file-1", "attributes":{"uploaded":true,"sourceFileChecksums":{"file":{"algorithm":"MD5","hash":"abcd"}}}
             }})
         );
     }

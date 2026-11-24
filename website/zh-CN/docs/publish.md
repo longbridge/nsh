@@ -259,7 +259,7 @@ nsh publish ios .nsh/out/Notes.ipa
 
 1. 从 IPA 的 `Info.plist` 读取 bundle ID、版本号和构建号，并检查 IPA 的目标是 iOS 真机。
 2. 用 API 密钥签发一个短期有效的 ES256 令牌，并检查 IPA 的 bundle ID 与 App Store Connect 中的应用一致。
-3. 创建一个构建上传，按 Apple 要求的分片流式上传 IPA，并提交它的 SHA-256 校验和。
+3. 创建一个构建上传，按 Apple 要求的分片流式上传 IPA，并提交它的 MD5 校验和。
 4. 打印上传 ID 和应用的 TestFlight 页面。
 5. 等待 Apple 处理构建（`--timeout` 分钟，默认 60），按 `store.ios.usesNonExemptEncryption` 回答出口合规问题，并把构建分发给 `store.ios.betaGroups`（或 `--beta-group`）中的 TestFlight 群组。
 6. 创建或复用以 IPA 版本号命名的 App Store 版本，关联该构建，设置发布方式，并写入[商店文案](#store-listing)和截图。**只有**带 `--submit` 时才提交 App 审核。

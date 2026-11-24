@@ -307,7 +307,7 @@ What the command does:
 
 1. Reads the bundle ID, version and build from the IPA's `Info.plist`, and checks that the IPA targets iOS devices.
 2. Signs a short-lived ES256 token with the API key, and checks that the IPA's bundle ID is the App Store Connect app's.
-3. Creates a build upload, streams the IPA in the parts Apple asks for, and commits its SHA-256 checksum.
+3. Creates a build upload, streams the IPA in the parts Apple asks for, and commits its MD5 checksum.
 4. Prints the upload ID and the app's TestFlight page.
 5. Waits for Apple to process the build (`--timeout` minutes, default 60), answers export compliance from
    `store.ios.usesNonExemptEncryption`, and gives the build to the TestFlight groups in `store.ios.betaGroups` (or
