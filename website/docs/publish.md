@@ -613,7 +613,8 @@ URL and SHA-256; Flathub builds and publishes every change merged there.
    nsh publish linux .nsh/out/Counter.tar.gz
    ```
 
-   The archive's URL is `store.linux.archiveUrl` with the version filled in (or `--url`). This writes `.nsh/out/flathub/<id>/<id>.yml`.
+   The archive's URL is `store.linux.archiveUrl` with the version filled in (or `--url`). This writes `.nsh/out/flathub/<id>/<id>.yml`, built for the processor of
+   the archive's executable (`x86_64` or `aarch64`), whichever machine runs the command.
 4. Submit it as described in [Flathub's submission guide](https://docs.flathub.org/docs/for-app-authors/submission): a
    pull request to `flathub/flathub` with the manifest. Flathub reviews it and creates `flathub/<id>`.
 
@@ -625,7 +626,7 @@ Bump `version`, package, upload the new archive, then point `--out` at your chec
 nsh publish linux .nsh/out/Counter.tar.gz --out ../flathub-io.github.example.Counter
 ```
 
-When the manifest exists, only the archive source marked `# nsh: release archive` is updated (`url` and `sha256`); the
+When the manifest exists, only the archive source marked `# nsh: release archive` is updated (`url`, `sha256` and `only-arches`); the
 rest stays as you or Flathub's reviewers edited it. Commit and open a pull request on `flathub/<id>`. NSH never opens
 pull requests for you.
 

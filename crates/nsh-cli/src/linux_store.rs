@@ -447,6 +447,7 @@ pub(crate) fn flatpak_manifest(
     app: &LinuxApp<'_>,
     config: &FlatpakConfig,
     source: &ArchiveSource<'_>,
+    arch: &str,
     icon: bool,
 ) -> String {
     let id = app.id;
@@ -493,23 +494,74 @@ pub(crate) fn flatpak_manifest(
             out.push_str(&format!("        url: {url}\n        sha256: {sha256}\n"));
         }
     }
-    out.push_str(&format!("        only-arches:\n          - {}\n", arch()));
+    out.push_str(&format!("        only-arches:\n          - {arch}\n"));
     out
 }
 
-/// Points the release archive's source in an existing manifest at `url`
-/// and `sha256`, leaving the rest as the maintainer wrote it; `None` when
-/// the manifest has no marked archive source.
-fn update_manifest(text: &str, url: &str, sha256: &str) -> Option<String> {
+/// The processor the release archive's executable `executable` is built for,
+/// as Flatpak names it, read from the executable's ELF header.
+fn archive_arch(archive: &Path, executable: &str) -> anyhow::Result<&'static str> {
+    let file = fs::File::open(archive).with_context(|| format!("open {}", archive.display()))?;
+    let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(file));
+    for entry in tar
+        .entries()
+        .with_context(|| format!("read {}", archive.display()))?
+    {
+        let mut entry = entry?;
+        if !entry.header().entry_type().is_file()
+            || entry.path()?.file_name().and_then(|n| n.to_str()) != Some(executable)
+        {
+            continue;
+        }
+        let mut header = [0; 20];
+        entry
+            .read_exact(&mut header)
+            .with_context(|| format!("read {executable} in {}", archive.display()))?;
+        return elf_arch(&header).with_context(|| {
+            format!(
+                "{executable} in {} is not an x86_64 or aarch64 ELF executable",
+                archive.display()
+            )
+        });
+    }
+    bail!("{} has no executable `{executable}`", archive.display())
+}
+
+/// The Flatpak name of an ELF header's machine (`e_machine`).
+fn elf_arch(header: &[u8; 20]) -> Option<&'static str> {
+    if &header[..4] != b"\x7fELF" || header[5] != 1 {
+        return None;
+    }
+    match u16::from_le_bytes([header[18], header[19]]) {
+        0x3e => Some("x86_64"),
+        0xb7 => Some("aarch64"),
+        _ => None,
+    }
+}
+
+/// Points the release archive's source in an existing manifest at `url`,
+/// `sha256` and the archive's `arch`, leaving the rest as the maintainer
+/// wrote it; `None` when the manifest has no marked archive source.
+fn update_manifest(text: &str, url: &str, sha256: &str, arch: &str) -> Option<String> {
     let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
     let mark = lines.iter().position(|l| l.trim() == ARCHIVE_MARK)?;
     let mut url_done = false;
     let mut sha_done = false;
+    let mut in_arches = false;
     for line in lines.iter_mut().skip(mark + 1) {
         let trimmed = line.trim_start();
         let indent = &line[..line.len() - trimmed.len()];
+        if in_arches && trimmed.starts_with("- ") {
+            *line = format!("{indent}- {arch}");
+            in_arches = false;
+            continue;
+        }
         if trimmed.starts_with("- ") && (url_done || sha_done) {
             break;
+        }
+        if trimmed == "only-arches:" {
+            in_arches = true;
+            continue;
         }
         if let Some(rest) = trimmed
             .strip_prefix("url:")
@@ -521,9 +573,6 @@ fn update_manifest(text: &str, url: &str, sha256: &str) -> Option<String> {
         } else if trimmed.starts_with("sha256:") {
             *line = format!("{indent}sha256: {sha256}");
             sha_done = true;
-        }
-        if url_done && sha_done {
-            break;
         }
     }
     if !url_done {
@@ -561,7 +610,13 @@ pub(crate) fn flatpak(
     let manifest = dir.join(format!("{}.yml", app.id));
     fs::write(
         &manifest,
-        flatpak_manifest(app, config, &ArchiveSource::Path(&archive_path), icon),
+        flatpak_manifest(
+            app,
+            config,
+            &ArchiveSource::Path(&archive_path),
+            arch(),
+            icon,
+        ),
     )?;
     let (Some(builder), Some(flatpak)) = (which("flatpak-builder"), which("flatpak")) else {
         ui::warn(format!(
@@ -673,6 +728,9 @@ pub(crate) fn publish(args: &Args) -> anyhow::Result<()> {
         hasher.update(&buf[..n]);
     }
     let sha256 = format!("{:x}", hasher.finalize());
+    // The archive may have been built on another machine (CI): its executable,
+    // not this host, says which processor Flathub builds it for.
+    let arch = archive_arch(archive, &app.executable)?;
     let out = args.out.clone().unwrap_or_else(|| {
         crate::package::config_dir(&args.entry)
             .join(".nsh/out/flathub")
@@ -683,7 +741,7 @@ pub(crate) fn publish(args: &Args) -> anyhow::Result<()> {
     let existing = fs::read_to_string(&manifest).ok();
     let text = match existing
         .as_deref()
-        .and_then(|t| update_manifest(t, url, &sha256))
+        .and_then(|t| update_manifest(t, url, &sha256, arch))
     {
         Some(text) => text,
         None => {
@@ -711,6 +769,7 @@ pub(crate) fn publish(args: &Args) -> anyhow::Result<()> {
                     url,
                     sha256: &sha256,
                 },
+                arch,
                 icon,
             )
         }
@@ -720,7 +779,7 @@ pub(crate) fn publish(args: &Args) -> anyhow::Result<()> {
         "{} → {} {}",
         ui::path(&manifest),
         app.version,
-        ui::dim(format!("(sha256 {})", &sha256[..12]))
+        ui::dim(format!("({arch}, sha256 {})", &sha256[..12]))
     ));
     ui::note(format!(
         "commit it to flathub/{} and open a pull request: Flathub builds and publishes it once merged",
@@ -1033,14 +1092,18 @@ mod tests {
                 url: "https://e.com/a-1.tar.gz",
                 sha256: "aaa",
             },
+            "aarch64",
             true,
         );
         assert!(text.contains("runtime-version: '49'"));
         assert!(text.contains("command: Counter"));
         assert!(text.contains("hicolor/256x256/apps/com.example.Counter.png"));
         let edited = text.replace("  - --share=network\n", "");
-        let updated = update_manifest(&edited, "https://e.com/a-2.tar.gz", "bbb").unwrap();
+        let updated =
+            update_manifest(&edited, "https://e.com/a-2.tar.gz", "bbb", "x86_64").unwrap();
         assert!(updated.contains("url: https://e.com/a-2.tar.gz"));
+        assert!(updated.contains("only-arches:\n          - x86_64\n"));
+        assert!(!updated.contains("aarch64"));
         assert!(updated.contains("sha256: bbb"));
         assert!(!updated.contains("aaa"));
         assert!(!updated.contains("--share=network"));
@@ -1049,11 +1112,60 @@ mod tests {
             &app(&s),
             &FlatpakConfig::default(),
             &ArchiveSource::Path("../a.tar.gz"),
+            "x86_64",
             false,
         );
-        let updated = update_manifest(&local, "https://e.com/a.tar.gz", "ccc").unwrap();
+        let updated = update_manifest(&local, "https://e.com/a.tar.gz", "ccc", "x86_64").unwrap();
         assert!(updated.contains("url: https://e.com/a.tar.gz\n        sha256: ccc\n"));
-        assert!(update_manifest("id: x\n", "u", "s").is_none());
+        assert!(update_manifest("id: x\n", "u", "s", "x86_64").is_none());
+    }
+
+    #[test]
+    fn archive_arch_comes_from_the_executable() {
+        let elf = |machine: u16| {
+            let mut header = vec![0x7f, b'E', b'L', b'F', 2, 1, 1, 0];
+            header.resize(18, 0);
+            header.extend(machine.to_le_bytes());
+            header.extend([0; 44]);
+            header
+        };
+        let dir = std::env::temp_dir().join(format!("nsh-flathub-arch-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let archive = |name: &str, files: &[(&str, Vec<u8>)]| {
+            let path = dir.join(name);
+            let gz = flate2::write::GzEncoder::new(
+                fs::File::create(&path).unwrap(),
+                flate2::Compression::fast(),
+            );
+            let mut tar = tar::Builder::new(gz);
+            for (name, data) in files {
+                let mut header = tar::Header::new_gnu();
+                header.set_size(data.len() as u64);
+                header.set_mode(0o755);
+                header.set_cksum();
+                tar.append_data(&mut header, name, data.as_slice()).unwrap();
+            }
+            tar.into_inner().unwrap().finish().unwrap();
+            path
+        };
+        let x86 = archive(
+            "x86.tar.gz",
+            &[
+                ("Counter/lib.so", elf(0xb7)),
+                ("Counter/Counter", elf(0x3e)),
+            ],
+        );
+        assert_eq!(archive_arch(&x86, "Counter").unwrap(), "x86_64");
+        let arm = archive("arm.tar.gz", &[("Counter/Counter", elf(0xb7))]);
+        assert_eq!(archive_arch(&arm, "Counter").unwrap(), "aarch64");
+        let none = archive("none.tar.gz", &[("Counter/Other", elf(0x3e))]);
+        assert!(archive_arch(&none, "Counter").is_err());
+        let text = archive(
+            "text.tar.gz",
+            &[("Counter/Counter", b"#!/bin/sh\n".to_vec())],
+        );
+        assert!(archive_arch(&text, "Counter").is_err());
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
