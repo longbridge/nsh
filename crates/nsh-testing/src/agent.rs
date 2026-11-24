@@ -1414,6 +1414,16 @@ pub trait Native: Send + Sync {
     fn opening(&self) -> bool {
         false
     }
+    /// Whether a call since the last time this was asked got no answer
+    /// because the platform's thread that answers it stayed busy past the
+    /// agent's wait, rather than finding nothing: what such a call returned
+    /// ([`Native::bounds`]'s `None`, an empty [`Native::viewport`]) is not
+    /// the app's state. Described for a failure (`"the window did not
+    /// answer in 10 s"`); asking resets it. The agent asks before and after
+    /// each step ([`Agent::take`]). `None` where every call is answered.
+    fn take_unanswered(&self) -> Option<String> {
+        None
+    }
     /// A picture of the window: PNG bytes, or UTF-8 Cell JSON on the terminal target.
     fn screenshot(&self) -> Result<Vec<u8>, String>;
     /// Makes the window `size` points.
@@ -1724,10 +1734,25 @@ impl Agent {
     }
 
     /// Takes `step`; blocks until it is done and the app is quiet.
+    ///
+    /// A call to the platform that went unanswered during the step
+    /// ([`Native::take_unanswered`]) is named in its failure, so a window
+    /// that was only busy is told from one that is gone or a view that is
+    /// not there. A question about the scene fails with it: its answer is
+    /// what the unanswered call returned. Other steps that succeed keep
+    /// their success: a later try got through.
     pub fn take(&self, step: TestStep) -> StepOutcome {
-        match self.run(step) {
-            Ok(value) => StepOutcome::Done { value },
-            Err(message) => StepOutcome::Failed { message },
+        // What an earlier step left unanswered is not this one's.
+        let _ = self.native.take_unanswered();
+        let question = matches!(step, TestStep::Scene { .. });
+        let result = self.run(step);
+        match (result, self.native.take_unanswered()) {
+            (Ok(_), Some(why)) if question => StepOutcome::Failed { message: why },
+            (Ok(value), _) => StepOutcome::Done { value },
+            (Err(message), Some(why)) if !message.contains(&why) => StepOutcome::Failed {
+                message: format!("{message} ({why})"),
+            },
+            (Err(message), _) => StepOutcome::Failed { message },
         }
     }
 
@@ -2876,7 +2901,10 @@ impl Agent {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
 
     use nsh_core::{
         EventKind, EventPayload,
@@ -4314,6 +4342,148 @@ mod tests {
         assert!(scene.take_waits() > 0);
         assert!(!agent.native.opening());
 
+        drop(engine);
+    }
+
+    /// [`Fake`] whose window's thread stays busy past the agent's wait
+    /// while `busy` is set: its views' bounds come back empty, and `back`
+    /// fails as a platform's error built from that wait does.
+    struct Busy {
+        fake: Fake,
+        busy: Arc<AtomicBool>,
+        missed: Arc<AtomicBool>,
+    }
+
+    const BUSY: &str = "the window did not answer in 10 s";
+
+    impl Busy {
+        fn wait(&self) -> bool {
+            let busy = self.busy.load(Ordering::Relaxed);
+            if busy {
+                self.missed.store(true, Ordering::Relaxed);
+            }
+            !busy
+        }
+    }
+
+    impl Native for Busy {
+        fn bounds(&self, id: NodeId) -> Option<Bounds<Points>> {
+            self.wait().then(|| self.fake.bounds(id)).flatten()
+        }
+        fn viewport(&self) -> Size<Points> {
+            if self.wait() {
+                self.fake.viewport()
+            } else {
+                Size::default()
+            }
+        }
+        fn press(&self, at: Point<Points>) {
+            if self.wait() {
+                self.fake.press(at);
+            }
+        }
+        fn long_press(&self, _: Point<Points>, _: Duration) {}
+        fn scroll(&self, _: Point<Points>, _: Point<Points>) {}
+        fn drag(&self, _: Point<Points>, _: Point<Points>, _: DragOptions) -> Result<(), String> {
+            Ok(())
+        }
+        fn type_text(&self, _: &str) {}
+        fn key(&self, _: Key) {}
+        fn input_text(&self, _: NodeId) -> Option<String> {
+            None
+        }
+        fn back(&self) -> Result<(), String> {
+            if self.wait() {
+                Err("no back here".into())
+            } else {
+                Err(BUSY.into())
+            }
+        }
+        fn answer_dialog(&self, _: Option<&str>) -> Result<(), String> {
+            Ok(())
+        }
+        fn animating(&self) -> bool {
+            false
+        }
+        fn take_unanswered(&self) -> Option<String> {
+            self.missed
+                .swap(false, Ordering::Relaxed)
+                .then(|| BUSY.to_owned())
+        }
+        fn screenshot(&self) -> Result<Vec<u8>, String> {
+            Ok(Vec::new())
+        }
+        fn resize(&self, _: Points, _: Points) -> Result<(), String> {
+            Ok(())
+        }
+        fn set_dark(&self, _: bool) -> Result<(), String> {
+            Ok(())
+        }
+        fn quit(&self) {}
+    }
+
+    #[test]
+    fn a_step_names_the_calls_a_busy_window_left_unanswered() {
+        let (engine, batches) =
+            crate::start(EngineConfig::new(crate::windowed_root::<Tally>())).unwrap();
+        let model = Arc::new(Model::default());
+        let feeding = model.clone();
+        std::thread::spawn(move || {
+            while let Ok(batch) = batches.recv() {
+                feeding.apply(&batch);
+            }
+        });
+        let (busy, missed) = (
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicBool::new(false)),
+        );
+        let agent = Agent::new(
+            model.clone(),
+            Box::new(Busy {
+                fake: Fake(engine.control(), Arc::default(), Some(model.clone())),
+                busy: busy.clone(),
+                missed: missed.clone(),
+            }),
+        );
+        let ok = StepOutcome::Done {
+            value: serde_json::Value::Null,
+        };
+        let failed = |message: &str| StepOutcome::Failed {
+            message: message.into(),
+        };
+        assert_eq!(agent.take(TestStep::Ready { timeout_ms: 5000 }), ok);
+        let (add, _) = agent
+            .find("Add", "pressable view", PickTarget::Pressable)
+            .unwrap();
+
+        // A question answered from a call that went unanswered fails with
+        // why, instead of answering that the view is not on screen.
+        busy.store(true, Ordering::Relaxed);
+        assert_eq!(
+            agent.take(TestStep::Scene {
+                query: SceneQuery::Bounds { id: add }
+            }),
+            failed(BUSY)
+        );
+        // A failure gets why; one that already says it is left as it is.
+        busy.store(false, Ordering::Relaxed);
+        missed.store(true, Ordering::Relaxed);
+        assert_eq!(
+            agent.take(TestStep::Back),
+            failed("no back here"),
+            "an earlier step's"
+        );
+        busy.store(true, Ordering::Relaxed);
+        assert_eq!(agent.take(TestStep::Back), failed(BUSY));
+        busy.store(false, Ordering::Relaxed);
+
+        // Answered again: the same question gets the view's bounds.
+        assert!(matches!(
+            agent.take(TestStep::Scene {
+                query: SceneQuery::Bounds { id: add }
+            }),
+            StepOutcome::Done { value } if value.is_array()
+        ));
         drop(engine);
     }
 }
