@@ -3271,6 +3271,97 @@ fn clipped_overflow_does_not_grow_scroll_content() {
     assert_eq!(content_width(true), 320.0);
 }
 
+/// An image smaller than its natural size is drawn inside its box, so it
+/// adds nothing to the scrollable extent of a scroll view around it: a
+/// 24 point icon in a 14 point box at the end of a fitting menu left the
+/// menu 3 points to scroll.
+#[test]
+fn a_sized_image_does_not_overflow_its_scroll_view() {
+    let extent = |natural: Size<Points>, boxed: (f32, f32), fit: Option<&'static str>| {
+        let mut c = core();
+        let mut image = vec![
+            ("width", StyleValue::Number(boxed.0)),
+            ("height", StyleValue::Number(boxed.1)),
+            ("alignSelf", StyleValue::Str("flex-start")),
+        ];
+        if let Some(fit) = fit {
+            image.push(("objectFit", StyleValue::Str(fit)));
+        }
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::Scroll,
+                },
+                style_op(
+                    2,
+                    &[
+                        ("width", StyleValue::Number(boxed.0)),
+                        ("height", StyleValue::Number(boxed.1)),
+                        ("alignSelf", StyleValue::Str("flex-start")),
+                    ],
+                ),
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+                Op::Create {
+                    id: 3,
+                    tag: Tag::Image,
+                },
+                style_op(3, &image),
+                Op::SetProp {
+                    id: 3,
+                    prop: Prop::Source(Some(ImageSource {
+                        uri: "asset:/icon.svg".into(),
+                        size: Some(natural),
+                        scales: ImageScales::NONE,
+                        data: None,
+                    })),
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: 3,
+                    before: None,
+                },
+            ],
+        );
+        let batch = c.commit().unwrap();
+        batch
+            .items
+            .iter()
+            .rev()
+            .find_map(|i| match i {
+                MountItem::ScrollContent { id: 2, size } => Some((size.width.0, size.height.0)),
+                _ => None,
+            })
+            .expect("the scroll view's content size")
+    };
+    assert_eq!(
+        extent(size_pt(24.0, 24.0), (14.0, 14.0), None),
+        (14.0, 14.0)
+    );
+    assert_eq!(
+        extent(size_pt(48.0, 24.0), (20.0, 10.0), None),
+        (20.0, 10.0)
+    );
+    // Cropped fits draw inside the box too.
+    for fit in ["cover", "none"] {
+        assert_eq!(
+            extent(size_pt(200.0, 100.0), (30.0, 40.0), Some(fit)),
+            (30.0, 40.0),
+            "{fit}"
+        );
+    }
+    // A box larger than the image is the extent itself.
+    assert_eq!(
+        extent(size_pt(24.0, 24.0), (60.0, 50.0), None),
+        (60.0, 50.0)
+    );
+}
+
 /// A scroll view's content size set twice in one batch (a row relaid in
 /// two passes) reaches the platform once, with the last size: a transient
 /// smaller size would clamp the offset before the content grows back.
