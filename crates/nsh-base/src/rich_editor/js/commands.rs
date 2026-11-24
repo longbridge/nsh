@@ -325,10 +325,7 @@ pub(crate) fn resolve_with(
     let plain = |f: fn(&EditorState, Dispatch<'_>) -> bool| -> BoxCommand { Arc::new(f) };
     Ok(match command.command {
         N::ToggleMark => cmd::toggle_mark(mark()?, attrs()?, true),
-        N::SetMark => {
-            let mark = mark()?.create(attrs()?).map_err(|e| e.to_string())?;
-            command_fn(move |state, dispatch| set_mark(state, dispatch, &mark))
-        }
+        N::SetMark => cmd::tiptap::set_mark(mark()?, attrs()?.unwrap_or_default()),
         N::UnsetMark => {
             let ty = mark()?;
             command_fn(move |state, dispatch| {
@@ -499,30 +496,4 @@ fn resolve_all(
         .iter()
         .map(|c| resolve_with(c, schema, registry))
         .collect()
-}
-
-/// Adds `mark` to the selection, or to the stored marks at a cursor.
-fn set_mark(
-    state: &EditorState,
-    dispatch: Dispatch<'_>,
-    mark: &crate::rich_editor::model::Mark,
-) -> bool {
-    let selection = state.selection();
-    let mut tr = state.tr();
-    if selection.empty() {
-        tr.add_stored_mark(mark);
-    } else {
-        for range in selection.ranges() {
-            if tr
-                .add_mark(range.from.pos, range.to.pos, mark.clone())
-                .is_err()
-            {
-                return false;
-            }
-        }
-    }
-    if let Some(dispatch) = dispatch {
-        dispatch(tr);
-    }
-    true
 }

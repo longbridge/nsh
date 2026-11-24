@@ -842,11 +842,15 @@ pub fn superscript() -> Extension {
 }
 
 /// `textStyle` (`color`, `fontFamily`, `fontSize`, `backgroundColor`);
-/// `setTextStyle(attrs)`, `unsetTextStyle`.
+/// `setTextStyle(attrs)`, `unsetTextStyle`, `removeEmptyTextStyle`.
 pub fn text_style() -> Extension {
     Extension::mark("textStyle", |_| marks::text_style().1).add_commands(|_| {
         let mut commands = mark_commands("textStyle", "TextStyle", false);
         commands.retain(|(name, _)| name != "toggleTextStyle");
+        commands.push((
+            "removeEmptyTextStyle".into(),
+            factory(|_, s| Ok(tiptap::remove_empty_text_style(mark_of(s, "textStyle")?))),
+        ));
         commands
     })
 }
@@ -1308,5 +1312,118 @@ mod tests {
             assert!(builtin(name).is_some(), "{name}");
         }
         assert_eq!(builtin("document").unwrap().name, "doc");
+    }
+
+    #[test]
+    fn text_style_remove_empty_merge_spans_and_css_validation() {
+        use crate::rich_editor::{
+            formats::{DomParser, ParseOptions, doc_to_html},
+            state::{EditorState, EditorStateConfig, TextSelection},
+        };
+        let manager = ExtensionManager::with_core(vec![starter_kit()]).unwrap();
+        let schema = manager.schema().clone();
+        let parser = DomParser::from_schema(&schema);
+        let cmds = manager.commands();
+        assert!(cmds.contains("removeEmptyTextStyle"));
+
+        // Removing color via setMark(textStyle, { color: null }) drops the empty span.
+        let doc = parser.parse("<p>Example Text</p>", &ParseOptions::default());
+        let state = EditorState::create(EditorStateConfig::new(schema.clone()).doc(doc).selection(
+            TextSelection::create(
+                &parser.parse("<p>Example Text</p>", &ParseOptions::default()),
+                1,
+                Some(13),
+            ),
+        ))
+        .unwrap();
+        let set_color = cmds
+            .make("setTextStyle", &json!({ "color": "#958DF1" }), &schema)
+            .unwrap();
+        let mut out = None;
+        assert!(set_color(&state, Some(&mut |tr| out = Some(tr))));
+        let state = state.apply(out.unwrap()).unwrap();
+        assert!(doc_to_html(state.doc()).contains("<span"));
+
+        let unset_color = cmds
+            .make("setTextStyle", &json!({ "color": null }), &schema)
+            .unwrap();
+        let mut out = None;
+        assert!(unset_color(&state, Some(&mut |tr| out = Some(tr))));
+        let state = state.apply(out.unwrap()).unwrap();
+        assert_eq!(doc_to_html(state.doc()), "<p>Example Text</p>");
+
+        // removeEmptyTextStyle removes a pre-existing all-null textStyle mark.
+        let empty_span_doc = schema
+            .node_from_json(&json!({
+                "type": "doc",
+                "content": [{
+                    "type": "paragraph",
+                    "content": [{
+                        "type": "text",
+                        "text": "Example",
+                        "marks": [{ "type": "textStyle", "attrs": { "color": null } }]
+                    }]
+                }]
+            }))
+            .unwrap();
+        let state = EditorState::create(
+            EditorStateConfig::new(schema.clone())
+                .doc(empty_span_doc.clone())
+                .selection(TextSelection::create(&empty_span_doc, 1, Some(8))),
+        )
+        .unwrap();
+        let clean = cmds
+            .make("removeEmptyTextStyle", &json!(null), &schema)
+            .unwrap();
+        let mut out = None;
+        assert!(clean(&state, Some(&mut |tr| out = Some(tr))));
+        let state = state.apply(out.unwrap()).unwrap();
+        assert_eq!(doc_to_html(state.doc()), "<p>Example</p>");
+
+        // CSS style injection values are rejected on serialize.
+        for attr in ["color", "backgroundColor", "fontFamily"] {
+            let injected = schema
+                .node_from_json(&json!({
+                    "type": "doc",
+                    "content": [{
+                        "type": "paragraph",
+                        "content": [{
+                            "type": "text",
+                            "text": "Example",
+                            "marks": [{ "type": "textStyle", "attrs": { attr: "red; position: fixed" } }]
+                        }]
+                    }]
+                }))
+                .unwrap();
+            assert_eq!(doc_to_html(&injected), "<p><span>Example</span></p>");
+        }
+        let injected_hl = schema
+            .node_from_json(&json!({
+                "type": "doc",
+                "content": [{
+                    "type": "paragraph",
+                    "content": [{
+                        "type": "text",
+                        "text": "Example",
+                        "marks": [{ "type": "highlight", "attrs": { "color": "red; position: fixed" } }]
+                    }]
+                }]
+            }))
+            .unwrap();
+        assert_eq!(doc_to_html(&injected_hl), "<p><mark>Example</mark></p>");
+
+        // Nested span styles merge (inner overrides outer).
+        let nested = parser.parse(
+            r#"<p><span style="color: #FF0000;"><span style="font-family: serif;"><span style="color: #0000FF;">blue serif</span></span></span></p>"#,
+            &ParseOptions::default(),
+        );
+        let text = nested.child(0).child(0);
+        let ts = text
+            .marks()
+            .iter()
+            .find(|m| m.ty().name() == "textStyle")
+            .unwrap();
+        assert_eq!(ts.attrs()["color"], json!("#0000FF"));
+        assert_eq!(ts.attrs()["fontFamily"], json!("serif"));
     }
 }
