@@ -220,7 +220,7 @@ nsh package [ENTRY] --target ios|ios-simulator|android|macos|linux|windows|web [
 | `--keystore <FILE>` | Android：release keystore。默认使用 `~/.android/debug.keystore` 中的调试密钥（不存在时创建）。 |
 | `--key-alias <ALIAS>` | Android：keystore 中的密钥别名。 |
 | `--keystore-password <PASSWORD>` | Android：keystore 密码，也可从 `NSH_KEYSTORE_PASSWORD` 读取。 |
-| `--format <FORMAT>` | Android：`apk`（默认）或 `aab`，即用于 Google Play 的 Android App Bundle，使用 `jarsigner` 签名。不能与 `--run` 同时使用。 |
+| `--format <FORMAT>` | Android：`apk`（默认）或 `aab`，即用于 Google Play 的 Android App Bundle，使用 `jarsigner` 签名。Linux：`appimage` 或 `flatpak`，在目录和压缩包之外另行生成（见 [Linux](./linux.md)）。不能与 `--run` 同时使用。 |
 | `--abi <ABI>` | Android：APK 包含的 ABI（`arm64-v8a`、`armeabi-v7a`、`x86_64`），可重复或用逗号分隔。默认：`arm64-v8a` 和 `armeabi-v7a`，加上 `--run` 时还有设备的 ABI。 |
 | `--arch <ARCH>` | macOS：应用运行的处理器，`arm64`（Apple 芯片）、`x86_64`（Intel）或 `universal`（两者合在一个可执行文件里）。默认：本机的。为另一种处理器编 runner 需要它的 Rust target（`rustup target add x86_64-apple-darwin`）。 |
 | `--run` | 打包完成后安装并启动应用：在模拟器中（`ios-simulator`）或在已连接的 Android 设备上；`macos`、`linux` 和 `windows` 则直接启动它；`web` 在本机提供站点服务，并打印其地址。 |
@@ -413,6 +413,17 @@ nsh publish doctor android [--entry <DIR>] [--package <NAME>] [--credentials <KE
 
 不改动 Play 上的任何内容，检查 `nsh publish android` 所需的一切：服务账号密钥、包名、商店目录、登录，以及对该应用的访问权限（打开一个
 edit 再删除）。有检查失败时以错误退出。
+
+
+### nsh publish linux
+
+```sh
+nsh publish linux <ARCHIVE.tar.gz> [--url <URL>] [--entry <DIR>] [--out <DIR>]
+nsh publish status linux [--entry <DIR>] [--json]
+nsh publish doctor linux [--entry <DIR>]
+```
+
+为发布压缩包写入或更新应用的 Flathub manifest（`<id>.yml`）：下载 URL 与 SHA-256。下载 URL 默认取 `nsh.json` 的 `store.linux.archiveUrl`（其中 `{version}` 替换为版本号），也可用 `--url` 指定。不会创建 Pull Request，需自行提交到 `flathub/<id>` 仓库。`status` 显示 Flathub 上的版本，与 `nsh.json` 不一致时退出码为 1；`doctor` 检查 Flathub 要求的元数据（`id`、商店文案、`store.linux`、图标），校验 metainfo 与 desktop 文件，并检测 `appimagetool`、`flatpak-builder`。
 
 ### nsh verify
 
