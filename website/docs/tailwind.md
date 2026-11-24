@@ -255,8 +255,8 @@ A token's name is its CSS variable's without `--`, as the theme file writes it: 
 | Form | Takes | Example |
 |---|---|---|
 | A color name in any color utility | A theme color, with an opacity too | `bg-primary`, `text-muted-foreground/70`, `bg-up/30`, `border-t-border`, `ring-ring`, `from-accent`, `placeholder:text-muted-foreground` |
-| `(--name)`, Tailwind 4's variable shorthand | A theme color or number | `bg-(--primary)`, `rounded-(--radius)`, `p-(--gap-card)` |
-| `(color:--name)`, `(length:--name)`, `(number:--name)`, `(family-name:--name)` | The same, typed where a utility takes several kinds | `text-(color:--up)`, `text-(length:--text-title)`, `font-(family-name:--font-mono)` |
+| `(--name)`, Tailwind 4's variable shorthand | A theme color or number; a number is a length in points, and a factor to `scale`, `scale-x` and `scale-y` | `bg-(--primary)`, `rounded-(--radius)`, `p-(--gap-card)`, `active:scale-(--press-scale)` |
+| `(color:--name)`, `(length:--name)`, `(number:--name)`, `(family-name:--name)` | The same, typed where a utility takes several kinds | `text-(color:--up)`, `text-(length:--text-title)`, `ring-(length:--ring-width)`, `font-(family-name:--font-mono)` |
 | `font-sans`, `font-mono` | The theme's fonts, when it sets them | `font-mono` |
 
 - **Your own tokens.** Every name in the theme file is a token, as every variable of a CSS `@theme` is: `"up": "#16a34a"` makes `bg-up`, `text-up` and `bg-up/30`; `"radius-card": "14px"` makes `rounded-(--radius-card)`; `"font-display": "Pacifico"` makes `font-(family-name:--font-display)`. Lengths are in points; `(number:--name)` passes the plain number.
