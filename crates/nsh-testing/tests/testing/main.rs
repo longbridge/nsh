@@ -432,6 +432,15 @@ fn a_press_reaches_a_view_across_a_scroll_view_s_fold() {
 }
 
 #[test]
+fn measure_takes_in_the_scrolls_that_keep_a_list_s_rows_in_place() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/scroll-by");
+    let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 1);
+}
+
+#[test]
 fn a_drag_is_a_finger_on_a_phone_and_the_mouse_on_a_desktop_or_the_web() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/drag-pointer");
     let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
