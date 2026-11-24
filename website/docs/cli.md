@@ -382,20 +382,51 @@ may name the package read, and only `--key`, `--cert` and `-o` apply.
 ### nsh publish android
 
 ```sh
-nsh publish android <BUNDLE.aab> [--entry <DIR>] [--package <NAME>] [--credentials <KEY.json>] [--draft]
+nsh publish android <BUNDLE.aab> [--track <TRACK>] [--rollout <FRACTION>] [--status <STATUS>] [--listing] [--draft]
+nsh publish android --from <TRACK> --track <TRACK> [--rollout <FRACTION>]
 ```
 
-Uploads an Android App Bundle to Google Play and releases it to the **internal testing** track, in one edit (insert,
-upload, track update, commit; a failed edit is deleted). It never goes further: promote the release to closed, open or
-production testing in Play Console. Signs in as a Google Cloud service account that has release permission for the app
-in Play Console ([Android](./android.md#upload-to-google-play)).
+Uploads an Android App Bundle to Google Play and releases it to a track, in one edit (insert, upload, track update,
+commit; a failed edit is deleted). Without `--track` the release goes to **internal testing** only; reaching testers
+beyond it, or the public, always takes an explicit `--track`. With `--from` instead of a bundle, it promotes the newest
+release of one track to another. Signs in as a Google Cloud service account that has release permission for the app in
+Play Console ([Android](./android.md#upload-to-google-play)).
 
 | Flag | Description |
 |---|---|
 | `--entry <DIR>` | The app's directory or entry, whose `nsh.json` `id` is the package name. Default: `.`. |
 | `--package <NAME>` | The package name on Google Play. Default: `nsh.json` `id`. |
 | `--credentials <KEY.json>` | The service account's JSON key. Default: `NSH_PLAY_CREDENTIALS`. Keep it out of the repository. |
+| `--track <TRACK>` | `internal` (default), `alpha`, `beta`, `production` or a custom track's name. |
+| `--from <TRACK>` | Promote: release the version codes of this track's newest release to `--track`, uploading nothing. |
+| `--rollout <FRACTION>` | A staged rollout to this fraction of the track's users, above 0 and below 1, e.g. `0.1`. |
+| `--status <STATUS>` | `completed` (default), `in-progress` (default with `--rollout`), `halted` (stop a staged rollout, with its `--rollout`) or `draft`. |
 | `--draft` | Release as a draft: Play takes only drafts until the app's first release is made in Play Console. |
+| `--store <DIR>` | The [store directory](./android.md#store-listing-and-release-notes). Default: `store` in the app's directory. |
+| `--listing` | Also update the store listing (name, descriptions, images) from the store directory, replacing what Play has for those locales. |
+
+To raise a staged rollout, release the same version again with a larger `--rollout`; to finish it, release it with no
+`--rollout`.
+
+### nsh publish status android
+
+```sh
+nsh publish status android [--entry <DIR>] [--package <NAME>] [--credentials <KEY.json>] [--json]
+```
+
+Prints every track's releases: status, version codes and rollout fraction. It reads them in an edit it deletes, so it
+changes nothing. `--json` prints `{"package", "releases": [{"track", "name", "status", "version_codes",
+"user_fraction"}]}` for scripts.
+
+### nsh publish doctor android
+
+```sh
+nsh publish doctor android [--entry <DIR>] [--package <NAME>] [--credentials <KEY.json>] [--store <DIR>]
+```
+
+Checks, without changing anything on Play, what `nsh publish android` needs: the service account key, the package
+name, the store directory, signing in, and access to the app (it opens an edit and deletes it). Exits with an error if
+a check fails.
 
 ### nsh verify
 

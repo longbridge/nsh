@@ -594,33 +594,25 @@ enum PublishStore {
         #[command(subcommand)]
         store: DoctorStore,
     },
-    /// Upload an Android App Bundle (`.aab`) to Google Play's internal
-    /// testing track, with a service account's JSON key.
-    Android {
-        /// The bundle (`.aab`) to upload.
-        bundle: PathBuf,
-        /// The app's directory or entry, whose `nsh.json` `id` is the
-        /// package name.
-        #[arg(long, default_value = ".")]
-        entry: PathBuf,
-        /// The package name on Google Play (default: `nsh.json` `id`).
-        #[arg(long)]
-        package: Option<String>,
-        /// The service account's JSON key; keep it out of the repository.
-        #[arg(long, env = "NSH_PLAY_CREDENTIALS", hide_env_values = true)]
-        credentials: Option<PathBuf>,
-        /// Release as a draft, which Play requires until the app's first
-        /// release is made in Play Console.
-        #[arg(long)]
-        draft: bool,
-    },
+    /// Upload an Android App Bundle (`.aab`) to a Google Play track
+    /// (default: internal testing), or promote a release between tracks,
+    /// with a service account's JSON key.
+    Android(play::PublishArgs),
 }
 
-/// The stores `nsh publish status` reads.
+/// The stores `nsh publish status` reports on.
 #[derive(Subcommand, Clone)]
 enum StatusStore {
     /// App Store Connect.
     Ios(publish_ios::StatusArgs),
+    /// Every Google Play track's releases, status and rollout.
+    Android {
+        #[command(flatten)]
+        app: play::AppArgs,
+        /// Print JSON.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// The stores `nsh publish doctor` checks.
@@ -628,6 +620,14 @@ enum StatusStore {
 enum DoctorStore {
     /// App Store Connect.
     Ios(publish_ios::DoctorArgs),
+    /// Google Play.
+    Android {
+        #[command(flatten)]
+        app: play::AppArgs,
+        /// The store directory (default: `store` in the app's directory).
+        #[arg(long)]
+        store: Option<PathBuf>,
+    },
 }
 
 /// Arguments of `nsh package`.
@@ -823,16 +823,16 @@ fn run(mut command: Command) -> anyhow::Result<()> {
                 let code = publish_ios::print_status(&args)?;
                 std::process::exit(code)
             }
+            PublishStore::Status {
+                store: StatusStore::Android { app, json },
+            } => play::print_status(&app, json),
             PublishStore::Doctor {
                 store: DoctorStore::Ios(args),
             } => publish_ios::doctor(&args),
-            PublishStore::Android {
-                bundle,
-                entry,
-                package,
-                credentials,
-                draft,
-            } => play::publish(&bundle, &entry, package, credentials, draft),
+            PublishStore::Doctor {
+                store: DoctorStore::Android { app, store },
+            } => play::doctor(&app, store.as_deref()),
+            PublishStore::Android(args) => play::publish(&args),
         };
     }
     // A package given to `nsh publish` has no app to resolve or build.
@@ -1415,9 +1415,49 @@ mod command_tests {
         let cli = Cli::try_parse_from(["nsh", "publish", "android", "app.aab", "--draft"]).unwrap();
         assert!(matches!(
             cli.command,
-            Command::Publish { store: Some(super::PublishStore::Android { bundle, draft: true, .. }), .. }
-                if bundle == std::path::Path::new("app.aab")
+            Command::Publish { store: Some(super::PublishStore::Android(ref args)), .. }
+                if args.draft && args.bundle.as_deref() == Some(std::path::Path::new("app.aab"))
+                    && args.track == "internal"
         ));
+        let cli = Cli::try_parse_from([
+            "nsh",
+            "publish",
+            "android",
+            "--from",
+            "beta",
+            "--track",
+            "production",
+            "--rollout",
+            "0.1",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Publish { store: Some(super::PublishStore::Android(ref args)), .. }
+                if args.bundle.is_none() && args.from.as_deref() == Some("beta")
+                    && args.rollout == Some(0.1)
+        ));
+        assert!(Cli::try_parse_from(["nsh", "publish", "android"]).is_err());
+        assert!(
+            Cli::try_parse_from(["nsh", "publish", "android", "a.aab", "--from", "beta"]).is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "nsh", "publish", "android", "a.aab", "--draft", "--status", "halted"
+            ])
+            .is_err()
+        );
+        let cli = Cli::try_parse_from(["nsh", "publish", "status", "android", "--json"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Publish {
+                store: Some(super::PublishStore::Status {
+                    store: super::StatusStore::Android { json: true, .. },
+                }),
+                ..
+            }
+        ));
+        assert!(Cli::try_parse_from(["nsh", "publish", "doctor", "android"]).is_ok());
         assert!(Cli::try_parse_from(["nsh", "publish", "."]).is_err());
         assert!(Cli::try_parse_from(["nsh", "publish", "android", "a.aab", "--key", "k"]).is_err());
     }
