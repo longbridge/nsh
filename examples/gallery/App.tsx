@@ -350,7 +350,7 @@ function SidebarRow(props: { demo: DemoEntry; focused: boolean; onLayout: (bound
         onLayout={({ bounds }) => props.onLayout(bounds)}
         role="button"
         accessibilityLabel={props.demo.name}
-        accessibilityState={{ selected: active() }}
+        accessibilityState={{ selected: active(), current: active() ? "page" : undefined }}
         style={{ height: TERMINAL_ROW, flexDirection: "row", alignItems: "center", paddingHorizontal: TERMINAL_COLUMN }}
       >
         <Text style={{ numberOfLines: 1, flex: 1, fontSize: 14, fontWeight: active() ? "600" : "400", color: colors.text }}>
@@ -366,7 +366,7 @@ function SidebarRow(props: { demo: DemoEntry; focused: boolean; onLayout: (bound
       onLayout={({ bounds }) => props.onLayout(bounds)}
       role="button"
       accessibilityLabel={props.demo.name}
-      accessibilityState={{ selected: active() }}
+      accessibilityState={{ selected: active(), current: active() ? "page" : undefined }}
       hoverStyle={active() ? undefined : hovered()}
       style={{
         height: 28,
