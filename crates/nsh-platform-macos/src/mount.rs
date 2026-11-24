@@ -535,6 +535,7 @@ impl Mounter {
             MountItem::Events { id, events } => {
                 if let Some(view) = self.get(*id) {
                     view.state_mut().events = *events;
+                    view.settle_leaf();
                     crate::file_drop::events_changed(surface, view);
                     crate::input::events_changed(surface, view);
                     crate::access::events_changed(view);
@@ -645,6 +646,7 @@ impl Mounter {
             MountItem::ViewProps { id, props } => {
                 let Some(view) = self.get(*id) else { return };
                 let old = std::mem::replace(&mut view.state_mut().props, props.clone());
+                view.settle_leaf();
                 crate::input::props_changed(surface, view, &old);
                 crate::access::props_changed(view);
             }
