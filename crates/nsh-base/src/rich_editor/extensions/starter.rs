@@ -466,20 +466,27 @@ pub mod marks {
     }
 
     /// A link with an `href` and a `title`; text typed at its end is not
-    /// linked.
+    /// linked. A `javascript:`, `vbscript:` or `data:` `href` is neither
+    /// read from HTML nor written to it.
     pub fn link() -> (String, MarkSpec) {
         (
             "link".into(),
             MarkSpec {
-                to_dom: Some(
+                to_dom: Some(DomOutputSpec::render(|src| {
+                    let href = src
+                        .attr("href")
+                        .and_then(Value::as_str)
+                        .filter(|href| allowed_href(href))
+                        .map(Value::from);
                     DomOutputSpec::tag("a")
-                        .attr_of("href", "href")
+                        .attr("href", href)
                         .attr_of("title", "title")
-                        .hole(),
-                ),
+                        .hole()
+                })),
                 parse_dom: vec![ParseRule::tag("a[href]").with_get_attrs(|input| {
                     let a = input.element()?;
-                    let mut attrs = attrs_of("href", Value::from(a.attr("href")?));
+                    let href = a.attr("href").filter(|href| allowed_href(href))?;
+                    let mut attrs = attrs_of("href", Value::from(href));
                     attrs.insert(
                         "title".into(),
                         a.attr("title").map_or(Value::Null, Value::from),
@@ -495,6 +502,22 @@ pub mod marks {
                 ..Default::default()
             },
         )
+    }
+
+    // Whether `href` may be a link's: not a script or data URL. The
+    // white space and control characters `is_allowed_uri` ignores are
+    // removed first, and the scheme is matched in any case, so
+    // `java\tscript:` and `JavaScript:` are refused too. Other schemes,
+    // an app's own included, are kept.
+    fn allowed_href(href: &str) -> bool {
+        let uri: String = href
+            .chars()
+            .filter(|c| !super::super::link::is_link_whitespace(*c))
+            .collect();
+        !["javascript:", "vbscript:", "data:"].iter().any(|scheme| {
+            uri.get(..scheme.len())
+                .is_some_and(|start| start.eq_ignore_ascii_case(scheme))
+        })
     }
 
     /// Italic (emphasis).
