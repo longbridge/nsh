@@ -1314,10 +1314,15 @@ years to pick) share it equally (`flex: 1`; a short last row of years is padded)
 spans it while one in a popup that fits its content keeps its items' widths; the header's items keep their own. The
 app's `renderItem` gets a `CalendarEntry`, what an item is (its kind, value, date, month, `today`, `outside`), and the
 states are the item's (`selected` for screen readers and `selected:`, every day of a complete range as React Aria's;
-`disabled`; the real focus; `project_data` for `data-range-start` / `-end` / `-middle`, `data-today`,
-`data-outside`): a day's content is rendered under its month and date, so the keys, a pick and the focus render
-nothing, a turn renders the days it brings once each, and with several months those still shown keep theirs (their
-holders move to the cells that now show them). `TimeField`'s `renderSegment` likewise gets a
+`disabled`; the real focus; `project_data` for `data-range-start` / `-end` / `-middle`, `data-range-preview-start`
+/ `-end` / `-middle`, `data-today`, `data-outside`): a day's content is rendered under its month and date, so the
+keys, the mouse, a pick and the focus render nothing, a turn renders the days it brings once each, and with several
+months those still shown keep theirs (their holders move to the cells that now show them). The preview reaches to
+`Grid::reach`, the enabled day the mouse moved over last (a day's `onMouseMove`, so a cell whose date changed under
+a still mouse is read again on the next move) or the keyboard's `cursor` once it moves, whichever came last. It stays
+when the mouse leaves the days, as React Aria's highlighted range does: a desktop date picker opens with the keyboard
+on today, which the user did not aim at. A day's marks read it only while the range is half picked, so the mouse
+changes no state otherwise. `TimeField`'s `renderSegment` likewise gets a
 `TimeFieldSegmentEntry` (`segment`, `value`, `label`), its selection `focus:` (`project_focused`).
 `TimeField` (`time_field.rs`) is `gpui-base`'s `SegmentEditor` over one
 transparent native text field, as `OtpInput`'s (its `diff` / `echoed`): what the field gains or loses goes to the
