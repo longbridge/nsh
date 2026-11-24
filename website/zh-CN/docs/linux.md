@@ -1,6 +1,6 @@
 ---
 title: Linux
-description: 在 Linux 上用 GTK 4 窗口运行 Rust 和 TSX 编写的 NSH 应用、打包应用、用 AppView 嵌入 GTK 应用，以及 Linux 上的差异。
+description: 在 Linux 上用 GTK 4 窗口运行 TSX 和 Rust 编写的 NSH 应用、打包应用、用 AppView 嵌入 GTK 应用，以及 Linux 上的差异。
 order: 15
 group: platforms
 ---

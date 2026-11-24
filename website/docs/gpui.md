@@ -1,6 +1,6 @@
 ---
 title: GPUI
-description: Embed Rust and TSX NSH apps in a GPUI or GPUI Kit app with AppView, drawn by GPUI on macOS, Windows and Linux, try TSX apps in the GPUI development host, and what the GPUI backend does differently.
+description: Embed TSX and Rust NSH apps in a GPUI or GPUI Kit app with AppView, drawn by GPUI on macOS, Windows and Linux, try TSX apps in the GPUI development host, and what the GPUI backend does differently.
 order: 15.5
 group: platforms
 ---

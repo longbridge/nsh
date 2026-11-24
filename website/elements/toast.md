@@ -22,6 +22,51 @@ The look and the content are the app's, and so is the convenience of showing a t
 own `toast(...)` on these, as the gallery does (`examples/gallery/toast.tsx`) and as GPUI Kit's notifications are
 built on `gpui-base`'s toasts.
 
+```tsx tabs
+import { Overlay, signal, Text, safeArea } from "nsh";
+import { Toast, type ToastEntry, ToastManager, ToastStack } from "nsh/base";
+
+const manager = new ToastManager();
+const shown = signal<ToastEntry[]>([]);
+const expanded = signal(false);
+const sync = () => shown.set(manager.visible(3));
+// Advance the lifecycle on a timer, paused while the stack is expanded.
+setInterval(() => {
+  if (manager.advance(expanded()).changed) sync();
+}, 50);
+
+export function toast(title: string) {
+  manager.push(crypto.randomUUID(), { title }, { timeout: 5000 });
+  sync();
+}
+
+export function Toaster() {
+  return (
+    <Overlay class="inset-x-0 bottom-0 items-center p-4" style={{ paddingBottom: safeArea().bottom + 16 }}>
+      <ToastStack placement="bottomCenter" class="w-80" onExpandedChange={(e) => expanded.set(e.expanded)} onCancel={() => {
+        const newest = shown().filter((t) => t.status !== "ending").at(-1);
+        if (newest) { manager.dismiss(newest.id); sync(); }
+      }}>
+        <Each of={shown()} key={(t: ToastEntry) => t.id}>
+          {(t) => (
+            <Toast
+              transitionStatus={t().status}
+              accessibilityLabel={(t().value as { title: string }).title}
+              onDismissRequest={() => { manager.dismiss(t().id); sync(); }}
+              class="rounded-xl bg-card px-4 py-3 shadow-lg transition-all duration-200"
+              startingClass="opacity-0 translate-y-4"
+              endingClass="opacity-0 scale-95"
+            >
+              <Text class="font-semibold text-card-foreground">{(t().value as { title: string }).title}</Text>
+            </Toast>
+          )}
+        </Each>
+      </ToastStack>
+    </Overlay>
+  );
+}
+```
+
 ```rust tabs
 use std::time::Duration;
 
@@ -83,51 +128,6 @@ fn toasts() -> impl IntoElement {
                     .child(text(move || item.get().1))
             },
         ))
-}
-```
-
-```tsx tabs
-import { Overlay, signal, Text, safeArea } from "nsh";
-import { Toast, type ToastEntry, ToastManager, ToastStack } from "nsh/base";
-
-const manager = new ToastManager();
-const shown = signal<ToastEntry[]>([]);
-const expanded = signal(false);
-const sync = () => shown.set(manager.visible(3));
-// Advance the lifecycle on a timer, paused while the stack is expanded.
-setInterval(() => {
-  if (manager.advance(expanded()).changed) sync();
-}, 50);
-
-export function toast(title: string) {
-  manager.push(crypto.randomUUID(), { title }, { timeout: 5000 });
-  sync();
-}
-
-export function Toaster() {
-  return (
-    <Overlay class="inset-x-0 bottom-0 items-center p-4" style={{ paddingBottom: safeArea().bottom + 16 }}>
-      <ToastStack placement="bottomCenter" class="w-80" onExpandedChange={(e) => expanded.set(e.expanded)} onCancel={() => {
-        const newest = shown().filter((t) => t.status !== "ending").at(-1);
-        if (newest) { manager.dismiss(newest.id); sync(); }
-      }}>
-        <Each of={shown()} key={(t: ToastEntry) => t.id}>
-          {(t) => (
-            <Toast
-              transitionStatus={t().status}
-              accessibilityLabel={(t().value as { title: string }).title}
-              onDismissRequest={() => { manager.dismiss(t().id); sync(); }}
-              class="rounded-xl bg-card px-4 py-3 shadow-lg transition-all duration-200"
-              startingClass="opacity-0 translate-y-4"
-              endingClass="opacity-0 scale-95"
-            >
-              <Text class="font-semibold text-card-foreground">{(t().value as { title: string }).title}</Text>
-            </Toast>
-          )}
-        </Each>
-      </ToastStack>
-    </Overlay>
-  );
 }
 ```
 

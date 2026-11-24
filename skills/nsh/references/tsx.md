@@ -1,7 +1,8 @@
 # TSX
 
-TSX mode: UI and logic in TypeScript on QuickJS, with hot updates and no Rust toolchain. Pick it for UI delivered at
-run time. With Rust of your own, see [mixed.md](mixed.md); with no JS at all, [rust.md](rust.md). A complete app is in
+TSX mode: UI and logic in TypeScript on QuickJS, with hot updates and no Rust toolchain. Start an app here, including
+UI delivered at run time. To extend it with Rust (an nshm crate in `ext/` or a published one), see [mixed.md](mixed.md);
+for a whole app in Rust with no JS, [rust.md](rust.md). A complete app is in
 [tsx-recipe.md](tsx-recipe.md). `.nsh/types` is the authority on what exists.
 
 ## Components run once

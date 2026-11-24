@@ -135,6 +135,15 @@ async function loadSettings(): Promise<string> {
 
 命令须与 `process.execute` 完全一致：`git` 和 `/usr/bin/git` 是两项不同的授权。裸命令通过宿主 `PATH` 中的绝对目录解析；在 Windows 上，裸命令还会在其中匹配 `<name>.com` 和 `<name>.exe`。批处理文件（`.cmd`、`.bat`）通过 `cmd.exe` 运行：授权它的绝对路径（`C:\Windows\System32\cmd.exe`），并把 `/d`、`/c` 和脚本作为参数传入。子进程的环境是宿主的 `PATH`、`HOME`、`USERPROFILE`、`SystemRoot`、`TEMP`、`TMP`、`TMPDIR`、`LANG` 和 `LC_*`，加上 `process.env` 授权的变量名（按名称精确匹配，仅在环境变量不区分大小写的 Windows 上忽略大小写）。子进程在应用的数据目录（不存在时创建）中运行，或在 `cwd` 中运行；`cwd` 须是 `fs.write` 根目录内已存在的目录，因为子进程可以在其运行目录中写入。嵌入应用可以进一步缩小授权。
 
+```tsx tabs
+import process from "process";
+
+const { code, stdout } = await process.run("git", ["status", "--short"]);
+const child = process.spawn("git", ["log", "--oneline"], { lines: true });
+child.on("stdout", (line) => console.log(line));
+child.on("exit", ({ code, signal }) => console.log("done", code, signal));
+```
+
 ```rust tabs
 use std::{
     io::{BufRead, BufReader},
@@ -159,15 +168,6 @@ spawn(async move {
     })
     .await;
 });
-```
-
-```tsx tabs
-import process from "process";
-
-const { code, stdout } = await process.run("git", ["status", "--short"]);
-const child = process.spawn("git", ["log", "--oneline"], { lines: true });
-child.on("stdout", (line) => console.log(line));
-child.on("exit", ({ code, signal }) => console.log("done", code, signal));
 ```
 
 `run` 在任何退出状态下都以 `{ code, signal, stdout, stderr }` 完成：`code` 为退出状态、`signal` 为 `null`；子进程被信号结束时，`code` 为 `null`，`signal` 为信号名（`"SIGTERM"`）。所有失败都使它拒绝。`spawn` 立即返回子进程；`stdin: "pipe"` 启用 `write` 和 `end`，`lines: true` 按完整行送达。`on(event, handler)` 返回子进程本身，处理函数收到事件的内容：文本，或在最后一次输出之后收到一次 `{ code, signal }`（由运行时结束子进程时，例如超时或行过长，还带有 `error`）（之后添加的监听器会立即收到它）。`pid` 是子进程的进程号。在子进程启动之前，`spawn` 抛出 `run` 会以之拒绝的错误：`process.execute` 未授权的命令为 `ERR_ACCESS_DENIED`（`permission` 为 `"process"`，`resource` 为该命令），`fs.write` 授权范围之外的 `cwd` 为 `ERR_ACCESS_DENIED`（`permission` 为 `"fs"`，`resource` 为该 `cwd`），桌面之外的调用为 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`，超过子进程数量上限为 `ERR_NSH_QUOTA_EXCEEDED`；启动失败的错误带有 `code`（可执行文件不存在时为 `ENOENT`，操作系统无法执行时为 `EACCES`）、`syscall`（`spawn <命令>`）和 `path`。`run` 到达期限时以 `ETIMEDOUT` 拒绝，输出超过捕获上限时以 `RangeError`（`code` 为 `ERR_CHILD_PROCESS_STDIO_MAXBUFFER`）拒绝；`spawn` 的子进程退出时在 `error` 中带有同样的消息，在 `errorCode` 中带有它的错误码。宿主没有数据目录时 `process.dataDir` 为 `null`。`kill`、超时、响应式所有者的清理和 VM 的销毁都会结束整个进程树：在 Unix 上，进程组先收到 SIGTERM，250 ms 后收到 SIGKILL（VM 销毁时立即发送 SIGKILL）。
@@ -232,6 +232,12 @@ console.log(`closed: ${socket.closeCode} ${socket.closeReason}`);
 }
 ```
 
+```tsx tabs
+const socket = new WebSocket("wss://chat.example.com/socket");
+socket.addEventListener("open", () => socket.send("hello"));
+socket.addEventListener("message", (event) => console.log(event.data));
+```
+
 ```rust tabs
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
@@ -249,12 +255,6 @@ spawn(async move {
 });
 ```
 
-```tsx tabs
-const socket = new WebSocket("wss://chat.example.com/socket");
-socket.addEventListener("open", () => socket.send("hello"));
-socket.addEventListener("message", (event) => console.log(event.data));
-```
-
 ## TCP 授权示例
 
 TCP 使用 socket 授权：应用所连接的精确主机与端口。
@@ -264,6 +264,19 @@ TCP 使用 socket 授权：应用所连接的精确主机与端口。
   "capabilities": {
     "network": { "sockets": ["tcp.example.com:9000"] }
   }
+}
+```
+
+```tsx tabs
+import { connect } from "net";
+
+const socket = await connect({ host: "tcp.example.com", port: 9000 });
+try {
+  await socket.write("hello\n");
+  const bytes = await socket.read(1024);
+  if (bytes) console.log(new TextDecoder().decode(bytes));
+} finally {
+  socket.close();
 }
 ```
 
@@ -286,19 +299,6 @@ spawn(async move {
         log::info!("{reply}");
     }
 });
-```
-
-```tsx tabs
-import { connect } from "net";
-
-const socket = await connect({ host: "tcp.example.com", port: 9000 });
-try {
-  await socket.write("hello\n");
-  const bytes = await socket.read(1024);
-  if (bytes) console.log(new TextDecoder().decode(bytes));
-} finally {
-  socket.close();
-}
 ```
 
 ## Gallery

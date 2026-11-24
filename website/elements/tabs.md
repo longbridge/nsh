@@ -16,6 +16,47 @@ each section is the app's too: it shows the one its value names, next to the lis
 underline or a pill the app styles, sits on the selected tab and travels to the next one natively
 ([Indicator](#indicator)).
 
+```tsx tabs
+import { mount, signal, Text, View } from "nsh";
+import { Tab, Tabs } from "nsh/base";
+import { Window } from "nsh/desktop";
+
+function App() {
+  const section = signal("overview");
+  const item = (value: string, label: string) => (
+    <Tab
+      selected={section() === value}
+      onPress={() => section.set(value)}
+      class="group rounded-(--radius) px-3 py-2"
+    >
+      <Text class="text-sm text-muted-foreground group-selected:text-foreground">{label}</Text>
+    </Tab>
+  );
+  return (
+    <View class="gap-4">
+      <Tabs
+        class="flex-row self-start gap-1 rounded-(--radius-lg) bg-muted p-1"
+        indicatorClass="inset-y-1 rounded-(--radius) bg-background"
+      >
+        {item("overview", "Overview")}
+        {item("activity", "Activity")}
+      </Tabs>
+      <Text class="text-foreground">
+        {section() === "overview"
+          ? "Visitors, sign-ups and conversion this week."
+          : "Deploys, invoices and new members, newest first."}
+      </Text>
+    </View>
+  );
+}
+
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
+```
+
 ```rust tabs
 use nsh_base::{tab, tabs, theme};
 use nsh_core::prelude::*;
@@ -61,47 +102,6 @@ fn sections() -> impl IntoElement {
             }
         }).text_color(move || theme().foreground))
 }
-```
-
-```tsx tabs
-import { mount, signal, Text, View } from "nsh";
-import { Tab, Tabs } from "nsh/base";
-import { Window } from "nsh/desktop";
-
-function App() {
-  const section = signal("overview");
-  const item = (value: string, label: string) => (
-    <Tab
-      selected={section() === value}
-      onPress={() => section.set(value)}
-      class="group rounded-(--radius) px-3 py-2"
-    >
-      <Text class="text-sm text-muted-foreground group-selected:text-foreground">{label}</Text>
-    </Tab>
-  );
-  return (
-    <View class="gap-4">
-      <Tabs
-        class="flex-row self-start gap-1 rounded-(--radius-lg) bg-muted p-1"
-        indicatorClass="inset-y-1 rounded-(--radius) bg-background"
-      >
-        {item("overview", "Overview")}
-        {item("activity", "Activity")}
-      </Tabs>
-      <Text class="text-foreground">
-        {section() === "overview"
-          ? "Visitors, sign-ups and conversion this week."
-          : "Deploys, invoices and new members, newest first."}
-      </Text>
-    </View>
-  );
-}
-
-mount(() => (
-  <Window id="main">
-    <App />
-  </Window>
-));
 ```
 
 `Tab` and `Tabs` come from [`nsh/base`](../modules/nsh-base.md), the `nsh-base` crate in Rust. The value is the

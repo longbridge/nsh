@@ -75,7 +75,7 @@ final class TabBarComponent implements NshComponent {
 
     @Override
     public void setProp(String name, Object value) {
-        // `TabBar`'s own props arrive as `$items` and `$selectedIndex`.
+        // `TabBar`'s own props arrive as `$items`, `$selectedIndex` and `$hidden`.
         if (name.startsWith("$")) name = name.substring(1);
         switch (name) {
             case "items":
@@ -86,6 +86,9 @@ final class TabBarComponent implements NshComponent {
                 boolean whole = value instanceof Number && ((Number) value).doubleValue() == ((Number) value).intValue();
                 selected = whole ? ((Number) value).intValue() : 0;
                 select();
+                break;
+            case "hidden":
+                setHidden(Boolean.TRUE.equals(value));
                 break;
             case "tint":
                 setTint(value instanceof String ? argb((String) value) : null);
@@ -98,6 +101,16 @@ final class TabBarComponent implements NshComponent {
     /** Hides or shows the bar for {@code hidesBottomBarWhenPushed} on the visible stack. */
     void setNavigationHidden(boolean hidden, boolean animated) {
         visibility.setNavigation(hidden);
+        apply(animated);
+    }
+
+    /** Hides or shows the bar for the app's {@code TabBar.hidden}. */
+    private void setHidden(boolean value) {
+        visibility.setApp(value);
+        apply(false);
+    }
+
+    private void apply(boolean animated) {
         boolean next = visibility.hidden();
         if (next == appliedHidden) return;
         appliedHidden = next;

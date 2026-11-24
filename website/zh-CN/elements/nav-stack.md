@@ -11,6 +11,68 @@ demo: ui-navigation
 
 导航栈负责导航行为（转场、返回手势和返回按钮、页面被覆盖时保留的状态）；页面的内容和桌面标题栏属于应用自己。
 
+```tsx tabs
+import { mount, Text, View } from "nsh";
+import { Button, createNavStack, NavPage, NavStack } from "nsh/base";
+import { Window } from "nsh/desktop";
+
+type Route = { name: "home" } | { name: "detail"; id: number };
+
+const nav = createNavStack<Route>([{ name: "home" }]);
+
+function Action(props: { title: string; onPress: () => void }) {
+  return (
+    <Button onPress={props.onPress} class="rounded-lg bg-blue-600 px-4 py-3 active:bg-blue-700">
+      <Text class="text-center text-base font-semibold text-white">{props.title}</Text>
+    </Button>
+  );
+}
+
+function Bar(props: { title: string }) {
+  return (
+    <View class="flex-row items-center gap-3 border-b border-neutral-200 px-4 py-3">
+      {nav.routes().length > 1 && <Action title="Back" onPress={() => nav.pop()} />}
+      <Text class="text-lg font-semibold">{props.title}</Text>
+    </View>
+  );
+}
+
+function Home() {
+  return (
+    <NavPage title="Inbox" header={<Bar title="Inbox" />}>
+      <View style={{ flex: 1, padding: 16 }}>
+        <Action title="Open message 1" onPress={() => nav.push({ name: "detail", id: 1 })} />
+      </View>
+    </NavPage>
+  );
+}
+
+function Detail(props: { id: number }) {
+  const title = `Message ${props.id}`;
+  return (
+    <NavPage title={title} header={<Bar title={title} />}>
+      <View style={{ flex: 1, padding: 16 }}>
+        <Text>The message.</Text>
+      </View>
+    </NavPage>
+  );
+}
+
+function App() {
+  return (
+    <NavStack state={nav} style={{ flex: 1 }}>
+      {(route) => (route.name === "home" ? <Home /> : <Detail id={route.id} />)}
+    </NavStack>
+  );
+}
+
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
+```
+
 ```rust tabs
 use nsh_base::{button, nav_page, nav_stack};
 use nsh_core::prelude::*;
@@ -78,68 +140,6 @@ fn app() -> impl IntoElement {
 }
 ```
 
-```tsx tabs
-import { mount, Text, View } from "nsh";
-import { Button, createNavStack, NavPage, NavStack } from "nsh/base";
-import { Window } from "nsh/desktop";
-
-type Route = { name: "home" } | { name: "detail"; id: number };
-
-const nav = createNavStack<Route>([{ name: "home" }]);
-
-function Action(props: { title: string; onPress: () => void }) {
-  return (
-    <Button onPress={props.onPress} class="rounded-lg bg-blue-600 px-4 py-3 active:bg-blue-700">
-      <Text class="text-center text-base font-semibold text-white">{props.title}</Text>
-    </Button>
-  );
-}
-
-function Bar(props: { title: string }) {
-  return (
-    <View class="flex-row items-center gap-3 border-b border-neutral-200 px-4 py-3">
-      {nav.routes().length > 1 && <Action title="Back" onPress={() => nav.pop()} />}
-      <Text class="text-lg font-semibold">{props.title}</Text>
-    </View>
-  );
-}
-
-function Home() {
-  return (
-    <NavPage title="Inbox" header={<Bar title="Inbox" />}>
-      <View style={{ flex: 1, padding: 16 }}>
-        <Action title="Open message 1" onPress={() => nav.push({ name: "detail", id: 1 })} />
-      </View>
-    </NavPage>
-  );
-}
-
-function Detail(props: { id: number }) {
-  const title = `Message ${props.id}`;
-  return (
-    <NavPage title={title} header={<Bar title={title} />}>
-      <View style={{ flex: 1, padding: 16 }}>
-        <Text>The message.</Text>
-      </View>
-    </NavPage>
-  );
-}
-
-function App() {
-  return (
-    <NavStack state={nav} style={{ flex: 1 }}>
-      {(route) => (route.name === "home" ? <Home /> : <Detail id={route.id} />)}
-    </NavStack>
-  );
-}
-
-mount(() => (
-  <Window id="main">
-    <App />
-  </Window>
-));
-```
-
 在 iOS 和 Android 上，页面显示带 `title` 和返回按钮的系统标题栏；在桌面平台和 Web 上，它显示 `header`。只面向手机的应用可以省略 `header`；只面向桌面的应用可以省略系统标题栏的选项。[导航指南](../docs/navigation.md)讲解一个完整应用的导航：栈的状态、对话框、Android 返回键和标签页。
 
 <a id="how-a-stack-works"></a>
@@ -176,18 +176,18 @@ function createNavStack<R>(routes: R[]): NavStackState<R>
 
 在 Rust 中，同样的操作就是修改你的路由信号：`routes.update(|r| r.push(route))` 推入，`r.pop()` 弹出，`r.truncate(1)` 弹回你保留的第一个页面，`routes.set(..)` 替换所有页面。
 
-```rust tabs
-routes.update(|r| r.push(7));
-routes.update(|r| r.truncate(r.len().saturating_sub(2)));
-routes.set(vec![1, 2]);
-let depth = move || routes.with(Vec::len);
-```
-
 ```tsx tabs
 nav.push({ name: "detail", id: 7 });
 nav.pop(2);
 nav.setRoutes([{ name: "home" }, { name: "detail", id: 1 }]);
 const depth = () => nav.routes().length;
+```
+
+```rust tabs
+routes.update(|r| r.push(7));
+routes.update(|r| r.truncate(r.len().saturating_sub(2)));
+routes.set(vec![1, 2]);
+let depth = move || routes.with(Vec::len);
 ```
 
 <a id="navstack-props"></a>
@@ -253,6 +253,17 @@ TSX 的子函数接收路由值本身，以及一个表示它在栈中位置的 
 
 `header`、`headerLeft`、`headerRight` 和 `headerTitle` 是插槽：普通的元素，可以读取信号、处理按压，并在页面显示期间更新。`header` 是应用在桌面平台和 Web 上的整个标题栏；其余三个放进 iOS 和 Android 的系统标题栏。
 
+```tsx tabs
+<NavPage
+  title="Profile"
+  header={<ProfileBar />}
+  headerStyle={{ backgroundColor: "#1a7f37", color: "#ffffff", tintColor: "#ffffff" }}
+  headerRight={<Text onPress={edit} style={{ color: "#ffffff", fontSize: 17 }}>Edit</Text>}
+>
+  <Scroll style={{ flex: 1 }}>…</Scroll>
+</NavPage>
+```
+
 ```rust tabs
 use nsh_base::nav_page;
 use nsh_core::prelude::*;
@@ -267,22 +278,17 @@ fn profile(edit: impl Fn() + 'static) -> Screen {
 }
 ```
 
-```tsx tabs
-<NavPage
-  title="Profile"
-  header={<ProfileBar />}
-  headerStyle={{ backgroundColor: "#1a7f37", color: "#ffffff", tintColor: "#ffffff" }}
-  headerRight={<Text onPress={edit} style={{ color: "#ffffff", fontSize: 17 }}>Edit</Text>}
->
-  <Scroll style={{ flex: 1 }}>…</Scroll>
-</NavPage>
-```
-
 页面的内容从标题栏下方开始：在 iOS 和 Android 上位于不透明的系统标题栏之下，在桌面平台和 Web 上位于 `header` 之下。使用 `headerTransparent`、`headerLargeTitle` 或 `headerVisible={false}` 时，在 iOS 和 Android 上内容从页面顶部开始；用 [`env(safe-area-inset-top)`](./safe-area.md) 或 `safeAreaInsets()` 让它避开标题栏和状态栏。
 
 在 iOS 上，设置 `headerVisible={false}` 的页面在 `popOnSwipe` 和 `popOnBack` 为 true 时仍支持侧滑返回。
 允许的交互式返回手势在转场开始时结束当前输入，键盘在拖动过程中收起。取消转场时，若其他控件没有取得焦点，
 会恢复原输入框的焦点。
+
+```tsx tabs
+<NavPage title="Large title" headerLargeTitle>
+  <Scroll style={{ flex: 1 }}>…</Scroll>
+</NavPage>
+```
 
 ```rust tabs
 nav_page()
@@ -291,17 +297,35 @@ nav_page()
     .child(scroll().flex_1())
 ```
 
-```tsx tabs
-<NavPage title="Large title" headerLargeTitle>
-  <Scroll style={{ flex: 1 }}>…</Scroll>
-</NavPage>
-```
-
 <a id="leaving-a-page"></a>
 
 ## 离开页面
 
 `popOnBack={false}` 把用户留在页面上，比如表单有未保存的更改时。它为 false 期间，侧滑返回关闭，返回按钮和返回键调用 `onBackPress` 而不弹出页面。先询问用户，再自己弹出页面：
+
+```tsx tabs
+import { signal } from "nsh";
+import { AlertDialog, NavPage, Input } from "nsh/base";
+
+function EditNote() {
+  const text = signal("");
+  const confirm = async () => {
+    const { action } = await AlertDialog.show({
+      title: "Discard your changes?",
+      actions: [
+        { label: "Keep editing", role: "cancel", id: "keep" },
+        { label: "Discard", role: "destructive", id: "discard" },
+      ],
+    });
+    if (action === "discard") nav.pop();
+  };
+  return (
+    <NavPage title="Edit" popOnBack={text().length === 0} onBackPress={() => text().length > 0 && confirm()}>
+      <Input value={text()} onChange={({ value }) => text.set(value)} placeholder="A note" />
+    </NavPage>
+  );
+}
+```
 
 ```rust tabs
 use nsh_base::{alert_dialog, nav_page};
@@ -338,30 +362,6 @@ fn edit_note(routes: Signal<Vec<u32>>) -> Screen {
                 .on_change(move |v: &str| note.set(v.to_owned()))
                 .placeholder("A note"),
         )
-}
-```
-
-```tsx tabs
-import { signal } from "nsh";
-import { AlertDialog, NavPage, Input } from "nsh/base";
-
-function EditNote() {
-  const text = signal("");
-  const confirm = async () => {
-    const { action } = await AlertDialog.show({
-      title: "Discard your changes?",
-      actions: [
-        { label: "Keep editing", role: "cancel", id: "keep" },
-        { label: "Discard", role: "destructive", id: "discard" },
-      ],
-    });
-    if (action === "discard") nav.pop();
-  };
-  return (
-    <NavPage title="Edit" popOnBack={text().length === 0} onBackPress={() => text().length > 0 && confirm()}>
-      <Input value={text()} onChange={({ value }) => text.set(value)} placeholder="A note" />
-    </NavPage>
-  );
 }
 ```
 

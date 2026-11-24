@@ -9,6 +9,25 @@ demo: el-input
 
 `Input` 是原生文本输入框：iOS 和 Mac Catalyst 上是 UITextField（单行）或 UITextView（多行），Android 上是 EditText。输入、光标、选区、自动更正和自动填充都由平台自己处理。Rust 用 `nsh_base::input()` 创建，TSX 用从 `nsh/base` 导入的 `<Input>`。
 
+```tsx tabs
+import { signal } from "nsh";
+import { Input } from "nsh/base";
+
+function NameField() {
+  const name = signal("");
+  return (
+    <Input
+      value={name()}
+      onChange={({ value }) => name.set(value)}
+      placeholder="你的名字"
+      autoCapitalize="words"
+      returnKeyType="done"
+      style={{ fontSize: 16, padding: 12, borderWidth: 1, borderColor: "#d0d7de", borderRadius: 8 }}
+    />
+  );
+}
+```
+
 ```rust tabs
 use nsh_base::input;
 use nsh_core::prelude::*;
@@ -26,25 +45,6 @@ fn name_field() -> impl IntoElement {
         .border_1()
         .border_color(rgb(0xd0d7de))
         .rounded(px(8.0))
-}
-```
-
-```tsx tabs
-import { signal } from "nsh";
-import { Input } from "nsh/base";
-
-function NameField() {
-  const name = signal("");
-  return (
-    <Input
-      value={name()}
-      onChange={({ value }) => name.set(value)}
-      placeholder="你的名字"
-      autoCapitalize="words"
-      returnKeyType="done"
-      style={{ fontSize: 16, padding: 12, borderWidth: 1, borderColor: "#d0d7de", borderRadius: 8 }}
-    />
-  );
 }
 ```
 
@@ -111,6 +111,11 @@ function NameField() {
 | `caretColor` | `.caret_color(..)` | `caret-*` | 光标的颜色。 |
 | `selectionColor` | `.selection_color(..)` | `selection:text-*` | 选区高亮的颜色。 |
 
+```tsx tabs
+<Input placeholder="搜索" class="text-zinc-900 placeholder:text-zinc-400 selection:text-blue-600" />
+<Input placeholder="搜索" style={{ placeholderColor: "#9ca3af", caretColor: "#2563eb", selectionColor: "#93c5fd" }} />
+```
+
 ```rust tabs
 input()
     .placeholder("搜索")
@@ -118,11 +123,6 @@ input()
     .placeholder_color(rgb(0x9ca3af))
     .caret_color(rgb(0x2563eb))
     .selection_color(rgb(0x93c5fd))
-```
-
-```tsx tabs
-<Input placeholder="搜索" class="text-zinc-900 placeholder:text-zinc-400 selection:text-blue-600" />
-<Input placeholder="搜索" style={{ placeholderColor: "#9ca3af", caretColor: "#2563eb", selectionColor: "#93c5fd" }} />
 ```
 
 ### iOS
@@ -133,14 +133,14 @@ input()
 | `inputAccessoryViewID` | `.input_accessory(id)` | `string` | 一个 `InputAccessoryView`（[`InputAccessoryView`](../modules/nsh-mobile.md#inputaccessoryview)）的 `nativeID`，输入框获得焦点时显示在键盘上方。 |
 | `keyboardAppearance` | `.keyboard_appearance(KeyboardAppearance::Dark)` | `"default" \| "light" \| "dark"` | 键盘的外观；`"default"` 跟随系统外观。Android 的键盘跟随系统主题。 |
 
+```tsx tabs
+<Input autoComplete="one-time-code" keyboardType="number-pad" ios={{ textContentType: "oneTimeCode" }} />
+```
+
 ```rust tabs
 use nsh_core::element::AutoFill;
 
 input().auto_fill(AutoFill::OneTimeCode).keyboard_type(KeyboardType::Number)
-```
-
-```tsx tabs
-<Input autoComplete="one-time-code" keyboardType="number-pad" ios={{ textContentType: "oneTimeCode" }} />
 ```
 
 ## 事件
@@ -159,6 +159,15 @@ input().auto_fill(AutoFill::OneTimeCode).keyboard_type(KeyboardType::Number)
 
 随文本增高的多行输入框：
 
+```tsx tabs
+const height = signal(40);
+<Input
+  multiline
+  onContentSizeChange={({ size }) => height.set(Math.min(120, Math.max(40, size.height + 16)))}
+  style={{ height: height(), paddingHorizontal: 12, paddingVertical: 8 }}
+/>;
+```
+
 ```rust tabs
 let height = signal(px(40.0));
 
@@ -172,15 +181,6 @@ input()
     .py_2()
 ```
 
-```tsx tabs
-const height = signal(40);
-<Input
-  multiline
-  onContentSizeChange={({ size }) => height.set(Math.min(120, Math.max(40, size.height + 16)))}
-  style={{ height: height(), paddingHorizontal: 12, paddingVertical: 8 }}
-/>;
-```
-
 ## ref 方法
 
 | 方法 | Rust | 说明 |
@@ -192,6 +192,14 @@ const height = signal(40);
 
 按回车把焦点移到下一个输入框：
 
+```tsx tabs
+let password!: InputRef;
+<>
+  <Input returnKeyType="next" onSubmit={() => password.focus()} />
+  <Input ref={password} masked autoComplete="current-password" />
+</>;
+```
+
 ```rust tabs
 use nsh_core::element::AutoFill;
 
@@ -200,14 +208,6 @@ let password = element_ref();
 view()
     .child(input().return_key_type(ReturnKeyType::Next).on_submit(move |_: &str| password.focus()))
     .child(input().element_ref(&password).masked(true).auto_fill(AutoFill::Password))
-```
-
-```tsx tabs
-let password!: InputRef;
-<>
-  <Input returnKeyType="next" onSubmit={() => password.focus()} />
-  <Input ref={password} masked autoComplete="current-password" />
-</>;
 ```
 
 无论哪个输入框持有键盘，`nsh` 的 `Keyboard.dismiss()`（Rust 中为 `dismiss_keyboard()`）都能把它收起。
