@@ -3,9 +3,9 @@
 //! its slots of the table's map, the columns as wide as their `colwidth`
 //! (else sized by their content, at least `cellMinWidth`), the rows at least
 //! their `height`. Over the content box: the handles resizing columns and
-//! rows on their right and bottom borders, the grips of the table the
-//! selection is in (on its top and left borders), which select a column or
-//! a row and drag it elsewhere, and the line showing where it drops. The
+//! rows on their right and bottom borders, the current cell's column and
+//! row grips (on the table's top and left borders), which select and drag
+//! a column or row, and the line showing where it drops. The
 //! gestures are the content box's own presses and drags, so they take
 //! nothing from its selecting: a press on a handle or a grip starts one.
 
@@ -26,7 +26,7 @@ use crate::{
         tables::{
             Axis, CellSelection, TableMap, TableRole, cell_around, column_widths,
             commands::{move_table_column, move_table_row, set_column_width, set_row_height},
-            find_table, is_cell, next_cell, table_role,
+            find_table, is_cell, next_cell, selection_cell, table_role,
         },
     },
     theme,
@@ -286,7 +286,16 @@ pub(crate) fn cell(wrapper: View, rv: &Rv, item: ReadSignal<BlockItem>) -> View 
             .is_some_and(|pos| cells.contains_cell(pos))
     };
     let overlay_rv = rv.clone();
+    let cell_id = item.get_untracked().id;
+    let hover = rv.hovered_table_cell;
     wrapper
+        .when(is_desktop(), |v| {
+            v.on_mouse_enter(move |_: &MouseEvent| {
+                if hover.get_untracked() != Some(cell_id) {
+                    hover.set(Some(cell_id));
+                }
+            })
+        })
         .relative()
         .min_w(move || {
             let (start, end, _, _) = at.get();
@@ -354,15 +363,14 @@ pub(crate) fn controls(rv: Rv) -> impl IntoElement {
             })
             .collect::<Vec<_>>()
     });
-    // The block of the table the selection is in: the tables' regions run
-    // again when it changes, for the two tables it concerns, not on every
-    // move of the selection.
+    // Only the tables losing or gaining grips need to update as the
+    // pointer or selection moves between cells.
     let active_rv = rv.clone();
     let active = computed(move || {
         active_rv.sel_rev.get();
         active_rv.doc_rev.get();
-        let pos = active_rv.active_table()?;
-        active_rv.tree.borrow().id_at(pos)
+        active_rv.hovered_table_cell.get();
+        active_rv.active_grips()
     });
     each(
         tables,
@@ -396,17 +404,17 @@ pub(crate) fn drop_line(rv: Rv) -> impl IntoElement {
     })
 }
 
-/// A table's resize handles (desktops) and, while the selection is in it,
-/// its grips, placed from its layout: they follow its frame, its cells'
+/// A table's resize handles (desktops) and its current cell's grips,
+/// placed from its layout: they follow its frame, its cells'
 /// and the boxes around it ([`Rv::watch_table`]), not every block's.
 fn table_controls(
     rv: Rv,
     item: ReadSignal<TableItem>,
-    active: Memo<Option<u64>>,
+    active: Memo<Option<ActiveGrips>>,
 ) -> impl IntoElement {
     let id = item.get_untracked().id;
     let moved = rv.watch_table(id);
-    let selected = computed(move || active.get() == Some(id));
+    let grips = computed(move || active.get().filter(|g| g.table == id));
     // Its own resize's preview: another table's resize does not wake it.
     let preview_rv = rv.clone();
     let preview = computed(move || {
@@ -420,11 +428,11 @@ fn table_controls(
     });
     dynamic(move || {
         let it = item.get();
-        let selected = selected.get();
+        let grips = grips.get();
         let (_, resizable, _) = options(&it.node);
         let handles = resizable && is_desktop();
         // Nothing to draw: its layout is not followed either.
-        if !handles && !selected {
+        if !handles && grips.is_none() {
             return Vec::new();
         }
         moved.get();
@@ -436,8 +444,8 @@ fn table_controls(
         if handles {
             out.extend(resize_handles(&rv, &layout, preview));
         }
-        if selected {
-            out.extend(grips(&rv, &layout));
+        if let Some(grips) = grips {
+            out.extend(grip_bars(&rv, &layout, grips.col, grips.row));
         }
         out
     })
@@ -553,7 +561,7 @@ fn row_grip(t: &TableLayout, row: usize) -> Bounds<Points> {
 
 /// The grips: a small bar on each, in the theme's `muted-foreground` (the
 /// `tableGrip` part).
-fn grips(rv: &Rv, t: &TableLayout) -> Vec<AnyElement> {
+fn grip_bars(rv: &Rv, t: &TableLayout, col: usize, row: usize) -> Vec<AnyElement> {
     let bar = |b: Bounds<Points>, horizontal: bool| {
         let (w, h) = if horizontal { (16.0, 4.0) } else { (4.0, 16.0) };
         view()
@@ -577,10 +585,8 @@ fn grips(rv: &Rv, t: &TableLayout) -> Vec<AnyElement> {
             ))
             .into_element()
     };
-    let mut out: Vec<AnyElement> = (0..t.cols.len())
-        .filter_map(|c| col_grip(t, c).map(|b| bar(b, true)))
-        .collect();
-    out.extend((0..t.rows.len()).map(|r| bar(row_grip(t, r), false)));
+    let mut out: Vec<AnyElement> = col_grip(t, col).map(|b| bar(b, true)).into_iter().collect();
+    out.push(bar(row_grip(t, row), false));
     out
 }
 
@@ -618,7 +624,68 @@ fn line_selection(doc: &Node, table: usize, axis: Axis, index: usize) -> Option<
     .map(Into::into)
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct ActiveGrips {
+    table: u64,
+    col: usize,
+    row: usize,
+}
+
 impl Rv {
+    fn grips_for_cell(&self, cell: &ResolvedPos) -> Option<ActiveGrips> {
+        let depth = cell.depth.checked_sub(1)?;
+        let start = cell.start(depth);
+        let table = cell.node(depth);
+        let id = self.tree.borrow().id_at(start.checked_sub(1)?)?;
+        let rect = TableMap::get(table).try_find_cell(cell.pos.checked_sub(start)?)?;
+        Some(ActiveGrips {
+            table: id,
+            col: rect.left,
+            row: rect.top,
+        })
+    }
+
+    fn active_grips(&self) -> Option<ActiveGrips> {
+        let state = self.st.borrow();
+        if let Some(cell) = self
+            .hovered_table_cell
+            .get_untracked()
+            .and_then(|id| self.block_pos(id))
+            .and_then(|pos| state.doc().resolve(pos).ok())
+            .and_then(|pos| self.grips_for_cell(&pos))
+        {
+            return Some(cell);
+        }
+        find_table(state.selection().resolved_head())?;
+        self.grips_for_cell(&selection_cell(&state)?)
+    }
+
+    pub(crate) fn clear_table_hover_outside(&self, at: Point<Points>) {
+        let Some(id) = self.hovered_table_cell.get_untracked() else {
+            return;
+        };
+        let geo = self.geo.borrow();
+        if let Some(origin) = geo.origin(id)
+            && let Some((_, frame)) = geo.frames.get(&id)
+            && contains(&Bounds::new(origin, frame.size), at)
+        {
+            return;
+        }
+        drop(geo);
+        // The grips sit across the outside border of the cell's table.
+        if let Some(ActiveGrips { table, col, row }) = self.active_grips()
+            && let Some(node) = self
+                .block_pos(table)
+                .and_then(|p| self.st.borrow().doc().node_at(p))
+            && let Some(t) = self.table_layout(table, &node)
+            && (col_grip(&t, col).is_some_and(|b| contains(&b, at))
+                || contains(&row_grip(&t, row), at))
+        {
+            return;
+        }
+        self.hovered_table_cell.set(None);
+    }
+
     /// The place at `at` (content box): in the innermost cell it is in,
     /// that cell's (a neighbor's text beside it may be nearer), else the
     /// nearest anywhere.
@@ -705,40 +772,29 @@ impl Rv {
         }
     }
 
-    /// The table the selection is in (the innermost), by position.
-    pub(crate) fn active_table(&self) -> Option<usize> {
-        let state = self.st.borrow();
-        find_table(state.selection().resolved_head()).map(|t| t.pos)
-    }
-
     /// The table gesture a press at `at` (content box) starts: on a grip
-    /// of the table the selection is in, else on a column's or row's
-    /// border.
+    /// of the current cell, else on a column's or row's border.
     pub(crate) fn table_target(&self, at: Point<Points>) -> Option<TableDrag> {
         let layouts = self.table_layouts();
-        let active = self.active_table();
+        let active = self.active_grips();
         // Inner tables first: their grips and borders lie over the outer's.
         for t in layouts.iter().rev() {
-            if Some(t.pos) == active {
-                for c in 0..t.cols.len() {
-                    if col_grip(t, c).is_some_and(|b| contains(&b, at)) {
-                        return Some(TableDrag::MoveCol {
-                            table: t.pos,
-                            from: c,
-                            press: at,
-                            to: None,
-                        });
-                    }
+            if let Some(grips) = active.filter(|g| self.block_pos(g.table) == Some(t.pos)) {
+                if col_grip(t, grips.col).is_some_and(|b| contains(&b, at)) {
+                    return Some(TableDrag::MoveCol {
+                        table: t.pos,
+                        from: grips.col,
+                        press: at,
+                        to: None,
+                    });
                 }
-                for r in 0..t.rows.len() {
-                    if contains(&row_grip(t, r), at) {
-                        return Some(TableDrag::MoveRow {
-                            table: t.pos,
-                            from: r,
-                            press: at,
-                            to: None,
-                        });
-                    }
+                if contains(&row_grip(t, grips.row), at) {
+                    return Some(TableDrag::MoveRow {
+                        table: t.pos,
+                        from: grips.row,
+                        press: at,
+                        to: None,
+                    });
                 }
             }
             if !t.resizable || !is_desktop() || !contains(&t.bounds, at) {
