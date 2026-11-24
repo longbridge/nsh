@@ -2398,9 +2398,11 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
 }
 
 thread_local! {
-    /// The text view the last wheel event reached, whether it passed the
-    /// event on, and the event's time (seconds).
-    static WHEEL_GESTURE: Cell<Option<(usize, bool, f64)>> = const { Cell::new(None) };
+    /// The text view the last wheel event reached, where its gesture goes
+    /// (`Some(true)`: around the input, `Some(false)`: the text, `None`:
+    /// not decided yet, the gesture has not moved), and the event's time
+    /// (seconds).
+    static WHEEL_GESTURE: Cell<Option<(usize, Option<bool>, f64)>> = const { Cell::new(None) };
 }
 
 /// Events of one wheel gesture come closer together than this (seconds).
@@ -2410,9 +2412,15 @@ const WHEEL_GAP: f64 = 0.15;
 /// text: while the surface scrolls (the pointer came over the input
 /// mid-scroll), for a gesture that began elsewhere, and for one beginning
 /// here that the text cannot take (`scrolls`).
+///
+/// A gesture is decided by its first move, as on the web: a trackpad's
+/// `MayBegin` / `Began` often carries no delta, and deciding there by
+/// overflow alone would keep every gesture on text already at its end.
+/// Until it moves, the gesture stays on the text; one the text cannot
+/// take then begins on the surface ([`crate::input::begin_gesture`]).
 fn wheel_to_host(
     text: &NSTextView,
-    surface: &Surface,
+    surface: &Rc<Surface>,
     event: &NSEvent,
     scrolls: impl Fn(CGFloat) -> bool,
 ) -> bool {
@@ -2425,28 +2433,39 @@ fn wheel_to_host(
         (owner == id && time - last < WHEEL_GAP).then_some(to_host)
     });
     let dy = event.scrollingDeltaY();
+    let moves = dy.abs() >= 0.01;
     let to_host = if crate::input::scrolling(surface, event) {
-        true
-    } else if starts {
-        // MayBegin / Began often carry a ~0 delta: only keep the gesture
-        // on the text when it actually overflows vertically.
-        if dy.abs() < 0.01 {
-            !text_overflows(text)
+        Some(true)
+    } else if starts || owned == Some(None) {
+        if !moves {
+            // Nothing to decide by yet: only text that overflows waits.
+            if text_overflows(text) {
+                None
+            } else {
+                Some(true)
+            }
+        } else if scrolls(dy) {
+            Some(false)
         } else {
-            !scrolls(dy)
+            // The surface gets this gesture from here: an undecided one
+            // began on the text, so the surface's begins now.
+            if owned == Some(None) && phase.contains(NSEventPhase::Changed) {
+                crate::input::begin_gesture(surface, event);
+            }
+            Some(true)
         }
     } else {
-        owned.unwrap_or(true)
+        owned.unwrap_or(Some(true))
     };
     WHEEL_GESTURE.set(Some((id, to_host, time)));
-    to_host
+    to_host.unwrap_or(false)
 }
 
 /// Whether a wheel `event` over the hosted view `native` scrolls the
 /// surface rather than an input's text: always over a single-line input,
 /// and over a multiline one unless its text takes the gesture
 /// ([`wheel_to_host`]). `false` for anything that is not an input.
-pub(crate) fn passes_wheel(surface: &Surface, native: &NSView, event: &NSEvent) -> bool {
+pub(crate) fn passes_wheel(surface: &Rc<Surface>, native: &NSView, event: &NSEvent) -> bool {
     if native.downcast_ref::<InputPad>().is_none() {
         return false;
     }

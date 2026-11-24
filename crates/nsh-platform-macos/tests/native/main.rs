@@ -45,6 +45,8 @@ mod input_restyle;
 #[cfg(target_os = "macos")]
 mod input_tab_stops;
 #[cfg(target_os = "macos")]
+mod input_wheel_chain;
+#[cfg(target_os = "macos")]
 mod keyboard;
 #[cfg(target_os = "macos")]
 mod keymap_ime;
@@ -182,6 +184,8 @@ fn main() {
                 deleted_scroll::run();
             } else if std::env::var_os("NSH_DOWNLOAD_REDIRECT_CHECK_ONLY").is_some() {
                 download_redirect::run();
+            } else if std::env::var_os("NSH_INPUT_WHEEL_CHAIN_CHECK_ONLY").is_some() {
+                input_wheel_chain::run();
             } else if std::env::var_os("NSH_EMBEDDED_SCROLL_CHECK_ONLY").is_some() {
                 embedded_scroll::run();
             } else if std::env::var_os("NSH_VIEW_SCALE_CHECK_ONLY").is_some() {
@@ -237,6 +241,7 @@ fn main() {
                 mount::run();
                 // Last: it makes the process an accessory app.
                 embedded_scroll::run();
+                input_wheel_chain::run();
                 nested_bounce::run();
                 // Last: it leaves the app an accessory, never activated.
                 press_momentum::run();
