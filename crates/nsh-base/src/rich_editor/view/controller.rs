@@ -384,7 +384,7 @@ impl Rv {
             if !rv.focused.get() {
                 return;
             }
-            for spec in keys::key_table() {
+            for spec in keys::key_table().into_iter().filter(|spec| !spec.copy) {
                 let rv = rv.clone();
                 let event = spec.event.clone();
                 on_key_with(
@@ -393,6 +393,37 @@ impl Rv {
                         when: When::Always,
                         repeat: spec.repeat,
                         for_focus: true,
+                        ..Default::default()
+                    },
+                    move |_| rv.key(&event),
+                );
+            }
+        });
+        // Copy, bound again as the selection empties or fills: with nothing
+        // selected in the editor the key also goes on to the platform, whose
+        // Copy takes what is selected around it (a chat's messages above its
+        // composer, which keeps the focus while they are selected), as an
+        // `Input`'s does. Plugins still hear it.
+        let rv = self.clone();
+        let copy_keys: Vec<keys::KeySpec> = keys::key_table()
+            .into_iter()
+            .filter(|spec| spec.copy)
+            .collect();
+        effect(move || {
+            if !rv.focused.get() {
+                return;
+            }
+            rv.sel_rev.get();
+            let empty = untracked(|| rv.session.state().selection().empty());
+            for spec in &copy_keys {
+                let rv = rv.clone();
+                let event = spec.event.clone();
+                on_key_with(
+                    &spec.keystroke,
+                    KeyOptions {
+                        when: When::Always,
+                        for_focus: true,
+                        pass_through: empty,
                         ..Default::default()
                     },
                     move |_| rv.key(&event),
