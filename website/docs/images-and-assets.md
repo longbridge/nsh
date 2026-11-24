@@ -41,6 +41,8 @@ fn native(registry: &mut Registry) {
 }
 ```
 
+`registry.assets(..)` ships the files with every package. A file only some platforms read, such as data the web downloads on demand while desktop and mobile compile it in, goes in with `registry.assets_for(&[Os::Web], assets!())`: only the packages of the listed platforms copy it (`nsh_core::platform::Os`: `Web`, `Ios`, `Android`, `MacOs`, `Linux`, `Windows`). Read it on the other targets and it is not there; `nsh run` serves every file.
+
 ```tsx tabs
 import logo from "./assets/logo@2x.png";
 

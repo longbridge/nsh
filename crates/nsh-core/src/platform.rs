@@ -128,6 +128,21 @@ impl Os {
         }
     }
 
+    /// The OS named `name` ([`Os::name`]): a scoped asset's target in a
+    /// UI set's description.
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
+        [
+            Os::Ios,
+            Os::Android,
+            Os::MacOs,
+            Os::Windows,
+            Os::Linux,
+            Os::Web,
+        ]
+        .into_iter()
+        .find(|os| os.name() == name)
+    }
+
     /// The OS of a desktop backend (macOS, Windows, Linux): it has windows
     /// and menus (`nsh/desktop`'s `isAvailable`). Desktop behavior
     /// (`desktop={{…}}` props, `platform.select({ desktop })`,
