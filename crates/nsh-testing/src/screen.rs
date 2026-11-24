@@ -442,6 +442,9 @@ pub struct AccessibilityNode {
     pub checked: Option<nsh_core::Checked>,
     /// Its `accessibilityState.expanded`.
     pub expanded: Option<bool>,
+    /// Its `accessibilityState.pressed`, for a toggle button; `None` when
+    /// it is unset.
+    pub pressed: Option<nsh_core::Checked>,
     /// Its `accessibilityLevel`.
     pub level: Option<u32>,
     /// Its `accessibilityDescription`.
@@ -1264,6 +1267,7 @@ impl Screen {
                 selected: v.selected,
                 checked: v.accessibility_state.checked,
                 expanded: v.accessibility_state.expanded,
+                pressed: v.accessibility_state.pressed,
                 level: v.level,
                 description: v.description.as_deref().map(str::to_owned),
                 children: Vec::new(),
@@ -3714,15 +3718,17 @@ pub(crate) fn protocol_accessibility(n: AccessibilityNode) -> nsh_dev::protocol:
     out.label = n.label;
     out.disabled = n.disabled;
     out.selected = n.selected;
-    out.checked = n.checked.map(|c| {
+    let name = |c: nsh_core::Checked| {
         match c {
             nsh_core::Checked::True => "true",
             nsh_core::Checked::False => "false",
             nsh_core::Checked::Mixed => "mixed",
         }
         .to_owned()
-    });
+    };
+    out.checked = n.checked.map(name);
     out.expanded = n.expanded;
+    out.pressed = n.pressed.map(name);
     out.level = n.level;
     out.description = n.description;
     out.children = n.children.into_iter().map(protocol_accessibility).collect();
