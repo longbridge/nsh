@@ -99,6 +99,7 @@ serde_json = "1"
 # Translations (`nsh_core::i18n`, `nsh-i18n`): our rust-i18n, its files and lookups.
 rust-i18n = "4.2.4"
 rust-i18n-support = "4.2.4"
+jiff-tzdb = "1"
 # The keys and values of `nsh.json` the CLI cannot read, which it warns of and
 # ignores (`nsh-cli`'s `package::read_config`).
 serde_ignored = "0.1.14"

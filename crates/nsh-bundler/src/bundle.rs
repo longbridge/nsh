@@ -529,10 +529,11 @@ fn app_json(config: &serde_json::Value, development: bool, info: &AppInfo) -> St
     .to_string()
 }
 
-/// The app's translations (`locales/`) and the language data of the
+/// The app's translations (`locales/`), the language data of the
 /// languages `nsh.json` `"locales"` lists (or, without it, of the
-/// translations' languages), as the runtime takes them; `None` when it has
-/// neither.
+/// translations' languages) and the rules of the time zones its
+/// `"timeZones"` lists, as the runtime takes them; `None` when it has none
+/// of them.
 pub fn i18n_json(
     dir: &std::path::Path,
     config: Option<&serde_json::Value>,
@@ -560,9 +561,30 @@ pub fn i18n_json(
             None
         }
     };
+    let time_zones = match config.and_then(|c| c.get("timeZones")) {
+        None => Vec::new(),
+        Some(serde_json::Value::Array(items)) => items
+            .iter()
+            .filter_map(|item| match item.as_str() {
+                Some(zone) => Some(zone.to_owned()),
+                None => {
+                    warn_ignored("timeZones", &[format!("{item} is not a time zone's name")]);
+                    None
+                }
+            })
+            .collect(),
+        Some(other) => {
+            warn_ignored(
+                "timeZones",
+                &[format!("{other} is not a list of time zone names")],
+            );
+            Vec::new()
+        }
+    };
     Ok(nsh_i18n::bundle_json(
         &translations,
         locales.as_deref(),
+        &time_zones,
         |warning| log::warn!(target: "nsh::build", "nsh.json: {warning}"),
     ))
 }

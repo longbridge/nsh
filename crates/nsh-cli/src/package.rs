@@ -230,6 +230,10 @@ pub(crate) struct AppConfig {
     /// The languages whose data the app ships (checked by the bundler).
     #[serde(default)]
     locales: Option<serde_json::Value>,
+    /// The named time zones whose rules the app ships (checked by the
+    /// bundler).
+    #[serde(default, rename = "timeZones")]
+    _time_zones: Option<serde_json::Value>,
     /// The store listing, read by `nsh publish <store>` (`store.rs`).
     #[serde(default)]
     pub(crate) store: Option<serde_json::Value>,

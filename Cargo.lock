@@ -3172,6 +3172,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "jiff-tzdb"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12e71a1b68a875a44a33bb7a1dd84392cb77145a3367a552a3cfe6a4f5cf3afc"
+
+[[package]]
 name = "jni"
 version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3995,6 +4001,7 @@ dependencies = [
 name = "nsh-i18n"
 version = "0.6.0"
 dependencies = [
+ "jiff-tzdb",
  "rust-i18n-support",
  "serde_json",
 ]
