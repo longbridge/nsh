@@ -2008,18 +2008,23 @@ class Player {
    * first: a side module, or an export of a module published whole.
    */
   async loadData(name) {
-    // A part of nsh/base a Rust app made a component of by name: its side
-    // module, or its gate in a module published whole; then the engine
-    // makes what waited for it. Nothing comes back on failure: the
-    // component keeps showing nothing, and the next one mounted asks again.
-    if (name.startsWith("part:")) {
-      const gate = `nsh_part_${name.slice(5)}`;
+    // A part of nsh/base a Rust app made a component of by name, or the
+    // shaders of a Rust app (`feature:shader`): its side module, or its
+    // gate in a module published whole; then the engine makes or draws
+    // what waited for it. Nothing comes back on failure: the component or
+    // shader keeps showing nothing, and the next one asks again.
+    const lazy = /^(part|feature):(.+)$/.exec(name);
+    if (lazy) {
+      const gate = `nsh_${lazy[1]}_${lazy[2]}`;
+      const after = () => this.call((w) => this.withStrings([gate], (p, l) => w.nsh_after_gate(p, l)));
       try {
         if (this.options.sides?.[gate]) await this.loadSide(gate, this.options.sides);
         else this.wasm[gate]?.();
-        this.call((w) => this.withStrings([gate], (p, l) => w.nsh_after_gate(p, l)));
+        after();
       } catch (err) {
         console.warn("[nsh]", `${err.message ?? err} (${gate})`);
+        // The runtime asks for a feature once at a time: it may ask again.
+        if (lazy[1] === "feature") after();
       }
       return;
     }
