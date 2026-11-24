@@ -3738,7 +3738,7 @@ pub enum Prop {
     /// its links' URL on their span), carried to the platform as data: a
     /// terminal draws the text inside the view as a hyperlink to it, and a
     /// span's is recorded in its block's text
-    /// ([`AttributedText::link_hrefs`](crate::AttributedText::link_hrefs)).
+    /// (`AttributedText::link_hrefs`).
     /// Set by the link components, never by JS.
     Href(Option<Arc<str>>),
     /// `panActivation`: the view's touch responder waits for a pan that the

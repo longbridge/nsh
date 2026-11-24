@@ -378,7 +378,9 @@ pub struct AttributedText {
     /// (`nsh-base`'s `TextView` gives its links their URL), by the link's
     /// index there. It changes nothing drawn or laid out; a platform that
     /// makes links hyperlinks takes it (the web draws a link's characters
-    /// as an `<a href>`).
+    /// as an `<a href>`). Hidden: only the web reads it so far, so it is
+    /// not yet a stable part of the core's API.
+    #[doc(hidden)]
     pub link_hrefs: Vec<LinkHref>,
     /// Nested `<Text>` spans with a `testID` (they may nest). Platforms
     /// draw nothing from them. Tests name a span by its id.
@@ -672,7 +674,9 @@ pub struct SpanTestId {
     pub test_id: Arc<str>,
 }
 
-/// Where a link of a text goes ([`AttributedText::link_hrefs`]).
+/// Where a link of a text goes (`AttributedText::link_hrefs`). Hidden, as
+/// that field is.
+#[doc(hidden)]
 #[derive(Debug, Clone, PartialEq, Default)]
 #[non_exhaustive]
 pub struct LinkHref {
@@ -929,7 +933,8 @@ impl AttributedText {
     }
 
     /// Where link `link` (its index in [`Self::links`]) goes, when its
-    /// span has an `href` ([`Self::link_hrefs`]).
+    /// span has an `href` (`link_hrefs`). Hidden, as that field is.
+    #[doc(hidden)]
     pub fn link_href(&self, link: usize) -> Option<&str> {
         self.link_hrefs
             .iter()

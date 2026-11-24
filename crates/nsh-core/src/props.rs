@@ -490,7 +490,7 @@ pub struct ViewProps {
     /// platform, never shown or read to accessibility clients. A terminal
     /// draws the text inside the view as an OSC 8 hyperlink to it. A
     /// span's (`TextView`'s links) goes into its block's text instead
-    /// ([`AttributedText::link_hrefs`](crate::AttributedText::link_hrefs)).
+    /// (`AttributedText::link_hrefs`).
     pub href: Option<Arc<str>>,
     /// `panActivation`: the view's touch responder waits for a pan the
     /// platform recognizes.
