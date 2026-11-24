@@ -134,6 +134,8 @@ mount(() => (
 `TabBar` comes from `nsh/mobile`, `nsh_core::mobile` in Rust. The selection is the app's: a
 tap reports `onChange` with the tab's index (`{ index }`), the bar shows the choice at once, as the system's does, and the app shows
 that section and passes the index back as `selectedIndex`. Its height is the system's where the style leaves it open.
+A bar out of sight — `hidden`, or a pushed page's `hidesBottomBarWhenPushed` — takes no touches: a press in the
+strip it leaves reaches the views below, so a control the app draws there (a floating action bar) works.
 In Rust, `tab_bar()` makes one, with a setter per prop (`.items(..)`, `.selected_index(..)`), a listener per event
 (`.on_change(..)`) and the typed style methods; `TabBarItem::new(title).icon(name).badge(text)` makes a tab.
 
@@ -143,7 +145,7 @@ In Rust, `tab_bar()` makes one, with a setter per prop (`.items(..)`, `.selected
 |---|---|---|---|---|
 | `items` | `.items(..)` | `TabBarItem[]` | `[]` | The tabs, in order. |
 | `selectedIndex` | `.selected_index(..)` | `number` | `0` | The selected tab, by index; an index past the tabs selects none. |
-| `hidden` | `.hidden(..)` | `boolean` | `false` | iOS: hides the bar without a transition. The app owns this value across pushes and pops. The bar shows when both this prop and the visible stack’s `hidesBottomBarWhenPushed` request are false. |
+| `hidden` | `.hidden(..)` | `boolean` | `false` | iOS: hides the bar without a transition. The app owns this value across pushes and pops. The bar shows when both this prop and the visible stack’s `hidesBottomBarWhenPushed` request are false. Out of sight, it takes no touches. |
 | `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | none | Where the bar is: its position and size. Its look is the system's, with the selected tab in the theme's `primary`. |
 | `testID` | `.test_id(..)` | `string` | none | Finds the bar in tests and `nsh test --trace`. |
 

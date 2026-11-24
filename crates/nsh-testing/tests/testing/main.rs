@@ -391,6 +391,15 @@ fn a_press_fails_on_a_view_another_covers() {
 }
 
 #[test]
+fn a_press_reaches_a_control_under_a_tab_bar_out_of_sight() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/tab-bar-hit");
+    let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 1);
+}
+
+#[test]
 fn comments_beside_flow_function_children_keep_their_accessors() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/flow-comments");
     let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
