@@ -90,6 +90,7 @@ In Rust each prop is a builder method in snake case (`injected_java_script`, `ja
 | `scrollable` | `boolean` | `true` | The user can scroll the page. |
 | `userAgent` | `string` | | The browser's user agent string. |
 | `incognito` | `boolean` | `false` | The pages' website data lives only as long as the web view, as each platform keeps it ([below](#website-data)). Read when the web view is made. |
+| `zoomable` | `boolean` | `false` | The person can pinch to zoom the page, also past its viewport's scale limits: built-in zoom without on-screen buttons on Android, the viewport's limits ignored on iOS, magnification on macOS. Off keeps each platform's own behavior (Android and macOS do not zoom, iOS zooms as far as the viewport allows, Windows zooms). Read when the web view is made. |
 | `ios={{ allowsBackForwardNavigationGestures }}` | `boolean` | | iOS: swipe back and forward through the page history. |
 | `desktop={{ allowsBackForwardNavigationGestures }}` | `boolean` | | macOS: swipe with two fingers on the trackpad to go back and forward; Windows: swipe on a touchscreen; Linux: swipe on the touchpad. |
 

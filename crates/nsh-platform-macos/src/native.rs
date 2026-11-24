@@ -2300,7 +2300,7 @@ impl WebHost {
         // A download's redirects take the grant its navigations do.
         let grant = access.clone();
         let allows: web_download::Allows =
-            Rc::new(move |url: &str| navigation_allowed(grant.as_deref(), None, true, url));
+            Rc::new(move |url: &str| navigation_allowed(grant.as_deref(), None, None, true, url));
         let download = web_download::Transport::new(surface.mtm, emit, allows);
         let handler = WebHandler::new(
             surface.mtm,
@@ -2511,6 +2511,11 @@ impl WebHost {
                 web,
                 setAllowsBackForwardNavigationGestures: Bool::new(p.back_forward_gestures)
             ];
+            // `zoomable`: pinch (trackpad) magnification; off is WebKit's
+            // default. The core keeps it from changing once it is made.
+            if first {
+                let _: () = msg_send![web, setAllowsMagnification: Bool::new(p.zoomable)];
+            }
             let prefs: Retained<AnyObject> = msg_send![&config, defaultWebpagePreferences];
             let _: () =
                 msg_send![&prefs, setAllowsContentJavaScript: Bool::new(p.javascript_enabled)];
@@ -3058,6 +3063,7 @@ mod tests {
         };
         assert!(!navigation_allowed(
             Some(&denied),
+            None,
             None,
             true,
             "blob:https://example.com/uuid"

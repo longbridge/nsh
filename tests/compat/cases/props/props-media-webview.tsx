@@ -3,8 +3,9 @@
 // page of HTML with its base URL, the scripts injected before and after
 // each page's own, scripts turned off, the user agent, scrolling turned
 // off, the swipes back and forward and website data kept only as long as
-// the web view (`incognito`) and one more origin it may show
-// (`allowOrigin`, in its one written form). Its script checks each.
+// the web view (`incognito`), pinch zoom (`zoomable`) and one more origin
+// it may show (`allowOrigin`, in its one written form). Its script checks
+// each.
 import { Text, View, signal } from "nsh";
 import { WebView } from "nsh";
 
@@ -27,6 +28,7 @@ function App() {
         userAgent="CompatAgent/1"
         scrollable={false}
         incognito
+        zoomable
         ios={{ allowsBackForwardNavigationGestures: true }}
         style={{ width: 200, height: 120 }}
       />

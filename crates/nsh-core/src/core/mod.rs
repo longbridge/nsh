@@ -6935,6 +6935,7 @@ impl<M: TextEngine> Core<M> {
                 {
                     let changed = match &prop {
                         NativeProp::Incognito(on) => Some(("`incognito` is", *on != p.incognito)),
+                        NativeProp::Zoomable(on) => Some(("`zoomable` is", *on != p.zoomable)),
                         // A re-render builds new handlers: only a change
                         // of the schemes served is worth a warning.
                         NativeProp::UrlSchemes(schemes) => Some((
@@ -12536,6 +12537,7 @@ fn apply_native(control: &mut NativeProps, prop: NativeProp) {
         (NativeProps::WebView(p), P::JavaScriptEnabled(v)) => p.javascript_enabled = v,
         (NativeProps::WebView(p), P::BackForwardGestures(v)) => p.back_forward_gestures = v,
         (NativeProps::WebView(p), P::Incognito(v)) => p.incognito = v,
+        (NativeProps::WebView(p), P::Zoomable(v)) => p.zoomable = v,
         (NativeProps::WebView(p), P::UrlSchemes(v)) => p.url_schemes = v,
         (NativeProps::WebView(p), P::DeferDownloads(v)) => p.defer_downloads = v,
         (NativeProps::Video(p), P::Source(v)) => {

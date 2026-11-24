@@ -3640,6 +3640,25 @@ pub(crate) fn forward_scroll(surface: &Rc<Surface>, ns_event: &NSEvent) {
     });
 }
 
+/// Begins a trackpad gesture on the surface at `ns_event` (a change of
+/// it), for a gesture that began on a hosted view which then passed it on:
+/// the surface sees a begin before the changes, as for its own gestures.
+pub(crate) fn begin_gesture(surface: &Rc<Surface>, ns_event: &NSEvent) {
+    let p = event_root(surface)
+        .ns()
+        .convertPoint_fromView(ns_event.locationInWindow(), None);
+    let time = ns_event.timestamp() * 1000.0;
+    gesture_event(
+        surface,
+        NSEventPhase::Began,
+        p.x as f32,
+        p.y as f32,
+        0.0,
+        0.0,
+        time,
+    );
+}
+
 /// A `scrollWheel:` event at `(x, y)`.
 fn scroll_event(surface: &Rc<Surface>, event: &NSEvent, x: f32, y: f32, time: f64) {
     let precise = event.hasPreciseScrollingDeltas();

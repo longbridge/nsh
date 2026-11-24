@@ -8466,6 +8466,33 @@ fn backdrop_material_survives_restyling_and_resets() {
 }
 
 #[test]
+fn zoomable_decodes_per_element() {
+    use crate::js::host::{HostCx, HostProps};
+    // Scroll views and web views share the name: each decodes it as its
+    // own prop.
+    let decode = |tag: Tag| {
+        let mut cx = HostCx::for_element(tag);
+        <Prop as HostProps>::decode("zoomable", &HostTestValue::Bool(true), &mut cx)
+            .expect("a zoomable prop")
+            .expect("a value")
+    };
+    assert_eq!(
+        decode(Tag::WebView),
+        Prop::Native(NativeProp::Zoomable(true))
+    );
+    assert_eq!(decode(Tag::Scroll), Prop::Scroll(ScrollProp::Pinch(true)));
+    // Cleared from JS: a web view does not zoom, a scroll view does.
+    assert_eq!(
+        Prop::Native(NativeProp::Zoomable(true)).reset(),
+        Some(Prop::Native(NativeProp::Zoomable(false)))
+    );
+    assert_eq!(
+        Prop::Scroll(ScrollProp::Pinch(false)).reset(),
+        Some(Prop::Scroll(ScrollProp::Pinch(true)))
+    );
+}
+
+#[test]
 fn supported_orientations_decode_per_element() {
     use crate::{
         ModalConfig, ModalProp, ScreenProp,
@@ -14065,6 +14092,75 @@ fn web_view_incognito_is_read_when_it_is_made() {
     );
     assert_eq!(c.commit().as_ref().and_then(web), None);
     // Other props still reach it, with the store it was made with.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::Native(NativeProp::UserAgent(Some("agent".into()))),
+        }],
+    );
+    assert_eq!(web(&c.commit().unwrap()), Some(true));
+}
+
+#[test]
+fn web_view_zoomable_is_read_when_it_is_made() {
+    let mut c = core();
+    let web = |batch: &MountBatch| {
+        batch.items.iter().rev().find_map(|item| match item {
+            MountItem::NativeProps {
+                id: 2,
+                props: crate::NativeProps::WebView(p),
+            } => Some(p.zoomable),
+            _ => None,
+        })
+    };
+    // Off unless asked.
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::WebView,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    assert_eq!(web(&c.commit().unwrap()), Some(false));
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::WebView,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Native(NativeProp::Zoomable(true)),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    // The platform makes the web view with its first props.
+    assert_eq!(web(&c.commit().unwrap()), Some(true));
+    // Made: a change is ignored, and nothing is sent for it.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::Native(NativeProp::Zoomable(false)),
+        }],
+    );
+    assert_eq!(c.commit().as_ref().and_then(web), None);
+    // Other props still reach it, as it was made.
     apply(
         &mut c,
         vec![Op::SetProp {
