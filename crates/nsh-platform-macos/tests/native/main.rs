@@ -21,6 +21,8 @@ mod download_redirect;
 #[cfg(target_os = "macos")]
 mod embedded_scroll;
 #[cfg(target_os = "macos")]
+mod file_panels;
+#[cfg(target_os = "macos")]
 mod fitting_input;
 #[cfg(target_os = "macos")]
 mod focus_selection;
@@ -113,6 +115,9 @@ fn main() {
             } else if std::env::var_os("NSH_MENU_LIFETIME_CHECK_ONLY").is_some() {
                 window_press::run();
                 menu_lifetime::run();
+            } else if std::env::var_os("NSH_FILE_PANELS_CHECK_ONLY").is_some() {
+                window_press::run();
+                file_panels::run();
             } else if std::env::var_os("NSH_MOUNT_CHECK_ONLY").is_some() {
                 mount::run();
             } else if std::env::var_os("NSH_WINDOW_DIALOG_CHECK_ONLY").is_some() {
@@ -178,6 +183,7 @@ fn main() {
                 canvas_bounds::run_scale();
                 menu_labels::run();
                 menu_lifetime::run();
+                file_panels::run();
                 window_frames::run();
                 window_layout::run();
                 keyboard::run();
