@@ -437,11 +437,12 @@ nsh revoke --root <ROOT.secret> [--extend <LIST>] [--sequence <N>] [--key <ID>].
 ## nsh publish ios
 
 ```sh
-nsh publish ios <IPA> --app-id <ID> --issuer-id <ID> --key-id <ID> --private-key <PATH>
+nsh publish ios <IPA> [--app-id <ID>] [--issuer-id <ID>] [--key-id <ID>] [--private-key <PATH>]
 ```
 
 在 macOS 上将经过 App Store 签名的 IPA 上传到 App Store Connect，等待处理、分发 TestFlight 测试组、
 准备 App Store 版本与商店文案，加 `--submit` 时提交审核。`nsh publish status ios` 与 `nsh publish doctor ios`
 报告发布状态并检查配置。参数也可通过
 `NSH_APP_STORE_APP_ID`、`NSH_APP_STORE_ISSUER_ID`、`NSH_APP_STORE_KEY_ID` 和
-`NSH_APP_STORE_PRIVATE_KEY` 环境变量提供。签名、凭据和处理流程见[上传到 TestFlight](./packaging.md#上传到-testflight)。
+`NSH_APP_STORE_PRIVATE_KEY` 环境变量提供。App ID 默认读 `nsh.json` 的 `store.ios.appId`，私钥默认读
+`~/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8`，配置好的应用只需 `nsh publish ios <IPA>`。签名、凭据和处理流程见[上传到 TestFlight](./packaging.md#上传到-testflight)。

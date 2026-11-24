@@ -66,6 +66,11 @@ pub(crate) struct Listing {
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct IosStore {
+    /// The app's numeric Apple ID in App Store Connect (App Information →
+    /// Apple ID), so that `nsh publish ios` needs no `--app-id`. A string
+    /// or a number.
+    #[serde(default, deserialize_with = "numeric_id")]
+    pub app_id: Option<String>,
     /// Export compliance answer set on every build (Apple asks for it
     /// before a build can be tested or submitted).
     pub uses_non_exempt_encryption: Option<bool>,
@@ -74,6 +79,20 @@ pub(crate) struct IosStore {
     pub beta_groups: Vec<String>,
     /// How an approved version is released (default: `manual`).
     pub release: Option<ReleaseMode>,
+}
+
+/// An id written as `"6835723652"` or `6835723652`.
+fn numeric_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Id {
+        Text(String),
+        Number(u64),
+    }
+    Ok(Option::<Id>::deserialize(d)?.map(|id| match id {
+        Id::Text(text) => text,
+        Id::Number(n) => n.to_string(),
+    }))
 }
 
 /// How a version goes live once the store approves it.
@@ -321,7 +340,7 @@ mod tests {
         std::fs::write(
             dir.join("nsh.json"),
             r#"{"id":"com.example.app","store":{"locales":{"en-US":{"whatsNew":"Inline"}},
-               "ios":{"usesNonExemptEncryption":false,"betaGroups":["QA"],"release":"phased"}}}"#,
+               "ios":{"appId":6835723652,"usesNonExemptEncryption":false,"betaGroups":["QA"],"release":"phased"}}}"#,
         )
         .unwrap();
         let store = read(&dir).unwrap();
@@ -333,6 +352,7 @@ mod tests {
             vec![shots.join("01.png"), shots.join("02.png")]
         );
         assert_eq!(store.locales["zh-Hans"].whats_new.as_deref(), Some("更新"));
+        assert_eq!(store.ios.app_id.as_deref(), Some("6835723652"));
         assert_eq!(store.ios.uses_non_exempt_encryption, Some(false));
         assert_eq!(store.ios.beta_groups, ["QA"]);
         assert_eq!(store.ios.release, Some(ReleaseMode::Phased));

@@ -854,25 +854,35 @@ App Store provisioning profile for that bundle identifier. Set `version` and inc
 builds (Developer, App Manager or Admin), and keep its `.p8` file outside the repository. Supply
 credentials from your shell or CI secret environment; keep them out of `nsh.json` and version control.
 
+The app's own identity belongs in `nsh.json`, so that a release needs no flags: put its Apple ID
+(App Store Connect → App Information → Apple ID) in `store.ios.appId`. Put the `.p8` key at
+`~/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8`, where Apple's tools also look, and export the
+issuer and key IDs once in your shell profile (Users and Access → Integrations → App Store Connect
+API shows both).
+
+```json
+{ "store": { "ios": { "appId": "1234567890" } } }
+```
+
+```sh
+export NSH_APP_STORE_ISSUER_ID=your-issuer-id
+export NSH_APP_STORE_KEY_ID=your-key-id
+```
+
 ```sh
 nsh package --target ios --sign "Apple Distribution: Your Team (TEAMID)" \
   --profile /secure/AppStore.mobileprovision
-
-export NSH_APP_STORE_APP_ID=1234567890
-export NSH_APP_STORE_ISSUER_ID=your-issuer-id
-export NSH_APP_STORE_KEY_ID=your-key-id
-export NSH_APP_STORE_PRIVATE_KEY=/secure/AuthKey_YOURKEY.p8
 nsh publish ios .nsh/out/MyApp.ipa
 ```
 
 | Flag | Environment variable | Meaning |
 |---|---|---|
-| `--app-id <ID>` | `NSH_APP_STORE_APP_ID` | Numeric Apple ID of the existing App Store Connect app. |
+| `--app-id <ID>` | `NSH_APP_STORE_APP_ID` | Numeric Apple ID of the existing App Store Connect app. Default: `store.ios.appId`. |
 | `--issuer-id <ID>` | `NSH_APP_STORE_ISSUER_ID` | Team API key issuer ID. |
 | `--key-id <ID>` | `NSH_APP_STORE_KEY_ID` | API key ID. |
-| `--private-key <PATH>` | `NSH_APP_STORE_PRIVATE_KEY` | Path to the `.p8` private key. |
+| `--private-key <PATH>` | `NSH_APP_STORE_PRIVATE_KEY` | Path to the `.p8` private key. Default: `AuthKey_<KEY_ID>.p8` in `./private_keys`, `~/.appstoreconnect/private_keys`, `~/.private_keys` or `~/private_keys`. |
 
-All four values are required; flags override environment variables. The CLI reads the bundle ID,
+Flags override environment variables, which override `nsh.json`. The CLI reads the bundle ID,
 version and build number from the IPA and checks that the bundle ID matches the App Store Connect
 app. It signs short-lived ES256 tokens, streams the IPA in the requested parts, and commits its
 SHA-256 checksum. The final message includes the upload ID and the app's TestFlight link.

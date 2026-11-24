@@ -743,25 +743,33 @@ App Store provisioning profile。在 `nsh.json` 中设置 `version`，并在打�
 在 App Store Connect 创建有构建上传权限的团队 API Key（Developer、App Manager 或 Admin），
 将 `.p8` 文件保存在仓库外。通过 shell 或 CI 的秘密环境变量提供凭据，保持 `nsh.json` 和版本控制中没有凭据。
 
+应用自身的信息写在 `nsh.json` 里，发布时就不需要参数：把应用的 Apple ID（App Store Connect → App 信息 → Apple ID）
+写进 `store.ios.appId`。`.p8` 放到 `~/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8`（Apple 自己的工具也在这里找），
+issuer ID 和 key ID 在 shell profile 里导出一次即可（用户和访问 → 集成 → App Store Connect API 页面能看到这两个值）。
+
+```json
+{ "store": { "ios": { "appId": "1234567890" } } }
+```
+
+```sh
+export NSH_APP_STORE_ISSUER_ID=your-issuer-id
+export NSH_APP_STORE_KEY_ID=your-key-id
+```
+
 ```sh
 nsh package --target ios --sign "Apple Distribution: Your Team (TEAMID)" \
   --profile /secure/AppStore.mobileprovision
-
-export NSH_APP_STORE_APP_ID=1234567890
-export NSH_APP_STORE_ISSUER_ID=your-issuer-id
-export NSH_APP_STORE_KEY_ID=your-key-id
-export NSH_APP_STORE_PRIVATE_KEY=/secure/AuthKey_YOURKEY.p8
 nsh publish ios .nsh/out/MyApp.ipa
 ```
 
 | 参数 | 环境变量 | 含义 |
 |---|---|---|
-| `--app-id <ID>` | `NSH_APP_STORE_APP_ID` | 已创建的 App Store Connect 应用的数字 Apple ID。 |
+| `--app-id <ID>` | `NSH_APP_STORE_APP_ID` | 已创建的 App Store Connect 应用的数字 Apple ID。默认读取 `store.ios.appId`。 |
 | `--issuer-id <ID>` | `NSH_APP_STORE_ISSUER_ID` | 团队 API Key 的 issuer ID。 |
 | `--key-id <ID>` | `NSH_APP_STORE_KEY_ID` | API Key ID。 |
-| `--private-key <PATH>` | `NSH_APP_STORE_PRIVATE_KEY` | `.p8` 私钥文件路径。 |
+| `--private-key <PATH>` | `NSH_APP_STORE_PRIVATE_KEY` | `.p8` 私钥文件路径。默认依次在 `./private_keys`、`~/.appstoreconnect/private_keys`、`~/.private_keys`、`~/private_keys` 中找 `AuthKey_<KEY_ID>.p8`。 |
 
-四项均必填，命令行参数优先于环境变量。CLI 从 IPA 读取 bundle ID、版本和构建号，
+命令行参数优先于环境变量，环境变量优先于 `nsh.json`。CLI 从 IPA 读取 bundle ID、版本和构建号，
 核对 bundle ID 与 App Store Connect 应用一致，然后签发短期 ES256 token、按指定分段流式上传，
 最后提交 SHA-256 校验和。完成消息包含 upload ID 和应用的 TestFlight 链接。
 

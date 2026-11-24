@@ -334,7 +334,8 @@ fn link(kind: &str, id: &str) -> Value {
 /// Each is optional here so that `doctor` can report what is missing.
 #[derive(clap::Args, Clone)]
 pub(crate) struct Account {
-    /// Numeric Apple ID of the app in App Store Connect.
+    /// Numeric Apple ID of the app in App Store Connect (default: nsh.json
+    /// `store.ios.appId`).
     #[arg(long, env = "NSH_APP_STORE_APP_ID")]
     app_id: Option<String>,
     /// App Store Connect team API key issuer ID.
@@ -343,7 +344,8 @@ pub(crate) struct Account {
     /// App Store Connect API key ID.
     #[arg(long, env = "NSH_APP_STORE_KEY_ID")]
     key_id: Option<String>,
-    /// Private API key (.p8); keep it outside the project.
+    /// Private API key (.p8); keep it outside the project (default:
+    /// `~/.appstoreconnect/private_keys/AuthKey_<key id>.p8`).
     #[arg(long, env = "NSH_APP_STORE_PRIVATE_KEY", hide_env_values = true)]
     private_key: Option<PathBuf>,
     /// The app's directory or entry, whose `nsh.json` holds `version` and
@@ -353,14 +355,23 @@ pub(crate) struct Account {
 }
 
 impl Account {
-    fn app_id(&self) -> anyhow::Result<&str> {
-        let id = self
-            .app_id
-            .as_deref()
-            .context("give the app's Apple ID with --app-id or NSH_APP_STORE_APP_ID")?;
+    /// `--app-id` / `NSH_APP_STORE_APP_ID`, else `nsh.json`
+    /// `store.ios.appId`.
+    fn app_id(&self) -> anyhow::Result<String> {
+        let id = match &self.app_id {
+            Some(id) => id.clone(),
+            None => crate::store::read(&self.entry)
+                .context("read nsh.json for `store.ios.appId`")?
+                .ios
+                .app_id
+                .context(
+                    "set the app's Apple ID (App Store Connect → App Information → Apple ID) \
+                     in nsh.json `store.ios.appId`, or give --app-id",
+                )?,
+        };
         ensure!(
             !id.is_empty() && id.bytes().all(|c| c.is_ascii_digit()),
-            "--app-id must be the numeric Apple ID from App Store Connect"
+            "the app ID `{id}` must be the numeric Apple ID from App Store Connect"
         );
         Ok(id)
     }
@@ -374,13 +385,39 @@ impl Account {
             .key_id
             .clone()
             .context("give the API key ID with --key-id or NSH_APP_STORE_KEY_ID")?;
-        let path = self
-            .private_key
-            .as_ref()
-            .context("give the .p8 key with --private-key or NSH_APP_STORE_PRIVATE_KEY")?;
-        let pem = std::fs::read_to_string(path).context("read App Store Connect .p8 key")?;
+        let path = match &self.private_key {
+            Some(path) => path.clone(),
+            None => default_key(&key_id).with_context(|| {
+                format!(
+                    "put the .p8 key at ~/.appstoreconnect/private_keys/AuthKey_{key_id}.p8, \
+                     or give --private-key or NSH_APP_STORE_PRIVATE_KEY"
+                )
+            })?,
+        };
+        let pem = std::fs::read_to_string(&path)
+            .with_context(|| format!("read App Store Connect key {}", path.display()))?;
         Credentials::from_pem(issuer, key_id, &pem)
     }
+}
+
+/// Where Apple's tools (`altool`, `xcrun notarytool`) look for
+/// `AuthKey_<key id>.p8`: the first that exists.
+fn default_key(key_id: &str) -> Option<PathBuf> {
+    let name = format!("AuthKey_{key_id}.p8");
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let mut dirs = vec![PathBuf::from("private_keys")];
+    if let Some(home) = home {
+        for dir in [
+            ".appstoreconnect/private_keys",
+            ".private_keys",
+            "private_keys",
+        ] {
+            dirs.push(home.join(dir));
+        }
+    }
+    dirs.into_iter()
+        .map(|dir| dir.join(&name))
+        .find(|p| p.is_file())
 }
 
 /// What to do once the upload is processed.
@@ -975,7 +1012,7 @@ fn client_agent() -> Http {
 /// `nsh publish ios`.
 pub(crate) fn publish(args: &Args) -> anyhow::Result<()> {
     ensure!(cfg!(target_os = "macos"), "nsh publish ios runs on macOS");
-    let app_id = args.account.app_id()?.to_owned();
+    let app_id = args.account.app_id()?;
     let credentials = args.account.credentials()?;
     let store = if args.testflight_only && args.beta_groups.is_empty() {
         crate::store::read(&args.account.entry).unwrap_or_default()
@@ -1070,7 +1107,7 @@ pub(crate) fn publish(args: &Args) -> anyhow::Result<()> {
 
 /// `nsh publish status ios`: exits 0 live, 10 pending, 11 draft, 12 action needed.
 pub(crate) fn print_status(args: &StatusArgs) -> anyhow::Result<i32> {
-    let app_id = args.account.app_id()?.to_owned();
+    let app_id = args.account.app_id()?;
     let credentials = args.account.credentials()?;
     let mut transport = client_agent();
     let status = status(&mut Asc::new(&mut transport, &credentials), &app_id)?;
@@ -1094,7 +1131,7 @@ pub(crate) fn print_status(args: &StatusArgs) -> anyhow::Result<i32> {
 pub(crate) fn doctor(args: &DoctorArgs) -> anyhow::Result<()> {
     let mut check = crate::store::Check::new();
     let account = &args.account;
-    check.report("app ID", account.app_id().map(str::to_owned));
+    check.report("app ID", account.app_id());
     let credentials = account.credentials();
     check.report(
         "API key",
@@ -1239,6 +1276,31 @@ mod tests {
     use ring::signature::{ECDSA_P256_SHA256_FIXED, KeyPair, UnparsedPublicKey};
 
     use super::*;
+
+    #[test]
+    fn app_id_comes_from_the_flag_else_nsh_json() {
+        let dir = std::env::temp_dir().join(format!("nsh-asc-app-id-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let account = |app_id: Option<&str>| Account {
+            app_id: app_id.map(str::to_owned),
+            issuer_id: None,
+            key_id: None,
+            private_key: None,
+            entry: dir.clone(),
+        };
+        std::fs::write(dir.join("nsh.json"), r#"{"id":"com.example.app"}"#).unwrap();
+        assert!(account(None).app_id().is_err());
+        std::fs::write(
+            dir.join("nsh.json"),
+            r#"{"id":"com.example.app","store":{"ios":{"appId":"6835723652"}}}"#,
+        )
+        .unwrap();
+        assert_eq!(account(None).app_id().unwrap(), "6835723652");
+        assert_eq!(account(Some("42")).app_id().unwrap(), "42");
+        assert!(account(Some("com.example.app")).app_id().is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
     use crate::play::Response;
 
     /// Answers each request with the next canned response and records it.

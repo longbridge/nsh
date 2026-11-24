@@ -448,7 +448,7 @@ Signs a revocation list: release keys and packages that must not load any more.
 ## nsh publish ios
 
 ```sh
-nsh publish ios <IPA> --app-id <ID> --issuer-id <ID> --key-id <ID> --private-key <PATH>
+nsh publish ios <IPA> [--app-id <ID>] [--issuer-id <ID>] [--key-id <ID>] [--private-key <PATH>]
 ```
 
 Uploads an App Store-signed IPA on macOS to App Store Connect, waits for processing, gives it to
@@ -456,4 +456,5 @@ TestFlight groups, prepares the App Store version and listing, and submits it fo
 `--submit`. `nsh publish status ios` and `nsh publish doctor ios` report the release state and check
 the setup. Flags also accept
 `NSH_APP_STORE_APP_ID`, `NSH_APP_STORE_ISSUER_ID`, `NSH_APP_STORE_KEY_ID` and
-`NSH_APP_STORE_PRIVATE_KEY`. See [Upload to TestFlight](./packaging.md#upload-to-testflight) for signing, credentials and processing.
+`NSH_APP_STORE_PRIVATE_KEY`. The app ID defaults to `nsh.json` `store.ios.appId` and the key to
+`~/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8`, so a configured app runs `nsh publish ios <IPA>`. See [Upload to TestFlight](./packaging.md#upload-to-testflight) for signing, credentials and processing.
