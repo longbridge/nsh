@@ -405,7 +405,7 @@ final class TextBox extends android.view.ViewGroup implements Node {
                             .setType("text/plain")
                             .putExtra(android.content.Intent.EXTRA_TEXT, selectedText());
                     android.content.Intent chooser = android.content.Intent.createChooser(send, null);
-                    if (!(getContext() instanceof android.app.Activity)) {
+                    if (SystemUi.activity(getContext()) == null) {
                         chooser.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
                     }
                     try {

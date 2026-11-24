@@ -39,6 +39,8 @@ mod input_focus;
 #[cfg(target_os = "macos")]
 mod input_hidden;
 #[cfg(target_os = "macos")]
+mod input_restyle;
+#[cfg(target_os = "macos")]
 mod keyboard;
 #[cfg(target_os = "macos")]
 mod keymap_ime;
@@ -55,6 +57,8 @@ mod mount;
 #[cfg(target_os = "macos")]
 mod navigation_unmount;
 #[cfg(target_os = "macos")]
+mod nested_bounce;
+#[cfg(target_os = "macos")]
 mod press_momentum;
 #[cfg(target_os = "macos")]
 mod quit_requests;
@@ -68,6 +72,8 @@ mod tap_feedback;
 mod text_view_selection;
 #[cfg(target_os = "macos")]
 mod title_bar;
+#[cfg(target_os = "macos")]
+mod tray_owner;
 #[cfg(target_os = "macos")]
 mod window_alert;
 #[cfg(target_os = "macos")]
@@ -118,6 +124,9 @@ fn main() {
             } else if std::env::var_os("NSH_FILE_PANELS_CHECK_ONLY").is_some() {
                 window_press::run();
                 file_panels::run();
+            } else if std::env::var_os("NSH_TRAY_OWNER_CHECK_ONLY").is_some() {
+                window_press::run();
+                tray_owner::run();
             } else if std::env::var_os("NSH_MOUNT_CHECK_ONLY").is_some() {
                 mount::run();
             } else if std::env::var_os("NSH_WINDOW_DIALOG_CHECK_ONLY").is_some() {
@@ -134,6 +143,8 @@ fn main() {
                 input_focus::run();
             } else if std::env::var_os("NSH_INPUT_CLIP_CHECK_ONLY").is_some() {
                 input_clip::run();
+            } else if std::env::var_os("NSH_INPUT_RESTYLE_CHECK_ONLY").is_some() {
+                input_restyle::run();
             } else if std::env::var_os("NSH_INPUT_HIDDEN_CHECK_ONLY").is_some() {
                 input_hidden::run();
             } else if std::env::var_os("NSH_FITTING_INPUT_CHECK_ONLY").is_some() {
@@ -165,6 +176,8 @@ fn main() {
                 canvas_bounds::run();
             } else if std::env::var_os("NSH_HOVER_CURSOR_CHECK_ONLY").is_some() {
                 hover_cursor::run();
+            } else if std::env::var_os("NSH_NESTED_BOUNCE_CHECK_ONLY").is_some() {
+                nested_bounce::run();
             } else if std::env::var_os("NSH_PRESS_MOMENTUM_CHECK_ONLY").is_some() {
                 press_momentum::run();
             } else {
@@ -184,6 +197,7 @@ fn main() {
                 menu_labels::run();
                 menu_lifetime::run();
                 file_panels::run();
+                tray_owner::run();
                 window_frames::run();
                 window_layout::run();
                 keyboard::run();
@@ -192,6 +206,7 @@ fn main() {
                 input_clip::run();
                 fitting_input::run();
                 input_focus::run();
+                input_restyle::run();
                 focus_selection::run();
                 text_view_selection::run();
                 fps_collapse::run();
@@ -202,6 +217,7 @@ fn main() {
                 mount::run();
                 // Last: it makes the process an accessory app.
                 embedded_scroll::run();
+                nested_bounce::run();
                 // Last: it leaves the app an accessory, never activated.
                 press_momentum::run();
                 tap_feedback::run();

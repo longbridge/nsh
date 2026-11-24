@@ -1376,6 +1376,10 @@ pub struct AccessibilityNode {
     /// Whether it is expanded, for an expandable view.
     #[prop(skip_none)]
     pub expanded: Option<bool>,
+    /// A toggle button's toggle state (`accessibilityState.pressed`):
+    /// `"true"`, `"false"` or `"mixed"`; absent when it is unset.
+    #[prop(skip_none)]
+    pub pressed: Option<String>,
     /// Its `accessibilityLevel`.
     #[prop(skip_none)]
     pub level: Option<u32>,
@@ -1395,6 +1399,7 @@ impl From<nsh_dev::protocol::AccessibilityNode> for AccessibilityNode {
             selected: n.selected,
             checked: n.checked,
             expanded: n.expanded,
+            pressed: n.pressed,
             level: n.level,
             description: n.description,
             children: n.children.into_iter().map(Self::from).collect(),
@@ -2426,7 +2431,7 @@ impl App {
 
     /// The accessibility tree as assistive technologies read it: the
     /// views on screen with a role or a label, each with `role`, `label`,
-    /// `disabled`, `selected`, `checked`, `expanded`, `level`,
+    /// `disabled`, `selected`, `checked`, `expanded`, `pressed`, `level`,
     /// `description` and the nodes inside it (`children`). With a
     /// selector, from the view it names (`null` when none is on screen);
     /// without, from a root that has no role.

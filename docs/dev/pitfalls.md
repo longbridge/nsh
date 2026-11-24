@@ -169,6 +169,15 @@ Things that were found the hard way. Read the section of the area you change bef
 
 - **UIFont and CTFont are toll-free bridged**: the text engine gets system fonts with `UIFont::systemFontOfSize_weight` and uses them as
   CTFonts (verified by rendering). CoreText attributes must use CT keys (colors are CGColors), not UIKit's NSForegroundColor.
+- **CoreText synthesizes no italic** (macOS too; verified on macOS 26 and the iOS 26 simulator): a family without an italic face (PingFang,
+  Hiragino, a family shipped without its italic files) has no italic copy (`CTFontCreateCopyWithSymbolicTraits` returns
+  NULL), and the fonts an italic face falls back to stay upright (CJK in SF's italic). A shear in a font's matrix leans
+  it, and CoreText draws the fonts it falls back to from it with the same matrix; a matrix on a cascade list's
+  descriptors (`kCTFontMatrixAttribute`) is ignored. So such a family's italic is the font leaning
+  (`core_text::italic`), and `core_text::slant_fallbacks` typesets an italic span that has characters its font lacks
+  and sets each run in an upright fallback font to that font leaning. `CTLineDraw` draws each run in its font's matrix,
+  `CTRunDraw` in the context's text matrix alone: macOS, which draws run by run (`draw_glyphs`), sets each run's
+  (`CTRunGetTextMatrix`) first.
 - **Catalyst's Mac idiom does not support `UIRefreshControl`** (attaching one throws `_UICatalystUnsupportedMacIdiomBehavior`): in the Mac
   idiom the pull is detected in the scroll delegate and shown with a spinner + contentInset; iOS uses the native control unless the
   app draws its own indicator (`refreshIndicator`), which `UIRefreshControl` cannot give way to: then it takes the Mac idiom's way,
@@ -364,6 +373,13 @@ Things that were found the hard way. Read the section of the area you change bef
   content rect within the view that started it: started from an editor's sink (a sliver at the caret) it sat on the
   caret whatever the rect said, over the selection's start handle, and took that handle's touches; it starts from the
   root view (`InputBox.openEditMenu`).
+- **Android, activities made again for a configuration change**: a change the manifest cannot declare (an overlay
+  changing resource paths: the navigation mode, the wallpaper's colors) destroys and recreates the activity in the
+  same process. `AppActivity` and `DevActivity` keep the running `NshView` across it
+  (`onRetainNonConfigurationInstance`): its views are made with a `MutableContextWrapper` of the activity, which moves
+  to the new one, so nothing keeps the old activity. Windows of the activity's own (modal dialogs, alerts, menus,
+  date pickers) must leave the old activity before it is destroyed, or they leak with it (`WindowLeaked`); code that
+  needs the `Activity` unwraps the context (`SystemUi.activity`), never tests `instanceof Activity`.
 - **Android, API levels and lint**: hosts that compile the Java runtime run Android Lint over it (NewApi,
   WrongConstant), while NSH's own build runs only javac. A class or helper reached only behind `SDK_INT >= N` carries
   `@TargetApi(N)`, as `Backdrop` does; a guard lint cannot see through (a helper that returns the check) is written at

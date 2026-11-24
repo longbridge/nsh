@@ -211,6 +211,8 @@ A disabled tab takes no presses, and screen readers announce it as dimmed. Its `
   tab's title: say there what the tab can do beyond being selected (a closable tab that Delete closes).
 - `Tabs` has the role `"tablist"`: screen readers hear the tabs inside it as one set, each still an element of its
   own. Its `accessibilityLabel` names the list; give one wherever no text next to the list says what its tabs switch.
+- The content the app shows for the selected tab can say what it is: give its view `role="tabpanel"` (Rust
+  `.role(AccessibilityRole::TabPanel)`), and screen readers say they enter a tab panel.
 - `disabled` is announced as the platform announces it (VoiceOver, TalkBack, UI Automation, the browser's accessibility
   tree).
 - Where the platform has a property for a list's orientation, screen readers hear it: the web's `aria-orientation`

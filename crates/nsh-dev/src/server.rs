@@ -441,6 +441,18 @@ impl DevServer {
         ui_sets: Vec<String>,
     ) {
         let ui_sets: Arc<[String]> = ui_sets.into();
+        // Hosts close the connection on a frame larger than they take, and
+        // would only reconnect to the same bundle.
+        let largest = bytecode
+            .len()
+            .max(source_map.as_ref().map_or(0, String::len));
+        if largest > MAX_MESSAGE_SIZE {
+            log::warn!(
+                "the bundle is {} MiB, more than the {} MiB a message to the host carries; hosts cannot load it",
+                largest.div_ceil(1 << 20),
+                MAX_MESSAGE_SIZE >> 20
+            );
+        }
         let version = {
             let mut next = self.next_version.lock().expect("version lock");
             *next += 1;

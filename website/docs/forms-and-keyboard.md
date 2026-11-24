@@ -620,8 +620,8 @@ Masked inputs on macOS keep AppKit's own paste and report nothing.
 A file copied in the macOS Finder leaves its name on the clipboard as text beside its URL, so with `"insert"` the
 input inserts the name, as AppKit's own text fields do. An input that takes files uses `"report"` and inserts the
 text only when the paste held none: `if (e.uris.length === 0 && e.files.length === 0 && e.tooLarge.length === 0) field?.insertText(e.text)`.
-A `uris` entry is a path, not the file's bytes: reading it with `fs/promises` needs a `capabilities.fs.read` root
-that holds it, as for a dropped file.
+A `uris` entry is a path, not the file's bytes: once the handler gets it, `fs/promises` reads that exact path
+without a `capabilities.fs.read` root, as for a dropped file ([files](../modules/standard-modules.md#files)).
 
 A pasted file can be large: a video copied in Files or Photos, a document of hundreds of megabytes. Give the input
 the largest file it reads, in bytes, with `pasteMaxSize` (Rust `.paste_max_size(..)`): a larger file is not read,

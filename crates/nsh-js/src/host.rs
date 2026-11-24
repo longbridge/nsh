@@ -569,6 +569,7 @@ impl Host {
 
     /// Delivers a native event (and its data) to the node's JS handler.
     pub fn dispatch_event(&self, id: NodeId, event: EventKind, payload: &EventPayload) {
+        let payload_in = payload;
         self.guarded(Phase::Call, || {
             self.cx.with(|cx| {
                 // Touches: the responder system is native.
@@ -629,6 +630,7 @@ impl Host {
                     let Some(handler) = crate::dom::handler(raw, id, event) else {
                         return Ok(());
                     };
+                    grant_user_files(raw, event, payload_in);
                     // SAFETY: an owned function value of this context.
                     let handler = unsafe { Value::from_raw(cx.clone(), handler) };
                     match handler.into_function() {
@@ -1278,6 +1280,21 @@ fn video_load<'js>(
     }
     obj.set("size", size)?;
     Ok(obj.into_value())
+}
+
+/// Lets the app read the files the user pasted or dropped, as its handler
+/// gets them (`fs/promises` at their exact paths): not a drag that only
+/// entered.
+fn grant_user_files(raw: *mut qjs::JSContext, event: EventKind, payload: &EventPayload) {
+    let uris = match (event, payload) {
+        (EventKind::Paste, EventPayload::Paste(paste)) => &paste.uris,
+        (
+            EventKind::FileDrop,
+            EventPayload::FileDrop(uris) | EventPayload::FileDropAt { uris, .. },
+        ) => uris,
+        _ => return,
+    };
+    nsh_core::runtime::grant_user_files(&crate::dom::shared(raw).system_locals, uris);
 }
 
 /// The JS object handed to event handlers.
@@ -2822,6 +2839,32 @@ const report = (v) => text(String(v));
             .count();
         assert_eq!(created, 1);
         assert!(host.fatal().is_none());
+    }
+
+    #[test]
+    fn an_event_for_a_components_node_never_reaches_the_js_node_below_its_id() {
+        // A Rust component's nodes have odd ids; once the component let go
+        // of one (a sheet closed), its late `Dismiss` comes to JS. Node 3 is
+        // not JS's node 2: a closed sheet's dismissal ran the handler of the
+        // page under it and popped that page.
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"import { element, prop } from "nsh:rt";
+            globalThis.view = element("view");
+            prop(globalThis.view, "onPress", () => element("view"));"#,
+        )
+        .unwrap();
+        ops(&host);
+        host.dispatch_event(3, EventKind::Press, &EventPayload::None);
+        host.dispatch_event(3, EventKind::Dismiss, &EventPayload::None);
+        assert!(ops(&host).is_empty());
+        // Its own id still reaches it.
+        host.dispatch_event(2, EventKind::Press, &EventPayload::None);
+        let created = ops(&host)
+            .into_iter()
+            .filter(|op| matches!(op, Op::Create { .. }))
+            .count();
+        assert_eq!(created, 1);
     }
 
     #[test]

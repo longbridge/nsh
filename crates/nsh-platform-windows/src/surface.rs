@@ -174,6 +174,8 @@ pub(crate) struct Surface {
     pub(crate) file_drop: crate::file_drop::State,
     engine: RefCell<Option<Engine>>,
     control: RefCell<Option<EngineControl>>,
+    #[cfg(test)]
+    recorded_events: RefCell<Option<Vec<(NodeId, EventKind, EventPayload)>>>,
     /// The URLs the app was launched with, for the next engine to start
     /// ([`Surface::set_launch_links`]).
     launch_links: RefCell<Vec<String>>,
@@ -311,6 +313,8 @@ impl Surface {
             file_drop: Default::default(),
             engine: RefCell::new(None),
             control: RefCell::new(None),
+            #[cfg(test)]
+            recorded_events: RefCell::new(None),
             launch_links: RefCell::new(Vec::new()),
             rx: RefCell::new(None),
             pending: RefCell::new(Arc::new(AtomicBool::new(false))),
@@ -589,7 +593,29 @@ impl Surface {
         ) {
             self.chrome.context_area.take();
         }
+        #[cfg(test)]
+        if let Some(log) = self.recorded_events.borrow_mut().as_mut() {
+            log.push((id, kind, payload));
+            return;
+        }
         self.control(|c| c.dispatch_event(id, kind, payload));
+    }
+
+    /// Records events passed to [`Surface::event`] instead of forwarding them
+    /// to an engine, for unit tests without a running engine.
+    #[cfg(test)]
+    pub(crate) fn record_events(&self) {
+        *self.recorded_events.borrow_mut() = Some(Vec::new());
+    }
+
+    /// Drains events recorded since [`Surface::record_events`] or the last call.
+    #[cfg(test)]
+    pub(crate) fn take_events(&self) -> Vec<(NodeId, EventKind, EventPayload)> {
+        self.recorded_events
+            .borrow_mut()
+            .as_mut()
+            .map(std::mem::take)
+            .unwrap_or_default()
     }
 
     /// The view of node `id`.

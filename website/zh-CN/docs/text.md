@@ -196,7 +196,7 @@ text("Made with ")
 | `color` | 一个[颜色](./styling.md#颜色)。默认黑色 | `.text_color(..)` |
 | `fontSize` | 点。默认 14。也可以相对继承的字号，同 CSS 的 `em` 和百分比：`"0.875em"`、`"87.5%"` | `.text_size(px(..))`、`.text_size(relative(0.875))`、`.text_sm()`、`.text_lg()` 等 |
 | `fontWeight` | `"normal"`（400）、`"bold"`（700），或 `100`–`900`（数字或字符串） | `.font_weight(FontWeight::BOLD)` |
-| `fontStyle` | `"normal"`、`"italic"`：彩色表情保持正体 | `.italic()` |
+| `fontStyle` | `"normal"`、`"italic"`：没有斜体字形的字体族倾斜显示，彩色表情保持正体 | `.italic()` |
 | `fontFamily` | 系统字体族、通用字体族或[导入的字体](./fonts.md) | `.font_family(..)` |
 | `lineHeight` | 点 | `.line_height(px(..))` |
 | `letterSpacing` | 点 | `.letter_spacing(px(..))` |

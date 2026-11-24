@@ -269,6 +269,7 @@ pub(crate) fn role_for(a: &Accessibility, kind: ViewKind, pressable: bool) -> Op
         AxRole::MenuItemRadio => Role::MenuItemRadio,
         AxRole::Dialog => Role::Dialog,
         AxRole::AlertDialog => Role::AlertDialog,
+        AxRole::TabPanel => Role::TabPanel,
     })
 }
 
@@ -1668,6 +1669,7 @@ mod tests {
             (AxRole::MenuItemRadio, Role::MenuItemRadio),
             (AxRole::Dialog, Role::Dialog),
             (AxRole::AlertDialog, Role::AlertDialog),
+            (AxRole::TabPanel, Role::TabPanel),
         ] {
             assert_eq!(
                 role_for(&with_role(role), ViewKind::View, false),

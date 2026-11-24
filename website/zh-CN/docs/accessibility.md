@@ -67,7 +67,7 @@ view()
 
 ### 角色
 
-角色（`.role(AccessibilityRole::Header)`、`role="header"`）告诉用户这是哪一类元素、如何操作。在 Rust 中它是 `AccessibilityRole` 的一个变体（`Button`、`Header`、`Switch` 等）；TSX 的取值有 `"none"`、`"button"`、`"link"`、`"search"`、`"textbox"`、`"image"`、`"imagebutton"`、`"keyboardkey"`、`"text"`、`"adjustable"`、`"header"`、`"summary"`、`"alert"`、`"checkbox"`、`"combobox"`、`"menu"`、`"menubar"`、`"menuitem"`、`"progressbar"`、`"radio"`、`"radiogroup"`、`"scrollbar"`、`"spinbutton"`、`"switch"`、`"tab"`、`"tablist"`、`"timer"`、`"toolbar"`、`"list"`、`"grid"`、`"table"`、`"rowgroup"`、`"row"`、`"columnheader"`、`"cell"`（[`Table`](../elements/table.md) 各部件的角色），以及 `"listbox"` 和 `"option"`（一组可供选择的选项，例如 [`Select`](../elements/select.md) 弹出的列表，及其中的选项，选中的那项由 `accessibilityState.selected` 标出），`"group"`（一组相关的元素），`"region"`（值得单独到达的一块区域，例如折叠面板的内容），`"navigation"`（在应用内跳转的一组链接，例如分页），`"tree"` 和 `"treeitem"`（可展开、收起的节点，各在自己的 `accessibilityLevel`），`"menuitemcheckbox"` 和 `"menuitemradio"`（可勾选的菜单项，单独勾选或在一组中单选），`"dialog"` 和 `"alertdialog"`（位于应用其余内容之上、以 `accessibilityLabel` 命名的对话框，以及请用户确认某件事的对话框；[`Dialog`](../elements/dialog.md) 默认是 `"dialog"`，除非它的 `role` 另有指定）。
+角色（`.role(AccessibilityRole::Header)`、`role="header"`）告诉用户这是哪一类元素、如何操作。在 Rust 中它是 `AccessibilityRole` 的一个变体（`Button`、`Header`、`Switch` 等）；TSX 的取值有 `"none"`、`"button"`、`"link"`、`"search"`、`"textbox"`、`"image"`、`"imagebutton"`、`"keyboardkey"`、`"text"`、`"adjustable"`、`"header"`、`"summary"`、`"alert"`、`"checkbox"`、`"combobox"`、`"menu"`、`"menubar"`、`"menuitem"`、`"progressbar"`、`"radio"`、`"radiogroup"`、`"scrollbar"`、`"spinbutton"`、`"switch"`、`"tab"`、`"tablist"`、`"timer"`、`"toolbar"`、`"list"`、`"grid"`、`"table"`、`"rowgroup"`、`"row"`、`"columnheader"`、`"cell"`（[`Table`](../elements/table.md) 各部件的角色），以及 `"listbox"` 和 `"option"`（一组可供选择的选项，例如 [`Select`](../elements/select.md) 弹出的列表，及其中的选项，选中的那项由 `accessibilityState.selected` 标出），`"group"`（一组相关的元素），`"region"`（值得单独到达的一块区域，例如折叠面板的内容），`"navigation"`（在应用内跳转的一组链接，例如分页），`"tree"` 和 `"treeitem"`（可展开、收起的节点，各在自己的 `accessibilityLevel`），`"menuitemcheckbox"` 和 `"menuitemradio"`（可勾选的菜单项，单独勾选或在一组中单选），`"dialog"` 和 `"alertdialog"`（位于应用其余内容之上、以 `accessibilityLabel` 命名的对话框，以及请用户确认某件事的对话框；[`Dialog`](../elements/dialog.md) 默认是 `"dialog"`，除非它的 `role` 另有指定），`"tabpanel"`（标签列表中选中的标签页所显示的内容，标签页用 `accessibilityControls` 指向它；[`DockArea`](../elements/dock.md) 的每个组都是一个）。
 
 最常用的几个：
 
@@ -409,7 +409,7 @@ function Upload() {
 
 播报那些用户否则会错过的变化：后台保存完成、在焦点之外出现的错误、计时结束。给视图设置 `accessibilityLiveRegion: "polite"`，屏幕阅读器就会自动播报它的变化——Android 上的 TalkBack、macOS 上的 VoiceOver、web 上的 `aria-live`、Windows 上的实时区域（`"assertive"` 不等用户空闲，立即朗读）。
 
-在 macOS 和 Web 上，警告（`.role(AccessibilityRole::Alert)`、`role="alert"`）会自己被读出：出现时、以及内容变化时，读它的标签，没有标签就读其中的文字，并打断屏幕阅读器正在读的内容。带这个角色显示的错误在这两个平台上不必再自己播报；在 macOS 上，同一次更新里播报的相同文字只读一次。在其他平台上，仍要自己播报。
+在 macOS 和 Web 上，警告（`.role(AccessibilityRole::Alert)`、`role="alert"`）会自己被读出：出现时、以及内容变化时，读它的标签，没有标签就读其中的文字，并打断屏幕阅读器正在读的内容。带这个角色显示的错误在这两个平台上不必再自己播报；在 macOS 上，同一次更新里播报的相同文字只读一次，同一次更新里拿掉又以相同文字重建的警告（移到另一个父节点下）也不会再读。在其他平台上，仍要自己播报。
 
 ## 文字大小
 

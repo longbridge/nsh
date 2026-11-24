@@ -590,7 +590,7 @@ const attachments = signal<File[]>([]);
 
 像上传任何 `File` 一样上传粘贴的文件，使用 `fetch` 和 `FormData`（`form.append("image", file)`）；它的字节在发送前一直留在原生侧。在 Android 上，插入图片的键盘（GIF、贴纸）也以同样方式报告。在 Linux 上剪贴板是异步读取的，因此 `"insert"` 时事件可能在它插入的文本的 `onChange` 之后到达；`"report"` 时它总是先到。macOS 上的密码输入框保留 AppKit 自己的粘贴，不报告任何内容。
 
-在 macOS 的访达中复制的文件，除 URL 外还会把文件名作为文本放进剪贴板，因此 `"insert"` 时输入框会插入文件名，与 AppKit 自带的文本框一致。接收文件的输入框使用 `"report"`，只在这次粘贴不含文件时插入文本：`if (e.uris.length === 0 && e.files.length === 0 && e.tooLarge.length === 0) field?.insertText(e.text)`。`uris` 中的是路径而不是文件内容：用 `fs/promises` 读取它，需要 `capabilities.fs.read` 中有包含它的根目录，与拖放的文件一样。
+在 macOS 的访达中复制的文件，除 URL 外还会把文件名作为文本放进剪贴板，因此 `"insert"` 时输入框会插入文件名，与 AppKit 自带的文本框一致。接收文件的输入框使用 `"report"`，只在这次粘贴不含文件时插入文本：`if (e.uris.length === 0 && e.files.length === 0 && e.tooLarge.length === 0) field?.insertText(e.text)`。`uris` 中的是路径而不是文件内容：处理函数收到它之后，`fs/promises` 可以直接读取这个精确路径，不需要 `capabilities.fs.read` 根目录，与拖放的文件一样（见[文件](../modules/standard-modules.md#文件)）。
 
 粘贴的文件可能很大：在“文件”或“照片”里复制的视频、几百 MB 的文档。用 `pasteMaxSize`（Rust 的 `.paste_max_size(..)`）给输入框指定读取的最大文件，单位为字节：更大的文件不读取，在 `onPaste` 的 `tooLarge` 中只带 `name`、`type` 和 `size` 到达，应用可以据此提示用户。在 iOS、Android 和 Web 上，先检查大小，再把字节复制进应用。不设置这个属性时所有文件都会读取。
 

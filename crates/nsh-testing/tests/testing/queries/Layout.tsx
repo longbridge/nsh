@@ -11,5 +11,8 @@ mount(() => <Window id="main">{() => (
       <View role="image" accessibilityLabel="Arrow" style={{ width: 10, height: 10 }} />
     </View>
     <View role="checkbox" accessibilityLabel="Agree" accessibilityState={{ checked: true }} style={{ width: 20, height: 20 }} />
+    <View role="button" accessibilityLabel="Bold" accessibilityState={{ pressed: true }} style={{ width: 20, height: 20 }} />
+    <View role="button" accessibilityLabel="Italic" accessibilityState={{ pressed: false }} style={{ width: 20, height: 20 }} />
+    <View role="button" accessibilityLabel="Underline" accessibilityState={{ pressed: "mixed" }} style={{ width: 20, height: 20 }} />
   </View>
 )}</Window>);
