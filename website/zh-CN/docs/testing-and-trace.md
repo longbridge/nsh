@@ -408,7 +408,7 @@ fn autosaves() {
 | `app.enabled(selector)` | 视图是否接受输入：它本身和外层视图都没有被禁用，输入框还要求不是 `readonly`。 |
 | `app.texts()` | 当前屏幕上的文字，按顺序排列。 |
 | `app.value(selector)` | 输入框的内容，没有匹配时为 `null`。 |
-| `app.spanStyle(selector)` | 返回匹配到的第一个字符的解析样式（无界面测试和各个 `--target` 都支持）：`color`、可选的 `backgroundColor`、`fontSize`、`fontWeight`、`italic`、`underline` 和 `lineThrough`。颜色为 `#rrggbbaa`，字号单位为 pt。 |
+| `app.spanStyle(selector)` | 返回匹配到的第一个字符的解析样式（无界面测试和各个 `--target` 都支持）：`color`、可选的 `backgroundColor`、`fontSize`、`fontWeight`、可选的 `lineHeight`（使用字体自然行高时不返回）、`letterSpacing`、可选的 `fontFamily`（应用设置的字体族，按原样返回；使用系统字体时不返回）、`italic`、`underline` 和 `lineThrough`。颜色为 `#rrggbbaa`，尺寸单位为 pt。 |
 | `app.viewStyle(selector)` | 返回匹配视图由应用设置的样式（无界面测试和各个 `--target` 都支持）：可选的 `backgroundColor`（透明时不返回）、自身的 `opacity`，以及 `effectiveOpacity`（自身透明度乘以所有祖先视图的透明度）。颜色为 `#rrggbbaa`。没有匹配时返回 `null`，匹配不唯一时报错。 |
 | `app.layout(selector)` | 返回匹配视图的布局位置（根坐标，单位 pt）：`x`、`y`、`width`、`height`，`hidden`（自身或祖先为 `visibility: hidden`），以及 `clipped`（被 `overflow: hidden` 的祖先或滚动视图裁掉一部分）。屏幕上没有匹配时返回 `null`，匹配不唯一时报错。 |
 | `app.accessibility(selector?)` | 返回无障碍树：屏幕上带 `role` 或 `accessibilityLabel` 的视图，每个节点含 `role`、`label`、`disabled`、`selected`、`checked`（`"true"`、`"false"` 或 `"mixed"`）、`expanded`、`pressed`（切换按钮的切换状态：`"true"`、`"false"` 或 `"mixed"`；未设置 `accessibilityState.pressed` 时省略）、`level`、`description` 和 `children`。传 selector 时从匹配视图开始（屏幕上没有匹配时返回 `null`）；不传时从没有 role 的根节点开始。 |
@@ -478,6 +478,12 @@ await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISAB
 `app.spanStyle("id:guide")` 读取嵌套的 `<Text testID="guide">`；`text:word` 读取匹配文字的第一个字符。
 用 `id:note >> text:word` 限定范围，用 `>> nth=0` 选择重复匹配中的一个。
 没有匹配、匹配不唯一或 span 为空时会报错。更新 span 的 `testID` 会复用文本排版，保持 `onTextLayout` 的回调次数。
+
+`lineHeight` 和 `letterSpacing` 按 span 自己的字号换算：10 pt 的 span 加 `leading-loose` 读到 `lineHeight: 20`，加 `tracking-wide` 读到 `letterSpacing: 0.25`。`fontFamily` 是应用要求的字体族（`"Inter, sans-serif"` 仍是列表），不是平台为缺字回退到的字体；设计系统测试用它检查设置的字体族，实际绘制效果用截图检查：
+
+```tsx
+expect(app.spanStyle("id:title")).toMatchObject({ fontSize: 20, lineHeight: 28, fontFamily: "Inter" });
+```
 
 `drag` 和 `dragAndHold` 的第三个可选参数是 `DragOptions`：`{ hold?: number }`。`hold` 是落指后、开始移动前停留的总毫秒数，省略时保持 100 ms。无头和 iOS 测试支持自定义停留；其他原生 agent 会在开始新的拖动前以 `ERR_NSH_TEST_UNSUPPORTED` 拒绝不支持的自定义停留。负值、非有限值和不可表示的时长会被拒绝。需要长按后拖动时可传 `{ hold: 600 }`，并用 `try` / `finally` 保证 `drop()` 抬起同一根手指。
 

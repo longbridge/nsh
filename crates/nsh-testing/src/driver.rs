@@ -940,6 +940,9 @@ impl Driver for Remote {
             color: nsh_core::Color(span.color),
             font_size: nsh_core::Points(span.font_size),
             font_weight: span.font_weight,
+            line_height: nsh_core::Points(span.line_height),
+            letter_spacing: nsh_core::Points(span.letter_spacing),
+            font_family: span.font_family.as_deref().map(nsh_core::FontFamily::new),
             italic: span.italic,
             decoration: nsh_core::TextDecoration {
                 underline: span.underline,

@@ -446,7 +446,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `app.enabled(selector)` | Whether the view takes input: neither it nor a view around it is disabled, and an input is not `readonly`. |
 | `app.texts()` | The texts on screen now, in order. |
 | `app.value(selector)` | The text of an input, `null` when none matches. |
-| `app.spanStyle(selector)` | The first matched character’s resolved style, headless and on every `--target`: `color`, optional `backgroundColor`, `fontSize`, `fontWeight`, `italic`, `underline`, and `lineThrough`. Colors are `#rrggbbaa`; sizes are in points. |
+| `app.spanStyle(selector)` | The first matched character’s resolved style, headless and on every `--target`: `color`, optional `backgroundColor`, `fontSize`, `fontWeight`, optional `lineHeight` (absent for the font's natural line height), `letterSpacing`, optional `fontFamily` (the family the app set, as written; absent for the system font), `italic`, `underline`, and `lineThrough`. Colors are `#rrggbbaa`; sizes are in points. |
 | `app.viewStyle(selector)` | The matched view’s style as the app set it, headless and on every `--target`: optional `backgroundColor` (absent when transparent), its own `opacity`, and `effectiveOpacity` (its opacity times every ancestor’s). Colors are `#rrggbbaa`. Returns `null` when nothing matches; reports an error for an ambiguous selector. |
 | `app.layout(selector)` | Where layout placed the matched view, in the root's points: `x`, `y`, `width`, `height`, `hidden` (it or an ancestor has `visibility: hidden`), and `clipped` (an ancestor with `overflow: hidden` or a scroll view cuts part of it). Returns `null` when nothing on screen matches; reports an error for an ambiguous selector. |
 | `app.accessibility(selector?)` | The accessibility tree: views on screen with a `role` or an `accessibilityLabel`, each with `role`, `label`, `disabled`, `selected`, `checked` (`"true"`, `"false"` or `"mixed"`), `expanded`, `pressed` (a toggle button's toggle state: `"true"`, `"false"` or `"mixed"`; omitted when `accessibilityState.pressed` is unset), `level`, `description` and `children`. With a selector, the tree from the matched view (`null` when nothing on screen matches); without, from a root that has no role. |
@@ -522,6 +522,15 @@ await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISAB
 of that match. Scope queries with `id:note >> text:word` and select repeated matches with `>> nth=0`.
 The query reports an error for a missing, ambiguous or empty span. Updating a span’s `testID` reuses its text
 layout and preserves the `onTextLayout` callback count.
+
+`lineHeight` and `letterSpacing` are resolved against the span’s own font size: `leading-loose` on a 10 pt span reads
+`lineHeight: 20`, `tracking-wide` reads `letterSpacing: 0.25`. `fontFamily` is the family the app asked for
+(`"Inter, sans-serif"` stays a list), not the face the platform falls back to for characters it lacks; a design-system
+test checks the family it set, and a screenshot checks what the platform drew:
+
+```tsx
+expect(app.spanStyle("id:title")).toMatchObject({ fontSize: 20, lineHeight: 28, fontFamily: "Inter" });
+```
 
 The optional second argument of `press` is `PressOptions`: `{ position?: { x: number; y: number } }`. `position` is
 where in the view the press lands, in points from its top left corner; omitting it presses the middle, as before.

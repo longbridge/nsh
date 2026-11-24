@@ -405,6 +405,15 @@ pub struct SpanStyle {
     pub font_size: f32,
     /// Its font weight (400 regular, 700 bold).
     pub font_weight: u16,
+    /// Its line height, in points; zero for the font's natural line height.
+    #[serde(default)]
+    pub line_height: f32,
+    /// The extra space between its characters, in points.
+    #[serde(default)]
+    pub letter_spacing: f32,
+    /// Its `fontFamily` as the app wrote it; `None` for the system font.
+    #[serde(default)]
+    pub font_family: Option<String>,
     /// Whether it is italic.
     pub italic: bool,
     /// Whether it is underlined.
