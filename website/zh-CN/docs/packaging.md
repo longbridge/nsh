@@ -507,11 +507,49 @@ nsh package --target linux --run
 `<id>.desktop` 和图标 `<id>.png`），以及同样内容的 `.nsh/out/<Name>.tar.gz`。请在 Linux 上打包：运行器是为构建它的机器构建的。运行应用的机器上必须装有
 GTK 4（4.14 及以上）、Pango 和 WebKitGTK 6.0（用于 Web 视图）。如何安装应用及其桌面条目：见 [Linux](./linux.md#打包)。
 
+### AppImage 与 Flatpak
+
+`--format appimage` 或 `--format flatpak` 还会根据 `nsh.json` 及其 `store` 部分写出 desktop 文件、256×256 图标和 AppStream
+metainfo（`<id>.metainfo.xml`）（见[发布](./publish.md#store-listing)）。
+
+#### AppImage
+
+```sh
+nsh package --target linux --format appimage
+```
+
+在目录和压缩包之外，再写出 `.nsh/out/<Name>.AppDir` 和 `.nsh/out/<Name>-<arch>.AppImage`。AppImage 带有 desktop 文件、图标和
+metainfo，和压缩包一样使用系统的 GTK 4 与 WebKitGTK，所以目标系统需要装有它们。把它附在你的发布里，用户这样运行：
+
+```sh
+chmod +x Counter-x86_64.AppImage
+./Counter-x86_64.AppImage
+```
+
+#### Flatpak
+
+```sh
+nsh package --target linux --format flatpak
+```
+
+写出 `.nsh/out/flatpak/<id>.yml`：一个把包的压缩包安装到 GNOME runtime（提供 GTK 4 与 WebKitGTK）上的 manifest。装有
+`flatpak-builder` 时还会构建它，写出单文件包 `.nsh/out/<Name>.flatpak`，用于测试或分发：
+
+```sh
+flatpak install --user .nsh/out/Counter.flatpak
+flatpak run io.github.example.Counter
+```
+
+依赖：[appimagetool](https://github.com/AppImage/appimagetool/releases) 在 `PATH` 中或由 `NSH_APPIMAGETOOL` 指定（没有 FUSE
+时设置 `APPIMAGE_EXTRACT_AND_RUN=1`）；本地构建 Flatpak 需要 `flatpak`、`flatpak-builder` 以及 GNOME runtime 和 SDK。
+AppImage 包含 NSH，但不包含 GTK 4 和 WebKitGTK；AppImage 启动后没有窗口，说明系统缺少它们，Flatpak 会自带。发布到
+Flathub：见[发布](./publish.md#publish-to-flathub)。
+
 ### 分发
 
 `nsh package --target linux` 把应用写成一个目录及其 `.tar.gz`，附带桌面条目和图标。你把归档上传到你的网站或 GitHub Release，用户解压并安装桌面条目；[应用更新](./app-updates.md)让已安装的副本保持最新。
 
-`nsh publish` 没有 Linux 商店上传，`nsh package` 目前也还不能写出 Flatpak、AppImage、`.deb` 或 `.rpm` 包。
+`--format appimage` 和 `--format flatpak` 还会写出 AppImage 和 Flatpak（见[上文](#appimage-and-flatpak)）；`nsh package` 目前还不能写出 `.deb` 或 `.rpm` 包。发布到 Flathub 见[发布](./publish.md#publish-to-flathub)。
 
 #### 首次发布之前
 
@@ -593,11 +631,20 @@ Build Tools 构建。请在 Windows 上打包：运行器是为构建它的机�
 Windows 能嵌入图标。应用可以从目录被复制到的任何位置运行。`nsh package` 还会写出 Inno Setup 脚本 `.nsh\out\<Name>.iss`，装有 Inno Setup 6
 时编译成 `.nsh\out\<Name>-setup.exe`：按用户安装（不需要管理员权限），带开始菜单快捷方式和“已安装的应用”条目，并支持原地升级。见 [Windows](./windows.md#打包)。
 
+### MSIX
+
+```sh
+nsh package --target windows --format msix                  # .nsh/out/<Name>.msix，用于 Store
+nsh package --target windows --format msix --sign cert.pfx  # 签名后可在 Store 之外安装
+```
+
+`--format msix` 额外写出 `.nsh\out\<Name>.msix`：打包目录加上 `AppxManifest.xml`（full-trust 桌面应用）、由应用图标生成的 logo 和 block map。不需要 Windows SDK，Linux 和 macOS 的 CI 也能生成。包标识来自 `nsh.json` 的 `windows`：`identityName`、`publisher`、`publisherDisplayName`，前两项从 Partner Center 的 Product identity 复制（默认分别为应用 id 与 `CN=<name>`）。版本号为 `version` 加第四位 0。Store 会自行签名，用 `nsh publish windows` 提交未签名的包即可（见[发布](./publish.md#publish-to-the-microsoft-store)）；Store 之外分发需 `--sign <cert.pfx>`（Windows 上用 `signtool`，其他系统用 `osslsigncode` 2.6+，密码放在 `NSH_WINDOWS_CERT_PASSWORD`），证书主题必须等于 `windows.publisher`。
+
 ### 签名与分发
 
 `nsh package --target windows` 写出直接下载发布所需的一切：应用目录、它的 `.zip`，以及用 Inno Setup 构建的按用户安装的安装程序。你用自己的代码签名证书签名可执行文件，再上传到你的网站或 GitHub Release；[应用更新](./app-updates.md)让已安装的副本保持最新。
 
-`nsh publish` 没有 Windows 商店上传：NSH 目前还不能为 Microsoft Store 打包 MSIX。
+上架 Microsoft Store 时，打包 [MSIX](#msix) 并用 `nsh publish windows` 提交（见[发布](./publish.md#publish-to-the-microsoft-store)）。
 
 #### 首次发布之前
 
@@ -1054,11 +1101,11 @@ Rust 应用构建自己的 runner。对 TSX 应用，`nsh package` 会在 CLI �
 
 ## 发布
 
-`nsh package` 只负责生成可安装的文件。上传到 App Store 或 Google Play 见[发布](./publish.md)：[iOS](./publish.md#publish-to-the-app-store) 和 [Android](./publish.md#publish-to-google-play)。没有商店上传的平台按上文分发：[macOS](#sign-notarize-and-distribute)、[Windows](#sign-and-distribute)、[Linux](#distribute) 和 [Web](#host-the-site)。
+`nsh package` 只负责生成可安装的文件。发布到商店见[发布](./publish.md)：[App Store](./publish.md#publish-to-the-app-store)、[Google Play](./publish.md#publish-to-google-play)、[Flathub](./publish.md#publish-to-flathub) 和 [Microsoft Store](./publish.md#publish-to-the-microsoft-store)。不经商店分发的应用按上文处理：[macOS](#sign-notarize-and-distribute)、[Windows](#sign-and-distribute)、[Linux](#distribute) 和 [Web](#host-the-site)。
 
 ## 另请参阅
 
-- [发布](./publish.md)：上传到 App Store 和 Google Play
+- [发布](./publish.md)：发布到 App Store、Google Play、Flathub 和 Microsoft Store
 - [CLI](./cli.md)：所有命令
 - [应用更新](./app-updates.md)：自我更新的打包应用
 - [OTA 更新](./ota-updates.md)：无需新构建，为打包应用（包括 iOS 和 Android）下发新的 TSX
