@@ -605,6 +605,7 @@ fn main() {
 - 用 `rustc-link-lib`，不要用 `rustc-link-arg`：链接参数只作用于本 crate 自己的目标。
 - 静态库的隐私清单条目写进应用的 `ios.privacyManifest`。
 - NSH 不嵌入动态 framework，优先使用 SDK 的静态版本。
+- 许可证要求用户能替换的库（LGPL，例如 libmpv）只能动态链接，由应用自己携带；NSH 的打包没有对应设置。像上面那样在 nshm 的 `build.rs` 里链接它（`rustc-link-lib=framework=…`、`rustc-link-search=framework=…`）。可执行文件的运行路径写在应用的 `.cargo/config.toml` 里（在 `[target.aarch64-apple-darwin]` 下写 `rustflags = ["-C", "link-arg=-Wl,-rpath,@executable_path/../Frameworks", "-C", "link-arg=-Wl,-rpath,<framework 所在目录>"]`），因为 crate 的 `rustc-link-arg` 到不了 `nsh run`、`nsh check`、`nsh test`。`nsh package --target macos` 之后，把 framework 复制到应用的 `Contents/Frameworks/`，用 `install_name_tool -delete_rpath` 去掉开发时的运行路径，再按先 framework、后应用的顺序，用打包时的身份重新签名（`codesign --force --sign <身份> --options runtime --entitlements <应用的 entitlements>`，ad hoc 包用 `--sign -`），最后用 `codesign --verify --deep --strict` 检查。
 - 在 Linux 和 Windows 上，同样由 `build.rs` 链接 SDK（Linux 上是 `.a` 和 `.so`，Windows 上是 `.lib`）。NSH 同样不会把共享库（`.so`、`.dll`）放进包里；请优先使用 SDK 的静态版本。
 
 ### TSX nshm
