@@ -31,6 +31,8 @@ mod fps_collapse;
 #[cfg(target_os = "macos")]
 mod hover_cursor;
 #[cfg(target_os = "macos")]
+mod image_placeholder;
+#[cfg(target_os = "macos")]
 mod ime;
 #[cfg(target_os = "macos")]
 mod input_clip;
@@ -141,6 +143,8 @@ fn main() {
                 focus_selection::run();
             } else if std::env::var_os("NSH_INPUT_FOCUS_CHECK_ONLY").is_some() {
                 input_focus::run();
+            } else if std::env::var_os("NSH_IMAGE_PLACEHOLDER_CHECK_ONLY").is_some() {
+                image_placeholder::run();
             } else if std::env::var_os("NSH_INPUT_CLIP_CHECK_ONLY").is_some() {
                 input_clip::run();
             } else if std::env::var_os("NSH_INPUT_RESTYLE_CHECK_ONLY").is_some() {
@@ -204,6 +208,7 @@ fn main() {
                 ime::run();
                 input_hidden::run();
                 input_clip::run();
+                image_placeholder::run();
                 fitting_input::run();
                 input_focus::run();
                 input_restyle::run();
