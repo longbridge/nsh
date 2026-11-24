@@ -122,6 +122,8 @@ Each version is installed once per machine, in `~/.nsh/nshms` (`NSH_HOME` moves 
 
 A Rust nshm is also added to the `[dependencies]` of the app's own crate when it has one, so the app's Rust uses it directly. An app whose nshm include a Rust one gets hosts built with it, as an app with a crate of its own does, so its development machine and CI need the Rust toolchain ([Building with Rust](./rust.md)). An app whose nshm are all TSX builds with `nsh` alone.
 
+The hosts of an app whose Rust comes from nshm only are built with the nsh that runs the app: a release with its crates from crates.io, a nightly with those of its own commit, an `nsh` built in a checkout with the checkout's. `nsh-extra` is released together with nsh, so an app that asks for it by version gets the `nsh-extra` of that same nsh (an app with a crate of its own, the one of the nsh its crate uses), and `nsh.lock` records which. A version requirement that nsh's version does not meet is an error that names both. A `"path"`, `"github"` or `"git"` entry for it is used as written.
+
 An app with a crate of its own can also depend on a Rust nshm in its `Cargo.toml` alone, as on any other crate, from crates.io, Git (a crate in a subdirectory of the repository too) or a path. `nsh` finds the Rust nshm among the crate's dependencies, direct or not, and links them as it links those of `"dependencies"`: their `#[native_module]` entries run when the app starts, with the features the crate turns on, in `nsh run`, `nsh test` and the packages alike, and TSX imports them by their specifiers. One listed in `"dependencies"` too is linked once.
 
 A crate that holds several modules keeps each behind a Cargo feature, so an app turns on only those it uses and pays

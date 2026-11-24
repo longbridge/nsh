@@ -570,6 +570,8 @@ function Custom(props: { node: TextViewCustomNode }) {
 | `math` | `boolean` | `true` | 公式：文本中的 `$…$` 和 `\(…\)`，`$$…$$` 和 `\[…\]` 公式块。转义方括号里是引用编号或中日韩文字时（`\[1\]\[3\]`、`\[注\]`）按文字显示。 |
 | `html` | `boolean` | `true` | Markdown 中的 HTML 按 `html` 属性的方式读取；`false` 时显示为文本。 |
 | `alerts` | `boolean` | `true` | GitHub 的提示块：`> [!NOTE]`、`[!TIP]`、`[!IMPORTANT]`、`[!WARNING]`、`[!CAUTION]`。 |
+| `links` | `boolean` | `true` | 链接：`[text](url)`、裸 URL 和 `<a href>`；`false` 时显示其文字，不显示为链接。 |
+| `images` | `boolean` | `true` | 图片：`![alt](src)` 和 `<img>`；`false` 时显示其 `alt` 文字。 |
 | `frontmatter` | `boolean` | `false` | 开头的 YAML front matter（`---` … `---`）成为名为 `frontmatter` 的自定义节点，其 `text` 是 YAML。 |
 | `mdx` | `boolean` | `false` | MDX：JSX 元素成为以标签命名的自定义节点，`{expressions}` 成为名为 `expression` 的自定义节点；此时原始 HTML 按文本读取。 |
 | `streaming` | `boolean` | `false` | 文本仍在到达：末尾未闭合的语法显示成闭合后的样子。 |

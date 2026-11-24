@@ -3271,6 +3271,97 @@ fn clipped_overflow_does_not_grow_scroll_content() {
     assert_eq!(content_width(true), 320.0);
 }
 
+/// An image smaller than its natural size is drawn inside its box, so it
+/// adds nothing to the scrollable extent of a scroll view around it: a
+/// 24 point icon in a 14 point box at the end of a fitting menu left the
+/// menu 3 points to scroll.
+#[test]
+fn a_sized_image_does_not_overflow_its_scroll_view() {
+    let extent = |natural: Size<Points>, boxed: (f32, f32), fit: Option<&'static str>| {
+        let mut c = core();
+        let mut image = vec![
+            ("width", StyleValue::Number(boxed.0)),
+            ("height", StyleValue::Number(boxed.1)),
+            ("alignSelf", StyleValue::Str("flex-start")),
+        ];
+        if let Some(fit) = fit {
+            image.push(("objectFit", StyleValue::Str(fit)));
+        }
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::Scroll,
+                },
+                style_op(
+                    2,
+                    &[
+                        ("width", StyleValue::Number(boxed.0)),
+                        ("height", StyleValue::Number(boxed.1)),
+                        ("alignSelf", StyleValue::Str("flex-start")),
+                    ],
+                ),
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+                Op::Create {
+                    id: 3,
+                    tag: Tag::Image,
+                },
+                style_op(3, &image),
+                Op::SetProp {
+                    id: 3,
+                    prop: Prop::Source(Some(ImageSource {
+                        uri: "asset:/icon.svg".into(),
+                        size: Some(natural),
+                        scales: ImageScales::NONE,
+                        data: None,
+                    })),
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: 3,
+                    before: None,
+                },
+            ],
+        );
+        let batch = c.commit().unwrap();
+        batch
+            .items
+            .iter()
+            .rev()
+            .find_map(|i| match i {
+                MountItem::ScrollContent { id: 2, size } => Some((size.width.0, size.height.0)),
+                _ => None,
+            })
+            .expect("the scroll view's content size")
+    };
+    assert_eq!(
+        extent(size_pt(24.0, 24.0), (14.0, 14.0), None),
+        (14.0, 14.0)
+    );
+    assert_eq!(
+        extent(size_pt(48.0, 24.0), (20.0, 10.0), None),
+        (20.0, 10.0)
+    );
+    // Cropped fits draw inside the box too.
+    for fit in ["cover", "none"] {
+        assert_eq!(
+            extent(size_pt(200.0, 100.0), (30.0, 40.0), Some(fit)),
+            (30.0, 40.0),
+            "{fit}"
+        );
+    }
+    // A box larger than the image is the extent itself.
+    assert_eq!(
+        extent(size_pt(24.0, 24.0), (60.0, 50.0), None),
+        (60.0, 50.0)
+    );
+}
+
 /// A scroll view's content size set twice in one batch (a row relaid in
 /// two passes) reaches the platform once, with the last size: a transient
 /// smaller size would clamp the offset before the content grows back.
@@ -35933,6 +36024,10 @@ fn capture_keys_decode_from_js() {
         Some(KeyCapture::All)
     );
     assert_eq!(
+        decode(serde_json::json!("text"), false),
+        Some(KeyCapture::Text)
+    );
+    assert_eq!(
         decode(serde_json::json!(["mod+k", "shift+tab"]), true),
         Some(KeyCapture::keys([
             Keystroke::parse_with("mod+k", true).unwrap(),
@@ -43633,7 +43728,7 @@ mod terminal_layout {
     }
 
     #[test]
-    fn a_card_has_its_border_and_no_padding_rows() {
+    fn a_card_has_its_border_and_a_padding_row_from_12_points() {
         let mut ops = view(
             2,
             ROOT_ID,
@@ -43649,12 +43744,12 @@ mod terminal_layout {
         ops.extend(view(8, 2, &[]));
         ops.extend(text(9, 8, "Two"));
         let batch = laid_out(ops);
-        // A border Cell each side, a column of padding, no padding row:
-        // 1 + 3 + 1 rows, 1 + 1 + 5 + 1 + 1 columns.
-        assert_eq!(frame_of(&batch, 2), Some(rect(0.0, 0.0, 72.0, 80.0)));
-        assert_eq!(frame_of(&batch, 3), Some(rect(16.0, 16.0, 40.0, 16.0)));
-        assert_eq!(frame_of(&batch, 5), Some(rect(16.0, 32.0, 40.0, 16.0)));
-        assert_eq!(frame_of(&batch, 8), Some(rect(16.0, 48.0, 40.0, 16.0)));
+        // A border Cell each side, a column and a row of padding:
+        // 1 + 1 + 3 + 1 + 1 rows, 1 + 1 + 5 + 1 + 1 columns.
+        assert_eq!(frame_of(&batch, 2), Some(rect(0.0, 0.0, 72.0, 112.0)));
+        assert_eq!(frame_of(&batch, 3), Some(rect(16.0, 32.0, 40.0, 16.0)));
+        assert_eq!(frame_of(&batch, 5), Some(rect(16.0, 48.0, 40.0, 16.0)));
+        assert_eq!(frame_of(&batch, 8), Some(rect(16.0, 64.0, 40.0, 16.0)));
     }
 
     #[test]
@@ -43685,7 +43780,7 @@ mod terminal_layout {
     }
 
     #[test]
-    fn sections_keep_one_blank_row_and_cards_none() {
+    fn sections_and_card_rows_keep_one_blank_row() {
         let mut ops = view(2, ROOT_ID, &[("rowGap", V::Number(24.0))]);
         // A card: a border, its rows 16pt apart inside.
         ops.extend(view(
@@ -43710,11 +43805,12 @@ mod terminal_layout {
         ops.extend(view(10, 9, &[]));
         ops.extend(text(11, 10, "Three"));
         let batch = laid_out(ops);
-        // Inside the card no blank row; between the cards one, the gap
-        // and the margin collapsed into it.
-        assert_eq!(frame_of(&batch, 7).map(|f| f.origin.y), Some(Points(16.0)));
-        assert_eq!(frame_of(&batch, 3), Some(rect(0.0, 0.0, 320.0, 64.0)));
-        assert_eq!(frame_of(&batch, 9), Some(rect(0.0, 80.0, 320.0, 48.0)));
+        // Inside the card a blank row between its rows; between the cards
+        // one, the gap and the margin collapsed into it; the second card's
+        // 12pt padding a row above and below.
+        assert_eq!(frame_of(&batch, 7).map(|f| f.origin.y), Some(Points(32.0)));
+        assert_eq!(frame_of(&batch, 3), Some(rect(0.0, 0.0, 320.0, 80.0)));
+        assert_eq!(frame_of(&batch, 9), Some(rect(0.0, 96.0, 320.0, 80.0)));
     }
 
     #[test]
