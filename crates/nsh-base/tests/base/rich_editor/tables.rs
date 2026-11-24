@@ -23,14 +23,18 @@ fn table(rows: &[&[&str]]) -> Value {
 
 /// A paragraph, a table, and a quote holding another table.
 fn table_session() -> EditorSession {
+    session_with_content(json!([
+        {"type": "paragraph", "content": [{"type": "text", "text": "above"}]},
+        table(&[&["a1", "a2"], &["b1", "b2"]]),
+        {"type": "blockquote", "content": [table(&[&["q1", "q2"]])]},
+    ]))
+}
+
+fn session_with_content(content: Value) -> EditorSession {
     let manager = ExtensionManager::with_core(vec![kit::starter_kit(), kit::table_kit()]).unwrap();
     let schema = manager.schema().clone();
     let doc = schema
-        .node_from_json(&json!({"type": "doc", "content": [
-            {"type": "paragraph", "content": [{"type": "text", "text": "above"}]},
-            table(&[&["a1", "a2"], &["b1", "b2"]]),
-            {"type": "blockquote", "content": [table(&[&["q1", "q2"]])]},
-        ]}))
+        .node_from_json(&json!({"type": "doc", "content": content}))
         .unwrap();
     let state = EditorState::create(
         EditorStateConfig::new(schema)
@@ -95,6 +99,75 @@ fn top(screen: &Screen, text: &str) -> f32 {
         .find(|n| n.text.as_ref().is_some_and(|t| t.text.text == text))
         .map(|n| n.bounds.origin.y.0)
         .unwrap_or_else(|| panic!("no text reads {text:?}"))
+}
+
+#[test]
+fn table_columns_fit_their_content_and_scroll_without_moving_the_document() {
+    let mut schedule = table(&[
+        &["ID", "Task", "Time", "Room", "Host", "Access", "End"],
+        &[
+            "7",
+            "ConferenceRegistrationConfirmation",
+            "ScheduledArrivalTime",
+            "MainConferenceAuditorium",
+            "InternationalRelationsCoordinator",
+            "AccessibleTransportationReservation",
+            "A",
+        ],
+    ]);
+    for row in schedule["content"].as_array_mut().unwrap() {
+        row["content"][2]["attrs"] = json!({"colwidth": [118]});
+    }
+    let session = session_with_content(json!([
+        {"type": "paragraph", "content": [{"type": "text", "text": "Event schedule"}]},
+        schedule,
+    ]));
+    let original = session.state().doc().to_json();
+    let held = session.clone();
+    let mut app = Headless::start(EngineConfig {
+        viewport: Size::new(px(800.0), px(900.0)),
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Tables>(move || {
+            HarnessProps {
+                session: Some(session.clone()),
+            }
+        }))
+    })
+    .unwrap();
+    let frame = "id:rich-editor-table-scroll";
+    app.wait_for(frame).unwrap();
+    let bounds = |s: &Screen, selector: &str| s.layout(selector).unwrap().unwrap().bounds;
+    app.wait_for("text:End").unwrap();
+    let s = app.screen();
+    let short = bounds(s, "text:Task").left() - bounds(s, "text:ID").left();
+    let long = bounds(s, "text:Time").left() - bounds(s, "text:Task").left();
+    assert!(
+        long > short,
+        "long entries should get more space: {long:?} vs {short:?}"
+    );
+    let manual = bounds(s, "text:Room").left() - bounds(s, "text:Time").left();
+    assert!(
+        (manual.0 - 118.0).abs() < 1.,
+        "saved column width: {manual:?}"
+    );
+    let viewport = bounds(s, frame);
+    let title = bounds(s, "text:Event schedule");
+    assert!(
+        bounds(s, "text:End").left() >= viewport.right(),
+        "the last column starts offscreen"
+    );
+
+    app.scroll(frame, px(10_000.)).unwrap();
+    app.wait_until(
+        "the last column is visible after a horizontal scroll",
+        Duration::from_secs(5),
+        |s| {
+            let last = bounds(s, "text:End");
+            last.left() >= viewport.left() && last.right() <= viewport.right()
+        },
+    )
+    .unwrap();
+    assert_eq!(bounds(app.screen(), "text:Event schedule"), title);
+    assert_eq!(held.state().doc().to_json(), original);
 }
 
 #[test]

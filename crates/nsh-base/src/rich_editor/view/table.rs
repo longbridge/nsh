@@ -1,7 +1,7 @@
 //! Tables in the view: a table node is a grid whose items are its cells
 //! (rows have no view: the walk of the tree flattens them), each placed at
 //! its slots of the table's map, the columns as wide as their `colwidth`
-//! (else sharing the room, at least `cellMinWidth`), the rows at least
+//! (else sized by their content, at least `cellMinWidth`), the rows at least
 //! their `height`. Over the content box: the handles resizing columns and
 //! rows on their right and bottom borders, the grips of the table the
 //! selection is in (on its top and left borders), which select a column or
@@ -51,6 +51,8 @@ pub(crate) struct TableLayout {
     pub(crate) pos: usize,
     /// Its box.
     pub(crate) bounds: Bounds<Points>,
+    /// The horizontal scroll viewport's left and right in the content box.
+    viewport_x: Option<(Points, Points)>,
     /// Each column's left and right.
     pub(crate) cols: Vec<(Points, Points)>,
     /// Each row's top and bottom.
@@ -144,8 +146,8 @@ fn track_px(value: Points) -> String {
     format!("{}px", (value.0 * 10.0).round() / 10.0)
 }
 
-/// The grid's columns: each `colwidth`'s (the preview's for the column
-/// being resized), else a share of the room, at least `cellMinWidth`.
+/// Saved or dragged widths take precedence. Other columns fit their content
+/// up to a readable line length.
 pub(crate) fn column_tracks(table: &Node, preview: Option<(usize, Points)>) -> String {
     let (min, _, _) = options(table);
     column_widths(table)
@@ -158,18 +160,11 @@ pub(crate) fn column_tracks(table: &Node, preview: Option<(usize, Points)>) -> S
             };
             match width {
                 Some(w) => track_px(w.max(min)),
-                None => format!("minmax({},1fr)", track_px(min)),
+                None => "fit-content(20rem)".to_owned(),
             }
         })
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-/// Whether every column has a width: the table is then as wide as they
-/// are, not as its container.
-pub(crate) fn fixed_width(table: &Node) -> bool {
-    let widths = column_widths(table);
-    !widths.is_empty() && widths.iter().all(Option::is_some)
 }
 
 /// The grid's rows: at least each row's `height` (the preview's for the
@@ -217,19 +212,22 @@ pub(crate) fn placement(doc: &Node, cell_pos: usize) -> Option<(i16, i16, i16, i
 /// side in a terminal).
 pub(crate) fn grid(wrapper: View, rv: &Rv, item: ReadSignal<BlockItem>) -> View {
     let (cols_rv, rows_rv) = (rv.clone(), rv.clone());
+    let preview = computed(move || {
+        let it = item.get();
+        match cols_rv.table_preview.get() {
+            Some(TablePreview::ColWidth { table, col, width })
+                if cols_rv.block_pos(it.id) == Some(table) =>
+            {
+                Some((col, width))
+            }
+            _ => None,
+        }
+    });
     wrapper
         .grid()
+        .self_start()
         .grid_template_columns(move || {
-            let it = item.get();
-            let preview = match cols_rv.table_preview.get() {
-                Some(TablePreview::ColWidth { table, col, width })
-                    if cols_rv.block_pos(it.id) == Some(table) =>
-                {
-                    Some((col, width))
-                }
-                _ => None,
-            };
-            SharedString::from(column_tracks(&it.node, preview))
+            SharedString::from(column_tracks(&item.get().node, preview.get()))
         })
         .grid_template_rows(move || {
             let it = item.get();
@@ -243,7 +241,6 @@ pub(crate) fn grid(wrapper: View, rv: &Rv, item: ReadSignal<BlockItem>) -> View 
             };
             SharedString::from(row_tracks(&it.node, preview))
         })
-        .style_when(move || fixed_width(&item.get().node), |s| s.self_start())
         .border_t(px(1.0))
         .border_l(px(1.0))
         // A terminal draws no cell's line (only a box's): the table's
@@ -259,7 +256,12 @@ pub(crate) fn grid(wrapper: View, rv: &Rv, item: ReadSignal<BlockItem>) -> View 
 /// while a cell selection holds it, the `selectedCell` part (the theme's
 /// selection color).
 pub(crate) fn cell(wrapper: View, rv: &Rv, item: ReadSignal<BlockItem>) -> View {
-    let header = table_role(item.get_untracked().node.ty()) == Some(TableRole::HeaderCell);
+    let first = item.get_untracked();
+    let header = table_role(first.node.ty()) == Some(TableRole::HeaderCell);
+    let min_width = rv
+        .block_pos(first.parent)
+        .and_then(|pos| rv.st.borrow().doc().node_at(pos))
+        .map_or(px(0.0), |table| options(&table).0);
     let place_rv = rv.clone();
     let at = computed(move || {
         place_rv.doc_rev.get();
@@ -286,7 +288,10 @@ pub(crate) fn cell(wrapper: View, rv: &Rv, item: ReadSignal<BlockItem>) -> View 
     let overlay_rv = rv.clone();
     wrapper
         .relative()
-        .min_w(px(0.0))
+        .min_w(move || {
+            let (start, end, _, _) = at.get();
+            min_width * f32::from(end - start)
+        })
         .col_start(move || at.get().0)
         .col_end(move || at.get().1)
         .row_start(move || at.get().2)
@@ -517,16 +522,21 @@ fn resize_handles(rv: &Rv, t: &TableLayout, preview: Option<TablePreview>) -> Ve
 
 /// The grip bands of a column (on the table's top border, centered over
 /// it) and of a row (on its left border).
-fn col_grip(t: &TableLayout, col: usize) -> Bounds<Points> {
-    let (left, right) = t.cols[col];
+fn col_grip(t: &TableLayout, col: usize) -> Option<Bounds<Points>> {
+    let (left, right) = *t.cols.get(col)?;
     let center = (left + right) * 0.5;
-    Bounds::new(
-        Point::new(
-            center - px(GRIP.0 / 2.0),
-            t.bounds.origin.y - px(GRIP.1 / 2.0),
-        ),
-        Size::new(px(GRIP.0), px(GRIP.1)),
-    )
+    let mut start = center - px(GRIP.0 / 2.0);
+    let mut end = start + px(GRIP.0);
+    if let Some((left, right)) = t.viewport_x {
+        start = start.max(left);
+        end = end.min(right);
+    }
+    (start < end).then(|| {
+        Bounds::new(
+            Point::new(start, t.bounds.origin.y - px(GRIP.1 / 2.0)),
+            Size::new(end - start, px(GRIP.1)),
+        )
+    })
 }
 
 fn row_grip(t: &TableLayout, row: usize) -> Bounds<Points> {
@@ -534,7 +544,7 @@ fn row_grip(t: &TableLayout, row: usize) -> Bounds<Points> {
     let center = (top + bottom) * 0.5;
     Bounds::new(
         Point::new(
-            t.bounds.origin.x - px(GRIP.1 / 2.0),
+            t.viewport_x.map_or(t.bounds.origin.x, |(left, _)| left) - px(GRIP.1 / 2.0),
             center - px(GRIP.0 / 2.0),
         ),
         Size::new(px(GRIP.1), px(GRIP.0)),
@@ -557,7 +567,7 @@ fn grips(rv: &Rv, t: &TableLayout) -> Vec<AnyElement> {
             .cursor(Cursor::Grab)
             .child(part(
                 view()
-                    .w(px(w))
+                    .w(px(w).min(b.size.width))
                     .h(px(h))
                     .rounded(px(2.0))
                     .pointer_events(PointerEvents::None)
@@ -568,7 +578,7 @@ fn grips(rv: &Rv, t: &TableLayout) -> Vec<AnyElement> {
             .into_element()
     };
     let mut out: Vec<AnyElement> = (0..t.cols.len())
-        .map(|c| bar(col_grip(t, c), true))
+        .filter_map(|c| col_grip(t, c).map(|b| bar(b, true)))
         .collect();
     out.extend((0..t.rows.len()).map(|r| bar(row_grip(t, r), false)));
     out
@@ -711,7 +721,7 @@ impl Rv {
         for t in layouts.iter().rev() {
             if Some(t.pos) == active {
                 for c in 0..t.cols.len() {
-                    if contains(&col_grip(t, c), at) {
+                    if col_grip(t, c).is_some_and(|b| contains(&b, at)) {
                         return Some(TableDrag::MoveCol {
                             table: t.pos,
                             from: c,
@@ -1083,6 +1093,10 @@ fn layout_of(tree: &Tree, geo: &Geometry, table_id: u64, table_node: &Node) -> O
     Some(TableLayout {
         pos: table_pos,
         bounds,
+        viewport_x: geo.table_scroll.get(&table_id).map(|(offset, width)| {
+            let left = origin.x + *offset;
+            (left, left + *width)
+        }),
         cols,
         rows,
         min_width,
@@ -1158,14 +1172,13 @@ mod tests {
             )
             .unwrap();
         let t = table(vec![row, tr(vec![td("c"), td("d")])]);
-        assert_eq!(column_tracks(&t, None), "120px minmax(25px,1fr)");
+        assert_eq!(column_tracks(&t, None), "120px fit-content(20rem)");
         assert_eq!(column_tracks(&t, Some((1, px(10.0)))), "120px 25px");
         assert_eq!(row_tracks(&t, None), "minmax(40px,auto) auto");
         assert_eq!(
             row_tracks(&t, Some((1, px(30.0)))),
             "minmax(40px,auto) minmax(30px,auto)"
         );
-        assert!(!fixed_width(&t));
     }
 
     #[test]
