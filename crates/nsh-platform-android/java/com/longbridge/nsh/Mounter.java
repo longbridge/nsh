@@ -81,9 +81,9 @@ final class Mounter {
     final int[] dialogColors = new int[10];
     /**
      * The language the app's text shows in ({@code encode.rs} {@code Command::TextLocale}), which
-     * the state words services read ({@link A11y}) and the date and time dialogs' words
-     * ({@link DateTimePickerComponent}) follow; null until the core names one (English state words,
-     * the system's dialogs).
+     * the state words services read ({@link A11y}) and the date and time pickers' values and
+     * dialogs ({@link DateTimePickerComponent}) follow; null until the core names one (English state
+     * words, the system's language for the pickers).
      */
     java.util.Locale textLocale;
     /** The alerts shown and not answered yet, by dialog id: what {@link SystemUi#closeDialog} takes back. */
@@ -2978,6 +2978,13 @@ final class Mounter {
             }
             case 64: {
                 textLocale = java.util.Locale.forLanguageTag((String) objects[b.getInt()]);
+                // Date and time pickers show their values in it.
+                for (int i = 0; i < views.size(); i++) {
+                    View view = views.valueAt(i);
+                    if (view instanceof ComponentBox && ((ComponentBox) view).component instanceof DateTimePickerComponent) {
+                        ((DateTimePickerComponent) ((ComponentBox) view).component).textLocaleChanged();
+                    }
+                }
                 // Services keep copies of the nodes: those with state words read them again.
                 android.view.accessibility.AccessibilityManager manager = host.accessibility();
                 // Without a running service there is no copy to refresh.
