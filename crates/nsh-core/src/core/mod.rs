@@ -6284,6 +6284,10 @@ impl<M: TextEngine> Core<M> {
                 if props.href != value {
                     props.href = value;
                     flags |= dirty::VIEW_PROPS;
+                    // A span's is recorded in its block's text (`link_hrefs`).
+                    if node.kind == Kind::Text && node.inline {
+                        rebuild_span = true;
+                    }
                 }
             }
             Prop::PanActivation(value) => {
@@ -8964,6 +8968,12 @@ impl<M: TextEngine> Core<M> {
                         if press && tracked & crate::tailwind::state::PRESSED != 0 {
                             events.set(EventKind::PressDown, true);
                             events.set(EventKind::PressUp, true);
+                        }
+                        // Where it goes (`TextView`'s links), for platforms
+                        // that make it a hyperlink (the web's `<a href>`).
+                        if let Some(href) = child.props.as_ref().and_then(|p| p.href.clone()) {
+                            out.link_hrefs
+                                .push(crate::text::LinkHref::new(out.links.len() as u32, href));
                         }
                         out.links.push(crate::text::TextLink {
                             start,

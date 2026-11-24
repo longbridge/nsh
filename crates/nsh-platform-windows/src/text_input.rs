@@ -1043,6 +1043,8 @@ impl InputState {
                 let list = dc.CreateCommandList().ok()?;
                 dc.SetTarget(&list);
                 dc.SetDpi(96.0 * s, 96.0 * s);
+                let params = cx.dc.GetTextRenderingParams().ok();
+                dc.SetTextRenderingParams(params.as_ref());
                 dc.BeginDraw();
                 // RichEdit draws its client pixels in units of GDI's DPI,
                 // not the target's: scaled to the target's (nothing on a

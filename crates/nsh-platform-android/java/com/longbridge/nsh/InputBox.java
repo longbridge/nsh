@@ -143,6 +143,11 @@ final class InputBox extends FrameLayout implements Node {
                 // TextView hides the action key of multiline inputs; one that
                 // submits shows it, as React Native does.
                 if (multiline && submit != NEWLINE) info.imeOptions &= ~EditorInfo.IME_FLAG_NO_ENTER_ACTION;
+                // In landscape an input method may otherwise go full screen,
+                // its own edit box covering the app (its layout, accessory
+                // view and action key with it), as Compose's and Flutter's
+                // fields keep it from doing.
+                info.imeOptions |= EditorInfo.IME_FLAG_NO_EXTRACT_UI | EditorInfo.IME_FLAG_NO_FULLSCREEN;
                 return connection == null ? null : new KeyConnection(connection);
             }
 

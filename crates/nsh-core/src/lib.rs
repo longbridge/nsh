@@ -165,9 +165,9 @@ pub use crate::{
     },
     text::{
         ATTACHMENT_CHAR, Affinity, ApproxTextEngine, AttachmentAlignments, AttachmentCopyText,
-        AttributedText, BackgroundBox, FontExtent, LinePiece, ResolvedTextStyle, SpanTestId,
-        TextAttachment, TextBackground, TextEngine, TextGeometry, TextLayout, TextLine, TextLink,
-        TextPosition, TextSpan, font_data, font_family, keep_font,
+        AttributedText, BackgroundBox, FontExtent, LinePiece, LinkHref, ResolvedTextStyle,
+        SpanTestId, TextAttachment, TextBackground, TextEngine, TextGeometry, TextLayout, TextLine,
+        TextLink, TextPosition, TextSpan, font_data, font_family, keep_font,
     },
     transform::{
         Decomposed, MAX_TRANSFORMS, Matrix, Transform, TransformKind, TransformOp, translation,
