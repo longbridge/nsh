@@ -89,7 +89,7 @@ WebKitGTK 6.0 must be installed where the app runs. To show the app in a desktop
 `PATH`, the `.desktop` file in `~/.local/share/applications` and the icon in an icon theme directory. `--run` launches
 the app after packaging it.
 
-AppImage and Flatpak packages, and releases on Flathub, are in [Publishing](./publish.md#linux).
+AppImage and Flatpak packages are in [Packaging](./packaging.md#appimage-and-flatpak); releases on Flathub in [Publishing](./publish.md#linux).
 
 ## Embedding in a GTK app
 
