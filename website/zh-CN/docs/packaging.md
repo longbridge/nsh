@@ -420,6 +420,44 @@ nsh package --target linux --run
 `<id>.desktop` 和图标 `<id>.png`），以及同样内容的 `.nsh/out/<Name>.tar.gz`。请在 Linux 上打包：运行器是为构建它的机器构建的。运行应用的机器上必须装有
 GTK 4（4.14 及以上）、Pango 和 WebKitGTK 6.0（用于 Web 视图）。如何安装应用及其桌面条目：见 [Linux](./linux.md#打包)。
 
+### AppImage 与 Flatpak
+
+`--format appimage` 或 `--format flatpak` 还会根据 `nsh.json` 及其 `store` 部分写出 desktop 文件、256×256 图标和 AppStream
+metainfo（`<id>.metainfo.xml`）（见[发布](./publish.md#configuration)）。
+
+#### AppImage
+
+```sh
+nsh package --target linux --format appimage
+```
+
+在目录和压缩包之外，再写出 `.nsh/out/<Name>.AppDir` 和 `.nsh/out/<Name>-<arch>.AppImage`。AppImage 带有 desktop 文件、图标和
+metainfo，和压缩包一样使用系统的 GTK 4 与 WebKitGTK，所以目标系统需要装有它们。把它附在你的发布里，用户这样运行：
+
+```sh
+chmod +x Counter-x86_64.AppImage
+./Counter-x86_64.AppImage
+```
+
+#### Flatpak
+
+```sh
+nsh package --target linux --format flatpak
+```
+
+写出 `.nsh/out/flatpak/<id>.yml`：一个把包的压缩包安装到 GNOME runtime（提供 GTK 4 与 WebKitGTK）上的 manifest。装有
+`flatpak-builder` 时还会构建它，写出单文件包 `.nsh/out/<Name>.flatpak`，用于测试或分发：
+
+```sh
+flatpak install --user .nsh/out/Counter.flatpak
+flatpak run io.github.example.Counter
+```
+
+依赖：[appimagetool](https://github.com/AppImage/appimagetool/releases) 在 `PATH` 中或由 `NSH_APPIMAGETOOL` 指定（没有 FUSE
+时设置 `APPIMAGE_EXTRACT_AND_RUN=1`）；本地构建 Flatpak 需要 `flatpak`、`flatpak-builder` 以及 GNOME runtime 和 SDK。
+AppImage 包含 NSH，但不包含 GTK 4 和 WebKitGTK；AppImage 启动后没有窗口，说明系统缺少它们，Flatpak 会自带。发布到
+Flathub：见[发布](./publish.md#flathub)。
+
 ## Windows
 
 ```sh

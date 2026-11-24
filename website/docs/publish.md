@@ -1,6 +1,6 @@
 ---
 title: Publishing
-description: Publish NSH apps to app stores. Linux: release on Flathub with metadata from nsh.json, nsh publish linux, status and doctor.
+description: "Publish NSH apps to app stores: Flathub on Linux, with metadata from nsh.json, nsh publish linux, status and doctor."
 order: 21
 group: delivery
 ---
