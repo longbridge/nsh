@@ -468,7 +468,8 @@ position in the text.
 ### Keyboard focus
 
 On macOS, Windows, the web and Android, Tab moves the keyboard focus between its stops in tree order: the inputs, the views
-that take presses, and every `focusable` view. Focus styles (`focus:`, `.focus(..)`) style the focused view, and
+that take presses, and every `focusable` view; on macOS and in `nsh test`, Tab passes over a disabled input and one
+with `focusable={false}`, as it does over such views. Focus styles (`focus:`, `.focus(..)`) style the focused view, and
 Return or Space presses it when it takes presses. A click presses a view without focusing it, so focus styles show
 for keyboard focus only. On Android a pressable view is a hardware-keyboard stop, while a touch-mode tap focuses
 only an explicit `focusable` view (or one a ref focused), so tapping a button leaves a field editing; at the first

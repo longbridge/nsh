@@ -582,14 +582,56 @@ application id and nsh.json's window options, a TSX app's `nsh/bundle.nshc`, `<i
 Linux: the runner is built for the machine it is built on. GTK 4 (4.14 or later), Pango and WebKitGTK 6.0 (for web
 views) must be installed where the app runs. Installing it and the desktop entry: [Linux](./linux.md#packaging).
 
+
+### AppImage and Flatpak
+
+`--format appimage` or `--format flatpak` also writes the desktop entry, the 256×256 icon and AppStream metainfo
+(`<id>.metainfo.xml`) from `nsh.json` and its `store` section ([Store listing](./publish.md#store-listing)).
+
+#### AppImage
+
+```sh
+nsh package --target linux --format appimage
+```
+
+Writes `.nsh/out/<Name>.AppDir` and `.nsh/out/<Name>-<arch>.AppImage`, besides the directory and archive. The
+AppImage carries the desktop entry, icon and metainfo, and runs on the system's GTK 4 and WebKitGTK like the archive,
+so the target system needs them installed. Attach it to your release; users run:
+
+```sh
+chmod +x Counter-x86_64.AppImage
+./Counter-x86_64.AppImage
+```
+
+#### Flatpak
+
+```sh
+nsh package --target linux --format flatpak
+```
+
+Writes `.nsh/out/flatpak/<id>.yml`, a manifest that installs the package's archive on the GNOME runtime, which
+provides GTK 4 and WebKitGTK. When `flatpak-builder` is installed it also builds it and writes
+`.nsh/out/<Name>.flatpak`, a single-file bundle to test or hand out:
+
+```sh
+flatpak install --user .nsh/out/Counter.flatpak
+flatpak run io.github.example.Counter
+```
+
+Requirements: [appimagetool](https://github.com/AppImage/appimagetool/releases) on `PATH` or in `NSH_APPIMAGETOOL`
+(without FUSE, set `APPIMAGE_EXTRACT_AND_RUN=1`); for a local Flatpak build, `flatpak`, `flatpak-builder` and the GNOME
+runtime and SDK. AppImage bundles NSH but not GTK 4 or WebKitGTK; when an AppImage starts without a window, the system
+lacks them, and the Flatpak brings them. Releasing on Flathub: [Publishing](./publish.md#publish-to-flathub).
+
 ### Distribute
 
 `nsh package --target linux` writes the app as a directory and a `.tar.gz` of it, with a desktop entry and the icon.
 You upload the archive to your site or a GitHub Release, and users unpack it and install the desktop entry;
 [App Updates](./app-updates.md) keeps installed copies up to date.
 
-`nsh publish` has no Linux store upload, and `nsh package` does not write Flatpak, AppImage, `.deb` or `.rpm`
-packages yet.
+`--format appimage` and `--format flatpak` also write an AppImage and a Flatpak ([above](#appimage-and-flatpak));
+`nsh package` does not write `.deb` or `.rpm` packages yet. Releasing on Flathub is
+[Publishing](./publish.md#publish-to-flathub).
 
 #### Before the first release
 
@@ -682,6 +724,35 @@ embed the icon. The app runs from wherever its directory is copied. `nsh package
 installer (no administrator rights) with a Start menu shortcut, an Installed apps entry, and in-place upgrades. See
 [Windows](./windows.md#packaging).
 
+### MSIX
+
+```sh
+nsh package --target windows --format msix                  # .nsh/out/<Name>.msix, for the Store
+nsh package --target windows --format msix --sign cert.pfx  # signed, to install outside the Store
+```
+
+`--format msix` also writes `.nsh\out\<Name>.msix`: the packaged directory with `AppxManifest.xml` (a full-trust
+desktop app), the logos made from the app's icon, and the block map. It needs no Windows SDK, so Linux and macOS CI
+can make it (the icon is then not embedded in the `.exe`, but the Start menu and the Store use the logos). The
+package's identity comes from `nsh.json`:
+
+```json
+{
+  "windows": {
+    "identityName": "12345Example.MyApp",
+    "publisher": "CN=0A1B2C3D-1234-5678-9ABC-0123456789AB",
+    "publisherDisplayName": "Example Inc."
+  }
+}
+```
+
+Copy `identityName` and `publisher` from Partner Center (the app → Product identity: Package/Identity/Name and
+Package/Identity/Publisher); defaults are the app id and `CN=<name>`. The version is `version` with a fourth part 0,
+which the Store reserves. The Store signs what it publishes, so submit the unsigned package with
+`nsh publish windows` ([Publishing](./publish.md#publish-to-the-microsoft-store)). Outside the Store, Windows installs only signed
+packages: `--sign <cert.pfx>` signs it with `signtool` on Windows or `osslsigncode` (2.6 or newer) elsewhere, its
+password in `NSH_WINDOWS_CERT_PASSWORD`; the certificate's subject must equal `windows.publisher`.
+
 ### Sign and distribute
 
 `nsh package --target windows` writes everything a Windows release needs for direct download: the app's directory, a
@@ -689,7 +760,8 @@ installer (no administrator rights) with a Start menu shortcut, an Installed app
 certificate and upload them to your site or a GitHub Release; [App Updates](./app-updates.md) keeps installed copies
 up to date.
 
-`nsh publish` has no Windows store upload: NSH does not package MSIX for the Microsoft Store yet.
+For the Microsoft Store, package an [MSIX](#msix) and submit it with `nsh publish windows`
+([Publishing](./publish.md#publish-to-the-microsoft-store)).
 
 #### Before the first release
 
@@ -1221,15 +1293,15 @@ points the CLI at another directory laid out like the distribution's `runtime/` 
 
 ## Publish
 
-`nsh package` stops at the installable file. Uploading it to the App Store or Google Play is covered in
-[Publishing](./publish.md): [iOS](./publish.md#publish-to-the-app-store) and
-[Android](./publish.md#publish-to-google-play). Platforms without a store upload are distributed as described above:
-[macOS](#sign-notarize-and-distribute), [Windows](#sign-and-distribute), [Linux](#distribute) and
-[Web](#host-the-site).
+`nsh package` stops at the installable file. Releasing it on a store is covered in [Publishing](./publish.md):
+[App Store](./publish.md#publish-to-the-app-store), [Google Play](./publish.md#publish-to-google-play),
+[Flathub](./publish.md#publish-to-flathub) and [Microsoft Store](./publish.md#publish-to-the-microsoft-store). Apps
+outside a store are distributed as described above: [macOS](#sign-notarize-and-distribute),
+[Windows](#sign-and-distribute), [Linux](#distribute) and [Web](#host-the-site).
 
 ## See also
 
-- [Publishing](./publish.md): uploading to the App Store and Google Play
+- [Publishing](./publish.md): releasing on the App Store, Google Play, Flathub and the Microsoft Store
 - [CLI](./cli.md): every command
 - [App Updates](./app-updates.md): packaged apps that update themselves
 - [OTA Updates](./ota-updates.md): new TSX for packaged apps, iOS and Android included, without a new build

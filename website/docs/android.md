@@ -58,14 +58,18 @@ runtime in `symbols/<abi>/libnsh.so` (a Rust app's in `.nsh/rust/android-rust-re
 
 ## Upload to Google Play
 
-`nsh publish android` uploads an Android App Bundle (`.aab`) to Google Play's internal testing track:
+`nsh publish android` uploads an Android App Bundle (`.aab`) to a Google Play track, internal testing unless `--track`
+names another ([CLI](./cli.md#nsh-publish-android)):
 
 ```sh
-export NSH_PLAY_CREDENTIALS=~/keys/play-service-account.json   # never commit it
+export NSH_PLAY_CREDENTIALS=~/keys/play-service-account.json
+nsh publish doctor android
 nsh publish android .nsh/out/App.aab
+nsh publish android --from internal --track production --rollout 0.1
+nsh publish status android --json
 ```
 
-The Play Console and service account setup, the upload key, promoting a release and common errors:
+The Play Console and service account setup, the upload key, tracks, staged rollouts, the store listing and common errors:
 [Publish to Google Play](./publish.md#publish-to-google-play).
 
 ## Embedding in an Android app

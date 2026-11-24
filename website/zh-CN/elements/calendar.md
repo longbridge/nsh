@@ -152,6 +152,8 @@ fn due_date() -> impl IntoElement {
 | `focus:` | 键盘在它上面。 |
 | `data-range-start:`、`data-range-end:` | 是完整范围的第一天或最后一天（只有一天的范围两者都是）。 |
 | `data-range-middle:` | 是完整范围内、不在两端的一天。 |
+| `data-range-preview-start:`、`data-range-preview-end:` | 范围只选了一半时：是它的开始日，或是鼠标所在、键盘所在、再选一次就会作为结束日的那一天（只有一天的范围两者都是）。 |
+| `data-range-preview-middle:` | 范围只选了一半时：是开始日与那一天之间的一天。 |
 | `data-today:` | 是今天。 |
 | `data-outside:` | 是补满各周的前后月份的日期。 |
 
@@ -164,7 +166,16 @@ fn due_date() -> impl IntoElement {
 />
 ```
 
-`renderItem` 根据条目本身（`CalendarEntry`）绘制其内容，从不根据它的状态：绘制只做一次，条目被选中、获得焦点或进入范围时都保留，所以按键、选择和焦点进出都不再绘制，翻月时只为新出现的日期各绘制一次（一天的绘制按它的月份和日期保留：显示多个月时，仍在显示的月份保留它们的绘制）。
+选择第二个端点时，`data-range-preview-*` 变体标出再选一次会得到的范围：从开始日到鼠标最后移过的那一天，或在键盘移动后到键盘所在的那一天，与 React Aria 的范围日历高亮它的方式相同。鼠标和键盘以最后移动的为准。开始日之前的日期没有预览，因为在那里选择会重新开始范围；鼠标停在被禁用的日期上或离开日期时，预览留在原处。第二次选择后，预览让位于范围自己的变体。没有鼠标和键盘时（触摸屏上），半个范围只显示它的开始日。把预览画得和范围一样，就能在选定之前显示出范围的色带，末端那一天由 `hover:` 或 `focus:` 点亮：
+
+```tsx
+<Calendar
+  range
+  itemClass="group rounded-md hover:bg-accent focus:bg-accent selected:bg-primary selected:text-primary-foreground data-range-preview-middle:rounded-none data-range-preview-middle:bg-accent data-range-preview-start:rounded-r-none data-range-preview-end:rounded-l-none data-range-preview-start:data-range-preview-end:rounded-md"
+/>
+```
+
+`renderItem` 根据条目本身（`CalendarEntry`）绘制其内容，从不根据它的状态：绘制只做一次，条目被选中、获得焦点或进入范围时都保留，所以按键、鼠标、选择和焦点进出都不再绘制，翻月时只为新出现的日期各绘制一次（一天的绘制按它的月份和日期保留：显示多个月时，仍在显示的月份保留它们的绘制）。
 
 | 字段 | 含义 |
 |---|---|
@@ -196,7 +207,7 @@ fn due_date() -> impl IntoElement {
 | `bodyClass`、`bodyStyle` | `.body_class(..)`、`.body_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 主体：并排的各月，或月份、年份视图的行。 |
 | `monthClass`、`monthStyle` | `.month_class(..)`、`.month_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 日视图中的每个月。 |
 | `rowClass`、`rowStyle` | `.row_class(..)`、`.row_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 每一行：星期、一周、一行月份或年份。 |
-| `itemClass`、`itemStyle` | `.item_class(..)`、`.item_style(..)` | `string`、`StyleProp<TextStyle>` | 无 | 每个条目：`selected:`、`disabled:`、`focus:`；日期的 `data-range-start:`、`data-range-end:`、`data-range-middle:`、`data-today:`、`data-outside:`（[条目](#items)）。 |
+| `itemClass`、`itemStyle` | `.item_class(..)`、`.item_style(..)` | `string`、`StyleProp<TextStyle>` | 无 | 每个条目：`selected:`、`disabled:`、`focus:`；日期的 `data-range-start:`、`data-range-end:`、`data-range-middle:`、`data-range-preview-start:`、`data-range-preview-end:`、`data-range-preview-middle:`、`data-today:`、`data-outside:`（[条目](#items)）。 |
 | `renderItem` | `.render_item(..)` | `(item: CalendarEntry) => JSX.Element` | 无 | 由应用根据条目本身绘制的内容；否则显示其数字。 |
 | `class`、`style` | 样式方法 | `string`、`StyleProp<ViewStyle>` | 无 | 日历：头部在主体之上。 |
 

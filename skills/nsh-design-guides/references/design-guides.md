@@ -170,6 +170,7 @@ Do not copy these web assumptions blindly:
 | Mobile-first single column | One column on phones, a resizable shell with a defined minimum window size on the desktops |
 | Hover-revealed critical actions | Keyboard-, touch- and pointer-reachable actions that do not depend on hover |
 | A row of hover-only icon buttons | A visible primary action plus `Menu` or `ContextMenu` for secondary commands |
+| A row in a menu that expands its nested items in place (accordion) | A `Submenu`: it cascades beside its item on the desktops and takes the menu's place in a phone's sheet |
 | Link-styled text for application commands | A `Button` in the app's default, outline, or ghost style; link styling only for URLs, web resources, or email addresses |
 | Large touch density everywhere | Touch-sized targets on touch screens; medium density with a pointer, compact only where information work benefits |
 | A drawn header and alert card on every platform | The system's header and `AlertDialog` on iOS and Android; the page's `header` slot on the desktops and the web |
@@ -711,6 +712,13 @@ semantics.
 - Preserve the component family's geometry. Menu rows share vertical and horizontal padding, height, icon and
   checkmark slots, separators, radius, and state treatment. Do not imitate one menu with a custom popup whose spacing
   only approximates the system.
+- Nest menu items with `Submenu`. A group under one row of a menu (Language, Appearance, Open Recent, Export as)
+  is a `Submenu` whose trigger ends in a trailing chevron: on the desktops it cascades beside its row as the
+  pointer comes over it, its first item level with that row, as macOS, Windows and GTK menus do; on phones it
+  takes the menu's place in the sheet. Never expand nested items in place with a chevron that turns down and
+  indented rows: no platform's menu does that, the menu grows and moves under the pointer, and the rows lose the
+  submenu's Right and Left keys and its screen reader role. A short choice that should stay visible is a section
+  instead, flat and unindented: a title that is not an item, its checked items under it, separators around it.
 - Do not wrap a component merely to rename every prop or freeze all of its capabilities.
 - Move reusable behavior without product styling to `nsh/base`, or to a crate the app's products share; keep themed,
   opinionated presentation in the application's components.
@@ -1627,6 +1635,7 @@ report each group as passed or as what was fixed. A group not checked is not pas
   and paddings match across buttons, inputs, selects and toolbars of one size.
 - [ ] State colors come from per-variant tokens (normal, hover, active); selected and menu-open share one style.
 - [ ] Popups share one surface; focus rings sit outside the border with room to show.
+- [ ] Nested menu items are a `Submenu` that cascades beside its row; no row of a menu expands its items in place.
 
 **Other states**
 - [ ] Focus-visible rings on every keyboard-reachable control, outside the clip; selected, disabled and loading

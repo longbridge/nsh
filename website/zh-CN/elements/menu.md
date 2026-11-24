@@ -84,6 +84,8 @@ fn file_menu() -> impl IntoElement {
 }
 ```
 
+菜单中某一行下面的一组项（分享、语言、外观）用 `Submenu`，不要做成点一下箭头向下转、把下级项在原位展开的行：没有哪个平台的菜单这样做，这些行也会失去子菜单的按键和角色。需要一直可见的少量选项改用分组：一个不可选的标题，下面是可勾选的项，不缩进，前后用分隔线隔开（见[可勾选的条目](#checkable-items)）。
+
 这五个组件都来自 [`nsh/base`](../modules/nsh-base.md)。条目会自己找到所属的菜单，所以你可以自由地编排它们：放在视图里分组、加标签、用 `If` 让条目出现和消失。`popupClass` 设置菜单所呈现的弹出层或 sheet 的样式。两者需要不同样式时，沿用同一条规则，并在样式 getter 或绑定中读取，这样 iPad 的窗口大小变化时它也随之改变：
 
 ```tsx
@@ -330,7 +332,7 @@ import { MenuButton } from "nsh/base";
 
 条目是数据，每个都有应用自己的 `id`，由 `onSelect({ id })` 报告；勾选、`disabled` 和 `destructive`（在 iOS 上为红色，在 Android 上为主题的错误色）是条目的状态，由应用改变；带 `items` 的条目是子菜单，再加 `inline` 则是以 `label` 为标题、就地显示的分组。子菜单或分组加上 `singleSelection` 后，它自己的操作是一组单选（排序方式、外观），由应用勾选其中一项：iOS 显示为单选菜单，Android 显示为单选按钮，桌面显示为勾选标记；不加时各个勾选互相独立。这组单选只含该菜单自己的操作，其中的分组或子菜单各自设定。整个菜单的条目都是一组单选时，把它们放进一个不带标题、带 `singleSelection` 的 `inline` 分组（`{ id: "", label: "", inline: true, singleSelection: true, items }`）。子元素、`class` 和 `style` 构成触发器，在所有平台上都由应用绘制。
 
-- **iOS 和 Mac Catalyst**：触发器上覆盖一个透明的 `UIButton`，它的 `UIMenu` 是主操作：点按、VoiceOver 激活或硬件键盘都会立即打开菜单，不等待 JS。`icon` 是 SF Symbol；`title` 显示在菜单顶部。VoiceOver 访问的是这个按钮（名称来自 `accessibilityLabel`），而不是它下面的触发器内容。新的 `items` 在下次打开时生效。
+- **iOS 和 Mac Catalyst**：触发器上覆盖一个透明的 `UIButton`，它的 `UIMenu` 是主操作：点按、VoiceOver 激活或硬件键盘都会立即打开菜单，不等待 JS。`icon` 是 SF Symbol；`title` 显示在菜单顶部。菜单从触发器处长出，展开期间触发器隐藏、收起时恢复，与系统按钮一致。VoiceOver 访问的是这个按钮（名称来自 `accessibilityLabel`），而不是它下面的触发器内容。新的 `items` 在下次打开时生效。
 - **桌面（macOS、Windows、Linux）**：按下时在指针处以平台的上下文菜单显示这些条目（同 `nsh/desktop` 的 `Menu.popup`），分组之间用分隔线；不显示 `icon`、`title` 和 `destructive`。
 - **Android**：触发器上覆盖一个透明按钮，点按立即在触发器下方打开系统的弹出菜单；触发器在窗口靠末端的一半时，菜单与触发器末端对齐。`title` 是菜单的第一行，不能选择（TalkBack 读作已停用的条目）；`svg` 是一份 SVG 文档，作为条目的图标，在 Android 10 及以上按条目文字的颜色绘制（`icon` 是 iOS 用的）。勾选、单选按钮、子菜单和分组由系统绘制。点按菜单外面时，手指抬起才关闭菜单；返回键和返回手势都只关闭菜单，下面的对话框仍然打开。
 - **Web**：视图没有系统菜单；触发器照常显示，按下不打开任何内容。在 Web 上按 `platform.os` 改用 `Menu`。

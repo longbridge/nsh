@@ -64,6 +64,8 @@ mod roving;
 mod scrollbar;
 mod select;
 mod sheet;
+#[cfg(any(feature = "editor", feature = "rich-editor"))]
+mod sink_text;
 mod slider;
 mod sort;
 mod split_view;

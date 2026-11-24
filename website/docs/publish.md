@@ -1,31 +1,38 @@
 ---
 title: Publishing
-description: "Publishing an NSH app to app stores: App Store Connect and TestFlight for iOS, Google Play for Android, store credentials and release CI."
+description: "Publishing an NSH app to app stores: App Store Connect and TestFlight for iOS, Google Play for Android, Flathub for Linux and the Microsoft Store for Windows, with identity and listing from nsh.json, store credentials and release CI."
 order: 18.5
 group: publishing
 ---
 
 # Publishing
 
-Publishing is uploading a packaged app to an app store: App Store Connect for iOS and Google Play for Android, with
-`nsh publish ios` and `nsh publish android`. [Packaging](./packaging.md) builds the file first, and also covers the
-platforms without a store upload: signing, notarizing and distributing macOS, Windows and Linux apps, and hosting a
-web app.
+Publishing is releasing a packaged app on an app store: App Store Connect for iOS, Google Play for Android, Flathub
+for Linux and the Microsoft Store for Windows, with `nsh publish <platform>`. Each store reads the app's identity and
+listing from `nsh.json`, so a release needs only the packaged file. [Packaging](./packaging.md) builds that file first,
+and also covers shipping without a store: archives, installers, AppImage, Flatpak and MSIX files, signing and
+notarizing, and hosting a web app.
 
 - [iOS](#publish-to-the-app-store): App Store Connect and TestFlight
 - [Android](#publish-to-google-play): Google Play
+- [Linux](#publish-to-flathub): Flathub
+- [Windows](#publish-to-the-microsoft-store): the Microsoft Store
 
 ## What each store supports
 
 | Platform | What `nsh package` writes | Store | What `nsh publish` does |
 |---|---|---|---|
-| iOS | A signed `.ipa` | App Store Connect: TestFlight, then the App Store | Uploads the IPA for TestFlight (`nsh publish ios`) |
-| Android | A signed `.aab` (or `.apk`) | Google Play | Uploads the bundle and releases it to the internal testing track (`nsh publish android`) |
+| iOS | A signed `.ipa` | App Store Connect: TestFlight, then the App Store | Uploads the IPA, waits for processing, gives it to TestFlight groups, fills the App Store version and listing, and submits for review with `--submit` (`nsh publish ios`) |
+| Android | A signed `.aab` (or `.apk`) | Google Play | Uploads the bundle and releases it to a track, internal testing unless `--track` says otherwise, with staged rollouts, promotion and the store listing (`nsh publish android`) |
+| Linux | A `.tar.gz` (also AppImage, Flatpak) | Flathub | Writes the Flathub manifest for the release archive; you open the pull request (`nsh publish linux`) |
+| Windows | An `.msix` (also a `.zip` and an installer) | Microsoft Store | Submits the package to certification (`nsh publish windows`) |
 
-Store review submissions, phased rollouts and production releases are made in each store's console; no `nsh` command
-makes them. macOS, Windows, Linux and the web have no store upload in NSH yet; they ship as direct downloads or a
-static site, described in Packaging: [macOS](./packaging.md#sign-notarize-and-distribute),
-[Windows](./packaging.md#sign-and-distribute), [Linux](./packaging.md#distribute) and [Web](./packaging.md#host-the-site).
+`nsh publish status <platform>` reports what the store has, and `nsh publish doctor <platform>` checks the
+configuration and credentials without changing anything. Store review of a first version, and what the console alone
+can set (pricing, age ratings, privacy details), stay in each store's console. macOS and the web have no store upload in
+NSH yet; they ship as direct downloads or a static site, described in Packaging:
+[macOS](./packaging.md#sign-notarize-and-distribute) and [Web](./packaging.md#host-the-site), as do Windows and Linux
+apps outside a store ([Windows](./packaging.md#sign-and-distribute), [Linux](./packaging.md#distribute)).
 
 `nsh publish <ENTRY> --key … --cert …`, without a platform, makes a signed package for
 [OTA Updates](./ota-updates.md) and [Signed packages](./signed-packages.md), not a store upload.
@@ -37,8 +44,9 @@ static site, described in Packaging: [macOS](./packaging.md#sign-notarize-and-di
    Both can also be given on the command line (`--app-version`, `--build`), which is handy when CI numbers builds.
 2. **Package.** iOS needs a Mac with Xcode; Android packages anywhere. See [Packaging](./packaging.md).
 3. **Sign.** Both sign as they package, given an Apple Distribution identity and profile, or an upload keystore.
-4. **Publish.** Upload to the store with `nsh publish ios` or `nsh publish android`.
-5. **Follow it up.** Processing, review and the move from testing to production happen in the store's console.
+4. **Publish.** Release it on the store with `nsh publish <platform>`; the app's store identity comes from `nsh.json`.
+5. **Follow it up.** `nsh publish status <platform>` tells when the release is live; review and anything the commands do
+   not cover happen in the store's console.
 
 ```json
 {
@@ -65,6 +73,82 @@ release CI fills from its secrets:
 | iOS | App Store Connect team API key: issuer ID, key ID, `.p8` file | `NSH_APP_STORE_ISSUER_ID`, `NSH_APP_STORE_KEY_ID`, `NSH_APP_STORE_PRIVATE_KEY` |
 | Android | Upload keystore and its password | `nsh package --keystore … --key-alias …`, `NSH_KEYSTORE_PASSWORD` |
 | Android | Google Cloud service account JSON key | `NSH_PLAY_CREDENTIALS` or `--credentials` |
+| Linux | None: Flathub builds from the manifest, and the pull request is yours | |
+| Windows | Azure AD app associated with Partner Center | `NSH_MS_TENANT_ID`, `NSH_MS_CLIENT_ID`, `NSH_MS_CLIENT_SECRET` |
+
+The app's own store identity is not a secret and belongs in `nsh.json` `store` (below): the App Store app ID, the
+Microsoft Store product ID, the Flathub archive URL.
+
+## Store listing
+
+Every `nsh publish <store>` reads one listing. Put it in `nsh.json` `"store"`, in a `store/` directory beside
+`nsh.json`, or both; a value in `nsh.json` wins over the file.
+
+```json
+{
+  "id": "com.example.notes",
+  "version": "1.2.0",
+  "store": {
+    "locales": {
+      "en-US": {
+        "name": "My App",
+        "subtitle": "Notes that sync",
+        "shortDescription": "Write notes on every device and keep them in sync.",
+        "description": "My App keeps your notes in sync.\n\nWrite once, read anywhere.",
+        "keywords": "notes,sync",
+        "releaseNotes": "Faster sync.",
+        "supportUrl": "https://example.com/support",
+        "marketingUrl": "https://example.com",
+        "screenshots": { "phone": ["store/en-US/phone-1.png"] }
+      }
+    },
+    "ios": {
+      "appId": "6835723652",
+      "usesNonExemptEncryption": false,
+      "betaGroups": ["QA"],
+      "release": "phased"
+    },
+    "linux": {
+      "license": "MIT",
+      "developer": "Example Inc.",
+      "categories": ["Office"],
+      "screenshots": ["https://example.com/screenshot.png"],
+      "archiveUrl": "https://github.com/example/notes/releases/download/v{version}/MyApp.tar.gz"
+    },
+    "windows": { "productId": "9NBLGGH4R315" }
+  }
+}
+```
+
+```text
+store/en-US/description.txt        # also name, subtitle, keywords, promotional_text,
+store/en-US/release_notes.txt      # release_notes, support_url, marketing_url, privacy_policy_url
+store/en-US/screenshots/phone/01.png
+store/en-US/screenshots/tablet/01.png
+store/en-US/short_description.txt  # Google Play
+store/en-US/android/phoneScreenshots/1.png   # a store's own image types, by platform
+```
+
+Every store reads its identity from here or from the app's `id`, so a configured app publishes with the artifact
+alone, credentials coming from the environment or their usual key paths:
+
+| Store | Identity | Publish |
+|---|---|---|
+| App Store | `store.ios.appId` | `nsh publish ios <App.ipa>` |
+| Google Play | `id` (the package name) | `nsh publish android <App.aab>` |
+| Flathub | `id`; the archive URL `store.linux.archiveUrl` | `nsh publish linux <App.tar.gz>` |
+| Microsoft Store | `store.windows.productId` (package identity: `windows`) | `nsh publish windows <App.msix>` |
+
+`nsh publish status <store>` and `nsh publish doctor <store>` take the same configuration. Google Play uses
+`shortDescription` and the images in `store/<locale>/android/<type>/`; Flathub uses the `en-US` listing's `subtitle`
+as the AppStream summary.
+
+Locales are BCP 47 tags as App Store Connect names them (`en-US`, `zh-Hans`). Screenshots are grouped by device class
+in display order: `phone` is the 6.9" iPhone size (`APP_IPHONE_67`), `tablet` the 13" iPad size
+(`APP_IPAD_PRO_3GEN_129`); an App Store Connect display type such as `APP_IPHONE_65` is taken as it is. A screenshot
+set is replaced only when its images changed. Fields left out keep what the store has. `releaseNotes`
+(`release_notes.txt`) is the release notes of every store; `whatsNew` and `whats_new.txt` are read too. App Store
+Connect rejects release notes on an app's first version. Keys `nsh.json` does not know are ignored.
 
 ## Automate it
 
@@ -110,8 +194,9 @@ workflow installs, so a release builds with the same NSH every time.
 
 An iOS app reaches users through App Store Connect: you upload a build, testers get it in TestFlight, and once Apple
 approves it, the App Store offers it. `nsh package --target ios` builds and signs the IPA; `nsh publish ios` uploads it
-to App Store Connect. Everything after the upload (TestFlight groups, the store listing, review and release) is done in
-App Store Connect.
+to App Store Connect, waits for processing, gives the build to TestFlight groups, fills the App Store version and its
+listing, and submits it for review when asked. Creating the app record, pricing, the privacy details and the age rating
+are done in App Store Connect.
 
 Both commands run on macOS with Xcode installed, for Rust, Rust + TSX and TSX apps alike.
 
@@ -128,7 +213,7 @@ Once per app:
 4. **Create an App Store provisioning profile** for that App ID and certificate, and download the
    `.mobileprovision` file. Keep it outside the repository.
 5. **Create the app in App Store Connect** (My Apps → New App) with the same bundle ID. Its numeric **Apple ID**, shown
-   under App Information, is the app id `nsh publish ios` takes.
+   under App Information, is the app id `nsh publish ios` takes: put it in `nsh.json` `store.ios.appId`.
 6. **Create a team API key** in App Store Connect under Users and Access → Integrations → App Store Connect API, with
    the Developer, App Manager or Admin role. Note its **Key ID** and the **Issuer ID** shown above the list, and
    download the `.p8` private key; Apple lets you download it only once.
@@ -198,23 +283,25 @@ codesign -d --entitlements - /tmp/notes-ipa/Payload/Notes.app
 `nsh publish ios <IPA>` uploads the IPA to App Store Connect with Apple's
 [build uploads API](https://developer.apple.com/documentation/appstoreconnectapi/build-uploads):
 
+The app's Apple ID goes in `nsh.json` (`{ "store": { "ios": { "appId": "1234567890" } } }`). Put the `.p8` key at
+`~/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8`, where Apple's tools also look, and export the issuer and key
+IDs once in your shell profile; a configured app then publishes with the IPA alone:
+
 ```sh
-export NSH_APP_STORE_APP_ID=1234567890
 export NSH_APP_STORE_ISSUER_ID=69a6de70-0000-0000-0000-000000000000
 export NSH_APP_STORE_KEY_ID=ABC123DEFG
-export NSH_APP_STORE_PRIVATE_KEY=/secure/AuthKey_ABC123DEFG.p8
 nsh publish ios .nsh/out/Notes.ipa
 ```
 
 | Flag | Environment variable | Meaning |
 |---|---|---|
-| `--app-id <ID>` | `NSH_APP_STORE_APP_ID` | The numeric Apple ID of the App Store Connect app. |
+| `--app-id <ID>` | `NSH_APP_STORE_APP_ID` | The numeric Apple ID of the App Store Connect app. Default: `store.ios.appId`. |
 | `--issuer-id <ID>` | `NSH_APP_STORE_ISSUER_ID` | The team API key's issuer ID. |
 | `--key-id <ID>` | `NSH_APP_STORE_KEY_ID` | The API key's ID. |
-| `--private-key <PATH>` | `NSH_APP_STORE_PRIVATE_KEY` | The `.p8` private key file. |
+| `--private-key <PATH>` | `NSH_APP_STORE_PRIVATE_KEY` | The `.p8` private key file. Default: `AuthKey_<KEY_ID>.p8` in `./private_keys`, `~/.appstoreconnect/private_keys`, `~/.private_keys` or `~/private_keys`. |
 
-All four are required; a flag overrides its variable. Keep them in your shell profile or the CI's secrets, never in
-`nsh.json` or the repository.
+Flags override environment variables, which override `nsh.json`. Keep the key and IDs in your shell profile or the
+CI's secrets, never in `nsh.json` or the repository.
 
 What the command does:
 
@@ -222,20 +309,42 @@ What the command does:
 2. Signs a short-lived ES256 token with the API key, and checks that the IPA's bundle ID is the App Store Connect app's.
 3. Creates a build upload, streams the IPA in the parts Apple asks for, and commits its SHA-256 checksum.
 4. Prints the upload ID and the app's TestFlight page.
+5. Waits for Apple to process the build (`--timeout` minutes, default 60), answers export compliance from
+   `store.ios.usesNonExemptEncryption`, and gives the build to the TestFlight groups in `store.ios.betaGroups` (or
+   `--beta-group`).
+6. Creates or reuses the App Store version named by the IPA's version, attaches the build, sets the release mode and
+   writes the [store listing](#store-listing) and screenshots. It submits for App Review **only** with `--submit`.
 
-Success means Apple accepted the file for processing. Processing takes from a few minutes to an hour; Apple then
-checks the signature, the profile, the icons and `Info.plist`, and emails the account holder about any problem.
+| Flag | Meaning |
+|---|---|
+| `--entry <DIR>` | The app whose `nsh.json` holds the store listing (default: `.`). |
+| `--no-wait` | Stop once Apple accepts the upload. |
+| `--testflight-only` | Stop after processing, compliance and TestFlight groups. |
+| `--beta-group <NAME>` | TestFlight group to add the build to (repeatable). |
+| `--release manual\|auto\|phased` | How an approved version goes live (default: `store.ios.release`, else `manual`). |
+| `--submit` | Submit the version for App Review. |
+
+A version that is already in review or live is never changed: raise `version` in `nsh.json`. Processing takes from a
+few minutes to an hour; Apple checks the signature, the profile, the icons and `Info.plist`, and emails the account
+holder about any problem.
 
 ### After the upload
+
+```sh
+nsh publish status ios --json   # exit 0 live, 10 processing/in review, 11 draft, 12 action needed
+nsh publish doctor ios          # read-only: credentials, nsh.json, listing, app access
+```
+
+`doctor` makes only read requests (`--offline` makes none) and exits non-zero when a check fails. Both run on any OS.
 
 In App Store Connect:
 
 - **TestFlight**: once processed, the build is available to internal testers (members of your team) at once. External
   testers need a group and a Beta App Review of the first build of each version.
-- **The App Store listing**: name, subtitle, description, keywords, screenshots for each device size, the privacy
-  details (App Privacy) and the age rating. They are entered in App Store Connect.
-- **Review**: add the build to the version, then Add for Review and Submit. After approval, the version is released
-  manually, automatically, or on a date, as the version's release option says.
+- **What only App Store Connect sets**: the privacy details (App Privacy), the age rating and pricing. Apple does not
+  allow creating the app record through the API, so create it once there.
+- **Review**: `--submit` sends the version for review; after approval it is released manually, automatically or in
+  phases, as `--release` (or `store.ios.release`) says.
 
 ### Common errors
 
@@ -261,8 +370,8 @@ package and upload again.
 
 Google Play takes Android App Bundles (`.aab`). `nsh package --target android --format aab` builds and signs one with
 your upload key, without Gradle; `nsh publish android` uploads it with the Google Play Developer API and releases it
-to the **internal testing** track. Promoting it to closed, open or production testing, the store listing and review
-are done in Play Console.
+to a track: **internal testing** unless `--track` names another. It also promotes releases between tracks, runs staged
+rollouts and updates the store listing. App content declarations and review are done in Play Console.
 
 Both commands run on macOS, Linux and Windows.
 
@@ -342,7 +451,7 @@ To try a bundle on a device before uploading, use [bundletool](https://github.co
 `bundletool build-apks --bundle .nsh/out/Notes.aab --output notes.apks --connected-device`, then
 `bundletool install-apks --apks notes.apks`.
 
-### Upload to the internal testing track
+### Upload and release
 
 ```sh
 export NSH_PLAY_CREDENTIALS=/secure/play-service-account.json
@@ -350,7 +459,8 @@ nsh publish android .nsh/out/Notes.aab
 ```
 
 ```sh
-nsh publish android <BUNDLE.aab> [--entry <DIR>] [--package <NAME>] [--credentials <KEY.json>] [--draft]
+nsh publish android <BUNDLE.aab> [--track <TRACK>] [--rollout <FRACTION>] [--status <STATUS>] [--listing] [--draft]
+nsh publish android --from <TRACK> --track <TRACK> [--rollout <FRACTION>]
 ```
 
 | Flag | Default | Meaning |
@@ -358,29 +468,48 @@ nsh publish android <BUNDLE.aab> [--entry <DIR>] [--package <NAME>] [--credentia
 | `--entry <DIR>` | `.` | The app's directory or entry, whose `nsh.json` `id` is the package name. |
 | `--package <NAME>` | `nsh.json` `id` | The package name on Google Play. |
 | `--credentials <KEY.json>` | `NSH_PLAY_CREDENTIALS` | The service account's JSON key. |
+| `--track <TRACK>` | `internal` | `internal`, `alpha`, `beta`, `production` or a custom track's name. Reaching testers beyond internal, or the public, always takes an explicit `--track`. |
+| `--from <TRACK>` | | Promote: release the version codes of this track's newest release to `--track`, uploading nothing. |
+| `--rollout <FRACTION>` | | A staged rollout to this fraction of the track's users, above 0 and below 1, e.g. `0.1`. |
+| `--status <STATUS>` | `completed` | `completed`, `in-progress` (default with `--rollout`), `halted` (stop a staged rollout) or `draft`. |
 | `--draft` | off | Release as a draft, which Google Play requires until the app's first release is made in Play Console. |
+| `--store <DIR>` | `store` | The store directory of the [store listing](#store-listing). |
+| `--listing` | off | Also update the name, descriptions and images on Play from the store listing, replacing what Play has for those locales. |
 
 What the command does, in one edit of the app on Google Play:
 
 1. Signs in as the service account.
 2. Opens an edit, uploads the bundle, and reads the version code Google Play found in it.
-3. Sets the internal testing track's release to that version code (completed, or a draft with `--draft`).
-4. Commits the edit. If any step fails, the edit is deleted, so nothing is half released.
+3. Sets the track's release to that version code, with the locales' release notes (completed, staged, or a draft).
+4. With `--listing`, writes the listing texts and, for each image type present, replaces Play's images of that type.
+5. Commits the edit. If any step fails, the edit is deleted, so nothing is half released.
 
-It prints the version code that is now on the internal testing track. Internal testers (up to 100, from the tester list
-in Play Console) get the update from Google Play within minutes.
+It prints the version code that is now on the track. Internal testers (up to 100, from the tester list in Play
+Console) get the update from Google Play within minutes. To raise a staged rollout, release the same version again
+with a larger `--rollout`; to finish it, release it with no `--rollout`:
+
+```sh
+nsh publish android --from internal --track production --rollout 0.1
+nsh publish android --from internal --track production
+```
+
+Image types are Google Play's, as directories in `store/<locale>/android/`: `phoneScreenshots`,
+`sevenInchScreenshots`, `tenInchScreenshots`, `tvScreenshots`, `wearScreenshots`, `icon`, `featureGraphic` and
+`tvBanner`.
+
+```sh
+nsh publish status android --json   # every track's releases: status, version codes, rollout fraction
+nsh publish doctor android          # read-only: the key, the package name, the store directory, access to the app
+```
 
 ### After the upload
 
 In Play Console:
 
-- **Promote the release**: Testing → Internal testing → the release → Promote release, to closed testing, open
-  testing or production. A new personal developer account must run a closed test before production access is granted.
-- **The store listing**: app name, short and full description, icon, feature graphic, phone and tablet screenshots.
+- **Production access**: a new personal developer account must run a closed test before production access is granted.
 - **App content**: privacy policy, data safety, ads, content rating and target audience, required before the first
   production release.
-- **Review and rollout**: releases to closed, open and production tracks are reviewed; a production release can be
-  rolled out to a percentage of users and raised later.
+- **Review**: releases to closed, open and production tracks are reviewed before they reach users.
 
 ### Common errors
 
@@ -393,11 +522,246 @@ In Play Console:
 | `could not open an edit on Google Play` with HTTP 404 | No app with this package name exists in Play Console: create it, or fix `id`/`--package`. |
 | `Google Play refused the bundle` … `version code that has already been used` | Raise `build` in `nsh.json` and package again. |
 | `Google Play refused the bundle` … signed with the wrong key | The bundle was signed with the debug key or another upload key: package with the upload keystore registered for the app. |
-| `Google Play refused the internal testing release` … draft | The app has had no release made in Play Console yet: pass `--draft` and roll it out in Play Console. |
+| `Google Play refused the … release` … draft | The app has had no release made in Play Console yet: pass `--draft` and roll it out in Play Console. |
+
+## Publish to Flathub
+
+On Linux the store is Flathub: users install from GNOME Software, KDE Discover or `flatpak install flathub <id>`.
+Flathub builds and signs the app itself from a manifest; NSH prepares the manifest from the release archive, you open
+the pull request. Archives, AppImage and local Flatpak bundles are packages, not store releases: see
+[Packaging](./packaging.md#appimage-and-flatpak).
+
+### Before the first release
+
+- The app packages on Linux: `nsh package --target linux` works ([Linux](./linux.md#packaging)).
+- `nsh.json` has an `id` in reverse-DNS form. On Flathub it must be a domain you control, or
+  `io.github.<user>.<App>` for a GitHub project.
+- A square icon in `nsh.json` `icon`, ideally 256×256 or larger: NSH writes it at 256×256 and `doctor` warns when it has to scale it up.
+- Optional, for `doctor`: `appstreamcli` and `desktop-file-validate` (packages `appstream` and `desktop-file-utils`).
+
+`nsh publish doctor linux` reports each of these.
+
+### Configure the app
+
+```json
+{
+  "name": "Counter",
+  "id": "io.github.example.Counter",
+  "version": "1.2.0",
+  "icon": "icon.png",
+  "store": {
+    "locales": {
+      "en-US": {
+        "subtitle": "Count things up and down",
+        "description": "A small counter.\n\nParagraphs are separated by blank lines.",
+        "keywords": "count,tally",
+        "marketingUrl": "https://example.com"
+      }
+    },
+    "linux": {
+      "license": "MIT",
+      "developer": "Example",
+      "categories": ["Utility"],
+      "screenshots": ["https://example.com/counter.png"],
+      "archiveUrl": "https://github.com/example/counter/releases/download/v{version}/Counter.tar.gz"
+    }
+  },
+  "linux": {
+    "flatpak": {
+      "runtimeVersion": "49",
+      "finishArgs": ["--share=ipc", "--socket=wayland", "--socket=fallback-x11", "--device=dri"]
+    }
+  }
+}
+```
+
+| Field | Used for |
+|---|---|
+| `name` | The executable, the desktop entry's `Name`, the file names |
+| `id` | The desktop entry, metainfo and manifest file names (`<id>.desktop`, `<id>.metainfo.xml`, `<id>.yml`) and `StartupWMClass` |
+| `version` | The metainfo release, and what `status` compares with Flathub |
+| `icon` | `<id>.png` at 256×256 |
+| `store.locales.en-US.subtitle` | The one-line AppStream summary. Flathub: at most 35 characters, no trailing period |
+| `store.locales.en-US.description` | The long description; blank lines separate paragraphs |
+| `store.locales.en-US.keywords` | Search keywords, comma separated (a list works too) |
+| `store.locales.en-US.marketingUrl` | The metainfo `homepage` link, unless `store.linux.homepage` is set |
+| `store.linux.license` | `project_license`, an SPDX expression |
+| `store.linux.developer` | The developer name shown in software centres |
+| `store.linux.categories` | freedesktop categories for the desktop entry and metainfo. Default `Utility` |
+| `store.linux.screenshots` | Image URLs; the first is the default screenshot. Flathub requires at least one |
+| `store.linux.archiveUrl` | Where each release archive is downloaded from; `{version}` is `nsh.json` `version` |
+| `linux.flatpak.runtimeVersion` | The GNOME runtime version. Default: the one NSH is tested with |
+| `linux.flatpak.finishArgs` | Replaces the sandbox permissions. Default: Wayland with X11 fallback, IPC, the GPU and the network |
+
+`store` is shared by every store `nsh publish` targets; fill it once ([Store listing](#store-listing)).
+The listing texts come from the `en-US` locale (else the first one), and may also be files in `store/en-US/`
+(`subtitle.txt`, `description.txt`, `keywords.txt`). Flathub names the app by `id`.
+
+### Release
+
+Flathub takes no uploads. Each app is a GitHub repository, `flathub/<id>`, whose manifest names the release archive by
+URL and SHA-256; Flathub builds and publishes every change merged there.
+
+#### First release
+
+1. `nsh publish doctor linux` until it passes.
+2. `nsh package --target linux` and upload `.nsh/out/<Name>.tar.gz` to a release with a stable URL, such as a GitHub
+   release asset.
+3. Write the manifest:
+
+   ```sh
+   nsh publish linux .nsh/out/Counter.tar.gz
+   ```
+
+   The archive's URL is `store.linux.archiveUrl` with the version filled in (or `--url`). This writes `.nsh/out/flathub/<id>/<id>.yml`.
+4. Submit it as described in [Flathub's submission guide](https://docs.flathub.org/docs/for-app-authors/submission): a
+   pull request to `flathub/flathub` with the manifest. Flathub reviews it and creates `flathub/<id>`.
+
+#### Later releases
+
+Bump `version`, package, upload the new archive, then point `--out` at your checkout of `flathub/<id>`:
+
+```sh
+nsh publish linux .nsh/out/Counter.tar.gz --out ../flathub-io.github.example.Counter
+```
+
+When the manifest exists, only the archive source marked `# nsh: release archive` is updated (`url` and `sha256`); the
+rest stays as you or Flathub's reviewers edited it. Commit and open a pull request on `flathub/<id>`. NSH never opens
+pull requests for you.
+
+### Status and checks
+
+```sh
+nsh publish status linux [--json]
+```
+
+Prints the version Flathub lists for the app and exits 1 until it equals `nsh.json`'s `version`, so CI can wait on a
+release going live. An app not on Flathub yet is reported as such.
+
+```sh
+nsh publish doctor linux
+```
+
+Checks the `id`, the store fields Flathub requires (summary length, license, screenshots), that the icon is square (warning when it is under 256×256), validates
+the generated metainfo with `appstreamcli` and the desktop entry with `desktop-file-validate` when installed. It exits non-zero while something Flathub requires is missing.
+
+### Commands
+
+```sh
+nsh publish linux <ARCHIVE.tar.gz> [--url <URL>] [--entry <DIR>] [--out <DIR>]
+nsh publish status linux [--entry <DIR>] [--json]
+nsh publish doctor linux [--entry <DIR>]
+```
+
+| Flag | Description |
+|---|---|
+| `--url <URL>` | Where the archive is downloaded from (HTTPS). Default: `store.linux.archiveUrl` |
+| `--entry <DIR>` | The app's directory or entry. Default `.` |
+| `--out <DIR>` | Where to write `<id>.yml`. Default `.nsh/out/flathub/<id>` |
+| `--json` | `status` only: machine-readable output |
+
+### Common errors
+
+| Symptom | Cause and fix |
+|---|---|
+| `doctor`: summary too long | Flathub allows 35 characters; shorten the `en-US` listing's `subtitle` |
+| `doctor`: no screenshots | Add at least one URL to `store.linux.screenshots` |
+| Flathub build fails on architecture | The archive is built for this machine's processor (`only-arches`); build and add an archive per architecture |
+| `nsh publish linux` asks for `--url` | Set `store.linux.archiveUrl` |
+| `status` says not on Flathub | The first submission isn't merged yet, or the `id` differs from the Flathub repository name |
+
+### What is not covered
+
+- No Snap Store or AUR releases.
+- No upload to Flathub or opening pull requests: Flathub builds from the manifest you submit.
+
+## Publish to the Microsoft Store
+
+On Windows the store is the Microsoft Store. `nsh publish windows` submits an MSIX package to it through the Store
+submission API; the Store certifies, signs and publishes it.
+
+### Before the first release
+
+- The app is reserved in [Partner Center](https://partner.microsoft.com/dashboard), and its first submission
+  (pricing, age ratings, the store listing) is made there. Later releases go through `nsh publish windows`.
+- An MSIX package: `nsh package --target windows --format msix`, unsigned ([Packaging](./packaging.md#msix)). It
+  builds on Linux and macOS too.
+- An Azure AD app associated with Partner Center (Account settings → User management → Azure AD applications, role
+  Manager). Its credentials are read only from the environment: `NSH_MS_TENANT_ID`, `NSH_MS_CLIENT_ID` and
+  `NSH_MS_CLIENT_SECRET`.
+
+### Configure the app
+
+```json
+{
+  "id": "com.example.notes",
+  "version": "1.2.0",
+  "windows": {
+    "identityName": "12345Example.MyApp",
+    "publisher": "CN=0A1B2C3D-1234-5678-9ABC-0123456789AB",
+    "publisherDisplayName": "Example Inc."
+  },
+  "store": {
+    "locales": { "en-US": { "releaseNotes": "Faster sync." } },
+    "windows": { "productId": "9NBLGGH4R315" }
+  }
+}
+```
+
+| Field | Used for |
+|---|---|
+| `store.windows.productId` | The app's Store ID (Partner Center → the app → Product identity). `storeId` is read too |
+| `windows.identityName`, `windows.publisher` | The package identity, copied from the same page; the Store rejects a package whose identity differs |
+| `version` | The package version, with a fourth part 0 |
+| `store.locales.<tag>.releaseNotes` | The release notes of that listing language (or `store/<tag>/release_notes.txt`) |
+
+### Release
+
+```sh
+nsh package --target windows --format msix
+nsh publish windows .nsh/out/MyApp.msix --wait
+```
+
+Creates a submission from the last published one, replaces its package, sets each listing's release notes, uploads the
+package and commits it to certification. A submission that fails before it is committed is deleted. An app with a
+pending submission (a draft in Partner Center) is refused, so nothing a person started is overwritten. `--wait` polls
+until certification ends and fails when the Store rejects the package.
+
+### Status and checks
+
+```sh
+nsh publish status windows [--json]   # exit 0 published, 2 in progress, 1 failed
+nsh publish doctor windows            # read-only: nsh.json, credentials, the Store ID
+```
+
+### Commands
+
+```sh
+nsh publish windows <APP.msix> [--entry <DIR>] [--product-id <ID>] [--notes <FILE>|<LANG>=<FILE>]... [--wait]
+nsh publish status windows [--entry <DIR>] [--product-id <ID>] [--submission <ID>] [--json]
+nsh publish doctor windows [--entry <DIR>] [--product-id <ID>]
+```
+
+| Flag | Description |
+|---|---|
+| `--product-id <ID>` | The Store ID. Default: `store.windows.productId` |
+| `--notes <FILE>` or `<LANG>=<FILE>` | Release notes for every listing, or for one language. Default: the store listing's `releaseNotes` |
+| `--wait` | Wait until certification ends |
+| `--submission <ID>` | `status` only: a submission other than the latest |
+| `--entry <DIR>` | The app's directory or entry. Default `.` |
+
+### Common errors
+
+| Symptom | Cause and fix |
+|---|---|
+| `doctor`: credentials missing | Set `NSH_MS_TENANT_ID`, `NSH_MS_CLIENT_ID` and `NSH_MS_CLIENT_SECRET` |
+| Refused: a pending submission exists | Finish or delete the draft in Partner Center, then publish again |
+| Certification fails on the package identity | Copy `identityName` and `publisher` from Partner Center's Product identity |
+| Certification fails on the version | Raise `version`: each submission needs a higher one |
 
 ## See also
 
-- [Packaging](./packaging.md): `nsh package` for every platform, and distributing apps without a store
+- [Packaging](./packaging.md): `nsh package` for every platform, AppImage, Flatpak and MSIX files, and distributing apps without a store
 - [CLI](./cli.md): every command and flag
 - [App Updates](./app-updates.md): apps that update themselves
 - [OTA Updates](./ota-updates.md): new TSX without a store release
