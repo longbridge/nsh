@@ -1664,7 +1664,8 @@ fn focus_pane(tree: &Mounter) -> Option<NodeId> {
 
 /// Whether the box `pane` holds rows the keys move through: a scroll view
 /// (a list) or a selected item, in its own content (not inside a framed
-/// box within it, a pane of its own).
+/// box within it, a pane of its own). A chosen tab (a segmented control's)
+/// is a control's value, not a row: a card around one keeps its line.
 fn holds_rows(tree: &Mounter, pane: NodeId) -> bool {
     let mut stack: Vec<NodeId> = tree
         .get(pane)
@@ -1673,7 +1674,9 @@ fn holds_rows(tree: &Mounter, pane: NodeId) -> bool {
         let Some(view) = tree.get(id) else {
             continue;
         };
-        if view.kind == ViewKind::Scroll || view.props.accessibility.state.selected {
+        let row = view.props.accessibility.state.selected
+            && view.props.accessibility.role != AccessibilityRole::Tab;
+        if view.kind == ViewKind::Scroll || row {
             return true;
         }
         let lined = view

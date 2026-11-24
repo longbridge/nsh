@@ -484,6 +484,93 @@ fn a_current_row_is_an_accent_rail_and_label_not_a_band() {
     assert_ne!(buffer[(1, 0)].bg, Color::Blue, "no accent band");
 }
 
+/// A framed card holding a segmented control (a row of tabs, one chosen),
+/// as the gallery's Keyboard card.
+#[component]
+fn FramedSegmented() -> impl IntoElement {
+    let tab = |label: &'static str, selected: bool| {
+        view()
+            .w(px(48.0))
+            .h(px(16.0))
+            .on_press(|_: &()| {})
+            .role(nsh_core::AccessibilityRole::Tab)
+            .accessibility_state(nsh_core::AccessibilityState {
+                selected,
+                ..Default::default()
+            })
+            .child(text(label))
+    };
+    view()
+        .flex_1()
+        .child(
+            view()
+                .w(px(160.0))
+                .border_1()
+                .border_color(nsh_core::color::rgb(0x3f3f46))
+                .py(px(16.0))
+                .child(
+                    view()
+                        .flex_row()
+                        .child(tab("none", false))
+                        .child(tab("drag", true)),
+                ),
+        )
+        .child(text("ready"))
+}
+
+/// A card around a segmented control is no list pane: the chosen tab is
+/// not a row the keys move through, so when a tab has the focus the card
+/// keeps its line as it rests (no accent, no bold), the tab showing it.
+#[test]
+fn a_card_holding_a_focused_segmented_control_keeps_its_line() {
+    let (mut view, rx) = surfaces();
+    let mut terminal = Terminal::new(TestBackend::new(24, 8)).unwrap();
+    view.load(App::Rust(Root::new::<FramedSegmented>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let frame = |buffer: &Buffer| {
+        (0..buffer.area.height)
+            .flat_map(|y| (0..buffer.area.width).map(move |x| (x, y)))
+            .filter(|&at| {
+                buffer[at]
+                    .symbol()
+                    .chars()
+                    .next()
+                    .is_some_and(|c| ('\u{2500}'..='\u{257f}').contains(&c))
+            })
+            .map(|at| (at, buffer[at].fg, buffer[at].modifier))
+            .collect::<Vec<_>>()
+    };
+    let rest = frame(terminal.backend().buffer());
+    assert!(!rest.is_empty(), "the card draws its line");
+    view.handle(nsh_platform_tui::Input::Key {
+        key: "Tab".into(),
+        modifiers: Default::default(),
+        release: false,
+    });
+    // Draw until the app goes quiet: the focus moved and shows.
+    loop {
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+        if rx
+            .recv_timeout(std::time::Duration::from_millis(300))
+            .is_err()
+        {
+            break;
+        }
+    }
+    let buffer = terminal.backend().buffer();
+    assert!(
+        (0..buffer.area.height)
+            .flat_map(|y| (0..buffer.area.width).map(move |x| (x, y)))
+            .any(|at| matches!(buffer[at].symbol(), "n" | "d") && buffer[at].bg == Color::Blue),
+        "a tab shows the focus"
+    );
+    let focused = frame(terminal.backend().buffer());
+    assert_eq!(focused, rest, "the card's line as it rests");
+}
+
 /// A framed card holding a button, as a menu bar's or a form's.
 #[component]
 fn FramedCard() -> impl IntoElement {
