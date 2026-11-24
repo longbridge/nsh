@@ -164,10 +164,7 @@ fn multiline_moves_between_lines_and_enter_obeys_submit_behavior() {
 fn placeholder_and_masked_text_draw_in_the_content_box_and_click_places_the_caret() {
     let (mut view, mut terminal, rx) = field("placeholder=\"Password\" masked");
     draw_until(&mut view, &mut terminal, &rx, "Password");
-    assert_eq!(
-        terminal.backend().buffer()[(0, 0)].fg,
-        ratatui_core::style::Color::Blue
-    );
+    assert_eq!(terminal.backend().buffer()[(0, 0)].fg, crate::ACCENT);
     view.handle(Input::Paste("界🙂abc".into()));
     draw_until(&mut view, &mut terminal, &rx, "•••••");
     terminal.backend_mut().assert_cursor_position((5, 0));

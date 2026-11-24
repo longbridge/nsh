@@ -2727,7 +2727,15 @@ fn split_line(
                     } else {
                         2
                     };
-                    let need = apart - prev.edges.1 - item.edges.0;
+                    // Two filled controls (a row of buttons) keep two
+                    // blank columns between their bands, as Bubbles'
+                    // buttons do, so they read as two and not one strip;
+                    // their padding is inside the band.
+                    let need = if apart == 2 && item.filled && prev.filled {
+                        2
+                    } else {
+                        apart - prev.edges.1 - item.edges.0
+                    };
                     base.max(i32::from(pulled))
                         .max(if words { need } else { 0 })
                 } else {
