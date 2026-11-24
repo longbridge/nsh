@@ -95,6 +95,16 @@ codegen-units = 1
 opt-level = 3
 [profile.dev.package.taffy]
 opt-level = 3
+# Text shaping: an Input reshapes its whole line after each edit, and
+# unoptimized, a line of 10,000 characters takes milliseconds each time.
+[profile.dev.package.cosmic-text]
+opt-level = 3
+[profile.dev.package.harfrust]
+opt-level = 3
+[profile.dev.package.read-fonts]
+opt-level = 3
+[profile.dev.package.font-types]
+opt-level = 3
 # SVG images are drawn when they load: unoptimized, a large one takes seconds.
 [profile.dev.package.tiny-skia]
 opt-level = 3

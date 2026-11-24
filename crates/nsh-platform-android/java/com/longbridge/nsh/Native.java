@@ -354,8 +354,12 @@ final class Native {
      */
     static native void eventMap(long handle, int id, int kind, String[] keys, Object[] values);
 
-    /** `onPaste`: the pasted text, the images' encoded bytes and local files' {@code file:} URLs. */
-    static native void paste(long handle, int id, String text, byte[][] images, String[] uris);
+    /**
+     * `onPaste`: the pasted text, the images' encoded bytes, local files' {@code file:} URLs and the names, types
+     * and sizes of the images too large to read (`tooLarge`).
+     */
+    static native void paste(long handle, int id, String text, byte[][] images, String[] uris, String[] largeNames,
+                             String[] largeTypes, long[] largeLengths);
 
     /**
      * A file drag for node {@code id}: {@link #FILE_DRAG_ENTER} with the files offered (none yet on Android, which

@@ -76,7 +76,7 @@ use objc2::{
 };
 use objc2_app_kit::{
     NSApplication, NSBorderType, NSColor, NSControl, NSControlTextEditingDelegate, NSDragOperation,
-    NSDraggingInfo, NSEvent, NSEventModifierFlags, NSEventType, NSFocusRingType,
+    NSDraggingInfo, NSEvent, NSEventModifierFlags, NSEventPhase, NSEventType, NSFocusRingType,
     NSFontAttributeName, NSForegroundColorAttributeName, NSGestureRecognizer,
     NSGestureRecognizerState, NSLineBreakMode, NSMutableParagraphStyle,
     NSParagraphStyleAttributeName, NSPasteboard, NSResponder, NSScrollElasticity, NSScrollView,
@@ -1087,6 +1087,19 @@ macro_rules! define_field {
                     ok
                 }
 
+                /// A single line has nothing to scroll by the wheel: the
+                /// surface around the input does. Focus does not matter —
+                /// the field editor is only installed while focused, so
+                /// this catches the unfocused hit too.
+                #[unsafe(method(scrollWheel:))]
+                fn scroll_wheel(&self, event: &NSEvent) {
+                    match self.ivars().get().and_then(|cx| cx.surface.upgrade()) {
+                        Some(surface) => crate::input::forward_scroll(&surface, event),
+                        // SAFETY: NSResponder's own handling (passes it up).
+                        None => unsafe { msg_send![super(self), scrollWheel: event] },
+                    }
+                }
+
                 /// Its field editor is about to end editing: what an input
                 /// method composes there is committed first.
                 #[unsafe(method(textShouldEndEditing:))]
@@ -1315,6 +1328,20 @@ define_text_view!(
     unsafe impl NSObjectProtocol for TextArea {}
 
     impl TextArea {
+        /// The wheel scrolls the text while it can move that way, as a web
+        /// textarea; a scroll of the surface under way, or one the text
+        /// cannot take, goes on around the input.
+        #[unsafe(method(scrollWheel:))]
+        fn scroll_wheel(&self, event: &NSEvent) {
+            match area_surface(self) {
+                Some(surface) if wheel_to_host(self, &surface, event, |dy| text_scrolls(self, dy)) => {
+                    crate::input::forward_scroll(&surface, event)
+                }
+                // SAFETY: NSTextView's own method.
+                _ => unsafe { msg_send![super(self), scrollWheel: event] },
+            }
+        }
+
         #[unsafe(method(keyDown:))]
         fn key_down(&self, event: &NSEvent) {
             let input = self.ivars().get().and_then(|cx| cx.input.upgrade());
@@ -1645,6 +1672,17 @@ define_text_view!(
     unsafe impl NSObjectProtocol for FieldEditor {}
 
     impl FieldEditor {
+        /// A single line has nothing to scroll by the wheel: the surface
+        /// around the input does.
+        #[unsafe(method(scrollWheel:))]
+        fn scroll_wheel(&self, event: &NSEvent) {
+            match editor_surface(self) {
+                Some(surface) => crate::input::forward_scroll(&surface, event),
+                // SAFETY: NSTextView's own method.
+                None => unsafe { msg_send![super(self), scrollWheel: event] },
+            }
+        }
+
         #[unsafe(method(mouseDown:))]
         fn mouse_down(&self, event: &NSEvent) {
             let input = field_ctx(self).and_then(|cx| cx.input.upgrade());
@@ -1888,9 +1926,18 @@ define_class!(
         #[unsafe(method(scrollWheel:))]
         fn scroll_wheel(&self, event: &NSEvent) {
             // The editor is the topmost subview (the placeholder is below it).
+            // Multiline hosts an NSScrollView: send to its document TextArea
+            // so `wheel_to_host` runs (the scroll view would swallow the wheel).
             match self.subviews().lastObject() {
                 Some(editor) if !self.ivars().forwarding.replace(true) => {
-                    editor.scrollWheel(event);
+                    if let Some(doc) = editor
+                        .downcast_ref::<NSScrollView>()
+                        .and_then(|s| s.documentView())
+                    {
+                        doc.scrollWheel(event);
+                    } else {
+                        editor.scrollWheel(event);
+                    }
                     self.ivars().forwarding.set(false);
                 }
                 // SAFETY: NSResponder's own handling (passes it up).
@@ -2317,6 +2364,125 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
         }
     });
     view.state_mut().input = Some(input);
+}
+
+thread_local! {
+    /// The text view the last wheel event reached, whether it passed the
+    /// event on, and the event's time (seconds).
+    static WHEEL_GESTURE: Cell<Option<(usize, bool, f64)>> = const { Cell::new(None) };
+}
+
+/// Events of one wheel gesture come closer together than this (seconds).
+const WHEEL_GAP: f64 = 0.15;
+
+/// Whether `event`, reaching `text`, scrolls `surface` rather than the
+/// text: while the surface scrolls (the pointer came over the input
+/// mid-scroll), for a gesture that began elsewhere, and for one beginning
+/// here that the text cannot take (`scrolls`).
+fn wheel_to_host(
+    text: &NSTextView,
+    surface: &Surface,
+    event: &NSEvent,
+    scrolls: impl Fn(CGFloat) -> bool,
+) -> bool {
+    let id = text as *const NSTextView as usize;
+    let time = event.timestamp();
+    let phase = event.phase();
+    let starts = event.momentumPhase().is_empty()
+        && (phase.is_empty() || phase.intersects(NSEventPhase::MayBegin | NSEventPhase::Began));
+    let owned = WHEEL_GESTURE.get().and_then(|(owner, to_host, last)| {
+        (owner == id && time - last < WHEEL_GAP).then_some(to_host)
+    });
+    let dy = event.scrollingDeltaY();
+    let to_host = if crate::input::scrolling(surface, event) {
+        true
+    } else if starts {
+        // MayBegin / Began often carry a ~0 delta: only keep the gesture
+        // on the text when it actually overflows vertically.
+        if dy.abs() < 0.01 {
+            !text_overflows(text)
+        } else {
+            !scrolls(dy)
+        }
+    } else {
+        owned.unwrap_or(true)
+    };
+    WHEEL_GESTURE.set(Some((id, to_host, time)));
+    to_host
+}
+
+/// Whether a wheel `event` over the hosted view `native` scrolls the
+/// surface rather than an input's text: always over a single-line input,
+/// and over a multiline one unless its text takes the gesture
+/// ([`wheel_to_host`]). `false` for anything that is not an input.
+pub(crate) fn passes_wheel(surface: &Surface, native: &NSView, event: &NSEvent) -> bool {
+    if native.downcast_ref::<InputPad>().is_none() {
+        return false;
+    }
+    // The editor is the topmost subview (the placeholder is below it).
+    let text = native
+        .subviews()
+        .lastObject()
+        .and_then(|editor| editor.downcast::<NSScrollView>().ok())
+        .and_then(|scroller| scroller.documentView())
+        .and_then(|doc| doc.downcast::<NSTextView>().ok());
+    match text {
+        Some(text) => wheel_to_host(&text, surface, event, |dy| text_scrolls(&text, dy)),
+        None => true,
+    }
+}
+
+/// How far `text` can still move inside its scroll view: `(above, below)`
+/// in points (positive towards the start / end). Uses the clip view's
+/// bounds origin as the offset from the top (same as `scroll_to` /
+/// `report_scroll`). Document height is the laid-out text height, not
+/// the minSize-stretched frame, so an empty tall field does not look like
+/// it overflows.
+fn text_scroll_room(text: &NSTextView) -> Option<(CGFloat, CGFloat)> {
+    let scroller = text.enclosingScrollView()?;
+    // SAFETY: a scroll view's clip view (an `NSView`), always present.
+    let clip: Retained<NSView> = unsafe { msg_send![&scroller, contentView] };
+    let bounds = clip.bounds();
+    let max_y = (text_layout_height(text) - bounds.size.height).max(0.0);
+    let above = bounds.origin.y.max(0.0);
+    let below = (max_y - above).max(0.0);
+    Some((above, below))
+}
+
+/// Laid-out height of `text`'s content (TextKit 1 used rect, else frame).
+fn text_layout_height(text: &NSTextView) -> CGFloat {
+    // SAFETY: TextKit 1 objects when the view has them (nil on TextKit 2).
+    unsafe {
+        let manager: Option<Retained<AnyObject>> = msg_send![text, layoutManager];
+        let container: Option<Retained<AnyObject>> = msg_send![text, textContainer];
+        if let (Some(manager), Some(container)) = (manager, container) {
+            let _: () = msg_send![&manager, ensureLayoutForTextContainer: &*container];
+            let used: NSRect = msg_send![&manager, usedRectForTextContainer: &*container];
+            let inset = text.textContainerInset().height;
+            return used.size.height + inset * 2.0;
+        }
+    }
+    text.frame().size.height
+}
+
+/// Whether `text`'s document is taller than its clip (either direction).
+fn text_overflows(text: &NSTextView) -> bool {
+    text_scroll_room(text).is_some_and(|(above, below)| above > 0.5 || below > 0.5)
+}
+
+/// Whether `text` can scroll by `dy` (positive towards its start; zero:
+/// either way).
+fn text_scrolls(text: &NSTextView, dy: CGFloat) -> bool {
+    let Some((above, below)) = text_scroll_room(text) else {
+        return false;
+    };
+    if dy > 0.0 {
+        above > 0.5
+    } else if dy < 0.0 {
+        below > 0.5
+    } else {
+        above > 0.5 || below > 0.5
+    }
 }
 
 /// A new editor, hooked to `delegate`.
