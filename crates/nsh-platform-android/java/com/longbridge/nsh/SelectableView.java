@@ -143,6 +143,8 @@ final class SelectableView implements SelectionHandle.Owner {
                 if (extending) {
                     float[] p = toArea(e.getRawX(), e.getRawY());
                     if (gesture(DRAG, p[0], p[1])) tick();
+                    view.getLocationOnScreen(at);
+                    magnify(-1, e.getRawX() - at[0], e.getRawY() - at[1]);
                     break;
                 }
                 float slop = android.view.ViewConfiguration.get(view.getContext()).getScaledTouchSlop();
@@ -152,6 +154,7 @@ final class SelectableView implements SelectionHandle.Owner {
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
                 view.removeCallbacks(longPress);
+                dismissMagnifier();
                 if (extending) {
                     extending = false;
                     showToolbar();
@@ -197,6 +200,7 @@ final class SelectableView implements SelectionHandle.Owner {
     /** Ends the selection, its highlight, handles and toolbar. */
     void clear() {
         view.removeCallbacks(longPress);
+        dismissMagnifier();
         extending = false;
         if (handle == 0) return;
         long h = handle;
@@ -508,10 +512,59 @@ final class SelectableView implements SelectionHandle.Owner {
             swapped = !swapped;
             placeHandles();
         }
+        magnify(moveStart != passed ? 0 : 1, x - at[0], y - at[1]);
+    }
+
+    /** Android's magnifier while an end of the selection is dragged (API 28 and later), as TextView shows it. */
+    private android.widget.Magnifier magnifier;
+
+    /**
+     * Shows the magnifier over end {@code end} of the selection (0 the start, 1 the end, -1 whichever is
+     * nearer the finger) on its line, the finger's {@code x} kept within the line, as TextView's; area
+     * coordinates in px.
+     */
+    private void magnify(int end, float x, float y) {
+        if (android.os.Build.VERSION.SDK_INT < 28 || handle == 0 || !view.isAttachedToWindow()) return;
+        int[] b = bounds();
+        if (b == null) return;
+        float best = Float.NaN, cx = 0, cy = 0;
+        view.getLocationInWindow(at);
+        for (int which = 0; which < 2; which++) {
+            if (end >= 0 && which != end) continue;
+            int i = b[which * 2], offset = b[which * 2 + 1];
+            if (i < 0 || i >= texts.size()) continue;
+            TextBox t = texts.get(i);
+            Layout layout = t.layout();
+            if (layout == null || !t.isShown()) continue;
+            offset = Math.min(offset, layout.getText().length());
+            int line = layout.getLineForOffset(offset);
+            // An end at a line's start is drawn on the line before (`placeHandles`).
+            if (which == 1 && line > 0 && offset == layout.getLineStart(line)) line--;
+            t.getLocationInWindow(at2);
+            float ox = at2[0] - at[0] + t.contentX(), oy = at2[1] - at[1] + t.contentY();
+            float lineY = oy + (layout.getLineTop(line) + layout.getLineBottom(line)) / 2f;
+            float distance = Math.abs(lineY - y);
+            if (!Float.isNaN(best) && distance >= best) continue;
+            best = distance;
+            cx = Math.max(ox + layout.getLineLeft(line), Math.min(ox + layout.getLineRight(line), x));
+            cy = lineY;
+        }
+        if (Float.isNaN(best)) return;
+        if (magnifier == null) {
+            magnifier = android.os.Build.VERSION.SDK_INT >= 29
+                    ? new android.widget.Magnifier.Builder(view).build()
+                    : new android.widget.Magnifier(view);
+        }
+        magnifier.show(cx, cy);
+    }
+
+    private void dismissMagnifier() {
+        if (magnifier != null) magnifier.dismiss();
     }
 
     @Override
     public void handleUp() {
+        dismissMagnifier();
         if (swapped) {
             swapped = false;
             placeHandles();
