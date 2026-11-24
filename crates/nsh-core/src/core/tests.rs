@@ -36024,6 +36024,10 @@ fn capture_keys_decode_from_js() {
         Some(KeyCapture::All)
     );
     assert_eq!(
+        decode(serde_json::json!("text"), false),
+        Some(KeyCapture::Text)
+    );
+    assert_eq!(
         decode(serde_json::json!(["mod+k", "shift+tab"]), true),
         Some(KeyCapture::keys([
             Keystroke::parse_with("mod+k", true).unwrap(),
