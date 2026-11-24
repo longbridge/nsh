@@ -3781,9 +3781,12 @@ pub enum Prop {
     /// `hitSlop`: extends the touch area beyond the bounds.
     #[prop(js = "hitSlop", with = crate::js::host_values::hit_slop, reset = Prop::HitSlop(EdgeInsets::default()), ts = "number | Partial<Edges>")]
     HitSlop(EdgeInsets),
-    /// Where a link goes (`nsh/base`'s `Link` sets its `href`), carried
-    /// to the platform as data: a terminal draws the text inside the view
-    /// as a hyperlink to it. Set by the link component, never by JS.
+    /// Where a link goes (`nsh/base`'s `Link` sets its `href`, `TextView`
+    /// its links' URL on their span), carried to the platform as data: a
+    /// terminal draws the text inside the view as a hyperlink to it, and a
+    /// span's is recorded in its block's text
+    /// (`AttributedText::link_hrefs`).
+    /// Set by the link components, never by JS.
     Href(Option<Arc<str>>),
     /// `panActivation`: the view's touch responder waits for a pan that the
     /// platform activates past an offset on one axis (and fails past one on

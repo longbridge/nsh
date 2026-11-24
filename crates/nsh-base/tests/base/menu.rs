@@ -11,7 +11,11 @@
 //! from the keyboard (Shift+F10 on its focused trigger, in the browser
 //! and on Linux) focuses its first enabled item, one opened by the secondary button
 //! none, until an arrow key. One the app opens (`open` set true) goes below
-//! its trigger at its first enabled item, as from the keyboard.
+//! its trigger at its first enabled item, as from the keyboard. Only Return
+//! or Space on the focused item is typed ahead of a key move: a tap (one
+//! that focuses its item first too) or an assistive technology's activation
+//! chooses the item it is on, also while the focus the keys asked for has
+//! not come (an iPad's).
 
 use std::{
     collections::HashMap,
@@ -1373,6 +1377,75 @@ fn a_secondary_click_moves_a_context_menu_the_app_opened_to_the_pointer() {
         .unwrap();
     app.app.press("id:show").unwrap();
     app.app.wait_for("text:at:40 140").unwrap();
+}
+
+/// [`ShownMenu`] on an iPad whose window is regular in width, where the
+/// menu is a popup at its trigger. The harness moves the keyboard focus to
+/// no view on iOS: the focus the menu asks for on its first enabled item
+/// never comes, as on the iPad in #3013.
+fn shown_menu_on_an_ipad() -> Headless {
+    let mut config = EngineConfig {
+        viewport: Size::new(px(834.0), px(1194.0)),
+        ..EngineConfig::new(nsh_testing::windowed_root::<ShownMenu>())
+    };
+    config.environment.os = Os::Ios;
+    config.environment.idiom = Idiom::Pad;
+    config.environment.horizontal_size_class = Some(SizeClass::Regular);
+    let mut app = Headless::start(config).expect("the engine starts");
+    app.first_render().unwrap();
+    app
+}
+
+/// The view a press on the Delete item goes to.
+fn delete_item(app: &Headless) -> NodeId {
+    app.screen()
+        .press_target("label:Delete")
+        .unwrap()
+        .expect("Delete takes presses")
+}
+
+#[test]
+fn a_tap_chooses_its_item_while_the_focus_the_keys_asked_for_has_not_come() {
+    // Opened by the app, the menu asks for the focus on Rename, as an
+    // opening from the keyboard does. A tap on Delete is no Return typed
+    // ahead of that focus: it chooses Delete.
+    let mut app = shown_menu_on_an_ipad();
+    app.press("id:show").unwrap();
+    app.wait_for("Rename").unwrap();
+    app.press("label:Delete").unwrap();
+    app.wait_for("text:chose:Delete").unwrap();
+}
+
+#[test]
+fn an_assistive_technologys_activation_chooses_its_item_while_the_focus_has_not_come() {
+    // VoiceOver activates the item it is on with a press from no pointer,
+    // as Return presses the focused one, but the keyboard focus is not on
+    // Delete: it is no key typed ahead either.
+    let mut app = shown_menu_on_an_ipad();
+    app.press("id:show").unwrap();
+    app.wait_for("Rename").unwrap();
+    let delete = delete_item(&app);
+    app.engine()
+        .control()
+        .dispatch_event(delete, EventKind::Press, EventPayload::None);
+    app.wait_for("text:chose:Delete").unwrap();
+}
+
+#[test]
+fn a_tap_that_focuses_its_item_first_still_chooses_it() {
+    // A press that gives its item the keyboard focus before pressing it,
+    // as a press focuses a control on Windows, a stop in a terminal and,
+    // before #2783, a button on iOS: Delete has the focus as its press
+    // comes, but the press is a finger's, no Return typed ahead.
+    let mut app = shown_menu_on_an_ipad();
+    app.press("id:show").unwrap();
+    app.wait_for("Rename").unwrap();
+    let delete = delete_item(&app);
+    app.engine()
+        .control()
+        .dispatch_event(delete, EventKind::Focus, EventPayload::None);
+    app.press("label:Delete").unwrap();
+    app.wait_for("text:chose:Delete").unwrap();
 }
 
 /// A `flex-1` canvas-like view as a context menu's trigger, in a column
