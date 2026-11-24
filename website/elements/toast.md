@@ -178,7 +178,9 @@ from it (Tailwind's `starting:`, CSS's `@starting-style`); `endingClass` while `
 A finger or the mouse dragged toward `swipeDirection` (`"right"` by default; `null` turns swiping off) moves it, once
 the pointer has moved, so its buttons stay buttons; let go past `swipeThreshold` points (50) or flicked, it moves on
 out and asks to be dismissed (`onDismissRequest`), short of it, it goes back. The screen reader reads its
-`accessibilityLabel` as it shows.
+`accessibilityLabel` as it shows, once: a toast the app moves to another parent (rebuilds there, such as a stack drawn
+in the topmost modal while one is open) is not read again. A toast mounted in the same update that takes down a toast
+with the same label is that toast moved; any other toast is read, whatever its `transitionStatus`.
 
 ## Toast props
 
