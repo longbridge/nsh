@@ -540,7 +540,9 @@ Things that were found the hard way. Read the section of the area you change bef
   callback, the up marked cancelled; Android 16 QPR2's `predictiveBackStopKeycodeBackForwarding` flag keeps both from the
   views again. `KeyDispatch` reports the release at the callback, from the down it saw, and not again for that key-up
   (`BackRelease`); `NshView` taking the key never doubles its callback, as the cancelled up does not go back (seen on an
-  Android 16 emulator, both settings; the version boundaries are AOSP's source).
+  Android 16 emulator, both settings; the version boundaries are AOSP's source). A modal's dialog, whose key listener
+  takes Back, follows the same rule (`ModalHost`): a key-up that is cancelled, or whose down it did not see, does not go
+  back, or one press would close it (or ask it to) twice.
 - **Android 8 (API 26 and 27) lacks three things the runtime uses from API 28**, and gets each another way, checked with
   `Build.VERSION.SDK_INT` so Android 9 and later draw as before:
   - Weights: `Typeface.create(family, weight, italic)` is API 28. The default family takes the nearest of Roboto's

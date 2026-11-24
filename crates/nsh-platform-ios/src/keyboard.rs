@@ -232,6 +232,7 @@ fn modifiers_of(flags: UIKeyModifierFlags) -> nsh_core::keymap::Modifiers {
         alt: flags.contains(UIKeyModifierFlags::Alternate),
         shift: flags.contains(UIKeyModifierFlags::Shift),
         cmd: flags.contains(UIKeyModifierFlags::Command),
+        alt_graph: false,
     }
 }
 

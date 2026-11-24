@@ -1464,6 +1464,13 @@ impl ViewObj {
         if scrolling(self.mtm()) && crate::native::passes_wheel(&surface, &native) {
             return me();
         }
+        // An input keeps only the wheels its own text scrolls by; the rest
+        // scroll the app around it, as over a web textarea.
+        if let Some(event) = scroll_event(self.mtm())
+            && crate::text_input::passes_wheel(&surface, &native, &event)
+        {
+            return me();
+        }
         let Some(holder) = superview(&native) else {
             return me();
         };
@@ -1733,13 +1740,15 @@ pub(crate) fn left_pressing(mtm: MainThreadMarker) -> bool {
 
 /// Whether the event AppKit handles is a mouse wheel or trackpad scroll.
 fn scrolling(mtm: MainThreadMarker) -> bool {
-    scripted_type()
-        .or_else(|| {
-            objc2_app_kit::NSApplication::sharedApplication(mtm)
-                .currentEvent()
-                .map(|e| e.r#type())
-        })
-        .is_some_and(|t| t == NSEventType::ScrollWheel)
+    scroll_event(mtm).is_some()
+}
+
+/// The event AppKit handles, when it is a mouse wheel or trackpad scroll.
+fn scroll_event(mtm: MainThreadMarker) -> Option<Retained<NSEvent>> {
+    SCRIPTED
+        .with_borrow(|e| e.clone())
+        .or_else(|| objc2_app_kit::NSApplication::sharedApplication(mtm).currentEvent())
+        .filter(|e| e.r#type() == NSEventType::ScrollWheel)
 }
 
 thread_local! {

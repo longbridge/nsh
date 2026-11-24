@@ -75,6 +75,9 @@ pub use nsh_core::{
 };
 #[cfg(feature = "js-core")]
 pub use nsh_js::BYTECODE_VERSION;
+#[cfg(feature = "js-core")]
+#[doc(hidden)]
+pub use nsh_js::with_inline_root;
 /// Signed packages, release-key certificates, revocations and trust stores.
 #[cfg(feature = "js-core")]
 pub use nsh_package as package;
@@ -4326,6 +4329,7 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             }
             if event == EventKind::Paste {
                 payload = payload.into_paste();
+                state.core.limit_paste(id, &mut payload);
             }
             // A secondary click goes down as a press does: the overlays it
             // is outside of hear `onPressOutside` first, then the view its
