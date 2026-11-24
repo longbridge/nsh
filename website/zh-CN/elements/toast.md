@@ -153,7 +153,7 @@ Manager 没有界面：它不渲染任何东西，也不运行计时器。应用
 
 Toast 是包裹应用内容的 `alert` 角色。它的 `transitionStatus` 来自 manager，状态类随之叠加在它的 `class` 之上：`startingClass` 在 `"starting"` 时只作用于它的第一帧，它的 `transition` 类从这里开始动画（Tailwind 的 `starting:`、CSS 的 `@starting-style`）；`endingClass` 在 `"ending"` 期间、退出时长内生效；`swipingClass` 在指针滑动它时生效（`transition-none` 让它紧跟手指）。
 
-手指或鼠标朝 `swipeDirection`（默认 `"right"`；`null` 关闭滑动）拖动时，它会在指针移动之后跟随，因此它的按钮仍是按钮；松开时超过 `swipeThreshold` 点（50）或快速甩动，它会继续移出并请求关闭（`onDismissRequest`），不足则回到原位。读屏软件会在它出现时朗读它的 `accessibilityLabel`。
+手指或鼠标朝 `swipeDirection`（默认 `"right"`；`null` 关闭滑动）拖动时，它会在指针移动之后跟随，因此它的按钮仍是按钮；松开时超过 `swipeThreshold` 点（50）或快速甩动，它会继续移出并请求关闭（`onDismissRequest`），不足则回到原位。读屏软件会在它出现时朗读它的 `accessibilityLabel`，只读一次：应用把 toast 移到另一个父节点下（在那里重建，例如有模态打开时把栈画进最上层的模态）不会再读一遍。在拿掉一个同标签 toast 的同一次更新里挂上的 toast，就是被移过去的那一条；其余的 toast 都会读，不论它的 `transitionStatus` 是什么。
 
 <a id="toast-props"></a>
 

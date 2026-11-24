@@ -382,7 +382,7 @@ nsh.registerComponent("embed.badge") { context -> Badge(context) }
 | `NshView.registerComponent(String name, NshComponent.Factory factory)` | 以某个名称注册一个工厂；此后每创建一个元素，它就生成一个组件（UI 线程）。 |
 | `interface NshComponent` | `View view()`、`void setProp(String, Object)`、`default void command(String, Object)`、`default void destroy()`（元素已移除：被移除，或它的应用被 `NshView.destroy()` 停止、被再次加载替换；每个组件调用一次）。在 UI 线程上调用。 |
 | `setProp` 的值 | `String`、`Number`、`Boolean`、`java.util.List`、`java.util.Map`；被移除时（或 JSON `null`）为 `null`。 |
-| `NshComponentContext.getContext()` | 组件所在 `NshView` 的 context（即其 Activity 的），用于创建组件的视图、读取资源和获取系统服务；生命周期比组件长的对象应持有它的 `getApplicationContext()`。可在任意线程调用。 |
+| `NshComponentContext.getContext()` | 组件所在 `NshView` 的 context（即其 Activity 的），用于创建组件的视图、读取资源和获取系统服务；生命周期比组件长的对象应持有它的 `getApplicationContext()`。在 Native Shell 自己的 Activity 中，它是包着 Activity 的 `ContextWrapper`：系统因配置变化重建 Activity 时，应用继续运行，它随之换到新的 Activity；需要 `Activity` 时通过 `getBaseContext()` 取得，不要持有。可在任意线程调用。 |
 | `NshComponentContext.emit(String event, Object data)` | 发出一个事件；`data` 使用同样的 Java 类型，或 `null`。可在任意线程调用。 |
 | `NshComponentContext.setSize(float width, float height)` | 以 dp 为单位上报组件自身的尺寸。可在任意线程调用。 |
 

@@ -31,7 +31,7 @@ final class A11y extends View.AccessibilityDelegate {
         "android.widget.GridView", "android.view.View", "android.view.View", "android.view.View", "android.view.View",
         "android.widget.ListView", "android.view.View", "android.view.View", "android.view.View",
         "android.view.View", "android.view.View", "android.view.View", "android.view.View", "android.view.View",
-        "android.view.View", "android.view.View", "android.widget.EditText",
+        "android.view.View", "android.view.View", "android.widget.EditText", "android.view.View",
     };
     /** Spoken role descriptions for roles without a widget class. */
     private static final String[] ROLE_DESCRIPTIONS = {
@@ -39,6 +39,7 @@ final class A11y extends View.AccessibilityDelegate {
         "menu bar", "menu item", null, null, null, "scroll bar", null, null, "tab", "tab list", "timer", null,
         null, null, null, "row", "cell", "column header", "row group", null, "option", null, "region",
         "navigation", "tree", "tree item", "menu item", "menu item", "dialog", "alert dialog", null,
+        "tab panel",
     };
     private static final int ROLE_ADJUSTABLE = 8;
     private static final int ROLE_HEADER = 9;

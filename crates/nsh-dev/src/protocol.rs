@@ -471,6 +471,9 @@ pub struct AccessibilityNode {
     pub checked: Option<String>,
     /// Whether it is expanded.
     pub expanded: Option<bool>,
+    /// A toggle button's toggle state (`accessibilityState.pressed`):
+    /// `"true"`, `"false"` or `"mixed"`; absent when it is unset.
+    pub pressed: Option<String>,
     /// Its `accessibilityLevel`.
     pub level: Option<u32>,
     /// Its `accessibilityDescription`.

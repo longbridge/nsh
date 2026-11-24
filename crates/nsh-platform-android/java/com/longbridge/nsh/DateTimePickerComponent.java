@@ -236,6 +236,28 @@ final class DateTimePickerComponent implements NshComponent {
         return localized;
     }
 
+    /** The date or time dialog shown, else null. */
+    private android.app.Dialog shown;
+
+    /** Shows {@code dialog}, the one shown until it goes. */
+    private void present(android.app.Dialog dialog) {
+        dialog.setOnDismissListener(d -> {
+            if (shown == d) shown = null;
+        });
+        shown = dialog;
+        dialog.show();
+    }
+
+    /**
+     * Closes the dialog shown, without a pick, as a press outside it does: its window is the activity's, which goes
+     * ({@link Mounter#leaveWindows}).
+     */
+    void closeDialog() {
+        android.app.Dialog dialog = shown;
+        shown = null;
+        if (dialog != null) dialog.dismiss();
+    }
+
     private void pickDate() {
         if (disabled) return;
         DatePickerDialog dialog = new DatePickerDialog(dialogContext(), dialogTheme(), (picker, y, m, d) -> {
@@ -260,18 +282,18 @@ final class DateTimePickerComponent implements NshComponent {
             DatePicker picker = dialog.getDatePicker();
             picker.dispatchConfigurationChanged(picker.getContext().getResources().getConfiguration());
         }
-        dialog.show();
+        present(dialog);
     }
 
     private void pickTime() {
         if (disabled) return;
-        new TimePickerDialog(dialogContext(), dialogTheme(), (picker, h, m) -> {
+        present(new TimePickerDialog(dialogContext(), dialogTheme(), (picker, h, m) -> {
             hour = h;
             // The dialog offers every minute: a pick between steps takes the
             // step before it.
             minute = m - m % minuteInterval;
             picked();
-        }, hour, minute, DateFormat.is24HourFormat(context)).show();
+        }, hour, minute, DateFormat.is24HourFormat(context)));
     }
 
     /** The user picked: the value moves into the bounds, shows and is reported. */

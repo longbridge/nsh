@@ -37,6 +37,8 @@ mod input_focus;
 #[cfg(target_os = "macos")]
 mod input_hidden;
 #[cfg(target_os = "macos")]
+mod input_restyle;
+#[cfg(target_os = "macos")]
 mod input_tab_stops;
 #[cfg(target_os = "macos")]
 mod keyboard;
@@ -133,6 +135,8 @@ fn main() {
                 input_focus::run();
             } else if std::env::var_os("NSH_INPUT_CLIP_CHECK_ONLY").is_some() {
                 input_clip::run();
+            } else if std::env::var_os("NSH_INPUT_RESTYLE_CHECK_ONLY").is_some() {
+                input_restyle::run();
             } else if std::env::var_os("NSH_INPUT_HIDDEN_CHECK_ONLY").is_some() {
                 input_hidden::run();
             } else if std::env::var_os("NSH_INPUT_TAB_STOPS_CHECK_ONLY").is_some() {
@@ -195,6 +199,7 @@ fn main() {
                 input_clip::run();
                 fitting_input::run();
                 input_focus::run();
+                input_restyle::run();
                 focus_selection::run();
                 text_view_selection::run();
                 fps_collapse::run();

@@ -129,12 +129,11 @@ const body = { fontFamily: Inter, fontSize: 16 } as const;
 </Text>
 ```
 
-When no registered face has the exact weight asked for, the nearest one is used. The platforms differ when a face is missing:
+When no registered face has the exact weight asked for, the nearest one is used. Italic text in a family without an italic face, such as the CJK system fonts or a family shipped without its italic files, is its upright face slanted, as browsers draw it, on iOS and Android alike. The platforms differ when a weight is missing:
 
 | | iOS | Android |
 |---|---|---|
 | Weight without a face | The nearest registered face | The nearest face, with Android's synthetic bold where it applies |
-| Italic without an italic face | The upright face (no slanting) | A slanted version of the upright face |
 
 Ship the faces you use to get the same result on both.
 

@@ -162,15 +162,20 @@ define_class!(
         }
 
         /// A `focusable` view is a stop of the keyboard focus (`focusable`,
-        /// or taking presses), as Tab and `ref.focus()` move it there.
+        /// or taking presses), as Tab and `ref.focus()` move it there. A
+        /// transparent one takes it too ([`crate::keyboard::shown`]), as on
+        /// the other platforms: a popup coming in from `opacity: 0` has the
+        /// item it asked for focused as it opens. Tab passes over it.
         #[unsafe(method(canBecomeFirstResponder))]
         fn can_become_first_responder(&self) -> bool {
-            self.is_focus_stop() && crate::keyboard::visible(self)
+            self.is_focus_stop() && crate::keyboard::shown(self)
         }
 
         /// The same stop is a UIKit focus item, so the system's own Tab
         /// traversal reaches it from the window's initial focus (where
-        /// available) and the focus engine stays on the responder.
+        /// available) and the focus engine follows the responder where it
+        /// is visible: the engine passes over a transparent one, as Tab
+        /// does.
         #[unsafe(method(canBecomeFocused))]
         fn can_become_focused(&self) -> bool {
             self.is_focus_stop() && crate::keyboard::visible(self)
@@ -821,8 +826,9 @@ fn is_element(a: &Accessibility, pressable: bool) -> bool {
 /// Roles of groups whose elements stay VoiceOver's own: a semantic
 /// group, which VoiceOver names by its label as it moves into it. A
 /// dialog is one (UIKit has no dialog trait): its title is said as the
-/// focus enters it, and its controls stay reachable. So is a list: a
-/// labelled list names its items, which are reached one by one.
+/// focus enters it, and its controls stay reachable, and so is a tab's
+/// panel (UIKit has no tab panel trait either). So is a list: a labelled
+/// list names its items, which are reached one by one.
 fn is_container(a: &Accessibility) -> bool {
     matches!(
         a.role,
@@ -837,6 +843,7 @@ fn is_container(a: &Accessibility) -> bool {
             | AccessibilityRole::Tablist
             | AccessibilityRole::Dialog
             | AccessibilityRole::AlertDialog
+            | AccessibilityRole::TabPanel
     )
 }
 
@@ -1094,6 +1101,10 @@ mod tests {
         ));
         assert!(is_container(
             &props(AccessibilityRole::AlertDialog, &[]).accessibility
+        ));
+        // A tab's panel keeps its content reachable.
+        assert!(is_container(
+            &props(AccessibilityRole::TabPanel, &[]).accessibility
         ));
         assert!(!is_container(
             &props(AccessibilityRole::Button, &[]).accessibility

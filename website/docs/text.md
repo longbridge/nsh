@@ -215,7 +215,7 @@ baseline. A view without text (an image, a colored box) stands on its bottom edg
 | `color` | A [color](./styling.md#colors). Default black | `.text_color(..)` |
 | `fontSize` | Points. Default 14. Or relative to the inherited size, as CSS's `em` and percentages: `"0.875em"`, `"87.5%"` | `.text_size(px(..))`, `.text_size(relative(0.875))`, `.text_sm()`, `.text_lg()`, ... |
 | `fontWeight` | `"normal"` (400), `"bold"` (700), or `100`–`900` (number or string) | `.font_weight(FontWeight::BOLD)` |
-| `fontStyle` | `"normal"`, `"italic"`: color emoji stay upright | `.italic()` |
+| `fontStyle` | `"normal"`, `"italic"`: a family without an italic face slants, color emoji stay upright | `.italic()` |
 | `fontFamily` | A system family, a generic family, or an [imported font](./fonts.md) | `.font_family(..)` |
 | `lineHeight` | Points | `.line_height(px(..))` |
 | `letterSpacing` | Points | `.letter_spacing(px(..))` |

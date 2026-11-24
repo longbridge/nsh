@@ -310,7 +310,7 @@ pub(crate) fn compile_hot(entry: &Path) -> Result<(Built, nsh_bundler::HotBundle
     let start = Instant::now();
     let hot = nsh_bundler::bundle_hot(entry, &crate::ui_sets())?;
     let (code, source_map) = hot.script();
-    let bytecode = nsh_js::compile_bytecode_with(&code, false, &crate::ui_sets())?;
+    let bytecode = nsh_js::compile_bytecode_with(&code, nsh_js::Strip::Source, &crate::ui_sets())?;
     let built = Built {
         code,
         bytecode,
@@ -452,13 +452,17 @@ mod tests {
                 let (code, _) = hot.script();
                 let assembled = start.elapsed();
                 let start = Instant::now();
-                let bytecode = nsh_js::compile_bytecode_with(&code, false, &sets).unwrap();
+                let bytecode =
+                    nsh_js::compile_bytecode_with(&code, nsh_js::Strip::Source, &sets).unwrap();
                 let compiled = start.elapsed();
                 assert!(!bytecode.is_empty());
+                // What keeping the functions' source text would cost.
+                let unstripped = nsh_js::compile_bytecode_with(&code, false, &sets).unwrap();
                 eprintln!(
-                    "{app} run {run}: bundle {bundled:?}, script {assembled:?}, bytecode {compiled:?}; {} source bytes, {} bytecode bytes",
+                    "{app} run {run}: bundle {bundled:?}, script {assembled:?}, bytecode {compiled:?}; {} source bytes, {} bytecode bytes ({} with function source)",
                     code.len(),
-                    bytecode.len()
+                    bytecode.len(),
+                    unstripped.len()
                 );
             }
         }
