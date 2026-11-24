@@ -1074,8 +1074,18 @@ development host's.
 App Store Connect checks an iOS app's privacy manifest, `PrivacyInfo.xcprivacy`, when it is uploaded: why the app
 calls the APIs Apple requires a reason for, whether it tracks and with which domains, and the data it collects
 ([Privacy manifest files](https://developer.apple.com/documentation/bundleresources/privacy-manifest-files)).
-`ios.privacyManifest` in `nsh.json` is that file's contents, which iOS packages write at the root of the app before
-signing it (an app extension carries its own, in its `.appex`):
+Every iOS package carries one. NSH's runtime is part of the app's executable, so the APIs it calls count as the app's;
+packages declare them for every app:
+
+| Category | What in NSH calls it | Reason |
+|---|---|---|
+| `NSPrivacyAccessedAPICategoryFileTimestamp` | Rust's standard library reading file metadata; the image cache, which ages its files | `C617.1` |
+| `NSPrivacyAccessedAPICategorySystemBootTime` | the renderer's timer | `35F9.1` |
+
+`ios.privacyManifest` in `nsh.json` is what the app adds: the APIs its own code and the SDKs it links call, whether it
+tracks, and the data it collects. Packages write it at the root of the app before signing it, with NSH's entries joined
+to the app's by category: one entry per category, with the reasons of both, each once (an app extension carries its
+own, in its `.appex`):
 
 ```json
 {
@@ -1085,11 +1095,7 @@ signing it (an app extension carries its own, in its `.appex`):
       "NSPrivacyAccessedAPITypes": [
         {
           "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
-          "NSPrivacyAccessedAPITypeReasons": ["C617.1"]
-        },
-        {
-          "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime",
-          "NSPrivacyAccessedAPITypeReasons": ["35F9.1"]
+          "NSPrivacyAccessedAPITypeReasons": ["3B52.1"]
         }
       ]
     }
@@ -1097,19 +1103,14 @@ signing it (an app extension carries its own, in its `.appex`):
 }
 ```
 
+Here the package's file timestamp entry gives `3B52.1`, for files people pick, and NSH's `C617.1`, and a system boot
+time entry with `35F9.1` follows it.
+
 It takes the four keys of Apple's format (`NSPrivacyTracking`, `NSPrivacyTrackingDomains`,
 `NSPrivacyCollectedDataTypes`, `NSPrivacyAccessedAPITypes`) and their entries' keys. An unknown key, a value of the
 wrong type or an entry without all its keys is left out with a warning. What App Store Connect would refuse as written
 (an entry with no reason, tracking without its domains) is warned about too; App Store Connect still checks the
 category and reason codes themselves.
-
-NSH's runtime is part of the app's executable, so the APIs it calls count as the app's: declare these with the app's
-own.
-
-| Category | What in NSH calls it | Reason |
-|---|---|---|
-| `NSPrivacyAccessedAPICategoryFileTimestamp` | Rust's standard library reading file metadata; the image cache, which ages its files | `C617.1`; also `3B52.1` when the app reads files people pick |
-| `NSPrivacyAccessedAPICategorySystemBootTime` | the renderer's timer | `35F9.1` |
 
 NSH reads no user defaults on iOS (the temperature unit comes from the locale): declare
 `NSPrivacyAccessedAPICategoryUserDefaults` only when the app's own code or an SDK it links calls `NSUserDefaults`.

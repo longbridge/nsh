@@ -916,7 +916,16 @@ entitlements：
 
 上传 iOS 应用时，App Store Connect 会检查它的隐私清单 `PrivacyInfo.xcprivacy`：应用调用 Apple 要求说明使用理由的 API 的原因、
 是否进行跟踪以及跟踪所用的域名，以及它收集的数据（见 [Privacy manifest files](https://developer.apple.com/documentation/bundleresources/privacy-manifest-files)）。
-`nsh.json` 的 `ios.privacyManifest` 就是这个文件的内容，iOS 包会在签名前把它写到应用的根目录（应用扩展在自己的 `.appex` 里带一份自己的）：
+每个 iOS 包都带有这个文件。NSH 的运行时是应用可执行文件的一部分，所以它调用的 API 也算作应用的；打包时会为每个应用声明它们：
+
+| 类别 | NSH 中调用它的部分 | 理由 |
+|---|---|---|
+| `NSPrivacyAccessedAPICategoryFileTimestamp` | Rust 标准库读取文件元数据；图片缓存按时间淘汰文件 | `C617.1` |
+| `NSPrivacyAccessedAPICategorySystemBootTime` | 渲染器的计时器 | `35F9.1` |
+
+`nsh.json` 的 `ios.privacyManifest` 是应用自己要补充的内容：应用自己的代码和它链接的 SDK 调用的 API、是否跟踪，以及它收集的数据。
+iOS 包会在签名前把它写到应用的根目录，并按类别和 NSH 的条目合并：每个类别一个条目，理由取两者之和，不重复（应用扩展在自己的
+`.appex` 里带一份自己的）：
 
 ```json
 {
@@ -926,11 +935,7 @@ entitlements：
       "NSPrivacyAccessedAPITypes": [
         {
           "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
-          "NSPrivacyAccessedAPITypeReasons": ["C617.1"]
-        },
-        {
-          "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime",
-          "NSPrivacyAccessedAPITypeReasons": ["35F9.1"]
+          "NSPrivacyAccessedAPITypeReasons": ["3B52.1"]
         }
       ]
     }
@@ -938,16 +943,11 @@ entitlements：
 }
 ```
 
+这样打出的包里，文件时间戳条目的理由是 `3B52.1`（读取用户选择的文件）和 NSH 的 `C617.1`，后面再跟一个理由为 `35F9.1` 的系统启动时间条目。
+
 它接受 Apple 格式的四个键（`NSPrivacyTracking`、`NSPrivacyTrackingDomains`、`NSPrivacyCollectedDataTypes`、
 `NSPrivacyAccessedAPITypes`）及其条目里的键。未知的键、类型不对的值或缺少键的条目会被略过并给出警告；App Store Connect
 按原样会拒绝的内容（没有理由的条目、开启跟踪却没有域名）也会给出警告。类别和理由代码本身仍由 App Store Connect 检查。
-
-NSH 的运行时是应用可执行文件的一部分，所以它调用的 API 也算作应用的：请把下面这些和应用自己的一起声明。
-
-| 类别 | NSH 中调用它的部分 | 理由 |
-|---|---|---|
-| `NSPrivacyAccessedAPICategoryFileTimestamp` | Rust 标准库读取文件元数据；图片缓存按时间淘汰文件 | `C617.1`；应用读取用户选择的文件时再加 `3B52.1` |
-| `NSPrivacyAccessedAPICategorySystemBootTime` | 渲染器的计时器 | `35F9.1` |
 
 NSH 在 iOS 上不读取用户默认设置（温度单位取自区域设置），所以只有应用自己的代码或它链接的 SDK 调用 `NSUserDefaults` 时，
 才需要声明 `NSPrivacyAccessedAPICategoryUserDefaults`。
