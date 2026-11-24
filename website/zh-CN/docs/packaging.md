@@ -802,7 +802,7 @@ Apple 在处理构建时验证签名和 provisioning profile。
     "locales": {
       "en-US": {
         "name": "My App",
-        "whatsNew": "Faster sync.",
+        "releaseNotes": "Faster sync.",
         "screenshots": { "phone": ["store/en-US/phone-1.png"] }
       }
     },
@@ -813,7 +813,7 @@ Apple 在处理构建时验证签名和 provisioning profile。
 
 ```text
 store/en-US/description.txt        # 另有 name、subtitle、keywords、promotional_text、
-store/en-US/whats_new.txt          # whats_new、support_url、marketing_url、privacy_policy_url
+store/en-US/release_notes.txt      # release_notes、support_url、marketing_url、privacy_policy_url
 store/en-US/screenshots/phone/01.png
 store/en-US/screenshots/tablet/01.png
 ```
@@ -821,7 +821,7 @@ store/en-US/screenshots/tablet/01.png
 语言使用 App Store Connect 的 BCP 47 标签（`en-US`、`zh-Hans`）。截图按设备类别分组、按显示顺序排列：
 `phone` 对应 6.9 英寸 iPhone（`APP_IPHONE_67`），`tablet` 对应 13 英寸 iPad（`APP_IPAD_PRO_3GEN_129`）；
 `APP_IPHONE_65` 等 App Store Connect 尺寸名原样使用。截图集只在图片变化时替换；未给出的字段保持
-App Store Connect 中的现值。App Store Connect 不接受应用首个版本的 `whatsNew`。
+App Store Connect 中的现值。`releaseNotes`（`release_notes.txt`）是所有商店共用的更新说明，也接受 `whatsNew` 和 `whats_new.txt`。App Store Connect 不接受应用首个版本的更新说明。`nsh.json` 不认识的键会被忽略。
 
 ### 状态与检查
 

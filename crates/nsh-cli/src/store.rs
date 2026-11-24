@@ -6,9 +6,14 @@
 //! ```text
 //! store/
 //!   en-US/
-//!     description.txt  keywords.txt  whats_new.txt  ...
+//!     description.txt  keywords.txt  release_notes.txt  ...
 //!     screenshots/phone/01.png  screenshots/tablet/01.png
 //! ```
+//!
+//! Every store identity lives under `store.<platform>` or is the app's
+//! top-level `id`, so that a configured app publishes with
+//! `nsh publish <platform> <artifact>` alone. Unknown keys are ignored, as
+//! everywhere else in `nsh.json`.
 //!
 //! Locales are BCP 47 tags (`en-US`, `zh-Hans`). Screenshots are grouped by
 //! device class (`phone`, `tablet`, `desktop`), which each store maps to its
@@ -25,7 +30,7 @@ use serde::{Deserialize, Serialize};
 
 /// `nsh.json` `"store"`.
 #[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct StoreConfig {
     /// The listing per locale.
     #[serde(default)]
@@ -33,27 +38,24 @@ pub(crate) struct StoreConfig {
     /// App Store Connect settings.
     #[serde(default)]
     pub ios: IosStore,
-    /// Settings of the other stores, read by their own `nsh publish`.
-    #[serde(default, rename = "android")]
-    _android: Option<serde_json::Value>,
-    #[serde(default, rename = "windows")]
-    _windows: Option<serde_json::Value>,
-    #[serde(default, rename = "linux")]
-    _linux: Option<serde_json::Value>,
 }
 
 /// One locale's listing. Every field is optional: a store leaves what is
 /// not given as it is.
 #[derive(Debug, Default, Clone, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct Listing {
     pub name: Option<String>,
     pub subtitle: Option<String>,
     pub description: Option<String>,
+    /// Search keywords, comma separated (a list is joined with commas).
+    #[serde(default, deserialize_with = "keywords")]
     pub keywords: Option<String>,
     pub promotional_text: Option<String>,
-    /// Release notes of this version.
-    pub whats_new: Option<String>,
+    /// Release notes of this version, for every store (`whatsNew` is
+    /// taken too).
+    #[serde(alias = "whatsNew")]
+    pub release_notes: Option<String>,
     pub support_url: Option<String>,
     pub marketing_url: Option<String>,
     pub privacy_policy_url: Option<String>,
@@ -64,7 +66,7 @@ pub(crate) struct Listing {
 
 /// `store.ios`.
 #[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct IosStore {
     /// The app's numeric Apple ID in App Store Connect (App Information →
     /// Apple ID), so that `nsh publish ios` needs no `--app-id`. A string
@@ -79,6 +81,20 @@ pub(crate) struct IosStore {
     pub beta_groups: Vec<String>,
     /// How an approved version is released (default: `manual`).
     pub release: Option<ReleaseMode>,
+}
+
+/// Keywords written as `"a, b"` or `["a", "b"]`.
+fn keywords<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Keywords {
+        Text(String),
+        List(Vec<String>),
+    }
+    Ok(Option::<Keywords>::deserialize(d)?.map(|k| match k {
+        Keywords::Text(text) => text,
+        Keywords::List(list) => list.join(","),
+    }))
 }
 
 /// An id written as `"6835723652"` or `6835723652`.
@@ -114,7 +130,7 @@ const TEXT_FILES: [&str; 9] = [
     "description",
     "keywords",
     "promotional_text",
-    "whats_new",
+    "release_notes",
     "support_url",
     "marketing_url",
     "privacy_policy_url",
@@ -128,7 +144,7 @@ impl Listing {
             "description" => &mut self.description,
             "keywords" => &mut self.keywords,
             "promotional_text" => &mut self.promotional_text,
-            "whats_new" => &mut self.whats_new,
+            "release_notes" => &mut self.release_notes,
             "support_url" => &mut self.support_url,
             "marketing_url" => &mut self.marketing_url,
             _ => &mut self.privacy_policy_url,
@@ -199,8 +215,17 @@ fn merge_dir(store: &mut StoreConfig, dir: &Path) -> anyhow::Result<()> {
         let listing = store.locales.entry(locale).or_default();
         for name in TEXT_FILES {
             let field = listing.field(name);
-            if field.is_none()
-                && let Ok(text) = std::fs::read_to_string(entry.path().join(format!("{name}.txt")))
+            if field.is_some() {
+                continue;
+            }
+            // `whats_new.txt` is App Store's name for the release notes.
+            let files = match name {
+                "release_notes" => &["release_notes", "whats_new"][..],
+                _ => &[name][..],
+            };
+            if let Some(text) = files.iter().find_map(|file| {
+                std::fs::read_to_string(entry.path().join(format!("{file}.txt"))).ok()
+            }) && !text.trim().is_empty()
             {
                 *field = Some(text.trim().to_owned());
             }
@@ -331,7 +356,7 @@ mod tests {
         let shots = dir.join("store/en-US/screenshots/phone");
         std::fs::create_dir_all(&shots).unwrap();
         std::fs::create_dir_all(dir.join("store/zh-Hans")).unwrap();
-        std::fs::write(dir.join("store/en-US/whats_new.txt"), "From file\n").unwrap();
+        std::fs::write(dir.join("store/en-US/release_notes.txt"), "From file\n").unwrap();
         std::fs::write(dir.join("store/en-US/description.txt"), "Described\n").unwrap();
         std::fs::write(dir.join("store/zh-Hans/whats_new.txt"), "更新").unwrap();
         for name in ["02.png", "01.png", "notes.md"] {
@@ -339,19 +364,23 @@ mod tests {
         }
         std::fs::write(
             dir.join("nsh.json"),
-            r#"{"id":"com.example.app","store":{"locales":{"en-US":{"whatsNew":"Inline"}},
+            r#"{"id":"com.example.app","store":{"locales":{"en-US":{"whatsNew":"Inline","keywords":["a","b"]}},
                "ios":{"appId":6835723652,"usesNonExemptEncryption":false,"betaGroups":["QA"],"release":"phased"}}}"#,
         )
         .unwrap();
         let store = read(&dir).unwrap();
         let en = &store.locales["en-US"];
-        assert_eq!(en.whats_new.as_deref(), Some("Inline"));
+        assert_eq!(en.release_notes.as_deref(), Some("Inline"));
+        assert_eq!(en.keywords.as_deref(), Some("a,b"));
         assert_eq!(en.description.as_deref(), Some("Described"));
         assert_eq!(
             en.screenshots["phone"],
             vec![shots.join("01.png"), shots.join("02.png")]
         );
-        assert_eq!(store.locales["zh-Hans"].whats_new.as_deref(), Some("更新"));
+        assert_eq!(
+            store.locales["zh-Hans"].release_notes.as_deref(),
+            Some("更新")
+        );
         assert_eq!(store.ios.app_id.as_deref(), Some("6835723652"));
         assert_eq!(store.ios.uses_non_exempt_encryption, Some(false));
         assert_eq!(store.ios.beta_groups, ["QA"]);
@@ -369,8 +398,8 @@ mod tests {
         )
         .unwrap();
         assert!(read(&dir).is_err());
-        std::fs::write(dir.join("nsh.json"), r#"{"store":{"typo":1}}"#).unwrap();
-        assert!(read(&dir).is_err());
+        std::fs::write(dir.join("nsh.json"), r#"{"store":{"future":1}}"#).unwrap();
+        assert!(read(&dir).is_ok());
         std::fs::remove_dir_all(dir).unwrap();
     }
 

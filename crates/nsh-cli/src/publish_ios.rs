@@ -647,7 +647,7 @@ fn write_listing(asc: &mut Asc, plan: &Plan, version_id: &str) -> anyhow::Result
             ("description", &listing.description),
             ("keywords", &listing.keywords),
             ("promotionalText", &listing.promotional_text),
-            ("whatsNew", &listing.whats_new),
+            ("whatsNew", &listing.release_notes),
             ("supportUrl", &listing.support_url),
             ("marketingUrl", &listing.marketing_url),
         ] {
@@ -1397,7 +1397,7 @@ mod tests {
         let mut store = StoreConfig::default();
         store.ios.uses_non_exempt_encryption = Some(false);
         let listing = store.locales.entry("en-US".into()).or_default();
-        listing.whats_new = Some("Faster".into());
+        listing.release_notes = Some("Faster".into());
         listing.name = Some("Example".into());
         listing
             .screenshots

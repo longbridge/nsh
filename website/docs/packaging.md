@@ -918,7 +918,7 @@ directory beside `nsh.json`, or both; a value in `nsh.json` wins over the file.
       "en-US": {
         "name": "My App",
         "subtitle": "Notes that sync",
-        "whatsNew": "Faster sync.",
+        "releaseNotes": "Faster sync.",
         "keywords": "notes,sync",
         "supportUrl": "https://example.com/support",
         "screenshots": { "phone": ["store/en-US/phone-1.png"] }
@@ -931,7 +931,7 @@ directory beside `nsh.json`, or both; a value in `nsh.json` wins over the file.
 
 ```text
 store/en-US/description.txt        # also name, subtitle, keywords, promotional_text,
-store/en-US/whats_new.txt          # whats_new, support_url, marketing_url, privacy_policy_url
+store/en-US/release_notes.txt      # release_notes, support_url, marketing_url, privacy_policy_url
 store/en-US/screenshots/phone/01.png
 store/en-US/screenshots/tablet/01.png
 ```
@@ -940,7 +940,9 @@ Locales are BCP 47 tags as App Store Connect names them (`en-US`, `zh-Hans`). Sc
 by device class in display order: `phone` is the 6.9" iPhone size (`APP_IPHONE_67`), `tablet` the 13"
 iPad size (`APP_IPAD_PRO_3GEN_129`); an App Store Connect display type such as `APP_IPHONE_65` is taken
 as it is. A screenshot set is replaced only when its images changed. Fields left out keep what App
-Store Connect has. App Store Connect rejects `whatsNew` on an app's first version.
+Store Connect has. `releaseNotes` (`release_notes.txt`) is the release
+notes of every store; `whatsNew` and `whats_new.txt` are read too. App Store Connect rejects release
+notes on an app's first version. Keys `nsh.json` does not know are ignored.
 
 ### Status and checks
 
