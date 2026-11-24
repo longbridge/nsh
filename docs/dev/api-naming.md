@@ -1001,3 +1001,13 @@ options object leaves `DragBy` as a displacement and allows both `drag` and `dra
 `nsh_testing::DragOptions` mirrors it as the last parameter of `Headless::drag` / `drag_and_hold` and the agents'
 `Native::drag` / `drag_and_hold`, with `hold: Option<Duration>`, so each gesture keeps one entry point in both
 languages. This is a test-driver extension without a corresponding GPUI control API.
+
+## Test press position
+
+`app.press` takes `PressOptions.position`, a point in points from the view's top left corner (its middle when
+omitted). It is Playwright's `page.click(selector, { position })`, which the test runner's selectors already follow:
+`position` says where the press lands in the view, while `offset` elsewhere is a scroll view's content offset. The
+point reaches a part of the view nothing covers, as a dialog's backdrop around its panel. Rust's `Headless::press`
+keeps its released signature; `Headless::press_with` is the crate's path for a point, and `TestStep::PressAt`
+carries it to a real host, as `TestStep::Press` keeps the middle. A test-driver extension without a corresponding
+GPUI control API.
