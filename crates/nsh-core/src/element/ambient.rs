@@ -1726,6 +1726,24 @@ pub fn after_answer(f: impl FnOnce() + 'static) {
     });
 }
 
+/// Runs `f`, with no owner, once the components of the commit being made
+/// (the one in progress, else the next) have rendered, before its batch
+/// goes out: after every view the update made or took down, so `f` sees the
+/// whole update. What it asks for (an announcement) and what it changes
+/// go out in the same batch. A task or a timer runs a commit later, too
+/// late for what has to go with the views it is about.
+///
+/// The core's part of `nsh_base::Toast`'s announcement, which tells a
+/// toast the app moved (took down and made again in one update) from a
+/// new one.
+#[doc(hidden)]
+pub fn after_render(f: impl FnOnce() + 'static) {
+    executor().after_render(task::AfterAnswer {
+        owner: Owner::detached(),
+        f: Box::new(f),
+    });
+}
+
 /// Runs blocking `f` on the runtime's blocking threads (in a task: await
 /// its result; `tokio::task::spawn_blocking`), starting at once, whether
 /// called from a task, a render, an effect or a handler. Not in

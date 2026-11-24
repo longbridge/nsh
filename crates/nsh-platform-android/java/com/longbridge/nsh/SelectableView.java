@@ -211,6 +211,7 @@ final class SelectableView implements SelectionHandle.Owner {
         if (mounter.selectedArea != null && mounter.selectedArea != this) mounter.selectedArea.clear();
         mounter.selectedArea = this;
         mounter.keepSelection();
+        mounter.updateBack();
         observer = view.getViewTreeObserver();
         observer.addOnPreDrawListener(follow);
         return true;
@@ -234,7 +235,10 @@ final class SelectableView implements SelectionHandle.Owner {
         }
         if (observer != null && observer.isAlive()) observer.removeOnPreDrawListener(follow);
         observer = null;
-        if (mounter.selectedArea == this) mounter.selectedArea = null;
+        if (mounter.selectedArea == this) {
+            mounter.selectedArea = null;
+            mounter.updateBack();
+        }
         Native.keepRendered(mounter.handle(), new int[0]);
         android.view.ActionMode m = mode;
         mode = null;
@@ -685,7 +689,7 @@ final class SelectableView implements SelectionHandle.Owner {
                             .setType("text/plain")
                             .putExtra(android.content.Intent.EXTRA_TEXT, nativeText(handle, SelectableView.this));
                     android.content.Intent chooser = android.content.Intent.createChooser(send, null);
-                    if (!(context instanceof android.app.Activity)) {
+                    if (SystemUi.activity(context) == null) {
                         chooser.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
                     }
                     try {
@@ -702,7 +706,7 @@ final class SelectableView implements SelectionHandle.Owner {
                     android.content.Intent send = new android.content.Intent(process)
                             .putExtra(android.content.Intent.EXTRA_PROCESS_TEXT, nativeText(handle, SelectableView.this))
                             .putExtra(android.content.Intent.EXTRA_PROCESS_TEXT_READONLY, true);
-                    if (!(context instanceof android.app.Activity)) {
+                    if (SystemUi.activity(context) == null) {
                         send.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
                     }
                     try {

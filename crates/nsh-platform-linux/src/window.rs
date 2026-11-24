@@ -850,6 +850,18 @@ pub(crate) fn batch_applied(surface: &Rc<Surface>) {
     }
 }
 
+/// Whether a window of the app's own is still opening, hidden until its
+/// first frame ([`batch_applied`], or [`FIRST_FRAME`] after it opened).
+/// Its views are not drawn until it shows, so they have no place on screen
+/// to act on: the test agent waits for it (`nsh_testing::agent::Native::opening`).
+#[cfg(any(feature = "dev", test))]
+pub(crate) fn opening(surface: &Surface) -> bool {
+    surface
+        .windows
+        .try_borrow()
+        .is_ok_and(|windows| windows.values().any(|w| w.pending.is_some()))
+}
+
 /// Shows window `id` the first time, unless it showed or was hidden.
 fn show_first(surface: &Rc<Surface>, id: NodeId) {
     let first = surface
@@ -2575,6 +2587,32 @@ mod tests {
                 "{user}"
             );
         }
+    }
+
+    /// A window of the app's own is opening until the commit after the one
+    /// that opened it is mounted, or until its wait for that runs out.
+    #[test]
+    fn a_new_window_is_opening_until_its_first_frame() {
+        crate::gtk_test::run(|| {
+            let surface = crate::gtk_test::surface();
+            assert!(!opening(&surface));
+            let view = NshView::new(40, nsh_core::ViewKind::View);
+            open(&surface, &view, &OpenWindow::default());
+            assert!(opening(&surface));
+            // The commit that opened it.
+            batch_applied(&surface);
+            assert!(opening(&surface));
+            batch_applied(&surface);
+            assert!(!opening(&surface));
+            // Without another commit, it shows after `FIRST_FRAME`.
+            let second = NshView::new(41, nsh_core::ViewKind::View);
+            open(&surface, &second, &OpenWindow::default());
+            batch_applied(&surface);
+            assert!(opening(&surface));
+            assert!(crate::gtk_test::wait_until(|| !opening(&surface)));
+            assert!(removed(&surface, &view));
+            assert!(removed(&surface, &second));
+        });
     }
 
     /// Window Model v2 keeps the host window hidden: the performance

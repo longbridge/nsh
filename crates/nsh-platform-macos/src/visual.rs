@@ -570,7 +570,8 @@ impl Visual {
     }
 
     /// Shapes the effect layers of `view` (in its own `layer`) after
-    /// `style`; `filled`: an opaque fill layer covers the box.
+    /// `style`; `filled`: an opaque fill layer covers the box; `corner`: the
+    /// decoration's corner mask when it is on `layer` (see [`Self::set_masks`]).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn apply(
         &mut self,
@@ -581,6 +582,7 @@ impl Visual {
         radii: CornerRadii,
         text: bool,
         filled: bool,
+        corner: Option<&CALayer>,
     ) {
         let effects = style.effects.as_deref();
         let shadows = effects.map_or(&[][..], |e| &e.box_shadows[..]);
@@ -642,6 +644,7 @@ impl Visual {
             effects.map_or(&[][..], |e| &e.mask_images[..]),
             style.clip_path(),
             local,
+            corner,
         );
     }
 
@@ -654,12 +657,19 @@ impl Visual {
     /// `mask-image`: a gradient whose alpha decides how much of the view is
     /// drawn. CSS composites several mask layers; this draws the topmost one,
     /// which is what a fade along one edge needs (as on iOS).
+    ///
+    /// `corner` is the decoration's mask for corners of different radii when
+    /// it is on `layer` itself (no container clips the children). A layer has
+    /// one mask, so the clip path or gradient masks that shape instead
+    /// (a mask's own mask applies to it): the layer keeps its corners and
+    /// the effect masks on top.
     fn set_masks(
         &mut self,
         layer: &CALayer,
         masks: &[Gradient],
         clip: Option<&ClipInset>,
         local: CGRect,
+        corner: Option<&CALayer>,
     ) {
         // Only a mask of ours is taken off: the decoration may have masked
         // the layer to its corners in the same pass.
@@ -690,15 +700,43 @@ impl Visual {
             None => self.clip.take().and(None),
         };
         let top: Option<&CALayer> = match (&shape, &gradient) {
-            (Some(shape), gradient) => {
-                // SAFETY: the shape owns the gradient as its mask, which has
-                // no superlayer of its own.
-                unsafe { shape.setMask(gradient.as_deref().map(|g| &**g)) };
-                Some(shape)
-            }
+            (Some(shape), _) => Some(shape),
             (None, Some(gradient)) => Some(gradient),
             (None, None) => None,
         };
+        let inner = gradient
+            .as_deref()
+            .map(|g| &**g)
+            .filter(|_| shape.is_some());
+        if let Some(corner) = corner {
+            // A gradient is the mask of one layer at a time: when the
+            // corner shape holds it (or a clip shape that goes), it leaves
+            // before it becomes the clip shape's. Only what changed is
+            // touched; the decoration set the corner shape on the layer in
+            // this pass.
+            if !is_mask(corner, top) {
+                // SAFETY: clearing the decoration's corner shape's mask.
+                unsafe { corner.setMask(None) };
+            }
+            if let Some(shape) = &shape
+                && !is_mask(shape, inner)
+            {
+                // SAFETY: the shape owns the gradient as its mask, which
+                // has no superlayer of its own.
+                unsafe { shape.setMask(inner) };
+            }
+            if !is_mask(corner, top) {
+                // SAFETY: the corner shape owns `top`, which is ours and
+                // has no superlayer.
+                unsafe { corner.setMask(top) };
+            }
+            return;
+        }
+        if let Some(shape) = &shape {
+            // SAFETY: the shape owns the gradient as its mask, which has no
+            // superlayer of its own.
+            unsafe { shape.setMask(inner) };
+        }
         if top.is_some() || ours {
             // SAFETY: the layer owns the mask, which has no superlayer of
             // its own (or none).
@@ -1227,6 +1265,15 @@ fn grown(radii: CornerRadii, d: Points) -> CornerRadii {
 /// non-zero rule of shadow paths).
 fn add_reversed(path: &CFRetained<CGMutablePath>, rect: CGRect, radii: CornerRadii) {
     crate::decor::add_rounded(path, rect, radii, true);
+}
+
+/// Whether `layer`'s mask is `want` (or both are none).
+fn is_mask(layer: &CALayer, want: Option<&CALayer>) -> bool {
+    match (layer.mask(), want) {
+        (None, None) => true,
+        (Some(m), Some(w)) => std::ptr::eq(&*m, w),
+        _ => false,
+    }
 }
 
 /// Configures `g` to draw `gradient` over a `size` box.

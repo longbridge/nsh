@@ -89,6 +89,11 @@ final class Mounter {
     /** The alerts shown and not answered yet, by dialog id: what {@link SystemUi#closeDialog} takes back. */
     final SparseArray<android.app.AlertDialog> dialogs = new SparseArray<>();
     /**
+     * By dialog id, what takes each of {@link #dialogs} off the activity going for a configuration change, unanswered,
+     * and gives what shows it again in the next one ({@link #leaveWindows}).
+     */
+    final SparseArray<java.util.function.Supplier<Runnable>> dialogMoves = new SparseArray<>();
+    /**
      * The status bar the app asked for last (style, hidden; -1: never), applied again when the app's or the system's
      * appearance changes.
      */
@@ -190,11 +195,16 @@ final class Mounter {
     /** A portaled view's logical keyboard parent (`ViewProps::key_parent`); absent: ordinary. */
     private final android.util.SparseIntArray keyParents = new android.util.SparseIntArray();
     /**
+     * While the views move to the activity made again ({@link NshView#leaveActivity}): the focus they lose and take
+     * back on the way is no change for the app, and its listeners do not hear it.
+     */
+    boolean moving;
+    /**
      * A managed view took or lost the focus: the core styles it (`FOCUSED`),
      * and its `onFocus` / `onBlur` listeners hear it as an input's do.
      */
     private final View.OnFocusChangeListener focusChange = (view, focused) -> {
-        if (!(view instanceof Node)) return;
+        if (!(view instanceof Node) || moving) return;
         int id = ((Node) view).nodeId();
         // The focus went somewhere (the user's Tab or tap, or the view a
         // pending `focus()` waits for): that request is over.
@@ -247,6 +257,24 @@ final class Mounter {
     TextBox selectedText;
     /** The selectable view with a selection (one per surface, a text's or an area's). */
     SelectableView selectedArea;
+
+    /** Whether a text or a selectable view holds a selection (back ends it first). */
+    boolean hasSelection() {
+        return selectedText != null || selectedArea != null;
+    }
+
+    /** Ends the selection there is; false when there is none. */
+    private boolean endSelection() {
+        if (selectedArea != null) {
+            selectedArea.clear();
+            return true;
+        }
+        if (selectedText != null) {
+            selectedText.clearSelection();
+            return true;
+        }
+        return false;
+    }
     /** Selectable views (`ViewProps.selectable_view`), by view. */
     private final SparseArray<SelectableView> selectableViews = new SparseArray<>();
 
@@ -2204,7 +2232,7 @@ final class Mounter {
      * by asking JS: the system asks synchronously.
      */
     boolean wantsBack() {
-        if (!shownModals.isEmpty()) return true;
+        if (!shownModals.isEmpty() || hasSelection()) return true;
         return backStack() != null || wants(1, Native.BACK_PRESS);
     }
 
@@ -2279,6 +2307,68 @@ final class Mounter {
         updateBack();
     }
 
+    // --- Moving to the activity made again ------------------------------------------
+
+    /** The view focused in the host's window as it left the activity. */
+    private View movedFocus;
+    /** The text field the software keyboard was up for as it left the activity. */
+    private View movedKeyboard;
+    /** What shows the alerts taken off the activity that went again, in the new one. */
+    private final java.util.ArrayList<Runnable> movedDialogs = new java.util.ArrayList<>();
+
+    /**
+     * The activity goes, to be made again for a configuration change ({@link NshView#leaveActivity}): what the app
+     * shows in windows of the activity's own goes off it now, or the activity would leak with them. Dialogs and
+     * alerts come back in {@link #enterWindows}; menus and date pickers close, as when the user leaves them.
+     */
+    void leaveWindows() {
+        moving = true;
+        movedKeyboard = fieldWithKeyboard();
+        movedFocus = host.findFocus();
+        SystemMenus.dismissOf(context);
+        for (int i = 0; i < views.size(); i++) {
+            View v = views.valueAt(i);
+            if (v instanceof ComponentBox && ((ComponentBox) v).component instanceof DateTimePickerComponent) {
+                ((DateTimePickerComponent) ((ComponentBox) v).component).closeDialog();
+            }
+        }
+        java.util.ArrayList<java.util.function.Supplier<Runnable>> alerts = new java.util.ArrayList<>();
+        for (int i = 0; i < dialogMoves.size(); i++) alerts.add(dialogMoves.valueAt(i));
+        for (java.util.function.Supplier<Runnable> alert : alerts) movedDialogs.add(alert.get());
+        // Those still going too: their dismissal ends now.
+        for (int i = 0; i < modals.size(); i++) modals.valueAt(i).leaveWindow();
+    }
+
+    /** Shows the dialogs and alerts {@link #leaveWindows} took in the activity made again, the focus as it was. */
+    void enterWindows() {
+        for (ModalHost m : shownModals) m.enterWindow();
+        for (Runnable show : movedDialogs) show.run();
+        movedDialogs.clear();
+        View focus = movedFocus;
+        movedFocus = null;
+        if (focus != null && focus.getRootView() == host.getRootView()) focus.requestFocus();
+        applySystemBars();
+        moving = false;
+        // The keyboard comes back up for its field once its window has the focus.
+        View field = movedKeyboard;
+        movedKeyboard = null;
+        for (View v = field; v != null; v = v.getParent() instanceof View ? (View) v.getParent() : null) {
+            if (v instanceof InputBox) {
+                ((InputBox) v).focus();
+                break;
+            }
+        }
+    }
+
+    /** The text field the software keyboard is up for: the focus of the topmost window, the host's or a dialog's. */
+    private View fieldWithKeyboard() {
+        View field = shownModals.isEmpty() ? host.findFocus() : shownModals.get(shownModals.size() - 1).focus();
+        if (field == null || !field.onCheckIsTextEditor()) return null;
+        if (Build.VERSION.SDK_INT < 30) return field;
+        android.view.WindowInsets insets = field.getRootWindowInsets();
+        return insets != null && insets.isVisible(android.view.WindowInsets.Type.ime()) ? field : null;
+    }
+
     /** Whether the app's back listeners hear the button before the stacks. */
     boolean listensToBack() {
         return wants(1, Native.BACK_PRESS);
@@ -2313,6 +2403,8 @@ final class Mounter {
      * listeners hear it (and send {@code Command::Back} when none takes it),
      * else the innermost stack pops. Returns false if nothing did. */
     boolean handleBack() {
+        // A selection goes first, as TextView's: back ends it and goes no further.
+        if (endSelection()) return true;
         if (!shownModals.isEmpty()) {
             shownModals.get(shownModals.size() - 1).backPressed();
             return true;

@@ -1,6 +1,6 @@
 ---
 title: 开发服务器与调试
-description: 用 nsh run 和 nsh dev 运行 Rust 和 TSX 应用，连接模拟器、Android 模拟器和真机，并使用重新构建、模块热替换、日志、错误浮层和经 source map 映射的调用栈。
+description: 用 nsh run 和 nsh dev 运行 TSX 和 Rust 应用，连接模拟器、Android 模拟器和真机，并使用重新构建、模块热替换、日志、错误浮层和经 source map 映射的调用栈。
 order: 60
 group: tools
 ---
@@ -100,7 +100,7 @@ UI 集，例如为另一个应用构建的开发宿主）不会收到构建：�
 ## 修改 Rust 代码
 
 Rust 需要编译：修改应用的 crate，或它以路径依赖的 crate，会重新构建应用，`nsh run` 用新代码重启它。应用的状态从头开始；需要在重启后
-保留的内容请放进[存储](../modules/nsh.md#storage)。构建错误会打印在终端，下一次能编译通过的保存会重新运行。在同时有 Rust 和 TSX
+保留的内容请放进[存储](../modules/nsh.md#storage)。构建错误会打印在终端，下一次能编译通过的保存会重新运行。在同时有 TSX 和 Rust
 的应用中，修改 TSX 仍是热更新（见下文），修改 Rust 会重启应用。
 
 ## 模块热替换
@@ -201,7 +201,7 @@ Studio 会显示），Linux 应用写入标准错误。
 
 #### 桌面上的日志文件和级别
 
-打包后的 macOS、Windows、Linux 应用除了写入平台日志，还把日志写到它数据目录下的文件 `logs/app.log`：
+打包后的 macOS、Windows、Linux 应用除了写入平台日志，还把日志写到它数据目录下的文件 `logs/app.log`。应用可以用 `nsh.json` 的 `logDir` 另选目录（见[项目结构](./project-structure.md)），下表是默认位置：
 
 | 平台 | 日志文件 |
 |---|---|
@@ -215,6 +215,12 @@ Studio 会显示），Linux 应用写入标准错误。
 Rust 中的 `log_file()`、TSX 中的 `process.logFile` 给出这个文件的路径，应用可以把它附进诊断报告，或者提供“打开日志文件夹”；
 日志只写入平台日志时（开发宿主、嵌入应用、移动端、Web）为 `None`（`null`）。
 
+```tsx tabs
+import process from "process";
+
+const report = { logFile: process.logFile, version: "1.4.0" };
+```
+
 ```rust tabs
 use nsh_core::prelude::*;
 
@@ -224,12 +230,6 @@ if let Some(file) = log_file() {
         let _ = reveal_path(file).await;
     });
 }
-```
-
-```tsx tabs
-import process from "process";
-
-const report = { logFile: process.logFile, version: "1.4.0" };
 ```
 
 默认情况下，打包应用记录它的警告、错误和 `js` 日志（`nsh run` 下记录 info 及以上的所有日志）。环境变量 `RUST_LOG`

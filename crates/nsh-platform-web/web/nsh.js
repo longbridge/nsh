@@ -923,10 +923,15 @@ function webBridge(token) {
 /// Blink's shape cache around 5 MB.
 const MEASURE_ROUNDS = 5000;
 
+/// The context text is measured with: a `<canvas>` element where there is a
+/// document. On macOS, Chrome 69 to 103 crash the renderer when an
+/// `OffscreenCanvas` context's `font` names `BlinkMacSystemFont`, as the
+/// system font stack (`src/text/css.rs`) does; a `<canvas>` measures the same
+/// font the DOM draws.
 function measureContext() {
-  const canvas = typeof OffscreenCanvas !== "undefined"
-    ? new OffscreenCanvas(1, 1)
-    : document.createElement("canvas");
+  const canvas = typeof document !== "undefined"
+    ? document.createElement("canvas")
+    : new OffscreenCanvas(1, 1);
   return canvas.getContext("2d");
 }
 
@@ -2003,6 +2008,21 @@ class Player {
    * first: a side module, or an export of a module published whole.
    */
   async loadData(name) {
+    // A part of nsh/base a Rust app made a component of by name: its side
+    // module, or its gate in a module published whole; then the engine
+    // makes what waited for it. Nothing comes back on failure: the
+    // component keeps showing nothing, and the next one mounted asks again.
+    if (name.startsWith("part:")) {
+      const gate = `nsh_part_${name.slice(5)}`;
+      try {
+        if (this.options.sides?.[gate]) await this.loadSide(gate, this.options.sides);
+        else this.wasm[gate]?.();
+        this.call((w) => this.withStrings([gate], (p, l) => w.nsh_after_gate(p, l)));
+      } catch (err) {
+        console.warn("[nsh]", `${err.message ?? err} (${gate})`);
+      }
+      return;
+    }
     const url = this.data?.[name] ?? new URL(`nsh-${name}.bin`, import.meta.url);
     let bytes = null;
     try {

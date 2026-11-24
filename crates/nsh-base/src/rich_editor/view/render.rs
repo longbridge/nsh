@@ -1942,6 +1942,7 @@ fn sink(rv: Rv) -> impl IntoElement {
         rv.clone(),
     );
     let menu = rv.clone();
+    let moved = rv.clone();
     let value = rv.sink_value;
     input()
         .element_ref(&rv.input)
@@ -1975,6 +1976,9 @@ fn sink(rv: Rv) -> impl IntoElement {
                 .with(|id| id.as_deref().unwrap_or_default().to_owned())
         })
         .on_change(move |text: &str| change.sink_changed(text))
+        .on_selection_change(move |selection: &nsh_core::element::Selection| {
+            moved.sink_selection(selection)
+        })
         .on_composition_change(move |c: &Composition| {
             composition.composition_changed(c.composing, &c.text)
         })

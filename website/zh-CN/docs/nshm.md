@@ -9,7 +9,7 @@ group: start
 
 **nshm**（NSH 模块）为 Native Shell 应用提供组件、模块和类，就像 crate 为 Rust 程序提供代码。它有两种：
 
-- **Rust nshm** 是一个 Rust crate，发布在 crates.io 或 Git 上。应用可以在 Rust 和 TSX 中使用它：同一份实现，在每个平台上都是原生的。
+- **Rust nshm** 是一个 Rust crate，发布在 crates.io 或 Git 上。应用可以在 TSX 和 Rust 中使用它：同一份实现，在每个平台上都是原生的。
 - **TSX nshm** 是用版本标签发布的 Git 仓库里的 TSX。它被打进应用的 bundle，所以只用 TSX nshm 的应用不需要 Rust，nshm 也随应用的包和 OTA 更新一起发布。
 
 例如 [nsh-omarchy](https://github.com/huacnlee/nsh-omarchy) 为应用带来 [Omarchy](https://omarchy.org) 的风格：按钮、输入框、菜单、对话框、表格和图表，并随系统的 Omarchy 主题实时切换。
@@ -19,7 +19,38 @@ nsh add nsh-omarchy                  # 来自 crates.io
 nsh add github:huacnlee/nsh-omarchy  # 或来自 GitHub
 ```
 
-然后用应用所写的语言使用它，Rust 或 TSX 均可。**Rust 应用**中，它的组件就是 crate 里的函数：
+然后用应用所写的语言使用它。**TSX 应用**中，只要 nshm 向 TSX 导出了组件、模块或类，`nsh add` 安装后就能直接使用：按它的标识导入即可，这里是 `nsh-omarchy`。不需要升级 NSH，也不需要自己写 Rust 代码来扩展，`nsh` 会用这个 crate 构建应用的宿主。
+
+```tsx
+// App.tsx
+import { mount, signal, View } from "nsh";
+import { Body, Button, Omarchy, Panel, Switch, Toaster, toast } from "nsh-omarchy";
+
+function App() {
+  // 使用系统当前的 Omarchy 主题绘制，并跟随它的变化。
+  Omarchy.followSystem();
+  const notify = signal(true);
+  const saved = signal(0);
+  const save = () => {
+    saved.set(saved() + 1);
+    toast({ title: "Settings saved" });
+  };
+  return (
+    <View class="flex-1 gap-4 p-6 bg-background">
+      <Panel title="Settings">
+        <Switch label="Notifications" checked={notify()} onChange={({ checked }) => notify.set(checked)} />
+        <Button label="Save" variant="primary" onPress={save} />
+      </Panel>
+      <Body>{`Saved ${saved()} times`}</Body>
+      <Toaster />
+    </View>
+  );
+}
+
+mount(() => <App />);
+```
+
+**Rust 应用**中，它的组件就是 crate 里的函数：
 
 ```rust
 // src/lib.rs：应用的根组件
@@ -52,37 +83,6 @@ pub fn App() -> impl IntoElement {
         .child(nsh_omarchy::body(move || format!("Saved {} times", saved.get())))
         .child(nsh_omarchy::toaster())
 }
-```
-
-**TSX 应用**中，只要 nshm 向 TSX 导出了组件、模块或类，`nsh add` 安装后就能直接使用：按它的标识导入即可，这里是 `nsh-omarchy`。不需要升级 NSH，也不需要自己写 Rust 代码来扩展，`nsh` 会用这个 crate 构建应用的宿主。
-
-```tsx
-// App.tsx
-import { mount, signal, View } from "nsh";
-import { Body, Button, Omarchy, Panel, Switch, Toaster, toast } from "nsh-omarchy";
-
-function App() {
-  // 使用系统当前的 Omarchy 主题绘制，并跟随它的变化。
-  Omarchy.followSystem();
-  const notify = signal(true);
-  const saved = signal(0);
-  const save = () => {
-    saved.set(saved() + 1);
-    toast({ title: "Settings saved" });
-  };
-  return (
-    <View class="flex-1 gap-4 p-6 bg-background">
-      <Panel title="Settings">
-        <Switch label="Notifications" checked={notify()} onChange={({ checked }) => notify.set(checked)} />
-        <Button label="Save" variant="primary" onPress={save} />
-      </Panel>
-      <Body>{`Saved ${saved()} times`}</Body>
-      <Toaster />
-    </View>
-  );
-}
-
-mount(() => <App />);
 ```
 
 nshm 让功能不必成为 NSH 的一部分，也能交到需要它的应用手中：它按自己的节奏发布，只有安装它的应用才承担它的体积、构建时间和依赖。
@@ -147,6 +147,7 @@ nsh add nsh-extra --features camera
 | Feature | TSX | 作用 |
 |---|---|---|
 | `camera` | `Camera` | 在 iOS 和 Android 上用系统相机拍一张照片 |
+| `location` | `Location` | 在用户允许后读取设备位置，支持 macOS、iOS 和 Web |
 | `photos` | `Photos` | 在用户允许后读取 iOS 上用户最近的照片 |
 | `push` | `Push` | 在 iOS 上接收任意推送服务发来的远程通知，在 Android 上通过该服务的绑定接收 |
 | `speech` | `Speech` | 在 macOS、iOS、Android、Windows 和 Web 上把用户说的话随说随转成文字 |
@@ -162,6 +163,38 @@ if (await Camera.available()) {
 ```
 
 用户取消时 `takePhoto` 返回 `null`；用户不允许应用使用相机时，它以错误码 `EACCES` 拒绝。应用可以在同一次点按里关掉 sheet 并请求拍照：相机会在 sheet 关好之后出现。没有相机可用的地方（桌面、Web、模拟器）`available()` 为 `false`，`takePhoto` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝。开启这个 feature 后，打包的应用会带上它需要的条目：iOS 上的相机用途说明（应用可以在 `ios.infoPlist` 里写自己的 `NSCameraUsageDescription` 文案），Android 上对相机应用的查询声明。
+
+### Location
+
+`Location` 在用户允许后读取设备的位置：用 `current` 读一次，或用 `watch` 在位置变化时持续收到，形式和浏览器的 `navigator.geolocation` 一致。macOS 和 iOS 用 CoreLocation 读取，Web 用浏览器的 `navigator.geolocation`；应用第一次读取时，系统或浏览器会询问用户。只在应用使用期间读取，不支持后台定位。
+
+```sh
+nsh add nsh-extra --features location
+```
+
+```tsx
+import { Location } from "nsh-extra";
+
+if (await Location.available()) {
+  const position = await Location.current({ accuracy: "high", timeout: 10_000 });
+  showOnMap(position.coords.latitude, position.coords.longitude, position.coords.accuracy);
+
+  const stop = Location.watch(
+    (position) => moveMarker(position.coords),
+    (error) => showError(error.code),
+    { distanceFilter: 10 },
+  );
+  // 之后调用 stop()；启动它的组件销毁时也会停止。
+}
+```
+
+- `available()` 在打包时开启了该 feature 的 macOS、iOS 应用，以及有 `navigator.geolocation` 的浏览器中为 `true`；在 Android、Windows、Linux、终端、headless 运行，以及以裸二进制运行的 Apple 应用（`nsh run --target macos`，没有 `Info.plist`，系统不会询问）中为 `false`。
+- `authorization()` 不询问用户，直接给出当前允许的范围：`"notDetermined"`、`"whenInUse"`、`"always"`、`"denied"` 或 `"restricted"`。Web 只有 `"whenInUse"`（已允许）、`"denied"` 和 `"notDetermined"`（会询问）。`requestAuthorization()` 询问用户并给出回答；读取时会自动询问，只在想自己决定询问时机时才需要先调用。
+- `current({ accuracy, timeout })` 给出一个 `Position`（`coords.latitude`、`longitude`、以米为单位的 `accuracy`、`altitude`、`altitudeAccuracy`、`heading`、`speed`，设备不知道的为 `null`；以及自 epoch 起的毫秒数 `timestamp`）。`accuracy` 可以是 `"best"`、`"high"`、`"balanced"`（默认）或 `"low"`。
+- `watch(listener, onError?, { accuracy, distanceFilter })` 每有新位置就调用 `listener`，返回一个停止它的函数。`onError` 收到使 watch 结束的错误。
+- 读取失败时得到一个 `Error`，其 `code` 为 `"EACCES"`（用户不允许）、`"ETIMEDOUT"`（`timeout` 内没有结果）、`"ERR_POSITION_UNAVAILABLE"`（设备找不到位置）或 `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"`（这里读不到位置）；选项超出范围时抛出 `RangeError`。
+
+该 feature 会在 iOS 和 macOS 应用的 `Info.plist` 中加入 `NSLocationWhenInUseUsageDescription`，并为沙盒化的 macOS 应用加入定位 entitlement。Rust 代码使用 `nsh_extra::location`：`available()`、`authorization().await`、`request_authorization().await`、`current(LocationRequest).await`，以及 `watch(LocationRequest)`，它的 `next().await` 给出每个位置（丢弃即停止）。
 
 ### Photos
 
@@ -622,4 +655,4 @@ nshm 可以提供自己的 target，例如 NSH 不构建的平台：在 `nsh.jso
 
 ## 安全
 
-nshm 的构建脚本和过程宏会在应用构建时执行，它的代码（无论 Rust 还是 TSX）以应用的权限运行。应用依赖图里的任何 crate 还能通过 `[package.metadata.nsh]` 给打包的应用加系统权限、清单组件、Java 库和 Android 库（连同其中的原生代码）以及 entitlements。请像审查应用自己的代码一样审查它的源码和 `nsh.lock` 的变更。
+nshm 的构建脚本和过程宏会在应用构建时执行，它的代码（无论 TSX 还是 Rust）以应用的权限运行。应用依赖图里的任何 crate 还能通过 `[package.metadata.nsh]` 给打包的应用加系统权限、清单组件、Java 库和 Android 库（连同其中的原生代码）以及 entitlements。请像审查应用自己的代码一样审查它的源码和 `nsh.lock` 的变更。

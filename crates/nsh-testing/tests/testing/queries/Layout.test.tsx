@@ -16,6 +16,7 @@ test("layout and the accessibility tree read what is on screen", async () => {
 
   const tree = app.accessibility()!;
   expect(tree.role).toBeUndefined();
-  expect(tree.children.map((c) => c.role)).toEqual(["button", "checkbox"]);
+  expect(tree.children.map((c) => c.role)).toEqual(["button", "checkbox", "button", "button", "button"]);
   expect(tree.children[1].checked).toBe("true");
+  expect(tree.children.map((c) => c.pressed)).toEqual([undefined, undefined, "true", "false", "mixed"]);
 });

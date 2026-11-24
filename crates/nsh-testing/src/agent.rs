@@ -26,7 +26,7 @@ use std::{
 use nsh_core::time::Instant;
 use nsh_core::{
     MountBatch, NodeId,
-    geometry::{Bounds, Point, Points, Size, point},
+    geometry::{Bounds, Point, Points, Size, point, px},
 };
 use nsh_dev::protocol::{
     AccessibilityNode, PickTarget, SceneQuery, SpanStyle, StepOutcome, TestStep, ViewLayout,
@@ -1738,7 +1738,10 @@ impl Agent {
         }
         match step {
             TestStep::Ready { timeout_ms } => done(self.ready(Duration::from_millis(timeout_ms))),
-            TestStep::Press { selector } => done(self.press(&selector)),
+            TestStep::Press { selector } => done(self.press(&selector, None)),
+            TestStep::PressAt { selector, x, y } => {
+                done(self.press(&selector, Some(point(px(x), px(y)))))
+            }
             TestStep::LongPress { selector } => done(self.long_press(&selector)),
             TestStep::Type { selector, text } => done(self.type_text(&selector, &text)),
             TestStep::Submit { selector } => done(self.submit(&selector)),
@@ -2067,6 +2070,18 @@ impl Agent {
         what: &str,
         target: PickTarget,
     ) -> Result<(NodeId, Point<Points>), String> {
+        self.find_at(selector, what, target, None)
+    }
+
+    /// [`Agent::find`] for a press at `position` in the view `selector`
+    /// names (its top left corner), else where a tap lands.
+    fn find_at(
+        &self,
+        selector: &str,
+        what: &str,
+        target: PickTarget,
+        position: Option<Point<Points>>,
+    ) -> Result<(NodeId, Point<Points>), String> {
         Selector::parse(selector)?;
         self.settled_unless_still()?;
         let picked = self.scene.pick(selector, target)?;
@@ -2074,6 +2089,42 @@ impl Agent {
         // The pointer acts in the window the view is in.
         self.native.target_window(self.scene.window_of(id)?)?;
         let (view, at) = self.locate(id, selector, target)?;
+        let at = match position {
+            None => at,
+            Some(position) => {
+                // The point is in the view the selector names, as the
+                // headless driver places it; a span of a text is placed in
+                // its text view, as the platform draws it.
+                let named = match target {
+                    PickTarget::View => id,
+                    _ => match self.scene.pick(selector, PickTarget::View)? {
+                        Pick::One(named) => named,
+                        _ => id,
+                    },
+                };
+                let origin = self
+                    .native
+                    .bounds(named)
+                    .map(|b| b.origin)
+                    .or_else(|| {
+                        self.scene
+                            .layout(selector)
+                            .ok()
+                            .flatten()
+                            .map(|l| point(px(l.x), px(l.y)))
+                    })
+                    .or_else(|| self.native.bounds(view).map(|b| b.origin))
+                    .ok_or_else(|| {
+                        format!(
+                            "`{selector}` has no bounds to place a press at {}, {}; {}",
+                            position.x.0,
+                            position.y.0,
+                            self.on_screen()
+                        )
+                    })?;
+                origin + position
+            }
+        };
         // What the system draws over the app (a header it scrolls under)
         // would take the press: the step fails rather than pressing it.
         if let Some(cover) = self.native.covered(view, at) {
@@ -2401,21 +2452,27 @@ impl Agent {
         Ok(clear_spot(start, extent, along, &covered).unwrap_or(along))
     }
 
-    fn press(&self, selector: &str) -> Result<(), String> {
-        let at = match self.find(selector, "pressable view", PickTarget::Pressable) {
+    fn press(&self, selector: &str, position: Option<Point<Points>>) -> Result<(), String> {
+        let at = match self.find_at(selector, "pressable view", PickTarget::Pressable, position) {
             Ok((_, at)) => at,
             // Not one of the app's views on screen: a control the system
             // draws for it (a header button) may carry the name.
-            Err(error) => self.system_control(selector).ok_or(error)?,
+            Err(error) => self
+                .system_control(selector)
+                .map(|bounds| match position {
+                    Some(position) => bounds.origin + position,
+                    None => bounds.center(),
+                })
+                .ok_or(error)?,
         };
         self.native.press(at);
         self.settled()
     }
 
-    /// The middle of the control the system draws for the app that
+    /// The bounds of the control the system draws for the app that
     /// `selector` names alone (`id:<key>`, `label:<label>` or a bare name,
     /// as a test id, else a label), when the platform shows one.
-    fn system_control(&self, selector: &str) -> Option<Point<Points>> {
+    fn system_control(&self, selector: &str) -> Option<Bounds<Points>> {
         use crate::selector::{Matcher, TextMatch};
         let parsed = Selector::parse(selector).ok()?;
         let [part] = parsed.parts.as_slice() else {
@@ -2435,7 +2492,7 @@ impl Agent {
                 .or_else(|| self.native.system_control(SystemName::Label(name))),
             _ => None,
         }?;
-        Some(bounds.center())
+        Some(bounds)
     }
 
     fn long_press(&self, selector: &str) -> Result<(), String> {
@@ -3287,6 +3344,49 @@ mod tests {
         });
         assert_eq!(outcome, ok);
         assert_eq!(pressed, [323.0]);
+    }
+
+    #[test]
+    fn a_press_at_a_position_lands_there_and_fails_when_that_point_is_covered() {
+        let press = |page: Page, position: Point<Points>| {
+            let pressed = page.pressed.clone();
+            let agent = Agent::new(page_model(), Box::new(page));
+            let outcome = agent.take(TestStep::PressAt {
+                selector: "view:4".into(),
+                x: position.x.0,
+                y: position.y.0,
+            });
+            (outcome, pressed.lock().unwrap().clone())
+        };
+        let (outcome, pressed) = press(
+            Page {
+                target: 200.0,
+                ..Page::default()
+            },
+            point(px(10.0), px(5.0)),
+        );
+        assert_eq!(
+            outcome,
+            StepOutcome::Done {
+                value: serde_json::Value::Null
+            }
+        );
+        assert_eq!(pressed, [205.0]);
+        // What draws over that point takes the press: the step fails
+        // instead of pressing the view.
+        let (outcome, pressed) = press(
+            Page {
+                target: 50.0,
+                bar: 103.0,
+                ..Page::default()
+            },
+            point(px(10.0), px(5.0)),
+        );
+        assert!(
+            matches!(&outcome, StepOutcome::Failed { message } if message.starts_with("`view:4` is covered: a press there reaches a navigation bar")),
+            "{outcome:?}"
+        );
+        assert!(pressed.is_empty());
     }
 
     #[test]

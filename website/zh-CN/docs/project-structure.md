@@ -1,30 +1,13 @@
 ---
 title: 项目结构
-description: 用 Rust 或 TSX 编写的 NSH 应用包含的文件、nsh.json 的每个键、.nsh/types 中的 TypeScript 配置、资源，以及模块和包的导入方式。
+description: 用 TSX 或 Rust 编写的 NSH 应用包含的文件、nsh.json 的每个键、.nsh/types 中的 TypeScript 配置、资源，以及模块和包的导入方式。
 order: 5
 group: start
 ---
 
 # 项目结构
 
-一个 NSH 应用就是一个目录，包含一个 `nsh.json` 和它的代码：一个 Rust crate（由 `nsh.json` 指定其根组件），或一个 TSX 入口模块，或两者都有。其他一切（更多模块、图片、字体、JSON 文件）都从这里找到：crate 的模块和它的 `assets/` 目录，或者 TSX 入口导入的文件，因此不需要维护文件清单。
-
-用 Rust 编写的应用是一个 Cargo 项目：
-
-```text
-my-app/
-├── nsh.json           name, id, version, icon, the crate ("rust") and its root component ("root"), theme
-├── Cargo.toml         the crate: nsh-core, nsh-base and your dependencies
-├── src/
-│   ├── lib.rs         the root component and the crate's UI set (#[native_module])
-│   ├── main.rs        cargo run: the root on this machine's desktop backend
-│   └── screens/       your own modules (any layout you like)
-├── assets/            files the crate ships: asset!("logo@2x.png"), fonts
-├── locales/           translations, rust-i18n's files: t!("hello") (I18n)
-├── .gitignore         .nsh/ and target/
-├── .nsh/              generated: the runners' sources, test entries, build output (.nsh/out)
-└── target/            Cargo's build directory
-```
+一个 NSH 应用就是一个目录，包含一个 `nsh.json` 和它的代码：一个 TSX 入口模块（有 Rust 时，再加上 `ext/` 里的 Rust crate），或一个由 `nsh.json` 指定根组件的 Rust crate。其他一切（更多模块、图片、字体、JSON 文件）都从这里找到：TSX 入口导入的文件，或者 crate 的模块和它的 `assets/` 目录，因此不需要维护文件清单。
 
 TSX 应用是一个入口及它导入的模块：
 
@@ -43,6 +26,23 @@ my-app/
 │   └── Inter.ttf      imported fonts
 ├── locales/           translations, rust-i18n's files: t("hello") (I18n)
 └── .nsh/              generated: type declarations, development host builds, test entries, build output (.nsh/out)
+```
+
+完全用 Rust 编写的应用是一个 Cargo 项目：
+
+```text
+my-app/
+├── nsh.json           name, id, version, icon, the crate ("rust") and its root component ("root"), theme
+├── Cargo.toml         the crate: nsh-core, nsh-base and your dependencies
+├── src/
+│   ├── lib.rs         the root component and the crate's UI set (#[native_module])
+│   ├── main.rs        cargo run: the root on this machine's desktop backend
+│   └── screens/       your own modules (any layout you like)
+├── assets/            files the crate ships: asset!("logo@2x.png"), fonts
+├── locales/           translations, rust-i18n's files: t!("hello") (I18n)
+├── .gitignore         .nsh/ and target/
+├── .nsh/              generated: the runners' sources, test entries, build output (.nsh/out)
+└── target/            Cargo's build directory
 ```
 
 TSX 应用通过 `ext/` 里自己的 nshm crate 用 Rust 扩展自己，在 `"dependencies"` 中按路径列出（[应用自己的 Rust：ext/](./nshm.md#应用自己的-rustext)）；`src/` 放 TSX，`ext/` 放 Rust。Rust 应用也可以在 `"rust"` 中列出它的 crate，再加一个导入它们的 TSX 入口（[用 Rust 开发](./rust.md#用-tsx-扩展-rust-应用)）。
@@ -69,7 +69,20 @@ my-project/
 
 ## 根组件
 
-Rust 应用的根是它的 crate 中的一个组件，`nsh.json` 的 `"root"` 用它在 crate 中的路径指定（`App`、`shell::Gallery`）。TSX 入口是一个普通模块，最后渲染根组件：
+TSX 入口是一个普通模块，最后渲染根组件。Rust 应用的根是它的 crate 中的一个组件，`nsh.json` 的 `"root"` 用它在 crate 中的路径指定（`App`、`shell::Gallery`）：
+
+```tsx tabs
+// App.tsx
+import { mount } from "nsh";
+import { Window } from "nsh/desktop";
+import { Home } from "./components/Home";
+
+function App() {
+  return <Home />;
+}
+
+mount(() => <Window id="main"><App /></Window>);
+```
 
 ```rust tabs
 // src/lib.rs; nsh.json: { "rust": ".", "root": "App" }
@@ -90,20 +103,7 @@ pub fn App() -> impl IntoElement {
 }
 ```
 
-```tsx tabs
-// App.tsx
-import { mount } from "nsh";
-import { Window } from "nsh/desktop";
-import { Home } from "./components/Home";
-
-function App() {
-  return <Home />;
-}
-
-mount(() => <Window id="main"><App /></Window>);
-```
-
-`nsh run` 和 `nsh package` 在所有平台上挂载 Rust 根组件，不带 QuickJS。在 TSX 中，`mount(component, props?)` 把组件渲染为应用根，并返回一个用于移除它的函数；应用只调用它一次。在桌面平台上，应用根用 `<Window>` 声明自己的窗口（声明窗口的应用也要声明第一个；裸 root 渲染在隐式首窗口中）；其他平台上 `<Window>` 在唯一界面中显示它的内容。入口顶层的代码在 bundle 加载时、第一帧之前运行。
+在 TSX 中，`mount(component, props?)` 把组件渲染为应用根，并返回一个用于移除它的函数；应用只调用它一次。在桌面平台上，应用根用 `<Window>` 声明自己的窗口（声明窗口的应用也要声明第一个；裸 root 渲染在隐式首窗口中）；其他平台上 `<Window>` 在唯一界面中显示它的内容。入口顶层的代码在 bundle 加载时、第一帧之前运行。`nsh run` 和 `nsh package` 在所有平台上挂载 Rust 根组件，不带 QuickJS。
 
 ## nsh.json
 
@@ -154,6 +154,7 @@ mount(() => <Window id="main"><App /></Window>);
 | `fileTypes` | object[] | `package`、`run` | 应用打开的文件类型，`[{ "name": "Video", "extensions": ["mp4"], "mimeTypes": ["video/mp4"] }]`，由包声明给系统（Android 经由 `mimeTypes`，进入分享面板）；文件送到 [`Application.on("openFiles")`](../modules/nsh-desktop.md#打开文件)。 |
 | `handoff` | boolean | `package` | `true`：在 iOS 和 macOS 上，应用用 [`UrlScheme.setUrl`](../modules/nsh.md#handoff) 设置的地址交给系统，Handoff 可以在用户的其他设备上接着打开它；打包时在 `NSUserActivityTypes` 中声明它的活动类型 `<id>.url`。 |
 | `singleInstance` | boolean | `package` | `true`：应用在 Windows 和 Linux 上只运行一份；第二次启动把参数和工作目录交给正在运行的应用后退出（[单实例](../modules/nsh-desktop.md#单实例)）。 |
+| `logDir` | string | `package` | 打包后的桌面应用（macOS、Windows、Linux）写日志文件（`app.log`、`app.1.log` 等）的目录，`log_file()` 和 `process.logFile` 也指向这里。写法与 `dataDir` 相同：绝对路径或 `"${homeDir}/.myapp/logs/ui"`（不能包含 `..` 或其他 `${...}`），其他值会给出警告并被忽略。不设置时，日志在数据目录（`dataDir`，或系统应用数据目录下以应用 id 命名的目录）的 `logs` 中；设置 `logDir` 后不会创建这个 `logs` 目录。iOS、Android、Web 和嵌入的应用没有日志文件，会忽略它。 |
 | `dataDir` | string | `package` | 应用在桌面（macOS、Windows、Linux）上的数据目录：存储（`nsh/storage`）、日志、`process.dataDir` 以及 `${dataDir}` 中的文件都在这里。取值为绝对路径或 `"${homeDir}/.myapp"`（不能包含 `..` 或其他 `${...}`），其他值会给出警告并被忽略。不设置时为系统应用数据目录下以应用 id 命名的目录：macOS 为 `~/Library/Application Support/<id>`，Windows 为 `%APPDATA%\<id>`，Linux 为 `$XDG_DATA_HOME/<id>`（`~/.local/share/<id>`）。在这里设置的目录不随应用 id 改变。缓存和下载的更新各有自己的位置；iOS、Android、Web 和嵌入的应用使用平台的目录。 |
 | `features` | string[] | `package` | 打包时 release runner 始终保留的原生功能（应用带 Rust crate，或本机装有 `cargo` 且打包目标是本机系统时，在本地构建 runner），如 `["plot"]`：只有 Rust 代码或动态 import 才用到的功能写在这里。其余功能中，bundle 用不到的（`shader`、`editor`、`plot` 等）`package` 会去掉，并输出原因。 |
 | `icon` | string \| object | `package`、`run` | 一张正方形 PNG，最好是 1024×1024，路径相对于 `nsh.json`；也可按平台分别提供（`{ "macos": "…", "windows": "…" }`，[打包](./packaging.md#图标)）。Android 的可以是自适应图标（`{ "foreground": "…", "background": "…", "monochrome": "…" }`，[打包](./packaging.md#图标)）。 |
@@ -314,6 +315,15 @@ declare module "node-polyfill";
 
 图片和字体随应用一起发布。Rust crate 在编译时用 `asset!` 读取它的 `assets/` 目录中的每个文件，并在它的 `#[native_module]` 函数中用 `registry.assets(assets!())` 把它们全部发布；TSX 像模块一样导入它们，打包器会记录每个被导入的文件（以及图片的像素密度变体）。`nsh build` 把它们复制到 `.nsh/out/assets/`，`nsh package` 把它们放进应用，开发期间则提供给应用。
 
+```tsx tabs
+import { Image, Text } from "nsh";
+import logo from "./assets/logo@2x.png";   // { url: "asset:/assets/logo@2x.png", size: { width: 64, height: 64 } }
+import Inter from "./assets/Inter.ttf";     // "Inter"
+
+<Image src={logo} />
+<Text style={{ fontFamily: Inter }}>Hello</Text>
+```
+
 ```rust tabs
 use nsh_core::element::{FontAsset, ImageAsset, asset};
 
@@ -322,15 +332,6 @@ const INTER: FontAsset = asset!("Inter.ttf");        // its uri, and its family:
 
 image(LOGO)
 text("Hello").font_family(INTER.family)
-```
-
-```tsx tabs
-import { Image, Text } from "nsh";
-import logo from "./assets/logo@2x.png";   // { url: "asset:/assets/logo@2x.png", size: { width: 64, height: 64 } }
-import Inter from "./assets/Inter.ttf";     // "Inter"
-
-<Image src={logo} />
-<Text style={{ fontFamily: Inter }}>Hello</Text>
 ```
 
 | 扩展名 | 导入得到 |

@@ -107,6 +107,32 @@ final class ModalHost {
         // window goes and `onDismiss` goes out before this one comes.
         finishChange();
         closing = false;
+        away = false;
+        awayFocus = null;
+        present();
+        Runnable animateIn = () -> {
+            if (animation == 2) {
+                mounter.event(id, Native.SHOW);
+                return;
+            }
+            if (animation == 0) container.setTranslationY(container.getHeight());
+            container.animate().alpha(1).translationY(0).setDuration(300)
+                    .setInterpolator(new DecelerateInterpolator(1.5f))
+                    .setListener(new AnimatorListenerAdapter() {
+                        @Override
+                        public void onAnimationEnd(Animator a) {
+                            container.animate().setListener(null);
+                            mounter.event(id, Native.SHOW);
+                        }
+                    }).start();
+        };
+        if (shaderIn(dialog, animateIn)) return;
+        container.setAlpha(animation == 1 ? 0 : 1);
+        container.post(animateIn);
+    }
+
+    /** Makes the dialog window and shows the content in it, without an animation. */
+    private void present() {
         Context context = mounter.context;
         dialog = new Dialog(context, android.R.style.Theme_DeviceDefault_Light_NoActionBar) {
             /**
@@ -158,25 +184,59 @@ final class ModalHost {
             if (container.findFocus() == null) container.requestFocus();
         });
         matchSystemBars(window);
-        Runnable animateIn = () -> {
-            if (animation == 2) {
-                mounter.event(id, Native.SHOW);
-                return;
-            }
-            if (animation == 0) container.setTranslationY(container.getHeight());
-            container.animate().alpha(1).translationY(0).setDuration(300)
-                    .setInterpolator(new DecelerateInterpolator(1.5f))
-                    .setListener(new AnimatorListenerAdapter() {
-                        @Override
-                        public void onAnimationEnd(Animator a) {
-                            container.animate().setListener(null);
-                            mounter.event(id, Native.SHOW);
-                        }
-                    }).start();
-        };
-        if (shaderIn(dialog, animateIn)) return;
-        container.setAlpha(animation == 1 ? 0 : 1);
-        container.post(animateIn);
+    }
+
+    /**
+     * The dialog window went with the activity ({@link Mounter#leaveWindows}), the modal still shown: the activity
+     * made again shows it again ({@link #enterWindow}).
+     */
+    private boolean away;
+    /** The view focused in the dialog as it went. */
+    private View awayFocus;
+
+    /**
+     * The activity goes for a configuration change: the dialog window, which is the activity's, goes now, its content
+     * kept as it is for the one made again ({@link #enterWindow}). A presentation or dismissal under way ends first,
+     * with its event.
+     */
+    void leaveWindow() {
+        if (dialog == null) return;
+        finishChange();
+        // Ends its own animation where it is going: `onShow` goes out, or the dismissed dialog goes.
+        container.animate().cancel();
+        if (dialog == null || closing) return;
+        container.setAlpha(1);
+        container.setTranslationY(0);
+        awayFocus = container.findFocus();
+        keys.focusLost();
+        if (mounter.handle() != 0) Native.keyReset(mounter.handle());
+        Dialog d = dialog;
+        dialog = null;
+        away = true;
+        d.dismiss();
+        if (container.getParent() instanceof ViewGroup) ((ViewGroup) container.getParent()).removeView(container);
+    }
+
+    /** Shows the dialog again over the activity made again ({@link #leaveWindow}), its focus where it was. */
+    void enterWindow() {
+        if (!away) return;
+        away = false;
+        present();
+        View focus = awayFocus;
+        awayFocus = null;
+        if (focus != null && focus != container && isAncestor(container, focus)) focus.requestFocus();
+    }
+
+    /** The view focused in the dialog, else null. */
+    View focus() {
+        return container.findFocus();
+    }
+
+    private static boolean isAncestor(View ancestor, View view) {
+        for (android.view.ViewParent p = view.getParent(); p != null; p = p.getParent()) {
+            if (p == ancestor) return true;
+        }
+        return false;
     }
 
     /**

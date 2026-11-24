@@ -1,30 +1,13 @@
 ---
 title: Project structure
-description: The files of an NSH app in Rust or TSX, every key of nsh.json, the TypeScript setup in .nsh/types, assets, and how modules and packages are imported.
+description: The files of an NSH app in TSX or Rust, every key of nsh.json, the TypeScript setup in .nsh/types, assets, and how modules and packages are imported.
 order: 5
 group: start
 ---
 
 # Project structure
 
-An NSH app is a directory with an `nsh.json` and its code: a Rust crate whose root component `nsh.json` names, or a TSX entry module, or both. Everything else (more modules, images, fonts, JSON files) is found from there: a crate's modules and its `assets/` directory, or the files the TSX entry imports, so there is no file list to maintain.
-
-An app written in Rust is a Cargo project:
-
-```text
-my-app/
-├── nsh.json           name, id, version, icon, the crate ("rust") and its root component ("root"), theme
-├── Cargo.toml         the crate: nsh-core, nsh-base and your dependencies
-├── src/
-│   ├── lib.rs         the root component and the crate's UI set (#[native_module])
-│   ├── main.rs        cargo run: the root on this machine's desktop backend
-│   └── screens/       your own modules (any layout you like)
-├── assets/            files the crate ships: asset!("logo@2x.png"), fonts
-├── locales/           translations, rust-i18n's files: t!("hello") (I18n)
-├── .gitignore         .nsh/ and target/
-├── .nsh/              generated: the runners' sources, test entries, build output (.nsh/out)
-└── target/            Cargo's build directory
-```
+An NSH app is a directory with an `nsh.json` and its code: a TSX entry module, with Rust crates in `ext/` when it has any, or a Rust crate whose root component `nsh.json` names. Everything else (more modules, images, fonts, JSON files) is found from there: the files the TSX entry imports, or a crate's modules and its `assets/` directory, so there is no file list to maintain.
 
 A TSX app is an entry and the modules it imports:
 
@@ -43,6 +26,23 @@ my-app/
 │   └── Inter.ttf      imported fonts
 ├── locales/           translations, rust-i18n's files: t("hello") (I18n)
 └── .nsh/              generated: type declarations, development host builds, test entries, build output (.nsh/out)
+```
+
+An app written entirely in Rust is a Cargo project:
+
+```text
+my-app/
+├── nsh.json           name, id, version, icon, the crate ("rust") and its root component ("root"), theme
+├── Cargo.toml         the crate: nsh-core, nsh-base and your dependencies
+├── src/
+│   ├── lib.rs         the root component and the crate's UI set (#[native_module])
+│   ├── main.rs        cargo run: the root on this machine's desktop backend
+│   └── screens/       your own modules (any layout you like)
+├── assets/            files the crate ships: asset!("logo@2x.png"), fonts
+├── locales/           translations, rust-i18n's files: t!("hello") (I18n)
+├── .gitignore         .nsh/ and target/
+├── .nsh/              generated: the runners' sources, test entries, build output (.nsh/out)
+└── target/            Cargo's build directory
 ```
 
 A TSX app extends itself with Rust through nshm crates of its own in `ext/`, listed in `"dependencies"` by path ([An app's own Rust: ext/](./nshm.md#an-apps-own-rust-ext)); `src/` holds its TSX, `ext/` its Rust. A Rust app can also list its crates in `"rust"` and add a TSX entry that imports them ([Building with Rust](./rust.md#extending-a-rust-app-with-tsx)).
@@ -69,7 +69,20 @@ my-project/
 
 ## The root component
 
-A Rust app's root is a component of its crate, which `nsh.json`'s `"root"` names by its path in the crate (`App`, `shell::Gallery`). A TSX entry is a normal module that ends by rendering the root component:
+A TSX entry is a normal module that ends by rendering the root component. A Rust app's root is a component of its crate, which `nsh.json`'s `"root"` names by its path in the crate (`App`, `shell::Gallery`):
+
+```tsx tabs
+// App.tsx
+import { mount } from "nsh";
+import { Window } from "nsh/desktop";
+import { Home } from "./components/Home";
+
+function App() {
+  return <Home />;
+}
+
+mount(() => <Window id="main"><App /></Window>);
+```
 
 ```rust tabs
 // src/lib.rs; nsh.json: { "rust": ".", "root": "App" }
@@ -90,20 +103,7 @@ pub fn App() -> impl IntoElement {
 }
 ```
 
-```tsx tabs
-// App.tsx
-import { mount } from "nsh";
-import { Window } from "nsh/desktop";
-import { Home } from "./components/Home";
-
-function App() {
-  return <Home />;
-}
-
-mount(() => <Window id="main"><App /></Window>);
-```
-
-`nsh run` and `nsh package` mount a Rust root on every platform, with no QuickJS. In TSX, `mount(component, props?)` renders the component into the app root and returns a function that removes it again; an app calls it once. On the desktops the root holds top-level `<Window>` scenes (an app that declares windows declares the first too; a plain root renders in the implicit first window); off the desktops `<Window>` shows its content in the one surface. Code at the top level of the entry runs when the bundle loads, before the first frame.
+In TSX, `mount(component, props?)` renders the component into the app root and returns a function that removes it again; an app calls it once. On the desktops the root holds top-level `<Window>` scenes (an app that declares windows declares the first too; a plain root renders in the implicit first window); off the desktops `<Window>` shows its content in the one surface. Code at the top level of the entry runs when the bundle loads, before the first frame. `nsh run` and `nsh package` mount a Rust root on every platform, with no QuickJS.
 
 ## nsh.json
 
@@ -154,6 +154,7 @@ Every other key is optional; a TSX app may also leave out the four. A TSX app's 
 | `fileTypes` | object[] | `package`, `run` | The file types the app opens, `[{ "name": "Video", "extensions": ["mp4"], "mimeTypes": ["video/mp4"] }]`, which packages declare to the system (on Android, through `mimeTypes`, in the share sheet); the files reach [`Application.on("openFiles")`](../modules/nsh-desktop.md#opening-files). |
 | `handoff` | boolean | `package` | `true`: on iOS and macOS the address the app sets with [`UrlScheme.setUrl`](../modules/nsh.md#handoff) goes to the system, so Handoff continues it on the user's other devices; packages declare its activity type, `<id>.url`, in `NSUserActivityTypes`. |
 | `singleInstance` | boolean | `package` | `true`: the app runs once on Windows and Linux; a second launch hands its arguments and working directory to the running app and exits ([Single instance](../modules/nsh-desktop.md#single-instance)). |
+| `logDir` | string | `package` | The directory a packaged desktop app (macOS, Windows, Linux) writes its log files (`app.log`, `app.1.log`, ...) in, and the directory `log_file()` and `process.logFile` point into. Spelled like `dataDir`: an absolute path or `"${homeDir}/.myapp/logs/ui"` (no `..`, no other `${...}`); NSH warns about and ignores any other value. Unset, the logs are in `logs` in the data directory (`dataDir`, or the app's id in the system's directory for apps' data); with `logDir` set, that `logs` directory is not created. iOS, Android, the web and embedded apps have no log file and ignore it. |
 | `dataDir` | string | `package` | The app's data directory on the desktop (macOS, Windows, Linux): its storage (`nsh/storage`), logs, `process.dataDir` and the files of `${dataDir}` live there. An absolute path or `"${homeDir}/.myapp"` (no `..`, no other `${...}`); NSH warns about and ignores any other value. Unset, it is the app's id in the system's directory for apps' data: `~/Library/Application Support/<id>` on macOS, `%APPDATA%\<id>` on Windows, `$XDG_DATA_HOME/<id>` (`~/.local/share/<id>`) on Linux. A directory set here stays the same when the app's id changes. Caches and downloaded updates keep their own places; iOS, Android, the web and embedded apps use the platform's directory. |
 | `features` | string[] | `package` | Native features the release runner always keeps (built locally when the app has Rust crates, or packages for this machine's OS with `cargo` installed), e.g. `["plot"]`: those only its Rust code or a computed import needs. `package` otherwise leaves out the ones its bundle never reaches (`shader`, `editor`, `plot`, …) and prints why. |
 | `icon` | string \| object | `package`, `run` | A square PNG, ideally 1024×1024, relative to `nsh.json`, or one per platform (`{ "macos": "…", "windows": "…" }`, [Packaging](./packaging.md#icons)). Android's may be an adaptive icon (`{ "foreground": "…", "background": "…", "monochrome": "…" }`, [Packaging](./packaging.md#icons)). |
@@ -317,6 +318,15 @@ declare module "node-polyfill";
 
 Images and fonts ship with the app. A Rust crate reads each file of its `assets/` directory at compile time with `asset!`, and ships them all with `registry.assets(assets!())` in its `#[native_module]` function; TSX imports them like modules, and the bundler records each imported file (and an image's pixel-density variants). `nsh build` copies them to `.nsh/out/assets/`, `nsh package` puts them in the app, and during development they are served to the app.
 
+```tsx tabs
+import { Image, Text } from "nsh";
+import logo from "./assets/logo@2x.png";   // { url: "asset:/assets/logo@2x.png", size: { width: 64, height: 64 } }
+import Inter from "./assets/Inter.ttf";     // "Inter"
+
+<Image src={logo} />
+<Text style={{ fontFamily: Inter }}>Hello</Text>
+```
+
 ```rust tabs
 use nsh_core::element::{FontAsset, ImageAsset, asset};
 
@@ -325,15 +335,6 @@ const INTER: FontAsset = asset!("Inter.ttf");        // its uri, and its family:
 
 image(LOGO)
 text("Hello").font_family(INTER.family)
-```
-
-```tsx tabs
-import { Image, Text } from "nsh";
-import logo from "./assets/logo@2x.png";   // { url: "asset:/assets/logo@2x.png", size: { width: 64, height: 64 } }
-import Inter from "./assets/Inter.ttf";     // "Inter"
-
-<Image src={logo} />
-<Text style={{ fontFamily: Inter }}>Hello</Text>
 ```
 
 | Extension | Import gives |

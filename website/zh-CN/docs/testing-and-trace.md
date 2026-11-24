@@ -19,6 +19,19 @@ Linux CI 机器。它做两件事：
 
 同一个测试，分别用 Rust 和 TypeScript 编写：它在存储中放一个空的待办列表打开应用，输入、点击，并检查屏幕显示的内容。
 
+```tsx tabs
+// App.test.tsx
+import { expect, open, test } from "nsh/test";
+
+test("adds a todo", async () => {
+  const app = await open("./App.tsx", { storage: { todos: "[]" } });
+  await app.type("id:new-todo", "Buy milk");
+  await app.press("text:Add");
+  await app.waitFor("text:Buy milk");
+  expect(app.texts()).toContain("1 item left");
+});
+```
+
 ```rust tabs
 // tests/app/main.rs
 use nsh_engine::{EngineConfig, Root};
@@ -34,19 +47,6 @@ fn adds_a_todo() {
     app.wait_for("text:Buy milk").unwrap();
     assert!(app.screen().texts().contains(&"1 item left"));
 }
-```
-
-```tsx tabs
-// App.test.tsx
-import { expect, open, test } from "nsh/test";
-
-test("adds a todo", async () => {
-  const app = await open("./App.tsx", { storage: { todos: "[]" } });
-  await app.type("id:new-todo", "Buy milk");
-  await app.press("text:Add");
-  await app.waitFor("text:Buy milk");
-  expect(app.texts()).toContain("1 item left");
-});
 ```
 
 ## 用 cargo test 编写 Rust 测试
@@ -248,6 +248,20 @@ expect(app.shows("Could not open the link")).toBe(true);
 未经允许时访问网络。路由是一个响应，或者一个接收请求、返回响应（或响应的 Promise）的函数；在 Rust 中，
 `StubNetwork::new(routes)` 接受同样的路由，每个是一个 `StubResponse` 或一个 `StubRoute::Handler`：
 
+```tsx tabs
+const app = await open("./App.tsx", {
+  network: {
+    "GET https://api.example.com/todos": { body: [{ id: 1, title: "Walk" }] },
+    "POST https://api.example.com/todos": (request) => ({ status: 201, body: JSON.parse(request.body!) }),
+    "GET https://api.example.com/todos/*": { status: 404 },
+    "GET https://api.example.com/sync": { error: "offline" },
+    "GET https://api.example.com/slow": { body: "done", delay: 2000 },
+  },
+});
+await app.press("Add");
+expect(app.requests().map((r) => r.method)).toEqual(["GET", "POST"]);
+```
+
 ```rust tabs
 use std::sync::Arc;
 use nsh_engine::{EngineConfig, Root};
@@ -277,20 +291,6 @@ fn adds_a_todo_on_the_server() {
 }
 ```
 
-```tsx tabs
-const app = await open("./App.tsx", {
-  network: {
-    "GET https://api.example.com/todos": { body: [{ id: 1, title: "Walk" }] },
-    "POST https://api.example.com/todos": (request) => ({ status: 201, body: JSON.parse(request.body!) }),
-    "GET https://api.example.com/todos/*": { status: 404 },
-    "GET https://api.example.com/sync": { error: "offline" },
-    "GET https://api.example.com/slow": { body: "done", delay: 2000 },
-  },
-});
-await app.press("Add");
-expect(app.requests().map((r) => r.method)).toEqual(["GET", "POST"]);
-```
-
 | 响应成员 | 默认值 | 说明 |
 |---|---|---|
 | `status` | 200 | 状态码。 |
@@ -314,6 +314,13 @@ reject，全局 `WebSocket` 先触发 `error`，再触发 `close`（1006，非�
 `EngineConfig::clock`，TypeScript 中 `open` 的 `clock`）时，应用改在手动时钟上运行，就像 Jest 的假定时器或 Playwright 的
 `page.clock`：时间只随测试推进，并且立即推进。`app.clock` 就是这个时钟，应用使用系统时钟时它为 `null`：
 
+```tsx tabs
+const app = await open("./App.tsx", { clock: { time: new Date("2026-01-01T09:00:00Z") } });
+await app.type("label:Note", "Milk");
+await app.clock!.runFor(10_000);           // 十秒后的自动保存
+expect(app.texts()).toContain("Saved at 09:00:10");
+```
+
 ```rust tabs
 use std::time::{Duration, SystemTime};
 use nsh_engine::{Clock, EngineConfig, Root};
@@ -329,13 +336,6 @@ fn autosaves() {
     app.run_for(Duration::from_secs(10)).unwrap(); // 十秒后的自动保存
     assert!(app.shows("Saved at 09:00:10"));
 }
-```
-
-```tsx tabs
-const app = await open("./App.tsx", { clock: { time: new Date("2026-01-01T09:00:00Z") } });
-await app.type("label:Note", "Milk");
-await app.clock!.runFor(10_000);           // 十秒后的自动保存
-expect(app.texts()).toContain("Saved at 09:00:10");
 ```
 
 响应带 `delay` 的 `StubNetwork` 用 `.with_clock(clock.clone())` 跟随手动时钟。下面是 `nsh test` 的步骤；`Headless` 都有对应的方法
@@ -411,7 +411,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `app.spanStyle(selector)` | 返回匹配到的第一个字符的解析样式（无界面测试和各个 `--target` 都支持）：`color`、可选的 `backgroundColor`、`fontSize`、`fontWeight`、`italic`、`underline` 和 `lineThrough`。颜色为 `#rrggbbaa`，字号单位为 pt。 |
 | `app.viewStyle(selector)` | 返回匹配视图由应用设置的样式（无界面测试和各个 `--target` 都支持）：可选的 `backgroundColor`（透明时不返回）、自身的 `opacity`，以及 `effectiveOpacity`（自身透明度乘以所有祖先视图的透明度）。颜色为 `#rrggbbaa`。没有匹配时返回 `null`，匹配不唯一时报错。 |
 | `app.layout(selector)` | 返回匹配视图的布局位置（根坐标，单位 pt）：`x`、`y`、`width`、`height`，`hidden`（自身或祖先为 `visibility: hidden`），以及 `clipped`（被 `overflow: hidden` 的祖先或滚动视图裁掉一部分）。屏幕上没有匹配时返回 `null`，匹配不唯一时报错。 |
-| `app.accessibility(selector?)` | 返回无障碍树：屏幕上带 `role` 或 `accessibilityLabel` 的视图，每个节点含 `role`、`label`、`disabled`、`selected`、`checked`（`"true"`、`"false"` 或 `"mixed"`）、`expanded`、`level`、`description` 和 `children`。传 selector 时从匹配视图开始（屏幕上没有匹配时返回 `null`）；不传时从没有 role 的根节点开始。 |
+| `app.accessibility(selector?)` | 返回无障碍树：屏幕上带 `role` 或 `accessibilityLabel` 的视图，每个节点含 `role`、`label`、`disabled`、`selected`、`checked`（`"true"`、`"false"` 或 `"mixed"`）、`expanded`、`pressed`（切换按钮的切换状态：`"true"`、`"false"` 或 `"mixed"`；未设置 `accessibilityState.pressed` 时省略）、`level`、`description` 和 `children`。传 selector 时从匹配视图开始（屏幕上没有匹配时返回 `null`）；不传时从没有 role 的根节点开始。 |
 | `app.storage()` | 应用存储当前保存的内容。 |
 | `await app.back()` | 像用户那样返回（导航栏的返回按钮、下滑关闭弹出页；弹出页里推入了页面时按它标题栏的返回按钮）：最新的模态窗口里（没有模态窗口时就在整个屏幕上）最内层、布局尺寸不为零（不在尺寸为零的标签页里）的导航栈弹出栈顶页面（`onDismiss`），栈顶页面设置了 `preventBack` 时改为询问它（`onBackRequest`）；没有可返回的栈时，最新的模态窗口请求关闭（`onRequestClose`）。没有可返回的内容时 reject。 |
 | `await app.forward()` | 像浏览器的前进按钮那样在浏览器历史中前进。仅限 `--target web`；其他情况下以 `ERR_NSH_TEST_UNSUPPORTED` reject。 |
@@ -449,7 +449,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `await app.quitRequest()` | 像 Quit 菜单项那样请求退出：运行 `Application.on("quitRequest")`，应用只有调用 `Application.quit()` 才会退出。仅限 headless 运行。 |
 | `app.quit()` | 应用是否已退出（`Application.quit()`、Quit 菜单项或最后窗口策略）。退出后后续步骤会报告应用已停止。 |
 
-步骤会等到应用连续 100 ms 没有渲染、没有正在运行的、会自行结束的原生动画，并且（`--target macos` 时）应用打开的窗口都已显示出来（对一直在渲染的应用最多等 2 s；在手动时钟上，同时最多等应用时间的 2 s）后才 resolve，所以下一行
+步骤会等到应用连续 100 ms 没有渲染、没有正在运行的、会自行结束的原生动画，并且（`--target macos` 或 `linux` 时）应用打开的窗口都已显示出来（对一直在渲染的应用最多等 2 s；在手动时钟上，同时最多等应用时间的 2 s）后才 resolve，所以下一行
 代码运行时，这一步带来的变化已经在屏幕上；之后才出现的内容（响应、定时器）用 `waitFor` 等待。在手动时钟上，步骤不等这
 100 ms：应用一旦跑完这一步和当前时钟时间带来的全部工作（此刻到期的定时器、promise、立即应答的桩响应），且不再需要帧，步骤
 就 resolve（仍有请求在途时除外），所以手动时钟上的测试在步骤之间没有停顿。由其他线程应答的结果（`nsh/host` 调用、
@@ -794,18 +794,18 @@ jobs:
 无界面测试检查的是运行时渲染出的内容，它们的 `id:` 选择器按测试 id 查找视图。如果要用平台的测试工具（XCUITest、Espresso / UI Automator、Appium、Maestro）
 驱动真实的原生 UI，请给视图设置测试 id：Rust 中用 `.test_id(…)`，TSX 中用 `testID`：
 
+```tsx tabs
+<View testID="add-to-cart" onPress={add} style={{ padding: 12 }}>
+  <Text testID="cart-count">{`${count()} items`}</Text>
+</View>
+```
+
 ```rust tabs
 view()
     .test_id("add-to-cart")
     .p_3()
     .on_press(add)
     .child(text(move || format!("{} items", count.get())).test_id("cart-count"))
-```
-
-```tsx tabs
-<View testID="add-to-cart" onPress={add} style={{ padding: 12 }}>
-  <Text testID="cart-count">{`${count()} items`}</Text>
-</View>
 ```
 
 | 平台 | `testID` 对应到哪里 |

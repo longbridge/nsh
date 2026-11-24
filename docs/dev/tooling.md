@@ -331,8 +331,11 @@ and more than one fails the step; a press whose match, or a view between it and 
 views that report it:
 
 - `press`: the match or its nearest pressable ancestor gets `PressIn`, `PressOut`, `Press`, at the match's center
-  (a press of a text inside a pressable view lands on the text, as a finger does); presses of one view within
-  500 ms count up (`clicks` 2 is a double press), as the platforms count them;
+  (a press of a text inside a pressable view lands on the text, as a finger does); with `app.press`'s `position` it
+  is that point in the view the selector names, in points from its top left corner, checked against what draws over
+  it there as the center is (`Screen::covering`, `Native::covered`); presses of one view within 500 ms count up
+  (`clicks` 2 is a double press), as the platforms count them; `TestStep::PressAt` carries a point to a real host,
+  `Headless::press_with` places it headless;
 - `long_press`: the match or its nearest ancestor hearing long presses or presses gets `PressIn`, then after its
   `delayLongPress` (500 ms) `LongPress` and `PressOut`, at the match's center as `press` does;
 - `clear`: the input takes the focus, gets a `KeyPress` of `Backspace` and an edit to nothing;
@@ -716,7 +719,9 @@ transitions but not its keyframes repeating forever, `animate-ping`'s or `animat
 finite animations too: a screen sliding in; Android counts a scroll view drawing, as its overscroll stretch relaxes
 without moving a view, and a touch then only catches the stretch) nor a window of the app's own was opening
 (`Native::opening`: on macOS a new window stays hidden until a batch laid out at its size is in, 250 ms at most, and
-AppKit gives a window that is not visible no mouse events, so a press sent before it shows would be lost). `Native`'s calls do their work
+AppKit gives a window that is not visible no mouse events, so a press sent before it shows would be lost; on Linux it
+stays hidden until the commit after the one that opened it is mounted, 150 ms at most, and its views have no place on
+screen to act on until then). `Native`'s calls do their work
 on the platform's main thread and return when the input is posted. Screenshots come back as base64 bytes: PNG
 on graphical targets, versioned UTF-8 Cell JSON on `tui`. The test's side saves them, as the host may run on another machine. `app.window(id)`'s steps (`TestStep::WindowState`, `PressWindowClose`, `WindowScreenshot`) name a window of the app by its id; the agent finds its root node in the model (`Scene::window_root`) and asks the platform (`Native::window_state`, `press_window_close`, `window_screenshot`), and `Native::target_window` names the window each step on a view acts in. Their defaults name the first app window (or no window), so a platform starts with the app's declared windows and adds `Window.open`'s. `open`'s manual clock reaches the host in the
 test's setup (`TestEnvironment::clock`, its start in Unix milliseconds): `Model::set_up_engine` starts the engine on

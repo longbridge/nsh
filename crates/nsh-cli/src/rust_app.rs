@@ -2913,8 +2913,10 @@ panic = \"abort\"
                 self.rust_web_lib(),
                 self.nsh.dep("nsh-core", ""),
                 self.nsh.dep("nsh-base", HIGHLIGHT),
-                self.nsh
-                    .dep("nsh-platform-web", ", default-features = false"),
+                self.nsh.dep(
+                    "nsh-platform-web",
+                    ", default-features = false, features = [\"rust-parts\"]"
+                ),
             ),
         )?;
         self.write_rust_app(ws, root)?;
@@ -4031,10 +4033,13 @@ impl RustApp {
     }
 
     /// The UI sets of a Rust app's runners and web runtime: `nsh/base`'s core part
-    /// only, then the app's ([`Self::sets`]). A Rust app runs no JS, so
-    /// nothing makes a component by its registered name: its code makes
-    /// each of `nsh/base`'s components by type (`nsh_base::button()`),
-    /// which links that component's code where it is used. What the app
+    /// only, then the app's ([`Self::sets`]). A Rust app runs no JS: its
+    /// code makes each of `nsh/base`'s components by type
+    /// (`nsh_base::button()`), which links that component's code where it
+    /// is used. On the web, what it makes by name
+    /// (`ComponentElement::by_name`) registers when the page runs the
+    /// part's gate (`nsh_part_*`, the runtime's feature `rust-parts`),
+    /// from a side module that `nsh package` splits off. What the app
     /// needs of the set itself is the theme's tokens, which every set of
     /// `nsh/base` has, and the built-in scroll bars, the core part's.
     /// Registering every part would link every component into the module,

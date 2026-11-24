@@ -1,6 +1,6 @@
 ---
 title: Dev Server and Debugging
-description: Run Rust and TSX apps with nsh run and nsh dev, connect simulators, emulators and devices, and use rebuilds, hot module replacement, logs, the error overlay and source-mapped stacks.
+description: Run TSX and Rust apps with nsh run and nsh dev, connect simulators, emulators and devices, and use rebuilds, hot module replacement, logs, the error overlay and source-mapped stacks.
 order: 60
 group: tools
 ---
@@ -115,7 +115,7 @@ installs the app's host.
 Rust is compiled: a change to an app's crate, or to a crate it depends on by path, builds the app again, and `nsh run`
 restarts it with the new code. The app's state starts afresh; keep what must survive a restart in
 [storage](../modules/nsh.md#storage). A build error is printed in the terminal, and the next save that compiles runs
-again. In an app with Rust and TSX, TSX edits stay hot updates (below) and Rust edits restart the app.
+again. In an app with TSX and Rust, TSX edits stay hot updates (below) and Rust edits restart the app.
 
 ## Hot module replacement
 
@@ -236,7 +236,8 @@ DebugView and Visual Studio show) and Linux apps to their standard error.
 #### Log files and levels on the desktop
 
 A packaged macOS, Windows or Linux app also writes its log lines to a file in its data directory, `logs/app.log`,
-beside the platform's log:
+beside the platform's log. An app can choose another directory for the files with `nsh.json` `logDir`
+([Project structure](./project-structure.md)); the table is the default:
 
 | Platform | Log file |
 |---|---|
@@ -252,6 +253,12 @@ three files before it are kept (`app.1.log` to `app.3.log`). The app runs on as 
 report or offer to open its folder; it is `None` (`null`) where the lines go to the platform's log only (development
 hosts, embedding apps, mobile, the web).
 
+```tsx tabs
+import process from "process";
+
+const report = { logFile: process.logFile, version: "1.4.0" };
+```
+
 ```rust tabs
 use nsh_core::prelude::*;
 
@@ -261,12 +268,6 @@ if let Some(file) = log_file() {
         let _ = reveal_path(file).await;
     });
 }
-```
-
-```tsx tabs
-import process from "process";
-
-const report = { logFile: process.logFile, version: "1.4.0" };
 ```
 
 By default a packaged app logs its warnings, errors and `js` lines (every line from info up under `nsh run`). The

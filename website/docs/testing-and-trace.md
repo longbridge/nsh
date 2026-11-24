@@ -22,6 +22,19 @@ window. It runs anywhere Cargo or the CLI runs, including Linux CI machines, and
 The same test, in Rust and in TypeScript: it opens the app with an empty todo list in its storage, types, presses and
 checks what the screen shows.
 
+```tsx tabs
+// App.test.tsx
+import { expect, open, test } from "nsh/test";
+
+test("adds a todo", async () => {
+  const app = await open("./App.tsx", { storage: { todos: "[]" } });
+  await app.type("id:new-todo", "Buy milk");
+  await app.press("text:Add");
+  await app.waitFor("text:Buy milk");
+  expect(app.texts()).toContain("1 item left");
+});
+```
+
 ```rust tabs
 // tests/app/main.rs
 use nsh_engine::{EngineConfig, Root};
@@ -37,19 +50,6 @@ fn adds_a_todo() {
     app.wait_for("text:Buy milk").unwrap();
     assert!(app.screen().texts().contains(&"1 item left"));
 }
-```
-
-```tsx tabs
-// App.test.tsx
-import { expect, open, test } from "nsh/test";
-
-test("adds a todo", async () => {
-  const app = await open("./App.tsx", { storage: { todos: "[]" } });
-  await app.type("id:new-todo", "Buy milk");
-  await app.press("text:Add");
-  await app.waitFor("text:Buy milk");
-  expect(app.texts()).toContain("1 item left");
-});
 ```
 
 ## Tests in Rust with cargo test
@@ -276,6 +276,20 @@ matches fails, so tests never reach the network unasked. A route is a response, 
 returns one (or a promise of one); in Rust, `StubNetwork::new(routes)` takes the same routes, each a `StubResponse` or
 a `StubRoute::Handler`:
 
+```tsx tabs
+const app = await open("./App.tsx", {
+  network: {
+    "GET https://api.example.com/todos": { body: [{ id: 1, title: "Walk" }] },
+    "POST https://api.example.com/todos": (request) => ({ status: 201, body: JSON.parse(request.body!) }),
+    "GET https://api.example.com/todos/*": { status: 404 },
+    "GET https://api.example.com/sync": { error: "offline" },
+    "GET https://api.example.com/slow": { body: "done", delay: 2000 },
+  },
+});
+await app.press("Add");
+expect(app.requests().map((r) => r.method)).toEqual(["GET", "POST"]);
+```
+
 ```rust tabs
 use std::sync::Arc;
 use nsh_engine::{EngineConfig, Root};
@@ -305,20 +319,6 @@ fn adds_a_todo_on_the_server() {
 }
 ```
 
-```tsx tabs
-const app = await open("./App.tsx", {
-  network: {
-    "GET https://api.example.com/todos": { body: [{ id: 1, title: "Walk" }] },
-    "POST https://api.example.com/todos": (request) => ({ status: 201, body: JSON.parse(request.body!) }),
-    "GET https://api.example.com/todos/*": { status: 404 },
-    "GET https://api.example.com/sync": { error: "offline" },
-    "GET https://api.example.com/slow": { body: "done", delay: 2000 },
-  },
-});
-await app.press("Add");
-expect(app.requests().map((r) => r.method)).toEqual(["GET", "POST"]);
-```
-
 | Response member | Default | Description |
 |---|---|---|
 | `status` | 200 | The status code. |
@@ -346,6 +346,13 @@ wait for them. With a manual clock (`EngineConfig::clock` in Rust, `open`'s `clo
 clock whose time moves only as the test moves it, and at once, as with Jest's fake timers or Playwright's
 `page.clock`. `app.clock` is that clock, and `null` when the app runs on the system's:
 
+```tsx tabs
+const app = await open("./App.tsx", { clock: { time: new Date("2026-01-01T09:00:00Z") } });
+await app.type("label:Note", "Milk");
+await app.clock!.runFor(10_000);           // the autosave, ten seconds later
+expect(app.texts()).toContain("Saved at 09:00:10");
+```
+
 ```rust tabs
 use std::time::{Duration, SystemTime};
 use nsh_engine::{Clock, EngineConfig, Root};
@@ -361,13 +368,6 @@ fn autosaves() {
     app.run_for(Duration::from_secs(10)).unwrap(); // the autosave, ten seconds later
     assert!(app.shows("Saved at 09:00:10"));
 }
-```
-
-```tsx tabs
-const app = await open("./App.tsx", { clock: { time: new Date("2026-01-01T09:00:00Z") } });
-await app.type("label:Note", "Milk");
-await app.clock!.runFor(10_000);           // the autosave, ten seconds later
-expect(app.texts()).toContain("Saved at 09:00:10");
 ```
 
 A `StubNetwork` whose responses have a `delay` follows a manual clock with `.with_clock(clock.clone())`. The steps below
@@ -421,7 +421,7 @@ one: a selector matching several fails the step, and the error says how to narro
 
 | Step | Description |
 |---|---|
-| `await app.press(selector)` | Presses the view, or the nearest view around it that hears presses (the button around a text): `onPressDown`, `onPressUp`, `onPress`, inside a finger going down and lifting, which the views around it that listen to touches hear (an overlay's `onPressOutside`). A span of a text is pressed on its characters (`await app.press("Privacy policy")`), headless and on iOS, Android and the desktops. A second press of the same view within 500 ms is its second click (`clicks: 2`, a double press), as the platforms count them. On iOS, a header button of `ios.headerRightItems` (which UIKit draws) is pressed by `id:<key>` or its label: it presses, or opens its menu. Rejects when it is disabled. |
+| `await app.press(selector, options?)` | Presses the view, or the nearest view around it that hears presses (the button around a text): `onPressDown`, `onPressUp`, `onPress`, inside a finger going down and lifting, which the views around it that listen to touches hear (an overlay's `onPressOutside`). `options.position` presses at that point in the view, in points from its top left corner, instead of its middle: a part another view does not cover, as a sheet's backdrop around its panel is. What draws over that point still fails the step (`ERR_NSH_TEST_COVERED`), as a press at the middle does. A span of a text is pressed on its characters (`await app.press("Privacy policy")`), headless and on iOS, Android and the desktops. A second press of the same view within 500 ms is its second click (`clicks: 2`, a double press), as the platforms count them. On iOS, a header button of `ios.headerRightItems` (which UIKit draws) is pressed by `id:<key>` or its label: it presses, or opens its menu. Rejects when it is disabled. |
 | `await app.longPress(selector)` | Holds a finger on it (or the nearest view around it that hears presses or touches) for its `delayLongPress` (500 ms): `onPressDown`, `onLongPress`, `onPressUp`; no `onPress` follows. The touches' handlers hear the finger (a `ContextMenu` or `Tooltip` opens). |
 | `await app.clear(selector)` | Empties the input, as selecting all and deleting does. |
 | `await app.type(selector, text)` | Types into the input (or the first input inside the view; `text:` also matches an input's text or placeholder) key by key, as the user's typing does: an input that does not have the focus is pressed to take it (on a device, where the press lands puts the caret; headless, the caret is at the end of what it holds), one that has it is not, so the text goes in at its caret and replaces its selection (after `keyboard.press("mod+a")`, say; headless, only a view that keeps its own selection, such as `Editor`, has one). Each character is an `onKeyPress` and an `onChange`, within `maxLength`. A `\n` in a single-line input is the return key. |
@@ -449,7 +449,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `app.spanStyle(selector)` | The first matched character’s resolved style, headless and on every `--target`: `color`, optional `backgroundColor`, `fontSize`, `fontWeight`, `italic`, `underline`, and `lineThrough`. Colors are `#rrggbbaa`; sizes are in points. |
 | `app.viewStyle(selector)` | The matched view’s style as the app set it, headless and on every `--target`: optional `backgroundColor` (absent when transparent), its own `opacity`, and `effectiveOpacity` (its opacity times every ancestor’s). Colors are `#rrggbbaa`. Returns `null` when nothing matches; reports an error for an ambiguous selector. |
 | `app.layout(selector)` | Where layout placed the matched view, in the root's points: `x`, `y`, `width`, `height`, `hidden` (it or an ancestor has `visibility: hidden`), and `clipped` (an ancestor with `overflow: hidden` or a scroll view cuts part of it). Returns `null` when nothing on screen matches; reports an error for an ambiguous selector. |
-| `app.accessibility(selector?)` | The accessibility tree: views on screen with a `role` or an `accessibilityLabel`, each with `role`, `label`, `disabled`, `selected`, `checked` (`"true"`, `"false"` or `"mixed"`), `expanded`, `level`, `description` and `children`. With a selector, the tree from the matched view (`null` when nothing on screen matches); without, from a root that has no role. |
+| `app.accessibility(selector?)` | The accessibility tree: views on screen with a `role` or an `accessibilityLabel`, each with `role`, `label`, `disabled`, `selected`, `checked` (`"true"`, `"false"` or `"mixed"`), `expanded`, `pressed` (a toggle button's toggle state: `"true"`, `"false"` or `"mixed"`; omitted when `accessibilityState.pressed` is unset), `level`, `description` and `children`. With a selector, the tree from the matched view (`null` when nothing on screen matches); without, from a root that has no role. |
 | `app.storage()` | What the app's storage holds now. |
 | `await app.back()` | Goes back as the user does (a header's back button, swiping a sheet down; in a sheet showing a pushed page, its header's back button): the innermost stack of the newest modal, else of the screen, that is laid out with a size (not in a tab laid out at no size) pops its top screen (`onDismiss`), or asks it (`onBackRequest`) when it has `preventBack`; without one, the newest modal asks to close (`onRequestClose`). Rejects when there is nothing to go back from. |
 | `await app.forward()` | Goes forward in the browser's history, as its forward button does. With `--target web` only; elsewhere it rejects with `ERR_NSH_TEST_UNSUPPORTED`. |
@@ -488,7 +488,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `await app.window(id).screenshot(path?)` | A picture of the window's content as a `Uint8Array` (PNG), as `app.screenshot` takes of the app's surface, also saved at `path` when given. Only a real platform draws the app. |
 
 A step resolves once the app rendered nothing for 100 ms, no native animation runs that ends by itself and, with
-`--target macos`, no window the app opened still waits to show (2 s at most, for apps that render all the time; on a
+`--target macos` or `linux`, no window the app opened still waits to show (2 s at most, for apps that render all the time; on a
 manual clock, also 2 s of the app's time), so what it changed is on
 screen when the next line runs; use `waitFor` for what comes later (a response, a timer). On a manual clock a step
 does not wait for those 100 ms: it resolves as soon as the app has run everything the step and the clock's time made
@@ -522,6 +522,18 @@ await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISAB
 of that match. Scope queries with `id:note >> text:word` and select repeated matches with `>> nth=0`.
 The query reports an error for a missing, ambiguous or empty span. Updating a span’s `testID` reuses its text
 layout and preserves the `onTextLayout` callback count.
+
+The optional second argument of `press` is `PressOptions`: `{ position?: { x: number; y: number } }`. `position` is
+where in the view the press lands, in points from its top left corner; omitting it presses the middle, as before.
+It reaches a part of a view another view does not cover, such as a dialog's backdrop around its panel:
+
+```tsx
+await app.press("id:backdrop", { position: { x: 12, y: 12 } });
+```
+
+The point is in the view the selector names (a text view, for a span). A press at a point something else draws over
+fails with `ERR_NSH_TEST_COVERED`, as a press at the middle does. Headless runs and `--target` hosts place it the
+same way.
 
 The optional third argument of `drag` and `dragAndHold` is `DragOptions`: `{ hold?: number }`. `hold` is the total rest in milliseconds after the pointer lands and before it moves; omitting it keeps 100 ms. Headless and iOS support custom timing. Unsupported custom timing rejects with `ERR_NSH_TEST_UNSUPPORTED` before a new pointer goes down. Negative, non-finite and unrepresentable durations reject. For a long-press drag, use `{ hold: 600 }` and put `drop()` in `finally` so an assertion failure still lifts the same finger.
 
@@ -885,18 +897,18 @@ Headless tests check what the runtime renders, and their `id:` selectors find vi
 native UI with the platform's test tools (XCUITest, Espresso / UI Automator, Appium, Maestro), give views a test id:
 `.test_id(…)` in Rust, `testID` in TSX:
 
+```tsx tabs
+<View testID="add-to-cart" onPress={add} style={{ padding: 12 }}>
+  <Text testID="cart-count">{`${count()} items`}</Text>
+</View>
+```
+
 ```rust tabs
 view()
     .test_id("add-to-cart")
     .p_3()
     .on_press(add)
     .child(text(move || format!("{} items", count.get())).test_id("cart-count"))
-```
-
-```tsx tabs
-<View testID="add-to-cart" onPress={add} style={{ padding: 12 }}>
-  <Text testID="cart-count">{`${count()} items`}</Text>
-</View>
 ```
 
 | Platform | Where `testID` goes |

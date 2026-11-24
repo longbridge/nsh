@@ -341,8 +341,11 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   it is, giving it up if the view is still not shown 3 s later: the latest request wins; a `blur()` of it, of a view
   holding it, or `Keyboard.dismiss()`, any focus taken meanwhile (in hosted native content or the embedding app's
   views too) or the view's removal end it; a request dropped without effect logs a warning (`PendingFocus`; an input
-  waits for its field on its own, `InputBox.focus`, and reports the wait, so the same rules end it). Windows and GPUI
-  leave `focus()` on views to them; iOS focuses inputs only.
+  waits for its field on its own, `InputBox.focus`, and reports the wait, so the same rules end it). iOS makes the
+  stop the first responder, a transparent one too (`keyboard::shown`: a popup coming in from `opacity: 0` focuses the
+  item it asked for as it opens), and asks UIKit's focus engine to follow (`keyboard::request_focus`), which it does
+  for a visible stop: Tab and the engine pass over a transparent one (`keyboard::visible`). Windows and GPUI leave
+  `focus()` on views to them.
 - **`onPanEnd` / `onPanStart`** carry `value` (`{ x?, y? }`, the axes `pan` binds): the bound pan values at that moment (a drag may grab a value mid
   animation), for snapping.
 - **Imperative calls**: nodes have `focus()`, `blur()` (inputs, and views that take presses where they are stops of
@@ -442,7 +445,11 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   the description and then the hint (`Accessibility::help_text`). Roles and states follow ARIA where `gpui-base` (AccessKit) has them: `group`, `region`,
   `navigation`, `tree` / `treeitem`, `menuitemcheckbox` / `menuitemradio`, `dialog` / `alertdialog` (`nsh-base`'s
   `Dialog` is a `dialog` unless the app gives it another role, named by its label; the platforms map it to their own
-  dialog roles, and on iOS to a semantic group so a labelled dialog never hides its content); `accessibilityState.pressed` (`aria-pressed`:
+  dialog roles, and on iOS to a semantic group so a labelled dialog never hides its content), `tabpanel` (the content
+  a tab list's selected tab shows, which the tabs name with `accessibilityControls`: a `DockArea` group's content
+  frame; GTK's tab panel role, which GTK gives AT-SPI as a panel, AccessKit's, macOS's `AXGroup` with WebKit's
+  `AXTabPanel` subrole, a UIA pane read as "tab panel", a semantic group on iOS, the role description "tab panel" on
+  Android); `accessibilityState.pressed` (`aria-pressed`:
   a button that has one is a toggle button) and `current` (`aria-current`: `true`, `page`, `step`, `location`, `date`,
   `time`), `hasPopup` (`aria-haspopup`: the element opens a popup, a menu or a list, and its `expanded` says whether
   it is open; `nsh-base`'s `Popover`, `Menu`, `HoverCard`, `Select`, `Combobox` and `DatePicker` set it on their

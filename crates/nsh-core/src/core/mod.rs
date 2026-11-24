@@ -39,6 +39,8 @@ use std::{rc::Rc, sync::Arc};
 use slab::Slab;
 use taffy::{AvailableSpace, NodeId as LayoutId, Overflow, Position};
 
+#[doc(hidden)]
+pub use self::components::set_part_requester;
 pub use self::measure::{ListScrollPosition, Measurement};
 use self::{
     layout_tree::LayoutTree,
@@ -4912,7 +4914,10 @@ impl<M: TextEngine> Core<M> {
         // automatic minimum size as a flex or grid item 0, which clipping the
         // paint must not do. Set here rather than while parsing the style so
         // that what `overflow` sets as a style stays what it was.
-        let clip = if node.view_style.overflow_hidden {
+        // An input always clips: it scrolls its own text, so text taller than
+        // its box (a fixed height, a `maxHeight`) stays in it and must not
+        // grow the content size of a scroll view around it.
+        let clip = if node.view_style.overflow_hidden || node.kind == Kind::Input {
             taffy::Overflow::Clip
         } else {
             taffy::Overflow::Visible

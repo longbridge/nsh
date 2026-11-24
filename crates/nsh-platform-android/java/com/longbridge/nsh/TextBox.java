@@ -301,6 +301,7 @@ final class TextBox extends android.view.ViewGroup implements Node {
             if (mounter.selectedArea != null) mounter.selectedArea.clear();
             mounter.selectedText = this;
             mounter.keepSelection();
+            mounter.updateBack();
         }
         placeHandles();
         if (toolbar) showToolbar();
@@ -317,7 +318,10 @@ final class TextBox extends android.view.ViewGroup implements Node {
         startHandle.dismiss();
         endHandle.dismiss();
         getViewTreeObserver().removeOnPreDrawListener(follow);
-        if (mounter.selectedText == this) mounter.selectedText = null;
+        if (mounter.selectedText == this) {
+            mounter.selectedText = null;
+            mounter.updateBack();
+        }
         android.view.ActionMode m = mode;
         mode = null;
         if (m != null) m.finish();
@@ -405,7 +409,7 @@ final class TextBox extends android.view.ViewGroup implements Node {
                             .setType("text/plain")
                             .putExtra(android.content.Intent.EXTRA_TEXT, selectedText());
                     android.content.Intent chooser = android.content.Intent.createChooser(send, null);
-                    if (!(getContext() instanceof android.app.Activity)) {
+                    if (SystemUi.activity(getContext()) == null) {
                         chooser.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
                     }
                     try {

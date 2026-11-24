@@ -106,9 +106,9 @@ impl OutEl {
         }
         let style = decls
             .iter()
-            .map(|(p, v)| format!("{p}: {v}"))
+            .map(|(p, v)| format!("{p}: {v};"))
             .collect::<Vec<_>>()
-            .join("; ");
+            .join(" ");
         self.put("style", style);
     }
 
@@ -352,6 +352,11 @@ fn render_attrs(el: &mut OutEl, specs: &[(String, AttrSpec)], attrs: &Attrs) {
         let Some(value) = attrs.get(name).and_then(attr_value_text) else {
             continue;
         };
+        if let Some(allowed) = &spec.allowed_values
+            && !allowed.iter().any(|v| v == value.trim())
+        {
+            continue;
+        }
         match &spec.render_html {
             None if valid_name(name) => el.set_attr(name, value),
             Some(AttrRender::Attribute(dom)) if valid_name(dom) => el.set_attr(dom, value),
@@ -411,7 +416,11 @@ fn render(
                     DomAttrValue::Attr(from) => src.attrs().get(from).and_then(attr_value_text),
                 };
                 if let Some(value) = value {
-                    el.put(name, value);
+                    if name == "style" {
+                        el.set_attr(name, value);
+                    } else {
+                        el.put(name, value);
+                    }
                 }
             }
             let mut hole = None;

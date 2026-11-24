@@ -471,6 +471,9 @@ pub struct AccessibilityNode {
     pub checked: Option<String>,
     /// Whether it is expanded.
     pub expanded: Option<bool>,
+    /// A toggle button's toggle state (`accessibilityState.pressed`):
+    /// `"true"`, `"false"` or `"mixed"`; absent when it is unset.
+    pub pressed: Option<String>,
     /// Its `accessibilityLevel`.
     pub level: Option<u32>,
     /// Its `accessibilityDescription`.
@@ -494,6 +497,18 @@ pub enum TestStep {
     Press {
         /// The view.
         selector: String,
+    },
+    /// Presses the view at a point in it (`app.press`'s `position`), in
+    /// points from its top left corner.
+    PressAt {
+        /// The view.
+        selector: String,
+        /// Points right of its left edge.
+        #[serde(deserialize_with = "float::f32")]
+        x: f32,
+        /// Points below its top edge.
+        #[serde(deserialize_with = "float::f32")]
+        y: f32,
     },
     /// Holds a press on the view for its long press delay (`app.longPress`).
     LongPress {

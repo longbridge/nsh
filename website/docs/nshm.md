@@ -19,7 +19,38 @@ nsh add nsh-omarchy                  # from crates.io
 nsh add github:huacnlee/nsh-omarchy  # or from GitHub
 ```
 
-Then use it from the language the app is written in, Rust or TSX. **In a Rust app**, its components are functions of the crate:
+Then use it from the language the app is written in. **In a TSX app**, an nshm that exports components, modules or classes to TSX is ready to use once `nsh add` installs it: import them by its specifier, here `nsh-omarchy`. The app needs no newer NSH and no Rust code of its own, since `nsh` builds the app's hosts with the crate.
+
+```tsx
+// App.tsx
+import { mount, signal, View } from "nsh";
+import { Body, Button, Omarchy, Panel, Switch, Toaster, toast } from "nsh-omarchy";
+
+function App() {
+  // Draw with the system's Omarchy theme, and follow it as it changes.
+  Omarchy.followSystem();
+  const notify = signal(true);
+  const saved = signal(0);
+  const save = () => {
+    saved.set(saved() + 1);
+    toast({ title: "Settings saved" });
+  };
+  return (
+    <View class="flex-1 gap-4 p-6 bg-background">
+      <Panel title="Settings">
+        <Switch label="Notifications" checked={notify()} onChange={({ checked }) => notify.set(checked)} />
+        <Button label="Save" variant="primary" onPress={save} />
+      </Panel>
+      <Body>{`Saved ${saved()} times`}</Body>
+      <Toaster />
+    </View>
+  );
+}
+
+mount(() => <App />);
+```
+
+**In a Rust app**, its components are functions of the crate:
 
 ```rust
 // src/lib.rs: the app's root component
@@ -52,37 +83,6 @@ pub fn App() -> impl IntoElement {
         .child(nsh_omarchy::body(move || format!("Saved {} times", saved.get())))
         .child(nsh_omarchy::toaster())
 }
-```
-
-**In a TSX app**, an nshm that exports components, modules or classes to TSX is ready to use once `nsh add` installs it: import them by its specifier, here `nsh-omarchy`. The app needs no newer NSH and no Rust code of its own, since `nsh` builds the app's hosts with the crate.
-
-```tsx
-// App.tsx
-import { mount, signal, View } from "nsh";
-import { Body, Button, Omarchy, Panel, Switch, Toaster, toast } from "nsh-omarchy";
-
-function App() {
-  // Draw with the system's Omarchy theme, and follow it as it changes.
-  Omarchy.followSystem();
-  const notify = signal(true);
-  const saved = signal(0);
-  const save = () => {
-    saved.set(saved() + 1);
-    toast({ title: "Settings saved" });
-  };
-  return (
-    <View class="flex-1 gap-4 p-6 bg-background">
-      <Panel title="Settings">
-        <Switch label="Notifications" checked={notify()} onChange={({ checked }) => notify.set(checked)} />
-        <Button label="Save" variant="primary" onPress={save} />
-      </Panel>
-      <Body>{`Saved ${saved()} times`}</Body>
-      <Toaster />
-    </View>
-  );
-}
-
-mount(() => <App />);
 ```
 
 An nshm is how a feature reaches the apps that need it without being part of NSH: it ships on its own schedule, and only the apps that install it pay its size, build time and dependencies.
@@ -151,6 +151,7 @@ crate, imported from `nsh-extra` in TSX and called as `nsh_extra::<module>` in R
 | Feature | TSX | What it does |
 |---|---|---|
 | `camera` | `Camera` | Takes a photo with the system's camera on iOS and Android |
+| `location` | `Location` | Reads the device's position once the user allows it, on macOS, iOS and the web |
 | `photos` | `Photos` | Reads the user's recent photos on iOS, once the user allows it |
 | `push` | `Push` | Receives remote notifications from any push service on iOS, and on Android through the service's binding |
 | `speech` | `Speech` | Turns what the user says into text as they speak, on macOS, iOS, Android, Windows and the web |
@@ -171,6 +172,54 @@ sheet has closed. `available()` is `false` where there is no camera to show (the
 and there `takePhoto` rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. The feature adds what the packaged app needs:
 the camera's usage description on iOS (an app sets its own wording with `ios.infoPlist`'s
 `NSCameraUsageDescription`) and the query of camera apps on Android.
+
+### Location
+
+`Location` reads the device's position once the user allows it: once with `current`, or each time it changes with
+`watch`, shaped as the browser's `navigator.geolocation`. macOS and iOS read it with CoreLocation, the web with the
+browser's `navigator.geolocation`; the system or the browser asks the user the first time the app reads it. Only while
+the app is in use: there is no background location.
+
+```sh
+nsh add nsh-extra --features location
+```
+
+```tsx
+import { Location } from "nsh-extra";
+
+if (await Location.available()) {
+  const position = await Location.current({ accuracy: "high", timeout: 10_000 });
+  showOnMap(position.coords.latitude, position.coords.longitude, position.coords.accuracy);
+
+  const stop = Location.watch(
+    (position) => moveMarker(position.coords),
+    (error) => showError(error.code),
+    { distanceFilter: 10 },
+  );
+  // Later: stop(). The watch also stops when the component that started it goes.
+}
+```
+
+- `available()` resolves `true` on macOS and iOS apps packaged with the feature, and in browsers with
+  `navigator.geolocation`; `false` on Android, Windows, Linux, in a terminal, in headless runs, and in an Apple app
+  run as a bare binary (`nsh run --target macos`), whose missing `Info.plist` the system never asks for.
+- `authorization()` resolves with what the user allows now, without asking: `"notDetermined"`, `"whenInUse"`,
+  `"always"`, `"denied"` or `"restricted"`. The web knows only `"whenInUse"` (granted), `"denied"` and
+  `"notDetermined"` (it will ask). `requestAuthorization()` asks the user and resolves with the answer; reading asks by
+  itself, so ask first only to choose the moment.
+- `current({ accuracy, timeout })` resolves with a `Position` (`coords.latitude`, `longitude`, `accuracy` in metres,
+  `altitude`, `altitudeAccuracy`, `heading`, `speed`, each `null` when the device does not know it, and `timestamp`
+  in milliseconds since the epoch). `accuracy` is `"best"`, `"high"`, `"balanced"` (the default) or `"low"`.
+- `watch(listener, onError?, { accuracy, distanceFilter })` calls `listener` with each new position and returns a
+  function that stops it. `onError` gets the failure that ends the watch.
+- A read fails with an `Error` whose `code` is `"EACCES"` (the user does not allow it), `"ETIMEDOUT"` (nothing came
+  within `timeout`), `"ERR_POSITION_UNAVAILABLE"` (the device found no position) or
+  `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"` (no position here); options out of range throw a `RangeError`.
+
+The feature adds `NSLocationWhenInUseUsageDescription` to the app's `Info.plist` on iOS and macOS, and the location
+entitlement of a sandboxed macOS app. Rust code uses `nsh_extra::location`: `available()`, `authorization().await`,
+`request_authorization().await`, `current(LocationRequest).await`, and `watch(LocationRequest)`, whose `next().await`
+gives each position (dropping it stops it).
 
 ### Photos
 
@@ -733,4 +782,4 @@ After `nsh add nsh-harmony`, the app's `nsh run`, `nsh dev`, `nsh test` and `nsh
 
 ## Security
 
-An nshm's build scripts and procedural macros run when the app builds, and its code, Rust or TSX, runs with the app's permissions. Any crate in the app's dependency graph can also add system permissions, manifest components, Java and Android libraries (with their native code) and entitlements to the packaged app through `[package.metadata.nsh]`. Review its source and the changes to `nsh.lock` as you review the app's own code.
+An nshm's build scripts and procedural macros run when the app builds, and its code, TSX or Rust, runs with the app's permissions. Any crate in the app's dependency graph can also add system permissions, manifest components, Java and Android libraries (with their native code) and entitlements to the packaged app through `[package.metadata.nsh]`. Review its source and the changes to `nsh.lock` as you review the app's own code.

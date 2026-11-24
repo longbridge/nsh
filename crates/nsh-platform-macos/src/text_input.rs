@@ -63,7 +63,7 @@ use std::{
 
 use nsh_core::{
     Bounds, Color, EventKind, EventPayload, InputConfig, PayloadValue, Points, SubmitBehavior,
-    TextAlign,
+    TextAlign, ViewKind,
     geometry::{Point, Size, px},
     tailwind::state,
     text_edit::{char_len, clip_chars},
@@ -357,6 +357,10 @@ pub(crate) struct InputState {
     editing: Cell<bool>,
     /// A field is taking the focus.
     focusing: Cell<bool>,
+    /// `config` is restyling a field. A new placeholder makes AppKit end
+    /// editing and start it again in the same field (#3028): that end is
+    /// not a blur.
+    restyling: Cell<bool>,
     /// The modifiers of the key a text view is handling (its commands do
     /// not say which were held).
     key_mods: Cell<NSEventModifierFlags>,
@@ -944,7 +948,7 @@ pub(crate) fn tab(surface: &Surface, from: &NSView, backward: bool) -> bool {
             && (if crate::view::is_ours(&next) {
                 NshView::from_ns(&next).is_some_and(|view| crate::input::is_key_stop(&view))
             } else {
-                held_seen(&next)
+                held_seen(&next) && held_stop(&next)
             })
             && !from.isDescendantOf(&next)
         {
@@ -963,6 +967,26 @@ fn held_seen(view: &NSView) -> bool {
     while let Some(ns) = at {
         if let Some(view) = NshView::from_ns(&ns) {
             return view.seen_by_keys();
+        }
+        at = crate::view::superview(&ns);
+    }
+    true
+}
+
+/// Whether a view of the key view loop that is not ours is a stop of Tab
+/// by the props of the input holding it: a disabled input, or one with
+/// `focusable: false`, is not (as [`nsh_core::ViewProps::focus_stop`]
+/// decides for views). A hosted view is a stop as AppKit says.
+fn held_stop(view: &NSView) -> bool {
+    let mut at = crate::view::superview(view);
+    while let Some(ns) = at {
+        // An input's pad, lifted to a host above transformed views
+        // (`place_pad`), is held by its input, not by that host.
+        if let Some(view) = pad_owner(&ns).or_else(|| NshView::from_ns(&ns)) {
+            let state = view.state();
+            return state.kind != ViewKind::Input
+                || (state.props.focusable != Some(false)
+                    && !state.props.accessibility.state.disabled);
         }
         at = crate::view::superview(&ns);
     }
@@ -1117,9 +1141,15 @@ macro_rules! define_field {
                     // SAFETY: NSTextField's own handling of its field
                     // editor's end (it implements NSTextDelegate).
                     let _: () = unsafe { msg_send![super(self), textDidEndEditing: notification] };
-                    if let Some(cx) = self.ivars().get() {
-                        cx.focus_changed(false);
+                    let Some(cx) = self.ivars().get() else {
+                        return;
+                    };
+                    // A restyle restarts editing without a new
+                    // `becomeFirstResponder`: the field keeps the focus.
+                    if cx.input.upgrade().is_some_and(|input| input.restyling.get()) {
+                        return;
                     }
+                    cx.focus_changed(false);
                 }
 
                 #[unsafe(method(textView:shouldChangeTextInRange:replacementString:))]
@@ -2358,6 +2388,7 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
             pending_value: RefCell::new(None),
             editing: Cell::new(false),
             focusing: Cell::new(false),
+            restyling: Cell::new(false),
             key_mods: Cell::new(NSEventModifierFlags::empty()),
             anim_color: Cell::new(None),
             cx,
@@ -2714,12 +2745,27 @@ pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig
     };
     match &editor {
         Editor::Line { field, .. } => {
+            let editing = field.currentEditor().is_some();
+            input.restyling.set(true);
             field.setFont(Some(&font));
             field.setTextColor(Some(&color));
             field.setAlignment(align);
             field.setBaseWritingDirection(direction);
             field.setEditable(config.editable);
-            field.setPlaceholderAttributedString(Some(&placeholder(config, &font, align)));
+            // Setting a placeholder on a field being edited ends editing
+            // and starts it again; only a changed one is set.
+            let hint = placeholder(config, &font, align);
+            if field
+                .placeholderAttributedString()
+                .is_none_or(|old| !old.isEqualToAttributedString(&hint))
+            {
+                field.setPlaceholderAttributedString(Some(&hint));
+            }
+            input.restyling.set(false);
+            if editing && field.currentEditor().is_none() {
+                // Editing did not start again: the focus left after all.
+                input.cx.focus_changed(false);
+            }
             if let Some(editor) = field.currentEditor() {
                 editor.setFont(Some(&font));
                 editor.setTextColor(Some(&color));

@@ -5838,6 +5838,80 @@ fn multiline_inputs_stop_at_their_max_height_and_so_do_their_parents() {
     assert_eq!(content, Some(88.0));
 }
 
+/// An input scrolls its own text: text taller than a fixed height stays in
+/// it and must not grow the content size of a scroll view around it, or
+/// that scroll view scrolls on into a blank below its last child.
+#[test]
+fn a_fixed_height_inputs_text_does_not_grow_the_scroll_content_around_it() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 4,
+                tag: Tag::Scroll,
+            },
+            style_op(
+                4,
+                &[
+                    ("width", StyleValue::Number(200.0)),
+                    ("height", StyleValue::Number(150.0)),
+                ],
+            ),
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 4,
+                before: None,
+            },
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            Op::Insert {
+                parent: 4,
+                child: 3,
+                before: None,
+            },
+            Op::Create {
+                id: 2,
+                tag: Tag::Input,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Multiline(true),
+            },
+            style_op(2, &[("height", StyleValue::Number(100.0))]),
+            Op::Insert {
+                parent: 3,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    c.commit();
+    // Far more text than its 100pt show.
+    c.input_changed(2, &"x".repeat(1000), 1);
+    // Nothing of the layout may change at all: no batch is as good as one
+    // without these items.
+    let batch = c.commit();
+    let items = batch.as_ref().map_or(&[][..], |b| &b.items[..]);
+    // It keeps its height (its frame unchanged, if sent at all).
+    let frame = items.iter().rev().find_map(|i| match i {
+        MountItem::Frame { id: 2, frame } => Some(frame.size.height.0),
+        _ => None,
+    });
+    assert!(frame.is_none_or(|h| h == 100.0), "input height {frame:?}");
+    let content = items.iter().rev().find_map(|i| match i {
+        MountItem::ScrollContent { id: 4, size } => Some(size.height.0),
+        _ => None,
+    });
+    // The scroll view's content is its child's 100pt, or unchanged (not sent).
+    assert!(
+        content.is_none_or(|h| h == 150.0),
+        "scroll content height {content:?}"
+    );
+}
+
 #[test]
 fn multiline_inputs_measure_long_runs_in_pieces() {
     let mut c = input_core();
@@ -10507,6 +10581,7 @@ fn pressed_current_and_level_decode_from_js() {
         ("menuitemradio", R::MenuItemRadio),
         ("dialog", R::Dialog),
         ("alertdialog", R::AlertDialog),
+        ("tabpanel", R::TabPanel),
     ] {
         assert_eq!(role(name), r);
     }
@@ -54195,4 +54270,51 @@ fn a_focus_outside_the_overlay_does_not_take_its_escape() {
     c.set_states(2, FOCUSED);
     c.commit();
     assert!(!c.focus_takes_escape());
+}
+
+mod by_name {
+    use super::*;
+    use crate::{
+        element::{ComponentElement, Registry, Root},
+        prelude::*,
+    };
+
+    #[component]
+    fn Later() -> impl IntoElement {
+        text("later")
+    }
+
+    #[component]
+    fn Page() -> impl IntoElement {
+        view()
+            .child(text("first"))
+            .child(ComponentElement::<Later>::named(()))
+    }
+
+    /// A component made by name shows nothing until a set registers it,
+    /// then it is made where it was mounted.
+    #[test]
+    fn a_component_made_by_name_is_made_when_its_set_registers_it() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Page>(|| ()));
+        let batch = c.commit().unwrap();
+        assert_eq!(super::views::texts(&batch), ["first"]);
+        let mut registry = Registry::new();
+        registry.register::<Later>();
+        c.extend_components(registry);
+        let batch = c.commit().unwrap();
+        assert_eq!(super::views::texts(&batch), ["later"]);
+    }
+
+    /// Registered already (a native runtime): made at once.
+    #[test]
+    fn a_registered_component_made_by_name_is_made_at_once() {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Later>();
+        c.set_components(registry);
+        c.mount_root(&Root::new::<Page>(|| ()));
+        let batch = c.commit().unwrap();
+        assert_eq!(super::views::texts(&batch), ["first", "later"]);
+    }
 }
