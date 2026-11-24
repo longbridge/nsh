@@ -87,9 +87,12 @@ impl OutEl {
     }
 
     /// Sets style property `prop`, replacing an earlier declaration of it
-    /// (Tiptap's `mergeAttributes`).
+    /// (Tiptap's `mergeAttributes`), rejecting values containing `;`, `{`, or
+    /// `}` (Tiptap's `isValidCSSStyleValue`).
     fn add_style(&mut self, prop: &str, value: &str) {
-        if prop.is_empty() || value.is_empty() {
+        let prop = prop.trim();
+        let value = value.trim();
+        if prop.is_empty() || value.is_empty() || value.contains([';', '{', '}']) {
             return;
         }
         let mut decls: Vec<(String, String)> = self

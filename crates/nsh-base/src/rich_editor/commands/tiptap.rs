@@ -229,9 +229,18 @@ fn can_set_mark(state: &EditorState, ty: &MarkType) -> bool {
     })
 }
 
+fn is_empty_text_style_attrs(ty: &MarkType, attrs: &Attrs) -> bool {
+    ty.name() == "textStyle"
+        && attrs
+            .values()
+            .all(|v| v.is_null() || v.as_str().is_some_and(|s| s.trim().is_empty()))
+}
+
 /// Adds a mark of `ty` with `attrs` to the selection, merging them into
 /// the attributes of marks of `ty` there already; at a cursor, into the
-/// stored marks (Tiptap's `setMark`).
+/// stored marks (Tiptap's `setMark`). When `ty` is `textStyle` and the
+/// merged attributes are all empty/null, removes the empty `textStyle` mark
+/// (Tiptap's `removeEmptyTextStyle`).
 pub fn set_mark(ty: MarkType, attrs: Attrs) -> BoxCommand {
     command(move |state, dispatch| {
         if !can_set_mark(state, &ty) {
@@ -241,7 +250,12 @@ pub fn set_mark(ty: MarkType, attrs: Attrs) -> BoxCommand {
             let selection = state.selection();
             if selection.empty() {
                 let old = get_mark_attributes(state, &ty);
-                match ty.create(Some(merged(Some(&old), &attrs))) {
+                let next_attrs = merged(Some(&old), &attrs);
+                if is_empty_text_style_attrs(&ty, &next_attrs) {
+                    tr.remove_stored_mark_type(&ty);
+                    return true;
+                }
+                match ty.create(Some(next_attrs)) {
                     Ok(mark) => {
                         tr.add_stored_mark(&mark);
                     }
@@ -256,15 +270,56 @@ pub fn set_mark(ty: MarkType, attrs: Attrs) -> BoxCommand {
                     let trimmed_to = (pos + node.node_size()).min(to);
                     let existing: Vec<_> = node.marks().iter().filter(|m| m.ty() == &ty).collect();
                     if existing.is_empty() {
-                        if let Ok(mark) = ty.create(Some(attrs.clone())) {
+                        if !is_empty_text_style_attrs(&ty, &attrs)
+                            && let Ok(mark) = ty.create(Some(attrs.clone()))
+                        {
                             let _ = tr.add_mark(trimmed_from, trimmed_to, mark);
                         }
                     } else {
                         for mark in existing {
-                            if let Ok(mark) = ty.create(Some(merged(Some(mark.attrs()), &attrs))) {
+                            let next_attrs = merged(Some(mark.attrs()), &attrs);
+                            if is_empty_text_style_attrs(&ty, &next_attrs) {
+                                let _ = tr.remove_mark(
+                                    trimmed_from,
+                                    trimmed_to,
+                                    MarkMatch::Type(ty.clone()),
+                                );
+                            } else if let Ok(mark) = ty.create(Some(next_attrs)) {
                                 let _ = tr.add_mark(trimmed_from, trimmed_to, mark);
                             }
                         }
+                    }
+                    true
+                });
+            }
+            true
+        })
+    })
+}
+
+/// Removes `textStyle` marks whose attributes are all null or empty from
+/// the selection and stored marks (Tiptap's `removeEmptyTextStyle`).
+pub fn remove_empty_text_style(ty: MarkType) -> BoxCommand {
+    command(move |state, dispatch| {
+        with_tr(state, dispatch, |tr| {
+            let selection = state.selection();
+            if selection.empty() {
+                let attrs = get_mark_attributes(state, &ty);
+                if is_empty_text_style_attrs(&ty, &attrs) {
+                    tr.remove_stored_mark_type(&ty);
+                }
+                return true;
+            }
+            for range in selection.ranges() {
+                let (from, to) = (range.from.pos, range.to.pos);
+                state.doc().nodes_between(from, to, &mut |node, pos, _, _| {
+                    if let Some(mark) = node.marks().iter().find(|m| m.ty() == &ty)
+                        && is_empty_text_style_attrs(&ty, mark.attrs())
+                    {
+                        let trimmed_from = pos.max(from);
+                        let trimmed_to = (pos + node.node_size()).min(to);
+                        let _ =
+                            tr.remove_mark(trimmed_from, trimmed_to, MarkMatch::Type(ty.clone()));
                     }
                     true
                 });
