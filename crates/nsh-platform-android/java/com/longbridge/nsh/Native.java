@@ -170,8 +170,11 @@ final class Native {
     /** Registers a font file; returns an error, or null. */
     static native String registerFont(long handle, byte[] data);
 
-    /** Whether the running app's web views may navigate to {@code url}. */
-    static native boolean allowsWebview(long handle, String url);
+    /**
+     * Whether a web view of the running app may navigate to {@code url}, with
+     * its {@code allowOrigin} {@code origin} (null: none).
+     */
+    static native boolean allowsWebview(long handle, String url, String origin);
 
     /**
      * Whether the running app's web pages may capture {@code kind}

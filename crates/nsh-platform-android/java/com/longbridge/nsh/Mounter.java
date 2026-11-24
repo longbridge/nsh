@@ -398,9 +398,13 @@ final class Mounter {
         views.put(1, root);
     }
 
-    /** Whether the running app's web views may navigate to {@code url} (its capabilities). */
-    boolean allowsWebview(String url) {
-        return Native.allowsWebview(handle(), url);
+    /**
+     * Whether a web view whose {@code allowOrigin} is {@code origin} (null:
+     * none) may navigate to {@code url} (the app's capabilities). The origin
+     * is compared in Rust.
+     */
+    boolean allowsWebview(String url, String origin) {
+        return Native.allowsWebview(handle(), url, origin);
     }
 
     /** Whether the running app's web pages may capture {@code kind} (its {@code webview.media}). */
@@ -3162,7 +3166,10 @@ final class Mounter {
                 }
                 String injected = optString(b, objects), before = optString(b, objects), ua = optString(b, objects);
                 boolean scroll = b.getInt() != 0, js = b.getInt() != 0, incognito = b.getInt() != 0;
-                if (v instanceof WebBox) ((WebBox) v).configure(source, injected, before, ua, scroll, js, incognito);
+                String allowOrigin = optString(b, objects);
+                if (v instanceof WebBox) {
+                    ((WebBox) v).configure(source, injected, before, ua, scroll, js, incognito, allowOrigin);
+                }
                 break;
             }
             case 4: {

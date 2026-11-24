@@ -48,6 +48,8 @@ final class WebBox extends WidgetBox {
     /** Source kind (0 none, 1 uri, 2 html) and fields; null before the first load. */
     private Object[] source;
     private String injected, injectedBefore, userAgent;
+    /** {@code allowOrigin}: the one origin besides the app's hosts (null: none). */
+    private String allowOrigin;
     private boolean scrollable = true;
     // The last props, to set up a WebView made after a renderer ended.
     private boolean javaScriptEnabled, incognito;
@@ -134,13 +136,16 @@ final class WebBox extends WidgetBox {
     }
 
     private final class Client extends WebViewClient {
-        /** Top-level navigations stay within the app's `webview` capability. */
+        /**
+         * Top-level navigations stay within the app's `webview` capability
+         * and the web view's {@code allowOrigin}.
+         */
         @Override
         public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
             if (disposed || processGone) return true;
             if (!request.isForMainFrame()) return false;
             String url = request.getUrl().toString();
-            if (mounter.allowsWebview(url)) return false;
+            if (mounter.allowsWebview(url, allowOrigin)) return false;
             android.util.Log.w("nsh", "web view navigation to " + url + " is not granted");
             mounter.eventMap(id, Native.ERROR, new String[] {"message", "code", "url"},
                     new Object[] {"navigation to " + url + " is not granted", "ERR_ACCESS_DENIED", url});
@@ -254,7 +259,7 @@ final class WebBox extends WidgetBox {
 
     @SuppressWarnings("deprecation") // setSaveFormData: still honored before Android 8.
     void configure(Object[] source, String injected, String injectedBefore, String userAgent,
-            boolean scrollable, boolean javaScriptEnabled, boolean incognito) {
+            boolean scrollable, boolean javaScriptEnabled, boolean incognito, String allowOrigin) {
         if (disposed) return;
         boolean revived = processGone;
         if (processGone && !revive()) return;
@@ -265,6 +270,8 @@ final class WebBox extends WidgetBox {
             settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
             settings.setSaveFormData(false);
         }
+        // Before the source loads: a new origin applies to the next navigation.
+        this.allowOrigin = allowOrigin;
         boolean scriptsChanged = !Objects.equals(injected, this.injected)
                 || !Objects.equals(injectedBefore, this.injectedBefore);
         this.injected = injected;

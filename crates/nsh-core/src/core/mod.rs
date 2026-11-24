@@ -1437,6 +1437,11 @@ pub struct Core<M: TextEngine> {
     /// Compiled shaders by the hash of their source, with their errors
     /// (an app setting the same source again compiles it once).
     shaders: rustc_hash::FxHashMap<u64, Result<crate::shader::Shader, crate::shader::ShaderError>>,
+    /// Web views whose URL `webview.hosts` does not grant, set while the
+    /// app may add an origin at run time (`webview.runtimeOrigin`): their
+    /// `allowOrigin` may come later in the same render, so they are
+    /// checked when their props go out ([`Self::settle_web_urls`]).
+    web_unchecked: rustc_hash::FxHashSet<(Key, NodeId)>,
     /// Shader transitions this commit starts ([`MountItem::ShaderTransition`]),
     /// put first in its batch.
     transition_starts: Vec<MountItem>,
@@ -1813,6 +1818,7 @@ impl<M: TextEngine> Core<M> {
             sticky_warned: false,
             inset_warned: false,
             shaders: Default::default(),
+            web_unchecked: Default::default(),
             transition_starts: Vec::new(),
             pictured: Default::default(),
             unlinked_from: Vec::new(),
@@ -3981,7 +3987,11 @@ impl<M: TextEngine> Core<M> {
                 }
                 // As a `src` the capability does not allow: the page is
                 // not loaded, so its headers go nowhere.
-                Command::Load(load) if !self.access.allows_webview(&load.src) => {
+                Command::Load(load)
+                    if !self
+                        .access
+                        .allows_webview_with(&load.src, self.web_origin(key)) =>
+                {
                     self.deny(not_granted("the web page", &load.src, "webview.hosts"));
                     continue;
                 }
@@ -5307,27 +5317,32 @@ impl<M: TextEngine> Core<M> {
     /// video or web view source shows nothing and fails (`onError` with
     /// `code` `ERR_ACCESS_DENIED`).
     fn check_prop(&mut self, key: Key, prop: Prop) -> Prop {
+        let prop = match prop {
+            Prop::Native(NativeProp::AllowOrigin(Some(origin))) => {
+                Prop::Native(NativeProp::AllowOrigin(self.check_allow_origin(&origin)))
+            }
+            prop => prop,
+        };
         if self.access.is_unrestricted() {
             return prop;
         }
         let node = &self.nodes[key as usize];
         let (id, kind) = (node.id, node.kind);
+        // With `webview.runtimeOrigin`, a URL `webview.hosts` does not
+        // grant waits for the web view's `allowOrigin`, which may come
+        // after it in this render: it is checked when the props go out.
+        if kind == Kind::WebView
+            && self.access.allows_runtime_origin()
+            && let Some(url) = web_url(&prop)
+            && !url.is_empty()
+            && !self.access.allows_webview_with(url, self.web_origin(key))
+        {
+            self.web_unchecked.insert((key, id));
+            return prop;
+        }
         // Always reported: the `onError` listener may be set after the
         // source (JS finds the handler when the event is delivered).
-        let report = |core: &mut Self, message: String| {
-            core.events.push(crate::element::JsEvent::Event(
-                id,
-                EventKind::Error,
-                EventPayload::Map(vec![
-                    ("message", PayloadValue::Str(message.clone())),
-                    (
-                        "code",
-                        PayloadValue::Str(crate::element::codes::ACCESS_DENIED.into()),
-                    ),
-                ]),
-            ));
-            core.deny(message);
-        };
+        let report = |core: &mut Self, message: String| core.report_access_denied(id, message);
         let refuse = |core: &mut Self, what: &str, uri: &str, capability: &str| {
             report(core, not_granted(what, uri, capability));
         };
@@ -5375,7 +5390,8 @@ impl<M: TextEngine> Core<M> {
                 }
             }
             Prop::Native(NativeProp::Src(Some(url)))
-                if kind == Kind::WebView && !self.access.allows_webview(&url) =>
+                if kind == Kind::WebView
+                    && !self.access.allows_webview_with(&url, self.web_origin(key)) =>
             {
                 refuse(self, "the web page", &url, "webview.hosts");
                 Prop::Native(NativeProp::Src(None))
@@ -5398,7 +5414,8 @@ impl<M: TextEngine> Core<M> {
                 }
             }
             Prop::Native(NativeProp::Source(crate::WebSource::Uri(uri)))
-                if kind == Kind::WebView && !self.access.allows_webview(&uri) =>
+                if kind == Kind::WebView
+                    && !self.access.allows_webview_with(&uri, self.web_origin(key)) =>
             {
                 refuse(self, "the web page", &uri, "webview.hosts");
                 Prop::Native(NativeProp::Source(crate::WebSource::None))
@@ -5419,7 +5436,7 @@ impl<M: TextEngine> Core<M> {
                 if kind == Kind::WebView
                     && !url.is_empty()
                     && self.access.allows_webviews()
-                    && !self.access.allows_webview(&url) =>
+                    && !self.access.allows_webview_with(&url, self.web_origin(key)) =>
             {
                 refuse(self, "the base URL", &url, "webview.hosts");
                 Prop::Native(NativeProp::BaseUrl(None))
@@ -5429,7 +5446,7 @@ impl<M: TextEngine> Core<M> {
                 base_url: Some(url),
             })) if kind == Kind::WebView
                 && !url.is_empty()
-                && !self.access.allows_webview(&url) =>
+                && !self.access.allows_webview_with(&url, self.web_origin(key)) =>
             {
                 refuse(self, "the base URL", &url, "webview.hosts");
                 Prop::Native(NativeProp::Source(crate::WebSource::Html {
@@ -5439,6 +5456,97 @@ impl<M: TextEngine> Core<M> {
             }
             prop => prop,
         }
+    }
+
+    /// `allowOrigin` as the web view keeps it: the origin in its one
+    /// written form, or none (with a message) when it is not an origin or
+    /// the app may not add one (`webview.runtimeOrigin`).
+    fn check_allow_origin(&mut self, origin: &str) -> Option<Arc<str>> {
+        match crate::access::WebOrigin::parse(origin) {
+            Err(e) => {
+                self.deny(format!("`allowOrigin`: {e}"));
+                None
+            }
+            Ok(_) if !self.access.is_unrestricted() && !self.access.allows_runtime_origin() => {
+                self.deny(
+                    "`allowOrigin` is not granted: add `\"runtimeOrigin\": true` to capabilities.webview in nsh.json"
+                        .into(),
+                );
+                None
+            }
+            Ok(o) => Some(o.to_string().into()),
+        }
+    }
+
+    /// The `allowOrigin` of the web view `key`, when it has one.
+    fn web_origin(&self, key: Key) -> Option<&crate::access::WebOrigin> {
+        match self.nodes[key as usize].control.as_deref() {
+            Some(NativeProps::WebView(p)) => p.allow_origin.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// Checks the URLs of web view `key` that waited for its `allowOrigin`
+    /// ([`Self::web_unchecked`]) as its props go out: what neither
+    /// `webview.hosts` nor its origin grants is refused as a prop would be
+    /// (`onError` with `ERR_ACCESS_DENIED`, and nothing loaded).
+    fn settle_web_urls(&mut self, key: Key) {
+        let id = self.nodes[key as usize].id;
+        if !self.web_unchecked.remove(&(key, id)) {
+            return;
+        }
+        let access = &self.access;
+        let Some(NativeProps::WebView(p)) = self.nodes[key as usize].control.as_deref_mut() else {
+            return;
+        };
+        let origin = p.allow_origin.clone();
+        let refuses =
+            |url: &str| !url.is_empty() && !access.allows_webview_with(url, origin.as_ref());
+        let mut messages = Vec::new();
+        // `src`, also while `html` shows instead: clearing `html` loads it.
+        let src = p.src.take_if(|url| refuses(url));
+        if let Some(url) = &src {
+            messages.push(not_granted("the web page", url, "webview.hosts"));
+        }
+        // What loads: `src`, or a URL Rust set as the source.
+        if let crate::WebSource::Uri(url) = &p.source
+            && refuses(url)
+        {
+            if src.as_ref() != Some(url) {
+                messages.push(not_granted("the web page", url, "webview.hosts"));
+            }
+            p.source = crate::WebSource::None;
+        }
+        let base = p.base_url.take_if(|url| refuses(url));
+        if let Some(url) = &base {
+            messages.push(not_granted("the base URL", url, "webview.hosts"));
+        }
+        if let crate::WebSource::Html { base_url, .. } = &mut p.source
+            && let Some(url) = base_url.take_if(|url| refuses(url))
+            && base.as_ref() != Some(&url)
+        {
+            messages.push(not_granted("the base URL", &url, "webview.hosts"));
+        }
+        for message in messages {
+            self.report_access_denied(id, message);
+        }
+    }
+
+    /// A refused source of node `id`: its `onError` (`ERR_ACCESS_DENIED`)
+    /// and the app's console.
+    fn report_access_denied(&mut self, id: NodeId, message: String) {
+        self.events.push(crate::element::JsEvent::Event(
+            id,
+            EventKind::Error,
+            EventPayload::Map(vec![
+                ("message", PayloadValue::Str(message.clone())),
+                (
+                    "code",
+                    PayloadValue::Str(crate::element::codes::ACCESS_DENIED.into()),
+                ),
+            ]),
+        ));
+        self.deny(message);
     }
 
     /// `source` compiled, once per source while the cache keeps it (its
@@ -8448,6 +8556,9 @@ impl<M: TextEngine> Core<M> {
                 if !props.is_empty() {
                     self.mount.push(MountItem::ComponentProps { id, props });
                 }
+            }
+            if flags & dirty::NATIVE != 0 && !self.web_unchecked.is_empty() {
+                self.settle_web_urls(key);
             }
             let node = &self.nodes[key as usize];
             if flags & dirty::NATIVE != 0
@@ -12345,6 +12456,24 @@ fn definite(size: Size<Points>) -> taffy::Size<AvailableSpace> {
 }
 
 /// The message for a refused URL.
+/// The URL a web view prop loads at or resolves against, when it is one.
+fn web_url(prop: &Prop) -> Option<&str> {
+    match prop {
+        Prop::Native(
+            NativeProp::Src(Some(url))
+            | NativeProp::BaseUrl(Some(url))
+            | NativeProp::Source(
+                crate::WebSource::Uri(url)
+                | crate::WebSource::Html {
+                    base_url: Some(url),
+                    ..
+                },
+            ),
+        ) => Some(url),
+        _ => None,
+    }
+}
+
 fn not_granted(what: &str, uri: &str, capability: &str) -> String {
     let advice = crate::access::grant_advice(uri, capability);
     format!("{what} {uri} is not granted: {advice}")
@@ -12396,6 +12525,9 @@ fn apply_native(control: &mut NativeProps, prop: NativeProp) {
                 base_url.clone_from(&url);
             }
             p.base_url = url;
+        }
+        (NativeProps::WebView(p), P::AllowOrigin(v)) => {
+            p.allow_origin = v.and_then(|o| crate::access::WebOrigin::parse(&o).ok());
         }
         (NativeProps::WebView(p), P::InjectedJavaScript(v)) => p.injected_js = v,
         (NativeProps::WebView(p), P::InjectedJavaScriptBefore(v)) => p.injected_js_before = v,

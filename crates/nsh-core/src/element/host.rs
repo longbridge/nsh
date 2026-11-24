@@ -1608,6 +1608,18 @@ impl WebView {
         })
     }
 
+    /// One more origin the web view may show and navigate to besides
+    /// `webview.hosts`, known only while the app runs
+    /// (`scheme://host[:port]`, matched exactly): needs
+    /// `"runtimeOrigin": true` in `capabilities.webview`
+    /// ([`crate::access::WebOrigin`]). Set with the source, it applies to
+    /// it; changed later, from the next navigation.
+    pub fn allow_origin(self, origin: impl IntoReactive<String>) -> Self {
+        self.bind_prop(origin, |origin: String| {
+            Prop::Native(NativeProp::AllowOrigin(Some(origin.into())))
+        })
+    }
+
     /// Runs before each page's own scripts.
     pub fn injected_java_script_before_content(self, script: impl IntoReactive<String>) -> Self {
         self.bind_prop(script, |script: String| {

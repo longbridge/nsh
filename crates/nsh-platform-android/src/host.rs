@@ -1078,21 +1078,29 @@ extern "system" fn Java_com_longbridge_nsh_Native_registerFont<'local>(
     }
 }
 
-/// Whether the running app's web views may navigate to `url`.
+/// Whether a web view of the running app may navigate to `url`, with its
+/// `allowOrigin` `origin` (null: none), as the core wrote it.
 #[unsafe(no_mangle)]
 extern "system" fn Java_com_longbridge_nsh_Native_allowsWebview(
     mut env: JNIEnv<'_>,
     _: JClass<'_>,
     handle: jlong,
     url: JString<'_>,
+    origin: JString<'_>,
 ) -> jboolean {
     // SAFETY: Java passes its live handle.
     let host = unsafe { host(handle) };
     let Ok(url) = env.get_string(&url) else {
         return 0;
     };
+    let url = String::from(url);
+    // An origin that does not read is none: only the app's hosts are granted.
+    let origin = (!origin.is_null())
+        .then(|| env.get_string(&origin).ok().map(String::from))
+        .flatten()
+        .and_then(|o| nsh_core::access::WebOrigin::parse(&o).ok());
     let access = host.access.lock().expect("access").clone();
-    access.allows_webview(&String::from(url)).into()
+    access.allows_webview_with(&url, origin.as_ref()).into()
 }
 
 /// Whether the running app's web pages may capture `kind` (`"microphone"`,

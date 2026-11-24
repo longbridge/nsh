@@ -610,6 +610,8 @@ mod imp {
         ) -> wry::WebViewBuilder<'a> {
             let emitter = self.emitter.clone();
             let surface = self.surface.clone();
+            // The web view's `allowOrigin` of the moment, from its props.
+            let item = Rc::downgrade(self);
             let builder = builder.with_navigation_handler(move |url| {
                 if always_allowed(&url) {
                     return true;
@@ -617,7 +619,13 @@ mod imp {
                 let access = surface
                     .upgrade()
                     .and_then(|s| s.native.access.borrow().clone());
-                if access.is_none_or(|a| a.allows_webview(&url)) {
+                let origin = item.upgrade().and_then(|i| {
+                    i.props
+                        .borrow()
+                        .as_ref()
+                        .and_then(|p| p.allow_origin.clone())
+                });
+                if access.is_none_or(|a| a.allows_webview_with(&url, origin.as_ref())) {
                     return true;
                 }
                 log::warn!(target: "js", "web view navigation to {url} is not granted");

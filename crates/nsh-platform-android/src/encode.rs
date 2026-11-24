@@ -1434,6 +1434,9 @@ fn native_props(e: &mut Encoded, p: &NativeProps) {
             e.bool(w.scrollable);
             e.bool(w.javascript_enabled);
             e.bool(w.incognito);
+            // Its one written form, which `Native.allowsWebview` reads back.
+            let origin = w.allow_origin.as_ref().map(ToString::to_string);
+            e.opt_string(origin.as_deref());
         }
         NativeProps::Video(v) => {
             e.int(4);

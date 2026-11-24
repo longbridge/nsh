@@ -58,7 +58,9 @@ trusted: every limit and check is enforced in Rust, never in JS.
   (`hosts`: `*`, `*.example.com` or a host; `http`: a host narrowed by methods, schemes, a port, paths and path prefixes),
   `webview` (`hosts` a web view may show and navigate to, a page's own `blob:` URLs following the origin they embed;
   `input`: its ref's `sendInput`, trusted input that carries
-  user activation, so never granted without a declaration, `Capabilities::all` leaves it off), `statusBar`, `process` (`execute`: exact executable names or absolute paths; `exit`: host exit requests; `env`: additional
+  user activation, so never granted without a declaration, `Capabilities::all` leaves it off; `runtimeOrigin`: a web
+  view's `allowOrigin` adds one exact origin to its hosts (`WebOrigin`), off unless declared, as `input`; with it, a URL
+  the hosts refuse waits for the commit, so `allowOrigin` and `src` apply in either order), `statusBar`, `process` (`execute`: exact executable names or absolute paths; `exit`: host exit requests; `env`: additional
   visible environment names), `fs` (`read` / `write`: trusted path roots), `clipboard` (`nsh`'s `Clipboard`: reading and
   writing the system clipboard; the copy menu of selectable text is the user's own act and needs none), `picker`
   (`nsh`'s `Picker`: showing the system's picker, whose picked files reach the app; denied, a pick rejects. Also

@@ -4082,6 +4082,17 @@ pub enum NativeProp {
     /// resolve against.
     #[prop(js = "baseUrl", on = WEBVIEW)]
     BaseUrl(Option<Arc<str>>),
+    /// `allowOrigin` (web views): one more origin this web view may show and
+    /// navigate to besides `webview.hosts`, for an origin known only while
+    /// the app runs: `scheme://host[:port]`, `http` or `https`, matched
+    /// exactly ([`crate::access::WebOrigin`]). It needs
+    /// `"runtimeOrigin": true` in `capabilities.webview`; another value or
+    /// no grant is refused with a message and the web view has none. Set
+    /// with `src` in the same render, it applies to that `src`; changed
+    /// later, it applies from the next navigation. Other web views and
+    /// the windows a page opens do not have it.
+    #[prop(js = "allowOrigin", on = WEBVIEW)]
+    AllowOrigin(Option<Arc<str>>),
     /// `injectedJavaScript` (web views): runs after each page loads.
     #[prop(js = "injectedJavaScript", on = WEBVIEW)]
     InjectedJavaScript(Option<Arc<str>>),
