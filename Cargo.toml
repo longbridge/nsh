@@ -491,6 +491,11 @@ objc2-core-foundation = { version = "0.3.2", default-features = false, features 
   "CFString",
   "CFURL",
 ] }
+objc2-core-location = { version = "0.3.2", default-features = false, features = [
+  "std",
+  "CLLocation",
+  "CLLocationManager",
+] }
 objc2-core-graphics = { version = "0.3.2", default-features = false, features = [
   "std",
   "CGBitmapContext",
