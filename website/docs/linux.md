@@ -89,77 +89,7 @@ WebKitGTK 6.0 must be installed where the app runs. To show the app in a desktop
 `PATH`, the `.desktop` file in `~/.local/share/applications` and the icon in an icon theme directory. `--run` launches
 the app after packaging it.
 
-### AppImage and Flatpak
-
-```sh
-nsh package --target linux --format appimage   # also .nsh/out/<Name>-<arch>.AppImage
-nsh package --target linux --format flatpak    # also .nsh/out/flatpak/<id>.yml (and <Name>.flatpak)
-```
-
-`--format appimage` lays the package out as an AppDir (`<Name>.AppDir`) and makes it into an AppImage with
-[appimagetool](https://github.com/AppImage/appimagetool/releases), from `PATH` or `NSH_APPIMAGETOOL`. The AppImage runs
-on the system's GTK 4, like the archive. `--format flatpak` writes a Flatpak manifest that installs the archive on the
-GNOME runtime; with `flatpak-builder` installed it also builds it and writes a `.flatpak` bundle (`flatpak install
-<Name>.flatpak`).
-
-The metainfo, the desktop entry's categories and the manifest come from `nsh.json` and the store listing every store
-shares ([Store listing](./packaging.md#store-listing)):
-
-```json
-{
-  "name": "Counter",
-  "id": "io.github.example.Counter",
-  "version": "1.2.0",
-  "icon": "icon.png",
-  "store": {
-    "locales": {
-      "en-US": {
-        "subtitle": "Count things up and down",
-        "description": "A small counter.\n\nParagraphs are separated by blank lines.",
-        "keywords": "count,tally",
-        "marketingUrl": "https://example.com"
-      }
-    },
-    "linux": {
-      "license": "MIT",
-      "developer": "Example",
-      "categories": ["Utility"],
-      "screenshots": ["https://example.com/counter.png"],
-      "archiveUrl": "https://github.com/me/app/releases/download/v{version}/Counter.tar.gz"
-    }
-  },
-  "linux": {
-    "flatpak": { "runtimeVersion": "49", "finishArgs": ["--share=ipc", "--socket=wayland", "--socket=fallback-x11", "--device=dri"] }
-  }
-}
-```
-
-The `en-US` listing (else the first locale) gives the AppStream summary (`subtitle`, Flathub: at most 35 characters),
-`description`, `keywords` (comma separated) and the homepage (`marketingUrl`, or `store.linux.homepage`); a
-`store/en-US/` directory works as for the other stores. `store.linux` has what only Linux stores ask for: `license` (an
-SPDX expression), `developer`, freedesktop `categories` (default `Utility`), `screenshots` (image URLs, the first the
-default one) and `archiveUrl`, where each release archive is downloaded from (`{version}` is `nsh.json` `version`).
-Flathub names the app by `id`. `linux.flatpak.finishArgs` replaces the sandbox permissions (default: Wayland with X11 fallback,
-the GPU and the network).
-
-### Publishing to Flathub
-
-Flathub takes no uploads: each app is a repository, `flathub/<id>`, whose manifest names the release archive by URL and
-SHA-256, and Flathub builds and publishes every change merged there. The first submission is a pull request to
-[flathub/flathub](https://docs.flathub.org/docs/for-app-authors/submission) that Flathub reviews; later releases update
-the manifest.
-
-```sh
-nsh publish doctor linux                     # what Flathub asks of the app, and the tools packaging needs
-nsh package --target linux                   # .nsh/out/<Name>.tar.gz: upload it to the release
-nsh publish linux .nsh/out/<Name>.tar.gz --out ../flathub-io.github.example.Counter
-nsh publish status linux [--json]            # the version on Flathub; exits 1 until it is nsh.json's
-```
-
-The archive's URL is `store.linux.archiveUrl` (or `--url`). `nsh publish linux` writes `<id>.yml` into `--out` (default `.nsh/out/flathub/<id>`), or, when one is there, updates
-only its archive's `url` and `sha256` (the source marked `# nsh: release archive`), keeping the rest as you edited it.
-Commit it to the app's Flathub repository and open the pull request yourself. The archive is built for this machine's
-processor (`only-arches`); `doctor` exits non-zero while something Flathub requires is missing.
+AppImage and Flatpak packages, and releases on Flathub, are in [Publishing on Linux](./publish-linux.md).
 
 ## Embedding in a GTK app
 
