@@ -1178,6 +1178,60 @@ mount(() => (
 ));
 "#;
 
+const RUST_IN_TOP_LEVEL_JS_WINDOWS_APP: &str = r#"import { mount, View } from "nsh";
+import { Window } from "nsh/desktop";
+import { HidesTitleBar, WindowArea } from "test/ui";
+
+function Content() {
+  return <View><HidesTitleBar /><WindowArea /></View>;
+}
+
+mount(() => (
+  <>
+    <Window id="devices" title="Devices">{() => <Content />}</Window>
+  </>
+));
+"#;
+
+/// An app root of windows alone has no main window: a Rust component in one
+/// of them, under a JS component, reads and changes that window, and opens
+/// no other.
+#[test]
+fn rust_components_in_top_level_js_windows_open_no_main_window() {
+    use nsh_core::desktop::DesktopCommand;
+    let (_engine, rx) = crate::components::start_with(
+        RUST_IN_TOP_LEVEL_JS_WINDOWS_APP,
+        Environment {
+            os: Os::MacOs,
+            idiom: Idiom::Desktop,
+            ..Environment::default()
+        },
+        None,
+        None,
+    );
+    let mut opened = Vec::new();
+    let mut texts = Vec::new();
+    for b in crate::components::until(&rx, |b| crate::components::shows(b, "devices 0 0 0")) {
+        for item in b.items {
+            match item {
+                MountItem::Text { text, .. } => texts.push(text.text.to_string()),
+                MountItem::Command {
+                    command: Command::Desktop(command),
+                    ..
+                } => {
+                    if let DesktopCommand::OpenWindow(open) = *command {
+                        opened.push(open.options.id.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    assert!(texts.iter().any(|t| t == "hidden in devices"), "{texts:?}");
+    assert!(!texts.iter().any(|t| t.starts_with("main ")), "{texts:?}");
+    assert_eq!(opened, ["devices"]);
+}
+
 /// A Rust component in a window JS opened renders in that window:
 /// `current_window()` is it, with its own title bar area, not the main
 /// window's (#2937).
