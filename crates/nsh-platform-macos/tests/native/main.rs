@@ -61,6 +61,8 @@ mod press_momentum;
 #[cfg(target_os = "macos")]
 mod quit_requests;
 #[cfg(target_os = "macos")]
+mod removed_focus;
+#[cfg(target_os = "macos")]
 mod scaled_input;
 #[cfg(all(target_os = "macos", feature = "shader"))]
 mod shader_content;
@@ -135,6 +137,8 @@ fn main() {
                 input_clip::run();
             } else if std::env::var_os("NSH_INPUT_RESTYLE_CHECK_ONLY").is_some() {
                 input_restyle::run();
+            } else if std::env::var_os("NSH_REMOVED_FOCUS_CHECK_ONLY").is_some() {
+                removed_focus::run();
             } else if std::env::var_os("NSH_INPUT_HIDDEN_CHECK_ONLY").is_some() {
                 input_hidden::run();
             } else if std::env::var_os("NSH_FITTING_INPUT_CHECK_ONLY").is_some() {
@@ -195,6 +199,7 @@ fn main() {
                 fitting_input::run();
                 input_focus::run();
                 input_restyle::run();
+                removed_focus::run();
                 focus_selection::run();
                 text_view_selection::run();
                 fps_collapse::run();
