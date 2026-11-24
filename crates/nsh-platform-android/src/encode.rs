@@ -1699,6 +1699,7 @@ fn role_index(role: AccessibilityRole) -> i32 {
         Dialog => 43,
         AlertDialog => 44,
         Textbox => 45,
+        TabPanel => 46,
     }
 }
 
