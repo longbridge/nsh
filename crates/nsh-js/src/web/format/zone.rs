@@ -162,7 +162,7 @@ impl Rule {
             s = s.strip_prefix(',')?;
             (start, transition(&mut s)?)
         };
-        s.is_empty().then(|| Rule {
+        s.is_empty().then_some(Rule {
             std: (std_name, std),
             dst: Some(Dst {
                 zone: (dst_name, dst),

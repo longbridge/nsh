@@ -96,16 +96,20 @@ fn parse_tzif(data: &[u8]) -> Result<Tzif, String> {
         String::from_utf8_lossy(&tail[..end]).into_owned()
     };
     let types = infos
-        .chunks_exact(6)
+        .as_chunks::<6>()
+        .0
+        .iter()
         .map(|info| {
             let offset = i32::from_be_bytes(info[..4].try_into().unwrap());
             (offset, abbr(info[5] as usize))
         })
         .collect::<Vec<_>>();
     let transitions = times
-        .chunks_exact(8)
+        .as_chunks::<8>()
+        .0
+        .iter()
         .zip(indices)
-        .map(|(at, ty)| (i64::from_be_bytes(at.try_into().unwrap()), *ty))
+        .map(|(at, ty)| (i64::from_be_bytes(*at), *ty))
         .collect::<Vec<_>>();
     if transitions
         .iter()
