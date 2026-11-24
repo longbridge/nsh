@@ -564,7 +564,7 @@ fn a_card_holding_a_focused_segmented_control_keeps_its_line() {
     assert!(
         (0..buffer.area.height)
             .flat_map(|y| (0..buffer.area.width).map(move |x| (x, y)))
-            .any(|at| matches!(buffer[at].symbol(), "n" | "d") && buffer[at].bg == Color::Blue),
+            .any(|at| matches!(buffer[at].symbol(), "n" | "d") && buffer[at].bg == crate::ACCENT),
         "a tab shows the focus"
     );
     let focused = frame(terminal.backend().buffer());
