@@ -372,19 +372,47 @@ nsh publish [ENTRY] --key <KEY.secret> --cert <CERT> [-o <OUT>] [--id <ID>] [--a
 ### nsh publish android
 
 ```sh
-nsh publish android <BUNDLE.aab> [--entry <DIR>] [--package <NAME>] [--credentials <KEY.json>] [--draft]
+nsh publish android <BUNDLE.aab> [--track <TRACK>] [--rollout <FRACTION>] [--status <STATUS>] [--listing] [--draft]
+nsh publish android --from <TRACK> --track <TRACK> [--rollout <FRACTION>]
 ```
 
-把 Android App Bundle 上传到 Google Play，并发布到**内部测试**轨道，全程在一次 edit 中完成（创建、上传、更新轨道、提交；失败的 edit
-会被删除）。它不会走得更远：要发布到封闭测试、开放测试或正式版，请在 Play Console 中推进。登录身份是一个在 Play Console
-中有该应用发布权限的 Google Cloud 服务账号（[Android](./android.md#上传到-google-play)）。
+把 Android App Bundle 上传到 Google Play 并发布到某个轨道，全程在一次 edit 中完成（创建、上传、更新轨道、提交；失败的 edit
+会被删除）。不带 `--track` 时只发布到**内部测试**；发布给更多测试者或公众，必须显式给出 `--track`。用 `--from` 代替 bundle
+时，把一个轨道上最新的版本推进到另一个轨道。登录身份是一个在 Play Console 中有该应用发布权限的 Google Cloud
+服务账号（[Android](./android.md#上传到-google-play)）。
 
 | 参数 | 说明 |
 |---|---|
 | `--entry <DIR>` | 应用目录或入口，其 `nsh.json` 的 `id` 即包名。默认：`.`。 |
 | `--package <NAME>` | Google Play 上的包名。默认：`nsh.json` 的 `id`。 |
 | `--credentials <KEY.json>` | 服务账号的 JSON 密钥。默认读取 `NSH_PLAY_CREDENTIALS`。不要提交到仓库。 |
+| `--track <TRACK>` | `internal`（默认）、`alpha`、`beta`、`production` 或自定义轨道名。 |
+| `--from <TRACK>` | 推进：把该轨道最新版本的 version code 发布到 `--track`，不上传任何文件。 |
+| `--rollout <FRACTION>` | 分阶段发布给该轨道这一比例的用户，大于 0 小于 1，例如 `0.1`。 |
+| `--status <STATUS>` | `completed`（默认）、`in-progress`（带 `--rollout` 时的默认）、`halted`（暂停分阶段发布，需带 `--rollout`）或 `draft`。 |
 | `--draft` | 以草稿发布：应用在 Play Console 中完成首次发布之前，Play 只接受草稿。 |
+| `--store <DIR>` | [商店目录](./android.md#商店信息和更新说明)。默认：应用目录下的 `store`。 |
+| `--listing` | 同时按商店目录更新商店信息（名称、描述、图片），覆盖 Play 上这些语言已有的内容。 |
+
+要扩大分阶段发布，用更大的 `--rollout` 再发布同一版本；要全量发布，不带 `--rollout` 再发布一次。
+
+### nsh publish status android
+
+```sh
+nsh publish status android [--entry <DIR>] [--package <NAME>] [--credentials <KEY.json>] [--json]
+```
+
+列出每个轨道的版本：状态、version code 和放量比例。它在一个随后删除的 edit 中读取，不做任何改动。`--json` 输出
+`{"package", "releases": [{"track", "name", "status", "version_codes", "user_fraction"}]}`，供脚本使用。
+
+### nsh publish doctor android
+
+```sh
+nsh publish doctor android [--entry <DIR>] [--package <NAME>] [--credentials <KEY.json>] [--store <DIR>]
+```
+
+不改动 Play 上的任何内容，检查 `nsh publish android` 所需的一切：服务账号密钥、包名、商店目录、登录，以及对该应用的访问权限（打开一个
+edit 再删除）。有检查失败时以错误退出。
 
 ### nsh verify
 

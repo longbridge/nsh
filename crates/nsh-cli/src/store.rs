@@ -7,7 +7,9 @@
 //! store/
 //!   en-US/
 //!     description.txt  keywords.txt  release_notes.txt  ...
+//!     short_description.txt          Google Play's short description
 //!     screenshots/phone/01.png  screenshots/tablet/01.png
+//!     android/phoneScreenshots/1.png a store's own image types, by platform
 //! ```
 //!
 //! Every store identity lives under `store.<platform>` or is the app's
@@ -47,6 +49,8 @@ pub(crate) struct StoreConfig {
 pub(crate) struct Listing {
     pub name: Option<String>,
     pub subtitle: Option<String>,
+    /// Google Play's short description (80 characters).
+    pub short_description: Option<String>,
     pub description: Option<String>,
     /// Search keywords, comma separated (a list is joined with commas).
     #[serde(default, deserialize_with = "keywords")]
@@ -62,7 +66,27 @@ pub(crate) struct Listing {
     /// Device class → image paths, relative to `nsh.json`, in display order.
     #[serde(default)]
     pub screenshots: BTreeMap<String, Vec<PathBuf>>,
+    /// Platform → a store's own image type (`phoneScreenshots`,
+    /// `featureGraphic`) → image paths, from `store/<locale>/<platform>/`.
+    #[serde(default)]
+    pub images: BTreeMap<String, BTreeMap<String, Vec<PathBuf>>>,
 }
+
+/// One locale's listing as a store uploads it, with the images of one
+/// platform.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub(crate) struct Locale {
+    pub tag: String,
+    pub name: Option<String>,
+    pub short_description: Option<String>,
+    pub description: Option<String>,
+    pub release_notes: Option<String>,
+    /// `(image type, files in upload order)` of the platform.
+    pub images: Vec<(String, Vec<PathBuf>)>,
+}
+
+/// The platforms whose own image types `store/<locale>/<platform>/` holds.
+const IMAGE_PLATFORMS: [&str; 1] = ["android"];
 
 /// `store.ios`.
 #[derive(Debug, Default, Deserialize)]
@@ -124,9 +148,10 @@ pub(crate) enum ReleaseMode {
 }
 
 /// The text files `store/<locale>/` may hold, by listing field.
-const TEXT_FILES: [&str; 9] = [
+const TEXT_FILES: [&str; 10] = [
     "name",
     "subtitle",
+    "short_description",
     "description",
     "keywords",
     "promotional_text",
@@ -141,6 +166,7 @@ impl Listing {
         match name {
             "name" => &mut self.name,
             "subtitle" => &mut self.subtitle,
+            "short_description" => &mut self.short_description,
             "description" => &mut self.description,
             "keywords" => &mut self.keywords,
             "promotional_text" => &mut self.promotional_text,
@@ -155,6 +181,12 @@ impl Listing {
 /// Reads the store listing of the app at `entry`: `nsh.json` `"store"`
 /// merged over `store/`, with screenshot paths made absolute and checked.
 pub(crate) fn read(entry: &Path) -> anyhow::Result<StoreConfig> {
+    read_with(entry, None)
+}
+
+/// [`read`] with the store directory at `store_dir` instead of `store/`
+/// beside `nsh.json`.
+pub(crate) fn read_with(entry: &Path, store_dir: Option<&Path>) -> anyhow::Result<StoreConfig> {
     let entry = &app_entry(entry);
     let dir = nsh_bundler::app_dir::config_dir_of(entry);
     let config = crate::package::read_config(entry)?;
@@ -162,13 +194,18 @@ pub(crate) fn read(entry: &Path) -> anyhow::Result<StoreConfig> {
         Some(value) => serde_json::from_value(value).context("invalid nsh.json `store`")?,
         None => StoreConfig::default(),
     };
-    merge_dir(&mut store, &dir.join("store"))?;
+    let store_dir = store_dir.map_or_else(|| dir.join("store"), Path::to_owned);
+    merge_dir(&mut store, &store_dir)?;
     for (locale, listing) in &mut store.locales {
         ensure!(
             valid_locale(locale),
             "store locale `{locale}` is not a BCP 47 tag like en-US"
         );
-        for (class, paths) in &mut listing.screenshots {
+        let platform_images = listing
+            .images
+            .iter_mut()
+            .flat_map(|(_, kinds)| kinds.iter_mut());
+        for (class, paths) in listing.screenshots.iter_mut().chain(platform_images) {
             for path in paths {
                 if path.is_relative() {
                     *path = dir.join(&*path);
@@ -187,6 +224,27 @@ pub(crate) fn read(entry: &Path) -> anyhow::Result<StoreConfig> {
         }
     }
     Ok(store)
+}
+
+impl StoreConfig {
+    /// Every locale's listing with `platform`'s own images, sorted by tag.
+    pub(crate) fn locales(&self, platform: &str) -> Vec<Locale> {
+        self.locales
+            .iter()
+            .map(|(tag, l)| Locale {
+                tag: tag.clone(),
+                name: l.name.clone(),
+                short_description: l.short_description.clone(),
+                description: l.description.clone(),
+                release_notes: l.release_notes.clone(),
+                images: l
+                    .images
+                    .get(platform)
+                    .map(|kinds| kinds.iter().map(|(k, f)| (k.clone(), f.clone())).collect())
+                    .unwrap_or_default(),
+            })
+            .collect()
+    }
 }
 
 /// `entry` as `package::read_config` takes it: an app's directory names its
@@ -230,28 +288,47 @@ fn merge_dir(store: &mut StoreConfig, dir: &Path) -> anyhow::Result<()> {
                 *field = Some(text.trim().to_owned());
             }
         }
-        let Ok(classes) = std::fs::read_dir(entry.path().join("screenshots")) else {
-            continue;
-        };
-        for class in classes {
-            let class = class?;
-            let Some(name) = class.file_name().to_str().map(str::to_owned) else {
-                continue;
-            };
-            if !class.file_type()?.is_dir() || listing.screenshots.contains_key(&name) {
+        for platform in IMAGE_PLATFORMS {
+            if listing.images.contains_key(platform) {
                 continue;
             }
-            let mut images: Vec<PathBuf> = std::fs::read_dir(class.path())?
-                .filter_map(|f| f.ok().map(|f| f.path()))
-                .filter(|p| image_kind(p).is_some())
-                .collect();
-            images.sort();
-            if !images.is_empty() {
-                listing.screenshots.insert(name, images);
+            let kinds = image_dirs(&entry.path().join(platform))?;
+            if !kinds.is_empty() {
+                listing.images.insert(platform.to_owned(), kinds);
             }
+        }
+        for (name, images) in image_dirs(&entry.path().join("screenshots"))? {
+            listing.screenshots.entry(name).or_insert(images);
         }
     }
     Ok(())
+}
+
+/// The images of each directory in `dir`, by directory name, in file-name
+/// order. A missing directory has none.
+fn image_dirs(dir: &Path) -> anyhow::Result<BTreeMap<String, Vec<PathBuf>>> {
+    let mut out = BTreeMap::new();
+    let Ok(classes) = std::fs::read_dir(dir) else {
+        return Ok(out);
+    };
+    for class in classes {
+        let class = class?;
+        let Some(name) = class.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        if !class.file_type()?.is_dir() {
+            continue;
+        }
+        let mut images: Vec<PathBuf> = std::fs::read_dir(class.path())?
+            .filter_map(|f| f.ok().map(|f| f.path()))
+            .filter(|p| image_kind(p).is_some())
+            .collect();
+        images.sort();
+        if !images.is_empty() {
+            out.insert(name, images);
+        }
+    }
+    Ok(out)
 }
 
 pub(crate) fn image_kind(path: &Path) -> Option<&'static str> {
@@ -400,6 +477,40 @@ mod tests {
         assert!(read(&dir).is_err());
         std::fs::write(dir.join("nsh.json"), r#"{"store":{"future":1}}"#).unwrap();
         assert!(read(&dir).is_ok());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_platforms_own_images_and_texts_reach_its_locales() {
+        let dir = std::env::temp_dir().join(format!("nsh-store-android-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let en = dir.join("store/en-US");
+        std::fs::create_dir_all(en.join("android/phoneScreenshots")).unwrap();
+        std::fs::create_dir_all(dir.join("store/zh-CN")).unwrap();
+        std::fs::write(en.join("short_description.txt"), "Short\n").unwrap();
+        std::fs::write(en.join("whats_new.txt"), "  \n").unwrap();
+        for name in ["2.png", "1.png", "notes.md"] {
+            std::fs::write(en.join("android/phoneScreenshots").join(name), b"x").unwrap();
+        }
+        std::fs::write(dir.join("store/zh-CN/release_notes.txt"), "修复").unwrap();
+        std::fs::write(dir.join("nsh.json"), r#"{"id":"a.b"}"#).unwrap();
+        let locales = read(&dir).unwrap().locales("android");
+        assert_eq!(locales.len(), 2);
+        assert_eq!(locales[0].tag, "en-US");
+        assert_eq!(locales[0].short_description.as_deref(), Some("Short"));
+        assert_eq!(locales[0].release_notes, None);
+        assert_eq!(
+            locales[0].images,
+            [(
+                "phoneScreenshots".to_owned(),
+                vec![
+                    en.join("android/phoneScreenshots/1.png"),
+                    en.join("android/phoneScreenshots/2.png")
+                ]
+            )]
+        );
+        assert_eq!(locales[1].release_notes.as_deref(), Some("修复"));
+        assert!(read(&dir).unwrap().locales("ios")[0].images.is_empty());
         std::fs::remove_dir_all(dir).unwrap();
     }
 

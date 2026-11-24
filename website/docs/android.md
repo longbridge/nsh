@@ -58,19 +58,46 @@ runtime in `symbols/<abi>/libnsh.so` (a Rust app's in `.nsh/rust/android-rust-re
 
 ## Upload to Google Play
 
-`nsh publish android` uploads an Android App Bundle (`.aab`) to Google Play's internal testing track
-([CLI](./cli.md#nsh-publish-android)):
+`nsh publish android` uploads an Android App Bundle (`.aab`) to a Google Play track, internal testing unless `--track`
+names another ([CLI](./cli.md#nsh-publish-android)):
 
 ```sh
-export NSH_PLAY_CREDENTIALS=~/keys/play-service-account.json   # never commit it
+export NSH_PLAY_CREDENTIALS=~/keys/play-service-account.json
+nsh publish doctor android
 nsh publish android .nsh/out/App.aab
+nsh publish android --from internal --track production --rollout 0.1
+nsh publish status android --json
 ```
 
-Once per app: create the app in Play Console, create a service account in Google Cloud with the Google Play Android
-Developer API enabled, download its JSON key, and invite the service account's email under **Users and permissions**
-with permission to release to testing tracks. Until the app's first release is made in Play Console, pass `--draft`.
-The bundle's version code must be higher than any uploaded before. Promoting a release beyond internal testing stays a
-step in Play Console.
+Keep the key out of the repository. Once per app: create the app in Play Console, create a service account in Google
+Cloud with the Google Play Android Developer API enabled, download its JSON key, and invite the service account's email
+under **Users and permissions** with permission to release to the tracks you use. Until the app's first release is made
+in Play Console, pass `--draft`. The bundle's version code must be higher than any uploaded before.
+
+### Store listing and release notes
+
+The `store` directory next to `nsh.json` holds the texts and images of each locale, named with its BCP 47 tag; every
+file is optional, and `nsh publish ios` reads the same directory:
+
+```text
+store/
+  en-US/
+    name.txt               store name
+    short_description.txt  Google Play's short description
+    description.txt        full description
+    release_notes.txt      what's new in this release
+    android/
+      phoneScreenshots/    1.png, 2.png, ... (uploaded in file-name order)
+      featureGraphic/
+      icon/
+  zh-CN/
+    ...
+```
+
+Every release carries the locales' `release_notes.txt`. With `--listing` the name and descriptions are set and, for
+each image type present, Play's images of that type are replaced. Image types are Google Play's: `phoneScreenshots`,
+`sevenInchScreenshots`, `tenInchScreenshots`, `tvScreenshots`, `wearScreenshots`, `icon`, `featureGraphic` and
+`tvBanner`.
 
 ## Embedding in an Android app
 
