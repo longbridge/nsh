@@ -206,6 +206,7 @@ prop id:page userAgent CompatAgent/1
 prop id:page scrollable false
 prop id:page incognito true
 prop id:page zoomable true
+prop id:page allowOrigin https://pages.example.com
 prop id:page ios.allowsBackForwardNavigationGestures true
 # A page of HTML with its base URL when the app switches to it.
 tap id:html
@@ -220,6 +221,7 @@ covers [props] userAgent
 covers [props] scrollable
 covers [props] incognito
 covers [props] zoomable
+covers [props] allowOrigin
 covers [props] ios.allowsBackForwardNavigationGestures
 # props-scroll-behavior
 tap id:case-props-scroll-behavior

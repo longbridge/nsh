@@ -83,6 +83,7 @@ In Rust each prop is a builder method in snake case (`injected_java_script`, `ja
 | `src` | `string` | | The URL of the page to show. |
 | `html` | `string` | | Inline HTML, shown instead of `src`. |
 | `baseUrl` | `string` | | What `html`'s relative URLs resolve against. It needs the same grant as a page there (`webview.hosts`); without it the HTML loads with no base URL and `onError` reports `ERR_ACCESS_DENIED`. |
+| `allowOrigin` | `string` | | One more origin this web view may show and navigate to besides `webview.hosts`, for an origin known only while the app runs (a server the user named): `scheme://host[:port]`, `http` or `https`, matched exactly (same scheme, host and port; never a subdomain). Needs `"runtimeOrigin": true` in [`capabilities.webview`](../docs/sandbox-and-capabilities.md#webview); another value is refused with a message. Set in the same render as `src`, it applies to it; changed later, from the next navigation. Other web views and the windows a page opens do not have it. |
 | `injectedJavaScript` | `string` | | Runs after each page loads. |
 | `injectedJavaScriptBeforeContentLoaded` | `string` | | Runs before each page's own scripts. |
 | `javaScriptEnabled` | `boolean` | `true` | Pages run scripts. |

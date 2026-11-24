@@ -13667,6 +13667,261 @@ fn web_source(batch: &MountBatch, view: NodeId) -> Option<crate::WebSource> {
     })
 }
 
+/// A core whose app declares `capabilities`, with web view 2 made from
+/// `props` in one render (its errors listened to): the source the platform
+/// receives, its `allowOrigin`, and the access errors it heard.
+fn web_view_with_access(
+    capabilities: serde_json::Value,
+    props: Vec<Prop>,
+) -> (
+    Core<FakeEngine>,
+    Option<crate::WebSource>,
+    Option<crate::access::WebOrigin>,
+    Vec<String>,
+) {
+    let mut c = core();
+    c.set_access(Arc::new(crate::access::Access {
+        declared: crate::access::Capabilities::from_json(&capabilities).unwrap(),
+        granted: None,
+    }));
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::WebView,
+        },
+        Op::Listen {
+            id: 2,
+            event: EventKind::Error,
+            enabled: true,
+        },
+    ];
+    ops.extend(props.into_iter().map(|prop| Op::SetProp { id: 2, prop }));
+    ops.push(Op::Insert {
+        parent: ROOT_ID,
+        child: 2,
+        before: None,
+    });
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    let origin = batch.items.iter().rev().find_map(|i| match i {
+        MountItem::NativeProps {
+            id: 2,
+            props: crate::NativeProps::WebView(p),
+        } => Some(p.allow_origin.clone()),
+        _ => None,
+    });
+    let denied = access_errors(&mut c, 2);
+    (c, web_source(&batch, 2), origin.flatten(), denied)
+}
+
+/// The messages of the access errors node `view` heard.
+fn access_errors(c: &mut Core<FakeEngine>, view: NodeId) -> Vec<String> {
+    js_events(c)
+        .into_iter()
+        .filter_map(|e| match e {
+            (id, EventKind::Error, EventPayload::Map(fields))
+                if id == view
+                    && fields.iter().any(|(k, v)| {
+                        *k == "code" && *v == crate::PayloadValue::Str("ERR_ACCESS_DENIED".into())
+                    }) =>
+            {
+                fields.into_iter().find_map(|(k, v)| match (k, v) {
+                    ("message", crate::PayloadValue::Str(m)) => Some(m.to_string()),
+                    _ => None,
+                })
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// `allowOrigin` adds one origin, decided while the app runs, to the hosts
+/// a web view may show, when the app declares `webview.runtimeOrigin`; set
+/// in the same render as `src`, before or after it, it applies to it.
+#[test]
+fn web_view_allow_origin_grants_its_origin() {
+    let caps = serde_json::json!({ "webview": { "hosts": ["127.0.0.1"], "runtimeOrigin": true } });
+    let page = "http://192.168.1.5:9876/session-page/T/index.html";
+    let src = || Prop::Native(NativeProp::Src(Some(page.into())));
+    let origin = |o: &str| Prop::Native(NativeProp::AllowOrigin(Some(o.into())));
+    let loaded = Some(crate::WebSource::Uri(page.into()));
+    for props in [
+        vec![src(), origin("http://192.168.1.5:9876")],
+        vec![origin("http://192.168.1.5:9876"), src()],
+    ] {
+        let (c, source, kept, denied) = web_view_with_access(caps.clone(), props);
+        assert_eq!(source, loaded);
+        assert_eq!(
+            kept.map(|o| o.to_string()).as_deref(),
+            Some("http://192.168.1.5:9876")
+        );
+        assert!(denied.is_empty(), "{denied:?}");
+        assert!(c.denied.is_empty(), "{:?}", c.denied);
+    }
+    // Written in its one form: the default port and the case dropped.
+    let (_, _, kept, _) =
+        web_view_with_access(caps.clone(), vec![origin("HTTPS://Name.Example.net:443/")]);
+    assert_eq!(
+        kept.map(|o| o.to_string()).as_deref(),
+        Some("https://name.example.net")
+    );
+    // Another origin is refused once, as a host not granted is.
+    for other in [
+        "http://192.168.1.5:9877/x",
+        "https://192.168.1.5:9876/x",
+        "http://a.192.168.1.5:9876/x",
+        "http://192.168.1.5:9876@evil.com/",
+    ] {
+        let (_, source, _, denied) = web_view_with_access(
+            caps.clone(),
+            vec![
+                Prop::Native(NativeProp::Src(Some(other.into()))),
+                origin("http://192.168.1.5:9876"),
+            ],
+        );
+        assert_eq!(source, Some(crate::WebSource::None), "{other}");
+        assert!(
+            matches!(&denied[..], [m] if m.contains("the web page")),
+            "{other}: {denied:?}"
+        );
+    }
+    // A base URL at the origin is kept with its HTML.
+    let (_, source, _, denied) = web_view_with_access(
+        caps.clone(),
+        vec![
+            Prop::Native(NativeProp::Html(Some("<b>hi</b>".into()))),
+            Prop::Native(NativeProp::BaseUrl(Some(
+                "http://192.168.1.5:9876/r/".into(),
+            ))),
+            origin("http://192.168.1.5:9876"),
+        ],
+    );
+    assert_eq!(
+        source,
+        Some(crate::WebSource::Html {
+            html: "<b>hi</b>".into(),
+            base_url: Some("http://192.168.1.5:9876/r/".into()),
+        })
+    );
+    assert!(denied.is_empty(), "{denied:?}");
+    // `webview.hosts` still grants on its own.
+    let (_, source, _, denied) = web_view_with_access(
+        caps,
+        vec![Prop::Native(NativeProp::Src(Some(
+            "http://127.0.0.1:6711/".into(),
+        )))],
+    );
+    assert_eq!(
+        source,
+        Some(crate::WebSource::Uri("http://127.0.0.1:6711/".into()))
+    );
+    assert!(denied.is_empty(), "{denied:?}");
+}
+
+/// Without `webview.runtimeOrigin` the prop is refused with a message and
+/// the web view keeps to `webview.hosts`, its URLs refused as before; a
+/// value that is not an origin is refused whatever the grant.
+#[test]
+fn web_view_allow_origin_needs_the_grant_and_an_origin() {
+    let page = "http://192.168.1.5:9876/index.html";
+    let (c, source, kept, denied) = web_view_with_access(
+        serde_json::json!({ "webview": { "hosts": ["127.0.0.1"] } }),
+        vec![
+            Prop::Native(NativeProp::AllowOrigin(Some(
+                "http://192.168.1.5:9876".into(),
+            ))),
+            Prop::Native(NativeProp::Src(Some(page.into()))),
+        ],
+    );
+    assert_eq!(source, Some(crate::WebSource::None));
+    assert_eq!(kept, None);
+    assert!(
+        matches!(&denied[..], [m] if m.contains("the web page")),
+        "{denied:?}"
+    );
+    assert!(
+        c.denied
+            .iter()
+            .any(|m| m.contains("add `\"runtimeOrigin\": true`")),
+        "{:?}",
+        c.denied
+    );
+    let caps = serde_json::json!({ "webview": { "hosts": ["127.0.0.1"], "runtimeOrigin": true } });
+    for bad in [
+        "http://h/path",
+        "http://h?q",
+        "http://h#f",
+        "http://u@h",
+        "*",
+        "ftp://h",
+        "http://*.h",
+        "http://bücher.example",
+        "h:80",
+    ] {
+        let (c, _, kept, _) = web_view_with_access(
+            caps.clone(),
+            vec![Prop::Native(NativeProp::AllowOrigin(Some(bad.into())))],
+        );
+        assert_eq!(kept, None, "{bad}");
+        assert!(
+            c.denied.iter().any(|m| m.starts_with("`allowOrigin`")),
+            "{bad}: {:?}",
+            c.denied
+        );
+    }
+}
+
+/// `load()` checks against the web view's origin of the moment: a new
+/// `allowOrigin` refuses the old one from the next load.
+#[test]
+fn web_view_allow_origin_applies_to_loads() {
+    let caps = serde_json::json!({ "webview": { "hosts": ["127.0.0.1"], "runtimeOrigin": true } });
+    let (mut c, _, _, _) = web_view_with_access(
+        caps,
+        vec![Prop::Native(NativeProp::AllowOrigin(Some(
+            "http://192.168.1.5:9876".into(),
+        )))],
+    );
+    let load = |c: &mut Core<FakeEngine>, url: &str| {
+        apply(
+            c,
+            vec![Op::Command {
+                id: 2,
+                command: Command::Load(crate::WebLoad {
+                    src: url.into(),
+                    headers: Vec::new(),
+                }),
+            }],
+        );
+        let batch = c.commit();
+        let sent = batch.is_some_and(|b| {
+            b.items.iter().any(|i| {
+                matches!(i, MountItem::Command { id: 2, command: Command::Load(l) } if l.src == url)
+            })
+        });
+        (sent, access_errors(c, 2))
+    };
+    assert_eq!(load(&mut c, "http://192.168.1.5:9876/a"), (true, vec![]));
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::Native(NativeProp::AllowOrigin(Some("http://10.0.0.2:9876".into()))),
+        }],
+    );
+    c.commit();
+    let (sent, _) = load(&mut c, "http://192.168.1.5:9876/b");
+    assert!(!sent);
+    assert!(
+        c.denied
+            .iter()
+            .any(|m| m.contains("http://192.168.1.5:9876/b")),
+        "{:?}",
+        c.denied
+    );
+    assert!(load(&mut c, "http://10.0.0.2:9876/c").0);
+}
+
 /// Inline HTML loaded with a base URL runs at the base URL's origin
 /// (WebKit, Android, Windows), so the base URL takes the grant a page there
 /// would.

@@ -59,6 +59,7 @@ A web view takes the props of a [view](./view.md) (it has no children) plus:
 | `src` | `web_view(url)` | `string` | | The URL of the page to show. |
 | `html` | `web_view_html(html, base_url)`, `.html(html, base_url)` | `string` | | Inline HTML, shown instead of `src`. |
 | `baseUrl` | `base_url` of `web_view_html` / `.html` | `string` | | What `html`'s relative links resolve against. It needs the same grant as a page there (`webview.hosts`); without it the HTML loads with no base URL and `onError` reports `ERR_ACCESS_DENIED`. |
+| `allowOrigin` | `.allow_origin(..)` | `string` | | One more origin this web view may show and navigate to besides `webview.hosts`, for an origin known only while the app runs (a server the user named): `scheme://host[:port]`, `http` or `https`, matched exactly (same scheme, host and port; never a subdomain). Needs `"runtimeOrigin": true` in [`capabilities.webview`](../docs/sandbox-and-capabilities.md#webview); another value is refused with a message. Set in the same render as `src`, it applies to it; changed later, from the next navigation. Other web views and the windows a page opens do not have it. |
 | `injectedJavaScript` | `.injected_java_script(..)` | `string` | | Runs after each page loads. |
 | `injectedJavaScriptBeforeContentLoaded` | `.injected_java_script_before_content(..)` | `string` | | Runs before each page's own scripts. |
 | `userAgent` | `.user_agent(..)` | `string` | | The browser's user agent string. |

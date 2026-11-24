@@ -67,6 +67,11 @@ pub struct WebProps {
     /// The `baseUrl` prop, which [`Self::source`] holds while `html` is
     /// set.
     pub base_url: Option<Arc<str>>,
+    /// The one origin this web view may show besides `webview.hosts`
+    /// (`allowOrigin`, granted by `webview.runtimeOrigin`): a web view's
+    /// backend checks its navigations with
+    /// [`Access::allows_webview_with`](crate::access::Access::allows_webview_with).
+    pub allow_origin: Option<crate::access::WebOrigin>,
     /// Script run after each page loads.
     pub injected_js: Option<Arc<str>>,
     /// Script run before each page's own scripts.
@@ -104,6 +109,7 @@ impl Default for WebProps {
             source: WebSource::None,
             src: None,
             base_url: None,
+            allow_origin: None,
             injected_js: None,
             injected_js_before: None,
             user_agent: None,
