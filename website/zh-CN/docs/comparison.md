@@ -90,7 +90,7 @@ GPUI 与 GPUI Fast 合为一列：两者运行的平台相同，GPUI Fast 在 GP
 
 - **两层意义上的 Native，在每个平台上。** 每个后端都建立在平台自己的视图、文本和输入法之上——UIKit、Android 视图、AppKit、用 Direct2D 绘制的 Win32、GTK 4、HTML——平台的交互方式也随之而来。文本选择、输入法和无障碍都是系统的，系统新版本对它们的改进，应用直接获得（[简介](./index.md#native-的含义)）。
 - **一套应用覆盖手机、桌面和 Web。** 六个平台都是同一个框架的后端，共享同一套响应式图、渲染器、Taffy 布局和模块；布局随窗口重组，输入方式随设备变化；在 Web 上，应用是 HTML，发布为静态网站。
-- **TSX 运行在 Rust 引擎上，在值得的地方用 Rust。** 应用用 TSX 编写，支持热更新，只有应用自己的代码是 JavaScript。Rust [nshm](./nshm.md)——应用自己的或已发布的——在需要速度、平台能力或 crates.io 的地方为 TSX 提供 Native 组件和模块；整个应用也可以从头到尾都是 Rust，不带 JavaScript runtime（[用 Rust 开发](./rust.md)）。
+- **Rust First，应用用 TSX 编写。** 引擎是 Rust，编译成 Native 代码。应用用 TSX 编写，支持热更新，只有应用自己的代码是 JavaScript。Rust [nshm](./nshm.md)——应用自己的或已发布的——在需要速度、平台能力或 crates.io 的地方为 TSX 提供 Native 组件和模块；整个应用也可以从头到尾都是 Rust，不带 JavaScript runtime（[用 Rust 开发](./rust.md)）。
 - **面向日常应用的 Retained Mode。** 组件只运行一次，细粒度的 signal 只把变化的属性发给视图，因此聊天、表单、列表和文档在静止时几乎不占 CPU（[简介](./index.md#retained-mode)、[响应式](./reactivity.md)）。
 - **发布之后下发界面，经过签名、运行在沙箱里。** 用 NSH 构建的应用——以及用各平台自己的工具编写的原生应用——都能在运行时接收 TSX 模块，由团队编写或 AI 生成（[动态界面](./index.md#动态界面与-ai-生成的界面)）。
 - **一个工具链，人和 AI agent 都能用。** 一个 `nsh` 可执行文件负责创建、运行、热更新、在真实平台上测试、打包和签名，覆盖每个目标平台；TSX 不需要 Node 或 npm（[CLI](./cli.md)、[安装](./installation.md)）。
@@ -266,7 +266,7 @@ GPUI 证明了 Rust 和 GPU 能构建 Zed 这样复杂的专业桌面应用，�
 - **高帧率不等于低开销。** 每帧重建元素树，意味着内容没变时也可能重复构建和绘制。这不只消耗 CPU，GPU 的绘制、合成和唤醒同样耗电。对日常应用来说，性能还包括静止时的开销、功耗和电池续航。
 - **没有终端。** 自绘架构理论上可以扩展到更多平台，但目前没有 NSH 这样的 iOS、Android、HTML Web 和 TUI 后端。
 
-NSH 怎么解决：同一套应用模型——TSX 运行在 Rust 引擎上，在值得的地方用 Rust——覆盖 iOS、Android、Web 和终端；Retained Mode 加细粒度 signal，界面变化少时不重新计算和绘制无关部分，减少 CPU 和不必要的 GPU 工作；Tab 焦点、键盘导航和无障碍尽可能交给平台；文本输入、选择和输入法是平台的；内置支持热更新的 TSX 和签名、沙箱化的下发。NSH 的 GPUI 后端可以把 NSH 应用嵌进现有的 GPUI 和 GPUI Kit 应用，界面可以一个个迁移，不必整体重写（[GPUI](./gpui.md)）。
+NSH 怎么解决：同一套 Rust First 的引擎——应用用 TSX 编写，在值得的地方用 Rust——覆盖 iOS、Android、Web 和终端；Retained Mode 加细粒度 signal，界面变化少时不重新计算和绘制无关部分，减少 CPU 和不必要的 GPU 工作；Tab 焦点、键盘导航和无障碍尽可能交给平台；文本输入、选择和输入法是平台的；内置支持热更新的 TSX 和签名、沙箱化的下发。NSH 的 GPUI 后端可以把 NSH 应用嵌进现有的 GPUI 和 GPUI Kit 应用，界面可以一个个迁移，不必整体重写（[GPUI](./gpui.md)）。
 
 **数字如实写。** 在 [NSH 性能基准](https://github.com/longbridge/nsh-perf-bench)中（Linux，500 行行情表，NSH 用 GTK 4 后端），日常负载开销相同：每秒 1,000 条行情时 NSH Rust 占单核 18%，GPUI Fast 20%。持续高强度更新时 GPUI Fast 领先：每秒 20,000 条行情时它占 25%，NSH 为 73–78%；每帧计算 1,000 个方块的动画，它的 CPU 约为 NSH 的三分之一。开发中我们还观察到下面这些特定场景的 CPU 占用。它们来自不同场景和既有经验，没有统一设备、负载和统计口径，**不能当作同一负载下的逐项对照**：
 

@@ -23,7 +23,7 @@ const robots = robotsProp ?? (isLatestVersion ? undefined : 'noindex');
 
 // A title that already names the site (the home pages') is used as it is.
 const pageTitle = !title || title === SITE_TITLE
-  ? `${SITE_TITLE} — Build once, native everywhere | Cross-platform native UI framework`
+  ? `${SITE_TITLE} — Build once, native everywhere | Rust UI framework`
   : title.startsWith(SITE_TITLE) ? title : `${title} · ${SITE_TITLE}`;
 const latest = siteVersions.find((version) => version.id === latestVersion);
 const canonical = isLatestVersion || !latest

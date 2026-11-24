@@ -1,6 +1,6 @@
 ---
 title: Introduction
-description: "What Native Shell is: a native UI framework for iOS, Android, macOS, Windows, Linux and the web, with each platform's own UI and interaction. Apps are written in TSX and extended with Rust where they need it."
+description: "What Native Shell is: a Rust-first native UI framework for iOS, Android, macOS, Windows, Linux and the web, with each platform's own UI and interaction. Apps are written in TSX and extended with Rust where they need it."
 order: 1
 group: start
 ---
@@ -51,9 +51,9 @@ Cross-platform in NSH means each device gets the app it expects, not the same sc
 
 Take an app like a chat client. Its developer builds it on the desktop with `nsh run`, opens it in an iOS simulator with `nsh run --target ios` to check the phone layout, then in a browser with `nsh run --target web` — the same project each time — and `nsh package` makes the installable apps and the website. One engineer can carry what used to take a team per platform, while the backend is built alongside.
 
-## TSX, extended with Rust
+## Rust first
 
-NSH is built in Rust, and apps are written on top of it in TSX, with Rust where it pays off:
+NSH is Rust first: the engine, layout, rendering and every platform layer are Rust, compiled to native code. Apps are written on top of it in TSX, with Rust where it pays off:
 
 - **Apps in TSX.** Screens, state, business logic and styles are TSX, with Tailwind classes and signals, and hot updates that keep the app's state on every save. Only the app's own code is JavaScript: the reactive graph, layout, rendering and every module the app imports are Rust ([JSX and components](./jsx-and-components.md)). `nsh init` starts here.
 - **Rust where the app needs it.** An app's own Rust crate in `ext/`, or an [nshm](./nshm.md) from crates.io, gives its TSX components, modules and classes: heavy computation, parsing, large data, system APIs and the crates.io ecosystem, at native speed even when TSX calls them.

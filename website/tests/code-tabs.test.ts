@@ -46,7 +46,7 @@ test('consecutive tabbed fences become one accessible group', async () => {
   expect(html.match(/data-code-tabs/g)?.length).toBe(2);
   expect(html).toContain('role="tablist"');
   expect(html).toContain('aria-label="Language"');
-  // TSX first and selected, Rust second and hidden.
+  // The TSX tab comes first and is selected; Rust is second and hidden.
   expect(html).toMatch(/<button[^>]*aria-selected="true"[^>]*data-tab="tsx"[^>]*>TSX<\/button><button[^>]*aria-selected="false"[^>]*data-tab="rust"[^>]*>Rust<\/button>/);
   expect(html).toMatch(/role="tabpanel"[^>]*data-tab="rust"[^>]*hidden/);
   expect(html).toMatch(/role="tabpanel"[^>]*data-tab="tsx"(?![^>]*hidden)/);

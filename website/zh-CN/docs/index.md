@@ -1,6 +1,6 @@
 ---
 title: 简介
-description: Native Shell 是什么：全平台的 Native UI 框架，覆盖 iOS、Android、macOS、Windows、Linux 和 Web，每个平台使用系统自己的界面与交互。应用用 TSX 编写，需要时用 Rust 扩展。
+description: Native Shell 是什么：Rust First 的全平台 Native UI 框架，覆盖 iOS、Android、macOS、Windows、Linux 和 Web，每个平台使用系统自己的界面与交互。应用用 TSX 编写，需要时用 Rust 扩展。
 order: 1
 group: start
 ---
@@ -51,9 +51,9 @@ NSH 的跨平台，是让每种设备都得到它该有的应用，而不是把�
 
 以一个聊天客户端为例。开发者用 `nsh run` 在桌面上开发它，用 `nsh run --target ios` 在 iOS 模拟器里检查手机布局，再用 `nsh run --target web` 在浏览器里运行——每次都是同一个工程——最后用 `nsh package` 打出可安装的应用和网站。过去需要每个平台一个团队的工作，一个工程师就能承担，后端开发可以同步进行。
 
-## TSX，用 Rust 扩展
+## Rust First
 
-NSH 用 Rust 构建，应用在它之上用 TSX 编写，在值得的地方使用 Rust：
+NSH 是 Rust First 的：引擎、布局、渲染和每个平台层都是 Rust，编译成 Native 代码。应用在它之上用 TSX 编写，在值得的地方使用 Rust：
 
 - **用 TSX 编写应用。** 界面、状态、业务逻辑和样式都是 TSX，使用 Tailwind 类和 signal，每次保存都热更新并保留应用状态。只有应用自己的代码是 JavaScript：响应式图、布局、渲染以及应用导入的每个模块都是 Rust（[JSX 与组件](./jsx-and-components.md)）。`nsh init` 从这里开始。
 - **在应用需要的地方使用 Rust。** 应用自己在 `ext/` 里的 Rust crate，或者来自 crates.io 的 [nshm](./nshm.md)，为它的 TSX 提供组件、模块和类：繁重计算、解析、大规模数据、系统 API 和 crates.io 生态，即使由 TSX 调用，也以 Native 速度运行。

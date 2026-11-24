@@ -1,6 +1,6 @@
 {
-  "title": "Native Shell — Build once, native everywhere | Cross-platform native UI framework",
-  "description": "Native Shell is a native UI framework: build one app in TSX for iOS, Android, macOS, Windows, Linux and the web, with each platform’s own UI and interaction, and extend it with Rust where it needs to.",
+  "title": "Native Shell — Build once, native everywhere | Rust UI framework",
+  "description": "Native Shell is a Rust-first native UI framework: build one app in TSX for iOS, Android, macOS, Windows, Linux and the web, with each platform’s own UI and interaction, and extend it with Rust where it needs to.",
   "slogan": "Build once, native everywhere",
   "lead": "Write only TSX and ship native clients that keep pace with Rust. One codebase runs on 8 platforms, each with the system’s own UI and interaction.",
   "idle": "Your app sits in the middle. Each arch around it is a platform.",
