@@ -1402,19 +1402,34 @@ impl Items {
     /// enabled item, Up and End the last, Page Down and Page Up a page
     /// from either end; from the item the pointer is on when its focus is
     /// still on its way. Once an item has the focus, its own keys take
-    /// over.
-    fn bind_entry_keys(&self, active: impl Fn() -> bool + 'static) {
-        let (items, current) = (self.clone(), self.focused);
-        crate::keys::bind_while(
-            move || active() && current.get().is_none(),
-            ITEM_KEYS,
+    /// over. While the keyboard focus is outside the menu (`outside`) they
+    /// fire even though a text input edits: the pointer opens a menu over
+    /// a field that keeps editing, and the open menu takes its arrows, not
+    /// the field's caret. While it is in the menu, a field of the menu's
+    /// own (a filter) keeps them.
+    fn bind_entry_keys(
+        &self,
+        active: impl Fn() -> bool + Clone + 'static,
+        outside: impl Fn() -> bool + Clone + 'static,
+    ) {
+        let enter = |items: Items| {
             move |step| {
                 items.in_turn(move |items| match items.moved_to() {
                     Some(key) => items.step(key, step),
                     None => items.step_in(0, None, step),
                 })
-            },
-        );
+            }
+        };
+        let current = self.focused;
+        for (when, wanted) in [(When::NotEditing, false), (When::Always, true)] {
+            let (active, outside) = (active.clone(), outside.clone());
+            crate::keys::bind_while_when(
+                move || active() && current.get().is_none() && outside() == wanted,
+                when,
+                ITEM_KEYS,
+                enter(self.clone()),
+            );
+        }
     }
 
     /// Binds the keys that move the focus from item `key` while `focused`
@@ -1625,7 +1640,16 @@ fn surface(
     // A popup opened with no item focused (by the pointer) takes the
     // arrows, Home and End as well.
     if !sheet {
-        items.bind_entry_keys(move || presence.mounted() && open.get());
+        // Whether the keyboard focus is in the popup: a field of the menu's
+        // own (a filter) keeps its arrows; one outside it (the field the
+        // pointer left editing) does not.
+        let inside = signal(false);
+        presence.popup().on_focus_in(move || inside.set(true));
+        presence.popup().on_focus_out(move || inside.set(false));
+        items.bind_entry_keys(
+            move || presence.mounted() && open.get(),
+            move || !inside.get(),
+        );
         // Letters and digits move the focus by typeahead in the level the
         // keys are in, as the desktops' menus do; a text field in the menu
         // keeps them. Each opening starts again.
