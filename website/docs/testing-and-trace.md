@@ -488,7 +488,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `await app.window(id).screenshot(path?)` | A picture of the window's content as a `Uint8Array` (PNG), as `app.screenshot` takes of the app's surface, also saved at `path` when given. Only a real platform draws the app. |
 
 A step resolves once the app rendered nothing for 100 ms, no native animation runs that ends by itself and, with
-`--target macos`, no window the app opened still waits to show (2 s at most, for apps that render all the time; on a
+`--target macos` or `linux`, no window the app opened still waits to show (2 s at most, for apps that render all the time; on a
 manual clock, also 2 s of the app's time), so what it changed is on
 screen when the next line runs; use `waitFor` for what comes later (a response, a timer). On a manual clock a step
 does not wait for those 100 ms: it resolves as soon as the app has run everything the step and the clock's time made
