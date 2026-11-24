@@ -5912,6 +5912,55 @@ fn a_fixed_height_inputs_text_does_not_grow_the_scroll_content_around_it() {
     );
 }
 
+/// The space around an input can be narrower than its own padding (a
+/// column squeezed while it resizes): the input then has no room for its
+/// text, not a negative one.
+/// A negative content width made the overflow Taffy computes from it
+/// negative, which its debug assertions reject.
+#[test]
+fn an_input_narrower_than_its_padding_measures_no_room_for_its_text() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            style_op(
+                3,
+                &[
+                    ("alignItems", StyleValue::Str("flex-start")),
+                    ("width", StyleValue::Number(10.0)),
+                ],
+            ),
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 3,
+                before: None,
+            },
+            Op::Create {
+                id: 2,
+                tag: Tag::Input,
+            },
+            style_op(2, &[("paddingHorizontal", StyleValue::Number(15.0))]),
+            Op::Insert {
+                parent: 3,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().expect("the first layout");
+    let width = batch.items.iter().rev().find_map(|i| match i {
+        MountItem::Frame { id: 2, frame } => Some(frame.size.width.0),
+        _ => None,
+    });
+    // Its padding and no text: the column's 10 points cannot make it
+    // narrower than its padding.
+    assert_eq!(width, Some(30.0));
+}
+
 #[test]
 fn multiline_inputs_measure_long_runs_in_pieces() {
     let mut c = input_core();
