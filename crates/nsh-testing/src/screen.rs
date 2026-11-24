@@ -3418,7 +3418,9 @@ impl Screen {
                 return false;
             };
             if let Some(input) = &v.input {
-                return input.config.editable && !self.disabled_from(id, None);
+                return input.config.editable
+                    && v.focusable != Some(false)
+                    && !self.disabled_from(id, None);
             }
             // A link in a text view is a stop after it, in text order
             // (`TextLink::focus_stop`).
@@ -3473,7 +3475,7 @@ impl Screen {
             return false;
         }
         if let Some(input) = &v.input {
-            return input.config.editable;
+            return input.config.editable && v.focusable != Some(false);
         }
         // A link in a text view is a stop after it, in text order
         // (`TextLink::focus_stop`).

@@ -43,6 +43,8 @@ mod input_hidden;
 #[cfg(target_os = "macos")]
 mod input_restyle;
 #[cfg(target_os = "macos")]
+mod input_tab_stops;
+#[cfg(target_os = "macos")]
 mod keyboard;
 #[cfg(target_os = "macos")]
 mod keymap_ime;
@@ -157,6 +159,8 @@ fn main() {
                 removed_focus::run();
             } else if std::env::var_os("NSH_INPUT_HIDDEN_CHECK_ONLY").is_some() {
                 input_hidden::run();
+            } else if std::env::var_os("NSH_INPUT_TAB_STOPS_CHECK_ONLY").is_some() {
+                input_tab_stops::run();
             } else if std::env::var_os("NSH_FITTING_INPUT_CHECK_ONLY").is_some() {
                 fitting_input::run();
             } else if std::env::var_os("NSH_FPS_COLLAPSE_CHECK_ONLY").is_some() {
@@ -216,6 +220,7 @@ fn main() {
                 keyboard::run();
                 ime::run();
                 input_hidden::run();
+                input_tab_stops::run();
                 input_clip::run();
                 image_placeholder::run();
                 fitting_input::run();
