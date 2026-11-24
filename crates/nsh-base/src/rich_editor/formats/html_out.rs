@@ -106,9 +106,9 @@ impl OutEl {
         }
         let style = decls
             .iter()
-            .map(|(p, v)| format!("{p}: {v}"))
+            .map(|(p, v)| format!("{p}: {v};"))
             .collect::<Vec<_>>()
-            .join("; ");
+            .join(" ");
         self.put("style", style);
     }
 
@@ -411,7 +411,11 @@ fn render(
                     DomAttrValue::Attr(from) => src.attrs().get(from).and_then(attr_value_text),
                 };
                 if let Some(value) = value {
-                    el.put(name, value);
+                    if name == "style" {
+                        el.set_attr(name, value);
+                    } else {
+                        el.put(name, value);
+                    }
                 }
             }
             let mut hole = None;
