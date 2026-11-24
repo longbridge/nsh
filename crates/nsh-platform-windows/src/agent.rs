@@ -67,6 +67,15 @@ pub(crate) struct WindowsNative {
     /// worker thread (`nsh_testing`'s `Worker`), so the error a call builds
     /// reads its own wait.
     late: AtomicBool,
+    /// Whether a call waited [`MAIN`] in vain since the agent last asked
+    /// ([`Native::take_unanswered`]): calls that return no error (a view's
+    /// bounds, the viewport) are not the app's state then.
+    missed: AtomicBool,
+}
+
+/// The error of a call the window's thread did not answer in [`MAIN`].
+fn unanswered() -> String {
+    format!("the window did not answer in {} s", MAIN.as_secs())
 }
 
 impl WindowsNative {
@@ -76,13 +85,14 @@ impl WindowsNative {
             target: Arc::new(AtomicU64::new(ROOT_ID as u64)),
             ui,
             late: AtomicBool::new(false),
+            missed: AtomicBool::new(false),
         }
     }
 
     /// Why the last call got nothing back, for its error.
     fn gone(&self) -> String {
         if self.late.load(Ordering::Relaxed) {
-            format!("the window did not answer in {} s", MAIN.as_secs())
+            unanswered()
         } else {
             "the window is gone".to_owned()
         }
@@ -132,10 +142,11 @@ impl WindowsNative {
             let _ = tx.send(Surface::by_key(key).map(|surface| f(&surface)));
         });
         let got = rx.recv_timeout(MAIN);
-        self.late.store(
-            matches!(got, Err(mpsc::RecvTimeoutError::Timeout)),
-            Ordering::Relaxed,
-        );
+        let late = matches!(got, Err(mpsc::RecvTimeoutError::Timeout));
+        self.late.store(late, Ordering::Relaxed);
+        if late {
+            self.missed.store(true, Ordering::Relaxed);
+        }
         got.ok().flatten()
     }
 
@@ -403,6 +414,10 @@ impl Native for WindowsNative {
             crate::chrome::press_close_button(hwnd)
         })
         .unwrap_or_else(|| Err(self.gone()))
+    }
+
+    fn take_unanswered(&self) -> Option<String> {
+        self.missed.swap(false, Ordering::Relaxed).then(unanswered)
     }
 
     fn quit(&self) {
