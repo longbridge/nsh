@@ -19,6 +19,19 @@ Linux CI 机器。它做两件事：
 
 同一个测试，分别用 Rust 和 TypeScript 编写：它在存储中放一个空的待办列表打开应用，输入、点击，并检查屏幕显示的内容。
 
+```tsx tabs
+// App.test.tsx
+import { expect, open, test } from "nsh/test";
+
+test("adds a todo", async () => {
+  const app = await open("./App.tsx", { storage: { todos: "[]" } });
+  await app.type("id:new-todo", "Buy milk");
+  await app.press("text:Add");
+  await app.waitFor("text:Buy milk");
+  expect(app.texts()).toContain("1 item left");
+});
+```
+
 ```rust tabs
 // tests/app/main.rs
 use nsh_engine::{EngineConfig, Root};
@@ -34,19 +47,6 @@ fn adds_a_todo() {
     app.wait_for("text:Buy milk").unwrap();
     assert!(app.screen().texts().contains(&"1 item left"));
 }
-```
-
-```tsx tabs
-// App.test.tsx
-import { expect, open, test } from "nsh/test";
-
-test("adds a todo", async () => {
-  const app = await open("./App.tsx", { storage: { todos: "[]" } });
-  await app.type("id:new-todo", "Buy milk");
-  await app.press("text:Add");
-  await app.waitFor("text:Buy milk");
-  expect(app.texts()).toContain("1 item left");
-});
 ```
 
 ## 用 cargo test 编写 Rust 测试
@@ -248,6 +248,20 @@ expect(app.shows("Could not open the link")).toBe(true);
 未经允许时访问网络。路由是一个响应，或者一个接收请求、返回响应（或响应的 Promise）的函数；在 Rust 中，
 `StubNetwork::new(routes)` 接受同样的路由，每个是一个 `StubResponse` 或一个 `StubRoute::Handler`：
 
+```tsx tabs
+const app = await open("./App.tsx", {
+  network: {
+    "GET https://api.example.com/todos": { body: [{ id: 1, title: "Walk" }] },
+    "POST https://api.example.com/todos": (request) => ({ status: 201, body: JSON.parse(request.body!) }),
+    "GET https://api.example.com/todos/*": { status: 404 },
+    "GET https://api.example.com/sync": { error: "offline" },
+    "GET https://api.example.com/slow": { body: "done", delay: 2000 },
+  },
+});
+await app.press("Add");
+expect(app.requests().map((r) => r.method)).toEqual(["GET", "POST"]);
+```
+
 ```rust tabs
 use std::sync::Arc;
 use nsh_engine::{EngineConfig, Root};
@@ -277,20 +291,6 @@ fn adds_a_todo_on_the_server() {
 }
 ```
 
-```tsx tabs
-const app = await open("./App.tsx", {
-  network: {
-    "GET https://api.example.com/todos": { body: [{ id: 1, title: "Walk" }] },
-    "POST https://api.example.com/todos": (request) => ({ status: 201, body: JSON.parse(request.body!) }),
-    "GET https://api.example.com/todos/*": { status: 404 },
-    "GET https://api.example.com/sync": { error: "offline" },
-    "GET https://api.example.com/slow": { body: "done", delay: 2000 },
-  },
-});
-await app.press("Add");
-expect(app.requests().map((r) => r.method)).toEqual(["GET", "POST"]);
-```
-
 | 响应成员 | 默认值 | 说明 |
 |---|---|---|
 | `status` | 200 | 状态码。 |
@@ -314,6 +314,13 @@ reject，全局 `WebSocket` 先触发 `error`，再触发 `close`（1006，非�
 `EngineConfig::clock`，TypeScript 中 `open` 的 `clock`）时，应用改在手动时钟上运行，就像 Jest 的假定时器或 Playwright 的
 `page.clock`：时间只随测试推进，并且立即推进。`app.clock` 就是这个时钟，应用使用系统时钟时它为 `null`：
 
+```tsx tabs
+const app = await open("./App.tsx", { clock: { time: new Date("2026-01-01T09:00:00Z") } });
+await app.type("label:Note", "Milk");
+await app.clock!.runFor(10_000);           // 十秒后的自动保存
+expect(app.texts()).toContain("Saved at 09:00:10");
+```
+
 ```rust tabs
 use std::time::{Duration, SystemTime};
 use nsh_engine::{Clock, EngineConfig, Root};
@@ -329,13 +336,6 @@ fn autosaves() {
     app.run_for(Duration::from_secs(10)).unwrap(); // 十秒后的自动保存
     assert!(app.shows("Saved at 09:00:10"));
 }
-```
-
-```tsx tabs
-const app = await open("./App.tsx", { clock: { time: new Date("2026-01-01T09:00:00Z") } });
-await app.type("label:Note", "Milk");
-await app.clock!.runFor(10_000);           // 十秒后的自动保存
-expect(app.texts()).toContain("Saved at 09:00:10");
 ```
 
 响应带 `delay` 的 `StubNetwork` 用 `.with_clock(clock.clone())` 跟随手动时钟。下面是 `nsh test` 的步骤；`Headless` 都有对应的方法
@@ -794,18 +794,18 @@ jobs:
 无界面测试检查的是运行时渲染出的内容，它们的 `id:` 选择器按测试 id 查找视图。如果要用平台的测试工具（XCUITest、Espresso / UI Automator、Appium、Maestro）
 驱动真实的原生 UI，请给视图设置测试 id：Rust 中用 `.test_id(…)`，TSX 中用 `testID`：
 
+```tsx tabs
+<View testID="add-to-cart" onPress={add} style={{ padding: 12 }}>
+  <Text testID="cart-count">{`${count()} items`}</Text>
+</View>
+```
+
 ```rust tabs
 view()
     .test_id("add-to-cart")
     .p_3()
     .on_press(add)
     .child(text(move || format!("{} items", count.get())).test_id("cart-count"))
-```
-
-```tsx tabs
-<View testID="add-to-cart" onPress={add} style={{ padding: 12 }}>
-  <Text testID="cart-count">{`${count()} items`}</Text>
-</View>
 ```
 
 | 平台 | `testID` 对应到哪里 |

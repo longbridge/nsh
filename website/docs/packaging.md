@@ -1,6 +1,6 @@
 ---
 title: Packaging
-description: Build installable Rust and TSX apps with nsh package for iOS devices, the iOS simulator, Android, macOS, Windows, Linux and the web, with app metadata, icons, signing and distribution outside the stores.
+description: Build installable TSX and Rust apps with nsh package for iOS devices, the iOS simulator, Android, macOS, Windows, Linux and the web, with app metadata, icons, signing and distribution outside the stores.
 order: 19
 group: publishing
 ---

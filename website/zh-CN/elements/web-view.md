@@ -10,22 +10,6 @@ demo: el-web-view
 
 web view 在应用内显示一个网页，或你传入的一段 HTML：iOS 和 Mac Catalyst 上是 WKWebView，Android 上是 `android.webkit.WebView`。由于 NSH 用原生视图渲染，web view 和其他视图一样处在布局中，与周围视图按顺序排列。Rust 用 `web_view(url)` 或 `web_view_html(html, base_url)` 创建，TSX 用从 `nsh` 导入的 `<WebView>`。
 
-```rust tabs
-use nsh_core::prelude::*;
-
-fn browser() -> impl IntoElement {
-    let title = signal(SharedString::from("加载中…"));
-    view()
-        .flex_1()
-        .child(text(title).number_of_lines(1))
-        .child(
-            web_view("https://example.com")
-                .flex_1()
-                .on_navigation_state_change(move |e: &WebNavigation| title.set(e.title.clone().into())),
-        )
-}
-```
-
 ```tsx tabs
 import { signal, Text, View, WebView, type WebViewNavigation } from "nsh";
 
@@ -41,6 +25,22 @@ function Browser() {
       />
     </View>
   );
+}
+```
+
+```rust tabs
+use nsh_core::prelude::*;
+
+fn browser() -> impl IntoElement {
+    let title = signal(SharedString::from("加载中…"));
+    view()
+        .flex_1()
+        .child(text(title).number_of_lines(1))
+        .child(
+            web_view("https://example.com")
+                .flex_1()
+                .on_navigation_state_change(move |e: &WebNavigation| title.set(e.title.clone().into())),
+        )
 }
 ```
 
@@ -138,6 +138,29 @@ web_view("https://example.com").on_download_pending(|event: &WebDownloadPending|
 
 应用和页面之间交换的是字符串。页面通过 `window.nsh.postMessage(data)` 发送；应用通过 ref 的 `postMessage(data)`（Rust 中为 `post_message(..)`）发送。结构化数据请用 JSON。
 
+```tsx tabs
+import { signal, Text, View, WebView, type WebViewRef } from "nsh";
+
+const page = `<!doctype html>
+<meta name="viewport" content="width=device-width">
+<button onclick="window.nsh.postMessage('来自页面的问候')">发给应用</button>
+<p id="got"></p>
+<script>
+  window.addEventListener("message", (e) => { document.getElementById("got").textContent = e.data; });
+</script>`;
+
+function Bridge() {
+  const message = signal("");
+  let web!: WebViewRef;
+  return (
+    <View style={{ gap: 12 }}>
+      <WebView ref={web} html={page} style={{ height: 200 }} onMessage={(e) => message.set(e.data)} />
+      <Text onPress={() => web.postMessage("来自应用的问候")}>发给页面 · 收到：{message()}</Text>
+    </View>
+  );
+}
+```
+
 ```rust tabs
 use nsh_core::prelude::*;
 
@@ -164,29 +187,6 @@ fn bridge() -> impl IntoElement {
             text(move || format!("发给页面 · 收到：{}", message.get()))
                 .on_press(move || web.post_message("来自应用的问候")),
         )
-}
-```
-
-```tsx tabs
-import { signal, Text, View, WebView, type WebViewRef } from "nsh";
-
-const page = `<!doctype html>
-<meta name="viewport" content="width=device-width">
-<button onclick="window.nsh.postMessage('来自页面的问候')">发给应用</button>
-<p id="got"></p>
-<script>
-  window.addEventListener("message", (e) => { document.getElementById("got").textContent = e.data; });
-</script>`;
-
-function Bridge() {
-  const message = signal("");
-  let web!: WebViewRef;
-  return (
-    <View style={{ gap: 12 }}>
-      <WebView ref={web} html={page} style={{ height: 200 }} onMessage={(e) => message.set(e.data)} />
-      <Text onPress={() => web.postMessage("来自应用的问候")}>发给页面 · 收到：{message()}</Text>
-    </View>
-  );
 }
 ```
 

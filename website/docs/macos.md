@@ -1,6 +1,6 @@
 ---
 title: macOS
-description: Run Rust and TSX NSH apps on macOS in AppKit windows, package them as .app bundles, embed them in a Mac app with AppView, and what differs on macOS.
+description: Run TSX and Rust NSH apps on macOS in AppKit windows, package them as .app bundles, embed them in a Mac app with AppView, and what differs on macOS.
 order: 13
 group: platforms
 ---

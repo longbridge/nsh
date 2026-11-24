@@ -9,6 +9,47 @@ demo: el-tabs
 
 标签页在同一处的几个部分之间切换：一个项目的概览和动态、一份文档的几种视图。每个 `Tab` 负责一个标签页的行为：按压、键盘激活、禁用状态，以及屏幕阅读器读到的标签页角色和它的选中状态。包在外面的 `Tabs` 就是标签列表，屏幕阅读器把它当作一组播报。外观由应用决定：标签页没有自己的颜色、尺寸或文字。它的子元素是应用自己的标签，标签页上的 `selected:` 类，以及它里面元素上的 `group-selected:` 类，跟随它的状态。每个部分的内容也属于应用：应用在列表旁边显示它的值所指的那一部分。列表的指示器是应用自己设置样式的下划线或胶囊，停在选中的标签页上，并原生地移动到下一个（见[指示器](#indicator)）。
 
+```tsx tabs
+import { mount, signal, Text, View } from "nsh";
+import { Tab, Tabs } from "nsh/base";
+import { Window } from "nsh/desktop";
+
+function App() {
+  const section = signal("overview");
+  const item = (value: string, label: string) => (
+    <Tab
+      selected={section() === value}
+      onPress={() => section.set(value)}
+      class="group rounded-(--radius) px-3 py-2"
+    >
+      <Text class="text-sm text-muted-foreground group-selected:text-foreground">{label}</Text>
+    </Tab>
+  );
+  return (
+    <View class="gap-4">
+      <Tabs
+        class="flex-row self-start gap-1 rounded-(--radius-lg) bg-muted p-1"
+        indicatorClass="inset-y-1 rounded-(--radius) bg-background"
+      >
+        {item("overview", "Overview")}
+        {item("activity", "Activity")}
+      </Tabs>
+      <Text class="text-foreground">
+        {section() === "overview"
+          ? "Visitors, sign-ups and conversion this week."
+          : "Deploys, invoices and new members, newest first."}
+      </Text>
+    </View>
+  );
+}
+
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
+```
+
 ```rust tabs
 use nsh_base::{tab, tabs, theme};
 use nsh_core::prelude::*;
@@ -54,47 +95,6 @@ fn sections() -> impl IntoElement {
             }
         }).text_color(move || theme().foreground))
 }
-```
-
-```tsx tabs
-import { mount, signal, Text, View } from "nsh";
-import { Tab, Tabs } from "nsh/base";
-import { Window } from "nsh/desktop";
-
-function App() {
-  const section = signal("overview");
-  const item = (value: string, label: string) => (
-    <Tab
-      selected={section() === value}
-      onPress={() => section.set(value)}
-      class="group rounded-(--radius) px-3 py-2"
-    >
-      <Text class="text-sm text-muted-foreground group-selected:text-foreground">{label}</Text>
-    </Tab>
-  );
-  return (
-    <View class="gap-4">
-      <Tabs
-        class="flex-row self-start gap-1 rounded-(--radius-lg) bg-muted p-1"
-        indicatorClass="inset-y-1 rounded-(--radius) bg-background"
-      >
-        {item("overview", "Overview")}
-        {item("activity", "Activity")}
-      </Tabs>
-      <Text class="text-foreground">
-        {section() === "overview"
-          ? "Visitors, sign-ups and conversion this week."
-          : "Deploys, invoices and new members, newest first."}
-      </Text>
-    </View>
-  );
-}
-
-mount(() => (
-  <Window id="main">
-    <App />
-  </Window>
-));
 ```
 
 `Tab` 和 `Tabs` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate。值由应用持有：列表本身不持有值。每个标签页被告知自己是否选中；按下时通过 `onPress` 报告，应用设置自己的值并显示对应的部分，每个标签页显示应用传回的 `selected`。列表和标签页的圆角同心：列表的内边距（`p-1`）正是 `radius.lg` 与 `radius` 之差。选中标签页的填充是列表的指示器（`indicatorClass`，位于这层内边距之内：`inset-y-1`），它以弹簧动画移到应用选中的标签页。在 Rust 中，`tab()` 和 `tabs()` 创建它们，每个属性对应一个设置方法（`.selected(..)`），每个事件对应一个监听方法（`.on_press(..)`），外观用类型化的样式方法，内容用 `.child(..)`。

@@ -1,6 +1,6 @@
 ---
 title: 打包
-description: 用 nsh package 为 iOS 真机、iOS 模拟器、Android、macOS、Windows、Linux 和 Web 构建可安装的 Rust 和 TSX 应用，包括应用元数据、图标和签名。
+description: 用 nsh package 为 iOS 真机、iOS 模拟器、Android、macOS、Windows、Linux 和 Web 构建可安装的 TSX 和 Rust 应用，包括应用元数据、图标和签名。
 order: 19
 group: publishing
 ---

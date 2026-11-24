@@ -13,22 +13,6 @@ A web view shows a web page, or HTML you pass in, inside the app: WKWebView on i
 view, in order with the views around it. Rust makes one with `web_view(url)` or `web_view_html(html, base_url)`, TSX
 with `<WebView>` from `nsh`.
 
-```rust tabs
-use nsh_core::prelude::*;
-
-fn browser() -> impl IntoElement {
-    let title = signal(SharedString::from("Loading…"));
-    view()
-        .flex_1()
-        .child(text(title).number_of_lines(1))
-        .child(
-            web_view("https://example.com")
-                .flex_1()
-                .on_navigation_state_change(move |e: &WebNavigation| title.set(e.title.clone().into())),
-        )
-}
-```
-
 ```tsx tabs
 import { signal, Text, View, WebView, type WebViewNavigation } from "nsh";
 
@@ -44,6 +28,22 @@ function Browser() {
       />
     </View>
   );
+}
+```
+
+```rust tabs
+use nsh_core::prelude::*;
+
+fn browser() -> impl IntoElement {
+    let title = signal(SharedString::from("Loading…"));
+    view()
+        .flex_1()
+        .child(text(title).number_of_lines(1))
+        .child(
+            web_view("https://example.com")
+                .flex_1()
+                .on_navigation_state_change(move |e: &WebNavigation| title.set(e.title.clone().into())),
+        )
 }
 ```
 
@@ -170,6 +170,29 @@ lifecycle. Applications can compose a save-path picker with `accept` where the p
 The app and the page exchange strings. The page posts with `window.nsh.postMessage(data)`; the app posts
 with the ref's `postMessage(data)` (`post_message(..)` in Rust). Send JSON for structured data.
 
+```tsx tabs
+import { signal, Text, View, WebView, type WebViewRef } from "nsh";
+
+const page = `<!doctype html>
+<meta name="viewport" content="width=device-width">
+<button onclick="window.nsh.postMessage('hello from the page')">Post to the app</button>
+<p id="got"></p>
+<script>
+  window.addEventListener("message", (e) => { document.getElementById("got").textContent = e.data; });
+</script>`;
+
+function Bridge() {
+  const message = signal("");
+  let web!: WebViewRef;
+  return (
+    <View style={{ gap: 12 }}>
+      <WebView ref={web} html={page} style={{ height: 200 }} onMessage={(e) => message.set(e.data)} />
+      <Text onPress={() => web.postMessage("hi from the app")}>Post to the page · got: {message()}</Text>
+    </View>
+  );
+}
+```
+
 ```rust tabs
 use nsh_core::prelude::*;
 
@@ -196,29 +219,6 @@ fn bridge() -> impl IntoElement {
             text(move || format!("Post to the page · got: {}", message.get()))
                 .on_press(move || web.post_message("hi from the app")),
         )
-}
-```
-
-```tsx tabs
-import { signal, Text, View, WebView, type WebViewRef } from "nsh";
-
-const page = `<!doctype html>
-<meta name="viewport" content="width=device-width">
-<button onclick="window.nsh.postMessage('hello from the page')">Post to the app</button>
-<p id="got"></p>
-<script>
-  window.addEventListener("message", (e) => { document.getElementById("got").textContent = e.data; });
-</script>`;
-
-function Bridge() {
-  const message = signal("");
-  let web!: WebViewRef;
-  return (
-    <View style={{ gap: 12 }}>
-      <WebView ref={web} html={page} style={{ height: 200 }} onMessage={(e) => message.set(e.data)} />
-      <Text onPress={() => web.postMessage("hi from the app")}>Post to the page · got: {message()}</Text>
-    </View>
-  );
 }
 ```
 

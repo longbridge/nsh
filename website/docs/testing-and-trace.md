@@ -22,6 +22,19 @@ window. It runs anywhere Cargo or the CLI runs, including Linux CI machines, and
 The same test, in Rust and in TypeScript: it opens the app with an empty todo list in its storage, types, presses and
 checks what the screen shows.
 
+```tsx tabs
+// App.test.tsx
+import { expect, open, test } from "nsh/test";
+
+test("adds a todo", async () => {
+  const app = await open("./App.tsx", { storage: { todos: "[]" } });
+  await app.type("id:new-todo", "Buy milk");
+  await app.press("text:Add");
+  await app.waitFor("text:Buy milk");
+  expect(app.texts()).toContain("1 item left");
+});
+```
+
 ```rust tabs
 // tests/app/main.rs
 use nsh_engine::{EngineConfig, Root};
@@ -37,19 +50,6 @@ fn adds_a_todo() {
     app.wait_for("text:Buy milk").unwrap();
     assert!(app.screen().texts().contains(&"1 item left"));
 }
-```
-
-```tsx tabs
-// App.test.tsx
-import { expect, open, test } from "nsh/test";
-
-test("adds a todo", async () => {
-  const app = await open("./App.tsx", { storage: { todos: "[]" } });
-  await app.type("id:new-todo", "Buy milk");
-  await app.press("text:Add");
-  await app.waitFor("text:Buy milk");
-  expect(app.texts()).toContain("1 item left");
-});
 ```
 
 ## Tests in Rust with cargo test
@@ -276,6 +276,20 @@ matches fails, so tests never reach the network unasked. A route is a response, 
 returns one (or a promise of one); in Rust, `StubNetwork::new(routes)` takes the same routes, each a `StubResponse` or
 a `StubRoute::Handler`:
 
+```tsx tabs
+const app = await open("./App.tsx", {
+  network: {
+    "GET https://api.example.com/todos": { body: [{ id: 1, title: "Walk" }] },
+    "POST https://api.example.com/todos": (request) => ({ status: 201, body: JSON.parse(request.body!) }),
+    "GET https://api.example.com/todos/*": { status: 404 },
+    "GET https://api.example.com/sync": { error: "offline" },
+    "GET https://api.example.com/slow": { body: "done", delay: 2000 },
+  },
+});
+await app.press("Add");
+expect(app.requests().map((r) => r.method)).toEqual(["GET", "POST"]);
+```
+
 ```rust tabs
 use std::sync::Arc;
 use nsh_engine::{EngineConfig, Root};
@@ -305,20 +319,6 @@ fn adds_a_todo_on_the_server() {
 }
 ```
 
-```tsx tabs
-const app = await open("./App.tsx", {
-  network: {
-    "GET https://api.example.com/todos": { body: [{ id: 1, title: "Walk" }] },
-    "POST https://api.example.com/todos": (request) => ({ status: 201, body: JSON.parse(request.body!) }),
-    "GET https://api.example.com/todos/*": { status: 404 },
-    "GET https://api.example.com/sync": { error: "offline" },
-    "GET https://api.example.com/slow": { body: "done", delay: 2000 },
-  },
-});
-await app.press("Add");
-expect(app.requests().map((r) => r.method)).toEqual(["GET", "POST"]);
-```
-
 | Response member | Default | Description |
 |---|---|---|
 | `status` | 200 | The status code. |
@@ -346,6 +346,13 @@ wait for them. With a manual clock (`EngineConfig::clock` in Rust, `open`'s `clo
 clock whose time moves only as the test moves it, and at once, as with Jest's fake timers or Playwright's
 `page.clock`. `app.clock` is that clock, and `null` when the app runs on the system's:
 
+```tsx tabs
+const app = await open("./App.tsx", { clock: { time: new Date("2026-01-01T09:00:00Z") } });
+await app.type("label:Note", "Milk");
+await app.clock!.runFor(10_000);           // the autosave, ten seconds later
+expect(app.texts()).toContain("Saved at 09:00:10");
+```
+
 ```rust tabs
 use std::time::{Duration, SystemTime};
 use nsh_engine::{Clock, EngineConfig, Root};
@@ -361,13 +368,6 @@ fn autosaves() {
     app.run_for(Duration::from_secs(10)).unwrap(); // the autosave, ten seconds later
     assert!(app.shows("Saved at 09:00:10"));
 }
-```
-
-```tsx tabs
-const app = await open("./App.tsx", { clock: { time: new Date("2026-01-01T09:00:00Z") } });
-await app.type("label:Note", "Milk");
-await app.clock!.runFor(10_000);           // the autosave, ten seconds later
-expect(app.texts()).toContain("Saved at 09:00:10");
 ```
 
 A `StubNetwork` whose responses have a `delay` follows a manual clock with `.with_clock(clock.clone())`. The steps below
@@ -897,18 +897,18 @@ Headless tests check what the runtime renders, and their `id:` selectors find vi
 native UI with the platform's test tools (XCUITest, Espresso / UI Automator, Appium, Maestro), give views a test id:
 `.test_id(…)` in Rust, `testID` in TSX:
 
+```tsx tabs
+<View testID="add-to-cart" onPress={add} style={{ padding: 12 }}>
+  <Text testID="cart-count">{`${count()} items`}</Text>
+</View>
+```
+
 ```rust tabs
 view()
     .test_id("add-to-cart")
     .p_3()
     .on_press(add)
     .child(text(move || format!("{} items", count.get())).test_id("cart-count"))
-```
-
-```tsx tabs
-<View testID="add-to-cart" onPress={add} style={{ padding: 12 }}>
-  <Text testID="cart-count">{`${count()} items`}</Text>
-</View>
 ```
 
 | Platform | Where `testID` goes |
