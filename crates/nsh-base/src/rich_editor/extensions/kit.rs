@@ -1008,7 +1008,7 @@ pub fn list_keymap() -> Extension {
 
 /// `table` (prosemirror-tables' table, as Tiptap's `Table`) with the
 /// options `HTMLAttributes` (written on `<table>`), `resizable` (true),
-/// `cellMinWidth` (25), `lastColumnResizable` (true), and
+/// `cellMinWidth` (25), `lastColumnResizable` (true) and
 /// `allowTableNodeSelection` (false): Tab and Shift-Tab between cells
 /// (Tab in the last cell adds a row), Backspace and Delete deleting the
 /// table when all its cells are selected, and the plugins repairing tables

@@ -23,7 +23,7 @@ use super::node_view::NodeView;
 use crate::rich_editor::{
     commands::{BoxCommand, helpers, tiptap::FOCUS_META},
     formats::{DomParser, slice_from_text},
-    model::{Attrs, Node, Slice},
+    model::{Attrs, Slice},
     state::{EditorState, StateError, Transaction, TransactionOrigin},
     transform::Mapping,
 };
@@ -106,11 +106,6 @@ pub trait ViewGeometry: Send + Sync {
         let _ = pos;
         None
     }
-    /// The visible box of the independently scrolling grid at this document position.
-    fn table_viewport(&self, _pos: usize) -> Option<Bounds<Points>> {
-        None
-    }
-
     /// A content point less the same point in the root view, now (its
     /// scrolling included), once the pointer has been over the content.
     fn page_shift(&self) -> Option<Point<Points>> {
@@ -279,12 +274,9 @@ pub enum ViewRequest {
 /// A view's handler of [`ViewRequest`]s.
 pub(crate) type ViewHook = Arc<dyn Fn(ViewRequest) + Send + Sync>;
 
-type TableColumnMeasurer = Arc<dyn Fn(&Node) -> Vec<Points> + Send + Sync>;
-
 struct Inner {
     state: EditorState,
     node_views: NodeViews,
-    table_columns: Option<TableColumnMeasurer>,
     dispatch: Option<DispatchTransaction>,
     subscribers: Vec<(SubscriptionId, Subscriber)>,
     views: Vec<(SubscriptionId, ViewHook)>,
@@ -328,7 +320,6 @@ impl EditorSession {
             inner: Mutex::new(Inner {
                 state,
                 node_views,
-                table_columns: None,
                 dispatch: None,
                 subscribers: Vec::new(),
                 views: Vec::new(),
@@ -356,29 +347,6 @@ impl EditorSession {
     /// The node views.
     pub fn node_views(&self) -> NodeViews {
         self.lock().node_views.clone()
-    }
-
-    /// Uses the host's typography and inline widget widths when sizing a table.
-    /// Install before mounting the editor. The measurements do not change the document.
-    pub fn set_table_column_measurer(
-        &self,
-        measure: impl Fn(&Node) -> Vec<Points> + Send + Sync + 'static,
-    ) {
-        self.lock().table_columns = Some(Arc::new(measure));
-    }
-
-    pub(crate) fn has_table_column_measurer(&self) -> bool {
-        self.lock().table_columns.is_some()
-    }
-
-    /// The host's preferred track widths, one per logical column, measured on the UI thread.
-    pub fn measured_table_columns(&self, table: &Node) -> Option<Vec<Points>> {
-        let measure = self.lock().table_columns.clone()?;
-        let widths = measure(table);
-        (!widths.is_empty()
-            && widths.len() == crate::rich_editor::tables::TableMap::get(table).width
-            && widths.iter().all(|w| w.0.is_finite() && w.0 > 0.))
-        .then_some(widths)
     }
 
     /// Replaces the node views (views made already stay until their nodes
@@ -664,12 +632,6 @@ impl EditorSession {
     /// children), or `None` when no view does.
     pub fn node_rect(&self, pos: usize) -> Option<Bounds<Points>> {
         self.geometry()?.node_rect(pos)
-    }
-
-    /// The visible part of the table starting at `pos`, in content coordinates.
-    /// Content overlays can use its edges to avoid drawing over neighboring paragraphs.
-    pub fn table_viewport(&self, pos: usize) -> Option<Bounds<Points>> {
-        self.geometry()?.table_viewport(pos)
     }
 
     /// The box of the block starting at `pos` in the root view (page
