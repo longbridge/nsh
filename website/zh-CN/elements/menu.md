@@ -19,36 +19,6 @@ iPad 跟随 UIKit 的水平尺寸类别，与系统自己的菜单一致：窗�
 在获得焦点的触发元素上按 Return、Space 或 Down 键打开菜单时，键盘焦点落在第一个可用的条目上；按 Up 键打开时落在最后一个上，之后用方向键在条目间移动。按压打开时不聚焦任何条目；在弹出层中，之后按 Down 或 Home 键聚焦第一个可用的条目，按 Up 或 End 键聚焦最后一个，菜单外的输入框仍在编辑时也一样（比如触发元素旁的搜索框）；菜单里的输入框保留自己的方向键。Page Down 移到视图里最后一个可用的条目，Page Up 移到第一个，每次翻一屏，到头停住（`MenuList` 也一样，见[长列表](#长列表)）。在弹出层中，指针移到某个条目上时它获得键盘焦点，按键从指针下的条目接着走；给条目的 `focus:` 状态设和 `hover:` 一样的样式。在弹出层中按一个字母或数字，焦点跳到下一个文字（或 `accessibilityLabel`）以它开头的可用条目，与 `Select` 的列表一样：连按同一个字母在这些条目之间轮转，短时间内连续打几个字母按前缀匹配。它们只作用于焦点所在的那一级菜单或子菜单；菜单里的输入框照常接收字母；跳到视图外的条目会把它滚进来。
 在弹出层和终端中，在 `Submenu` 的条目上按 Right、Return 或 Space 键打开它，键盘焦点落在它第一个可用的条目上；在它的条目上按 Left 键或按 Escape 键关闭它，焦点回到它的条目上。指针打开的子菜单，在方向键把焦点移到所在菜单的另一个条目时关闭。
 
-```rust tabs
-use nsh_base::{menu, menu_item, menu_separator, submenu};
-use nsh_core::prelude::*;
-
-fn item(label: &'static str, on_select: impl Fn() + 'static) -> impl IntoElement {
-    menu_item()
-        .on_select(on_select)
-        .px_3()
-        .py_2()
-        .rounded_md()
-        .child(text(label))
-}
-
-fn file_menu() -> impl IntoElement {
-    menu()
-        .offset(px(4.0))
-        .trigger(view().px_3().py_2().child(text("File")))
-        .child(item("New", || log::info!("new")))
-        .child(item("Open…", || log::info!("open")))
-        .child(menu_separator().h(px(1.0)).my_1().bg(rgb(0xe5e7eb)))
-        .child(
-            submenu()
-                .trigger(view().px_3().py_2().child(text("Share ›")))
-                .back(view().px_3().py_2().child(text("‹ Back")))
-                .child(item("Mail", || log::info!("mail")))
-                .child(item("Copy link", || log::info!("link"))),
-        )
-}
-```
-
 ```tsx tabs
 import { Text, View } from "nsh";
 import { Menu, MenuItem, MenuSeparator, Submenu } from "nsh/base";
@@ -81,6 +51,36 @@ function FileMenu() {
       </Submenu>
     </Menu>
   );
+}
+```
+
+```rust tabs
+use nsh_base::{menu, menu_item, menu_separator, submenu};
+use nsh_core::prelude::*;
+
+fn item(label: &'static str, on_select: impl Fn() + 'static) -> impl IntoElement {
+    menu_item()
+        .on_select(on_select)
+        .px_3()
+        .py_2()
+        .rounded_md()
+        .child(text(label))
+}
+
+fn file_menu() -> impl IntoElement {
+    menu()
+        .offset(px(4.0))
+        .trigger(view().px_3().py_2().child(text("File")))
+        .child(item("New", || log::info!("new")))
+        .child(item("Open…", || log::info!("open")))
+        .child(menu_separator().h(px(1.0)).my_1().bg(rgb(0xe5e7eb)))
+        .child(
+            submenu()
+                .trigger(view().px_3().py_2().child(text("Share ›")))
+                .back(view().px_3().py_2().child(text("‹ Back")))
+                .child(item("Mail", || log::info!("mail")))
+                .child(item("Copy link", || log::info!("link"))),
+        )
 }
 ```
 
@@ -137,46 +137,6 @@ import { ContextMenu, MenuItem } from "nsh/base";
 
 `checked` 让条目可以勾选：菜单显示的一项设置（「显示侧边栏」），或者在 `role="menuitemradio"` 时，一组选项中的一个（「排序方式」）。值由你持有：选择条目会调用 `onSelect`，你设置下一个值，条目就显示它。勾选时，它的 `checked:` 类和 `checkedStyle` 生效，它的指示部件（位于内容之前，`indicatorClass`、`indicatorStyle`）也一样，部件里是你给它的标记（`indicator`）。标记只创建一次并保留下来，由指示部件的 `checked:` 类显示和隐藏它；也可以在 `indicatorClass` 中加 `group`，用标记自己的 `group-checked:` 类。`closeOnSelect={false}` 让菜单保持打开，这样设置会立刻显示新的值。
 
-```rust tabs
-use nsh_base::{menu, menu_item};
-use nsh_core::{element::StyleRefinement, prelude::*};
-
-fn view_menu(sidebar: Signal<bool>, sort: Signal<&'static str>) -> impl IntoElement {
-    // The indicator part shows the mark while the item is checked.
-    let part = |s: StyleRefinement| s.w(px(16.0)).opacity(0.0).checked(|s| s.opacity(1.0));
-    let by = move |label: &'static str| {
-        menu_item()
-            .role(AccessibilityRole::MenuItemRadio)
-            .checked(move || Some(sort.get() == label))
-            .indicator_style(part)
-            .indicator(text("✓"))
-            .on_select(move || sort.set(label))
-            .flex_row()
-            .gap_2()
-            .px_3()
-            .py_2()
-            .child(text(label))
-    };
-    menu()
-        .trigger(view().px_3().py_2().child(text("View")))
-        .child(
-            menu_item()
-                .checked(move || Some(sidebar.get()))
-                .close_on_select(false)
-                .indicator_style(part)
-                .indicator(text("✓"))
-                .on_select(move || sidebar.set(!sidebar.get_untracked()))
-                .flex_row()
-                .gap_2()
-                .px_3()
-                .py_2()
-                .child(text("Show sidebar")),
-        )
-        .child(by("Name"))
-        .child(by("Date modified"))
-}
-```
-
 ```tsx tabs
 import { Text, View, signal } from "nsh";
 import { Menu, MenuItem } from "nsh/base";
@@ -215,6 +175,46 @@ function ViewMenu() {
       </Each>
     </Menu>
   );
+}
+```
+
+```rust tabs
+use nsh_base::{menu, menu_item};
+use nsh_core::{element::StyleRefinement, prelude::*};
+
+fn view_menu(sidebar: Signal<bool>, sort: Signal<&'static str>) -> impl IntoElement {
+    // The indicator part shows the mark while the item is checked.
+    let part = |s: StyleRefinement| s.w(px(16.0)).opacity(0.0).checked(|s| s.opacity(1.0));
+    let by = move |label: &'static str| {
+        menu_item()
+            .role(AccessibilityRole::MenuItemRadio)
+            .checked(move || Some(sort.get() == label))
+            .indicator_style(part)
+            .indicator(text("✓"))
+            .on_select(move || sort.set(label))
+            .flex_row()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .child(text(label))
+    };
+    menu()
+        .trigger(view().px_3().py_2().child(text("View")))
+        .child(
+            menu_item()
+                .checked(move || Some(sidebar.get()))
+                .close_on_select(false)
+                .indicator_style(part)
+                .indicator(text("✓"))
+                .on_select(move || sidebar.set(!sidebar.get_untracked()))
+                .flex_row()
+                .gap_2()
+                .px_3()
+                .py_2()
+                .child(text("Show sidebar")),
+        )
+        .child(by("Name"))
+        .child(by("Date modified"))
 }
 ```
 

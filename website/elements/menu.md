@@ -37,36 +37,6 @@ In a popup and in a terminal, Right, Return or Space on a `Submenu`'s item opens
 its first enabled item; Left on one of its items, or Escape, closes it and puts the focus back on its item. A submenu
 the pointer opened closes when the arrow keys move the focus to another item of its menu.
 
-```rust tabs
-use nsh_base::{menu, menu_item, menu_separator, submenu};
-use nsh_core::prelude::*;
-
-fn item(label: &'static str, on_select: impl Fn() + 'static) -> impl IntoElement {
-    menu_item()
-        .on_select(on_select)
-        .px_3()
-        .py_2()
-        .rounded_md()
-        .child(text(label))
-}
-
-fn file_menu() -> impl IntoElement {
-    menu()
-        .offset(px(4.0))
-        .trigger(view().px_3().py_2().child(text("File")))
-        .child(item("New", || log::info!("new")))
-        .child(item("Open…", || log::info!("open")))
-        .child(menu_separator().h(px(1.0)).my_1().bg(rgb(0xe5e7eb)))
-        .child(
-            submenu()
-                .trigger(view().px_3().py_2().child(text("Share ›")))
-                .back(view().px_3().py_2().child(text("‹ Back")))
-                .child(item("Mail", || log::info!("mail")))
-                .child(item("Copy link", || log::info!("link"))),
-        )
-}
-```
-
 ```tsx tabs
 import { Text, View } from "nsh";
 import { Menu, MenuItem, MenuSeparator, Submenu } from "nsh/base";
@@ -99,6 +69,36 @@ function FileMenu() {
       </Submenu>
     </Menu>
   );
+}
+```
+
+```rust tabs
+use nsh_base::{menu, menu_item, menu_separator, submenu};
+use nsh_core::prelude::*;
+
+fn item(label: &'static str, on_select: impl Fn() + 'static) -> impl IntoElement {
+    menu_item()
+        .on_select(on_select)
+        .px_3()
+        .py_2()
+        .rounded_md()
+        .child(text(label))
+}
+
+fn file_menu() -> impl IntoElement {
+    menu()
+        .offset(px(4.0))
+        .trigger(view().px_3().py_2().child(text("File")))
+        .child(item("New", || log::info!("new")))
+        .child(item("Open…", || log::info!("open")))
+        .child(menu_separator().h(px(1.0)).my_1().bg(rgb(0xe5e7eb)))
+        .child(
+            submenu()
+                .trigger(view().px_3().py_2().child(text("Share ›")))
+                .back(view().px_3().py_2().child(text("‹ Back")))
+                .child(item("Mail", || log::info!("mail")))
+                .child(item("Copy link", || log::info!("link"))),
+        )
 }
 ```
 
@@ -175,46 +175,6 @@ indicator: the part before its content (`indicatorClass`, `indicatorStyle`) arou
 `group-checked:` classes with `group` in `indicatorClass`. `closeOnSelect={false}` keeps the menu open, so a setting
 shows its new value at once.
 
-```rust tabs
-use nsh_base::{menu, menu_item};
-use nsh_core::{element::StyleRefinement, prelude::*};
-
-fn view_menu(sidebar: Signal<bool>, sort: Signal<&'static str>) -> impl IntoElement {
-    // The indicator part shows the mark while the item is checked.
-    let part = |s: StyleRefinement| s.w(px(16.0)).opacity(0.0).checked(|s| s.opacity(1.0));
-    let by = move |label: &'static str| {
-        menu_item()
-            .role(AccessibilityRole::MenuItemRadio)
-            .checked(move || Some(sort.get() == label))
-            .indicator_style(part)
-            .indicator(text("✓"))
-            .on_select(move || sort.set(label))
-            .flex_row()
-            .gap_2()
-            .px_3()
-            .py_2()
-            .child(text(label))
-    };
-    menu()
-        .trigger(view().px_3().py_2().child(text("View")))
-        .child(
-            menu_item()
-                .checked(move || Some(sidebar.get()))
-                .close_on_select(false)
-                .indicator_style(part)
-                .indicator(text("✓"))
-                .on_select(move || sidebar.set(!sidebar.get_untracked()))
-                .flex_row()
-                .gap_2()
-                .px_3()
-                .py_2()
-                .child(text("Show sidebar")),
-        )
-        .child(by("Name"))
-        .child(by("Date modified"))
-}
-```
-
 ```tsx tabs
 import { Text, View, signal } from "nsh";
 import { Menu, MenuItem } from "nsh/base";
@@ -253,6 +213,46 @@ function ViewMenu() {
       </Each>
     </Menu>
   );
+}
+```
+
+```rust tabs
+use nsh_base::{menu, menu_item};
+use nsh_core::{element::StyleRefinement, prelude::*};
+
+fn view_menu(sidebar: Signal<bool>, sort: Signal<&'static str>) -> impl IntoElement {
+    // The indicator part shows the mark while the item is checked.
+    let part = |s: StyleRefinement| s.w(px(16.0)).opacity(0.0).checked(|s| s.opacity(1.0));
+    let by = move |label: &'static str| {
+        menu_item()
+            .role(AccessibilityRole::MenuItemRadio)
+            .checked(move || Some(sort.get() == label))
+            .indicator_style(part)
+            .indicator(text("✓"))
+            .on_select(move || sort.set(label))
+            .flex_row()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .child(text(label))
+    };
+    menu()
+        .trigger(view().px_3().py_2().child(text("View")))
+        .child(
+            menu_item()
+                .checked(move || Some(sidebar.get()))
+                .close_on_select(false)
+                .indicator_style(part)
+                .indicator(text("✓"))
+                .on_select(move || sidebar.set(!sidebar.get_untracked()))
+                .flex_row()
+                .gap_2()
+                .px_3()
+                .py_2()
+                .child(text("Show sidebar")),
+        )
+        .child(by("Name"))
+        .child(by("Date modified"))
 }
 ```
 

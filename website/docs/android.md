@@ -1,6 +1,6 @@
 ---
 title: Android
-description: Run Rust and TSX NSH apps on Android with Android views, on an emulator or a device, package them as an .apk, and embed them in an existing Android app with nsh.aar and NshView.
+description: Run TSX and Rust NSH apps on Android with Android views, on an emulator or a device, package them as an .apk, and embed them in an existing Android app with nsh.aar and NshView.
 order: 12
 group: platforms
 ---
@@ -8,7 +8,7 @@ group: platforms
 # Android
 
 NSH apps run on Android with ordinary Android views and `StaticLayout` text, from Android 8 (API 26), on `arm64-v8a`,
-`armeabi-v7a` and `x86_64`. Whole apps written in Rust and in TSX run and package as on the other platforms, and an existing app
+`armeabi-v7a` and `x86_64`. Whole apps written in TSX and in Rust run and package as on the other platforms, and an existing app
 can embed modules in an `NshView` and load signed packages it downloads, under limits and capabilities it sets. On Android, `os()` is `Os::Android` (`platform.os` is `"android"` in TSX) and TSX's
 `android={{…}}` props apply.
 

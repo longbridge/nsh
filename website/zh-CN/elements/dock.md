@@ -9,36 +9,6 @@ demo: el-dock
 
 停靠区域是用户自行安排的工作区：面板放在标签组里，标签组并排或上下分栏，左、右、下三条边上的停靠区可以打开、关闭和调整大小。把标签页拖到另一个标签组上，它就加入那个组；拖到一个组的边缘，就把那个组分开；面板移动时，它里面的东西都保留着。`DockArea` 负责行为：标签页的拖放（以原生方式逐帧运行）、调整分栏和停靠区的大小、打开和关闭停靠区、放大和锁定。外观由应用决定：标签页、标签栏、手柄、放置指示和每个面板的内容都由应用绘制和设置样式，区域自己什么也不画。
 
-```rust tabs
-use nsh_base::{
-    dock::{DockAreaLayout, DockLayout, DockPanel, DockPlacement, DockRegion, DockTab},
-    dock_area, theme,
-};
-use nsh_core::prelude::*;
-
-fn workspace() -> impl IntoElement {
-    let layout = signal(
-        DockAreaLayout::new(
-            DockLayout::h_split()
-                .child(DockLayout::tabs().panel("readme").panel("main"), None)
-                .child(DockLayout::tabs().panel("preview"), Some(px(320.0))),
-        )
-        .with_dock(DockPlacement::Left, DockRegion::new(DockLayout::tabs().panel("files")))
-        .with_dock(DockPlacement::Bottom, DockRegion::new(DockLayout::tabs().panel("terminal"))),
-    );
-    dock_area()
-        .layout(move || layout.get())
-        .on_layout_change(move |next: &DockAreaLayout| layout.set(next.clone()))
-        .handle_style(|s| s.bg(move || theme().border()))
-        .tab_bar_style(|s| s.flex_row().border_b_1().border_color(move || theme().border()))
-        .tab_style(|s| s.px_3().py_1().selected(|s| s.bg(move || theme().muted())))
-        .render_tab(|tab: &DockTab| text(tab.panel.to_string()).text_sm().text_color(move || theme().foreground()))
-        .render_panel(|panel: &DockPanel| {
-            text(format!("{} content", panel.id)).p_4().text_color(move || theme().foreground())
-        })
-}
-```
-
 ```tsx tabs
 import { mount, signal, Text } from "nsh";
 import { DockArea, type DockAreaLayout } from "nsh/base";
@@ -81,6 +51,36 @@ mount(() => (
     <App />
   </Window>
 ));
+```
+
+```rust tabs
+use nsh_base::{
+    dock::{DockAreaLayout, DockLayout, DockPanel, DockPlacement, DockRegion, DockTab},
+    dock_area, theme,
+};
+use nsh_core::prelude::*;
+
+fn workspace() -> impl IntoElement {
+    let layout = signal(
+        DockAreaLayout::new(
+            DockLayout::h_split()
+                .child(DockLayout::tabs().panel("readme").panel("main"), None)
+                .child(DockLayout::tabs().panel("preview"), Some(px(320.0))),
+        )
+        .with_dock(DockPlacement::Left, DockRegion::new(DockLayout::tabs().panel("files")))
+        .with_dock(DockPlacement::Bottom, DockRegion::new(DockLayout::tabs().panel("terminal"))),
+    );
+    dock_area()
+        .layout(move || layout.get())
+        .on_layout_change(move |next: &DockAreaLayout| layout.set(next.clone()))
+        .handle_style(|s| s.bg(move || theme().border()))
+        .tab_bar_style(|s| s.flex_row().border_b_1().border_color(move || theme().border()))
+        .tab_style(|s| s.px_3().py_1().selected(|s| s.bg(move || theme().muted())))
+        .render_tab(|tab: &DockTab| text(tab.panel.to_string()).text_sm().text_color(move || theme().foreground()))
+        .render_panel(|panel: &DockPanel| {
+            text(format!("{} content", panel.id)).p_4().text_color(move || theme().foreground())
+        })
+}
 ```
 
 `DockArea` 和它使用的值来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate（`nsh_base::dock_area()`，值在 `nsh_base::dock` 中）。在 Rust 中，`dock_area()` 创建它，每个属性对应一个设置方法，每个事件对应一个监听方法，外观用类型化的样式方法；`DockLayout` 用面板的键描述布局（`h_split()`、`v_split()`、`tabs()`、`.child(layout, size)`、`.panel(key)`）。

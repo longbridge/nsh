@@ -1,6 +1,6 @@
 ---
 title: Android
-description: 在 Android 上用 Android 视图运行 Rust 和 TSX 编写的 NSH 应用（模拟器或真机），打包成 .apk，并通过 nsh.aar 和 NshView 嵌入现有 Android 应用。
+description: 在 Android 上用 Android 视图运行 TSX 和 Rust 编写的 NSH 应用（模拟器或真机），打包成 .apk，并通过 nsh.aar 和 NshView 嵌入现有 Android 应用。
 order: 12
 group: platforms
 ---
@@ -8,7 +8,7 @@ group: platforms
 # Android
 
 NSH 应用在 Android 上用普通的 Android 视图和 `StaticLayout` 文本运行，要求 Android 8（API 26）及以上，支持 `arm64-v8a`、
-`armeabi-v7a` 和 `x86_64`。用 Rust 和 TSX 编写的完整应用，运行和打包方式与其他平台相同；现有应用也可以在 `NshView` 中嵌入模块，加载它下载的签名包，并按自己设定的限制和能力运行它们。在
+`armeabi-v7a` 和 `x86_64`。用 TSX 和 Rust 编写的完整应用，运行和打包方式与其他平台相同；现有应用也可以在 `NshView` 中嵌入模块，加载它下载的签名包，并按自己设定的限制和能力运行它们。在
 Android 上，`os()` 是 `Os::Android`（TSX 中 `platform.os` 是 `"android"`），TSX 的 `android={{…}}` 属性生效。
 
 ## 环境要求

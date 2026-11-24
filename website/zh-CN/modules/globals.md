@@ -73,6 +73,16 @@ Rust：`set_timeout(delay, f)` 和 `set_interval(period, f)` 返回一个 `Spawn
 
 `requestAnimationFrame` 的回调在引擎产出下一帧时执行一次，同一帧的回调拿到相同的 `performance.now()` 时间。回调里再次请求的帧会在下一帧调用，所以常见的循环写法可以正常工作：
 
+```tsx tabs
+let start = 0;
+function tick(time: number) {
+  if (!start) start = time;
+  progress.set(Math.min(1, (time - start) / 300));
+  if (time - start < 300) requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+```
+
 ```rust tabs
 spawn(async move {
     let start = next_frame().await;
@@ -85,16 +95,6 @@ spawn(async move {
         }
     }
 });
-```
-
-```tsx tabs
-let start = 0;
-function tick(time: number) {
-  if (!start) start = time;
-  progress.set(Math.min(1, (time - start) / 300));
-  if (time - start < 300) requestAnimationFrame(tick);
-}
-requestAnimationFrame(tick);
 ```
 
 > [!TIP]
@@ -196,14 +196,6 @@ channel.send("hello");
 
 `AbortSignal` 可以取消 `fetch` 请求和流的管道传输，也可以移除用 `{ signal }` 添加的监听器。在 Rust 中，请求运行在任务里，取消任务即取消请求：
 
-```rust tabs
-let search = spawn(async move {
-    let _ = fetch("https://api.example.com/search?q=nsh").await;
-});
-// 之后，例如屏幕关闭时（任务也会随组件一起结束）：
-search.cancel();
-```
-
 ```tsx tabs
 const controller = new AbortController();
 const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]);
@@ -213,6 +205,14 @@ fetch("https://api.example.com/search?q=nsh", { signal }).catch((e) => {
 });
 // later, for example when the screen closes:
 controller.abort();
+```
+
+```rust tabs
+let search = spawn(async move {
+    let _ = fetch("https://api.example.com/search?q=nsh").await;
+});
+// 之后，例如屏幕关闭时（任务也会随组件一起结束）：
+search.cancel();
 ```
 
 ## URL
@@ -262,17 +262,17 @@ class URLSearchParams {
 
 URL 按 URL 标准解析。`searchParams` 是双向联动的：修改参数会重写查询串，设置 `search` 或 `href` 会重新解析参数。Rust 代码使用遵循同一标准的 `url` crate：
 
-```rust tabs
-let mut url = url::Url::parse("https://api.example.com")?.join("/v1/items")?;
-url.query_pairs_mut().append_pair("page", "2").append_pair("tag", "new");
-url.as_str(); // "https://api.example.com/v1/items?page=2&tag=new"
-```
-
 ```tsx tabs
 const url = new URL("/v1/items", "https://api.example.com");
 url.searchParams.set("page", "2");
 url.searchParams.append("tag", "new");
 url.href; // "https://api.example.com/v1/items?page=2&tag=new"
+```
+
+```rust tabs
+let mut url = url::Url::parse("https://api.example.com")?.join("/v1/items")?;
+url.query_pairs_mut().append_pair("page", "2").append_pair("tag", "new");
+url.as_str(); // "https://api.example.com/v1/items?page=2&tag=new"
 ```
 
 `URLSearchParams`（以及 `Headers`、`FormData`）的迭代器遍历的是创建迭代器那一刻的快照，并且带有迭代器辅助方法（`map`、`filter`、`toArray` 等）。
@@ -386,6 +386,18 @@ type BodyInit = ReadableStream<Uint8Array> | Blob | BufferSource | FormData | UR
 
 `fetch` 通过平台自身的网络栈发送 HTTP 和 HTTPS 请求：iOS 和 Mac Catalyst 上是 `NSURLSession`，Android 上是 `HttpURLConnection`。因此系统的代理设置、TLS 配置和证书信任都会生效。`data:` URL 和 `blob:` URL（来自 `URL.createObjectURL`）在本地直接应答，不经过网络；其他协议一律 reject。Rust 的 `fetch(request)` 走同一个网络栈、受同样的能力约束，接受 URL 或 `HttpRequest`，resolve 为包含完整响应体的 `HttpResponse`（[网络](../docs/networking.md#在-rust-组件中)）：
 
+```tsx tabs
+type Todo = { id: number; title: string; done: boolean };
+
+async function loadTodos(): Promise<Todo[]> {
+  const res = await fetch("https://api.example.com/todos", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+```
+
 ```rust tabs
 #[derive(serde::Deserialize)]
 struct Todo {
@@ -401,18 +413,6 @@ async fn load_todos(token: &str) -> Result<Vec<Todo>, String> {
         return Err(format!("HTTP {}", response.status()));
     }
     serde_json::from_slice(&response.body).map_err(|e| e.to_string())
-}
-```
-
-```tsx tabs
-type Todo = { id: number; title: string; done: boolean };
-
-async function loadTodos(): Promise<Todo[]> {
-  const res = await fetch("https://api.example.com/todos", {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
 }
 ```
 

@@ -1,6 +1,6 @@
 ---
 title: Linux
-description: Run Rust and TSX NSH apps on Linux in GTK 4 windows, package them, embed them in a GTK app with AppView, and what differs on Linux.
+description: Run TSX and Rust NSH apps on Linux in GTK 4 windows, package them, embed them in a GTK app with AppView, and what differs on Linux.
 order: 15
 group: platforms
 ---
