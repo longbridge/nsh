@@ -1857,34 +1857,46 @@ fn send(surface: &Surface, id: NodeId, event: WindowEvent) {
 }
 
 /// The root view of a window of the app's own was resized (it fills the
-/// window's content view): the core lays the root out at its size.
-pub(crate) fn resized(surface: &Surface, view: &NshView) {
+/// window's content view): the core lays the root out at its size, which
+/// is applied before this returns unless the engine is late, as for the
+/// host's root ([`Surface::await_layout`]): AppKit's full screen and zoom
+/// animations otherwise grow the window around its old content.
+pub(crate) fn resized(surface: &Rc<Surface>, view: &NshView) {
     let id = view.id();
-    let size = {
+    // The window's content (the container the root fills), whatever set
+    // the root's own frame.
+    let Some(bounds) = surface
+        .windows
+        .borrow()
+        .get(&id)
+        .map(|w| w.container.bounds())
+    else {
+        return;
+    };
+    // Outside the borrow: this resizes the root again, which comes back
+    // here and may wait for the layout ([`Surface::await_layout`]).
+    if view.ns().frame() != bounds {
+        view.ns().setFrame(bounds);
+    }
+    let size = Size::new(
+        Points(bounds.size.width as f32),
+        Points(bounds.size.height as f32),
+    );
+    {
         let windows = surface.windows.borrow();
         let Some(w) = windows.get(&id) else {
             return;
         };
-        // The window's content (the container the root fills), whatever
-        // set the root's own frame.
-        let bounds = w.container.bounds();
-        if view.ns().frame() != bounds {
-            view.ns().setFrame(bounds);
-        }
-        let size = Size::new(
-            Points(bounds.size.width as f32),
-            Points(bounds.size.height as f32),
-        );
         if w.reported.replace(Some(size)) == Some(size) {
             return;
         }
-        size
-    };
+    }
     view.state_mut().frame = Bounds::new(point(Points(0.0), Points(0.0)), size);
     surface.control(|c| c.set_root_size(id, size, EdgeInsets::default()));
     crate::navigation::window_resized(surface, view);
     // The primary window's size is the app's `windowSize()`.
     surface.window_environment();
+    surface.await_layout(id, size);
 }
 
 /// The displays changed: the windows of the app's own read their state

@@ -200,9 +200,10 @@ before each redirect and cancels one the grant does not allow, reporting it to t
   scroll's frames are not delayed (`FRAME_BATCHES`), always in order; a resize applies the waiting ones first.
   Dispatched closures must be `Send`, so they find their surface by key in a thread-local map; no globals are shared
   between surfaces.
-- **Resizes are shown at once** (`Surface::resized`, the one place the main thread waits for the engine): when the
-  window resizes the root, the main thread waits for the layout at the new size (the engine reports it after its
-  commit: `MountSink::resized`), at most 16 ms, and applies it before AppKit draws the window. AppKit's animated
+- **Resizes are shown at once** (`Surface::await_layout`, the one place the main thread waits for the engine): when the
+  window resizes the root (`Surface::resized`) or a window of the app's own resizes its root (`window::resized`), the
+  main thread waits for the layout at the new size (the engine reports it after its commit: `MountSink::resized`,
+  `MountSink::root_resized` for a window's root), at most 16 ms, and applies it before AppKit draws the window. AppKit's animated
   resizes (zoom, the green button, a double click on the title bar) and live resizes take this path, so the window
   never grows around stale content. An engine that misses the deadline (JS busy) is not waited for again until it
   reports a resize done, so a busy app resizes as before.
