@@ -575,5 +575,5 @@ gpui-kit's `Colorize` methods are inherent methods of `Hsla` (no trait to import
 ## Android differences
 
 - **Android differences**: shadows need a background (no content shadows, e.g. text with a transparent background); odd corner
-  radii clip by path before API 33; pull to refresh is our own (stretch overscroll stays native); `contentInset` is padding and
+  radii clip by path before API 33, and continuous corners clip their children through a layer (pitfalls); pull to refresh is our own (stretch overscroll stays native); `contentInset` is padding and
   `decelerationRate` only shapes snapping glides.
