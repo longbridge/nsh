@@ -130,13 +130,8 @@ final class ModalHost {
         // No background of NSH's own: the app's popup (and backdrop) has its look.
         container.setBackgroundColor(0);
         dialog.setCancelable(false);
-        dialog.setOnKeyListener((d, keyCode, event) -> {
-            if (keyCode == KeyEvent.KEYCODE_BACK && event.getAction() == KeyEvent.ACTION_UP) {
-                backPressed();
-                return true;
-            }
-            return keyCode == KeyEvent.KEYCODE_BACK;
-        });
+        backKeyDown = false;
+        dialog.setOnKeyListener((d, keyCode, event) -> backKey(event));
         if (Build.VERSION.SDK_INT >= 33) {
             dialog.getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
                     android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, this::backPressed);
@@ -265,6 +260,30 @@ final class ModalHost {
         }
     }
 
+    /** The back key's press came down to this dialog (its release goes back). */
+    private boolean backKeyDown;
+
+    /**
+     * The back key, as the dialog's window hands it to its key listener: the
+     * dialog takes every Back event, and a press goes back on its release.
+     * With an {@code OnBackInvokedCallback} in effect the window turns that
+     * release into the callback ({@link #backPressed}), and Android 15 QPR1
+     * to 16 still send the key-up after it, marked cancelled: only a key-up
+     * whose down came here and that is not cancelled goes back, so one
+     * press is reported once, as {@code NshView} does for the activity.
+     */
+    private boolean backKey(KeyEvent e) {
+        if (e.getKeyCode() != KeyEvent.KEYCODE_BACK) return false;
+        if (e.getAction() == KeyEvent.ACTION_DOWN) {
+            if (e.getRepeatCount() == 0) backKeyDown = true;
+        } else if (e.getAction() == KeyEvent.ACTION_UP) {
+            boolean press = backKeyDown && !e.isCanceled();
+            backKeyDown = false;
+            if (press) backPressed();
+        }
+        return true;
+    }
+
     /**
      * The back button, Android's Escape. Answered from `closeOnEscape`, not
      * by asking JS: close here (reported as `RequestClose` with reason
@@ -272,6 +291,7 @@ final class ModalHost {
      * decides).
      */
     void backPressed() {
+        backKeyDown = false;
         if (closing) return;
         mounter.requestClose(id, "cancel");
         if (closeOnEscape) {
