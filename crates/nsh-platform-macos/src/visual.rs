@@ -147,6 +147,10 @@ struct Backdrop {
     tint: Option<Color>,
     /// The material, blending and state `view` was given (material only).
     material: MacOsBackdrop,
+    /// The frame and corners `view` (and its layer) were last shaped to:
+    /// writing the same frame or corner radius again is not free, since
+    /// `NSGlassEffectView` lays its SwiftUI content out again for each.
+    shape: Option<(CGRect, CornerRadii)>,
 }
 
 define_class!(
@@ -1037,7 +1041,11 @@ impl Visual {
             self.backdrop = Some(backdrop);
         }
         let b = self.backdrop.as_mut().expect("just inserted");
-        b.view.setFrame(local);
+        let shape = (local, radii);
+        let reshape = b.shape != Some(shape);
+        if b.shape.is_none_or(|(frame, _)| frame != local) {
+            b.view.setFrame(local);
+        }
         match kind {
             BackdropKind::Plain => {
                 if let Some(blur) = b.view.downcast_ref::<PlainBlur>() {
@@ -1066,16 +1074,22 @@ impl Visual {
                         b.tint = style.glass_tint_color;
                     }
                     // The glass draws its own rounded shape.
-                    let r = crate::decor::shared(&radii).unwrap_or(0.0) as CGFloat;
-                    // SAFETY: NSGlassEffectView's `setCornerRadius:`, a
-                    // CGFloat, on the main thread.
-                    let _: () = unsafe { msg_send![&**glass, setCornerRadius: r] };
+                    if b.shape.is_none_or(|(_, old)| old != radii) {
+                        let r = crate::decor::shared(&radii).unwrap_or(0.0) as CGFloat;
+                        // SAFETY: NSGlassEffectView's `setCornerRadius:`, a
+                        // CGFloat, on the main thread.
+                        let _: () = unsafe { msg_send![&**glass, setCornerRadius: r] };
+                    }
                 }
             }
+        }
+        if !reshape {
+            return;
         }
         let Some(layer) = b.view.layer() else {
             return;
         };
+        b.shape = Some(shape);
         // Below the background's fill layer and every effect.
         layer.setZPosition(BACKDROP_Z);
         match crate::decor::shared(&radii) {
@@ -1118,6 +1132,7 @@ fn new_backdrop(
                 glass_style: GlassEffect::None,
                 tint: None,
                 material,
+                shape: None,
             }
         }
         BackdropKind::Plain => {
@@ -1133,6 +1148,7 @@ fn new_backdrop(
                 glass_style: GlassEffect::None,
                 tint: None,
                 material,
+                shape: None,
             }
         }
         BackdropKind::Glass => {
@@ -1150,6 +1166,7 @@ fn new_backdrop(
                 glass_style: style.glass_effect,
                 tint: None,
                 material: MacOsBackdrop::default(),
+                shape: None,
             }
         }
     };
