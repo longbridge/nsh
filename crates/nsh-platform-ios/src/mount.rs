@@ -3910,6 +3910,9 @@ impl Mounter {
         {
             view.setUserInteractionEnabled(true);
         }
+        if wants_touch || wants_pinch || wants_rotation {
+            view.setMultipleTouchEnabled(true);
+        }
         if let Some(nsh) = slot.native.nsh() {
             nsh.set_target(&target);
             nsh.set_events(events);
