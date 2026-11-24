@@ -379,7 +379,7 @@ nsh publish android --from <TRACK> --track <TRACK> [--rollout <FRACTION>]
 把 Android App Bundle 上传到 Google Play 并发布到某个轨道，全程在一次 edit 中完成（创建、上传、更新轨道、提交；失败的 edit
 会被删除）。不带 `--track` 时只发布到**内部测试**；发布给更多测试者或公众，必须显式给出 `--track`。用 `--from` 代替 bundle
 时，把一个轨道上最新的版本推进到另一个轨道。登录身份是一个在 Play Console 中有该应用发布权限的 Google Cloud
-服务账号（[Android](./android.md#上传到-google-play)）。
+服务账号（[发布到 Google Play](./publish.md#publish-to-google-play)）。
 
 | 参数 | 说明 |
 |---|---|
@@ -391,7 +391,7 @@ nsh publish android --from <TRACK> --track <TRACK> [--rollout <FRACTION>]
 | `--rollout <FRACTION>` | 分阶段发布给该轨道这一比例的用户，大于 0 小于 1，例如 `0.1`。 |
 | `--status <STATUS>` | `completed`（默认）、`in-progress`（带 `--rollout` 时的默认）、`halted`（暂停分阶段发布，需带 `--rollout`）或 `draft`。 |
 | `--draft` | 以草稿发布：应用在 Play Console 中完成首次发布之前，Play 只接受草稿。 |
-| `--store <DIR>` | [商店目录](./android.md#商店信息和更新说明)。默认：应用目录下的 `store`。 |
+| `--store <DIR>` | [商店目录](./publish.md#store-listing)。默认：应用目录下的 `store`。 |
 | `--listing` | 同时按商店目录更新商店信息（名称、描述、图片），覆盖 Play 上这些语言已有的内容。 |
 
 要扩大分阶段发布，用更大的 `--rollout` 再发布同一版本；要全量发布，不带 `--rollout` 再发布一次。
@@ -484,4 +484,4 @@ nsh publish ios <IPA> [--app-id <ID>] [--issuer-id <ID>] [--key-id <ID>] [--priv
 报告发布状态并检查配置。参数也可通过
 `NSH_APP_STORE_APP_ID`、`NSH_APP_STORE_ISSUER_ID`、`NSH_APP_STORE_KEY_ID` 和
 `NSH_APP_STORE_PRIVATE_KEY` 环境变量提供。App ID 默认读 `nsh.json` 的 `store.ios.appId`，私钥默认读
-`~/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8`，配置好的应用只需 `nsh publish ios <IPA>`。签名、凭据和处理流程见[上传到 TestFlight](./packaging.md#上传到-testflight)。
+`~/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8`，配置好的应用只需 `nsh publish ios <IPA>`。签名、凭据和处理流程见[发布到 App Store](./publish.md#publish-to-the-app-store)。

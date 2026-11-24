@@ -66,7 +66,8 @@ crates/
   nsh-package/         Signed packages (`.nshpkg`): Ed25519 keys, release-key certificates, revocation lists, the trust store
   nsh-updater/          App self-update: manifests and their signatures, verified downloads, replacing the installed app on the desktop (docs/dev/updater.md); `nsh-core`'s `runtime/updater.rs` is its JS face, `nsh/updater`
   nsh-extra/           NSH's official modules, an nshm apps install with `nsh add nsh-extra --features <name>`: one Cargo feature
-                       per module (`camera`: `Camera`, photos from the system's camera on iOS and Android; `photos`:
+                       per module (`camera`: `Camera`, photos from the system's camera on iOS and Android; `location`: `Location`, the
+                       device's position on macOS, iOS and the web; `photos`:
                        `Photos`, the recent photos of the user's library on iOS; `push`: `Push`,
                        remote notifications on iOS and, through a push service's binding, Android; `speech`:
                        `Speech`, speech recognized as the user talks on macOS, iOS, Android, Windows and the web), its code in

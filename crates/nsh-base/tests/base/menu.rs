@@ -407,6 +407,109 @@ fn FileMenu() -> impl IntoElement {
         .child(text(move || format!("chose:{}", chose.get())))
 }
 
+/// A search field over the File menu: the field edits while the pointer
+/// opens the menu. The text says the item chosen last.
+#[component]
+fn FieldAndMenu() -> impl IntoElement {
+    let chose = signal("none");
+    let item = move |label: &'static str| {
+        menu_item()
+            .accessibility_label(label)
+            .on_select(move || chose.set(label))
+            .child(text(label))
+    };
+    view()
+        .pt(px(40.0))
+        .pl(px(40.0))
+        .gap(px(8.0))
+        .child(input().test_id("search").w(px(160.0)).h(px(28.0)))
+        .child(
+            menu()
+                .trigger(
+                    view()
+                        .test_id("file")
+                        .w(px(80.0))
+                        .h(px(30.0))
+                        .child(text("File")),
+                )
+                .child(item("Open"))
+                .child(item("Save")),
+        )
+        .child(text(move || format!("chose:{}", chose.get())))
+}
+
+#[test]
+fn a_menu_the_pointer_opens_over_an_editing_field_takes_the_arrows() {
+    let mut app = start_with(nsh_testing::windowed_root::<FieldAndMenu>());
+    app.app.type_text("id:search", "ab").unwrap();
+    app.app.press("id:file").unwrap();
+    app.app.wait_for("Open").unwrap();
+    // Down focuses the first item, not the field's caret; Return chooses it.
+    app.app.press_key("down").unwrap();
+    app.app.press_key("down").unwrap();
+    app.app.press_key("enter").unwrap();
+    app.app.wait_for("text:chose:Save").unwrap();
+    assert_eq!(
+        app.app.screen().input_text("id:search").unwrap(),
+        Some("ab")
+    );
+    // Letters still go to the field while the menu is open; Home goes in.
+    app.app.press("id:file").unwrap();
+    app.app.wait_for("Open").unwrap();
+    app.app.type_text("id:search", "c").unwrap();
+    assert_eq!(
+        app.app.screen().input_text("id:search").unwrap(),
+        Some("abc")
+    );
+    app.app.press_key("home").unwrap();
+    app.app.press_key("enter").unwrap();
+    app.app.wait_for("text:chose:Open").unwrap();
+}
+
+/// A menu with a filter field of its own above its items.
+#[component]
+fn FilteredMenu() -> impl IntoElement {
+    let chose = signal("none");
+    let item = move |label: &'static str| {
+        menu_item()
+            .accessibility_label(label)
+            .on_select(move || chose.set(label))
+            .child(text(label))
+    };
+    view()
+        .pt(px(40.0))
+        .pl(px(40.0))
+        .child(
+            menu()
+                .trigger(
+                    view()
+                        .test_id("file")
+                        .w(px(80.0))
+                        .h(px(30.0))
+                        .child(text("File")),
+                )
+                .child(input().test_id("filter").w(px(120.0)).h(px(28.0)))
+                .child(item("Open"))
+                .child(item("Save")),
+        )
+        .child(text(move || format!("chose:{}", chose.get())))
+}
+
+#[test]
+fn a_field_in_the_menu_keeps_its_arrows() {
+    let mut app = start_with(nsh_testing::windowed_root::<FilteredMenu>());
+    app.app.press("id:file").unwrap();
+    app.app.wait_for("Open").unwrap();
+    app.app.type_text("id:filter", "op").unwrap();
+    // The field's caret takes them: no item gets the focus, so Return
+    // chooses nothing.
+    app.app.press_key("down").unwrap();
+    app.app.press_key("home").unwrap();
+    app.app.press_key("enter").unwrap();
+    assert!(app.app.shows("chose:none"));
+    assert!(app.app.shows("Open"), "still open");
+}
+
 /// Opens the File menu with `key` on its focused trigger, then presses
 /// the item the keyboard focus is on (Space).
 fn open_with_key_and_choose(key: &str) -> App {

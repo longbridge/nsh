@@ -1,6 +1,6 @@
 [package]
 name = "nsh-extra"
-description = "NSH's official modules apps install with `nsh add` (an nshm), one Cargo feature each: `camera` takes photos with the system's camera, `photos` reads the user's recent photos, `push` receives remote notifications, `speech` recognizes what the user says."
+description = "NSH's official modules apps install with `nsh add` (an nshm), one Cargo feature each: `camera` takes photos with the system's camera, `location` reads the device's position, `photos` reads the user's recent photos, `push` receives remote notifications, `speech` recognizes what the user says."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -20,6 +20,16 @@ workspace = true
 default = []
 # `Camera`: photos taken with the system's camera (iOS, Android).
 camera = ["dep:tokio"]
+# `Location`: the device's position (macOS, iOS, the web).
+location = [
+  "dep:dispatch2",
+  "dep:objc2",
+  "dep:objc2-foundation",
+  "dep:objc2-core-location",
+  "dep:wasm-bindgen",
+  "dep:js-sys",
+  "dep:web-sys",
+]
 # `Photos`: the user's photo library, its recent photos, and `PhotosPicker`,
 # the system's photo picker embedded in the layout (iOS).
 photos = ["dep:tokio"]
@@ -46,8 +56,10 @@ nsh-core.workspace = true
 log.workspace = true
 tokio = { workspace = true, features = ["sync"], optional = true }
 
-# Speech's recognizer on macOS; iOS has these below.
+# Speech's recognizer and Location's CoreLocation on macOS; iOS has these
+# below.
 [target.'cfg(target_os = "macos")'.dependencies]
+objc2-core-location = { workspace = true, optional = true }
 block2 = { workspace = true, optional = true }
 dispatch2 = { workspace = true, optional = true }
 objc2 = { workspace = true, optional = true }
@@ -64,6 +76,7 @@ objc2-core-foundation.workspace = true
 objc2-foundation.workspace = true
 objc2-ui-kit.workspace = true
 libc.workspace = true
+objc2-core-location = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "android")'.dependencies]
 nsh-platform-android.workspace = true
@@ -79,13 +92,21 @@ windows = { workspace = true, optional = true, features = [
   "Media_SpeechRecognition",
 ] }
 
-# Speech's recognizer on the web: the browser's Web Speech API.
+# Speech's recognizer on the web: the browser's Web Speech API; Location's
+# `navigator.geolocation`.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = { workspace = true, optional = true }
 js-sys = { workspace = true, optional = true }
 web-sys = { workspace = true, optional = true, features = [
   "Event",
   "EventTarget",
+  "Geolocation",
+  "PermissionDescriptor",
+  "PermissionName",
+  "PermissionState",
+  "PermissionStatus",
+  "Permissions",
+  "PositionOptions",
   "SpeechRecognition",
   "SpeechRecognitionAlternative",
   "SpeechRecognitionEvent",
@@ -122,6 +143,20 @@ queries = ['<intent><action android:name="android.media.action.IMAGE_CAPTURE"/><
 # Android has no entry: the module reads no library there (see its docs).
 [package.metadata.nsh.features.photos.ios.infoPlist]
 NSPhotoLibraryUsageDescription = "The app shows your recent photos so you can add them quickly."
+
+# Reading the position needs the user's permission, which the system asks
+# with this text; without it the system never asks (and the module reports
+# the platform unavailable). A sandboxed macOS app also needs the
+# entitlement. Only while the app is in use: no background location.
+[package.metadata.nsh.features.location.ios.infoPlist]
+NSLocationWhenInUseUsageDescription = "The app shows where you are."
+
+[package.metadata.nsh.features.location.macos.infoPlist]
+NSLocationWhenInUseUsageDescription = "The app shows where you are."
+NSLocationUsageDescription = "The app shows where you are."
+
+[package.metadata.nsh.features.location.macos.entitlements]
+"com.apple.security.personal-information.location" = true
 
 # Background deliveries wake the app. `aps-environment` is not declared:
 # the provisioning profile the app is signed with grants it, with the

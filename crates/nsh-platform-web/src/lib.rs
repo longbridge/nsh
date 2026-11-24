@@ -134,11 +134,43 @@ pub fn add_ui_set(set: Registry) {
 /// The UI sets engines serve: [`set_ui_sets`]'s, else `nsh/base`'s parts
 /// and the app's sets their gates added ([`add_ui_set`]).
 fn ui_sets() -> Vec<Registry> {
-    UI_SETS.with(|s| s.borrow().clone()).unwrap_or_else(|| {
-        let mut sets = vec![base_set()];
-        APP_SETS.with(|a| sets.extend(a.borrow().iter().cloned()));
+    UI_SETS
+        .with(|s| s.borrow().clone())
+        .map(with_gated_parts)
+        .unwrap_or_else(|| {
+            let mut sets = vec![base_set()];
+            APP_SETS.with(|a| sets.extend(a.borrow().iter().cloned()));
+            sets
+        })
+}
+
+/// A Rust app's sets with the parts of `nsh/base` whose gates ran since
+/// (feature `rust-parts`): the side modules of the components it makes by
+/// name (`ComponentElement::by_name`).
+fn with_gated_parts(sets: Vec<Registry>) -> Vec<Registry> {
+    #[cfg(feature = "rust-parts")]
+    {
+        let mut sets = sets;
+        for part in nsh_base::gated_parts() {
+            let mut set = Registry::ui_set(nsh_base::SPECIFIER);
+            part(&mut set);
+            sets.push(set);
+        }
         sets
-    })
+    }
+    #[cfg(not(feature = "rust-parts"))]
+    sets
+}
+
+/// Asks the page for the part of `nsh/base` that registers component
+/// `name`, made by name and not registered yet: it loads the part's side
+/// module and runs its gate, then [`nsh_after_gate`].
+#[cfg(feature = "rust-parts")]
+fn request_part(name: &str) {
+    match nsh_base::part_of_component(name) {
+        Some(part) => ffi::load_data(&format!("part:{part}")),
+        None => log::warn!("`{name}` is made by name, and no part of nsh/base registers it"),
+    }
 }
 
 /// `nsh/base`: the parts the page asked for (`nsh_part_*`, which it calls
@@ -686,6 +718,9 @@ fn init() {
         }));
         // What this module leaves out (the syntaxes) comes from the page.
         nsh_core::runtime_data::set_loader(ffi::load_data);
+        // The parts of `nsh/base` a Rust app makes components of by name.
+        #[cfg(feature = "rust-parts")]
+        nsh_core::set_part_requester(request_part);
     });
 }
 
@@ -2163,3 +2198,7 @@ pub extern "C" fn nsh_set_dark(dark: u32) -> f64 {
         app.control.set_environment(app.environment);
     })
 }
+
+// The TSX runtime exports its own `nsh_part_*` gates (`base_parts!`).
+#[cfg(all(feature = "rust-parts", feature = "base-full"))]
+compile_error!("`rust-parts` is for a Rust app's runtime, without `base-full`");

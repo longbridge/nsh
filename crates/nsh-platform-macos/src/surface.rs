@@ -560,6 +560,7 @@ impl Surface {
         self.mounter.borrow_mut().clear();
         self.native.clear();
         crate::system::clear(self);
+        crate::panels::close(self);
         *self.anim.borrow_mut() = UiAnimation::default();
         self.nav.borrow_mut().reset();
         crate::window::close_all(self);
@@ -1448,11 +1449,12 @@ impl Drop for Surface {
         }
         crate::tray::release(key);
         crate::global_shortcut::release(key);
-        // A surface dropped without stopping takes its alerts with it: a
-        // sheet left on an embedding app's window, or an alert shown on
-        // its own (an app-modal loop), would wait for an answer no one
-        // hears.
+        // A surface dropped without stopping takes its alerts and panels
+        // with it: a sheet left on an embedding app's window, or an alert
+        // shown on its own (an app-modal loop), would wait for an answer no
+        // one hears.
         crate::system::clear(self);
+        crate::panels::close(self);
         let _ = SURFACES.try_with(|s| s.borrow_mut().remove(&key));
     }
 }

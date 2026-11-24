@@ -52,7 +52,7 @@ release APK 中的 `libnsh.so` 不带符号表和调试信息。完整的库位�
 
 ## 上传到 Google Play
 
-`nsh publish android` 把 Android App Bundle（`.aab`）上传到 Google Play 的某个轨道，未用 `--track` 指定时为内部测试（[CLI](./cli.md#nsh-publish-android)）：
+`nsh publish android` 把 Android App Bundle（`.aab`）上传到 Google Play 的某个轨道，未用 `--track` 指定时为内部测试：
 
 ```sh
 export NSH_PLAY_CREDENTIALS=~/keys/play-service-account.json
@@ -62,32 +62,7 @@ nsh publish android --from internal --track production --rollout 0.1
 nsh publish status android --json
 ```
 
-密钥不要提交到仓库。每个应用做一次：在 Play Console 中创建应用；在 Google Cloud 中启用 Google Play Android Developer API
-并创建服务账号，下载其 JSON 密钥；在 Play Console 的**用户和权限**中邀请该服务账号的邮箱，并授予发布到所用轨道的权限。应用在
-Play Console 中完成首次发布之前，请加 `--draft`。Bundle 的 version code 必须高于此前上传过的所有版本。
-
-### 商店信息和更新说明
-
-`nsh.json` 旁的 `store` 目录按语言存放文字和图片，目录名为 BCP 47 标签；每个文件都可省略，`nsh publish ios` 读取同一个目录：
-
-```text
-store/
-  en-US/
-    name.txt               商店名称
-    short_description.txt  Google Play 的简短描述
-    description.txt        完整描述
-    release_notes.txt      本次更新说明
-    android/
-      phoneScreenshots/    1.png、2.png……（按文件名顺序上传）
-      featureGraphic/
-      icon/
-  zh-CN/
-    ...
-```
-
-每次发布都带上各语言的 `release_notes.txt`。加 `--listing` 时设置名称和描述，并对存在的每种图片类型替换 Play 上同类型的图片。图片类型沿用
-Google Play 的：`phoneScreenshots`、`sevenInchScreenshots`、`tenInchScreenshots`、`tvScreenshots`、`wearScreenshots`、`icon`、`featureGraphic`
-和 `tvBanner`。
+Play Console 与服务账号的准备、上传密钥、轨道与分阶段发布、商店信息和常见错误见[发布到 Google Play](./publish.md#publish-to-google-play)。
 
 ## 嵌入 Android 应用
 
@@ -546,6 +521,7 @@ adb reverse tcp:8790 tcp:8790
 
 ## 另请参阅
 
+- [发布到 Google Play](./publish.md#publish-to-google-play)
 - [用 Rust 开发](./rust.md)
 - [嵌入 iOS 应用](./ios.md)
 - [原生组件](./native-components.md)

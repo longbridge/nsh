@@ -214,7 +214,24 @@ final class SystemMenus {
             window.setElevation(dp(ELEVATION));
             window.setOverlapAnchor(false);
             window.setFocusable(true);
-            window.setOutsideTouchable(true);
+            // Touch-modal, so the touches outside come to the menu too: a
+            // tap there closes it on release, a back swipe leaves it to the
+            // back the swipe sends (MenuOutsideTouch).
+            window.setOutsideTouchable(false);
+            MenuOutsideTouch outside = new MenuOutsideTouch();
+            window.setTouchInterceptor((view, event) -> {
+                float x = event.getX(), y = event.getY();
+                boolean out = x < 0 || y < 0 || x >= view.getWidth() || y >= view.getHeight();
+                switch (outside.on(event.getActionMasked(), out)) {
+                    case MenuOutsideTouch.DISMISS:
+                        window.dismiss();
+                        return true;
+                    case MenuOutsideTouch.TAKE:
+                        return true;
+                    default:
+                        return false;
+                }
+            });
             window.setInputMethodMode(PopupWindow.INPUT_METHOD_NOT_NEEDED);
             window.setOnDismissListener(() -> {
                 if (open == this) open = null;
