@@ -89,12 +89,44 @@ pub(crate) fn frame(view: &NSView) -> Option<NSRect> {
     frame_of(view, view.layer()?.bounds())
 }
 
+/// `children` (AppKit's accessibility children of `view`) with `view`'s
+/// leaves (#2066), which are in no view hierarchy for AppKit to list.
+pub(crate) fn with_leaves(
+    view: &NshView,
+    children: Option<Retained<NSArray>>,
+) -> Option<Retained<NSArray>> {
+    let leaves = view.leaf_children();
+    if leaves.is_empty() {
+        return children;
+    }
+    let mut out: Vec<Retained<AnyObject>> = children.iter().flat_map(|c| c.iter()).collect();
+    out.extend(
+        leaves
+            .iter()
+            .map(|l| AsRef::<AnyObject>::as_ref(l.ns()).retain()),
+    );
+    Some(NSArray::from_retained_slice(&out))
+}
+
+/// The view in the window hierarchy that `view` is drawn in: itself, or
+/// for a leaf (#2066), the parent whose layer its layer is in.
+fn hosting(view: &NSView) -> Retained<NSView> {
+    match NshView::from_ns(view)
+        .filter(NshView::is_leaf_layer)
+        .and_then(|v| v.parent_view())
+    {
+        Some(parent) => AsRef::<NSView>::as_ref(parent.ns()).retain(),
+        None => view.retain(),
+    }
+}
+
 /// A rectangle of a view in AppKit screen coordinates, including layer transforms.
 pub(crate) fn frame_of(view: &NSView, rect: NSRect) -> Option<NSRect> {
-    let window = view.window()?;
+    let host = hosting(view);
+    let window = host.window()?;
     let layer = view.layer()?;
-    let mut outer = view.retain();
-    let mut parent = superview(view);
+    let mut outer = host.clone();
+    let mut parent = superview(&host);
     while let Some(view) = parent {
         parent = superview(&view);
         if view.layer().is_some() {
@@ -297,7 +329,13 @@ const MAX_NAME: usize = 1000;
 
 /// Appends the texts and labels of `view`'s content to `out`.
 fn gather_name(view: &NSView, out: &mut String) {
-    for child in view.subviews().iter() {
+    let leaves = NshView::from_ns(view)
+        .map(|v| v.leaf_children())
+        .unwrap_or_default();
+    let leaves = leaves
+        .iter()
+        .map(|l| AsRef::<NSView>::as_ref(l.ns()).retain());
+    for child in view.subviews().iter().chain(leaves) {
         if out.len() >= MAX_NAME {
             return;
         }
@@ -375,6 +413,8 @@ enum Ax {
     Toggle,
     Link,
     Text,
+    /// A text field.
+    TextField,
     Image,
     Group,
     Heading,
@@ -1076,6 +1116,7 @@ fn ax_role(role: Ax) -> (Option<Retained<NSString>>, Option<Retained<NSString>>)
             ),
             Ax::Link => (constant(NSAccessibilityLinkRole), None),
             Ax::Text => (constant(NSAccessibilityStaticTextRole), None),
+            Ax::TextField => (constant(NSAccessibilityTextFieldRole), None),
             Ax::Image => (constant(NSAccessibilityImageRole), None),
             Ax::Group => (constant(NSAccessibilityGroupRole), None),
             // WebKit's role for headings, which VoiceOver's rotor lists.
@@ -1275,6 +1316,7 @@ fn base_role(a: &Accessibility, kind: ViewKind, pressable: bool) -> Ax {
         Role::Button | Role::ImageButton | Role::KeyboardKey => Ax::Button,
         Role::Link => Ax::Link,
         Role::Search => Ax::Search,
+        Role::Textbox => Ax::TextField,
         Role::Image => Ax::Image,
         Role::Text => Ax::Text,
         Role::Adjustable => Ax::Slider,
@@ -1434,6 +1476,10 @@ mod tests {
         assert_eq!(
             role_for(&with_role(Role::Option), ViewKind::View, true),
             Ax::Option
+        );
+        assert_eq!(
+            role_for(&with_role(Role::Textbox), ViewKind::View, false),
+            Ax::TextField
         );
     }
 

@@ -173,8 +173,6 @@ pub(crate) enum Action {
         Box<crate::canvas::render::RenderRequest>,
         AnswerSlot<Result<Vec<u8>, super::JsError>>,
     ),
-    /// A speech recognition session's request ([`crate::speech`]).
-    Speech(SpeechAction),
     /// A notification's request ([`crate::notifications`]).
     Notification(NotificationAction),
     /// Reads whether the app launches at login (`None`) or turns it on
@@ -301,24 +299,6 @@ pub(crate) enum Action {
     /// the node, with the layout of the last commit; `None`: the pointer
     /// left.
     HoverAt(NodeId, Option<crate::MouseEvent>),
-}
-
-/// What a speech recognition session asks of the core
-/// ([`Action::Speech`]).
-pub(crate) enum SpeechAction {
-    /// Starts session `id`, reporting to `sink`; the session running is
-    /// aborted first.
-    Start {
-        id: u32,
-        request: crate::speech::SpeechRequest,
-        sink: crate::speech::SpeechSink,
-    },
-    /// Stops session `id`: it finishes what it heard, then ends.
-    Stop(u32),
-    /// Ends session `id` at once, without an error.
-    Abort(u32),
-    /// Whether speech can be recognized; the answer resolves the slot.
-    Available(AnswerSlot<bool>),
 }
 
 /// What a sound or a player asks of the core ([`Action::Audio`]).

@@ -85,11 +85,12 @@ nsh dev App.tsx --server-only
 | Flag | Description |
 |---|---|
 | `--port <port>` | Dev server port. As for `nsh run`; with `--server-only`, the default is 8790, replacing the previous NSH session on it. |
+| `--host <ipv4>` | IPv4 address to bind. Defaults to `0.0.0.0` for `--server-only` and `--target ios`, `android` or `web`, and `127.0.0.1` for local targets. With `--target android`, only `127.0.0.1` and `0.0.0.0` are supported (`adb reverse` forwards to this machine's `127.0.0.1`). |
 | `--release` | Serve release builds. |
 
-`nsh dev --server-only` listens on every address of this computer, so phones and other machines on the network can
-connect. `nsh run` and `nsh dev` with a host on this computer (a window, the terminal, Catalyst) listen on `127.0.0.1`;
-with `--target ios`, `android` or `web` they listen on every address, as `--server-only` does.
+By default, `nsh dev --server-only` listens on every address of this computer (`0.0.0.0`), so phones and other machines on the network can
+connect. `nsh run` and `nsh dev` with a host on this computer (a window, the terminal, Catalyst) default to `127.0.0.1`;
+with `--target ios`, `android` or `web` they default to every address, as `--server-only` does. Pass `--host <ipv4>` to override the bind address—for example, `nsh dev App.tsx --server-only --host 127.0.0.1` keeps a server-only session on loopback only.
 
 Connect hosts to the printed URL:
 

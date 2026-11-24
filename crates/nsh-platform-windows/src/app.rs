@@ -476,7 +476,6 @@ impl AppView {
             clipboard: None,
             host: options.host.clone(),
             picker: None,
-            speech: None,
             audio: None,
             windows: None,
             login_item: self.login_item(&options),

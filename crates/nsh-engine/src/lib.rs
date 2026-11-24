@@ -75,6 +75,9 @@ pub use nsh_core::{
 };
 #[cfg(feature = "js-core")]
 pub use nsh_js::BYTECODE_VERSION;
+#[cfg(feature = "js-core")]
+#[doc(hidden)]
+pub use nsh_js::with_inline_root;
 /// Signed packages, release-key certificates, revocations and trust stores.
 #[cfg(feature = "js-core")]
 pub use nsh_package as package;
@@ -1252,11 +1255,6 @@ pub struct EngineConfig {
     /// platform's picker: the embedding app's own picker, or a test's
     /// files; `None`: the platform's.
     pub picker: Option<Arc<dyn nsh_core::picker::PickerBackend>>,
-    /// Recognizes the app's speech (`Speech.start`) instead of the
-    /// platform's recognizer: the embedding app's own, or a test's fake
-    /// (`nsh_testing`'s). `None` (the default): the platform's, where it
-    /// has one (`Environment::speech`).
-    pub speech: Option<Arc<dyn nsh_core::speech::SpeechBackend>>,
     /// Plays the app's sound (`Sound`, `AudioPlayer`) instead of the
     /// platform: the embedding app's own audio stack, or a test's fake
     /// (`nsh_testing`'s). `None` (the default): the platform's, where it
@@ -1407,7 +1405,6 @@ impl EngineConfig {
             clipboard: None,
             host: HostChannel::default(),
             picker: None,
-            speech: None,
             audio: None,
             windows: None,
             login_item: None,
@@ -1493,7 +1490,6 @@ impl std::fmt::Debug for EngineConfig {
             .field("clipboard", &self.clipboard.is_some())
             .field("host", &self.host)
             .field("picker", &self.picker.is_some())
-            .field("speech", &self.speech.is_some())
             .field("audio", &self.audio.is_some())
             .field("login_item", &self.login_item.is_some())
             .field("windows", &self.windows.is_some())
@@ -2500,7 +2496,6 @@ impl<M: TextEngine + 'static> Driver<M> {
         });
         core.set_clipboard(config.clipboard.clone());
         core.set_picker(config.picker.clone());
-        core.set_speech(config.speech.clone());
         core.set_app_links(config.app.links().clone());
         core.set_app_info(config.app.app_info().cloned());
         // Every VM reads the core's address where it is (`UrlScheme.url()`).
@@ -4122,7 +4117,6 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         auth_session: env.auth_session,
         scheme_links: env.scheme_links(),
         file_requests: env.file_requests,
-        speech: env.speech,
         notifications: env.notifications,
         audio: env.audio,
         tab_bar: env.tab_bar,
@@ -4335,6 +4329,7 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             }
             if event == EventKind::Paste {
                 payload = payload.into_paste();
+                state.core.limit_paste(id, &mut payload);
             }
             // A secondary click goes down as a press does: the overlays it
             // is outside of hear `onPressOutside` first, then the view its

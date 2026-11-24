@@ -166,19 +166,16 @@ pub(crate) trait Driver: Send {
     fn picks(&mut self) -> Result<Vec<nsh_core::picker::Pick>, String> {
         Err(headless_only("`picks()`"))
     }
-    /// What the app's speech sessions asked for, in order.
-    fn speech_requests(&mut self) -> Result<Vec<nsh_core::speech::SpeechRequest>, String> {
-        Err(headless_only("`speechRequests()`"))
-    }
-    /// The user says `text` to the session listening.
-    fn hear(&mut self, text: &str) -> Result<(), String> {
-        let _ = text;
-        Err(headless_only("speaking for the user"))
-    }
-    /// Ends the session listening, with `error` or as the user stops.
-    fn end_speech(&mut self, error: Option<nsh_core::speech::SpeechError>) -> Result<(), String> {
-        let _ = error;
-        Err(headless_only("ending a speech session"))
+    /// Calls `method` of the fake a native module gives headless runs
+    /// (`nsh_core::fake`), named `name`, with `args`; its answer.
+    fn call_fake(
+        &mut self,
+        name: &str,
+        method: &str,
+        args: &[nsh_core::JsonValue],
+    ) -> Result<nsh_core::JsonValue, String> {
+        let _ = (method, args);
+        Err(headless_only(&format!("the fake {name:?}")))
     }
     /// What the app asked of the speaker, in order.
     fn audio_calls(&mut self) -> Result<Vec<crate::headless::AudioCall>, String> {
@@ -401,15 +398,13 @@ impl Driver for Headless {
         self.catch_up();
         Ok(Headless::picks(self))
     }
-    fn speech_requests(&mut self) -> Result<Vec<nsh_core::speech::SpeechRequest>, String> {
-        self.catch_up();
-        Ok(Headless::speech_requests(self))
-    }
-    fn hear(&mut self, text: &str) -> Result<(), String> {
-        Headless::hear(self, text)
-    }
-    fn end_speech(&mut self, error: Option<nsh_core::speech::SpeechError>) -> Result<(), String> {
-        Headless::end_speech(self, error)
+    fn call_fake(
+        &mut self,
+        name: &str,
+        method: &str,
+        args: &[nsh_core::JsonValue],
+    ) -> Result<nsh_core::JsonValue, String> {
+        Headless::call_fake(self, name, method, args)
     }
     fn audio_calls(&mut self) -> Result<Vec<crate::headless::AudioCall>, String> {
         self.catch_up();
