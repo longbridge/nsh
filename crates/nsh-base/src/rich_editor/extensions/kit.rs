@@ -36,7 +36,7 @@ use super::{
 use crate::rich_editor::{
     commands::{
         BoxCommand, CommandFactory, command, lift_list_item, registry::content_fragment,
-        sink_list_item, split_list_item, tiptap, toggle_mark, wrap_in,
+        sink_list_item, split_list_item_keep_marks, tiptap, toggle_mark, wrap_in,
     },
     model::{Attrs, MarkType, NodeType, Schema},
     tables::{
@@ -231,7 +231,7 @@ pub fn list_item_keys(schema: &Schema) -> Vec<(String, BoxCommand)> {
         return Vec::new();
     };
     vec![
-        ("Enter".into(), split_list_item(ty.clone(), None)),
+        ("Enter".into(), split_list_item_keep_marks(ty.clone(), None)),
         ("Tab".into(), sink_list_item(ty.clone())),
         ("Shift-Tab".into(), lift_list_item(ty)),
     ]
@@ -244,7 +244,7 @@ pub fn task_item_keys(schema: &Schema, nested: bool) -> Vec<(String, BoxCommand)
         return Vec::new();
     };
     let mut keys: Vec<(String, BoxCommand)> =
-        vec![("Enter".into(), split_list_item(ty.clone(), None))];
+        vec![("Enter".into(), split_list_item_keep_marks(ty.clone(), None))];
     if nested {
         keys.push(("Tab".into(), sink_list_item(ty.clone())));
     }

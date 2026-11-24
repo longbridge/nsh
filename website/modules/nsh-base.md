@@ -407,7 +407,8 @@ A date, or with `range` a range of dates, picked from months of days, with no lo
 value is an ISO date (`"2026-10-28"`) or `[start, end]` the app owns (`value`, `onChange`) or leaves to the calendar
 (`defaultValue`); `disabledMatcher` keeps days from being picked, and the days take the keyboard as one stop of Tab.
 The app styles the parts and draws the items (`renderItem`, given what an item is; its states are its classes, a
-range's days `selected:` with `data-range-start:`, `data-range-middle:` and `data-range-end:`). See
+range's days `selected:` with `data-range-start:`, `data-range-middle:` and `data-range-end:`, and while its end is
+chosen `data-range-preview-*:` up to the day under the mouse or the keyboard). See
 [Calendar](../elements/calendar.md).
 
 ### TimeField
