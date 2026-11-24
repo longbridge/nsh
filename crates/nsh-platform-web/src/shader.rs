@@ -23,8 +23,11 @@ thread_local! {
 /// exports.
 #[unsafe(no_mangle)]
 pub(crate) extern "C" fn nsh_feature_shader() {
-    nsh_core::shader::set_compile(nsh_core::shader::Shader::compile);
-    ENCODE.with(|e| e.set(Some(encode)));
+    // `black_box`: each slot only ever holds these functions, so without it
+    // LTO calls them directly and keeps naga in the main module, defeating
+    // the side-module split (#3048).
+    nsh_core::shader::set_compile(std::hint::black_box(nsh_core::shader::Shader::compile as _));
+    ENCODE.with(|e| e.set(Some(std::hint::black_box(encode as Encode))));
 }
 
 /// [`encode`] when the runtime has shaders; `null` (no layer) otherwise,
