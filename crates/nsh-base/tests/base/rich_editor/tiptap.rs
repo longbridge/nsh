@@ -232,10 +232,10 @@ fn mark_shortcuts_toggle_tiptaps_marks() {
 }
 
 #[test]
-fn subscript_and_superscript_exclude_each_other() {
+fn subscript_and_superscript_can_combine() {
     let s = pressed(&state_with(vec![p("ab")], 1, Some(3), false), "Mod-,");
     let s = pressed(&s, "Mod-.");
-    assert_doc(&s, r#"doc(paragraph(superscript("ab")))"#);
+    assert_doc(&s, r#"doc(paragraph(subscript(superscript("ab"))))"#);
 }
 
 #[test]

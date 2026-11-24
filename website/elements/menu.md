@@ -102,6 +102,11 @@ function FileMenu() {
 }
 ```
 
+A group of items under one row (Share, Language, Appearance) is a `Submenu`, never a row that expands its items in
+place with a chevron turning down: no platform's menu does that, and those rows would lose the submenu's keys and
+role. A few choices that stay visible are a section instead: a title that is not an item and checkable items under
+it, unindented, between separators (see [Checkable items](#checkable-items)).
+
 All five come from [`nsh/base`](../modules/nsh-base.md). The items reach their menu on their own, so you arrange them
 freely: groups in views, labels, items that come and go with `If`. `popupClass` styles the popup or the sheet,
 whichever the menu is. A style that differs between them follows the same rule, read in a style getter or a binding
