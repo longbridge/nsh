@@ -23,11 +23,7 @@ fn table(rows: &[&[&str]]) -> Value {
 
 /// A paragraph, a table, and a quote holding another table.
 fn table_session() -> EditorSession {
-    session_with_tables(kit::table_kit())
-}
-
-fn session_with_tables(tables: nsh_base::rich_editor::extensions::Extension) -> EditorSession {
-    let manager = ExtensionManager::with_core(vec![kit::starter_kit(), tables]).unwrap();
+    let manager = ExtensionManager::with_core(vec![kit::starter_kit(), kit::table_kit()]).unwrap();
     let schema = manager.schema().clone();
     let doc = schema
         .node_from_json(&json!({"type": "doc", "content": [
@@ -225,8 +221,8 @@ fn a_table_grip_press_selects_with_the_pointer_meta() {
     // Pressing a cell activates its table so its column and row grips show.
     app.press_at("text:a1", Point::new(px(1.0), px(1.0)))
         .unwrap();
-    app.wait_until("the column grips", Duration::from_secs(5), |s| {
-        col_grips(s).len() == 2
+    app.wait_until("the active column grip", Duration::from_secs(5), |s| {
+        col_grips(s).len() == 1
     })
     .unwrap();
     assert_eq!(noted.lock().unwrap().last(), Some(&true));
@@ -257,14 +253,12 @@ fn a_table_grip_press_selects_with_the_pointer_meta() {
 }
 
 #[test]
-fn scoped_grips_follow_the_hovered_or_pressed_cell() {
+fn table_grips_follow_the_hovered_or_pressed_cell_by_default() {
     for (os, idiom) in [(Os::Linux, Idiom::Desktop), (Os::Android, Idiom::Phone)] {
         let mut config = EngineConfig {
             viewport: Size::new(px(800.0), px(900.0)),
             ..EngineConfig::new(nsh_testing::windowed_root_with::<Tables>(|| HarnessProps {
-                session: Some(session_with_tables(kit::table_kit().configure(json!({
-                    "table": {"activeCellGrips": true, "resizable": false}
-                })))),
+                session: Some(table_session()),
             }))
         };
         config.environment.os = os;

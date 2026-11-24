@@ -4585,7 +4585,6 @@ expect DeleteTable: true none
 expect Markdown: *a|*b/c|d 3
 expect Text: "a\tb\nc\td"
 expect Configure: true
-expect Active cell grips: false true *|*
 covers [nsh/base] TableKit
 covers [nsh/base] RichTable
 covers [nsh/base] RichTableRow

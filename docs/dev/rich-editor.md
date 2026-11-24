@@ -269,11 +269,10 @@ cell, the keymaps' `arrow` leaves the table); Tab and Shift-Tab are the `table` 
 right border and each row's bottom border (`resizable`; the last column's when `lastColumnResizable`), the column- or
 row-resize cursor, its line (`tableResizeHandle`, the theme's `primary`) on hover and while dragged; a drag previews
 the new size in the grid's tracks and commits `setColumnWidth` / `setRowHeight` once on release (at least
-`cellMinWidth`, rows 16 points). The table the selection is in has grips (a bar of the `tableGrip` part, the theme's
-`muted-foreground`) centered on its top border over each column and on its left border beside each row: a press
-selects the column or row (a cell selection), a drag on desktops shows the drop line (`tableDropIndicator`, `primary`)
-and moves it with `moveTableColumn` / `moveTableRow` on release. With the `activeCellGrips` table option only the
-hovered cell’s column and row have grips; without a hover the selection supplies the cell. An editor session may
+`cellMinWidth`, rows 16 points). The current cell gets a column grip on the table's top border and a row grip
+on its left border (bars of the `tableGrip` part, the theme's `muted-foreground`). The hovered cell takes precedence
+over the selection. A press selects the column or row (a cell selection). A drag on desktops shows the drop line
+(`tableDropIndicator`, `primary`) and moves the column or row with `moveTableColumn` / `moveTableRow` on release. An editor session may
 provide measured column widths with `set_table_column_measurer`; dragging a track previews its new width over those
 measurements. Table gestures come before the content box's
 selecting (`Rv::table_target` at the press).
