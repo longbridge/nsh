@@ -336,8 +336,11 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   it is, giving it up if the view is still not shown 3 s later: the latest request wins; a `blur()` of it, of a view
   holding it, or `Keyboard.dismiss()`, any focus taken meanwhile (in hosted native content or the embedding app's
   views too) or the view's removal end it; a request dropped without effect logs a warning (`PendingFocus`; an input
-  waits for its field on its own, `InputBox.focus`, and reports the wait, so the same rules end it). Windows and GPUI
-  leave `focus()` on views to them; iOS focuses inputs only.
+  waits for its field on its own, `InputBox.focus`, and reports the wait, so the same rules end it). iOS makes the
+  stop the first responder, a transparent one too (`keyboard::shown`: a popup coming in from `opacity: 0` focuses the
+  item it asked for as it opens), and asks UIKit's focus engine to follow (`keyboard::request_focus`), which it does
+  for a visible stop: Tab and the engine pass over a transparent one (`keyboard::visible`). Windows and GPUI leave
+  `focus()` on views to them.
 - **`onPanEnd` / `onPanStart`** carry `value` (`{ x?, y? }`, the axes `pan` binds): the bound pan values at that moment (a drag may grab a value mid
   animation), for snapping.
 - **Imperative calls**: nodes have `focus()`, `blur()` (inputs, and views that take presses where they are stops of

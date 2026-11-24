@@ -162,15 +162,20 @@ define_class!(
         }
 
         /// A `focusable` view is a stop of the keyboard focus (`focusable`,
-        /// or taking presses), as Tab and `ref.focus()` move it there.
+        /// or taking presses), as Tab and `ref.focus()` move it there. A
+        /// transparent one takes it too ([`crate::keyboard::shown`]), as on
+        /// the other platforms: a popup coming in from `opacity: 0` has the
+        /// item it asked for focused as it opens. Tab passes over it.
         #[unsafe(method(canBecomeFirstResponder))]
         fn can_become_first_responder(&self) -> bool {
-            self.is_focus_stop() && crate::keyboard::visible(self)
+            self.is_focus_stop() && crate::keyboard::shown(self)
         }
 
         /// The same stop is a UIKit focus item, so the system's own Tab
         /// traversal reaches it from the window's initial focus (where
-        /// available) and the focus engine stays on the responder.
+        /// available) and the focus engine follows the responder where it
+        /// is visible: the engine passes over a transparent one, as Tab
+        /// does.
         #[unsafe(method(canBecomeFocused))]
         fn can_become_focused(&self) -> bool {
             self.is_focus_stop() && crate::keyboard::visible(self)
