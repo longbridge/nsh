@@ -84,6 +84,9 @@ pub struct WebProps {
     /// HTTP cache and no saved form data). Read when the platform makes the
     /// web view: the core keeps it from changing afterwards.
     pub incognito: bool,
+    /// The person can pinch to zoom the page, past its viewport's scale
+    /// limits. Read when the platform makes the web view, as `incognito`.
+    pub zoomable: bool,
     /// The URL schemes the page loads from the app
     /// ([`crate::web_resource`]). Read when the platform makes the web
     /// view, as `incognito`.
@@ -108,6 +111,7 @@ impl Default for WebProps {
             javascript_enabled: true,
             back_forward_gestures: false,
             incognito: false,
+            zoomable: false,
             url_schemes: Vec::new(),
             defer_downloads: false,
         }

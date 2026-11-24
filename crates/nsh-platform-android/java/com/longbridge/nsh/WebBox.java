@@ -50,7 +50,7 @@ final class WebBox extends WidgetBox {
     private String injected, injectedBefore, userAgent;
     private boolean scrollable = true;
     // The last props, to set up a WebView made after a renderer ended.
-    private boolean javaScriptEnabled, incognito;
+    private boolean javaScriptEnabled, incognito, zoomable;
     private boolean disposed, processGone;
     private final Handler evaluationHandler = new Handler(Looper.getMainLooper());
     private final HashMap<Integer, Evaluation> evaluations = new HashMap<>();
@@ -254,7 +254,7 @@ final class WebBox extends WidgetBox {
 
     @SuppressWarnings("deprecation") // setSaveFormData: still honored before Android 8.
     void configure(Object[] source, String injected, String injectedBefore, String userAgent,
-            boolean scrollable, boolean javaScriptEnabled, boolean incognito) {
+            boolean scrollable, boolean javaScriptEnabled, boolean incognito, boolean zoomable) {
         if (disposed) return;
         boolean revived = processGone;
         if (processGone && !revive()) return;
@@ -265,13 +265,17 @@ final class WebBox extends WidgetBox {
             settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
             settings.setSaveFormData(false);
         }
+        if (this.source == null && zoomable) zoom(web.getSettings());
         boolean scriptsChanged = !Objects.equals(injected, this.injected)
                 || !Objects.equals(injectedBefore, this.injectedBefore);
         this.injected = injected;
         this.injectedBefore = injectedBefore;
         this.scrollable = scrollable;
         this.javaScriptEnabled = javaScriptEnabled;
-        if (this.source == null) this.incognito = incognito;
+        if (this.source == null) {
+            this.incognito = incognito;
+            this.zoomable = zoomable;
+        }
         web.setVerticalScrollBarEnabled(scrollable);
         web.setHorizontalScrollBarEnabled(scrollable);
         web.getSettings().setJavaScriptEnabled(javaScriptEnabled);
@@ -286,6 +290,17 @@ final class WebBox extends WidgetBox {
             }
             loadSource();
         }
+    }
+
+    /**
+     * {@code zoomable}: pinch zoom with no on-screen buttons. The page's
+     * viewport keeps its say over the layout width (wide viewport and
+     * overview mode stay as they are).
+     */
+    static void zoom(WebSettings settings) {
+        settings.setSupportZoom(true);
+        settings.setBuiltInZoomControls(true);
+        settings.setDisplayZoomControls(false);
     }
 
     private void loadSource() {
@@ -321,6 +336,7 @@ final class WebBox extends WidgetBox {
             settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
             settings.setSaveFormData(false);
         }
+        if (zoomable) zoom(settings);
         settings.setJavaScriptEnabled(javaScriptEnabled);
         if (userAgent != null) settings.setUserAgentString(userAgent);
         fresh.setVerticalScrollBarEnabled(scrollable);

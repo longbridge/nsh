@@ -3180,7 +3180,8 @@ final class Mounter {
                 }
                 String injected = optString(b, objects), before = optString(b, objects), ua = optString(b, objects);
                 boolean scroll = b.getInt() != 0, js = b.getInt() != 0, incognito = b.getInt() != 0;
-                if (v instanceof WebBox) ((WebBox) v).configure(source, injected, before, ua, scroll, js, incognito);
+                boolean zoomable = b.getInt() != 0;
+                if (v instanceof WebBox) ((WebBox) v).configure(source, injected, before, ua, scroll, js, incognito, zoomable);
                 break;
             }
             case 4: {

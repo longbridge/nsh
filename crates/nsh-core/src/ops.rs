@@ -2070,7 +2070,7 @@ pub enum ScrollProp {
     #[prop(js = "bouncesZoom", default = true, on = SCROLL)]
     BouncesZoom(bool),
     /// `zoomable`: the user can pinch to zoom (default true).
-    #[prop(js = "zoomable", default = true, on = SCROLL)]
+    #[prop(js = "zoomable", default = true, on = SCROLL, shared)]
     Pinch(bool),
     /// `centerContent`: content smaller than the viewport (zoomed out) is centered.
     #[prop(js = "centerContent", on = SCROLL)]
@@ -4114,6 +4114,15 @@ pub enum NativeProp {
     /// (with a warning): render a new element to change it.
     #[prop(js = "incognito", on = WEBVIEW)]
     Incognito(bool),
+    /// `zoomable` (web views): the person can pinch to zoom the page, also
+    /// past the scale limits of its viewport (Android's built-in zoom with
+    /// no on-screen buttons, WebKit ignoring the viewport's scale limits on
+    /// iOS, magnification on macOS). False keeps each platform's own
+    /// behavior: Android and macOS do not zoom, iOS zooms as far as the
+    /// page's viewport allows, WebView2 (Windows) zooms by default. Read
+    /// when the web view is made, as `incognito`.
+    #[prop(js = "zoomable", on = WEBVIEW, shared)]
+    Zoomable(bool),
     /// The URL schemes a web view serves from the app (Rust's
     /// `WebView::url_scheme`). Read when the web view is made, as
     /// `incognito`.
