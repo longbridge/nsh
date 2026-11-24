@@ -63,7 +63,7 @@ use std::{
 
 use nsh_core::{
     Bounds, Color, EventKind, EventPayload, InputConfig, PayloadValue, Points, SubmitBehavior,
-    TextAlign,
+    TextAlign, ViewKind,
     geometry::{Point, Size, px},
     tailwind::state,
     text_edit::{char_len, clip_chars},
@@ -944,7 +944,7 @@ pub(crate) fn tab(surface: &Surface, from: &NSView, backward: bool) -> bool {
             && (if crate::view::is_ours(&next) {
                 NshView::from_ns(&next).is_some_and(|view| crate::input::is_key_stop(&view))
             } else {
-                held_seen(&next)
+                held_seen(&next) && held_stop(&next)
             })
             && !from.isDescendantOf(&next)
         {
@@ -963,6 +963,26 @@ fn held_seen(view: &NSView) -> bool {
     while let Some(ns) = at {
         if let Some(view) = NshView::from_ns(&ns) {
             return view.seen_by_keys();
+        }
+        at = crate::view::superview(&ns);
+    }
+    true
+}
+
+/// Whether a view of the key view loop that is not ours is a stop of Tab
+/// by the props of the input holding it: a disabled input, or one with
+/// `focusable: false`, is not (as [`nsh_core::ViewProps::focus_stop`]
+/// decides for views). A hosted view is a stop as AppKit says.
+fn held_stop(view: &NSView) -> bool {
+    let mut at = crate::view::superview(view);
+    while let Some(ns) = at {
+        // An input's pad, lifted to a host above transformed views
+        // (`place_pad`), is held by its input, not by that host.
+        if let Some(view) = pad_owner(&ns).or_else(|| NshView::from_ns(&ns)) {
+            let state = view.state();
+            return state.kind != ViewKind::Input
+                || (state.props.focusable != Some(false)
+                    && !state.props.accessibility.state.disabled);
         }
         at = crate::view::superview(&ns);
     }

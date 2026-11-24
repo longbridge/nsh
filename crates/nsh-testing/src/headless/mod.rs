@@ -4493,6 +4493,37 @@ mod tests {
             }))
     }
 
+    /// Four inputs, the second disabled and the third not `focusable`.
+    #[component]
+    fn InputStops() -> impl IntoElement {
+        view()
+            .child(input().test_id("first"))
+            .child(input().test_id("disabled").disabled(true))
+            .child(input().test_id("unfocusable").focusable(false))
+            .child(input().test_id("last"))
+    }
+
+    #[test]
+    fn tab_passes_over_disabled_and_unfocusable_inputs() {
+        let mut config = EngineConfig::new(crate::windowed_root::<InputStops>());
+        config.environment.os = Os::MacOs;
+        config.environment.idiom = nsh_core::platform::Idiom::Desktop;
+        let mut app = Headless::start(config).unwrap();
+        app.first_render().unwrap();
+        let id = |app: &Headless, s: &str| match app.screen().view(&Selector::parse(s).unwrap()) {
+            crate::screen::Pick::One(id) => id,
+            _ => panic!("{s} is shown"),
+        };
+        let (first, last) = (id(&app, "id:first"), id(&app, "id:last"));
+        let focus = |app: &Headless| app.screen().focused();
+        app.press_key("tab").unwrap();
+        assert_eq!(focus(&app), Some(first));
+        app.press_key("tab").unwrap();
+        assert_eq!(focus(&app), Some(last));
+        app.press_key("shift+tab").unwrap();
+        assert_eq!(focus(&app), Some(first));
+    }
+
     /// A page with two buttons and a dialog over it, open at first, with
     /// two buttons of its own.
     #[component]

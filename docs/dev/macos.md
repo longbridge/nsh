@@ -797,8 +797,10 @@ NSView, which AppKit's key view loop would still stop at: a view with no area
 (each view of a `display: none` subtree gets an empty frame) or inside a
 `visibility: hidden` one (`NshView::seen_by_keys`, as the headless driver's
 stops are shown views). Inputs' fields and hosted views follow the view of
-ours holding them, and the focus leaves one a batch hid for the root
-(`input::release_hidden_focus`), so no key acts on what cannot be seen.
+ours holding them; an input's field is no stop either when the input is
+disabled or `focusable={false}` (`text_input::held_stop`), and the focus
+leaves one a batch hid for the root (`input::release_hidden_focus`), so no
+key acts on what cannot be seen.
 Tab/Shift+Tab stay within the newest modal and advance from the currently
 focused stop. The root and passive layout views stay outside that loop. A
 modal remembers the input or Tab stop that had the focus when it was
