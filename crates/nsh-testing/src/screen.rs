@@ -164,7 +164,8 @@ pub struct Screen {
     /// Inputs configured to take the focus when they mount (`autoFocus`)
     /// that are not in a window yet, in the order they were configured.
     auto_focus: Vec<NodeId>,
-    /// Scroll views a command moved, whose offset the engine is told
+    /// Scroll views the core's items moved (`ScrollBy`, `ScrollTo`, a
+    /// content's new end), whose offset the engine is told
     /// ([`Screen::take_scrolled`]), as a platform reports it.
     scrolled: Vec<NodeId>,
     /// Screens a back popped natively, until the app removes them.
@@ -855,7 +856,11 @@ impl Screen {
                 self.pull_back(*id);
             }
             MountItem::ScrollBy { id, dx, dy } => {
-                // Not clamped: the core knows its content.
+                // Not clamped: the core knows its content. Reported, as
+                // the platforms report the offset it moves a view to: the
+                // core's offset (`ref.measure()`, a list's window) takes in
+                // the scrolls that keep rows in place as rows above them
+                // change size.
                 if let Some(scroll) = self.scroll_mut(*id) {
                     scroll.applied = scroll.applied.wrapping_add(1);
                     if scroll.horizontal {
@@ -863,6 +868,7 @@ impl Screen {
                     } else {
                         scroll.y += *dy;
                     }
+                    self.moved(*id);
                 }
             }
             MountItem::Command { id, command } => {
@@ -1005,7 +1011,7 @@ impl Screen {
                         scroll.y = y.clamp(Points::ZERO, end);
                     }
                     scroll.applied = scroll.applied.wrapping_add(1);
-                    self.scrolled.push(id);
+                    self.moved(id);
                 }
             }
             Command::ScrollToEnd { .. } => {
@@ -1017,7 +1023,7 @@ impl Screen {
                         scroll.y = end;
                     }
                     scroll.applied = scroll.applied.wrapping_add(1);
-                    self.scrolled.push(id);
+                    self.moved(id);
                 }
             }
             _ => {}
@@ -3700,11 +3706,20 @@ impl Screen {
         };
         if *at > end {
             *at = end;
+            self.moved(id);
+        }
+    }
+
+    /// Scroll view `id` moved by what the core sent (a scroll, or its
+    /// content's new end): reported once after the batch, however many
+    /// items of it moved the view.
+    fn moved(&mut self, id: NodeId) {
+        if !self.scrolled.contains(&id) {
             self.scrolled.push(id);
         }
     }
 
-    /// The scroll views a command moved since the last call.
+    /// The scroll views the core's items moved since the last call.
     pub(crate) fn take_scrolled(&mut self) -> Vec<NodeId> {
         std::mem::take(&mut self.scrolled)
     }
@@ -4066,7 +4081,8 @@ mod tests {
         ]));
         // Rows arrive above the one row: the core keeps it in place with a
         // scroll it sends before the new content size, and the view goes
-        // as far as that size lets it.
+        // as far as that size lets it. The scroll and the pull back move
+        // it once: one report.
         screen.apply(&batch(vec![by(1176.0), content(1232.0)]));
         assert_eq!(screen.scroll(2).unwrap().y, Points(432.0));
         assert_eq!(screen.take_scrolled(), [2]);
@@ -4075,9 +4091,10 @@ mod tests {
         screen.apply(&batch(vec![content(56.0)]));
         assert_eq!(screen.scroll(2).unwrap().y, Points::ZERO);
         assert_eq!(screen.take_scrolled(), [2]);
-        // So does a viewport growing past the content's end.
+        // So does a viewport growing past the content's end, from where the
+        // core's scroll put the view (reported, as any scroll of the core's).
         screen.apply(&batch(vec![by(432.0), content(1232.0)]));
-        assert!(screen.take_scrolled().is_empty());
+        assert_eq!(screen.take_scrolled(), [2]);
         screen.apply(&batch(vec![frame(2, 0.0, 0.0, 390.0, 1000.0)]));
         assert_eq!(screen.scroll(2).unwrap().y, Points(232.0));
         assert_eq!(screen.take_scrolled(), [2]);
