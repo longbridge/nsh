@@ -67,6 +67,7 @@ mount(() => (
 | `scrollable` | `boolean` | `true` | The user can scroll the page. |
 | `javaScriptEnabled` | `boolean` | `true` | Pages run scripts. |
 | `incognito` | `boolean` | `false` | The pages' website data (cookies, storage, the cache) lives only as long as the web view, apart from the app's; on Android the web view loads without the HTTP cache and saves no form data ([website data](../docs/web-view-and-video.md#website-data)). Read when the web view is made. |
+| `zoomable` | `boolean` | `false` | The person can pinch to zoom the page, also past its viewport's scale limits: built-in zoom without on-screen buttons on Android, the viewport's limits ignored on iOS, magnification on macOS. Off keeps each platform's own behavior (Android and macOS do not zoom, iOS zooms as far as the viewport allows, Windows zooms). Read when the web view is made. |
 | `ios` | `{ allowsBackForwardNavigationGestures?: boolean }` | | iOS only: swipe from the edges to go back and forward. |
 | `desktop` | `{ allowsBackForwardNavigationGestures?: boolean }` | | macOS: two-finger trackpad swipes go back and forward; Windows: touchscreen swipes; Linux: touchpad swipes. |
 | `android` | `{ downloads?: { scope?: string[] } }` | | Android HTTP(S) GET request scope for download decisions; see [download destinations](../elements/web-view.md#download-destinations-in-rust). |

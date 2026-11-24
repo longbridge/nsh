@@ -1651,6 +1651,14 @@ impl WebView {
         self.set(Prop::Native(NativeProp::Incognito(incognito)))
     }
 
+    /// Lets the person pinch to zoom the page, also past its viewport's
+    /// scale limits (default no: each platform's own behavior, see the
+    /// `zoomable` prop). Read when the web view is made, as
+    /// [`incognito`](Self::incognito).
+    pub fn zoomable(self, zoomable: bool) -> Self {
+        self.set(Prop::Native(NativeProp::Zoomable(zoomable)))
+    }
+
     /// Serves the page the URLs of `scheme` (`"app-image"` for
     /// `<img src="app-image:1">`) from the app: `handler` answers each
     /// request with bytes and a MIME type

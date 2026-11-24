@@ -2498,6 +2498,11 @@ impl WebHost {
                 web,
                 setAllowsBackForwardNavigationGestures: Bool::new(p.back_forward_gestures)
             ];
+            // `zoomable`: pinch (trackpad) magnification; off is WebKit's
+            // default. The core keeps it from changing once it is made.
+            if first {
+                let _: () = msg_send![web, setAllowsMagnification: Bool::new(p.zoomable)];
+            }
             let prefs: Retained<AnyObject> = msg_send![&config, defaultWebpagePreferences];
             let _: () =
                 msg_send![&prefs, setAllowsContentJavaScript: Bool::new(p.javascript_enabled)];

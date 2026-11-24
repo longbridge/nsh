@@ -1434,6 +1434,7 @@ fn native_props(e: &mut Encoded, p: &NativeProps) {
             e.bool(w.scrollable);
             e.bool(w.javascript_enabled);
             e.bool(w.incognito);
+            e.bool(w.zoomable);
         }
         NativeProps::Video(v) => {
             e.int(4);

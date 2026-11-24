@@ -507,6 +507,13 @@ impl WebHost {
                     msg_send![class(c"WKWebsiteDataStore"), nonPersistentDataStore];
                 let _: () = msg_send![&config, setWebsiteDataStore: &*store];
             }
+            // `zoomable`: pinch zoom past the page's viewport limits
+            // (`user-scalable=no`, `maximum-scale`). WKWebView pinches
+            // within them anyway; the configuration is read only when the
+            // web view is made.
+            if p.zoomable {
+                let _: () = msg_send![&config, setIgnoresViewportScaleLimits: Bool::YES];
+            }
             self.schemes =
                 nsh_platform_apple::web_scheme::serve(handler.mtm(), &config, &p.url_schemes);
             let content: Retained<AnyObject> = msg_send![&config, userContentController];
