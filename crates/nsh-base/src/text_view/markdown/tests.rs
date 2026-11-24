@@ -1269,6 +1269,40 @@ fn streamed_reference_brackets_and_unknown_tags_stay_text() {
     assert_eq!(blocks("<foo> x"), vec![p(vec![t("<foo> x")])]);
 }
 
+#[test]
+fn streamed_closers_brackets_and_task_boxes_show_no_markers() {
+    // Every prefix of a streamed reply: a closer typed in part, a label
+    // whose `(` has not arrived and a task box alone never show their
+    // markers as text.
+    for source in [
+        "Some **bold** and *it* and __b__ and ~~del~~ end",
+        "See [the docs](https://example.com) and ![alt](a.png) end",
+    ] {
+        for (prefix, doc) in streamed_prefixes(source) {
+            let text = doc.plain_text();
+            assert!(
+                !text.contains(['*', '_', '~', '[', ']']),
+                "{prefix:?}: {text:?}"
+            );
+        }
+    }
+    for (prefix, doc) in streamed_prefixes("Run ``a`b`` now") {
+        let debug = format!("{:?}", doc.blocks);
+        assert!(!debug.contains("``"), "{prefix:?}: {debug}");
+    }
+    for (prefix, doc) in streamed_prefixes("- [x] done\n- [ ] todo\n\n1. [X] one") {
+        let text = doc.plain_text();
+        assert!(!text.contains(['[', ']']), "{prefix:?}: {text:?}");
+        let (mut items, mut code) = (Vec::new(), Vec::new());
+        walk(&doc.blocks, &mut items, &mut code);
+        assert!(
+            items.iter().all(|item| item.checked.is_some()),
+            "{prefix:?}: {:?}",
+            doc.blocks
+        );
+    }
+}
+
 /// Every prefix of `source` (at each character), as a streamed reply
 /// shows it.
 fn streamed_prefixes(source: &str) -> impl Iterator<Item = (&str, Document)> {
