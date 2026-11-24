@@ -140,6 +140,7 @@ fn content(rv: Rv) -> impl IntoElement {
     let (down, tap, mov, up, end) = (rv.clone(), rv.clone(), rv.clone(), rv.clone(), rv.clone());
     let (long, lift, armed, sweep) = (rv.clone(), rv.clone(), rv.clone(), rv.clone());
     let over = rv.clone();
+    let hovered = rv.hovered_table_cell;
     let dropped = rv.clone();
     let claim = rv.clone();
     let placed = rv.clone();
@@ -182,6 +183,12 @@ fn content(rv: Rv) -> impl IntoElement {
     .on(EventKind::MouseMove, move |p: &EventPayload| {
         if let EventPayload::Mouse(e) = p {
             over.note_pointer(e.position, e.page_position);
+            over.clear_table_hover_outside(e.position);
+        }
+    })
+    .on_mouse_leave(move |_: &MouseEvent| {
+        if hovered.get_untracked().is_some() {
+            hovered.set(None);
         }
     })
     .on(EventKind::Press, move |p: &EventPayload| {
@@ -380,7 +387,12 @@ struct Window {
 fn doc_window(rv: &Rv, items: &[BlockItem]) -> Window {
     let n = items.len();
     if n <= WINDOWED_BLOCKS {
-        return Window { start: 0, end: n, above: 0.0, below: 0.0 };
+        return Window {
+            start: 0,
+            end: n,
+            above: 0.0,
+            below: 0.0,
+        };
     }
     let geo = rv.geo.borrow();
     let frame = |i: usize| {
@@ -406,7 +418,11 @@ fn doc_window(rv: &Rv, items: &[BlockItem]) -> Window {
         }
     }
     let average = if count > 0 { sum / count as f32 } else { 24.0 };
-    let gap = if gap_count > 0 { gaps / gap_count as f32 } else { 0.0 };
+    let gap = if gap_count > 0 {
+        gaps / gap_count as f32
+    } else {
+        0.0
+    };
     let pitch = |i: usize| frame(i).map_or(average, |b| b.size.height.0) + gap;
     let viewport = rv.viewport.get().height.0;
     let viewport = if viewport > 0.0 { viewport } else { 1000.0 };
@@ -448,7 +464,12 @@ fn doc_window(rv: &Rv, items: &[BlockItem]) -> Window {
     let end = end.min(n);
     let above = (0..start).map(pitch).sum();
     let below = (end..n).map(pitch).sum();
-    Window { start, end, above, below }
+    Window {
+        start,
+        end,
+        above,
+        below,
+    }
 }
 
 /// The document's blocks: every one, or, in a long document, those near
@@ -460,7 +481,11 @@ fn doc_blocks(rv: Rv) -> Vec<AnyElement> {
         window_rv.layout_rev.get();
         window_rv.sel_rev.get();
         let tree = window_rv.tree.borrow();
-        let items = tree.children.get(&DOC).map(Vec::as_slice).unwrap_or_default();
+        let items = tree
+            .children
+            .get(&DOC)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
         let items = items.to_vec();
         drop(tree);
         doc_window(&window_rv, &items)
@@ -470,7 +495,11 @@ fn doc_blocks(rv: Rv) -> Vec<AnyElement> {
         list_rv.doc_rev.get();
         let w = window.get();
         let tree = list_rv.tree.borrow();
-        let items = tree.children.get(&DOC).map(Vec::as_slice).unwrap_or_default();
+        let items = tree
+            .children
+            .get(&DOC)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
         items[w.start.min(items.len())..w.end.min(items.len())].to_vec()
     });
     // A spacer is there only while it stands for blocks, so a short
@@ -492,7 +521,11 @@ fn doc_blocks(rv: Rv) -> Vec<AnyElement> {
     };
     vec![
         spacer(true),
-        each(list, |b: &BlockItem| b.id, move |item, _| block(rv.clone(), item)),
+        each(
+            list,
+            |b: &BlockItem| b.id,
+            move |item, _| block(rv.clone(), item),
+        ),
         spacer(false),
     ]
 }

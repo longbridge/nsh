@@ -252,8 +252,8 @@ fn a_table_grip_press_selects_with_the_pointer_meta() {
     // Pressing a cell activates its table so its column and row grips show.
     app.press_at("text:a1", Point::new(px(1.0), px(1.0)))
         .unwrap();
-    app.wait_until("the column grips", Duration::from_secs(5), |s| {
-        col_grips(s).len() == 2
+    app.wait_until("the active column grip", Duration::from_secs(5), |s| {
+        col_grips(s).len() == 1
     })
     .unwrap();
     assert_eq!(noted.lock().unwrap().last(), Some(&true));
@@ -281,4 +281,66 @@ fn a_table_grip_press_selects_with_the_pointer_meta() {
     let notes = noted.lock().unwrap();
     assert!(notes.len() > before);
     assert_eq!(notes.last(), Some(&true));
+}
+
+#[test]
+fn table_grips_follow_the_hovered_or_pressed_cell_by_default() {
+    for (os, idiom) in [(Os::Linux, Idiom::Desktop), (Os::Android, Idiom::Phone)] {
+        let mut config = EngineConfig {
+            viewport: Size::new(px(800.0), px(900.0)),
+            ..EngineConfig::new(nsh_testing::windowed_root_with::<Tables>(|| HarnessProps {
+                session: Some(table_session()),
+            }))
+        };
+        config.environment.os = os;
+        config.environment.idiom = idiom;
+        let mut app = Headless::start(config).unwrap();
+        see(&mut app, "Ready");
+        let grips = |s: &Screen| -> Option<(f32, f32)> {
+            let cols = col_grips(s);
+            let rows: Vec<_> = s
+                .layout_nodes()
+                .into_iter()
+                .map(|n| n.bounds)
+                .filter(|b| b.size.width.0 == 12. && b.size.height.0 == 24.)
+                .collect();
+            match (cols.as_slice(), rows.as_slice()) {
+                ([c], [r]) => Some((c.origin.x.0, r.origin.y.0)),
+                _ => None,
+            }
+        };
+        if idiom == Idiom::Desktop {
+            app.hover("text:a1").unwrap();
+        } else {
+            app.press("text:a1").unwrap();
+        }
+        app.wait_until("one row and one column grip", Duration::from_secs(5), |s| {
+            grips(s).is_some()
+        })
+        .unwrap();
+        let first = grips(app.screen()).unwrap();
+        if idiom == Idiom::Desktop {
+            app.hover("text:b2").unwrap();
+        } else {
+            app.press("text:b2").unwrap();
+        }
+        app.wait_until(
+            "the other row and column replace the previous grips",
+            Duration::from_secs(5),
+            |s| grips(s).is_some_and(|(x, y)| x > first.0 && y > first.1),
+        )
+        .unwrap();
+        app.press("text:b2").unwrap();
+        if idiom == Idiom::Desktop {
+            app.hover("text:above").unwrap();
+            assert!(grips(app.screen()).is_some_and(|(x, y)| x > first.0 && y > first.1));
+        }
+        app.press("text:above").unwrap();
+        app.wait_until(
+            "grips leave with the selection",
+            Duration::from_secs(5),
+            |s| col_grips(s).is_empty(),
+        )
+        .unwrap();
+    }
 }

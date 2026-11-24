@@ -98,7 +98,14 @@ pub(crate) fn selected(
     .plain_text();
     debug_assert_eq!(formulas.len(), plain.len());
     let found = locate(&plain, &shown(&plain), &unmarked, reported.start)
-        .or_else(|| locate(&plain, &sourced(&plain, &formulas), &unmarked, reported.start))
+        .or_else(|| {
+            locate(
+                &plain,
+                &sourced(&plain, &formulas),
+                &unmarked,
+                reported.start,
+            )
+        })
         .or_else(|| locate(&plain, &shown(&masked), &unmarked, reported.start))
         .map(|(from, to)| widen(&masked, &unmarked, from, to));
     let Some((from, to)) = found else {
