@@ -12042,6 +12042,16 @@ fn measure_leaf_size<M: TextEngine>(
                 width: known.width.map(|w| (w - inset.width).max(0.0)),
                 height: known.height.map(|h| (h - inset.height).max(0.0)),
             };
+            // The space Taffy offers the content box is the space around
+            // the box less its padding and border, negative where that
+            // space is narrower than they are (a column squeezed while it
+            // resizes). The content then has no room, as with a known
+            // size: an input measured as wide as that negative space gave
+            // Taffy a negative overflow, which its debug assertions reject.
+            let available = taffy::Size {
+                width: available.width.map_definite_value(|w| w.max(0.0)),
+                height: available.height.map_definite_value(|h| h.max(0.0)),
+            };
             measure_content(engine, cache, cx, known, available, input_max_height)
         },
     );
