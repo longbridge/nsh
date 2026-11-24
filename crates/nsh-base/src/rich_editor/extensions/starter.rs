@@ -492,6 +492,7 @@ pub mod marks {
                 ],
                 inclusive: false,
                 exitable: true,
+                keep_on_split: false,
                 ..Default::default()
             },
         )
