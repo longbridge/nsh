@@ -2328,13 +2328,13 @@ pub(crate) fn root_in(surface: &Surface, window: &NSWindow) -> Option<NshView> {
 /// window of the app's own; `None` for another surface's view (or one in
 /// no window's tree).
 pub(crate) fn root_containing(surface: &Surface, view: &NshView) -> Option<NshView> {
-    if view.ns().isDescendantOf(surface.root.ns()) {
+    if view.is_within(surface.root.ns()) {
         return Some(surface.root.clone());
     }
     let windows = surface.windows.try_borrow().ok()?;
     windows
         .values()
-        .find(|w| view.ns().isDescendantOf(w.view.ns()))
+        .find(|w| view.is_within(w.view.ns()))
         .map(|w| w.view.clone())
 }
 

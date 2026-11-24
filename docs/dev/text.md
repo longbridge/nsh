@@ -37,8 +37,9 @@
   truncations and omits the ellipsis from range boxes; mixed-direction ranges split by visual run on both Apple
   backends. Web hit testing measures cluster rectangles in the complete drawn DOM run on first use, keeps both
   edges at bidi boundaries and caches them with the layout. Linux selection drawing reuses its rectangle buffer.
-  Test-id-only span updates remount the text metadata with its cached final layout (`LaidText`), retaining fitted
-  font sizes. They preserve prepared state and measurement caches and raise no `onTextLayout`.
+  Span updates of metadata only (a test id, a link's `href`) remount the text metadata with its cached final layout
+  (`LaidText`), retaining fitted font sizes. They preserve prepared state and measurement caches and raise no
+  `onTextLayout`.
 - A text laid out gives Taffy its first line's baseline, below its top through its padding and border
   (`TextEngine::first_baseline`: every built-in engine, CoreText on macOS and iOS, Android, Pango, DirectWrite, GPUI,
   the web, Cells and the headless one; `measure_leaf`, cached per width in `TextContext::baseline`), so a flex row
@@ -159,6 +160,11 @@
   restyled span merges into its text again. The platforms only hit-test their links as they already do for hints
   and presses. A color change takes the path above; a decoration line typesets the paragraph again without laying
   out the views around it (`layout_eq`).
+- **Where links go**: a link's span with an `href` (`ViewProps::href`, from the hidden builder `Link` sets its own
+  with: `TextView` gives each of its links its URL) records it in its block's text (`AttributedText::link_hrefs`, by
+  the link's index in `links`, `Core::collect_text`). It is metadata, as `test_ids`: a new one is mounted without
+  typesetting again (`metadata_eq`), on a fitted text's drawn spans too (`set_metadata`). Platforms that make a
+  link a hyperlink take it: the web draws the link's characters as an `a` (`docs/dev/web.md` "Links of text").
 - **Span backgrounds**: `backgroundColor` / `borderRadius` on a nested `<Text>` (its view style, which spans otherwise
   ignore) become `ResolvedTextStyle::background` (`TextBackground`: color, radius and the span's node, so neighboring
   spans that look the same stay apart), inherited by the spans inside it; the block's own background stays its view's.
