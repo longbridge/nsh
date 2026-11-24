@@ -160,7 +160,7 @@
   context isolates it); `block` boxes never collapse margins with their children (an unset `align-content` resolves to
   `flex-start`, which makes taffy's block a formatting context); strings keep their whitespace (`whitespace-*` sets
   wrapping only; the JSX compiler collapses literal JSX text); `transition` / `transition-all` animate their groups
-  (`TransitionProps`: colors, opacity, transform, shadows, shape; `transition-all` adds the clip path), and filters, backdrop filters, gradients and layout
+  (`TransitionProps`: colors, opacity, transform, shadows, shape; `transition-all` adds the clip path and the mask), and filters, backdrop filters, gradients and layout
   take their new values at once; `focus-visible:` (`state::FOCUS_VISIBLE`) is the focus that shows, after the
   browsers' `:focus-visible`: the platforms report only how the user last gave input (`InputModality`: a key, or a
   pointer, pen or finger going down; `EngineControl::set_input_modality`), and the core decides (`classes.rs`
@@ -269,7 +269,7 @@
   (Apple's Liquid Glass, drawn in the `backdropFilter`'s place on iOS 26 and macOS 26 and later (`UIGlassEffect`, `NSGlassEffectView`, both looked up at run time) and nowhere else, so give a glass
   view a blur to fall back to), `glassTintColor` (the tint of the native glass on iOS 26 and macOS 26;
   `null` restores its native default, an explicit transparent color remains a tint, and the earlier-system blur fallback is unchanged), `maskImage` (a gradient whose alpha decides how much of the view is drawn, its backdrop
-  filter included; iOS, macOS, Android, Linux and web, the topmost layer of several. A masked `backdropFilter` blurs by its exact radius on iOS and macOS, without the material's tint (`PlainBlur` in their `visual.rs`), so layers of them stack into a progressive blur), `clipPath` (CSS's `inset()` shape only, a rounded rectangle and no arbitrary
+  filter included; iOS, macOS, Android, Linux and web, the topmost layer of several. A masked `backdropFilter` blurs by its exact radius on iOS and macOS, without the material's tint (`PlainBlur` in their `visual.rs`), so layers of them stack into a progressive blur; `Gradient::lerp` transitions it stop by stop between gradients of the same kind and stop count, through the shared `transition.rs` on macOS and Linux, while iOS, Android and web still change it at once), `clipPath` (CSS's `inset()` shape only, a rounded rectangle and no arbitrary
   path: `ClipInset` in `effects.rs` resolves it against the view's size and is what every backend clips drawing and hit
   testing to, `HitArea::clipped` for the desktops; it transitions between two insets and changes at once to or from
   `none`), `mixBlendMode`, `outline*`, `visibility`, `cursor`, `transition*` (CSS: property groups,
