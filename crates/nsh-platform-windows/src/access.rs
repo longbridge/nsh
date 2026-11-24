@@ -708,6 +708,19 @@ fn update(surface: &Rc<Surface>, view: &NshView) -> bool {
         _ => {}
     }
     let label_changed = old.name != spec.name;
+    // An alert that appears is read by itself, as on macOS and the web:
+    // its name, the label or else its texts. Its changes afterwards are
+    // the live region's (`#2816`), at the priority the app asks for.
+    if spec.part == Part::Element(Control::Alert)
+        && old.part != Part::Element(Control::Alert)
+        && let Some(said) = spec
+            .name
+            .as_deref()
+            .map(str::to_owned)
+            .filter(|said| !said.is_empty())
+    {
+        uia::notify(surface, Some(view), &said, true);
+    }
     if label_changed || text_changed {
         let live = live_region(view);
         if live != LiveRegion::None {
@@ -921,6 +934,43 @@ mod tests {
             label: Some(label.into()),
             ..Default::default()
         }
+    }
+
+    /// An alert is exposed as one, named by its label or else its texts:
+    /// what `update` reads when it announces one that appears.
+    #[test]
+    fn an_alert_is_exposed_as_an_alert_named_by_its_label_or_texts() {
+        let alert = view(
+            2,
+            ViewKind::View,
+            Accessibility {
+                role: Role::Alert,
+                ..labelled("Upload failed")
+            },
+        );
+        let spec = spec_of(&alert.try_state().unwrap());
+        assert_eq!(spec.part, Part::Element(Control::Alert));
+        assert_eq!(spec.name.as_deref(), Some("Upload failed"));
+
+        // Without a label, its text names it.
+        let alert = view(4, ViewKind::View, with_role(Role::Alert));
+        crate::text::set(
+            &alert,
+            &Arc::new(AttributedText {
+                text: "Upload failed".into(),
+                ..Default::default()
+            }),
+            &nsh_core::TextLayout(Arc::new(())),
+            Default::default(),
+        );
+        let spec = spec_of(&alert.try_state().unwrap());
+        assert_eq!(spec.part, Part::Element(Control::Alert));
+        assert_eq!(spec.name.as_deref(), Some("Upload failed"));
+
+        // A view with no alert role is not one.
+        let plain = view(6, ViewKind::View, Accessibility::default());
+        let spec = spec_of(&plain.try_state().unwrap());
+        assert_ne!(spec.part, Part::Element(Control::Alert));
     }
 
     #[test]
