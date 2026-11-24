@@ -1,7 +1,13 @@
 //! CoreText text engine: typesets on the engine thread, draws on the main
 //! thread from finished `CTLine`s, so every text is laid out once.
 
-use std::{cell::RefCell, ffi::c_void, ops::Range, ptr::NonNull};
+use std::{
+    cell::RefCell,
+    ffi::c_void,
+    ops::Range,
+    ptr::NonNull,
+    sync::atomic::{AtomicU32, Ordering},
+};
 
 use nsh_core::{
     Affinity, AttributedText, Bounds, Color, EllipsizeMode, FamilyName, FontFamily, Point, Points,
@@ -75,6 +81,17 @@ impl FontCache {
     fn clear(&self) {
         self.fonts.borrow_mut().clear();
     }
+}
+
+/// Fonts registered in the process so far ([`fonts_registered`]).
+static FONTS_REGISTERED: AtomicU32 = AtomicU32::new(0);
+
+/// Changes whenever the app registers a font: a family may resolve to
+/// another font from then on, so fonts and lines made from family names
+/// before (the canvas's, which draws on another thread than the engine
+/// that registers) are made again.
+pub(crate) fn fonts_registered() -> u32 {
+    FONTS_REGISTERED.load(Ordering::Relaxed)
 }
 
 pub(crate) fn make_font(style: &ResolvedTextStyle) -> CFRetained<CTFont> {
@@ -1262,6 +1279,7 @@ impl TextEngine for CoreTextEngine {
         };
         // Fonts resolve differently now (a family may have been missing).
         self.fonts.clear();
+        FONTS_REGISTERED.fetch_add(1, Ordering::Relaxed);
         if ok {
             return Ok(());
         }

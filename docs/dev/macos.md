@@ -176,6 +176,11 @@ before each redirect and cancels one the grant does not allow, reporting it to t
   to their 32-point-tile-aligned bounds (`CanvasState::content_bounds`, translating the context by `-frame.origin`),
   and a canvas that paints nothing visible removes its content layer instead of allocating a backing store. Both
   surfaces follow the view's clipping, opacity, scale and visibility. Contents stay in the screen's format.
+- **Canvas text is laid out once** (`canvas/lines.rs`): a canvas keeps the `CTLine` of each text and font it
+  draws, and the fonts, as Windows and Linux keep their DirectWrite / Pango layouts. The line takes its color from
+  the context, so a fill or stroke in any color reuses it. A new drawing keeps only the lines the previous one drew,
+  at most 1024 per canvas; registering a font drops them all. Before, every paint made a font, an attributed string
+  and a line per text on the main thread, most of a text-heavy canvas's replay while a window resizes.
 - **No masks on what scrolls, where avoidable** (`visual.rs`): the window server pays for a mask on every frame its
   layer moves, so shadows and inset shadows avoid masks where their background allows.
 - **Out-of-sight content is not drawn** (`Mounter::draw_when_shown`): text and canvases whose content changes (a
