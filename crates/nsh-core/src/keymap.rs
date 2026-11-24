@@ -724,7 +724,7 @@ pub enum OverFocused {
     /// (`Core::keymap`), where the newest that may fire wins.
     Always,
     /// Return and Space, from a focused control that a pointer gave the
-    /// focus ([`Keymap::pointer_focus`]): a press, or a popup a press used
+    /// focus (`Keymap::pointer_focus`): a press, or a popup a press used
     /// giving the focus back to its trigger. A control the keyboard
     /// focused (Tab, the arrows) keeps them. A media player's Space plays
     /// after a click on Mute.
@@ -828,7 +828,7 @@ impl KeyBinding {
 
     /// It comes after the views' bindings in the root's table
     /// ([`OverFocused::Always`]).
-    pub fn comes_after_views(&self) -> bool {
+    pub(crate) fn comes_after_views(&self) -> bool {
         self.over_focused == OverFocused::Always
     }
 
@@ -909,7 +909,7 @@ impl Keymap {
 
     /// The table with the keyboard focus given by a pointer when
     /// `pointer_focus` ([`Self::pointer_focus`]).
-    pub fn with_pointer_focus(mut self, pointer_focus: bool) -> Keymap {
+    pub(crate) fn with_pointer_focus(mut self, pointer_focus: bool) -> Keymap {
         self.pointer_focus = pointer_focus;
         self
     }
@@ -919,14 +919,14 @@ impl Keymap {
     /// it as the focus moves, in the table it mounts, while a binding
     /// asks for it ([`OverFocused::Pointer`]); the keys that
     /// follow are matched with it on the spot.
-    pub fn pointer_focus(&self) -> bool {
+    pub(crate) fn pointer_focus(&self) -> bool {
         self.pointer_focus
     }
 
     /// Whether a binding asks how the focus came
     /// ([`OverFocused::Pointer`]): the core keeps
     /// [`Self::pointer_focus`] in the table only then.
-    pub fn takes_over_pointer_focus(&self) -> bool {
+    pub(crate) fn takes_over_pointer_focus(&self) -> bool {
         self.bindings.iter().any(KeyBinding::over_pointer_focus)
     }
 
@@ -935,7 +935,7 @@ impl Keymap {
     /// [`crate::input::presses_focused_control`]). The focus' own bindings
     /// ([`KeyBinding::for_focus`]) take such a key, the others give way to
     /// the control. When a pointer gave the focus
-    /// ([`Self::pointer_focus`]) and a binding of the key takes it over
+    /// (`Keymap::pointer_focus`) and a binding of the key takes it over
     /// such a focus ([`OverFocused::Pointer`]), only those take
     /// it: the focus' own give way to them too (a `Select` trigger's Space
     /// opening its list). A platform that matches the bindings itself
@@ -1001,7 +1001,7 @@ impl Keymap {
     /// action) does not act instead of the control the user moved the
     /// focus to; one that takes them over a pointer's focus
     /// ([`OverFocused::Pointer`]) does when a pointer gave it
-    /// ([`Self::pointer_focus`]).
+    /// (`Keymap::pointer_focus`).
     pub fn find_at(
         &self,
         window: crate::NodeId,
