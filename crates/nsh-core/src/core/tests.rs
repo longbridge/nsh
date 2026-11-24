@@ -33607,6 +33607,119 @@ fn fixed_views_are_laid_out_in_their_root_view() {
 }
 
 #[test]
+fn fixing_a_view_in_a_scroll_view_unculls_its_subtree() {
+    let mut c = core();
+    // Scroll view (2) -> wrapper (3) -> toolbar (4) with an existing item (5),
+    // plus a tall spacer (6) and an off-screen descendant (7) that starts culled.
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Scroll,
+            },
+            style_op(2, &[("height", StyleValue::Number(100.0))]),
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            class_op(3, "h-[1200px]"),
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+            Op::Create {
+                id: 4,
+                tag: Tag::View,
+            },
+            class_op(4, "flex-row h-[40px]"),
+            Op::Insert {
+                parent: 3,
+                child: 4,
+                before: None,
+            },
+            Op::Create {
+                id: 5,
+                tag: Tag::View,
+            },
+            class_op(5, "w-[40px] h-[40px]"),
+            Op::Insert {
+                parent: 4,
+                child: 5,
+                before: None,
+            },
+            Op::Create {
+                id: 6,
+                tag: Tag::View,
+            },
+            class_op(6, "h-[1000px]"),
+            Op::Insert {
+                parent: 3,
+                child: 6,
+                before: None,
+            },
+            Op::Create {
+                id: 7,
+                tag: Tag::View,
+            },
+            class_op(7, "h-[40px]"),
+            Op::Insert {
+                parent: 3,
+                child: 7,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert!(created_in(&batch).contains(&3));
+    assert!(created_in(&batch).contains(&4));
+    assert!(created_in(&batch).contains(&5));
+    assert!(!created_in(&batch).contains(&7));
+
+    // In the same commit: promote wrapper (3) to `position: fixed` and insert a
+    // new child (8) into toolbar (4). Before `sync_fixed()` runs, `insert` sees
+    // the outer scroll view as the culling scope and holds back (8); once (3)
+    // becomes fixed (`is_layout_root()`), the outer scroll view skips it.
+    apply(
+        &mut c,
+        vec![
+            class_op(3, "fixed inset-0"),
+            Op::Create {
+                id: 8,
+                tag: Tag::View,
+            },
+            class_op(8, "w-[60px] h-[40px]"),
+            Op::Insert {
+                parent: 4,
+                child: 8,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    let created = created_in(&batch);
+    assert!(
+        created.contains(&8),
+        "newly inserted child must be created: {created:?}"
+    );
+    assert!(
+        created.contains(&7),
+        "previously culled descendant must be created: {created:?}"
+    );
+    let ins = inserts(&batch);
+    assert!(ins.contains(&(ROOT_ID, 3, None)), "{ins:?}");
+    assert!(ins.contains(&(4, 8, None)), "{ins:?}");
+    assert!(ins.contains(&(3, 7, None)), "{ins:?}");
+    assert_eq!(frame_of(&batch, 8), Some(rect(40.0, 0.0, 60.0, 40.0)));
+}
+
+#[test]
 fn perspective_gives_children_depth_from_the_center() {
     use crate::transform::TransformKind as T;
     let mut c = core();
