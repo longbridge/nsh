@@ -13919,7 +13919,7 @@ fn web_view_allow_origin_applies_to_loads() {
         "{:?}",
         c.denied
     );
-    assert_eq!(load(&mut c, "http://10.0.0.2:9876/c").0, true);
+    assert!(load(&mut c, "http://10.0.0.2:9876/c").0);
 }
 
 /// Inline HTML loaded with a base URL runs at the base URL's origin
