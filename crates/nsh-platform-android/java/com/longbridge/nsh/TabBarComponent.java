@@ -212,6 +212,7 @@ final class TabBarComponent implements NshComponent {
         protected void onConfigurationChanged(Configuration config) {
             super.onConfigurationChanged(config);
             appearanceChanged();
+            for (Item item : items) item.textSize();
         }
 
         @Override
@@ -355,6 +356,15 @@ final class TabBarComponent implements NshComponent {
             LayoutParams lp = new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             lp.topMargin = px(4);
             addView(label, lp);
+        }
+
+        /**
+         * Sizes its text again: a size in sp is resolved when it is set, and
+         * the activity keeps its views through a change of the font scale.
+         */
+        void textSize() {
+            label.setTextSize(TypedValue.COMPLEX_UNIT_SP, LABEL_SP);
+            if (badge != null && badge.length() > 0) badge.setTextSize(TypedValue.COMPLEX_UNIT_SP, BADGE_SP);
         }
 
         @Override

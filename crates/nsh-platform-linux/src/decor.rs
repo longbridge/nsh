@@ -254,9 +254,23 @@ pub(crate) fn append_clipped(
         }
     };
     let (bottom, right) = (bottom.max(top), right.max(left));
-    plain(rect(0.0, top, s.w, bottom));
-    plain(rect(left, 0.0, right, top));
-    plain(rect(left, bottom, right, s.h));
+    // The box's own edges off device pixels: a rectangle clip there is cut
+    // to whole pixels by some renderers (GL scissors), dropping the
+    // partially covered row or column the path keeps. The bands stop at the
+    // last whole device pixel inside the box; the thin strip beyond it is
+    // masked with the path like the corners.
+    let inner = |v: f32, o: f32, up: bool| {
+        let d = (o + v) * k;
+        let d = if up { d.ceil() } else { d.floor() };
+        d / k - o
+    };
+    let x0 = inner(0.0, ox, true).clamp(0.0, left);
+    let x1 = inner(s.w, ox, false).clamp(right, s.w);
+    let y0 = inner(0.0, oy, true).clamp(0.0, top);
+    let y1 = inner(s.h, oy, false).clamp(bottom, s.h);
+    plain(rect(x0, top, x1, bottom));
+    plain(rect(left, y0, right, top));
+    plain(rect(left, bottom, right, y1));
     let path = s.path();
     // The corners' outer sides reach past the box: there the path alone
     // antialiases the edge, not the path and the clip twice over.
@@ -266,6 +280,10 @@ pub(crate) fn append_clipped(
         rect(right, -o, s.w + o, top),
         rect(right, bottom, s.w + o, s.h + o),
         rect(-o, bottom, left, s.h + o),
+        rect(-o, top, x0, bottom).filter(|_| x0 > 0.0),
+        rect(x1, top, s.w + o, bottom).filter(|_| x1 < s.w),
+        rect(left, -o, right, y0).filter(|_| y0 > 0.0),
+        rect(left, y1, right, s.h + o).filter(|_| y1 < s.h),
     ]
     .into_iter()
     .flatten()
