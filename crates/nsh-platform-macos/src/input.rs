@@ -418,6 +418,15 @@ pub(crate) fn removed(surface: &Surface, view: &NshView) {
         None => crate::text_input::taken_out(&window),
     }
     window.makeFirstResponder(None);
+    // Then the root, as when the view hides or is blurred (the page's body
+    // in a browser): left on the window, the focus reaches no responder of
+    // the root's keys and actions (Copy of a page selection, Escape,
+    // scrolling keys), and a press on a page text does not take it back.
+    // Not when the root leaves with the view (its window closes).
+    let root = root_in(surface, &window);
+    if !root.ns().isDescendantOf(view.ns()) {
+        window.makeFirstResponder(Some(root.ns()));
+    }
 }
 
 /// Sets or clears interaction state `bit` of `view` and reports the
