@@ -684,11 +684,11 @@ define_class!(
             set_copy_label(self, "Copied");
         }
 
-        /// A pointing hand, as over a link: the text view around it would
-        /// otherwise show its I-beam.
+        /// The default arrow, as over any button: the text view around it
+        /// would otherwise show its I-beam.
         #[unsafe(method(resetCursorRects))]
         fn reset_cursor_rects(&self) {
-            self.addCursorRect_cursor(self.bounds(), &NSCursor::pointingHandCursor());
+            self.addCursorRect_cursor(self.bounds(), &NSCursor::arrowCursor());
         }
     }
 );

@@ -554,11 +554,11 @@ fn show_error(ui: &Rc<RefCell<DevUi>>, title: &str, message: &str, prose: bool) 
     heading.add_css_class("nsh-dev-title");
     heading.set_xalign(0.0);
     // Beside the title, not in a corner, where a custom title bar puts its
-    // close button. A pointing hand, as over a link.
+    // close button. The default arrow, as over any button.
     let copy = gtk::Button::with_label("Copy");
     copy.add_css_class("nsh-dev-copy");
     copy.set_valign(gtk::Align::Center);
-    copy.set_cursor_from_name(Some("pointer"));
+    copy.set_cursor_from_name(Some("default"));
     let error = format!("{title}\n\n{message}");
     copy.connect_clicked(move |button| {
         if let Some(display) = gdk::Display::default() {
