@@ -641,7 +641,7 @@ enum DoctorStore {
         #[arg(long)]
         store: Option<PathBuf>,
     },
-    /// Flathub: the app's metadata and the tools Linux packages need.
+    /// Flathub: the metadata Flathub asks for, read-only.
     Linux {
         /// The app's directory or entry.
         #[arg(long, default_value = ".")]

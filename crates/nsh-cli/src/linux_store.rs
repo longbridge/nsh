@@ -939,16 +939,6 @@ pub(crate) fn doctor(entry: &Path) -> anyhow::Result<()> {
         None => r.warn("desktop-file-validate is not installed: desktop entry not validated"),
     }
     let _ = fs::remove_dir_all(&tmp);
-    if appimagetool().is_some() {
-        r.ok("appimagetool");
-    } else {
-        r.warn("appimagetool is not installed: --format appimage stops at the AppDir");
-    }
-    if which("flatpak-builder").is_some() {
-        r.ok("flatpak-builder");
-    } else {
-        r.warn("flatpak-builder is not installed: --format flatpak writes the manifest only");
-    }
     if r.failed > 0 {
         bail!(
             "{} problem(s) to fix before publishing to Flathub",

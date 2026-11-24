@@ -1,13 +1,15 @@
 ---
 title: Publishing
-description: Publish NSH apps to app stores and distribution channels. Linux: release on Flathub with metadata from nsh.json, nsh publish linux, status and doctor.
+description: Publish NSH apps to app stores. Linux: release on Flathub with metadata from nsh.json, nsh publish linux, status and doctor.
 order: 21
 group: delivery
 ---
 
 # Publishing
 
-`nsh publish <platform>` prepares and uploads releases. Each platform has its own section below.
+`nsh publish <platform>` releases an app on that platform's app store, with the app's identity and listing from
+`nsh.json`. Each store has its own section below. Making the files you ship (archives, installers, AppImage, the web
+build) is [Packaging](./packaging.md); platforms without a store, such as the web, are covered there only.
 
 ## Linux
 
@@ -130,8 +132,7 @@ nsh publish doctor linux
 ```
 
 Checks the `id`, the store fields Flathub requires (summary length, license, screenshots), that the icon is square (warning when it is under 256×256), validates
-the generated metainfo with `appstreamcli` and the desktop entry with `desktop-file-validate` when installed, and finds
-`appimagetool` and `flatpak-builder`. It exits non-zero while something Flathub requires is missing.
+the generated metainfo with `appstreamcli` and the desktop entry with `desktop-file-validate` when installed. It exits non-zero while something Flathub requires is missing.
 
 ### Commands
 
