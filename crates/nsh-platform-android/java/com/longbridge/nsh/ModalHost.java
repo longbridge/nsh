@@ -385,6 +385,9 @@ final class ModalHost {
         if (mounter.handle() != 0) Native.keyReset(mounter.handle());
         // Its keyboard hides with it, not once the dialog's window is gone.
         mounter.hideKeyboardIn(container);
+        // The inset this window reported goes back to the activity, which
+        // learns about its own keyboard again the next time it shows one.
+        mounter.host.keyboardFromModal(0);
         Dialog d = dialog;
         Runnable done = () -> {
             d.dismiss();
@@ -553,6 +556,12 @@ final class ModalHost {
                 int[] at = new int[2];
                 getLocationOnScreen(at);
                 mounter.keyboard(ime > 0 ? at[1] + getHeight() - ime : Integer.MAX_VALUE);
+                // A dialog is its own window, so the activity's keyboard-inset
+                // env never sees this keyboard: the app inside the dialog reads
+                // `env(keyboard-inset-height)` as zero and lays its fields out
+                // under the keys. Report it from the window that actually holds
+                // the focus, then let go of the report when the dialog closes.
+                mounter.host.keyboardFromModal(ime);
                 // Shrink / grow the modal's layout area above the IME (see report).
                 requestLayout();
             }
@@ -583,7 +592,6 @@ final class ModalHost {
         private void report() {
             WindowInsets insets = getRootWindowInsets();
             int top = 0, right = 0, bottom = 0, left = 0;
-            int ime = 0;
             if (insets != null) {
                 if (Build.VERSION.SDK_INT >= 30) {
                     android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
@@ -591,27 +599,24 @@ final class ModalHost {
                     right = bars.right;
                     bottom = bars.bottom;
                     left = bars.left;
-                    ime = insets.getInsets(WindowInsets.Type.ime()).bottom;
                 } else {
                     top = insets.getSystemWindowInsetTop();
                     right = insets.getSystemWindowInsetRight();
                     bottom = insets.getSystemWindowInsetBottom();
                     left = insets.getSystemWindowInsetLeft();
-                    // Bottom inset taller than the nav bar is the keyboard: keep
-                    // only the bar as a safe-area inset and shrink the height.
+                    // Below Android 11 the keyboard shares the bottom inset with
+                    // the navigation bar: keep only the bar as a safe area.
                     int navigation = navigationBarHeight();
-                    if (bottom > navigation) {
-                        ime = bottom;
-                        bottom = navigation;
-                    }
+                    if (bottom > navigation) bottom = navigation;
                 }
             }
             int below = statusBar();
             top = Math.max(0, top - below);
-            // Lay the dialog out above the IME so centered cards stay visible
-            // (the activity's keyboard-inset env often stays 0 while a dialog
-            // holds the soft keyboard).
-            int[] now = {getWidth(), Math.max(0, getHeight() - below - ime), top, right, bottom, left};
+            // The root keeps the window's whole height: the keyboard is the
+            // app's to lay out around, through `env(keyboard-inset-height)`
+            // (reported by `keyboardFromModal`). Shrinking here as well would
+            // lift everything that already pads for the keyboard a second time.
+            int[] now = {getWidth(), Math.max(0, getHeight() - below), top, right, bottom, left};
             if (now[0] == 0 || java.util.Arrays.equals(now, reported)) return;
             reported = now;
             float d = mounter.density;
