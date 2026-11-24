@@ -3852,6 +3852,77 @@ test("a copy gives attachments' copy texts where the layout put them among the r
   assert.equal(player.selectedText(root, reaching(0, 2)), "Area is  here,\n next");
 });
 
+test("a selectable view's selection carries the box around it", (t) => {
+  const saved = ["getComputedStyle", "document", "getSelection"].map((k) => [k, Object.getOwnPropertyDescriptor(globalThis, k)]);
+  t.after(() => {
+    for (const [k, d] of saved) d ? Object.defineProperty(globalThis, k, d) : delete globalThis[k];
+  });
+  globalThis.getComputedStyle = () => ({ visibility: "visible" });
+  // Where the selected part of each run shows on the page.
+  const shown = new Map();
+  globalThis.document = {
+    createRange: () => ({
+      selectNodeContents(run) {
+        this.run = run;
+      },
+      setStart() {},
+      setEnd() {},
+      getClientRects() {
+        return shown.get(this.run) ?? [];
+      },
+    }),
+  };
+  const { player, sent } = fakePlayer();
+  const runs = [{}, {}, {}];
+  for (const run of runs) run.contains = () => false;
+  // A view 320 by 60 drawn at twice its size (a scaled player), at 100, 200
+  // on the page.
+  const area = {
+    _id: 4,
+    _events: new Set(["onSelectionChange"]),
+    isConnected: true,
+    querySelectorAll: () => runs,
+    getBoundingClientRect: () => ({ left: 100, top: 200, width: 640, height: 120 }),
+    offsetWidth: 320,
+    offsetHeight: 60,
+  };
+  // From the first run into the second; the third is not reached.
+  const range = { intersectsNode: (run) => run !== runs[2], startContainer: null, endContainer: null };
+  globalThis.getSelection = () => ({ rangeCount: 1, isCollapsed: false, anchorNode: { nodeType: 1 }, getRangeAt: () => range });
+  // The first line's part, and the empty box at its end (its break only).
+  shown.set(runs[0], [
+    { left: 140, top: 200, right: 300, bottom: 240, width: 160, height: 40 },
+    { left: 320, top: 200, right: 320, bottom: 240, width: 0, height: 40 },
+  ]);
+  shown.set(runs[1], [{ left: 100, top: 256, right: 180, bottom: 296, width: 80, height: 40 }]);
+  shown.set(runs[2], [{ left: 100, top: 300, right: 700, bottom: 340, width: 600, height: 40 }]);
+  Object.assign(player, {
+    root: { contains: () => true },
+    areaOf: () => area,
+    selectableText: () => true,
+    selectedText: () => "beta\nDel",
+    selectionStart: () => 6,
+  });
+  const reports = () => sent.filter(([name]) => name === "onSelectionChange").map(([, p]) => p);
+  player.areaSelectionChanged();
+  // In the view's own points, from its top left corner.
+  assert.deepEqual(reports(), [
+    { text: "beta\nDel", start: 6, bounds: { origin: { x: 0, y: 0 }, size: { width: 100, height: 48 } } },
+  ]);
+  // The same selection where it was: nothing to report.
+  player.areaSelectionChanged();
+  assert.equal(reports().length, 1);
+  // The same text selected elsewhere (the second line's part further on).
+  shown.set(runs[1], [{ left: 100, top: 256, right: 400, bottom: 296, width: 300, height: 40 }]);
+  player.areaSelectionChanged();
+  assert.equal(reports().length, 2);
+  assert.deepEqual(reports()[1].bounds, { origin: { x: 0, y: 0 }, size: { width: 150, height: 48 } });
+  // Nothing selected: no box.
+  player.selectedText = () => "";
+  player.areaSelectionChanged();
+  assert.deepEqual(reports().slice(2), [{ text: "", start: 0 }]);
+});
+
 test("text with its HTML goes on the clipboard as one item of both types", async (t) => {
   const log = fakeClipboard(t);
   const { player } = fakePlayer();

@@ -960,7 +960,12 @@ browsers' touches into what phones report:
   the area's texts on one row (their boxes overlap vertically: a table's cells) with a tab instead of a newline, joins
   a text whose props have `continuesText` (`ViewProps::continues_text`: a wrapped line's later part) to the one
   before it with nothing, and gives attachments (U+FFFC) as their copy texts (`copyText`, sent with the text) or
-  leaves them out, as `SelectionModel::text` does.
+  leaves them out, as `SelectionModel::text` does. The area's `onSelectionChange` (`areaSelectionChanged`, on the
+  document's `selectionchange`) carries that text, where it starts and `bounds`, the box around the selected
+  characters in the area as of the event (`selectionBounds`: the client rects of the selected parts of the runs a
+  copy takes, united, in the area's own points), to which the core adds `pageBounds`. It is reported when the text or
+  the box changed (the same text selected elsewhere); the layout moving the selected text after a batch is not
+  looked for, which would read the page's layout after every batch.
 - **Elsewhere**: no page context menu or iOS callout outside fields and selectable text; a mouse drag selects only in
   selectable text and fields; overflow is `clip`, never `hidden`, so that the browser cannot scroll a box the core
   laid out to show a focused field.

@@ -9622,9 +9622,50 @@ class Player {
     return (this.selectedText(area, before) ?? "").length;
   }
 
+  /** The box around the selection's characters in `area` (`[x, y, width,
+   * height]` in the area, from its top left corner, as its layout places
+   * it), or null when they show nowhere: the boxes of the selected parts of
+   * the texts it reaches, united, as the native platforms report it
+   * (`SelectionModel::selected_bounds`). */
+  selectionBounds(area) {
+    const sel = getSelection();
+    if (!sel?.rangeCount || sel.isCollapsed) return null;
+    const range = sel.getRangeAt(0);
+    let left = Infinity;
+    let top = Infinity;
+    let right = -Infinity;
+    let bottom = -Infinity;
+    for (const run of area.querySelectorAll(".nsh-run")) {
+      // The runs a copy takes (`selectedText`).
+      if (!range.intersectsNode(run) || !this.selectableText(run)) continue;
+      if (getComputedStyle(run).visibility === "hidden") continue;
+      const part = document.createRange();
+      part.selectNodeContents(run);
+      if (run.contains(range.startContainer)) part.setStart(range.startContainer, range.startOffset);
+      if (run.contains(range.endContainer)) part.setEnd(range.endContainer, range.endOffset);
+      for (const r of part.getClientRects()) {
+        // The empty box at a line's end where the selection only reaches its break.
+        if (r.width <= 0 || r.height <= 0) continue;
+        left = Math.min(left, r.left);
+        top = Math.min(top, r.top);
+        right = Math.max(right, r.right);
+        bottom = Math.max(bottom, r.bottom);
+      }
+    }
+    if (left > right) return null;
+    // In the area's own points: a transform around it (a scaled player,
+    // a zoomed scroll view) scales what the browser measures on screen.
+    const box = area.getBoundingClientRect();
+    const sx = area.offsetWidth ? box.width / area.offsetWidth : 1;
+    const sy = area.offsetHeight ? box.height / area.offsetHeight : 1;
+    return [(left - box.left) / sx, (top - box.top) / sy, (right - left) / sx, (bottom - top) / sy];
+  }
+
   /** The document's selection changed: the selectable view it is in (the
-   * outermost) hears its text (`onSelectionChange`), and one it left hears
-   * "" (nothing selected), each only when its text changed. */
+   * outermost) hears its text (`onSelectionChange`) with the box around it
+   * as of now (`bounds`, to which the core adds `pageBounds`), and one it
+   * left hears "" (nothing selected), each only when its text or the box
+   * changed (the same text selected elsewhere is a change). */
   areaSelectionChanged() {
     const sel = getSelection();
     const anchor = sel?.rangeCount ? sel.anchorNode : null;
@@ -9637,14 +9678,23 @@ class Player {
         this.event(last._id, "onSelectionChange", { text: "", start: 0 });
       }
       last._selectedText = "";
+      last._selectedBox = "";
     }
     if (!area) return;
     this._selectedArea = area;
     if (!area._events?.has("onSelectionChange")) return;
     const text = this.selectedText(area) ?? "";
-    if (text === (area._selectedText ?? "")) return;
+    const box = text ? this.selectionBounds(area) : null;
+    const key = box ? box.join() : "";
+    if (text === (area._selectedText ?? "") && key === (area._selectedBox ?? "")) return;
     area._selectedText = text;
-    this.event(area._id, "onSelectionChange", { text, start: text ? this.selectionStart(area) : 0 });
+    area._selectedBox = key;
+    const payload = { text, start: text ? this.selectionStart(area) : 0 };
+    if (box) {
+      const [x, y, width, height] = box;
+      payload.bounds = { origin: { x, y }, size: { width, height } };
+    }
+    this.event(area._id, "onSelectionChange", payload);
   }
 
   /** Select all and Escape in selectable text with a selection: within it. */
