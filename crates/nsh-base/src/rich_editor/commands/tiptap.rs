@@ -553,29 +553,68 @@ pub fn insert_content_at(
     content: Fragment,
     options: InsertContentOptions,
 ) -> BoxCommand {
+    insert_content_at_raw(from, to, content, None, options)
+}
+
+/// Like [`insert_content_at`], preserving `raw_text` directly when the
+/// parsed `content` consists solely of unmarked text (Tiptap's
+/// `insertContentAt` string fast-path, so incomplete tags such as `foo<p`
+/// and raw spaces are inserted verbatim).
+pub fn insert_content_at_raw(
+    from: usize,
+    to: usize,
+    content: Fragment,
+    raw_text: Option<String>,
+    options: InsertContentOptions,
+) -> BoxCommand {
     command(move |state, dispatch| {
         with_tr(state, dispatch, |tr| {
-            insert_content_in(tr, from, to, &content, options)
+            insert_content_in_raw(tr, from, to, &content, raw_text.as_deref(), options)
         })
     })
 }
 
 /// [`insert_content_at`] over the selection (Tiptap's `insertContent`).
 pub fn insert_content(content: Fragment, options: InsertContentOptions) -> BoxCommand {
+    insert_content_raw(content, None, options)
+}
+
+/// Like [`insert_content`], with an optional raw string for the plain-text
+/// fast-path.
+pub fn insert_content_raw(
+    content: Fragment,
+    raw_text: Option<String>,
+    options: InsertContentOptions,
+) -> BoxCommand {
     command(move |state, dispatch| {
         let selection = state.selection();
-        insert_content_at(selection.from(), selection.to(), content.clone(), options)(
-            state, dispatch,
-        )
+        insert_content_at_raw(
+            selection.from(),
+            selection.to(),
+            content.clone(),
+            raw_text.clone(),
+            options,
+        )(state, dispatch)
     })
 }
 
 /// What [`insert_content_at`] does, in `tr`: whether it could.
 pub fn insert_content_in(
     tr: &mut Transaction,
+    from: usize,
+    to: usize,
+    content: &Fragment,
+    options: InsertContentOptions,
+) -> bool {
+    insert_content_in_raw(tr, from, to, content, None, options)
+}
+
+fn insert_content_in_raw(
+    tr: &mut Transaction,
     mut from: usize,
     mut to: usize,
     content: &Fragment,
+    raw_text: Option<&str>,
     options: InsertContentOptions,
 ) -> bool {
     if from > to || to > tr.doc().content().size() {
@@ -586,7 +625,7 @@ pub fn insert_content_in(
         return false;
     }
     let only_text = nodes.iter().all(|n| n.is_text() && n.marks().is_empty());
-    let only_block = nodes.iter().all(Node::is_block);
+    let only_block = !nodes.is_empty() && nodes.iter().all(Node::is_block);
     if from == to && only_block {
         let Ok(at) = tr.doc().resolve(from) else {
             return false;
@@ -598,7 +637,10 @@ pub fn insert_content_in(
         }
     }
     if only_text {
-        let text: String = nodes.iter().filter_map(Node::text).collect();
+        let text: String = match raw_text {
+            Some(raw) => raw.to_owned(),
+            None => nodes.iter().filter_map(Node::text).collect(),
+        };
         tr.insert_text(&text, Some(from), Some(to));
     } else {
         let Ok(at) = tr.doc().resolve(from) else {
