@@ -139,7 +139,7 @@
   built by `chrome::menu`), Windows and GPUI to their popup (`selectable_view::context_menu`), GTK as a section of
   the edit popover (`selection-menu.item-N` actions), iOS 16 and later to the edit menu
   (`editMenuInteraction:menuForConfiguration:suggestedActions:`; groups between separators are inline sections; iOS
-  15's `UIMenuController` shows the system's items alone), Android to the floating `ActionMode` after the
+  15's `UIMenuController` shows the system's items alone), Android to the floating `ActionMode` before the
   `PROCESS_TEXT` actions (`encode.rs` `selection_menu`, `SelectableView.addAppItems`). The web shows the browser's
   menu alone: the browser's renderer drops the prop.
 - **Color changes**: a text whose spans change only their colors (text, decoration and background) or which of them

@@ -6,11 +6,11 @@ use std::{
     time::Duration,
 };
 
-use tungstenite::{Message, WebSocket, stream::MaybeTlsStream};
+use tungstenite::{Message, WebSocket, protocol::WebSocketConfig, stream::MaybeTlsStream};
 
 use crate::protocol::{
-    BundleFormat, ClientMessage, HostPlatform, LogLevel, PROTOCOL_VERSION, RunningBuild,
-    ServerMessage, StepOutcome, TestStep,
+    BundleFormat, ClientMessage, HostPlatform, LogLevel, MAX_MESSAGE_SIZE, PROTOCOL_VERSION,
+    RunningBuild, ServerMessage, StepOutcome, TestStep,
 };
 
 /// Something the dev server told the host.
@@ -170,7 +170,13 @@ impl DevClient {
                     if let Err(TryRecvError::Disconnected) = log_rx.try_recv() {
                         return;
                     }
-                    match tungstenite::connect(url.as_str()) {
+                    // The server sends a message in one frame: take frames
+                    // as large as the messages it sends (a test's pasted
+                    // files), not tungstenite's smaller default frame.
+                    let config = WebSocketConfig::default()
+                        .max_message_size(Some(MAX_MESSAGE_SIZE))
+                        .max_frame_size(Some(MAX_MESSAGE_SIZE));
+                    match tungstenite::client::connect_with_config(url.as_str(), Some(config), 3) {
                         Ok((socket, _)) => {
                             backoff = Duration::from_millis(100);
                             on_event(DevEvent::Connected);
