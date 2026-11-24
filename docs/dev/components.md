@@ -1231,7 +1231,8 @@ is for, never by replacing one popup with another everywhere:
 **The system's menu.** `MenuButton` (`menu_button.rs`) is no popup of the core's: its items are data and the system
 draws the menu. On iOS the app's content is covered by the native component `nsh/menu-button`
 (`nsh-platform-ios`'s `system_menu_button.rs`): a transparent `UIButton` whose `UIMenu`, made from the mounted items,
-is its primary action, so the tap is answered natively; the button sets itself as the element's only accessibility
+is its primary action, so the tap is answered natively; the menu grows out of the app's trigger (the element, as the
+menu's preview), which UIKit hides while the menu is up; the button sets itself as the element's only accessibility
 element, and an action emits `select` with the app's id. On Android the same component is
 `MenuButtonComponent.java`: a transparent button whose tap shows a system popup window (`SystemMenus.java`) with rows
 laid out as Material 3's menus, alike under every vendor's theme. On a
