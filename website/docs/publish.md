@@ -1,6 +1,6 @@
 ---
 title: Publishing
-description: Publish NSH apps to app stores and distribution channels. Linux: ship an AppImage, a Flatpak or on Flathub, with metadata from nsh.json, nsh publish linux, status and doctor.
+description: Publish NSH apps to app stores and distribution channels. Linux: release on Flathub with metadata from nsh.json, nsh publish linux, status and doctor.
 order: 21
 group: delivery
 ---
@@ -11,16 +11,10 @@ group: delivery
 
 ## Linux
 
-A Linux app reaches users three ways:
-
-| Channel | What you ship | How users get it |
-|---|---|---|
-| Archive | `<Name>.tar.gz` from `nsh package --target linux` | Download, extract, run `<Name>` |
-| AppImage | `<Name>-<arch>.AppImage` | Download one file, make it executable, run it |
-| Flathub | A manifest in the `flathub/<id>` repository | GNOME Software, KDE Discover, `flatpak install flathub <id>` |
-
-All three are built from the same package and read the same `nsh.json`. Flathub builds and signs the app itself:
-NSH prepares the manifest, you open the pull request.
+On Linux the store is Flathub: users install from GNOME Software, KDE Discover or `flatpak install flathub <id>`.
+Flathub builds and signs the app itself from a manifest; NSH prepares the manifest from the release archive, you open
+the pull request. Archives, AppImage and local Flatpak bundles are packages, not store releases: see
+[Packaging](./packaging.md#appimage-and-flatpak).
 
 ### Before you start
 
@@ -28,10 +22,6 @@ NSH prepares the manifest, you open the pull request.
 - `nsh.json` has an `id` in reverse-DNS form. On Flathub it must be a domain you control, or
   `io.github.<user>.<App>` for a GitHub project.
 - A square icon in `nsh.json` `icon`, ideally 256×256 or larger: NSH writes it at 256×256 and `doctor` warns when it has to scale it up.
-- For AppImage: [appimagetool](https://github.com/AppImage/appimagetool/releases) on `PATH`, or its path in
-  `NSH_APPIMAGETOOL`. Without FUSE, set `APPIMAGE_EXTRACT_AND_RUN=1`.
-- For a local Flatpak build: `flatpak` and `flatpak-builder`, and the GNOME runtime and SDK
-  (`flatpak install flathub org.gnome.Platform//49 org.gnome.Sdk//49`).
 - Optional, for `doctor`: `appstreamcli` and `desktop-file-validate` (packages `appstream` and `desktop-file-utils`).
 
 `nsh publish doctor linux` reports each of these.
@@ -92,36 +82,6 @@ NSH prepares the manifest, you open the pull request.
 The listing texts come from the `en-US` locale (else the first one), and may also be files in `store/en-US/`
 (`subtitle.txt`, `description.txt`, `keywords.txt`). Flathub names the app by `id`.
 
-### AppImage
-
-```sh
-nsh package --target linux --format appimage
-```
-
-Writes `.nsh/out/<Name>.AppDir` and `.nsh/out/<Name>-<arch>.AppImage`, besides the directory and archive. The
-AppImage carries the desktop entry, icon and metainfo, and runs on the system's GTK 4 and WebKitGTK like the archive,
-so the target system needs them installed. Attach it to your release; users run:
-
-```sh
-chmod +x Counter-x86_64.AppImage
-./Counter-x86_64.AppImage
-```
-
-### Flatpak
-
-```sh
-nsh package --target linux --format flatpak
-```
-
-Writes `.nsh/out/flatpak/<id>.yml`, a manifest that installs the package's archive on the GNOME runtime, which
-provides GTK 4 and WebKitGTK. When `flatpak-builder` is installed it also builds it and writes
-`.nsh/out/<Name>.flatpak`, a single-file bundle to test or hand out:
-
-```sh
-flatpak install --user .nsh/out/Counter.flatpak
-flatpak run io.github.example.Counter
-```
-
 ### Flathub
 
 Flathub takes no uploads. Each app is a GitHub repository, `flathub/<id>`, whose manifest names the release archive by
@@ -176,7 +136,6 @@ the generated metainfo with `appstreamcli` and the desktop entry with `desktop-f
 ### Commands
 
 ```sh
-nsh package --target linux [--format appimage|flatpak]
 nsh publish linux <ARCHIVE.tar.gz> [--url <URL>] [--entry <DIR>] [--out <DIR>]
 nsh publish status linux [--entry <DIR>] [--json]
 nsh publish doctor linux [--entry <DIR>]
@@ -193,10 +152,6 @@ nsh publish doctor linux [--entry <DIR>]
 
 | Symptom | Cause and fix |
 |---|---|
-| `appimagetool not found` | Install it on `PATH` or set `NSH_APPIMAGETOOL` |
-| AppImage fails with `fuse: failed to open /dev/fuse` | Set `APPIMAGE_EXTRACT_AND_RUN=1`, or install `libfuse2` |
-| AppImage starts but no window appears | GTK 4 or WebKitGTK 6.0 is missing on that system; use the Flatpak, which brings them |
-| `--format flatpak` writes only the manifest | `flatpak-builder` is not installed; install it, or let Flathub build the manifest |
 | `doctor`: summary too long | Flathub allows 35 characters; shorten the `en-US` listing's `subtitle` |
 | `doctor`: no screenshots | Add at least one URL to `store.linux.screenshots` |
 | Flathub build fails on architecture | The archive is built for this machine's processor (`only-arches`); build and add an archive per architecture |
@@ -205,6 +160,5 @@ nsh publish doctor linux [--entry <DIR>]
 
 ### What is not covered
 
-- No `.deb`, `.rpm`, Snap or AUR packages.
+- No Snap Store or AUR releases.
 - No upload to Flathub or opening pull requests: Flathub builds from the manifest you submit.
-- AppImage bundles NSH but not GTK 4 or WebKitGTK.

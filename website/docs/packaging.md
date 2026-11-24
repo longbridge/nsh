@@ -478,6 +478,47 @@ application id and nsh.json's window options, a TSX app's `nsh/bundle.nshc`, `<i
 Linux: the runner is built for the machine it is built on. GTK 4 (4.14 or later), Pango and WebKitGTK 6.0 (for web
 views) must be installed where the app runs. Installing it and the desktop entry: [Linux](./linux.md#packaging).
 
+
+### AppImage and Flatpak
+
+`--format appimage` or `--format flatpak` also writes the desktop entry, the 256×256 icon and AppStream metainfo
+(`<id>.metainfo.xml`) from `nsh.json` and its `store` section ([Publishing](./publish.md#configuration)).
+
+#### AppImage
+
+```sh
+nsh package --target linux --format appimage
+```
+
+Writes `.nsh/out/<Name>.AppDir` and `.nsh/out/<Name>-<arch>.AppImage`, besides the directory and archive. The
+AppImage carries the desktop entry, icon and metainfo, and runs on the system's GTK 4 and WebKitGTK like the archive,
+so the target system needs them installed. Attach it to your release; users run:
+
+```sh
+chmod +x Counter-x86_64.AppImage
+./Counter-x86_64.AppImage
+```
+
+#### Flatpak
+
+```sh
+nsh package --target linux --format flatpak
+```
+
+Writes `.nsh/out/flatpak/<id>.yml`, a manifest that installs the package's archive on the GNOME runtime, which
+provides GTK 4 and WebKitGTK. When `flatpak-builder` is installed it also builds it and writes
+`.nsh/out/<Name>.flatpak`, a single-file bundle to test or hand out:
+
+```sh
+flatpak install --user .nsh/out/Counter.flatpak
+flatpak run io.github.example.Counter
+```
+
+Requirements: [appimagetool](https://github.com/AppImage/appimagetool/releases) on `PATH` or in `NSH_APPIMAGETOOL`
+(without FUSE, set `APPIMAGE_EXTRACT_AND_RUN=1`); for a local Flatpak build, `flatpak`, `flatpak-builder` and the GNOME
+runtime and SDK. AppImage bundles NSH but not GTK 4 or WebKitGTK; when an AppImage starts without a window, the system
+lacks them, and the Flatpak brings them. Releasing on Flathub: [Publishing](./publish.md#flathub).
+
 ## Windows
 
 ```sh
