@@ -7,7 +7,7 @@
 //! dist/nsh/runtime/ios/maccatalyst/nsh-ios-host                development host
 //! dist/nsh/runtime/macos/{nsh-macos-host,nsh-macos-app}        development host, packaged app runner
 //! dist/nsh/runtime/linux/{nsh-linux-host,nsh-linux-app}        development host, packaged app runner
-//! dist/nsh/runtime/windows/{nsh-windows-host,nsh-windows-app}.exe  development host, packaged app runner
+//! dist/nsh/runtime/windows/{nsh-windows-host,nsh-windows-app,nsh-windows-app-slim}.exe  development host, packaged app runner (full, slim)
 //! dist/nsh/runtime/gpui/nsh-gpui-host[.exe]                   development host (GPUI; apps embed it, never package it)
 //! dist/nsh/runtime/tui/nsh-tui-host[.exe]                     development host (the terminal, `nsh run --target tui`)
 //! dist/nsh/runtime/android/{release,dev}/                      classes.dex, lib/<abi>/libnsh.so (stripped),
@@ -141,6 +141,27 @@ pub(crate) fn dist() -> anyhow::Result<()> {
                 &out.join("runtime/windows").join(exe(package)),
             )?;
         }
+        // A slim release runner for apps that use none of the large parts
+        // (`nsh package` picks it from the bundle's imports, #1644): about
+        // half the size of the full one.
+        let package = "nsh-windows-app";
+        cargo(
+            &[
+                "build",
+                "--release",
+                "-p",
+                package,
+                "--no-default-features",
+                "--features",
+                "js,net,svg,media",
+            ],
+            "the slim release runner for Windows",
+        )?;
+        copy_executable(
+            &release.join("release").join(exe(package)),
+            &out.join("runtime/windows")
+                .join(exe("nsh-windows-app-slim")),
+        )?;
     }
 
     // GPUI is the backend for embedding in GPUI apps: its development

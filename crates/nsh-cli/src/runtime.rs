@@ -14,6 +14,7 @@
 //! runtime/macos/nsh-macos-app                release runner (macOS)
 //! runtime/windows/nsh-windows-host.exe       development host (Windows)
 //! runtime/windows/nsh-windows-app.exe        release runner (Windows)
+//! runtime/windows/nsh-windows-app-slim.exe   release runner without the large parts (Windows)
 //! runtime/gpui/nsh-gpui-host[.exe]           development host (GPUI, this OS)
 //! runtime/android/release/             classes.dex + lib/<abi>/libnsh.so
 //! runtime/android/dev/                 the same with development support

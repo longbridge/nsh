@@ -50,6 +50,7 @@ pub(crate) fn package(
     built: &crate::build::Built,
 ) -> anyhow::Result<()> {
     let runner = runtime::file(Platform::Windows, true)?;
+    let runner = slim_runner(&runner, built, config).unwrap_or(runner);
     // A runner built for another system would package fine and then not
     // start on Windows ("not a valid application").
     let mut magic = [0; 2];
@@ -858,5 +859,79 @@ mod tests {
             .unwrap();
         assert_eq!(code, "code");
         fs::remove_dir_all(&dir).unwrap();
+    }
+}
+
+/// The features of the slim prebuilt runner (`nsh-windows-app-slim.exe`,
+/// next to the full one in a distribution): what an app that imports none
+/// of the large parts needs (#1644). `media` stays: no import tells
+/// whether an app plays video or sound.
+pub(crate) const SLIM_FEATURES: &[&str] = &["js", "net", "svg", "media"];
+
+/// The slim prebuilt runner next to `runner`, when there is one and the
+/// app's bundle needs nothing more than [`SLIM_FEATURES`]. An app with Rust
+/// crates builds its own runner, and one whose bundle was not analyzed
+/// keeps the full runner.
+fn slim_runner(
+    runner: &std::path::Path,
+    built: &crate::build::Built,
+    config: &AppConfig,
+) -> Option<std::path::PathBuf> {
+    if crate::rust_app::current().is_some() {
+        return None;
+    }
+    let slim = runner.with_file_name("nsh-windows-app-slim.exe");
+    if !slim.is_file() {
+        return None;
+    }
+    let choices =
+        crate::native_features::choose(built.native_use.as_ref(), &config.features, false);
+    if !fits_slim(&choices) {
+        return None;
+    }
+    ui::debug(format!(
+        "the app needs only {}: it has the slim runner",
+        SLIM_FEATURES.join(", ")
+    ));
+    Some(slim)
+}
+
+/// Whether every feature `choices` keeps is in the slim runner.
+fn fits_slim(choices: &[crate::native_features::Choice]) -> bool {
+    choices
+        .iter()
+        .filter(|c| c.keep)
+        .all(|c| SLIM_FEATURES.contains(&c.feature))
+}
+
+#[cfg(test)]
+mod slim_tests {
+    use super::*;
+    use crate::native_features::choose;
+
+    fn uses(code: &str) -> nsh_bundler::NativeUse {
+        let mut uses = nsh_bundler::NativeUse::default();
+        uses.add(code, |s| {
+            s == "nsh" || s.starts_with("nsh/") || s == "websocket"
+        });
+        uses
+    }
+
+    #[test]
+    fn a_button_app_fits_the_slim_runner() {
+        let u = uses("import { Button } from 'nsh/base'; Button;");
+        assert!(fits_slim(&choose(Some(&u), &[], false)));
+    }
+
+    #[test]
+    fn a_large_part_or_no_analysis_keeps_the_full_runner() {
+        let u = uses("import { Editor } from 'nsh/base'; Editor;");
+        assert!(!fits_slim(&choose(Some(&u), &[], false)));
+        // The compiled `<WebView>` passes its tag to `nsh:rt`'s `element`.
+        let u = uses("element('webview');");
+        assert!(!fits_slim(&choose(Some(&u), &[], false)));
+        assert!(!fits_slim(&choose(None, &[], false)));
+        let u = uses("import { Button } from 'nsh/base'; Button;");
+        assert!(!fits_slim(&choose(Some(&u), &["editor".into()], false)));
     }
 }
