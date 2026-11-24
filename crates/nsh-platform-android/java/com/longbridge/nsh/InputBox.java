@@ -290,6 +290,8 @@ final class InputBox extends FrameLayout implements Node {
                 edit.clearComposingText();
                 syncComposition();
             }
+            // Moving to the activity made again: the field keeps the focus for the app.
+            if (mounter != null && mounter.moving) return;
             mounter.inputFocused(this, focused);
             mounter.reportState(id, Mounter.STATE_FOCUSED, focused);
             if (mounter.wants(id, focused ? Native.FOCUS : Native.BLUR)) {
