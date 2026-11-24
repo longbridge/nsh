@@ -76,6 +76,21 @@ impl PackageTarget {
         }
     }
 
+    /// The target a crate's files are scoped to
+    /// (`Registry::assets_for`); `None` for the removed GPUI packages.
+    pub(crate) fn asset_target(self) -> Option<nsh_core::element::AssetTarget> {
+        use nsh_core::element::AssetTarget;
+        match self {
+            PackageTarget::Ios | PackageTarget::IosSimulator => Some(AssetTarget::Ios),
+            PackageTarget::Android => Some(AssetTarget::Android),
+            PackageTarget::Linux => Some(AssetTarget::Linux),
+            PackageTarget::Macos => Some(AssetTarget::Macos),
+            PackageTarget::Windows => Some(AssetTarget::Windows),
+            PackageTarget::Web => Some(AssetTarget::Web),
+            PackageTarget::Gpui => None,
+        }
+    }
+
     /// This machine's desktop target (`None` off macOS, Windows and
     /// Linux): where `--target gpui` points.
     pub(crate) fn desktop() -> Option<PackageTarget> {
@@ -1604,7 +1619,7 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
             config.window.as_ref(),
         ),
     )?;
-    for asset in &built.assets {
+    for asset in built.assets_for(options.target.asset_target()) {
         let dest = resources.join("assets").join(&asset.path);
         if let Some(dir) = dest.parent() {
             fs::create_dir_all(dir)?;
@@ -1829,7 +1844,7 @@ fn package_android(
         )
         .into_bytes(),
     ));
-    for asset in &built.assets {
+    for asset in built.assets_for(options.target.asset_target()) {
         let bytes = fs::read(&asset.source).with_context(|| format!("read {}", asset.path))?;
         assets.push((format!("nsh/assets/{}", asset.path), bytes));
     }
@@ -1959,7 +1974,7 @@ fn package_linux(
     if let Some(json) = built.capabilities_json() {
         fs::write(resources.join("capabilities.json"), json)?;
     }
-    for asset in &built.assets {
+    for asset in built.assets_for(options.target.asset_target()) {
         let dest = resources.join("assets").join(&asset.path);
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent)?;
@@ -2128,7 +2143,7 @@ fn package_macos(
     if let Some(json) = built.capabilities_json() {
         fs::write(nsh.join("capabilities.json"), json)?;
     }
-    for asset in &built.assets {
+    for asset in built.assets_for(options.target.asset_target()) {
         let dest = nsh.join("assets").join(&asset.path);
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent)?;

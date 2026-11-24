@@ -1011,8 +1011,9 @@ pub struct Registry {
     namespace: Option<&'static str>,
     /// The JS module a UI set is imported as (`app/native`).
     ui_set: Option<&'static str>,
-    /// The files its crates ship ([`Registry::assets`]).
-    assets: Arc<Vec<&'static [super::AssetFile]>>,
+    /// The files its crates ship, with the targets they are for
+    /// ([`Registry::assets_for`]; none: every target).
+    assets: Arc<Vec<(&'static [super::AssetTarget], &'static [super::AssetFile])>>,
     /// Makes the design tokens of a theme ([`Registry::tokens_from`]).
     tokens: Option<super::TokenSource>,
     /// Makes the views' built-in scroll bars ([`Registry::scrollbars_from`]).
@@ -1321,9 +1322,23 @@ impl Registry {
     /// Ships `files` with the apps that use the set (`assets!()`: a crate's
     /// `assets/` directory): `nsh run` serves them, `nsh package` copies
     /// them into the app, and the engine registers the fonts among them
-    /// before the first render. `asset!` refers to one.
+    /// before the first render. `asset!` refers to one. Every target gets
+    /// them; [`Registry::assets_for`] limits them to some.
     pub fn assets(&mut self, files: &'static [super::AssetFile]) -> &mut Self {
-        Arc::make_mut(&mut self.assets).push(files);
+        self.assets_for(&[], files)
+    }
+
+    /// Like [`Registry::assets`], for the packages of `targets` only: the
+    /// others neither copy the files nor register their fonts, so a file
+    /// only the web downloads stays out of the desktop and mobile
+    /// packages. No `targets`: every target. A file the app reads on a
+    /// target outside the list is not there to read.
+    pub fn assets_for(
+        &mut self,
+        targets: &'static [super::AssetTarget],
+        files: &'static [super::AssetFile],
+    ) -> &mut Self {
+        Arc::make_mut(&mut self.assets).push((targets, files));
         self
     }
 
@@ -1430,9 +1445,20 @@ impl Registry {
         self.tokens
     }
 
-    /// The files [`Registry::assets`] ships.
+    /// The files [`Registry::assets`] and [`Registry::assets_for`] ship, for
+    /// every target.
     pub fn asset_files(&self) -> impl Iterator<Item = &'static super::AssetFile> + '_ {
-        self.assets.iter().flat_map(|files| files.iter())
+        self.assets.iter().flat_map(|(_, files)| files.iter())
+    }
+
+    /// The files of [`Registry::asset_files`] with the targets each is
+    /// for (none: every target).
+    pub fn scoped_asset_files(
+        &self,
+    ) -> impl Iterator<Item = (&'static [super::AssetTarget], &'static super::AssetFile)> + '_ {
+        self.assets
+            .iter()
+            .flat_map(|&(targets, files)| files.iter().map(move |file| (targets, file)))
     }
 
     /// The values of [`Registry::native_values`].

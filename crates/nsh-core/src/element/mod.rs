@@ -126,7 +126,7 @@ pub use self::{
         DiffClamp, Interpolation, Motion, Spring, Timing, sample_decay, sample_decay_within,
         sample_spring,
     },
-    asset::{AssetFile, AssetKind, FileAsset, FontAsset, ImageAsset, ImageSrc},
+    asset::{AssetFile, AssetKind, AssetTarget, FileAsset, FontAsset, ImageAsset, ImageSrc},
     audio::{
         AudioFailure, AudioPlayer, PlayerState, Sound, SoundSource, audio_available, audio_player,
         load_sound,
