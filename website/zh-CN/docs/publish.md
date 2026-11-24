@@ -524,7 +524,7 @@ Flathub 不接受上传。每个应用是一个 GitHub 仓库 `flathub/<id>`，�
    nsh publish linux .nsh/out/Counter.tar.gz
    ```
 
-   压缩包地址为填入版本号后的 `store.linux.archiveUrl`（或 `--url`），输出 `.nsh/out/flathub/<id>/<id>.yml`。
+   压缩包地址为填入版本号后的 `store.linux.archiveUrl`（或 `--url`），输出 `.nsh/out/flathub/<id>/<id>.yml`；其架构取自压缩包中可执行文件的处理器（`x86_64` 或 `aarch64`），与运行命令的机器无关。
 4. 按 [Flathub 提交指南](https://docs.flathub.org/docs/for-app-authors/submission)向 `flathub/flathub` 提交带 manifest 的 Pull Request。Flathub 审核后会创建 `flathub/<id>`。
 
 #### 后续版本
@@ -535,7 +535,7 @@ Flathub 不接受上传。每个应用是一个 GitHub 仓库 `flathub/<id>`，�
 nsh publish linux .nsh/out/Counter.tar.gz --out ../flathub-io.github.example.Counter
 ```
 
-manifest 已存在时，只更新标记为 `# nsh: release archive` 的压缩包来源（`url` 与 `sha256`），其余内容保持你或 Flathub 审核者修改后的样子。之后自行提交并在 `flathub/<id>` 上开 Pull Request，NSH 不会替你开 Pull Request。
+manifest 已存在时，只更新标记为 `# nsh: release archive` 的压缩包来源（`url`、`sha256` 与 `only-arches`），其余内容保持你或 Flathub 审核者修改后的样子。之后自行提交并在 `flathub/<id>` 上开 Pull Request，NSH 不会替你开 Pull Request。
 
 ### 状态与检查
 
