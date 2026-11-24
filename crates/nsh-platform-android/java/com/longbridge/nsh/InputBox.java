@@ -78,6 +78,8 @@ final class InputBox extends FrameLayout implements Node {
     boolean pasteInserts = true;
     /** `pasteMaxSize`: the largest pasted file read, in bytes (-1: any the heap holds). */
     int pasteMaxSize = -1;
+    /** The EditText's own floating text toolbar (its selection or insertion action mode), while it is open. */
+    private android.view.ActionMode textActions;
     /** Whether the EditText shows a vertical scroll bar of its own by default. */
     private final boolean defaultVerticalBar;
     /** Platform hint colors before any explicit `placeholderTextColor` override. */
@@ -175,16 +177,26 @@ final class InputBox extends FrameLayout implements Node {
 
             @Override
             public boolean onTextContextMenuItem(int item) {
+                if (item != android.R.id.paste && item != android.R.id.pasteAsPlainText) {
+                    return super.onTextContextMenuItem(item);
+                }
                 // Before Android 12 a paste comes here (the menu, Ctrl+V);
                 // from then on `receiveContent` hears it.
-                if (Build.VERSION.SDK_INT < 31
-                        && (item == android.R.id.paste || item == android.R.id.pasteAsPlainText)) {
+                boolean done = false;
+                if (Build.VERSION.SDK_INT < 31) {
                     android.content.ClipboardManager board = (android.content.ClipboardManager)
                             getContext().getSystemService(Context.CLIPBOARD_SERVICE);
                     android.content.ClipData clip = board == null ? null : board.getPrimaryClip();
-                    if (clip != null && pasted(clip) && !pasteInserts) return true;
+                    done = clip != null && pasted(clip) && !pasteInserts;
                 }
-                return super.onTextContextMenuItem(item);
+                if (!done) done = super.onTextContextMenuItem(item);
+                // TextView ends its toolbar when an edit changes the text, so
+                // a paste of text closes it; one whose content was taken
+                // without inserting anything (an image `onPaste` received,
+                // `pasteBehavior="report"`) leaves the text, and the toolbar
+                // with Paste on it, as they were. A paste ends it either way.
+                finishTextActions();
+                return done;
             }
 
             @Override
@@ -285,6 +297,32 @@ final class InputBox extends FrameLayout implements Node {
             }
         });
         addView(edit, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+        // Keeps the EditText's toolbar at hand for a paste to end
+        // (`finishTextActions`); its items and their handling stay TextView's.
+        android.view.ActionMode.Callback textActionsTracker = new android.view.ActionMode.Callback() {
+            @Override
+            public boolean onCreateActionMode(android.view.ActionMode m, android.view.Menu menu) {
+                textActions = m;
+                return true;
+            }
+
+            @Override
+            public boolean onPrepareActionMode(android.view.ActionMode m, android.view.Menu menu) {
+                return true;
+            }
+
+            @Override
+            public boolean onActionItemClicked(android.view.ActionMode m, android.view.MenuItem item) {
+                return false;
+            }
+
+            @Override
+            public void onDestroyActionMode(android.view.ActionMode m) {
+                if (textActions == m) textActions = null;
+            }
+        };
+        edit.setCustomSelectionActionModeCallback(textActionsTracker);
+        edit.setCustomInsertionActionModeCallback(textActionsTracker);
         if (Build.VERSION.SDK_INT >= 31) {
             InputContent.install(edit, this);
         }
@@ -776,6 +814,13 @@ final class InputBox extends FrameLayout implements Node {
     void closeEditMenu() {
         android.view.ActionMode m = editMenu;
         editMenu = null;
+        if (m != null) m.finish();
+    }
+
+    /** Ends the EditText's own toolbar, if it is open. */
+    private void finishTextActions() {
+        android.view.ActionMode m = textActions;
+        textActions = null;
         if (m != null) m.finish();
     }
 

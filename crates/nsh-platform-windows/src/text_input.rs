@@ -1043,6 +1043,8 @@ impl InputState {
                 let list = dc.CreateCommandList().ok()?;
                 dc.SetTarget(&list);
                 dc.SetDpi(96.0 * s, 96.0 * s);
+                let params = cx.dc.GetTextRenderingParams().ok();
+                dc.SetTextRenderingParams(params.as_ref());
                 dc.BeginDraw();
                 // RichEdit draws its client pixels in units of GDI's DPI,
                 // not the target's: scaled to the target's (nothing on a
@@ -2135,7 +2137,17 @@ pub(crate) fn pointer(surface: &Rc<Surface>, view: &NshView, event: &ItemPointer
     };
     if matches!(event.kind, PointerKind::Down) {
         let arrives = focused(surface).as_ref() != Some(view);
+        // Focus scrolls RichEdit to its caret (the text's end after the
+        // value was set); the press is hit against what shows, so the
+        // field stays where it was until the press places the caret.
+        let mut scroll = windows::Win32::Foundation::POINT::default();
+        if arrives {
+            input.send(EM_GETSCROLLPOS, 0, &mut scroll as *mut _ as isize);
+        }
         set_focus(surface, Some(view));
+        if arrives {
+            input.send(EM_SETSCROLLPOS, 0, &mut scroll as *mut _ as isize);
+        }
         // The press, sent to RichEdit after the focus arrived, places the
         // caret where it lands (or extends the selection, or starts a
         // drag): `selectTextOnFocus` waits for its release. A Shift or

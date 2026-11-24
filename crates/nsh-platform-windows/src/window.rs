@@ -1823,7 +1823,9 @@ fn window_api(
             None
         }
         WM_DISPLAYCHANGE => {
+            crate::text::invalidate_rendering_params();
             crate::window_state::displays_changed(surface);
+            surface.invalidate();
             None
         }
         WM_CLOSE => {

@@ -1147,6 +1147,18 @@ and a context menu on it is the browser's (open in a new tab, copy the link) unl
 in it listens for `onContextMenu` (`contextMenu`, where the runtime otherwise prevents the browser's menu). The other
 backends store `web_element` and draw nothing differently.
 
+**Links of text.** A link of a text (a nested `<Text>` taking presses, `AttributedText::links`) whose span has an
+`href` (`AttributedText::link_hrefs`: `TextView` gives each of its links its URL, as `Link` gives its view its `href`)
+is an `a` inside its run (`fillRun`, class `nsh-link`; the link record of the text item is `[node, events, href]`)
+when its address is one a browser opens from a page (`textLinkAddress`: `http:`, `https:`, `mailto:`, `tel:` and
+paths, under the site's base as a `Link`'s `href`, `linkHref`); an `#anchor` of the document and any other scheme (an
+app's own routes, `javascript:`) stay a span, pressed as before. The `a` keeps its run's shaping, bidi order, color
+and decoration (a rule of the runtime's stylesheet takes the browser's off `a.nsh-link`), is not draggable (a drag
+selects its characters) and keeps `tabindex="-1"`, as Tab passes the web's links of text. Its clicks are a `Link`'s
+(`LINK_SELECTOR`): a plain click presses the link through its text (`linkPress`), a click with a modifier key or the
+middle button is the browser's alone; its context menu is the browser's unless its text listens for `onContextMenu`.
+`text-browser.test.mjs` checks that the `a` sits where the span would.
+
 **The page's head.** `nsh/web` is a native module like the platform modules (`nsh_core::js::NATIVE_MODULES`): the
 QuickJS hosts serve `nsh-js`'s `web_page.rs` (`Head` renders nothing), the browser runtime its
 own (`web/browser/page.js`, made per app by `runtime.js` and set as the `nsh/web` namespace). `page.js` runs in the

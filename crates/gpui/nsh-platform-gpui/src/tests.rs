@@ -160,6 +160,7 @@ fn ime(
 
 /// Runs the window (and waits for the engine's thread) until the focused
 /// field reads `text`.
+#[track_caller]
 fn wait_for(view: &Entity<AppView>, cx: &mut VisualTestContext, text: &str) {
     let start = Instant::now();
     loop {
@@ -1374,6 +1375,7 @@ fn presses_carry_where_the_pointer_was(cx: &mut TestAppContext) {
 
 /// Runs the window until the focused field's text satisfies `done`, and
 /// returns it.
+#[track_caller]
 fn wait_until(
     view: &Entity<AppView>,
     cx: &mut VisualTestContext,

@@ -746,6 +746,7 @@ expect Extended: text,custom
 expect CJK emphasis: strong,text
 expect CJK URL: https://example.com,text
 expect Math off: Math $x$
+expect Links off: a i
 expect From HTML: Hi there
 expect Text style: textStyle red
 expect Unknown tag: <US tech> up
@@ -4565,6 +4566,8 @@ covers [nsh/base] wrappingRule
 
 # base-rich-editor-tables
 tap id:case-base-rich-editor-tables
+prop scroll:text:"InternationalConferenceAuditorium" horizontal true
+scroll id:rich-editor-table-scroll 30 0
 tap text:RunTables
 expect Insert: true *|*/|
 expect AddRow: true *|*/|/|

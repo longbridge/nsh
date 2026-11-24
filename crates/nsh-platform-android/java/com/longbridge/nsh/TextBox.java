@@ -195,8 +195,9 @@ final class TextBox extends android.view.ViewGroup implements Node {
                 downX = e.getX();
                 downY = e.getY();
                 extending = false;
-                // A tap on the text ends its selection (a long press makes a new one).
-                clearSelection();
+                // A long press makes a new selection; a tap ends this one
+                // (`Mounter.touchUp`), a scroll keeps it.
+                removeCallbacks(longPress);
                 postDelayed(longPress, android.view.ViewConfiguration.getLongPressTimeout());
                 break;
             case android.view.MotionEvent.ACTION_MOVE: {
@@ -299,6 +300,7 @@ final class TextBox extends android.view.ViewGroup implements Node {
             // One selection per surface.
             if (mounter.selectedArea != null) mounter.selectedArea.clear();
             mounter.selectedText = this;
+            mounter.keepSelection();
             mounter.updateBack();
         }
         placeHandles();

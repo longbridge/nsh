@@ -1184,9 +1184,17 @@ impl Items {
     /// ahead of a move under way: a Return or Space typed ahead, which
     /// selects the item the keys move to once they are there. Whether it
     /// took the press.
-    fn press_ahead(&self, key: u64) -> bool {
+    ///
+    /// Only a key is typed ahead: a press from no pointer (`clicks` 0) on
+    /// the item with the keyboard focus, which Return and Space press. A
+    /// pointer's press (a tap, a click) and an assistive technology's
+    /// activation of another item are that item's own, also while the
+    /// focus the keys moved has not come: on a touch screen no pointer
+    /// moves over the item first to take the keys' place ([`Self::point`]).
+    fn press_ahead(&self, key: u64, press: &PressEvent) -> bool {
+        let typed = press.clicks == 0 && self.focused.get_untracked() == Some(key);
         let ahead = self.cursor.get().is_some_and(|c| c != key);
-        if self.busy.get() == 0 && !ahead {
+        if !typed || (self.busy.get() == 0 && !ahead) {
             return false;
         }
         self.in_turn(move |items| {
@@ -2857,11 +2865,11 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
         .when_some(left, |v, (items, key)| {
             v.on_mouse_leave(move |_: &MouseEvent| items.unpoint(key, node))
         })
-        .on_press(move || {
+        .on_press(move |e: &PressEvent| {
             // A Return or Space typed ahead of a key move selects the item
             // the keys move to.
             if let (Some(m), Some(key)) = (&chosen, key)
-                && m.items.press_ahead(key)
+                && m.items.press_ahead(key, e)
             {
                 return;
             }
