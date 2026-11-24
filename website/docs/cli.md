@@ -390,7 +390,7 @@ Uploads an Android App Bundle to Google Play and releases it to a track, in one 
 commit; a failed edit is deleted). Without `--track` the release goes to **internal testing** only; reaching testers
 beyond it, or the public, always takes an explicit `--track`. With `--from` instead of a bundle, it promotes the newest
 release of one track to another. Signs in as a Google Cloud service account that has release permission for the app in
-Play Console ([Android](./android.md#upload-to-google-play)).
+Play Console ([Publish to Google Play](./publish.md#publish-to-google-play)).
 
 | Flag | Description |
 |---|---|
@@ -402,7 +402,7 @@ Play Console ([Android](./android.md#upload-to-google-play)).
 | `--rollout <FRACTION>` | A staged rollout to this fraction of the track's users, above 0 and below 1, e.g. `0.1`. |
 | `--status <STATUS>` | `completed` (default), `in-progress` (default with `--rollout`), `halted` (stop a staged rollout, with its `--rollout`) or `draft`. |
 | `--draft` | Release as a draft: Play takes only drafts until the app's first release is made in Play Console. |
-| `--store <DIR>` | The [store directory](./android.md#store-listing-and-release-notes). Default: `store` in the app's directory. |
+| `--store <DIR>` | The [store directory](./publish.md#store-listing). Default: `store` in the app's directory. |
 | `--listing` | Also update the store listing (name, descriptions, images) from the store directory, replacing what Play has for those locales. |
 
 To raise a staged rollout, release the same version again with a larger `--rollout`; to finish it, release it with no
@@ -488,4 +488,4 @@ TestFlight groups, prepares the App Store version and listing, and submits it fo
 the setup. Flags also accept
 `NSH_APP_STORE_APP_ID`, `NSH_APP_STORE_ISSUER_ID`, `NSH_APP_STORE_KEY_ID` and
 `NSH_APP_STORE_PRIVATE_KEY`. The app ID defaults to `nsh.json` `store.ios.appId` and the key to
-`~/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8`, so a configured app runs `nsh publish ios <IPA>`. See [Upload to TestFlight](./packaging.md#upload-to-testflight) for signing, credentials and processing.
+`~/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8`, so a configured app runs `nsh publish ios <IPA>`. See [Publish to the App Store](./publish.md#publish-to-the-app-store) for signing, credentials and processing.

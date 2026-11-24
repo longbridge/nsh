@@ -377,6 +377,7 @@ Not supported, or different:
 
 ## See also
 
+- [Sign, notarize and distribute](./packaging.md#sign-notarize-and-distribute)
 - [CLI](./cli.md): `nsh run --target macos`, `nsh package --target macos`
 - [Packaging](./packaging.md)
 - [Platform-specific code](./platform-specific.md)

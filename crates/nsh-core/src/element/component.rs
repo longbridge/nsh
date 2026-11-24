@@ -530,7 +530,7 @@ pub(crate) fn name_of<C: Component>() -> &'static str {
 
 /// A type's own name, its JS export: the last segment of its path, without
 /// a generic type's arguments (the test `components_are_named_after_their_types`).
-fn export_name(type_name: &str) -> &str {
+pub(crate) fn export_name(type_name: &str) -> &str {
     let path = type_name.split('<').next().unwrap_or(type_name);
     path.rsplit("::").next().unwrap_or(path)
 }
@@ -894,6 +894,17 @@ impl fmt::Debug for Root {
     }
 }
 
+/// What a component element made by name ([`super::ComponentElement::by_name`])
+/// has for its `make`: never called, the registry makes it.
+pub(crate) fn missing_instance() -> Box<dyn AnyInstance> {
+    unreachable!("a component made by name is made by its registry")
+}
+
+/// What a component element made by name has for its `spec`: never called.
+pub(crate) fn missing_spec() -> ComponentSpec {
+    unreachable!("a component made by name is made by its registry")
+}
+
 /// A new instance of `C`, its props not set yet.
 pub(crate) fn make_instance<C: Component>() -> Box<dyn AnyInstance> {
     Box::new(super::once::OnceInstance::<C>::new())
@@ -1011,8 +1022,9 @@ pub struct Registry {
     namespace: Option<&'static str>,
     /// The JS module a UI set is imported as (`app/native`).
     ui_set: Option<&'static str>,
-    /// The files its crates ship ([`Registry::assets`]).
-    assets: Arc<Vec<&'static [super::AssetFile]>>,
+    /// The files its crates ship, with the targets they are for
+    /// ([`Registry::assets_for`]; none: every target).
+    assets: Arc<Vec<(&'static [crate::platform::Os], &'static [super::AssetFile])>>,
     /// Makes the design tokens of a theme ([`Registry::tokens_from`]).
     tokens: Option<super::TokenSource>,
     /// Makes the views' built-in scroll bars ([`Registry::scrollbars_from`]).
@@ -1321,9 +1333,23 @@ impl Registry {
     /// Ships `files` with the apps that use the set (`assets!()`: a crate's
     /// `assets/` directory): `nsh run` serves them, `nsh package` copies
     /// them into the app, and the engine registers the fonts among them
-    /// before the first render. `asset!` refers to one.
+    /// before the first render. `asset!` refers to one. Every target gets
+    /// them; [`Registry::assets_for`] limits them to some.
     pub fn assets(&mut self, files: &'static [super::AssetFile]) -> &mut Self {
-        Arc::make_mut(&mut self.assets).push(files);
+        self.assets_for(&[], files)
+    }
+
+    /// Like [`Registry::assets`], for the packages of `targets` only: the
+    /// others neither copy the files nor register their fonts, so a file
+    /// only the web downloads stays out of the desktop and mobile
+    /// packages. No `targets`: every target. A file the app reads on a
+    /// target outside the list is not there to read.
+    pub fn assets_for(
+        &mut self,
+        targets: &'static [crate::platform::Os],
+        files: &'static [super::AssetFile],
+    ) -> &mut Self {
+        Arc::make_mut(&mut self.assets).push((targets, files));
         self
     }
 
@@ -1430,9 +1456,21 @@ impl Registry {
         self.tokens
     }
 
-    /// The files [`Registry::assets`] ships.
+    /// The files [`Registry::assets`] and [`Registry::assets_for`] ship, for
+    /// every target.
     pub fn asset_files(&self) -> impl Iterator<Item = &'static super::AssetFile> + '_ {
-        self.assets.iter().flat_map(|files| files.iter())
+        self.assets.iter().flat_map(|(_, files)| files.iter())
+    }
+
+    /// The files of [`Registry::asset_files`] with the targets each is
+    /// for (none: every target).
+    pub fn scoped_asset_files(
+        &self,
+    ) -> impl Iterator<Item = (&'static [crate::platform::Os], &'static super::AssetFile)> + '_
+    {
+        self.assets
+            .iter()
+            .flat_map(|&(targets, files)| files.iter().map(move |file| (targets, file)))
     }
 
     /// The values of [`Registry::native_values`].
@@ -1554,6 +1592,18 @@ impl Registry {
             }
         }
         out
+    }
+
+    /// A new instance of the component of type `id`, and its registered
+    /// name (a component element made by name).
+    pub(crate) fn make_type(
+        &self,
+        id: TypeId,
+    ) -> Option<(Arc<ComponentSpec>, Box<dyn AnyInstance>)> {
+        self.types
+            .values()
+            .find(|t| t.id == id)
+            .map(|t| (t.spec.clone(), (t.make)()))
     }
 
     /// A new instance of component `name`.

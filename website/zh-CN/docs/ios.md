@@ -532,6 +532,7 @@ try app.loadBundle(at: bundledURL)
 
 ## 另请参阅
 
+- [发布到 App Store](./publish.md#publish-to-the-app-store)
 - [用 Rust 开发](./rust.md)
 - [嵌入 Android 应用](./android.md)
 - [原生组件](./native-components.md)

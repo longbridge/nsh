@@ -151,6 +151,7 @@ crate, imported from `nsh-extra` in TSX and called as `nsh_extra::<module>` in R
 | Feature | TSX | What it does |
 |---|---|---|
 | `camera` | `Camera` | Takes a photo with the system's camera on iOS and Android |
+| `location` | `Location` | Reads the device's position once the user allows it, on macOS, iOS and the web |
 | `photos` | `Photos` | Reads the user's recent photos on iOS, once the user allows it |
 | `push` | `Push` | Receives remote notifications from any push service on iOS, and on Android through the service's binding |
 | `speech` | `Speech` | Turns what the user says into text as they speak, on macOS, iOS, Android, Windows and the web |
@@ -171,6 +172,54 @@ sheet has closed. `available()` is `false` where there is no camera to show (the
 and there `takePhoto` rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. The feature adds what the packaged app needs:
 the camera's usage description on iOS (an app sets its own wording with `ios.infoPlist`'s
 `NSCameraUsageDescription`) and the query of camera apps on Android.
+
+### Location
+
+`Location` reads the device's position once the user allows it: once with `current`, or each time it changes with
+`watch`, shaped as the browser's `navigator.geolocation`. macOS and iOS read it with CoreLocation, the web with the
+browser's `navigator.geolocation`; the system or the browser asks the user the first time the app reads it. Only while
+the app is in use: there is no background location.
+
+```sh
+nsh add nsh-extra --features location
+```
+
+```tsx
+import { Location } from "nsh-extra";
+
+if (await Location.available()) {
+  const position = await Location.current({ accuracy: "high", timeout: 10_000 });
+  showOnMap(position.coords.latitude, position.coords.longitude, position.coords.accuracy);
+
+  const stop = Location.watch(
+    (position) => moveMarker(position.coords),
+    (error) => showError(error.code),
+    { distanceFilter: 10 },
+  );
+  // Later: stop(). The watch also stops when the component that started it goes.
+}
+```
+
+- `available()` resolves `true` on macOS and iOS apps packaged with the feature, and in browsers with
+  `navigator.geolocation`; `false` on Android, Windows, Linux, in a terminal, in headless runs, and in an Apple app
+  run as a bare binary (`nsh run --target macos`), whose missing `Info.plist` the system never asks for.
+- `authorization()` resolves with what the user allows now, without asking: `"notDetermined"`, `"whenInUse"`,
+  `"always"`, `"denied"` or `"restricted"`. The web knows only `"whenInUse"` (granted), `"denied"` and
+  `"notDetermined"` (it will ask). `requestAuthorization()` asks the user and resolves with the answer; reading asks by
+  itself, so ask first only to choose the moment.
+- `current({ accuracy, timeout })` resolves with a `Position` (`coords.latitude`, `longitude`, `accuracy` in metres,
+  `altitude`, `altitudeAccuracy`, `heading`, `speed`, each `null` when the device does not know it, and `timestamp`
+  in milliseconds since the epoch). `accuracy` is `"best"`, `"high"`, `"balanced"` (the default) or `"low"`.
+- `watch(listener, onError?, { accuracy, distanceFilter })` calls `listener` with each new position and returns a
+  function that stops it. `onError` gets the failure that ends the watch.
+- A read fails with an `Error` whose `code` is `"EACCES"` (the user does not allow it), `"ETIMEDOUT"` (nothing came
+  within `timeout`), `"ERR_POSITION_UNAVAILABLE"` (the device found no position) or
+  `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"` (no position here); options out of range throw a `RangeError`.
+
+The feature adds `NSLocationWhenInUseUsageDescription` to the app's `Info.plist` on iOS and macOS, and the location
+entitlement of a sandboxed macOS app. Rust code uses `nsh_extra::location`: `available()`, `authorization().await`,
+`request_authorization().await`, `current(LocationRequest).await`, and `watch(LocationRequest)`, whose `next().await`
+gives each position (dropping it stops it).
 
 ### Photos
 

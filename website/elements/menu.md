@@ -25,7 +25,8 @@ trigger by the keyboard in the browser and on Linux, and by screen readers on ma
 
 Return, Space or Down on the focused trigger opens the menu with the keyboard focus on its first enabled item, and Up
 with it on its last; the arrow keys then move between the items. A press opens it with no item focused; in a popup Down or Home then
-focuses the first enabled item and Up or End the last. Page Down moves to the last enabled item in view and Page Up to
+focuses the first enabled item and Up or End the last, even while a field outside the menu keeps editing (a search
+field beside the trigger); a field inside the menu keeps its own arrows. Page Down moves to the last enabled item in view and Page Up to
 the first, a view at a time, stopping at the ends (a `MenuList` the same, see [Long lists](#long-lists)). In a popup the pointer moving over an item gives
 it the keyboard focus, so the keys go on from the item under the pointer; style an item's `focus:` state as its
 `hover:` one. In a popup a letter or digit moves the focus to the next enabled item whose text (or
@@ -400,7 +401,9 @@ submenu inside it sets its own. A menu whose items are all one choice puts them 
 - **Android**: a transparent button over the trigger opens the system's popup menu below it at once, lined up with the
   trigger's end when the trigger is in the end half of the window. `title` is the menu's first row, which cannot be
   chosen (TalkBack reads it as a disabled item); `svg`, an SVG document, is the item's icon, drawn in the item's text
-  color on Android 10 and later (`icon` is iOS's). Checks, radio buttons, submenus and sections are the system's.
+  color on Android 10 and later (`icon` is iOS's). Checks, radio buttons, submenus and sections are the system's. A
+  tap outside closes the menu as the finger lifts; the back button and the back gesture close only the menu, so a
+  dialog under it stays open.
 - **The web**: there is no system menu for a view; the trigger shows and opens nothing. Use `Menu` there, picked by
   `platform.os`.
 

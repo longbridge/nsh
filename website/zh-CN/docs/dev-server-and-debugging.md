@@ -201,7 +201,7 @@ Studio 会显示），Linux 应用写入标准错误。
 
 #### 桌面上的日志文件和级别
 
-打包后的 macOS、Windows、Linux 应用除了写入平台日志，还把日志写到它数据目录下的文件 `logs/app.log`：
+打包后的 macOS、Windows、Linux 应用除了写入平台日志，还把日志写到它数据目录下的文件 `logs/app.log`。应用可以用 `nsh.json` 的 `logDir` 另选目录（见[项目结构](./project-structure.md)），下表是默认位置：
 
 | 平台 | 日志文件 |
 |---|---|
