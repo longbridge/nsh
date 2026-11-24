@@ -99,8 +99,10 @@ final class SelectableView implements SelectionHandle.Owner {
     private final android.graphics.Path path = new android.graphics.Path();
     private final Runnable longPress = this::selectWordAtDown;
     private final Runnable recollect = this::recollect;
+    /** The area's width the toolbar was laid out for. */
+    private int toolbarWidth;
     private final android.view.ViewTreeObserver.OnPreDrawListener follow = () -> {
-        placeHandles();
+        follow();
         return true;
     };
 
@@ -108,6 +110,19 @@ final class SelectableView implements SelectionHandle.Owner {
         this.mounter = mounter;
         this.view = view;
         this.id = id;
+    }
+
+    /** Before each frame while there is a selection: the handles and the toolbar follow the text. */
+    private void follow() {
+        placeHandles();
+        if (mode == null) return;
+        // Laid out again at another width (the phone turned): the toolbar is measured again too.
+        if (view.getWidth() != toolbarWidth) {
+            toolbarWidth = view.getWidth();
+            mode.invalidate();
+        }
+        // Scrolled with its text: the toolbar goes along.
+        mode.invalidateContentRect();
     }
 
     /** The area's view is gone: ends the selection without reporting it. */
@@ -135,8 +150,9 @@ final class SelectableView implements SelectionHandle.Owner {
                 touched = text;
                 downX = e.getRawX();
                 downY = e.getRawY();
-                // A tap ends the selection (a long press makes a new one).
-                clear();
+                // A long press makes a new selection; a tap ends this one
+                // (`Mounter.touchUp`), a scroll keeps it.
+                view.removeCallbacks(longPress);
                 view.postDelayed(longPress, android.view.ViewConfiguration.getLongPressTimeout());
                 break;
             case MotionEvent.ACTION_MOVE: {
@@ -189,6 +205,7 @@ final class SelectableView implements SelectionHandle.Owner {
         if (mounter.selectedText != null) mounter.selectedText.clearSelection();
         if (mounter.selectedArea != null && mounter.selectedArea != this) mounter.selectedArea.clear();
         mounter.selectedArea = this;
+        mounter.keepSelection();
         observer = view.getViewTreeObserver();
         observer.addOnPreDrawListener(follow);
         return true;
