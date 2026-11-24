@@ -1577,23 +1577,30 @@ fn set_focus(surface: &Rc<Surface>, view: Option<&NshView>) {
 
 // --- The IME -----------------------------------------------------------------
 
-/// Enables the IME while an editable, non-secure field has the focus.
+/// Enables the IME on the window showing the focused editable, non-secure
+/// field and on the host window RichEdit reads its input context from, and
+/// detaches it from every other window of the surface.
 fn update_ime(surface: &Surface) {
-    let hwnd = surface.hwnd();
-    if hwnd.is_invalid() {
-        return;
-    }
-    let wants = FOCUS
+    let shown = FOCUS
         .with(|f| f.borrow().get(&surface.key()).and_then(|f| f.view.clone()))
-        .and_then(|v| input_of(&v))
-        .is_some_and(|input| {
-            let c = input.config.borrow();
-            c.editable && !c.secure
-        });
-    // SAFETY: plain calls on the surface's window; a null context with no
-    // flags detaches the IME, IACE_DEFAULT restores the window's own.
-    unsafe {
-        let _ = ImmAssociateContextEx(hwnd, HIMC::default(), if wants { IACE_DEFAULT } else { 0 });
+        .filter(|v| {
+            input_of(v).is_some_and(|input| {
+                let c = input.config.borrow();
+                c.editable && !c.secure
+            })
+        })
+        .map(|v| crate::app_window::hwnd_showing(surface, &v));
+    let host = surface.hwnd();
+    for hwnd in crate::app_window::hwnds(surface).into_iter().chain([host]) {
+        if hwnd.is_invalid() {
+            continue;
+        }
+        let on = shown.is_some_and(|w| hwnd == w || hwnd == host);
+        // SAFETY: plain calls on the surface's live windows; a null context
+        // with no flags detaches the IME, IACE_DEFAULT restores the window's own.
+        unsafe {
+            let _ = ImmAssociateContextEx(hwnd, HIMC::default(), if on { IACE_DEFAULT } else { 0 });
+        }
     }
 }
 
