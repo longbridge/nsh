@@ -42,6 +42,30 @@ const STYLE_CACHE: usize = 4096;
 /// Rounds of polls and updates per run of the tasks, at most.
 const MAX_TASK_ROUNDS: u32 = 64;
 
+/// A component made by name whose part is not registered yet.
+struct ByName {
+    id: std::any::TypeId,
+    props: Box<dyn crate::element::builder::AnyProps>,
+    /// Where it was made: its context comes from there.
+    owner: crate::element::Owner,
+}
+
+thread_local! {
+    /// What asks the platform for the part that registers a component
+    /// made by name ([`set_part_requester`]).
+    static PART_REQUESTER: std::cell::Cell<Option<fn(&str)>> = const { std::cell::Cell::new(None) };
+}
+
+/// Sets what asks the platform for the code of a component made by name
+/// that no UI set registers yet (a web runtime loads the side module of
+/// its part, then calls its gate): it gets the component's registered
+/// name. Without one, such a component shows nothing until a set
+/// registers it.
+#[doc(hidden)]
+pub fn set_part_requester(request: fn(&str)) {
+    PART_REQUESTER.with(|r| r.set(Some(request)));
+}
+
 /// What renders on a host node.
 enum Inner {
     /// Nothing is registered under the name: renders nothing.
@@ -219,6 +243,9 @@ pub(super) struct Instance {
     /// style and animated values.
     pub(super) app_style: Option<crate::StylePatch>,
     dirty: bool,
+    /// Its view is made again, in place of the one it showed (a component
+    /// made by name, made when its part is registered).
+    remake: bool,
     /// The nodes of its view with bindings: what was applied last. Boxed:
     /// a record is large, and a map's free slots are as large as its
     /// entries.
@@ -374,6 +401,7 @@ impl Instance {
             responders: Vec::new(),
             app_style,
             dirty: false,
+            remake: false,
             bound: FxHashMap::default(),
             js_kids: None,
             cell_owner: None,
@@ -669,6 +697,9 @@ pub(super) struct Components {
     /// Boxed: making a view (or applying its patches) takes its instance
     /// out of the map and back.
     pub(super) instances: FxHashMap<NodeId, Box<Instance>>,
+    /// Hosts of components made by name whose part is not registered yet
+    /// ([`crate::element::ComponentElement::by_name`]): made when it is.
+    by_name: FxHashMap<NodeId, ByName>,
     /// Expanded node -> the host of the component whose view made it.
     pub(super) owners: FxHashMap<NodeId, NodeId>,
     /// Changes when reconciliation releases an expanded element or raw
@@ -922,6 +953,7 @@ impl Default for Components {
             app_tokens: Arc::new(Tokens::default()),
             host_tokens: None,
             instances: FxHashMap::default(),
+            by_name: FxHashMap::default(),
             owners: FxHashMap::default(),
             release_generation: 0,
             released_hosts: FxHashSet::default(),
@@ -1137,6 +1169,87 @@ impl<M: TextEngine> Core<M> {
             registry.run_setups_not_in(&self.components.registry);
         }
         self.components.registry = registry;
+        self.make_by_name();
+    }
+
+    /// Makes the components made by name whose part is registered now.
+    fn make_by_name(&mut self) {
+        if self.components.by_name.is_empty() {
+            return;
+        }
+        let _entered = self.components.runtime.enter();
+        let hosts: Vec<NodeId> = self.components.by_name.keys().copied().collect();
+        for host in hosts {
+            let Some(waiting) = self.components.by_name.get(&host) else {
+                continue;
+            };
+            let still = self
+                .components
+                .instances
+                .get(&host)
+                .is_some_and(|i| matches!(i.inner, Inner::Missing));
+            if !still {
+                self.components.by_name.remove(&host);
+                continue;
+            }
+            let Some((spec, mut inner)) = self.components.registry.make_type(waiting.id) else {
+                continue;
+            };
+            let waiting = self.components.by_name.remove(&host).expect("waiting");
+            inner.place(host, waiting.owner);
+            inner.set_props(waiting.props.as_any());
+            // Its view is made in place of the empty one it showed.
+            if let Some(inst) = self.components.instances.get_mut(&host) {
+                inst.inner = Inner::Component(inner);
+                inst.spec = Some(spec);
+                inst.remake = true;
+            }
+            self.components.mark(host);
+        }
+    }
+
+    /// Makes `host` the host of component element `c`: by its type, or
+    /// by its registered name ([`crate::element::ComponentElement::by_name`]).
+    fn create_instance_for(&mut self, host: NodeId, c: &crate::element::builder::ComponentEl) {
+        let Some(id) = c.by_name else {
+            self.create_instance_of(host, c.name, c.make, c.spec);
+            return;
+        };
+        if self.is_host(host) {
+            return;
+        }
+        match self.components.registry.make_type(id) {
+            Some((spec, inner)) => self.insert_instance(host, Some(spec), Inner::Component(inner)),
+            None => {
+                self.insert_instance(host, None, Inner::Missing);
+                self.components.by_name.insert(
+                    host,
+                    ByName {
+                        id,
+                        props: c.props.clone_box(),
+                        owner: crate::element::Owner::current(),
+                    },
+                );
+                let name = crate::element::component::export_name(c.name);
+                match PART_REQUESTER.with(|r| r.get()) {
+                    Some(request) => request(name),
+                    None => log::debug!("`{name}` waits for the part that registers it"),
+                }
+            }
+        }
+    }
+
+    /// Sets the props of `host`'s component from its element.
+    fn set_element_props(&mut self, host: NodeId, props: &dyn crate::element::builder::AnyProps) {
+        if let Some(waiting) = self.components.by_name.get_mut(&host) {
+            waiting.props = props.clone_box();
+            return;
+        }
+        if let Some(inst) = self.components.instances.get_mut(&host)
+            && let Inner::Component(inner) = &mut inst.inner
+        {
+            inner.set_props(props.as_any());
+        }
     }
 
     /// `uiTheme` on the root: the app's theme file (`nsh.json`, `setTheme`),
@@ -1379,12 +1492,8 @@ impl<M: TextEngine> Core<M> {
         let id = self.components.alloc();
         let _ = self.apply_op(Op::Create { id, tag: el.tag });
         made(self, id);
-        self.create_instance_of(id, c.name, c.make, c.spec);
-        if let Some(inst) = self.components.instances.get_mut(&id)
-            && let Inner::Component(inner) = &mut inst.inner
-        {
-            inner.set_props(c.props.as_any());
-        }
+        self.create_instance_for(id, &c);
+        self.set_element_props(id, c.props.as_ref());
         Some(id)
     }
 
@@ -2808,7 +2917,7 @@ impl<M: TextEngine> Core<M> {
                 inner.set_children(!inst.js_children.is_empty());
                 // Its view is made: its props now reach what read them, and
                 // the app's (or its parent's) styles may have changed.
-                if inst.root.is_some() {
+                if inst.root.is_some() && !std::mem::take(&mut inst.remake) {
                     self.restyle_view(host, inst);
                     return None;
                 }
@@ -3207,7 +3316,7 @@ impl<M: TextEngine> Core<M> {
                     return;
                 }
                 self.components.owners.insert(id, host);
-                self.create_instance_of(id, c.name, c.make, c.spec);
+                self.create_instance_for(id, c);
                 if let Some(rooted) = self.components.instances.get_mut(&id) {
                     // The app's style is the top host's.
                     rooted.app_style = None;
@@ -4834,7 +4943,7 @@ impl<M: TextEngine> Core<M> {
                 let _ = self.apply_op(Op::Create { id, tag: el.tag });
                 self.components.owners.insert(id, host);
                 if let ElKind::Component(c) = &el.kind {
-                    self.create_instance_of(id, c.name, c.make, c.spec);
+                    self.create_instance_for(id, c);
                 }
                 (
                     id,
@@ -4856,11 +4965,7 @@ impl<M: TextEngine> Core<M> {
         if let Some(c) = component {
             // A nested component: its props, and the styles as the app's
             // classes of its host.
-            if let Some(nested) = self.components.instances.get_mut(&id)
-                && let Inner::Component(inner) = &mut nested.inner
-            {
-                inner.set_props(c.props.as_any());
-            }
+            self.set_element_props(id, c.props.as_ref());
             if self.is_host(id) {
                 if let Some(style) = nested_style {
                     el.style = self.bind_nested_style(id, style);
