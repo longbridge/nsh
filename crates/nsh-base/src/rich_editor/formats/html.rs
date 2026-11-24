@@ -298,6 +298,24 @@ impl DomParser {
         Slice::max_open(cx.finish().into_fragment(), true)
     }
 
+    /// Parses an HTML fragment for content insertion (Tiptap's
+    /// `createNodeFromContent` with `slice: true` and
+    /// `preserveWhitespace: 'full'`), wrapping in `<body>` so leading and
+    /// trailing whitespace survives HTML parsing and stripping inter-tag
+    /// formatting whitespace (`^(\n\s\s|\n)$`) as Tiptap's `elementFromString`.
+    pub fn parse_insert_fragment(&self, html: &str) -> Fragment {
+        let wrapped = format!("<body>{html}</body>");
+        let mut body = self.read_html(&wrapped);
+        strip_insert_whitespace(&mut body);
+        let options = ParseOptions {
+            preserve_whitespace: Some(Whitespace::Full),
+            ..Default::default()
+        };
+        let mut cx = ParseContext::new(self, &options, true, false);
+        cx.add_all(&body, Vec::new());
+        cx.finish().into_fragment()
+    }
+
     /// Pasted `html` as the slice that fits at `context` (ProseMirror's
     /// `parseFromClipboard` for HTML): parsed in that context, sibling
     /// nodes wrapped so they fit where they land together, then opened as
@@ -643,6 +661,29 @@ fn convert_children(node: &Handle, depth: usize) -> Vec<DomNode> {
             _ => None,
         })
         .collect()
+}
+
+fn is_stripped_insert_ws(text: &str) -> bool {
+    if text == "\n" {
+        return true;
+    }
+    let mut chars = text.chars();
+    matches!(
+        (chars.next(), chars.next(), chars.next(), chars.next()),
+        (Some('\n'), Some(a), Some(b), None) if a.is_whitespace() && b.is_whitespace()
+    )
+}
+
+fn strip_insert_whitespace(el: &mut DomElement) {
+    el.children.retain(|child| match child {
+        DomNode::Text(text) => !is_stripped_insert_ws(text),
+        _ => true,
+    });
+    for child in &mut el.children {
+        if let DomNode::Element(child_el) = child {
+            strip_insert_whitespace(child_el);
+        }
+    }
 }
 
 /// Moves lists placed directly in a list into the item before them, as

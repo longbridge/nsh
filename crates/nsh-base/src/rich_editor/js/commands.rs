@@ -12,7 +12,7 @@ use crate::rich_editor::{
     commands::{self as cmd, BoxCommand, CommandRegistry, Dispatch, command},
     extensions::{history, input_rules},
     formats::{DocFormat, DomParser, MarkdownFormat, MarkdownNames, ParseOptions, slice_from_text},
-    model::{Attrs, Fragment, Node, Schema, Slice},
+    model::{Attrs, Fragment, Node, Schema},
     state::{EditorState, NodeSelection, TextSelection},
     transform::MarkMatch,
 };
@@ -393,25 +393,34 @@ pub(crate) fn resolve_with(
                 .ok_or("insertContent needs `content`")?;
             let format = command.format;
             let schema = schema.clone();
-            command_fn(move |state, dispatch| {
-                let slice = match &content {
-                    Content::Text(text) if format.unwrap_or_default() == RichFormat::Text => {
-                        slice_from_text(&schema, text, state.selection().resolved_from())
+            command_fn(move |state, dispatch| match &content {
+                Content::Text(text) if format.unwrap_or_default() == RichFormat::Text => {
+                    let slice = slice_from_text(&schema, text, state.selection().resolved_from());
+                    if let Some(dispatch) = dispatch {
+                        let mut tr = state.tr();
+                        tr.replace_selection(slice);
+                        dispatch(tr);
                     }
-                    _ => match fragment_of(&schema, &content, format) {
-                        Ok(fragment) => Slice::max_open(fragment, true),
-                        Err(error) => {
-                            log::warn!("insertContent: {error}");
-                            return false;
-                        }
-                    },
-                };
-                if let Some(dispatch) = dispatch {
-                    let mut tr = state.tr();
-                    tr.replace_selection(slice);
-                    dispatch(tr);
+                    true
                 }
-                true
+                Content::Text(html) if format == Some(RichFormat::Html) => {
+                    let fragment = DomParser::from_schema(&schema).parse_insert_fragment(html);
+                    cmd::tiptap::insert_content_raw(
+                        fragment,
+                        Some(html.clone()),
+                        cmd::tiptap::InsertContentOptions::default(),
+                    )(state, dispatch)
+                }
+                _ => match fragment_of(&schema, &content, format) {
+                    Ok(fragment) => cmd::tiptap::insert_content(
+                        fragment,
+                        cmd::tiptap::InsertContentOptions::default(),
+                    )(state, dispatch),
+                    Err(error) => {
+                        log::warn!("insertContent: {error}");
+                        false
+                    }
+                },
             })
         }
         N::SetNodeAttribute => {
