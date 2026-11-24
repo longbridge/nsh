@@ -160,6 +160,7 @@ pub fn App() -> impl IntoElement {
 | `icon` | string \| object | `package`、`run` | 一张正方形 PNG，最好是 1024×1024，路径相对于 `nsh.json`；也可按平台分别提供（`{ "macos": "…", "windows": "…" }`，[打包](./packaging.md#图标)）。Android 的可以是自适应图标（`{ "foreground": "…", "background": "…", "monochrome": "…" }`，[打包](./packaging.md#图标)）。 |
 | `tailwind` | object | 每次构建 | 扩展 `class` 字符串所依据的 Tailwind 主题（[Tailwind](./tailwind.md)）。 |
 | `locales` | string[] | 每次构建 | 应用除英语外格式化数字和日期所用的语言（`["de", "zh-CN"]`），bundle 会携带它们的数据。默认：`locales/` 中翻译所包含的语言（[I18n](./i18n.md#数字和日期)）。 |
+| `timeZones` | string[] | 每次构建 | 除设备时区、`UTC` 和偏移量外，`Intl` 还能使用的时区名（`["America/New_York"]`），bundle 会携带它们的规则。默认：无（[时区](./i18n.md#时区)）。 |
 | `theme` | string 或 object | 每次构建 | 应用的设计令牌（shadcn/ui 的 `cssVars`，叠加在默认的 `neutral` 主题之上），供 token 类名、`token()` 和 Rust 组件绘制时使用：相对于 `nsh.json` 的主题文件路径，或直接内联的主题（[用 Rust 开发](./rust.md#主题)、[主题 token](./tailwind.md#主题-token)）。 |
 | `statusBar` | object | 每次构建、`package` | 所有页面和对话框之下的状态栏默认值（iOS 和 Android）：`{ "foreground": "auto" \| "light" \| "dark", "hidden": boolean }`，两个字段都可省略。打包的 iOS 应用从启动屏起就使用它（[状态栏](../modules/nsh-base.md#status-bar)）。 |
 | `capabilities` | object | 每次构建 | 应用可以访问 VM 之外的哪些资源：网络主机、网页视图主机、状态栏、应用自己的窗口（[沙箱与权限](./sandbox-and-capabilities.md)）。 |

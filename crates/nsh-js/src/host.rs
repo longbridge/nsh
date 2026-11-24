@@ -2733,6 +2733,73 @@ const report = (v) => text(String(v));
         );
     }
 
+    /// A named zone the app ships (nsh.json `timeZones`, packed into the
+    /// bundle's `i18n` by `nsh-i18n`) formats at its offset at each
+    /// instant: across daylight saving time in New York, at half an hour
+    /// in Kolkata, with Lord Howe's half-hour daylight saving time, and
+    /// by its rule after its last transition. A zone the app does not
+    /// ship still throws.
+    #[test]
+    fn formats_in_the_named_zones_the_app_ships() {
+        let host = Host::new().unwrap();
+        let zones = ["America/New_York", "Asia/Kolkata", "Australia/Lord_Howe"].map(String::from);
+        let bundle =
+            nsh_i18n::bundle_json(&Default::default(), Some(&["de".to_owned()]), &zones, |w| {
+                panic!("{w}")
+            })
+            .unwrap();
+        host.eval_source(&format!(
+            r#"{REPORT}
+            import {{ i18n }} from "nsh:rt";
+            i18n({bundle:?});
+            const time = (timeZone) => new Intl.DateTimeFormat("en-US", {{
+              timeZone, year: "numeric", month: "2-digit", day: "2-digit",
+              hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZoneName: "short",
+            }});
+            const ny = time("america/new_york");
+            report(ny.resolvedOptions().timeZone);
+            // Daylight saving time starts at 2:00 EST on March 8, 2026 and
+            // ends at 2:00 EDT on November 1.
+            for (const at of [Date.UTC(2026, 2, 8, 6, 59), Date.UTC(2026, 2, 8, 7, 0),
+                              Date.UTC(2026, 10, 1, 5, 59), Date.UTC(2026, 10, 1, 6, 0)]) {{
+              report(ny.format(at));
+            }}
+            report(time("Asia/Kolkata").format(Date.UTC(2026, 0, 1, 0, 0)));
+            // Lord Howe: +10:30, and +11 from 2:00 on October 4, 2026.
+            const howe = time("Australia/Lord_Howe");
+            report(howe.format(Date.UTC(2026, 9, 3, 15, 29)));
+            report(howe.format(Date.UTC(2026, 9, 3, 15, 30)));
+            // Past the last transition: the zone's rule.
+            report(ny.format(Date.UTC(2200, 6, 1, 12, 0)));
+            report(ny.format(Date.UTC(2200, 11, 1, 12, 0)));
+            report(new Date(Date.UTC(2026, 6, 4, 16, 0)).toLocaleTimeString("en-US", {{ timeZone: "America/New_York" }}));
+            report(new Intl.DateTimeFormat("en-US", {{ timeZone: "America/New_York", timeStyle: "long" }}).format(Date.UTC(2026, 6, 4, 16, 0)));
+            report(new Intl.DateTimeFormat("de", {{ timeZone: "America/New_York", timeStyle: "long" }}).format(Date.UTC(2026, 0, 1)));
+            try {{ new Intl.DateTimeFormat("en", {{ timeZone: "Europe/Berlin" }}); }} catch (e) {{ report(e.name); }}
+            "#
+        ))
+        .unwrap();
+        assert_eq!(
+            reported(&host),
+            [
+                "America/New_York",
+                "03/08/2026, 01:59 EST",
+                "03/08/2026, 03:00 EDT",
+                "11/01/2026, 01:59 EDT",
+                "11/01/2026, 01:00 EST",
+                "01/01/2026, 05:30 GMT+5:30",
+                "10/04/2026, 01:59 GMT+10:30",
+                "10/04/2026, 02:30 GMT+11",
+                "07/01/2200, 08:00 EDT",
+                "12/01/2200, 07:00 EST",
+                "12:00:00 PM",
+                "12:00:00 PM EDT",
+                "19:00:00 GMT-5",
+                "RangeError",
+            ]
+        );
+    }
+
     #[test]
     fn timers_fire_in_order_and_cancel() {
         let host = Host::new().unwrap();
