@@ -41,6 +41,8 @@ mod keyboard;
 #[cfg(target_os = "macos")]
 mod keymap_ime;
 #[cfg(target_os = "macos")]
+mod mask_corners;
+#[cfg(target_os = "macos")]
 mod menu_labels;
 #[cfg(target_os = "macos")]
 mod menu_lifetime;
@@ -158,6 +160,8 @@ fn main() {
                 canvas_bounds::run_scale();
             } else if std::env::var_os("NSH_CANVAS_BOUNDS_CHECK_ONLY").is_some() {
                 canvas_bounds::run();
+            } else if std::env::var_os("NSH_MASK_CORNERS_CHECK_ONLY").is_some() {
+                mask_corners::run();
             } else if std::env::var_os("NSH_HOVER_CURSOR_CHECK_ONLY").is_some() {
                 hover_cursor::run();
             } else if std::env::var_os("NSH_PRESS_MOMENTUM_CHECK_ONLY").is_some() {
@@ -176,6 +180,7 @@ fn main() {
                 shader_content::run();
                 canvas_bounds::run();
                 canvas_bounds::run_scale();
+                mask_corners::run();
                 menu_labels::run();
                 menu_lifetime::run();
                 window_frames::run();
