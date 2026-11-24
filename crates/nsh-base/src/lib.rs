@@ -64,6 +64,7 @@ mod roving;
 mod scrollbar;
 mod select;
 mod sheet;
+mod sink_text;
 mod slider;
 mod sort;
 mod split_view;
