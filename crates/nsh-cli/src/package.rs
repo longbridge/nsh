@@ -78,6 +78,21 @@ impl PackageTarget {
         }
     }
 
+    /// The target a crate's files are scoped to
+    /// (`Registry::assets_for`); `None` for the removed GPUI packages.
+    pub(crate) fn asset_target(self) -> Option<nsh_core::platform::Os> {
+        use nsh_core::platform::Os;
+        match self {
+            PackageTarget::Ios | PackageTarget::IosSimulator => Some(Os::Ios),
+            PackageTarget::Android => Some(Os::Android),
+            PackageTarget::Linux => Some(Os::Linux),
+            PackageTarget::Macos => Some(Os::MacOs),
+            PackageTarget::Windows => Some(Os::Windows),
+            PackageTarget::Web => Some(Os::Web),
+            PackageTarget::Gpui => None,
+        }
+    }
+
     /// This machine's desktop target (`None` off macOS, Windows and
     /// Linux): where `--target gpui` points.
     pub(crate) fn desktop() -> Option<PackageTarget> {
@@ -281,6 +296,12 @@ pub(crate) struct AppConfig {
     /// release runners (macOS, Windows, Linux) read it; [`read_config`]
     /// drops a value they would refuse.
     pub(crate) data_dir: Option<String>,
+    /// The directory of the packaged app's log files (`"logDir":
+    /// "${homeDir}/.myapp/logs/ui"`), in place of `logs` in its data
+    /// directory. Spelled and checked like [`Self::data_dir`]; written into
+    /// `app.json` for the desktop release runners, and [`read_config`] drops
+    /// a value they would refuse.
+    pub(crate) log_dir: Option<String>,
     /// Gives the app's address (`UrlScheme.setUrl`) to the system on iOS
     /// and macOS (`"handoff": true`), so Handoff continues it on the user's
     /// other devices. iOS and macOS
@@ -588,6 +609,9 @@ impl AppConfig {
     pub(crate) fn add_data_dir_to_app_json(&self, info: &mut serde_json::Value) {
         if let Some(dir) = &self.data_dir {
             info["dataDir"] = dir.as_str().into();
+        }
+        if let Some(dir) = &self.log_dir {
+            info["logDir"] = dir.as_str().into();
         }
     }
 
@@ -1079,6 +1103,14 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
             "dataDir: `{dir}` is neither an absolute path nor `${{homeDir}}/...` (no `..`, no other `${{...}}`)"
         ));
         config.data_dir = None;
+    }
+    if let Some(dir) = &config.log_dir
+        && nsh_engine::resolve_data_dir(dir).is_none()
+    {
+        ignored.push(format!(
+            "logDir: `{dir}` is neither an absolute path nor `${{homeDir}}/...` (no `..`, no other `${{...}}`)"
+        ));
+        config.log_dir = None;
     }
     for library in &mut config.android.libraries {
         library.path = dir.join(&library.path);
@@ -1670,7 +1702,7 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
             config.window.as_ref(),
         ),
     )?;
-    for asset in &built.assets {
+    for asset in built.assets_for(options.target.asset_target()) {
         let dest = resources.join("assets").join(&asset.path);
         if let Some(dir) = dest.parent() {
             fs::create_dir_all(dir)?;
@@ -1895,7 +1927,7 @@ fn package_android(
         )
         .into_bytes(),
     ));
-    for asset in &built.assets {
+    for asset in built.assets_for(options.target.asset_target()) {
         let bytes = fs::read(&asset.source).with_context(|| format!("read {}", asset.path))?;
         assets.push((format!("nsh/assets/{}", asset.path), bytes));
     }
@@ -2025,7 +2057,7 @@ fn package_linux(
     if let Some(json) = built.capabilities_json() {
         fs::write(resources.join("capabilities.json"), json)?;
     }
-    for asset in &built.assets {
+    for asset in built.assets_for(options.target.asset_target()) {
         let dest = resources.join("assets").join(&asset.path);
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent)?;
@@ -2222,7 +2254,7 @@ fn package_macos(
     if let Some(json) = built.capabilities_json() {
         fs::write(nsh.join("capabilities.json"), json)?;
     }
-    for asset in &built.assets {
+    for asset in built.assets_for(options.target.asset_target()) {
         let dest = nsh.join("assets").join(&asset.path);
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent)?;
@@ -4173,6 +4205,41 @@ mod tests {
             .unwrap();
             let config = read_config(&entry).unwrap();
             assert_eq!(config.data_dir.is_some(), kept, "{value}");
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn an_apps_log_dir_goes_into_app_json() {
+        let config: AppConfig =
+            serde_json::from_str(r#"{ "logDir": "${homeDir}/.myapp/logs/ui" }"#).unwrap();
+        let info = desktop_app_json(&config, "A", "com.a", "1.0.0");
+        assert_eq!(
+            info["logDir"],
+            serde_json::json!("${homeDir}/.myapp/logs/ui")
+        );
+        let info = desktop_app_json(&AppConfig::default(), "A", "com.a", "1.0.0");
+        assert!(info.get("logDir").is_none());
+    }
+
+    #[test]
+    fn a_log_dir_the_runner_would_refuse_is_dropped() {
+        let dir = std::env::temp_dir().join(format!("nsh-log-dir-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let entry = dir.join("App.tsx");
+        for (value, kept) in [
+            ("${homeDir}/.myapp/logs", true),
+            ("logs", false),
+            ("${homeDir}/../elsewhere", false),
+            ("${appId}/logs", false),
+        ] {
+            std::fs::write(
+                dir.join("nsh.json"),
+                serde_json::json!({ "logDir": value }).to_string(),
+            )
+            .unwrap();
+            let config = read_config(&entry).unwrap();
+            assert_eq!(config.log_dir.is_some(), kept, "{value}");
         }
         std::fs::remove_dir_all(&dir).unwrap();
     }

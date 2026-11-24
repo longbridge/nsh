@@ -115,7 +115,7 @@ mount(() => (
 ));
 ```
 
-`TabBar` 来自 `nsh/mobile`，在 Rust 中是 `nsh_core::mobile`。选中状态属于应用：一次点按通过 `onChange` 报告该标签的索引（`{ index }`），标签栏像系统的一样立即显示这次选择，应用显示那一部分并把索引作为 `selectedIndex` 传回。样式没有给定高度时，高度是系统的。在 Rust 中，`tab_bar()` 创建它，每个 prop 一个 setter（`.items(..)`、`.selected_index(..)`），每个事件一个监听方法（`.on_change(..)`），以及带类型的样式方法；`TabBarItem::new(title).icon(name).badge(text)` 创建一个标签。
+`TabBar` 来自 `nsh/mobile`，在 Rust 中是 `nsh_core::mobile`。选中状态属于应用：一次点按通过 `onChange` 报告该标签的索引（`{ index }`），标签栏像系统的一样立即显示这次选择，应用显示那一部分并把索引作为 `selectedIndex` 传回。样式没有给定高度时，高度是系统的。标签栏不在视野中时（`hidden`，或被推入页面的 `hidesBottomBarWhenPushed` 移出底部）不接收触摸：落在它留下的区域上的点按会到达下面的视图，因此应用画在那里的控件（例如浮动的操作栏）可以点按。在 Rust 中，`tab_bar()` 创建它，每个 prop 一个 setter（`.items(..)`、`.selected_index(..)`），每个事件一个监听方法（`.on_change(..)`），以及带类型的样式方法；`TabBarItem::new(title).icon(name).badge(text)` 创建一个标签。
 
 ### Props
 
@@ -123,7 +123,7 @@ mount(() => (
 |---|---|---|---|---|
 | `items` | `.items(..)` | `TabBarItem[]` | `[]` | 各个标签，按顺序。 |
 | `selectedIndex` | `.selected_index(..)` | `number` | `0` | 选中的标签的索引；超出标签数量的索引不选中任何标签。 |
-| `hidden` | `.hidden(..)` | `boolean` | `false` | iOS：立即隐藏标签栏。应用在页面推入和弹出期间持有这个值；当它和当前可见导航栈的 `hidesBottomBarWhenPushed` 请求都为 false 时，标签栏显示。 |
+| `hidden` | `.hidden(..)` | `boolean` | `false` | iOS：立即隐藏标签栏。应用在页面推入和弹出期间持有这个值；当它和当前可见导航栈的 `hidesBottomBarWhenPushed` 请求都为 false 时，标签栏显示。不在视野中时它不接收触摸。 |
 | `class`、`style` | 样式方法 | `string`、`StyleProp<ViewStyle>` | 无 | 标签栏的位置和尺寸。外观是系统的，选中的标签使用主题的 `primary`。 |
 | `testID` | `.test_id(..)` | `string` | 无 | 在测试和 `nsh test --trace` 中找到标签栏。 |
 

@@ -7063,6 +7063,48 @@ fn the_tab_bar_is_the_systems_component_on_ios_and_android() {
     }
 }
 
+/// The bar's own view is what takes a press: its container passes one on.
+/// A bar out of sight (`hidden`, or hidden by a pushed page's
+/// `hidesBottomBarWhenPushed`) leaves the strip it had, and a control the
+/// app draws there hears the press.
+#[test]
+fn the_tab_bars_container_takes_no_press_of_its_own() {
+    use nsh_core::platform::Os;
+
+    for os in [Os::Ios, Os::Android] {
+        let (_engine, rx) = start_in(
+            TAB_BAR,
+            Environment {
+                os,
+                ..Environment::default()
+            },
+        );
+        let batches = until(&rx, |batch| batch.items.iter().any(is_tab_bar));
+        let container = batches
+            .iter()
+            .flat_map(|batch| &batch.items)
+            .find_map(|item| match item {
+                MountItem::Component { id, .. } if is_tab_bar(item) => Some(*id),
+                _ => None,
+            })
+            .expect("the system bar's container");
+        let props = batches
+            .iter()
+            .flat_map(|batch| &batch.items)
+            .filter_map(|item| match item {
+                MountItem::ViewProps { id, props } if *id == container => Some(props),
+                _ => None,
+            })
+            .next_back()
+            .expect("the container's box-none reaches the platform");
+        assert_eq!(
+            props.pointer_events,
+            nsh_core::PointerEvents::BoxNone,
+            "{os:?}"
+        );
+    }
+}
+
 /// The bar's selected tab takes the theme's `primary`, as the platforms
 /// read one color: the light value, then the dark one when the appearance
 /// turns dark.

@@ -69,37 +69,8 @@ nsh publish android --from internal --track production --rollout 0.1
 nsh publish status android --json
 ```
 
-Keep the key out of the repository. Once per app: create the app in Play Console, create a service account in Google
-Cloud with the Google Play Android Developer API enabled, download its JSON key, and invite the service account's email
-under **Users and permissions** with permission to release to the tracks you use. Until the app's first release is made
-in Play Console, pass `--draft`. The bundle's version code must be higher than any uploaded before.
-
-### Store listing and release notes
-
-The `store` directory next to `nsh.json` holds the texts and images of each locale, named with its BCP 47 tag; every
-file is optional, and every store reads the same listing. The same fields can be written in `nsh.json`
-`store.locales` (`name`, `shortDescription`, `description`, `releaseNotes`), which win over the files
-([Store listing](./packaging.md#store-listing)):
-
-```text
-store/
-  en-US/
-    name.txt               store name
-    short_description.txt  Google Play's short description
-    description.txt        full description
-    release_notes.txt      what's new in this release
-    android/
-      phoneScreenshots/    1.png, 2.png, ... (uploaded in file-name order)
-      featureGraphic/
-      icon/
-  zh-CN/
-    ...
-```
-
-Every release carries the locales' `release_notes.txt`. With `--listing` the name and descriptions are set and, for
-each image type present, Play's images of that type are replaced. Image types are Google Play's: `phoneScreenshots`,
-`sevenInchScreenshots`, `tenInchScreenshots`, `tvScreenshots`, `wearScreenshots`, `icon`, `featureGraphic` and
-`tvBanner`.
+The Play Console and service account setup, the upload key, tracks, staged rollouts, the store listing and common errors:
+[Publish to Google Play](./publish.md#publish-to-google-play).
 
 ## Embedding in an Android app
 
@@ -596,6 +567,7 @@ config of the app may override it). The release `nsh.aar` does not.
 
 ## See also
 
+- [Publish to Google Play](./publish.md#publish-to-google-play)
 - [Building with Rust](./rust.md)
 - [Embedding in iOS apps](./ios.md)
 - [Native components](./native-components.md)

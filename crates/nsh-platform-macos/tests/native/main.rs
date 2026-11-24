@@ -21,6 +21,8 @@ mod download_redirect;
 #[cfg(target_os = "macos")]
 mod embedded_scroll;
 #[cfg(target_os = "macos")]
+mod file_panels;
+#[cfg(target_os = "macos")]
 mod fitting_input;
 #[cfg(target_os = "macos")]
 mod focus_selection;
@@ -28,6 +30,8 @@ mod focus_selection;
 mod fps_collapse;
 #[cfg(target_os = "macos")]
 mod hover_cursor;
+#[cfg(target_os = "macos")]
+mod image_placeholder;
 #[cfg(target_os = "macos")]
 mod ime;
 #[cfg(target_os = "macos")]
@@ -119,6 +123,9 @@ fn main() {
             } else if std::env::var_os("NSH_MENU_LIFETIME_CHECK_ONLY").is_some() {
                 window_press::run();
                 menu_lifetime::run();
+            } else if std::env::var_os("NSH_FILE_PANELS_CHECK_ONLY").is_some() {
+                window_press::run();
+                file_panels::run();
             } else if std::env::var_os("NSH_TRAY_OWNER_CHECK_ONLY").is_some() {
                 window_press::run();
                 tray_owner::run();
@@ -136,6 +143,8 @@ fn main() {
                 focus_selection::run();
             } else if std::env::var_os("NSH_INPUT_FOCUS_CHECK_ONLY").is_some() {
                 input_focus::run();
+            } else if std::env::var_os("NSH_IMAGE_PLACEHOLDER_CHECK_ONLY").is_some() {
+                image_placeholder::run();
             } else if std::env::var_os("NSH_INPUT_CLIP_CHECK_ONLY").is_some() {
                 input_clip::run();
             } else if std::env::var_os("NSH_INPUT_RESTYLE_CHECK_ONLY").is_some() {
@@ -191,6 +200,7 @@ fn main() {
                 canvas_bounds::run_scale();
                 menu_labels::run();
                 menu_lifetime::run();
+                file_panels::run();
                 tray_owner::run();
                 window_frames::run();
                 window_layout::run();
@@ -198,6 +208,7 @@ fn main() {
                 ime::run();
                 input_hidden::run();
                 input_clip::run();
+                image_placeholder::run();
                 fitting_input::run();
                 input_focus::run();
                 input_restyle::run();

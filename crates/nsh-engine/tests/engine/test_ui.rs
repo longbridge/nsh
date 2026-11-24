@@ -27,7 +27,8 @@ pub(crate) fn registry() -> Registry {
         .register::<TextField>()
         .register::<Sheet>()
         .register::<Shortcut>()
-        .register::<WindowArea>();
+        .register::<WindowArea>()
+        .register::<HidesTitleBar>();
     registry
 }
 
@@ -553,6 +554,22 @@ pub(crate) fn Sheet(props: SheetProps) -> impl IntoElement {
     }))
 }
 
+// --- HidesTitleBar: a component that changes the window it renders in -------
+
+/// Hides the system's title bar of the window it renders in, as a styled
+/// library's title bar does, and shows that window's id.
+#[component]
+pub(crate) fn HidesTitleBar() -> impl IntoElement {
+    use nsh_core::desktop::{TitleBarOptions, TitleBarStyle, WindowAttributes};
+    let window = nsh_core::element::desktop::current_window();
+    let mut options = TitleBarOptions::default();
+    options.style = TitleBarStyle::Hidden;
+    let mut attributes = WindowAttributes::default();
+    attributes.title_bar = Some(options);
+    window.set(attributes);
+    text(format!("hidden in {}", window.id()))
+}
+
 // --- WindowArea: the window a component renders in ---------------------------
 
 /// `<window id> <title bar height> <left> <right>` of the window it renders
@@ -562,6 +579,12 @@ pub(crate) fn WindowArea() -> impl IntoElement {
     let window = nsh_core::element::desktop::current_window();
     text(move || {
         let area = window.title_bar();
-        format!("{} {} {} {}", window.id(), area.top.0, area.left.0, area.right.0)
+        format!(
+            "{} {} {} {}",
+            window.id(),
+            area.top.0,
+            area.left.0,
+            area.right.0
+        )
     })
 }

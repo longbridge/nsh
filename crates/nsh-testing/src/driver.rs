@@ -24,7 +24,9 @@ use crate::{
 pub(crate) trait Driver: Send {
     /// Names the step the batches that come next belong to (`--trace`).
     fn step(&mut self, name: &str);
-    fn press(&mut self, selector: &str) -> Result<(), String>;
+    /// Presses `selector` at `at` in the view it names (its top left
+    /// corner), else where a tap lands.
+    fn press(&mut self, selector: &str, at: Option<Point<Points>>) -> Result<(), String>;
     fn long_press(&mut self, selector: &str) -> Result<(), String>;
     fn type_text(&mut self, selector: &str, text: &str) -> Result<(), String>;
     fn submit(&mut self, selector: &str) -> Result<(), String>;
@@ -238,8 +240,8 @@ impl Driver for Headless {
     fn step(&mut self, name: &str) {
         Headless::step(self, name);
     }
-    fn press(&mut self, selector: &str) -> Result<(), String> {
-        Headless::press(self, selector)
+    fn press(&mut self, selector: &str, at: Option<Point<Points>>) -> Result<(), String> {
+        self.press_with(selector, at)
     }
     fn long_press(&mut self, selector: &str) -> Result<(), String> {
         Headless::long_press(self, selector)
@@ -594,6 +596,9 @@ impl Remote {
 fn step_name(step: &TestStep) -> Option<String> {
     Some(match step {
         TestStep::Press { selector } => format!("press({selector})"),
+        TestStep::PressAt { selector, x, y } => {
+            format!("press({selector}, {}, {})", Points(*x), Points(*y))
+        }
         TestStep::LongPress { selector } => format!("longPress({selector})"),
         TestStep::Type { selector, text } => format!("type({selector}, {text:?})"),
         TestStep::Submit { selector } => format!("submit({selector})"),
@@ -678,9 +683,16 @@ impl Driver for Remote {
     fn step(&mut self, name: &str) {
         *self.step.lock().unwrap_or_else(|e| e.into_inner()) = name.to_owned();
     }
-    fn press(&mut self, selector: &str) -> Result<(), String> {
-        self.action(TestStep::Press {
-            selector: selector.into(),
+    fn press(&mut self, selector: &str, at: Option<Point<Points>>) -> Result<(), String> {
+        self.action(match at {
+            Some(at) => TestStep::PressAt {
+                selector: selector.into(),
+                x: at.x.0,
+                y: at.y.0,
+            },
+            None => TestStep::Press {
+                selector: selector.into(),
+            },
         })
     }
     fn long_press(&mut self, selector: &str) -> Result<(), String> {

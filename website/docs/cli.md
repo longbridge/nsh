@@ -390,7 +390,7 @@ Uploads an Android App Bundle to Google Play and releases it to a track, in one 
 commit; a failed edit is deleted). Without `--track` the release goes to **internal testing** only; reaching testers
 beyond it, or the public, always takes an explicit `--track`. With `--from` instead of a bundle, it promotes the newest
 release of one track to another. Signs in as a Google Cloud service account that has release permission for the app in
-Play Console ([Android](./android.md#upload-to-google-play)).
+Play Console ([Publish to Google Play](./publish.md#publish-to-google-play)).
 
 | Flag | Description |
 |---|---|
@@ -402,7 +402,7 @@ Play Console ([Android](./android.md#upload-to-google-play)).
 | `--rollout <FRACTION>` | A staged rollout to this fraction of the track's users, above 0 and below 1, e.g. `0.1`. |
 | `--status <STATUS>` | `completed` (default), `in-progress` (default with `--rollout`), `halted` (stop a staged rollout, with its `--rollout`) or `draft`. |
 | `--draft` | Release as a draft: Play takes only drafts until the app's first release is made in Play Console. |
-| `--store <DIR>` | The [store directory](./android.md#store-listing-and-release-notes). Default: `store` in the app's directory. |
+| `--store <DIR>` | The [store directory](./publish.md#store-listing). Default: `store` in the app's directory. |
 | `--listing` | Also update the store listing (name, descriptions, images) from the store directory, replacing what Play has for those locales. |
 
 To raise a staged rollout, release the same version again with a larger `--rollout`; to finish it, release it with no
@@ -437,7 +437,7 @@ nsh publish doctor linux [--entry <DIR>]
 ```
 
 Writes or updates the app's Flathub manifest (`<id>.yml`) for a release archive: its download URL and SHA-256. It opens
-no pull request; commit the manifest to `flathub/<id>` yourself ([Publishing](./publish.md#flathub)). `status`
+no pull request; commit the manifest to `flathub/<id>` yourself ([Publishing](./publish.md#publish-to-flathub)). `status`
 prints the app's version on Flathub and exits 1 until it is `nsh.json`'s; `doctor` checks the metadata Flathub asks for
 (`id`, the store listing, `store.linux`, the icon), and validates the metainfo and desktop entry.
 
@@ -457,7 +457,7 @@ nsh publish doctor windows [--entry <DIR>] [--product-id <ID>]
 
 Submits an MSIX package (`nsh package --target windows --format msix`) to the Microsoft Store with the Store
 submission API: creates a submission from the last published one, replaces its package, sets the release notes of
-its listings (each locale's `releaseNotes` of the [store listing](./packaging.md#store-listing), or `--notes`), uploads the package and commits it to certification. A failed submission is deleted before
+its listings (each locale's `releaseNotes` of the [store listing](./publish.md#store-listing), or `--notes`), uploads the package and commits it to certification. A failed submission is deleted before
 it is committed; an app with a pending submission (a draft in Partner Center) is refused, so nothing a person
 started is overwritten. `--wait` polls until certification ends and fails when the Store rejects it. `status` prints
 the latest submission's status and exits 0 when published, 2 while in progress, 1 when failed. `doctor` checks
@@ -528,4 +528,4 @@ TestFlight groups, prepares the App Store version and listing, and submits it fo
 the setup. Flags also accept
 `NSH_APP_STORE_APP_ID`, `NSH_APP_STORE_ISSUER_ID`, `NSH_APP_STORE_KEY_ID` and
 `NSH_APP_STORE_PRIVATE_KEY`. The app ID defaults to `nsh.json` `store.ios.appId` and the key to
-`~/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8`, so a configured app runs `nsh publish ios <IPA>`. See [Upload to TestFlight](./packaging.md#upload-to-testflight) for signing, credentials and processing.
+`~/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8`, so a configured app runs `nsh publish ios <IPA>`. See [Publish to the App Store](./publish.md#upload-to-testflight) for signing, credentials and processing.
