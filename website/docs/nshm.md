@@ -732,6 +732,7 @@ fn main() {
 - Use `rustc-link-lib`, not `rustc-link-arg`: link arguments only apply to the crate's own targets.
 - Put a static library's privacy manifest entries in the app's `ios.privacyManifest`.
 - NSH does not embed dynamic frameworks; prefer the SDK's static build.
+- A library whose licence asks that users can replace it (LGPL, such as libmpv) stays dynamic, and the app carries it itself; NSH's packages have no setting for it. Link it from the nshm's `build.rs` as above (`rustc-link-lib=framework=…`, `rustc-link-search=framework=…`). Give the executables their run path in the app's `.cargo/config.toml` (`rustflags = ["-C", "link-arg=-Wl,-rpath,@executable_path/../Frameworks", "-C", "link-arg=-Wl,-rpath,<the framework's directory>"]` under `[target.aarch64-apple-darwin]`), since a crate's `rustc-link-arg` does not reach `nsh run`, `nsh check` or `nsh test`. After `nsh package --target macos`, copy the framework into the app's `Contents/Frameworks/`, remove the development run path with `install_name_tool -delete_rpath`, then sign again, the framework first and the app last, with the identity the package used (`codesign --force --sign <identity> --options runtime --entitlements <the app's entitlements>`, or `--sign -` for an ad hoc package), and check it with `codesign --verify --deep --strict`.
 - On Linux and Windows the same `build.rs` links the SDK (`.a` and `.so` on Linux, `.lib` on Windows). NSH does not carry shared libraries (`.so`, `.dll`) into the package either; prefer the SDK's static build.
 
 ### A TSX nshm
