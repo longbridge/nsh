@@ -461,7 +461,11 @@ export function Confirm() {
 - `closeOnEscape`, `closeOnBackdropPress`, `closeOnSwipe`, `closeOnPressOutside` decide dismissal up front.
 - `Sheet` takes `open`, `onOpenChange`, `side` and `popupClass`. `Popover` and `Menu` take `trigger` and `popupClass`.
 - `const { action } = await AlertDialog.show({ title, actions: [{ id: "delete", label: "Delete", role: "destructive" }] })` resolves the chosen `id`, or `null` when closed without one. An alert with `input: { defaultValue, placeholder, selectTextOnFocus, required }` shows the system's text field (iOS, Android, macOS, web) and resolves its text as `value`.
-- `Menu` holds `MenuItem`s, each with `onSelect`.
+- `Menu` holds `MenuItem`s, each with `onSelect`, `MenuSeparator`s and `Submenu`s. A group under one row (Language,
+  Appearance) is a `<Submenu trigger={row with a trailing chevron} back={row leading back}>`: it cascades beside its
+  row on the desktops and takes the menu's place in a phone's sheet. Never expand nested items in place inside a menu
+  (a chevron turning down, indented rows); a few always-visible choices are a flat section of `checked` items under a
+  title instead. See `website/elements/menu.md`.
 - `ToastStack`, `Tooltip`, `HoverCard`, `ContextMenu` and `Command` are also in `nsh/base`.
 
 ## Runtime and sandbox limits

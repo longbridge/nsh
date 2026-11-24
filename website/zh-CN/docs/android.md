@@ -52,14 +52,17 @@ release APK 中的 `libnsh.so` 不带符号表和调试信息。完整的库位�
 
 ## 上传到 Google Play
 
-`nsh publish android` 把 Android App Bundle（`.aab`）上传到 Google Play 的内部测试轨道：
+`nsh publish android` 把 Android App Bundle（`.aab`）上传到 Google Play 的某个轨道，未用 `--track` 指定时为内部测试（[CLI](./cli.md#nsh-publish-android)）：
 
 ```sh
-export NSH_PLAY_CREDENTIALS=~/keys/play-service-account.json   # 不要提交到仓库
+export NSH_PLAY_CREDENTIALS=~/keys/play-service-account.json
+nsh publish doctor android
 nsh publish android .nsh/out/App.aab
+nsh publish android --from internal --track production --rollout 0.1
+nsh publish status android --json
 ```
 
-Play Console 与服务账号的准备、上传密钥、推进发布和常见错误见[发布到 Google Play](./publish.md#publish-to-google-play)。
+Play Console 与服务账号的准备、上传密钥、轨道、分阶段发布、商店文案和常见错误见[发布到 Google Play](./publish.md#publish-to-google-play)。
 
 ## 嵌入 Android 应用
 

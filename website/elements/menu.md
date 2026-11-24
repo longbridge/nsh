@@ -102,6 +102,11 @@ function FileMenu() {
 }
 ```
 
+A group of items under one row (Share, Language, Appearance) is a `Submenu`, never a row that expands its items in
+place with a chevron turning down: no platform's menu does that, and those rows would lose the submenu's keys and
+role. A few choices that stay visible are a section instead: a title that is not an item and checkable items under
+it, unindented, between separators (see [Checkable items](#checkable-items)).
+
 All five come from [`nsh/base`](../modules/nsh-base.md). The items reach their menu on their own, so you arrange them
 freely: groups in views, labels, items that come and go with `If`. `popupClass` styles the popup or the sheet,
 whichever the menu is. A style that differs between them follows the same rule, read in a style getter or a binding
@@ -394,7 +399,8 @@ submenu inside it sets its own. A menu whose items are all one choice puts them 
 
 - **iOS and Mac Catalyst**: the trigger is covered by a transparent `UIButton` whose `UIMenu` is its primary action:
   a tap, VoiceOver's activation or a hardware keyboard opens it at once, without waiting for JS. `icon` is an SF
-  Symbol; `title` heads the menu. VoiceOver reaches the button, named by `accessibilityLabel`, and not the trigger's
+  Symbol; `title` heads the menu. The menu grows out of the trigger, which hides while the menu is up and comes back as it
+  closes, as a system button does. VoiceOver reaches the button, named by `accessibilityLabel`, and not the trigger's
   content under it. New `items` change the menu the next time it opens.
 - **Desktops (macOS, Windows, Linux)**: a press shows the items as the platform's context menu at the pointer (as
   `Menu.popup` from `nsh/desktop`), sections between separators; `icon`, `title` and `destructive` are not shown.
