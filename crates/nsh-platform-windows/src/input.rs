@@ -1723,14 +1723,17 @@ fn down(
         _ => {
             if let Some(target) = crate::keyboard::focus_target(surface, &hit.view) {
                 crate::keyboard::focus_pointer(surface, &target);
-            } else if let Some(field) = crate::text_input::focused(surface)
+            } else if !matches!(item, Some(Item::Text(_) | Item::Area(..)))
+                && let Some(field) = crate::text_input::focused(surface)
                 && crate::app_window::window_of(surface, &field)
                     == crate::app_window::window_of(surface, &hit.view)
             {
                 // A press on no stop (blank space) leaves the field of its
                 // window, as one on a stop does: the field is drawn here,
                 // not a system control that would lose the focus to the
-                // click itself.
+                // click itself. A press that starts a text selection keeps
+                // the field focused, so Ctrl+C copies the selection around
+                // a chat's composer (copy-selection-windows.test.tsx).
                 crate::text_input::blur(&field);
             }
         }
@@ -3080,8 +3083,15 @@ mod tests {
             &surface.root,
             4,
             ViewKind::View,
-            rect(0.0, 100.0, 400.0, 300.0),
+            rect(0.0, 100.0, 400.0, 200.0),
         );
+        let area = view(
+            &surface.root,
+            5,
+            ViewKind::View,
+            rect(0.0, 300.0, 400.0, 100.0),
+        );
+        area.state_mut().props.selectable_view = true;
         let click = |x: f32, y: f32| {
             let event = |kind| PointerEvent {
                 kind,
@@ -3102,6 +3112,10 @@ mod tests {
         click(10.0, 10.0);
         assert_eq!(crate::text_input::focused(&surface), Some(field.clone()));
         click(10.0, 10.0);
+        assert_eq!(crate::text_input::focused(&surface), Some(field.clone()));
+        // A press that starts a selection keeps the field focused, so
+        // Ctrl+C copies the selection around it.
+        click(200.0, 350.0);
         assert_eq!(crate::text_input::focused(&surface), Some(field.clone()));
         click(200.0, 200.0);
         assert_eq!(crate::text_input::focused(&surface), None);
