@@ -42,7 +42,7 @@ use crate::{
             Affinity, ClickEvent, Decoration, EditorState, EditorStateConfig, GapCursor, KeyEvent,
             NodeSelection, Plugin, Selection, TextSelection, Transaction, TransactionOrigin,
         },
-        tables::{CellSelection, cell_around, is_table, table_role},
+        tables::{CellSelection, is_table, table_role},
         transform::drop_point,
     },
 };
@@ -2671,55 +2671,6 @@ impl Rv {
         self.node_box(pos)
     }
 
-    fn scroll_selected_cell(&self, state: &EditorState, caret: Bounds<Points>) {
-        let Some(cell) = cell_around(state.selection().resolved_head()) else {
-            return;
-        };
-        let tree = self.tree.borrow();
-        let geo = self.geo.borrow();
-        let Some(table_id) = tree.id_at(cell.before(cell.depth - 1)) else {
-            return;
-        };
-        let (Some(viewport), Some((offset, _)), Some(handle)) = (
-            geo.table_viewport(table_id),
-            geo.table_scroll.get(&table_id),
-            geo.table_scroll_handles.get(&table_id),
-        ) else {
-            return;
-        };
-        let selection = state.selection();
-        let mut visible = caret;
-        if !selection.empty()
-            && selection
-                .resolved_anchor()
-                .same_parent(selection.resolved_head())
-            && let Some(anchor) = geo.caret_rect(selection.anchor(), Affinity::Downstream)
-        {
-            let both = anchor.union(&caret);
-            if both.size.width <= viewport.size.width {
-                visible = both;
-            }
-        }
-        if visible.origin.x >= viewport.origin.x
-            && visible.origin.x + visible.size.width <= viewport.origin.x + viewport.size.width
-        {
-            return;
-        }
-        let target = node_box(&tree, &geo, state, cell.pos)
-            .filter(|cell| cell.size.width <= viewport.size.width)
-            .unwrap_or(visible);
-        let left = target.origin.x - viewport.origin.x;
-        let right = left + target.size.width - viewport.size.width;
-        let delta = if left < px(0.) {
-            left
-        } else if right > px(0.) {
-            right
-        } else {
-            return;
-        };
-        handle.scroll_to(Point::new((*offset + delta).max(px(0.)), px(0.)), false);
-    }
-
     /// Scrolls the head into view, once it is laid out: a selected node
     /// whole, as ProseMirror scrolls its DOM node, else the caret.
     fn scroll_into_view(&self) {
@@ -2736,7 +2687,6 @@ impl Rv {
             return;
         };
         self.scroll_pending.set(false);
-        self.scroll_selected_cell(&state, caret);
         let top = self.scroll_y.get_untracked();
         let height = self.viewport.get_untracked().height;
         if height <= px(0.0) {
@@ -3502,14 +3452,6 @@ impl ViewGeometry for GeometryHandle {
             return None;
         }
         GeometryHandle::page_shift(self)
-    }
-
-    fn table_viewport(&self, pos: usize) -> Option<Bounds<Points>> {
-        if !self.here() {
-            return None;
-        }
-        let id = self.tree.borrow().id_at(pos)?;
-        self.geo.borrow().table_viewport(id)
     }
 
     fn node_rect(&self, pos: usize) -> Option<Bounds<Points>> {

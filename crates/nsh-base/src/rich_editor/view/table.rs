@@ -51,8 +51,6 @@ pub(crate) struct TableLayout {
     pub(crate) pos: usize,
     /// Its box.
     pub(crate) bounds: Bounds<Points>,
-    /// The horizontal scroll viewport's left and right in the content box.
-    viewport_x: Option<(Points, Points)>,
     /// Each column's left and right.
     pub(crate) cols: Vec<(Points, Points)>,
     /// Each row's top and bottom.
@@ -219,45 +217,19 @@ pub(crate) fn placement(doc: &Node, cell_pos: usize) -> Option<(i16, i16, i16, i
 /// side in a terminal).
 pub(crate) fn grid(wrapper: View, rv: &Rv, item: ReadSignal<BlockItem>) -> View {
     let (cols_rv, rows_rv) = (rv.clone(), rv.clone());
-    let session = rv.session.clone();
-    let measured = computed(move || session.measured_table_columns(&item.get().node));
-    let preview = computed(move || {
-        let it = item.get();
-        match cols_rv.table_preview.get() {
-            Some(TablePreview::ColWidth { table, col, width })
-                if cols_rv.block_pos(it.id) == Some(table) =>
-            {
-                Some((col, width))
-            }
-            _ => None,
-        }
-    });
-    let displayed = computed(move || {
-        let mut widths = measured.get()?;
-        if let Some((col, width)) = preview.get()
-            && let Some(track) = widths.get_mut(col)
-        {
-            *track = width;
-        }
-        Some(widths)
-    });
-    let total = computed(move || {
-        displayed.with(|widths| widths.as_ref().map(|v| px(v.iter().map(|p| p.0).sum())))
-    });
     wrapper
         .grid()
         .grid_template_columns(move || {
-            SharedString::from(displayed.with(|widths| {
-                match widths {
-                    Some(widths) => widths
-                        .iter()
-                        .copied()
-                        .map(track_px)
-                        .collect::<Vec<_>>()
-                        .join(" "),
-                    None => column_tracks(&item.get().node, preview.get()),
+            let it = item.get();
+            let preview = match cols_rv.table_preview.get() {
+                Some(TablePreview::ColWidth { table, col, width })
+                    if cols_rv.block_pos(it.id) == Some(table) =>
+                {
+                    Some((col, width))
                 }
-            }))
+                _ => None,
+            };
+            SharedString::from(column_tracks(&it.node, preview))
         })
         .grid_template_rows(move || {
             let it = item.get();
@@ -272,14 +244,6 @@ pub(crate) fn grid(wrapper: View, rv: &Rv, item: ReadSignal<BlockItem>) -> View 
             SharedString::from(row_tracks(&it.node, preview))
         })
         .style_when(move || fixed_width(&item.get().node), |s| s.self_start())
-        .style_when(
-            move || total.get().is_some(),
-            |s| {
-                s.self_start()
-                    .min_w(move || total.get().unwrap_or_default())
-                    .w(move || total.get().unwrap_or_default())
-            },
-        )
         .border_t(px(1.0))
         .border_l(px(1.0))
         // A terminal draws no cell's line (only a box's): the table's
@@ -561,21 +525,16 @@ fn resize_handles(rv: &Rv, t: &TableLayout, preview: Option<TablePreview>) -> Ve
 
 /// The grip bands of a column (on the table's top border, centered over
 /// it) and of a row (on its left border).
-fn col_grip(t: &TableLayout, col: usize) -> Option<Bounds<Points>> {
-    let (left, right) = *t.cols.get(col)?;
+fn col_grip(t: &TableLayout, col: usize) -> Bounds<Points> {
+    let (left, right) = t.cols[col];
     let center = (left + right) * 0.5;
-    let mut start = center - px(GRIP.0 / 2.0);
-    let mut end = start + px(GRIP.0);
-    if let Some((left, right)) = t.viewport_x {
-        start = start.max(left);
-        end = end.min(right);
-    }
-    (start < end).then(|| {
-        Bounds::new(
-            Point::new(start, t.bounds.origin.y - px(GRIP.1 / 2.0)),
-            Size::new(end - start, px(GRIP.1)),
-        )
-    })
+    Bounds::new(
+        Point::new(
+            center - px(GRIP.0 / 2.0),
+            t.bounds.origin.y - px(GRIP.1 / 2.0),
+        ),
+        Size::new(px(GRIP.0), px(GRIP.1)),
+    )
 }
 
 fn row_grip(t: &TableLayout, row: usize) -> Bounds<Points> {
@@ -583,7 +542,7 @@ fn row_grip(t: &TableLayout, row: usize) -> Bounds<Points> {
     let center = (top + bottom) * 0.5;
     Bounds::new(
         Point::new(
-            t.viewport_x.map_or(t.bounds.origin.x, |(left, _)| left) - px(GRIP.1 / 2.0),
+            t.bounds.origin.x - px(GRIP.1 / 2.0),
             center - px(GRIP.0 / 2.0),
         ),
         Size::new(px(GRIP.1), px(GRIP.0)),
@@ -592,7 +551,7 @@ fn row_grip(t: &TableLayout, row: usize) -> Bounds<Points> {
 
 /// The grips: a small bar on each, in the theme's `muted-foreground` (the
 /// `tableGrip` part).
-fn grip_bars(rv: &Rv, t: &TableLayout, col: usize, row: usize) -> impl Iterator<Item = AnyElement> {
+fn grip_bars(rv: &Rv, t: &TableLayout, col: usize, row: usize) -> [AnyElement; 2] {
     let bar = |b: Bounds<Points>, horizontal: bool| {
         let (w, h) = if horizontal { (16.0, 4.0) } else { (4.0, 16.0) };
         view()
@@ -616,10 +575,7 @@ fn grip_bars(rv: &Rv, t: &TableLayout, col: usize, row: usize) -> impl Iterator<
             ))
             .into_element()
     };
-    col_grip(t, col)
-        .map(|b| bar(b, true))
-        .into_iter()
-        .chain(std::iter::once(bar(row_grip(t, row), false)))
+    [bar(col_grip(t, col), true), bar(row_grip(t, row), false)]
 }
 
 fn contains(b: &Bounds<Points>, p: Point<Points>) -> bool {
@@ -710,8 +666,7 @@ impl Rv {
                 .block_pos(table)
                 .and_then(|p| self.st.borrow().doc().node_at(p))
             && let Some(t) = self.table_layout(table, &node)
-            && (col_grip(&t, col).is_some_and(|b| contains(&b, at))
-                || contains(&row_grip(&t, row), at))
+            && (contains(&col_grip(&t, col), at) || contains(&row_grip(&t, row), at))
         {
             return;
         }
@@ -812,7 +767,7 @@ impl Rv {
         // Inner tables first: their grips and borders lie over the outer's.
         for t in layouts.iter().rev() {
             if let Some(grips) = active.filter(|g| self.block_pos(g.table) == Some(t.pos)) {
-                if col_grip(t, grips.col).is_some_and(|b| contains(&b, at)) {
+                if contains(&col_grip(t, grips.col), at) {
                     return Some(TableDrag::MoveCol {
                         table: t.pos,
                         from: grips.col,
@@ -1181,10 +1136,6 @@ fn layout_of(tree: &Tree, geo: &Geometry, table_id: u64, table_node: &Node) -> O
     Some(TableLayout {
         pos: table_pos,
         bounds,
-        viewport_x: geo.table_scroll.get(&table_id).map(|(offset, width)| {
-            let left = origin.x + *offset;
-            (left, left + *width)
-        }),
         cols,
         rows,
         min_width,

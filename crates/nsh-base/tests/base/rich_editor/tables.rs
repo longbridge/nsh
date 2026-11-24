@@ -98,48 +98,6 @@ fn top(screen: &Screen, text: &str) -> f32 {
 }
 
 #[test]
-fn host_column_measurements_size_the_cells_without_changing_the_document() {
-    let session = table_session();
-    let state = session.state();
-    let table = state.doc().child(1);
-    assert_eq!(session.measured_table_columns(table), None);
-    let original = state.doc().to_json();
-    session.set_table_column_measurer(|_| vec![px(160.0), px(250.0)]);
-    assert_eq!(
-        session.measured_table_columns(table),
-        Some(vec![px(160.0), px(250.0)])
-    );
-    let held = session.clone();
-    let mut app = Headless::start(EngineConfig {
-        viewport: Size::new(px(800.0), px(900.0)),
-        ..EngineConfig::new(nsh_testing::windowed_root_with::<Tables>(move || {
-            HarnessProps {
-                session: Some(session.clone()),
-            }
-        }))
-    })
-    .unwrap();
-    app.wait_until(
-        "the second cell starts after the measured first column",
-        Duration::from_secs(5),
-        |screen| {
-            let nodes = screen.layout_nodes();
-            let left = |label: &str| {
-                nodes
-                    .iter()
-                    .find(|n| n.text.as_ref().is_some_and(|t| t.text.text == label))
-                    .map(|n| n.bounds.origin.x.0)
-            };
-            left("a1")
-                .zip(left("a2"))
-                .is_some_and(|(first, second)| (second - first - 160.0).abs() < 1.0)
-        },
-    )
-    .unwrap();
-    assert_eq!(held.state().doc().to_json(), original);
-}
-
-#[test]
 fn a_tables_handles_follow_it_and_the_quote_it_is_in() {
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(900.0)),
