@@ -247,6 +247,24 @@ final class Mounter {
     TextBox selectedText;
     /** The selectable view with a selection (one per surface, a text's or an area's). */
     SelectableView selectedArea;
+
+    /** Whether a text or a selectable view holds a selection (back ends it first). */
+    boolean hasSelection() {
+        return selectedText != null || selectedArea != null;
+    }
+
+    /** Ends the selection there is; false when there is none. */
+    private boolean endSelection() {
+        if (selectedArea != null) {
+            selectedArea.clear();
+            return true;
+        }
+        if (selectedText != null) {
+            selectedText.clearSelection();
+            return true;
+        }
+        return false;
+    }
     /** Selectable views (`ViewProps.selectable_view`), by view. */
     private final SparseArray<SelectableView> selectableViews = new SparseArray<>();
 
@@ -2176,7 +2194,7 @@ final class Mounter {
      * by asking JS: the system asks synchronously.
      */
     boolean wantsBack() {
-        if (!shownModals.isEmpty()) return true;
+        if (!shownModals.isEmpty() || hasSelection()) return true;
         return backStack() != null || wants(1, Native.BACK_PRESS);
     }
 
@@ -2285,6 +2303,8 @@ final class Mounter {
      * listeners hear it (and send {@code Command::Back} when none takes it),
      * else the innermost stack pops. Returns false if nothing did. */
     boolean handleBack() {
+        // A selection goes first, as TextView's: back ends it and goes no further.
+        if (endSelection()) return true;
         if (!shownModals.isEmpty()) {
             shownModals.get(shownModals.size() - 1).backPressed();
             return true;
