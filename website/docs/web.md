@@ -593,7 +593,7 @@ The player and the dev server run apps with development settings; published apps
 
 ## See also
 
-- [Publish on the web](./publish-web.md)
+- [Publish on the web](./publish.md#publish-on-the-web)
 - [Packaging](./packaging.md): the other targets of `nsh package`.
 - [Architecture](./architecture.md): the engine, the core and the mount batches the web build reuses.
 - [Testing](./testing-and-trace.md): `nsh test` runs the same engine headless, with an approximate text engine.

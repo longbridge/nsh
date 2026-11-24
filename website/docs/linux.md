@@ -241,7 +241,7 @@ Not supported:
 
 ## See also
 
-- [Publish for Linux](./publish-linux.md)
+- [Publish for Linux](./publish.md#publish-for-linux)
 - [CLI](./cli.md): `nsh run --target linux`, `nsh package --target linux`
 - [Packaging](./packaging.md)
 - [Platform-specific code](./platform-specific.md)

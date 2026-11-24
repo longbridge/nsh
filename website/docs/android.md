@@ -66,7 +66,7 @@ nsh publish android .nsh/out/App.aab
 ```
 
 The Play Console and service account setup, the upload key, promoting a release and common errors:
-[Publish to Google Play](./publish-android.md).
+[Publish to Google Play](./publish.md#publish-to-google-play).
 
 ## Embedding in an Android app
 
@@ -563,7 +563,7 @@ config of the app may override it). The release `nsh.aar` does not.
 
 ## See also
 
-- [Publish to Google Play](./publish-android.md)
+- [Publish to Google Play](./publish.md#publish-to-google-play)
 - [Building with Rust](./rust.md)
 - [Embedding in iOS apps](./ios.md)
 - [Native components](./native-components.md)

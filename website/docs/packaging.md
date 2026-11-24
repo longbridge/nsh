@@ -836,13 +836,13 @@ points the CLI at another directory laid out like the distribution's `runtime/` 
 ## Publish
 
 `nsh package` stops at the installable file. Uploading it to the App Store or Google Play, notarizing a Mac app,
-signing a Windows installer and deploying a web app are covered per platform in [Publishing](./publishing.md):
-[iOS](./publish-ios.md), [Android](./publish-android.md), [macOS](./publish-macos.md),
-[Windows](./publish-windows.md), [Linux](./publish-linux.md) and [Web](./publish-web.md).
+signing a Windows installer and deploying a web app are covered per platform in [Publishing](./publish.md):
+[iOS](./publish.md#publish-to-the-app-store), [Android](./publish.md#publish-to-google-play), [macOS](./publish.md#publish-for-macos),
+[Windows](./publish.md#publish-for-windows), [Linux](./publish.md#publish-for-linux) and [Web](./publish.md#publish-on-the-web).
 
 ## See also
 
-- [Publishing](./publishing.md): from a package to the app's users, per platform
+- [Publishing](./publish.md): from a package to the app's users, per platform
 - [CLI](./cli.md): every command
 - [App Updates](./app-updates.md): packaged apps that update themselves
 - [OTA Updates](./ota-updates.md): new TSX for packaged apps, iOS and Android included, without a new build

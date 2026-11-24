@@ -726,12 +726,12 @@ Rust 应用构建自己的 runner。对 TSX 应用，`nsh package` 会在 CLI �
 ## 发布
 
 `nsh package` 只负责生成可安装的文件。上传到 App Store 或 Google Play、公证 Mac 应用、签名 Windows 安装程序以及部署 Web
-应用，按平台分别在[发布](./publishing.md)中介绍：[iOS](./publish-ios.md)、[Android](./publish-android.md)、
-[macOS](./publish-macos.md)、[Windows](./publish-windows.md)、[Linux](./publish-linux.md) 和 [Web](./publish-web.md)。
+应用，按平台分别在[发布](./publish.md)中介绍：[iOS](./publish.md#publish-to-the-app-store)、[Android](./publish.md#publish-to-google-play)、
+[macOS](./publish.md#publish-for-macos)、[Windows](./publish.md#publish-for-windows)、[Linux](./publish.md#publish-for-linux) 和 [Web](./publish.md#publish-on-the-web)。
 
 ## 另请参阅
 
-- [发布](./publishing.md)：按平台介绍从安装包到用户手中的全过程
+- [发布](./publish.md)：按平台介绍从安装包到用户手中的全过程
 - [CLI](./cli.md)：所有命令
 - [应用更新](./app-updates.md)：自我更新的打包应用
 - [OTA 更新](./ota-updates.md)：无需新构建，为打包应用（包括 iOS 和 Android）下发新的 TSX

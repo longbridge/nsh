@@ -579,7 +579,7 @@ updates the app in place, logs appear in the `nsh dev` terminal, and errors show
 
 ## See also
 
-- [Publish to the App Store](./publish-ios.md)
+- [Publish to the App Store](./publish.md#publish-to-the-app-store)
 - [Building with Rust](./rust.md)
 - [Embedding in Android apps](./android.md)
 - [Native components](./native-components.md)

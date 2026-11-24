@@ -219,7 +219,7 @@ Web 视图是绘制在 NSH 视图之内的 WebKitGTK 页面：sheet、对话框�
 
 ## 另见
 
-- [发布 Linux 应用](./publish-linux.md)
+- [发布 Linux 应用](./publish.md#publish-for-linux)
 - [CLI](./cli.md)：`nsh run --target linux`、`nsh package --target linux`
 - [打包](./packaging.md)
 - [平台特定代码](./platform-specific.md)

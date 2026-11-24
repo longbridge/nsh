@@ -198,7 +198,7 @@ QuickJS 字节码是受信任的输入，只能从你自己应用的文件中加
 
 ## 另见
 
-- [发布 Windows 应用](./publish-windows.md)
+- [发布 Windows 应用](./publish.md#publish-for-windows)
 - [CLI](./cli.md)：`nsh run --target windows`、`nsh package --target windows`
 - [打包](./packaging.md)
 - [平台特定代码](./platform-specific.md)

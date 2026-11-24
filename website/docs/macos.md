@@ -377,7 +377,7 @@ Not supported, or different:
 
 ## See also
 
-- [Publish for macOS](./publish-macos.md)
+- [Publish for macOS](./publish.md#publish-for-macos)
 - [CLI](./cli.md): `nsh run --target macos`, `nsh package --target macos`
 - [Packaging](./packaging.md)
 - [Platform-specific code](./platform-specific.md)

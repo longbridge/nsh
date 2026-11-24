@@ -59,7 +59,7 @@ export NSH_PLAY_CREDENTIALS=~/keys/play-service-account.json   # 不要提交到
 nsh publish android .nsh/out/App.aab
 ```
 
-Play Console 与服务账号的准备、上传密钥、推进发布和常见错误见[发布到 Google Play](./publish-android.md)。
+Play Console 与服务账号的准备、上传密钥、推进发布和常见错误见[发布到 Google Play](./publish.md#publish-to-google-play)。
 
 ## 嵌入 Android 应用
 
@@ -518,7 +518,7 @@ adb reverse tcp:8790 tcp:8790
 
 ## 另请参阅
 
-- [发布到 Google Play](./publish-android.md)
+- [发布到 Google Play](./publish.md#publish-to-google-play)
 - [用 Rust 开发](./rust.md)
 - [嵌入 iOS 应用](./ios.md)
 - [原生组件](./native-components.md)
