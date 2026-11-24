@@ -2569,7 +2569,10 @@ impl NshView {
         if self.is_leaf_layer()
             && let Some(layer) = self.ns().layer()
         {
-            layer.setBounds(CGRect::new(CGPoint::new(0.0, 0.0), rect.size));
+            let bounds = CGRect::new(CGPoint::new(0.0, 0.0), rect.size);
+            if layer.bounds() != bounds {
+                layer.setBounds(bounds);
+            }
         }
         self.set_layer_geometry();
     }
@@ -2628,8 +2631,17 @@ impl NshView {
                 s.style.hidden || crate::decor::backface_away(&s) || self.ns().isHidden(),
             )
         };
-        layer.setAnchorPoint(CGPoint::new(0.0, 0.0));
-        layer.setPosition(self.ns().frame().origin);
+        // Each place writes them again, mostly to the same values: only
+        // changes are written, as each write is a property Core Animation
+        // records and commits.
+        let anchor = CGPoint::new(0.0, 0.0);
+        if layer.anchorPoint() != anchor {
+            layer.setAnchorPoint(anchor);
+        }
+        let origin = self.ns().frame().origin;
+        if layer.position() != origin {
+            layer.setPosition(origin);
+        }
         let before = layer.transform();
         let t = transform.as_ref().map_or(IDENTITY, ca_transform);
         // Unrelated spinners must not rescan a long list's deferred rows.
@@ -2637,9 +2649,16 @@ impl NshView {
             crate::sight::moved();
         }
         let rescaled = scale_changed(&before, &t);
-        layer.setTransform(t);
-        layer.setOpacity(opacity.clamp(0.0, 1.0));
-        layer.setHidden(hidden);
+        if before != t {
+            layer.setTransform(t);
+        }
+        let opacity = opacity.clamp(0.0, 1.0);
+        if layer.opacity() != opacity {
+            layer.setOpacity(opacity);
+        }
+        if layer.isHidden() != hidden {
+            layer.setHidden(hidden);
+        }
         if rescaled {
             self.sharpen();
         }
