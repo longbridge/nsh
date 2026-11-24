@@ -1061,3 +1061,30 @@ fn a_host_that_takes_smaller_frames_leaving_on_a_paste_is_told_apart() {
     assert!(err.contains("older nsh"), "{err}");
     host.join().unwrap();
 }
+
+#[test]
+fn a_server_that_drops_each_session_at_once_is_retried_with_backoff() {
+    // A server that ends every session right after the handshake, as one
+    // sending a frame over the host's limit does.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let accepted = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = accepted.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(stream) = stream else { return };
+            count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if let Ok(mut socket) = tungstenite::accept(stream) {
+                let _ = socket.close(None);
+                let _ = socket.flush();
+            }
+        }
+    });
+    let url = format!("ws://{addr}{WS_PATH}");
+    let client = DevClient::start(url, host("phone", "bc-1"), |_| {}).unwrap();
+    std::thread::sleep(Duration::from_secs(3));
+    drop(client);
+    let sessions = accepted.load(std::sync::atomic::Ordering::Relaxed);
+    // 100 ms apart that would be ~30; backing off it is a handful.
+    assert!((1..=8).contains(&sessions), "{sessions} sessions in 3 s");
+}
