@@ -12046,9 +12046,11 @@ fn measure_leaf_size<M: TextEngine>(
     // measured is the natural size: a 24 point icon in a 14 point box
     // would give the scroll view around it 10 points to scroll.
     if image {
-        let o = &mut output.scrollable_overflow_rect;
-        o.right = o.right.min(output.size.width);
-        o.bottom = o.bottom.min(output.size.height);
+        let o = output.scrollable_overflow_rect;
+        let mut rect = o.rect();
+        rect.right = rect.right.min(output.size.width);
+        rect.bottom = rect.bottom.min(output.size.height);
+        output.scrollable_overflow_rect = taffy::ScrollableOverflow::new(rect, o.is_reversed());
     }
     output
 }
