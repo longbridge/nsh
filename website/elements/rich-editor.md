@@ -542,6 +542,9 @@ editor.run(insertMention(editor.suggestion("mention")!.range, "u1", "Joan"));
   addresses), and the protocol a bare host gets is `defaultProtocol` (`http`). Links take the protocols `http`,
   `https`, `ftp`, `ftps`, `mailto`, `tel`, `callto`, `sms`, `cid`, `xmpp` and those in `protocols`, so
   `setLink({ href })`, `toggleLink(attrs?)` and autolinking keep scripts (`javascript:`) and data URLs out.
+  The link mark keeps `javascript:`, `vbscript:` and `data:` URLs out of the HTML it reads and writes, in any case and
+  with white space or control characters inside the scheme: such an `<a>` is read as plain text, and such an `href`
+  is not written. Other URLs, an app's own schemes included, are read and written as they are.
   `unsetLink()` removes the link around the selection.
   On the desktops and the web in the desktop idiom, the pointer resting on linked text shows the link's `title` and
   destination below the pointer, as [TextView's links](./text-view.md) do; pressing and typing in the link work as
