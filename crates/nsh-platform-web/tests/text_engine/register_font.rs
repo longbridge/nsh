@@ -3,8 +3,7 @@
 
 use nsh_core::TextEngine;
 
-use crate::ffi::REGISTERED;
-use crate::text::WebTextEngine;
+use crate::{ffi::REGISTERED, text::WebTextEngine};
 
 fn registered(data: &[u8]) -> (String, u16, u16) {
     REGISTERED.with(|r| r.borrow_mut().clear());

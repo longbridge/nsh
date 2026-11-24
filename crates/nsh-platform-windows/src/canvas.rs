@@ -1045,7 +1045,8 @@ fn set_recording_text_params(dc: &ID2D1DeviceContext, params: Option<&IDWriteRen
     // Grayscale is incompatible with aliased DirectWrite params.
     // SAFETY: COM calls on the live context and rendering params.
     unsafe {
-        let mode = if params.is_some_and(|p| p.GetRenderingMode() == DWRITE_RENDERING_MODE_ALIASED) {
+        let mode = if params.is_some_and(|p| p.GetRenderingMode() == DWRITE_RENDERING_MODE_ALIASED)
+        {
             D2D1_TEXT_ANTIALIAS_MODE_ALIASED
         } else {
             D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE

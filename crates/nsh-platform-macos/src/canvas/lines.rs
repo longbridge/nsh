@@ -13,7 +13,7 @@
 //! Bounded: lines are added up to [`MAX_LINES`]; when a canvas gets a new
 //! drawing ([`TextCache::trim`]) only the lines the previous one drew stay
 //! (texts that change, such as live prices, are dropped with the drawings
-//! that had them), all of them going when those alone exceed the bound.
+//! that had them).
 
 use std::sync::Arc;
 
@@ -82,13 +82,10 @@ pub(super) struct TextCache {
 
 impl TextCache {
     /// Called for each new drawing: keeps the lines the previous drawing
-    /// drew, when they are at most [`MAX_LINES`], and drops the rest.
+    /// drew and drops the rest.
     pub(super) fn trim(&mut self) {
         let generation = self.generation;
         self.lines.retain(|_, e| e.used == generation);
-        if self.lines.len() > MAX_LINES {
-            self.lines.clear();
-        }
         self.generation = generation.wrapping_add(1);
     }
 
