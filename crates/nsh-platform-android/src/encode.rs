@@ -1484,6 +1484,7 @@ fn screen_config(e: &mut Encoded, c: &ScreenConfig) {
         HeaderTitleAlign::Left => 0,
         HeaderTitleAlign::Center => 1,
     });
+    e.bool(c.hides_bottom_bar_when_pushed);
 }
 
 fn view_props(e: &mut Encoded, p: &ViewProps) {

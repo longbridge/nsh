@@ -219,6 +219,7 @@ TSX 的子函数接收路由值本身，以及一个表示它在栈中位置的 
 | `headerShadowVisible` | `.header_shadow_visible(..)` | `boolean` | `true` | iOS：系统标题栏下方的细线。设为 `false` 时没有这条线，同 iOS 26 系统自带的标题栏。Android 的标题栏没有这条线。 |
 | `headerTitleAlign` | `.header_title_align(..)` | `"left" \| "center"` | `"left"` | Android：标题在系统标题栏起始边，或在两侧按钮之间居中。iOS：系统导航栏总是居中，忽略此值。 |
 | `headerBackgroundOnScroll` | `.header_background_on_scroll(..)` | `boolean` | `false` | iOS：配合 `headerTransparent`，内容停在顶端时系统标题栏是透明的，内容滚到标题栏下面后显示标题栏的背景，同 UIKit 自带的标题栏。标题栏跟随从页面顶端开始、露出最多的那个可见滚动视图。其他平台忽略。 |
+| `hidesBottomBarWhenPushed` | `.hides_bottom_bar_when_pushed(..)` | `boolean` | `false` | iOS 和 Android：此页面位于顶部时系统标签栏离开，随转场移动并在页面弹出时回来。在 iOS 上动画跟随侧滑手势，标签栏不会被重建。 |
 | `headerLargeTitle` | `.header_large_title(..)` | `boolean` | `false` | iOS：大标题，随内容滚动收进标题栏；内容在标题栏之下滚动。 |
 | `headerBackTitle` | `.header_back_title(..)` | `string` | 无 | iOS 和 Android：返回到这个页面的返回按钮的文字（在 Android 上是它给屏幕阅读器的描述）。 |
 | `headerBackVisible` | `.header_back_visible(..)` | `boolean` | `true` | iOS 和 Android：显示返回按钮。 |
