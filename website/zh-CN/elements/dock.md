@@ -363,6 +363,7 @@ const terminalOpen = signal(true);
 ## 无障碍
 
 - 每个标签页对屏幕阅读器来说是带选中状态的标签页，和 [`Tab`](./tabs.md) 一样，激活它就会选中。它的标签是 `renderTab` 绘制的文字。
+- 每个组的内容是一个标签页面板，组里的标签页都把它标为自己控制的元素：屏幕阅读器进入时会说这是选中标签页的面板。
 - 每个手柄（分栏之间和停靠区边缘的）都是可调节的元素，标签是 `handleAccessibilityLabel`。分栏中组之间的手柄就是 [Resizable](./resizable.md) 的手柄：屏幕阅读器每次把它移动 10 点，通过 `onLayoutChange` 报告。
 - 在紧凑方式中，Escape 和返回会收起显示的抽屉或底部面板。
 
