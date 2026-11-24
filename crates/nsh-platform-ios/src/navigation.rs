@@ -108,6 +108,15 @@ pub(crate) struct ScreenIvars {
     /// `!headerVisible`: whether the bar is hidden while this screen is on
     /// top of its stack (`follow_header`).
     header_hidden: Cell<bool>,
+    /// `headerLargeTitle`: the last value applied to this screen, so an
+    /// in-place toggle on the top screen resizes the bar.
+    large_title: Cell<Option<bool>>,
+    /// `headerLargeTitle` toggled while this screen was on top; applied on
+    /// `follow_large_title` (or once any running transition ends).
+    resize_large_title: Cell<bool>,
+    /// Suppresses intermediate `report_insets` while hiding and showing the bar
+    /// to force UIKit to recompute its large-title height.
+    refreshing_bar: Cell<bool>,
 }
 
 define_class!(
@@ -174,6 +183,9 @@ impl ScreenController {
             follow_scroll: Cell::new(false),
             followed: RefCell::new(None),
             header_hidden: Cell::new(false),
+            large_title: Cell::new(None),
+            resize_large_title: Cell::new(false),
+            refreshing_bar: Cell::new(false),
         });
         // SAFETY: UIViewController's designated initializer.
         unsafe {
@@ -231,6 +243,80 @@ impl ScreenController {
         nav.setNavigationBarHidden_animated(hidden, animated);
     }
 
+    /// Resizes the navigation bar when `headerLargeTitle` toggles in place on
+    /// the top screen. Turning large titles off shrinks an expanded bar with
+    /// `sizeToFit`; turning them on toggles `setNavigationBarHidden` off/on so
+    /// UIKit recomputes the large-title bar height (`sizeThatFits` still
+    /// reports the inline height after an in-place switch on iOS 27).
+    pub(crate) fn follow_large_title(&self) {
+        let ivars = self.ivars();
+        if !ivars.resize_large_title.get() {
+            return;
+        }
+        let Some(nav) = self.navigationController() else {
+            ivars.resize_large_title.set(false);
+            return;
+        };
+        let on_top = nav
+            .topViewController()
+            .is_some_and(|top| std::ptr::eq::<UIViewController>(&*top, &**self));
+        if !on_top
+            || nav.isNavigationBarHidden()
+            || self.viewIfLoaded().is_none_or(|v| v.window().is_none())
+        {
+            ivars.resize_large_title.set(false);
+            return;
+        }
+        if let Some(coordinator) = nav.transitionCoordinator() {
+            let pending = Cell::new(Some(Weak::from_retained(&self.retain())));
+            let mtm = self.mtm();
+            let wait = RcBlock::new(
+                move |_: NonNull<
+                    ProtocolObject<dyn UIViewControllerTransitionCoordinatorContext>,
+                >| {
+                    let Some(screen) = pending.take() else {
+                        return;
+                    };
+                    let bound = MainThreadBound::new(screen, mtm);
+                    DispatchQueue::main().exec_async(move || {
+                        let mtm = MainThreadMarker::new().expect("the main queue");
+                        if let Some(screen) = bound.into_inner(mtm).load() {
+                            screen.follow_large_title();
+                        }
+                    });
+                },
+            );
+            if coordinator.animateAlongsideTransition_completion(None, Some(&wait)) {
+                return;
+            }
+        }
+        ivars.resize_large_title.set(false);
+        match ivars.large_title.get() {
+            Some(true) => {
+                ivars.refreshing_bar.set(true);
+                nav.setNavigationBarHidden_animated(true, false);
+                nav.setNavigationBarHidden_animated(false, false);
+                ivars.refreshing_bar.set(false);
+                fit_large_title(&nav);
+                if let Some(view) = self.viewIfLoaded() {
+                    view.setNeedsLayout();
+                }
+                self.report_insets();
+            }
+            Some(false) => {
+                let bar = nav.navigationBar();
+                let size = bar.frame().size;
+                if bar.sizeThatFits(size).height < size.height {
+                    bar.sizeToFit();
+                    if let Some(view) = self.viewIfLoaded() {
+                        view.setNeedsLayout();
+                    }
+                }
+            }
+            None => {}
+        }
+    }
+
     /// With `headerBackgroundOnScroll`, the header switches to its standard
     /// appearance once the content scrolls under it. UIKit watches the
     /// controller's content scroll view for that, and before iOS 26 finds it
@@ -256,6 +342,9 @@ impl ScreenController {
     /// `safeAreaInsets()` inside it; and where its content starts below
     /// the header.
     pub(crate) fn report_insets(&self) {
+        if self.ivars().refreshing_bar.get() {
+            return;
+        }
         let Some(view) = self.view() else { return };
         let s = view.safeAreaInsets();
         self.report_header(&view, s.top as f32);
@@ -1070,7 +1159,7 @@ fn fit_large_title(nav: &UINavigationController) {
     let scrolled = top
         .viewIfLoaded()
         .and_then(|view| crate::mount::first_scroll_view(&view))
-        .is_some_and(|s| s.contentOffset().y > -s.adjustedContentInset().top);
+        .is_some_and(|s| s.contentOffset().y > -s.adjustedContentInset().top + 0.5);
     let size = bar.frame().size;
     if !scrolled && bar.sizeThatFits(size).height > size.height {
         bar.sizeToFit();
@@ -1243,6 +1332,9 @@ define_class!(
             size_screens(nav);
             defer_to_back_swipe(nav);
             fit_large_title(nav);
+            if let Some(screen) = controller.downcast_ref::<ScreenController>() {
+                screen.ivars().resize_large_title.set(false);
+            }
             // A bar that comes back with the transition (the screen that
             // left hid the header) is put at the top of a stack that starts
             // below the top of the window, above where UIKit keeps it at
@@ -2358,6 +2450,16 @@ impl ScreenHost {
             .follow_scroll
             .set(c.header_transparent && c.header_background_on_scroll);
         ivars.header_hidden.set(!c.header_visible);
+        let on_top = self.controller.navigationController().is_some_and(|nav| {
+            nav.topViewController()
+                .is_some_and(|top| std::ptr::eq::<UIViewController>(&*top, &**self.controller))
+        });
+        if let Some(was) = ivars.large_title.replace(Some(c.large_title))
+            && was != c.large_title
+            && on_top
+        {
+            ivars.resize_large_title.set(true);
+        }
         // After `measure`: the safe area the bar changes reports the header.
         self.controller.follow_header();
         self.controller.report_insets();

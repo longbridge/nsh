@@ -197,7 +197,11 @@ Things that were found the hard way. Read the section of the area you change bef
   changes. A stack laid out in the frame its first screen arrives leaves the bar at an inline title's height
   (`sizeThatFits` gives the large one). `fit_large_title` sizes the bar when a stack shows a screen whose content is
   at its top. A scroll view on screen that starts to adjust its insets (`contentInsetAdjustmentBehavior` automatic)
-  keeps its offset under the header. The mounter moves it to its top when it switches.
+  keeps its offset under the header. The mounter moves it to its top when it switches. Toggling `headerLargeTitle` in
+  place on the top screen also leaves `UINavigationBar.sizeThatFits` at inline height when enabling large titles, so
+  `follow_large_title` toggles `setNavigationBarHidden` off/on to expand the bar (`fit_large_title` afterwards) and
+  calls `sizeToFit` to shrink it when turning large titles off, while switching `contentInsetAdjustmentBehavior` between
+  `Automatic` and `Never`.
 - **Mac idiom custom pull to refresh**: on release, the system's bounce already targets the old inset (back to 0), so changing only
   `contentInset` hides the spinner; once refreshing starts, the offset is animated to the top inset plus the refresh room on the next main-queue turn. Synthetic
   tests need continuous scroll events with phases (began / changed / ended); plain wheel events never overscroll.
