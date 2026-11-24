@@ -685,7 +685,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   named as its item provider suggests) and `canPerformAction:withSender:`; with a `maxLength` they insert the clipped text
   themselves (`paste_text`, the test agent's paste too) instead of UIKit's `paste:`; Android: `setOnReceiveContentListener` (API 31;
   the clipboard and keyboards' rich content; images read from their content URIs, through `Native.paste`; the text
-  goes back to the EditText while it inserts) and `onTextContextMenuItem` before; macOS: `TextArea` and a field
+  goes back to the EditText while it inserts) and `onTextContextMenuItem` before; on every version a paste from the
+  EditText's text toolbar ends that toolbar, one that inserted nothing included; macOS: `TextArea` and a field
   editor of NSH's (`FieldEditor`, from `FieldCell`'s `fieldEditorForView:`, one per window; masked fields keep
   AppKit's) override `paste:` / `pasteAsPlainText:` and `validateUserInterfaceItem:`; Windows and GPUI: their own
   editors' paste (the clipboard's PNG or bitmap, `CF_HDROP`; GPUI's `ClipboardEntry::Image` / `ExternalPaths`);
