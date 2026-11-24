@@ -131,6 +131,11 @@ final class TextBox extends android.view.ViewGroup implements Node {
         }
     }
 
+    /** Where its characters are: {@link TextLayouts#geometry} of its layout. */
+    Layout geometry() {
+        return TextLayouts.geometry(layout);
+    }
+
     Layout layout() {
         return layout;
     }
@@ -433,7 +438,7 @@ final class TextBox extends android.view.ViewGroup implements Node {
                     return;
                 }
                 android.graphics.RectF bounds = new android.graphics.RectF();
-                layout.getSelectionPath(selStart, selEnd, selectionPath);
+                geometry().getSelectionPath(selStart, selEnd, selectionPath);
                 selectionPath.computeBounds(bounds, true);
                 out.set(Math.round(contentX + bounds.left), Math.round(contentY + bounds.top),
                         Math.round(contentX + bounds.right), Math.round(contentY + bounds.bottom));
@@ -451,6 +456,7 @@ final class TextBox extends android.view.ViewGroup implements Node {
         }
         int[] at = new int[2];
         getLocationInWindow(at);
+        Layout layout = geometry();
         int startLine = layout.getLineForOffset(selStart);
         startHandle.place(at[0] + contentX + layout.getPrimaryHorizontal(selStart),
                 at[1] + contentY + layout.getLineBottom(startLine));
@@ -613,7 +619,7 @@ final class TextBox extends android.view.ViewGroup implements Node {
             }
             highlightPaint.setColor(color);
         }
-        layout.getSelectionPath(start, end, selectionPath);
+        geometry().getSelectionPath(start, end, selectionPath);
         canvas.drawPath(selectionPath, highlightPaint);
     }
 
