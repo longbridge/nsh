@@ -458,8 +458,10 @@ never reported twice. Caps Lock toggles rather than
 holding: each `flagsChanged` that changes its flag is its press, one that does not is its release. A modifier transition
 without its own flag is a release even when its press was never tracked (after losing the app's focus, or a press made
 in another app); a press always carries its flag, so a reported key-down never says the modifier is off. A focus move
-inside the app keeps the tracked modifiers (AppKit still reports their releases to the new first responder); only losing
-the app's focus (`NSApplicationDidResignActive`) drops them, and no release is made up. A release AppKit delivers is
+between the surface's own windows keeps the tracked modifiers (AppKit still reports their releases to the new first
+responder). A `flagsChanged` in a window the surface does not own (another `AppView`, a host window, a panel) reports
+nothing but still drops the codes its flags no longer hold and re-reads Caps Lock's state, since the keyboard is global; losing the app's focus
+(`NSApplicationDidResignActive`) drops them all. No release is made up for either. A release AppKit delivers is
 reported on whichever focused view has it by then. Keys pressed before the app launched, or released while another
 app was in front, have no transition to report.
 

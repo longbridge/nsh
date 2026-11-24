@@ -215,12 +215,28 @@ pub(crate) fn key_up(surface: &Surface, event: &NSEvent) -> bool {
 /// keys of AppKit have no `keyDown`/`keyUp` of their own.
 pub(crate) fn flags_changed(surface: &Surface, event: &NSEvent) {
     // The monitor sees every window of the application: only the surface
-    // whose window got the transition tracks it (one tracker per surface,
-    // shared by that surface's windows).
-    let Some(window) = event.window(surface.mtm) else {
-        return;
-    };
-    if crate::window::root_in(surface, &window).is_none() {
+    // whose window got the transition reports it (one tracker per surface,
+    // shared by that surface's windows). The flags are the physical
+    // keyboard's, whichever window got them, so a release in a window this
+    // surface does not own still drops the codes held here: the key is no
+    // longer down, and keeping it would turn the next press into a
+    // release. Nothing is reported, as for a release made while the app
+    // was inactive: the window that had the focus heard it.
+    let own = event
+        .window(surface.mtm)
+        .is_some_and(|window| crate::window::root_in(surface, &window).is_some());
+    if !own {
+        // Caps Lock's state is the physical keyboard's too: left stale, the
+        // next press here would be read from a wrong baseline (a press as
+        // a release, or the reverse). No `seen`/`remember`: both steps are
+        // idempotent, so the monitor's and the responder's deliveries of
+        // one event cannot account it twice.
+        let flags = event.modifierFlags();
+        reconcile(surface, flags, None);
+        surface
+            .keyboard
+            .caps
+            .set(flags.contains(NSEventModifierFlags::CapsLock));
         return;
     }
     // The monitor reports it first; the responder then gets the same event
