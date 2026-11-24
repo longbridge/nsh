@@ -691,6 +691,7 @@ pub(crate) fn platform_program(cwd: &Path, name: &str) -> anyhow::Result<Option<
         copy_dir(&r.dir, &build)?;
         fs::write(&stamp, &at)?;
     }
+    own_workspace(&build.join("Cargo.toml"))?;
     let bin = format!("{}{name}", crate::platforms::PREFIX);
     status(
         "Building",
@@ -726,6 +727,26 @@ pub(crate) fn platform_program(cwd: &Path, name: &str) -> anyhow::Result<Option<
         );
     }
     Ok(Some(program))
+}
+
+/// Makes the manifest at `path` the root of its own workspace: the copy in
+/// `.nsh/platforms/<name>` lies inside the app's directory, and a Rust app's
+/// `Cargo.toml` is a workspace root, which Cargo would take the copy to be
+/// an undeclared member of. A platform from Git or a directory often has its
+/// own `[workspace]`; one from crates.io never does, as `cargo package` drops
+/// it from the manifest it publishes.
+fn own_workspace(path: &Path) -> anyhow::Result<()> {
+    let manifest =
+        fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    let has_workspace = manifest.lines().any(|line| {
+        let line = line.trim_start();
+        line.starts_with("[workspace]") || line.starts_with("[workspace.")
+    });
+    if !has_workspace {
+        fs::write(path, format!("{manifest}\n[workspace]\n"))
+            .with_context(|| format!("writing {}", path.display()))?;
+    }
+    Ok(())
 }
 
 /// Copies the directory `from` to `to`, without its `target/`, `.git/` and
@@ -781,6 +802,57 @@ mod tests {
         assert!(!to.join("target").exists());
         assert!(!to.join(".git").exists());
         assert!(!to.join("examples/app/.nsh").exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A platform from crates.io, built inside a Rust app's workspace,
+    /// builds on its own (Cargo's own check, not only the manifest's text).
+    #[test]
+    fn a_platform_copy_is_its_own_workspace() {
+        let root = std::env::temp_dir().join(format!("nsh-own-workspace-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let app = root.join("app");
+        let build = app.join(".nsh/platforms/x");
+        fs::create_dir_all(app.join("src")).unwrap();
+        fs::create_dir_all(build.join("src")).unwrap();
+        fs::write(
+            app.join("Cargo.toml"),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[workspace]\n",
+        )
+        .unwrap();
+        fs::write(app.join("src/lib.rs"), "").unwrap();
+        let platform =
+            "[package]\nname = \"nsh-platform-x\"\nversion = \"0.1.0\"\nedition = \"2024\"\n";
+        fs::write(build.join("Cargo.toml"), platform).unwrap();
+        fs::write(build.join("src/main.rs"), "fn main() {}").unwrap();
+        let metadata = || {
+            Command::new(rust_app::cargo())
+                .args([
+                    "metadata",
+                    "--no-deps",
+                    "--offline",
+                    "--format-version",
+                    "1",
+                    "--manifest-path",
+                ])
+                .arg(build.join("Cargo.toml"))
+                .output()
+                .unwrap()
+                .status
+                .success()
+        };
+        assert!(!metadata(), "Cargo takes the copy into the app's workspace");
+        own_workspace(&build.join("Cargo.toml")).unwrap();
+        assert!(metadata());
+        // Once is enough: a second build leaves the manifest as it is.
+        let once = fs::read_to_string(build.join("Cargo.toml")).unwrap();
+        own_workspace(&build.join("Cargo.toml")).unwrap();
+        assert_eq!(fs::read_to_string(build.join("Cargo.toml")).unwrap(), once);
+        // A platform's own workspace stays as it is.
+        let ws = format!("{platform}\n[workspace]\nmembers = [\"crates/*\"]\n");
+        fs::write(build.join("Cargo.toml"), &ws).unwrap();
+        own_workspace(&build.join("Cargo.toml")).unwrap();
+        assert_eq!(fs::read_to_string(build.join("Cargo.toml")).unwrap(), ws);
         fs::remove_dir_all(&root).unwrap();
     }
 
