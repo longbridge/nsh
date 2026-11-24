@@ -55,6 +55,8 @@ mod mount;
 #[cfg(target_os = "macos")]
 mod navigation_unmount;
 #[cfg(target_os = "macos")]
+mod nested_bounce;
+#[cfg(target_os = "macos")]
 mod press_momentum;
 #[cfg(target_os = "macos")]
 mod quit_requests;
@@ -164,6 +166,8 @@ fn main() {
                 canvas_bounds::run();
             } else if std::env::var_os("NSH_HOVER_CURSOR_CHECK_ONLY").is_some() {
                 hover_cursor::run();
+            } else if std::env::var_os("NSH_NESTED_BOUNCE_CHECK_ONLY").is_some() {
+                nested_bounce::run();
             } else if std::env::var_os("NSH_PRESS_MOMENTUM_CHECK_ONLY").is_some() {
                 press_momentum::run();
             } else {
@@ -201,6 +205,7 @@ fn main() {
                 mount::run();
                 // Last: it makes the process an accessory app.
                 embedded_scroll::run();
+                nested_bounce::run();
                 // Last: it leaves the app an accessory, never activated.
                 press_momentum::run();
                 tap_feedback::run();
