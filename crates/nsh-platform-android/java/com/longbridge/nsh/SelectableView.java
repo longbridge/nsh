@@ -528,8 +528,12 @@ final class SelectableView implements SelectionHandle.Owner {
     }
 
     /**
-     * The app's items (`selectionMenu`) after the system's and the text
-     * actions, in their order; a separator starts a new group.
+     * The app's items (`selectionMenu`) after the system's, in their order,
+     * and before other apps' text actions (Translate and the like): they act
+     * on this app's content, as TextView's own items come before those. The
+     * floating toolbar shows the first items that fit and the rest under its
+     * overflow, so an app's item behind every installed app's action was out
+     * of sight. A separator starts a new group.
      */
     private void addAppItems(android.view.Menu m) {
         int group = 1;
@@ -539,7 +543,7 @@ final class SelectableView implements SelectionHandle.Owner {
                 group++;
                 continue;
             }
-            m.add(group, APP_ITEM + i, 200 + i, entry.label).setEnabled(entry.enabled);
+            m.add(group, APP_ITEM + i, 50 + i, entry.label).setEnabled(entry.enabled);
         }
     }
 
