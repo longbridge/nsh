@@ -29,6 +29,10 @@ pub const WS_PATH: &str = "/ws";
 /// Default dev-server port.
 pub const DEFAULT_PORT: u16 = 8790;
 
+/// The largest message either end takes, in one frame or many. Pasted
+/// files and screenshots travel inside a single JSON message.
+pub(crate) const MAX_MESSAGE_SIZE: usize = 64 << 20;
+
 /// A build a host runs ([`ClientMessage::Hello`]).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RunningBuild {
@@ -369,7 +373,11 @@ pub struct TestFile {
     pub name: String,
     /// Its MIME type.
     pub mime: String,
-    /// Its bytes.
+    /// Its bytes, base64 on the wire.
+    #[serde(
+        serialize_with = "base64_bytes::serialize",
+        deserialize_with = "base64_bytes::deserialize_or_numbers"
+    )]
     pub data: Vec<u8>,
 }
 
@@ -1012,6 +1020,41 @@ mod base64_bytes {
             .decode(text)
             .map_err(serde::de::Error::custom)
     }
+
+    /// Base64 text, or the array of numbers servers sent before files
+    /// travelled as base64.
+    pub(super) fn deserialize_or_numbers<'de, D: Deserializer<'de>>(
+        d: D,
+    ) -> Result<Vec<u8>, D::Error> {
+        struct Bytes;
+
+        impl<'de> serde::de::Visitor<'de> for Bytes {
+            type Value = Vec<u8>;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("base64 text or an array of bytes")
+            }
+
+            fn visit_str<E: serde::de::Error>(self, text: &str) -> Result<Vec<u8>, E> {
+                base64::engine::general_purpose::STANDARD
+                    .decode(text)
+                    .map_err(E::custom)
+            }
+
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> Result<Vec<u8>, A::Error> {
+                let mut bytes = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+                while let Some(byte) = seq.next_element()? {
+                    bytes.push(byte);
+                }
+                Ok(bytes)
+            }
+        }
+
+        d.deserialize_any(Bytes)
+    }
 }
 
 /// Float fields, decoded whatever serde_json's features: as a number, or
@@ -1217,6 +1260,25 @@ mod tests {
                 ..
             } if sets == ["app/native", "app/charts"]
         ));
+    }
+
+    #[test]
+    fn pasted_files_travel_as_base64() {
+        let file = TestFile::new("a.png", "image/png", vec![0, 1, 254, 255]);
+        let text = serde_json::to_string(&file).unwrap();
+        assert_eq!(
+            text,
+            r#"{"name":"a.png","mime":"image/png","data":"AAH+/w=="}"#
+        );
+        assert_eq!(serde_json::from_str::<TestFile>(&text).unwrap(), file);
+        // An older server sends the bytes as an array of numbers.
+        assert_eq!(
+            serde_json::from_str::<TestFile>(
+                r#"{"name":"a.png","mime":"image/png","data":[0,1,254,255]}"#
+            )
+            .unwrap(),
+            file
+        );
     }
 
     /// The messages with float fields, each with fractions.
