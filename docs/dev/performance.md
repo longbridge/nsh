@@ -851,6 +851,11 @@ sends 2631 mount items instead of 2885 (no `ViewProps` set and set back in one c
   it replaced did (0.57ms).
   The native context records into a Rust list (`nsh-js` `canvas.rs`): the same 17 500 calls take ~1.0–1.1ms
   (~1.7ms in the former JS runtime, measured A/B), and 12 of them plus decoding one commit 21–22ms (61ms).
+- Canvas text on macOS (`cargo test --release -p nsh-platform-macos --lib bench_canvas_text -- --ignored --nocapture`,
+  a 40 × 8 quote table of 320 `fillText`s painted into a 760 × 820 point bitmap at scale 2, Apple Silicon): with each
+  canvas keeping its fonts and `CTLine`s (`canvas/lines.rs`), a paint with the same texts (a window being resized)
+  takes ~0.34–0.41ms and one after a new drawing changed every text ~1.5–1.6ms, against ~11.2–11.8ms either way when
+  every paint made a font, an attributed string and a line per text.
 - `OffscreenCanvas` on Windows: the UI thread records, submits the drawing and its copy, and maps the read-back
   bitmap once a Direct3D event query polled every timer tick says the GPU is done, so a large image costs it the
   recording and one copy of its rows, never a wait for the GPU; unpremultiplying and PNG encoding run on a thread.
