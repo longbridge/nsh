@@ -29,6 +29,7 @@ mod runtime;
 mod rust_app;
 mod self_update;
 mod sign;
+mod store;
 mod test;
 mod test_android;
 mod test_host;
@@ -578,8 +579,21 @@ enum Command {
 /// The stores `nsh publish` uploads to.
 #[derive(Subcommand, Clone)]
 enum PublishStore {
-    /// Upload an App Store-signed IPA to App Store Connect for TestFlight.
+    /// Upload an App Store-signed IPA to App Store Connect, wait for
+    /// processing, give it to TestFlight groups, prepare the App Store
+    /// version and listing, and submit it for review with `--submit`.
     Ios(publish_ios::Args),
+    /// Report where a store has the app's newest release. Exits 0 live,
+    /// 10 pending (processing or in review), 11 draft, 12 action needed.
+    Status {
+        #[command(subcommand)]
+        store: StatusStore,
+    },
+    /// Check a store's credentials and the app's store config, read-only.
+    Doctor {
+        #[command(subcommand)]
+        store: DoctorStore,
+    },
     /// Upload an Android App Bundle (`.aab`) to Google Play's internal
     /// testing track, with a service account's JSON key.
     Android {
@@ -600,6 +614,20 @@ enum PublishStore {
         #[arg(long)]
         draft: bool,
     },
+}
+
+/// The stores `nsh publish status` reads.
+#[derive(Subcommand, Clone)]
+enum StatusStore {
+    /// App Store Connect.
+    Ios(publish_ios::StatusArgs),
+}
+
+/// The stores `nsh publish doctor` checks.
+#[derive(Subcommand, Clone)]
+enum DoctorStore {
+    /// App Store Connect.
+    Ios(publish_ios::DoctorArgs),
 }
 
 /// Arguments of `nsh package`.
@@ -789,6 +817,15 @@ fn run(mut command: Command) -> anyhow::Result<()> {
     {
         return match store {
             PublishStore::Ios(args) => publish_ios::publish(&args),
+            PublishStore::Status {
+                store: StatusStore::Ios(args),
+            } => {
+                let code = publish_ios::print_status(&args)?;
+                std::process::exit(code)
+            }
+            PublishStore::Doctor {
+                store: DoctorStore::Ios(args),
+            } => publish_ios::doctor(&args),
             PublishStore::Android {
                 bundle,
                 entry,

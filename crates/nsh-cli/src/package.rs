@@ -213,6 +213,9 @@ pub(crate) struct AppConfig {
     /// The languages whose data the app ships (checked by the bundler).
     #[serde(default)]
     locales: Option<serde_json::Value>,
+    /// The store listing, read by `nsh publish <store>` (`store.rs`).
+    #[serde(default)]
+    pub(crate) store: Option<serde_json::Value>,
     /// The locales the app ships (`locales`, else its translations'
     /// languages: `nsh_i18n::app_locales`), which Apple packages declare
     /// (`CFBundleLocalizations`) so that system UI shows in them.

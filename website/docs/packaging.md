@@ -877,11 +877,71 @@ version and build number from the IPA and checks that the bundle ID matches the 
 app. It signs short-lived ES256 tokens, streams the IPA in the requested parts, and commits its
 SHA-256 checksum. The final message includes the upload ID and the app's TestFlight link.
 
-A successful command means Apple accepted the upload for processing. Follow processing status,
-export compliance, tester groups and any beta review in App Store Connect. App Store review submission
-and production release remain manual. If an upload is interrupted, check its printed upload ID in
-App Store Connect before retrying; each invocation starts a new upload. Apple validates signing
-and provisioning while processing the build.
+By default the command then waits for Apple to process the build (`--timeout` minutes, default 60),
+answers export compliance from `store.ios.usesNonExemptEncryption`, gives the build to the TestFlight
+groups in `store.ios.betaGroups` (or `--beta-group`), creates or reuses the App Store version named by
+the IPA's version, attaches the build, sets the release mode and writes the store listing and
+screenshots. It submits for App Review **only** with `--submit`.
+
+| Flag | Meaning |
+|---|---|
+| `--entry <DIR>` | The app whose `nsh.json` holds the store listing (default: `.`). |
+| `--no-wait` | Stop once Apple accepts the upload. |
+| `--testflight-only` | Stop after processing, compliance and TestFlight groups. |
+| `--beta-group <NAME>` | TestFlight group to add the build to (repeatable). |
+| `--release manual\|auto\|phased` | How an approved version goes live (default: `store.ios.release`, else `manual`). |
+| `--submit` | Submit the version for App Review. |
+
+A version that is already in review or live is never changed: raise `version` in `nsh.json`.
+If an upload is interrupted, check its printed upload ID in App Store Connect before retrying; each
+invocation starts a new upload. Apple validates signing and provisioning while processing the build.
+
+### Store listing
+
+The listing is shared by every `nsh publish <store>`. Put it in `nsh.json` `"store"`, in a `store/`
+directory beside `nsh.json`, or both; a value in `nsh.json` wins over the file.
+
+```json
+{
+  "store": {
+    "locales": {
+      "en-US": {
+        "name": "My App",
+        "subtitle": "Notes that sync",
+        "whatsNew": "Faster sync.",
+        "keywords": "notes,sync",
+        "supportUrl": "https://example.com/support",
+        "screenshots": { "phone": ["store/en-US/phone-1.png"] }
+      }
+    },
+    "ios": { "usesNonExemptEncryption": false, "betaGroups": ["QA"], "release": "phased" }
+  }
+}
+```
+
+```text
+store/en-US/description.txt        # also name, subtitle, keywords, promotional_text,
+store/en-US/whats_new.txt          # whats_new, support_url, marketing_url, privacy_policy_url
+store/en-US/screenshots/phone/01.png
+store/en-US/screenshots/tablet/01.png
+```
+
+Locales are BCP 47 tags as App Store Connect names them (`en-US`, `zh-Hans`). Screenshots are grouped
+by device class in display order: `phone` is the 6.9" iPhone size (`APP_IPHONE_67`), `tablet` the 13"
+iPad size (`APP_IPAD_PRO_3GEN_129`); an App Store Connect display type such as `APP_IPHONE_65` is taken
+as it is. A screenshot set is replaced only when its images changed. Fields left out keep what App
+Store Connect has. App Store Connect rejects `whatsNew` on an app's first version.
+
+### Status and checks
+
+```sh
+nsh publish status ios --json   # exit 0 live, 10 processing/in review, 11 draft, 12 action needed
+nsh publish doctor ios          # read-only: credentials, nsh.json, listing, app access
+```
+
+`doctor` makes only read requests (`--offline` makes none) and exits non-zero when a check fails.
+Both run on any OS. Apple does not allow creating the app record through the API, so create it once in
+App Store Connect.
 
 `nsh publish <ENTRY> --key … --cert …` continues to produce a signed `.nshpkg` for embedding.
 Use `./ios` to name a local entry directory called `ios`.

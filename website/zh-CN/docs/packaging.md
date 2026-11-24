@@ -765,10 +765,65 @@ nsh publish ios .nsh/out/MyApp.ipa
 核对 bundle ID 与 App Store Connect 应用一致，然后签发短期 ES256 token、按指定分段流式上传，
 最后提交 SHA-256 校验和。完成消息包含 upload ID 和应用的 TestFlight 链接。
 
-命令成功表示 Apple 已接受上传，等待处理。在 App Store Connect 查看处理状态、填写出口合规信息、
-设置测试组并处理可能需要的 Beta 审核；App Store 提审和正式发布仍由你手动操作。
+默认情况下，命令随后等待 Apple 处理构建（`--timeout` 分钟，默认 60），按 `store.ios.usesNonExemptEncryption`
+回答出口合规，把构建分发给 `store.ios.betaGroups`（或 `--beta-group`）中的 TestFlight 测试组，
+创建或复用与 IPA 版本号同名的 App Store 版本、挂上构建、设置发布方式，并写入商店文案与截图。
+**只有**加 `--submit` 才会提交 App 审核。
+
+| 参数 | 含义 |
+|---|---|
+| `--entry <DIR>` | `nsh.json` 中含商店文案的应用（默认 `.`）。 |
+| `--no-wait` | Apple 接受上传后即停止。 |
+| `--testflight-only` | 处理完成、出口合规与 TestFlight 分组后停止。 |
+| `--beta-group <NAME>` | 添加构建的 TestFlight 测试组（可重复）。 |
+| `--release manual\|auto\|phased` | 审核通过后的发布方式（默认 `store.ios.release`，否则 `manual`）。 |
+| `--submit` | 提交 App 审核。 |
+
+已在审核中或已上架的版本不会被修改：请在 `nsh.json` 中提高 `version`。
 上传中断时，先根据输出的 upload ID 在 App Store Connect 核实状态，再决定是否重试；每次运行都会创建新上传。
 Apple 在处理构建时验证签名和 provisioning profile。
+
+### 商店文案
+
+商店文案由所有 `nsh publish <store>` 共用，可写在 `nsh.json` 的 `"store"`、与 `nsh.json` 同级的 `store/`
+目录，或两者都用；`nsh.json` 中的值优先于文件。
+
+```json
+{
+  "store": {
+    "locales": {
+      "en-US": {
+        "name": "My App",
+        "whatsNew": "Faster sync.",
+        "screenshots": { "phone": ["store/en-US/phone-1.png"] }
+      }
+    },
+    "ios": { "usesNonExemptEncryption": false, "betaGroups": ["QA"], "release": "phased" }
+  }
+}
+```
+
+```text
+store/en-US/description.txt        # 另有 name、subtitle、keywords、promotional_text、
+store/en-US/whats_new.txt          # whats_new、support_url、marketing_url、privacy_policy_url
+store/en-US/screenshots/phone/01.png
+store/en-US/screenshots/tablet/01.png
+```
+
+语言使用 App Store Connect 的 BCP 47 标签（`en-US`、`zh-Hans`）。截图按设备类别分组、按显示顺序排列：
+`phone` 对应 6.9 英寸 iPhone（`APP_IPHONE_67`），`tablet` 对应 13 英寸 iPad（`APP_IPAD_PRO_3GEN_129`）；
+`APP_IPHONE_65` 等 App Store Connect 尺寸名原样使用。截图集只在图片变化时替换；未给出的字段保持
+App Store Connect 中的现值。App Store Connect 不接受应用首个版本的 `whatsNew`。
+
+### 状态与检查
+
+```sh
+nsh publish status ios --json   # 退出码 0 已上架，10 处理中/审核中，11 草稿，12 需处理
+nsh publish doctor ios          # 只读检查凭据、nsh.json、商店文案和应用访问权限
+```
+
+`doctor` 只发只读请求（`--offline` 不发请求），任一检查失败时以非零退出。两者可在任意系统上运行。
+Apple 不允许通过 API 创建应用记录，需先在 App Store Connect 手动创建一次。
 
 `nsh publish <ENTRY> --key … --cert …` 继续为嵌入场景生成签名 `.nshpkg`。
 本地入口目录名为 `ios` 时，写作 `./ios`。
