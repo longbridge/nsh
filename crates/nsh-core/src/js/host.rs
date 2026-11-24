@@ -189,7 +189,7 @@ pub trait HostValue: Sized {
     fn ts_type(types: &mut TsTypes) -> String;
 }
 
-/// Decodes a view's `captureKeys` (`"none"`, `"all"`, or an array of
+/// Decodes a view's `captureKeys` (`"none"`, `"all"`, `"text"`, or an array of
 /// keystroke strings) with the platform's `mod` convention: `apple` says
 /// `mod` is Command ([`crate::keymap::apple_keys`]).
 ///
@@ -209,9 +209,10 @@ pub fn decode_capture_keys<I: HostInput>(
         return match text.as_str() {
             "none" => Some(KeyCapture::None),
             "all" => Some(KeyCapture::All),
+            "text" => Some(KeyCapture::Text),
             other => {
                 cx.warn(format!(
-                    "captureKeys: expected \"none\", \"all\" or keystrokes, got {other:?}"
+                    "captureKeys: expected \"none\", \"all\", \"text\" or keystrokes, got {other:?}"
                 ));
                 None
             }

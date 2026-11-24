@@ -116,10 +116,10 @@ On Unix, the terminal host exits on SIGHUP, SIGTERM, SIGINT or terminal disconne
 ## nsh dev
 
 ```sh
-nsh dev [ENTRY] [--target macos|linux|windows|ios|android|gpui|tui|web|catalyst] [--device <DEVICE>] [--server-only] [--port <PORT>] [--release] [--limits [<LIMITS>]]
+nsh dev [ENTRY] [--target macos|linux|windows|ios|android|gpui|tui|web|catalyst] [--device <DEVICE>] [--server-only] [--port <PORT>] [--host <HOST>] [--release] [--limits [<LIMITS>]]
 ```
 
-Starts the dev server and opens this system’s native host: AppKit on macOS, GTK on Linux, Win32 on Windows. Choose `--target ios` or `--target android` explicitly for mobile development. `--server-only` serves hosts you start yourself. The server builds the app, watches the entry’s directory and the app’s `nsh.json`, theme and translations, and pushes every rebuild to connected hosts. With `--server-only`, it prints the URL for hosts on this machine and one per LAN address for devices, and, when the web runtime is there, the page browsers open to run the app ([Web](./web.md#develop-in-the-browser)):
+Starts the dev server and opens this system’s native host: AppKit on macOS, GTK on Linux, Win32 on Windows. Choose `--target ios` or `--target android` explicitly for mobile development. `--server-only` serves hosts you start yourself. The server builds the app, watches the entry’s directory and the app’s `nsh.json`, theme and translations, and pushes every rebuild to connected hosts. With `--server-only`, it prints the URL for hosts on this machine and, unless bound to loopback, one per LAN address for devices, and, when the web runtime is there, the page browsers open to run the app ([Web](./web.md#develop-in-the-browser)):
 
 ```text
 ✓ built App.tsx (3.2 KB js, 9.8 KB bytecode, 21ms)
@@ -129,7 +129,7 @@ Starts the dev server and opens this system’s native host: AppKit on macOS, GT
   browsers on this network: http://192.168.1.20:8790/
 ```
 
-Use `nsh dev --server-only` with an app that embeds the development SDK (`NativeShellDev.xcframework`, `nsh-dev.aar`). `--target`, `--device`, `--port`, `--release` and `--limits` work as for `nsh run`; `--server-only` selects a server without a launched host.
+Use `nsh dev --server-only` with an app that embeds the development SDK (`NativeShellDev.xcframework`, `nsh-dev.aar`). `--target`, `--device`, `--port`, `--release` and `--limits` work as for `nsh run`; `--server-only` selects a server without a launched host. `--host <HOST>` binds the dev server to a specific IPv4 address instead of the default (`0.0.0.0` for `--server-only` and `--target ios`, `android`, or `web`; `127.0.0.1` for local targets), for example `nsh dev App.tsx --server-only --host 127.0.0.1` to listen on loopback only. With `--target android`, `--host` must be `127.0.0.1` or `0.0.0.0` because `adb reverse` forwards the device's `127.0.0.1` to this machine's `127.0.0.1`.
 
 ## nsh test
 
