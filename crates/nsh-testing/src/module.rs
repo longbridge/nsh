@@ -1278,6 +1278,17 @@ pub struct SpanStyle {
     pub font_size: f64,
     /// Its font weight (400 regular, 700 bold).
     pub font_weight: f64,
+    /// Its line height, in points (a multiple or ems of the font size
+    /// resolved against it); absent for the font's natural line height.
+    #[prop(skip_none)]
+    pub line_height: Option<f64>,
+    /// The extra space between its characters, in points (ems resolved).
+    pub letter_spacing: f64,
+    /// The `fontFamily` it has, as the app wrote it (a list stays a list);
+    /// absent for the system font. It is the family asked for, not the
+    /// face a platform falls back to for characters it lacks.
+    #[prop(skip_none)]
+    pub font_family: Option<String>,
     /// Whether it is italic.
     pub italic: bool,
     /// Whether it is underlined.
@@ -1300,6 +1311,10 @@ impl From<nsh_core::ResolvedTextStyle> for SpanStyle {
             background_color: style.background.map(|b| css(b.color)),
             font_size: f64::from(style.font_size.0),
             font_weight: f64::from(style.font_weight),
+            line_height: (style.line_height > nsh_core::Points::ZERO)
+                .then_some(f64::from(style.line_height.0)),
+            letter_spacing: f64::from(style.letter_spacing.0),
+            font_family: style.font_family.map(|f| f.name().to_string()),
             italic: style.italic,
             underline: style.decoration.underline,
             line_through: style.decoration.line_through,

@@ -681,6 +681,9 @@ impl Scene for Model {
         span.background = style.background.map(|b| b.color.0);
         span.font_size = style.font_size.0;
         span.font_weight = style.font_weight;
+        span.line_height = style.line_height.0;
+        span.letter_spacing = style.letter_spacing.0;
+        span.font_family = style.font_family.map(|f| f.name().to_string());
         span.italic = style.italic;
         span.underline = style.decoration.underline;
         span.line_through = style.decoration.line_through;
