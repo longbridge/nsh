@@ -156,16 +156,24 @@ pub(crate) fn package(
         let has_emoji =
             plan.main.iter().any(|g| g == EMOJI_GATE) || plan.lazy().contains(&EMOJI_GATE);
         let exports = prune::exports(&linkable)?;
+        // A Rust app's parts of `nsh/base` (`nsh_part_*`): the app makes
+        // their components by name (`ComponentElement::by_name`), so each
+        // is a side module the page loads when one first mounts; what the
+        // app makes by type is linked where it is used, in the main module.
+        let rust_part = |name: &str| built.rust_root && name.starts_with("nsh_part_");
         let keep: Vec<&str> = exports
             .iter()
             .map(String::as_str)
-            .filter(|name| !is_gate(name) || plan.main.iter().any(|g| g == name))
+            .filter(|name| {
+                !is_gate(name) || (!rust_part(name) && plan.main.iter().any(|g| g == name))
+            })
             .collect();
-        let lazy: Vec<&str> = plan
+        let mut lazy: Vec<&str> = plan
             .lazy()
             .into_iter()
             .filter(|gate| exports.iter().any(|e| e == gate))
             .collect();
+        lazy.extend(exports.iter().map(String::as_str).filter(|n| rust_part(n)));
         let split = link(&linkable, runtime.glue.is_some(), &keep, &lazy)?;
         for side in &split.sides {
             let file = side_file_name(&side.gates);

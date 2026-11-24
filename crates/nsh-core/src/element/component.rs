@@ -530,7 +530,7 @@ pub(crate) fn name_of<C: Component>() -> &'static str {
 
 /// A type's own name, its JS export: the last segment of its path, without
 /// a generic type's arguments (the test `components_are_named_after_their_types`).
-fn export_name(type_name: &str) -> &str {
+pub(crate) fn export_name(type_name: &str) -> &str {
     let path = type_name.split('<').next().unwrap_or(type_name);
     path.rsplit("::").next().unwrap_or(path)
 }
@@ -892,6 +892,17 @@ impl fmt::Debug for Root {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("Root")
     }
+}
+
+/// What a component element made by name ([`super::ComponentElement::by_name`])
+/// has for its `make`: never called, the registry makes it.
+pub(crate) fn missing_instance() -> Box<dyn AnyInstance> {
+    unreachable!("a component made by name is made by its registry")
+}
+
+/// What a component element made by name has for its `spec`: never called.
+pub(crate) fn missing_spec() -> ComponentSpec {
+    unreachable!("a component made by name is made by its registry")
 }
 
 /// A new instance of `C`, its props not set yet.
@@ -1554,6 +1565,18 @@ impl Registry {
             }
         }
         out
+    }
+
+    /// A new instance of the component of type `id`, and its registered
+    /// name (a component element made by name).
+    pub(crate) fn make_type(
+        &self,
+        id: TypeId,
+    ) -> Option<(Arc<ComponentSpec>, Box<dyn AnyInstance>)> {
+        self.types
+            .values()
+            .find(|t| t.id == id)
+            .map(|t| (t.spec.clone(), (t.make)()))
     }
 
     /// A new instance of component `name`.
