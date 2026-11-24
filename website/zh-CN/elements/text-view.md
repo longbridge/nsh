@@ -336,6 +336,8 @@ text_view().markdown(doc).links(TextViewLinks::Open)
 
 在桌面平台和桌面形态的 Web 上，指针停在链接上会在指针下方显示它去往哪里：链接有标题时先显示标题（`[docs](https://example.com/docs "The guide")`，或 HTML 链接的 `title`），下面一行是用主题 `muted-foreground` 颜色显示的目的地。URL 按解析后的样子显示，协议、主机和端口始终完整（国际化域名显示为 ASCII 形式，冒充的字母会显示出本来面目），过长的路径从中间截断；路径和文档内的锚点（`#…`）按原样显示。链接里的图片也以同样方式在图片下方显示链接的目的地和标题。这与 [Link](./link.md#去往哪里) 的核对相同。
 
+在 Web 上，指向网页、站内路径、邮件地址或电话号码的链接（`https:`、`http:`、路径、`mailto:`、`tel:`）在页面中是一个 `<a href>`，与带 `href` 的 [Link](./link.md#平台说明) 相同：爬虫会跟随它，浏览器会显示它去往哪里，按住修饰键点击或用鼠标中键点击时由浏览器在新标签页或新窗口中打开，不触发 `onLinkPress`；右键点击显示浏览器的链接菜单。普通点击由应用处理，由 `onLinkPress` 报告。路径与 `Link` 的 `href` 一样，放在站点的基础地址下。文档内的锚点（`#…`）和指向应用自身路由的链接（应用自己的 scheme，如 `myapp:`）是可点击的文字，每次点击都会连同修饰键一起报告。
+
 <a id="render-functions"></a>
 
 ## 渲染函数
@@ -568,6 +570,8 @@ function Custom(props: { node: TextViewCustomNode }) {
 | `math` | `boolean` | `true` | 公式：文本中的 `$…$` 和 `\(…\)`，`$$…$$` 和 `\[…\]` 公式块。转义方括号里是引用编号或中日韩文字时（`\[1\]\[3\]`、`\[注\]`）按文字显示。 |
 | `html` | `boolean` | `true` | Markdown 中的 HTML 按 `html` 属性的方式读取；`false` 时显示为文本。 |
 | `alerts` | `boolean` | `true` | GitHub 的提示块：`> [!NOTE]`、`[!TIP]`、`[!IMPORTANT]`、`[!WARNING]`、`[!CAUTION]`。 |
+| `links` | `boolean` | `true` | 链接：`[text](url)`、裸 URL 和 `<a href>`；`false` 时显示其文字，不显示为链接。 |
+| `images` | `boolean` | `true` | 图片：`![alt](src)` 和 `<img>`；`false` 时显示其 `alt` 文字。 |
 | `frontmatter` | `boolean` | `false` | 开头的 YAML front matter（`---` … `---`）成为名为 `frontmatter` 的自定义节点，其 `text` 是 YAML。 |
 | `mdx` | `boolean` | `false` | MDX：JSX 元素成为以标签命名的自定义节点，`{expressions}` 成为名为 `expression` 的自定义节点；此时原始 HTML 按文本读取。 |
 | `streaming` | `boolean` | `false` | 文本仍在到达：末尾未闭合的语法显示成闭合后的样子。 |

@@ -67,6 +67,8 @@ final class SelectableView implements SelectionHandle.Owner {
     /** The texts drawing a highlight. */
     private final java.util.ArrayList<TextBox> highlighted = new java.util.ArrayList<>();
     private SelectionHandle startHandle, endHandle;
+    /** The color the handles are tinted in (`selectionColor`; null: the theme's). */
+    private Integer handleColor;
     /** A dragged handle passed the other: each marks the other end until the finger lifts. */
     private boolean swapped;
     private android.view.ActionMode mode;
@@ -470,10 +472,16 @@ final class SelectableView implements SelectionHandle.Owner {
             return;
         }
         TextBox start = texts.get(b[0]), end = texts.get(b[2]);
+        Integer color = start.selectionColor();
         if (startHandle == null) {
-            Integer color = start.selectionColor();
             startHandle = new SelectionHandle(view, true, color, this);
             endHandle = new SelectionHandle(view, false, color, this);
+            handleColor = color;
+        } else if (!java.util.Objects.equals(color, handleColor)) {
+            // The handles outlive a selection: the next one's text (another color, the appearance changed) tints them.
+            startHandle.tint(color);
+            endHandle.tint(color);
+            handleColor = color;
         }
         // While a dragged handle has passed the other, each marks the other end.
         SelectionHandle forStart = swapped ? endHandle : startHandle, forEnd = swapped ? startHandle : endHandle;
@@ -598,8 +606,12 @@ final class SelectableView implements SelectionHandle.Owner {
     }
 
     /**
-     * The app's items (`selectionMenu`) after the system's and the text
-     * actions, in their order; a separator starts a new group.
+     * The app's items (`selectionMenu`) after the system's, in their order,
+     * and before other apps' text actions (Translate and the like): they act
+     * on this app's content, as TextView's own items come before those. The
+     * floating toolbar shows the first items that fit and the rest under its
+     * overflow, so an app's item behind every installed app's action was out
+     * of sight. A separator starts a new group.
      */
     private void addAppItems(android.view.Menu m) {
         int group = 1;
@@ -609,7 +621,7 @@ final class SelectableView implements SelectionHandle.Owner {
                 group++;
                 continue;
             }
-            m.add(group, APP_ITEM + i, 200 + i, entry.label).setEnabled(entry.enabled);
+            m.add(group, APP_ITEM + i, 50 + i, entry.label).setEnabled(entry.enabled);
         }
     }
 
