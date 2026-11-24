@@ -923,10 +923,15 @@ function webBridge(token) {
 /// Blink's shape cache around 5 MB.
 const MEASURE_ROUNDS = 5000;
 
+/// The context text is measured with: a `<canvas>` element where there is a
+/// document. On macOS, Chrome 69 to 103 crash the renderer when an
+/// `OffscreenCanvas` context's `font` names `BlinkMacSystemFont`, as the
+/// system font stack (`src/text/css.rs`) does; a `<canvas>` measures the same
+/// font the DOM draws.
 function measureContext() {
-  const canvas = typeof OffscreenCanvas !== "undefined"
-    ? new OffscreenCanvas(1, 1)
-    : document.createElement("canvas");
+  const canvas = typeof document !== "undefined"
+    ? document.createElement("canvas")
+    : new OffscreenCanvas(1, 1);
   return canvas.getContext("2d");
 }
 
