@@ -3256,9 +3256,9 @@ impl<M: TextEngine> Core<M> {
             // something still holds (a development host keeps the mounted
             // app for hot updates) is not released yet, but it is gone.
             .filter(|&id| {
-                !self.key(id).is_ok_and(|k| {
-                    id == crate::ROOT_ID || self.nodes[k as usize].parent != NO_KEY
-                })
+                !self
+                    .key(id)
+                    .is_ok_and(|k| id == crate::ROOT_ID || self.nodes[k as usize].parent != NO_KEY)
             })
             .collect();
         for id in gone {
@@ -6284,6 +6284,10 @@ impl<M: TextEngine> Core<M> {
                 if props.href != value {
                     props.href = value;
                     flags |= dirty::VIEW_PROPS;
+                    // A span's is recorded in its block's text (`link_hrefs`).
+                    if node.kind == Kind::Text && node.inline {
+                        rebuild_span = true;
+                    }
                 }
             }
             Prop::PanActivation(value) => {
@@ -8965,6 +8969,12 @@ impl<M: TextEngine> Core<M> {
                             events.set(EventKind::PressDown, true);
                             events.set(EventKind::PressUp, true);
                         }
+                        // Where it goes (`TextView`'s links), for platforms
+                        // that make it a hyperlink (the web's `<a href>`).
+                        if let Some(href) = child.props.as_ref().and_then(|p| p.href.clone()) {
+                            out.link_hrefs
+                                .push(crate::text::LinkHref::new(out.links.len() as u32, href));
+                        }
                         out.links.push(crate::text::TextLink {
                             start,
                             end: out.len_utf16(),
@@ -11556,10 +11566,12 @@ fn ceil_to_pixel(value: Points, ratio: f32) -> Points {
 fn scroll_extent(l: &taffy::Layout) -> Size<Points> {
     let o = l.scrollable_overflow_rect;
     size_pt(
-        l.size.width.max(l.border.left + o.right + l.padding.right),
+        l.size
+            .width
+            .max(l.border.left + o.right() + l.padding.right),
         l.size
             .height
-            .max(l.border.top + o.bottom + l.padding.bottom),
+            .max(l.border.top + o.bottom() + l.padding.bottom),
     )
 }
 
@@ -11624,10 +11636,17 @@ fn rounded(layout: &taffy::Layout, origin: Origin, ratio: taffy::Size<f32>) -> t
     out.padding.top = span(top, top + layout.padding.top, ry);
     out.padding.bottom = span(bottom - layout.padding.bottom, bottom, ry);
     let o = layout.scrollable_overflow_rect;
-    out.scrollable_overflow_rect.left = points(pixel(x + o.left, rx) - x0, rx);
-    out.scrollable_overflow_rect.right = points(pixel(x + o.right, rx) - x0, rx);
-    out.scrollable_overflow_rect.top = points(pixel(y + o.top, ry) - y0, ry);
-    out.scrollable_overflow_rect.bottom = points(pixel(y + o.bottom, ry) - y0, ry);
+    // Taffy packs the scroll-origin directions into the rectangle's signs;
+    // keep them, and keep the origin inside the rounded rectangle.
+    out.scrollable_overflow_rect = taffy::ScrollableOverflow::new(
+        taffy::Rect {
+            left: points(pixel(x + o.left(), rx) - x0, rx).min(0.0),
+            right: points(pixel(x + o.right(), rx) - x0, rx).max(0.0),
+            top: points(pixel(y + o.top(), ry) - y0, ry).min(0.0),
+            bottom: points(pixel(y + o.bottom(), ry) - y0, ry).max(0.0),
+        },
+        o.is_reversed(),
+    );
     out
 }
 
@@ -11917,7 +11936,7 @@ fn measure_leaf<M: TextEngine>(
         && let Some(LeafContext::Text(cx)) = cx
     {
         use taffy::util::ResolveOrZero;
-        let resolve = |_: *const (), _: f32| 0.0;
+        let resolve = |_: taffy::CalcHandle, _: f32| 0.0;
         let padding = style
             .padding
             .resolve_or_zero(input.parent_size.width, resolve);
@@ -12008,7 +12027,8 @@ fn measure_leaf_size<M: TextEngine>(
         }
         inset
     };
-    taffy::compute_leaf_layout(
+    let image = matches!(cx, Some(LeafContext::Image(_)));
+    let mut output = taffy::compute_leaf_layout(
         input,
         style,
         |_, _| 0.0,
@@ -12019,7 +12039,20 @@ fn measure_leaf_size<M: TextEngine>(
             };
             measure_content(engine, cache, cx, known, available, input_max_height)
         },
-    )
+    );
+    // An image is drawn inside its box whatever its fit (CSS's replaced
+    // elements have no scrollable overflow). Taffy lays a leaf out without
+    // the sizes its style gives it (`RunMode::PerformLayout`), so what was
+    // measured is the natural size: a 24 point icon in a 14 point box
+    // would give the scroll view around it 10 points to scroll.
+    if image {
+        let o = output.scrollable_overflow_rect;
+        let mut rect = o.rect();
+        rect.right = rect.right.min(output.size.width);
+        rect.bottom = rect.bottom.min(output.size.height);
+        output.scrollable_overflow_rect = taffy::ScrollableOverflow::new(rect, o.is_reversed());
+    }
+    output
 }
 
 /// The size of a leaf's content: `known` and `available` are its content

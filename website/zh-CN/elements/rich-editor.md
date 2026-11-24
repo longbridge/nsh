@@ -467,7 +467,7 @@ editor.run(addRowAfter());
 
 Tab 与 Shift-Tab 在单元格之间移动，在最后一个单元格按 Tab 会添加一行。在单元格边缘按方向键会进入相邻单元格；Shift 加方向键，或跨单元格拖动，会选中一个矩形区域的单元格（类型为 `"cell"` 的选区，其 `anchor` 与 `head` 是首尾单元格之前的位置）。Backspace 与 Delete 清空选中的单元格，选中全部单元格时删除整个表格。
 
-在编辑器中，表格是由其单元格组成的网格：每列与其单元格的 `colwidth` 一样宽，没有宽度的列分享剩余空间（至少 `cellMinWidth` 宽），每行至少为其 `height` 高。默认外观来自主题：1 点 `border` 网格线，表头单元格使用 `muted` 背景，单元格带内边距，选中的单元格覆盖一层 `selectedCell` 部件，使用选区颜色。`classes.nodes`（`table`、`tableCell`、`tableHeader`）和这些部件可以重新设置全部外观。在单元格的第一行或最后一行按上下方向键，会进入上方或下方的单元格。
+列宽随单元格中的文字和组件调整。长段落会换行，表格超出编辑器宽度时可以在表格内左右滚动。拖动或保存的列宽优先，每列至少为 `cellMinWidth` 宽，每行至少为保存的 `height` 高。默认外观来自主题：1 点 `border` 网格线，表头单元格使用 `muted` 背景，单元格带内边距，选中的单元格覆盖一层 `selectedCell` 部件，使用选区颜色。`classes.nodes`（`table`、`tableCell`、`tableHeader`）和这些部件可以重新设置全部外观。在单元格的第一行或最后一行按上下方向键，会进入上方或下方的单元格。
 
 文档可编辑时：
 

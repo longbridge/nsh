@@ -418,12 +418,22 @@ impl Dom {
         Ok(())
     }
 
+    /// The live node `id`, or null. Only that node: JS's ids are even and
+    /// index `nodes` halved, so an odd id (a Rust component's node, whose
+    /// late events reach JS once the component no longer has it) would
+    /// otherwise find the JS node one below it.
     fn by_id(&self, id: NodeId) -> *mut NodeData {
-        self.nodes
+        let p = self
+            .nodes
             .borrow()
             .get((id >> 1) as usize)
             .copied()
-            .unwrap_or(ptr::null_mut())
+            .unwrap_or(ptr::null_mut());
+        // SAFETY: a live node's data, read briefly.
+        if p.is_null() || unsafe { (*p).id } != id {
+            return ptr::null_mut();
+        }
+        p
     }
 }
 

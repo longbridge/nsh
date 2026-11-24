@@ -2825,6 +2825,32 @@ const report = (v) => text(String(v));
     }
 
     #[test]
+    fn an_event_for_a_components_node_never_reaches_the_js_node_below_its_id() {
+        // A Rust component's nodes have odd ids; once the component let go
+        // of one (a sheet closed), its late `Dismiss` comes to JS. Node 3 is
+        // not JS's node 2: a closed sheet's dismissal ran the handler of the
+        // page under it and popped that page.
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"import { element, prop } from "nsh:rt";
+            globalThis.view = element("view");
+            prop(globalThis.view, "onPress", () => element("view"));"#,
+        )
+        .unwrap();
+        ops(&host);
+        host.dispatch_event(3, EventKind::Press, &EventPayload::None);
+        host.dispatch_event(3, EventKind::Dismiss, &EventPayload::None);
+        assert!(ops(&host).is_empty());
+        // Its own id still reaches it.
+        host.dispatch_event(2, EventKind::Press, &EventPayload::None);
+        let created = ops(&host)
+            .into_iter()
+            .filter(|op| matches!(op, Op::Create { .. }))
+            .count();
+        assert_eq!(created, 1);
+    }
+
+    #[test]
     fn an_interrupt_inside_find_keeps_the_elements_alive() {
         // An interrupt inside QuickJS's `find` family must not free the
         // arrays' elements (quickjs-ng #1826), or a later call crashes the
