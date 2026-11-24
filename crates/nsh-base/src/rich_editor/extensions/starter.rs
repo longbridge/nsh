@@ -405,27 +405,31 @@ pub mod marks {
         )
     }
 
-    /// Subscript, which excludes superscript.
+    /// Subscript (`<sub>` and `vertical-align: sub`).
     pub fn subscript() -> (String, MarkSpec) {
         (
             "subscript".into(),
             MarkSpec {
                 to_dom: Some(DomOutputSpec::tag("sub").hole()),
-                parse_dom: vec![ParseRule::tag("sub")],
-                excludes: Some("superscript".into()),
+                parse_dom: vec![
+                    ParseRule::tag("sub"),
+                    ParseRule::style("vertical-align=sub"),
+                ],
                 ..Default::default()
             },
         )
     }
 
-    /// Superscript, which excludes subscript.
+    /// Superscript (`<sup>` and `vertical-align: super`).
     pub fn superscript() -> (String, MarkSpec) {
         (
             "superscript".into(),
             MarkSpec {
                 to_dom: Some(DomOutputSpec::tag("sup").hole()),
-                parse_dom: vec![ParseRule::tag("sup")],
-                excludes: Some("subscript".into()),
+                parse_dom: vec![
+                    ParseRule::tag("sup"),
+                    ParseRule::style("vertical-align=super"),
+                ],
                 ..Default::default()
             },
         )

@@ -498,6 +498,12 @@ fn parsed_attrs(target: &Target, dom: &DomElement, attrs: Option<Attrs>) -> Opti
             Some(AttrParse::Skip) => None,
         };
         let Some(raw) = raw else { continue };
+        if let Some(allowed) = &spec.allowed_values {
+            let trimmed = raw.trim();
+            if !allowed.iter().any(|v| v == trimmed) {
+                continue;
+            }
+        }
         let value = match spec.validate {
             Some(kind @ (AttrType::Number | AttrType::Boolean)) => typed_value(kind, &raw),
             _ => Some(value_from_string(&raw)),
