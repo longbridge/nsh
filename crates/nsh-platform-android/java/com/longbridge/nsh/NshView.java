@@ -838,6 +838,12 @@ public class NshView extends FrameLayout {
 
     private float keyboard;
     /**
+     * The keyboard height a modal reported, in pixels, or 0 when none holds it. A dialog is its own window: the
+     * activity's insets never see the keyboard that window raised, so the modal reports it and this stands in for
+     * the activity's until the dialog closes.
+     */
+    private float modalKeyboard;
+    /**
      * Whether the app is in use (`lifecycle()`): its activity's state, 0 resumed (active), 1 paused or started
      * again (inactive: visible without the focus), 2 stopped (background). Active until the activity says otherwise.
      */
@@ -934,7 +940,10 @@ public class NshView extends FrameLayout {
             // bottom safe area under it included).
             ime = Math.min(getHeight(), Math.max(0, keyboardBottom - gapBottom));
         }
-        if (ime != keyboard) {
+        // A modal holding the keyboard owns the inset: this window's own ime is
+        // zero while a dialog has the focus, and reporting that would take the
+        // app's fields back under the keys.
+        if (modalKeyboard == 0 && ime != keyboard) {
             keyboard = ime;
             // Nothing to do when the system pans the window instead.
             int[] at = new int[2];
@@ -954,8 +963,9 @@ public class NshView extends FrameLayout {
         safe = new float[] {top / density, right / density, bottom / density, left / density};
         java.util.Locale locale = hostLocale != null ? hostLocale : java.util.Locale.getDefault();
         float fontScale = hostFontScale > 0 && !Float.isInfinite(hostFontScale) ? hostFontScale : c.fontScale;
+        float reported = modalKeyboard > 0 ? modalKeyboard : ime;
         Native.environment(handle, new float[] {
-            top / density, right / density, bottom / density, left / density, ime / density, (float) keyboardDuration, fontScale,
+            top / density, right / density, bottom / density, left / density, reported / density, (float) keyboardDuration, fontScale,
             android.text.TextUtils.getLayoutDirectionFromLocale(java.util.Locale.getDefault()) == LAYOUT_DIRECTION_RTL ? 1 : 0,
             // "Remove animations" sets the animator scale to 0.
             android.provider.Settings.Global.getFloat(getContext().getContentResolver(),
@@ -981,6 +991,19 @@ public class NshView extends FrameLayout {
         // Screens report their own insets only when their options change, so
         // a page already shown would keep the old safe area.
         if (!java.util.Arrays.equals(previous, safe)) mounter.reportAllScreenInsets();
+    }
+
+    /**
+     * A modal window's keyboard height, in pixels (0 when its keyboard went away).
+     *
+     * A dialog owns its own window and its own insets, so the activity never learns about the keyboard that window
+     * raised. The modal reports it here, and the environment carries it while the dialog is up; {@link
+     * #keyboardFromModal}(0) hands the inset back to the activity.
+     */
+    void keyboardFromModal(int px) {
+        if (modalKeyboard == px) return;
+        modalKeyboard = px;
+        publishEnvironment(getRootWindowInsets());
     }
 
     /** The system's time zone's ID (`localeSettings()`'s `timeZone`). */
