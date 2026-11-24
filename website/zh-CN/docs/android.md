@@ -52,17 +52,14 @@ release APK 中的 `libnsh.so` 不带符号表和调试信息。完整的库位�
 
 ## 上传到 Google Play
 
-`nsh publish android` 把 Android App Bundle（`.aab`）上传到 Google Play 的内部测试轨道（[CLI](./cli.md#nsh-publish-android)）：
+`nsh publish android` 把 Android App Bundle（`.aab`）上传到 Google Play 的内部测试轨道：
 
 ```sh
 export NSH_PLAY_CREDENTIALS=~/keys/play-service-account.json   # 不要提交到仓库
 nsh publish android .nsh/out/App.aab
 ```
 
-每个应用做一次：在 Play Console 中创建应用；在 Google Cloud 中启用 Google Play Android Developer API 并创建服务账号，下载其
-JSON 密钥；在 Play Console 的**用户和权限**中邀请该服务账号的邮箱，并授予发布到测试轨道的权限。应用在 Play Console
-中完成首次发布之前，请加 `--draft`。Bundle 的 version code 必须高于此前上传过的所有版本。发布到内部测试之外的轨道仍在 Play
-Console 中操作。
+Play Console 与服务账号的准备、上传密钥、推进发布和常见错误见[发布到 Google Play](./publish.md#publish-to-google-play)。
 
 ## 嵌入 Android 应用
 
@@ -521,6 +518,7 @@ adb reverse tcp:8790 tcp:8790
 
 ## 另请参阅
 
+- [发布到 Google Play](./publish.md#publish-to-google-play)
 - [用 Rust 开发](./rust.md)
 - [嵌入 iOS 应用](./ios.md)
 - [原生组件](./native-components.md)
