@@ -434,6 +434,10 @@ pub struct AccessibilityNode {
     pub role: Option<AccessibilityRole>,
     /// Its `accessibilityLabel`.
     pub label: Option<String>,
+    /// Its accessible name, the one `role:<role>[<name>]` matches: its
+    /// `accessibilityLabel`, else the texts inside it joined by spaces;
+    /// empty for the root and for a view with neither.
+    pub name: String,
     /// It takes no presses.
     pub disabled: bool,
     /// It is selected.
@@ -445,6 +449,10 @@ pub struct AccessibilityNode {
     /// Its `accessibilityState.pressed`, for a toggle button; `None` when
     /// it is unset.
     pub pressed: Option<nsh_core::Checked>,
+    /// Its `accessibilityState.busy`: it is loading.
+    pub busy: bool,
+    /// Its `accessibilityValue.text`.
+    pub value: Option<String>,
     /// Its `accessibilityLevel`.
     pub level: Option<u32>,
     /// Its `accessibilityDescription`.
@@ -1263,11 +1271,14 @@ impl Screen {
             Some(v) => AccessibilityNode {
                 role: Some(v.role).filter(|r| *r != AccessibilityRole::None),
                 label: v.label.as_deref().map(str::to_owned),
+                name: self.name(id),
                 disabled: v.disabled,
                 selected: v.selected,
                 checked: v.accessibility_state.checked,
                 expanded: v.accessibility_state.expanded,
                 pressed: v.accessibility_state.pressed,
+                busy: v.accessibility_state.busy,
+                value: v.value_text.as_deref().map(str::to_owned),
                 level: v.level,
                 description: v.description.as_deref().map(str::to_owned),
                 children: Vec::new(),
@@ -3718,6 +3729,7 @@ pub(crate) fn protocol_accessibility(n: AccessibilityNode) -> nsh_dev::protocol:
     let mut out = nsh_dev::protocol::AccessibilityNode::default();
     out.role = n.role.map(|r| r.js_name().to_owned());
     out.label = n.label;
+    out.name = n.name;
     out.disabled = n.disabled;
     out.selected = n.selected;
     let name = |c: nsh_core::Checked| {
@@ -3731,6 +3743,8 @@ pub(crate) fn protocol_accessibility(n: AccessibilityNode) -> nsh_dev::protocol:
     out.checked = n.checked.map(name);
     out.expanded = n.expanded;
     out.pressed = n.pressed.map(name);
+    out.busy = n.busy;
+    out.value = n.value;
     out.level = n.level;
     out.description = n.description;
     out.children = n.children.into_iter().map(protocol_accessibility).collect();

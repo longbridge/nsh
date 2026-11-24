@@ -1375,6 +1375,9 @@ pub struct AccessibilityNode {
     /// Its `accessibilityLabel`.
     #[prop(skip_none)]
     pub label: Option<String>,
+    /// Its accessible name, the one `role:<role>[<name>]` matches: its
+    /// `accessibilityLabel`, else the texts inside it.
+    pub name: String,
     /// It takes no presses.
     pub disabled: bool,
     /// It is selected.
@@ -1389,6 +1392,11 @@ pub struct AccessibilityNode {
     /// `"true"`, `"false"` or `"mixed"`; absent when it is unset.
     #[prop(skip_none)]
     pub pressed: Option<String>,
+    /// Its `accessibilityState.busy`: it is loading.
+    pub busy: bool,
+    /// Its `accessibilityValue.text`.
+    #[prop(skip_none)]
+    pub value: Option<String>,
     /// Its `accessibilityLevel`.
     #[prop(skip_none)]
     pub level: Option<u32>,
@@ -1404,11 +1412,14 @@ impl From<nsh_dev::protocol::AccessibilityNode> for AccessibilityNode {
         AccessibilityNode {
             role: n.role,
             label: n.label,
+            name: n.name,
             disabled: n.disabled,
             selected: n.selected,
             checked: n.checked,
             expanded: n.expanded,
             pressed: n.pressed,
+            busy: n.busy,
+            value: n.value,
             level: n.level,
             description: n.description,
             children: n.children.into_iter().map(Self::from).collect(),

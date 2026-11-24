@@ -463,6 +463,9 @@ pub struct AccessibilityNode {
     pub role: Option<String>,
     /// Its `accessibilityLabel`.
     pub label: Option<String>,
+    /// Its accessible name: its label, else the texts inside it.
+    #[serde(default)]
+    pub name: String,
     /// It takes no presses.
     pub disabled: bool,
     /// It is selected.
@@ -474,6 +477,12 @@ pub struct AccessibilityNode {
     /// A toggle button's toggle state (`accessibilityState.pressed`):
     /// `"true"`, `"false"` or `"mixed"`; absent when it is unset.
     pub pressed: Option<String>,
+    /// Its `accessibilityState.busy`.
+    #[serde(default)]
+    pub busy: bool,
+    /// Its `accessibilityValue.text`.
+    #[serde(default)]
+    pub value: Option<String>,
     /// Its `accessibilityLevel`.
     pub level: Option<u32>,
     /// Its `accessibilityDescription`.
