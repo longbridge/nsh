@@ -35,8 +35,10 @@ pub(crate) enum PackageTarget {
     IosSimulator,
     /// Android: a signed `.apk`.
     Android,
-    /// Linux (GTK): a directory with the runner, the bundle and a `.desktop`
-    /// file, and the same as a `.tar.gz`.
+    /// Linux (GTK): a directory with the runner, the bundle, a `.desktop`
+    /// file and AppStream metainfo, and the same as a `.tar.gz`; with
+    /// `--format appimage` also an AppImage, with `--format flatpak` a
+    /// Flatpak manifest (and bundle, with `flatpak-builder`).
     Linux,
     /// macOS (AppKit): a signed `.app` (ad hoc without `--sign`).
     Macos,
@@ -228,6 +230,9 @@ pub(crate) struct AppConfig {
     /// The languages whose data the app ships (checked by the bundler).
     #[serde(default)]
     locales: Option<serde_json::Value>,
+    /// The store listing, read by `nsh publish <store>` (`store.rs`).
+    #[serde(default)]
+    pub(crate) store: Option<serde_json::Value>,
     /// The locales the app ships (`locales`, else its translations'
     /// languages: `nsh_i18n::app_locales`), which Apple packages declare
     /// (`CFBundleLocalizations`) so that system UI shows in them.
@@ -335,6 +340,53 @@ pub(crate) struct AppConfig {
     /// What Android packages set in their manifest.
     #[serde(default)]
     pub(crate) android: AndroidConfig,
+    /// What Linux packages set (`"linux"`): the Flatpak manifest's runtime
+    /// and permissions.
+    #[serde(default)]
+    pub(crate) linux: crate::linux_store::LinuxConfig,
+    /// The identity of Windows' MSIX packages (`msix.rs`) and the app's
+    /// Microsoft Store id (`nsh publish windows`).
+    #[serde(default)]
+    pub(crate) windows: crate::msix::WindowsConfig,
+}
+
+/// The file name of a desktop package's executable: the app's name
+/// without what file names and `Exec=` lines trip on.
+pub(crate) fn executable_name(name: &str) -> String {
+    let executable: String = name.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+    if executable.is_empty() {
+        "App".to_owned()
+    } else {
+        executable
+    }
+}
+
+/// The directory of the app's `nsh.json`.
+pub(crate) fn config_dir(entry: &Path) -> PathBuf {
+    nsh_bundler::app_dir::config_dir_of(entry)
+}
+
+/// The app's Linux `.desktop` entry, with its store categories.
+pub(crate) fn linux_desktop_entry(
+    config: &AppConfig,
+    store: &crate::linux_store::StoreConfig,
+    name: &str,
+    id: &str,
+    executable: &str,
+    icon: bool,
+) -> String {
+    desktop_entry(
+        name,
+        id,
+        executable,
+        icon,
+        &config.schemes,
+        &file_mime_types(&config.file_types()),
+    )
+    .replace(
+        "Categories=Utility;",
+        &crate::linux_store::desktop_categories(store),
+    )
 }
 
 /// `nsh.json` `"android"`.
@@ -1435,6 +1487,12 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
     if !options.abis.is_empty() && options.target != PackageTarget::Android {
         bail!("--abi only applies to --target android");
     }
+    if options.target == PackageTarget::Windows
+        && options.sign.is_some()
+        && options.format != crate::android::Format::Msix
+    {
+        bail!("--sign signs the MSIX package on Windows: add --format msix");
+    }
     if options.arch.is_some() && options.target != PackageTarget::Macos {
         bail!("--arch only applies to --target macos");
     }
@@ -1449,9 +1507,22 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
             bail!("--device is where --run installs the app: add --run");
         }
     }
-    if options.format != crate::android::Format::Apk {
+    if options.format == crate::android::Format::Msix {
+        if options.target != PackageTarget::Windows {
+            bail!("--format msix only applies to --target windows");
+        }
+    } else if options.format.is_linux() {
+        if options.target != PackageTarget::Linux {
+            bail!("--format appimage and flatpak only apply to --target linux");
+        }
+        if options.run {
+            bail!(
+                "--run launches the packaged directory: drop --format, or open the package itself"
+            );
+        }
+    } else if options.format != crate::android::Format::Apk {
         if options.target != PackageTarget::Android {
-            bail!("--format only applies to --target android");
+            bail!("--format aab only applies to --target android");
         }
         if options.run {
             bail!(
@@ -1493,12 +1564,7 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
             "nsh.json links: Linux and Windows open web links in the browser, so the links are left out",
         );
     }
-    let executable: String = name.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
-    let executable = if executable.is_empty() {
-        "App".to_owned()
-    } else {
-        executable
-    };
+    let executable = executable_name(&name);
 
     // Web apps load what `import()` brings in when it is used; native
     // packages are one bundle. A Rust app has none: its runner mounts its
@@ -2002,21 +2068,25 @@ fn package_linux(
     let mut info = desktop_app_json(config, name, id, version);
     info["schemes"] = serde_json::json!(config.schemes);
     fs::write(resources.join("app.json"), info.to_string())?;
+    let store = crate::linux_store::StoreConfig::read(options.entry)?;
     let icon = config.icon(PackageTarget::Linux);
     if let Some(icon) = icon {
-        fs::copy(icon, dir.join(format!("{id}.png")))
-            .with_context(|| format!("copy {}", icon.display()))?;
+        crate::linux_store::write_icon(icon, &dir.join(format!("{id}.png")))?;
     }
     fs::write(
         dir.join(format!("{id}.desktop")),
-        desktop_entry(
-            name,
-            id,
-            executable,
-            icon.is_some(),
-            &config.schemes,
-            &file_mime_types(&config.file_types()),
-        ),
+        linux_desktop_entry(config, &store, name, id, executable, icon.is_some()),
+    )?;
+    let store_app = crate::linux_store::LinuxApp {
+        name,
+        id,
+        executable,
+        version,
+        store: &store,
+    };
+    fs::write(
+        dir.join(format!("{id}.metainfo.xml")),
+        crate::linux_store::metainfo(&store_app),
     )?;
     let archive = options.out.join(format!("{name}.tar.gz"));
     let _ = fs::remove_file(&archive);
@@ -2047,6 +2117,30 @@ fn package_linux(
         ui::path(&dir),
         ui::path(&archive)
     ));
+    match options.format {
+        crate::android::Format::Appimage => {
+            let step = ui::Step::start(format!("making the AppImage of {name}"));
+            let image = crate::linux_store::appimage(&dir, options.out, &store_app)?;
+            step.done(format!("packaged {}", ui::path(&image)));
+        }
+        crate::android::Format::Flatpak => {
+            let step = ui::Step::start(format!("making the Flatpak of {name}"));
+            match crate::linux_store::flatpak(
+                &archive,
+                options.out,
+                &store_app,
+                &config.linux.flatpak,
+                icon.is_some(),
+            )? {
+                Some(bundle) => step.done(format!("packaged {}", ui::path(&bundle))),
+                None => step.done(format!(
+                    "wrote {}",
+                    ui::path(&options.out.join("flatpak").join(format!("{id}.yml")))
+                )),
+            }
+        }
+        _ => {}
+    }
     if options.run {
         let exe = dir.join(executable);
         Command::new(&exe)

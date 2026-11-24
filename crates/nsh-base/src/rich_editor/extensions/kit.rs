@@ -940,6 +940,11 @@ pub fn text_align() -> Extension {
             "defaultAlignment": null,
         }))
         .add_global_attributes(|options| {
+            let alignments = opt_strings(
+                options,
+                "alignments",
+                &["left", "center", "right", "justify"],
+            );
             let mut attr = styled_attr("text-align");
             attr.default = Some(
                 options
@@ -947,6 +952,7 @@ pub fn text_align() -> Extension {
                     .cloned()
                     .unwrap_or(Value::Null),
             );
+            attr.allowed_values = Some(alignments);
             vec![GlobalAttributes::new(
                 opt_strings(options, "types", &["heading", "paragraph"]),
                 vec![("textAlign".into(), attr)],
@@ -1491,6 +1497,52 @@ mod tests {
             .unwrap();
         assert_eq!(ts.attrs()["color"], json!("#0000FF"));
         assert_eq!(ts.attrs()["fontFamily"], json!("serif"));
+    }
+
+    #[test]
+    fn text_align_allowlist_and_sub_sup_styles() {
+        use crate::rich_editor::formats::{DomParser, ParseOptions, doc_to_html};
+        let manager = ExtensionManager::with_core(vec![starter_kit()]).unwrap();
+        let schema = manager.schema().clone();
+        let parser = DomParser::from_schema(&schema);
+
+        // text-align allowlist rejects "start" and CSS injection on both parse and render.
+        let bad_align = schema
+            .node_from_json(&json!({
+                "type": "doc",
+                "content": [{
+                    "type": "paragraph",
+                    "attrs": { "textAlign": "start" },
+                    "content": [{ "type": "text", "text": "Example" }]
+                }]
+            }))
+            .unwrap();
+        assert_eq!(doc_to_html(&bad_align), "<p>Example</p>");
+        let inj_align = schema
+            .node_from_json(&json!({
+                "type": "doc",
+                "content": [{
+                    "type": "paragraph",
+                    "attrs": { "textAlign": "left; position: fixed" },
+                    "content": [{ "type": "text", "text": "Example" }]
+                }]
+            }))
+            .unwrap();
+        assert_eq!(doc_to_html(&inj_align), "<p>Example</p>");
+        let parsed_start = parser.parse(
+            r#"<p style="text-align: start">Example</p>"#,
+            &ParseOptions::default(),
+        );
+        assert_eq!(parsed_start.child(0).attrs()["textAlign"], Value::Null);
+
+        // Subscript / superscript from vertical-align.
+        assert_eq!(
+            doc_to_html(&parser.parse(
+                r#"<p><span style="vertical-align: sub">a</span><span style="vertical-align: super">b</span></p>"#,
+                &ParseOptions::default(),
+            )),
+            "<p><sub>a</sub><sup>b</sup></p>"
+        );
     }
 
     #[test]

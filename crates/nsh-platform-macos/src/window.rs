@@ -1913,7 +1913,10 @@ thread_local! {
 }
 
 /// Whether the app runs in the background: it never activates, and AppKit
-/// gives none of its windows the keyboard.
+/// gives none of its windows the keyboard. Costly: AppKit asks Launch
+/// Services for the policy on every call (a round trip to another process,
+/// 0.5 ms and more), so checks that run per batch ask it last, after
+/// [`background_key`] (only ever set in such an app).
 fn in_background(mtm: MainThreadMarker) -> bool {
     NSApplication::sharedApplication(mtm).activationPolicy()
         == objc2_app_kit::NSApplicationActivationPolicy::Prohibited
@@ -1928,15 +1931,15 @@ fn background_key() -> Option<Retained<NSWindow>> {
 fn app_key_window(mtm: MainThreadMarker) -> Option<Retained<NSWindow>> {
     NSApplication::sharedApplication(mtm)
         .keyWindow()
-        .or_else(|| in_background(mtm).then(background_key).flatten())
+        .or_else(|| background_key().filter(|_| in_background(mtm)))
 }
 
 /// Whether `window` has the keyboard (`WindowState.focused`): it is the
 /// key window, or the one that would be in a background app.
 pub(crate) fn is_key(window: &NSWindow) -> bool {
     window.isKeyWindow()
-        || (in_background(MainThreadMarker::from(window))
-            && background_key().is_some_and(|k| &*k == window))
+        || (background_key().is_some_and(|k| &*k == window)
+            && in_background(MainThreadMarker::from(window)))
 }
 
 /// `window` was made key (shown, focused, pressed). In a background app
@@ -1969,7 +1972,7 @@ pub(crate) fn became_key(surface: &Surface, window: &NSWindow) {
 /// window that would be key, the main window becomes it, as AppKit gives
 /// the keyboard to the next window.
 fn lost_key(surface: &Surface, window: &NSWindow) {
-    if !in_background(surface.mtm) || background_key().as_deref() != Some(window) {
+    if background_key().as_deref() != Some(window) || !in_background(surface.mtm) {
         return;
     }
     BACKGROUND_KEY.with(|k| k.borrow_mut().take());

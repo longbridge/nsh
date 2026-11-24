@@ -22,6 +22,19 @@ window. It runs anywhere Cargo or the CLI runs, including Linux CI machines, and
 The same test, in Rust and in TypeScript: it opens the app with an empty todo list in its storage, types, presses and
 checks what the screen shows.
 
+```tsx tabs
+// App.test.tsx
+import { expect, open, test } from "nsh/test";
+
+test("adds a todo", async () => {
+  const app = await open("./App.tsx", { storage: { todos: "[]" } });
+  await app.type("id:new-todo", "Buy milk");
+  await app.press("text:Add");
+  await app.waitFor("text:Buy milk");
+  expect(app.texts()).toContain("1 item left");
+});
+```
+
 ```rust tabs
 // tests/app/main.rs
 use nsh_engine::{EngineConfig, Root};
@@ -37,19 +50,6 @@ fn adds_a_todo() {
     app.wait_for("text:Buy milk").unwrap();
     assert!(app.screen().texts().contains(&"1 item left"));
 }
-```
-
-```tsx tabs
-// App.test.tsx
-import { expect, open, test } from "nsh/test";
-
-test("adds a todo", async () => {
-  const app = await open("./App.tsx", { storage: { todos: "[]" } });
-  await app.type("id:new-todo", "Buy milk");
-  await app.press("text:Add");
-  await app.waitFor("text:Buy milk");
-  expect(app.texts()).toContain("1 item left");
-});
 ```
 
 ## Tests in Rust with cargo test
@@ -276,6 +276,20 @@ matches fails, so tests never reach the network unasked. A route is a response, 
 returns one (or a promise of one); in Rust, `StubNetwork::new(routes)` takes the same routes, each a `StubResponse` or
 a `StubRoute::Handler`:
 
+```tsx tabs
+const app = await open("./App.tsx", {
+  network: {
+    "GET https://api.example.com/todos": { body: [{ id: 1, title: "Walk" }] },
+    "POST https://api.example.com/todos": (request) => ({ status: 201, body: JSON.parse(request.body!) }),
+    "GET https://api.example.com/todos/*": { status: 404 },
+    "GET https://api.example.com/sync": { error: "offline" },
+    "GET https://api.example.com/slow": { body: "done", delay: 2000 },
+  },
+});
+await app.press("Add");
+expect(app.requests().map((r) => r.method)).toEqual(["GET", "POST"]);
+```
+
 ```rust tabs
 use std::sync::Arc;
 use nsh_engine::{EngineConfig, Root};
@@ -305,20 +319,6 @@ fn adds_a_todo_on_the_server() {
 }
 ```
 
-```tsx tabs
-const app = await open("./App.tsx", {
-  network: {
-    "GET https://api.example.com/todos": { body: [{ id: 1, title: "Walk" }] },
-    "POST https://api.example.com/todos": (request) => ({ status: 201, body: JSON.parse(request.body!) }),
-    "GET https://api.example.com/todos/*": { status: 404 },
-    "GET https://api.example.com/sync": { error: "offline" },
-    "GET https://api.example.com/slow": { body: "done", delay: 2000 },
-  },
-});
-await app.press("Add");
-expect(app.requests().map((r) => r.method)).toEqual(["GET", "POST"]);
-```
-
 | Response member | Default | Description |
 |---|---|---|
 | `status` | 200 | The status code. |
@@ -346,6 +346,13 @@ wait for them. With a manual clock (`EngineConfig::clock` in Rust, `open`'s `clo
 clock whose time moves only as the test moves it, and at once, as with Jest's fake timers or Playwright's
 `page.clock`. `app.clock` is that clock, and `null` when the app runs on the system's:
 
+```tsx tabs
+const app = await open("./App.tsx", { clock: { time: new Date("2026-01-01T09:00:00Z") } });
+await app.type("label:Note", "Milk");
+await app.clock!.runFor(10_000);           // the autosave, ten seconds later
+expect(app.texts()).toContain("Saved at 09:00:10");
+```
+
 ```rust tabs
 use std::time::{Duration, SystemTime};
 use nsh_engine::{Clock, EngineConfig, Root};
@@ -361,13 +368,6 @@ fn autosaves() {
     app.run_for(Duration::from_secs(10)).unwrap(); // the autosave, ten seconds later
     assert!(app.shows("Saved at 09:00:10"));
 }
-```
-
-```tsx tabs
-const app = await open("./App.tsx", { clock: { time: new Date("2026-01-01T09:00:00Z") } });
-await app.type("label:Note", "Milk");
-await app.clock!.runFor(10_000);           // the autosave, ten seconds later
-expect(app.texts()).toContain("Saved at 09:00:10");
 ```
 
 A `StubNetwork` whose responses have a `delay` follows a manual clock with `.with_clock(clock.clone())`. The steps below
@@ -446,7 +446,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `app.enabled(selector)` | Whether the view takes input: neither it nor a view around it is disabled, and an input is not `readonly`. |
 | `app.texts()` | The texts on screen now, in order. |
 | `app.value(selector)` | The text of an input, `null` when none matches. |
-| `app.spanStyle(selector)` | The first matched character’s resolved style, headless and on every `--target`: `color`, optional `backgroundColor`, `fontSize`, `fontWeight`, `italic`, `underline`, and `lineThrough`. Colors are `#rrggbbaa`; sizes are in points. |
+| `app.spanStyle(selector)` | The first matched character’s resolved style, headless and on every `--target`: `color`, optional `backgroundColor`, `fontSize`, `fontWeight`, optional `lineHeight` (absent for the font's natural line height), `letterSpacing`, optional `fontFamily` (the family the app set, as written; absent for the system font), `italic`, `underline`, and `lineThrough`. Colors are `#rrggbbaa`; sizes are in points. |
 | `app.viewStyle(selector)` | The matched view’s style as the app set it, headless and on every `--target`: optional `backgroundColor` (absent when transparent), its own `opacity`, and `effectiveOpacity` (its opacity times every ancestor’s). Colors are `#rrggbbaa`. Returns `null` when nothing matches; reports an error for an ambiguous selector. |
 | `app.layout(selector)` | Where layout placed the matched view, in the root's points: `x`, `y`, `width`, `height`, `hidden` (it or an ancestor has `visibility: hidden`), and `clipped` (an ancestor with `overflow: hidden` or a scroll view cuts part of it). Returns `null` when nothing on screen matches; reports an error for an ambiguous selector. |
 | `app.accessibility(selector?)` | The accessibility tree: views on screen with a `role` or an `accessibilityLabel`, each with `role`, `label`, `disabled`, `selected`, `checked` (`"true"`, `"false"` or `"mixed"`), `expanded`, `pressed` (a toggle button's toggle state: `"true"`, `"false"` or `"mixed"`; omitted when `accessibilityState.pressed` is unset), `level`, `description` and `children`. With a selector, the tree from the matched view (`null` when nothing on screen matches); without, from a root that has no role. |
@@ -488,7 +488,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `await app.window(id).screenshot(path?)` | A picture of the window's content as a `Uint8Array` (PNG), as `app.screenshot` takes of the app's surface, also saved at `path` when given. Only a real platform draws the app. |
 
 A step resolves once the app rendered nothing for 100 ms, no native animation runs that ends by itself and, with
-`--target macos`, no window the app opened still waits to show (2 s at most, for apps that render all the time; on a
+`--target macos` or `linux`, no window the app opened still waits to show (2 s at most, for apps that render all the time; on a
 manual clock, also 2 s of the app's time), so what it changed is on
 screen when the next line runs; use `waitFor` for what comes later (a response, a timer). On a manual clock a step
 does not wait for those 100 ms: it resolves as soon as the app has run everything the step and the clock's time made
@@ -522,6 +522,15 @@ await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISAB
 of that match. Scope queries with `id:note >> text:word` and select repeated matches with `>> nth=0`.
 The query reports an error for a missing, ambiguous or empty span. Updating a span’s `testID` reuses its text
 layout and preserves the `onTextLayout` callback count.
+
+`lineHeight` and `letterSpacing` are resolved against the span’s own font size: `leading-loose` on a 10 pt span reads
+`lineHeight: 20`, `tracking-wide` reads `letterSpacing: 0.25`. `fontFamily` is the family the app asked for
+(`"Inter, sans-serif"` stays a list), not the face the platform falls back to for characters it lacks; a design-system
+test checks the family it set, and a screenshot checks what the platform drew:
+
+```tsx
+expect(app.spanStyle("id:title")).toMatchObject({ fontSize: 20, lineHeight: 28, fontFamily: "Inter" });
+```
 
 The optional second argument of `press` is `PressOptions`: `{ position?: { x: number; y: number } }`. `position` is
 where in the view the press lands, in points from its top left corner; omitting it presses the middle, as before.
@@ -897,18 +906,18 @@ Headless tests check what the runtime renders, and their `id:` selectors find vi
 native UI with the platform's test tools (XCUITest, Espresso / UI Automator, Appium, Maestro), give views a test id:
 `.test_id(…)` in Rust, `testID` in TSX:
 
+```tsx tabs
+<View testID="add-to-cart" onPress={add} style={{ padding: 12 }}>
+  <Text testID="cart-count">{`${count()} items`}</Text>
+</View>
+```
+
 ```rust tabs
 view()
     .test_id("add-to-cart")
     .p_3()
     .on_press(add)
     .child(text(move || format!("{} items", count.get())).test_id("cart-count"))
-```
-
-```tsx tabs
-<View testID="add-to-cart" onPress={add} style={{ padding: 12 }}>
-  <Text testID="cart-count">{`${count()} items`}</Text>
-</View>
 ```
 
 | Platform | Where `testID` goes |

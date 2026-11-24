@@ -36,6 +36,60 @@ pub(crate) fn encode_layer(layer: Option<&ShaderLayer>) -> String {
     }
 }
 
+#[cfg(feature = "rust-parts")]
+thread_local! {
+    /// A Rust app's shader layers that came before the page loaded the
+    /// shader gate, by view: the latest item of each, encoded again once
+    /// the gate ran ([`gate_ran`]). Keyed by whether it is a page's
+    /// transition too: a view may have both.
+    static WAITING: std::cell::RefCell<rustc_hash::FxHashMap<(nsh_core::NodeId, bool), nsh_core::MountItem>> =
+        std::cell::RefCell::default();
+    /// Whether the page was asked for the gate and has not answered yet.
+    static REQUESTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Notes a shader view's layer (`MountItem::Shader`) or a page's
+/// transition (`MountItem::NavShader`) that this runtime cannot encode yet:
+/// a Rust app's runtime splits the shader gate into a side module
+/// (`nsh_feature_shader`), which the page loads the first time the app
+/// shows a shader. The item shows nothing until then ([`gate_ran`]
+/// encodes it again); an item without a layer drops what waited.
+#[cfg(feature = "rust-parts")]
+pub(crate) fn note(item: &nsh_core::MountItem) {
+    use nsh_core::MountItem;
+    if ENCODE.with(|e| e.get()).is_some() {
+        return;
+    }
+    let (key, has_layer) = match item {
+        MountItem::Shader { id, layer } => ((*id, false), layer.is_some()),
+        MountItem::NavShader { id, shader } => ((*id, true), shader.is_some()),
+        _ => return,
+    };
+    WAITING.with(|w| {
+        let mut waiting = w.borrow_mut();
+        if has_layer {
+            waiting.insert(key, item.clone());
+        } else {
+            waiting.remove(&key);
+        }
+    });
+    if has_layer && !REQUESTED.with(|r| r.replace(true)) {
+        crate::ffi::load_data("feature:shader");
+    }
+}
+
+/// The page answered the request for the shader gate ([`note`]): the
+/// items that waited for it, if it ran (none if it did not load, and the
+/// next shader asks again).
+#[cfg(feature = "rust-parts")]
+pub(crate) fn gate_ran() -> Vec<nsh_core::MountItem> {
+    REQUESTED.with(|r| r.set(false));
+    if ENCODE.with(|e| e.get()).is_none() {
+        return Vec::new();
+    }
+    WAITING.with(|w| w.borrow_mut().drain().map(|(_, item)| item).collect())
+}
+
 /// The layer as `nsh.js`'s `op_sh` (and `op_shn`) takes it: `null`, or the
 /// program (its key, its two shaders, the names of its uniform blocks and
 /// of the samplers of the pictures it reads, `[name, input]` with input 0

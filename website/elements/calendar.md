@@ -19,45 +19,6 @@ range's band). The grid fills the width it is given, as a table's columns do: th
 row share the row equally, so a calendar in a phone's sheet spans the screen and one in a popup sized to its content
 keeps its items' widths (`flex-none` in `itemClass` or `monthClass` keeps an item or a month at its own width).
 
-```rust tabs
-use nsh_base::{CalendarEntry, CalendarItemKind, Date, Matcher, calendar};
-use nsh_core::prelude::*;
-
-const MONTHS: [&str; 12] = [
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December",
-];
-const WEEKDAYS: [&str; 7] = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
-
-fn due_date() -> impl IntoElement {
-    let due = signal(Date::default());
-    calendar()
-        .value(move || due.get())
-        .on_change(move |next: &Date| due.set(*next))
-        .disabled_matcher(Matcher::DayOfWeek(vec![0, 6]))
-        .previous_accessibility_label("Previous month")
-        .next_accessibility_label("Next month")
-        .item_class("rounded-md selected:bg-primary selected:text-primary-foreground disabled:opacity-50")
-        .render_item(|item: &CalendarEntry| {
-            let label = match item.kind {
-                CalendarItemKind::Previous => "‹".to_string(),
-                CalendarItemKind::Next => "›".to_string(),
-                CalendarItemKind::Weekday => WEEKDAYS[item.value as usize].to_string(),
-                CalendarItemKind::MonthToggle | CalendarItemKind::Month => {
-                    MONTHS[item.value as usize - 1].to_string()
-                }
-                _ => item.value.to_string(),
-            };
-            view()
-                .w_8()
-                .h_8()
-                .items_center()
-                .justify_center()
-                .child(text(label).text_sm())
-        })
-}
-```
-
 ```tsx tabs
 import { mount, signal, Text } from "nsh";
 import { Calendar, type CalendarValue } from "nsh/base";
@@ -101,6 +62,45 @@ mount(() => (
     <App />
   </Window>
 ));
+```
+
+```rust tabs
+use nsh_base::{CalendarEntry, CalendarItemKind, Date, Matcher, calendar};
+use nsh_core::prelude::*;
+
+const MONTHS: [&str; 12] = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+];
+const WEEKDAYS: [&str; 7] = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+
+fn due_date() -> impl IntoElement {
+    let due = signal(Date::default());
+    calendar()
+        .value(move || due.get())
+        .on_change(move |next: &Date| due.set(*next))
+        .disabled_matcher(Matcher::DayOfWeek(vec![0, 6]))
+        .previous_accessibility_label("Previous month")
+        .next_accessibility_label("Next month")
+        .item_class("rounded-md selected:bg-primary selected:text-primary-foreground disabled:opacity-50")
+        .render_item(|item: &CalendarEntry| {
+            let label = match item.kind {
+                CalendarItemKind::Previous => "‹".to_string(),
+                CalendarItemKind::Next => "›".to_string(),
+                CalendarItemKind::Weekday => WEEKDAYS[item.value as usize].to_string(),
+                CalendarItemKind::MonthToggle | CalendarItemKind::Month => {
+                    MONTHS[item.value as usize - 1].to_string()
+                }
+                _ => item.value.to_string(),
+            };
+            view()
+                .w_8()
+                .h_8()
+                .items_center()
+                .justify_center()
+                .child(text(label).text_sm())
+        })
+}
 ```
 
 `Calendar` comes from [`nsh/base`](../modules/nsh-base.md), the `nsh-base` crate in Rust. In Rust, `calendar()` makes

@@ -1,6 +1,6 @@
 ---
 title: iOS
-description: Run Rust and TSX NSH apps on iOS with UIKit views, in the simulator or on devices, package them as .app and .ipa, and embed them in an existing iOS app with AppView or NativeShell.xcframework's NshAppView.
+description: Run TSX and Rust NSH apps on iOS with UIKit views, in the simulator or on devices, package them as .app and .ipa, and embed them in an existing iOS app with AppView or NativeShell.xcframework's NshAppView.
 order: 11
 group: platforms
 ---

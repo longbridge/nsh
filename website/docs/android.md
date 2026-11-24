@@ -1,6 +1,6 @@
 ---
 title: Android
-description: Run Rust and TSX NSH apps on Android with Android views, on an emulator or a device, package them as an .apk, and embed them in an existing Android app with nsh.aar and NshView.
+description: Run TSX and Rust NSH apps on Android with Android views, on an emulator or a device, package them as an .apk, and embed them in an existing Android app with nsh.aar and NshView.
 order: 12
 group: platforms
 ---
@@ -8,7 +8,7 @@ group: platforms
 # Android
 
 NSH apps run on Android with ordinary Android views and `StaticLayout` text, from Android 8 (API 26), on `arm64-v8a`,
-`armeabi-v7a` and `x86_64`. Whole apps written in Rust and in TSX run and package as on the other platforms, and an existing app
+`armeabi-v7a` and `x86_64`. Whole apps written in TSX and in Rust run and package as on the other platforms, and an existing app
 can embed modules in an `NshView` and load signed packages it downloads, under limits and capabilities it sets. On Android, `os()` is `Os::Android` (`platform.os` is `"android"` in TSX) and TSX's
 `android={{…}}` props apply.
 
@@ -58,14 +58,18 @@ runtime in `symbols/<abi>/libnsh.so` (a Rust app's in `.nsh/rust/android-rust-re
 
 ## Upload to Google Play
 
-`nsh publish android` uploads an Android App Bundle (`.aab`) to Google Play's internal testing track:
+`nsh publish android` uploads an Android App Bundle (`.aab`) to a Google Play track, internal testing unless `--track`
+names another ([CLI](./cli.md#nsh-publish-android)):
 
 ```sh
-export NSH_PLAY_CREDENTIALS=~/keys/play-service-account.json   # never commit it
+export NSH_PLAY_CREDENTIALS=~/keys/play-service-account.json
+nsh publish doctor android
 nsh publish android .nsh/out/App.aab
+nsh publish android --from internal --track production --rollout 0.1
+nsh publish status android --json
 ```
 
-The Play Console and service account setup, the upload key, promoting a release and common errors:
+The Play Console and service account setup, the upload key, tracks, staged rollouts, the store listing and common errors:
 [Publish to Google Play](./publish.md#publish-to-google-play).
 
 ## Embedding in an Android app

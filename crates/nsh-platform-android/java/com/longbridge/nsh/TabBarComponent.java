@@ -53,6 +53,7 @@ final class TabBarComponent implements NshComponent {
     private Integer tint;
     /** The bottom inset the bar reaches under, in px. */
     private int inset;
+    private boolean hidden;
 
     TabBarComponent(Context context, NshComponentContext events, BooleanSupplier night) {
         this.context = context;
@@ -70,7 +71,7 @@ final class TabBarComponent implements NshComponent {
 
     @Override
     public void setProp(String name, Object value) {
-        // `TabBar`'s own props arrive as `$items` and `$selectedIndex`.
+        // `TabBar`'s own props arrive as `$items`, `$selectedIndex` and `$hidden`.
         if (name.startsWith("$")) name = name.substring(1);
         switch (name) {
             case "items":
@@ -82,12 +83,21 @@ final class TabBarComponent implements NshComponent {
                 selected = whole ? ((Number) value).intValue() : 0;
                 select();
                 break;
+            case "hidden":
+                setHidden(Boolean.TRUE.equals(value));
+                break;
             case "tint":
                 setTint(value instanceof String ? argb((String) value) : null);
                 break;
             default:
                 break;
         }
+    }
+
+    private void setHidden(boolean value) {
+        if (hidden == value) return;
+        hidden = value;
+        bar.setVisibility(hidden ? View.GONE : View.VISIBLE);
     }
 
     /** The theme's {@code primary} (null: none, the system's colors; transparent is a color). */
@@ -179,6 +189,7 @@ final class TabBarComponent implements NshComponent {
         @Override
         protected void onLayout(boolean changed, int l, int t, int r, int b) {
             super.onLayout(changed, l, t, r, b);
+            if (hidden) return;
             // Reaching the window's bottom, the bar goes under the
             // navigation bar, taller by its inset, as Material's does.
             int bottom = 0, left = 0, right = 0;

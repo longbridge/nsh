@@ -1,6 +1,6 @@
 ---
 title: Android
-description: 在 Android 上用 Android 视图运行 Rust 和 TSX 编写的 NSH 应用（模拟器或真机），打包成 .apk，并通过 nsh.aar 和 NshView 嵌入现有 Android 应用。
+description: 在 Android 上用 Android 视图运行 TSX 和 Rust 编写的 NSH 应用（模拟器或真机），打包成 .apk，并通过 nsh.aar 和 NshView 嵌入现有 Android 应用。
 order: 12
 group: platforms
 ---
@@ -8,7 +8,7 @@ group: platforms
 # Android
 
 NSH 应用在 Android 上用普通的 Android 视图和 `StaticLayout` 文本运行，要求 Android 8（API 26）及以上，支持 `arm64-v8a`、
-`armeabi-v7a` 和 `x86_64`。用 Rust 和 TSX 编写的完整应用，运行和打包方式与其他平台相同；现有应用也可以在 `NshView` 中嵌入模块，加载它下载的签名包，并按自己设定的限制和能力运行它们。在
+`armeabi-v7a` 和 `x86_64`。用 TSX 和 Rust 编写的完整应用，运行和打包方式与其他平台相同；现有应用也可以在 `NshView` 中嵌入模块，加载它下载的签名包，并按自己设定的限制和能力运行它们。在
 Android 上，`os()` 是 `Os::Android`（TSX 中 `platform.os` 是 `"android"`），TSX 的 `android={{…}}` 属性生效。
 
 ## 环境要求
@@ -52,14 +52,17 @@ release APK 中的 `libnsh.so` 不带符号表和调试信息。完整的库位�
 
 ## 上传到 Google Play
 
-`nsh publish android` 把 Android App Bundle（`.aab`）上传到 Google Play 的内部测试轨道：
+`nsh publish android` 把 Android App Bundle（`.aab`）上传到 Google Play 的某个轨道，未用 `--track` 指定时为内部测试（[CLI](./cli.md#nsh-publish-android)）：
 
 ```sh
-export NSH_PLAY_CREDENTIALS=~/keys/play-service-account.json   # 不要提交到仓库
+export NSH_PLAY_CREDENTIALS=~/keys/play-service-account.json
+nsh publish doctor android
 nsh publish android .nsh/out/App.aab
+nsh publish android --from internal --track production --rollout 0.1
+nsh publish status android --json
 ```
 
-Play Console 与服务账号的准备、上传密钥、推进发布和常见错误见[发布到 Google Play](./publish.md#publish-to-google-play)。
+Play Console 与服务账号的准备、上传密钥、轨道、分阶段发布、商店文案和常见错误见[发布到 Google Play](./publish.md#publish-to-google-play)。
 
 ## 嵌入 Android 应用
 

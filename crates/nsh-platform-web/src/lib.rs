@@ -861,6 +861,19 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
 pub unsafe extern "C" fn nsh_after_gate(ptr: *const u8, len: usize) -> f64 {
     // SAFETY: guaranteed by the caller.
     let gate = unsafe { string(ptr, len) };
+    // A Rust app's shaders that waited for their gate (`shader::note`).
+    #[cfg(feature = "rust-parts")]
+    if gate == "nsh_feature_shader" {
+        let waiting = shader::gate_ran();
+        if !waiting.is_empty() {
+            let mut out = encode::Out::new();
+            for item in &waiting {
+                encode::encode(&mut out, item);
+            }
+            ffi::submit(&out.finish());
+        }
+        return pump();
+    }
     let running = APP.with(|a| a.borrow().is_some());
     if !running {
         return pump();

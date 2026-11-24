@@ -1,6 +1,6 @@
 ---
 title: GPUI
-description: 用 AppView 把 Rust 和 TSX 编写的 NSH 应用嵌入 GPUI 或 GPUI Kit 应用，在 macOS、Windows 和 Linux 上由 GPUI 绘制，在 GPUI 开发宿主中试用 TSX 应用，以及 GPUI 后端的不同之处。
+description: 用 AppView 把 TSX 和 Rust 编写的 NSH 应用嵌入 GPUI 或 GPUI Kit 应用，在 macOS、Windows 和 Linux 上由 GPUI 绘制，在 GPUI 开发宿主中试用 TSX 应用，以及 GPUI 后端的不同之处。
 order: 15.5
 group: platforms
 ---

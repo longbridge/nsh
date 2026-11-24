@@ -211,6 +211,7 @@ final class SelectableView implements SelectionHandle.Owner {
         if (mounter.selectedArea != null && mounter.selectedArea != this) mounter.selectedArea.clear();
         mounter.selectedArea = this;
         mounter.keepSelection();
+        mounter.updateBack();
         observer = view.getViewTreeObserver();
         observer.addOnPreDrawListener(follow);
         return true;
@@ -234,7 +235,10 @@ final class SelectableView implements SelectionHandle.Owner {
         }
         if (observer != null && observer.isAlive()) observer.removeOnPreDrawListener(follow);
         observer = null;
-        if (mounter.selectedArea == this) mounter.selectedArea = null;
+        if (mounter.selectedArea == this) {
+            mounter.selectedArea = null;
+            mounter.updateBack();
+        }
         Native.keepRendered(mounter.handle(), new int[0]);
         android.view.ActionMode m = mode;
         mode = null;

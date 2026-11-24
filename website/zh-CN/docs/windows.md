@@ -1,6 +1,6 @@
 ---
 title: Windows
-description: 在 Windows 上用 Direct2D 绘制的 Win32 窗口运行 Rust 和 TSX 编写的 NSH 应用、打包应用、用 AppView 嵌入 Win32 应用，以及 Windows 上的差异。
+description: 在 Windows 上用 Direct2D 绘制的 Win32 窗口运行 TSX 和 Rust 编写的 NSH 应用、打包应用、用 AppView 嵌入 Win32 应用，以及 Windows 上的差异。
 order: 14
 group: platforms
 ---

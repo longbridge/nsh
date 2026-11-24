@@ -1,6 +1,6 @@
 ---
 title: Web
-description: 用 Rust 或 TSX 和 Native Shell 组件构建 HTML 和 CSS 界面，在浏览器里开发 Web 应用，并发布到任意静态托管服务或 CDN。
+description: 用 TSX 或 Rust 和 Native Shell 组件构建 HTML 和 CSS 界面，在浏览器里开发 Web 应用，并发布到任意静态托管服务或 CDN。
 order: 16
 group: platforms
 demo: counter

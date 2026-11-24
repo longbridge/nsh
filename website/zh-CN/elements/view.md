@@ -10,38 +10,6 @@ demo: el-view
 
 `View` 是每个界面的基本构件：一个原生容器（iOS 和 Mac Catalyst 上是 UIView，Android 上是 ViewGroup），用 flexbox 或 grid 布局子元素，绘制背景、边框、阴影和渐变，并处理按压。按钮、卡片、列表行和整个界面都是 view。Rust 用 `view()` 创建，TSX 用从 `nsh` 导入的 `<View>`。
 
-```rust tabs
-use nsh_core::prelude::*;
-
-fn app() -> impl IntoElement {
-    let liked = signal(false);
-    view()
-        .flex_1()
-        .p_6()
-        .gap_4()
-        .bg(rgb(0xf6f8fa))
-        .child(
-            view()
-                .flex_row()
-                .items_center()
-                .gap_3()
-                .p_4()
-                .rounded(px(16.0))
-                .bg(white())
-                .shadow_md()
-                .child(view().size(px(40.0)).rounded_full().bg(rgb(0x8250df)))
-                .child(text("一张卡片").flex_1().text_base())
-                .child(
-                    view()
-                        .hit_slop(EdgeInsets::all(px(8.0)))
-                        .active(|s| s.opacity(0.5))
-                        .on_press(move || liked.update(|l| *l = !*l))
-                        .child(text(move || if liked.get() { "♥" } else { "♡" }).text_size(px(22.0))),
-                ),
-        )
-}
-```
-
 ```tsx tabs
 import { mount, signal, Text, View } from "nsh";
 import { Window } from "nsh/desktop";
@@ -78,6 +46,38 @@ mount(() => (
 ));
 ```
 
+```rust tabs
+use nsh_core::prelude::*;
+
+fn app() -> impl IntoElement {
+    let liked = signal(false);
+    view()
+        .flex_1()
+        .p_6()
+        .gap_4()
+        .bg(rgb(0xf6f8fa))
+        .child(
+            view()
+                .flex_row()
+                .items_center()
+                .gap_3()
+                .p_4()
+                .rounded(px(16.0))
+                .bg(white())
+                .shadow_md()
+                .child(view().size(px(40.0)).rounded_full().bg(rgb(0x8250df)))
+                .child(text("一张卡片").flex_1().text_base())
+                .child(
+                    view()
+                        .hit_slop(EdgeInsets::all(px(8.0)))
+                        .active(|s| s.opacity(0.5))
+                        .on_press(move || liked.update(|l| *l = !*l))
+                        .child(text(move || if liked.get() { "♥" } else { "♡" }).text_size(px(22.0))),
+                ),
+        )
+}
+```
+
 ## 布局
 
 view 用 flexbox 布局子元素，默认值为：`flexDirection: "column"`、`flexShrink: 0`、`alignContent: "flex-start"`、`position: "relative"`。`display: "grid"`（Rust 中为 `.grid()`）切换为 CSS grid，`display: "block"` 切换为块布局。尺寸单位是点。参见[布局](../docs/layout.md)和[样式参考](../modules/style-reference.md)。
@@ -103,6 +103,19 @@ view 用 flexbox 布局子元素，默认值为：`flexDirection: "column"`、`f
 
 带有按压处理函数的 view 就是可按压的。它的反馈由应用决定：按下时的样式，在手指按下期间于原生侧生效，不经过应用代码。`hoverStyle`、`focusStyle` 和 `disabledStyle` 对其他状态同样如此：
 
+```tsx tabs
+// 整个视图淡化。
+<View onPress={open} activeStyle={{ opacity: 0.6 }}>…</View>
+
+// 显示背景色；group-active: 设置子元素的样式。
+<View onPress={open} class="group" activeStyle={{ backgroundColor: "#e5e7eb" }}>
+  <Text class="group-active:opacity-70">打开</Text>
+</View>
+
+// 用 active: 类在按下时改变任意样式。
+<View onPress={open} class="bg-blue-600 active:bg-blue-800 active:scale-95">…</View>
+```
+
 ```rust tabs
 // 整个视图淡化。
 view().on_press(open).active(|s| s.opacity(0.6))
@@ -118,22 +131,13 @@ view()
 view().on_press(open).bg(rgb(0x2563eb)).active(|s| s.bg(rgb(0x1e40af)).scale(0.95))
 ```
 
-```tsx tabs
-// 整个视图淡化。
-<View onPress={open} activeStyle={{ opacity: 0.6 }}>…</View>
-
-// 显示背景色；group-active: 设置子元素的样式。
-<View onPress={open} class="group" activeStyle={{ backgroundColor: "#e5e7eb" }}>
-  <Text class="group-active:opacity-70">打开</Text>
-</View>
-
-// 用 active: 类在按下时改变任意样式。
-<View onPress={open} class="bg-blue-600 active:bg-blue-800 active:scale-95">…</View>
-```
-
 在 Android 上，`android={{ ripple: { color: "#0000001f" } }}`（Rust 中为 `.ripple(Ripple { .. })`）会加上 Material 水波纹（可用 `borderless`、`radius` 和 `foreground` 调整）。
 
 `disabled` 会从原生视图上移除按压监听（既不响应按压，也没有反馈），并应用禁用状态的样式：
+
+```tsx tabs
+<View onPress={submit} disabled={!valid()} class="bg-green-600 disabled:opacity-40">…</View>
+```
 
 ```rust tabs
 view()
@@ -141,10 +145,6 @@ view()
     .disabled(move || !valid.get())
     .bg(rgb(0x16a34a))
     .disabled_style(|s| s.opacity(0.4))
-```
-
-```tsx tabs
-<View onPress={submit} disabled={!valid()} class="bg-green-600 disabled:opacity-40">…</View>
 ```
 
 ## 事件
@@ -184,26 +184,6 @@ view()
 
 在 Android 上，带有 `onFileDrop` 的视图接收其他应用在分屏或自由窗口中拖入的文件，例如从相册拖来的照片、从文件管理器拖来的文档。按与触摸相同的命中规则，由最近的监听视图接收。与 iOS 一样，Android 只在松手时才开放拖动数据：`onFileDragEnter` 给出 `uris: []`，`onFileDrop` 给出复制到应用缓存目录里的文件的 `file:` URL（文件名取提供方应用给的名字，名字没有扩展名时按类型补上），顺序与拖动项一致，并带 `pagePosition`；之后视图收到 `onFileDragLeave`。NSH 不删除这些副本，由系统适时清理缓存目录：应用要保留的文件请自行移走或上传。只带文字或链接的拖动不是文件拖动，仍交给文本输入框；视图里的文本输入框上方拖动的文件交给该视图。
 
-```rust tabs
-let hint = signal(String::new());
-let files = signal(Vec::<String>::new());
-
-view()
-    .min_h(px(160.0))
-    .p_6()
-    .on_file_drag_enter(move |event: &FileDragEvent| {
-        let images = event.mime_types.iter().filter(|t| t.starts_with("image/")).count();
-        hint.set(format!("松开添加 {images} 张图片（共 {} 个文件）", event.uris.len()));
-    })
-    .on_file_drag_leave(move || hint.set(String::new()))
-    .on_file_drop(move |event: &FileDropEvent| {
-        files.set(event.uris.clone());
-        hint.set(String::new());
-    })
-    .child(text(move || if hint.get().is_empty() { "将文件拖到这里".into() } else { hint.get() }))
-    .child(text(move || files.get().join("\n")))
-```
-
 ```tsx tabs
 const hint = signal("");
 const files = signal<string[]>([]);
@@ -223,6 +203,26 @@ const files = signal<string[]>([]);
   <Text>{hint() || "将文件拖到这里"}</Text>
   <Text>{files().join("\n")}</Text>
 </View>
+```
+
+```rust tabs
+let hint = signal(String::new());
+let files = signal(Vec::<String>::new());
+
+view()
+    .min_h(px(160.0))
+    .p_6()
+    .on_file_drag_enter(move |event: &FileDragEvent| {
+        let images = event.mime_types.iter().filter(|t| t.starts_with("image/")).count();
+        hint.set(format!("松开添加 {images} 张图片（共 {} 个文件）", event.uris.len()));
+    })
+    .on_file_drag_leave(move || hint.set(String::new()))
+    .on_file_drop(move |event: &FileDropEvent| {
+        files.set(event.uris.clone());
+        hint.set(String::new());
+    })
+    .child(text(move || if hint.get().is_empty() { "将文件拖到这里".into() } else { hint.get() }))
+    .child(text(move || files.get().join("\n")))
 ```
 
 最近的、已启用且监听 `onFileDrop` 的祖先视图接收文件，搜索范围止于模态根节点。`disabled` 会移除文件拖入、离开和放下的监听；离开、取消、完成或移除目标会清除当前拖放状态。原生侧根据已挂载的状态同步接受 Copy 操作。应用决定如何读取、打开或传输收到的文件。

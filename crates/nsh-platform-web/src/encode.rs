@@ -1395,6 +1395,8 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
             out.item("shi").num(*id).end();
         }
         MountItem::NavShader { id, shader } => {
+            #[cfg(feature = "rust-parts")]
+            crate::shader::note(item);
             let layer = shader.as_ref().map(|s| &*s.layer);
             let ms = shader
                 .as_ref()
@@ -1406,6 +1408,8 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 .end();
         }
         MountItem::Shader { id, layer } => {
+            #[cfg(feature = "rust-parts")]
+            crate::shader::note(item);
             out.item("sh")
                 .num(*id)
                 .raw(&crate::shader::encode_layer(layer.as_deref()))
