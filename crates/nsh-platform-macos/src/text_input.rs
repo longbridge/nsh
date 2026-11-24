@@ -357,6 +357,10 @@ pub(crate) struct InputState {
     editing: Cell<bool>,
     /// A field is taking the focus.
     focusing: Cell<bool>,
+    /// `config` is restyling a field. A new placeholder makes AppKit end
+    /// editing and start it again in the same field (#3028): that end is
+    /// not a blur.
+    restyling: Cell<bool>,
     /// The modifiers of the key a text view is handling (its commands do
     /// not say which were held).
     key_mods: Cell<NSEventModifierFlags>,
@@ -1117,9 +1121,15 @@ macro_rules! define_field {
                     // SAFETY: NSTextField's own handling of its field
                     // editor's end (it implements NSTextDelegate).
                     let _: () = unsafe { msg_send![super(self), textDidEndEditing: notification] };
-                    if let Some(cx) = self.ivars().get() {
-                        cx.focus_changed(false);
+                    let Some(cx) = self.ivars().get() else {
+                        return;
+                    };
+                    // A restyle restarts editing without a new
+                    // `becomeFirstResponder`: the field keeps the focus.
+                    if cx.input.upgrade().is_some_and(|input| input.restyling.get()) {
+                        return;
                     }
+                    cx.focus_changed(false);
                 }
 
                 #[unsafe(method(textView:shouldChangeTextInRange:replacementString:))]
@@ -2358,6 +2368,7 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
             pending_value: RefCell::new(None),
             editing: Cell::new(false),
             focusing: Cell::new(false),
+            restyling: Cell::new(false),
             key_mods: Cell::new(NSEventModifierFlags::empty()),
             anim_color: Cell::new(None),
             cx,
@@ -2714,12 +2725,27 @@ pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig
     };
     match &editor {
         Editor::Line { field, .. } => {
+            let editing = field.currentEditor().is_some();
+            input.restyling.set(true);
             field.setFont(Some(&font));
             field.setTextColor(Some(&color));
             field.setAlignment(align);
             field.setBaseWritingDirection(direction);
             field.setEditable(config.editable);
-            field.setPlaceholderAttributedString(Some(&placeholder(config, &font, align)));
+            // Setting a placeholder on a field being edited ends editing
+            // and starts it again; only a changed one is set.
+            let hint = placeholder(config, &font, align);
+            if field
+                .placeholderAttributedString()
+                .is_none_or(|old| !old.isEqualToAttributedString(&hint))
+            {
+                field.setPlaceholderAttributedString(Some(&hint));
+            }
+            input.restyling.set(false);
+            if editing && field.currentEditor().is_none() {
+                // Editing did not start again: the focus left after all.
+                input.cx.focus_changed(false);
+            }
             if let Some(editor) = field.currentEditor() {
                 editor.setFont(Some(&font));
                 editor.setTextColor(Some(&color));
