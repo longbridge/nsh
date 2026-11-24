@@ -134,6 +134,7 @@ final class Mounter {
         float headerHeight;
         /** `headerTitleAlign` "center". */
         boolean centerTitle;
+        boolean hidesBottomBar;
     }
 
     /** Properties that animations can override, as last set by a style. */
@@ -361,6 +362,9 @@ final class Mounter {
     /** Stacks and shown modals, oldest first (the back button tries the newest). */
     private final java.util.ArrayList<StackBox> stacks = new java.util.ArrayList<>();
     private final java.util.ArrayList<ModalHost> shownModals = new java.util.ArrayList<>();
+
+    /** Re-syncs the tab bars when stacks, screens, or their visibility changed in a batch. */
+    private boolean bottomBarDirty;
 
     /** The surface root (node 1). */
     final Box root;
@@ -1028,6 +1032,7 @@ final class Mounter {
             return;
         }
         ((ComponentBox) v).attach(factory.create(new NshComponentContext(host, id)));
+        if (((ComponentBox) v).component instanceof TabBarComponent) bottomBarDirty = true;
     }
 
     private static ViewGroup container(View parent) {
@@ -1239,6 +1244,7 @@ final class Mounter {
             return;
         }
         Box.Frame f = Box.frame(v);
+        boolean wasEmpty = f.right <= f.left || f.bottom <= f.top;
         Transition t = layoutAnimation != null ? layoutAnimation[1] : null;
         // A view never placed has no frame to move from; one placed zero
         // high (a collapsed reveal) or zero wide grows from it, as on iOS.
@@ -1270,6 +1276,7 @@ final class Mounter {
             f.bottom = to[3];
             Box.place(v);
         }
+        if (!stacks.isEmpty() && wasEmpty != (to[2] <= to[0] || to[3] <= to[1])) bottomBarDirty = true;
         if (v instanceof ImageBox) loadImage((ImageBox) v);
     }
 
@@ -1341,6 +1348,7 @@ final class Mounter {
             decor.originYFraction = originYFraction;
             decor.backfaceHidden = backfaceHidden;
             decor.clipPath = hasClip ? clip : null;
+            if (!stacks.isEmpty() && decor.hidden != fx.hidden) bottomBarDirty = true;
             decor.hidden = fx.hidden;
             decor.boxShadows = fx.shadows;
             decor.boxShadowColors = fx.shadowColors;
@@ -2136,10 +2144,12 @@ final class Mounter {
         o.headerHeight = b.getFloat();
         o.backTitle = string(objects, b.getInt());
         o.centerTitle = b.getInt() == 1;
+        o.hidesBottomBar = b.getInt() != 0;
         screenOptions.put(id, o);
         dirtyScreens.add(id);
         int stack = hosts.get(id, -1);
         if (stack >= 0) dirtyStacks.add(stack);
+        bottomBarDirty = true;
     }
 
     private static int skip(ByteBuffer b) {
@@ -2155,14 +2165,18 @@ final class Mounter {
                 StackBox stack = (StackBox) v;
                 for (int s : stack.screens) {
                     dirtyScreens.add(s);
-                    // The transition reads each screen's animation: a screen
-                    // mounted in this batch is configured only below, so give
-                    // it its option before the stack animates it in.
+                    // The transition reads each screen's animation and hidesBottomBar:
+                    // a screen mounted in this batch is configured only below, so give
+                    // it its options before the stack reconciles and animates it in.
                     View sv = views.get(s);
                     ScreenOptions so = screenOptions.get(s);
-                    if (sv instanceof StackBox.ScreenBox && so != null) ((StackBox.ScreenBox) sv).animation = so.animation;
+                    if (sv instanceof StackBox.ScreenBox && so != null) {
+                        ((StackBox.ScreenBox) sv).animation = so.animation;
+                        ((StackBox.ScreenBox) sv).hidesBottomBar = so.hidesBottomBar;
+                    }
                 }
                 stack.reconcile();
+                bottomBarDirty = true;
             }
         }
         dirtyStacks.clear();
@@ -2177,7 +2191,7 @@ final class Mounter {
             ScreenOptions below = canGoBack ? screenOptions.get(((StackBox) stack).screens.get(index - 1)) : null;
             ((StackBox.ScreenBox) v).configure(this, o.title, o.shown, o.transparent, o.tint, o.background,
                     o.titleColor, o.backVisible, o.gesture, o.preventBack, o.animation, o.left, o.right, o.titleView,
-                    o.headerHeight, o.centerTitle, canGoBack, below != null ? below.backTitle : null);
+                    o.headerHeight, o.centerTitle, o.hidesBottomBar, canGoBack, below != null ? below.backTitle : null);
             reportScreenInsets(id, o);
         }
         dirtyScreens.clear();
@@ -2195,6 +2209,10 @@ final class Mounter {
             }
         }
         dirtyModals.clear();
+        if (bottomBarDirty) {
+            bottomBarDirty = false;
+            for (StackBox s : stacks) s.syncBottomBar(false);
+        }
         updateBack();
     }
 
