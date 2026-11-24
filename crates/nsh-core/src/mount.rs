@@ -640,6 +640,9 @@ pub struct InputConfig {
     pub submit_behavior: Option<SubmitBehavior>,
     /// What a paste does (`pasteBehavior`).
     pub paste_behavior: PasteBehavior,
+    /// The largest pasted file read, in bytes (`pasteMaxSize`): a larger
+    /// one goes to [`crate::PasteEvent::too_large`] unread. `None`: all.
+    pub paste_max_size: Option<u64>,
     /// Focus once on screen.
     pub auto_focus: bool,
     /// Select the whole text when the input takes the focus
@@ -718,6 +721,7 @@ impl Default for InputConfig {
             blur_on_submit: true,
             submit_behavior: None,
             paste_behavior: PasteBehavior::Insert,
+            paste_max_size: None,
             auto_focus: false,
             select_text_on_focus: false,
             selection_color: None,

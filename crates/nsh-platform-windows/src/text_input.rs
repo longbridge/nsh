@@ -1043,6 +1043,8 @@ impl InputState {
                 let list = dc.CreateCommandList().ok()?;
                 dc.SetTarget(&list);
                 dc.SetDpi(96.0 * s, 96.0 * s);
+                let params = cx.dc.GetTextRenderingParams().ok();
+                dc.SetTextRenderingParams(params.as_ref());
                 dc.BeginDraw();
                 // RichEdit draws its client pixels in units of GDI's DPI,
                 // not the target's: scaled to the target's (nothing on a
@@ -1187,7 +1189,17 @@ impl Hosted for InputState {
                 );
             }
         }
+        let indicator = multiline && config.scrollbar_visible;
         drop(config);
+        if indicator {
+            // RichEdit has no window of its own: the `WS_VSCROLL` bar it
+            // keeps the range of is never drawn, so the field draws the
+            // platform's indicator over its text, as a scroll view does.
+            let (min, max, pos, page) = e.vscroll();
+            if let Some((x, y, bw, bh)) = indicator_thumb((w, h), min, max, pos, page, cx.scale) {
+                crate::scroll::draw_knob(cx, x, y, bw, bh, 1.0);
+            }
+        }
         cx.pop();
     }
 
@@ -1271,6 +1283,40 @@ fn copy_face_name(dst: &mut [u16; 32], face: &str) {
 #[cfg(test)]
 fn family(name: Option<&str>) -> String {
     crate::text::resolve_family(name, 400, false).gdi_name
+}
+
+/// Where a multiline field of `size` points draws its scroll indicator's
+/// thumb, from RichEdit's vertical range (`min..max`, position `pos` and
+/// page `page`, in pixels at `scale`); `None` when all the text fits.
+fn indicator_thumb(
+    size: (f32, f32),
+    min: i32,
+    max: i32,
+    pos: i32,
+    page: i32,
+    scale: f32,
+) -> Option<(f32, f32, f32, f32)> {
+    use nsh_core::scroll::INDICATOR_THICK;
+    const MARGIN: f32 = 2.0;
+    const MIN_THUMB: f32 = 20.0;
+    let (w, h) = size;
+    let s = scale.max(0.01);
+    let content = (max - min) as f32 / s;
+    let viewport = if page > 0 { page as f32 / s } else { h };
+    if content <= viewport + 0.5 || h <= 2.0 * MARGIN {
+        return None;
+    }
+    let track = h - 2.0 * MARGIN;
+    let thumb = (track * viewport / content).clamp(MIN_THUMB.min(track), track);
+    let travel = (content - viewport).max(1.0);
+    let at = ((pos - min) as f32 / s / travel).clamp(0.0, 1.0);
+    let thick = INDICATOR_THICK.0;
+    Some((
+        w - thick - MARGIN,
+        MARGIN + (track - thumb) * at,
+        thick,
+        thumb,
+    ))
 }
 
 fn scroll_flags(config: &InputConfig) -> u32 {
@@ -2637,6 +2683,20 @@ mod blink {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn indicator_thumb_follows_the_text_scroll() {
+        // All the text fits: no thumb.
+        assert_eq!(indicator_thumb((100.0, 50.0), 0, 50, 0, 50, 1.0), None);
+        // 4 pages of text at 175%: a quarter of the track, at the top, then at the bottom.
+        let s = 1.75;
+        let page = (50.0 * s) as i32;
+        let max = page * 4;
+        let (x, y, _, h) = indicator_thumb((100.0, 50.0), 0, max, 0, page, s).unwrap();
+        assert!(x > 90.0 && (y - 2.0).abs() < 0.01 && (h - 20.0).abs() < 0.5);
+        let (_, y, _, h) = indicator_thumb((100.0, 50.0), 0, max, max - page, page, s).unwrap();
+        assert!((y + h - 48.0).abs() < 0.01);
+    }
 
     #[test]
     fn multiline_scrollbars_have_native_overflow_ranges() {

@@ -46,13 +46,14 @@ impl Manifest {
     pub(crate) fn read(dir: &Path, what: &str) -> anyhow::Result<Self> {
         let cargo = dir.join("Cargo.toml");
         let cargo = cargo.is_file().then_some(cargo);
-        let config: Option<serde_json::Value> = match fs::read_to_string(dir.join("nsh.json")) {
-            Ok(text) => Some(
-                serde_json::from_str(&text)
-                    .with_context(|| format!("{what}: nsh.json is not JSON"))?,
-            ),
-            Err(_) => None,
-        };
+        let config: Option<serde_json::Value> =
+            match nsh_bundler::app_dir::read(&dir.join("nsh.json")) {
+                Ok(text) => Some(
+                    serde_json::from_str(&text)
+                        .with_context(|| format!("{what}: nsh.json is not JSON"))?,
+                ),
+                Err(_) => None,
+            };
         let config = config.filter(|c| {
             cargo.is_none() || c.get("exports").is_some() || c.get("platform").is_some()
         });

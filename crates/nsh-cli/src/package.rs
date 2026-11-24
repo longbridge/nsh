@@ -243,6 +243,9 @@ pub(crate) struct AppConfig {
     /// Terminal layout options.
     #[serde(default)]
     pub(crate) tui: TuiConfig,
+    /// What the development watcher skips.
+    #[serde(default)]
+    pub(crate) watch: WatchConfig,
     /// URL schemes that open the app (`"myapp"`: `myapp://...`), which
     /// packages register with the system; the app hears them through
     /// `UrlScheme.on("open", ...)`. [`read_config`] checks them and lowers
@@ -442,6 +445,18 @@ pub(crate) fn android_permission(name: &str, at: &str) -> anyhow::Result<String>
 pub(crate) struct TuiConfig {
     /// Width and height of one Cell in points (`8x16` by default).
     pub(crate) points_per_cell: Option<String>,
+}
+
+/// `nsh.json` `"watch"`: what `nsh run` and `nsh dev` leave out of the
+/// watcher ([`crate::dev`], [`crate::rust_app`]).
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct WatchConfig {
+    /// Directories whose file events the watcher skips: paths relative to
+    /// `nsh.json` (`"vendor"`, `"third/jpeg-turbo"`), absolute ones as they
+    /// are. One inside the watch (the app's directory, a crate's) that
+    /// holds generated code or another checkout is the usual one.
+    #[serde(default)]
+    pub(crate) ignore: Vec<String>,
 }
 
 impl AppConfig {
@@ -911,7 +926,7 @@ impl AppConfig {
 /// both, before a build fails on what the other version lacks.
 pub(crate) fn check_nsh_version(entry: &Path) -> anyhow::Result<()> {
     let path = nsh_bundler::app_dir::config_dir_of(entry).join("nsh.json");
-    let Ok(text) = fs::read_to_string(&path) else {
+    let Ok(text) = nsh_bundler::app_dir::read(&path) else {
         return Ok(());
     };
     // A file that does not read is reported by the command itself.
@@ -952,7 +967,7 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
     let config_dir = nsh_bundler::app_dir::config_dir_of(entry);
     let dir = config_dir.as_path();
     let path = dir.join("nsh.json");
-    let Ok(text) = fs::read_to_string(&path) else {
+    let Ok(text) = nsh_bundler::app_dir::read(&path) else {
         return Ok(AppConfig {
             localizations: app_localizations(dir, None),
             ..AppConfig::default()
@@ -2962,6 +2977,23 @@ fn make_ipa(app: &Path, ipa: &Path) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `watch.ignore` reads as the watcher's skip list; without it there
+    /// is nothing to skip.
+    #[test]
+    fn watch_ignore_is_read_from_nsh_json() {
+        let (config, ignored) = parse_config(
+            r#"{
+                "watch": { "ignore": ["vendor", "third/jpeg-turbo"] }
+            }"#,
+        )
+        .unwrap();
+        assert!(ignored.is_empty(), "{ignored:?}");
+        assert_eq!(config.watch.ignore, ["vendor", "third/jpeg-turbo"]);
+        let (config, ignored) = parse_config("{}").unwrap();
+        assert!(ignored.is_empty(), "{ignored:?}");
+        assert!(config.watch.ignore.is_empty());
+    }
 
     /// Without `ios.launchScreen` the launch screen is the system's
     /// background; with it `UILaunchScreen` names the catalog's color and

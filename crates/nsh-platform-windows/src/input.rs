@@ -153,6 +153,7 @@ impl Modifiers {
             alt: self.alt,
             shift: self.shift,
             cmd: self.meta,
+            alt_graph: false,
         }
     }
 }
@@ -1722,6 +1723,15 @@ fn down(
         _ => {
             if let Some(target) = crate::keyboard::focus_target(surface, &hit.view) {
                 crate::keyboard::focus_pointer(surface, &target);
+            } else if let Some(field) = crate::text_input::focused(surface)
+                && crate::app_window::window_of(surface, &field)
+                    == crate::app_window::window_of(surface, &hit.view)
+            {
+                // A press on no stop (blank space) leaves the field of its
+                // window, as one on a stop does: the field is drawn here,
+                // not a system control that would lose the focus to the
+                // click itself.
+                crate::text_input::blur(&field);
             }
         }
     }
@@ -3042,6 +3052,59 @@ mod tests {
         assert_eq!(pressed(10.0), Some(4));
         // A field that does not listen: the row around it is not pressed.
         assert_eq!(pressed(60.0), None);
+    }
+
+    /// A click on blank space (no stop of the keyboard focus) blurs the
+    /// field that has the focus; a click on the field keeps it.
+    #[test]
+    fn a_click_on_blank_space_blurs_the_field() {
+        let surface = Surface::new(nsh_core::platform::Environment::default());
+        surface.root.state_mut().frame = rect(0.0, 0.0, 400.0, 400.0);
+        let field = view(
+            &surface.root,
+            2,
+            ViewKind::Input,
+            rect(0.0, 0.0, 200.0, 40.0),
+        );
+        crate::text_input::create(&surface, &field);
+        // A field left focused reaches thread-locals the test thread has
+        // already dropped as it ends: blurred however the test ends.
+        struct Blurred(Rc<Surface>);
+        impl Drop for Blurred {
+            fn drop(&mut self) {
+                crate::text_input::blur_all(&self.0);
+            }
+        }
+        let _blurred = Blurred(surface.clone());
+        view(
+            &surface.root,
+            4,
+            ViewKind::View,
+            rect(0.0, 100.0, 400.0, 300.0),
+        );
+        let click = |x: f32, y: f32| {
+            let event = |kind| PointerEvent {
+                kind,
+                x,
+                y,
+                button: 0,
+                buttons: if kind == PointerKind::Down { 1 } else { 0 },
+                pointer: 1,
+                touch: false,
+                pen: false,
+                time: 0.0,
+                clicks: 1,
+                modifiers: Modifiers::default(),
+            };
+            pointer(&surface, event(PointerKind::Down));
+            pointer(&surface, event(PointerKind::Up));
+        };
+        click(10.0, 10.0);
+        assert_eq!(crate::text_input::focused(&surface), Some(field.clone()));
+        click(10.0, 10.0);
+        assert_eq!(crate::text_input::focused(&surface), Some(field.clone()));
+        click(200.0, 200.0);
+        assert_eq!(crate::text_input::focused(&surface), None);
     }
 
     #[test]
