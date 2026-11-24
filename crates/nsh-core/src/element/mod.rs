@@ -54,6 +54,7 @@ mod js;
 pub(crate) mod json_host;
 mod keyboard;
 pub(crate) mod keys;
+mod lazy;
 pub(crate) mod menus;
 pub(crate) mod module;
 mod once;
@@ -177,6 +178,7 @@ pub use self::{
     js::{JsClass, JsHost, JsIn, JsKind, JsOwned, JsPrimitive, JsRaw},
     json_host::from_json,
     keyboard::Keyboard,
+    lazy::{lazy_view, register_lazy_view},
     module::{
         Constant, ConstantValue, Function, FunctionCall, FunctionKind, FunctionSpec, Module,
         ModuleCx, ModuleFuture, ModuleParam, ModuleSpec, Overload, OverloadSpec, SyncCall,

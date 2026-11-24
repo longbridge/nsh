@@ -161,11 +161,19 @@ pub(crate) fn package(
             .map(String::as_str)
             .filter(|name| !is_gate(name) || plan.main.iter().any(|g| g == name))
             .collect();
-        let lazy: Vec<&str> = plan
+        let mut lazy: Vec<&str> = plan
             .lazy()
             .into_iter()
             .filter(|gate| exports.iter().any(|e| e == gate))
             .collect();
+        // The app's lazy views (`lazy_view`): a side module each, loaded
+        // the first time the view shows.
+        lazy.extend(
+            exports
+                .iter()
+                .map(String::as_str)
+                .filter(|name| name.starts_with(LAZY_VIEW_GATE)),
+        );
         let split = link(&linkable, runtime.glue.is_some(), &keep, &lazy)?;
         for side in &split.sides {
             let file = side_file_name(&side.gates);
@@ -450,10 +458,19 @@ fn is_sent_as_written(segment: &str) -> bool {
 /// module, of a feature (shaders) or of one of the app's own UI sets
 /// ([`ui_set_gate`]), which a runtime linked for an app keeps only when it
 /// uses them.
+/// The prefix of the gates of an app's lazy views (`nsh_core::lazy_view`).
+const LAZY_VIEW_GATE: &str = "nsh_lazy_";
+
 fn is_gate(name: &str) -> bool {
-    ["nsh_part_", "nsh_std_", "nsh_feature_", UI_SET_GATE]
-        .iter()
-        .any(|prefix| name.starts_with(prefix))
+    [
+        "nsh_part_",
+        "nsh_std_",
+        "nsh_feature_",
+        LAZY_VIEW_GATE,
+        UI_SET_GATE,
+    ]
+    .iter()
+    .any(|prefix| name.starts_with(prefix))
 }
 
 /// What the app imports by name from each native module: the browser host

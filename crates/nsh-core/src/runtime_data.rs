@@ -56,6 +56,14 @@ pub fn deliver(name: &str, bytes: Option<Vec<u8>>) {
     }
 }
 
+/// Forgets what loading `name` gave, so the next [`load`] asks the loader
+/// again (a lazy view whose code did not load tries again).
+pub fn forget(name: &str) {
+    registry()
+        .entries
+        .retain(|(n, entry)| n != name || matches!(entry, Entry::Loading(_)));
+}
+
 fn registry() -> MutexGuard<'static, Registry> {
     REGISTRY.lock().unwrap_or_else(PoisonError::into_inner)
 }

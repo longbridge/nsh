@@ -2003,6 +2003,21 @@ class Player {
    * first: a side module, or an export of a module published whole.
    */
   async loadData(name) {
+    // A lazy view's code (`lazy_view`): the side module of its gate
+    // `nsh_lazy_<name>`, which registers the view; there is no data file.
+    if (name.startsWith("lazy_")) {
+      const gate = `nsh_${name}`;
+      let ok = 0;
+      try {
+        if (this.options.sides?.[gate]) await this.loadSide(gate, this.options.sides);
+        else this.wasm[gate]?.();
+        ok = 1;
+      } catch (err) {
+        console.warn("[nsh]", `${err.message ?? err} (${gate})`);
+      }
+      this.call((w) => this.withStrings([name, new Uint8Array(0)], (np, nl, dp, dl) => w.nsh_data(np, nl, dp, dl, ok)));
+      return;
+    }
     const url = this.data?.[name] ?? new URL(`nsh-${name}.bin`, import.meta.url);
     let bytes = null;
     try {

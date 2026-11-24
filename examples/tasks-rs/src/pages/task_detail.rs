@@ -20,6 +20,7 @@ pub(crate) fn task_detail(id: u32) -> Screen {
                     .text_lg()
                     .text_color(move || theme().foreground),
             )
+            .child(lazy_view("editor", || text("Loading…")))
             .child(
                 switch()
                     .checked(move || task().is_some_and(|task| task.done))
@@ -64,4 +65,18 @@ fn confirm_remove(id: u32) {
             store::remove_task(id);
         }
     });
+}
+
+/// The page's editor, left out of the web build's main module.
+fn editor() -> AnyElement {
+    nsh_base::rich_editor::view::rich_editor()
+        .flex_1()
+        .into_element()
+}
+
+/// The gate of the lazy view `editor`.
+#[unsafe(no_mangle)]
+#[allow(unreachable_pub)]
+pub extern "C" fn nsh_lazy_editor() {
+    register_lazy_view("editor", editor);
 }
