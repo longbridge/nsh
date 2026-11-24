@@ -4013,6 +4013,8 @@ expect Tab a*
 expect Tab b
 expect Tab c
 expect Panel a
+# The frame showing the panel is the tab panel for screen readers.
+prop parent:parent:parent:parent:id:panel-a role tabpanel
 # A tab of the other group shows that group.
 tap text:Tab c
 expect Tab c*

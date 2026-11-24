@@ -143,6 +143,11 @@ pub enum AccessibilityRole {
     /// its `label`.
     #[prop(rename = "alertdialog")]
     AlertDialog,
+    /// The content a tab of a [`Tablist`](Self::Tablist) shows: the
+    /// selected tab's section, which the tabs name with
+    /// `accessibilityControls`.
+    #[prop(rename = "tabpanel")]
+    TabPanel,
 }
 
 impl AccessibilityRole {

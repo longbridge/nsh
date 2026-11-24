@@ -9,8 +9,8 @@
 // option `selected`, and the structural roles of `nsh/base`'s accordions,
 // toolbars, paginations, trees and checkable menu items (`"group"`,
 // `"region"`, `"navigation"`, `"tree"`, `"treeitem"`, `"menuitemcheckbox"`,
-// `"menuitemradio"`) and of a text box (`"textbox"`) and dialogs
-// (`"dialog"`, `"alertdialog"`), and
+// `"menuitemradio"`), of a text box (`"textbox"`), dialogs
+// (`"dialog"`, `"alertdialog"`) and a tab's content (`"tabpanel"`), and
 // `accessibilityDescribedBy`: a field whose error line's text is its
 // description while the line is there, its own description after. Its
 // script checks each.
@@ -96,6 +96,7 @@ function App() {
       <View testID="role-dialog" role="dialog" style={{ height: 4 }} />
       <View testID="role-alertdialog" role="alertdialog" style={{ height: 4 }} />
       <View testID="role-textbox" role="textbox" accessibilityLabel="Message" style={{ height: 4 }} />
+      <View testID="role-tabpanel" role="tabpanel" style={{ height: 4 }} />
       <View testID="plain" style={{ height: 20 }} />
     </View>
   );

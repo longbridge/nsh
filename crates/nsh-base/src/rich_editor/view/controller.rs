@@ -238,6 +238,7 @@ pub(crate) struct Rv {
     pub(crate) table_gesture: Rc<RefCell<Option<TableGesture>>>,
     /// What that drag shows: a column's or row's new size, a drop line.
     pub(crate) table_preview: Signal<Option<TablePreview>>,
+    pub(crate) hovered_table_cell: Signal<Option<u64>>,
     /// The selection a touch made, its handles and edit menu.
     pub(crate) touch: super::touch::Touch,
     /// Per-block `(selected, focused)` state, notified only for changed blocks.
@@ -303,6 +304,7 @@ impl Rv {
             base_keymap: Rc::new(base_keymap),
             table_gesture: Rc::default(),
             table_preview: signal(None),
+            hovered_table_cell: signal(None),
             touch: super::touch::Touch::new(),
             active_blocks: Rc::default(),
             sel_rects: Rc::default(),

@@ -162,6 +162,9 @@ pub(crate) enum Control {
     /// A pane read as "alert dialog", with `UIA_IsDialogPropertyId`
     /// (ARIA's `alertdialog`).
     AlertDialog,
+    /// A pane read as "tab panel" (ARIA's `tabpanel`, a pane in browsers
+    /// and AccessKit).
+    TabPanel,
 }
 
 impl Control {
@@ -237,6 +240,7 @@ impl Control {
             Control::Grid => "grid",
             Control::Dialog => "dialog",
             Control::AlertDialog => "alert dialog",
+            Control::TabPanel => "tab panel",
             _ => return None,
         })
     }
@@ -333,6 +337,7 @@ pub(crate) fn control_for(a: &Accessibility, kind: ViewKind, pressable: bool) ->
         Role::TreeItem => Control::TreeItem,
         Role::Dialog => Control::Dialog,
         Role::AlertDialog => Control::AlertDialog,
+        Role::TabPanel => Control::TabPanel,
     })
 }
 
@@ -1284,6 +1289,7 @@ mod tests {
             (Role::MenuItemRadio, Control::MenuItem),
             (Role::Dialog, Control::Dialog),
             (Role::AlertDialog, Control::AlertDialog),
+            (Role::TabPanel, Control::TabPanel),
         ] {
             assert_eq!(
                 control_for(&with_role(role), ViewKind::View, false),
