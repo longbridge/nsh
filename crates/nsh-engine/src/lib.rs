@@ -2544,14 +2544,12 @@ impl<M: TextEngine + 'static> Driver<M> {
         }
         // The fonts the UI sets' crates ship for this target, before
         // anything is measured.
-        let target = nsh_core::element::AssetTarget::current();
+        let os = config.environment.os;
         let fonts = config
             .ui_sets
             .iter()
             .flat_map(nsh_core::element::Registry::scoped_asset_files)
-            .filter(|(targets, _)| {
-                targets.is_empty() || target.is_none_or(|target| targets.contains(&target))
-            })
+            .filter(|(targets, _)| targets.is_empty() || targets.contains(&os))
             .map(|(_, file)| file)
             .filter(|file| file.kind == nsh_core::element::AssetKind::Font);
         for font in fonts {

@@ -87,7 +87,7 @@ pub struct AssetDescription {
     /// The file, where the set's crate was built.
     pub source: String,
     /// The targets it is for; none: every target.
-    pub targets: Vec<super::AssetTarget>,
+    pub targets: Vec<crate::platform::Os>,
 }
 
 /// A UI set as data: everything the toolchain reads from a [`Registry`].
@@ -236,13 +236,18 @@ impl SetDescription {
             .map(|(i, a)| {
                 let at = format!("{at}.assets[{i}]");
                 let a = object(a, &at)?;
-                let targets = strings(a, "targets", &at)?
-                    .iter()
-                    .map(|name| {
-                        super::AssetTarget::from_name(name)
-                            .ok_or_else(|| format!("{at}: unknown target {name}"))
-                    })
-                    .collect::<Result<Vec<_>, String>>()?;
+                // A description from before `assets_for` has no targets:
+                // every target.
+                let targets = match a.get("targets") {
+                    None => Vec::new(),
+                    Some(_) => strings(a, "targets", &at)?
+                        .iter()
+                        .map(|name| {
+                            crate::platform::Os::from_name(name)
+                                .ok_or_else(|| format!("{at}: unknown target {name}"))
+                        })
+                        .collect::<Result<Vec<_>, String>>()?,
+                };
                 Ok(AssetDescription {
                     path: string(a, "path", &at)?,
                     source: string(a, "source", &at)?,
@@ -453,16 +458,34 @@ mod tests {
         description.sets[0].assets.push(AssetDescription {
             path: "@app/zh-CN.json".into(),
             source: "C:\\app\\assets\\zh-CN.json".into(),
-            targets: vec![crate::element::AssetTarget::Web],
+            targets: vec![crate::platform::Os::Web],
         });
         let json = description.to_json();
         assert_eq!(Description::from_json(&json).unwrap(), description);
         assert_eq!(description.nsh, VERSION);
     }
 
+    /// A description from before `assets_for` has no `targets`: its files
+    /// are for every target.
+    #[test]
+    fn an_asset_without_targets_is_for_every_target() {
+        let mut description = Description::of(&[set()]);
+        description.sets[0].assets.push(AssetDescription {
+            path: "@app/logo@2x.png".into(),
+            source: "/app/assets/logo@2x.png".into(),
+            targets: Vec::new(),
+        });
+        let mut json: Value = serde_json::from_str(&description.to_json()).unwrap();
+        let asset = json["sets"][0]["assets"][0].as_object_mut().unwrap();
+        assert!(asset.remove("targets").is_some());
+        let parsed = Description::from_json(&json.to_string()).unwrap();
+        assert_eq!(parsed, description);
+    }
+
     #[test]
     fn assets_for_scopes_files_to_targets() {
-        use super::super::{AssetFile, AssetKind, AssetTarget};
+        use super::super::{AssetFile, AssetKind};
+        use crate::platform::Os;
         static ALL: &[AssetFile] = &[AssetFile {
             uri: "asset:/@app/a.png",
             source: "/app/assets/a.png",
@@ -474,7 +497,7 @@ mod tests {
             kind: AssetKind::File,
         }];
         let mut registry = Registry::ui_set("test/assets");
-        registry.assets(ALL).assets_for(&[AssetTarget::Web], WEB);
+        registry.assets(ALL).assets_for(&[Os::Web], WEB);
         let set = SetDescription::of(&registry).unwrap();
         let scoped: Vec<_> = set
             .assets
@@ -483,10 +506,7 @@ mod tests {
             .collect();
         assert_eq!(
             scoped,
-            [
-                ("@app/a.png", &[][..]),
-                ("@app/zh-CN.json", &[AssetTarget::Web][..])
-            ]
+            [("@app/a.png", &[][..]), ("@app/zh-CN.json", &[Os::Web][..])]
         );
         // Every file stays among `asset_files`, whatever its targets.
         assert_eq!(registry.asset_files().count(), 2);

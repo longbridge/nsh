@@ -121,7 +121,7 @@ pub(crate) struct Asset {
     pub(crate) source: PathBuf,
     /// The targets it is for; none: every target
     /// (`Registry::assets_for`).
-    pub(crate) targets: Vec<nsh_core::element::AssetTarget>,
+    pub(crate) targets: Vec<nsh_core::platform::Os>,
 }
 
 /// The files the UI sets' crates ship (`Registry::assets`), published
@@ -179,7 +179,7 @@ impl Built {
     /// [`Registry::assets_for`]: nsh_core::element::Registry::assets_for
     pub(crate) fn assets_for(
         &self,
-        target: Option<nsh_core::element::AssetTarget>,
+        target: Option<nsh_core::platform::Os>,
     ) -> impl Iterator<Item = &Asset> {
         self.assets.iter().filter(move |asset| {
             asset.targets.is_empty() || target.is_none_or(|target| asset.targets.contains(&target))
@@ -510,8 +510,8 @@ mod tests {
 
     #[test]
     fn a_package_ships_the_files_of_its_target() {
-        use nsh_core::element::AssetTarget;
-        let file = |path: &str, targets: &[AssetTarget]| crate::build::Asset {
+        use nsh_core::platform::Os;
+        let file = |path: &str, targets: &[Os]| crate::build::Asset {
             path: path.to_owned(),
             source: PathBuf::from(path),
             targets: targets.to_vec(),
@@ -519,8 +519,8 @@ mod tests {
         let built = crate::build::Built {
             assets: vec![
                 file("all.png", &[]),
-                file("web.json", &[AssetTarget::Web]),
-                file("phones.json", &[AssetTarget::Ios, AssetTarget::Android]),
+                file("web.json", &[Os::Web]),
+                file("phones.json", &[Os::Ios, Os::Android]),
             ],
             ..crate::build::rust_root()
         };
@@ -530,9 +530,9 @@ mod tests {
                 .map(|a| a.path.as_str())
                 .collect::<Vec<_>>()
         };
-        assert_eq!(paths(Some(AssetTarget::Web)), ["all.png", "web.json"]);
-        assert_eq!(paths(Some(AssetTarget::Macos)), ["all.png"]);
-        assert_eq!(paths(Some(AssetTarget::Ios)), ["all.png", "phones.json"]);
+        assert_eq!(paths(Some(Os::Web)), ["all.png", "web.json"]);
+        assert_eq!(paths(Some(Os::MacOs)), ["all.png"]);
+        assert_eq!(paths(Some(Os::Ios)), ["all.png", "phones.json"]);
     }
 
     /// An entry below its app (`tests/SubApp.tsx`, which a test opens)

@@ -78,15 +78,15 @@ impl PackageTarget {
 
     /// The target a crate's files are scoped to
     /// (`Registry::assets_for`); `None` for the removed GPUI packages.
-    pub(crate) fn asset_target(self) -> Option<nsh_core::element::AssetTarget> {
-        use nsh_core::element::AssetTarget;
+    pub(crate) fn asset_target(self) -> Option<nsh_core::platform::Os> {
+        use nsh_core::platform::Os;
         match self {
-            PackageTarget::Ios | PackageTarget::IosSimulator => Some(AssetTarget::Ios),
-            PackageTarget::Android => Some(AssetTarget::Android),
-            PackageTarget::Linux => Some(AssetTarget::Linux),
-            PackageTarget::Macos => Some(AssetTarget::Macos),
-            PackageTarget::Windows => Some(AssetTarget::Windows),
-            PackageTarget::Web => Some(AssetTarget::Web),
+            PackageTarget::Ios | PackageTarget::IosSimulator => Some(Os::Ios),
+            PackageTarget::Android => Some(Os::Android),
+            PackageTarget::Linux => Some(Os::Linux),
+            PackageTarget::Macos => Some(Os::MacOs),
+            PackageTarget::Windows => Some(Os::Windows),
+            PackageTarget::Web => Some(Os::Web),
             PackageTarget::Gpui => None,
         }
     }

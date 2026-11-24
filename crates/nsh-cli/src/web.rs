@@ -228,7 +228,7 @@ pub(crate) fn package(
     } = modules;
     let mut assets = serde_json::Map::new();
     let mut fonts = Vec::new();
-    for asset in built.assets_for(Some(nsh_core::element::AssetTarget::Web)) {
+    for asset in built.assets_for(Some(nsh_core::platform::Os::Web)) {
         let bytes = fs::read(&asset.source).with_context(|| format!("read {}", asset.path))?;
         let url = site.add(&format!("assets/{}", asset.path), &bytes)?;
         if is_font(&asset.path) {

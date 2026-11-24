@@ -1013,7 +1013,7 @@ pub struct Registry {
     ui_set: Option<&'static str>,
     /// The files its crates ship, with the targets they are for
     /// ([`Registry::assets_for`]; none: every target).
-    assets: Arc<Vec<(&'static [super::AssetTarget], &'static [super::AssetFile])>>,
+    assets: Arc<Vec<(&'static [crate::platform::Os], &'static [super::AssetFile])>>,
     /// Makes the design tokens of a theme ([`Registry::tokens_from`]).
     tokens: Option<super::TokenSource>,
     /// Makes the views' built-in scroll bars ([`Registry::scrollbars_from`]).
@@ -1335,7 +1335,7 @@ impl Registry {
     /// target outside the list is not there to read.
     pub fn assets_for(
         &mut self,
-        targets: &'static [super::AssetTarget],
+        targets: &'static [crate::platform::Os],
         files: &'static [super::AssetFile],
     ) -> &mut Self {
         Arc::make_mut(&mut self.assets).push((targets, files));
@@ -1455,7 +1455,8 @@ impl Registry {
     /// for (none: every target).
     pub fn scoped_asset_files(
         &self,
-    ) -> impl Iterator<Item = (&'static [super::AssetTarget], &'static super::AssetFile)> + '_ {
+    ) -> impl Iterator<Item = (&'static [crate::platform::Os], &'static super::AssetFile)> + '_
+    {
         self.assets
             .iter()
             .flat_map(|&(targets, files)| files.iter().map(move |file| (targets, file)))

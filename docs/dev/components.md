@@ -700,9 +700,9 @@ The URI is `asset:/@<package>/<path>`, apart from the app's own files. The regis
 ships the directory: `registry.assets(assets!())` lists every file (`AssetFile`: URI, the file where the crate was
 built, kind), which `nsh` (`rust_app.rs`, from the description of the set: each file's path and source) serves in development and
 copies into packages next to the imported assets, and whose fonts the engine registers before the first view
-(`EngineConfig::ui_sets`, read through `EngineConfig::assets`). `registry.assets_for(&[AssetTarget::Web], assets!())`
-scopes files to the listed targets: the description carries each file's `targets` (none: every target), `Built::assets_for`
-gives each packager (and the web's) its files, and the engine registers only the fonts of `AssetTarget::current()`;
+(`EngineConfig::ui_sets`, read through `EngineConfig::assets`). `registry.assets_for(&[Os::Web], assets!())`
+(`nsh_core::platform::Os`, the `platform.os` values) scopes files to the listed targets: the description carries each file's `targets` (none: every target), `Built::assets_for`
+gives each packager (and the web's) its files, and the engine registers only the fonts of its `Environment::os`;
 `nsh run`, `nsh sign` and the in-place runners keep every file.
 
 ## Styles
