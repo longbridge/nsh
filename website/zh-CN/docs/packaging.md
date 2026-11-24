@@ -470,14 +470,14 @@ Build Tools 构建。请在 Windows 上打包：运行器是为构建它的机�
 Windows 能嵌入图标。应用可以从目录被复制到的任何位置运行。`nsh package` 还会写出 Inno Setup 脚本 `.nsh\out\<Name>.iss`，装有 Inno Setup 6
 时编译成 `.nsh\out\<Name>-setup.exe`：按用户安装（不需要管理员权限），带开始菜单快捷方式和“已安装的应用”条目，并支持原地升级。见 [Windows](./windows.md#打包)。
 
-### MSIX 与 Microsoft Store
+### MSIX
 
 ```sh
 nsh package --target windows --format msix                  # .nsh/out/<Name>.msix，用于 Store
 nsh package --target windows --format msix --sign cert.pfx  # 签名后可在 Store 之外安装
 ```
 
-`--format msix` 额外写出 `.nsh\out\<Name>.msix`：打包目录加上 `AppxManifest.xml`（full-trust 桌面应用）、由应用图标生成的 logo 和 block map。不需要 Windows SDK，Linux 和 macOS 的 CI 也能生成。包标识来自 `nsh.json` 的 `windows`：`identityName`、`publisher`、`publisherDisplayName`，前两项从 Partner Center 的 Product identity 复制（默认分别为应用 id 与 `CN=<name>`）。Store ID 写在 `store.windows.productId`。版本号为 `version` 加第四位 0。Store 会自行签名，上传未签名的包即可（`nsh publish windows`）；Store 之外分发需 `--sign <cert.pfx>`（Windows 上用 `signtool`，其他系统用 `osslsigncode` 2.6+，密码放在 `NSH_WINDOWS_CERT_PASSWORD`），证书主题必须等于 `windows.publisher`。
+`--format msix` 额外写出 `.nsh\out\<Name>.msix`：打包目录加上 `AppxManifest.xml`（full-trust 桌面应用）、由应用图标生成的 logo 和 block map。不需要 Windows SDK，Linux 和 macOS 的 CI 也能生成。包标识来自 `nsh.json` 的 `windows`：`identityName`、`publisher`、`publisherDisplayName`，前两项从 Partner Center 的 Product identity 复制（默认分别为应用 id 与 `CN=<name>`）。版本号为 `version` 加第四位 0。Store 会自行签名，用 `nsh publish windows` 提交未签名的包即可（见[发布](./publish.md#windows)）；Store 之外分发需 `--sign <cert.pfx>`（Windows 上用 `signtool`，其他系统用 `osslsigncode` 2.6+，密码放在 `NSH_WINDOWS_CERT_PASSWORD`），证书主题必须等于 `windows.publisher`。
 
 ## Web
 

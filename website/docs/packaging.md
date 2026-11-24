@@ -534,7 +534,7 @@ embed the icon. The app runs from wherever its directory is copied. `nsh package
 installer (no administrator rights) with a Start menu shortcut, an Installed apps entry, and in-place upgrades. See
 [Windows](./windows.md#packaging).
 
-### MSIX and the Microsoft Store
+### MSIX
 
 ```sh
 nsh package --target windows --format msix                  # .nsh/out/<Name>.msix, for the Store
@@ -552,15 +552,14 @@ package's identity comes from `nsh.json`:
     "identityName": "12345Example.MyApp",
     "publisher": "CN=0A1B2C3D-1234-5678-9ABC-0123456789AB",
     "publisherDisplayName": "Example Inc."
-  },
-  "store": { "windows": { "productId": "9NBLGGH4R315" } }
+  }
 }
 ```
 
 Copy `identityName` and `publisher` from Partner Center (the app → Product identity: Package/Identity/Name and
 Package/Identity/Publisher); defaults are the app id and `CN=<name>`. The version is `version` with a fourth part 0,
-which the Store reserves. The Store signs what it publishes, so upload the unsigned package with
-`nsh publish windows` ([CLI](./cli.md#nsh-publish-windows)). Outside the Store, Windows installs only signed
+which the Store reserves. The Store signs what it publishes, so submit the unsigned package with
+`nsh publish windows` ([Publishing](./publish.md#windows)). Outside the Store, Windows installs only signed
 packages: `--sign <cert.pfx>` signs it with `signtool` on Windows or `osslsigncode` (2.6 or newer) elsewhere, its
 password in `NSH_WINDOWS_CERT_PASSWORD`; the certificate's subject must equal `windows.publisher`.
 

@@ -1,6 +1,6 @@
 ---
 title: 发布
-description: "把 NSH 应用发布到应用商店：Linux 上的 Flathub，元数据来自 nsh.json，使用 nsh publish linux、status 和 doctor。"
+description: "把 NSH 应用发布到应用商店：Linux 上的 Flathub 和 Windows 上的 Microsoft Store，应用标识与文案来自 nsh.json，使用 nsh publish、status 和 doctor。"
 order: 21
 group: delivery
 ---
@@ -157,3 +157,82 @@ nsh publish doctor linux [--entry <DIR>]
 
 - 不支持发布到 Snap Store 或 AUR。
 - 不会上传到 Flathub 或开 Pull Request：Flathub 根据你提交的 manifest 构建。
+
+## Windows
+
+Windows 上的商店是 Microsoft Store。`nsh publish windows` 通过 Store 提交 API 把 MSIX 包提交到 Store，由 Store 认证、签名并发布。
+
+### 准备工作
+
+- 已在 [Partner Center](https://partner.microsoft.com/dashboard) 保留应用名，并在那里完成首次提交（定价、年龄分级、商店文案）。之后的版本通过
+  `nsh publish windows` 发布。
+- 一个 MSIX 包：`nsh package --target windows --format msix`，不签名（见[打包](./packaging.md#msix)）。Linux 和 macOS 上也能生成。
+- 一个关联到 Partner Center 的 Azure AD 应用（Account settings → User management → Azure AD applications，角色 Manager）。凭据只从环境变量读取：
+  `NSH_MS_TENANT_ID`、`NSH_MS_CLIENT_ID` 和 `NSH_MS_CLIENT_SECRET`。
+
+### 配置
+
+```json
+{
+  "id": "com.example.notes",
+  "version": "1.2.0",
+  "windows": {
+    "identityName": "12345Example.MyApp",
+    "publisher": "CN=0A1B2C3D-1234-5678-9ABC-0123456789AB",
+    "publisherDisplayName": "Example Inc."
+  },
+  "store": {
+    "locales": { "en-US": { "releaseNotes": "Faster sync." } },
+    "windows": { "productId": "9NBLGGH4R315" }
+  }
+}
+```
+
+| 字段 | 用途 |
+|---|---|
+| `store.windows.productId` | 应用的 Store ID（Partner Center → 应用 → Product identity），也接受 `storeId` |
+| `windows.identityName`、`windows.publisher` | 包标识，从同一页面复制；包标识不一致时 Store 会拒绝 |
+| `version` | 包版本，第四位为 0 |
+| `store.locales.<tag>.releaseNotes` | 该语言商店页面的更新说明（或 `store/<tag>/release_notes.txt`） |
+
+### 发布
+
+```sh
+nsh package --target windows --format msix
+nsh publish windows .nsh/out/MyApp.msix --wait
+```
+
+以最近一次已发布的提交为基础新建提交，替换其中的包，设置各语言的更新说明，上传包并提交认证。提交认证前失败的提交会被删除。应用有待处理的提交
+（Partner Center 中的草稿）时会拒绝执行，不会覆盖别人已开始的工作。`--wait` 会一直轮询到认证结束，Store 拒绝时以失败退出。
+
+### 状态与检查
+
+```sh
+nsh publish status windows [--json]   # 退出码：0 已发布，2 进行中，1 失败
+nsh publish doctor windows            # 只读：nsh.json、凭据、Store ID
+```
+
+### 命令
+
+```sh
+nsh publish windows <APP.msix> [--entry <DIR>] [--product-id <ID>] [--notes <FILE>|<LANG>=<FILE>]... [--wait]
+nsh publish status windows [--entry <DIR>] [--product-id <ID>] [--submission <ID>] [--json]
+nsh publish doctor windows [--entry <DIR>] [--product-id <ID>]
+```
+
+| 参数 | 说明 |
+|---|---|
+| `--product-id <ID>` | Store ID。默认：`store.windows.productId` |
+| `--notes <FILE>` 或 `<LANG>=<FILE>` | 所有语言或某个语言的更新说明。默认：商店信息中的 `releaseNotes` |
+| `--wait` | 等到认证结束 |
+| `--submission <ID>` | 仅 `status`：查看最近一次之外的某个提交 |
+| `--entry <DIR>` | 应用目录或入口，默认 `.` |
+
+### 常见问题
+
+| 现象 | 原因与解决 |
+|---|---|
+| `doctor`：缺少凭据 | 设置 `NSH_MS_TENANT_ID`、`NSH_MS_CLIENT_ID` 和 `NSH_MS_CLIENT_SECRET` |
+| 被拒绝：存在待处理的提交 | 在 Partner Center 完成或删除草稿后再发布 |
+| 认证因包标识失败 | 从 Partner Center 的 Product identity 复制 `identityName` 和 `publisher` |
+| 认证因版本失败 | 提高 `version`：每次提交都需要更高的版本 |

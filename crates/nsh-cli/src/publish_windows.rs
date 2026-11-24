@@ -445,7 +445,7 @@ pub(crate) fn publish(args: &Args) -> anyhow::Result<()> {
     step.done(format!("committed submission {id} of app {app}"));
     if !args.wait {
         ui::done(format!(
-            "certification runs in the Store: `nsh publish windows status --submission {id}`"
+            "certification runs in the Store: `nsh publish status windows --submission {id}`"
         ));
         return Ok(());
     }

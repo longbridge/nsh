@@ -1,6 +1,6 @@
 ---
 title: Publishing
-description: "Publish NSH apps to app stores: Flathub on Linux, with metadata from nsh.json, nsh publish linux, status and doctor."
+description: "Publish NSH apps to app stores: Flathub on Linux and the Microsoft Store on Windows, with identity and listing from nsh.json, nsh publish, status and doctor."
 order: 21
 group: delivery
 ---
@@ -163,3 +163,87 @@ nsh publish doctor linux [--entry <DIR>]
 
 - No Snap Store or AUR releases.
 - No upload to Flathub or opening pull requests: Flathub builds from the manifest you submit.
+
+## Windows
+
+On Windows the store is the Microsoft Store. `nsh publish windows` submits an MSIX package to it through the Store
+submission API; the Store certifies, signs and publishes it.
+
+### Before you start
+
+- The app is reserved in [Partner Center](https://partner.microsoft.com/dashboard), and its first submission
+  (pricing, age ratings, the store listing) is made there. Later releases go through `nsh publish windows`.
+- An MSIX package: `nsh package --target windows --format msix`, unsigned ([Packaging](./packaging.md#msix)). It
+  builds on Linux and macOS too.
+- An Azure AD app associated with Partner Center (Account settings → User management → Azure AD applications, role
+  Manager). Its credentials are read only from the environment: `NSH_MS_TENANT_ID`, `NSH_MS_CLIENT_ID` and
+  `NSH_MS_CLIENT_SECRET`.
+
+### Configuration
+
+```json
+{
+  "id": "com.example.notes",
+  "version": "1.2.0",
+  "windows": {
+    "identityName": "12345Example.MyApp",
+    "publisher": "CN=0A1B2C3D-1234-5678-9ABC-0123456789AB",
+    "publisherDisplayName": "Example Inc."
+  },
+  "store": {
+    "locales": { "en-US": { "releaseNotes": "Faster sync." } },
+    "windows": { "productId": "9NBLGGH4R315" }
+  }
+}
+```
+
+| Field | Used for |
+|---|---|
+| `store.windows.productId` | The app's Store ID (Partner Center → the app → Product identity). `storeId` is read too |
+| `windows.identityName`, `windows.publisher` | The package identity, copied from the same page; the Store rejects a package whose identity differs |
+| `version` | The package version, with a fourth part 0 |
+| `store.locales.<tag>.releaseNotes` | The release notes of that listing language (or `store/<tag>/release_notes.txt`) |
+
+### Release
+
+```sh
+nsh package --target windows --format msix
+nsh publish windows .nsh/out/MyApp.msix --wait
+```
+
+Creates a submission from the last published one, replaces its package, sets each listing's release notes, uploads the
+package and commits it to certification. A submission that fails before it is committed is deleted. An app with a
+pending submission (a draft in Partner Center) is refused, so nothing a person started is overwritten. `--wait` polls
+until certification ends and fails when the Store rejects the package.
+
+### Status and doctor
+
+```sh
+nsh publish status windows [--json]   # exit 0 published, 2 in progress, 1 failed
+nsh publish doctor windows            # read-only: nsh.json, credentials, the Store ID
+```
+
+### Commands
+
+```sh
+nsh publish windows <APP.msix> [--entry <DIR>] [--product-id <ID>] [--notes <FILE>|<LANG>=<FILE>]... [--wait]
+nsh publish status windows [--entry <DIR>] [--product-id <ID>] [--submission <ID>] [--json]
+nsh publish doctor windows [--entry <DIR>] [--product-id <ID>]
+```
+
+| Flag | Description |
+|---|---|
+| `--product-id <ID>` | The Store ID. Default: `store.windows.productId` |
+| `--notes <FILE>` or `<LANG>=<FILE>` | Release notes for every listing, or for one language. Default: the store listing's `releaseNotes` |
+| `--wait` | Wait until certification ends |
+| `--submission <ID>` | `status` only: a submission other than the latest |
+| `--entry <DIR>` | The app's directory or entry. Default `.` |
+
+### Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| `doctor`: credentials missing | Set `NSH_MS_TENANT_ID`, `NSH_MS_CLIENT_ID` and `NSH_MS_CLIENT_SECRET` |
+| Refused: a pending submission exists | Finish or delete the draft in Partner Center, then publish again |
+| Certification fails on the package identity | Copy `identityName` and `publisher` from Partner Center's Product identity |
+| Certification fails on the version | Raise `version`: each submission needs a higher one |
