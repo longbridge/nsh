@@ -255,8 +255,8 @@ token 的名称就是主题文件中 CSS 变量去掉 `--` 后的名称：`muted
 | 写法 | 取值 | 示例 |
 |---|---|---|
 | 任意颜色类里的颜色名 | 主题颜色，也可带不透明度 | `bg-primary`、`text-muted-foreground/70`、`bg-up/30`、`border-t-border`、`ring-ring`、`from-accent`、`placeholder:text-muted-foreground` |
-| `(--name)`，Tailwind 4 的变量简写 | 主题颜色或数值 | `bg-(--primary)`、`rounded-(--radius)`、`p-(--gap-card)` |
-| `(color:--name)`、`(length:--name)`、`(number:--name)`、`(family-name:--name)` | 同上，在一个类可以接受多种值时标明类型 | `text-(color:--up)`、`text-(length:--text-title)`、`font-(family-name:--font-mono)` |
+| `(--name)`，Tailwind 4 的变量简写 | 主题颜色或数值；数值是以点为单位的长度，给 `scale`、`scale-x`、`scale-y` 时是倍数 | `bg-(--primary)`、`rounded-(--radius)`、`p-(--gap-card)`、`active:scale-(--press-scale)` |
+| `(color:--name)`、`(length:--name)`、`(number:--name)`、`(family-name:--name)` | 同上，在一个类可以接受多种值时标明类型 | `text-(color:--up)`、`text-(length:--text-title)`、`ring-(length:--ring-width)`、`font-(family-name:--font-mono)` |
 | `font-sans`、`font-mono` | 主题设置的字体 | `font-mono` |
 
 - **应用自己的令牌。** 主题文件中的每个名称都是 token，就像 CSS `@theme` 中的每个变量：`"up": "#16a34a"` 生成 `bg-up`、`text-up` 和 `bg-up/30`；`"radius-card": "14px"` 生成 `rounded-(--radius-card)`；`"font-display": "Pacifico"` 生成 `font-(family-name:--font-display)`。长度的单位是点；`(number:--name)` 传入不带单位的数值。
