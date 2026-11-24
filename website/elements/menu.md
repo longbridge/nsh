@@ -399,7 +399,8 @@ submenu inside it sets its own. A menu whose items are all one choice puts them 
 
 - **iOS and Mac Catalyst**: the trigger is covered by a transparent `UIButton` whose `UIMenu` is its primary action:
   a tap, VoiceOver's activation or a hardware keyboard opens it at once, without waiting for JS. `icon` is an SF
-  Symbol; `title` heads the menu. VoiceOver reaches the button, named by `accessibilityLabel`, and not the trigger's
+  Symbol; `title` heads the menu. The menu grows out of the trigger, which hides while the menu is up and comes back as it
+  closes, as a system button does. VoiceOver reaches the button, named by `accessibilityLabel`, and not the trigger's
   content under it. New `items` change the menu the next time it opens.
 - **Desktops (macOS, Windows, Linux)**: a press shows the items as the platform's context menu at the pointer (as
   `Menu.popup` from `nsh/desktop`), sections between separators; `icon`, `title` and `destructive` are not shown.
