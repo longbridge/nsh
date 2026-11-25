@@ -317,6 +317,9 @@ async function lint(text: string) {
 `decorations` style ranges the app chooses: semantic highlighting from a language server, the statement being run, the
 lines a review changed. A decoration's `class` and `style` style its text; `lineClass` and `lineStyle` style the rows
 of its lines, behind the text. Like diagnostics, they stay on their text through edits until the app sets new ones.
+While an input method composes, its text shows in place in the row, which keeps its decorations: the text after it
+moves aside with its own, and the composed text is styled as it will be once committed (inside a decoration that
+continues on both sides of the caret, not one that starts or ends there).
 
 ```tsx
 const range = (line: number, start: number, end: number) => ({ start: { line, column: start }, end: { line, column: end } });
@@ -585,6 +588,17 @@ app sizes it, and `scrollBeyondLastLine` lets the text scroll on past its last l
 default), not at all (`false`) or a number of rows. As the caret moves, `cursorSurroundingLines` rows stay in view
 around it. Dragging a selection past the editor's edges scrolls on, faster the farther out the pointer goes.
 
+In a container with rounded corners, or under bars floating over the editor, `scrollbarInset` keeps the scroll bars
+that far from the editor's edges, as a [scroll view's](./scroll.md) does; the text still scrolls under them. The
+vertical bar and the overview ruler keep within its top, bottom and right, the horizontal bar (without `softWrap`)
+within its left, right and bottom.
+
+```tsx
+<View class="flex-1 overflow-hidden rounded-xl border border-border">
+  <Editor defaultValue={source()} language="rust" scrollbarInset={{ top: 8, bottom: 8 }} class="flex-1" />
+</View>
+```
+
 `showWhitespaces` shows a `·` for each space and a `→` for each tab (the `whitespace` part), and `rulers` draws a
 line at each of its columns (the `ruler` part), as guides of a line's length.
 
@@ -794,6 +808,7 @@ with the user's text size (`fontScale()`), and the rows grow with it.
 | `activeLine` | `.active_line(..)` | `boolean` | `true` | The rows of the lines with a caret are highlighted. |
 | `indentGuides` | `.indent_guides(..)` | `boolean` | `true` | The guides of indentation. |
 | `scrollBeyondLastLine` | `.scroll_beyond_last_line(..)` | `boolean \| number` | `true` | The text scrolls on past its last line: up to a screen (`true`), not at all (`false`) or that many rows. |
+| `scrollbarInset` | `.scrollbar_inset(EdgeInsets { .. })` | `Partial<Edges>` | | Keeps the scroll bars this far from the editor's edges ([Size and scrolling](#size-and-scrolling)). |
 | `fontFamily` | `.font_family(..)` | `string` | the theme's `font-mono` | The font the text is drawn and measured in. |
 | `fontSize` | `.font_size(..)` | `number` | `13` | The font size, in points. |
 | `lineHeight` | `.line_height(..)` | `number` | `20` | The height of a row, in points; in a terminal a row is one Cell. |

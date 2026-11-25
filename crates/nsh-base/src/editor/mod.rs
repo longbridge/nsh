@@ -124,6 +124,14 @@ pub struct EditorProps {
     /// screen (the default), `false` not at all, a number that many rows.
     #[prop(default)]
     pub scroll_beyond_last_line: Prop<EditorScrollBeyond>,
+    /// How far the scroll bars keep from each edge of the editor, as a
+    /// scroll view's `scrollbarInset`: clear of a rounded container's
+    /// corners or of bars floating over the editor; the text still scrolls
+    /// under them. The vertical bar and the overview ruler keep within the
+    /// top, bottom and right; the horizontal one (without `softWrap`)
+    /// within the left, right and bottom.
+    #[prop(default)]
+    pub scrollbar_inset: Prop<EdgeInsets>,
     /// The font family (default the theme's `font-mono`, else the
     /// system's monospaced font). The editor measures its text in it, so
     /// set the font here rather than with classes.

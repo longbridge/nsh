@@ -108,6 +108,7 @@ desktop::window_state::Display.refresh_rate                     # a refresh rate
 desktop::window_state::Display.scale_factor                     # device pixels per point, a ratio
 desktop::window_state::WindowState.scale_factor                 # device pixels per point, a ratio
 effects::ClipInset::lerp(t)                                      # transition progress (easing curve coordinates, unit square)
+effects::Gradient::lerp(t)                                       # transition progress (easing curve coordinates, unit square)
 effects::Filter::Brightness.0                                    # a filter amount (1 leaves the image as it is)
 effects::Filter::Contrast.0                                      # a filter amount (1 leaves the image as it is)
 effects::Filter::Grayscale.0                                     # a filter amount (1 leaves the image as it is)

@@ -110,7 +110,7 @@ jobs:
         with:
           components: clippy
 
-      # The self-hosted runner is shared: install the toolchain without
+      # The self-hosted runners are shared: install the toolchain without
       # making it the machine's default (RUSTUP_TOOLCHAIN picks it).
       - name: Setup Rust (self-hosted)
         if: runner.environment == 'self-hosted'

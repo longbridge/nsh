@@ -1100,6 +1100,11 @@ pub struct PerfStats {
     /// The share of recent frames that took longer than one refresh, from 0
     /// to 1 (`0.05` is 5%), as TS's `dropped` reads it.
     pub dropped: crate::geometry::Percentage,
+    /// Memory the process owns, in bytes, as the monitor's panel shows it:
+    /// the physical footprint on Apple platforms (Activity Monitor's Memory
+    /// column), the resident set elsewhere. `None` where the platform does
+    /// not say, and on the web.
+    pub memory: Option<u64>,
 }
 
 impl PerfStats {
