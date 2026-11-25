@@ -750,6 +750,19 @@ impl DisplayMap {
         Points(self.fonts.base.space())
     }
 
+    /// The width of `text` on one line from x 0, typed at byte `at`: in
+    /// the font of the run around `at`, else the editor's. A run's ends do
+    /// not take text typed there, as edits carry runs
+    /// ([`Self::carry_runs`]).
+    pub(crate) fn inserted_width(&self, at: usize, text: &str) -> Points {
+        let runs = &self.fonts.runs;
+        let metrics = runs
+            .get(runs.partition_point(|r| r.range.end <= at))
+            .filter(|r| r.range.start < at)
+            .map_or(&self.fonts.base, |r| &self.fonts.faces[r.face].metrics);
+        Points(metrics.run_width(text))
+    }
+
     /// A `RowLayout` over this map and `buffer`.
     pub(crate) fn layout<'a>(&'a self, buffer: &'a Buffer) -> impl RowLayout + 'a {
         MapLayout { map: self, buffer }
@@ -784,7 +797,8 @@ impl DisplayMap {
         let mut after_space = false;
         let mut faced = self.fonts.from(info.range.start);
         for (at, grapheme) in graphemes(&text) {
-            let width = faced.advance(info.range.start + at, grapheme, x);
+            let start = info.range.start + at;
+            let width = faced.advance(start, grapheme, x);
             match grapheme {
                 " " => match out.last_mut() {
                     Some(run) if after_space => {
@@ -792,6 +806,7 @@ impl DisplayMap {
                         run.count += 1;
                     }
                     _ => out.push(Whitespace {
+                        start,
                         x: Points(info.indent.0 + x),
                         width: Points(width),
                         count: 1,
@@ -799,6 +814,7 @@ impl DisplayMap {
                     }),
                 },
                 "\t" => out.push(Whitespace {
+                    start,
                     x: Points(info.indent.0 + x),
                     width: Points(width),
                     count: 1,
@@ -816,6 +832,8 @@ impl DisplayMap {
 /// A run of spaces or a tab of a row ([`DisplayMap::whitespace`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Whitespace {
+    /// Its first byte in the buffer.
+    pub(crate) start: usize,
     /// Where it starts, from the text's left edge.
     pub(crate) x: Points,
     /// How wide it is.
@@ -1775,7 +1793,8 @@ mod tests {
     fn whitespace_is_runs_of_spaces_and_tabs() {
         let buffer = Buffer::new("a  b\t c\n  x\nnone");
         let map = map(&buffer, None, vec![]);
-        let ws = |x: f32, width: f32, count: usize, tab: bool| Whitespace {
+        let ws = |start: usize, x: f32, width: f32, count: usize, tab: bool| Whitespace {
+            start,
             x: px(x),
             width: px(width),
             count,
@@ -1786,12 +1805,12 @@ mod tests {
         assert_eq!(
             map.whitespace(&buffer, 0),
             vec![
-                ws(10.0, 20.0, 2, false),
-                ws(40.0, 40.0, 1, true),
-                ws(80.0, 10.0, 1, false),
+                ws(1, 10.0, 20.0, 2, false),
+                ws(4, 40.0, 40.0, 1, true),
+                ws(5, 80.0, 10.0, 1, false),
             ]
         );
-        assert_eq!(map.whitespace(&buffer, 1), vec![ws(0.0, 20.0, 2, false)]);
+        assert_eq!(map.whitespace(&buffer, 1), vec![ws(8, 0.0, 20.0, 2, false)]);
         assert!(map.whitespace(&buffer, 2).is_empty());
     }
 

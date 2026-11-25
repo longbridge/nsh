@@ -1274,9 +1274,9 @@ Some checks run on the organization's self-hosted runners, which keep their buil
 `runs-on` says where it runs. On a self-hosted runner a job installs its toolchain without making it the machine's
 default (`RUSTUP_TOOLCHAIN` picks it) and skips the dependency caches. The Linux ones (`public`, `Linux`, `X64`) take
 one job each and run a job more slowly than GitHub's runners, but a pull request's job waits less for them: they take
-the Linux runs of Core, Compat, Linux's `check`, Examples, TUI, Rust application's `check` and GPUI. The jobs that
-drive a browser (Rust application's `web`, Website) and Linux's `gpui-gallery` (its own build cache, software Vulkan)
-stay on GitHub's runners. Pull requests from forks and the scheduled runs
+the Linux runs of Core, Compat, Examples, TUI, Rust application's `check` and GPUI. Linux's `check` and
+`gpui-gallery` stay on GitHub's runners: the examples' tests in windows run in real time, and on the slower machines
+they time out waiting for what they press. So do the jobs that drive a browser (Rust application's `web`, Website). Pull requests from forks and the scheduled runs
 on `main` run every check on GitHub's runners. The release (its builds, `Plan`, `Release` and `Nightly`), the crates'
 publication, the Homebrew formula's update and the website's deployment run only on GitHub's runners: the jobs that
 hold write tokens or decide and build what users download run on fresh machines.

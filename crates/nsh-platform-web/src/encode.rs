@@ -1224,6 +1224,12 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 if !run.after.is_empty() {
                     out.s.push(',');
                     push_str(&mut out.s, &run.after);
+                } else if run.line_height.is_some() {
+                    out.s.push_str(",null");
+                }
+                // Its line's height, when not its own.
+                if let Some(height) = run.line_height {
+                    let _ = write!(out.s, ",{height}");
                 }
                 out.s.push(']');
             }

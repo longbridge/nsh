@@ -260,7 +260,7 @@ async function lint(text: string) {
 
 ## 装饰
 
-`decorations` 为应用选择的范围设置样式：来自语言服务器的语义高亮、正在执行的语句、评审中改动的行。装饰的 `class` 和 `style` 设置其文本的样式；`lineClass` 和 `lineStyle` 设置其所在各行的样式，位于文本后面。与诊断一样，它们在编辑中留在自己的文本上，直到应用设置新的装饰。
+`decorations` 为应用选择的范围设置样式：来自语言服务器的语义高亮、正在执行的语句、评审中改动的行。装饰的 `class` 和 `style` 设置其文本的样式；`lineClass` 和 `lineStyle` 设置其所在各行的样式，位于文本后面。与诊断一样，它们在编辑中留在自己的文本上，直到应用设置新的装饰。输入法组字时，组字文本就地显示在该行中，该行保留其装饰：其后的文本连同自己的装饰一起后移，组字文本的样式与上屏后相同（光标两侧都被装饰覆盖时在装饰之内，装饰在光标处开始或结束时不在其内）。
 
 ```tsx
 const range = (line: number, start: number, end: number) => ({ start: { line, column: start }, end: { line, column: end } });
@@ -497,6 +497,14 @@ let editor!: EditorRef;
 
 设置 `minRows` 和 / 或 `maxRows` 时，编辑器随文本增高：它和文本的行一样高，至少 `minRows` 行，到 `maxRows` 行起文本滚动，就像消息输入框或笔记本的单元格。否则由应用决定它的尺寸，`scrollBeyondLastLine` 让文本滚动到最后一行之后：最多一屏（`true`，默认）、完全不（`false`）或若干行。光标移动时，它上下各保留 `cursorSurroundingLines` 行在视野内。拖动选择越过编辑器的边缘时会继续滚动，指针越远滚得越快。
 
+编辑器放在圆角容器里，或上面浮着栏时，`scrollbarInset` 让滚动条与编辑器各边保持这段距离，和[滚动视图](./scroll.md)的一样；文本仍从下面滚过。竖向滚动条和概览标尺按它的上、下、右边让开，横向滚动条（未开 `softWrap` 时）按它的左、右、下边让开。
+
+```tsx
+<View class="flex-1 overflow-hidden rounded-xl border border-border">
+  <Editor defaultValue={source()} language="rust" scrollbarInset={{ top: 8, bottom: 8 }} class="flex-1" />
+</View>
+```
+
 `showWhitespaces` 把每个空格显示为 `·`、每个制表符显示为 `→`（`whitespace` 部件），`rulers` 在它的每一列画一条线（`ruler` 部件），作为行长度的参考线。
 
 ```tsx
@@ -685,6 +693,7 @@ let editor!: EditorRef;
 | `activeLine` | `.active_line(..)` | `boolean` | `true` | 高亮有光标的行。 |
 | `indentGuides` | `.indent_guides(..)` | `boolean` | `true` | 缩进参考线。 |
 | `scrollBeyondLastLine` | `.scroll_beyond_last_line(..)` | `boolean \| number` | `true` | 文本可以滚动到最后一行之后：最多一屏（`true`）、完全不（`false`）或若干行。 |
+| `scrollbarInset` | `.scrollbar_inset(EdgeInsets { .. })` | `Partial<Edges>` | | 滚动条与编辑器各边保持的距离（[尺寸与滚动](#尺寸与滚动)）。 |
 | `fontFamily` | `.font_family(..)` | `string` | 主题的 `font-mono` | 绘制和测量文本所用的字体。 |
 | `fontSize` | `.font_size(..)` | `number` | `13` | 字号，单位为点。 |
 | `lineHeight` | `.line_height(..)` | `number` | `20` | 一行的高度，单位为点；在终端里一行就是一个 Cell。 |
