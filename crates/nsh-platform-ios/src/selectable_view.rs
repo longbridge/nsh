@@ -12,7 +12,9 @@
 //! tap clears (a finger that scrolls a scroll view is no tap), and the edit menu (`UIEditMenuInteraction` from iOS 16,
 //! `UIMenuController` before) offers Copy and Select All, which the
 //! responder answers as the first responder (so do ⌘C and ⌘A on hardware
-//! keyboards). As in UIKit's text views, the long press plays an impact
+//! keyboards); the other hardware keys go through the area's raw key path
+//! (`KeyDown` / `KeyUp`, capture rules, bubbling to listening ancestors)
+//! while it holds the selection, as on the other backends. As in UIKit's text views, the long press plays an impact
 //! (the weight of a long press opening a menu) when it selects, and each
 //! time a drag moves an end a selection tick.
 //! Pointers (Mac Catalyst's mouse, iPad trackpads) select as on the
@@ -50,13 +52,15 @@ use objc2::{
     sel,
 };
 use objc2_core_foundation::{CGFloat, CGPoint, CGRect, CGSize};
-use objc2_foundation::{NSArray, NSNumber, NSObject, NSRunLoop, NSRunLoopCommonModes, NSString};
+use objc2_foundation::{
+    NSArray, NSNumber, NSObject, NSRunLoop, NSRunLoopCommonModes, NSSet, NSString,
+};
 use objc2_quartz_core::CADisplayLink;
 use objc2_ui_kit::{
     UIGestureRecognizer, UIGestureRecognizerDelegate, UIGestureRecognizerState,
     UIImpactFeedbackGenerator, UIImpactFeedbackStyle, UILongPressGestureRecognizer, UIMenu,
-    UIMenuElement, UIPanGestureRecognizer, UIResponder, UIScrollView, UISelectionFeedbackGenerator,
-    UITapGestureRecognizer, UITouch, UITraitEnvironment, UIView,
+    UIMenuElement, UIPanGestureRecognizer, UIPress, UIPressesEvent, UIResponder, UIScrollView,
+    UISelectionFeedbackGenerator, UITapGestureRecognizer, UITouch, UITraitEnvironment, UIView,
 };
 
 use crate::{native_view::NshView, text_view::TextView};
@@ -369,6 +373,36 @@ define_class!(
                 self.clear_selection();
             }
             resigned
+        }
+
+        /// Hardware keys: Copy and Select All come as key commands
+        /// (`canPerformAction:withSender:`); the presses left go through
+        /// the area's raw key path ([`crate::keyboard::area_began`]), so
+        /// the area and its ancestors hear them while it holds the
+        /// selection, as a focused view's would.
+        #[unsafe(method(pressesBegan:withEvent:))]
+        fn presses_began(&self, presses: &NSSet<UIPress>, event: Option<&UIPressesEvent>) {
+            if !self.area_presses(presses, crate::keyboard::area_began) {
+                // SAFETY: calling the superclass implementation.
+                let _: () = unsafe { msg_send![super(self), pressesBegan: presses, withEvent: event] };
+            }
+        }
+
+        #[unsafe(method(pressesEnded:withEvent:))]
+        fn presses_ended(&self, presses: &NSSet<UIPress>, event: Option<&UIPressesEvent>) {
+            if !self.area_presses(presses, crate::keyboard::area_ended) {
+                // SAFETY: calling the superclass implementation.
+                let _: () = unsafe { msg_send![super(self), pressesEnded: presses, withEvent: event] };
+            }
+        }
+
+        #[unsafe(method(pressesCancelled:withEvent:))]
+        fn presses_cancelled(&self, presses: &NSSet<UIPress>, event: Option<&UIPressesEvent>) {
+            if !self.area_presses(presses, crate::keyboard::area_cancelled) {
+                // SAFETY: calling the superclass implementation.
+                let _: () =
+                    unsafe { msg_send![super(self), pressesCancelled: presses, withEvent: event] };
+            }
         }
 
         #[unsafe(method(canPerformAction:withSender:))]
@@ -765,6 +799,17 @@ impl AreaResponder {
         area.setUserInteractionEnabled(true);
         update_texts(area);
         this
+    }
+
+    /// Runs `path` (one of [`crate::keyboard`]'s area entries) for presses
+    /// delivered to the responder as the first responder: whether they
+    /// were consumed.
+    fn area_presses(
+        &self,
+        presses: &NSSet<UIPress>,
+        path: fn(&UIView, &NSSet<UIPress>) -> bool,
+    ) -> bool {
+        self.isFirstResponder() && self.superview().is_some_and(|area| path(&area, presses))
     }
 
     /// Whether JS listens to the area's `onSelectionChange`.
