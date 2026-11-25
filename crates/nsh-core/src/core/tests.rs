@@ -4674,7 +4674,7 @@ fn bottom_aligned_list_does_not_mount_scrolls_during_native_bounce() {
             },
             Op::SetProp {
                 id: 2,
-                prop: Prop::FollowEnd(Some(px(80.0))),
+                prop: Prop::FollowEnd(Some(px(80.0)), false),
             },
         ],
     );
@@ -4714,7 +4714,7 @@ fn rows_arriving_as_the_viewport_grows_keep_the_list_at_its_end() {
             },
             Op::SetProp {
                 id: 2,
-                prop: Prop::FollowEnd(Some(px(48.0))),
+                prop: Prop::FollowEnd(Some(px(48.0)), false),
             },
             Op::SetProp {
                 id: 2,
@@ -4763,7 +4763,7 @@ fn last_row_grows_at_end(revealing: bool) -> (f32, f32) {
         &mut c,
         vec![Op::SetProp {
             id: 2,
-            prop: Prop::FollowEnd(Some(px(80.0))),
+            prop: Prop::FollowEnd(Some(px(80.0)), false),
         }],
     );
     c.commit();
@@ -4820,6 +4820,138 @@ fn follow_end_keeps_its_place_while_the_last_row_reveals() {
     // Without its own animation, the row grows and the list follows.
     let (after, end) = last_row_grows_at_end(false);
     assert_eq!(after, end);
+}
+
+/// List 2 (follow_end 80 pt, `animated` as given) at its end with 100
+/// rows of 50 pt; returns the core and the cell showing the last row.
+fn list_following_its_end(animated: bool) -> (Core<FakeEngine>, u32) {
+    let mut c = core();
+    estimated_list(&mut c);
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::FollowEnd(Some(px(80.0)), animated),
+        }],
+    );
+    c.commit();
+    let (mut next_id, mut cells) = (100, Vec::new());
+    render_binds(&mut c, &mut next_id, &mut cells, 50.0);
+    c.commit();
+    c.apply(Op::Command {
+        id: 2,
+        command: Command::ScrollToEnd { animated: false },
+    })
+    .unwrap();
+    let mut at = scrolled(&c.commit().unwrap(), 0.0);
+    for _ in 0..4 {
+        render_binds(&mut c, &mut next_id, &mut cells, 50.0);
+        if let Some(batch) = c.commit() {
+            at = scrolled(&batch, at);
+        }
+    }
+    c.set_scroll_offset(2, point(px(0.0), px(at)), u32::MAX);
+    c.commit();
+    assert_eq!(at, 100.0 * 50.0 - 400.0, "at the end");
+    let last = *cells
+        .iter()
+        .max_by(|&&a, &&b| {
+            let y = |id| c.nodes[c.key(id).unwrap() as usize].frame.origin.y.0;
+            y(a).total_cmp(&y(b))
+        })
+        .unwrap();
+    (c, last)
+}
+
+/// List 2's scrolls in the commit after the last row (`cell`) becomes
+/// `height` tall: its `ScrollTo` commands (offset, animated) and its
+/// `ScrollBy` items.
+fn last_row_resized(
+    c: &mut Core<FakeEngine>,
+    cell: u32,
+    height: f32,
+) -> (Vec<(f32, bool)>, Vec<f32>) {
+    apply(
+        c,
+        vec![style_op(cell, &[("height", StyleValue::Number(height))])],
+    );
+    let (mut to, mut by) = (Vec::new(), Vec::new());
+    for item in c.commit().map(|b| b.items).unwrap_or_default() {
+        match item {
+            MountItem::Command {
+                id: 2,
+                command: Command::ScrollTo { y, animated, .. },
+            } => to.push((y.0, animated)),
+            MountItem::ScrollBy { id: 2, dy, .. } => by.push(dy.0),
+            _ => {}
+        }
+    }
+    (to, by)
+}
+
+#[test]
+fn follow_end_animated_animates_a_large_step_of_the_end() {
+    // A chart appears in the last row: 300 pt at once.
+    let (mut c, last) = list_following_its_end(true);
+    let end = 100.0 * 50.0 + 300.0 - 400.0;
+    assert_eq!(
+        last_row_resized(&mut c, last, 350.0),
+        (vec![(end, true)], vec![]),
+        "an animated scroll to the new end, no jump"
+    );
+    // Without `animated`, the list jumps there as before.
+    let (mut c, last) = list_following_its_end(false);
+    assert_eq!(last_row_resized(&mut c, last, 350.0), (vec![], vec![300.0]));
+}
+
+#[test]
+fn follow_end_animated_follows_small_steps_at_once() {
+    // A line of text streaming in: an animation restarted on every
+    // commit would lag behind it.
+    let (mut c, last) = list_following_its_end(true);
+    assert_eq!(last_row_resized(&mut c, last, 70.0), (vec![], vec![20.0]));
+}
+
+#[test]
+fn follow_end_animated_retargets_while_the_content_grows() {
+    let (mut c, last) = list_following_its_end(true);
+    let end = 100.0 * 50.0 - 400.0;
+    assert_eq!(
+        last_row_resized(&mut c, last, 350.0),
+        (vec![(end + 300.0, true)], vec![])
+    );
+    // Halfway there, the reported offset is not the user leaving the end.
+    c.set_scroll_offset(2, point(px(0.0), px(end + 150.0)), u32::MAX);
+    let batch = c.commit();
+    assert_eq!(
+        batch.map_or(end + 150.0, |b| scrolled(&b, end + 150.0)),
+        end + 150.0
+    );
+    // The row grows on: the animation's target moves to the new end.
+    assert_eq!(
+        last_row_resized(&mut c, last, 450.0),
+        (vec![(end + 400.0, true)], vec![])
+    );
+    // Landed, the list follows small steps at once again.
+    c.set_scroll_offset(2, point(px(0.0), px(end + 400.0)), u32::MAX);
+    c.commit();
+    assert_eq!(last_row_resized(&mut c, last, 470.0), (vec![], vec![20.0]));
+}
+
+#[test]
+fn follow_end_animated_stops_when_the_user_scrolls_away() {
+    let (mut c, last) = list_following_its_end(true);
+    let end = 100.0 * 50.0 - 400.0;
+    assert_eq!(
+        last_row_resized(&mut c, last, 350.0),
+        (vec![(end + 300.0, true)], vec![])
+    );
+    c.set_scroll_offset(2, point(px(0.0), px(end + 150.0)), u32::MAX);
+    c.commit();
+    // A drag back up, away from where the animation goes.
+    c.set_scroll_offset(2, point(px(0.0), px(end - 200.0)), u32::MAX);
+    c.commit();
+    assert_eq!(last_row_resized(&mut c, last, 450.0), (vec![], vec![]));
 }
 
 #[test]
@@ -25205,6 +25337,76 @@ mod views {
         });
         assert_eq!(texts(&c.commit().unwrap()), ["woke 1"]);
         assert_eq!(WAKE_RUNS.with(Cell::get), 2);
+    }
+
+    thread_local! {
+        static RESERVED_RUNS: Cell<u32> = const { Cell::new(0) };
+    }
+
+    /// Shows the regions the device reserves; its effect counts its runs.
+    #[component]
+    fn Reserved() -> impl IntoElement {
+        effect(move || {
+            reserved_regions();
+            RESERVED_RUNS.with(|n| n.set(n.get() + 1));
+        });
+        text(move || {
+            let regions = reserved_regions();
+            let shown: Vec<String> = regions
+                .iter()
+                .map(|r| format!("{} {}", r.kind.name(), r.bounds.right().0))
+                .collect();
+            format!("reserved [{}]", shown.join(", "))
+        })
+    }
+
+    #[test]
+    fn the_reserved_regions_reach_components_and_notify_only_when_they_change() {
+        use crate::platform::{ReservedRegion, ReservedRegionKind, ReservedRegions};
+        RESERVED_RUNS.with(|n| n.set(0));
+        let mut c = core();
+        c.mount_root(&Root::new::<Reserved>(|| ()));
+        assert_eq!(texts(&c.commit().unwrap()), ["reserved []"]);
+        // Another part of the environment changes: the effect stays.
+        let mut environment = crate::element::Environment {
+            dark: true,
+            ..Default::default()
+        };
+        c.set_environment(environment);
+        c.commit();
+        assert_eq!(RESERVED_RUNS.with(Cell::get), 1);
+        // A partly folded display: its fold down the middle.
+        let fold = ReservedRegion::new(
+            ReservedRegionKind::Division,
+            crate::geometry::Bounds::new(
+                crate::geometry::point(px(460.0), px(0.0)),
+                crate::geometry::size(px(31.0), px(669.0)),
+            ),
+        );
+        environment.reserved_regions = ReservedRegions::new([fold]);
+        c.set_environment(environment);
+        assert_eq!(texts(&c.commit().unwrap()), ["reserved [division 491]"]);
+        assert_eq!(RESERVED_RUNS.with(Cell::get), 2);
+        // Fully open again.
+        environment.reserved_regions = ReservedRegions::NONE;
+        c.set_environment(environment);
+        assert_eq!(texts(&c.commit().unwrap()), ["reserved []"]);
+        assert_eq!(RESERVED_RUNS.with(Cell::get), 3);
+    }
+
+    #[test]
+    fn reserved_regions_keep_the_first_eight() {
+        use crate::platform::{ReservedRegion, ReservedRegions};
+        let regions = ReservedRegions::new((0..10).map(|i| ReservedRegion {
+            bounds: crate::geometry::Bounds::new(
+                crate::geometry::point(px(i as f32), px(0.0)),
+                crate::geometry::size(px(1.0), px(1.0)),
+            ),
+            ..Default::default()
+        }));
+        assert_eq!(regions.len(), ReservedRegions::CAPACITY);
+        assert_eq!(regions.as_slice()[7].bounds.origin.x, px(7.0));
+        assert!(ReservedRegions::default().is_empty());
     }
 
     thread_local! {

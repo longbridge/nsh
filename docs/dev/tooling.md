@@ -849,7 +849,8 @@ window too; a window without a surface is drawn into the bitmap instead. A step 
 that moves: a signature of every shown view's place, offset, scroll position and opacity, compared between looks. The
 system's appearance is the device's night mode, which the CLI switches (`cmd uimode night`) and restores. All of them
 use `nsh_testing::agent::Tester`, which turns the dev client's
-test events into an agent's steps on a `Worker` thread.
+test events into an agent's steps on a `Worker` thread. Events come on the client's thread from the moment it starts,
+so answers wait until the host hands its client to the `Tester` (`Tester::set_client`).
 These hosts are also how a change to a platform is checked by hand: `nsh test <entry> --target <platform>` with steps
 on standard input (`app.screenshot("a.png")`, `app.press(…)`) opens the app in the platform's window, takes them and
 closes it.

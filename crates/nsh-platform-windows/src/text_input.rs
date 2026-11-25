@@ -2624,6 +2624,7 @@ fn paste(surface: &Surface, view: &NshView, input: &InputState) {
     let text = crate::system::clipboard_text();
     if view.state().events.contains(EventKind::Paste) {
         let mut paste = nsh_core::PasteEvent::new(text.clone().unwrap_or_default());
+        paste.html = crate::system::clipboard_html().unwrap_or_default();
         if let Some(image) = crate::system::clipboard_image() {
             paste.files.push(nsh_core::PastedFile::image(image));
         }

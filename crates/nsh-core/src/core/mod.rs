@@ -6388,9 +6388,9 @@ impl<M: TextEngine> Core<M> {
                     }
                 }
             }
-            Prop::FollowEnd(threshold) => {
+            Prop::FollowEnd(threshold, animated) => {
                 if let Some(list) = node.list.as_mut() {
-                    list.set_follow_end(threshold.map(|t| t.0));
+                    list.set_follow_end(threshold.map(|t| t.0), animated);
                     if list.parent {
                         self.warn_ignored(key);
                     }
@@ -11263,6 +11263,15 @@ impl<M: TextEngine> Core<M> {
             Follow::Stay => {}
             Follow::By(delta) => anchor += delta,
             Follow::To(offset) => retarget = Some(offset),
+        }
+        // `maintainVisibleContentPosition={{ animated }}`: the end moved
+        // away by a large step, so the list animates there instead of
+        // jumping, and the pin keeps the animation's target at the end as
+        // the content goes on growing.
+        if list.take_animated_end() {
+            let end = list.target_offset(PinTarget::End);
+            list.pin(Some(PinTarget::End), end, true);
+            retarget = Some(end);
         }
 
         // The End key's commands, if any, are resolved below with the

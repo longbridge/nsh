@@ -102,6 +102,12 @@ const LEAD_DECAY: f32 = 0.75;
 const END_THRESHOLD: f32 = 1.0;
 /// Default `loadMoreAtStartThreshold`, in viewports.
 const START_THRESHOLD: f32 = 1.0;
+/// With `maintainVisibleContentPosition={{ animated }}`: how far the end
+/// must move away at once, in viewports, for the list to animate there
+/// rather than jump. Text streaming into the last row moves it a line or
+/// two per commit and keeps following at once: an animation restarted on
+/// every commit would lag behind it.
+const ANIMATED_FOLLOW_STEP: f32 = 0.25;
 
 /// Which of a list's load-more events a window update raises
 /// ([`ListState::update_window`]).
@@ -347,6 +353,13 @@ pub(super) struct ListState {
     /// a list that is not inverted follows the end of its content while
     /// it is within this distance of it.
     pub(super) follow_end: Option<f32>,
+    /// `maintainVisibleContentPosition`'s `animated`: with `follow_end`, an
+    /// end that moves away by [`ANIMATED_FOLLOW_STEP`] or more at once is
+    /// followed by an animated scroll pinned to the end.
+    follow_end_animated: bool,
+    /// [`ListState::anchor_end`] left a large step of the end to an
+    /// animated scroll the core sends ([`ListState::take_animated_end`]).
+    animated_end: bool,
     /// Where the list rests ([`ListAlignment`]; an inverted list ignores it).
     pub(super) alignment: ListAlignment,
     /// `stickyHeaderIndices`, sorted.
@@ -477,6 +490,8 @@ impl ListState {
             horizontal: false,
             inverted: false,
             follow_end: None,
+            follow_end_animated: false,
+            animated_end: false,
             alignment: ListAlignment::Top,
             sticky: Vec::new(),
             kept: Vec::new(),
@@ -1530,7 +1545,8 @@ impl ListState {
         }
     }
 
-    pub(super) fn set_follow_end(&mut self, threshold: Option<f32>) {
+    pub(super) fn set_follow_end(&mut self, threshold: Option<f32>, animated: bool) {
+        self.follow_end_animated = animated;
         if self.parent {
             self.ignored |= if threshold.is_some() {
                 ignored::FOLLOW_END
@@ -1707,8 +1723,14 @@ impl ListState {
     /// `kept` is how far this commit's measurements moved the offset to keep
     /// the visible rows in place: that move says nothing about where the user
     /// is, so a list at its end is still at its end.
+    ///
+    /// With `follow_end_animated`, a step of [`ANIMATED_FOLLOW_STEP`] or more
+    /// is left to an animated scroll to the end
+    /// ([`ListState::take_animated_end`]), and while that scroll is in flight
+    /// its pin follows the end, not this.
     pub(super) fn anchor_end(&mut self, kept: f32) -> f32 {
         self.measured_scroll = 0.0;
+        self.animated_end = false;
         let revealing = std::mem::take(&mut self.revealing);
         if self.viewport <= 0.0 {
             return 0.0;
@@ -1749,6 +1771,18 @@ impl ListState {
                 return 0.0;
             }
             let delta = end - self.offset;
+            if self.follow_end_animated && self.follow_end.is_some() && !opening {
+                if self.animating_to_end() {
+                    // The scroll in flight lands at the end: a jump under it
+                    // would cut it short.
+                    return 0.0;
+                }
+                if delta >= self.viewport * ANIMATED_FOLLOW_STEP {
+                    // The platform animates there from where the list is.
+                    self.animated_end = true;
+                    return 0.0;
+                }
+            }
             self.offset = end;
             return delta;
         }
@@ -1761,6 +1795,25 @@ impl ListState {
         self.anchored_end = end;
         self.offset += delta;
         delta
+    }
+
+    /// Whether the last [`ListState::anchor_end`] left the end to an animated
+    /// scroll, once: the core pins the end and sends the scroll.
+    pub(super) fn take_animated_end(&mut self) -> bool {
+        std::mem::take(&mut self.animated_end)
+    }
+
+    /// An animated scroll to the end is in flight (`scrollToEnd` or a
+    /// large step of the end followed with `follow_end_animated`).
+    fn animating_to_end(&self) -> bool {
+        matches!(
+            self.pin,
+            Some(Pin {
+                target: PinTarget::End,
+                animating: true,
+                ..
+            })
+        )
     }
 
     /// The last row is not measured yet but will be: the window reaches it.
@@ -2856,7 +2909,7 @@ mod tests {
     #[test]
     fn lists_follow_the_end_within_the_threshold() {
         let mut l = list(100, 50.0, 400.0);
-        l.set_follow_end(Some(10.0));
+        l.set_follow_end(Some(10.0), false);
         assert_eq!(l.anchor_end(0.0), 0.0, "starts where it is");
         // At the end: the last item grows by 30, the list follows.
         l.offset = 5000.0 - 400.0;
@@ -3577,7 +3630,7 @@ mod tests {
         // Sticky rows stay: they stick to the view around the list.
         assert!(!l.inverted && l.sticky_enabled());
         assert_eq!(l.ignored, ignored::INVERTED);
-        l.set_follow_end(Some(10.0));
+        l.set_follow_end(Some(10.0), false);
         assert_eq!(l.follow_end, None);
         assert_ne!(l.ignored & ignored::FOLLOW_END, 0);
     }
@@ -3586,7 +3639,7 @@ mod tests {
     fn back_to_its_own_scroll_view_a_list_gets_back_what_parent_mode_set_aside() {
         let mut l = list(100, 50.0, 400.0);
         l.set_inverted(true);
-        l.set_follow_end(Some(10.0));
+        l.set_follow_end(Some(10.0), false);
         l.set_parent(true);
         l.set_parent(false);
         assert!(l.inverted);

@@ -14,7 +14,7 @@ use nsh_core::{
 use super::{
     EditorDecoration, EditorDiagnosticSeverity, EditorPart, EditorProps,
     controller::Ed,
-    state::{GutterMark, GutterPlace, LabelKey, RowContent, RulerMark, SpanFont, SpanTags},
+    state::{GutterMark, GutterPlace, RowContent, RulerMark, SpanFont, SpanLabel, SpanTags},
 };
 use crate::{input, theme};
 
@@ -1287,10 +1287,9 @@ fn spans(ed: Ed, slot: ReadSignal<(usize, usize)>, content: RowContent) -> Vec<A
     {
         let st = ed.st.borrow();
         for span in content.spans {
-            if let Some(item) = span.label {
-                if let Some(d) = st.decoration_items.get(item) {
-                    let key = st.label_key(item, span.font.as_ref());
-                    out.push(label_box(&ed, d, key, span.font, span.text).into_element());
+            if let Some(label) = span.label {
+                if let Some(d) = st.decoration_items.get(label.item) {
+                    out.push(label_box(&ed, label, d, span.font, span.text).into_element());
                 }
                 continue;
             }
@@ -1367,24 +1366,30 @@ fn spans(ed: Ed, slot: ReadSignal<(usize, usize)>, content: RowContent) -> Vec<A
     out
 }
 
-/// A replacing decoration's label in its row, in place of `source` (the
-/// range's text): a box of the decoration's `labelClass` and `labelStyle`
-/// holding its label in `font` (the decorations' font around it, else the
-/// editor's), centered on the row's text, its lines as tall as
+/// The label of replacing decoration `d` (`label`) in its row, in place of
+/// `source` (the range's text): a box of the decoration's `labelClass` and
+/// `labelStyle` holding its label in `font` (the decorations' font around
+/// it, else the editor's), centered on the row's text, its lines as tall as
 /// the font (so padding keeps it within the row unless the app sets
 /// another `leading-*`). The box reports the width it was laid out at
 /// (its margins included, as the outer box's) for the caret and presses
-/// after it; copies and screen readers take the range's text, and presses
-/// pass to the rows below, as on the text.
+/// after this decoration's range; copies and screen readers take the
+/// range's text, and presses pass to the rows below, as on the text.
+///
+/// The box is keyed by its decoration, look and font. A row made again
+/// keeps a box only for the same label: a kept box's listener hears the
+/// frame it was last laid out at, before the new content is, which for
+/// another label's box would be that label's width reported as this one's.
 fn label_box(
     ed: &Ed,
+    label: SpanLabel,
     d: &EditorDecoration,
-    key: LabelKey,
     font: Option<SpanFont>,
     source: String,
 ) -> View {
+    let SpanLabel { item, key } = label;
     let width_ed = ed.clone();
-    let mut outer = view();
+    let mut outer = view().key(format!("label:{item}:{:x}:{:x}", key.0, key.1));
     if let Some(font) = font {
         // Inherited, so the box's classes can still set another.
         outer = outer
@@ -1398,7 +1403,7 @@ fn label_box(
         .copy_text(SharedString::from(source.clone()))
         .accessible(true)
         .label(SharedString::from(source))
-        .on_layout(move |b: &Bounds<Points>| width_ed.set_label_width(key, b.size.width))
+        .on_layout(move |b: &Bounds<Points>| width_ed.set_label_width(item, key, b.size.width))
         .child(
             view()
                 .app_class(d.label_class.clone())

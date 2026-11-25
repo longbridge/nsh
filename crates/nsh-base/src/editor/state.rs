@@ -114,11 +114,21 @@ pub(crate) struct Span {
     /// The diagnostics over it: their tags (faded, struck through) and
     /// the most serious one's underline.
     pub(crate) tags: SpanTags,
-    /// A replaced range's label, shown in place of `text` (the range's):
-    /// its decoration, an index into the editor's decorations.
-    pub(crate) label: Option<usize>,
+    /// A replaced range's label, shown in place of `text` (the range's).
+    pub(crate) label: Option<SpanLabel>,
     /// What an input method is composing, not in the text yet.
     pub(crate) composition: bool,
+}
+
+/// A replaced range's label in a row: its decoration and its look and
+/// font. A row whose label changes look or font is a new row's content,
+/// so its box is made again rather than kept with the old label.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SpanLabel {
+    /// Its decoration, an index into the editor's decorations.
+    pub(crate) item: usize,
+    /// Its look and font ([`State::label_key`]).
+    pub(crate) key: LabelKey,
 }
 
 /// The diagnostics over a span: how its text is drawn.
@@ -299,7 +309,15 @@ pub(crate) struct State {
     /// Each decoration's label look (its label, classes and style) as a
     /// key of `label_widths`; 0 without a label.
     pub(crate) label_keys: Vec<u64>,
-    /// The widths labels' boxes were laid out at, by look and font.
+    /// The width each labeled decoration's own box was laid out at, by
+    /// its index in `decoration_items`, with the look and font it was laid
+    /// out in.
+    laid_labels: FxHashMap<usize, (LabelKey, f32)>,
+    /// What a label whose box has not been laid out yet is taken to be,
+    /// by look and font: the width the first box of that look and font
+    /// reported. Never changed by later reports, so boxes of one look that
+    /// disagree (each in its own context) cannot keep laying the rows out
+    /// again: each keeps its own width in `laid_labels`.
     label_widths: FxHashMap<LabelKey, f32>,
     /// The labeled decorations a selection touches (indexes into
     /// `labeled`), as last shown.
@@ -388,6 +406,7 @@ impl State {
             labeled: Vec::new(),
             label_reach: 0,
             label_keys: Vec::new(),
+            laid_labels: FxHashMap::default(),
             label_widths: FxHashMap::default(),
             touched: Vec::new(),
             labels_dirty: false,
@@ -610,7 +629,9 @@ impl State {
         }
         self.display.rebuild(&self.buffer);
         // Labels not measured yet take the new font's widths (their lines
-        // laid out again over the new rows).
+        // laid out again over the new rows), until a box of their look
+        // reports again.
+        self.label_widths.clear();
         self.labels_dirty = true;
         self.sync_labels();
         if let Some(h) = &mut self.highlighter {
@@ -1119,13 +1140,15 @@ impl State {
                 .find(|(r, _)| r.start <= start && end <= r.end)
             {
                 if start == r.start {
+                    let font = self.label_font(r.start);
+                    let key = self.label_key(*item, font.as_ref());
                     spans.push(Span {
                         text: self.buffer.slice(r.clone()),
                         token: None,
-                        font: self.label_font(r.start),
+                        font,
                         decorations: Vec::new(),
                         tags: SpanTags::default(),
-                        label: Some(*item),
+                        label: Some(SpanLabel { item: *item, key }),
                         composition: false,
                     });
                 }
@@ -1289,6 +1312,17 @@ impl State {
         items: Vec<EditorDecoration>,
     ) {
         self.decoration_reach = app_highlight::reach(&marks);
+        // A labeled decoration the app gives again (its range and look)
+        // keeps the width its box was laid out at.
+        let laid: FxHashMap<(usize, usize, u64), (LabelKey, f32)> = self
+            .labeled
+            .iter()
+            .filter_map(|m| {
+                let width = self.laid_labels.get(&m.item)?;
+                let look = *self.label_keys.get(m.item)?;
+                Some(((m.range.start, m.range.end, look), *width))
+            })
+            .collect();
         self.labeled = marks
             .iter()
             .filter(|m| items[m.item].label.is_some())
@@ -1296,6 +1330,18 @@ impl State {
             .collect();
         self.label_reach = app_highlight::reach(&self.labeled);
         self.label_keys = items.iter().map(label_key).collect();
+        self.laid_labels = if laid.is_empty() {
+            FxHashMap::default()
+        } else {
+            self.labeled
+                .iter()
+                .filter_map(|m| {
+                    let look = self.label_keys[m.item];
+                    let width = laid.get(&(m.range.start, m.range.end, look))?;
+                    Some((m.item, *width))
+                })
+                .collect()
+        };
         // The widths of looks no decoration has any more go.
         let keys: FxHashSet<u64> = self.label_keys.iter().copied().collect();
         self.label_widths.retain(|key, _| keys.contains(&key.0));
@@ -1330,19 +1376,32 @@ impl State {
         self.sync_labels()
     }
 
-    /// A label's box was laid out `width` wide (`key`: its look and font,
-    /// [`Self::label_key`]). Whether the rows changed.
-    pub(crate) fn set_label_width(&mut self, key: LabelKey, width: f32) -> bool {
-        if key.0 == 0
-            || !width.is_finite()
-            || self
-                .label_widths
-                .get(&key)
-                .is_some_and(|w| (w - width).abs() < 0.01)
-        {
+    /// The box of decoration `item`'s label was laid out `width` wide
+    /// (`key`: its look and font, [`Self::label_key`]). Whether the rows
+    /// changed.
+    ///
+    /// Each decoration's range takes its own box's width: boxes of one
+    /// look can be laid out a little apart (each in its own row's styles),
+    /// and a width shared by every box of a look would follow whichever
+    /// reported last, laying out every row again for each, without end.
+    /// The first box of a look and font also gives the width of those not
+    /// laid out yet ([`Self::label_width`]), once, so each box changes the
+    /// rows at most once for what it reports.
+    pub(crate) fn set_label_width(&mut self, item: usize, key: LabelKey, width: f32) -> bool {
+        if key.0 == 0 || !width.is_finite() || self.label_keys.get(item) != Some(&key.0) {
             return false;
         }
-        self.label_widths.insert(key, width);
+        let first = !self.label_widths.contains_key(&key);
+        if first {
+            self.label_widths.insert(key, width);
+        }
+        let same = self
+            .laid_labels
+            .insert(item, (key, width))
+            .is_some_and(|(k, w)| k == key && (w - width).abs() < 0.01);
+        if same && !first {
+            return false;
+        }
         self.labels_dirty = true;
         self.sync_labels()
     }
@@ -1407,10 +1466,17 @@ impl State {
     }
 
     /// How wide decoration `item`'s label at byte `at` is: as its box was
-    /// laid out, or its text in its font until then.
+    /// laid out in its font, else as the first box of its look and font
+    /// was, else its text in its font.
     fn label_width(&self, item: usize, at: usize) -> f32 {
         let font = self.label_font(at);
-        if let Some(width) = self.label_widths.get(&self.label_key(item, font.as_ref())) {
+        let key = self.label_key(item, font.as_ref());
+        if let Some((laid, width)) = self.laid_labels.get(&item)
+            && *laid == key
+        {
+            return *width;
+        }
+        if let Some(width) = self.label_widths.get(&key) {
             return *width;
         }
         self.decoration_items
@@ -2855,7 +2921,7 @@ mod tests {
         st.row_content(st.display.line_row(line), None)
             .spans
             .into_iter()
-            .map(|span| (span.text, span.label))
+            .map(|span| (span.text, span.label.map(|l| l.item)))
             .collect()
     }
 
@@ -2893,8 +2959,8 @@ mod tests {
         assert_eq!(st.offset_at(Pt::new(px(70.0), px(5.0))), 15);
         // The width its box was laid out at, once.
         let key = st.label_key(0, None);
-        assert!(st.set_label_width(key, 80.0));
-        assert!(!st.set_label_width(key, 80.0));
+        assert!(st.set_label_width(0, key, 80.0));
+        assert!(!st.set_label_width(0, key, 80.0));
         assert_eq!(st.caret_point(15).x, px(112.0));
         // The same look elsewhere takes that width at once.
         decorate(
@@ -2906,6 +2972,48 @@ mod tests {
         assert_eq!(st.buffer.slice(0..18), "due @2026-11-25 ok");
         st.set_search(Some(EditorSearch::new("2026")));
         assert_eq!(st.matches, vec![5..9]);
+    }
+
+    /// Boxes of one look laid out a little apart (each in its own row)
+    /// report their widths again whenever they are laid out: the rows
+    /// settle after one change per box, each range going by its own box.
+    #[test]
+    fn label_boxes_of_one_look_that_disagree_settle() {
+        let mut st = state("- a\n  - b\n    - c\n");
+        let items = || {
+            vec![
+                labeled(0, 0, 2, "•"),
+                labeled(1, 2, 4, "•"),
+                labeled(2, 4, 6, "◦"),
+            ]
+        };
+        decorate(&mut st, items());
+        let (line1, line2) = (st.buffer.line_start(1), st.buffer.line_start(2));
+        // The label's text in the editor's font (8 points) until a box
+        // reports.
+        assert_eq!(st.caret_point(2).x, px(8.0));
+        let key = st.label_key(0, None);
+        assert_eq!(key, st.label_key(1, None));
+        let mut relaid = 0;
+        for _ in 0..10 {
+            relaid += usize::from(st.set_label_width(0, key, 6.0));
+            relaid += usize::from(st.set_label_width(1, key, 6.5));
+        }
+        assert_eq!(relaid, 2, "one change per box");
+        // Each range goes by its own box.
+        assert_eq!(st.caret_point(2).x, px(6.0));
+        assert_eq!(st.caret_point(line1 + 4).x, px(16.0 + 6.5));
+        // Another look is not theirs.
+        assert_eq!(st.caret_point(line2 + 6).x, px(32.0 + 8.0));
+        // The app giving the same decorations again keeps the widths.
+        decorate(&mut st, items());
+        assert_eq!(st.caret_point(2).x, px(6.0));
+        assert_eq!(st.caret_point(line1 + 4).x, px(16.0 + 6.5));
+        assert!(!st.set_label_width(0, key, 6.0));
+        assert!(!st.set_label_width(1, key, 6.5));
+        // A report for a decoration of another look is not this one's.
+        assert!(!st.set_label_width(2, key, 30.0));
+        assert_eq!(st.caret_point(line2 + 6).x, px(32.0 + 8.0));
     }
 
     #[test]
@@ -3009,7 +3117,7 @@ mod tests {
                 .row_content(0, st.composing().as_ref())
                 .spans
                 .into_iter()
-                .map(|s| (s.text, s.label, s.composition))
+                .map(|s| (s.text, s.label.map(|l| l.item), s.composition))
                 .collect::<Vec<_>>();
             st.composition = None;
             spans
@@ -3060,7 +3168,7 @@ mod tests {
             .row_content(0, None)
             .spans
             .into_iter()
-            .map(|s| (s.text, s.label, s.font))
+            .map(|s| (s.text, s.label.map(|l| l.item), s.font))
             .collect();
         assert_eq!(
             spans,
@@ -3071,8 +3179,8 @@ mod tests {
             ]
         );
         // Its width is kept by its look and font.
-        assert!(!st.set_label_width(st.label_key(1, None), 100.0));
-        assert!(st.set_label_width(st.label_key(1, Some(&big)), 100.0));
+        assert!(!st.set_label_width(1, st.label_key(1, None), 100.0));
+        assert!(st.set_label_width(1, st.label_key(1, Some(&big)), 100.0));
         assert_eq!(st.caret_point(8).x, px(196.0));
         // Touched, its text shows in the heading's font.
         st.set_focused(true);

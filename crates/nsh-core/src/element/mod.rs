@@ -246,7 +246,8 @@ pub use crate::{
     platform::{
         Appearance, CellularData, HourCycle, HttpBody, HttpHead, HttpRequest, Idiom, Languages,
         Lifecycle, Locale, LocaleSettings, MeasurementSystem, Network, NetworkKind, Os, PerfStats,
-        SizeClass, TemperatureUnit, TimeZone, Weekday,
+        ReservedRegion, ReservedRegionKind, ReservedRegions, SizeClass, TemperatureUnit, TimeZone,
+        Weekday,
     },
     style::Color,
 };
@@ -257,6 +258,7 @@ pub mod __private {
     pub use serde_json::Map as JsonMap;
 
     pub use super::component::BY_NAME_MARKER;
+    pub use crate::shader::USE_MARKER as SHADER_USE_MARKER;
 
     /// The type of a props struct's field `I` as its setter takes it (the
     /// value of an `Option`): `#[derive(Props)]` implements it where the

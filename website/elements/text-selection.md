@@ -181,7 +181,7 @@ An [`Input`](./input.md)'s `onSelectionChange` is its own: the caret and selecti
 
 | Platform | How a selection is made |
 |---|---|
-| macOS, Windows, Linux, GPUI | Drag across the texts; a double click selects a word, a triple click a paragraph, and a drag after them goes on by words or paragraphs. Shift+click extends the selection. Ctrl / Cmd+A selects everything in the view, Ctrl / Cmd+C copies, Escape or a press outside clears. |
+| macOS, Windows, Linux, GPUI | Drag across the texts; a double click selects a word, a triple click a paragraph, and a drag after them goes on by words or paragraphs. Shift+click extends the selection. Ctrl / Cmd+A selects everything in the view, Ctrl / Cmd+C copies, Escape or a press outside clears. On macOS, Shift with the arrow keys extends a selectable view's selection from where it was pressed, as in a text view: by a character or a line, with Option by a word or a paragraph, with Cmd to the line's or the view's ends (Shift+Home / End too). |
 | iOS, Android | A long press selects a word; the platform's handles extend it, and its edit menu has Copy and Select All. |
 | Web | The browser's own selection, with its gestures, menu and shortcuts. |
 
