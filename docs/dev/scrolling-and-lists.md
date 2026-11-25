@@ -22,7 +22,8 @@
   by `ScrollBehavior::snap_target` (core) on iOS and its Java port on Android, from the release offset, the projected glide and
   the velocity. Lists scrolled past their start keep the visible rows in place when items are inserted above them
   (`splice`) or rows above them are measured (`measured`), as a browser's scroll anchoring does, anchored on the first row
-  that starts in the viewport (a row the viewport's start cuts through counts as above it, `ListState::reading_anchor`); at their start the rows that arrive
+  that starts in the viewport (a row the viewport's start cuts through counts as above it, `ListState::reading_anchor`; for measurements only while it was never
+  measured, since a row on screen is measured when it first shows); at their start the rows that arrive
   show, unless the list loads pages at its start (`onLoadMoreAtStart`: the page it prepends keeps the rows in place there too). Keyed changes
   (`keyExtractor`, or item identity; Rust's `.keys`) are matched row by row (`nsh_core::list_diff`, the core's
   `ListState::reorder`): a row that stays keeps its cell, its content and its measured size wherever it moves, and so

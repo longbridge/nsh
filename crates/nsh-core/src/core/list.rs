@@ -1598,9 +1598,14 @@ impl ListState {
 
     /// Records a measured size. Returns the change if the item's row lies
     /// above the visible rows (the caller scrolls by it so the visible
-    /// content stays put): entirely before the viewport, or cut by the
-    /// viewport's start with the next row starting in view, the row a
-    /// change of the items keeps in place ([`Self::reading_anchor`]).
+    /// content stays put): entirely before the viewport, or, measured for
+    /// the first time, cut by the viewport's start with the next row
+    /// starting in view, the row a change of the items keeps in place
+    /// ([`Self::reading_anchor`]). A row is measured in the layout that
+    /// first shows it, so one cut at its first measurement was never seen
+    /// (rows inserted right after a cut row): its estimate only placed it.
+    /// A row already measured is being read and keeps its start, the rows
+    /// below it moving.
     pub(super) fn measured(&mut self, i: u32, size: f32) -> f32 {
         let idx = i as usize;
         if idx >= self.sizes.len() || self.sizes[idx] == size {
@@ -1610,8 +1615,10 @@ impl ListState {
         let before = self.row_size(row);
         let row_start = self.item_at(i);
         let natural = self.measuring_natural_offset();
+        let unseen = self.sizes[idx].is_nan();
         let above_viewport = row_start < natural
-            && (row_start + before <= natural || self.cut_above_a_row_in_view(row, natural));
+            && (row_start + before <= natural
+                || (unseen && self.cut_above_a_row_in_view(row, natural)));
         let keep = above_viewport && self.keeps_visible_rows_at(natural);
         self.sizes[idx] = size;
         let delta = self.row_size(row) - before;
@@ -2362,10 +2369,10 @@ mod tests {
         scroll
     }
 
-    /// A row the viewport's start cuts through counts as above the visible
-    /// rows, as for a change of the items ([`ListState::reading_anchor`]):
-    /// measured smaller or larger than its estimate, the first row that
-    /// starts in view stays where it is.
+    /// A row the viewport's start cuts through, measured for the first
+    /// time, counts as above the visible rows, as for a change of the items
+    /// ([`ListState::reading_anchor`]): measured smaller or larger than its
+    /// estimate, the first row that starts in view stays where it is.
     #[test]
     fn a_row_cut_by_the_viewport_measured_keeps_the_rows_below() {
         for (size, scroll) in [(46.0, -4.0), (80.0, 30.0)] {
@@ -2386,6 +2393,19 @@ mod tests {
         assert!(l.item_at(21) < l.offset);
         assert_eq!(measure(&mut l, 21, 46.0), -4.0);
         assert_eq!(l.item_at(22) - l.offset, 20.0);
+    }
+
+    /// A row the viewport's start cuts through that was measured before
+    /// is being read: measured again (its content changed), it keeps its
+    /// start and the rows below it move.
+    #[test]
+    fn a_measured_row_cut_by_the_viewport_keeps_its_start() {
+        let mut l = list(100, 50.0, 400.0);
+        measure(&mut l, 20, 50.0);
+        l.offset = 1010.0;
+        assert_eq!(measure(&mut l, 20, 180.0), 0.0);
+        assert_eq!(l.item_at(20) - l.offset, -10.0);
+        assert_eq!(l.item_at(21) - l.offset, 170.0);
     }
 
     #[test]
