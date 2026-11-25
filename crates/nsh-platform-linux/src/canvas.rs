@@ -111,6 +111,9 @@ pub(crate) struct CanvasState {
     split: usize,
     split_path: bool,
     dirty: Cell<Damage>,
+    /// While `dirty` is a `Rect`: the [`DAMAGE_TILE`] cells it is made of
+    /// (empty for "all of the rect").
+    dirty_tiles: RefCell<DirtyTiles>,
     /// Out of sight with something to draw ([`reveal`]).
     hidden: Cell<bool>,
     /// Finds what animated slots paint, and the slots that changed (reused).
@@ -129,6 +132,7 @@ impl Default for CanvasState {
             split: 0,
             split_path: true,
             dirty: Cell::new(Damage::All),
+            dirty_tiles: RefCell::default(),
             hidden: Cell::new(false),
             scan: DamageScan::default(),
             changed: Vec::new(),
@@ -208,6 +212,88 @@ pub(crate) fn in_sight(view: &NshView) -> bool {
 
 /// The side of a canvas' tiles, in pixels.
 const TILE: i32 = 256;
+
+/// The side of the cells, in view points, a partial redraw is tracked in:
+/// separate changes redraw their own cells, not the box around them all.
+const DAMAGE_TILE: f32 = 64.0;
+/// Cells tracked before a partial redraw falls back to the box around them.
+const MAX_DAMAGE_TILES: usize = 64;
+
+/// The [`DAMAGE_TILE`] cells (column, row) that changed, sorted; empty
+/// when the damaged rect is to be redrawn whole (none tracked, or too many).
+#[derive(Default)]
+struct DirtyTiles {
+    cells: Vec<(i32, i32)>,
+    overflow: bool,
+}
+
+impl DirtyTiles {
+    /// Marks the cells `areas` cover.
+    fn add(&mut self, areas: &[nsh_core::geometry::Bounds<nsh_core::geometry::Points>]) {
+        for a in areas {
+            if self.overflow {
+                return;
+            }
+            let (x0, y0) = (a.origin.x.0, a.origin.y.0);
+            let (x1, y1) = (x0 + a.size.width.0, y0 + a.size.height.0);
+            let cell = |v: f32| (v / DAMAGE_TILE).floor() as i32;
+            let (c0, c1, r0, r1) = (cell(x0), cell(x1 - 0.001), cell(y0), cell(y1 - 0.001));
+            if ((c1 - c0 + 1) as i64) * ((r1 - r0 + 1) as i64) > MAX_DAMAGE_TILES as i64 {
+                self.overflow = true;
+                self.cells.clear();
+                return;
+            }
+            for r in r0..=r1 {
+                for c in c0..=c1 {
+                    if let Err(i) = self.cells.binary_search(&(r, c)) {
+                        self.cells.insert(i, (r, c));
+                    }
+                }
+            }
+            if self.cells.len() > MAX_DAMAGE_TILES {
+                self.overflow = true;
+                self.cells.clear();
+            }
+        }
+    }
+
+    fn clear(&mut self) {
+        self.cells.clear();
+        self.overflow = false;
+    }
+
+    /// The areas to redraw within `rect` (x0, y0, x1, y1 in points): runs
+    /// of dirty cells along each row, clipped to it; `rect` itself when no
+    /// cells are tracked.
+    fn areas(&self, [x0, y0, x1, y1]: [f64; 4]) -> Vec<[f64; 4]> {
+        if self.overflow || self.cells.is_empty() {
+            return vec![[x0, y0, x1, y1]];
+        }
+        let t = DAMAGE_TILE as f64;
+        let mut out: Vec<[f64; 4]> = Vec::new();
+        let mut cells = self.cells.iter().peekable();
+        while let Some(&(r, c)) = cells.next() {
+            let mut end = c;
+            while cells
+                .peek()
+                .is_some_and(|&&(r2, c2)| r2 == r && c2 == end + 1)
+            {
+                end += 1;
+                cells.next();
+            }
+            let a = [
+                (c as f64 * t).max(x0),
+                (r as f64 * t).max(y0),
+                ((end + 1) as f64 * t).min(x1),
+                ((r + 1) as f64 * t).min(y1),
+            ];
+            if a[0] < a[2] && a[1] < a[3] {
+                out.push(a);
+            }
+        }
+        out
+    }
+}
 
 /// The tiles of a surface `pw` × `ph` pixels: their areas (x, y, width,
 /// height), row by row.
@@ -295,6 +381,7 @@ pub(crate) fn set_args(view: &NshView, values: &[(u16, AnimationValue)]) {
             scan,
             changed,
             dirty,
+            dirty_tiles,
             hidden,
             ..
         }) = state.canvas.as_mut()
@@ -313,6 +400,10 @@ pub(crate) fn set_args(view: &NshView, values: &[(u16, AnimationValue)]) {
         let ops = drawing.as_ref().map_or(&[][..], |d| &d.ops[..]);
         let is_changed = |s: u16| changed.contains(&s);
         let before = scan.damage(ops, |s| slot_number(args, s), is_changed);
+        let mut tiles = dirty_tiles.borrow_mut();
+        if matches!(before, Damage::Rect(_)) {
+            tiles.add(scan.areas());
+        }
         for &(k, value) in values {
             let i = k as usize;
             if args.len() <= i {
@@ -322,9 +413,19 @@ pub(crate) fn set_args(view: &NshView, values: &[(u16, AnimationValue)]) {
         }
         let damage = match before {
             Damage::All => Damage::All,
-            _ => before.union(scan.damage(ops, |s| slot_number(args, s), is_changed)),
+            _ => {
+                let after = scan.damage(ops, |s| slot_number(args, s), is_changed);
+                if matches!(after, Damage::Rect(_)) {
+                    tiles.add(scan.areas());
+                }
+                before.union(after)
+            }
         };
-        dirty.set(dirty.get().union(damage));
+        let total = dirty.get().union(damage);
+        if !matches!(total, Damage::Rect(_)) {
+            tiles.clear();
+        }
+        dirty.set(total);
         // Out of sight, it is drawn when it comes into sight.
         damage != Damage::None && !hidden.get()
     };
@@ -373,9 +474,18 @@ pub(crate) fn draw(snapshot: &gtk::Snapshot, view: &NshView, state: &ViewState, 
         _ if !fits => Damage::All,
         damage => damage,
     };
+    let cells = std::mem::take(&mut *canvas.dirty_tiles.borrow_mut());
     if damage != Damage::None {
         let started = crate::fps::measuring().then(nsh_core::time::Instant::now);
-        let rasterized = rasterize(canvas, drawing, raster.take(), damage, (pw, ph), scale);
+        let rasterized = rasterize(
+            canvas,
+            drawing,
+            raster.take(),
+            damage,
+            &cells,
+            (pw, ph),
+            scale,
+        );
         if let Some(started) = started {
             crate::fps::rasterized(started.elapsed());
         }
@@ -404,9 +514,24 @@ fn rasterize(
     drawing: &Drawing,
     old: Option<Raster>,
     damage: Damage,
+    cells: &DirtyTiles,
     (pw, ph): (i32, i32),
     scale: f64,
 ) -> Result<Raster, String> {
+    // The areas redrawn, in view points: the dirty cells within the
+    // damaged rect, or the rect.
+    let areas: Vec<[f64; 4]> = match damage {
+        Damage::Rect(area) => {
+            let r = [
+                area.origin.x.0 as f64,
+                area.origin.y.0 as f64,
+                (area.origin.x.0 + area.size.width.0) as f64,
+                (area.origin.y.0 + area.size.height.0) as f64,
+            ];
+            cells.areas(r)
+        }
+        _ => Vec::new(),
+    };
     // A full replay draws into the surfaces it had, cleared, when they
     // fit: no new allocations (pages the kernel must map) per drawing.
     let fits = old
@@ -435,13 +560,10 @@ fn rasterize(
         // those before it, kept.
         let mut kept = None;
         let mut spare = spare;
-        if let Damage::Rect(area) = damage {
-            cr.rectangle(
-                area.origin.x.0 as f64,
-                area.origin.y.0 as f64,
-                area.size.width.0 as f64,
-                area.size.height.0 as f64,
-            );
+        if let Damage::Rect(_) = damage {
+            for &[x0, y0, x1, y1] in &areas {
+                cr.rectangle(x0, y0, x1 - x0, y1 - y0);
+            }
             cr.clip();
             match &prefix {
                 Some(prefix) => {
@@ -494,27 +616,30 @@ fn rasterize(
     }
     let mut surface = surface;
     surface.flush();
-    // The area redrawn, in whole pixels (all of it for a full replay).
-    let [x0, y0, x1, y1] = match damage {
-        Damage::Rect(area) => {
-            let px = |v: f32, round: fn(f64) -> f64, max: i32| {
-                (round(v as f64 * scale) as i32).clamp(0, max)
-            };
-            [
-                px(area.origin.x.0, f64::floor, pw),
-                px(area.origin.y.0, f64::floor, ph),
-                px(area.origin.x.0 + area.size.width.0, f64::ceil, pw),
-                px(area.origin.y.0 + area.size.height.0, f64::ceil, ph),
-            ]
-        }
-        _ => [0, 0, pw, ph],
+    // The areas redrawn, in whole pixels (all of it for a full replay).
+    let px = |v: f64, round: fn(f64) -> f64, max: i32| (round(v * scale) as i32).clamp(0, max);
+    let redrawn: Vec<[i32; 4]> = match damage {
+        Damage::Rect(_) => areas
+            .iter()
+            .map(|&[x0, y0, x1, y1]| {
+                [
+                    px(x0, f64::floor, pw),
+                    px(y0, f64::floor, ph),
+                    px(x1, f64::ceil, pw),
+                    px(y1, f64::ceil, ph),
+                ]
+            })
+            .collect(),
+        _ => vec![[0, 0, pw, ph]],
     };
     let data = surface.data().map_err(|e| e.to_string())?;
     let stride = data.len() / ph.max(1) as usize;
     let mut old = kept.unwrap_or_default().into_iter();
     let tiles = tiles((pw, ph))
         .map(|[x, y, w, h]| {
-            let touched = x < x1 && x + w > x0 && y < y1 && y + h > y0;
+            let touched = redrawn
+                .iter()
+                .any(|&[x0, y0, x1, y1]| x < x1 && x + w > x0 && y < y1 && y + h > y0);
             match old.next() {
                 Some(texture) if !touched => texture,
                 _ => memory_texture(&data, stride, [x, y, w, h]),
@@ -1805,7 +1930,16 @@ mod tests {
             Some(AnimationValue::Number(0.5)),
         ];
         let drawing = drawing.clone();
-        rasterize(canvas, &drawing, old, damage, (600, 80), 2.0).unwrap()
+        rasterize(
+            canvas,
+            &drawing,
+            old,
+            damage,
+            &DirtyTiles::default(),
+            (600, 80),
+            2.0,
+        )
+        .unwrap()
     }
 
     fn pixels(raster: &Raster) -> Vec<u8> {
@@ -1841,6 +1975,198 @@ mod tests {
         assert_eq!(pixels(&small), pixels(&fresh));
     }
 
+    #[test]
+    fn separate_changes_redraw_only_their_cells() {
+        use nsh_core::canvas::PathOp;
+        let c = Num::Const;
+        let dot = |x: f32| {
+            [
+                CanvasOp::BeginPath,
+                CanvasOp::Path(PathOp::Arc {
+                    x: c(x),
+                    y: c(20.0),
+                    radius: Num::Slot(0),
+                    start: c(0.0),
+                    end: c(TAU as f32),
+                    ccw: false,
+                }),
+                CanvasOp::Fill(None, FillRule::NonZero),
+            ]
+        };
+        let mut ops = vec![CanvasOp::FillStyle(Paint::Color(Color(0x2060ffff)))];
+        ops.extend(dot(20.0));
+        ops.extend(dot(280.0));
+        let drawing = Arc::new(Drawing {
+            ops,
+            ..Drawing::default()
+        });
+        let at = |radius: f32| {
+            let mut canvas = CanvasState::default();
+            canvas.split = first_animated(&drawing.ops);
+            canvas.split_path = prefix_path_needed(&drawing.ops, canvas.split);
+            canvas.args = vec![Some(AnimationValue::Number(radius))];
+            canvas
+        };
+        let size = (600, 80);
+        let first = rasterize(
+            &at(4.0),
+            &drawing,
+            None,
+            Damage::All,
+            &DirtyTiles::default(),
+            size,
+            2.0,
+        )
+        .unwrap();
+        let before = first.tiles.clone();
+        let mut scan = DamageScan::default();
+        let mut cells = DirtyTiles::default();
+        let old = scan.damage(&drawing.ops, |_| 4.0, |s| s == 0);
+        cells.add(scan.areas());
+        let new = scan.damage(&drawing.ops, |_| 9.0, |s| s == 0);
+        cells.add(scan.areas());
+        let damage = old.union(new);
+        // The box around both dots spans the canvas; their cells do not.
+        let Damage::Rect(rect) = damage else {
+            panic!("{damage:?}")
+        };
+        assert!(rect.size.width.0 > 250.0);
+        assert_eq!(cells.cells.len(), 2);
+        let partial =
+            rasterize(&at(9.0), &drawing, Some(first), damage, &cells, size, 2.0).unwrap();
+        // The middle tile (pixels 256..512) has neither dot: kept.
+        assert_ne!(partial.tiles[0], before[0]);
+        assert_eq!(partial.tiles[1], before[1]);
+        assert_ne!(partial.tiles[2], before[2]);
+        let full = rasterize(
+            &at(9.0),
+            &drawing,
+            None,
+            Damage::All,
+            &DirtyTiles::default(),
+            size,
+            2.0,
+        )
+        .unwrap();
+        assert_eq!(pixels(&partial), pixels(&full));
+    }
+
+    /// `cargo test -p nsh-platform-linux --release --lib tile_damage_bench -- --ignored --nocapture`:
+    /// a 1600 × 1000 chart (3000 static segments) with `dots` pulsing
+    /// markers spread over it, one frame of the pulse redrawn as the box
+    /// around every change vs only their cells.
+    #[test]
+    #[ignore]
+    fn tile_damage_bench() {
+        use nsh_core::canvas::PathOp;
+        let c = Num::Const;
+        for dots in [1usize, 2, 4, 8] {
+            let mut ops = vec![
+                CanvasOp::StrokeStyle(Paint::Color(Color(0x808080ff))),
+                CanvasOp::LineWidth(c(1.0)),
+                CanvasOp::BeginPath,
+            ];
+            let mut seed = 7u32;
+            let mut rnd = |m: f32| {
+                seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                (seed >> 8) as f32 / (1u32 << 24) as f32 * m
+            };
+            for _ in 0..3000 {
+                ops.push(CanvasOp::Path(PathOp::MoveTo(
+                    c(rnd(1600.0)),
+                    c(rnd(1000.0)),
+                )));
+                ops.push(CanvasOp::Path(PathOp::LineTo(
+                    c(rnd(1600.0)),
+                    c(rnd(1000.0)),
+                )));
+            }
+            ops.push(CanvasOp::Stroke(None));
+            ops.push(CanvasOp::FillStyle(Paint::Color(Color(0xff3030ff))));
+            for i in 0..dots {
+                // Spread along the diagonal: the box around them grows.
+                let t = (i as f32 + 0.5) / dots as f32;
+                ops.push(CanvasOp::BeginPath);
+                ops.push(CanvasOp::Path(PathOp::Arc {
+                    x: c(60.0 + t * 1480.0),
+                    y: c(40.0 + (1.0 - t) * 920.0),
+                    radius: Num::Slot(0),
+                    start: c(0.0),
+                    end: c(TAU as f32),
+                    ccw: false,
+                }));
+                ops.push(CanvasOp::Fill(None, FillRule::NonZero));
+            }
+            let drawing = Arc::new(Drawing {
+                ops,
+                ..Drawing::default()
+            });
+            let mut canvas = CanvasState::default();
+            canvas.split = first_animated(&drawing.ops);
+            canvas.split_path = prefix_path_needed(&drawing.ops, canvas.split);
+            let size = (1600, 1000);
+            let frames = 120;
+            let mut run = |tiled: bool| {
+                canvas.args = vec![Some(AnimationValue::Number(4.0))];
+                let mut raster = Some(
+                    rasterize(
+                        &canvas,
+                        &drawing,
+                        None,
+                        Damage::All,
+                        &DirtyTiles::default(),
+                        size,
+                        1.0,
+                    )
+                    .unwrap(),
+                );
+                let mut scan = DamageScan::default();
+                let started = std::time::Instant::now();
+                let mut pixels = 0f64;
+                for f in 0..frames {
+                    let (r0, r1) = (4.0 + (f % 8) as f32, 4.0 + ((f + 1) % 8) as f32);
+                    let mut cells = DirtyTiles::default();
+                    let a = scan.damage(&drawing.ops, |_| r0, |s| s == 0);
+                    if tiled {
+                        cells.add(scan.areas());
+                    }
+                    let b = scan.damage(&drawing.ops, |_| r1, |s| s == 0);
+                    if tiled {
+                        cells.add(scan.areas());
+                    }
+                    let damage = a.union(b);
+                    if let Damage::Rect(r) = damage {
+                        let rr = [
+                            r.origin.x.0 as f64,
+                            r.origin.y.0 as f64,
+                            (r.origin.x.0 + r.size.width.0) as f64,
+                            (r.origin.y.0 + r.size.height.0) as f64,
+                        ];
+                        pixels += cells
+                            .areas(rr)
+                            .iter()
+                            .map(|a| (a[2] - a[0]) * (a[3] - a[1]))
+                            .sum::<f64>();
+                    }
+                    canvas.args = vec![Some(AnimationValue::Number(r1))];
+                    raster = Some(
+                        rasterize(&canvas, &drawing, raster.take(), damage, &cells, size, 1.0)
+                            .unwrap(),
+                    );
+                }
+                (
+                    started.elapsed().as_secs_f64() * 1000.0 / frames as f64,
+                    pixels / frames as f64,
+                )
+            };
+            let (box_ms, box_px) = run(false);
+            let (cell_ms, cell_px) = run(true);
+            println!(
+                "dots={dots}: box {box_ms:.2} ms/frame, {box_px:.0} px; cells {cell_ms:.2} ms/frame, {cell_px:.0} px"
+            );
+        }
+    }
+
     /// The pixels of `ops` drawn on a fresh `w` × `h` canvas at scale 1.
     fn draw_ops(ops: Vec<CanvasOp>, (w, h): (i32, i32)) -> (Vec<u8>, usize) {
         let drawing = Drawing {
@@ -1848,7 +2174,16 @@ mod tests {
             ..Drawing::default()
         };
         let canvas = CanvasState::default();
-        let raster = rasterize(&canvas, &drawing, None, Damage::All, (w, h), 1.0).unwrap();
+        let raster = rasterize(
+            &canvas,
+            &drawing,
+            None,
+            Damage::All,
+            &DirtyTiles::default(),
+            (w, h),
+            1.0,
+        )
+        .unwrap();
         let mut surface = copy(&raster.surface, None, (w, h), 1.0).unwrap();
         let stride = surface.stride() as usize;
         let data = surface.data().map(|d| d.to_vec()).unwrap();
@@ -1915,8 +2250,16 @@ mod tests {
             );
             for scale in [1, 2] {
                 let size = (100 * scale, 40 * scale);
-                let raster =
-                    rasterize(&canvas, &drawing, None, Damage::All, size, scale as f64).unwrap();
+                let raster = rasterize(
+                    &canvas,
+                    &drawing,
+                    None,
+                    Damage::All,
+                    &DirtyTiles::default(),
+                    size,
+                    scale as f64,
+                )
+                .unwrap();
                 let mut surface = copy(&raster.surface, None, size, scale as f64).unwrap();
                 let stride = surface.stride() as usize;
                 let data = surface.data().map(|d| d.to_vec()).unwrap();
