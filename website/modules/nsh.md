@@ -997,7 +997,7 @@ See [Device and environment](../docs/device-and-environment.md) for the guide.
 const windowSize: Accessor<Size>;
 ```
 
-The size of the surface in points: the window, or the embedded `NshAppView` / `NshView`. Reactive. Rust: `window() -> Size<Points>`.
+The size of the surface in points: the window, or the embedded `NshAppView` / `NshView`. On macOS, Windows and Linux it is the content size of the app's primary window, the first of its own windows still open; a window's own size is its [`state()`](./nsh-desktop.md#the-windows-state-and-the-displays)`?.contentBounds`. Reactive. Rust: `window() -> Size<Points>`.
 
 ```tsx tabs
 const wide = () => windowSize().width >= 600;
