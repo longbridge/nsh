@@ -818,6 +818,7 @@ fn text_area(ed: Ed, lh: impl Fn() -> Points + Clone + 'static, layer: Layer) ->
         }
         let scroll_ed = ed.clone();
         let layout_ed = ed.clone();
+        let content_ed = ed.clone();
         scroll()
             .horizontal()
             .flex_1()
@@ -826,7 +827,13 @@ fn text_area(ed: Ed, lh: impl Fn() -> Points + Clone + 'static, layer: Layer) ->
             .on_layout(move |bounds: &Bounds<Points>| layout_ed.text_width.set(bounds.size.width))
             .child(
                 part(
-                    view().min_w(relative(1.0)).pl(px(4.0)),
+                    view()
+                        .min_w(relative(1.0))
+                        .pl(px(4.0))
+                        // How far the text scrolls sideways (`onScroll`).
+                        .on_layout(move |bounds: &Bounds<Points>| {
+                            content_ed.text_content_width.set(bounds.size.width)
+                        }),
                     props,
                     EditorPart::Content,
                 )

@@ -274,6 +274,16 @@ pub enum EditorEvent {
     /// (`showCodeActions`, Mod+.): the app shows its menu at `bounds`.
     #[args(event)]
     CodeActionRequest(EditorCodeActionRequest),
+    /// The text scrolled, or the viewport or the content changed size (a
+    /// resize, an edit, a fold, soft wrap): the offset, the content's size
+    /// and the viewport's, as a `Scroll`'s `onScroll` gives them, when one
+    /// differs from those reported last (first once the editor is laid
+    /// out). The offset is `scrollOffset()`'s; the content is as wide as
+    /// the viewport plus how far the text scrolls sideways (none while
+    /// lines wrap), so `offset` runs from 0 to `contentSize - size`. An
+    /// app draws a line or a fade at an edge the text scrolls under.
+    #[args(offset, content_size, size)]
+    Scroll(Point<Points>, Size<Points>, Size<Points>),
 }
 
 /// What an [`Editor`]'s `replaceAll` did.

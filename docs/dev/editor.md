@@ -114,6 +114,14 @@ bottom edge (from 16 points inside), or past the text area's left or right edge 
 `set_interval` scrolls by 12 to 64 points a tick, faster the farther out (`edge_speed`), within the content, and
 extends the selection to the pointer again; it stops when the pointer comes back, on release, and when the drag ends.
 
+`onScroll` (`Ed::report_scroll`) gives the app what a `Scroll`'s `onScroll` would: the offset (`scrollOffset()`'s),
+the content's size and the viewport's, once laid out and whenever one of them differs from the last report. The
+height is the vertical scroll view's content; the width is the viewport's plus how far the horizontal scroll view's
+content outgrows it (none while lines wrap, `x` then 0), so the offset stays within `contentSize - size` as a scroll
+view's does. It is how an app draws a separator or a fade at an edge the text scrolls under: the rows are drawn over
+the scroll views, so a mask or a view laid over the editor reaches neither cleanly. Like the other reports it is emitted
+whether or not the app listens; an event with no handler is dropped before it reaches JS.
+
 Revisions (`Signal<u64>` in `Ed`) keep a change to the parts that depend on it: `text_rev` (the text or its layout),
 `hl_rev` (highlighting progressed), `sel_rev` (selections), `marks_rev` (diagnostics, decorations, matches). The state
 itself lives in an `Rc<RefCell<State>>` outside the reactive graph.

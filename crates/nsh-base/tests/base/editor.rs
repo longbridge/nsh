@@ -11,7 +11,8 @@ use std::{
 };
 
 use nsh_base::editor::{
-    Editor, EditorApi, EditorCommand, EditorSearch, EditorSearchResult, EditorSelection, editor,
+    Editor, EditorApi, EditorCommand, EditorEvent, EditorSearch, EditorSearchResult,
+    EditorSelection, editor,
 };
 use nsh_core::{
     MountItem, NodeId, PayloadValue, PointerEvents, Size,
@@ -19,7 +20,7 @@ use nsh_core::{
     prelude::*,
 };
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
+use nsh_testing::{Headless, Screen};
 
 #[derive(Clone, PartialEq, Props)]
 struct HarnessProps {
@@ -58,7 +59,9 @@ fn selections_text(selections: &[EditorSelection]) -> String {
 
 /// An editor of 600 × 400 at the top left (in a view `editor`), and what
 /// the app heard from it: the text (`Value "…"`), how many changes, the
-/// selections, the search's result; buttons run the ref's methods.
+/// selections, the search's result, where it scrolled (`Scrolled x y
+/// content-width content-height width height`) and how many times; buttons
+/// run the ref's methods.
 #[component]
 fn Harness(props: HarnessProps) -> impl IntoElement {
     let value = signal(props.text.clone());
@@ -68,6 +71,9 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
     let replaced = signal(0u32);
     let from_api = signal(String::new());
     let search = signal(None::<EditorSearch>);
+    let scrolled = signal(String::from("-"));
+    let scrolls = signal(0u32);
+    let wrap = signal(false);
     let ed = component_ref::<Editor>();
     let api = move |f: &dyn Fn(&EditorApi)| {
         if let Some(api) = ed.api::<EditorApi>() {
@@ -86,6 +92,21 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
         .read_only(props.read_only)
         .tab_size(4u32)
         .search(move || search.get())
+        .soft_wrap(move || wrap.get())
+        .on_scroll(move |e: &EditorEvent| {
+            if let EditorEvent::Scroll(offset, content, size) = e {
+                scrolled.set(format!(
+                    "{} {} {} {} {} {}",
+                    offset.x.0,
+                    offset.y.0,
+                    content.width.0,
+                    content.height.0,
+                    size.width.0,
+                    size.height.0
+                ));
+                scrolls.update(|n| *n += 1);
+            }
+        })
         .on_change(move |text: &SharedString| {
             value.set(text.to_string());
             changes.update(|n| *n += 1);
@@ -117,6 +138,8 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
         .child(text(move || format!("Matches {}", matches.get())))
         .child(text(move || format!("Replaced {}", replaced.get())))
         .child(text(move || format!("Api {:?}", from_api.get())))
+        .child(text(move || format!("Scrolled {}", scrolled.get())))
+        .child(text(move || format!("Scrolls {}", scrolls.get())))
         .child(
             view()
                 .flex_row()
@@ -149,7 +172,18 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
                 .child(button("fold-0", Box::new(|a| a.fold(0))))
                 .child(button("unfold-0", Box::new(|a| a.unfold(0))))
                 .child(button("to-4000", Box::new(|a| a.scroll_to_line(4000))))
-                .child(button("to-2000", Box::new(|a| a.scroll_to_line(2000)))),
+                .child(button("to-2000", Box::new(|a| a.scroll_to_line(2000))))
+                .child(button(
+                    "to-offset",
+                    Box::new(|a| a.set_scroll_offset(point(px(40.0), px(200.0)))),
+                ))
+                .child(
+                    view()
+                        .test_id("wrap")
+                        .w(px(20.0))
+                        .h(px(20.0))
+                        .on_press(move || wrap.update(|w| *w = !*w)),
+                ),
         )
 }
 
@@ -649,6 +683,86 @@ fn a_long_text_makes_only_the_rows_in_view() {
         (20..150).contains(&rows),
         "{rows} rows made after scrolling"
     );
+}
+
+/// What the editor reported last (`onScroll`): `[x, y, content width,
+/// content height, width, height]`, `None` before it reported.
+fn scrolled(screen: &Screen) -> Option<[f32; 6]> {
+    let line = screen
+        .texts()
+        .iter()
+        .find_map(|t| t.trim().strip_prefix("Scrolled ").map(str::to_string))
+        .filter(|s| s != "-")?;
+    let values: Vec<f32> = line.split(' ').map(|v| v.parse().unwrap()).collect();
+    values.try_into().ok()
+}
+
+/// How many times the editor reported where it scrolled.
+fn scrolls(app: &Headless) -> u32 {
+    app.screen()
+        .texts()
+        .iter()
+        .find_map(|t| t.trim().strip_prefix("Scrolls "))
+        .expect("the count shows")
+        .parse()
+        .unwrap()
+}
+
+/// Waits for a report `done` accepts and gives it: a report follows the
+/// layout or the scroll it tells of, not a fixed time.
+fn wait_scrolled(app: &mut Headless, what: &str, done: impl Fn(&[f32; 6]) -> bool) -> [f32; 6] {
+    app.wait_until(what, Duration::from_secs(5), |s| {
+        scrolled(s).is_some_and(|r| done(&r))
+    })
+    .unwrap_or_else(|e| panic!("{e}; reported: {:?}", scrolled(app.screen())));
+    scrolled(app.screen()).unwrap()
+}
+
+/// The editor reports where its text is scrolled, the content's size and
+/// the viewport's (`onScroll`): once laid out, on a scroll, on the ref's
+/// `setScrollOffset`, and when soft wrap stops the sideways scrolling;
+/// nothing when nothing moved. An app draws a line or a fade at an edge
+/// the text scrolls under from it.
+#[test]
+fn the_editor_reports_where_its_text_is_scrolled() {
+    let mut lines: Vec<String> = (0..100).map(|i| format!("line {i}")).collect();
+    lines[0] = format!("wide {}", "word ".repeat(60));
+    let mut app = start(props(&lines.join("\n")));
+    see(&mut app, "line 1");
+    // Once laid out: at the top left, the viewport the editor's box, the
+    // content taller (100 rows) and wider (the long line) than it.
+    let first = wait_scrolled(&mut app, "the first layout", |r| {
+        r[2] > 640.0 && r[3] >= 2000.0
+    });
+    let content_h = first[3];
+    assert_eq!(
+        [first[0], first[1], first[4], first[5]],
+        [0.0, 0.0, 600.0, 400.0],
+        "{first:?}"
+    );
+    // The user scrolls down.
+    app.scroll("id:editor", px(100.0)).unwrap();
+    wait_scrolled(&mut app, "the scroll down", |r| {
+        r[0] == 0.0 && r[1] == 100.0
+    });
+    // The ref scrolls both ways at once.
+    app.press("id:to-offset").unwrap();
+    let moved = wait_scrolled(&mut app, "the ref's offset", |r| {
+        r[0] == 40.0 && r[1] == 200.0
+    });
+    assert_eq!(&moved[2..], &first[2..], "the sizes stay");
+    // Nothing moved: nothing more is reported.
+    let before = scrolls(&app);
+    app.press("id:read-api").unwrap();
+    app.wait(Duration::from_millis(100)).unwrap();
+    assert_eq!(scrolls(&app), before);
+    // Wrapped, the text no longer scrolls sideways: the content is as wide
+    // as the viewport, and taller (the long line takes several rows).
+    app.press("id:wrap").unwrap();
+    let wrapped = wait_scrolled(&mut app, "the wrapped content", |r| {
+        r[0] == 0.0 && r[2] == 600.0 && r[3] > content_h
+    });
+    assert_eq!(wrapped[4..], [600.0, 400.0], "{wrapped:?}");
 }
 
 /// The top of the row reading `text`, as laid out.

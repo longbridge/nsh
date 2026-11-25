@@ -103,6 +103,9 @@ pub(crate) struct Ed {
     pub(crate) viewport: Signal<Size<Points>>,
     /// The width the text area shows (wrapping and horizontal scrolling).
     pub(crate) text_width: Signal<Points>,
+    /// The width of the horizontal scroll view's content, as last laid
+    /// out (stale while lines wrap).
+    pub(crate) text_content_width: Signal<Points>,
     /// Where the rows' box is in the vertical scroll view's content.
     pub(crate) rows_top: Signal<Points>,
     /// The editor has the keyboard focus.
@@ -184,6 +187,7 @@ impl Ed {
             scroll_x: signal(px(0.0)),
             viewport: signal(Size::default()),
             text_width: signal(px(0.0)),
+            text_content_width: signal(px(0.0)),
             rows_top: signal(px(0.0)),
             focused: signal(false),
             blink: signal(true),
@@ -212,6 +216,7 @@ impl Ed {
         ed.follow_hooks();
         ed.follow_completion();
         ed.follow_definition();
+        ed.report_scroll();
         ed.bind_keys();
         ed.load_syntaxes();
         ed
@@ -1409,6 +1414,40 @@ impl Ed {
     }
 
     // Reports.
+
+    /// Reports the offset, the content's size and the viewport's
+    /// (`onScroll`) once the editor is laid out, and again whenever one of
+    /// them changes. An event no handler waits for is dropped before it
+    /// reaches JS, so the per-frame report of a scroll costs an app that
+    /// does not listen nothing there.
+    fn report_scroll(&self) {
+        let ed = self.clone();
+        let reported = Cell::<Option<(Point<Points>, Size<Points>, Size<Points>)>>::new(None);
+        effect(move || {
+            let viewport = ed.viewport.get();
+            let height = ed.content_height.get();
+            if viewport == Size::default() || height <= px(0.0) {
+                return;
+            }
+            // Wrapped lines do not scroll sideways (the horizontal scroll
+            // view is gone, what it last reported with it).
+            let (x, beyond) = match ed.props.soft_wrap.get() {
+                true => (px(0.0), px(0.0)),
+                false => (
+                    ed.scroll_x.get(),
+                    (ed.text_content_width.get() - ed.text_width.get()).max(px(0.0)),
+                ),
+            };
+            let now = (
+                Point::new(x, ed.scroll_y.get()),
+                Size::new(viewport.width + beyond, height),
+                viewport,
+            );
+            if reported.replace(Some(now)) != Some(now) {
+                ed.cx.emit(EditorEvent::Scroll(now.0, now.1, now.2));
+            }
+        });
+    }
 
     fn report_text(&self) {
         let text = {
