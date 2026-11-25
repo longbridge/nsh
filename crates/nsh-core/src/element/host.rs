@@ -478,18 +478,25 @@ fn svg_drawing(
     shown
 }
 
+/// A shader view of `tag`, noting that the app uses shaders
+/// ([`crate::shader::USE_MARKER`]).
+fn shader_view(tag: Tag) -> ShaderView {
+    crate::shader::note_use();
+    ShaderView(ElNode::new(tag))
+}
+
 /// A view whose box a shader draws, under its children: give it the
 /// program with [`ShaderView::source`] and its uniforms with
 /// [`ShaderView::uniform`]. Without a program it draws nothing of its own.
 pub fn shader() -> ShaderView {
-    ShaderView(ElNode::new(Tag::Shader))
+    shader_view(Tag::Shader)
 }
 
 /// A view whose children draw through a shader: give it the program with
 /// [`ShaderView::source`], which reads what they draw with
 /// `sample_content`. Without a program the children draw as they are.
 pub fn shader_effect() -> ShaderView {
-    ShaderView(ElNode::new(Tag::ShaderEffect))
+    shader_view(Tag::ShaderEffect)
 }
 
 /// A view whose children change through a shader when its
@@ -497,20 +504,20 @@ pub fn shader_effect() -> ShaderView {
 /// drew, `sample_to` what they draw now, `nsh.progress` how far it is.
 /// Without a program it cross-fades ([`ShaderView::fallback`]).
 pub fn shader_transition() -> ShaderView {
-    ShaderView(ElNode::new(Tag::ShaderTransition))
+    shader_view(Tag::ShaderTransition)
 }
 
 /// The whole surface drawn through a shader, which reads it with
 /// `sample_content`. It takes no space and has no children.
 pub fn screen_effect() -> ShaderView {
-    ShaderView(ElNode::new(Tag::ScreenEffect))
+    shader_view(Tag::ScreenEffect)
 }
 
 /// The whole surface changing through a shader when its
 /// [`ShaderView::value`] changes, as [`shader_transition`] does for its
 /// children. It takes no space and has no children.
 pub fn screen_transition() -> ShaderView {
-    ShaderView(ElNode::new(Tag::ScreenTransition))
+    shader_view(Tag::ScreenTransition)
 }
 
 crate::static_reactive!(crate::shader::Shader: crate::shader::Shader);
@@ -1187,6 +1194,7 @@ impl Screen {
         shader: impl IntoReactive<Option<crate::shader::TransitionShader>>,
     ) -> Self {
         self.bind_prop(shader, |s: Option<crate::shader::TransitionShader>| {
+            crate::shader::note_use();
             Prop::TransitionShader(s.map(Into::into))
         })
     }
@@ -1427,6 +1435,7 @@ impl Modal {
         shader: impl IntoReactive<Option<crate::shader::TransitionShader>>,
     ) -> Self {
         self.bind_prop(shader, |s: Option<crate::shader::TransitionShader>| {
+            crate::shader::note_use();
             Prop::TransitionShader(s.map(Into::into))
         })
     }

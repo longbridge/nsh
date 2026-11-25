@@ -3368,9 +3368,10 @@ opt-level = \"s\"
         // through wasm-bindgen when the app's crates call JS through it.
         // A runtime wasm-bindgen runs on cannot be split afterwards, so what
         // the app does not use is left out before it: the gates of the parts
-        // of `nsh/base` the app never makes by name.
+        // of `nsh/base` the app never makes by name and the shader gate when
+        // it shows no shader.
         let pruned = if rust {
-            self.without_unused_part_gates(&built, &out, &stem)?
+            self.without_unused_gates(&built, &out, &stem)?
         } else {
             None
         };
@@ -3820,10 +3821,11 @@ opt-level = \"s\"
         Ok(path)
     }
 
-    /// The web runtime `built` without the `nsh_part_*` gates, in `out`, when
-    /// it goes through wasm-bindgen and the app makes no component by name
-    /// ([`crate::web::without_unused_part_gates`]); `None` otherwise.
-    fn without_unused_part_gates(
+    /// The web runtime `built` without the gates the app does not need, in
+    /// `out`, when it goes through wasm-bindgen
+    /// ([`crate::web::without_unused_gates`]); `None` when it does not or
+    /// every gate stays.
+    fn without_unused_gates(
         &self,
         built: &Path,
         out: &Path,
@@ -3833,15 +3835,15 @@ opt-level = \"s\"
         if crate::bindgen::needs(&module)?.is_none() {
             return Ok(None);
         }
-        let Some(pruned) = crate::web::without_unused_part_gates(&module)? else {
+        let Some(pruned) = crate::web::without_unused_gates(&module)? else {
             return Ok(None);
         };
         ui::debug(format!(
-            "web runtime: left out the gates of nsh/base's parts, which the app never makes by name ({} to {} bytes)",
+            "web runtime: left out the gates the app does not need: nsh/base's parts it never makes by name, shaders it never shows ({} to {} bytes)",
             module.len(),
             pruned.len()
         ));
-        let path = out.join(format!("{stem}-without-parts.wasm"));
+        let path = out.join(format!("{stem}-without-gates.wasm"));
         fs::write(&path, pruned).with_context(|| format!("write {}", path.display()))?;
         Ok(Some(path))
     }

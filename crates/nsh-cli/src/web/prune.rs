@@ -64,39 +64,77 @@ const PART_GATE: &str = "nsh_part_";
 /// name and tests that it is still the function's.
 const BY_NAME_MARK: &str = nsh_core::element::__private::BY_NAME_MARKER;
 
-/// `wasm`, a linkable runtime, without the `nsh_part_*` gates, and the code
-/// only they reach, when the app makes no component by name: for a runtime
-/// that cannot be split into side modules (wasm-bindgen rewrites a module
-/// after the linker), where the gates would keep every part's code in the
-/// published module. `None` when the runtime has no such gate or the app
-/// makes a component by name (every gate stays: a part is loaded when its
-/// first component is made, and which one that is is not known).
-pub(crate) fn without_unused_part_gates(wasm: &[u8]) -> anyhow::Result<Option<Vec<u8>>> {
+/// The export of a Rust app's runtime that makes shaders run (the GLSL ES
+/// translation, naga): the page calls it the first time the app shows one.
+const SHADER_GATE: &str = "nsh_feature_shader";
+
+/// What an app's code runs only when it makes a shader view or a shader
+/// transition: the function `nsh-core` calls from each of them. Found like
+/// [`BY_NAME_MARK`], and `nsh-core` tests its name too.
+const SHADER_MARK: &str = nsh_core::element::__private::SHADER_USE_MARKER;
+
+/// `wasm`, a linkable runtime, without the gates the app does not need, and
+/// the code only they reach: for a runtime that cannot be split into side
+/// modules (wasm-bindgen rewrites a module after the linker), where the
+/// gates would keep their code in the published module.
+///
+/// - The `nsh_part_*` gates go when the app makes no component by name
+///   (every one stays when it does: a part is loaded when its first
+///   component is made, and which one that is is not known).
+/// - The shader gate goes when no code reachable from the other exports
+///   (the part gates that stay among them) makes a shader view or a shader
+///   transition.
+///
+/// `None` when every gate stays or the runtime has none.
+pub(crate) fn without_unused_gates(wasm: &[u8]) -> anyhow::Result<Option<Vec<u8>>> {
     let module = Module::parse(wasm)?;
-    let funcs = |gate: bool| -> Vec<&Export<'_>> {
+    let is_part = |e: &Export<'_>| e.name.starts_with(PART_GATE);
+    let is_gate = |e: &Export<'_>| is_part(e) || e.name == SHADER_GATE;
+    if !module
+        .exports
+        .iter()
+        .any(|e| is_gate(e) && e.kind == ExternalKind::Func)
+    {
+        return Ok(None);
+    }
+    let funcs = |keep: &dyn Fn(&Export<'_>) -> bool| -> Vec<u32> {
         module
             .exports
             .iter()
-            .filter(|e| e.name.starts_with(PART_GATE) == gate)
+            .filter(|e| e.kind == ExternalKind::Func && keep(e))
+            .map(|e| e.index)
             .collect()
     };
-    if funcs(true).iter().all(|e| e.kind != ExternalKind::Func) {
-        return Ok(None);
-    }
-    let roots: Vec<u32> = funcs(false)
-        .iter()
-        .filter(|e| e.kind == ExternalKind::Func)
-        .map(|e| e.index)
-        .collect();
-    let live = module.mark_from(roots, Vec::new())?;
-    let by_name = module
-        .func_names
-        .iter()
-        .any(|&(func, name)| live.funcs[func as usize] && name.contains(BY_NAME_MARK));
+    let reaches = |roots: Vec<u32>, mark: &str| -> anyhow::Result<bool> {
+        let live = module.mark_from(roots, Vec::new())?;
+        Ok(module
+            .func_names
+            .iter()
+            .any(|&(func, name)| live.funcs[func as usize] && name.contains(mark)))
+    };
+    let mut roots = funcs(&|e| !is_gate(e));
+    let by_name = reaches(roots.clone(), BY_NAME_MARK)?;
     if by_name {
+        roots.extend(funcs(&is_part));
+    }
+    let shaders = reaches(roots, SHADER_MARK)?;
+    let keep: Vec<&str> = module
+        .exports
+        .iter()
+        .filter(|e| {
+            if is_part(e) {
+                by_name
+            } else if is_gate(e) {
+                shaders
+            } else {
+                true
+            }
+        })
+        .map(|e| e.name)
+        .collect();
+    if keep.len() == module.exports.len() {
         return Ok(None);
     }
-    let keep: Vec<&str> = funcs(false).iter().map(|e| e.name).collect();
     Ok(Some(split::split(wasm, &keep, &[])?.main))
 }
 
@@ -906,9 +944,26 @@ mod tests {
     }
 
     #[test]
+    fn the_shader_gate_goes_when_nothing_shows_a_shader() {
+        let wasm = module_named(SHADER_GATE, "nsh_core::shader::other");
+        let pruned = without_unused_gates(&wasm).unwrap().unwrap();
+        Validator::new().validate_all(&pruned).unwrap();
+        let pruned = parts(&pruned);
+        assert!(pruned.exports.iter().any(|(name, _)| name == "a"));
+        assert!(!pruned.exports.iter().any(|(name, _)| name == SHADER_GATE));
+        assert_eq!(pruned.bodies.len(), 2);
+    }
+
+    #[test]
+    fn the_shader_gate_stays_when_the_app_shows_a_shader() {
+        let wasm = module_named(SHADER_GATE, &format!("nsh_core::shader::{SHADER_MARK}"));
+        assert!(without_unused_gates(&wasm).unwrap().is_none());
+    }
+
+    #[test]
     fn part_gates_go_when_nothing_makes_a_component_by_name() {
         let wasm = module_named("nsh_part_plot", "nsh_core::element::component::missing_x");
-        let pruned = without_unused_part_gates(&wasm).unwrap().unwrap();
+        let pruned = without_unused_gates(&wasm).unwrap().unwrap();
         Validator::new().validate_all(&pruned).unwrap();
         let pruned = parts(&pruned);
         assert!(pruned.exports.iter().any(|(name, _)| name == "a"));
@@ -928,12 +983,12 @@ mod tests {
             "nsh_part_plot",
             &format!("nsh_core::element::component::{BY_NAME_MARK}"),
         );
-        assert!(without_unused_part_gates(&wasm).unwrap().is_none());
+        assert!(without_unused_gates(&wasm).unwrap().is_none());
     }
 
     #[test]
     fn a_runtime_without_part_gates_is_left_alone() {
-        assert!(without_unused_part_gates(&module()).unwrap().is_none());
+        assert!(without_unused_gates(&module()).unwrap().is_none());
     }
 
     #[test]
