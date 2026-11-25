@@ -59,8 +59,9 @@ impl PackageTarget {
     /// The platform [`crate::module_meta`] reads the app's dependency
     /// graph for, and the Rust targets it reads it for: iOS, macOS and
     /// Android, where crates declare package entries. A macOS package is
-    /// read for each architecture it is built for (`arch`; `None`: this
-    /// Mac's), so a crate only another architecture links counts.
+    /// read for each architecture it is built for (`arch`; `None`: the one
+    /// Cargo builds for with no `--target`, [`Arch::native`]), so a crate
+    /// only another architecture links counts.
     fn module_meta_triples(
         self,
         arch: Option<Arch>,
@@ -70,7 +71,7 @@ impl PackageTarget {
             PackageTarget::Ios => Some((&["aarch64-apple-ios"], Platform::Ios)),
             PackageTarget::IosSimulator => Some((&["aarch64-apple-ios-sim"], Platform::Ios)),
             PackageTarget::Macos => Some((
-                arch.unwrap_or_else(Arch::host).macos_triples(),
+                arch.unwrap_or_else(Arch::native).macos_triples(),
                 Platform::Macos,
             )),
             PackageTarget::Android => Some((&["aarch64-linux-android"], Platform::Android)),
@@ -127,12 +128,23 @@ const MACOS_ARM64: &str = "aarch64-apple-darwin";
 const MACOS_X86_64: &str = "x86_64-apple-darwin";
 
 impl Arch {
-    /// This machine's processor.
-    fn host() -> Self {
-        if cfg!(target_arch = "aarch64") {
-            Arch::Arm64
-        } else {
-            Arch::X86_64
+    /// The processor a package with no `--arch` is built for: the one a
+    /// Cargo build with no `--target` is for, the host of the toolchain
+    /// ([`runtime::rustc_host`]), which is the Mac's own even when this nsh
+    /// runs translated (an Intel nsh under Rosetta); without a toolchain,
+    /// this nsh's own, whose prebuilt runner the package then has.
+    fn native() -> Self {
+        Self::of_host(runtime::rustc_host(None).as_deref())
+    }
+
+    /// The processor of the Rust target `host` (`None`: unknown, this
+    /// nsh's own).
+    fn of_host(host: Option<&str>) -> Self {
+        match host.and_then(|host| host.split('-').next()) {
+            Some("aarch64") => Arch::Arm64,
+            Some("x86_64") => Arch::X86_64,
+            _ if cfg!(target_arch = "aarch64") => Arch::Arm64,
+            _ => Arch::X86_64,
         }
     }
 
@@ -146,19 +158,6 @@ impl Arch {
     }
 }
 
-/// The Rust target of macOS on this machine's processor.
-fn host_macos_triple() -> &'static str {
-    Arch::host().macos_triples()[0]
-}
-
-/// What cargo builds the runner for `triple` with: nothing for this
-/// machine's processor, so the build is the one `nsh run` and every other
-/// package share (`target/release`), else `--target triple`
-/// (`target/<triple>/release`).
-fn macos_build_triple(triple: &'static str) -> Option<&'static str> {
-    (triple != host_macos_triple()).then_some(triple)
-}
-
 /// The architecture of a macOS `triple` as `lipo` names it.
 fn lipo_arch(triple: &str) -> &str {
     match triple.split('-').next() {
@@ -168,18 +167,21 @@ fn lipo_arch(triple: &str) -> &str {
     }
 }
 
-/// The updater's names of the platforms a macOS package for `arch` runs on
-/// (`None`: this machine's), which its update archives are named after: a
-/// universal package is the archive of either.
-fn macos_update_platforms(arch: Option<Arch>) -> Vec<String> {
-    match arch {
-        None => vec![nsh_updater::platform()],
-        Some(arch) => arch
-            .macos_triples()
-            .iter()
-            .map(|triple| format!("macos-{}", triple.split('-').next().unwrap_or(triple)))
-            .collect(),
-    }
+/// The updater's names of the platforms a macOS executable of the
+/// architectures `archs` (as `lipo` names them) runs on, which its
+/// package's update archives are named after: a universal package is the
+/// archive of either.
+fn macos_update_platforms(archs: &[String]) -> Vec<String> {
+    let mut platforms: Vec<String> = archs
+        .iter()
+        .map(|arch| match arch.as_str() {
+            "arm64" => "macos-aarch64".to_owned(),
+            arch => format!("macos-{arch}"),
+        })
+        .collect();
+    platforms.sort();
+    platforms.dedup();
+    platforms
 }
 
 /// App metadata: `nsh.json` next to the entry, overridden by flags.
@@ -2332,12 +2334,15 @@ fn package_macos(
     }
     codesign_macos(&app, identity, entitlements_path.as_deref())?;
     codesign_verify(&app)?;
+    // Named after what the executable holds: with no `--arch`, the runner
+    // as it was built or came.
+    let archs = lipo_archs(&macos.join(executable))?;
     crate::updater::archive_macos_app(
         config,
         name,
         &app,
         options.out,
-        &macos_update_platforms(options.arch),
+        &macos_update_platforms(&archs),
     )?;
     step.done(format!("packaged {}", ui::path(&app)));
     if options.run {
@@ -2362,9 +2367,9 @@ struct MacRunner {
     fat: bool,
 }
 
-/// The macOS release runners of a package for `arch` (`None`: this Mac's):
-/// one per architecture, each built for its Rust target (this Mac's own
-/// with no `--target`).
+/// The macOS release runners of a package for `arch` (`None`: the runner
+/// as Cargo builds it with no `--target`, or as it comes prebuilt): one per
+/// architecture, each built for its Rust target ([`runtime::build_target`]).
 fn macos_runners(arch: Option<Arch>) -> anyhow::Result<Vec<MacRunner>> {
     let Some(arch) = arch else {
         let path = runtime::file(Platform::MacOs, true)?;
@@ -2376,18 +2381,19 @@ fn macos_runners(arch: Option<Arch>) -> anyhow::Result<Vec<MacRunner>> {
     };
     let mut runners = Vec::new();
     for &triple in arch.macos_triples() {
-        let path = runtime::file_for(Platform::MacOs, true, macos_build_triple(triple))?;
+        let runtime::RuntimeFile { path, built } =
+            runtime::locate(Platform::MacOs, true, Some(triple))?;
         let wanted = lipo_arch(triple);
-        // A prebuilt runner (an installed nsh's, `NSH_RUNTIME`) is built
-        // for the processor of the machine that built it.
         let archs = lipo_archs(&path)?;
         if !archs.iter().any(|arch| arch == wanted) {
-            bail!(
-                "the macOS release runner {} is built for {}, not {wanted}: an installed nsh has the runner of its own processor, \
-                 so package for {wanted} with the nsh of that processor, or with a nsh checkout, which builds the runner for any",
-                path.display(),
-                archs.join(" and ")
-            );
+            let source = if built {
+                RunnerSource::Built
+            } else if std::env::var_os("NSH_RUNTIME").is_some() {
+                RunnerSource::NshRuntime
+            } else {
+                RunnerSource::Installed
+            };
+            bail!("{}", wrong_runner_arch(&path, source, &archs, triple));
         }
         runners.push(MacRunner {
             path,
@@ -2396,6 +2402,42 @@ fn macos_runners(arch: Option<Arch>) -> anyhow::Result<Vec<MacRunner>> {
         });
     }
     Ok(runners)
+}
+
+/// Where a macOS release runner comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RunnerSource {
+    /// Built by Cargo for this package (an app's crates, a checkout).
+    Built,
+    /// An installed nsh's prebuilt runner.
+    Installed,
+    /// The prebuilt runner of the runtime `NSH_RUNTIME` names.
+    NshRuntime,
+}
+
+/// Why the macOS release runner at `path`, from `source`, which holds
+/// `archs`, cannot be the one for `triple`. A prebuilt runner is built for
+/// the processor of the machine that built it.
+fn wrong_runner_arch(path: &Path, source: RunnerSource, archs: &[String], triple: &str) -> String {
+    let wanted = lipo_arch(triple);
+    let held = archs.join(" and ");
+    let path = path.display();
+    match source {
+        // Cargo was told the target, or it was the toolchain's host.
+        RunnerSource::Built => format!(
+            "the macOS release runner {path} came out built for {held}, not {wanted}, though Cargo built it for {triple}: \
+             a Cargo configuration (`build.target`, a wrapper) or a `RUSTC` other than Cargo's builds it for another target"
+        ),
+        RunnerSource::Installed => format!(
+            "the prebuilt macOS release runner {path} is built for {held}, not {wanted}: an installed nsh has the runner of its \
+             own processor, so package for {wanted} with the nsh of that processor, or where nsh can build the runner with \
+             Cargo (rustup.rs), which builds it for any"
+        ),
+        RunnerSource::NshRuntime => format!(
+            "the macOS release runner {path} of NSH_RUNTIME is built for {held}, not {wanted}: set NSH_RUNTIME to a runtime \
+             built for {wanted}, or unset it where Cargo is, with which nsh builds the runner for any"
+        ),
+    }
 }
 
 /// The architectures of the executable `path` (`lipo -archs`): `arm64`,
@@ -3275,21 +3317,60 @@ mod tests {
             Arch::Universal.macos_triples(),
             ["aarch64-apple-darwin", "x86_64-apple-darwin"]
         );
-        let (here, other) = if cfg!(target_arch = "aarch64") {
-            ("aarch64-apple-darwin", "x86_64-apple-darwin")
-        } else {
-            ("x86_64-apple-darwin", "aarch64-apple-darwin")
-        };
-        assert_eq!(macos_build_triple(here), None);
-        assert_eq!(macos_build_triple(other), Some(other));
         assert_eq!(lipo_arch("aarch64-apple-darwin"), "arm64");
         assert_eq!(lipo_arch("x86_64-apple-darwin"), "x86_64");
-        assert_eq!(macos_update_platforms(None), [nsh_updater::platform()]);
-        assert_eq!(macos_update_platforms(Some(Arch::X86_64)), ["macos-x86_64"]);
+        let archs = |list: &[&str]| list.iter().map(|a| a.to_string()).collect::<Vec<_>>();
         assert_eq!(
-            macos_update_platforms(Some(Arch::Universal)),
+            macos_update_platforms(&archs(&["arm64"])),
+            ["macos-aarch64"]
+        );
+        assert_eq!(
+            macos_update_platforms(&archs(&["x86_64"])),
+            ["macos-x86_64"]
+        );
+        assert_eq!(
+            macos_update_platforms(&archs(&["x86_64", "arm64"])),
             ["macos-aarch64", "macos-x86_64"]
         );
+    }
+
+    /// A package with no `--arch` is for the processor of the Rust
+    /// toolchain, not of this nsh: an Intel nsh under Rosetta with an Apple
+    /// silicon toolchain builds and names an Apple silicon package.
+    #[test]
+    fn the_default_arch_is_the_toolchains() {
+        assert_eq!(Arch::of_host(Some("aarch64-apple-darwin")), Arch::Arm64);
+        assert_eq!(Arch::of_host(Some("x86_64-apple-darwin")), Arch::X86_64);
+        let own = if cfg!(target_arch = "aarch64") {
+            Arch::Arm64
+        } else {
+            Arch::X86_64
+        };
+        assert_eq!(Arch::of_host(None), own);
+    }
+
+    /// The error of a runner for the wrong processor says where it came
+    /// from: a runner Cargo built is not an installed nsh's.
+    #[test]
+    fn a_runner_for_another_processor_says_where_it_came_from() {
+        let path = Path::new("/tmp/nsh-macos-app");
+        let archs = ["arm64".to_owned()];
+        let built = wrong_runner_arch(path, RunnerSource::Built, &archs, MACOS_X86_64);
+        assert!(built.contains("built for arm64, not x86_64"), "{built}");
+        assert!(
+            built.contains("Cargo built it for x86_64-apple-darwin"),
+            "{built}"
+        );
+        assert!(!built.contains("installed"), "{built}");
+        let installed = wrong_runner_arch(path, RunnerSource::Installed, &archs, MACOS_X86_64);
+        assert!(
+            installed.starts_with("the prebuilt macOS release runner"),
+            "{installed}"
+        );
+        assert!(installed.contains("an installed nsh"), "{installed}");
+        let env = wrong_runner_arch(path, RunnerSource::NshRuntime, &archs, MACOS_X86_64);
+        assert!(env.contains("NSH_RUNTIME"), "{env}");
+        assert!(!env.contains("installed"), "{env}");
     }
 
     #[test]
@@ -4891,7 +4972,7 @@ mod tests {
         );
         assert_eq!(
             read(PackageTarget::Macos, None),
-            Some((&[host_macos_triple()][..], Platform::Macos))
+            Some((Arch::native().macos_triples(), Platform::Macos))
         );
         assert_eq!(
             read(PackageTarget::Ios, None),
@@ -4934,7 +5015,7 @@ mod tests {
         assert_eq!(
             PackageTarget::Macos.module_meta_triples(None),
             Some((
-                &[host_macos_triple()][..],
+                Arch::native().macos_triples(),
                 crate::module_meta::Platform::Macos
             ))
         );
