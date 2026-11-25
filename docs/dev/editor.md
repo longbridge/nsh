@@ -93,7 +93,7 @@ finger or a wheel on a row's glyphs scrolls as on blank space. Only the rows in 
 (`window.rs`'s `RowWindow`, which the `DiffView` shares); each row is an absolutely placed view holding one `Text`
 whose spans are the row's runs of one token and one set of decorations (`State::row_content`). The rows' box draws,
 from back to front: the rulers, indent guides, search matches, selections, the matching brackets, the rows, the
-whitespace marks, diagnostics' marks, the placeholder, the carets and the composition. In a terminal a row is one Cell, whatever `lineHeight` is (`terminal::row_height`, the `DiffView`'s too):
+whitespace marks, diagnostics' marks, the placeholder and the carets. In a terminal a row is one Cell, whatever `lineHeight` is (`terminal::row_height`, the `DiffView`'s too):
 rows on another step would land on the Cell grid unevenly, a blank row every few lines.
 
 `showWhitespaces` draws a `·` per space and a `→` per tab over the rows in view: one `Text` per run of spaces and per
@@ -107,7 +107,9 @@ is the room the rows' box has past its last row. With `minRows` and / or `maxRow
 root's height is its display rows within those bounds plus the padding its parts take around the rows (the vertical
 scroll view's content as last laid out, less the rows' box), and there is no room past the last line; past `maxRows`
 the text scrolls. Moving the caret keeps `cursorSurroundingLines` rows around it (a row by default, at most a quarter
-of the viewport; never more than half of what the caret's row leaves).
+of the viewport; never more than half of what the caret's row leaves). `scrollbarInset` is a scroll view's, measured
+from the editor's edges: the vertical scroll view takes it as it is; the horizontal one its sides along its bar and
+the bottom, the left less where the text area starts past the gutter (`layout::text_bar_inset`).
 
 A drag that selects (`drag_to`) never jumps to the caret: while the pointer is near or past the viewport's top or
 bottom edge (from 16 points inside), or past the text area's left or right edge without soft wrap, a 16 ms
@@ -115,7 +117,9 @@ bottom edge (from 16 points inside), or past the text area's left or right edge 
 extends the selection to the pointer again; it stops when the pointer comes back, on release, and when the drag ends.
 
 Revisions (`Signal<u64>` in `Ed`) keep a change to the parts that depend on it: `text_rev` (the text or its layout),
-`hl_rev` (highlighting progressed), `sel_rev` (selections), `marks_rev` (diagnostics, decorations, matches). The state
+`hl_rev` (highlighting progressed), `sel_rev` (selections), `marks_rev` (diagnostics, decorations, matches),
+`composition_rev` (what an input method composes). `composing` holds where a composition shows; each row and mark
+painter reads that, so a composing keystroke recomputes only the composing row's content. The state
 itself lives in an `Rc<RefCell<State>>` outside the reactive graph.
 
 ### Typed text and input methods
@@ -132,8 +136,11 @@ forward deletions and typed text at every selection (`sink_changed`, `sink_text.
 input methods that replace their text work. The caret stands for the sink's end until the platform moves the sink's
 own caret without a key (an input method that types a pair of brackets and puts its caret between them): a single
 caret then follows it (`sink_selection`), over text the editor holds the same way. While an input method composes, its text
-is drawn at the caret over the text (the `composition` part, underlined) and the carets hide; the commit arrives as
-typed text. The sink is emptied when the caret moves (unless a composition is under way) and once it holds 256 bytes.
+is a span of the primary caret's row (the `composition` part, underlined) and the carets hide; the commit arrives as
+typed text. The row keeps its tokens and decorations, and the composed span takes those its commit will fall inside
+(the ones around the caret, not those starting or ending there, as edits map them). Marks drawn over the row after the
+caret (selections, matches, brackets, whitespace, diagnostics, links) move aside by the composed text's width, and the
+placeholder hides while a composition shows in an empty editor. The sink is emptied when the caret moves (unless a composition is under way) and once it holds 256 bytes.
 A paste reaches the sink as a paste event (`PasteBehavior::Report`) and goes through `Editing::paste`; text copied
 from carets (whole lines) pastes back as whole lines.
 
@@ -341,10 +348,11 @@ its line's first row at a line start, across the bottom of its last row elsewher
 line break); that boundary is `placement: "before"`, and by default an empty range covers its line, as it does for
 `lineClass` (one decoration, one meaning of its range). Empty ranges are kept through edits (`adjust` collapses a deleted range to its boundary). The overview
 ruler (`view::overview_ruler`, the `overviewRuler` part, 14 points wide unless the part sets a width; its lanes are
-shares of that width, so a width the app's classes set moves them too) lies over the scroll view's right edge, receiving no pointer;
+shares of that width, so a width the app's classes set moves them too) lies over the scroll view's right edge, within
+`scrollbarInset` as the vertical bar is, receiving no pointer;
 its marks' display rows (`State::overview_ruler_marks`) are worked out again only when the text, folds, wrapping or
 decorations change (`text_rev`, `marks_rev`), and their places (`layout::ruler_place`: the rows scaled from the
-rows' box to the viewport's height, at least 6 points; `layout::ruler_lane`, Monaco's lanes) when the viewport does. GPUI Kit's folded
+rows' box to the ruler's height, at least 6 points; `layout::ruler_lane`, Monaco's lanes) when the viewport does. GPUI Kit's folded
 color and the theme's status colors are left out: a mark's look is the app's `class` / `style`.
 
 A decoration's `label` replaces its range's text on screen, as CodeMirror's replace decorations do: the display map
@@ -412,7 +420,7 @@ The defaults are the theme's tokens (`crate::theme()`), so a theme and the dark 
 | `activeLine` | `muted` at 60 % behind the rows of lines with a caret |
 | `selection` | The theme's selection color: its `selection` color, else `primary` at 22 % |
 | `caret` | 2 points wide, `foreground`, blinking every 530 ms while focused; in a terminal none: the terminal's cursor stands at the sink, which is kept at the primary caret |
-| `composition` | Underlined, on `background` |
+| `composition` | Underlined |
 | `searchMatch` / `currentSearchMatch` | Amber (`#fbbf24` / `#d97706` dark) at 25 % / 55 % |
 | `matchingBracket` | A 1 point border, `muted-foreground` at 60 %, while focused |
 | `indentGuide` | A 1 point line of `border` per level |

@@ -54930,3 +54930,590 @@ mod by_name {
         assert_eq!(super::views::texts(&batch), ["first", "later"]);
     }
 }
+
+/// Resolved class style cache (`Core::resolved_styles`) equivalence, sharing,
+/// invalidation, and mount/restyle benchmarks.
+mod resolved_style_cache {
+    use std::time::Instant;
+
+    use serde_json::json;
+
+    use super::{Prop as NodeProp, *};
+    use crate::{
+        element::Registry,
+        platform::Appearance,
+        prelude::*,
+        tailwind::{ClassEnvironment, Platform, state},
+    };
+
+    #[derive(Clone, PartialEq, Props)]
+    struct StyledBoxProps {
+        #[prop(default)]
+        class: crate::element::Prop<Option<SharedString>>,
+    }
+
+    #[component]
+    fn StyledBox(props: StyledBoxProps) -> impl IntoElement {
+        view()
+            .bg(crate::element::palette::INDIGO.shade(500))
+            .p(px(8.0))
+            .app_class(props.class)
+    }
+
+    fn setup_core() -> Core<FakeEngine> {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<StyledBox>();
+        c.set_components(registry);
+        c.set_safe_area(crate::EdgeInsets {
+            top: px(12.0),
+            ..Default::default()
+        });
+        c
+    }
+
+    fn node_snapshot(c: &Core<FakeEngine>, id: NodeId) -> Option<String> {
+        let key = c.key(id).ok()?;
+        let n = &c.nodes[key as usize];
+        let layout = n.layout.map(|l| c.layout.style(l));
+        Some(format!(
+            "{:?} | {:?}",
+            (
+                &n.view_style,
+                &n.text_style,
+                &n.paint,
+                &n.class_props,
+                &layout,
+                &n.base_layout,
+                &n.sticky,
+            ),
+            (
+                n.wants_fixed,
+                n.rtl,
+                n.has_logical,
+                n.z_index,
+                n.vertical_align,
+                n.resting_fill,
+                n.frame,
+                n.direction,
+            )
+        ))
+    }
+
+    fn assert_cores_match(a: &mut Core<FakeEngine>, b: &mut Core<FakeEngine>, ids: &[NodeId]) {
+        let ba = a.commit();
+        let bb = b.commit();
+        match (ba, bb) {
+            (None, None) => {}
+            (Some(ba), Some(bb)) => {
+                assert_eq!(
+                    format!("{:?}", ba.items),
+                    format!("{:?}", bb.items),
+                    "MountBatch items diverged"
+                );
+            }
+            (ba, bb) => panic!("MountBatch presence diverged: {ba:?} vs {bb:?}"),
+        }
+        for &id in ids {
+            assert_eq!(
+                node_snapshot(a, id),
+                node_snapshot(b, id),
+                "Node {id} state diverged"
+            );
+        }
+    }
+
+    fn apply_both(
+        cached: &mut Core<FakeEngine>,
+        uncached: &mut Core<FakeEngine>,
+        build_ops: impl Fn() -> Vec<Op>,
+    ) {
+        apply(cached, build_ops());
+        for op in build_ops() {
+            uncached.apply(op).unwrap();
+        }
+    }
+
+    #[test]
+    fn resolved_class_style_cache_matches_uncached_resolution() {
+        let mut cached = setup_core();
+        let mut uncached = setup_core();
+        uncached.resolve_uncached = true;
+
+        // Build a diverse tree mixing shared Tailwind classes, bordered cards
+        // (`currentColor`), shadows/transforms (`Parts`), `!important`, logical
+        // properties, breakpoints, `w-screen`/`h-screen`, interactions, positional
+        // variants, `group`, `data-*`, `ch`, `space-y-*`, `env()`, `fixed`,
+        // `sticky`, `inline_style`, `Input`, and a Rust component with `app_class`.
+        let build_ops = || {
+            let mut ops = vec![
+                // Color-inheriting wrapper for `currentColor` borders.
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                class_op(2, "p-2 text-red-600 dark:text-amber-300"),
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ];
+
+            // Repeated shared views & texts (hitting resolved_styles cache).
+            for i in 0..8 {
+                let card = 10 + i * 4;
+                let title = card + 1;
+                let raw = card + 2;
+                let badge = card + 3;
+                ops.extend([
+                    Op::Create {
+                        id: card,
+                        tag: Tag::View,
+                    },
+                    class_op(
+                        card,
+                        "p-3 gap-2 rounded-s-lg ps-4 pe-2 ms-1 border bg-white dark:bg-zinc-900 shadow-sm hover:bg-blue-500 active:scale-95 focus:border-emerald-500 disabled:opacity-50 sm:w-40 md:px-6 rtl:bg-green-500",
+                    ),
+                    Op::Create {
+                        id: title,
+                        tag: Tag::Text,
+                    },
+                    class_op(title, "text-sm font-semibold text-neutral-900 dark:text-white"),
+                    Op::CreateText {
+                        id: raw,
+                        text: format!("Item {i}"),
+                    },
+                    Op::Create {
+                        id: badge,
+                        tag: Tag::View,
+                    },
+                    class_op(
+                        badge,
+                        "px-2 py-1 rounded border border-neutral-300 bg-neutral-100 !bg-amber-200 z-10",
+                    ),
+                    Op::Insert {
+                        parent: title,
+                        child: raw,
+                        before: None,
+                    },
+                    Op::Insert {
+                        parent: card,
+                        child: title,
+                        before: None,
+                    },
+                    Op::Insert {
+                        parent: card,
+                        child: badge,
+                        before: None,
+                    },
+                    Op::Insert {
+                        parent: 2,
+                        child: card,
+                        before: None,
+                    },
+                ]);
+            }
+
+            // Positional container + children.
+            ops.extend([
+                Op::Create {
+                    id: 100,
+                    tag: Tag::View,
+                },
+                class_op(100, "flex-col gap-1"),
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 100,
+                    before: None,
+                },
+            ]);
+            for i in 0..5 {
+                let row = 101 + i;
+                ops.extend([
+                    Op::Create {
+                        id: row,
+                        tag: Tag::View,
+                    },
+                    class_op(
+                        row,
+                        "h-6 first:mt-2 last:mb-2 odd:bg-neutral-100 even:bg-white only:rounded-xl",
+                    ),
+                    Op::Insert {
+                        parent: 100,
+                        child: row,
+                        before: None,
+                    },
+                ]);
+            }
+
+            // Edge/excluded cases: `group`, `data-*`, `ch`, `space-y-*`, `env()`, `fixed`,
+            // `sticky`, `inline_style`, `Input`, and a Rust component.
+            ops.extend([
+                Op::Create {
+                    id: 200,
+                    tag: Tag::View,
+                },
+                class_op(200, "group space-y-2 p-2"),
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 200,
+                    before: None,
+                },
+                Op::Create {
+                    id: 201,
+                    tag: Tag::View,
+                },
+                class_op(
+                    201,
+                    "h-8 bg-white group-hover:bg-yellow-500 data-open:border-red-500 border",
+                ),
+                Op::SetProp {
+                    id: 201,
+                    prop: NodeProp::ProjectedData(vec!["open"].into()),
+                },
+                Op::Insert {
+                    parent: 200,
+                    child: 201,
+                    before: None,
+                },
+                Op::Create {
+                    id: 202,
+                    tag: Tag::View,
+                },
+                class_op(
+                    202,
+                    "max-w-prose pt-[env(safe-area-inset-top)] sticky top-4",
+                ),
+                Op::Insert {
+                    parent: 200,
+                    child: 202,
+                    before: None,
+                },
+                Op::Create {
+                    id: 203,
+                    tag: Tag::View,
+                },
+                class_op(
+                    203,
+                    "fixed bottom-2 right-2 w-screen h-screen bg-blue-500 !bg-emerald-500",
+                ),
+                style_op(203, &[("backgroundColor", StyleValue::Str("#ff00ff"))]),
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 203,
+                    before: None,
+                },
+                Op::Create {
+                    id: 204,
+                    tag: Tag::Input,
+                },
+                class_op(204, "px-2 py-1 bg-white placeholder:text-neutral-400"),
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 204,
+                    before: None,
+                },
+                Op::Create {
+                    id: 205,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 205,
+                    prop: NodeProp::Component(std::any::type_name::<StyledBox>().into()),
+                },
+                Op::SetProp {
+                    id: 205,
+                    prop: rust_prop::<StyledBoxProps>(
+                        "class",
+                        Some(json!("rounded-lg m-2 bg-rose-500")),
+                    ),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 205,
+                    before: None,
+                },
+            ]);
+            ops
+        };
+
+        let mut ids: Vec<NodeId> = vec![ROOT_ID, 2, 100, 200, 201, 202, 203, 204, 205];
+        for i in 0..8 {
+            let card = 10 + i * 4;
+            ids.extend([card, card + 1, card + 3]);
+        }
+        ids.extend(101..106);
+
+        apply_both(&mut cached, &mut uncached, build_ops);
+        assert_cores_match(&mut cached, &mut uncached, &ids);
+
+        // Toggle dark mode.
+        cached.set_appearance(Appearance::Dark);
+        uncached.set_appearance(Appearance::Dark);
+        assert_cores_match(&mut cached, &mut uncached, &ids);
+
+        // Resize across responsive breakpoints + w-screen/h-screen.
+        cached.set_viewport(size_pt(820.0, 500.0));
+        uncached.set_viewport(size_pt(820.0, 500.0));
+        assert_cores_match(&mut cached, &mut uncached, &ids);
+
+        // Flip RTL on root.
+        apply_both(&mut cached, &mut uncached, || {
+            vec![style_op(ROOT_ID, &[("direction", StyleValue::Str("rtl"))])]
+        });
+        assert_cores_match(&mut cached, &mut uncached, &ids);
+
+        // Toggle interaction & disabled states on shared views and group.
+        cached.set_states(10, state::HOVERED | state::PRESSED);
+        uncached.set_states(10, state::HOVERED | state::PRESSED);
+        cached.set_states(14, state::FOCUSED | state::DISABLED);
+        uncached.set_states(14, state::FOCUSED | state::DISABLED);
+        cached.set_states(200, state::HOVERED);
+        uncached.set_states(200, state::HOVERED);
+        assert_cores_match(&mut cached, &mut uncached, &ids);
+
+        // Switch inherited `currentColor` on wrapper `2`.
+        apply_both(&mut cached, &mut uncached, || {
+            vec![class_op(2, "p-2 text-blue-500")]
+        });
+        assert_cores_match(&mut cached, &mut uncached, &ids);
+
+        // Switch to light appearance + terminal cell layout to verify `resting_fill` matches.
+        cached.set_appearance(Appearance::Light);
+        uncached.set_appearance(Appearance::Light);
+        let env = crate::element::Environment {
+            cell: Some(size_pt(8.0, 16.0)),
+            ..Default::default()
+        };
+        cached.set_environment(env);
+        uncached.set_environment(env);
+        cached.set_states(10, state::HOVERED);
+        uncached.set_states(10, state::HOVERED);
+        assert_cores_match(&mut cached, &mut uncached, &ids);
+        // Verify hovered shared card `10` keeps its resting background in `resting_fill`.
+        let k10 = cached.key(10).unwrap();
+        assert!(cached.nodes[k10 as usize].resting_fill.is_some());
+
+        // Switch back off terminal and update tokens + Tailwind theme.
+        let env_off = crate::element::Environment::default();
+        cached.set_environment(env_off);
+        uncached.set_environment(env_off);
+        let (tokens, _) = test_tokens(Some(r##"{"primary": "#123456"}"##)).unwrap();
+        cached.set_tokens(tokens.clone());
+        uncached.set_tokens(tokens);
+        assert_cores_match(&mut cached, &mut uncached, &ids);
+
+        cached.set_tailwind_theme("{}");
+        uncached.set_tailwind_theme("{}");
+        assert_cores_match(&mut cached, &mut uncached, &ids);
+    }
+
+    #[test]
+    fn repeated_classes_share_resolved_styles_and_layout_records() {
+        let mut c = setup_core();
+        // 7 distinct class strings (> `LayoutTree`'s `SHARED = 4` window),
+        // including bordered `currentColor`, shadow `Parts`, text styles, and a token class.
+        let classes = [
+            "p-4 gap-2 rounded-lg border border-neutral-200 bg-white",
+            "p-3 rounded-md border bg-white",
+            "text-base font-semibold text-neutral-950",
+            "flex-row items-center gap-3 px-4 py-2 shadow-sm",
+            "w-12 h-8 rounded bg-neutral-100 hover:bg-neutral-200",
+            "ps-4 pe-2 rounded-s-md bg-blue-600",
+            "p-2 bg-primary text-white",
+        ];
+        let mut ops = Vec::new();
+        for i in 0..70 {
+            let id = 10 + i as NodeId;
+            ops.extend([
+                Op::Create { id, tag: Tag::View },
+                class_op(id, classes[i % classes.len()]),
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: id,
+                    before: None,
+                },
+            ]);
+        }
+        apply(&mut c, ops);
+        let _ = c.commit();
+        assert_eq!(c.resolved_styles.len(), classes.len());
+
+        // Nodes cycling through > 4 distinct styles still share exact `Rc` records.
+        for offset in 0..classes.len() {
+            let k0 = c.key(10 + offset as NodeId).unwrap();
+            let k1 = c.key(10 + (offset + classes.len()) as NodeId).unwrap();
+            let n0 = &c.nodes[k0 as usize];
+            let n1 = &c.nodes[k1 as usize];
+            assert!(std::ptr::eq(
+                c.layout.style(n0.layout.unwrap()),
+                c.layout.style(n1.layout.unwrap())
+            ));
+            assert!(super::opt_rc_eq(
+                n0.view_style.0.as_ref(),
+                n1.view_style.0.as_ref()
+            ));
+            assert!(super::opt_rc_eq(
+                n0.text_style.0.as_ref(),
+                n1.text_style.0.as_ref()
+            ));
+            assert!(super::opt_rc_eq(
+                n0.class_props.as_ref(),
+                n1.class_props.as_ref()
+            ));
+        }
+
+        let token_node = c.key(16).unwrap();
+        let plain_node = c.key(10).unwrap();
+        let token_view_before = c.nodes[token_node as usize].view_style.0.clone().unwrap();
+        let plain_view_before = c.nodes[plain_node as usize].view_style.0.clone().unwrap();
+
+        // Value-only token change evicts only token-dependent cache entries (`bg-primary`),
+        // restyling those nodes with a fresh `Rc` while keeping non-token entries shared.
+        let (tokens, _) = test_tokens(Some(r##"{"primary": "#abcdef"}"##)).unwrap();
+        c.set_tokens(tokens);
+        assert_eq!(c.resolved_styles.len(), classes.len());
+        let token_view_after = c.nodes[token_node as usize].view_style.0.as_ref().unwrap();
+        let plain_view_after = c.nodes[plain_node as usize].view_style.0.as_ref().unwrap();
+        assert!(!std::rc::Rc::ptr_eq(&token_view_before, token_view_after));
+        assert!(std::rc::Rc::ptr_eq(&plain_view_before, plain_view_after));
+
+        // Replacing the Tailwind theme clears the full cache and restyles every node.
+        c.set_tailwind_theme("{}");
+        assert_eq!(c.resolved_styles.len(), classes.len());
+        let plain_view_themed = c.nodes[plain_node as usize].view_style.0.as_ref().unwrap();
+        assert!(!std::rc::Rc::ptr_eq(&plain_view_before, plain_view_themed));
+
+        // Changing platform clears `resolved_styles` and rebuilds every entry with `deps != 0` (4 of 7).
+        let kept: Vec<_> = c.resolved_styles.values().cloned().collect();
+        c.set_class_environment(ClassEnvironment {
+            platform: Platform::Android,
+            ..Default::default()
+        });
+        assert_eq!(c.resolved_styles.len(), 4);
+        assert!(
+            c.resolved_styles
+                .values()
+                .all(|entry| kept.iter().all(|old| !std::rc::Rc::ptr_eq(old, entry)))
+        );
+    }
+
+    /// `cargo test --release -p nsh-core --lib bench_tailwind_class_mount -- --ignored --nocapture`:
+    /// compares shared-class mounts, 0%-cache-hit unique-class control mounts,
+    /// and appearance restyles on shared bordered views.
+    #[test]
+    #[ignore]
+    fn bench_tailwind_class_mount() {
+        let repeated_classes = [
+            "p-4 gap-2 rounded-lg border border-neutral-200 bg-white dark:bg-zinc-900",
+            "flex-row items-center justify-between gap-2 px-3 py-2 bg-neutral-100 rounded-md",
+            "text-base font-semibold text-neutral-950 dark:text-white",
+            "px-2 py-1 rounded bg-blue-600 text-white shadow-sm",
+            "p-2 gap-1 rounded border border-neutral-300 bg-white",
+            "flex-1 gap-1 px-3 py-2 bg-white rounded-md",
+            "text-xs text-neutral-500",
+            "h-10 px-4 rounded-lg bg-emerald-500 text-white",
+            "p-3 gap-2 rounded-xl border border-neutral-200 bg-neutral-50",
+            "flex-row gap-3 items-center py-2 px-3",
+        ];
+
+        for count in [2_000usize, 10_000usize] {
+            let ops: Vec<Op> = (0..count)
+                .flat_map(|i| {
+                    let id = 10 + i as NodeId;
+                    [
+                        Op::Create { id, tag: Tag::View },
+                        class_op(id, repeated_classes[i % repeated_classes.len()]),
+                        Op::Insert {
+                            parent: ROOT_ID,
+                            child: id,
+                            before: None,
+                        },
+                    ]
+                })
+                .collect();
+            let mut c = setup_core();
+            let t = Instant::now();
+            apply(&mut c, ops);
+            let batch = c.commit().unwrap();
+            let ms = t.elapsed().as_secs_f64() * 1e3;
+            println!(
+                "repeated {count:>6} views | {ms:>7.2} ms | {} mount items",
+                batch.items.len()
+            );
+        }
+
+        for count in [2_000usize, 10_000usize] {
+            let unique: Vec<String> = (0..count)
+                .map(|i| {
+                    format!(
+                        "w-[{}px] px-3 py-2 rounded-md border border-neutral-200 bg-white",
+                        20 + (i % 4096) + (i / 4096) * 4096
+                    )
+                })
+                .collect();
+            let ops: Vec<Op> = unique
+                .iter()
+                .enumerate()
+                .flat_map(|(i, cls)| {
+                    let id = 10 + i as NodeId;
+                    [
+                        Op::Create { id, tag: Tag::View },
+                        class_op(id, cls),
+                        Op::Insert {
+                            parent: ROOT_ID,
+                            child: id,
+                            before: None,
+                        },
+                    ]
+                })
+                .collect();
+            let mut c = setup_core();
+            let t = Instant::now();
+            apply(&mut c, ops);
+            let batch = c.commit().unwrap();
+            let ms = t.elapsed().as_secs_f64() * 1e3;
+            println!(
+                "unique   {count:>6} views | {ms:>7.2} ms | {} mount items",
+                batch.items.len()
+            );
+        }
+
+        // Restyling 5,000 shared views via dark-appearance toggles.
+        let count = 5_000usize;
+        let ops: Vec<Op> = (0..count)
+            .flat_map(|i| {
+                let id = 10 + i as NodeId;
+                [
+                    Op::Create { id, tag: Tag::View },
+                    class_op(id, repeated_classes[i % repeated_classes.len()]),
+                    Op::Insert {
+                        parent: ROOT_ID,
+                        child: id,
+                        before: None,
+                    },
+                ]
+            })
+            .collect();
+        let mut c = setup_core();
+        apply(&mut c, ops);
+        let _ = c.commit();
+        let rounds = 20;
+        let t = Instant::now();
+        let mut total_items = 0usize;
+        for r in 0..rounds {
+            c.set_appearance(if r % 2 == 0 {
+                Appearance::Dark
+            } else {
+                Appearance::Light
+            });
+            total_items += c.commit().map_or(0, |b| b.items.len());
+        }
+        let ms = t.elapsed().as_secs_f64() * 1e3 / rounds as f64;
+        println!(
+            "restyle_dark {count} views | {ms:>7.2} ms/toggle | {} mount items/toggle",
+            total_items / rounds
+        );
+    }
+}

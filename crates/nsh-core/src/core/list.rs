@@ -886,6 +886,19 @@ impl ListState {
         )
     }
 
+    /// Whether `row`, which the viewport's start (at `natural`) cuts
+    /// through, lies above the row [`Self::reading_anchor`] keeps in place:
+    /// more than a pixel's rounding of it is past the start and the next
+    /// row starts in view. A row taller than the viewport is the anchor
+    /// itself.
+    fn cut_above_a_row_in_view(&self, row: u32, natural: f32) -> bool {
+        let next = (row + 1) * self.columns;
+        self.viewport > 0.0
+            && next < self.count
+            && self.item_at(row * self.columns) - natural < -PIN_SLACK
+            && self.item_at(next) - natural < self.viewport
+    }
+
     /// The row the viewport starts in, by its first item, and how far
     /// past the row's start the viewport starts, in natural coordinates
     /// (`ref.measureScrollPosition()`); `None` without items or a
@@ -1583,9 +1596,16 @@ impl ListState {
         }
     }
 
-    /// Records a measured size. Returns the change if the item lies
-    /// entirely before the viewport (the caller scrolls by it so the
-    /// visible content stays put).
+    /// Records a measured size. Returns the change if the item's row lies
+    /// above the visible rows (the caller scrolls by it so the visible
+    /// content stays put): entirely before the viewport, or, measured for
+    /// the first time, cut by the viewport's start with the next row
+    /// starting in view, the row a change of the items keeps in place
+    /// ([`Self::reading_anchor`]). A row is measured in the layout that
+    /// first shows it, so one cut at its first measurement was never seen
+    /// (rows inserted right after a cut row): its estimate only placed it.
+    /// A row already measured is being read and keeps its start, the rows
+    /// below it moving.
     pub(super) fn measured(&mut self, i: u32, size: f32) -> f32 {
         let idx = i as usize;
         if idx >= self.sizes.len() || self.sizes[idx] == size {
@@ -1595,7 +1615,10 @@ impl ListState {
         let before = self.row_size(row);
         let row_start = self.item_at(i);
         let natural = self.measuring_natural_offset();
-        let above_viewport = row_start < natural && row_start + before <= natural;
+        let unseen = self.sizes[idx].is_nan();
+        let above_viewport = row_start < natural
+            && (row_start + before <= natural
+                || (unseen && self.cut_above_a_row_in_view(row, natural)));
         let keep = above_viewport && self.keeps_visible_rows_at(natural);
         self.sizes[idx] = size;
         let delta = self.row_size(row) - before;
@@ -2335,6 +2358,81 @@ mod tests {
             l.anchor_end(scroll);
             assert_eq!(l.item_at(50) - l.natural_offset(), 0.0, "{order:?}");
         }
+    }
+
+    /// Measures item `i` as a layout does: scrolls by what keeps the
+    /// visible rows in place.
+    fn measure(l: &mut ListState, i: u32, size: f32) -> f32 {
+        let scroll = l.measured(i, size);
+        l.offset += scroll;
+        l.anchor_end(scroll);
+        scroll
+    }
+
+    /// A row the viewport's start cuts through, measured for the first
+    /// time, counts as above the visible rows, as for a change of the items
+    /// ([`ListState::reading_anchor`]): measured smaller or larger than its
+    /// estimate, the first row that starts in view stays where it is.
+    #[test]
+    fn a_row_cut_by_the_viewport_measured_keeps_the_rows_below() {
+        for (size, scroll) in [(46.0, -4.0), (80.0, 30.0)] {
+            // Row 20 at the top with 30 of its 50 points scrolled past; row
+            // 21 starts 20 points down.
+            let mut l = list(100, 50.0, 400.0);
+            l.offset = 1030.0;
+            assert_eq!(measure(&mut l, 20, size), scroll, "{size}");
+            assert_eq!(l.item_at(21) - l.offset, 20.0, "{size}");
+        }
+        // A row inserted right after the cut row (now above the viewport,
+        // the rows below kept in place) is cut in turn, and measured
+        // smaller than its estimate: the rows below still stay.
+        let mut l = with_cells(100, 1030.0);
+        l.splice(21, 0, 1);
+        l.take_splice_anchor();
+        assert_eq!(l.item_at(22) - l.offset, 20.0);
+        assert!(l.item_at(21) < l.offset);
+        assert_eq!(measure(&mut l, 21, 46.0), -4.0);
+        assert_eq!(l.item_at(22) - l.offset, 20.0);
+    }
+
+    /// A row the viewport's start cuts through that was measured before
+    /// is being read: measured again (its content changed), it keeps its
+    /// start and the rows below it move.
+    #[test]
+    fn a_measured_row_cut_by_the_viewport_keeps_its_start() {
+        let mut l = list(100, 50.0, 400.0);
+        measure(&mut l, 20, 50.0);
+        l.offset = 1010.0;
+        assert_eq!(measure(&mut l, 20, 180.0), 0.0);
+        assert_eq!(l.item_at(20) - l.offset, -10.0);
+        assert_eq!(l.item_at(21) - l.offset, 170.0);
+    }
+
+    #[test]
+    fn rows_measured_in_or_below_the_first_row_in_view_move_the_rows_below() {
+        // A row whole in view: the rows below it move.
+        let mut l = list(100, 50.0, 400.0);
+        l.offset = 1030.0;
+        assert_eq!(measure(&mut l, 22, 30.0), 0.0);
+        assert_eq!(l.item_at(21) - l.offset, 20.0);
+        assert_eq!(l.item_at(23) - l.offset, 100.0);
+        // At its start the list stays there.
+        let mut l = list(100, 50.0, 400.0);
+        assert_eq!(measure(&mut l, 0, 30.0), 0.0);
+        assert_eq!((l.offset, l.item_at(1)), (0.0, 30.0));
+        // A row starting at the viewport's start, a pixel's rounding away,
+        // shows whole: the rows below it move.
+        let mut l = list(100, 50.0, 400.0);
+        l.offset = 1000.5;
+        assert_eq!(measure(&mut l, 20, 46.0), 0.0);
+        assert_eq!(l.item_at(21) - l.offset, 45.5);
+        // A row taller than the viewport, no row starting in view: it is
+        // the anchor itself, and the rows below it move.
+        let mut l = list(100, 50.0, 400.0);
+        measure(&mut l, 20, 600.0);
+        l.offset = 1100.0;
+        assert_eq!(measure(&mut l, 20, 550.0), 0.0);
+        assert_eq!((l.offset, l.item_at(21)), (1100.0, 1550.0));
     }
 
     #[test]

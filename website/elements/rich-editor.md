@@ -282,6 +282,11 @@ const canIndent = editor.can(sinkListItem("listItem"));
 | `on(event, listener)` | Calls `listener` with the payload of every `event`, in JS's next turn: `revision` (`{ revision }`, after every change, from any source), `update`, `selectionUpdate`, `transaction`, `focus`, `blur`, `delete`. Returns a function that stops it; a listener added while a component renders stops with the component |
 | `focus()`, `blur()` | Moves the keyboard focus to or from the views showing the editor |
 
+When `insertContent` receives text, Markdown or JSON, the content opens at its edges and fits where it goes: at a
+caret in text, one paragraph joins the text around it, while lists, tables and other blocks that cannot fit inline
+remain blocks. An HTML string follows Tiptap's `insertContent`: bare text or inline markup joins the text, and
+explicit block elements insert as blocks.
+
 Positions count as ProseMirror's do: a text counts its UTF-16 code units, a leaf node one, a node with content its
 two boundaries. Anything that must outlive edits keeps an id in a node's attributes or a mark. A position query
 (`resolve(pos)`, `nodeAt(pos)`, `coordsAtPos(pos)`, `findParentNode(name, pos)`, ...) throws a `RangeError` for a
@@ -488,9 +493,10 @@ const paste = new RichEditorPlugin("paste")
 An app that cleans up the clipboard's HTML itself (Word's lists, Google Docs' wrapper, Markdown turned into HTML)
 hands the result on with `editor.pasteHTML(html)` and returns `true`; plain text goes on with `editor.pasteText(text)`.
 They are ProseMirror's `pasteHTML` and `pasteText`: the content is read as a paste is, by the schema's parse rules and
-fitted to the selection, so a node marked `isolating` (a figure with its caption) stays whole where
-`insertContent(html, "html")` would open it, and the editor's own paste steps (links, character limits, paste rules)
-apply. The plugins' `transformPasted` and `handlePaste` are not asked again. They return whether something was pasted.
+fitted to the selection, so a node marked `isolating` (a figure with its caption) stays whole where JSON or Markdown
+given to `insertContent` opens even through such a node at the content's edges. The editor's own paste steps (links,
+character limits, paste rules) apply. The plugins' `transformPasted` and `handlePaste` are not asked again. They
+return whether something was pasted.
 
 ```tsx
 const paste = new RichEditorPlugin("paste").handlePaste((_slice, clipboard) => {

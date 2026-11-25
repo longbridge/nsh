@@ -727,6 +727,15 @@ const RUNTIME_SHEET = Symbol.for("nsh.runtimeSheet");
 /** Adds (or, for a view's own rule, replaces) class `name` with `text`.
  * The class is doubled: it wins over the runtime's rules of a class and a
  * pseudo-class (`.nsh-v:focus`), as inline styles did. */
+/** The CSS font of run style class `name` (its `font` and the longhands a
+ * `font` shorthand cannot say, as `font-variant-numeric`, leave its
+ * `font` empty); null for none. */
+function runFont(name) {
+  const style = name && CLASSES.rules.get(name)?.style;
+  if (!style?.fontFamily) return null;
+  return style.font || `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+}
+
 function defineClass(name, text, replace, weight = 2) {
   const rule = CLASSES.rules.get(name);
   if (rule) {
@@ -1853,6 +1862,51 @@ class Player {
   }
 
   /**
+   * How far below its top a run in `font` with `line-height` `height`
+   * (points) has its baseline, as the DOM lays it out (half-leading around
+   * the font's own ascent and descent, snapped as the browser snaps it);
+   * null without a document to measure in. Kept per font and height:
+   * texts have few of either.
+   */
+  lineBaseline(font, height) {
+    const key = `${height}|${font}`;
+    const cache = (this.lineBaselines ??= new Map());
+    if (cache.has(key)) return cache.get(key);
+    let baseline = null;
+    if (this.domMetrics(font)) {
+      const { run, mark } = this.metricsProbe;
+      run.style.lineHeight = `${height}px`;
+      baseline = mark.getBoundingClientRect().top - run.getBoundingClientRect().top;
+      run.style.lineHeight = "";
+    }
+    cache.set(key, baseline);
+    return baseline;
+  }
+
+  /**
+   * Places `span`, a run whose glyphs' top is at `top` (`[x, y]` of its
+   * line's layout): a run in a line taller or shorter than its font
+   * (`height`, a line height the text sets) gets a line box that tall
+   * around the same baseline, so a selection highlights the whole line as
+   * on a browser's own text, not the font's height.
+   */
+  placeRun(span, name, left, top, height) {
+    let lead = 0;
+    const font = height ? runFont(name) : null;
+    const baseline = font ? this.lineBaseline(font, height) : null;
+    if (baseline != null) lead = baseline - this.metrics(font)[0];
+    else height = null;
+    const line = height ? `${height}px` : "";
+    const y = `${top - lead}px`, x = `${left}px`;
+    if (span.style.left !== x) span.style.left = x;
+    if (span.style.top !== y) span.style.top = y;
+    if (span.style.lineHeight !== line) span.style.lineHeight = line;
+    // Where its glyphs' top is in its box (a snapshot draws them there).
+    if (lead) span._lead = lead;
+    else delete span._lead;
+  }
+
+  /**
    * A face registered from data loads asynchronously: text is measured
    * again once it can be drawn. Faces registered while the app starts hide
    * it until they load, so its first frame shows the right fonts.
@@ -1879,6 +1933,7 @@ class Player {
         }
         this.fontsPending = [];
         this.metricsCache.clear();
+        this.lineBaselines?.clear();
         this.call((w) => w.nsh_fonts_loaded());
         clearTimeout(this.fontTimer);
         this.root.classList.remove("nsh-hidden");
@@ -3088,14 +3143,12 @@ class Player {
       el.insertBefore(span, before ?? null);
       spans.push(span);
     }
-    runs.forEach(([x, y, text, style, start, , after], i) => {
+    runs.forEach(([x, y, text, style, start, , after, height], i) => {
       const span = spans[i];
       const name = this.styleClass(styles[style]);
       const className = name ? `nsh-run ${name}` : "nsh-run";
       if (span.className !== className) span.className = className;
-      const left = `${cx + x}px`, top = `${cy + y}px`;
-      if (span.style.left !== left) span.style.left = left;
-      if (span.style.top !== top) span.style.top = top;
+      this.placeRun(span, name, cx + x, cy + y, height);
       if (span.firstChild.data !== text) span.firstChild.data = text;
       span._start = start;
       span._run = i;
@@ -3145,11 +3198,11 @@ class Player {
       events: new Set(events),
       address: this.textLinkAddress(href),
     }));
-    runs.forEach(([x, y, text, style, start, parts, after], i) => {
+    runs.forEach(([x, y, text, style, start, parts, after, height], i) => {
       const span = document.createElement("span");
       const name = this.styleClass(styles[style]);
       span.className = name ? `nsh-run ${name}` : "nsh-run";
-      span.style.cssText = `left:${cx + x}px;top:${cy + y}px`;
+      this.placeRun(span, name, cx + x, cy + y, height);
       fillRun(span, text, parts, spans);
       // Where its characters are in the text (UTF-16, as JS strings).
       span._start = start;
@@ -4295,7 +4348,8 @@ class Player {
         cx.textBaseline = "alphabetic";
         const text = child.textContent;
         const m = cx.measureText(text);
-        cx.fillText(text, x, y + (m.fontBoundingBoxAscent ?? m.actualBoundingBoxAscent));
+        // Its glyphs sit `_lead` below its top in a line box of its line's height.
+        cx.fillText(text, x, y + (child._lead ?? 0) + (m.fontBoundingBoxAscent ?? m.actualBoundingBoxAscent));
       }
       // A view that clips its content (a scroll view among them) clips it here too.
       if (cs.clips) {
