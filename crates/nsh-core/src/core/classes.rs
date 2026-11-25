@@ -1807,7 +1807,7 @@ impl<M: TextEngine> Core<M> {
             self.ch_readers -= 1;
         }
         if positional {
-            self.nodes[parent as usize].positional |= Positional::CHILDREN;
+            self.reads_positions(parent);
         }
     }
 
