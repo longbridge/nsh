@@ -193,9 +193,9 @@ impl Composing {
             return rect;
         }
         if span.start >= self.at {
-            rect.origin.x = rect.origin.x + self.width;
+            rect.origin.x += self.width;
         } else if span.end > self.at {
-            rect.size.width = rect.size.width + self.width;
+            rect.size.width += self.width;
         }
         rect
     }
