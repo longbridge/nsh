@@ -186,15 +186,19 @@ impl Renderer {
     /// ([`crate::EngineControl::shaders_unavailable`]).
     pub fn new(format: PixelFormat) -> Option<Renderer> {
         // The first backend that gives a device: an adapter found may still
-        // refuse its device, and the next backend then gets its turn. On
-        // NVIDIA's driver OpenGL does (wgpu's validation of indirect calls
-        // needs compute shaders its GL context lacks), and Vulkan opens.
+        // refuse its device, and the next backend then gets its turn.
         let mut opened = None;
         let mut last = None;
         let order = backend_order();
         for (i, &backends) in order.iter().enumerate() {
             let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
                 backends,
+                // Shader views never draw or dispatch indirectly, and the
+                // validation of indirect calls needs compute shaders: an
+                // OpenGL context without them (NVIDIA's driver) would refuse
+                // the device, and wgpu log its pipeline's failure as an error.
+                flags: wgpu::InstanceFlags::default()
+                    - wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL,
                 ..wgpu::InstanceDescriptor::new_without_display_handle()
             });
             let adapter =
