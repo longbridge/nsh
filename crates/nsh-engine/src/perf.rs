@@ -238,6 +238,7 @@ impl PerfSnapshot {
         let mut stats = nsh_core::platform::PerfStats::new(self.fps);
         stats.refresh_rate = self.refresh_rate;
         stats.dropped = nsh_core::geometry::Percentage(self.dropped);
+        stats.memory = self.process.memory;
         stats
     }
 }
