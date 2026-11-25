@@ -405,7 +405,8 @@ pub struct ComponentSpec {
 
 /// The props JS sets on a component's host as on a view (TSX's
 /// `ComponentHostProps` but `ref`): the app's classes and styles, its test
-/// id, its tooltip, layout, file drop, mouse and context menu events.
+/// id, its accessibility, its tooltip, layout, file drop, mouse and context
+/// menu events, and the actions assistive technologies perform.
 pub const HOST_PROPS: &[&str] = &[
     "class",
     "classList",
@@ -417,6 +418,21 @@ pub const HOST_PROPS: &[&str] = &[
     "focusVisibleStyle",
     "disabledStyle",
     "testID",
+    "accessible",
+    "accessibilityLabel",
+    "accessibilityHint",
+    "accessibilityDescription",
+    "role",
+    "accessibilityState",
+    "accessibilityValue",
+    "accessibilityElementsHidden",
+    "importantForAccessibility",
+    "accessibilityLiveRegion",
+    "accessibilityActions",
+    "accessibilityLevel",
+    "accessibilityActiveDescendant",
+    "accessibilityControls",
+    "accessibilityDescribedBy",
     "tooltip",
     "onLayout",
     "onFileDragEnter",
@@ -427,6 +443,7 @@ pub const HOST_PROPS: &[&str] = &[
     "onMouseLeave",
     "onMouseUp",
     "onContextMenu",
+    "onAccessibilityAction",
 ];
 
 /// What makes a component's props', events' and methods' specs.
