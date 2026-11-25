@@ -535,6 +535,11 @@ impl CanvasState {
             let only_pan = self.changed.iter().all(|&k| own(k));
             store(&mut self.args, values);
             if only_pan {
+                // A pan frame counts as a paint: during a drag the canvas
+                // keeps drawing on Core Animation's threads, so the drawing
+                // around the pan every few frames does not block the main
+                // thread (a few paints a second alone would draw it there).
+                self.cadence.paint(Instant::now());
                 let (dx, dy) = self.pan_shift().unwrap_or_default();
                 let half = margin / 2.0;
                 if !self.pan_margin_stale.get() && dx.abs() <= half && dy.abs() <= half {
@@ -2635,6 +2640,38 @@ mod tests {
             Damage::All
         );
         assert_eq!(canvas.pan_shift(), Some((0.0, 0.0)));
+    }
+
+    #[test]
+    fn a_drag_keeps_a_panned_canvas_drawing_asynchronously() {
+        let mut canvas = CanvasState {
+            drawing: Some(panned_tree(64)),
+            ..CanvasState::default()
+        };
+        canvas.pan = Some((Num::Slot(0), Num::Slot(1)));
+        let (w, h) = (300.0, 200.0);
+        canvas.content_bounds(CGSize::new(w, h));
+        let m = PAN_MARGIN;
+        let target = Some(Painted {
+            frame: CGRect::new(CGPoint::new(-m, -m), CGSize::new(w + 2.0 * m, h + 2.0 * m)),
+            scale: 2.0,
+            prefix_only: false,
+        });
+        let pan = |x: f32| {
+            [
+                (0, AnimationValue::Number(x)),
+                (1, AnimationValue::Number(0.0)),
+            ]
+        };
+        canvas.set_args(&pan(0.0), target);
+        canvas.painted.set(target);
+        assert!(!canvas.draws_asynchronously());
+        // Frames that only move the layer, as a drag's: it is drawn again
+        // around the pan on Core Animation's threads.
+        for f in 1..=FREQUENT {
+            assert_eq!(canvas.set_args(&pan(f as f32), target), Damage::None);
+        }
+        assert!(canvas.draws_asynchronously());
     }
 
     /// What a pan of a whole drawing costs a frame, replayed in full each
