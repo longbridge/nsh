@@ -235,7 +235,7 @@ pub(crate) struct RareAttrs {
     /// The text continues the one before it ([`Element::continues_text`]).
     pub(crate) continues_text: bool,
     /// Its children take its position among its siblings
-    /// ([`Element::pass_position`]).
+    /// (`Element::__pass_position`).
     pub(crate) pass_position: bool,
     /// The states it shows as its control's part
     /// ([`Interactive::project_checked`]).
@@ -1165,8 +1165,10 @@ pub trait Element: IntoElement + Sized {
     /// view's place, not theirs among its children. For a view that only
     /// wraps its content, as the root an [`each`](super::each) row needs
     /// around a [`dynamic`](super::dynamic): the content then styles as
-    /// though it were the row. Off by default.
-    fn pass_position(mut self, pass: impl IntoReactive<bool>) -> Self {
+    /// though it were the row. Off by default. Internal: only the base
+    /// components (`TextView`) use it; not part of the public API.
+    #[doc(hidden)]
+    fn __pass_position(mut self, pass: impl IntoReactive<bool>) -> Self {
         self.node().bind_attr(pass, |a, pass| {
             if pass || a.rare.is_some() {
                 a.rare_mut().pass_position = pass;

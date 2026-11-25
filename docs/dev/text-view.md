@@ -38,7 +38,7 @@ colored with the theme's tokens; the app restyles each part over it.
   table once its delimiter row arrives) gets a new row. A row's item (`Row`) is its block (shared), its position,
   what comes before it (a heading's room above it) and whether it is the last (the caret's), so a row hears of a
   change through its own item alone and an update runs no memo per row. A row's root is a view only because an `Each`
-  keeps rows by their root's key; it passes its position on (`Element::pass_position`), as do the views `block` wraps
+  keeps rows by their root's key; it passes its position on (`Element::__pass_position`), as do the views `block` wraps
   a block in (the caret's line, a terminal's blank row), so a part's `first:` / `last:` read the block's place among
   the blocks, as they do inside a quote. Footnotes follow the blocks in one region of
   their own.

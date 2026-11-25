@@ -4012,7 +4012,7 @@ pub enum Prop {
     /// The view's children take its own position among its siblings
     /// (`first:`, `last:`, `odd:`, `even:`, `only:`), not theirs among
     /// its children: a node that only wraps its content. Set by
-    /// components (`Element::pass_position`), never by JS.
+    /// components (`Element::__pass_position`), never by JS.
     PassPosition(bool),
     /// `allowFontScaling`: follow the system text size (default true).
     #[prop(js = "allowFontScaling", default = true, on = TEXT | INPUT)]
