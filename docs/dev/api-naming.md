@@ -350,6 +350,7 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | `ImageAsset.uri` | `ImageAsset.url` | Addresses | What `import logo from "./logo.png"` gives |
 | **Video** | | | |
 | `source: string \| { uri }` | `src: string` | Addresses | |
+| `poster` | `poster?: string`, Rust `.poster(url)` | Addresses | react-native-video's name and meaning: an image shown while the video loads, until its first frame is ready. HTML's `<video poster>` stays until playback starts; the web backend takes it off at `loadeddata` so every platform shows the same |
 | **WebView** | | | |
 | `source: string \| { uri } \| { html, baseUrl }` | `src?: string`; `html?: string`, `baseUrl?: string` | Addresses | One of `src` and `html` |
 | the page's `window.ReactNativeWebView.postMessage(data)` | `window.nsh.postMessage(data)` | Where names come from | Decided by the user: only `window.nsh` is injected |

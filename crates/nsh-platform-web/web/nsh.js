@@ -7498,11 +7498,19 @@ class Player {
     this.webNavigation(el, "onLoad", false);
   }
 
-  op_video([, id, src, paused, muted, volume, rate, repeat, fit, controls, progressInterval]) {
+  op_video([, id, src, poster, paused, muted, volume, rate, repeat, fit, controls, progressInterval]) {
     const el = this.view(id);
     const video = el?._video;
     if (!video) return;
     const url = src ? this.asset(src) : "";
+    // The poster shows until the first frame is ready (`loadeddata`), as
+    // on the other platforms, not until playback starts as `<video>`'s own.
+    const posterUrl = poster ? this.asset(poster) : "";
+    if (posterUrl !== el._poster || url !== el._src) {
+      el._poster = posterUrl;
+      if (posterUrl && (url !== el._src || video.readyState < 2)) video.poster = posterUrl;
+      else video.removeAttribute("poster");
+    }
     // `paused` is acted on when it changes (or for a new source): `play()`
     // on a video that ended starts it over, and one its controls paused
     // would play on, whenever another prop (the volume, say) changed.
@@ -7559,6 +7567,7 @@ class Player {
     });
     video.addEventListener("loadedmetadata", () =>
       emit("onLoad", { duration: video.duration || 0, width: video.videoWidth, height: video.videoHeight }));
+    video.addEventListener("loadeddata", () => video.removeAttribute("poster"));
     video.addEventListener("playing", () => {
       buffer(false);
       stopProgress();

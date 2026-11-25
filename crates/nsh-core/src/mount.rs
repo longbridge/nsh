@@ -150,6 +150,9 @@ pub enum AudioSession {
 pub struct VideoProps {
     /// The video's URL (or `asset:/` URI).
     pub source: Option<Arc<str>>,
+    /// An image (URL or `asset:/` URI) shown while the video loads, until
+    /// its first frame is ready.
+    pub poster: Option<Arc<str>>,
     /// What its sound does to the rest of the device's audio.
     pub audio_session: AudioSession,
     /// Paused.
@@ -174,6 +177,7 @@ impl Default for VideoProps {
     fn default() -> Self {
         Self {
             source: None,
+            poster: None,
             audio_session: AudioSession::default(),
             paused: false,
             muted: false,

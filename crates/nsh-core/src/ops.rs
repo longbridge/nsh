@@ -4084,6 +4084,9 @@ pub enum NativeProp {
     /// `src` of a web view or video: the URL it loads.
     #[prop(js = "src", on = WEBVIEW | VIDEO, shared)]
     Src(Option<Arc<str>>),
+    /// `poster` (videos): an image shown until the video's first frame is ready.
+    #[prop(js = "poster", on = VIDEO)]
+    Poster(Option<Arc<str>>),
     /// `html` (web views): the page to show instead of loading `src`.
     #[prop(js = "html", on = WEBVIEW)]
     Html(Option<Arc<str>>),

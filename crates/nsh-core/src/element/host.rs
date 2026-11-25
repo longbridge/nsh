@@ -1826,6 +1826,14 @@ impl WebView {
 }
 
 impl Video {
+    /// An image (a URL or `asset:/` URI) shown while the video loads,
+    /// until its first frame is ready.
+    pub fn poster(self, url: impl IntoReactive<String>) -> Self {
+        self.bind_prop(url, |url: String| {
+            Prop::Native(NativeProp::Poster(Some(url.into())))
+        })
+    }
+
     /// Paused.
     pub fn paused(self, paused: impl IntoReactive<bool>) -> Self {
         self.bind_prop(paused, |paused: bool| {

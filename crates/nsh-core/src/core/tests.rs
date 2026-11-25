@@ -13601,6 +13601,12 @@ fn media_sources_load_the_url_the_check_granted() {
                 "//docs.example.com/v/../v.mp4".into(),
             ))),
         },
+        Op::SetProp {
+            id: 10,
+            prop: Prop::Native(NativeProp::Poster(Some(
+                "//docs.example.com/p/../poster.png".into(),
+            ))),
+        },
         Op::Insert {
             parent: ROOT_ID,
             child: 10,
@@ -13632,12 +13638,17 @@ fn media_sources_load_the_url_the_check_granted() {
         MountItem::NativeProps {
             id: 10,
             props: crate::NativeProps::Video(p),
-        } => Some(p.source.clone()),
+        } => Some(p),
         _ => None,
     });
+    let video = video.expect("the video's props");
     assert_eq!(
-        video.flatten().as_deref(),
+        video.source.as_deref(),
         Some("https://docs.example.com/v.mp4")
+    );
+    assert_eq!(
+        video.poster.as_deref(),
+        Some("https://docs.example.com/poster.png")
     );
 }
 
@@ -41879,6 +41890,49 @@ fn audio_session_reaches_the_video() {
         })
         .expect("the video's props");
     assert_eq!(props.audio_session, crate::AudioSession::Playback);
+}
+
+#[test]
+fn a_videos_poster_reaches_the_platform() {
+    // The image shown until the video's first frame is ready is the app's,
+    // not a platform extra.
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Video,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Native(crate::NativeProp::Poster(Some(
+                    "https://example.com/poster.png".into(),
+                ))),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let items = c.commit().unwrap();
+    let props = items
+        .items
+        .iter()
+        .find_map(|item| match item {
+            MountItem::NativeProps {
+                id: 2,
+                props: crate::NativeProps::Video(v),
+            } => Some(v),
+            _ => None,
+        })
+        .expect("the video's props");
+    assert_eq!(
+        props.poster.as_deref(),
+        Some("https://example.com/poster.png")
+    );
 }
 
 #[test]

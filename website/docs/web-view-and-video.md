@@ -34,7 +34,7 @@ its parents and rounded corners, but NSH content drawn over it (a dialog, a shee
 WebView2 Runtime (part of Windows 11; installed with Edge on Windows 10), else it shows a placeholder;
 `baseUrl` for HTML, `scrollable` and `allowsBackForwardNavigationGestures` are not supported. Videos are
 ordinary content (clipped, transformed and covered like any view) and play the formats the installed Media Foundation
-codecs decode; `rate` works, there is no poster, and the control bar always shows while `controls` is on.
+codecs decode; `rate` works, and the control bar always shows while `controls` is on.
 
 ## WebView
 
@@ -620,6 +620,7 @@ In Rust, `video(url)` makes the player (the URL a value, a signal or a closure) 
 | Prop | Type | Default | Description |
 |---|---|---|---|
 | `src` | `string` | | The video's URL. |
+| `poster` | `string` | | An image shown while the video loads, until its first frame is ready. |
 | `paused` | `boolean` | `false` | Playback is paused. |
 | `muted` | `boolean` | `false` | No sound. |
 | `volume` | `number` | `1` | 0..1. |
