@@ -40,7 +40,14 @@ What is kept:
 - `shader`, `editor`, `rich-editor`, `plot`, `term`, `emoji-picker`: kept when a reachable import links their part;
   `highlight` and `math` also by `TextView` (Markdown shows code and formulas);
 - `zlib`, `crypto`, `websocket`, `updater`: kept when the bundle imports their module;
-- `js`, `net`, `svg` (and Linux's `sound` and `webview`, Windows' `webview` and `media`): always kept, since a URL or an image's format comes from data;
+- `webview`: kept when the app may make a `WebView` (the bundle spells its tag, `webview`, or the app's Rust code
+  spells `WebView` or `web_view`);
+- `sound` (Linux's GStreamer): kept when the bundle imports `Sound` from `nsh`, or the app's Rust code names
+  `load_sound`; GTK plays `AudioPlayer` and `Video` without it;
+- `media` (Windows' Media Foundation and XAudio2): kept when the bundle imports `Sound`, `AudioPlayer` or `Video` from
+  `nsh` or spells the tag `video` (the compiled `<Video>`), or the app's Rust code names `load_sound`, `audio_player` or
+  `video` (whole names, so `Win32_SoundDevice` or an icon's `Icon::Video` keeps nothing);
+- `js`, `net`, `svg`: always kept, since a URL or an image's format comes from data;
 - everything is kept when the bundle computes an import (`import(name)`), or when it could not be analyzed.
 
 What only the app's Rust code or a dynamic access needs, it keeps in `nsh.json`: `"features": ["plot"]`. Rust code that
