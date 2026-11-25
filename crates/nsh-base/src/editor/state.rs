@@ -431,8 +431,8 @@ impl State {
             .set_fonts(&self.buffer, fonts, runs, |font| measure(font));
     }
 
-    /// The decorations' fonts carried through an edit, before the lines it
-    /// touched are laid out again (or everything is).
+    /// The decorations' fonts found again before everything is laid out
+    /// again (a new text, font or text size).
     fn carry_fonts(&mut self) {
         let (fonts, runs) = self.font_runs();
         let measure = self.measure_font.clone();
@@ -467,8 +467,10 @@ impl State {
         }
         self.decoration_reach =
             diagnostics::adjust(&mut self.decorations, self.decoration_reach, changes);
+        // The fonts' runs move with the text as the decorations do; the
+        // lines the edit touched are laid out again with them.
         if self.has_fonts {
-            self.carry_fonts();
+            self.display.carry_runs(changes);
         }
         match self.buffer.last_line_span() {
             Some(span) => {

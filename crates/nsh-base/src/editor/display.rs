@@ -25,7 +25,7 @@ use rustc_hash::FxHashMap;
 use unicode_segmentation::{GraphemeIndices, UnicodeSegmentation};
 
 use super::{
-    buffer::{Buffer, LineSpan},
+    buffer::{Bias, Buffer, Change, LineSpan, map_offset},
     fold::FoldRange,
     state::Font,
     types::RowLayout,
@@ -196,9 +196,9 @@ impl DisplayMap {
         self.relayout_lines(buffer, first..last + 1);
     }
 
-    /// The fonts and runs after an edit, carried through it (the runs
-    /// moved with the text): set before [`Self::edited`] lays out the
-    /// lines the edit touched, as only those can have other fonts.
+    /// The fonts and runs the next [`Self::rebuild`] lays everything out
+    /// with (a new text, font or text size); an edit moves the runs it has
+    /// instead ([`Self::carry_runs`]).
     pub(crate) fn carry_fonts(
         &mut self,
         fonts: Vec<Font>,
@@ -272,7 +272,8 @@ impl DisplayMap {
             &mut laid,
             &mut self.scratch,
         );
-        let row_delta = laid.rows.len() as isize - (r1 - r0) as isize;
+        let new_rows = laid.rows.len();
+        let row_delta = new_rows as isize - (r1 - r0) as isize;
         self.rows.splice(r0..r1, laid.rows);
         self.widths.get_mut().splice(r0..r1, laid.widths);
         self.line_rows.splice(a..b, laid.line_rows);
@@ -282,7 +283,7 @@ impl DisplayMap {
             }
         }
         self.widest.set(None);
-        self.heights_from(r0);
+        self.update_tops(r0, r1 - r0, new_rows);
     }
 
     /// The width rows wrap at; None: no soft wrap. Takes effect with the
@@ -335,8 +336,7 @@ impl DisplayMap {
         self.widest.set(None);
         self.rope = rope.clone();
         self.dirty = false;
-        self.tops.clear();
-        self.heights_from(0);
+        self.build_tops();
     }
 
     /// Lays out again only the lines of `span` (`LineSpan` from the
@@ -427,52 +427,78 @@ impl DisplayMap {
         }
         self.widest.set(None);
         self.rope = rope.clone();
-        self.heights_from(r0);
+        self.update_tops(r0, r1 - r0, new_rows);
     }
 
-    /// Brings the rows' tops up to date from row `from` on (the rows
-    /// before it unchanged): while no row is taller than a line height,
-    /// there are none.
-    fn heights_from(&mut self, from: usize) {
-        if self.fonts.runs.is_empty() {
-            self.tops = Vec::new();
-            return;
-        }
+    /// Whether rows can be taller than a line: a font of the runs is.
+    fn has_tall_rows(&self) -> bool {
         let lh = self.line_height;
-        let tall = self.fonts.faces.iter().any(|f| f.height() > lh);
-        if !tall {
+        !self.fonts.runs.is_empty() && self.fonts.faces.iter().any(|f| f.height() > lh)
+    }
+
+    /// Every row's top, laid out from the first row (none while no row
+    /// can be taller than a line).
+    fn build_tops(&mut self) {
+        self.tops = Vec::new();
+        if !self.has_tall_rows() {
+            return;
+        }
+        self.tops.reserve(self.rows.len() + 1);
+        let (bottom, tops) = self.fonts.tops_of(&self.rows, 0.0, self.line_height);
+        self.tops = tops;
+        self.tops.push(bottom);
+    }
+
+    /// The rows' tops after rows `r0..r0 + old_rows` were laid out again
+    /// as `new_rows` rows (those before them unchanged, those after them
+    /// only moved): the new rows' tops are worked out, the tops after them
+    /// move by the difference in height, so an edit that keeps its rows'
+    /// heights costs only its rows.
+    fn update_tops(&mut self, r0: usize, old_rows: usize, new_rows: usize) {
+        if !self.has_tall_rows() {
             self.tops = Vec::new();
             return;
         }
-        let from = if self.tops.is_empty() {
-            0
-        } else {
-            from.min(self.tops.len() - 1).min(self.rows.len())
-        };
-        self.tops.truncate(from);
-        let mut y = match from {
-            0 => 0.0,
-            _ => self.tops[from - 1] + self.height_of(from - 1),
-        };
-        self.tops.reserve(self.rows.len() + 1 - from);
-        let runs = &self.fonts.runs;
-        let start = self.rows.get(from).map_or(0, |r| r.range.start);
-        let mut run = runs.partition_point(|r| r.range.end <= start);
-        for row in &self.rows[from..] {
-            self.tops.push(y);
-            y += self.fonts.row_height(row, &mut run, lh);
+        // No tops yet (the first tall row), or not those of the rows
+        // before the change: all of them.
+        if self.tops.len() + new_rows != self.rows.len() + old_rows + 1 {
+            self.build_tops();
+            return;
         }
-        self.tops.push(y);
+        let y0 = self.tops[r0];
+        let old_bottom = self.tops[r0 + old_rows];
+        let (bottom, tops) =
+            self.fonts
+                .tops_of(&self.rows[r0..r0 + new_rows], y0, self.line_height);
+        self.tops.splice(r0..r0 + old_rows, tops);
+        let delta = bottom - old_bottom;
+        if delta != 0.0 {
+            for top in &mut self.tops[r0 + new_rows..] {
+                *top += delta;
+            }
+        }
     }
 
-    /// Row `row`'s height, from its fonts.
-    fn height_of(&self, row: usize) -> f32 {
-        let row = &self.rows[row];
-        let mut run = self
-            .fonts
-            .runs
-            .partition_point(|r| r.range.end <= row.range.start);
-        self.fonts.row_height(row, &mut run, self.line_height)
+    /// Moves the runs with an edit's `changes`, as the decorations they
+    /// come from move: a run's start after text inserted there, its end
+    /// before it, a run whose text was deleted gone. Only the runs from
+    /// the first change on are touched.
+    pub(crate) fn carry_runs(&mut self, changes: &[Change]) {
+        let Some(first) = changes.iter().map(|c| c.range.start).min() else {
+            return;
+        };
+        let runs = &mut self.fonts.runs;
+        let from = runs.partition_point(|r| r.range.end < first);
+        let mut emptied = false;
+        for run in &mut runs[from..] {
+            let start = map_offset(changes, run.range.start, Bias::Right);
+            let end = map_offset(changes, run.range.end, Bias::Left);
+            run.range = start..end.max(start);
+            emptied |= end <= start;
+        }
+        if emptied {
+            runs.retain(|r| !r.range.is_empty());
+        }
     }
 
     /// The top of display row `row` in the rows' box (past the last row:
@@ -1216,6 +1242,19 @@ impl Fonts {
             .map(|r| self.faces[r.face].height())
             .fold(line_height, f32::max)
     }
+
+    /// The tops of `rows` (in order) from `y`, and the bottom of the last.
+    fn tops_of(&self, rows: &[Row], y: f32, line_height: f32) -> (f32, Vec<f32>) {
+        let mut tops = Vec::with_capacity(rows.len() + 1);
+        let start = rows.first().map_or(0, |r| r.range.start);
+        let mut run = self.runs.partition_point(|r| r.range.end <= start);
+        let mut y = y;
+        for row in rows {
+            tops.push(y);
+            y += self.row_height(row, &mut run, line_height);
+        }
+        (y, tops)
+    }
 }
 
 /// The fonts along a text ([`Fonts::from`]).
@@ -1881,5 +1920,94 @@ mod tests {
         let rows = map.rows.clone();
         map.set_fonts(&buffer, vec![font(20.0, 30.0)], vec![run(9..11, 0)], sized);
         assert_eq!(map.rows, rows);
+    }
+
+    /// `map` laid out from scratch with its fonts and runs: the same rows
+    /// and tops.
+    fn assert_same_with_fonts(map: &DisplayMap, buffer: &Buffer) {
+        let mut fresh = self::map(buffer, map.wrap_width.map(|w| w.0), map.folds.clone());
+        let fonts = map.fonts.faces.iter().map(|f| f.font.clone()).collect();
+        fresh.carry_fonts(fonts, map.fonts.runs.clone(), sized);
+        fresh.rebuild(buffer);
+        assert_eq!(map.rows, fresh.rows);
+        assert_eq!(map.line_rows, fresh.line_rows);
+        assert_eq!(map.tops, fresh.tops);
+    }
+
+    /// Replaces `range` with `text`, the runs carried through the edit.
+    fn edit_carrying(buffer: &mut Buffer, map: &mut DisplayMap, range: Range<usize>, text: &str) {
+        let selections = Selections::default();
+        let changes = buffer.edit(
+            vec![(range, text.to_string())],
+            &selections,
+            &selections,
+            EditKind::Other,
+        );
+        map.carry_runs(&changes);
+        let span = buffer.last_line_span().expect("a span");
+        map.edited(buffer, span);
+    }
+
+    /// Every other line of 300 a heading in a font 30 points tall.
+    fn headings() -> (Buffer, DisplayMap) {
+        let text: Vec<String> = (0..300)
+            .map(|i| match i % 2 {
+                0 => format!("# head {i}"),
+                _ => format!("body {i}"),
+            })
+            .collect();
+        let buffer = Buffer::new(&text.join("\n"));
+        let mut map = map(&buffer, None, vec![]);
+        let runs = (0..300)
+            .step_by(2)
+            .map(|line| run(buffer.line_start(line)..buffer.line_end(line), 0))
+            .collect();
+        map.set_fonts(&buffer, vec![font(15.0, 30.0)], runs, sized);
+        (buffer, map)
+    }
+
+    #[test]
+    fn an_edit_far_above_tall_rows_keeps_their_tops() {
+        let (mut buffer, mut map) = headings();
+        assert_eq!(map.rows_height(), px(150.0 * 30.0 + 150.0 * 20.0));
+        // Typing in a body line and in a heading: no row's height changes.
+        let at = buffer.line_start(1) + 2;
+        edit_carrying(&mut buffer, &mut map, at..at, "x");
+        assert_same_with_fonts(&map, &buffer);
+        let at = buffer.line_start(0) + 3;
+        edit_carrying(&mut buffer, &mut map, at..at, "yy");
+        assert_eq!(map.fonts.runs[0].range, 0..buffer.line_end(0));
+        assert_same_with_fonts(&map, &buffer);
+        assert_eq!(map.row_top(299), px(150.0 * 30.0 + 149.0 * 20.0));
+    }
+
+    #[test]
+    fn an_edit_that_changes_a_rows_height_moves_the_rows_below() {
+        let (mut buffer, mut map) = headings();
+        // The first heading's text deleted: its run goes, its row is a
+        // line tall, the same rows below it 10 points higher.
+        let end = buffer.line_end(0);
+        edit_carrying(&mut buffer, &mut map, 0..end, "");
+        assert_eq!(map.row_height(0), px(20.0));
+        assert_eq!(map.row_top(2), px(40.0));
+        assert_same_with_fonts(&map, &buffer);
+        // A line break inside a heading: both its lines are in its run.
+        let at = buffer.line_start(2) + 4;
+        edit_carrying(&mut buffer, &mut map, at..at, "\n");
+        assert_eq!(map.row_height(2), px(30.0));
+        assert_eq!(map.row_height(3), px(30.0));
+        assert_same_with_fonts(&map, &buffer);
+        // A heading and the body line after it deleted.
+        let (start, end) = (buffer.line_start(5), buffer.line_start(7));
+        edit_carrying(&mut buffer, &mut map, start..end, "");
+        assert_same_with_fonts(&map, &buffer);
+        // Wrapped: a line growing a row above tall ones.
+        map.set_wrap_width(Some(px(200.0)));
+        map.rebuild(&buffer);
+        let at = buffer.line_end(10);
+        let rows = map.row_count();
+        edit_carrying(&mut buffer, &mut map, at..at, "wwwwwwwwwwwwwww ");
+        assert_eq!(map.row_count(), rows + 1);
+        assert_same_with_fonts(&map, &buffer);
     }
 }
