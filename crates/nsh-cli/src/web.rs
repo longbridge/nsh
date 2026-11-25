@@ -107,7 +107,7 @@ pub(crate) fn package(
         );
     }
     let runtime = runtime::package_web()?;
-    // `--shared-wasm-runtime`: the runtime's shared form, the same bytes for
+    // `--shared-runtime`: the runtime's shared form, the same bytes for
     // every app on this NSH version wherever it is packaged, which the
     // browser downloads once when the apps serve it from one place
     // (`--asset-url`). nsh's own runtime only: an app with Rust components
@@ -115,7 +115,7 @@ pub(crate) fn package(
     let shared = options.shared_runtime;
     if shared && (built.rust_root || runtime.glue.is_some()) {
         bail!(
-            "--shared-wasm-runtime needs nsh's own runtime: an app with Rust components or wasm-bindgen glue has a runtime of its own"
+            "--shared-runtime needs nsh's own runtime: an app with Rust components or wasm-bindgen glue has a runtime of its own"
         );
     }
     let dir = options.out.join(name);
@@ -155,7 +155,7 @@ pub(crate) fn package(
     // an app's chunks use is a side module of its own, which the page
     // loads before the first chunk that needs it runs (`chunkSides`), after
     // the side modules of the code it shares with other gates (`sides`).
-    // A shared runtime (`--shared-wasm-runtime`) links none: every
+    // A shared runtime (`--shared-runtime`) links none: every
     // gate is a side module, the same for every app, and the page loads
     // those the entry needs before the app starts (`entrySides`).
     let mut sides = serde_json::Map::new();
@@ -387,7 +387,7 @@ pub(crate) fn package(
     Ok(())
 }
 
-/// What a shared runtime (`--shared-wasm-runtime`) keeps in its main
+/// What a shared runtime (`--shared-runtime`) keeps in its main
 /// module and splits off, whatever the app uses: every export but the
 /// gates, and every gate, in order. The same for every app on one
 /// runtime, so are its modules; the app's own gates are its `entrySides`.

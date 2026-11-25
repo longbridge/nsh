@@ -213,10 +213,10 @@ gets the whole runtime, its crates included, in its `nsh.<digest>.wasm`. Measure
 
 #### One runtime for several apps
 
-Several apps on one site can share one runtime. Package each of them with `--shared-wasm-runtime`:
+Several apps on one site can share one runtime. Package each of them with `--shared-runtime` (web only; other targets ignore it):
 
 ```sh
-nsh package --target web --shared-wasm-runtime --asset-url https://cdn.example.com/nsh/
+nsh package --target web --shared-runtime --asset-url https://cdn.example.com/nsh/
 ```
 
 `nsh.<digest>.wasm` then holds only the engine, and each `nsh/base` part, standard module and shader is a side
@@ -225,7 +225,7 @@ version of NSH, wherever and in whatever order they are packaged, so each app ca
 Serve them from one place (`--asset-url`) and the browser downloads them once for the whole site.
 
 Without the flag each app gets its own runtime, trimmed to what it uses, which is smaller for a site with one app.
-An app with Rust components of its own has its own runtime, and `--shared-wasm-runtime` fails for it.
+An app with Rust components of its own has its own runtime, and `--shared-runtime` fails for it.
 
 ### Deploy it
 

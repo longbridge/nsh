@@ -741,13 +741,13 @@ struct PackageArgs {
     /// relatively, so the site runs from any directory.
     #[arg(long, value_name = "URL", conflicts_with = "run")]
     asset_url: Option<String>,
-    /// Web (wasm) only: package nsh's runtime in its shared form, the same files for
+    /// Web only (ignored for other targets): package nsh's runtime in its shared form, the same files for
     /// every app on this NSH version, so a site embedding several apps
     /// downloads it once. Each app can be packaged on its own (separate CI
     /// jobs); serve the runtime files from one place (`--asset-url`).
     /// Not for an app with Rust components or wasm-bindgen glue.
     #[arg(long)]
-    shared_wasm_runtime: bool,
+    shared_runtime: bool,
 }
 
 /// `nsh component`'s actions.
@@ -1215,7 +1215,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 run,
                 device,
                 asset_url,
-                shared_wasm_runtime,
+                shared_runtime,
             } = *args;
             let mut config = package::read_config(&entry)?;
             config.name = name.or(config.name);
@@ -1243,7 +1243,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 run,
                 device: device.as_deref(),
                 asset_url: asset_url.as_deref(),
-                shared_runtime: shared_wasm_runtime,
+                shared_runtime,
                 development: false,
             })
         }

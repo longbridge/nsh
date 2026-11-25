@@ -7,7 +7,7 @@
 // `nsh/host` calls: its `createHost(player)` runs once the player exists,
 // before the app starts, so no call comes earlier. Its pages and dialogs
 // are browser history entries as nsh.json `web.history` says. A shared
-// runtime (`nsh package --shared-wasm-runtime`) links none of the app's parts of
+// runtime (`nsh package --shared-runtime`) links none of the app's parts of
 // `nsh/base`: the side modules the entry needs (`app.entrySides`, requested
 // with the main module by the head's script) load before the app starts.
 //
