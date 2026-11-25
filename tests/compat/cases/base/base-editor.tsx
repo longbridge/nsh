@@ -18,10 +18,12 @@
 // third folds where the app's `foldRanges` say, by level, recursively and
 // by hand, reporting the folded ranges (`onFoldChange`, `folds`), its text
 // colored by the app's tokens alone (`decorations` with a `token`,
-// `highlighting={false}`), its scroll bars kept clear of its container's
-// rounded corners (`scrollbarInset`). A context menu asked for over the
-// text reports where in it, and whether a touch selection asked for it
-// (`selection`, its box in the root view) or a pointer (`onContextMenu`). A fourth
+// `highlighting={false}`), a word shown as a label (a decoration's
+// `label`, `labelClass`, `labelStyle`) and its scroll bars kept clear of
+// its container's rounded corners (`scrollbarInset`). A context menu
+// asked for over the text reports where in it, and whether a touch
+// selection asked for it (`selection`, its box in the root view) or a
+// pointer (`onContextMenu`). A fourth
 // editor completes (`completion`): typing a word asks the app
 // (`onCompletionRequest`), whose answer (`presentCompletions`) shows as
 // a list that typing on filters; pressing an item inserts it
@@ -118,6 +120,12 @@ export default function BaseEditor() {
               overviewRuler: { lane: "left", style: { backgroundColor: "#22c55e" } },
             },
             { range: { start: { line: 3, column: 0 }, end: { line: 3, column: 0 } }, gutter: { placement: "before", style: { backgroundColor: "#ef4444" } } },
+            {
+              range: { start: { line: 0, column: 4 }, end: { line: 0, column: 5 } },
+              label: "alpha",
+              labelClass: "px-1 rounded",
+              labelStyle: { backgroundColor: "#e5e7eb" },
+            },
           ]}
           gutterDecorationsWidth={4}
           scrollbarInset={{ top: 6, right: 2, bottom: 6 }}

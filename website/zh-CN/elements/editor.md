@@ -260,7 +260,7 @@ async function lint(text: string) {
 
 ## 装饰
 
-`decorations` 为应用选择的范围设置样式：来自语言服务器的语义高亮、正在执行的语句、评审中改动的行。装饰的 `class` 和 `style` 设置其文本的样式；`lineClass` 和 `lineStyle` 设置其所在各行的样式，位于文本后面。与诊断一样，它们在编辑中留在自己的文本上，直到应用设置新的装饰。输入法组字时，组字文本就地显示在该行中，该行保留其装饰：其后的文本连同自己的装饰一起后移，组字文本的样式与上屏后相同（光标两侧都被装饰覆盖时在装饰之内，装饰在光标处开始或结束时不在其内）。
+`decorations` 为应用选择的范围设置样式：来自语言服务器的语义高亮、正在执行的语句、评审中改动的行。装饰的 `class` 和 `style` 设置其文本的样式；`lineClass` 和 `lineStyle` 设置其所在各行的样式，位于文本后面；`label` 在其范围的位置显示一段文字（[标签](#labels)）。与诊断一样，它们在编辑中留在自己的文本上，直到应用设置新的装饰。输入法组字时，组字文本就地显示在该行中，该行保留其装饰：其后的文本连同自己的装饰一起后移，组字文本的样式与上屏后相同（光标两侧都被装饰覆盖时在装饰之内，装饰在光标处开始或结束时不在其内）。
 
 ```tsx
 const range = (line: number, start: number, end: number) => ({ start: { line, column: start }, end: { line, column: end } });
@@ -335,6 +335,25 @@ const kinds: Record<string, EditorToken> = { keyword: "keyword", function: "titl
   language="ts"
   highlighting={false}
   decorations={semanticTokens().map((t) => ({ range: range(t.line, t.start, t.end), token: kinds[t.type] }))}
+  class="flex-1"
+/>
+```
+
+<a id="labels"></a>
+
+### 标签
+
+装饰的 `label` 在其范围的位置显示一段文字：写成 `⏰ 2026-11-25 09:00` 的日期显示为「明天 09:00」标签，链接的源文本显示为它的标题。`labelClass` 和 `labelStyle` 设置标签框的样式（背景、圆角、内边距），标签框位于行内、与文本居中对齐，宽度按它排版的结果。标签文字使用其所在位置由装饰的 `fontFamily` / `fontSize` 设置的字体（标题中的日期与标题同样大小），除非 `labelClass` 另行设置。当编辑器有焦点、且有光标或选区接触到这个范围（在范围内或在它的任一端）时，改为显示范围的原文，光标像在其他文本中一样在其中移动和编辑；光标离开后，标签重新出现。文本仍属于文档：复制、撤销、搜索和屏幕阅读器读到的都是原文。标签只显示在同一行内、不为空的范围上；与前面一个带标签的范围重叠的范围显示原文。
+
+```tsx
+<Editor
+  value={note()}
+  onChange={({ value }) => note.set(value)}
+  decorations={reminders(note()).map((r) => ({
+    range: r.range,
+    label: r.relative, // "明天 09:00"
+    labelClass: "px-1.5 rounded-md bg-amber-500/15 text-amber-700",
+  }))}
   class="flex-1"
 />
 ```
@@ -716,7 +735,7 @@ let editor!: EditorRef;
 | `lineHeight` | `.line_height(..)` | `number` | `20` | 一行的高度，单位为点；在终端里一行就是一个 Cell。 |
 | `search` | `.search(..)` | `EditorSearch` | | 要查找的内容（[查找与替换](#find-and-replace)）。 |
 | `diagnostics` | `.diagnostics(..)` | `EditorDiagnostic[]` | `[]` | 要标记的问题（[诊断](#diagnostics)）。 |
-| `decorations` | `.decorations(..)` | `EditorDecoration[]` | `[]` | 应用设置样式的范围（[装饰](#decorations)）。 |
+| `decorations` | `.decorations(..)` | `EditorDecoration[]` | `[]` | 应用设置样式或显示为标签的范围（[装饰](#decorations)）。 |
 | `gutterDecorationsWidth` | `.gutter_decorations_width(..)` | `number` | `3` | 行号槽中装饰标记条的宽度，单位为点。 |
 | `classes` | `.classes(..)` | `EditorClasses` | `{}` | 按部件的 Tailwind 类。 |
 | `styles` | `.styles(..)` | `EditorStyles` | `{}` | 按部件的内联样式，优先于类。 |
