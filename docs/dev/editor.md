@@ -28,7 +28,7 @@ user-facing page is `website/elements/editor.md`; how each module works inside i
 | `select.rs` | The selection history (`undoSelection`), expanding and shrinking selections, block selections, the scope of a search in the selection |
 | `keymap.rs` | The default key bindings as data, in `nsh`'s keystroke syntax, Apple's and the others' |
 | `language.rs` | `LanguageConfig`: per-language comments, brackets, auto-close pairs, word characters, indentation, tab size and the syntax hint; the lookup by name, alias, extension or file name |
-| `display.rs` | `DisplayMap`: tabs, measured widths, soft wrap, folds and the decorations' fonts as display rows of their heights |
+| `display.rs` | `DisplayMap`: tabs, measured widths, soft wrap, folds, labels and the decorations' fonts as display rows of their heights |
 | `fold.rs` | Where folds can start, by indentation |
 | `fold_set.rs` | Folds as sets of ranges: the app's `foldRanges` normalized and carried through edits, the folded set after an edit, levels, nesting, the outermost folds |
 | `search.rs` | Find and replace on `regex`: matches, replacements with groups, the next and previous match |
@@ -84,7 +84,10 @@ With `softWrap`, a line breaks where the row would overflow at its last break op
 after whitespace, as before, so code and Latin text keep their tokens, operators and paths whole; elsewhere at
 Unicode's line break opportunities (UAX #14, from `unicode-linebreak`, as the core's text layout), so CJK text breaks
 between characters but not before closing punctuation or after opening punctuation. A run without one breaks between
-graphemes, never inside one. Its continuation rows start at its indentation unless that is over half the width. A folded line shows as one row and the
+graphemes, never inside one. A replacing decoration's label is one unit that never splits; rows break around it as
+around an object replacement character (U+FFFC), except between ASCII neighbours, where the ASCII rule keeps it with
+the code beside it. A line's continuation rows start at its indentation unless that is over half the width. A folded line
+shows as one row and the
 lines it hides as none. An edit lays out only the lines it touched. A decoration's `fontFamily` / `fontSize` measure
 its text in that font (as drawn, grown by `fontScale`), and a row is as tall as its largest text needs, never shorter
 than `lineHeight`; every place that turns rows into points (carets, selections, presses, the rows made, scrolling,
@@ -373,6 +376,17 @@ decorations change (`text_rev`, `marks_rev`), and their places (`layout::ruler_p
 rows' box to the ruler's height, at least 6 points; `layout::ruler_lane`, Monaco's lanes) when the viewport does. GPUI Kit's folded
 color and the theme's status colors are left out: a mark's look is the app's `class` / `style`.
 
+A decoration's `label` replaces its range's text on screen, as CodeMirror's replace decorations do: the display map
+lays the range out as one unit as wide as the label's box (as its layout reports it; the label's text in its font until
+then), so carets, presses, wrapping and the rows' widths go around it, and the row draws the box in its place. The label
+is in the font of the decoration font run around its start (a date in a heading is a heading's size), and the row keeps
+the height the display map gives it. The range's text comes back while the editor has the focus and a selection touches the range (inside it or at
+either end), worked out again when the selections, the text, the decorations or the focus change: a move that touches
+no other label costs a search per selection. The caret then moves through the text as through any other, rather than
+skipping the range as one atomic unit: the labels stand for text the user edits (a date, a link's source in a Markdown
+notes app), and every command, edit and position stays the buffer's, so copying, undo, search and accessibility read
+the text. Ranges over a line break, empty ones and ones overlapping an earlier label show their text.
+
 A diagnostic is LSP's `Diagnostic` with names for its enums: `codeDescription` and `relatedInformation` are data the
 hover hands back (related ranges as the app gave them, as they may be in other documents), and `tags` style its text.
 A tagged diagnostic's text is cut into spans as a decoration's is, in the same pass of `State::row_content`: the row
@@ -455,7 +469,8 @@ texts keep the app's values, which the core grows. A row's text is one line, cli
 
 ## Accessibility
 
-The sink carries `accessibilityLabel`; the rows are real texts, read in order.
+The sink carries `accessibilityLabel`; the rows are real texts, read in order. A decoration's label reads as its
+range's text.
 
 ## From GPUI Kit
 
@@ -481,3 +496,4 @@ The sink carries `accessibilityLabel`; the rows are real texts, read in order.
   (parsed from 40 lines before them) until the parse reaches them, which can differ inside a long comment or string.
 - At most 10 000 search matches are found and 1000 undo steps kept.
 - On touch screens the sweep after a long press does not extend the selection: the handles do.
+- A label replaces a range on one line; nothing shows a box at a position without replacing text (an inlay hint).

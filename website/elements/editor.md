@@ -318,10 +318,11 @@ async function lint(text: string) {
 
 `decorations` style ranges the app chooses: semantic highlighting from a language server, the statement being run, the
 lines a review changed. A decoration's `class` and `style` style its text; `lineClass` and `lineStyle` style the rows
-of its lines, behind the text. Like diagnostics, they stay on their text through edits until the app sets new ones.
-While an input method composes, its text shows in place in the row, which keeps its decorations: the text after it
-moves aside with its own, and the composed text is styled as it will be once committed (inside a decoration that
-continues on both sides of the caret, not one that starts or ends there).
+of its lines, behind the text; its `label` shows a text in its range's place ([Labels](#labels)). Like diagnostics,
+they stay on their text through edits until the app sets new ones. While an input method composes, its text shows in
+place in the row, which keeps its decorations: the text after it moves aside with its own, and the composed text is
+styled as it will be once committed (inside a decoration that continues on both sides of the caret, not one that
+starts or ends there).
 
 ```tsx
 const range = (line: number, start: number, end: number) => ({ start: { line, column: start }, end: { line, column: end } });
@@ -411,6 +412,31 @@ const kinds: Record<string, EditorToken> = { keyword: "keyword", function: "titl
   language="ts"
   highlighting={false}
   decorations={semanticTokens().map((t) => ({ range: range(t.line, t.start, t.end), token: kinds[t.type] }))}
+  class="flex-1"
+/>
+```
+
+### Labels
+
+A decoration's `label` shows a text in place of its range's: a date written as `⏰ 2026-11-25 09:00` shown as a
+"Tomorrow 09:00" chip, a link's source shown as its title. `labelClass` and `labelStyle` style the label's box (a
+background, rounded corners, padding), which sits in the row centered on the text and as wide as it is laid out. Its
+text is in the font a decoration's `fontFamily` / `fontSize` sets around it (a date in a heading is the heading's size),
+unless `labelClass` sets another. While
+the editor has the focus and a caret or a selection touches the range (inside it or at either end), the range's text
+shows instead, so the caret moves through it and edits it as any text; when the caret leaves, the label comes back.
+The text stays the document's: copying, undo, search and screen readers read it. A label shows on a range on one line
+that is not empty; a range overlapping an earlier labeled one shows its text.
+
+```tsx
+<Editor
+  value={note()}
+  onChange={({ value }) => note.set(value)}
+  decorations={reminders(note()).map((r) => ({
+    range: r.range,
+    label: r.relative, // "Tomorrow 09:00"
+    labelClass: "px-1.5 rounded-md bg-amber-500/15 text-amber-700",
+  }))}
   class="flex-1"
 />
 ```
@@ -841,7 +867,7 @@ with the user's text size (`fontScale()`), and the rows grow with it.
 | `lineHeight` | `.line_height(..)` | `number` | `20` | The height of a row, in points; in a terminal a row is one Cell. |
 | `search` | `.search(..)` | `EditorSearch` | | What to find ([Find and replace](#find-and-replace)). |
 | `diagnostics` | `.diagnostics(..)` | `EditorDiagnostic[]` | `[]` | Problems to mark ([Diagnostics](#diagnostics)). |
-| `decorations` | `.decorations(..)` | `EditorDecoration[]` | `[]` | Ranges the app styles ([Decorations](#decorations)). |
+| `decorations` | `.decorations(..)` | `EditorDecoration[]` | `[]` | Ranges the app styles or shows as labels ([Decorations](#decorations)). |
 | `gutterDecorationsWidth` | `.gutter_decorations_width(..)` | `number` | `3` | The width of the gutter's strip of decorations' marks, in points. |
 | `classes` | `.classes(..)` | `EditorClasses` | `{}` | Tailwind classes by part. |
 | `styles` | `.styles(..)` | `EditorStyles` | `{}` | Inline styles by part, over the classes. |

@@ -622,6 +622,9 @@ impl Positional {
     /// Its children moved, and it waits in `Core::position_parents` for
     /// their positions to be looked at (`classes.rs` `flush_positions`).
     const QUEUED: Self = Self(2);
+    /// Its children take its own position among its siblings
+    /// (`Prop::PassPosition`), which `position_used` keeps while known.
+    const PASS: Self = Self(4);
 
     fn has(self, flag: Self) -> bool {
         self.0 & flag.0 != 0
@@ -6009,6 +6012,10 @@ impl<M: TextEngine> Core<M> {
                 self.set_follow_target(key, target);
                 return Ok(());
             }
+            Prop::PassPosition(pass) => {
+                self.set_pass_position(key, pass);
+                return Ok(());
+            }
             Prop::FollowTransition(transition) => {
                 self.set_follow_transition(key, transition);
                 return Ok(());
@@ -7414,12 +7421,16 @@ impl<M: TextEngine> Core<M> {
             self.inherit_color_from(child, color);
         }
         self.groups_changed(child, parent);
-        if self.nodes[child as usize]
+        let child_node = &self.nodes[child as usize];
+        if child_node
             .classes
             .as_ref()
             .is_some_and(|c| c.deps() & crate::tailwind::deps::POSITION != 0)
+            // A view passing its position on reads it for its children.
+            || (child_node.positional.has(Positional::PASS)
+                && child_node.positional.has(Positional::CHILDREN))
         {
-            self.nodes[parent as usize].positional |= Positional::CHILDREN;
+            self.reads_positions(parent);
         }
         if self.nodes[parent as usize]
             .positional

@@ -1,6 +1,7 @@
 //! Typed root parts reach the document's text before classes and styles;
 //! a table's grid takes the app's frame; inline links are stops of Tab,
-//! pressed with Return; a link's press reports the modifier keys held.
+//! pressed with Return; a link's press reports the modifier keys held;
+//! blocks' `first:` and `last:` read their place among the blocks.
 
 use std::sync::{Arc, Mutex};
 
@@ -200,6 +201,32 @@ fn text_takes_the_documents_colors_under_the_apps_text_style_part() {
     // The text around keeps the view's color; the part's classes win.
     assert_ne!(color("text:Plain"), Color(0xe545_45ff));
     assert_eq!(color("text:the app's color"), Color(0x0000_ffff));
+}
+
+/// Paragraphs whose `classes` read their place among the blocks:
+/// `first:` and `last:` match the first and last block, as each block
+/// is the one its row shows.
+#[component]
+fn PlacedParagraphs() -> impl IntoElement {
+    text_view()
+        .markdown("Alpha\n\nBravo\n\nCharlie")
+        .classes(TextViewClasses {
+            paragraph: Some("text-[#ff0000] first:text-[#00ff00] last:text-[#0000ff]".into()),
+            ..Default::default()
+        })
+}
+
+#[test]
+fn blocks_take_their_place_among_the_blocks() {
+    let mut app = Headless::start(EngineConfig::new(nsh_testing::windowed_root::<
+        PlacedParagraphs,
+    >()))
+    .unwrap();
+    app.wait_for("Charlie").unwrap();
+    let color = |selector: &str| app.screen().span_style(selector).unwrap().color;
+    assert_eq!(color("text:Alpha"), Color(0x00ff_00ff));
+    assert_eq!(color("text:Bravo"), Color(0xff00_00ff));
+    assert_eq!(color("text:Charlie"), Color(0x0000_ffff));
 }
 
 /// A table whose grid the app frames by `classes`: a border on every

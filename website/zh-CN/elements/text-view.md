@@ -135,7 +135,7 @@ fn total() -> impl IntoElement {
 
 ## 部件样式
 
-`class` 和 `style` 设定根节点（各文档块组成的一列）的样式；在那里设置的文本样式（颜色、字号、字体）会传给每个部件。根节点也是部件 `root`：`styles.root` 以带类型的方式接收文本样式（`style` 的类型是视图样式），`classes.root` 接收类。`classes` 按部件接收 Tailwind 类，`styles` 按部件接收内联样式。部件的类排在它自己的默认样式之后，因此优先生效；它的 `styles` 又优先于它的类。在 Rust 中，部件接收类型化的样式：`TextViewParts` 为每个 `TextViewPart` 提供一个细化其样式的函数，作用于提供它的视图下面的每个 `TextView`（[类型化的部件样式](#typed-part-styles)），根节点则使用样式方法。默认样式的行高以点为单位：改变某个部件字号的类也要设定行高（Tailwind 的 `text-*` 类会一并设定）。
+`class` 和 `style` 设定根节点（各文档块组成的一列）的样式；在那里设置的文本样式（颜色、字号、字体）会传给每个部件。根节点也是部件 `root`：`styles.root` 以带类型的方式接收文本样式（`style` 的类型是视图样式），`classes.root` 接收类。`classes` 按部件接收 Tailwind 类，`styles` 按部件接收内联样式。部件的类排在它自己的默认样式之后，因此优先生效；它的 `styles` 又优先于它的类。在 Rust 中，部件接收类型化的样式：`TextViewParts` 为每个 `TextViewPart` 提供一个细化其样式的函数，作用于提供它的视图下面的每个 `TextView`（[类型化的部件样式](#typed-part-styles)），根节点则使用样式方法。默认样式的行高以点为单位：改变某个部件字号的类也要设定行高（Tailwind 的 `text-*` 类会一并设定）。文档块的位置变体（`first:`、`last:`、`odd:`、`even:`、`only:`）按它在周围各块中的位置生效：`heading: "mt-6 first:mt-0"` 让位于文档或引用开头的标题上方不留空。
 
 ```tsx tabs
 <TextView
