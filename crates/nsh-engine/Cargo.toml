@@ -34,7 +34,7 @@ shader = ["dep:wgpu", "dep:pollster", "nsh-core/shader", "dep:objc2", "dep:objc2
 
 # The native WebSocket client (tokio-tungstenite, rustls). Without it
 # `connect` of `websocket` rejects with ERR_FEATURE_UNAVAILABLE_ON_PLATFORM.
-websocket = ["nsh-core/websocket"]
+websocket = ["nsh-core/websocket", "nsh-js?/websocket"]
 # App self-updates (`nsh/updater`). Without it a check finds no update.
 updater = ["nsh-core/updater"]
 
@@ -88,7 +88,8 @@ nsh-base = { workspace = true, features = ["editor", "highlight", "plot", "rich-
 # The host's shared data in `nativeModule`'s tests.
 tokio = { workspace = true, features = ["sync"] }
 nsh-bundler = { workspace = true, features = ["bundle"] }
-nsh-js.workspace = true
+# The global `WebSocket` in `tests/engine/websocket.rs`.
+nsh-js = { workspace = true, features = ["websocket"] }
 # The language data an app ships (`locale_and_font_scale_follow_the_environment`).
 nsh-i18n.workspace = true
 crossbeam-channel.workspace = true
