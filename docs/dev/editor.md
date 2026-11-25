@@ -29,6 +29,7 @@ user-facing page is `website/elements/editor.md`; how each module works inside i
 | `keymap.rs` | The default key bindings as data, in `nsh`'s keystroke syntax, Apple's and the others' |
 | `language.rs` | `LanguageConfig`: per-language comments, brackets, auto-close pairs, word characters, indentation, tab size and the syntax hint; the lookup by name, alias, extension or file name |
 | `display.rs` | `DisplayMap`: tabs, measured widths, soft wrap, folds, labels and the decorations' fonts as display rows of their heights |
+| `line_break.rs` | Where soft-wrapped text may break, shared with `DiffView`'s soft wrap |
 | `fold.rs` | Where folds can start, by indentation |
 | `fold_set.rs` | Folds as sets of ranges: the app's `foldRanges` normalized and carried through edits, the folded set after an edit, levels, nesting, the outermost folds |
 | `search.rs` | Find and replace on `regex`: matches, replacements with groups, the next and previous match |
