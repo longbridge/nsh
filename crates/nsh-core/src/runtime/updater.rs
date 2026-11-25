@@ -238,7 +238,8 @@ impl Updater {
     /// interrupted transfer keeps its partial file keyed to the asset and
     /// resumes on the next call when the host supports HTTP `Range` requests,
     /// starting over when the server ignores the range or the file does not
-    /// match. Rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` when it found
+    /// match. Transient network failures are retried within the call.
+    /// Rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` when it found
     /// none or `canInstall` is false, and when the download fails or does not
     /// match.
     pub(crate) fn download_update(
@@ -324,7 +325,8 @@ impl Updater {
     /// arrive. An interrupted transfer keeps its partial file keyed to the
     /// package and resumes on the next call when the host supports HTTP
     /// `Range` requests, starting over when the server ignores the range or
-    /// the file does not match. Rejects with
+    /// the file does not match. Transient network failures are retried
+    /// within the call. Rejects with
     /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` when the check found none, and
     /// with an error saying why when the download fails or the package is
     /// refused (a refused package leaves nothing behind).
@@ -842,7 +844,7 @@ mod native {
         mut resumed: bool,
         progress: &mut impl FnMut(u64, Option<u64>) -> bool,
         verify: &impl Fn(&std::path::Path) -> Result<(), String>,
-    ) -> Result<TransferStep, String> {
+    ) -> Result<TransferStep, DownloadError> {
         use std::io::{Seek as _, Write as _};
 
         // Upper bound on server-capped `206` slices in one call.
@@ -854,6 +856,8 @@ mod native {
             let mut kind = ResponseKind::None;
             let mut server_total: Option<u64> = None;
             let mut exceeded_size = false;
+            // Set when the failure is ours (cancel, disk), not the network's.
+            let mut local_failure = false;
 
             let transfer = target
                 .host
@@ -865,9 +869,13 @@ mod native {
                         if at == 0 {
                             kind = ResponseKind::Full;
                             if check.received() > 0 {
-                                file.set_len(0).map_err(|e| e.to_string())?;
-                                file.seek(std::io::SeekFrom::Start(0))
-                                    .map_err(|e| e.to_string())?;
+                                let reset = file
+                                    .set_len(0)
+                                    .and_then(|()| file.seek(std::io::SeekFrom::Start(0)));
+                                if let Err(e) = reset {
+                                    local_failure = true;
+                                    return Err(e.to_string());
+                                }
                                 check = Download::new(target.sha256, target.size);
                                 resumed = false;
                             }
@@ -875,6 +883,7 @@ mod native {
                             kind = ResponseKind::Partial;
                             // Show the kept bytes before the new ones arrive.
                             if !progress(offset, target.size.or(total)) {
+                                local_failure = true;
                                 return Err("download cancelled".to_owned());
                             }
                         } else {
@@ -894,8 +903,12 @@ mod native {
                             return Err(e.to_string());
                         }
                     };
-                    file.write_all(chunk).map_err(|e| e.to_string())?;
+                    if let Err(e) = file.write_all(chunk) {
+                        local_failure = true;
+                        return Err(e.to_string());
+                    }
                     if !progress(received, target.size.or(server_total)) {
+                        local_failure = true;
                         return Err("download cancelled".to_owned());
                     }
                     Ok(())
@@ -915,14 +928,18 @@ mod native {
                     if resumed {
                         return Ok(TransferStep::RestartFresh);
                     }
-                    return Err(err);
+                    return Err(err.into());
                 }
                 // Keep partial progress on transport / HTTP errors or cancellation
                 // so the next call resumes; drop empty 0-byte placeholders.
                 if received == 0 {
                     let _ = std::fs::remove_file(target.part);
                 }
-                return Err(err);
+                let retryable = !local_failure && is_transient(&err);
+                return Err(DownloadError {
+                    message: err,
+                    retryable,
+                });
             }
 
             match kind {
@@ -936,7 +953,7 @@ mod native {
                         if check.finish().is_ok() {
                             if let Err(err) = verify(target.part) {
                                 let _ = std::fs::remove_file(target.part);
-                                return Err(err);
+                                return Err(err.into());
                             }
                             let _ = progress(received, target.size.or(Some(received)));
                             std::fs::rename(target.part, target.dest).map_err(|e| e.to_string())?;
@@ -947,7 +964,7 @@ mod native {
                     if resumed {
                         return Ok(TransferStep::RestartFresh);
                     }
-                    return Err("HTTP 416".to_owned());
+                    return Err("HTTP 416".to_owned().into());
                 }
                 ResponseKind::Partial => {
                     let expected = target.size.or(server_total);
@@ -977,7 +994,10 @@ mod native {
                     if received == 0 {
                         let _ = std::fs::remove_file(target.part);
                     }
-                    return Err("empty response".to_owned());
+                    return Err(DownloadError {
+                        message: "empty response".to_owned(),
+                        retryable: true,
+                    });
                 }
             }
         }
@@ -1006,11 +1026,106 @@ mod native {
     /// Downloads `target.url` into `target.part` (resuming an existing partial
     /// file when present), verifies its size, SHA-256 and `verify`, and moves
     /// it atomically to `target.dest`.
+    #[cfg(test)]
     fn download_resumable(
         target: &DownloadTarget<'_>,
+        progress: impl FnMut(u64, Option<u64>) -> bool,
+        verify: impl Fn(&std::path::Path) -> Result<(), String>,
+    ) -> Result<(), String> {
+        download_once(target, progress, verify).map_err(|e| e.message)
+    }
+
+    /// How [`download_with_retry`] backs off between attempts.
+    #[derive(Clone, Copy)]
+    struct RetryPolicy {
+        /// Retries in a row without any new byte before giving up.
+        attempts: u32,
+        /// First wait; doubles per retry without progress, capped at 16x.
+        backoff: std::time::Duration,
+    }
+
+    impl RetryPolicy {
+        const DEFAULT: Self = Self {
+            attempts: 5,
+            backoff: std::time::Duration::from_secs(1),
+        };
+    }
+
+    /// [`download_resumable`] that retries transient network failures
+    /// (resets, stalls, truncated bodies, `5xx`, `408`, `429`) from the
+    /// bytes already on disk, so a flaky link does not need the app to call
+    /// `download` again. The attempt budget resets whenever a pass made
+    /// progress; cancellation, verification and `4xx` errors fail at once.
+    fn download_with_retry(
+        target: &DownloadTarget<'_>,
+        policy: RetryPolicy,
         mut progress: impl FnMut(u64, Option<u64>) -> bool,
         verify: impl Fn(&std::path::Path) -> Result<(), String>,
     ) -> Result<(), String> {
+        let mut failures = 0u32;
+        let mut furthest = 0u64;
+        loop {
+            let mut reached = 0u64;
+            let result = download_once(
+                target,
+                |received, total| {
+                    reached = reached.max(received);
+                    progress(received, total)
+                },
+                &verify,
+            );
+            let err = match result {
+                Ok(()) => return Ok(()),
+                Err(err) if !err.retryable => return Err(err.message),
+                Err(err) => err,
+            };
+            if reached > furthest {
+                furthest = reached;
+                failures = 0;
+            }
+            failures += 1;
+            if failures > policy.attempts {
+                return Err(err.message);
+            }
+            let wait = policy.backoff * (1u32 << (failures - 1).min(4));
+            std::thread::sleep(wait);
+            // Let a cancellation made during the wait stop the retry.
+            if !progress(furthest, target.size) {
+                return Err("download cancelled".to_owned());
+            }
+        }
+    }
+
+    /// Whether a transfer error from the host is worth retrying.
+    fn is_transient(err: &str) -> bool {
+        match err
+            .strip_prefix("HTTP ")
+            .and_then(|code| code.trim().parse::<u16>().ok())
+        {
+            Some(status) => status >= 500 || status == 408 || status == 429,
+            None => !err.starts_with("redirect to non-HTTPS") && err != "too many redirects",
+        }
+    }
+
+    struct DownloadError {
+        message: String,
+        retryable: bool,
+    }
+
+    impl From<String> for DownloadError {
+        fn from(message: String) -> Self {
+            Self {
+                message,
+                retryable: false,
+            }
+        }
+    }
+
+    fn download_once(
+        target: &DownloadTarget<'_>,
+        mut progress: impl FnMut(u64, Option<u64>) -> bool,
+        verify: impl Fn(&std::path::Path) -> Result<(), String>,
+    ) -> Result<(), DownloadError> {
         // One download of an asset at a time, also across processes: the
         // `.part` is shared, so a second one would interleave its bytes.
         let _lock = lock_part(target.part)?;
@@ -1027,7 +1142,7 @@ mod native {
                 let _ = std::fs::remove_file(target.part);
                 if let Err(err) = verify(target.dest) {
                     let _ = std::fs::remove_file(target.dest);
-                    return Err(err);
+                    return Err(err.into());
                 }
                 let _ = progress(received, target.size.or(Some(received)));
                 return Ok(());
@@ -1047,7 +1162,7 @@ mod native {
             if check.finish().is_ok() {
                 if let Err(err) = verify(target.part) {
                     let _ = std::fs::remove_file(target.part);
-                    return Err(err);
+                    return Err(err.into());
                 }
                 let _ = progress(received, Some(received));
                 std::fs::rename(target.part, target.dest).map_err(|e| e.to_string())?;
@@ -1081,11 +1196,11 @@ mod native {
                             resumed = false;
                             continue;
                         }
-                        return Err(err.to_string());
+                        return Err(err.to_string().into());
                     }
                     if let Err(err) = verify(target.part) {
                         let _ = std::fs::remove_file(target.part);
-                        return Err(err);
+                        return Err(err.into());
                     }
                     std::fs::rename(target.part, target.dest).map_err(|e| e.to_string())?;
                     return Ok(());
@@ -1150,8 +1265,9 @@ mod native {
                 sha256: &sha256,
                 size,
             };
-            download_resumable(
+            download_with_retry(
                 &target,
+                RetryPolicy::DEFAULT,
                 |received, total| tx.send((received, total)).is_ok(),
                 |_| Ok(()),
             )?;
@@ -1236,7 +1352,7 @@ mod native {
                 sha256: &delta.sha256,
                 size: Some(delta.size),
             };
-            download_resumable(&target, progress, |_| Ok(()))?;
+            download_with_retry(&target, RetryPolicy::DEFAULT, progress, |_| Ok(()))?;
             let base = fs::read(&base_path).map_err(|e| e.to_string())?;
             let out_path = dir.join(format!("delta-{key}.tar"));
             let applied = (|| {
@@ -1350,8 +1466,9 @@ mod native {
                 sha256: &available.sha256,
                 size: available.size,
             };
-            download_resumable(
+            download_with_retry(
                 &target,
+                RetryPolicy::DEFAULT,
                 |received, total| tx.send((received, total)).is_ok(),
                 |file| {
                     pending
@@ -1846,6 +1963,116 @@ mod native {
             }
         }
 
+        const NO_WAIT: RetryPolicy = RetryPolicy {
+            attempts: 2,
+            backoff: std::time::Duration::ZERO,
+        };
+
+        #[test]
+        fn transient_failures_retry_from_the_partial_file() {
+            let dir = TempDir::new("retry");
+            let payload = b"0123456789abcdef";
+            let sha256 = nsh_updater::sha256(payload);
+            let part = dir.path().join("retry.part");
+            let dest = dir.path().join("retry");
+            // Each pass makes progress, so the budget of 2 resets each time.
+            let host = ScriptedHost::new(
+                payload,
+                [
+                    ScriptedResponse::DropAfter {
+                        bytes: 4,
+                        err: "connection reset",
+                    },
+                    ScriptedResponse::DropAfter {
+                        bytes: 4,
+                        err: "download stalled",
+                    },
+                    ScriptedResponse::ImmediateErr("HTTP 503"),
+                    ScriptedResponse::DropAfter {
+                        bytes: 4,
+                        err: "truncated response",
+                    },
+                    ScriptedResponse::Complete,
+                ],
+            );
+            let target = DownloadTarget {
+                host: &host,
+                url: "https://x.dev/app.tar.gz",
+                part: &part,
+                dest: &dest,
+                remove_invalid_dest: true,
+                sha256: &sha256,
+                size: Some(payload.len() as u64),
+            };
+            download_with_retry(&target, NO_WAIT, |_, _| true, |_| Ok(())).unwrap();
+            assert_eq!(std::fs::read(&dest).unwrap(), payload);
+            assert_eq!(host.offsets(), [0, 4, 8, 8, 12]);
+        }
+
+        #[test]
+        fn retry_gives_up_without_progress_and_keeps_the_part() {
+            let dir = TempDir::new("retry-give-up");
+            let payload = b"0123456789abcdef";
+            let sha256 = nsh_updater::sha256(payload);
+            let part = dir.path().join("retry.part");
+            let dest = dir.path().join("retry");
+            let host = ScriptedHost::new(
+                payload,
+                [
+                    ScriptedResponse::DropAfter {
+                        bytes: 5,
+                        err: "connection reset",
+                    },
+                    ScriptedResponse::ImmediateErr("connection refused"),
+                    ScriptedResponse::ImmediateErr("connection refused"),
+                ],
+            );
+            let target = DownloadTarget {
+                host: &host,
+                url: "https://x.dev/app.tar.gz",
+                part: &part,
+                dest: &dest,
+                remove_invalid_dest: true,
+                sha256: &sha256,
+                size: Some(payload.len() as u64),
+            };
+            let err = download_with_retry(&target, NO_WAIT, |_, _| true, |_| Ok(())).unwrap_err();
+            assert_eq!(err, "connection refused");
+            // One pass with progress, then two retries without any.
+            assert_eq!(host.offsets(), [0, 5, 5]);
+            assert_eq!(std::fs::read(&part).unwrap(), &payload[..5]);
+        }
+
+        #[test]
+        fn retry_skips_client_errors_and_cancellation() {
+            let dir = TempDir::new("retry-fatal");
+            let payload = b"0123456789abcdef";
+            let sha256 = nsh_updater::sha256(payload);
+            let part = dir.path().join("retry.part");
+            let dest = dir.path().join("retry");
+            let host = ScriptedHost::new(
+                payload,
+                [
+                    ScriptedResponse::ImmediateErr("HTTP 404"),
+                    ScriptedResponse::Complete,
+                ],
+            );
+            let target = DownloadTarget {
+                host: &host,
+                url: "https://x.dev/app.tar.gz",
+                part: &part,
+                dest: &dest,
+                remove_invalid_dest: true,
+                sha256: &sha256,
+                size: Some(payload.len() as u64),
+            };
+            let err = download_with_retry(&target, NO_WAIT, |_, _| true, |_| Ok(())).unwrap_err();
+            assert_eq!(err, "HTTP 404");
+            let err = download_with_retry(&target, NO_WAIT, |_, _| false, |_| Ok(())).unwrap_err();
+            assert_eq!(err, "download cancelled");
+            assert_eq!(host.offsets(), [0, 0]);
+        }
+
         #[test]
         fn interrupted_download_resumes_from_partial_file() {
             let dir = TempDir::new("resume");
@@ -2296,7 +2523,7 @@ mod native {
                         bytes: 7,
                         err: "network lost",
                     },
-                    ScriptedResponse::ImmediateErr("HTTP 503"),
+                    ScriptedResponse::ImmediateErr("HTTP 404"),
                     ScriptedResponse::Complete,
                 ],
             );
@@ -2316,23 +2543,17 @@ mod native {
                 .unwrap();
             assert_eq!(offered.build, 2.0);
 
-            // Attempt 1 drops after 7 bytes: part stays, older `next.nshpkg` stays.
+            // Attempt 1 drops after 7 bytes, retries on its own and stops
+            // at a `404`: part stays at 7 bytes, older `next.nshpkg` stays.
             let err = rt
                 .block_on(download_package(sys.clone(), None))
                 .unwrap_err();
-            assert!(format!("{err:?}").contains("network lost"), "{err:?}");
+            assert!(format!("{err:?}").contains("HTTP 404"), "{err:?}");
             let part = updates.join(format!("next-{sha256}.nshpkg.part"));
             assert_eq!(std::fs::read(&part).unwrap(), &payload[..7]);
             assert_eq!(std::fs::read(updates.join(NEXT)).unwrap(), b"older-build");
 
-            // Attempt 2 hits HTTP 503: part still stays at 7 bytes.
-            let err = rt
-                .block_on(download_package(sys.clone(), None))
-                .unwrap_err();
-            assert!(format!("{err:?}").contains("HTTP 503"), "{err:?}");
-            assert_eq!(std::fs::read(&part).unwrap(), &payload[..7]);
-
-            // Attempt 3 resumes from byte 7, verifies, and atomically replaces `next.nshpkg`.
+            // Attempt 2 resumes from byte 7, verifies, and atomically replaces `next.nshpkg`.
             rt.block_on(download_package(sys.clone(), None)).unwrap();
             assert_eq!(host.offsets(), [0, 7, 7]);
             assert!(!part.exists());
