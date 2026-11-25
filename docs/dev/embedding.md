@@ -438,7 +438,8 @@ NSH draws (`src/layers.rs`).
   from a `nsh dev` server and reloads it on every change, as `connectDevServer` on iOS and Android: the server's
   assets, logs forwarded to the developer's terminal, the status line and the error overlay over the view, the reload
   key. The embedding app's `on_error` keeps hearing the app's errors next to the overlay; connecting again replaces
-  the session. `crates/gpui/nsh-platform-gpui/examples/embed.rs` takes a dev server's URL.
+  the session. `dev` keeps the optional parts the app's build chose ([features.md](features.md)), so an app
+  importing a part its release leaves out fails here as it would there. `crates/gpui/nsh-platform-gpui/examples/embed.rs` takes a dev server's URL.
 - **Errors.** `AppView::on_app_error` hears every error of the app (also logged) as an `AppError` (`nsh_engine`,
   re-exported): its `kind` (`Load`: the bundle did not start; `Uncaught`: an exception escaped a callback, the app goes
   on; `Stopped`: the VM was stopped, reported once; `HotUpdate`; `Asset`), `is_fatal()` (`Load` or `Stopped`: no JS
