@@ -255,6 +255,120 @@ fn the_caret_sink_has_no_built_in_scrollbar() {
     );
 }
 
+/// `scrollbarInset` keeps the editor's bars within it, as a scroll view's:
+/// the vertical scroll view takes it whole; the horizontal one (no soft
+/// wrap) its left, right and bottom, the left less the gutter's width,
+/// which already keeps its bar that far from the editor's left.
+#[test]
+fn the_scroll_bars_keep_within_the_scrollbar_inset() {
+    const INSET: EdgeInsets = EdgeInsets {
+        top: Points(8.0),
+        right: Points(4.0),
+        bottom: Points(6.0),
+        left: Points(12.0),
+    };
+
+    #[component]
+    fn InsetEditor() -> impl IntoElement {
+        let inset = signal(INSET);
+        let gutter = signal(true);
+        let button =
+            |id: &str, f: Box<dyn Fn()>| view().test_id(id).w(px(20.0)).h(px(20.0)).on_press(f);
+        view()
+            .child(
+                view().w(px(600.0)).h(px(200.0)).child(
+                    editor()
+                        .default_value("a long line ".repeat(200))
+                        .line_numbers(move || gutter.get())
+                        .folding(move || gutter.get())
+                        .scrollbar_inset(move || inset.get())
+                        .size_full(),
+                ),
+            )
+            .child(button("no-gutter", Box::new(move || gutter.set(false))))
+            .child(button(
+                "clear",
+                Box::new(move || inset.set(EdgeInsets::default())),
+            ))
+    }
+
+    #[derive(Default)]
+    struct Seen {
+        horizontal: HashMap<NodeId, bool>,
+        insets: HashMap<NodeId, EdgeInsets>,
+    }
+    let mut config = EngineConfig {
+        viewport: Size::new(px(800.0), px(900.0)),
+        clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
+        ..EngineConfig::new(nsh_testing::windowed_root::<InsetEditor>())
+    };
+    config.environment.os = Os::Linux;
+    config.environment.idiom = Idiom::Desktop;
+    let mut app = Headless::start(config).expect("the engine starts");
+    let seen = Arc::new(Mutex::new(Seen::default()));
+    let into = seen.clone();
+    app.observe(move |_, batch| {
+        let mut seen = into.lock().unwrap();
+        for item in &batch.items {
+            match item {
+                MountItem::ScrollConfig { id, horizontal, .. } => {
+                    seen.horizontal.insert(*id, *horizontal);
+                }
+                MountItem::ScrollBehavior { id, behavior } => {
+                    seen.insets.insert(*id, behavior.scrollbar_inset);
+                }
+                _ => {}
+            }
+        }
+    });
+    app.first_render().unwrap();
+    app.run_for(Duration::from_millis(50)).unwrap();
+    // The editor's scroll view along each axis: the one sent an inset.
+    let (vertical_id, horizontal_id) = {
+        let seen = seen.lock().unwrap();
+        let of = |horizontal: bool| {
+            let mut found = seen.insets.iter().filter(|(id, inset)| {
+                seen.horizontal.get(id) == Some(&horizontal) && **inset != EdgeInsets::default()
+            });
+            let (id, _) = found.next().expect("the scroll view's inset");
+            assert!(found.next().is_none(), "one scroll view per axis");
+            *id
+        };
+        (of(false), of(true))
+    };
+    // The last inset each of them was sent.
+    let insets = |app: &mut Headless| {
+        app.run_for(Duration::from_millis(50)).unwrap();
+        let seen = seen.lock().unwrap();
+        (seen.insets[&vertical_id], seen.insets[&horizontal_id])
+    };
+    let along_the_bottom = |left: f32| EdgeInsets {
+        top: px(0.0),
+        left: px(left),
+        ..INSET
+    };
+
+    let (vertical, horizontal) = insets(&mut app);
+    assert_eq!(vertical, INSET, "the vertical bar takes the inset whole");
+    assert_eq!(
+        horizontal,
+        along_the_bottom(0.0),
+        "the gutter is wider than the left inset"
+    );
+
+    // Without a gutter the text area starts at the editor's left.
+    app.press("id:no-gutter").unwrap();
+    let (vertical, horizontal) = insets(&mut app);
+    assert_eq!(vertical, INSET);
+    assert_eq!(horizontal, along_the_bottom(12.0));
+
+    app.press("id:clear").unwrap();
+    assert_eq!(
+        insets(&mut app),
+        (EdgeInsets::default(), EdgeInsets::default())
+    );
+}
+
 /// Waits until a text on screen reads `text`.
 fn see(app: &mut Headless, text: &str) {
     app.wait_for(&format!("text:{text}")).unwrap();
