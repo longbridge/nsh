@@ -213,13 +213,12 @@ gets the whole runtime, its crates included, in its `nsh.<digest>.wasm`. Measure
 
 #### One runtime for several apps
 
-A site that embeds several apps downloads each one's runtime, as each is linked for its app. With
-`"web": { "sharedRuntime": true }` in `nsh.json`, `nsh.<digest>.wasm` holds only the engine, the same for every app
-packaged with that version of NSH, and each `nsh/base` part, standard module and shader is a side module of its
-own (`nsh-<part>.<digest>.wasm`), also the same for every app. The page loads those the entry imports before the app
-starts (`entrySides` in the page's app config, requested with `nsh.<digest>.wasm`), and the rest when a screen
-first needs them. Served from one place, these files download once for every app of the site; an app alone
-downloads somewhat more than with its own runtime. An app with Rust components of its own cannot share it.
+Package several apps into one directory and they share one runtime. When `nsh package` finds another NSH app
+already in the `--out` directory, `nsh.<digest>.wasm` holds only the engine, and each `nsh/base` part, standard
+module and shader is a side module of its own (`nsh-<part>.<digest>.wasm`). These files are the same for every app
+packaged with that version of NSH. Serve them from one place (`--asset-url`) and the browser downloads them once
+for the whole site. Nothing to configure. Package the first app again after the others so it shares too. An app
+packaged alone keeps its own, smaller runtime, and so does an app with Rust components of its own.
 
 ### Deploy it
 

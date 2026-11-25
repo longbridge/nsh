@@ -107,14 +107,15 @@ pub(crate) fn package(
         );
     }
     let runtime = runtime::package_web()?;
-    let shared = config.web.shared_runtime;
-    if shared && (built.rust_root || runtime.glue.is_some()) {
-        bail!(
-            "nsh.json web.sharedRuntime needs nsh's own runtime: an app with Rust components or wasm-bindgen glue has a runtime of its own"
-        );
-    }
+    // A site of several apps: another NSH app is packaged next to this
+    // one (`<out>/<other>/`), so the runtime is the shared form, the same
+    // bytes for every app, which the browser downloads once when the apps
+    // serve it from one place (`--asset-url`). nsh's own runtime only: an
+    // app with Rust components or wasm-bindgen glue has one of its own.
+    let shared = !built.rust_root && runtime.glue.is_none() && has_other_app(options.out, name);
     let dir = options.out.join(name);
     let step = ui::Step::start(format!("packaging {}", ui::path(&dir)));
+
     if dir.exists() {
         fs::remove_dir_all(&dir).with_context(|| format!("remove {}", dir.display()))?;
     }
@@ -149,7 +150,7 @@ pub(crate) fn package(
     // an app's chunks use is a side module of its own, which the page
     // loads before the first chunk that needs it runs (`chunkSides`), after
     // the side modules of the code it shares with other gates (`sides`).
-    // A shared runtime (nsh.json `web.sharedRuntime`) links none: every
+    // A shared runtime (several apps packaged into one directory) links none: every
     // gate is a side module, the same for every app, and the page loads
     // those the entry needs before the app starts (`entrySides`).
     let mut sides = serde_json::Map::new();
@@ -381,7 +382,28 @@ pub(crate) fn package(
     Ok(())
 }
 
-/// What a shared runtime (nsh.json `web.sharedRuntime`) keeps in its main
+/// Whether `out` has an NSH web app other than `name`: a directory with the
+/// page's script (`nsh-start.<digest>.js`).
+fn has_other_app(out: &Path, name: &str) -> bool {
+    let Ok(dirs) = fs::read_dir(out) else {
+        return false;
+    };
+    dirs.flatten()
+        .filter(|dir| dir.file_name() != name && dir.path().is_dir())
+        .any(|dir| {
+            fs::read_dir(dir.path())
+                .into_iter()
+                .flatten()
+                .flatten()
+                .any(|f| {
+                    let f = f.file_name();
+                    let f = f.to_string_lossy();
+                    f.starts_with("nsh-start.") && f.ends_with(".js")
+                })
+        })
+}
+
+/// What a shared runtime (several apps packaged into one directory) keeps in its main
 /// module and splits off, whatever the app uses: every export but the
 /// gates, and every gate, in order. The same for every app on one
 /// runtime, so are its modules; the app's own gates are its `entrySides`.
@@ -2492,6 +2514,20 @@ mod tests {
         assert_eq!(plan.main, linked_gates(built.native_use.as_ref()));
         built.entry_native_use = None;
         assert!(GatePlan::of(&built).chunks.is_empty());
+    }
+
+    #[test]
+    fn a_runtime_is_shared_once_another_app_is_packaged_next_to_it() {
+        let out = std::env::temp_dir().join(format!("nsh-web-shared-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&out);
+        fs::create_dir_all(&out).unwrap();
+        assert!(!has_other_app(&out, "a"));
+        fs::create_dir_all(out.join("a")).unwrap();
+        fs::write(out.join("a/nsh-start.1.js"), "").unwrap();
+        // Its own previous package does not count.
+        assert!(!has_other_app(&out, "a"));
+        assert!(has_other_app(&out, "b"));
+        fs::remove_dir_all(&out).unwrap();
     }
 
     #[test]
