@@ -307,6 +307,12 @@ editor.dispatchTransaction = (tr) => editor.applyTransaction(tr);
   `toggleMark(..)`, `history(..)`, `markRule(..)`, ...), resolved against the editor's schema when they run or the
   editor is made (`commands.rs`, `plugins.rs`). `chain` runs commands on the states each leaves and dispatches their
   steps as one transaction; `first` is ProseMirror's `chainCommands`.
+- `insertContent(content, format?)` (the command object and the session method) is not the registry's
+  `insertContentAt`: plain text is read by `slice_from_text`, Markdown and JSON become a `Slice::max_open`, and all
+  of them go through `Selection::replace`, so a paragraph produced by a document format splices into the text around
+  the caret while structure that cannot fit stays in blocks. An HTML string is the exception: it is parsed by
+  `DomParser::parse_insert_fragment` and inserted with Tiptap's `insertContent` algorithm, since HTML can represent
+  bare inline content and Tiptap's string input is HTML. `pasteHTML` / `pasteText` remain the paste algorithms.
 - `RichEditorPlugin` (`#[class]`) is a plugin whose behavior is the app's. Its callbacks live in a thread-local table
   of the engine thread (`HookRef`), since the kernel's plugins and the session are `Send + Sync`. Captured keys are a
   native keymap consumed while `capturing` is set, reported to JS with `post`; decorations are data a transaction

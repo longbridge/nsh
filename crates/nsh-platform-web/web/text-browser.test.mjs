@@ -370,6 +370,59 @@ test('a text streamed in keeps the spans and breaks of the lines it already had'
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
+test('a run in a taller line gets a line box that tall around the same baseline', { skip: !chromium }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'nsh-text-line-box-'));
+  try {
+    const source = await readFile(new URL('./nsh.js', import.meta.url), 'utf8');
+    const module = 'data:text/javascript;base64,' + Buffer.from(source + '\nexport { Player, defineClass };').toString('base64');
+    await writeFile(join(dir, 'index.html'), `<!doctype html><meta charset="utf-8"><style>body { margin:0; } .nsh-run { position:absolute; white-space:pre; }</style><script type="module">
+      import { Player, defineClass } from '${module}';
+      try {
+        // A run style as the engine writes it: the font with its own line height.
+        defineClass('nsh-test-run', 'font: 400 20px / 23px Arial;');
+        const player = Object.create(Player.prototype);
+        player.styleClass = () => 'nsh-test-run';
+        player.metricsCache = new Map();
+        player.measure = document.createElement('canvas').getContext('2d');
+        const el = document.createElement('div');
+        el._animation = {};
+        el.style.cssText = 'position:absolute;left:0;top:0';
+        document.body.append(el);
+        const baseline = (span) => {
+          const mark = document.createElement('i');
+          mark.style.cssText = 'display:inline-block;width:0;height:0;vertical-align:baseline';
+          span.append(mark);
+          const y = mark.getBoundingClientRect().top;
+          mark.remove();
+          return y;
+        };
+        // [x, y, text, style, start, parts, after, lineHeight]
+        player.replaceRuns(el, 0, 0, [[0, 10, 'Hg', 0, 0, null, null]], [{}], null, null);
+        let span = el.querySelector('.nsh-run');
+        const own = baseline(span), ownHeight = span.getBoundingClientRect().height;
+        if (span.style.lineHeight) throw Error('a run of its own height got ' + span.style.lineHeight);
+        for (const height of [40, 33.75, 18]) {
+          player.replaceRuns(el, 0, 0, [[0, 10, 'Hg', 0, 0, null, null, height]], [{}], null, null);
+          span = el.querySelector('.nsh-run');
+          if (span.getBoundingClientRect().height !== height) throw Error(height + ': box ' + span.getBoundingClientRect().height);
+          if (baseline(span) !== own) throw Error(height + ': baseline ' + baseline(span) + ', not ' + own);
+        }
+        // Updated in place: back to its own height, then into a taller line.
+        if (!player.updateRuns(el, 0, 0, [[0, 10, 'Hg', 0, 0, null, null]], [{}], null, null)) throw Error('made again');
+        if (span.style.lineHeight || span.getBoundingClientRect().height !== ownHeight || baseline(span) !== own) throw Error('not its own again: ' + span.outerHTML);
+        if (!player.updateRuns(el, 0, 0, [[0, 10, 'Hg', 0, 0, null, null, 40]], [{}], null, null)) throw Error('made again');
+        if (span.getBoundingClientRect().height !== 40 || baseline(span) !== own) throw Error('updated: ' + span.outerHTML);
+        document.body.dataset.result = 'passed';
+      } catch (e) { document.body.dataset.result = 'failed: ' + e.message; }
+    </script>`);
+    const html = execFileSync(chromium, ['--headless', '--no-sandbox', '--disable-dev-shm-usage',
+      '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--virtual-time-budget=1000',
+      '--user-data-dir=' + join(dir, 'profile'), '--dump-dom', pathToFileURL(join(dir, 'index.html')).href],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20000, maxBuffer: 1024 * 1024 });
+    assert.equal(html.match(/data-result="([^"]*)"/)?.[1], 'passed');
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
 test('letter-spacing advances DOM runs once per grapheme cluster', { skip: !chromium }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'nsh-text-cluster-spacing-'));
   try {

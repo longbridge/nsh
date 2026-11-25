@@ -18,9 +18,10 @@
 // third folds where the app's `foldRanges` say, by level, recursively and
 // by hand, reporting the folded ranges (`onFoldChange`, `folds`), its text
 // colored by the app's tokens alone (`decorations` with a `token`,
-// `highlighting={false}`). A context menu asked for over the text reports
-// where in it, and whether a touch selection asked for it (`selection`,
-// its box in the root view) or a pointer (`onContextMenu`). A fourth
+// `highlighting={false}`), its scroll bars kept clear of its container's
+// rounded corners (`scrollbarInset`). A context menu asked for over the
+// text reports where in it, and whether a touch selection asked for it
+// (`selection`, its box in the root view) or a pointer (`onContextMenu`). A fourth
 // editor completes (`completion`): typing a word asks the app
 // (`onCompletionRequest`), whose answer (`presentCompletions`) shows as
 // a list that typing on filters; pressing an item inserts it
@@ -114,6 +115,7 @@ export default function BaseEditor() {
             { range: { start: { line: 3, column: 0 }, end: { line: 3, column: 0 } }, gutter: { placement: "before", style: { backgroundColor: "#ef4444" } } },
           ]}
           gutterDecorationsWidth={4}
+          scrollbarInset={{ top: 6, right: 2, bottom: 6 }}
           classes={{ overviewRuler: "w-[12px]" }}
           onFoldChange={({ folds }) => folded.set(show(folds))}
           style={{ flex: 1 }}
