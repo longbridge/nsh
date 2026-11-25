@@ -573,15 +573,30 @@ function localOffset(ms) {
 
 /**
  * Whether the page can show the browser's share sheet: it has
- * `navigator.share` and the page's permissions policy allows `web-share`
- * (a frame of another origin needs `allow="web-share"`).
+ * `navigator.share` and the document is allowed to use `web-share` (a frame
+ * of another origin needs `allow="web-share"`, and `Permissions-Policy:
+ * web-share=()` turns it off).
  *
- * `allowsFeature` logs "Unrecognized feature" to the console on every call for
- * a name the browser does not know, so ask `features()` first. A browser
- * without `web-share` in its policy list does not gate sharing on it.
+ * Web Share (W3C REC) makes `navigator.canShare(data)` return `false` when the
+ * document is not allowed to use "web-share", so that is the probe. It never
+ * touches the policy by name, so it does not log "Unrecognized feature" in
+ * browsers whose Permissions Policy has no `web-share` entry. The data only
+ * has to be valid share data; nothing is shared.
+ *
+ * `canShare` is newer than `share` (some browsers ship only `share`). Those
+ * fall back to the Permissions Policy API, asking `features()` before
+ * `allowsFeature()`: `allowsFeature` logs for a name the browser does not
+ * list, and such a browser does not gate sharing on that policy.
  */
 function webShareAllowed() {
   if (typeof navigator === "undefined" || typeof navigator.share !== "function") return false;
+  if (typeof navigator.canShare === "function") {
+    try {
+      return navigator.canShare({ text: "share" });
+    } catch {
+      return false;
+    }
+  }
   const doc = typeof document === "undefined" ? undefined : document;
   const policy = doc?.permissionsPolicy ?? doc?.featurePolicy;
   if (typeof policy?.allowsFeature !== "function") return true;
