@@ -15,7 +15,7 @@ use super::{
     buffer::{Buffer, Change},
     commands::{EditOptions, Editing},
     diagnostics::{self, Mark},
-    display::DisplayMap,
+    display::{DisplayMap, FontRun},
     fold::{self, FoldRange},
     fold_set,
     highlight::{Highlighter, LineEdit, Syntax},
@@ -52,11 +52,54 @@ impl Font {
     }
 }
 
+/// The measures of a text in another font than the editor's
+/// ([`face_font`]).
+pub(crate) type MeasureFont = Rc<dyn Fn(&Font) -> Rc<dyn Fn(&str) -> Points>>;
+
+/// The font of a decoration's text (`family` and / or `size` set, the
+/// editor's `base` otherwise), as drawn: its size grown by the user's text
+/// size (`scale`) as the editor's is. A row with larger text is taller in
+/// proportion: the editor's row height times the sizes' ratio, in whole
+/// points, never less than the editor's.
+pub(crate) fn face_font(
+    base: &Font,
+    scale: f32,
+    family: Option<&nsh_core::element::SharedString>,
+    size: Option<Points>,
+) -> Font {
+    let size = size.map_or(base.size, |size| size * scale);
+    let line_height = if size > base.size && base.size.0 > 0.0 {
+        Points((base.line_height.0 * size.0 / base.size.0).ceil())
+    } else {
+        base.line_height
+    };
+    Font {
+        family: family.cloned().unwrap_or_else(|| base.family.clone()),
+        size,
+        line_height,
+    }
+}
+
+/// A font a decoration sets on a span, as the app gave it (the core grows
+/// it by the user's text size, as every text's).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SpanFont {
+    pub(crate) family: nsh_core::element::SharedString,
+    pub(crate) size: Points,
+}
+
+/// A decoration's font size when it is one (finite, above zero).
+fn valid_size(size: Option<Points>) -> Option<Points> {
+    size.filter(|s| s.0.is_finite() && s.0 > 0.0)
+}
+
 /// A span of a row's text and what styles it.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Span {
     pub(crate) text: String,
     pub(crate) token: Option<Token>,
+    /// The font a decoration sets on it; `None`: the editor's.
+    pub(crate) font: Option<SpanFont>,
     /// The decorations over it (indexes into the editor's decorations).
     pub(crate) decorations: Vec<usize>,
     /// The diagnostics over it: their tags (faded, struck through) and
@@ -123,6 +166,9 @@ pub(crate) struct RowContent {
     pub(crate) folded: bool,
     /// The decorations whose line styles cover the row's line.
     pub(crate) line_decorations: Vec<usize>,
+    /// The row's height as the app's values are (the core grows it by the
+    /// user's text size) when larger text makes it taller than a line.
+    pub(crate) line_height: Option<Points>,
 }
 
 /// What the gutter shows for a display row.
@@ -180,7 +226,8 @@ pub(crate) struct Composing {
     pub(crate) at: usize,
     /// The display row it shows in.
     pub(crate) row: usize,
-    /// Its width in the editor's font.
+    /// Its width in the font its commit will take (the decoration font
+    /// around the caret, else the editor's).
     pub(crate) width: Points,
 }
 
@@ -213,6 +260,13 @@ pub(crate) struct State {
     pub(crate) language: &'static LanguageConfig,
     pub(crate) options: EditOptions,
     pub(crate) font: Font,
+    /// How much the user's text size grows the app's font sizes
+    /// (`fontScale`; 1 in a terminal).
+    pub(crate) font_scale: f32,
+    /// The measures of the decorations' fonts.
+    measure_font: MeasureFont,
+    /// A decoration sets a font.
+    has_fonts: bool,
     pub(crate) diagnostics: Vec<Mark<EditorDiagnostic>>,
     /// The longest diagnostic's bytes: a row looks for the diagnostics
     /// over it among those starting this far before it.
@@ -263,7 +317,17 @@ impl State {
         measure: Rc<dyn Fn(&str) -> Points>,
     ) -> State {
         let buffer = Buffer::new(text);
+        // Until the view gives the platform's measures: the editor's,
+        // scaled by size.
+        let base_size = font.size.0.max(1.0);
+        let base = measure.clone();
+        let measure_font: MeasureFont = Rc::new(move |font: &Font| {
+            let base = base.clone();
+            let ratio = font.size.0 / base_size;
+            Rc::new(move |text: &str| base(text) * ratio)
+        });
         let mut display = DisplayMap::new(measure, options.tab_size);
+        display.set_line_height(font.line_height);
         display.rebuild(&buffer);
         State {
             buffer,
@@ -281,6 +345,9 @@ impl State {
             language,
             options,
             font,
+            font_scale: 1.0,
+            measure_font,
+            has_fonts: false,
             diagnostics: Vec::new(),
             tag_reach: 0,
             decorations: Vec::new(),
@@ -305,6 +372,106 @@ impl State {
 
     pub(crate) fn line_height(&self) -> Points {
         self.font.line_height
+    }
+
+    /// How text in another font is measured (the platform's text engine).
+    pub(crate) fn set_measure_font(&mut self, measure: MeasureFont) {
+        self.measure_font = measure;
+    }
+
+    /// The fonts the decorations set and the stretches of text in them:
+    /// at each byte, the innermost decoration's family and size (the latest
+    /// starting; of those the shortest; of equal ranges the last), each
+    /// falling back to the editor's. None in a terminal, whose text is in
+    /// its Cells.
+    fn font_runs(&self) -> (Vec<Font>, Vec<FontRun>) {
+        let mut fonts: Vec<Font> = Vec::new();
+        let mut runs: Vec<FontRun> = Vec::new();
+        if !self.has_fonts || self.display.cells() {
+            return (fonts, runs);
+        }
+        let items = &self.decoration_items;
+        let marks: Vec<&Mark<usize>> = self
+            .decorations
+            .iter()
+            .filter(|m| !m.range.is_empty())
+            .filter(|m| {
+                items
+                    .get(m.item)
+                    .is_some_and(|d| d.font_family.is_some() || valid_size(d.font_size).is_some())
+            })
+            .collect();
+        let mut cuts: Vec<usize> = marks
+            .iter()
+            .flat_map(|m| [m.range.start, m.range.end])
+            .collect();
+        cuts.sort_unstable();
+        cuts.dedup();
+        // The marks over the stretch between two cuts (by start, so in
+        // the order `marks` has them): they cover it whole.
+        let mut active: Vec<usize> = Vec::new();
+        let mut next = 0;
+        for pair in cuts.windows(2) {
+            let (start, end) = (pair[0], pair[1]);
+            while next < marks.len() && marks[next].range.start <= start {
+                active.push(next);
+                next += 1;
+            }
+            active.retain(|&i| marks[i].range.end > start);
+            if active.is_empty() {
+                continue;
+            }
+            let innermost = |set: &dyn Fn(&EditorDecoration) -> bool| {
+                active
+                    .iter()
+                    .filter(|&&i| set(&items[marks[i].item]))
+                    .max_by_key(|&&i| {
+                        let r = &marks[i].range;
+                        (r.start, std::cmp::Reverse(r.end), i)
+                    })
+                    .map(|&i| &items[marks[i].item])
+            };
+            let family =
+                innermost(&|d| d.font_family.is_some()).and_then(|d| d.font_family.as_ref());
+            let size = innermost(&|d| valid_size(d.font_size).is_some())
+                .and_then(|d| valid_size(d.font_size));
+            let font = face_font(&self.font, self.font_scale, family, size);
+            if font == self.font {
+                continue;
+            }
+            let face = match fonts.iter().position(|f| *f == font) {
+                Some(face) => face,
+                None => {
+                    fonts.push(font);
+                    fonts.len() - 1
+                }
+            };
+            match runs.last_mut() {
+                Some(last) if last.range.end == start && last.face == face => last.range.end = end,
+                _ => runs.push(FontRun {
+                    range: start..end,
+                    face,
+                }),
+            }
+        }
+        (fonts, runs)
+    }
+
+    /// The decorations' fonts after the decorations or the editor's font
+    /// changed: the lines whose fonts changed are laid out again.
+    fn update_fonts(&mut self) {
+        let (fonts, runs) = self.font_runs();
+        let measure = self.measure_font.clone();
+        self.display
+            .set_fonts(&self.buffer, fonts, runs, |font| measure(font));
+    }
+
+    /// The decorations' fonts found again before everything is laid out
+    /// again (a new text, font or text size).
+    fn carry_fonts(&mut self) {
+        let (fonts, runs) = self.font_runs();
+        let measure = self.measure_font.clone();
+        self.display.carry_fonts(fonts, runs, |font| measure(font));
     }
 
     /// Runs `f` on an [`Editing`] of the state with `page_rows` rows a page.
@@ -332,6 +499,13 @@ impl State {
     pub(crate) fn changed(&mut self, changes: &[Change]) {
         if changes.is_empty() {
             return;
+        }
+        self.decoration_reach =
+            diagnostics::adjust(&mut self.decorations, self.decoration_reach, changes);
+        // The fonts' runs move with the text as the decorations do; the
+        // lines the edit touched are laid out again with them.
+        if self.has_fonts {
+            self.display.carry_runs(changes);
         }
         match self.buffer.last_line_span() {
             Some(span) => {
@@ -362,8 +536,6 @@ impl State {
             None => self.relayout(),
         }
         self.tag_reach = diagnostics::adjust(&mut self.diagnostics, self.tag_reach, changes);
-        self.decoration_reach =
-            diagnostics::adjust(&mut self.decorations, self.decoration_reach, changes);
         if let Some(scope) = &mut self.search_scope {
             diagnostics::adjust(scope, usize::MAX, changes);
         }
@@ -384,6 +556,10 @@ impl State {
         }
         if let Some(ranges) = &mut self.app_folds {
             *ranges = fold_set::normalize(std::mem::take(ranges), lines);
+        }
+        self.display.set_line_height(self.font.line_height);
+        if self.has_fonts {
+            self.carry_fonts();
         }
         self.display.rebuild(&self.buffer);
         if let Some(h) = &mut self.highlighter {
@@ -731,9 +907,7 @@ impl State {
 
     /// The offset at `point` of the rows' box (a press).
     pub(crate) fn offset_at(&self, point: Pt<Points>) -> usize {
-        let lh = self.line_height().0.max(1.0);
-        let rows = self.display.row_count();
-        let row = ((point.y.0 / lh).floor().max(0.0) as usize).min(rows.saturating_sub(1));
+        let row = self.display.row_at_y(point.y);
         let before = self.buffer.snapshot();
         let layout = self.display.layout(&before);
         // The layout's x counts a continuation row's indent itself.
@@ -746,7 +920,19 @@ impl State {
         let layout = self.display.layout(&before);
         // The x counts a continuation row's indent.
         let (row, x) = layout.locate(offset);
-        Pt::new(x, self.line_height() * row as f32)
+        Pt::new(x, self.display.row_top(row))
+    }
+
+    /// Where `offset` is drawn ([`Self::caret_point`]) and its row's
+    /// height: the caret's box.
+    pub(crate) fn caret_box(&self, offset: usize) -> (Pt<Points>, Points) {
+        let before = self.buffer.snapshot();
+        let layout = self.display.layout(&before);
+        let (row, x) = layout.locate(offset);
+        (
+            Pt::new(x, self.display.row_top(row)),
+            self.display.row_height(row),
+        )
     }
 
     /// How many rows a page moves: the viewport's height in rows, less
@@ -767,7 +953,7 @@ impl State {
         let (row, _) = self.display.layout(&before).locate(at);
         let tab = " ".repeat(self.display.tab_size().max(1) as usize);
         let text = text.replace('\t', &tab);
-        let width = self.display.text_width(&text);
+        let width = self.display.inserted_width(at, &text);
         Some(Composing {
             text,
             at,
@@ -830,9 +1016,28 @@ impl State {
             cuts.push(r.start);
             cuts.push(r.end);
         }
+        // The decorations' fonts, as the display map measures them (the
+        // app's sizes: the core grows them as it grows the editor's).
+        let scale = self.font_scale.max(f32::EPSILON);
+        let fonts: Vec<(Range<usize>, SpanFont)> = self
+            .display
+            .row_fonts(row)
+            .into_iter()
+            .map(|(r, font)| {
+                let font = SpanFont {
+                    family: font.family.clone(),
+                    size: font.size / scale,
+                };
+                (r, font)
+            })
+            .collect();
+        for (r, _) in &fonts {
+            cuts.push(r.start);
+            cuts.push(r.end);
+        }
         let mut composed = composing
             .filter(|c| c.row == row)
-            .map(|c| self.composed_span(c, &info.range, &decorations, tokens, line_start));
+            .map(|c| self.composed_span(c, &info.range, &decorations, tokens, &fonts, line_start));
         if let Some((at, _)) = &composed {
             cuts.push(*at);
         }
@@ -874,18 +1079,24 @@ impl State {
                 .iter()
                 .filter(|(_, r)| r.start <= start && r.end >= end)
                 .fold(SpanTags::default(), |all, (t, _)| all.union(*t));
+            let font = fonts
+                .iter()
+                .find(|(r, _)| r.start <= start && r.end >= end)
+                .map(|(_, f)| f.clone());
             match spans.last_mut() {
                 Some(last)
                     if !last.composition
                         && last.token == token
                         && last.decorations == decorations
-                        && last.tags == tags =>
+                        && last.tags == tags
+                        && last.font == font =>
                 {
                     last.text.push_str(&text);
                 }
                 _ => spans.push(Span {
                     text,
                     token,
+                    font,
                     decorations,
                     tags,
                     composition: false,
@@ -918,10 +1129,12 @@ impl State {
             d.line_class.is_some() || d.line_style.is_some()
         })
         .collect();
+        let height = self.display.row_height(row);
         RowContent {
             spans,
             folded,
             line_decorations,
+            line_height: (height != self.line_height()).then(|| height / scale),
         }
     }
 
@@ -937,6 +1150,7 @@ impl State {
         range: &Range<usize>,
         decorations: &[(usize, Range<usize>)],
         tokens: &[(Range<usize>, Token)],
+        fonts: &[(Range<usize>, SpanFont)],
         line_start: usize,
     ) -> (usize, Span) {
         let at = composing.at.clamp(range.start, range.end);
@@ -953,9 +1167,14 @@ impl State {
                     .find(|(r, _)| inside(&(line_start + r.start..line_start + r.end)))
                     .map(|(_, t)| *t)
             });
+        let font = fonts
+            .iter()
+            .find(|(r, _)| inside(r))
+            .map(|(_, f)| f.clone());
         let span = Span {
             text: composing.text.clone(),
             token,
+            font,
             decorations: over
                 .iter()
                 .map(|(i, _)| self.decorations[*i].item)
@@ -990,7 +1209,14 @@ impl State {
     ) {
         self.decoration_reach = app_highlight::reach(&marks);
         self.decorations = marks;
+        let had_fonts = self.has_fonts;
+        self.has_fonts = items
+            .iter()
+            .any(|d| d.font_family.is_some() || valid_size(d.font_size).is_some());
         self.decoration_items = items;
+        if self.has_fonts || had_fonts {
+            self.update_fonts();
+        }
     }
 
     fn row_is_last_of_line(&self, row: usize) -> bool {
@@ -1163,7 +1389,6 @@ impl State {
         if range.is_empty() && !newline {
             return out;
         }
-        let lh = self.line_height();
         let before = self.buffer.snapshot();
         let layout = self.display.layout(&before);
         let (first_row, _) = layout.locate(range.start);
@@ -1186,7 +1411,10 @@ impl State {
                 x1 += space;
             }
             if x1 > x0 {
-                let rect = Bounds::new(Pt::new(x0, lh * row as f32), Size::new(x1 - x0, lh));
+                let rect = Bounds::new(
+                    Pt::new(x0, self.display.row_top(row)),
+                    Size::new(x1 - x0, self.display.row_height(row)),
+                );
                 out.push(match &composing {
                     Some(c) => c.shift(row, start..end, rect),
                     None => rect,
@@ -1208,17 +1436,21 @@ impl State {
         out
     }
 
-    /// The carets on `rows`: their top left (the caret is 2 points wide and
-    /// a line tall).
-    pub(crate) fn caret_points(&self, rows: Range<usize>) -> Vec<Pt<Points>> {
-        let lh = self.line_height();
+    /// The carets on `rows`: their top left and height (the caret is 2
+    /// points wide and its row tall).
+    pub(crate) fn caret_points(&self, rows: Range<usize>) -> Vec<(Pt<Points>, Points)> {
+        let before = self.buffer.snapshot();
+        let layout = self.display.layout(&before);
         self.selections
             .all()
             .iter()
-            .map(|s| self.caret_point(s.head))
-            .filter(|p| {
-                let row = (p.y.0 / lh.0.max(1.0)).round() as usize;
-                rows.contains(&row)
+            .map(|s| layout.locate(s.head))
+            .filter(|(row, _)| rows.contains(row))
+            .map(|(row, x)| {
+                (
+                    Pt::new(x, self.display.row_top(row)),
+                    self.display.row_height(row),
+                )
             })
             .collect()
     }
@@ -1299,11 +1531,11 @@ impl State {
                 continue;
             }
             let at = self.caret_point(range.start);
-            let row = (at.y.0 / self.line_height().0.max(1.0)).round() as usize;
+            let row = self.display.row_at_y(at.y);
             if !rows.contains(&row) {
                 continue;
             }
-            let size = Size::new(self.display.space_width(), self.line_height());
+            let size = Size::new(self.display.space_width(), self.display.row_height(row));
             let mut rect = Bounds::new(at, size);
             if let Some(c) = &composing {
                 rect = c.shift(row, range.clone(), rect);
@@ -1429,10 +1661,9 @@ impl State {
     /// The size of the rows' box: the widest row (without soft wrap) and
     /// every row's height.
     pub(crate) fn content_size(&self) -> Size<Points> {
-        let lh = self.line_height();
         Size::new(
             self.display.widest_row() + self.display.space_width() * 2.0,
-            lh * self.display.row_count() as f32,
+            self.display.rows_height(),
         )
     }
 
@@ -1453,11 +1684,11 @@ impl State {
     /// each run of spaces or tab is and what shows there, a `·` per space
     /// and a `→` per tab.
     pub(crate) fn whitespace_marks(&self, rows: Range<usize>) -> Vec<(Rect, String)> {
-        let lh = self.line_height();
         let count = self.display.row_count();
         let composing = self.composing();
         let mut out = Vec::new();
         for row in rows.start.min(count)..rows.end.min(count) {
+            let (top, lh) = (self.display.row_top(row), self.display.row_height(row));
             for ws in self.display.whitespace(&self.buffer, row) {
                 let mark = if ws.tab {
                     "→".to_owned()
@@ -1465,7 +1696,7 @@ impl State {
                     "·".repeat(ws.count)
                 };
                 let span = ws.start..ws.start + if ws.tab { 1 } else { ws.count };
-                let rect = Bounds::new(Pt::new(ws.x, lh * row as f32), Size::new(ws.width, lh));
+                let rect = Bounds::new(Pt::new(ws.x, top), Size::new(ws.width, lh));
                 match &composing {
                     // A composition inside a run of spaces splits it: the
                     // spaces after it move aside.
@@ -1986,6 +2217,63 @@ mod tests {
     }
 
     #[test]
+    fn a_composition_takes_the_font_its_commit_will() {
+        // The heading's 26 points are twice the editor's 13: 16 points a
+        // char and a row 40 tall.
+        let mut st = state("hello world\nnext\n");
+        let heading = EditorDecoration {
+            font_size: Some(px(26.0)),
+            ..decoration(0, 0, 5)
+        };
+        decorate(&mut st, vec![heading]);
+        let big = Some(SpanFont {
+            family: "monospace".into(),
+            size: px(26.0),
+        });
+        let compose = |st: &mut State, at: usize| {
+            st.selections = Selections::single(Selection::caret(at));
+            st.composition = Some("ni".to_owned());
+        };
+        let fonts = |st: &State| -> Vec<(String, Option<SpanFont>, bool)> {
+            st.row_content(0, st.composing().as_ref())
+                .spans
+                .into_iter()
+                .map(|s| (s.text, s.font, s.composition))
+                .collect()
+        };
+        // Inside the heading: in its font, as wide as it draws there.
+        compose(&mut st, 2);
+        assert_eq!(st.composing().map(|c| c.width), Some(px(32.0)));
+        assert_eq!(
+            fonts(&st),
+            vec![
+                ("he".to_owned(), big.clone(), false),
+                ("ni".to_owned(), big.clone(), true),
+                ("llo".to_owned(), big.clone(), false),
+                (" world".to_owned(), None, false),
+            ]
+        );
+        // What follows moves aside by that width, on the row's own top and
+        // height.
+        let rect = st.range_rects(3..5, 0..2, false)[0];
+        assert_eq!(
+            (rect.origin.x, rect.origin.y, rect.size.height),
+            (px(80.0), px(0.0), px(40.0))
+        );
+        // At the heading's end, outside it: the editor's font.
+        compose(&mut st, 5);
+        assert_eq!(st.composing().map(|c| c.width), Some(px(16.0)));
+        assert_eq!(fonts(&st)[1], ("ni".to_owned(), None, true));
+        // On the row below the tall one, the marks keep that row's place.
+        compose(&mut st, 13);
+        let rect = st.range_rects(14..16, 0..2, false)[0];
+        assert_eq!(
+            (rect.origin.x, rect.origin.y, rect.size.height),
+            (px(32.0), px(40.0), px(20.0))
+        );
+    }
+
+    #[test]
     fn a_composition_moves_the_marks_after_it_aside() {
         // Every char is 8 points wide: "ni" is 16.
         let mut st = state("ab cd ef\na  b\n");
@@ -2310,6 +2598,147 @@ mod tests {
                 nsh_core::FamilyName::Named("Menlo"),
                 nsh_core::FamilyName::Named("PingFang SC"),
             ]
+        );
+    }
+
+    #[test]
+    fn decorations_set_fonts_and_rows_grow_with_their_sizes() {
+        let mut st = state("# Title\nuse `code` here\nend\n");
+        let heading = EditorDecoration {
+            font_size: Some(px(26.0)),
+            ..decoration(0, 0, 7)
+        };
+        let code = EditorDecoration {
+            font_family: Some("Menlo".into()),
+            ..decoration(1, 4, 10)
+        };
+        decorate(&mut st, vec![heading, code]);
+        // Twice the editor's 13 points: a row twice its 20.
+        assert_eq!(st.display.row_height(0), px(40.0));
+        assert_eq!(st.display.row_height(1), px(20.0));
+        let line1 = st.buffer.line_start(1);
+        assert_eq!(st.caret_box(line1), (Pt::new(px(0.0), px(40.0)), px(20.0)));
+        assert_eq!(st.content_size().height, px(100.0));
+        // The heading is measured at its size: 16 points a char.
+        assert_eq!(st.caret_point(7).x, px(112.0));
+        assert_eq!(st.offset_at(Pt::new(px(17.0), px(35.0))), 1);
+        assert_eq!(st.offset_at(Pt::new(px(0.0), px(45.0))), line1);
+        // Its row's text is drawn at the app's size, as tall as the row.
+        let content = st.row_content(0, None);
+        let big = Some(SpanFont {
+            family: "monospace".into(),
+            size: px(26.0),
+        });
+        assert_eq!(content.spans.len(), 1);
+        assert_eq!(content.spans[0].font, big);
+        assert_eq!(content.line_height, Some(px(40.0)));
+        // The code is a span in its family.
+        let fonts: Vec<(String, Option<SpanFont>)> = st
+            .row_content(1, None)
+            .spans
+            .into_iter()
+            .map(|s| (s.text, s.font))
+            .collect();
+        let menlo = Some(SpanFont {
+            family: "Menlo".into(),
+            size: px(13.0),
+        });
+        assert_eq!(
+            fonts,
+            vec![
+                ("use ".to_owned(), None),
+                ("`code`".to_owned(), menlo),
+                (" here".to_owned(), None),
+            ]
+        );
+        assert_eq!(st.row_content(1, None).line_height, None);
+
+        // Typing in the heading: it stays large, the rows below in place.
+        insert(&mut st, 2, "X");
+        assert_eq!(st.caret_point(8).x, px(128.0));
+        assert_eq!(st.display.row_top(2), px(60.0));
+        // A line above it moves it down a line.
+        insert(&mut st, 0, "intro\n");
+        assert_eq!(st.display.row_top(1), px(20.0));
+        assert_eq!(st.display.row_height(1), px(40.0));
+        assert_eq!(st.display.row_top(2), px(60.0));
+
+        // Without them every row is a line tall again.
+        decorate(&mut st, vec![]);
+        assert_eq!(st.display.row_top(2), px(40.0));
+        assert_eq!(st.row_content(1, None).line_height, None);
+    }
+
+    #[test]
+    fn the_innermost_decoration_sets_each_part_of_the_font() {
+        let mut st = state("aaaaaaaaaa\n");
+        let outer = EditorDecoration {
+            font_family: Some("Georgia".into()),
+            font_size: Some(px(26.0)),
+            ..decoration(0, 0, 10)
+        };
+        let inner = EditorDecoration {
+            font_family: Some("Menlo".into()),
+            ..decoration(0, 2, 4)
+        };
+        // Not a size: the outer one's stays.
+        let invalid = EditorDecoration {
+            font_size: Some(px(-1.0)),
+            ..decoration(0, 3, 4)
+        };
+        decorate(&mut st, vec![inner, outer, invalid]);
+        let fonts: Vec<(String, Option<SpanFont>)> = st
+            .row_content(0, None)
+            .spans
+            .into_iter()
+            .map(|s| (s.text, s.font))
+            .collect();
+        let font = |family: &'static str| {
+            Some(SpanFont {
+                family: family.into(),
+                size: px(26.0),
+            })
+        };
+        assert_eq!(
+            fonts,
+            vec![
+                ("aa".to_owned(), font("Georgia")),
+                ("aa".to_owned(), font("Menlo")),
+                ("aaaaaa".to_owned(), font("Georgia")),
+            ]
+        );
+        assert_eq!(st.display.row_height(0), px(40.0));
+    }
+
+    #[test]
+    fn a_decorations_size_grows_with_the_users_text_size() {
+        let mut st = state("ab\n");
+        // The editor's font as drawn at a text size of 2.
+        st.font = Font {
+            family: "monospace".into(),
+            size: px(26.0),
+            line_height: px(40.0),
+        };
+        st.font_scale = 2.0;
+        st.relayout();
+        decorate(
+            &mut st,
+            vec![EditorDecoration {
+                font_size: Some(px(26.0)),
+                ..decoration(0, 0, 2)
+            }],
+        );
+        // Drawn at 52 points in an 80 point row; the view gives the core
+        // the app's values, which it grows.
+        assert_eq!(st.display.row_height(0), px(80.0));
+        let content = st.row_content(0, None);
+        assert_eq!(content.line_height, Some(px(40.0)));
+        assert_eq!(
+            content.spans[0].font,
+            Some(SpanFont {
+                family: "monospace".into(),
+                size: px(26.0),
+            })
         );
     }
 }

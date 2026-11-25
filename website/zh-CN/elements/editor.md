@@ -279,6 +279,25 @@ const range = (line: number, start: number, end: number) => ({ start: { line, co
 
 <a id="gutter-and-overview-ruler-marks"></a>
 
+### 字体
+
+装饰的 `fontFamily` 和 `fontSize` 设置其文本的字体，于是基于 `Editor` 的 Markdown 笔记应用可以让行内代码和代码块用等宽字体、让标题更大。编辑器用这个字体测量文本：光标、选区、点击和软换行都随之而定。一行的高度取其中最大的文本所需：编辑器的 `lineHeight` 按字号等比放大（13 点、行高 20 点的编辑器中，26 点的标题占 40 点的一行），且不低于 `lineHeight`。带字体的装饰重叠时，最内层装饰的字体族和字号胜出，两者各自取（内层的 `fontFamily` 保留外层的 `fontSize`）。字体请在这里设置，不要用 `class` 或 `style`，编辑器不会按它们测量。在终端中文本保持在其单元格中。
+
+```tsx
+<Editor
+  value={notes()}
+  onChange={({ value }) => notes.set(value)}
+  fontFamily="Inter"
+  fontSize={15}
+  lineHeight={24}
+  decorations={[
+    { range: range(0, 0, 14), fontSize: 22, class: "font-semibold" },
+    { range: range(2, 8, 20), fontFamily: "Menlo", class: "bg-zinc-500/10" },
+  ]}
+  class="flex-1"
+/>
+```
+
 ### 行号槽与概览标尺标记
 
 装饰的 `gutter` 在行号前的一条窄带中，为其范围覆盖的每一行放一个标记：版本控制差异中新增或修改的行，或断点（空范围覆盖它所在的行，与 `lineClass` 相同）。设置 `placement: "before"` 时，它是在范围起点之前的行间边界处横跨窄带的一条线，即删除行的位置。这条窄带宽 `gutterDecorationsWidth` 点（默认 3），只要有装饰带行号槽标记就一直保留，标记出现或消失时文本位置不变。折叠中的范围标记在折叠所在的那一行。

@@ -28,7 +28,7 @@ user-facing page is `website/elements/editor.md`; how each module works inside i
 | `select.rs` | The selection history (`undoSelection`), expanding and shrinking selections, block selections, the scope of a search in the selection |
 | `keymap.rs` | The default key bindings as data, in `nsh`'s keystroke syntax, Apple's and the others' |
 | `language.rs` | `LanguageConfig`: per-language comments, brackets, auto-close pairs, word characters, indentation, tab size and the syntax hint; the lookup by name, alias, extension or file name |
-| `display.rs` | `DisplayMap`: tabs, measured widths, soft wrap and folds as display rows |
+| `display.rs` | `DisplayMap`: tabs, measured widths, soft wrap, folds and the decorations' fonts as display rows of their heights |
 | `fold.rs` | Where folds can start, by indentation |
 | `fold_set.rs` | Folds as sets of ranges: the app's `foldRanges` normalized and carried through edits, the folded set after an edit, levels, nesting, the outermost folds |
 | `search.rs` | Find and replace on `regex`: matches, replacements with groups, the next and previous match |
@@ -82,7 +82,11 @@ the editor's font as drawn (the app's `fontSize` and `lineHeight` grown by the u
 core grows every text's: `controller::drawn_font`) measured with the platform's text engine, and large files lay out without measuring every row.
 With `softWrap`, a line breaks after whitespace where the row would overflow, else between graphemes, and its
 continuation rows start at its indentation unless that is over half the width. A folded line shows as one row and the
-lines it hides as none. An edit lays out only the lines it touched.
+lines it hides as none. An edit lays out only the lines it touched. A decoration's `fontFamily` / `fontSize` measure
+its text in that font (as drawn, grown by `fontScale`), and a row is as tall as its largest text needs, never shorter
+than `lineHeight`; every place that turns rows into points (carets, selections, presses, the rows made, scrolling,
+`minRows` / `maxRows`, the overview ruler) asks the display map for a row's top and height rather than multiplying
+by the line height. New decorations lay out again only the lines whose fonts changed.
 
 ### Rendering and virtualization
 
@@ -146,8 +150,9 @@ own caret without a key (an input method that types a pair of brackets and puts 
 caret then follows it (`sink_selection`), over text the editor holds the same way. While an input method composes, its text
 is a span of the primary caret's row (the `composition` part, underlined) and the carets hide; the commit arrives as
 typed text. The row keeps its tokens and decorations, and the composed span takes those its commit will fall inside
-(the ones around the caret, not those starting or ending there, as edits map them). Marks drawn over the row after the
-caret (selections, matches, brackets, whitespace, diagnostics, links) move aside by the composed text's width, and the
+(the ones around the caret, not those starting or ending there, as edits map them), a decoration's font included.
+Marks drawn over the row after the caret (selections, matches, brackets, whitespace, diagnostics, links) move aside by
+the composed text's width in that font, and the
 placeholder hides while a composition shows in an empty editor. The sink is emptied when the caret moves (unless a composition is under way) and once it holds 256 bytes.
 A paste reaches the sink as a paste event (`PasteBehavior::Report`) and goes through `Editing::paste`; text copied
 from carets (whole lines) pastes back as whole lines.
@@ -342,7 +347,9 @@ the linter has not answered yet. A diagnostic underlines its text with a 1 point
 Kit draws it: the spans are cut at its bounds and carry the most serious severity over them (`SpanTags`), so the text
 engine draws the line; an empty range marks the character after it (the one before it at a line's end), and on an
 empty line a short line a space wide is drawn under the row (`diagnostic_rects`). A decoration's `class` / `style` style its text (the spans are cut at its
-bounds), its `lineClass` / `lineStyle` the rows of its lines behind the text. A row looks for its decorations by two
+bounds), its `lineClass` / `lineStyle` the rows of its lines behind the text, its `fontFamily` / `fontSize` the font
+the text is measured and drawn in (the innermost decoration's family and size, each on its own; fields rather than
+classes, as the editor's own font is props: the editor must measure it). A row looks for its decorations by two
 binary searches over the marks (sorted by start): those starting from the longest mark's length before the row
 (`decoration_reach`) up to its end, so thousands of short ones (semantic tokens) cost a row only its own.
 

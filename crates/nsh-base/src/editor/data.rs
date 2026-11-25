@@ -243,13 +243,25 @@ impl EditorDiagnosticRelatedInformation {
 pub struct EditorDecoration {
     /// What it styles.
     pub range: EditorRange,
-    /// Tailwind classes of the range's text (`text-*`, `font-*`,
-    /// `underline`, `bg-*`).
+    /// Tailwind classes of the range's text (colors, weights, `italic`,
+    /// `underline`, `bg-*`); its font is `fontFamily` and `fontSize`.
     #[prop(skip_none)]
     pub class: Option<SharedString>,
     /// The inline style of the range's text, over `class`.
     #[prop(skip_none)]
     pub style: Option<Style>,
+    /// The font family of the range's text (a Markdown app's code in a
+    /// monospaced font; default the editor's `fontFamily`). The editor
+    /// measures the text in it, so set the font here rather than with
+    /// `class` or `style`.
+    #[prop(skip_none)]
+    pub font_family: Option<SharedString>,
+    /// The font size of the range's text, in points (a Markdown app's
+    /// headings; default the editor's `fontSize`). A row with larger text
+    /// is taller: the editor's `lineHeight` grown in proportion to the
+    /// largest size on it. A terminal's text keeps its Cells.
+    #[prop(skip_none)]
+    pub font_size: Option<Points>,
     /// Tailwind classes of the rows of the lines it covers (a background).
     #[prop(skip_none)]
     pub line_class: Option<SharedString>,

@@ -89,13 +89,14 @@ impl JsValue for EditorScrollBeyond {
 }
 
 /// The height of the rows of an editor growing with its text: `rows`
-/// rows, at least `min` and at most `max` of them. `None` when neither is
-/// set (the app sizes the editor).
+/// rows, at least `min` and at most `max` of them, the first `n` of them
+/// `top(n)` tall (rows past the last a line height each). `None` when
+/// neither is set (the app sizes the editor).
 pub(crate) fn grow_height(
     rows: usize,
-    line_height: Points,
     min: Option<u32>,
     max: Option<u32>,
+    top: impl Fn(usize) -> Points,
 ) -> Option<Points> {
     if min.is_none() && max.is_none() {
         return None;
@@ -103,7 +104,7 @@ pub(crate) fn grow_height(
     let min = min.unwrap_or(1).max(1);
     let max = max.unwrap_or(u32::MAX).max(min);
     let rows = u32::try_from(rows).unwrap_or(u32::MAX).clamp(min, max);
-    Some(line_height * rows as f32)
+    Some(top(rows as usize))
 }
 
 /// The room kept between the caret's row and the viewport's top and bottom
@@ -140,14 +141,17 @@ mod tests {
 
     #[test]
     fn an_editor_grows_between_its_rows_bounds() {
-        let lh = px(20.0);
-        assert_eq!(grow_height(5, lh, None, None), None);
-        assert_eq!(grow_height(1, lh, Some(3), None), Some(px(60.0)));
-        assert_eq!(grow_height(5, lh, Some(3), None), Some(px(100.0)));
-        assert_eq!(grow_height(9, lh, Some(2), Some(6)), Some(px(120.0)));
+        let top = |rows: usize| px(20.0) * rows as f32;
+        assert_eq!(grow_height(5, None, None, top), None);
+        assert_eq!(grow_height(1, Some(3), None, top), Some(px(60.0)));
+        assert_eq!(grow_height(5, Some(3), None, top), Some(px(100.0)));
+        assert_eq!(grow_height(9, Some(2), Some(6), top), Some(px(120.0)));
         // A max under the min is the min; zero rows are one.
-        assert_eq!(grow_height(9, lh, Some(4), Some(2)), Some(px(80.0)));
-        assert_eq!(grow_height(0, lh, None, Some(4)), Some(px(20.0)));
+        assert_eq!(grow_height(9, Some(4), Some(2), top), Some(px(80.0)));
+        assert_eq!(grow_height(0, None, Some(4), top), Some(px(20.0)));
+        // Taller rows: the rows' own tops.
+        let tall = |rows: usize| px(20.0) * rows as f32 + if rows > 0 { px(12.0) } else { px(0.0) };
+        assert_eq!(grow_height(2, Some(1), Some(4), tall), Some(px(52.0)));
     }
 
     #[test]
@@ -166,20 +170,21 @@ mod tests {
 /// The least height of a mark on the overview ruler, as Monaco's.
 const RULER_MARK_MIN_HEIGHT: Points = Points(6.0);
 
-/// Where a mark covering display rows `rows` is down an overview ruler
-/// `track` tall: its top and height, the rows' place in the rows' box
-/// (`content` tall, or the ruler's height when shorter) scaled to the
-/// ruler, at least [`RULER_MARK_MIN_HEIGHT`] tall and kept within it.
+/// Where a mark covering rows `top` down and `height` tall in the rows'
+/// box is down an overview ruler `track` tall: its top and height, the
+/// rows' place in the rows' box (`content` tall, or the ruler's height when
+/// shorter) scaled to the ruler, at least [`RULER_MARK_MIN_HEIGHT`] tall
+/// and kept within it.
 pub(crate) fn ruler_place(
-    rows: std::ops::Range<usize>,
-    line_height: Points,
+    top: Points,
+    height: Points,
     content: Points,
     track: Points,
 ) -> (Points, Points) {
     let content = content.max(track).max(px(1.0));
     let scale = track / content;
-    let height = (line_height * rows.len() as f32 * scale).max(RULER_MARK_MIN_HEIGHT);
-    let top = (line_height * rows.start as f32 * scale).min((track - height).max(px(0.0)));
+    let height = (height * scale).max(RULER_MARK_MIN_HEIGHT);
+    let top = (top * scale).min((track - height).max(px(0.0)));
     (top, height)
 }
 
@@ -224,19 +229,21 @@ mod ruler_tests {
 
     #[test]
     fn ruler_marks_scale_to_the_ruler_in_their_lanes() {
-        let lh = px(20.0);
         // 100 rows (2000 points) on a 200 point ruler: a tenth.
         assert_eq!(
-            ruler_place(50..60, lh, px(2000.0), px(200.0)),
+            ruler_place(px(1000.0), px(200.0), px(2000.0), px(200.0)),
             (px(100.0), px(20.0))
         );
         // A row is at least six points tall, kept within the ruler.
         assert_eq!(
-            ruler_place(99..100, lh, px(2000.0), px(200.0)),
+            ruler_place(px(1980.0), px(20.0), px(2000.0), px(200.0)),
             (px(194.0), px(6.0))
         );
         // A short text keeps its rows' places.
-        assert_eq!(ruler_place(2..3, lh, px(100.0), px(200.0)).0, px(40.0));
+        assert_eq!(
+            ruler_place(px(40.0), px(20.0), px(100.0), px(200.0)).0,
+            px(40.0)
+        );
         assert_eq!(ruler_lane(Lane::Right), (2.0 / 3.0, 1.0 / 3.0));
         assert_eq!(ruler_lane(Lane::Full), (0.0, 1.0));
     }

@@ -329,10 +329,11 @@ pub(crate) fn link_marks(ed: Ed) -> impl IntoElement {
         // Under the glyphs rather than at the row's bottom, where the
         // diagnostics' marks go: the font's descent below the baseline of a
         // row's text, centered in its row.
-        let under = st.line_height() / 2.0 + st.font.size * 0.45;
+        let size = st.font.size * 0.45;
         st.range_rects(link, rows, false)
             .into_iter()
             .map(|b| {
+                let under = b.size.height / 2.0 + size;
                 let bar = Bounds::new(
                     Point::new(
                         b.origin.x,
