@@ -77,6 +77,8 @@ mod removed_focus;
 #[cfg(target_os = "macos")]
 mod scaled_input;
 #[cfg(target_os = "macos")]
+mod scroll_indicator_layout;
+#[cfg(target_os = "macos")]
 mod selection_autoscroll;
 #[cfg(all(target_os = "macos", feature = "shader"))]
 mod shader_content;
@@ -192,6 +194,8 @@ fn main() {
                 input_wheel_chain::run();
             } else if std::env::var_os("NSH_SELECTION_AUTOSCROLL_CHECK_ONLY").is_some() {
                 selection_autoscroll::run();
+            } else if std::env::var_os("NSH_SCROLL_INDICATOR_CHECK_ONLY").is_some() {
+                scroll_indicator_layout::run();
             } else if std::env::var_os("NSH_EMBEDDED_SCROLL_CHECK_ONLY").is_some() {
                 embedded_scroll::run();
             } else if std::env::var_os("NSH_VIEW_SCALE_CHECK_ONLY").is_some() {
@@ -245,6 +249,7 @@ fn main() {
                 scaled_input::run();
                 zoom::run();
                 deleted_scroll::run();
+                scroll_indicator_layout::run();
                 download_redirect::run();
                 mount::run();
                 // Last: it makes the process an accessory app.
