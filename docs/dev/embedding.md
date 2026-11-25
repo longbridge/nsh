@@ -434,13 +434,12 @@ NSH draws (`src/layers.rs`).
   `.off`, `.default` / `.maxSize(megabytes:)` / `.off`) in Swift over `nsh_app_set_cache` (a C struct with a leading
   `size`, read up to it, so it can grow), `NshView.setCacheOptions(NshCacheOptions)` (immutable, built) in Java; all
   from the next load. A new kind of cache is one more `CachePolicy` field, never another option per platform.
-- **Development.** With feature `dev-client`, `view.update(cx, |view, cx| view.connect_dev_server(url, cx))` loads the app
+- **Development.** With feature `dev`, `view.update(cx, |view, cx| view.connect_dev_server(url, cx))` loads the app
   from a `nsh dev` server and reloads it on every change, as `connectDevServer` on iOS and Android: the server's
   assets, logs forwarded to the developer's terminal, the status line and the error overlay over the view, the reload
   key. The embedding app's `on_error` keeps hearing the app's errors next to the overlay; connecting again replaces
-  the session. `dev-client` keeps the optional parts the app's build chose ([features.md](features.md)), so an app
-  importing a part its release leaves out fails here as it would there; `dev` also turns every part on, for
-  development hosts that run any app. `crates/gpui/nsh-platform-gpui/examples/embed.rs` takes a dev server's URL.
+  the session. `dev` keeps the optional parts the app's build chose ([features.md](features.md)), so an app
+  importing a part its release leaves out fails here as it would there. `crates/gpui/nsh-platform-gpui/examples/embed.rs` takes a dev server's URL.
 - **Errors.** `AppView::on_app_error` hears every error of the app (also logged) as an `AppError` (`nsh_engine`,
   re-exported): its `kind` (`Load`: the bundle did not start; `Uncaught`: an exception escaped a callback, the app goes
   on; `Stopped`: the VM was stopped, reported once; `HotUpdate`; `Asset`), `is_fatal()` (`Load` or `Stopped`: no JS

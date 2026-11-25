@@ -26,14 +26,14 @@
 #![cfg(any(target_os = "linux", target_os = "macos", windows))]
 
 mod access;
-#[cfg(feature = "dev-client")]
+#[cfg(feature = "dev")]
 mod agent;
 mod animation;
 mod app;
 mod canvas;
 mod chrome;
 mod decor;
-#[cfg(feature = "dev-client")]
+#[cfg(feature = "dev")]
 pub mod dev;
 mod events;
 mod file_drop;
@@ -53,7 +53,7 @@ mod selectable_view;
 mod shader;
 mod stats;
 mod surface;
-#[cfg(feature = "dev-client")]
+#[cfg(feature = "dev")]
 mod synth;
 mod system;
 mod text;
@@ -82,7 +82,7 @@ pub use nsh_engine::{
 #[cfg(feature = "js")]
 pub use nsh_engine::{LoadedPackage, accept_package, load_package, package, verify_package};
 
-#[cfg(feature = "dev-client")]
+#[cfg(feature = "dev")]
 pub use crate::app::set_root;
 pub use crate::{
     app::{

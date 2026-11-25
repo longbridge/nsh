@@ -7,13 +7,12 @@
 //! (cd crates/gpui && cargo run -p nsh-platform-gpui --example embed -- ../../target/embedded/bundle.nshc)
 //! ```
 //!
-//! With feature `dev-client` (or `dev`, which also turns every optional part
-//! on) it also takes a dev server's URL and reloads the app as its sources
-//! change (`AppView::connect_dev_server`):
+//! With feature `dev` it also takes a dev server's URL and reloads the app
+//! as its sources change (`AppView::connect_dev_server`):
 //!
 //! ```sh
 //! cargo run -p nsh-cli -- dev examples/embedded
-//! (cd crates/gpui && cargo run -p nsh-platform-gpui --features dev-client --example embed -- ws://127.0.0.1:8790/ws)
+//! (cd crates/gpui && cargo run -p nsh-platform-gpui --features dev --example embed -- ws://127.0.0.1:8790/ws)
 //! ```
 //!
 //! The badge is laid out by nsh (sized to its text with
@@ -151,7 +150,7 @@ fn main() {
         .nth(1)
         .unwrap_or_else(|| "target/embedded/bundle.nshc".to_owned());
     let source = match path {
-        #[cfg(feature = "dev-client")]
+        #[cfg(feature = "dev")]
         url if url.starts_with("ws://") || url.starts_with("wss://") => AppSource::DevServer(url),
         // SAFETY: the bundle is the one the developer built and named.
         path => AppSource::Bundle(
@@ -205,7 +204,7 @@ fn main() {
                 view.on_error(|message| eprintln!("embedded app: {message}"));
                 match source {
                     AppSource::Bundle(bundle) => view.load(App::Js(bundle)),
-                    #[cfg(feature = "dev-client")]
+                    #[cfg(feature = "dev")]
                     AppSource::DevServer(url) => view.connect_dev_server(url, cx),
                     AppSource::Rust(root) => view.load(App::Rust(root)),
                 }

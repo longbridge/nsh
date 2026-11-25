@@ -18,10 +18,9 @@ default = ["js", "webview", "shader", "editor", "emoji-picker", "highlight", "ma
 js = ["nsh-engine/js-core"]
 # Development support: dev server client, log forwarding, error overlay, test
 # agent. It leaves the optional parts as the build has them, so an embedding
-# app's development build runs its apps with the parts of its release build.
-dev-client = ["js", "dep:nsh-dev", "dep:nsh-testing"]
-# A development host: `dev-client` and every optional part, so it runs any app.
-dev = ["dev-client", "shader", "editor", "emoji-picker", "highlight", "math", "plot", "rich-editor", "term", "zlib", "crypto", "websocket", "updater", "svg", "net"]
+# app's development build runs its apps with the parts of its release build. A
+# development host that runs any app turns the parts on itself.
+dev = ["js", "dep:nsh-dev", "dep:nsh-testing"]
 # Shaders (`Shader`, `ShaderEffect`, `ShaderTransition`, the shader transitions
 # of pages and dialogs), on naga and wgpu. Without it they draw nothing.
 shader = ["nsh-engine/shader"]

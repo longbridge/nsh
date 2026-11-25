@@ -120,7 +120,7 @@ enum Drag {
 }
 
 /// The text input `view` holds now (`None`: it is no input).
-#[cfg(feature = "dev-client")]
+#[cfg(feature = "dev")]
 pub(crate) fn current_text(view: &crate::view::NshView) -> Option<String> {
     let input = view.state().input.clone()?;
     let text = input.model.borrow().text().to_owned();
@@ -1895,7 +1895,7 @@ pub(crate) fn set_selection(view: &NshView, start: u32, end: u32) {
 
 /// Characters typed into the focused field (the test agent's), as the
 /// input handler's `replace_text_in_range` brings them.
-#[cfg(any(feature = "dev-client", all(test, feature = "shot")))]
+#[cfg(any(feature = "dev", all(test, feature = "shot")))]
 pub(crate) fn char_input(surface: &Rc<Surface>, text: &str) {
     ime::replace_text_in_range(surface, None, text);
 }

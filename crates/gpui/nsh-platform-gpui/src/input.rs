@@ -4563,7 +4563,7 @@ mod tests {
     /// `nsh test --target gpui`'s key step reaches the raw path: the
     /// explicit keystroke is the source, so bindings and capture decide it
     /// as they do a window's own keys.
-    #[cfg(feature = "dev-client")]
+    #[cfg(feature = "dev")]
     #[test]
     fn a_test_steps_key_goes_through_the_raw_router() {
         use std::sync::Arc;

@@ -149,10 +149,10 @@ jobs:
         run: cargo clippy -p nsh-platform-gpui --no-default-features --features js -- -D warnings
 
       # An embedding app's development build: the dev server client without
-      # the optional parts `dev` turns on.
-      - name: Check dev-client without optional features
+      # the optional parts.
+      - name: Check dev without optional features
         working-directory: crates/gpui
-        run: cargo clippy -p nsh-platform-gpui --no-default-features --features js,dev-client -- -D warnings
+        run: cargo clippy -p nsh-platform-gpui --no-default-features --features js,dev -- -D warnings
 
       # Tests need no display: they open no window.
       - name: Test

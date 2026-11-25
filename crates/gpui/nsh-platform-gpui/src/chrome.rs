@@ -64,12 +64,12 @@ use gpui::{
 };
 // Text fields' and selectable text's context menus (`text_input.rs`,
 // `text.rs`) show their items with these.
-#[cfg(feature = "dev-client")]
+#[cfg(feature = "dev")]
 pub(crate) use menus::choose_path as choose_menu_path;
 pub(crate) use menus::{LocalItem, popup_actions};
 
 /// Closes the open menu with nothing chosen (`nsh test --target gpui`).
-#[cfg(feature = "dev-client")]
+#[cfg(feature = "dev")]
 pub(crate) fn close_menu(surface: &Surface) -> Result<(), String> {
     if surface.chrome.open.borrow().is_none() {
         return Err("no context menu is open".into());

@@ -100,7 +100,7 @@ pub(crate) fn key_stroke(
         return false;
     };
     // The dev host's Ctrl+R / Cmd+R reloads, whatever the app binds.
-    if cfg!(feature = "dev-client") && keystroke.reloads(OS) {
+    if cfg!(feature = "dev") && keystroke.reloads(OS) {
         return false;
     }
     // Only the bindings of the window the key is in (and JS's) take it.

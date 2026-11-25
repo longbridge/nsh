@@ -405,7 +405,7 @@ pub(crate) fn escape(
 /// Runs `f` in window `id` of the app's own, as its input runs: on its GPUI
 /// window, with its root the input root, its view focused first when
 /// `focus` (a press focuses it). `None` while it is not open.
-#[cfg(feature = "dev-client")]
+#[cfg(feature = "dev")]
 pub(crate) fn act_in<R>(
     surface: &Rc<Surface>,
     id: NodeId,
@@ -431,7 +431,7 @@ pub(crate) fn act_in<R>(
 }
 
 /// The window of the app's own with the keyboard focus, if one has it.
-#[cfg(feature = "dev-client")]
+#[cfg(feature = "dev")]
 pub(crate) fn focused(surface: &Surface, cx: &App) -> Option<NodeId> {
     let active = cx.active_window().or_else(|| background_key(cx))?;
     surface
@@ -444,7 +444,7 @@ pub(crate) fn focused(surface: &Surface, cx: &App) -> Option<NodeId> {
 
 /// Window `id`'s state as it would be reported now ([`ROOT_ID`]: the main
 /// window's); `None` while it is not open.
-#[cfg(feature = "dev-client")]
+#[cfg(feature = "dev")]
 pub(crate) fn state_now(surface: &Surface, id: NodeId, cx: &mut App) -> Option<WindowState> {
     let visible = match id {
         // The main window's own (`native::visible`).
@@ -465,7 +465,7 @@ pub(crate) fn state_now(surface: &Surface, id: NodeId, cx: &mut App) -> Option<W
 
 /// A press of window `id`'s close button ([`ROOT_ID`]: the main window's),
 /// through the path the button's press takes.
-#[cfg(feature = "dev-client")]
+#[cfg(feature = "dev")]
 pub(crate) fn press_close_button(surface: &Rc<Surface>, id: NodeId) -> Result<(), String> {
     match id {
         ROOT_ID => crate::chrome::press_close(surface, CloseReason::CloseButton),
@@ -484,13 +484,13 @@ pub(crate) fn press_close_button(surface: &Rc<Surface>, id: NodeId) -> Result<()
 }
 
 /// The GPUI window of window `id` of the app's own, once open.
-#[cfg(feature = "dev-client")]
+#[cfg(feature = "dev")]
 pub(crate) fn handle(surface: &Surface, id: NodeId) -> Option<AnyWindowHandle> {
     get(surface, id)?.handle.get()
 }
 
 /// Window `id` of the app's own is open (the agent may act in it).
-#[cfg(feature = "dev-client")]
+#[cfg(feature = "dev")]
 pub(crate) fn is_open(surface: &Surface, id: NodeId) -> bool {
     get(surface, id).is_some_and(|w| w.handle.get().is_some())
 }
@@ -1150,7 +1150,7 @@ fn main_opened(surface: &Surface, window: &mut Window) {
 
 /// A development host shows an error: the main window shows with it while
 /// it is hidden, so the error is seen (`crate::dev`).
-#[cfg(feature = "dev-client")]
+#[cfg(feature = "dev")]
 pub(crate) fn show_main_if_hidden(surface: &Rc<Surface>) {
     let s = Rc::downgrade(surface);
     with_main(surface, move |window, cx| {
@@ -1260,7 +1260,7 @@ fn follow_simulated_scheme(window: &Window) {
 
 /// A test changed the system's scheme: every window of the app's own draws
 /// again in it (its frame too).
-#[cfg(feature = "dev-client")]
+#[cfg(feature = "dev")]
 pub(crate) fn scheme_simulated(surface: &Surface) {
     invalidate_all(surface);
     for w in surface.windows.borrow().iter() {
