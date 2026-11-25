@@ -423,6 +423,9 @@ pub(crate) struct Ivars {
     content: RefCell<Option<(Retained<CALayer>, Retained<Drawer>)>>,
     /// A canvas's small animated suffix, above its static content.
     overlay: RefCell<Option<(Retained<CALayer>, Retained<Drawer>)>>,
+    /// A panned canvas's content layer draws past its bounds: this layer
+    /// holds it and clips it to them ([`NshView::clip_content`]).
+    pan_clip: RefCell<Option<Retained<CALayer>>>,
     /// Its content changed while it could not be seen
     /// ([`crate::mount::Mounter::draw_when_shown`]).
     stale: Cell<bool>,
@@ -1827,6 +1830,7 @@ impl NshView {
             tracking: Cell::new(false),
             content: RefCell::new(None),
             overlay: RefCell::new(None),
+            pan_clip: RefCell::new(None),
             stale: Cell::new(false),
             unplaced: Cell::new(false),
             // Not known until a first scan.
@@ -2123,6 +2127,9 @@ impl NshView {
         if let Some((layer, _)) = self.ivars().overlay.borrow_mut().take() {
             layer.removeFromSuperlayer();
         }
+        if let Some(clip) = self.ivars().pan_clip.borrow_mut().take() {
+            clip.removeFromSuperlayer();
+        }
         self.ivars().rastered.set(false);
         self.clear_canvas_painted();
     }
@@ -2236,7 +2243,13 @@ impl NshView {
             self.clear_content_layers();
             return None;
         };
-        if let Some((layer, _)) = &*self.ivars().content.borrow() {
+        let existing = self
+            .ivars()
+            .content
+            .borrow()
+            .as_ref()
+            .map(|(l, _)| l.clone());
+        if let Some(layer) = existing {
             let frame_changed = layer.frame() != bounds;
             if frame_changed {
                 let resized = layer.bounds().size != bounds.size;
@@ -2245,7 +2258,8 @@ impl NshView {
                     layer.setContentsScale(self.content_scale(bounds.size));
                 }
             }
-            return Some((layer.clone(), frame_changed));
+            self.clip_content(&layer);
+            return Some((layer, frame_changed));
         }
         let host = self.ns().layer()?;
         let mtm = MainThreadMarker::from(&*self.0);
@@ -2281,7 +2295,71 @@ impl NshView {
         layer.setFrame(bounds);
         host.addSublayer(&layer);
         *self.ivars().content.borrow_mut() = Some((layer.clone(), drawer));
+        self.clip_content(&layer);
         Some((layer, true))
+    }
+
+    /// Puts a panned canvas's content layer, which draws
+    /// [`crate::canvas::PAN_MARGIN`] past each side of the view, in a layer
+    /// clipping it to the view's bounds (a rectangle: no offscreen pass),
+    /// and any other back in the view's layer.
+    fn clip_content(&self, layer: &CALayer) {
+        let panned = self.state().canvas.as_ref().is_some_and(|c| c.is_panned());
+        let Some(host) = self.ns().layer() else {
+            return;
+        };
+        let mut clip = self.ivars().pan_clip.borrow_mut();
+        if !panned {
+            if let Some(c) = clip.take() {
+                crate::surface::quiet(|| {
+                    host.addSublayer(layer);
+                    c.removeFromSuperlayer();
+                });
+            }
+            return;
+        }
+        let size = self.ns().frame().size;
+        let bounds = CGRect::new(CGPoint::new(0.0, 0.0), size);
+        crate::surface::quiet(|| {
+            let c = clip.get_or_insert_with(|| {
+                let c = CALayer::new();
+                c.setAnchorPoint(CGPoint::new(0.0, 0.0));
+                c.setMasksToBounds(true);
+                // Where the content layer would be.
+                c.setZPosition(crate::decor::BEHIND / 2.0);
+                host.addSublayer(&c);
+                c
+            });
+            if c.frame() != bounds {
+                c.setFrame(bounds);
+            }
+            if !layer.superlayer().is_some_and(|s| std::ptr::eq(&*s, &**c)) {
+                c.addSublayer(layer);
+            }
+        });
+    }
+
+    /// Moves a panned canvas's content layer with its pan
+    /// ([`crate::canvas::CanvasState::pan_shift`]) without drawing it
+    /// again: Core Animation composites the picture it holds where the pan
+    /// puts it.
+    pub(crate) fn shift_canvas(&self) {
+        let panned = self.state().canvas.as_ref().is_some_and(|c| c.is_panned());
+        if !panned {
+            return;
+        }
+        let Some(bounds) = self.desired_content_bounds() else {
+            return;
+        };
+        if let Some((layer, _)) = &*self.ivars().content.borrow() {
+            let frame = layer.frame();
+            if frame != bounds
+                && frame.size.width == bounds.size.width
+                && frame.size.height == bounds.size.height
+            {
+                layer.setFrame(bounds);
+            }
+        }
     }
 
     /// Its content layer got a new size: drawn again when it can be seen.
@@ -2583,12 +2661,19 @@ impl NshView {
             self.clear_content_layers();
             return;
         };
-        let resized = match &*self.ivars().content.borrow() {
-            Some((layer, _)) => {
+        let content = self
+            .ivars()
+            .content
+            .borrow()
+            .as_ref()
+            .map(|(l, _)| l.clone());
+        let resized = match content {
+            Some(layer) => {
                 let changed = layer.frame() != bounds;
                 if changed {
                     layer.setFrame(bounds);
                 }
+                self.clip_content(&layer);
                 changed
             }
             // A canvas whose drawing was omitted while the view had zero size

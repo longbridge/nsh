@@ -731,6 +731,53 @@ fn an_icon_button_short_of_room_cuts_its_label_with_an_ellipsis() {
 }
 
 #[component]
+fn WideIcons() -> impl IntoElement {
+    let icon = |label: &'static str| {
+        view().label(label).w(px(16.0)).on_press(|_: &()| {}).child(
+            canvas(Painter::new().fill_rect(0.0, 0.0, 16.0, 16.0))
+                .w(px(16.0))
+                .h(px(16.0)),
+        )
+    };
+    view()
+        .flex_1()
+        .child(
+            view()
+                .flex_row()
+                .gap(px(16.0))
+                .child(icon("菜单"))
+                .child(icon("设置")),
+        )
+        .child(
+            view()
+                .w(px(80.0))
+                .flex_row()
+                .child(text("标题"))
+                .child(icon("打开最近的会话")),
+        )
+        .child(text("ready"))
+}
+
+#[test]
+fn an_icon_button_lays_out_its_wide_label_whole_or_cuts_it_with_an_ellipsis() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(20, 4)).unwrap();
+    view.load(App::Rust(Root::new::<WideIcons>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let buffer = terminal.backend().buffer();
+    // A wide glyph's trailing cell reads back as a space, so compare without them.
+    let first = row(buffer, 0, 0..20).replace(' ', "");
+    assert!(first.starts_with("菜单"), "{first:?}");
+    assert!(first.contains("设置"), "{first:?}");
+    let second = row(buffer, 1, 0..20).replace(' ', "");
+    assert!(second.starts_with("标题"), "{second:?}");
+    assert!(
+        second.contains('…'),
+        "a cut wide label keeps its ellipsis: {second:?}"
+    );
+}
+
+#[component]
 fn Disclosures() -> impl IntoElement {
     let trigger = |label: &'static str, state: AccessibilityState| {
         view()

@@ -51,6 +51,8 @@ mod session;
 mod shader;
 // Without GStreamer (the feature `sound`), a stand-in whose loads fail
 // as not supported.
+#[cfg(feature = "sound")]
+mod gst;
 #[cfg_attr(not(feature = "sound"), path = "sound_off.rs")]
 mod sound;
 mod surface;
