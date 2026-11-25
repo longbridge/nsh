@@ -4256,7 +4256,7 @@ impl<M: TextEngine> Core<M> {
     /// ([`Self::is_control`]), a text, a scroll view, and whether a
     /// terminal leaves it out: what it cannot show at an icon's size is
     /// left out, never emulated (icon-sized videos, web views, shaders and
-    /// canvases); larger, they keep their box, as images do at every size.
+    /// canvases) and glyph-sized images; larger, they keep their box.
     fn grid_role(&self, key: Key) -> terminal_layout::Role {
         let kind = self.nodes[key as usize].kind;
         let left_out = match kind {
