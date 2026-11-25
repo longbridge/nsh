@@ -16,6 +16,9 @@ mod access;
 mod app_directory;
 mod cache;
 mod error;
+// Where shader frames go: read back, or on surfaces the backend shows.
+#[cfg(feature = "shader")]
+mod frames;
 mod host_channel;
 mod local_storage;
 #[cfg(not(target_arch = "wasm32"))]
