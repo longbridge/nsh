@@ -272,13 +272,8 @@ fn the_scroll_bars_keep_within_the_scrollbar_inset() {
     fn InsetEditor() -> impl IntoElement {
         let inset = signal(INSET);
         let gutter = signal(true);
-        let button = |id: &str, f: Box<dyn Fn()>| {
-            view()
-                .test_id(id)
-                .w(px(20.0))
-                .h(px(20.0))
-                .on_press(move || f())
-        };
+        let button =
+            |id: &str, f: Box<dyn Fn()>| view().test_id(id).w(px(20.0)).h(px(20.0)).on_press(f);
         view()
             .child(
                 view().w(px(600.0)).h(px(200.0)).child(
