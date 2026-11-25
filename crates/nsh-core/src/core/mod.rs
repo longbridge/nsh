@@ -4269,7 +4269,7 @@ impl<M: TextEngine> Core<M> {
             _ => terminal_layout::LeftOut::No,
         };
         let control = self.is_control(key);
-        // A control's label in columns, one per character: what it shows
+        // A control's label in columns (a wide character takes two): what it shows
         // when all its content is left out (an icon button).
         let label = control
             .then(|| self.nodes[key as usize].props.as_ref())
@@ -4281,7 +4281,7 @@ impl<M: TextEngine> Core<M> {
                     return 1;
                 }
                 p.accessibility.label.as_deref().map_or(0, |l| {
-                    l.trim().chars().count().min(u16::MAX as usize) as u16
+                    terminal_layout::columns(l.trim()).min(u16::MAX as usize) as u16
                 })
             });
         let node = &self.nodes[key as usize];
