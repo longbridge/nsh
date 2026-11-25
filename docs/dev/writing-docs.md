@@ -43,8 +43,42 @@ English page. The content must match; the wording does not have to. Avoid transl
 such as long "的" chains, "被" passives and literal English clause order. Keep API names, code and
 units as they are.
 
-## Before you submit
+## Terms
 
-- Read the first paragraph on its own. It must tell a newcomer what the page is about.
-- Check every number and claim against the code or a benchmark.
-- AI may draft a page, but a person must edit it before it ships.
+Define a term the first time a page uses it, in one plain sentence or a link. Examples:
+capability, host grant, reactive graph, `MountBatch`, hardening. Use one name per concept across
+pages; don't switch between synonyms.
+
+## Example rewrite
+
+Before (flagged on Hacker News):
+
+> An app written in Rust is native code compiled into the app that ships it, as the rest of that
+> app is, and runs with its trust; its calls into NSH's services go through the same native checks
+> as TSX's, under what a host grants.
+
+After:
+
+> Rust code in your app is compiled into the app binary. It has the same trust as the rest of
+> your app. When it calls an NSH service such as `fetch`, NSH applies the same checks as it does
+> for TSX code.
+
+## Self-check (run it before you commit)
+
+Docs in this repo are written by AI and shipped without a separate human edit, so the writer
+must check its own output. Go through every item; fix the page until all pass.
+
+1. The first paragraph alone tells a newcomer what the page is about.
+2. No sentence is longer than about 30 words, and none joins clauses with `;`.
+3. Every pronoun ("it", "this", "that") points at a noun in the same or previous sentence.
+4. None of these appear: "It's important to note", "seamlessly", "robust", "powerful",
+   "leverage", "in order to", "simply", "effectively", "comprehensive", "first-class",
+   "under the hood", "as X is", "the rest of that".
+   Quick check: `grep -nEi "seamless|robust|leverag|in order to|first-class|important to note" <file>`.
+5. Each idea appears once. Principles already stated on Goals are linked, not restated.
+6. Every new term is defined at first use (see Terms).
+7. Every number, default, limit and API name matches the code or a benchmark.
+8. Every code example compiles or runs as shown, with its imports.
+9. The zh-CN page reads as natural Chinese and carries the same facts as the English page.
+10. Long reference material (all options, every edge case) sits below the common case, or on its
+    own page.
