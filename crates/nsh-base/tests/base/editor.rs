@@ -751,9 +751,11 @@ fn the_editor_reports_where_its_text_is_scrolled() {
         r[0] == 40.0 && r[1] == 200.0
     });
     assert_eq!(&moved[2..], &first[2..], "the sizes stay");
-    // Nothing moved: nothing more is reported.
+    // Nothing moved (a search that matches nothing; the text read back
+    // would take the screen's height and push the buttons off it):
+    // nothing more is reported.
     let before = scrolls(&app);
-    app.press("id:read-api").unwrap();
+    app.press("id:search").unwrap();
     app.wait(Duration::from_millis(100)).unwrap();
     assert_eq!(scrolls(&app), before);
     // Wrapped, the text no longer scrolls sideways: the content is as wide
