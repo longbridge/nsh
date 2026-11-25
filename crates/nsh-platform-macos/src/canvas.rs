@@ -88,6 +88,9 @@ pub(crate) struct CanvasState {
     /// The images the drawing names, by URI: `None` while loading (or
     /// when they failed to load).
     images: FxHashMap<Arc<str>, Option<CanvasBitmap>>,
+    /// The parts of `images` that `drawImage`s with a source rectangle
+    /// draw ([`ImageParts`]).
+    parts: RefCell<ImageParts>,
     /// The lines of its texts ([`lines`]).
     text: RefCell<lines::TextCache>,
     /// Finds what a change of slots redraws ([`set_args`]).
@@ -222,9 +225,16 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, drawing: Arc<Drawing>) 
         let Some(c) = state.canvas.as_mut() else {
             return;
         };
-        // Images no longer drawn are let go.
+        // Images no longer drawn are let go, with their parts.
         c.images
             .retain(|uri, _| drawing.images().any(|i| &i.uri == uri));
+        let images = &c.images;
+        c.parts.get_mut().retain(|whole| {
+            images
+                .values()
+                .flatten()
+                .any(|b| std::ptr::eq::<CGImage>(&*b.image, whole))
+        });
         for image in drawing.images() {
             if !c.images.contains_key(&image.uri) {
                 c.images.insert(image.uri.clone(), None);
@@ -1005,6 +1015,7 @@ struct Replay<'a> {
     c: &'a CGContext,
     args: &'a [Option<AnimationValue>],
     images: &'a FxHashMap<Arc<str>, Option<CanvasBitmap>>,
+    parts: &'a RefCell<ImageParts>,
     text: &'a RefCell<lines::TextCache>,
     state: State,
     stack: Vec<State>,
@@ -1027,6 +1038,7 @@ impl<'a> Replay<'a> {
             c,
             args: &canvas.args,
             images: &canvas.images,
+            parts: &canvas.parts,
             text: &canvas.text,
             state: State::default(),
             stack: Vec::new(),
@@ -1610,7 +1622,7 @@ impl<'a> Replay<'a> {
                 CGPoint::new(sx as f64 * scale, sy as f64 * scale),
                 CGSize::new(sw as f64 * scale, sh as f64 * scale),
             );
-            part = CGImage::with_image_in_rect(Some(image), rect);
+            part = self.parts.borrow_mut().get(image, rect);
             if part.is_none() {
                 return;
             }
@@ -1641,6 +1653,58 @@ impl<'a> Replay<'a> {
             Some(drawn),
         );
         CGContext::restore_g_state(c);
+    }
+}
+
+/// The parts of a canvas's images that `drawImage`s with a source
+/// rectangle draw (sprites of a sheet), each made once and drawn again on
+/// every frame. Core Graphics converts an image's pixels to the color
+/// space it draws into on its first draw and keeps the result with the
+/// image: a part made again for each draw converts again each time (a
+/// sprite sheet zoomed in on: hundreds of milliseconds a frame).
+#[derive(Default)]
+struct ImageParts {
+    /// By the whole image (kept alive here, so its address stays its own)
+    /// and the rectangle, in its pixels.
+    parts: FxHashMap<(usize, [u64; 4]), (CFRetained<CGImage>, CFRetained<CGImage>)>,
+}
+
+impl ImageParts {
+    /// At most this many parts are kept: a drawing whose source
+    /// rectangles keep changing (an animation) starts over past it.
+    const MAX: usize = 4096;
+
+    /// The part `rect` of `whole`; `None` when it has none
+    /// (`CGImageCreateWithImageInRect`).
+    fn get(&mut self, whole: &CFRetained<CGImage>, rect: CGRect) -> Option<CFRetained<CGImage>> {
+        let key = (
+            std::ptr::from_ref::<CGImage>(whole) as usize,
+            [
+                rect.origin.x.to_bits(),
+                rect.origin.y.to_bits(),
+                rect.size.width.to_bits(),
+                rect.size.height.to_bits(),
+            ],
+        );
+        if let Some((_, part)) = self.parts.get(&key) {
+            return Some(part.clone());
+        }
+        let part = CGImage::with_image_in_rect(Some(whole), rect)?;
+        if self.parts.len() >= Self::MAX {
+            self.parts.clear();
+        }
+        self.parts.insert(key, (whole.clone(), part.clone()));
+        Some(part)
+    }
+
+    /// Keeps only the parts of the images `keep` says.
+    fn retain(&mut self, mut keep: impl FnMut(&CGImage) -> bool) {
+        self.parts.retain(|_, (whole, _)| keep(whole));
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.parts.len()
     }
 }
 
@@ -2182,6 +2246,64 @@ mod tests {
             assert_eq!(pixel(&bytes, true, w + 0.5, 0.5)[3], 0, "{what}");
             assert_eq!(pixel(&bytes, true, 0.5, h + 0.5)[3], 0, "{what}");
         }
+    }
+
+    #[test]
+    fn a_part_of_an_image_is_made_once_for_every_frame() {
+        // Two sprites of one sheet, the first drawn twice: two parts,
+        // the same ones on the next paint.
+        let c = Num::Const;
+        let part = |x: f32| {
+            Some(Bounds {
+                origin: Point::new(ScaledPixels(x), ScaledPixels(0.0)),
+                size: Size {
+                    width: ScaledPixels(10.0),
+                    height: ScaledPixels(10.0),
+                },
+            })
+        };
+        let draw = |x: f32, at: f32| CanvasOp::DrawImage {
+            image: CanvasImage {
+                uri: "asset:/sheet.png".into(),
+            },
+            source: part(x),
+            dest: [c(at), c(0.0), c(10.0), c(10.0)],
+        };
+        let canvas = CanvasState {
+            drawing: Some(Arc::new(Drawing {
+                ops: vec![draw(0.0, 0.0), draw(10.0, 10.0), draw(0.0, 20.0)],
+                ..Drawing::default()
+            })),
+            images: [(
+                Arc::from("asset:/sheet.png"),
+                Some(CanvasBitmap {
+                    image: opaque_image(20, 10),
+                    scale: 1.0,
+                }),
+            )]
+            .into_iter()
+            .collect(),
+            ..CanvasState::default()
+        };
+        let first = pixels(&canvas);
+        assert_eq!(canvas.parts.borrow().len(), 2);
+        let made: Vec<usize> = canvas
+            .parts
+            .borrow()
+            .parts
+            .values()
+            .map(|(_, p)| std::ptr::from_ref::<CGImage>(p) as usize)
+            .collect();
+        assert_eq!(pixels(&canvas), first);
+        let again: Vec<usize> = canvas
+            .parts
+            .borrow()
+            .parts
+            .values()
+            .map(|(_, p)| std::ptr::from_ref::<CGImage>(p) as usize)
+            .collect();
+        assert_eq!(made, again);
+        assert_eq!(pixel(&first, true, 25.5, 5.5)[3], 255);
     }
 
     #[test]
