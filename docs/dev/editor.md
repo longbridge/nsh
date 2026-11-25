@@ -80,8 +80,11 @@ user-facing page is `website/elements/editor.md`; how each module works inside i
 `DisplayMap` (`display_map.rs`) lays the text out in display rows: tabs advance to the next stop, widths come from
 the editor's font as drawn (the app's `fontSize` and `lineHeight` grown by the user's text size, `fontScale`, as the
 core grows every text's: `controller::drawn_font`) measured with the platform's text engine, and large files lay out without measuring every row.
-With `softWrap`, a line breaks after whitespace where the row would overflow, else between graphemes, and its
-continuation rows start at its indentation unless that is over half the width. A folded line shows as one row and the
+With `softWrap`, a line breaks where the row would overflow at the last line break opportunity of Unicode's line
+breaking algorithm (UAX #14, from `unicode-linebreak`, as the core's text layout): after spaces and hyphens, between
+CJK characters, never before closing punctuation or small kana nor after opening punctuation. A run without one
+breaks between graphemes, never inside one. Its continuation rows start at its indentation unless that is over half
+the width. A folded line shows as one row and the
 lines it hides as none. An edit lays out only the lines it touched.
 
 ### Rendering and virtualization

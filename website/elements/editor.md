@@ -60,7 +60,9 @@ fn code() -> impl IntoElement {
 
 The editor fills the box the app gives it (`flex-1`, a height) and scrolls its text inside: vertically always,
 sideways when lines are longer than the box, or not at all with `softWrap`, where long lines wrap at the editor's
-width.
+width. They wrap where Unicode's line breaking rules allow, as text elsewhere does: after spaces, between Chinese,
+Japanese and Korean characters, and never before closing punctuation such as `，` or `）` or after opening punctuation
+such as `「`.
 
 ## The text
 

@@ -752,9 +752,13 @@ impl Iterator for LineRanges<'_> {
 }
 
 /// Soft-wraps one line (`text`, at byte `start` of the text) at `width`:
-/// after whitespace when the row would overflow, else between graphemes;
-/// whitespace never wraps (it hangs past the edge). Continuation rows start
-/// at the line's indentation unless that is over half the width.
+/// at the last line break opportunity of Unicode's line breaking algorithm
+/// (UAX #14) when the row would overflow, else between graphemes. So rows
+/// break after spaces and between CJK characters, but not before closing
+/// punctuation or after opening punctuation. Whitespace never wraps (it
+/// hangs past the edge), and a row never ends inside a grapheme.
+/// Continuation rows start at the line's indentation unless that is over
+/// half the width.
 fn wrap_line(
     metrics: &Metrics,
     width: Points,
@@ -785,9 +789,19 @@ fn wrap_line(
     let mut row_indent = 0.0;
     let mut available = width;
     let mut x = 0.0;
-    // Where the row may break: after the last whitespace, and the x there.
+    // Where the row may break: the last break opportunity, and the x there.
     let mut break_at: Option<(usize, f32)> = None;
+    // The opportunities, by the offset of the char after them, walked in
+    // step with the graphemes; ones inside a grapheme are skipped.
+    let mut breaks = unicode_linebreak::linebreaks(text)
+        .map(|(offset, _)| offset)
+        .peekable();
     for (at, grapheme) in graphemes(text) {
+        while breaks.next_if(|&offset| offset < at).is_some() {}
+        // The indentation is no place to break: a row of only it is no use.
+        if breaks.next_if_eq(&at).is_some() && at > lead {
+            break_at = Some((at, x));
+        }
         let blank = grapheme.chars().all(char::is_whitespace);
         let advance = metrics.advance(grapheme, x);
         while !blank && at > row_start && x + advance > available {
@@ -803,10 +817,6 @@ fn wrap_line(
             break_at = None;
         }
         x += advance;
-        // The indentation is no place to break: a row of only it is no use.
-        if blank && at + grapheme.len() > lead {
-            break_at = Some((at + grapheme.len(), x));
-        }
     }
     push(row_start..text.len(), row_indent, x);
 }
@@ -1113,6 +1123,67 @@ mod tests {
         assert_eq!(ranges(&map), vec![0..6, 6..9]);
         assert_eq!(map.x_of(&buffer, 3), px(20.0));
         assert_eq!(map.offset_at(&buffer, 0, px(25.0)), 3);
+    }
+
+    #[test]
+    fn mixed_cjk_and_latin_wraps_between_cjk_chars() {
+        // The CJK run fills the row instead of moving down whole after
+        // the space.
+        let buffer = Buffer::new("ab 中文字符");
+        let map = map(&buffer, Some(70.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..9, 9..15]);
+        // Latin text and CJK may break where they meet without a space.
+        let buffer = Buffer::new("Mac上没下");
+        let map = self::map(&buffer, Some(40.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..3, 3..9, 9..12]);
+    }
+
+    #[test]
+    fn closing_punctuation_never_starts_a_row() {
+        // The comma would start the second row: the char before it goes
+        // along.
+        let buffer = Buffer::new("中文，字。");
+        let map = map(&buffer, Some(50.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..3, 3..9, 9..15]);
+    }
+
+    #[test]
+    fn opening_punctuation_never_ends_a_row() {
+        let buffer = Buffer::new("说「你好」吧");
+        let map = map(&buffer, Some(40.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..3, 3..9, 9..15, 15..18]);
+    }
+
+    #[test]
+    fn small_kana_never_start_a_row() {
+        // Small っ and ょ stay with the kana or kanji before them.
+        let buffer = Buffer::new("ちょっと待って");
+        let map = map(&buffer, Some(35.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..9, 9..12, 12..18, 18..21]);
+    }
+
+    #[test]
+    fn a_hyphen_is_a_break_opportunity() {
+        let buffer = Buffer::new("well-known");
+        let map = map(&buffer, Some(70.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..5, 5..10]);
+    }
+
+    #[test]
+    fn a_run_without_opportunities_wraps_between_graphemes() {
+        // Commas never start a row, but a row of only them must break
+        // somewhere.
+        let buffer = Buffer::new("，，，，");
+        let map = map(&buffer, Some(50.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..6, 6..12]);
+    }
+
+    #[test]
+    fn an_emoji_sequence_wraps_whole_among_cjk() {
+        // A family emoji (three emoji joined by ZWJs) is one grapheme.
+        let buffer = Buffer::new("中👨\u{200D}👩\u{200D}👧文");
+        let map = map(&buffer, Some(40.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..3, 3..21, 21..24]);
     }
 
     #[test]
