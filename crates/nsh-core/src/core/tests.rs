@@ -4455,6 +4455,72 @@ fn scrolling_on_hides_no_cells() {
 }
 
 #[test]
+fn a_list_under_display_none_keeps_its_window_and_cells() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 3,
+                before: None,
+            },
+        ],
+    );
+    thousand_rows(&mut c);
+    apply(
+        &mut c,
+        vec![Op::Insert {
+            parent: 3,
+            child: 2,
+            before: None,
+        }],
+    );
+    c.commit();
+    let (mut next_id, mut cells) = (100, Vec::new());
+    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 17);
+    c.commit();
+
+    // A page kept alive under `display: none`: its list has no size, which
+    // is no viewport to empty its window by. Only the page's style goes.
+    apply(
+        &mut c,
+        vec![style_op(3, &[("display", StyleValue::Str("none"))])],
+    );
+    let hidden = c.commit().unwrap();
+    eprintln!("HIDE items {}", hidden.items.len());
+    for &cell in &cells {
+        assert_eq!(hidden_in(&hidden, cell), (None, None), "cell {cell}");
+    }
+    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 0);
+
+    // Shown again, its cells still show their rows where they were.
+    apply(
+        &mut c,
+        vec![style_op(3, &[("display", StyleValue::Str("flex"))])],
+    );
+    let shown = c.commit().unwrap();
+    eprintln!("SHOW items {}", shown.items.len());
+    let mut rows: Vec<f32> = cells
+        .iter()
+        .map(|&cell| {
+            assert_eq!(hidden_in(&shown, cell), (None, None), "cell {cell}");
+            frame_of(&shown, cell).expect("placed").origin.y.0
+        })
+        .collect();
+    rows.sort_by(f32::total_cmp);
+    assert_eq!(
+        rows,
+        (0..17).map(|row| 50.0 * row as f32).collect::<Vec<_>>()
+    );
+    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 0);
+}
+
+#[test]
 fn list_cells_unbound_before_they_are_placed_are_hidden() {
     let mut c = core();
     thousand_rows(&mut c);
