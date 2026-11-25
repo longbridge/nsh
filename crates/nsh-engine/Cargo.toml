@@ -34,7 +34,7 @@ shader = ["dep:wgpu", "dep:pollster", "nsh-core/shader", "dep:objc2", "dep:objc2
 
 # The native WebSocket client (tokio-tungstenite, rustls). Without it
 # `connect` of `websocket` rejects with ERR_FEATURE_UNAVAILABLE_ON_PLATFORM.
-websocket = ["nsh-core/websocket"]
+websocket = ["nsh-core/websocket", "nsh-js?/websocket"]
 # App self-updates (`nsh/updater`). Without it a check finds no update.
 updater = ["nsh-core/updater"]
 
