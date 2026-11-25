@@ -234,6 +234,9 @@ pub(crate) struct RareAttrs {
     pub(crate) selectable_view: bool,
     /// The text continues the one before it ([`Element::continues_text`]).
     pub(crate) continues_text: bool,
+    /// Its children take its position among its siblings
+    /// ([`Element::pass_position`]).
+    pub(crate) pass_position: bool,
     /// The states it shows as its control's part
     /// ([`Interactive::project_checked`]).
     pub(crate) projected_states: u16,
@@ -269,6 +272,7 @@ impl RareAttrs {
             && self.bound.is_empty()
             && !self.selectable_view
             && !self.continues_text
+            && !self.pass_position
             && self.projected_states == 0
             && self.projected_data.is_empty()
             && self.projected_active.is_none()
@@ -440,6 +444,9 @@ impl Attrs {
             }
             if sr.continues_text != or.continues_text {
                 out.push(Prop::ContinuesText(sr.continues_text));
+            }
+            if sr.pass_position != or.pass_position {
+                out.push(Prop::PassPosition(sr.pass_position));
             }
             if sr.projected_states != or.projected_states {
                 out.push(Prop::ProjectedStates(sr.projected_states));
@@ -1148,6 +1155,21 @@ pub trait Element: IntoElement + Sized {
         self.node().bind_attr(continues, |a, continues| {
             if continues || a.rare.is_some() {
                 a.rare_mut().continues_text = continues;
+            }
+        });
+        self
+    }
+
+    /// Hands the view's position among its siblings to its children: their
+    /// `first:`, `last:`, `odd:`, `even:` and `only:` classes read the
+    /// view's place, not theirs among its children. For a view that only
+    /// wraps its content, as the root an [`each`](super::each) row needs
+    /// around a [`dynamic`](super::dynamic): the content then styles as
+    /// though it were the row. Off by default.
+    fn pass_position(mut self, pass: impl IntoReactive<bool>) -> Self {
+        self.node().bind_attr(pass, |a, pass| {
+            if pass || a.rare.is_some() {
+                a.rare_mut().pass_position = pass;
             }
         });
         self

@@ -10149,6 +10149,239 @@ fn sibling_positions() {
     );
 }
 
+/// A wrapper that passes its position on (`Prop::PassPosition`, an
+/// `each` row's root around a `dynamic`): its child's `first:` and
+/// `last:` read the wrapper's place among the rows, not the child's
+/// place as its wrapper's only child, and follow the rows as they come
+/// and go.
+#[test]
+fn a_wrapper_passes_its_position_to_its_children() {
+    let mut c = core();
+    view_with_classes(&mut c, 2, "flex-col");
+    // Row `n`: wrapper `n`, its content `n + 1`.
+    let add_row = |c: &mut Core<FakeEngine>, row: NodeId, before: Option<NodeId>| {
+        apply(
+            c,
+            vec![
+                Op::Create {
+                    id: row,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: row,
+                    prop: Prop::PassPosition(true),
+                },
+                Op::Create {
+                    id: row + 1,
+                    tag: Tag::View,
+                },
+                class_op(
+                    row + 1,
+                    "h-2 bg-red-500 first:bg-green-500 last:bg-blue-500",
+                ),
+                Op::Insert {
+                    parent: row,
+                    child: row + 1,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: row,
+                    before,
+                },
+            ],
+        );
+    };
+    for row in [10, 20, 30] {
+        add_row(&mut c, row, None);
+    }
+    let batch = c.commit().unwrap();
+    let green = Color(0x00c9_50ff);
+    let red = Color(0xfb2c_36ff);
+    let blue = Color(0x2b7f_ffff);
+    let bg = |batch: &MountBatch, id| view_style_of(batch, id).unwrap().background_color;
+    assert_eq!(bg(&batch, 11), green);
+    assert_eq!(bg(&batch, 21), red);
+    assert_eq!(bg(&batch, 31), blue);
+    // A row added first: the old first row is in the middle now.
+    add_row(&mut c, 40, Some(10));
+    let batch = c.commit().unwrap();
+    assert_eq!(bg(&batch, 41), green);
+    assert_eq!(bg(&batch, 11), red);
+    // Removing the last row makes the one before it last.
+    c.apply(Op::Remove {
+        parent: 2,
+        child: 30,
+    })
+    .unwrap();
+    let batch = c.commit().unwrap();
+    assert_eq!(bg(&batch, 21), blue);
+    // Without the prop, the middle row's content is its wrapper's only
+    // child again: first and last, and `last:` comes after `first:`.
+    c.apply(Op::SetProp {
+        id: 10,
+        prop: Prop::PassPosition(false),
+    })
+    .unwrap();
+    let batch = c.commit().unwrap();
+    assert_eq!(bg(&batch, 11), blue);
+}
+
+/// Content given its positional classes after its rows mounted, when no
+/// child read a position yet: it reads its wrapper's place, and follows
+/// it when a view joins the rows that reads no position itself.
+#[test]
+fn content_classed_after_mounting_follows_its_wrapper() {
+    let mut c = core();
+    view_with_classes(&mut c, 2, "flex-col");
+    for row in [10, 20] {
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: row,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: row,
+                    prop: Prop::PassPosition(true),
+                },
+                Op::Create {
+                    id: row + 1,
+                    tag: Tag::View,
+                },
+                class_op(row + 1, "h-2"),
+                Op::Insert {
+                    parent: row,
+                    child: row + 1,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: row,
+                    before: None,
+                },
+            ],
+        );
+    }
+    c.commit().unwrap();
+    for row in [10, 20] {
+        c.apply(class_op(
+            row + 1,
+            "h-2 bg-red-500 first:bg-green-500 last:bg-blue-500",
+        ))
+        .unwrap();
+    }
+    let batch = c.commit().unwrap();
+    let bg = |batch: &MountBatch, id| view_style_of(batch, id).unwrap().background_color;
+    assert_eq!(bg(&batch, 11), Color(0x00c9_50ff));
+    assert_eq!(bg(&batch, 21), Color(0x2b7f_ffff));
+    // A plain view first: the first row's content is no longer first.
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            class_op(3, "h-2"),
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: Some(10),
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(bg(&batch, 11), Color(0xfb2c_36ff));
+}
+
+/// Wrappers in wrappers pass the outer one's place down, and content
+/// styled before its wrapper joins the rows takes the wrapper's place
+/// once it does.
+#[test]
+fn nested_wrappers_pass_the_outer_position() {
+    let mut c = core();
+    view_with_classes(&mut c, 2, "flex-col");
+    let pass = |id| Op::SetProp {
+        id,
+        prop: Prop::PassPosition(true),
+    };
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            class_op(3, "h-2"),
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+        ],
+    );
+    c.commit().unwrap();
+    // Outer wrapper 10, inner wrapper 11, content 12: styled while
+    // detached, then the outer one joins after view 3.
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 10,
+                tag: Tag::View,
+            },
+            pass(10),
+            Op::Create {
+                id: 11,
+                tag: Tag::View,
+            },
+            pass(11),
+            Op::Create {
+                id: 12,
+                tag: Tag::View,
+            },
+            class_op(12, "h-2 bg-red-500 first:bg-green-500"),
+            Op::Insert {
+                parent: 11,
+                child: 12,
+                before: None,
+            },
+            Op::Insert {
+                parent: 10,
+                child: 11,
+                before: None,
+            },
+        ],
+    );
+    // Nothing mounted yet: the rows' styles wait.
+    assert!(c.commit().is_none());
+    c.apply(Op::Insert {
+        parent: 2,
+        child: 10,
+        before: None,
+    })
+    .unwrap();
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        view_style_of(&batch, 12).unwrap().background_color,
+        Color(0xfb2c_36ff),
+        "the outer wrapper is second"
+    );
+    // View 3 leaves: the outer wrapper is first.
+    c.apply(Op::Remove {
+        parent: 2,
+        child: 3,
+    })
+    .unwrap();
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        view_style_of(&batch, 12).unwrap().background_color,
+        Color(0x00c9_50ff)
+    );
+}
+
 #[test]
 fn text_inherits_a_rows_positional_classes() {
     let mut c = core();

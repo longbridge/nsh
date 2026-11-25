@@ -73,7 +73,9 @@
   `data-range-start`; names of lower case letters, digits and `-`; the value form `data-[state=open]:` is unknown;
   after the `aria-*` variants, by name, as Tailwind registers them; `deps::DATA`, and a node whose classes read none
   sends nothing when its attributes change), `group-*:` (named groups `group/name`; `group-data-<name>:` too), `first:` / `last:` /
-  `odd:` / `even:` / `only:`, `placeholder:` / `selection:` (a color only, the pseudo-element's: `placeholder:text-*` / `selection:bg-*`, the
+  `odd:` / `even:` / `only:` (the place among the parent's element children; a view that only wraps its content, as an
+  `each` row's root around a `dynamic`, hands its own place to its children with `Element::pass_position`,
+  `Prop::PassPosition`), `placeholder:` / `selection:` (a color only, the pseudo-element's: `placeholder:text-*` / `selection:bg-*`, the
   `placeholderColor` / `selectionColor` style keys; other utilities under them are unknown), `!` (important). The state classes have style props of their own (`activeStyle`, `hoverStyle`,
   `focusStyle`, `focusVisibleStyle`, `focusWithinStyle`, `disabledStyle`, `checkedStyle`, `indeterminateStyle`, `expandedStyle`,
   `pressedStyle`, a `Button`'s `selectedStyle`), resolved the same way: later states win, `disabled` over all. A nested `<Text>` takes `hover:` and `active:` from the pointer over its characters (`text.md`
