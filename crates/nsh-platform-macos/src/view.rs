@@ -2359,6 +2359,20 @@ impl NshView {
             {
                 layer.setFrame(bounds);
             }
+            // Where its next drawing around the pan happens: a drag keeps it
+            // on Core Animation's threads from that drawing on, not only
+            // from the one after (`drawLayer:inContext:` sets it after a
+            // paint).
+            let asynchronous = self
+                .state()
+                .canvas
+                .as_ref()
+                .is_some_and(|c| c.draws_asynchronously());
+            if self.ivars().overlay.borrow().is_none()
+                && layer.drawsAsynchronously() != asynchronous
+            {
+                layer.setDrawsAsynchronously(asynchronous);
+            }
         }
     }
 
