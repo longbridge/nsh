@@ -2562,6 +2562,12 @@ impl NshView {
             }
             if old_size != rect.size {
                 self.resize_content_layers();
+                // A scroll view's indicator is sized and placed from its
+                // frame: follow every frame a layout animation writes,
+                // not only scroll ticks and content changes (#3188).
+                if self.state().scroll.is_some() {
+                    crate::scroll::update_overlays(self);
+                }
             }
         }
         // AppKit sizes a view's layer only while the view is in a
