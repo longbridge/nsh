@@ -4308,6 +4308,12 @@ expect Defined: 3 key 7 5-11
 # Code actions at the selection, start first, with the caret's box.
 tap id:code-actions
 expect Acted: 5-11 5 placed
+# The seventh editor reports where its text is scrolled once laid out:
+# 30 rows of 20 points with no room past the last, wrapped (as wide as
+# its 390 × 100 viewport), at the top. The ref scrolls it, reported.
+expect Scroll: 0 0 390x600 390x100
+tap id:scroll-to
+expect Scroll: 0 470 390x600 390x100
 covers [nsh/base] Editor
 covers [events] Editor.onHover
 covers [events] Editor.onHoverEnd
@@ -4330,6 +4336,16 @@ covers [props] Editor.gutterDecorationsWidth
 covers [props] scrollbarInset
 covers [events] Editor.onDefinitionRequest
 covers [events] Editor.onCodeActionRequest
+covers [events] onScroll
+
+# base-editor-fonts
+tap id:case-base-editor-fonts
+# A decoration's 26 point heading takes a row twice the editor's 20,
+# the caret there is as tall, and the code's row below keeps its 20.
+expect end
+tap id:measure
+expect Rows: 40 20 40
+covers [props] Editor.decorations
 
 # base-diff
 tap id:case-base-diff
