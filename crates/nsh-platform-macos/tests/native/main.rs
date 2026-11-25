@@ -67,6 +67,8 @@ mod navigation_unmount;
 #[cfg(target_os = "macos")]
 mod nested_bounce;
 #[cfg(target_os = "macos")]
+mod nested_run_loop;
+#[cfg(target_os = "macos")]
 mod press_momentum;
 #[cfg(target_os = "macos")]
 mod quit_requests;
@@ -200,6 +202,8 @@ fn main() {
                 nested_bounce::run();
             } else if std::env::var_os("NSH_PRESS_MOMENTUM_CHECK_ONLY").is_some() {
                 press_momentum::run();
+            } else if std::env::var_os("NSH_NESTED_RUN_LOOP_CHECK_ONLY").is_some() {
+                nested_run_loop::run();
             } else {
                 quit_requests::run();
                 window_press::run();
@@ -243,6 +247,7 @@ fn main() {
                 embedded_scroll::run();
                 input_wheel_chain::run();
                 nested_bounce::run();
+                nested_run_loop::run();
                 // Last: it leaves the app an accessory, never activated.
                 press_momentum::run();
                 tap_feedback::run();

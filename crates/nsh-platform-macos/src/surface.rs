@@ -323,6 +323,15 @@ pub(crate) struct Surface {
     pub(crate) perf_mode: RefCell<Option<PerfMode>>,
     /// When the last frame ran (`CACurrentMediaTime`).
     last_tick: Cell<f64>,
+    /// A batch is being applied ([`Surface::apply`]). An item can run a
+    /// nested run loop (AppKit animates the `zoom:` a window's
+    /// `SetMode(Maximized)` asks for, #3175), in which the display link,
+    /// deadline timers and the engine's wake-ups fire again: they must
+    /// not apply another batch in the middle of this one.
+    applying: Cell<bool>,
+    /// The engine's wake-up came while a batch was being applied: its
+    /// messages are drained once the batch is done ([`Surface::drain`]).
+    drain_after_apply: Cell<bool>,
     /// The deadline the timer scheduled waits for
     /// ([`Surface::keep_deadline`]).
     keeper: Cell<Option<f64>>,
@@ -444,6 +453,8 @@ impl Surface {
             perf_toggle: RefCell::new(None),
             perf_mode: RefCell::new(None),
             last_tick: Cell::new(0.0),
+            applying: Cell::new(false),
+            drain_after_apply: Cell::new(false),
             keeper: Cell::new(None),
             resize_late: Cell::new(false),
             revisited: Cell::new(0),
@@ -769,6 +780,12 @@ impl Surface {
     /// Handles what the engine sent. While animations run (see the module
     /// doc), batches wait for the next frame ([`Surface::apply_queued`]).
     fn drain(self: &Rc<Self>) {
+        // Woken in a nested run loop while a batch is applied: what the
+        // engine sent stays in the channel, in order, until it is done.
+        if self.applying.get() {
+            self.drain_after_apply.set(true);
+            return;
+        }
         let monitor = self.perf.borrow().clone();
         let start = monitor.as_ref().map(|_| Instant::now());
         self.pending.borrow().store(false, Ordering::Release);
@@ -880,6 +897,22 @@ impl Surface {
     }
 
     fn apply(self: &Rc<Self>, batch: &MountBatch) {
+        self.applying.set(true);
+        self.apply_batch(batch);
+        self.applying.set(false);
+        // Messages that arrived during a nested run loop: on the main
+        // queue's next turn, after the rest of what applied this batch.
+        if self.drain_after_apply.take() {
+            let key = self.key;
+            DispatchQueue::main().exec_async(move || {
+                if let Some(surface) = find(key) {
+                    surface.drain();
+                }
+            });
+        }
+    }
+
+    fn apply_batch(self: &Rc<Self>, batch: &MountBatch) {
         // A batch may change what a running frame callback has left (a
         // transition retargeted, a scroll view told to scroll) without
         // adding one: their deadlines are of before it, so each runs again
@@ -1336,6 +1369,13 @@ impl Surface {
     /// One display frame at `now`, `period` seconds after the previous one
     /// (the display link's, `drawn`, or one a deadline ran without a frame).
     fn frame(self: &Rc<Self>, now: f64, period: f64, drawn: bool) {
+        // A frame in a nested run loop while a batch is applied (#3175):
+        // skipped, the batch is not whole yet. The next one runs after it
+        // (the display link fires again; `last_tick` is left as it was, so
+        // a deadline still runs one).
+        if self.applying.get() {
+            return;
+        }
         self.last_tick.set(objc2_quartz_core::CACurrentMediaTime());
         let Some(monitor) = self.perf.borrow().clone() else {
             return quiet(|| self.tick(now, drawn));
