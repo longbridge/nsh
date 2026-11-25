@@ -920,7 +920,21 @@ fn own_insets(
         // 12pt, one from 4pt; a popup's panel (an anchored overlay's first
         // face) a column each side from 4pt and no rows, its band all the
         // frame it needs.
-        let border = Sides::default();
+        // A filled box framed on every side around a text field (a
+        // composer: its field, its send button) keeps its line: without
+        // it the field is a lone underlined line and its buttons float
+        // beside it, nothing showing they are one input.
+        let border = if kind.container && framed_field(tree, node) {
+            let has = |v: LengthPercentage| i32::from(lp(v, parent_width) > 0.0);
+            Sides {
+                l: has(s.border.left),
+                r: has(s.border.right),
+                t: has(s.border.top),
+                b: has(s.border.bottom),
+            }
+        } else {
+            Sides::default()
+        };
         let popup = popup_panel(tree, node);
         let px = |v: LengthPercentage| {
             let p = lp(v, parent_width);
@@ -1337,6 +1351,27 @@ fn ring(tree: &impl Tree, node: NodeId, kind: Kind, parent_width: Option<f32>) -
 /// Below this many columns a box of an explicit width is small
 /// ([`compute`]): it takes its content's words when they are wider.
 const SMALL_BOX: i32 = 6;
+
+/// How deep [`framed_field`] looks for a text field.
+const FIELD_DEPTH: usize = 4;
+
+/// Whether `node` is framed on every side and holds a text field within
+/// [`FIELD_DEPTH`] levels (a composer around its field), and is not a
+/// field itself.
+fn framed_field(tree: &impl Tree, node: NodeId) -> bool {
+    fn holds(tree: &impl Tree, node: NodeId, depth: usize) -> bool {
+        (0..tree.child_count(node)).any(|i| {
+            let child = tree.child(node, i);
+            tree.role(child).input || (depth > 1 && holds(tree, child, depth - 1))
+        })
+    }
+    let b = tree.style(node).border;
+    !tree.role(node).input
+        && [b.left, b.right, b.top, b.bottom]
+            .iter()
+            .all(|&v| length(v.into_raw()).is_some_and(|v| v > 0.0))
+        && holds(tree, node, FIELD_DEPTH)
+}
 
 /// A corner radius that rounds any box fully (`rounded-full` is 9999).
 const FULLY_ROUND: f32 = 1000.0;
