@@ -18,7 +18,7 @@ use std::{
 use nsh_core::geometry::Points;
 use ropey::Rope;
 use rustc_hash::FxHashMap;
-use unicode_segmentation::{GraphemeIndices, UnicodeSegmentation};
+use unicode_segmentation::{GraphemeCursor, GraphemeIndices, UnicodeSegmentation};
 
 use super::{
     buffer::{Buffer, LineSpan},
@@ -790,43 +790,22 @@ fn wrap_line(
     let mut row_indent = 0.0;
     let mut available = width;
     let mut x = 0.0;
-    // Where the row may break: the last break opportunity, and the x there.
+    let ascii = text.is_ascii();
+    // An ASCII line's last break opportunity: after the last whitespace, and
+    // the x there. Other lines look for theirs when a row overflows
+    // ([`last_break`]): most lines fit, and pay nothing for it.
     let mut break_at: Option<(usize, f32)> = None;
-    // UAX #14's opportunities, by the offset of the char after them, walked
-    // in step with the graphemes (ones inside a grapheme are skipped). An
-    // ASCII line has only ASCII neighbours and needs none.
-    let mut breaks = (!text.is_ascii()).then(|| {
-        unicode_linebreak::linebreaks(text)
-            .map(|(offset, _)| offset)
-            .peekable()
-    });
-    // The previous grapheme: whitespace, and ends in an ASCII char.
-    let mut after_blank = false;
-    let mut after_ascii = true;
-    for (at, grapheme) in graphemes(text) {
-        let opportunity = match &mut breaks {
-            None => after_blank,
-            Some(breaks) => {
-                while breaks.next_if(|&offset| offset < at).is_some() {}
-                let unicode = breaks.next_if_eq(&at).is_some();
-                if after_ascii && grapheme.as_bytes()[0].is_ascii() {
-                    after_blank
-                } else {
-                    unicode
-                }
-            }
-        };
-        // The indentation is no place to break: a row of only it is no use.
-        if opportunity && at > lead {
-            break_at = Some((at, x));
-        }
+    for (at, grapheme) in graphemes_of(text, ascii) {
         let blank = grapheme.chars().all(char::is_whitespace);
         let advance = metrics.advance(grapheme, x);
         while !blank && at > row_start && x + advance > available {
-            let (end, end_x) = match break_at {
-                Some((offset, offset_x)) if offset > row_start => (offset, offset_x),
-                _ => (at, x),
+            let found = if ascii {
+                break_at.filter(|&(offset, _)| offset > row_start)
+            } else {
+                last_break(text, row_start.max(lead), at)
+                    .map(|offset| (offset, x_before(metrics, text, row_start, offset, at, x)))
             };
+            let (end, end_x) = found.unwrap_or((at, x));
             push(row_start..end, row_indent, end_x);
             x -= end_x;
             row_start = end;
@@ -835,10 +814,91 @@ fn wrap_line(
             break_at = None;
         }
         x += advance;
-        after_blank = blank;
-        after_ascii = grapheme.as_bytes().last().is_some_and(u8::is_ascii);
+        // The indentation is no place to break: a row of only it is no use.
+        if ascii && blank && at + grapheme.len() > lead {
+            break_at = Some((at + grapheme.len(), x));
+        }
     }
     push(row_start..text.len(), row_indent, x);
+}
+
+/// The last break opportunity of `text` after `floor` and at or before
+/// `at` (a grapheme's offset), by the offset of the char after it. Between
+/// two ASCII chars it is after whitespace; elsewhere it is UAX #14's, at a
+/// grapheme boundary. UAX #14 runs backwards from `at` a span at a time,
+/// each from where its breaks no longer depend on the text before it
+/// (`split_at_safe`): a few chars, not the whole line. A span starts a
+/// char before that point (so it can break there), but that char lacks
+/// its own context (a combining mark, its base's class): a break before
+/// the point is the next span's to decide.
+fn last_break(text: &str, floor: usize, at: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let ascii_pair = |offset: usize| bytes[offset - 1].is_ascii() && bytes[offset].is_ascii();
+    // Opportunities after `start`, up to `bound`, are looked for; `bound`
+    // is a char's offset, and the span ends after that char, so it decides
+    // the break before it.
+    let mut bound = at;
+    loop {
+        let end = bound + text[bound..].chars().next().map_or(0, char::len_utf8);
+        let (before, span) = unicode_linebreak::split_at_safe(&text[..end]);
+        let start = if before.is_empty() {
+            0
+        } else {
+            before.len() + span.chars().next().map_or(0, char::len_utf8)
+        };
+        let mut found = None;
+        for (offset, _) in unicode_linebreak::linebreaks(span) {
+            let offset = before.len() + offset;
+            if offset > bound {
+                break;
+            }
+            if offset > start
+                && offset > floor
+                && !ascii_pair(offset)
+                && is_grapheme_boundary(text, offset)
+            {
+                found = Some(offset);
+            }
+        }
+        // Between ASCII chars (always a grapheme boundary: no `\r\n` in a
+        // line), after whitespace.
+        if let Some(offset) = (start.max(floor) + 1..=bound)
+            .rev()
+            .find(|&offset| ascii_pair(offset) && char::from(bytes[offset - 1]).is_whitespace())
+        {
+            found = found.max(Some(offset));
+        }
+        if found.is_some() || start <= floor {
+            return found;
+        }
+        bound = start;
+    }
+}
+
+fn is_grapheme_boundary(text: &str, offset: usize) -> bool {
+    GraphemeCursor::new(offset, text.len(), true)
+        .is_boundary(text, 0)
+        .unwrap_or(false)
+}
+
+/// The x of `offset` in the row from `row_start`, the x of `at` (after
+/// `offset`) being `x`: back from `x` by the graphemes between, or, as a
+/// tab's advance depends on where it starts, along the row.
+fn x_before(
+    metrics: &Metrics,
+    text: &str,
+    row_start: usize,
+    offset: usize,
+    at: usize,
+    x: f32,
+) -> f32 {
+    let between = &text[offset..at];
+    if between.contains('\t') {
+        return metrics.run_width(&text[row_start..offset]);
+    }
+    x - graphemes(between)
+        .map(|(_, grapheme)| metrics.width(grapheme))
+        .sum::<f32>()
 }
 
 /// Widths in the editor's font, measured once per char (or grapheme of
@@ -927,7 +987,12 @@ impl Metrics {
 /// The graphemes of `text` with their byte offsets; ASCII text (where each
 /// byte is one) skips segmentation.
 fn graphemes(text: &str) -> Graphemes<'_> {
-    if text.is_ascii() {
+    graphemes_of(text, text.is_ascii())
+}
+
+/// [`graphemes`] of `text`, known to be ASCII or not.
+fn graphemes_of(text: &str, ascii: bool) -> Graphemes<'_> {
+    if ascii {
         Graphemes::Ascii(text, 0)
     } else {
         Graphemes::Unicode(text.grapheme_indices(true))
