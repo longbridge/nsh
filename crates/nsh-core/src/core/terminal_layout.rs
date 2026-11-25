@@ -3659,3 +3659,29 @@ mod tests {
         assert_eq!([12.0, 16.0].map(|p| space_between(p, false)), [0, 1]);
     }
 }
+
+/// The terminal columns `text` takes: two for a wide (East Asian or emoji)
+/// character, one for any other.
+pub(crate) fn columns(text: &str) -> usize {
+    text.chars()
+        .map(|c| {
+            let c = c as u32;
+            let wide = matches!(c,
+                0x1100..=0x115F
+                | 0x2E80..=0x303E
+                | 0x3041..=0x33FF
+                | 0x3400..=0x4DBF
+                | 0x4E00..=0x9FFF
+                | 0xA000..=0xA4CF
+                | 0xAC00..=0xD7A3
+                | 0xF900..=0xFAFF
+                | 0xFE30..=0xFE4F
+                | 0xFF00..=0xFF60
+                | 0xFFE0..=0xFFE6
+                | 0x1F300..=0x1F64F
+                | 0x1F900..=0x1F9FF
+                | 0x20000..=0x3FFFD);
+            1 + usize::from(wide)
+        })
+        .sum()
+}
