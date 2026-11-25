@@ -193,12 +193,15 @@ impl Renderer {
         for (i, &backends) in order.iter().enumerate() {
             let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
                 backends,
-                // Shader views never draw or dispatch indirectly, and the
-                // validation of indirect calls needs compute shaders: an
-                // OpenGL context without them (NVIDIA's driver) would refuse
-                // the device, and wgpu log its pipeline's failure as an error.
-                flags: wgpu::InstanceFlags::default()
-                    - wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL,
+                // None, in debug builds as in release ones (wgpu's `WGPU_*`
+                // variables still turn them on). Shader views never draw or
+                // dispatch indirectly, and the validation of indirect calls
+                // needs compute shaders: an OpenGL context without them
+                // (NVIDIA's driver) would refuse the device, wgpu logging its
+                // pipeline's failure as an error. The backends' validation
+                // layers are for wgpu's own development: OpenGL's debug
+                // output logs the driver's performance notes as warnings.
+                flags: wgpu::InstanceFlags::empty().with_env(),
                 ..wgpu::InstanceDescriptor::new_without_display_handle()
             });
             let adapter =
