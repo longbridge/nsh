@@ -2352,16 +2352,11 @@ fn shown_before<'a>(blocks: impl DoubleEndedIterator<Item = &'a Block>) -> Optio
 }
 
 /// Whether a terminal leaves `block` out, its row and the blank row
-/// before it with it: a rule (the blank row between the blocks around it
-/// is the break) and a paragraph of images with no alt text (a terminal
-/// draws no images; one with alt text reads as `[alt]`).
+/// before it with it: a rule, as the blank row between the blocks around
+/// it is the break. Images show, with alt text or without: the terminal
+/// draws the picture.
 fn blank_in_terminal(block: &Block) -> bool {
-    match block {
-        Block::Rule => true,
-        Block::Paragraph { content } => only_images(content)
-            .is_some_and(|images| images.iter().all(|(i, _)| i.alt.trim().is_empty())),
-        _ => false,
-    }
+    matches!(block, Block::Rule)
 }
 
 /// A browser's list markers by depth: disc, circle, square.
