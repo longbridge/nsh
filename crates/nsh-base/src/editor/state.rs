@@ -62,6 +62,8 @@ pub(crate) struct Span {
     /// The diagnostics over it: their tags (faded, struck through) and
     /// the most serious one's underline.
     pub(crate) tags: SpanTags,
+    /// What an input method is composing, not in the text yet.
+    pub(crate) composition: bool,
 }
 
 /// The diagnostics over a span: how its text is drawn.
@@ -715,15 +717,6 @@ impl State {
         Pt::new(x, self.line_height() * row as f32)
     }
 
-    /// What follows `offset` on its row, as shown.
-    pub(crate) fn row_after(&self, offset: usize) -> String {
-        let before = self.buffer.snapshot();
-        let (row, _) = self.display.layout(&before).locate(offset);
-        let end = self.display.row(row).range.end;
-        let tab = " ".repeat(self.display.tab_size().max(1) as usize);
-        self.buffer.slice(offset.min(end)..end).replace('\t', &tab)
-    }
-
     /// How many rows a page moves: the viewport's height in rows, less
     /// one kept for context.
     pub(crate) fn page_rows(&self, viewport: Points) -> usize {
@@ -786,6 +779,10 @@ impl State {
             cuts.push(r.start);
             cuts.push(r.end);
         }
+        let mut composed = self.composed_span(row, &info.range, &decorations, tokens, line_start);
+        if let Some((at, _)) = &composed {
+            cuts.push(*at);
+        }
         cuts.retain(|c| *c >= info.range.start && *c <= info.range.end);
         cuts.sort_unstable();
         cuts.dedup();
@@ -794,6 +791,9 @@ impl State {
             let (start, end) = (pair[0], pair[1]);
             if start >= end {
                 continue;
+            }
+            if let Some((_, span)) = composed.take_if(|(at, _)| *at <= start) {
+                spans.push(span);
             }
             let display = row_text.display_range(start..end);
             let text = row_text.text[display].to_owned();
@@ -823,7 +823,8 @@ impl State {
                 .fold(SpanTags::default(), |all, (t, _)| all.union(*t));
             match spans.last_mut() {
                 Some(last)
-                    if last.token == token
+                    if !last.composition
+                        && last.token == token
                         && last.decorations == decorations
                         && last.tags == tags =>
                 {
@@ -834,9 +835,11 @@ impl State {
                     token,
                     decorations,
                     tags,
+                    composition: false,
                 }),
             }
         }
+        spans.extend(composed.map(|(_, span)| span));
         let folded = info.first
             && self
                 .display
@@ -867,6 +870,55 @@ impl State {
             folded,
             line_decorations,
         }
+    }
+
+    /// What an input method is composing, as a span of display row `row`
+    /// (whose bytes are `range`), with where it goes in: at the primary
+    /// caret, when the caret is drawn on this row. It is styled as the
+    /// commit will be: the edit puts it inside the decorations and tokens
+    /// around the caret (`decorations`, `tokens`), not in those that start
+    /// or end there (`diagnostics::adjust`). The rest of the row keeps its
+    /// own spans, so what follows the caret moves aside as it is.
+    fn composed_span(
+        &self,
+        row: usize,
+        range: &Range<usize>,
+        decorations: &[(usize, Range<usize>)],
+        tokens: &[(Range<usize>, Token)],
+        line_start: usize,
+    ) -> Option<(usize, Span)> {
+        let text = self.composition.as_deref()?;
+        let head = self.primary_head();
+        let before = self.buffer.snapshot();
+        if self.display.layout(&before).locate(head).0 != row {
+            return None;
+        }
+        let at = head.clamp(range.start, range.end);
+        let inside = |r: &Range<usize>| r.start < at && at < r.end;
+        let over: Vec<(usize, Range<usize>)> = decorations
+            .iter()
+            .filter(|(_, r)| inside(r))
+            .cloned()
+            .collect();
+        let token = app_highlight::token(&over, &self.decorations, &self.decoration_items, at..at)
+            .or_else(|| {
+                tokens
+                    .iter()
+                    .find(|(r, _)| inside(&(line_start + r.start..line_start + r.end)))
+                    .map(|(_, t)| *t)
+            });
+        let tab = " ".repeat(self.display.tab_size().max(1) as usize);
+        let span = Span {
+            text: text.replace('\t', &tab),
+            token,
+            decorations: over
+                .iter()
+                .map(|(i, _)| self.decorations[*i].item)
+                .collect(),
+            tags: SpanTags::default(),
+            composition: true,
+        };
+        Some((at, span))
     }
 
     /// The diagnostics that can overlap bytes `low..=high`, by start: those
@@ -1778,6 +1830,83 @@ mod tests {
                 ("f".to_owned(), Some(Token::Title), 2),
                 ("() {}".to_owned(), Some(Token::String), 1),
             ]
+        );
+    }
+
+    #[test]
+    fn a_composition_keeps_its_rows_decorations() {
+        use crate::editor::EditorToken;
+        let mut st = state("hello world\nnext\n");
+        let bold = EditorDecoration {
+            class: Some("font-bold".into()),
+            line_class: Some("bg-amber-100".into()),
+            ..decoration(0, 0, 5)
+        };
+        let keyword = EditorDecoration {
+            token: Some(EditorToken::Keyword),
+            ..decoration(1, 0, 4)
+        };
+        decorate(&mut st, vec![bold, keyword]);
+        let composed = |st: &mut State, at: usize| {
+            st.selections = Selections::single(Selection::caret(at));
+            st.composition = Some("ni".to_owned());
+            let row = st.display.line_row(st.buffer.line_of(at));
+            let spans = st
+                .row_content(row)
+                .spans
+                .into_iter()
+                .map(|s| (s.text, s.token, s.decorations.len(), s.composition))
+                .collect::<Vec<_>>();
+            st.composition = None;
+            spans
+        };
+        let plain = |text: &str, decorations| (text.to_owned(), None, decorations, false);
+        let ni = |token, decorations| ("ni".to_owned(), token, decorations, true);
+        // At the end of the line: the decorations before it stay, and the
+        // composition, after the bold range, is plain.
+        assert_eq!(
+            composed(&mut st, 11),
+            vec![plain("hello", 1), plain(" world", 0), ni(None, 0)]
+        );
+        // Inside a decoration, the composition takes it (as its commit
+        // will) and what follows keeps it.
+        assert_eq!(
+            composed(&mut st, 2),
+            vec![
+                plain("he", 1),
+                ni(None, 1),
+                plain("llo", 1),
+                plain(" world", 0)
+            ]
+        );
+        // At a decoration's start or end, the composition is outside it.
+        assert_eq!(
+            composed(&mut st, 0),
+            vec![ni(None, 0), plain("hello", 1), plain(" world", 0)]
+        );
+        assert_eq!(
+            composed(&mut st, 5),
+            vec![plain("hello", 1), ni(None, 0), plain(" world", 0)]
+        );
+        // The app's token colors a composition inside its range.
+        assert_eq!(
+            composed(&mut st, 14),
+            vec![
+                ("ne".to_owned(), Some(Token::Keyword), 1, false),
+                ni(Some(Token::Keyword), 1),
+                ("xt".to_owned(), Some(Token::Keyword), 1, false),
+            ]
+        );
+        // The row's line style stays; other rows show only their own text.
+        st.selections = Selections::single(Selection::caret(11));
+        st.composition = Some("ni".to_owned());
+        assert_eq!(
+            st.row_content(st.display.line_row(0)).line_decorations,
+            vec![0]
+        );
+        assert_eq!(
+            spans(&st, 1),
+            vec![("next".to_owned(), Some(Token::Keyword), 1)]
         );
     }
 

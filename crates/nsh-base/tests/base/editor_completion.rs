@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use nsh_base::editor::{
     Editor, EditorApi, EditorCommand, EditorCompletionAcceptEvent, EditorCompletionItem,
-    EditorCompletionKind, EditorCompletionRequest, EditorCompletionTrigger, EditorEdit,
-    EditorInlineCompletionRequest, EditorPosition, EditorRange, editor,
+    EditorCompletionKind, EditorCompletionRequest, EditorCompletionTrigger, EditorDecoration,
+    EditorEdit, EditorInlineCompletionRequest, EditorPosition, EditorRange, EditorToken, editor,
 };
 use nsh_core::{
     PayloadValue, Size,
@@ -28,6 +28,9 @@ struct HarnessProps {
     answer: bool,
     /// The inline completion answering every inline request.
     inline: Option<String>,
+    /// Columns of the first line the app colors as a keyword (a
+    /// decoration's token), from and to.
+    keyword: Vec<u32>,
 }
 
 fn props(text: &str) -> HarnessProps {
@@ -35,6 +38,7 @@ fn props(text: &str) -> HarnessProps {
         text: text.into(),
         answer: true,
         inline: None,
+        keyword: Vec::new(),
     }
 }
 
@@ -82,6 +86,20 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
     };
     let el = editor()
         .default_value(props.text.clone())
+        .decorations(
+            props
+                .keyword
+                .chunks_exact(2)
+                .map(|columns| {
+                    let (from, to) = (columns[0], columns[1]);
+                    let mut keyword = EditorDecoration::default();
+                    keyword.range =
+                        EditorRange::new(EditorPosition::new(0, from), EditorPosition::new(0, to));
+                    keyword.token = Some(EditorToken::Keyword);
+                    keyword
+                })
+                .collect::<Vec<_>>(),
+        )
         .completion(true)
         .completion_trigger_characters(vec![SharedString::from(".")])
         .inline_completion_delay(50.0)
@@ -286,6 +304,39 @@ fn a_composition_inside_a_row_moves_what_follows_aside() {
     compose(&mut app, true, "da");
     see(&mut app, "da");
     see(&mut app, "b cd");
+    see(&mut app, &value("ab cd"));
+}
+
+#[test]
+fn a_composition_keeps_the_decorations_of_its_row() {
+    // `cd` is a keyword the app colors; the composition goes in at its
+    // start, outside it.
+    let mut app = start(HarnessProps {
+        keyword: vec![3, 5],
+        ..props("ab cd")
+    });
+    typed(&mut app, "");
+    let color = |app: &Headless, word: &str| {
+        app.screen()
+            .span_style(&format!("id:editor >> text:{word}"))
+            .map(|style| style.color)
+    };
+    let (plain, keyword) = (color(&app, "ab").unwrap(), color(&app, "cd").unwrap());
+    assert_ne!(plain, keyword);
+    for _ in 0..3 {
+        app.press_key("right").unwrap();
+    }
+    compose(&mut app, true, "da");
+    see(&mut app, "da");
+    // The row shows `cd` once, still colored, after the composition, which
+    // is plain as its commit will be.
+    assert_eq!(color(&app, "cd"), Ok(keyword));
+    assert_eq!(color(&app, "da"), Ok(plain));
+    let underlined = app
+        .screen()
+        .span_style("id:editor >> text:da")
+        .map(|style| style.decoration.underline);
+    assert_eq!(underlined, Ok(true));
     see(&mut app, &value("ab cd"));
 }
 

@@ -95,6 +95,8 @@ pub(crate) struct Ed {
     pub(crate) sel_rev: Signal<u64>,
     /// Diagnostics, decorations or search matches changed.
     pub(crate) marks_rev: Signal<u64>,
+    /// What an input method composes changed (the composing row's content).
+    pub(crate) composition_rev: Signal<u64>,
     /// The vertical scroll view's offset.
     pub(crate) scroll_y: Signal<Points>,
     /// The horizontal scroll view's offset.
@@ -180,6 +182,7 @@ impl Ed {
             hl_rev: signal(0),
             sel_rev: signal(0),
             marks_rev: signal(0),
+            composition_rev: signal(0),
             scroll_y: signal(px(0.0)),
             scroll_x: signal(px(0.0)),
             viewport: signal(Size::default()),
@@ -720,11 +723,14 @@ impl Ed {
         if text.is_empty() {
             return;
         }
-        let outcome = {
+        let (outcome, composed) = {
             let mut st = self.st.borrow_mut();
-            st.composition = None;
-            st.editing(1, |e| e.insert(text))
+            let composed = st.composition.take().is_some();
+            (st.editing(1, |e| e.insert(text)), composed)
         };
+        if composed {
+            self.composition_rev.update(|r| *r += 1);
+        }
         let edited = matches!(outcome, Outcome::Edited(_));
         self.after_typing(outcome);
         if edited {
@@ -933,8 +939,9 @@ impl Ed {
     }
 
     /// An input method's composition started, changed or ended: its text
-    /// shows at the caret and the text waits for the commit, which asks for
-    /// no completions (the input method offers its own candidates).
+    /// shows at the caret, in the caret's row (`State::row_content`), and
+    /// the text waits for the commit, which asks for no completions (the
+    /// input method offers its own candidates).
     pub(crate) fn composition(&self, composing: bool, text: &str) {
         let (started, held) = {
             let mut sink = self.sink.borrow_mut();
@@ -949,9 +956,15 @@ impl Ed {
         if let Some(held) = held {
             self.without_completions(|| self.sink_edited(&held));
         }
-        {
+        let changed = {
             let mut st = self.st.borrow_mut();
-            st.composition = (composing && !text.is_empty()).then(|| text.to_owned());
+            let composition = (composing && !text.is_empty()).then(|| text.to_owned());
+            let changed = st.composition != composition;
+            st.composition = composition;
+            changed
+        };
+        if changed {
+            self.composition_rev.update(|r| *r += 1);
         }
         self.bump_selection();
     }

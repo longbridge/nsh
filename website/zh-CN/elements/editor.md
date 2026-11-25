@@ -260,7 +260,7 @@ async function lint(text: string) {
 
 ## 装饰
 
-`decorations` 为应用选择的范围设置样式：来自语言服务器的语义高亮、正在执行的语句、评审中改动的行。装饰的 `class` 和 `style` 设置其文本的样式；`lineClass` 和 `lineStyle` 设置其所在各行的样式，位于文本后面。与诊断一样，它们在编辑中留在自己的文本上，直到应用设置新的装饰。
+`decorations` 为应用选择的范围设置样式：来自语言服务器的语义高亮、正在执行的语句、评审中改动的行。装饰的 `class` 和 `style` 设置其文本的样式；`lineClass` 和 `lineStyle` 设置其所在各行的样式，位于文本后面。与诊断一样，它们在编辑中留在自己的文本上，直到应用设置新的装饰。输入法组字时，组字文本就地显示在该行中，该行保留其装饰：其后的文本连同自己的装饰一起后移，组字文本的样式与上屏后相同（光标两侧都被装饰覆盖时在装饰之内，装饰在光标处开始或结束时不在其内）。
 
 ```tsx
 const range = (line: number, start: number, end: number) => ({ start: { line, column: start }, end: { line, column: end } });
