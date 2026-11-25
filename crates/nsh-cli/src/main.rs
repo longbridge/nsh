@@ -747,7 +747,7 @@ struct PackageArgs {
     /// jobs); serve the runtime files from one place (`--asset-url`).
     /// Not for an app with Rust components or wasm-bindgen glue.
     #[arg(long)]
-    wasm_shared_runtime: bool,
+    shared_wasm_runtime: bool,
 }
 
 /// `nsh component`'s actions.
@@ -1215,7 +1215,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 run,
                 device,
                 asset_url,
-                wasm_shared_runtime,
+                shared_wasm_runtime,
             } = *args;
             let mut config = package::read_config(&entry)?;
             config.name = name.or(config.name);
@@ -1243,7 +1243,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 run,
                 device: device.as_deref(),
                 asset_url: asset_url.as_deref(),
-                shared_runtime: wasm_shared_runtime,
+                shared_runtime: shared_wasm_runtime,
                 development: false,
             })
         }

@@ -892,7 +892,7 @@ pub(crate) struct PackageOptions<'a> {
     pub(crate) device: Option<&'a str>,
     /// The web: the URL the site's files are served from (`--asset-url`).
     pub(crate) asset_url: Option<&'a str>,
-    /// The web: package the shared runtime (`--wasm-shared-runtime`).
+    /// The web: package the shared runtime (`--shared-wasm-runtime`).
     pub(crate) shared_runtime: bool,
     /// A development build for `nsh run`. Android: the APK is debuggable,
     /// so `AppActivity` takes the environment `nsh run` passes it.
@@ -1479,7 +1479,7 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
         bail!("--asset-url is where a web site's files are served from: package with --target web");
     }
     if options.shared_runtime && options.target != PackageTarget::Web {
-        bail!("--wasm-shared-runtime is the web's runtime: package with --target web");
+        bail!("--shared-wasm-runtime is the web's runtime: package with --target web");
     }
     if let Some(url) = options.asset_url {
         crate::web::check_asset_url(url)?;
