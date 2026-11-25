@@ -279,6 +279,25 @@ const range = (line: number, start: number, end: number) => ({ start: { line, co
 
 <a id="gutter-and-overview-ruler-marks"></a>
 
+### 字体
+
+装饰的 `fontFamily` 和 `fontSize` 设置其文本的字体，于是基于 `Editor` 的 Markdown 笔记应用可以让行内代码和代码块用等宽字体、让标题更大。编辑器用这个字体测量文本：光标、选区、点击和软换行都随之而定。一行的高度取其中最大的文本所需：编辑器的 `lineHeight` 按字号等比放大（13 点、行高 20 点的编辑器中，26 点的标题占 40 点的一行），且不低于 `lineHeight`。带字体的装饰重叠时，最内层装饰的字体族和字号胜出，两者各自取（内层的 `fontFamily` 保留外层的 `fontSize`）。字体请在这里设置，不要用 `class` 或 `style`，编辑器不会按它们测量。在终端中文本保持在其单元格中。
+
+```tsx
+<Editor
+  value={notes()}
+  onChange={({ value }) => notes.set(value)}
+  fontFamily="Inter"
+  fontSize={15}
+  lineHeight={24}
+  decorations={[
+    { range: range(0, 0, 14), fontSize: 22, class: "font-semibold" },
+    { range: range(2, 8, 20), fontFamily: "Menlo", class: "bg-zinc-500/10" },
+  ]}
+  class="flex-1"
+/>
+```
+
 ### 行号槽与概览标尺标记
 
 装饰的 `gutter` 在行号前的一条窄带中，为其范围覆盖的每一行放一个标记：版本控制差异中新增或修改的行，或断点（空范围覆盖它所在的行，与 `lineClass` 相同）。设置 `placement: "before"` 时，它是在范围起点之前的行间边界处横跨窄带的一条线，即删除行的位置。这条窄带宽 `gutterDecorationsWidth` 点（默认 3），只要有装饰带行号槽标记就一直保留，标记出现或消失时文本位置不变。折叠中的范围标记在折叠所在的那一行。
@@ -499,6 +518,23 @@ let editor!: EditorRef;
 />
 ```
 
+`onScroll({ offset, contentSize, size })` 报告文本滚动到的位置，键与 [`Scroll`](./scroll.md) 的相同：`offset` 即 `scrollOffset()`，`contentSize` 是文本滚动经过的内容的尺寸，`size` 是视口的尺寸。不设 `softWrap` 时，内容的宽度是视口的宽度加上文本能横向滚动的距离；自动换行时，内容与视口同宽，`offset.x` 为 0。编辑器完成布局时触发一次，之后其中任何一项变化时再触发：滚动、改变大小，以及改变了内容尺寸的编辑或折叠。放在标题下面的编辑器可以在文本滚到顶边下面时，在顶边画一条线或做渐隐：
+
+```tsx
+const scrolled = signal(false);
+
+<View style={{ flex: 1 }}>
+  <View class={scrolled() ? "h-px bg-border" : "h-px"} />
+  <Editor
+    defaultValue={notes()}
+    language="markdown"
+    softWrap
+    onScroll={({ offset }) => scrolled.set(offset.y > 0)}
+    style={{ flex: 1 }}
+  />
+</View>
+```
+
 <a id="methods"></a>
 
 ## 方法
@@ -717,6 +753,7 @@ let editor!: EditorRef;
 | `onInlineCompletionRequest` | `.on_inline_completion_request(\|event: &EditorInlineCompletionRequest\| ..)` | 输入停顿了：`{ id, offset, position }`，用于行内补全。 |
 | `onDefinitionRequest` | `.on_definition_request(\|event: &EditorDefinitionRequest\| ..)` | 编辑器请求一个定义：`{ id, position, offset, range, trigger }`（[跳转到定义](#跳转到定义与代码操作)）。 |
 | `onCodeActionRequest` | `.on_code_action_request(\|event: &EditorCodeActionRequest\| ..)` | 用户请求代码操作：`{ range, position, bounds? }`。 |
+| `onScroll` | `.on_scroll(\|e: &EditorEvent\| ..)` | 文本滚动了，或者内容或视口的尺寸变了：`{ offset, contentSize, size }`，与 `Scroll` 的相同（Rust 中为 `EditorEvent::Scroll(offset, content_size, size)`）。编辑器完成布局时触发一次，之后其中任何一项变化时再触发（[尺寸与滚动](#size-and-scrolling)）。 |
 
 <a id="accessibility"></a>
 

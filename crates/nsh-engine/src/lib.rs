@@ -991,7 +991,19 @@ impl nsh_core::runtime::UpdaterHost for UpdaterOverNetwork {
             let mut total: Option<u64> = None;
 
             let outcome = loop {
-                match rx.recv() {
+                // Platform stacks only time out connecting and waiting for
+                // headers; a body that stops arriving would hang forever.
+                let event = match rx.recv_timeout(UPDATER_STALL_TIMEOUT) {
+                    Ok(event) => Ok(event),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                        break Err(format!(
+                            "download stalled (no data for {}s)",
+                            UPDATER_STALL_TIMEOUT.as_secs()
+                        ));
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(()),
+                };
+                match event {
                     Ok(FetchEvent::Head(head)) => {
                         if matches!(head.status, 301 | 302 | 303 | 307 | 308)
                             && let Some(location) = updater_header(&head.headers, "location")
@@ -1074,6 +1086,14 @@ impl nsh_core::runtime::UpdaterHost for UpdaterOverNetwork {
         Err("too many redirects".to_owned())
     }
 }
+
+/// How long an update download may go without any network event before
+/// it fails as stalled (and is retried from the bytes already on disk).
+const UPDATER_STALL_TIMEOUT: std::time::Duration = if cfg!(test) {
+    std::time::Duration::from_millis(200)
+} else {
+    std::time::Duration::from_secs(60)
+};
 
 /// First value of header `target` (ASCII case-insensitive).
 fn updater_header<'a>(headers: &'a [(String, String)], target: &str) -> Option<&'a str> {
@@ -5161,6 +5181,39 @@ mod updater_range_tests {
             events.push("unsatisfiable".into());
         }
         Ok((events, body))
+    }
+
+    #[test]
+    fn updater_over_network_fails_a_stalled_body() {
+        /// Sends headers and a first piece, then keeps the stream open silently.
+        struct Silent(Mutex<Vec<FetchEvents>>);
+        impl Network for Silent {
+            fn fetch(&self, _: HttpRequest, mut events: FetchEvents) -> Box<dyn FetchTask> {
+                events(FetchEvent::Head(HttpHead {
+                    status: 200,
+                    headers: vec![("Content-Length".into(), "10".into())],
+                    ..Default::default()
+                }));
+                events(FetchEvent::Data(b"0123".to_vec()));
+                self.0.lock().unwrap().push(events);
+                Box::new(NoopTask)
+            }
+        }
+        let host = UpdaterOverNetwork {
+            network: Arc::new(Silent(Mutex::new(Vec::new()))),
+            assets: None,
+            config: None,
+            running: None,
+        };
+        let mut body = Vec::new();
+        let err = host
+            .get("https://x.dev/a.tar.gz", 0, &mut |_, bytes, _| {
+                body.extend_from_slice(bytes);
+                Ok(())
+            })
+            .unwrap_err();
+        assert!(err.starts_with("download stalled"), "{err}");
+        assert_eq!(body, b"0123");
     }
 
     #[test]

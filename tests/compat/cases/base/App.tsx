@@ -26,6 +26,7 @@ import BaseDockRenderHandle from "./base-dock-render-handle";
 import BaseDockToolbar from "./base-dock-toolbar";
 import BaseSplitView from "./base-split-view";
 import BaseEditor from "./base-editor";
+import BaseEditorFonts from "./base-editor-fonts";
 import BaseHoverCard from "./base-hover-card";
 import BaseLink from "./base-link";
 import BaseNavPage from "./base-nav-page";
@@ -97,6 +98,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-dock-toolbar": BaseDockToolbar,
   "base-split-view": BaseSplitView,
   "base-editor": BaseEditor,
+  "base-editor-fonts": BaseEditorFonts,
   "base-hover-card": BaseHoverCard,
   "base-link": BaseLink,
   "base-nav-page": BaseNavPage,

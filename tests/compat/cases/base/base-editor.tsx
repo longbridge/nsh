@@ -37,7 +37,10 @@
 // (`onDefinitionRequest`, trigger `hover`), whose answer underlines it
 // (`presentDefinitionLink`, `hideDefinitionLink`); `run("goToDefinition")`
 // asks at the caret (trigger `key`), and `run("showCodeActions")` asks for
-// the code actions at the selection (`onCodeActionRequest`).
+// the code actions at the selection (`onCodeActionRequest`). A seventh
+// editor reports where its text is scrolled, the content's size and the
+// viewport's (`onScroll`), once laid out and as the ref scrolls it
+// (`setScrollOffset`).
 import { Text, View, signal } from "nsh";
 import { Editor, type EditorFoldRange, type EditorRef } from "nsh/base";
 
@@ -59,11 +62,13 @@ export default function BaseEditor() {
   const tagged = signal("none");
   const defined = signal("none");
   const acted = signal("none");
+  const scrolled = signal("none");
   let editor!: EditorRef;
   let grown!: EditorRef;
   let outline!: EditorRef;
   let completer!: EditorRef;
   let navigator!: EditorRef;
+  let scroller!: EditorRef;
   const show = (folds: EditorFoldRange[]) => folds.map(f => `${f.startLine}-${f.endLine}`).join(" ") || "-";
   const track = async () => history.set(`Undo ${await editor.canUndo()} Redo ${await editor.canRedo()}`);
   return (
@@ -331,6 +336,20 @@ export default function BaseEditor() {
           navigator.run("showCodeActions");
         }}
       />
+      <View style={{ width: 390, height: 100 }}>
+        <Editor
+          ref={r => (scroller = r)}
+          defaultValue={Array.from({ length: 30 }, (_, i) => `row ${i}`).join("\n")}
+          softWrap
+          scrollBeyondLastLine={false}
+          onScroll={({ offset, contentSize, size }) =>
+            scrolled.set(`${offset.x} ${offset.y} ${contentSize.width}x${contentSize.height} ${size.width}x${size.height}`)
+          }
+          style={{ flex: 1 }}
+        />
+      </View>
+      <Text>{() => `Scroll: ${scrolled()}`}</Text>
+      <View testID="scroll-to" style={{ height: 20 }} onPress={() => scroller.setScrollOffset({ x: 0, y: 470 })} />
     </View>
   );
 }
