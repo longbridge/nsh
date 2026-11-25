@@ -100,7 +100,7 @@ fn icon_sized_canvases_draw_nothing() {
 }
 
 #[test]
-fn canvas_fills_strokes_dashes_and_text_draw_in_braille_cells() {
+fn canvas_fills_draw_as_cell_backgrounds_and_strokes_in_braille() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(24, 6)).unwrap();
     view.load(App::Rust(Root::new::<Shapes>(|| ()))).unwrap();
@@ -109,10 +109,14 @@ fn canvas_fills_strokes_dashes_and_text_draw_in_braille_cells() {
     for y in 0..3 {
         assert_eq!(
             row(buffer, y, 0..5),
-            "⣿⣿⣿⣿⣿",
-            "the filled rectangle, row {y}"
+            "     ",
+            "the filled rectangle, row {y}: no braille"
         );
-        assert_eq!(buffer[(0, y)].fg, Color::Rgb(255, 0, 0));
+        assert_eq!(
+            buffer[(0, y)].bg,
+            Color::Rgb(255, 0, 0),
+            "a Cell background"
+        );
     }
     assert_eq!(
         row(buffer, 0, 6..20),
