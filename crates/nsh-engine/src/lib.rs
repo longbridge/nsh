@@ -2469,11 +2469,11 @@ impl<M: TextEngine + 'static> Driver<M> {
         // while a plain root's implicit main window quits on close unless the
         // app explicitly sets `application.quitMode` or calls
         // `Application.setQuitMode`.
-        core.set_default_quit_mode(nsh_core::desktop::QuitMode::Platform);
+        core.__set_default_quit_mode(nsh_core::desktop::QuitMode::Platform);
         if let Some(mode) = config
             .app
             .application()
-            .and_then(|options| options.quit_mode)
+            .and_then(|options| options.__explicit_quit_mode())
         {
             core.set_quit_mode(mode);
         }

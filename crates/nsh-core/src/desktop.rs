@@ -80,10 +80,11 @@ impl QuitMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub struct ApplicationOptions {
-    /// When closing the last window quits. `None` when omitted from
-    /// nsh.json: explicit windows follow [`QuitMode::Platform`], while a
-    /// plain root's implicit main window quits when closed.
-    pub quit_mode: Option<QuitMode>,
+    /// When closing the last window quits.
+    pub quit_mode: QuitMode,
+    /// Whether nsh.json set `quitMode` (a plain root's implicit main
+    /// window quits on close unless it did).
+    quit_mode_set: bool,
 }
 
 impl ApplicationOptions {
@@ -97,12 +98,20 @@ impl ApplicationOptions {
             match key.as_str() {
                 "quitMode" => {
                     options.quit_mode =
-                        Some(QuitMode::from_json(value).map_err(|e| format!("quitMode: {e}"))?);
+                        QuitMode::from_json(value).map_err(|e| format!("quitMode: {e}"))?;
+                    options.quit_mode_set = true;
                 }
                 other => return Err(format!("unknown key `{other}`")),
             }
         }
         Ok(options)
+    }
+
+    /// The quit mode nsh.json set, `None` when it omitted `quitMode`.
+    /// Engine plumbing, not app API.
+    #[doc(hidden)]
+    pub fn __explicit_quit_mode(&self) -> Option<QuitMode> {
+        self.quit_mode_set.then_some(self.quit_mode)
     }
 }
 
@@ -1311,20 +1320,20 @@ mod tests {
         let read = |json: &str| {
             ApplicationOptions::from_json(&serde_json::from_str::<crate::JsonValue>(json).unwrap())
         };
-        assert_eq!(read(r#"{}"#).unwrap().quit_mode, None);
+        assert_eq!(read(r#"{}"#).unwrap().__explicit_quit_mode(), None);
         assert_eq!(
             read(r#"{"quitMode":"platform"}"#).unwrap().quit_mode,
-            Some(QuitMode::Platform)
+            QuitMode::Platform
         );
         assert_eq!(
             read(r#"{"quitMode":"lastWindowClosed"}"#)
                 .unwrap()
                 .quit_mode,
-            Some(QuitMode::LastWindowClosed)
+            QuitMode::LastWindowClosed
         );
         assert_eq!(
             read(r#"{"quitMode":"explicit"}"#).unwrap().quit_mode,
-            Some(QuitMode::Explicit)
+            QuitMode::Explicit
         );
         assert!(read(r#"{"quitMode":"sometimes"}"#).is_err());
         assert!(read(r#"{"quitMode":true}"#).is_err());

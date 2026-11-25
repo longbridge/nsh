@@ -2157,8 +2157,10 @@ impl<M: TextEngine> Core<M> {
 
     /// Sets the host's default quit mode when the app has not explicitly
     /// configured one: explicit `<Window>` scenes follow this mode, while a
-    /// plain root's implicit main window still quits on close.
-    pub fn set_default_quit_mode(&mut self, mode: crate::desktop::QuitMode) {
+    /// plain root's implicit main window still quits on close. Engine
+    /// plumbing, not app API.
+    #[doc(hidden)]
+    pub fn __set_default_quit_mode(&mut self, mode: crate::desktop::QuitMode) {
         self.default_quit_mode = mode;
     }
 

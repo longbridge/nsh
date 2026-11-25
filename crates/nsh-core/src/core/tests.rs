@@ -30980,7 +30980,7 @@ mod rust_windows {
                 os: crate::platform::Os::MacOs,
                 ..Default::default()
             });
-            c.set_default_quit_mode(crate::desktop::QuitMode::Platform);
+            c.__set_default_quit_mode(crate::desktop::QuitMode::Platform);
             if let Some(mode) = explicit_mode {
                 c.set_quit_mode(mode);
             }
