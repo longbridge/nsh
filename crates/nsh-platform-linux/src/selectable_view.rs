@@ -593,9 +593,10 @@ pub(crate) fn released(surface: &Surface) {
 /// How often a drag past a scroll view's edge scrolls it (ms).
 const AUTOSCROLL_INTERVAL: u64 = 16;
 
-/// The scroll view around the dragging mouse's area that it is near or
-/// past an edge of, and by how much to scroll it (wheel deltas,
-/// [`autoscroll_step`]).
+/// The innermost scroll view around the selection's focus (one inside the
+/// dragging mouse's area, a wide table's horizontal scroll, #2996, then
+/// those around it) that the mouse is near or past an edge of, and by how
+/// much to scroll it (wheel deltas, [`autoscroll_step`]).
 fn autoscroll_target(surface: &Surface) -> Option<(NshView, f32, f32)> {
     let (id, last) = surface
         .selection
@@ -604,7 +605,7 @@ fn autoscroll_target(surface: &Surface) -> Option<(NshView, f32, f32)> {
         .as_ref()
         .filter(|d| d.selecting)
         .map(|d| (d.area, d.last))?;
-    let mut current = view_of(surface, id);
+    let mut current = focus_view(surface, id).or_else(|| view_of(surface, id));
     while let Some(view) = current {
         current = view.parent_view();
         let (horizontal, w, h) = {
@@ -630,6 +631,17 @@ fn autoscroll_target(surface: &Surface) -> Option<(NshView, f32, f32)> {
         }
     }
     None
+}
+
+/// The text the focus of area `id`'s selection is in.
+fn focus_view(surface: &Surface, id: NodeId) -> Option<NshView> {
+    let area = view_of(surface, id)?;
+    let focus = surface.selection.areas.borrow().get(&id)?.model.focus()?;
+    collect(&area)
+        .items
+        .into_iter()
+        .nth(focus.text)
+        .map(|i| i.view)
 }
 
 /// Starts scrolling the scroll view the dragging mouse is past the edge
