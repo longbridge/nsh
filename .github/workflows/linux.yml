@@ -157,7 +157,7 @@ jobs:
       # decodes and mixes sounds; its base and good plug-ins are what the
       # sound tests decode (WAV) and mix with.
       - name: Install clang, GTK 4, WebKitGTK and GStreamer
-        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev libgtk-4-dev libwebkitgtk-6.0-dev xvfb xauth at-spi2-core python3 libxtst6 libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good
+        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev libgtk-4-dev libwebkitgtk-6.0-dev xvfb xauth at-spi2-core python3 libxtst6 gstreamer1.0-plugins-base gstreamer1.0-plugins-good
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
