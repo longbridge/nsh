@@ -765,13 +765,12 @@ fn Picture() -> impl IntoElement {
 }
 
 #[test]
-fn a_terminals_block_image_reads_as_its_alt_text_on_a_line() {
+fn a_terminals_block_image_is_a_picture_on_its_own_lines() {
     let at = text_origins::<Picture>();
     let row = |t: &str| at.get(t).unwrap_or_else(|| panic!("no {t} in {at:?}")).1;
-    // A line of its own, a blank row on each side as any block has.
-    let image = row("[Green mountains]");
-    assert!(image > row("Intro."), "{at:?}");
-    assert_eq!(image - row("Intro."), row("After.") - image, "{at:?}");
+    // Drawn as a picture, not read as its alt text, between the paragraphs.
+    assert!(!at.contains_key("[Green mountains]"), "{at:?}");
+    assert!(row("After.") > row("Intro."), "{at:?}");
 }
 
 /// The same with an image without alt text.

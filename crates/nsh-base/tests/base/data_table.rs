@@ -299,12 +299,16 @@ fn tab_out_on(idiom: Idiom) -> Headless {
 }
 
 #[test]
-fn a_terminals_tab_leaves_the_table_and_the_arrows_move_between_columns() {
+fn a_terminals_tab_moves_between_columns_and_escape_then_tab_leaves() {
     let mut app = tab_out_on(Idiom::Terminal);
-    app.press_key("right").unwrap();
+    app.press_key("tab").unwrap();
     app.wait_for("Chosen Some(0):Some(1) next false").unwrap();
     app.press_key("left").unwrap();
     app.wait_for("Chosen Some(0):Some(0) next false").unwrap();
+    // Escape clears the selection, a second one gives up the keyboard;
+    // Tab then moves the focus on.
+    app.press_key("escape").unwrap();
+    app.press_key("escape").unwrap();
     app.press_key("tab").unwrap();
     app.wait_for("Chosen Some(0):Some(0) next true").unwrap();
 }
