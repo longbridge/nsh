@@ -228,6 +228,9 @@ pub(crate) struct Role {
     /// A control's accessibility label, in columns (0 without one): an
     /// icon button shows it in place of its icon.
     pub(crate) label: u16,
+    /// The label's first word, in columns (the whole label when it is
+    /// one word): a label short of room keeps this before it is cut.
+    pub(crate) word: u16,
     /// A text or a text input: a box holding only such is a box of text.
     pub(crate) text: bool,
     /// A scroll view or a list: its content is laid out unbounded along
@@ -2192,6 +2195,10 @@ struct Item {
     /// anything else. They give their columns before anything else but
     /// the gaps: down to three a label (cut short), then out.
     labels: i32,
+    /// Its labels' first words and a column between them
+    /// ([`labels_short`]): its labels give down to this before they are
+    /// cut to three columns.
+    short: i32,
     /// A negative margin pulls it over its sibling (stacked avatars): in a
     /// row it keeps a column from it instead.
     overlaps: bool,
@@ -2308,8 +2315,9 @@ fn min_content_cols(
 }
 
 /// Gives `over` columns of a row back from its gaps (down to one column)
-/// and then its icon controls shown as labels (down to three columns,
-/// cut short, then out, the last first); returns what is still over.
+/// and then its icon controls shown as labels (down to their first words,
+/// the widest first, then three columns, cut short, then out, the last
+/// first); returns what is still over.
 fn give_gaps_and_labels(items: &mut [Item], before: &mut [i32], mut over: i32) -> i32 {
     while over > 0 {
         let pick = (1..before.len())
@@ -2321,6 +2329,20 @@ fn give_gaps_and_labels(items: &mut [Item], before: &mut [i32], mut over: i32) -
     }
     // Three columns a label, and a column between a group's.
     let least = |i: &Item| i.labels * 3 + (i.labels - 1).max(0);
+    // A label keeps its first word while another has more to give
+    // (`Edit` of `Edit folder`), so each still says what it does.
+    let word = |i: &Item| i.short.max(least(i));
+    while over > 0 {
+        let pick = items
+            .iter()
+            .enumerate()
+            .filter(|(_, i)| i.labels > 0 && i.main > word(i))
+            .max_by_key(|(_, i)| i.main - word(i))
+            .map(|(n, _)| n);
+        let Some(pick) = pick else { break };
+        items[pick].main -= 1;
+        over -= 1;
+    }
     while over > 0 {
         let pick = items
             .iter()
@@ -2406,6 +2428,27 @@ fn labels_held(tree: &impl Tree, node: NodeId) -> i32 {
         }
     }
     if n > 1 && !row { 0 } else { n }
+}
+
+/// The columns `node`'s labels ([`labels_held`]) take showing only their
+/// first words, a column between two: what they give down to first.
+fn labels_short(tree: &impl Tree, node: NodeId) -> i32 {
+    if kind(tree, node).labelled {
+        return i32::from(tree.role(node).word);
+    }
+    let mut cols = 0;
+    let mut n = 0;
+    for i in 0..tree.child_count(node) {
+        let child = tree.child(node, i);
+        if hidden(tree, child) || tree.style(child).position.is_out_of_flow() {
+            continue;
+        }
+        if labels_held(tree, child) > 0 {
+            cols += labels_short(tree, child);
+            n += 1;
+        }
+    }
+    cols + (n - 1).max(0)
 }
 
 /// The longest words of `node`'s children ([`min_content_cols`]): the
@@ -2534,6 +2577,7 @@ fn arrange_flex(
                 content: !k.empty || tree.role(node).splitter != Splitter::No,
                 floor: 0,
                 labels: labels_held(tree, node),
+                short: labels_short(tree, node),
                 control: tree.role(node).control,
                 filled: surface(tree.role(node), tree.backdrop(node).unwrap_or(grid.page))
                     .is_some(),

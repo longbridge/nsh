@@ -1740,13 +1740,25 @@ enum Focus {
     Shown,
 }
 
-/// `label` as it fits `room` columns: whole, or cut on a character's edge
-/// with `…` in the column after the last one that fits.
+/// `label` as it fits `room` columns: whole; its first word whole when a
+/// cut would fall inside it (`Edit` of `Edit folder`); else cut on a
+/// character's edge with `…` in the column after the last one that fits.
 fn cut_label(label: &str, room: usize) -> std::borrow::Cow<'_, str> {
     use unicode_segmentation::UnicodeSegmentation;
     use unicode_width::UnicodeWidthStr;
     if label.width() <= room {
         return label.into();
+    }
+    // A cut inside the first word would leave a stub (`Sc…` of `Scan
+    // folder`): the first word whole reads better, when it fits.
+    let first = label.split_whitespace().next().unwrap_or("");
+    let first_width = first.width();
+    if first != label && first_width <= room && room <= first_width + 1 {
+        let mut cut = first.to_string();
+        if first_width < room {
+            cut.push('…');
+        }
+        return cut.into();
     }
     let mut cut = String::new();
     let mut width = 0;
@@ -1758,6 +1770,8 @@ fn cut_label(label: &str, room: usize) -> std::borrow::Cow<'_, str> {
         cut.push_str(grapheme);
         width += w;
     }
+    // Not `Edit …`: the ellipsis follows the last character.
+    cut.truncate(cut.trim_end().len());
     if room > 0 {
         cut.push('…');
     }
