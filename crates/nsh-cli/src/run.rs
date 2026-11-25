@@ -634,6 +634,7 @@ fn package_for_run(
         run: false,
         device: None,
         asset_url: None,
+        shared_runtime: false,
         development: true,
     })
 }

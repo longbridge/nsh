@@ -42,7 +42,29 @@ pub(crate) fn text_break(
     // the break before it.
     let mut bound = bound;
     let mut max = if inclusive { bound } else { bound - 1 };
+    let lowest = floor.max(context);
     loop {
+        // Between ASCII chars a row breaks only after whitespace, whatever
+        // comes before: a run of them (a Latin word, a URL) is scanned as
+        // bytes, not a span at a time.
+        let top = max;
+        while max > lowest && ascii_pair(max) {
+            // After a run of whitespace, never inside one: the run hangs
+            // past the edge rather than starting the next row.
+            if char::from(bytes[max - 1]).is_whitespace() && !char::from(bytes[max]).is_whitespace()
+            {
+                return Some(max);
+            }
+            max -= 1;
+        }
+        if max <= lowest {
+            return None;
+        }
+        if max < top {
+            // The run ended at an ASCII char (a char boundary) after
+            // another char: UAX #14 decides the break before it.
+            bound = max;
+        }
         let end = bound + text[bound..].chars().next().map_or(0, char::len_utf8);
         let (before, span) = unicode_linebreak::split_at_safe(&text[context..end]);
         let span_start = context + before.len();
@@ -66,8 +88,7 @@ pub(crate) fn text_break(
             }
         }
         // Between ASCII chars (always a grapheme boundary: no `\r\n` in a
-        // line), after whitespace: after a run of it, never inside one, so
-        // the run hangs past the edge rather than starting the next row.
+        // line), after whitespace: after a run of it, never inside one.
         if let Some(offset) = (start.max(floor) + 1..=max).rev().find(|&offset| {
             ascii_pair(offset)
                 && char::from(bytes[offset - 1]).is_whitespace()
@@ -84,8 +105,13 @@ pub(crate) fn text_break(
     }
 }
 
+/// Whether `offset` (a char boundary after the first char) of `text` is a
+/// grapheme boundary: the next one after the char before it. Asked as
+/// `next_boundary`, which the grapheme walk calls too: a second caller of
+/// `is_boundary` stops the optimizer inlining it into that walk, which then
+/// costs every non-ASCII line.
 fn is_grapheme_boundary(text: &str, offset: usize) -> bool {
-    GraphemeCursor::new(offset, text.len(), true)
-        .is_boundary(text, 0)
-        .unwrap_or(false)
+    let before = text[..offset].chars().next_back().map_or(0, char::len_utf8);
+    GraphemeCursor::new(offset - before, text.len(), true).next_boundary(text, 0)
+        == Ok(Some(offset))
 }

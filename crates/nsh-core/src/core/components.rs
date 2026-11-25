@@ -8276,15 +8276,15 @@ impl<M: TextEngine> Core<M> {
         drop(keys);
         // JS's first, then the views', where the newest that may fire wins:
         // a focused component's keys win over the app's. Bindings
-        // `over_focused` come after both, so they win over the components';
+        // `OverFocused::Always` come after both, so they win over the components';
         // the overlay's Escape (a popup closing) stays last.
         let js = self.components.js_keymap.bindings();
         let bindings = js
             .iter()
-            .filter(|b| !b.over_focused)
-            .chain(views.iter().filter(|b| !b.over_focused))
-            .chain(js.iter().filter(|b| b.over_focused))
-            .chain(views.iter().filter(|b| b.over_focused))
+            .filter(|b| !b.comes_after_views())
+            .chain(views.iter().filter(|b| !b.comes_after_views()))
+            .chain(js.iter().filter(|b| b.comes_after_views()))
+            .chain(views.iter().filter(|b| b.comes_after_views()))
             .copied()
             .chain(overlay)
             .collect();
