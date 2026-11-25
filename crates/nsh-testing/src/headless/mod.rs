@@ -5341,6 +5341,50 @@ mod tests {
         }
     }
 
+    /// 100 rows of 46 points estimated at 50; "Insert" adds one right
+    /// after item 20.
+    #[component]
+    fn InsertedRows() -> impl IntoElement {
+        let rows = signal((0..100u32).collect::<Vec<_>>());
+        let list = virtual_list(
+            move || rows.with(Vec::len),
+            move |at| {
+                view().h(px(46.0)).child(text(move || {
+                    let id = rows.with(|r| r.get(at.index()).copied().unwrap_or_default());
+                    format!("Item {id}")
+                }))
+            },
+        )
+        .keys(move || rows.get())
+        .estimated_item_size(px(50.0));
+        view()
+            .flex_1()
+            .child(text("Insert").on_press(move |_: &()| rows.update(|r| r.insert(21, 1000))))
+            .child(list.test_id("viewport").flex_1())
+    }
+
+    /// A row inserted right after a row the viewport's start cuts through
+    /// moves that row up, out of view, instead of the rows being read; it
+    /// is cut in turn, at its estimate, and once it is measured at another
+    /// height the rows being read still stay in place.
+    #[test]
+    fn a_row_inserted_after_a_cut_top_row_keeps_the_rows_below_once_measured() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<InsertedRows>())).unwrap();
+        app.first_render().unwrap();
+        // Item 20 at the top, showing its last 22 points.
+        app.scroll("id:viewport", px(20.0 * 46.0 + 24.0)).unwrap();
+        app.wait(Duration::from_millis(300)).unwrap();
+        let before = from_top(&app, "Item 21").unwrap();
+        assert!((1.0..46.0).contains(&before), "item 21 at {before}");
+        app.press("Insert").unwrap();
+        app.wait(Duration::from_millis(300)).unwrap();
+        let after = from_top(&app, "Item 21");
+        assert!(
+            after.is_some_and(|y| (y - before).abs() < 0.5),
+            "item 21 from {before} to {after:?}"
+        );
+    }
+
     /// A bottom-aligned list rests at its end while the cards above the
     /// viewport are measured and their content loads: it anchors to its
     /// end, not to its first visible row.
