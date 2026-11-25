@@ -997,7 +997,7 @@ See [Device and environment](../docs/device-and-environment.md) for the guide.
 const windowSize: Accessor<Size>;
 ```
 
-The size of the surface in points: the window, or the embedded `NshAppView` / `NshView`. Reactive. Rust: `window() -> Size<Points>`.
+The size of the surface in points: the window, or the embedded `NshAppView` / `NshView`. On macOS, Windows and Linux it is the content size of the app's primary window, the first of its own windows still open; a window's own size is its [`state()`](./nsh-desktop.md#the-windows-state-and-the-displays)`?.contentBounds`. Reactive. Rust: `window() -> Size<Points>`.
 
 ```tsx tabs
 const wide = () => windowSize().width >= 600;
@@ -1219,10 +1219,11 @@ interface PerfStats {
   readonly fps: number;
   readonly refreshRate: number | null;
   readonly dropped: number;
+  readonly memory: number | null;
 }
 ```
 
-What the monitor measured over the last second, read once a second while it measures (`fpsEnabled()`), and `null` while it does not and until its first second, so an app can show it its own way. `fps` is the frames shown per second: an idle app reads low, which is not slowness (only display refreshes in which the app changed count). `refreshRate` is the rate the display refreshes at (Hz), `null` until the monitor saw it refresh; `dropped` is the share of recent frames that took longer than one refresh, from 0 to 1 (`0.05` is 5%; in Rust a `Percentage`, the same fraction). Headless test runs measure too and draw no frames: they read 0 fps. Rust: `perf_stats() -> Option<PerfStats>`.
+What the monitor measured over the last second, read once a second while it measures (`fpsEnabled()`), and `null` while it does not and until its first second, so an app can show it its own way. `fps` is the frames shown per second: an idle app reads low, which is not slowness (only display refreshes in which the app changed count). `refreshRate` is the rate the display refreshes at (Hz), `null` until the monitor saw it refresh; `dropped` is the share of recent frames that took longer than one refresh, from 0 to 1 (`0.05` is 5%; in Rust a `Percentage`, the same fraction). `memory` is the memory the process owns, in bytes, as the panel shows it: the physical footprint on Apple platforms (Activity Monitor's Memory column), the resident set elsewhere; `null` where the platform does not say, and in headless test runs. Headless test runs measure too and draw no frames: they read 0 fps. Rust: `perf_stats() -> Option<PerfStats>`.
 
 ```tsx
 <If when={perfStats()}>

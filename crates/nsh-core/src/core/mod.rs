@@ -543,7 +543,7 @@ struct ImageState {
 /// A style most nodes leave at its default: stored only once set to
 /// something else, read through the shared default otherwise.
 #[derive(Default)]
-struct Sparse<T: 'static>(Option<Box<T>>);
+struct Sparse<T: 'static>(Option<Rc<T>>);
 
 trait SharedDefault: Sized + PartialEq + 'static {
     fn shared_default() -> &'static Self;
@@ -561,15 +561,30 @@ impl SharedDefault for TextStyle {
     }
 }
 
-impl<T: SharedDefault> Sparse<T> {
+impl<T: SharedDefault + Clone> Sparse<T> {
     fn set(&mut self, value: T) {
-        // A node restyled once keeps its box: only a node without one pays
-        // for the comparison with the default.
-        if let Some(b) = &mut self.0 {
-            **b = value;
+        // Mutate in place when uniquely owned; clear to `None` or replace
+        // with a new `Rc` when shared with a cached resolved style.
+        if let Some(rc) = &mut self.0 {
+            if let Some(inner) = Rc::get_mut(rc) {
+                *inner = value;
+                return;
+            }
+            if value == *T::shared_default() {
+                self.0 = None;
+                return;
+            }
+            if **rc == value {
+                return;
+            }
+            *rc = Rc::new(value);
         } else if value != *T::shared_default() {
-            self.0 = Some(Box::new(value));
+            self.0 = Some(Rc::new(value));
         }
+    }
+
+    fn is_default(&self) -> bool {
+        self.0.as_ref().is_none_or(|v| **v == *T::shared_default())
     }
 }
 
@@ -577,7 +592,7 @@ impl<T: SharedDefault> std::ops::Deref for Sparse<T> {
     type Target = T;
     fn deref(&self) -> &T {
         match &self.0 {
-            Some(b) => b,
+            Some(rc) => rc,
             None => T::shared_default(),
         }
     }
@@ -646,7 +661,7 @@ struct Node {
     text_style: Sparse<TextStyle>,
     /// SVG's paint properties as written on the node (inherited by the
     /// canvases inside it); `None` while it sets none.
-    paint: Option<Box<PaintStyle>>,
+    paint: Option<Rc<PaintStyle>>,
     animated: Vec<(AnimationProp, crate::animation::NodeId)>,
     /// What a canvas draws.
     drawing: Option<Arc<crate::canvas::Drawing>>,
@@ -659,7 +674,7 @@ struct Node {
     /// Their parsed form.
     classes: Option<std::rc::Rc<ClassList>>,
     /// Node props the classes set.
-    class_props: Option<Box<ClassProps>>,
+    class_props: Option<Rc<ClassProps>>,
     /// Interaction states (`tailwind::state` bits).
     states: u16,
     /// States the platform reports for the view.
@@ -753,8 +768,8 @@ struct Node {
     rtl: bool,
     /// `direction`: `None` inherits.
     direction: Option<bool>,
-    /// Start / end properties, if any.
-    logical: Option<Box<crate::style::Logical>>,
+    /// Start / end properties, if any (restyled on direction flip).
+    has_logical: bool,
     /// Touch, accessibility and test properties; most views have none.
     props: Option<Box<ViewProps>>,
     /// Raw text content.
@@ -1057,7 +1072,7 @@ impl Node {
             copy_text: None,
             rtl: false,
             direction: None,
-            logical: None,
+            has_logical: false,
             props: None,
             text: String::new(),
             paragraph: Paragraph::default(),
@@ -1640,6 +1655,14 @@ pub struct Core<M: TextEngine> {
     needs_layout: bool,
     /// Parsed classes and the theme.
     tailwind: Tailwind,
+    /// Resolved class styles shared by the nodes whose classes resolve alike
+    /// (the same `ClassList` under the same inputs it reads,
+    /// `classes::ResolvedKey`).
+    resolved_styles:
+        rustc_hash::FxHashMap<classes::ResolvedKey, std::rc::Rc<classes::ResolvedClassStyle>>,
+    /// Tests resolve every class style afresh, to compare with the cache.
+    #[cfg(test)]
+    resolve_uncached: bool,
     /// What class variants read from the environment (`dark` as shown:
     /// [`Core::set_appearance`]).
     class_env: ClassEnvironment,
@@ -1889,6 +1912,9 @@ impl<M: TextEngine> Core<M> {
             position_parents: Vec::new(),
             needs_layout: true,
             tailwind: Tailwind::new(),
+            resolved_styles: rustc_hash::FxHashMap::default(),
+            #[cfg(test)]
+            resolve_uncached: false,
             class_env: ClassEnvironment::default(),
             appearance: crate::platform::Appearance::System,
             system_dark: false,
@@ -4131,7 +4157,7 @@ impl<M: TextEngine> Core<M> {
     fn create(&mut self, id: NodeId, tag: Tag) -> Result<(), ApplyError> {
         let kind = Kind::of(tag);
         let key = self.alloc(id, kind)?;
-        let mut style = crate::style::unstyled_layout();
+        let mut custom_layout = None;
         if let Some(role) = shader_role(tag) {
             self.nodes[key as usize]
                 .shader
@@ -4143,21 +4169,27 @@ impl<M: TextEngine> Core<M> {
                 crate::shader::ShaderRole::Screen | crate::shader::ShaderRole::ScreenTransition
             ) {
                 // A screen's effect takes no space: the surface is its box.
+                let mut style = crate::style::unstyled_layout();
                 style.position = taffy::Position::Absolute;
                 style.size = taffy::Size {
                     width: taffy::Dimension::length(0.0),
                     height: taffy::Dimension::length(0.0),
                 };
+                custom_layout = Some(style);
             }
         }
-        let layout = match leaf_context(kind) {
-            Some(context) => self.layout.new_leaf_with_context(style.clone(), context),
-            None => self.layout.new_leaf(style.clone()),
+        let context = leaf_context(kind);
+        let layout = match custom_layout {
+            Some(style) => match context {
+                Some(context) => self.layout.new_leaf_with_context(style, context),
+                None => self.layout.new_leaf(style),
+            },
+            None => self.layout.new_default_leaf(context),
         };
         self.layout.set_tag(layout, key);
         self.nodes[key as usize].layout = Some(layout);
         self.sync_grid_role(key);
-        self.became(key, style);
+        self.became(key);
         if kind == Kind::WebView && !self.components.environment.web_views {
             self.web_view_unavailable(id);
         }
@@ -4376,15 +4408,19 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// What a node of its kind needs once made, its layout style `style`.
-    fn became(&mut self, key: Key, style: taffy::Style) {
+    /// What a node of its kind needs once made.
+    fn became(&mut self, key: Key) {
         let kind = self.nodes[key as usize].kind;
+        if kind.derives_layout() {
+            let style = self.nodes[key as usize]
+                .layout
+                .map(|l| self.layout.style(l).clone())
+                .unwrap_or_else(crate::style::unstyled_layout);
+            self.nodes[key as usize].base_layout = Some(Box::new(style));
+        }
         let node = &mut self.nodes[key as usize];
         if kind == Kind::Text {
             node.dirty |= dirty::TEXT_BUILD;
-        }
-        if kind.derives_layout() {
-            node.base_layout = Some(Box::new(style));
         }
         if kind == Kind::List {
             self.lists.push(key);
@@ -4459,8 +4495,7 @@ impl<M: TextEngine> Core<M> {
         node.component = fresh.component;
         let layout = node.layout.expect("a view has a layout");
         self.layout.set_node_context(layout, leaf_context(kind));
-        let style = self.layout.style(layout).clone();
-        self.became(key, style);
+        self.became(key);
         // A native component made in its place reads its style's accent.
         self.sync_accent(key);
         // What a terminal's layout takes from its kind (a scroll view's
@@ -4709,7 +4744,6 @@ impl<M: TextEngine> Core<M> {
 
     fn set_style(&mut self, id: NodeId, style: Style) -> Result<(), ApplyError> {
         let key = self.key(id)?;
-        let node = &mut self.nodes[key as usize];
         let Style {
             mut layout,
             mut view,
@@ -4721,7 +4755,7 @@ impl<M: TextEngine> Core<M> {
             direction,
             logical,
             pending,
-            perspective: child_perspective,
+            perspective,
         } = style;
         if animated
             .iter()
@@ -4732,30 +4766,100 @@ impl<M: TextEngine> Core<M> {
             view.clear_background_images();
         }
         if key != self.root {
-            node.direction = direction;
+            self.nodes[key as usize].direction = direction;
         }
-        node.logical = (!logical.is_empty()).then(|| Box::new(logical));
         let rtl = self.resolved_rtl(key);
-        crate::style::resolve_normal_alignment(&mut layout);
-        crate::style::apply_direction(&mut layout, &mut view, &logical, rtl);
-        // A sticky box's insets say where it sticks, not where it is laid
-        // out.
-        let sticky = pending.sticky_position.then(|| Box::new(layout.inset));
-        if sticky.is_some() {
-            layout.inset = taffy::Rect {
-                left: taffy::LengthPercentageAuto::auto(),
-                right: taffy::LengthPercentageAuto::auto(),
-                top: taffy::LengthPercentageAuto::auto(),
-                bottom: taffy::LengthPercentageAuto::auto(),
-            };
+        let sticky = prepare_layout(
+            &mut layout,
+            &mut view,
+            &logical,
+            rtl,
+            pending.sticky_position,
+        );
+        // An input always clips: it scrolls its own text, so text taller than
+        // its box (a fixed height, a `maxHeight`) stays in it and must not
+        // grow the content size of a scroll view around it.
+        let input = self.nodes[key as usize].kind == Kind::Input;
+        clip_overflow(&mut layout, view.overflow_hidden || input);
+        self.install_style(
+            key,
+            StyleRecord {
+                layout,
+                view,
+                text,
+                paint: (paint != PaintStyle::default()).then(|| Rc::new(paint)),
+                animated,
+                sticky,
+                perspective,
+                object_fit: pending.object_fit,
+                wants_fixed: pending.fixed_position,
+                env: pending.env,
+                z_index,
+                vertical_align,
+                has_logical: !logical.is_empty(),
+                rtl,
+            },
+        );
+        Ok(())
+    }
+
+    /// Installs a cached [`classes::ResolvedClassStyle`] on `key`, sharing
+    /// its records with the other nodes styled alike.
+    fn apply_resolved_style(&mut self, key: Key, resolved: &classes::ResolvedClassStyle) {
+        self.set_class_props_shared(key, resolved.props.as_ref());
+        self.install_style(
+            key,
+            StyleRecord {
+                layout: resolved.layout.clone(),
+                view: resolved.view.clone(),
+                text: resolved.text.clone(),
+                paint: resolved.paint.clone(),
+                animated: Vec::new(),
+                sticky: resolved.sticky,
+                perspective: resolved.perspective,
+                object_fit: resolved.object_fit,
+                wants_fixed: resolved.wants_fixed,
+                env: crate::style::EnvEdges::default(),
+                z_index: resolved.z_index,
+                vertical_align: resolved.vertical_align,
+                has_logical: resolved.has_logical,
+                rtl: resolved.rtl,
+            },
+        );
+    }
+
+    /// Makes `record` `key`'s style and marks what changed: the one path of
+    /// a node resolved alone ([`Self::set_style`]) and of a cached class
+    /// style ([`Self::apply_resolved_style`]).
+    fn install_style(
+        &mut self,
+        key: Key,
+        record: StyleRecord<impl LayoutSlot, impl StyleSlot<ViewStyle>, impl StyleSlot<TextStyle>>,
+    ) {
+        let StyleRecord {
+            mut layout,
+            view,
+            text,
+            paint,
+            animated,
+            sticky,
+            perspective,
+            object_fit,
+            wants_fixed,
+            env,
+            z_index,
+            vertical_align,
+            has_logical,
+            rtl,
+        } = record;
+        let node = &mut self.nodes[key as usize];
+        node.has_logical = has_logical;
+        if node.sticky.as_deref() != sticky.as_ref() {
+            self.set_sticky(key, sticky.map(Box::new));
         }
         let node = &mut self.nodes[key as usize];
-        if node.sticky != sticky {
-            self.set_sticky(key, sticky);
-        }
-        let node = &mut self.nodes[key as usize];
-        if node.child_perspective != child_perspective {
-            node.child_perspective = child_perspective;
+        if node.child_perspective != perspective {
+            node.child_perspective = perspective;
             // Its children's transforms compose it (their animated steps
             // move by its steps).
             let children = node.children.clone();
@@ -4764,23 +4868,23 @@ impl<M: TextEngine> Core<M> {
             }
         }
         let node = &mut self.nodes[key as usize];
-        if node.object_fit != pending.object_fit {
-            node.object_fit = pending.object_fit;
+        if node.object_fit != object_fit {
+            node.object_fit = object_fit;
             if node.image.is_some() {
                 self.mark(key, dirty::IMAGE);
             } else if let Some(control) = node.control.as_mut() {
                 // A video is contained by default.
-                let fit = pending.object_fit.unwrap_or(ResizeMode::Contain);
+                let fit = object_fit.unwrap_or(ResizeMode::Contain);
                 apply_native(control, NativeProp::VideoResizeMode(fit));
                 self.mark(key, dirty::NATIVE);
             }
         }
         let node = &mut self.nodes[key as usize];
-        if node.wants_fixed != pending.fixed_position {
+        if node.wants_fixed != wants_fixed {
             // Made an overlay, or a view again: at once while it is in no
             // parent (classes are set before the node is inserted), else as
             // the commit starts.
-            node.wants_fixed = pending.fixed_position;
+            node.wants_fixed = wants_fixed;
             let id = node.id;
             if node.parent == NO_KEY {
                 self.fix_or_unfix(key);
@@ -4790,7 +4894,6 @@ impl<M: TextEngine> Core<M> {
         }
         // `env()`'s terms, on the edges their declarations name (left and
         // right are physical, right to left too).
-        let env = pending.env;
         let env = (!env.is_empty()).then(|| (env, self.env_insets(key, &env)));
         let node = &mut self.nodes[key as usize];
         let id = node.id;
@@ -4818,6 +4921,7 @@ impl<M: TextEngine> Core<M> {
             extra = Some([sum(p, applied[0]), sum(m, applied[1])]);
         }
         if let Some([padding, margin]) = extra.as_ref() {
+            let layout = layout.to_mut();
             // On top of points; percentages cannot take an addition.
             let add = |p: &mut taffy::LengthPercentage, d: f32| {
                 if let taffy::style::ExpandedLengthPercentage::Length(v) = p.expand() {
@@ -4839,41 +4943,49 @@ impl<M: TextEngine> Core<M> {
             add(&mut layout.margin.bottom, margin.bottom.0);
             add(&mut layout.margin.left, margin.left.0);
         }
+        let node = &mut self.nodes[key as usize];
         let flipped = node.rtl != rtl;
         node.rtl = rtl;
+        // A shared record installed already (or an equal one) changes
+        // nothing visual: the comparisons below are skipped.
+        let view_same = view.same(&node.view_style);
+        let new_view = view.get();
         // `objectPosition` is the image's (`MountItem::Image`), not the view's.
-        let position_changed = node.view_style.object_position != view.object_position;
-        let view_changed = if position_changed {
-            node.view_style
-                != ViewStyle {
-                    object_position: node.view_style.object_position,
-                    ..view.clone()
-                }
-        } else {
-            node.view_style != view
-        };
+        let position_changed =
+            !view_same && node.view_style.object_position != new_view.object_position;
+        let view_changed = !view_same
+            && (!position_changed
+                || node.view_style
+                    != ViewStyle {
+                        object_position: node.view_style.object_position,
+                        ..new_view.clone()
+                    });
         // A span's background and visibility are part of its block's text.
-        let span_drawing_changed = node.inline
+        let span_drawing_changed = !view_same
+            && node.inline
             && node.kind == Kind::Text
-            && (span_background(&node.view_style, node.id) != span_background(&view, node.id)
-                || node.view_style.hidden != view.hidden);
-        let text_changed = node.text_style != text || span_drawing_changed;
+            && (span_background(&node.view_style, node.id) != span_background(new_view, node.id)
+                || node.view_style.hidden != new_view.hidden);
+        let text_same = text.same(&node.text_style);
+        let text_changed = !text_same || span_drawing_changed;
         // What its children inherit as `currentColor`.
         let passed_color = |node: &Node, text: &TextStyle| text.color.or(node.inherited_color);
-        let color_passed = passed_color(node, &node.text_style) != passed_color(node, &text);
+        let color_passed =
+            !text_same && passed_color(node, &node.text_style) != passed_color(node, text.get());
         let animation_changed = node.animated != animated;
-        let paint = (paint != PaintStyle::default()).then(|| Box::new(paint));
-        let paint_changed = node.paint != paint;
+        let paint_changed = !opt_rc_eq(node.paint.as_ref(), paint.as_ref());
         let z_changed = node.z_index != z_index;
         // An attachment's place in its line is part of its block's text.
         let align_changed =
             node.vertical_align != vertical_align && node.inline && node.kind != Kind::Text;
         // ... and so is the content's of a render placed there.
         let content_align_changed = node.vertical_align != vertical_align && !node.inline;
-        let accent_changed = node.view_style.accent_color != view.accent_color;
-        node.view_style.set(view);
-        node.text_style.set(text);
-        node.paint = paint;
+        let accent_changed = !view_same && node.view_style.accent_color != new_view.accent_color;
+        view.install(&mut node.view_style);
+        text.install(&mut node.text_style);
+        if paint_changed {
+            node.paint = paint;
+        }
         node.animated = animated;
         node.z_index = z_index;
         node.vertical_align = vertical_align;
@@ -4888,31 +5000,18 @@ impl<M: TextEngine> Core<M> {
             self.restack(key);
         }
         let node = &mut self.nodes[key as usize];
-        // `overflow: "hidden"` clips in layout as well as in paint: what a box
-        // clips away must not reach an enclosing scroll view's content size,
-        // or a child laid out wider than its box and scaled down with a
-        // transform (transforms do not affect layout) leaves the scroll view
-        // scrollable across its own axis.
-        // `Clip`, not `Hidden`: both stop the overflow from propagating, but
-        // `Hidden` is a scroll container in CSS and would also make the box's
-        // automatic minimum size as a flex or grid item 0, which clipping the
-        // paint must not do. Set here rather than while parsing the style so
-        // that what `overflow` sets as a style stays what it was.
-        // An input always clips: it scrolls its own text, so text taller than
-        // its box (a fixed height, a `maxHeight`) stays in it and must not
-        // grow the content size of a scroll view around it.
-        let clip = if node.view_style.overflow_hidden || node.kind == Kind::Input {
-            taffy::Overflow::Clip
-        } else {
-            taffy::Overflow::Visible
-        };
-        layout.overflow = taffy::Point { x: clip, y: clip };
+        fn keep_base(slot: &mut Option<Box<taffy::Style>>, layout: impl LayoutSlot) {
+            match slot {
+                Some(base) => **base = layout.into_owned(),
+                None => *slot = Some(Box::new(layout.into_owned())),
+            }
+        }
         if node.kind.derives_layout() || node.fixed_view {
-            node.base_layout = Some(Box::new(layout));
+            keep_base(&mut node.base_layout, layout);
             self.sync_layout_style(key);
         } else if let Some(l) = node.layout {
             // A style that only changed what is painted lays nothing out.
-            if self.layout.set_style(l, layout) {
+            if layout.set_on(&mut self.layout, l) {
                 self.needs_layout = true;
             }
         } else if node.kind == Kind::Text {
@@ -4920,8 +5019,8 @@ impl<M: TextEngine> Core<M> {
             // part of its block's text (horizontal: room in the line;
             // vertical: its background's).
             let padding = |l: &taffy::Style| l.padding;
-            let padded = node.base_layout.as_deref().map(padding) != Some(padding(&layout));
-            node.base_layout = Some(Box::new(layout));
+            let padded = node.base_layout.as_deref().map(padding) != Some(padding(layout.get()));
+            keep_base(&mut node.base_layout, layout);
             if padded && node.inline {
                 self.mark_text_block(key);
             }
@@ -4995,7 +5094,6 @@ impl<M: TextEngine> Core<M> {
                 self.restyle(key);
             }
         }
-        Ok(())
     }
 
     /// Marks the canvases at and inside `key` that paint with their view's
@@ -5140,7 +5238,7 @@ impl<M: TextEngine> Core<M> {
             list.set_mirrored(mirrored);
         }
         // A spaced child's margin is on its end side.
-        let logical = node.logical.is_some() || node.spaced;
+        let logical = node.has_logical || node.spaced;
         let kind = node.kind;
         if let Some(base) = node.base_layout.as_deref_mut() {
             base.direction = direction;
@@ -8193,7 +8291,7 @@ impl<M: TextEngine> Core<M> {
         // cells (`Node::mounted_view_style`), with no scroll view's config.
         let parent_list = node.list.as_ref().is_some_and(|l| l.parent);
         let mut flags = 0;
-        if node.view_style != ViewStyle::default()
+        if !node.view_style.is_default()
             || node.elevation != Points::ZERO
             || node.backdrop_material != crate::BackdropMaterial::default()
             || node.macos_backdrop.is_some()
@@ -12720,6 +12818,173 @@ fn broken_runs(content: &str) -> std::borrow::Cow<'_, str> {
             broken.into()
         }
         None => content.into(),
+    }
+}
+
+/// A visual style being installed on a node ([`Core::install_style`]):
+/// resolved for it alone (`T`, [`Core::set_style`]) or shared with the nodes
+/// whose classes resolved alike (`Option<Rc<T>>`, `None` the default,
+/// [`classes::ResolvedClassStyle`]). Generic rather than an enum so that a
+/// shared style moves as a pointer, not as large as an owned one.
+trait StyleSlot<T: SharedDefault>: Sized {
+    fn get(&self) -> &T;
+    /// Whether `held` holds it already (by pointer first for a shared one).
+    fn same(&self, held: &Sparse<T>) -> bool;
+    fn install(self, held: &mut Sparse<T>);
+}
+
+impl<T: SharedDefault + Clone> StyleSlot<T> for T {
+    fn get(&self) -> &T {
+        self
+    }
+
+    fn same(&self, held: &Sparse<T>) -> bool {
+        **held == *self
+    }
+
+    fn install(self, held: &mut Sparse<T>) {
+        held.set(self);
+    }
+}
+
+impl<T: SharedDefault + Clone> StyleSlot<T> for Option<Rc<T>> {
+    fn get(&self) -> &T {
+        self.as_deref().unwrap_or_else(|| T::shared_default())
+    }
+
+    fn same(&self, held: &Sparse<T>) -> bool {
+        match (&held.0, self) {
+            (None, None) => true,
+            (Some(a), Some(b)) => Rc::ptr_eq(a, b) || **a == **b,
+            (Some(a), None) => **a == *T::shared_default(),
+            (None, Some(b)) => *T::shared_default() == **b,
+        }
+    }
+
+    fn install(self, held: &mut Sparse<T>) {
+        held.0 = self;
+    }
+}
+
+/// The layout style being installed on a node, [`StyleSlot`]'s
+/// counterpart: `taffy::Style` or a shared `Rc<taffy::Style>`.
+trait LayoutSlot: Sized {
+    fn get(&self) -> &taffy::Style;
+    /// The node's own copy to adjust (`env()`, insets).
+    fn to_mut(&mut self) -> &mut taffy::Style;
+    fn into_owned(self) -> taffy::Style;
+    /// Makes it `node`'s style in `tree`; whether that changed it.
+    fn set_on<C>(self, tree: &mut LayoutTree<C>, node: LayoutId) -> bool;
+}
+
+impl LayoutSlot for taffy::Style {
+    fn get(&self) -> &taffy::Style {
+        self
+    }
+
+    fn to_mut(&mut self) -> &mut taffy::Style {
+        self
+    }
+
+    fn into_owned(self) -> taffy::Style {
+        self
+    }
+
+    fn set_on<C>(self, tree: &mut LayoutTree<C>, node: LayoutId) -> bool {
+        tree.set_style(node, self)
+    }
+}
+
+impl LayoutSlot for Rc<taffy::Style> {
+    fn get(&self) -> &taffy::Style {
+        self
+    }
+
+    fn to_mut(&mut self) -> &mut taffy::Style {
+        Rc::make_mut(self)
+    }
+
+    fn into_owned(self) -> taffy::Style {
+        Rc::unwrap_or_clone(self)
+    }
+
+    fn set_on<C>(self, tree: &mut LayoutTree<C>, node: LayoutId) -> bool {
+        tree.set_style_shared(node, self)
+    }
+}
+
+/// What [`Core::install_style`] makes a node's style: a resolved
+/// [`Style`] after [`prepare_layout`] and [`clip_overflow`].
+struct StyleRecord<L, V, X> {
+    layout: L,
+    view: V,
+    text: X,
+    paint: Option<Rc<PaintStyle>>,
+    animated: Vec<(AnimationProp, crate::animation::NodeId)>,
+    /// A sticky box's insets, taken out of its layout.
+    sticky: Option<taffy::Rect<taffy::LengthPercentageAuto>>,
+    perspective: Option<Points>,
+    object_fit: Option<ResizeMode>,
+    wants_fixed: bool,
+    env: crate::style::EnvEdges,
+    z_index: i32,
+    vertical_align: crate::style::VerticalAlign,
+    has_logical: bool,
+    rtl: bool,
+}
+
+/// What a resolved layout takes before it is installed, for `rtl`
+/// ([`Core::set_style`], [`Core::resolved_styles`]): CSS's `normal`
+/// alignment resolved and its start / end sides placed. A sticky box's insets
+/// say where it sticks, not where it is laid out: they are taken out and
+/// returned.
+fn prepare_layout(
+    layout: &mut taffy::Style,
+    view: &mut ViewStyle,
+    logical: &crate::style::Logical,
+    rtl: bool,
+    sticky: bool,
+) -> Option<taffy::Rect<taffy::LengthPercentageAuto>> {
+    crate::style::resolve_normal_alignment(layout);
+    crate::style::apply_direction(layout, view, logical, rtl);
+    sticky.then(|| {
+        let auto = taffy::LengthPercentageAuto::auto();
+        std::mem::replace(
+            &mut layout.inset,
+            taffy::Rect {
+                left: auto,
+                right: auto,
+                top: auto,
+                bottom: auto,
+            },
+        )
+    })
+}
+
+/// `overflow: "hidden"` clips in layout as well as in paint: what a box
+/// clips away must not reach an enclosing scroll view's content size, or a
+/// child laid out wider than its box and scaled down with a transform
+/// (transforms do not affect layout) leaves the scroll view scrollable across
+/// its own axis. `Clip`, not `Hidden`: both stop the overflow from
+/// propagating, but `Hidden` is a scroll container in CSS and would also make
+/// the box's automatic minimum size as a flex or grid item 0, which clipping
+/// the paint must not do. Set here rather than while parsing the style so that
+/// what `overflow` sets as a style stays what it was.
+fn clip_overflow(layout: &mut taffy::Style, clip: bool) {
+    let clip = if clip {
+        taffy::Overflow::Clip
+    } else {
+        taffy::Overflow::Visible
+    };
+    layout.overflow = taffy::Point { x: clip, y: clip };
+}
+
+/// `Rc` equality, by pointer first.
+fn opt_rc_eq<T: PartialEq>(a: Option<&Rc<T>>, b: Option<&Rc<T>>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => Rc::ptr_eq(a, b) || **a == **b,
+        _ => false,
     }
 }
 

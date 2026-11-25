@@ -408,7 +408,7 @@ fn the_performance_monitor_reports_its_stats_once_a_second() {
     std::fs::write(
         &entry,
         r#"import { mount, perfStats, Text } from "nsh";
-mount(() => <Text>{`reading ${perfStats()?.fps ?? "none"}`}</Text>);
+mount(() => <Text>{`reading ${perfStats()?.fps ?? "none"} ${perfStats()?.memory ?? "none"}`}</Text>);
 "#,
     )
     .unwrap();
@@ -437,10 +437,14 @@ mount(() => <Text>{`reading ${perfStats()?.fps ?? "none"}`}</Text>);
         }
         panic!("the reading never showed");
     };
-    read(&|t| t == "reading none");
-    // The platform installs a monitor and shows frames, one a refresh,
-    // until the reading has them.
+    read(&|t| t == "reading none none");
+    // The platform installs a monitor, samples the process and shows
+    // frames, one a refresh, until the reading has them.
     let monitor = std::sync::Arc::new(nsh_engine::perf::PerfMonitor::new());
+    monitor.set_process(nsh_engine::perf::ProcessSample {
+        memory: Some(42 << 20),
+        ..Default::default()
+    });
     engine.control().set_perf_monitor(Some(monitor.clone()));
     let showing = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
     let frames = {
@@ -455,15 +459,16 @@ mount(() => <Text>{`reading ${perfStats()?.fps ?? "none"}`}</Text>);
     };
     let shown = read(&|t| {
         t.strip_prefix("reading ")
-            .and_then(|n| n.parse::<f32>().ok())
+            .and_then(|r| r.split_once(' '))
+            .and_then(|(fps, _)| fps.parse::<f32>().ok())
             .is_some_and(|fps| fps > 0.0)
     });
     showing.store(false, std::sync::atomic::Ordering::SeqCst);
     frames.join().unwrap();
-    assert!(shown.starts_with("reading "), "{shown}");
+    assert!(shown.ends_with(&format!(" {}", 42u64 << 20)), "{shown}");
     // Removed, it reads none again.
     engine.control().set_perf_monitor(None);
-    read(&|t| t == "reading none");
+    read(&|t| t == "reading none none");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

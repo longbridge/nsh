@@ -210,6 +210,8 @@ impl Installation {
     /// Linux keeps the directory the user's launchers name.
     fn target(&self, new: &Path) -> PathBuf {
         if cfg!(target_os = "macos")
+            && is_app_bundle(new)
+            && is_app_bundle(&self.root)
             && let (Some(name), Some(parent)) = (new.file_name(), self.root.parent())
             && Some(name) != self.root.file_name()
             && !parent.join(name).exists()
@@ -369,6 +371,12 @@ fn dunce_like(path: &Path) -> PathBuf {
         Some(path) => PathBuf::from(path),
         None => path.to_owned(),
     }
+}
+
+/// Whether `path` is a macOS application bundle (`*.app`): only a bundle takes
+/// a new name from an update; a plain directory (`~/.nsh`) keeps its own.
+fn is_app_bundle(path: &Path) -> bool {
+    path.extension().is_some_and(|e| e == "app")
 }
 
 /// A fresh directory in `parent`.
@@ -803,6 +811,19 @@ mod tests {
         let error = installation.install(&archive).unwrap_err().to_string();
         assert!(error.contains("code signature"), "{error}");
         assert_eq!(version(&root), "1.0.0");
+    }
+
+    /// A directory installation (`nsh update` replacing `~/.nsh` with an
+    /// archive whose top entry is `nsh/`) stays where it is on every
+    /// platform: only an `.app` takes the name of the new one.
+    #[test]
+    fn a_directory_keeps_its_place_whatever_the_new_entry_is_named() {
+        let dir = TempDir::new();
+        let root = dir.path().join(".nsh");
+        let installation = Installation::directory(&root, &root.join("bin/nsh")).unwrap();
+        let staged = dir.path().join(format!("{STAGED}1-.nsh"));
+        assert_eq!(installation.target(&staged.join("nsh")), root);
+        assert_eq!(installation.target(&staged.join("nsh.app")), root);
     }
 
     /// `Pal` (`com.example.pal`) becomes `Endless` (`com.example.endless`):

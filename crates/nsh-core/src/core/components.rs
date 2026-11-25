@@ -747,7 +747,7 @@ pub(super) struct Components {
     styles: FxHashMap<StyleRefinement, std::rc::Rc<ClassList>>,
     /// The styles a component on another's host gets from each above it,
     /// merged (by the lists', which the entry keeps).
-    merges: FxHashMap<(usize, usize), [std::rc::Rc<ClassList>; 3]>,
+    pub(super) merges: FxHashMap<(usize, usize), [std::rc::Rc<ClassList>; 3]>,
     /// While a view's slot content is matched: the nested component's host
     /// and the slot (its regions are the slot's).
     pub(super) filling: Option<(NodeId, &'static str)>,
@@ -3655,12 +3655,7 @@ impl<M: TextEngine> Core<M> {
             Some(self.components.lowered(style))
         };
         if !same(&own, &old.0) || !same(&user, &old.1) {
-            let list = match (&own, &user) {
-                (Some(a), Some(b)) => Some(std::rc::Rc::new(a.merged(b))),
-                (Some(a), None) => Some(a.clone()),
-                (None, Some(b)) => Some(b.clone()),
-                (None, None) => None,
-            };
+            let list = self.merge_user(own.clone(), user.clone());
             if let Ok(key) = self.key(id) {
                 self.set_class_list(key, list);
             }

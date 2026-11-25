@@ -1120,6 +1120,10 @@ export interface PerfStats {
   /** The share of recent frames that took longer than one refresh, from 0
    * to 1 (`0.05` is 5%), as Rust's `dropped` (a `Percentage`) reads it. */
   readonly dropped: number;
+  /** Memory the process owns, in bytes: the physical footprint on Apple
+   * platforms (Activity Monitor's Memory column), the resident set
+   * elsewhere; `null` where the platform does not say, and on the web. */
+  readonly memory: number | null;
 }
 
 /** The kind of link the device's default route takes (`network().kind`):

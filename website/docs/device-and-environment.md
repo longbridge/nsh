@@ -77,7 +77,7 @@ pub fn App() -> impl IntoElement {
 
 ## Window size and responsive layout
 
-`window()` (TSX: `windowSize()`) is the size of the surface NSH renders into: the screen on a phone, the window on an iPad in split view, the host view when NSH is embedded. On the desktops the app host is invisible, so this is the host surface's size, not the calling window's; read a window's own `state()?.contentBounds` and `state()?.scaleFactor` for layout inside it. Use it to change the layout, not only sizes:
+`window()` (TSX: `windowSize()`) is the size of the surface NSH renders into: the screen on a phone, the window on an iPad in split view, the host view when NSH is embedded. On macOS, Windows and Linux the app host is invisible, so this is the content size of the app's primary window: the first of its own windows still open, followed as the user resizes it, whichever window has the focus. When that window closes, it is the next one's. It is not the calling window's size: with several windows open, read a window's own `state()?.contentBounds` and `state()?.scaleFactor` for layout inside it. Use it to change the layout, not only sizes:
 
 ```tsx tabs
 import { Image, View } from "nsh";

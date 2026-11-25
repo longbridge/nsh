@@ -344,6 +344,11 @@ pub(crate) struct Run {
     /// What follows the run when the text is copied: the line's break (a
     /// newline, or the spaces a wrap dropped) after its last run.
     pub(crate) after: String,
+    /// The height of its line when it is not the run's own (a line height
+    /// the text sets, a taller run beside it): the DOM gives the run a line
+    /// box that tall around its baseline, so a selection highlights the
+    /// whole line, as a browser's own text does.
+    pub(crate) line_height: Option<f32>,
 }
 
 /// A box of a span background, behind the runs.
@@ -1485,7 +1490,10 @@ impl TextEngine for WebTextEngine {
                         (index.saturating_sub(1), byte)
                     }
                     _ => {
+                        let natural = s.ascent + s.descent;
                         runs.push(Run {
+                            line_height: ((line.height - natural).abs() > 0.01)
+                                .then_some(line.height),
                             x,
                             y: baseline - s.ascent,
                             text: text.to_string(),
