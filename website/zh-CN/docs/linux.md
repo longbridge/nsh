@@ -27,7 +27,7 @@ NSH 应用也能在 Linux 上运行。Linux 后端用 GTK 4 控件渲染应用�
   `gstreamer1-devel gstreamer1-plugins-base-devel`。应用运行的机器上需要 GStreamer 及其 base 插件（桌面系统自带），以及应用要播放的
   视频和音频格式对应的插件。开发包供 `Sound` 使用，即运行时的 Cargo feature `sound`：不播放音效的 Rust 应用在
   `nsh-platform-linux` 上设置 `default-features = false` 并不启用这个 feature，就无需它们即可构建，视频和 `AudioPlayer`
-  仍通过 GTK 播放。
+  仍通过 GTK 播放。应用没有导入 `Sound` 时，`nsh package` 构建的 TSX 应用 runner 也不启用它。
 
 ## 运行应用
 
