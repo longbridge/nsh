@@ -588,16 +588,18 @@ function localOffset(ms) {
  * `allowsFeature()`: `allowsFeature` logs for a name the browser does not
  * list, and such a browser does not gate sharing on that policy.
  */
-function webShareAllowed() {
-  if (typeof navigator === "undefined" || typeof navigator.share !== "function") return false;
-  if (typeof navigator.canShare === "function") {
+function webShareAllowed(
+  nav = typeof navigator === "undefined" ? undefined : navigator,
+  doc = typeof document === "undefined" ? undefined : document,
+) {
+  if (typeof nav?.share !== "function") return false;
+  if (typeof nav.canShare === "function") {
     try {
-      return navigator.canShare({ text: "share" });
+      return nav.canShare({ text: "share" });
     } catch {
       return false;
     }
   }
-  const doc = typeof document === "undefined" ? undefined : document;
   const policy = doc?.permissionsPolicy ?? doc?.featurePolicy;
   if (typeof policy?.allowsFeature !== "function") return true;
   if (typeof policy.features === "function" && !policy.features().includes("web-share")) return true;
