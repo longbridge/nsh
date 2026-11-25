@@ -1089,16 +1089,24 @@ pub(crate) struct WindowRecord {
     /// The size it opened at, its content's until the platform reports
     /// it (`Core::set_root_size`).
     pub(crate) size: Option<Size<Points>>,
+    /// Whether this window is the implicit first window created by `mount`
+    /// for a plain root that declared no `<Window>` scenes.
+    pub(crate) implicit: bool,
 }
 
 impl WindowRecord {
     /// A window the platform opened with `attributes`, at `size`.
-    pub(crate) fn opened(attributes: WindowAttributes, size: Option<Size<Points>>) -> WindowRecord {
+    pub(crate) fn opened(
+        attributes: WindowAttributes,
+        size: Option<Size<Points>>,
+        implicit: bool,
+    ) -> WindowRecord {
         WindowRecord {
             sent: attributes,
             pending: WindowAttributes::default(),
             fitted: None,
             size,
+            implicit,
         }
     }
 
@@ -1247,6 +1255,7 @@ mod tests {
         let mut record = WindowRecord::opened(
             WindowAttributes::resolve(WindowKind::Normal, &Default::default()),
             None,
+            false,
         );
         // Setting what it has sends nothing.
         record.pending.title = Some(String::new());

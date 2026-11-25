@@ -18,6 +18,28 @@ test("off the desktops the same view is the one surface", async () => {
   expect(app.shows("No window")).toBe(true);
 });
 
+test("closing the implicit main window quits on macOS by default", async () => {
+  const app = await open("./App.tsx", { platform: "macos" });
+  expect(app.quit()).toBe(false);
+  await app.window("main").pressClose();
+  await app.waitUntil(() => app.window("main").state() === null);
+  expect(app.quit()).toBe(true);
+});
+
+test("an implicit main window respects Application.setQuitMode(\"platform\")", async () => {
+  const app = await open("./PlatformQuit.tsx", { platform: "macos" });
+  await app.window("main").pressClose();
+  await app.waitUntil(() => app.window("main").state() === null);
+  expect(app.quit()).toBe(false);
+});
+
+test("an implicit main window respects nsh.json application.quitMode", async () => {
+  const app = await open("./configured/App.tsx", { platform: "macos" });
+  await app.window("main").pressClose();
+  await app.waitUntil(() => app.window("main").state() === null);
+  expect(app.quit()).toBe(false);
+});
+
 test("titleBar() and windowState() read main outside a render", async () => {
   const app = await open("./App.tsx", { platform: "macos", width: 800, height: 600 });
   await app.press("Read outside");

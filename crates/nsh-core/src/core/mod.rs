@@ -1711,10 +1711,14 @@ pub struct Core<M: TextEngine> {
     /// The windows of the app's own, by the app's id: their root nodes,
     /// and whether their placement is kept.
     window_ids: rustc_hash::FxHashMap<String, (NodeId, bool)>,
-    /// When the app quits if its last window closes
-    /// ([`DesktopCommand::SetQuitMode`]); [`crate::desktop::QuitMode::Explicit`]
-    /// until the host sets one.
-    quit_mode: crate::desktop::QuitMode,
+    /// Explicit quit mode set by the app (`nsh.json` `application.quitMode`,
+    /// `Application.setQuitMode`, [`Core::set_quit_mode`]); `None` until
+    /// the app chooses one.
+    quit_mode: Option<crate::desktop::QuitMode>,
+    /// Fallback quit mode when the app has not set one:
+    /// [`crate::desktop::QuitMode::Explicit`] in a bare core,
+    /// [`crate::desktop::QuitMode::Platform`] in an engine host.
+    default_quit_mode: crate::desktop::QuitMode,
     /// nsh.json's `"window"` launch defaults ([`Core::set_main_window`]):
     /// the first app window inherits them, since the host has no visible
     /// window of its own.
@@ -1812,9 +1816,11 @@ impl<M: TextEngine> Core<M> {
             window_ids: Default::default(),
             runs: Default::default(),
             folded: Default::default(),
-            // Until the host sets one: the app decides (the engine sets
-            // nsh.json's mode, `"platform"` by default, before the app runs).
-            quit_mode: crate::desktop::QuitMode::Explicit,
+            // Until the host or app sets one: a bare core keeps running
+            // (the engine sets the default `"platform"` and any explicit
+            // `application.quitMode` before the app runs).
+            quit_mode: None,
+            default_quit_mode: crate::desktop::QuitMode::Explicit,
             main_window_options: None,
             launch_defaults_applied: false,
             keep_main_placement: false,
@@ -2142,11 +2148,20 @@ impl<M: TextEngine> Core<M> {
         self.picker = backend;
     }
 
-    /// Sets when the app quits if its last window closes (the desktops'
-    /// `"platform"` mode: quit on Windows and Linux, stay on macOS).
-    /// `Application.setQuitMode` sets it at run time.
+    /// Sets an explicit quit mode when the app's last window closes
+    /// (`nsh.json` `application.quitMode`, `Application.setQuitMode`).
+    /// Overrides the implicit main window's default quit-on-close behavior.
     pub fn set_quit_mode(&mut self, mode: crate::desktop::QuitMode) {
-        self.quit_mode = mode;
+        self.quit_mode = Some(mode);
+    }
+
+    /// Sets the host's default quit mode when the app has not explicitly
+    /// configured one: explicit `<Window>` scenes follow this mode, while a
+    /// plain root's implicit main window still quits on close. Engine
+    /// plumbing, not app API.
+    #[doc(hidden)]
+    pub fn __set_default_quit_mode(&mut self, mode: crate::desktop::QuitMode) {
+        self.default_quit_mode = mode;
     }
 
     /// The main window's launch-time options (nsh.json `"window"`): its
@@ -3190,7 +3205,7 @@ impl<M: TextEngine> Core<M> {
                     .merge(&attributes);
             }
             DesktopCommand::SetQuitMode(mode) => {
-                self.quit_mode = mode;
+                self.quit_mode = Some(mode);
             }
             DesktopCommand::OpenWindow(mut open) => {
                 let options = &mut open.options;
@@ -3269,8 +3284,10 @@ impl<M: TextEngine> Core<M> {
                     .placement
                     .map(|p| p.bounds.size)
                     .or(options.default_size);
-                self.windows
-                    .insert(id, WindowRecord::opened(options.attributes.clone(), size));
+                self.windows.insert(
+                    id,
+                    WindowRecord::opened(options.attributes.clone(), size, open.implicit),
+                );
                 self.window_ids
                     .insert(options.id.clone(), (id, options.restore_bounds));
                 self.key_ancestry_dirty = true;
@@ -3314,8 +3331,11 @@ impl<M: TextEngine> Core<M> {
                     .is_ok_and(|k| id == crate::ROOT_ID || self.nodes[k as usize].parent != NO_KEY)
             })
             .collect();
+        let mut closed_implicit = false;
         for id in gone {
-            self.windows.remove(&id);
+            if let Some(record) = self.windows.remove(&id) {
+                closed_implicit |= record.implicit;
+            }
             self.window_ids.retain(|_, (node, _)| *node != id);
         }
         // The last window went: the quit mode decides whether that ends the
@@ -3327,9 +3347,19 @@ impl<M: TextEngine> Core<M> {
         // last close, not from `lastWindowClosed`. A listener that opens a
         // window again does so in the next commit, which by then is not the
         // last window (with the mode `"explicit"`).
+        //
+        // A plain root's implicit main window has no `<Window>` scenes or
+        // reopen flow of its own: unless the app explicitly chose a quit
+        // mode, closing it quits on every platform instead of leaving a
+        // windowless Dock process on macOS.
         if had_windows && self.window_ids.is_empty() {
             self.last_window_closed();
-            if self.quit_mode.quits(self.components.environment.os) {
+            let mode = self.quit_mode.unwrap_or(if closed_implicit {
+                crate::desktop::QuitMode::LastWindowClosed
+            } else {
+                self.default_quit_mode
+            });
+            if mode.quits(self.components.environment.os) {
                 self.commands.push((
                     ROOT_ID,
                     Command::Desktop(Box::new(crate::desktop::DesktopCommand::Quit)),
