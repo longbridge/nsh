@@ -1,7 +1,7 @@
 # Cargo features of the runtimes
 
 The large optional parts of a native runtime are Cargo features of the platform crates (`nsh-platform-linux`,
-`-macos`, `-windows`, `-ios`, `-android`, `-gpui`) and the app runners (`nsh-*-app`). `websocket` and `updater` are also features of `nsh-core`, `nsh-engine` and `nsh-platform-tui`. All are on by default, and `dev` turns all on.
+`-macos`, `-windows`, `-ios`, `-android`, `-gpui`) and the app runners (`nsh-*-app`). `websocket` and `updater` are also features of `nsh-core`, `nsh-engine` and `nsh-platform-tui`. All are on by default, and `dev` turns all on. `nsh-platform-gpui`'s `dev` is the exception: it connects to a dev server and leaves the parts as they are, so an embedding app's development build has its release's parts.
 
 | Feature | What it links | Off |
 | --- | --- | --- |

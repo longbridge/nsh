@@ -344,7 +344,7 @@ only when its color is a CSS color (`selection.rs` `style_color`): a document of
 On the terminal backend (`is_terminal()`) the document takes the forms of a terminal reader, in `text_view/view.rs`
 next to the screen forms; the full list is `TextView`'s row in `docs/dev/components.md` "In a terminal". In short:
 blocks are one blank row apart and nothing trails the last (`shown_before` skips the blocks that show nothing: a
-rule, a paragraph of images without alt text); headings drop their `#` marks and take their level's color in bold,
+rule); headings drop their `#` marks and take their level's color in bold,
 with a `─` rule under h1 only (`terminal_heading`); a quote is `▎` in the accent before muted text; code blocks and
 formulas are bands as wide as their longest line plus a Cell each side (`terminal_band`), a code block under its
 language label; an alert is one band across the body text's width, its icon and text a Cell in, and keeps a `│` in its

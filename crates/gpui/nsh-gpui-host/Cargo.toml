@@ -20,14 +20,14 @@ log.workspace = true
 
 [target.'cfg(any(target_os = "linux", target_os = "macos", windows))'.dependencies]
 nsh-base.workspace = true
-nsh-platform-gpui = { workspace = true, features = ["dev", "webview"] }
+nsh-platform-gpui = { workspace = true, features = ["dev", "shader", "editor", "emoji-picker", "highlight", "math", "plot", "rich-editor", "term", "zlib", "crypto", "websocket", "updater", "svg", "net", "webview"] }
 nsh-dev.workspace = true
 nsh-engine = { workspace = true, features = ["js"] }
 
 # Offscreen `shot` script steps (Linux reads the window from the X server).
 [target.'cfg(any(target_os = "macos", windows))'.dependencies]
-nsh-platform-gpui = { workspace = true, features = ["dev", "shot", "webview"] }
+nsh-platform-gpui = { workspace = true, features = ["dev", "shader", "editor", "emoji-picker", "highlight", "math", "plot", "rich-editor", "term", "zlib", "crypto", "websocket", "updater", "svg", "net", "shot", "webview"] }
 
 # Videos play through GStreamer, which Linux desktops have.
 [target.'cfg(target_os = "linux")'.dependencies]
-nsh-platform-gpui = { workspace = true, features = ["dev", "webview", "video"] }
+nsh-platform-gpui = { workspace = true, features = ["dev", "shader", "editor", "emoji-picker", "highlight", "math", "plot", "rich-editor", "term", "zlib", "crypto", "websocket", "updater", "svg", "net", "webview", "video"] }

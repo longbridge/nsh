@@ -760,6 +760,9 @@ pub(crate) struct Mounter {
     hosts: rustc_hash::FxHashMap<NodeId, NodeId>,
     /// Stacks whose screens changed in the current batch.
     dirty_stacks: Vec<NodeId>,
+    /// Views whose transform went back to the identity: the stacks inside
+    /// them are laid out again ([`Mounter::lay_out_untransformed`]).
+    untransformed: Vec<NodeId>,
     /// A retained tab changed visibility; sync the newly visible stack.
     bottom_bar_dirty: bool,
     /// Stacks whose screens changed during a push or pop transition: they
@@ -938,6 +941,7 @@ impl Mounter {
             auth_session: Default::default(),
             hosts: Default::default(),
             dirty_stacks: Vec::new(),
+            untransformed: Vec::new(),
             bottom_bar_dirty: false,
             deferred_stacks: Vec::new(),
             orientations: None,
@@ -1017,6 +1021,7 @@ impl Mounter {
         if animation_changed {
             self.apply_animations();
         }
+        self.lay_out_untransformed();
         self.report_finished();
         self.start_image_loads();
         for (_, area) in &self.areas {
@@ -1356,7 +1361,9 @@ impl Mounter {
                 {
                     // Back before its removal finished animating.
                     c.native.view().layer().removeAllAnimations();
-                    apply_dynamic(c, &self.animator);
+                    if apply_dynamic(c, &self.animator) {
+                        self.untransformed.push(child);
+                    }
                 }
                 if let (Some(p), Some(c)) = (self.slot(parent), self.slot(child)) {
                     let zoom = p.zoom_view();
@@ -1670,8 +1677,10 @@ impl Mounter {
                         .iter()
                         .map(|v| v.tag() as NodeId)
                         .collect();
-                    if let Some(s) = self.slot(id) {
-                        apply_dynamic(s, &self.animator);
+                    if let Some(s) = self.slot(id)
+                        && apply_dynamic(s, &self.animator)
+                    {
+                        self.untransformed.push(id);
                     }
                     for cell in cells {
                         self.set_in_mirrored(cell, mirrored);
@@ -1926,8 +1935,10 @@ impl Mounter {
                     }
                     // Bound values apply now too (a canvas reads them when
                     // it draws next).
-                    if let Some(s) = self.slot(id) {
-                        apply_dynamic(s, &self.animator);
+                    if let Some(s) = self.slot(id)
+                        && apply_dynamic(s, &self.animator)
+                    {
+                        self.untransformed.push(id);
                     }
                     self.push_shader_args(id);
                     // A component gets what is bound again.
@@ -2948,8 +2959,10 @@ impl Mounter {
             && c.in_mirrored != mirrored
         {
             c.in_mirrored = mirrored;
-            if let Some(c) = self.slot(id) {
-                apply_dynamic(c, &self.animator);
+            if let Some(c) = self.slot(id)
+                && apply_dynamic(c, &self.animator)
+            {
+                self.untransformed.push(id);
             }
         }
     }
@@ -3148,15 +3161,19 @@ impl Mounter {
                     // the closure runs synchronously inside it.
                     let this = unsafe { &mut *this };
                     this.decorate_animated(id);
-                    if let Some(s) = this.slot(id) {
-                        apply_dynamic(s, &this.animator);
+                    if let Some(s) = this.slot(id)
+                        && apply_dynamic(s, &this.animator)
+                    {
+                        this.untransformed.push(id);
                     }
                 });
             }
             None => {
                 self.decorate(id);
-                if let Some(s) = self.slot(id) {
-                    apply_dynamic(s, &self.animator);
+                if let Some(s) = self.slot(id)
+                    && apply_dynamic(s, &self.animator)
+                {
+                    self.untransformed.push(id);
                 }
             }
         }
@@ -4380,6 +4397,11 @@ impl Mounter {
                 }
             }
             screen.controller.follow_large_title();
+            // A header changed under a transform is laid out for where the
+            // stack is, not for the picture the transform shows.
+            if let Some(nav) = screen.controller.navigationController() {
+                crate::navigation::lay_out_header_in_place(&nav);
+            }
         }
         for (id, follows) in follows {
             self.following_scroll.retain(|&other| other != id);
@@ -6338,11 +6360,50 @@ impl Mounter {
         }
     }
 
+    /// Lays the stacks inside [`Mounter::untransformed`] out again.
+    ///
+    /// UIKit lays a stack out through the transforms around it: a header
+    /// that changes while a container shows the stack moved or scaled (a
+    /// push drawer) gets its bar laid out for that picture, which puts a bar
+    /// the device keeps along one side of the screen (the iPhone Duo's
+    /// vertical bar) on the side the picture is nearest. A transform going
+    /// back to the identity starts no layout pass, so the bar would stay
+    /// there, and the stack's safe area with what it was measured through
+    /// the transform, until something else lays it out.
+    fn lay_out_untransformed(&mut self) {
+        if self.untransformed.is_empty() {
+            return;
+        }
+        let views: Vec<Retained<UIView>> = std::mem::take(&mut self.untransformed)
+            .into_iter()
+            .filter_map(|id| self.slot(id).map(|s| s.native.view().retain()))
+            .collect();
+        let inside = |nav: &UINavigationController| {
+            nav.viewIfLoaded()
+                .is_some_and(|v| views.iter().any(|t| v.isDescendantOfView(t)))
+        };
+        for slot in self.views.iter().flatten() {
+            if let Native::Stack(stack) = &slot.native
+                && inside(&stack.nav)
+            {
+                crate::navigation::lay_out_in_place(&stack.nav);
+            }
+        }
+        // A collapsed split's pages are in its compact stack.
+        for split in self.splits.values() {
+            if inside(&split.compact.nav) {
+                crate::navigation::lay_out_in_place(&split.compact.nav);
+            }
+        }
+    }
+
     fn apply_animations(&mut self) {
         let animator = &self.animator;
         for &id in &self.animated {
-            if let Some(s) = self.views.get(id as usize).and_then(Option::as_ref) {
-                apply_dynamic(s, animator);
+            if let Some(s) = self.views.get(id as usize).and_then(Option::as_ref)
+                && apply_dynamic(s, animator)
+            {
+                self.untransformed.push(id);
             }
         }
         // Shaders get their bound uniforms; those that picture the views
@@ -6379,6 +6440,7 @@ impl Mounter {
                 self.pin_sticky(id);
             }
         }
+        self.lay_out_untransformed();
     }
 
     fn report_finished(&mut self) {
@@ -6695,8 +6757,9 @@ fn shader_args<'a>(
 }
 
 /// Opacity, background color and transform: static values overridden by
-/// animated bindings.
-fn apply_dynamic(slot: &Slot, animator: &Animator) {
+/// animated bindings. True when the view's transform went back to the
+/// identity, which UIKit lays nothing out for ([`Mounter::untransformed`]).
+fn apply_dynamic(slot: &Slot, animator: &Animator) -> bool {
     if let Native::Canvas(canvas) = &slot.native {
         canvas.set_values(slot.bindings.iter().filter_map(|&(prop, node)| match prop {
             AnimationProp::CanvasArg(k) => Some((k, animator.eval(node))),
@@ -6714,7 +6777,10 @@ fn apply_dynamic(slot: &Slot, animator: &Animator) {
     }
     view.setAlpha(dynamic_opacity(slot, animator) as CGFloat);
     slot.decor.set_background(view, background);
-    view.layer().setTransform(dynamic_transform(slot, animator));
+    let layer = view.layer();
+    let transform = dynamic_transform(slot, animator);
+    let untransformed = transform.is_identity() && !layer.transform().is_identity();
+    layer.setTransform(transform);
     apply_bound_decor(slot, animator);
     if let Native::Text(text) = &slot.native {
         let color = slot.bindings.iter().find_map(|&(prop, node)| match prop {
@@ -6726,6 +6792,7 @@ fn apply_dynamic(slot: &Slot, animator: &Animator) {
         });
         text.set_color(color);
     }
+    untransformed
 }
 
 /// Runs `f` in a UIKit animation of `view` following `t`; on the
