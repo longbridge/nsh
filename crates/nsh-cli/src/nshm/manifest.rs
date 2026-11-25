@@ -117,6 +117,13 @@ impl Manifest {
             )?,
         };
         let dependencies = dep::read_all(&config).map_err(|e| e.context(what.to_string()))?;
+        if let Some(d) = dependencies.iter().find(|d| !d.targets.is_empty()) {
+            bail!(
+                "{what}: nsh.json: dependencies: {}: \"targets\" is the app's to choose, in its \
+                 own nsh.json; an nshm's dependencies are linked wherever the nshm is",
+                d.name
+            );
+        }
         let platform = field("platform");
         Self::finish(
             dir,
@@ -340,6 +347,15 @@ mod tests {
             .unwrap();
             assert!(Manifest::read(&d, "acme-ui").is_err(), "{exports}");
         }
+        // The app chooses the targets of what it links, not an nshm.
+        fs::write(
+            d.join("nsh.json"),
+            r#"{ "name": "acme-ui", "version": "1.4.0", "exports": { "acme-ui": "src/index.tsx" },
+                "dependencies": { "nsh-extra": { "version": "^0.6", "targets": ["ios"] } } }"#,
+        )
+        .unwrap();
+        let err = Manifest::read(&d, "acme-ui").unwrap_err().to_string();
+        assert!(err.contains("\"targets\" is the app's to choose"), "{err}");
         // A newer NSH required.
         fs::write(
             d.join("nsh.json"),

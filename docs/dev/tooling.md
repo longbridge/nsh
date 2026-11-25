@@ -1079,7 +1079,7 @@ for the release runner in both. The test runner links QuickJS, so the first `nsh
 
 `crates/nsh-cli/src/nshm/` resolves, installs and locks; `crates/nsh-bundler/src/nshm.rs` reads the lock for TSX.
 
-- `dep.rs`: `"dependencies"` entries by package name (`"^1.2"`, `{ github|git, tag|rev, version, features }`,
+- `dep.rs`: `"dependencies"` entries by package name (`"^1.2"`, `{ github|git, tag|rev, version, features, targets }`,
   `{ path }`) and `nsh add` arguments (`crate[@req]`, `github:owner/repo[@req]`, Git URLs, `--path`). The
   pre-release keys `"modules"` and `"extensions"` are rejected.
 - `manifest.rs`: an nshm's own description. A Rust nshm's name and version are its `Cargo.toml`'s and it needs a
@@ -1108,6 +1108,14 @@ for the release runner in both. The test runner links QuickJS, so the first `nsh
   nothing into the shared installation), as a workspace of its own (`own_workspace`: a Rust app's `Cargo.toml` is a
   workspace root above the copy, and a published crate's manifest has no `[workspace]`); `platforms::dispatch` tries
   it before `PATH`.
+- `"targets"` (an app's entries only; `manifest.rs` refuses them in an nshm's, `check_targets` on a TSX nshm) lists
+  the `platform.os` names a Rust nshm is linked for. Resolution and `nsh.lock` ignore it. `main.rs` passes the
+  command's target (`run::Target::os`, `PackageTarget::asset_target`, this machine's for a headless `nsh test`,
+  `None` for commands that serve every target) to `rust_app::of`, and `linked_for` keeps the entries for it with
+  what they depend on, by the lock's dependency names. A command that leaves one out does not rewrite `.nsh/types`
+  (`left_out`). The bundler reads the lock's `module`s (`nsh_bundler::nshm::modules`): one the build's UI sets lack
+  and no `resolve.alias` replaces is refused in a static import and kept external in an `import()`
+  (`NshPlugin::left_out`); the plugin resolves before the alias, so where the nshm is linked its module wins.
 - `rust_app::cargo_nshm`: the Rust nshm the app's own crates (`"rust"`) reach through Cargo alone are linked as well,
   after the listed crates, by package name: packages of the crates' graph (normal dependencies) that depend on
   `nsh-core` and have a `#[native_module]` at their root (`specifier_of`, the test `manifest.rs` applies). The
