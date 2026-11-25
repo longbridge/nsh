@@ -3721,14 +3721,40 @@ fn gradient(
     if layers.is_empty() {
         return None;
     }
+    // The surface the terminal actually shows under the box: a step of
+    // its ramp, not the app's page color (which the terminal's background
+    // stands for, and may be far darker or lighter than it).
+    let base = parent.ramp.map_or(parent.rgb, |ramp| {
+        ramp.mix(palette::LADDER[parent.level.min(palette::LADDER.len() - 1)])
+    });
     let [red, green, blue, alpha] = fill.0.to_be_bytes();
     let alpha = f32::from(alpha) / 255.0;
     let under: palette::Rgb = std::array::from_fn(|i| {
         let top = f32::from([red, green, blue][i]);
-        (top * alpha + f32::from(parent.rgb[i]) * (1.0 - alpha)).round() as u8
+        (top * alpha + f32::from(base[i]) * (1.0 - alpha)).round() as u8
     });
-    let color_at =
-        |point: (f32, f32)| crate::gradient::over(under, layers.iter().map(|l| l.at(point)));
+    // The hue a too-faint wash is lifted toward: the box's own fill, else
+    // its gradient's first visible stop.
+    let toward: palette::Rgb = if fill.0 & 255 != 0 {
+        [red, green, blue]
+    } else {
+        effects
+            .background_images
+            .iter()
+            .flat_map(|g| g.stops.iter())
+            .find(|stop| stop.color.0 & 255 != 0)
+            .map_or(base, |stop| {
+                let [r, g, b, _] = stop.color.0.to_be_bytes();
+                [r, g, b]
+            })
+    };
+    let color_at = |point: (f32, f32)| {
+        palette::apart(
+            crate::gradient::over(under, layers.iter().map(|l| l.at(point))),
+            base,
+            toward,
+        )
+    };
     for y in visible.y..visible.bottom() {
         let py = (i32::from(y) - bounds.top) as f32 * ch + ch / 2.0;
         for x in visible.x..visible.right() {
