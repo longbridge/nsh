@@ -752,13 +752,14 @@ impl Iterator for LineRanges<'_> {
 }
 
 /// Soft-wraps one line (`text`, at byte `start` of the text) at `width`:
-/// at the last line break opportunity of Unicode's line breaking algorithm
-/// (UAX #14) when the row would overflow, else between graphemes. So rows
-/// break after spaces and between CJK characters, but not before closing
-/// punctuation or after opening punctuation. Whitespace never wraps (it
-/// hangs past the edge), and a row never ends inside a grapheme.
-/// Continuation rows start at the line's indentation unless that is over
-/// half the width.
+/// at the last break opportunity when the row would overflow, else between
+/// graphemes. Between two ASCII chars the opportunity is after whitespace,
+/// so code wraps between its tokens and an operator (`->`, `!=`) or a path
+/// stays whole; next to any other char it is Unicode's (UAX #14), so rows
+/// break between CJK characters, but not before closing punctuation or
+/// after opening punctuation. Whitespace never wraps (it hangs past the
+/// edge), and a row never ends inside a grapheme. Continuation rows start
+/// at the line's indentation unless that is over half the width.
 fn wrap_line(
     metrics: &Metrics,
     width: Points,
@@ -791,15 +792,32 @@ fn wrap_line(
     let mut x = 0.0;
     // Where the row may break: the last break opportunity, and the x there.
     let mut break_at: Option<(usize, f32)> = None;
-    // The opportunities, by the offset of the char after them, walked in
-    // step with the graphemes; ones inside a grapheme are skipped.
-    let mut breaks = unicode_linebreak::linebreaks(text)
-        .map(|(offset, _)| offset)
-        .peekable();
+    // UAX #14's opportunities, by the offset of the char after them, walked
+    // in step with the graphemes (ones inside a grapheme are skipped). An
+    // ASCII line has only ASCII neighbours and needs none.
+    let mut breaks = (!text.is_ascii()).then(|| {
+        unicode_linebreak::linebreaks(text)
+            .map(|(offset, _)| offset)
+            .peekable()
+    });
+    // The previous grapheme: whitespace, and ends in an ASCII char.
+    let mut after_blank = false;
+    let mut after_ascii = true;
     for (at, grapheme) in graphemes(text) {
-        while breaks.next_if(|&offset| offset < at).is_some() {}
+        let opportunity = match &mut breaks {
+            None => after_blank,
+            Some(breaks) => {
+                while breaks.next_if(|&offset| offset < at).is_some() {}
+                let unicode = breaks.next_if_eq(&at).is_some();
+                if after_ascii && grapheme.as_bytes()[0].is_ascii() {
+                    after_blank
+                } else {
+                    unicode
+                }
+            }
+        };
         // The indentation is no place to break: a row of only it is no use.
-        if breaks.next_if_eq(&at).is_some() && at > lead {
+        if opportunity && at > lead {
             break_at = Some((at, x));
         }
         let blank = grapheme.chars().all(char::is_whitespace);
@@ -817,6 +835,8 @@ fn wrap_line(
             break_at = None;
         }
         x += advance;
+        after_blank = blank;
+        after_ascii = grapheme.as_bytes().last().is_some_and(u8::is_ascii);
     }
     push(row_start..text.len(), row_indent, x);
 }
@@ -1125,6 +1145,21 @@ mod tests {
         assert_eq!(map.offset_at(&buffer, 0, px(25.0)), 3);
     }
 
+    /// Every row of `map` starts and ends between graphemes of `text`.
+    fn assert_rows_between_graphemes(map: &DisplayMap, text: &str) {
+        let bounds: Vec<usize> = text
+            .grapheme_indices(true)
+            .map(|(at, _)| at)
+            .chain([text.len()])
+            .collect();
+        for range in ranges(map) {
+            assert!(
+                bounds.contains(&range.start) && bounds.contains(&range.end),
+                "{range:?} splits a grapheme of {text:?}"
+            );
+        }
+    }
+
     #[test]
     fn mixed_cjk_and_latin_wraps_between_cjk_chars() {
         // The CJK run fills the row instead of moving down whole after
@@ -1133,9 +1168,9 @@ mod tests {
         let map = map(&buffer, Some(70.0), vec![]);
         assert_eq!(ranges(&map), vec![0..9, 9..15]);
         // Latin text and CJK may break where they meet without a space.
-        let buffer = Buffer::new("Mac上没下");
-        let map = self::map(&buffer, Some(40.0), vec![]);
-        assert_eq!(ranges(&map), vec![0..3, 3..9, 9..12]);
+        let buffer = Buffer::new("a Mac上没");
+        let map = self::map(&buffer, Some(60.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..5, 5..11]);
     }
 
     #[test]
@@ -1163,10 +1198,59 @@ mod tests {
     }
 
     #[test]
-    fn a_hyphen_is_a_break_opportunity() {
-        let buffer = Buffer::new("well-known");
-        let map = map(&buffer, Some(70.0), vec![]);
-        assert_eq!(ranges(&map), vec![0..5, 5..10]);
+    fn code_wraps_only_after_whitespace() {
+        // Where UAX #14 alone would split `->`, `!=`, `!done`, `|x|` and
+        // `well-known`, rows break at the space before them (or, without
+        // one, between graphemes), on ASCII lines and on lines with other
+        // text alike.
+        let cases: [(&str, f32, Vec<Range<usize>>); 10] = [
+            ("fn f() -> T", 80.0, vec![0..7, 7..11]),
+            ("a != b", 30.0, vec![0..2, 2..5, 5..6]),
+            ("if !done", 50.0, vec![0..3, 3..8]),
+            ("|x| x + 1", 20.0, vec![0..2, 2..4, 4..6, 6..8, 8..9]),
+            ("well-known", 70.0, vec![0..7, 7..10]),
+            ("注 fn f() -> T", 110.0, vec![0..11, 11..15]),
+            ("注 a != b", 50.0, vec![0..6, 6..10]),
+            ("注 if !done", 60.0, vec![0..7, 7..12]),
+            ("注 |x| x + 1", 40.0, vec![0..4, 4..8, 8..12, 12..13]),
+            ("注 well-known", 80.0, vec![0..4, 4..12, 12..14]),
+        ];
+        for (text, width, rows) in cases {
+            let buffer = Buffer::new(text);
+            let map = map(&buffer, Some(width), vec![]);
+            assert_eq!(ranges(&map), rows, "{text:?} at {width}");
+        }
+    }
+
+    #[test]
+    fn opportunities_inside_a_grapheme_are_skipped() {
+        // UAX #14 allows a break between 😀 and its skin tone modifier,
+        // and between a space and a combining mark on it; each pair is one
+        // grapheme. The opportunities after them still count.
+        let text = "中😀🏻文";
+        let buffer = Buffer::new(text);
+        let map = map(&buffer, Some(50.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..11, 11..14]);
+        assert_rows_between_graphemes(&map, text);
+        let text = "中 \u{301}文，";
+        let buffer = Buffer::new(text);
+        let map = self::map(&buffer, Some(70.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..6, 6..12]);
+        assert_rows_between_graphemes(&map, text);
+        // The only opportunity is inside a grapheme: graphemes break.
+        let text = "ab \u{301}cd";
+        let buffer = Buffer::new(text);
+        let map = self::map(&buffer, Some(40.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..5, 5..7]);
+        assert_rows_between_graphemes(&map, text);
+    }
+
+    #[test]
+    fn korean_wraps_between_syllables() {
+        // As a browser's `word-break: normal`.
+        let buffer = Buffer::new("한국어 문장입니다");
+        let map = map(&buffer, Some(50.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..13, 13..25]);
     }
 
     #[test]
