@@ -1313,6 +1313,15 @@ impl Style {
         self.0.as_deref().map_or(&[], crate::StylePatch::decls)
     }
 
+    /// Whether it has typed styles (Rust's [`StyleRefinement`], static or
+    /// bound): a style JS gives has none. A component that applies a style
+    /// it is given after its own bound styles reads it to bind only the
+    /// styles that need it ([`Element::inline_style`] of a closure binds
+    /// the typed styles after the element's own).
+    pub fn is_typed(&self) -> bool {
+        !self.1.is_empty()
+    }
+
     /// Applies it to `node` in `variant`: the declarations with `attr`, the
     /// typed styles as part of the node's own. A bound style adds its
     /// typed styles as a bound part only when it has some as the element

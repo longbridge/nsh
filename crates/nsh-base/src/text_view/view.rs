@@ -642,11 +642,20 @@ impl Cx {
             el.app_class(Some(SharedString::from(classes)))
         };
         let styles: Vec<&Style> = parts.iter().filter_map(|p| self.styles.get(*p)).collect();
-        match styles.as_slice() {
-            [] => el,
-            [style] => el.inline_style((*style).clone()),
+        let style = match styles.as_slice() {
+            [] => return el,
+            [style] => (*style).clone(),
             // Later parts win, as later classes do.
-            _ => el.inline_style(styles.iter().fold(Style::default(), |all, s| all.then(s))),
+            _ => styles.iter().fold(Style::default(), |all, s| all.then(s)),
+        };
+        // A static style's typed styles join the element's own static ones,
+        // which its bound ones (theme colors) come after; bound, they come
+        // after those, as the app's style is over the element's own. A style
+        // of declarations alone (JS's) stays static, costing no binding.
+        if style.is_typed() {
+            el.inline_style(move || style.clone())
+        } else {
+            el.inline_style(style)
         }
     }
 

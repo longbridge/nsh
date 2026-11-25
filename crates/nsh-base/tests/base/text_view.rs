@@ -1800,3 +1800,48 @@ fn typed_part_styles_reach_headings_in_order() {
     assert_eq!(color("text:Big"), Color(0x0000_ffff));
     assert_eq!(color("text:Small"), Color(0xff00_00ff));
 }
+
+/// A quote whose part has a typed style (`StyleRefinement`, as a Rust app
+/// types it) or the same in declarations: either wins over the color the
+/// view gives quotes, which follows the theme.
+#[derive(Clone, PartialEq, Props)]
+struct QuoteProps {
+    typed: bool,
+}
+
+#[component]
+fn StyledQuote(props: QuoteProps) -> impl IntoElement {
+    use nsh_base::text_view::PartStyle;
+    use nsh_core::element::StyleRefinement;
+
+    let red = rgb(0xff0000);
+    let style = if props.typed {
+        StyleRefinement::default().text_color(red).into()
+    } else {
+        Style::default().with(
+            StyleKey::Color,
+            nsh_core::PropertyValue::Color(Some(red.into())),
+        )
+    };
+    let styles = TextViewStyles {
+        blockquote: Some(PartStyle(style)),
+        ..Default::default()
+    };
+    text_view().markdown("> quoted").styles(styles)
+}
+
+#[test]
+fn a_quotes_typed_part_style_wins_over_its_theme_color() {
+    for typed in [false, true] {
+        let mut app = Headless::start(EngineConfig::new(nsh_testing::windowed_root_with::<
+            StyledQuote,
+        >(move || QuoteProps { typed })))
+        .unwrap();
+        app.wait_for("quoted").unwrap();
+        assert_eq!(
+            app.screen().span_style("text:quoted").unwrap().color,
+            Color(0xff00_00ff),
+            "typed: {typed}"
+        );
+    }
+}

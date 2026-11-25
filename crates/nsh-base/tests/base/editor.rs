@@ -1283,31 +1283,53 @@ fn typed_part_styles_reach_line_numbers_of_one_part_and_of_two() {
 }
 
 /// Typed decoration styles reach their range's text (`style`) and their
-/// lines' rows (`lineStyle`), whose text takes their color.
+/// lines' rows (`lineStyle`), whose text takes their color; where two
+/// decorations cover the same text or line, the later one wins.
 #[test]
-fn typed_decoration_styles_reach_their_text_and_rows() {
+fn typed_decoration_styles_reach_their_text_and_rows_the_later_winning() {
     use nsh_base::editor::{EditorDecoration, EditorPosition, EditorRange};
     use nsh_core::Color;
 
     #[component]
     fn Decorated() -> impl IntoElement {
-        let mut word = EditorDecoration::default();
-        word.range = EditorRange::new(EditorPosition::new(0, 0), EditorPosition::new(0, 3));
-        word.style = Some(typed_color(0xff0000));
-        let mut row = EditorDecoration::default();
-        row.range = EditorRange::new(EditorPosition::new(1, 0), EditorPosition::new(1, 3));
-        row.line_style = Some(typed_color(0x0000ff));
+        let range = |line, from, to| {
+            EditorRange::new(
+                EditorPosition::new(line, from),
+                EditorPosition::new(line, to),
+            )
+        };
+        let text = |line, from, to, color| {
+            let mut d = EditorDecoration::default();
+            d.range = range(line, from, to);
+            d.style = Some(typed_color(color));
+            d
+        };
+        let row = |line, color| {
+            let mut d = EditorDecoration::default();
+            d.range = range(line, 0, 3);
+            d.line_style = Some(typed_color(color));
+            d
+        };
         view().test_id("editor").w(px(600.0)).h(px(200.0)).child(
             editor()
-                .default_value("abc and\ndef")
-                .decorations(vec![word, row])
+                .default_value("abc and xyz\ndef\nghi")
+                .decorations(vec![
+                    text(0, 0, 3, 0xff0000),
+                    text(0, 8, 11, 0xff0000),
+                    text(0, 8, 11, 0x0000ff),
+                    row(1, 0x00ff00),
+                    row(2, 0x00ff00),
+                    row(2, 0x0000ff),
+                ])
                 .size_full(),
         )
     }
 
-    let app = start_component::<Decorated>("def");
+    let app = start_component::<Decorated>("ghi");
     let color = |selector: &str| app.screen().span_style(selector).unwrap().color;
     assert_eq!(color("id:editor >> text:abc"), Color(0xff00_00ff));
-    assert_ne!(color("id:editor >> text: and"), Color(0xff00_00ff));
-    assert_eq!(color("id:editor >> text:def"), Color(0x0000_ffff));
+    assert_ne!(color("id:editor >> text: and "), Color(0xff00_00ff));
+    assert_eq!(color("id:editor >> text:xyz"), Color(0x0000_ffff));
+    assert_eq!(color("id:editor >> text:def"), Color(0x00ff_00ff));
+    assert_eq!(color("id:editor >> text:ghi"), Color(0x0000_ffff));
 }

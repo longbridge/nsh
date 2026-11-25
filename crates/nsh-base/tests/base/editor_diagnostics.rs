@@ -28,9 +28,10 @@ const TEXT: &str = "let unused = old();";
 struct HarnessProps {
     /// The editor's `classes`.
     classes: EditorClasses,
-    /// The editor's `styles` make the `unnecessaryText` part bold, typed
-    /// (`StyleRefinement`, as a Rust app types it).
-    typed_bold: bool,
+    /// The editor's `styles` color the `diagnosticWarning` part red and the
+    /// `deprecatedText` part, which comes after it, blue and bold, typed
+    /// (`StyleRefinement`, as a Rust app types them).
+    typed: bool,
 }
 
 fn range(line: u32, from: u32, to: u32) -> EditorRange {
@@ -102,9 +103,14 @@ fn hover_text(e: &EditorHoverEvent) -> String {
 fn Harness(props: HarnessProps) -> impl IntoElement {
     let hovered = signal(String::from("Hover none"));
     let mut styles = EditorStyles::default();
-    if props.typed_bold {
-        styles.unnecessary_text = Some(PartStyle(
-            nsh_core::element::StyleRefinement::default()
+    if props.typed {
+        use nsh_core::element::StyleRefinement;
+        styles.diagnostic_warning = Some(PartStyle(
+            StyleRefinement::default().text_color(rgb(0xff0000)).into(),
+        ));
+        styles.deprecated_text = Some(PartStyle(
+            StyleRefinement::default()
+                .text_color(rgb(0x0000ff))
                 .font_weight(FontWeight::BOLD)
                 .into(),
         ));
@@ -130,15 +136,15 @@ fn start(classes: EditorClasses) -> Headless {
     start_styled(classes, false)
 }
 
-/// [`start`], the `unnecessaryText` part bold in a typed style when
-/// `typed_bold`.
-fn start_styled(classes: EditorClasses, typed_bold: bool) -> Headless {
+/// [`start`], with the typed part styles of [`HarnessProps::typed`] when
+/// `typed`.
+fn start_styled(classes: EditorClasses, typed: bool) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(900.0)),
         ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>(move || {
             HarnessProps {
                 classes: classes.clone(),
-                typed_bold,
+                typed,
             }
         }))
     };
@@ -182,15 +188,18 @@ fn the_apps_classes_restyle_the_tagged_text() {
     assert!(!screen.span_style("id:editor >> text:let").unwrap().italic);
 }
 
-/// A typed style of a tag's part reaches the tagged text as the part's
-/// classes do.
+/// Typed styles of a diagnostic's parts reach its text as the parts'
+/// classes do: its severity's part, then its tags', the later winning
+/// (`old` is a deprecated warning).
 #[test]
 fn the_apps_typed_styles_restyle_the_tagged_text() {
     let app = start_styled(EditorClasses::default(), true);
     let screen = app.screen();
-    let weight = |selector: &str| screen.span_style(selector).unwrap().font_weight;
-    assert_eq!(weight("id:editor >> text:unused"), 700);
-    assert_ne!(weight("id:editor >> text:let"), 700);
+    let style = |selector: &str| screen.span_style(selector).unwrap();
+    let old = style("id:editor >> text:old");
+    assert_eq!(old.color, nsh_core::Color(0x0000_ffff));
+    assert_eq!(old.font_weight, 700);
+    assert_ne!(style("id:editor >> text:let").font_weight, 700);
 }
 
 #[test]

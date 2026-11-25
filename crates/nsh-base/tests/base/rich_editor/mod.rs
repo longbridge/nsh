@@ -772,7 +772,8 @@ fn char_point(app: &Headless, line: &str, i: usize) -> Point<Points> {
 
 /// An editor whose node and mark parts have typed styles
 /// (`StyleRefinement`, as a Rust app types them): paragraphs red, bold
-/// text blue over its paragraph's red.
+/// text blue over its paragraph's red, headings green but those of level
+/// 2 blue (`heading[level=2]` comes after `heading`).
 #[component]
 fn TypedStyles(props: HarnessProps) -> impl IntoElement {
     use nsh_base::rich_editor::view::{PartStyles, RichEditorStyles};
@@ -781,7 +782,12 @@ fn TypedStyles(props: HarnessProps) -> impl IntoElement {
     let color = |c: u32| StyleRefinement::default().text_color(rgb(c)).into();
     let mut styles = RichEditorStyles::default();
     styles.nodes = Some(PartStyles(
-        [("paragraph".to_owned(), color(0xff0000))].into(),
+        [
+            ("paragraph".to_owned(), color(0xff0000)),
+            ("heading".to_owned(), color(0x00ff00)),
+            ("heading[level=2]".to_owned(), color(0x0000ff)),
+        ]
+        .into(),
     ));
     styles.marks = Some(PartStyles([("bold".to_owned(), color(0x0000ff))].into()));
     view()
@@ -797,11 +803,15 @@ fn TypedStyles(props: HarnessProps) -> impl IntoElement {
 }
 
 #[test]
-fn typed_node_and_mark_styles_reach_their_text() {
-    let doc = json!({"type": "doc", "content": [{"type": "paragraph", "content": [
-        {"type": "text", "text": "plain "},
-        {"type": "text", "text": "loud", "marks": [{"type": "bold"}]},
-    ]}]});
+fn typed_node_and_mark_styles_reach_their_text_the_later_winning() {
+    let doc = json!({"type": "doc", "content": [
+        {"type": "heading", "attrs": {"level": 1}, "content": [{"type": "text", "text": "Top"}]},
+        {"type": "heading", "attrs": {"level": 2}, "content": [{"type": "text", "text": "Sub"}]},
+        {"type": "paragraph", "content": [
+            {"type": "text", "text": "plain "},
+            {"type": "text", "text": "loud", "marks": [{"type": "bold"}]},
+        ]},
+    ]});
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(900.0)),
         ..EngineConfig::new(nsh_testing::windowed_root_with::<TypedStyles>(move || {
@@ -823,4 +833,6 @@ fn typed_node_and_mark_styles_reach_their_text() {
         color("id:editor >> text:loud"),
         nsh_core::Color(0x0000_ffff)
     );
+    assert_eq!(color("id:editor >> text:Top"), nsh_core::Color(0x00ff_00ff));
+    assert_eq!(color("id:editor >> text:Sub"), nsh_core::Color(0x0000_ffff));
 }

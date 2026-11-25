@@ -1168,19 +1168,21 @@ fn a_wrapped_lines_later_parts_continue_its_first_for_a_copy() {
     assert_eq!(joined.trim_end(), long.trim_end());
 }
 
-/// A typed part style (`StyleRefinement`, as a Rust app types it)
-/// reaches its part's view: the line numbers' text takes its color.
+/// Typed part styles (`StyleRefinement`, as a Rust app types them) reach
+/// their parts' views: an unchanged line's number takes `lineNumber`'s
+/// color, a changed line's its tint's part, which comes after it.
 #[test]
-fn a_typed_part_style_reaches_its_part() {
+fn typed_part_styles_reach_line_numbers_the_later_winning() {
     use nsh_base::{DiffViewStyles, text_view::PartStyle};
     use nsh_core::{Color, element::StyleRefinement};
 
     #[component]
     fn Typed() -> impl IntoElement {
         let mut styles = DiffViewStyles::default();
-        styles.line_number = Some(PartStyle(
-            StyleRefinement::default().text_color(rgb(0xff0000)).into(),
-        ));
+        let color = |c: u32| PartStyle(StyleRefinement::default().text_color(rgb(c)).into());
+        styles.line_number = Some(color(0xff0000));
+        styles.line_number_deleted = Some(color(0x00ff00));
+        styles.line_number_added = Some(color(0x0000ff));
         view().test_id("diff").w(px(700.0)).h(px(300.0)).child(
             diff_view()
                 .old_value("same\nold\n")
@@ -1198,11 +1200,13 @@ fn a_typed_part_style_reaches_its_part() {
     config.environment.idiom = Idiom::Desktop;
     let mut app = Headless::start(config).expect("the engine starts");
     see(&mut app, "new");
-    assert_eq!(
-        app.screen()
-            .span_style("id:diff >> text:1 >> nth=0")
-            .unwrap()
-            .color,
-        Color(0xff00_00ff)
-    );
+    let color = |selector: &str| app.screen().span_style(selector).unwrap().color;
+    assert_eq!(color("id:diff >> text:1 >> nth=0"), Color(0xff00_00ff));
+    // Line 2 is deleted on the old side and added on the new one.
+    let mut changed = [
+        color("id:diff >> text:2 >> nth=0"),
+        color("id:diff >> text:2 >> nth=1"),
+    ];
+    changed.sort_by_key(|c| c.0);
+    assert_eq!(changed, [Color(0x0000_ffff), Color(0x00ff_00ff)]);
 }
