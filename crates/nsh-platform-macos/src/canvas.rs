@@ -51,10 +51,14 @@ use nsh_core::{
     },
     geometry::{Corners, Points, Radians, size},
 };
-use objc2_core_foundation::{CFRetained, CGAffineTransform, CGFloat, CGPoint, CGRect, CGSize};
+use objc2_core_foundation::{
+    CFRetained, CFType, CGAffineTransform, CGFloat, CGPoint, CGRect, CGSize,
+};
 use objc2_core_graphics::{
-    CGBlendMode, CGContext, CGGradient, CGGradientDrawingOptions, CGImage, CGLayer, CGLineCap,
-    CGLineJoin, CGMutablePath, CGPath, CGTextDrawingMode,
+    CGBitmapContextCreate, CGBitmapContextCreateImage, CGBitmapContextGetBitmapInfo,
+    CGBitmapContextGetBitsPerComponent, CGBitmapContextGetColorSpace, CGBlendMode, CGColorSpace,
+    CGContext, CGGradient, CGGradientDrawingOptions, CGImage, CGImageAlphaInfo,
+    CGImageByteOrderInfo, CGLayer, CGLineCap, CGLineJoin, CGMutablePath, CGPath, CGTextDrawingMode,
 };
 use rustc_hash::FxHashMap;
 
@@ -1611,6 +1615,9 @@ impl<'a> Replay<'a> {
         let Some(Some(CanvasBitmap { image, scale })) = self.images.get(uri) else {
             return;
         };
+        // Its pixels in the context's color space, converted once.
+        let baked = self.parts.borrow_mut().in_space_of(image, self.c);
+        let image = &baked;
         let mut part: Option<CFRetained<CGImage>> = None;
         // Its pixels over its file name's density (`@3x`), as an `Image`'s,
         // never the screen's: the same size on every display. The source
@@ -1651,7 +1658,7 @@ impl<'a> Replay<'a> {
         // Core Graphics images draw y up.
         CGContext::translate_ctm(c, dx, dy + dh);
         CGContext::scale_ctm(c, 1.0, -1.0);
-        let drawn: &CGImage = part.as_deref().unwrap_or(image);
+        let drawn: &CGImage = part.as_deref().unwrap_or(&**image);
         CGContext::draw_image(
             c,
             CGRect::new(CGPoint::ZERO, CGSize::new(dw, dh)),
@@ -1661,23 +1668,85 @@ impl<'a> Replay<'a> {
     }
 }
 
-/// The parts of a canvas's images that `drawImage`s with a source
-/// rectangle draw (sprites of a sheet), each made once and drawn again on
-/// every frame. Core Graphics converts an image's pixels to the color
-/// space it draws into on its first draw and keeps the result with the
-/// image: a part made again for each draw converts again each time (a
-/// sprite sheet zoomed in on: hundreds of milliseconds a frame).
+/// A canvas's images as it draws them: each redrawn once in the color
+/// space and pixel format of the bitmap it is drawn into, and the parts
+/// of them that `drawImage`s with a source rectangle draw (sprites of a
+/// sheet), each made once and drawn again on every frame.
+///
+/// An image in another color space than the context's (an sRGB PNG drawn
+/// into a Display P3 or extended-range backing store) is color matched
+/// pixel by pixel as Core Graphics samples it, on every draw: a sprite
+/// sheet zoomed in on spent hundreds of milliseconds a frame there
+/// (`img_interpolate_read` → `CGColorTransformConvertUsingCMSConverter`).
+/// Drawn from a copy already in the context's color space, it is not.
 #[derive(Default)]
 struct ImageParts {
-    /// By the whole image (kept alive here, so its address stays its own)
-    /// and the rectangle, in its pixels.
-    parts: FxHashMap<(usize, [u64; 4]), (CFRetained<CGImage>, CFRetained<CGImage>)>,
+    /// The images redrawn in a context's color space.
+    baked: Vec<Baked>,
+    /// By the image the part is cut from (a whole image or a baked one,
+    /// kept alive here, so its address stays its own) and the rectangle,
+    /// in its pixels.
+    parts: FxHashMap<(usize, [u64; 4]), CutFrom>,
+}
+
+/// A part, with the image it is cut from.
+type CutFrom = (CFRetained<CGImage>, CFRetained<CGImage>);
+
+/// An image redrawn in a bitmap context's color space and pixel format.
+struct Baked {
+    whole: CFRetained<CGImage>,
+    space: CFRetained<CGColorSpace>,
+    bits: usize,
+    info: u32,
+    /// `None` when it could not be (it is drawn as it is).
+    image: Option<CFRetained<CGImage>>,
 }
 
 impl ImageParts {
     /// At most this many parts are kept: a drawing whose source
     /// rectangles keep changing (an animation) starts over past it.
     const MAX: usize = 4096;
+    /// At most this many images are kept baked (a window moved between
+    /// displays bakes again for each).
+    const MAX_BAKED: usize = 64;
+    /// Larger images are drawn as they are: a copy of them costs more
+    /// memory than their conversion costs time.
+    const MAX_BAKED_PIXELS: usize = 4096 * 4096;
+
+    /// `whole` in the color space and pixel format of the bitmap context
+    /// `cx`, redrawn the first time; `whole` itself when it already is, or
+    /// `cx` is not a bitmap (a PDF, or Core Animation recording an
+    /// asynchronous draw).
+    fn in_space_of(&mut self, whole: &CFRetained<CGImage>, cx: &CGContext) -> CFRetained<CGImage> {
+        let Some(space) = CGBitmapContextGetColorSpace(Some(cx)) else {
+            return whole.clone();
+        };
+        if CGImage::color_space(Some(whole)).is_some_and(|own| same(&own, &space)) {
+            return whole.clone();
+        }
+        let bits = CGBitmapContextGetBitsPerComponent(Some(cx));
+        let info = CGBitmapContextGetBitmapInfo(Some(cx)).0;
+        if let Some(b) = self.baked.iter().find(|b| {
+            std::ptr::eq::<CGImage>(&*b.whole, &**whole)
+                && b.bits == bits
+                && b.info == info
+                && same(&b.space, &space)
+        }) {
+            return b.image.clone().unwrap_or_else(|| whole.clone());
+        }
+        let image = bake(whole, &space, bits, with_alpha(info));
+        if self.baked.len() >= Self::MAX_BAKED {
+            self.baked.clear();
+        }
+        self.baked.push(Baked {
+            whole: whole.clone(),
+            space,
+            bits,
+            info,
+            image: image.clone(),
+        });
+        image.unwrap_or_else(|| whole.clone())
+    }
 
     /// The part `rect` of `whole`; `None` when it has none
     /// (`CGImageCreateWithImageInRect`).
@@ -1702,15 +1771,72 @@ impl ImageParts {
         Some(part)
     }
 
-    /// Keeps only the parts of the images `keep` says.
+    /// Keeps only the images `keep` says, baked, and their parts.
     fn retain(&mut self, mut keep: impl FnMut(&CGImage) -> bool) {
-        self.parts.retain(|_, (whole, _)| keep(whole));
+        self.baked.retain(|b| keep(&b.whole));
+        let baked = &self.baked;
+        self.parts.retain(|_, (from, _)| {
+            keep(from)
+                || baked
+                    .iter()
+                    .any(|b| b.image.as_deref().is_some_and(|i| std::ptr::eq(i, &**from)))
+        });
     }
 
     #[cfg(test)]
     fn len(&self) -> usize {
         self.parts.len()
     }
+}
+
+/// `info` with an alpha channel: an opaque backing store's
+/// (`NoneSkipFirst`) made premultiplied, so a sprite baked in its format
+/// keeps its transparent pixels.
+fn with_alpha(info: u32) -> u32 {
+    const MASK: u32 = 0x1F;
+    let alpha = match CGImageAlphaInfo(info & MASK) {
+        CGImageAlphaInfo::None | CGImageAlphaInfo::NoneSkipLast => {
+            CGImageAlphaInfo::PremultipliedLast
+        }
+        CGImageAlphaInfo::NoneSkipFirst => CGImageAlphaInfo::PremultipliedFirst,
+        a => a,
+    };
+    (info & !MASK) | alpha.0
+}
+
+/// Whether two color spaces are the same (`CFEqual`).
+fn same(a: &CGColorSpace, b: &CGColorSpace) -> bool {
+    let (a, b): (&CFType, &CFType) = (a, b);
+    a == b
+}
+
+/// `image` redrawn in a bitmap of `space` with `bits` per component and
+/// the bitmap info `info` (a context's), or in 8-bit premultiplied BGRA of
+/// `space` when Core Graphics makes no bitmap of that format; `None` when
+/// it is too large or no bitmap could be made.
+fn bake(
+    image: &CGImage,
+    space: &CGColorSpace,
+    bits: usize,
+    info: u32,
+) -> Option<CFRetained<CGImage>> {
+    let (w, h) = (CGImage::width(Some(image)), CGImage::height(Some(image)));
+    if w == 0 || h == 0 || w.saturating_mul(h) > ImageParts::MAX_BAKED_PIXELS {
+        return None;
+    }
+    let bgra = CGImageAlphaInfo::PremultipliedFirst.0 | CGImageByteOrderInfo::Order32Little.0;
+    // SAFETY: contexts with pixels of their own (rows padded by Core
+    // Graphics), released when dropped.
+    let cx = unsafe {
+        CGBitmapContextCreate(std::ptr::null_mut(), w, h, bits, 0, Some(space), info)
+            .or_else(|| CGBitmapContextCreate(std::ptr::null_mut(), w, h, 8, 0, Some(space), bgra))
+    }?;
+    CGContext::draw_image(
+        Some(&cx),
+        CGRect::new(CGPoint::ZERO, CGSize::new(w as f64, h as f64)),
+        Some(image),
+    );
+    CGBitmapContextCreateImage(Some(&cx))
 }
 
 fn blend(c: Composite) -> CGBlendMode {
@@ -2309,6 +2435,85 @@ mod tests {
             .collect();
         assert_eq!(made, again);
         assert_eq!(pixel(&first, true, 25.5, 5.5)[3], 255);
+    }
+
+    #[test]
+    fn an_image_is_converted_to_the_context_color_space_once() {
+        // An sRGB-ish (device RGB) image drawn into a Display P3 extended
+        // range, half-float bitmap, as a wide-gamut backing store: it is
+        // redrawn in that space and format once, then reused; into a bitmap
+        // of its own space it is drawn as it is.
+        let sheet = opaque_image(20, 10);
+        let p3 = CGColorSpace::with_name(Some(unsafe {
+            objc2_core_graphics::kCGColorSpaceExtendedLinearDisplayP3
+        }))
+        .unwrap();
+        // SAFETY: a context with pixels of its own.
+        let wide = unsafe {
+            CGBitmapContextCreate(
+                std::ptr::null_mut(),
+                8,
+                8,
+                16,
+                0,
+                Some(&p3),
+                CGImageAlphaInfo::PremultipliedLast.0
+                    | CGImageByteOrderInfo::Order16Little.0
+                    | objc2_core_graphics::CGImageComponentInfo::Float.0,
+            )
+        }
+        .unwrap();
+        let mut parts = ImageParts::default();
+        let baked = parts.in_space_of(&sheet, &wide);
+        assert!(!std::ptr::eq::<CGImage>(&*baked, &*sheet));
+        assert!(same(&CGImage::color_space(Some(&baked)).unwrap(), &p3));
+        assert_eq!(CGImage::bits_per_component(Some(&baked)), 16);
+        assert!(std::ptr::eq::<CGImage>(
+            &*parts.in_space_of(&sheet, &wide),
+            &*baked
+        ));
+        assert_eq!(parts.baked.len(), 1);
+
+        let space = CGColorSpace::new_device_rgb().unwrap();
+        // SAFETY: as above.
+        let own = unsafe {
+            CGBitmapContextCreate(
+                std::ptr::null_mut(),
+                8,
+                8,
+                8,
+                0,
+                Some(&space),
+                CGImageAlphaInfo::PremultipliedFirst.0 | CGImageByteOrderInfo::Order32Little.0,
+            )
+        }
+        .unwrap();
+        assert!(std::ptr::eq::<CGImage>(
+            &*parts.in_space_of(&sheet, &own),
+            &*sheet
+        ));
+
+        // A part of the baked sheet goes with the sheet.
+        assert!(
+            parts
+                .get(&baked, CGRect::new(CGPoint::ZERO, CGSize::new(10.0, 10.0)))
+                .is_some()
+        );
+        parts.retain(|i| std::ptr::eq(i, &*sheet));
+        assert_eq!((parts.baked.len(), parts.len()), (1, 1));
+        parts.retain(|_| false);
+        assert_eq!((parts.baked.len(), parts.len()), (0, 0));
+    }
+
+    #[test]
+    fn an_image_baked_for_an_opaque_backing_store_keeps_its_alpha() {
+        let skip = CGImageAlphaInfo::NoneSkipFirst.0 | CGImageByteOrderInfo::Order32Little.0;
+        assert_eq!(
+            with_alpha(skip),
+            CGImageAlphaInfo::PremultipliedFirst.0 | CGImageByteOrderInfo::Order32Little.0
+        );
+        let last = CGImageAlphaInfo::PremultipliedLast.0 | CGImageByteOrderInfo::Order16Little.0;
+        assert_eq!(with_alpha(last), last);
     }
 
     #[test]
