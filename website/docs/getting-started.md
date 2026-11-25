@@ -1,6 +1,6 @@
 ---
 title: Getting started
-description: "Create an app in TSX with nsh init, extend it with Rust where needed, run it on iOS, Android, macOS, Windows, Linux or the web, host TSX modules in your app and ship them as signed packages, or package the app on its own."
+description: "Create an NSH app with nsh init, run it on iOS, Android, macOS, Windows, Linux or the web, and ship it: as signed TSX packages inside your own app, or as a standalone app."
 order: 4
 group: start
 demo: guide-getting-started
@@ -8,23 +8,24 @@ demo: guide-getting-started
 
 # Getting started
 
-This guide creates an NSH app, runs it on the platforms you target, and ships it. NSH apps are written in TSX, with
-hot updates while you develop; the app's own code runs on QuickJS, and the engine, layout, rendering and modules
-under it are native. Where an app needs native speed, system access or a crate, it adds Rust through
-[nshm](./nshm.md), and an app can also be Rust from start to end, compiled with no JavaScript VM. The guide follows a
-TSX app, with the same app in Rust beside it.
-It assumes `nsh` is installed and on your `PATH` ([Installation](./installation.md)); in a checkout, use
-`./target/debug/nsh` instead.
+This guide creates an NSH app, runs it, and ships it.
+
+You write NSH apps in TSX and get hot updates while you develop. Your code runs on QuickJS. The engine, layout,
+rendering and modules under it are native. When you need native speed, system access or a crate, add Rust with
+[nshm](./nshm.md). You can also write the whole app in Rust, with no JavaScript VM. Each example below shows the TSX
+version with the Rust version beside it.
+
+You need `nsh` on your `PATH` ([Installation](./installation.md)). In an NSH checkout, use `./target/debug/nsh`.
 
 > [!TIP]
-> No app project at hand? The first two sections need none: `nsh run` shows the app in a window on your computer, in
-> the iOS simulator, on an Android device or in the browser. You can stop there, or [package it as a standalone
+> You don't need an existing app. The first two sections run the app on its own: in a desktop window, the iOS
+> simulator, an Android device or a browser. From there you can [package it as a standalone
 > app](#or-ship-it-as-a-standalone-app).
 
 ## Create an app
 
-On a terminal, `nsh init` asks what the app is written in: `ts` (the default), `rust` or `mixed` (TSX extended with
-Rust in `ext/`). `--template` chooses without asking.
+`nsh init` asks which template to use: `ts` (the default), `rust`, or `mixed` (TSX plus Rust in `ext/`). Pass
+`--template` to skip the question.
 
 ### In TSX
 
@@ -32,14 +33,14 @@ Rust in `ext/`). `--template` chooses without asking.
 nsh init my-app --template ts
 ```
 
-A TSX app is one or more `.tsx` files with an entry: what `nsh run` runs, and what a host app loads as a module.
+A TSX app is one or more `.tsx` files with one entry. `nsh run` runs the entry, and a host app loads it as a module.
 
 | File | What it is |
 |---|---|
 | `App.tsx` | The entry module: renders the app with `mount` |
 | `App.test.tsx` | Its test (`nsh test`) |
 | `nsh.json` | The app's name, id, version and build number ([Project structure](./project-structure.md#nshjson)) |
-| `tsconfig.json` | Extends `.nsh/tsconfig.json`, NSH's TypeScript settings, which resolve `nsh` to the declarations in `.nsh/types` |
+| `tsconfig.json` | Extends `.nsh/tsconfig.json` (NSH's TypeScript settings), which resolves `nsh` to `.nsh/types` |
 | `.gitignore` | Ignores `.nsh/` and `target/` |
 | `.nsh/types/` | Generated declarations of every NSH module, for your editor |
 
@@ -49,7 +50,7 @@ A TSX app is one or more `.tsx` files with an entry: what `nsh run` runs, and wh
 nsh init my-app --template rust
 ```
 
-`nsh init` creates the directory and writes a Cargo project:
+This creates a new directory with a Cargo project:
 
 | File | What it is |
 |---|---|
@@ -61,15 +62,16 @@ nsh init my-app --template rust
 | `README.md` | How to run, test and package the app, and how to add a TSX entry later |
 | `.gitignore` | Ignores `.nsh/` and `target/` |
 
-Rust development needs a Rust toolchain ([rustup](https://rustup.rs), and we recommend
-[huacnlee/cargo](https://github.com/huacnlee/cargo) for building); the `nsh` commands build the app's runners
-from NSH's crates on crates.io, at the CLI's version.
+Rust apps need a Rust toolchain ([rustup](https://rustup.rs)). We recommend
+[huacnlee/cargo](https://github.com/huacnlee/cargo) for building. `nsh` builds the app's runners from NSH's crates on
+crates.io, at the CLI's version.
 
-For a TSX app, files that already exist are kept, so you can run it in a directory that has some of them; a Rust app
-is created in a new directory.
+Notes for both templates:
 
-For both, the display name defaults to the directory's name; pass `--name "My App"` to choose another. The id becomes
-`com.example.<name>`: change it in `nsh.json` before you ship.
+- A TSX app can go into an existing directory. `nsh init` keeps files that already exist. A Rust app always gets a new
+  directory.
+- The display name defaults to the directory name. Use `--name "My App"` to change it.
+- The id is `com.example.<name>`. Change it in `nsh.json` before you ship.
 
 ### TSX extended with Rust
 
@@ -77,13 +79,13 @@ For both, the display name defaults to the directory's name; pass `--name "My Ap
 nsh init my-app --template mixed
 ```
 
-The TSX app, plus an nshm crate of its own in `ext/<name>-native/`, whose component, module and class `App.tsx`
-imports: the place for the parts of the app that are better in Rust ([An app's own Rust: ext/](./nshm.md#an-apps-own-rust-ext)).
-A TSX app made with `--template ts` adds the same later with `nsh add`.
+You get the TSX app plus an nshm crate in `ext/<name>-native/`. `App.tsx` imports its component, module and class.
+Put the parts that are better in Rust there ([An app's own Rust: ext/](./nshm.md#an-apps-own-rust-ext)). To add this
+to a `ts` app later, use `nsh add`.
 
 ### The root component
 
-The two templates make the same app, a counter:
+Both templates make the same counter app:
 
 ```tsx tabs
 // App.tsx
@@ -164,60 +166,58 @@ pub fn App() -> impl IntoElement {
 
 In TSX:
 
-- **`import { mount, signal, Text, View } from "nsh"`**: `nsh` is the core module: signals, `mount`, the other
-  reactive primitives, and the host elements. It is served by the native runtime, not bundled. **`nsh/base`** has the
-  base components.
-- **`function App()`** is a component that runs **once**. **`{count()}`** reads the signal inside JSX: the compiler
-  sees a call and makes this text follow the signal.
-- **`<View onPress>`** is a native view that reacts to presses; `active:` classes are its style while pressed. `View`,
-  `Text`, `Image`, `Scroll` and the other [host elements](../elements/index.md) are imported from `nsh` (`Input` from `nsh/base`); only
-  `If` and `Each` need no import.
-- **`class`** takes [Tailwind](./tailwind.md) classes; `style={{ … }}` takes an object of camelCase style
-  properties, with numbers in points. `bg-background`, `bg-primary`, `text-primary-foreground` and
-  `rounded-(--radius)` name the tokens of the app's theme ([Theme tokens](./tailwind.md#theme-tokens)): they follow
-  dark mode by themselves, and `"theme"` in `nsh.json` restyles them. Layout is flexbox, and children stack in a
-  column by default ([Layout](./layout.md)).
-- **`mount(App)`** renders the app root; on the desktops the root declares its windows with `<Window>`.
+- **`from "nsh"`**: the core module. It has signals, `mount`, the other reactive primitives and the host elements.
+  The native runtime provides it, so it is not bundled. **`nsh/base`** has the base components.
+- **`function App()`** is a component. It runs **once**. **`{count()}`** reads the signal, and the compiler makes this
+  text update when the signal changes.
+- **`<View onPress>`** is a native view that handles presses. `active:` classes style it while pressed. Import `View`,
+  `Text`, `Image`, `Scroll` and the other [host elements](../elements/index.md) from `nsh`, and `Input` from
+  `nsh/base`. Only `If` and `Each` need no import.
+- **`class`** takes [Tailwind](./tailwind.md) classes. `style={{ … }}` takes camelCase style properties, with numbers
+  in points. `bg-background`, `bg-primary`, `text-primary-foreground` and `rounded-(--radius)` are theme tokens
+  ([Theme tokens](./tailwind.md#theme-tokens)). They follow dark mode, and `"theme"` in `nsh.json` restyles them.
+- **Layout** is flexbox. Children stack in a column by default ([Layout](./layout.md)).
+- **`mount(App)`** renders the root. On desktop, the root declares its windows with `<Window>`.
 
 In Rust:
 
-- **`use nsh_core::prelude::*`** brings the primitives (`view()`, `text()`, `scroll()`, `input()`, `image()`, ...),
-  [signals](./reactivity.md) and the typed style methods (`.p_safe_area()` pads a view by the [safe area](../elements/safe-area.md)); **`nsh_base`** has the unstyled base components
-  (`button()`, the keyboard, dialogs) and `theme()`, the colors and
-  radii the app's components draw with ([Theme](./rust.md#theme)).
-- **`#[component] pub fn App()`** is a component: a function that runs **once** and returns its elements.
-  `nsh.json`'s `"root": "App"` names it, and `nsh run` mounts it. `signal(0_u32)` makes a value that changes over time.
-- **`text(move || format!(…, count.get()))`** binds the text to the signal: when `count` changes, NSH runs this
-  closure again and updates this one text, nothing else. Styles take closures the same way:
-  `.bg(move || theme().primary)` follows the theme into dark mode.
-- **`.on_press(..)`** makes the view answer presses; `.active(|s| s.opacity(0.6))` is its style while pressed, applied
-  natively. The button is the app's own: NSH provides the primitives and the capabilities, and the app draws its UI
-  from them.
-- **`.px_5()`, `.rounded(px(10.0))`, `.gap_4()`** are typed style methods named as Tailwind's utilities are, in
-  points (`px`).
-- **`#[native_module("my-app/native")]`** names what a TSX entry may import from the crate, for when you add TSX
-  screens on top ([Building with Rust](./rust.md#extending-a-rust-app-with-tsx)).
+- **`use nsh_core::prelude::*`** imports the primitives (`view()`, `text()`, `scroll()`, `input()`, `image()`, ...),
+  [signals](./reactivity.md) and typed style methods. `.p_safe_area()` pads a view by the
+  [safe area](../elements/safe-area.md).
+- **`nsh_base`** has the unstyled base components (`button()`, the keyboard, dialogs) and `theme()`, the app's colors
+  and radii ([Theme](./rust.md#theme)).
+- **`#[component] pub fn App()`** is a component. It runs **once** and returns its elements. `"root": "App"` in
+  `nsh.json` names it, and `nsh run` mounts it. `signal(0_u32)` holds a value that changes.
+- **`text(move || format!(…, count.get()))`** binds the text to the signal. When `count` changes, NSH reruns the
+  closure and updates only this text. Styles take closures too: `.bg(move || theme().primary)` follows dark mode.
+- **`.on_press(..)`** handles presses. `.active(|s| s.opacity(0.6))` is the pressed style, applied natively. The button
+  is the app's own: NSH provides primitives and capabilities, and the app draws its UI with them.
+- **`.px_5()`, `.rounded(px(10.0))`, `.gap_4()`** are typed style methods named after Tailwind utilities, in points
+  (`px`).
+- **`#[native_module("my-app/native")]`** lists what a TSX entry may import from the crate, if you add TSX screens
+  later ([Building with Rust](./rust.md#extending-a-rust-app-with-tsx)).
 
 > [!IMPORTANT]
-> Text shows in a text element: `<Text>` in TSX, `text(..)` in Rust. In TSX, text written straight in a `<View>`
-> (`<View>Hello</View>`) is a build error that points at it, and a string an expression puts there
-> (`<View>{name}</View>`) is reported in the log.
+> Text must be inside a text element: `<Text>` in TSX, `text(..)` in Rust. In TSX, literal text in a `<View>`
+> (`<View>Hello</View>`) is a build error. A string from an expression (`<View>{name}</View>`) logs a warning.
 
 ## Develop it
 
 ### Run it
 
-`nsh run` builds the app, launches it and rebuilds while you edit; the app's logs appear in the terminal. Give it the
-app's directory: it runs a TSX app's `App.tsx` (`nsh run my-app/App.tsx` names another entry), or a Rust app's root.
+`nsh run` builds the app, launches it and rebuilds when you edit. App logs appear in the terminal. Pass the app's
+directory. It runs `App.tsx` for a TSX app, or the root for a Rust app. To run another entry, name it:
+`nsh run my-app/App.tsx`.
 
-For a TSX app, `nsh run` starts a dev server and a development host that loads the app from it, and patches the
-running app on every save; Rust in `ext/` is built into the host, and built again when it changes. For a Rust
-app, `nsh run` builds the app's own runner for the target, with your crate and the root mounted and no QuickJS, and
-starts it; a change to the Rust code builds it again and restarts the app. `cargo run` in the app's directory starts
-the same root straight on the desktop backend.
+| App | What `nsh run` does |
+|---|---|
+| TSX | Starts a dev server and a development host that loads the app. Patches the running app on every save. Builds Rust in `ext/` into the host and rebuilds it when it changes. |
+| Rust | Builds the app's own runner for the target: your crate, the root mounted, no QuickJS. Rebuilds and restarts on every Rust change. |
 
-Without `--target`, `nsh run` uses the machine you are on: an AppKit window on macOS, a Win32 window on Windows and a
-GTK window on Linux. Pick another platform with `--target`:
+In a Rust app, `cargo run` starts the same root directly on the desktop backend.
+
+Without `--target`, `nsh run` targets your machine: AppKit on macOS, Win32 on Windows, GTK on Linux. Use `--target`
+for other platforms:
 
 | Target | Command | Runs from |
 |---|---|---|
@@ -235,8 +235,8 @@ nsh run my-app --target ios
 nsh run my-app --target ios --device "iPhone 16 Pro"
 ```
 
-`nsh` uses a booted simulator, or boots the newest iPhone if none is running, and installs the app (a Rust app's
-runner, or the development host) into it. `--device` picks a simulator by name or UDID.
+`nsh` uses the booted simulator, or boots the newest iPhone. It installs the Rust app's runner or the development
+host. `--device` picks a simulator by name or UDID.
 
 #### Android
 
@@ -244,10 +244,12 @@ runner, or the development host) into it. `--device` picks a simulator by name o
 nsh run my-app --target android
 ```
 
-Start an emulator or connect a device first (`adb devices` lists them). NSH uses the one `--device <serial>` or
-`ANDROID_SERIAL` names, else the first one, and names the one it uses when several are connected. `nsh` installs the app
-on it: a Rust app's own `libnsh.so`, or a development host APK (rebuilt only when the runtime changes) whose dev server
-port is forwarded to the device with `adb reverse`, so it works over USB without a shared network.
+Start an emulator or connect a device first (`adb devices` lists them). NSH picks the device named by
+`--device <serial>` or `ANDROID_SERIAL`, otherwise the first one. If several are connected, it prints which one it
+uses.
+
+`nsh` installs a Rust app's own `libnsh.so`, or a development host APK. The APK is rebuilt only when the runtime
+changes. `adb reverse` forwards the dev server port, so USB is enough. No shared network is needed.
 
 #### macOS (AppKit)
 
@@ -255,8 +257,8 @@ port is forwarded to the device with `adb reverse`, so it works over USB without
 nsh run my-app --target macos
 ```
 
-The app opens as a desktop Mac app (AppKit, in a resizable window), with mouse, trackpad and keyboard input instead of
-touches. It needs macOS 14 or later; see [macOS](./macos.md).
+The app opens as a Mac app in a resizable AppKit window, with mouse, trackpad and keyboard input. Requires macOS 14
+or later. See [macOS](./macos.md).
 
 #### Windows (default on Windows)
 
@@ -264,8 +266,8 @@ touches. It needs macOS 14 or later; see [macOS](./macos.md).
 nsh run my-app
 ```
 
-The app opens in a desktop window (1200×800 points), with mouse, touchpad, touch and keyboard input. It needs Windows
-10 1809 or later; see [Windows](./windows.md).
+The app opens in a 1200×800 point window, with mouse, touchpad, touch and keyboard input. Requires Windows 10 1809 or
+later. See [Windows](./windows.md).
 
 #### Linux (default on Linux)
 
@@ -273,7 +275,7 @@ The app opens in a desktop window (1200×800 points), with mouse, touchpad, touc
 nsh run my-app
 ```
 
-The app opens in a GTK window (390×844 points). It needs GTK 4.14 or later; see [Linux](./linux.md).
+The app opens in a 390×844 point GTK window. Requires GTK 4.14 or later. See [Linux](./linux.md).
 
 #### Web
 
@@ -281,8 +283,8 @@ The app opens in a GTK window (390×844 points). It needs GTK 4.14 or later; see
 nsh run my-app --target web
 ```
 
-`nsh` prints the page's address; open it in a browser. A Rust app runs as WebAssembly with your crate, and the open
-page loads the new build by itself after a change; see [Web](./web.md).
+`nsh` prints the page address. Open it in a browser. A Rust app runs as WebAssembly. After a change, the open page
+loads the new build. See [Web](./web.md).
 
 ### Edit it
 
@@ -298,11 +300,11 @@ text("Add one")
     .text_color(move || theme().primary_foreground)
 ```
 
-Save. A TSX app gets a hot update: the CLI rebuilds and sends a patch, and the host runs the changed module again and
-renders again only the components whose code changed. Here that is `App`, which owns the `count` signal, so the count
-starts over. A Rust app is built again and restarts with the new label; the count starts over too.
+Save. In a TSX app, the CLI sends a patch. The host reruns the changed module and re-renders only the components
+whose code changed. Here that is `App`, which owns `count`, so the count resets. A Rust app rebuilds and restarts, so
+its count resets too.
 
-Pieces of UI move into components of their own, or plain functions that return elements:
+Move parts of the UI into their own components, or into plain functions that return elements:
 
 ```tsx tabs
 function TapButton(props: { onPress: () => void }) {
@@ -331,20 +333,24 @@ fn tap_button(on_press: impl Fn() + 'static) -> impl IntoElement {
 // In App: .child(tap_button(move || count.update(|value| *value += 1)))
 ```
 
-In TSX, state survives when you edit a component that does not own it: tap a few times, then change `TapButton`'s
-color, and the button updates while the count stays. Hot replacement works per top-level component: a function with a
-capitalized name whose body contains JSX. A component renders again when its own code changes, or when the module's
-code outside components changes (a constant it uses, a helper). If an edit cannot be applied in place (for example, it
-imports an NSH module the running app did not import yet, or changes `nsh.json`'s capabilities), the host reloads the
-whole app.
+In TSX, state survives when you edit a component that does not own it. Tap a few times, then change `TapButton`'s
+color. The button updates and the count stays.
+
+How hot replacement works:
+
+- It works per top-level component: a function with a capitalized name whose body contains JSX.
+- A component re-renders when its own code changes, or when module code outside components changes (a constant or
+  helper it uses).
+- If an edit can't be applied in place, the host reloads the whole app. Examples: importing an NSH module the running
+  app has not imported yet, or changing capabilities in `nsh.json`.
 
 #### Errors
 
-A Rust compile error is printed in the terminal with cargo's output, and `nsh run` builds again with the next save. A
-TSX build error is printed in the terminal and shown on the device as a red overlay with the file, line and
-column; the app keeps running the last good build. The overlay disappears with the next successful build (tap it to
-dismiss it earlier). An exception thrown at run time is shown the same way, with its stack mapped back to your `.tsx`
-source.
+| Error | Where it shows |
+|---|---|
+| Rust compile error | Terminal, with cargo's output. `nsh run` rebuilds on the next save. |
+| TSX build error | Terminal, and a red overlay on the device with file, line and column. The app keeps running the last good build. The overlay closes after the next good build, or when you tap it. |
+| Runtime exception | Same overlay, with the stack mapped back to your `.tsx` source. |
 
 ### Development tools
 
@@ -354,20 +360,27 @@ source.
 nsh run my-app --target catalyst
 ```
 
-The app opens with the iOS (UIKit) backend in an iPhone-sized window (390×844 points) on your Mac. Use it only when
-you need it: to check behavior specific to Catalyst, or an app that embeds NSH in a Mac Catalyst app. For the Mac app,
-use the default `macos`; to see an app as a phone shows it, use `--target ios`.
+The app opens with the iOS (UIKit) backend in a 390×844 point window on your Mac. Use it only to check
+Catalyst-specific behavior, or for a Mac Catalyst app that embeds NSH. For a Mac app, use the default `macos`. To see
+the phone layout, use `--target ios`.
 
 ## Host it in your app
 
-A native app shows NSH in a view of its own: `NshAppView` (a `UIView`) on iOS, `NshView` (an Android `View`) on
-Android, `AppView` on macOS, Windows, Linux and in GPUI apps. Place it like any other view, on any screen, as many
-times as you need.
+A native app shows NSH in a view:
 
-A Rust root is part of the app's build: the app links your crate and mounts the root with `AppSource::Rust` on the
-`AppView` of macOS, Windows, Linux, GPUI and iOS ([Building with Rust](./rust.md#an-app-written-in-rust)). A TSX app is
-a module the view loads: during development from the dev server, in a release from a built bundle or a downloaded,
-signed package. The sections below load TSX modules.
+| Platform | View |
+|---|---|
+| iOS | `NshAppView` (a `UIView`) |
+| Android | `NshView` (an Android `View`) |
+| macOS, Windows, Linux, GPUI | `AppView` |
+
+Place it like any other view, on any screen, as many times as you need.
+
+A Rust root is compiled into the app. The app links your crate and mounts the root with `AppSource::Rust` on the
+`AppView` of macOS, Windows, Linux, GPUI and iOS ([Building with Rust](./rust.md#an-app-written-in-rust)).
+
+A TSX app is a module the view loads. In development it comes from the dev server. In a release it comes from a built
+bundle or a downloaded signed package. The sections below load TSX modules.
 
 ### iOS
 
@@ -388,9 +401,8 @@ try app.loadBundle(at: Bundle.main.url(forResource: "bundle", withExtension: "ns
 #endif
 ```
 
-`nsh dev my-app` serves the module to the app and pushes every save, as `nsh run` does with its own host. For the
-release build, `nsh build my-app --release --out MyApp/nsh` writes the bundle into a folder you add to the app's
-resources.
+`nsh dev my-app` serves the module and pushes every save, like `nsh run` does. For release,
+`nsh build my-app --release --out MyApp/nsh` writes the bundle to a folder. Add that folder to the app's resources.
 
 ### Android
 
@@ -411,23 +423,25 @@ if (BuildConfig.DEBUG) {
 
 ### macOS, Windows and Linux
 
-Desktop apps written in Rust embed NSH with `AppView`, from the `nsh-platform-macos`, `nsh-platform-windows`,
-`nsh-platform-linux` and `nsh-platform-gpui` crates: an `NSView`, a child window, a GTK widget or a GPUI view that
-mounts a Rust root or loads a built bundle. See [macOS](./macos.md#embedding-in-a-mac-app),
+Rust desktop apps embed NSH with `AppView` from the `nsh-platform-macos`, `nsh-platform-windows`,
+`nsh-platform-linux` and `nsh-platform-gpui` crates. It is an `NSView`, a child window, a GTK widget or a GPUI view.
+It mounts a Rust root or loads a built bundle. See [macOS](./macos.md#embedding-in-a-mac-app),
 [Windows](./windows.md#embedding-in-a-win32-app), [Linux](./linux.md#embedding-in-a-gtk-app) and [GPUI](./gpui.md),
 and [Platforms](./platforms.md#embed-in-a-native-app) for every host side by side.
 
 ### What the module may do
 
-On iOS and Android, the host decides before loading what a module may do: `grantCapabilities` sets the network hosts
-and other capabilities it may reach, and limits cap its memory, call time and node count ([Sandbox and
-capabilities](./sandbox-and-capabilities.md)). To give modules your own native views (a map, a chart, a design-system
-component), register them as [native components](./native-components.md).
+On iOS and Android, the host sets a module's permissions before loading it. `grantCapabilities` lists the network
+hosts and other capabilities it may use. Limits cap its memory, call time and node count ([Sandbox and
+capabilities](./sandbox-and-capabilities.md)).
+
+To give modules your own native views (a map, a chart, a design-system component), register them as
+[native components](./native-components.md).
 
 ## Ship updates as signed packages
 
-A TSX module the app downloads after release comes as a signed package. Create a root key once and keep it offline,
-certify a release key with it, and publish:
+TSX modules that the app downloads after release are signed packages. Create a root key once and keep it offline.
+Use it to certify a release key, then publish:
 
 ```sh
 nsh keygen keys/root && nsh keygen keys/release
@@ -435,8 +449,8 @@ nsh certify --root keys/root.secret --key keys/release.pub --apps 'com.example.*
 nsh publish my-app --key keys/release.secret --cert keys/release.cert --build 2
 ```
 
-The app trusts the root's public key and loads what it downloads; NSH verifies the signature, the certificate and the
-revocation list before running anything:
+The app trusts the root public key and loads the download. NSH checks the signature, certificate and revocation list
+before running any code:
 
 ```swift
 let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -445,12 +459,12 @@ try trust.addRoot(rootPublicKey)   // the contents of keys/root.pub
 let info = try await app.loadPackage(at: downloadedFile, trust: trust)
 ```
 
-Android has the same flow with `NshTrust` and `NshPackage`. Hosting, delivery and revocation in detail: [Signed
+Android uses the same flow with `NshTrust` and `NshPackage`. For hosting, delivery and revocation, see [Signed
 packages](./signed-packages.md).
 
 ## Or ship it as a standalone app
 
-`nsh package` builds an installable app, TSX or Rust, with no Xcode project or Gradle build of your own:
+`nsh package` builds an installable TSX or Rust app. You don't need your own Xcode project or Gradle build:
 
 ```sh
 nsh package my-app --target ios-simulator --run
@@ -461,23 +475,23 @@ nsh package my-app --target windows
 nsh package my-app --target web
 ```
 
-A TSX app is packaged with the prebuilt runtime (or, with Rust in `ext/`, a runtime built with it); a Rust app with its
-own runner, built from your crate and NSH's crates, its root mounted. Options, signing and icons: [Packaging](./packaging.md).
+A TSX app uses the prebuilt runtime. With Rust in `ext/`, it uses a runtime built with that Rust. A Rust app uses its
+own runner, built from your crate and NSH's crates. For options, signing and icons, see [Packaging](./packaging.md).
 
 ## Try it in the terminal
 
-`nsh test` runs an app headless, with no device or window. Given a TSX app's entry or a Rust app's `nsh.json`, it
-opens the app, lets it run and prints what it mounts; with `--trace`, also the native view operations and the time of
-every commit ([Testing](./testing-and-trace.md)):
+`nsh test` runs an app headless, with no device or window. Pass a TSX entry or a Rust app's `nsh.json`. It opens the
+app and prints what it mounts. `--trace` also prints native view operations and the time of every commit
+([Testing](./testing-and-trace.md)):
 
 ```sh
 nsh test my-app/App.tsx --trace      # a TSX app's entry
 nsh test my-app/nsh.json --trace     # a Rust app's root
 ```
 
-Given a directory, it runs the app's tests: each template's `App.test.tsx` opens the app, presses its button and
-checks what it shows (`nsh test my-app`). A Rust app's opens its root (`open(".")`); it can also be tested in `cargo test` with
-`nsh_testing::Headless` ([Building with Rust](./rust.md#testing)).
+Pass a directory to run the app's tests: `nsh test my-app`. Each template's `App.test.tsx` opens the app, presses the
+button and checks the result. In a Rust app, the test opens the root with `open(".")`. You can also test a Rust app in
+`cargo test` with `nsh_testing::Headless` ([Building with Rust](./rust.md#testing)).
 
 ## Next steps
 

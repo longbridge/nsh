@@ -1,36 +1,39 @@
 ---
 title: Sandbox and Capabilities
-description: The limits every NSH app runs under (memory, time, nodes), the language hardening of release builds, and capabilities declared in nsh.json and granted by host apps.
+description: The limits every NSH app runs under (memory, time, nodes), how release builds are hardened, and the capabilities an app declares in nsh.json and a host app grants.
 order: 21
 group: delivery
 ---
 
 # Sandbox and Capabilities
 
-An app written in Rust is native code compiled into the app that ships it, as the rest of that app is, and runs with
-its trust; its calls into NSH's services (`fetch`, images, web views, the status bar) go through the same native
-checks as TSX's, under what a host grants. The TSX and JavaScript an app runs, its own or a [signed
-package](./signed-packages.md) it downloads, run in a QuickJS VM per view, and everything they can do outside that VM
-goes through NSH's native runtime. That makes it possible to run code you did not write, such as third-party mini apps
-or downloaded updates, under rules the host app controls:
+The sandbox lets a host app run TSX and JavaScript it did not write, such as a [signed package](./signed-packages.md)
+or a third-party mini app, under rules the host controls. Rust code is different: it is native code compiled into
+the app, and NSH trusts it like the rest of the app.
 
-- **Limits** bound the memory, time and native resources one app can use.
-- **Hardening** removes the ways to turn strings into code in release builds.
+Each view runs its JS in its own QuickJS VM. Anything the JS does outside that VM goes through NSH's native runtime.
+That runtime applies three layers:
+
+- **Limits** cap the memory, time and native resources one app can use.
+- **Hardening** removes every way to turn a string into code in release builds.
 - **Capabilities** list what an app may reach: which hosts it may fetch from, which pages a web view may show, whether
-  it may change the status bar. The app declares them; a host app may grant less.
+  it may change the status bar. The app declares them, and a host app may grant less.
 
-A bundle holds only the app's code: the reactive graph, the renderer and every module the app imports are native. So
-nothing in JS is trusted, and every limit and check is enforced in Rust; there is no JS code an app could patch to get
-around them.
+A bundle holds only the app's own code. The reactive graph, the renderer and every imported module are native. NSH
+trusts nothing in JS and enforces every limit and check in Rust, so there is no JS an app could patch to get around
+them. Rust code calling NSH services (`fetch`, images, web views, the status bar) goes through the same native checks
+as TSX, within what the host grants.
 
 ## Limits
 
-Limits bound a VM: they apply to TSX and JavaScript. An app embedded in another app runs within limits its host app decides. An app on its own (packaged with
-`nsh package`, the web included, or run with `nsh run`) is your own code, as a native app is: it uses the memory and
-time the device gives it, and its interpreter stack of 4096 KB turns deep recursion into a `RangeError` the app can
-catch.
+Limits apply to a VM, so they cover TSX and JavaScript.
 
-An embedded app has these limits:
+- **An embedded app** runs within limits its host app sets.
+- **A standalone app** (packaged with `nsh package`, the web included, or run with `nsh run`) is your own code, like a
+  native app. It uses whatever memory and time the device gives it. Its 4096 KB interpreter stack still turns deep
+  recursion into a `RangeError` the app can catch.
+
+Default limits for an embedded app:
 
 | Limit | Default | When it is hit |
 |---|---|---|
@@ -42,42 +45,67 @@ An embedded app has these limits:
 | Changes at once (queued operations) | 8 000 000 values | The VM stops. |
 | Operations in one canvas drawing | 1 000 000 | The VM stops. |
 
-**Time is budgeted per call, not per app.** A "call" is one thing the runtime asks JS to do: handle one event
-(including the rendering it causes), bind one list row, run one timer, run one frame's `requestAnimationFrame`
-callbacks, drain the microtask queue. A long-running app never accumulates time toward a limit; only a single call
-that does not return in time is interrupted. Calls nested inside another share the outer call's budget.
-A call is charged the time it runs: its thread's CPU time on Linux, Android, macOS and iOS, monotonic time on
-Windows and the web. Time the system keeps the app frozen or suspended in the background, or waiting for a CPU, is not
-the call's.
+**Time is budgeted per call, not per app.** A call is one job the runtime gives JS:
 
-An interrupted call ends with an exception that no `catch` can swallow, and the error is reported with the budget it
-exceeded:
+- handle one event, including the rendering it causes
+- bind one list row
+- run one timer
+- run one frame's `requestAnimationFrame` callbacks
+- drain the microtask queue
+
+A long-running app never builds up time toward a limit. Only a single call that does not return in time is
+interrupted. Nested calls share the outer call's budget.
+
+A call is charged the time it actually runs:
+
+| Platform | Clock |
+|---|---|
+| Linux, Android, macOS, iOS | The thread's CPU time |
+| Windows, web | Monotonic time |
+
+Time spent frozen, suspended in the background or waiting for a CPU does not count.
+
+An interrupted call ends with an exception that no `catch` can swallow. The error names the budget:
 
 ```text
 the script was interrupted: a call into JS exceeded its budget of 2000 ms
 ```
 
-The VM keeps running: the next event, timer or frame runs normally.
+The VM keeps running. The next event, timer or frame runs normally.
 
-**Running out of memory or going over a quota stops the VM.** The error is reported once (to the host app's error
-handler, and in development builds over the app), no JS runs after that, and the views stay as they were. The node
-and operation quotas exist because native views and queued changes live in native memory, which the JS heap limit does
-not cover: without them, an app could exhaust the device's memory through the UI.
+**Running out of memory or going over a quota stops the VM.** NSH reports the error once: to the host app's error
+handler, and over the app in development builds. No JS runs after that, and the views stay as they were. The node and
+operation quotas exist because native views and queued changes live in native memory, outside the JS heap limit.
+Without them, an app could exhaust the device's memory through the UI.
 
-**Arrays NSH reads natively hold up to 2^20 (1 048 576) items, in every app.** Children (nested arrays counted
-together), `<Each>`'s items, menus (submenus counted together), a tray's title, `Animated.sequence` / `parallel` /
-`stagger`, `split`'s keys, a navigation stack's routes, a native component's `props` and `events` and the values it
-is given, a pan's `touches`, a canvas call's arguments, a style (its nested styles, shadows and transforms), a
-prop's lists, an animation's ranges and easing and the animations a composite runs (each counted together) are read
-in native code, beyond the call budget's reach, and an array is as long as it says, empty or not
-(`new Array(2 ** 32 - 1)`). A longer one throws an error the app can catch: a `RangeError`, a `TypeError` for a menu
-or the tray; an animation's `start` rejects its promise; a canvas call ignores it with a warning. A navigation stack
-holds up to as many screens: `push` beyond that throws a `RangeError`. Children, submenus and styles nested more than
-64 levels deep throw a `TypeError`. A `<List>`'s `each` takes any number of rows.
+**Arrays that NSH reads natively hold at most 2^20 (1 048 576) items, in every app.** Native code reads these outside
+the call budget, and an array is as long as its `length` says, even if empty (`new Array(2 ** 32 - 1)`). The limit
+covers:
 
-**Views nest up to 1024 levels deep, in every app.** Layout and mounting walk the tree in native code, level by level,
-where the interpreter's stack limit does not reach. An app that nests views deeper is stopped, as it is when it goes
-over a quota:
+- children (nested arrays counted together), `<Each>` items
+- menus (submenus counted together), a tray's title
+- `Animated.sequence` / `parallel` / `stagger`, an animation's ranges and easing, the animations a composite runs (each
+  counted together)
+- `split`'s keys, a navigation stack's routes
+- a native component's `props` and `events` and the values passed to it
+- a pan's `touches`, a canvas call's arguments
+- a style (its nested styles, shadows and transforms), a prop's lists
+
+What happens with a longer array:
+
+| Where | Result |
+|---|---|
+| Most places | A `RangeError` the app can catch |
+| A menu or the tray | A `TypeError` |
+| An animation's `start` | Its promise rejects |
+| A canvas call | Ignored, with a warning |
+| Navigation stack | Holds up to 2^20 screens; `push` beyond that throws a `RangeError` |
+
+Children, submenus and styles nested more than 64 levels deep throw a `TypeError`. A `<List>`'s `each` takes any
+number of rows.
+
+**Views nest up to 1024 levels deep, in every app.** Layout and mounting walk the tree level by level in native code,
+where the interpreter's stack limit does not reach. An app that nests deeper is stopped, as with a quota:
 
 ```text
 the app nested views more than 1024 deep and was stopped
@@ -88,36 +116,42 @@ the app nested views more than 1024 deep and was stopped
 > anyway: it would freeze the app's updates for that long. Split it with `setTimeout`, or move it out of the event
 > handler.
 
-Host apps set the limits per view: `NshAppView.limits` on [iOS](./ios.md#limits),
-`NshView.setLimits` on [Android](./android.md#limits), `AppOptions::limits` / `AppView::set_limits` in a
-[GPUI app](./gpui.md#embedding-in-a-gpui-app). They apply from the next load.
+Host apps set limits per view. They apply from the next load:
 
-To see in development what a TSX app does within a host app's limits, run it with
-[`--limits`](./cli.md#nsh-run): `nsh run App.tsx --limits` uses the defaults above, and
-`nsh run --limits memory=128MB,call=500ms` sets those two as a host app would, the rest keeping their defaults.
+| Host | API |
+|---|---|
+| [iOS](./ios.md#limits) | `NshAppView.limits` |
+| [Android](./android.md#limits) | `NshView.setLimits` |
+| [GPUI app](./gpui.md#embedding-in-a-gpui-app) | `AppOptions::limits` / `AppView::set_limits` |
+
+To test a TSX app under a host's limits during development, use [`--limits`](./cli.md#nsh-run):
+
+- `nsh run App.tsx --limits` uses the defaults above.
+- `nsh run --limits memory=128MB,call=500ms` sets those two, as a host app would. The rest keep their defaults.
 
 ## Hardening
 
-Release builds (everything not loaded from a dev server) are hardened when they load:
+Release builds (everything not loaded from a dev server) are hardened on load:
 
-- `eval` is removed, and the `Function`, `AsyncFunction`, `GeneratorFunction` and `AsyncGeneratorFunction`
-  constructors throw. NSH runs no code made from strings:
+- `eval` is removed. The `Function`, `AsyncFunction`, `GeneratorFunction` and `AsyncGeneratorFunction` constructors
+  throw. NSH runs no code made from strings:
 
   ```text
   TypeError: the Function constructor is disabled: nsh runs no code from strings (development builds allow it)
   ```
 
-- The prototypes all modules share (`Object`, `Array`, `Function`, `String`, `Number`, `Promise`, `Map`, typed arrays
-  and the rest) are frozen, so one module (or one library) cannot change `Array.prototype` for everyone else.
-  `Error.prototype` stays writable, so error subclasses can set `this.name`.
+- The shared prototypes (`Object`, `Array`, `Function`, `String`, `Number`, `Promise`, `Map`, typed arrays and the
+  rest) are frozen. One module or library cannot change `Array.prototype` for everyone else. `Error.prototype` stays
+  writable, so error subclasses can set `this.name`.
 
-Freezing prototypes would normally break a common pattern, the "override mistake": assigning
-`Sub.prototype.constructor = Sub` or `obj.toString = …` throws when the inherited property is frozen. NSH turns the
-commonly overridden members (`constructor`, `toString`, `valueOf`, `toJSON`, ...) into accessors whose setter defines
-the property on the object assigned to, so such code (and libraries like axios that use it) keeps working.
+Frozen prototypes normally break a common pattern, the "override mistake": `Sub.prototype.constructor = Sub` or
+`obj.toString = …` throws when the inherited property is frozen. NSH turns the commonly overridden members
+(`constructor`, `toString`, `valueOf`, `toJSON`, ...) into accessors whose setter defines the property on the target
+object. Such code keeps working, as do libraries that rely on it, like axios.
 
-Bundles served by `nsh dev` / `nsh run` (with or without `--release`) are not hardened, so you can debug with `eval`. Test the release
-behavior with `nsh test` (which hardens) or a packaged build before shipping code that relies on dynamic code.
+Bundles served by `nsh dev` / `nsh run` (with or without `--release`) are not hardened, so you can debug with `eval`.
+Before shipping code that relies on dynamic code, test the release behavior with `nsh test` (which hardens) or a
+packaged build.
 
 ## Capabilities
 
@@ -152,18 +186,21 @@ An app declares what it may reach outside its VM in `nsh.json`:
 }
 ```
 
-**An app without `"capabilities"` may do everything**: a standalone app is its developer's own, and nothing is
-restricted. Raw TCP sockets are granted by name in every app, through `network.sockets`, and the host's functions
-through `host`. **An app with `"capabilities"` may do only what it lists**: everything else is denied. A key or value NSH
-cannot read grants nothing: the build warns of it, so a typo shows up when you build instead of as a missing permission
-at runtime. A [signed
-package](./signed-packages.md#packages-from-newer-versions-of-nsh) from a newer NSH may declare capabilities an older
-runtime does not know: they are not granted there.
+The rules:
+
+- **No `"capabilities"` key: the app may do everything.** A standalone app belongs to its developer. Exceptions are
+  granted only by name in every app: raw TCP sockets (`network.sockets`) and the host's functions (`host`), plus the
+  keys marked "never granted unless declared" below.
+- **With `"capabilities"`: the app may do only what it lists.** Everything else is denied.
+- **A key or value NSH cannot read grants nothing.** The build warns about it, so a typo shows up at build time instead
+  of as a missing permission at runtime.
+- A [signed package](./signed-packages.md#packages-from-newer-versions-of-nsh) from a newer NSH may declare capabilities
+  an older runtime does not know. The older runtime does not grant them.
 
 ### `network`
 
 Covers `fetch` (including every redirect), WebSockets, remote images (`<Image>`, `placeholder`, canvas images,
-`Image.getSize` / `Image.prefetch`), video and sound sources and raw TCP sockets (`net.connect`).
+`Image.getSize` / `Image.prefetch`), video and sound sources, and raw TCP sockets (`net.connect`).
 
 | Key | Type | Description |
 |---|---|---|
@@ -177,43 +214,54 @@ Covers `fetch` (including every redirect), WebSockets, remote images (`<Image>`,
 | `http[].pathPrefixes` | `string[]` | Path prefixes covering whole segments: `/v1` covers `/v1` and `/v1/quote`, `/v1/` what follows it. `pathPrefix` (one, as a string) and `path_prefixes` read the same. |
 | `sockets` | `string[]` | Raw TCP destinations for [`net.connect`](../modules/standard-modules.md), each an exact `"host:port"` (`"[::1]:9000"` for IPv6). |
 
-An `http` rule covers every path when it lists no `paths` or `pathPrefixes`, and with both a path matching either.
+An `http` rule with no `paths` or `pathPrefixes` covers every path. With both, a path matching either is covered.
 
-Paths are matched as the request sends them, after WHATWG's URL parser resolves dot segments, percent-encoded ones
-too: `/v1/../admin` and `/v1/%2e%2e/admin` are `/admin`, which `pathPrefix: "/v1"` does not cover. The request goes
-out with the URL that was checked, so the server receives the path the rule matched. A rule's own paths are read the
-same way: `/my photos` covers `/my%20photos`, and a path with a `.` or `..` segment is an error. An encoded `/` or `\`
-(`%2F`, `%5C`) stays as written, so `/v1/x%2F..%2F..%2Fadmin` is under `/v1`; a server that decodes them before it
-resolves dot segments serves another path.
+**Path matching.** NSH matches the path the request actually sends, after WHATWG's URL parser resolves dot segments,
+including percent-encoded ones:
 
-Host patterns are `*` (any host), `*.example.com` (any subdomain of `example.com`, not `example.com` itself) or an
-exact host name. Matching ignores case and the port. The host is taken after the last `@`, so
-`https://api.example.com@evil.io/` is checked as `evil.io`. A URL that platforms read as different hosts or paths is
-granted only by `*` in `hosts` (or a `*` rule with no port or path): one with a backslash before its query (write
-`%5C`), a control character, or a host with percent-encoding or a character hosts cannot contain (a space, `<`, `>`,
-`^`, `|`, or `[` / `]` outside an IPv6 address).
+- `/v1/../admin` and `/v1/%2e%2e/admin` are `/admin`, which `pathPrefix: "/v1"` does not cover.
+- The request goes out with the checked URL, so the server receives the path the rule matched.
+- Rule paths are parsed the same way: `/my photos` covers `/my%20photos`. A rule path with a `.` or `..` segment is an
+  error.
+- An encoded `/` or `\` (`%2F`, `%5C`) stays as written, so `/v1/x%2F..%2F..%2Fadmin` is under `/v1`. A server that
+  decodes these before resolving dot segments serves a different path.
 
-A WebSocket handshake is an HTTP GET: `ws://` is checked as `http://` and `wss://` as `https://`, so the hosts and
-`http` grants that allow a GET of the URL allow the WebSocket. A raw socket reaches past every HTTP rule, so
-`sockets` lists each host and port exactly, and only `sockets` grants them.
+**Host patterns** are `*` (any host), `*.example.com` (any subdomain of `example.com`, not `example.com` itself) or an
+exact host name. Matching ignores case and the port. The host is read after the last `@`, so
+`https://api.example.com@evil.io/` is checked as `evil.io`.
 
-`asset:` URIs (the app's own files) are always allowed while their path stays inside the app's files, as `fetch`'s do:
-no empty, `.` or `..` segment, encoded or not, and no backslash, colon or encoded `/`. Images, videos and sounds may
-also use `data:` and `blob:` URIs. A relative path is the page's on the web; a native app has no page, so for an app
-with capabilities it loads nothing there (a sound's relative path is a bundled file). A source that starts with `//`
-names a host: on the web it takes the page's scheme and is checked as that URL; in a native app it has no page to take
-a scheme from, so it loads nothing (write `https://…`). Any other source with a scheme is checked as a URL, and loads
-what was checked. Spaces and control characters around a source are dropped, as the URL parser drops them, and the
-cleaned URL loads. A source that platforms read differently (a backslash, a control character, tab or newline inside
-it, an unusual host) is granted only by `*` and loads as written (in a native app, one that starts with `//` then loads
-nothing).
+Some URLs are read as different hosts or paths by different platforms. Only `*` in `hosts` (or a `*` rule with no port
+or path) grants them:
 
-A local file in a media source (a `file:` URL, or in a native app an absolute path such as `/Users/a/x.png` or
-`C:\pictures\x.png`) is read under the [`fs`](../modules/standard-modules.md) capability's `read` roots, as
-`fs/promises` reads files, on every native platform. Its symlinks are resolved when the source is set, and the
-platform loads the resolved path, so a link inside a granted root then does not lead out of it; a link made there
-later is followed while the source stays set. On the web, `/x.png` is the page's
-own path. An app without `capabilities` loads local files as before.
+- a backslash before the query (write `%5C`)
+- a control character
+- a host with percent-encoding, or with a character hosts cannot contain: a space, `<`, `>`, `^`, `|`, or `[` / `]`
+  outside an IPv6 address
+
+**WebSockets.** The handshake is an HTTP GET. `ws://` is checked as `http://` and `wss://` as `https://`, so any grant
+that allows a GET of the URL allows the WebSocket. **Raw sockets** bypass every HTTP rule, so only `sockets` grants them,
+each by exact host and port.
+
+**Media and asset sources.**
+
+- `asset:` URIs (the app's own files) are always allowed while the path stays inside the app's files, as with `fetch`:
+  no empty, `.` or `..` segment (encoded or not), and no backslash, colon or encoded `/`.
+- Images, videos and sounds may also use `data:` and `blob:` URIs.
+- A relative path is relative to the page on the web. A native app has no page, so with capabilities it loads nothing
+  there (a sound's relative path is a bundled file).
+- A source starting with `//` names a host. On the web it takes the page's scheme and is checked as that URL. In a
+  native app there is no scheme to take, so it loads nothing; write `https://…`.
+- Any other source with a scheme is checked as a URL and loads exactly what was checked.
+- Spaces and control characters around a source are dropped, as the URL parser does, and the cleaned URL loads.
+- A source that platforms read differently (a backslash, a control character, tab or newline inside it, an unusual
+  host) is granted only by `*` and loads as written. In a native app, one starting with `//` still loads nothing.
+
+**Local files.** A local media source (a `file:` URL, or in a native app an absolute path such as `/Users/a/x.png` or
+`C:\pictures\x.png`) is read under the [`fs`](../modules/standard-modules.md) capability's `read` roots, like
+`fs/promises`, on every native platform. Symlinks are resolved when the source is set, and the platform loads the
+resolved path, so a link inside a granted root cannot lead out of it. A link created there later is followed while the
+source stays set. On the web, `/x.png` is the page's own path. An app without `capabilities` loads local files as
+before.
 
 ### `webview`
 
@@ -224,32 +272,36 @@ own path. An app without `capabilities` loads local files as before.
 | `media` | `string[]` | What web pages may capture with `getUserMedia`: `"microphone"`, `"camera"`. Never granted unless declared, also for an app without `"capabilities"`. |
 | `runtimeOrigin` | `boolean` | A web view's `allowOrigin` may add one origin, decided while the app runs, to the hosts that web view may show ([`allowOrigin`](../elements/web-view.md)). Never granted unless declared, also for an app without `"capabilities"`. |
 
-Top-level navigations inside the web view are checked too, by the platform's navigation delegate, before they load.
-The page's own subresources (its scripts, images, XHRs) are the web content's business and are not checked.
-`about:blank` and inline HTML (`html`) need only web views to be granted at all: `"webview": { "hosts": [] }`
-allows them without allowing any remote page. A `baseUrl` gives inline HTML that URL's origin in the native
-web views, so the base URL needs the grant a page there would: its host in `hosts`.
+**What is checked.** The platform's navigation delegate checks top-level navigations inside the web view before they
+load. The page's own subresources (scripts, images, XHRs) are not checked.
 
-A page may show and download a `blob:` URL it made (`URL.createObjectURL`, a `<a download>` link): a blob URL
-embeds the origin of the document that made it, so it is allowed when that origin is a host in `hosts`, and a
-blob of a host the page may not show — or an opaque one (`blob:null/…`) — is not. Every platform checks this
-the same way.
+**Inline content.** `about:blank` and inline HTML (`html`) only need web views to be granted:
+`"webview": { "hosts": [] }` allows them without any remote page. A `baseUrl` gives inline HTML that URL's origin in
+native web views, so its host must be in `hosts`.
 
-A download from a host follows the same rule: a download whose response comes from a host not in `hosts` is not
-saved, and `onDownload` reports it `failed` with `code` `"ERR_ACCESS_DENIED"`. On iOS, macOS and Linux this holds
-wherever its redirects lead, and on iOS and macOS a redirect to such a host is cancelled before it is requested. A
-download of the page's own content (`data:` and `blob:` URLs) comes from no host and is saved as before.
+**Blob URLs.** A page may show and download a `blob:` URL it created (`URL.createObjectURL`, an `<a download>` link).
+A blob URL embeds the origin of the document that made it. It is allowed when that origin is in `hosts`. A blob from
+a host the page may not show, or an opaque one (`blob:null/…`), is refused. Every platform checks this the same way.
 
-`input` is separate from `hosts` because trusted input carries user activation, which `injectJavaScript` never gets:
-the page may then open windows, write the clipboard, open the system's file panel, start WebAuthn or permission prompts
-and press any button that checks `isTrusted`. Without it the core drops `sendInput` and logs which key to add.
+**Downloads.** A download whose response comes from a host not in `hosts` is not saved, and `onDownload` reports it
+`failed` with `code` `"ERR_ACCESS_DENIED"`. On iOS, macOS and Linux this holds wherever redirects lead. On iOS and
+macOS, a redirect to such a host is cancelled before it is requested. Downloads of the page's own content (`data:` and
+`blob:` URLs) come from no host and are saved as before.
 
-`media` answers the web view's own media capture requests: those for a declared kind are allowed on macOS, iOS,
-Android, Windows and Linux, and the rest are denied. The system still asks the user the first time, so packages
-declare what it needs: `nsh package` writes `NSMicrophoneUsageDescription` / `NSCameraUsageDescription` (word them your
-own way with `ios.infoPlist` / `macos.infoPlist`), the macOS `com.apple.security.device.audio-input` /
-`com.apple.security.device.camera` entitlements, and Android's `RECORD_AUDIO` / `CAMERA` permissions, which the app asks
-for when a page first needs them. The development hosts (`nsh run`) carry the usage descriptions for any app. Pages need a secure context (`https:` or `localhost`) for `getUserMedia`.
+**Why `input` is separate.** Trusted input carries user activation, which `injectJavaScript` never gets. With it a page
+may open windows, write the clipboard, open the system file panel, start WebAuthn or permission prompts, and press any
+button that checks `isTrusted`. Without the grant, the core drops `sendInput` and logs which key to add.
+
+**`media`** answers the web view's own capture requests. Declared kinds are allowed on macOS, iOS, Android, Windows and
+Linux; the rest are denied. The system still asks the user the first time, so `nsh package` writes what the package
+needs:
+
+- `NSMicrophoneUsageDescription` / `NSCameraUsageDescription` (reword them with `ios.infoPlist` / `macos.infoPlist`)
+- the macOS `com.apple.security.device.audio-input` / `com.apple.security.device.camera` entitlements
+- Android's `RECORD_AUDIO` / `CAMERA` permissions, which the app requests when a page first needs them
+
+The development hosts (`nsh run`) carry the usage descriptions for any app. `getUserMedia` needs a secure context
+(`https:` or `localhost`).
 
 ```json
 { "capabilities": { "webview": { "hosts": ["phone.example.com"], "media": ["microphone"] } } }
@@ -257,76 +309,86 @@ for when a page first needs them. The development hosts (`nsh run`) carry the us
 
 ### `statusBar`
 
-`"statusBar": true` lets the app change the status bar (the `statusBar` of pages and dialogs in
-[`nsh/base`](../modules/nsh-base.md#status-bar), and `nsh.json`'s `"statusBar"` default).
+`"statusBar": true` lets the app change the status bar: the `statusBar` of pages and dialogs in
+[`nsh/base`](../modules/nsh-base.md#status-bar), and the `"statusBar"` default in `nsh.json`.
 
 ### `clipboard`
 
-`"clipboard": true` lets the app read and write the system clipboard ([`Clipboard`](../modules/nsh.md#clipboard)). Copying from a selectable text's edit menu is the user's own act and needs no capability.
+`"clipboard": true` lets the app read and write the system clipboard ([`Clipboard`](../modules/nsh.md#clipboard)).
+Copying from a selectable text's edit menu is the user's own action and needs no capability.
 
 ### `picker`
 
-`"picker": true` lets the app show the system's picker for photos ([`Picker`](../modules/nsh.md#picker)): the user
-picks what reaches the app.
+`"picker": true` lets the app show the system photo picker ([`Picker`](../modules/nsh.md#picker)). The user picks what
+reaches the app.
 
-It also grants the photo library to an app that turns on `nsh-extra`'s [`Photos`](./nshm.md#photos): reading the
-recent photos, their thumbnails and the photos themselves. What the user allows holds for the whole app, so this
-capability is what decides which code reaches them.
+It also grants the photo library to an app using `nsh-extra`'s [`Photos`](./nshm.md#photos): reading recent photos,
+their thumbnails and the photos themselves. The user's permission covers the whole app, so this capability decides
+which code may use it.
 
 ### `share`
 
-`"share": true` lets the app show the system's share sheet ([`Share`](../modules/nsh.md#share)): the user chooses
-where the content goes. A shared file must also be readable under `fs.read`.
+`"share": true` lets the app show the system share sheet ([`Share`](../modules/nsh.md#share)). The user chooses where
+the content goes. A shared file must also be readable under `fs.read`.
 
 ### `speech`
 
-`"speech": true` lets the app recognize what the user says (`nsh-extra`'s [`Speech`](./nshm.md#speech)): the
-microphone and the system's speech recognizer, whose transcript reaches the app. The system still asks the user once.
+`"speech": true` lets the app recognize speech with `nsh-extra`'s [`Speech`](./nshm.md#speech): it uses the microphone
+and the system speech recognizer, and the transcript reaches the app. The system still asks the user once.
 
 ### `audio`
 
-`"audio": true` lets the app make sound ([`Sound` and `AudioPlayer`](../modules/nsh.md#sound)). A remote source also
+`"audio": true` lets the app play sound ([`Sound` and `AudioPlayer`](../modules/nsh.md#sound)). A remote source also
 needs a `network` grant for its host.
 
 ### `notifications`
 
-`"notifications": true` lets the app show system notifications and set its icon's badge
-([`Notifications`](../modules/nsh.md#notifications)). The system still asks the user once, where it asks.
+`"notifications": true` lets the app show system notifications and set its icon badge
+([`Notifications`](../modules/nsh.md#notifications)). Where the system asks the user, it asks once.
 
-It also grants remote notifications to an app that turns on `nsh-extra`'s [`Push`](./nshm.md#push): registering the
-device and reading its token, listening to deliveries and presses, deciding how notifications show in front and
-removing a thread's delivered ones. Registering and background deliveries never ask the user, and what the user
-allowed holds for the whole app, so this capability is what decides which code reaches them.
+It also grants remote notifications to an app using `nsh-extra`'s [`Push`](./nshm.md#push): registering the device and
+reading its token, listening to deliveries and presses, choosing how notifications show in the foreground, and removing
+a thread's delivered notifications. Registration and background deliveries never ask the user, and the user's
+permission covers the whole app, so this capability decides which code may use it.
 
 ### `application`
 
-`"application": true` lets the app act on the application as a whole: on the desktop
-([`nsh/desktop`](../modules/nsh-desktop.md)) the application menu (`Menu.setApplicationMenu`), the tray, global
-shortcuts, `Application.quit()`, `Application.setQuitMode()`, `Application.restart()` and
-`Application.setLaunchAtLogin()`, and on iOS and Android the app's page in the system's settings
-([`AppSettings.open()`](../modules/nsh-mobile.md#appsettings) of `nsh/mobile`; for an embedded view, the embedding
-app's page). Without it they do nothing, `Application.launchAtLogin()` and `AppSettings.available()` resolve `false`,
-and `setLaunchAtLogin` and `AppSettings.open()` reject with `ERR_ACCESS_DENIED` (`permission` `"application"`). Context menus (`Menu.popup`) show in the app's own view, and windows the app opens are
-granted by [`windows`](#windows), so neither needs it.
+`"application": true` lets the app act on the application as a whole:
+
+- **Desktop** ([`nsh/desktop`](../modules/nsh-desktop.md)): the application menu (`Menu.setApplicationMenu`), the tray,
+  global shortcuts, `Application.quit()`, `Application.setQuitMode()`, `Application.restart()` and
+  `Application.setLaunchAtLogin()`.
+- **iOS and Android**: the app's page in system settings ([`AppSettings.open()`](../modules/nsh-mobile.md#appsettings)
+  of `nsh/mobile`; for an embedded view, the embedding app's page).
+
+Without it, these do nothing. `Application.launchAtLogin()` and `AppSettings.available()` resolve `false`, and
+`setLaunchAtLogin` and `AppSettings.open()` reject with `ERR_ACCESS_DENIED` (`permission` `"application"`).
+
+Context menus (`Menu.popup`) show in the app's own view, and app windows are granted by [`windows`](#windows), so
+neither needs `application`.
 
 ### `homeDir`
 
-`"homeDir": true` lets [`os.homedir()`](../modules/standard-modules.md) tell the user's home directory; without it the
-call throws an error with `code` `ERR_ACCESS_DENIED`. The path is only a name: reading or writing there still needs
+`"homeDir": true` lets [`os.homedir()`](../modules/standard-modules.md) return the user's home directory. Without it
+the call throws an error with `code` `ERR_ACCESS_DENIED`. The path is only a name: reading or writing there still needs
 `fs` grants.
 
 ### `openUrl`
 
-Lets the app open URLs outside it ([`openUrl`](../modules/nsh.md#openurl), a `TextView`'s links with
-`links="open"`): `"openUrl": true` for every scheme, `"openUrl": { "schemes": ["https", "mailto"] }` for the schemes
-listed. A URL whose scheme is not granted rejects with `ERR_ACCESS_DENIED` (`permission` `"openUrl"`, `resource` the
-URL). URLs that would run code or reach the app's own data
-(`javascript:`, `data:`, `file:`, ...) are never opened, whatever the capability.
+Lets the app open URLs outside itself ([`openUrl`](../modules/nsh.md#openurl), and `TextView` links with
+`links="open"`):
+
+- `"openUrl": true` allows every scheme.
+- `"openUrl": { "schemes": ["https", "mailto"] }` allows the listed schemes.
+
+A URL with a scheme not granted rejects with `ERR_ACCESS_DENIED` (`permission` `"openUrl"`, `resource` the URL). URLs
+that would run code or reach the app's own data (`javascript:`, `data:`, `file:`, ...) are never opened, whatever the
+capability.
 
 ### `windows`
 
-Lets the app open windows of its own on the desktops ([`Window`](../modules/nsh-desktop.md#windows)): `"windows": true`
-for every kind but overlays, or an object that narrows it:
+Lets the app open its own windows on the desktop ([`Window`](../modules/nsh-desktop.md#windows)). `"windows": true`
+allows every kind except overlays. An object narrows it:
 
 | Key | Type | Description |
 |---|---|---|
@@ -335,22 +397,30 @@ for every kind but overlays, or an object that narrows it:
 | `max` | `number` | How many windows of its own may be open at once, the first window included. Missing: any number. |
 | `overlay` | `boolean` | Overlays and click-through windows (`pointerEvents: "none"`). Never granted unless declared, also for an app without `"capabilities"`. |
 
-`overlay` is separate because a transparent, click-through window above every other can pass for the system's own UI.
-Every window needs the grant, the first one included: no window is privileged.
+`overlay` is separate because a transparent, click-through window above everything can pass for system UI. Every
+window needs the grant, the first one included. No window is privileged.
 
 ### Storage
 
-Every app may keep its own data on the device with [`Storage`](../modules/nsh.md#storage), with no capability: the storage holds only that app's data, and the embedding app decides where it is kept.
+Every app may keep its own data on the device with [`Storage`](../modules/nsh.md#storage). No capability is needed:
+the storage holds only that app's data, and the embedding app decides where it lives.
 
 ### `host`
 
-`host` lists the functions of the app embedding NSH that `nsh`'s `host.call(name, args)` may call: exact names
-(`"getUserInfo"`) or prefixes ending in `*` (`"bridge.*"` matches `bridge.call` and `bridge.share`). `"host": true`
-allows every function. A function not listed is refused, also in an app without `"capabilities"`: the host's
-functions are never granted by default, and building an app that imports `host` from `nsh` without `host` warns that every
-call will be refused. Names are 1 to 128 characters from `A`–`Z`, `a`–`z`, `0`–`9`, `_`, `.`, `:` and `-`, without `..`;
-the call of any other name is refused before the grants are read. End a prefix with a separator (`"bridge.*"`):
-`"bridge*"` matches `bridgeAdmin` too. The host's events (`host.on(event, listener)`) reach the app's listeners as the host sends them.
+`host` lists which functions of the embedding app `host.call(name, args)` (from `nsh`) may call:
+
+- exact names, such as `"getUserInfo"`
+- prefixes ending in `*`: `"bridge.*"` matches `bridge.call` and `bridge.share`
+- `"host": true` allows every function
+
+Unlisted functions are refused, even in an app without `"capabilities"`. Host functions are never granted by default.
+Building an app that imports `host` from `nsh` without a `host` grant warns that every call will be refused.
+
+Names are 1 to 128 characters from `A`–`Z`, `a`–`z`, `0`–`9`, `_`, `.`, `:` and `-`, without `..`. A call with any
+other name is refused before the grants are read. End a prefix with a separator: `"bridge*"` also matches
+`bridgeAdmin`.
+
+Host events (`host.on(event, listener)`) reach the app's listeners as the host sends them.
 
 ```ts
 import { host } from "nsh";
@@ -362,7 +432,7 @@ if (host.available()) {
 }
 ```
 
-`host.available()` is true on platforms that embed a host; elsewhere `host.call` rejects with `code`
+`host.available()` is true on platforms that embed a host. Elsewhere `host.call` rejects with `code`
 `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"`.
 
 ### What a refusal looks like
@@ -389,10 +459,10 @@ if (host.available()) {
 | Window (`Window.open`, `<Window>`) | Throws `ERR_ACCESS_DENIED`, `permission` `"windows"` and `resource` the window's id; nothing opens. An attribute of `set()` not granted is left as it is, with a warning. |
 | WebSocket | The `websocket` module's `connect` rejects with `ERR_ACCESS_DENIED`, `permission` `"network"` and `resource` the URL; the global `WebSocket` fires `error` and then `close` (code 1006), as a connection that fails does. |
 
-The errors of the [standard modules](../modules/standard-modules.md#failures) carry `code` `"ERR_ACCESS_DENIED"`, so an
-app tells a refusal apart from a failed operation, and their `permission` and `resource` name the capability and what
-was asked for. The modules of [`nsh`](../modules/nsh.md) refuse the same way: their promises reject with
-`ERR_ACCESS_DENIED`, `permission` and `resource` (`fetch` with a `TypeError`, the class of every failed request).
+Errors from the [standard modules](../modules/standard-modules.md#failures) and from [`nsh`](../modules/nsh.md) modules
+carry `code` `"ERR_ACCESS_DENIED"`, so an app can tell a refusal from a failed operation. `permission` names the
+capability and `resource` names what was requested. `fetch` rejects with a `TypeError`, the class of every failed
+request.
 
 ```ts
 import { Clipboard } from "nsh";
@@ -405,33 +475,39 @@ try {
 }
 ```
 
-Rust components get the same refusals in Rust's terms: a refused clipboard read answers what an empty clipboard does, a
-refused pick no files, a refused `open_url` `false` and a refused `fetch` an `Err` with the message.
+Rust components see refusals in Rust terms:
 
-Each refusal is logged once, saying which key to add:
+| Call | Refused result |
+|---|---|
+| Clipboard read | Same as an empty clipboard |
+| Pick | No files |
+| `open_url` | `false` |
+| `fetch` | An `Err` with the message |
+
+Each refusal is logged once, with the key to add:
 
 ```text
 fetch GET https://evil.example.org/x is not granted: add `evil.example.org` to capabilities.network in nsh.json
 ```
 
-Redirects are followed by NSH, not by the platform's HTTP stack, so every hop is checked against the capabilities. (A
-streamed request body is not sent twice, so a `307` / `308` redirect of a streamed upload fails.)
+NSH follows redirects itself instead of the platform's HTTP stack, so every hop is checked. A streamed request body is
+not sent twice, so a `307` / `308` redirect of a streamed upload fails.
 
 ### Where capabilities travel
 
-The declaration goes with the app wherever it goes:
+The declaration goes everywhere the app goes:
 
-- `nsh build` and `nsh package` write it next to the bundle as `capabilities.json`;
-- `nsh publish` puts it in the [signed package](./signed-packages.md) header, covered by the signature;
+- `nsh build` and `nsh package` write it next to the bundle as `capabilities.json`.
+- `nsh publish` puts it in the [signed package](./signed-packages.md) header, covered by the signature.
 - `nsh dev` sends it with every build, so development enforces the same rules. Changing `capabilities` reloads the app
-  instead of hot-patching it;
-- an app whose root is a Rust component (`"root"` in `nsh.json`) has it compiled in with the root, so every runner, the
-  web and `nsh test` included, checks the app's calls against it, as a TSX app's. Without `"capabilities"` it reaches
-  what any app without a declaration does.
+  instead of hot-patching it.
+- An app whose root is a Rust component (`"root"` in `nsh.json`) has it compiled in with the root. Every runner,
+  including the web and `nsh test`, checks the app's calls against it, as for a TSX app. Without `"capabilities"` it
+  behaves like any app without a declaration.
 
 ## Grants: what a host app allows
 
-A host app that embeds NSH can grant **at most** some capabilities, in the same JSON form:
+A host app that embeds NSH can grant **at most** a set of capabilities, in the same JSON form:
 
 ```rust
 // iOS, in Rust (nsh_platform_ios::AppView)
@@ -452,8 +528,8 @@ nsh.setGrantedCapabilities("{ \"network\": { \"hosts\": [\"api.example.com\"] } 
 ```
 
 A request must be allowed by **both** the app's declaration and the host's grant. With the grant above, an app that
-declares `"hosts": ["*"]` can still only reach `api.example.com`, and cannot show web pages or change the status bar.
-Without a grant (`nil` / `null`, the default), what each app declares applies.
+declares `"hosts": ["*"]` can still reach only `api.example.com`, and cannot show web pages or change the status bar.
+Without a grant (`nil` / `null`, the default), each app's declaration applies.
 
 Grants apply from the next load. A typical setup for third-party mini apps: grant each one only its own API host, run
 it from a [signed package](./signed-packages.md) whose declaration you reviewed, and keep the default limits or lower

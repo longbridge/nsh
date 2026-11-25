@@ -1,22 +1,26 @@
 ---
 title: 简介
-description: Native Shell 是什么：Rust First 的全平台 Native UI 框架，覆盖 iOS、Android、macOS、Windows、Linux 和 Web，每个平台使用系统自己的界面与交互。应用用 TSX 编写，需要时用 Rust 扩展。
+description: Native Shell 是 Rust First 的全平台 UI 框架，支持 iOS、Android、macOS、Windows、Linux 和 Web，每个平台都用系统自己的界面与交互。应用用 TSX 编写，需要时加入 Rust。
 order: 1
 group: start
 ---
 
 # 简介
 
-Native Shell（简称 NSH）是一个全平台的 Native UI 框架。你用一套应用模型——组件、signal、样式，以及处处相同的 API——构建一次应用，NSH 就在 **iOS、Android、macOS、Windows、Linux 和 Web** 上运行它，而且每次都是那个平台的应用：由平台自己的视图组成，用平台自己的文本系统编辑，按平台用户的习惯操作。应用用 **TSX** 编写，在需要 Native 速度、系统能力或某个 crate 的地方，通过 [nshm](./nshm.md) 用 **Rust** 扩展；应用也可以从头到尾都用 Rust 编写，运行在同一个引擎上。在同一个引擎之上，已经发布的应用还能在运行时接收新界面——由团队编写，或由模型生成——以签名模块的形式，运行在宿主配置的沙箱里。
+Native Shell（简称 NSH）是一个 UI 框架，支持 **iOS、Android、macOS、Windows、Linux 和 Web**。应用只写一份，在每个平台上都是真正的原生应用：用平台自己的视图搭建，用平台自己的文本系统，按平台的习惯交互。
+
+应用用 **TSX** 编写。需要原生性能、系统能力或某个 crate 时，通过 [nshm](./nshm.md) 加入 **Rust**。整个应用也可以全用 Rust 写，两者跑在同一个引擎上。
+
+已经发布的应用还能在运行时加载新界面。界面可以由团队编写，也可以由模型生成，以签名模块的形式下发，运行在宿主应用配置的沙箱里。
 
 > [!IMPORTANT]
-> NSH 提供原生视图与交互，应用掌握视觉设计。组件、状态和 API 跨平台共享，颜色、字体、间距和形状由应用决定；文本输入、焦点和菜单遵循设备的交互习惯。详见[目标与设计原则](./goals.md)。
+> NSH 提供原生视图与交互，视觉设计由应用决定：颜色、字体、间距和形状都归应用。组件、状态和 API 跨平台共享；文本输入、焦点和菜单遵循各设备的习惯。详见[目标与设计原则](./goals.md)。
 
 ## Native 的含义
 
-NSH 所说的 Native 有两层：平台的基础设施，以及平台的交互方式。应用自行定义界面外观，也可以在支持的平台上选用 Liquid Glass 等系统材质。
+NSH 说的 Native 分两层：平台的基础设施，和平台的交互方式。外观仍由应用自己定义；在支持的平台上，也可以用 Liquid Glass 等系统材质。
 
-**平台的基础设施。** 每个平台都有自己的后端，建立在这个平台已有的界面技术之上：
+**平台的基础设施。** 每个平台都有独立的后端，直接建在平台已有的 UI 上：
 
 | 平台 | 视图 | 文本 | 文本输入 |
 |---|---|---|---|
@@ -27,38 +31,38 @@ NSH 所说的 Native 有两层：平台的基础设施，以及平台的交互�
 | Linux | GTK 4 | Pango | GTK 的 `Text` 与 `TextView` |
 | Web | 用 CSS 设置样式的 HTML 元素 | 浏览器的字体 | 浏览器的输入框 |
 
-文本选择及其菜单、输入法、无障碍和滚动都来自平台，系统在新版本里对它们的改进，应用直接获得。Native 组件——地图、网页视图、视频播放器，以及宿主注册的任何视图——只是同一层级里的又一个视图，与其他内容一起布局、裁剪和滚动（[原生组件](./native-components.md)）。
+文本选择和选择菜单、输入法、无障碍、滚动，都由平台提供。系统升级后带来的改进，应用自动获得。地图、网页视图、视频播放器等原生组件，以及宿主注册的任何视图，都和普通视图在同一棵树里，一起布局、裁剪和滚动（[原生组件](./native-components.md)）。
 
-**平台的交互方式。** NSH 在 [`nsh/base`](../modules/nsh-base.md) 中提供的组件按每种设备的用户习惯工作，应用只写一次：
+**平台的交互方式。** [`nsh/base`](../modules/nsh-base.md) 里的组件会按各设备的习惯工作，应用只需写一次：
 
 | | 桌面（以及桌面浏览器） | 手机和平板 |
 |---|---|---|
 | `Menu` | 在触发点弹出；子菜单在菜单项旁展开 | 从底部升起的面板；子菜单替换当前菜单项 |
-| `ContextMenu` | 右键在指针处打开 | 手指长按触发元素，以面板形式打开 |
+| `ContextMenu` | 右键在指针处打开 | 长按触发元素，以面板形式打开 |
 | `Tooltip` | 指针停留在触发元素上时显示 | 由应用打开时显示 |
-| `Popover` | 点击外部关闭它，并把点击交给指针下的内容 | 点击外部关闭它 |
+| `Popover` | 点击外部关闭，点击同时传给指针下的内容 | 点击外部关闭 |
 
-页面、对话框、键盘和状态栏遵循同样的思路：导航栈按每个平台的动效推入和弹出，返回键、Escape 和侧滑返回的行为与平台一致（[导航](./navigation.md)）。
+页面、对话框、键盘和状态栏也是这样。导航栈用平台自己的动效推入、弹出；返回键、Escape 和侧滑返回的行为都和平台一致（[导航](./navigation.md)）。
 
 ## 从手机到桌面，再到 Web
 
-NSH 的跨平台，是让每种设备都得到它该有的应用，而不是把同一个界面放大或缩小：
+NSH 不是把一个界面放大缩小，而是让每种设备拿到它该有的应用：
 
-- **一套应用模型。** 应用的组件、状态、业务逻辑和页面是共享的；每个后端把它们映射到自己的平台。
-- **布局随窗口重组。** 每个平台上的 Flexbox 和 CSS Grid 都由 [Taffy](https://github.com/DioxusLabs/taffy) 排版，Tailwind 断点（`md:`、`lg:`）和窗口尺寸（Rust 中的 `window()`）改变的是结构，而不只是大小：聊天应用在宽窗口里并排显示侧栏、会话列表和消息，在手机上一次显示一屏（[布局](./layout.md)、[Tailwind](./tailwind.md)）。
-- **每种设备的输入方式。** 桌面上是指针、悬停、右键、快捷键和焦点；手机上是触摸、手势、软键盘和页面导航。应用需要按平台做不同处理时，用 `desktop={{…}}` 属性和 `platform.select` 表达（[平台相关代码](./platform-specific.md)）。
-- **在每个目标上验证。** `nsh test` 无界面地运行应用的测试，也能在 macOS、Windows、Linux 和 GPUI 窗口、iOS 模拟器、Android 设备或浏览器里，用平台自己的输入运行同样的测试（[测试与 trace](./testing-and-trace.md)）。
+- **一套应用模型。** 组件、状态、业务逻辑和页面共享，各后端负责映射到自己的平台。
+- **布局会重组。** 所有平台的 Flexbox 和 CSS Grid 都由 [Taffy](https://github.com/DioxusLabs/taffy) 排版。Tailwind 断点（`md:`、`lg:`）和窗口尺寸（Rust 中的 `window()`）改变的是结构，不只是大小。比如聊天应用在宽窗口里并排显示侧栏、会话和消息，在手机上一次只显示一屏（[布局](./layout.md)、[Tailwind](./tailwind.md)）。
+- **各设备的输入方式。** 桌面有指针、悬停、右键、快捷键和焦点；手机有触摸、手势、软键盘和页面导航。需要按平台区别处理时，用 `desktop={{…}}` 属性和 `platform.select`（[平台相关代码](./platform-specific.md)）。
+- **每个目标都能测。** `nsh test` 可以无界面运行测试，也可以在 macOS、Windows、Linux 和 GPUI 窗口、iOS 模拟器、Android 设备或浏览器里，用平台真实输入运行同一批测试（[测试与 trace](./testing-and-trace.md)）。
 
-以一个聊天客户端为例。开发者用 `nsh run` 在桌面上开发它，用 `nsh run --target ios` 在 iOS 模拟器里检查手机布局，再用 `nsh run --target web` 在浏览器里运行——每次都是同一个工程——最后用 `nsh package` 打出可安装的应用和网站。过去需要每个平台一个团队的工作，一个工程师就能承担，后端开发可以同步进行。
+以聊天客户端为例：在桌面上用 `nsh run` 开发，用 `nsh run --target ios` 看手机布局，用 `nsh run --target web` 看网页版，始终是同一个工程。最后 `nsh package` 打出安装包和网站。以前每个平台要一个团队，现在一个工程师就能做。
 
 ## Rust First
 
-NSH 是 Rust First 的：引擎、布局、渲染和每个平台层都是 Rust，编译成 Native 代码。应用在它之上用 TSX 编写，在值得的地方使用 Rust：
+引擎、布局、渲染和各平台层都用 Rust 编写，编译成原生代码。应用在上层用 TSX 写，划算的地方用 Rust：
 
-- **用 TSX 编写应用。** 界面、状态、业务逻辑和样式都是 TSX，使用 Tailwind 类和 signal，每次保存都热更新并保留应用状态。只有应用自己的代码是 JavaScript：响应式图、布局、渲染以及应用导入的每个模块都是 Rust（[JSX 与组件](./jsx-and-components.md)）。`nsh init` 从这里开始。
-- **在应用需要的地方使用 Rust。** 应用自己在 `ext/` 里的 Rust crate，或者来自 crates.io 的 [nshm](./nshm.md)，为它的 TSX 提供组件、模块和类：繁重计算、解析、大规模数据、系统 API 和 crates.io 生态，即使由 TSX 调用，也以 Native 速度运行。
-- **完整的 Rust 应用。** 核心是复杂业务逻辑的应用，可以从头到尾都用 Rust 编写，带着 Rust 的所有权、类型和线程编译成 Native 代码，没有 JavaScript runtime（[用 Rust 开发](./rust.md)）。
-- **一个工具链。** 一个 `nsh` 可执行文件负责创建、构建、类型检查、热更新开发、测试、打包和签名，覆盖每个目标平台。它自带 TSX 打包器和 TypeScript 检查器，因此 TSX 应用只需要 `nsh`；应用有了自己的 Rust 代码时，才需要 Rust 工具链（[安装](./installation.md)、[命令行](./cli.md)）。
+- **用 TSX 写应用。** 界面、状态、逻辑和样式都是 TSX，用 Tailwind 类和 signal。每次保存都会热更新，并保留应用状态。只有你自己的代码是 JavaScript；响应式图、布局、渲染和所有导入的模块都是 Rust（[JSX 与组件](./jsx-and-components.md)）。`nsh init` 默认就是这种方式。
+- **需要时用 Rust。** 在 `ext/` 放应用自己的 crate，或使用 crates.io 上的 [nshm](./nshm.md)，为 TSX 提供组件、模块和类。适合繁重计算、解析、大数据、系统 API 和 crates.io 生态。即使由 TSX 调用，也按原生速度运行。
+- **全 Rust 应用。** 核心是复杂业务逻辑的应用，可以全部用 Rust 写，用上所有权、类型和线程，没有 JavaScript runtime（[用 Rust 开发](./rust.md)）。
+- **一个工具链。** 一个 `nsh` 可执行文件就能创建、构建、类型检查、热更新运行、测试、打包和签名，覆盖所有目标。它自带 TSX 打包器和 TypeScript 检查器，所以 TSX 应用只要装 `nsh`。应用有自己的 Rust 代码时，才需要 Rust 工具链（[安装](./installation.md)、[命令行](./cli.md)）。
 
 ## 一个应用
 
@@ -112,74 +116,102 @@ pub fn Counter() -> impl IntoElement {
 }
 ```
 
-一个视图（`view()`、`<View>`）在 iOS 上成为 `UIView`，在 Android 上成为 `ViewGroup`，在 macOS 上成为 `NSView`，在 Linux 上成为 GTK 控件，在 Windows 上成为用 Direct2D 绘制的保留视图，在 Web 上成为 HTML 元素；文本成为 Native 文本视图，按钮的按压反馈（`.active(..)`、`activeStyle`）在主线程上运行。点击时，`count.update` 改变一个 signal，只有读取它的那段文本会更新：组件函数不会再次运行。在 TSX 应用里，只有模块自己的代码是 JavaScript；Rust 应用从头到尾都是 Native 代码。
+每个视图（`view()`、`<View>`）都会变成真实的平台视图：
+
+| 平台 | 视图 |
+|---|---|
+| iOS | `UIView` |
+| Android | `ViewGroup` |
+| macOS | `NSView` |
+| Linux | GTK 控件 |
+| Windows | 用 Direct2D 绘制的保留视图 |
+| Web | HTML 元素 |
+
+文本是原生文本视图，按钮的按压反馈（`.active(..)`、`activeStyle`）在主线程执行。点击时 `count.update` 只改一个 signal，也只更新读取它的那段文本，组件函数不会重新运行。TSX 应用里只有模块自己的代码是 JavaScript；Rust 应用则全部是原生代码。
 
 ## Retained Mode
 
-NSH 是 Retained Mode 的：每个元素都是平台保留着的视图，一次更新只改变发生变化的部分。
+NSH 是 Retained Mode：每个元素都是平台保留的视图，更新只改动变化的部分。
 
-- **细粒度更新。** [Signal](./reactivity.md) 与 Solid 的相同，由 Native 实现：组件只运行一次，一次变化只重新运行读到那个 signal 的表达式。
-- **只有变化跨越线程。** 一轮里的变化一起排版，每帧作为一批视图操作交给主线程；没有变化的样式和位置不会发送，没被改到的视图原样不动。
-- **动画在 Native 侧运行。** 时间曲线、弹簧和衰减动画、手势以及与滚动联动的值，都在平台的帧时钟上计算，不经过 JS 逐帧调用（[动画](./animation.md)）。
+- **细粒度更新。** [Signal](./reactivity.md) 的模型和 Solid 一样，但由原生实现。组件只运行一次，变化时只重跑读取该 signal 的表达式。
+- **只有变化跨线程。** 同一轮的变化一起排版，每帧打成一批视图操作交给主线程。没变的样式和位置不发送，没动的视图保持原样。
+- **动画在原生侧运行。** 时间曲线、弹簧、衰减动画、手势和滚动联动值都跟着平台的帧时钟计算，不需要每帧调用 JS（[动画](./animation.md)）。
 
-这适合大多数应用由之组成的界面——聊天、邮件、表单、列表、文档、设置、逐步生成的 AI 回复——每次只有少数视图变化，其余都在等待。这类界面在两次更新之间几乎不占 CPU，在 ProMotion 屏幕上滚动和动画稳定在 120 FPS。在 [NSH 性能基准](https://github.com/longbridge/nsh-perf-bench)中，一个每秒更新 1,000 次的 500 行行情表，在 Linux 上用 NSH Rust 编写占用 18% 的单核 CPU，直接用 [GPUI Fast](https://github.com/longbridge/gpui-fast) 编写同样的界面为 20%。繁重的计算应当放在 Rust 里：TSX 运行在解释器 QuickJS 上，而 Rust 模块即使由 TSX 调用，也以 Native 速度运行——这样对 10 万行排序约需 3 ms，与纯 Rust 相当（[性能](./performance.md)）。
+大多数应用的界面正是这样：聊天、邮件、表单、列表、文档、设置、流式输出的 AI 回复。每次只有少数视图在变。两次更新之间几乎不占 CPU，在 ProMotion 屏幕上滚动和动画稳定在 120 FPS。
+
+在 [NSH 性能基准](https://github.com/longbridge/nsh-perf-bench)中，一个 500 行的行情表每秒更新 1,000 次。在 Linux 上，NSH Rust 版占单核 18%，直接用 [GPUI Fast](https://github.com/longbridge/gpui-fast) 写的同一界面占 20%。
+
+重计算请放到 Rust。TSX 跑在解释器 QuickJS 上，而 Rust 模块即使由 TSX 调用，也是原生速度：排序 10 万行约 3 ms，和纯 Rust 一样（[性能](./performance.md)）。
 
 ## 如何运行
 
-工具链是一个 `nsh` 可执行文件。应用可以用 TSX、Rust 或两者编写，各自经过一条路径，到达同一个 Rust 引擎。
+工具链只有一个 `nsh` 可执行文件。应用可以用 TSX、Rust 或两者一起写，最后都进入同一个 Rust 引擎。
 
 ### TSX 应用
 
-TSX 应用（一个模块）是一组带入口的 `.tsx` / `.ts` 文件，入口通常是 `App.tsx`：
+TSX 应用（即模块）是一组 `.tsx` / `.ts` 文件，入口通常是 `App.tsx`：
 
-1. **构建。** `nsh` 打包模块的文件（使用 rolldown 和 Oxc），并用自己的编译器编译 JSX。对 `nsh` 和 `nsh/*` 的导入保持为导入：运行时以 Native 方式提供它们，所以 bundle 里只有你的代码。bundle 会被编译成 QuickJS 字节码。
-2. **运行。** 引擎线程在 [QuickJS](https://github.com/quickjs-ng/quickjs) 中运行字节码，每个视图一个虚拟机。编译后的 JSX 直接调用 Native 渲染器，JavaScript 只描述界面和处理事件；解析样式、解析 Tailwind 类、比对差异、布局和文本都在 Rust 中完成。
+1. **构建。** `nsh` 用 rolldown 和 Oxc 打包，用自带编译器编译 JSX。`nsh` 和 `nsh/*` 的导入原样保留，由运行时原生提供，所以 bundle 里只有你的代码，最后编译成 QuickJS 字节码。
+2. **运行。** 引擎线程在 [QuickJS](https://github.com/quickjs-ng/quickjs) 中执行字节码，每个视图一个虚拟机。编译后的 JSX 直接调用原生渲染器，JavaScript 只负责描述界面和处理事件。样式解析、Tailwind 类解析、diff、布局和文本都在 Rust 里完成。
 
 ### Rust 应用
 
-Rust 应用是一个 crate，完全用 Rust 与 Native 开发，无 JavaScript runtime：
+Rust 应用就是一个 crate，没有 JavaScript runtime：
 
-1. **构建。** `nsh` 为每个目标——iOS、Android、macOS、Windows、Linux 或 Web 应用——构建链接了你的 crate 的运行器。组件、状态、事件处理和引擎一起编译成 Native 代码。
-2. **运行。** 应用的根组件以 Rust 形式运行在引擎线程上。运行器里没有 JavaScript 引擎：在任何平台上，Rust 应用都不包含 QuickJS。
+1. **构建。** `nsh` 为每个目标（iOS、Android、macOS、Windows、Linux 或 Web）构建运行器，并链接你的 crate。组件、状态、事件处理和引擎一起编译成原生代码。
+2. **运行。** 根组件以 Rust 形式跑在引擎线程上。运行器里没有 JavaScript 引擎，任何平台上的 Rust 应用都不带 QuickJS。
 
 ### 两者的区别
 
 | | TSX 应用 | Rust 应用 |
 |---|---|---|
 | 编写语言 | TSX（TypeScript 与 JSX） | Rust |
-| 构建产物 | QuickJS 字节码，由运行时加载 | Native 代码，链接进每个目标的运行器 |
+| 构建产物 | QuickJS 字节码，由运行时加载 | 原生代码，链接进每个目标的运行器 |
 | JavaScript 引擎 | QuickJS，每个视图一个虚拟机 | 无 |
 | 开发时（`nsh run`） | 每次保存后热更新 | 每次保存后重新构建并重启 |
-| 发布之后 | 随应用一起发布；也可在运行时以签名包下发，运行在沙箱里 | 随应用一起发布 |
-| 适合 | 大多数应用、插件、运行时下发或由模型生成的界面 | 核心是繁重计算或系统相关工作的应用 |
+| 发布之后 | 随应用发布；也可在运行时以签名包下发，运行在沙箱里 | 随应用发布 |
+| 适合 | 大多数应用、插件、运行时下发或模型生成的界面 | 核心是繁重计算或系统工作的应用 |
 
-两者可以结合：TSX 应用从 nshm——应用自己在 `ext/` 里的，或已发布的——导入 Rust 组件、模块和类，它们以 Native 代码运行（[nshm](./nshm.md)）；Rust 应用也可以用同样的方式承载 TSX 页面（[用 Rust 开发](./rust.md)）。
+两者可以混用。TSX 应用通过 nshm 导入 Rust 组件、模块和类，可以是 `ext/` 里自己的，也可以是已发布的，它们都以原生代码运行（[nshm](./nshm.md)）。Rust 应用也能用同样方式承载 TSX 页面（[用 Rust 开发](./rust.md)）。
 
 ### 共用的引擎
 
-从引擎开始，两条路径完全相同。每一轮的变化被收集起来，由 Taffy（Flexbox 和 CSS Grid）排版，每帧作为一批视图操作交给主线程，主线程把它应用到 Native 视图上。文本在引擎线程上只测量和排版一次（Apple 平台用 CoreText，Android 用 `StaticLayout`，Windows 用 DirectWrite，Linux 用 Pango，Web 用浏览器的字体度量），主线程只负责绘制。
+进入引擎之后，两条路径完全相同：
 
-在 Web 上，同一个引擎运行在页面里：浏览器显示用 CSS 设置样式的 HTML 元素，负责滚动、选择文本和处理输入；`nsh package --target web` 把应用发布成一个按内容命名文件的静态网站，可以直接放进任何 CDN（[Web](./web.md)）。
+1. 收集每一轮的变化。
+2. 由 [Taffy](https://github.com/DioxusLabs/taffy) 排版（Flexbox 和 CSS Grid）。
+3. 每帧把一批视图操作交给主线程，主线程应用到原生视图上。
+
+文本只在引擎线程上测量和排版一次：Apple 平台用 CoreText，Android 用 `StaticLayout`，Windows 用 DirectWrite，Linux 用 Pango，Web 用浏览器的字体度量。主线程只负责绘制。
+
+在 Web 上，同一个引擎跑在页面里。浏览器负责显示 CSS 样式的 HTML 元素、滚动、选择文本和处理输入。`nsh package --target web` 把应用发布成静态网站，文件按内容命名，可以直接放到任何 CDN（[Web](./web.md)）。
 
 > [!NOTE]
-> 主线程从不等待应用的代码。系统同步提出的问题（这个输入框能否再接受一个字符、用户能否侧滑返回、这个面板能否关闭）都由事先设置的属性在 Native 侧回答，比如 `maxLength`、`popOnBack` 或 `closeOnSwipe`。事件随后才到达应用的处理函数。
+> 主线程从不等待应用代码。系统有时会同步询问：这个输入框还能不能输入字符？用户能不能侧滑返回？这个面板能不能关？NSH 根据事先设置的属性在原生侧直接回答，例如 `maxLength`、`popOnBack`、`closeOnSwipe`。事件之后才交给应用的处理函数。
 
 ## 动态界面与 AI 生成的界面
 
-NSH 最初是为了让 Native 应用在发布之后接收新界面，这仍然是它的主要用途之一。应用在需要显示模块的地方嵌入 `NshAppView`（iOS）、`NshView`（Android）、`AppView`（macOS、Windows、Linux 以及 GPUI 应用）或 `createPlayer`（网页），NSH 就在其中运行 TSX 模块：
+NSH 最初就是为了让原生应用在发布后还能加载新界面，这至今仍是主要用途之一。应用在需要的位置嵌入一个视图，NSH 在里面运行 TSX 模块：
 
-- **发布之后下发。** 模块是应用在运行时下载的签名包（`.nshpkg`）。应用在运行它之前，会用自己信任的密钥和吊销列表校验签名（[签名包](./signed-packages.md)）。宿主应用集成运行时，业务团队基于它的 API 开发模块，并按自己的节奏下发。
-- **宿主始终掌控。** 每个模块运行在自己的 QuickJS 虚拟机里，内存、调用时长和节点数都有上限，只能使用宿主授予的能力：网络主机、网页、状态栏（[沙箱与能力](./sandbox-and-capabilities.md)）。多个模块可以并排运行。
-- **模块可以沿用应用的设计。** 模块可以复用应用的组件样式，宿主还能注册自己的 Native 视图——地图、播放器、设计系统组件——供模块使用（[原生组件](./native-components.md)）。
+| 平台 | 嵌入方式 |
+|---|---|
+| iOS | `NshAppView` |
+| Android | `NshView` |
+| macOS、Windows、Linux、GPUI 应用 | `AppView` |
+| 网页 | `createPlayer` |
 
-同一套机制让应用可以**用界面来回答**。模型写出一个小的 TSX 模块（一个表单、一张图表、一张预订卡片），你的服务器检查、构建并签名，应用以 Native 方式显示它：
+- **发布后下发。** 模块是签名包（`.nshpkg`），应用在运行时下载。运行前，应用用自己信任的密钥和吊销列表校验签名（[签名包](./signed-packages.md)）。宿主应用集成运行时，业务团队按它的 API 开发模块，按自己的节奏下发。
+- **宿主说了算。** 每个模块有独立的 QuickJS 虚拟机，内存、调用时长和节点数都有上限。模块只能用宿主授予的能力：网络主机、网页、状态栏（[沙箱与能力](./sandbox-and-capabilities.md)）。多个模块可以同时运行。
+- **和应用风格一致。** 模块可以复用应用的组件样式。宿主还可以注册自己的原生视图给模块用，比如地图、播放器、设计系统组件（[原生组件](./native-components.md)）。
+
+同一套机制还能让应用**直接用界面回答**。模型写一个小的 TSX 模块，比如表单、图表或预订卡片；你的服务器检查、构建并签名；应用用原生方式显示：
 
 <div class="diagram-scroll">
 <img class="diagram diagram-light" src="/diagrams/ai-flow-light.svg" alt="从提示词到 Native 界面：模型写出 TSX 模块；你的服务器构建、检查并签名；越过信任边界后，应用校验包，在它设定的限制和能力下于沙箱中运行，并用平台自己的界面显示。">
 <img class="diagram diagram-dark" src="/diagrams/ai-flow-dark.svg" alt="从提示词到 Native 界面：模型写出 TSX 模块；你的服务器构建、检查并签名；越过信任边界后，应用校验包，在它设定的限制和能力下于沙箱中运行，并用平台自己的界面显示。">
 </div>
 
-在 iOS 上，宿主只需要几行代码：
+在 iOS 上，宿主只需三行：
 
 ```swift
 let app = NshAppView()                         // 一个 UIView：放在任意位置
@@ -189,13 +221,13 @@ let info = try await app.loadPackage(at: downloadedFile, trust: trust)   // 校�
 
 ## AI-Friendly
 
-NSH 为用 AI 编写的软件而设计，完整的应用和生成的界面都是如此：
+NSH 为 AI 编写的软件而设计，不论是完整应用还是生成的界面：
 
-- **每个平台一套应用模型。** 模型只需学会一种编写界面的方式，结果就能运行在手机、桌面和 Web 上；NSH 按平台适配交互，不需要把同一个界面生成六遍。
-- **TSX，在值得的地方用 Rust。** 应用、界面、插件和按请求生成的界面用 TSX；TSX 导入的性能关键模块或完整应用用 Rust——运行在同一个引擎上。
-- **精确、自动生成的契约。** 每个元素、属性、样式键和模块都有从 Rust 源码生成的 TypeScript 声明（`.nsh/types`），Rust API 本身是类型化的，因此生成的代码都由编译器检查。这些文档也以纯文本形式提供给模型（[`llms.txt`](/llms.txt)、[`llms-full.txt`](/llms-full.txt)），`npx skills add longbridge/nsh` 则把编码指南和设计指南安装为编程智能体的技能。
-- **一个命令行覆盖整个循环。** Agent 通过 `nsh` 创建应用、构建、在目标平台上运行、执行测试、读取结果、修复并打包。`nsh test` 无需设备、无界面地运行，并报告错误和生成的视图；编译器还能在进程内（`nsh_bundler::compile_module`）和浏览器里运行（[Playground](/playground)）。
-- **不可信也能安全运行。** 运行时下发的生成代码是不可信代码：它带着签名到达，运行在有限制的虚拟机里，只能使用宿主授予的能力。
+- **所有平台一套模型。** 模型只学一种写界面的方式，结果就能跑在手机、桌面和 Web 上。交互由 NSH 按平台适配，不用把同一个界面生成六遍。
+- **TSX 为主，必要处用 Rust。** 应用、页面、插件和按请求生成的界面用 TSX；性能关键的模块或完整应用用 Rust。两者共用一个引擎。
+- **精确的生成契约。** 每个元素、属性、样式键和模块都有从 Rust 源码生成的 TypeScript 声明（`.nsh/types`），Rust API 本身也有类型，生成的代码都要过编译器检查。文档也提供纯文本版给模型读（[`llms.txt`](/llms.txt)、[`llms-full.txt`](/llms-full.txt)）。`npx skills add longbridge/nsh` 会把编码指南和设计指南装成编程 Agent 的技能。
+- **一个命令行走完整个循环。** Agent 通过 `nsh` 创建、构建、运行、测试、修复和打包应用。`nsh test` 不需要设备，无界面运行，并报告错误和生成的视图。编译器也能在进程内（`nsh_bundler::compile_module`）和浏览器里运行（[Playground](/playground)）。
+- **不可信代码也能安全运行。** 运行时下发的生成代码按不可信处理：必须带签名，跑在有限制的虚拟机里，只能用宿主授予的能力。
 
 ## 运行平台
 
@@ -210,7 +242,7 @@ NSH 为用 AI 编写的软件而设计，完整的应用和生成的界面都是
 | [TUI](./tui.md) | macOS、Windows、Linux 上的终端 | ratatui | `AppView`（ratatui 区域） |
 | [GPUI](./gpui.md) | 桌面平台 | GPUI | `AppView`（GPUI、GPUI Kit 应用） |
 
-作为开发工具，Mac Catalyst（`--target catalyst`）在 Mac 上运行 iOS 后端，用于 Catalyst 特有的工作。
+开发时，可以用 Mac Catalyst（`--target catalyst`）在 Mac 上运行 iOS 后端，处理 Catalyst 相关的问题。
 
 <div class="diagram-scroll">
 <img class="diagram diagram-light" src="/diagrams/platforms-light.svg" alt="一个模块，多个宿主：同一个 bundle 和 Rust 运行时运行在 iOS、Android、Linux、使用 AppKit 的 macOS 和使用 Win32 / Direct2D 的 Windows 上，GPUI 覆盖三个桌面平台，网页则用 HTML 绘制。">
@@ -219,19 +251,21 @@ NSH 为用 AI 编写的软件而设计，完整的应用和生成的界面都是
 
 ## Native Shell 与 GPUI Shell
 
-[长桥（Longbridge）](https://longbridge.com)为自己的客户端构建 NSH。最初的需求是移动客户端的插件层，起点是 [GPUI Shell](https://gpui-kit.com/shell)——它让 [GPUI](https://gpui-kit.com) 桌面应用可以用 JavaScript 扩展。在手机上，由 GPUI 自己绘制的界面将不得不重建平台已有的能力——文本选择及其菜单（拷贝、分享、翻译、查询）、输入法、无障碍、每个 iOS 版本带来的新视觉材质——每个移动团队也都要接手一套新的界面技术栈。因此 NSH 用每个平台自己的界面来渲染，并从那个插件层成长为一个覆盖所有平台、可以编写完整应用的框架。
+[长桥（Longbridge）](https://longbridge.com)为自己的客户端开发 NSH。它最早是移动客户端的插件层，起点是 [GPUI Shell](https://gpui-kit.com/shell)。GPUI Shell 让 [GPUI](https://gpui-kit.com) 桌面应用可以用 JavaScript 扩展。
 
-两者的定位不同。GPUI Shell 用于扩展 GPUI 桌面应用；Native Shell 是面向手机、桌面和 Web Native 应用的框架，它的 GPUI 后端可以把 NSH 应用嵌入 GPUI 和 GPUI Kit 应用（[GPUI](./gpui.md)）。
+如果在手机上也用 GPUI 自绘界面，就得重做平台已有的能力：文本选择和选择菜单（拷贝、分享、翻译、查询）、输入法、无障碍，以及每个 iOS 版本新增的视觉材质。每个移动团队还得学一套新的 UI 技术栈。所以 NSH 改用各平台自己的 UI 渲染，并从插件层发展成能写完整应用的全平台框架。
+
+两者定位不同。GPUI Shell 用来扩展 GPUI 桌面应用；Native Shell 用来开发手机、桌面和 Web 上的原生应用，它的 GPUI 后端还能把 NSH 应用嵌进 GPUI 和 GPUI Kit 应用（[GPUI](./gpui.md)）。
 
 ## 与其他方案的比较
 
-就完整应用而言，NSH 与 React Native、Flutter、Qt、GPUI、Slint、Electron 和 Tauri 等跨平台框架并列；就发布之后下发的界面而言，它与网页视图、服务端驱动 UI 和小程序容器并列。它的选择是：在一套应用模型下使用每个平台自己的界面和交互，用 TSX 编写，运行在用 Rust 构建的引擎上，需要的部分用 Rust。[方案比较](./comparison.md)逐一做了对比。
+做完整应用时，NSH 的同类是 React Native、Flutter、Qt、GPUI、Slint、Electron 和 Tauri 等跨平台框架；做发布后下发的界面时，同类是网页视图、服务端驱动 UI 和小程序容器。NSH 的选择是：一套应用模型，各平台用自己的界面和交互；用 TSX 写，跑在 Rust 引擎上，需要时直接用 Rust。[方案比较](./comparison.md)逐一做了对比。
 
 ## 下一步
 
-- [安装](./installation.md)与[快速上手](./getting-started.md)：获取 `nsh`，编写第一个应用，并在各个平台上运行。
+- [安装](./installation.md)与[快速上手](./getting-started.md)：安装 `nsh`，写第一个应用，在各平台上运行。
 - [nshm](./nshm.md)：用 Rust 组件、模块和类扩展 TSX 应用，可以是应用自己的，也可以是已发布的。
 - [用 Rust 开发](./rust.md)：从头到尾用 Rust 编写的应用。
 - [平台](./platforms.md)：哪些平台能运行什么，以及如何在每个平台上运行、打包和嵌入。
-- [JSX 与组件](./jsx-and-components.md)和[响应式](./reactivity.md)：其他一切都建立在这两个概念之上，TSX 和 Rust 都是如此。
+- [JSX 与组件](./jsx-and-components.md)和[响应式](./reactivity.md)：两个核心概念，TSX 和 Rust 通用。
 - [签名包](./signed-packages.md)与[沙箱与能力](./sandbox-and-capabilities.md)：下发模块，并决定它们能做什么。

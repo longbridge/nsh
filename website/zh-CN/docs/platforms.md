@@ -1,15 +1,22 @@
 ---
 title: 平台概览
-description: "NSH 在哪些平台上运行：iOS、Android、macOS、Windows、Linux、GPUI、终端和 Web，每个平台都有自己的后端；在各平台上如何运行、打包和嵌入 TSX 或 Rust 应用，以及各自需要什么。"
+description: "NSH 支持 iOS、Android、macOS、Windows、Linux、GPUI、终端和 Web。介绍各平台如何运行、打包和嵌入 TSX 或 Rust 应用，以及需要什么环境。"
 order: 10
 group: platforms
 ---
 
 # 平台概览
 
-NSH 运行在手机、桌面、终端和网页上：iOS、Android、macOS、Windows、Linux、GPUI、终端和 Web。每个平台都有自己的后端，用平台自己的界面技术绘制：同一个应用在 iPhone 上是 UIKit 视图，在 Mac 上是 AppKit 视图，在 Linux 上是 GTK 4 控件，在 GPUI 应用里是 GPUI 元素，在终端里是字符 Cell，在浏览器里是 HTML，文本、输入、无障碍和深色模式都是平台自己的。后端之上的部分全部共享：响应式图、渲染器、Taffy 布局、组件和原生模块在每个平台上都是同一份 Rust 代码，所以一个应用可以在所有平台上运行。用 Rust 编写的应用就是这份代码加上你的 crate，不带 JavaScript 虚拟机；TSX 应用则在它之上用 QuickJS 运行自己的模块（[用 Rust 开发](./rust.md)）。
+NSH 支持 iOS、Android、macOS、Windows、Linux、GPUI、终端和 Web。每个平台有自己的后端，用平台原生界面绘制：iPhone 上是 UIKit 视图，Mac 上是 AppKit 视图，Linux 上是 GTK 4 控件，GPUI 应用里是 GPUI 元素，终端里是字符 Cell，浏览器里是 HTML。文本、输入、无障碍和深色模式都用平台自己的实现。
 
-在每个平台上，应用都有同样的两种用法：打包成该平台可安装的应用（`nsh package`），或嵌入你自己的原生应用——宿主可以链接一个 Rust 根组件，也可以在运行时加载 TSX。开发时用 `nsh run`（改动 Rust 会重新构建并重启应用，改动 TSX 是热更新）。
+后端之上全部共享同一份 Rust 代码：响应式图、渲染器、Taffy 布局、组件和原生模块。所以一个应用能跑在所有平台上。Rust 应用就是这份代码加你的 crate，不带 JavaScript 虚拟机；TSX 应用在此之上用 QuickJS 运行模块（[用 Rust 开发](./rust.md)）。
+
+每个平台上，应用都有两种用法：
+
+- 用 `nsh package` 打包成该平台的可安装应用。
+- 嵌入你自己的原生应用。宿主可以链接 Rust 根组件，也可以运行时加载 TSX。
+
+开发时用 `nsh run`：改 Rust 会重新构建并重启，改 TSX 直接热更新。
 
 ## 一览
 
@@ -24,19 +31,19 @@ NSH 运行在手机、桌面、终端和网页上：iOS、Android、macOS、Wind
 | [Web](./web.md) | HTML 与 CSS；浏览器的字体 | 现代浏览器，桌面和手机 | `nsh run --target web` | 一个静态网站 |
 | [TUI](./tui.md) | 在终端 Cell 网格上用 ratatui 绘制；终端的字体 | macOS、Windows 和 Linux 上的终端 | `nsh run --target tui` | 随嵌入它的终端应用发布 |
 
-- **[GPUI](./gpui.md)** 用姊妹项目 GPUI Kit 所基于的 [GPUI](https://gpui-kit.com) 绘制应用，在 macOS、Windows 和 Linux 上表现一致：它是嵌入 GPUI 和 GPUI Kit 应用的后端，这些应用把 `AppView` 放进自己的元素树。独立的桌面应用用各操作系统自己的后端（AppKit、Win32、GTK 4）运行和打包。
-- **[TUI](./tui.md)** 把应用绘制在终端的字符 Cell 网格上，使用终端自己的颜色，以键盘为主，也支持鼠标：`nsh run --target tui` 在当前终端中运行应用，ratatui 应用用 `AppView` 嵌入应用。
-- **[Web](./web.md)** 把应用渲染成浏览器页面里的 HTML：`nsh package --target web` 发布一个静态网站，可部署到任意 Web 服务器或 CDN，Rust 应用的引擎和 crate 编译为 WebAssembly；你自己的网页可以用 `createPlayer` 或 iframe 嵌入应用。本站的在线示例和 [Playground](/playground) 也由它运行。
+- **[GPUI](./gpui.md)** 用 GPUI Kit 背后的 [GPUI](https://gpui-kit.com) 绘制，支持 macOS、Windows 和 Linux。它用于把 NSH 嵌入 GPUI 和 GPUI Kit 应用，宿主把 `AppView` 放进自己的元素树。独立桌面应用则用各系统自己的后端（AppKit、Win32、GTK 4）。
+- **[TUI](./tui.md)** 在终端的字符 Cell 网格上绘制，使用终端配色，以键盘为主，也支持鼠标。`nsh run --target tui` 在当前终端运行应用；ratatui 应用用 `AppView` 嵌入。
+- **[Web](./web.md)** 把应用渲染成 HTML。`nsh package --target web` 生成静态网站，可部署到任意 Web 服务器或 CDN；Rust 应用的引擎和 crate 编译为 WebAssembly。你的网页可以用 `createPlayer` 或 iframe 嵌入应用。本站的在线示例和 [Playground](/playground) 就是这样运行的。
 
-社区还在同一个引擎上构建了更多平台，每个平台有自己的仓库，`nsh` 命令行按名字运行它们：[`nsh-platform-miniprogram`](https://github.com/huacnlee/nsh-platform-miniprogram) 在微信小程序中运行应用（`--target miniprogram`）。[构建平台](./platform-extensions.md)介绍了如何构建一个平台。
+社区也基于同一引擎做了更多平台，各自独立成仓库，`nsh` 命令行按名字调用。例如 [`nsh-platform-miniprogram`](https://github.com/huacnlee/nsh-platform-miniprogram) 可在微信小程序中运行应用（`--target miniprogram`）。做法见[构建平台](./platform-extensions.md)。
 
-**开发工具：**Mac Catalyst 在 Mac 上用 iPhone 尺寸的窗口（390×844）运行 iOS 后端（`--target catalyst`），仅在确有需要时使用：检查 Catalyst 特有的行为，或在 Mac Catalyst 应用中嵌入 NSH。Mac 应用请用默认的 `macos`；要看应用在手机上的效果，请用 `--target ios`。
+**开发工具：**`--target catalyst` 在 Mac 上用 iPhone 尺寸的窗口（390×844）运行 iOS 后端。只在需要检查 Catalyst 特有行为、或把 NSH 嵌入 Mac Catalyst 应用时使用。做 Mac 应用用默认的 `macos`；看手机效果用 `--target ios`。
 
 ## 开发与打包
 
-不传 `--target` 时，`nsh run` 选择本机的平台：macOS 上是 AppKit，Linux 上是 GTK 窗口，Windows 上是 Win32 窗口。手机要从电脑上连接：iOS 需要装有 Xcode 的 Mac，Android 可以在装有 Android SDK 的 macOS、Linux 或 Windows 上开发（[安装](./installation.md#各平台可用的命令)）。
+不传 `--target` 时，`nsh run` 使用本机平台：macOS 用 AppKit，Linux 用 GTK，Windows 用 Win32。手机需要通过电脑开发：iOS 要装了 Xcode 的 Mac；Android 要在 macOS、Linux 或 Windows 上装 Android SDK（[安装](./installation.md#各平台可用的命令)）。
 
-Rust 应用（`nsh.json` 写明 `"root"` 根组件）在自己的目录里运行和打包：`nsh` 为目标构建应用自己的 runner，包含你的 crate，不带 QuickJS。TSX 应用则写明入口：
+Rust 应用在 `nsh.json` 里写明 `"root"` 根组件，在项目目录下运行和打包。`nsh` 会为目标平台构建专属 runner，包含你的 crate，不带 QuickJS。TSX 应用需要指定入口文件：
 
 ```sh
 # Rust 应用，在它的目录里
@@ -48,7 +55,7 @@ nsh run App.tsx --target macos     # 或 ios、android、windows、linux、gpui�
 nsh package App.tsx --target macos
 ```
 
-每个桌面操作系统用自己的后端打包应用，后端只为运行它的机器构建：Mac 应用在 Mac 上打包，Windows 应用在 Windows 上打包，Linux 应用在 Linux 上打包。各目标的输出、签名和图标见[打包](./packaging.md)。
+桌面应用要在对应系统上打包：Mac 应用在 Mac 上，Windows 应用在 Windows 上，Linux 应用在 Linux 上。各目标的产物、签名和图标见[打包](./packaging.md)。
 
 ## 嵌入原生应用
 
@@ -66,16 +73,16 @@ nsh package App.tsx --target macos
 | Web | `createPlayer`（一个页面元素）或 iframe | TSX bundle；Rust 应用以发布的网站嵌入 | `nsh package --target web` 生成的运行时文件 | JavaScript 或 HTML |
 | TUI | `AppView`（ratatui frame 中的一块区域） | Rust 根组件、TSX bundle | `nsh-platform-tui` crate | Rust |
 
-Rust 宿主以 `AppSource::Rust` 或 `App::Rust` 挂载 Rust 根组件（`Root::of::<App>()`），并用 `set_ui_sets` 把应用的 UI 集合交给它的引擎，这样它加载的 TSX 就能导入应用自己的组件和模块。每个视图都是一个引擎，一个应用可以同时显示多个。在每个平台上，宿主都可以注册自己的原生视图给应用使用（[原生组件](./native-components.md)）。
+Rust 宿主以 `AppSource::Rust` 或 `App::Rust` 挂载 Rust 根组件（`Root::of::<App>()`），再用 `set_ui_sets` 把应用的 UI 集合交给引擎。这样加载的 TSX 也能导入应用自己的组件和模块。一个视图对应一个引擎，一个应用可以同时显示多个视图。各平台的宿主都能注册自己的原生视图供应用使用（[原生组件](./native-components.md)）。
 
 > [!NOTE]
-> Rust 宿主通过 NSH 仓库里的平台 crate 嵌入 NSH；macOS、Windows 和 Linux 的 `AppView` 从应用自己的文件（或源代码）加载 bundle，使用默认限制。GPUI crate 以及 iOS 和 Android SDK 还能加载[签名包](./signed-packages.md)，并为每个视图设置限制和能力（[沙箱与能力](./sandbox-and-capabilities.md)）。
+> Rust 宿主用 NSH 仓库里的平台 crate 嵌入。macOS、Windows 和 Linux 的 `AppView` 从应用自带的文件（或源代码）加载 bundle，使用默认限制。GPUI crate 和 iOS、Android SDK 还能加载[签名包](./signed-packages.md)，并按视图设置限制和能力（[沙箱与能力](./sandbox-and-capabilities.md)）。
 
 ### 共享移动宿主的 Tokio 运行时
 
-链接 Rust 的移动宿主可以让 NSH 的异步任务运行在应用已有的 Tokio 运行时上。每个视图保存运行时 `Handle` 的一份克隆；运行时归应用所有，应用保持它（启用 IO 和时间驱动）运转到视图停止。`None` 使用 NSH 共享的运行时。
+链接了 Rust 的移动宿主，可以让 NSH 的异步任务跑在自己已有的 Tokio 运行时上。每个视图持有运行时 `Handle` 的克隆。运行时归应用所有，应用要让它一直运行（开启 IO 和时间驱动），直到视图停止。传 `None` 则用 NSH 的共享运行时。
 
-iOS 在 `AppView`（或 `Surface`）的选项里设置运行时，视图的每次加载都使用它：
+iOS 在 `AppView`（或 `Surface`）的选项里设置，视图每次加载都会用它：
 
 ```rust
 let mut options = SurfaceOptions::default();
@@ -84,7 +91,12 @@ let view = AppView::new(mtm, frame, options);
 view.load(bundle);
 ```
 
-Android 在 UI 线程上用 `NshView` 的原生句柄（它的 `handle` 字段）调用 `nsh::set_runtime`，时机在视图加载应用或连接开发服务器之前。设置属于这个视图，从它的下一次加载起生效；运行中的引擎继续使用启动时的运行时。应用自己库里的 JNI 函数读取句柄：
+Android 用 `NshView` 的原生句柄（`handle` 字段）调用 `nsh::set_runtime`：
+
+- 在 UI 线程调用，且要早于视图加载应用或连接开发服务器。
+- 设置只作用于该视图，从下一次加载起生效。已在运行的引擎继续用启动时的运行时。
+
+句柄由应用自己库里的 JNI 函数读取：
 
 ```rust
 #[unsafe(no_mangle)]
@@ -101,17 +113,17 @@ extern "system" fn Java_com_example_app_RuntimeBridge_configure(
 }
 ```
 
-开启混淆时，保留桥接类的名称（`-keep class com.example.app.RuntimeBridge { *; }`）；分发的 AAR 已保留 `com.longbridge.nsh` 包，包括 `NshView.handle`。
+开启混淆时，要保留桥接类的名称（`-keep class com.example.app.RuntimeBridge { *; }`）。官方分发的 AAR 已保留 `com.longbridge.nsh` 包，包括 `NshView.handle`。
 
 ## 为每个平台编写
 
-应用的大部分代码不需要判断平台：元素、样式、布局和模块在各处行为一致。平台确实不同的地方，NSH 给它一个固定的位置（[平台特定代码](./platform-specific.md)）：
+大部分代码不用判断平台：元素、样式、布局和模块在各平台行为一致。确有差异时，NSH 把差异集中在一处处理（[平台特定代码](./platform-specific.md)）：
 
-- **环境说明应用运行在哪里**：Rust 里是 `os()`、`idiom()` 和 `is_desktop()`（`nsh_core::prelude`），TSX 里是 `nsh` 的 `platform.os`、`platform.idiom`、`platform.desktop` 和 `platform.select`。操作系统是 iOS、Android、macOS、Windows、Linux 或 Web；在终端里，idiom 为 `"terminal"`，操作系统是本机自己的系统。
-- **平台专属属性**在 TSX 里放在 `ios={{…}}`、`android={{…}}`、`macos={{…}}`、`windows={{…}}`、`web={{…}}` 或 `desktop={{…}}` 里（`desktop`：macOS、Windows、Linux、桌面浏览器和终端）。
-- **输入跟随平台。** 手机上是触摸和软键盘；桌面上是鼠标、触控板和键盘。
+- **判断运行环境**：Rust 用 `os()`、`idiom()` 和 `is_desktop()`（`nsh_core::prelude`）；TSX 用 `nsh` 导出的 `platform.os`、`platform.idiom`、`platform.desktop` 和 `platform.select`。OS 取值为 iOS、Android、macOS、Windows、Linux 或 Web。在终端里，idiom 是 `"terminal"`，OS 是本机系统。
+- **平台专属属性**：TSX 里写在 `ios={{…}}`、`android={{…}}`、`macos={{…}}`、`windows={{…}}`、`web={{…}}` 或 `desktop={{…}}` 中。`desktop` 包括 macOS、Windows、Linux、桌面浏览器和终端。
+- **输入随平台。** 手机用触摸和软键盘，桌面用鼠标、触控板和键盘。
 
-应用的组件用 NSH 的基础元素绘制，所以在桌面上和在手机上一样运行，样子也相同。桌面布局用基础元素（`view`、`text`、`scroll`、`virtual_list` 等；TSX 里是 `View`、`Text`、`Scroll`、`List` 等）加上对桌面的判断搭建，示例应用 gallery 的桌面布局就是这样做的：
+组件都由 NSH 基础元素绘制，所以在桌面和手机上运行方式、外观都一致。桌面布局用基础元素（`view`、`text`、`scroll`、`virtual_list` 等；TSX 里是 `View`、`Text`、`Scroll`、`List` 等）加一个桌面判断即可，gallery 的桌面布局就是这样写的：
 
 ```tsx tabs
 import { View } from "nsh";
@@ -151,12 +163,12 @@ fn tab_layout() -> AnyElement {
 }
 ```
 
-每个后端都列出了它以自己的方式处理的内容：[macOS](./macos.md#macos-上的差异)、[Windows](./windows.md#windows-上的差异)、[Linux](./linux.md#linux-上的差异)、[GPUI](./gpui.md#差异)、[TUI](./tui.md)。
+各后端的特殊之处见：[macOS](./macos.md#macos-上的差异)、[Windows](./windows.md#windows-上的差异)、[Linux](./linux.md#linux-上的差异)、[GPUI](./gpui.md#差异)、[TUI](./tui.md)。
 
 ## 另请参阅
 
-- [快速开始](./getting-started.md)：第一个应用，在每个平台上运行。
-- [用 Rust 开发](./rust.md)：完全用 Rust 编写的应用，以及 Rust 加 TSX。
-- [安装](./installation.md)：每个平台需要的工具。
-- [架构](./architecture.md)：哪些部分共享，每个后端做什么。
-- [构建平台](./platform-extensions.md)：在 NSH 的引擎上构建你自己的平台。
+- [快速开始](./getting-started.md)：写第一个应用，并在各平台运行。
+- [用 Rust 开发](./rust.md)：纯 Rust 应用，以及 Rust 加 TSX。
+- [安装](./installation.md)：各平台需要的工具。
+- [架构](./architecture.md)：哪些部分共享，各后端负责什么。
+- [构建平台](./platform-extensions.md)：基于 NSH 引擎构建自己的平台。
