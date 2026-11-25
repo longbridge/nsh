@@ -333,6 +333,31 @@ const range = (line: number, start: number, end: number) => ({ start: { line, co
 />
 ```
 
+### Fonts
+
+A decoration's `fontFamily` and `fontSize` set the font of its text, so a Markdown notes app built on `Editor` shows
+inline code and code blocks in a monospaced font and its headings larger. The editor measures the text in that font:
+carets, selections, presses and soft wrap follow it. A row is as tall as its largest text needs, the editor's
+`lineHeight` grown in proportion to the size (a 26 point heading in a 13 point editor with 20 point rows takes a row of
+40), and never shorter than `lineHeight`. Where decorations with fonts overlap, the innermost one's family and size
+win, each on its own (an inner `fontFamily` keeps an outer `fontSize`). Set the font here rather than with `class` or
+`style`, which the editor does not measure. In a terminal the text keeps its Cells.
+
+```tsx
+<Editor
+  value={notes()}
+  onChange={({ value }) => notes.set(value)}
+  fontFamily="Inter"
+  fontSize={15}
+  lineHeight={24}
+  decorations={[
+    { range: range(0, 0, 14), fontSize: 22, class: "font-semibold" },
+    { range: range(2, 8, 20), fontFamily: "Menlo", class: "bg-zinc-500/10" },
+  ]}
+  class="flex-1"
+/>
+```
+
 ### Gutter and overview ruler marks
 
 A decoration's `gutter` puts a mark in a strip before the line numbers, beside every line its range covers: the lines

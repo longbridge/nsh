@@ -4324,6 +4324,15 @@ covers [props] Editor.gutterDecorationsWidth
 covers [events] Editor.onDefinitionRequest
 covers [events] Editor.onCodeActionRequest
 
+# base-editor-fonts
+tap id:case-base-editor-fonts
+# A decoration's 26 point heading takes a row twice the editor's 20,
+# the caret there is as tall, and the code's row below keeps its 20.
+expect end
+tap id:measure
+expect Rows: 40 20 40
+covers [props] Editor.decorations
+
 # base-diff
 tap id:case-base-diff
 # Two changes, one line each, with a line of context around them: the
