@@ -1178,7 +1178,7 @@ impl<'a> Replay<'a> {
                 dest,
             } => self.image(
                 &image.uri,
-                image.density(),
+                || f64::from(image.density()),
                 source.map(|b| [b.origin.x, b.origin.y, b.size.width, b.size.height].map(|v| v.0)),
                 dest,
             ),
@@ -1595,7 +1595,13 @@ impl<'a> Replay<'a> {
         CGContext::restore_g_state(c);
     }
 
-    fn image(&self, uri: &str, density: f32, source: Option<[f32; 4]>, dest: &[Num; 4]) {
+    fn image(
+        &self,
+        uri: &str,
+        density: impl Fn() -> f64,
+        source: Option<[f32; 4]>,
+        dest: &[Num; 4],
+    ) {
         let Some(Some(CanvasBitmap { image, scale })) = self.images.get(uri) else {
             return;
         };
@@ -1604,11 +1610,8 @@ impl<'a> Replay<'a> {
         // never the screen's: the same size on every display. The source
         // rectangle and the default size are in the image's own units: an
         // SVG drawn sharp has `scale` pixels to each.
-        let density = f64::from(density);
-        let size = (
-            CGImage::width(Some(image)) as f64 / scale / density,
-            CGImage::height(Some(image)) as f64 / scale / density,
-        );
+        // Parsed only when a size is missing: a sprite sheet drawn with
+        // both sizes, thousands of times a frame, never needs it.
         let [dx, dy, mut dw, mut dh] = dest.map(|v| self.n(v));
         if let Some([sx, sy, sw, sh]) = source {
             let rect = CGRect::new(
@@ -1620,17 +1623,17 @@ impl<'a> Replay<'a> {
                 return;
             }
             if dw.is_nan() {
-                dw = sw as f64 / density;
+                dw = sw as f64 / density();
             }
             if dh.is_nan() {
-                dh = sh as f64 / density;
+                dh = sh as f64 / density();
             }
         }
         if dw.is_nan() {
-            dw = size.0;
+            dw = CGImage::width(Some(image)) as f64 / scale / density();
         }
         if dh.is_nan() {
-            dh = size.1;
+            dh = CGImage::height(Some(image)) as f64 / scale / density();
         }
         let c = self.cx();
         CGContext::save_g_state(c);
