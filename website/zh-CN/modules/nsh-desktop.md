@@ -421,8 +421,8 @@ async function changeLanguage(language: string) {
 ### 退出
 
 应用的生命周期由应用自己负责。关闭窗口只关闭那个窗口；最后一个窗口关闭时按退出模式处理：
-`"platform"`（默认）让 macOS 应用留在 Dock 中，在 Windows 和 Linux 上退出；`"lastWindowClosed"` 在所有平台上退出；
-`"explicit"` 让应用继续运行，以便打开另一个窗口、显示托盘菜单或调用 `quit()`。应用用
+`"platform"`（声明了 `<Window>` 场景的应用的默认值）让 macOS 应用留在 Dock 中，在 Windows 和 Linux 上退出；`"lastWindowClosed"` 在所有平台上退出；
+`"explicit"` 让应用继续运行，以便打开另一个窗口、显示托盘菜单或调用 `quit()`。未声明 `<Window>` 的裸 `mount(App)` 应用使用隐式主窗口，除非显式在 nsh.json 中配置 `application.quitMode` 或调用 `Application.setQuitMode`，关闭该窗口时在所有平台（包括 macOS）上都会直接退出。应用用
 `Application.setQuitMode("platform")`（Rust：`set_quit_mode(QuitMode::Platform)`）设置它；nsh.json 的
 `application.quitMode` 保存启动时的同一个模式。`Application.on("lastWindowClosed")` 在最后一个窗口
 关闭后收到通知。Rust listener 在退出模式生效前同步运行；JS listener 在后续提交中、决定之后运行。

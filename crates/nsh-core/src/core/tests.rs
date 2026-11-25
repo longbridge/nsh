@@ -30770,6 +30770,67 @@ mod rust_windows {
         );
     }
 
+    #[test]
+    fn closing_the_implicit_main_window_quits_unless_a_quit_mode_is_set() {
+        let open_and_close = |implicit: bool, explicit_mode: Option<crate::desktop::QuitMode>| {
+            let mut c = core();
+            c.set_environment(crate::element::Environment {
+                os: crate::platform::Os::MacOs,
+                ..Default::default()
+            });
+            c.set_default_quit_mode(crate::desktop::QuitMode::Platform);
+            if let Some(mode) = explicit_mode {
+                c.set_quit_mode(mode);
+            }
+            let mut open = OpenWindow {
+                implicit,
+                ..OpenWindow::default()
+            };
+            open.options.id = "main".into();
+            c.apply(Op::Create {
+                id: 2,
+                tag: Tag::Modal,
+            })
+            .unwrap();
+            c.apply(Op::Insert {
+                parent: crate::ROOT_ID,
+                child: 2,
+                before: None,
+            })
+            .unwrap();
+            c.apply(Op::Command {
+                id: 2,
+                command: Command::Desktop(Box::new(DesktopCommand::OpenWindow(Box::new(open)))),
+            })
+            .unwrap();
+            let _ = c.commit().unwrap();
+            c.apply(Op::Remove {
+                parent: crate::ROOT_ID,
+                child: 2,
+            })
+            .unwrap();
+            let batch = c.commit().unwrap();
+            app_commands(&batch).contains(&DesktopCommand::Quit)
+        };
+
+        assert!(
+            open_and_close(true, None),
+            "implicit main window quits on macOS when no quit mode was set"
+        );
+        assert!(
+            !open_and_close(true, Some(crate::desktop::QuitMode::Platform)),
+            "explicitly setting platform keeps macOS running even for an implicit window"
+        );
+        assert!(
+            !open_and_close(true, Some(crate::desktop::QuitMode::Explicit)),
+            "explicit quit mode keeps macOS running for an implicit window"
+        );
+        assert!(
+            !open_and_close(false, None),
+            "explicit windows keep the platform default on macOS"
+        );
+    }
+
     /// Rust sets the mode as TSX does (`set_quit_mode`), and the last
     /// window's close follows it.
     #[test]

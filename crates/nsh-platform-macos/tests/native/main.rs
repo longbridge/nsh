@@ -34,6 +34,8 @@ mod hover_cursor;
 mod image_placeholder;
 #[cfg(target_os = "macos")]
 mod ime;
+#[cfg(all(target_os = "macos", feature = "js"))]
+mod implicit_quit;
 #[cfg(target_os = "macos")]
 mod input_clip;
 #[cfg(target_os = "macos")]
@@ -118,6 +120,12 @@ fn main() {
                 quit_requests::run_case();
             } else if std::env::var_os("NSH_QUIT_CHECK_ONLY").is_some() {
                 quit_requests::run();
+            } else if std::env::var_os("NSH_IMPLICIT_QUIT_CASE").is_some() {
+                #[cfg(feature = "js")]
+                implicit_quit::run_case();
+            } else if std::env::var_os("NSH_IMPLICIT_QUIT_CHECK_ONLY").is_some() {
+                #[cfg(feature = "js")]
+                implicit_quit::run();
             } else if std::env::var_os("NSH_TITLE_BAR_CHECK_ONLY").is_some() {
                 title_bar::run();
             } else if std::env::var_os("NSH_MODAL_FADE_CHECK_ONLY").is_some() {
@@ -214,6 +222,8 @@ fn main() {
                 nested_run_loop::run();
             } else {
                 quit_requests::run();
+                #[cfg(feature = "js")]
+                implicit_quit::run();
                 window_press::run();
                 window_hover::run();
                 title_bar::run();

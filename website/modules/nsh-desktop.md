@@ -430,12 +430,14 @@ async function changeLanguage(language: string) {
 ### Quitting
 
 The app owns its lifecycle. Closing a window closes that window only; closing the last window follows the quit mode:
-`"platform"` (the default) keeps a macOS app running in the Dock and quits on Windows and Linux, `"lastWindowClosed"`
-quits on every platform, `"explicit"` leaves the app running so it can open another window, show a tray menu or call
-`quit()`. The app sets it with `Application.setQuitMode("platform")` (Rust: `set_quit_mode(QuitMode::Platform)`);
-nsh.json's `application.quitMode` holds the same mode from launch. `Application.on("lastWindowClosed")` hears the last
-window go, after its close path. Rust listeners run synchronously before the quit mode acts; JS listeners run in a later
-commit, after the decision.
+`"platform"` (the default for apps that declare `<Window>` scenes) keeps a macOS app running in the Dock and quits on
+Windows and Linux, `"lastWindowClosed"` quits on every platform, `"explicit"` leaves the app running so it can open
+another window, show a tray menu or call `quit()`. A plain `mount(App)` root with no `<Window>` scenes uses an implicit
+main window that quits on every platform when closed unless the app explicitly sets `application.quitMode` in nsh.json
+or calls `Application.setQuitMode`. The app sets it with `Application.setQuitMode("platform")` (Rust:
+`set_quit_mode(QuitMode::Platform)`); nsh.json's `application.quitMode` holds the same mode from launch.
+`Application.on("lastWindowClosed")` hears the last window go, after its close path. Rust listeners run synchronously
+before the quit mode acts; JS listeners run in a later commit, after the decision.
 
 A macOS Dock or Finder reopen, or a later launch on Windows and Linux, reaches `Application.on("reopen")` (Rust:
 `on_reopen`): the app opens or focuses the window it wants. NSH never shows a window of its own.

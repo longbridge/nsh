@@ -2461,16 +2461,19 @@ impl<M: TextEngine + 'static> Driver<M> {
         let text_engine = Rc::new(text_engine);
         let access = Arc::new(app_access(&config.app));
         let mut core = Core::new(text_engine.clone(), config.viewport);
-        // nsh.json's `application.quitMode`, else the default
-        // `"platform"`: Windows and Linux quit when the last window
-        // closes; macOS stays in the Dock. The app can change it at run
-        // time with `Application.setQuitMode`.
-        let mode = config
+        // Explicit `<Window>` scenes default to `"platform"` (Windows and
+        // Linux quit when the last window closes; macOS stays in the Dock),
+        // while a plain root's implicit main window quits on close unless the
+        // app explicitly sets `application.quitMode` or calls
+        // `Application.setQuitMode`.
+        core.set_default_quit_mode(nsh_core::desktop::QuitMode::Platform);
+        if let Some(mode) = config
             .app
             .application()
-            .map(|options| options.quit_mode)
-            .unwrap_or_default();
-        core.set_quit_mode(mode);
+            .and_then(|options| options.quit_mode)
+        {
+            core.set_quit_mode(mode);
+        }
         core.set_content_culling(config.content_culling);
         core.set_tree_order_tracking(sink.needs_tree_order());
         core.set_projected_state_mounting(sink.needs_projected_states());
