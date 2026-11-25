@@ -629,6 +629,10 @@ Each run is a span placed at its position. The characters a line broke at (the s
 break's newline: a run's `after`) stand between the spans as text nodes (`Player.lineBreaks`), so a text's
 `textContent` and its `aria-label` read as the text was written ("it now brings", never "it nowbrings"), which is
 what search engines and screen readers get; beside absolutely placed spans that whitespace collapses and shows nothing.
+A run whose line is taller or shorter than its font (a line height the text sets, a taller run beside it: `Run::line_height`)
+gets a `line-height` of its line and moves up by the half-leading the DOM adds (`Player.placeRun`, measured per font
+and height on the metrics probe, `lineBaseline`, as the browser snaps it), so its baseline stays where layout put it
+and a selection highlights the whole line, as on a browser's own text, not the font's height.
 
 ## Styles as classes
 
