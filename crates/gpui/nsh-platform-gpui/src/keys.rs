@@ -195,7 +195,7 @@ impl RawKey {
     /// character it types on the US layout (Shift's), the web's name for
     /// a named key — with no hardware metadata (`code` stays empty).
     /// `down` is the transition the step generates; it marks no repeat.
-    #[cfg(any(feature = "dev", test))]
+    #[cfg(any(feature = "dev-client", test))]
     pub(crate) fn requested(keystroke: &Keystroke, down: bool) -> Self {
         let modifiers = keystroke.modifiers;
         let key = match keystroke.key {
@@ -308,7 +308,7 @@ fn named(key: &str) -> Option<SharedString> {
 }
 
 /// The web's name for a named key a test step asked for.
-#[cfg(any(feature = "dev", test))]
+#[cfg(any(feature = "dev-client", test))]
 fn named_key(key: ShortcutKey) -> SharedString {
     let name = match key {
         ShortcutKey::Enter => "Enter",

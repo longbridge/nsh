@@ -664,7 +664,7 @@ fn open_submenu(open: &mut Open, level: usize, row: usize, keyboard: bool) {
 /// Chooses the item of the open menu at the end of `path` (the labels of
 /// the submenus on the way, then its own), as clicks on them do (`nsh test
 /// --target gpui`).
-#[cfg(feature = "dev")]
+#[cfg(feature = "dev-client")]
 pub(crate) fn choose_path(surface: &Rc<Surface>, path: &[String]) -> Result<(), String> {
     for (level, wanted) in path.iter().enumerate() {
         let row = {

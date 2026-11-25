@@ -165,7 +165,7 @@ struct Settings {
 
 /// Makes the system look dark (or light) from now on (`nsh test
 /// --target`'s color scheme).
-#[cfg(feature = "dev")]
+#[cfg(feature = "dev-client")]
 pub(crate) fn simulate_system_scheme(dark: bool) {
     SIMULATED.with(|s| s.set(Some(dark)));
     let surfaces: Vec<Rc<Surface>> = WATCHED.with(|w| {
@@ -2552,7 +2552,7 @@ struct DialogItem {
     /// Answered: fading out, no more input.
     closing: Cell<bool>,
     /// The buttons' texts, in order.
-    #[cfg_attr(not(feature = "dev"), allow(dead_code))]
+    #[cfg_attr(not(feature = "dev-client"), allow(dead_code))]
     labels: Vec<String>,
 }
 
@@ -2896,7 +2896,7 @@ fn show_dialog(surface: &Rc<Surface>, dialog: &Dialog) {
 
 /// Whether the newest dialog on `surface` was drawn (laid out), or there
 /// is none.
-#[cfg(feature = "dev")]
+#[cfg(feature = "dev-client")]
 pub(crate) fn dialog_drawn(surface: &Surface) -> bool {
     OVERLAYS
         .with(|o| {
@@ -2913,7 +2913,7 @@ pub(crate) fn dialog_drawn(surface: &Surface) -> bool {
 /// Where a user presses to answer the newest dialog on `surface` (root
 /// points): the middle of its button titled `button`, or outside its card
 /// to close it without one (`None`; only a dialog that can be closed so).
-#[cfg(feature = "dev")]
+#[cfg(feature = "dev-client")]
 pub(crate) fn dialog_point(
     surface: &Rc<Surface>,
     button: Option<&str>,

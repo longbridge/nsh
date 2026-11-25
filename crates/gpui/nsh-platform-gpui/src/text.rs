@@ -168,7 +168,7 @@ pub(crate) const MONOSPACE: &[&str] = &[
 
 /// The first installed of [`MONOSPACE`] (GPUI resolves exact family
 /// names only, no generic `monospace`). Only the dev overlay needs it.
-#[cfg(feature = "dev")]
+#[cfg(feature = "dev-client")]
 pub(crate) fn monospace_family(system: &TextSystem) -> Option<SharedString> {
     let installed = system.all_font_names();
     MONOSPACE
@@ -2648,7 +2648,7 @@ pub(crate) fn draw_silhouette(
 /// The first rectangle (view coordinates: x, y, width, height) the
 /// characters `start..end` of the text view with `state` cover (the test
 /// agent's spans).
-#[cfg(feature = "dev")]
+#[cfg(feature = "dev-client")]
 pub(crate) fn range_rect(state: &ViewState, start: u32, end: u32) -> Option<(f32, f32, f32, f32)> {
     let drawn = state.text.as_ref()?;
     let layout = drawn.layout.downcast::<GpuiLayout>()?;

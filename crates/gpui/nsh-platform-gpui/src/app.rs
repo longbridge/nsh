@@ -70,20 +70,20 @@ pub fn set_ui_sets(sets: Vec<nsh_core::element::Registry>) {
 }
 
 /// The app's Rust root ([`set_root`]).
-#[cfg(feature = "dev")]
+#[cfg(feature = "dev-client")]
 static ROOT: RwLock<Option<fn() -> Root>> = RwLock::new(None);
 
 /// Sets the root of an app of Rust only (`nsh.json` `"root"`), which this
 /// development host runs when its dev server publishes the app as the
 /// host's root (`nsh test --target gpui` of such an app) instead of a
 /// bundle.
-#[cfg(feature = "dev")]
+#[cfg(feature = "dev-client")]
 pub fn set_root(root: fn() -> Root) {
     *ROOT.write().unwrap_or_else(|e| e.into_inner()) = Some(root);
 }
 
 /// The app's Rust root, if the host has one ([`set_root`]).
-#[cfg(feature = "dev")]
+#[cfg(feature = "dev-client")]
 pub(crate) fn root() -> Option<Root> {
     let root = *ROOT.read().unwrap_or_else(|e| e.into_inner());
     root.map(|root| root())
@@ -116,7 +116,7 @@ pub enum AppSource {
     Bundle(Bundle),
     /// A dev server (`ws://host:port/ws`); bundles are pushed on every
     /// rebuild.
-    #[cfg(feature = "dev")]
+    #[cfg(feature = "dev-client")]
     DevServer(String),
 }
 
@@ -357,7 +357,7 @@ pub struct AppView {
     /// Answers the apps' picks in place of GPUI's open dialog
     /// ([`AppView::set_picker`]).
     picker: RefCell<Option<Arc<dyn nsh_core::picker::PickerBackend>>>,
-    #[cfg(feature = "dev")]
+    #[cfg(feature = "dev-client")]
     pub(crate) dev: RefCell<Option<crate::dev::DevSession>>,
 }
 
@@ -415,7 +415,7 @@ impl AppView {
             tabbed: std::cell::Cell::new(false),
             picker: RefCell::new(None),
             _keystrokes: cx.observe_keystrokes(Self::tab_entered),
-            #[cfg(feature = "dev")]
+            #[cfg(feature = "dev-client")]
             dev: RefCell::new(None),
         }
     }
@@ -505,7 +505,7 @@ impl AppView {
     /// [`AppView::on_error`] still hears the app's errors. Connecting again
     /// replaces the session; dropping the view ends it. Call it through
     /// `view.update(cx, |view, cx| …)`.
-    #[cfg(feature = "dev")]
+    #[cfg(feature = "dev-client")]
     pub fn connect_dev_server(&self, url: impl Into<String>, cx: &mut Context<Self>) {
         crate::dev::start(self, url.into(), false, cx);
     }
@@ -948,7 +948,7 @@ impl Render for AppView {
             view: cx.entity().downgrade(),
         };
         // A dev session draws its status line and error overlay above.
-        #[cfg(feature = "dev")]
+        #[cfg(feature = "dev-client")]
         let surface = crate::dev::wrap(self, surface.into_any_element(), cx);
         // The window's chrome (title bar, menu bar) goes around the surface.
         let content = crate::chrome::render(&self.surface, surface, window, cx);
@@ -1039,7 +1039,7 @@ fn open(
     let app: Result<App, AppSource> = match source {
         AppSource::Rust(root) => Ok(App::Rust(root)),
         AppSource::Bundle(bundle) => Ok(App::Js(bundle)),
-        #[cfg(feature = "dev")]
+        #[cfg(feature = "dev-client")]
         source @ AppSource::DevServer(_) => Err(source),
     };
     let main = app
@@ -1101,7 +1101,7 @@ fn open(
             .set(opening_mode);
         match app {
             Ok(app) => view.read(cx).load(app),
-            #[cfg(feature = "dev")]
+            #[cfg(feature = "dev-client")]
             Err(AppSource::DevServer(url)) => {
                 view.update(cx, |view, cx| crate::dev::start(view, url, held, cx))
             }
