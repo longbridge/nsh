@@ -24,12 +24,13 @@ use std::{
 use nsh_core::geometry::Points;
 use ropey::Rope;
 use rustc_hash::FxHashMap;
-use unicode_segmentation::{GraphemeCursor, GraphemeIndices, UnicodeSegmentation};
+use unicode_segmentation::{GraphemeIndices, UnicodeSegmentation};
 
 use super::{
     buffer::{Bias, Buffer, Change, LineSpan, map_offset},
     diagnostics::{self, Mark},
     fold::FoldRange,
+    line_break::text_break,
     state::Font,
     types::RowLayout,
 };
@@ -1351,82 +1352,6 @@ fn last_break(
     }
 }
 
-/// How far before a row UAX #14 may look for context.
-const BREAK_CONTEXT: usize = 64;
-
-/// The last break opportunity of plain text (no label in it) after `floor`
-/// and before `bound` (at it too when `inclusive`), the text's context
-/// starting at `context` at the earliest. UAX #14 runs backwards from
-/// `bound` a span at a time, each from where its breaks no longer depend on
-/// the text before it (`split_at_safe`): a few chars, not the whole line. A
-/// span starts a char before that point (so it can break there), but that
-/// char lacks its own context (a combining mark, its base's class): a break
-/// before the point is the next span's to decide. Nothing looks further
-/// back than [`BREAK_CONTEXT`] bytes before the row (from `row_start`), so
-/// a line wraps in time linear in its length; text without such a point
-/// that long (a rare run, as of spaces with combining marks) takes its
-/// breaks as if the line started there.
-fn text_break(
-    text: &str,
-    row_start: usize,
-    context: usize,
-    floor: usize,
-    bound: usize,
-    inclusive: bool,
-) -> Option<usize> {
-    let bytes = text.as_bytes();
-    let ascii_pair = |offset: usize| bytes[offset - 1].is_ascii() && bytes[offset].is_ascii();
-    let mut context = row_start.saturating_sub(BREAK_CONTEXT).max(context);
-    while !text.is_char_boundary(context) {
-        context -= 1;
-    }
-    // A row starts at a grapheme boundary: graphemes are found from there.
-    let row = &text[row_start..];
-    // Opportunities after `start`, up to `max`, are looked for; `bound` is
-    // a char's offset, and the span ends after that char, so it decides
-    // the break before it.
-    let mut bound = bound;
-    let mut max = if inclusive { bound } else { bound - 1 };
-    loop {
-        let end = bound + text[bound..].chars().next().map_or(0, char::len_utf8);
-        let (before, span) = unicode_linebreak::split_at_safe(&text[context..end]);
-        let span_start = context + before.len();
-        let start = if before.is_empty() {
-            span_start
-        } else {
-            span_start + span.chars().next().map_or(0, char::len_utf8)
-        };
-        let mut found = None;
-        for (offset, _) in unicode_linebreak::linebreaks(span) {
-            let offset = span_start + offset;
-            if offset > max {
-                break;
-            }
-            if offset > start
-                && offset > floor
-                && !ascii_pair(offset)
-                && is_grapheme_boundary(row, offset - row_start)
-            {
-                found = Some(offset);
-            }
-        }
-        // Between ASCII chars (always a grapheme boundary: no `\r\n` in a
-        // line), after whitespace.
-        if let Some(offset) = (start.max(floor) + 1..=max)
-            .rev()
-            .find(|&offset| ascii_pair(offset) && char::from(bytes[offset - 1]).is_whitespace())
-        {
-            found = found.max(Some(offset));
-        }
-        // A span from `context` on is as far back as the text goes.
-        if found.is_some() || start <= floor || before.is_empty() {
-            return found;
-        }
-        bound = start;
-        max = start;
-    }
-}
-
 /// Whether a row may break before the label of `label` (a range of
 /// `text`): as before an object replacement character, unless the chars
 /// on both sides are ASCII, where only whitespace before it allows one.
@@ -1497,12 +1422,6 @@ fn breaks_after_label(text: &str, label: Range<usize>) -> bool {
             | BreakClass::Quotation
             | BreakClass::Inseparable
     )
-}
-
-fn is_grapheme_boundary(text: &str, offset: usize) -> bool {
-    GraphemeCursor::new(offset, text.len(), true)
-        .is_boundary(text, 0)
-        .unwrap_or(false)
 }
 
 /// The x of `offset` in the row from `row_start` of a line's `text` (at
