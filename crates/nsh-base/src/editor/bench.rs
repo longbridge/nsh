@@ -339,4 +339,17 @@ fn bench_wrap_200k() {
     bench_wrap("Rust", &rust);
     let markdown = corpus("md", &["website/zh-CN"], LINES);
     bench_wrap("Markdown (zh-CN)", &markdown);
+    // One line each: wrapping stays linear in a line's length.
+    let prose: String = markdown
+        .chars()
+        .filter(|&c| c != '\n')
+        .take(200_000)
+        .collect();
+    bench_wrap("zh-CN prose, one line of 200k chars", &prose);
+    bench_wrap("50k commas, one line", &"，".repeat(50_000));
+    bench_wrap(
+        "50k spaces with a combining mark, one line",
+        &" \u{301}".repeat(50_000),
+    );
+    bench_wrap("25k flags, one line", &"🇨🇳".repeat(25_000));
 }
