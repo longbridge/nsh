@@ -7,7 +7,7 @@ group: start
 
 # CLI
 
-`nsh` is the command-line tool that builds, runs and packages NSH apps, in TSX or Rust. Every subcommand that builds an app takes `[ENTRY]`. This is the app's directory or a TSX entry module. The directory defaults to the current one, so `cd my-app && nsh run` works. In a directory, `nsh` runs a Rust app's root component (`nsh.json` `"root"`) or a TSX app's `App.tsx`. Each command reads `nsh.json` in the app's root and refreshes the type declarations in `.nsh/types`.
+`nsh` is the tool an NSH app is built with, in TSX or Rust. Every subcommand that builds an app takes `[ENTRY]`: the app's directory (default: the current one, so `cd my-app && nsh run` works), which runs a Rust app's root component (`nsh.json` `"root"`) or a TSX app's `App.tsx`, or a TSX entry module. It reads `nsh.json` in the app's root and refreshes the type declarations in `.nsh/types`.
 
 ```text
 nsh <COMMAND>
@@ -27,7 +27,7 @@ nsh <COMMAND>
   revoke       Sign a revocation list
 ```
 
-`nsh <command> --help` prints the flags of a command. `nsh -V` (`--version`) prints the version and the Git revision it was built from.
+`nsh <command> --help` prints the flags of a command; `nsh -V` (`--version`) prints the version and the Git revision it was built from.
 
 ## Output
 
@@ -42,14 +42,14 @@ warn iOS Simulator: image failed: An SSL error has occurred and a secure connect
 ✓ rebuilt App.tsx (18ms), 1 device
 ```
 
-`✓` marks a finished step, `→` shows where to connect and `•` reports what a device did. `warn` and `error` lines
-are problems. Plain lines are your app's own output (`console.log`). On a terminal, a spinner shows the running step
-and lines are colored, unless `NO_COLOR` is set. When you redirect output to a file, NSH writes only the result
-lines, without colors. If a tool that NSH runs fails (cargo for an app's Rust crate, or a development host), its
-output is printed below the `error` line.
+`✓` is a finished step, `→` where to connect, `•` what a device did; `warn` and `error` lines are problems, and
+plain lines are your app's own output (`console.log`). On a terminal a spinner shows the step that is running, and
+lines are colored (unless `NO_COLOR` is set); redirected to a file, only the result lines are written, without colors.
+The output of the tools NSH runs (cargo for an app's Rust crate, the development hosts) is printed below an `error`
+line when one of them fails.
 
-`-v, --verbose` works on any command, as does `NSH_VERBOSE=1`. It prints everything as it comes: every log line
-with its level and source, cargo's output and the hosts' output.
+`-v, --verbose` (any command; also `NSH_VERBOSE=1`) prints everything as it comes: every log line with its level and
+source, cargo's output and the hosts' own.
 
 ## nsh init
 
@@ -71,7 +71,7 @@ Creates an app in `DIR` (default: the current directory, created if missing) fro
 | `--template <TEMPLATE>` | `rust`, `ts` or `mixed` (above). `rust` and `mixed` need Rust; `cargo run` also needs the native desktop backend's development libraries. |
 | `--nsh-source <DIR>` | With `rust` or `mixed`: the crates depend on the NSH crates of the checkout in `DIR`, by path, to build the app against NSH's sources. |
 
-The `rust` and `mixed` crates depend on NSH's crates from crates.io, at the CLI's version. With `--nsh-source` they depend on a local checkout instead. The `nsh` commands build the app's runners and hosts from the same crates. Before each command on such an app, `nsh` builds a small program from the app's crates and NSH's core. This program describes their components, modules and classes, and `nsh` runs it again whenever the crates change. The CLI uses that description to bundle, compile, type-check, serve and package the app. A Rust app's builds compile only its crates and NSH's core. Create these templates in a new app directory. If any of their files already exists, `nsh init` reports a conflict before it writes anything.
+The crates of `rust` and `mixed` depend on NSH's crates on crates.io at the CLI's version (with `--nsh-source`, on a checkout's), and the `nsh` commands build the app's runners and hosts from the same crates. Before each command on such an app, `nsh` builds a small program of the app's crates and NSH's core that describes their components, modules and classes, and runs it when the crates changed; with that description the CLI itself bundles, compiles, type-checks, serves and packages the app. A Rust app's builds compile its crates and NSH's core alone. Create them in a new app directory: any of their files existing is reported as a conflict before anything is written.
 
 Apps whose Rust crates depend on NSH through Git use the checkout Cargo resolves in the app’s lockfile. Generated hosts share that checkout, including NSH dependencies redirected by the app’s Cargo patches.
 
@@ -87,9 +87,9 @@ nsh run my-app --target ios        # in the iOS simulator
 nsh run my-app/App.tsx --target web
 ```
 
-For a TSX entry, `nsh run` starts the dev server (like `nsh dev`) and launches a development host that loads the app from it. It rebuilds on every save. Hot module replacement (HMR) patches the running app in place. The app's logs and errors appear in the terminal. Stop it with Ctrl-C, or close the Catalyst, macOS, Linux, Windows or GPUI window. However the run ends (Ctrl-C, `kill` / `pkill` or an error), `nsh run` stops the host it started. That host is the Catalyst app, the macOS, Linux, Windows or GPUI host, or the development host in the simulator or on the Android device.
+For a TSX entry, `nsh run` starts the dev server (as `nsh dev`), launches a development host that loads the app from it, and rebuilds on every save. Hot module replacement patches the running app in place; logs and errors from the app are printed in the terminal. Stop it with Ctrl-C (or by closing the Catalyst, macOS, Linux, Windows or GPUI window). However it ends (Ctrl-C, `kill` / `pkill`, an error), it stops the host it started: the Catalyst app, the macOS, Linux, Windows or GPUI host, the development host in the simulator, or on the Android device.
 
-On the native window and mobile targets, a Rust app (`nsh.json` `"root"`, [Building with Rust](./rust.md)) runs with no dev server and no QuickJS. `nsh run` builds the app's runner for the target, with the root component mounted, and starts it. On the desktops this is a debug build with its logs in the terminal. In the simulator and on Android, `nsh run` installs the app. When the crate's Rust code changes, `nsh run` rebuilds and restarts it. With `--target web` it prints the page's address, and the open page loads the new runtime by itself. To run the TSX entry instead, name it: `nsh run App.tsx`.
+On the native window and mobile targets, a Rust app (`nsh.json` `"root"`, [Building with Rust](./rust.md)) runs with no dev server and no QuickJS: `nsh run` builds the app's runner for the target with its root mounted, starts it (on the desktops a debug build, its logs in the terminal; in the simulator and on Android, the app installed), and on a change to the crate's Rust code builds it again and restarts it. With `--target web` it prints the page's address, and the open page loads the new runtime by itself. Name the TSX entry (`nsh run App.tsx`) to run that instead.
 
 | Flag | Default | Description |
 |---|---|---|
@@ -106,12 +106,12 @@ On the native window and mobile targets, a Rust app (`nsh.json` `"root"`, [Build
 | `--display <N>` | The main display | The display the window opens on, centered: `1` is the primary display (the one with the menu bar), `2` the next, and so on; a number with no display opens it on the main one (`--target macos`, TSX entries). |
 | `--background` | | The app never becomes the active app, as `nsh test` runs its apps: its window shows, the keyboard stays with the app you type in, and input sent to its windows (an agent driving it, a UI test) still reaches it. On macOS it has no Dock icon or menu bar while it runs. For a run you do not watch, such as an agent checking a change while you work (`--target macos`, `linux`, `windows` and `gpui`, TSX entries). |
 
-With `--target android`, `nsh` uses the device that `--device` or `ANDROID_SERIAL` names. Otherwise it uses the first one that `adb devices` lists, and names it when several are connected. `adb reverse` forwards the dev server's port to the device. See [Getting started](./getting-started.md#run-it) and [Dev server and debugging](./dev-server-and-debugging.md).
+With `--target android`, the device `--device` or `ANDROID_SERIAL` names is used, else the first one `adb devices` lists (`nsh` names it when several are connected); the dev server's port is forwarded to it with `adb reverse`. See [Getting started](./getting-started.md#run-it) and [Dev server and debugging](./dev-server-and-debugging.md).
 
-A replacement waits up to ten seconds for the previous session to finish cleanup. Several apps run side by side on ports of their own, and running an app again replaces its previous session. If another program or an older NSH CLI holds the `--port`, the error names the port. `--port 0` asks the OS for a free port. `nsh run` serves only this machine. With `--target ios`, `android` or `web` it also serves the network.
-With `--target tui`, the app runs in the current terminal with hot updates on save. CLI and host diagnostics go to the app's `.nsh/tui.log`. Press `C-h e` for logs and errors, Escape or `C-g` to close the panel, and `r` to reload. App errors open the panel automatically, and an update restores the app display. A Cell is one terminal character position, 8×16 points by default. `--points-per-cell 10x20` takes precedence over `"tui": { "pointsPerCell": "10x20" }` in `nsh.json`. Both dimensions must be finite and positive, and they apply when the run starts. Rust apps run their root in a generated terminal development host and rebuild/restart when Rust code changes.
+A replacement waits up to ten seconds for the previous session to finish cleanup. Several apps run side by side on ports of their own, and running an app again replaces its previous session. A `--port` occupied by another program, or an older NSH CLI, produces an error naming the port; `--port 0` asks the OS for a free port. `nsh run` serves this machine only, and with `--target ios`, `android` or `web` also the network.
+With `--target tui`, the app runs in the current terminal with hot updates on save. CLI and host diagnostics go to the app's `.nsh/tui.log`. Press `C-h e` for logs and errors, Escape or `C-g` to close the panel, and `r` to reload. App errors open the panel automatically; an update restores the app display. Each Cell defaults to 8×16 points. `--points-per-cell 10x20` takes precedence over `"tui": { "pointsPerCell": "10x20" }` in `nsh.json`; both dimensions must be finite and positive, and apply when the run starts. Rust apps run their root in a generated terminal development host and rebuild/restart when Rust code changes.
 
-On Unix, the terminal host exits on SIGHUP, SIGTERM, SIGINT or terminal disconnection and restores the terminal settings that remain accessible. Idle apps sleep between input checks. Interactive runs use live terminal input. `--headless` accepts redirected input for tests.
+On Unix, the terminal host exits on SIGHUP, SIGTERM, SIGINT or terminal disconnection and restores the terminal settings that remain accessible. Idle apps sleep between input checks; interactive runs use live terminal input, and `--headless` accepts redirected input for tests.
 
 ## nsh dev
 
@@ -129,7 +129,7 @@ Starts the dev server and opens this system’s native host: AppKit on macOS, GT
   browsers on this network: http://192.168.1.20:8790/
 ```
 
-Use `nsh dev --server-only` with an app that embeds the development SDK (`NativeShellDev.xcframework`, `nsh-dev.aar`). `--target`, `--device`, `--port`, `--release` and `--limits` work as for `nsh run`. `--server-only` starts the server without launching a host. `--host <HOST>` binds the dev server to a specific IPv4 address. The default is `0.0.0.0` for `--server-only` and for `--target ios`, `android` or `web`, and `127.0.0.1` for local targets. For example, use `nsh dev App.tsx --server-only --host 127.0.0.1` to listen on loopback only. With `--target android`, `--host` must be `127.0.0.1` or `0.0.0.0` because `adb reverse` forwards the device's `127.0.0.1` to this machine's `127.0.0.1`.
+Use `nsh dev --server-only` with an app that embeds the development SDK (`NativeShellDev.xcframework`, `nsh-dev.aar`). `--target`, `--device`, `--port`, `--release` and `--limits` work as for `nsh run`; `--server-only` selects a server without a launched host. `--host <HOST>` binds the dev server to a specific IPv4 address instead of the default (`0.0.0.0` for `--server-only` and `--target ios`, `android`, or `web`; `127.0.0.1` for local targets), for example `nsh dev App.tsx --server-only --host 127.0.0.1` to listen on loopback only. With `--target android`, `--host` must be `127.0.0.1` or `0.0.0.0` because `adb reverse` forwards the device's `127.0.0.1` to this machine's `127.0.0.1`.
 
 ## nsh test
 
@@ -137,13 +137,7 @@ Use `nsh dev --server-only` with an app that embeds the development SDK (`Native
 nsh test [PATH] [--filter <NAME>] [--release] [--trace] [--fps] [--junit <FILE>] [--jobs <N>] [--target <TARGET>] [--browser <PATH>] [--web-host <JS>] [--device <DEVICE>] [--display <N>] [--foreground]
 ```
 
-Runs the app's tests headless ([Testing](./testing-and-trace.md)). Test files are `*.test.tsx` and `*.test.ts` files that import `nsh/test`. `PATH` is a directory or a single test file. The default is the current directory. Hidden directories, `node_modules` and `target` are skipped.
-
-If the directory is an app with Rust crates of its own (`nsh.json` `"rust"`: a Rust app or a TSX app with a crate), `nsh test` first runs `cargo test` in each crate's directory. It shows and counts each Rust test with the TypeScript tests, under the file of its test target (`src/lib.rs › tests::adds`). A Rust app with only Rust tests is tested this way too.
-
-Each test file runs on its own engine, and each app a test opens runs on another fresh engine. `nsh test` prints one line per test. For a failure it also prints what was thrown, where in the test file, and the texts on screen. Any failure makes it exit with a non-zero code.
-
-Given the app's entry (`nsh test App.tsx`, or `nsh test nsh.json` for a Rust app), it opens the app with network access, lets it run for 1.2 s and then takes steps from standard input (`await app.press("Add")`, where `app` is the app). A TSX app runs in the CLI's own process. An app with its own Rust crates runs in a headless runner built from them, and the CLI builds the entries for it. Headless runs behave as iOS unless a test opens the app as Android (`open`'s `platform`). So `platform.os` is `"ios"`, and `ios:` classes and `ios={{…}}` props apply.
+Runs the app's tests headless ([Testing](./testing-and-trace.md)): the test files (`*.test.tsx`, `*.test.ts`, importing `nsh/test`) in `PATH`, a directory (default: the current one; hidden directories, `node_modules` and `target` are skipped), or the test file `PATH`. Given a directory of an app with Rust crates of its own (`nsh.json` `"rust"`: a Rust app or a TSX app with a crate), it first runs `cargo test` for each crate in the directory, in the crate's own directory, and shows and counts each Rust test with the TypeScript tests, under the file of its test target (`src/lib.rs › tests::adds`); a Rust app with only Rust tests is tested this way too. Each test file runs on an engine of its own and each app its tests open on another, fresh one. It prints a line per test, and for a failure what was thrown, where in the test file and the texts on screen; any failure makes it exit with a non-zero code. Given the app's entry (`nsh test App.tsx`; a Rust app's: `nsh test nsh.json`), it opens the app on the network, lets it run for 1.2 s and takes the steps standard input gives (`await app.press("Add")`, with `app` the app). A TSX app runs in the CLI's own process; an app with Rust crates of its own runs in a headless runner built with them, which the CLI builds the entries for. Headless runs behave as iOS unless a test opens the app as Android (`open`'s `platform`): `platform.os` is `"ios"`, and `ios:` classes and `ios={{…}}` props apply.
 
 ```text
 ✓ App.test.tsx › counts taps (321ms)
@@ -171,7 +165,7 @@ Given the app's entry (`nsh test App.tsx`, or `nsh test nsh.json` for a Rust app
 nsh check [ENTRY] [--tsc <TSC>] [-- <TSC ARGS>...]
 ```
 
-Type checks the app. If the app has Rust crates of its own (`nsh.json` `"rust"`), `nsh check` first runs `cargo check --all-targets` in each crate's directory, tests included. Cargo errors make it exit with a non-zero code. A Rust app (`"root"`) is then checked as far as it has TypeScript. If it has a `tsconfig.json` (`nsh init --template rust` writes one for `App.test.tsx`), its test files are type checked too. The TypeScript check refreshes `.nsh/types` and `.nsh/tsconfig.json`, then runs `tsc -p <app directory> --noEmit` with the app's `tsconfig.json`. It uses TypeScript 7, the native compiler, which needs no Node. The first run downloads it from the npm registry (about 9 MB), verifies the checksum NSH records and keeps it in NSH's cache (`~/Library/Caches/nsh` on macOS, `~/.cache/nsh` on Linux, `%LOCALAPPDATA%\nsh` on Windows, or `NSH_CACHE`). Type errors make it exit with a non-zero code. It warns when `tsconfig.json` does not extend `./.nsh/tsconfig.json`, where NSH keeps its TypeScript settings ([Project structure](./project-structure.md#tsconfigjson-and-nshtypes)).
+Type checks the app. An app with Rust crates of its own (`nsh.json` `"rust"`) has each crate checked first with `cargo check --all-targets` in the crate's directory, its tests included; Cargo's errors make it exit with a non-zero code. A Rust app (`"root"`) is then checked as far as it has TypeScript: with a `tsconfig.json` (the one `nsh init --template rust` writes for `App.test.tsx`) its test files are type checked too. The TypeScript check refreshes `.nsh/types` and `.nsh/tsconfig.json`, then runs `tsc -p <app directory> --noEmit` with the app's `tsconfig.json`. It uses TypeScript 7, the native compiler, which needs no Node: the first run downloads it from the npm registry (about 9 MB), checks it against the checksum NSH records, and keeps it in NSH's cache (`~/Library/Caches/nsh` on macOS, `~/.cache/nsh` on Linux, `%LOCALAPPDATA%\nsh` on Windows, or `NSH_CACHE`). Type errors make it exit with a non-zero code. It warns when `tsconfig.json` does not extend `./.nsh/tsconfig.json`, where NSH keeps its TypeScript settings ([Project structure](./project-structure.md#tsconfigjson-and-nshtypes)).
 
 | Flag | Description |
 |---|---|
@@ -179,8 +173,8 @@ Type checks the app. If the app has Rust crates of its own (`nsh.json` `"rust"`)
 | `-- <TSC ARGS>` | Passed on to `tsc`, e.g. `nsh check -- --pretty false`. |
 
 NSH-generated files stay under `.nsh/`: declarations, runner sources, and default build/package outputs in
-`.nsh/out/`. Cargo keeps its normal `target/` cache and existing `CARGO_TARGET_DIR` behavior. NSH does not
-add Cargo configuration to move it. `--out` still overrides the output location. With [huacnlee/cargo](https://github.com/huacnlee/cargo), which we
+`.nsh/out/`. Cargo keeps its normal `target/` cache and existing `CARGO_TARGET_DIR` behavior; NSH does not
+add Cargo configuration to relocate it. `--out` still overrides the output location. With [huacnlee/cargo](https://github.com/huacnlee/cargo), which we
 recommend, the builds live under `~/.cargo/targets/` and the binaries still land in `target/`.
 
 ## nsh build
@@ -214,16 +208,7 @@ It writes:
 nsh package [ENTRY] --target ios|ios-simulator|android|macos|linux|windows|web [-o <OUT>] [flags]
 ```
 
-Builds an installable app in release mode. A Rust app (`nsh.json` `"root"`) is packaged with its own runner. Cargo builds that runner from your crates and NSH's, with the root mounted and no QuickJS ([Building with Rust](./rust.md)). A TSX app is packaged with the prebuilt runtime. No Xcode project or Gradle build is involved. NSH assembles the app bundle itself, with these tools per target:
-
-- iOS: Xcode's `actool` and `codesign`.
-- Android: the SDK's `aapt2`, `zipalign` and `apksigner`.
-- macOS: a `.app` signed ad hoc, or with `--sign` via `codesign`. `sips` makes the icon.
-- Linux: copies the runner and writes a `.tar.gz` with `tar`.
-- Windows: copies the runner, embeds the icon and writes a `.zip`, with no external tools.
-- Web: writes a static site, with no external tools.
-
-Metadata comes from `nsh.json`. Flags override it.
+Builds an installable app in release mode. A Rust app (`nsh.json` `"root"`) is packaged with its own runner, built with Cargo from your crates and NSH's, its root mounted with no QuickJS ([Building with Rust](./rust.md)); a TSX app with the prebuilt runtime. No Xcode project or Gradle build is involved: NSH assembles the app bundle itself and uses Xcode's `actool` and `codesign` (iOS) or the SDK's `aapt2`, `zipalign` and `apksigner` (Android); for macOS it assembles a `.app` signed ad hoc or with `--sign` via `codesign` (and `sips` for the icon); for Linux it copies the runner and writes a `.tar.gz` with `tar`; for Windows it copies the runner, embeds the icon and writes a `.zip`, with no tools; for the web it writes a static site, with no tools. Metadata comes from `nsh.json`, overridden by the flags.
 
 | Flag | Description |
 |---|---|
@@ -260,7 +245,7 @@ See [Packaging](./packaging.md).
 
 ## External targets
 
-When `nsh dev`, `nsh run`, `nsh test` or `nsh package` gets a `--target` that NSH does not know, it runs an external platform of that name. NSH first looks for a [platform nshm](./nshm.md#platform-nshm) in the app. Otherwise it runs the program `nsh-platform-<name>` on your `PATH`, the same way Cargo runs `cargo-<name>`. The program receives the command and every argument except `--target` and its value. It also gets the environment variables `NSH` (this `nsh` executable), `NSH_VERSION` and `NSH_TARGET` (the name). Its exit code becomes the command's exit code.
+`nsh dev`, `nsh run`, `nsh test` and `nsh package` with a `--target` that is none of NSH's own run the platform of that name, built outside NSH: the one a [platform nshm](./nshm.md#platform-nshm) of the app provides, else the program `nsh-platform-<name>` on your `PATH`, as Cargo runs `cargo-<name>`. It gets the command and every argument but `--target` and its value, and the environment variables `NSH` (this `nsh` executable), `NSH_VERSION` and `NSH_TARGET` (the name); its exit code is the command's.
 
 ```sh
 nsh package my-app --target miniprogram --out dist
@@ -271,8 +256,8 @@ A name is lower-case letters, digits and dashes, starting with a letter. With no
 
 ## nsh update
 
-Updates an installed `nsh` to the latest build of its channel. Naming a channel switches to it, as
-`rustup update nightly` does ([Installation](./installation.md#updating)).
+Updates an installed `nsh` to the latest build of its channel; naming one, as `rustup update nightly`
+does, switches channels ([Installation](./installation.md#updating)).
 
 ```sh
 nsh update [stable|nightly]
@@ -294,15 +279,15 @@ nsh add nsh-extra --features camera                  # with the crate's Cargo fe
 
 It lists the nshm in `nsh.json` `"dependencies"` under its package name (the crate's, or the `"name"` in a Git or local nshm's `nsh.json`), as `Cargo.toml` does: `"acme-gauge": "^1.2.0"`, `{ "github": "acme/ui", "version": "^1.4" }`, `{ "git": "…", "tag": "v1.4.0" }`, `{ "git": "…", "rev": "…" }` or `{ "path": "../gauge" }`, each object with optional `"version"`, `"features"` and `"targets"` (the targets a Rust nshm is linked for, which `nsh add` keeps when it adds the nshm again: [nshm](./nshm.md#using-an-nshm)). Added without a version, it gets `^` and the version it resolved to. Then it resolves every nshm the app reaches again, installs what is missing in `~/.nsh/nshms`, pins them in `nsh.lock` (commit it with the app), and adds a Rust nshm to the `[dependencies]` of the app's crate when it has one (`"rust"`). It prints the specifiers to import, and says so when the nshm brings Rust into a pure TSX app, whose development machine and CI then need the Rust toolchain ([Building with Rust](./rust.md)). If the nshm cannot be resolved, clashes with the app's crates or another nshm (the same package, specifier or module), or does not work with this NSH, the app's files are left unchanged.
 
-`--features` turns on Cargo features of a Rust nshm. Each feature is a module of the nshm that the app uses. Features already listed stay on: `nsh add nsh-extra --features push` after `camera` keeps `camera`. A name the crate does not define stops `nsh add`. To turn a feature off, remove it from `nsh.json` and from the dependency in the app crate's `Cargo.toml`. For the enabled features, what the crates declare under `[package.metadata.nsh]` goes into the packages. The development hosts get all of it except the entitlements ([What the packaged app needs](./nshm.md#what-the-packaged-app-needs)).
+`--features` turns on Cargo features of a Rust nshm, the modules of it the app uses, besides those already listed (`nsh add nsh-extra --features push` after `camera` keeps `camera`); a name the crate does not define stops `nsh add`. To turn one off, remove it from `nsh.json` and from the dependency in the app crate's `Cargo.toml`. What the crates declare under `[package.metadata.nsh]` for the features on goes into the packages, and all but the entitlements into the development hosts ([What the packaged app needs](./nshm.md#what-the-packaged-app-needs)).
 
-Versions are semver requirements with Cargo's meaning: `1.2` and `^1.2` take any 1.x from 1.2.0, and `~1.2`, `=1.2.3`, `>=1.2, <2` and `*` work as in `Cargo.toml` (quote them in the shell: `nsh add "acme-gauge@>=1.2, <2"`). A Git nshm's versions are its tags (`v1.4.0` or `1.4.0`). `nsh.json` says which versions are acceptable, and `nsh.lock` records which ones were resolved. Every command builds with the locked versions, without the network, while they still meet the requirements. A changed requirement is resolved again. The whole app gets one version of each package: the newest one that every requirement accepts. When no version fits, the error names who requires what. The NSH versions an nshm works with are its `nsh.json` `"nsh"` requirement and, for a Rust nshm, its `nsh-core` requirement, checked against the running `nsh`.
+Versions are semver requirements with Cargo's meaning: `1.2` and `^1.2` take any 1.x from 1.2.0, and `~1.2`, `=1.2.3`, `>=1.2, <2` and `*` work as in `Cargo.toml` (quote them in the shell: `nsh add "acme-gauge@>=1.2, <2"`). A Git nshm's versions are its tags (`v1.4.0` or `1.4.0`). `nsh.json` says what is acceptable, `nsh.lock` what was resolved: every command builds with the locked versions while they still meet the requirements, without the network; a changed requirement resolves anew. One version of each package is resolved for the whole app, the newest every requirement on it accepts; when none fits, the error names who requires what. The NSH versions an nshm works with are its `nsh.json` `"nsh"` requirement and, for a Rust nshm, its `nsh-core` requirement, checked against the running `nsh`.
 
 Build scripts and procedural macros of an nshm run when the app builds, and its code runs with the app's permissions: review its source and `nsh.lock` changes like the app's own code.
 
 ## nsh upgrade
 
-Upgrades the app's nshm (all of them, or the ones you name) to the newest versions their requirements accept. It pins them in `nsh.lock` and updates a Rust nshm's dependency in the app's crate to match. To move past a requirement, change it in `nsh.json` or run `nsh add` with the new one.
+Upgrades the app's nshm to the newest versions their requirements accept, all of them or those named, and pins them in `nsh.lock`; a Rust nshm's dependency in the app's crate follows. To move past a requirement, change it in `nsh.json` or run `nsh add` with the new one.
 
 ```sh
 nsh upgrade [NAME]...
@@ -336,7 +321,7 @@ These commands make and check signed packages (`.nshpkg`): app bundles that apps
 nsh keygen <NAME>
 ```
 
-Creates an Ed25519 key pair: `<NAME>.secret` and `<NAME>.pub` (e.g. `nsh keygen keys/root`). Keep a root key's `.secret` offline. Apps trust its `.pub`.
+Creates an Ed25519 key pair: `<NAME>.secret` and `<NAME>.pub` (e.g. `nsh keygen keys/root`). Keep a root's `.secret` offline; apps trust its `.pub`.
 
 ### nsh update-manifest
 
@@ -401,9 +386,9 @@ nsh publish android <BUNDLE.aab> [--track <TRACK>] [--rollout <FRACTION>] [--sta
 nsh publish android --from <TRACK> --track <TRACK> [--rollout <FRACTION>]
 ```
 
-Uploads an Android App Bundle to Google Play and releases it to a track in one edit: insert, upload, track update
-and commit. A failed edit is deleted. Without `--track` the release goes to **internal testing** only. Reaching
-other testers or the public always takes an explicit `--track`. With `--from` instead of a bundle, it promotes the newest
+Uploads an Android App Bundle to Google Play and releases it to a track, in one edit (insert, upload, track update,
+commit; a failed edit is deleted). Without `--track` the release goes to **internal testing** only; reaching testers
+beyond it, or the public, always takes an explicit `--track`. With `--from` instead of a bundle, it promotes the newest
 release of one track to another. Signs in as a Google Cloud service account that has release permission for the app in
 Play Console ([Publish to Google Play](./publish.md#publish-to-google-play)).
 
@@ -420,8 +405,8 @@ Play Console ([Publish to Google Play](./publish.md#publish-to-google-play)).
 | `--store <DIR>` | The [store directory](./publish.md#store-listing). Default: `store` in the app's directory. |
 | `--listing` | Also update the store listing (name, descriptions, images) from the store directory, replacing what Play has for those locales. |
 
-To raise a staged rollout, release the same version again with a larger `--rollout`. To finish it, release it with
-no `--rollout`.
+To raise a staged rollout, release the same version again with a larger `--rollout`; to finish it, release it with no
+`--rollout`.
 
 ### nsh publish status android
 
@@ -452,8 +437,8 @@ nsh publish doctor linux [--entry <DIR>]
 ```
 
 Writes or updates the app's Flathub manifest (`<id>.yml`) for a release archive: its download URL and SHA-256. It opens
-no pull request. Commit the manifest to `flathub/<id>` yourself ([Publishing](./publish.md#publish-to-flathub)). `status`
-prints the app's version on Flathub and exits 1 until it matches `nsh.json`. `doctor` checks the metadata Flathub asks for
+no pull request; commit the manifest to `flathub/<id>` yourself ([Publishing](./publish.md#publish-to-flathub)). `status`
+prints the app's version on Flathub and exits 1 until it is `nsh.json`'s; `doctor` checks the metadata Flathub asks for
 (`id`, the store listing, `store.linux`, the icon), and validates the metainfo and desktop entry.
 
 | Flag | Description |
@@ -473,15 +458,15 @@ nsh publish doctor windows [--entry <DIR>] [--product-id <ID>]
 Submits an MSIX package (`nsh package --target windows --format msix`) to the Microsoft Store with the Store
 submission API: creates a submission from the last published one, replaces its package, sets the release notes of
 its listings (each locale's `releaseNotes` of the [store listing](./publish.md#store-listing), or `--notes`), uploads the package and commits it to certification. A failed submission is deleted before
-it is committed. If the app has a pending submission (a draft in Partner Center), the command refuses to run, so it
-never overwrites work a person started. `--wait` polls until certification ends and fails when the Store rejects it. `status` prints
+it is committed; an app with a pending submission (a draft in Partner Center) is refused, so nothing a person
+started is overwritten. `--wait` polls until certification ends and fails when the Store rejects it. `status` prints
 the latest submission's status and exits 0 when published, 2 while in progress, 1 when failed. `doctor` checks
 `nsh.json`, the credentials and the Store ID without changing anything.
 
 Credentials are an Azure AD app associated with Partner Center (Account settings → User management → Azure AD
 applications, role Manager), read only from `NSH_MS_TENANT_ID`, `NSH_MS_CLIENT_ID` and `NSH_MS_CLIENT_SECRET`. The
-Store ID is `nsh.json` `store.windows.productId` (or `--product-id`). Make the app's first submission (pricing, age ratings, store
-listing) in Partner Center. Later ones go through this command.
+Store ID is `nsh.json` `store.windows.productId` (or `--product-id`). The app's first submission (pricing, age ratings, store
+listing) is made in Partner Center; later ones go through this command.
 
 ### nsh verify
 

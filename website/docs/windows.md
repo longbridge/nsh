@@ -8,16 +8,16 @@ group: platforms
 # Windows
 
 NSH apps also run on Windows. The Windows backend draws them in Win32 windows with Direct2D and lays out text with
-DirectWrite. The core, reactive graph, renderer, Taffy layout and native modules are the same as on iOS and Android,
-so one app runs everywhere. On Windows, `os()` is `Os::Windows` (`platform.os` is `"windows"` in TSX), and TSX
-`desktop={{…}}` props apply. The window's title, a title bar of the app's own, the menu bar and
+DirectWrite; the core, the reactive graph, the renderer, Taffy layout and the native modules are the same
+as on iOS and Android, so one app runs everywhere. On Windows, `os()` is `Os::Windows` (`platform.os` is `"windows"`
+in TSX) and TSX's `desktop={{…}}` props apply. The window's title, a title bar of the app's own, the menu bar and
 context menus come from `nsh_core::element::desktop` in Rust ([Desktop title bars](./rust.md#desktop-title-bars)) and
 [`nsh/desktop`](../modules/nsh-desktop.md) in TSX.
 
 ## Requirements
 
 - **Windows 10 1809** or later, or Windows 11.
-- The **WebView2 Runtime** for web views. It comes with Windows 11 and with Microsoft Edge on Windows 10. Without it a
+- The **WebView2 Runtime** for web views. It comes with Windows 11 and with Microsoft Edge on Windows 10; without it a
   `WebView` shows a placeholder.
 - **Media Foundation codecs** for the video formats your app plays (videos play through Windows' own media stack).
 - To build a Rust app's runner: Visual Studio Build Tools with the C++ workload and the Windows SDK. To build NSH's
@@ -32,7 +32,7 @@ nsh run                        # --target windows is the default on Windows
 ```
 
 `nsh` builds a debug runner with your crate and opens the app, with its logs (`log::info!` and the rest) in the
-terminal. A change to the crate's Rust code builds the runner again and restarts the app. `cargo run` starts the same
+terminal; a change to the crate's Rust code builds the runner again and restarts the app. `cargo run` starts the same
 root from the crate's `src/main.rs`, which `nsh init --template rust` writes: [`run_app`](#embedding-in-a-win32-app)
 with `AppSource::Rust`.
 
@@ -43,8 +43,8 @@ error overlay as on the other targets:
 nsh run App.tsx
 ```
 
-In a checkout, `nsh run` builds the development host (`nsh-windows-host.exe`) first. The distribution made on Windows
-ships it in `runtime\windows\`. Ctrl-C closes the window, and closing the window ends `nsh run`. The host never
+In a checkout, `nsh run` builds the development host (`nsh-windows-host.exe`) first; the distribution made on Windows
+ships it in `runtime\windows\`. Ctrl-C closes the window, and closing the window ends `nsh run`; the host never
 outlives `nsh`, however it ends. The host also runs a built bundle on its own:
 
 ```sh
@@ -62,7 +62,7 @@ dist\nsh\runtime\windows\nsh-windows-host --bundle build\bundle.nshc --window-si
 (target `nsh::fps`): frames shown over the display's rate, the main thread's time per frame and its phases (`tick`,
 `drain`, `paint`, `present`, `canvas`), the engine's commits, CPU and memory, in the shape the other desktops log
 (milliseconds as mean/p50/p95/max). `nsh test --fps -v` shows them and `examples/gallery/tools/perf.py` reads them
-([Performance report](./performance-report.md#windows-win32-direct2d)). Measure release builds. The monitor costs
+([Performance report](./performance-report.md#windows-win32-direct2d)). Measure release builds; the monitor costs
 nothing while it is off.
 
 ## Packaging
@@ -85,7 +85,7 @@ Writes a directory, the same as an archive, and an installer:
 .nsh\out\<Name>-setup.exe  the installer, when Inno Setup 6 is installed
 ```
 
-The executable finds `nsh\` next to itself. Copy the whole directory (or unpack the `.zip`) wherever the app should
+The executable finds `nsh\` next to itself; copy the whole directory (or unpack the `.zip`) wherever the app should
 live, or ship the installer. `nsh package` also writes `.nsh\out\<Name>.iss`, an [Inno Setup](https://jrsoftware.org/isinfo.php)
 script, and compiles it to `.nsh\out\<Name>-setup.exe` when Inno Setup 6 is installed (`winget install
 JRSoftware.InnoSetup`). The installer needs no administrator rights: it installs for the current user in
@@ -101,7 +101,7 @@ certificate (`signtool`) to distribute it.
 ## Embedding in a Win32 app
 
 The `nsh-platform-windows` crate (from the NSH repository) gives a Rust Win32 app `AppView`: one NSH engine in a child
-window of a window of yours. Each `AppView` is independent. Several can run at once. It runs a Rust root, the root
+window of a window of yours. Each `AppView` is independent; several can run at once. It runs a Rust root, the root
 component of your crate:
 
 ```rust
@@ -155,7 +155,7 @@ app's stay yours; `run_app` sets it.
 
 `AppOptions::login_item` gives the app `run_app` runs its [login item](../modules/nsh-desktop.md#opening-at-login): a
 value of the current user's `Run` key named by `app_id`, starting this executable. It is off by default and read by
-`run_app` alone, so an embedded app never launches at login. The runner of the apps `nsh package` builds sets it.
+`run_app` alone, so an embedded app never launches at login; the runner of the apps `nsh package` builds sets it.
 
 `AppOptions::cache` (or `AppView::set_cache`, for the apps loaded next) sets where the apps keep their caches, the
 [images they download](./images-and-assets.md#kept-on-disk), and how much each keeps (`CacheOptions`: the system's
@@ -167,10 +167,10 @@ follow at once ([Device and environment](./device-and-environment.md#in-an-embed
 
 `AppView::set_theme_overrides(Some(json))` puts your app's brand over the app's [theme](./tailwind.md#theme-tokens): a theme file
 in the format of `nsh.json`'s `"theme"`, whose tokens win over the app's of the same names in light and dark mode
-while the app's others stay. Classes such as `bg-primary` restyle at once, and apps loaded later start with it
+while the app's others stay; classes such as `bg-primary` restyle at once, and apps loaded later start with it
 (`None` gives the app its own theme back; a file that does not parse is an error and changes nothing).
 
-Native components are registered with `AppView::register_component`. See
+Native components are registered with `AppView::register_component`; see
 [Native components](./native-components.md#registering-on-windows-rust). `set_ui_sets(sets)` sets the UI sets every
 engine serves: NSH's (`nsh_base::registry()`) and your crates' (`my_app::registry()`, which `#[native_module]`
 makes), so the TSX a view loads imports your Rust components and modules too.
@@ -188,7 +188,7 @@ The title bar and resize borders keep their system cursors.
 
 An app declares its windows with [`<Window>` and `Window.open`](../modules/nsh-desktop.md#windows): each is a
 top-level window drawn by the app's engine and running in its one JS runtime, so it shares the app's signals and
-modules directly. A normal window has its own taskbar button. Dialogs, panels and popups with a parent are owned by
+modules directly. A normal window has its own taskbar button; dialogs, panels and popups with a parent are owned by
 that window. The app host is an invisible message-only dispatcher with a hidden surface: closing any user window
 closes only that window, and closing the last one quits only when the app's quit mode says so (the Windows default).
 
@@ -209,22 +209,22 @@ closes only that window, and closing the last one quits only when the app's quit
 
 Shortcuts work with any keyboard layout (on a Cyrillic or Greek one, Ctrl+C is the key that types C on a US layout).
 A return that commits an input method's composition (Chinese, Japanese, ...) never submits. `onKeyPress` reports
-what React Native reports: the typed text, `"Enter"`, `"Backspace"`, and `"Escape"`. Pasted text is not reported.
+what React Native reports: the typed text, `"Enter"`, `"Backspace"`, and `"Escape"`; pasted text is not reported.
 
 The app's own shortcuts ([`keymap`](../modules/nsh.md#keymap)) come before a focused field's keys, navigation
-and scrolling. Alt+F4, F11 and Ctrl+Q cannot be bound.
+and scrolling; Alt+F4, F11 and Ctrl+Q cannot be bound.
 
 Different, or not supported:
 
 - **`WebView`**: a page inside a view with a 3D transform (perspective) is not shown, and a `backdropFilter` over a
   page does not blur it. `baseUrl` takes `http(s)` URLs. A native component that brings a window of its own
   stays above everything NSH draws.
-- **Video**: the formats the installed codecs decode. There is no poster. The control bar always shows with `controls`.
+- **Video**: the formats the installed codecs decode; no poster; the control bar always shows with `controls`.
 - **`mixBlendMode` and `backdropFilter`** are drawn, but not inside a view that has a `filter` or a 3D transform;
   `borderCurve: "continuous"` draws circular corners.
-- **Text**: head and middle ellipses on a single line only (more lines get a tail ellipsis). Color emoji from COLR
-  fonts only. Small caps only where the font has them.
-- **Text inputs**: keyboard types and autofill do not apply (there is no software keyboard). Tab moves between text
+- **Text**: head and middle ellipses on a single line only (more lines get a tail ellipsis); color emoji from COLR
+  fonts only; small caps only where the font has them.
+- **Text inputs**: keyboard types and autofill do not apply (there is no software keyboard); Tab moves between text
   fields. A right click opens the edit menu (Undo, Cut, Copy, Paste, Delete, Select All), as on selectable text (Copy,
   Select All).
 - **Accessibility** (UI Automation): alert dialogs and toasts are not exposed.

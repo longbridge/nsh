@@ -7,27 +7,26 @@ demo: el-menu
 
 # Menu
 
-A menu is a list of actions that opens from a trigger. You write one structure, and each device presents it in its own
-way:
+A menu is a list of actions its trigger opens. One structure serves every device, presented as each expects:
 
-- On the desktops, in desktop browsers and on an iPad in a regular-width window, the menu is a popup at the trigger. A
-  `Submenu` cascades beside its item when the pointer moves over or presses the item. Its first item lines up with that
-  item (inside the padding and border of your `popupClass`).
-- On phones, other tablets and an iPad in a compact width (Slide Over, a narrow Split View or Stage Manager window), the
-  menu is a sheet at the bottom of the screen over a backdrop. A `Submenu` replaces the menu's items in the sheet, with
-  a row of yours that leads back.
+- On the desktops, in desktop browsers and on an iPad whose window is regular in width, a popup at the trigger; a
+  `Submenu` cascades beside its item as the pointer comes over it or presses it, its first item level with that item
+  (inside the padding and border of your `popupClass`).
+- On phones and the other tablets, and on an iPad in a compact width (Slide Over, a narrow Split View or Stage
+  Manager window), a sheet at the bottom of the screen over a backdrop; a `Submenu` shows its items in the sheet in
+  place of the menu's, with a row of yours leading back.
 
-An iPad follows UIKit's horizontal size class, like the system's own menus. Resizing its window across the boundary
-switches between the two presentations.
+An iPad follows UIKit's horizontal size class, as the system's own menus do: resizing its window across it presents
+the menu the other way.
 
-Choosing an item, a press outside, Escape, the Android back button and VoiceOver's escape gesture close the menu.
+Choosing an item, a press outside, Escape, the Android back button and VoiceOver's escape gesture close it.
+
 `ContextMenu` is the same menu with other ways to open it:
 
 - the secondary button (a right click), at the pointer;
-- a long press on the trigger, on touch screens;
+- a finger held on the trigger, on touch screens;
 - the keyboard, below the trigger, in the browser and on Linux;
 - screen readers on macOS and Windows.
-
 
 Return, Space or Down on the focused trigger opens the menu with the keyboard focus on its first enabled item, and Up
 with it on its last; the arrow keys then move between the items. A press opens it with no item focused; in a popup Down or Home then

@@ -7,14 +7,9 @@ group: platforms
 
 # Building a platform
 
-You can bring NSH apps to a platform NSH does not ship. NSH's own backends (iOS, Android, macOS, Windows, Linux, GPUI, the terminal and the web) are built on a public engine, and your platform uses the same API from a repository of its own. The work splits in two:
+Native Shell's backends for iOS, Android, macOS, Windows, Linux, GPUI, the terminal and the web are built on a public engine, and so is any other platform. A platform built outside NSH lives in a repository of its own, on the API NSH's own backends use: the engine runs the app (its components, layout, reactivity and text measurement), and the backend shows what the engine commits with the platform's own UI and sends the user's input back. The `nsh` command line runs such a platform by its name: `nsh package --target miniprogram` runs the program `nsh-platform-miniprogram`.
 
-- The **engine** runs the app: its components, layout, reactivity and text measurement.
-- The **backend** shows what the engine commits with the platform's own UI, and sends the user's input back.
-
-The `nsh` command line runs such a platform by its name: `nsh package --target miniprogram` runs the program `nsh-platform-miniprogram`.
-
-This page walks through the parts of a backend with a complete example, [`nsh-platform-miniprogram`](https://github.com/huacnlee/nsh-platform-miniprogram), which runs NSH apps written in Rust in WeChat Mini Programs. It demonstrates the extension points. Its README invites a maintainer who wants to take it further.
+This page walks through the parts of a backend with a complete example, [`nsh-platform-miniprogram`](https://github.com/huacnlee/nsh-platform-miniprogram), which runs NSH apps written in Rust in WeChat Mini Programs. It is a demonstration of the extension points, and its README invites a maintainer who wants to take it further.
 
 ## Using a platform built outside NSH
 
@@ -74,7 +69,7 @@ let config = EngineConfig {
 let mut engine = LocalEngine::start(config, text_engine, sink).expect("the app starts");
 ```
 
-The environment also says what the platform provides. `tab_bar` (on by default) is the system's tab bar of `nsh/mobile`'s `TabBar` on iOS and Android. A platform with none turns it off, and the app shows its tabs with `nsh/base`'s `Tabs`. `clipboard_images` is images on the clipboard: by default as NSH's own backends on `os` (none on Android), `Some` for what the platform does. Without them, `Clipboard.readImage` and `writeImage` reject with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` and `hasImage` is false. `scheme_links` is links of the app's schemes (`nsh.json` `schemes`) reaching it: by default as NSH's native backends on `os` (none on the web), `Some(false)` for a platform that hands the app none. Without them, `open_auth_session` fails at once with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` instead of waiting for a callback that cannot come. A Mini Program has none of the three.
+The environment also says what the platform provides. `tab_bar` (on by default) is the system's tab bar of `nsh/mobile`'s `TabBar` on iOS and Android; a platform with none turns it off, and the app shows its tabs with `nsh/base`'s `Tabs`. `clipboard_images` is images on the clipboard: by default as NSH's own backends on `os` (none on Android), `Some` for what the platform does; without them, `Clipboard.readImage` and `writeImage` reject with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` and `hasImage` is false. `scheme_links` is links of the app's schemes (`nsh.json` `schemes`) reaching it: by default as NSH's native backends on `os` (none on the web), `Some(false)` for a platform that hands the app none; without them, `open_auth_session` fails at once with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` instead of waiting for a callback that cannot come. A Mini Program has none of the three.
 
 `LocalEngine::pump()` runs what is due and returns when it is due again: the platform calls it at that time and after each input. Depend on `nsh-engine` with `default-features = false` for apps written in Rust: the engine then builds for `wasm32-unknown-unknown` too.
 
@@ -100,7 +95,7 @@ impl MountSink for Sink {
 }
 ```
 
-Apply the items in order. Skip the kinds the platform does not show. The Mini Program platform encodes each batch as a JSON array (`["c", 2, "view"]`, `["f", 2, 0, 0, 100, 40]`, …), keeps the views as a tree of plain objects in the logic layer and updates the page with the fewest `setData` paths, where a recursive component draws each view at its frame.
+Apply the items in order; skip the kinds the platform does not show. The Mini Program platform encodes each batch as a JSON array (`["c", 2, "view"]`, `["f", 2, 0, 0, 100, 40]`, …), keeps the views as a tree of plain objects in the logic layer and updates the page with the fewest `setData` paths, where a recursive component draws each view at its frame.
 
 ## 3. Measure text
 
@@ -127,7 +122,7 @@ press of End then takes a list all the way to its end.
 
 ## 5. Add the command line's target
 
-`nsh dev`, `nsh run`, `nsh test` and `nsh package` with a `--target` none of NSH's own run `nsh-platform-<name>` from your `PATH`. It gets the command and every other argument, and the environment variables `NSH` (the `nsh` executable, to call back), `NSH_VERSION` and `NSH_TARGET`. Its exit code is the command's:
+`nsh dev`, `nsh run`, `nsh test` and `nsh package` with a `--target` none of NSH's own run `nsh-platform-<name>` from your `PATH`. It gets the command and every other argument, and the environment variables `NSH` (the `nsh` executable, to call back), `NSH_VERSION` and `NSH_TARGET`; its exit code is the command's:
 
 ```sh
 nsh package my-app --target miniprogram --out dist
@@ -140,7 +135,7 @@ For an app written in Rust, `$NSH build <app>` writes the crate `.nsh/rust/rust-
 nsh_platform_miniprogram::app!(nsh_rust_app::app_ui_sets(), nsh_rust_app::root());
 ```
 
-`app_ui_sets()` gives the app's own crates' UI sets (with the fonts and files they ship) without `nsh/base`'s registry for TSX, so the module links only the components the app uses. `ui_sets()` gives both.
+`app_ui_sets()` gives the app's own crates' UI sets (with the fonts and files they ship) without `nsh/base`'s registry for TSX, so the module links only the components the app uses; `ui_sets()` gives both.
 
 ## Testing a platform
 
@@ -154,7 +149,7 @@ Then open the app on the platform itself: `nsh run my-app --target miniprogram` 
 
 ## Following NSH
 
-A platform is built against a version of NSH: the mount items, the text engine and the events are NSH's protocol and grow with each release. Pin the NSH version your platform builds with, and release the platform again for each NSH release. On WebAssembly, NSH's crates import a few functions from their host (module `nsh`: `now_ms`, `date_now_ms`, `local_offset`). A platform checks its module's imports when it packages an app, so a new one shows at build time.
+A platform is built against a version of NSH: the mount items, the text engine and the events are NSH's protocol and grow with each release. Pin the NSH version your platform builds with, and release the platform again for each NSH release. On WebAssembly, NSH's crates import a few functions from their host (module `nsh`: `now_ms`, `date_now_ms`, `local_offset`); a platform checks its module's imports when it packages an app, so a new one shows at build time.
 
 ## See also
 

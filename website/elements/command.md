@@ -7,8 +7,8 @@ demo: el-command
 
 # Command
 
-A command palette is a search field over a list of commands. The user types a few letters and the list narrows to
-the matching commands. The arrow keys move the highlight, and Return runs the highlighted command. `Command` owns the
+A command palette is a search field over a list of commands: the user types a few letters, the list narrows to the
+commands that match, the arrow keys move the highlight and Return runs the highlighted command. `Command` owns the
 behavior of one: filtering, sections, the highlight, the keyboard and what screen readers hear. Filtering runs
 natively and the rows are virtualized: only the rows in view are made, so a palette of thousands of commands, files or
 emoji filters at every keystroke. The look is the app's: the command draws nothing of its own, the app styles each part
@@ -98,7 +98,7 @@ fn palette() -> impl IntoElement {
 ```
 
 `Command` comes from [`nsh/base`](../modules/nsh-base.md), the `nsh-base` crate in Rust. The query is the app's when it
-sets `query`, which it updates in `onQueryChange`. Without it the search field keeps its own, starting from
+sets `query`, which it updates in `onQueryChange`; without it the search field keeps its own, starting from
 `defaultQuery`. Items are identified by their `id`, the app's own, never by their label: `onSelect({ id })` says which
 one the user chose. In Rust, `command()` makes it, with a setter per prop (`.items(..)`, `.query(..)`,
 `.render_item(..)`), a listener method per event and the typed style methods.
@@ -195,7 +195,7 @@ palette?.focus();
 
 ## A palette in a dialog
 
-Put the command in a [`Dialog`](./dialog.md) and open it with the app's shortcut. Escape clears the query first. With
+Put the command in a [`Dialog`](./dialog.md) and open it with the app's shortcut. Escape clears the query first; with
 an empty query it is `onCancel`, where the app closes the dialog.
 
 ```tsx
@@ -235,9 +235,9 @@ and sets `items` with the results, `loading` while it waits.
 
 ## Accessibility
 
-- The list has the role `"listbox"`, named by `accessibilityLabel`. Each row is an `"option"` named by its item's
-  label, checked and disabled as its item is. A section's header is a `"header"`, a separator is hidden.
-- The search field is a text field named by `searchAccessibilityLabel` (else `accessibilityLabel`). Its placeholder is
+- The list has the role `"listbox"`, named by `accessibilityLabel`; each row is an `"option"` named by its item's
+  label, checked and disabled as its item is; a section's header is a `"header"`, a separator is hidden.
+- The search field is a text field named by `searchAccessibilityLabel` (else `accessibilityLabel`); its placeholder is
   a hint shown while it is empty.
 - The search field keeps the keyboard focus while the arrow keys move the highlight, and screen readers hear the
   highlighted label. Without a search field, the highlighted row takes the screen reader's focus.

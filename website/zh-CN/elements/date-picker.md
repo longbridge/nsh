@@ -9,7 +9,7 @@ demo: el-date-picker
 
 日期选择器从应用的触发元素打开一个 [Calendar](./calendar.md) 来设置日期：截止日期、生日，在 `range` 时是一次旅行的日期，在 `timePrecision` 时是一个日期加一天中的时间。与 [Select](./select.md) 一样，它按每种设备的习惯打开：
 
-- 在桌面平台和桌面浏览器上，是触发元素处的弹出层。打开时键盘落在日期上。
+- 在桌面平台和桌面浏览器上，是触发元素处的弹出层；打开时键盘落在日期上。
 - 在手机和平板上，是屏幕底部、覆盖在背景层之上的 sheet。
 
 选择器负责行为：值（应用的，或它自己的）、展开状态、日历、时间、预设、键盘，以及屏幕阅读器听到的内容。外观由应用决定：应用绘制触发元素（显示值、占位文字、图标），并为弹出层、日历的部件、预设和时间输入框设置样式。
@@ -107,25 +107,25 @@ fn trip_dates() -> impl IntoElement {
 }
 ```
 
-`DatePicker` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate。在 Rust 中，`date_picker()` 创建一个日期选择器，每个属性有一个设置方法（`.value(..)`、`.range(..)`、`.time_precision(..)`），每个事件有一个监听方法（`.on_change(..)`）。它的值是 `DateTime`（`DateTime::Single`、`DateTime::Range`，由 `chrono` 的日期或日期时间构成）。`onChange` 给出一个 `PickedDate`，即值及选择器的时间精度。
+`DatePicker` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate。在 Rust 中，`date_picker()` 创建一个日期选择器，每个属性有一个设置方法（`.value(..)`、`.range(..)`、`.time_precision(..)`），每个事件有一个监听方法（`.on_change(..)`）。它的值是 `DateTime`（`DateTime::Single`、`DateTime::Range`，由 `chrono` 的日期或日期时间构成）；`onChange` 给出一个 `PickedDate`，即值及选择器的时间精度。
 
 <a id="value"></a>
 
 ## 值
 
-值采用 HTML 输入框的格式：ISO 日期 `"2026-10-28"`，与 `<input type="date">` 的相同。在 `range` 时为 `[start, end]`。在 `timePrecision` 时为日期和时间 `"2026-10-28T09:30"`（精确到秒时为 `"2026-10-28T09:30:15"`），与 `<input type="datetime-local">` 的相同。`null` 表示没有。有 `value` 时，值由应用持有：选择器显示它，并用 `onChange({ value })` 报告每次变化。应用把 `value` 设为报告的值以跟随它。省略 `value` 时，选择器自己保存值，初始为 `defaultValue`。
+值采用 HTML 输入框的格式：ISO 日期 `"2026-10-28"`，与 `<input type="date">` 的相同；在 `range` 时为 `[start, end]`；在 `timePrecision` 时为日期和时间 `"2026-10-28T09:30"`（精确到秒时为 `"2026-10-28T09:30:15"`），与 `<input type="datetime-local">` 的相同；`null` 表示没有。有 `value` 时，值由应用持有：选择器显示它，并用 `onChange({ value })` 报告每次变化；应用把 `value` 设为报告的值以跟随它。省略 `value` 时，选择器自己保存值，初始为 `defaultValue`。
 
 - 单个日期：按下某一天会设置值并关闭弹出层。
-- 在 `range` 时，第一次按压开始范围，第二次结束范围，与[日历的](./calendar.md#value)相同。完整的范围设置值并关闭弹出层。
-- 在 `timePrecision` 时（仅限单个日期），日历下方显示一个时间输入框，时间的每次编辑都会报告。在桌面上，选中某一天时弹出层保持打开以便设置时间，并报告带时间的日期。再次按下已选中的日期会关闭弹出层。在手机和平板上，点一下某天就以它的时间选中这一天并关闭底部面板，与单个日期相同。再次打开面板即可设置时间。在设置任何时间之前选中的日期使用 `defaultTime`（默认 `00:00`）。`hourCycle` 是时间输入框的小时计法，与 [TimeField](./time-field.md) 的相同，包括用户的。
+- 在 `range` 时，第一次按压开始范围，第二次结束范围，与[日历的](./calendar.md#value)相同；完整的范围设置值并关闭弹出层。
+- 在 `timePrecision` 时（仅限单个日期），日历下方显示一个时间输入框，时间的每次编辑都会报告。在桌面上，选中某一天时弹出层保持打开以便设置时间，并报告带时间的日期；再次按下已选中的日期会关闭弹出层。在手机和平板上，点一下某天就以它的时间选中这一天并关闭底部面板，与单个日期相同；再次打开面板即可设置时间。在设置任何时间之前选中的日期使用 `defaultTime`（默认 `00:00`）。`hourCycle` 是时间输入框的小时计法，与 [TimeField](./time-field.md) 的相同，包括用户的。
 
-`cleanable` 会在有值时加一个清除按钮：按下它会清除值（`onChange({ value: null })`）。这个按钮在触发元素之后，不在它里面，所以按它不会打开弹出层。由应用摆放并填充内容（`clearButton`），和[选择框的清除按钮](./select.md#value)一样。
+`cleanable` 会在有值时加一个清除按钮：按下它会清除值（`onChange({ value: null })`）。这个按钮在触发元素之后，不在它里面，所以按它不会打开弹出层；由应用摆放并填充内容（`clearButton`），和[选择框的清除按钮](./select.md#value)一样。
 
 <a id="presets"></a>
 
 ## 预设
 
-`presets` 是日历旁边设置值的按钮："今天"、"最近 7 天"、"明天 9 点"。每个是 `{ label, value }`，`value` 为一个日期、一个范围或日期时间，按原样保存。按下它会设置值并关闭弹出层。`contentClass` 排列预设列与日历和时间（一行，`flex-row`）。`presetsClass` 为这一列设置样式，`presetClass` 为每个按钮设置样式。
+`presets` 是日历旁边设置值的按钮："今天"、"最近 7 天"、"明天 9 点"。每个是 `{ label, value }`，`value` 为一个日期、一个范围或日期时间，按原样保存；按下它会设置值并关闭弹出层。`contentClass` 排列预设列与日历和时间（一行，`flex-row`）；`presetsClass` 为这一列设置样式，`presetClass` 为每个按钮设置样式。
 
 <a id="the-calendar"></a>
 
@@ -139,7 +139,7 @@ fn trip_dates() -> impl IntoElement {
 
 ## 出现与离开
 
-在桌面平台上，弹出层像 [Popover](./popover.md#entrance-and-exit) 一样随你的过渡出现和离开：`popupStartingClass` 是它第一帧的外观，`popupClass` 里的 `transition-*` 类把它过渡到自己的外观。`popupEndingClass` 是关闭后的外观，在这些过渡播放期间它会保留、不接受按压，随后触发 `onClose`。关闭时键盘焦点就回到触发元素（在 macOS 和 iOS 上由指针打开时，回到打开之前的位置），除非选择的 `onChange` 把焦点移到了别的视图（比如表单的下一个输入框），那样焦点就留在那里。在离开途中再次打开时，它从当前状态回到自己的外观。`popupStartingStyle` 和 `popupEndingStyle` 以内联样式做同样的事。用户要求减少动态效果时，它立即出现、立即离开。触摸屏上的 sheet 自带滑入和滑出的动作。
+在桌面平台上，弹出层像 [Popover](./popover.md#entrance-and-exit) 一样随你的过渡出现和离开：`popupStartingClass` 是它第一帧的外观，`popupClass` 里的 `transition-*` 类把它过渡到自己的外观；`popupEndingClass` 是关闭后的外观，在这些过渡播放期间它会保留、不接受按压，随后触发 `onClose`。关闭时键盘焦点就回到触发元素（在 macOS 和 iOS 上由指针打开时，回到打开之前的位置），除非选择的 `onChange` 把焦点移到了别的视图（比如表单的下一个输入框），那样焦点就留在那里。在离开途中再次打开时，它从当前状态回到自己的外观。`popupStartingStyle` 和 `popupEndingStyle` 以内联样式做同样的事。用户要求减少动态效果时，它立即出现、立即离开；触摸屏上的 sheet 自带滑入和滑出的动作。
 
 ```tsx
 <DatePicker
@@ -236,7 +236,7 @@ fn trip_dates() -> impl IntoElement {
 ## 无障碍
 
 - 触发元素对屏幕阅读器来说是一个组合框（combobox）：它的标签是 `accessibilityLabel`，值是按 `dateFormat` 写出的日期（默认 `2026/10/28`，在 `timePrecision` 时带时间），并说明弹出层是否展开。`disabled` 时它显示为不可用。
-- 日历的日期是按钮，以其 ISO 日期命名（见[无障碍](./calendar.md#accessibility)）。预设是按钮，以其标签命名。时间输入框的名称来自 `timeAccessibilityLabel`。
+- 日历的日期是按钮，以其 ISO 日期命名（见[无障碍](./calendar.md#accessibility)）；预设是按钮，以其标签命名；时间输入框的名称来自 `timeAccessibilityLabel`。
 - 清除按钮是一个按钮，名称来自 `clearButtonAccessibilityLabel`。
 
 关于标签、角色和播报的一般说明，见[无障碍](../docs/accessibility.md)。

@@ -8,17 +8,13 @@ demo: guide-gestures
 
 # Touch and gestures
 
-NSH has three levels of touch handling:
-
-- **Presses** (`.on_press` in Rust, `onPress` in TSX, and related handlers) cover buttons, rows and links. Press feedback is drawn natively.
-- **Native gestures** (pan, pinch and rotation) move [animated values](./animation.md#animated-values) on the UI thread. A dragged card follows the finger even while your code is busy.
-- **Raw touches and the responder system** give your code every finger position. Use them for what the other two levels cannot express, such as drawing. In Rust these are `.on_touch` and `.claim_touches` with the `.on_responder_*` handlers. In TSX they are `onTouchStart`, `onResponderMove` and `PanResponder`.
+NSH has three levels of touch handling. **Presses** (`.on_press` in Rust, `onPress` in TSX, and their siblings) cover buttons, rows and links, with press feedback drawn natively. **Native gestures** (pan, pinch and rotation) move [animated values](./animation.md#animated-values) on the UI thread, so a dragged card follows the finger even while your code is busy. **Raw touches and the responder system** (`.on_touch` and `.claim_touches` with the `.on_responder_*` handlers in Rust; `onTouchStart`, `onResponderMove` and `PanResponder` in TSX) give your code every finger position for anything the other two cannot express, such as drawing.
 
 Pick the highest level that does the job: the higher the level, the less work crosses from the UI thread to your code.
 
 ## Presses
 
-Every element accepts the press handlers. There is no separate "touchable" component. Put `.on_press` / `onPress` on a view, a text, an image or anything else.
+Every element accepts the press handlers; there is no separate "touchable" component. Put `.on_press` / `onPress` on a view, a text, an image or anything else.
 
 ```tsx tabs
 import { mount, signal, Text, View } from "nsh";
@@ -89,7 +85,7 @@ How presses behave:
 - **Inside a scroll view, the press waits about 130 ms** before it starts (and shows feedback), so a drag that begins on a button scrolls instead of pressing it.
 - **Sliding off cancels.** Moving the finger out of the view ends the press with the press-up handler and no press.
 - **Disabling removes the press listeners** from what is mounted, so the view shows no feedback at all, and the disabled style applies (`.disabled_style(..)`, `class="disabled:opacity-40"`).
-- **Nested text spans with a press handler are links.** The paragraph is one native view. The press goes to the span under the finger. See [Text](./text.md).
+- **Nested text spans with a press handler are links.** The paragraph is one native view; the press goes to the span under the finger. See [Text](./text.md).
 
 ## Press feedback
 
@@ -246,7 +242,7 @@ view().flex_1().child(map()).child(
 
 ## Native gestures: pan, pinch and rotation
 
-For drags, pinches and rotations that move something on screen, bind [animated values](./animation.md#animated-values) to the gesture. The platform's gesture recognizer writes the values on the UI thread and the views bound to them move in the same frame. Your code is told when the gesture starts and ends.
+For drags, pinches and rotations that move something on screen, bind [animated values](./animation.md#animated-values) to the gesture. The platform's gesture recognizer writes the values on the UI thread and the views bound to them move in the same frame; your code is told when the gesture starts and ends.
 
 ```tsx tabs
 import { mount, View } from "nsh";
@@ -316,10 +312,10 @@ A pan event has where the drag started (`origin`, a `Point` in surface points, l
 
 What the native side does for you:
 
-- **A drag continues from where the value is.** At the start the values are read, and the translation is added to them. Grabbing a value that is still animating (a spring on its way home) stops the animation where it is.
+- **A drag continues from where the value is.** At the start the values are read, and the translation is added to them; grabbing a value that is still animating (a spring on its way home) stops the animation where it is.
 - **One axis only lets the other scroll.** With only a horizontal value bound the drag begins only when the finger moves more horizontally than vertically, so a horizontal swipe row inside a vertical scroll view still scrolls vertically. This decision is made natively when the system asks whether the gesture may begin.
 - **Pan, pinch and rotation run together** on the same view: one card can be dragged, pinched and rotated at once.
-- **Release velocity for physics.** The pan end's velocity feeds a spring's or a decay's velocity directly. The values let you pick a snap point.
+- **Release velocity for physics.** The pan end's velocity feeds a spring's or a decay's velocity directly; the values let you pick a snap point.
 
 A view pans while it has a pan handler or `pan` values, so a condition in the expression turns its pan off and on: with `onPanEnd={zoomed() ? undefined : close}` the drags go to the content inside while `zoomed()` is true. The condition goes in the expression itself: a plain name (`onPanEnd={handler}`) is set once ([What runs again](./jsx-and-components.md#what-runs-again)).
 
@@ -348,11 +344,11 @@ view()
 ```
 
 > [!TIP]
-> Bind animated values to the gesture rather than following it through the responder whenever the drag only moves things. With bound values, busy app code cannot make the drag stutter. With the responder, every move is an event to your code and an update of what the view shows.
+> Bind animated values to the gesture rather than following it through the responder whenever the drag only moves things. With bound values, busy app code cannot make the drag stutter; with the responder, every move is an event to your code and an update of what the view shows.
 
 ## Raw touches
 
-The touch handlers report every finger as it goes down, moves and lifts. They are useful for logging, custom hit testing and reacting to multi-touch. They do not claim the touch (presses and scroll views keep working).
+The touch handlers report every finger as it goes down, moves and lifts. They are useful for logging, custom hit testing and reacting to multi-touch; they do not claim the touch (presses and scroll views keep working).
 
 In Rust, `.on_touch(..)` hears every phase as a `TouchEvent`: its `phase` (`TouchPhase::Start`, `Move`, `End`, `Cancel`), its `timestamp` and its `points`, every finger that is down, each with its `id`, its `location` in the view it went down on, its `page` position in the surface, and `changed` for the fingers the event is about. In TSX, each phase has its own handler:
 
@@ -402,7 +398,7 @@ view().on_touch(|e: &TouchEvent| {
 
 ### Where a view is: measure
 
-A touch's location is relative to the view the finger went down on, which may be a child of the view you care about (a slider's knob). Measuring a view tells you where it is, so you can use the page position instead. In Rust, put an `element_ref()` on the view and await its `measure()`. In TSX, call `measure()` on its ref:
+A touch's location is relative to the view the finger went down on, which may be a child of the view you care about (a slider's knob). Measuring a view tells you where it is, so you can use the page position instead. In Rust, put an `element_ref()` on the view and await its `measure()`; in TSX, call `measure()` on its ref:
 
 ```tsx tabs
 let track!: ViewRef;
@@ -436,11 +432,11 @@ view()
     .on_responder_move(move |e: &ResponderEvent| seek(e.page.x - origin.get()))
 ```
 
-It resolves once the changes made so far are laid out: in Rust to a `Measurement` (`frame`, the frame in the parent as the layout handler reports it, and `page`, the top left corner), in TSX to `{ bounds, pagePosition }`. The corner is in the surface, or in the dialog the view is in, the same coordinates as touches' page positions. The offsets of the scroll views and lists around it are taken into account. Transforms (animations included) are not. It resolves to `None` / `null` for a view that is not on screen.
+It resolves once the changes made so far are laid out: in Rust to a `Measurement` (`frame`, the frame in the parent as the layout handler reports it, and `page`, the top left corner), in TSX to `{ bounds, pagePosition }`. The corner is in the surface, or in the dialog the view is in, the same coordinates as touches' page positions. The offsets of the scroll views and lists around it are taken into account; transforms (animations included) are not. It resolves to `None` / `null` for a view that is not on screen.
 
 ## The responder system
 
-When your code has to own a touch sequence (finger drawing, a custom slider, a gesture the native recognizers do not offer), use the gesture responder system. One view at a time is the **responder** and receives the moves. Views negotiate who that is.
+When your code has to own a touch sequence (finger drawing, a custom slider, a gesture the native recognizers do not offer), use the gesture responder system. One view at a time is the **responder** and receives the moves; views negotiate who that is.
 
 Becoming the responder:
 
@@ -451,7 +447,7 @@ Becoming the responder:
 | `TouchClaim::on_start().capture()` | `onStartShouldSetResponderCapture` | As above, asked from the outside in, before the bubbling ones. A parent uses it to take a touch from its children. |
 | `TouchClaim::on_move().capture()` | `onMoveShouldSetResponderCapture` | The move version. |
 
-A claim decides from the view alone, with no code of yours running, unless it asks: `TouchClaim::on_move().ask(|r: &ClaimRequest| ..)` claims when the listener calls `r.claim()`, deciding with the gesture so far (`r.event.gesture`). The TSX handlers get the gesture as their second argument, `gestureState`, with the same fields as [PanResponder's](#panresponder) (`dx`, `dy`, `vx`, `vy`, `moveX`, `moveY`, `x0`, `y0`, `numberActiveTouches`). A swipe that claims only horizontal moves: `onMoveShouldSetResponder={(e, g) => Math.abs(g.dx) > 10 && Math.abs(g.dx) > Math.abs(g.dy)}`. That decision still comes a move late, so a scroll view around may start scrolling first. For drags inside scroll views use [pan activation](#pans-inside-scroll-views-panactivation).
+A claim decides from the view alone, with no code of yours running, unless it asks: `TouchClaim::on_move().ask(|r: &ClaimRequest| ..)` claims when the listener calls `r.claim()`, deciding with the gesture so far (`r.event.gesture`). The TSX handlers get the gesture as their second argument, `gestureState`, with the same fields as [PanResponder's](#panresponder) (`dx`, `dy`, `vx`, `vy`, `moveX`, `moveY`, `x0`, `y0`, `numberActiveTouches`). A swipe that claims only horizontal moves: `onMoveShouldSetResponder={(e, g) => Math.abs(g.dx) > 10 && Math.abs(g.dx) > Math.abs(g.dy)}`. That decision still comes a move late, so a scroll view around may start scrolling first; for drags inside scroll views use [pan activation](#pans-inside-scroll-views-panactivation).
 
 While responding:
 
@@ -540,14 +536,14 @@ fn sketch() -> impl IntoElement {
 }
 ```
 
-How it runs: a view with any touch or responder handler listens to touches natively. The platform reports the touches on it (and inside it) with the path of listening views, and the negotiation runs in NSH's Rust core, asking the claims and calling your handlers in order: the captures from the outermost view inwards, then the others from the target outwards. Two consequences:
+How it runs: a view with any touch or responder handler listens to touches natively; the platform reports the touches on it (and inside it) with the path of listening views, and the negotiation runs in NSH's Rust core, asking the claims and calling your handlers in order: the captures from the outermost view inwards, then the others from the target outwards. Two consequences:
 
 - **Native scroll views and responders compete.** While a responder blocks them, the scroll views around it stop taking the touches until it ends. If a native scroll view starts dragging first, it wins: the responder gets the terminate handler and the touch handlers a cancel.
-- **Each move is an event to your code.** Responder-driven drags are as smooth as your code is fast. For drags that only move views, prefer [bound values](#native-gestures-pan-pinch-and-rotation).
+- **Each move is an event to your code.** Responder-driven drags are as smooth as your code is fast; for drags that only move views, prefer [bound values](#native-gestures-pan-pinch-and-rotation).
 
 ## PanResponder
 
-In Rust, the responder events already carry the gesture: `ResponderEvent::gesture` is a `PanGesture` with the distance from the start, the velocity and the number of fingers. In TSX, `PanResponder` from `nsh` wraps the responder system and adds the same gesture state. Spread its `panHandlers` on a view.
+In Rust, the responder events already carry the gesture: `ResponderEvent::gesture` is a `PanGesture` with the distance from the start, the velocity and the number of fingers. In TSX, `PanResponder` from `nsh` wraps the responder system and adds the same gesture state; spread its `panHandlers` on a view.
 
 ```tsx tabs
 import { mount, signal, View } from "nsh";
@@ -653,7 +649,7 @@ view()
 | `direction` | `direction` | The one way it activates in (`left`, `right`, `up`, `down`): a drag the other way, or mostly across it, fails and stays with the views around. |
 | `edge` | `edge` | Only a finger that goes down at this edge (`left`, `right`, `top`, `bottom`) starts it, moving away from the edge. |
 
-`PanActivation::horizontal(active, fail)` and `PanActivation::vertical(active, fail)` set the usual pairs. Without active offsets the pan activates after 10 points in any direction. Until it activates, the scroll views around wait for it (iOS) and the view's other claims are not asked. A scroll view inside the view that cannot scroll along the pan's one axis (a vertical list inside a view that pans sideways) takes only the drags the pan fails on, as on the other platforms: a diagonal goes to whichever offset the finger passes first. When it activates, the scroll views can no longer take these touches and the view becomes the responder (the grant, then the moves). When it fails, the scroll view scrolls as usual. In TSX, `PanResponder`'s `panHandlers` work with it too: spread them next to the prop, and `onPanResponderGrant` runs at the activation.
+`PanActivation::horizontal(active, fail)` and `PanActivation::vertical(active, fail)` set the usual pairs. Without active offsets the pan activates after 10 points in any direction. Until it activates, the scroll views around wait for it (iOS) and the view's other claims are not asked. A scroll view inside the view that cannot scroll along the pan's one axis (a vertical list inside a view that pans sideways) takes only the drags the pan fails on, as on the other platforms: a diagonal goes to whichever offset the finger passes first. When it activates, the scroll views can no longer take these touches and the view becomes the responder (the grant, then the moves); when it fails, the scroll view scrolls as usual. In TSX, `PanResponder`'s `panHandlers` work with it too: spread them next to the prop, and `onPanResponderGrant` runs at the activation.
 
 ### One way, or from a screen edge
 
@@ -697,7 +693,7 @@ The main thread never waits for your code. When the system needs an answer on th
 - [Animation](./animation.md): animated values, springs and decay for gesture-driven motion.
 - [Scrolling](./scrolling.md): the keyboard taps setting, scroll views and nested gestures.
 - [`PanResponder`](../modules/nsh.md#panresponder): the `PanResponder` reference.
-- [Accessibility](./accessibility.md): pressable views are accessibility elements. Give them a role and a label.
+- [Accessibility](./accessibility.md): pressable views are accessibility elements; give them a role and a label.
 
 ## Terminal pointer input
 

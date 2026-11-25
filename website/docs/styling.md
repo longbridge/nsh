@@ -8,22 +8,9 @@ demo: guide-styling
 
 # Styling
 
-Every element uses the same set of native style properties. You write them in one of three ways:
+Every element is styled with the same native styles, written two ways. In Rust, styles are typed methods chained on the element (`.p_4()`, `.rounded(px(12.0))`, `.bg(color)`); in TSX, a `style` prop of camelCase properties, or [Tailwind classes](./tailwind.md). Both include CSS features such as box shadows, gradients, filters, outlines, transitions and grid, and only the properties that changed are sent to the native view.
 
-- Rust: typed methods chained on the element (`.p_4()`, `.rounded(px(12.0))`, `.bg(color)`).
-- TSX: a `style` prop with camelCase properties.
-- TSX: [Tailwind classes](./tailwind.md).
-
-All three support CSS features such as box shadows, gradients, filters, outlines, transitions and grid. NSH sends only the changed properties to the native view.
-
-Property names follow CSS. A few use the plainer names apps use, such as `paddingHorizontal`, `marginStart` and `numberOfLines`. CSS values (colors, gradients, filters, shadows, transforms, alignment keywords) and Tailwind utilities mean what they mean on the web. Each Rust method and utility sets what Tailwind CSS 4 generates for it. So `paddingLeft` is `padding-left` and `pl-4`, `boxShadow` is `box-shadow`, and `display: "flex"` is a row, like the `flex` class.
-
-Some parts differ for native apps:
-
-- Lengths are points (`16`, `"50%"`, `"auto"`). Classes also accept `rem` and other CSS units.
-- Defaults follow native layout (listed below).
-- A value that changes over time takes numbers instead of a string (`translate: [x, 0]`, a shadow's layers).
-- Platform features beyond CSS have their own [extensions](#extensions).
+The three ways write one set of properties and mean the same. Their names are CSS's (a few take the plainer names apps write, such as `paddingHorizontal`, `marginStart` and `numberOfLines`), and CSS values (colors, gradients, filters, shadows, transforms, alignment keywords) and Tailwind utilities mean what they mean on the web, each Rust method and utility setting what Tailwind CSS 4 generates for it, so what you know from the web carries over: `paddingLeft` is `padding-left` and `pl-4`, `boxShadow` is `box-shadow`, `display: "flex"` is a row as the `flex` class is. The rest is made for native apps: lengths are points (`16`, `"50%"`, `"auto"`; classes take `rem` and CSS's other units), the defaults are native layout's (listed below), a value that changes takes numbers instead of a string (`translate: [x, 0]`, a shadow's layers), and what the platforms do beyond CSS has [extensions](#extensions) of its own.
 
 ```tsx tabs
 <View
@@ -65,7 +52,7 @@ This page covers how styles combine and the visual properties. Layout properties
 
 ## Combining styles
 
-In Rust, shared styles are functions that take an element and return it styled, and conditions are plain Rust: `.when(condition, |v| ..)` for what is known when the element is made, `.style_when(signal, |s| ..)` for styles that switch while the app runs. In TSX, `style` takes an object, or an array of objects merged left to right. Falsy entries (`false`, `null`, `undefined`) are skipped, which makes conditional styles short:
+In Rust, shared styles are functions that take an element and return it styled, and conditions are plain Rust: `.when(condition, |v| ..)` for what is known when the element is made, `.style_when(signal, |s| ..)` for styles that switch while the app runs. In TSX, `style` takes an object, or an array of objects merged left to right; falsy entries (`false`, `null`, `undefined`) are skipped, which makes conditional styles short:
 
 ```tsx tabs
 const styles = {
@@ -91,7 +78,7 @@ fn button(danger: bool, busy: Signal<bool>) -> View {
 
 In TSX, define shared styles as constants outside components (with `as const`, so TypeScript keeps literal types such as `"row"`). A plain object is all it takes: styles are parsed in Rust each time they are set, from objects nobody needs to register.
 
-A style that reads signals follows them: in Rust, give the method a closure (`.bg(move || ..)`), and only that property is set again when the signals change. In TSX, a style expression that reads signals is rebuilt, and NSH sends only the properties whose values differ:
+A style that reads signals follows them: in Rust, give the method a closure (`.bg(move || ..)`), and only that property is set again when the signals change; in TSX, a style expression that reads signals is rebuilt, and NSH sends only the properties whose values differ:
 
 ```tsx tabs
 <View style={{ backgroundColor: selected() ? "#ddf4ff" : "#ffffff", padding: 12 }} />
@@ -111,7 +98,7 @@ Within one style (an object, or an array merged into one), the order of the keys
 
 - **Lengths are points** (density-independent pixels): `px(100.0)` in Rust and `width: 100` in TSX are 100pt, which is 200 or 300 physical pixels on a 2× or 3× screen.
 - **Percentages** (`relative(0.5)` in Rust, `"50%"` in TSX) are relative to the parent, for sizes, positions, margins and paddings ([Layout](./layout.md)).
-- **Angles** are `deg(45.0)`, `radians(0.5)` or `turn(0.25)` in Rust, and degrees as numbers or strings with a unit in TSX: `45`, `"45deg"`, `"0.5rad"`. CSS's `rotate` and `transform` also take `"0.25turn"`, and inside a `transform` string every angle has its unit.
+- **Angles** are `deg(45.0)`, `radians(0.5)` or `turn(0.25)` in Rust, and degrees as numbers or strings with a unit in TSX: `45`, `"45deg"`, `"0.5rad"`; CSS's `rotate` and `transform` also take `"0.25turn"`, and inside a `transform` string every angle has its unit.
 - **Durations** are milliseconds: `.duration(150.0)` in Rust, numbers or strings (`"150ms"`, `"0.2s"`) in TSX.
 
 ## Defaults
@@ -198,10 +185,10 @@ view()
     .border_b_color(rgb(0x0969da))
 ```
 
-- **Widths and colors** per side: `borderTopWidth`, `borderRightWidth`, ..., `borderTopColor`, ..., which keep their side in either direction. And `borderStartWidth`, `borderEndWidth`, `borderStartColor`, `borderEndColor`, which follow the [layout direction](./layout.md#right-to-left) (`.border_t(..)`, `.border_t_color(..)`, `.border_s(..)`, `.border_e_color(..)`, ... in Rust).
+- **Widths and colors** per side: `borderTopWidth`, `borderRightWidth`, ..., `borderTopColor`, ..., which keep their side in either direction; and `borderStartWidth`, `borderEndWidth`, `borderStartColor`, `borderEndColor`, which follow the [layout direction](./layout.md#right-to-left) (`.border_t(..)`, `.border_t_color(..)`, `.border_s(..)`, `.border_e_color(..)`, ... in Rust).
 - **The color** of a side whose width is set and whose color is not is the text color, as CSS's `currentColor`: `{ borderWidth: 1, color: "#0969da" }` draws a blue border.
 - **Radii** per corner: `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomRightRadius`, `borderBottomLeftRadius`, and `borderTopStartRadius` / `borderTopEndRadius` / `borderBottomStartRadius` / `borderBottomEndRadius` (top start, top end, bottom start, bottom end), which follow the [layout direction](./layout.md#right-to-left) (`.rounded_tl(..)`, ..., `.rounded_ss(..)`, `.rounded_se(..)`, `.rounded_es(..)`, `.rounded_ee(..)` in Rust, and the presets `.rounded_lg()`, `.rounded_full()`, ...).
-- **`borderCurve: "continuous"`** (`.border_curve(BorderCurve::Continuous)`, the class `corner-squircle`) draws superellipse corners, whose curvature eases into the edges, like iOS app icons: on iOS, Android, macOS and Linux, and on the web where the browser has CSS `corner-shape` (Chromium). Elsewhere it draws circular corners of the same radius. A pill (`borderRadius` of half the height) stays a pill.
+- **`borderCurve: "continuous"`** (`.border_curve(BorderCurve::Continuous)`, the class `corner-squircle`) draws superellipse corners, whose curvature eases into the edges, like iOS app icons: on iOS, Android, macOS and Linux, and on the web where the browser has CSS `corner-shape` (Chromium); elsewhere circular corners of the same radius. A pill (`borderRadius` of half the height) stays a pill.
 - **`overflow: "hidden"`** (`.overflow_hidden()`) clips children to the rounded shape. What it clips away is clipped in layout too: it does not reach an enclosing scroll view's content size, so a box that lays a child out wider than itself and scales it down with a `transform` (transforms do not affect layout) leaves the scroll view alone.
 
 Radii larger than half the side are clamped, so `borderRadius: 9999` (`.rounded_full()`) makes a circle or a pill.
@@ -234,14 +221,14 @@ view().shadow_lg().shadow_color(rgba(0x0969da66))
 view().elevation(px(6.0)).bg(white()).rounded(px(12.0))
 ```
 
-`boxShadow` follows CSS: `offsetX offsetY blur spread color`, `inset` for inner shadows. It also takes its layers as numbers, the form for values that change, which builds no string: `boxShadow: [{ x: 0, y: 6, blur: 18, spread: 0, color: "#0000004d", inset: false }]` (only `x` and `y` required; a layer without a color is the text color). Rust takes the layers, `.shadow([BoxShadow { .. }])`. Shadows follow the view's rounded shape, and a transition animates them (`transitionProperty: "boxShadow"`, `.transition_shadow()`). Tailwind's presets are `.shadow_sm()`, `.shadow_md()`, `.shadow_lg()`, ... in Rust, and `.shadow_color(..)` recolors their layers. A shadow that follows a transparent view's content (the glyphs of an icon, say) is a `filter: "drop-shadow(...)"` ([Filters](#filters-and-blending)). Text has `textShadow` ([Text](./text.md)).
+`boxShadow` follows CSS: `offsetX offsetY blur spread color`, `inset` for inner shadows. It also takes its layers as numbers, the form for values that change, which builds no string: `boxShadow: [{ x: 0, y: 6, blur: 18, spread: 0, color: "#0000004d", inset: false }]` (only `x` and `y` required; a layer without a color is the text color). Rust takes the layers, `.shadow([BoxShadow { .. }])`. Shadows follow the view's rounded shape, and a transition animates them (`transitionProperty: "boxShadow"`, `.transition_shadow()`). Tailwind's presets are `.shadow_sm()`, `.shadow_md()`, `.shadow_lg()`, ... in Rust, and `.shadow_color(..)` recolors their layers. A shadow that follows a transparent view's content (the glyphs of an icon, say) is a `filter: "drop-shadow(...)"` ([Filters](#filters-and-blending)); text has `textShadow` ([Text](./text.md)).
 
 > [!NOTE]
 > On Android, shadows need a background: a view with a transparent background (a text without one, for example) casts no shadow.
 
 ## Gradients
 
-`backgroundImage` takes CSS gradients, drawn over the background color. In Rust, use `.bg_linear(angle)`, `.bg_radial()` and `.bg_conic(angle)` with the stops `.gradient_from(..)`, `.gradient_via(..)` and `.gradient_to(..)`, as Tailwind's `bg-linear-*` with `from-*`, `via-*` and `to-*`. In TSX, separate several gradients with commas.
+`backgroundImage` takes CSS gradients, drawn over the background color; in Rust, `.bg_linear(angle)`, `.bg_radial()` and `.bg_conic(angle)` with the stops `.gradient_from(..)`, `.gradient_via(..)` and `.gradient_to(..)`, as Tailwind's `bg-linear-*` with `from-*`, `via-*` and `to-*`. In TSX, several gradients are separated by commas.
 
 ```tsx tabs
 <View style={{ height: 120, borderRadius: 16, backgroundImage: "linear-gradient(135deg, #54aeff, #8250df)" }} />
@@ -313,7 +300,7 @@ Platform support differs:
 | `backdropFilter` | A system blur material, approximating the radius | From Android 12 (API 31) |
 | `mixBlendMode` | Yes | From Android 10 (API 29) |
 
-The web, Windows and Linux apply every filter to views, macOS as iOS does. GPUI draws the color filters and `drop-shadow()`. The backdrop filter is a blur on iOS, macOS and Android, every filter on the web and Windows. Linux and GPUI draw none, and GPUI draws views in the normal blend mode. Of a `filter` with several `drop-shadow()`s, iOS, macOS and Android draw the last. `mixBlendMode` blends the view with everything drawn behind it.
+The web, Windows and Linux apply every filter to views, macOS as iOS does; GPUI draws the color filters and `drop-shadow()`. The backdrop filter is a blur on iOS, macOS and Android, every filter on the web and Windows; Linux and GPUI draw none, and GPUI draws views in the normal blend mode. Of a `filter` with several `drop-shadow()`s, iOS, macOS and Android draw the last. `mixBlendMode` blends the view with everything drawn behind it.
 
 On iOS, `ios={{ backdropMaterial: "regular" }}` selects the system material used by a
 `backdropFilter` blur. Values are `"ultraThin"` (the default), `"thin"`, `"regular"`, `"thick"`,
@@ -357,7 +344,7 @@ default), `"sidebar"`, `"headerView"`, `"sheet"`, `"windowBackground"`, `"hudWin
 `"fullScreenUI"`, `"toolTip"`, `"contentBackground"`, `"underWindowBackground"` or
 `"underPageBackground"`; `blending` is `"withinWindow"` (the default) or `"behindWindow"`; `state` is
 `"followsWindowActiveState"`, `"active"` (the default) or `"inactive"`. An explicit backdrop wins over
-`glassEffect` and `backdropFilter`. Without it, macOS keeps the glass on macOS 26 and later and the blur
+`glassEffect` and `backdropFilter`; without it, macOS keeps the glass on macOS 26 and later and the blur
 elsewhere. Rust uses `.macos_backdrop(backdrop)` with a `MacOsBackdrop` (the struct is `#[non_exhaustive]`: start from
 `MacOsBackdrop::default()` and set `material`, `blending` and `state`); `None` (the default) leaves the fallback.
 `"behindWindow"` shows what is behind the window only in a transparent one. Window attributes can request this;
@@ -370,7 +357,7 @@ never enables transparency. An embedded `AppView` leaves its host window unchang
 ```
 
 On Windows 11 and later, `windows={{ backdrop: { material: "blur" } }}` fills the view's box, inside its corners, with the
-system's blur of what is behind the window, below the view's own background, border and content. A translucent
+system's blur of what is behind the window, below the view's own background, border and content; a translucent
 background tints it. Like `"behindWindow"`, it shows only in a transparent window. In an opaque window, on an earlier
 Windows, or when the system cannot make the blur, nothing is drawn under the view and the rest of it draws as always.
 The system decides how it looks, and it keeps following what is behind the window while the window is inactive. Rust
@@ -414,7 +401,7 @@ function ProgressiveBlur(props: { radius: number; style: ViewStyle }) {
 }
 ```
 
-In Rust, use `.mask_linear(deg(90.0), [transparent_black(), black(), transparent_black()])` to fade both edges, `.mask_radial([black(), transparent_black()])` for a centered radial fade, and `.mask_none()` to clear it. Angles and stop vectors accept signals or closures. An empty stop vector clears the mask. Positions use `(color, percentage(0.2))` or `(color, px(12.0))`.
+In Rust, use `.mask_linear(deg(90.0), [transparent_black(), black(), transparent_black()])` to fade both edges, `.mask_radial([black(), transparent_black()])` for a centered radial fade, and `.mask_none()` to clear it. Angles and stop vectors accept signals or closures; an empty stop vector clears the mask. Positions use `(color, percentage(0.2))` or `(color, px(12.0))`.
 
 A masked `backdropFilter` draws the blur alone, without the system material's tint, at its exact radius, on iOS and macOS too. Each layer blurs what the window shows on every frame, so keep the layers few and the area small. Linux and GPUI draw no `backdropFilter`, so give the region a fading `backgroundImage` where the text over it must stay readable.
 
@@ -430,7 +417,7 @@ GPUI draws no `maskImage` yet: a masked view draws whole, so a fade made with a 
 
 ## Transforms
 
-Transforms are CSS's. In TSX, `translate`, `rotate` and `scale` are properties of their own and `transform` takes CSS's string of functions or a list of steps. They compose in CSS's order, `translate`, then `rotate`, then `scale`, then `transform`, whatever the order of the keys. In Rust, transforms are methods (`.translate_x(..)`, `.rotate(..)`, `.scale(..)`, ...) composed in the same order:
+Transforms are CSS's. In TSX, `translate`, `rotate` and `scale` are properties of their own and `transform` takes CSS's string of functions or a list of steps; they compose in CSS's order, `translate`, then `rotate`, then `scale`, then `transform`, whatever the order of the keys. In Rust, transforms are methods (`.translate_x(..)`, `.rotate(..)`, `.scale(..)`, ...) composed in the same order:
 
 ```tsx tabs
 <View style={{ translate: "20px 0", rotate: "-8deg", scale: 0.9 }} />
@@ -451,15 +438,15 @@ view().origin_top_left().rotate(deg(30.0))
 | `scale` | `1.5`, `"150%"`, `"1 2"` (x and y), an animated value (both axes) or `[x, y]` |
 | `transform` | CSS's functions: `translate()`, `translateX()`, `translateY()`, `scale()`, `scaleX()`, `scaleY()`, `rotate()` / `rotateZ()`, `rotateX()`, `rotateY()`, `skew()`, `skewX()`, `skewY()`, `perspective()`; lengths in `px` (translations also `%`), angles in `deg`, `rad` or `turn`; `"none"`; or a list of steps (`[{ perspective: 800 }, { rotateY: angle }]`) whose amounts may be animated values |
 
-Each is a property of its own, as with classes: a style's `scale` replaces a `scale-95` class and keeps its `rotate-3`. Animated values move `translate`, `rotate` and `scale` natively. For what CSS's string cannot hold with an animated amount, such as a 3D rotation, give `transform` a list of steps: `translateX`, `translateY`, `scale`, `scaleX`, `scaleY`, `rotate` (`rotateZ`), `rotateX`, `rotateY`, `skewX`, `skewY` and `perspective` ([Animation](./animation.md)). A style's `transform` is one form or the other, so a perspective before animated steps is a step of the list.
+Each is a property of its own, as with classes: a style's `scale` replaces a `scale-95` class and keeps its `rotate-3`. Animated values move `translate`, `rotate` and `scale` natively; for what CSS's string cannot hold with an animated amount, such as a 3D rotation, give `transform` a list of steps: `translateX`, `translateY`, `scale`, `scaleX`, `scaleY`, `rotate` (`rotateZ`), `rotateX`, `rotateY`, `skewX`, `skewY` and `perspective` ([Animation](./animation.md)). A style's `transform` is one form or the other, so a perspective before animated steps is a step of the list.
 
-Rust's `.perspective(..)` is CSS's `perspective` property, as Tailwind's `perspective-*`: it gives the view's children their depth, while the `perspective()` function of a `transform` applies to the view's own transform. `transformOrigin` takes keywords, percentages and lengths (`"top left"`, `"50% 0"`, `[10, 20]`; `.origin_top_left()`, `.transform_origin(..)` in Rust). The default is the center. Transforms do not affect layout: siblings are placed as if the view were untransformed.
+Rust's `.perspective(..)` is CSS's `perspective` property, as Tailwind's `perspective-*`: it gives the view's children their depth, while the `perspective()` function of a `transform` applies to the view's own transform. `transformOrigin` takes keywords, percentages and lengths (`"top left"`, `"50% 0"`, `[10, 20]`; `.origin_top_left()`, `.transform_origin(..)` in Rust); the default is the center. Transforms do not affect layout: siblings are placed as if the view were untransformed.
 
 Android has no skew transforms. GPUI cannot turn an image's pixels: a rotated or skewed `Image` is drawn upright at its own size, centered where it would be.
 
 ## Transitions
 
-A view animates changes of its own style when you name what to animate. The animation runs natively. None of your code runs per frame.
+A view animates changes of its own style when you name what to animate. The animation runs natively; none of your code runs per frame.
 
 ```tsx tabs
 <View
@@ -516,7 +503,7 @@ view()
     .scale(move || if open.get() { 1.0 } else { 0.95 })
 ```
 
-Sizes and positions are layout, not style, and do not transition. Animate layout changes with `LayoutAnimation` or drive values with native animations ([Animation](./animation.md)).
+Sizes and positions are layout, not style, and do not transition; animate layout changes with `LayoutAnimation` or drive values with native animations ([Animation](./animation.md)).
 
 ### Keyframe animations
 
@@ -536,7 +523,7 @@ view()
 
 ## Press feedback
 
-Press feedback is the app's styles for the pressed state, applied natively without a round trip to your code. The hovered, focused and disabled states take styles the same way (`.hover(..)`, `.focus(..)`, `.disabled_style(..)` in Rust; `hoverStyle`, `focusStyle` and `disabledStyle`, or `hover:`, `focus:`, `disabled:`, in TSX):
+Press feedback is the app's styles for the pressed state, applied natively without a round trip to your code; the hovered, focused and disabled states take styles the same way (`.hover(..)`, `.focus(..)`, `.disabled_style(..)` in Rust; `hoverStyle`, `focusStyle` and `disabledStyle`, or `hover:`, `focus:`, `disabled:`, in TSX):
 
 | Rust | TSX | Effect while pressed |
 |---|---|---|

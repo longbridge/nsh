@@ -6,7 +6,11 @@ order: 12.6
 
 # nsh/i18n
 
-`nsh/i18n` shows your app's text in the user's language. Translations come from two places: the app's `locales/` files, which the build reads and the bundle carries, and dictionaries added at run time with `addTranslations`. The files use [rust-i18n](https://github.com/longbridge/rust-i18n)'s formats, and the API is rust-i18n's too. Rust components get the same API in `nsh_core::prelude`: `t!`, `set_locale`, `available_locales` and `add_translations`. [I18n](../docs/i18n.md) walks through translating an app.
+`nsh/i18n` shows the app's text in the user's language. The translations are the app's `locales/` files, in
+[rust-i18n](https://github.com/longbridge/rust-i18n)'s formats, which the build reads and the bundle carries, plus any
+added at run time with `addTranslations`; the API is rust-i18n's, and Rust components have the same as `t!`,
+`set_locale`, `available_locales` and `add_translations` in `nsh_core::prelude`. [I18n](../docs/i18n.md) walks through
+translating an app.
 
 ```tsx
 import { addTranslations, availableLocales, setLocale, t } from "nsh/i18n";

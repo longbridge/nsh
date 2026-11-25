@@ -7,24 +7,22 @@ group: platforms
 
 # GPUI
 
-GPUI 后端在 macOS、Windows 和 Linux 上用 [GPUI](https://gpui-kit.com)（GPUI Fast）绘制 NSH 应用。GPUI 是 GPU 加速的 UI 框架，GPUI Kit 就构建在它之上。
-
-这个后端用于把 NSH 嵌入 GPUI 或 GPUI Kit 应用。`AppView` 是一个 GPUI 视图，可以放在元素树的任意位置，里面运行应用自己的 Rust 根组件或加载的 TSX。
-
-独立应用不用这个后端，而是用各桌面系统自己的后端运行和打包：[macOS](./macos.md)（AppKit）、
+GPUI 后端用 [GPUI](https://gpui-kit.com)（GPUI Fast）绘制 NSH 应用。GPUI 是 GPUI Kit 所基于的 GPU 加速 UI 框架，在 macOS、
+Windows 和 Linux 上表现一致。它是嵌入 GPUI 和 GPUI Kit 应用的后端：`AppView` 是一个 GPUI 视图，GPUI 或 GPUI Kit 应用可以在
+自己元素树的任意位置显示 NSH 应用：它自己的 Rust 根组件，或它加载的 TSX。独立应用用各桌面系统自己的后端运行和打包：[macOS](./macos.md)（AppKit）、
 [Windows](./windows.md)（Win32）和 [Linux](./linux.md)（GTK）。核心、响应式图、渲染器、Taffy 布局以及原生模块与其他所有平台完全相同，因此同一个应用可以在所有
 平台上运行。`os()`（TSX 中的 `platform.os`）是它所运行的操作系统（macOS、Windows 或 Linux），并会应用 TSX 的 `desktop={{…}}` 属性。
 
-[macOS](./macos.md)（AppKit）、[Windows](./windows.md)（Win32）和 [Linux](./linux.md)（GTK）后端的元素和模块它都具备。
+[macOS](./macos.md)（AppKit）、[Windows](./windows.md)（Win32）和 [Linux](./linux.md)（GTK）后端的元素和模块它都具备；
 GPUI 用自己方式绘制的地方，见[差异](#差异)。
 
 ## 工作方式
 
 - **每个界面一个元素。** 一个界面（surface）是一个 GPUI 元素，它填满父元素给它的空间，用 GPUI 的图元（矩形、阴影、路径、字形和
   图片）绘制整棵视图树。与 Windows 后端一样，NSH 为每个节点保留一个视图，只在提交改变了内容时才重绘。
-- **文字在引擎线程上排版**，使用 GPUI 的文字系统（应用自己的字体），由 NSH 断行。主线程只绘制字形。
-- **每次提交一次跳转。** 引擎运行在自己的线程上。每次提交是发往 GPUI 主线程的一个闭包，由它通知视图重绘。
-- **输入**来自 GPUI 的鼠标、滚动、按键和输入法事件。命中测试、按压、响应者系统、滚动和文本编辑与 Windows 后端是同一套逻辑。
+- **文字在引擎线程上排版**，使用 GPUI 的文字系统（应用自己的字体），由 NSH 断行；主线程只绘制字形。
+- **每次提交一次跳转。** 引擎运行在自己的线程上；每次提交是发往 GPUI 主线程的一个闭包，由它通知视图重绘。
+- **输入**来自 GPUI 的鼠标、滚动、按键和输入法事件；命中测试、按压、响应者系统、滚动和文本编辑与 Windows 后端是同一套逻辑。
   可缩放的滚动视图用触控板捏合以指针为中心缩放，缩放后可以双向滚动。
 
 ## 环境要求
@@ -46,7 +44,7 @@ GPUI 用自己方式绘制的地方，见[差异](#差异)。
 ## 运行应用
 
 Rust 应用运行在你的 GPUI 应用里：用 `AppView` 嵌入它的根组件（[嵌入 GPUI 应用](#嵌入-gpui-应用)），然后 `cargo run` 这个 GPUI
-应用。你的 crate 和这个应用是同一次 Cargo 构建。单独运行时，Rust 应用使用本机操作系统自己的后端（`nsh run --target macos`、
+应用；你的 crate 和这个应用是同一次 Cargo 构建。单独运行时，Rust 应用使用本机操作系统自己的后端（`nsh run --target macos`、
 `windows` 或 `linux`）。
 
 TSX 应用在 GPUI 开发宿主中运行：
@@ -56,7 +54,7 @@ nsh run App.tsx --target gpui
 ```
 
 它在一个 GPUI 窗口（默认 1200×800）中打开应用，显示效果与嵌入它的 GPUI 应用相同，和其他目标一样支持热重载、在终端显示日志并提供错误浮层。开发宿主
-（`nsh-gpui-host`）在每个操作系统上都直接运行，不需要外面包一层应用包。在源码仓库中，`nsh run` 会先构建它。发行版把它放在
+（`nsh-gpui-host`）在每个操作系统上都直接运行，不需要外面包一层应用包。在源码仓库中，`nsh run` 会先构建它；发行版把它放在
 `runtime/gpui/` 中。宿主也可以单独运行一个构建好的 bundle：
 
 ```sh
@@ -79,7 +77,7 @@ GStreamer 的 base、good 插件（Debian / Ubuntu：`libwebkit2gtk-4.1-0`、`li
 ## 嵌入 GPUI 应用
 
 `nsh-platform-gpui` crate（来自 NSH 仓库）为 Rust GPUI 应用提供 `AppView`：一个以 GPUI 视图（`Entity<AppView>`）形式存在的
-NSH 引擎，填满父元素给它的空间。每个 `AppView` 相互独立，可以同时运行多个。和其他平台 crate 一样，它默认开启运行时的全部可选功能。只嵌入部分应用的
+NSH 引擎，填满父元素给它的空间。每个 `AppView` 相互独立，可以同时运行多个。和其他平台 crate 一样，它默认开启运行时的全部可选功能；只嵌入部分应用的
 GPUI 应用可以[从二进制中去掉部分功能](./project-structure.md#从二进制中去掉部分功能)。它运行一个 Rust 根组件，即你的 crate 的根组件：
 
 ```rust
@@ -117,14 +115,14 @@ let code = std::fs::read_to_string(".nsh/out/bundle.js").expect("bundle");
 view.read(cx).load(App::Js(Bundle::source(code)));
 ```
 
-像其他视图一样把这个 entity 放进元素树（GPUI Kit 的 `Root`、一个面板、一个停靠区）。`AppView::load` 替换正在运行的内容。
+像其他视图一样把这个 entity 放进元素树（GPUI Kit 的 `Root`、一个面板、一个停靠区）。`AppView::load` 替换正在运行的内容；
 `stop`（或丢弃视图）结束应用。`AppOptions::asset_base` 指定 `asset:/` URI 的解析位置（`AssetBase::Directory` 或
 `AssetBase::Http`）。字节码 bundle（`bundle.nshc`）用 `unsafe { Bundle::bytecode(bytes) }`（或同样是 unsafe 的
 `Bundle::read_trusted(path)`）加载：QuickJS 字节码是受信任的输入，只应从你自己应用的文件中加载。
 
 将 `AppOptions::inline_root` 设为 `true`，可在视图内绘制普通 JS 根视图，参见 `examples/embed-gpui`。该选项默认为
 `false`，此时普通根视图会在隐式的第一个窗口中显示。应用看到的桌面平台不变，显式声明的 `<Window>` 或通过 `Window.open`
-打开的窗口仍是独立的 GPUI 窗口。无论视图是否接管宿主窗口（`AppView::own_window`），内嵌渲染都有效。`own_window` 可以在
+打开的窗口仍是独立的 GPUI 窗口。无论视图是否接管宿主窗口（`AppView::own_window`），内嵌渲染都有效；`own_window` 可以在
 `load` 之前或之后调用。`open_app_window` 和 `run_app` 会忽略 `inline_root`。
 
 - `open_app_window(source, options, cx)` 在运行中的 GPUI 应用里打开一个带 `AppView` 的宿主窗口，并在第一帧之前应用
@@ -135,17 +133,17 @@ view.read(cx).load(App::Js(Bundle::source(code)));
 - `AppView::register_component(name, factory)` 在加载前注册你自己的原生组件（[原生组件](./native-components.md)）。
 - `AppOptions::cache`（或 `AppView::set_cache`，作用于之后加载的应用）设置应用保存缓存（[下载的图片](./images-and-assets.md#磁盘缓存)）的位置和每种缓存的大小：`CacheOptions { location, images }`，`CacheLocation::System`（默认）、`Dir(path)` 或 `Off`，`CachePolicy::Default`（256 MiB）、`MaxSize(ByteSize::mib(n))` 或 `Off`。
 - `AppView::host()` 是视图与它运行的应用之间的通道（[`host`](../modules/nsh.md#host)），一个可在任意线程使用的 `HostChannel`：加载前用 `set_params(map)` 给应用启动参数（`host.params`），用 `send(name, data)` 发送事件（`host.on`），用 `handle(name, |call| …)` 回答应用的 `host.call(name, data)` 并接收它的 `host.post`（`call.resolve(json)`、`call.reject(message)`，可以立即回答，也可以稍后在任意线程回答）。处理函数在引擎线程运行：把调用交给你的 GPUI entity（例如通过一个由 `cx.spawn` 任务读取的 channel），在那里回答。macOS、Windows 和 Linux 的 `AppView` 也有同样的 `host()`。它的 `handle_open_url(|request| …)` 在系统之前看到应用打开的 URL（[`openUrl`](../modules/nsh.md#openurl)）：你的应用自己处理了这个 URL 时调用 `request.handled()`，调用 `request.decline()`（或直接丢弃 request）则由系统用 GPUI 的 `open_url` 打开。
-- `AppOptions::limits`（或 `AppView::set_limits`，作用于之后加载的应用）设置 VM 限制：JS 堆、栈、时间预算和节点配额（[沙箱与能力](./sandbox-and-capabilities.md)）。嵌入的应用默认是 `Limits::default()`（256 MB 堆）。开发宿主把应用作为独立应用运行，使用 `Limits::standalone()`。
+- `AppOptions::limits`（或 `AppView::set_limits`，作用于之后加载的应用）设置 VM 限制：JS 堆、栈、时间预算和节点配额（[沙箱与能力](./sandbox-and-capabilities.md)）。嵌入的应用默认是 `Limits::default()`（256 MB 堆）；开发宿主把应用作为独立应用运行，使用 `Limits::standalone()`。
 - `AppOptions::transparent` 让视图透明：它不绘制窗口背景，`open_app_window` / `run_app` 打开透明窗口，应用没有绘制的地方显示窗口后面的内容（桌面小部件、浮层）。默认为 false。
-- `AppView::connect_dev_server(url, cx)`（feature `dev`）从 `nsh dev` 加载应用，边改边重新加载，错误浮层显示在视图上。`AppView::on_error` 照样收到应用的错误。
+- `AppView::connect_dev_server(url, cx)`（feature `dev`）从 `nsh dev` 加载应用，边改边重新加载，错误浮层显示在视图上；`AppView::on_error` 照样收到应用的错误。
 - `AppView::on_app_error(|error| …)` 接收应用的错误：`error.kind`（应用加载失败、未捕获的异常、VM 已停止），`error.is_fatal()` 表示该应用不会再执行任何 JS，`error.message`、`error.stack`，以及 `error.package`（它来自的签名包的 id 和 build 号）。`AppView::on_error` 以文本形式收到同样的错误。
 - `AppView::set_locale(locale, cx)` 和 `AppView::set_font_scale(scale, cx)` 用你的应用的语言和文字大小代替系统的设置（`None` 恢复跟随系统）：`locale()`、`Intl`、`fontScale()` 和文字立即跟随（[设备与环境](./device-and-environment.md#在嵌入它的应用中)）。
-- `AppView::set_theme_overrides(Some(json), cx)` 把你的应用的品牌加在应用的[主题](./tailwind.md#主题-token)之上：格式与 `nsh.json` 的 `"theme"` 相同的主题文件，其中的 token 在浅色和深色模式下都覆盖应用的同名 token，应用的其他 token 保持不变。`bg-primary` 等类名立即更新样式，之后加载的应用一开始就使用它（`None` 恢复应用自己的主题；无法解析的文件返回错误，不做任何改动）。用 `set_theme` / `set_theme_json` 给了整套主题时，覆盖压在那套主题的 token 之上，两者改动其一时另一个保持不变。
-- `AppView::content_height()` 返回逻辑根节点中参与正常布局的子视图的底边位置，单位为表面逻辑点。没有已布局的流内内容时返回 `None`。浮层、模态窗口以及固定或绝对定位的根子视图不计入高度。在 Rust 宿主中监听视图的 GPUI 通知后重新读取：每次提交会一起更新缓存高度和视图，然后才通知观察者。如果应用由你维护，也可以直接用应用根视图的 `.on_layout(..)` 获取它的布局尺寸。它报告当前布局，不进行固有尺寸计算：相对视口的高度和 flex 增长仍取决于宿主提供的视口。
+- `AppView::set_theme_overrides(Some(json), cx)` 把你的应用的品牌加在应用的[主题](./tailwind.md#主题-token)之上：格式与 `nsh.json` 的 `"theme"` 相同的主题文件，其中的 token 在浅色和深色模式下都覆盖应用的同名 token，应用的其他 token 保持不变；`bg-primary` 等类名立即更新样式，之后加载的应用一开始就使用它（`None` 恢复应用自己的主题；无法解析的文件返回错误，不做任何改动）。用 `set_theme` / `set_theme_json` 给了整套主题时，覆盖压在那套主题的 token 之上，两者改动其一时另一个保持不变。
+- `AppView::content_height()` 返回逻辑根节点中参与正常布局的子视图的底边位置，单位为表面逻辑点；没有已布局的流内内容时返回 `None`。浮层、模态窗口以及固定或绝对定位的根子视图不计入高度。在 Rust 宿主中监听视图的 GPUI 通知后重新读取：每次提交会一起更新缓存高度和视图，然后才通知观察者。如果应用由你维护，也可以直接用应用根视图的 `.on_layout(..)` 获取它的布局尺寸。它报告当前布局，不进行固有尺寸计算：相对视口的高度和 flex 增长仍取决于宿主提供的视口。
 - 设置宿主主题或主题覆盖时，未指定颜色的文字继承 `foreground` token。
-- `AppView::run_package(&package)` 运行来自 `verify_package` 或 `load_package` 的[签名包](./signed-packages.md)。你的应用判定它健康之后，用 `accept_package` 记录它。
+- `AppView::run_package(&package)` 运行来自 `verify_package` 或 `load_package` 的[签名包](./signed-packages.md)；你的应用判定它健康之后，用 `accept_package` 记录它。
 - `set_ui_sets(sets)` 设置每个引擎提供的 UI 套件：NSH 的（`nsh_base::registry()`）和你的 crate 的（`my_app::registry()`，由
-  `#[native_module]` 生成。[用 Rust 开发](./rust.md)），也用来提供你的应用自己的套件：应用通过
+  `#[native_module]` 生成；[用 Rust 开发](./rust.md)），也用来提供你的应用自己的套件：应用通过
   [`nativeModule`](../modules/nsh.md#nativemodule) 按名称使用其中的函数和类，并用标准的 `nsh build` 构建。仓库中的
   `examples/embed-gpui` 就这样在宿主中维护一个交易台，由两个嵌入的下单面板和宿主自己的控件共享。
 
@@ -155,20 +153,20 @@ view.read(cx).load(App::Js(Bundle::source(code)));
 
 - **变换**：旋转、斜切和透视的视图，其背景、边框、阴影和图片会随之变换（转动中的照片在每个新角度重新绘制，单色 SVG 图标由 GPU
   旋转），画布跟随旋转和斜切；文字保持直立，视频按其边界绘制。
-- **不透明度**作用于每种颜色而不是整组，因此半透明视图中相互重叠的子视图会彼此透出。图片的不透明度（淡入、半透明视图）以
+- **不透明度**作用于每种颜色而不是整组，因此半透明视图中相互重叠的子视图会彼此透出；图片的不透明度（淡入、半透明视图）以
   十六分之一为级变化。
 - **圆角裁剪**（带圆角的 `overflow: "hidden"`）会让子视图的背景和图片跟随圆角，但文字、边框、视频和原生组件按矩形裁剪。
-- **不绘制**：`filter: blur()`、`backdropFilter` 和 `mixBlendMode`。阴影会透过半透明填充显示。`borderCurve: "continuous"`
+- **不绘制**：`filter: blur()`、`backdropFilter` 和 `mixBlendMode`；阴影会透过半透明填充显示；`borderCurve: "continuous"`
   绘制为圆形圆角。
 - **画布文字**是近似的：旋转时保持直立，`maxWidth` 下缩小字号而不是压窄，渐变以单一颜色绘制，`strokeText` 绘制为填充，阴影
   不模糊，合成操作和 `clearRect` 对它不起作用。
-- **视频**在 Linux 上播放（GStreamer）。在 macOS 和 Windows 上显示占位内容并报告 `onError`。
-- **Web 视图**是位于 NSH 在该位置所绘制一切内容之上的原生视图。Linux 上需要 X11（见[环境要求](#环境要求)）。在 Xwayland
+- **视频**在 Linux 上播放（GStreamer）；在 macOS 和 Windows 上显示占位内容并报告 `onError`。
+- **Web 视图**是位于 NSH 在该位置所绘制一切内容之上的原生视图。Linux 上需要 X11（见[环境要求](#环境要求)）；在 Xwayland
   下页面一直是黑的（日志中有 "Failed to create GBM buffer"）时，请用 `WEBKIT_DISABLE_DMABUF_RENDERER=1` 运行应用。macOS 和
   Windows 上裁剪祖先不会裁剪它们，加载失败也不会报告 `onError`。不支持 `baseUrl`、`scrollable` 和
   `allowsBackForwardNavigationGestures`。`incognito` 网页视图保存页面数据的方式与该系统自己的后端相同
   （见[网站数据](./web-view-and-video.md#网站数据)）。
-- **无障碍**通过 AccessKit 实现：读屏软件在所有平台上都能激活、聚焦、设置值并把元素滚动到可见。自定义操作和上下文菜单操作
+- **无障碍**通过 AccessKit 实现：读屏软件在所有平台上都能激活、聚焦、设置值并把元素滚动到可见；自定义操作和上下文菜单操作
   尚未传递。
 
 可对照各原生后端自己的列表：[macOS](./macos.md#macos-上的差异)、[Windows](./windows.md#windows-上的差异)、

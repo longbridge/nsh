@@ -8,11 +8,9 @@ demo: guide-reactivity
 
 # 响应式
 
-NSH 用 **signal** 更新界面。signal 是一个值，它知道哪些计算读取了自己。signal 变化时，NSH 只重新运行这些计算（一段文本、一个样式、一个 effect），组件不会重新渲染。
+NSH 用 **signal** 更新界面：signal 是知道谁在读取自己的值。signal 变化时，NSH 只重新运行读取了它的那些计算（一段文本、一个样式、一个 effect），其他一概不动。组件不会重新渲染。这套模型来自 Solid，而响应式图本身是原生实现的：Rust 组件和 TSX 运行在同一个用 Rust 编写的图上，所以在 TSX 中，调度、依赖跟踪和清理同样都在解释器之外完成。
 
-这套模型和 Solid 相同。**响应式图**（signal 和读取它们的计算组成的图）用 Rust 实现。Rust 组件和 TSX 共用这张图，所以在 TSX 中，调度、依赖跟踪和清理也都在 JavaScript 解释器之外完成。
-
-Rust 组件从 prelude 中取得本页的所有内容。TSX 从 `nsh` 导入：
+Rust 组件从 prelude 中取得本页的所有内容；TSX 从 `nsh` 导入：
 
 ```tsx tabs
 import { batch, cleanup, computed, context, effect, resource, signal, untracked } from "nsh";
@@ -24,7 +22,7 @@ use nsh_core::prelude::*;   // signal, computed, effect, resource, batch, untrac
 
 ## signal
 
-`signal(value)` 创建一个 signal。Rust 中用 `get()` 读取，TSX 中调用它来读取。用 `set` 和 `update` 写入：
+`signal(value)` 创建一个 signal。Rust 中用 `get()` 读取，TSX 中调用它来读取；用 `set` 和 `update` 写入：
 
 ```tsx tabs
 const count = signal(0);
@@ -77,11 +75,11 @@ const position = signal({ x: 0, y: 0 }, { equals: (a, b) => a.x === b.x && a.y =
 let tick = signal_with(0, SignalEquals::Never);   // every write notifies
 ```
 
-在 TSX 中，不带初始值的 `signal<T>()` 初始为 `undefined`，类型为 `Signal<T | undefined>`。在 Rust 中，用 `Option` 表达同样的意思（`signal(None::<User>)`）。
+在 TSX 中，不带初始值的 `signal<T>()` 初始为 `undefined`，类型为 `Signal<T | undefined>`；在 Rust 中，用 `Option` 表达同样的意思（`signal(None::<User>)`）。
 
 ### 对象与数组
 
-在 Rust 中，`update` 原地修改值并通知读取者。`set` 替换它。在 TSX 中，signal 用 `===` 比较，原地修改的值不算变化：请写入一个新的对象或数组。
+在 Rust 中，`update` 原地修改值并通知读取者；`set` 替换它。在 TSX 中，signal 用 `===` 比较，原地修改的值不算变化：请写入一个新的对象或数组。
 
 ```tsx tabs
 const todos = signal<Todo[]>([]);
@@ -189,7 +187,7 @@ pub fn Search(props: SearchProps) -> impl IntoElement {
 
 effect 只跟踪它同步运行期间的读取。任务中、`.then` 回调中或 `await` 之后的读取不会被跟踪。
 
-调用 [ref](./jsx-and-components.md#ref) 的 effect 作用于 ref 所在的元素。在 TSX 中，effect 在同一轮创建的元素都已存在之后运行，所以 ref 已经设置好：
+调用 [ref](./jsx-and-components.md#ref) 的 effect 作用于 ref 所在的元素；在 TSX 中，effect 在同一轮创建的元素都已存在之后运行，所以 ref 已经设置好：
 
 ```tsx tabs
 let input: InputRef | undefined;
@@ -257,7 +255,7 @@ view()
     .child(text("Reload").on_press(move || quote.refetch()))
 ```
 
-`source` 会被跟踪：每当它给出新值，`fetcher(value, info)` 就重新加载。在 Rust 中它是一个返回 `Option` 的闭包，`None` 表示不加载。在 TSX 中它是一个访问器（signal、函数）或一个值，`undefined`、`null` 或 `false` 表示不加载：适用于用户尚未登录或尚未选择任何内容的情况。没有 source 时，Rust 传入 `|| Some(())`，TSX 的 `resource(fetcher)` 只加载一次，调用 `fetcher(info)`。Rust 的 fetcher 返回 `Result`。TSX 的返回一个值或一个 promise，抛出异常即为失败。
+`source` 会被跟踪：每当它给出新值，`fetcher(value, info)` 就重新加载。在 Rust 中它是一个返回 `Option` 的闭包，`None` 表示不加载；在 TSX 中它是一个访问器（signal、函数）或一个值，`undefined`、`null` 或 `false` 表示不加载：适用于用户尚未登录或尚未选择任何内容的情况。没有 source 时，Rust 传入 `|| Some(())`，TSX 的 `resource(fetcher)` 只加载一次，调用 `fetcher(info)`。Rust 的 fetcher 返回 `Result`；TSX 的返回一个值或一个 promise，抛出异常即为失败。
 
 | Rust | TSX | 含义 |
 |---|---|---|
@@ -268,9 +266,9 @@ view()
 | `quote.refetch()` | `posts.refetch()` | 用同一个 source 重新加载：重试、下拉刷新。 |
 | `quote.mutate(value)` | `posts.mutate(value)` | 不经加载直接设置值（乐观更新），并清除错误。 |
 
-Rust 的 resource 和 signal 一样是一个 `Copy` 句柄。TSX 的成员已绑定，所以 `onRefresh={posts.refetch}` 和 `const loading = posts.loading` 可以直接使用。
+Rust 的 resource 和 signal 一样是一个 `Copy` 句柄；TSX 的成员已绑定，所以 `onRefresh={posts.refetch}` 和 `const loading = posts.loading` 可以直接使用。
 
-只有最新的一次加载有效。新的加载会放弃正在进行的那次，组件被移除时也一样。在 TSX 中，`info.signal` 会中止交给它的 `fetch`。被取代之后才结束的加载不会改变任何东西。`info.refetching` 表示这次加载是由 `refetch()` 发起的。Rust 的 `resource_with_value(value, source, fetcher)` 和 TSX 的 `{ initialValue }` 让 resource 从一开始就有值。
+只有最新的一次加载有效。新的加载会放弃正在进行的那次，组件被移除时也一样；在 TSX 中，`info.signal` 会中止交给它的 `fetch`。被取代之后才结束的加载不会改变任何东西。`info.refetching` 表示这次加载是由 `refetch()` 发起的。Rust 的 `resource_with_value(value, source, fetcher)` 和 TSX 的 `{ initialValue }` 让 resource 从一开始就有值。
 
 ## cleanup
 
@@ -380,7 +378,7 @@ Rust 的 `get_untracked()` 以同样的方式读取单个 signal。组件函数�
 
 ## context
 
-context 是组件提供给它所渲染的一切内容（无论多深）的值。在 Rust 中，`provide_context(value)` 提供一个该类型的值，`use_context::<T>()` 查找最近的一个。在 TSX 中，`context(defaultValue)` 创建一个 context，调用它读取最近提供的值（或默认值），渲染 `<Ctx.Provider value>` 来提供值：
+context 是组件提供给它所渲染的一切内容（无论多深）的值。在 Rust 中，`provide_context(value)` 提供一个该类型的值，`use_context::<T>()` 查找最近的一个；在 TSX 中，`context(defaultValue)` 创建一个 context，调用它读取最近提供的值（或默认值），渲染 `<Ctx.Provider value>` 来提供值：
 
 ```tsx tabs
 const Theme = context<"light" | "dark">("light");
@@ -458,7 +456,7 @@ fn swatch() -> impl IntoElement {
 
 ## 错误边界
 
-错误边界把视图中某一部分的失败限制在这一部分之内。它下面的代码在渲染或运行时抛出异常（Rust 中为 panic），例如组件函数体、绑定、effect 或事件处理函数，失败的部分会被移除，错误边界在原处显示它的 fallback。视图的其余部分保持不变。Rust 中使用 `catch_error(view, fallback)`。TSX 中使用 `nsh` 的 `<ErrorBoundary fallback>`。fallback 得到错误（TSX 中就是抛出的值本身，通常是一个 `Error`）和一个重新渲染视图的 reset：
+错误边界把视图中某一部分的失败限制在这一部分之内。它下面的代码在渲染或运行时抛出异常（Rust 中为 panic），例如组件函数体、绑定、effect 或事件处理函数，失败的部分会被移除，错误边界在原处显示它的 fallback；视图的其余部分保持不变。Rust 中使用 `catch_error(view, fallback)`；TSX 中使用 `nsh` 的 `<ErrorBoundary fallback>`。fallback 得到错误（TSX 中就是抛出的值本身，通常是一个 `Error`）和一个重新渲染视图的 reset：
 
 ```tsx tabs
 import { ErrorBoundary, Text, View } from "nsh";
@@ -533,7 +531,7 @@ fn good() -> impl IntoElement {
 }
 ```
 
-**只读取一次 props。** 在 Rust 组件函数体中用 `props.title.get()` 读取的 prop 只读一次。请在绑定中读取它（`text(props.title)`、`move || props.title.get()`）。在 TSX 中，`const { title } = props` 只会读取一次 `title`：请在使用的地方读取 `props.title`，或用 [`split`](./jsx-and-components.md#展开-props) 拆分 props。
+**只读取一次 props。** 在 Rust 组件函数体中用 `props.title.get()` 读取的 prop 只读一次；请在绑定中读取它（`text(props.title)`、`move || props.title.get()`）。在 TSX 中，`const { title } = props` 只会读取一次 `title`：请在使用的地方读取 `props.title`，或用 [`split`](./jsx-and-components.md#展开-props) 拆分 props。
 
 **在 TSX 中原地修改而不是重新设置。** `list().push(x)` 改变了数组，却不会通知任何人。请写入一个新数组，Rust 的 `update` 则会替你通知。
 

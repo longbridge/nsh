@@ -8,8 +8,9 @@ demo: el-toolbar
 # Toolbar
 
 A toolbar is a bar of controls: a text editor's formatting, a media player's transport, a vertical palette of tools.
-`Toolbar` owns the keyboard and the semantics. Screen readers announce a toolbar named by its `accessibilityLabel`.
-The keyboard reaches it in one stop and moves between its items with the arrow keys of its `axis`. Its items are the `Button`s, `Toggle`s and `Link`s inside it, at any depth. A `ToolbarGroup` is a named run of
+`Toolbar` owns the keyboard and the semantics of one: screen readers announce a toolbar (named by its
+`accessibilityLabel`), and the keyboard reaches it in one stop and moves between its items with the arrow keys of its
+`axis`. Its items are the `Button`s, `Toggle`s and `Link`s inside it, at any depth. A `ToolbarGroup` is a named run of
 related items (undo and redo, the alignment), and a `ToolbarSeparator` a line the app draws between runs. The look is
 the app's: the toolbar has no colors, padding or gaps of its own, and each control keeps its own state.
 
@@ -126,7 +127,7 @@ tool the app draws itself is a `Button` with the app's classes: a `Button` has n
 app styles it and is an item (a `View` with `onPress` stays a stop of its own, outside the arrow keys). A
 `ToggleGroup` inside a toolbar is one of its groups: its toggles are the toolbar's items, screen readers hear a group,
 and its `disabled` still disables its own toggles. Other controls (an `Input`, a `Select`, a `Slider`) stay stops of
-their own and keep their arrow keys. Place them at the end of the bar. What a popup an item opens shows (a popover's
+their own and keep their arrow keys; place them at the end of the bar. What a popup an item opens shows (a popover's
 fields and buttons, a menu's items, a hover card's links) is no part of the toolbar. The arrow keys go through the items in the order the
 bar lays them out, however deep each one sits, and an item the app shows later takes its place among them.
 
@@ -165,7 +166,7 @@ A palette of tools is a column: `axis="vertical"` lays the items out top to bott
 
 ## Disabled
 
-`disabled` on a toolbar disables every item in it, a bar the app locks. On a group, the group's items. A disabled item
+`disabled` on a toolbar disables every item in it, a bar the app locks; on a group, the group's items. A disabled item
 takes no presses, the arrow keys pass it by, and screen readers announce it as dimmed:
 
 ```tsx
@@ -178,7 +179,7 @@ takes no presses, the arrow keys pass it by, and screen readers announce it as d
 
 ## Accessibility
 
-- `Toolbar` has the role `"toolbar"`, named by `accessibilityLabel`. Its items stay elements of their own. On iOS the
+- `Toolbar` has the role `"toolbar"`, named by `accessibilityLabel`; its items stay elements of their own. On iOS the
   toolbar is a semantic group VoiceOver enters.
 - `ToolbarGroup` has the role `"group"`, named by its `accessibilityLabel`, so a run of items reads as one unit. A
   `ToggleGroup` inside a toolbar is a group too.
@@ -203,12 +204,12 @@ On macOS and the web, where Tab reaches the views that take presses, a `Toolbar`
 
 The arrow keys skip disabled items and press nothing: a toggle changes only when it is pressed. The other pair of
 arrows is left to the items (a menu's trigger opens its menu with Down). In a right-to-left layout a horizontal
-toolbar runs from the right, so Left moves to the next item and Right to the previous. A vertical one keeps Down and
+toolbar runs from the right, so Left moves to the next item and Right to the previous; a vertical one keeps Down and
 Up.
 
 ## Platform notes
 
-- iOS, Android and Mac Catalyst: each item is pressed with a tap. The toolbar is a group screen readers announce.
+- iOS, Android and Mac Catalyst: each item is pressed with a tap; the toolbar is a group screen readers announce.
 - Desktops (macOS, Windows, Linux, GPUI) and the web: a press is a click. On macOS and the web the toolbar is one stop
   of Tab, and the arrow keys, Home and End move between its items ([Keyboard](#keyboard)).
 - Every platform draws what the app styles: the bar, its groups, its separators and its items.

@@ -11,8 +11,8 @@ demo: el-diff-view
 new on the right with their lines aligned, or unified, the deleted lines above the added ones. Within a changed line
 the words that changed are highlighted, the unchanged lines between changes fold into separators that expand, and the
 text is highlighted in the [`Editor`](./editor.md)'s syntax colors. It shows two texts (`oldValue` and `newValue`) or the
-files of a unified diff (`patch`, such as `git diff` output or a pull request), each under its header. It is made for
-reviewing changes, including an AI's proposed edits: your actions on each change keep it or revert it. Only the rows in view are made, so a
+files of a unified diff (`patch`: `git diff`'s, a pull request's), each under its header, and it is made for reviewing changes, an AI's
+proposed edits among them: the app's actions on each change keep it or revert it. Only the rows in view are made, so a
 long file scrolls as a short one does.
 
 `DiffView` owns behavior and comes with a look of its own built from the theme's tokens: the theme's `font-mono` at
@@ -96,7 +96,7 @@ added and deleted line counts, and `▾`, and a press on it collapses the file t
 `renderFileHeader` draws the headers the app's way (and shows one above a patch of a single file too), told the file
 (`DiffFile`): `index`, `path`, `oldPath` (renamed or copied from), `status` (`"modified"`, `"added"`, `"deleted"`,
 `"renamed"`, `"copied"`), `binary` (the patch shows no lines of it), `added`, `deleted`, `hunks`, `firstHunk` and
-`collapsed`. The app's header calls the ref's `toggleFile(path)`. `collapseFile` and `expandFile` set the state, and
+`collapsed`. The app's header calls the ref's `toggleFile(path)`; `collapseFile` and `expandFile` set the state, and
 every change is reported with `onFileToggle({ file })`. A collapsed file stays collapsed while a new `patch` still has it.
 
 Changes count across files, in order: a file's changes are `firstHunk` to `firstHunk + hunks - 1`, which
@@ -148,7 +148,7 @@ what is highlighted within a changed line:
 | `"char"` | Each character that changed |
 | `"none"` | Nothing: the lines' tints alone |
 
-Words are runs of letters, digits and `_`. Each CJK character, kana and hangul syllable is a word of its own, so a
+Words are runs of letters, digits and `_`; each CJK character, kana and hangul syllable is a word of its own, so a
 changed character in a sentence marks only itself. A line that changed almost entirely shows its tint alone.
 
 `indicators` marks changed lines beside their numbers: `"bars"` (the default, a bar at the gutter's edge),
@@ -161,9 +161,9 @@ changed character in a sentence marks only itself. A line that changed almost en
 
 ## Collapsed lines
 
-Around each change `contextLines` unchanged lines show (3 by default). The unchanged lines between changes, and those
+Around each change `contextLines` unchanged lines show (3 by default); the unchanged lines between changes, and those
 before the first and after the last, collapse into a separator that says how many lines it hides. Pressing it shows
-them all. `expandAll` shows every line. The ref's `expand`, `expandAll()` and `collapseAll()` reveal and fold them
+them all. `expandAll` shows every line; the ref's `expand`, `expandAll()` and `collapseAll()` reveal and fold them
 from the app.
 
 `renderSeparator` draws the separators the app's way. It gets the separator (`DiffSeparator`): `gap`, the index of
@@ -446,7 +446,7 @@ from a deleted one (no new lines), to color its mark.
 
 The code is selectable text: dragging over it selects across lines, a double click selects a word and a triple click a
 line, Shift extends the selection, and the platform's copy (Cmd+C or Ctrl+C; Ctrl+Shift+C in a terminal) copies it.
-Each side of a split view selects on its own, so a selection stays on the side it starts on. A unified view's column
+Each side of a split view selects on its own, so a selection stays on the side it starts on; a unified view's column
 is one text. The line numbers, the `+` / `−` marks and bars, the separators, the file headers and the app's controls
 and annotations stay out of the selection, so a copy holds only code. With `softWrap`, a wrapped line copies whole,
 without a line break where it wraps, and a triple click selects all of its rows. Selecting lines on the line numbers
@@ -462,7 +462,7 @@ the mouse over the numbers selects those it goes over. `onLineSelectionChange` r
 `annotations` puts the app's content under lines: each `{ id, side, line }` is drawn by `renderAnnotation` across its
 line's side (the whole view when unified), as tall as it lays out, and shows while its line does. `renderAddAnnotation`
 is the app's control to add one, at the right of the gutter of the line the pointer is over and of the last selected
-line. It gets the selected lines when its line is one of them, else that line.
+line; it gets the selected lines when its line is one of them, else that line.
 
 ```tsx
 type Comment = { id: string; side: "old" | "new"; line: number; text: string };
@@ -489,9 +489,9 @@ const drafting = signal<DiffLineRange | null>(null);
 
 ## Styling the parts
 
-`class` and `style` style the view's box. `classes` takes Tailwind classes by part and `styles` inline styles by part.
-A part's classes come after its own default styles, so they win, and its `styles` win over its classes. The font is
-set with `fontFamily`, `fontSize` and `lineHeight`. Like every text, it grows with the user's text size (`fontScale()`),
+`class` and `style` style the view's box. `classes` takes Tailwind classes by part and `styles` inline styles by part;
+a part's classes come after its own default styles, so they win, and its `styles` win over its classes. The font is
+set with `fontFamily`, `fontSize` and `lineHeight`; like every text, it grows with the user's text size (`fontScale()`),
 and the rows and sides grow with it.
 
 ```tsx

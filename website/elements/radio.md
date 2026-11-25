@@ -7,13 +7,11 @@ demo: el-radio
 
 # Radio
 
-Radios let the user pick exactly one option from a set, such as a plan, a sort order or a theme. Each `Radio` handles
-one option: presses, keyboard activation, the disabled state, and the radio role and checked state for screen readers.
-A `RadioGroup` wraps the set, and screen readers announce it as one group.
-
-Your app owns the look. A radio has no circle, dot, colors, sizes or label of its own. Its children are your indicator
-and label. `checked:` classes on the radio, and `group-checked:` classes on its children, follow its state.
-
+Radios offer a set of options the user picks exactly one of: a plan, a sort order, a theme. Each `Radio` owns the
+behavior of one option: presses, keyboard activation, the disabled state, and the radio role and its checked state for
+screen readers. A `RadioGroup` around them is the set, which screen readers announce as one group. The look is the
+app's: a radio has no circle, dot, colors, sizes or label of its own. Its children are the app's indicator and label,
+and `checked:` classes on the radio, or `group-checked:` classes on what is inside it, follow its state.
 
 ```tsx tabs
 import { mount, signal, Text, View } from "nsh";

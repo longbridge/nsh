@@ -7,7 +7,7 @@ demo: el-dialog
 
 # Dialog
 
-Dialog 在应用其余内容之上、在它自己的原生窗口层中呈现内容：iOS 和 Mac Catalyst 上是一个被 present 的 view controller，Android 上是一个 Dialog，桌面平台和 Web 上是覆盖整个窗口的一层。它用于全屏流程、sheet 和对话框。系统手势都能正常使用，并由原生侧处理：下滑关闭 sheet、Android 返回键、Escape。Rust 用 `nsh_base::dialog()` 创建，TSX 用从 `nsh/base` 导入的 `<Dialog>`。
+Dialog 在应用其余内容之上、在它自己的原生窗口层中呈现内容：iOS 和 Mac Catalyst 上是一个被 present 的 view controller，Android 上是一个 Dialog，桌面平台和 Web 上是覆盖整个窗口的一层。它用于全屏流程、sheet 和对话框。系统自带的手势（下滑关闭 sheet、Android 返回键、Escape）都能正常工作，并在原生侧决定。Rust 用 `nsh_base::dialog()` 创建，TSX 用从 `nsh/base` 导入的 `<Dialog>`。
 
 Dialog 负责行为，外观交给应用：它的样式设定弹出层（包含子元素的视图）的样式，在 TSX 中 `backdropClass` / `backdropStyle` 在它后面加一层背景。
 
@@ -133,7 +133,7 @@ fn example() -> impl IntoElement {
 ## 无障碍
 
 读屏软件把对话框当作一个整体：焦点进入时先说出这是一个对话框和它的名字，再读里面的内容。把标题作为它的名字：TSX 中是
-`accessibilityLabel`，Rust 中是 `.label(..)`。把说明文字作为它的描述：`accessibilityDescription`、
+`accessibilityLabel`，Rust 中是 `.label(..)`；把说明文字作为它的描述：`accessibilityDescription`、
 `.accessibility_description(..)`，读屏软件紧接着名字读出它，用户在走到按钮之前就知道对话框说的是什么。请用户确认某件事（例如删除）的对话框是警示对话框：`role="alertdialog"`、
 `.role(AccessibilityRole::AlertDialog)`。各平台按自己的对话框呈现这个角色：macOS 上是 VoiceOver 的对话框，iOS 上是以标题命名的语义分组，
 Windows 上是 UI Automation 的对话框窗格，Linux 上是 AT-SPI 的对话框，Web 上是带 `aria-modal` 的 dialog。
@@ -226,9 +226,9 @@ dialog()
     .child(nav_stack().flex_1().child(nav_page().key("settings").child(settings())))
 ```
 
-`detent` 的值变化时 sheet 移过去，如上用 `onDetentChange` 跟随用户的拖动。app 不跟的拖动不会被撤销，sheet 停在用户拖到的那档。
+`detent` 的值变化时 sheet 移过去，如上用 `onDetentChange` 跟随用户的拖动；app 不跟的拖动不会被撤销，sheet 停在用户拖到的那档。
 
-内容按 sheet 所停的高度排版。其他平台忽略 detents，dialog 保持它在那里的形式。需要在所有平台上都按档位停靠的底部 sheet，请用 [`Sheet`](./sheet.md)。
+内容按 sheet 所停的高度排版。其他平台忽略 detents，dialog 保持它在那里的形式；需要在所有平台上都按档位停靠的底部 sheet，请用 [`Sheet`](./sheet.md)。
 
 ## 带背景层的对话框
 
@@ -295,7 +295,7 @@ when(confirm, move || {
 
 ## 平台说明
 
-- iOS 和 Mac Catalyst：`presentation` 决定形式。`fullScreen` 以透明背景覆盖整个屏幕。`pageSheet` 和 `formSheet` 是带系统背景的系统 sheet，下滑时跟随手指（`closeOnSwipe`）。sheet 停在它的 `detents` 上，设了 `grabber` 时带系统抓手。自定义高度需要 iOS 16，iOS 15 上取 medium 和 large 中较近的一档。
+- iOS 和 Mac Catalyst：`presentation` 决定形式。`fullScreen` 以透明背景覆盖整个屏幕；`pageSheet` 和 `formSheet` 是带系统背景的系统 sheet，下滑时跟随手指（`closeOnSwipe`）。sheet 停在它的 `detents` 上，设了 `grabber` 时带系统抓手；自定义高度需要 iOS 16，iOS 15 上取 medium 和 large 中较近的一档。
 - Android：dialog 铺满窗口，显示应用的弹出层和背景层。返回键首先交给最上层的 dialog，然后才是导航栈和 `BackHandler` 监听器。
 - 桌面平台（macOS、Windows、Linux、GPUI）和 Web：dialog 是覆盖整个窗口的透明层，显示应用的弹出层和背景层。Escape 是一次关闭尝试。
 - `detents`、`detent`、`defaultDetent`、`grabber`、`largestUndimmedDetent` 和 `onDetentChange` 属于 iOS：Android、桌面平台和 Web 没有系统 sheet，会忽略它们（请用 [`Sheet`](./sheet.md)）。

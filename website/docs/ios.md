@@ -7,11 +7,9 @@ group: platforms
 
 # iOS
 
-NSH apps run on iOS 15.0 and later, on devices and in the simulator. They render with UIKit views and lay out text
-with CoreText. Whole apps run and package as on the other platforms.
-
-An existing iOS app can also show NSH apps in its own views. It can link a Rust root or load TSX, including signed
-packages it downloads. The host app sets the limits and capabilities. On iOS, `os()` is `Os::Ios` (`platform.os` is `"ios"` in TSX) and TSX's `ios={{…}}` props apply.
+NSH apps run on iOS with UIKit views and CoreText text, on devices and in the simulator, from iOS 15.0. Whole apps run
+and package as on the other platforms, and an existing app can show NSH apps in its own views, a Rust root it links
+or TSX it loads, including signed packages it downloads, under limits and capabilities it sets. On iOS, `os()` is `Os::Ios` (`platform.os` is `"ios"` in TSX) and TSX's `ios={{…}}` props apply.
 
 ## Requirements
 
@@ -31,7 +29,7 @@ nsh run App.tsx --target ios                          # a TSX app
 ```
 
 `nsh` uses a booted simulator, or boots the newest iPhone. For a Rust app it builds the app's own runner with your
-crate, installs it and shows its logs in the terminal. A change to the crate's Rust code builds it again and restarts
+crate, installs it and shows its logs in the terminal; a change to the crate's Rust code builds it again and restarts
 the app. For a TSX app it installs the development host and keeps the app up to date as you save, with logs in the
 terminal. `--device` picks a simulator by name or UDID. The simulator is where to check an app
 as an iPhone shows it; [Mac Catalyst](./getting-started.md#mac-catalyst) (`--target catalyst`) is for
@@ -73,14 +71,14 @@ set_foreign_handler(Chats);
 
 `ForeignNotification` carries the request's `id`, the `thread_id` it is grouped in and its `userInfo` as JSON
 (`user_info`). The handler's methods run on the main thread, and `set_foreign_handler` panics elsewhere. There is one
-handler, so the app's crate owns it and passes notifications on to the modules it uses. A later call replaces it.
+handler, so the app's crate owns it and passes notifications on to the modules it uses; a later call replaces it.
 Without a handler, these notifications show as the app's own do and their presses are dropped. Only a press of the
 notification itself is reported, not the actions of its category. An app that embeds NSH and has a notification center
 delegate of its own keeps every notification there. macOS works the same way.
 
 An app that turns on `nsh-extra`'s [`push`](./nshm.md#push) feature has this handler set by that module once the
 standalone app launches, which passes the notifications to `Push.on` and to Rust code through
-`nsh_extra::push::on_event`. The app's crate then listens there, and decides how a notification shows in front with
+`nsh_extra::push::on_event`; the app's crate then listens there, and decides how a notification shows in front with
 `nsh_extra::push::set_foreground_presentation_decider`, rather than setting a handler of its own.
 
 ## Packaging
@@ -90,7 +88,7 @@ nsh package --target ios-simulator --run      # .nsh/out/<Name>.app, installed a
 nsh package --target ios --sign "Apple Distribution: Example Inc (ABCDE12345)" --profile AppStore.mobileprovision
 ```
 
-From a Rust app's directory, the app is the iOS runner built with your crate. A TSX app names its entry
+From a Rust app's directory, the app is the iOS runner built with your crate; a TSX app names its entry
 (`nsh package App.tsx --target ios-simulator --run`).
 
 `--target ios` writes a signed `.ipa` for devices, TestFlight or the App Store. Signing identities, provisioning
@@ -106,7 +104,7 @@ as the subsystem: Console shows a connected iPhone's, and
 A standalone app's `UIApplicationDelegate` belongs to NSH. The Rust code of the app's crate or of an
 [nshm](./nshm.md) receives its launch and remote-notification callbacks with
 `nsh_platform_ios::on_application_event`. Call it once, from the `#[native_module]` entry, which runs on the main
-thread before the app starts. Each call adds another handler, so code that runs the entry again (its `registry()`)
+thread before the app starts; each call adds another handler, so code that runs the entry again (its `registry()`)
 adds it again. The crate depends on `nsh-platform-ios` for iOS only, at the version and from the source of its other
 NSH crates ([Registering from the app's crate](./native-components.md#registering-from-the-apps-crate)):
 
@@ -148,12 +146,12 @@ app links `NativeShell.xcframework`, a framework with a Swift module: you create
 add it anywhere in your view hierarchy and load a TSX app or a signed package into it. Your native screens,
 navigation and the NSH app live side by side in one UIKit hierarchy.
 
-Each view is one independent engine. There are no global singletons, so an app can show several NSH apps at once, for
+Each view is one independent engine; there are no global singletons, so an app can show several NSH apps at once, for
 example one per tab.
 
 <div class="diagram-scroll">
-<img class="diagram diagram-light" src="/diagrams/host-app-light.svg" alt="One host app with two NshAppView regions: each is its own engine with its own thread, VM, limits and capabilities. The host grants capabilities, sets limits and registers native components such as a map.">
-<img class="diagram diagram-dark" src="/diagrams/host-app-dark.svg" alt="One host app with two NshAppView regions: each is its own engine with its own thread, VM, limits and capabilities. The host grants capabilities, sets limits and registers native components such as a map.">
+<img class="diagram diagram-light" src="/diagrams/host-app-light.svg" alt="One host app with two NshAppView regions: each is its own engine with its own thread, VM, limits and capabilities; the host grants capabilities, sets limits and registers native components such as a map.">
+<img class="diagram diagram-dark" src="/diagrams/host-app-dark.svg" alt="One host app with two NshAppView regions: each is its own engine with its own thread, VM, limits and capabilities; the host grants capabilities, sets limits and registers native components such as a map.">
 </div>
 
 ## Embedding a Rust app
@@ -296,7 +294,7 @@ final class EmbedController: UIViewController {
 ```
 
 The view's size is the app's window: NSH lays the app out at the view's bounds and again whenever they change. Loading
-again replaces the running app. The app stops when the view is deallocated.
+again replaces the running app; the app stops when the view is deallocated.
 
 The complete sample, a UIKit app that shows an NSH app below its own native header, is `examples/embed-ios/main.swift`.
 
@@ -379,7 +377,7 @@ app.handle("analytics") { data, _ in analytics.log(data) }
 app.send("conversation.open", ["id": tapped.conversationID])
 ```
 
-Handlers run on the main thread. A call waits for its answer in the app without blocking either side. A reply
+Handlers run on the main thread; a call waits for its answer in the app without blocking either side. A reply
 released unanswered fails the call, and a call of a name with no handler fails at once. Events of names the app does
 not listen to yet are kept until it does, and events sent while no app runs (before `loadBundle`, during a reload) go
 to the next one, so a notification tapped while the app starts still reaches it.
@@ -427,7 +425,7 @@ replaced or removed (`nil`). Desktop and web apps are not embedded, so they have
 
 One app embedded in several branded host apps takes each host's brand: the host gives the tokens its brand changes,
 as a theme file in the format of `nsh.json`'s `"theme"` (shadcn/ui's `cssVars`, values as CSS writes them). They win
-over the app's tokens of the same names. The app's other tokens stay. Give a token its dark-mode value under `dark`
+over the app's tokens of the same names; the app's other tokens stay. Give a token its dark-mode value under `dark`
 (one set only under `light` or `theme` is that color in both modes):
 
 ```swift
@@ -488,7 +486,7 @@ app.limits = NshLimits(memoryMB: 128, callBudget: 1, maxNodes: 50_000)
 
 ## Capabilities
 
-An app declares what it may reach in its `nsh.json`. The embedding app can grant less. A request must be allowed by
+An app declares what it may reach in its `nsh.json`; the embedding app can grant less. A request must be allowed by
 both:
 
 ```swift
@@ -554,7 +552,7 @@ try app.loadBundle(at: bundledURL)
 #endif
 ```
 
-Run `nsh dev App.tsx` on your Mac. The simulator shares the Mac's network, so `127.0.0.1` reaches the server. A
+Run `nsh dev App.tsx` on your Mac. The simulator shares the Mac's network, so `127.0.0.1` reaches the server; a
 device uses the LAN address `nsh dev` prints (`devices on this network: ws://192.168.1.20:8790/ws`). Every save
 updates the app in place, logs appear in the `nsh dev` terminal, and errors show over the app. See
 [Dev server and debugging](./dev-server-and-debugging.md).
@@ -566,7 +564,7 @@ updates the app in place, logs appear in the `nsh dev` terminal, and errors show
 ## Notes
 
 - **Threads.** `NshAppView` is main-actor isolated. `NshTrust`, `NshPackage` and `NshComponentContext` are thread-safe.
-  The JS engine runs on its own thread. The main thread never waits for it.
+  The JS engine runs on its own thread; the main thread never waits for it.
 - **Status bar.** The embedded app's pages and dialogs (`statusBar`) change what `NshAppView.preferredStatusBarStyle` and friends return;
   the hosting view controller must forward them, as in the example above.
 - **Orientations.** A page's `supportedOrientations` changes what `NshAppView.supportedInterfaceOrientations` returns;

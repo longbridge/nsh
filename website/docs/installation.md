@@ -7,9 +7,7 @@ group: start
 
 # Installation
 
-You use NSH through one command, `nsh`. It builds apps written in TSX or Rust, runs them on every platform, serves
-TSX to development hosts with hot updates, and packages installable apps. Install a prebuilt release, or build `nsh`
-from a checkout of the repository.
+Everything NSH does goes through one command, `nsh`. It builds apps written in TSX or Rust, runs them on every platform, serves TSX to development hosts with hot updates, and packages installable apps. You can use it from a prebuilt distribution or build it from a checkout of the repository.
 
 TSX apps need `nsh` alone. Apps with Rust in them (their own crates in `ext/`, a Rust nshm, or an app written in Rust) also need a Rust toolchain ([below](#for-apps-written-in-rust)). On top of that, each platform needs its own tools:
 
@@ -34,7 +32,7 @@ Each [GitHub release](https://github.com/longbridge/nsh/releases) carries the pr
 curl -fsSL https://nsh.dev/install.sh | sh
 ```
 
-It installs the distribution to `~/.nsh` and links `~/.local/bin/nsh` to it. Running it again updates it. `NSH_VERSION=v0.1.0` pins a release, `NSH_INSTALL_DIR` picks another directory.
+It installs the distribution to `~/.nsh` and links `~/.local/bin/nsh` to it; running it again updates it. `NSH_VERSION=v0.1.0` pins a release, `NSH_INSTALL_DIR` picks another directory.
 
 **Windows**, in PowerShell:
 
@@ -62,10 +60,10 @@ scoop install https://github.com/longbridge/nsh/releases/latest/download/nsh.jso
 mise use -g github:longbridge/nsh
 ```
 
-The archives (`nsh-macos-arm64.tar.gz`, `nsh-macos-x86_64.tar.gz`, `nsh-linux-x86_64.tar.gz`, `nsh-linux-arm64.tar.gz`, `nsh-windows-x86_64.zip`, `nsh-windows-arm64.zip`, each with a `.sha256`) carry no version in their names, so `https://github.com/longbridge/nsh/releases/latest/download/<archive>` always fetches the latest. Each holds the CLI and the runtime of its own platform. The runtimes of the other platforms are [components](#components), added when they are first needed. The embedding SDKs are released alone, for native apps that embed NSH: `nsh-embed-ios.zip` and `nsh-embed-android.zip`.
+The archives (`nsh-macos-arm64.tar.gz`, `nsh-macos-x86_64.tar.gz`, `nsh-linux-x86_64.tar.gz`, `nsh-linux-arm64.tar.gz`, `nsh-windows-x86_64.zip`, `nsh-windows-arm64.zip`, each with a `.sha256`) carry no version in their names, so `https://github.com/longbridge/nsh/releases/latest/download/<archive>` always fetches the latest. Each holds the CLI and the runtime of its own platform; the runtimes of the other platforms are [components](#components), added when they are first needed. The embedding SDKs are released alone, for native apps that embed NSH: `nsh-embed-ios.zip` and `nsh-embed-android.zip`.
 
 > [!NOTE]
-> The binaries are not signed yet. macOS quarantines files downloaded by a browser. The install script, Homebrew and mise download with `curl` and are not affected. For a browser download, run `xattr -dr com.apple.quarantine <dir>`. The Linux runtime needs glibc 2.39 and GTK 4.14 or newer (Ubuntu 24.04 and later). Homebrew and Scoop install the Apple silicon, x86_64 Linux and x86_64 Windows builds. Use the install script on the others.
+> The binaries are not signed yet. macOS quarantines files downloaded by a browser; the install script, Homebrew and mise download with `curl` and are not affected, otherwise run `xattr -dr com.apple.quarantine <dir>`. The Linux runtime needs glibc 2.39 and GTK 4.14 or newer (Ubuntu 24.04 and later). Homebrew and Scoop install the Apple silicon, x86_64 Linux and x86_64 Windows builds; use the install script on the others.
 
 ## Components
 
@@ -153,7 +151,7 @@ export PATH="$PWD/dist/nsh/bin:$PATH"
 nsh --version
 ```
 
-The distribution is made with `cargo xtask dist` in a checkout (below). The `nsh` binary it contains is built for that machine. On a Mac with Xcode it includes the iOS and macOS runtimes (Apple Silicon). On Linux it includes the Linux runtime instead, built for that machine. On Windows it includes the Windows runtime, with `bin\nsh.exe`. Each also includes the [GPUI](./gpui.md) and terminal development hosts, built for that machine. All include the Android runtime (on Windows only when the Android SDK is found).
+The distribution is made with `cargo xtask dist` in a checkout (below). The `nsh` binary it contains is built for that machine. On a Mac with Xcode it includes the iOS and macOS runtimes (Apple Silicon); on Linux it includes the Linux runtime instead, built for that machine; on Windows the Windows runtime, with `bin\nsh.exe`. Each also includes the [GPUI](./gpui.md) and terminal development hosts, built for that machine. All include the Android runtime (on Windows only when the Android SDK is found).
 
 ## Installing the nightly build
 
@@ -173,7 +171,7 @@ $env:NSH_VERSION = 'nightly'; irm https://nsh.dev/install.ps1 | iex
 
 `nsh -V` then shows the commit and the channel, such as `nsh 0.4.0 (abcdef0 nightly)`.
 
-Apps written in Rust build their runner with NSH's crates on crates.io at the CLI's version, the last release's. For those apps, use a release or the source.
+Apps written in Rust build their runner with NSH's crates on crates.io at the CLI's version, the last release's; for those apps, use a release or the source.
 
 ## Updating
 
@@ -193,7 +191,7 @@ With Git, Rust and the [platform tools](#platform-tools), on macOS and Linux:
 curl -fsSL https://nsh.dev/install.sh | sh -s -- --source
 ```
 
-It keeps the checkout in `~/.nsh/source`, builds the CLI and links it into `~/.local/bin`. Run it again to update. To work on NSH itself, clone the repository and build the CLI there. It builds the desktop and web runtimes it runs on when they are missing:
+It keeps the checkout in `~/.nsh/source`, builds the CLI and links it into `~/.local/bin`; run it again to update. To work on NSH itself, clone the repository and build the CLI there; it builds the desktop and web runtimes it runs on when they are missing:
 
 The CLI is then `./target/debug/nsh`:
 
@@ -234,7 +232,7 @@ See [macOS](./macos.md).
 ### Linux
 
 - **GTK 4.14** or later, with their development packages and clang to build the runtime: `libgtk-4-dev clang` (Debian, Ubuntu 24.04 or later), `gtk4 clang` (Arch), `gtk4-devel clang` (Fedora).
-- **WebKitGTK 6.0** (2.42 or later) for web views and download decisions: `libwebkitgtk-6.0-dev` (Debian, Ubuntu), `webkitgtk-6.0` (Arch), `webkitgtk6.0-devel` (Fedora) to build the runtime. Apps then need it where they run. Without it, `cargo xtask dist` builds the runtime with placeholders for web views.
+- **WebKitGTK 6.0** (2.42 or later) for web views and download decisions: `libwebkitgtk-6.0-dev` (Debian, Ubuntu), `webkitgtk-6.0` (Arch), `webkitgtk6.0-devel` (Fedora) to build the runtime; apps then need it where they run. Without it, `cargo xtask dist` builds the runtime with placeholders for web views.
 - **GStreamer** 1.14 or later, for video and sound: `libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev` (Debian, Ubuntu), `gstreamer gst-plugins-base` (Arch), `gstreamer1-devel gstreamer1-plugins-base-devel` (Fedora) to build the runtime, and the plug-ins for the video and audio formats apps play. Its development packages are for `Sound` (the feature `sound`): a Rust app without it builds with GTK alone.
 
 See [Linux](./linux.md).
@@ -264,7 +262,7 @@ Building the Android runtime from a checkout (`cargo xtask android`) additionall
 | `nsh keygen`, `certify`, `publish`, `verify`, `revoke` | Yes | Yes | Yes |
 | `nsh run --target catalyst` (Mac Catalyst) | Yes | No | No |
 
-On Linux, build the CLI and the Android runtime from a checkout (`cargo build -p nsh-cli` and `cargo xtask android --dev`). The NDK's Linux toolchain is used automatically. On Windows the NDK's Windows toolchain is used the same way, and `cargo xtask dist` includes the Android runtime when it finds the Android SDK.
+On Linux, build the CLI and the Android runtime from a checkout (`cargo build -p nsh-cli` and `cargo xtask android --dev`); the NDK's Linux toolchain is used automatically. On Windows the NDK's Windows toolchain is used the same way, and `cargo xtask dist` includes the Android runtime when it finds the Android SDK.
 
 ## Editor setup
 

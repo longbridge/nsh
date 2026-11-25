@@ -9,9 +9,9 @@ demo: el-editor
 
 `Editor` is a code editor: syntax highlighting for more than fifty languages, line numbers, several carets, folding,
 soft wrap, find and replace, diagnostics and decorations, with the keys of code editors (moving and duplicating lines,
-comments, indentation, brackets and quotes that close as they are typed). It holds files of any length. Only the rows
-in view are made, and highlighting updates line by line after each edit, so a long file scrolls and types as fast as
-a short one. Typing goes through the platform's input, so input methods (pinyin, kana, dead keys) and soft keyboards work as
+comments, indentation, brackets and quotes that close as they are typed). It holds files of any length: only the rows
+in view are made, and highlighting follows each edit line by line, so a long file scrolls and types as a short one
+does. Typing goes through the platform's input, so input methods (pinyin, kana, dead keys) and soft keyboards work as
 they do in any text field.
 
 The editor owns behavior and comes with a look of its own built from the theme's tokens: the theme's `font-mono` at
@@ -102,7 +102,7 @@ the tokens, moves them with the text as it is edited and asks again for the line
 highlighter. `language` finds the registered languages first, by name, alias, extension or path, in editors and diff
 views alike.
 
-Each engine keeps its own languages. A Rust app registers them in its root before it mounts its editors. An app's
+Each engine keeps its own languages. A Rust app registers them in its root before it mounts its editors; an app's
 crate registers them for the TSX app in the setup of its UI set, which every engine running the app calls first.
 
 ```rust
@@ -133,16 +133,16 @@ The editor works as code editors do:
 
 - **Several carets.** Alt-click (Option-click) adds a caret, `mod+d` selects the next occurrence of the selection,
   `mod+shift+l` all of them, and the add-caret keys add one on the row above or below. Typing, deleting, moving and
-  every command act at each one. Escape goes back to one. `undoSelection` (`cmd+u`, `ctrl+u`) goes back to the
-  selections before the last move. The carets blink while the editor has the focus. On Linux they stay shown after
+  every command act at each one; Escape goes back to one. `undoSelection` (`cmd+u`, `ctrl+u`) goes back to the
+  selections before the last move. The carets blink while the editor has the focus; on Linux they stay shown after
   ten seconds with no edit, caret move or focus change (GTK's default), until the next one.
 - **Selections grow** by units with `expandSelection` (`ctrl+shift+cmd+right`, `shift+alt+right`): the word, a
-  string's contents and the string, a bracket pair's contents and the pair, the line, the text. `shrinkSelection`
+  string's contents and the string, a bracket pair's contents and the pair, the line, the text; `shrinkSelection`
   goes back the same way. `splitSelectionIntoLines` (`shift+alt+i`) turns a selection over several lines into one
   selection per line.
 - **Indentation.** A new line keeps the line's indentation and adds a level after an opening bracket (Python's `:`,
-  Ruby's `do`, ...). Enter between a pair of brackets puts the closing one on its own line. Tab and Shift+Tab indent
-  and outdent the selected lines. Backspace in leading spaces goes back to the previous indent stop. `autoIndent` turns
+  Ruby's `do`, ...); Enter between a pair of brackets puts the closing one on its own line. Tab and Shift+Tab indent
+  and outdent the selected lines; Backspace in leading spaces goes back to the previous indent stop. `autoIndent` turns
   this off.
 - **Brackets and quotes** close as they are typed, wrap a selection, and step over the closing one when it is typed
   again (`autoClose`). The bracket at the caret and its partner are outlined.
@@ -162,7 +162,7 @@ The editor works as code editors do:
 
 ## Keys
 
-The editor's keys work while it has the focus. Other inputs keep theirs. `mod` is Command on macOS and iOS and Control
+The editor's keys work while it has the focus; other inputs keep theirs. `mod` is Command on macOS and iOS and Control
 elsewhere (`keymap`'s keystrokes).
 
 | Keys (macOS) | Keys (Windows, Linux) | Command |
@@ -230,7 +230,7 @@ app bound to it. To take such a key, as a query editor running its text with Mod
 `search` is what to find: `{ query, caseSensitive?, wholeWord?, regex?, inSelection? }`. Its matches are highlighted, the one the
 selection is on more strongly, and `onSearchChange` reports `{ result }`, a `{ count, current, error }`: how many matches, which one
 the selection is on (from 0), and why a regular expression is not valid. `findNext` and `findPrevious` select the next
-and previous match, wrapping around. `replace(text)` replaces the current match and selects the next one, and
+and previous match, wrapping around; `replace(text)` replaces the current match and selects the next one, and
 `replaceAll(text)` replaces every match as one edit and returns `{ count }`, how many. A regular expression's replacement refers to
 its groups as `$1` and `${name}`.
 
@@ -282,14 +282,14 @@ function Find(props: { source: string; onChange: (value: string) => void }) {
 `diagnostics` marks the problems a language server or a linter reports: a thin wavy underline under each range in its
 severity's color (`error`, `warning`, `info`, `hint`). Positions are lines and UTF-16 columns from 0, as a language server's, so
 its diagnostics pass through as they come. The marks stay on their text while the user types, until the app passes
-new ones. Showing the messages (a list, a hover card at the line) is the app's.
+new ones; showing the messages (a list, a hover card at the line) is the app's.
 
 A diagnostic carries the rest of a language server's `Diagnostic` too. Its `tags` draw its text as language clients do:
 `unnecessary` code (an unused variable, unreachable code) is faded and `deprecated` code struck through, in the
-`unnecessaryText` and `deprecatedText` parts. A hint with a tag shows in its text alone. `codeDescription.href` is the
+`unnecessaryText` and `deprecatedText` parts; a hint with a tag shows in its text alone. `codeDescription.href` is the
 page that describes its code (a lint rule's), and `relatedInformation` lists the other places that tell about it
 (`{ location: { uri?, range }, message }`): the hover hands both to the app, which shows them in its hover card and
-opens the page. A language server sends tags as numbers (`1`, `2`). The editor takes their names.
+opens the page. A language server sends tags as numbers (`1`, `2`); the editor takes their names.
 
 ```tsx
 const problems = signal<EditorDiagnostic[]>([]);
@@ -315,8 +315,8 @@ async function lint(text: string) {
 ## Decorations
 
 `decorations` style ranges the app chooses: semantic highlighting from a language server, the statement being run, the
-lines a review changed. A decoration's `class` and `style` style its text. `lineClass` and `lineStyle` style the rows
-of its lines, behind the text. Its `label` shows a text in its range's place ([Labels](#labels)). Like diagnostics,
+lines a review changed. A decoration's `class` and `style` style its text; `lineClass` and `lineStyle` style the rows
+of its lines, behind the text; its `label` shows a text in its range's place ([Labels](#labels)). Like diagnostics,
 they stay on their text through edits until the app sets new ones. While an input method composes, its text shows in
 place in the row, which keeps its decorations: the text after it moves aside with its own, and the composed text is
 styled as it will be once committed (inside a decoration that continues on both sides of the caret, not one that
@@ -376,7 +376,7 @@ least 6 points tall and takes a `lane` of the ruler: `left`, `center` (the defau
 while a decoration has a mark there.
 
 Each mark takes the app's `class` and `style`, drawn in the foreground color without them. Both follow edits as the
-decoration's range does. An edit that deletes a marked range leaves an empty one where it was.
+decoration's range does; an edit that deletes a marked range leaves an empty one where it was.
 
 ```tsx
 <Editor
@@ -397,7 +397,7 @@ decoration's range does. An edit that deletes a marked range leaves an empty one
 A decoration's `token` colors its text as the built-in highlighting colors that kind of token (`comment`, `keyword`,
 `string`, `number`, `title`, `attr`, `built`, `deletion`), in place of what the built-in highlighter found there: the
 app's own highlighter (a language server's semantic tokens, a parser of its own) maps its tokens onto these and gets
-the editor's colors in light and dark. The innermost decoration's token wins. `class` and `style` apply over it.
+the editor's colors in light and dark. The innermost decoration's token wins; `class` and `style` apply over it.
 `highlighting={false}` turns the built-in highlighter off, so the app's tokens color the text alone, while `language`
 still decides comments, brackets and indentation.
 
@@ -501,7 +501,7 @@ const breakpoints = signal<number[]>([]);
 ## Language features
 
 Suggestions, hover information, go to definition and code actions come from the app's language server. The editor
-draws the completion list, the inline completion and the definition link itself, with their keys. For the rest it
+draws the completion list, the inline completion and the definition link itself, with their keys; for the rest it
 gives the app the moments and the places, and the app draws its popups (an [`Overlay`](./overlay.md) anchored to a
 `pageBounds`).
 
@@ -517,7 +517,7 @@ it near the bottom of the window):
   trigger `"invoked"`.
 - The app answers with `presentCompletions(event.id, items)`. Each item is a language server's `CompletionItem` shape:
   `label`, and optionally `kind` (`"function"`, `"variable"`, `"class"`, ...), `detail`, `documentation`,
-  `insertText`, `filterText`, `sortText` and `range`. The answer to the latest request shows. An earlier one, or one
+  `insertText`, `filterText`, `sortText` and `range`. The answer to the latest request shows; an earlier one, or one
   for a word the caret has left, is set aside.
 - Typing on filters the list in place: the query matches each item's `filterText` (else its label) as letters in
   order, in any case, words starting with the query first, then the closest matches, then by `sortText`. The matched
@@ -599,8 +599,8 @@ editors:
   `offset`, and the word's `range`. Answer with `presentDefinitionLink(event.id, range)` when the language server
   finds a definition: the range is underlined (the `definitionLink` part) and the pointer becomes a hand over it. The
   link goes when Mod is released, the mouse leaves it or the text changes or scrolls, or with `hideDefinitionLink()`.
-  The answer to the latest request shows. An earlier one is set aside.
-- A Mod-click on a word asks with trigger `"press"`. On the link the caret stays where it is. F12 (`goToDefinition`,
+  The answer to the latest request shows; an earlier one is set aside.
+- A Mod-click on a word asks with trigger `"press"`; on the link the caret stays where it is. F12 (`goToDefinition`,
   `run("goToDefinition")`) asks for the word at the caret, trigger `"key"`. The app goes to the definition:
   `revealPosition` and `setSelections` for one in the same text, its own navigation for another file.
 - Mod+. (`showCodeActions`, `run("showCodeActions")`) reports `onCodeActionRequest({ range, position, bounds })`: the
@@ -640,7 +640,7 @@ default), not at all (`false`) or a number of rows. As the caret moves, `cursorS
 around it. Dragging a selection past the editor's edges scrolls on, faster the farther out the pointer goes.
 
 In a container with rounded corners, or under bars floating over the editor, `scrollbarInset` keeps the scroll bars
-that far from the editor's edges, as a [scroll view's](./scroll.md) does. The text still scrolls under them. The
+that far from the editor's edges, as a [scroll view's](./scroll.md) does; the text still scrolls under them. The
 vertical bar and the overview ruler keep within its top, bottom and right, the horizontal bar (without `softWrap`)
 within its left, right and bottom.
 
@@ -666,7 +666,7 @@ line at each of its columns (the `ruler` part), as guides of a line's length.
 
 `onScroll({ offset, contentSize, size })` reports where the text is scrolled, with the keys of a
 [`Scroll`](./scroll.md)'s: `offset` is `scrollOffset()`, `contentSize` what the text scrolls over and `size` the
-viewport. Without `softWrap` the content is as wide as the viewport plus how far the text scrolls sideways. Wrapped, it
+viewport. Without `softWrap` the content is as wide as the viewport plus how far the text scrolls sideways; wrapped, it
 is as wide as the viewport and `offset.x` is 0. It fires once the editor is laid out and again when one of them
 changes: a scroll, a resize, an edit or a fold that changes the content's size. An editor under a title draws a line
 or a fade at its top edge once the text scrolls under it:
@@ -775,8 +775,8 @@ let editor!: EditorRef;
 ## Styling the parts
 
 `class` and `style` style the editor's box. `classes` takes Tailwind classes by part and `styles` inline styles by
-part. A part's classes come after its own default styles, so they win, and its `styles` win over its classes. The font
-is set with `fontFamily`, `fontSize` and `lineHeight`, which the editor measures its text in. Like every text, it grows
+part; a part's classes come after its own default styles, so they win, and its `styles` win over its classes. The font
+is set with `fontFamily`, `fontSize` and `lineHeight`, which the editor measures its text in; like every text, it grows
 with the user's text size (`fontScale()`), and the rows grow with it.
 
 ```tsx
@@ -904,7 +904,7 @@ with the user's text size (`fontScale()`), and the rows grow with it.
 
 ## Accessibility
 
-Screen readers call the editor by its `accessibilityLabel`. Its focus is a text input's, so the platform's text
+Screen readers call the editor by its `accessibilityLabel`; its focus is a text input's, so the platform's text
 services (input methods, dictation, soft keyboards) work in it.
 
 ## Related

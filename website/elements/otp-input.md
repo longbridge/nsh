@@ -7,17 +7,13 @@ demo: el-otp-input
 
 # OtpInput
 
-A one-time-code input takes a fixed number of digits and shows them in cells. Typical codes come from a text message
-or an authenticator app.
-
-One native text field sits over the cells, transparent, and takes the keyboard. Typing, input methods, paste, the
-number pad and the system's code autofill (iOS's "From Messages", Android's SMS suggestions) are therefore the
-platform's own. Screen readers find one text field. Only digits go in, up to `length`. Backspace removes the last one,
-and `onComplete` fires when the code is full.
-
-Your app owns the look. An `OtpInput` has no colors, sizes, borders or label of its own. Its parts are the cells, the
-groups they are split into and a caret, and you style each one.
-
+A one-time-code input takes a fixed number of digits (a verification code from a text message, an authenticator's
+code) and shows them in cells. It owns the behavior: one native text field, transparent and over the cells, takes the
+keyboard, so typing, input methods, paste, the number pad and the system's code autofill (iOS's "From Messages",
+Android's SMS suggestions) are the platform's own, and screen readers find one text field. Digits only go in, up to
+`length`; Backspace removes the last one, and `onComplete` tells when the code is full. The look is the app's: an
+`OtpInput` has no colors, sizes, borders or label of its own. Its parts are the cells, the groups they are split into
+and a caret, and the app styles each.
 
 ```tsx tabs
 import { mount, signal } from "nsh";

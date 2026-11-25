@@ -7,15 +7,9 @@ group: ui
 
 # 导航
 
-`nsh_base`（TSX：`nsh/base`）提供原生的导航栈和原生的对话框。导航栈（Rust 中是 `nav_stack()`，TSX 中是 `NavStack`）为每个路由显示一个页面，用户可以返回上一页。
+`nsh_base`（TSX：`nsh/base`）提供原生的导航栈和原生的对话框。导航栈（Rust 中是 `nav_stack()`，TSX 中是 `NavStack`）在 iOS 上是 UINavigationController，带有它的标题栏、侧滑返回和大标题；在 Android 上是带工具栏、支持预测性返回的页面栈；在桌面和 Web 上，每个页面显示应用自己绘制的标题栏。路由保存在你的状态中；栈把每个路由渲染为一个页面，只要路由还在栈里，页面就保持挂载，状态也随之保留。
 
-- iOS 上是 UINavigationController，带标题栏、侧滑返回和大标题。
-- Android 上是带工具栏、支持预测性返回的页面栈。
-- 桌面和 Web 上，每个页面显示应用自己绘制的标题栏。
-
-路由存放在你的状态里，栈把每个路由渲染成一个页面。路由还在栈里，页面就一直挂载，状态也保留。
-
-在 Rust 中，在 prelude 旁按名字导入这些构建函数（`use nsh_base::{dialog, nav_page, nav_stack};`；系统提示框是 `nsh_base::alert_dialog()`）。路由是一个 signal。栈的子元素就是页面，每个路由一个，按 key 保持（`each`）。加入页面即压入，移除即弹出。在 TSX 中，`createNavStack` 保存路由，`NavStack` 渲染它们。
+在 Rust 中，在 prelude 旁按名字导入这些构建函数（`use nsh_base::{dialog, nav_page, nav_stack};`；系统提示框是 `nsh_base::alert_dialog()`）。路由是一个 signal，栈的子元素就是它的页面，每个路由一个，按 key 保持（`each`）：放入页面即压入，移出即弹出。在 TSX 中，`createNavStack` 保存路由，`NavStack` 渲染它们。
 
 ```tsx tabs
 import { mount, Scroll, Text, View } from "nsh";
@@ -163,7 +157,7 @@ pub fn App() -> impl IntoElement {
 
 ## 栈的状态
 
-在 Rust 中，路由就是你自己的 signal（`signal(vec![..])`，或整个应用都能访问的 `global::<Routes>()`），压入、弹出和替换就是更新它：`routes.update(|r| r.push(route))`、`r.pop()`、`r.truncate(1)`、`routes.set(..)`。每个页面的 key（这里是路由的 `Debug` 文本）告诉栈哪个页面是哪个，所以路由还在的页面会保留状态。可能重复的路由要给一个唯一的 key。处理每个页面的 `on_dismiss`：用户以原生方式返回了，这个路由（连同它上面的路由）要从你的 signal 中移除。
+在 Rust 中，路由就是你自己的 signal（`signal(vec![..])`，或整个应用都能访问的 `global::<Routes>()`），压入、弹出和替换就是更新它：`routes.update(|r| r.push(route))`、`r.pop()`、`r.truncate(1)`、`routes.set(..)`。每个页面的 key（这里是路由的 `Debug` 文本）告诉栈哪个页面是哪个，所以路由保留的页面会保留状态；可能重复的路由要给一个唯一的 key。处理每个页面的 `on_dismiss`：用户以原生方式返回了，这个路由（连同它上面的路由）要从你的 signal 中移除。
 
 在 TSX 中，`createNavStack(routes)` 用一个从底到顶的路由数组创建栈的状态。路由可以是任何值（字符串、对象，或者像上面那样的可辨识联合类型），每次 push 都是一个独立的页面，同一个路由 push 两次也一样。状态只创建一次，放在模块顶层或根组件中，在需要导航的页面里导入它。
 
@@ -179,7 +173,7 @@ pub fn App() -> impl IntoElement {
 
 要一开始就处在多层深处，多传几个路由：`createNavStack<Route>([{ name: "inbox" }, { name: "message", id: 3 }])`。
 
-当用户以原生方式离开页面时（标题栏的返回按钮、iOS 侧滑返回、Android 返回键或返回手势、桌面的返回键和鼠标返回键、浏览器的返回按钮），TSX 的栈会自动从状态中移除对应路由，所以 `routes()` 总是与屏幕上的内容一致。Rust 的页面像上面那样用 `on_dismiss` 报告。
+当用户以原生方式离开页面时（标题栏的返回按钮、iOS 侧滑返回、Android 返回键或返回手势、桌面的返回键和鼠标返回键、浏览器的返回按钮），TSX 的栈会自动从状态中移除对应路由，所以 `routes()` 总是与屏幕上的内容一致；Rust 的页面像上面那样用 `on_dismiss` 报告。
 
 路由携带页面需要的数据。gallery 示例应用推送的路由直接保存创建页面的函数，页面很多时路由类型依然很小：
 
@@ -224,7 +218,7 @@ pub fn routes() -> Signal<Routes> {
 
 ## NavStack
 
-在 Rust 中，`nav_stack()` 是一个视图，它的子元素就是页面，从底到顶排列。样式和普通视图一样设置（`.flex_1()`）。在 TSX 中：
+在 Rust 中，`nav_stack()` 是一个视图，它的子元素就是它的页面，从底到顶；像任何视图一样设置样式（`.flex_1()`）。在 TSX 中：
 
 | 属性 | 类型 | 说明 |
 |---|---|---|
@@ -233,7 +227,7 @@ pub fn routes() -> Signal<Routes> {
 | `style`、`class` | | 栈自身的样式（通常是 `flex: 1`）。 |
 | `onChange` | `({ routes }) => void` | 路由变化了：应用压入、弹出、替换或设置了路由，或用户从某个页面返回。它在变化渲染之后运行，栈最初的路由不触发它。 |
 
-每个路由压入时，渲染函数运行一次。`route` 是原始值，`index()` 是它当前的位置。返回值成为页面内容。返回 `<NavPage>` 可以设置标题栏；返回其他内容时会自动包在一个使用默认选项的页面里。
+渲染函数在每个路由被压入时运行一次；`route` 是原始值，`index()` 是它当前的位置。返回值成为页面内容。返回 `<NavPage>` 可以设置标题栏；返回其他内容时会自动包在一个使用默认选项的页面里。
 
 只要路由还在栈中，页面就保持挂载：返回时，上一个页面与离开时完全相同，包括滚动位置、输入框和 signal。路由离开栈时，页面的 [`cleanup`](./reactivity.md) 处理函数会运行。
 
@@ -277,7 +271,7 @@ pub fn routes() -> Signal<Routes> {
 | `onDismiss` | `() => void` | | 用户弹出了页面；路由已被移除。 |
 | `style`、`class` | | | 页面的内容视图。 |
 
-在 iOS 上，多个系统尾部按钮（可带原生菜单）可以代替 `headerRight`。每个按钮和每个菜单项各自带处理器（`onPress` / `onSelect`）。平台把它们报告为根上的菜单事件，与桌面菜单同一条路径：
+在 iOS 上，多个系统尾部按钮（可带原生菜单）可以代替 `headerRight`。每个按钮和每个菜单项各自带处理器（`onPress` / `onSelect`）；平台把它们报告为根上的菜单事件，与桌面菜单同一条路径：
 
 ```tsx
 <NavPage
@@ -671,14 +665,14 @@ pub fn editor() -> impl IntoElement {
 }
 ```
 
-在 effect 中创建的监听器一直有效，直到 effect 再次运行或组件卸载。在 TSX 中，调用 `BackHandler.on` 返回的函数也会停止它。在 TSX 中，`BackHandler.exitApp()` 退出应用。iOS 上也可以导入 `nsh/mobile`，`BackHandler` 的调用会立即返回，所以同一份代码可以在两个平台上运行。见[平台特定代码](./platform-specific.md)。
+在 effect 中创建的监听器一直有效，直到 effect 再次运行或它的组件消失；在 TSX 中，调用 `BackHandler.on` 返回的函数也会停止它。在 TSX 中，`BackHandler.exitApp()` 退出应用；在 iOS 上也可以导入 `nsh/mobile`，`BackHandler` 的调用会立即返回，所以同一份代码可以在两个平台上运行。见[平台特定代码](./platform-specific.md)。
 
 ### 跟随返回手势
 
 在 Android 14 及更高版本上，返回手势会在手指移动时报告进度（预测性返回）。应用自己移动的视图，例如抽屉或底部面板，可以跟随它：Rust
 中用 `on_back_progress`，TSX 中用 `BackHandler.on("progress", listener)`。每一步带有 `phase`（`start`、`move`、`end`、
 `cancel`）、从 0 到 1 的 `progress`，以及滑动开始的屏幕边缘 `edge`（`left` 或 `right`）。`end` 之后紧接着是返回操作，你的返回监听器像上面那样收到它；
-`cancel` 之后把视图放回原处。注册了进度监听器时，导航栈把手势交给应用，不再预览弹出。对话框接管的手势不会报告。和返回监听器一样，只在视图打开时监听：
+`cancel` 之后把视图放回原处。注册了进度监听器时，导航栈把手势交给应用，不再预览弹出；对话框接管的手势不会报告。和返回监听器一样，只在视图打开时监听：
 
 ```tsx tabs
 import { createAnimatedValue, effect, type Signal } from "nsh";
@@ -733,7 +727,7 @@ pub fn drawer(open: Signal<bool>) -> impl IntoElement {
 
 ## 标签页与其他布局
 
-标签栏是应用自己的界面，用基础元素绘制：一排可按压的视图加一个保存当前标签的 signal。用 [`when` / `<If>`](../elements/control-flow.md)（或 TSX 中的函数子元素）渲染选中标签的内容。要在切换时保留每个标签的状态，给每个标签一个独立的栈和路由，并让它们都保持挂载，用 `display: none` 隐藏未选中的标签。
+标签栏是应用自己的界面，用基础元素绘制：一排可按压的视图加一个保存当前标签的 signal；用 [`when` / `<If>`](../elements/control-flow.md)（或 TSX 中的函数子元素）渲染选中标签的内容。要在切换时保留每个标签的状态，给每个标签一个独立的栈和路由，并让它们都保持挂载，用 `display: none` 隐藏未选中的标签。
 
 由多个栈组成的分栏，比如 iPad 上的“邮件”或“设置”那样把侧边栏、列表和详情并排显示，使用 [`SplitView`](../elements/split-view.md)：每一栏都是一个独立的 `NavStack`，在 iOS 和 iPadOS 上是 `UISplitViewController`，窗口紧凑时一次只显示一栏。
 

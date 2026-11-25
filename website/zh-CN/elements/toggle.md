@@ -7,7 +7,7 @@ demo: el-toggle
 
 # Toggle
 
-开关按钮是一个保持开或关的按钮：文字工具栏里的加粗、收藏的星标、一个视图选项。`Toggle` 负责行为：按压、键盘激活、禁用状态，以及给屏幕阅读器的按钮角色和按下状态，读屏时会播报为开关按钮。包在几个开关按钮外面的 `ToggleGroup` 是一个工具栏：屏幕阅读器把它当作一个整体播报，键盘一站就进入它，再用方向键在其中的开关按钮之间移动。外观由应用决定：开关按钮没有自己的颜色、尺寸、图标或文字。它的子元素是应用自己的图标或标签，开关按钮上的 `aria-pressed:` 类，以及它里面元素上的 `group-aria-pressed:` 类，跟随它的状态。
+开关按钮是一个保持开或关的按钮：文字工具栏里的加粗、收藏的星标、一个视图选项。`Toggle` 负责一个开关按钮的行为：按压、键盘激活、禁用状态，以及屏幕阅读器读到的按钮角色和它的按下状态，屏幕阅读器把它播报为开关按钮。包在几个开关按钮外面的 `ToggleGroup` 是一个工具栏：屏幕阅读器把它当作一个整体播报，键盘一站就进入它，再用方向键在其中的开关按钮之间移动。外观由应用决定：开关按钮没有自己的颜色、尺寸、图标或文字。它的子元素是应用自己的图标或标签，开关按钮上的 `aria-pressed:` 类，以及它里面元素上的 `group-aria-pressed:` 类，跟随它的状态。
 
 ```tsx tabs
 import { mount, signal, Text } from "nsh";
@@ -121,7 +121,7 @@ fn formatting() -> impl IntoElement {
 | 开关按钮 | 组里，或任何地方 | `Toggle` 的 `class`、`style` | `aria-pressed:`、`disabled:`、`active:`、`hover:`、`focus:`（或 `pressedStyle`、`disabledStyle` ……） |
 | 图标或标签 | 开关按钮里 | 它自己的元素（`children`） | 开关按钮的 `class` 带 `group` 时的 `group-aria-pressed:`、`group-disabled:` 及其他 `group-*:` 变体 |
 
-`aria-pressed:` 是开关按钮处于开。`active:` 是正在进行的按压，不论开或关。用开关按钮自己的表面显示它已按下，在浅色和深色主题下都要和悬停明显不同：更深的填充加一道边、更醒目的图标或文字（见[设计指南](../docs/design-guides.md)的交互状态一节）。
+`aria-pressed:` 是开关按钮处于开；`active:` 是正在进行的按压，不论开或关。用开关按钮自己的表面显示它已按下，在浅色和深色主题下都要和悬停明显不同：更深的填充加一道边、更醒目的图标或文字（见[设计指南](../docs/design-guides.md)的交互状态一节）。
 
 ## 分段
 
@@ -193,7 +193,7 @@ fn formatting() -> impl IntoElement {
 | Home、End | 把焦点移到第一个或最后一个开关按钮。 |
 | Space、Return | 按下获得焦点的开关按钮。 |
 
-方向键跳过禁用的开关按钮，且不按下任何东西：开关按钮只在被按压时改变。两组方向键都能移动，不论这一组的布局如何，布局是应用的类。在从右到左的布局里，Left 和 Right 互换：Left 移到下一个开关按钮，Right 移到上一个。Up、Down、Home 和 End 不变。`focus-visible:` 样式显示焦点在哪里。`ToggleGroup` 之外的 `Toggle` 自己占一站。
+方向键跳过禁用的开关按钮，且不按下任何东西：开关按钮只在被按压时改变。两组方向键都能移动，不论这一组的布局如何，布局是应用的类。在从右到左的布局里，Left 和 Right 互换：Left 移到下一个开关按钮，Right 移到上一个；Up、Down、Home 和 End 不变。`focus-visible:` 样式显示焦点在哪里。`ToggleGroup` 之外的 `Toggle` 自己占一站。
 
 ## 平台说明
 

@@ -29,10 +29,10 @@ nsh package --target ios --sign "Apple Development: Jane Doe (ABCDE12345)" --pro
 nsh package App.tsx --target ios-simulator --run
 ```
 
-除非传入 `--out`，否则输出到 `.nsh/out/`。下面各节给出的是 Rust 应用的命令。TSX 应用加上它的入口（`nsh package App.tsx --target …`）。
+除非传入 `--out`，否则输出到 `.nsh/out/`。下面各节给出的是 Rust 应用的命令；TSX 应用加上它的入口（`nsh package App.tsx --target …`）。
 
 > [!NOTE]
-> 如果想把 NSH 放*进*现有的原生应用，请参阅[平台](./platforms.md#嵌入原生应用)。GPUI 或 GPUI Kit 应用请参阅 [GPUI](./gpui.md#嵌入-gpui-应用)。如果想发布由应用下载并验证的更新，请参阅[签名包](./signed-packages.md)。
+> 如果想把 NSH 放*进*现有的原生应用，请参阅[平台](./platforms.md#嵌入原生应用)；GPUI 或 GPUI Kit 应用请参阅 [GPUI](./gpui.md#嵌入-gpui-应用)。如果想发布由应用下载并验证的更新，请参阅[签名包](./signed-packages.md)。
 
 ## 应用元数据：`nsh.json`
 
@@ -56,7 +56,7 @@ nsh package App.tsx --target ios-simulator --run
 | `build` | number | `1` | 构建号（`CFBundleVersion`、`versionCode`）。每次上传新版本都要递增。 |
 | `icon` | string \| object | 无 | 一张正方形 PNG，最好是 1024×1024，路径相对于 `nsh.json`；也可按平台分别提供（[图标](#图标)）。 |
 
-`nsh.json` 还包含 `rust` 和 `root`（应用的 crate 和根组件，见[用 Rust 开发](./rust.md)）、`theme` 和 `appearance`、`tailwind`（见 [Tailwind](./tailwind.md)）、`capabilities`（见[沙箱与能力](./sandbox-and-capabilities.md)）、`android`（`targetSdk`、`usesCleartextTraffic`、`permissions`、`libraries`、`manifestPlaceholders`、`queries` 和 `application`，见下文“目标 API 级别”“明文 HTTP”“权限”“Java 代码”和“组件与 queries”）、`ios` 和 `macos`（对应包的 `Info.plist` 键和 entitlements，见[下文](#infoplist-键与-entitlements)；`ios.extensions` 和 `macos.extensions` 分别是 [iOS 应用扩展](#应用扩展)和 [macOS 应用扩展](#macos-应用扩展)；`macos.activationPolicy` 用于[菜单栏应用](./macos.md#菜单栏应用)）以及让桌面包自我更新、让所有原生包接收 [OTA 更新](./ota-updates.md)的 `updater`（见[应用更新](./app-updates.md)）。[项目结构](./project-structure.md#nshjson)列出了所有键。NSH 读不懂的键或值会给出警告并被略过：为更新的 NSH 写的应用在较旧的 NSH 上照样能构建，拼写错误也会在警告里看到。
+`nsh.json` 还包含 `rust` 和 `root`（应用的 crate 和根组件，见[用 Rust 开发](./rust.md)）、`theme` 和 `appearance`、`tailwind`（见 [Tailwind](./tailwind.md)）、`capabilities`（见[沙箱与能力](./sandbox-and-capabilities.md)）、`android`（`targetSdk`、`usesCleartextTraffic`、`permissions`、`libraries`、`manifestPlaceholders`、`queries` 和 `application`，见下文“目标 API 级别”“明文 HTTP”“权限”“Java 代码”和“组件与 queries”）、`ios` 和 `macos`（对应包的 `Info.plist` 键和 entitlements，见[下文](#infoplist-键与-entitlements)；`ios.extensions` 和 `macos.extensions` 分别是 [iOS 应用扩展](#应用扩展)和 [macOS 应用扩展](#macos-应用扩展)；`macos.activationPolicy` 用于[菜单栏应用](./macos.md#菜单栏应用)）以及让桌面包自我更新、让所有原生包接收 [OTA 更新](./ota-updates.md)的 `updater`（见[应用更新](./app-updates.md)）；[项目结构](./project-structure.md#nshjson)列出了所有键。NSH 读不懂的键或值会给出警告并被略过：为更新的 NSH 写的应用在较旧的 NSH 上照样能构建，拼写错误也会在警告里看到。
 
 上表中的每个键都可以在命令行上覆盖，这在 CI 中很方便：
 
@@ -118,7 +118,7 @@ nsh package --target ios \
 security find-identity -v -p codesigning
 ```
 
-如果没有传 `--sign` 和 `--profile`，NSH 会写出一个未签名的 `.nsh/out/<Name>.app` 并给出提示。它无法直接安装到真机上。
+如果没有传 `--sign` 和 `--profile`，NSH 会写出一个未签名的 `.nsh/out/<Name>.app` 并给出提示；它无法直接安装到真机上。
 
 应用支持 iPhone 和 iPad，支持竖屏和横屏（倒置竖屏仅限 iPad），要求 iOS 15.0 或更高版本，或应用指定的更高版本（见[最低系统版本](#最低系统版本)）。
 
@@ -150,11 +150,11 @@ security find-identity -v -p codesigning
 
 每个包都会把扩展复制进 `PlugIns/`，并把它们的版本号设成应用的 `version` 和 `build`：扩展的版本号应当和应用一致（不一致时
 App Store Connect 会给出提示）。扩展的
-identifier 必须以应用的开头（应用为 `com.example.app` 时，扩展为 `com.example.app.Widget`）。模拟器包用 ad hoc 签名。
+identifier 必须以应用的开头（应用为 `com.example.app` 时，扩展为 `com.example.app.Widget`）。模拟器包用 ad hoc 签名；
 真机包先用各扩展 identifier 对应的描述文件给它签名，并把描述文件作为 `embedded.mobileprovision` 放进扩展，再签名应用。
 `nsh run --target ios` 也会带上扩展：模拟器里的开发宿主运行所有 TSX 应用，所以每个扩展的 identifier 改用宿主的开头
 （`com.longbridge.nsh.host.Widget`）。
-给应用传一个 `--profile`，每个扩展再各传一个。写明了 bundle identifier 的描述文件优先于覆盖它的通配描述文件：
+给应用传一个 `--profile`，每个扩展再各传一个；写明了 bundle identifier 的描述文件优先于覆盖它的通配描述文件：
 
 ```sh
 nsh package --target ios \
@@ -186,7 +186,7 @@ nsh package --target android --run
 - 一个 JDK，用于首次创建 debug keystore，以及构建应用列出的 [Java 库](#java-代码)。
 - Rust 应用还需要 Android NDK（`sdkmanager "ndk;<version>"`，或 `ANDROID_NDK_HOME`），用它构建应用的 `libnsh.so`。
 
-应用的目标 API 为 35（`targetSdkVersion`，Google Play 的要求），除非 `nsh.json` 指定了其他级别。应用要求 API 26（Android 8）或更高版本。它包含适用于手机 ABI `arm64-v8a` 和 `armeabi-v7a` 的原生代码。
+应用的目标 API 为 35（`targetSdkVersion`，Google Play 的要求），除非 `nsh.json` 指定了其他级别；应用要求 API 26（Android 8）或更高版本。它包含适用于手机 ABI `arm64-v8a` 和 `armeabi-v7a` 的原生代码；
 加上 `--run` 时还包含设备的 ABI，例如模拟器的 `x86_64`。用 `--abi` 可以自己选择，例如 `--abi arm64-v8a` 只面向 64 位手机，APK 最小：
 
 ```sh
@@ -244,7 +244,7 @@ Android 自己的权限（`android.permission.<NAME>`），带点的名字按原
 ```
 
 `ACCESS_WIFI_STATE` 这样的普通权限在安装应用时授予。运行时权限（例如 `ACCESS_FINE_LOCATION`）只是被声明：仍需应用自己的代码向用户
-申请。TSX 开发宿主（TSX 应用的 `nsh run --target android`）不声明这些权限。Rust 应用的 `nsh run` 会构建它的包，因此会声明。
+申请。TSX 开发宿主（TSX 应用的 `nsh run --target android`）不声明这些权限；Rust 应用的 `nsh run` 会构建它的包，因此会声明。
 
 ### Java 代码
 
@@ -259,15 +259,15 @@ Rust 通过 JNI 可以调用大多数 Android API，但有些 API 需要应用�
 ```
 
 打包时用 SDK 的 `d8` 把 jar 转换成 dex，把其中的类放在 NSH 运行时之后，应用的类加载器因此能找到它们。jar 里类以外的文件（例如
-供 `ServiceLoader` 读取的 `META-INF/services/...`）放到包的根目录。其中 `assets/` 下的文件和 Android 的 Gradle 插件一样作为包的 asset。dex 文件按原样放入，不经过 `d8` 合并，所以它和 jar 里重复定义的类在打包时不会被发现。同一个文件被列出两次或被两个 crate
-列出时只放入一次。两个不同的文件定义了同一个类时构建会停止，并指出这两个文件。不列出任何库的应用照旧打包，不会运行 `d8`。
+供 `ServiceLoader` 读取的 `META-INF/services/...`）放到包的根目录；其中 `assets/` 下的文件和 Android 的 Gradle 插件一样作为包的 asset。dex 文件按原样放入，不经过 `d8` 合并，所以它和 jar 里重复定义的类在打包时不会被发现。同一个文件被列出两次或被两个 crate
+列出时只放入一次；两个不同的文件定义了同一个类时构建会停止，并指出这两个文件。不列出任何库的应用照旧打包，不会运行 `d8`。
 
 这些库都是本地文件：NSH 不下载它们，也不解析 Maven 依赖，所以 SDK 依赖的库也要一并列出。第三方工具 [nsh-maven](https://github.com/SuperNSH/maven)
-会从 Maven 仓库解析一个库及其依赖（`nsh-maven add com.google.firebase:firebase-messaging:26.0.1`），把文件下载到应用中并在这里列出。
+会从 Maven 仓库解析一个库及其依赖（`nsh-maven add com.google.firebase:firebase-messaging:26.0.1`），把文件下载到应用中并在这里列出；
 加上 `--crate` 时则列在 nshm crate 的 `Cargo.toml` 里。
 
-Android 库（`.aar`）带来的不只是类（类按 jar 的方式处理）：它的原生库（`jni/<abi>/*.so`）按包含的 ABI 放入，和 NSH 自己的一样不压缩存放。
-它的 assets 和应用自己的 assets 放在一起。它的资源（`res/`）并入包里的资源，库的代码照它构建时那样通过自己的 `R` 类读取。它 manifest 里的权限、功能、`<queries>` 和组件并入应用的 manifest，相对类名（`.PushService`）
+Android 库（`.aar`）带来的不只是类（类按 jar 的方式处理）：它的原生库（`jni/<abi>/*.so`）按包含的 ABI 放入，和 NSH 自己的一样不压缩存放；
+它的 assets 和应用自己的 assets 放在一起；它的资源（`res/`）并入包里的资源，库的代码照它构建时那样通过自己的 `R` 类读取；它 manifest 里的权限、功能、`<queries>` 和组件并入应用的 manifest，相对类名（`.PushService`）
 补上它的包名，`${applicationId}` 换成应用的包名。几个库以同一个名字声明的组件（例如各自往同一个启动 provider 里加初始化器）合成一个。
 它 manifest 里（或 crate 的 `android.application` 里）的其他占位符取 `android.manifestPlaceholders` 的值，只有应用的 `nsh.json`
 能设置：这些值属于应用，例如某个服务的 key。`nsh test --target android` 安装的共用开发宿主不读任何应用的 `nsh.json`，
@@ -282,14 +282,14 @@ Android 库（`.aar`）带来的不只是类（类按 jar 的方式处理）：�
 }
 ```
 
-每个库按它 manifest 里的包名只放入一次：两个 crate 带了同一个文件时只放一次。同一个库的两个版本会让构建停止并指出两者。应用在自己的
+每个库按它 manifest 里的包名只放入一次：两个 crate 带了同一个文件时只放一次；同一个库的两个版本会让构建停止并指出两者；应用在自己的
 `nsh.json` 里列出的版本就是包里用的版本。库需要 NSH 应用没有的东西时，构建也会停止并指出这个库：最低 API 级别高于 26、平台比
 `android.targetSdk` 更新、自己的 `Application` 类、manifest 合并规则（`tools:node="remove"`、`tools:replace`），或包里有某个 ABI、而库带了原生库却缺这个 ABI 的版本，或带了资源却没有 Android 构建一并写出的 `R.txt`。
 
 和所有 Android 应用一样，资源共用一个命名空间。几处为同一配置（密度、夜间模式、语言等）定义了同名资源时，包自己的资源（`android/res/`）
 优先，其次是应用 `nsh.json` 列出的库（先列的优先于后列的），再次是各 crate 的库（crate 名排序靠前的优先）。样式整个取自胜出的一方，
 不逐条合并。NSH 为包生成的资源（图标、启动画面和通知音）在所有配置下都归包自己：库里同名的资源会被去掉，并给出警告。
-库的 `R.txt` 也会列出它构建时所依赖的库的资源。没有任何列出的库定义的那些不会进入它的 `R` 类，只汇总提示一次。库的代码读取了这样的资源时，
+库的 `R.txt` 也会列出它构建时所依赖的库的资源；没有任何列出的库定义的那些不会进入它的 `R` 类，只汇总提示一次。库的代码读取了这样的资源时，
 构建会停止并指出这个库、读取它的类和资源：把定义它的库也列上。
 
 自己的 Java 源码先针对平台的 `android.jar` 编译，再打成 jar：
@@ -299,7 +299,7 @@ javac --release 11 -classpath "$ANDROID_HOME/platforms/android-35/android.jar" -
 jar cf java/out/glue.jar -C java/classes .
 ```
 
-在 Rust 启动的线程里，JNI 的 `FindClass` 只能找到系统的类。在那里要通过 activity 的类加载器（`Context.getClassLoader()`）加载应用的类。
+在 Rust 启动的线程里，JNI 的 `FindClass` 只能找到系统的类；在那里要通过 activity 的类加载器（`Context.getClassLoader()`）加载应用的类。
 
 NSH 应用没有自己的 `Application` 类，所以必须在 `Application` 里初始化、或必须继承它的 SDK 无法使用。随应用启动的 SDK 通过
 content provider 初始化：由它的 AAR 自己声明，或由 nshm 在 `android.application` 里声明：
@@ -312,13 +312,13 @@ application = ['<provider android:name="com.example.push.Init" android:authoriti
 
 `nsh run --target android` 同样带上这些库：TSX 应用放在开发宿主里，Rust 应用放在它构建的包里。开发宿主对所有应用使用同一个包名，
 所以按包名校验应用的 SDK（推送服务的 SDK、地图 SDK）只能在应用自己的包里使用：用 `nsh package --target android --run` 试。
-TSX 开发宿主（TSX 应用的 `nsh run --target android`）不包含这些文件。Rust 应用的 `nsh run` 会构建它的包，因此会包含。
+TSX 开发宿主（TSX 应用的 `nsh run --target android`）不包含这些文件；Rust 应用的 `nsh run` 会构建它的包，因此会包含。
 
 ### 组件与 queries
 
-由系统启动的类（`<service>`、`<receiver>`、`<provider>`）只有在 manifest 中声明后才能工作。SDK 也可能需要 `<meta-data>`，或者需要
+由系统启动的类（`<service>`、`<receiver>`、`<provider>`）只有在 manifest 中声明后才能工作；SDK 也可能需要 `<meta-data>`，或者需要
 `<queries>` 条目才能看到其他应用。`android.application` 向 manifest 的 `<application>` 添加 `<service>`、`<receiver>`、`<provider>`、
-`<activity>` 和 `<meta-data>` 元素。`android.queries` 向 `<queries>` 添加 `<intent>`、`<package>` 和 `<provider>` 元素。每个条目是
+`<activity>` 和 `<meta-data>` 元素；`android.queries` 向 `<queries>` 添加 `<intent>`、`<package>` 和 `<provider>` 元素。每个条目是
 一个完整写出的元素，其中的 `${applicationId}` 会被替换为应用的包名，其他 `${name}` 替换为 `android.manifestPlaceholders` 给出的值。
 不是这样一个元素、带有 `tools:` 属性（它们属于库的 manifest），
 或者用了 NSH 自己声明的名字（它的 `com.longbridge.nsh.*` 类和 meta-data，以及它的文件 provider 所用的 `${applicationId}.files`
@@ -340,12 +340,12 @@ authority）的条目，会被略过并给出警告：
 应用链接的 crate 也用同样的方式添加它们的条目（见[打包的应用需要什么](./nshm.md#打包的应用需要什么)），排在应用的之后。
 应用有 Android 库（`.aar`）时，这些条目会与库声明的内容合并：与库中某个元素同名的条目（例如给库声明的 provider 添加的
 `<meta-data>`）会并入该元素。`<application>` 元素自身的属性仍由 NSH 设置。开发宿主（TSX 应用的 `nsh run`，以及 `nsh test --target android`）声明 crate 的条目，
-但不声明应用自己的。Rust 应用的 `nsh run` 会构建它的包，因此会声明。
+但不声明应用自己的；Rust 应用的 `nsh run` 会构建它的包，因此会声明。
 
 ### Google Play：App Bundle
 
 Google Play 接收 Android App Bundle，而不是 APK。`--format aab` 用同一个应用写出 `.nsh/out/<Name>.aab` 代替 APK，不需要 Gradle 或
-bundletool。Google Play 会据此为每台设备生成要安装的 APK（每个 ABI 一个）。bundle 使用 JDK 中的 `jarsigner` 签名，签名选项与
+bundletool；Google Play 会据此为每台设备生成要安装的 APK（每个 ABI 一个）。bundle 使用 JDK 中的 `jarsigner` 签名，签名选项与
 `--keystore` 相同：这个密钥就是你在 Play 应用签名中登记的上传密钥。
 
 ```sh
@@ -353,7 +353,7 @@ NSH_KEYSTORE_PASSWORD=… nsh package --target android --format aab \
   --keystore release.jks --key-alias upload
 ```
 
-`--run` 安装的是 APK，所以不能与 `--format aab` 同时使用。要在设备上试用 bundle，请使用
+`--run` 安装的是 APK，所以不能与 `--format aab` 同时使用；要在设备上试用 bundle，请使用
 [bundletool](https://github.com/google/bundletool)（先 `build-apks`，再 `install-apks`）。
 
 ## macOS
@@ -411,7 +411,7 @@ nsh package --target macos --arch universal
 
 ### 签名、公证与分发
 
-在 Mac App Store 之外，Mac 应用以已签名并经过公证的 `.app` 分发，用户从你的网站或 GitHub Release 下载。`nsh package --target macos --sign …` 构建应用并用你的 Developer ID 签名。公证、装订（staple）和上传则用 Apple 的命令行工具和你的发布主机完成。之后由[应用更新](./app-updates.md)让已安装的副本保持最新。
+在 Mac App Store 之外，Mac 应用以已签名并经过公证的 `.app` 分发，用户从你的网站或 GitHub Release 下载。`nsh package --target macos --sign …` 构建应用并用你的 Developer ID 签名；公证、装订（staple）和上传则用 Apple 的命令行工具和你的发布主机完成。之后由[应用更新](./app-updates.md)让已安装的副本保持最新。
 
 `nsh publish` 没有 macOS 商店上传：NSH 目前还不能为 Mac App Store 打包。
 
@@ -451,7 +451,7 @@ nsh package --target macos --arch universal \
   --sign "Developer ID Application: Example Inc (ABCDE12345)"
 ```
 
-这会写出 `.nsh/out/<Name>.app`。有证书时，NSH 先签名内嵌的 framework 和扩展，再签名应用，并按公证的要求启用 Hardened Runtime（`--options runtime`）和安全时间戳（`--timestamp`），最后用 `codesign --verify --deep --strict` 验证结果。`--arch universal` 能同时在 Apple 芯片和 Intel Mac 上运行（Rust 应用需要 `rustup target add x86_64-apple-darwin`）。省略它则只面向本机的处理器。不带 `--sign` 时应用使用 ad hoc 签名，能在构建它的 Mac 上运行，但在其他 Mac 上会被 Gatekeeper 拦下。
+这会写出 `.nsh/out/<Name>.app`。有证书时，NSH 先签名内嵌的 framework 和扩展，再签名应用，并按公证的要求启用 Hardened Runtime（`--options runtime`）和安全时间戳（`--timestamp`），最后用 `codesign --verify --deep --strict` 验证结果。`--arch universal` 能同时在 Apple 芯片和 Intel Mac 上运行（Rust 应用需要 `rustup target add x86_64-apple-darwin`）；省略它则只面向本机的处理器。不带 `--sign` 时应用使用 ad hoc 签名，能在构建它的 Mac 上运行，但在其他 Mac 上会被 Gatekeeper 拦下。
 
 #### 公证并装订
 
@@ -541,15 +541,15 @@ flatpak run io.github.example.Counter
 ```
 
 依赖：[appimagetool](https://github.com/AppImage/appimagetool/releases) 在 `PATH` 中或由 `NSH_APPIMAGETOOL` 指定（没有 FUSE
-时设置 `APPIMAGE_EXTRACT_AND_RUN=1`）。本地构建 Flatpak 需要 `flatpak`、`flatpak-builder` 以及 GNOME runtime 和 SDK。
-AppImage 包含 NSH，但不包含 GTK 4 和 WebKitGTK。AppImage 启动后没有窗口，说明系统缺少它们，Flatpak 会自带。发布到
+时设置 `APPIMAGE_EXTRACT_AND_RUN=1`）；本地构建 Flatpak 需要 `flatpak`、`flatpak-builder` 以及 GNOME runtime 和 SDK。
+AppImage 包含 NSH，但不包含 GTK 4 和 WebKitGTK；AppImage 启动后没有窗口，说明系统缺少它们，Flatpak 会自带。发布到
 Flathub：见[发布](./publish.md#publish-to-flathub)。
 
 ### 分发
 
-`nsh package --target linux` 把应用写成一个目录及其 `.tar.gz`，附带桌面条目和图标。你把归档上传到你的网站或 GitHub Release，用户解压并安装桌面条目。[应用更新](./app-updates.md)让已安装的副本保持最新。
+`nsh package --target linux` 把应用写成一个目录及其 `.tar.gz`，附带桌面条目和图标。你把归档上传到你的网站或 GitHub Release，用户解压并安装桌面条目；[应用更新](./app-updates.md)让已安装的副本保持最新。
 
-`--format appimage` 和 `--format flatpak` 还会写出 AppImage 和 Flatpak（见[上文](#appimage-and-flatpak)）。`nsh package` 目前还不能写出 `.deb` 或 `.rpm` 包。发布到 Flathub 见[发布](./publish.md#publish-to-flathub)。
+`--format appimage` 和 `--format flatpak` 还会写出 AppImage 和 Flatpak（见[上文](#appimage-and-flatpak)）；`nsh package` 目前还不能写出 `.deb` 或 `.rpm` 包。发布到 Flathub 见[发布](./publish.md#publish-to-flathub)。
 
 #### 首次发布之前
 
@@ -626,7 +626,7 @@ nsh package --target windows --run
 ```
 
 写出 `.nsh\out\<Name>\`（带应用图标的可执行文件 `<Name>.exe`、`nsh\assets\…`、包含窗口标题、应用 id、版本、外观和 nsh.json 中窗口设置的 `nsh\app.json`，以及
-TSX 应用的 `nsh\bundle.nshc`），以及同样内容的 `.nsh\out\<Name>.zip`。TSX 应用不需要任何工具。Rust 应用的 runner 用 Visual Studio
+TSX 应用的 `nsh\bundle.nshc`），以及同样内容的 `.nsh\out\<Name>.zip`。TSX 应用不需要任何工具；Rust 应用的 runner 用 Visual Studio
 Build Tools 构建。请在 Windows 上打包：运行器是为构建它的机器构建的，而且只有
 Windows 能嵌入图标。应用可以从目录被复制到的任何位置运行。`nsh package` 还会写出 Inno Setup 脚本 `.nsh\out\<Name>.iss`，装有 Inno Setup 6
 时编译成 `.nsh\out\<Name>-setup.exe`：按用户安装（不需要管理员权限），带开始菜单快捷方式和“已安装的应用”条目，并支持原地升级。见 [Windows](./windows.md#打包)。
@@ -638,11 +638,11 @@ nsh package --target windows --format msix                  # .nsh/out/<Name>.ms
 nsh package --target windows --format msix --sign cert.pfx  # 签名后可在 Store 之外安装
 ```
 
-`--format msix` 额外写出 `.nsh\out\<Name>.msix`：打包目录加上 `AppxManifest.xml`（full-trust 桌面应用）、由应用图标生成的 logo 和 block map。不需要 Windows SDK，Linux 和 macOS 的 CI 也能生成。包标识来自 `nsh.json` 的 `windows`：`identityName`、`publisher`、`publisherDisplayName`，前两项从 Partner Center 的 Product identity 复制（默认分别为应用 id 与 `CN=<name>`）。版本号为 `version` 加第四位 0。Store 会自行签名，用 `nsh publish windows` 提交未签名的包即可（见[发布](./publish.md#publish-to-the-microsoft-store)）。Store 之外分发需 `--sign <cert.pfx>`（Windows 上用 `signtool`，其他系统用 `osslsigncode` 2.6+，密码放在 `NSH_WINDOWS_CERT_PASSWORD`），证书主题必须等于 `windows.publisher`。
+`--format msix` 额外写出 `.nsh\out\<Name>.msix`：打包目录加上 `AppxManifest.xml`（full-trust 桌面应用）、由应用图标生成的 logo 和 block map。不需要 Windows SDK，Linux 和 macOS 的 CI 也能生成。包标识来自 `nsh.json` 的 `windows`：`identityName`、`publisher`、`publisherDisplayName`，前两项从 Partner Center 的 Product identity 复制（默认分别为应用 id 与 `CN=<name>`）。版本号为 `version` 加第四位 0。Store 会自行签名，用 `nsh publish windows` 提交未签名的包即可（见[发布](./publish.md#publish-to-the-microsoft-store)）；Store 之外分发需 `--sign <cert.pfx>`（Windows 上用 `signtool`，其他系统用 `osslsigncode` 2.6+，密码放在 `NSH_WINDOWS_CERT_PASSWORD`），证书主题必须等于 `windows.publisher`。
 
 ### 签名与分发
 
-`nsh package --target windows` 写出直接下载发布所需的一切：应用目录、它的 `.zip`，以及用 Inno Setup 构建的按用户安装的安装程序。你用自己的代码签名证书签名可执行文件，再上传到你的网站或 GitHub Release。[应用更新](./app-updates.md)让已安装的副本保持最新。
+`nsh package --target windows` 写出直接下载发布所需的一切：应用目录、它的 `.zip`，以及用 Inno Setup 构建的按用户安装的安装程序。你用自己的代码签名证书签名可执行文件，再上传到你的网站或 GitHub Release；[应用更新](./app-updates.md)让已安装的副本保持最新。
 
 上架 Microsoft Store 时，打包 [MSIX](#msix) 并用 `nsh publish windows` 提交（见[发布](./publish.md#publish-to-the-microsoft-store)）。
 
@@ -650,7 +650,7 @@ nsh package --target windows --format msix --sign cert.pfx  # 签名后可在 St
 
 在负责打包的 Windows 机器（或 CI runner）上：
 
-1. **安装工具。** TSX 应用不需要任何工具。Rust 应用的 runner 用 Visual Studio Build Tools 构建。安装程序需要 Inno Setup 6：`winget install JRSoftware.InnoSetup`。
+1. **安装工具。** TSX 应用不需要任何工具；Rust 应用的 runner 用 Visual Studio Build Tools 构建。安装程序需要 Inno Setup 6：`winget install JRSoftware.InnoSetup`。
 2. **获取代码签名证书**：从证书颁发机构购买，或使用 Azure Trusted Signing 这样的云签名服务。未签名的可执行文件照样能运行，但 SmartScreen 会提示发布者未知，一些杀毒软件也会对它们抱有怀疑。
 3. **安装 Windows SDK** 以获得 `signtool.exe`（它随 Visual Studio 安装程序的 Windows SDK 组件提供）。
 
@@ -680,7 +680,7 @@ nsh package --target windows
 
 #### 签名
 
-先签名应用的可执行文件，再构建安装程序，这样安装后的应用也是已签名的。然后签名安装程序。证书位于 Windows 证书存储中时：
+先签名应用的可执行文件，再构建安装程序，这样安装后的应用也是已签名的；然后签名安装程序。证书位于 Windows 证书存储中时：
 
 ```powershell
 signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /n "Example Inc" .nsh\out\Notes\Notes.exe
@@ -689,7 +689,7 @@ signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /n "Exampl
 signtool verify /pa .nsh\out\Notes-setup.exe
 ```
 
-`ISCC.exe` 用 `nsh package` 写出的脚本重新编译安装程序，这次包含已签名的可执行文件。它的路径取决于 Inno Setup 的安装位置（为整台机器安装时是 `C:\Program Files (x86)\Inno Setup 6\ISCC.exe`）。如果你也发布 `.zip`，同样要从已签名的目录重新制作。始终加上时间戳（`/tr`）：这样证书过期后签名仍然有效。
+`ISCC.exe` 用 `nsh package` 写出的脚本重新编译安装程序，这次包含已签名的可执行文件；它的路径取决于 Inno Setup 的安装位置（为整台机器安装时是 `C:\Program Files (x86)\Inno Setup 6\ISCC.exe`）。如果你也发布 `.zip`，同样要从已签名的目录重新制作。始终加上时间戳（`/tr`）：这样证书过期后签名仍然有效。
 
 #### 分发
 
@@ -724,11 +724,11 @@ nsh package --target web --run
 
 写出 `.nsh/out/<Name>/`，一个静态站点：`index.html`、`manifest.webmanifest`、页面脚本（`nsh.<digest>.js`）和 `nsh.<digest>.wasm`
 （Rust 应用的引擎和 crate；TSX 应用则是运行时，旁边是应用的 ES 模块 `app.<digest>.js`）、资源和图标，每个文件都以其内容命名，托管方可以永久缓存它们。把目录部署到任意 Web 服务器或 CDN
-即可。`--run` 在 `http://127.0.0.1:4173/` 上提供服务，自行在浏览器中打开即可。缓存头和嵌入方式见 [Web](./web.md#发布应用)。
+即可；`--run` 在 `http://127.0.0.1:4173/` 上提供服务，自行在浏览器中打开即可。缓存头和嵌入方式见 [Web](./web.md#发布应用)。
 
 ### 托管站点
 
-在 Web 上，应用就是一个静态站点。`nsh package --target web` 写出它。你把目录复制到任意 Web 服务器、对象存储或静态托管服务上。没有应用商店，不需要签名，也没有审核，部署之后每个用户下次加载时就会更新。这里没有 `nsh publish` 要做的事。
+在 Web 上，应用就是一个静态站点。`nsh package --target web` 写出它；你把目录复制到任意 Web 服务器、对象存储或静态托管服务上。没有应用商店，不需要签名，也没有审核，部署之后每个用户下次加载时就会更新。这里没有 `nsh publish` 要做的事。
 
 #### 配置应用
 
@@ -789,7 +789,7 @@ jobs:
       - uses: actions/deploy-pages@v4
 ```
 
-项目站点位于 `/<repo>/` 下。相对 URL 能处理这一点。在自己的路径下打开的应用要设置 `"web": { "base": "/<repo>/" }`，并添加一份 `index.html` 的副本作为 `404.html`（上传前执行 `cp site/index.html site/404.html`），GitHub Pages 会用它响应未知路径。GitHub Pages 不能按文件设置 `Cache-Control`，所以回访的用户也会重新验证带哈希的文件。能自行设置响应头的主机加载更快。
+项目站点位于 `/<repo>/` 下；相对 URL 能处理这一点。在自己的路径下打开的应用要设置 `"web": { "base": "/<repo>/" }`，并添加一份 `index.html` 的副本作为 `404.html`（上传前执行 `cp site/index.html site/404.html`），GitHub Pages 会用它响应未知路径。GitHub Pages 不能按文件设置 `Cache-Control`，所以回访的用户也会重新验证带哈希的文件；能自行设置响应头的主机加载更快。
 
 ##### 对象存储和 CDN
 
@@ -845,7 +845,7 @@ App Store 分类、App Transport Security 例外）和 entitlements（例如 Ass
 }
 ```
 
-值按属性列表（property list）写入：字符串、数字（整数或实数）、布尔值、数组和对象（字典）。`null` 会报错。应用设置的键会替换 NSH
+值按属性列表（property list）写入：字符串、数字（整数或实数）、布尔值、数组和对象（字典）；`null` 会报错。应用设置的键会替换 NSH
 的默认值，因此应用也可以改写 NSH 添加的权限说明文字、缩小支持的屏幕方向，或提高最低系统版本（见[下文](#最低系统版本)）。
 
 NSH 根据 `nsh.json` 其他键设置的键、以及打包后的应用所依赖的键由 NSH 掌握。设置其中之一会报错，并说明应改设什么：
@@ -868,7 +868,7 @@ NSH 根据 `nsh.json` 其他键设置的键、以及打包后的应用所依赖�
 entitlements：
 
 - **iOS 真机**包用描述文件授予的 entitlements 签名，应用写的每一项替换描述文件里的值。应用列出的每个 entitlement 都必须是描述文件授予的，
-  且值在其范围内（描述文件把 Associated Domains 授予为 `*`，把钥匙串分组授予为 `TEAMID.*`）。否则 `nsh package` 停下并指出是哪一项，
+  且值在其范围内（描述文件把 Associated Domains 授予为 `*`，把钥匙串分组授予为 `TEAMID.*`）；否则 `nsh package` 停下并指出是哪一项，
   这时为应用的标识符启用对应的 capability，再重新下载描述文件。
 - **iOS 模拟器**包直接用应用写的 entitlements 签名。
 - **macOS** 包用应用的 entitlements 签名（默认 ad hoc，传入 `--sign <identity>` 时启用 Hardened Runtime）。带
@@ -896,7 +896,7 @@ entitlements：
 }
 ```
 
-打包时每种语言写成包里的 `<语言>.lproj/InfoPlist.strings`。`nsh run` 也给 iOS 模拟器和 Mac Catalyst 的开发宿主带上同样的文件，
+打包时每种语言写成包里的 `<语言>.lproj/InfoPlist.strings`；`nsh run` 也给 iOS 模拟器和 Mac Catalyst 的开发宿主带上同样的文件，
 打包前就能看到各语言的弹框文字。系统对每个应用只问一次：再次检查弹框前先重置之前的选择，iOS 模拟器用
 `xcrun simctl privacy booted reset camera <id>`，macOS 和 Mac Catalyst 用 `tccutil reset Camera <id>`，`<id>` 是应用的
 `id`，在 `nsh run` 下是开发宿主的 id。
@@ -906,17 +906,17 @@ entitlements：
 - **`Info.plist` 里的值**是所有没有翻译的语言看到的文字，所以每个翻译的键都要有这个值：写在 `infoPlist` 里，或者来自 NSH
   （应用名、NSH 添加的用途说明）或 [crate](./nshm.md#打包的应用需要什么)。包的 `Info.plist` 里没有这个键、或者它不是字符串时，
   `nsh package` 报错并指出这个键：系统永远不会显示这条翻译。
-- **可以翻译的键**是应用自己的键，NSH 的键里只有 `CFBundleDisplayName` 和 `CFBundleName`。值都是字符串。翻译了应用名的 macOS
+- **可以翻译的键**是应用自己的键，NSH 的键里只有 `CFBundleDisplayName` 和 `CFBundleName`；值都是字符串。翻译了应用名的 macOS
   包还会告诉访达（`LSHasLocalizedDisplayName`）。
 - **这些语言会和应用的 [`locales`](./i18n.md) 一起声明给系统**（`CFBundleLocalizations`，英语在前）：没有翻译的语言的用户看到
-  `Info.plist` 的文字，系统在应用里显示的界面也会使用这些翻译过的语言。写成空的 `{}` 的语言没有文件，也不会声明。它采用
+  `Info.plist` 的文字，系统在应用里显示的界面也会使用这些翻译过的语言。写成空的 `{}` 的语言没有文件，也不会声明；它采用
   [crate](./nshm.md#打包的应用需要什么) 的翻译，应用只采用自己支持的语言的 crate 翻译。
 
 ### 隐私清单
 
 上传 iOS 应用时，App Store Connect 会检查它的隐私清单 `PrivacyInfo.xcprivacy`：应用调用 Apple 要求说明使用理由的 API 的原因、
 是否进行跟踪以及跟踪所用的域名，以及它收集的数据（见 [Privacy manifest files](https://developer.apple.com/documentation/bundleresources/privacy-manifest-files)）。
-每个 iOS 包都带有这个文件。NSH 的运行时是应用可执行文件的一部分，所以它调用的 API 也算作应用的。打包时会为每个应用声明它们：
+每个 iOS 包都带有这个文件。NSH 的运行时是应用可执行文件的一部分，所以它调用的 API 也算作应用的；打包时会为每个应用声明它们：
 
 | 类别 | NSH 中调用它的部分 | 理由 |
 |---|---|---|
@@ -946,7 +946,7 @@ iOS 包会在签名前把它写到应用的根目录，并按类别和 NSH 的�
 这样打出的包里，文件时间戳条目的理由是 `3B52.1`（读取用户选择的文件）和 NSH 的 `C617.1`，后面再跟一个理由为 `35F9.1` 的系统启动时间条目。
 
 它接受 Apple 格式的四个键（`NSPrivacyTracking`、`NSPrivacyTrackingDomains`、`NSPrivacyCollectedDataTypes`、
-`NSPrivacyAccessedAPITypes`）及其条目里的键。未知的键、类型不对的值或缺少键的条目会被略过并给出警告。App Store Connect
+`NSPrivacyAccessedAPITypes`）及其条目里的键。未知的键、类型不对的值或缺少键的条目会被略过并给出警告；App Store Connect
 按原样会拒绝的内容（没有理由的条目、开启跟踪却没有域名）也会给出警告。类别和理由代码本身仍由 App Store Connect 检查。
 
 NSH 在 iOS 上不读取用户默认设置（温度单位取自区域设置），所以只有应用自己的代码或它链接的 SDK 调用 `NSUserDefaults` 时，
@@ -974,13 +974,13 @@ NSH 在 iOS 上不读取用户默认设置（温度单位取自区域设置）�
 在 `nsh.json` 中（`"icon": "icon.png"`）或通过 `--icon` 提供一张正方形 PNG，最好是 1024×1024：
 
 - **iOS：** 由 Xcode 的 `actool` 编译进应用的资源目录（`Assets.car`），iOS 所需的各种尺寸都由它生成。
-- **Android：** 缩放到 192×192，用作启动器图标（`mipmap-xxxhdpi`）。也可以用自适应图标，见下文。
+- **Android：** 缩放到 192×192，用作启动器图标（`mipmap-xxxhdpi`）；也可以用自适应图标，见下文。
 - **macOS：** 由 `sips` 转换为 `AppIcon.icns`。`nsh run --target macos` 和 `nsh test --target macos` 会在程序坞和应用切换器里显示这张 PNG。
 - **Linux：** 复制为 `<id>.png`，`.desktop` 文件以它作为 `Icon`。
-- **Windows：** 缩放为 16 到 64 像素以及 256 像素，作为图标嵌入可执行文件，窗口、资源管理器和任务栏都会显示它。同时写到 bundle 旁的 `nsh\icon.ico`，通知会显示它。在 macOS 或 Linux 上打包时，可执行文件在资源管理器里保持默认图标，窗口和任务栏显示 `icon.ico`。`nsh run --target windows` 和 `nsh test --target windows` 也会显示它。
+- **Windows：** 缩放为 16 到 64 像素以及 256 像素，作为图标嵌入可执行文件，窗口、资源管理器和任务栏都会显示它；同时写到 bundle 旁的 `nsh\icon.ico`，通知会显示它。在 macOS 或 Linux 上打包时，可执行文件在资源管理器里保持默认图标，窗口和任务栏显示 `icon.ico`。`nsh run --target windows` 和 `nsh test --target windows` 也会显示它。
 - **Web：** 缩放为 32 像素（favicon）、180 像素（`apple-touch-icon`）以及 192 和 512 像素（Web 应用清单）。
 
-各平台绘制图标的方式不同：macOS 的图案在透明画布上内缩（1024 像素中占 824），Windows、Linux 和 Android 则铺满画布。给 `icon` 一个对象，即可为每个平台使用各自的 PNG。键为 `macos`、`windows`、`linux`、`ios`、`android` 和 `web`，未列出的平台显示系统默认图标：
+各平台绘制图标的方式不同：macOS 的图案在透明画布上内缩（1024 像素中占 824），Windows、Linux 和 Android 则铺满画布。给 `icon` 一个对象，即可为每个平台使用各自的 PNG；键为 `macos`、`windows`、`linux`、`ios`、`android` 和 `web`，未列出的平台显示系统默认图标：
 
 ```json
 {
@@ -1036,7 +1036,7 @@ NSH 在 iOS 上不读取用户默认设置（温度单位取自区域设置）�
 
 两者和图标一起编译进应用的资源目录，并写进 `UILaunchScreen`，应用就不再在 `ios.infoPlist` 里设置它。启动画面与应用第一帧一致（同样的背景、同一张图在同一位置）时，启动看起来没有跳变。系统显示哪一套由 `appearance` 决定。
 
-Android 上 `android.launchScreen` 用同样的键。打包时给应用生成一个主题，窗口背景是 `background`：从点下图标起窗口就和应用第一帧一致，之后也留在应用下面。Android 12 及以上，系统启动屏同样用 `background`（图标后面也是），`image` 在中央，大小与 iOS 相同（288×288 的 PNG 是 96×96 dp）。不给 `image` 时启动屏显示启动器图标。目标 API 级别低于 31 的应用没有系统启动屏，`image` 不显示，但文件仍会检查。深色的值在系统深色模式下生效。`appearance` 固定为 `light` 或 `dark` 时只用那一套。
+Android 上 `android.launchScreen` 用同样的键。打包时给应用生成一个主题，窗口背景是 `background`：从点下图标起窗口就和应用第一帧一致，之后也留在应用下面。Android 12 及以上，系统启动屏同样用 `background`（图标后面也是），`image` 在中央，大小与 iOS 相同（288×288 的 PNG 是 96×96 dp）；不给 `image` 时启动屏显示启动器图标。目标 API 级别低于 31 的应用没有系统启动屏，`image` 不显示，但文件仍会检查。深色的值在系统深色模式下生效；`appearance` 固定为 `light` 或 `dark` 时只用那一套。
 
 ```json
 {
@@ -1083,7 +1083,7 @@ Rust 应用的包就是它的 runner：用你的 crate 构建，挂载好根组�
 | Windows | `nsh-windows-app.exe` 可执行文件，重命名为 `<Name>.exe` | `<Name>\nsh\bundle.nshc`、`nsh\assets\…` |
 | Web | `nsh.<digest>.wasm`、`nsh.<digest>.js` | `<Name>/app.<digest>.js`、`assets/…`、`index.html` |
 
-打包出的应用不注册任何[原生组件](./native-components.md)。如需使用原生组件，请把 NSH 嵌入你自己的应用。
+打包出的应用不注册任何[原生组件](./native-components.md)；如需使用原生组件，请把 NSH 嵌入你自己的应用。
 
 ## 日志
 
@@ -1096,7 +1096,7 @@ Rust 应用的包就是它的 runner：用你的 crate 构建，挂载好根组�
 Rust 应用构建自己的 runner。对 TSX 应用，`nsh package` 会在 CLI 旁边查找预构建运行时（发行包中的 `bin/../runtime`）。在 NSH 的源码仓库中，它使用
 `target/<triple>/<profile>` 和 `target/android/<profile>`，profile 与 CLI 自身一致（debug 版 CLI 使用 debug 版运行时）：用
 `cargo build -p nsh-ios-app --target aarch64-apple-ios-sim`（真机用 `aarch64-apple-ios`）和 `cargo xtask android`
-构建它们（release 版 CLI 需加上 `--release`）。`nsh-macos-app`（在 macOS 上）、`nsh-linux-app`（在 Linux 上）和 `nsh-windows-app`（在 Windows 上）为本机构建，位于 `target/<profile>`（`cargo build -p nsh-macos-app`、`cargo build -p nsh-linux-app`、`cargo build -p nsh-windows-app`）。Web 运行时不论 CLI 的 profile 如何，都以 `web` profile 构建，位于 `target/wasm32-unknown-unknown/web/`。环境变量 `NSH_RUNTIME` 可以让 CLI 改用另一个目录，其结构与发行包的
+构建它们（release 版 CLI 需加上 `--release`）；`nsh-macos-app`（在 macOS 上）、`nsh-linux-app`（在 Linux 上）和 `nsh-windows-app`（在 Windows 上）为本机构建，位于 `target/<profile>`（`cargo build -p nsh-macos-app`、`cargo build -p nsh-linux-app`、`cargo build -p nsh-windows-app`）；Web 运行时不论 CLI 的 profile 如何，都以 `web` profile 构建，位于 `target/wasm32-unknown-unknown/web/`。环境变量 `NSH_RUNTIME` 可以让 CLI 改用另一个目录，其结构与发行包的
 `runtime/` 相同（`ios/iphoneos`、`ios/iphonesimulator`、`android/release`、`macos`、`linux`、`windows`、`gpui`、`web` 等）。
 
 ## 发布

@@ -7,7 +7,7 @@ demo: el-button
 
 # Button
 
-按钮是一个可按压的目标。它负责行为：按压、按压反馈（用应用的状态样式呈现）、禁用和选中状态、键盘焦点，以及屏幕阅读器读到的按钮角色。`Button` 没有自己的颜色、尺寸、内边距或文字。给它不同的样式和子元素，它就可以是主按钮、图标按钮、菜单触发按钮或列表的一行。
+按钮是一个按压目标。它负责行为：按压、通过应用的状态样式呈现的按压反馈、禁用和选中状态、键盘焦点，以及它对屏幕阅读器而言的角色。外观由应用决定：`Button` 没有自己的颜色、尺寸、内边距或文字，所以同一个组件可以按你给它的样式和子元素，成为主按钮、图标按钮、菜单的触发按钮或列表的一行。
 
 ```tsx tabs
 import { mount, signal, Text } from "nsh";
@@ -75,7 +75,7 @@ fn counter() -> impl IntoElement {
 | `class`、`style` | 样式方法 | `string`、`StyleProp<ViewStyle>` | 无 | 它的全部外观。 |
 | `activeStyle`、`hoverStyle`、`focusStyle`、`disabledStyle` | `.active(\|s\| ..)`、`.hover(..)`、`.focus(..)`、`.disabled_style(..)` | `StyleProp<ViewStyle>` | 无 | 按下、悬停、获得焦点或禁用时的样式，与对应的 `<state>:` 类相同。后面的状态优先，`disabled` 优先于所有状态。 |
 
-在 Rust 中，每个属性是一个设置方法，接受值、信号或闭包。没有设置的属性保留默认值：
+在 Rust 中，每个属性是一个设置方法，接受值、信号或闭包；没有设置的属性保留默认值：
 
 ```rust
 button()
@@ -195,7 +195,7 @@ fn save(saving: Signal<bool>) -> impl IntoElement {
 
 ## 用 selected 标出当前项
 
-`selected` 把按钮标为同类中的当前项，或正在打开的内容的触发器：侧栏当前显示的文件夹、生效中的筛选条件、菜单打开期间的菜单按钮（见设计指南的“交互状态”）。值由应用持有，选中状态的样式也由应用设置。屏幕阅读器会报告按钮已选中。
+`selected` 把按钮标为同类中的当前项，或正在打开的内容的触发器：侧栏当前显示的文件夹、生效中的筛选条件、菜单打开期间的菜单按钮（见设计指南的“交互状态”）。值由应用持有，选中状态的样式也由应用设置；屏幕阅读器会报告按钮已选中。
 
 ```tsx tabs
 <Button
@@ -254,8 +254,8 @@ fn close(open: Signal<bool>) -> impl IntoElement {
 
 ## 无障碍
 
-- 标签不能说明按下按钮的结果时，设置 `accessibilityHint`。它跟随响应式值变化。设为 `undefined` 会移除提示。
-- 对屏幕阅读器而言，按钮是一个元素，角色为 `"button"`，除非 `role` 另有指定。它的标签是它的文字内容。内容是图标或说明不足时，设置 `accessibilityLabel`。
+- 标签不能说明按下按钮的结果时，设置 `accessibilityHint`。它跟随响应式值变化；设为 `undefined` 会移除提示。
+- 对屏幕阅读器而言，按钮是一个元素，角色为 `"button"`，除非 `role` 另有指定。它的标签是它的文字内容；内容是图标或说明不足时，设置 `accessibilityLabel`。
 - `disabled`、`selected` 和 `busy` 按平台的方式播报（VoiceOver、TalkBack、UI Automation、浏览器的无障碍树）。
 - 在 macOS 和 Web 上，按钮是键盘焦点的一站：Tab 可以到达它，Return 和空格按下它，`focus-visible:` 样式显示焦点所在。
 
@@ -265,6 +265,6 @@ fn close(open: Signal<bool>) -> impl IntoElement {
 
 ## 平台说明
 
-- iOS、Android 和 Mac Catalyst：一次按压是在按钮上结束的轻点。移开会取消它，与系统自己的按钮一致。
+- iOS、Android 和 Mac Catalyst：一次按压是在按钮上结束的轻点；移开会取消它，与系统自己的按钮一致。
 - 桌面平台（macOS、Windows、Linux、GPUI）和 Web：一次按压是一次单击。在 macOS 和 Web 上，Return 和空格也会按下拥有键盘焦点的按钮。`hover:` 样式在鼠标或触控板指针下生效。
 - 每个平台都只绘制应用设定的样式：按压反馈是 `active:` / `activeStyle` 或你自己的动画。

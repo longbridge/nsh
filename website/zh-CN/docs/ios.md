@@ -7,9 +7,9 @@ group: platforms
 
 # iOS
 
-NSH 应用可以在 iOS 15.0 及以上的真机和模拟器上运行，用 UIKit 视图渲染，用 CoreText 排版文字。完整应用的运行和打包方式与其他平台相同。
-
-现有 iOS 应用也可以在自己的视图里显示 NSH 应用：链接 Rust 根组件，或加载 TSX（包括下载的签名包）。限制和能力由宿主应用设定。在 iOS 上，`os()` 是 `Os::Ios`（TSX 中 `platform.os` 是 `"ios"`），TSX 的
+NSH 应用在 iOS 上用 UIKit 视图和 CoreText 文本运行，支持真机和模拟器，要求 iOS 15.0 及以上。完整应用的运行和打包方式
+与其他平台相同；现有应用也可以在自己的视图中显示 NSH 应用，可以是它链接的 Rust 根组件，也可以是它加载的 TSX，包括它下载的签名包，
+并按自己设定的限制和能力运行它们。在 iOS 上，`os()` 是 `Os::Ios`（TSX 中 `platform.os` 是 `"ios"`），TSX 的
 `ios={{…}}` 属性生效。
 
 ## 环境要求
@@ -27,9 +27,9 @@ nsh run --target ios --device "iPhone 16 Pro"
 nsh run App.tsx --target ios                          # TSX 应用
 ```
 
-`nsh` 会使用已启动的模拟器，或者启动最新的 iPhone。对 Rust 应用，它用你的 crate 构建应用自己的 runner 并安装，在终端显示日志。
+`nsh` 会使用已启动的模拟器，或者启动最新的 iPhone。对 Rust 应用，它用你的 crate 构建应用自己的 runner 并安装，在终端显示日志；
 修改 crate 的 Rust 代码会重新构建并重启应用。对 TSX 应用，它安装开发宿主，并在你保存时更新应用，日志显示在终端中。`--device`
-按名称或 UDID 选择模拟器。查看应用在 iPhone 上的效果请用模拟器。[Mac Catalyst](./getting-started.md#mac-catalyst)
+按名称或 UDID 选择模拟器。查看应用在 iPhone 上的效果请用模拟器；[Mac Catalyst](./getting-started.md#mac-catalyst)
 （`--target catalyst`）用于 Catalyst 特有的工作。
 
 ## 来自其他代码的通知
@@ -65,12 +65,12 @@ set_foreign_handler(Chats);
 ```
 
 `ForeignNotification` 带有请求的 `id`、所属分组 `thread_id`，以及转成 JSON 的 `userInfo`（`user_info`）。处理者的方法在主线程运行，
-在其他线程调用 `set_foreign_handler` 会 panic。处理者只有一个，所以由应用 crate 持有，再转给它使用的模块。之后的调用会替换它。没有处理者时，
+在其他线程调用 `set_foreign_handler` 会 panic。处理者只有一个，所以由应用 crate 持有，再转给它使用的模块；之后的调用会替换它。没有处理者时，
 这些通知和应用自己的通知一样显示，点击被丢弃。只报告点击通知本身，不报告其类别的操作。嵌入 NSH 且自己设置了通知中心 delegate 的应用，
 所有通知都留在自己的 delegate。macOS 上同样如此。
 
 开启 `nsh-extra` 的 [`push`](./nshm.md#push) feature 的应用，独立运行的应用启动后由这个模块设置处理者，它把通知交给 `Push.on`，并通过
-`nsh_extra::push::on_event` 交给 Rust 代码。这时应用 crate 在那里监听，用 `nsh_extra::push::set_foreground_presentation_decider`
+`nsh_extra::push::on_event` 交给 Rust 代码；这时应用 crate 在那里监听，用 `nsh_extra::push::set_foreground_presentation_decider`
 决定通知在前台怎么显示，不再自己设置处理者。
 
 ## 打包
@@ -80,7 +80,7 @@ nsh package --target ios-simulator --run      # .nsh/out/<Name>.app，安装到�
 nsh package --target ios --sign "Apple Distribution: Example Inc (ABCDE12345)" --profile AppStore.mobileprovision
 ```
 
-在 Rust 应用的目录里，应用是用你的 crate 构建的 iOS runner。TSX 应用需写明入口（`nsh package App.tsx --target ios-simulator --run`）。
+在 Rust 应用的目录里，应用是用你的 crate 构建的 iOS runner；TSX 应用需写明入口（`nsh package App.tsx --target ios-simulator --run`）。
 
 `--target ios` 为真机、TestFlight 或 App Store 生成签名的 `.ipa`。签名身份、描述文件和图标见[打包](./packaging.md#ios-真机)。
 
@@ -91,7 +91,7 @@ nsh package --target ios --sign "Apple Distribution: Example Inc (ABCDE12345)" -
 ## 应用事件
 
 独立应用的 `UIApplicationDelegate` 归 NSH 所有。应用 crate 或 [nshm](./nshm.md) 的 Rust 代码用
-`nsh_platform_ios::on_application_event` 接收它的启动和远程通知回调。在 `#[native_module]` 入口里调用一次：入口在主线程上、应用启动前执行。
+`nsh_platform_ios::on_application_event` 接收它的启动和远程通知回调。在 `#[native_module]` 入口里调用一次：入口在主线程上、应用启动前执行；
 每次调用都会再添加一个处理函数，所以重新运行入口的代码（它的 `registry()`）会重复添加。crate 只在 iOS 上依赖 `nsh-platform-ios`，
 版本和来源与它的其他 NSH crate 一致（[从应用的 crate 注册](./native-components.md#从应用的-crate-注册)）：
 
@@ -119,7 +119,7 @@ nsh_platform_ios::on_application_event(|event| match event {
 事件有 `Launched`（带启动选项）、`RegisteredForRemoteNotifications`、`FailedToRegisterForRemoteNotifications` 和
 `RemoteNotification`。NSH 只负责转交：申请远程通知（`registerForRemoteNotifications`）由应用自己的代码调用。
 `aps-environment` entitlement 来自应用签名所用的描述文件，`remote-notification` 后台模式由应用写在 `nsh.json` 里
-（[Info.plist 键与 entitlements](./packaging.md#infoplist-键与-entitlements)）。`nsh-extra` 的 [`push`](./nshm.md#push) feature 会自己加上这个后台模式。没有处理函数的应用，其 delegate 不实现这些方法。
+（[Info.plist 键与 entitlements](./packaging.md#infoplist-键与-entitlements)）；`nsh-extra` 的 [`push`](./nshm.md#push) feature 会自己加上这个后台模式。没有处理函数的应用，其 delegate 不实现这些方法。
 把 NSH 嵌入自己 UIKit 应用的应用保留自己的 delegate，在那里接收这些回调。
 
 ## 嵌入 iOS 应用
@@ -129,11 +129,11 @@ nsh_platform_ios::on_application_event(|event| match event {
 模块的 framework：创建一个 `NshAppView`（一个 `UIView`），把它加到视图层级的任意位置，再往里加载一个 TSX 应用或签名包即可。
 你的原生页面、导航和 NSH 应用共处同一个 UIKit 视图层级。
 
-每个视图都是一个独立的引擎。没有全局单例，所以一个应用可以同时显示多个 NSH 应用，比如每个标签页一个。
+每个视图都是一个独立的引擎；没有全局单例，所以一个应用可以同时显示多个 NSH 应用，比如每个标签页一个。
 
 <div class="diagram-scroll">
-<img class="diagram diagram-light" src="/diagrams/host-app-light.svg" alt="一个宿主应用里有两个 NshAppView 区域：每个都是独立的引擎，有自己的线程、虚拟机、限制和能力。宿主授予能力、设置限制，并注册地图这样的原生组件。">
-<img class="diagram diagram-dark" src="/diagrams/host-app-dark.svg" alt="一个宿主应用里有两个 NshAppView 区域：每个都是独立的引擎，有自己的线程、虚拟机、限制和能力。宿主授予能力、设置限制，并注册地图这样的原生组件。">
+<img class="diagram diagram-light" src="/diagrams/host-app-light.svg" alt="一个宿主应用里有两个 NshAppView 区域：每个都是独立的引擎，有自己的线程、虚拟机、限制和能力；宿主授予能力、设置限制，并注册地图这样的原生组件。">
+<img class="diagram diagram-dark" src="/diagrams/host-app-dark.svg" alt="一个宿主应用里有两个 NshAppView 区域：每个都是独立的引擎，有自己的线程、虚拟机、限制和能力；宿主授予能力、设置限制，并注册地图这样的原生组件。">
 </div>
 
 ## 嵌入 Rust 应用
@@ -158,9 +158,9 @@ fn show(container: &UIView) -> AppView {
 }
 ```
 
-视图随父视图调整大小。`AppView::run` 替换正在运行的内容。`AppView::load` 则运行 TSX bundle（`Bundle::source`，或对应用包内的
+视图随父视图调整大小。`AppView::run` 替换正在运行的内容；`AppView::load` 则运行 TSX bundle（`Bundle::source`，或对应用包内的
 `bundle.nshc` 使用 `unsafe { Bundle::bytecode(bytes) }`）。`SurfaceOptions` 包含限制、授予的能力、数据目录和原生组件，与下文
-`NshAppView` 的成员对应。`AppView::set_locale`、`set_font_scale` 和 `set_error_handler` 对应 `locale`、`fontScale` 和 `onError`。
+`NshAppView` 的成员对应；`AppView::set_locale`、`set_font_scale` 和 `set_error_handler` 对应 `locale`、`fontScale` 和 `onError`。
 `nsh package --target ios` 会为你构建这种应用，并挂载好根组件。
 
 不调用 `set_ui_sets` 时，`AppView` 提供 `nsh/base` 的核心部分（`Button`、`Checkbox`、`Switch`、`Tabs`、`Slider`、`AlertDialog`、
@@ -191,7 +191,7 @@ cargo xtask ios-embed --dynamic
 动态 framework 让运行时拥有独立的库映像和展开表，适合已经链接其他 Rust 运行时的宿主应用。请根据构建类型选择下文的 Xcode 嵌入设置。
 
 默认情况下，每个 XCFramework 包含三个 arm64 切片：iOS 真机、iOS 模拟器（Apple 芯片）和 Mac Catalyst。最低部署目标为 iOS 15.0。Swift
-模块启用了 library evolution 编译，因此用其他版本 Swift 编译器构建的应用也能导入它。framework 已链接了它需要的一切，你无需再添加其他东西。
+模块启用了 library evolution 编译，因此用其他版本 Swift 编译器构建的应用也能导入它；framework 已链接了它需要的一切，你无需再添加其他东西。
 
 `NshAppView` 为它运行的应用提供完整的 `nsh/base`（包括 `nsh/base/plot`），与 Android 的 `NshView` 一样：应用可以导入其中任何组件。
 宿主应用若用自己的 Rust 代码构建运行时，可以在创建第一个视图之前用 `nsh_platform_ios::set_ui_sets` 选择 UI 集合
@@ -200,7 +200,7 @@ cargo xtask ios-embed --dynamic
 ## 加入 Xcode 项目
 
 1. 把 `NativeShell.xcframework`（开发构建则用 `NativeShellDev.xcframework`）拖到应用 target 的
-   **Frameworks, Libraries, and Embedded Content** 中。默认的静态 framework 选择 **Do Not Embed**。
+   **Frameworks, Libraries, and Embedded Content** 中。默认的静态 framework 选择 **Do Not Embed**；
    使用 `--dynamic` 构建的动态 framework 选择 **Embed & Sign**。
 2. 在 Swift 中 `import NativeShell`。
 3. 在应用的 `Info.plist` 中把 `CADisableMinimumFrameDurationOnPhone` 设为 `YES`：在 ProMotion iPhone 上，应用的动画
@@ -270,7 +270,7 @@ final class EmbedController: UIViewController {
 }
 ```
 
-视图的尺寸就是应用的窗口：NSH 按视图的 bounds 布局应用，bounds 变化时重新布局。再次加载会替换正在运行的应用。视图被释放时应用随之停止。
+视图的尺寸就是应用的窗口：NSH 按视图的 bounds 布局应用，bounds 变化时重新布局。再次加载会替换正在运行的应用；视图被释放时应用随之停止。
 
 完整示例是 `examples/embed-ios/main.swift`：一个在自己的原生标题栏下方显示 NSH 应用的 UIKit 应用。
 
@@ -350,7 +350,7 @@ app.handle("analytics") { data, _ in analytics.log(data) }
 app.send("conversation.open", ["id": tapped.conversationID])
 ```
 
-处理函数在主线程运行。调用在应用中等待回答，不会阻塞任何一方。未回答就被释放的 reply 会让调用失败，没有处理函数的名称的调用会立即失败。应用尚未监听的名称的事件会保留到它开始监听，没有应用运行时（`loadBundle` 之前、重新加载期间）发送的事件交给下一个应用，因此应用启动期间点开的通知照样能送到。
+处理函数在主线程运行；调用在应用中等待回答，不会阻塞任何一方。未回答就被释放的 reply 会让调用失败，没有处理函数的名称的调用会立即失败。应用尚未监听的名称的事件会保留到它开始监听，没有应用运行时（`loadBundle` 之前、重新加载期间）发送的事件交给下一个应用，因此应用启动期间点开的通知照样能送到。
 ## 跟随滚动视图
 
 宿主的原生界面有时要逐帧跟着应用的内容移动：页面下方一个由内容末尾拉起的面板，或随内容收起的页头。把 `onScroll` 经 JS
@@ -446,7 +446,7 @@ app.limits = NshLimits(memoryMB: 128, callBudget: 1, maxNodes: 50_000)
 
 ## 能力
 
-应用在 `nsh.json` 中声明它可以访问什么。嵌入方应用可以授予更少的能力。一个请求必须同时被两者允许：
+应用在 `nsh.json` 中声明它可以访问什么；嵌入方应用可以授予更少的能力。一个请求必须同时被两者允许：
 
 ```swift
 try app.grantCapabilities("""
@@ -509,7 +509,7 @@ try app.loadBundle(at: bundledURL)
 #endif
 ```
 
-在 Mac 上运行 `nsh dev App.tsx`。模拟器与 Mac 共享网络，所以 `127.0.0.1` 就能访问服务器。真机则使用 `nsh dev`
+在 Mac 上运行 `nsh dev App.tsx`。模拟器与 Mac 共享网络，所以 `127.0.0.1` 就能访问服务器；真机则使用 `nsh dev`
 打印的局域网地址（`devices on this network: ws://192.168.1.20:8790/ws`）。每次保存都会就地更新应用，日志显示在 `nsh dev`
 终端中，错误显示在应用上方。参见[开发服务器与调试](./dev-server-and-debugging.md)。
 
@@ -520,9 +520,9 @@ try app.loadBundle(at: bundledURL)
 ## 注意事项
 
 - **线程。** `NshAppView` 隔离在 main actor 上。`NshTrust`、`NshPackage` 和 `NshComponentContext` 是线程安全的。JS
-  引擎运行在自己的线程上。主线程从不等待它。
-- **状态栏。** 嵌入应用的页面和对话框（`statusBar`）会改变 `NshAppView.preferredStatusBarStyle` 等属性的返回值。宿主视图控制器必须像上面的示例那样转发它们。
-- **方向。** 页面的 `supportedOrientations` 会改变 `NshAppView.supportedInterfaceOrientations` 的返回值。宿主视图控制器像上面的示例那样转发它，屏幕按其控制器允许的方向转动。
+  引擎运行在自己的线程上；主线程从不等待它。
+- **状态栏。** 嵌入应用的页面和对话框（`statusBar`）会改变 `NshAppView.preferredStatusBarStyle` 等属性的返回值；宿主视图控制器必须像上面的示例那样转发它们。
+- **方向。** 页面的 `supportedOrientations` 会改变 `NshAppView.supportedInterfaceOrientations` 的返回值；宿主视图控制器像上面的示例那样转发它，屏幕按其控制器允许的方向转动。
 - **安全区域。** 应用照常在 Rust 中使用 `safe_area()`，在 TSX 中在内边距里使用
   `env(safe-area-inset-*)` 或 [`nsh`](../modules/nsh.md#safe-area-and-keyboard) 的 `safeAreaInsets()`。放在你自己标题栏下方的 `NshAppView` 拿到的是适用于它自身的 insets，而不是整个窗口的。
 - **Mac Catalyst。** 同一个 framework 也可用于 Catalyst 应用。

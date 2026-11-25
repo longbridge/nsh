@@ -7,14 +7,9 @@ group: tools
 
 # Dev Server and Debugging
 
-During development, NSH rebuilds your app on every save.
-
-- A Rust app (one whose `nsh.json` names a `"root"`) is built into its own runner, which `nsh run` starts. A change
-  to its crate rebuilds it and restarts the app.
-- A TSX app is pushed to every connected host, and each host updates in place. A **host** is the native app that runs
-  your NSH app, such as the development host window or your own app with the development SDK.
-
-Two commands do this:
+During development, NSH builds your app on every save. A Rust app (`nsh.json` names its `"root"`) is built into its
+own runner, which `nsh run` starts; a change to its crate builds it again and restarts the app. A TSX app is pushed to
+every connected host, which updates in place. Two commands do this:
 
 - `nsh run` builds the app **and** launches it: an AppKit window on macOS, a GTK window on Linux, a Win32 window
   on Windows, an iOS simulator, an Android device or emulator, or a browser page. For TSX it also starts the dev
@@ -36,7 +31,7 @@ nsh run App.tsx --target android    # Android device or emulator
 nsh dev App.tsx --server-only       # server only
 ```
 
-`nsh dev` also opens the native host by default. For mobile hosts, pass `--target ios` or `--target android`.
+`nsh dev` also opens the native host by default; mobile hosts use `--target ios` or `--target android`.
 
 ## `nsh run`
 
@@ -51,31 +46,29 @@ nsh dev App.tsx --server-only       # server only
 What each target does:
 
 - **`macos`** (macOS) runs the AppKit development host, a desktop app in a 1200×800 window. Stopping `nsh run`
-  (Ctrl-C, or `kill`) closes the window, and closing the window ends `nsh run`. Cmd+R reloads the latest build.
-  Requires macOS 14 or later ([macOS](./macos.md)).
-- **`linux`** (Linux) runs the GTK development host in a 390×844 window. It starts and stops the same way as `macos`.
-  Requires GTK 4.14 or later ([Linux](./linux.md)).
-- **`windows`** (Windows) runs the Win32 development host in a 1200×800 window, the same way. The host never outlives
+  (Ctrl-C, or `kill`) closes it, and closing the window ends `nsh run`; Cmd+R reloads the latest build. Requires
+  macOS 14 or later ([macOS](./macos.md)).
+- **`linux`** (Linux) runs the GTK development host in a 390×844 window, the same way: stopping `nsh run` closes
+  it, closing the window ends `nsh run`. Requires GTK 4.14 or later ([Linux](./linux.md)).
+- **`windows`** (Windows) runs the Win32 development host in a 1200×800 window, the same way; the host never outlives
   `nsh run`, even when the console is closed. Requires Windows 10 1809 or later ([Windows](./windows.md)).
 - **`ios`** installs the development host in the simulator, launches it pointed at the dev server and keeps watching.
   The simulator shares the Mac's network, so the host reaches the server on `127.0.0.1`. Stopping `nsh run` (Ctrl-C)
-  closes the host. Otherwise it would join the next session. Requires Xcode.
-- **`android`** installs the development host APK, and reinstalls it only when the runtime changed. It runs
-  `adb reverse tcp:<port> tcp:<port>` so the device's own `127.0.0.1` reaches the server, then starts the host. It
-  works with an emulator or a USB device. Requires the Android SDK (`ANDROID_HOME`). When `nsh run` ends (Ctrl-C
-  included), it stops the host and removes the port forwarding, so the host does not join the next session.
+  closes the host, which would otherwise join the next session. Requires Xcode.
+- **`android`** installs the development host APK (again only when the runtime changed), runs
+  `adb reverse tcp:<port> tcp:<port>` so the device's own `127.0.0.1` reaches the server, and starts it. Works with an
+  emulator or a USB device. Requires the Android SDK (`ANDROID_HOME`). When `nsh run` ends (Ctrl-C too), it stops the
+  host and removes that port forwarding, so the host does not join the next session.
 
-**Development tool:** `catalyst` (macOS) runs the iOS development host as a Mac Catalyst app. Use it only to check
-Catalyst-specific behavior, or for an app that embeds NSH in a Mac Catalyst app. It starts and stops with `nsh run`
-like `macos`.
+**Development tool:** `catalyst` (macOS) runs the iOS development host as a Mac Catalyst app, only when you need it: to check behavior specific to Catalyst, or an app that embeds NSH in a Mac Catalyst app. It starts and stops with `nsh run` as `macos` does.
 
-However `nsh run` ends, it stops the host it started. It closes the macOS, Linux or Windows host, terminates the
+When `nsh run` ends, however it ends, it stops the host it started: it closes the macOS, Linux or Windows host, terminates the
 development host in the simulator, force-stops it on the device, or quits the Catalyst app.
 
-For a Rust app, each target runs the app's own runner, built with its crate. On the desktops this is a debug build
-that runs in place, with its output in the terminal. On iOS and Android it is an installed package. For TSX the hosts
-are generic: they run any NSH app the server sends, so nothing is built per app. An app with its own crate gets hosts
-built with that crate.
+For a Rust app each target runs the app's own runner, built with its crate: the desktops a debug build in place, with
+its output in the terminal; iOS and Android a package of it, installed. For TSX the hosts are generic: they run any
+NSH app the server sends, so there is nothing to build per app (an app with a crate of its own gets hosts built with
+it).
 
 ## `nsh dev`
 
@@ -95,11 +88,9 @@ nsh dev App.tsx --server-only
 | `--host <ipv4>` | IPv4 address to bind. Defaults to `0.0.0.0` for `--server-only` and `--target ios`, `android` or `web`, and `127.0.0.1` for local targets. With `--target android`, only `127.0.0.1` and `0.0.0.0` are supported (`adb reverse` forwards to this machine's `127.0.0.1`). |
 | `--release` | Serve release builds. |
 
-By default, `nsh dev --server-only` listens on every address of this computer (`0.0.0.0`), so phones and other
-machines on the network can connect. `nsh run` and `nsh dev` with a host on this computer (a window, the terminal,
-Catalyst) default to `127.0.0.1`. With `--target ios`, `android` or `web` they listen on every address, like
-`--server-only`. Pass `--host <ipv4>` to choose the bind address. For example,
-`nsh dev App.tsx --server-only --host 127.0.0.1` keeps a server-only session on loopback only.
+By default, `nsh dev --server-only` listens on every address of this computer (`0.0.0.0`), so phones and other machines on the network can
+connect. `nsh run` and `nsh dev` with a host on this computer (a window, the terminal, Catalyst) default to `127.0.0.1`;
+with `--target ios`, `android` or `web` they default to every address, as `--server-only` does. Pass `--host <ipv4>` to override the bind address—for example, `nsh dev App.tsx --server-only --host 127.0.0.1` keeps a server-only session on loopback only.
 
 Connect hosts to the printed URL:
 
@@ -108,50 +99,50 @@ Connect hosts to the printed URL:
 - **Your own Android app**, with `nsh-dev.aar`: `nsh.connectDevServer("ws://192.168.1.20:8790/ws")`, or
   `adb reverse tcp:8790 tcp:8790` and `ws://127.0.0.1:8790/ws`. See [Embedding in Android apps](./android.md#development).
 
-Any number of hosts can connect at once, and every build goes to all of them. A host that connects later receives
-the current build right away. Some hosts cannot run the app because they lack a UI set the app imports, for example
-a development host built for another app. Such a host gets no build. It shows the reason, and the terminal prints a
-`warn` line with the command that installs the right host.
+Any number of hosts can be connected at once; every build goes to all of them. A host that connects later receives the
+current build right away. A host that cannot run the app, because it lacks a UI set the app imports (a development
+host built for another app), gets no build: it shows why, and the terminal prints a `warn` line with the command that
+installs the app's host.
 
 > [!NOTE]
-> A device on the LAN must reach your computer on the dev server's port. It needs the same network and no firewall
-> in between. The same port serves assets over plain HTTP: the files the app imports, and the images, fonts, audio
-> and video in the app's directory, except in hidden directories. Sources and configuration (`nsh.json`, `.env`) stay
-> on your computer. The WebSocket serves the development hosts and the dev server's own web page.
+> A device on the LAN needs to reach your computer on the dev server's port: same network, no firewall in between.
+> Assets are served over plain HTTP from the same port: the files the app imports, and the images, fonts, audio and
+> video in its directory outside hidden directories. Its sources and configuration (`nsh.json`, `.env`) stay on your
+> computer. The WebSocket takes the development hosts and the dev server's own web page.
 
 ## Rust edits
 
-Rust is compiled, so it can't be patched in place. A change to the app's crate, or to a crate it depends on by path,
-rebuilds the app, and `nsh run` restarts it with the new code. The app's state starts fresh. Keep what must survive a
-restart in [storage](../modules/nsh.md#storage). Build errors print in the terminal, and the next save that compiles
-runs again. In an app with both TSX and Rust, TSX edits are hot updates (below) and Rust edits restart the app.
+Rust is compiled: a change to an app's crate, or to a crate it depends on by path, builds the app again, and `nsh run`
+restarts it with the new code. The app's state starts afresh; keep what must survive a restart in
+[storage](../modules/nsh.md#storage). A build error is printed in the terminal, and the next save that compiles runs
+again. In an app with TSX and Rust, TSX edits stay hot updates (below) and Rust edits restart the app.
 
 ## Hot module replacement
 
-Hot module replacement updates a running app without restarting it. TSX development builds keep one module per
-source file. When you save, NSH rebuilds, compares the modules with the last good build and sends a **patch** with
-only the changed modules. The host applies it in place in well under a millisecond. From saving a file to seeing the
-change takes roughly 120 ms.
+TSX development builds keep one module per source file. When you save, NSH rebuilds, compares the modules with the last
+good build and sends a **patch** with only the modules that changed. The host applies it in place in well under a
+millisecond; from saving a file to seeing the change takes roughly 120 ms.
 
 What happens to your app:
 
 - **Only the components you edited render again.** Every top-level component (a capitalized function that returns JSX)
-  is wrapped in a stable proxy. When its code changes, or other code in its module changes, its instances render
-  again with the new code. Components whose code did not change keep their instances, with their signals and state.
-  Edit a button's style and the screen stays where it was, with the same input text and scroll position.
-- **Modules that changed run again.** So do modules that import a changed module which cannot take the update by
-  itself, up to the entry. Module-level code therefore runs again, except for what keeps its state:
-- **Top-level signals and navigation stacks keep their state.** A `const` made by `signal(…)` or `createNavStack(…)`
-  at the top of a module keeps its value (for a stack, its pages) across edits, as long as its initializer is the
-  same. Change the initializer (`signal(0)` to `signal(10)`) to start fresh.
+  is wrapped in a stable proxy. When its code changes (or the rest of its module's code, which it may use), its
+  instances render again with the new code; components whose code did not change keep their instances, and with them
+  their signals and state. Edit a button's style and the
+  screen stays where it was, with the same input text and scroll position.
+- **Modules that changed run again**, and so do the modules importing a changed module that cannot take the update
+  by itself, up to the entry. Module-level code therefore runs again, except for what keeps its state:
+- **Top-level signals and navigation stacks keep their state**: a `const` made by `signal(…)` or `createNavStack(…)` at the
+  top of a module keeps its value (a stack its pages) across edits, as long as its own initializer is the same;
+  change the initializer (`signal(0)` to `signal(10)`) to start afresh.
 - **Top-level `context()` objects keep their identity**, taking the new default value, so providers and consumers in
   different modules keep matching.
-- **Editing the entry keeps the app mounted.** When `mount(App)` (or `mount(() => <App />)`) runs again with the
-  same component, it keeps what it mounted. Only the components you edited render again. If you edit `App` itself,
-  it renders again along with its children, whose own state starts fresh. A navigator made at the top of the module
-  still keeps its routes, so a pushed screen stays pushed. If the `mount` call itself changed (another component or
-  props), the app mounts again.
-- **A component that throws** reports the error and renders nothing until you fix it. The rest of the app keeps
+- **Editing the entry keeps the app mounted.** `mount(App)` (or `mount(() => <App />)`) run again with the same
+  component keeps what it mounted: only the components you edited render again. Edit `App` itself and it renders
+  again, with what it renders (their own state starts afresh), but a navigator made at the top of the module keeps its
+  routes, so a pushed screen stays pushed. A `mount` call that changed (another component, props) mounts the app
+  again.
+- **A component that throws** reports the error and renders nothing until you fix it; the rest of the app keeps
   running. The next good save recovers.
 
 The host **reloads the whole app** instead of patching when:
@@ -165,20 +156,19 @@ The host **reloads the whole app** instead of patching when:
 > State a component keeps in its own signals resets when that component, or one that renders it, is edited. Keep
 > state that must survive edits in top-level signals (or a store module), and make navigators at the top of a module.
 
-`--release` serves release builds without hot updates, so every save reloads the app. Use it to check the minified
-build. Anything loaded from a dev server skips the runtime's hardening, with or without `--release`. Hardening is the
-set of restrictions applied to production code, such as removing `eval`. See
+`--release` serves release builds, without hot updates: every save reloads the app. Use it to check the minified build.
+Anything loaded from a dev server, `--release` or not, skips the runtime's hardening (`eval` stays available); see
 [Sandbox and capabilities](./sandbox-and-capabilities.md#hardening).
 
 ## Logs
 
-A Rust app logs with the `log` crate (`log::info!`, `log::warn!`, `log::error!`). On the desktops and in the iOS
-simulator, `nsh run` shows these lines in its terminal, with the app's output.
+A Rust app logs with the `log` crate (`log::info!`, `log::warn!`, `log::error!`): `nsh run` shows the lines in its
+terminal, with the app's output, on the desktops and in the iOS simulator.
 
-In TSX, `console.log`, `console.info`, `console.debug`, `console.warn` and `console.error` write to the native log
-with target `js`. While a host is connected, its log lines are forwarded to the terminal running `nsh run` or
-`nsh dev`. Your `console.log` lines appear as they are, prefixed with the device's name when several devices are
-connected. Warnings and errors always follow the device's name:
+In TSX, `console.log`, `console.info`, `console.debug`, `console.warn` and `console.error` go to the native log with
+target `js`. While a host is connected, its log lines are forwarded to the terminal running `nsh run` / `nsh dev`: your
+`console.log` lines as they are (prefixed with the device's name when several devices are connected), warnings and
+errors after the device's name:
 
 ```text
 • iPhone 16 Pro connected, build 1
@@ -188,28 +178,28 @@ error iPhone 16 Pro: uncaught exception: TypeError: cannot read property 'id' of
           at Row (demos/Photos.tsx:18:22)
 ```
 
-`console.log` formats values like a browser console: strings as they are, errors with their stack, functions by
-name, objects and arrays as JSON. When no host is connected, logs go to Xcode's console on iOS (when Xcode runs the
-app) and to `adb logcat` on Android. A packaged app logs to the platform's log
+`console.log` formats values like a browser console: strings as they are, errors with their stack, functions by name,
+objects and arrays as JSON. When the host is not connected, its logs go to Xcode's console on iOS (when Xcode runs the
+app) and to `adb logcat` on Android; a packaged app's go to the platform's log
 ([A packaged app's logs](#a-packaged-apps-logs)).
 
-An unhandled rejection is also logged as an error, as in a browser. A rejection is unhandled when the promise still
-has no handler after its microtasks have run. Examples are an `async` function that throws while nobody awaits it, a
-`Promise.reject(…)` nobody catches, or a failed call into Rust that nothing waits for. The line goes wherever
-`console.error` goes (the terminal, the platform's log, the browser console on the web). Its stack points at your
-sources:
+A promise that is rejected and still has no handler once the work that rejected it is done (its microtasks ran) is
+logged as an error too, the way a browser reports it: an `async` function that throws while nobody awaits it, a
+`Promise.reject(…)` nobody catches, a call into Rust that fails with nothing waiting for it. The line goes wherever
+`console.error` goes (the terminal, the platform's log, the browser console on the web), with its stack pointing at
+your sources:
 
 ```text
 error iPhone 16 Pro: unhandled rejection: Error: HTTP 404
           at loadProfile (App.tsx:12:11)
 ```
 
-A handler attached later in the same turn (`const p = load(); …; p.catch(…)`) still counts. Where the failure
-matters, await the promise or give it a `.catch`.
+A handler attached later in the same turn (`const p = load(); …; p.catch(…)`) counts as handling it. Await the
+promise or give it a `.catch` where the failure matters.
 
-Other terminal output is one line per step: `✓` for done, `→` for where to connect, `•` for what a device did. Output
-from the tools NSH runs (cargo, the hosts) appears only when one of them fails. `nsh run -v` (or `NSH_VERBOSE=1`)
-prints everything: every log line with its level and source, cargo's output and the hosts' output.
+The rest of the terminal is one line per step (`✓` done, `→` where to connect, `•` what a device did); the output of
+the tools NSH runs (cargo, the hosts themselves) is only printed when one fails. `nsh run -v` (or `NSH_VERBOSE=1`)
+prints everything: every log line with its level and source, cargo's output and the hosts' own.
 
 `--trace` adds the cost of every commit:
 
@@ -221,11 +211,12 @@ See [Testing](./testing-and-trace.md) for what these numbers mean.
 
 ### A packaged app's logs
 
-On macOS and iOS, a packaged app writes to the unified log, Apple's system log. It logs its warnings and errors,
-and its `js` lines (`console.log`, `console.info`, `console.warn`, `console.error`, unhandled rejections). The
-subsystem is the app's id (`nsh.json` `"id"`, its bundle identifier). The category is the line's target: `js` for
-`console.*`, or a Rust module's path for Rust lines (`nsh_engine::updates`). In the Console app, pick the Mac or a
-connected iPhone, start streaming and search for `subsystem:com.example.notes`. In a terminal, use `log`:
+On macOS and iOS a packaged app logs to the unified log: its warnings and errors, and its `js` lines (`console.log`,
+`console.info`, `console.warn`, `console.error`, unhandled rejections). The subsystem is the app's id (`nsh.json`
+`"id"`, its bundle identifier) and the category the line's target: `js` for `console.*`, a Rust module's path for
+Rust's lines (`nsh_engine::updates`). In Console, pick
+the Mac or a connected iPhone, start streaming and search for `subsystem:com.example.notes`; in a terminal, `log` reads
+them:
 
 ```sh
 log stream --predicate 'subsystem == "com.example.notes"'                              # as they come
@@ -233,22 +224,20 @@ log show --last 1h --predicate 'subsystem == "com.example.notes" AND category ==
 xcrun simctl spawn booted log stream --predicate 'subsystem == "com.example.notes"'     # an app in the iOS simulator
 ```
 
-Errors are logged as the log's errors (`messageType == error` in a predicate). Warnings start with `WARN`. A line
-longer than about 1 KB continues in the following entries.
-
-A Mac app also prints its lines to standard error, wherever that goes: the terminal it was started from, a file
-(`2> app.log`, `open --stderr app.log`, launchd's `StandardErrorPath`) or a pipe. An iOS app that embeds
-`NativeShell.xcframework` logs the same lines under its own bundle identifier. Xcode's console shows them while Xcode
-runs the app, even with `OS_ACTIVITY_MODE=disable` in the scheme.
+Errors are the log's errors (`messageType == error` in a predicate) and warnings start with `WARN`; a line longer than
+about 1 KB continues in the entries after it. A Mac app also prints its lines to its standard error wherever that goes:
+the terminal it was started from, a file (`2> app.log`, `open --stderr app.log`, launchd's `StandardErrorPath`) or a
+pipe. An iOS app embedding `NativeShell.xcframework` logs the same lines under its own bundle identifier, and Xcode's
+console shows them while Xcode runs it, also with `OS_ACTIVITY_MODE=disable` in the scheme.
 
 Android apps log to logcat (`adb logcat -s nsh`), Windows apps to the debugger's output (`OutputDebugString`, which
 DebugView and Visual Studio show) and Linux apps to their standard error.
 
 #### Log files and levels on the desktop
 
-A packaged macOS, Windows or Linux app also writes its log lines to `logs/app.log` in its data directory, in
-addition to the platform's log. The table shows the default paths. To use another directory, set `logDir` in
-`nsh.json` ([Project structure](./project-structure.md)).
+A packaged macOS, Windows or Linux app also writes its log lines to a file in its data directory, `logs/app.log`,
+beside the platform's log. An app can choose another directory for the files with `nsh.json` `logDir`
+([Project structure](./project-structure.md)); the table is the default:
 
 | Platform | Log file |
 |---|---|
@@ -257,13 +246,12 @@ addition to the platform's log. The table shows the default paths. To use anothe
 | Linux | `$XDG_DATA_HOME/<app id>/logs/app.log` (`~/.local/share/<app id>/logs/app.log`) |
 
 Each line has the time in UTC, the level, the target and the message:
-`2026-11-12T08:30:05.123Z INFO  js: signed in`. At 5 MB the file is renamed `app.1.log` and a new `app.log` starts.
-NSH keeps the three previous files (`app.1.log` to `app.3.log`). If the file cannot be written, the app keeps running
-as usual.
+`2026-11-12T08:30:05.123Z INFO  js: signed in`. At 5 MB the file becomes `app.1.log` and a new `app.log` starts; the
+three files before it are kept (`app.1.log` to `app.3.log`). The app runs on as usual when the file cannot be written.
 
-`log_file()` in Rust and `process.logFile` in TSX return the file's path. The app can attach the file to a
-diagnostics report or offer to open its folder. The value is `None` (`null`) when lines go only to the platform's
-log: in development hosts, embedding apps, mobile and the web.
+`log_file()` in Rust and `process.logFile` in TSX give the file's path, so the app can attach it to a diagnostics
+report or offer to open its folder; it is `None` (`null`) where the lines go to the platform's log only (development
+hosts, embedding apps, mobile, the web).
 
 ```tsx tabs
 import process from "process";
@@ -282,22 +270,22 @@ if let Some(file) = log_file() {
 }
 ```
 
-By default a packaged app logs its warnings, errors and `js` lines. Under `nsh run` it logs every line from info
-up. The `RUST_LOG` environment variable overrides the levels, in `env_logger` syntax. It applies to both the file and
-the platform's log:
+By default a packaged app logs its warnings, errors and `js` lines (every line from info up under `nsh run`). The
+`RUST_LOG` environment variable sets the levels instead, in `env_logger`'s syntax, for the file and the platform's
+log alike:
 
 ```sh
 RUST_LOG=info ./notes                                  # every line from info up
 RUST_LOG=warn,notes=debug,js=info ./notes              # the app's crate in detail
 ```
 
-On Windows, set it for one run in PowerShell (`$env:RUST_LOG="info"; .\Notes.exe`), or for the user in the
-system's environment variables.
+On Windows set it for one run in PowerShell (`$env:RUST_LOG="info"; .\Notes.exe`), or for the user in the system's
+environment variables.
 
-When Rust code panics, the file records it at any log level. It writes an `ERROR panic:` line with Rust's panic
-message (the thread, the location and the message). With `RUST_BACKTRACE=1`, it also writes the backtrace. A
-packaged app's standard error is often hidden, for example in a Windows GUI program or a Mac app opened from Finder.
-So this file is where you can read the cause of a crash.
+When Rust code panics, the file records it whatever the levels: an `ERROR panic:` line with the words Rust prints (the
+thread, the place and the message), and the backtrace when `RUST_BACKTRACE=1` is set. A packaged app's standard error
+is often out of sight (a Windows GUI program, a Mac app opened from Finder), so this file is where a crash's cause can
+be read.
 
 ## The error overlay
 
@@ -322,17 +310,16 @@ App.tsx
  4 | }
 ```
 
-The bundler removes TypeScript types without checking them. For type errors, run [`nsh check`](./cli.md#nsh-check)
-or rely on your editor. `nsh check` uses TypeScript's native compiler with the `tsconfig.json` that `nsh init`
-writes, and needs no Node.
+The bundler removes TypeScript types without checking them; run [`nsh check`](./cli.md#nsh-check) (TypeScript's
+native compiler with the `tsconfig.json` `nsh init` writes; no Node needed) or rely on your editor for type errors.
 
-In release builds (an embedding app with the release SDK, or a packaged app), errors are not shown over the app.
-They are logged and passed to the host app's error handler (`NshAppView.onError`, `NshView.setErrorListener`).
+In release builds (an embedding app with the release SDK, a packaged app), errors are logged and passed to the host
+app's error handler (`NshAppView.onError`, `NshView.setErrorListener`) but not shown over the app.
 
 ## Source maps and stack traces
 
-Bundling produces a source map that covers every step (TypeScript → JSX → the bundle). The dev server sends it with
-each build. Before printing or showing a stack trace, the runtime maps bundle positions back to your sources. Stacks
+Bundling produces a source map that composes every step (TypeScript → JSX → the bundle), and it is sent along with each
+build. Before a stack trace is printed or shown, the runtime rewrites the bundle's positions to your sources, so stacks
 point at `App.tsx:2:28`, not at the bundle:
 
 ```text
@@ -340,21 +327,20 @@ error Mac Catalyst: uncaught exception: Error: tap boom
           at <anonymous> (App.tsx:2:58)
 ```
 
-`nsh build` writes the map as `bundle.js.map`. An embedding app that loads a bundle from a folder reads the map from
-next to the bundle. [Signed packages](./signed-packages.md) carry the map too. You can instead keep it next to the
-package and apply it with `nsh symbolicate`
-([Errors from published packages](./signed-packages.md#errors-from-published-packages)).
+`nsh build` writes the map as `bundle.js.map`; an embedding app that loads a bundle from a folder reads it from next to
+the bundle, and [signed packages](./signed-packages.md) carry it too, unless it is kept next to the package and applied
+with `nsh symbolicate` ([Errors from published packages](./signed-packages.md#errors-from-published-packages)).
 
 ## Debugging tips
 
-- **Nothing updates after an edit**: check the terminal for a build error. The overlay shows it on the host too.
+- **Nothing updates after an edit**: check the terminal for a build error; the overlay shows it on the host too.
 - **The app keeps old state you expected to reset**: hot replacement keeps unchanged components' state, top-level
   signals and navigators on purpose. Restart with Ctrl-C and `nsh run`, or change the state's initializer.
-- **A request fails only in a packaged or embedded build**: check the app's [capabilities](./sandbox-and-capabilities.md).
-  Refusals are logged with the key to add.
+- **A request fails only in a packaged or embedded build**: check the app's [capabilities](./sandbox-and-capabilities.md);
+  refusals are logged with the key to add.
 - **Something is slow**: reproduce it headless with [`nsh test --trace`](./testing-and-trace.md), which prints every
-  native view operation. Or run a TSX app with `--trace`.
-- **Type errors in the editor**: `nsh run` and `nsh dev` keep `.nsh/types` up to date. See
+  native view operation, or run a TSX app with `--trace`.
+- **Type errors in the editor**: `nsh run` and `nsh dev` keep `.nsh/types` up to date; see
   [Project structure](./project-structure.md).
 
 ## See also

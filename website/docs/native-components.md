@@ -13,8 +13,8 @@ child `HWND` on Windows. The NSH app uses it like any other element: a Rust app 
 `nsh_core::prelude`, a TSX app declares it with `nativeComponent()` from [`nsh`](../modules/nsh.md#nativecomponent-and-nativemodule). NSH lays it out with the rest of the
 app, sends it props, delivers its events to handlers and forwards commands from a `ref`.
 
-NSH renders with the system's own views, so a native component is one more subview in the same hierarchy. It clips,
-scrolls and receives touches like a `<View>`, and there is no layering problem.
+Because NSH renders with the system's own views, a native component is just one more subview in the same hierarchy:
+there is no layering problem, it clips, scrolls and receives touches like a `<View>`.
 
 > [!NOTE]
 > Native components are registered by the app that embeds NSH ([iOS](./ios.md), [Android](./android.md),
@@ -27,12 +27,12 @@ scrolls and receives touches like a `<View>`, and there is no layering problem.
 ## How it fits together
 
 1. The host app registers a factory under a name, such as `"embed.badge"`, on its `NshAppView` (iOS) or `NshView`
-   (Android). Each view has its own registry. There is nothing global.
+   (Android). Each view has its own registry; there is nothing global.
 2. The NSH app declares a component for that name with the props and events it uses.
 3. When the element is created, NSH creates a container view (decorated, framed and hit-tested like any view), then
    asks the factory for a component and puts the component's view inside the container, filling it.
 4. The component receives every prop right after it is made, then each prop again when it changes.
-5. The component emits events and may report its own size. The app calls its commands through a `ref`.
+5. The component emits events and may report its own size; the app calls its commands through a `ref`.
 
 ## Using the component in the app
 
@@ -163,7 +163,7 @@ or a TSX `text={label()}` reads a signal, the new value is sent when the signal 
 | A prop becomes `undefined` | That prop with no value (`nil` in Swift, `null` in Java) |
 | A prop bound to an animated value moves | `setAnimatedNumber` / `setAnimatedColor`, on the frames it changes |
 
-Props carry JSON values. Keep the interface to data (functions and class instances stay in the app).
+Props carry JSON values; keep the interface to data (functions and class instances stay in the app).
 
 ### Animated props
 
@@ -179,7 +179,7 @@ const pull = createAnimatedValue(0);
 ```
 
 The component receives numbers with `setAnimatedNumber(name, value)` and colors with `setAnimatedColor(name, argb)`
-(`0xAARRGGBB`). By default both call `setProp` with the number, so a component that does not implement them still
+(`0xAARRGGBB`); by default both call `setProp` with the number, so a component that does not implement them still
 gets the value. Rust components implement `set_animated_number` and `set_animated_color`, and Rust code binds a prop
 with `native(name).bind_animated_prop("progress", &value)`. Giving the prop a plain value again unbinds it and sends that
 value. The web has no registered components.
@@ -441,7 +441,7 @@ fn register(app: &AppView, make_view: impl Fn() -> objc2::rc::Retained<UIView> +
 ```
 
 `ComponentContext::emit(name, data)` sends an event (`data` is a `serde_json::Value`) and `set_size(width, height)`
-reports the size. Both work from any thread.
+reports the size; both work from any thread.
 
 ## Registering on macOS (Rust)
 
@@ -492,7 +492,7 @@ fn register(app: &AppView, mtm: MainThreadMarker) {
 ```
 
 The view fills the container NSH lays out; `ComponentContext::emit` and `set_size` (points) work from any thread, as
-on iOS. Register before `AppView::load`. A registry belongs to one `AppView` (and the views made from the same
+on iOS. Register before `AppView::load`; a registry belongs to one `AppView` (and the views made from the same
 `AppOptions`).
 
 ## Registering on Linux (Rust)
@@ -604,18 +604,18 @@ fn register(app: &AppView) {
 }
 ```
 
-`draw` runs with every frame of the window, in the view's coordinates (points), clipped to its bounds. Call
+`draw` runs with every frame of the window, in the view's coordinates (points), clipped to its bounds; call
 `ComponentContext::redraw` when what it shows changes. A drawn component is covered, clipped and transformed like any
 view, and its container gets the touches. A component that returns a child window from `window` is moved, clipped and
 hidden with its view, receives its own input, and sits above everything NSH draws (NSH content over it is hidden, as
 with web views). `ComponentContext::emit`, `set_size` (points) and `redraw` work from any thread. Register before
-`AppView::load`. A registry belongs to one `AppView` (and the views made from the same `AppOptions`).
+`AppView::load`; a registry belongs to one `AppView` (and the views made from the same `AppOptions`).
 
 A component also takes the mouse wheel and touchpad scrolls over it with `wheel` (an image viewer zooms with them). The
 `Wheel` it gets holds the pointer (`x`, `y`, the component's points), the distance in points (`dx`, `dy`, positive
 toward the right and down, as scroll views move their content) and in wheel notches (`notches_x`, `notches_y`, with
 fractions from precision touchpads and high-resolution wheels), whether it came in fine steps (`precise`) and the
-modifiers held (`shift`, `ctrl`, `alt`). It returns `true` for a scroll it took. The scroll views around it scroll with
+modifiers held (`shift`, `ctrl`, `alt`). It returns `true` for a scroll it took; the scroll views around it scroll with
 the rest, and by default with all of them. A scroll a scroll view has begun stays on that view. Ctrl + wheel is also a
 precision touchpad's pinch, and Shift + wheel arrives as the wheel sent it (`dy`, with `shift`):
 
@@ -642,7 +642,7 @@ A drawn component can also take presses, moves and releases where it has somethi
 over an image). `hit` is asked for each point and is `false` by default, so presses go to its view's handlers
 (`onPress`, `onMouseMove`) as before. Where it returns `true`, `pointer` gets a `Pointer` (`kind`: `Down`, `Move`,
 `Up`, `Cancel`, `Leave`; `x`, `y` in the component's points; `clicks`; `shift`, `ctrl`, `alt`): after a press it took,
-the moves and the release follow until the release, also outside its bounds. With no button down, moves come while
+the moves and the release follow until the release, also outside its bounds; with no button down, moves come while
 the mouse is over where it hits, then `Leave`. A press it returns `false` for goes to the views below. Only the left
 button reaches it, so right-clicks and context menus stay with its view. `cursor` sets the cursor where it hits:
 
@@ -725,15 +725,15 @@ own: a name registered on the view after that (`AppView::register_component`) re
   `loadBundle` / `loadAssetBundle` / `run`, so the first frame finds them.
 - **The container owns decoration and touches.** Background, borders, corner radius, shadows, opacity, transforms and
   `overflow: "hidden"` apply to the container NSH draws. Your view fills it and receives the touches that land inside.
-- **Capabilities do not apply.** A registered component is the host app's own code. The
+- **Capabilities do not apply.** A registered component is the host app's own code; the
   [capabilities](./sandbox-and-capabilities.md) an app declares do not restrict what it does. If you embed apps you
   do not trust, only register components that are safe for them to use.
-- **Keep the interface to data.** Props, event payloads and command arguments cross as JSON text. Send identifiers and
+- **Keep the interface to data.** Props, event payloads and command arguments cross as JSON text; send identifiers and
   small values, not large blobs, on every change.
 - **One bundle, both platforms.** Register the same names with the same props and events on iOS and Android, so one
   bundle runs on both.
 - **Names under `nsh/` are NSH's.** NSH's own components (the system's tab bar of `nsh/mobile`'s `TabBar`) are
-  registered under `nsh/`. Name yours after your app or company (`embed.badge`), and a registration under `nsh/` logs
+  registered under `nsh/`; name yours after your app or company (`embed.badge`), and a registration under `nsh/` logs
   a warning and keeps NSH's.
 
 ## See also

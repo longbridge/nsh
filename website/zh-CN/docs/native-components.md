@@ -11,10 +11,11 @@ group: platforms
 `android.view.View`、macOS 上任意的 `NSView`、Linux 上任意的 `gtk::Widget`，或者 Windows 上的 Direct2D 绘制或子 `HWND`。NSH 应用像使用其他元素一样使用它：Rust 应用用 `nsh_core::prelude` 的 `native(name)` 创建它，TSX 应用用 [`nativeComponent`](../modules/nsh.md#nativecomponent-and-nativemodule) 提供的 `nativeComponent()` 声明它。NSH
 会把它和应用的其余部分一起布局，向它发送 props，把它的事件交给对应的处理函数，并转发通过 `ref` 发出的命令。
 
-NSH 本身就用系统原生视图渲染，所以原生组件只是同一视图层级里的又一个子视图。它像 `<View>` 一样裁剪、滚动、接收触摸，不存在叠放层级的问题。
+NSH 本身就用系统原生视图渲染，所以原生组件只是同一视图层级里多出来的一个子视图：不存在层级叠放问题，它会像 `<View>`
+一样被裁剪、随内容滚动并接收触摸。
 
 > [!NOTE]
-> 原生组件由嵌入 NSH 的应用注册（[iOS](./ios.md)、[Android](./android.md)、[macOS](./macos.md#嵌入-mac-应用)、[Linux](./linux.md#嵌入-gtk-应用)、[Windows](./windows.md#嵌入-win32-应用)）。
+> 原生组件由嵌入 NSH 的应用注册（[iOS](./ios.md)、[Android](./android.md)、[macOS](./macos.md#嵌入-mac-应用)、[Linux](./linux.md#嵌入-gtk-应用)、[Windows](./windows.md#嵌入-win32-应用)）；
 > 在 Windows、macOS、Linux、iOS 和 Android 上也可以由应用自己的 Rust crate 注册，开发宿主和打包出的应用（`nsh package`）会注册这些组件（见[从应用的 crate 注册](#从应用的-crate-注册)）。
 > 没有任何地方注册的名称会渲染成一个空视图（并记录一次“未知名称”日志）。
 
@@ -25,7 +26,7 @@ NSH 本身就用系统原生视图渲染，所以原生组件只是同一视图�
 2. NSH 应用为这个名称声明一个组件，列出它用到的 props 和事件。
 3. 元素创建时，NSH 先创建一个容器视图（和普通视图一样负责装饰、定位和命中测试），再向工厂请求一个组件，并把组件的视图放进容器、铺满容器。
 4. 组件创建后会立即收到所有 props，之后每当某个 prop 变化时再收到该 prop。
-5. 组件可以发出事件、上报自身尺寸。应用通过 `ref` 调用它的命令。
+5. 组件可以发出事件、上报自身尺寸；应用通过 `ref` 调用它的命令。
 
 ## 在应用中使用组件
 
@@ -134,7 +135,7 @@ function nativeComponent<P extends object = {}, E extends object = {}>(
 
 类型参数描述 props（`P`）以及每个事件的负载（`E`）。返回的组件接受：
 
-- 组件自己的 props `P`。
+- 组件自己的 props `P`；
 - 每个事件对应一个处理函数：事件 `tap` 由 `onTap` 处理，`regionChange` 由 `onRegionChange` 处理（首字母大写并加上
   `on` 前缀）；
 - `<View>` 能接受的一切（children 除外）：`style`、`class` / `classList`（[Tailwind](./tailwind.md)）、布局、
@@ -154,7 +155,7 @@ function nativeComponent<P extends object = {}, E extends object = {}>(
 | 某个 prop 变为 `undefined` | 该 prop，但没有值（Swift 中为 `nil`，Java 中为 `null`） |
 | 绑定到动画值的 prop 变化 | `setAnimatedNumber` / `setAnimatedColor`，在值变化的那些帧 |
 
-Props 携带 JSON 值。接口只传数据（函数和类实例留在应用中）。
+Props 携带 JSON 值；接口只传数据（函数和类实例留在应用中）。
 
 ### 动画 props
 
@@ -168,7 +169,7 @@ const pull = createAnimatedValue(0);
 </Scroll>
 ```
 
-组件通过 `setAnimatedNumber(name, value)` 收到数值，通过 `setAnimatedColor(name, argb)` 收到颜色（`0xAARRGGBB`）。两者默认都以该数值调用
+组件通过 `setAnimatedNumber(name, value)` 收到数值，通过 `setAnimatedColor(name, argb)` 收到颜色（`0xAARRGGBB`）；两者默认都以该数值调用
 `setProp`，所以没有实现它们的组件也能收到值。Rust 组件实现 `set_animated_number` 和 `set_animated_color`，Rust 代码用
 `native(name).bind_animated_prop("progress", &value)` 绑定 prop。重新给该 prop 一个普通值即解除绑定，并发送这个值。Web 上没有注册的原生组件。
 
@@ -426,7 +427,7 @@ fn register(app: &AppView, make_view: impl Fn() -> objc2::rc::Retained<UIView> +
 ```
 
 `ComponentContext::emit(name, data)` 发送一个事件（`data` 是 `serde_json::Value`），`set_size(width, height)`
-上报尺寸。两者都可以在任意线程调用。
+上报尺寸；两者都可以在任意线程调用。
 
 ## 在 macOS 上注册（Rust）
 
@@ -475,8 +476,8 @@ fn register(app: &AppView, mtm: MainThreadMarker) {
 }
 ```
 
-视图会铺满 NSH 布局出的容器。与 iOS 一样，`ComponentContext::emit` 和 `set_size`（单位为点）可在任意线程调用。请在
-`AppView::load` 之前注册。注册表属于一个 `AppView`（以及用同一个 `AppOptions` 创建的视图）。
+视图会铺满 NSH 布局出的容器；与 iOS 一样，`ComponentContext::emit` 和 `set_size`（单位为点）可在任意线程调用。请在
+`AppView::load` 之前注册；注册表属于一个 `AppView`（以及用同一个 `AppOptions` 创建的视图）。
 
 ## 在 Linux 上注册（Rust）
 
@@ -520,7 +521,7 @@ fn register(app: &AppView) {
 }
 ```
 
-控件会铺满 NSH 布局出的容器。与 iOS 一样，`ComponentContext::emit` 和 `set_size`（单位为点）可在任意线程调用。请在
+控件会铺满 NSH 布局出的容器；与 iOS 一样，`ComponentContext::emit` 和 `set_size`（单位为点）可在任意线程调用。请在
 `AppView::load` 之前注册。注册表属于一个 `AppView`（以及用同一个 `AppOptions` 创建的视图，注册表就是它的 `components` 字段）。
 
 ## 在 Windows 上注册（Rust）
@@ -584,16 +585,16 @@ fn register(app: &AppView) {
 }
 ```
 
-`draw` 在窗口的每一帧都会调用，坐标为视图自身的坐标（点），并裁剪到视图边界。显示的内容变化时调用 `ComponentContext::redraw`。
+`draw` 在窗口的每一帧都会调用，坐标为视图自身的坐标（点），并裁剪到视图边界；显示的内容变化时调用 `ComponentContext::redraw`。
 绘制出来的组件会像普通视图一样被遮挡、裁剪和变换，触摸由它的容器接收。通过 `window` 返回子窗口的组件会随视图移动、裁剪和隐藏，
 自己接收输入，并位于 NSH 绘制的所有内容之上（绘制在它上方的 NSH 内容会被遮住，和 Web 视图一样）。`ComponentContext::emit`、
-`set_size`（单位为点）和 `redraw` 可以在任意线程调用。请在 `AppView::load` 之前注册。注册表属于一个 `AppView`（以及用同一个
+`set_size`（单位为点）和 `redraw` 可以在任意线程调用。请在 `AppView::load` 之前注册；注册表属于一个 `AppView`（以及用同一个
 `AppOptions` 创建的视图）。
 
 组件还可以通过 `wheel` 接收落在它上面的鼠标滚轮和触控板滚动（比如图片查看器用它来缩放）。它收到的 `Wheel` 包含指针位置
 （`x`、`y`，组件自身坐标，单位为点）、以点为单位的距离（`dx`、`dy`，向右、向下为正，和滚动视图移动内容的方向一致）、以滚轮刻度
 为单位的距离（`notches_x`、`notches_y`，精确触控板和高分辨率滚轮会给出小数）、是否为细粒度滚动（`precise`），以及按下的修饰键
-（`shift`、`ctrl`、`alt`）。接收了这次滚动就返回 `true`。其余的滚动交给外层的滚动视图，默认全部交给它们。滚动视图已经开始的
+（`shift`、`ctrl`、`alt`）。接收了这次滚动就返回 `true`；其余的滚动交给外层的滚动视图，默认全部交给它们。滚动视图已经开始的
 一次滚动会一直留在那个视图上。Ctrl + 滚轮也是精确触控板的捏合手势，Shift + 滚轮按滚轮原本发送的方向到达（`dy`，`shift` 为真）：
 
 ```rust
@@ -618,7 +619,7 @@ impl NativeComponent for ImageView {
 绘制型组件也可以在自己有可命中内容的地方（比如画在图片上的标注）接收按下、移动和松开。`hit` 对每个点询问，默认返回
 `false`，此时按下仍交给视图的处理器（`onPress`、`onMouseMove`）。返回 `true` 的地方，`pointer` 会收到 `Pointer`
 （`kind`：`Down`、`Move`、`Up`、`Cancel`、`Leave`；`x`、`y` 为组件坐标的点；`clicks`；`shift`、`ctrl`、`alt`）：它接下的按下之后，
-移动和松开会一直送给它直到松开，即使移出边界。没有按键时，鼠标在它命中的区域上移动时收到移动，离开时收到 `Leave`。它返回
+移动和松开会一直送给它直到松开，即使移出边界；没有按键时，鼠标在它命中的区域上移动时收到移动，离开时收到 `Leave`。它返回
 `false` 的按下会交给下面的视图。只有左键会送给它，右键和上下文菜单仍归视图。`cursor` 设置它命中区域上的光标：
 
 ```rust
@@ -653,7 +654,7 @@ impl NativeComponent for ImageView {
 
 带有自己 Rust crate 的应用（`nsh.json` 的 `"rust"`，见 [Rust](./rust.md)）可以在这个 crate 里注册原生组件，NSH 为应用构建的宿主都会用到它们：
 `nsh run` 和 `nsh test --target` 的开发宿主，以及 `nsh package` 打包出的应用。在 crate 根（`lib.rs`）放一个带
-`#[native_components(<platform>)]` 的函数，把组件注册到该平台的 `Components` 上。宿主创建每个视图时都会调用它，就像嵌入应用在自己的 `AppView` 上注册一样：
+`#[native_components(<platform>)]` 的函数，把组件注册到该平台的 `Components` 上；宿主创建每个视图时都会调用它，就像嵌入应用在自己的 `AppView` 上注册一样：
 
 ```rust
 use std::rc::Rc;
@@ -692,10 +693,10 @@ nsh-platform-android = { version = "0.6", default-features = false }
 
 - **先注册，再加载。** 工厂只对注册之后创建的元素生效。请在 `loadBundle` / `loadAssetBundle` / `run` 之前注册所有名称，这样第一帧就能找到它们。
 - **装饰和触摸归容器管。** 背景、边框、圆角、阴影、不透明度、变换以及 `overflow: "hidden"` 都作用于 NSH 绘制的容器。你的视图铺满容器，并接收落在其中的触摸。
-- **能力声明不适用。** 注册的组件是宿主应用自己的代码。应用声明的[能力](./sandbox-and-capabilities.md)限制不了它做什么。如果你嵌入的是不受信任的应用，就只注册那些可以放心让它们使用的组件。
-- **接口只传数据。** Props、事件负载和命令参数都以 JSON 文本跨越边界。每次变更时传递标识符和小数据，而不是大块数据。
+- **能力声明不适用。** 注册的组件是宿主应用自己的代码；应用声明的[能力](./sandbox-and-capabilities.md)限制不了它做什么。如果你嵌入的是不受信任的应用，就只注册那些可以放心让它们使用的组件。
+- **接口只传数据。** Props、事件负载和命令参数都以 JSON 文本跨越边界；每次变更时传递标识符和小数据，而不是大块数据。
 - **一个 bundle，两个平台。** 在 iOS 和 Android 上用相同的 props 和事件注册相同的名称，同一个 bundle 就能在两个平台上运行。
-- **`nsh/` 下的名称属于 NSH。** NSH 自己的组件（`nsh/mobile` 的 `TabBar` 所用的系统标签栏）注册在 `nsh/` 下。请用你的应用或公司来命名自己的组件（`embed.badge`），在 `nsh/` 下注册会记录一条警告，并保留 NSH 的组件。
+- **`nsh/` 下的名称属于 NSH。** NSH 自己的组件（`nsh/mobile` 的 `TabBar` 所用的系统标签栏）注册在 `nsh/` 下；请用你的应用或公司来命名自己的组件（`embed.badge`），在 `nsh/` 下注册会记录一条警告，并保留 NSH 的组件。
 
 ## 另请参阅
 

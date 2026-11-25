@@ -7,12 +7,12 @@ group: tools
 
 # 测试
 
-NSH 可以 **无界面（headless）** 运行应用：引擎是真实的，但不需要模拟器、设备或窗口。引擎与设备上相同，包括响应式图、
-渲染器、组件、布局、列表虚拟化，TSX 还有 QuickJS，显示帧以 60 Hz 推进。Cargo 或 CLI 能运行的地方都能用它，包括
+NSH 以 **无界面（headless）** 方式运行应用：使用真实的引擎（与设备上相同的响应式图、渲染器、组件、布局和列表虚拟化，
+TSX 还有 QuickJS），以 60 Hz 提供显示帧，但不需要模拟器、设备或窗口。只要 Cargo 或 CLI 能运行的地方它都能运行，包括
 Linux CI 机器。它做两件事：
 
 - 运行测试：每个测试打开应用，像用户一样操作（点击、输入、滚动），并检查屏幕上的内容。Rust 应用的测试用 Rust 编写，由
-  `cargo test` 配合 `nsh-testing` crate 运行。用 TypeScript 编写的测试由 `nsh test` 运行，TSX 应用和 Rust 应用都适用。
+  `cargo test` 配合 `nsh-testing` crate 运行；用 TypeScript 编写的测试由 `nsh test` 运行，TSX 应用和 Rust 应用都适用；
 - 加上 `--trace` 时，打印运行时发送给原生视图的每一个操作并附带耗时：首帧、一次点击或一帧滚动的开销。
 
 ## 编写测试
@@ -64,22 +64,22 @@ cargo test                    # crate 的所有测试
 cargo test adds_a_todo        # 名称包含 "adds_a_todo" 的测试
 ```
 
-`EngineConfig::new(root)` 是一个手机尺寸（390×844 点）、其余都未设置的引擎。它的字段对应下文 `open` 的选项：`storage`
+`EngineConfig::new(root)` 是一个手机尺寸（390×844 点）、其余都未设置的引擎；它的字段对应下文 `open` 的选项：`storage`
 （`MemoryStorage::new(entries)`）、`network`（`StubNetwork`，见下文）、`viewport`、`environment`（外观、区域设置、减少动态效果）、
 `clock`（`Clock::manual(time)`，见下文）。`nsh_testing::Headless::start(config)` 启动应用，并维护它所显示视图的模型。它的步骤就是
 下文 `nsh test` 的步骤，选择器相同，只是用 Rust 写：`press`、`long_press`、`clear`、`type_text`、`submit`、
 `scroll(selector, px(3000.0))`、`back`、`wait`、`wait_for`、`wait_for_gone`、`wait_until`、`run_for`、`fast_forward`、
-`set_system_time`、`set_viewport`、`set_clipboard` 和 `on_dialog`。`app.shows(text)` 和 `app.screen()`（`texts()`、
+`set_system_time`、`set_viewport`、`set_clipboard` 和 `on_dialog`；`app.shows(text)` 和 `app.screen()`（`texts()`、
 `count(selector)`、`enabled(selector)`、`dialogs()`、`clipboard()`、`commands()`）读取屏幕上的内容。无法执行的步骤会返回一个错误，
 附带屏幕上的文字。`app.clear_commands()` 让 `commands()` 从头记起，长测试只留下它要检查的那些步骤发出的命令。
 
 `nsh_testing::tsx(entry, sets)`（feature `bundle`）以同样的方式打开应用的 TSX 入口，基于 NSH 的和 crate 的 UI 集合构建
-（[用 Rust 开发](./rust.md#测试)）。`examples/gallery-rs` 就这样测试它的 Rust 根组件，每个演示一个模块。`examples/rust-exports`
+（[用 Rust 开发](./rust.md#测试)）。`examples/gallery-rs` 就这样测试它的 Rust 根组件，每个演示一个模块；`examples/rust-exports`
 从 Rust 测试它的 TSX 入口。
 
 `nsh test` 也会运行这些测试：传入带有 Rust crate 的应用（`nsh.json` `"rust"`）的目录时，它会在测试文件之前为其中每个 crate
 运行 `cargo test`，并把 Rust 测试与 TypeScript 测试一起显示和计数（`✓ src/lib.rs › tests::adds`），计入汇总和 `--junit`
-报告。所以无论是 Rust 应用、带 crate 的 TSX 应用还是 TSX 应用，`nsh test` 都是同一个命令。`nsh check` 同样会先对 crate 运行
+报告。所以无论是 Rust 应用、带 crate 的 TSX 应用还是 TSX 应用，`nsh test` 都是同一个命令；`nsh check` 同样会先对 crate 运行
 `cargo check --all-targets`，再对 TypeScript 做类型检查。
 
 ## 用 nsh test 编写测试
@@ -102,14 +102,14 @@ error 2 tests: 1 passed, 1 failed (0.9s)
 ```
 
 失败的测试会显示抛出的内容、它在测试文件中的位置，以及所打开应用当时屏幕上的文字。这些文字会被截断到几 KB（尾部以
-`… (<n> more characters)` 标出剩余内容），以免长文档刷屏输出。`-v` 会显示全部。只要有失败，`nsh test` 就以非零
+`… (<n> more characters)` 标出剩余内容），以免长文档刷屏输出；`-v` 会显示全部。只要有失败，`nsh test` 就以非零
 退出码结束。`nsh init` 会随应用创建一个 `App.test.tsx`，`nsh check` 会连同其他代码一起对测试文件做类型检查
 （`.nsh/types` 中声明了 `nsh/test`）。
 
 每个测试文件在各自的引擎上运行，文件中的测试按顺序逐个运行。`open` 在另一个全新的引擎上启动应用，因此测试之间从不
-共享状态。测试结束时，它打开的应用会被关闭。测试在抛出异常、返回的 promise 被 reject 或超时时失败：超时默认 30 秒，
+共享状态；测试结束时，它打开的应用会被关闭。测试在抛出异常、返回的 promise 被 reject 或超时时失败：超时默认 30 秒，
 也可以用 `test` 的第三个参数按毫秒指定（`test("syncs", body, 60_000)`）。带有自己
-Rust crate 的应用（`nsh.json` 的 `"rust"`）以同样的方式，在 NSH 用这些 crate 构建的无界面运行器中运行测试。在 Rust 应用
+Rust crate 的应用（`nsh.json` 的 `"rust"`）以同样的方式，在 NSH 用这些 crate 构建的无界面运行器中运行测试；在 Rust 应用
 （`nsh.json` 的 `"root"`，[用 Rust 开发](./rust.md)）中，`open(".")` 启动它的根组件。加上 `--release` 会以
 `cargo test --release` 运行其 crate 测试，以优化模式（`--release`）构建无界面运行器和开发宿主，并对被测应用 bundle 压缩代码、去掉调试信息。
 
@@ -145,12 +145,12 @@ describe("the cart", () => {
 | `test.only(name, body, timeout?)`、`describe.only(name, body)` | 测试文件中有它们时，只运行这些测试和块；文件中的其他测试报告为已跳过。 |
 | `test.todo(name)` | 还没写的测试，报告为 todo。 |
 
-钩子可以是 `async` 函数。`timeout` 默认 30 秒。测试和钩子在文件加载时声明：在测试或钩子里声明测试会抛出异常。
+钩子可以是 `async` 函数；`timeout` 默认 30 秒。测试和钩子在文件加载时声明：在测试或钩子里声明测试会抛出异常。
 
 ### 打开应用
 
 `open(entry, options?)` 构建 `entry` 处的应用（路径相对于测试文件；每次运行中每个入口只构建一次），以 390×844 的视口
-启动它，并在它完成渲染且空闲后 resolve。使用 `--target` 时，应用按测试给出的每个选项运行。目标平台无法满足的选项会让
+启动它，并在它完成渲染且空闲后 resolve。使用 `--target` 时，应用按测试给出的每个选项运行；目标平台无法满足的选项会让
 `open` 以 `ERR_NSH_TEST_UNSUPPORTED` reject，并在消息中指出该选项（见[在真实平台上运行](#在真实平台上运行)）。
 
 | 选项 | 默认值 | 说明 |
@@ -172,7 +172,7 @@ describe("the cart", () => {
 
 ### 扮演宿主应用
 
-嵌入在原生应用中的应用通过 [`host`](../modules/nsh.md#host) 与宿主应用通信。在测试里由测试扮演宿主应用：`host.params` 是应用启动时读取的启动参数，`host.handlers` 按名称回答应用的 `host.call`、接收它的 `host.post`。处理函数可以是一个值，用它回答每次调用。也可以是一个函数，接收调用的数据并返回回答（或回答的 promise）。函数抛出的错误会让调用失败，与宿主应用出错时一样。`handlers` 没有列出的名称的调用会失败，与不处理任何调用的宿主应用一样。
+嵌入在原生应用中的应用通过 [`host`](../modules/nsh.md#host) 与宿主应用通信。在测试里由测试扮演宿主应用：`host.params` 是应用启动时读取的启动参数，`host.handlers` 按名称回答应用的 `host.call`、接收它的 `host.post`。处理函数可以是一个值，用它回答每次调用；也可以是一个函数，接收调用的数据并返回回答（或回答的 promise）。函数抛出的错误会让调用失败，与宿主应用出错时一样。`handlers` 没有列出的名称的调用会失败，与不处理任何调用的宿主应用一样。
 
 ```tsx
 const app = await open("./App.tsx", {
@@ -197,7 +197,7 @@ expect(app.shows("Conversation c-43")).toBe(true);
 
 ### 替换原生模块
 
-`modules` 用替身替换应用导入的原生模块的导出：应用自己 crate 的（`#[native_module]` UI 集）、`nsh/base` 的或运行时的。键先是模块标识，再是导出名（`"save"`）或某个导出的成员（`"Keychain.get"`）。应用的导入拿到的是替身。模块的其他导出保持原样，Rust 代码直接调用模块时仍运行模块本身。
+`modules` 用替身替换应用导入的原生模块的导出：应用自己 crate 的（`#[native_module]` UI 集）、`nsh/base` 的或运行时的。键先是模块标识，再是导出名（`"save"`）或某个导出的成员（`"Keychain.get"`）。应用的导入拿到的是替身；模块的其他导出保持原样，Rust 代码直接调用模块时仍运行模块本身。
 
 替身是一个值或一个函数，应用的代码拿到什么取决于替身的种类，与真实导出的返回方式无关：
 
@@ -206,7 +206,7 @@ expect(app.shows("Conversation c-43")).toBe(true);
 | 值 | 直接拿到这个值：本是函数的导出变成同步返回该值的函数，其他导出就是这个值。 |
 | 函数 | 每次调用都拿到一个 promise，同步导出也是如此：函数收到调用的参数，promise 兑现为函数的返回值（或它返回的 promise 兑现的值），函数抛出的错误让 promise reject。 |
 
-应用同步调用的函数，用值做替身就保持同步。应用 await 的函数，用函数做替身。
+应用同步调用的函数，用值做替身就保持同步；应用 await 的函数，用函数做替身。
 
 ```tsx
 const saved: unknown[][] = [];
@@ -245,7 +245,7 @@ expect(app.shows("Could not open the link")).toBe(true);
 ### 模拟网络
 
 `network` 按 `"<METHOD> <URL>"` 列出路由（只写 URL 表示 `GET`；`*` 匹配任意文字）。没有路由匹配的请求会失败，因此测试不会在
-未经允许时访问网络。路由是一个响应，或者一个接收请求、返回响应（或响应的 Promise）的函数。在 Rust 中，
+未经允许时访问网络。路由是一个响应，或者一个接收请求、返回响应（或响应的 Promise）的函数；在 Rust 中，
 `StubNetwork::new(routes)` 接受同样的路由，每个是一个 `StubResponse` 或一个 `StubRoute::Handler`：
 
 ```tsx tabs
@@ -338,7 +338,7 @@ fn autosaves() {
 }
 ```
 
-响应带 `delay` 的 `StubNetwork` 用 `.with_clock(clock.clone())` 跟随手动时钟。下面是 `nsh test` 的步骤。`Headless` 都有对应的方法
+响应带 `delay` 的 `StubNetwork` 用 `.with_clock(clock.clone())` 跟随手动时钟。下面是 `nsh test` 的步骤；`Headless` 都有对应的方法
 （`run_for`、`fast_forward`、`set_system_time`）。
 
 | 步骤 | 说明 |
@@ -348,7 +348,7 @@ fn autosaves() {
 | `app.clock.setSystemTime(time)` | 把墙上时间（`Date.now()`、`new Date()`）设为某个 `Date` 或毫秒数，不触发任何定时器。 |
 
 `Date`、`performance.now()` 和 `Intl` 的默认日期都跟随这个时钟。步骤不再等待正在进行的内容：只要应用在请求帧或有原生
-动画在运行，帧就一帧接一帧地立即到来，每帧在时钟上相隔一帧的时间（1/60 s）。300 ms 的转场只需几毫秒，期间到期的
+动画在运行，帧就一帧接一帧地立即到来，每帧在时钟上相隔一帧的时间（1/60 s）；300 ms 的转场只需几毫秒，期间到期的
 定时器也会执行。无限循环的动画（加载指示器）随时钟运行：测试推进时钟时它跟着转动。`app.wait(ms)` 和长按会把时钟推进它们各自的时长。更晚到期的定时器只有在测试把时钟推进到那里时才会执行。
 `waitFor` 和 `waitUntil` 在等待时推进时钟，每次一个显示帧，每帧之后检查一次，所以定时器显示的内容会在等待中很快出现：
 `waitFor("Saved", { timeout: 15_000 })` 最多把时钟推进十五秒。它们的超时同时按两个时钟计算：等待最多把应用的时钟推进这么久，
@@ -375,10 +375,10 @@ fn autosaves() {
 `label:`、`text:` 和角色的名称也可以写正则：`text:/^Buy/i`，语法为 Rust `regex` crate 的语法（与 JavaScript 相同的字符类、
 分组、锚点和量词，以线性时间匹配；标志 `i`、`m` 和 `s`）。` >> ` 在前一部分匹配到的视图内部继续查找
 （`id:cart >> role:button[Remove]`），`nth=<n>` 只保留第 n 个匹配，从 0 开始（`text:Delete >> nth=1`）。选择器找到的是用户
-最先会看到的视图：先在最上层的模态窗口中找，再在屏幕上找。对于导航栈只看最上面的页面。滚动视图和列表
+最先会看到的视图：先在最上层的模态窗口中找，再在屏幕上找；对于导航栈只看最上面的页面；滚动视图和列表
 里的内容按它在屏幕上的次序排列，从上到下（横向的从左到右），与 Tab 和读屏的次序一致。它只匹配用户看得见的视图：有面积、不在
 `visibility: hidden` 之内、位于窗口和裁剪它的视图（`overflow: hidden`）之内，或者位于用户可以滚动的滚动视图内容中的任何位置（滚动就能
-把它带进来）。`opacity` 和 transform 不影响，与 Playwright 一致。作用于视图的步骤（`press`、`type`、
+把它带进来）；`opacity` 和 transform 不影响，与 Playwright 一致。作用于视图的步骤（`press`、`type`、
 `clear`、`submit`、`scroll`、`longPress`）要求恰好匹配一个视图：匹配到多个时步骤失败，错误信息会说明怎样缩小范围。
 
 | 步骤 | 说明 |
@@ -450,7 +450,7 @@ fn autosaves() {
 | `app.quit()` | 应用是否已退出（`Application.quit()`、Quit 菜单项或最后窗口策略）。退出后后续步骤会报告应用已停止。 |
 
 步骤会等到应用连续 100 ms 没有渲染、没有正在运行的、会自行结束的原生动画，并且（`--target macos` 或 `linux` 时）应用打开的窗口都已显示出来（对一直在渲染的应用最多等 2 s；在手动时钟上，同时最多等应用时间的 2 s）后才 resolve，所以下一行
-代码运行时，这一步带来的变化已经在屏幕上。之后才出现的内容（响应、定时器）用 `waitFor` 等待。在手动时钟上，步骤不等这
+代码运行时，这一步带来的变化已经在屏幕上；之后才出现的内容（响应、定时器）用 `waitFor` 等待。在手动时钟上，步骤不等这
 100 ms：应用一旦跑完这一步和当前时钟时间带来的全部工作（此刻到期的定时器、promise、立即应答的桩响应），且不再需要帧，步骤
 就 resolve（仍有请求在途时除外），所以手动时钟上的测试在步骤之间没有停顿。由其他线程应答的结果（`nsh/host` 调用、
 文件读取、Rust 任务在线程上做的工作）在步骤 resolve 之后才到，用 `waitFor` 等待它显示的内容。无限循环的动画（比如加载
@@ -458,7 +458,7 @@ fn autosaves() {
 （错误信息会列出屏幕上的文字）、应用在此期间抛出了异常，或者应用请求了只有真实平台才能回答的内容时，步骤会 reject，
 测试随之失败。
 
-测试可能要预期的失败都带有一个 `code`，它保持不变。错误消息是给人看的，可能会变，所以测试匹配 code：
+测试可能要预期的失败都带有一个 `code`，它保持不变；错误消息是给人看的，可能会变，所以测试匹配 code：
 
 | `code` | 步骤或查询 |
 |---|---|
@@ -475,17 +475,17 @@ await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISAB
 
 `app.viewStyle("id:card")` 可以不截图就检查视图是否变暗或高亮。它读取的是应用设置的值：动画进行中返回动画的终值，而不是屏幕上的当前帧。原生控件自己绘制的默认背景不在结果里，需要用 `app.screenshot` 检查。
 
-`app.spanStyle("id:guide")` 读取嵌套的 `<Text testID="guide">`。`text:word` 读取匹配文字的第一个字符。
+`app.spanStyle("id:guide")` 读取嵌套的 `<Text testID="guide">`；`text:word` 读取匹配文字的第一个字符。
 用 `id:note >> text:word` 限定范围，用 `>> nth=0` 选择重复匹配中的一个。
 没有匹配、匹配不唯一或 span 为空时会报错。更新 span 的 `testID` 会复用文本排版，保持 `onTextLayout` 的回调次数。
 
-`lineHeight` 和 `letterSpacing` 按 span 自己的字号换算：10 pt 的 span 加 `leading-loose` 读到 `lineHeight: 20`，加 `tracking-wide` 读到 `letterSpacing: 0.25`。`fontFamily` 是应用要求的字体族（`"Inter, sans-serif"` 仍是列表），不是平台为缺字回退到的字体。设计系统测试用它检查设置的字体族，实际绘制效果用截图检查：
+`lineHeight` 和 `letterSpacing` 按 span 自己的字号换算：10 pt 的 span 加 `leading-loose` 读到 `lineHeight: 20`，加 `tracking-wide` 读到 `letterSpacing: 0.25`。`fontFamily` 是应用要求的字体族（`"Inter, sans-serif"` 仍是列表），不是平台为缺字回退到的字体；设计系统测试用它检查设置的字体族，实际绘制效果用截图检查：
 
 ```tsx
 expect(app.spanStyle("id:title")).toMatchObject({ fontSize: 20, lineHeight: 28, fontFamily: "Inter" });
 ```
 
-`drag` 和 `dragAndHold` 的第三个可选参数是 `DragOptions`：`{ hold?: number }`。`hold` 是落指后、开始移动前停留的总毫秒数，省略时保持 100 ms。无头和 iOS 测试支持自定义停留。其他原生 agent 会在开始新的拖动前以 `ERR_NSH_TEST_UNSUPPORTED` 拒绝不支持的自定义停留。负值、非有限值和不可表示的时长会被拒绝。需要长按后拖动时可传 `{ hold: 600 }`，并用 `try` / `finally` 保证 `drop()` 抬起同一根手指。
+`drag` 和 `dragAndHold` 的第三个可选参数是 `DragOptions`：`{ hold?: number }`。`hold` 是落指后、开始移动前停留的总毫秒数，省略时保持 100 ms。无头和 iOS 测试支持自定义停留；其他原生 agent 会在开始新的拖动前以 `ERR_NSH_TEST_UNSUPPORTED` 拒绝不支持的自定义停留。负值、非有限值和不可表示的时长会被拒绝。需要长按后拖动时可传 `{ hold: 600 }`，并用 `try` / `finally` 保证 `drop()` 抬起同一根手指。
 
 ### 无界面运行替平台做了什么
 
@@ -493,18 +493,18 @@ expect(app.spanStyle("id:title")).toMatchObject({ fontSize: 20, lineHeight: 28, 
 
 - **原生动画会运行**，逐帧跑到结束：`start(callback)` 的回调会执行，等待动画结束的逻辑也会继续。没有终点的循环一直运行，直到应用停止它。
 - **返回**会像平台那样弹出页面、关闭模态窗口（`app.back()`）。
-- **对话框会被回答**：由测试的 `onDialog` 回答，否则按它的取消按钮，否则在可以关闭时直接关闭。只能用其他按钮回答的对话框，
+- **对话框会被回答**：由测试的 `onDialog` 回答，否则按它的取消按钮，否则在可以关闭时直接关闭；只能用其他按钮回答的对话框，
   会让弹出它的步骤失败，直到测试指定要按哪个按钮。
 - **剪贴板保存文字**：应用复制的内容，粘贴时可以读回来（用 `clipboard` 设定初始内容）。
 - **页面的宿主应答 `host`**：应用的 `nsh.json` 在 `web.host` 中指定了宿主时（[页面的宿主](#页面的宿主)）。
 - **应用在它的能力下运行**：`nsh.json` 的 `capabilities` 与设备上一样生效，没有声明的都会被拒绝。
 - **URL 只被记录**：应用打开的 URL 以“已打开”回报（测试用 `app.failOpenUrls` 让它失败的除外），`app.openedUrls()` 列出它们。
 - **选取会被回答**：用测试给的文件（`onPick`），否则视为取消，`Picker.pickImages` 和 `Picker.pickFiles` resolve 为 `[]`。
-- **分享由测试决定**：`onShare` 给出分享面板后，每次分享都按它的回答。在此之前 `Share.available()` resolve 为 `false`。
-- **原生模块运行在模拟实现上**：会访问设备的模块在无界面运行中提供一个模拟实现代替设备，由测试驱动（`app.fake`）。开启 `nsh-extra` 的 `speech` 时，`Speech.available()` resolve 为 `true`，会话立即开始，听到模拟实现的 `hear` 说的内容。模拟实现在整个进程内生效，所以启动带模拟实现模块的 `Headless` 应用的 Rust 测试在同一进程里轮流运行。用同一个 registry 的克隆启动的应用可以同时运行。
+- **分享由测试决定**：`onShare` 给出分享面板后，每次分享都按它的回答；在此之前 `Share.available()` resolve 为 `false`。
+- **原生模块运行在模拟实现上**：会访问设备的模块在无界面运行中提供一个模拟实现代替设备，由测试驱动（`app.fake`）。开启 `nsh-extra` 的 `speech` 时，`Speech.available()` resolve 为 `true`，会话立即开始，听到模拟实现的 `hear` 说的内容。模拟实现在整个进程内生效，所以启动带模拟实现模块的 `Headless` 应用的 Rust 测试在同一进程里轮流运行；用同一个 registry 的克隆启动的应用可以同时运行。
 - **声音交给假扬声器**：音效按 WAV 解码（时长取自文件头，其他字节以 `decode` 失败），播放器立即播放其源的一分钟，在 `endAudio()` 时播到结尾。
 - **模态窗口立即出现**：弹出时就会触发 `onShow`。
-- **图片不会加载**：不会有 `onLoad`，也不会有 `onError`，除非测试让这张图片加载失败（`app.failImages`）。`Image.getSize` 和 `Image.prefetch` 会 reject，app 里和测试文件里都一样。`blob:` URL 的尺寸直接从它的数据读取，所以对它调用 `Image.getSize` 会 resolve。
+- **图片不会加载**：不会有 `onLoad`，也不会有 `onError`，除非测试让这张图片加载失败（`app.failImages`）；`Image.getSize` 和 `Image.prefetch` 会 reject，app 里和测试文件里都一样。`blob:` URL 的尺寸直接从它的数据读取，所以对它调用 `Image.getSize` 会 resolve。
 - **只有真实平台才能回答的请求会让步骤失败**：剪贴板里的图片或文件。
 
 ### 页面的宿主
@@ -513,9 +513,9 @@ expect(app.spanStyle("id:title")).toMatchObject({ fontSize: 20, lineHeight: 28, 
 （[Web](./web.md#宿主的函数)）。无界面运行时，测试每打开一个应用，都会在应用启动前，在独立的 JavaScript 上下文中加载
 这个模块（有定时器和 `console`，没有浏览器的 API，不能 import）：它的 `call` 应答应用的
 [`host.call`](../modules/nsh.md#host)，它的 `post`（没有时用 `call`）接收应用的 `host.post`，它的 `player.hostEvent` 送到 `host.on`，`host.available()` 为 `true`。
-`call` 抛出异常、Promise 被拒绝或返回值不是 JSON 时，应用的调用以它的消息被拒绝，与页面上一致。应用启动前发送的事件
+`call` 抛出异常、Promise 被拒绝或返回值不是 JSON 时，应用的调用以它的消息被拒绝，与页面上一致；应用启动前发送的事件
 会在应用启动后送到它顶层注册的监听器。`--web-host <module>` 指定另一个模块。应用调用的函数必须列在它的 `capabilities.host` 中，
-与页面上一致。调用的超时和宿主自己的定时器都按应用的时间计算，手动时钟（`app.clock.runFor`）会推进它们。在浏览器中（`--target web`），开发页面像发布的页面一样为每个应用运行 `nsh.json` 的 `web.host`。在其他平台上（`--target`）应用没有宿主：`host.available()` 为 `false`。
+与页面上一致。调用的超时和宿主自己的定时器都按应用的时间计算，手动时钟（`app.clock.runFor`）会推进它们。在浏览器中（`--target web`），开发页面像发布的页面一样为每个应用运行 `nsh.json` 的 `web.host`；在其他平台上（`--target`）应用没有宿主：`host.available()` 为 `false`。
 
 ```tsx
 // nsh.json：{ "capabilities": { "host": ["echo"] }, "web": { "host": "./host.js" } }
@@ -534,7 +534,7 @@ test("calls reach the page's host", async () => {
 
 `expect(value)` 按 Jest 的方式检查值，比较的是 JS 创建的值本身：`toBe` 使用 `Object.is`，`toEqual` 逐个成员比较，
 `Date`、`Map`、`Uint8Array` 都按它们本来的类型比较。每个检查不成立时都会抛出异常。`.not` 把检查反过来：
-`expect(app.texts()).not.toContain("Error")`。给出函数时，`toThrow` 检查调用它抛出的异常。给出 promise 或返回 promise
+`expect(app.texts()).not.toContain("Error")`。给出函数时，`toThrow` 检查调用它抛出的异常；给出 promise 或返回 promise
 的函数时，`rejects` 和 `resolves` 检查它的结果，与 Jest 相同：
 `await expect(save()).rejects.toMatchObject({ code: "ERR_ACCESS_DENIED" })`。
 
@@ -565,12 +565,12 @@ test("calls reach the page's host", async () => {
 ### 在真实平台上运行
 
 `nsh test --target macos`（或 `linux`、`windows`、`gpui`、`tui`、`web`、`ios`、`android`）在平台的开发 host 上运行同样的测试，而不是 headless：每次 `open` 都在一个新窗口里启动应用，并使用全新的
-数据目录。步骤用平台自己的输入作用在选择器指向的视图上，就像 Playwright 在浏览器里那样：
+数据目录；步骤用平台自己的输入作用在选择器指向的视图上，就像 Playwright 在浏览器里那样：
 
-- 按压是在视图中心点击，长按是按住不放，`type` 先点击输入框再逐键输入，`scroll` 是在滚动视图上的触控板手势，`back` 是用户的操作（macOS 和 Linux 上按 Escape，Windows 和 GPUI 里按鼠标的后退键，web 上是浏览器的后退按钮，iOS 上是把 sheet 往下滑，菜单、弹出框或 `Sheet` 打开时是 VoiceOver 的退出手势，否则点标题栏的返回按钮，Android 上是返回键）。
-- 不在屏幕上的视图会先被滚动到可见，每次一个手势。在触摸屏上，手指像用户那样落在页面本身接收拖动的地方，避开跟随拖动的视图（滑块、绘图区域）。滚动视图已经到头时，贴在它边缘的视图就地操作，不会把滚动视图拖过头（那样会触发下拉刷新或关掉页面 sheet）。滚动视图内容从边缘下面经过的部分（iOS 上透明的标题栏、Tab 栏、键盘）里的视图会先被滚出来，仍留在那下面、被系统绘制的栏或选区的编辑菜单盖住的视图，操作会以 `ERR_NSH_TEST_COVERED` 失败，而不是按到盖住它的东西上。
-- 选择器、等待和查询看到的应用模型与 headless 相同，由 host 绘制的内容建立，所以找到的是同样的视图。
-- 对话框是平台自己的：`app.dialogs()` 读取它们，回答对话框（`onDialog`，或测试没有回答时按它的取消按钮）会按下对应的按钮。
+- 按压是在视图中心点击，长按是按住不放，`type` 先点击输入框再逐键输入，`scroll` 是在滚动视图上的触控板手势，`back` 是用户的操作（macOS 和 Linux 上按 Escape，Windows 和 GPUI 里按鼠标的后退键，web 上是浏览器的后退按钮，iOS 上是把 sheet 往下滑，菜单、弹出框或 `Sheet` 打开时是 VoiceOver 的退出手势，否则点标题栏的返回按钮，Android 上是返回键）；
+- 不在屏幕上的视图会先被滚动到可见，每次一个手势；在触摸屏上，手指像用户那样落在页面本身接收拖动的地方，避开跟随拖动的视图（滑块、绘图区域）；滚动视图已经到头时，贴在它边缘的视图就地操作，不会把滚动视图拖过头（那样会触发下拉刷新或关掉页面 sheet）；滚动视图内容从边缘下面经过的部分（iOS 上透明的标题栏、Tab 栏、键盘）里的视图会先被滚出来，仍留在那下面、被系统绘制的栏或选区的编辑菜单盖住的视图，操作会以 `ERR_NSH_TEST_COVERED` 失败，而不是按到盖住它的东西上；
+- 选择器、等待和查询看到的应用模型与 headless 相同，由 host 绘制的内容建立，所以找到的是同样的视图；
+- 对话框是平台自己的：`app.dialogs()` 读取它们，回答对话框（`onDialog`，或测试没有回答时按它的取消按钮）会按下对应的按钮；
 - `app.screenshot(path)` 截取应用显示的窗口（测试指定的窗口，否则最前面的那个），`app.window(id).screenshot(path)` 截取应用的其他窗口。
 
 ```sh
@@ -585,27 +585,27 @@ nsh test --target tui                         # 在内存终端里运行
 nsh test tests/form.test.tsx --target macos   # 只运行一个文件
 ```
 
-窗口按视口大小打开（除非 `open` 指定，否则为 390 × 844），并且不会超出屏幕（在 macOS 上，`setViewport` 改变大小后窗口也不会超出屏幕；比屏幕还大时，左上角留在屏幕内）。在 iOS 和 Android 上，应用以设备的尺寸占满屏幕。在 macOS、Windows、GPUI 和 Linux 上，应用在后台运行：窗口照常显示，键盘留在你正在输入的应用里，步骤的点击、按键和快捷键直接发给这些窗口（`--foreground` 让它们成为当前活跃的应用）。应用以目标平台运行（`platform.os`）。
+窗口按视口大小打开（除非 `open` 指定，否则为 390 × 844），并且不会超出屏幕（在 macOS 上，`setViewport` 改变大小后窗口也不会超出屏幕；比屏幕还大时，左上角留在屏幕内）；在 iOS 和 Android 上，应用以设备的尺寸占满屏幕。在 macOS、Windows、GPUI 和 Linux 上，应用在后台运行：窗口照常显示，键盘留在你正在输入的应用里，步骤的点击、按键和快捷键直接发给这些窗口（`--foreground` 让它们成为当前活跃的应用）。应用以目标平台运行（`platform.os`）。
 手动 `clock` 和 headless 时一样：`app.clock.runFor`、
-`fastForward` 和 `setSystemTime` 立即推进应用的时间（计时器、每隔一帧的 `requestAnimationFrame`、`Date`），`app.wait(ms)`、`waitFor` 和 `waitUntil` 也会推进它。
+`fastForward` 和 `setSystemTime` 立即推进应用的时间（计时器、每隔一帧的 `requestAnimationFrame`、`Date`），`app.wait(ms)`、`waitFor` 和 `waitUntil` 也会推进它；
 平台每显示一帧，时钟前进一帧（1/60 秒），所以应用在动画时时间照常流逝。平台自身的动画和路由的 `delay` 按真实时间进行。应用的请求和 headless
-时一样交给测试：由 `network` 路由应答，没有路由匹配的请求会失败，`"live"` 则放行到 host 的真实网络。`app.requests()` 列出全部请求。
+时一样交给测试：由 `network` 路由应答，没有路由匹配的请求会失败，`"live"` 则放行到 host 的真实网络；`app.requests()` 列出全部请求。
 使用 `"live"` 时，socket 和 WebSocket 在 host 的网络上连接，否则和 headless 时一样被拒绝。
-`storage` 在应用启动时就已写入应用存储，`app.storage()` 从应用中读取。`open` 给出的 `locale`、`localeSettings` 列出的语言与地区设置、`reducedMotion` 和 `safeArea`（包括取默认值时）不随平台上报的值变化，给出的 `colorScheme` 会切换系统外观（`"light"` 也一样），没有给出的则沿用平台自己的。
-应用的剪贴板调用由测试自己的剪贴板应答（`clipboard` 是它的初始文本，`app.clipboard()` 读取它），机器的剪贴板保持不变。文本输入框自身的复制和
+`storage` 在应用启动时就已写入应用存储，`app.storage()` 从应用中读取。`open` 给出的 `locale`、`localeSettings` 列出的语言与地区设置、`reducedMotion` 和 `safeArea`（包括取默认值时）不随平台上报的值变化，给出的 `colorScheme` 会切换系统外观（`"light"` 也一样），没有给出的则沿用平台自己的；
+应用的剪贴板调用由测试自己的剪贴板应答（`clipboard` 是它的初始文本，`app.clipboard()` 读取它），机器的剪贴板保持不变；文本输入框自身的复制和
 粘贴使用系统剪贴板。`host.params` 会传给应用，`app.host.send` 发送事件，应用打开的 URL 被记录下来供 `app.openedUrls()` 读取，而不会真正打开。
 `host.handlers` 在 headless 运行，由测试回答应用的调用。`open` 会按目标检查它的选项：iOS 和 Android 上的 `width` 与
 `height`、属于另一类设备的 `platform`（桌面或 web 上的手机平台，iOS 或 Android 上的桌面平台或另一种手机）、`host.handlers`、`modules` 以及 `url` 会以
 `ERR_NSH_TEST_UNSUPPORTED` reject，这样测试要么按写的那样运行，要么说明它需要什么。桌面平台的 `platform`（例如用 `"macos"` 获得桌面的鼠标和按键）
-可以在任何桌面目标和 web 上运行，应用以该目标的平台运行，且总是桌面形态：在浏览器中页面无论宽度都以桌面形态启动。
-不给 `platform`（或给 `"web"`）时，页面像浏览器一样自己判断形态（宽度至少 600 点时为桌面）。带有自己 Rust crate 的应用运行在 NSH 为该平台用这些 crate 构建的开发 host 中（Android 上和 `nsh run` 一样，只为设备的 ABI 构建）。
+可以在任何桌面目标和 web 上运行，应用以该目标的平台运行，且总是桌面形态：在浏览器中页面无论宽度都以桌面形态启动；
+不给 `platform`（或给 `"web"`）时，页面像浏览器一样自己判断形态（宽度至少 600 点时为桌面）。带有自己 Rust crate 的应用运行在 NSH 为该平台用这些 crate 构建的开发 host 中（Android 上和 `nsh run` 一样，只为设备的 ABI 构建）；
 Rust 应用的 host 运行它的 root，所以 `open(".")` 在那里启动它，和 headless 时一样。
 
 `nsh test --target tui` 在内存终端中使用终端渲染器运行测试，适合 CI。每次 `open` 使用独立的 surface 和数据目录。
-用 `open(entry, { width, height })` 指定 point 尺寸。尺寸按应用 `nsh.json` 的 `tui.pointsPerCell` 向上取整为完整 Cell，
+用 `open(entry, { width, height })` 指定 point 尺寸；尺寸按应用 `nsh.json` 的 `tui.pointsPerCell` 向上取整为完整 Cell，
 默认每个 Cell 为 8 × 16 points。`app.screenshot("cells.json")` 返回并保存 UTF-8 JSON：`format: "nsh-tui-cells"`、
 `version: 1`、`width`、`height`，以及 `rows[y][x]` 中每个 Cell 的 `symbol`、`fg`、`bg`、`underline` 和 `modifiers`。
-颜色使用 `reset`、小写 ratatui 颜色名、`#rrggbb` 或 `indexed:N`。修饰符是已启用样式名的数组，例如 `bold`、`italic`、
+颜色使用 `reset`、小写 ratatui 颜色名、`#rrggbb` 或 `indexed:N`；修饰符是已启用样式名的数组，例如 `bold`、`italic`、
 `underlined`。用 `new TextDecoder().decode(bytes)` 解码返回的字节，再解析 JSON，即可断言 Cell 快照。
 
 在 web 上，应用运行在 headless 的 Chrome、Edge 或 Chromium 打开的开发 host 页面里：使用本机安装的浏览器，或
@@ -614,15 +614,15 @@ Rust 应用的 host 运行它的 root，所以 `open(".")` 在那里启动它，
 
 在 iOS 上，应用运行在 iOS 模拟器里的开发 host 中：使用 `--device` 指定的模拟器（名称或 UDID），否则使用已启动的模拟器，
 再否则 `nsh test` 会启动最新的 iPhone。模拟器应用在你正在输入的应用后面打开，步骤直接发给模拟器中的应用。步骤是手指的触摸和软键盘的输入，
-UIKit 收到它们的方式与在设备上相同。`setColorScheme` 切换模拟器的外观，`nsh test` 会在应用结束后把它恢复原样。屏幕是所模拟设备的尺寸。
-`nsh test` 环境中由应用在 `capabilities.process.env` 里声明的变量，会传给模拟器中的应用，与桌面上一样（`nsh run --target ios` 也会传递）。
+UIKit 收到它们的方式与在设备上相同。`setColorScheme` 切换模拟器的外观，`nsh test` 会在应用结束后把它恢复原样；屏幕是所模拟设备的尺寸。
+`nsh test` 环境中由应用在 `capabilities.process.env` 里声明的变量，会传给模拟器中的应用，与桌面上一样（`nsh run --target ios` 也会传递）；
 `HOME`、`TMPDIR` 和 `PATH` 是模拟器为应用设置的路径。
 
 在 Android 上，应用运行在设备或模拟器上的开发 host 中：使用 `--device` 指定的那台（按序列号），否则使用 `ANDROID_SERIAL`
-指定的那台，否则使用 `adb devices` 列出的第一台。并拥有独立的存储。步骤是手指的触摸和键盘的按键，
-应用的视图收到它们的方式与在设备上相同。`back` 是系统的返回。`setColorScheme` 切换设备的深色主题，`nsh test` 会在应用结束后把它恢复原样。
+指定的那台，否则使用 `adb devices` 列出的第一台；并拥有独立的存储。步骤是手指的触摸和键盘的按键，
+应用的视图收到它们的方式与在设备上相同；`back` 是系统的返回。`setColorScheme` 切换设备的深色主题，`nsh test` 会在应用结束后把它恢复原样。
 `nsh test` 环境中由应用在 `capabilities.process.env` 里声明的变量，会传给设备上的应用，与桌面上一样（`nsh run --target android`
-运行 TSX 应用时也会传递）。`PATH`、`HOME`、`TMPDIR` 以及 Android 为每个应用设置的其他路径保持设备上的值。打包的应用
+运行 TSX 应用时也会传递）；`PATH`、`HOME`、`TMPDIR` 以及 Android 为每个应用设置的其他路径保持设备上的值。打包的应用
 （`nsh package --target android`）使用设备上的环境。
 
 ### 从标准输入给出步骤
@@ -669,9 +669,9 @@ echo 'await app.press("Add")' | nsh test App.tsx --trace --target ios   # 在 iO
 
 它的用途：
 
-- 检查应用（或某个 demo）能否无错误地构建、执行和渲染。
-- 准确查看一次改动创建、移动或更新了哪些原生视图，以及数量。
-- 测量首帧、一次点击以及每一帧滚动的开销。
+- 检查应用（或某个 demo）能否无错误地构建、执行和渲染；
+- 准确查看一次改动创建、移动或更新了哪些原生视图，以及数量；
+- 测量首帧、一次点击以及每一帧滚动的开销；
 - 在 CI 中发现回归。
 
 ### 读懂输出
@@ -725,7 +725,7 @@ perf commit: 10 ops, 672µs (list js 7µs), 7 mount items, 24 nodes
 | `Text { id, text, content }` | 文本视图排版后的文本。 |
 | `Image { id, source, ... }` | 要加载的图片。 |
 
-只发送发生变化的内容：一次只改变一个数字的点击只发送一个 `Text` item。视图不会收到默认样式，也不会收到空的事件掩码。
+只发送发生变化的内容：一次只改变一个数字的点击只发送一个 `Text` item；视图不会收到默认样式，也不会收到空的事件掩码；
 未变化的 frame 不会发送。一帧滚动如果没有露出新行，**根本不会产生批次**。
 
 #### `perf` 日志行
@@ -740,7 +740,7 @@ perf commit: 10 ops, 672µs (list js 7µs), 7 mount items, 24 nodes
 
 > [!NOTE]
 > 无界面模式下文本使用近似的文本引擎测量，因此文本尺寸与设备上（使用 CoreText 或 Android 的文本布局）略有差异。
-> 显式设置的 `lineHeight` 会用于行高。未设置时，行高为字号的 1.2 倍。字符宽度仍为近似值。布局逻辑、视图数量和操作数量则完全相同。
+> 显式设置的 `lineHeight` 会用于行高；未设置时，行高为字号的 1.2 倍。字符宽度仍为近似值。布局逻辑、视图数量和操作数量则完全相同。
 
 单次运行的耗时很大程度上取决于 CPU 的频率状态（刚从空闲中唤醒的机器会比较慢）。请在同一台机器上比较多次运行，取多次
 运行中的最小值，并且更多地相信操作数和 item 数，而不是微秒数。
@@ -790,7 +790,7 @@ jobs:
 会按测试展示它：每个测试文件一个 `testsuite`，每个测试一个 `testcase`，并附上失败的内容、位置和屏幕上的文字。
 
 要守住性能，可以记录几个交互的 item 数（`--trace` 输出中的 `── … : N items` 行以及 `ops` / `mount items` 的数字），在它们
-增长时让 CI 失败。这些计数是确定的。共享 CI 机器上的耗时则不是。
+增长时让 CI 失败。这些计数是确定的；共享 CI 机器上的耗时则不是。
 
 > [!NOTE]
 > 测试在应用 `nsh.json` 声明的 `capabilities` 下运行，与设备上一致：应用没有声明的，在测试中同样被拒绝。
@@ -819,7 +819,7 @@ view()
 | iOS | 视图的 `accessibilityIdentifier`（在 XCUITest 中为 `app.otherElements["add-to-cart"]`）。 |
 | Android | 无障碍节点的 view id 资源名（在 UI Automator 中为 `By.res("add-to-cart")`）。 |
 
-在 Rust 中测试 id 是每个元素的方法，组件的元素也不例外（`button().test_id("save")` 为组件的根视图命名）。`testID` 是每个元素以及每个 Rust 组件（`Button`、`Dialog` 等）都有的 prop。它不会改变屏幕阅读器读出的内容。那应该用
+在 Rust 中测试 id 是每个元素的方法，组件的元素也不例外（`button().test_id("save")` 为组件的根视图命名）；`testID` 是每个元素以及每个 Rust 组件（`Button`、`Dialog` 等）都有的 prop。它不会改变屏幕阅读器读出的内容；那应该用
 `accessibilityLabel`（参见[无障碍](./accessibility.md)）。在 `--trace` 的输出中，它出现在视图的 `ViewProps` item 里，
 形如 `test_id: Some("add-to-cart")`。
 

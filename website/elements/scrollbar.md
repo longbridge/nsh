@@ -7,23 +7,14 @@ demo: el-scrollbar
 
 # Scrollbar
 
-A scrollbar gives a scroll view or a list a bar in your app's own look. Examples are a thin pill that widens under the
-pointer, a track in the brand color, or a bar beside a fixed header or spanning two panes.
-
-There are two ways to use it. Set it once as the app theme, and every scroll view and list draws it in place of the
-platform's indicator ([Built-in bars](#built-in-bars)). Or place one yourself: it names the scroll view it moves and
-sits wherever you put it.
-
-`Scrollbar` handles the behavior:
-
-- The thumb's length and position follow the content, the viewport and the offset, also while a list grows or the
-  window resizes.
-- Dragging the thumb scrolls the content. A press on the track moves the thumb's middle to that point.
-- It shows while the content scrolls, while the pointer is over it, or always, and fades in and out natively.
-
-Your app owns the look and timing. A `Scrollbar` has no colors, sizes or radii of its own, and its fades take no time
-until you set a duration.
-
+A scrollbar gives a scroll view or a list a bar in the app's own look: a thin pill that widens under the pointer, a
+track in the brand's tone, a bar beside a fixed header or along two panes. Set once as the app's theme, every scroll
+view and list draws one in place of the platform's indicator ([Built-in bars](#built-in-bars)); placed by the app, it
+names the scroll view it moves and sits wherever the app puts it. It owns its behavior: the thumb's length and place follow the content, the viewport and
+the offset (also while a list grows or the window resizes); dragging the thumb scrolls the content, and a press on the
+track brings the thumb's middle there; it shows while the content scrolls, while the pointer is over it, or always,
+and fades in and out natively. The look and the timing are the app's: a `Scrollbar` has no colors, sizes or radii of
+its own, and its fades take no time until the app gives them some.
 
 ```tsx tabs
 import { mount, Scroll, Text, View, type YNode } from "nsh";

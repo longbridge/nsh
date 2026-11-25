@@ -8,13 +8,13 @@ demo: el-tabs
 # Tabs
 
 Tabs switch between the sections of one place: the overview and the activity of a project, the views of a document.
-Each `Tab` owns the behavior of one tab: presses, keyboard activation, the disabled state, and the tab role and
-selected state for screen readers. The `Tabs` around them is the tab list, which screen readers announce as one set.
-
-The look is the app's: a tab has no colors, sizes or label of its own. Its children are the app's label.
-`selected:` classes on the tab, or `group-selected:` classes on its children, follow its state. The app also renders
-each section's content and shows the one that the value names. The list's indicator is an underline or pill the app
-styles. It sits on the selected tab and moves to the next one natively ([Indicator](#indicator)).
+Each `Tab` owns the behavior of one tab: presses, keyboard activation, the disabled state, and the tab role and its
+selected state for screen readers. A `Tabs` around them is the tab list, which screen readers announce as one set. The
+look is the app's: a tab has no colors, sizes or label of its own. Its children are the app's label, and
+`selected:` classes on the tab, or `group-selected:` classes on what is inside it, follow its state. The content of
+each section is the app's too: it shows the one its value names, next to the list. The list's indicator, an
+underline or a pill the app styles, sits on the selected tab and travels to the next one natively
+([Indicator](#indicator)).
 
 ```tsx tabs
 import { mount, signal, Text, View } from "nsh";
@@ -105,7 +105,7 @@ fn sections() -> impl IntoElement {
 ```
 
 `Tab` and `Tabs` come from [`nsh/base`](../modules/nsh-base.md), the `nsh-base` crate in Rust. The value is the
-app's: the list holds none. Each tab is told whether it is selected. A press reports `onPress`, the app sets its value
+app's: the list holds none. Each tab is told whether it is selected; a press reports `onPress`, the app sets its value
 and shows that section, and every tab shows the `selected` the app passes back. The list's corners and the tabs' are
 concentric: the list's padding (`p-1`) is the difference between `radius.lg` and `radius`. The selected tab's fill is
 the list's indicator (`indicatorClass`, inside that padding: `inset-y-1`), which springs to the tab the app selects. In
@@ -166,7 +166,7 @@ An underline under the selected tab, a pill behind it or a segmented control's r
 indicator: a view the app styles with `indicatorClass` and `indicatorStyle`, drawn behind the tabs and absolutely
 positioned in the list. Native Shell places it on the selected tab after each layout. Along the list (a row's width,
 a column's height) it spans that tab, inside the indicator's own margins on that axis (`mx-3` for an underline
-shorter than its tab). Across the list its classes place it:
+shorter than its tab); across the list its classes place it:
 
 ```tsx
 // An underline at the bottom of a row of tabs.
@@ -182,8 +182,8 @@ shorter than its tab). Across the list its classes place it:
 </Tabs>
 ```
 
-When the app selects another tab, the indicator springs there natively, as GPUI Kit's tab bar indicator does. With
-reduced motion it moves at once. While no tab is selected it is hidden. While several are, it is on the first. A
+When the app selects another tab, the indicator springs there natively, as GPUI Kit's tab bar indicator does; with
+reduced motion it moves at once. While no tab is selected it is hidden; while several are, it is on the first. A
 resize or a change of a tab's width moves it in the same frame as the tabs. The
 indicator needs no layout events and no code of the app's: the selected tab is the one whose `selected` is true. In a
 list that scrolls, the scroll view goes around the `Tabs`, and the indicator scrolls with the tabs.
@@ -210,7 +210,7 @@ A disabled tab takes no presses, and screen readers announce it as dimmed. Its `
   children, or `accessibilityLabel`. Its `accessibilityDescription` is read after the name, so the name stays the
   tab's title: say there what the tab can do beyond being selected (a closable tab that Delete closes).
 - `Tabs` has the role `"tablist"`: screen readers hear the tabs inside it as one set, each still an element of its
-  own. Its `accessibilityLabel` names the list. Give one wherever no text next to the list says what its tabs switch.
+  own. Its `accessibilityLabel` names the list; give one wherever no text next to the list says what its tabs switch.
 - The content the app shows for the selected tab can say what it is: give its view `role="tabpanel"` (Rust
   `.role(AccessibilityRole::TabPanel)`), and screen readers say they enter a tab panel.
 - `disabled` is announced as the platform announces it (VoiceOver, TalkBack, UI Automation, the browser's accessibility
@@ -239,7 +239,7 @@ On macOS and the web, where Tab reaches the views that take presses, a `Tabs` li
 
 The arrow keys skip disabled tabs, and the tab they move to reports `onPress`, so the app selects it as the focus
 moves: the section follows the focus. `orientation` picks the pair that moves (`horizontal`: Left and Right;
-`vertical`: Up and Down). Without it both pairs move, as a list laid out either way. The other pair is left to the
+`vertical`: Up and Down); without it both pairs move, as a list laid out either way. The other pair is left to the
 page, so a scroll view around the list scrolls with it. The layout is separate, the app's `class`. In a
 right-to-left layout a horizontal list runs from the right, so Left and Right trade places: Left moves to the next
 tab and Right to the previous; Up, Down, Home and End keep theirs. `focus-visible:` styles show where the focus is. A

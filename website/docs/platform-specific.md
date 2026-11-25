@@ -7,7 +7,7 @@ group: platforms
 
 # Platform-specific code
 
-One NSH bundle runs on iOS, Android, macOS, Windows and Linux (and in Mac Catalyst), and in browsers through the [web runtime](./web.md). Most of an app needs no platform checks. Elements, styles, layout and modules behave the same everywhere, and components built from them look the same everywhere. When something is specific to one platform, NSH gives it one of these places, so platform code stays easy to find:
+One NSH bundle runs on iOS, Android, macOS, Windows and Linux (and in Mac Catalyst), and in browsers through the [web runtime](./web.md). Most of an app needs no platform checks at all: elements, styles, layout and modules behave the same everywhere, and the components you draw from them look the same everywhere. When something really is specific to one platform, NSH gives it a clear place, so platform code stays visible and contained:
 
 | Rust | TSX | For |
 |---|---|---|
@@ -18,13 +18,13 @@ One NSH bundle runs on iOS, Android, macOS, Windows and Linux (and in Mac Cataly
 
 ## Desktop and mobile
 
-Every platform is desktop or mobile, by one rule. Desktop is macOS, Windows, Linux, and browsers in the desktop idiom (a mouse and a wide window, [the web](./web.md)). Mobile is iOS, Android, and browsers in the phone or tablet idiom. Mac Catalyst runs the iOS backend, so it is mobile too, with `ios={{…}}` props. `desktop={{…}}` props, `platform.select({ desktop, mobile })`, `platform.desktop` and `platform.idiom === "desktop"` all follow this rule, as do `nsh/base`'s components (a menu is a popup on desktops and a sheet on mobile) and, in Rust, `is_desktop()`.
+Every platform is desktop or mobile, by one rule. Desktop is macOS, Windows, Linux, and browsers in the desktop idiom (a mouse and a wide window, [the web](./web.md)). Mobile is iOS, Android, and browsers in the phone or tablet idiom; Mac Catalyst runs the iOS backend, so it is mobile too, with `ios={{…}}` props. `desktop={{…}}` props, `platform.select({ desktop, mobile })`, `platform.desktop` and `platform.idiom === "desktop"` all follow this rule, as do `nsh/base`'s components (a menu is a popup on desktops and a sheet on mobile) and, in Rust, `is_desktop()`.
 
 `nsh/desktop`'s `isAvailable` answers a narrower question: whether that module's window and menu APIs work, which they do on macOS, Windows and Linux, but not in a terminal app. Gate layout, density and input on `platform.desktop`, and calls of `Window` and `Menu` on `isAvailable`.
 
 ## Platform-only props
 
-In Rust, a prop one platform has is a builder method like any other (`.ripple(..)`, `.elevation(..)` for Android, `.input_accessory(..)` for iOS, `.macos_backdrop(..)` for macOS, `.windows_backdrop(..)` for Windows, `.window_drag(..)` for the desktops). The other platforms leave it aside. In TSX, props that exist on one platform only are grouped in an object named after it. Each element accepts `ios`, `android`, `macos`, `windows`, `desktop` (macOS, Windows, Linux, and browsers in the desktop idiom) and `web` (browsers). On other platforms the object is ignored, and on its own platform only its keys are applied. macOS applies both `macos` and `desktop`, Windows both `windows` and `desktop`. A desktop browser applies both `desktop` and `web`.
+In Rust, a prop one platform has is a builder method like any other (`.ripple(..)`, `.elevation(..)` for Android, `.input_accessory(..)` for iOS, `.macos_backdrop(..)` for macOS, `.windows_backdrop(..)` for Windows, `.window_drag(..)` for the desktops); the other platforms leave it aside. In TSX, props that exist on one platform only are grouped in an object named after it. Each element accepts `ios`, `android`, `macos`, `windows`, `desktop` (macOS, Windows, Linux, and browsers in the desktop idiom) and `web` (browsers); on other platforms the object is ignored, and on its own platform only its keys are applied. macOS applies both `macos` and `desktop`, Windows both `windows` and `desktop`; a desktop browser applies both `desktop` and `web`.
 
 ```tsx tabs
 <View
@@ -76,7 +76,7 @@ when(shown, || {
 })
 ```
 
-The TSX objects are reactive like any prop. A key removed from the object is cleared.
+The TSX objects are reactive like any prop; a key removed from the object is cleared.
 
 What exists today:
 
@@ -110,7 +110,7 @@ What an element means on every platform is a top-level prop (in Rust a method of
 
 ## Platform modules
 
-In Rust, the APIs only one platform has are functions of `nsh_core::prelude` (`on_back_press`, `haptic`, `input_accessory_view`) and of `nsh_core::element::desktop` (windows: `window`, `current_window` and its `WindowRef`, `title_bar`, `displays`; the app: `quit`, `restart`, `launch_at_login`, `set_launch_at_login`; menus: `set_application_menu`, `popup_menu`). Elsewhere they do nothing, and the app does not launch at login: `launch_at_login` answers `false` and `set_launch_at_login` fails with `LaunchAtLoginError::Unavailable`. In TSX, `nsh/mobile` holds the APIs of iOS and Android (some of them one platform's), `nsh/desktop` those of the desktops. Both can be imported on every platform, so one bundle runs everywhere: on other platforms their functions return at once and their components take no room. Each exports `isAvailable`, which is `true` on its own platforms. `platform.os` tells them apart.
+In Rust, the APIs only one platform has are functions of `nsh_core::prelude` (`on_back_press`, `haptic`, `input_accessory_view`) and of `nsh_core::element::desktop` (windows: `window`, `current_window` and its `WindowRef`, `title_bar`, `displays`; the app: `quit`, `restart`, `launch_at_login`, `set_launch_at_login`; menus: `set_application_menu`, `popup_menu`); elsewhere they do nothing, and the app does not launch at login: `launch_at_login` answers `false` and `set_launch_at_login` fails with `LaunchAtLoginError::Unavailable`. In TSX, `nsh/mobile` holds the APIs of iOS and Android (some of them one platform's), `nsh/desktop` those of the desktops. Both can be imported on every platform, so one bundle runs everywhere: on other platforms their functions return at once and their components take no room. Each exports `isAvailable`, which is `true` on its own platforms; `platform.os` tells them apart.
 
 ### nsh/mobile
 
@@ -321,7 +321,7 @@ when(os() == Os::Ios, || input_accessory_view("bar").child(…))
 
 ## Platform variants in Tailwind
 
-Rust styles per platform with `.when(os() == Os::Ios, |v| ..)`. In TSX, the `ios:`, `android:` and `web:` variants apply classes on one platform:
+Rust styles per platform with `.when(os() == Os::Ios, |v| ..)`; in TSX, the `ios:`, `android:` and `web:` variants apply classes on one platform:
 
 ```tsx tabs
 <View class="rounded-xl bg-white p-4 ios:shadow-md android:border android:border-zinc-200">…</View>

@@ -120,14 +120,14 @@ fn tag_picker() -> impl IntoElement {
 
 ## 值
 
-值是已选条目的值组成的数组。有 `value` 时，值由应用持有：组合框把这些条目显示为已选，并用 `onChange({ value })` 报告每次变化。应用把 `value` 设为报告的值以跟随它，或者保留自己的值。省略 `value` 时，组合框自己保存值，初始为 `defaultValue`。
+值是已选条目的值组成的数组。有 `value` 时，值由应用持有：组合框把这些条目显示为已选，并用 `onChange({ value })` 报告每次变化；应用把 `value` 设为报告的值以跟随它，或者保留自己的值。省略 `value` 时，组合框自己保存值，初始为 `defaultValue`。
 
 - 在 `multiple` 时，按压、Return 或 Space 切换高亮的条目：不在值里就加入，在就移出。列表保持打开。
-- 不设 `multiple` 时，一次选择把值替换为该条目的值并关闭列表。再次选择已选的条目只会关闭列表。
+- 不设 `multiple` 时，一次选择把值替换为该条目的值并关闭列表；再次选择已选的条目只会关闭列表。
 
 `onConfirm({ value })` 在列表关闭时告知当时的值：每次打开报告一次，不论怎样关闭（一次选择、Escape、在外面按压、按触发按钮、列表打开时按 Tab 或 Shift+Tab，`reason: "focus"`），值是用户离开时的样子。Mac 上的 Cmd+Return（其他平台为 Ctrl+Return）关闭列表并确认。
 
-`cleanable` 会在有已选条目时加一个清除按钮：按下它会清空值（`onChange({ value: [] })`）。这个按钮在输入框之后、触发按钮之前，按它不会打开列表。由应用填充内容，和[选择框的清除按钮](./select.md#value)一样。
+`cleanable` 会在有已选条目时加一个清除按钮：按下它会清空值（`onChange({ value: [] })`）。这个按钮在输入框之后、触发按钮之前，按它不会打开列表；由应用填充内容，和[选择框的清除按钮](./select.md#value)一样。
 
 <a id="input"></a>
 
@@ -135,11 +135,11 @@ fn tag_picker() -> impl IntoElement {
 
 触发元素是组合框这一行（它的 `class` 和 `style`：字段的边框和填充）中的一个文本输入框，前面是应用的 `prefix`（以标签形式显示的已选条目、一个图标），后面依次是清除按钮、应用的 `triggerButton`（一个箭头）和 `suffix`。
 
-- 输入会打开列表并按标题筛选条目，忽略大小写。没有匹配时显示 `empty`。Down 和 Up 也会打开列表，按输入框或触发按钮会打开或关闭它。在触屏设备上，让输入框获得焦点的那次点按会打开它。
+- 输入会打开列表并按标题筛选条目，忽略大小写；没有匹配时显示 `empty`。Down 和 Up 也会打开列表，按输入框或触发按钮会打开或关闭它；在触屏设备上，让输入框获得焦点的那次点按会打开它。
 - 单个值时，输入框显示已选条目的标题（没有时显示 `placeholder`）。输入框获得焦点时标题被选中，所以输入的内容会替换它。
-- 在 `multiple` 时，输入框显示搜索词。已选条目由应用显示，放在 `prefix` 中或组合框旁边。
+- 在 `multiple` 时，输入框显示搜索词；已选条目由应用显示，放在 `prefix` 中或组合框旁边。
 
-搜索词默认属于组合框自己，每次打开从 `defaultQuery`（没有则为空）开始。有 `query` 时由应用持有：`onQueryChange({ query })` 报告输入的内容，应用把 `query` 设为它以跟随，用来按自己的方式筛选，或给出一个起始搜索词。
+搜索词默认属于组合框自己，每次打开从 `defaultQuery`（没有则为空）开始；有 `query` 时由应用持有：`onQueryChange({ query })` 报告输入的内容，应用把 `query` 设为它以跟随，用来按自己的方式筛选，或给出一个起始搜索词。
 
 <a id="footer"></a>
 
@@ -151,7 +151,7 @@ fn tag_picker() -> impl IntoElement {
 
 ## 出现与离开
 
-在桌面平台上，弹出层像 [Popover](./popover.md#entrance-and-exit) 一样随你的过渡出现和离开：`popupStartingClass` 是它第一帧的外观，`popupClass` 里的 `transition-*` 类把它过渡到自己的外观。`popupEndingClass` 是关闭后的外观，在这些过渡播放期间它会保留、不接受按压，随后触发 `onClose`。关闭时键盘焦点就回到输入框，除非选择的 `onChange` 把焦点移到了别的视图（比如表单的下一个输入框），那样焦点就留在那里。在离开途中再次打开时，它从当前状态回到自己的外观。`popupStartingStyle` 和 `popupEndingStyle` 以内联样式做同样的事。用户要求减少动态效果时，它立即出现、立即离开。触摸屏上的 sheet 自带滑入和滑出的动作。
+在桌面平台上，弹出层像 [Popover](./popover.md#entrance-and-exit) 一样随你的过渡出现和离开：`popupStartingClass` 是它第一帧的外观，`popupClass` 里的 `transition-*` 类把它过渡到自己的外观；`popupEndingClass` 是关闭后的外观，在这些过渡播放期间它会保留、不接受按压，随后触发 `onClose`。关闭时键盘焦点就回到输入框，除非选择的 `onChange` 把焦点移到了别的视图（比如表单的下一个输入框），那样焦点就留在那里。在离开途中再次打开时，它从当前状态回到自己的外观。`popupStartingStyle` 和 `popupEndingStyle` 以内联样式做同样的事。用户要求减少动态效果时，它立即出现、立即离开；触摸屏上的 sheet 自带滑入和滑出的动作。
 
 ```tsx
 <Combobox
@@ -241,14 +241,14 @@ fn tag_picker() -> impl IntoElement {
 
 ## 键盘
 
-输入框保持焦点时，按键与选择框的相同（见[键盘](./select.md#keyboard)），区别在于：字母和数字输入到输入框中并筛选列表，而不是输入跳转。Down 和 Up 打开关闭着的列表。在 `multiple` 时，Return 切换高亮的条目并保持列表打开。Mac 上的 Cmd+Return（其他平台为 Ctrl+Return）关闭列表并确认。Tab 和 Shift+Tab 关闭打开的列表，焦点移到下一个或上一个控件。在桌面平台上列表以其他方式关闭时，焦点留在输入框，除非选择的 `onChange` 把它移到了别的视图。
+输入框保持焦点时，按键与选择框的相同（见[键盘](./select.md#keyboard)），区别在于：字母和数字输入到输入框中并筛选列表，而不是输入跳转；Down 和 Up 打开关闭着的列表；在 `multiple` 时，Return 切换高亮的条目并保持列表打开；Mac 上的 Cmd+Return（其他平台为 Ctrl+Return）关闭列表并确认。Tab 和 Shift+Tab 关闭打开的列表，焦点移到下一个或上一个控件。在桌面平台上列表以其他方式关闭时，焦点留在输入框，除非选择的 `onChange` 把它移到了别的视图。
 
 <a id="accessibility"></a>
 
 ## 无障碍
 
 - 输入框对屏幕阅读器来说是一个组合框（combobox）：它的标签是 `accessibilityLabel`，值是已选条目的标题，以逗号连接，并说明列表是否展开。`disabled` 时它显示为不可用。
-- 列表是一个列表框（listbox），每一行是一个选项，以其标题命名。已选的选项为已选状态，不可选的显示为不可用。分组标题是标题。
-- 清除按钮是一个按钮，名称来自 `clearButtonAccessibilityLabel`。它不是 Tab 的一站。触发按钮对屏幕阅读器隐藏，因为输入框已说明列表是否打开，它也不是 Tab 的一站。
+- 列表是一个列表框（listbox），每一行是一个选项，以其标题命名；已选的选项为已选状态，不可选的显示为不可用。分组标题是标题。
+- 清除按钮是一个按钮，名称来自 `clearButtonAccessibilityLabel`；它不是 Tab 的一站。触发按钮对屏幕阅读器隐藏，因为输入框已说明列表是否打开，它也不是 Tab 的一站。
 
 关于标签、角色和播报的一般说明，见[无障碍](../docs/accessibility.md)。

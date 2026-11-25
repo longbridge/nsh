@@ -19,7 +19,7 @@ NSH apps get a set of standard globals without any import. They are implemented 
 
 Because they follow the standards, JavaScript libraries built on them (HTTP clients, URL and encoding helpers, stream utilities) work unchanged.
 
-This page lists every global. They belong to the TSX environment. Rust code uses Rust's standard library, crates.io and the NSH services in `nsh_core::prelude` (`fetch`, timers, tasks; see [Building with Rust](../docs/rust.md)). The table's Rust column names the Rust equivalent. You build UI with [elements](../elements/index.md) and your own components. Everything else comes from the [modules](./index.md) you import.
+This page lists every global an app has. These are the TSX environment's: Rust code uses Rust's standard library, crates.io and NSH's services of `nsh_core::prelude` instead (`fetch`, timers, tasks; see [Building with Rust](../docs/rust.md)), named in the table's Rust column. UI is built with [elements](../elements/index.md) and the app's own components, and everything else an app uses comes from the [modules](./index.md) it imports.
 
 The TypeScript declarations of all of these are generated into `.nsh/types/nsh/globals.d.ts` (see [Project structure](../docs/project-structure.md)).
 

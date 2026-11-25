@@ -8,7 +8,7 @@ demo: guide-tailwind
 
 # Tailwind
 
-NSH 的样式遵循 Tailwind CSS 4。在 Rust 中，Tailwind 的工具类是名称和取值都相同的类型化样式方法（`.p_4()` 即 `p-4`，`.rounded_2xl()` 即 `rounded-2xl`，`ZINC.shade(900)` 即 `zinc-900`）。在 TSX 中，每个元素都可以直接在 `class` 中写这些类，它们会以 Tailwind 4 的默认主题为准，在原生层解析。下面每个示例先给出类型化方法，再给出类名：
+NSH 的样式遵循 Tailwind CSS 4。在 Rust 中，Tailwind 的工具类是名称和取值都相同的类型化样式方法（`.p_4()` 即 `p-4`，`.rounded_2xl()` 即 `rounded-2xl`，`ZINC.shade(900)` 即 `zinc-900`）；在 TSX 中，每个元素都可以直接在 `class` 中写这些类，它们会以 Tailwind 4 的默认主题为准，在原生层解析。下面每个示例先给出类型化方法，再给出类名：
 
 ```tsx tabs
 <View class="flex-row items-center gap-3 rounded-2xl bg-white p-4 shadow-lg active:scale-[0.98] dark:bg-zinc-800">
@@ -36,9 +36,9 @@ view()
     )
 ```
 
-类型化方法生成的样式规则与类名编译出的完全相同，无需解析字符串。对于类名，整个过程不生成 CSS，也不在 JavaScript 中运行任何代码：字符串被直接交给核心，核心对每个不同的类字符串只解析一次（并缓存），把它转换为样式规则后应用。依赖状态的变体（按下、深色模式、窗口宽度）会在相应状态变化时由核心重新应用。按下和聚焦状态在原生层跟踪，因此 `active:` 的反馈（Rust 中的 `.active(..)`）无需与你的代码往返。
+类型化方法生成的样式规则与类名编译出的完全相同，无需解析字符串。对于类名，整个过程不生成 CSS，也不在 JavaScript 中运行任何代码：字符串被直接交给核心，核心对每个不同的类字符串只解析一次（并缓存），把它转换为样式规则后应用。依赖状态的变体（按下、深色模式、窗口宽度）会在相应状态变化时由核心重新应用；按下和聚焦状态在原生层跟踪，因此 `active:` 的反馈（Rust 中的 `.active(..)`）无需与你的代码往返。
 
-类名和 [`style` 属性](./styling.md) 产生的是同样的原生样式，两者可以组合使用。本页介绍类名特有的部分及其类型化写法。[Tailwind 参考](../modules/tailwind-reference.md) 列出了所有支持的工具类。
+类名和 [`style` 属性](./styling.md) 产生的是同样的原生样式，两者可以组合使用；本页介绍类名特有的部分及其类型化写法。[Tailwind 参考](../modules/tailwind-reference.md) 列出了所有支持的工具类。
 
 ## class 与 classList
 
@@ -70,7 +70,7 @@ view()
 3. **`style` 优先于类名。** 样式键就是与它同名的 CSS 属性，也就是类名设置的那个属性，因此它只替换这一个属性：`style={{ paddingLeft: 8 }}` 替换 `pl-4`，保留 `pr-4`。
 4. `!` 让一个类变为 important：`!p-0`。
 
-Rust 组件（`nsh/base` 的以及应用自己 crate 中的组件）在 TSX 中同样接受 `class` 和 `classList`。你的类会合并在组件自身样式之后，同等优先级时以你的为准。
+Rust 组件（`nsh/base` 的以及应用自己 crate 中的组件）在 TSX 中同样接受 `class` 和 `classList`；你的类会合并在组件自身样式之后，同等优先级时以你的为准。
 
 ## 变体
 
@@ -161,19 +161,19 @@ view()
 - **单位是点（point）。** `p-4`（`.p_4()`）是 16 点（1 个间距步长 = 4pt，1rem = 16pt）。以 `px` 写的任意值也按点计算：`p-[13px]`（`.p(px(13.0))`）就是 13pt。
 - **`flex` 是横向排列**，与 CSS 一致：`class="flex"` 会让子元素横向排列，除非有方向类另行指定（在字符串中的任何位置都可以：`flex-col flex` 是纵向）。样式中的 `display: "flex"` 和 Rust 的 `.flex()` 同样是横向，未设置 display 的视图保持 NSH 默认的纵向排列。`block` 和 `flow-root` 使用块布局，`inline` 和 `inline-block` 也是如此，与浏览器在 flex 或 grid 父元素中的布局一致。在 Rust 中由 `.flex_row()` 和 `.flex_col()` 设置方向。
 - **视图上的文字类会被继承。** 视图上的 `text-*`、`font-*`、`leading-*`、`tracking-*` 等文字工具类（Rust 中的 `.text_color(..)`、`.font_weight(..)` 等）会像 CSS 继承那样传给其内部的文本和输入元素：`<View class="text-white">` 会让其中的标签变成白色。
-- **每个视图都是独立的盒子。** `overflow-x-hidden` 和 `overflow-y-hidden` 与 `overflow-hidden` 一样裁剪两个方向（滚动由 [scroll](../elements/scroll.md) 元素负责）。`invisible` 隐藏视图及其中的一切。`mix-blend-*` 让视图与其后绘制的一切混合。`block` 盒子的外边距与其子元素的外边距互不合并。`absolute` 视图与 CSS 一样，相对最近的定位祖先放置。`fixed` 让视图在其根视图中布局（其他元素按 `absolute` 定位）。
-- **文本保留空白。** 字符串中的空格和换行按原样绘制，`whitespace-*` 设置换行方式。JSX 编译器会像 JSX 一样合并字面 JSX 文本中的空白。
-- **过渡按属性组生效**：`transition` 对颜色、不透明度、阴影和变换做动画，`transition-all` 还包括圆角和边框宽度。滤镜、背景滤镜、渐变和布局会直接取新值。
-- **`focus-visible:` 与浏览器的 `:focus-visible` 一致**：在焦点显示时应用。Tab、组内的方向键和快捷键会显示焦点。按压或轻点不会。应用移动的焦点（`focus()`、日历或对话框打开时）在按键之后显示，在按压之后不显示。文本输入框获得焦点时总是显示。`focus:` 在元素获得焦点时就会应用，因此键盘的焦点环写在 `focus-visible:` 上。组件自己保留焦点时，按键作用的那一行（树的行、列表高亮的选项）在作为这一行时应用 `focus:`，组件的焦点显示时还应用 `focus-visible:`。
-- **状态背景色显示在渐变之上。** 在 CSS 中渐变会盖住 `background-color`，因此 `bg-linear-*` 表面上的 `active:bg-*` 永远看不到。在 NSH 中，来自 `active:`、`hover:`、`focus:` 或 `group-*:` 的背景色会在该状态期间替换渐变（除非该状态设置了自己的渐变，例如 `active:from-*`）。`activeStyle` 等状态样式以及动画背景色也是如此。
-- **文字与触摸的设置都是样式键**：`line-clamp-*` 设置 `numberOfLines`，`text-ellipsis` 和 `text-clip` 设置 `textOverflow`，`truncate` 两者都设置，`select-*` 设置 `userSelect`，`pointer-events-*` 设置 `pointerEvents`，因此它们可以用在状态变体中，并且和所有类一样会被内联 `style` 覆盖。`caret-*`、`placeholder:text-*` 和 `selection:bg-*` 同样设置 `caretColor`、`placeholderColor` 和 `selectionColor` 样式。在 Rust 中它们是 `Styled` 方法（`.number_of_lines(..)`、`.truncate()`、`.text_overflow(..)`、`.select_text()`、`.pointer_events(..)` 等）。`whitespace-nowrap`（`.whitespace_nowrap()`）让文本保持一行，`text-pretty`（`.text_pretty()`）避免末行孤字。它们没有样式键，设在视图上会作用到其中的文本。`object-*` 设置图片和视频的 `objectFit` 与 `objectPosition` 样式，样式中的同名键会像其他样式一样替换它们。
-- **支持的范围**：Tailwind 4 中在原生层有意义的工具类和变体。`peer-*` 变体、伪元素（`before:`、`after:`）和任意属性（`[mask-type:luminance]`）会报告为未知类。NSH 在原生层没有对应含义的工具类也都是未知类，因此一个类不会有与浏览器不同的含义。渲染提示类（`antialiased`、`will-change-transform`、`appearance-none`、`box-border` 等）会被接受，但不改变任何东西。
+- **每个视图都是独立的盒子。** `overflow-x-hidden` 和 `overflow-y-hidden` 与 `overflow-hidden` 一样裁剪两个方向（滚动由 [scroll](../elements/scroll.md) 元素负责）；`invisible` 隐藏视图及其中的一切；`mix-blend-*` 让视图与其后绘制的一切混合；`block` 盒子的外边距与其子元素的外边距互不合并；`absolute` 视图与 CSS 一样，相对最近的定位祖先放置；`fixed` 让视图在其根视图中布局（其他元素按 `absolute` 定位）。
+- **文本保留空白。** 字符串中的空格和换行按原样绘制，`whitespace-*` 设置换行方式；JSX 编译器会像 JSX 一样合并字面 JSX 文本中的空白。
+- **过渡按属性组生效**：`transition` 对颜色、不透明度、阴影和变换做动画，`transition-all` 还包括圆角和边框宽度；滤镜、背景滤镜、渐变和布局会直接取新值。
+- **`focus-visible:` 与浏览器的 `:focus-visible` 一致**：在焦点显示时应用。Tab、组内的方向键和快捷键会显示焦点；按压或轻点不会；应用移动的焦点（`focus()`、日历或对话框打开时）在按键之后显示，在按压之后不显示；文本输入框获得焦点时总是显示。`focus:` 在元素获得焦点时就会应用，因此键盘的焦点环写在 `focus-visible:` 上。组件自己保留焦点时，按键作用的那一行（树的行、列表高亮的选项）在作为这一行时应用 `focus:`，组件的焦点显示时还应用 `focus-visible:`。
+- **状态背景色显示在渐变之上。** 在 CSS 中渐变会盖住 `background-color`，因此 `bg-linear-*` 表面上的 `active:bg-*` 永远看不到；在 NSH 中，来自 `active:`、`hover:`、`focus:` 或 `group-*:` 的背景色会在该状态期间替换渐变（除非该状态设置了自己的渐变，例如 `active:from-*`）。`activeStyle` 等状态样式以及动画背景色也是如此。
+- **文字与触摸的设置都是样式键**：`line-clamp-*` 设置 `numberOfLines`，`text-ellipsis` 和 `text-clip` 设置 `textOverflow`，`truncate` 两者都设置，`select-*` 设置 `userSelect`，`pointer-events-*` 设置 `pointerEvents`，因此它们可以用在状态变体中，并且和所有类一样会被内联 `style` 覆盖；`caret-*`、`placeholder:text-*` 和 `selection:bg-*` 同样设置 `caretColor`、`placeholderColor` 和 `selectionColor` 样式。在 Rust 中它们是 `Styled` 方法（`.number_of_lines(..)`、`.truncate()`、`.text_overflow(..)`、`.select_text()`、`.pointer_events(..)` 等）。`whitespace-nowrap`（`.whitespace_nowrap()`）让文本保持一行，`text-pretty`（`.text_pretty()`）避免末行孤字；它们没有样式键，设在视图上会作用到其中的文本。`object-*` 设置图片和视频的 `objectFit` 与 `objectPosition` 样式，样式中的同名键会像其他样式一样替换它们。
+- **支持的范围**：Tailwind 4 中在原生层有意义的工具类和变体。`peer-*` 变体、伪元素（`before:`、`after:`）和任意属性（`[mask-type:luminance]`）会报告为未知类；NSH 在原生层没有对应含义的工具类也都是未知类，因此一个类不会有与浏览器不同的含义。渲染提示类（`antialiased`、`will-change-transform`、`appearance-none`、`box-border` 等）会被接受，但不改变任何东西。
 
 其余部分都与 Tailwind 4 文档一致：调色板、透明度修饰符（`bg-black/40`）、任意值（`bg-[#34c759]`、`w-[72px]`、`grid-cols-[1fr_2fr]`；`p`、`px`、`py`、`pt`、`pr`、`pb`、`pl` 和 `m` 系列工具类还接受环境变量，`pt-[env(safe-area-inset-top)]`、`pb-[calc(env(keyboard-inset-height)+49px)]`，见[安全区域](../elements/safe-area.md)和[键盘](../elements/keyboard.md)）、分数（`w-1/2`、`translate-x-1/2`）、阴影和 ring、渐变（`bg-linear-to-r`、`bg-radial`、`bg-conic` 配合 `from-` / `via-` / `to-`，或直接写出的渐变 `bg-[linear-gradient(45deg,#f00,#00f)]`，也可带 Tailwind 的 `image:` 提示）、滤镜、`backdrop-blur-*`、`mix-blend-*`、变换、`transition-*` 和 `duration-*`、`animate-spin` / `ping` / `pulse` / `bounce`，以及网格，每一项在 Rust 中都有对应的类型化方法。[滤镜与混合](./styling.md#滤镜与混合) 的平台限制对类名同样适用。
 
 ## 主题
 
-类名以 Tailwind 4 的默认主题为准解析。在 `nsh.json` 的 `"tailwind"` 下扩展它。你的条目会加入默认值（同名时替换默认值）：
+类名以 Tailwind 4 的默认主题为准解析。在 `nsh.json` 的 `"tailwind"` 下扩展它；你的条目会加入默认值（同名时替换默认值）：
 
 ```json
 {
@@ -259,12 +259,12 @@ token 的名称就是主题文件中 CSS 变量去掉 `--` 后的名称：`muted
 | `(color:--name)`、`(length:--name)`、`(number:--name)`、`(family-name:--name)` | 同上，在一个类可以接受多种值时标明类型 | `text-(color:--up)`、`text-(length:--text-title)`、`ring-(length:--ring-width)`、`font-(family-name:--font-mono)` |
 | `font-sans`、`font-mono` | 主题设置的字体 | `font-mono` |
 
-- **应用自己的令牌。** 主题文件中的每个名称都是 token，就像 CSS `@theme` 中的每个变量：`"up": "#16a34a"` 生成 `bg-up`、`text-up` 和 `bg-up/30`。`"radius-card": "14px"` 生成 `rounded-(--radius-card)`。`"font-display": "Pacifico"` 生成 `font-(family-name:--font-display)`。长度的单位是点。`(number:--name)` 传入不带单位的数值。
+- **应用自己的令牌。** 主题文件中的每个名称都是 token，就像 CSS `@theme` 中的每个变量：`"up": "#16a34a"` 生成 `bg-up`、`text-up` 和 `bg-up/30`；`"radius-card": "14px"` 生成 `rounded-(--radius-card)`；`"font-display": "Pacifico"` 生成 `font-(family-name:--font-display)`。长度的单位是点；`(number:--name)` 传入不带单位的数值。
 - **字体。** `font-sans` 是应用的字体：没有设置自己字体族的文字都用它绘制，就像网页使用 Tailwind 的 `--font-sans`。`font-mono` 是 `font-mono` 类和 `TextView` 中代码的字体。未设置时两者都是系统字体。
 - **两种外观。** token 带有主题的浅色值和深色值：`bg-primary`、`theme().primary` 和 `token("primary")` 都会随外观自动切换，不需要 `dark:` 类。只在一种外观里设置的颜色在两种外观下都使用该值。
 - **你的 Tailwind 颜色优先。** `"tailwind"` 的 `colors` 或 Tailwind 调色板里的名称就是那个颜色，所以 Tailwind 主题里没有 `primary` 这个颜色时，`bg-primary` 是主题 token。
 - **主题可以在运行时改变。** 嵌入原生应用的 NSH 应用拿到宿主的主题时，以及主题每次变化时，引用 token 的类、读取 `theme()` 的 Rust 绑定和读取 `token()` 的 TSX 代码都会更新，其中类和绑定在原生侧更新。宿主主题里没有的 token 使用应用自己 `"theme"` 中的值（再没有则用默认主题的值）。只想加上自己品牌的宿主给出主题覆盖，即用同样的文件格式写出其品牌要改的 token（[iOS](./ios.md#主题覆盖)、[Android](./android.md#主题覆盖)，桌面端为 `AppView::set_theme_overrides`）。
-- **应用可以换一个主题。** `nsh` 的 [`setTheme(theme)`](../modules/nsh.md#settheme) 在应用运行时把一个同样格式的主题设为应用的主题，取代它的 `"theme"`，在每个平台和 `nsh test` 里都一样。`setTheme(null)` 恢复应用自己的主题。`token()` 立即读到新的 token。主题要整个读得懂：有读不懂的值时抛出列出该值的 `TypeError`，正在显示的主题保持不变。请从应用自己的主题文件出发构造新主题，这样类名引用的每个 token 都还有值。Rust 应用用 `set_tokens(theme.into())` 设置一个 `nsh_base::Theme` 的 token。
+- **应用可以换一个主题。** `nsh` 的 [`setTheme(theme)`](../modules/nsh.md#settheme) 在应用运行时把一个同样格式的主题设为应用的主题，取代它的 `"theme"`，在每个平台和 `nsh test` 里都一样；`setTheme(null)` 恢复应用自己的主题。`token()` 立即读到新的 token。主题要整个读得懂：有读不懂的值时抛出列出该值的 `TypeError`，正在显示的主题保持不变。请从应用自己的主题文件出发构造新主题，这样类名引用的每个 token 都还有值。Rust 应用用 `set_tokens(theme.into())` 设置一个 `nsh_base::Theme` 的 token。
 - **运行时调整密度和缩放。** Tailwind 的命名尺寸（`h-9`、`text-sm`、`gap-2`）和 bundle 的 `rem` 在构建时就固定了。要让用户在运行时缩放控件或文字，把需要跟着变的尺寸写成应用 `"theme"` 里的数字 token（`"control-h": "36px"`、`"text-body": "14px"`、`"icon": "16px"`），在组件的类名里引用它们（`h-(--control-h)`、`text-(length:--text-body)`、`size-(--icon)`），再用 `setTheme` 修改：引用它们的类名都会立即重新解析。
 - **与其他类名一样检查。** 既不是默认主题、也不是应用 `"theme"` 中 token 的名称，在构建时会报告为未知类（`unknown class 'bg-chart-up'`）。要使用只有宿主或运行时设置的主题提供的 token，在应用的 `"theme"` 里也给它一个值：应用单独运行时显示这个值。
 

@@ -7,9 +7,9 @@ group: platforms
 
 # macOS
 
-NSH apps run on macOS as native Mac apps. The macOS backend renders them with AppKit views and Core Animation and lays
-out text with CoreText. The core, the reactive graph, the renderer, Taffy layout and the native modules are the same
-as on iOS and Android, so one app runs everywhere. On macOS, `os()` is `Os::MacOs` (`platform.os` is `"macos"`
+NSH apps also run as native Mac apps. The macOS backend renders them with AppKit views and Core Animation and lays out
+text with CoreText; the core, the reactive graph, the renderer, Taffy layout and the native modules are the
+same as on iOS and Android, so one app runs everywhere. On macOS, `os()` is `Os::MacOs` (`platform.os` is `"macos"`
 in TSX) and TSX's `desktop={{…}}` props apply. The window's title, a title bar of the app's own, the menu bar and
 context menus come from `nsh_core::element::desktop` in Rust ([Desktop title bars](./rust.md#desktop-title-bars)) and
 [`nsh/desktop`](../modules/nsh-desktop.md) in TSX.
@@ -34,7 +34,7 @@ nsh run --target macos         # the default on a Mac
 ```
 
 `nsh` builds a debug runner with your crate and opens the app in a window, with its logs (`log::info!` and the rest)
-in the terminal. A change to the crate's Rust code builds the runner again and restarts the app. `cargo run` starts
+in the terminal; a change to the crate's Rust code builds the runner again and restarts the app. `cargo run` starts
 the same root from the crate's `src/main.rs`, which `nsh init --template rust` writes: [`run_app`](#embedding-in-a-mac-app)
 with `AppSource::Rust`.
 
@@ -55,7 +55,7 @@ nsh build my-app --release -o build
 dist/nsh/runtime/macos/nsh-macos-host --bundle build/bundle.nshc --window-size 1200x800   # in a checkout: target/debug/nsh-macos-host
 ```
 
-`--window-size` is the window's initial size (TSX apps). The window can be resized. `--display <n>` (`nsh run` / `nsh test
+`--window-size` is the window's initial size (TSX apps); the window can be resized. `--display <n>` (`nsh run` / `nsh test
 --target macos --display <n>`) centers it on display `n`: `1` is the primary display, the one with the menu bar.
 
 `nsh test --target macos` runs a TSX app's tests in macOS windows, on a secondary display when there is one (the main
@@ -87,12 +87,12 @@ the panel however the app is opened. Add this key through `nsh.json`'s `macos.in
 
 The bars below are the last 120 frames' main-thread time against one refresh (the line): green within half of it, amber
 within it, red over. While the panel shows, the readings are also logged once a second (target `nsh::fps`, in the
-Linux backend's shape with macOS's frame phases `tick`, `drain` and `canvas`, milliseconds as mean/p50/p95/max), which
-`nsh test --fps -v` shows and `examples/gallery/tools/perf.py` reads. Measure release builds. The monitor costs nothing
+Linux backend's shape with macOS's frame phases `tick`, `drain` and `canvas`; milliseconds as mean/p50/p95/max), which
+`nsh test --fps -v` shows and `examples/gallery/tools/perf.py` reads. Measure release builds; the monitor costs nothing
 while it is off.
 
 A click on the panel collapses it to a pill with the frame rate alone, green, amber or red as the frames' 95th percentile
-main-thread time is within half of one refresh, within it, or over it (the bars' colors). Another click expands it.
+main-thread time is within half of one refresh, within it, or over it (the bars' colors); another click expands it.
 VoiceOver reads it as a button with that value and presses it the same way. The panel takes the clicks on it and no
 others: the rest of the app gets the mouse as it does without it. The app sets how it shows with `setFpsMode`
 (`"expanded"`, `"collapsed"`, or `"hidden"`, which shows nothing while it still measures and logs; Rust:
@@ -150,7 +150,7 @@ The app is a menu bar app from launch, before its code runs, whichever way NSH s
 `LSUIElement` into the package's `Info.plist` (set `macos.activationPolicy` rather than `LSUIElement` in
 [`macos.infoPlist`](./packaging.md#infoplist-keys-and-entitlements)) and the policy into its `app.json`, which the
 runner reads. `nsh run --target macos` starts the development host with `--activation-policy accessory`, the flag to
-give the host when you start it yourself, and so does `nsh test --target macos --foreground`. Tests in the background
+give the host when you start it yourself, and so does `nsh test --target macos --foreground`; tests in the background
 (the default) run as before. `cargo run` starts a Rust app's own `main`, which says so in `run_app`'s options. The
 option is the macOS backend's, so a `main` that also builds for Windows and Linux, as `nsh init --template rust`
 writes it, sets it for macOS:
@@ -197,7 +197,7 @@ An app embedded with `AppView` takes part in the system's UI as its host app doe
 ## Embedding in a Mac app
 
 The `nsh-platform-macos` crate (from the NSH repository) gives a Rust Mac app `AppView`: one NSH engine as an `NSView`.
-Each `AppView` is independent. Several can run at once. It runs a Rust root, the root component of your crate:
+Each `AppView` is independent; several can run at once. It runs a Rust root, the root component of your crate:
 
 ```rust
 use std::rc::Rc;
@@ -274,7 +274,7 @@ app's stay yours; `run_app` sets it.
 
 `AppOptions::login_item` gives the app `run_app` runs its [login item](../modules/nsh-desktop.md#opening-at-login): the
 app bundle's (`SMAppService.mainApp`). It is off by default and read by `run_app` alone, so an embedded app
-never launches at login. The runner of the apps `nsh package` builds sets it.
+never launches at login; the runner of the apps `nsh package` builds sets it.
 
 `AppOptions::cache` (or `AppView::set_cache`, for the apps loaded next) sets where the apps keep their caches, the
 [images they download](./images-and-assets.md#kept-on-disk), and how much each keeps (`CacheOptions`: the system's
@@ -286,10 +286,10 @@ follow at once ([Device and environment](./device-and-environment.md#in-an-embed
 
 `AppView::set_theme_overrides(Some(json))` puts your app's brand over the app's [theme](./tailwind.md#theme-tokens): a theme file
 in the format of `nsh.json`'s `"theme"`, whose tokens win over the app's of the same names in light and dark mode
-while the app's others stay. Classes such as `bg-primary` restyle at once, and apps loaded later start with it
+while the app's others stay; classes such as `bg-primary` restyle at once, and apps loaded later start with it
 (`None` gives the app its own theme back; a file that does not parse is an error and changes nothing).
 
-Native components are registered with `AppView::register_component`. See
+Native components are registered with `AppView::register_component`; see
 [Native components](./native-components.md#registering-on-macos-rust). `set_ui_sets(sets)` sets the UI sets every
 engine serves: NSH's (`nsh_base::registry()`) and your crates' (`my_app::registry()`, which `#[native_module]`
 makes), so the TSX a view loads imports your Rust components and modules too.
@@ -309,12 +309,12 @@ The environment is a desktop's: the safe area and the keyboard height are 0, `id
 [Device and environment](./device-and-environment.md).
 
 Input is a desktop's: the mouse, the trackpad (scrolling with momentum, pinch and rotation) and the keyboard.
-Trackpad tap-to-click briefly shows the app’s `active:` feedback even when the press and release arrive together. Press callbacks run at release. Reduced motion keeps immediate visual release.
+Trackpad tap-to-click briefly shows the app’s `active:` feedback even when the press and release arrive together; press callbacks run at release. Reduced motion keeps immediate visual release.
 A zoomable scroll view zooms with a trackpad pinch or Control + wheel around the pointer, and scrolls both ways while
 zoomed.
 Selectable text is selected by dragging, double- and triple-clicking, and copied with Cmd+C. Escape, Option+Left,
 Cmd+[ and the mouse's back button close the newest dialog or go back in a stack (Escape in a focused field or web page
-only leaves it. A page gets these keys first and keeps those it uses). A `Dialog` is a layer over the whole window
+only leaves it; a page gets these keys first, and keeps those it uses); a `Dialog` is a layer over the whole window
 that shows the app's popup and backdrop. Pages show their `header` at the top. A click anywhere in an `Input`, its padding too, puts the caret at the nearest
 point. `AlertDialog` shows an `NSAlert`: a sheet of the window the user is in, and, while that window is out of sight
 (a tray app's hidden main window, the app hidden, the window minimized or off every screen), an alert of its own in
@@ -363,11 +363,11 @@ Not supported, or different:
 - **`brightness()`** above 1 is not drawn. **`mixBlendMode`** and **backdrops** are drawn by Core Animation:
   `mixBlendMode` as the view layer's compositing filter, `macos={{ backdrop: { material, blending, state } }}` as an
   `NSVisualEffectView` below the view (any AppKit material and state, whether or not a `backdropFilter` is set), and
-  `glassTintColor` as `glassEffect`'s tint on macOS 26. Before macOS 26 the blur stands in for glass. These are
+  `glassTintColor` as `glassEffect`'s tint on macOS 26; before macOS 26 the blur stands in for glass. These are
   compositor effects: the test agent's composited screenshots show them, but its in-process fallback cannot.
   A `behindWindow` material shows the desktop only through a see-through window, requested by window attributes
-  or a custom host's `AppOptions::transparent`. The view's blending never enables transparency itself.
-- **Inputs**: content types and autofill, keyboard types, autocapitalization, letter spacing. Input accessory views
+  or a custom host's `AppOptions::transparent`; the view's blending never enables transparency itself.
+- **Inputs**: content types and autofill, keyboard types, autocapitalization, letter spacing; input accessory views
   are never shown (there is no software keyboard) and `keyboardShouldPersistTaps` is ignored.
 - **`WebView`'s `scrollable={false}`** keeps the mouse wheel and the trackpad from scrolling the page: they scroll
   the app's scroll views around it, as on iOS. The page still scrolls with its keyboard (Space, the arrows) and its own

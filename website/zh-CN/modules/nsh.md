@@ -6,9 +6,7 @@ order: 2
 
 # nsh
 
-`nsh` 是核心模块，包含响应式 API（signal、computed、effect、context）、`mount`、`token`、`setTheme`，以及宿主元素 `View`、`Text`、`Scroll` 和 `Overlay`。它还提供[可选择的视图](#selectable-views)、[安全区域与键盘](#safe-area-and-keyboard)、[动画](#animation)、[设备与环境](#device)、[`PanResponder`](#panresponder)、[剪贴板](#clipboard)、[照片选择器](#picker)、[分享面板](#share)、[声音](#sound)、[存储](#storage)、[宿主通道](#host)、[键盘快捷键](#keymap)、[原生组件与模块](#nativecomponent-and-nativemodule)、[无障碍](#accessibility)，以及元素、样式和事件的 TypeScript 类型。
-
-响应式图以 Rust 原生运行。读取一个 signal 就是调用一次运行时，只需几纳秒。只有你自己写的闭包在 JavaScript 解释器里执行。
+`nsh` 是核心模块：响应式 API（signal、computed、effect、context）、`mount`、`token`、`setTheme`、宿主元素 `View`、`Text`、`Scroll` 和 `Overlay`，[可选择的视图](#selectable-views)、[安全区域与键盘](#safe-area-and-keyboard)，[动画](#animation)、[设备与环境](#device)、[`PanResponder`](#panresponder)、[剪贴板](#clipboard)、[照片选择器](#picker)、[分享面板](#share)、[声音](#sound)、[存储](#storage)、[宿主通道](#host)、[键盘快捷键](#keymap)、[原生组件与模块](#nativecomponent-and-nativemodule)、[无障碍](#accessibility)，以及元素、样式和事件的 TypeScript 类型。响应式图本身以 Rust 原生运行；读取一个 signal 是一次对运行时的调用，只需几纳秒，只有你自己写的闭包会在 JavaScript 解释器中执行。
 
 ```ts
 import { batch, cleanup, computed, context, effect, ErrorBoundary, mount, Overlay, Scroll, signal, split, Text, token, untracked, View } from "nsh";

@@ -1,8 +1,8 @@
 {
   "title": "Native Shell — Build once, native everywhere | Rust UI framework",
-  "description": "Native Shell is a Rust-first UI framework. Write one app in TSX for iOS, Android, macOS, Windows, Linux and the web. Each platform gets its own UI and interaction, and you add Rust where you need it.",
+  "description": "Native Shell is a Rust-first native UI framework: build one app in TSX for iOS, Android, macOS, Windows, Linux and the web, with each platform’s own UI and interaction, and extend it with Rust where it needs to.",
   "slogan": "Build once, native everywhere",
-  "lead": "Write TSX, ship native clients as fast as Rust. One codebase runs on 8 platforms, each with the system’s own UI and interaction.",
+  "lead": "Write only TSX and ship native clients that keep pace with Rust. One codebase runs on 8 platforms, each with the system’s own UI and interaction.",
   "idle": "Your app sits in the middle. Each arch around it is a platform.",
   "start": "Get started",
   "gallery": "Gallery",
@@ -13,7 +13,7 @@
     "platforms"
   ],
   "numbersTitle": "A client written in TSX, right beside Rust",
-  "numbersLead": "In NSH, only your app’s code is JS. The reactive graph, renderer, layout and every module are Rust. TSX and Rust apps run on the same native pipeline.",
+  "numbersLead": "In NSH only your app’s code is JS. The reactive graph, the renderer, layout and every module are Rust. TSX and Rust apps share the same native execution pipeline.",
   "stats": [
     "22 live sparklines, an order book and a tape updating together, frame p95 under 4 ms",
     "Engine startup (75–155 µs)",
@@ -53,14 +53,14 @@
   "numbersNote": "Release builds. Memory at rest: macOS footprint on an Apple M3 (the counter app and the Rust template at 1200 × 800; the system window holds one label at 480 × 640); Linux private dirty memory on an NVIDIA RTX 3060 Ti (nsh init’s TSX and Rust templates and a GTK window with one label, all at 480 × 640); Windows private working set. Each platform’s measure, with RSS and USS, is in the report. Sizes: nsh package’s release builds, with link-time optimization and stripped; the TSX executable holds the QuickJS runtime, the app’s code is under 1 KB; the package is the zipped .app on macOS, the .tar.gz on Linux and the .zip on Windows; on the web, what the browser downloads, runtime and app.",
   "numbersCta": "The full performance report",
   "zeroTitle": "TSX with 0 dependencies",
-  "zeroLead": "An app is just the files below. The nsh command line includes its own bundler and toolchain, and every module you import is native.",
+  "zeroLead": "An app is the files below. The nsh command line brings its own bundler and toolchain, and the modules you import are native.",
   "zeroPoints": [
     "One nsh executable creates, runs, tests and packages",
     "~120 ms from saving a file to the new version running",
     "nsh check type-checks with TypeScript 7’s native tsc"
   ],
   "viewsTitle": "8 platforms, each with the system’s own controls",
-  "viewsLead": "NSH builds each UI from what the platform already has. Text input, selection, input methods and accessibility come from the system. When a new OS improves them, your app gets it too.",
+  "viewsLead": "NSH builds each UI from what its platform already has. Text input, selection, input methods and accessibility come from the system, and what a new OS release brings to them reaches the app with it.",
   "cols": [
     "Platform",
     "Views",
@@ -71,7 +71,7 @@
   "embedNote": "Maps, web views, video and any native view the host registers are one more subview in the same hierarchy: they lay out, clip, scroll and take touches with the rest of the app.",
   "embedCta": "The backend of each platform",
   "formTitle": "One app, in each device’s own form",
-  "formLead": "The same compiled code runs twice here. Only the device differs. With a pointer, it is a window with conversations at the side. On a phone, the buttons and composer float in Liquid Glass above the thread. In a terminal, it draws on the character grid. You write the app once.",
+  "formLead": "The same compiled code runs twice here, and only the device differs. With a pointer it is a window with its conversations at the side; on a phone the buttons and the composer float in Liquid Glass with the thread scrolling beneath; in a terminal it sits on the character grid. The app is written once.",
   "desktop": "Desktop",
   "phone": "Phone",
   "terminal": "Terminal",
@@ -80,10 +80,10 @@
   "pending": "The live preview is not built yet: run bun run dev (or cargo xtask web).",
   "tuiCta": "Explore TUI",
   "langTitle": "Rust, where the app needs it",
-  "langLead": "A TSX app imports Rust components, modules and classes through nshm: its own crate in ext/, or one from crates.io. Use them for native speed, platform access or a crate. You can also write the whole app in Rust, with the same elements and signals, compiled to native code.",
+  "langLead": "A TSX app imports Rust components, modules and classes through nshm, its own crate in ext/ or one from crates.io, for native speed, the platform or a crate. A whole app can be Rust too: the same elements and signals, compiled to native code.",
   "langCta": "Building with Rust",
   "fastTitle": "Only the views that changed are touched",
-  "fastLead": "Every element is a view the platform keeps. A change re-runs only the expressions that read the changed signal, in one batch per frame. The main thread never waits for JS, and animations run natively. Scrolling and animation hold 120 FPS, and the app sits near idle at rest.",
+  "fastLead": "Every element is a view the platform keeps. A change runs only the expressions that read the changed signal, in one batch per frame. The main thread never waits for JS and native animations run without it, so scrolling and animation hold 120 FPS and the app sits near idle at rest.",
   "fastPress": "Press +1",
   "fastLegend": "The two texts that read the signals change and the history gains a row; no other view is touched.",
   "fastIdle": "24 nodes, at rest",
@@ -92,7 +92,7 @@
   "fastStat": "1 commit · 7 mount items",
   "fastCta": "How it stays fast",
   "shipTitle": "After release, your app can still take new UI",
-  "shipLead": "Your team writes it, or a model generates it per request. It reaches the device as a signed module, runs in a sandbox the host sets, and renders natively.",
+  "shipLead": "Your team can write it, or a model can generate it for each request. It reaches the device as a signed module, runs in a sandbox the host sets, and shows natively.",
   "trust": "Trust boundary",
   "flow": [
     {
@@ -114,7 +114,7 @@
   ],
   "waysHead": "Three ways to ship, one engine",
   "foundTitle": "Behavior from NSH, the look from you",
-  "foundLead": "nsh/base has unstyled base components. They handle state, focus, keyboard and accessibility, and your app styles every part. The nsh command line does the rest.",
+  "foundLead": "nsh/base holds unstyled base components that own state, focus, keyboard and accessibility, and the app styles every part. One nsh command line does the rest.",
   "kitNote": [
     "Building for the desktop only? ",
     "GPUI Kit",

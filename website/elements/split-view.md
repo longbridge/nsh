@@ -8,16 +8,12 @@ demo: el-split-view
 # SplitView
 
 A split view shows the app's navigation in columns: a sidebar (the sections or the lists), an optional content column
-(the items of what the sidebar selects) and the detail. Each column is its own [`NavStack`](./nav-stack.md), so
-each keeps its own pages and pushes and pops independently.
-
-- **iOS, iPadOS and Mac Catalyst**: the columns live in a `UISplitViewController`. On iPadOS 26 the sidebar floats
-  over the content. It comes in with an edge swipe or the system's sidebar button, and the system rearranges the
-  columns as the window rotates or resizes.
-- **Elsewhere**: the columns stand side by side, and the user resizes them by dragging their edges.
-- **Compact width** (a phone, a narrow window): one column shows at a time.
-
-The app owns which columns show, through `columnVisibility`.
+(the items of what the sidebar selects) and the detail. Each column is a [`NavStack`](./nav-stack.md) of its own, so
+each keeps its pages and pushes and pops on its own. On iOS, iPadOS and Mac Catalyst the columns are a
+`UISplitViewController`'s: the sidebar floats over the content on iPadOS 26, comes in with a swipe from the edge and
+with the system's sidebar button, and the system arranges the columns as the window turns and is resized. Elsewhere
+the columns stand side by side, resized by dragging their edges. Where the room is compact (a phone, a narrow window) one column shows
+at a time. Which columns show is `columnVisibility`, a value the app owns.
 
 ```tsx tabs
 import { horizontalSizeClass, mount, signal, Text, View } from "nsh";
@@ -123,7 +119,7 @@ fn mail() -> impl IntoElement {
 
 `SplitView` comes from [`nsh/base`](../modules/nsh-base.md), `nsh_base::split_view()` in Rust, with
 `ColumnVisibility`. In Rust each column is a setter that takes its stack (`.sidebar(..)`, `.content(..)`,
-`.detail(..)`). In TSX each is a prop that takes a `<NavStack>`.
+`.detail(..)`); in TSX each is a prop that takes a `<NavStack>`.
 
 ## Columns
 
@@ -134,7 +130,7 @@ fn mail() -> impl IntoElement {
 
 Each column is a `NavStack`: its pages, its header, its back button and its state are the stack's, and pushing and
 popping one column leaves the others as they are. The columns' widths are the platform's: on iOS UIKit's, which
-follow the window. Elsewhere iPadOS's defaults, the sidebar and the content column 320 points wide and the detail the
+follow the window; elsewhere iPadOS's defaults, the sidebar and the content column 320 points wide and the detail the
 rest to start, which the user resizes by dragging. The look is the app's: the pages draw the columns' content and backgrounds, the borders between them included.
 
 ## Which columns show
@@ -150,7 +146,7 @@ Without `columnVisibility` the view keeps its own value, starting from `"automat
 value and changes it in `onColumnVisibilityChange({ columnVisibility })`, which reports what the user or the system
 shows instead: iPadOS's sidebar button, a swipe from the edge, a press beside a column shown over the detail, going
 back from a column's first page on a phone. When the app keeps another value, the view shows the app's again. Under
-`"automatic"` the view keeps what the user shows. The changes iPadOS makes as the window turns or is resized belong to
+`"automatic"` the view keeps what the user shows; the changes iPadOS makes as the window turns or is resized belong to
 `"automatic"` itself, so the user's are the ones reported.
 
 ## Phones and narrow windows
@@ -165,7 +161,7 @@ bring the detail in front sets `"detailOnly"` then, as the example above does.
   sidebar's, then the content's and the detail's, as far as `columnVisibility` goes, with the system's back button and
   swipe back between them. A page pushed on any column is pushed there. Going back from a column's first page shows
   the column before, reported with `onColumnVisibilityChange` (`"detailOnly"` becomes `"doubleColumn"` with three
-  columns, `"all"` with two). A page left that is not its column's first is popped as in any stack. Widened again,
+  columns, `"all"` with two); a page left that is not its column's first is popped as in any stack. Widened again,
   each column takes its pages back.
 - **Android, the desktops and the web**: where the window is horizontally compact (below 600 points of its width),
   the column shows alone, full size. The app shows the way back to the column before: a back button in the column's
@@ -202,6 +198,6 @@ See [Accessibility](../docs/accessibility.md) for labels, roles and announcement
 - **iOS, iPadOS and Mac Catalyst**: `UISplitViewController` with two or three columns, each the
   `UINavigationController` of its `NavStack`. iPadOS 26 floats the sidebar over the content in Liquid Glass. The
   swipe from the edge and the sidebar button are the system's.
-- **Android, the desktops and the web**: the columns stand side by side. The user drags the sidebar's edge and the
+- **Android, the desktops and the web**: the columns stand side by side; the user drags the sidebar's edge and the
   boundary between the columns to resize them. A [`DockArea`](./dock.md) is the workspace whose columns the user also
   rearranges.

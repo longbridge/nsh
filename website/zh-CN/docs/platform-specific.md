@@ -7,7 +7,7 @@ group: platforms
 
 # 平台特定代码
 
-同一个 NSH 包可以在 iOS、Android、macOS、Windows 和 Linux 上运行（也可以在 Mac Catalyst 中运行），还可以通过 [Web 运行时](./web.md)在浏览器中运行。应用的大部分代码不需要判断平台：元素、样式、布局和模块在各平台行为一致，用它们做出的组件看起来也一样。真正只属于某个平台的代码，NSH 给了固定的位置，方便查找和管理：
+同一个 NSH 包可以在 iOS、Android、macOS、Windows 和 Linux 上运行（也可以在 Mac Catalyst 中运行），还可以通过 [Web 运行时](./web.md)在浏览器中运行。应用的大部分代码根本不需要判断平台：元素、样式、布局和模块在各处的行为都相同，你用它们绘制的组件在各处看起来也都一样。当某样东西确实只属于一个平台时，NSH 给它安排了明确的位置，让平台代码一目了然、范围可控：
 
 | Rust | TSX | 用途 |
 |---|---|---|
@@ -18,13 +18,13 @@ group: platforms
 
 ## 桌面与移动端
 
-每个平台不是桌面就是移动端，判断规则只有一条。桌面是 macOS、Windows、Linux，以及桌面形态的浏览器（有鼠标且窗口较宽，见 [Web](./web.md)）。移动端是 iOS、Android，以及手机或平板形态的浏览器。Mac Catalyst 运行 iOS 后端，因此也属于移动端，适用 `ios={{…}}` 属性。`desktop={{…}}` 属性、`platform.select({ desktop, mobile })`、`platform.desktop` 和 `platform.idiom === "desktop"` 都遵循这条规则，`nsh/base` 的组件（菜单在桌面上是弹出层，在移动端是底部面板）和 Rust 中的 `is_desktop()` 也一样。
+每个平台不是桌面就是移动端，判断规则只有一条。桌面是 macOS、Windows、Linux，以及桌面形态的浏览器（有鼠标且窗口较宽，见 [Web](./web.md)）。移动端是 iOS、Android，以及手机或平板形态的浏览器；Mac Catalyst 运行 iOS 后端，因此也属于移动端，适用 `ios={{…}}` 属性。`desktop={{…}}` 属性、`platform.select({ desktop, mobile })`、`platform.desktop` 和 `platform.idiom === "desktop"` 都遵循这条规则，`nsh/base` 的组件（菜单在桌面上是弹出层，在移动端是底部面板）和 Rust 中的 `is_desktop()` 也一样。
 
 `nsh/desktop` 的 `isAvailable` 回答的是一个更窄的问题：这个模块的窗口和菜单 API 是否可用，它们在 macOS、Windows 和 Linux 上可用，但在终端应用中不可用。布局、密度和输入方式用 `platform.desktop` 判断，调用 `Window` 和 `Menu` 用 `isAvailable` 判断。
 
 ## 平台专属属性
 
-在 Rust 中，只有一个平台才有的属性和其他属性一样是构建方法（Android 的 `.ripple(..)`、`.elevation(..)`，iOS 的 `.input_accessory(..)`，macOS 的 `.macos_backdrop(..)`，Windows 的 `.windows_backdrop(..)`，桌面的 `.window_drag(..)`）。其他平台会忽略它。在 TSX 中，只存在于某一个平台的属性，归入以该平台命名的对象中。每个元素都接受 `ios`、`android`、`macos`、`windows`、`desktop`（macOS、Windows、Linux，以及界面风格为桌面的浏览器）和 `web`（浏览器）。在其他平台上这个对象会被忽略，在它自己的平台上只应用其中的键。macOS 同时应用 `macos` 和 `desktop`，Windows 同时应用 `windows` 和 `desktop`。桌面浏览器同时应用 `desktop` 和 `web`。
+在 Rust 中，只有一个平台才有的属性和其他属性一样是构建方法（Android 的 `.ripple(..)`、`.elevation(..)`，iOS 的 `.input_accessory(..)`，macOS 的 `.macos_backdrop(..)`，Windows 的 `.windows_backdrop(..)`，桌面的 `.window_drag(..)`）；其他平台会忽略它。在 TSX 中，只存在于某一个平台的属性，归入以该平台命名的对象中。每个元素都接受 `ios`、`android`、`macos`、`windows`、`desktop`（macOS、Windows、Linux，以及界面风格为桌面的浏览器）和 `web`（浏览器）；在其他平台上这个对象会被忽略，在它自己的平台上只应用其中的键。macOS 同时应用 `macos` 和 `desktop`，Windows 同时应用 `windows` 和 `desktop`；桌面浏览器同时应用 `desktop` 和 `web`。
 
 ```tsx tabs
 <View
@@ -76,7 +76,7 @@ when(shown, || {
 })
 ```
 
-TSX 的这些对象和其他属性一样是响应式的。从对象中移除的键会被清除。
+TSX 的这些对象和其他属性一样是响应式的；从对象中移除的键会被清除。
 
 目前已有的：
 
@@ -106,11 +106,11 @@ TSX 的这些对象和其他属性一样是响应式的。从对象中移除的�
 
 在 TSX 中，`macos={{…}}`、`windows={{…}}`、`desktop={{…}}` 和 `web={{…}}` 在所有地方都可以使用。类型（`IOSProps`、`AndroidProps`、`MacOSProps`、`WindowsProps`、`DesktopProps` 及其各元素的形式）会告诉编辑器每个元素接受什么。
 
-元素在各平台上都要表达的意思是顶层属性（Rust 中是同名方法），在有意义的平台上生效：`NavPage` 的 `title`、`headerStyle`、`headerLargeTitle` 和 `headerBackTitle` 设置 iOS 和 Android 的系统标题栏，它的 `header` 插槽是桌面和 Web 上的标题栏，`Dialog` 的 `presentation` 选择 iOS 的表单样式。`AlertDialog.show` 的 `closeOnBackdropPress`、`pagingEnabled`、`refreshing`、`hitSlop` 等在所有平台上都可用。平台系统自带的功能放进该平台的对象。几个平台都有时，用同一个名字分别放进各自的对象：`WebView` 的 `allowsBackForwardNavigationGestures`（系统的滑动前进后退手势）同时在 `ios={{…}}` 和 `desktop={{…}}` 里。
+元素在各平台上都要表达的意思是顶层属性（Rust 中是同名方法），在有意义的平台上生效：`NavPage` 的 `title`、`headerStyle`、`headerLargeTitle` 和 `headerBackTitle` 设置 iOS 和 Android 的系统标题栏，它的 `header` 插槽是桌面和 Web 上的标题栏，`Dialog` 的 `presentation` 选择 iOS 的表单样式。`AlertDialog.show` 的 `closeOnBackdropPress`、`pagingEnabled`、`refreshing`、`hitSlop` 等在所有平台上都可用。平台系统自带的功能放进该平台的对象；几个平台都有时，用同一个名字分别放进各自的对象：`WebView` 的 `allowsBackForwardNavigationGestures`（系统的滑动前进后退手势）同时在 `ios={{…}}` 和 `desktop={{…}}` 里。
 
 ## 平台模块
 
-在 Rust 中，只有一个平台才有的 API 是 `nsh_core::prelude` 的函数（`on_back_press`、`haptic`、`input_accessory_view`）和 `nsh_core::element::desktop` 的函数（窗口：`window`、`current_window` 及其 `WindowRef`、`title_bar`、`displays`；应用：`quit`、`restart`、`launch_at_login`、`set_launch_at_login`；菜单：`set_application_menu`、`popup_menu`）。在其他平台上它们什么都不做，应用也不会登录时打开：`launch_at_login` 返回 `false`，`set_launch_at_login` 以 `LaunchAtLoginError::Unavailable` 失败。在 TSX 中，`nsh/mobile` 存放 iOS 和 Android 的 API（其中一些只属于其中一个平台），`nsh/desktop` 存放桌面的 API。两者在所有平台上都可以导入，因此同一个包可以到处运行：在其他平台上，它们的函数会立即返回，组件不占空间。每个模块都导出 `isAvailable`，在自己的平台上为 `true`。`platform.os` 区分具体平台。
+在 Rust 中，只有一个平台才有的 API 是 `nsh_core::prelude` 的函数（`on_back_press`、`haptic`、`input_accessory_view`）和 `nsh_core::element::desktop` 的函数（窗口：`window`、`current_window` 及其 `WindowRef`、`title_bar`、`displays`；应用：`quit`、`restart`、`launch_at_login`、`set_launch_at_login`；菜单：`set_application_menu`、`popup_menu`）；在其他平台上它们什么都不做，应用也不会登录时打开：`launch_at_login` 返回 `false`，`set_launch_at_login` 以 `LaunchAtLoginError::Unavailable` 失败。在 TSX 中，`nsh/mobile` 存放 iOS 和 Android 的 API（其中一些只属于其中一个平台），`nsh/desktop` 存放桌面的 API。两者在所有平台上都可以导入，因此同一个包可以到处运行：在其他平台上，它们的函数会立即返回，组件不占空间。每个模块都导出 `isAvailable`，在自己的平台上为 `true`；`platform.os` 区分具体平台。
 
 ### nsh/mobile
 
@@ -287,7 +287,7 @@ let hint = match os() {
 
 ### 渲染不同的组件
 
-组件也可以这样选择。选择永远不变时（TSX）放在模块顶层：
+组件也可以这样选择；选择永远不变时（TSX）放在模块顶层：
 
 ```tsx tabs
 const Spinner = platform.select({ ios: IosSpinner, default: MaterialSpinner })!;
@@ -318,7 +318,7 @@ when(os() == Os::Ios, || input_accessory_view("bar").child(…))
 
 ## Tailwind 中的平台变体
 
-Rust 用 `.when(os() == Os::Ios, |v| ..)` 按平台设置样式。在 TSX 中，`ios:`、`android:` 和 `web:` 变体只在一个平台上应用对应的类：
+Rust 用 `.when(os() == Os::Ios, |v| ..)` 按平台设置样式；在 TSX 中，`ios:`、`android:` 和 `web:` 变体只在一个平台上应用对应的类：
 
 ```tsx tabs
 <View class="rounded-xl bg-white p-4 ios:shadow-md android:border android:border-zinc-200">…</View>

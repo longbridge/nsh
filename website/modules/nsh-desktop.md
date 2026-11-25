@@ -1,25 +1,12 @@
 ---
 title: nsh/desktop
-description: "Desktop-only APIs: the app's windows (every window equal, their kinds, attributes, state and events), the displays, a title bar of the app's own, the application menu, context menus, the tray and global shortcuts."
+description: "Desktop-only APIs: the app's windows (all of them first-class, their kinds, attributes, state and events), the displays, a title bar of the app's own, the application menu, context menus, the tray and global shortcuts."
 order: 12.5
 ---
 
 # nsh/desktop
 
-`nsh/desktop` holds what only desktops have: the app's windows and their title bars, the displays, the application menu and context menus, the tray and global shortcuts. It works on macOS, Windows and Linux. TSX imports `nsh/desktop`.
-
-Rust code finds the same in `nsh_core::element::desktop`:
-
-- windows (`window()`) and the window a component renders in (`current_window()`, a `WindowRef`)
-- the displays (`displays`)
-- `quit`, `restart` and opening at login (`launch_at_login`, `set_launch_at_login`)
-- the application menu and context menus (`set_application_menu`, `popup_menu`, made of `MenuItem`s)
-- the tray (`set_tray`) and global shortcuts (`register_global_shortcut`)
-- draggable views, marked with `.window_drag(true)`
-
-You can import the module on every platform, so one bundle runs everywhere. On iOS and Android its functions do nothing, and `isAvailable` tells you whether windows and menus exist.
-
-If your app declares [capabilities](../docs/sandbox-and-capabilities.md#application) (the permissions an app asks for in nsh.json), it needs `"application": true` for the application menu, the tray, global shortcuts, `quit` and quit requests, `restart`, the quit mode and launching at login. Without it, these do nothing. Context menus and the app's windows (granted by `windows`) don't need `application`.
+`nsh/desktop` holds what only desktops have: the app's windows and their title bars, the displays, the application menu and context menus, the tray and global shortcuts. It works on macOS, Windows and Linux. Rust code finds the same in `nsh_core::element::desktop`: windows (`window()`), the window a component renders in (`current_window()`, a `WindowRef`), the displays (`displays`), `quit`, `restart`, opening at login (`launch_at_login`, `set_launch_at_login`), the application menu and context menus (`set_application_menu`, `popup_menu`, made of `MenuItem`s), the tray (`set_tray`) and global shortcuts (`register_global_shortcut`), and marks draggable views with `.window_drag(true)`; TSX imports `nsh/desktop`. The module can be imported on every platform, so one bundle runs everywhere: on iOS and Android its functions do nothing, and `isAvailable` tells you whether its windows and menus are there. An app that declares capabilities needs `"application": true` for the application menu, the tray, global shortcuts, `quit` and quit requests, `restart`, the quit mode and launching at login ([capabilities](../docs/sandbox-and-capabilities.md#application)); without it they do nothing. Context menus and the app's windows (granted by `windows`) need no `application`.
 
 ```tsx tabs
 import {
@@ -354,7 +341,7 @@ nsh.json's `window` holds launch defaults for the first window the app declares,
 }
 ```
 
-It takes the [options](#options) `defaultSize`, `defaultPosition`, `display`, `defaultMode` and `restoreBounds`, and every [attribute](#attributes); the first `<Window>` the app opens inherits them, and its own options and attributes override them. One nsh.json serves every build: the desktops apply these settings, a web page takes `title` as its title, and on iOS and Android the app fills its view in the screen. `"defaultVisible"` no longer applies: the host has nothing to show, and an app that starts without a window opens none (or keeps its first `<Window open={false}>` closed until it wants it).
+It takes the [options](#options) `defaultSize`, `defaultPosition`, `display`, `defaultMode` and `restoreBounds`, and every [attribute](#attributes); the first `<Window>` the app opens inherits them, and its own options and attributes override them. One nsh.json serves every build: the desktops apply these settings, a web page takes `title` as its title, and on iOS and Android the app fills its view in the screen. `"defaultVisible"` no longer applies: the host has nothing to show, and an app that starts without a window simply opens none (or keeps its first `<Window open={false}>` closed until it wants it).
 
 A tray app can start with its window hidden and open it when its icon is clicked, keeping running when the window hides:
 

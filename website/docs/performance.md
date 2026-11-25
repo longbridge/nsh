@@ -7,14 +7,10 @@ group: tools
 
 # Performance
 
-Performance is NSH's first priority. The framework decides most of it, not your app:
-
-- The runtime is native.
-- Each update crosses threads once.
-- Animations and list virtualization run without JS.
-- An app written in Rust runs no JS at all.
-
-This page explains the rules NSH follows, what they mean for your Rust and TSX code, and how to measure.
+Performance is NSH's first priority, and most of it is decided by the framework rather than by your app: the runtime
+is native, each update crosses threads once, animations and list virtualization run without JS, and an app written in
+Rust runs no JS at all. This page explains the rules NSH follows, what they mean for the code you write, in Rust and in
+TSX, and how to measure.
 
 ## The rules
 
@@ -59,7 +55,7 @@ handler with everything it changes, becomes **one commit**: the runtime renders 
 of native view operations, which reaches the main thread in **one hop**. There is no bridge message per view and no
 serialization per prop.
 
-**For your code:** you do not need to coalesce writes for performance. Ten `set` calls in one handler still produce one
+**For your code:** you do not need to coalesce writes for performance; ten `set` calls in one handler still produce one
 commit, in TSX and in Rust. Use `batch` when you want effects and computed values to see all the writes at once instead of running after
 each one.
 
@@ -106,7 +102,7 @@ fn price(quote: Signal<Quote>) -> impl IntoElement {
 
 - Read signals where they are used (inside bindings, `move ||` closures in Rust and JSX expressions in TSX, and in
   `computed` and `effect`), not at the top of a component, so the narrowest binding updates.
-- Use `each` / `<Each>` (rows kept by key) or a [virtual list](./lists.md) for collections. Rows made again from the whole
+- Use `each` / `<Each>` (rows kept by key) or a [virtual list](./lists.md) for collections; rows made again from the whole
   collection (`dynamic` in Rust, a plain `.map()` in JSX) are all created again on each change.
 - Derive values with `computed` when several bindings use them, so they are computed once per change.
 
@@ -171,7 +167,7 @@ virtual_list(move || photos.with(Vec::len), move |at| photo_row(photos, at))
 
 - `timing`, `spring` and `decay` run on the platform's UI thread, frame by frame, with no work on the engine thread
   per frame.
-- `scroll_value` (`scrollValue`) writes a scroll offset into an animated value in the same frame. A pan
+- `scroll_value` (`scrollValue`) writes a scroll offset into an animated value in the same frame; a pan
   (`pan={{ x, y }}`) lets drags move a view directly. Your code hears about the end (the animation completes, the pan's
   end gets the velocity).
 - `Animated.sequence` / `parallel` / `stagger` / `loop` run as one native tree: each step starts the moment the
@@ -181,7 +177,7 @@ virtual_list(move || photos.with(Vec::len), move |at| photo_row(photos, at))
 ### 6. Virtualize long lists
 
 [`List`](./lists.md) keeps only the rows near the viewport, recycles their cells, and computes positions, columns,
-sticky headers and viewability natively. Scrolling frames that reveal no new row run none of your code and produce no batch. A
+sticky headers and viewability natively. Scrolling frames that reveal no new row run none of your code and produce no batch; a
 frame that binds one new row of the gallery's photo list is 4 operations and 4 mount items.
 
 **For your code:**
@@ -242,7 +238,7 @@ Measure with `--release`: for an app with a Rust crate it also builds the develo
 
 (`AppOptions { fps: true, .. }` in a Rust app's `run_app`) shows the frame rate and what frames and commits cost over the running app, with CPU, GPU and memory
 ([macOS: performance monitor](./macos.md#performance-monitor)). Linux also shows a panel with the frame rate, frame time and p95, JS and core time,
-CPU, memory, the JS heap and the nodes alive, over a curve of the last 120 frames' cost along its bottom, rising in amber for slow frames. A click collapses it to the frame rate and
+CPU, memory, the JS heap and the nodes alive, over a curve of the last 120 frames' cost along its bottom, rising in amber for slow frames; a click collapses it to the frame rate and
 expands it again. On Linux and Windows, `--target linux --fps` and
 `--target windows --fps` also log readings once a second, with the time of each phase of a frame, which `-v` shows;
 `nsh test --target linux --fps -v` (or `windows`) takes them while a test drives the app.
@@ -251,7 +247,7 @@ The environment variable `NSH_FPS=1` turns the monitor on however the app is sta
 app, a Rust app, an app that embeds NSH. A packaged macOS app opened from the Dock or Finder gets it from its
 `Info.plist`'s `LSEnvironment` (`nsh.json`: `"macos": { "infoPlist": { "LSEnvironment": { "NSH_FPS": "1" } } }`). The
 app turns it on and off itself with `setFpsEnabled(enabled)` and reads it with `fpsEnabled()`
-([`nsh`](../modules/nsh.md#fpsenabled-and-setfpsenabled)). The gallery's sidebar menu has a switch for it.
+([`nsh`](../modules/nsh.md#fpsenabled-and-setfpsenabled)); the gallery's sidebar menu has a switch for it.
 
 On the terminal target, `nsh run examples/gallery --target tui --fps` shows one line in a corner.
 `C-h p` toggles it outside text fields. It shows active FPS, `idle` when the app rests, frame time and p95,
@@ -268,13 +264,13 @@ Measured numbers, NSH's baselines and the gallery page by page on Linux, are in 
 
 ## Checklist
 
-- Language: write the app, or the parts it uses most, in Rust ([Building with Rust](./rust.md)). Keep TSX for what
+- Language: write the app, or the parts it uses most, in Rust ([Building with Rust](./rust.md)); keep TSX for what
   changes often or is delivered at run time.
 - Interactions: a tap changes a handful of mount items, not dozens.
-- Lists: a virtual list (`virtual_list`, `List`) for anything long, with an estimated item size. Per-item state in data.
+- Lists: a virtual list (`virtual_list`, `List`) for anything long, with an estimated item size; per-item state in data.
 - Animations: animated values, not signals written every frame.
 - Scroll effects: `scroll_value` (`scrollValue`), not a scroll listener.
-- Handlers: no heavy work per keystroke or per scroll event. Cache in `computed`.
+- Handlers: no heavy work per keystroke or per scroll event; cache in `computed`.
 
 ## See also
 

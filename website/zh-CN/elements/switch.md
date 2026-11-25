@@ -68,7 +68,7 @@ fn wifi() -> impl IntoElement {
 }
 ```
 
-`Switch` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate。值由应用持有：按压时通过 `onChange` 报告下一个值，开关显示应用传回的 `checked`。在 Rust 中，`switch()` 创建一个开关，每个属性对应一个设置方法（`.checked(..)`、`.track_style(..)`），每个事件对应一个监听方法（`.on_change(..)`），开关自身用类型化的样式方法，标签用 `.child(..)`。部件的样式接受跟随开关的状态方法（`.checked(..)`、`.disabled_style(..)`）。
+`Switch` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate。值由应用持有：按压时通过 `onChange` 报告下一个值，开关显示应用传回的 `checked`。在 Rust 中，`switch()` 创建一个开关，每个属性对应一个设置方法（`.checked(..)`、`.track_style(..)`），每个事件对应一个监听方法（`.on_change(..)`），开关自身用类型化的样式方法，标签用 `.child(..)`；部件的样式接受跟随开关的状态方法（`.checked(..)`、`.disabled_style(..)`）。
 
 <a id="props"></a>
 
@@ -166,8 +166,8 @@ fn wifi() -> impl IntoElement {
 
 ## 无障碍
 
-- 标签不能说明改变设置的效果时，设置 `accessibilityHint`。它跟随响应式值变化。设为 `undefined` 会移除提示。
-- 开关对屏幕阅读器而言是一个元素，角色是 `"switch"`，带有它的值（开或关）。轨道和滑块是它的部件。它的标签是子元素的文字。没有文字时设置 `accessibilityLabel`。
+- 标签不能说明改变设置的效果时，设置 `accessibilityHint`。它跟随响应式值变化；设为 `undefined` 会移除提示。
+- 开关对屏幕阅读器而言是一个元素，角色是 `"switch"`，带有它的值（开或关）；轨道和滑块是它的部件。它的标签是子元素的文字；没有文字时设置 `accessibilityLabel`。
 - `disabled` 按平台的方式报告（VoiceOver、TalkBack、UI Automation、浏览器的无障碍树）。
 - 在 macOS 和 Web 上，开关是键盘焦点的一站：Tab 可以到达它，Space 和 Return 切换它，`focus-visible:` 样式显示焦点所在。
 
@@ -179,4 +179,4 @@ fn wifi() -> impl IntoElement {
 
 - iOS、Android 和 Mac Catalyst：按压是在开关上（包括它的标签）结束的一次轻点。
 - 桌面（macOS、Windows、Linux、GPUI）和 Web：按压是一次点击。在 macOS 和 Web 上，Space 和 Return 也会切换拥有键盘焦点的开关。
-- 每个平台都按应用的样式绘制。滑块按应用的样式和过渡移动。
+- 每个平台都按应用的样式绘制；滑块按应用的样式和过渡移动。

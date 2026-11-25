@@ -6,7 +6,7 @@ order: 2.4
 
 # Video
 
-`nsh` 导出 `Video`：基于平台播放器构建的视频播放器（iOS 和 Mac Catalyst 上是 `AVPlayer`，Android 上是 `MediaPlayer`）。播放由属性控制，暂停视频只需改一个 signal。
+`nsh` 导出 `Video`：基于平台播放器构建的视频播放器（iOS 和 Mac Catalyst 上是 `AVPlayer`，Android 上是 `MediaPlayer`）。播放由属性控制，所以暂停只需改一个 signal。
 
 ```ts
 import { Video, type VideoProps } from "nsh";

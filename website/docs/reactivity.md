@@ -8,11 +8,9 @@ demo: guide-reactivity
 
 # Reactivity
 
-NSH updates the UI with **signals**. A signal is a value that knows which computations read it. When a signal changes, NSH reruns only those computations (a text, a style, an effect). Components do not re-render.
+NSH updates the UI with **signals**: values that know who reads them. When a signal changes, NSH runs again exactly the computations that read it (a text, a style, an effect) and nothing else. Components do not re-render. The model is Solid's, and the reactive graph itself is native: Rust components and TSX run on the same graph, written in Rust, so in TSX too the scheduling, dependency tracking and cleanup all happen outside the interpreter.
 
-The model is the same as Solid's. The **reactive graph** (the set of signals and the computations that read them) is written in Rust. Rust components and TSX use the same graph, so in TSX the scheduling, dependency tracking and cleanup also run outside the JavaScript interpreter.
-
-Rust components take everything on this page from the prelude. TSX imports it from `nsh`:
+Rust components take everything on this page from the prelude; TSX imports it from `nsh`:
 
 ```tsx tabs
 import { batch, cleanup, computed, context, effect, resource, signal, untracked } from "nsh";
@@ -77,7 +75,7 @@ const position = signal({ x: 0, y: 0 }, { equals: (a, b) => a.x === b.x && a.y =
 let tick = signal_with(0, SignalEquals::Never);   // every write notifies
 ```
 
-In TSX, `signal<T>()` without a value starts as `undefined` and is typed `Signal<T | undefined>`. In Rust, an
+In TSX, `signal<T>()` without a value starts as `undefined` and is typed `Signal<T | undefined>`; in Rust, an
 `Option` says the same (`signal(None::<User>)`).
 
 ### Objects and arrays
@@ -190,7 +188,7 @@ pub fn Search(props: SearchProps) -> impl IntoElement {
 
 An effect tracks the reads made while it runs synchronously. Reads in a task, a `.then` callback or after an `await` are not tracked.
 
-An effect that calls a [ref](./jsx-and-components.md#refs) acts on the element the ref is on. In TSX, effects run after the elements created in the same pass exist, so refs are set:
+An effect that calls a [ref](./jsx-and-components.md#refs) acts on the element the ref is on; in TSX, effects run after the elements created in the same pass exist, so refs are set:
 
 ```tsx tabs
 let input: InputRef | undefined;
@@ -258,7 +256,7 @@ view()
     .child(text("Reload").on_press(move || quote.refetch()))
 ```
 
-`source` is tracked: whenever it gives a new value, `fetcher(value, info)` loads again. In Rust it is a closure returning an `Option`, and `None` loads nothing. In TSX it is an accessor (a signal, a function) or a value, and `undefined`, `null` or `false` load nothing. Use this when no user is signed in yet or nothing is picked. With no source, Rust passes `|| Some(())`, and TSX's `resource(fetcher)` loads once, calling `fetcher(info)`. The Rust fetcher returns a `Result`. The TSX one returns a value or a promise, and a throw is a failure.
+`source` is tracked: whenever it gives a new value, `fetcher(value, info)` loads again. In Rust it is a closure returning an `Option`, and `None` loads nothing; in TSX it is an accessor (a signal, a function) or a value, and `undefined`, `null` or `false` load nothing: for a user not signed in yet or nothing picked. With no source, Rust passes `|| Some(())`, and TSX's `resource(fetcher)` loads once, calling `fetcher(info)`. The Rust fetcher returns a `Result`; the TSX one a value or a promise, and a throw is a failure.
 
 | Rust | TSX | What it is |
 |---|---|---|
@@ -269,9 +267,9 @@ view()
 | `quote.refetch()` | `posts.refetch()` | Loads again from the same source: a retry, a pull to refresh. |
 | `quote.mutate(value)` | `posts.mutate(value)` | Sets the value here with no load, an optimistic update, and clears the error. |
 
-A Rust resource is a `Copy` handle, as signals are. The TSX members are bound, so `onRefresh={posts.refetch}` and `const loading = posts.loading` work as they are.
+A Rust resource is a `Copy` handle, as signals are; the TSX members are bound, so `onRefresh={posts.refetch}` and `const loading = posts.loading` work as they are.
 
-Only the latest load counts. A new one drops the one running, and so does the component going away. In TSX, `info.signal` aborts the `fetch` it is given. A load that ends after it was superseded changes nothing. `info.refetching` says that `refetch()` started the load. `resource_with_value(value, source, fetcher)` in Rust and `{ initialValue }` in TSX give the resource a value from the start.
+Only the latest load counts. A new one drops the one running, and so does the component going away; in TSX, `info.signal` aborts the `fetch` it is given. A load that ends after it was superseded changes nothing. `info.refetching` says that `refetch()` started the load. `resource_with_value(value, source, fetcher)` in Rust and `{ initialValue }` in TSX give the resource a value from the start.
 
 ## cleanup
 
@@ -381,7 +379,7 @@ Rust's `get_untracked()` reads one signal the same way. A component body is alre
 
 ## context
 
-A context is a value a component provides to everything it renders, however deep. In Rust, `provide_context(value)` provides a value of its type, and `use_context::<T>()` finds the nearest one. In TSX, `context(defaultValue)` makes a context, calling it reads the nearest provided value (or the default), and `<Ctx.Provider value>` provides one:
+A context is a value a component provides to everything it renders, however deep. In Rust, `provide_context(value)` provides a value of its type, and `use_context::<T>()` finds the nearest one; in TSX, `context(defaultValue)` makes a context, calling it reads the nearest provided value (or the default), and `<Ctx.Provider value>` provides one:
 
 ```tsx tabs
 const Theme = context<"light" | "dark">("light");
@@ -459,7 +457,7 @@ Read a context in a component body (or in code that runs while components are be
 
 ## Error boundaries
 
-An error boundary keeps a failure in one part of a view to that part. When something under it throws (Rust: panics) while it renders or runs, such as a component's body, a binding, an effect or an event handler, the failed part is removed and the boundary shows its fallback in its place. The rest of the view stays as it is. In Rust it is `catch_error(view, fallback)`. In TSX it is `<ErrorBoundary fallback>` from `nsh`. The fallback gets the error (in TSX the thrown value itself, usually an `Error`) and a reset that renders the view again:
+An error boundary keeps a failure in one part of a view to that part. When something under it throws (Rust: panics) while it renders or runs, such as a component's body, a binding, an effect or an event handler, the failed part is removed and the boundary shows its fallback in its place; the rest of the view stays as it is. In Rust it is `catch_error(view, fallback)`; in TSX, `<ErrorBoundary fallback>` from `nsh`. The fallback gets the error (in TSX the thrown value itself, usually an `Error`) and a reset that renders the view again:
 
 ```tsx tabs
 import { ErrorBoundary, Text, View } from "nsh";
@@ -534,7 +532,7 @@ fn good() -> impl IntoElement {
 }
 ```
 
-**Reading props once.** A Rust prop read with `props.title.get()` in the body is read once. Read it in a binding (`text(props.title)`, `move || props.title.get()`). In TSX, `const { title } = props` reads `title` once: read `props.title` where you use it, or split props with [`split`](./jsx-and-components.md#spreading-props).
+**Reading props once.** A Rust prop read with `props.title.get()` in the body is read once; read it in a binding (`text(props.title)`, `move || props.title.get()`). In TSX, `const { title } = props` reads `title` once: read `props.title` where you use it, or split props with [`split`](./jsx-and-components.md#spreading-props).
 
 **Mutating instead of setting, in TSX.** `list().push(x)` changes the array but notifies nobody. Write a new array, as Rust's `update` does for you.
 

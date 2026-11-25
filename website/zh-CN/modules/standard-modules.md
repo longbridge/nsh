@@ -4,7 +4,7 @@ description: "十一个 Node 风格的标准模块：固定版本的 LLRT 工具
 order: 14.5
 ---
 
-Native Shell 为 TSX 提供十一个标准模块，按裸模块名导入，例如 `path`、`crypto`。它们的接口是 Node 风格，与 gpui-shell 兼容，运行在应用的 VM 里，由 NSH 的原生运行时实现，能力检查在 Rust 中完成。Rust 代码改用 Rust 自己的库（见[在 Rust 中](#在-rust-中)）。`.nsh/types` 中的 TypeScript 声明与模块出自同一份规格，类型和运行时导出完全一致。
+Native Shell 为 TSX 提供十一个标准模块，按裸模块名导入（Rust 代码使用 Rust 自己的库：见[在 Rust 中](#在-rust-中)）：与 gpui-shell 兼容的 Node 风格接口，运行在应用的 VM 中，由 NSH 的原生运行时实现，能力检查在 Rust 中进行。`.nsh/types` 中的 TypeScript 声明与模块由同一份规格生成，类型所示即运行时所导出。
 
 | 模块 | 导出 |
 |---|---|

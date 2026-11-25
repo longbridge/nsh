@@ -111,7 +111,7 @@ fn formatting() -> impl IntoElement {
 
 ## 项目
 
-工具栏的项目是其中的 `Button`、`Toggle` 和 `Link`，包括它的分组里的，以及放在它里面的 [`ToggleGroup`](./toggle.md) 里的。[`Menu`](./menu.md) 或 [`Popover`](./popover.md) 的触发器也是项目：即放在它的 `trigger` 插槽里的视图，弹出层把按下、焦点和 `expanded` 状态交给它。应用自己画的工具写成带应用样式的 `Button`：`Button` 没有自己的外观，样子完全由应用决定，同时它是工具栏的项目（带 `onPress` 的 `View` 是键盘焦点单独的一站，方向键不经过它）。放在工具栏里的 `ToggleGroup` 是它的一个分组：其中的开关按钮就是工具栏的项目，屏幕阅读器听到的是一个分组，它的 `disabled` 仍然禁用它自己的开关按钮。其他控件（`Input`、`Select`、`Slider`）各自是键盘焦点的一站，保留自己的方向键。把它们放在栏的末尾。项目打开的弹出层里显示的内容（弹出框的输入框和按钮、菜单的项、悬停卡片的链接）不属于工具栏。方向键按栏里排列的顺序经过各个项目，无论项目嵌套多深。应用稍后才显示的项目也会排在它所在的位置。
+工具栏的项目是其中的 `Button`、`Toggle` 和 `Link`，包括它的分组里的，以及放在它里面的 [`ToggleGroup`](./toggle.md) 里的。[`Menu`](./menu.md) 或 [`Popover`](./popover.md) 的触发器也是项目：即放在它的 `trigger` 插槽里的视图，弹出层把按下、焦点和 `expanded` 状态交给它。应用自己画的工具写成带应用样式的 `Button`：`Button` 没有自己的外观，样子完全由应用决定，同时它是工具栏的项目（带 `onPress` 的 `View` 是键盘焦点单独的一站，方向键不经过它）。放在工具栏里的 `ToggleGroup` 是它的一个分组：其中的开关按钮就是工具栏的项目，屏幕阅读器听到的是一个分组，它的 `disabled` 仍然禁用它自己的开关按钮。其他控件（`Input`、`Select`、`Slider`）各自是键盘焦点的一站，保留自己的方向键；把它们放在栏的末尾。项目打开的弹出层里显示的内容（弹出框的输入框和按钮、菜单的项、悬停卡片的链接）不属于工具栏。方向键按栏里排列的顺序经过各个项目，无论项目嵌套多深；应用稍后才显示的项目也会排在它所在的位置。
 
 ## 部件
 
@@ -147,7 +147,7 @@ fn formatting() -> impl IntoElement {
 
 ## 禁用
 
-工具栏上的 `disabled` 禁用其中每个项目，相当于应用锁住的一栏。分组上的则禁用分组的项目。被禁用的项目不响应按压，方向键会跳过它，屏幕阅读器把它播报为变暗：
+工具栏上的 `disabled` 禁用其中每个项目，相当于应用锁住的一栏；分组上的则禁用分组的项目。被禁用的项目不响应按压，方向键会跳过它，屏幕阅读器把它播报为变暗：
 
 ```tsx
 <Toolbar disabled={readonly()} accessibilityLabel="Review" class="flex-row gap-1">
@@ -159,7 +159,7 @@ fn formatting() -> impl IntoElement {
 
 ## 无障碍
 
-- `Toolbar` 的角色是 `"toolbar"`，名字来自 `accessibilityLabel`。它的项目仍然各自是一个元素。在 iOS 上工具栏是 VoiceOver 进入的语义分组。
+- `Toolbar` 的角色是 `"toolbar"`，名字来自 `accessibilityLabel`；它的项目仍然各自是一个元素。在 iOS 上工具栏是 VoiceOver 进入的语义分组。
 - `ToolbarGroup` 的角色是 `"group"`，名字来自它的 `accessibilityLabel`，一段项目因此读作一个整体。放在工具栏里的 `ToggleGroup` 也是一个分组。
 - `ToolbarSeparator` 对屏幕阅读器不是元素。
 - `disabled` 按平台的方式播报（VoiceOver、TalkBack、UI Automation、浏览器的无障碍树）。
@@ -178,10 +178,10 @@ fn formatting() -> impl IntoElement {
 | Home、End | 把焦点移到第一个或最后一个项目。 |
 | 空格、回车 | 按下获得焦点的项目。 |
 
-方向键跳过被禁用的项目，不会按下任何东西：开关按钮只在被按下时改变。另一对方向键留给项目使用（菜单的触发器用下键打开菜单）。在从右到左的布局里，横向工具栏从右边开始，左键移到下一个项目，右键移到上一个。纵向工具栏仍用下、上键。
+方向键跳过被禁用的项目，不会按下任何东西：开关按钮只在被按下时改变。另一对方向键留给项目使用（菜单的触发器用下键打开菜单）。在从右到左的布局里，横向工具栏从右边开始，左键移到下一个项目，右键移到上一个；纵向工具栏仍用下、上键。
 
 ## 平台说明
 
-- iOS、Android 和 Mac Catalyst：每个项目用轻点按下。工具栏是屏幕阅读器播报的一个分组。
+- iOS、Android 和 Mac Catalyst：每个项目用轻点按下；工具栏是屏幕阅读器播报的一个分组。
 - 桌面（macOS、Windows、Linux、GPUI）和 Web：按压就是点击。在 macOS 和 Web 上工具栏是 Tab 的一站，方向键、Home 和 End 在其项目之间移动（[键盘](#键盘)）。
 - 每个平台都按应用的样式绘制：栏、分组、分隔线和项目。

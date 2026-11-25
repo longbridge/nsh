@@ -13,7 +13,7 @@ Accordion（手风琴）把多个分区叠在一起，每个分区在自己的�
 - `AccordionItem`：一个分区，以 `value` 标识。accordion 的 `value` 包含它时它就展开。
 - `AccordionHeader`：分区的标题，屏幕阅读器会报告它的 `level`。
 - `AccordionTrigger`：标题中的按钮，展开和收起所在分区，并报告分区是否已展开。
-- `AccordionPanel`：分区的内容，分区展开时显示。设置 `reveal` 后高度以弹簧动画展开和收起。
+- `AccordionPanel`：分区的内容，分区展开时显示；设置 `reveal` 后高度以弹簧动画展开和收起。
 
 ```tsx tabs
 import { mount, signal, Text, View } from "nsh";
@@ -183,14 +183,14 @@ fn faq() -> impl IntoElement {
 
 ## 禁用
 
-禁用分区的触发器不响应按压，屏幕阅读器报告它不可用。触发器上的 `disabled:` 类和里面的 `group-disabled:` 类会跟随。accordion 的 `disabled` 禁用所有分区。禁用的分区仍按应用的 `value` 显示：应用可以展开它。
+禁用分区的触发器不响应按压，屏幕阅读器报告它不可用；触发器上的 `disabled:` 类和里面的 `group-disabled:` 类会跟随。accordion 的 `disabled` 禁用所有分区。禁用的分区仍按应用的 `value` 显示：应用可以展开它。
 
 <a id="accessibility"></a>
 
 ## 无障碍
 
 - 整组是一个分组，每个标题是对应 `level` 的标题，每个触发器是标题里的按钮，并报告所在分区是否已展开。屏幕阅读器可以在标题之间跳转。
-- 展开的面板是一个区域，名称来自它的 `accessibilityLabel`。收起的面板对屏幕阅读器隐藏，保留的内容也一样。
+- 展开的面板是一个区域，名称来自它的 `accessibilityLabel`；收起的面板对屏幕阅读器隐藏，保留的内容也一样。
 - 展开项的外观由应用决定，不要只靠颜色区分：像示例那样转动箭头。
 
 通用的标签、角色和播报见[无障碍](../docs/accessibility.md)。
@@ -207,5 +207,5 @@ fn faq() -> impl IntoElement {
 
 - 每个平台都在标题下显示展开分区的面板，收起的面板不参与布局（设置 `reveal` 时高度为零）。
 - 设置 `reveal` 后，每个平台都在自己的动画器上以弹簧动画改变面板高度（iOS、Android、macOS、Windows、Linux、GPUI 和 Web），系统要求减少动态效果时立即展开和收起。
-- 各平台的屏幕阅读器按各自读取标题的方式读出标题及其级别，并把其中的触发器读作带展开状态的按钮。在 iOS 上，VoiceOver 读的是触发器本身。
-- iOS、Android 和 Mac Catalyst：按下触发器是轻点。桌面（macOS、Windows、Linux、GPUI）和 Web：点击。在 macOS 和 Web 上，也可以在触发器获得焦点时按空格或回车。
+- 各平台的屏幕阅读器按各自读取标题的方式读出标题及其级别，并把其中的触发器读作带展开状态的按钮；在 iOS 上，VoiceOver 读的是触发器本身。
+- iOS、Android 和 Mac Catalyst：按下触发器是轻点。桌面（macOS、Windows、Linux、GPUI）和 Web：点击；在 macOS 和 Web 上，也可以在触发器获得焦点时按空格或回车。

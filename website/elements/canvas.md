@@ -8,10 +8,10 @@ demo: el-canvas
 
 # Canvas
 
-A canvas is a view you draw yourself with the HTML Canvas 2D API: charts, gauges, rings, signatures, custom shapes.
-Your drawing code records operations. The platform replays them natively (Core Graphics on
+A canvas is a view you draw yourself with a 2D drawing API, the HTML Canvas 2D API's: charts, gauges, rings,
+signatures, custom shapes. The drawing code records operations; the platform replays them natively (Core Graphics on
 iOS and Mac Catalyst, `android.graphics.Canvas` on Android) at the screen's resolution. Rust makes one with
-`canvas(painter)`, a `Painter` recording the drawing. TSX with `<Canvas>` from `nsh` and its `draw` function.
+`canvas(painter)`, a `Painter` recording the drawing; TSX with `<Canvas>` from `nsh` and its `draw` function.
 
 ```tsx tabs
 import { Canvas, mount } from "nsh";
@@ -167,7 +167,7 @@ paths (`moveTo`, `lineTo`, `arc`, `arcTo`, `ellipse`, `rect`, `roundRect`, Bézi
 (also of a `Path2D`, which accepts SVG path data; `fill_svg` / `stroke_svg` in Rust), rectangles, text (`fillText`,
 `strokeText`, `measureText`), linear / radial / conic gradients, line dashes, shadows, `globalAlpha`,
 `globalCompositeOperation` and `drawImage` (images by URL or asset). Every member is listed in the
-[Canvas API reference](../modules/nsh-canvas.md). The [canvas guide](../docs/canvas.md) walks through drawing
+[Canvas API reference](../modules/nsh-canvas.md); the [canvas guide](../docs/canvas.md) walks through drawing
 charts and animated graphics.
 
 Coordinates are in points with the origin at the top left. `measureText` is synchronous and returns `width`. Rust's

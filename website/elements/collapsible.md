@@ -8,7 +8,7 @@ demo: el-collapsible
 # Collapsible
 
 A collapsible is a region whose content expands and collapses: details under a summary, a "show more", a section of
-advanced settings. It always renders its children. It renders its `content` after them while `open` is true. The app owns `open` and
+advanced settings. It renders its children always and its `content` after them while `open`. The app owns `open` and
 the trigger that flips it (one of the children), and the look is the app's: a `Collapsible` has no trigger, chevron or
 label of its own. With `reveal`, the content opens and closes with motion: its region's height springs from nothing to
 the content's own and back, and what follows the collapsible moves along.

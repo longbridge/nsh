@@ -7,7 +7,7 @@ demo: el-alert-dialog
 
 # AlertDialog
 
-`AlertDialog` 显示平台自己的警告框或操作表：在 iOS 和 Mac Catalyst 上是 `UIAlertController`，在 Android 上是 `AlertDialog`（操作表为列表对话框），在其他平台上是平台对话框风格的警告框。`AlertDialog.show`（Rust 中为 `alert_dialog()` 的 `.show()`）返回一个 promise（在 Rust 中是 future），结果是 `{ action }`：用户所选操作的 `id`。所有文字都由应用提供，使用应用自己的语言。
+`AlertDialog` 显示平台自己的警告框或操作表：在 iOS 和 Mac Catalyst 上是 `UIAlertController`，在 Android 上是 `AlertDialog`（操作表为列表对话框），在其他平台上是平台对话框风格的警告框。`AlertDialog.show`（Rust 中为 `alert_dialog()` 的 `.show()`）返回一个 promise（在 Rust 中是 future），结果是 `{ action }`：用户所选操作的 `id`。所有文字都来自应用，所以警告框说的是你的应用要说的话，用的是它的语言。
 
 ```tsx tabs
 import { mount, signal, Text, View } from "nsh";
@@ -96,7 +96,7 @@ alert_dialog().title(..).description(..).action(..).cancel(..).destructive(..).s
     -> impl Future<Output = Result<AlertDialogResult, String>>
 ```
 
-结果是 `{ action }`（`AlertDialogResult`）：所选操作的 `id`，对话框未经操作关闭时为 `null`（`None`）：在 `closeOnBackdropPress` 和 `closeOnEscape` 允许时，点按对话框外部、Escape 或返回键。没有任何操作时 promise 以 `TypeError` 拒绝（在 Rust 中是一个 `Err`）。在 Rust 中，`nsh_base::alert_dialog()` 用一个方法设置一个选项或添加一个操作，操作按添加的顺序显示，`.show()` 显示对话框。在任务（`spawn`）中 await 它的结果。
+结果是 `{ action }`（`AlertDialogResult`）：所选操作的 `id`，对话框未经操作关闭时为 `null`（`None`）：在 `closeOnBackdropPress` 和 `closeOnEscape` 允许时，点按对话框外部、Escape 或返回键。没有任何操作时 promise 以 `TypeError` 拒绝（在 Rust 中是一个 `Err`）。在 Rust 中，`nsh_base::alert_dialog()` 用一个方法设置一个选项或添加一个操作，操作按添加的顺序显示，`.show()` 显示对话框；在任务（`spawn`）中 await 它的结果。
 
 <a id="action-sheets"></a>
 

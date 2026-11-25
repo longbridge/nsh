@@ -8,10 +8,9 @@ demo: el-data-table
 # DataTable
 
 `DataTable` shows rows and columns as a spreadsheet does and scrolls both ways over any number of either. Only the
-cells in view are made, so a table of a million rows and ten thousand columns scrolls as a small one does. The user
-selects rows, columns or cells with the pointer and the keyboard. Columns have fixed widths. The user resizes a column
-by dragging its edge and moves it by dragging its title. Columns can stay pinned left or right while the others
-scroll, and they sort. Titles can sit under group
+cells in view are made, so a table of a million rows and ten thousand columns scrolls as a small one does. Rows,
+columns or cells select, with the pointer and the keyboard; columns have fixed widths, resize with a drag of their
+edge, move with a drag of their title, stay at the left or the right while the others scroll, and sort. Titles can sit under group
 labels, and a cell or a title can be drawn by the app.
 
 `DataTable` supplies layout, alignment, virtualization and interaction. The app gives its parts their padding,
@@ -169,7 +168,7 @@ column reports `onColumnMove`.
 `cellClasses` lists classes for individual cells, each by its data row and its index among `columns` (the same
 numbers `onRowPress` reports), drawn after the part's classes and the column's `cellClass`. The cell's text stays
 the table's. A column the app selected takes its look from that column's `headerClass` and `cellClass`. A column
-whose `selectable` is false selects neither itself nor its cells. A press of its title is still reported.
+whose `selectable` is false selects neither itself nor its cells; a press of its title is still reported.
 
 ```tsx
 <DataTable
@@ -195,7 +194,7 @@ own data.
 
 Rows count from 0 in the data, and a column is its index among `columns`, whatever order the user moved them to.
 `onSelectionChange` reports what the user selected (`null` for nothing). The `selection` prop sets the selection from
-the app. Leave it unset and the table keeps it. `onDoublePress` reports a row, a cell or a title pressed twice, and
+the app; leave it unset and the table keeps it. `onDoublePress` reports a row, a cell or a title pressed twice, and
 `onContextMenu` a secondary or long press with the point to open the app's [`Menu`](./menu.md) at. Both name the
 cell under the pointer (its `row` and `column`), a row's number (`row` only) or a title (`column` only). Until the next
 press, the cell a menu was asked for has the `cellActive` part, or its row the `rowActive` part where cells do not
@@ -207,7 +206,7 @@ selected.
 ## Keyboard
 
 Pressing the table, or reaching it with Tab (macOS, the web), gives it the keyboard until another press, the focus
-moving elsewhere or `blur()`. `focus()` gives it from the app. The table is one stop of Tab: inside it Tab moves the
+moving elsewhere or `blur()`; `focus()` gives it from the app. The table is one stop of Tab: inside it Tab moves the
 selection, and Escape gives the keyboard back. Its columns' resize handles take the pointer only, in a terminal too, where a handle shows its line while the pointer is on it and a title's sort is one glyph (`▲`, `▼`, `↕` unsorted).
 
 | Keys | What they do |
@@ -245,7 +244,7 @@ title shows it. Because the app owns the order, sorting works the same over a mi
 ## Resizing and moving columns
 
 A drag of a column's trailing edge resizes it within its `minWidth` and `maxWidth`, and `onColumnResize({ key, width })`
-reports every step. Pressing the edge twice in a row fits the column to its widest text and title. A drag of a title moves the column, and a line shows where it will drop. `onColumnMove` reports
+reports every step. Pressing the edge twice in a row fits the column to its widest text and title. A drag of a title moves the column, and a line shows where it will drop; `onColumnMove` reports
 `{ key, from, to, order }`, `order` being the `key`s of all the columns in the order shown. Fixed columns stay among
 the ones fixed at their side. `resizableColumns` and `movableColumns` turn both off for the table, and a column's `resizable` and
 `movable` win over them.
@@ -254,14 +253,14 @@ the ones fixed at their side. `resizableColumns` and `movableColumns` turn both 
 
 Columns whose content the app does not know in advance (a query's results, a file's fields) take their width from it
 and from the table. A column with `autoFit` fits its widest text and title, as `fitColumn` does, once the table first
-holds rows with text in it. Until then it has its `width`. It fits once per `key`: later data leaves the width as it is, so live
+holds rows with text in it; until then it has its `width`. It fits once per `key`: later data leaves the width as it is, so live
 rows do not move the columns, and a column of a new key fits when its rows come.
 
 While the columns are narrower than the table, the width they leave free goes to the columns with a `grow`, in
 proportion to it, as CSS's `flex-grow`: on top of their width (or the width they fitted), each up to its `maxWidth`.
-The shares follow the table's width. Once the columns are wider than the table, none grows and the table scrolls. A
+The shares follow the table's width; once the columns are wider than the table, none grows and the table scrolls. A
 column the user resizes, or whose width the app sets (`setColumnWidth`, `fitColumn`), keeps that width and no longer
-grows. Growing and fitting by themselves report no `onColumnResize`. `columnWidths()` gives the widths shown.
+grows. Growing and fitting by themselves report no `onColumnResize`; `columnWidths()` gives the widths shown.
 
 ```tsx
 <DataTable
@@ -323,7 +322,7 @@ the `group-hover:` classes of the row under the pointer. `renderHeaderCell` draw
 ```
 
 A view with `onPress` in a cell (a copy button) gets the presses on it, and the table then neither selects the row nor
-reports `onRowPress`. A press elsewhere in the cell selects as usual. Such a view gets `onPress`, without hover or
+reports `onRowPress`; a press elsewhere in the cell selects as usual. Such a view gets `onPress`, without hover or
 pressed styles.
 
 `fontFamily` and `fontSize` (default `14`) set the font of the cells, which the table also measures texts in to fit
@@ -332,7 +331,7 @@ columns.
 ## The ref
 
 `ref` gives a `DataTableRef`. A method given a row, a column or a column key the table does not have changes nothing
-and logs a warning naming the method and the value. `fitColumn` rejects with a `TypeError` for an unknown key.
+and logs a warning naming the method and the value; `fitColumn` rejects with a `TypeError` for an unknown key.
 
 | Method | Description |
 |---|---|
@@ -351,8 +350,8 @@ and logs a warning naming the method and the value. `fitColumn` rejects with a `
 
 ## Styling the parts
 
-`class` and `style` style the table's box. `classes` takes Tailwind classes by part and `styles` inline styles by part.
-Parts provide the table's structure and alignment. Their classes supply the appearance, and `styles` win over classes.
+`class` and `style` style the table's box. `classes` takes Tailwind classes by part and `styles` inline styles by part;
+parts provide the table's structure and alignment; their classes supply the appearance, and `styles` win over classes.
 
 ```tsx
 <DataTable
@@ -469,7 +468,7 @@ Parts provide the table's structure and alignment. Their classes supply the appe
 
 ### Fixed columns in Rust
 
-`nsh_base::data_table::ColumnFixed` follows GPUI Kit's column-side naming. `None` (the default) scrolls normally.
+`nsh_base::data_table::ColumnFixed` follows GPUI Kit's column-side naming. `None` (the default) scrolls normally;
 `Left` and `Right` pin the column to that side. TS uses `false`, `"left"` and `"right"`,
 with `true` retained as a shorthand for `"left"`.
 

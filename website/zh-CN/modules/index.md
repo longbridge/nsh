@@ -6,7 +6,7 @@ order: 1
 
 # 模块
 
-NSH 应用用到的一切都从一小组模块导入。每个模块和响应式图、渲染器一样，都在运行时内部用 Rust 实现。打包器把 `import ... from "nsh/..."` 原样保留为导入，不会把 NSH 的代码复制进 bundle，所以 bundle 里只有你自己的代码。
+NSH 应用用到的一切都从一小组模块导入。这些模块全部是原生的：响应式图、渲染器和每个模块都在运行时内部用 Rust 实现，打包器会把 `import ... from "nsh/..."` 原样保留为导入，而不会把代码复制进你的 bundle。你的 bundle 里只有你自己的代码。
 
 ```tsx
 import { createAnimatedValue, mount, signal, windowSize } from "nsh";

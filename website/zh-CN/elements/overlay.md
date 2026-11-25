@@ -8,9 +8,7 @@ demo: el-overlay
 
 # Overlay
 
-浮层把子元素显示在所在根视图的最上层，根视图是窗口或外层的对话框。父元素的尺寸、`overflow: hidden` 和滚动视图都不会裁剪它。
-
-除此之外，它和写在原处没有区别：读取周围的 context，处理函数属于所在组件，并随父元素一起移除。弹出框、菜单、工具提示和 sheet 都基于浮层实现。[`nsh/base`](../modules/nsh-base.md) 已经提供了这些组件（[Popover](./popover.md)、[Menu](./menu.md)、[Tooltip](./tooltip.md)、[Sheet](./sheet.md)）；要做自己的弹出层，就用浮层。
+浮层把它的子元素显示在所在根视图中一切内容之上：窗口，或包住它的对话框。父元素的尺寸、`overflow: hidden` 和滚动视图都不会裁剪它。除此之外，它就待在你写它的地方：它读取周围的 context，它的处理函数属于它所在的组件，并随父元素一起移除。弹出框、菜单、工具提示和 sheet 都建立在它之上；[`nsh/base`](../modules/nsh-base.md) 已经提供了它们（[Popover](./popover.md)、[Menu](./menu.md)、[Tooltip](./tooltip.md)、[Sheet](./sheet.md)），要构建你自己的弹出层，就用浮层。
 
 ```tsx tabs
 import { Overlay, signal, Text, View, type ViewRef } from "nsh";

@@ -7,9 +7,7 @@ group: publishing
 
 # 发布
 
-`nsh publish <platform>` 把打包好的应用发布到应用商店，支持 App Store Connect（iOS）、Google Play（Android）、Flathub（Linux）和 Microsoft Store（Windows）。
-
-命令从 `nsh.json` 读取应用标识和商店文案，所以发布只需要打包好的文件。这个文件由[打包](./packaging.md)生成。打包页还介绍了不经商店的交付方式：压缩包、安装程序、AppImage、Flatpak 和 MSIX 文件，签名与公证，以及 Web 应用的托管。
+发布指把打包好的应用发布到应用商店：iOS 发布到 App Store Connect，Android 发布到 Google Play，Linux 发布到 Flathub，Windows 发布到 Microsoft Store，都用 `nsh publish <platform>`。每个商店都从 `nsh.json` 读取应用标识和商店文案，所以一次发布只需要打包好的文件。[打包](./packaging.md)先生成这个文件，也介绍不经商店的交付方式：压缩包、安装程序、AppImage、Flatpak 和 MSIX 文件，签名与公证，以及 Web 应用的托管。
 
 - [iOS](#publish-to-the-app-store)：App Store Connect 和 TestFlight
 - [Android](#publish-to-google-play)：Google Play
@@ -25,17 +23,17 @@ group: publishing
 | Linux | `.tar.gz`（也可以是 AppImage、Flatpak） | Flathub | 为发布压缩包写出 Flathub manifest；Pull Request 由你提交（`nsh publish linux`） |
 | Windows | `.msix`（也可以是 `.zip` 和安装程序） | Microsoft Store | 把包提交认证（`nsh publish windows`） |
 
-`nsh publish status <platform>` 报告商店中的现状，`nsh publish doctor <platform>` 检查配置和凭据，不做任何改动。首个版本的商店审核，以及只能在控制台设置的内容（定价、年龄分级、隐私详情），仍在各商店的控制台中完成。macOS 和 Web 目前在 NSH 中没有商店上传，以直接下载或静态站点的方式交付，见打包中的 [macOS](./packaging.md#sign-notarize-and-distribute) 和 [Web](./packaging.md#host-the-site)。不经商店的 Windows 和 Linux 应用也一样（[Windows](./packaging.md#sign-and-distribute)、[Linux](./packaging.md#distribute)）。
+`nsh publish status <platform>` 报告商店中的现状，`nsh publish doctor <platform>` 检查配置和凭据，不做任何改动。首个版本的商店审核，以及只能在控制台设置的内容（定价、年龄分级、隐私详情），仍在各商店的控制台中完成。macOS 和 Web 目前在 NSH 中没有商店上传，以直接下载或静态站点的方式交付，见打包中的 [macOS](./packaging.md#sign-notarize-and-distribute) 和 [Web](./packaging.md#host-the-site)；不经商店的 Windows 和 Linux 应用也一样（[Windows](./packaging.md#sign-and-distribute)、[Linux](./packaging.md#distribute)）。
 
 不带平台的 `nsh publish <ENTRY> --key … --cert …` 生成的是用于 [OTA 更新](./ota-updates.md)和[签名包](./signed-packages.md)的签名包，不是商店上传。
 
 ## 一次发布，逐步进行
 
-1. **在 `nsh.json` 中设置版本。** `version` 是用户看到的版本号（`1.4.0`）。`build` 是一个整数，在每个平台上每次上传到商店都必须递增（Apple 平台上是 `CFBundleVersion`，Android 上是 `versionCode`）。两者也都可以在命令行上传入（`--app-version`、`--build`），在 CI 给构建编号时很方便。
-2. **打包。** iOS 需要装有 Xcode 的 Mac。Android 在哪里都可以打包。见[打包](./packaging.md)。
+1. **在 `nsh.json` 中设置版本。** `version` 是用户看到的版本号（`1.4.0`）；`build` 是一个整数，在每个平台上每次上传到商店都必须递增（Apple 平台上是 `CFBundleVersion`，Android 上是 `versionCode`）。两者也都可以在命令行上传入（`--app-version`、`--build`），在 CI 给构建编号时很方便。
+2. **打包。** iOS 需要装有 Xcode 的 Mac；Android 在哪里都可以打包。见[打包](./packaging.md)。
 3. **签名。** 提供 Apple Distribution 签名身份和描述文件，或上传 keystore，打包时即完成签名。
-4. **发布。** 用 `nsh publish <platform>` 发布到商店。应用在商店中的标识来自 `nsh.json`。
-5. **后续跟进。** `nsh publish status <platform>` 告诉你版本何时上线。审核以及命令未覆盖的内容在商店的控制台中进行。
+4. **发布。** 用 `nsh publish <platform>` 发布到商店；应用在商店中的标识来自 `nsh.json`。
+5. **后续跟进。** `nsh publish status <platform>` 告诉你版本何时上线；审核以及命令未覆盖的内容在商店的控制台中进行。
 
 ```json
 {
@@ -47,7 +45,7 @@ group: publishing
 }
 ```
 
-`id` 在 Apple 平台上是 bundle identifier，在 Android 上是包名。商店中的应用记录必须使用同一个值。应用一旦以某个 id 上架，就不能再更改。
+`id` 在 Apple 平台上是 bundle identifier，在 Android 上是包名；商店中的应用记录必须使用同一个值。应用一旦以某个 id 上架，就不能再更改。
 
 ## 凭据
 
@@ -66,7 +64,7 @@ group: publishing
 
 ## 商店文案
 
-每个 `nsh publish <store>` 都读取同一份文案。可写在 `nsh.json` 的 `"store"`、与 `nsh.json` 同级的 `store/` 目录，或两者都用。`nsh.json` 中的值优先于文件。
+每个 `nsh publish <store>` 都读取同一份文案。可写在 `nsh.json` 的 `"store"`、与 `nsh.json` 同级的 `store/` 目录，或两者都用；`nsh.json` 中的值优先于文件。
 
 ```json
 {
@@ -122,9 +120,9 @@ store/en-US/android/phoneScreenshots/1.png   # a store's own image types, by pla
 | Flathub | `id`；压缩包下载地址 `store.linux.archiveUrl` | `nsh publish linux <App.tar.gz>` |
 | Microsoft Store | `store.windows.productId`（包标识在 `windows`） | `nsh publish windows <App.msix>` |
 
-`nsh publish status <store>` 与 `nsh publish doctor <store>` 读取同一份配置。Google Play 使用 `shortDescription` 和 `store/<locale>/android/<type>/` 中的图片。Flathub 以 `en-US` 文案的 `subtitle` 作为 AppStream 摘要。
+`nsh publish status <store>` 与 `nsh publish doctor <store>` 读取同一份配置。Google Play 使用 `shortDescription` 和 `store/<locale>/android/<type>/` 中的图片；Flathub 以 `en-US` 文案的 `subtitle` 作为 AppStream 摘要。
 
-语言使用 App Store Connect 的 BCP 47 标签（`en-US`、`zh-Hans`）。截图按设备类别分组、按显示顺序排列：`phone` 对应 6.9 英寸 iPhone（`APP_IPHONE_67`），`tablet` 对应 13 英寸 iPad（`APP_IPAD_PRO_3GEN_129`）。`APP_IPHONE_65` 等 App Store Connect 尺寸名原样使用。截图集只在图片变化时替换。未给出的字段保持商店中的现值。`releaseNotes`（`release_notes.txt`）是所有商店共用的更新说明，也接受 `whatsNew` 和 `whats_new.txt`。App Store Connect 不接受应用首个版本的更新说明。`nsh.json` 不认识的键会被忽略。
+语言使用 App Store Connect 的 BCP 47 标签（`en-US`、`zh-Hans`）。截图按设备类别分组、按显示顺序排列：`phone` 对应 6.9 英寸 iPhone（`APP_IPHONE_67`），`tablet` 对应 13 英寸 iPad（`APP_IPAD_PRO_3GEN_129`）；`APP_IPHONE_65` 等 App Store Connect 尺寸名原样使用。截图集只在图片变化时替换。未给出的字段保持商店中的现值。`releaseNotes`（`release_notes.txt`）是所有商店共用的更新说明，也接受 `whatsNew` 和 `whats_new.txt`。App Store Connect 不接受应用首个版本的更新说明。`nsh.json` 不认识的键会被忽略。
 
 ## 自动化
 
@@ -166,7 +164,7 @@ jobs:
 
 ## 发布到 App Store
 
-iOS 应用通过 App Store Connect 到达用户：你上传一个构建版本，测试员在 TestFlight 中拿到它，Apple 审核通过后，App Store 就会提供它。`nsh package --target ios` 构建并签名 IPA。`nsh publish ios` 把它上传到 App Store Connect，等待处理完成，把构建分发给 TestFlight 群组，填写 App Store 版本及其商店文案，需要时提交审核。创建应用记录、定价、隐私详情和年龄分级在 App Store Connect 中完成。
+iOS 应用通过 App Store Connect 到达用户：你上传一个构建版本，测试员在 TestFlight 中拿到它，Apple 审核通过后，App Store 就会提供它。`nsh package --target ios` 构建并签名 IPA；`nsh publish ios` 把它上传到 App Store Connect，等待处理完成，把构建分发给 TestFlight 群组，填写 App Store 版本及其商店文案，需要时提交审核。创建应用记录、定价、隐私详情和年龄分级在 App Store Connect 中完成。
 
 两个命令都在装有 Xcode 的 macOS 上运行，Rust、Rust + TSX 和 TSX 应用都一样。
 
@@ -179,7 +177,7 @@ iOS 应用通过 App Store Connect 到达用户：你上传一个构建版本，
 3. **创建分发证书。** 即 *Apple Distribution* 证书，安装到负责打包的 Mac（或 CI runner）的登录钥匙串中。`security find-identity -v -p codesigning` 会把它列为 `Apple Distribution: Example Inc (ABCDE12345)`。
 4. **创建 App Store 描述文件**，对应该 App ID 和证书，并下载 `.mobileprovision` 文件。把它放在仓库之外。
 5. **在 App Store Connect 中创建应用**（“我的 App”→“新建 App”），使用同一个 bundle ID。“App 信息”下显示的数字 **Apple ID** 就是 `nsh publish ios` 需要的应用 id：把它写在 `nsh.json` 的 `store.ios.appId`。
-6. **创建团队 API 密钥**：在 App Store Connect 的“用户和访问”→“集成”→“App Store Connect API”中创建，角色为“开发者”“App 管理”或“管理”（Developer、App Manager 或 Admin）。记下它的 **Key ID** 和列表上方显示的 **Issuer ID**，并下载 `.p8` 私钥。Apple 只允许下载一次。
+6. **创建团队 API 密钥**：在 App Store Connect 的“用户和访问”→“集成”→“App Store Connect API”中创建，角色为“开发者”“App 管理”或“管理”（Developer、App Manager 或 Admin）。记下它的 **Key ID** 和列表上方显示的 **Issuer ID**，并下载 `.p8` 私钥；Apple 只允许下载一次。
 
 ### 配置应用
 
@@ -240,7 +238,7 @@ codesign -d --entitlements - /tmp/notes-ipa/Payload/Notes.app
 
 `nsh publish ios <IPA>` 通过 Apple 的 [build uploads API](https://developer.apple.com/documentation/appstoreconnectapi/build-uploads) 把 IPA 上传到 App Store Connect：
 
-应用的 Apple ID 写在 `nsh.json` 中（`{ "store": { "ios": { "appId": "1234567890" } } }`）。把 `.p8` 密钥放在 Apple 工具也会查找的 `~/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8`，并在 shell 配置文件中导出一次 issuer ID 和 key ID。之后配置好的应用只需给出 IPA 即可发布：
+应用的 Apple ID 写在 `nsh.json` 中（`{ "store": { "ios": { "appId": "1234567890" } } }`）。把 `.p8` 密钥放在 Apple 工具也会查找的 `~/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8`，并在 shell 配置文件中导出一次 issuer ID 和 key ID；之后配置好的应用只需给出 IPA 即可发布：
 
 ```sh
 export NSH_APP_STORE_ISSUER_ID=69a6de70-0000-0000-0000-000000000000
@@ -275,7 +273,7 @@ nsh publish ios .nsh/out/Notes.ipa
 | `--release manual\|auto\|phased` | 审核通过的版本如何上线（默认：`store.ios.release`，否则 `manual`）。 |
 | `--submit` | 提交该版本供 App 审核。 |
 
-已在审核中或已上线的版本不会被修改：在 `nsh.json` 中提高 `version`。处理需要几分钟到一小时。Apple 会检查签名、描述文件、图标和 `Info.plist`，有任何问题都会发邮件给账号持有人。
+已在审核中或已上线的版本不会被修改：在 `nsh.json` 中提高 `version`。处理需要几分钟到一小时；Apple 会检查签名、描述文件、图标和 `Info.plist`，有任何问题都会发邮件给账号持有人。
 
 ### 上传之后
 
@@ -290,7 +288,7 @@ nsh publish doctor ios          # read-only: credentials, nsh.json, listing, app
 
 - **TestFlight**：处理完成后，构建版本会立即提供给内部测试员（你团队的成员）。外部测试员需要一个群组，并且每个版本的第一个构建都要经过 Beta 版 App 审核（Beta App Review）。
 - **只能在 App Store Connect 中设置的内容**：隐私详情（App 隐私）、年龄分级和定价。Apple 不允许通过 API 创建应用记录，需先在那里创建一次。
-- **审核**：`--submit` 提交该版本供审核。审核通过后，按 `--release`（或 `store.ios.release`）手动发布、自动发布或分阶段发布。
+- **审核**：`--submit` 提交该版本供审核；审核通过后，按 `--release`（或 `store.ios.release`）手动发布、自动发布或分阶段发布。
 
 ### 常见错误
 
@@ -308,11 +306,11 @@ nsh publish doctor ios          # read-only: credentials, nsh.json, listing, app
 | `Apple rejected the uploaded file; check App Store Connect` | 文件上传后被 Apple 拒绝；原因见 App Store Connect 和 Apple 的邮件。 |
 | 描述文件不覆盖应用的 id（打包时） | 为应用的 bundle ID 或覆盖它的通配 ID 创建 App Store 描述文件。 |
 
-Apple 在处理时发现的问题（缺少用途说明、图标带透明、描述文件缺少某项 entitlement）会通过邮件通知，并显示在 App Store Connect 的构建版本上。在 `nsh.json` 中修正，提高 `build`，再重新打包上传。
+Apple 在处理时发现的问题（缺少用途说明、图标带透明、描述文件缺少某项 entitlement）会通过邮件通知，并显示在 App Store Connect 的构建版本上；在 `nsh.json` 中修正，提高 `build`，再重新打包上传。
 
 ## 发布到 Google Play
 
-Google Play 接收 Android App Bundle（`.aab`）。`nsh package --target android --format aab` 不借助 Gradle 构建一个 bundle 并用你的上传密钥签名。`nsh publish android` 通过 Google Play Developer API 上传它并发布到某个轨道：未用 `--track` 指定其他轨道时为**内部测试**。它还能在轨道之间推广版本、进行分阶段发布并更新商品详情。应用内容声明和审核在 Play Console 中完成。
+Google Play 接收 Android App Bundle（`.aab`）。`nsh package --target android --format aab` 不借助 Gradle 构建一个 bundle 并用你的上传密钥签名；`nsh publish android` 通过 Google Play Developer API 上传它并发布到某个轨道：未用 `--track` 指定其他轨道时为**内部测试**。它还能在轨道之间推广版本、进行分阶段发布并更新商品详情。应用内容声明和审核在 Play Console 中完成。
 
 两个命令都可以在 macOS、Linux 和 Windows 上运行。
 
@@ -327,7 +325,7 @@ Google Play 接收 Android App Bundle（`.aab`）。`nsh package --target androi
    keytool -genkeypair -v -keystore release.jks -alias upload -keyalg RSA -keysize 2048 -validity 10000
    ```
 
-   把 `release.jks` 及其密码放在仓库之外并做好备份。启用 Play 应用签名（新应用的默认设置）时，设备安装的内容由 Google 用它自己的应用签名密钥签名。上传密钥丢失后可以通过 Play Console 支持重置。
+   把 `release.jks` 及其密码放在仓库之外并做好备份。启用 Play 应用签名（新应用的默认设置）时，设备安装的内容由 Google 用它自己的应用签名密钥签名；上传密钥丢失后可以通过 Play Console 支持重置。
 3. **创建用于上传的服务账号**：在 Google Cloud 中选择或创建一个项目，启用 **Google Play Android Developer API**，创建服务账号并为它下载 JSON 密钥。
 4. **给服务账号授权**：在 Play Console 的“用户和权限”→“邀请新用户”中填入服务账号的邮箱，授予它该应用的访问权限，以及发布到测试轨道的权限。
 5. **在 Play Console 中完成首次发布。** 在应用于 Play Console 中发布过一次之前，Google Play 只接受通过 API 创建的草稿版本：用 `nsh publish android --draft` 上传第一个 bundle，再在 Play Console 中发布这个草稿。
@@ -371,9 +369,9 @@ NSH_KEYSTORE_PASSWORD=… nsh package --target android --format aab \
   --keystore release.jks --key-alias upload
 ```
 
-这会写出 `.nsh/out/<Name>.aab`，由 JDK 中的 `jarsigner` 签名。它包含 `arm64-v8a` 和 `armeabi-v7a` 的原生代码。Google Play 据此构建每台设备安装的 APK。`NSH_KEYSTORE_PASSWORD` 能让密码不进入 shell 历史（`--keystore-password` 也可以）。不带 `--keystore` 时，bundle 用 debug 密钥签名，Google Play 会拒绝。环境要求（Android SDK、Rust 应用需要的 NDK、JDK）见[打包：Android](./packaging.md#android)。
+这会写出 `.nsh/out/<Name>.aab`，由 JDK 中的 `jarsigner` 签名。它包含 `arm64-v8a` 和 `armeabi-v7a` 的原生代码；Google Play 据此构建每台设备安装的 APK。`NSH_KEYSTORE_PASSWORD` 能让密码不进入 shell 历史（`--keystore-password` 也可以）。不带 `--keystore` 时，bundle 用 debug 密钥签名，Google Play 会拒绝。环境要求（Android SDK、Rust 应用需要的 NDK、JDK）见[打包：Android](./packaging.md#android)。
 
-release bundle 中的 `libnsh.so` 不带符号。完整的库写在运行时旁的 `symbols/<abi>/libnsh.so`。在 Play Console 中上传它们（该 bundle 的“下载内容”→原生调试符号），就能在 Android Vitals 中看懂原生崩溃堆栈。
+release bundle 中的 `libnsh.so` 不带符号；完整的库写在运行时旁的 `symbols/<abi>/libnsh.so`。在 Play Console 中上传它们（该 bundle 的“下载内容”→原生调试符号），就能在 Android Vitals 中看懂原生崩溃堆栈。
 
 上传前想在设备上试用 bundle，可以用 [bundletool](https://github.com/google/bundletool)：先 `bundletool build-apks --bundle .nsh/out/Notes.aab --output notes.apks --connected-device`，再 `bundletool install-apks --apks notes.apks`。
 
@@ -410,7 +408,7 @@ nsh publish android --from <TRACK> --track <TRACK> [--rollout <FRACTION>]
 4. 带 `--listing` 时，写入商店文案的文字，并对存在的每种图片类型，替换 Play 上该类型的图片。
 5. 提交编辑。任何一步失败都会删除这次编辑，不会出现发布了一半的情况。
 
-它会打印现在位于该轨道上的版本代码。内部测试员（最多 100 人，来自 Play Console 中的测试员列表）几分钟内就能从 Google Play 收到更新。要提高分阶段发布的比例，用更大的 `--rollout` 再次发布同一版本。要完成分阶段发布，不带 `--rollout` 发布它：
+它会打印现在位于该轨道上的版本代码。内部测试员（最多 100 人，来自 Play Console 中的测试员列表）几分钟内就能从 Google Play 收到更新。要提高分阶段发布的比例，用更大的 `--rollout` 再次发布同一版本；要完成分阶段发布，不带 `--rollout` 发布它：
 
 ```sh
 nsh publish android --from internal --track production --rollout 0.1
@@ -447,7 +445,7 @@ nsh publish doctor android          # read-only: the key, the package name, the 
 
 ## 发布到 Flathub
 
-Linux 上的商店是 Flathub：用户通过 GNOME Software、KDE Discover 或 `flatpak install flathub <id>` 安装。Flathub 根据 manifest 自行构建并签名应用。NSH 根据发布压缩包生成 manifest，由你提交 Pull Request。压缩包、AppImage 和本地 Flatpak 包属于打包，不是商店发布，见[打包](./packaging.md#appimage-and-flatpak)。
+Linux 上的商店是 Flathub：用户通过 GNOME Software、KDE Discover 或 `flatpak install flathub <id>` 安装。Flathub 根据 manifest 自行构建并签名应用；NSH 根据发布压缩包生成 manifest，由你提交 Pull Request。压缩包、AppImage 和本地 Flatpak 包属于打包，不是商店发布，见[打包](./packaging.md#appimage-and-flatpak)。
 
 ### 首次发布之前
 
@@ -514,7 +512,7 @@ Linux 上的商店是 Flathub：用户通过 GNOME Software、KDE Discover 或 `
 
 ### 发布
 
-Flathub 不接受上传。每个应用是一个 GitHub 仓库 `flathub/<id>`，其中的 manifest 写明发布压缩包的 URL 与 SHA-256。合入该仓库的每次改动都由 Flathub 构建并发布。
+Flathub 不接受上传。每个应用是一个 GitHub 仓库 `flathub/<id>`，其中的 manifest 写明发布压缩包的 URL 与 SHA-256；合入该仓库的每次改动都由 Flathub 构建并发布。
 
 #### 首次发布
 
@@ -526,7 +524,7 @@ Flathub 不接受上传。每个应用是一个 GitHub 仓库 `flathub/<id>`，�
    nsh publish linux .nsh/out/Counter.tar.gz
    ```
 
-   压缩包地址为填入版本号后的 `store.linux.archiveUrl`（或 `--url`），输出 `.nsh/out/flathub/<id>/<id>.yml`。其架构取自压缩包中可执行文件的处理器（`x86_64` 或 `aarch64`），与运行命令的机器无关。
+   压缩包地址为填入版本号后的 `store.linux.archiveUrl`（或 `--url`），输出 `.nsh/out/flathub/<id>/<id>.yml`；其架构取自压缩包中可执行文件的处理器（`x86_64` 或 `aarch64`），与运行命令的机器无关。
 4. 按 [Flathub 提交指南](https://docs.flathub.org/docs/for-app-authors/submission)向 `flathub/flathub` 提交带 manifest 的 Pull Request。Flathub 审核后会创建 `flathub/<id>`。
 
 #### 后续版本
@@ -551,7 +549,7 @@ nsh publish status linux [--json]
 nsh publish doctor linux
 ```
 
-检查 `id`、Flathub 要求的商店字段（摘要长度、许可证、截图）、图标是否为正方形（小于 256×256 时警告）。安装了相应工具时，用 `appstreamcli` 校验生成的 metainfo，用 `desktop-file-validate` 校验 desktop 文件。缺少 Flathub 必需的内容时以非零退出。
+检查 `id`、Flathub 要求的商店字段（摘要长度、许可证、截图）、图标是否为正方形（小于 256×256 时警告）；安装了相应工具时，用 `appstreamcli` 校验生成的 metainfo，用 `desktop-file-validate` 校验 desktop 文件。缺少 Flathub 必需的内容时以非零退出。
 
 ### 命令
 

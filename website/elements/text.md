@@ -88,7 +88,7 @@ text("Run ")
 ```
 
 The Tailwind classes work the same way: `<Text class="bg-gray-100 rounded px-1">`. Horizontal padding takes room in the
-line at the span's two ends and its background covers it, as a CSS inline box's does. Vertical padding grows the
+line at the span's two ends and its background covers it, as a CSS inline box's does; vertical padding grows the
 background above and below the text without changing the line's height, and borders leave spans as they are.
 
 ### Hidden spans
@@ -120,7 +120,7 @@ Here the paragraph is as wide as "The answer is forty-two.", shows "The answer i
 
 A span with a press handler is a link: a press on its characters goes to the span, a press elsewhere to the paragraph.
 A span takes its hover styles (`hoverStyle`, `hover:`, `.hover(..)`) while the mouse is over its characters, and a
-link its press styles (`activeStyle`, `active:`, `.active(..)`) while a press on it is in. The other runs of the
+link its press styles (`activeStyle`, `active:`, `.active(..)`) while a press on it is in; the other runs of the
 paragraph keep their look. Over a span inside a link, the link is the one hovered: style the link.
 In a terminal each link is also a stop of the keyboard focus: Tab reaches the links of a paragraph in turn, and Return
 presses the focused one.
@@ -156,7 +156,7 @@ text("By continuing you agree to the ")
 
 Any other element inside a text (a view, an image, even inside spans) is an inline attachment: it is laid out at its
 own size, sits on the baseline (or where its `verticalAlign` style puts it: `"text-top"`, `"text-bottom"`,
-`"middle"`, as in CSS. The line grows to hold it. On the baseline, a view that holds text stands by the baseline of
+`"middle"`, as in CSS; the line grows to hold it; on the baseline, a view that holds text stands by the baseline of
 its first line of text, as an `inline-flex` box) and wraps with the words. It takes presses of its own.
 
 ```tsx tabs

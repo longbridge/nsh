@@ -8,14 +8,7 @@ demo: guide-lists
 
 # Lists
 
-A list (`virtual_list(..)` in Rust, `List` from `nsh` in TSX) shows long data in a native scroll view. It only
-creates the rows near the screen, so a list of a million items costs about as much as a list of thirty.
-
-Use a list from the start for collections that can grow, such as chat timelines, feeds and history. Use a scroll view
-with ordinary children for small, bounded content.
-
-The native side computes which rows exist, where they go, the columns, sticky headers and which items are visible.
-Your code only fills a cell with content when the native side asks for one.
+For collections that can grow, including chat timelines, feeds and history, prefer a virtualized list from the start. Use a scroll view with ordinary children for small, bounded content. A list (`virtual_list(..)` in Rust, `List` from `nsh` in TSX) renders long data on a native scroll view while only creating the rows near the screen. Which rows exist, where they go, the columns, sticky headers and which items are visible are all computed natively; your code only fills cells with content when the native side asks for one. A list of a million items costs about as much as a list of thirty.
 
 ```tsx tabs
 import { List, mount, Text, View } from "nsh";
@@ -64,7 +57,7 @@ pub fn App() -> impl IntoElement {
 }
 ```
 
-In Rust, `virtual_list(count, row)` takes the number of rows (a value, a signal or a closure) and a function that builds a row from its position (`at.index()`). The rows read your data by that index. In TSX, `each` takes the items and the row function gets the item. Like a [scroll view](./scrolling.md), the list is the viewport and needs a size from its parent (`.flex_1()`, `flex: 1` or a height).
+In Rust, `virtual_list(count, row)` takes the number of rows (a value, a signal or a closure) and a function that builds a row from its position (`at.index()`); the rows read your data by that index. In TSX, `each` takes the items and the row function gets the item. Like a [scroll view](./scrolling.md), the list is the viewport and needs a size from its parent (`.flex_1()`, `flex: 1` or a height).
 
 ## How recycling works
 
@@ -145,11 +138,11 @@ virtual_list(move || posts.with(Vec::len), move |at| {
 .flex_1()
 ```
 
-Rows can have different heights. Until a row has been measured, the list assumes the estimated item size (default 50 points). Pass a value close to your typical row so the scroll indicator and jumps to far items are accurate from the start.
+Rows can have different heights. Until a row has been measured, the list assumes the estimated item size (default 50 points); pass a value close to your typical row so the scroll indicator and jumps to far items are accurate from the start.
 
 ## Changing the data
 
-In Rust, give the count as a signal or a closure (`move || posts.with(Vec::len)`): the list grows and shrinks in place. Rows added or removed at the end need nothing more. When rows come and go elsewhere, give their identities with `.keys(move || posts.with(|p| p.iter().map(|p| p.id).collect::<Vec<_>>()))`, and the list matches the rows by key.
+In Rust, give the count as a signal or a closure (`move || posts.with(Vec::len)`): the list grows and shrinks in place. Rows added or removed at the end need nothing more; when rows come and go elsewhere, give their identities with `.keys(move || posts.with(|p| p.iter().map(|p| p.id).collect::<Vec<_>>()))`, and the list matches the rows by key.
 
 In TSX, pass a new array to change the items: `posts.set([...posts(), ...more])`. The list compares the old and the new array **by item identity** (`===`), or by the keys `keyExtractor` returns.
 
@@ -204,7 +197,7 @@ The header, footer and empty slots take an element (in TSX also a component: `he
 
 ## Columns and grids
 
-`numColumns` (`.columns(n)`) lays items out in rows of that many columns. Content padding goes around the content, with gaps between rows and columns. Rows of a grid may have different heights: each row is as tall as its tallest item. `numColumns` may change while the list shows (more columns as a window widens): the first visible item stays at the top, and so it does when `estimatedItemSize` changes.
+`numColumns` (`.columns(n)`) lays items out in rows of that many columns; content padding goes around the content, with gaps between rows and columns. Rows of a grid may have different heights: each row is as tall as its tallest item. `numColumns` may change while the list shows (more columns as a window widens): the first visible item stays at the top, and so it does when `estimatedItemSize` changes.
 
 ```tsx tabs
 <List
@@ -234,7 +227,7 @@ virtual_list(count, move |at| {
 
 ## Sticky headers
 
-`stickyHeaderIndices` lists items that stick to the top of the viewport while the content scrolls past them, until the next sticky item pushes them out. Sections are one list of header and row items. The headers' indices stick. The pinning is done natively on every scroll frame.
+`stickyHeaderIndices` lists items that stick to the top of the viewport while the content scrolls past them, until the next sticky item pushes them out. Sections are one list of header and row items; the headers' indices stick. The pinning is done natively on every scroll frame.
 
 ```tsx tabs
 type Row = { header: string } | { name: string };
@@ -325,7 +318,7 @@ view().flex_1().overflow_hidden().child(
 
 ## Chat: inverted lists
 
-`inverted` lays the list out from the end: item 0 is at the bottom, the list starts scrolled to the end, and it keeps its distance from the end as items change. Keep the newest message first. Prepend to add one, append to load older ones with `onLoadMore` (the "end" of an inverted list is the top). A chat opened at an old message loads the newer ones with [`onLoadMoreAtStart`](#loading-at-the-start-onloadmoreatstart). With it, the list keeps its distance from the bottom while it is there and keeps the messages on screen in place when scrolled up.
+`inverted` lays the list out from the end: item 0 is at the bottom, the list starts scrolled to the end, and it keeps its distance from the end as items change. Keep the newest message first; prepend to add one, append to load older ones with `onLoadMore` (the "end" of an inverted list is the top). A chat opened at an old message loads the newer ones with [`onLoadMoreAtStart`](#loading-at-the-start-onloadmoreatstart); with it, the list keeps its distance from the bottom while it is there and keeps the messages on screen in place when scrolled up.
 
 ```tsx tabs
 import { List, mount, signal, Text, View } from "nsh";
@@ -489,7 +482,7 @@ pub fn chat() -> impl IntoElement {
 
 ### Bottom alignment
 
-`alignment="bottom"` (`.alignment(ListAlignment::Bottom)` in Rust) is the simplest way to build a chat: messages stay in reading order, oldest first, and the list opens at the newest. It stays at the end as a reply streams in, a message is appended or the keyboard shows. When the user scrolls up, the visible content stays where it is, and scrolling back to the end resumes following. Messages shorter than the viewport lie at its bottom.
+`alignment="bottom"` (`.alignment(ListAlignment::Bottom)` in Rust) is the simplest way to build a chat: messages stay in reading order, oldest first, and the list opens at the newest. It stays at the end as a reply streams in, a message is appended or the keyboard shows; when the user scrolls up, the visible content stays where it is, and scrolling back to the end resumes following. Messages shorter than the viewport lie at its bottom.
 
 Rows keep their positions in the content while the list grows, so an appended message moves no other row: the list places the new row and scrolls once. Older messages prepended with `onLoadMoreAtStart` keep the visible rows in place.
 
@@ -525,7 +518,7 @@ virtual_list(move || messages.with(Vec::len), move |at| bubble(messages, at))
 
 ## Horizontal lists
 
-`horizontal` turns the list sideways. Cells are laid out at the list's height. Combined with snapping it makes a carousel of any length:
+`horizontal` turns the list sideways; cells are laid out at the list's height. Combined with snapping it makes a carousel of any length:
 
 ```tsx tabs
 <List
@@ -593,7 +586,7 @@ scroll()
 
 - The list is as long as its rows: its height (its width, sideways) comes from its content, as a view's does, and its padding, border and margins work as on a view.
 - Its rows follow the nearest scroll view around it along its axis, or the screen it is on.
-- The page keeps what you read in place, as a browser does: rows that change size wholly above the top of the viewport move the page by as much. While the list's start is in view, rows that grow push what is below them down.
+- The page keeps what you read in place, as a browser does: rows that change size wholly above the top of the viewport move the page by as much; while the list's start is in view, rows that grow push what is below them down.
 - `scrollToIndex`, `scrollToEnd` and `initialScrollIndex` scroll the page to the list's rows, within the page's content; `onLoadMore` fires as the list's end comes near the viewport, and `onViewableItemsChange` reports the rows in the page's viewport.
 - `stickyHeaderIndices` and `stickyHeaderOffset` stick rows to the top of the page: a section header stays at the top while its rows scroll under it, until the next one pushes it out, and the last one leaves with the end of its list.
 - How the page scrolls is its scroll view's: set `onScroll` and the other scroll events, `scrollValue`, `refreshing` / `onRefresh`, paging and snapping, `contentInset`, `scrollbar`, `scrollable` and `keyboardDismissMode` on the `Scroll`. Inverted lists and `maintainVisibleContentPosition` are features of a list with a viewport of its own (`viewport="own"`, the default).
@@ -601,7 +594,7 @@ scroll()
 
 ## Loading more: onLoadMore
 
-`onLoadMore` (`.on_load_more(..)`) fires when the viewport comes within `loadMoreThreshold` viewports of the end (1 by default: one screen ahead). Append the next page. The list fires again when the new end comes near.
+`onLoadMore` (`.on_load_more(..)`) fires when the viewport comes within `loadMoreThreshold` viewports of the end (1 by default: one screen ahead). Append the next page; the list fires again when the new end comes near.
 
 ```tsx tabs
 const posts = signal<Post[]>([]);
@@ -731,7 +724,7 @@ Once the newest message is in, stop loading: new messages then arrive at the sta
 
 ## Viewability
 
-`onViewableItemsChange` (`.on_viewable_items_change(..)`) reports which items are on screen, for analytics, autoplaying the visible video, or marking messages read. In TSX it gets `{ viewableItems, changed }`, arrays of tokens `{ item, key, index, isViewable }`. In Rust, `ViewableItems` with the first and last viewable row (`viewable`) and the rows whose state changed (`changed()`). Viewability is computed natively. Your code only hears about changes.
+`onViewableItemsChange` (`.on_viewable_items_change(..)`) reports which items are on screen, for analytics, autoplaying the visible video, or marking messages read. In TSX it gets `{ viewableItems, changed }`, arrays of tokens `{ item, key, index, isViewable }`; in Rust, `ViewableItems` with the first and last viewable row (`viewable`) and the rows whose state changed (`changed()`). Viewability is computed natively; your code only hears about changes.
 
 | `viewabilityConfig` | Rust | Description |
 |---|---|---|
@@ -803,7 +796,7 @@ Scrolling to an index (and to the end) is resolved natively with the sizes known
 
 ### Keeping a reading position
 
-`measureScrollPosition()` (`measure_scroll_position()`) tells where the viewport starts among the rows once this turn's changes are laid out: `{ index, offset }`, the row there and how far into it, in the positions the list itself lays its rows out at (measured rows at their sizes, the others at their estimates). Read it as the list scrolls and keep it; `scrollToIndex({ index, viewOffset: -offset })` puts the viewport's start back there, in the same list or in one made anew, which follows the row as it is measured. A list without items answers `null`. It counts along the list's axis from the side item 0 is on (the bottom of an inverted list). In a header before the first row, `index` is 0 and `offset` negative.
+`measureScrollPosition()` (`measure_scroll_position()`) tells where the viewport starts among the rows once this turn's changes are laid out: `{ index, offset }`, the row there and how far into it, in the positions the list itself lays its rows out at (measured rows at their sizes, the others at their estimates). Read it as the list scrolls and keep it; `scrollToIndex({ index, viewOffset: -offset })` puts the viewport's start back there, in the same list or in one made anew, which follows the row as it is measured. A list without items answers `null`. It counts along the list's axis from the side item 0 is on (the bottom of an inverted list); in a header before the first row, `index` is 0 and `offset` negative.
 
 ```tsx tabs
 let list!: ListRef;
@@ -923,7 +916,7 @@ pub fn settings_list(settings: Rc<Vec<Setting>>, on_select: impl Fn(&Setting) + 
 ## Performance notes
 
 - Each cell is laid out on its own, so scrolling only lays out the cells that changed. Keep rows shallow and avoid reading signals in rows that change on every frame.
-- The native side asks for cells in batches, up to several rounds per frame, merged into one update. A fast fling binds many cells in one frame without a call into your code per cell. Rust rows are bound in the core itself, within the commit that needs them.
+- The native side asks for cells in batches, up to several rounds per frame, merged into one update; a fast fling binds many cells in one frame without a call into your code per cell. Rust rows are bound in the core itself, within the commit that needs them.
 - Use [`nsh test --trace` with a `scroll` step](./testing-and-trace.md#scrolling) to measure the per-frame cost of your rows.
 
 ## Related

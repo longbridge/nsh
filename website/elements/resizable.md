@@ -7,14 +7,12 @@ demo: el-resizable
 
 # Resizable
 
-A resizable group lays out panels side by side or stacked, with a handle between each two. Examples are a sidebar
-beside a document, an editor above its console, or a list beside its detail. The user drags a handle to move the
-boundary, and each panel stays within the sizes your app allows.
-
-`ResizablePanelGroup` handles the behavior: the drag (which runs natively, frame by frame), how space is shared, the
-resize cursor and a larger touch area for fingers. Your app owns the look. A handle is a band with no line, color or
-grip of its own. Whatever it contains is your indicator, and the panels are your views.
-
+A resizable group lays out panels side by side or stacked, with a handle on each boundary between two of them: a
+sidebar beside a document, an editor above its console, a list beside its detail. The user drags a handle to move the
+boundary, and each panel stays within the sizes the app allows it. `ResizablePanelGroup` owns the behavior: the drag,
+which runs natively frame by frame, how the room is shared, the resize cursor and a larger touch area for a finger.
+The look is the app's: a handle is a band with no line, color or grip of its own, and what it draws is the app's
+indicator; the panels are the app's views.
 
 ```tsx tabs
 import { mount, signal, Text } from "nsh";

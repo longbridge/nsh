@@ -6,7 +6,9 @@ order: 12.6
 
 # nsh/web
 
-`nsh/web` controls the web page that hosts your app. It exports [`Head`](#head), which sets the document's title, description and metadata. Search engines index them and link previews show them. You can import the module on every platform, so one bundle runs everywhere. On phones and desktops, `Head` renders nothing.
+`nsh/web` holds what the page around an app has on the web: [`Head`](#head), the document's title, description and
+metadata, which search engines index and link previews show. The module can be imported on every platform, so one
+bundle runs everywhere: on the phones and the desktops `Head` renders nothing.
 
 ```tsx
 import { Head } from "nsh/web";

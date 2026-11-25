@@ -7,10 +7,10 @@ demo: el-switch
 
 # Switch
 
-A switch turns a setting on or off, and the change takes effect at once. `Switch` owns the behavior: presses,
-keyboard activation, the disabled state, and the switch role and value for screen readers. The look is the app's: a
-`Switch` has no colors, sizes, motion or label of its own. It is a track with a thumb inside it, then its children
-(a label). The app styles each part, and `checked:` and `disabled:` classes follow the switch's state.
+A switch turns a setting on or off, and the change takes effect at once. It owns the behavior: presses, keyboard
+activation, the disabled state, and the switch role and its value for screen readers. The look is the app's: a
+`Switch` has no colors, sizes, motion or label of its own. It is made of a track with a thumb inside it, then its
+children (a label), and the app styles each part, with `checked:` and `disabled:` classes that follow the switch.
 
 ```tsx tabs
 import { mount, signal, Text } from "nsh";
@@ -74,7 +74,7 @@ fn wifi() -> impl IntoElement {
 `Switch` comes from [`nsh/base`](../modules/nsh-base.md), the `nsh-base` crate in Rust. The value is the app's: a
 press reports the next value with `onChange`, and the switch shows the `checked` the app passes back. In Rust,
 `switch()` makes one with a setter per prop (`.checked(..)`, `.track_style(..)`), a listener per event
-(`.on_change(..)`), the typed style methods for the switch itself and `.child(..)` for its label. A part's style takes
+(`.on_change(..)`), the typed style methods for the switch itself and `.child(..)` for its label; a part's style takes
 the state methods (`.checked(..)`, `.disabled_style(..)`) that follow the switch.
 
 ## Props
@@ -170,9 +170,9 @@ points past each side, without changing its layout or its look: one number for e
 ## Accessibility
 
 - Give `accessibilityHint` when the label does not explain the effect of changing the setting. It follows reactive
-  values. Setting it to `undefined` removes the hint.
-- A switch is one element for screen readers, with the role `"switch"` and its value (on or off). The track and the
-  thumb are parts of it. Its label is the text of its children. Give `accessibilityLabel` when it has none.
+  values; setting it to `undefined` removes the hint.
+- A switch is one element for screen readers, with the role `"switch"` and its value (on or off); the track and the
+  thumb are parts of it. Its label is the text of its children; give `accessibilityLabel` when it has none.
 - `disabled` is announced as the platform announces it (VoiceOver, TalkBack, UI Automation, the browser's accessibility
   tree).
 - On macOS and the web a switch is a stop of the keyboard focus: Tab reaches it, Space and Return toggle it, and
@@ -185,4 +185,4 @@ See [Accessibility](../docs/accessibility.md) for labels, roles and announcement
 - iOS, Android and Mac Catalyst: a press is a tap that ends on the switch, its label included.
 - Desktops (macOS, Windows, Linux, GPUI) and the web: a press is a click. On macOS and the web, Space and Return also
   toggle the switch that has the keyboard focus.
-- Every platform draws what the app styles. The thumb moves as the app's styles and transitions say.
+- Every platform draws what the app styles; the thumb moves as the app's styles and transitions say.

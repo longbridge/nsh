@@ -10,7 +10,7 @@ demo: guide-device
 
 The environment an app runs in changes while it runs: the window resizes (rotation, split view, a Mac window), the user switches to dark mode or a larger text size, the keyboard comes and goes. NSH exposes each of these as a **reactive accessor**: call it like a signal, and whatever read it (a style, a text, a computed value) updates when it changes. There are no listeners to add or remove.
 
-In Rust the accessors are functions of `nsh_core::prelude`. In TSX they come from the modules listed.
+In Rust the accessors are functions of `nsh_core::prelude`; in TSX they come from the modules listed.
 
 | Rust | TSX | Value |
 |---|---|---|
@@ -112,7 +112,7 @@ fn gallery() -> impl IntoElement {
 }
 ```
 
-Often flexbox, percentages and `aspect_ratio` (`aspectRatio`) do the job without reading the size at all. See [Layout](./layout.md). Rust's `style_when(|| window().width.0 >= 640.0, |s| s.flex_row())` switches styles with the width. In TSX with Tailwind, the breakpoint variants (`sm:`, `md:`, `lg:`, `xl:`, `2xl:`, `max-*:`, `min-[…]:`) and `portrait:` / `landscape:` follow the window too: `class="grid grid-cols-2 md:grid-cols-4"`.
+Often flexbox, percentages and `aspect_ratio` (`aspectRatio`) do the job without reading the size at all; see [Layout](./layout.md). Rust's `style_when(|| window().width.0 >= 640.0, |s| s.flex_row())` switches styles with the width; in TSX with Tailwind, the breakpoint variants (`sm:`, `md:`, `lg:`, `xl:`, `2xl:`, `max-*:`, `min-[…]:`) and `portrait:` / `landscape:` follow the window too: `class="grid grid-cols-2 md:grid-cols-4"`.
 
 ## Dark mode
 
@@ -135,7 +135,7 @@ view()
     )
 ```
 
-For anything else, read `dark()` (TSX: `colorScheme()`) in a closure or a computed value. In TSX, for more than a few colors, derive a palette once:
+For anything else, read `dark()` (TSX: `colorScheme()`) in a closure or a computed value; in TSX, for more than a few colors, derive a palette once:
 
 ```tsx tabs
 import { computed, Text, View } from "nsh";
@@ -357,7 +357,7 @@ use nsh_core::prelude::*;
 text(move || format!("Times in {}", locale_settings().time_zone))
 ```
 
-`Date`'s local times follow the system's zone, as they always have: `time_zone` names it. `Intl` formats local time in that zone and names it the same way: `Intl.DateTimeFormat().resolvedOptions().timeZone` is `localeSettings().timeZone`, and `{ timeZone: localeSettings().timeZone }` formats in local time. In tests, the zone `open` or `app.setLocaleSettings` gives (`UTC` otherwise) is the one `localeSettings()` reports. Local times, `Date`'s and `Intl`'s, stay the machine's, and `Intl` names the machine's zone.
+`Date`'s local times follow the system's zone, as they always have: `time_zone` names it. `Intl` formats local time in that zone and names it the same way: `Intl.DateTimeFormat().resolvedOptions().timeZone` is `localeSettings().timeZone`, and `{ timeZone: localeSettings().timeZone }` formats in local time. In tests, the zone `open` or `app.setLocaleSettings` gives (`UTC` otherwise) is the one `localeSettings()` reports; local times, `Date`'s and `Intl`'s, stay the machine's, and `Intl` names the machine's zone.
 
 ## In an embedding app
 
@@ -384,7 +384,7 @@ effect(move || {
 });
 ```
 
-Use `background` to pause work. Save the user's changes as they make them. The system may suspend an app seconds after it moves to the background, before an effect that reads the change has run. An app shown inside a native app follows that app's state. Where an app has several windows (an iPad, a desktop), a view follows the window it is in. On macOS and Windows, standalone apps and views embedded in AppKit and Win32 apps are also in the `background` while the screen is locked or off, and while their window is on another desktop (a Space, a virtual desktop). On Windows, an app moves to `background` when the user signs out, Windows shuts down or restarts, or an installer closes it, and its handlers run before the session ends. Then the app quits ([`Application.on("quit")`](../modules/nsh-desktop.md#quitting)). A standalone app on Linux does the same when the user signs out or the system shuts down or restarts, and when it is sent `SIGTERM` (as systemd does to end a session or stop a service). In tests, `app.setLifecycle("background")` of `nsh/test` moves the app there ([Testing](./testing-and-trace.md#steps)).
+Use `background` to pause work, and save what the user changes as they change it: the system may suspend an app seconds after it moves to the background, before an effect that reads the change has run. An app shown inside a native app follows that app's state, and where an app has several windows (an iPad, a desktop) a view follows the window it is in. Standalone apps and views embedded in AppKit and Win32 apps are in the `background` too on macOS and Windows while the screen is locked or turned off and while their window is on another desktop (a Space, a virtual desktop). On Windows, an app moves to `background` when the user signs out, Windows shuts down or restarts, or an installer closes it, and its handlers run before the session ends; then the app quits ([`Application.on("quit")`](../modules/nsh-desktop.md#quitting)). A standalone app on Linux does the same when the user signs out or the system shuts down or restarts, and when it is sent `SIGTERM` (as systemd does to end a session or stop a service). In tests, `app.setLifecycle("background")` of `nsh/test` moves the app there ([Testing](./testing-and-trace.md#steps)).
 
 ## After a sleep
 
@@ -424,13 +424,13 @@ effect(move || {
 });
 ```
 
-On iPhones sold in mainland China, the system asks the user whether the app may use wireless data the first time it reaches the network. The app's requests fail until the user answers. `cellularData` is `"unknown"` until then. A request that failed while it is `"unknown"` should wait for it to change and try again. A request that failed while it is `"restricted"` (the user chose Off, or WLAN only on cellular) should tell the user, and `AppSettings.open()` of `nsh/mobile` opens the app's page in Settings, where they change it.
+On iPhones sold in mainland China, the system asks the user whether the app may use wireless data the first time it reaches the network, and the app's requests fail until the user answers. `cellularData` is `"unknown"` until then: a request that failed while it is `"unknown"` waits for it to change and tries again; one that failed while it is `"restricted"` (the user chose Off, or WLAN only on cellular) tells the user, and `AppSettings.open()` of `nsh/mobile` opens the app's page in Settings, where they change it.
 
-iOS and macOS follow the system's path monitor (Network.framework) and, on iOS, CoreTelephony's cellular data state. Android follows the default network through `ConnectivityManager`. This needs the `ACCESS_NETWORK_STATE` permission, which `nsh package` and the Android SDK's AAR declare. Without it the kind stays `"unknown"`. The web reads `navigator.onLine` and, where the browser has it, `navigator.connection` (a desktop browser names no link: `"unknown"` while online). Windows, Linux, GPUI and terminals report `"unknown"`. A route is not a promise: a server may still be out of reach on a link that is `online`, so the app keeps handling failed requests. In tests, `app.setNetworkState({ kind: "none" })` of `nsh/test` takes the device offline ([Testing](./testing-and-trace.md#steps)).
+iOS and macOS follow the system's path monitor (Network.framework) and, on iOS, CoreTelephony's cellular data state. Android follows the default network (`ConnectivityManager`, with the `ACCESS_NETWORK_STATE` permission that `nsh package` and the Android SDK's AAR declare; without it the kind stays `"unknown"`). The web reads `navigator.onLine` and, where the browser has it, `navigator.connection` (a desktop browser names no link: `"unknown"` while online). Windows, Linux, GPUI and terminals report `"unknown"`. A route is not a promise: a server may still be out of reach on a link that is `online`, so the app keeps handling failed requests. In tests, `app.setNetworkState({ kind: "none" })` of `nsh/test` takes the device offline ([Testing](./testing-and-trace.md#steps)).
 
 ## Safe areas
 
-Notches, the home indicator, the status bar, Android's navigation bar, the Mac Catalyst title bar and the window controls of an iPad app in a window cover parts of the surface. NSH apps draw edge to edge on every platform, and get the covered parts as insets. On iPadOS 26 and later, a windowed app's leading inset is as wide as the window controls in its top-leading corner, over the whole leading edge. In full screen and on iPhone it is the plain safe area.
+Notches, the home indicator, the status bar, Android's navigation bar, the Mac Catalyst title bar and the window controls of an iPad app in a window cover parts of the surface. NSH apps draw edge to edge on every platform, and get the covered parts as insets. On iPadOS 26 and later, a windowed app's leading inset is as wide as the window controls in its top-leading corner, over the whole leading edge; in full screen and on iPhone it is the plain safe area.
 
 - `safe_area()` (TSX: `safeArea()`) gives the surface's insets.
 - A component's `cx.insets()` (TSX: `safeAreaInsets()`) gives the insets **where the component renders**: inside a navigation [page](./navigation.md#safe-areas-under-the-header) they are measured below its header, inside a [dialog](../elements/dialog.md) they are the dialog's. Prefer it in components that may be shown in several places.
@@ -544,7 +544,7 @@ In a terminal ([the terminal backend](./tui.md)), `platform.idiom` is `"terminal
 
 ## The app's data directory
 
-`data_dir()` in Rust and `process.dataDir` in TSX return the directory where the app keeps its own files, such as a SQLite database. Its `storage.json` lives there too. This holds on every native platform, Android and iOS included. By default it is the app's id in the system's directory for apps' data: `~/Library/Application Support/<id>` on macOS, `%APPDATA%\<id>` on Windows, `$XDG_DATA_HOME/<id>` (`~/.local/share/<id>`) on Linux. An app embedded in another keeps it in the embedding app's. A desktop app can name its own with `nsh.json` `dataDir` ([Project structure](./project-structure.md)), and `process.dataDir` and `${dataDir}` follow it. It is `None` (`null`) where the host keeps no files for the app, such as the web. The directory may not exist yet, so create it before writing.
+`data_dir()` in Rust, `process.dataDir` in TSX, is the directory the app keeps its own files in, such as a SQLite database, beside its `storage.json`, on every native platform, Android and iOS included. By default it is the app's id in the system's directory for apps' data: `~/Library/Application Support/<id>` on macOS, `%APPDATA%\<id>` on Windows, `$XDG_DATA_HOME/<id>` (`~/.local/share/<id>`) on Linux; an app embedded in another keeps it in the embedding app's. A desktop app can name its own with `nsh.json` `dataDir` ([Project structure](./project-structure.md)), and `process.dataDir` and `${dataDir}` follow it. It is `None` (`null`) where the host keeps no files for the app, such as the web. The directory may not exist yet, so create it before writing.
 
 A packaged desktop app writes its log lines to `logs/app.log` there: `log_file()` in Rust, `process.logFile` in TSX
 ([Log files and levels on the desktop](./dev-server-and-debugging.md#log-files-and-levels-on-the-desktop)).
@@ -563,7 +563,7 @@ if let Some(dir) = data_dir() {
 `app_info()` in Rust, `appInfo()` from `nsh` in TSX ([`appInfo`](../modules/nsh.md#appinfo)), is the app as it was
 built: its id, name, version and build number, and whether it is a development build. A package reports what
 `nsh package` names and versions it as, `--id`, `--name`, `--version` and `--build` included, with version `1.0.0` and
-build `1` where nothing gives them. Other builds report `nsh.json`'s, `None` where it leaves them out. `nsh run`,
+build `1` where nothing gives them; other builds report `nsh.json`'s, `None` where it leaves them out. `nsh run`,
 `nsh dev` and `nsh test` make development builds of a Rust app; `nsh package` does not.
 `app_info()` is `None` in a TSX app, where JS's `appInfo()` reports it.
 
@@ -599,13 +599,13 @@ view()
     .bg(rgb(0xd0d7de))
 ```
 
-`pixel_ratio()` and `pixelRatio()` are reactive. On the desktops they report the host display's scale. A window moved to a screen with another density reports its own scale in `state()?.scaleFactor`.
+`pixel_ratio()` and `pixelRatio()` are reactive. On the desktops they report the host display's scale; a window moved to a screen with another density reports its own scale in `state()?.scaleFactor`.
 
 ## Right to left
 
-When the device language is written right to left (Arabic, Hebrew, Persian, ...), NSH lays the app out right to left. Rows run from the right, logical style properties use their right-to-left sides, text aligns right and native widgets mirror. The layout direction follows the user's language by itself. A view's `direction` style (`"ltr"`, `"rtl"` or `"inherit"`; `.direction(LayoutDirection::..)` in Rust) sets the direction of its subtree. On the root view it sets the app's.
+When the device language is written right to left (Arabic, Hebrew, Persian, ...), NSH lays the app out right to left: rows run from the right, the logical style properties take their right-to-left sides, text aligns to the right, and native widgets mirror. The layout direction follows the user's language by itself. A view's `direction` style (`"ltr"`, `"rtl"` or `"inherit"`; `.direction(LayoutDirection::..)` in Rust) sets the direction of its subtree; on the root view it sets the app's.
 
-Changes apply at once, without restarting the app. The demo on this page toggles the `direction` style.
+Changes apply at once, without restarting the app; the demo on this page toggles the `direction` style.
 
 Write layouts that work both ways with the logical properties: in Rust `ms` / `me` and `ps` / `pe` (Tailwind's names), in TSX `marginStart` / `marginEnd`, `paddingStart` / `paddingEnd`, `start` / `end`, `borderTopStartRadius`, `textAlign: "start"` and so on, which mean left and right in left-to-right layouts and the reverse right to left. `left` and `right` (`marginLeft`, `paddingRight`, `left`, `textAlign: "left"`, ...) keep their sides in both, as in CSS. The `direction` style (`"inherit"`, `"ltr"`, `"rtl"`) overrides the direction for a subtree, for example to keep a phone number or a media player's controls left to right. The `rtl:` and `ltr:` Tailwind variants apply per direction.
 

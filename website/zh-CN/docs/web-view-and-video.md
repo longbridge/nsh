@@ -19,17 +19,17 @@ Web 视图和视频播放器把平台自己的网页引擎和媒体播放器作�
 页面播放的视频在每个平台上都在 Web 视图里播放，iPhone 也一样——否则 WebKit 会把第一帧交给系统的全屏播放器（页面上的 `playsinline` 拦不住）。页面自己的控件要求全屏时，仍能占满整个屏幕：在 Apple 的 Web 视图上，`element.requestFullscreen()` 会像在浏览器里一样接管屏幕。Android 的 Web 视图还没有自己的全屏，页面上的控件在那里不起作用。
 
 在 [macOS](./macos.md) 上，Web 视图没有自己的滚动视图：`scrollable={false}` 时，鼠标滚轮和触控板滚动的是它外面的应用滚动视图，
-而不是页面。页面仍可用键盘和它自己的脚本滚动。
+而不是页面；页面仍可用键盘和它自己的脚本滚动。
 
 在 [Linux](./linux.md) 上，Web 视图是绘制在它的视图之内的 WebKitGTK 页面：绘制在它上方的 NSH 内容（对话框、sheet）会遮住它，父视图会裁剪它。
 那里的 `webview` 权限同样作用于框架的导航（未获授权的主机的 `iframe` 保持空白），`scrollable: false` 让页面本身不滚动（页面中的元素仍可滚动）。
-应用需要装有 WebKitGTK 6.0。不带它构建的运行时显示中性的占位视图。视频能播放哪些格式取决于已安装的
-GStreamer 插件。不支持 `rate`（始终以 1× 播放），`onEnd` 只对不循环的视频触发。
+应用需要装有 WebKitGTK 6.0；不带它构建的运行时显示中性的占位视图。视频能播放哪些格式取决于已安装的
+GStreamer 插件；不支持 `rate`（始终以 1× 播放），`onEnd` 只对不循环的视频触发。
 
 在 [Windows](./windows.md) 上，Web 视图是位于子窗口中的 WebView2 控件，跟随它的视图移动：它会被父视图和圆角裁剪，但绘制在它上方的
-NSH 内容（对话框、sheet）会被它遮住。它需要 WebView2 Runtime（Windows 11 自带，Windows 10 上随 Edge 安装），否则显示占位视图。
+NSH 内容（对话框、sheet）会被它遮住。它需要 WebView2 Runtime（Windows 11 自带，Windows 10 上随 Edge 安装），否则显示占位视图；
 不支持 HTML 的 `baseUrl`、`scrollable` 和 `allowsBackForwardNavigationGestures`。视频是普通内容（像其他视图一样被裁剪、
-变换和遮挡），能播放哪些格式取决于已安装的 Media Foundation 解码器。`rate` 可用，没有封面图（poster），开启 `controls` 时控制栏始终显示。
+变换和遮挡），能播放哪些格式取决于已安装的 Media Foundation 解码器；`rate` 可用，没有封面图（poster），开启 `controls` 时控制栏始终显示。
 
 ## WebView
 
@@ -67,7 +67,7 @@ pub fn App() -> impl IntoElement {
 | `html="<!doctype html>…"` | 字符串形式的 HTML，代替 `src` 显示。 |
 | `html` 加上 `baseUrl="https://example.com/"` | 相对 URL 以 `baseUrl` 为基准解析的 HTML。 |
 
-在 Rust 中，`web_view(url)` 显示网页，`web_view_html(html, base_url)` 显示 HTML（`base_url` 是 `Option<&str>`）。URL 和 HTML 都可以是 signal 或闭包，它读取的值变化时页面会重新加载。改变 `src` 或 `html` 会加载新的页面。
+在 Rust 中，`web_view(url)` 显示网页，`web_view_html(html, base_url)` 显示 HTML（`base_url` 是 `Option<&str>`）；URL 和 HTML 都可以是 signal 或闭包，它读取的值变化时页面会重新加载。改变 `src` 或 `html` 会加载新的页面。
 
 ### 属性
 
@@ -194,7 +194,7 @@ pub fn browser() -> impl IntoElement {
 
 ### 页面与应用之间的消息
 
-页面通过 `window.nsh.postMessage(string)` 向应用发消息，应用收到 `on_message`（`onMessage`）。应用通过 ref 的 `post_message`（`postMessage(string)`）向页面发消息，页面在 `window` 上收到 `message` 事件。消息是字符串。结构化数据请发送 JSON。收到的消息要当作不可信的数据，检查后再处理：页面运行的任何脚本都能发消息，而在 Android 上，页面的每个 frame（包括 `iframe`）都有 `window.nsh`。
+页面通过 `window.nsh.postMessage(string)` 向应用发消息，应用收到 `on_message`（`onMessage`）。应用通过 ref 的 `post_message`（`postMessage(string)`）向页面发消息，页面在 `window` 上收到 `message` 事件。消息是字符串；结构化数据请发送 JSON。收到的消息要当作不可信的数据，检查后再处理：页面运行的任何脚本都能发消息，而在 Android 上，页面的每个 frame（包括 `iframe`）都有 `window.nsh`。
 
 ```tsx tabs
 import { mount, signal, Text, View, WebView, type WebViewRef } from "nsh";
@@ -284,7 +284,7 @@ pub fn App() -> impl IntoElement {
 }
 ```
 
-ref 的 `inject_java_script`（`injectJavaScript(script)`）可以随时在当前页面中运行代码。`injected_java_script` 和 `injected_java_script_before_content`（`injectedJavaScript`、`injectedJavaScriptBeforeContentLoaded`）在每次页面加载时运行，分别在页面自己的脚本之后或之前，适合用来安装钩子：
+ref 的 `inject_java_script`（`injectJavaScript(script)`）可以随时在当前页面中运行代码；`injected_java_script` 和 `injected_java_script_before_content`（`injectedJavaScript`、`injectedJavaScriptBeforeContentLoaded`）在每次页面加载时运行，分别在页面自己的脚本之后或之前，适合用来安装钩子：
 
 ```tsx tabs
 <WebView
@@ -305,7 +305,7 @@ web_view("https://example.com")
 ### 应用提供的资源
 
 页面可以从应用自己的 URL scheme 加载应用持有的字节（内存或磁盘中的图片、邮件的附件）。`url_scheme` 指定 scheme
-和应答其请求的 Rust 函数。页面像引用其他 URL 一样引用它的 URL（`<img src="app-image:42">`、
+和应答其请求的 Rust 函数；页面像引用其他 URL 一样引用它的 URL（`<img src="app-image:42">`、
 `fetch("app-image:42")`），网页引擎像加载任何子资源一样加载它们：字节原样传给页面，不经过页面的脚本。几十 MB
 的图片也能以读文件的速度加载。
 
@@ -326,10 +326,10 @@ fn serve(request: WebResourceRequest) {
 web_view_html(html, None).url_scheme("app-image", serve).flex_1()
 ```
 
-处理函数在平台的主线程上运行，因此应立即返回。请求只应答一次，可以当场或稍后、在任何线程上应答：`respond`
+处理函数在平台的主线程上运行，因此应立即返回；请求只应答一次，可以当场或稍后、在任何线程上应答：`respond`
 （字节和 MIME 类型）或 `fail`（图片的 `error` 事件、被拒绝的 `fetch`）。未应答就被丢弃的请求视为失败。页面不再需要
 它时（页面已跳转、网页视图已移除），`is_cancelled()` 变为 true，之后的应答会被丢弃。应答带有
-`Access-Control-Allow-Origin: *`，所以无论页面的来源是什么，页面的脚本都能 `fetch` 它们。Content-Security-Policy
+`Access-Control-Allow-Origin: *`，所以无论页面的来源是什么，页面的脚本都能 `fetch` 它们；Content-Security-Policy
 像其他来源一样写出 scheme 即可（`img-src app-image:`）。
 
 scheme 以字母开头，后接字母、数字、`+`、`-` 或 `.`，且不能是 Web 或系统的 scheme（`http`、`https`、`file`、
@@ -356,10 +356,10 @@ fn open(web: &ElementRef, token: &str) {
 ```
 
 - 只有页面自身的请求带这些请求头：它的图片、脚本等子资源不带，之后的导航和 `reload()` 也不带，所以凭据不会发给页面用到的其他主机。页面再次需要它时（点链接、重新加载），用 `load` 再加载一次，并为那次请求生成新值（DPoP proof 与 URL 绑定）。
-- 之后页面的显示与 `src` 加载的一样。之后 `src` 属性一变，就改为加载那个页面。
-- 它的主机必须是 `webview.hosts` 允许的（[`webview`](./sandbox-and-capabilities.md#webview)），与 `src` 相同。否则什么也不加载，核心会在日志里说明要添加哪个主机。
+- 之后页面的显示与 `src` 加载的一样；之后 `src` 属性一变，就改为加载那个页面。
+- 它的主机必须是 `webview.hosts` 允许的（[`webview`](./sandbox-and-capabilities.md#webview)），与 `src` 相同；否则什么也不加载，核心会在日志里说明要添加哪个主机。
 - 请求头的名字不是 HTTP token、或值里有换行时，抛出 `TypeError`（`WebLoad::new` 返回 `None`），一个请求头不能借此开始另一个。NSH 的日志只写请求头的名字，从不写值。
-- macOS、iOS、Mac Catalyst、Android、Windows、Linux 和 GPUI 后端会发送这些请求头。浏览器后端做不到（iframe 无法设置请求头），调用不做任何事。
+- macOS、iOS、Mac Catalyst、Android、Windows、Linux 和 GPUI 后端会发送这些请求头；浏览器后端做不到（iframe 无法设置请求头），调用不做任何事。
 
 ### 像用户一样输入
 
@@ -397,7 +397,7 @@ fn search(web: &ElementRef) {
 
 和点击一样，`sendInput` 会把键盘焦点交给网页视图，应用自己的 `Input` 随之失去焦点。页面按自己的节奏处理输入：点击的事件在下一次调用开始时可能仍在途中，所以点击后先等它生效（大约一帧）再输入。目前由 macOS 投递这些输入，其他平台暂时忽略。
 
-在提供依赖它的功能之前，先确认它在当前环境下可用：`web_input_available()`（`WebView.inputAvailable()`）只有在平台会投递输入、并且应用拥有 `webview.input` 授权时才得到 `true`。在忽略这个调用的平台上，或者应用没有这项授权时，结果都是 `false`。
+在提供依赖它的功能之前，先确认它在当前环境下可用：`web_input_available()`（`WebView.inputAvailable()`）只有在平台会投递输入、并且应用拥有 `webview.input` 授权时才得到 `true`；在忽略这个调用的平台上，或者应用没有这项授权时，结果都是 `false`。
 
 ```tsx tabs
 import { signal, WebView } from "nsh";
@@ -427,7 +427,7 @@ spawn(async move { input.set(web_input_available().await) });
 web_view("https://example.com/preview").incognito(true).flex_1()
 ```
 
-`incognito` 在网页视图创建时读取，所以在 Rust 里它接收一个值。在 TSX 里之后再改它，网页视图保留原来的存储并打印一条警告。
+`incognito` 在网页视图创建时读取，所以在 Rust 里它接收一个值；在 TSX 里之后再改它，网页视图保留原来的存储并打印一条警告。
 要切换，就显示一个新的网页视图。各平台这样保存它的存储：
 
 | 平台 | incognito 网页视图的存储 |
@@ -450,7 +450,7 @@ web_view("https://example.com/preview").incognito(true).flex_1()
 }
 ```
 
-检查覆盖网页视图的 `src` 以及页面发起的每一次顶层导航（链接、重定向、修改 `location`）。它在平台询问能否继续导航时由原生决定。页面自己的子资源（脚本、图片、iframe）属于网页内容自身的事情，不做检查。`*.example.com` 只匹配子域名。要包括裸域名，还需列出 `example.com`。没有 `"capabilities"` 键的应用可以显示任何页面。见[沙箱与能力声明](./sandbox-and-capabilities.md)。
+检查覆盖网页视图的 `src` 以及页面发起的每一次顶层导航（链接、重定向、修改 `location`）；它在平台询问能否继续导航时由原生决定。页面自己的子资源（脚本、图片、iframe）属于网页内容自身的事情，不做检查。`*.example.com` 只匹配子域名；要包括裸域名，还需列出 `example.com`。没有 `"capabilities"` 键的应用可以显示任何页面。见[沙箱与能力声明](./sandbox-and-capabilities.md)。
 
 ### 没有网页引擎时
 
@@ -493,7 +493,7 @@ function Preview(props: { url: string }) {
 
 ### 页面的进程结束时
 
-网页视图的页面运行在单独的进程里，这个进程可能在应用运行时结束：它崩溃了，或系统回收了它的内存。应用继续运行，网页视图不再显示页面。它的
+网页视图的页面运行在单独的进程里，这个进程可能在应用运行时结束：它崩溃了，或系统回收了它的内存。应用继续运行，网页视图不再显示页面；它的
 `onError` 触发，`code` 为 `"ERR_NSH_WEBVIEW_TERMINATED"`（Rust 中为 `.on_process_terminated`，参数为消息）。ref 的 `reload()`、
 `load()` 或新的 `src` / `html` 会重新显示页面（Android 会为此新建一个 WebView）。iOS、macOS、Linux 和 Android 会报告它。
 
@@ -601,7 +601,7 @@ pub fn player() -> impl IntoElement {
 
 播放由属性控制：用 signal 设置 `paused`、`muted`、`volume` 和 `rate`，播放器随之变化。已播放到结尾的视频，取消暂停后从头再播。ref 提供 `seek(seconds)`。
 
-在 Rust 中，`video(url)` 创建播放器（URL 可以是值、signal 或闭包），每个属性是一个蛇形命名的构建方法（`paused`、`repeat(true)`、`object_fit(ResizeMode::Contain)`，`progressUpdateInterval` 对应 `progress_interval`）。`on_load` 收到 `VideoInfo`（`duration`、`size`），`on_progress` 收到 `VideoProgress`（`current_time`、`duration`），`on_buffer` 收到 `bool`。
+在 Rust 中，`video(url)` 创建播放器（URL 可以是值、signal 或闭包），每个属性是一个蛇形命名的构建方法（`paused`、`repeat(true)`、`object_fit(ResizeMode::Contain)`，`progressUpdateInterval` 对应 `progress_interval`）；`on_load` 收到 `VideoInfo`（`duration`、`size`），`on_progress` 收到 `VideoProgress`（`current_time`、`duration`），`on_buffer` 收到 `bool`。
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
@@ -624,7 +624,7 @@ pub fn player() -> impl IntoElement {
 | `onEnd` | | 播放到结尾。 |
 | `onError` | `{ message }` | 加载或播放失败。 |
 
-设置 `controls` 时，平台会绘制自己的播放按钮、进度条和全屏按钮。不设置时，用视图在视频上方或下方画你自己的控件。由于视频是布局中的原生视图，覆盖层可以自然地叠在上面：
+设置 `controls` 时，平台会绘制自己的播放按钮、进度条和全屏按钮。不设置时，用视图在视频上方或下方画你自己的控件；由于视频是布局中的原生视图，覆盖层可以自然地叠在上面：
 
 ```tsx tabs
 <View style={{ height: 220 }}>

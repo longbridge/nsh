@@ -7,13 +7,7 @@ demo: el-split-view
 
 # SplitView
 
-分栏视图把应用的导航分成几栏显示：侧边栏（分区或列表）、可选的内容栏（侧边栏所选内容中的条目）和详情栏。每一栏都是一个独立的 [`NavStack`](./nav-stack.md)，因此每一栏保留自己的页面，各自推入和弹出。
-
-- **iOS、iPadOS 和 Mac Catalyst**：各栏放在 `UISplitViewController` 里。iPadOS 26 上侧边栏浮在内容之上，从边缘轻扫或点系统的侧边栏按钮即可呼出。窗口旋转或改变大小时，由系统重新排列各栏。
-- **其他平台**：各栏并排显示，拖动边缘调整宽度。
-- **空间紧凑时**（手机、窄窗口）：一次只显示一栏。
-
-显示哪些栏由应用通过 `columnVisibility` 决定。
+分栏视图把应用的导航分成几栏显示：侧边栏（分区或列表）、可选的内容栏（侧边栏所选内容中的条目）和详情栏。每一栏都是一个独立的 [`NavStack`](./nav-stack.md)，因此每一栏保留自己的页面，各自推入和弹出。在 iOS、iPadOS 和 Mac Catalyst 上，这些栏属于 `UISplitViewController`：在 iPadOS 26 上侧边栏浮在内容之上，从边缘轻扫或按系统的侧边栏按钮即可呼出，窗口旋转和改变大小时由系统安排各栏。其他平台上各栏并排显示，拖动边缘即可调整宽度。空间紧凑时（手机、窄窗口）一次只显示一栏。显示哪些栏由 `columnVisibility` 决定，这个值由应用持有。
 
 ```tsx tabs
 import { horizontalSizeClass, mount, signal, Text, View } from "nsh";
@@ -117,7 +111,7 @@ fn mail() -> impl IntoElement {
 }
 ```
 
-`SplitView` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh_base::split_view()`，以及 `ColumnVisibility`。在 Rust 中每一栏是一个接收它的栈的设置方法（`.sidebar(..)`、`.content(..)`、`.detail(..)`）。在 TSX 中每一栏是一个接收 `<NavStack>` 的属性。
+`SplitView` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh_base::split_view()`，以及 `ColumnVisibility`。在 Rust 中每一栏是一个接收它的栈的设置方法（`.sidebar(..)`、`.content(..)`、`.detail(..)`）；在 TSX 中每一栏是一个接收 `<NavStack>` 的属性。
 
 ## 栏
 
@@ -125,7 +119,7 @@ fn mail() -> impl IntoElement {
 - **`content`**：三栏中间的一栏，侧边栏所选内容中的条目（例如一个邮箱里的邮件）。没有它时视图只有两栏。
 - **`detail`**：最后一栏，显示其他栏选中的内容。
 
-每一栏都是一个 `NavStack`：它的页面、标题栏、返回按钮和状态都属于这个栈，在一栏中推入或弹出页面不会影响其他栏。各栏的宽度由平台决定：在 iOS 上由 UIKit 决定，并随窗口变化。其他平台上初始采用 iPadOS 的默认值，侧边栏和内容栏宽 320 点，详情栏占据其余空间，用户可拖动栏边调整。外观属于应用：各栏的内容和背景（包括栏之间的分隔线）都由页面绘制。
+每一栏都是一个 `NavStack`：它的页面、标题栏、返回按钮和状态都属于这个栈，在一栏中推入或弹出页面不会影响其他栏。各栏的宽度由平台决定：在 iOS 上由 UIKit 决定，并随窗口变化；其他平台上初始采用 iPadOS 的默认值，侧边栏和内容栏宽 320 点，详情栏占据其余空间，用户可拖动栏边调整。外观属于应用：各栏的内容和背景（包括栏之间的分隔线）都由页面绘制。
 
 ## 显示哪些栏
 
@@ -136,13 +130,13 @@ fn mail() -> impl IntoElement {
 | `"doubleColumn"` | 内容栏和详情栏；只有两栏时两栏都显示 | 内容栏；只有两栏时为侧边栏 |
 | `"detailOnly"` | 详情栏 | 详情栏 |
 
-不设置 `columnVisibility` 时，视图自己保存这个值，初始为 `"automatic"`。设置后由应用持有这个值，并在 `onColumnVisibilityChange({ columnVisibility })` 中更新它。这个事件报告用户或系统改为显示的栏：iPadOS 的侧边栏按钮、从边缘轻扫、在覆盖于详情栏之上的栏旁边按下、在手机上从一栏的第一页返回。应用保留另一个值时，视图会重新显示应用的值。在 `"automatic"` 下视图保留用户显示的栏。窗口旋转或改变大小时 iPadOS 自行做出的改变属于 `"automatic"` 本身，因此报告的是用户做出的改变。
+不设置 `columnVisibility` 时，视图自己保存这个值，初始为 `"automatic"`。设置后由应用持有这个值，并在 `onColumnVisibilityChange({ columnVisibility })` 中更新它；这个事件报告用户或系统改为显示的栏：iPadOS 的侧边栏按钮、从边缘轻扫、在覆盖于详情栏之上的栏旁边按下、在手机上从一栏的第一页返回。应用保留另一个值时，视图会重新显示应用的值。在 `"automatic"` 下视图保留用户显示的栏；窗口旋转或改变大小时 iPadOS 自行做出的改变属于 `"automatic"` 本身，因此报告的是用户做出的改变。
 
 ## 手机与窄窗口
 
 窗口在水平方向紧凑时（[`horizontalSizeClass()`](../modules/nsh.md#horizontalsizeclass--verticalsizeclass) 为 `"compact"`，Rust 中为 `horizontal_size_class()`）只显示一栏，即 `columnVisibility` 显示的第一栏。选中某项后要把详情栏显示到前面，就在这时设置 `"detailOnly"`，就像上面的例子所做的那样。
 
-- **iOS、iPadOS 和 Mac Catalyst**：窗口在水平方向紧凑时（iPhone、侧拉（Slide Over）中的 iPad，或窄的分屏（Split View）和台前调度（Stage Manager）窗口），分栏视图收起为一个由各栏页面组成的导航栈：先是侧边栏的页面，再按 `columnVisibility` 依次是内容栏和详情栏的页面，栏之间使用系统的返回按钮和轻扫返回。在任何一栏推入的页面都会推入到这里。从一栏的第一页返回会显示前一栏，并通过 `onColumnVisibilityChange` 报告（三栏时 `"detailOnly"` 变为 `"doubleColumn"`，两栏时变为 `"all"`）。离开的页面若不是所在栏的第一页，就像在普通的栈中一样被弹出。窗口重新变宽时，每一栏取回自己的页面。
+- **iOS、iPadOS 和 Mac Catalyst**：窗口在水平方向紧凑时（iPhone、侧拉（Slide Over）中的 iPad，或窄的分屏（Split View）和台前调度（Stage Manager）窗口），分栏视图收起为一个由各栏页面组成的导航栈：先是侧边栏的页面，再按 `columnVisibility` 依次是内容栏和详情栏的页面，栏之间使用系统的返回按钮和轻扫返回。在任何一栏推入的页面都会推入到这里。从一栏的第一页返回会显示前一栏，并通过 `onColumnVisibilityChange` 报告（三栏时 `"detailOnly"` 变为 `"doubleColumn"`，两栏时变为 `"all"`）；离开的页面若不是所在栏的第一页，就像在普通的栈中一样被弹出。窗口重新变宽时，每一栏取回自己的页面。
 - **Android、桌面平台和 Web**：窗口在水平方向紧凑时（窗口宽度小于 600 点），这一栏单独占满全部空间。返回前一栏的方式由应用提供：栏标题栏中的返回按钮，或 Android 上的 [`BackHandler`](../modules/nsh-mobile.md#backhandler)。
 
 在所有平台上，每一栏在两种呈现方式之间都保留自己的页面和状态。

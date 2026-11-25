@@ -7,12 +7,12 @@ group: ui
 
 # Accessibility
 
-NSH renders with native views. Assistive technologies, such as VoiceOver on iOS and Mac Catalyst, TalkBack on Android, Switch Control and Voice Control, see your app's real view hierarchy. You add what they cannot infer: what an element is, what it says, what state it is in and what it can do. Every element accepts the methods (Rust) and props (TSX) below.
+NSH renders with native views, so the platforms' assistive technologies (VoiceOver on iOS and Mac Catalyst, TalkBack on Android, Switch Control, Voice Control, ...) see your app's real view hierarchy. What you add are the descriptions those technologies cannot infer: what an element is, what it says, what state it is in and what it can do. Every element accepts the methods (Rust) and props (TSX) below.
 
 ## What you get without doing anything
 
 - **Text is read.** A text element is an accessibility element whose label is its text. A view without a label is read as the texts inside it.
-- **Links and inline views inside text are reached one by one.** With VoiceOver on iOS and macOS, each pressable span of a text (a nested `<Text onPress>`, a Markdown link) is a separate link. Activating it presses the span, and the Links rotor moves between them. Each inline view inside a text is a separate element, read in its place in the sentence. On iOS, a text you give a label, a role or a press of its own stays one element.
+- **Links and inline views inside text are reached one by one.** With VoiceOver on iOS and macOS, each span of a text that takes presses (a nested `<Text onPress>`, a Markdown link) is a link of its own that activating presses, and the Links rotor moves between them; each inline view inside a text is an element of its own, read in its place in the sentence. On iOS, a text you give a label, a role or a press of its own stays one element.
 - **Pressable views are elements.** A view with a press or long press handler (`.on_press`, `onPress`) is an accessibility element by default, and activating it (double tap with VoiceOver or TalkBack) presses it.
 - **Inputs are text fields**, with their placeholder, value and keyboard.
 - **Text follows the user's size setting.** See [Text size](#text-size).
@@ -141,20 +141,13 @@ view()
     )
 ```
 
-The state is `AccessibilityState { disabled, selected, checked: Option<Checked>, busy, expanded, pressed: Option<Checked>, current: Option<AccessibilityCurrent>, has_popup, invalid }` in Rust and `{ disabled?, selected?, checked?: boolean | "mixed", busy?, expanded?, pressed?: boolean | "mixed", current?: boolean | "page" | "step" | "location" | "date" | "time", hasPopup?, invalid? }` in TSX.
-
-- `pressed` makes a button a toggle button (ARIA's `aria-pressed`).
-- `current` marks the current item of a set, such as a pagination's page or a wizard's step (ARIA's `aria-current`).
-- `hasPopup` marks the trigger of a popup, menu or list (ARIA's `aria-haspopup`). Its `expanded` says whether the popup is open. An `expanded` element without `hasPopup` is a disclosure that shows its content in place. `Popover`, `Menu`, `HoverCard`, `Select`, `Combobox` and `DatePicker` set `hasPopup` on their triggers.
-- `invalid` marks content that fails the app's checks, such as a rejected field or an empty required select (ARIA's `aria-invalid`). Screen readers read it with the element, and `aria-invalid:` classes style it.
-
-Disabling the view also sets `disabled` (`.disabled(..)`, `disabled`). `accessibilityValue` with `min`, `max` and `now` is read as a percentage; with `text` it is read as given ("3 of 10", "Medium").
+The state is `AccessibilityState { disabled, selected, checked: Option<Checked>, busy, expanded, pressed: Option<Checked>, current: Option<AccessibilityCurrent>, has_popup, invalid }` in Rust and `{ disabled?, selected?, checked?: boolean | "mixed", busy?, expanded?, pressed?: boolean | "mixed", current?: boolean | "page" | "step" | "location" | "date" | "time", hasPopup?, invalid? }` in TSX. `pressed` makes a button a toggle button (ARIA's `aria-pressed`); `current` marks the current item of a set (ARIA's `aria-current`): a pagination's page, a wizard's step; `hasPopup` marks the trigger of a popup, a menu or a list (ARIA's `aria-haspopup`), whose `expanded` says whether it is open, where an `expanded` element without it is a disclosure that shows its content in place (`Popover`, `Menu`, `HoverCard`, `Select`, `Combobox` and `DatePicker` set it on their triggers); `invalid` marks content that does not pass the app's checks (ARIA's `aria-invalid`): a field whose text was rejected, a required select left empty. Screen readers read it with the element, and `aria-invalid:` classes style it. `disabled` is also implied by disabling the view (`.disabled(..)`, `disabled`). `accessibilityValue` with `min`, `max` and `now` is read as a percentage; with `text` it is read as given ("3 of 10", "Medium").
 
 On iOS and Android, NSH supplies the words read for the states the system has no words of its own for (checked, mixed, expanded, collapsed, current, invalid). They are in the language the app's text shows in ([I18n](./i18n.md)), including one `setLocale` picks, and change with it: English, Chinese (simplified and traditional), Japanese or Korean. Other platforms read the states in the screen reader's own words.
 
 ### The active item of a focused element
 
-Some controls keep the keyboard focus while the user moves through items inside them. A combo box's field stays focused while the arrow keys walk its list. A list moves a cursor row. `accessibilityActiveDescendant` names the item that is active now. `accessibilityControls` names the element the control drives. With both set, a screen reader reads each item as it becomes active, and the focus stays where the user types. Both take a ref of the named element: a `ViewRef` in TSX, an `ElementRef` in Rust. The element may render later than the control, like a virtualized list's rows. While it is not on screen, the relation names nothing.
+A control can keep the keyboard focus while the user moves through items inside it: a combo box's field stays focused as the arrow keys walk its list, a list moves a cursor row. `accessibilityActiveDescendant` names the item that is active now, and `accessibilityControls` names the element the control drives, so a screen reader reads each item as it becomes active while the focus stays where the user types. Both take a ref of the element named (a `ViewRef` in TSX, an `ElementRef` in Rust), which may be rendered later than the control, as a virtualized list's rows are; while the element named is not on screen, the relation names nothing.
 
 ```tsx tabs
 // A list that keeps the focus and moves a cursor row.
@@ -211,7 +204,7 @@ On the web these are `aria-activedescendant` and `aria-controls`; on macOS Voice
 
 ### An element that describes another
 
-A form often shows a field's error or help text on a separate line. Set `accessibilityDescribedBy` on the field to name that line. A screen reader then reads the line after the field's name each time the field gets focus, and reads the new text when the line changes. Like `accessibilityControls`, it takes a ref of the named element. The element's labels and texts replace the field's own `accessibilityDescription`. That description comes back while the named element is not on screen. You can make the line `accessibilityHidden` so it is read only once, with its field; a named element still reads its text. Every platform reads it where it reads a description. On the web it is `aria-describedby`.
+A form shows a field's error or help in a line of its own, apart from the field. `accessibilityDescribedBy` names that line on the field, so a screen reader reads its text after the field's name each time the focus comes to it, and reads the new text when the line changes. It takes a ref of the element named, as `accessibilityControls` does; its labels and texts are the field's description, in the place of the field's own `accessibilityDescription`, which comes back while the element named is not on screen. The line may be `accessibilityHidden`, so that it is read once, with its field: an element named reads its text all the same. Every platform reads it where it reads a description; on the web it is `aria-describedby`.
 
 ```tsx tabs
 // A field and the error line under it.
@@ -249,7 +242,7 @@ view()
 
 ## Actions
 
-A pressable view supports activation already. For anything else, declare actions with `accessibilityActions` and handle them with `onAccessibilityAction`. A Rust component hears the performed action's name with `.on_accessibility_action(|name: &str| ..)`:
+A pressable view supports activation already. For anything else, declare actions with `accessibilityActions` and handle them with `onAccessibilityAction`; a Rust component hears the performed action's name with `.on_accessibility_action(|name: &str| ..)`:
 
 ```tsx
 function Quantity() {
@@ -356,7 +349,7 @@ Hide what adds nothing: decorative images, dividers, an icon next to a text that
 <Image src={decoration} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
 ```
 
-`accessibilityElementsHidden` (iOS's name) and `importantForAccessibility="no-hide-descendants"` (Android's) both hide the subtree on both platforms. Setting both is harmless.
+`accessibilityElementsHidden` (iOS's name) and `importantForAccessibility="no-hide-descendants"` (Android's) both hide the subtree on both platforms; setting both is harmless.
 
 ## The screen reader and the user's settings
 
@@ -419,7 +412,7 @@ fn upload() -> impl IntoElement {
 
 Announce changes the user would otherwise miss: a background save finishing, an error appearing away from the focus, a timer ending. `accessibilityLiveRegion: "polite"` on a view has the screen reader announce its changes by itself — TalkBack on Android, VoiceOver on macOS, `aria-live` on the web, a live region on Windows (`"assertive"` reads right away instead of when the user is idle).
 
-On macOS and the web, the screen reader reads an alert (`.role(AccessibilityRole::Alert)`, `role="alert"`) by itself. It reads the label, or else the texts inside, when the alert appears and again when its content changes. It interrupts what the screen reader was saying. On these platforms an error with the alert role needs no separate announcement. On macOS, the same text announced in the same update is read once. An alert that an update removes and recreates with the same text (moved to another parent) is not read again. On other platforms, announce the alert as well.
+An alert (`.role(AccessibilityRole::Alert)`, `role="alert"`) is read by itself on macOS and the web: its label, or else the texts inside it, as it appears and again when its content changes, ahead of what the screen reader was saying. An error shown with the role needs no announcement of its own there; on macOS the same text announced in the same update is read once, and an alert the update takes down and makes again with the same text (moved to another parent) is not read again. On the other platforms, announce it as well.
 
 ## Text size
 

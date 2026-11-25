@@ -8,13 +8,13 @@ demo: guide-scrolling
 
 # Scrolling
 
-The scroll view (`scroll()` in Rust, `<Scroll>` in TSX) is the platform's own scroll view: UIScrollView on iOS and ScrollView on Android. Flings, bounces, the scroll indicator, pull to refresh and snapping are all native. Your code receives scroll events. It can also bind the offset to an [animated value](./animation.md#animated-values) for effects that follow the finger frame by frame.
+The scroll view (`scroll()` in Rust, `<Scroll>` in TSX) is the platform's own scroll view (UIScrollView on iOS, a ScrollView on Android): flings, bounces, the scroll indicator and pull to refresh are native, and so is snapping. Your code hears about scrolling through events and can bind the offset to an [animated value](./animation.md#animated-values) for effects that follow the finger frame by frame.
 
 Use a scroll view for content of a known, moderate size: a settings page, a form, an article, a row of chips. For long or unbounded data use a [list](./lists.md), which recycles rows and accepts the same scrolling props.
 
 ## A scroll view
 
-A scroll view is the viewport. Its children are the content. The viewport needs a size from its parent (usually `flex: 1`, `.flex_1()`), and the content is laid out at the viewport's width (vertical) or height (horizontal) and as long as it needs to be.
+A scroll view is the viewport; its children are the content. The viewport needs a size from its parent (usually `flex: 1`, `.flex_1()`), and the content is laid out at the viewport's width (vertical) or height (horizontal) and as long as it needs to be.
 
 ```tsx tabs
 import { mount, Scroll, Text, View } from "nsh";
@@ -54,7 +54,7 @@ pub fn App() -> impl IntoElement {
 }
 ```
 
-The child view above is the scroll view's content container. In TSX, `contentStyle` (or `contentClass`) makes one for you, wrapping the children in a view with that style, which scrolls with them. `flexGrow: 1` (`.flex_grow(1.0)`) makes the content at least as tall as the viewport, so a short content can be centered and a long one still scrolls:
+The child view above is the scroll view's content container; in TSX, `contentStyle` (or `contentClass`) makes one for you, wrapping the children in a view with that style, which scrolls with them. `flexGrow: 1` (`.flex_grow(1.0)`) makes the content at least as tall as the viewport, so a short content can be centered and a long one still scrolls:
 
 ```tsx tabs
 <Scroll style={{ flex: 1 }} contentStyle={{ flexGrow: 1, justifyContent: "center", padding: 16 }}>
@@ -97,7 +97,7 @@ scroll().horizontal().scrollbar(false).child(
 
 Right to left (see [Device and environment](./device-and-environment.md#right-to-left)), a horizontal scroll view starts at its right end and keeps its distance from it.
 
-Fingers drag scroll views. On the desktop (macOS, Windows, Linux) and in the browser, the mouse scrolls as in desktop apps: with its wheel (Shift + wheel scrolls horizontally), the touchpad, the keyboard and the scroll indicator, which shows while the mouse moves over the view and drags as a scroll bar. Mouse drags go to the app's pans, responders and text selection. Touchscreens on desktops drag scroll views as fingers do. `scrollbar={false}` hides the indicator on either axis: a mouse without a horizontal wheel moves a horizontal view with Shift + wheel, with the wheel where nothing around it scrolls vertically, and with the keyboard.
+Fingers drag scroll views. On the desktop (macOS, Windows, Linux) and in the browser, the mouse scrolls as in desktop apps: with its wheel (Shift + wheel scrolls horizontally), the touchpad, the keyboard and the scroll indicator, which shows while the mouse moves over the view and drags as a scroll bar; mouse drags go to the app's pans, responders and text selection. Touchscreens on desktops drag scroll views as fingers do. `scrollbar={false}` hides the indicator on either axis: a mouse without a horizontal wheel moves a horizontal view with Shift + wheel, with the wheel where nothing around it scrolls vertically, and with the keyboard.
 
 ### Behavior props
 
@@ -116,7 +116,7 @@ Fingers drag scroll views. On the desktop (macOS, Windows, Linux) and in the bro
 
 ## Paging and snapping
 
-Snapping is decided natively when the finger lifts, from the release offset, the projected glide and the velocity. The scroll view then glides to the chosen stop, with none of your code involved.
+Snapping is decided natively when the finger lifts, from the release offset, the projected glide and the velocity; the scroll view then glides to the chosen stop, with none of your code involved.
 
 | Prop | Rust | Type | Description |
 |---|---|---|---|
@@ -384,11 +384,11 @@ view()
     .child(view().absolute().top_0().left_0().right_0().h(px(56.0)).bind_translate_y(&header.mul(-1.0)))
 ```
 
-Interpolations clamp outside their input range by default, so pulling past the top (a negative offset) keeps the effect at its end. Pass `extrapolate: "extend"` (`interpolate_with(.., Interpolation::extrapolate(Extrapolate::Extend))` in Rust) for a stretchy header that grows as you pull.
+Interpolations clamp outside their input range by default, so pulling past the top (a negative offset) keeps the effect at its end; pass `extrapolate: "extend"` (`interpolate_with(.., Interpolation::extrapolate(Extrapolate::Extend))` in Rust) for a stretchy header that grows as you pull.
 
 ## Pull to refresh
 
-`refreshing` and `onRefresh` (`.refreshing(..)` and `.on_refresh(..)`) add the platform's pull-to-refresh control. The control shows while `refreshing` is true. Set it in `onRefresh` and clear it when the work is done.
+`refreshing` and `onRefresh` (`.refreshing(..)` and `.on_refresh(..)`) add the platform's pull-to-refresh control. The control shows while `refreshing` is true; set it in `onRefresh` and clear it when the work is done.
 
 ```tsx tabs
 const refreshing = signal(false);
@@ -419,7 +419,7 @@ let reload = move || {
 scroll().flex_1().refreshing(refreshing).on_refresh(reload).child(content)
 ```
 
-On iOS the control is UIRefreshControl. In the Mac idiom of Mac Catalyst, NSH shows its own spinner with the same behavior. Lists take the same props. On the desktop and in the browser the pull is a touchscreen's (or a macOS trackpad's, which pulls past the top) gesture, since the mouse scrolls without dragging. Offer another way to refresh there, such as a button or a keyboard shortcut.
+On iOS the control is UIRefreshControl; in the Mac idiom of Mac Catalyst, NSH shows its own spinner with the same behavior. Lists take the same props. On the desktop and in the browser the pull is a touchscreen's (or a macOS trackpad's, which pulls past the top) gesture, since the mouse scrolls without dragging; offer another way to refresh there, such as a button or a keyboard shortcut.
 
 ### An indicator of your own
 
@@ -502,7 +502,7 @@ A scroll view (lists keep a scale of 1) zooms when its maximum zoom scale is abo
 | `zoomable` | `.zoomable(..)` | `boolean` | `true` | The user can pinch to zoom. |
 | `centerContent` | `.center_content(..)` | `boolean` | `false` | Content smaller than the viewport (zoomed out) is centered. |
 
-The scroll event reports the zoom scale and the zoomed content size. From code, `zoom_to(scale, center, animated)` / `zoomTo({ scale, x, y, animated })` zooms so that the content point (in unzoomed points) lands in the middle of the viewport. Double tap to zoom is a press handler calling it:
+The scroll event reports the zoom scale and the zoomed content size. From code, `zoom_to(scale, center, animated)` / `zoomTo({ scale, x, y, animated })` zooms so that the content point (in unzoomed points) lands in the middle of the viewport; double tap to zoom is a press handler calling it:
 
 ```tsx tabs
 import { Image, mount, Scroll, type ScrollRef, signal } from "nsh";
@@ -583,7 +583,7 @@ scroll().flex_1().element_ref(&scroller).child(content)
 view().on_press(move || scroller.scroll_to(point(px(0.0), px(0.0)), true))
 ```
 
-Lists add `scrollToIndex`, `scrollToOffset` and `scrollToEnd`. See [Lists](./lists.md#scrolling-from-code).
+Lists add `scrollToIndex`, `scrollToOffset` and `scrollToEnd`; see [Lists](./lists.md#scrolling-from-code).
 
 ### Revealing a view
 
@@ -627,14 +627,14 @@ Two props decide how scrolling and taps interact with the keyboard:
 `keyboardShouldPersistTaps`:
 
 - `"never"`: a tap outside the focused input only hides the keyboard, and buttons get the next tap. The user taps once to dismiss, again to press. Nothing inside acts on that tap: no `onPress` (`onPressIn` / `onPressOut` and `active:` styles still show while the finger is down), a responder's touch ends with `onResponderTerminate` instead of `onResponderRelease`, and native views such as a web view get no click. Only taps are held back and hide it: long presses (`onLongPress`, context menus), drags and scrolling work as they do with the keyboard down.
-- `"handled"`: a tap on something that handles it (a button) goes through and the keyboard stays. A tap on empty space hides it. Usually the right choice for forms.
+- `"handled"`: a tap on something that handles it (a button) goes through and the keyboard stays; a tap on empty space hides it. Usually the right choice for forms.
 - `"always"`: the keyboard stays up through every tap.
 
 Both are decided natively when the tap or drag happens, without waiting for your code. To hide the keyboard from code, call `dismiss_keyboard()` in Rust or `Keyboard.dismiss()` from [`nsh`](../modules/nsh.md#keyboard-and-keyboardframe) in TSX.
 
 ## Views floating over a scroll view
 
-A toolbar or a floating button placed over the top or bottom of a scroll view can name that scroll view, so the platform treats it as it treats a bar there. From iOS 26 the scroll view's edge effect then takes its shape from what the view shows: the content scrolled under it fades out around its buttons. The edge effect is iOS 26's. Where a screen needs the same separation on other versions and platforms, a fade the app draws under the view gives it. `contentInset` keeps room for the view at that end of the content.
+A toolbar or a floating button placed over the top or bottom of a scroll view can name that scroll view, so the platform treats it as it treats a bar there. From iOS 26 the scroll view's edge effect then takes its shape from what the view shows: the content scrolled under it fades out around its buttons. The edge effect is iOS 26's; where a screen needs the same separation on other versions and platforms, a fade the app draws under the view gives it. `contentInset` keeps room for the view at that end of the content.
 
 ```tsx
 const list = signal<ViewRef>();
@@ -654,7 +654,7 @@ In Rust, `.scroll_edge_element(Some(list), ScrollEdge::Bottom)` on the floating 
 
 ## Nested scroll views
 
-A horizontal scroll view inside a vertical one works as expected: each takes the drags along its own axis. Two scroll views on the same axis nest too (the inner one scrolls first). Responders that need the finger, such as a drawing canvas inside a scroll view, keep it from the scroll views around them: `.keep_touches(true)` in Rust, `true` returned from `onResponderGrant` in TSX. See [Touch and gestures](./touch-and-gestures.md#the-responder-system).
+A horizontal scroll view inside a vertical one works as expected: each takes the drags along its own axis. Two scroll views on the same axis nest too (the inner one scrolls first). Responders that need the finger, such as a drawing canvas inside a scroll view, keep it from the scroll views around them: `.keep_touches(true)` in Rust, `true` returned from `onResponderGrant` in TSX; see [Touch and gestures](./touch-and-gestures.md#the-responder-system).
 
 ## Related
 

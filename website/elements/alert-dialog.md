@@ -9,8 +9,8 @@ demo: el-alert-dialog
 
 `AlertDialog` shows the platform's own alert or action sheet: `UIAlertController` on iOS and Mac Catalyst, an
 `AlertDialog` (or a list dialog for an action sheet) on Android, and an alert in the platform's dialog look on the
-other platforms. `AlertDialog.show` returns a promise that resolves with `{ action }`, the `id` of the action the user chose. In Rust,
-`alert_dialog()`'s `.show()` returns a future. Every label comes from your app, in your app's language.
+other platforms. `AlertDialog.show` (`alert_dialog()`'s `.show()` in Rust) returns a promise (a future in Rust) that resolves with `{ action }`: the `id` of the action the user chose.
+Every label comes from the app, so an alert says what your app says, in its language.
 
 ```tsx tabs
 import { mount, signal, Text, View } from "nsh";
@@ -101,7 +101,7 @@ The result is `{ action }` (`AlertDialogResult`): the chosen action's `id`, or `
 without an action: a press outside it, Escape or the back button, where
 `closeOnBackdropPress` and `closeOnEscape` allow it. Without actions the promise rejects with a `TypeError` (an `Err`
 in Rust). In Rust, `nsh_base::alert_dialog()` sets the dialog up with a method per option and per action, in the order
-the actions show, and `.show()` shows it. Await its answer in a task (`spawn`).
+the actions show, and `.show()` shows it; await its answer in a task (`spawn`).
 
 ## Action sheets
 
@@ -186,7 +186,7 @@ fn share() {
   then `null`). The list dialog shows the `title`, or the `description` when the sheet has no title.
 - **macOS**: an `NSAlert`, a sheet of the window the user is in. While that window is out of sight (a tray app's
   hidden main window, the app hidden, the window minimized or off every screen), the alert shows on its own in front
-  of every window and takes the app's input until it is answered. The app goes on running meanwhile. Escape chooses
+  of every window and takes the app's input until it is answered; the app goes on running meanwhile. Escape chooses
   the `"cancel"` action.
   See [macOS](../docs/macos.md).
 - **Windows, Linux, GPUI and the web**: NSH draws the alert or action sheet in the platform's dialog look.

@@ -7,9 +7,7 @@ group: platforms
 
 # 嵌入现有应用
 
-现有原生应用可以在自己界面的一部分里显示 NSH 应用：一个页面、一个标签页，或原生工具栏下方的一块区域。这个现有应用称为**宿主**。宿主添加一个视图，像对待自己的其他视图一样安排位置和大小，再把应用加载进去。
-
-NSH 应用按视图大小布局，用平台原生视图渲染，和宿主的视图并排显示。视图销毁时，应用随之停止。每个视图运行独立的引擎，所以宿主可以同时显示多个 NSH 应用。
+现有原生应用可以在自己界面的一部分里显示 NSH 应用：一个页面、一个标签页，或原生工具栏下方的一块区域。宿主添加一个视图，像自己的其他视图一样决定它的位置和大小，再把应用加载进去。NSH 应用按视图大小布局，用平台自己的视图与宿主的视图并排渲染，视图销毁时应用停止。每个视图是独立的引擎，宿主可以同时显示多个。
 
 ## 选择方式
 
@@ -27,8 +25,8 @@ NSH 应用按视图大小布局，用平台原生视图渲染，和宿主的视�
 
 因此：
 
-- **Swift 或 Java/Kotlin 宿主加载 TSX。** 嵌入部分用 TSX 编写，用 `nsh build` 构建，把 bundle 加载进 `NshAppView` 或 `NshView`。签名包（`nsh publish`）可以不发版更新它。
-- **带 Rust 代码的宿主可以挂载 Rust 根组件**，即你的 crate 的根组件，不需要 JavaScript VM。同一个 `AppView` 也能加载 TSX bundle。
+- **Swift 或 Java/Kotlin 宿主加载 TSX。** 嵌入部分用 TSX 编写，用 `nsh build` 构建，把 bundle 加载进 `NshAppView` 或 `NshView`；签名包（`nsh publish`）可以不发版更新它。
+- **带 Rust 代码的宿主可以挂载 Rust 根组件**，即你的 crate 的根组件，不需要 JavaScript VM；同一个 `AppView` 也能加载 TSX bundle。
 - 桌面端的 `AppView` 都是 Rust API。用 Swift、C# 或 C++ 编写的桌面应用目前还没有对应的宿主视图。
 
 ## 移动端
@@ -36,7 +34,7 @@ NSH 应用按视图大小布局，用平台原生视图渲染，和宿主的视�
 ### iOS（Swift）
 
 1. 从 `dist/nsh/embed/ios` 获取 `NativeShell.xcframework`（发布用）和 `NativeShellDev.xcframework`（可连接 `nsh dev`），或在 NSH 源码中用 `cargo xtask ios-embed` 构建（[获取 framework](./ios.md#get-the-framework)）。
-2. 把 framework 加到应用 target，默认的静态版本选 `Do Not Embed`。Dev framework 只在 Debug 配置中链接（[加入 Xcode 项目](./ios.md#add-it-to-an-xcode-project)）。
+2. 把 framework 加到应用 target，默认的静态版本选 `Do Not Embed`；Dev framework 只在 Debug 配置中链接（[加入 Xcode 项目](./ios.md#add-it-to-an-xcode-project)）。
 3. 把 NSH 应用构建到应用的一个文件夹引用中：
 
    ```sh
@@ -69,7 +67,7 @@ NSH 应用按视图大小布局，用平台原生视图渲染，和宿主的视�
    }
    ```
 
-约束决定显示区域：把视图固定在屏幕的一部分，NSH 应用就只占这一部分。完整示例见 `examples/embed-ios`。视图的全部成员见 [iOS](./ios.md#nshappview)。
+约束决定显示区域：把视图固定在屏幕的一部分，NSH 应用就只占这一部分。完整示例见 `examples/embed-ios`；视图的全部成员见 [iOS](./ios.md#nshappview)。
 
 ### iOS（Rust）
 
@@ -133,7 +131,7 @@ fn show(container: &UIView) -> AppView {
    }
    ```
 
-布局参数决定区域。完整示例见 `examples/embed-android`。视图的全部方法见 [Android](./android.md#nshview)。AAR 运行 TSX。Rust 应用在 Android 上以 `nsh package --target android` 构建的 APK 发布。
+布局参数决定区域。完整示例见 `examples/embed-android`；视图的全部方法见 [Android](./android.md#nshview)。AAR 运行 TSX；Rust 应用在 Android 上以 `nsh package --target android` 构建的 APK 发布。
 
 ## 桌面端
 
@@ -177,7 +175,7 @@ view.load(Root::of::<my_app::App>().into());
 paned.set_end_child(Some(&view.widget())); // 任意 GTK 容器
 ```
 
-`view.widget()` 是 GTK widget。窗口关闭时停止该视图（[嵌入 GTK 应用](./linux.md#embedding-in-a-gtk-app)）。
+`view.widget()` 是 GTK widget；窗口关闭时停止该视图（[嵌入 GTK 应用](./linux.md#embedding-in-a-gtk-app)）。
 
 ### GPUI
 
@@ -201,7 +199,7 @@ view.load(Bundle::source(std::fs::read_to_string("app/bundle.js")?).into());
 
 - **与应用通信**：通过 `nsh/host` 在宿主与应用间传递启动参数、调用和事件（[iOS](./ios.md#talking-to-the-app)、[Android](./android.md#talking-to-the-app)）。
 - **原生组件**：宿主注册自己的视图（地图、图表）供应用使用（[原生组件](./native-components.md)）。
-- **主题**：宿主用自己的品牌 token 覆盖应用主题（[iOS](./ios.md#theme-overrides)、[Android](./android.md#theme-overrides)）。语言和字号跟随宿主设置（[设备与环境](./device-and-environment.md#in-an-embedding-app)）。
+- **主题**：宿主用自己的品牌 token 覆盖应用主题（[iOS](./ios.md#theme-overrides)、[Android](./android.md#theme-overrides)）；语言和字号跟随宿主设置（[设备与环境](./device-and-environment.md#in-an-embedding-app)）。
 - **限制与能力**：每个视图中的应用能使用什么（[沙箱与能力](./sandbox-and-capabilities.md)）。
 - **更新**：Swift、Java/Kotlin 和 GPUI 宿主可以加载下载的[签名包](./signed-packages.md)。
 - **开发**：Dev 版 framework 和 AAR 连接 `nsh dev` 进行热更新（[iOS](./ios.md#development)、[Android](./android.md#development)）。

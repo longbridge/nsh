@@ -1,22 +1,15 @@
 ---
 title: Platform overview
-description: "Where NSH runs: iOS, Android, macOS, Windows, Linux, GPUI, the terminal and the web. How to run, package and embed a TSX or Rust app on each, and what each needs."
+description: "Where NSH runs: iOS, Android, macOS, Windows, Linux, GPUI, the terminal and the web, each with its own backend; how to run, package and embed a TSX or Rust app on each, and what each needs."
 order: 10
 group: platforms
 ---
 
 # Platform overview
 
-NSH runs on iOS, Android, macOS, Windows, Linux, GPUI, the terminal and the web. Each platform has its own backend that draws with native UI: UIKit views on iPhone, AppKit views on a Mac, GTK 4 widgets on Linux, GPUI elements in a GPUI app, character Cells in a terminal and HTML in a browser. Text, input, accessibility and dark mode come from the platform.
+NSH runs on phones, desktops, terminals and the web: iOS, Android, macOS, Windows, Linux, GPUI, the terminal and web pages. Each has a backend of its own that draws with the platform's own UI, so an app is UIKit views on an iPhone, AppKit views on a Mac, GTK 4 widgets on Linux, GPUI elements in a GPUI app, character Cells in a terminal and HTML in a browser, with the platform's text, input, accessibility and dark mode. Everything above the backend is shared: the reactive graph, the renderer, Taffy layout, the components and the native modules are the same Rust code everywhere, so one app runs on all of them. An app written in Rust is that code and your crate, with no JavaScript VM; a TSX app runs its modules on QuickJS on top of it ([Building with Rust](./rust.md)).
 
-Everything above the backend is shared Rust code: the reactive graph, the renderer, Taffy layout, the components and the native modules. So one app runs everywhere. A Rust app is that code plus your crate, with no JavaScript VM. A TSX app runs its modules on QuickJS on top ([Building with Rust](./rust.md)).
-
-You can use an app in two ways on every platform:
-
-- Package it as an installable app (`nsh package`).
-- Embed it in your own native app. The host links a Rust root or loads TSX at run time.
-
-During development, use `nsh run`. Rust edits rebuild and restart the app. TSX edits hot-update.
+On every platform, an app is used the same two ways: packaged as an installable app of that platform (`nsh package`), or embedded in a native app of your own, whether the host links a Rust root or loads TSX at run time. You develop it with `nsh run` (Rust edits rebuild and restart the app, TSX edits are hot updates).
 
 ## At a glance
 
@@ -31,19 +24,19 @@ During development, use `nsh run`. Rust edits rebuild and restart the app. TSX e
 | [Web](./web.md) | HTML and CSS; the browser's fonts | modern browsers, desktop and phone | `nsh run --target web` | a static site |
 | [TUI](./tui.md) | ratatui on the terminal's Cell grid; the terminal's font | terminals on macOS, Windows and Linux | `nsh run --target tui` | inside the terminal app that embeds it |
 
-- **[GPUI](./gpui.md)** draws with [GPUI](https://gpui-kit.com), the framework behind GPUI Kit, on macOS, Windows and Linux. Use it to embed NSH in GPUI and GPUI Kit apps: they place `AppView` in their own element tree. Standalone desktop apps use each OS's own backend (AppKit, Win32, GTK 4).
-- **[TUI](./tui.md)** draws on the terminal's grid of character Cells, in the terminal's colors. It is keyboard first and supports the mouse. `nsh run --target tui` runs an app in the current terminal. A ratatui app embeds one with `AppView`.
-- **[Web](./web.md)** renders apps as HTML. `nsh package --target web` publishes a static site for any web server or CDN. A Rust app's engine and crate compile to WebAssembly. Your own page embeds an app with `createPlayer` or an iframe. The live demos and the [playground](/playground) on this site use it.
+- **[GPUI](./gpui.md)** draws apps with [GPUI](https://gpui-kit.com), the framework of the sibling project GPUI Kit, on macOS, Windows and Linux alike: it is the backend for embedding in GPUI and GPUI Kit apps, whose `AppView` they place in their own element tree. Standalone desktop apps run and are packaged with each OS's own backend (AppKit, Win32, GTK 4).
+- **[TUI](./tui.md)** draws apps on the terminal's grid of character Cells, in the terminal's own colors, keyboard first and with the mouse: `nsh run --target tui` runs an app in the current terminal, and a ratatui app embeds one with `AppView`.
+- **[Web](./web.md)** renders apps as HTML in a browser page: `nsh package --target web` publishes a static site for any web server or CDN, with a Rust app's engine and crate compiled to WebAssembly, and a page of your own embeds an app with `createPlayer` or an iframe. It also runs the live demos and the [playground](/playground) on this site.
 
-The community builds more platforms on the same engine, each in its own repository. The `nsh` CLI runs them by name. For example, [`nsh-platform-miniprogram`](https://github.com/huacnlee/nsh-platform-miniprogram) runs apps in WeChat Mini Programs (`--target miniprogram`). See [Building a platform](./platform-extensions.md).
+More platforms are built by the community on the same engine, each in a repository of its own, and the `nsh` command line runs them by name: [`nsh-platform-miniprogram`](https://github.com/huacnlee/nsh-platform-miniprogram) runs apps in WeChat Mini Programs (`--target miniprogram`). [Building a platform](./platform-extensions.md) shows how one is made.
 
-**Development tool:** `--target catalyst` runs the iOS backend on a Mac in an iPhone-sized window (390×844). Use it only to check Catalyst-specific behavior or to embed NSH in a Mac Catalyst app. For a Mac app, use the default `macos`. To see the phone layout, use `--target ios`.
+**Development tool:** Mac Catalyst runs the iOS backend in an iPhone-sized window (390×844) on a Mac (`--target catalyst`), used only when needed: to check behavior specific to Catalyst, or an app that embeds NSH in a Mac Catalyst app. For the Mac app, use the default `macos`; to see an app as a phone shows it, use `--target ios`.
 
 ## Develop and package
 
-Without `--target`, `nsh run` picks the machine's platform: AppKit on macOS, GTK on Linux, Win32 on Windows. Phones need a computer: iOS needs a Mac with Xcode. Android needs the Android SDK on macOS, Linux or Windows ([Installation](./installation.md#what-works-where)).
+`nsh run` picks the machine's own platform when you give no `--target`: AppKit on macOS, the GTK window on Linux and the Win32 window on Windows. Phones are reached from a computer: iOS from a Mac with Xcode, Android from macOS, Linux or Windows with the Android SDK ([Installation](./installation.md#what-works-where)).
 
-A Rust app names its `"root"` component in `nsh.json`. Run and package it from its directory. `nsh` builds a runner for the target with your crate and no QuickJS. A TSX app passes its entry file:
+A Rust app (its `nsh.json` names the `"root"` component) runs and packages from its directory: `nsh` builds the app's own runner for the target, with your crate and no QuickJS. A TSX app names its entry:
 
 ```sh
 # A Rust app, from its directory
@@ -55,11 +48,11 @@ nsh run App.tsx --target macos     # or ios, android, windows, linux, gpui, tui,
 nsh package App.tsx --target macos
 ```
 
-Each desktop app is packaged on its own OS: a Mac app on a Mac, a Windows app on Windows, a Linux app on Linux. [Packaging](./packaging.md) covers output, signing and icons for every target.
+Each desktop OS packages apps with its own backend, built for the machine it runs on: package a Mac app on a Mac, a Windows app on Windows and a Linux app on Linux. [Packaging](./packaging.md) covers every target's output, signing and icons.
 
 ## Embed in a native app
 
-Step-by-step guides are in [Embedding in an existing app](./embedding.md).
+Step-by-step guides for each platform are in [Embedding in an existing app](./embedding.md).
 
 | Platform | Host view | Runs | Ships as | Host language |
 |---|---|---|---|---|
@@ -73,16 +66,16 @@ Step-by-step guides are in [Embedding in an existing app](./embedding.md).
 | Web | `createPlayer` (a page element) or an iframe | TSX bundles; a Rust app as its published site | the runtime files from `nsh package --target web` | JavaScript or HTML |
 | TUI | `AppView` (an area of a ratatui frame) | a Rust root, TSX bundles | the `nsh-platform-tui` crate | Rust |
 
-A Rust host mounts a Rust root (`Root::of::<App>()`) as `AppSource::Rust` or `App::Rust`. It passes the app's UI sets to its engines with `set_ui_sets`, so loaded TSX can import the app's own components and modules. Each view is one engine, and an app can show several. On every platform, the host can register its own native views for apps ([Native components](./native-components.md)).
+A Rust host mounts a Rust root (`Root::of::<App>()`) as `AppSource::Rust` or `App::Rust`, and gives its engines the app's UI sets with `set_ui_sets`, so TSX it loads imports the app's own components and modules. Each view is one engine, and an app can show several. The host registers its own native views for apps to use on every platform ([Native components](./native-components.md)).
 
 > [!NOTE]
-> Rust hosts use the platform crates from the NSH repository. On macOS, Windows and Linux, `AppView` loads bundles from the app's own files (or source code) with the default limits. The GPUI crate and the iOS and Android SDKs also load [signed packages](./signed-packages.md) and set limits and capabilities per view ([Sandbox and capabilities](./sandbox-and-capabilities.md)).
+> Rust hosts embed NSH with the platform crates from the NSH repository; the `AppView` of macOS, Windows and Linux loads bundles from the app's own files (or source code), with the default limits. The GPUI crate and the iOS and Android SDKs also load [signed packages](./signed-packages.md) and set limits and capabilities per view ([Sandbox and capabilities](./sandbox-and-capabilities.md)).
 
 ### Share a mobile host's Tokio runtime
 
-A mobile host that links Rust can run NSH's async tasks on its existing Tokio runtime. Each view keeps a clone of the runtime's `Handle`. The app owns the runtime and must keep it running, with IO and time enabled, until its views stop. `None` uses NSH's shared runtime.
+A Rust-linked mobile host can run NSH's async tasks on the Tokio runtime it already has. Each view keeps a clone of the runtime's `Handle`; the app owns the runtime and keeps it running (with IO and time enabled) until its views stop. `None` uses NSH's shared runtime.
 
-On iOS, set the runtime in the `AppView` (or `Surface`) options. Every load of the view uses it:
+On iOS, set the runtime in the options of `AppView` (or `Surface`); every load of the view uses it:
 
 ```rust
 let mut options = SurfaceOptions::default();
@@ -91,12 +84,7 @@ let view = AppView::new(mtm, frame, options);
 view.load(bundle);
 ```
 
-On Android, call `nsh::set_runtime` with the `NshView`'s native handle (its `handle` field):
-
-- Call it on the UI thread, before the view loads an app or connects to a dev server.
-- It applies to that view from its next load. A running engine keeps the runtime it started with.
-
-A JNI function in the app's own library reads the handle:
+On Android, call `nsh::set_runtime` on the UI thread with the `NshView`'s native handle (its `handle` field), before the view loads an app or connects to a dev server. The setting belongs to that view and applies from its next load; a running engine keeps the runtime it started with. A JNI function in the app's own library reads the handle:
 
 ```rust
 #[unsafe(no_mangle)]
@@ -113,17 +101,17 @@ extern "system" fn Java_com_example_app_RuntimeBridge_configure(
 }
 ```
 
-In minified builds, keep the bridge class names (`-keep class com.example.app.RuntimeBridge { *; }`). The distributed AARs already keep the `com.longbridge.nsh` package, including `NshView.handle`.
+In minified builds, keep the bridge class's names (`-keep class com.example.app.RuntimeBridge { *; }`); the distributed AARs already keep the `com.longbridge.nsh` package, `NshView.handle` included.
 
 ## Writing for every platform
 
-Most app code needs no platform checks. Elements, styles, layout and modules behave the same everywhere. Where platforms differ, NSH puts the difference in one place ([Platform-specific code](./platform-specific.md)):
+Most of an app needs no platform checks: elements, styles, layout and modules behave the same everywhere. Where platforms differ, NSH gives the difference one place ([Platform-specific code](./platform-specific.md)):
 
-- **Where the app runs**: Rust has `os()`, `idiom()` and `is_desktop()` (`nsh_core::prelude`). TSX has `platform.os`, `platform.idiom`, `platform.desktop` and `platform.select` from `nsh`. The OS is iOS, Android, macOS, Windows, Linux or the web. In a terminal, the idiom is `"terminal"` and the OS is the machine's own.
-- **Platform-only props** go in `ios={{…}}`, `android={{…}}`, `macos={{…}}`, `windows={{…}}`, `web={{…}}` or `desktop={{…}}` in TSX. `desktop` covers macOS, Windows, Linux, desktop browsers and terminals.
-- **Input follows the platform.** Phones get touch and the software keyboard. Desktops get the mouse, trackpad and keyboard.
+- **The environment says where the app runs**: in Rust `os()`, `idiom()` and `is_desktop()` (`nsh_core::prelude`), in TSX `platform.os`, `platform.idiom`, `platform.desktop` and `platform.select` from `nsh`. The OS is iOS, Android, macOS, Windows, Linux or the web; in a terminal, the idiom is `"terminal"` and the OS the machine's own.
+- **Platform-only props** go in `ios={{…}}`, `android={{…}}`, `macos={{…}}`, `windows={{…}}`, `web={{…}}` or `desktop={{…}}` in TSX (`desktop`: macOS, Windows, Linux, desktop browsers and terminals).
+- **Input follows the platform.** Phones get touches and the software keyboard; desktops get the mouse, the trackpad and the keyboard.
 
-Components are drawn with NSH primitives, so they run and look the same on desktops and phones. Build a desktop layout from the primitives (`view`, `text`, `scroll`, `virtual_list`, …; `View`, `Text`, `Scroll`, `List`, … in TSX) plus a desktop check, as the gallery does:
+An app's components are drawn with NSH's primitives, so they run on desktops as well as on phones, looking the same on both. A desktop layout is built from the primitives (`view`, `text`, `scroll`, `virtual_list`, …; `View`, `Text`, `Scroll`, `List`, … in TSX) and a check for the desktop, as the gallery's desktop layout is:
 
 ```tsx tabs
 import { View } from "nsh";
@@ -163,12 +151,12 @@ fn tab_layout() -> AnyElement {
 }
 ```
 
-Each backend lists what it does differently: [macOS](./macos.md#what-differs-on-macos), [Windows](./windows.md#what-differs-on-windows), [Linux](./linux.md#what-differs-on-linux), [GPUI](./gpui.md#differences), [TUI](./tui.md).
+Each backend lists what it does its own way: [macOS](./macos.md#what-differs-on-macos), [Windows](./windows.md#what-differs-on-windows), [Linux](./linux.md#what-differs-on-linux), [GPUI](./gpui.md#differences), [TUI](./tui.md).
 
 ## See also
 
 - [Getting started](./getting-started.md): a first app, run on each platform.
-- [Building with Rust](./rust.md): apps in Rust, and Rust with TSX.
+- [Building with Rust](./rust.md): apps written in Rust, and Rust with TSX.
 - [Installation](./installation.md): the tools each platform needs.
 - [Architecture](./architecture.md): what is shared and what each backend does.
-- [Building a platform](./platform-extensions.md): your own platform on NSH's engine.
+- [Building a platform](./platform-extensions.md): a platform of your own on NSH's engine.

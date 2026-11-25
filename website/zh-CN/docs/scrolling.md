@@ -14,7 +14,7 @@ demo: guide-scrolling
 
 ## 滚动视图
 
-滚动视图本身是视口，它的子元素是内容。视口需要父元素给出尺寸（通常是 `flex: 1`、`.flex_1()`）。内容按视口的宽度（纵向）或高度（横向）排版，长度按需延伸。
+滚动视图本身是视口，它的子元素是内容。视口需要父元素给出尺寸（通常是 `flex: 1`、`.flex_1()`）；内容按视口的宽度（纵向）或高度（横向）排版，长度按需延伸。
 
 ```tsx tabs
 import { mount, Scroll, Text, View } from "nsh";
@@ -54,7 +54,7 @@ pub fn App() -> impl IntoElement {
 }
 ```
 
-上面的子视图就是滚动视图的内容容器。在 TSX 中，`contentStyle`（或 `contentClass`）会替你创建一个，把子元素包进一个带该样式、随内容一起滚动的视图。`flexGrow: 1`（`.flex_grow(1.0)`）让内容至少和视口一样高，内容较短时可以居中，较长时照常滚动：
+上面的子视图就是滚动视图的内容容器；在 TSX 中，`contentStyle`（或 `contentClass`）会替你创建一个，把子元素包进一个带该样式、随内容一起滚动的视图。`flexGrow: 1`（`.flex_grow(1.0)`）让内容至少和视口一样高，内容较短时可以居中，较长时照常滚动：
 
 ```tsx tabs
 <Scroll style={{ flex: 1 }} contentStyle={{ flexGrow: 1, justifyContent: "center", padding: 16 }}>
@@ -97,7 +97,7 @@ scroll().horizontal().scrollbar(false).child(
 
 在从右到左布局中（见[设备与环境](./device-and-environment.md#从右到左)），横向滚动视图从最右端开始，并保持与右端的距离。
 
-手指拖动滚动视图。在桌面（macOS、Windows、Linux）和浏览器中，鼠标像在桌面应用中一样滚动：用滚轮（Shift + 滚轮横向滚动）、触控板、键盘和滚动指示条（鼠标在视图上移动时显示，可以像滚动条一样拖动）。鼠标拖动交给应用的拖拽手势、响应者和文字选择。桌面上的触摸屏像手指一样拖动滚动视图。`scrollbar={false}` 在两个方向上都隐藏指示条：没有横向滚轮的鼠标用 Shift + 滚轮、在周围没有纵向滚动时用滚轮，以及用键盘来移动横向视图。
+手指拖动滚动视图。在桌面（macOS、Windows、Linux）和浏览器中，鼠标像在桌面应用中一样滚动：用滚轮（Shift + 滚轮横向滚动）、触控板、键盘和滚动指示条（鼠标在视图上移动时显示，可以像滚动条一样拖动）；鼠标拖动交给应用的拖拽手势、响应者和文字选择。桌面上的触摸屏像手指一样拖动滚动视图。`scrollbar={false}` 在两个方向上都隐藏指示条：没有横向滚轮的鼠标用 Shift + 滚轮、在周围没有纵向滚动时用滚轮，以及用键盘来移动横向视图。
 
 ### 行为属性
 
@@ -116,7 +116,7 @@ scroll().horizontal().scrollbar(false).child(
 
 ## 分页与吸附
 
-吸附在手指抬起时由原生决定，依据松手位置、预计滑行距离和速度。随后滚动视图滑到选中的停靠点，整个过程不涉及你的代码。
+吸附在手指抬起时由原生决定，依据松手位置、预计滑行距离和速度；随后滚动视图滑到选中的停靠点，整个过程不涉及你的代码。
 
 | 属性 | Rust | 类型 | 说明 |
 |---|---|---|---|
@@ -259,7 +259,7 @@ scroll()
 | `onMomentumEnd` | `.on_momentum_end(..)` | `{ offset }` | 惯性滑行结束（被新的拖动打断时也会触发）。 |
 | `onScrollEnd` | `.on_scroll_end(..)` | `{ offset }` | 用户的滚动停了下来：惯性滑行结束后，或没有惯性的拖动结束时。 |
 
-`ScrollEvent` 包含偏移（`offset`，一个 `Point`；Rust 中同名）、内容尺寸，含缩放（`contentSize`，一个 `Size`；`content_size`）、视口（`size`）以及 `zoomScale`（`zoom_scale`）。其他事件携带偏移：TSX 中为 `{ offset }`，其值是一个 `Point`。Rust 中为 `Point<Points>`。
+`ScrollEvent` 包含偏移（`offset`，一个 `Point`；Rust 中同名）、内容尺寸，含缩放（`contentSize`，一个 `Size`；`content_size`）、视口（`size`）以及 `zoomScale`（`zoom_scale`）。其他事件携带偏移：TSX 中为 `{ offset }`，其值是一个 `Point`；Rust 中为 `Point<Points>`。
 
 ```tsx tabs
 const atBottom = signal(false);
@@ -384,11 +384,11 @@ view()
     .child(view().absolute().top_0().left_0().right_0().h(px(56.0)).bind_translate_y(&header.mul(-1.0)))
 ```
 
-插值在输入范围之外默认会截断（clamp），所以下拉越过顶部（偏移为负）时效果停在终点。想做随下拉放大的弹性头图，传入 `extrapolate: "extend"`（Rust 中为 `interpolate_with(.., Interpolation::extrapolate(Extrapolate::Extend))`）。
+插值在输入范围之外默认会截断（clamp），所以下拉越过顶部（偏移为负）时效果停在终点；想做随下拉放大的弹性头图，传入 `extrapolate: "extend"`（Rust 中为 `interpolate_with(.., Interpolation::extrapolate(Extrapolate::Extend))`）。
 
 ## 下拉刷新
 
-`refreshing` 和 `onRefresh`（`.refreshing(..)` 和 `.on_refresh(..)`）会加上平台的下拉刷新控件。`refreshing` 为 true 时控件显示。在 `onRefresh` 中把它设为 true，工作完成后再清除。
+`refreshing` 和 `onRefresh`（`.refreshing(..)` 和 `.on_refresh(..)`）会加上平台的下拉刷新控件。`refreshing` 为 true 时控件显示；在 `onRefresh` 中把它设为 true，工作完成后再清除。
 
 ```tsx tabs
 const refreshing = signal(false);
@@ -419,7 +419,7 @@ let reload = move || {
 scroll().flex_1().refreshing(refreshing).on_refresh(reload).child(content)
 ```
 
-iOS 上的控件是 UIRefreshControl。在 Mac Catalyst 的 Mac 界面风格中，NSH 显示自己的加载指示器，行为相同。列表也接受这些属性。由于鼠标滚动时不拖动，在桌面和浏览器中下拉是触摸屏（或 macOS 的触控板，它能拉过顶部）的手势。请在这些地方另外提供刷新方式，比如按钮或键盘快捷键。
+iOS 上的控件是 UIRefreshControl；在 Mac Catalyst 的 Mac 界面风格中，NSH 显示自己的加载指示器，行为相同。列表也接受这些属性。由于鼠标滚动时不拖动，在桌面和浏览器中下拉是触摸屏（或 macOS 的触控板，它能拉过顶部）的手势；请在这些地方另外提供刷新方式，比如按钮或键盘快捷键。
 
 ### 自己的指示器
 
@@ -502,7 +502,7 @@ view()
 | `zoomable` | `.zoomable(..)` | `boolean` | `true` | 用户可以捏合缩放。 |
 | `centerContent` | `.center_content(..)` | `boolean` | `false` | 比视口小的内容（缩小时）居中显示。 |
 
-滚动事件会报告缩放比例和缩放后的内容尺寸。在代码中，`zoom_to(scale, center, animated)` / `zoomTo({ scale, x, y, animated })` 会缩放，使内容中的点（未缩放的点坐标）落在视口中央。双击放大就是在按压处理函数里调用它：
+滚动事件会报告缩放比例和缩放后的内容尺寸。在代码中，`zoom_to(scale, center, animated)` / `zoomTo({ scale, x, y, animated })` 会缩放，使内容中的点（未缩放的点坐标）落在视口中央；双击放大就是在按压处理函数里调用它：
 
 ```tsx tabs
 import { Image, mount, Scroll, type ScrollRef, signal } from "nsh";
@@ -583,7 +583,7 @@ scroll().flex_1().element_ref(&scroller).child(content)
 view().on_press(move || scroller.scroll_to(point(px(0.0), px(0.0)), true))
 ```
 
-列表另外还有 `scrollToIndex`、`scrollToOffset` 和 `scrollToEnd`。见[列表](./lists.md#从代码滚动)。
+列表另外还有 `scrollToIndex`、`scrollToOffset` 和 `scrollToEnd`；见[列表](./lists.md#从代码滚动)。
 
 ### 把视图滚到可见处
 
@@ -617,14 +617,14 @@ NSH 会自动让获得焦点的输入框保持可见：键盘出现时，输入�
 `keyboardShouldPersistTaps`：
 
 - `"never"`：点击输入框之外只会收起键盘，按钮接收下一次点击。用户要先点一次收起键盘，再点一次才能按下。里面的视图都不会响应这次点击：不触发 `onPress`（手指按下时 `onPressIn` / `onPressOut` 和 `active:` 样式照常显示），responder 的触摸以 `onResponderTerminate` 而不是 `onResponderRelease` 结束，web view 等原生视图收不到点击。只有点击会被拦下并收起键盘：长按（`onLongPress`、上下文菜单）、拖动和滚动与键盘未弹出时一样。
-- `"handled"`：点在会处理它的东西（按钮）上时，点击照常传递，键盘保持。点在空白处则收起键盘。表单通常应选它。
+- `"handled"`：点在会处理它的东西（按钮）上时，点击照常传递，键盘保持；点在空白处则收起键盘。表单通常应选它。
 - `"always"`：键盘在每次点击后都保持显示。
 
 两者都在点击或拖动发生时由原生决定，无需等待你的代码。要从代码收起键盘，在 Rust 中调用 `dismiss_keyboard()`，在 TSX 中调用 [`nsh`](../modules/nsh.md#keyboard-and-keyboardframe) 的 `Keyboard.dismiss()`。
 
 ## 浮在滚动视图上的视图
 
-放在滚动视图顶部或底部之上的工具栏、悬浮按钮可以指明它下面的滚动视图，平台就像对待那里的栏一样对待它。iOS 26 起，滚动视图的边缘效果会按这个视图显示的内容成形：滚到它下面的内容在它的按钮周围渐隐。这个边缘效果来自 iOS 26。其他版本和平台的界面需要同样的分隔时，由应用在视图下面画一层渐隐。用 `contentInset` 在内容那一端给这个视图留出位置。
+放在滚动视图顶部或底部之上的工具栏、悬浮按钮可以指明它下面的滚动视图，平台就像对待那里的栏一样对待它。iOS 26 起，滚动视图的边缘效果会按这个视图显示的内容成形：滚到它下面的内容在它的按钮周围渐隐。这个边缘效果来自 iOS 26；其他版本和平台的界面需要同样的分隔时，由应用在视图下面画一层渐隐。用 `contentInset` 在内容那一端给这个视图留出位置。
 
 ```tsx
 const list = signal<ViewRef>();
@@ -644,7 +644,7 @@ Rust 中在浮着的视图上调用 `.scroll_edge_element(Some(list), ScrollEdge
 
 ## 嵌套滚动视图
 
-纵向滚动视图里放横向滚动视图会如预期工作：各自接管自己方向上的拖动。同方向的两个滚动视图也可以嵌套（内层先滚动）。需要独占手指的响应者，比如滚动视图里的绘图画布，会阻止外层滚动视图接管触摸：Rust 中用 `.keep_touches(true)`，TSX 中在 `onResponderGrant` 中返回 `true`。见[触摸与手势](./touch-and-gestures.md#手势响应者系统)。
+纵向滚动视图里放横向滚动视图会如预期工作：各自接管自己方向上的拖动。同方向的两个滚动视图也可以嵌套（内层先滚动）。需要独占手指的响应者，比如滚动视图里的绘图画布，会阻止外层滚动视图接管触摸：Rust 中用 `.keep_touches(true)`，TSX 中在 `onResponderGrant` 中返回 `true`；见[触摸与手势](./touch-and-gestures.md#手势响应者系统)。
 
 ## 相关内容
 

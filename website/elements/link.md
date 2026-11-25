@@ -7,13 +7,11 @@ demo: el-link
 
 # Link
 
-A link takes the user somewhere: a web page, another app (`mailto:`, `tel:`), or a screen of your app. `Link` handles
-the behavior: presses, Return and Space while it has keyboard focus, the disabled state, and the link role for screen
-readers. Your app owns the look. A `Link` has no color, underline or label of its own, and only its children show.
-
-`href` is where the link goes. NSH uses it to open the target, and the desktops show it while the pointer rests on the
-link ([Where it goes](#where-it-goes)).
-
+A link takes the user somewhere: a web page, another app (`mailto:`, `tel:`), or a screen of the app itself. It owns
+the behavior: presses, Return and Space while it has the keyboard focus, the disabled state, and the link role for
+screen readers. The look is the app's: a `Link` has no color, underline or label of its own, and its children are what
+shows. `href` says where it goes; it is data for the opening, and the URL the desktops show while the pointer rests on
+the link ([Where it goes](#where-it-goes)).
 
 ```tsx tabs
 import { mount, Text } from "nsh";

@@ -9,7 +9,7 @@ demo: el-select
 
 选择框从一组条目中选出一个值：一项设置、一个筛选条件、一个国家、一个时区。应用提供的触发元素打开列表，并按每种设备的习惯呈现：
 
-- 在桌面平台和桌面浏览器中，它是与触发元素一样宽的弹出层（应用的 `popupStyle` / `popupClass` 设置宽度时用它的，和 `gpui-component` 的 `menu_width` 一样），高度随行数增长，最多占满屏幕上的空间。在 macOS 上它盖在触发元素上打开，已选的行正好叠在触发元素上，所以已选的标题停在原处，和系统的弹出按钮一样（shadcn/ui 的 `item-aligned` 定位）。没有已选条目时它在触发元素下方打开。在 Windows、Linux 和浏览器中它在触发元素下方打开，和这些平台的下拉列表一样。`cover` 让它在每个桌面平台上都按同一种方式打开。键盘可以在条目间移动并选中一个。
+- 在桌面平台和桌面浏览器中，它是与触发元素一样宽的弹出层（应用的 `popupStyle` / `popupClass` 设置宽度时用它的，和 `gpui-component` 的 `menu_width` 一样），高度随行数增长，最多占满屏幕上的空间。在 macOS 上它盖在触发元素上打开，已选的行正好叠在触发元素上，所以已选的标题停在原处，和系统的弹出按钮一样（shadcn/ui 的 `item-aligned` 定位）；没有已选条目时它在触发元素下方打开。在 Windows、Linux 和浏览器中它在触发元素下方打开，和这些平台的下拉列表一样；`cover` 让它在每个桌面平台上都按同一种方式打开。键盘可以在条目间移动并选中一个。
 - 在手机和平板上，它是屏幕底部、覆盖在背景层之上的 sheet。
 
 选择框负责行为：值（应用持有的，或它自己保存的）、打开状态、键盘、输入跳转、搜索、分组、高亮的行以及屏幕阅读器听到的内容。外观由应用决定：应用为触发元素、弹出层、列表、行、分组标题和搜索框设置样式，或者自己绘制行。
@@ -126,7 +126,7 @@ fn fruit_select() -> impl IntoElement {
 }
 ```
 
-`Select` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate。在 Rust 中，`select()` 创建一个选择框，每个属性有一个设置方法（`.items(..)`、`.value(..)`、`.item_style(..)`），每个事件有一个监听方法（`.on_change(..)`）。`SelectItem::new(value, title)` 创建一个条目，可再用 `.disabled(..)` 和 `.group(..)`。
+`Select` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate。在 Rust 中，`select()` 创建一个选择框，每个属性有一个设置方法（`.items(..)`、`.value(..)`、`.item_style(..)`），每个事件有一个监听方法（`.on_change(..)`）；`SelectItem::new(value, title)` 创建一个条目，可再用 `.disabled(..)` 和 `.group(..)`。
 
 <a id="items"></a>
 
@@ -147,15 +147,15 @@ fn fruit_select() -> impl IntoElement {
 />
 ```
 
-这些行是弹出层滚动视图中的虚拟化列表：上千个条目的列表只创建可见的行。行的总高度超过可用空间时，弹出层可以滚动。
+这些行是弹出层滚动视图中的虚拟化列表：上千个条目的列表只创建可见的行；行的总高度超过可用空间时，弹出层可以滚动。
 
 <a id="value"></a>
 
 ## 值
 
-有 `value` 时，选中的条目由应用持有：选择框显示该值对应的条目，并用 `onChange({ value })` 报告一次选择。应用把 `value` 设为它以跟随这次选择，或者保留自己的值。`value={null}` 表示没有选中任何条目。省略 `value` 时，选择框自己保存值，初始为 `defaultValue`。`onChange` 只报告变化：再次选择已选中的条目会关闭列表。
+有 `value` 时，选中的条目由应用持有：选择框显示该值对应的条目，并用 `onChange({ value })` 报告一次选择；应用把 `value` 设为它以跟随这次选择，或者保留自己的值。`value={null}` 表示没有选中任何条目。省略 `value` 时，选择框自己保存值，初始为 `defaultValue`。`onChange` 只报告变化：再次选择已选中的条目会关闭列表。
 
-`cleanable` 会在有选中条目时加一个清除按钮：按下它会清空值，以 `onChange({ value: null })` 报告，列表保持关闭。这个按钮在选择框的视图里、触发元素之后，不在触发元素里面，所以按它不会打开列表。由应用摆放它（用 `absolute` 盖在触发元素末端、原本放箭头的位置）并填充内容：
+`cleanable` 会在有选中条目时加一个清除按钮：按下它会清空值，以 `onChange({ value: null })` 报告，列表保持关闭。这个按钮在选择框的视图里、触发元素之后，不在触发元素里面，所以按它不会打开列表；由应用摆放它（用 `absolute` 盖在触发元素末端、原本放箭头的位置）并填充内容：
 
 ```tsx
 <Select
@@ -170,7 +170,7 @@ fn fruit_select() -> impl IntoElement {
 />
 ```
 
-触发元素是应用自己的元素，所以它可以按应用的需要显示选中的条目：标题、图标，或者在没有选中时显示占位文字。在 TSX 中，触发元素就是你传入的元素：它本身就是组合框，按压、键盘焦点、展开状态和 `disabled` 都在它自己身上，所以它自己的 `active:`、`focus:` 和 `disabled:` 类会跟随选择框，它自己的 `onPress` 也照常运行。列表相对它放置，并且与它一样宽。
+触发元素是应用自己的元素，所以它可以按应用的需要显示选中的条目：标题、图标，或者在没有选中时显示占位文字。在 TSX 中，触发元素就是你传入的元素：它本身就是组合框，按压、键盘焦点、展开状态和 `disabled` 都在它自己身上，所以它自己的 `active:`、`focus:` 和 `disabled:` 类会跟随选择框，它自己的 `onPress` 也照常运行；列表相对它放置，并且与它一样宽。
 
 <a id="open-state"></a>
 
@@ -182,7 +182,7 @@ fn fruit_select() -> impl IntoElement {
 
 ## 出现与离开
 
-在桌面平台上，弹出层像 [Popover](./popover.md#entrance-and-exit) 一样随你的过渡出现和离开：`popupStartingClass` 是它第一帧的外观，`popupClass` 里的 `transition-*` 类把它过渡到自己的外观。`popupEndingClass` 是关闭后的外观，在这些过渡播放期间它会保留、不接受按压，随后触发 `onClose`。关闭时键盘焦点就回到触发元素，除非选择的 `onChange` 把焦点移到了别的视图（比如表单的下一个输入框），那样焦点就留在那里。在离开途中再次打开时，它从当前状态回到自己的外观。`popupStartingStyle` 和 `popupEndingStyle` 以内联样式做同样的事。用户要求减少动态效果时，它立即出现、立即离开。触摸屏上的 sheet 自带滑入和滑出的动作。
+在桌面平台上，弹出层像 [Popover](./popover.md#entrance-and-exit) 一样随你的过渡出现和离开：`popupStartingClass` 是它第一帧的外观，`popupClass` 里的 `transition-*` 类把它过渡到自己的外观；`popupEndingClass` 是关闭后的外观，在这些过渡播放期间它会保留、不接受按压，随后触发 `onClose`。关闭时键盘焦点就回到触发元素，除非选择的 `onChange` 把焦点移到了别的视图（比如表单的下一个输入框），那样焦点就留在那里。在离开途中再次打开时，它从当前状态回到自己的外观。`popupStartingStyle` 和 `popupEndingStyle` 以内联样式做同样的事。用户要求减少动态效果时，它立即出现、立即离开；触摸屏上的 sheet 自带滑入和滑出的动作。
 
 ```tsx
 <Select
@@ -212,7 +212,7 @@ fn fruit_select() -> impl IntoElement {
 />
 ```
 
-在桌面平台上，列表打开时搜索框就获得键盘焦点。在触摸屏上，按下搜索框时键盘才弹出。每次打开时搜索都从空白开始。
+在桌面平台上，列表打开时搜索框就获得键盘焦点；在触摸屏上，按下搜索框时键盘才弹出。每次打开时搜索都从空白开始。
 
 <a id="rows-the-app-draws"></a>
 
@@ -300,7 +300,7 @@ fn fruit_select() -> impl IntoElement {
 | `SelectEntry` | `value`、`title`、`disabled`、`group?`（条目的）、`index: number` | `renderItem` 收到的内容：条目本身和它在 `items` 中的序号，从不包含状态（状态是行的 `focus:`、`selected:` 和 `disabled:`）。 |
 | `SelectGroup` | `title: string` | `renderGroup` 收到的内容：分组的 `group`。 |
 
-在 Rust 中它们是 `nsh_base::SelectItem`、`SelectEntry` 和 `SelectGroup`。`value` 是 `SelectValue`（一个值为 `Controlled(Some(..))`，`null` 为 `Controlled(None)`），`.value(..)` 可以从 `Option<SharedString>` 或字符串创建它。
+在 Rust 中它们是 `nsh_base::SelectItem`、`SelectEntry` 和 `SelectGroup`；`value` 是 `SelectValue`（一个值为 `Controlled(Some(..))`，`null` 为 `Controlled(None)`），`.value(..)` 可以从 `Option<SharedString>` 或字符串创建它。
 
 <a id="parts"></a>
 
@@ -337,7 +337,7 @@ fn fruit_select() -> impl IntoElement {
 | Escape | 不选择，关闭列表。 |
 | Tab、Shift+Tab | 关闭列表（`reason: "focus"`），焦点移到下一个或上一个控件。 |
 
-列表关闭后，键盘焦点回到触发元素，除非一次外部按压、Tab 或选择的 `onChange` 把它带到了别处。在 macOS 和 iOS 上，由指针打开的列表则把焦点还回打开之前的位置：像 AppKit 和 UIKit 一样，那里的按压不移动焦点，触发元素从未获得焦点，所以 Space 和 Return 会交给应用的快捷键，而不会再次打开列表。指针移过的行会被高亮。按键移动到的高亮行会滚动到可见位置。
+列表关闭后，键盘焦点回到触发元素，除非一次外部按压、Tab 或选择的 `onChange` 把它带到了别处。在 macOS 和 iOS 上，由指针打开的列表则把焦点还回打开之前的位置：像 AppKit 和 UIKit 一样，那里的按压不移动焦点，触发元素从未获得焦点，所以 Space 和 Return 会交给应用的快捷键，而不会再次打开列表。指针移过的行会被高亮；按键移动到的高亮行会滚动到可见位置。
 
 <a id="on-each-device"></a>
 
@@ -350,16 +350,16 @@ fn fruit_select() -> impl IntoElement {
 | 搜索 | 列表打开时搜索框获得键盘焦点 | 按下搜索框时键盘弹出 |
 | 选择 | 鼠标键按下时就选中，搜索框保持键盘焦点 | 轻点 |
 
-`popupClass` 在桌面上为弹出层、在手机上为 sheet 设置样式。两者需要不同样式时，可以把 `platform.idiom`（`nsh/device`）与 `"desktop"` 比较。
+`popupClass` 在桌面上为弹出层、在手机上为 sheet 设置样式；两者需要不同样式时，可以把 `platform.idiom`（`nsh/device`）与 `"desktop"` 比较。
 
 <a id="accessibility"></a>
 
 ## 无障碍
 
 - 触发元素对屏幕阅读器来说是一个组合框（combobox）：它的标签是 `accessibilityLabel`，值是选中条目的标题（没有选中时是 `placeholder`），并说明列表是否展开。`disabled` 时它显示为不可用。
-- 清除按钮是一个按钮，名称来自 `clearButtonAccessibilityLabel`。它不是 Tab 的一站。
-- 搜索框是一个文本框，名称来自 `searchAccessibilityLabel`。占位文字是它为空时显示的提示。
-- 列表是一个列表框（listbox），每一行是一个选项（option），以标题命名。选中的选项处于选中状态，禁用的选项显示为不可用。分组标题是标题（header）。
-- 按键移动高亮时，屏幕阅读器的焦点移到高亮的行。搜索框有键盘焦点时，改为播报高亮条目的标题，以便继续输入。
+- 清除按钮是一个按钮，名称来自 `clearButtonAccessibilityLabel`；它不是 Tab 的一站。
+- 搜索框是一个文本框，名称来自 `searchAccessibilityLabel`；占位文字是它为空时显示的提示。
+- 列表是一个列表框（listbox），每一行是一个选项（option），以标题命名；选中的选项处于选中状态，禁用的选项显示为不可用。分组标题是标题（header）。
+- 按键移动高亮时，屏幕阅读器的焦点移到高亮的行；搜索框有键盘焦点时，改为播报高亮条目的标题，以便继续输入。
 
 关于标签、角色和播报的一般说明，见[无障碍](../docs/accessibility.md)。

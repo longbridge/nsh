@@ -72,10 +72,10 @@ fn picker() -> impl IntoElement {
 
 ## 表情数据
 
-面板内置 Unicode 的表情（emojibase-data，Emoji 18.0），保持它们的分组和顺序，每个表情带有引入它的 Emoji 版本，以及来自 Unicode CLDR 的英文名称和关键词。原生平台把数据打包在应用里。Web 上页面在第一次显示面板时下载（`nsh-emoji.bin`，压缩后约 30 KB），下载完成前显示 `loading`。
+面板内置 Unicode 的表情（emojibase-data，Emoji 18.0），保持它们的分组和顺序，每个表情带有引入它的 Emoji 版本，以及来自 Unicode CLDR 的英文名称和关键词。原生平台把数据打包在应用里；Web 上页面在第一次显示面板时下载（`nsh-emoji.bin`，压缩后约 30 KB），下载完成前显示 `loading`。
 
-- **应用语言的名称**：`annotations` 为每个表情提供应用语言的名称和关键词，可以直接取自 emojibase 对应语言的数据（`compact.json`：`{ emoji: unicode, label, keywords: tags }`）。格子和 `onSelect` 使用应用给的名称。查询词同时匹配应用的词和英文词。
-- **搜索**：名称或某个关键词包含查询词（不区分大小写）的表情会被匹配。名称里有以查询词开头的词的表情排在最前，其次是关键词里有这样的词的，然后是其余匹配项。匹配结果显示为一个没有标题的分组。
+- **应用语言的名称**：`annotations` 为每个表情提供应用语言的名称和关键词，可以直接取自 emojibase 对应语言的数据（`compact.json`：`{ emoji: unicode, label, keywords: tags }`）。格子和 `onSelect` 使用应用给的名称；查询词同时匹配应用的词和英文词。
+- **搜索**：名称或某个关键词包含查询词（不区分大小写）的表情会被匹配；名称里有以查询词开头的词的表情排在最前，其次是关键词里有这样的词的，然后是其余匹配项。匹配结果显示为一个没有标题的分组。
 - **分组**：`groups` 选择显示哪些分组以及顺序。`"recent"` 是应用的 `recent` 表情：由应用保存（取自 `onSelect` 的 `base`），面板负责显示。
 - **肤色**：`skinTone` 为所有能换肤色的表情设置同一种肤色（多人表情的每个人都会换上）。
 - **较新的表情**：`emojiVersion` 去掉某个 Emoji 版本之后新增的表情，供字体还画不出它们的系统使用（Emoji 16 需要 iOS 18.4、Android 16 或较新的 Windows 11）。
@@ -187,7 +187,7 @@ void fetch("https://cdn.jsdelivr.net/npm/emojibase-data@18/zh/compact.json")
 
 ## 无障碍
 
-- 网格的角色是 `"listbox"`，名称来自 `accessibilityLabel`。每个格子是一个 `"option"`，名称是表情的名称。分组标题是 `"header"`。最后一行不满时保留的空位对屏幕阅读器隐藏。
+- 网格的角色是 `"listbox"`，名称来自 `accessibilityLabel`；每个格子是一个 `"option"`，名称是表情的名称；分组标题是 `"header"`。最后一行不满时保留的空位对屏幕阅读器隐藏。
 - 方向键移动高亮时键盘焦点留在搜索框里，屏幕阅读器读出高亮表情的名称。
 
 标签、角色和播报的通用说明见[无障碍](../docs/accessibility.md)。
@@ -210,4 +210,4 @@ void fetch("https://cdn.jsdelivr.net/npm/emojibase-data@18/zh/compact.json")
 
 - 每个平台用自己的彩色表情字体绘制：iOS 和 macOS 是 Apple Color Emoji，Android（Linux 上通常也是）是 Noto Color Emoji（缺少时请安装），Windows 是 Segoe UI Emoji，浏览器里是系统的字体。Windows 上国旗显示为两个字母：在那里可以把 `"flags"` 从 `groups` 里去掉。
 - 桌面（macOS、Windows、Linux、GPUI）和 Web：指针移到哪个格子就高亮哪个格子，点击在按下时就选中，所以搜索框保持键盘焦点。
-- iOS、Android 和 Mac Catalyst：轻点选中。键盘上的回车键选中高亮的表情。
+- iOS、Android 和 Mac Catalyst：轻点选中；键盘上的回车键选中高亮的表情。

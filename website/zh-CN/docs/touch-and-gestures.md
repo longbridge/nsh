@@ -8,11 +8,7 @@ demo: guide-gestures
 
 # 触摸与手势
 
-NSH 的触摸处理分三个层次：
-
-- **按压**（Rust 中的 `.on_press`、TSX 中的 `onPress` 等）用于按钮、列表行和链接，按压反馈由原生绘制。
-- **原生手势**（拖动、捏合和旋转）在 UI 线程上驱动[动画值](./animation.md#动画值)。即使你的代码正忙，被拖动的卡片也能紧跟手指。
-- **原始触摸与响应者系统**把每根手指的位置都交给你的代码，用来实现前两层做不到的交互，例如手写绘图。Rust 中是 `.on_touch`、`.claim_touches` 与 `.on_responder_*`，TSX 中是 `onTouchStart`、`onResponderMove`、`PanResponder`。
+NSH 的触摸处理分三个层次。**按压**（Rust 中的 `.on_press`、TSX 中的 `onPress` 等）用于按钮、列表行和链接，按压反馈由原生绘制。**原生手势**（拖动、捏合和旋转）在 UI 线程上驱动[动画值](./animation.md#动画值)，即使你的代码正忙，被拖动的卡片也能紧跟手指。**原始触摸与手势响应者系统**（Rust 中的 `.on_touch`、`.claim_touches` 与 `.on_responder_*`；TSX 中的 `onTouchStart`、`onResponderMove`、`PanResponder`）把每根手指的位置都交给你的代码，用来实现前两者表达不了的交互，例如手写绘图。
 
 选择能完成任务的最高层次：层次越高，从 UI 线程传到你的代码的工作就越少。
 
@@ -207,7 +203,7 @@ view()
 | `PointerEvents::BoxNone` | `"box-none"` | 永远不是目标 | 接收触摸 |
 | `PointerEvents::BoxOnly` | `"box-only"` | 接收触摸 | 永远不是目标 |
 
-典型用法：不能挡住下层内容的覆盖层（none）。全屏容器的空白处要把触摸让给后面的内容、而其中的按钮仍然可用（box-none）。手指落在子视图上时也要由整行接收按压（box-only）。
+典型用法：不能挡住下层内容的覆盖层（none）；全屏容器的空白处要把触摸让给后面的内容、而其中的按钮仍然可用（box-none）；手指落在子视图上时也要由整行接收按压（box-only）。
 
 ```tsx tabs
 <View style={{ flex: 1 }}>
@@ -242,11 +238,11 @@ view().flex_1().child(map()).child(
 )
 ```
 
-`"none"` 与 CSS 的 `pointer-events` 一样会继承：其中设置了 `"auto"` 的视图会重新接收触摸。`"box-none"` 和 `"box-only"` 只作用于设置它们的视图。Tailwind 类 `pointer-events-none` 和 `pointer-events-auto` 分别设置 `"none"` 和 `"auto"`。作为样式键，`pointerEvents` 也能用在状态样式（`activeStyle` 等）和变体中。
+`"none"` 与 CSS 的 `pointer-events` 一样会继承：其中设置了 `"auto"` 的视图会重新接收触摸。`"box-none"` 和 `"box-only"` 只作用于设置它们的视图。Tailwind 类 `pointer-events-none` 和 `pointer-events-auto` 分别设置 `"none"` 和 `"auto"`；作为样式键，`pointerEvents` 也能用在状态样式（`activeStyle` 等）和变体中。
 
 ## 原生手势：拖动、捏合与旋转
 
-要让拖动、捏合和旋转移动屏幕上的东西，就把[动画值](./animation.md#动画值)绑定到手势上。平台的手势识别器在 UI 线程上写入这些值，绑定了它们的视图在同一帧移动。你的代码只在手势开始和结束时得到通知。
+要让拖动、捏合和旋转移动屏幕上的东西，就把[动画值](./animation.md#动画值)绑定到手势上。平台的手势识别器在 UI 线程上写入这些值，绑定了它们的视图在同一帧移动；你的代码只在手势开始和结束时得到通知。
 
 ```tsx tabs
 import { mount, View } from "nsh";
@@ -316,10 +312,10 @@ fn App() -> impl IntoElement {
 
 原生端替你做了这些事：
 
-- **拖动从值当前的位置继续。** 开始时读取这些值，再把位移加上去。抓住一个仍在动画中的值（例如正在弹回的弹簧）会让动画停在原处。
+- **拖动从值当前的位置继续。** 开始时读取这些值，再把位移加上去；抓住一个仍在动画中的值（例如正在弹回的弹簧）会让动画停在原处。
 - **只绑定一个轴时，另一个轴照常滚动。** 只绑定水平值时，只有手指的水平移动大于垂直移动，拖动才会开始，所以竖向滚动视图里的横向滑动行仍然可以上下滚动。这个判断在系统询问手势能否开始时由原生做出。
 - **拖动、捏合和旋转可以同时进行**：同一张卡片可以同时被拖动、缩放和旋转。
-- **用松手速度做物理效果。** 拖动结束时的速度可以直接作为弹簧或衰减的速度。绑定的值用来挑选吸附点。
+- **用松手速度做物理效果。** 拖动结束时的速度可以直接作为弹簧或衰减的速度；绑定的值用来挑选吸附点。
 
 视图挂着拖动回调或 `pan` 值时就可以拖动，所以在表达式里写条件就能开关它的拖动：`onPanEnd={zoomed() ? undefined : close}` 在 `zoomed()` 为真时把拖动交给里面的内容。条件要写在表达式里：只写一个名字（`onPanEnd={handler}`）只设置一次（[哪些会重新运行](./jsx-and-components.md#哪些会重新运行)）。
 
@@ -348,11 +344,11 @@ view()
 ```
 
 > [!TIP]
-> 只要拖动只是移动东西，就把动画值绑定到手势上，而不是通过响应者跟随手指。绑定值时，繁忙的应用代码不会让拖动卡顿。用响应者时，每一次移动都是一次发往你的代码的事件和一次视图更新。
+> 只要拖动只是移动东西，就把动画值绑定到手势上，而不是通过响应者跟随手指。绑定值时，繁忙的应用代码不会让拖动卡顿；用响应者时，每一次移动都是一次发往你的代码的事件和一次视图更新。
 
 ## 原始触摸事件
 
-触摸事件报告每根手指的按下、移动和抬起。它们适合记录日志、自定义命中测试和响应多点触摸。它们不会占有触摸（按压和滚动视图照常工作）。
+触摸事件报告每根手指的按下、移动和抬起。它们适合记录日志、自定义命中测试和响应多点触摸；它们不会占有触摸（按压和滚动视图照常工作）。
 
 在 Rust 中，`.on_touch(..)` 以 `TouchEvent` 接收每个阶段：`phase`（`TouchPhase::Start`、`Move`、`End`、`Cancel`）、`timestamp` 和 `points`，即所有按下的手指，每根手指有 `id`、在它按下的视图中的位置 `location`、在 surface 中的位置 `page`，以及表示本次事件涉及该手指的 `changed`。在 TSX 中，每个阶段有自己的处理函数：
 
@@ -402,7 +398,7 @@ view().on_touch(|e: &TouchEvent| {
 
 ### 视图的位置：measure
 
-触摸的位置相对于手指按下的那个视图，而它可能是你关心的视图的子视图（例如滑块的滑钮）。测量一个视图可以得知它的位置，这样就能改用 page 坐标。在 Rust 中，给视图放一个 `element_ref()`，然后 await 它的 `measure()`。在 TSX 中，调用它的 ref 的 `measure()`：
+触摸的位置相对于手指按下的那个视图，而它可能是你关心的视图的子视图（例如滑块的滑钮）。测量一个视图可以得知它的位置，这样就能改用 page 坐标。在 Rust 中，给视图放一个 `element_ref()`，然后 await 它的 `measure()`；在 TSX 中，调用它的 ref 的 `measure()`：
 
 ```tsx tabs
 let track!: ViewRef;
@@ -436,7 +432,7 @@ view()
     .on_responder_move(move |e: &ResponderEvent| seek(e.page.x - origin.get()))
 ```
 
-它在此前的改动完成布局后返回：Rust 中是一个 `Measurement`（`frame`，即布局处理函数报告的、相对于父视图的框架；以及 `page`，即左上角），TSX 中是 `{ bounds, pagePosition }`。左上角位于 surface 中，或位于视图所在的对话框中，与触摸的 page 坐标相同。周围滚动视图和列表的偏移会计入。transform（包括动画）不计入。视图不在屏幕上时返回 `None` / `null`。
+它在此前的改动完成布局后返回：Rust 中是一个 `Measurement`（`frame`，即布局处理函数报告的、相对于父视图的框架；以及 `page`，即左上角），TSX 中是 `{ bounds, pagePosition }`。左上角位于 surface 中，或位于视图所在的对话框中，与触摸的 page 坐标相同。周围滚动视图和列表的偏移会计入；transform（包括动画）不计入。视图不在屏幕上时返回 `None` / `null`。
 
 ## 手势响应者系统
 
@@ -451,7 +447,7 @@ view()
 | `TouchClaim::on_start().capture()` | `onStartShouldSetResponderCapture` | 同上，但从外向内询问，先于冒泡阶段。父视图用它从子视图手里拿走触摸。 |
 | `TouchClaim::on_move().capture()` | `onMoveShouldSetResponderCapture` | 移动时的版本。 |
 
-声明的接管只根据视图本身做决定，不运行你的代码，除非它询问：`TouchClaim::on_move().ask(|r: &ClaimRequest| ..)` 在监听函数调用 `r.claim()` 时接管，可以根据至今的手势（`r.event.gesture`）来判断。TSX 处理函数的第二个参数 `gestureState` 就是这个手势，字段与 [PanResponder](#panresponder) 的相同（`dx`、`dy`、`vx`、`vy`、`moveX`、`moveY`、`x0`、`y0`、`numberActiveTouches`）。只接管水平滑动：`onMoveShouldSetResponder={(e, g) => Math.abs(g.dx) > 10 && Math.abs(g.dx) > Math.abs(g.dy)}`。这个决定仍然晚了一次移动，外层的滚动视图可能已经开始滚动。滚动视图里的拖动请用 [panActivation](#滚动视图里的拖动panactivation)。
+声明的接管只根据视图本身做决定，不运行你的代码，除非它询问：`TouchClaim::on_move().ask(|r: &ClaimRequest| ..)` 在监听函数调用 `r.claim()` 时接管，可以根据至今的手势（`r.event.gesture`）来判断。TSX 处理函数的第二个参数 `gestureState` 就是这个手势，字段与 [PanResponder](#panresponder) 的相同（`dx`、`dy`、`vx`、`vy`、`moveX`、`moveY`、`x0`、`y0`、`numberActiveTouches`）。只接管水平滑动：`onMoveShouldSetResponder={(e, g) => Math.abs(g.dx) > 10 && Math.abs(g.dx) > Math.abs(g.dy)}`。这个决定仍然晚了一次移动，外层的滚动视图可能已经开始滚动；滚动视图里的拖动请用 [panActivation](#滚动视图里的拖动panactivation)。
 
 成为响应者之后：
 
@@ -540,14 +536,14 @@ fn sketch() -> impl IntoElement {
 }
 ```
 
-运行方式：带有任何触摸或响应者处理函数的视图会在原生端监听触摸。平台把发生在它上面（及其内部）的触摸连同沿途正在监听的视图路径一起上报，协商过程在 NSH 的 Rust 核心中进行，按顺序询问接管声明并调用你的处理函数：先从最外层视图向内处理捕获阶段，再从目标向外处理其他的。由此有两个结果：
+运行方式：带有任何触摸或响应者处理函数的视图会在原生端监听触摸；平台把发生在它上面（及其内部）的触摸连同沿途正在监听的视图路径一起上报，协商过程在 NSH 的 Rust 核心中进行，按顺序询问接管声明并调用你的处理函数：先从最外层视图向内处理捕获阶段，再从目标向外处理其他的。由此有两个结果：
 
 - **原生滚动视图与响应者相互竞争。** 响应者阻止滚动视图时，外层的滚动视图会停止接管触摸，直到手势结束。如果原生滚动视图先开始拖动，则滚动视图获胜：响应者收到 terminate 处理函数，触摸处理函数收到 cancel。
-- **每次移动都是一次发往你的代码的事件。** 由响应者驱动的拖动，流畅程度取决于你的代码的速度。只是移动视图的拖动，优先使用[绑定的值](#原生手势拖动捏合与旋转)。
+- **每次移动都是一次发往你的代码的事件。** 由响应者驱动的拖动，流畅程度取决于你的代码的速度；只是移动视图的拖动，优先使用[绑定的值](#原生手势拖动捏合与旋转)。
 
 ## PanResponder
 
-在 Rust 中，响应者事件已经带有手势：`ResponderEvent::gesture` 是一个 `PanGesture`，包含自开始以来的距离、速度和手指数量。在 TSX 中，`nsh` 中的 `PanResponder` 封装了手势响应者系统，并附加同样的手势状态。把它的 `panHandlers` 展开到视图上。
+在 Rust 中，响应者事件已经带有手势：`ResponderEvent::gesture` 是一个 `PanGesture`，包含自开始以来的距离、速度和手指数量。在 TSX 中，`nsh` 中的 `PanResponder` 封装了手势响应者系统，并附加同样的手势状态；把它的 `panHandlers` 展开到视图上。
 
 ```tsx tabs
 import { mount, signal, View } from "nsh";
@@ -624,7 +620,7 @@ fn ball() -> impl IntoElement {
 
 ## 滚动视图里的拖动：panActivation
 
-纵向滚动视图里一个可以横向拖动查看数值的图表，需要接管横向拖动、把纵向拖动留给滚动视图。按下时就接管触摸会让滚动从第一个像素起就被挡住。在你的代码里根据移动来判断又太晚：等它回答时，滚动视图可能已经拿走了触摸。拖动激活（`TouchClaim::on_pan(..)`、`panActivation`）让平台在主线程上随着手指移动来决定：
+纵向滚动视图里一个可以横向拖动查看数值的图表，需要接管横向拖动、把纵向拖动留给滚动视图。按下时就接管触摸会让滚动从第一个像素起就被挡住；在你的代码里根据移动来判断又太晚：等它回答时，滚动视图可能已经拿走了触摸。拖动激活（`TouchClaim::on_pan(..)`、`panActivation`）让平台在主线程上随着手指移动来决定：
 
 ```tsx tabs
 <View
@@ -653,7 +649,7 @@ view()
 | `direction` | `direction` | 只在这一个方向上激活（`left`、`right`、`up`、`down`）：反方向的拖动，或者主要横穿这个方向的拖动，会失败并留给外层的视图。 |
 | `edge` | `edge` | 只有在这条边（`left`、`right`、`top`、`bottom`）按下的手指才能开始拖动，方向为离开这条边。 |
 
-`PanActivation::horizontal(active, fail)` 和 `PanActivation::vertical(active, fail)` 设置常用的组合。没有激活偏移时，任一方向移动 10 点后激活。激活之前，外层的滚动视图会等待它（iOS），视图的其他接管声明也不会被询问。视图里面不能沿拖动所在方向滚动的滚动视图（横向拖动的视图里的纵向列表）只接手拖动失败的手势，与其他平台相同：斜向拖动归手指先超过的那个偏移。激活后，滚动视图不能再拿走这些触摸，视图成为响应者（先 grant，再收到移动）。失败时滚动视图照常滚动。在 TSX 中，`PanResponder` 的 `panHandlers` 也可以一起用：和这个属性放在同一个视图上，`onPanResponderGrant` 在激活时运行。
+`PanActivation::horizontal(active, fail)` 和 `PanActivation::vertical(active, fail)` 设置常用的组合。没有激活偏移时，任一方向移动 10 点后激活。激活之前，外层的滚动视图会等待它（iOS），视图的其他接管声明也不会被询问。视图里面不能沿拖动所在方向滚动的滚动视图（横向拖动的视图里的纵向列表）只接手拖动失败的手势，与其他平台相同：斜向拖动归手指先超过的那个偏移。激活后，滚动视图不能再拿走这些触摸，视图成为响应者（先 grant，再收到移动）；失败时滚动视图照常滚动。在 TSX 中，`PanResponder` 的 `panHandlers` 也可以一起用：和这个属性放在同一个视图上，`onPanResponderGrant` 在激活时运行。
 
 ### 单向拖动与屏幕边缘拖动
 
@@ -689,7 +685,7 @@ let content = view()
 
 ## 为什么有些答案是属性
 
-主线程从不等待你的代码。当系统需要立即得到答案时（这个拖动手势能否开始、这个点是否命中视图、这次点击是否应该收起键盘），NSH 根据事先挂载好的设置在原生端直接回答：绑定的拖动值（它们的轴）、捏合值、点击区域扩展、指针事件设置、滚动视图的键盘点击设置、拖动激活。你的处理函数事后才得知发生了什么。所以这些是声明式的设置而不是回调。也正因如此，会运行你的代码的响应者协商只在响应者之间做决定，从不阻塞原生手势。
+主线程从不等待你的代码。当系统需要立即得到答案时（这个拖动手势能否开始、这个点是否命中视图、这次点击是否应该收起键盘），NSH 根据事先挂载好的设置在原生端直接回答：绑定的拖动值（它们的轴）、捏合值、点击区域扩展、指针事件设置、滚动视图的键盘点击设置、拖动激活。你的处理函数事后才得知发生了什么。所以这些是声明式的设置而不是回调；也正因如此，会运行你的代码的响应者协商只在响应者之间做决定，从不阻塞原生手势。
 
 ## 相关内容
 
@@ -697,7 +693,7 @@ let content = view()
 - [动画](./animation.md)：用于手势驱动运动的动画值、弹簧和衰减。
 - [滚动](./scrolling.md)：键盘点击设置、滚动视图与嵌套手势。
 - [`PanResponder`](../modules/nsh.md#panresponder)：`PanResponder` 参考。
-- [无障碍](./accessibility.md)：可按压视图是无障碍元素。给它们设置角色和标签。
+- [无障碍](./accessibility.md)：可按压视图是无障碍元素；给它们设置角色和标签。
 
 ## 终端鼠标输入
 

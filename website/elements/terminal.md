@@ -10,13 +10,11 @@ demo: el-terminal
 A terminal shows the output of a program (a shell, a build, a remote session) and sends what the user types back to
 it, as a terminal application does. It interprets the program's escape sequences (colors, cursor moves, erasing,
 scroll regions, the alternate screen of full-screen programs, titles, the bell) and draws the lines with the
-platform's own text engine. It runs everywhere NSH does: macOS, Windows, Linux, iOS, Android, the web and the
-terminal backend. Its scrollback scrolls like a list and follows the end while the user is there.
-
-An input method (IME) composes at the cursor. The composing text shows there underlined, and the candidates open
-under it. The terminal cursor stays hidden during composition and returns when it ends. When composition ends,
-`onData` receives the committed text, including any parts confirmed during the composition. Cancelling sends no
-composed text.
+platform's own text engine, so it runs everywhere NSH does: macOS, Windows, Linux, iOS, Android, the web and the
+terminal backend. It keeps a scrollback that scrolls like a list and follows the end while the user is there. An
+input method composes at the cursor: what it composes shows there, underlined, and its candidates open under it.
+The terminal cursor stays hidden during composition and returns when it ends. `onData` receives the committed
+text once composition ends, including any parts confirmed during that composition; cancelling sends no composed text.
 
 The program is the app's. A `Terminal` starts nothing: the app connects it to a source of bytes (a pseudo-terminal
 on the desktop, a WebSocket, an SSH channel) with the ref's `write` and the `onData` event, and tells the program the
@@ -107,7 +105,7 @@ cells without a background show the terminal's own, the app's `class`.
 
 The emulator built in is NSH's own, written in Rust on `vte`. A Rust app uses another one (libghostty,
 `alacritty_terminal`, ...) by implementing `TerminalEmulator` over it and giving the terminals below a
-`TerminalEmulatorFactory`. The view, the keys and the events stay the same:
+`TerminalEmulatorFactory`; the view, the keys and the events stay the same:
 
 ```rust
 provide_context(TerminalEmulatorFactory::new(|size, scrollback| {

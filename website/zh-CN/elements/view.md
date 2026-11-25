@@ -90,7 +90,7 @@ view 用 flexbox 布局子元素，默认值为：`flexDirection: "column"`、`f
 
 ## 可选择的视图
 
-设置 `selectable` 后，选区按阅读顺序跨越视图中的 [`Text`](./text.md) 元素和 [`TextView`](./text-view.md)。设置了 `selectable={false}` 的文字不参与，可选择视图中的另一个可选择视图属于外层视图。各平台的手势参见[文字选择](./text-selection.md)。
+设置 `selectable` 后，选区按阅读顺序跨越视图中的 [`Text`](./text.md) 元素和 [`TextView`](./text-view.md)；设置了 `selectable={false}` 的文字不参与，可选择视图中的另一个可选择视图属于外层视图。各平台的手势参见[文字选择](./text-selection.md)。
 
 ```tsx
 <View selectable class="gap-3 p-4">
@@ -176,13 +176,13 @@ view()
 
 在 AppKit、GTK、Win32 和 GPUI 上，带有 `onFileDrop` 的视图可以接收从其他应用拖入的本地文件和目录。`onFileDragEnter` 和 `onFileDrop` 都接收 `{ uris: string[], mimeTypes: string[] }`，顺序与原生文件列表一致。`uris` 的每项都是绝对 `file:` URL，空格和非 ASCII 字符使用 URL 转义。请解析 URL 获取文件系统路径。`mimeTypes[i]` 是 `uris[i]` 按文件名得出的 MIME 类型（`a.png` 为 `image/png`），文件名看不出类型时（例如目录）为 `""`，与 DOM 的 `File.type` 相同。各平台结果一致，得出它不读取任何文件。
 
-进入时的列表可用于预告文件名、数量与类型（“松开添加 2 张图片”），只传元数据。松手后仍需重新校验文件。AppKit 把 Finder 文件引用解析为路径 URL。GTK 等异步文件列表预加载完成后报告进入，鼠标停住也会通知。离开或重置后的迟到通知会被忽略。跨目标移动时先报告离开，再携同一列表报告进入。`onFileDragLeave` 用于清除预告。Rust 进入回调接收 `&FileDragEvent`，原有的 `||`、`|_: &()|` 和 `Listener<()>` 仍可使用。
+进入时的列表可用于预告文件名、数量与类型（“松开添加 2 张图片”），只传元数据；松手后仍需重新校验文件。AppKit 把 Finder 文件引用解析为路径 URL。GTK 等异步文件列表预加载完成后报告进入，鼠标停住也会通知；离开或重置后的迟到通知会被忽略。跨目标移动时先报告离开，再携同一列表报告进入；`onFileDragLeave` 用于清除预告。Rust 进入回调接收 `&FileDragEvent`，原有的 `||`、`|_: &()|` 和 `Listener<()>` 仍可使用。
 
-在 AppKit 上，不带文件 URL、只承诺提供文件（file promise）的拖动也会被接收，例如从 Safari 或 Chrome 网页里拖出的图片、从邮件拖出的附件。这些文件要松手后才写出，所以 `onFileDragEnter` 给出 `uris: []` 和承诺文件的 `mimeTypes`。`onFileDrop` 给出 `uris: []`，文件内容在 `files` 里（与 Web 和 `Picker.pickFiles` 相同的 `{ file, name, type, size, status }`），顺序与拖动项一致，并带 `pagePosition`。NSH 把它们写到临时目录，读取后删除该目录。同时带文件 URL 的拖动（例如截图缩略图）仍按上文给出 `uris`。
+在 AppKit 上，不带文件 URL、只承诺提供文件（file promise）的拖动也会被接收，例如从 Safari 或 Chrome 网页里拖出的图片、从邮件拖出的附件。这些文件要松手后才写出，所以 `onFileDragEnter` 给出 `uris: []` 和承诺文件的 `mimeTypes`；`onFileDrop` 给出 `uris: []`，文件内容在 `files` 里（与 Web 和 `Picker.pickFiles` 相同的 `{ file, name, type, size, status }`），顺序与拖动项一致，并带 `pagePosition`。NSH 把它们写到临时目录，读取后删除该目录。同时带文件 URL 的拖动（例如截图缩略图）仍按上文给出 `uris`。
 
 在 iOS（和 iPadOS）上，带有 `onFileDrop` 的视图接收拖入的文件，例如从照片、文件 App、Safari 或应用自己的网页视图拖来的图片和文档。与桌面一致，由最近的监听视图接收。拖动项不带文件 URL，只带按类型提供、松手时才读取的数据，所以 `onFileDragEnter` 在 iOS 上给出 `uris: []`，`onFileDrop` 给出复制到应用临时目录里的文件的 `file:` URL（也带 `pagePosition`），顺序与拖动项一致。NSH 不删除这些副本，由系统适时清理临时目录：应用要保留的文件请自行移走或上传。只带文字或链接的项不是文件，不会提供给视图。视图里的文本输入框保留它能接收的内容：UIKit 的文本拖放接收文字和链接，所以带着自身链接的图片（来自网页）拖到输入框上会作为链接插入。
 
-在 Android 上，带有 `onFileDrop` 的视图接收其他应用在分屏或自由窗口中拖入的文件，例如从相册拖来的照片、从文件管理器拖来的文档。按与触摸相同的命中规则，由最近的监听视图接收。与 iOS 一样，Android 只在松手时才开放拖动数据：`onFileDragEnter` 给出 `uris: []`，`onFileDrop` 给出复制到应用缓存目录里的文件的 `file:` URL（文件名取提供方应用给的名字，名字没有扩展名时按类型补上），顺序与拖动项一致，并带 `pagePosition`。之后视图收到 `onFileDragLeave`。NSH 不删除这些副本，由系统适时清理缓存目录：应用要保留的文件请自行移走或上传。只带文字或链接的拖动不是文件拖动，仍交给文本输入框。视图里的文本输入框上方拖动的文件交给该视图。
+在 Android 上，带有 `onFileDrop` 的视图接收其他应用在分屏或自由窗口中拖入的文件，例如从相册拖来的照片、从文件管理器拖来的文档。按与触摸相同的命中规则，由最近的监听视图接收。与 iOS 一样，Android 只在松手时才开放拖动数据：`onFileDragEnter` 给出 `uris: []`，`onFileDrop` 给出复制到应用缓存目录里的文件的 `file:` URL（文件名取提供方应用给的名字，名字没有扩展名时按类型补上），顺序与拖动项一致，并带 `pagePosition`；之后视图收到 `onFileDragLeave`。NSH 不删除这些副本，由系统适时清理缓存目录：应用要保留的文件请自行移走或上传。只带文字或链接的拖动不是文件拖动，仍交给文本输入框；视图里的文本输入框上方拖动的文件交给该视图。
 
 ```tsx tabs
 const hint = signal("");
@@ -225,7 +225,7 @@ view()
     .child(text(move || files.get().join("\n")))
 ```
 
-最近的、已启用且监听 `onFileDrop` 的祖先视图接收文件，搜索范围止于模态根节点。`disabled` 会移除文件拖入、离开和放下的监听。离开、取消、完成或移除目标会清除当前拖放状态。原生侧根据已挂载的状态同步接受 Copy 操作。应用决定如何读取、打开或传输收到的文件。
+最近的、已启用且监听 `onFileDrop` 的祖先视图接收文件，搜索范围止于模态根节点。`disabled` 会移除文件拖入、离开和放下的监听；离开、取消、完成或移除目标会清除当前拖放状态。原生侧根据已挂载的状态同步接受 Copy 操作。应用决定如何读取、打开或传输收到的文件。
 
 文本输入框属于包住它的拖放目标：文件放到输入框的文字上，和放到目标其他位置一样由该目标接收，拖入、离开事件也相同，输入框里的文字保持不变。拖进输入框的文字，以及放到不在任何拖放目标内的输入框上的文件，按平台文本框的方式处理。
 
@@ -239,9 +239,9 @@ view()
 
 ## 平台说明
 
-- `boxShadow` 在所有平台上都会绘制。`android={{ elevation }}` 则改用 Android 的 Material 阴影。在 Android 上阴影需要背景色（背景透明的视图不会投下阴影）。
-- view 上的 `filter`：iOS 支持 `opacity()`、不超过 1 的 `brightness()` 和 `drop-shadow()`（图片支持所有颜色滤镜和 `blur()`）。Android 从 API 31 起全部支持，低于该版本支持颜色滤镜。
+- `boxShadow` 在所有平台上都会绘制；`android={{ elevation }}` 则改用 Android 的 Material 阴影。在 Android 上阴影需要背景色（背景透明的视图不会投下阴影）。
+- view 上的 `filter`：iOS 支持 `opacity()`、不超过 1 的 `brightness()` 和 `drop-shadow()`（图片支持所有颜色滤镜和 `blur()`）；Android 从 API 31 起全部支持，低于该版本支持颜色滤镜。
 - `backdropFilter: "blur(…)"` 在 iOS 上是系统材质（近似效果），在 Android 上需要 API 31。
-- Android 绘制 `translate`、`scale` 和 `rotate` 变换。斜切（`skew()`、`skewX()`、`skewY()`）在其他平台上生效。
+- Android 绘制 `translate`、`scale` 和 `rotate` 变换；斜切（`skew()`、`skewX()`、`skewY()`）在其他平台上生效。
 - `borderCurve: "continuous"`（`.border_curve(BorderCurve::Continuous)`）在两个平台上都会绘制平滑过渡到边的圆角（如同 iOS 应用图标）。
 - `cursor` 样式在有指针的场合生效（Mac Catalyst、连接指针设备的 iPad、桌面平台）。

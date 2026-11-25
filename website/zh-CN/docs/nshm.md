@@ -98,7 +98,7 @@ nsh add https://github.com/huacnlee/nsh-omarchy.git --rev main  # 任意 Git 地
 nsh add --path ../nsh-omarchy                                   # 本地目录，按当前内容使用
 ```
 
-它像 `Cargo.toml` 一样按包名把 nshm 记录到 `nsh.json` 的 `"dependencies"`：crates.io 上的写版本要求（`nsh add nsh-omarchy` 写入 `"^<解析到的版本>"`，`nsh add nsh-omarchy@0.3` 保留 `"0.3"`），其他来源写带 `"github"`、`"git"` 或 `"path"` 的对象。Git 上的 nshm 以标签（`v1.4.0` 或 `1.4.0`）作为版本，所以同样写版本要求。`--tag` 或 `--rev` 则固定到某个标签或提交。
+它像 `Cargo.toml` 一样按包名把 nshm 记录到 `nsh.json` 的 `"dependencies"`：crates.io 上的写版本要求（`nsh add nsh-omarchy` 写入 `"^<解析到的版本>"`，`nsh add nsh-omarchy@0.3` 保留 `"0.3"`），其他来源写带 `"github"`、`"git"` 或 `"path"` 的对象。Git 上的 nshm 以标签（`v1.4.0` 或 `1.4.0`）作为版本，所以同样写版本要求；`--tag` 或 `--rev` 则固定到某个标签或提交。
 
 ```json
 {
@@ -162,7 +162,7 @@ nsh add nsh-extra --features camera
 nshm（TSX nshm 在每个 target 上都是 bundle 的一部分），也只用于应用自己的条目：nshm 的依赖在它被链接的地方都会链接，
 被某个已链接的 nshm 依赖的 nshm 也会链接，不论应用自己的条目怎么写。
 
-[CLI：nsh add](./cli.md#nsh-add) 介绍了每种来源写法。[nsh upgrade](./cli.md#nsh-upgrade) 和 [nsh remove](./cli.md#nsh-remove) 介绍了其他命令。
+[CLI：nsh add](./cli.md#nsh-add) 介绍了每种来源写法；[nsh upgrade](./cli.md#nsh-upgrade) 和 [nsh remove](./cli.md#nsh-remove) 介绍了其他命令。
 
 ## nsh-extra
 
@@ -186,11 +186,11 @@ if (await Camera.available()) {
 }
 ```
 
-用户取消时 `takePhoto` 返回 `null`。用户不允许应用使用相机时，它以错误码 `EACCES` 拒绝。应用可以在同一次点按里关掉 sheet 并请求拍照：相机会在 sheet 关好之后出现。没有相机可用的地方（桌面、Web、模拟器）`available()` 为 `false`，`takePhoto` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝。开启这个 feature 后，打包的应用会带上它需要的条目：iOS 上的相机用途说明（应用可以在 `ios.infoPlist` 里写自己的 `NSCameraUsageDescription` 文案），Android 上对相机应用的查询声明。
+用户取消时 `takePhoto` 返回 `null`；用户不允许应用使用相机时，它以错误码 `EACCES` 拒绝。应用可以在同一次点按里关掉 sheet 并请求拍照：相机会在 sheet 关好之后出现。没有相机可用的地方（桌面、Web、模拟器）`available()` 为 `false`，`takePhoto` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝。开启这个 feature 后，打包的应用会带上它需要的条目：iOS 上的相机用途说明（应用可以在 `ios.infoPlist` 里写自己的 `NSCameraUsageDescription` 文案），Android 上对相机应用的查询声明。
 
 ### Location
 
-`Location` 在用户允许后读取设备的位置：用 `current` 读一次，或用 `watch` 在位置变化时持续收到，形式和浏览器的 `navigator.geolocation` 一致。macOS 和 iOS 用 CoreLocation 读取，Web 用浏览器的 `navigator.geolocation`。应用第一次读取时，系统或浏览器会询问用户。只在应用使用期间读取，不支持后台定位。
+`Location` 在用户允许后读取设备的位置：用 `current` 读一次，或用 `watch` 在位置变化时持续收到，形式和浏览器的 `navigator.geolocation` 一致。macOS 和 iOS 用 CoreLocation 读取，Web 用浏览器的 `navigator.geolocation`；应用第一次读取时，系统或浏览器会询问用户。只在应用使用期间读取，不支持后台定位。
 
 ```sh
 nsh add nsh-extra --features location
@@ -212,17 +212,17 @@ if (await Location.available()) {
 }
 ```
 
-- `available()` 在打包时开启了该 feature 的 macOS、iOS 应用，以及有 `navigator.geolocation` 的浏览器中为 `true`。在 Android、Windows、Linux、终端、headless 运行，以及以裸二进制运行的 Apple 应用（`nsh run --target macos`，没有 `Info.plist`，系统不会询问）中为 `false`。
-- `authorization()` 不询问用户，直接给出当前允许的范围：`"notDetermined"`、`"whenInUse"`、`"always"`、`"denied"` 或 `"restricted"`。Web 只有 `"whenInUse"`（已允许）、`"denied"` 和 `"notDetermined"`（会询问）。`requestAuthorization()` 询问用户并给出回答。读取时会自动询问，只在想自己决定询问时机时才需要先调用。
+- `available()` 在打包时开启了该 feature 的 macOS、iOS 应用，以及有 `navigator.geolocation` 的浏览器中为 `true`；在 Android、Windows、Linux、终端、headless 运行，以及以裸二进制运行的 Apple 应用（`nsh run --target macos`，没有 `Info.plist`，系统不会询问）中为 `false`。
+- `authorization()` 不询问用户，直接给出当前允许的范围：`"notDetermined"`、`"whenInUse"`、`"always"`、`"denied"` 或 `"restricted"`。Web 只有 `"whenInUse"`（已允许）、`"denied"` 和 `"notDetermined"`（会询问）。`requestAuthorization()` 询问用户并给出回答；读取时会自动询问，只在想自己决定询问时机时才需要先调用。
 - `current({ accuracy, timeout })` 给出一个 `Position`（`coords.latitude`、`longitude`、以米为单位的 `accuracy`、`altitude`、`altitudeAccuracy`、`heading`、`speed`，设备不知道的为 `null`；以及自 epoch 起的毫秒数 `timestamp`）。`accuracy` 可以是 `"best"`、`"high"`、`"balanced"`（默认）或 `"low"`。
 - `watch(listener, onError?, { accuracy, distanceFilter })` 每有新位置就调用 `listener`，返回一个停止它的函数。`onError` 收到使 watch 结束的错误。
-- 读取失败时得到一个 `Error`，其 `code` 为 `"EACCES"`（用户不允许）、`"ETIMEDOUT"`（`timeout` 内没有结果）、`"ERR_POSITION_UNAVAILABLE"`（设备找不到位置）或 `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"`（这里读不到位置）。选项超出范围时抛出 `RangeError`。
+- 读取失败时得到一个 `Error`，其 `code` 为 `"EACCES"`（用户不允许）、`"ETIMEDOUT"`（`timeout` 内没有结果）、`"ERR_POSITION_UNAVAILABLE"`（设备找不到位置）或 `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"`（这里读不到位置）；选项超出范围时抛出 `RangeError`。
 
 该 feature 会在 iOS 和 macOS 应用的 `Info.plist` 中加入 `NSLocationWhenInUseUsageDescription`，并为沙盒化的 macOS 应用加入定位 entitlement。Rust 代码使用 `nsh_extra::location`：`available()`、`authorization().await`、`request_authorization().await`、`current(LocationRequest).await`，以及 `watch(LocationRequest)`，它的 `next().await` 给出每个位置（丢弃即停止）。
 
 ### Photos
 
-`Photos` 在用户允许后读取用户的相册：最近的照片、每张用来显示的缩略图，以及用户选中的那张照片，后者和 `Picker.pickImages` 选出的图片一样交给应用。它用于一条最近照片，用户按一下就能添加。`Picker.pickImages` 不需要权限，仍是从整个相册里挑选的方式。
+`Photos` 在用户允许后读取用户的相册：最近的照片、每张用来显示的缩略图，以及用户选中的那张照片，后者和 `Picker.pickImages` 选出的图片一样交给应用。它用于一条最近照片，用户按一下就能添加；`Picker.pickImages` 不需要权限，仍是从整个相册里挑选的方式。
 
 ```sh
 nsh add nsh-extra --features photos
@@ -247,14 +247,14 @@ if (access === "full" || access === "limited") {
 Photos.on("change", () => refreshStrip());
 ```
 
-- `access()` 不询问用户，只告诉用户允许了什么：`"full"`、`"limited"`（用户选中的照片）、`"notDetermined"`、`"denied"` 或 `"unavailable"`。`requestAccess()` 第一次时询问用户并以回答 resolve。之后只有系统设置能改。
-- `recent({ limit })` 按从新到旧给出图片（不给时 30 张，最多 1000 张），不含隐藏的照片，每张带 `id` 和 `size`。`thumbnail(id, { maxDimension })` 给出最长边不超过 `maxDimension` 像素（默认 256）、方向已摆正的 JPEG。`load(id, { maxDimension, quality })` 给出和 `Picker.pickImages` 一样准备好的照片。只存在 iCloud 上的照片会下载。没有访问权限时它们以 `EACCES` 拒绝，照片不存在时以 `ENOENT` 拒绝。
+- `access()` 不询问用户，只告诉用户允许了什么：`"full"`、`"limited"`（用户选中的照片）、`"notDetermined"`、`"denied"` 或 `"unavailable"`。`requestAccess()` 第一次时询问用户并以回答 resolve；之后只有系统设置能改。
+- `recent({ limit })` 按从新到旧给出图片（不给时 30 张，最多 1000 张），不含隐藏的照片，每张带 `id` 和 `size`。`thumbnail(id, { maxDimension })` 给出最长边不超过 `maxDimension` 像素（默认 256）、方向已摆正的 JPEG；`load(id, { maxDimension, quality })` 给出和 `Picker.pickImages` 一样准备好的照片。只存在 iCloud 上的照片会下载。没有访问权限时它们以 `EACCES` 拒绝，照片不存在时以 `ENOENT` 拒绝。
 - 有限访问时，`presentLimitedPicker()` 显示系统的选择面板让用户更改选择，并以用户选中的 `id` resolve。
 - `on("change")` 在相册变化时通知应用，用户允许读取后生效。
-- Android、桌面和 Web 上 `access()` 为 `"unavailable"`，读取以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝。Android 只允许以照片为核心用途的应用读取整个相册（Google Play 对 `READ_MEDIA_IMAGES` 的政策）。其他应用使用系统的照片选择器，也就是 `Picker.pickImages` 显示的那个。
+- Android、桌面和 Web 上 `access()` 为 `"unavailable"`，读取以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝。Android 只允许以照片为核心用途的应用读取整个相册（Google Play 对 `READ_MEDIA_IMAGES` 的政策）；其他应用使用系统的照片选择器，也就是 `Picker.pickImages` 显示的那个。
 - 声明了 `"capabilities"` 的应用用 [`"picker": true`](./sandbox-and-capabilities.md#picker) 授予 `Photos`，和 `Picker` 用的是同一项能力：除 `access()` 外的每个函数都会先检查它。
 
-开启这个 feature 后，打包的 iOS 应用会带上相册的用途说明（应用可以在 `ios.infoPlist` 里写自己的 `NSPhotoLibraryUsageDescription` 文案）。Rust 代码使用 `nsh_extra::photos`。用 `set_backend` 设置的 `PhotosBackend` 会代替系统相册应答（嵌入方自己的相册，或测试的照片）。
+开启这个 feature 后，打包的 iOS 应用会带上相册的用途说明（应用可以在 `ios.infoPlist` 里写自己的 `NSPhotoLibraryUsageDescription` 文案）。Rust 代码使用 `nsh_extra::photos`；用 `set_backend` 设置的 `PhotosBackend` 会代替系统相册应答（嵌入方自己的相册，或测试的照片）。
 
 #### 内嵌的照片选择器
 
@@ -284,17 +284,17 @@ const photos = await Promise.all(selected().map((id) => Photos.loadPicked(id, { 
 picker?.deselect(id);
 ```
 
-- 用户每次选中或取消选中一张照片，`onChange` 都给出当前所有选中照片的 id，按用户选中的先后排列，选择器上也按这个顺序给每张照片标序号。id 是不透明的。照片的字节留在原生侧，直到 `loadPicked(id, options)` 读取（选项同 `load`）。照片选中且选择器还在显示时 id 可读。之后以 `ENOENT` 拒绝。
+- 用户每次选中或取消选中一张照片，`onChange` 都给出当前所有选中照片的 id，按用户选中的先后排列，选择器上也按这个顺序给每张照片标序号。id 是不透明的；照片的字节留在原生侧，直到 `loadPicked(id, options)` 读取（选项同 `load`）。照片选中且选择器还在显示时 id 可读；之后以 `ENOENT` 拒绝。
 - `selectionLimit` 限制最多选几张（默认 100，与 `Picker.pickImages` 一致；0 表示系统允许的最多张数），`filter` 显示 `"images"`（默认）、`"livePhotos"` 或 `"screenshots"`。
 - 尺寸由样式决定：给它一个高度，用 `borderRadius` 和 `overflow: "hidden"` 做圆角。
-- `pickerViewAvailable()` 为 `false` 的地方（iOS 16 及以下、Android、桌面和 Web）它不占空间、什么也不显示。应用改用 `Picker.pickImages` 让用户挑选。Android 的照片选择器需要较新设备上的系统扩展才能内嵌，Native Shell 暂未使用。
+- `pickerViewAvailable()` 为 `false` 的地方（iOS 16 及以下、Android、桌面和 Web）它不占空间、什么也不显示；应用改用 `Picker.pickImages` 让用户挑选。Android 的照片选择器需要较新设备上的系统扩展才能内嵌，Native Shell 暂未使用。
 - `loadPicked` 和 `Photos` 的其他函数一样需要 `picker` 能力。
 
 Rust 代码用 `photos_picker()` 创建它（`.selection_limit(10).on_change(..)`），通过 `component_ref::<PhotosPicker>()` 的 `PhotosPickerApi` 取消选中，用 `nsh_extra::photos::load_picked` 读取。
 
 ### Push
 
-`Push` 向推送服务注册设备，把设备 token 交给应用，应用再把它发给自己的服务器。之后通知以事件的形式到达。iOS 上用的是系统的推送服务。Android 没有每台设备都有的推送服务，因此应用要链接一个推送服务的绑定，即基于 `nsh_extra::push`、封装该服务 SDK 的 crate：
+`Push` 向推送服务注册设备，把设备 token 交给应用，应用再把它发给自己的服务器。之后通知以事件的形式到达。iOS 上用的是系统的推送服务；Android 没有每台设备都有的推送服务，因此应用要链接一个推送服务的绑定，即基于 `nsh_extra::push`、封装该服务 SDK 的 crate：
 
 ```sh
 nsh add nsh-extra --features push
@@ -328,19 +328,19 @@ function closeConversation(threadId: string) {
 }
 ```
 
-- `register()` 以 `{ token }` 完成，`token` 是推送服务要的字符串（iOS 上是十六进制）。设备未能注册时以服务给出的原因拒绝。服务要能连上才会答复，离线时这个 Promise 会一直等待：可靠的做法是 `on("token")`，token 变了它也会报告。每次启动都注册一次，`token()` 读取最近的一个。
+- `register()` 以 `{ token }` 完成，`token` 是推送服务要的字符串（iOS 上是十六进制）；设备未能注册时以服务给出的原因拒绝。服务要能连上才会答复，离线时这个 Promise 会一直等待：可靠的做法是 `on("token")`，token 变了它也会报告。每次启动都注册一次，`token()` 读取最近的一个。
 - `press` 报告用户点按的通知，包括启动应用的那一条，它会等到第一个监听者。`notification` 报告应用在前台时到达的通知。两者都带它的 `id`、`threadId` 和推送服务发来的 `payload`。payload 是不可信输入。
 - `background` 报告唤醒应用或在前台到达的投递（iOS 上是带 `content-available` 的那种，可见且带 `content-available` 的推送在前台到达时，也会报告给 `notification`；Android 上是绑定交来的投递）。系统会等它的监听者：返回一个 Promise 表示这项工作及其结果，须在投递到达后 25 秒内完成。到达时没有监听者的投递，最多等到到达后 5 秒。
-- `setForegroundPresentation(presentation)` 决定应用在前台时通知怎么显示，`setForegroundPresentation(presentation, { threadId })` 决定某个 thread 的通知怎么显示。传 `null` 撤销。它们要在通知到达前设好（系统会立即询问），并对应用的所有界面生效。Android 上由绑定按它们发出通知。
-- `closeThread(threadId)` 移除某个 thread（Android 上是通知分组）里已送达的通知，`Notifications.show` 显示的除外。`Notifications.close(id)` 移除单条。
-- 独立运行的 iOS 应用里，以及应用链接了推送服务绑定的地方，`available()` 为 `true`。其他地方为 `false`，`register` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝。`closeThread` 也一样，Android 除外。
+- `setForegroundPresentation(presentation)` 决定应用在前台时通知怎么显示，`setForegroundPresentation(presentation, { threadId })` 决定某个 thread 的通知怎么显示；传 `null` 撤销。它们要在通知到达前设好（系统会立即询问），并对应用的所有界面生效。Android 上由绑定按它们发出通知。
+- `closeThread(threadId)` 移除某个 thread（Android 上是通知分组）里已送达的通知，`Notifications.show` 显示的除外；`Notifications.close(id)` 移除单条。
+- 独立运行的 iOS 应用里，以及应用链接了推送服务绑定的地方，`available()` 为 `true`。其他地方为 `false`，`register` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝；`closeThread` 也一样，Android 除外。
 - 声明了 `"capabilities"` 的应用用 [`"notifications": true`](./sandbox-and-capabilities.md#notifications) 授予 `Push`，与 `Notifications` 用的是同一项能力。token、投递和它们的显示方式属于整个应用，所以除 `available()` 外的每个函数都先检查这项能力。
 
-开启这个 feature 后，打包的 iOS 应用会带上 `remote-notification` 后台模式。`aps-environment` entitlement 来自应用签名所用的描述文件（[iOS 真机](./packaging.md#ios-真机)）。Android 上它不添加任何条目：推送服务的 SDK 自带它的 manifest 所需。Rust 代码（比如某个推送服务 SDK 的绑定）使用 `nsh_extra::push`：`on_event` 收到同样的事件，并带 token 的原始字节。`set_foreground_presentation_decider` 在原生侧决定每条通知怎么显示。iOS 的启动参数从 `nsh_platform_ios::on_application_event` 取得（[应用事件](./ios.md#应用事件)）。绑定实现 `PushProvider`（向它的服务注册设备），在自己的 `#[native_module]` 入口里用 `set_provider` 设上，再用 `provide_token`、`provide_registration_failure`、`provide_notification` 和 `provide_background` 报告服务送来的内容。点按绑定发出的通知会以 intent 的 extras 携带 payload 打开应用，`press` 收到的 `payload` 就是这些 extras（Android 不告诉是哪条通知，所以没有 `id` 和 `threadId`）。
+开启这个 feature 后，打包的 iOS 应用会带上 `remote-notification` 后台模式。`aps-environment` entitlement 来自应用签名所用的描述文件（[iOS 真机](./packaging.md#ios-真机)）。Android 上它不添加任何条目：推送服务的 SDK 自带它的 manifest 所需。Rust 代码（比如某个推送服务 SDK 的绑定）使用 `nsh_extra::push`：`on_event` 收到同样的事件，并带 token 的原始字节；`set_foreground_presentation_decider` 在原生侧决定每条通知怎么显示；iOS 的启动参数从 `nsh_platform_ios::on_application_event` 取得（[应用事件](./ios.md#应用事件)）。绑定实现 `PushProvider`（向它的服务注册设备），在自己的 `#[native_module]` 入口里用 `set_provider` 设上，再用 `provide_token`、`provide_registration_failure`、`provide_notification` 和 `provide_background` 报告服务送来的内容。点按绑定发出的通知会以 intent 的 extras 携带 payload 打开应用，`press` 收到的 `payload` 就是这些 extras（Android 不告诉是哪条通知，所以没有 `id` 和 `threadId`）。
 
 ### Speech
 
-`Speech` 把用户说的话变成文字（听写）：应用开始一个会话，系统监听麦克风，转写文本随说话逐步到达。macOS 和 iOS 使用系统的 Speech 框架识别，Android 使用设备上的语音识别服务（`SpeechRecognizer`），Windows 使用系统的听写（`Windows.Media.SpeechRecognition`），Web 使用浏览器的 Web Speech API。系统或浏览器会向用户请求一次麦克风权限（Apple 平台上还有语音识别权限）。Windows 的听写使用用户的联机语音识别，由用户在“设置 > 隐私和安全性 > 语音”中打开。关闭时会话以 `"not-allowed"` 结束。Linux 上没有识别器，终端应用（TUI 宿主，在任何操作系统上）也没有。用 GPUI 嵌入的应用在 macOS 和 Windows 上使用平台的识别器。显示麦克风按钮前先检查 `Speech.available()`：没有识别器的地方，会话会立即以 `"unavailable"` 结束。
+`Speech` 把用户说的话变成文字（听写）：应用开始一个会话，系统监听麦克风，转写文本随说话逐步到达。macOS 和 iOS 使用系统的 Speech 框架识别，Android 使用设备上的语音识别服务（`SpeechRecognizer`），Windows 使用系统的听写（`Windows.Media.SpeechRecognition`），Web 使用浏览器的 Web Speech API；系统或浏览器会向用户请求一次麦克风权限（Apple 平台上还有语音识别权限）。Windows 的听写使用用户的联机语音识别，由用户在“设置 > 隐私和安全性 > 语音”中打开；关闭时会话以 `"not-allowed"` 结束。Linux 上没有识别器，终端应用（TUI 宿主，在任何操作系统上）也没有；用 GPUI 嵌入的应用在 macOS 和 Windows 上使用平台的识别器。显示麦克风按钮前先检查 `Speech.available()`：没有识别器的地方，会话会立即以 `"unavailable"` 结束。
 
 ```sh
 nsh add nsh-extra --features speech
@@ -399,14 +399,14 @@ function toggle() {
 }
 ```
 
-- `start` 立即返回会话。会话按顺序报告：麦克风打开、识别器开始监听时 `start`。转写每次变化时 `result`（`text` 始终是到目前为止的完整转写，应用照原样显示即可）。最后一次 `end`，之后不再有事件。`stop()` 停止监听，让识别器处理完已听到的内容：最后一个 `isFinal: true` 的结果，然后 `end`。`abort()` 立即结束会话，不带错误。麦克风只有一个，所以同一时间只运行一个会话：开始新会话会结束正在运行的会话。同一个应用在同一个视图里开始的新会话像 `abort()` 一样结束它，不带错误。进程里另一个应用或视图（嵌入应用的另一个 `AppView`）开始的会话以 `"audio-capture"` 结束它，因为麦克风被拿走了。
+- `start` 立即返回会话。会话按顺序报告：麦克风打开、识别器开始监听时 `start`；转写每次变化时 `result`（`text` 始终是到目前为止的完整转写，应用照原样显示即可）；最后一次 `end`，之后不再有事件。`stop()` 停止监听，让识别器处理完已听到的内容：最后一个 `isFinal: true` 的结果，然后 `end`。`abort()` 立即结束会话，不带错误。麦克风只有一个，所以同一时间只运行一个会话：开始新会话会结束正在运行的会话。同一个应用在同一个视图里开始的新会话像 `abort()` 一样结束它，不带错误；进程里另一个应用或视图（嵌入应用的另一个 `AppView`）开始的会话以 `"audio-capture"` 结束它，因为麦克风被拿走了。
 - `end` 带有最后的转写，会话失败时还带有 `error`，名称与 Web Speech API 一致：`"not-allowed"`（用户或系统不允许使用麦克风或语音识别，或应用在后台）、`"no-speech"`（没有听到说话）、`"audio-capture"`（无法使用麦克风）、`"network"`（识别器需要网络）、`"language-not-supported"`（识别器不认识 `lang`）、`"unavailable"`（这里没有识别器，或暂时不可用）和 `"failed"`。
 - 选项类型不对时 `start` 抛出 `TypeError`，`lang` 不是语言标签时抛出 `RangeError`。
 - macOS 和 iOS 上、有语音识别服务的 Android 设备上、有听写语言和麦克风的 Windows 上、支持 Web Speech API 的浏览器里（Chrome、Edge 等基于 Chromium 的浏览器，以及 Safari），以及应用给模块设置了自己的识别器的地方，`available()` 为 `true`。Linux 上和终端应用里为 `false`。
-- 在 Web 上，页面需要安全上下文（HTTPS，开发时也可以是 `localhost`）才能使用麦克风。用 iframe 嵌入应用的页面需要允许麦克风（`allow="microphone"`）。Chrome 使用它的在线服务识别，所以连接断开时报告 `"network"`。
+- 在 Web 上，页面需要安全上下文（HTTPS，开发时也可以是 `localhost`）才能使用麦克风；用 iframe 嵌入应用的页面需要允许麦克风（`allow="microphone"`）。Chrome 使用它的在线服务识别，所以连接断开时报告 `"network"`。
 - 声明了 `"capabilities"` 的应用用 [`"speech": true`](./sandbox-and-capabilities.md#speech) 授予 `Speech`。没有授予时 `start` 抛出一个 `Error`，其 `code` 为 `"ERR_ACCESS_DENIED"`，`permission` 为 `"speech"`。
 
-开启这个 feature 后，打包的应用会带上它需要的条目：iOS 和 macOS 上的麦克风和语音识别用途说明（应用可以在 `ios.infoPlist` / `macos.infoPlist` 里写自己的文案），macOS 上的音频输入 entitlement，Android 上的 `RECORD_AUDIO` 权限和对语音识别服务的查询声明。在 Web 上，模块通过 wasm-bindgen 调用浏览器，所以 `nsh` 会用 `wasm-bindgen` CLI 构建应用的 Web 运行时（[在 Rust 中使用浏览器 API](./web.md#在-rust-中使用浏览器-api)）。站点本身不需要任何声明。
+开启这个 feature 后，打包的应用会带上它需要的条目：iOS 和 macOS 上的麦克风和语音识别用途说明（应用可以在 `ios.infoPlist` / `macos.infoPlist` 里写自己的文案），macOS 上的音频输入 entitlement，Android 上的 `RECORD_AUDIO` 权限和对语音识别服务的查询声明。在 Web 上，模块通过 wasm-bindgen 调用浏览器，所以 `nsh` 会用 `wasm-bindgen` CLI 构建应用的 Web 运行时（[在 Rust 中使用浏览器 API](./web.md#在-rust-中使用浏览器-api)）；站点本身不需要任何声明。
 
 Rust 代码使用 `nsh_extra::speech`：`available().await`，以及 `recognize(SpeechRequest)` 返回的会话，它的 `next().await` 给出每个 `SpeechEvent`（`stop()`、`abort()`；丢弃它即中止）。用自己的方式识别语音的应用（自己的引擎或服务，比如嵌入 NSH 的应用）用 `set_backend` 给模块一个 `SpeechBackend`：之后每个会话都交给它，而不是系统的识别器。
 
@@ -427,7 +427,7 @@ async fn dictate() -> String {
 }
 ```
 
-在 `nsh test`（以及 `nsh_testing::Headless`）中，会话运行在模块的模拟识别器上，它的名称是 `"nsh-extra/speech"`：会话立即开始监听，就像用户允许了麦克风。测试通过 [`app.fake`](./testing-and-trace.md)（Rust 中是 `Headless::call_fake`）调用这个模拟识别器，代替用户说话：
+在 `nsh test`（以及 `nsh_testing::Headless`）中，会话运行在模块的模拟识别器上，它的名称是 `"nsh-extra/speech"`：会话立即开始监听，就像用户允许了麦克风；测试通过 [`app.fake`](./testing-and-trace.md)（Rust 中是 `Headless::call_fake`）调用这个模拟识别器，代替用户说话：
 
 | 方法 | `args` | 作用和回答 |
 |---|---|---|
@@ -504,11 +504,11 @@ const result = JSON.parse(await DiskTree.request("/scan", JSON.stringify({ path 
 
 为什么用 `ext/`，而不是把应用根目录做成 crate（`"rust": "."`）：
 
-- **与其他 nshm 一样。** 应用自己的 Rust 和安装的 nshm 用同样的方式列出、锁定和构建。以后把 `ext/` 里的 crate 发布到 crates.io 或单独的仓库，只需改它在 `nsh.json` 里的条目。
+- **与其他 nshm 一样。** 应用自己的 Rust 和安装的 nshm 用同样的方式列出、锁定和构建；以后把 `ext/` 里的 crate 发布到 crates.io 或单独的仓库，只需改它在 `nsh.json` 里的条目。
 - **每个 crate 独立。** 它有自己的 `Cargo.toml`、依赖和测试（在它的目录里 `cargo test`），并在 `~/.nsh/builds` 里优化构建一次，直到它改变。应用根目录仍是 TSX 项目。
 - **接口小。** TSX 只能通过 `#[native_module]` 注册的内容访问 Rust，声明由 Rust 签名生成（`.nsh/types/<crate>.d.ts`），边界有类型，评审时一目了然。
 
-用 `cargo new --lib ext/<name>` 新增 crate，写上 `#[native_module("<name>")]`，再运行 `nsh add --path ext/<name>`。界面留在 TSX，需要原生性能、平台能力或 crates.io 生态的部分放进 Rust。必须原生的视图也可以由 crate 导出为组件（[Rust nshm](#rust-nshm)）。
+用 `cargo new --lib ext/<name>` 新增 crate，写上 `#[native_module("<name>")]`，再运行 `nsh add --path ext/<name>`。界面留在 TSX，需要原生性能、平台能力或 crates.io 生态的部分放进 Rust；必须原生的视图也可以由 crate 导出为组件（[Rust nshm](#rust-nshm)）。
 
 ## 编写 nshm
 
@@ -566,7 +566,7 @@ nshm 兼容的 NSH 版本就是它自己对 `nsh-core` 的版本要求（`nsh-co
 
 ### 打包的应用需要什么
 
-用到系统功能的 nshm 在 `Cargo.toml` 里声明打包的应用需要什么：写在 `[package.metadata.nsh]` 下。只有某个 feature 需要时，写在 `[package.metadata.nsh.features.<feature>]` 下。`nsh` 构建安装包时，会把应用链接的每个 crate 的条目（按 Cargo 实际开启的 feature）加进去。开发宿主拿到其中的 iOS `Info.plist` 键和 Android 条目：
+用到系统功能的 nshm 在 `Cargo.toml` 里声明打包的应用需要什么：写在 `[package.metadata.nsh]` 下；只有某个 feature 需要时，写在 `[package.metadata.nsh.features.<feature>]` 下。`nsh` 构建安装包时，会把应用链接的每个 crate 的条目（按 Cargo 实际开启的 feature）加进去；开发宿主拿到其中的 iOS `Info.plist` 键和 Android 条目：
 
 ```toml
 [package.metadata.nsh.features.scanner.ios.infoPlist]
@@ -596,11 +596,11 @@ crate 不能设置 `android.manifestPlaceholders`，设置了会报错：占位�
 两个 crate 带了同一个 Android 库的不同版本时，用应用在自己的 `android.libraries` 里列出的那个版本。两个库定义了同名资源时，
 应用列出的库优先，其次是 crate 名排序靠前的（[Java 代码](./packaging.md#java-代码)）。
 
-应用自己的 `nsh.json` 优先：它设置过的键保留它的值，数组（例如 `UIBackgroundModes`）合并。两个 crate 给同一个键设置了不同的值时（例如两段不同的相机用途说明），由应用在 `ios.infoPlist`、`ios.entitlements`、`macos.infoPlist` 或 `macos.entitlements` 里写这个键来决定。应用没写之前，打包该平台应用会报错并指出这两个 crate。NSH 自己设置的键（包标识、版本等）不能由 crate 设置。
+应用自己的 `nsh.json` 优先：它设置过的键保留它的值，数组（例如 `UIBackgroundModes`）合并。两个 crate 给同一个键设置了不同的值时（例如两段不同的相机用途说明），由应用在 `ios.infoPlist`、`ios.entitlements`、`macos.infoPlist` 或 `macos.entitlements` 里写这个键来决定；应用没写之前，打包该平台应用会报错并指出这两个 crate。NSH 自己设置的键（包标识、版本等）不能由 crate 设置。
 
-crate 翻译的是各 crate 在 `ios.infoPlist`（macOS 是 `macos.infoPlistStrings` 翻译 `macos.infoPlist`）里设置的键，按它们的措辞翻译。按应用开启的 feature 没有 crate 设置的键（例如所在 feature 没开），它的翻译会被略过并给出警告。应用只采用自己支持的语言的 crate 翻译，即 `locales` 里的语言或应用自己 `ios.infoPlistStrings`（`macos.infoPlistStrings`）里的语言（写一个空的 `{}` 就是只声明语言、不写自己的文字），所以 crate 可以带上很多语言，而不会给应用增加语言。应用自己设置了的键不采用任何 crate 的翻译，因为那些翻译说的不是应用自己的文字。两个 crate 对同一个键给出不同的翻译时，同样由应用在 `ios.infoPlistStrings`（`macos.infoPlistStrings`）里写这个键来决定。
+crate 翻译的是各 crate 在 `ios.infoPlist`（macOS 是 `macos.infoPlistStrings` 翻译 `macos.infoPlist`）里设置的键，按它们的措辞翻译；按应用开启的 feature 没有 crate 设置的键（例如所在 feature 没开），它的翻译会被略过并给出警告。应用只采用自己支持的语言的 crate 翻译，即 `locales` 里的语言或应用自己 `ios.infoPlistStrings`（`macos.infoPlistStrings`）里的语言（写一个空的 `{}` 就是只声明语言、不写自己的文字），所以 crate 可以带上很多语言，而不会给应用增加语言。应用自己设置了的键不采用任何 crate 的翻译，因为那些翻译说的不是应用自己的文字。两个 crate 对同一个键给出不同的翻译时，同样由应用在 `ios.infoPlistStrings`（`macos.infoPlistStrings`）里写这个键来决定。
 
-在应用旁边开发时用 `nsh add --path ../my-gauge`，按目录当前内容使用。发布方式与普通 crate 相同（`cargo publish`），加上关键词 `nshm`，便于在 [crates.io](https://crates.io/keywords/nshm) 上找到。也可以推送到 Git 并给版本打标签。
+在应用旁边开发时用 `nsh add --path ../my-gauge`，按目录当前内容使用。发布方式与普通 crate 相同（`cargo publish`），加上关键词 `nshm`，便于在 [crates.io](https://crates.io/keywords/nshm) 上找到；也可以推送到 Git 并给版本打标签。
 
 ### 封装原生 SDK
 
@@ -629,8 +629,8 @@ fn main() {
 - 用 `rustc-link-lib`，不要用 `rustc-link-arg`：链接参数只作用于本 crate 自己的目标。
 - 静态库的隐私清单条目写进应用的 `ios.privacyManifest`。
 - NSH 不嵌入动态 framework，优先使用 SDK 的静态版本。
-- 许可证要求用户能替换的库（LGPL，例如 libmpv）只能动态链接，由应用自己携带。NSH 的打包没有对应设置。像上面那样在 nshm 的 `build.rs` 里链接它（`rustc-link-lib=framework=…`、`rustc-link-search=framework=…`）。可执行文件的运行路径写在应用的 `.cargo/config.toml` 里（在 `[target.aarch64-apple-darwin]` 下写 `rustflags = ["-C", "link-arg=-Wl,-rpath,@executable_path/../Frameworks", "-C", "link-arg=-Wl,-rpath,<framework 所在目录>"]`），因为 crate 的 `rustc-link-arg` 到不了 `nsh run`、`nsh check`、`nsh test`。`nsh package --target macos` 之后，把 framework 复制到应用的 `Contents/Frameworks/`，用 `install_name_tool -delete_rpath` 去掉开发时的运行路径，再按先 framework、后应用的顺序，用打包时的身份重新签名（`codesign --force --sign <身份> --options runtime --entitlements <应用的 entitlements>`，ad hoc 包用 `--sign -`），最后用 `codesign --verify --deep --strict` 检查。
-- 在 Linux 和 Windows 上，同样由 `build.rs` 链接 SDK（Linux 上是 `.a` 和 `.so`，Windows 上是 `.lib`）。NSH 同样不会把共享库（`.so`、`.dll`）放进包里。请优先使用 SDK 的静态版本。
+- 许可证要求用户能替换的库（LGPL，例如 libmpv）只能动态链接，由应用自己携带；NSH 的打包没有对应设置。像上面那样在 nshm 的 `build.rs` 里链接它（`rustc-link-lib=framework=…`、`rustc-link-search=framework=…`）。可执行文件的运行路径写在应用的 `.cargo/config.toml` 里（在 `[target.aarch64-apple-darwin]` 下写 `rustflags = ["-C", "link-arg=-Wl,-rpath,@executable_path/../Frameworks", "-C", "link-arg=-Wl,-rpath,<framework 所在目录>"]`），因为 crate 的 `rustc-link-arg` 到不了 `nsh run`、`nsh check`、`nsh test`。`nsh package --target macos` 之后，把 framework 复制到应用的 `Contents/Frameworks/`，用 `install_name_tool -delete_rpath` 去掉开发时的运行路径，再按先 framework、后应用的顺序，用打包时的身份重新签名（`codesign --force --sign <身份> --options runtime --entitlements <应用的 entitlements>`，ad hoc 包用 `--sign -`），最后用 `codesign --verify --deep --strict` 检查。
+- 在 Linux 和 Windows 上，同样由 `build.rs` 链接 SDK（Linux 上是 `.a` 和 `.so`，Windows 上是 `.lib`）。NSH 同样不会把共享库（`.so`、`.dll`）放进包里；请优先使用 SDK 的静态版本。
 
 ### TSX nshm
 
@@ -670,13 +670,13 @@ nshm 在自己的 `nsh.json` 的 `"dependencies"` 中列出需要的 nshm，写�
 
 ## 平台 nshm
 
-nshm 可以提供自己的 target，例如 NSH 不构建的平台：在 `nsh.json` 中写 `"platform"`，并在 crate 中提供名为 `nsh-platform-<name>` 的二进制。crate 只提供 target 时不需要 `#[native_module]`。没有它时，应用不会链接这个 crate，也不会因此变成 Rust 应用：
+nshm 可以提供自己的 target，例如 NSH 不构建的平台：在 `nsh.json` 中写 `"platform"`，并在 crate 中提供名为 `nsh-platform-<name>` 的二进制。crate 只提供 target 时不需要 `#[native_module]`；没有它时，应用不会链接这个 crate，也不会因此变成 Rust 应用：
 
 ```json
 { "name": "nsh-harmony", "version": "0.1.0", "platform": "harmony" }
 ```
 
-`nsh add nsh-harmony` 之后，应用的 `nsh run`、`nsh dev`、`nsh test` 和 `nsh package` 带上 `--target harmony` 时，会构建这个二进制（在应用的 `.nsh/platforms/harmony` 中，不改动共享安装）并把它作为[外部 target](./cli.md#外部-target) 运行。以 `nsh-platform-<name>` 安装在 `PATH` 上的平台不必是 nshm，所有应用都能用。应用的 nshm 优先。[构建平台](./platform-extensions.md)介绍了平台需要实现什么。
+`nsh add nsh-harmony` 之后，应用的 `nsh run`、`nsh dev`、`nsh test` 和 `nsh package` 带上 `--target harmony` 时，会构建这个二进制（在应用的 `.nsh/platforms/harmony` 中，不改动共享安装）并把它作为[外部 target](./cli.md#外部-target) 运行。以 `nsh-platform-<name>` 安装在 `PATH` 上的平台不必是 nshm，所有应用都能用；应用的 nshm 优先。[构建平台](./platform-extensions.md)介绍了平台需要实现什么。
 
 ## 安全
 

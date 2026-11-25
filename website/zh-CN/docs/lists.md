@@ -8,11 +8,7 @@ demo: guide-lists
 
 # 列表
 
-列表（Rust 中的 `virtual_list(..)`，TSX 中 `nsh` 的 `List`）在原生滚动视图里显示长数据。它只创建屏幕附近的行，所以一百万条的列表，开销和三十条差不多。
-
-会增长的集合，例如聊天记录、信息流和历史记录，一开始就用列表。内容少且数量固定时，用滚动视图加普通子元素即可。
-
-哪些行存在、放在哪里、多列布局、吸顶标题、哪些条目可见，都由原生端计算。原生端需要某个单元格时，你的代码才填充它的内容。
+列表（Rust 中的 `virtual_list(..)`，TSX 中 `nsh` 的 `List`）在原生滚动视图上渲染长数据，但只创建屏幕附近的行。哪些行存在、放在哪里、多列布局、吸顶标题以及哪些条目可见，全部由原生计算；只有当原生端要一个单元格时，你的代码才去填充内容。一百万条的列表，开销和三十条的差不多。
 
 ```tsx tabs
 import { List, mount, Text, View } from "nsh";
@@ -61,7 +57,7 @@ pub fn App() -> impl IntoElement {
 }
 ```
 
-在 Rust 中，`virtual_list(count, row)` 接收行数（一个值、一个 signal 或一个闭包）和一个根据位置（`at.index()`）构建行的函数。行按这个索引读取你的数据。在 TSX 中，`each` 接收条目，行函数拿到条目。和[滚动视图](./scrolling.md)一样，列表本身是视口，需要父元素给出尺寸（`.flex_1()`、`flex: 1` 或一个高度）。
+在 Rust 中，`virtual_list(count, row)` 接收行数（一个值、一个 signal 或一个闭包）和一个根据位置（`at.index()`）构建行的函数；行按这个索引读取你的数据。在 TSX 中，`each` 接收条目，行函数拿到条目。和[滚动视图](./scrolling.md)一样，列表本身是视口，需要父元素给出尺寸（`.flex_1()`、`flex: 1` 或一个高度）。
 
 ## 复用是如何工作的
 
@@ -142,11 +138,11 @@ virtual_list(move || posts.with(Vec::len), move |at| {
 .flex_1()
 ```
 
-各行可以高度不同。在测量之前，列表假定行高为预估尺寸（默认 50 点）。传入接近典型行高的值，滚动条和跳转到远处条目从一开始就会比较准确。
+各行可以高度不同。在测量之前，列表假定行高为预估尺寸（默认 50 点）；传入接近典型行高的值，滚动条和跳转到远处条目从一开始就会比较准确。
 
 ## 修改数据
 
-在 Rust 中，把行数写成 signal 或闭包（`move || posts.with(Vec::len)`）：列表会原地增长和收缩。只在末尾增删的行不需要做别的。在其他位置增删行时，用 `.keys(move || posts.with(|p| p.iter().map(|p| p.id).collect::<Vec<_>>()))` 给出各行的标识，列表会按键匹配各行。
+在 Rust 中，把行数写成 signal 或闭包（`move || posts.with(Vec::len)`）：列表会原地增长和收缩。只在末尾增删的行不需要做别的；在其他位置增删行时，用 `.keys(move || posts.with(|p| p.iter().map(|p| p.id).collect::<Vec<_>>()))` 给出各行的标识，列表会按键匹配各行。
 
 在 TSX 中，传入新数组即可改变条目：`posts.set([...posts(), ...more])`。列表会**按条目标识**（`===`）比较新旧数组，或者按 `keyExtractor` 返回的键比较。
 
@@ -158,7 +154,7 @@ virtual_list(move || posts.with(Vec::len), move |at| {
 - 改动过的条目应是一个新对象（`{ ...post, title }`），这样它的行才会显示变化。
 - 在前面插入（新消息、刷新后的信息流）会保留用户的阅读位置。
 
-`keyExtractor` 给出匹配改动所用的键，因此重建为新对象的条目仍保留各自的行。它也为可见性回调中的条目命名（见下文）。不传时按标识匹配改动，可见性回调依次取 `item.key`、`item.id`、索引为条目命名。
+`keyExtractor` 给出匹配改动所用的键，因此重建为新对象的条目仍保留各自的行；它也为可见性回调中的条目命名（见下文）。不传时按标识匹配改动，可见性回调依次取 `item.key`、`item.id`、索引为条目命名。
 
 ## 属性
 
@@ -197,11 +193,11 @@ virtual_list(move || posts.with(Vec::len), move |at| {
 | `scrollbar` | `.scrollbar(..)` | `boolean \| ScrollbarTheme` | `true` | 显示滚动条：平台的滚动指示器，或应用设置主题后的[内置滚动条](../elements/scrollbar.md#内置滚动条)；对象是该视图自己的主题。 |
 | `ref` | `.element_ref(&list)` | `ListRef` | | `scrollToIndex`、`scrollToOffset`、`scrollToEnd`、`scrollTo`、`measureScrollPosition`。 |
 
-头部、尾部和空状态插槽接受元素（在 TSX 中也可以是组件：`header={Header}`）。它们是独立的单元格，从不被复用，并且和其他元素一样是响应式的：整个插槽是一个 `<If>` 或 `<Each>` 时，它随条件或数据更新。组件只调用一次。
+头部、尾部和空状态插槽接受元素（在 TSX 中也可以是组件：`header={Header}`）。它们是独立的单元格，从不被复用，并且和其他元素一样是响应式的：整个插槽是一个 `<If>` 或 `<Each>` 时，它随条件或数据更新；组件只调用一次。
 
 ## 多列与网格
 
-`numColumns`（`.columns(n)`）把条目排成每行若干列。内容内边距添加在内容四周，并设置行间距和列间距。网格中各行的高度可以不同：每行与其中最高的条目一样高。列表显示期间 `numColumns` 可以改变（窗口变宽时列数增加）：第一个可见条目保持在顶部。`estimatedItemSize` 改变时也是如此。
+`numColumns`（`.columns(n)`）把条目排成每行若干列；内容内边距添加在内容四周，并设置行间距和列间距。网格中各行的高度可以不同：每行与其中最高的条目一样高。列表显示期间 `numColumns` 可以改变（窗口变宽时列数增加）：第一个可见条目保持在顶部；`estimatedItemSize` 改变时也是如此。
 
 ```tsx tabs
 <List
@@ -322,7 +318,7 @@ view().flex_1().overflow_hidden().child(
 
 ## 聊天：倒置列表
 
-`inverted` 让列表从末尾开始排版：第 0 项在底部，列表初始滚动到末尾，并在条目变化时保持与末尾的距离。把最新的消息放在最前面。添加消息时插到前面，用 `onLoadMore` 加载更早的消息时追加到后面（倒置列表的"末尾"是顶部）。从一条旧消息打开的聊天用 [`onLoadMoreAtStart`](#在开头加载onloadmoreatstart) 加载更新的消息。设置它后，列表在底部时保持与底部的距离，向上滚动后条目变化时屏幕上的消息保持原位。
+`inverted` 让列表从末尾开始排版：第 0 项在底部，列表初始滚动到末尾，并在条目变化时保持与末尾的距离。把最新的消息放在最前面；添加消息时插到前面，用 `onLoadMore` 加载更早的消息时追加到后面（倒置列表的"末尾"是顶部）。从一条旧消息打开的聊天用 [`onLoadMoreAtStart`](#在开头加载onloadmoreatstart) 加载更新的消息；设置它后，列表在底部时保持与底部的距离，向上滚动后条目变化时屏幕上的消息保持原位。
 
 ```tsx tabs
 import { List, mount, signal, Text, View } from "nsh";
@@ -486,7 +482,7 @@ pub fn chat() -> impl IntoElement {
 
 ### 底部对齐
 
-`alignment="bottom"`（Rust 中为 `.alignment(ListAlignment::Bottom)`）是构建聊天界面最简单的方式：消息按阅读顺序排列，最旧的在前，列表打开时显示最新消息。回复流式输出、追加消息或键盘弹出时，列表保持在末尾。用户向上滚动后，可见内容保持不动，滚回末尾后继续跟随。消息不足一屏时位于视口底部。
+`alignment="bottom"`（Rust 中为 `.alignment(ListAlignment::Bottom)`）是构建聊天界面最简单的方式：消息按阅读顺序排列，最旧的在前，列表打开时显示最新消息。回复流式输出、追加消息或键盘弹出时，列表保持在末尾；用户向上滚动后，可见内容保持不动，滚回末尾后继续跟随。消息不足一屏时位于视口底部。
 
 列表增长时，各行在内容中的位置不变，所以追加一条消息不会移动其他行：列表只放置新行并滚动一次。通过 `onLoadMoreAtStart` 在前面插入的旧消息也不会移动可见的行。
 
@@ -522,7 +518,7 @@ virtual_list(move || messages.with(Vec::len), move |at| bubble(messages, at))
 
 ## 横向列表
 
-`horizontal` 让列表横向排列。单元格按列表的高度排版。配合吸附可以做出任意长度的轮播：
+`horizontal` 让列表横向排列；单元格按列表的高度排版。配合吸附可以做出任意长度的轮播：
 
 ```tsx tabs
 <List
@@ -588,17 +584,17 @@ scroll()
     .child(footer())
 ```
 
-- 列表的长度就是它所有行的长度：它的高度（横向时是宽度）由内容决定，和普通视图一样。内边距、边框和外边距也和视图上的效果相同。
+- 列表的长度就是它所有行的长度：它的高度（横向时是宽度）由内容决定，和普通视图一样；内边距、边框和外边距也和视图上的效果相同。
 - 它的行跟随沿其方向最近的外层滚动视图，或者它所在的屏幕。
-- 页面会像浏览器一样保持你正在阅读的内容不动：完全位于视口顶部以上的行改变尺寸时，页面随之移动同样的距离。列表开头在视口内时，变高的行会把下面的内容往下推。
-- `scrollToIndex`、`scrollToEnd` 和 `initialScrollIndex` 会在页面内容范围内把页面滚动到列表的行。列表末尾接近视口时触发 `onLoadMore`，`onViewableItemsChange` 报告页面视口中的行。
-- `stickyHeaderIndices` 和 `stickyHeaderOffset` 让行吸附在页面顶部：分组标题停在顶部，它的行从下面滚过，直到下一个标题把它推出。最后一个标题随列表的末尾一起离开。
+- 页面会像浏览器一样保持你正在阅读的内容不动：完全位于视口顶部以上的行改变尺寸时，页面随之移动同样的距离；列表开头在视口内时，变高的行会把下面的内容往下推。
+- `scrollToIndex`、`scrollToEnd` 和 `initialScrollIndex` 会在页面内容范围内把页面滚动到列表的行；列表末尾接近视口时触发 `onLoadMore`，`onViewableItemsChange` 报告页面视口中的行。
+- `stickyHeaderIndices` 和 `stickyHeaderOffset` 让行吸附在页面顶部：分组标题停在顶部，它的行从下面滚过，直到下一个标题把它推出；最后一个标题随列表的末尾一起离开。
 - 页面如何滚动由它的滚动视图决定：把 `onScroll` 等滚动事件、`scrollValue`、`refreshing` / `onRefresh`、分页和吸附、`contentInset`、`scrollbar`、`scrollable` 和 `keyboardDismissMode` 设置在 `Scroll` 上。倒置列表和 `maintainVisibleContentPosition` 属于拥有自己视口的列表（`viewport="own"`，默认值）。
 - 视口在列表创建时确定：要切换，请渲染一个新的列表。
 
 ## 加载更多：onLoadMore
 
-当视口距离末尾不到 `loadMoreThreshold` 个视口时（默认 1：提前一屏），触发 `onLoadMore`（`.on_load_more(..)`）。追加下一页数据。新的末尾临近时会再次触发。
+当视口距离末尾不到 `loadMoreThreshold` 个视口时（默认 1：提前一屏），触发 `onLoadMore`（`.on_load_more(..)`）。追加下一页数据；新的末尾临近时会再次触发。
 
 ```tsx tabs
 const posts = signal<Post[]>([]);
@@ -664,7 +660,7 @@ virtual_list(move || posts.with(Vec::len), move |at| post_row(posts, at))
 
 ## 在开头加载：onLoadMoreAtStart
 
-列表也可以从数据的中间打开：从搜索结果或引用跳到一条旧消息的聊天，显示的是它附近的一页，更新的消息还没有加载。当视口距离开头不到 `loadMoreAtStartThreshold` 个视口时（默认 1），触发 `onLoadMoreAtStart`（`.on_load_more_at_start(..)`）。开头是第 0 项所在的一侧：普通列表的顶部，倒置列表的底部。把这一页插到前面：新内容到达时，屏幕上的行保持原位（倒置列表离开底部后也是如此）。下一次接近开头时会再次触发，如果新的一页插入后仍在开头附近，则立即再次触发。
+列表也可以从数据的中间打开：从搜索结果或引用跳到一条旧消息的聊天，显示的是它附近的一页，更新的消息还没有加载。当视口距离开头不到 `loadMoreAtStartThreshold` 个视口时（默认 1），触发 `onLoadMoreAtStart`（`.on_load_more_at_start(..)`）。开头是第 0 项所在的一侧：普通列表的顶部，倒置列表的底部。把这一页插到前面：新内容到达时，屏幕上的行保持原位（倒置列表离开底部后也是如此）；下一次接近开头时会再次触发，如果新的一页插入后仍在开头附近，则立即再次触发。
 
 只有在用户滚动到开头，或滚动命令（包括 `initialScrollIndex`）把列表带到那里之后才会触发：从最新一项打开的列表不会请求任何内容，而用 `initialScrollIndex` 打开在开头附近的列表会立刻请求它之前的一页。
 
@@ -728,7 +724,7 @@ virtual_list(move || messages.with(Vec::len), move |at| message_row(messages, at
 
 ## 可见性
 
-`onViewableItemsChange`（`.on_viewable_items_change(..)`）报告哪些条目在屏幕上，可用于统计曝光、自动播放可见的视频或把消息标记为已读。在 TSX 中它收到 `{ viewableItems, changed }`，两者都是由 `{ item, key, index, isViewable }` 组成的数组。在 Rust 中它收到 `ViewableItems`，包含第一个和最后一个可见行（`viewable`）以及状态发生变化的行（`changed()`）。可见性由原生计算，你的代码只在变化时收到通知。
+`onViewableItemsChange`（`.on_viewable_items_change(..)`）报告哪些条目在屏幕上，可用于统计曝光、自动播放可见的视频或把消息标记为已读。在 TSX 中它收到 `{ viewableItems, changed }`，两者都是由 `{ item, key, index, isViewable }` 组成的数组；在 Rust 中它收到 `ViewableItems`，包含第一个和最后一个可见行（`viewable`）以及状态发生变化的行（`changed()`）。可见性由原生计算，你的代码只在变化时收到通知。
 
 | `viewabilityConfig` | Rust | 说明 |
 |---|---|---|
@@ -802,7 +798,7 @@ list.scroll_to_index(120, percentage(0.5), px(0.0), true);
 
 ### 记住阅读位置
 
-`measureScrollPosition()`（`measure_scroll_position()`）在本轮改动排版后给出视口起点落在哪一行：`{ index, offset }`，即那一行和视口起点在行内多深，用的是列表自己排行的位置（已测量的行按实测尺寸，其余按预估尺寸）。在列表滚动时读取并保存。`scrollToIndex({ index, viewOffset: -offset })` 能把视口起点放回原处，无论是同一个列表还是重新创建的列表（它会随该行被测量而跟随）。没有条目的列表返回 `null`。它沿列表主轴、从第 0 项所在的一侧算起（倒置列表是底部）。视口起点在第一行之前的列表头里时，`index` 为 0，`offset` 为负。
+`measureScrollPosition()`（`measure_scroll_position()`）在本轮改动排版后给出视口起点落在哪一行：`{ index, offset }`，即那一行和视口起点在行内多深，用的是列表自己排行的位置（已测量的行按实测尺寸，其余按预估尺寸）。在列表滚动时读取并保存；`scrollToIndex({ index, viewOffset: -offset })` 能把视口起点放回原处，无论是同一个列表还是重新创建的列表（它会随该行被测量而跟随）。没有条目的列表返回 `null`。它沿列表主轴、从第 0 项所在的一侧算起（倒置列表是底部）；视口起点在第一行之前的列表头里时，`index` 为 0，`offset` 为负。
 
 ```tsx tabs
 let list!: ListRef;
@@ -924,7 +920,7 @@ pub fn settings_list(settings: Rc<Vec<Setting>>, on_select: impl Fn(&Setting) + 
 ## 性能提示
 
 - 每个单元格单独排版，滚动时只重新排版有变化的单元格。行的层级保持浅一些，避免在行里读取每帧都会变化的 signal。
-- 原生端分批请求单元格，每帧可以进行多轮，合并成一次更新。快速滑动时一帧内绑定许多单元格，也不会每个单元格调用一次你的代码。Rust 的行由核心自己在需要它们的那次提交中绑定。
+- 原生端分批请求单元格，每帧可以进行多轮，合并成一次更新；快速滑动时一帧内绑定许多单元格，也不会每个单元格调用一次你的代码。Rust 的行由核心自己在需要它们的那次提交中绑定。
 - 用 [`nsh test --trace` 加上 `scroll` 步骤](./testing-and-trace.md#滚动)测量行在每一帧的开销。
 
 ## 相关内容

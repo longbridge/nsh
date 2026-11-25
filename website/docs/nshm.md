@@ -165,7 +165,7 @@ code behind a `platform.os` check can load it. `"targets"` is for nshm with Rust
 every target) and for the app's own entries: an nshm's dependencies are linked wherever it is, and an nshm that a
 linked one depends on is linked whatever the app's entry for it says.
 
-An app listing them in the older `"modules"` array still builds. The next `nsh add` rewrites it as `"dependencies"`, keeping each requirement (a bare name becomes `"*"`) and what `nsh.lock` pinned.
+An app listing them in the older `"modules"` array still builds; the next `nsh add` rewrites it as `"dependencies"`, keeping each requirement (a bare name becomes `"*"`) and what `nsh.lock` pinned.
 
 [CLI: nsh add](./cli.md#nsh-add) covers every source form; [nsh upgrade](./cli.md#nsh-upgrade) and [nsh remove](./cli.md#nsh-remove) the others.
 
@@ -203,7 +203,7 @@ the camera's usage description on iOS (an app sets its own wording with `ios.inf
 
 `Location` reads the device's position once the user allows it: once with `current`, or each time it changes with
 `watch`, shaped as the browser's `navigator.geolocation`. macOS and iOS read it with CoreLocation, the web with the
-browser's `navigator.geolocation`. The system or the browser asks the user the first time the app reads it. Only while
+browser's `navigator.geolocation`; the system or the browser asks the user the first time the app reads it. Only while
 the app is in use: there is no background location.
 
 ```sh
@@ -231,7 +231,7 @@ if (await Location.available()) {
   run as a bare binary (`nsh run --target macos`), whose missing `Info.plist` the system never asks for.
 - `authorization()` resolves with what the user allows now, without asking: `"notDetermined"`, `"whenInUse"`,
   `"always"`, `"denied"` or `"restricted"`. The web knows only `"whenInUse"` (granted), `"denied"` and
-  `"notDetermined"` (it will ask). `requestAuthorization()` asks the user and resolves with the answer. Reading asks by
+  `"notDetermined"` (it will ask). `requestAuthorization()` asks the user and resolves with the answer; reading asks by
   itself, so ask first only to choose the moment.
 - `current({ accuracy, timeout })` resolves with a `Position` (`coords.latitude`, `longitude`, `accuracy` in metres,
   `altitude`, `altitudeAccuracy`, `heading`, `speed`, each `null` when the device does not know it, and `timestamp`
@@ -240,7 +240,7 @@ if (await Location.available()) {
   function that stops it. `onError` gets the failure that ends the watch.
 - A read fails with an `Error` whose `code` is `"EACCES"` (the user does not allow it), `"ETIMEDOUT"` (nothing came
   within `timeout`), `"ERR_POSITION_UNAVAILABLE"` (the device found no position) or
-  `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"` (no position here). Options out of range throw a `RangeError`.
+  `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"` (no position here); options out of range throw a `RangeError`.
 
 The feature adds `NSLocationWhenInUseUsageDescription` to the app's `Info.plist` on iOS and macOS, and the location
 entitlement of a sandboxed macOS app. Rust code uses `nsh_extra::location`: `available()`, `authorization().await`,
@@ -279,7 +279,7 @@ Photos.on("change", () => refreshStrip());
 
 - `access()` tells what the user allows, without asking: `"full"`, `"limited"` (the photos the user selected),
   `"notDetermined"`, `"denied"` or `"unavailable"`. `requestAccess()` asks the user the first time and resolves with
-  the answer. After that only the system's settings change it.
+  the answer; after that only the system's settings change it.
 - `recent({ limit })` resolves with the newest images first (30 when not given, at most 1000), without the hidden
   ones, each with its `id` and its `size`. `thumbnail(id, { maxDimension })` resolves with an upright JPEG of at most
   `maxDimension` pixels (256 by default), `load(id, { maxDimension, quality })` with the photo as `Picker.pickImages`
@@ -290,7 +290,7 @@ Photos.on("change", () => refreshStrip());
 - `on("change")` reports that the library changed, once the user allows reading it.
 - On Android, the desktops and the web `access()` is `"unavailable"` and the reads reject with
   `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. Android lets only apps whose core purpose is photos read the whole library
-  (Google Play's policy on `READ_MEDIA_IMAGES`). Other apps use the system's Photo Picker, which `Picker.pickImages`
+  (Google Play's policy on `READ_MEDIA_IMAGES`); other apps use the system's Photo Picker, which `Picker.pickImages`
   shows.
 - An app that declares `"capabilities"` grants `Photos` with [`"picker": true`](./sandbox-and-capabilities.md#picker),
   the capability `Picker` uses: every function but `access()` asks for it first.
@@ -330,13 +330,13 @@ picker?.deselect(id);
 ```
 
 - `onChange` hands over the ids of every photo selected now, each time the user selects or deselects one, in the order the
-  user selected them. The picker shows each photo's number in that order. The ids are opaque. The photos' bytes stay native until `loadPicked(id, options)` reads one, with `load`'s options. An id reads
-  while its photo is selected and its picker shown. After that it rejects with `ENOENT`.
+  user selected them; the picker shows each photo's number in that order. The ids are opaque; the photos' bytes stay native until `loadPicked(id, options)` reads one, with `load`'s options. An id reads
+  while its photo is selected and its picker shown; after that it rejects with `ENOENT`.
 - `selectionLimit` caps the selection (100 by default, as `Picker.pickImages`; 0 lets the user select as many as the
   system allows), and `filter` shows `"images"` (default), `"livePhotos"` or `"screenshots"`.
 - The style sizes it: give it a height, and round it with `borderRadius` and `overflow: "hidden"`.
 - Where `pickerViewAvailable()` is `false` (iOS 16 and earlier, Android, the desktops, the web) it takes no room and
-  shows nothing. The app lets the user choose with `Picker.pickImages`. Android's photo picker embeds only with a
+  shows nothing; the app lets the user choose with `Picker.pickImages`. Android's photo picker embeds only with a
   system extension recent devices have, which Native Shell does not use yet.
 - `loadPicked` needs the `picker` capability, as the rest of `Photos` does.
 
@@ -346,7 +346,7 @@ Rust code makes it with `photos_picker()` (`.selection_limit(10).on_change(..)`)
 ### Push
 
 `Push` registers the device with a push service and hands the app its token, which the app sends to its server.
-Notifications then arrive as events. On iOS the service is the system's. Android has none that every device has, so
+Notifications then arrive as events. On iOS the service is the system's; Android has none that every device has, so
 there the app links a push service's binding, a crate built on `nsh_extra::push` that wraps the service's SDK:
 
 ```sh
@@ -399,7 +399,7 @@ function closeConversation(threadId: string) {
 - `closeThread(threadId)` removes the delivered notifications of a thread (on Android a notification group), but those
   `Notifications.show` showed; `Notifications.close(id)` removes one.
 - `available()` is `true` in a standalone iOS app and wherever the app links a push service's binding. Elsewhere it is
-  `false`, and `register` rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. So does `closeThread`, except on Android.
+  `false`, and `register` rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`; so does `closeThread`, except on Android.
 - An app that declares `"capabilities"` grants `Push` with
   [`"notifications": true`](./sandbox-and-capabilities.md#notifications), the capability `Notifications` uses. The
   token, the deliveries and how they show belong to the whole app, so every function but `available()` asks for it
@@ -422,10 +422,10 @@ does not say which notification it was, so it has no `id` or `threadId`).
 `Speech` turns what the user says into text (dictation): the app starts a session, the system listens to the
 microphone, and the transcript arrives as it grows. macOS and iOS recognize with the system's Speech framework,
 Android with the device's recognition service (`SpeechRecognizer`), Windows with its dictation
-(`Windows.Media.SpeechRecognition`), the web with the browser's Web Speech API. The system or the browser asks the
+(`Windows.Media.SpeechRecognition`), the web with the browser's Web Speech API; the system or the browser asks the
 user for the microphone (and on Apple platforms for speech recognition) once. Windows dictates with the user's online
-speech recognition, which they turn on in Settings > Privacy & security > Speech. While it is off, a session ends with
-`"not-allowed"`. Linux has no recognizer, nor have terminal apps (the TUI host, on every OS). An app embedded with
+speech recognition, which they turn on in Settings > Privacy & security > Speech; while it is off, a session ends with
+`"not-allowed"`. Linux has no recognizer, nor have terminal apps (the TUI host, on every OS); an app embedded with
 GPUI recognizes with the platform's recognizer on macOS and Windows. Check `Speech.available()` before showing a
 microphone button: where nothing recognizes speech, a session ends at once with `"unavailable"`.
 
@@ -491,7 +491,7 @@ function toggle() {
   it as it is), and one `end`, after which nothing comes. `stop()` stops listening and lets the recognizer finish
   what it heard: a last result with `isFinal: true`, then `end`. `abort()` ends the session at once, without an
   error. One session runs at a time, as there is one microphone: starting another ends the one running. A new
-  session of the same app in the same view ends it as `abort()` does, without an error. One that another app or
+  session of the same app in the same view ends it as `abort()` does, without an error; one that another app or
   view of the process starts (an embedding app's other `AppView`) ends it with `"audio-capture"`, as the microphone
   was taken from it.
 - `end` carries the last transcript and, when the session failed, `error`, named as in the Web Speech API:
@@ -515,7 +515,7 @@ The feature adds what the packaged app needs: the microphone's and speech recogn
 and macOS (an app sets its own wording with `ios.infoPlist` / `macos.infoPlist`), the audio input entitlement on
 macOS, and on Android the `RECORD_AUDIO` permission and the query of recognition services. On the web the module
 calls the browser through wasm-bindgen, so `nsh` builds the app's web runtime with the `wasm-bindgen` CLI
-([browser APIs from Rust](./web.md#browser-apis-from-rust)). The site itself needs no declaration.
+([browser APIs from Rust](./web.md#browser-apis-from-rust)); the site itself needs no declaration.
 
 Rust code uses `nsh_extra::speech`: `available().await`, and `recognize(SpeechRequest)`, a session whose
 `next().await` gives each `SpeechEvent` (`stop()`, `abort()`; dropping it aborts). An app that recognizes speech its
@@ -623,7 +623,7 @@ Why `ext/` rather than a crate at the app's root (`"rust": "."`):
 - **Each crate on its own.** It has its own `Cargo.toml`, dependencies and tests (`cargo test` in its directory), and builds once, optimized, in `~/.nsh/builds` until it changes. The app's root stays a TSX project.
 - **Small interfaces.** TSX reaches the Rust only through what `#[native_module]` registers, with declarations generated from the Rust signatures (`.nsh/types/<crate>.d.ts`), so the boundary is typed and easy to see in review.
 
-Add another crate with `cargo new --lib ext/<name>`, give it a `#[native_module("<name>")]`, and run `nsh add --path ext/<name>`. Keep UI in TSX and put in Rust what needs native speed, the platform, or the crates.io ecosystem. A crate exports components too when a view must be native ([A Rust nshm](#a-rust-nshm)).
+Add another crate with `cargo new --lib ext/<name>`, give it a `#[native_module("<name>")]`, and run `nsh add --path ext/<name>`. Keep UI in TSX and put in Rust what needs native speed, the platform, or the crates.io ecosystem; a crate exports components too when a view must be native ([A Rust nshm](#a-rust-nshm)).
 
 ## Writing an nshm
 
@@ -717,12 +717,12 @@ lists wins, then the crate whose name sorts first ([Java code](./packaging.md#ja
 
 The app's own `nsh.json` wins: a key it sets keeps its value, and arrays (such as `UIBackgroundModes`) are joined. When
 two crates set one key to different values (two usage descriptions of the camera), the app chooses by setting the key
-in `ios.infoPlist`, `ios.entitlements`, `macos.infoPlist` or `macos.entitlements`. Until it does, packaging for that
+in `ios.infoPlist`, `ios.entitlements`, `macos.infoPlist` or `macos.entitlements`; until it does, packaging for that
 platform stops with an error naming both crates. Keys NSH sets itself (the bundle's identifier, version and the like)
 are not the crates'.
 
 A crate translates the keys the crates set in `ios.infoPlist` (`macos.infoPlist` in `macos.infoPlistStrings`), as
-they word them. A translation of a key no crate sets with the app's features (one of a feature that is off) is left out
+they word them; a translation of a key no crate sets with the app's features (one of a feature that is off) is left out
 with a warning. The app takes the crates' translations for the languages it has only, those of its `locales` or its own
 `ios.infoPlistStrings` (`macos.infoPlistStrings`; an empty `{}` names a language without text of its own), so a crate
 may carry many languages without adding any to the app. A key the app sets itself takes none of the crates'
@@ -757,9 +757,9 @@ fn main() {
 
 - Use `rustc-link-lib`, not `rustc-link-arg`: link arguments only apply to the crate's own targets.
 - Put a static library's privacy manifest entries in the app's `ios.privacyManifest`.
-- NSH does not embed dynamic frameworks. Prefer the SDK's static build.
-- A library whose licence asks that users can replace it (LGPL, such as libmpv) stays dynamic, and the app carries it itself. NSH's packages have no setting for it. Link it from the nshm's `build.rs` as above (`rustc-link-lib=framework=…`, `rustc-link-search=framework=…`). Give the executables their run path in the app's `.cargo/config.toml` (`rustflags = ["-C", "link-arg=-Wl,-rpath,@executable_path/../Frameworks", "-C", "link-arg=-Wl,-rpath,<the framework's directory>"]` under `[target.aarch64-apple-darwin]`), since a crate's `rustc-link-arg` does not reach `nsh run`, `nsh check` or `nsh test`. After `nsh package --target macos`, copy the framework into the app's `Contents/Frameworks/`, remove the development run path with `install_name_tool -delete_rpath`, then sign again, the framework first and the app last, with the identity the package used (`codesign --force --sign <identity> --options runtime --entitlements <the app's entitlements>`, or `--sign -` for an ad hoc package), and check it with `codesign --verify --deep --strict`.
-- On Linux and Windows the same `build.rs` links the SDK (`.a` and `.so` on Linux, `.lib` on Windows). NSH does not carry shared libraries (`.so`, `.dll`) into the package either. Prefer the SDK's static build.
+- NSH does not embed dynamic frameworks; prefer the SDK's static build.
+- A library whose licence asks that users can replace it (LGPL, such as libmpv) stays dynamic, and the app carries it itself; NSH's packages have no setting for it. Link it from the nshm's `build.rs` as above (`rustc-link-lib=framework=…`, `rustc-link-search=framework=…`). Give the executables their run path in the app's `.cargo/config.toml` (`rustflags = ["-C", "link-arg=-Wl,-rpath,@executable_path/../Frameworks", "-C", "link-arg=-Wl,-rpath,<the framework's directory>"]` under `[target.aarch64-apple-darwin]`), since a crate's `rustc-link-arg` does not reach `nsh run`, `nsh check` or `nsh test`. After `nsh package --target macos`, copy the framework into the app's `Contents/Frameworks/`, remove the development run path with `install_name_tool -delete_rpath`, then sign again, the framework first and the app last, with the identity the package used (`codesign --force --sign <identity> --options runtime --entitlements <the app's entitlements>`, or `--sign -` for an ad hoc package), and check it with `codesign --verify --deep --strict`.
+- On Linux and Windows the same `build.rs` links the SDK (`.a` and `.so` on Linux, `.lib` on Windows). NSH does not carry shared libraries (`.so`, `.dll`) into the package either; prefer the SDK's static build.
 
 ### A TSX nshm
 
@@ -789,7 +789,7 @@ export function Badge(props: { label: string }) {
 }
 ```
 
-Its exports are its specifier or start with it (`acme-badge`, `acme-badge/icons`), and its files stay inside it. Apps import it as they import their own modules, and `nsh check` checks their TSX against its source. Publish a version by tagging it (`git tag v0.1.0 && git push --tags`). The tag's version must be the one its `nsh.json` says.
+Its exports are its specifier or start with it (`acme-badge`, `acme-badge/icons`), and its files stay inside it. Apps import it as they import their own modules, and `nsh check` checks their TSX against its source. Publish a version by tagging it (`git tag v0.1.0 && git push --tags`); the tag's version must be the one its `nsh.json` says.
 
 A Rust nshm can export TSX as well, by the same `"exports"` in an `nsh.json` beside its `Cargo.toml`: TSX helpers written on top of its native module. Its name and version are then its crate's.
 
@@ -799,13 +799,13 @@ An nshm lists the nshm it needs in its `nsh.json` `"dependencies"`, in the app's
 
 ## Platform nshm
 
-An nshm can provide a target of its own, such as a platform NSH does not build for, with `"platform"` in its `nsh.json` and a binary named `nsh-platform-<name>` in its crate. The crate needs no `#[native_module]` when it gives the app nothing but the target. Without one, the app is not linked with it and does not become a Rust app:
+An nshm can provide a target of its own, such as a platform NSH does not build for, with `"platform"` in its `nsh.json` and a binary named `nsh-platform-<name>` in its crate. The crate needs no `#[native_module]` when it gives the app nothing but the target; without one, the app is not linked with it and does not become a Rust app:
 
 ```json
 { "name": "nsh-harmony", "version": "0.1.0", "platform": "harmony" }
 ```
 
-After `nsh add nsh-harmony`, the app's `nsh run`, `nsh dev`, `nsh test` and `nsh package` with `--target harmony` build that binary (in the app's `.nsh/platforms/harmony`, leaving the shared installation as it is) and run it as an [external target](./cli.md#external-targets). A platform installed on `PATH` as `nsh-platform-<name>` serves every app without being an nshm. The app's nshm comes first. [Building a platform](./platform-extensions.md) covers what a platform implements.
+After `nsh add nsh-harmony`, the app's `nsh run`, `nsh dev`, `nsh test` and `nsh package` with `--target harmony` build that binary (in the app's `.nsh/platforms/harmony`, leaving the shared installation as it is) and run it as an [external target](./cli.md#external-targets). A platform installed on `PATH` as `nsh-platform-<name>` serves every app without being an nshm; the app's nshm comes first. [Building a platform](./platform-extensions.md) covers what a platform implements.
 
 ## Security
 

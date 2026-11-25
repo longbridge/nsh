@@ -7,14 +7,9 @@ group: platforms
 
 # 构建平台
 
-NSH 没有内置的平台，你也可以自己接入。NSH 自带的后端（iOS、Android、macOS、Windows、Linux、GPUI、终端和 Web）都建在一个公开的引擎上，你的平台放在自己的仓库里，用的是同一套 API。工作分成两部分：
+Native Shell 的 iOS、Android、macOS、Windows、Linux、GPUI、终端和 Web 后端都构建在一个公开的引擎之上，其他平台也一样。在 NSH 之外构建的平台放在自己的仓库里，使用的正是 NSH 自己的后端所用的 API：引擎运行应用（组件、布局、响应式和文本测量），后端用平台自己的界面显示引擎提交的内容，并把用户的输入送回引擎。`nsh` 命令行按名字运行这样的平台：`nsh package --target miniprogram` 会运行程序 `nsh-platform-miniprogram`。
 
-- **引擎**运行应用：组件、布局、响应式和文本测量。
-- **后端**用平台自己的界面显示引擎提交的内容，并把用户输入送回引擎。
-
-`nsh` 命令行按名字运行这样的平台：`nsh package --target miniprogram` 会运行程序 `nsh-platform-miniprogram`。
-
-本页借一个完整的例子逐一讲解后端的各个部分：[`nsh-platform-miniprogram`](https://github.com/huacnlee/nsh-platform-miniprogram)。它在微信小程序中运行用 Rust 编写的 NSH 应用，用于演示这些扩展能力。有意继续发展它的维护者可以按其 README 联系作者接手。
+本页借一个完整的例子逐一讲解后端的各个部分：[`nsh-platform-miniprogram`](https://github.com/huacnlee/nsh-platform-miniprogram)。它在微信小程序中运行用 Rust 编写的 NSH 应用，用于演示这些扩展能力；有意继续发展它的维护者可以按其 README 联系作者接手。
 
 ## 使用在 NSH 之外构建的平台
 
@@ -74,7 +69,7 @@ let config = EngineConfig {
 let mut engine = LocalEngine::start(config, text_engine, sink).expect("the app starts");
 ```
 
-环境还说明平台提供哪些能力。`tab_bar`（默认开启）是 iOS 和 Android 上 `nsh/mobile` 的 `TabBar` 所用的系统标签栏。没有它的平台将其关闭，应用改用 `nsh/base` 的 `Tabs` 显示标签。`clipboard_images` 是剪贴板上的图片：默认与 NSH 自己的后端在 `os` 上一致（Android 上没有），平台用 `Some` 说明自己的情况。没有图片时 `Clipboard.readImage` 和 `writeImage` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝，`hasImage` 为 false。`scheme_links` 说明应用 scheme（`nsh.json` 的 `schemes`）的链接能否到达应用：默认与 NSH 的原生后端在 `os` 上一致（网页上没有），不把这类链接交给应用的平台用 `Some(false)`。没有时 `open_auth_session` 立即以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 失败，而不是等一个回不来的回调。小程序三者都没有。
+环境还说明平台提供哪些能力。`tab_bar`（默认开启）是 iOS 和 Android 上 `nsh/mobile` 的 `TabBar` 所用的系统标签栏；没有它的平台将其关闭，应用改用 `nsh/base` 的 `Tabs` 显示标签。`clipboard_images` 是剪贴板上的图片：默认与 NSH 自己的后端在 `os` 上一致（Android 上没有），平台用 `Some` 说明自己的情况；没有图片时 `Clipboard.readImage` 和 `writeImage` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝，`hasImage` 为 false。`scheme_links` 说明应用 scheme（`nsh.json` 的 `schemes`）的链接能否到达应用：默认与 NSH 的原生后端在 `os` 上一致（网页上没有），不把这类链接交给应用的平台用 `Some(false)`；没有时 `open_auth_session` 立即以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 失败，而不是等一个回不来的回调。小程序三者都没有。
 
 `LocalEngine::pump()` 运行到期的工作，并返回下次到期的时间：平台在那个时间以及每次输入之后调用它。对用 Rust 编写的应用，以 `default-features = false` 依赖 `nsh-engine`，引擎就能构建到 `wasm32-unknown-unknown`。
 
@@ -100,7 +95,7 @@ impl MountSink for Sink {
 }
 ```
 
-按顺序应用这些条目。平台不显示的类型直接跳过。小程序平台把每个批次编码成一个 JSON 数组（`["c", 2, "view"]`、`["f", 2, 0, 0, 100, 40]`……），在逻辑层把视图保存为一棵普通对象树，并用尽量少的 `setData` 路径更新页面。页面中一个递归的自定义组件把每个视图绘制在它的 frame 上。
+按顺序应用这些条目；平台不显示的类型直接跳过。小程序平台把每个批次编码成一个 JSON 数组（`["c", 2, "view"]`、`["f", 2, 0, 0, 100, 40]`……），在逻辑层把视图保存为一棵普通对象树，并用尽量少的 `setData` 路径更新页面；页面中一个递归的自定义组件把每个视图绘制在它的 frame 上。
 
 ## 3. 测量文本
 
@@ -119,14 +114,14 @@ impl TextEngine for MiniProgramTextEngine {
 
 ## 4. 送回输入
 
-`EngineControl` 发送用户的操作：视图上报按下事件时，点击用 `dispatch_event(id, EventKind::Press, EventPayload::None)`。滚动视图移动时用 `scroll(id, offset, 0)`。窗口或外观变化时用 `resize(size)` 和 `set_environment(environment)`。引擎请求的显示帧（`MountSink::request_frame`）到来时用 `frame()`。
+`EngineControl` 发送用户的操作：视图上报按下事件时，点击用 `dispatch_event(id, EventKind::Press, EventPayload::None)`；滚动视图移动时用 `scroll(id, offset, 0)`；窗口或外观变化时用 `resize(size)` 和 `set_environment(environment)`；引擎请求的显示帧（`MountSink::request_frame`）到来时用 `frame()`。
 
 滚动视图可以用键盘移动（方向键、Page Up / Down、Home、End）的平台，在开始每次按键滚动之后调用
 `key_scrolled(id, key_move)`，传入这次按键的移动（`nsh_core::scroll::KeyMove`）：这样按一次 End，列表就会一直滚到末尾。
 
 ## 5. 加入命令行 target
 
-`nsh dev`、`nsh run`、`nsh test` 和 `nsh package` 的 `--target` 不是 NSH 自带的 target 时，会运行 `PATH` 上的 `nsh-platform-<name>`。它收到命令和其余所有参数，以及环境变量 `NSH`（`nsh` 可执行文件，用于回调）、`NSH_VERSION` 和 `NSH_TARGET`。它的退出码就是命令的退出码：
+`nsh dev`、`nsh run`、`nsh test` 和 `nsh package` 的 `--target` 不是 NSH 自带的 target 时，会运行 `PATH` 上的 `nsh-platform-<name>`。它收到命令和其余所有参数，以及环境变量 `NSH`（`nsh` 可执行文件，用于回调）、`NSH_VERSION` 和 `NSH_TARGET`；它的退出码就是命令的退出码：
 
 ```sh
 nsh package my-app --target miniprogram --out dist
@@ -139,7 +134,7 @@ nsh package my-app --target miniprogram --out dist
 nsh_platform_miniprogram::app!(nsh_rust_app::app_ui_sets(), nsh_rust_app::root());
 ```
 
-`app_ui_sets()` 提供应用自己 crate 的 UI set（包括它们附带的字体和文件），不含 `nsh/base` 面向 TSX 的注册表，因此模块只链接应用用到的组件。`ui_sets()` 两者都提供。
+`app_ui_sets()` 提供应用自己 crate 的 UI set（包括它们附带的字体和文件），不含 `nsh/base` 面向 TSX 的注册表，因此模块只链接应用用到的组件；`ui_sets()` 两者都提供。
 
 ## 测试平台
 
@@ -153,7 +148,7 @@ nsh_platform_miniprogram::app!(nsh_rust_app::app_ui_sets(), nsh_rust_app::root()
 
 ## 跟随 NSH
 
-平台针对某个 NSH 版本构建：挂载条目、文本引擎和事件是 NSH 的协议，会随每次发布扩展。请固定平台构建所用的 NSH 版本，并为每个 NSH 版本重新发布平台。在 WebAssembly 中，NSH 的 crate 会从宿主导入几个函数（模块 `nsh`：`now_ms`、`date_now_ms`、`local_offset`）。平台在打包应用时检查模块的导入，因此新增的导入会在构建时显现。
+平台针对某个 NSH 版本构建：挂载条目、文本引擎和事件是 NSH 的协议，会随每次发布扩展。请固定平台构建所用的 NSH 版本，并为每个 NSH 版本重新发布平台。在 WebAssembly 中，NSH 的 crate 会从宿主导入几个函数（模块 `nsh`：`now_ms`、`date_now_ms`、`local_offset`）；平台在打包应用时检查模块的导入，因此新增的导入会在构建时显现。
 
 ## 另请参阅
 

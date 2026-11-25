@@ -8,9 +8,9 @@ demo: el-dialog
 # Dialog
 
 A dialog presents content over the rest of the app in its own native window layer: a presented view controller on iOS
-and Mac Catalyst, a Dialog on Android, a layer over the whole window on the desktops and the web. Use it for
-full-screen flows, sheets and dialogs. The system gestures work and are handled natively: swiping a sheet down, the
-Android back button and Escape. Rust makes one with `nsh_base::dialog()`, TSX with `<Dialog>` from `nsh/base`.
+and Mac Catalyst, a Dialog on Android, a layer over the whole window on the desktops and the web. It is used for
+full-screen flows, sheets and dialogs. The system's own gestures (swiping a sheet down, the Android back button,
+Escape) work, and are decided natively. Rust makes one with `nsh_base::dialog()`, TSX with `<Dialog>` from `nsh/base`.
 
 The dialog owns its behavior and leaves its look to the app: its styles style the popup (the view holding the
 children), and in TSX `backdropClass` / `backdropStyle` add a backdrop behind it.
@@ -247,11 +247,11 @@ dialog()
     .child(nav_stack().flex_1().child(nav_page().key("settings").child(settings())))
 ```
 
-`detent` moves the sheet when its value changes, and follows the user with `onDetentChange` as above. A drag the app
+`detent` moves the sheet when its value changes, and follows the user with `onDetentChange` as above; a drag the app
 does not follow stays where the user left it.
 
 The content is laid out at the height the sheet rests at. Elsewhere the detents are ignored and the dialog keeps its
-form there. For a bottom sheet that rests at detents on every platform, use [`Sheet`](./sheet.md).
+form there; for a bottom sheet that rests at detents on every platform, use [`Sheet`](./sheet.md).
 
 ## A dialog with a backdrop
 
@@ -320,14 +320,14 @@ None.
 ## Platform notes
 
 - iOS and Mac Catalyst: `presentation` picks the form. `fullScreen` presents over the full screen with a clear
-  background. `pageSheet` and `formSheet` are system sheets with the system background, which follow the finger when
-  swiped down (`closeOnSwipe`). A sheet rests at its `detents`, with the system's grabber when `grabber` is set.
-  Custom heights need iOS 16, and iOS 15 takes the nearer of medium and large.
+  background; `pageSheet` and `formSheet` are system sheets with the system background, which follow the finger when
+  swiped down (`closeOnSwipe`). A sheet rests at its `detents`, with the system's grabber when `grabber` is set;
+  custom heights need iOS 16, and iOS 15 takes the nearer of medium and large.
 - Android: the dialog fills the window and shows the app's popup and backdrop. The back button goes to the topmost
   dialog first, before stacks and `BackHandler` listeners.
 - Desktops (macOS, Windows, Linux, GPUI) and the web: the dialog is a transparent layer over the whole window that
   shows the app's popup and backdrop. Escape is a close attempt.
 - `detents`, `detent`, `defaultDetent`, `grabber`, `largestUndimmedDetent` and `onDetentChange` are iOS's: Android,
   the desktops and the web have no system sheet, so they are ignored there (use [`Sheet`](./sheet.md)).
-- `supportedOrientations` is iOS's. `statusBarTranslucent` is Android's. An Android dialog's content starts below the
+- `supportedOrientations` is iOS's; `statusBarTranslucent` is Android's. An Android dialog's content starts below the
   status bar unless `statusBarTranslucent` is set.

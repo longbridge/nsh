@@ -8,22 +8,9 @@ demo: guide-styling
 
 # 样式
 
-每个元素都使用同一套原生样式属性，有三种写法：
+每个元素都使用同一套原生样式，有两种写法。在 Rust 中，样式是链式调用在元素上的类型化方法（`.p_4()`、`.rounded(px(12.0))`、`.bg(color)`）；在 TSX 中，是一个由 camelCase 属性组成的 `style` 属性，或 [Tailwind 类名](./tailwind.md)。两者都包括盒阴影、渐变、滤镜、轮廓线、过渡和 grid 等 CSS 能力，只有变化了的属性才会发送给原生视图。
 
-- Rust：在元素上链式调用类型化方法（`.p_4()`、`.rounded(px(12.0))`、`.bg(color)`）。
-- TSX：用 camelCase 属性写 `style`。
-- TSX：写 [Tailwind 类名](./tailwind.md)。
-
-三种写法都支持盒阴影、渐变、滤镜、轮廓线、过渡和 grid 等 CSS 能力。NSH 只把变化了的属性发给原生视图。
-
-属性名沿用 CSS，少数用了应用里更直白的名字，如 `paddingHorizontal`、`marginStart` 和 `numberOfLines`。CSS 值（颜色、渐变、滤镜、阴影、变换、对齐关键字）和 Tailwind 工具类的含义与 Web 上相同，每个 Rust 方法和工具类设置的值都与 Tailwind CSS 4 生成的一致。所以 Web 经验可以直接沿用：`paddingLeft` 就是 `padding-left` 和 `pl-4`，`boxShadow` 就是 `box-shadow`，`display: "flex"` 和 `flex` 类一样是横向排列。
-
-为原生应用调整的地方：
-
-- 长度单位是点（`16`、`"50%"`、`"auto"`），类名还可以用 `rem` 等 CSS 单位。
-- 默认值沿用原生布局（见下文）。
-- 会变化的值用数字而不是字符串（`translate: [x, 0]`、阴影的各层）。
-- 平台超出 CSS 的能力有专门的[扩展](#扩展)。
+三种写法写的是同一组属性，含义相同。属性名取自 CSS（少数采用应用里更常见、更直白的名字，如 `paddingHorizontal`、`marginStart` 和 `numberOfLines`），CSS 值（颜色、渐变、滤镜、阴影、变换、对齐关键字）和 Tailwind 工具类的含义与 Web 上相同，每个 Rust 方法和工具类设置的值与 Tailwind CSS 4 生成的一致，因此你在 Web 上的经验可以沿用：`paddingLeft` 就是 `padding-left` 和 `pl-4`，`boxShadow` 就是 `box-shadow`，`display: "flex"` 与 `flex` 类一样是横向。其余部分为原生应用而设计：长度单位是点（`16`、`"50%"`、`"auto"`；类可以用 `rem` 等 CSS 单位），默认值是原生布局的默认值（见下文），会变化的值用数字而不是字符串来写（`translate: [x, 0]`、阴影的各层），平台超出 CSS 的能力有专门的[扩展](#扩展)。
 
 ```tsx tabs
 <View
@@ -65,7 +52,7 @@ view()
 
 ## 组合样式
 
-在 Rust 中，共享样式就是接收元素并返回加好样式的元素的函数，条件就是普通的 Rust：创建元素时已知的条件用 `.when(condition, |v| ..)`，运行时切换的样式用 `.style_when(signal, |s| ..)`。在 TSX 中，`style` 接受一个对象，或者一个从左到右合并的对象数组。假值项（`false`、`null`、`undefined`）会被跳过，这让条件样式写起来很简短：
+在 Rust 中，共享样式就是接收元素并返回加好样式的元素的函数，条件就是普通的 Rust：创建元素时已知的条件用 `.when(condition, |v| ..)`，运行时切换的样式用 `.style_when(signal, |s| ..)`。在 TSX 中，`style` 接受一个对象，或者一个从左到右合并的对象数组；假值项（`false`、`null`、`undefined`）会被跳过，这让条件样式写起来很简短：
 
 ```tsx tabs
 const styles = {
@@ -91,7 +78,7 @@ fn button(danger: bool, busy: Signal<bool>) -> View {
 
 在 TSX 中，把共享的样式定义为组件外部的常量（加上 `as const`，让 TypeScript 保留 `"row"` 这样的字面量类型）。一个普通对象就够了：样式在每次设置时由 Rust 解析，对象无需事先注册。
 
-读取 signal 的样式会跟随 signal 变化：在 Rust 中给方法传一个闭包（`.bg(move || ..)`），signal 变化时只重新设置这一个属性。在 TSX 中，读取 signal 的样式表达式会重建，NSH 只发送值不同的属性：
+读取 signal 的样式会跟随 signal 变化：在 Rust 中给方法传一个闭包（`.bg(move || ..)`），signal 变化时只重新设置这一个属性；在 TSX 中，读取 signal 的样式表达式会重建，NSH 只发送值不同的属性：
 
 ```tsx tabs
 <View style={{ backgroundColor: selected() ? "#ddf4ff" : "#ffffff", padding: 12 }} />
@@ -103,7 +90,7 @@ view()
     .bg(move || if selected.get() { rgb(0xddf4ff) } else { rgb(0xffffff) })
 ```
 
-TSX 元素同时有 `style` 和 `class` 时，`style` 优先：先应用类名，再在其上叠加内联样式。值为 `undefined` 的键不设置任何东西（`backgroundColor: active ? accent : undefined` 在未激活时保留类名的颜色）。`null` 则设为默认值。在 Rust 中，同一属性后调用的方法优先于先调用的。
+TSX 元素同时有 `style` 和 `class` 时，`style` 优先：先应用类名，再在其上叠加内联样式。值为 `undefined` 的键不设置任何东西（`backgroundColor: active ? accent : undefined` 在未激活时保留类名的颜色）；`null` 则设为默认值。在 Rust 中，同一属性后调用的方法优先于先调用的。
 
 在同一个样式中（一个对象，或合并成一个对象的数组），键的顺序不影响结果：更具体的属性优先于它的简写，`borderTopWidth` 优先于 `borderWidth`，`borderLeftColor` 优先于 `borderColor`，`marginTop` 优先于 `marginVertical`、再优先于 `margin`（padding 同理），`rowGap` 优先于 `gap`，`flexGrow` 优先于 `flex`，`gridColumnStart` 优先于 `gridColumn`。在其中把具体属性设为 `null` 时，显示简写的值。
 
@@ -111,7 +98,7 @@ TSX 元素同时有 `style` 和 `class` 时，`style` 优先：先应用类名�
 
 - **长度的单位是点**（与密度无关的像素）：Rust 中的 `px(100.0)` 和 TSX 中的 `width: 100` 都是 100pt，在 2× 或 3× 屏幕上分别是 200 或 300 个物理像素。
 - **百分比**（Rust 中的 `relative(0.5)`，TSX 中的 `"50%"`）相对于父视图，可用于尺寸、位置、外边距和内边距（[布局](./layout.md)）。
-- **角度**在 Rust 中是 `deg(45.0)`、`radians(0.5)` 或 `turn(0.25)`，在 TSX 中是以数字表示的度数，或带单位的字符串：`45`、`"45deg"`、`"0.5rad"`。CSS 的 `rotate` 和 `transform` 还接受 `"0.25turn"`，`transform` 字符串中的每个角度都要带单位。
+- **角度**在 Rust 中是 `deg(45.0)`、`radians(0.5)` 或 `turn(0.25)`，在 TSX 中是以数字表示的度数，或带单位的字符串：`45`、`"45deg"`、`"0.5rad"`；CSS 的 `rotate` 和 `transform` 还接受 `"0.25turn"`，`transform` 字符串中的每个角度都要带单位。
 - **时长**是毫秒数：Rust 中的 `.duration(150.0)`，TSX 中的数字或字符串（`"150ms"`、`"0.2s"`）。
 
 ## 默认值
@@ -198,10 +185,10 @@ view()
     .border_b_color(rgb(0x0969da))
 ```
 
-- **宽度和颜色**可按边设置：`borderTopWidth`、`borderRightWidth`……`borderTopColor`……，它们在两个方向上都保持各自的一侧。以及跟随[布局方向](./layout.md)的 `borderStartWidth`、`borderEndWidth`、`borderStartColor`、`borderEndColor`（Rust 中的 `.border_t(..)`、`.border_t_color(..)`、`.border_s(..)`、`.border_e_color(..)` 等）。
+- **宽度和颜色**可按边设置：`borderTopWidth`、`borderRightWidth`……`borderTopColor`……，它们在两个方向上都保持各自的一侧；以及跟随[布局方向](./layout.md)的 `borderStartWidth`、`borderEndWidth`、`borderStartColor`、`borderEndColor`（Rust 中的 `.border_t(..)`、`.border_t_color(..)`、`.border_s(..)`、`.border_e_color(..)` 等）。
 - **颜色**：设置了宽度而没有设置颜色的边，用文字颜色绘制，与 CSS 的 `currentColor` 相同：`{ borderWidth: 1, color: "#0969da" }` 画出蓝色边框。
 - **圆角半径**可按角设置：`borderTopLeftRadius`、`borderTopRightRadius`、`borderBottomRightRadius`、`borderBottomLeftRadius`，以及跟随[布局方向](./layout.md)的 `borderTopStartRadius` / `borderTopEndRadius` / `borderBottomStartRadius` / `borderBottomEndRadius`（顶部起始、顶部结束、底部起始、底部结束；Rust 中的 `.rounded_tl(..)` 等、`.rounded_ss(..)`、`.rounded_se(..)`、`.rounded_es(..)`、`.rounded_ee(..)`，以及预设 `.rounded_lg()`、`.rounded_full()` 等）。
-- **`borderCurve: "continuous"`**（`.border_curve(BorderCurve::Continuous)`，类名 `corner-squircle`）绘制超椭圆圆角，曲率平滑过渡到边，就像 iOS 应用图标：iOS、Android、macOS、Linux 支持，Web 上在浏览器支持 CSS `corner-shape` 时生效（Chromium）。其他情况下是相同半径的圆角。胶囊形状（`borderRadius` 为高度一半）仍是胶囊。
+- **`borderCurve: "continuous"`**（`.border_curve(BorderCurve::Continuous)`，类名 `corner-squircle`）绘制超椭圆圆角，曲率平滑过渡到边，就像 iOS 应用图标：iOS、Android、macOS、Linux 支持，Web 上在浏览器支持 CSS `corner-shape` 时生效（Chromium）；其他情况下是相同半径的圆角。胶囊形状（`borderRadius` 为高度一半）仍是胶囊。
 - **`overflow: "hidden"`**（`.overflow_hidden()`）把子视图裁剪到圆角形状内。裁掉的部分在布局上同样被裁掉：它不会进入外层滚动视图的内容尺寸，所以一个盒子把子视图按更大的尺寸排版、再用 `transform` 缩小（transform 不影响布局）时，不会让滚动视图多出可滚动的范围。
 
 超过边长一半的半径会被截断，所以 `borderRadius: 9999`（`.rounded_full()`）会得到圆形或胶囊。
@@ -234,14 +221,14 @@ view().shadow_lg().shadow_color(rgba(0x0969da66))
 view().elevation(px(6.0)).bg(white()).rounded(px(12.0))
 ```
 
-`boxShadow` 遵循 CSS 语法：`offsetX offsetY blur spread color`，`inset` 表示内阴影。它也接受以数字写出的各层，适合会变化的值，不需要拼字符串：`boxShadow: [{ x: 0, y: 6, blur: 18, spread: 0, color: "#0000004d", inset: false }]`（只有 `x` 和 `y` 必填；不写颜色的层用文字颜色）。Rust 用各层写，`.shadow([BoxShadow { .. }])`。阴影会贴合视图的圆角形状，过渡可以为它播放动画（`transitionProperty: "boxShadow"`、`.transition_shadow()`）。Tailwind 的阴影预设在 Rust 中是 `.shadow_sm()`、`.shadow_md()`、`.shadow_lg()` 等，`.shadow_color(..)` 给它们的各层换色。贴合透明视图内容（例如图标的字形）的阴影用 `filter: "drop-shadow(...)"`（[滤镜](#滤镜与混合)）。文字用 `textShadow`（[文本](./text.md)）。
+`boxShadow` 遵循 CSS 语法：`offsetX offsetY blur spread color`，`inset` 表示内阴影。它也接受以数字写出的各层，适合会变化的值，不需要拼字符串：`boxShadow: [{ x: 0, y: 6, blur: 18, spread: 0, color: "#0000004d", inset: false }]`（只有 `x` 和 `y` 必填；不写颜色的层用文字颜色）。Rust 用各层写，`.shadow([BoxShadow { .. }])`。阴影会贴合视图的圆角形状，过渡可以为它播放动画（`transitionProperty: "boxShadow"`、`.transition_shadow()`）。Tailwind 的阴影预设在 Rust 中是 `.shadow_sm()`、`.shadow_md()`、`.shadow_lg()` 等，`.shadow_color(..)` 给它们的各层换色。贴合透明视图内容（例如图标的字形）的阴影用 `filter: "drop-shadow(...)"`（[滤镜](#滤镜与混合)）；文字用 `textShadow`（[文本](./text.md)）。
 
 > [!NOTE]
 > 在 Android 上，阴影需要背景：背景透明的视图（例如没有背景的文本）不会投射阴影。
 
 ## 渐变
 
-`backgroundImage` 接受 CSS 渐变，绘制在背景色之上。在 Rust 中是 `.bg_linear(angle)`、`.bg_radial()` 和 `.bg_conic(angle)`，配合色标 `.gradient_from(..)`、`.gradient_via(..)` 和 `.gradient_to(..)`，与 Tailwind 的 `bg-linear-*` 加 `from-*`、`via-*`、`to-*` 相同。在 TSX 中，多个渐变用逗号分隔。
+`backgroundImage` 接受 CSS 渐变，绘制在背景色之上；在 Rust 中是 `.bg_linear(angle)`、`.bg_radial()` 和 `.bg_conic(angle)`，配合色标 `.gradient_from(..)`、`.gradient_via(..)` 和 `.gradient_to(..)`，与 Tailwind 的 `bg-linear-*` 加 `from-*`、`via-*`、`to-*` 相同。在 TSX 中，多个渐变用逗号分隔。
 
 ```tsx tabs
 <View style={{ height: 120, borderRadius: 16, backgroundImage: "linear-gradient(135deg, #54aeff, #8250df)" }} />
@@ -264,7 +251,7 @@ view()
 
 线性和径向渐变的色标位置可以是百分比或长度（`px`、`pt`、`rem`；纯数字表示点），锥形渐变的色标位置可以是百分比或角度（`deg`、`turn`、`rad`、`grad`）。带两个位置的色标（`#8250df 0 12px`）是一段纯色，位置相同的两个色标也是。长度沿视图当前尺寸下的渐变线计算，因此视图尺寸变化时，12px 的色带始终是 12px 宽。
 
-色标之间的颜色与 CSS 一样混合：在渐变指定的色彩空间中（`linear-gradient(in oklab, …)`；还有 `srgb`、`srgb-linear`、`xyz`、可带色相方法（如 `longer hue`）的 `oklch` 以及 `hsl`）。未指定时，若所有颜色都是十六进制、`rgb()`、`hsl()` 或具名颜色，则在 sRGB 中混合，若有颜色是 `oklch()`、`oklab()`、`lab()`、`lch()` 或 `color()`，则在 Oklab 中混合。
+色标之间的颜色与 CSS 一样混合：在渐变指定的色彩空间中（`linear-gradient(in oklab, …)`；还有 `srgb`、`srgb-linear`、`xyz`、可带色相方法（如 `longer hue`）的 `oklch` 以及 `hsl`）；未指定时，若所有颜色都是十六进制、`rgb()`、`hsl()` 或具名颜色，则在 sRGB 中混合，若有颜色是 `oklch()`、`oklab()`、`lab()`、`lch()` 或 `color()`，则在 Oklab 中混合。
 
 `repeating-linear-gradient`、`repeating-radial-gradient` 和 `repeating-conic-gradient` 与 CSS 一样，在最后一个色标之后重复：从第一个色标到最后一个色标的距离为一个周期。可以用来画斜线阴影、横线和网格：
 
@@ -313,7 +300,7 @@ view()
 | `backdropFilter` | 系统模糊材质，近似给定半径 | Android 12（API 31）起支持 |
 | `mixBlendMode` | 支持 | Android 10（API 29）起支持 |
 
-Web、Windows 和 Linux 对视图应用所有滤镜，macOS 与 iOS 相同。GPUI 绘制颜色滤镜和 `drop-shadow()`。背景滤镜在 iOS、macOS 和 Android 上是模糊，在 Web 和 Windows 上支持所有滤镜。Linux 和 GPUI 不绘制背景滤镜，GPUI 以普通混合模式绘制视图。对于包含多个 `drop-shadow()` 的 `filter`，iOS、macOS 和 Android 绘制最后一个。`mixBlendMode` 让视图与其后绘制的一切混合。
+Web、Windows 和 Linux 对视图应用所有滤镜，macOS 与 iOS 相同；GPUI 绘制颜色滤镜和 `drop-shadow()`。背景滤镜在 iOS、macOS 和 Android 上是模糊，在 Web 和 Windows 上支持所有滤镜；Linux 和 GPUI 不绘制背景滤镜，GPUI 以普通混合模式绘制视图。对于包含多个 `drop-shadow()` 的 `filter`，iOS、macOS 和 Android 绘制最后一个。`mixBlendMode` 让视图与其后绘制的一切混合。
 
 在 iOS 上，`ios={{ backdropMaterial: "regular" }}` 选择 `backdropFilter` 模糊所使用的系统材质。
 可选值为 `"ultraThin"`（默认）、`"thin"`、`"regular"`、`"thick"` 和 `"chrome"`。
@@ -354,13 +341,13 @@ tint.set(Some(AdaptiveColor::rgb(0x5080ff, 0x5080ff)));
 <View style={{ height: 80, borderRadius: 16, backdropFilter: "blur(12px)", glassEffect: "regular", glassTintColor: "rgba(255, 210, 120, 0.35)" }} />
 ```
 
-在 macOS 上，`macos={{ backdrop: { material, blending, state } }}` 选择独立的 `NSVisualEffectView` 材质，不需要模糊滤镜。`material` 可取 `"titlebar"`、`"selection"`、`"menu"`、`"popover"`（默认）、`"sidebar"`、`"headerView"`、`"sheet"`、`"windowBackground"`、`"hudWindow"`、`"fullScreenUI"`、`"toolTip"`、`"contentBackground"`、`"underWindowBackground"` 或 `"underPageBackground"`。`blending` 为 `"withinWindow"`（默认）或 `"behindWindow"`。`state` 为 `"followsWindowActiveState"`、`"active"`（默认）或 `"inactive"`。显式背景优先于 `glassEffect` 和 `backdropFilter`。不设置时，macOS 26 及更高版本使用玻璃，其他版本使用模糊。Rust 使用 `.macos_backdrop(backdrop)`，该结构体标注了 `#[non_exhaustive]`：从 `MacOsBackdrop::default()` 开始，再设置 `material`、`blending` 和 `state`。`None`（默认）保留回退行为。`"behindWindow"` 只有在透明窗口中才能显示窗口背后的内容。窗口属性可以请求透明。自定义 Rust 宿主也可以用 `AppOptions { transparent: true, .. }` 提供初始默认值，显式主窗口属性及后续窗口更新优先。标准宿主默认不透明，视图的混合方式本身不会改变窗口透明度。嵌入的 `AppView` 由宿主窗口决定。
+在 macOS 上，`macos={{ backdrop: { material, blending, state } }}` 选择独立的 `NSVisualEffectView` 材质，不需要模糊滤镜。`material` 可取 `"titlebar"`、`"selection"`、`"menu"`、`"popover"`（默认）、`"sidebar"`、`"headerView"`、`"sheet"`、`"windowBackground"`、`"hudWindow"`、`"fullScreenUI"`、`"toolTip"`、`"contentBackground"`、`"underWindowBackground"` 或 `"underPageBackground"`；`blending` 为 `"withinWindow"`（默认）或 `"behindWindow"`；`state` 为 `"followsWindowActiveState"`、`"active"`（默认）或 `"inactive"`。显式背景优先于 `glassEffect` 和 `backdropFilter`；不设置时，macOS 26 及更高版本使用玻璃，其他版本使用模糊。Rust 使用 `.macos_backdrop(backdrop)`，该结构体标注了 `#[non_exhaustive]`：从 `MacOsBackdrop::default()` 开始，再设置 `material`、`blending` 和 `state`；`None`（默认）保留回退行为。`"behindWindow"` 只有在透明窗口中才能显示窗口背后的内容。窗口属性可以请求透明；自定义 Rust 宿主也可以用 `AppOptions { transparent: true, .. }` 提供初始默认值，显式主窗口属性及后续窗口更新优先。标准宿主默认不透明，视图的混合方式本身不会改变窗口透明度。嵌入的 `AppView` 由宿主窗口决定。
 
 ```tsx
 <View macos={{ backdrop: { material: "hudWindow", blending: "behindWindow" } }} style={{ height: 64 }} />
 ```
 
-在 Windows 11 及更高版本上，`windows={{ backdrop: { material: "blur" } }}` 用系统对窗口背后内容的模糊填充视图的边框盒（在圆角之内），位于视图自身的背景、边框和内容之下。半透明背景会为它着色。与 `"behindWindow"` 一样，它只在透明窗口中显示。在不透明窗口中、较早的 Windows 上，或系统无法创建模糊时，视图下方不绘制任何内容，视图其余部分照常绘制。外观由系统决定。窗口不活动时，它仍跟随窗口背后的内容变化。Rust 使用 `.windows_backdrop(Some(WindowsBackdrop::default()))`。`None`（默认）不绘制。窗口显示这样的视图时，自带窗口的原生组件（见[原生组件](./native-components.md)）位于 NSH 内容之下，而不是之上。显示这样视图的窗口每一帧都完整重绘。模糊按其祖先裁剪区域的外接矩形裁剪（可能露出祖先圆角之外）。位于 `filter`、`mixBlendMode` 或 3D 变换之内的视图不显示模糊。
+在 Windows 11 及更高版本上，`windows={{ backdrop: { material: "blur" } }}` 用系统对窗口背后内容的模糊填充视图的边框盒（在圆角之内），位于视图自身的背景、边框和内容之下；半透明背景会为它着色。与 `"behindWindow"` 一样，它只在透明窗口中显示。在不透明窗口中、较早的 Windows 上，或系统无法创建模糊时，视图下方不绘制任何内容，视图其余部分照常绘制。外观由系统决定；窗口不活动时，它仍跟随窗口背后的内容变化。Rust 使用 `.windows_backdrop(Some(WindowsBackdrop::default()))`；`None`（默认）不绘制。窗口显示这样的视图时，自带窗口的原生组件（见[原生组件](./native-components.md)）位于 NSH 内容之下，而不是之上。显示这样视图的窗口每一帧都完整重绘；模糊按其祖先裁剪区域的外接矩形裁剪（可能露出祖先圆角之外）；位于 `filter`、`mixBlendMode` 或 3D 变换之内的视图不显示模糊。
 
 ```tsx
 <View windows={{ backdrop: { material: "blur" } }} style={{ height: 64, borderRadius: 12, backgroundColor: "rgba(255, 255, 255, 0.4)" }} />
@@ -396,7 +383,7 @@ function ProgressiveBlur(props: { radius: number; style: ViewStyle }) {
 }
 ```
 
-在 Rust 中，用 `.mask_linear(deg(90.0), [transparent_black(), black(), transparent_black()])` 让两侧渐隐，`.mask_radial([black(), transparent_black()])` 从中心径向渐隐，`.mask_none()` 清除遮罩。角度和色标向量接受信号或闭包。空色标向量清除遮罩。位置使用 `(color, percentage(0.2))` 或 `(color, px(12.0))`。
+在 Rust 中，用 `.mask_linear(deg(90.0), [transparent_black(), black(), transparent_black()])` 让两侧渐隐，`.mask_radial([black(), transparent_black()])` 从中心径向渐隐，`.mask_none()` 清除遮罩。角度和色标向量接受信号或闭包；空色标向量清除遮罩。位置使用 `(color, percentage(0.2))` 或 `(color, px(12.0))`。
 
 带遮罩的 `backdropFilter` 只绘制模糊本身，不带系统材质的色调，半径也是精确的，iOS 和 macOS 同样如此。每一层在每帧都要模糊窗口内容，所以层数要少、面积要小。Linux 和 GPUI 不绘制 `backdropFilter`，如果上面的文字必须清晰可读，请给这块区域加上渐隐的 `backgroundImage`。
 
@@ -406,13 +393,13 @@ GPUI 目前不绘制 `maskImage`：带遮罩的视图会完整绘制，用遮罩
 
 - `outlineWidth`、`outlineColor`、`outlineStyle`、`outlineOffset`（`.outline(..)`、`.outline_color(..)`、`.outline_dashed()`、`.outline_offset(..)`）：边框之外、不占空间的一条线（负偏移会画在内侧）。与 CSS 一样，`outlineStyle: "none"`（或 `"hidden"`，`.outline_none()`）会隐藏轮廓，无论宽度是多少。
 - `opacity`（`.opacity(n)`）：0 到 1，作用于视图及其子视图。
-- `visibility: "hidden"`（Rust 中为 `.invisible()`）：视图不绘制，但保留所占空间。与浏览器中一样，屏幕阅读器也会跳过它及其子树。用在 span（`Text` 里的 `Text`）上时，它让 span 的字符原地隐藏，复制时也会略过（[Text 元素](../elements/text.md#隐藏片段)）。`display: "none"`（`.hidden()`）则将它移出布局。
+- `visibility: "hidden"`（Rust 中为 `.invisible()`）：视图不绘制，但保留所占空间；与浏览器中一样，屏幕阅读器也会跳过它及其子树。用在 span（`Text` 里的 `Text`）上时，它让 span 的字符原地隐藏，复制时也会略过（[Text 元素](../elements/text.md#隐藏片段)）。`display: "none"`（`.hidden()`）则将它移出布局。
 - `zIndex`（`.z_index(n)`）：在兄弟视图中的顺序，也是原生的层叠顺序（值相同时保持稳定）。
 - `cursor`（`.cursor(..)`、`.cursor_pointer()`）：鼠标指针在视图上的形状，用于指针设备和桌面平台。
 
 ## 变换
 
-变换就是 CSS 的变换。在 TSX 中，`translate`、`rotate` 和 `scale` 各是独立的属性，`transform` 接受 CSS 的函数字符串或一个步骤列表。无论键的顺序如何，它们都按 CSS 的顺序组合：先 `translate`，再 `rotate`，再 `scale`，最后 `transform`。在 Rust 中，变换是方法（`.translate_x(..)`、`.rotate(..)`、`.scale(..)` 等），按同样的顺序组合：
+变换就是 CSS 的变换。在 TSX 中，`translate`、`rotate` 和 `scale` 各是独立的属性，`transform` 接受 CSS 的函数字符串或一个步骤列表；无论键的顺序如何，它们都按 CSS 的顺序组合：先 `translate`，再 `rotate`，再 `scale`，最后 `transform`。在 Rust 中，变换是方法（`.translate_x(..)`、`.rotate(..)`、`.scale(..)` 等），按同样的顺序组合：
 
 ```tsx tabs
 <View style={{ translate: "20px 0", rotate: "-8deg", scale: 0.9 }} />
@@ -433,9 +420,9 @@ view().origin_top_left().rotate(deg(30.0))
 | `scale` | `1.5`、`"150%"`、`"1 2"`（x 和 y）、一个动画值（两个轴）或 `[x, y]` |
 | `transform` | CSS 的函数：`translate()`、`translateX()`、`translateY()`、`scale()`、`scaleX()`、`scaleY()`、`rotate()` / `rotateZ()`、`rotateX()`、`rotateY()`、`skew()`、`skewX()`、`skewY()`、`perspective()`；长度用 `px`（平移也可用 `%`），角度用 `deg`、`rad` 或 `turn`；`"none"`；或一个步骤列表（`[{ perspective: 800 }, { rotateY: angle }]`），其数值可以是动画值 |
 
-与类名一样，每个都是独立的属性：样式中的 `scale` 替换 `scale-95` 类，并保留 `rotate-3`。动画值以原生方式驱动 `translate`、`rotate` 和 `scale`。CSS 字符串无法容纳动画数值的变换，例如 3D 旋转，给 `transform` 一个步骤列表：`translateX`、`translateY`、`scale`、`scaleX`、`scaleY`、`rotate`（`rotateZ`）、`rotateX`、`rotateY`、`skewX`、`skewY` 和 `perspective`（[动画](./animation.md)）。样式的 `transform` 取其中一种形式，因此动画步骤之前的透视也写成列表中的一个步骤。
+与类名一样，每个都是独立的属性：样式中的 `scale` 替换 `scale-95` 类，并保留 `rotate-3`。动画值以原生方式驱动 `translate`、`rotate` 和 `scale`；CSS 字符串无法容纳动画数值的变换，例如 3D 旋转，给 `transform` 一个步骤列表：`translateX`、`translateY`、`scale`、`scaleX`、`scaleY`、`rotate`（`rotateZ`）、`rotateX`、`rotateY`、`skewX`、`skewY` 和 `perspective`（[动画](./animation.md)）。样式的 `transform` 取其中一种形式，因此动画步骤之前的透视也写成列表中的一个步骤。
 
-Rust 的 `.perspective(..)` 是 CSS 的 `perspective` 属性，与 Tailwind 的 `perspective-*` 相同：它给视图的子视图景深。而 `transform` 中的 `perspective()` 函数作用于视图自身的变换。`transformOrigin` 接受关键字、百分比和长度（`"top left"`、`"50% 0"`、`[10, 20]`；Rust 中的 `.origin_top_left()`、`.transform_origin(..)`），默认为中心。变换不影响布局：兄弟视图的位置按视图未变换时计算。
+Rust 的 `.perspective(..)` 是 CSS 的 `perspective` 属性，与 Tailwind 的 `perspective-*` 相同：它给视图的子视图景深；而 `transform` 中的 `perspective()` 函数作用于视图自身的变换。`transformOrigin` 接受关键字、百分比和长度（`"top left"`、`"50% 0"`、`[10, 20]`；Rust 中的 `.origin_top_left()`、`.transform_origin(..)`），默认为中心。变换不影响布局：兄弟视图的位置按视图未变换时计算。
 
 Android 不支持斜切（skew）变换。GPUI 无法旋转图片的像素：旋转或斜切的 `Image` 按自身尺寸正放绘制，中心位于原本的位置。
 
@@ -481,7 +468,7 @@ view()
 | `transitionDelay` | 同时长 | `.delay(100.0)` |
 | `transitionTimingFunction` | `"linear"`、`"ease"`、`"ease-in"`、`"ease-out"`、`"ease-in-out"`、`"cubic-bezier(x1, y1, x2, y2)"`、`"spring(stiffness, damping)"`、`"spring(stiffness, damping, mass)"` | `.ease_linear()`、`.ease_in()`、`.ease_out()`、`.ease_in_out()`、`.ease_bezier(x1, y1, x2, y2)`、`.ease_spring(Spring { .. })` |
 
-`y` 超出 0..1 的 `cubic-bezier()` 会越过目标再回来，与 CSS 一致（`"cubic-bezier(0.3, 1.25, 0.6, 1)"`）。`spring()` 则让过渡按弹簧的物理运动：刚度、阻尼（系数，不是阻尼比）和质量（省略时为 1），从静止开始。弹簧自己决定时长，持续到它稳定为止，因此不使用 `transitionDuration`。`"spring(620, 36)"` 越过目标约 4%，约 380 ms 稳定。对应的类是 `ease-spring-[620,36]`（带质量时为 `ease-spring-[620,36,1]`），弹出层的离开同样会等它的弹簧播放完毕。
+`y` 超出 0..1 的 `cubic-bezier()` 会越过目标再回来，与 CSS 一致（`"cubic-bezier(0.3, 1.25, 0.6, 1)"`）。`spring()` 则让过渡按弹簧的物理运动：刚度、阻尼（系数，不是阻尼比）和质量（省略时为 1），从静止开始。弹簧自己决定时长，持续到它稳定为止，因此不使用 `transitionDuration`；`"spring(620, 36)"` 越过目标约 4%，约 380 ms 稳定。对应的类是 `ease-spring-[620,36]`（带质量时为 `ease-spring-[620,36,1]`），弹出层的离开同样会等它的弹簧播放完毕。
 
 ```tsx tabs
 <View class="transition-transform ease-spring-[620,36]" style={{ scale: open() ? 1 : 0.95 }} />
@@ -494,7 +481,7 @@ view()
     .scale(move || if open.get() { 1.0 } else { 0.95 })
 ```
 
-尺寸和位置属于布局而不是样式，不会产生过渡。要为布局变化做动画，使用 `LayoutAnimation`，或用原生动画驱动数值（[动画](./animation.md)）。
+尺寸和位置属于布局而不是样式，不会产生过渡；要为布局变化做动画，使用 `LayoutAnimation`，或用原生动画驱动数值（[动画](./animation.md)）。
 
 ### 关键帧动画
 
@@ -514,7 +501,7 @@ view()
 
 ## 按压反馈
 
-按压反馈是应用为按下状态设置的样式，由原生应用，无需与你的代码往返。悬停、聚焦和禁用状态也以同样方式设置样式（Rust 中的 `.hover(..)`、`.focus(..)`、`.disabled_style(..)`；TSX 中的 `hoverStyle`、`focusStyle` 和 `disabledStyle`，或 `hover:`、`focus:`、`disabled:`）：
+按压反馈是应用为按下状态设置的样式，由原生应用，无需与你的代码往返；悬停、聚焦和禁用状态也以同样方式设置样式（Rust 中的 `.hover(..)`、`.focus(..)`、`.disabled_style(..)`；TSX 中的 `hoverStyle`、`focusStyle` 和 `disabledStyle`，或 `hover:`、`focus:`、`disabled:`）：
 
 | Rust | TSX | 按下时的效果 |
 |---|---|---|

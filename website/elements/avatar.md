@@ -9,8 +9,8 @@ demo: el-avatar
 
 An avatar shows a person's picture: a member of a team, the author of a comment, the account in a header. Until the
 picture has loaded, when it fails and when there is none, it shows a fallback: the initials of the person's `name`, or
-the app's own content (an icon). It tracks the picture's loading state natively, from the image's load and error events, with no
-JavaScript. Screen readers get an image labelled with the person's name. The look is the
+the app's own content (an icon). It owns the picture's loading state, run natively from the image's own load and error
+events with no JavaScript, and what screen readers get: an image labelled with the person's name. The look is the
 app's: an `Avatar` has no size, shape, colors or font of its own. An `AvatarGroup` shows the first few avatars of a
 row and an overflow that stands for the others ("+5").
 
@@ -91,12 +91,12 @@ methods for the avatar itself and `.child(..)` for what sits over the picture.
 | The app's content | the avatar, last | its own elements (`children`) |
 
 Give the avatar its size (`class="size-10"`): the fallback and the picture fill it, so the fallback leaving lays
-nothing out again. The picture is laid out from the start, transparent, and turns opaque once it has loaded. The fallback then leaves.
+nothing out again. The picture is laid out from the start, transparent, and turns opaque once it has loaded; the fallback then leaves.
 A `transition-opacity` in `imageClass` fades it in (reduced motion shows it at once). Round the picture and the
 fallback (`rounded-full` on each) rather than clipping the avatar, so a presence dot placed at its edge
 (`absolute bottom-0 right-0`) stays whole.
 
-The initials are the first letters of the name's first two words, in upper case ("Ada Lovelace" is "AL"). A single
+The initials are the first letters of the name's first two words, in upper case ("Ada Lovelace" is "AL"); a single
 word gives its first two letters ("huacnlee" is "HU"), and a name in a script without letter case its first character
 ("王小明" is "王").
 
@@ -142,7 +142,7 @@ shown, which are the fewer of the children and `limit`: `total={8}` with two chi
 - An avatar is one image for screen readers, labelled with `accessibilityLabel` or `name`: the name is said once. The
   fallback and the picture are hidden from them, so the initials are not read apart. An avatar with neither, or with `accessibilityLabel=""`, is decorative: hidden from screen readers, as an
   avatar beside the name it shows should be.
-- A group is a group, labelled with its `accessibilityLabel` ("Ada, Grace and 5 others"). The avatars shown are images
+- A group is a group, labelled with its `accessibilityLabel` ("Ada, Grace and 5 others"); the avatars shown are images
   inside it. The overflow is read as its content ("+5"), or as `overflowAccessibilityLabel` ("5 more people") when the
   app gives one: NSH writes no words of its own.
 - An avatar is one element for screen readers, so what its children show is not read apart, and on iOS a button or
@@ -154,7 +154,7 @@ See [Accessibility](../docs/accessibility.md) for labels, roles and announcement
 
 ## Platform notes
 
-- Every platform loads the picture with its own image loader and caches (see [Image](./image.md)). Its load and error
+- Every platform loads the picture with its own image loader and caches (see [Image](./image.md)); its load and error
   events change the avatar's state in Rust, so a loading or failed picture changes the picture and the fallback and
   nothing else.
 - The picture starts loading once it has a frame, so it stays laid out while transparent.

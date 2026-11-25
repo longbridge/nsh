@@ -7,8 +7,8 @@ demo: el-table
 
 # Table
 
-A `Table` lays out a few rows that the app writes as children: invoices, a summary, a comparison. Screen readers get
-a real table, with a role on the table, each row group, row, column header and cell. Its parts are
+A `Table` lays out a few rows the app writes as children (invoices, a summary, a comparison) and gives screen readers
+a table: the table itself, groups of rows, rows, column headers and cells, each with its role. Its parts are
 `TableHeader`, `TableBody` and `TableFooter` (groups of rows), `TableRow` (its cells side by side), `TableHead` (a
 column's header cell), `TableCell` and `TableCaption`. The look is the app's: no part has colors, borders, paddings or
 widths of its own, and each takes the app's `class` and `style`. For many rows, sorting, selection and resizable
@@ -68,7 +68,7 @@ fn invoices() -> impl IntoElement {
 
 `Table` and its parts come from [`nsh/base`](../modules/nsh-base.md), the `nsh-base` crate in Rust, where `table()`,
 `table_header()`, `table_body()`, `table_footer()`, `table_row()`, `table_head()`, `table_cell()` and
-`table_caption()` make them, with the typed style methods and `.child(..)`. A row lays its cells out side by side. The
+`table_caption()` make them, with the typed style methods and `.child(..)`. A row lays its cells out side by side; the
 app gives cells their widths, so the columns line up.
 
 ## Props
@@ -93,7 +93,7 @@ app gives cells their widths, so the columns line up.
 | `TableCaption` | `Table` | content the app shows about the table |
 
 Each platform gives the roles to its screen reader: table, row, cell and column header roles on Linux (AT-SPI), the
-web (ARIA), Android and the GPUI backend. Grids and groups on macOS and Windows. Headers as headers on iOS.
+web (ARIA), Android and the GPUI backend; grids and groups on macOS and Windows; headers as headers on iOS.
 
 ## See also
 

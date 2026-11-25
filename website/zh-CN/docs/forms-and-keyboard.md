@@ -8,9 +8,7 @@ demo: guide-forms
 
 # 表单与键盘
 
-用户通过 input 元素输入文字：Rust 中是 `input()`，TSX 中是 `<Input>`。它在 iOS 上是 UITextField 或 UITextView，在 Android 上是 EditText。打字、光标、选区、自动更正和自动填充都由平台处理。应用通过事件读取文本，也可以设置文本。
-
-获得焦点的输入框会自动保持在软键盘上方，不用写代码。NSH 处理不了的布局，可以用它提供的键盘高度（一个响应式的值）自己调整。
+文本输入使用 input 元素，Rust 中是 `input()`，TSX 中是 `<Input>`：iOS 上是 UITextField 或 UITextView，Android 上是 EditText。输入、光标、选区、自动更正和自动填充都由平台自己处理；应用通过事件拿到文本，也可以控制文本。NSH 还会自动让获得焦点的输入框保持在软键盘上方，并把键盘高度作为响应式的值提供给你，用于它自己处理不了的情况。
 
 输入框和其他视图一样接受样式（Rust 中是类型化的样式方法，TSX 中是样式和 Tailwind 类），所以表单里的输入框是应用自己的外观。带标签的输入框就是一个简短的自定义组件：
 
@@ -126,7 +124,7 @@ pub fn App() -> impl IntoElement {
 
 ### 输入法
 
-中文、日文、韩文输入法先组字再上屏：拼音在选字后变成“腾”。`onCompositionChange`（Rust 的 `.on_composition_change(..)`） 随组字报告其状态：用户输入时为 `{ composing: true, text: "teng" }`，结束时为 `{ composing: false, text: "" }`。上屏的文本先经 `onChange` 报告，然后才报告结束。在 iOS、Android、macOS 和 Web 上，系统把正在组的字放在输入框里，`onChange` 也会报告它。在 Windows、Linux 和 GPUI 上，`onChange` 报告上屏后的文本。受控输入框无论应用如何处理值，组字都会继续：用户组字时设置的 `value` 在组字结束后显示，因此转大写或过滤文本的输入框也能正常输入拼音。
+中文、日文、韩文输入法先组字再上屏：拼音在选字后变成“腾”。`onCompositionChange`（Rust 的 `.on_composition_change(..)`） 随组字报告其状态：用户输入时为 `{ composing: true, text: "teng" }`，结束时为 `{ composing: false, text: "" }`；上屏的文本先经 `onChange` 报告，然后才报告结束。在 iOS、Android、macOS 和 Web 上，系统把正在组的字放在输入框里，`onChange` 也会报告它；在 Windows、Linux 和 GPUI 上，`onChange` 报告上屏后的文本。受控输入框无论应用如何处理值，组字都会继续：用户组字时设置的 `value` 在组字结束后显示，因此转大写或过滤文本的输入框也能正常输入拼音。
 
 只搜索上屏文本的搜索框：
 
@@ -172,7 +170,7 @@ input()
 
 ### 硬件按键与输入框
 
-`Input` 拥有用于编辑它的按键。平台会原生地应用这些按键，以及负责组字的输入法。祖先上的 `onKeyDown` / `onKeyUp` 监听或 `captureKeys` 规则都不会改变这一点：它不会拦截输入、光标移动、选区或编辑命令，也拿不走系统交给该输入框的按键。原始硬件按键（`onKeyDown` / `onKeyUp`、`captureKeys`）用于自行绘制的交互界面，而不是扩展文本输入框。输入框自身的文本请使用 `onKeyPress`、`onChange` 和 `onSubmit`（[键盘](../elements/keyboard.md#自定义视图的硬件按键)）。
+`Input` 拥有用于编辑它的按键。平台会原生地应用这些按键，以及负责组字的输入法；祖先上的 `onKeyDown` / `onKeyUp` 监听或 `captureKeys` 规则都不会改变这一点：它不会拦截输入、光标移动、选区或编辑命令，也拿不走系统交给该输入框的按键。原始硬件按键（`onKeyDown` / `onKeyUp`、`captureKeys`）用于自行绘制的交互界面，而不是扩展文本输入框；输入框自身的文本请使用 `onKeyPress`、`onChange` 和 `onSubmit`（[键盘](../elements/keyboard.md#自定义视图的硬件按键)）。
 
 位于捕获视图中的表单控件同样保持这一边界：只有该控件本身不拥有的按键（例如功能键，或控件不接收的 Tab）会到达捕获规则，并以 `defaultPrevented` 报告策略对本次转换的决定。
 
@@ -220,7 +218,7 @@ input()
 | `onContentSizeChange` | `{ size }` | 文本尺寸（`size`）改变（多行时按输入框的宽度计算），随输入报告；输入框为空时报告一行空行的尺寸，与占位文字无关。 |
 | `onCompositionChange` | `{ composing, text }` | 输入法的组字开始、变化或结束（见[输入法](#输入法)）。 |
 
-输入框的样式与文本相同：`fontSize`、`color`、`fontFamily`、`textAlign`、`letterSpacing` 以及其余[文本样式](./text.md)，再加上边框、内边距和背景。焦点样式（Rust 中是 `.focus(|s| ..)`，TSX 中是 Tailwind 的 `focus:` 变体或 `focusStyle`）在输入框获得焦点时生效。占位文字的颜色是 `.placeholder_color(..)`（样式键 `placeholderColor`，`placeholder:text-*`），光标的颜色是 `.caret_color(..)`（`caretColor`，`caret-*`），选区高亮的颜色是 `.selection_color(..)`（`selectionColor`，`selection:text-*`）。UIKit 用同一种颜色绘制光标和选区，设置了光标颜色时以它为准：
+输入框的样式与文本相同：`fontSize`、`color`、`fontFamily`、`textAlign`、`letterSpacing` 以及其余[文本样式](./text.md)，再加上边框、内边距和背景。焦点样式（Rust 中是 `.focus(|s| ..)`，TSX 中是 Tailwind 的 `focus:` 变体或 `focusStyle`）在输入框获得焦点时生效。占位文字的颜色是 `.placeholder_color(..)`（样式键 `placeholderColor`，`placeholder:text-*`），光标的颜色是 `.caret_color(..)`（`caretColor`，`caret-*`），选区高亮的颜色是 `.selection_color(..)`（`selectionColor`，`selection:text-*`）；UIKit 用同一种颜色绘制光标和选区，设置了光标颜色时以它为准：
 
 ```tsx tabs
 <Input
@@ -297,7 +295,7 @@ input()
 | `SubmitBehavior::Submit` | `"submit"` | 触发提交事件，输入框保持焦点 | |
 | `SubmitBehavior::Newline` | `"newline"` | 插入换行（仅多行输入框） | 多行输入框 |
 
-设置了 `"submit"` 或 `"blurAndSubmit"` 的多行输入框像聊天输入框一样按回车发送，文本仍会自动换行。使用硬件键盘时（桌面、Mac、平板的外接键盘），Shift+Return 或 Option / Alt+Return 插入换行。用回车确认输入法的候选词（例如中文或日文输入）只会上屏，不会提交。
+设置了 `"submit"` 或 `"blurAndSubmit"` 的多行输入框像聊天输入框一样按回车发送，文本仍会自动换行；使用硬件键盘时（桌面、Mac、平板的外接键盘），Shift+Return 或 Option / Alt+Return 插入换行。用回车确认输入法的候选词（例如中文或日文输入）只会上屏，不会提交。
 
 要切换到下一个字段，保存输入框的 ref（Rust 中是 `element_ref()` 和 `.element_ref(&r)`，TSX 中是 `ref`）并调用 `focus()`：
 
@@ -383,7 +381,7 @@ pub fn sign_in() -> impl IntoElement {
 | `set_selection(start, end)` | `setSelection(start, end?)` | 选中 `start..end`（UTF-16 码元）；两者相等时为光标（TSX：不传 `end`）。 |
 | `insert_text(text)` | `insertText(text)` | 以用户编辑的方式用 `text` 替换选区：是输入框撤销历史中的一步，由 `onChange` 报告；目前只在 iOS、macOS、Linux、Windows、Web 和无头测试中生效（[粘贴](#粘贴图片和文件)）。 |
 
-在 macOS、Web 和 Android 上，可按压视图的 ref 的 `focus()` 和 `blur()` 也会像 Tab 一样移动键盘焦点（[键盘焦点](../elements/index.md#键盘焦点)）。在 Android 上，该视图在这次焦点期间可在触摸模式下获得焦点，默认按钮失去焦点后又恢复为触摸中性。
+在 macOS、Web 和 Android 上，可按压视图的 ref 的 `focus()` 和 `blur()` 也会像 Tab 一样移动键盘焦点（[键盘焦点](../elements/index.md#键盘焦点)）；在 Android 上，该视图在这次焦点期间可在触摸模式下获得焦点，默认按钮失去焦点后又恢复为触摸中性。
 
 Rust 中的 `dismiss_keyboard()` 和 TSX 中 `nsh` 的 `Keyboard.dismiss()` 让当前拥有焦点的输入框失去焦点：
 
@@ -399,7 +397,7 @@ view().on_press(|| dismiss_keyboard())
 
 ## 选区
 
-选区事件（`.on_selection_change(..)`，TSX 的 `onSelectionChange`）报告光标和选区，ref 的 `set_selection` 或选区属性（`.selected_range(..)`，TSX 的 `selectedRange`）设置它们。位置以 UTF-16 码元计，与 JavaScript 字符串索引一致，所以在 TSX 中 `text.slice(start, end)` 就是选中的文本。在 Rust 中按文本的 UTF-16 码元截取。
+选区事件（`.on_selection_change(..)`，TSX 的 `onSelectionChange`）报告光标和选区，ref 的 `set_selection` 或选区属性（`.selected_range(..)`，TSX 的 `selectedRange`）设置它们。位置以 UTF-16 码元计，与 JavaScript 字符串索引一致，所以在 TSX 中 `text.slice(start, end)` 就是选中的文本；在 Rust 中按文本的 UTF-16 码元截取。
 
 ```tsx tabs
 const text = signal("Select part of this text");
@@ -452,7 +450,7 @@ view()
 
 ## 光标位置
 
-光标事件（`.on_caret_move(..)`，TSX 的 `onCaretMove`）报告光标在哪里，让属于光标处的内容在那里打开：`@` 提及的候选列表、斜杠命令的菜单、表情选择器。`bounds` 是光标在输入框中的 `Bounds`（`origin` 和 `size`，已计入输入框的内边距和滚动），宽度是平台绘制的光标宽度，高度是它所在的行高。`pageBounds` 是同一个矩形在窗口（或输入框所在的对话框）中的位置，可直接作为浮层的 `anchor`。输入框获得焦点时，光标每次移动都会触发这个事件：随选区移动时，以及输入框的文本滚动或重新换行时。在 Rust 中，浮层用 `.anchor_bounds(..)` 相对一个矩形放置。
+光标事件（`.on_caret_move(..)`，TSX 的 `onCaretMove`）报告光标在哪里，让属于光标处的内容在那里打开：`@` 提及的候选列表、斜杠命令的菜单、表情选择器。`bounds` 是光标在输入框中的 `Bounds`（`origin` 和 `size`，已计入输入框的内边距和滚动），宽度是平台绘制的光标宽度，高度是它所在的行高；`pageBounds` 是同一个矩形在窗口（或输入框所在的对话框）中的位置，可直接作为浮层的 `anchor`。输入框获得焦点时，光标每次移动都会触发这个事件：随选区移动时，以及输入框的文本滚动或重新换行时。在 Rust 中，浮层用 `.anchor_bounds(..)` 相对一个矩形放置。
 
 ```tsx tabs
 import { type Bounds, Overlay, Text, View, signal } from "nsh";
@@ -528,7 +526,7 @@ view()
 
 这时事件在插入任何内容之前到达，应用可以放行、取消或改写这次粘贴。ref 的 `insertText`（Rust 的 `insert_text`）以用户编辑的方式用放行的文本替换选区：遵守 `maxLength` 与单行规则，由 `onChange` 报告，在 Linux、Windows 和 Web 上是输入框撤销历史中的一步，Ctrl+Z 一次即可撤回。设置新的 `value` 则是替换整段文本。
 
-`insertText` 在 iOS、macOS、Linux、Windows、Web 和无头测试（`nsh test`）中插入文本。在 Android 和 GPUI 上目前不做任何事，只打印一条警告。请配合 `pasteBehavior="report"` 使用：`"insert"`（默认值）时输入框已经插入了这次粘贴，再调用 `insertText` 会插入第二遍。输入法正在组字时，`insertText` 不插入任何内容。
+`insertText` 在 iOS、macOS、Linux、Windows、Web 和无头测试（`nsh test`）中插入文本；在 Android 和 GPUI 上目前不做任何事，只打印一条警告。请配合 `pasteBehavior="report"` 使用：`"insert"`（默认值）时输入框已经插入了这次粘贴，再调用 `insertText` 会插入第二遍。输入法正在组字时，`insertText` 不插入任何内容。
 
 ```tsx tabs
 import type { InputRef } from "nsh";
@@ -590,7 +588,7 @@ input()
     .p_2()
 ```
 
-像上传任何 `File` 一样上传粘贴的文件，使用 `fetch` 和 `FormData`（`form.append("image", file)`）。它的字节在发送前一直留在原生侧。在 Android 上，插入图片的键盘（GIF、贴纸）也以同样方式报告。在 Linux 上剪贴板是异步读取的，因此 `"insert"` 时事件可能在它插入的文本的 `onChange` 之后到达。`"report"` 时它总是先到。macOS 上的密码输入框保留 AppKit 自己的粘贴，不报告任何内容。
+像上传任何 `File` 一样上传粘贴的文件，使用 `fetch` 和 `FormData`（`form.append("image", file)`）；它的字节在发送前一直留在原生侧。在 Android 上，插入图片的键盘（GIF、贴纸）也以同样方式报告。在 Linux 上剪贴板是异步读取的，因此 `"insert"` 时事件可能在它插入的文本的 `onChange` 之后到达；`"report"` 时它总是先到。macOS 上的密码输入框保留 AppKit 自己的粘贴，不报告任何内容。
 
 在 macOS 的访达中复制的文件，除 URL 外还会把文件名作为文本放进剪贴板，因此 `"insert"` 时输入框会插入文件名，与 AppKit 自带的文本框一致。接收文件的输入框使用 `"report"`，只在这次粘贴不含文件时插入文本：`if (e.uris.length === 0 && e.files.length === 0 && e.tooLarge.length === 0) field?.insertText(e.text)`。`uris` 中的是路径而不是文件内容：处理函数收到它之后，`fs/promises` 可以直接读取这个精确路径，不需要 `capabilities.fs.read` 根目录，与拖放的文件一样（见[文件](../modules/standard-modules.md#文件)）。
 
@@ -660,11 +658,11 @@ scroll()
     .child(view().p(px(16.0)).gap(px(12.0)) /* 输入框 */)
 ```
 
-收起方式（`.keyboard_dismiss_mode(..)`，TSX 的 `keyboardDismissMode`：不收起、拖动时、交互式）让拖动表单时收起键盘。已处理的点击（`.keyboard_taps(KeyboardTaps::Handled)`，TSX 的 `keyboardShouldPersistTaps="handled"`）让键盘弹出时点击按钮能直接生效，而不只是收起键盘。见[滚动](./scrolling.md#滚动视图与键盘)。
+收起方式（`.keyboard_dismiss_mode(..)`，TSX 的 `keyboardDismissMode`：不收起、拖动时、交互式）让拖动表单时收起键盘；已处理的点击（`.keyboard_taps(KeyboardTaps::Handled)`，TSX 的 `keyboardShouldPersistTaps="handled"`）让键盘弹出时点击按钮能直接生效，而不只是收起键盘。见[滚动](./scrolling.md#滚动视图与键盘)。
 
 ### 滚动视图之外的内容
 
-在 iOS 上，如果键盘会盖住一个不在滚动视图中的已聚焦输入框，NSH 会沿键盘的曲线把它所在页面（或对话框）的内容上移，直到输入框刚好在键盘上方。键盘收起或输入框失去焦点时再移回，与 SwiftUI 的做法一致（在 Android 上，`adjustPan` 模式的窗口由系统平移）。它只处理应用自己的布局之后仍被盖住的部分：像下面这样自己让出空间的应用不会再被额外移动。
+在 iOS 上，如果键盘会盖住一个不在滚动视图中的已聚焦输入框，NSH 会沿键盘的曲线把它所在页面（或对话框）的内容上移，直到输入框刚好在键盘上方；键盘收起或输入框失去焦点时再移回，与 SwiftUI 的做法一致（在 Android 上，`adjustPan` 模式的窗口由系统平移）。它只处理应用自己的布局之后仍被盖住的部分：像下面这样自己让出空间的应用不会再被额外移动。
 
 这样会移动整个页面。固定在页面底部的消息栏应该跟着键盘上移，而它上方的内容随之变矮：用 CSS 的 `env(keyboard-inset-height)` 为页面底部加内边距（`paddingBottom: "env(keyboard-inset-height)"`、Tailwind `pb-[env(keyboard-inset-height)]`、Rust `.pb_keyboard()`）：它会在底部让出与键盘等高的空间，并与键盘原生同步动画。
 
@@ -748,7 +746,7 @@ pub fn chat_screen() -> impl IntoElement {
 }
 ```
 
-内边距（`.pb_keyboard()`）让上方内容缩小，背景仍延伸到屏幕底部。底部外边距（`marginBottom: "env(keyboard-inset-height)"`、`.mb_keyboard()`）让整个视图止于键盘顶部。`calc(env(keyboard-inset-height) + <length>)`（Rust `.pb_keyboard_plus(..)`、`.mb_keyboard_plus(..)`）再加一段长度，例如减去视图下方标签栏的高度。
+内边距（`.pb_keyboard()`）让上方内容缩小，背景仍延伸到屏幕底部；底部外边距（`marginBottom: "env(keyboard-inset-height)"`、`.mb_keyboard()`）让整个视图止于键盘顶部。`calc(env(keyboard-inset-height) + <length>)`（Rust `.pb_keyboard_plus(..)`、`.mb_keyboard_plus(..)`）再加一段长度，例如减去视图下方标签栏的高度。
 
 完整的键盘高度适合延伸到 surface 底部的视图，页面内容通常如此。在会为键盘缩小窗口的 Android 宿主上，窗口本身已经变小，该变量为 0。见[键盘](../elements/keyboard.md)。
 
@@ -756,7 +754,7 @@ pub fn chat_screen() -> impl IntoElement {
 
 ### 键盘访问器
 
-Rust 中的 `keyboard_height()` 和 `keyboard_duration()`，以及 TSX 中 `nsh` 的 `keyboardFrame()`（一个 `{ height, duration }`），都是响应式的：键盘伸入 surface 的高度（隐藏时为 0，包含被它盖住的底部安全区域）以及它的动画时长（毫秒）。需要自定义行为时读取它们，例如输入时隐藏浮动按钮，或调整面板尺寸。键盘开始移动时那次更新中随它们变化的内容，会沿键盘的曲线、从键盘开始移动的时刻起与键盘一起移动（`LayoutCurve::Keyboard`），和 `env(keyboard-inset-height)` 一样。应用为这次更新自己设置的动画（`LayoutAnimation.configureNext`）优先。
+Rust 中的 `keyboard_height()` 和 `keyboard_duration()`，以及 TSX 中 `nsh` 的 `keyboardFrame()`（一个 `{ height, duration }`），都是响应式的：键盘伸入 surface 的高度（隐藏时为 0，包含被它盖住的底部安全区域）以及它的动画时长（毫秒）。需要自定义行为时读取它们，例如输入时隐藏浮动按钮，或调整面板尺寸。键盘开始移动时那次更新中随它们变化的内容，会沿键盘的曲线、从键盘开始移动的时刻起与键盘一起移动（`LayoutCurve::Keyboard`），和 `env(keyboard-inset-height)` 一样；应用为这次更新自己设置的动画（`LayoutAnimation.configureNext`）优先。
 
 ```tsx tabs
 import { View, keyboardFrame } from "nsh";
@@ -775,7 +773,7 @@ view().child(when(
 
 ## 键盘上方的工具栏：InputAccessoryView
 
-Rust 中的 `input_accessory_view(id)` 和 TSX 中 `nsh/mobile` 的 `InputAccessoryView` 会在引用它的输入框获得焦点时，在键盘顶部显示一个附着的工具栏，即 iOS 的 `inputAccessoryView`。它由原生跟随键盘移动，包括交互式收起键盘的过程。它在树中所处的位置不占空间。输入框通过它的 id 引用它（`.input_accessory(id)`，TSX 的 `ios={{ inputAccessoryViewID }}` 与 `nativeID`）：
+Rust 中的 `input_accessory_view(id)` 和 TSX 中 `nsh/mobile` 的 `InputAccessoryView` 会在引用它的输入框获得焦点时，在键盘顶部显示一个附着的工具栏，即 iOS 的 `inputAccessoryView`。它由原生跟随键盘移动，包括交互式收起键盘的过程。它在树中所处的位置不占空间；输入框通过它的 id 引用它（`.input_accessory(id)`，TSX 的 `ios={{ inputAccessoryViewID }}` 与 `nativeID`）：
 
 ```tsx tabs
 import { type InputRef, signal, Text, View } from "nsh";

@@ -87,7 +87,7 @@ A web view takes the props of a [view](./view.md) (it has no children) plus:
 | `onMessage` | `.on_message` | `{ data: string }` (`&str`) | The page called `window.nsh.postMessage(data)`. |
 | `onDownload` | `.on_download` | `WebViewDownload` (`WebDownload`) | A download started, finished, failed, or was cancelled. |
 
-`WebViewNavigation` is `{ url, title, loading, canGoBack, canGoForward }`. In Rust `WebNavigation` with `url`, `title`,
+`WebViewNavigation` is `{ url, title, loading, canGoBack, canGoForward }`; in Rust `WebNavigation` with `url`, `title`,
 `loading`, `can_go_back` and `can_go_forward`.
 
 `WebView.available()` (Rust `web_view_available()`) resolves whether a web view shows a page here: `false` where the
@@ -101,7 +101,7 @@ Its `state` is `"started"`, `"finished"`, `"failed"` or `"cancelled"`.
 `"finished"` means the file has been published at `path`; `bytes` is its size. A failure carries a diagnostic
 `message` and, when available, a stable `code`. A cancellation reports its `reason`: `"app"`, `"timeout"`,
 `"teardown"` or `"noListener"`.
-Removing both download listeners cancels in-flight downloads with `reason: "noListener"`. The WebView stays mounted.
+Removing both download listeners cancels in-flight downloads with `reason: "noListener"`; the WebView stays mounted.
 
 `source` describes the available data: `"transfer"` for a live browser download, `"request"` for a request owned by
 NSH, or `"none"` when the browser reported the download after releasing its response. `"page"` is reserved for
@@ -110,15 +110,15 @@ page-provided data. The event's source describes the transfer, not a promise tha
 With an `onDownload` listener, owned downloads are saved in the app's data directory as
 `downloads/<id>/<filename>`, where `path` points, and the app reads them with `fs/promises`. The app manages its
 storage budget and removes completed files when it has finished using them. Removing the web view stops its
-active downloads. Owned temporary output is cleaned after writing stops. Published files belong to the app.
+active downloads; owned temporary output is cleaned after writing stops. Published files belong to the app.
 Filenames are sanitized for path separators, control and bidirectional-formatting characters, length, and the
-destination platform's reserved names. Download outcomes use `onDownload`. Navigation errors use `onError`.
+destination platform's reserved names. Download outcomes use `onDownload`; navigation errors use `onError`.
 
 ### Download destinations in Rust
 
 A Rust host chooses where a download goes by registering `.on_download_pending(..)`. Registration selects manual
-decisions. Otherwise the automatic behavior above applies. The `WebDownloadPending` event contains `id`, `url`,
-`filename`, `source`, and optional `mime_type`, `bytes` and `method`. Metadata can be unknown. In particular,
+decisions; otherwise the automatic behavior above applies. The `WebDownloadPending` event contains `id`, `url`,
+`filename`, `source`, and optional `mime_type`, `bytes` and `method`. Metadata can be unknown; in particular,
 a URL alone does not establish the method of the request that produced it.
 
 The event carries a private decision handle. Clones refer to the same download, and changing public metadata does
@@ -144,10 +144,10 @@ web_view("https://example.com").on_download_pending(|event: &WebDownloadPending|
 transfer's outcome. The destination must be absolute, name a file, and have an existing parent directory. Existing
 entries are refused by default, including one created while a transfer is running. `overwrite(true)` permits
 replacement only at successful publication. The transfer writes into an owned private staging directory beside
-the destination. Failure and cancellation preserve an existing destination.
+the destination; failure and cancellation preserve an existing destination.
 
 `cancel()` applies while pending or active. It waits for writing to stop and for owned output to be cleaned.
-An unanswered pending decision expires after 60 seconds. A command's reply has a separate 30-second deadline.
+An unanswered pending decision expires after 60 seconds; a command's reply has a separate 30-second deadline.
 Late, duplicate, foreign and unbound decisions cannot affect another transfer. `WebDownloadPending::default()`
 has no bound download and its decisions return an error.
 
@@ -169,7 +169,7 @@ lifecycle. Applications can compose a save-path picker with `accept` where the p
 
 ## Messaging
 
-The app and the page exchange strings. The page posts with `window.nsh.postMessage(data)`. The app posts
+The app and the page exchange strings. The page posts with `window.nsh.postMessage(data)`; the app posts
 with the ref's `postMessage(data)` (`post_message(..)` in Rust). Send JSON for structured data.
 
 ```tsx tabs
@@ -228,7 +228,7 @@ fn bridge() -> impl IntoElement {
 
 When the app declares [capabilities](../docs/sandbox-and-capabilities.md) in `nsh.json`, a web view shows and
 navigates to the hosts listed under `webview`. A `src` on another host, or `html` in an app without `webview`, shows an
-empty view. A `baseUrl` on another host is dropped, and the HTML loads without it. A top-level navigation to another
+empty view; a `baseUrl` on another host is dropped, and the HTML loads without it; a top-level navigation to another
 host (a link the user taps) is cancelled natively. Each reports
 `onError` with `code` `"ERR_ACCESS_DENIED"`.
 
@@ -236,7 +236,7 @@ A page's own `blob:` URL (`URL.createObjectURL`, a `<a download>` link) counts a
 and downloads when that origin is granted, while an opaque `blob:null/…` is refused.
 
 A download from a host is saved only when its response comes from a granted host (on iOS, macOS and Linux, after any
-redirects). Otherwise `onDownload` reports it `failed` with `code` `"ERR_ACCESS_DENIED"`. On iOS and macOS a redirect
+redirects); otherwise `onDownload` reports it `failed` with `code` `"ERR_ACCESS_DENIED"`. On iOS and macOS a redirect
 to a host that is not granted is cancelled before it is requested. A download of the page's own content (`data:` and
 `blob:` URLs) comes from no host and is saved as before.
 

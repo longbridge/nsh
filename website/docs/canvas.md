@@ -8,7 +8,7 @@ demo: guide-canvas
 
 # Canvas
 
-A canvas is a view you draw into with the operations of the HTML Canvas 2D API. Use it for charts, progress rings, gauges, signatures, custom icons and anything else that is easier to draw than to build out of views. In Rust, `canvas(..)` shows what a `Painter` recorded. In TSX, `Canvas` from `nsh` takes a `draw` function that records the drawing in one go. The platform replays the drawing natively at the screen's resolution, using Core Graphics on iOS and `android.graphics.Canvas` on Android. Drawings stay sharp at any pixel density.
+A canvas is a view you draw into with the operations of the HTML Canvas 2D API: charts, progress rings, gauges, signatures, custom icons, anything that is easier to draw than to build out of views. In Rust, `canvas(..)` shows what a `Painter` recorded; in TSX, `Canvas` from `nsh` takes a `draw` function that records the drawing in one go. The platform replays it natively (Core Graphics on iOS, `android.graphics.Canvas` on Android) at the screen's resolution, so drawings stay sharp at any pixel density.
 
 ```tsx tabs
 import { Canvas, mount, View } from "nsh";
@@ -68,11 +68,11 @@ pub fn App() -> impl IntoElement {
 }
 ```
 
-A canvas takes everything a [view](../elements/view.md) takes (styles, classes, touch handlers, accessibility, refs) plus its drawing. It needs a size from its style or layout. Its content is the drawing. Coordinates are in points, with the origin at the top left.
+A canvas takes everything a [view](../elements/view.md) takes (styles, classes, touch handlers, accessibility, refs) plus its drawing. It needs a size from its style or layout; its content is the drawing. Coordinates are in points, with the origin at the top left.
 
 ## When the drawing is made
 
-In Rust, `canvas(move || ..)` records in a binding. The closure runs once, and again when a [signal](./reactivity.md) it read changes. A drawing that depends on the canvas's size keeps the size from `.on_layout(..)` in a signal and reads it, as above. In TSX, `draw(cx, { width, height })` runs:
+In Rust, `canvas(move || ..)` records in a binding: the closure runs once, and again when a [signal](./reactivity.md) it read changes. A drawing that depends on the canvas's size keeps the size from `.on_layout(..)` in a signal and reads it, as above. In TSX, `draw(cx, { width, height })` runs:
 
 - once the canvas's size is known (after its first layout);
 - again when the canvas is resized;
@@ -143,13 +143,13 @@ The operations are a subset of the HTML Canvas 2D API: `CanvasRenderingContext2D
 
 **Transforms**: `translate(x, y)`, `scale(x, y)`, `rotate(angle)` (radians, clockwise), `transform(a, b, c, d, e, f)`, `setTransform(a, b, c, d, e, f)`, `resetTransform()`.
 
-**Paths**: `beginPath()`, `moveTo`, `lineTo`, `quadraticCurveTo`, `bezierCurveTo`, `arc`, `arcTo`, `ellipse`, `rect`, `roundRect(x, y, w, h, radii)`, `closePath()`; then `fill(rule?)`, `stroke()` and `clip(rule?)`. Each also takes a path (`fill_path`, `stroke_path`, `clip_path` in Rust). Fill rules are `"nonzero"` and `"evenodd"`.
+**Paths**: `beginPath()`, `moveTo`, `lineTo`, `quadraticCurveTo`, `bezierCurveTo`, `arc`, `arcTo`, `ellipse`, `rect`, `roundRect(x, y, w, h, radii)`, `closePath()`; then `fill(rule?)`, `stroke()` and `clip(rule?)`, each also taking a path (`fill_path`, `stroke_path`, `clip_path` in Rust). Fill rules are `"nonzero"` and `"evenodd"`.
 
 **Rectangles**: `fillRect`, `strokeRect`, `clearRect`.
 
-**Text**: `fillText(text, x, y, maxWidth?)`, `strokeText(...)`, `measureText(text)`. The platform's text engine measures synchronously with the current `font` and returns `width`, plus the font's extent above and below the baseline (`fontBoundingBoxAscent` and `fontBoundingBoxDescent`). In Rust, `measure_text(font, text)` gives the width and `text_metrics(font, text)` all of them.
+**Text**: `fillText(text, x, y, maxWidth?)`, `strokeText(...)`, `measureText(text)` (measured synchronously by the platform's text engine with the current `font`: `width`, and the font's extent above and below the baseline on that line, `fontBoundingBoxAscent` and `fontBoundingBoxDescent`). In Rust, `measure_text(font, text)` gives the width and `text_metrics(font, text)` all of them.
 
-**Hit testing**: `isPointInPath(path?, x, y, rule?)` and `isPointInStroke(path?, x, y)` (`path_contains`, `stroke_contains`, `is_point_in_path` and `is_point_in_stroke` on a `Painter`) answer synchronously. They use the recorded geometry: the current transform, path, `lineWidth` and `lineCap`. Keep the drawing and the paths you drew to find the shape under a tap:
+**Hit testing**: `isPointInPath(path?, x, y, rule?)` and `isPointInStroke(path?, x, y)` (`path_contains`, `stroke_contains`, `is_point_in_path` and `is_point_in_stroke` on a `Painter`) answer synchronously, computed from the recorded geometry (the current transform, path, `lineWidth` and `lineCap`). Keep the drawing and the paths you drew to find the shape under a tap:
 
 ```tsx tabs
 let cx: CanvasRenderingContext2D | undefined;
@@ -195,7 +195,7 @@ Strokes are tested with round joins and without dashes; coordinates given as ani
 
 `cx.canvas.width` and `cx.canvas.height` give the canvas's size in points in TSX.
 
-**The supported set**: drawing operations only. The platform writes the pixels, so `getImageData` / `putImageData`, other pixel access and `filter` are not supported. An invalid color or font drops that one operation, as in HTML Canvas.
+**The supported set**: drawing operations. Pixels are written by the platform, so `getImageData` / `putImageData` and other pixel access are outside it, as is `filter`. An invalid color or font drops that one operation, as in HTML Canvas.
 
 ## Paths and SVG path data
 
@@ -284,7 +284,7 @@ canvas(move || {
 .on_layout(move |frame: &Bounds<Points>| width.set(frame.size.width.0))
 ```
 
-A conic gradient (`createConicGradient(startAngle, x, y)`, `CanvasGradient::conic(start_angle, center)`) sweeps colors around a point. Its start angle is in radians, clockwise from the x axis. A conic gradient on a stroked arc makes a gradient progress ring.
+A conic gradient (`createConicGradient(startAngle, x, y)`, `CanvasGradient::conic(start_angle, center)`) sweeps colors around a point; its start angle is in radians, clockwise from the x axis. A conic gradient on a stroked arc makes a gradient progress ring.
 
 ## Text
 
@@ -315,9 +315,9 @@ Font families are the same as in styles: system families and the names of fonts 
 
 ## Images
 
-Drawing an image takes a URL in Rust (an asset's is `LOGO.url`), and a URL or an imported asset (`import logo from "./logo.png"`) in TSX. NSH loads the image natively and redraws the canvas once it has loaded, so you do not need to track loading yourself. Remote URLs are subject to the app's [network capabilities](./sandbox-and-capabilities.md).
+Drawing an image takes a URL in Rust (an asset's is `LOGO.url`), and a URL or an imported asset (`import logo from "./logo.png"`) in TSX. The image is loaded natively, and the canvas draws again once it has loaded, so you do not need to track loading yourself. Remote URLs are subject to the app's [network capabilities](./sandbox-and-capabilities.md).
 
-Canvases on iOS, macOS, Android, Windows, Linux and GPUI draw bitmaps and SVG images. `nsh_core::svg` rasterizes an SVG and hands it to the canvas as a bitmap. The bitmap's size comes from the SVG's intrinsic size in points (the loader's size bucket). Draw it into an explicit destination rectangle rather than relying on the raster's pixel size. Drawing it much larger than its intrinsic size enlarges that bitmap and looks soft. Draw it at or below its intrinsic size for sharp edges and text. On the web, a canvas draws what the browser draws, SVG included.
+Canvases on iOS, macOS, Android, Windows, Linux and GPUI draw bitmaps and SVG images: an SVG is rasterized by `nsh_core::svg` and handed to the canvas as its bitmap, sized from the SVG's intrinsic size in points (the loader's size bucket). Draw it into an explicit destination rectangle rather than relying on the raster's pixel size. Drawing it much larger than its intrinsic size enlarges that bitmap and looks soft; draw it at or below its intrinsic size for sharp edges and text. On the web, a canvas draws what the browser draws, SVG included.
 
 ```tsx tabs
 import { Canvas } from "nsh";
@@ -355,7 +355,7 @@ The nine-argument form (`draw_image_part`) takes the source rectangle in the ima
 
 ## Driving drawings with animated values
 
-Any number argument of a drawing call, and the fill and stroke paints, can be an [animated value](./animation.md#animated-values) or a node derived from it. The platform reads such arguments while it draws. When the value animates, the platform redraws every frame on its own. It does not record the drawing again or run any of your code.
+Any number argument of a drawing call, and the fill and stroke paints, can be an [animated value](./animation.md#animated-values) or a node derived from it. Such arguments are read while the platform draws, and when the value animates, the platform redraws on its own, every frame, without recording the drawing again or running any of your code.
 
 ```tsx tabs
 import { Canvas, mount, signal, Text, View } from "nsh";
@@ -459,7 +459,7 @@ pub fn ring() -> impl IntoElement {
 }
 ```
 
-The arc's end angle is `progress.mul(2π).sub(π/2)`, which is a node. The ring sweeps natively for 900 ms, but the drawing is recorded only once, plus once more for the label, which reads a signal. A clock's second hand works the same way: `rotate(seconds.mul(π / 30))` with `seconds` animated linearly.
+The arc's end angle is `progress.mul(2π).sub(π/2)`: a node, so the ring sweeps natively for 900 ms while the drawing was recorded once (and once more for the label, which reads a signal). A clock's second hand works the same way: `rotate(seconds.mul(π / 30))` with `seconds` animated linearly.
 
 Colors animate the same way: `.fill_style(&t.interpolate_colors(&[0.0, 1.0], &[rgb(0x54aeff), rgb(0xcf222e)]))` in Rust, `cx.fillStyle = t.interpolate({ inputRange: [0, 1], outputRange: ["#54aeff", "#cf222e"] })` in TSX.
 

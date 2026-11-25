@@ -9,7 +9,7 @@ demo: el-color-picker
 
 颜色选择器持有一个颜色，放在其中的部件显示并修改它：饱和度与明度的 `ColorArea`，RGB、HSL、HSB 或 OKLCH 任一通道及透明度的
 `ColorSlider`，以文本接受整个颜色或以数字接受一个通道的 `ColorField`，预设颜色的 `ColorSwatch`，以及在屏幕任意位置取色的 `ColorEyeDropper`。应用用自己的元素排布这些部件（每个通道一行，带上字母；用
-`Tabs` 切换色彩空间。把选择器放进 `Popover`），并为每个部件设置样式：部件绘制通道的颜色，尺寸、圆角、边框和阴影都由应用决定。
+`Tabs` 切换色彩空间；把选择器放进 `Popover`），并为每个部件设置样式：部件绘制通道的颜色，尺寸、圆角、边框和阴影都由应用决定。
 
 ```tsx tabs
 import { mount, signal, Text, View } from "nsh";
@@ -130,18 +130,18 @@ fn primary(color: Signal<Hsla>) -> impl IntoElement {
 ```
 
 `ColorPicker`、`ColorArea`、`ColorSlider`、`ColorField`、`ColorSwatch` 和 `ColorEyeDropper` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中即
-`nsh-base` crate。Rust 中 `color_picker()` 及各部件的函数创建它们，每个 prop 有一个 setter（`.channel(..)`、`.thumb_style(..)`），每个事件有一个监听方法（`.on_change(..)`），另有类型化的样式方法。颜色是
+`nsh-base` crate。Rust 中 `color_picker()` 及各部件的函数创建它们，每个 prop 有一个 setter（`.channel(..)`、`.thumb_style(..)`），每个事件有一个监听方法（`.on_change(..)`），另有类型化的样式方法；颜色是
 `Hsla`，色彩空间、通道和格式分别是 `ColorSpace`、`ColorChannel` 和 `ColorFormat`。
 
 ## 值
 
-颜色是 CSS 颜色：十六进制（`#3b82f6`，带透明度的 `#3b82f680`）、`rgb()`、`hsl()`、`hsb()`、`oklch()` 或 CSS 颜色名。Rust 中是
-`Hsla`。应用通过 `value` 持有它，并设置 `onChange` 报告的颜色，与 `nsh/base` 的其他控件一样。也可以用 `defaultValue` 把颜色交给选择器自己保存，照样收到变化。
+颜色是 CSS 颜色：十六进制（`#3b82f6`，带透明度的 `#3b82f680`）、`rgb()`、`hsl()`、`hsb()`、`oklch()` 或 CSS 颜色名；Rust 中是
+`Hsla`。应用通过 `value` 持有它，并设置 `onChange` 报告的颜色，与 `nsh/base` 的其他控件一样；也可以用 `defaultValue` 把颜色交给选择器自己保存，照样收到变化。
 
 - `onChange({ value, formatted })` 报告用户要的每个颜色：拖动区域或滑块的每一步、每次按键、在字段中输入的数字、按下的色板。`value` 是颜色，`formatted`
   是按 `format`（`"hex"`、`"rgb"`、`"hsl"`、`"hsb"` 或 `"oklch"`）写出的同一颜色，可以直接保存或设为 token。
 - `onChangeEnd({ value, formatted })` 报告一次变化结束时的颜色，只报一次：指针抬起时、每次按键后、字段失去焦点或提交时、按下色板时。
-- 选择器按用户设置的样子保存颜色在每个空间中的通道值。灰色保留色相和饱和度，所以色相滑块停在用户放下的位置。在 OKLCH 中编辑的颜色保留输入的明度、色度和色相，超出
+- 选择器按用户设置的样子保存颜色在每个空间中的通道值。灰色保留色相和饱和度，所以色相滑块停在用户放下的位置；在 OKLCH 中编辑的颜色保留输入的明度、色度和色相，超出
   sRGB 时也一样（报告的颜色是 sRGB 能显示的最接近颜色，`"oklch"` 的 `formatted` 保留通道值）。
 - 应用设置的、不是选择器报告的 `value` 会替换所有空间中的颜色。
 
@@ -209,7 +209,7 @@ fn primary(color: Signal<Hsla>) -> impl IntoElement {
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 屏幕阅读器为字段读出的内容。 |
 | `class`、`style` | 样式方法 | `string`、`StyleProp<TextStyle>` | 无 | 字段本身，一个文本输入框。 |
 
-通道字段在输入数字时即修改颜色，数值限制在通道范围内。整个颜色的字段在失去焦点或提交时，若文本能读成颜色才修改。离开字段时，值会按字段的形式重新写出。
+通道字段在输入数字时即修改颜色，数值限制在通道范围内；整个颜色的字段在失去焦点或提交时，若文本能读成颜色才修改。离开字段时，值会按字段的形式重新写出。
 
 ### ColorSwatch
 
@@ -234,7 +234,7 @@ fn primary(color: Signal<Hsla>) -> impl IntoElement {
 | `class`、`style` | 样式方法 | `string`、`StyleProp<ViewStyle>` | 无 | 按钮本身。 |
 
 按下时显示系统的吸管：macOS 上是 AppKit 的取色器，Web 上是浏览器的 `EyeDropper`（Chrome 和 Edge）。取到的颜色成为选择器的颜色（先报告
-`onChange`，再报告 `onChangeEnd`）。按 Escape 则不取色。平台没有吸管时按钮处于禁用状态，用 `disabled:hidden` 即可在这些平台上隐藏它。
+`onChange`，再报告 `onChangeEnd`）；按 Escape 则不取色。平台没有吸管时按钮处于禁用状态，用 `disabled:hidden` 即可在这些平台上隐藏它。
 
 ## 事件
 
@@ -277,19 +277,19 @@ Rust 中 `ColorPickerEvent::Change(Hsla, SharedString)` 和 `ColorPickerEvent::C
 | Page Up、Page Down | 十步 | 明度十步 |
 | Home、End | 通道的两端 | |
 
-在从右到左的布局里，横向滑块和区域从右边开始，最小值（饱和度最低处）在右端：Left 增加一步，Right 减少一步，点按或拖动按绘制出的位置取指针下的值。垂直滑块仍是 Right、Up 增加一步。区域上的 Up、Down 仍调节明度。
+在从右到左的布局里，横向滑块和区域从右边开始，最小值（饱和度最低处）在右端：Left 增加一步，Right 减少一步，点按或拖动按绘制出的位置取指针下的值。垂直滑块仍是 Right、Up 增加一步；区域上的 Up、Down 仍调节明度。
 
-色板接受 Space 和 Return。每次按键先报告 `onChange`，再报告 `onChangeEnd`。按住方向键会重复。
+色板接受 Space 和 Return。每次按键先报告 `onChange`，再报告 `onChangeEnd`；按住方向键会重复。
 
 ## 无障碍
 
-- 区域和每个滑块的拇指都是可调节元素（`"adjustable"`，浏览器中为 slider），带有标签、数值和范围。屏幕阅读器的增加、减少操作会逐步调节它们。
-- 每个字段是带标签的文本框。每个色板是按钮，是选择器当前颜色时为选中状态，未设置 `accessibilityLabel` 时以十六进制颜色命名。吸管是带应用所给标签的按钮。
+- 区域和每个滑块的拇指都是可调节元素（`"adjustable"`，浏览器中为 slider），带有标签、数值和范围；屏幕阅读器的增加、减少操作会逐步调节它们。
+- 每个字段是带标签的文本框；每个色板是按钮，是选择器当前颜色时为选中状态，未设置 `accessibilityLabel` 时以十六进制颜色命名。吸管是带应用所给标签的按钮。
 - 禁用时，屏幕阅读器会说明部件已变暗，部件不接受任何操作。
 
 标签、角色和操作的通用说明见[无障碍](../docs/accessibility.md)。
 
 ## 平台说明
 
-- 每个平台都绘制应用设置的样式。轨道和面板的颜色是平台绘制的渐变。按压和拖动由核心跟踪，鼠标、触控笔和手指都适用。外层的滚动视图只处理从别处开始的拖动。
-- `ColorEyeDropper` 在 macOS 上使用 AppKit 的取色器，在 Web 上使用浏览器的 `EyeDropper`。取到的颜色为 sRGB。
+- 每个平台都绘制应用设置的样式；轨道和面板的颜色是平台绘制的渐变。按压和拖动由核心跟踪，鼠标、触控笔和手指都适用；外层的滚动视图只处理从别处开始的拖动。
+- `ColorEyeDropper` 在 macOS 上使用 AppKit 的取色器，在 Web 上使用浏览器的 `EyeDropper`；取到的颜色为 sRGB。

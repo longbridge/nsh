@@ -1,25 +1,12 @@
 ---
 title: nsh/desktop
-description: 桌面专有 API：应用的窗口（各窗口地位相同，它们的种类、属性、状态和事件）、显示器、自定义标题栏、应用菜单、右键菜单、托盘和全局快捷键。
+description: 桌面专有 API：应用的窗口（全部是一等窗口，它们的种类、属性、状态和事件）、显示器、自定义标题栏、应用菜单、右键菜单、托盘和全局快捷键。
 order: 12.5
 ---
 
 # nsh/desktop
 
-`nsh/desktop` 提供只有桌面才有的能力：应用的窗口及标题栏、显示器、应用菜单和右键菜单、托盘和全局快捷键。它支持 macOS、Windows 和 Linux。TSX 导入 `nsh/desktop`。
-
-Rust 代码在 `nsh_core::element::desktop` 里有同样的功能：
-
-- 窗口（`window()`），以及组件所在的窗口（`current_window()`，返回 `WindowRef`）
-- 显示器（`displays`）
-- `quit`、`restart` 和登录时打开（`launch_at_login`、`set_launch_at_login`）
-- 应用菜单和右键菜单（`set_application_menu`、`popup_menu`，由 `MenuItem` 组成）
-- 托盘（`set_tray`）和全局快捷键（`register_global_shortcut`）
-- 可拖动窗口的视图，用 `.window_drag(true)` 标记
-
-这个模块在所有平台都能导入，所以一个 bundle 可以到处运行。在 iOS 和 Android 上它的函数什么也不做，`isAvailable` 告诉你当前有没有窗口和菜单。
-
-如果应用声明了[能力](../docs/sandbox-and-capabilities.md#application)（应用在 nsh.json 中申请的权限），就需要 `"application": true` 才能使用应用菜单、托盘、全局快捷键、`quit` 和退出请求、`restart`、退出模式和登录时打开，否则它们什么也不做。右键菜单和应用的窗口（由 `windows` 授权）不需要 `application`。
+`nsh/desktop` 包含只有桌面才有的东西：应用的窗口和它们的标题栏、显示器、应用菜单和右键菜单、托盘和全局快捷键。它在 macOS、Windows 和 Linux 上可用。Rust 代码在 `nsh_core::element::desktop` 中有同样的功能：应用自己的窗口（`window()`）、组件所在的窗口（`current_window()`，一个 `WindowRef`）、显示器（`displays`）、`quit`、`restart`、登录时打开（`launch_at_login`、`set_launch_at_login`）、应用菜单和右键菜单（`set_application_menu`、`popup_menu`，由 `MenuItem` 组成）、托盘（`set_tray`）和全局快捷键（`register_global_shortcut`），并用 `.window_drag(true)` 标记可拖动的视图；TSX 导入 `nsh/desktop`。这个模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在 iOS 和 Android 上它的函数什么也不做，`isAvailable` 告诉你当前是否有它的窗口和菜单。声明了能力的应用需要 `"application": true` 才能使用应用菜单、托盘、全局快捷键、`quit` 和退出请求、`restart`、退出模式和登录时打开（[能力](../docs/sandbox-and-capabilities.md#application)），否则它们什么也不做。右键菜单和应用打开的窗口（由 `windows` 授权）不需要 `application`。
 
 ```tsx tabs
 import {

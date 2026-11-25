@@ -7,31 +7,11 @@ demo: ui-navigation
 
 # nsh/base
 
-`nsh/base` 是应用界面的基础组件层。组件本身不带样式，只负责行为、状态、焦点和无障碍，各平台通用。这一层位于基础元素（`nsh`、`nsh/mobile` 和 `nsh/desktop`）与应用自己的组件库之间，作用相当于 GPUI Kit 中位于 `gpui` 与带样式组件库之间的 `gpui-base`（见[模块](./index.md#three-layers)）。
-
-它提供：
-
-- **控件**：`Button`、`Link`、`Checkbox`、带 `ColorArea`、`ColorSlider`、`ColorField`、`ColorSwatch` 和 `ColorEyeDropper` 的 `ColorPicker`、`NumberInput`、放在 `RadioGroup` 里的 `Radio`、`Slider`、`Switch`、放在 `Tabs` 里的 `Tab`、放在 `ToggleGroup` 里的 `Toggle`、`Select`、`Combobox`、`Calendar`、`TimeField`、`DatePicker`。
-- **命令面板**（`Command`）和**表情选择面板**（`EmojiPicker`）。
-- **控件栏**：带 `ToolbarGroup` 和 `ToolbarSeparator` 的 `Toolbar`。
-- **滚动条**，外观由你决定（`Scrollbar`）。
-- **可展开收起的区域**：`Collapsible`，以及带 `AccordionItem`、`AccordionHeader`、`AccordionTrigger` 和 `AccordionPanel` 的 `Accordion`。
-- **进度与验证码**：进度条（`Progress`）、一次性验证码（`OtpInput`）和分页（`Pagination`）。
-- **树**：包含子项的项目（`Tree`）。
-- **图表部件**：`nsh/base/plot` 中的 `Plot` 及 `Line`、`Area`、`Bar`、`Rule`、`Dot`、`Cell`、`Grid`、`Pie`、`Arc`。
-- **用户自行安排的工作区**：放在 `ResizablePanelGroup` 里的 `ResizablePanel`，以及 `DockArea` 的分栏、标签组和停靠区。
-- **轮播**：`Carousel` 及其部件。
-- **文档与文本**：Markdown 或 HTML 文档（`TextView`）、代码编辑器（`Editor`）、文本差异（`DiffView`）、表格（`Table` 及其部件、`DataTable`）和文本输入框（`Input`）。
-- **浮在所有内容之上的弹出层**：`Popover`，`Menu` 和 `ContextMenu` 及其 `MenuItem`、`MenuSeparator` 和 `Submenu`，`Tooltip`，`Sheet`。
-- **Toast**：放在 `ToastStack` 中的 `Toast`，生命周期由 `ToastManager` 管理。
-- **导航**：由 `createNavStack` 创建的状态驱动、由 `NavPage` 组成的 `NavStack`，`SplitView` 中由导航栈组成的分栏，以及盖在所有内容之上的 `Dialog`。
-- **系统警告对话框**（`AlertDialog`）。
-
-页面和对话框还决定状态栏（`statusBar`）。
+`nsh/base` 是应用界面的基础组件层：不带样式、负责行为、状态、焦点和无障碍的组件，各平台通用。它位于基础元素（`nsh`、`nsh/mobile` 和 `nsh/desktop`）与应用自己的组件库之间，就像 GPUI Kit 中 `gpui-base` 位于 `gpui` 与带样式的组件库之间（见[模块](./index.md#three-layers)）。它提供控件（`Button`、`Link`、`Checkbox`、带 `ColorArea`、`ColorSlider`、`ColorField`、`ColorSwatch` 和 `ColorEyeDropper` 部件的 `ColorPicker`、`NumberInput`、放在 `RadioGroup` 里的 `Radio`、`Slider`、`Switch`、放在 `Tabs` 里的 `Tab`、放在 `ToggleGroup` 里的 `Toggle`、`Select`、`Combobox`、`Calendar`、`TimeField`、`DatePicker`）、命令面板（`Command`）、表情选择面板（`EmojiPicker`）、控件栏（带 `ToolbarGroup` 和 `ToolbarSeparator` 的 `Toolbar`）、应用自己外观的滚动条（`Scrollbar`）、可展开和收起的区域（`Collapsible`，以及带 `AccordionItem`、`AccordionHeader`、`AccordionTrigger` 和 `AccordionPanel` 部件的 `Accordion`）、进度条（`Progress`）、一次性验证码（`OtpInput`）、一组内容的分页（`Pagination`）、包含子项目的项目（`Tree`）、构建图表的部件（`nsh/base/plot` 中的 `Plot` 及 `Line`、`Area`、`Bar`、`Rule`、`Dot`、`Cell`、`Grid`、`Pie`、`Arc`）、由用户自行安排的工作区（放在 `ResizablePanelGroup` 里的 `ResizablePanel`，以及 `DockArea` 的分栏、标签组和停靠区）、Markdown 或 HTML 文档（`TextView`）、代码编辑器（`Editor`）、文本之间的改动（`DiffView`）、表格（`Table` 及其部件、`DataTable`）、文本输入框（`Input`）、显示在一切之上的弹出层（`Popover`，`Menu` 和 `ContextMenu` 及其 `MenuItem`、`MenuSeparator` 和 `Submenu`，`Tooltip`，`Sheet`）、toast（放在 `ToastStack` 中的 `Toast`，生命周期由 `ToastManager` 管理）、导航（由 `createNavStack` 创建的状态驱动、由多个 `NavPage` 组成的 `NavStack`，`SplitView` 中由导航栈组成的分栏，以及在所有内容之上展示内容的 `Dialog`）和系统警告对话框（`AlertDialog`）。页面和对话框还决定状态栏（`statusBar`）。
 
 基础组件还包括 `Avatar` 和 `AvatarGroup`（原生管理图片加载状态），以及用于逐页浏览内容的 `Carousel` 和其部件。
 
-外观由你决定。页面、对话框或标题栏里放的是你自己的内容：可以是用基础元素、样式、[Tailwind](../docs/tailwind.md) 类和主题写的 JSX，可以是[你自己的 crate](../docs/rust.md) 里的 Rust 组件，也可以是社区基于 `nsh/base` 做的组件库。每个宿主都提供 `nsh/base`。Rust 应用通过 `nsh-base` crate 使用同一套 API（`nsh_base::{button, dialog, …}`）。
+外观由应用决定：页面、对话框或标题栏里的内容都是你自己的 JSX，用基础元素配合样式、[Tailwind](../docs/tailwind.md) 类和主题绘制；或者是[你自己的 crate](../docs/rust.md) 中的 Rust 组件；也可以是社区基于 `nsh/base` 构建的组件库。每个宿主都提供 `nsh/base`；Rust 应用通过 `nsh-base` crate 使用同一套 API（`nsh_base::{button, dialog, …}`）。
 
 ```tsx tabs
 import {

@@ -8,15 +8,7 @@ demo: guide-components
 
 # JSX and components
 
-NSH apps describe their UI with elements and components, in TSX or in Rust.
-
-- TSX writes them as JSX. NSH's compiler turns JSX into direct calls to the native renderer. There is no React and no
-  virtual DOM.
-- Rust builds the same elements with functions and typed builder methods, such as `view().gap_4().child(..)`.
-
-In both, a component is a function that runs once to build its part of the tree. After that,
-[reactivity](./reactivity.md) keeps the UI up to date. NSH tracks the bindings that read signals, and only those
-bindings run again.
+NSH apps describe their UI with elements and components, in TSX or in Rust. TSX writes them as JSX, which NSH's compiler turns into direct calls of the native renderer, with no React and no virtual DOM; Rust builds the same elements with functions and typed builder methods (`view().gap_4().child(..)`). Either way, a component is a function that runs once to build its part of the tree. What keeps the UI up to date afterwards is [reactivity](./reactivity.md): the bindings that read signals are followed natively, and only they run again.
 
 ## Elements
 
@@ -43,8 +35,8 @@ use nsh_core::prelude::*;   // view, text, image, scroll, input, virtual_list, .
 ```
 
 In Rust, styles are typed methods named as Tailwind's utilities are (`.px_4()`, `.rounded_lg()`, `.bg(..)`), and
-listeners are methods too (`.on_press(..)`). Platform-only settings have methods of their own. In TSX, props keep
-their camelCase names (`onPress`, `allowFontScaling`, `backgroundColor`). Every element accepts `style`, `class` /
+listeners are methods too (`.on_press(..)`); platform-only settings have methods of their own. In TSX, props keep
+their camelCase names (`onPress`, `allowFontScaling`, `backgroundColor`); every element accepts `style`, `class` /
 `classList` ([Tailwind](./tailwind.md)), `ref`, touch handlers, accessibility props and `testID`, and platform-only
 props go in `ios={{…}}`, `android={{…}}`, `macos={{…}}`, `windows={{…}}`, `desktop={{…}}` or `web={{…}}`, where only the current platform's object is sent:
 
@@ -119,7 +111,7 @@ badge()
 
 The function runs **once**, when the component is created, and does not track what it reads: there is no re-rendering. Code in its body (creating signals, starting effects, computing constants) runs one time. The elements it returns stay connected to the props and signals they read, so `Badge` above updates its text whenever `unread` changes, without running `Badge` again.
 
-Write a `#[component]` when the UI has props or events of its own, or when a TSX entry imports it: a Rust component is registered under its type (`registry.register::<Badge>()`), with props typed from the struct ([Building with Rust](./rust.md#extending-a-rust-app-with-tsx)). For a piece of UI only Rust uses, a plain function returning `impl IntoElement` is enough, its arguments the props. In TSX, a component may return an element, a string or number, an array, `null`, or a function returning any of these (which the renderer follows). The `Component<P>` type from `nsh` describes one:
+Write a `#[component]` when the UI has props or events of its own, or when a TSX entry imports it: a Rust component is registered under its type (`registry.register::<Badge>()`), with props typed from the struct ([Building with Rust](./rust.md#extending-a-rust-app-with-tsx)). For a piece of UI only Rust uses, a plain function returning `impl IntoElement` is enough, its arguments the props. In TSX, a component may return an element, a string or number, an array, `null`, or a function returning any of these (which the renderer follows); the `Component<P>` type from `nsh` describes one:
 
 ```tsx tabs
 import type { Component, JSX } from "nsh";
@@ -145,7 +137,7 @@ fn row(title: impl Into<SharedString>, content: impl IntoElement) -> impl IntoEl
 
 ### What runs again
 
-A value given to an element is set once. A binding follows what it reads. In Rust a binding is a closure (or a signal, a memo, a prop) given where a value goes. In TSX, the compiler decides for each expression in JSX: an expression changes when it **calls a function or reads a property** (outside nested functions), and everything else is set once:
+A value given to an element is set once; a binding follows what it reads. In Rust a binding is a closure (or a signal, a memo, a prop) given where a value goes. In TSX, the compiler decides for each expression in JSX: an expression changes when it **calls a function or reads a property** (outside nested functions), and everything else is set once:
 
 ```tsx tabs
 <Text>{count()}</Text>              // follows count
@@ -327,7 +319,7 @@ For long or infinite lists, use [`List`](./lists.md) (`virtual_list` in Rust): i
 
 ## Refs
 
-A ref names a host element for imperative calls: `focus()`, `blur()`, `scroll_to()` / `scrollTo()`, `scroll_to_index()` / `scrollToIndex()`, `measure()` ([where a view is](./touch-and-gestures.md#where-a-view-is-measure)), ... In Rust, `element_ref()` makes one and `.element_ref(&handle)` puts it on an element. In TSX, `ref` gives you the element's ref, whose type is the element's own (`InputRef` here, `ViewRef` for a `View`; see [ref methods](../elements/index.md#ref-methods)):
+A ref names a host element for imperative calls: `focus()`, `blur()`, `scroll_to()` / `scrollTo()`, `scroll_to_index()` / `scrollToIndex()`, `measure()` ([where a view is](./touch-and-gestures.md#where-a-view-is-measure)), ... In Rust, `element_ref()` makes one and `.element_ref(&handle)` puts it on an element; in TSX, `ref` gives you the element's ref, whose type is the element's own (`InputRef` here, `ViewRef` for a `View`; see [ref methods](../elements/index.md#ref-methods)):
 
 ```tsx tabs
 import type { InputRef } from "nsh";
@@ -356,14 +348,14 @@ fn search() -> impl IntoElement {
 }
 ```
 
-A Rust ref is a `Copy` handle. Its calls go to the element that carries it, and do nothing once its owner is gone. In TSX, what `ref={…}` names receives the node:
+A Rust ref is a `Copy` handle; its calls go to the element that carries it, and do nothing once its owner is gone. In TSX, what `ref={…}` names receives the node:
 
 - a variable declared with `let` is assigned it;
 - a field (`ref={refs.input}`, `ref={refs[name]}`) is assigned it;
 - a [signal](./reactivity.md) is set to it, so what reads the signal follows it;
 - a function is called with it (`<Scroll ref={(node) => (scroller = node)} />`).
 
-A `const` or an import holds a signal or a function, as in `const input = signal<InputRef>()` with `<Input ref={input} />` and `input()?.focus()`. One holding anything else is reported when the element is made, with what to write.
+A `const` or an import holds a signal or a function, as in `const input = signal<InputRef>()` with `<Input ref={input} />` and `input()?.focus()`; one holding anything else is reported when the element is made, with what to write.
 
 The ref is set when the element is created, before the component returns, so it is available in [effects](./reactivity.md#effect) and event handlers. Calls are sent to the view in order with the changes made before them. The base components and the Rust components of your own crate accept `ref` too (in Rust `component_ref()`, put on the element with `.component_ref(&r)`: `dialog().component_ref(&r)`).
 
@@ -429,7 +421,7 @@ fn primary_button(title: &'static str, on_press: impl Fn() + 'static) -> impl In
 primary_button("Save", save)
 ```
 
-`nsh_base`'s `Button` (`button()` in Rust, `<Button>` from `nsh/base`) is the unstyled press target with the disabled and selected states and their accessibility. The app gives it its look: `button().disabled(move || saving.get()).on_press(move || save()).px_4().active(|s| s.opacity(0.6)).child(text("Save"))`.
+`nsh_base`'s `Button` (`button()` in Rust, `<Button>` from `nsh/base`) is the unstyled press target with the disabled and selected states and their accessibility; the app gives it its look: `button().disabled(move || saving.get()).on_press(move || save()).px_4().active(|s| s.opacity(0.6)).child(text("Save"))`.
 
 In TSX, your bindings win over the globals: a component named `Each` in scope makes `<Each>` that component. A primitive is recognized by its import, so `import { View as Box } from "nsh"` makes `<Box>` a view, and a component of your own named `Text` is just your component. The primitives are real components too: `const Tag = inline ? Text : View;` and then `<Tag>…</Tag>` works.
 
@@ -442,7 +434,7 @@ Components are typed by their own declarations: Rust's props structs are checked
 > window (`id` `"main"`). The wrapper shown here (`mount(() => <Window id="main">…`) makes that window explicit, and
 > is how an app that opens more than one window declares them.
 
-A Rust app's root is the component `nsh.json`'s `"root"` names; `nsh run` and `nsh package` mount it. A TSX entry calls `mount(App)` to render the root component (`mount(App, props)` passes it props). On the desktops the app root is a host, not a surface: it declares the app's windows as top-level [`<Window>`](./windows.md) scenes, and a window's content fills that window. A root that returns views instead renders them in the implicit first window, as a released app's main window was. Off the desktops (phones, the web) the root's view is the app's screen. Give the content `flex: 1` so it fills the window, and a background color: the platform's own background shows through otherwise.
+A Rust app's root is the component `nsh.json`'s `"root"` names; `nsh run` and `nsh package` mount it. A TSX entry calls `mount(App)` to render the root component (`mount(App, props)` passes it props). On the desktops the app root is a host, not a surface: it declares the app's windows as top-level [`<Window>`](./windows.md) scenes, and a window's content fills that window; a root that returns views instead renders them in the implicit first window, as a released app's main window was. Off the desktops (phones, the web) the root's view is the app's screen. Give the content `flex: 1` so it fills the window, and a background color: the platform's own background shows through otherwise.
 
 ```tsx tabs
 import { Window } from "nsh/desktop";

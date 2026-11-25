@@ -7,12 +7,11 @@ group: publishing
 
 # Publishing
 
-`nsh publish <platform>` releases a packaged app on an app store. It supports App Store Connect (iOS), Google Play
-(Android), Flathub (Linux) and the Microsoft Store (Windows).
-
-The command reads the app's identity and store listing from `nsh.json`, so a release needs only the packaged file.
-[Packaging](./packaging.md) builds that file. It also covers shipping without a store: archives, installers,
-AppImage, Flatpak and MSIX files, signing, notarizing and hosting a web app.
+Publishing is releasing a packaged app on an app store: App Store Connect for iOS, Google Play for Android, Flathub
+for Linux and the Microsoft Store for Windows, with `nsh publish <platform>`. Each store reads the app's identity and
+listing from `nsh.json`, so a release needs only the packaged file. [Packaging](./packaging.md) builds that file first,
+and also covers shipping without a store: archives, installers, AppImage, Flatpak and MSIX files, signing and
+notarizing, and hosting a web app.
 
 - [iOS](#publish-to-the-app-store): App Store Connect and TestFlight
 - [Android](#publish-to-google-play): Google Play
@@ -31,7 +30,7 @@ AppImage, Flatpak and MSIX files, signing, notarizing and hosting a web app.
 `nsh publish status <platform>` reports what the store has, and `nsh publish doctor <platform>` checks the
 configuration and credentials without changing anything. Store review of a first version, and what the console alone
 can set (pricing, age ratings, privacy details), stay in each store's console. macOS and the web have no store upload in
-NSH yet. They ship as direct downloads or a static site, described in Packaging:
+NSH yet; they ship as direct downloads or a static site, described in Packaging:
 [macOS](./packaging.md#sign-notarize-and-distribute) and [Web](./packaging.md#host-the-site), as do Windows and Linux
 apps outside a store ([Windows](./packaging.md#sign-and-distribute), [Linux](./packaging.md#distribute)).
 
@@ -43,10 +42,10 @@ apps outside a store ([Windows](./packaging.md#sign-and-distribute), [Linux](./p
 1. **Set the version in `nsh.json`.** `version` is what users see (`1.4.0`); `build` is a whole number that must grow
    with every upload to a store, on every platform (`CFBundleVersion` on Apple platforms, `versionCode` on Android).
    Both can also be given on the command line (`--app-version`, `--build`), which is handy when CI numbers builds.
-2. **Package.** iOS needs a Mac with Xcode. Android packages on any machine. See [Packaging](./packaging.md).
+2. **Package.** iOS needs a Mac with Xcode; Android packages anywhere. See [Packaging](./packaging.md).
 3. **Sign.** Both sign as they package, given an Apple Distribution identity and profile, or an upload keystore.
-4. **Publish.** Release it on the store with `nsh publish <platform>`. The app's store identity comes from `nsh.json`.
-5. **Follow it up.** `nsh publish status <platform>` tells when the release is live. Review and anything the commands do
+4. **Publish.** Release it on the store with `nsh publish <platform>`; the app's store identity comes from `nsh.json`.
+5. **Follow it up.** `nsh publish status <platform>` tells when the release is live; review and anything the commands do
    not cover happen in the store's console.
 
 ```json
@@ -59,7 +58,7 @@ apps outside a store ([Windows](./packaging.md#sign-and-distribute), [Linux](./p
 }
 ```
 
-The `id` is the bundle identifier on Apple platforms and the package name on Android. The store records must use the
+The `id` is the bundle identifier on Apple platforms and the package name on Android; the store records must use the
 same one. Once an app is in a store under an id, it cannot change.
 
 ## Credentials
@@ -83,7 +82,7 @@ Microsoft Store product ID, the Flathub archive URL.
 ## Store listing
 
 Every `nsh publish <store>` reads one listing. Put it in `nsh.json` `"store"`, in a `store/` directory beside
-`nsh.json`, or both. A value in `nsh.json` wins over the file.
+`nsh.json`, or both; a value in `nsh.json` wins over the file.
 
 ```json
 {
@@ -141,12 +140,12 @@ alone, credentials coming from the environment or their usual key paths:
 | Microsoft Store | `store.windows.productId` (package identity: `windows`) | `nsh publish windows <App.msix>` |
 
 `nsh publish status <store>` and `nsh publish doctor <store>` take the same configuration. Google Play uses
-`shortDescription` and the images in `store/<locale>/android/<type>/`. Flathub uses the `en-US` listing's `subtitle`
+`shortDescription` and the images in `store/<locale>/android/<type>/`; Flathub uses the `en-US` listing's `subtitle`
 as the AppStream summary.
 
 Locales are BCP 47 tags as App Store Connect names them (`en-US`, `zh-Hans`). Screenshots are grouped by device class
 in display order: `phone` is the 6.9" iPhone size (`APP_IPHONE_67`), `tablet` the 13" iPad size
-(`APP_IPAD_PRO_3GEN_129`). An App Store Connect display type such as `APP_IPHONE_65` is taken as it is. A screenshot
+(`APP_IPAD_PRO_3GEN_129`); an App Store Connect display type such as `APP_IPHONE_65` is taken as it is. A screenshot
 set is replaced only when its images changed. Fields left out keep what the store has. `releaseNotes`
 (`release_notes.txt`) is the release notes of every store; `whatsNew` and `whats_new.txt` are read too. App Store
 Connect rejects release notes on an app's first version. Keys `nsh.json` does not know are ignored.
@@ -217,7 +216,7 @@ Once per app:
    under App Information, is the app id `nsh publish ios` takes: put it in `nsh.json` `store.ios.appId`.
 6. **Create a team API key** in App Store Connect under Users and Access → Integrations → App Store Connect API, with
    the Developer, App Manager or Admin role. Note its **Key ID** and the **Issuer ID** shown above the list, and
-   download the `.p8` private key. Apple lets you download it only once.
+   download the `.p8` private key; Apple lets you download it only once.
 
 ### Configure the app
 
@@ -286,7 +285,7 @@ codesign -d --entitlements - /tmp/notes-ipa/Payload/Notes.app
 
 The app's Apple ID goes in `nsh.json` (`{ "store": { "ios": { "appId": "1234567890" } } }`). Put the `.p8` key at
 `~/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8`, where Apple's tools also look, and export the issuer and key
-IDs once in your shell profile. A configured app then publishes with the IPA alone:
+IDs once in your shell profile; a configured app then publishes with the IPA alone:
 
 ```sh
 export NSH_APP_STORE_ISSUER_ID=69a6de70-0000-0000-0000-000000000000
@@ -326,7 +325,7 @@ What the command does:
 | `--submit` | Submit the version for App Review. |
 
 A version that is already in review or live is never changed: raise `version` in `nsh.json`. Processing takes from a
-few minutes to an hour. Apple checks the signature, the profile, the icons and `Info.plist`, and emails the account
+few minutes to an hour; Apple checks the signature, the profile, the icons and `Info.plist`, and emails the account
 holder about any problem.
 
 ### After the upload
@@ -344,7 +343,7 @@ In App Store Connect:
   testers need a group and a Beta App Review of the first build of each version.
 - **What only App Store Connect sets**: the privacy details (App Privacy), the age rating and pricing. Apple does not
   allow creating the app record through the API, so create it once there.
-- **Review**: `--submit` sends the version for review. After approval it is released manually, automatically or in
+- **Review**: `--submit` sends the version for review; after approval it is released manually, automatically or in
   phases, as `--release` (or `store.ios.release`) says.
 
 ### Common errors
@@ -364,7 +363,7 @@ In App Store Connect:
 | The profile does not cover the app's id (while packaging) | Create the App Store profile for the app's bundle ID, or a wildcard ID that covers it. |
 
 Problems Apple finds while processing (a missing usage description, an icon with transparency, an entitlement the
-profile lacks) arrive by email and show on the build in App Store Connect. Fix them in `nsh.json`, raise `build`, and
+profile lacks) arrive by email and show on the build in App Store Connect; fix them in `nsh.json`, raise `build`, and
 package and upload again.
 
 ## Publish to Google Play
@@ -439,12 +438,12 @@ NSH_KEYSTORE_PASSWORD=… nsh package --target android --format aab \
 ```
 
 This writes `.nsh/out/<Name>.aab`, signed with `jarsigner` from the JDK. It holds native code for `arm64-v8a` and
-`armeabi-v7a`. Google Play builds from it the APKs each device installs. `NSH_KEYSTORE_PASSWORD` keeps the password out
+`armeabi-v7a`; Google Play builds from it the APKs each device installs. `NSH_KEYSTORE_PASSWORD` keeps the password out
 of the shell history (`--keystore-password` works too). Without `--keystore` the bundle is signed with the debug key,
 which Google Play rejects. [Packaging: Android](./packaging.md#android) has the requirements (Android SDK, NDK for
 Rust apps, JDK).
 
-A release bundle carries `libnsh.so` without its symbols. The complete libraries are written beside the runtime in
+A release bundle carries `libnsh.so` without its symbols; the complete libraries are written beside the runtime in
 `symbols/<abi>/libnsh.so`. Upload them in Play Console (the bundle's Downloads → native debug symbols) to read native
 crash stacks in Android vitals.
 
@@ -487,7 +486,7 @@ What the command does, in one edit of the app on Google Play:
 
 It prints the version code that is now on the track. Internal testers (up to 100, from the tester list in Play
 Console) get the update from Google Play within minutes. To raise a staged rollout, release the same version again
-with a larger `--rollout`. To finish it, release it with no `--rollout`:
+with a larger `--rollout`; to finish it, release it with no `--rollout`:
 
 ```sh
 nsh publish android --from internal --track production --rollout 0.1
@@ -528,7 +527,7 @@ In Play Console:
 ## Publish to Flathub
 
 On Linux the store is Flathub: users install from GNOME Software, KDE Discover or `flatpak install flathub <id>`.
-Flathub builds and signs the app itself from a manifest. NSH prepares the manifest from the release archive, you open
+Flathub builds and signs the app itself from a manifest; NSH prepares the manifest from the release archive, you open
 the pull request. Archives, AppImage and local Flatpak bundles are packages, not store releases: see
 [Packaging](./packaging.md#appimage-and-flatpak).
 
@@ -594,14 +593,14 @@ the pull request. Archives, AppImage and local Flatpak bundles are packages, not
 | `linux.flatpak.runtimeVersion` | The GNOME runtime version. Default: the one NSH is tested with |
 | `linux.flatpak.finishArgs` | Replaces the sandbox permissions. Default: Wayland with X11 fallback, IPC, the GPU and the network |
 
-`store` is shared by every store `nsh publish` targets. Fill it once ([Store listing](#store-listing)).
+`store` is shared by every store `nsh publish` targets; fill it once ([Store listing](#store-listing)).
 The listing texts come from the `en-US` locale (else the first one), and may also be files in `store/en-US/`
 (`subtitle.txt`, `description.txt`, `keywords.txt`). Flathub names the app by `id`.
 
 ### Release
 
 Flathub takes no uploads. Each app is a GitHub repository, `flathub/<id>`, whose manifest names the release archive by
-URL and SHA-256. Flathub builds and publishes every change merged there.
+URL and SHA-256; Flathub builds and publishes every change merged there.
 
 #### First release
 
@@ -627,7 +626,7 @@ Bump `version`, package, upload the new archive, then point `--out` at your chec
 nsh publish linux .nsh/out/Counter.tar.gz --out ../flathub-io.github.example.Counter
 ```
 
-When the manifest exists, only the archive source marked `# nsh: release archive` is updated (`url`, `sha256` and `only-arches`). The
+When the manifest exists, only the archive source marked `# nsh: release archive` is updated (`url`, `sha256` and `only-arches`); the
 rest stays as you or Flathub's reviewers edited it. Commit and open a pull request on `flathub/<id>`. NSH never opens
 pull requests for you.
 
@@ -680,7 +679,7 @@ nsh publish doctor linux [--entry <DIR>]
 ## Publish to the Microsoft Store
 
 On Windows the store is the Microsoft Store. `nsh publish windows` submits an MSIX package to it through the Store
-submission API. The Store certifies, signs and publishes it.
+submission API; the Store certifies, signs and publishes it.
 
 ### Before the first release
 

@@ -133,7 +133,7 @@ const palette = signal<keyof typeof palettes>("Sunset");
 A uniform may be a [native animated value](../modules/nsh.md#animation), or a node derived from one
 (`interpolate`, arithmetic). The platform writes its value into the shader on every frame it changes and draws again,
 on the UI thread: the animation runs at full frame rate however busy the app's code is. Numbers animate `f32`, `i32`
-and `u32` members and the components of a `vec2f`. An interpolation to colors animates a `vec3f` or `vec4f`.
+and `u32` members and the components of a `vec2f`; an interpolation to colors animates a `vec3f` or `vec4f`.
 
 ```tsx tabs
 import { Animated, cleanup, createAnimatedValue, Easing, Shader } from "nsh";
@@ -215,7 +215,7 @@ box the shader draws, in points.
 
 **`ShaderEffect`** draws its children through the shader: they keep their presses, focus and accessibility, and what
 shows is the shader's result. `progress` is a number or an animated value, which moves the effect natively.
-`maxSampleOffset` lets the shader draw that many points beyond the box (a glow, a blur's edge). Its `uv` then goes
+`maxSampleOffset` lets the shader draw that many points beyond the box (a glow, a blur's edge); its `uv` then goes
 below 0 and above 1. Without `source` the children draw as they are.
 
 ```tsx
@@ -247,7 +247,7 @@ cross-fade, the default) or `"none"`.
 ```
 
 **`ScreenEffect`** and **`ScreenTransition`** do the same for the whole surface (its pages, dialogs and overlays). They
-take no space and have no children. Put them anywhere in the app. The last screen effect mounted with a `source`
+take no space and have no children; put them anywhere in the app. The last screen effect mounted with a `source`
 draws.
 
 Pages and dialogs come and go through a shader with **`transitionShader`**: `{ source, uniforms, duration }` on a
@@ -277,7 +277,7 @@ fn details() -> impl IntoElement {
 
 The shader takes the place of the page's or the dialog's `animation`, whatever it is (`"none"` too). The `animation`
 runs on a device without a GPU, when the user asks for less motion (Reduce Motion, Remove animations), and for a
-source that does not compile. With `"none"` the change then shows at once. A push, pop, show or close that starts
+source that does not compile; with `"none"` the change then shows at once. A push, pop, show or close that starts
 while one runs completes that one first: its page or dialog arrives or leaves, its `onShow` or `onDismiss` fires, and
 the new change starts from there.
 
@@ -339,8 +339,8 @@ Each source compiles once: views that share a source, and a source set again, us
 - A frame is at most 4096 pixels a side: a larger view draws its shader at a lower scale.
 
 For noise, hash the integer cell a point is in (`bitcast<vec2u>(vec2i(floor(p)))` mixed with multiplies and
-xor-shifts) rather than `fract(sin(…) * 43758.5)`. An integer hash gives a cell the same value everywhere it is computed, so
-value noise has no visible seams on any GPU. The gallery's shaders show one.
+xor-shifts) rather than `fract(sin(…) * 43758.5)`: integer hashes give the same value for a cell everywhere it is
+computed, so value noise stays seamless on every GPU. The gallery's shaders show one.
 
 ## Platforms
 

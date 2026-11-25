@@ -7,15 +7,9 @@ group: ui
 
 # Navigation
 
-`nsh_base` (TSX: `nsh/base`) provides a native navigation stack and native dialogs. A navigation stack (`nav_stack()` in Rust, `NavStack` in TSX) shows one page per route and lets the user go back.
+`nsh_base` (TSX: `nsh/base`) provides a native navigation stack and native dialogs. A navigation stack (`nav_stack()` in Rust, `NavStack` in TSX) is a UINavigationController on iOS, with its header, swipe back and large titles, and a stack with a toolbar and predictive back on Android; on the desktops and the web, each page shows the header your app draws. You keep the routes in your state; the stack renders each route as a page and keeps it mounted, with its state, while it is in the stack.
 
-- On iOS it is a UINavigationController, with its header, swipe back and large titles.
-- On Android it is a stack with a toolbar and predictive back.
-- On the desktops and the web, each page shows the header your app draws.
-
-You keep the routes in your state. The stack renders each route as a page. A page stays mounted, with its state, while its route is in the stack.
-
-In Rust, import the builders by name next to the prelude (`use nsh_base::{dialog, nav_page, nav_stack};`; system alerts are `nsh_base::alert_dialog()`). The routes are a signal. The stack's children are its pages, one per route, kept by key (`each`). Adding a page pushes it, and removing it pops it. In TSX, `createNavStack` holds the routes and `NavStack` renders them.
+In Rust, import the builders by name next to the prelude (`use nsh_base::{dialog, nav_page, nav_stack};`; system alerts are `nsh_base::alert_dialog()`). The routes are a signal and the stack's children are its pages, one per route, kept by key (`each`): a page goes in to push it and out to pop it. In TSX, `createNavStack` holds the routes and `NavStack` renders them.
 
 ```tsx tabs
 import { mount, Scroll, Text, View } from "nsh";
@@ -161,7 +155,7 @@ pub fn App() -> impl IntoElement {
 
 ## The stack's state
 
-In Rust, the routes are your own signal (`signal(vec![..])`, or `global::<Routes>()` for one the whole app reaches), and you push, pop and replace by updating it: `routes.update(|r| r.push(route))`, `r.pop()`, `r.truncate(1)`, `routes.set(..)`. Each page's key (here the route's `Debug` text) tells the stack which page is which, so pages whose route stays keep their state. Give routes that may repeat a unique key. Handle each page's `on_dismiss`: the user went back natively, and the route (with those above it) leaves your signal.
+In Rust, the routes are your own signal (`signal(vec![..])`, or `global::<Routes>()` for one the whole app reaches), and you push, pop and replace by updating it: `routes.update(|r| r.push(route))`, `r.pop()`, `r.truncate(1)`, `routes.set(..)`. Each page's key (here the route's `Debug` text) tells the stack which page is which, so pages whose route stays keep their state; give routes that may repeat a unique key. Handle each page's `on_dismiss`: the user went back natively, and the route (with those above it) leaves your signal.
 
 In TSX, `createNavStack(routes)` creates the stack's state from an array of routes, bottom to top. A route is any value you like (a string, an object, a discriminated union as above), and each push is a page of its own, the same route pushed twice included. Create the state once, at module level or in your root component, and import it wherever pages navigate.
 
@@ -177,7 +171,7 @@ In TSX, `createNavStack(routes)` creates the stack's state from an array of rout
 
 To start several pages deep, pass more routes: `createNavStack<Route>([{ name: "inbox" }, { name: "message", id: 3 }])`.
 
-When the user leaves a page natively (the back button in the header, a swipe back on iOS, Android's back button or gesture, the desktops' back keys and mouse button, the browser's back button), the TSX stack removes that route from its state for you, so `routes()` always matches what is on screen. A Rust page reports it with `on_dismiss`, as above.
+When the user leaves a page natively (the back button in the header, a swipe back on iOS, Android's back button or gesture, the desktops' back keys and mouse button, the browser's back button), the TSX stack removes that route from its state for you, so `routes()` always matches what is on screen; a Rust page reports it with `on_dismiss`, as above.
 
 A route carries what the page needs. The gallery apps push routes that hold what makes the page, which keeps the route type small when there are many pages:
 
@@ -222,7 +216,7 @@ pub fn routes() -> Signal<Routes> {
 
 ## NavStack
 
-In Rust, `nav_stack()` is a view whose children are its pages, bottom to top. Style it as any view (`.flex_1()`). In TSX:
+In Rust, `nav_stack()` is a view whose children are its pages, bottom to top; style it as any view (`.flex_1()`). In TSX:
 
 | Prop | Type | Description |
 |---|---|---|
@@ -231,7 +225,7 @@ In Rust, `nav_stack()` is a view whose children are its pages, bottom to top. St
 | `style`, `class` | | The stack's own style (usually `flex: 1`). |
 | `onChange` | `({ routes }) => void` | The routes changed: pushed, popped, replaced or set by the app, or a page the user went back from. It runs after the change is rendered, and not for the routes the stack starts with. |
 
-The render function runs once per route, when it is pushed. `route` is the plain value, and `index()` is its current position. What it returns becomes the page's content. Return a `<NavPage>` to set the header; anything else is wrapped in a page with default options.
+The render function runs once per route, when it is pushed; `route` is the plain value, `index()` its current position. What it returns becomes the page's content. Return a `<NavPage>` to set the header; anything else is wrapped in a page with default options.
 
 Pages stay mounted while their route is in the stack: going back shows the previous page exactly as it was left, with its scroll position, inputs and signals. A page's [`cleanup`](./reactivity.md) handlers run when its route leaves the stack.
 
@@ -273,7 +267,7 @@ In Rust, each prop below is a method of `nav_page()` in snake case: `.title(..)`
 | `onDismiss` | `() => void` | | The user popped the page; its route is already removed. |
 | `style`, `class` | | | The page's content view. |
 
-On iOS, several trailing system bar buttons (with optional native menus) stand in for `headerRight`. Each button and each menu item carries its own handler (`onPress` / `onSelect`). The platform reports them as the root's menu event, the same path desktop menus use:
+On iOS, several trailing system bar buttons (with optional native menus) stand in for `headerRight`. Each button and each menu item carries its own handler (`onPress` / `onSelect`); the platform reports them as the root's menu event, the same path desktop menus use:
 
 ```tsx
 <NavPage
@@ -411,7 +405,7 @@ fn compose(routes: Signal<Vec<Route>>) -> Screen {
 }
 ```
 
-A colored system header (in Rust, `header_style_with` takes typed styles: `bg`, `text_color` and `tint_color`, the color of the header's buttons. Theme colors follow the appearance):
+A colored system header (in Rust, `header_style_with` takes typed styles: `bg`, `text_color` and `tint_color`, the color of the header's buttons; theme colors follow the appearance):
 
 ```tsx tabs
 <NavPage title="Profile" headerStyle={{ backgroundColor: "#1a7f37", color: "#ffffff", tintColor: "#ffffff" }}>
@@ -425,7 +419,7 @@ nav_page()
     .header_style_with(|s| s.bg(rgb(0x1a7f37)).text_color(rgb(0xffffff)).tint_color(rgb(0xffffff)))
 ```
 
-A page that shows no header still has the system bars around it. Pad its content by the [safe area](../elements/safe-area.md) insets:
+A page that shows no header still has the system bars around it; pad its content by the [safe area](../elements/safe-area.md) insets:
 
 ```tsx tabs
 <NavPage headerVisible={false}>
@@ -667,8 +661,8 @@ pub fn editor() -> impl IntoElement {
 }
 ```
 
-A listener made in an effect lasts until the effect runs again or its component goes. In TSX, the function
-`BackHandler.on` returns also stops it. In TSX, `BackHandler.exitApp()` leaves the app. You can import `nsh/mobile` on iOS too, where `BackHandler`'s calls return at once, so the same code runs on both platforms. See [Platform-specific code](./platform-specific.md).
+A listener made in an effect lasts until the effect runs again or its component goes; in TSX, the function
+`BackHandler.on` returns also stops it. In TSX, `BackHandler.exitApp()` leaves the app; `nsh/mobile` can be imported on iOS too, where `BackHandler`'s calls return at once, so the same code runs on both platforms. See [Platform-specific code](./platform-specific.md).
 
 ### Following the back gesture
 
@@ -676,8 +670,8 @@ On Android 14 and later the back gesture reports its progress while the finger m
 app moves itself, such as a drawer or a sheet, can follow it: `on_back_progress` in Rust,
 `BackHandler.on("progress", listener)` in TSX. Each step has a `phase` (`start`, `move`, `end`, `cancel`), the
 `progress` from 0 to 1, and the `edge` the swipe started at (`left` or `right`). After `end` the press follows and
-your back listeners hear it as above. After `cancel`, put the view back. While a progress listener is registered, the
-stacks leave the gesture to your app and do not preview their pop. A gesture that a dialog takes is not reported. As with
+your back listeners hear it as above; after `cancel` put the view back. While a progress listener is registered, the
+stacks leave the gesture to your app and do not preview their pop; a gesture a dialog takes is not reported. As with
 back listeners, listen only while the view is open:
 
 ```tsx tabs
@@ -733,7 +727,7 @@ pub fn drawer(open: Signal<bool>) -> impl IntoElement {
 
 ## Tabs and other layouts
 
-A tab bar is your own UI, drawn from primitives: a row of pressable views and a signal holding the selected tab. Render the selected tab's content with [`when` / `<If>`](../elements/control-flow.md) (or a function child in TSX). To keep each tab's state while switching, give each tab its own stack and routes and keep all of them mounted, hiding the inactive ones with `display: none`.
+A tab bar is your own UI, drawn from primitives: a row of pressable views and a signal holding the selected tab; render the selected tab's content with [`when` / `<If>`](../elements/control-flow.md) (or a function child in TSX). To keep each tab's state while switching, give each tab its own stack and routes and keep all of them mounted, hiding the inactive ones with `display: none`.
 
 Columns of stacks, a sidebar beside a list and its detail as in Mail or Settings on iPad, are a
 [`SplitView`](../elements/split-view.md): each column is a `NavStack` of its own, a `UISplitViewController` on iOS

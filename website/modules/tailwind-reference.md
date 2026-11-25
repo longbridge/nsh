@@ -6,11 +6,11 @@ order: 17
 
 # Tailwind reference
 
-Every element takes Tailwind CSS classes in its `class` prop, and conditional ones in `classList`. NSH resolves them in Rust against Tailwind 4's default theme. JS passes only the string, and NSH parses each distinct string once and caches it. Variants such as `dark:` or `active:` are re-evaluated natively when the appearance, window size or press state changes, without running any JS.
+Every element takes Tailwind CSS classes in its `class` prop (and conditional ones in `classList`). NSH resolves them in Rust against Tailwind 4's default theme: JS passes only the string, each distinct string is parsed once and cached, and variants such as `dark:` or `active:` are re-evaluated natively when the appearance, window size or press state changes, without running any JS.
 
 Each utility sets exactly what Tailwind CSS 4 generates for it, with the same meaning as in a browser. This page lists what is supported. For an introduction see [Tailwind](../docs/tailwind.md); for the style keys the utilities set, see the [Style reference](./style-reference.md).
 
-Rust components don't take class strings. They call the typed methods of `Styled` (`nsh_core::prelude`), which are named after these utilities and resolve to the same values, Tailwind's default scales included: `px-4` is `.px_4()`, `rounded-2xl` is `.rounded_2xl()`, `shadow-md` is `.shadow_md()`, `bg-linear-to-br` is `.bg_linear_to_br()`. Colors are values: theme colors, or Tailwind's palette as `nsh_core::element::palette` (`ZINC.shade(800)` is `zinc-800`). Variants are methods that take a closure of styles: `.active(|s| …)`, `.hover(…)`, `.focus(…)`, `.disabled_style(…)`, `.dark(…)`, `.group_active(…)`, and `.style_when(condition, …)` for the rest. The [Style reference](./style-reference.md) names the method for each style key.
+Rust components take no class strings: they style elements with the typed methods of `Styled` (`nsh_core::prelude`), named after these utilities and resolving to the same values, Tailwind's default scales included (`px-4` is `.px_4()`, `rounded-2xl` `.rounded_2xl()`, `shadow-md` `.shadow_md()`, `bg-linear-to-br` `.bg_linear_to_br()`). Colors are values: theme colors, or Tailwind's palette as `nsh_core::element::palette` (`ZINC.shade(800)` is `zinc-800`). Variants are methods taking a closure of styles: `.active(|s| …)`, `.hover(…)`, `.focus(…)`, `.disabled_style(…)`, `.dark(…)`, `.group_active(…)`, and `.style_when(condition, …)` for the rest. The [Style reference](./style-reference.md) names the method of each style key.
 
 ```tsx tabs
 <View class="flex-row items-center gap-3 rounded-2xl bg-white p-4 shadow-md active:scale-[0.98] transition dark:bg-zinc-800">

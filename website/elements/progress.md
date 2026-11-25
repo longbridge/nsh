@@ -7,14 +7,11 @@ demo: el-progress
 
 # Progress
 
-A progress bar shows how far a task has got, such as a download, an upload or a setup step. With `indeterminate`, it
-shows that a task of unknown length is under way.
-
-`Progress` handles two things. Screen readers get the progress bar role, the range 0 to 100 and the value. The
-indicator's width is `value` percent of the track's width. Your app owns the look. A `Progress` has no colors, sizes,
-radii, motion or label of its own. Its parts are a track, an indicator inside it, and its children (a label, the value
-as text). You style each part.
-
+A progress bar shows how far a task with a known extent is (a download, an upload, a step of a setup), or, while
+`indeterminate`, that a task of unknown extent is under way. It owns what screen readers get, the progress bar role
+with the range 0 to 100 and the value, and the indicator's width: `value` percent of the track's. The look is the
+app's: a `Progress` has no colors, sizes, radii, motion or label of its own. It is made of a track with an indicator
+inside it, then its children (a label, the value as text), and the app styles each part.
 
 ```tsx tabs
 import { mount, signal, Text } from "nsh";

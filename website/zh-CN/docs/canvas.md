@@ -8,7 +8,7 @@ demo: guide-canvas
 
 # 画布
 
-画布是一种视图，你可以用 HTML Canvas 2D API 的操作在上面绘制。图表、进度环、仪表盘、签名、自定义图标，凡是画出来比用视图拼更容易的东西都适合用它。在 Rust 中，`canvas(..)` 显示 `Painter` 录制的内容。在 TSX 中，`nsh` 的 `Canvas` 接收一个 `draw` 函数，一次性录制整幅绘制。平台按屏幕分辨率以原生方式回放这些绘制，iOS 上用 Core Graphics，Android 上用 `android.graphics.Canvas`。所以在任何像素密度下都很清晰。
+画布是一个用 HTML Canvas 2D API 的操作绘制的视图：图表、进度环、仪表盘、签名、自定义图标，凡是画出来比用视图拼出来更容易的东西都适合。在 Rust 中，`canvas(..)` 显示一个 `Painter` 录制的内容；在 TSX 中，`nsh` 的 `Canvas` 接收一个 `draw` 函数，一次性录制整幅绘制。平台以原生方式回放（iOS 上是 Core Graphics，Android 上是 `android.graphics.Canvas`），按屏幕分辨率绘制，所以在任何像素密度下都很清晰。
 
 ```tsx tabs
 import { Canvas, mount, View } from "nsh";
@@ -72,7 +72,7 @@ pub fn App() -> impl IntoElement {
 
 ## 绘制何时生成
 
-在 Rust 中，`canvas(move || ..)` 在绑定中录制。闭包先运行一次，它读取过的 [signal](./reactivity.md) 改变时再运行。依赖画布尺寸的绘制把 `.on_layout(..)` 得到的尺寸存在 signal 中并读取它，如上例所示。在 TSX 中，`draw(cx, { width, height })` 会在以下时机运行：
+在 Rust 中，`canvas(move || ..)` 在绑定中录制：闭包运行一次，它读取过的 [signal](./reactivity.md) 改变时再运行。依赖画布尺寸的绘制把 `.on_layout(..)` 得到的尺寸存在 signal 中并读取它，如上例所示。在 TSX 中，`draw(cx, { width, height })` 会在以下时机运行：
 
 - 画布尺寸确定后（第一次布局之后）；
 - 画布尺寸改变时；
@@ -143,13 +143,13 @@ canvas(move || {
 
 **变换**：`translate(x, y)`、`scale(x, y)`、`rotate(angle)`（弧度，顺时针）、`transform(a, b, c, d, e, f)`、`setTransform(a, b, c, d, e, f)`、`resetTransform()`。
 
-**路径**：`beginPath()`、`moveTo`、`lineTo`、`quadraticCurveTo`、`bezierCurveTo`、`arc`、`arcTo`、`ellipse`、`rect`、`roundRect(x, y, w, h, radii)`、`closePath()`。然后是 `fill(rule?)`、`stroke()` 和 `clip(rule?)`，它们也都接受一条路径（Rust 中的 `fill_path`、`stroke_path`、`clip_path`）。填充规则为 `"nonzero"` 和 `"evenodd"`。
+**路径**：`beginPath()`、`moveTo`、`lineTo`、`quadraticCurveTo`、`bezierCurveTo`、`arc`、`arcTo`、`ellipse`、`rect`、`roundRect(x, y, w, h, radii)`、`closePath()`；然后是 `fill(rule?)`、`stroke()` 和 `clip(rule?)`，它们也都接受一条路径（Rust 中的 `fill_path`、`stroke_path`、`clip_path`）。填充规则为 `"nonzero"` 和 `"evenodd"`。
 
 **矩形**：`fillRect`、`strokeRect`、`clearRect`。
 
-**文字**：`fillText(text, x, y, maxWidth?)`、`strokeText(...)`、`measureText(text)`。平台的文字引擎按当前 `font` 同步测量，返回 `width`，以及字体在基线上方和下方的高度 `fontBoundingBoxAscent`、`fontBoundingBoxDescent`。在 Rust 中，`measure_text(font, text)` 给出宽度，`text_metrics(font, text)` 给出全部。
+**文字**：`fillText(text, x, y, maxWidth?)`、`strokeText(...)`、`measureText(text)`（由平台的文字引擎按当前 `font` 同步测量：`width`，以及这一行字体在基线上方、下方的高度 `fontBoundingBoxAscent`、`fontBoundingBoxDescent`）。在 Rust 中，`measure_text(font, text)` 给出宽度，`text_metrics(font, text)` 给出全部。
 
-**命中测试**：`isPointInPath(path?, x, y, rule?)` 和 `isPointInStroke(path?, x, y)`（`Painter` 上的 `path_contains`、`stroke_contains`、`is_point_in_path` 和 `is_point_in_stroke`）同步给出结果。计算依据是录制下来的几何信息：当前变换、路径、`lineWidth` 和 `lineCap`。保留绘制和画过的路径，就能找出点击位置下的形状：
+**命中测试**：`isPointInPath(path?, x, y, rule?)` 和 `isPointInStroke(path?, x, y)`（`Painter` 上的 `path_contains`、`stroke_contains`、`is_point_in_path` 和 `is_point_in_stroke`）同步给出结果，依据录制的几何信息（当前变换、路径、`lineWidth` 和 `lineCap`）计算。保留绘制和画过的路径，就能找出点击位置下的形状：
 
 ```tsx tabs
 let cx: CanvasRenderingContext2D | undefined;
@@ -284,7 +284,7 @@ canvas(move || {
 .on_layout(move |frame: &Bounds<Points>| width.set(frame.size.width.0))
 ```
 
-锥形渐变（`createConicGradient(startAngle, x, y)`、`CanvasGradient::conic(start_angle, center)`）让颜色绕一个点旋转过渡。起始角以弧度表示，从 x 轴顺时针计算。把锥形渐变用在描边的圆弧上，就是渐变色的进度环。
+锥形渐变（`createConicGradient(startAngle, x, y)`、`CanvasGradient::conic(start_angle, center)`）让颜色绕一个点旋转过渡；起始角以弧度表示，从 x 轴顺时针计算。把锥形渐变用在描边的圆弧上，就是渐变色的进度环。
 
 ## 文字
 
@@ -315,9 +315,9 @@ Painter::new()
 
 ## 图片
 
-在 Rust 中，绘制图片接受 URL（资源的 URL 是 `LOGO.url`）。在 TSX 中接受 URL 或导入的资源（`import logo from "./logo.png"`）。图片在原生端加载，加载完成后画布会重新绘制，你不需要自己跟踪加载状态。远程 URL 受应用的[网络能力声明](./sandbox-and-capabilities.md)约束。
+在 Rust 中，绘制图片接受 URL（资源的 URL 是 `LOGO.url`）；在 TSX 中接受 URL 或导入的资源（`import logo from "./logo.png"`）。图片在原生端加载，加载完成后画布会重新绘制，你不需要自己跟踪加载状态。远程 URL 受应用的[网络能力声明](./sandbox-and-capabilities.md)约束。
 
-iOS、macOS、Android、Windows、Linux 和 GPUI 上的画布既能绘制位图，也能绘制 SVG。`nsh_core::svg` 先把 SVG 栅格化为位图，再交给画布。位图尺寸由加载器按 SVG 的固有尺寸（点）分档决定。请把它绘制到明确的目标矩形中，不要依赖栅格位图的像素尺寸。放大很多倍绘制会拉伸位图，看起来发虚。要得到清晰的边缘和文字，请按固有尺寸或更小绘制。在 Web 上，画布绘制浏览器能绘制的内容，包括 SVG。
+iOS、macOS、Android、Windows、Linux 和 GPUI 上的画布既绘制位图，也绘制 SVG：SVG 由 `nsh_core::svg` 栅格化为位图后交给画布，栅格尺寸由加载器按 SVG 的固有尺寸（点）分档决定。请把它绘制到明确的目标矩形中，不要依赖栅格位图的像素尺寸。把它放大很多倍绘制会放大位图而显得模糊；要得到清晰的边缘和文字，请按固有尺寸或更小绘制。在 Web 上，画布绘制浏览器能绘制的内容，包括 SVG。
 
 ```tsx tabs
 import { Canvas } from "nsh";
@@ -459,7 +459,7 @@ pub fn ring() -> impl IntoElement {
 }
 ```
 
-圆弧的终止角 `progress.mul(2π).sub(π/2)` 是一个节点。所以进度环在 900 毫秒内以原生方式扫过，绘制却只录制了一次。标签读取了 signal，因此会多录制一次。时钟的秒针也是同样的做法：`rotate(seconds.mul(π / 30))`，其中 `seconds` 做线性动画。
+圆弧的终止角是 `progress.mul(2π).sub(π/2)`：它是一个节点，所以进度环会在 900 毫秒内以原生方式扫过，而绘制只录制了一次（标签读取了 signal，因此再录制一次）。时钟的秒针也是同样的做法：`rotate(seconds.mul(π / 30))`，其中 `seconds` 做线性动画。
 
 颜色也可以这样动起来：Rust 中为 `.fill_style(&t.interpolate_colors(&[0.0, 1.0], &[rgb(0x54aeff), rgb(0xcf222e)]))`，TSX 中为 `cx.fillStyle = t.interpolate({ inputRange: [0, 1], outputRange: ["#54aeff", "#cf222e"] })`。
 

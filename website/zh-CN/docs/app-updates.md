@@ -7,9 +7,7 @@ group: delivery
 
 # 应用更新
 
-`nsh/updater` 让打包后的应用检查新版本、下载并替换自己。界面由你自己画，模块只提供状态和动作。
-
-本页讲的是更新整个应用。只想更新打包应用的 TSX，请看 [OTA 更新](/zh-CN/docs/ota-updates)。只想给宿主应用下发 NSH 界面，请看[签名包](/zh-CN/docs/signed-packages)。
+`nsh/updater` 让打包后的应用检查新版本、下载并替换自己。界面由你自己画，模块只提供状态和动作。它更新的是整个应用；如果只想更新打包应用的 TSX，请看 [OTA 更新](/zh-CN/docs/ota-updates)；如果只想给宿主应用下发 NSH 界面，请看[签名包](/zh-CN/docs/signed-packages)。
 
 | 平台 | 行为 |
 | --- | --- |
@@ -26,7 +24,7 @@ group: delivery
 { "version": "1.2.0", "updater": { "github": "owner/repo" } }
 ```
 
-从自己的服务器更新，必须配签名密钥。否则谁控制了服务器，谁就控制了应用运行的代码。用 `nsh keygen keys/update` 生成密钥，`.secret` 文件不要放进仓库：
+从自己的服务器更新必须配签名密钥，否则谁控制了服务器，谁就控制了应用运行的代码（`nsh keygen keys/update`，`.secret` 不要放进仓库）：
 
 ```json
 {
@@ -40,7 +38,7 @@ group: delivery
 
 `github` 也可以配 `publicKey`，配了之后会拒绝未签名的清单。
 
-想让自愿参加的用户收到 beta，可以加一个频道。频道就是另起名字的另一份清单。应用代码只传频道名（`checkForUpdate({ channel: "beta" })`），不能传地址。这样更新从哪里来，仍由包决定（[频道](../modules/nsh-updater.md#频道)）。
+想让自愿参加的用户收到 beta，再加一个频道：按名字声明的另一份清单。应用代码把用户的选择作为名字传入（`checkForUpdate({ channel: "beta" })`），不能传地址，所以更新从哪来仍由包决定（[频道](../modules/nsh-updater.md#频道)）。
 
 ```json
 "updater": {
@@ -65,11 +63,9 @@ if (update?.canInstall) {
 }
 ```
 
-`update` 包含 `version`、`notes`、`url` 和 `canInstall`。iOS、Android 上 `canInstall` 为 false。桌面端如果应用装在用户没有写权限的位置（比如通过系统包安装），也为 false。开发运行时 `checkForUpdate` 返回 `null`。
+`update` 包含 `version`、`notes`、`url` 和 `canInstall`。iOS、Android 上 `canInstall` 为 false；桌面端如果应用装在用户无法写入的位置（如系统包），也为 false。开发运行时 `checkForUpdate` 返回 `null`。
 
-`installAndRestart` 和 `Application.restart()` 一样重启应用：当前进程像用户主动退出那样退出，结束后新版本启动。安装失败时，应用保持原样。
-
-不想打断用户，可以改用 `installOnQuit()`。更新现在就完成校验，应用退出时再替换，下次启动就是新版本。每个函数、它的错误以及 `nsh.json` 的键见 [nsh/updater 参考](../modules/nsh-updater.md)。
+`installAndRestart` 像 `Application.restart()` 一样重启应用：当前进程像用户退出时那样退出，进程结束后新版本启动。如果失败，应用保持原样。不想打断用户时改用 `installOnQuit()`：更新现在就校验好，应用退出时替换，下次启动就是新版本。每个函数、它的错误以及 `nsh.json` 的键见 [nsh/updater 参考](../modules/nsh-updater.md)。
 
 ## 发布新版本
 
@@ -88,30 +84,22 @@ nsh update-manifest *.tar.gz *.zip \
 
 把压缩包、`latest.json` 和 `latest.json.sig`（使用 `--key` 时）上传为 GitHub Release 的附件，或放到自己服务器的同一目录。GitHub 上标记为 draft 或 prerelease 的版本不会被推送。
 
-更新说明有多种语言时，每种语言加一个 `--notes <标签>=<文件>`，标签用 BCP 47，例如 `--notes zh-TW=CHANGES.zh-TW.md`。每种语言写成 `latest.json` 旁边的 `notes.<标签>.md`，清单会记录它的 SHA-256。这些文件要和清单一起上传。用 `checkForUpdate({ locale })` 检查时，`update.notes` 就是该语言的说明，只单独下载这一个文件。没有该语言时，用不带标签的说明。旧版运行时的应用照旧显示不带标签的说明。
+更新说明有多种语言时，每种语言加一个 `--notes <标签>=<文件>`，标签用 BCP 47，例如 `--notes zh-TW=CHANGES.zh-TW.md`。每种语言写成 `latest.json` 旁边的 `notes.<标签>.md`，清单里记录它的 SHA-256；和清单一起上传。用 `checkForUpdate({ locale })` 检查时，`update.notes` 就是该语言的说明，只下载这一个文件；没有该语言时用不带标签的说明。旧版运行时的应用照旧显示不带标签的说明。
 
 ### 更小的下载
 
-用 `--previous` 传入上一版本的压缩包，`nsh update-manifest` 会为每个平台写出一个从上一版本到新版本的 zstd 补丁，放在清单旁边。补丁也要一起上传。
-
-运行上一版本的应用会下载补丁，而不是整个压缩包。它用已安装的文件还原出新应用，再照常安装。以下情况会自动改为下载整个压缩包：
-
-- 已安装的文件与发布时不一致；
-- 补丁应用失败；
-- 还原结果与签名清单中的 SHA-256 不符。
-
-更早版本或旧版运行时的应用照旧下载压缩包。
+用 `--previous` 传入上一版本的压缩包，`nsh update-manifest` 会为每个平台在清单旁写出从该版本到新版本的 zstd 补丁，一起上传即可。运行上一版本的应用会下载补丁而不是整个压缩包，用已安装的文件还原出新应用，再照常安装。已安装的文件与发布时不一致、补丁失败或结果与签名清单中的 SHA-256 不符时，自动改为下载整个压缩包。更早版本或旧版运行时的应用照旧下载压缩包。
 
 ```sh
 gh release download v1.2.0 -p 'My-App-1.2.0-*' -D previous
 nsh update-manifest *.tar.gz *.zip --previous previous/* --notes CHANGES.md --key keys/update.secret
 ```
 
-以 NSH 自己的发布包为例，相邻版本的补丁大小是压缩包的 24–37%。每个平台生成补丁约需一分钟、最多 0.7 GB 内存，适合放在发布 CI 里。应用补丁不到一秒。
+在 NSH 自己的发布包上，相邻版本的补丁是压缩包的 24–37%。每个平台生成约需一分钟、最多 0.7 GB 内存，适合放在发布 CI 里；还原不到一秒。
 
 ## OTA 更新
 
-只改了 TSX 的版本不需要发新应用。[OTA 更新](/zh-CN/docs/ota-updates)把它作为签名包下发，已安装的应用下次启动就会运行它。所有原生平台都适用，包括 iOS 和 Android。优先用 OTA，只有改动需要更新的 NSH 运行时或原生代码时才发新应用。一份清单可以同时包含两者，应用先检查包，再检查新应用：
+只改了 TSX 的版本不需要新应用：[OTA 更新](/zh-CN/docs/ota-updates)把它作为签名包下发，已安装的应用从下次启动开始运行它，所有原生平台（包括 iOS 和 Android）都适用。优先用 OTA，改动需要更新的 NSH 运行时或原生代码时再发新应用。一份清单可以同时包含两者，应用先检查包，再检查新应用：
 
 ```tsx
 import { checkForPackage, checkForUpdate, downloadPackage } from "nsh/updater";
@@ -132,7 +120,7 @@ if (await checkForPackage()) {
 - 版本号：只提供更新的版本，旧清单无法让应用降级。
 - URL：只允许 HTTPS（明文 HTTP 仅限本机测试）。
 - 压缩包的大小和 SHA-256。
-- 新应用：必须是一个可运行的应用（可执行文件，macOS 上还有代码签名）。它的 id 和可执行文件名可以和已安装的不同，所以更新可以给应用改名或换 id。决定更新属于哪个应用的，是清单签名。共用签名密钥的应用会安装各自 `"updater"` 来源提供的任何内容。
+- 新应用：必须是一个可运行的应用（可执行文件，macOS 上还有代码签名）。它的 id 和可执行文件名可以和已安装的不同，所以更新可以给应用改名或换 id：把更新绑定到应用的是清单签名。共用签名密钥的应用会安装各自 `"updater"` 来源提供的任何内容。
 - 当前进程就是这个包本身：运行在其他应用内的 NSH 模块无法替换宿主。
 - OTA 包：按 `packages.roots` 校验签名、应用 id、比当前运行及之前运行过的都新的构建号、所需运行时、大小和 SHA-256。
 
@@ -141,9 +129,9 @@ macOS 上 `nsh package` 用的是 ad hoc 签名，可用于测试，但在其他
 ## Rust 应用
 
 原生 Rust 应用直接使用 `nsh-updater`，并提供自己的 HTTP 传输。
-用 `Config::check` 验证清单，用 `Download` 验证更新包。之后调用
-`Installation::install`，成功后再调用 `nsh_core::element::desktop::restart()`。
-应用会像 `Application.restart()` 那样退出，进程结束后新版本启动。`install`
+用 `Config::check` 验证清单，用 `Download` 验证更新包；之后调用
+`Installation::install`，成功后调用 `nsh_core::element::desktop::restart()`：
+应用像 `Application.restart()` 那样退出，进程结束后新版本启动。`install`
 失败时，应用保持原样。
 
 `Config`、`Manifest`、`Asset` 和 `Available` 均为非穷尽结构体。
