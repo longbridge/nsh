@@ -3553,7 +3553,7 @@ fn scenes(registry: &mut Registry) {
 
 Rust UI 用 `gpu_view().renderer(Spinner::default)`（或 `.renderer_named("app/spinner")`）放置 GPU 视图，用 `.prop(name, value)` 设置属性，用 `.bind_animated_prop(name, &value)` 绑定动画值，用 `.on_native_event(…)` 接收事件。
 
-帧的大小是 `frame.width()` × `frame.height()` 像素，格式为 `frame.format()`（8 位 RGBA 或 BGRA）：先清屏，颜色按 sRGB 编码并预乘 alpha，与 CSS 颜色一致。同一窗口的 GPU 视图共享一个设备：高性能 GPU，开启它的全部 features 和 limits。没有可用 GPU，或 `name` 下没有注册渲染器时，视图只绘制自身样式和子元素。目前 Linux 上已能绘制 GPU 视图；其他平台在支持到来之前显示视图的样式和子元素。
+帧的大小是 `frame.width()` × `frame.height()` 像素，格式为 `frame.format()`（8 位 RGBA 或 BGRA）：先清屏，颜色按 sRGB 编码并预乘 alpha，与 CSS 颜色一致。同一窗口的 GPU 视图共享一个设备：高性能 GPU，开启它的全部 features 和 limits。没有可用 GPU，或 `name` 下没有注册渲染器时，视图只绘制自身样式和子元素。目前 Linux、macOS 和 iOS 上已能绘制 GPU 视图；其他平台在支持到来之前显示视图的样式和子元素。
 
 ## Accessibility
 

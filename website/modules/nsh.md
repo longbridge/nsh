@@ -3713,7 +3713,7 @@ fn scenes(registry: &mut Registry) {
 
 Rust UI places one with `gpu_view().renderer(Spinner::default)` (or `.renderer_named("app/spinner")`), sets props with `.prop(name, value)`, binds them with `.bind_animated_prop(name, &value)` and hears events with `.on_native_event(…)`.
 
-The frame is `frame.width()` × `frame.height()` pixels of `frame.format()`, 8-bit RGBA or BGRA: clear it first, and write sRGB-encoded colors with premultiplied alpha, as CSS colors. The device is shared by the views of a window: a high-performance GPU, with all of its features and limits. Where no GPU is available, or nothing is registered under `name`, the view draws only its own style and children. GPU views draw on Linux today; the other platforms show their style and children while their support lands.
+The frame is `frame.width()` × `frame.height()` pixels of `frame.format()`, 8-bit RGBA or BGRA: clear it first, and write sRGB-encoded colors with premultiplied alpha, as CSS colors. The device is shared by the views of a window: a high-performance GPU, with all of its features and limits. Where no GPU is available, or nothing is registered under `name`, the view draws only its own style and children. GPU views draw on Linux, macOS and iOS today; the other platforms show their style and children while their support lands.
 
 ## Accessibility
 

@@ -228,6 +228,7 @@ impl Mounter {
                 // A picture taken while drawing was deferred lacks this content.
                 crate::shader::ui_changed(&view);
                 crate::shader::shown(&view);
+                crate::gpu_view::shown(&view);
             }
         }
         true
@@ -405,6 +406,7 @@ impl Mounter {
                     crate::text_input::deleted(&view);
                     crate::native::deleted(surface, &view);
                     crate::shader::deleted(surface, &view);
+                    crate::gpu_view::deleted(surface, &view);
                     crate::scroll::deleted(&view);
                     // A view whose parent the batch deletes too stays in it:
                     // the subtree leaves the window with its root, in one
@@ -499,7 +501,10 @@ impl Mounter {
                             self.draw_when_shown(view, Damage::All);
                         }
                     }
-                    _ => crate::shader::resized(surface, view),
+                    _ => {
+                        crate::shader::resized(surface, view);
+                        crate::gpu_view::resized(surface, view);
+                    }
                 }
             }
             MountItem::ViewStyle { id, style } => {
@@ -634,9 +639,11 @@ impl Mounter {
                     crate::navigation::set_shader(surface, view, shader.clone());
                 }
             }
-            // GPU views draw nothing on this backend yet
-            // (`docs/dev/gpu-views.md`).
-            MountItem::GpuView { .. } => {}
+            MountItem::GpuView { id, source } => {
+                if let Some(view) = self.get(*id) {
+                    crate::gpu_view::set(surface, view, source.clone());
+                }
+            }
             MountItem::Shader { id, layer } => {
                 if let Some(view) = self.get(*id) {
                     crate::shader::set(surface, view, layer.clone());
@@ -691,7 +698,9 @@ impl Mounter {
                 }
             }
             MountItem::ComponentProps { id, props } => {
-                if let Some(view) = self.get(*id) {
+                if let Some(view) = self.get(*id)
+                    && !crate::gpu_view::props(surface, view, props)
+                {
                     crate::native::component_props(surface, view, props);
                 }
             }
