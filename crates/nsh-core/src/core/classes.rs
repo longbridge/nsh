@@ -26,7 +26,7 @@ use crate::{
 };
 
 /// Maximum entries kept in [`Core::resolved_styles`] before clearing.
-const RESOLVED_STYLE_CACHE: usize = 4096;
+pub(super) const RESOLVED_STYLE_CACHE: usize = 4096;
 
 /// Cache key for [`Core::resolved_styles`], normalized to the dependency bits of `ClassList`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -315,7 +315,7 @@ impl<M: TextEngine> Core<M> {
             })
             // `ios:` / `android:` never change at run time, but a new
             // platform must reach classes resolved before it was known.
-            | (if env.platform != self.class_env.platform { u16::MAX } else { 0 });
+            | (if env.platform != self.class_env.platform { deps::PLATFORM } else { 0 });
         if env.platform != self.class_env.platform {
             self.resolved_styles.clear();
         }

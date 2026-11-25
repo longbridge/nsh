@@ -54996,6 +54996,8 @@ mod resolved_style_cache {
                 n.resting_fill,
                 n.frame,
                 n.direction,
+                n.object_fit,
+                n.child_perspective,
             )
         ))
     }
@@ -55385,18 +55387,378 @@ mod resolved_style_cache {
         let plain_view_themed = c.nodes[plain_node as usize].view_style.0.as_ref().unwrap();
         assert!(!std::rc::Rc::ptr_eq(&plain_view_before, plain_view_themed));
 
-        // Changing platform clears `resolved_styles` and rebuilds every entry with `deps != 0` (4 of 7).
-        let kept: Vec<_> = c.resolved_styles.values().cloned().collect();
+        // Changing platform clears `resolved_styles`. None of these classes use
+        // platform variants, so nothing needs restyling and entries rebuild only
+        // lazily; the nodes' existing (platform-independent) styles stay valid.
+        let pre_platform = c.nodes[plain_node as usize].view_style.0.clone();
         c.set_class_environment(ClassEnvironment {
             platform: Platform::Android,
             ..Default::default()
         });
-        assert_eq!(c.resolved_styles.len(), 4);
-        assert!(
-            c.resolved_styles
-                .values()
-                .all(|entry| kept.iter().all(|old| !std::rc::Rc::ptr_eq(old, entry)))
+        let plain_view_platform = c.nodes[plain_node as usize].view_style.0.as_ref().unwrap();
+        assert!(std::rc::Rc::ptr_eq(
+            pre_platform.as_ref().unwrap(),
+            plain_view_platform
+        ));
+    }
+
+    #[test]
+    fn platform_only_classes_restyle_when_platform_changes() {
+        let mut c = setup_core();
+        // The view style a batch last mounts on `id`, if any: the core's
+        // observable output rather than its internal bookkeeping.
+        let mounted_bg = |batch: &crate::mount::MountBatch, id: NodeId| {
+            batch.items.iter().rev().find_map(|item| match item {
+                crate::mount::MountItem::ViewStyle { id: x, style } if *x == id => {
+                    Some(style.background_color)
+                }
+                _ => None,
+            })
+        };
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 10,
+                    tag: Tag::View,
+                },
+                class_op(10, "ios:bg-red-500"),
+                Op::Create {
+                    id: 11,
+                    tag: Tag::View,
+                },
+                class_op(11, "android:bg-blue-500 ios:dark:bg-green-500"),
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 10,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 11,
+                    before: None,
+                },
+            ],
         );
+        let batch = c.commit().unwrap();
+        // On iOS the `ios:` rule applies, the `android:` one does not.
+        assert!(mounted_bg(&batch, 10).is_some_and(|bg| bg != crate::style::Color::TRANSPARENT));
+        assert!(mounted_bg(&batch, 11).is_none_or(|bg| bg == crate::style::Color::TRANSPARENT));
+
+        c.set_class_environment(ClassEnvironment {
+            platform: Platform::Android,
+            ..Default::default()
+        });
+        let batch = c
+            .commit()
+            .expect("the platform change must restyle both views");
+        // `ios:bg-red-500` unmounts its background, `android:bg-blue-500` mounts one:
+        // both are platform-only dependent classes, with no other dependency bits.
+        assert_eq!(
+            mounted_bg(&batch, 10),
+            Some(crate::style::Color::TRANSPARENT)
+        );
+        assert!(mounted_bg(&batch, 11).is_some_and(|bg| bg != crate::style::Color::TRANSPARENT));
+    }
+
+    /// Extended equivalence coverage beyond `resolved_class_style_cache_matches_uncached_resolution`:
+    /// combined variants, class-environment toggles (dark / motion / pointer /
+    /// terminal), orientation, transitions and keyframe animations, cached
+    /// `fixed` / `sticky` / perspective / object-fit / paint records, inline
+    /// text spans, interaction sequences, re-classing and class removal.
+    #[test]
+    fn resolved_class_style_cache_matches_uncached_extended() {
+        use crate::tailwind::Pointer;
+
+        let mut cached = setup_core();
+        let mut uncached = setup_core();
+        uncached.resolve_uncached = true;
+
+        let build_ops = || {
+            let mut ops = Vec::new();
+            // Combined variants, repeated 4x for cache hits.
+            for i in 0..4 {
+                let id = 300 + i;
+                ops.extend([
+                    Op::Create { id, tag: Tag::View },
+                    class_op(
+                        id,
+                        "p-1 sm:dark:hover:bg-red-500 dark:md:px-8 rtl:ms-4 \
+                         motion-safe:transition-transform motion-reduce:transition-none \
+                         landscape:p-4 portrait:p-2 pointer-coarse:m-2 pointer-fine:m-1 \
+                         terminal:rounded-none",
+                    ),
+                    Op::Insert {
+                        parent: ROOT_ID,
+                        child: id,
+                        before: None,
+                    },
+                ]);
+            }
+            // Transitions / keyframe animations, repeated.
+            for i in 0..4 {
+                let id = 310 + i;
+                ops.extend([
+                    Op::Create { id, tag: Tag::View },
+                    class_op(
+                        id,
+                        "transition-transform duration-150 ease-out animate-pulse p-2 bg-white",
+                    ),
+                    Op::Insert {
+                        parent: ROOT_ID,
+                        child: id,
+                        before: None,
+                    },
+                ]);
+            }
+            // Cached (no inline style) fixed / sticky / perspective / object-fit / paint.
+            for (id, cls, tag) in [
+                (320, "fixed bottom-0 right-2 p-2 bg-blue-500", Tag::View),
+                (321, "fixed bottom-0 right-2 p-2 bg-blue-500", Tag::View),
+                (322, "sticky top-4 bg-white z-10 p-1", Tag::View),
+                (323, "sticky top-4 bg-white z-10 p-1", Tag::View),
+                (324, "perspective-normal p-2", Tag::View),
+                (325, "perspective-normal p-2", Tag::View),
+                (330, "object-cover w-10 h-10", Tag::Image),
+                (331, "object-cover w-10 h-10", Tag::Image),
+                (340, "fill-red-500 stroke-blue-500 w-8 h-8", Tag::Canvas),
+                (341, "fill-red-500 stroke-blue-500 w-8 h-8", Tag::Canvas),
+            ] {
+                ops.extend([
+                    Op::Create { id, tag },
+                    class_op(id, cls),
+                    Op::Insert {
+                        parent: ROOT_ID,
+                        child: id,
+                        before: None,
+                    },
+                ]);
+            }
+            // Inline text spans with vertical alignment.
+            ops.extend([
+                Op::Create {
+                    id: 350,
+                    tag: Tag::Text,
+                },
+                class_op(350, "text-base text-neutral-900"),
+                Op::Create {
+                    id: 351,
+                    tag: Tag::Text,
+                },
+                class_op(351, "align-middle text-red-500 bg-amber-100"),
+                Op::CreateText {
+                    id: 352,
+                    text: "middle".into(),
+                },
+                Op::Create {
+                    id: 353,
+                    tag: Tag::Text,
+                },
+                class_op(353, "align-text-top text-blue-500"),
+                Op::CreateText {
+                    id: 354,
+                    text: "top".into(),
+                },
+                Op::Insert {
+                    parent: 351,
+                    child: 352,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: 353,
+                    child: 354,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: 350,
+                    child: 351,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: 350,
+                    child: 353,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 350,
+                    before: None,
+                },
+            ]);
+            // Positional + interaction combinations.
+            ops.extend([
+                Op::Create {
+                    id: 365,
+                    tag: Tag::View,
+                },
+                class_op(365, "flex-col"),
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 365,
+                    before: None,
+                },
+            ]);
+            for i in 0..5 {
+                let row = 360 + i;
+                ops.extend([
+                    Op::Create {
+                        id: row,
+                        tag: Tag::View,
+                    },
+                    class_op(
+                        row,
+                        "h-5 first:bg-red-100 odd:hover:bg-blue-100 even:active:bg-green-100",
+                    ),
+                    Op::Insert {
+                        parent: 365,
+                        child: row,
+                        before: None,
+                    },
+                ]);
+            }
+            ops
+        };
+
+        let mut ids: Vec<NodeId> = vec![ROOT_ID, 350, 351, 353, 365];
+        ids.extend(300..304);
+        ids.extend(310..314);
+        ids.extend([320, 321, 322, 323, 324, 325, 330, 331, 340, 341]);
+        ids.extend(360..365);
+
+        let env =
+            |dark: bool, reduce_motion: bool, pointer: Pointer, terminal: bool| ClassEnvironment {
+                dark,
+                platform: Platform::Ios,
+                reduce_motion,
+                pointer,
+                terminal,
+            };
+
+        apply_both(&mut cached, &mut uncached, build_ops);
+        assert_cores_match(&mut cached, &mut uncached, &ids);
+
+        // Dark, reduce-motion, fine pointer, terminal — one at a time, then combined.
+        for e in [
+            env(true, false, Pointer::Coarse, false),
+            env(true, true, Pointer::Coarse, false),
+            env(true, true, Pointer::Fine, false),
+            env(true, true, Pointer::Fine, true),
+            env(false, false, Pointer::Coarse, false),
+        ] {
+            cached.set_class_environment(e);
+            uncached.set_class_environment(e);
+            assert_cores_match(&mut cached, &mut uncached, &ids);
+        }
+
+        // Orientation + breakpoint crossings.
+        for viewport in [
+            size_pt(500.0, 1000.0),
+            size_pt(900.0, 600.0),
+            size_pt(400.0, 800.0),
+        ] {
+            cached.set_viewport(viewport);
+            uncached.set_viewport(viewport);
+            assert_cores_match(&mut cached, &mut uncached, &ids);
+        }
+
+        // Interaction sequences: hover, hover+press, release, and row positional states.
+        for states in [state::HOVERED, state::HOVERED | state::PRESSED, 0] {
+            cached.set_states(300, states);
+            uncached.set_states(300, states);
+            cached.set_states(361, states);
+            uncached.set_states(361, states);
+            cached.set_states(362, states);
+            uncached.set_states(362, states);
+            assert_cores_match(&mut cached, &mut uncached, &ids);
+        }
+
+        // RTL flip on root, then back.
+        apply_both(&mut cached, &mut uncached, || {
+            vec![style_op(ROOT_ID, &[("direction", StyleValue::Str("rtl"))])]
+        });
+        assert_cores_match(&mut cached, &mut uncached, &ids);
+        apply_both(&mut cached, &mut uncached, || {
+            vec![style_op(ROOT_ID, &[("direction", StyleValue::Str("ltr"))])]
+        });
+        assert_cores_match(&mut cached, &mut uncached, &ids);
+
+        // Re-class a cached node to a different class, then remove its classes.
+        apply_both(&mut cached, &mut uncached, || {
+            vec![class_op(300, "p-8 bg-emerald-500 rounded-full")]
+        });
+        assert_cores_match(&mut cached, &mut uncached, &ids);
+        apply_both(&mut cached, &mut uncached, || vec![class_op(300, "")]);
+        assert_cores_match(&mut cached, &mut uncached, &ids);
+    }
+
+    /// Filling `resolved_styles` past its 4096-entry bound clears it; resolution
+    /// must stay equivalent across evictions, and previously hot shared classes
+    /// must still resolve correctly afterwards.
+    #[test]
+    fn resolved_cache_eviction_preserves_equivalence() {
+        let mut cached = setup_core();
+        let mut uncached = setup_core();
+        uncached.resolve_uncached = true;
+
+        let build_base = || {
+            let mut ops = Vec::new();
+            for i in 0..4 {
+                let id = 10 + i;
+                ops.extend([
+                    Op::Create { id, tag: Tag::View },
+                    class_op(id, "h-4"),
+                    Op::Insert {
+                        parent: ROOT_ID,
+                        child: id,
+                        before: None,
+                    },
+                ]);
+            }
+            // A hot shared class that eviction will drop again and again.
+            ops.extend([
+                Op::Create {
+                    id: 20,
+                    tag: Tag::View,
+                },
+                class_op(20, "p-4 bg-white rounded border"),
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 20,
+                    before: None,
+                },
+            ]);
+            ops
+        };
+        let ids: Vec<NodeId> = vec![ROOT_ID, 10, 11, 12, 13, 20];
+        apply_both(&mut cached, &mut uncached, build_base);
+        assert_cores_match(&mut cached, &mut uncached, &ids);
+
+        for round in 0..4300u32 {
+            let id = 10 + (round % 4) as NodeId;
+            let unique = round / 4;
+            apply_both(&mut cached, &mut uncached, || {
+                vec![class_op(id, &format!("w-[{unique}px] h-4"))]
+            });
+            // Node 20 alternates between two shared classes so its entries are
+            // re-created after every eviction.
+            if round % 16 == 0 {
+                apply_both(&mut cached, &mut uncached, || {
+                    vec![class_op(
+                        20,
+                        if round % 32 == 0 {
+                            "p-4 bg-white rounded border"
+                        } else {
+                            "p-4 bg-neutral-100 rounded"
+                        },
+                    )]
+                });
+            }
+            if round == 2048 {
+                assert_cores_match(&mut cached, &mut uncached, &ids);
+            }
+        }
+        assert!(cached.resolved_styles.len() <= super::classes::RESOLVED_STYLE_CACHE);
+        assert_cores_match(&mut cached, &mut uncached, &ids);
     }
 
     /// `cargo test --release -p nsh-core --lib bench_tailwind_class_mount -- --ignored --nocapture`:

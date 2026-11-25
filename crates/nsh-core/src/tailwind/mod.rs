@@ -141,6 +141,8 @@ pub mod deps {
     /// The pointer's precision and the terminal (`pointer-fine:`,
     /// `pointer-coarse:`, `terminal:`).
     pub const DEVICE: u16 = 4096;
+    /// The platform (`ios:`, `android:`, `web:`).
+    pub const PLATFORM: u16 = 8192;
 }
 
 /// CSS's `ch` where no font is known ([`ClassList::apply`]): half a `rem`,
@@ -340,6 +342,9 @@ impl Condition {
         }
         if self.pointer.is_some() || self.terminal.is_some() {
             d |= deps::DEVICE;
+        }
+        if self.platform.is_some() {
+            d |= deps::PLATFORM;
         }
         if self.states != 0 || self.not_states != 0 {
             d |= deps::STATE;
