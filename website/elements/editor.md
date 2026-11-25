@@ -336,6 +336,31 @@ const range = (line: number, start: number, end: number) => ({ start: { line, co
 />
 ```
 
+### Fonts
+
+A decoration's `fontFamily` and `fontSize` set the font of its text, so a Markdown notes app built on `Editor` shows
+inline code and code blocks in a monospaced font and its headings larger. The editor measures the text in that font:
+carets, selections, presses and soft wrap follow it. A row is as tall as its largest text needs, the editor's
+`lineHeight` grown in proportion to the size (a 26 point heading in a 13 point editor with 20 point rows takes a row of
+40), and never shorter than `lineHeight`. Where decorations with fonts overlap, the innermost one's family and size
+win, each on its own (an inner `fontFamily` keeps an outer `fontSize`). Set the font here rather than with `class` or
+`style`, which the editor does not measure. In a terminal the text keeps its Cells.
+
+```tsx
+<Editor
+  value={notes()}
+  onChange={({ value }) => notes.set(value)}
+  fontFamily="Inter"
+  fontSize={15}
+  lineHeight={24}
+  decorations={[
+    { range: range(0, 0, 14), fontSize: 22, class: "font-semibold" },
+    { range: range(2, 8, 20), fontFamily: "Menlo", class: "bg-zinc-500/10" },
+  ]}
+  class="flex-1"
+/>
+```
+
 ### Gutter and overview ruler marks
 
 A decoration's `gutter` puts a mark in a strip before the line numbers, beside every line its range covers: the lines
@@ -613,6 +638,28 @@ line at each of its columns (the `ruler` part), as guides of a line's length.
 />
 ```
 
+`onScroll({ offset, contentSize, size })` reports where the text is scrolled, with the keys of a
+[`Scroll`](./scroll.md)'s: `offset` is `scrollOffset()`, `contentSize` what the text scrolls over and `size` the
+viewport. Without `softWrap` the content is as wide as the viewport plus how far the text scrolls sideways; wrapped, it
+is as wide as the viewport and `offset.x` is 0. It fires once the editor is laid out and again when one of them
+changes: a scroll, a resize, an edit or a fold that changes the content's size. An editor under a title draws a line
+or a fade at its top edge once the text scrolls under it:
+
+```tsx
+const scrolled = signal(false);
+
+<View style={{ flex: 1 }}>
+  <View class={scrolled() ? "h-px bg-border" : "h-px"} />
+  <Editor
+    defaultValue={notes()}
+    language="markdown"
+    softWrap
+    onScroll={({ offset }) => scrolled.set(offset.y > 0)}
+    style={{ flex: 1 }}
+  />
+</View>
+```
+
 ## Methods
 
 `ref={editor}` gives the editor's methods (`EditorRef`), for the app's buttons, menus and keys. Methods that return a
@@ -827,6 +874,7 @@ with the user's text size (`fontScale()`), and the rows grow with it.
 | `onInlineCompletionRequest` | `.on_inline_completion_request(\|event: &EditorInlineCompletionRequest\| ..)` | Typing paused: `{ id, offset, position }`, for an inline completion. |
 | `onDefinitionRequest` | `.on_definition_request(\|event: &EditorDefinitionRequest\| ..)` | The editor asks for a definition: `{ id, position, offset, range, trigger }` ([Go to definition](#go-to-definition-and-code-actions)). |
 | `onCodeActionRequest` | `.on_code_action_request(\|event: &EditorCodeActionRequest\| ..)` | The user asked for code actions: `{ range, position, bounds? }`. |
+| `onScroll` | `.on_scroll(\|e: &EditorEvent\| ..)` | The text scrolled, or it or the viewport changed size: `{ offset, contentSize, size }`, as a `Scroll`'s (`EditorEvent::Scroll(offset, content_size, size)` in Rust). It fires once the editor is laid out and again when one of them changes ([Size and scrolling](#size-and-scrolling)). |
 
 ## Accessibility
 

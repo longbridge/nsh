@@ -139,7 +139,7 @@ Downloads the archive of the update the last `checkForUpdate` found into the app
 `onProgress` as bytes arrive (`total` is missing when the server does not say), then checks its size and SHA-256
 against the manifest. An interrupted download keeps its partial file keyed to the asset and resumes on the next call
 with an HTTP `Range` request when the server supports it, restarting from the beginning if the server ignores the range
-or the asset changed. It rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` when no update was found or `canInstall` is
+or the asset changed. A dropped connection, a body that stalls for 60 seconds, a truncated response or a `5xx`/`408`/`429` is retried on its own from the bytes already on disk, waiting longer between tries, and fails after five tries in a row that bring no new bytes. It rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` when no update was found or `canInstall` is
 false, and when the download fails or does not match.
 
 ```tsx
@@ -221,7 +221,7 @@ verifies it as the app's next start will: signed by a release key one of the roo
 than the running build and than every build the app ran before, for this runtime. It then waits in the app's data
 directory for the next start. An interrupted download keeps its partial file keyed to the package and resumes on the
 next call with an HTTP `Range` request when the server supports it, restarting from the beginning if the server ignores
-the range or the package changed. It rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` when the check found none, and
+the range or the package changed. A dropped connection, a body that stalls for 60 seconds, a truncated response or a `5xx`/`408`/`429` is retried on its own from the bytes already on disk, waiting longer between tries, and fails after five tries in a row that bring no new bytes. It rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` when the check found none, and
 with an error saying why (`package refused: …`) when the download fails or the package is refused (a refused package
 leaves nothing behind).
 
