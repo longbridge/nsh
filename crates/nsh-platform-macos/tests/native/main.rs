@@ -74,6 +74,8 @@ mod quit_requests;
 mod removed_focus;
 #[cfg(target_os = "macos")]
 mod scaled_input;
+#[cfg(target_os = "macos")]
+mod selection_autoscroll;
 #[cfg(all(target_os = "macos", feature = "shader"))]
 mod shader_content;
 #[cfg(target_os = "macos")]
@@ -186,6 +188,8 @@ fn main() {
                 download_redirect::run();
             } else if std::env::var_os("NSH_INPUT_WHEEL_CHAIN_CHECK_ONLY").is_some() {
                 input_wheel_chain::run();
+            } else if std::env::var_os("NSH_SELECTION_AUTOSCROLL_CHECK_ONLY").is_some() {
+                selection_autoscroll::run();
             } else if std::env::var_os("NSH_EMBEDDED_SCROLL_CHECK_ONLY").is_some() {
                 embedded_scroll::run();
             } else if std::env::var_os("NSH_VIEW_SCALE_CHECK_ONLY").is_some() {
@@ -242,6 +246,7 @@ fn main() {
                 // Last: it makes the process an accessory app.
                 embedded_scroll::run();
                 input_wheel_chain::run();
+                selection_autoscroll::run();
                 nested_bounce::run();
                 // Last: it leaves the app an accessory, never activated.
                 press_momentum::run();

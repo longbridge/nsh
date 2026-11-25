@@ -389,6 +389,13 @@ impl SelectionModel {
         ];
     }
 
+    /// Where the selection goes: the end a drag moves (`None` without a
+    /// selection). A selection drag autoscrolls the scroll views around
+    /// its text, innermost first.
+    pub fn focus(&self) -> Option<TextPosition> {
+        self.focus
+    }
+
     /// The start and the end, in document order (`None` without a
     /// selection).
     pub fn bounds(&self) -> Option<(TextPosition, TextPosition)> {

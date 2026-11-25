@@ -565,12 +565,13 @@ pub(crate) fn up(surface: &Surface) -> bool {
         })
 }
 
-/// The innermost scroll view around `area` (or `area` itself) that can
-/// still move toward where the pointer at `(x, y)` (root coordinates) is
-/// near or past its edge, and its step per 60 Hz frame
-/// ([`autoscroll_step`]).
+/// The innermost scroll view around the selection's focus that can still
+/// move toward where the pointer at `(x, y)` (root coordinates) is near or
+/// past its edge, and its step per 60 Hz frame ([`autoscroll_step`]): one
+/// inside `area` (a wide table's horizontal scroll, #2996), then those
+/// around it. Without a focus, from `area` out.
 fn past_edge(surface: &Surface, area: &NshView, x: f32, y: f32) -> Option<(NshView, f32, f32)> {
-    let mut current = Some(area.clone());
+    let mut current = Some(focus_view(surface, area).unwrap_or_else(|| area.clone()));
     while let Some(view) = current {
         if view.kind() == ViewKind::Scroll {
             let (lx, ly) = crate::input::local(surface, &view, x, y);
@@ -589,6 +590,19 @@ fn past_edge(surface: &Surface, area: &NshView, x: f32, y: f32) -> Option<(NshVi
         current = view.parent_view();
     }
     None
+}
+
+/// The text the selection's focus is in, in `area`.
+fn focus_view(surface: &Surface, area: &NshView) -> Option<NshView> {
+    let focus = surface
+        .selection
+        .area
+        .active
+        .borrow()
+        .as_ref()?
+        .model
+        .focus()?;
+    collect(area).views.get(focus.text).cloned()
 }
 
 /// Starts scrolling on every frame while the selecting pointer stays past
