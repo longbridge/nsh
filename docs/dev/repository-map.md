@@ -111,7 +111,8 @@ crates/
   nsh-linux-host/      Development host on Linux (`nsh run --target linux`): connects to a dev server or runs a bundle
   nsh-linux-app/       Release runner on Linux: the executable of apps built by `nsh package --target linux`
   nsh-platform-apple/  Shared by the macOS and iOS backends: the notification center, how
-                       drawn text splits into screen reader elements around its links and inline views, and
+                       drawn text splits into screen reader elements around its links and inline views, whether a
+                       view shows through the ancestors that clip it (`sight`), and
                        `unified_log`, the logger of the release runners and the iOS SDK (the unified log; stderr too
                        wherever it goes but /dev/null)
   nsh-platform-macos/  AppKit backend (macOS): one flipped, layer-backed `NSView` per node decorated by Core Animation, CoreText text
