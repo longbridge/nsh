@@ -575,12 +575,18 @@ function localOffset(ms) {
  * Whether the page can show the browser's share sheet: it has
  * `navigator.share` and the page's permissions policy allows `web-share`
  * (a frame of another origin needs `allow="web-share"`).
+ *
+ * `allowsFeature` logs "Unrecognized feature" to the console on every call for
+ * a name the browser does not know, so ask `features()` first. A browser
+ * without `web-share` in its policy list does not gate sharing on it.
  */
 function webShareAllowed() {
   if (typeof navigator === "undefined" || typeof navigator.share !== "function") return false;
   const doc = typeof document === "undefined" ? undefined : document;
   const policy = doc?.permissionsPolicy ?? doc?.featurePolicy;
-  return typeof policy?.allowsFeature === "function" ? policy.allowsFeature("web-share") : true;
+  if (typeof policy?.allowsFeature !== "function") return true;
+  if (typeof policy.features === "function" && !policy.features().includes("web-share")) return true;
+  return policy.allowsFeature("web-share");
 }
 
 /** The kinds `network()` names for `navigator.connection.type`'s. */
