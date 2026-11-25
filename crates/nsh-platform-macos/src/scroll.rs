@@ -1461,8 +1461,9 @@ fn thumb(s: &ScrollState, w: f32, h: f32) -> Option<(CGRect, f32)> {
     Some((frame, dim - before - after - 2.0 * INDICATOR_MARGIN - len))
 }
 
-/// Updates the indicator and the refresh spinner of `view` to its offset.
-fn update_overlays(view: &NshView) {
+/// Updates the indicator and the refresh spinner of `view` to its offset
+/// and its frame.
+pub(crate) fn update_overlays(view: &NshView) {
     let mut state = view.state_mut();
     let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     let refresh_listened = state.events.contains(EventKind::Refresh);

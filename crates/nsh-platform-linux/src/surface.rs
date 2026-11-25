@@ -315,13 +315,9 @@ impl Surface {
                 surface.resized(width, height);
             }
         });
-        // Canvases that came into sight are drawn in the frame that shows them.
+        reveal_on_frames(root.upcast_ref());
         root.connect_realize(|root| {
             if let Some(clock) = root.frame_clock() {
-                clock.connect_layout(|_| {
-                    crate::canvas::reveal();
-                    crate::shader::reveal();
-                });
                 crate::fps::log_first_frame(&clock);
             }
         });
@@ -859,6 +855,20 @@ fn url_payload(url: String) -> EventPayload {
 /// GLib's monotonic time in seconds, the clock GDK's frame times are on.
 fn monotonic() -> f64 {
     glib::monotonic_time() as f64 / 1_000_000.0
+}
+
+/// Draws the canvases and starts the shader views that came into sight in
+/// the frame that shows them, on the frame clock of `toplevel`: the root's
+/// window, and each window the app opens, which has a clock of its own.
+pub(crate) fn reveal_on_frames(toplevel: &gtk::Widget) {
+    toplevel.connect_realize(|toplevel| {
+        if let Some(clock) = toplevel.frame_clock() {
+            clock.connect_layout(|_| {
+                crate::canvas::reveal();
+                crate::shader::reveal();
+            });
+        }
+    });
 }
 
 /// The widget type a surface is shown in.

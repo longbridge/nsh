@@ -315,6 +315,9 @@ pub(crate) struct Mixer {
     /// Set by the bus when the output failed.
     broken: Rc<Cell<bool>>,
     _bus: Option<gst::Watch>,
+    /// The output element, which tests read from.
+    #[cfg(test)]
+    output: Object,
 }
 
 impl Mixer {
@@ -343,9 +346,15 @@ impl Mixer {
         init()?;
         let pipeline = Object::pipeline();
         // The silent source keeps the mixer running, live, between plays:
-        // a voice's samples go at the running time they were added at.
+        // a voice's samples go at the running time they were added at. Its
+        // silence is a sine of no frequency, zeros, rather than the
+        // `silence` wave: that one's buffers are gaps, which an audio sink
+        // drops rather than writes, so it loses its place in the output
+        // and cuts the first tens of milliseconds of the next play (all of
+        // a click).
         let silence = element("audiotestsrc")?;
-        silence.set("wave", "silence");
+        silence.set("wave", "sine");
+        silence.set("freq", "0");
         silence.set("is-live", "true");
         silence.set("samplesperbuffer", &SILENCE_SAMPLES.to_string());
         let filter = element("capsfilter")?;
@@ -368,6 +377,8 @@ impl Mixer {
             voices: Vec::new(),
             broken: Rc::default(),
             _bus: None,
+            #[cfg(test)]
+            output,
         })
     }
 
@@ -398,6 +409,12 @@ impl Mixer {
         src.set_src_caps(&caps());
         src.set("format", "time");
         src.set("is-live", "true");
+        // Its samples are all queued at once: no latency, and no bound on
+        // how long they may wait. By default a live `appsrc` answers a
+        // latency of at most 0, below the silent source's 10 ms, and the
+        // mixer, unable to set its latency, mixes without waiting for the
+        // voice and drops its samples as late.
+        src.set("min-latency", "0");
         self.pipeline.add(&src)?;
         let pad = self
             .mixer
@@ -790,6 +807,17 @@ mod tests {
         mixer.sweep();
         assert_eq!(mixer.voices(), 0);
         assert!(!mixer.is_broken());
+    }
+
+    /// Between plays the output gets silence, not gaps: an audio sink
+    /// drops a gap and cuts the start of the play after it.
+    #[test]
+    fn the_silence_between_plays_is_not_a_gap() {
+        let mixer = Mixer::with_sink("appsink").unwrap();
+        let sample = (0..20)
+            .find_map(|_| mixer.output.try_pull_sample(100_000_000))
+            .expect("the mixer's output");
+        assert!(!sample.is_gap());
     }
 
     #[test]

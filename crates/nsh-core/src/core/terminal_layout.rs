@@ -3730,28 +3730,6 @@ fn arrange_grid(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn halves_round_down() {
-        assert_eq!(nearest(1.5), 1);
-        assert_eq!(nearest(1.51), 2);
-        assert_eq!(nearest(-1.5), -1);
-        assert_eq!(nearest(2.9999), 3);
-    }
-
-    #[test]
-    fn spacing_is_coarse() {
-        assert_eq!([4.0, 8.0, 16.0, 24.0, 32.0].map(space_x), [0, 1, 1, 2, 2]);
-        assert_eq!([8.0, 12.0, 16.0, 24.0, 48.0].map(space_y), [0, 1, 1, 1, 1]);
-        assert_eq!([0.0, 4.0, 24.0].map(gap_x), [0, 1, 2]);
-        assert_eq!([8.0, 12.0, 16.0].map(|p| space_between(p, true)), [0, 1, 1]);
-        assert_eq!([12.0, 16.0].map(|p| space_between(p, false)), [0, 1]);
-    }
-}
-
 /// The terminal columns `text` takes: two for a wide (East Asian or emoji)
 /// character, one for any other.
 pub(crate) fn columns(text: &str) -> usize {
@@ -3776,4 +3754,26 @@ pub(crate) fn columns(text: &str) -> usize {
             1 + usize::from(wide)
         })
         .sum()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn halves_round_down() {
+        assert_eq!(nearest(1.5), 1);
+        assert_eq!(nearest(1.51), 2);
+        assert_eq!(nearest(-1.5), -1);
+        assert_eq!(nearest(2.9999), 3);
+    }
+
+    #[test]
+    fn spacing_is_coarse() {
+        assert_eq!([4.0, 8.0, 16.0, 24.0, 32.0].map(space_x), [0, 1, 1, 2, 2]);
+        assert_eq!([8.0, 12.0, 16.0, 24.0, 48.0].map(space_y), [0, 1, 1, 1, 1]);
+        assert_eq!([0.0, 4.0, 24.0].map(gap_x), [0, 1, 2]);
+        assert_eq!([8.0, 12.0, 16.0].map(|p| space_between(p, true)), [0, 1, 1]);
+        assert_eq!([12.0, 16.0].map(|p| space_between(p, false)), [0, 1]);
+    }
 }

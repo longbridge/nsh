@@ -33,6 +33,7 @@ comments before editing. Read only the relevant sections of these reference page
 | Build, platform prerequisites, packaging, signing, native testing | [Commands](docs/dev/commands.md) |
 | PRs, reviews, CI scheduling, caches, parallel work | [Workflow](docs/dev/workflow.md) |
 | Public names and compatibility | [API naming](docs/dev/api-naming.md), [compatibility](docs/dev/compatibility.md) |
+| User docs and website copy | [Writing user docs](docs/dev/writing-docs.md) |
 | Platform code | [Pitfalls](docs/dev/pitfalls.md) and the platform's dev page |
 | Hot paths | [Performance baselines](docs/dev/performance.md) |
 
