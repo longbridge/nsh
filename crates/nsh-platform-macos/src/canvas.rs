@@ -1674,8 +1674,11 @@ impl<'a> Replay<'a> {
 struct ImageParts {
     /// By the whole image (kept alive here, so its address stays its own)
     /// and the rectangle, in its pixels.
-    parts: FxHashMap<(usize, [u64; 4]), (CFRetained<CGImage>, CFRetained<CGImage>)>,
+    parts: FxHashMap<(usize, [u64; 4]), ImagePart>,
 }
+
+/// The whole image a part was cut from, and the part.
+type ImagePart = (CFRetained<CGImage>, CFRetained<CGImage>);
 
 impl ImageParts {
     /// At most this many parts are kept: a drawing whose source
@@ -2710,11 +2713,12 @@ mod tests {
         canvas.content_bounds(CGSize::new(w, h));
         let m = PAN_MARGIN;
         let frame = CGRect::new(CGPoint::new(-m, -m), CGSize::new(w + 2.0 * m, h + 2.0 * m));
-        let target = Some(Painted {
+        let painted = Painted {
             frame,
             scale: 2.0,
             prefix_only: false,
-        });
+        };
+        let target = Some(painted);
         let args = |x: f32, y: f32, zoom: f32| {
             [
                 (0, AnimationValue::Number(x)),
@@ -2742,7 +2746,7 @@ mod tests {
         // A moved layer still holds the whole picture.
         let moved = Some(Painted {
             frame: CGRect::new(CGPoint::new(40.0 - m, -60.0 - m), frame.size),
-            ..target.unwrap()
+            ..painted
         });
         assert_eq!(
             canvas.set_args(&args(41.0, -60.0, 1.0), moved),
