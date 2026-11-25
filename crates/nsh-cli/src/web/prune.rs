@@ -52,6 +52,54 @@ pub(crate) fn unlinked(wasm: &[u8]) -> anyhow::Result<Vec<u8>> {
     Ok(out)
 }
 
+/// The exports of a Rust app's runtime that make a part of `nsh/base` run:
+/// `nsh_part_<name>`, which the page calls the first time the app makes a
+/// component of that part by name.
+const PART_GATE: &str = "nsh_part_";
+
+/// What an app's code runs only when it makes a component by name
+/// (`ComponentElement::by_name`): the stand-in its element is until the part
+/// that registers the component has run. Found by its name in the symbol
+/// table, which has the mangled path of the function. `nsh-core` owns the
+/// name and tests that it is still the function's.
+const BY_NAME_MARK: &str = nsh_core::element::__private::BY_NAME_MARKER;
+
+/// `wasm`, a linkable runtime, without the `nsh_part_*` gates, and the code
+/// only they reach, when the app makes no component by name: for a runtime
+/// that cannot be split into side modules (wasm-bindgen rewrites a module
+/// after the linker), where the gates would keep every part's code in the
+/// published module. `None` when the runtime has no such gate or the app
+/// makes a component by name (every gate stays: a part is loaded when its
+/// first component is made, and which one that is is not known).
+pub(crate) fn without_unused_part_gates(wasm: &[u8]) -> anyhow::Result<Option<Vec<u8>>> {
+    let module = Module::parse(wasm)?;
+    let funcs = |gate: bool| -> Vec<&Export<'_>> {
+        module
+            .exports
+            .iter()
+            .filter(|e| e.name.starts_with(PART_GATE) == gate)
+            .collect()
+    };
+    if funcs(true).iter().all(|e| e.kind != ExternalKind::Func) {
+        return Ok(None);
+    }
+    let roots: Vec<u32> = funcs(false)
+        .iter()
+        .filter(|e| e.kind == ExternalKind::Func)
+        .map(|e| e.index)
+        .collect();
+    let live = module.mark_from(roots, Vec::new())?;
+    let by_name = module
+        .func_names
+        .iter()
+        .any(|&(func, name)| live.funcs[func as usize] && name.contains(BY_NAME_MARK));
+    if by_name {
+        return Ok(None);
+    }
+    let keep: Vec<&str> = funcs(false).iter().map(|e| e.name).collect();
+    Ok(Some(split::split(wasm, &keep, &[])?.main))
+}
+
 /// A symbol of the `linking` section's table, as far as pruning needs it.
 enum Symbol {
     Func(u32),
@@ -121,6 +169,8 @@ struct Module<'a> {
     segments: Vec<Segment>,
     symbols: Vec<Symbol>,
     no_strip: Vec<u32>,
+    /// The functions the symbol table names, as the toolchain mangled them.
+    func_names: Vec<(u32, &'a str)>,
     code_relocs: Vec<RelocationEntry>,
     data_relocs: Vec<DataReloc>,
 }
@@ -321,6 +371,14 @@ impl<'a> Module<'a> {
                             && !flags.contains(SymbolFlags::UNDEFINED)
                         {
                             module.no_strip.push(module.symbols.len() as u32);
+                        }
+                        if let SymbolInfo::Func {
+                            index,
+                            name: Some(name),
+                            ..
+                        } = &symbol
+                        {
+                            module.func_names.push((*index, name));
                         }
                         let symbol = module.symbol(symbol)?;
                         module.symbols.push(symbol);
@@ -695,6 +753,12 @@ mod tests {
     /// (function 1) calls function 2 and loads `d0`; function 2 takes its
     /// own address; `d0` holds a pointer into itself.
     fn module() -> Vec<u8> {
+        module_named("b", "c")
+    }
+
+    /// [`module`] with `gate` the name of function 0 (`b`) and `callee` that
+    /// of function 2 (`c`).
+    fn module_named(gate: &str, callee: &str) -> Vec<u8> {
         fn section(out: &mut Vec<u8>, id: u8, contents: &[u8]) {
             out.push(id);
             put_uleb(out, contents.len() as u64);
@@ -710,7 +774,7 @@ mod tests {
         section(&mut wasm, 4, &[1, 0x70, 1, 3, 3]);
         section(&mut wasm, 5, &[1, 0, 1]);
         let mut exports = vec![3];
-        for (export, kind, index) in [("b", 0, 0), ("a", 0, 1), ("memory", 2, 0)] {
+        for (export, kind, index) in [(gate, 0, 0), ("a", 0, 1), ("memory", 2, 0)] {
             name(&mut exports, export);
             exports.extend_from_slice(&[kind, index]);
         }
@@ -764,7 +828,7 @@ mod tests {
         name(&mut linking, "linking");
         linking.push(2);
         let mut symbols = vec![5];
-        for (index, func) in ["b", "a", "c"].iter().enumerate() {
+        for (index, func) in [gate, "a", callee].iter().enumerate() {
             symbols.extend_from_slice(&[0, 0, index as u8]);
             name(&mut symbols, func);
         }
@@ -839,6 +903,37 @@ mod tests {
         assert_eq!(side.elements, [(1, vec![0])]);
         assert_eq!(side.data, [(1024, vec![0xaa; 16])]);
         assert_eq!(read_sleb5(&side.bodies[0][9..]), 1024);
+    }
+
+    #[test]
+    fn part_gates_go_when_nothing_makes_a_component_by_name() {
+        let wasm = module_named("nsh_part_plot", "nsh_core::element::component::missing_x");
+        let pruned = without_unused_part_gates(&wasm).unwrap().unwrap();
+        Validator::new().validate_all(&pruned).unwrap();
+        let pruned = parts(&pruned);
+        assert!(pruned.exports.iter().any(|(name, _)| name == "a"));
+        assert!(
+            !pruned
+                .exports
+                .iter()
+                .any(|(name, _)| name.starts_with("nsh_part_"))
+        );
+        // The gate's own function is gone with it.
+        assert_eq!(pruned.bodies.len(), 2);
+    }
+
+    #[test]
+    fn part_gates_stay_when_the_app_makes_a_component_by_name() {
+        let wasm = module_named(
+            "nsh_part_plot",
+            &format!("nsh_core::element::component::{BY_NAME_MARK}"),
+        );
+        assert!(without_unused_part_gates(&wasm).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_runtime_without_part_gates_is_left_alone() {
+        assert!(without_unused_part_gates(&module()).unwrap().is_none());
     }
 
     #[test]

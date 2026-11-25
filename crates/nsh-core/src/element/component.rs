@@ -894,8 +894,16 @@ impl fmt::Debug for Root {
     }
 }
 
+/// The name of [`missing_instance`], which `nsh-cli` looks for in a web
+/// runtime's symbol table to know the app makes a component by name (it
+/// then keeps every `nsh_part_*` gate). A test below fails when the two
+/// stop matching.
+pub const BY_NAME_MARKER: &str = "missing_instance";
+
 /// What a component element made by name ([`super::ComponentElement::by_name`])
-/// has for its `make`: never called, the registry makes it.
+/// has for its `make`: never called, the registry makes it. Never inlined, so
+/// every by-name element's code references this one function.
+#[inline(never)]
 pub(crate) fn missing_instance() -> Box<dyn AnyInstance> {
     unreachable!("a component made by name is made by its registry")
 }
@@ -2024,6 +2032,32 @@ fn handler_name(event: &str) -> String {
 mod tests {
     use super::*;
     use crate::prelude::*;
+
+    #[test]
+    fn by_name_marker_names_the_stand_in_make() {
+        let name = std::any::type_name_of_val(&missing_instance);
+        assert!(
+            name.ends_with(&format!("::{BY_NAME_MARKER}")),
+            "{name} is not {BY_NAME_MARKER}: update nsh-cli's by-name detection"
+        );
+    }
+
+    #[component]
+    fn ByName() -> impl IntoElement {
+        text("by name")
+    }
+
+    #[test]
+    fn a_component_made_by_name_has_the_marked_make() {
+        let mut element = crate::element::ComponentElement::<ByName>::named(());
+        let crate::element::ElKind::Component(c) = &element.node().kind else {
+            panic!("not a component element");
+        };
+        assert!(std::ptr::fn_addr_eq(
+            c.make,
+            missing_instance as fn() -> Box<dyn AnyInstance>
+        ));
+    }
 
     #[derive(Default)]
     struct Stepper;

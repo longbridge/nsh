@@ -3305,7 +3305,19 @@ opt-level = \"s\"
         fs::create_dir_all(&out)?;
         // Both kinds build to the same file: each keeps a copy of its own,
         // through wasm-bindgen when the app's crates call JS through it.
-        runtime.glue = crate::bindgen::install(&built, &out, &stem)?;
+        // A runtime wasm-bindgen runs on cannot be split afterwards, so what
+        // the app does not use is left out before it: the gates of the parts
+        // of `nsh/base` the app never makes by name.
+        let pruned = if rust {
+            self.without_unused_part_gates(&built, &out, &stem)?
+        } else {
+            None
+        };
+        let installed = crate::bindgen::install(pruned.as_deref().unwrap_or(&built), &out, &stem);
+        if let Some(pruned) = &pruned {
+            let _ = fs::remove_file(pruned);
+        }
+        runtime.glue = installed?;
         if self.nsh.source().is_none() {
             let js = self.resolved_crate("nsh-platform-web")?.join("web/nsh.js");
             crate::runtime::copy_browser_host(
@@ -3740,6 +3752,32 @@ opt-level = \"s\"
             once.record(&path);
         }
         Ok(path)
+    }
+
+    /// The web runtime `built` without the `nsh_part_*` gates, in `out`, when
+    /// it goes through wasm-bindgen and the app makes no component by name
+    /// ([`crate::web::without_unused_part_gates`]); `None` otherwise.
+    fn without_unused_part_gates(
+        &self,
+        built: &Path,
+        out: &Path,
+        stem: &str,
+    ) -> anyhow::Result<Option<PathBuf>> {
+        let module = fs::read(built).with_context(|| format!("read {}", built.display()))?;
+        if crate::bindgen::needs(&module)?.is_none() {
+            return Ok(None);
+        }
+        let Some(pruned) = crate::web::without_unused_part_gates(&module)? else {
+            return Ok(None);
+        };
+        ui::debug(format!(
+            "web runtime: left out the gates of nsh/base's parts, which the app never makes by name ({} to {} bytes)",
+            module.len(),
+            pruned.len()
+        ));
+        let path = out.join(format!("{stem}-without-parts.wasm"));
+        fs::write(&path, pruned).with_context(|| format!("write {}", path.display()))?;
+        Ok(Some(path))
     }
 
     /// The development host (`runner` false) or release runner of the app,
