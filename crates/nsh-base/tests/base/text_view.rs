@@ -1772,3 +1772,31 @@ mod large_document {
         }
     }
 }
+
+/// Headings whose parts have typed styles (`StyleRefinement`, as a Rust
+/// app types them): every heading's, then its level's over it.
+#[component]
+fn TypedHeadings() -> impl IntoElement {
+    use nsh_base::text_view::PartStyle;
+    use nsh_core::element::StyleRefinement;
+
+    let color = |c: u32| PartStyle(StyleRefinement::default().text_color(rgb(c)).into());
+    let styles = TextViewStyles {
+        heading: Some(color(0xff0000)),
+        heading1: Some(color(0x0000ff)),
+        ..Default::default()
+    };
+    text_view().markdown("# Big\n\n## Small").styles(styles)
+}
+
+#[test]
+fn typed_part_styles_reach_headings_in_order() {
+    let mut app = Headless::start(EngineConfig::new(
+        nsh_testing::windowed_root::<TypedHeadings>(),
+    ))
+    .unwrap();
+    app.wait_for("Small").unwrap();
+    let color = |selector: &str| app.screen().span_style(selector).unwrap().color;
+    assert_eq!(color("text:Big"), Color(0x0000_ffff));
+    assert_eq!(color("text:Small"), Color(0xff00_00ff));
+}

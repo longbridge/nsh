@@ -45,12 +45,10 @@ fn parts<E: Element>(el: E, props: DiffViewProps, list: Vec<DiffViewPart>) -> E 
     })
     .inline_style(move || {
         props.styles.with(|s| {
-            Style::from_decls(
-                styles
-                    .iter()
-                    .filter_map(|p| s.get(*p))
-                    .flat_map(|s| s.decls().iter().cloned()),
-            )
+            styles
+                .iter()
+                .filter_map(|p| s.get(*p))
+                .fold(Style::default(), |all, s| all.then(s))
         })
     })
 }

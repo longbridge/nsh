@@ -828,3 +828,30 @@ fn the_horizontal_bar_spans_the_scrolling_columns_only() {
     assert_eq!(bar.bounds.origin.x.0, 100.0);
     assert_eq!(bar.bounds.size.width.0, 400.0);
 }
+
+/// Quotes whose root and cells have typed styles (`StyleRefinement`, as
+/// a Rust app types them): the root's color for the titles, the cells'
+/// over it.
+#[component]
+fn TypedStyles() -> impl IntoElement {
+    use nsh_base::{DataTableStyles, text_view::PartStyle};
+    use nsh_core::element::StyleRefinement;
+
+    let color = |c: u32| PartStyle(StyleRefinement::default().text_color(rgb(c)).into());
+    let mut styles = DataTableStyles::default();
+    styles.root = Some(color(0xff0000));
+    styles.cell = Some(color(0x0000ff));
+    data_table()
+        .h(px(200.0))
+        .columns(vec![column("symbol")])
+        .data(DataTableRows::new(1).texts("symbol", ["AAPL"]))
+        .styles(styles)
+}
+
+#[test]
+fn typed_part_styles_reach_their_parts() {
+    let app = start::<TypedStyles>();
+    let color = |selector: &str| app.screen().span_style(selector).unwrap().color;
+    assert_eq!(color("text:symbol"), nsh_core::Color(0xff00_00ff));
+    assert_eq!(color("text:AAPL"), nsh_core::Color(0x0000_ffff));
+}

@@ -769,3 +769,58 @@ fn char_point(app: &Headless, line: &str, i: usize) -> Point<Points> {
         px(paragraph.content.size.height.0 / 2.0),
     )
 }
+
+/// An editor whose node and mark parts have typed styles
+/// (`StyleRefinement`, as a Rust app types them): paragraphs red, bold
+/// text blue over its paragraph's red.
+#[component]
+fn TypedStyles(props: HarnessProps) -> impl IntoElement {
+    use nsh_base::rich_editor::view::{PartStyles, RichEditorStyles};
+    use nsh_core::element::StyleRefinement;
+
+    let color = |c: u32| StyleRefinement::default().text_color(rgb(c)).into();
+    let mut styles = RichEditorStyles::default();
+    styles.nodes = Some(PartStyles(
+        [("paragraph".to_owned(), color(0xff0000))].into(),
+    ));
+    styles.marks = Some(PartStyles([("bold".to_owned(), color(0x0000ff))].into()));
+    view()
+        .child(
+            view().test_id("editor").w(px(600.0)).h(px(400.0)).child(
+                rich_editor()
+                    .editor(props.session.clone().expect("a session"))
+                    .styles(styles)
+                    .size_full(),
+            ),
+        )
+        .child(text("Ready"))
+}
+
+#[test]
+fn typed_node_and_mark_styles_reach_their_text() {
+    let doc = json!({"type": "doc", "content": [{"type": "paragraph", "content": [
+        {"type": "text", "text": "plain "},
+        {"type": "text", "text": "loud", "marks": [{"type": "bold"}]},
+    ]}]});
+    let mut config = EngineConfig {
+        viewport: Size::new(px(800.0), px(900.0)),
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<TypedStyles>(move || {
+            HarnessProps {
+                session: Some(session(doc.clone())),
+            }
+        }))
+    };
+    config.environment.os = Os::Linux;
+    config.environment.idiom = Idiom::Desktop;
+    let mut app = Headless::start(config).expect("the engine starts");
+    see(&mut app, "Ready");
+    let color = |selector: &str| app.screen().span_style(selector).unwrap().color;
+    assert_eq!(
+        color("id:editor >> text:plain"),
+        nsh_core::Color(0xff00_00ff)
+    );
+    assert_eq!(
+        color("id:editor >> text:loud"),
+        nsh_core::Color(0x0000_ffff)
+    );
+}

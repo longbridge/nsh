@@ -9,8 +9,9 @@ use nsh_base::{
     editor::{
         EditorClasses, EditorDiagnostic, EditorDiagnosticCodeDescription,
         EditorDiagnosticRelatedInformation, EditorDiagnosticSeverity, EditorDiagnosticTag,
-        EditorHoverEvent, EditorLocation, EditorPosition, EditorRange, editor,
+        EditorHoverEvent, EditorLocation, EditorPosition, EditorRange, EditorStyles, editor,
     },
+    text_view::PartStyle,
     theme,
 };
 use nsh_core::{
@@ -27,6 +28,9 @@ const TEXT: &str = "let unused = old();";
 struct HarnessProps {
     /// The editor's `classes`.
     classes: EditorClasses,
+    /// The editor's `styles` make the `unnecessaryText` part bold, typed
+    /// (`StyleRefinement`, as a Rust app types it).
+    typed_bold: bool,
 }
 
 fn range(line: u32, from: u32, to: u32) -> EditorRange {
@@ -97,6 +101,14 @@ fn hover_text(e: &EditorHoverEvent) -> String {
 #[component]
 fn Harness(props: HarnessProps) -> impl IntoElement {
     let hovered = signal(String::from("Hover none"));
+    let mut styles = EditorStyles::default();
+    if props.typed_bold {
+        styles.unnecessary_text = Some(PartStyle(
+            nsh_core::element::StyleRefinement::default()
+                .font_weight(FontWeight::BOLD)
+                .into(),
+        ));
+    }
     view()
         .child(
             view().test_id("editor").w(px(600.0)).h(px(400.0)).child(
@@ -104,6 +116,7 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
                     .default_value(TEXT)
                     .diagnostics(diagnostics())
                     .classes(props.classes.clone())
+                    .styles(styles)
                     .on_hover(move |e: &EditorHoverEvent| hovered.set(hover_text(e)))
                     .size_full(),
             ),
@@ -114,11 +127,18 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
 }
 
 fn start(classes: EditorClasses) -> Headless {
+    start_styled(classes, false)
+}
+
+/// [`start`], the `unnecessaryText` part bold in a typed style when
+/// `typed_bold`.
+fn start_styled(classes: EditorClasses, typed_bold: bool) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(900.0)),
         ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>(move || {
             HarnessProps {
                 classes: classes.clone(),
+                typed_bold,
             }
         }))
     };
@@ -160,6 +180,17 @@ fn the_apps_classes_restyle_the_tagged_text() {
     assert_eq!(old.font_weight, 700);
     assert!(!old.decoration.line_through);
     assert!(!screen.span_style("id:editor >> text:let").unwrap().italic);
+}
+
+/// A typed style of a tag's part reaches the tagged text as the part's
+/// classes do.
+#[test]
+fn the_apps_typed_styles_restyle_the_tagged_text() {
+    let app = start_styled(EditorClasses::default(), true);
+    let screen = app.screen();
+    let weight = |selector: &str| screen.span_style(selector).unwrap().font_weight;
+    assert_eq!(weight("id:editor >> text:unused"), 700);
+    assert_ne!(weight("id:editor >> text:let"), 700);
 }
 
 #[test]

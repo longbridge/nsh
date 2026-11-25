@@ -1167,3 +1167,42 @@ fn a_wrapped_lines_later_parts_continue_its_first_for_a_copy() {
     let joined: String = parts.iter().map(|(_, t)| t.as_str()).collect();
     assert_eq!(joined.trim_end(), long.trim_end());
 }
+
+/// A typed part style (`StyleRefinement`, as a Rust app types it)
+/// reaches its part's view: the line numbers' text takes its color.
+#[test]
+fn a_typed_part_style_reaches_its_part() {
+    use nsh_base::{DiffViewStyles, text_view::PartStyle};
+    use nsh_core::{Color, element::StyleRefinement};
+
+    #[component]
+    fn Typed() -> impl IntoElement {
+        let mut styles = DiffViewStyles::default();
+        styles.line_number = Some(PartStyle(
+            StyleRefinement::default().text_color(rgb(0xff0000)).into(),
+        ));
+        view().test_id("diff").w(px(700.0)).h(px(300.0)).child(
+            diff_view()
+                .old_value("same\nold\n")
+                .new_value("same\nnew\n")
+                .styles(styles)
+                .size_full(),
+        )
+    }
+
+    let mut config = EngineConfig {
+        viewport: Size::new(px(800.0), px(900.0)),
+        ..EngineConfig::new(nsh_testing::windowed_root::<Typed>())
+    };
+    config.environment.os = Os::Linux;
+    config.environment.idiom = Idiom::Desktop;
+    let mut app = Headless::start(config).expect("the engine starts");
+    see(&mut app, "new");
+    assert_eq!(
+        app.screen()
+            .span_style("id:diff >> text:1 >> nth=0")
+            .unwrap()
+            .color,
+        Color(0xff00_00ff)
+    );
+}

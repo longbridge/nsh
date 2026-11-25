@@ -91,12 +91,10 @@ fn parts_with<E: Element>(
             if s.is_empty() {
                 return Style::default();
             }
-            Style::from_decls(
-                styles()
-                    .iter()
-                    .filter_map(|p| s.get(*p))
-                    .flat_map(|s| s.decls().iter().cloned()),
-            )
+            styles()
+                .iter()
+                .filter_map(|p| s.get(*p))
+                .fold(Style::default(), |all, s| all.then(s))
         })
     })
 }
@@ -184,12 +182,10 @@ fn column_parts<E: Element>(
             if s.is_empty() {
                 return Style::default();
             }
-            Style::from_decls(
-                styles()
-                    .iter()
-                    .filter_map(|p| s.get(*p))
-                    .flat_map(|s| s.decls().iter().cloned()),
-            )
+            styles()
+                .iter()
+                .filter_map(|p| s.get(*p))
+                .fold(Style::default(), |all, s| all.then(s))
         })
     })
 }

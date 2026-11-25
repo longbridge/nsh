@@ -54,11 +54,9 @@ pub(crate) fn parts<E: Element>(el: E, props: EditorProps, list: &'static [Edito
     })
     .inline_style(move || {
         props.styles.with(|s| {
-            Style::from_decls(
-                list.iter()
-                    .filter_map(|p| s.get(*p))
-                    .flat_map(|s| s.decls().iter().cloned()),
-            )
+            list.iter()
+                .filter_map(|p| s.get(*p))
+                .fold(Style::default(), |all, s| all.then(s))
         })
     })
 }
@@ -1241,8 +1239,7 @@ fn row_view(ed: Ed, slot: ReadSignal<(usize, usize)>) -> impl IntoElement {
                             .and_then(|d| d.line_style.clone())
                     })
                     .collect();
-                let style =
-                    Style::from_decls(styles.iter().flat_map(|s| s.decls().iter().cloned()));
+                let style = styles.iter().fold(Style::default(), |all, s| all.then(s));
                 // A row with larger text is taller, and so is its text's
                 // line (the others take the root's): in the binding the row
                 // has, no style of its own for the rows that need none.
@@ -1342,9 +1339,8 @@ fn spans(ed: Ed, slot: ReadSignal<(usize, usize)>, content: RowContent) -> Vec<A
                     el = el.app_class(Some(SharedString::from(classes.join(" "))));
                 }
                 if !styles.is_empty() {
-                    el = el.inline_style(Style::from_decls(
-                        styles.iter().flat_map(|s| s.decls().iter().cloned()),
-                    ));
+                    el =
+                        el.inline_style(styles.iter().fold(Style::default(), |all, s| all.then(s)));
                 }
             } else {
                 el = tagged(el, props, tags, span.composition, classes, styles);
@@ -1446,13 +1442,11 @@ fn tagged(
     })
     .inline_style(move || {
         props.styles.with(|s| {
-            Style::from_decls(
-                style_list
-                    .iter()
-                    .filter_map(|p| s.get(*p))
-                    .chain(styles.iter())
-                    .flat_map(|s| s.decls().iter().cloned()),
-            )
+            style_list
+                .iter()
+                .filter_map(|p| s.get(*p))
+                .chain(styles.iter())
+                .fold(Style::default(), |all, s| all.then(s))
         })
     })
 }

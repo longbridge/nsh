@@ -352,7 +352,7 @@ pub(crate) fn join(classes: Vec<String>) -> Option<SharedString> {
 
 /// `styles` merged in order (later ones win).
 pub(crate) fn merge(styles: &[Style]) -> Style {
-    Style::from_decls(styles.iter().flat_map(|s| s.decls().iter().cloned()))
+    styles.iter().fold(Style::default(), |all, s| all.then(s))
 }
 
 #[cfg(test)]

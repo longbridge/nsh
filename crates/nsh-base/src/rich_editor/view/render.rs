@@ -70,11 +70,9 @@ pub(crate) fn parts<E: Element>(el: E, rv: &Rv, list: &'static [Part]) -> E {
     })
     .inline_style(move || {
         props.styles.with(|s| {
-            Style::from_decls(
-                list.iter()
-                    .filter_map(|p| s.part(*p))
-                    .flat_map(|s| s.decls().iter().cloned()),
-            )
+            list.iter()
+                .filter_map(|p| s.part(*p))
+                .fold(Style::default(), |all, s| all.then(s))
         })
     })
 }

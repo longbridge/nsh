@@ -645,10 +645,8 @@ impl Cx {
         match styles.as_slice() {
             [] => el,
             [style] => el.inline_style((*style).clone()),
-            // Later parts' declarations win, as later classes do.
-            _ => el.inline_style(Style::from_decls(
-                styles.iter().flat_map(|s| s.decls().iter().cloned()),
-            )),
+            // Later parts win, as later classes do.
+            _ => el.inline_style(styles.iter().fold(Style::default(), |all, s| all.then(s))),
         }
     }
 
