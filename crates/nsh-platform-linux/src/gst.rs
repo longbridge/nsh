@@ -621,6 +621,19 @@ impl Drop for Buffer {
 pub(crate) struct Sample(NonNull<c_void>);
 
 impl Sample {
+    /// Whether its buffer is a gap (`GST_BUFFER_FLAG_GAP`): no data, to be
+    /// taken as silence.
+    #[cfg(test)]
+    pub(crate) fn is_gap(&self) -> bool {
+        const BUFFER_FLAG_GAP: c_uint = 1 << 11;
+        // SAFETY: the buffer is borrowed from the sample.
+        unsafe {
+            let buffer = (loaded().gst_sample_get_buffer)(self.0.as_ptr());
+            !buffer.is_null()
+                && (*(buffer as *const RawBuffer)).mini_object.flags & BUFFER_FLAG_GAP != 0
+        }
+    }
+
     /// Appends its buffer's bytes to `out`.
     pub(crate) fn append_to(&self, out: &mut Vec<u8>) {
         // SAFETY: the buffer is borrowed from the sample.

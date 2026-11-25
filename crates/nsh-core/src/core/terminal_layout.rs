@@ -228,6 +228,9 @@ pub(crate) struct Role {
     /// A control's accessibility label, in columns (0 without one): an
     /// icon button shows it in place of its icon.
     pub(crate) label: u16,
+    /// The label's first word, in columns (the whole label when it is
+    /// one word): a label short of room keeps this before it is cut.
+    pub(crate) word: u16,
     /// A text or a text input: a box holding only such is a box of text.
     pub(crate) text: bool,
     /// A scroll view or a list: its content is laid out unbounded along
@@ -933,7 +936,21 @@ fn own_insets(
         // 12pt, one from 4pt; a popup's panel (an anchored overlay's first
         // face) a column each side from 4pt and no rows, its band all the
         // frame it needs.
-        let border = Sides::default();
+        // A filled box framed on every side around a text field (a
+        // composer: its field, its send button) keeps its line: without
+        // it the field is a lone underlined line and its buttons float
+        // beside it, nothing showing they are one input.
+        let border = if kind.container && framed_field(tree, node) {
+            let has = |v: LengthPercentage| i32::from(lp(v, parent_width) > 0.0);
+            Sides {
+                l: has(s.border.left),
+                r: has(s.border.right),
+                t: has(s.border.top),
+                b: has(s.border.bottom),
+            }
+        } else {
+            Sides::default()
+        };
         let popup = popup_panel(tree, node);
         let px = |v: LengthPercentage| {
             let p = lp(v, parent_width);
@@ -1350,6 +1367,27 @@ fn ring(tree: &impl Tree, node: NodeId, kind: Kind, parent_width: Option<f32>) -
 /// Below this many columns a box of an explicit width is small
 /// ([`compute`]): it takes its content's words when they are wider.
 const SMALL_BOX: i32 = 6;
+
+/// How deep [`framed_field`] looks for a text field.
+const FIELD_DEPTH: usize = 4;
+
+/// Whether `node` is framed on every side and holds a text field within
+/// [`FIELD_DEPTH`] levels (a composer around its field), and is not a
+/// field itself.
+fn framed_field(tree: &impl Tree, node: NodeId) -> bool {
+    fn holds(tree: &impl Tree, node: NodeId, depth: usize) -> bool {
+        (0..tree.child_count(node)).any(|i| {
+            let child = tree.child(node, i);
+            tree.role(child).input || (depth > 1 && holds(tree, child, depth - 1))
+        })
+    }
+    let b = tree.style(node).border;
+    !tree.role(node).input
+        && [b.left, b.right, b.top, b.bottom]
+            .iter()
+            .all(|&v| length(v.into_raw()).is_some_and(|v| v > 0.0))
+        && holds(tree, node, FIELD_DEPTH)
+}
 
 /// A corner radius that rounds any box fully (`rounded-full` is 9999).
 const FULLY_ROUND: f32 = 1000.0;
@@ -2192,6 +2230,10 @@ struct Item {
     /// anything else. They give their columns before anything else but
     /// the gaps: down to three a label (cut short), then out.
     labels: i32,
+    /// Its labels' first words and a column between them
+    /// ([`labels_short`]): its labels give down to this before they are
+    /// cut to three columns.
+    short: i32,
     /// A negative margin pulls it over its sibling (stacked avatars): in a
     /// row it keeps a column from it instead.
     overlaps: bool,
@@ -2308,8 +2350,9 @@ fn min_content_cols(
 }
 
 /// Gives `over` columns of a row back from its gaps (down to one column)
-/// and then its icon controls shown as labels (down to three columns,
-/// cut short, then out, the last first); returns what is still over.
+/// and then its icon controls shown as labels (down to their first words,
+/// the widest first, then three columns, cut short, then out, the last
+/// first); returns what is still over.
 fn give_gaps_and_labels(items: &mut [Item], before: &mut [i32], mut over: i32) -> i32 {
     while over > 0 {
         let pick = (1..before.len())
@@ -2321,6 +2364,20 @@ fn give_gaps_and_labels(items: &mut [Item], before: &mut [i32], mut over: i32) -
     }
     // Three columns a label, and a column between a group's.
     let least = |i: &Item| i.labels * 3 + (i.labels - 1).max(0);
+    // A label keeps its first word while another has more to give
+    // (`Edit` of `Edit folder`), so each still says what it does.
+    let word = |i: &Item| i.short.max(least(i));
+    while over > 0 {
+        let pick = items
+            .iter()
+            .enumerate()
+            .filter(|(_, i)| i.labels > 0 && i.main > word(i))
+            .max_by_key(|(_, i)| i.main - word(i))
+            .map(|(n, _)| n);
+        let Some(pick) = pick else { break };
+        items[pick].main -= 1;
+        over -= 1;
+    }
     while over > 0 {
         let pick = items
             .iter()
@@ -2406,6 +2463,27 @@ fn labels_held(tree: &impl Tree, node: NodeId) -> i32 {
         }
     }
     if n > 1 && !row { 0 } else { n }
+}
+
+/// The columns `node`'s labels ([`labels_held`]) take showing only their
+/// first words, a column between two: what they give down to first.
+fn labels_short(tree: &impl Tree, node: NodeId) -> i32 {
+    if kind(tree, node).labelled {
+        return i32::from(tree.role(node).word);
+    }
+    let mut cols = 0;
+    let mut n = 0;
+    for i in 0..tree.child_count(node) {
+        let child = tree.child(node, i);
+        if hidden(tree, child) || tree.style(child).position.is_out_of_flow() {
+            continue;
+        }
+        if labels_held(tree, child) > 0 {
+            cols += labels_short(tree, child);
+            n += 1;
+        }
+    }
+    cols + (n - 1).max(0)
 }
 
 /// The longest words of `node`'s children ([`min_content_cols`]): the
@@ -2534,6 +2612,7 @@ fn arrange_flex(
                 content: !k.empty || tree.role(node).splitter != Splitter::No,
                 floor: 0,
                 labels: labels_held(tree, node),
+                short: labels_short(tree, node),
                 control: tree.role(node).control,
                 filled: surface(tree.role(node), tree.backdrop(node).unwrap_or(grid.page))
                     .is_some(),
@@ -3651,28 +3730,6 @@ fn arrange_grid(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn halves_round_down() {
-        assert_eq!(nearest(1.5), 1);
-        assert_eq!(nearest(1.51), 2);
-        assert_eq!(nearest(-1.5), -1);
-        assert_eq!(nearest(2.9999), 3);
-    }
-
-    #[test]
-    fn spacing_is_coarse() {
-        assert_eq!([4.0, 8.0, 16.0, 24.0, 32.0].map(space_x), [0, 1, 1, 2, 2]);
-        assert_eq!([8.0, 12.0, 16.0, 24.0, 48.0].map(space_y), [0, 1, 1, 1, 1]);
-        assert_eq!([0.0, 4.0, 24.0].map(gap_x), [0, 1, 2]);
-        assert_eq!([8.0, 12.0, 16.0].map(|p| space_between(p, true)), [0, 1, 1]);
-        assert_eq!([12.0, 16.0].map(|p| space_between(p, false)), [0, 1]);
-    }
-}
-
 /// The terminal columns `text` takes: two for a wide (East Asian or emoji)
 /// character, one for any other.
 pub(crate) fn columns(text: &str) -> usize {
@@ -3697,4 +3754,26 @@ pub(crate) fn columns(text: &str) -> usize {
             1 + usize::from(wide)
         })
         .sum()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn halves_round_down() {
+        assert_eq!(nearest(1.5), 1);
+        assert_eq!(nearest(1.51), 2);
+        assert_eq!(nearest(-1.5), -1);
+        assert_eq!(nearest(2.9999), 3);
+    }
+
+    #[test]
+    fn spacing_is_coarse() {
+        assert_eq!([4.0, 8.0, 16.0, 24.0, 32.0].map(space_x), [0, 1, 1, 2, 2]);
+        assert_eq!([8.0, 12.0, 16.0, 24.0, 48.0].map(space_y), [0, 1, 1, 1, 1]);
+        assert_eq!([0.0, 4.0, 24.0].map(gap_x), [0, 1, 2]);
+        assert_eq!([8.0, 12.0, 16.0].map(|p| space_between(p, true)), [0, 1, 1]);
+        assert_eq!([12.0, 16.0].map(|p| space_between(p, false)), [0, 1]);
+    }
 }
