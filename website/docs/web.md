@@ -213,12 +213,19 @@ gets the whole runtime, its crates included, in its `nsh.<digest>.wasm`. Measure
 
 #### One runtime for several apps
 
-Package several apps into one directory and they share one runtime. When `nsh package` finds another NSH app
-already in the `--out` directory, `nsh.<digest>.wasm` holds only the engine, and each `nsh/base` part, standard
-module and shader is a side module of its own (`nsh-<part>.<digest>.wasm`). These files are the same for every app
-packaged with that version of NSH. Serve them from one place (`--asset-url`) and the browser downloads them once
-for the whole site. Nothing to configure. Package the first app again after the others so it shares too. An app
-packaged alone keeps its own, smaller runtime, and so does an app with Rust components of its own.
+Several apps on one site can share one runtime. Package each of them with `--shared-runtime`:
+
+```sh
+nsh package --target web --shared-runtime --asset-url https://cdn.example.com/nsh/
+```
+
+`nsh.<digest>.wasm` then holds only the engine, and each `nsh/base` part, standard module and shader is a side
+module of its own (`nsh-<part>.<digest>.wasm`). These files are the same for every app packaged with the same
+version of NSH, wherever and in whatever order they are packaged, so each app can be built in its own CI job.
+Serve them from one place (`--asset-url`) and the browser downloads them once for the whole site.
+
+Without the flag each app gets its own runtime, trimmed to what it uses, which is smaller for a site with one app.
+An app with Rust components of its own has its own runtime, and `--shared-runtime` fails for it.
 
 ### Deploy it
 
