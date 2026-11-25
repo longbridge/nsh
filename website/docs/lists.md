@@ -146,7 +146,7 @@ In Rust, give the count as a signal or a closure (`move || posts.with(Vec::len)`
 
 In TSX, pass a new array to change the items: `posts.set([...posts(), ...more])`. The list compares the old and the new array **by item identity** (`===`), or by the keys `keyExtractor` returns.
 
-In both, a row that stays keeps its cell, its content and its measured size wherever it moves (an item sorted to the top once it changes), and so do the rows it passes: a focused field or an open menu in them stays open. Only new items get new rows. When rows are inserted above the rows on screen, the visible rows stay where they are instead of jumping.
+In both, a row that stays keeps its cell, its content and its measured size wherever it moves (an item sorted to the top once it changes), and so do the rows it passes: a focused field or an open menu in them stays open. Only new items get new rows. When rows are inserted above the rows on screen, the visible rows stay where they are instead of jumping. A row only partly scrolled into view at the top counts as above them, so rows inserted right after it leave the rows being read in place.
 
 - In TSX, update immutably: a new array, with the unchanged item objects reused. Mutating the array in place (`push`) is not seen.
 - A changed item should be a new object (`{ ...post, title }`), so its row shows the change.
