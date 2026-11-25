@@ -670,14 +670,11 @@ impl InputState {
     /// farthest it goes (the last line at the content box's bottom).
     /// Clamp the wheel to the text's height rather than scrolling past its end.
     fn text_scroll(&self) -> Option<(i32, i32)> {
-        let client = self.client();
         self.with_editor(|e| {
             let mut at = windows::Win32::Foundation::POINT::default();
             e.send(EM_GETSCROLLPOS, 0, &mut at as *mut _ as isize);
-            let height = e.text_height(client.right - client.left)?;
-            Some((at.y, (height - (client.bottom - client.top)).max(0)))
+            (at.y, e.scroll_limit())
         })
-        .flatten()
     }
 
     /// RichEdit's client rectangle: the content box in the window's client
@@ -2774,6 +2771,52 @@ mod tests {
             let (min, max, _, _) = editor.vscroll();
             assert!(max - min > 80, "vertical overflow missing: {min}..{max}");
         }
+    }
+
+    /// The wheel's limit reaches the last line: scrolled there, the text's
+    /// end sits inside the client rectangle and no further scroll moves it
+    /// (#3200: the limit stopped about halfway at HiDPI).
+    #[test]
+    fn wheel_limit_reaches_the_last_line() {
+        let config = InputConfig {
+            multiline: true,
+            ..Default::default()
+        };
+        let client = RECT {
+            right: 420,
+            bottom: 160,
+            ..Default::default()
+        };
+        let editor = Editor::new(
+            HWND::default(),
+            Props {
+                client,
+                bits: base_bits(&config),
+                scroll: scroll_flags(&config),
+                ..Default::default()
+            },
+            Box::new(|| {}),
+            Box::new(|| {}),
+        )
+        .expect("RichEdit");
+        let text: Vec<String> = (1..=40)
+            .map(|i| format!("line {i:02}  abcdefghij"))
+            .collect();
+        editor.set_text(&text.join("\r\n"));
+        editor.send(0x00BA, 0, 0); // EM_GETLINECOUNT forces text layout.
+        let limit = editor.scroll_limit();
+        assert!(limit > client.bottom, "no overflow: {limit}");
+        let mut at = windows::Win32::Foundation::POINT { x: 0, y: limit };
+        editor.send(EM_SETSCROLLPOS, 0, &mut at as *mut _ as isize);
+        let mut now = windows::Win32::Foundation::POINT::default();
+        editor.send(EM_GETSCROLLPOS, 0, &mut now as *mut _ as isize);
+        assert_eq!(now.y, limit, "RichEdit clamped short of the limit");
+        let len = editor.text_units().len() as u32;
+        let last = editor.position(len);
+        assert!(
+            last.y >= client.top && last.y < client.bottom,
+            "the last line is not in view at the limit: {last:?}"
+        );
     }
 
     /// Several lines are as far apart as the line height says, the same

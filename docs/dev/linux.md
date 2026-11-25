@@ -14,9 +14,10 @@ window until the app opens one. `defaultVisible` and the main window's `show()` 
 The crates need the GTK 4 (≥ 4.14; Pango from 1.50 on, the app's fonts going through Fontconfig) development
 packages (`libgtk-4-dev` on Debian / Ubuntu, `gtk4` on Arch, `gtk4-devel` on Fedora), for web views WebKitGTK 6.0's
 (2.42 or later: `libwebkitgtk-6.0-dev` on Debian / Ubuntu, `webkitgtk-6.0` on Arch, `webkitgtk6.0-devel` on Fedora),
-GStreamer's core and base plug-ins (`libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev` on Debian / Ubuntu,
-`gstreamer gst-plugins-base` on Arch, `gstreamer1-devel gstreamer1-plugins-base-devel` on Fedora; sounds decode and mix
-with them, `sound.rs`, the feature `sound`; without it `sound_off.rs` fails every load as `not-supported`) and, for QuickJS, clang. Off Linux the crates are empty (like the other platform crates off their targets), so check them on
+and, for QuickJS, clang. GStreamer needs no development package: sounds (`sound.rs`, the feature `sound`) load
+`libgstreamer-1.0.so.0` and `libgstapp-1.0.so.0` at run time (`gst.rs`), so an app starts without GStreamer and a
+sound's load then fails naming the library missing; without the feature `sound_off.rs` fails every load as
+`not-supported`. Running the sound tests needs GStreamer and its base plug-ins installed. Off Linux the crates are empty (like the other platform crates off their targets), so check them on
 Linux:
 
 ```sh

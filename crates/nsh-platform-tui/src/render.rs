@@ -41,9 +41,12 @@
 //!   `┃` in the default color over the inner right (bottom) edge, only when
 //!   the content overflows.
 //! - **Unsupported** content is left out: icon-sized videos, web views
-//!   and canvases take no Cells in the layout, larger ones and native
-//!   components without a terminal rendering keep their box blank (the mounter logs each content
-//!   kind once). A control whose content is all left out (an icon button)
+//!   and canvases take no Cells in the layout; larger videos, web views
+//!   and native components without a terminal rendering show a dim
+//!   `[Video: …]` / `[Web page: …]` / `[name: not available in the
+//!   terminal]` line in their box, and a picture on a terminal of 16
+//!   colors or fewer its `[label]` (the mounter logs each content kind
+//!   once). A control whose content is all left out (an icon button)
 //!   draws its accessibility label as its label.
 //! - **Clipping**: a text draws inside its own view's box; a view that
 //!   clips, scrolls or has a border keeps its children inside its content
@@ -380,6 +383,7 @@ impl Painter<'_> {
             .get(id)
             .and_then(|view| icon_label(self.tree, view))
             .map(str::to_owned);
+        let stand_in = self.tree.get(id).and_then(|view| stand_in(self.tree, view));
         // Only an overlay's box takes a title, so only there is it asked
         // whether its label is already its text.
         let label_shown = self.tree.get(id).is_some_and(|view| {
@@ -1207,6 +1211,19 @@ impl Painter<'_> {
             if let Some(component) = &mut view.component {
                 component.render(inner_visible, self.buffer);
             }
+            if let Some(text) = &stand_in
+                && !inner_visible.is_empty()
+            {
+                // What the terminal cannot show says so in its box, dim,
+                // instead of leaving a blank the reader takes for a gap.
+                let (x, y) = (inner_visible.x, inner_visible.y);
+                let room = inner_visible.right() - x;
+                let drawn = dialog::put(self.buffer, x, y, text, room, Color::Reset, Modifier::DIM);
+                if drawn > 0 && unicode_width::UnicodeWidthStr::width(text.as_str()) > room as usize
+                {
+                    self.buffer[(x + drawn - 1, y)].set_symbol("…");
+                }
+            }
             if control && let Some(label) = &icon {
                 let (x, y) = (inner_visible.x, inner_visible.y);
                 let room = (inner.right - inner.left).max(0);
@@ -1243,20 +1260,19 @@ impl Painter<'_> {
                     } else {
                         x
                     };
+                    // A row short of room shrinks an icon button below its
+                    // label: the label is cut on a character's edge (never
+                    // half of a wide one), its last Cell `…`.
+                    let cut = cut_label(label, room.max(0) as usize);
                     let drawn = dialog::put(
                         self.buffer,
                         x,
                         y,
-                        label,
+                        &cut,
                         inner_visible.right() - x,
                         Color::Reset,
                         Modifier::empty(),
                     );
-                    // A row short of room shrinks an icon button below its
-                    // label: the label is cut, its last Cell `…`.
-                    if drawn > 0 && unicode_width::UnicodeWidthStr::width(label) > room as usize {
-                        self.buffer[(x + drawn - 1, y)].set_symbol("…");
-                    }
                     let width = usize::from(self.buffer.area.width);
                     let start = usize::from(y) * width + usize::from(x);
                     for cell in &mut self.text_cells[start..start + usize::from(drawn)] {
@@ -1741,6 +1757,44 @@ enum Focus {
     Shown,
 }
 
+/// `label` as it fits `room` columns: whole; its first word whole when a
+/// cut would fall inside it (`Edit` of `Edit folder`); else cut on a
+/// character's edge with `…` in the column after the last one that fits.
+fn cut_label(label: &str, room: usize) -> std::borrow::Cow<'_, str> {
+    use unicode_segmentation::UnicodeSegmentation;
+    use unicode_width::UnicodeWidthStr;
+    if label.width() <= room {
+        return label.into();
+    }
+    // A cut inside the first word would leave a stub (`Sc…` of `Scan
+    // folder`): the first word whole reads better, when it fits.
+    let first = label.split_whitespace().next().unwrap_or("");
+    let first_width = first.width();
+    if first != label && first_width <= room && room <= first_width + 1 {
+        let mut cut = first.to_string();
+        if first_width < room {
+            cut.push('…');
+        }
+        return cut.into();
+    }
+    let mut cut = String::new();
+    let mut width = 0;
+    for grapheme in label.graphemes(true) {
+        let w = grapheme.width();
+        if width + w + 1 > room {
+            break;
+        }
+        cut.push_str(grapheme);
+        width += w;
+    }
+    // Not `Edit …`: the ellipsis follows the last character.
+    cut.truncate(cut.trim_end().len());
+    if room > 0 {
+        cut.push('…');
+    }
+    cut.into()
+}
+
 /// The label an icon button shows: its accessibility label, trimmed, when
 /// all its content is left out (every child laid out empty or hidden), as
 /// the layout then gives it a row as wide as that label.
@@ -1751,6 +1805,43 @@ fn icon_label<'a>(tree: &Mounter, view: &'a NshView) -> Option<&'a str> {
     let label = view.props.accessibility.label.as_deref()?.trim();
     let empty = !view.children.iter().any(|&child| draws(tree, child));
     (empty && !label.is_empty()).then_some(label)
+}
+
+/// The line that stands in for content the terminal cannot show: a video,
+/// a web view, a native component without a terminal rendering, or a
+/// picture on a terminal of 16 colors or fewer (its accessibility label).
+fn stand_in(tree: &Mounter, view: &NshView) -> Option<String> {
+    if view.frame.size.width <= Points::ZERO || view.frame.size.height <= Points::ZERO {
+        return None;
+    }
+    let label = view
+        .props
+        .accessibility
+        .label
+        .as_deref()
+        .map(str::trim)
+        .filter(|label| !label.is_empty());
+    let what = match view.kind {
+        ViewKind::Video => "Video",
+        ViewKind::WebView => "Web page",
+        ViewKind::Image => {
+            let image = view.image.as_ref()?;
+            if !tree.images.hides(image) {
+                return None;
+            }
+            return Some(format!("[{}]", label.unwrap_or("Image")));
+        }
+        _ => match (&view.component, &view.component_name) {
+            (None, Some(name)) => {
+                return Some(format!("[{name}: not available in the terminal]"));
+            }
+            _ => return None,
+        },
+    };
+    Some(match label {
+        Some(label) => format!("[{what}: {label}]"),
+        None => format!("[{what}: not available in the terminal]"),
+    })
 }
 
 /// Whether `id` or a view inside it draws anything of its own in the

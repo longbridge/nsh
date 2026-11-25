@@ -2194,6 +2194,8 @@ impl Headless {
         let mut routed = None;
         // Where on the page the finger lands, when the test gives a point.
         let mut page = None;
+        // Where it lands otherwise: the part of the view that is visible.
+        let mut landed = None;
         if let Some(offset) = offset {
             let named = match self.screen.resolve(&parsed)[..] {
                 [named] => named,
@@ -2242,6 +2244,7 @@ impl Headless {
                 Some(visible) => visible.center(),
                 None => point,
             };
+            landed = Some(point);
             if let Some((to, inside)) = self.screen.routed_press(id, point) {
                 (id, routed) = (to, Some(inside));
             } else if (visible.is_some() || target.is_empty())
@@ -2254,15 +2257,17 @@ impl Headless {
                 ));
             }
         }
-        let at = page.or_else(|| {
-            self.screen
-                .canvas_node(&parsed)
-                .and_then(|(canvas, center)| {
-                    self.screen
-                        .bounds_in_root(canvas)
-                        .map(|b| b.origin + center)
-                })
-        });
+        let at = page
+            .or_else(|| {
+                self.screen
+                    .canvas_node(&parsed)
+                    .and_then(|(canvas, center)| {
+                        self.screen
+                            .bounds_in_root(canvas)
+                            .map(|b| b.origin + center)
+                    })
+            })
+            .or(landed);
         self.activate_window_of(id);
         // The finger, as platforms report it to the views around it that
         // listen to touches (an overlay's `onPressOutside` among them).

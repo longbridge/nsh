@@ -80,8 +80,14 @@ user-facing page is `website/elements/editor.md`; how each module works inside i
 `DisplayMap` (`display_map.rs`) lays the text out in display rows: tabs advance to the next stop, widths come from
 the editor's font as drawn (the app's `fontSize` and `lineHeight` grown by the user's text size, `fontScale`, as the
 core grows every text's: `controller::drawn_font`) measured with the platform's text engine, and large files lay out without measuring every row.
-With `softWrap`, a line breaks after whitespace where the row would overflow, else between graphemes, and its
-continuation rows start at its indentation unless that is over half the width. A folded line shows as one row and the
+With `softWrap`, a line breaks where the row would overflow at its last break opportunity: between ASCII characters
+after whitespace, as before, so code and Latin text keep their tokens, operators and paths whole; elsewhere at
+Unicode's line break opportunities (UAX #14, from `unicode-linebreak`, as the core's text layout), so CJK text breaks
+between characters but not before closing punctuation or after opening punctuation. A run without one breaks between
+graphemes, never inside one. A replacing decoration's label is one unit that never splits; rows break around it as
+around an object replacement character (U+FFFC), except between ASCII neighbours, where the ASCII rule keeps it with
+the code beside it. A line's continuation rows start at its indentation unless that is over half the width. A folded line
+shows as one row and the
 lines it hides as none. An edit lays out only the lines it touched. A decoration's `fontFamily` / `fontSize` measure
 its text in that font (as drawn, grown by `fontScale`), and a row is as tall as its largest text needs, never shorter
 than `lineHeight`; every place that turns rows into points (carets, selections, presses, the rows made, scrolling,
