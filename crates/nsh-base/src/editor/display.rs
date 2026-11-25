@@ -1,7 +1,9 @@
 //! The display map: how the text is laid out in display rows. Tabs advance
 //! to the next tab stop, widths come from the editor's font (measured once
-//! per character and cached), long lines soft-wrap at a width, and a folded
-//! range shows as its first line alone.
+//! per character and cached), long lines soft-wrap at a width, a folded
+//! range shows as its first line alone, and a replaced range (a replacing
+//! decoration's label) is one unit as wide as its label: its text is not
+//! drawn, and a press is before or after it.
 //!
 //! Rows are kept in one vector with the first row of every line beside it,
 //! so line → row is an index and row → line a field; an edit lays out only
@@ -26,10 +28,22 @@ use unicode_segmentation::{GraphemeIndices, UnicodeSegmentation};
 
 use super::{
     buffer::{Bias, Buffer, Change, LineSpan, map_offset},
+    diagnostics::{self, Mark},
     fold::FoldRange,
     state::Font,
     types::RowLayout,
 };
+
+/// A replaced range's label: the decoration it is (its index in the
+/// editor's decorations) and its width.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Label {
+    pub(crate) item: usize,
+    pub(crate) width: f32,
+}
+
+/// A range of the text shown as its label, on one row.
+pub(crate) type Replaced = Mark<Label>;
 
 /// A stretch of the text in another font than the editor's (a
 /// decoration's `fontFamily` / `fontSize`).
@@ -106,6 +120,7 @@ impl DisplayMap {
                 base: Metrics::new(measure, tab_size),
                 faces: Vec::new(),
                 runs: Vec::new(),
+                replaced: Vec::new(),
             },
             line_height: 20.0,
             tops: Vec::new(),
@@ -306,6 +321,69 @@ impl DisplayMap {
     /// The folded ranges.
     pub(crate) fn folds(&self) -> &[FoldRange] {
         &self.folds
+    }
+
+    /// The ranges shown as their labels.
+    pub(crate) fn replaced(&self) -> &[Replaced] {
+        &self.fonts.replaced
+    }
+
+    /// Shows `replaced` (sorted, not overlapping, each on one line) as
+    /// their labels, laying out again only the lines whose labels changed.
+    /// Whether anything changed.
+    pub(crate) fn set_replaced(&mut self, buffer: &Buffer, replaced: Vec<Replaced>) -> bool {
+        if replaced == self.fonts.replaced {
+            return false;
+        }
+        let mut lines: Vec<usize> = Vec::new();
+        {
+            // The marks in one list and not the other, by a merge of both.
+            let (old, new) = (&self.fonts.replaced, &replaced);
+            let (mut i, mut j) = (0, 0);
+            while i < old.len() || j < new.len() {
+                let take_old = match (old.get(i), new.get(j)) {
+                    (Some(a), Some(b)) if a == b => {
+                        i += 1;
+                        j += 1;
+                        continue;
+                    }
+                    (Some(a), Some(b)) => {
+                        (a.range.start, a.range.end) <= (b.range.start, b.range.end)
+                    }
+                    (Some(_), None) => true,
+                    (None, _) => false,
+                };
+                let mark = if take_old {
+                    i += 1;
+                    &old[i - 1]
+                } else {
+                    j += 1;
+                    &new[j - 1]
+                };
+                lines.push(buffer.line_of(mark.range.start));
+            }
+        }
+        self.fonts.replaced = replaced;
+        if self.dirty {
+            // A rebuild follows.
+            return true;
+        }
+        lines.sort_unstable();
+        lines.dedup();
+        for line in lines.into_iter().rev() {
+            self.relayout_lines(buffer, line..line + 1);
+        }
+        true
+    }
+
+    /// Carries the replaced ranges through `changes`, as the decorations
+    /// they are: [`Self::edited`] lays out the edited lines with them, until
+    /// the editor sets them again.
+    pub(crate) fn adjust_replaced(&mut self, changes: &[Change]) {
+        if !self.fonts.replaced.is_empty() {
+            let reach = self.fonts.replaced.iter().map(|m| m.range.len()).max();
+            diagnostics::adjust(&mut self.fonts.replaced, reach.unwrap_or(0), changes);
+        }
     }
 
     /// Lays the whole text out again (a new text, font, tab size, width or
@@ -593,20 +671,33 @@ impl DisplayMap {
             .copied()
     }
 
-    /// The row's text as shown: tabs as spaces, plus each tab's display
-    /// range → buffer byte offset, so the view turns buffer ranges (tokens,
-    /// decorations, matches) into ranges of this string.
+    /// The row's text as shown: tabs as spaces and replaced ranges left
+    /// out, plus where those are, so the view turns buffer ranges (tokens,
+    /// decorations, matches) into ranges of this string and puts the
+    /// labels in.
     pub(crate) fn row_text(&self, buffer: &Buffer, row: usize) -> RowText {
         let range = self.row(row).range.clone();
         let source = slice_text(buffer.rope(), range.clone());
         let mut text = String::with_capacity(source.len());
-        let mut tabs = Vec::new();
+        let mut swaps = Vec::new();
+        let mut labels = Vec::new();
         let mut faced = self.fonts.from(range.start);
         let mut x = 0.0;
-        for (at, grapheme) in graphemes(&source) {
-            let metrics = faced.at(range.start + at);
-            let width = metrics.advance(grapheme, x);
-            if grapheme == "\t" {
+        for (at, unit, label) in units(&source, range.start, &self.fonts.replaced) {
+            let buffer_range = range.start + at..range.start + at + unit.len();
+            if let Some(label) = label {
+                let display = text.len();
+                swaps.push(Swap {
+                    buffer: buffer_range.clone(),
+                    display: display..display,
+                });
+                labels.push((buffer_range, label.item));
+                x += label.width;
+                continue;
+            }
+            let metrics = faced.at(buffer_range.start);
+            let width = metrics.advance(unit, x);
+            if unit == "\t" {
                 // Spaces in the tab's font: the row's text draws them.
                 let space = metrics.space();
                 let spaces = if space > 0.0 {
@@ -616,16 +707,21 @@ impl DisplayMap {
                 };
                 let display = text.len();
                 text.extend(std::iter::repeat_n(' ', spaces));
-                tabs.push(TabSpan {
-                    buffer: range.start + at,
+                swaps.push(Swap {
+                    buffer: buffer_range,
                     display: display..text.len(),
                 });
             } else {
-                text.push_str(grapheme);
+                text.push_str(unit);
             }
             x += width;
         }
-        RowText { text, range, tabs }
+        RowText {
+            text,
+            range,
+            swaps,
+            labels,
+        }
     }
 
     /// The x of `offset` within its row (from the text's left edge: a
@@ -666,8 +762,12 @@ impl DisplayMap {
         let mut faced = self.fonts.from(row.range.start);
         let mut cx = 0.0;
         let mut last = None;
-        for (at, grapheme) in graphemes(&text) {
-            let width = faced.advance(row.range.start + at, grapheme, cx);
+        // A label is one unit: a press is before or after it.
+        for (at, unit, label) in units(&text, row.range.start, &self.fonts.replaced) {
+            let width = match label {
+                Some(label) => label.width,
+                None => faced.advance(row.range.start + at, unit, cx),
+            };
             let edge = if self.cells { width } else { width / 2.0 };
             if target < cx + edge {
                 return row.range.start + at;
@@ -763,6 +863,28 @@ impl DisplayMap {
         Points(metrics.run_width(text))
     }
 
+    /// The font of the run around byte `at` (from its start on, before
+    /// its end); `None`: the editor's.
+    pub(crate) fn font_at(&self, at: usize) -> Option<&Font> {
+        self.face_at(at).map(|face| &face.font)
+    }
+
+    /// The width of `text` on one line from x 0 in the font around byte
+    /// `at` ([`Self::font_at`]).
+    pub(crate) fn width_at(&self, at: usize, text: &str) -> Points {
+        let metrics = self
+            .face_at(at)
+            .map_or(&self.fonts.base, |face| &face.metrics);
+        Points(metrics.run_width(text))
+    }
+
+    fn face_at(&self, at: usize) -> Option<&Face> {
+        let runs = &self.fonts.runs;
+        runs.get(runs.partition_point(|r| r.range.end <= at))
+            .filter(|r| r.range.start <= at)
+            .map(|r| &self.fonts.faces[r.face])
+    }
+
     /// A `RowLayout` over this map and `buffer`.
     pub(crate) fn layout<'a>(&'a self, buffer: &'a Buffer) -> impl RowLayout + 'a {
         MapLayout { map: self, buffer }
@@ -778,7 +900,14 @@ impl DisplayMap {
     /// The x of `offset` (clamped to the row) in row `row`.
     fn x_in_row(&self, rope: &Rope, row: usize, offset: usize) -> Points {
         let row = &self.rows[row];
-        let end = offset.clamp(row.range.start, row.range.end);
+        let mut end = offset.clamp(row.range.start, row.range.end);
+        // Inside a replaced range: at its label's start.
+        let after = self.fonts.replaced.partition_point(|m| m.range.start < end);
+        if let Some(m) = after.checked_sub(1).map(|i| &self.fonts.replaced[i])
+            && m.range.end > end
+        {
+            end = m.range.start.max(row.range.start);
+        }
         let end = end.min(rope.len_bytes());
         let start = row.range.start.min(end);
         let text = slice_text(rope, start..end);
@@ -796,7 +925,13 @@ impl DisplayMap {
         // The previous grapheme was a space: a space extends its run.
         let mut after_space = false;
         let mut faced = self.fonts.from(info.range.start);
-        for (at, grapheme) in graphemes(&text) {
+        for (at, unit, label) in units(&text, info.range.start, &self.fonts.replaced) {
+            if let Some(label) = label {
+                after_space = false;
+                x += label.width;
+                continue;
+            }
+            let grapheme = unit;
             let start = info.range.start + at;
             let width = faced.advance(start, grapheme, x);
             match grapheme {
@@ -847,20 +982,26 @@ pub(crate) struct Whitespace {
 /// A row's text as shown, and how its offsets map to the buffer's.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct RowText {
-    /// The text: the row's, with every tab as spaces.
+    /// The text: the row's, with every tab as spaces and without its
+    /// replaced ranges.
     pub(crate) text: String,
     /// The buffer range the row shows.
     pub(crate) range: Range<usize>,
-    /// The tabs, in order: the only chars whose display length differs.
-    tabs: Vec<TabSpan>,
+    /// The tabs and replaced ranges, in order: the only text whose
+    /// display length differs.
+    swaps: Vec<Swap>,
+    /// The replaced ranges, in order, and their decorations (indexes into
+    /// the editor's decorations).
+    pub(crate) labels: Vec<(Range<usize>, usize)>,
 }
 
-/// A tab of a row and the spaces it shows as.
+/// A tab of a row and the spaces it shows as, or a replaced range and the
+/// empty place its label is at.
 #[derive(Debug, Clone, PartialEq)]
-struct TabSpan {
-    /// The tab's byte offset in the buffer.
-    buffer: usize,
-    /// Its spaces in the row's text.
+struct Swap {
+    /// Its bytes in the buffer.
+    buffer: Range<usize>,
+    /// Its place in the row's text.
     display: Range<usize>,
 }
 
@@ -873,26 +1014,31 @@ impl RowText {
     }
 
     /// Buffer offset `offset` as an offset of [`Self::text`], clamped to
-    /// the row.
+    /// the row (inside a replaced range: where its label is).
     pub(crate) fn display_offset(&self, offset: usize) -> usize {
         let offset = offset.clamp(self.range.start, self.range.end);
-        let before = self.tabs.partition_point(|tab| tab.buffer < offset);
-        match before.checked_sub(1).map(|i| &self.tabs[i]) {
+        let before = self
+            .swaps
+            .partition_point(|swap| swap.buffer.start < offset);
+        match before.checked_sub(1).map(|i| &self.swaps[i]) {
             None => offset - self.range.start,
-            Some(tab) => tab.display.end + (offset - tab.buffer - 1),
+            Some(swap) if offset < swap.buffer.end => swap.display.start,
+            Some(swap) => swap.display.end + (offset - swap.buffer.end),
         }
     }
 
     /// Offset `display` of [`Self::text`] as a buffer offset (inside a
-    /// tab's spaces: the tab's start).
+    /// tab's spaces: the tab's start; at a label: the start of its range).
     #[cfg(test)]
     pub(crate) fn buffer_offset(&self, display: usize) -> usize {
         let display = display.min(self.text.len());
-        let before = self.tabs.partition_point(|tab| tab.display.start < display);
-        match before.checked_sub(1).map(|i| &self.tabs[i]) {
+        let before = self
+            .swaps
+            .partition_point(|swap| swap.display.start < display);
+        match before.checked_sub(1).map(|i| &self.swaps[i]) {
             None => self.range.start + display,
-            Some(tab) if display < tab.display.end => tab.buffer,
-            Some(tab) => tab.buffer + 1 + (display - tab.display.end),
+            Some(swap) if display < swap.display.end => swap.buffer.start,
+            Some(swap) => swap.buffer.end + (display - swap.display.end),
         }
         .min(self.range.end)
     }
@@ -1060,8 +1206,9 @@ impl Iterator for LineRanges<'_> {
 
 /// Soft-wraps one line (`text`, at byte `start` of the text) at `width`:
 /// after whitespace when the row would overflow, else between graphemes;
-/// whitespace never wraps (it hangs past the edge). Continuation rows start
-/// at the line's indentation unless that is over half the width.
+/// whitespace never wraps (it hangs past the edge), nor does a replaced
+/// range (its label is one unit). Continuation rows start at the line's
+/// indentation unless that is over half the width.
 fn wrap_line(fonts: &Fonts, width: Points, line: usize, start: usize, text: &str, out: &mut Laid) {
     let width = width.0.max(1.0);
     let lead = text.len() - text.trim_start_matches([' ', '\t']).len();
@@ -1088,9 +1235,12 @@ fn wrap_line(fonts: &Fonts, width: Points, line: usize, start: usize, text: &str
     let mut x = 0.0;
     // Where the row may break: after the last whitespace, and the x there.
     let mut break_at: Option<(usize, f32)> = None;
-    for (at, grapheme) in graphemes(text) {
-        let blank = grapheme.chars().all(char::is_whitespace);
-        let advance = faced.advance(start + at, grapheme, x);
+    for (at, unit, label) in units(text, start, &fonts.replaced) {
+        let blank = label.is_none() && unit.chars().all(char::is_whitespace);
+        let advance = match label {
+            Some(label) => label.width,
+            None => faced.advance(start + at, unit, x),
+        };
         while !blank && at > row_start && x + advance > available {
             let (end, end_x) = match break_at {
                 Some((offset, offset_x)) if offset > row_start => (offset, offset_x),
@@ -1105,8 +1255,8 @@ fn wrap_line(fonts: &Fonts, width: Points, line: usize, start: usize, text: &str
         }
         x += advance;
         // The indentation is no place to break: a row of only it is no use.
-        if blank && at + grapheme.len() > lead {
-            break_at = Some((at + grapheme.len(), x));
+        if blank && at + unit.len() > lead {
+            break_at = Some((at + unit.len(), x));
         }
     }
     push(row_start..text.len(), row_indent, x);
@@ -1204,6 +1354,9 @@ struct Fonts {
     faces: Vec<Face>,
     /// The stretches in them: sorted, not overlapping, none empty.
     runs: Vec<FontRun>,
+    /// The ranges shown as their labels (sorted, not overlapping, each on
+    /// one line), each one unit as wide as its label.
+    replaced: Vec<Replaced>,
 }
 
 /// A decoration's font and its widths.
@@ -1231,15 +1384,19 @@ impl Fonts {
         Faced { fonts: self, run }
     }
 
-    /// The width of `text`, at byte `start` of the text, from x 0.
+    /// The width of `text`, at byte `start` of the text, from x 0: its
+    /// replaced ranges as wide as their labels.
     fn run_width(&self, start: usize, text: &str) -> f32 {
-        if self.runs.is_empty() {
+        if self.runs.is_empty() && self.replaced.is_empty() {
             return self.base.run_width(text);
         }
         let mut faced = self.from(start);
         let mut x = 0.0;
-        for (at, grapheme) in graphemes(text) {
-            x += faced.advance(start + at, grapheme, x);
+        for (at, unit, label) in units(text, start, &self.replaced) {
+            x += match label {
+                Some(label) => label.width,
+                None => faced.advance(start + at, unit, x),
+            };
         }
         x
     }
@@ -1354,6 +1511,66 @@ impl<'a> Iterator for Graphemes<'a> {
                 Some((start, &text[start..start + 1]))
             }
             Graphemes::Unicode(inner) => inner.next(),
+        }
+    }
+}
+
+/// The units of `text` (at byte `base` of the buffer), with their byte
+/// offsets in it: its graphemes, and each range of `replaced` (sorted, the
+/// map's) that lies whole in it as one unit with its label. A range
+/// crossing the text's start or end, or overlapping an earlier one, is not
+/// replaced here.
+fn units<'a>(text: &'a str, base: usize, replaced: &'a [Replaced]) -> Units<'a> {
+    let from = replaced.partition_point(|m| m.range.start < base);
+    Units {
+        text,
+        base,
+        graphemes: graphemes(text),
+        replaced: &replaced[from..],
+        skip_to: 0,
+    }
+}
+
+struct Units<'a> {
+    text: &'a str,
+    base: usize,
+    graphemes: Graphemes<'a>,
+    /// The replaced ranges from the next unit on.
+    replaced: &'a [Replaced],
+    /// The end of the last replaced range: the graphemes before it are in
+    /// it.
+    skip_to: usize,
+}
+
+impl<'a> Iterator for Units<'a> {
+    type Item = (usize, &'a str, Option<Label>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let (at, grapheme) = self.graphemes.next()?;
+            if at < self.skip_to {
+                continue;
+            }
+            let offset = self.base + at;
+            while self
+                .replaced
+                .first()
+                .is_some_and(|m| m.range.start < offset)
+            {
+                self.replaced = &self.replaced[1..];
+            }
+            if let Some(m) = self.replaced.first()
+                && m.range.start == offset
+                && m.range.end > offset
+                && m.range.end <= self.base + self.text.len()
+            {
+                let end = m.range.end - self.base;
+                let label = m.item;
+                self.replaced = &self.replaced[1..];
+                self.skip_to = end;
+                return Some((at, &self.text[at..end], Some(label)));
+            }
+            return Some((at, grapheme, None));
         }
     }
 }
@@ -1600,6 +1817,57 @@ mod tests {
         assert_eq!(map.offset_at(&buffer, 0, px(24.0)), 1);
         assert_eq!(map.offset_at(&buffer, 0, px(26.0)), 2);
         assert_eq!(map.widest_row(), px(50.0));
+    }
+
+    #[test]
+    fn a_replaced_range_is_one_unit() {
+        let buffer = Buffer::new("a b\tcdef g\nxy");
+        let label = |range: Range<usize>, width: f32| Replaced {
+            range,
+            item: Label { item: 0, width },
+        };
+        let mut map = map(&buffer, None, vec![]);
+        // "cdef" (4..8) shown as a label 25 points wide, after the tab's
+        // stop at 40.
+        assert!(map.set_replaced(&buffer, vec![label(4..8, 25.0)]));
+        assert!(!map.set_replaced(&buffer, vec![label(4..8, 25.0)]));
+        assert_eq!(map.x_of(&buffer, 4), px(40.0));
+        assert_eq!(map.x_of(&buffer, 6), px(40.0), "inside: at its start");
+        assert_eq!(map.x_of(&buffer, 8), px(65.0));
+        assert_eq!(map.x_of(&buffer, 10), px(85.0));
+        assert_eq!(map.offset_at(&buffer, 0, px(50.0)), 4);
+        assert_eq!(map.offset_at(&buffer, 0, px(55.0)), 8);
+        let text = map.row_text(&buffer, 0);
+        assert_eq!(text.text, "a b  g");
+        assert_eq!(text.labels, vec![(4..8, 0)]);
+        assert_eq!(text.display_range(8..10), 4..6);
+        assert_eq!(text.display_range(5..7), 4..4);
+        assert_eq!(text.buffer_offset(4), 4);
+        assert_eq!(text.buffer_offset(5), 9);
+        let spaces: Vec<(Points, bool)> = map
+            .whitespace(&buffer, 0)
+            .into_iter()
+            .map(|w| (w.x, w.tab))
+            .collect();
+        assert_eq!(
+            spaces,
+            vec![(px(10.0), false), (px(30.0), true), (px(65.0), false)]
+        );
+        assert_eq!(map.widest_row(), px(85.0));
+        // Shown as text again, the row is as before.
+        assert!(map.set_replaced(&buffer, vec![]));
+        assert_eq!(map.x_of(&buffer, 8), px(80.0));
+        assert_eq!(map.widest_row(), px(100.0));
+        // Wrapped, a label never splits, and laying out its line again
+        // gives the rows a rebuild gives.
+        let mut wrapped = self::map(&buffer, Some(60.0), vec![]);
+        assert!(wrapped.set_replaced(&buffer, vec![label(4..8, 25.0)]));
+        assert_eq!(ranges(&wrapped), vec![0..4, 4..10, 11..13]);
+        let mut fresh = self::map(&buffer, Some(60.0), vec![]);
+        fresh.fonts.replaced = vec![label(4..8, 25.0)];
+        fresh.rebuild(&buffer);
+        assert_eq!(wrapped.rows, fresh.rows);
+        assert_eq!(wrapped.line_rows, fresh.line_rows);
     }
 
     #[test]

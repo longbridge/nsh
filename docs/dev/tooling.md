@@ -1169,10 +1169,13 @@ built for this machine from a copy in `.nsh/hosts/<profile>/` that changes only 
 (`runtime::stable_copy`): cargo links the binary into `target/<profile>` again on every build, even one with nothing
 to do, and macOS checks an executable whose file changed again the first time it runs, a second or more for a debug
 host on every `nsh run`. `nsh package --target macos --arch` builds the release runner (the checkout's or a Rust app's)
-for each processor it names, with `--target <triple>` for one other than this Mac's (`runtime::file_for`,
-`RustApp::runtime`; programs the CLI runs itself, such as `describe`, stay this Mac's), and `lipo` makes one universal
+for each processor it names, with `--target <triple>` for one other than the Rust toolchain's host, which is the one a
+build with no `--target` is for and the default `--arch` (`runtime::build_target`, used by `runtime::locate` and
+`RustApp::runtime`); the CLI's own architecture does not decide it, since an Intel `nsh` can run under Rosetta with an
+Apple silicon toolchain. Programs the CLI runs itself, such as `describe`, stay the host's, and `lipo` makes one universal
 executable of `universal`'s two; an installed distribution's runner is its own processor's, so the package checks what
-the runner holds (`package::macos_runners`). The web runtimes (`runtime/web/nsh.wasm`
+the runner holds and says whether Cargo built it (`package::macos_runners`). Update archives are named after what the
+packaged executable holds. The web runtimes (`runtime/web/nsh.wasm`
 for published apps, `nsh-dev.wasm` for the development host, and `nsh.js`: `docs/dev/web.md`) are always built with
 the `web` profile, into `target/wasm32-unknown-unknown/web/`. Every CLI wasm build, including an app's generated Rust runtime outside the checkout, selects `getrandom_backend="custom"` for the browser entropy bridge. `runtime::web_build_flags` appends it to explicit Rust flags or merges a Cargo target-config array, preserving the existing stack and user flags; generated web packages also retain their 8 MiB stack link argument.
 

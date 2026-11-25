@@ -678,16 +678,6 @@ const HACK_USE: &str =
     "\n// The features the app's programs share (`.nsh/rust/hack`).\nuse workspace_hack as _;\n";
 const HACK_LIB_RS: &str = "//! Only dependencies: the features the app's programs share (nsh's\n//! `RustApp::unify_features`).\n";
 
-/// This machine's target triple (`rustc -vV`).
-fn host_triple() -> Option<String> {
-    let rustc = env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
-    let output = Command::new(rustc).arg("-vV").output().ok()?;
-    let text = String::from_utf8(output.stdout).ok()?;
-    text.lines()
-        .find_map(|line| line.strip_prefix("host: "))
-        .map(str::to_owned)
-}
-
 /// The packages the describing program builds on its own, as
 /// `(name, version)`: `cargo tree -p <describe>` resolves its features
 /// alone, as `cargo build -p` does, with the hack empty.
@@ -2704,7 +2694,7 @@ panic = \"abort\"
             }
             return;
         }
-        let Some(triple) = host_triple() else {
+        let Some(triple) = crate::runtime::rustc_host(None) else {
             return;
         };
         let key = self.hack_key(ws, &triple);
@@ -3714,19 +3704,15 @@ opt-level = \"s\"
     /// The development host (`runner` false) or release runner of the app,
     /// built for `platform`, for `triple` (`None`: this machine), which is
     /// the platform's own ([`Platform::triple`]) but for a macOS package
-    /// for another processor.
+    /// for a given processor.
     pub(crate) fn runtime(
         &self,
         platform: Platform,
         runner: bool,
         triple: Option<&str>,
     ) -> anyhow::Result<PathBuf> {
-        if let Some(triple) = triple
-            && Some(triple) != platform.triple()
-        {
-            // Cargo runs in this directory, so rustup picks its toolchain here.
-            crate::runtime::require_target(None, triple)?;
-        }
+        // Cargo runs in this directory, so rustup picks its toolchain here.
+        let triple = crate::runtime::build_target(platform, triple, None)?;
         if self.root.is_some() {
             return self.rust_runner(platform, runner, triple);
         }
