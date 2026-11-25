@@ -126,7 +126,13 @@
   `number:` hint, where it stays bare (`scale-(--press)` is `scale-[0.97]`). When the design
   tokens the app draws with change (`Core::set_tokens`, `set_host_tokens`; a host's keep the app's names they lack,
   `Tokens::over`), `Core::class_tokens_changed` drops the cached strings that name tokens and resolves
-  their nodes (and the app's classes on Rust components) again; when the names change, every class. `nsh build` / `nsh dev` warn about unknown static classes in app code (`file:line:col:
+  their nodes (and the app's classes on Rust components) again; when the names change, every class.
+  Nodes whose classes resolve alike share one resolved style (`Core::resolved_styles`, keyed by the `ClassList` and
+  the inputs its `deps()` read: appearance, motion, pointer, terminal, window size, direction, states, position,
+  inherited `currentColor`): its layout, view, text, paint and node-prop records are `Rc`s installed by pointer
+  through the same `Core::install_style` as a node's own style. A node whose style reads more than that (an inline
+  style, `group-*`, `data-*`, `ch`, a `space-*` parent, `env()`, insets, an input) resolves alone. A theme or platform
+  change clears the cache; a token change drops the entries naming tokens. `nsh build` / `nsh dev` warn about unknown static classes in app code (`file:line:col:
   unknown class '...'`, target `nsh::build`); the core logs each unknown class once at run time. Settings
   that are props in React Native are style keys here, as in CSS (`numberOfLines`, `textOverflow`, `userSelect`,
   `pointerEvents`, `objectFit`; `line-clamp-*`, `truncate`, `text-ellipsis`, `select-*`, `pointer-events-*`,

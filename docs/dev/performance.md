@@ -4,6 +4,35 @@ Performance is the project's first priority; the rules are in `AGENTS.md`. Chang
 after `nsh test --trace` timings and item counts (`nsh trace` before it, in the records below). Current baselines
 (Apple Silicon except where noted):
 
+Resolved class styles cached and style records shared (`core/classes.rs`, `core/mod.rs`, `core/layout_tree.rs`,
+`core/components.rs`, `tailwind/mod.rs`, `tailwind/utilities.rs`, 2026-11-25, macOS arm64, Apple M5, release against
+`main` at `b729299a0`): every restyle unconditionally cloned `Style` (~900 B) for TUI resting fills, zero-initialized
+a ~700 B `Parts` builder and ran three rule passes in `ClassList::apply_with`, scanned rules redundantly for
+`currentColor`, missed layout/style sharing across repeated `Rc<ClassList>`s once `LayoutTree`'s 4-entry window
+overflowed, and cloned `unstyled_layout()` on every node creation. `ClassList` now records `rule_flags` (`add`) to
+skip empty passes and `Parts` allocation, `Core::resolved_styles` (4,096-entry per-`Core` cache normalized to
+`ClassList::deps()`, including inherited `currentColor`) caches resolved outputs sharing `Rc<taffy::Style>`,
+`Rc<ViewStyle>`, `Rc<TextStyle>`, `Rc<PaintStyle>`, and `Rc<ClassProps>`, `Core::create` shares `LayoutTree::default_style`,
+and `Components::apply_styles` reuses `merge_user`. `resolved_class_style_cache_matches_uncached_resolution` and
+`repeated_classes_share_resolved_styles_and_layout_records` pin exact mount-item/style equivalence and sharing; every
+workload below keeps identical ops, mount items, and nodes (five alternating rounds except `bench_large_document` and
+headless `PositionalClasses`, three alternating rounds):
+
+| Benchmark | Metric | Before | After |
+|---|---|---:|---:|
+| `nsh-core` `bench_restyle_colors` | 900 boxes min / median | 364–367 / 371–383 µs | 128–133 / 137–140 µs |
+| `nsh-core` `bench_tailwind_class_mount` | Repeated 10,000 views median | 13.31 ms (12.79–23.66) | 7.42 ms (7.17–7.52) |
+| `nsh-core` `bench_tailwind_class_mount` | Dark toggle 5,000 views median | 0.39 ms/toggle | 0.09 ms/toggle |
+| `nsh-core` `bench_tailwind_class_mount` (0% hit control) | Unique 10,000 views median | 31.27 ms (30.69–44.23) | 28.18 ms (27.99–38.89) |
+| `nsh-core` `bench_row_relayout` (control) | Median per commit | 803 ns | 797 ns |
+| `nsh-engine` `GridTs.tsx` | First frame core min | 612.6–618.3 µs | 455.6–461.5 µs |
+| `nsh-engine` `GridRust.tsx` | First frame core min | 934.3–956.0 µs | 801.8–836.0 µs |
+| `nsh-engine` `RowsTs.tsx` / `RowsRust.tsx` | First frame core min | 117.0–118.5 / 138.2–140.2 µs | 102.6–109.8 / 125.3–127.4 µs |
+| `nsh-base` `bench_large_document` (1.9 MB, 34,326 blocks) | Mount culling off / on | 789.1–800.7 / 735.9–767.4 ms | 637.4–644.9 / 653.3–670.2 ms |
+| `examples/bench/PositionalClasses.tsx` (release `--trace`) | First commit median (range) | 1,918 µs (1,563–2,314) | 954 µs (823–1,225) |
+
+The debug `examples/counter/App.tsx --trace` control keeps 56 ops, 50 mount items, and 15 nodes with every mount item identical (`Node` record stays at 600 B).
+
 Sibling position classes looked at once per parent (`core/classes.rs`, 2026-11-23, macOS arm64, release, the change on
 `cc19b8b38` against `main` at `2c17143e7`): every child inserted or removed ran `positions_changed` over all of its
 siblings at once (cloning the list and counting them), so mounting N rows with `odd:` or `last:` classes looked at
