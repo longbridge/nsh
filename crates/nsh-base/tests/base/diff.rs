@@ -1202,11 +1202,7 @@ fn typed_part_styles_reach_line_numbers_the_later_winning() {
     see(&mut app, "new");
     let color = |selector: &str| app.screen().span_style(selector).unwrap().color;
     assert_eq!(color("id:diff >> text:1 >> nth=0"), Color(0xff00_00ff));
-    // Line 2 is deleted on the old side and added on the new one.
-    let mut changed = [
-        color("id:diff >> text:2 >> nth=0"),
-        color("id:diff >> text:2 >> nth=1"),
-    ];
-    changed.sort_by_key(|c| c.0);
-    assert_eq!(changed, [Color(0x0000_ffff), Color(0x00ff_00ff)]);
+    // Line 2 is deleted on the old side (first) and added on the new one.
+    assert_eq!(color("id:diff >> text:2 >> nth=0"), Color(0x00ff_00ff));
+    assert_eq!(color("id:diff >> text:2 >> nth=1"), Color(0x0000_ffff));
 }

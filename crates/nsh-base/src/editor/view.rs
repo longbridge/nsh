@@ -16,7 +16,7 @@ use super::{
     controller::Ed,
     state::{GutterMark, GutterPlace, RowContent, RulerMark, SpanFont, SpanLabel, SpanTags},
 };
-use crate::{input, theme};
+use crate::{input, text_view::merge_styles, theme};
 
 /// The width of a caret.
 pub(crate) const CARET_WIDTH: f32 = 2.0;
@@ -53,11 +53,9 @@ pub(crate) fn parts<E: Element>(el: E, props: EditorProps, list: &'static [Edito
         })
     })
     .inline_style(move || {
-        props.styles.with(|s| {
-            list.iter()
-                .filter_map(|p| s.get(*p))
-                .fold(Style::default(), |all, s| all.then(s))
-        })
+        props
+            .styles
+            .with(|s| merge_styles(list.iter().filter_map(|p| s.get(*p))))
     })
 }
 
@@ -1239,7 +1237,7 @@ fn row_view(ed: Ed, slot: ReadSignal<(usize, usize)>) -> impl IntoElement {
                             .and_then(|d| d.line_style.clone())
                     })
                     .collect();
-                let style = styles.iter().fold(Style::default(), |all, s| all.then(s));
+                let style = merge_styles(&styles);
                 // A row with larger text is taller, and so is its text's
                 // line (the others take the root's): in the binding the row
                 // has, no style of its own for the rows that need none.
@@ -1339,8 +1337,7 @@ fn spans(ed: Ed, slot: ReadSignal<(usize, usize)>, content: RowContent) -> Vec<A
                     el = el.app_class(Some(SharedString::from(classes.join(" "))));
                 }
                 if !styles.is_empty() {
-                    el =
-                        el.inline_style(styles.iter().fold(Style::default(), |all, s| all.then(s)));
+                    el = el.inline_style(merge_styles(&styles));
                 }
             } else {
                 el = tagged(el, props, tags, span.composition, classes, styles);
@@ -1442,11 +1439,12 @@ fn tagged(
     })
     .inline_style(move || {
         props.styles.with(|s| {
-            style_list
-                .iter()
-                .filter_map(|p| s.get(*p))
-                .chain(styles.iter())
-                .fold(Style::default(), |all, s| all.then(s))
+            merge_styles(
+                style_list
+                    .iter()
+                    .filter_map(|p| s.get(*p))
+                    .chain(styles.iter()),
+            )
         })
     })
 }

@@ -344,3 +344,80 @@ fn table_grips_follow_the_hovered_or_pressed_cell_by_default() {
         .unwrap();
     }
 }
+
+/// A table whose header cells have a typed background (`StyleRefinement`,
+/// as a Rust app types it) or the same in declarations.
+#[derive(Clone, PartialEq, Props)]
+struct HeaderProps {
+    session: Option<EditorSession>,
+    typed: bool,
+}
+
+#[component]
+fn StyledHeader(props: HeaderProps) -> impl IntoElement {
+    use nsh_base::rich_editor::view::{PartStyles, RichEditorStyles};
+    use nsh_core::{PropertyValue, StyleKey, element::StyleRefinement};
+
+    let red = rgb(0xff0000);
+    let style = if props.typed {
+        StyleRefinement::default().bg(red).into()
+    } else {
+        nsh_core::element::Style::default().with(
+            StyleKey::BackgroundColor,
+            PropertyValue::Color(Some(red.into())),
+        )
+    };
+    let mut styles = RichEditorStyles::default();
+    styles.nodes = Some(PartStyles([("tableHeader".to_owned(), style)].into()));
+    view()
+        .child(
+            view().test_id("editor").w(px(600.0)).h(px(400.0)).child(
+                rich_editor()
+                    .editor(props.session.clone().expect("a session"))
+                    .styles(styles)
+                    .size_full(),
+            ),
+        )
+        .child(text("Ready"))
+}
+
+/// A header cell's part style wins over the header's theme background,
+/// typed as declared.
+#[test]
+fn a_header_cells_typed_part_style_wins_over_its_theme_background() {
+    for typed in [false, true] {
+        let mut config = EngineConfig {
+            viewport: Size::new(px(800.0), px(900.0)),
+            ..EngineConfig::new(nsh_testing::windowed_root_with::<StyledHeader>(move || {
+                HeaderProps {
+                    session: Some(session_with_content(json!([{"type": "table", "content": [
+                        {"type": "tableRow", "content": [{"type": "tableHeader", "content": [
+                            {"type": "paragraph", "content": [{"type": "text", "text": "Head"}]}
+                        ]}]},
+                        {"type": "tableRow", "content": [cell("body")]},
+                    ]}]))),
+                    typed,
+                }
+            }))
+        };
+        config.environment.os = Os::Linux;
+        config.environment.idiom = Idiom::Desktop;
+        let mut app = Headless::start(config).expect("the engine starts");
+        see(&mut app, "Head");
+        let screen = app.screen();
+        let nodes = screen.layout_nodes();
+        // The backgrounds of the views around the header's text.
+        let mut at = screen.id("text:Head").unwrap();
+        let mut backgrounds = Vec::new();
+        while let Some(node) = nodes.iter().find(|n| n.id == at) {
+            if let Ok(Some(style)) = screen.view_style(&format!("view:{at}")) {
+                backgrounds.extend(style.background_color);
+            }
+            at = node.parent;
+        }
+        assert!(
+            backgrounds.contains(&0xff00_00ff),
+            "typed: {typed}, backgrounds: {backgrounds:x?}"
+        );
+    }
+}

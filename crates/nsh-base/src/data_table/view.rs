@@ -35,7 +35,7 @@ use super::{
     controller::{CustomCell, Dt, Geo, MOVE_SLOP, PressRegion, SORT_WIDTH},
     selection::Selection,
 };
-use crate::HandleEdge;
+use crate::{HandleEdge, text_view::merge_styles};
 
 /// The thickness of the desktops' horizontal scroll bar's band.
 const STRIP: f32 = 12.0;
@@ -91,10 +91,7 @@ fn parts_with<E: Element>(
             if s.is_empty() {
                 return Style::default();
             }
-            styles()
-                .iter()
-                .filter_map(|p| s.get(*p))
-                .fold(Style::default(), |all, s| all.then(s))
+            merge_styles(styles().iter().filter_map(|p| s.get(*p)))
         })
     })
 }
@@ -182,10 +179,7 @@ fn column_parts<E: Element>(
             if s.is_empty() {
                 return Style::default();
             }
-            styles()
-                .iter()
-                .filter_map(|p| s.get(*p))
-                .fold(Style::default(), |all, s| all.then(s))
+            merge_styles(styles().iter().filter_map(|p| s.get(*p)))
         })
     })
 }
