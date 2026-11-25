@@ -1819,16 +1819,17 @@ impl Cx {
                 self.link.replace(outer);
                 // Where it goes, shown while the pointer rests on it (an
                 // `#anchor` of the document and a path too: every
-                // destination shows; a terminal links the text to it).
-                let hint = (!is_terminal()).then(|| {
+                // destination shows, in a terminal too, where the keyboard's
+                // focus on the link shows it as well).
+                let hint = {
                     let href = url.clone();
                     let title = title.clone().map(SharedString::from);
-                    link_hint(
+                    Some(link_hint(
                         move || Some(href.clone()),
                         move || title.clone(),
                         HintAt::Pointer,
-                    )
-                });
+                    ))
+                };
                 let el = span
                     .text_color(move || theme().primary)
                     .underline()
@@ -1964,8 +1965,8 @@ impl Cx {
         let is_link = link.is_some();
         // Where the link goes, on the image that takes its press (below
         // it: the image's own title, a tooltip, shows above), as on a link
-        // of text; a terminal links the text it reads as instead.
-        let hint = link.clone().filter(|_| !is_terminal()).map(|(url, title)| {
+        // of text.
+        let hint = link.clone().map(|(url, title)| {
             LinkImageHint(link_hint(
                 move || Some(url.clone()),
                 move || title.clone(),
@@ -2003,22 +2004,9 @@ impl Cx {
                 None => el.into_element(),
             };
         }
-        // A terminal's block image reads as its alt text in brackets, as a
-        // text browser shows one: a line of text, pressable as the image
-        // (`block` leaves out a paragraph of images without alt text).
-        if is_terminal() && matches!(flow, ImageFlow::Block) {
-            if image.alt.trim().is_empty() {
-                return view().into_element();
-            }
-            let el = text(format!("[{}]", image.alt.trim()))
-                .text_color(move || theme().muted_foreground)
-                .label(SharedString::from(image.alt.clone()));
-            let el = match press {
-                Some(press) => el.role(role).on_press(press),
-                None => el.role(AccessibilityRole::Image),
-            };
-            return self.part(el, Part::Image).into_element();
-        }
+        // A terminal draws the picture as the desktops do (in half
+        // blocks or with kitty graphics); one that cannot shows its alt text
+        // in brackets in its box instead.
         let (width, height) = (image.width, image.height);
         // Its natural size (a pixel a point, as a browser takes it), once
         // known, for what its own size leaves to its aspect ratio.
