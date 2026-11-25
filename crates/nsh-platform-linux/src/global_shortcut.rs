@@ -250,7 +250,14 @@ fn connect(done: impl FnOnce(Option<gio::DBusConnection>) + 'static) {
             // An older portal, or a sandboxed app (whose id the sandbox
             // gives), has nothing to register: the session may still work.
             if let Err(e) = result {
-                log::debug!("nsh: the desktop portal did not register the app: {e}");
+                if e.message().contains("App info not found") {
+                    // 1.22+ refuses the session too: say what fixes it.
+                    log::warn!(
+                        "nsh: the desktop portal has no {app_id}.desktop entry, so global shortcuts will not register: install the app's package, or run it with `nsh run`, which adds one"
+                    );
+                } else {
+                    log::debug!("nsh: the desktop portal did not register the app: {e}");
+                }
             }
             BUS.with(|b| *b.borrow_mut() = Some(registered.clone()));
             done(Some(registered));
