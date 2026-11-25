@@ -4329,7 +4329,7 @@ covers [props] Editor.styles
 covers [props] Editor.gutterDecorationsWidth
 covers [events] Editor.onDefinitionRequest
 covers [events] Editor.onCodeActionRequest
-covers [events] Editor.onScroll
+covers [events] onScroll
 
 # base-diff
 tap id:case-base-diff
