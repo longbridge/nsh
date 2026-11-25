@@ -299,6 +299,7 @@ fn the_scroll_bars_keep_within_the_scrollbar_inset() {
     }
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(900.0)),
+        clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
         ..EngineConfig::new(nsh_testing::windowed_root::<InsetEditor>())
     };
     config.environment.os = Os::Linux;
