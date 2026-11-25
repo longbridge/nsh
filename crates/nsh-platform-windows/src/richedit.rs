@@ -50,7 +50,9 @@ use windows::{
                 TXTBACKSTYLE, TXTBIT_RICHTEXT, TXTVIEW_ACTIVE,
             },
             Input::Ime::{HIMC, ImmGetContext, ImmReleaseContext},
-            WindowsAndMessaging::{HCURSOR, KillTimer, SetTimer, WM_TIMER},
+            WindowsAndMessaging::{
+                CreateCaret, HCURSOR, KillTimer, SetCaretPos, SetTimer, WM_TIMER,
+            },
         },
     },
     core::{BOOL, GUID, HRESULT, IUnknown, Interface, PCWSTR, w},
@@ -195,6 +197,29 @@ impl Notes {
 /// they sent outside its messages ([`notes_later`]); their own ids are
 /// small.
 const NOTES_LATER: u32 = u32::MAX;
+
+impl Host {
+    /// Keeps the thread's Win32 caret, never shown, where the field's caret
+    /// is in the window it shows in. The field draws its own caret; IMEs
+    /// that place their candidates by the system caret (Microsoft Pinyin
+    /// through the IMM compatibility layer, GetGUIThreadInfo) otherwise
+    /// read a stale position and the candidate window jumps between it
+    /// and the composition RichEdit reports (#3257).
+    fn system_caret(&self, c: Caret, create: bool) {
+        let hwnd = self.shown_in.get();
+        if hwnd.is_invalid() {
+            return;
+        }
+        // SAFETY: plain calls on a live window of this thread; a caret made
+        // and never shown only records the position.
+        unsafe {
+            if create {
+                let _ = CreateCaret(hwnd, None, c.width.max(1), c.height.max(1));
+            }
+            let _ = SetCaretPos(c.x, c.y);
+        }
+    }
+}
 
 /// Our `ITextHost2`.
 #[repr(C)]
@@ -917,6 +942,7 @@ unsafe extern "system" fn tx_create_caret(this: This, _: HBITMAP, width: i32, he
     c.width = width.max(1);
     c.height = height;
     host.caret.set(c);
+    host.system_caret(c, true);
     BOOL(1)
 }
 
@@ -940,6 +966,7 @@ unsafe extern "system" fn tx_set_caret_pos(this: This, x: i32, y: i32) -> BOOL {
         c.x = x;
         c.y = y;
         host.caret.set(c);
+        host.system_caret(c, false);
         (host.invalidate)();
     }
     BOOL(1)
