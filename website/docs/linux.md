@@ -27,7 +27,9 @@ from `nsh_core::element::desktop` in Rust ([Desktop title bars](./rust.md#deskto
 - **GStreamer** 1.14 or later, which GTK plays video through and NSH plays sound with. Nothing of it is needed to
   build: NSH loads GStreamer when an app first plays a sound. Where apps run, GStreamer and its base plug-ins
   (desktops have them), and the plug-ins for the video and audio formats your app plays. Without GStreamer an app
-  still starts; loading a sound then fails with an error naming the missing library.
+  still starts; loading a sound then fails with an error naming the missing library. `nsh package` leaves sounds (the
+  runtime's Cargo feature `sound`) out of a TSX app's runner when the app imports no `Sound`; video and `AudioPlayer`
+  play through GTK either way.
 
 ## Running an app
 

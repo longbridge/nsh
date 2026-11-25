@@ -1600,7 +1600,9 @@ pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
         let choices = crate::native_features::choose(
             built.native_use.as_ref(),
             &config.features,
-            crate::rust_app::current().is_some_and(|app| crate::rust_app::may_make_web_view(&app)),
+            crate::rust_app::current()
+                .map(|app| crate::rust_app::rust_code_use(&app))
+                .unwrap_or_default(),
         );
         // Why each feature is in or out is detail: only verbose runs
         // (`-v`) show it, a normal build stays quiet.
