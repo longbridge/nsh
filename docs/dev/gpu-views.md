@@ -39,7 +39,7 @@ handle) and `crates/nsh-engine/src/gpu.rs` (the runtime) are the reference; this
 | Platform | Shows frames | Status |
 |---|---|---|
 | Linux (GTK) | read back into a `GdkMemoryTexture` drawn under the children, clipped to the rounded box; tick callback on the root (`crates/nsh-platform-linux/src/gpu.rs`) | done |
-| macOS, iOS | IOSurface as layer contents | not yet: draws nothing |
+| macOS, iOS (and Mac Catalyst) | each frame's IOSurface set as the contents of a sublayer under the children, shaped as a shader's fill (rounded, continuous corners), no copy; a frame without a surface is read back as a CGImage. macOS ticks on the surface's display link draw callback (`crates/nsh-platform-macos/src/gpu_view.rs`), iOS on a `CADisplayLink` up to 120 Hz (`crates/nsh-platform-ios/src/gpu.rs`) | done |
 | Windows | D3D12 shared texture as a D2D bitmap | not yet: draws nothing |
 | Android, web, GPUI | readback / a canvas of its own | not yet: draws nothing |
 
@@ -49,4 +49,4 @@ A view out of sight (unmapped, or outside a clipping ancestor or the window) ren
 
 `crates/nsh-gpu` tests the registration, `crates/nsh-engine/src/gpu.rs` renders offscreen and reads pixels back (skipped
 where no GPU answers), `core/tests.rs` the mount items (`a_gpu_view_…`), `crates/nsh-platform-linux/src/gpu.rs` a frame
-shown by GTK. The compat case `tests/compat/cases/core/core-gpu-view.tsx` covers the export.
+shown by GTK, `crates/nsh-platform-macos/tests/native/gpu_view.rs` a frame shown as a layer's IOSurface (`NSH_GPU_VIEW_CHECK_ONLY=1 cargo test -p nsh-platform-macos --test native -- --ignored`). The compat case `tests/compat/cases/core/core-gpu-view.tsx` covers the export.

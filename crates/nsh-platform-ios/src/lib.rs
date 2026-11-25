@@ -73,6 +73,7 @@ pub mod dev;
 pub mod embed;
 mod file_drop;
 mod fps;
+mod gpu;
 mod haptics;
 mod image;
 mod input;

@@ -760,6 +760,9 @@ pub(crate) struct Mounter {
     hosts: rustc_hash::FxHashMap<NodeId, NodeId>,
     /// Stacks whose screens changed in the current batch.
     dirty_stacks: Vec<NodeId>,
+    /// Views whose transform went back to the identity: the stacks inside
+    /// them are laid out again ([`Mounter::lay_out_untransformed`]).
+    untransformed: Vec<NodeId>,
     /// A retained tab changed visibility; sync the newly visible stack.
     bottom_bar_dirty: bool,
     /// Stacks whose screens changed during a push or pop transition: they
@@ -839,6 +842,8 @@ pub(crate) struct Mounter {
     fps: Option<std::rc::Rc<crate::fps::Fps>>,
     /// Shader views and the GPU device they render with.
     shaders: crate::shader::Shaders,
+    /// GPU views and the display link they render on.
+    gpu: crate::gpu::SurfaceGpu,
     /// Texts whose color transitions.
     text_colors: crate::interaction::TextColors,
     /// The `transitionShader`s of pages and dialogs.
@@ -926,6 +931,7 @@ impl Mounter {
             soft_edges: Vec::new(),
             frame_link: crate::animation::frame_link(&target_for_link),
             shaders,
+            gpu: crate::gpu::SurfaceGpu::new(&target_for_link),
             text_colors: crate::interaction::TextColors::new(&target_for_link),
             nav_shaders: rustc_hash::FxHashMap::default(),
             leaving_screens: rustc_hash::FxHashMap::default(),
@@ -935,6 +941,7 @@ impl Mounter {
             auth_session: Default::default(),
             hosts: Default::default(),
             dirty_stacks: Vec::new(),
+            untransformed: Vec::new(),
             bottom_bar_dirty: false,
             deferred_stacks: Vec::new(),
             orientations: None,
@@ -1014,6 +1021,7 @@ impl Mounter {
         if animation_changed {
             self.apply_animations();
         }
+        self.lay_out_untransformed();
         self.report_finished();
         self.start_image_loads();
         for (_, area) in &self.areas {
@@ -1353,7 +1361,9 @@ impl Mounter {
                 {
                     // Back before its removal finished animating.
                     c.native.view().layer().removeAllAnimations();
-                    apply_dynamic(c, &self.animator);
+                    if apply_dynamic(c, &self.animator) {
+                        self.untransformed.push(child);
+                    }
                 }
                 if let (Some(p), Some(c)) = (self.slot(parent), self.slot(child)) {
                     let zoom = p.zoom_view();
@@ -1479,6 +1489,7 @@ impl Mounter {
                 if was_screen {
                     self.release_root_effect();
                 }
+                self.gpu.deleted(id);
                 self.nav_shaders.remove(&id);
                 if let Some((root, window)) = restore {
                     self.target.restore_root_focus(root, window);
@@ -1577,6 +1588,7 @@ impl Mounter {
                 if self.shaders.has(id) {
                     self.layout_shader(id);
                 }
+                self.layout_gpu(id);
             }
             MountItem::TrackStates { id, states } => self.track_states(id, states),
             MountItem::Overflow { id, extent } => {
@@ -1665,8 +1677,10 @@ impl Mounter {
                         .iter()
                         .map(|v| v.tag() as NodeId)
                         .collect();
-                    if let Some(s) = self.slot(id) {
-                        apply_dynamic(s, &self.animator);
+                    if let Some(s) = self.slot(id)
+                        && apply_dynamic(s, &self.animator)
+                    {
+                        self.untransformed.push(id);
                     }
                     for cell in cells {
                         self.set_in_mirrored(cell, mirrored);
@@ -1856,9 +1870,14 @@ impl Mounter {
                     self.nav_shaders.remove(&id);
                 }
             },
-            // GPU views draw nothing on this backend yet
-            // (`docs/dev/gpu-views.md`).
-            MountItem::GpuView { .. } => {}
+            MountItem::GpuView { id, source } => {
+                let scale = self.display_scale();
+                if let Some(s) = self.views.get(id as usize).and_then(Option::as_ref) {
+                    self.gpu.set(id, s.native.view(), &s.style, scale, source);
+                    // Bindings that came before it, for the new renderer.
+                    self.gpu.rebound(id, &s.bindings, &self.animator);
+                }
+            }
             MountItem::Shader { id, layer } => {
                 let scale = self.display_scale();
                 let was_screen = self.shaders.draws_screen(id);
@@ -1916,8 +1935,10 @@ impl Mounter {
                     }
                     // Bound values apply now too (a canvas reads them when
                     // it draws next).
-                    if let Some(s) = self.slot(id) {
-                        apply_dynamic(s, &self.animator);
+                    if let Some(s) = self.slot(id)
+                        && apply_dynamic(s, &self.animator)
+                    {
+                        self.untransformed.push(id);
                     }
                     self.push_shader_args(id);
                     // A component gets what is bound again.
@@ -1926,6 +1947,10 @@ impl Mounter {
                     {
                         host.forget();
                         host.push(&s.bindings, &self.animator);
+                    }
+                    // A GPU view's renderer too.
+                    if let Some(s) = self.views.get(id as usize).and_then(Option::as_ref) {
+                        self.gpu.rebound(id, &s.bindings, &self.animator);
                     }
                     return true;
                 }
@@ -2042,12 +2067,13 @@ impl Mounter {
                 }
             }
             MountItem::ComponentPropSlots { id, names } => {
-                if let Some(Slot {
-                    native: Native::Component(host),
-                    ..
-                }) = self.slot_mut(id)
+                if !self.gpu.prop_slots(id, &names)
+                    && let Some(Slot {
+                        native: Native::Component(host),
+                        ..
+                    }) = self.slot_mut(id)
                 {
-                    host.slots = names;
+                    host.bound.slots = names;
                     host.forget();
                 }
             }
@@ -2059,10 +2085,11 @@ impl Mounter {
                 }
             }
             MountItem::ComponentProps { id, props } => {
-                if let Some(Slot {
-                    native: Native::Component(host),
-                    ..
-                }) = self.slot_mut(id)
+                if !self.gpu.props(id, &props)
+                    && let Some(Slot {
+                        native: Native::Component(host),
+                        ..
+                    }) = self.slot_mut(id)
                     && let Some(component) = host.component.as_mut()
                 {
                     for (name, value) in &props {
@@ -2932,8 +2959,10 @@ impl Mounter {
             && c.in_mirrored != mirrored
         {
             c.in_mirrored = mirrored;
-            if let Some(c) = self.slot(id) {
-                apply_dynamic(c, &self.animator);
+            if let Some(c) = self.slot(id)
+                && apply_dynamic(c, &self.animator)
+            {
+                self.untransformed.push(id);
             }
         }
     }
@@ -3132,15 +3161,19 @@ impl Mounter {
                     // the closure runs synchronously inside it.
                     let this = unsafe { &mut *this };
                     this.decorate_animated(id);
-                    if let Some(s) = this.slot(id) {
-                        apply_dynamic(s, &this.animator);
+                    if let Some(s) = this.slot(id)
+                        && apply_dynamic(s, &this.animator)
+                    {
+                        this.untransformed.push(id);
                     }
                 });
             }
             None => {
                 self.decorate(id);
-                if let Some(s) = self.slot(id) {
-                    apply_dynamic(s, &self.animator);
+                if let Some(s) = self.slot(id)
+                    && apply_dynamic(s, &self.animator)
+                {
+                    self.untransformed.push(id);
                 }
             }
         }
@@ -3188,10 +3221,11 @@ impl Mounter {
                 self.pending_images.push(id);
             }
         }
-        // Its corners clip the shader.
+        // Its corners clip the shader, or a GPU view's frames.
         if self.shaders.has(id) {
             self.layout_shader(id);
         }
+        self.layout_gpu(id);
     }
 
     /// Restyles with Core Animation's implicit animations on.
@@ -3479,9 +3513,10 @@ impl Mounter {
     }
 
     /// The surface moved to a window (or out of one): the shaders in it
-    /// take the pictures they missed.
+    /// take the pictures they missed, the GPU views render.
     pub(crate) fn window_changed(&mut self) {
         self.shaders.revisit();
+        self.gpu.reveal();
         self.restore_root_focus();
     }
 
@@ -3490,6 +3525,7 @@ impl Mounter {
     pub(crate) fn traits_changed(&mut self) {
         let scale = self.display_scale();
         self.shaders.rescale(scale);
+        self.gpu.rescale(scale);
         if scale == self.image_scale {
             return;
         }
@@ -4361,6 +4397,11 @@ impl Mounter {
                 }
             }
             screen.controller.follow_large_title();
+            // A header changed under a transform is laid out for where the
+            // stack is, not for the picture the transform shows.
+            if let Some(nav) = screen.controller.navigationController() {
+                crate::navigation::lay_out_header_in_place(&nav);
+            }
         }
         for (id, follows) in follows {
             self.following_scroll.retain(|&other| other != id);
@@ -4623,8 +4664,9 @@ impl Mounter {
         animated: bool,
     ) {
         // A page shown again is back in the window: the shaders in it take
-        // the pictures they missed.
+        // the pictures they missed, the GPU views render.
         self.shaders.revisit();
+        self.gpu.reveal();
         let Some(screen) = controller.downcast_ref::<crate::navigation::ScreenController>() else {
             return;
         };
@@ -4644,6 +4686,7 @@ impl Mounter {
     /// swipe) are reported so the app removes them.
     pub(crate) fn stack_did_show(&mut self, id: NodeId) {
         self.shaders.revisit();
+        self.gpu.reveal();
         if self.splits.contains_key(&id) {
             self.compact_did_show(id);
         } else {
@@ -5993,6 +6036,11 @@ impl Mounter {
         self.shaders.frame();
     }
 
+    /// The GPU views' display link fired.
+    pub(crate) fn gpu_frame(&mut self) {
+        self.gpu.frame(&self.control);
+    }
+
     /// The GPU device the shaders asked for opened (`None`: there is none,
     /// which the app hears: `shadersAvailable()`).
     pub(crate) fn shaders_opened(&mut self, renderer: Option<nsh_engine::shader::Renderer>) {
@@ -6011,6 +6059,17 @@ impl Mounter {
         let scale = self.display_scale();
         if let Some(s) = self.views.get(id as usize).and_then(Option::as_ref) {
             self.shaders.layout(id, &s.style, scale);
+        }
+    }
+
+    /// GPU view `id` (if it is one) follows its frame and corners.
+    fn layout_gpu(&mut self, id: NodeId) {
+        if !self.gpu.has(id) {
+            return;
+        }
+        let scale = self.display_scale();
+        if let Some(s) = self.views.get(id as usize).and_then(Option::as_ref) {
+            self.gpu.resized(id, &s.style, scale);
         }
     }
 
@@ -6301,11 +6360,50 @@ impl Mounter {
         }
     }
 
+    /// Lays the stacks inside [`Mounter::untransformed`] out again.
+    ///
+    /// UIKit lays a stack out through the transforms around it: a header
+    /// that changes while a container shows the stack moved or scaled (a
+    /// push drawer) gets its bar laid out for that picture, which puts a bar
+    /// the device keeps along one side of the screen (the iPhone Duo's
+    /// vertical bar) on the side the picture is nearest. A transform going
+    /// back to the identity starts no layout pass, so the bar would stay
+    /// there, and the stack's safe area with what it was measured through
+    /// the transform, until something else lays it out.
+    fn lay_out_untransformed(&mut self) {
+        if self.untransformed.is_empty() {
+            return;
+        }
+        let views: Vec<Retained<UIView>> = std::mem::take(&mut self.untransformed)
+            .into_iter()
+            .filter_map(|id| self.slot(id).map(|s| s.native.view().retain()))
+            .collect();
+        let inside = |nav: &UINavigationController| {
+            nav.viewIfLoaded()
+                .is_some_and(|v| views.iter().any(|t| v.isDescendantOfView(t)))
+        };
+        for slot in self.views.iter().flatten() {
+            if let Native::Stack(stack) = &slot.native
+                && inside(&stack.nav)
+            {
+                crate::navigation::lay_out_in_place(&stack.nav);
+            }
+        }
+        // A collapsed split's pages are in its compact stack.
+        for split in self.splits.values() {
+            if inside(&split.compact.nav) {
+                crate::navigation::lay_out_in_place(&split.compact.nav);
+            }
+        }
+    }
+
     fn apply_animations(&mut self) {
         let animator = &self.animator;
         for &id in &self.animated {
-            if let Some(s) = self.views.get(id as usize).and_then(Option::as_ref) {
-                apply_dynamic(s, animator);
+            if let Some(s) = self.views.get(id as usize).and_then(Option::as_ref)
+                && apply_dynamic(s, animator)
+            {
+                self.untransformed.push(id);
             }
         }
         // Shaders get their bound uniforms; those that picture the views
@@ -6319,6 +6417,12 @@ impl Mounter {
                 if pictured {
                     self.shaders.ui_changed(s.native.view());
                 }
+            }
+        }
+        // GPU views' renderers get their bound props' changes.
+        for &id in &self.animated {
+            if let Some(s) = self.views.get(id as usize).and_then(Option::as_ref) {
+                self.gpu.animated(id, &s.bindings, animator);
             }
         }
         // Components get their bound props' changes (no view borrowed while
@@ -6336,6 +6440,7 @@ impl Mounter {
                 self.pin_sticky(id);
             }
         }
+        self.lay_out_untransformed();
     }
 
     fn report_finished(&mut self) {
@@ -6652,8 +6757,9 @@ fn shader_args<'a>(
 }
 
 /// Opacity, background color and transform: static values overridden by
-/// animated bindings.
-fn apply_dynamic(slot: &Slot, animator: &Animator) {
+/// animated bindings. True when the view's transform went back to the
+/// identity, which UIKit lays nothing out for ([`Mounter::untransformed`]).
+fn apply_dynamic(slot: &Slot, animator: &Animator) -> bool {
     if let Native::Canvas(canvas) = &slot.native {
         canvas.set_values(slot.bindings.iter().filter_map(|&(prop, node)| match prop {
             AnimationProp::CanvasArg(k) => Some((k, animator.eval(node))),
@@ -6671,7 +6777,10 @@ fn apply_dynamic(slot: &Slot, animator: &Animator) {
     }
     view.setAlpha(dynamic_opacity(slot, animator) as CGFloat);
     slot.decor.set_background(view, background);
-    view.layer().setTransform(dynamic_transform(slot, animator));
+    let layer = view.layer();
+    let transform = dynamic_transform(slot, animator);
+    let untransformed = transform.is_identity() && !layer.transform().is_identity();
+    layer.setTransform(transform);
     apply_bound_decor(slot, animator);
     if let Native::Text(text) = &slot.native {
         let color = slot.bindings.iter().find_map(|&(prop, node)| match prop {
@@ -6683,6 +6792,7 @@ fn apply_dynamic(slot: &Slot, animator: &Animator) {
         });
         text.set_color(color);
     }
+    untransformed
 }
 
 /// Runs `f` in a UIKit animation of `view` following `t`; on the

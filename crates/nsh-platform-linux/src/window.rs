@@ -545,6 +545,7 @@ fn open(surface: &Rc<Surface>, view: &NshView, open: &OpenWindow) {
     let options = &open.options;
     let window = gtk::Window::new();
     window.add_css_class("nsh-window");
+    crate::surface::reveal_on_frames(window.upcast_ref());
     let main = main_window(surface);
     if let Some(app) = main.as_ref().and_then(|w| w.application()) {
         window.set_application(Some(&app));
@@ -702,11 +703,18 @@ fn connect(surface: &Rc<Surface>, id: NodeId, window: &gtk::Window, view: &NshVi
         gdk_surface.connect_enter_monitor(move |_, _| f());
         if let Some(toplevel) = gdk_surface.downcast_ref::<gdk::Toplevel>() {
             let f = follow(weak.clone());
-            toplevel.connect_state_notify(move |_| f());
+            toplevel.connect_state_notify(move |_| {
+                f();
+                // Minimized, suspended or focused: the app's state.
+                crate::system::lifecycle_changed();
+            });
         }
     });
     let weak = Rc::downgrade(surface);
     window.connect_map(move |_| {
+        // The host's window never shows: the app's own windows tell whether
+        // it is in the background (`lifecycle()`).
+        crate::system::lifecycle_changed();
         let weak = weak.clone();
         // After GTK set the surface's own input region.
         glib::idle_add_local_once(move || {
@@ -715,6 +723,7 @@ fn connect(surface: &Rc<Surface>, id: NodeId, window: &gtk::Window, view: &NshVi
             }
         });
     });
+    window.connect_unmap(|_| crate::system::lifecycle_changed());
     let weak = Rc::downgrade(surface);
     window.connect_close_request(move |_| {
         let Some(surface) = weak.upgrade() else {
@@ -2207,6 +2216,19 @@ pub(crate) fn removed(surface: &Rc<Surface>, view: &NshView) -> bool {
     true
 }
 
+/// Whether one of the app's own windows shows: mapped, neither minimized
+/// nor suspended. The host's window never shows under the desktop window
+/// model, so these tell whether the app is in the background
+/// ([`crate::system::lifecycle`]). False while the registry changes (a
+/// window opening or closing), whose window maps or unmaps after it.
+pub(crate) fn any_shown(surface: &Surface) -> bool {
+    surface.windows.try_borrow().is_ok_and(|windows| {
+        windows
+            .values()
+            .any(|w| w.window.is_mapped() && crate::system::not_hidden(w.window.upcast_ref()))
+    })
+}
+
 /// The app's primary window: the oldest of its own windows still open
 /// that was given a size. `None` while it shows none.
 fn primary_window(surface: &Surface) -> Option<NodeId> {
@@ -2418,6 +2440,7 @@ fn launcher_params(app_id: &str, progress: Option<WindowProgress>, urgent: bool)
 #[cfg(test)]
 mod tests {
     use nsh_core::desktop::ProgressState;
+    use nsh_engine::Lifecycle;
 
     use super::*;
 
@@ -2648,6 +2671,37 @@ mod tests {
             assert!(removed(&surface, &first));
             assert!(removed(&surface, &second));
             assert!(focused, "a click focuses a field in the first window");
+        });
+    }
+
+    /// Window Model v2 keeps the host window hidden: the app is in the
+    /// background (`lifecycle()`) only while none of its own windows shows,
+    /// and the environment follows as they show and hide.
+    #[test]
+    fn the_app_shows_while_one_of_its_windows_does() {
+        crate::gtk_test::run(|| {
+            let surface = crate::gtk_test::surface();
+            crate::system::follow_lifecycle_for_test(&surface);
+            let reported = || surface.environment.get().lifecycle;
+            assert!(!surface.root.is_mapped(), "the host never shows");
+            assert_eq!(crate::system::lifecycle(&surface), Lifecycle::Background);
+            let view = NshView::new(40, nsh_core::ViewKind::View);
+            open(&surface, &view, &OpenWindow::default());
+            let window = surface.windows.borrow()[&40].window.clone();
+            assert_eq!(crate::system::lifecycle(&surface), Lifecycle::Background);
+            window.present();
+            assert!(crate::gtk_test::wait_until(|| window.is_mapped()));
+            assert_ne!(crate::system::lifecycle(&surface), Lifecycle::Background);
+            assert_ne!(reported(), Lifecycle::Background);
+            window.set_visible(false);
+            assert!(crate::gtk_test::wait_until(|| !window.is_mapped()));
+            assert_eq!(reported(), Lifecycle::Background);
+            window.present();
+            assert!(crate::gtk_test::wait_until(|| window.is_mapped()));
+            assert_ne!(reported(), Lifecycle::Background);
+            // Closing the last one leaves the app in the background.
+            assert!(removed(&surface, &view));
+            assert_eq!(reported(), Lifecycle::Background);
         });
     }
 

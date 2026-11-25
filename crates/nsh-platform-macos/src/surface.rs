@@ -379,6 +379,8 @@ pub(crate) struct Surface {
     pub(crate) file_drop: crate::file_drop::State,
     /// The GPU device and the shader views rendering ([`crate::shader`]).
     pub(crate) shaders: crate::shader::Shaders,
+    /// The GPU views ([`crate::gpu_view`]).
+    pub(crate) gpu: RefCell<crate::gpu_view::SurfaceGpu>,
 }
 
 /// A per-frame callback ([`Surface::add_frame_callback`]): gets the frame
@@ -476,6 +478,7 @@ impl Surface {
             main_window: Default::default(),
             window: Default::default(),
             shaders: Default::default(),
+            gpu: Default::default(),
         });
         SURFACES.with(|s| s.borrow_mut().insert(key, Rc::downgrade(&surface)));
         // CoreText's first use loads fonts and caches (tens of
@@ -598,6 +601,7 @@ impl Surface {
         #[cfg(feature = "dev")]
         self.cosmetic_frames.set(0);
         crate::shader::clear(self);
+        crate::gpu_view::clear(self);
     }
 
     /// Calls `f` with the engine's control, if an app runs.
@@ -948,18 +952,20 @@ impl Surface {
     /// Writes the animated values to the views and reports finished
     /// animations.
     pub(crate) fn write_animations(&self) {
-        let (finished, moved) = {
+        let (finished, mut moved) = {
             let mut anim = self.anim.borrow_mut();
             anim.write(&self.mounter.borrow());
             let mut moved = Vec::new();
             anim.write_components(
-                |id| crate::native::has_component(self, id),
+                |id| crate::native::has_component(self, id) || crate::gpu_view::has(self, id),
                 |id, name, value| moved.push((id, std::sync::Arc::<str>::from(name), value)),
             );
             (std::mem::take(&mut anim.finished), moved)
         };
         // Shaders whose animated uniforms moved render from the next frame.
         crate::shader::wake(self);
+        // GPU views' renderers take theirs on the render thread.
+        crate::gpu_view::animated(self, &mut moved);
         // No surface state borrowed while the app's components run.
         crate::native::component_animated(self, moved);
         crate::scroll::pin_animated_sticky(self);

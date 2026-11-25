@@ -6142,6 +6142,7 @@ dependencies = [
  "syntect",
  "ttf-parser",
  "two-face",
+ "unicode-linebreak",
  "unicode-segmentation",
  "unicode-width",
  "vte",
@@ -6225,6 +6226,7 @@ dependencies = [
  "libc",
  "log",
  "nsh-core",
+ "nsh-gpu",
  "nsh-js",
  "nsh-package",
  "nsh-updater",
@@ -6241,6 +6243,15 @@ dependencies = [
  "wgpu 29.0.4",
  "windows 0.62.2",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "nsh-gpu"
+version = "0.7.0"
+dependencies = [
+ "nsh-core",
+ "serde_json",
+ "wgpu 29.0.4",
 ]
 
 [[package]]

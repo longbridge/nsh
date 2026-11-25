@@ -65,6 +65,55 @@ fn rows_made_in_rust_show_their_cells() {
     }
 }
 
+/// [`Quotes`] in a page that `id:toggle` hides with `display: none` and
+/// shows again, as an app keeps a visited page alive.
+#[component]
+fn HiddenPage() -> impl IntoElement {
+    let shown = signal(true);
+    view()
+        .child(
+            view()
+                .test_id("toggle")
+                .h(px(20.0))
+                .on_press(move || shown.update(|s| *s = !*s))
+                .child(text("Toggle")),
+        )
+        .child(
+            view()
+                .style_when(move || !shown.get(), |s| s.hidden())
+                .child(quotes()),
+        )
+}
+
+#[test]
+fn a_hidden_table_keeps_its_rows() {
+    let mut app = start::<HiddenPage>();
+    app.wait_for("AAPL").unwrap();
+    let seen: Arc<Mutex<Vec<MountItem>>> = Arc::default();
+    let into = seen.clone();
+    app.observe(move |_, batch| into.lock().unwrap().extend(batch.items.iter().cloned()));
+    // Hidden, its rows have no room; shown, they are where they were. Their
+    // texts are never let go of nor made again.
+    for _ in 0..2 {
+        app.press("id:toggle").unwrap();
+        app.settle();
+        let items = std::mem::take(&mut *seen.lock().unwrap());
+        let texts: Vec<_> = items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Text { text, .. } => Some(text.text.to_string()),
+                _ => None,
+            })
+            .collect();
+        assert!(texts.iter().all(|t| !t.is_empty()), "{texts:?}");
+        assert!(
+            !items.iter().any(|i| matches!(i, MountItem::Create { .. })),
+            "a view was made"
+        );
+    }
+    app.wait_for("AAPL").unwrap();
+}
+
 /// The table of [`Quotes`] beside a lone resize handle (`id:lone` inside),
 /// in a terminal.
 #[component]
@@ -250,14 +299,21 @@ fn tab_out_on(idiom: Idiom) -> Headless {
 }
 
 #[test]
-fn a_terminals_tab_leaves_the_table_and_the_arrows_move_between_columns() {
+fn a_terminals_tab_moves_between_cells_and_escape_lets_it_leave() {
     let mut app = tab_out_on(Idiom::Terminal);
+    // The arrows and Tab move the chosen cell, as on the desktops.
     app.press_key("right").unwrap();
     app.wait_for("Chosen Some(0):Some(1) next false").unwrap();
     app.press_key("left").unwrap();
     app.wait_for("Chosen Some(0):Some(0) next false").unwrap();
     app.press_key("tab").unwrap();
-    app.wait_for("Chosen Some(0):Some(0) next true").unwrap();
+    app.wait_for("Chosen Some(0):Some(1) next false").unwrap();
+    // Escape clears the selection, then gives up the keyboard: Tab moves
+    // the focus on, out of the table.
+    app.press_key("escape").unwrap();
+    app.press_key("escape").unwrap();
+    app.press_key("tab").unwrap();
+    app.wait_for("Chosen Some(0):Some(1) next true").unwrap();
 }
 
 #[test]

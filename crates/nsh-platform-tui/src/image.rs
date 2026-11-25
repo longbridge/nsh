@@ -272,6 +272,12 @@ impl Loader {
 
     /// Whether `image` shows a picture: it loaded, and the terminal draws
     /// pictures. Until then a control holding it shows its label.
+    /// Whether `image` has a picture this terminal has no way to draw
+    /// (16 colors or fewer, no kitty graphics).
+    pub(crate) fn hides(&self, image: &ImageView) -> bool {
+        image.shown.is_some() && !self.shows(image)
+    }
+
     pub(crate) fn shows(&self, image: &ImageView) -> bool {
         image.shown.is_some()
             && (self.graphics == Graphics::KittyPlaceholders
