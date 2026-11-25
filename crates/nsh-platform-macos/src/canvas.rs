@@ -1667,11 +1667,14 @@ impl<'a> Replay<'a> {
 /// space it draws into on its first draw and keeps the result with the
 /// image: a part made again for each draw converts again each time (a
 /// sprite sheet zoomed in on: hundreds of milliseconds a frame).
+/// A part's key: the whole image's address and the rectangle.
+type PartKey = (usize, [u64; 4]);
+
 #[derive(Default)]
 struct ImageParts {
     /// By the whole image (kept alive here, so its address stays its own)
     /// and the rectangle, in its pixels.
-    parts: FxHashMap<(usize, [u64; 4]), (CFRetained<CGImage>, CFRetained<CGImage>)>,
+    parts: FxHashMap<PartKey, (CFRetained<CGImage>, CFRetained<CGImage>)>,
 }
 
 impl ImageParts {
