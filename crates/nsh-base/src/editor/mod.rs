@@ -30,6 +30,7 @@ mod keymap;
 pub(crate) mod language;
 pub(crate) mod languages;
 pub(crate) mod layout;
+pub(crate) mod line_break;
 mod movement;
 mod parts;
 mod search;

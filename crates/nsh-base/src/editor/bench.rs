@@ -2,7 +2,8 @@
 //!
 //! `cargo test --release -p nsh-base --lib bench_highlight_200k -- --ignored --nocapture`
 //!
-//! And what soft-wrapping one costs (`bench_wrap_200k`, the same way).
+//! And what soft-wrapping one costs (`bench_wrap_200k`, the same way), and
+//! `DiffView`'s wrapping of the same lines (`bench_diff_wrap_200k`).
 //!
 //! The text is this repository's own code, Rust and TSX, repeated to
 //! 200 000 lines. The controller's task is played as it runs: each pass's
@@ -352,4 +353,48 @@ fn bench_wrap_200k() {
         &" \u{301}".repeat(50_000),
     );
     bench_wrap("25k flags, one line", &"🇨🇳".repeat(25_000));
+}
+
+/// What counting the wrapped lines of every line of `text` at 75 columns
+/// costs (`DiffView` does it for every line when it lays its rows out with
+/// `softWrap`; 600 points of an 8 point column), the median of five runs.
+fn bench_diff_wrap(name: &str, text: &str) {
+    let mut lines = 0;
+    let mut times: Vec<Duration> = (0..5)
+        .map(|_| {
+            let t = Instant::now();
+            lines = text
+                .split('\n')
+                .map(|line| crate::diff::geometry::wrapped_lines(line, 75))
+                .sum::<usize>();
+            t.elapsed()
+        })
+        .collect();
+    println!(
+        "{name}: diff wrap {:>9.2?} ({} lines, {lines} wrapped)",
+        median(&mut times),
+        text.split('\n').count(),
+    );
+}
+
+#[test]
+#[ignore]
+fn bench_diff_wrap_200k() {
+    let rust = corpus("rs", &["crates"], LINES);
+    bench_diff_wrap("Rust", &rust);
+    let markdown = corpus("md", &["website/zh-CN"], LINES);
+    bench_diff_wrap("Markdown (zh-CN)", &markdown);
+    // One line each: wrapping stays linear in a line's length.
+    let prose: String = markdown
+        .chars()
+        .filter(|&c| c != '\n')
+        .take(200_000)
+        .collect();
+    bench_diff_wrap("zh-CN prose, one line of 200k chars", &prose);
+    bench_diff_wrap("50k commas, one line", &"，".repeat(50_000));
+    bench_diff_wrap(
+        "50k spaces with a combining mark, one line",
+        &" \u{301}".repeat(50_000),
+    );
+    bench_diff_wrap("25k flags, one line", &"🇨🇳".repeat(25_000));
 }
