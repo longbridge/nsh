@@ -176,9 +176,11 @@ pub(crate) fn clear(surface: &Surface) {
     gpu.views = None;
 }
 
-/// Sizes the views, tells those out of sight (shown again through
-/// [`shown`]); `true` when one wants a frame.
-fn sync(surface: &Surface) -> bool {
+/// Sizes the views and, with `sight`, tells those out of sight (shown
+/// again through [`shown`]); `true` when one wants a frame. Sight is only
+/// decided on a display frame, as shaders do: while mounting, AppKit has
+/// not placed the views yet and every one would look out of sight.
+fn sync(surface: &Surface, sight: bool) -> bool {
     let hidden = {
         let mut gpu = surface.gpu.borrow_mut();
         let SurfaceGpu { views, shown, .. } = &mut *gpu;
@@ -193,7 +195,7 @@ fn sync(surface: &Surface) -> bool {
                 size,
                 crate::view::backing_scale_of(view.ns()) as f32,
             );
-            let out = !view.shown();
+            let out = sight && !view.shown();
             views.set_hidden(view.id(), out);
             if out {
                 hidden.push(view.clone());
@@ -218,7 +220,7 @@ fn sync(surface: &Surface) -> bool {
 
 /// Starts the display link's draw callback while a view wants a frame.
 fn start(surface: &Rc<Surface>) {
-    if surface.gpu.borrow().ticking || !sync(surface) {
+    if surface.gpu.borrow().ticking || !sync(surface, false) {
         return;
     }
     surface.gpu.borrow_mut().ticking = true;
@@ -234,7 +236,7 @@ fn start(surface: &Rc<Surface>) {
 /// One frame of the clock: asks for the frames due, shows those done,
 /// reports the events; whether to tick again.
 fn frame(surface: &Rc<Surface>) -> bool {
-    sync(surface);
+    sync(surface, true);
     let mut new = Vec::new();
     let events = {
         let mut gpu = surface.gpu.borrow_mut();
