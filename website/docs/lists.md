@@ -148,6 +148,8 @@ In TSX, pass a new array to change the items: `posts.set([...posts(), ...more])`
 
 In both, a row that stays keeps its cell, its content and its measured size wherever it moves (an item sorted to the top once it changes), and so do the rows it passes: a focused field or an open menu in them stays open. Only new items get new rows. When rows are inserted above the rows on screen, the visible rows stay where they are instead of jumping. A row only partly scrolled into view at the top counts as above them, so rows inserted right after it leave the rows being read in place.
 
+A list hidden with `display: none`, such as a page kept alive under another tab, keeps its rows. Shown again, it puts them back without rendering any of them anew. `DataTable` does the same.
+
 - In TSX, update immutably: a new array, with the unchanged item objects reused. Mutating the array in place (`push`) is not seen.
 - A changed item should be a new object (`{ ...post, title }`), so its row shows the change.
 - Prepending (new messages, a refreshed feed) keeps the user's place.

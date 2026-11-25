@@ -10946,6 +10946,12 @@ impl<M: TextEngine> Core<M> {
         if !node.created {
             return;
         }
+        // Under `display: none` it has no size, which is no viewport to
+        // empty its window by: it keeps its rows bound until it shows again
+        // (a page kept alive under a hidden tab).
+        if self.displays_none(key) {
+            return;
+        }
         let list = node.list.as_ref().expect("list");
         if !(relayout || moved || list.dirty || self.commands.iter().any(|c| c.0 == node.id)) {
             return;

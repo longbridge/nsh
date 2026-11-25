@@ -39,7 +39,9 @@
 //! it; then the components' lists let its content go before it reads
 //! there, and it is the first cell a new item takes. The
 //! header, footer and empty placeholder are cells with a role
-//! (`slot="header"`, ...) and are never recycled. Each cell is a Taffy root
+//! (`slot="header"`, ...) and are never recycled. A list under
+//! `display: none` has no size and is not updated: it keeps its window
+//! and its bound cells until it shows again. Each cell is a Taffy root
 //! of its own (its width follows the list's cross axis), so scrolling
 //! relays out dirty cells only.
 //!
