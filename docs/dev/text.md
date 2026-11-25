@@ -113,7 +113,9 @@
   column (falling back to document order when no column has width). Words are runs of letters, digits and `_`, runs
   of spaces, or single other characters (each CJK ideograph, kana, emoji or punctuation mark); a triple click selects
   a whole text. Desktops select as their single texts do (drag, double click words, triple click paragraphs, drags go
-  on by them, Shift+click extends; Ctrl / Cmd+A, Ctrl / Cmd+C, Escape; a press elsewhere clears), touch screens with a
+  on by them, Shift+click extends; Ctrl / Cmd+A, Ctrl / Cmd+C, Escape; a press elsewhere clears; keys extend the
+  selection's focus with `SelectionModel::extend` by a `Movement` (a character cluster, a word, a line at a kept x, a
+  line's or paragraph's edge, the document's) and the backend reveals `focus_caret`: macOS so far), touch screens with a
   long press (a word) and then the platform's handles and edit menu (Copy, Select All). Texts with `userSelect: "none"`
   stay out; an area inside another is part of the outer one (only the outermost area keeps a model); texts outside
   areas select alone, as above. Views without the flag change nothing (no extra mount items). iOS
