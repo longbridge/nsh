@@ -1671,8 +1671,12 @@ impl<'a> Replay<'a> {
 struct ImageParts {
     /// By the whole image (kept alive here, so its address stays its own)
     /// and the rectangle, in its pixels.
-    parts: FxHashMap<(usize, [u64; 4]), (CFRetained<CGImage>, CFRetained<CGImage>)>,
+    parts: FxHashMap<(usize, [u64; 4]), ImagePart>,
 }
+
+/// A part of an image: the whole image, kept alive, and the part cut from
+/// it.
+type ImagePart = (CFRetained<CGImage>, CFRetained<CGImage>);
 
 impl ImageParts {
     /// At most this many parts are kept: a drawing whose source
