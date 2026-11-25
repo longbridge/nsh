@@ -98,7 +98,8 @@ Its columns set `fitPadding: 16` for this app-owned spacing; fits add this to th
 `Columns` keeps each column's *base* width (its spec's, or what a drag, a fit or the app set) apart from the width it
 shows: the base plus its share of the room the columns leave free (`grow`, `Columns::grow`), given in whole points so
 they fill the room exactly. `Dt::sync_room` gives it the room (the viewport less the row header and a terminal's bar)
-whenever that changes. A width set by a drag, `setColumnWidth` or `fitColumn` settles the column: it keeps that width
+whenever that changes; a layout with no area (`display: none` around the table) changes neither, so a hidden table
+keeps its rows and shows them again as they were. A width set by a drag, `setColumnWidth` or `fitColumn` settles the column: it keeps that width
 and no longer grows. `autoFit` (`Dt::auto_fit`, run when the columns or the rows change) measures as `fitColumn` does
 and sets the base without settling or reporting, once per column; `Columns::updated` carries the bases, the settled
 and the fitted columns over by key, as it does the widths the user dragged.

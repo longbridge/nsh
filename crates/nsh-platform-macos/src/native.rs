@@ -2383,6 +2383,12 @@ impl WebHost {
                 if let Some(pool) = WEB_POOL.with(|p| p.borrow().clone()) {
                     let _: () = msg_send![&config, setProcessPool: &*pool];
                 }
+                // A page's own full-screen control (`element.requestFullscreen`)
+                // is off unless the configuration turns it on, and Safari has
+                // it on: without it every page that asks for the screen does
+                // nothing when its button is clicked.
+                let preferences: Retained<AnyObject> = msg_send![&config, preferences];
+                let _: () = msg_send![&preferences, setElementFullscreenEnabled: true];
                 if p.incognito {
                     let store: Retained<AnyObject> =
                         msg_send![class(c"WKWebsiteDataStore")?, nonPersistentDataStore];

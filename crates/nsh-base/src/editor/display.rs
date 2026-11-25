@@ -1,7 +1,9 @@
 //! The display map: how the text is laid out in display rows. Tabs advance
 //! to the next tab stop, widths come from the editor's font (measured once
-//! per character and cached), long lines soft-wrap at a width, and a folded
-//! range shows as its first line alone.
+//! per character and cached), long lines soft-wrap at a width, a folded
+//! range shows as its first line alone, and a replaced range (a replacing
+//! decoration's label) is one unit as wide as its label: its text is not
+//! drawn, and a press is before or after it.
 //!
 //! Rows are kept in one vector with the first row of every line beside it,
 //! so line → row is an index and row → line a field; an edit lays out only
@@ -22,14 +24,26 @@ use std::{
 use nsh_core::geometry::Points;
 use ropey::Rope;
 use rustc_hash::FxHashMap;
-use unicode_segmentation::{GraphemeIndices, UnicodeSegmentation};
+use unicode_segmentation::{GraphemeCursor, GraphemeIndices, UnicodeSegmentation};
 
 use super::{
     buffer::{Bias, Buffer, Change, LineSpan, map_offset},
+    diagnostics::{self, Mark},
     fold::FoldRange,
     state::Font,
     types::RowLayout,
 };
+
+/// A replaced range's label: the decoration it is (its index in the
+/// editor's decorations) and its width.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Label {
+    pub(crate) item: usize,
+    pub(crate) width: f32,
+}
+
+/// A range of the text shown as its label, on one row.
+pub(crate) type Replaced = Mark<Label>;
 
 /// A stretch of the text in another font than the editor's (a
 /// decoration's `fontFamily` / `fontSize`).
@@ -106,6 +120,7 @@ impl DisplayMap {
                 base: Metrics::new(measure, tab_size),
                 faces: Vec::new(),
                 runs: Vec::new(),
+                replaced: Vec::new(),
             },
             line_height: 20.0,
             tops: Vec::new(),
@@ -306,6 +321,69 @@ impl DisplayMap {
     /// The folded ranges.
     pub(crate) fn folds(&self) -> &[FoldRange] {
         &self.folds
+    }
+
+    /// The ranges shown as their labels.
+    pub(crate) fn replaced(&self) -> &[Replaced] {
+        &self.fonts.replaced
+    }
+
+    /// Shows `replaced` (sorted, not overlapping, each on one line) as
+    /// their labels, laying out again only the lines whose labels changed.
+    /// Whether anything changed.
+    pub(crate) fn set_replaced(&mut self, buffer: &Buffer, replaced: Vec<Replaced>) -> bool {
+        if replaced == self.fonts.replaced {
+            return false;
+        }
+        let mut lines: Vec<usize> = Vec::new();
+        {
+            // The marks in one list and not the other, by a merge of both.
+            let (old, new) = (&self.fonts.replaced, &replaced);
+            let (mut i, mut j) = (0, 0);
+            while i < old.len() || j < new.len() {
+                let take_old = match (old.get(i), new.get(j)) {
+                    (Some(a), Some(b)) if a == b => {
+                        i += 1;
+                        j += 1;
+                        continue;
+                    }
+                    (Some(a), Some(b)) => {
+                        (a.range.start, a.range.end) <= (b.range.start, b.range.end)
+                    }
+                    (Some(_), None) => true,
+                    (None, _) => false,
+                };
+                let mark = if take_old {
+                    i += 1;
+                    &old[i - 1]
+                } else {
+                    j += 1;
+                    &new[j - 1]
+                };
+                lines.push(buffer.line_of(mark.range.start));
+            }
+        }
+        self.fonts.replaced = replaced;
+        if self.dirty {
+            // A rebuild follows.
+            return true;
+        }
+        lines.sort_unstable();
+        lines.dedup();
+        for line in lines.into_iter().rev() {
+            self.relayout_lines(buffer, line..line + 1);
+        }
+        true
+    }
+
+    /// Carries the replaced ranges through `changes`, as the decorations
+    /// they are: [`Self::edited`] lays out the edited lines with them, until
+    /// the editor sets them again.
+    pub(crate) fn adjust_replaced(&mut self, changes: &[Change]) {
+        if !self.fonts.replaced.is_empty() {
+            let reach = self.fonts.replaced.iter().map(|m| m.range.len()).max();
+            diagnostics::adjust(&mut self.fonts.replaced, reach.unwrap_or(0), changes);
+        }
     }
 
     /// Lays the whole text out again (a new text, font, tab size, width or
@@ -593,20 +671,33 @@ impl DisplayMap {
             .copied()
     }
 
-    /// The row's text as shown: tabs as spaces, plus each tab's display
-    /// range → buffer byte offset, so the view turns buffer ranges (tokens,
-    /// decorations, matches) into ranges of this string.
+    /// The row's text as shown: tabs as spaces and replaced ranges left
+    /// out, plus where those are, so the view turns buffer ranges (tokens,
+    /// decorations, matches) into ranges of this string and puts the
+    /// labels in.
     pub(crate) fn row_text(&self, buffer: &Buffer, row: usize) -> RowText {
         let range = self.row(row).range.clone();
         let source = slice_text(buffer.rope(), range.clone());
         let mut text = String::with_capacity(source.len());
-        let mut tabs = Vec::new();
+        let mut swaps = Vec::new();
+        let mut labels = Vec::new();
         let mut faced = self.fonts.from(range.start);
         let mut x = 0.0;
-        for (at, grapheme) in graphemes(&source) {
-            let metrics = faced.at(range.start + at);
-            let width = metrics.advance(grapheme, x);
-            if grapheme == "\t" {
+        for (at, unit, label) in units(&source, range.start, &self.fonts.replaced) {
+            let buffer_range = range.start + at..range.start + at + unit.len();
+            if let Some(label) = label {
+                let display = text.len();
+                swaps.push(Swap {
+                    buffer: buffer_range.clone(),
+                    display: display..display,
+                });
+                labels.push((buffer_range, label.item));
+                x += label.width;
+                continue;
+            }
+            let metrics = faced.at(buffer_range.start);
+            let width = metrics.advance(unit, x);
+            if unit == "\t" {
                 // Spaces in the tab's font: the row's text draws them.
                 let space = metrics.space();
                 let spaces = if space > 0.0 {
@@ -616,16 +707,21 @@ impl DisplayMap {
                 };
                 let display = text.len();
                 text.extend(std::iter::repeat_n(' ', spaces));
-                tabs.push(TabSpan {
-                    buffer: range.start + at,
+                swaps.push(Swap {
+                    buffer: buffer_range,
                     display: display..text.len(),
                 });
             } else {
-                text.push_str(grapheme);
+                text.push_str(unit);
             }
             x += width;
         }
-        RowText { text, range, tabs }
+        RowText {
+            text,
+            range,
+            swaps,
+            labels,
+        }
     }
 
     /// The x of `offset` within its row (from the text's left edge: a
@@ -666,8 +762,12 @@ impl DisplayMap {
         let mut faced = self.fonts.from(row.range.start);
         let mut cx = 0.0;
         let mut last = None;
-        for (at, grapheme) in graphemes(&text) {
-            let width = faced.advance(row.range.start + at, grapheme, cx);
+        // A label is one unit: a press is before or after it.
+        for (at, unit, label) in units(&text, row.range.start, &self.fonts.replaced) {
+            let width = match label {
+                Some(label) => label.width,
+                None => faced.advance(row.range.start + at, unit, cx),
+            };
             let edge = if self.cells { width } else { width / 2.0 };
             if target < cx + edge {
                 return row.range.start + at;
@@ -763,6 +863,28 @@ impl DisplayMap {
         Points(metrics.run_width(text))
     }
 
+    /// The font of the run around byte `at` (from its start on, before
+    /// its end); `None`: the editor's.
+    pub(crate) fn font_at(&self, at: usize) -> Option<&Font> {
+        self.face_at(at).map(|face| &face.font)
+    }
+
+    /// The width of `text` on one line from x 0 in the font around byte
+    /// `at` ([`Self::font_at`]).
+    pub(crate) fn width_at(&self, at: usize, text: &str) -> Points {
+        let metrics = self
+            .face_at(at)
+            .map_or(&self.fonts.base, |face| &face.metrics);
+        Points(metrics.run_width(text))
+    }
+
+    fn face_at(&self, at: usize) -> Option<&Face> {
+        let runs = &self.fonts.runs;
+        runs.get(runs.partition_point(|r| r.range.end <= at))
+            .filter(|r| r.range.start <= at)
+            .map(|r| &self.fonts.faces[r.face])
+    }
+
     /// A `RowLayout` over this map and `buffer`.
     pub(crate) fn layout<'a>(&'a self, buffer: &'a Buffer) -> impl RowLayout + 'a {
         MapLayout { map: self, buffer }
@@ -778,7 +900,14 @@ impl DisplayMap {
     /// The x of `offset` (clamped to the row) in row `row`.
     fn x_in_row(&self, rope: &Rope, row: usize, offset: usize) -> Points {
         let row = &self.rows[row];
-        let end = offset.clamp(row.range.start, row.range.end);
+        let mut end = offset.clamp(row.range.start, row.range.end);
+        // Inside a replaced range: at its label's start.
+        let after = self.fonts.replaced.partition_point(|m| m.range.start < end);
+        if let Some(m) = after.checked_sub(1).map(|i| &self.fonts.replaced[i])
+            && m.range.end > end
+        {
+            end = m.range.start.max(row.range.start);
+        }
         let end = end.min(rope.len_bytes());
         let start = row.range.start.min(end);
         let text = slice_text(rope, start..end);
@@ -796,7 +925,13 @@ impl DisplayMap {
         // The previous grapheme was a space: a space extends its run.
         let mut after_space = false;
         let mut faced = self.fonts.from(info.range.start);
-        for (at, grapheme) in graphemes(&text) {
+        for (at, unit, label) in units(&text, info.range.start, &self.fonts.replaced) {
+            if let Some(label) = label {
+                after_space = false;
+                x += label.width;
+                continue;
+            }
+            let grapheme = unit;
             let start = info.range.start + at;
             let width = faced.advance(start, grapheme, x);
             match grapheme {
@@ -847,20 +982,26 @@ pub(crate) struct Whitespace {
 /// A row's text as shown, and how its offsets map to the buffer's.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct RowText {
-    /// The text: the row's, with every tab as spaces.
+    /// The text: the row's, with every tab as spaces and without its
+    /// replaced ranges.
     pub(crate) text: String,
     /// The buffer range the row shows.
     pub(crate) range: Range<usize>,
-    /// The tabs, in order: the only chars whose display length differs.
-    tabs: Vec<TabSpan>,
+    /// The tabs and replaced ranges, in order: the only text whose
+    /// display length differs.
+    swaps: Vec<Swap>,
+    /// The replaced ranges, in order, and their decorations (indexes into
+    /// the editor's decorations).
+    pub(crate) labels: Vec<(Range<usize>, usize)>,
 }
 
-/// A tab of a row and the spaces it shows as.
+/// A tab of a row and the spaces it shows as, or a replaced range and the
+/// empty place its label is at.
 #[derive(Debug, Clone, PartialEq)]
-struct TabSpan {
-    /// The tab's byte offset in the buffer.
-    buffer: usize,
-    /// Its spaces in the row's text.
+struct Swap {
+    /// Its bytes in the buffer.
+    buffer: Range<usize>,
+    /// Its place in the row's text.
     display: Range<usize>,
 }
 
@@ -873,26 +1014,31 @@ impl RowText {
     }
 
     /// Buffer offset `offset` as an offset of [`Self::text`], clamped to
-    /// the row.
+    /// the row (inside a replaced range: where its label is).
     pub(crate) fn display_offset(&self, offset: usize) -> usize {
         let offset = offset.clamp(self.range.start, self.range.end);
-        let before = self.tabs.partition_point(|tab| tab.buffer < offset);
-        match before.checked_sub(1).map(|i| &self.tabs[i]) {
+        let before = self
+            .swaps
+            .partition_point(|swap| swap.buffer.start < offset);
+        match before.checked_sub(1).map(|i| &self.swaps[i]) {
             None => offset - self.range.start,
-            Some(tab) => tab.display.end + (offset - tab.buffer - 1),
+            Some(swap) if offset < swap.buffer.end => swap.display.start,
+            Some(swap) => swap.display.end + (offset - swap.buffer.end),
         }
     }
 
     /// Offset `display` of [`Self::text`] as a buffer offset (inside a
-    /// tab's spaces: the tab's start).
+    /// tab's spaces: the tab's start; at a label: the start of its range).
     #[cfg(test)]
     pub(crate) fn buffer_offset(&self, display: usize) -> usize {
         let display = display.min(self.text.len());
-        let before = self.tabs.partition_point(|tab| tab.display.start < display);
-        match before.checked_sub(1).map(|i| &self.tabs[i]) {
+        let before = self
+            .swaps
+            .partition_point(|swap| swap.display.start < display);
+        match before.checked_sub(1).map(|i| &self.swaps[i]) {
             None => self.range.start + display,
-            Some(tab) if display < tab.display.end => tab.buffer,
-            Some(tab) => tab.buffer + 1 + (display - tab.display.end),
+            Some(swap) if display < swap.display.end => swap.buffer.start,
+            Some(swap) => swap.buffer.end + (display - swap.display.end),
         }
         .min(self.range.end)
     }
@@ -1059,9 +1205,16 @@ impl Iterator for LineRanges<'_> {
 }
 
 /// Soft-wraps one line (`text`, at byte `start` of the text) at `width`:
-/// after whitespace when the row would overflow, else between graphemes;
-/// whitespace never wraps (it hangs past the edge). Continuation rows start
-/// at the line's indentation unless that is over half the width.
+/// at the last break opportunity when the row would overflow, else between
+/// graphemes. Between two ASCII chars the opportunity is after whitespace,
+/// so code wraps between its tokens and an operator (`->`, `!=`) or a path
+/// stays whole; next to any other char it is Unicode's (UAX #14), so rows
+/// break between CJK characters, but not before closing punctuation or
+/// after opening punctuation. Whitespace never wraps (it hangs past the
+/// edge), a row never ends inside a grapheme, and a replaced range never
+/// splits (its label is one unit, broken around as an object replacement
+/// character, [`last_break`]). Continuation rows start at the line's
+/// indentation unless that is over half the width.
 fn wrap_line(fonts: &Fonts, width: Points, line: usize, start: usize, text: &str, out: &mut Laid) {
     let width = width.0.max(1.0);
     let lead = text.len() - text.trim_start_matches([' ', '\t']).len();
@@ -1086,18 +1239,38 @@ fn wrap_line(fonts: &Fonts, width: Points, line: usize, start: usize, text: &str
     let mut row_indent = 0.0;
     let mut available = width;
     let mut x = 0.0;
-    // Where the row may break: after the last whitespace, and the x there.
+    let ascii = text.is_ascii();
+    // An ASCII line's last break opportunity: after the last whitespace, and
+    // the x there. Other lines look for theirs when a row overflows
+    // ([`last_break`]): most lines fit, and pay nothing for it.
     let mut break_at: Option<(usize, f32)> = None;
-    for (at, grapheme) in graphemes(text) {
-        let blank = grapheme.chars().all(char::is_whitespace);
-        let advance = faced.advance(start + at, grapheme, x);
+    for (at, unit, label) in units(text, start, &fonts.replaced) {
+        let blank = label.is_none() && unit.chars().all(char::is_whitespace);
+        let advance = match label {
+            Some(label) => label.width,
+            None => faced.advance(start + at, unit, x),
+        };
         while !blank && at > row_start && x + advance > available {
-            let (end, end_x) = match break_at {
-                Some((offset, offset_x)) if offset > row_start => (offset, offset_x),
-                _ => (at, x),
+            let found = if ascii {
+                break_at.filter(|&(offset, _)| offset > row_start)
+            } else {
+                last_break(text, start, &fonts.replaced, row_start, lead, at).map(|offset| {
+                    (
+                        offset,
+                        x_before(fonts, start, text, row_start, offset, at, x),
+                    )
+                })
             };
+            let (end, end_x) = found.unwrap_or((at, x));
             push(row_start..end, row_indent, end_x);
-            x -= end_x;
+            // The new row starts at `end`: what lies before `at` moves
+            // along, and a tab among it advances from the new start.
+            let moved = &text[end..at];
+            x = if moved.contains('\t') {
+                fonts.run_width(start + end, moved)
+            } else {
+                x - end_x
+            };
             row_start = end;
             row_indent = indent;
             available = width - indent;
@@ -1105,11 +1278,258 @@ fn wrap_line(fonts: &Fonts, width: Points, line: usize, start: usize, text: &str
         }
         x += advance;
         // The indentation is no place to break: a row of only it is no use.
-        if blank && at + grapheme.len() > lead {
-            break_at = Some((at + grapheme.len(), x));
+        if ascii && blank && at + unit.len() > lead {
+            break_at = Some((at + unit.len(), x));
         }
     }
     push(row_start..text.len(), row_indent, x);
+}
+
+/// The last break opportunity of the row from `row_start` of a line's
+/// `text` (at byte `start` of the text) after it and `lead` and at or
+/// before `at` (a unit's offset), by the offset of the char after it.
+/// Between two ASCII chars it is after whitespace; elsewhere it is UAX
+/// #14's, at a grapheme boundary. A replaced range (`replaced`, the map's)
+/// is one unit, never broken inside: around it UAX #14 breaks as around an
+/// object replacement character (U+FFFC), unless the chars on both sides
+/// are ASCII (its text's first or last char counting), where the ASCII
+/// rule holds and a label never counts as whitespace. So a label in code
+/// keeps its neighbours as the text it replaces did, and one among CJK
+/// text breaks like a character there.
+fn last_break(
+    text: &str,
+    start: usize,
+    replaced: &[Replaced],
+    row_start: usize,
+    lead: usize,
+    at: usize,
+) -> Option<usize> {
+    let floor = row_start.max(lead);
+    // The labels starting in the line up to `at`, whole in it (as `units`
+    // shows them), from the last.
+    let first = replaced.partition_point(|m| m.range.start < start);
+    let last = replaced.partition_point(|m| m.range.start <= start + at);
+    let mut labels = replaced[first..last]
+        .iter()
+        .filter(|m| !m.range.is_empty() && m.range.end <= start + text.len())
+        .map(|m| m.range.start - start..m.range.end - start)
+        .rev()
+        .peekable();
+    let mut bound = at;
+    let mut inclusive = true;
+    // The unit at `at` is a label: the break before it is its own.
+    if let Some(label) = labels.next_if(|label| label.start == at) {
+        if at > floor && breaks_before_label(text, label) {
+            return Some(at);
+        }
+        inclusive = false;
+    }
+    loop {
+        // The text between the label before `bound` and `bound`, its
+        // context starting after that label: after an object replacement
+        // character, UAX #14 goes on as from the start of a text.
+        let label = labels.next();
+        let context = label.as_ref().map_or(0, |label| label.end);
+        if let Some(offset) = text_break(text, row_start, context, floor, bound, inclusive) {
+            return Some(offset);
+        }
+        let label = label?;
+        if label.end <= floor {
+            return None;
+        }
+        if (inclusive || label.end < bound) && breaks_after_label(text, label.clone()) {
+            return Some(label.end);
+        }
+        if label.start > floor && breaks_before_label(text, label.clone()) {
+            return Some(label.start);
+        }
+        bound = label.start;
+        inclusive = false;
+        if bound <= floor {
+            return None;
+        }
+    }
+}
+
+/// How far before a row UAX #14 may look for context.
+const BREAK_CONTEXT: usize = 64;
+
+/// The last break opportunity of plain text (no label in it) after `floor`
+/// and before `bound` (at it too when `inclusive`), the text's context
+/// starting at `context` at the earliest. UAX #14 runs backwards from
+/// `bound` a span at a time, each from where its breaks no longer depend on
+/// the text before it (`split_at_safe`): a few chars, not the whole line. A
+/// span starts a char before that point (so it can break there), but that
+/// char lacks its own context (a combining mark, its base's class): a break
+/// before the point is the next span's to decide. Nothing looks further
+/// back than [`BREAK_CONTEXT`] bytes before the row (from `row_start`), so
+/// a line wraps in time linear in its length; text without such a point
+/// that long (a rare run, as of spaces with combining marks) takes its
+/// breaks as if the line started there.
+fn text_break(
+    text: &str,
+    row_start: usize,
+    context: usize,
+    floor: usize,
+    bound: usize,
+    inclusive: bool,
+) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let ascii_pair = |offset: usize| bytes[offset - 1].is_ascii() && bytes[offset].is_ascii();
+    let mut context = row_start.saturating_sub(BREAK_CONTEXT).max(context);
+    while !text.is_char_boundary(context) {
+        context -= 1;
+    }
+    // A row starts at a grapheme boundary: graphemes are found from there.
+    let row = &text[row_start..];
+    // Opportunities after `start`, up to `max`, are looked for; `bound` is
+    // a char's offset, and the span ends after that char, so it decides
+    // the break before it.
+    let mut bound = bound;
+    let mut max = if inclusive { bound } else { bound - 1 };
+    loop {
+        let end = bound + text[bound..].chars().next().map_or(0, char::len_utf8);
+        let (before, span) = unicode_linebreak::split_at_safe(&text[context..end]);
+        let span_start = context + before.len();
+        let start = if before.is_empty() {
+            span_start
+        } else {
+            span_start + span.chars().next().map_or(0, char::len_utf8)
+        };
+        let mut found = None;
+        for (offset, _) in unicode_linebreak::linebreaks(span) {
+            let offset = span_start + offset;
+            if offset > max {
+                break;
+            }
+            if offset > start
+                && offset > floor
+                && !ascii_pair(offset)
+                && is_grapheme_boundary(row, offset - row_start)
+            {
+                found = Some(offset);
+            }
+        }
+        // Between ASCII chars (always a grapheme boundary: no `\r\n` in a
+        // line), after whitespace.
+        if let Some(offset) = (start.max(floor) + 1..=max)
+            .rev()
+            .find(|&offset| ascii_pair(offset) && char::from(bytes[offset - 1]).is_whitespace())
+        {
+            found = found.max(Some(offset));
+        }
+        // A span from `context` on is as far back as the text goes.
+        if found.is_some() || start <= floor || before.is_empty() {
+            return found;
+        }
+        bound = start;
+        max = start;
+    }
+}
+
+/// Whether a row may break before the label of `label` (a range of
+/// `text`): as before an object replacement character, unless the chars
+/// on both sides are ASCII, where only whitespace before it allows one.
+fn breaks_before_label(text: &str, label: Range<usize>) -> bool {
+    use unicode_linebreak::{BreakClass, break_property};
+    let before = &text[..label.start];
+    let (Some(prev), Some(first)) = (before.chars().next_back(), text[label].chars().next()) else {
+        return false;
+    };
+    if prev.is_ascii() && first.is_ascii() {
+        return prev.is_whitespace();
+    }
+    // A combining mark has its base's class; after spaces, an opening
+    // punctuation before them still holds the break.
+    let class = |c: char| break_property(c as u32);
+    let mut chars = before
+        .chars()
+        .rev()
+        .skip_while(|&c| class(c) == BreakClass::CombiningMark);
+    let Some(prev) = chars.next() else {
+        return true;
+    };
+    match class(prev) {
+        BreakClass::Space => chars
+            .find(|&c| class(c) != BreakClass::Space)
+            .is_none_or(|c| class(c) != BreakClass::OpenPunctuation),
+        BreakClass::OpenPunctuation
+        | BreakClass::Quotation
+        | BreakClass::NonBreakingGlue
+        | BreakClass::WordJoiner
+        | BreakClass::ZeroWidthJoiner
+        | BreakClass::Before => false,
+        _ => true,
+    }
+}
+
+/// Whether a row may break after the label of `label` (a range of `text`):
+/// as after an object replacement character, unless the chars on both
+/// sides are ASCII (a label is no whitespace).
+fn breaks_after_label(text: &str, label: Range<usize>) -> bool {
+    use unicode_linebreak::{BreakClass, break_property};
+    let (Some(last), Some(next)) = (
+        text[label.clone()].chars().next_back(),
+        text[label.end..].chars().next(),
+    ) else {
+        return false;
+    };
+    if last.is_ascii() && next.is_ascii() {
+        return false;
+    }
+    !matches!(
+        break_property(next as u32),
+        BreakClass::ClosePunctuation
+            | BreakClass::CloseParenthesis
+            | BreakClass::Exclamation
+            | BreakClass::InfixSeparator
+            | BreakClass::Symbol
+            | BreakClass::Space
+            | BreakClass::After
+            | BreakClass::Hyphen
+            | BreakClass::NonStarter
+            | BreakClass::ConditionalJapaneseStarter
+            | BreakClass::NonBreakingGlue
+            | BreakClass::WordJoiner
+            | BreakClass::ZeroWidthSpace
+            | BreakClass::CombiningMark
+            | BreakClass::ZeroWidthJoiner
+            | BreakClass::Quotation
+            | BreakClass::Inseparable
+    )
+}
+
+fn is_grapheme_boundary(text: &str, offset: usize) -> bool {
+    GraphemeCursor::new(offset, text.len(), true)
+        .is_boundary(text, 0)
+        .unwrap_or(false)
+}
+
+/// The x of `offset` in the row from `row_start` of a line's `text` (at
+/// byte `start` of the text), the x of `at` (after `offset`) being `x`:
+/// back from `x` by the units between, each in its font (a label as wide
+/// as it is), or, as a tab's advance depends on where it starts, along the
+/// row.
+fn x_before(
+    fonts: &Fonts,
+    start: usize,
+    text: &str,
+    row_start: usize,
+    offset: usize,
+    at: usize,
+    x: f32,
+) -> f32 {
+    let between = &text[offset..at];
+    if between.contains('\t') {
+        return fonts.run_width(start + row_start, &text[row_start..offset]);
+    }
+    let mut faced = fonts.from(start + offset);
+    x - units(between, start + offset, &fonts.replaced)
+        .map(|(i, unit, label)| match label {
+            Some(label) => label.width,
+            None => faced.at(start + offset + i).width(unit),
+        })
+        .sum::<f32>()
 }
 
 /// Widths in the editor's font, measured once per char (or grapheme of
@@ -1204,6 +1624,9 @@ struct Fonts {
     faces: Vec<Face>,
     /// The stretches in them: sorted, not overlapping, none empty.
     runs: Vec<FontRun>,
+    /// The ranges shown as their labels (sorted, not overlapping, each on
+    /// one line), each one unit as wide as its label.
+    replaced: Vec<Replaced>,
 }
 
 /// A decoration's font and its widths.
@@ -1231,15 +1654,19 @@ impl Fonts {
         Faced { fonts: self, run }
     }
 
-    /// The width of `text`, at byte `start` of the text, from x 0.
+    /// The width of `text`, at byte `start` of the text, from x 0: its
+    /// replaced ranges as wide as their labels.
     fn run_width(&self, start: usize, text: &str) -> f32 {
-        if self.runs.is_empty() {
+        if self.runs.is_empty() && self.replaced.is_empty() {
             return self.base.run_width(text);
         }
         let mut faced = self.from(start);
         let mut x = 0.0;
-        for (at, grapheme) in graphemes(text) {
-            x += faced.advance(start + at, grapheme, x);
+        for (at, unit, label) in units(text, start, &self.replaced) {
+            x += match label {
+                Some(label) => label.width,
+                None => faced.advance(start + at, unit, x),
+            };
         }
         x
     }
@@ -1354,6 +1781,66 @@ impl<'a> Iterator for Graphemes<'a> {
                 Some((start, &text[start..start + 1]))
             }
             Graphemes::Unicode(inner) => inner.next(),
+        }
+    }
+}
+
+/// The units of `text` (at byte `base` of the buffer), with their byte
+/// offsets in it: its graphemes, and each range of `replaced` (sorted, the
+/// map's) that lies whole in it as one unit with its label. A range
+/// crossing the text's start or end, or overlapping an earlier one, is not
+/// replaced here.
+fn units<'a>(text: &'a str, base: usize, replaced: &'a [Replaced]) -> Units<'a> {
+    let from = replaced.partition_point(|m| m.range.start < base);
+    Units {
+        text,
+        base,
+        graphemes: graphemes(text),
+        replaced: &replaced[from..],
+        skip_to: 0,
+    }
+}
+
+struct Units<'a> {
+    text: &'a str,
+    base: usize,
+    graphemes: Graphemes<'a>,
+    /// The replaced ranges from the next unit on.
+    replaced: &'a [Replaced],
+    /// The end of the last replaced range: the graphemes before it are in
+    /// it.
+    skip_to: usize,
+}
+
+impl<'a> Iterator for Units<'a> {
+    type Item = (usize, &'a str, Option<Label>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let (at, grapheme) = self.graphemes.next()?;
+            if at < self.skip_to {
+                continue;
+            }
+            let offset = self.base + at;
+            while self
+                .replaced
+                .first()
+                .is_some_and(|m| m.range.start < offset)
+            {
+                self.replaced = &self.replaced[1..];
+            }
+            if let Some(m) = self.replaced.first()
+                && m.range.start == offset
+                && m.range.end > offset
+                && m.range.end <= self.base + self.text.len()
+            {
+                let end = m.range.end - self.base;
+                let label = m.item;
+                self.replaced = &self.replaced[1..];
+                self.skip_to = end;
+                return Some((at, &self.text[at..end], Some(label)));
+            }
+            return Some((at, grapheme, None));
         }
     }
 }
@@ -1546,6 +2033,220 @@ mod tests {
         assert_eq!(map.offset_at(&buffer, 0, px(25.0)), 3);
     }
 
+    /// Every row of `map` starts and ends between graphemes of `text`.
+    fn assert_rows_between_graphemes(map: &DisplayMap, text: &str) {
+        let bounds: Vec<usize> = text
+            .grapheme_indices(true)
+            .map(|(at, _)| at)
+            .chain([text.len()])
+            .collect();
+        for range in ranges(map) {
+            assert!(
+                bounds.contains(&range.start) && bounds.contains(&range.end),
+                "{range:?} splits a grapheme of {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn mixed_cjk_and_latin_wraps_between_cjk_chars() {
+        // The CJK run fills the row instead of moving down whole after
+        // the space.
+        let buffer = Buffer::new("ab 中文字符");
+        let map = map(&buffer, Some(70.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..9, 9..15]);
+        // Latin text and CJK may break where they meet without a space.
+        let buffer = Buffer::new("a Mac上没");
+        let map = self::map(&buffer, Some(60.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..5, 5..11]);
+    }
+
+    #[test]
+    fn closing_punctuation_never_starts_a_row() {
+        // The comma would start the second row: the char before it goes
+        // along.
+        let buffer = Buffer::new("中文，字。");
+        let map = map(&buffer, Some(50.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..3, 3..9, 9..15]);
+    }
+
+    #[test]
+    fn opening_punctuation_never_ends_a_row() {
+        let buffer = Buffer::new("说「你好」吧");
+        let map = map(&buffer, Some(40.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..3, 3..9, 9..15, 15..18]);
+    }
+
+    #[test]
+    fn small_kana_never_start_a_row() {
+        // Small っ and ょ stay with the kana or kanji before them.
+        let buffer = Buffer::new("ちょっと待って");
+        let map = map(&buffer, Some(35.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..9, 9..12, 12..18, 18..21]);
+    }
+
+    #[test]
+    fn code_wraps_only_after_whitespace() {
+        // Where UAX #14 alone would split `->`, `!=`, `!done`, `|x|` and
+        // `well-known`, rows break at the space before them (or, without
+        // one, between graphemes), on ASCII lines and on lines with other
+        // text alike.
+        let cases: [(&str, f32, Vec<Range<usize>>); 10] = [
+            ("fn f() -> T", 80.0, vec![0..7, 7..11]),
+            ("a != b", 30.0, vec![0..2, 2..5, 5..6]),
+            ("if !done", 50.0, vec![0..3, 3..8]),
+            ("|x| x + 1", 20.0, vec![0..2, 2..4, 4..6, 6..8, 8..9]),
+            ("well-known", 70.0, vec![0..7, 7..10]),
+            ("注 fn f() -> T", 110.0, vec![0..11, 11..15]),
+            ("注 a != b", 50.0, vec![0..6, 6..10]),
+            ("注 if !done", 60.0, vec![0..7, 7..12]),
+            ("注 |x| x + 1", 40.0, vec![0..4, 4..8, 8..12, 12..13]),
+            ("注 well-known", 80.0, vec![0..4, 4..12, 12..14]),
+        ];
+        for (text, width, rows) in cases {
+            let buffer = Buffer::new(text);
+            let map = map(&buffer, Some(width), vec![]);
+            assert_eq!(ranges(&map), rows, "{text:?} at {width}");
+        }
+    }
+
+    /// Every row's width is its indent and its text's, measured from the
+    /// row's start.
+    fn assert_row_widths(map: &DisplayMap, text: &str) {
+        let widths = map.widths.borrow();
+        for (row, width) in map.rows.iter().zip(widths.iter()) {
+            let measured = row.indent.0
+                + map
+                    .fonts
+                    .run_width(row.range.start, &text[row.range.clone()]);
+            assert!(
+                (width - measured).abs() < 1e-3,
+                "{:?} of {text:?}: {width} wide, measures {measured}",
+                row.range
+            );
+        }
+    }
+
+    #[test]
+    fn a_tab_moved_to_a_new_row_advances_from_its_start() {
+        // The break is after the space, before the tab: on the new row the
+        // tab reaches the first stop (40), so the comma overflows there.
+        let text = "中 \t，ab";
+        let buffer = Buffer::new(text);
+        let map = map(&buffer, Some(50.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..4, 4..5, 5..10]);
+        assert_row_widths(&map, text);
+    }
+
+    #[test]
+    fn rows_of_random_lines_measure_what_they_hold() {
+        let pool = [
+            "a", "b", " ", " ", "\t", "-", "!", "(", ")", "/", "中", "文", "，", "。", "「", "」",
+            "ち", "っ", "한", "😀", "🏻", "\u{301}", "\u{3000}",
+        ];
+        let mut seed = 0x2545_f491_u64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed as usize
+        };
+        for _ in 0..4_000 {
+            let len = next() % 40 + 1;
+            let text: String = (0..len).map(|_| pool[next() % pool.len()]).collect();
+            let width = [25.0, 40.0, 50.0, 70.0, 100.0][next() % 5];
+            let buffer = Buffer::new(&text);
+            let mut map = map(&buffer, Some(width), vec![]);
+            // Half the lines with a stretch in a wider font.
+            if next() % 2 == 0 {
+                let bounds: Vec<usize> = text
+                    .char_indices()
+                    .map(|(at, _)| at)
+                    .chain([text.len()])
+                    .collect();
+                let i = next() % (bounds.len() - 1);
+                let j = i + 1 + next() % (bounds.len() - 1 - i);
+                let (a, b) = (bounds[i], bounds[j]);
+                map.set_fonts(&buffer, vec![font(20.0, 20.0)], vec![run(a..b, 0)], sized);
+            }
+            // A third of the lines with a label over some graphemes.
+            let mut label = None;
+            if next() % 3 == 0 {
+                let bounds: Vec<usize> = text
+                    .grapheme_indices(true)
+                    .map(|(at, _)| at)
+                    .chain([text.len()])
+                    .collect();
+                let i = next() % (bounds.len() - 1);
+                let j = i + 1 + next() % (bounds.len() - 1 - i);
+                let range = bounds[i]..bounds[j];
+                map.set_replaced(&buffer, vec![labeled(range.clone(), (next() % 50) as f32)]);
+                label = Some(range);
+            }
+            let rows = ranges(&map);
+            if let Some(label) = &label {
+                assert!(
+                    rows.iter()
+                        .all(|r| !(label.start < r.end && r.end < label.end)),
+                    "{text:?} splits the label {label:?}: {rows:?}"
+                );
+            }
+            assert_eq!(rows.first().map(|r| r.start), Some(0), "{text:?}");
+            assert_eq!(rows.last().map(|r| r.end), Some(text.len()), "{text:?}");
+            assert!(rows.windows(2).all(|w| w[0].end == w[1].start), "{text:?}");
+            assert_rows_between_graphemes(&map, &text);
+            assert_row_widths(&map, &text);
+        }
+    }
+
+    #[test]
+    fn opportunities_inside_a_grapheme_are_skipped() {
+        // UAX #14 allows a break between 😀 and its skin tone modifier,
+        // and between a space and a combining mark on it; each pair is one
+        // grapheme. The opportunities after them still count.
+        let text = "中😀🏻文";
+        let buffer = Buffer::new(text);
+        let map = map(&buffer, Some(50.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..11, 11..14]);
+        assert_rows_between_graphemes(&map, text);
+        let text = "中 \u{301}文，";
+        let buffer = Buffer::new(text);
+        let map = self::map(&buffer, Some(70.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..6, 6..12]);
+        assert_rows_between_graphemes(&map, text);
+        // The only opportunity is inside a grapheme: graphemes break.
+        let text = "ab \u{301}cd";
+        let buffer = Buffer::new(text);
+        let map = self::map(&buffer, Some(40.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..5, 5..7]);
+        assert_rows_between_graphemes(&map, text);
+    }
+
+    #[test]
+    fn korean_wraps_between_syllables() {
+        // As a browser's `word-break: normal`.
+        let buffer = Buffer::new("한국어 문장입니다");
+        let map = map(&buffer, Some(50.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..13, 13..25]);
+    }
+
+    #[test]
+    fn a_run_without_opportunities_wraps_between_graphemes() {
+        // Commas never start a row, but a row of only them must break
+        // somewhere.
+        let buffer = Buffer::new("，，，，");
+        let map = map(&buffer, Some(50.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..6, 6..12]);
+    }
+
+    #[test]
+    fn an_emoji_sequence_wraps_whole_among_cjk() {
+        // A family emoji (three emoji joined by ZWJs) is one grapheme.
+        let buffer = Buffer::new("中👨\u{200D}👩\u{200D}👧文");
+        let map = map(&buffer, Some(40.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..3, 3..21, 21..24]);
+    }
+
     #[test]
     fn wrapping_never_splits_a_grapheme() {
         // The thumbs up and its skin tone modifier are one grapheme.
@@ -1600,6 +2301,57 @@ mod tests {
         assert_eq!(map.offset_at(&buffer, 0, px(24.0)), 1);
         assert_eq!(map.offset_at(&buffer, 0, px(26.0)), 2);
         assert_eq!(map.widest_row(), px(50.0));
+    }
+
+    #[test]
+    fn a_replaced_range_is_one_unit() {
+        let buffer = Buffer::new("a b\tcdef g\nxy");
+        let label = |range: Range<usize>, width: f32| Replaced {
+            range,
+            item: Label { item: 0, width },
+        };
+        let mut map = map(&buffer, None, vec![]);
+        // "cdef" (4..8) shown as a label 25 points wide, after the tab's
+        // stop at 40.
+        assert!(map.set_replaced(&buffer, vec![label(4..8, 25.0)]));
+        assert!(!map.set_replaced(&buffer, vec![label(4..8, 25.0)]));
+        assert_eq!(map.x_of(&buffer, 4), px(40.0));
+        assert_eq!(map.x_of(&buffer, 6), px(40.0), "inside: at its start");
+        assert_eq!(map.x_of(&buffer, 8), px(65.0));
+        assert_eq!(map.x_of(&buffer, 10), px(85.0));
+        assert_eq!(map.offset_at(&buffer, 0, px(50.0)), 4);
+        assert_eq!(map.offset_at(&buffer, 0, px(55.0)), 8);
+        let text = map.row_text(&buffer, 0);
+        assert_eq!(text.text, "a b  g");
+        assert_eq!(text.labels, vec![(4..8, 0)]);
+        assert_eq!(text.display_range(8..10), 4..6);
+        assert_eq!(text.display_range(5..7), 4..4);
+        assert_eq!(text.buffer_offset(4), 4);
+        assert_eq!(text.buffer_offset(5), 9);
+        let spaces: Vec<(Points, bool)> = map
+            .whitespace(&buffer, 0)
+            .into_iter()
+            .map(|w| (w.x, w.tab))
+            .collect();
+        assert_eq!(
+            spaces,
+            vec![(px(10.0), false), (px(30.0), true), (px(65.0), false)]
+        );
+        assert_eq!(map.widest_row(), px(85.0));
+        // Shown as text again, the row is as before.
+        assert!(map.set_replaced(&buffer, vec![]));
+        assert_eq!(map.x_of(&buffer, 8), px(80.0));
+        assert_eq!(map.widest_row(), px(100.0));
+        // Wrapped, a label never splits, and laying out its line again
+        // gives the rows a rebuild gives.
+        let mut wrapped = self::map(&buffer, Some(60.0), vec![]);
+        assert!(wrapped.set_replaced(&buffer, vec![label(4..8, 25.0)]));
+        assert_eq!(ranges(&wrapped), vec![0..4, 4..10, 11..13]);
+        let mut fresh = self::map(&buffer, Some(60.0), vec![]);
+        fresh.fonts.replaced = vec![label(4..8, 25.0)];
+        fresh.rebuild(&buffer);
+        assert_eq!(wrapped.rows, fresh.rows);
+        assert_eq!(wrapped.line_rows, fresh.line_rows);
     }
 
     #[test]
@@ -1863,6 +2615,69 @@ mod tests {
         fresh.carry_fonts(vec![font(20.0, 20.0)], vec![run(3..5, 0)], sized);
         fresh.rebuild(&buffer);
         assert_eq!(map.rows, fresh.rows);
+    }
+
+    #[test]
+    fn a_break_before_a_stretch_in_a_font_measures_it_in_that_font() {
+        // `abc` is 20 points a char: `c` overflows, the row breaks after
+        // the space, and `ab` moves along at its own width.
+        let text = "中 abc字";
+        let buffer = Buffer::new(text);
+        let mut map = map(&buffer, Some(80.0), vec![]);
+        map.set_fonts(&buffer, vec![font(20.0, 20.0)], vec![run(4..7, 0)], sized);
+        assert_eq!(ranges(&map), vec![0..4, 4..10]);
+        assert_row_widths(&map, text);
+    }
+
+    /// `range` shown as a label `width` points wide.
+    fn labeled(range: Range<usize>, width: f32) -> Replaced {
+        Replaced {
+            range,
+            item: Label { item: 0, width },
+        }
+    }
+
+    #[test]
+    fn a_label_among_cjk_breaks_like_a_character_there() {
+        // "中文" (2..8) as a label 50 wide: the row breaks before it (after
+        // the space) and after it (before 字), never inside it.
+        let text = "x 中文字";
+        let buffer = Buffer::new(text);
+        let mut map = map(&buffer, Some(60.0), vec![]);
+        assert!(map.set_replaced(&buffer, vec![labeled(2..8, 50.0)]));
+        assert_eq!(ranges(&map), vec![0..2, 2..8, 8..11]);
+        assert_row_widths(&map, text);
+        // "ab" (6..8) as a label after 中文: a break before it.
+        let text = "中文ab字";
+        let buffer = Buffer::new(text);
+        let mut map = self::map(&buffer, Some(60.0), vec![]);
+        assert!(map.set_replaced(&buffer, vec![labeled(6..8, 30.0)]));
+        assert_eq!(ranges(&map), vec![0..6, 6..11]);
+        assert_row_widths(&map, text);
+    }
+
+    #[test]
+    fn closing_punctuation_never_starts_a_row_after_a_label() {
+        // No break between the label and the comma: the row breaks before
+        // the label.
+        let text = "中ab，";
+        let buffer = Buffer::new(text);
+        let mut map = map(&buffer, Some(50.0), vec![]);
+        assert!(map.set_replaced(&buffer, vec![labeled(3..5, 20.0)]));
+        assert_eq!(ranges(&map), vec![0..3, 3..8]);
+        assert_row_widths(&map, text);
+    }
+
+    #[test]
+    fn a_label_between_ascii_chars_breaks_only_after_whitespace() {
+        // `#fff` (8..12) as a label after `obj.`: as the text it replaces,
+        // it stays with `obj.`, and the row breaks at the space.
+        let text = "注 obj.#fff";
+        let buffer = Buffer::new(text);
+        let mut map = map(&buffer, Some(85.0), vec![]);
+        assert!(map.set_replaced(&buffer, vec![labeled(8..12, 20.0)]));
+        assert_eq!(ranges(&map), vec![0..4, 4..12]);
+        assert_row_widths(&map, text);
     }
 
     #[test]

@@ -4218,6 +4218,9 @@ frame id:grow 0 0 300 40
 tap id:grow-more
 wait 100
 frame id:grow 0 0 300 60
+# A replacing decoration shows its label in place of its range's text
+# while no caret touches it (the editor is not focused): `a` as `alpha`.
+expect alpha
 # The app's fold ranges (the outer one shorter than the indentation's):
 # level 2 folds the inner block alone.
 # The gutter's strip of decorations' marks is `gutterDecorationsWidth`
