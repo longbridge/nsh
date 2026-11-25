@@ -1832,11 +1832,16 @@ pub struct KeyOptions {
     /// give way to the control the focus is on (default)
     /// ([`crate::keymap::KeyBinding::for_focus`]).
     pub for_focus: bool,
-    /// Comes before the views' bindings of the keystroke, so it takes a key
-    /// a focused component binds itself (a query editor's mod+enter over
-    /// the editor's own) while it is kept (default: the views' come first)
-    /// ([`crate::keymap::KeyBinding::over_focused`]).
-    pub over_focused: bool,
+    /// What it takes from the control with the keyboard focus
+    /// ([`crate::keymap::OverFocused`]; default: nothing, a focused
+    /// component's own bindings and press win). `Always`: it comes before
+    /// the views' bindings of the keystroke, so it takes a key a focused
+    /// component binds itself (a query editor's mod+enter over the
+    /// editor's own) while it is kept. `Pointer`: Return and Space from a
+    /// control a pointer gave the focus (a press, a popup a press used
+    /// giving it back), where they would press it; one the keyboard
+    /// focused still takes them.
+    pub over_focused: crate::keymap::OverFocused,
 }
 
 /// Where a keyboard shortcut fires ([`on_key_with`]; TS: `keymap.bind`'s

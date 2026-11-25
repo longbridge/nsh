@@ -3059,14 +3059,14 @@ interface KeyBindingOptions {
   repeat?: boolean;
   passThrough?: boolean;
   forFocus?: boolean;
-  overFocused?: boolean;
+  overFocused?: boolean | "pointer";
 }
 ```
 
 | TS | Rust |
 |---|---|
 | `keymap.bind(keystroke, handler)` | `on_key(keystroke, handler)` |
-| `keymap.bind(keystroke, handler, { scope, when, repeat, passThrough, forFocus, overFocused })` | `on_key_with(keystroke, KeyOptions { scope, when, repeat, pass_through, for_focus, over_focused }, handler)`；`scope` 是 `KeyScope::Window`（默认）或 `KeyScope::App`；`when` 是 `nsh_core::keymap::When`（`Auto`、`Always`、`NotEditing`） |
+| `keymap.bind(keystroke, handler, { scope, when, repeat, passThrough, forFocus, overFocused })` | `on_key_with(keystroke, KeyOptions { scope, when, repeat, pass_through, for_focus, over_focused }, handler)`；`scope` 是 `KeyScope::Window`（默认）或 `KeyScope::App`；`when` 是 `nsh_core::keymap::When`（`Auto`、`Always`、`NotEditing`）；`over_focused` 是 `nsh_core::keymap::OverFocused`（默认 `Never`；`true` 对应 `Always`；`Pointer`） |
 | `keymap.bind({ … })` | 每个按键组合一次 `on_key` |
 | `keymap.label(keystroke)` | `key_label(keystroke)` |
 
@@ -3255,9 +3255,20 @@ on_key_with("tab", KeyOptions { pass_through: true, ..KeyOptions::default() }, m
 on_key_with("space", KeyOptions { for_focus: true, ..KeyOptions::default() }, move |_| flip());
 ```
 
+媒体播放器的空格这类单键快捷键，可以用 `overFocused: "pointer"` 从指针聚焦的控件那里拿到按键。在 Windows 上，点击会像原生按钮一样把焦点交给点中的按钮；除 macOS 和 iOS 外，由点击打开的 `Select`、`Menu`、`Popover` 或 `DatePicker` 关闭时会把焦点还给触发器。（在 macOS 和 iOS 上，点击不移动焦点，这个选项很少有按键可拿。）不带这个选项时，空格会再次按下这个控件：点了静音之后按空格会再静音一次，选完画质后按空格会再次打开列表。带上它，就由这个绑定处理。键盘聚焦的控件（Tab、方向键）仍然拿到回车和空格，键盘用户按下的就是他们移过去的控件；文本输入框按 `when` 的规则保留自己的按键：
+
+```tsx tabs
+keymap.bind("space", togglePlayback, { when: "notEditing", overFocused: "pointer" });
+```
+
+```rust tabs
+let options = KeyOptions { when: When::NotEditing, over_focused: OverFocused::Pointer, ..KeyOptions::default() };
+on_key_with("space", options, move |_| toggle_playback());
+```
+
 按键归最新的对话框：焦点留在被对话框盖住的视图上时（菜单项打开对话框，菜单关闭时把焦点还给触发器），回车和空格交给对话框的绑定，这个视图的 `forFocus` 绑定和按下都要等对话框关闭后才生效。
 
-拥有焦点的组件自己的绑定排在应用的绑定之前：`Editor` 有焦点时，无论应用把 Mod+Enter 绑给了什么，它都会在下方插入一行。带 `overFocused: true` 的绑定则排在它们之前，应用因此能拿到聚焦组件自己绑定的按键，例如查询编辑器用 Mod+Enter 执行其中的文本。在那个视图有焦点时绑定、焦点离开时撤销，组件在别的时候仍然保留这个键（Rust：`KeyOptions { over_focused: true, .. }`）。不带这个选项时顺序与以前相同，弹出层的 Escape 仍然先关闭弹出层。
+拥有焦点的组件自己的绑定排在应用的绑定之前：`Editor` 有焦点时，无论应用把 Mod+Enter 绑给了什么，它都会在下方插入一行。带 `overFocused: true` 的绑定则排在它们之前，应用因此能拿到聚焦组件自己绑定的按键，例如查询编辑器用 Mod+Enter 执行其中的文本。在那个视图有焦点时绑定、焦点离开时撤销，组件在别的时候仍然保留这个键（Rust：`KeyOptions { over_focused: OverFocused::Always, .. }`）。不带这个选项时顺序与以前相同，弹出层的 Escape 仍然先关闭弹出层。
 
 ```tsx
 const focused = signal(false);
