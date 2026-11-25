@@ -60,7 +60,9 @@ use objc2_core_graphics::CGContext;
 use objc2_foundation::{
     NSArray, NSObject, NSObjectProtocol, NSPoint, NSRange, NSRect, NSSize, NSString,
 };
-use objc2_quartz_core::{CALayer, CALayerDelegate, CATransform3D, kCAGravityBottomLeft};
+use objc2_quartz_core::{
+    CALayer, CALayerDelegate, CATransform3D, kCAContentsFormatRGBA8Uint, kCAGravityBottomLeft,
+};
 
 use crate::surface::{Surface, quiet};
 
@@ -2220,6 +2222,7 @@ impl NshView {
             layer.setAnchorPoint(CGPoint::new(0.0, 0.0));
             layer.setContentsScale(self.content_scale(bounds.size));
             layer.setZPosition(crate::decor::BEHIND / 4.0);
+            eight_bit_store(&layer);
             host.addSublayer(&layer);
             *overlay = Some((layer, drawer));
         }
@@ -2293,6 +2296,7 @@ impl NshView {
         // shadows), below the children and the borders in front.
         layer.setZPosition(crate::decor::BEHIND / 2.0);
         layer.setFrame(bounds);
+        eight_bit_store(&layer);
         host.addSublayer(&layer);
         *self.ivars().content.borrow_mut() = Some((layer.clone(), drawer));
         self.clip_content(&layer);
@@ -3342,6 +3346,21 @@ pub(crate) fn backing_scale_of(view: &NSView) -> CGFloat {
     } else {
         2.0
     }
+}
+
+/// Gives a content layer an 8-bit backing store in the display's color space.
+///
+/// Left to pick (`AutomaticAppKit`), Core Animation gives a layer that draws
+/// an image or a gradient a 16-bit store (RGBA16, or half floats when it draws
+/// asynchronously) on a wide color display. Writing resampled image pixels
+/// into it is about 3x slower than into 8 bits (a 64 px sprite drawn at
+/// 256 pt: 8.3-9.7 ms against 2.6-2.9 ms), and it takes twice the memory.
+/// Content layers draw sRGB colors and images, which 8 bits per channel in
+/// the display's (wide) color space hold; only HDR images lose their
+/// brightness above white.
+fn eight_bit_store(layer: &CALayer) {
+    // SAFETY: an immutable constant string of Core Animation's.
+    layer.setContentsFormat(unsafe { kCAContentsFormatRGBA8Uint });
 }
 
 #[cfg(test)]
