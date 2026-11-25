@@ -499,6 +499,23 @@ let editor!: EditorRef;
 />
 ```
 
+`onScroll({ offset, contentSize, size })` 报告文本滚动到的位置，键与 [`Scroll`](./scroll.md) 的相同：`offset` 即 `scrollOffset()`，`contentSize` 是文本滚动经过的内容的尺寸，`size` 是视口的尺寸。不设 `softWrap` 时，内容的宽度是视口的宽度加上文本能横向滚动的距离；自动换行时，内容与视口同宽，`offset.x` 为 0。编辑器完成布局时触发一次，之后其中任何一项变化时再触发：滚动、改变大小，以及改变了内容尺寸的编辑或折叠。放在标题下面的编辑器可以在文本滚到顶边下面时，在顶边画一条线或做渐隐：
+
+```tsx
+const scrolled = signal(false);
+
+<View style={{ flex: 1 }}>
+  <View class={scrolled() ? "h-px bg-border" : "h-px"} />
+  <Editor
+    defaultValue={notes()}
+    language="markdown"
+    softWrap
+    onScroll={({ offset }) => scrolled.set(offset.y > 0)}
+    style={{ flex: 1 }}
+  />
+</View>
+```
+
 <a id="methods"></a>
 
 ## 方法
@@ -717,6 +734,7 @@ let editor!: EditorRef;
 | `onInlineCompletionRequest` | `.on_inline_completion_request(\|event: &EditorInlineCompletionRequest\| ..)` | 输入停顿了：`{ id, offset, position }`，用于行内补全。 |
 | `onDefinitionRequest` | `.on_definition_request(\|event: &EditorDefinitionRequest\| ..)` | 编辑器请求一个定义：`{ id, position, offset, range, trigger }`（[跳转到定义](#跳转到定义与代码操作)）。 |
 | `onCodeActionRequest` | `.on_code_action_request(\|event: &EditorCodeActionRequest\| ..)` | 用户请求代码操作：`{ range, position, bounds? }`。 |
+| `onScroll` | `.on_scroll(\|e: &EditorEvent\| ..)` | 文本滚动了，或者内容或视口的尺寸变了：`{ offset, contentSize, size }`，与 `Scroll` 的相同（Rust 中为 `EditorEvent::Scroll(offset, content_size, size)`）。编辑器完成布局时触发一次，之后其中任何一项变化时再触发（[尺寸与滚动](#size-and-scrolling)）。 |
 
 <a id="accessibility"></a>
 

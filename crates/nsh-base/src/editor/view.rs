@@ -825,6 +825,7 @@ fn text_area(ed: Ed, lh: impl Fn() -> Points + Clone + 'static, layer: Layer) ->
         }
         let scroll_ed = ed.clone();
         let layout_ed = ed.clone();
+        let content_ed = ed.clone();
         // Where the text area starts in the editor (past the gutter): the
         // editor's `scrollbarInset` counts from the editor's left. A memo,
         // so that a layout that leaves the bar's inset as it was sends
@@ -845,7 +846,13 @@ fn text_area(ed: Ed, lh: impl Fn() -> Points + Clone + 'static, layer: Layer) ->
             })
             .child(
                 part(
-                    view().min_w(relative(1.0)).pl(px(4.0)),
+                    view()
+                        .min_w(relative(1.0))
+                        .pl(px(4.0))
+                        // How far the text scrolls sideways (`onScroll`).
+                        .on_layout(move |bounds: &Bounds<Points>| {
+                            content_ed.text_content_width.set(bounds.size.width)
+                        }),
                     props,
                     EditorPart::Content,
                 )

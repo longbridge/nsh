@@ -613,6 +613,28 @@ line at each of its columns (the `ruler` part), as guides of a line's length.
 />
 ```
 
+`onScroll({ offset, contentSize, size })` reports where the text is scrolled, with the keys of a
+[`Scroll`](./scroll.md)'s: `offset` is `scrollOffset()`, `contentSize` what the text scrolls over and `size` the
+viewport. Without `softWrap` the content is as wide as the viewport plus how far the text scrolls sideways; wrapped, it
+is as wide as the viewport and `offset.x` is 0. It fires once the editor is laid out and again when one of them
+changes: a scroll, a resize, an edit or a fold that changes the content's size. An editor under a title draws a line
+or a fade at its top edge once the text scrolls under it:
+
+```tsx
+const scrolled = signal(false);
+
+<View style={{ flex: 1 }}>
+  <View class={scrolled() ? "h-px bg-border" : "h-px"} />
+  <Editor
+    defaultValue={notes()}
+    language="markdown"
+    softWrap
+    onScroll={({ offset }) => scrolled.set(offset.y > 0)}
+    style={{ flex: 1 }}
+  />
+</View>
+```
+
 ## Methods
 
 `ref={editor}` gives the editor's methods (`EditorRef`), for the app's buttons, menus and keys. Methods that return a
@@ -827,6 +849,7 @@ with the user's text size (`fontScale()`), and the rows grow with it.
 | `onInlineCompletionRequest` | `.on_inline_completion_request(\|event: &EditorInlineCompletionRequest\| ..)` | Typing paused: `{ id, offset, position }`, for an inline completion. |
 | `onDefinitionRequest` | `.on_definition_request(\|event: &EditorDefinitionRequest\| ..)` | The editor asks for a definition: `{ id, position, offset, range, trigger }` ([Go to definition](#go-to-definition-and-code-actions)). |
 | `onCodeActionRequest` | `.on_code_action_request(\|event: &EditorCodeActionRequest\| ..)` | The user asked for code actions: `{ range, position, bounds? }`. |
+| `onScroll` | `.on_scroll(\|e: &EditorEvent\| ..)` | The text scrolled, or it or the viewport changed size: `{ offset, contentSize, size }`, as a `Scroll`'s (`EditorEvent::Scroll(offset, content_size, size)` in Rust). It fires once the editor is laid out and again when one of them changes ([Size and scrolling](#size-and-scrolling)). |
 
 ## Accessibility
 
