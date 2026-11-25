@@ -1,10 +1,12 @@
 //! How an editor sizes and scrolls: how far the text scrolls past its last
 //! line ([`EditorScrollBeyond`]), the height of an editor that grows with
 //! its text (`minRows` / `maxRows`), the rows kept around the caret
-//! (`cursorSurroundingLines`), and scrolling on its own while a drag
-//! selects past the viewport's edge.
+//! (`cursorSurroundingLines`), scrolling on its own while a drag selects
+//! past the viewport's edge, and where the scroll bars keep within the
+//! editor (`scrollbarInset`).
 
 use nsh_core::{
+    EdgeInsets,
     element::{JsHost, JsIn, JsOwned, JsValue, PropError, TsTypes},
     geometry::{Points, px},
 };
@@ -194,6 +196,27 @@ pub(crate) fn ruler_lane(lane: super::EditorOverviewRulerLane) -> (f32, f32) {
     }
 }
 
+/// The editor's `scrollbarInset`, none below zero, as a scroll view
+/// takes it.
+pub(crate) fn bar_inset(inset: EdgeInsets) -> EdgeInsets {
+    inset.map(|v| v.max(px(0.0)))
+}
+
+/// The horizontal scroll view's `scrollbarInset`: the editor's `inset`,
+/// measured from the editor's edges, for a text area starting `text_left`
+/// past the editor's left (the gutter's width). Its bar runs along the
+/// bottom between the ends, so the top is the vertical bar's alone, and
+/// the gutter already keeps the bar that far from the left.
+pub(crate) fn text_bar_inset(inset: EdgeInsets, text_left: Points) -> EdgeInsets {
+    let inset = bar_inset(inset);
+    EdgeInsets {
+        top: px(0.0),
+        right: inset.right,
+        bottom: inset.bottom,
+        left: (inset.left - text_left).max(px(0.0)),
+    }
+}
+
 #[cfg(test)]
 mod ruler_tests {
     use super::*;
@@ -216,5 +239,31 @@ mod ruler_tests {
         assert_eq!(ruler_place(2..3, lh, px(100.0), px(200.0)).0, px(40.0));
         assert_eq!(ruler_lane(Lane::Right), (2.0 / 3.0, 1.0 / 3.0));
         assert_eq!(ruler_lane(Lane::Full), (0.0, 1.0));
+    }
+
+    #[test]
+    fn the_horizontal_bar_keeps_the_editors_inset_past_the_gutter() {
+        let inset = EdgeInsets {
+            top: px(8.0),
+            right: px(4.0),
+            bottom: px(6.0),
+            left: px(12.0),
+        };
+        let without_top = |left| EdgeInsets {
+            top: px(0.0),
+            right: px(4.0),
+            bottom: px(6.0),
+            left: px(left),
+        };
+        // No gutter: the text area starts at the editor's left.
+        assert_eq!(text_bar_inset(inset, px(0.0)), without_top(12.0));
+        // A gutter narrower than the inset keeps the rest of it.
+        assert_eq!(text_bar_inset(inset, px(5.0)), without_top(7.0));
+        // A wider one already keeps the bar clear.
+        assert_eq!(text_bar_inset(inset, px(40.0)), without_top(0.0));
+        // Negative sides count as none, as on a scroll view.
+        let negative = EdgeInsets::all(px(-3.0));
+        assert_eq!(bar_inset(negative), EdgeInsets::default());
+        assert_eq!(text_bar_inset(negative, px(0.0)), EdgeInsets::default());
     }
 }

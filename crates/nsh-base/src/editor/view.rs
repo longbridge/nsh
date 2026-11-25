@@ -104,6 +104,7 @@ pub(crate) fn render(ed: Ed) -> impl IntoElement {
                 .element_ref(&ed.vscroll)
                 .absolute()
                 .inset_0()
+                .scrollbar_inset(move || super::layout::bar_inset(props.scrollbar_inset.get()))
                 .on_scroll(move |e: &ScrollEvent| {
                     vscroll_ed.scroll_y.set(e.offset.y);
                     vscroll_ed.viewport.set(e.size);
@@ -368,7 +369,8 @@ fn decoration_mark<E: Element>(
 /// The overview ruler's width, a scroll bar's (Monaco's).
 const RULER_WIDTH: f32 = 14.0;
 
-/// The overview ruler: along the editor's right edge, over the text, the
+/// The overview ruler: along the editor's right edge (within its
+/// `scrollbarInset`, as the vertical bar), over the text, the
 /// decorations' marks at their rows' places in the whole text.
 fn overview_ruler(ed: Ed) -> impl IntoElement {
     let props = ed.props;
@@ -393,12 +395,15 @@ fn overview_ruler(ed: Ed) -> impl IntoElement {
                 })
             };
             let ed = ed.clone();
+            // The vertical scroll bar's track: within the editor's
+            // `scrollbarInset`, as the bar is.
+            let inset = move || super::layout::bar_inset(props.scrollbar_inset.get());
             part(
                 view()
                     .absolute()
-                    .top_0()
-                    .bottom_0()
-                    .right_0()
+                    .top(move || Length::from(inset().top))
+                    .bottom(move || Length::from(inset().bottom))
+                    .right(move || Length::from(inset().right))
                     // A scroll bar's width, the part's to change: the
                     // lanes are shares of it.
                     .w(px(RULER_WIDTH))
@@ -449,7 +454,8 @@ fn overview_ruler(ed: Ed) -> impl IntoElement {
 
 /// Where a mark is down the overview ruler: its top and height.
 fn ruler_place(ed: &Ed, mark: &RulerMark) -> (Points, Points) {
-    let track = ed.viewport.get().height;
+    let inset = super::layout::bar_inset(ed.props.scrollbar_inset.get());
+    let track = (ed.viewport.get().height - inset.top - inset.bottom).max(px(0.0));
     let lh = {
         ed.text_rev.get();
         ed.st.borrow().line_height()
@@ -818,12 +824,24 @@ fn text_area(ed: Ed, lh: impl Fn() -> Points + Clone + 'static, layer: Layer) ->
         }
         let scroll_ed = ed.clone();
         let layout_ed = ed.clone();
+        // Where the text area starts in the editor (past the gutter): the
+        // editor's `scrollbarInset` counts from the editor's left. A memo,
+        // so that a layout that leaves the bar's inset as it was sends
+        // nothing.
+        let left = signal(px(0.0));
+        let inset = computed(move || {
+            super::layout::text_bar_inset(props.scrollbar_inset.get(), left.get())
+        });
         scroll()
             .horizontal()
             .flex_1()
             .element_ref(&ed.hscroll)
+            .scrollbar_inset(move || inset.get())
             .on_scroll(move |e: &ScrollEvent| scroll_ed.scroll_x.set(e.offset.x))
-            .on_layout(move |bounds: &Bounds<Points>| layout_ed.text_width.set(bounds.size.width))
+            .on_layout(move |bounds: &Bounds<Points>| {
+                left.set(bounds.origin.x);
+                layout_ed.text_width.set(bounds.size.width);
+            })
             .child(
                 part(
                     view().min_w(relative(1.0)).pl(px(4.0)),

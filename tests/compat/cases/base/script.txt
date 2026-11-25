@@ -4224,6 +4224,9 @@ frame id:grow 0 0 300 60
 # wide, before the line numbers and the fold markers: the gutter is
 # 12 + 4 + 15 + 20 + 4 wide.
 frame below:parent:parent:parent:parent:span:c(); 0 0 55 200
+# Its vertical scroll view (below the layer drawn over it) keeps its bar
+# within `scrollbarInset`.
+prop below:parent:parent:parent:parent:parent:parent:span:c(); scrollbarInset top=6 right=2 bottom=6
 tap id:fold-level
 expect Folded: 1-2
 # Folding the outer block recursively keeps the inner one folded, so
@@ -4321,6 +4324,7 @@ covers [events] Editor.onInlineCompletionRequest
 covers [props] Editor.diagnostics
 covers [props] Editor.styles
 covers [props] Editor.gutterDecorationsWidth
+covers [props] Editor.scrollbarInset
 covers [events] Editor.onDefinitionRequest
 covers [events] Editor.onCodeActionRequest
 
