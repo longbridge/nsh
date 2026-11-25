@@ -24,7 +24,8 @@ NSH 应用也能在 Linux 上运行。Linux 后端用 GTK 4 控件渲染应用�
   构建的运行时中 Web 视图为占位视图，其应用只需要 GTK。
 - **GStreamer** 1.14 及以上：GTK 通过它播放视频，NSH 用它播放声音。构建时不需要它：应用第一次播放声音时 NSH
   才加载 GStreamer。应用运行的机器上需要 GStreamer 及其 base 插件（桌面系统自带），以及应用要播放的视频和音频格式对应的插件。
-  没有 GStreamer 时应用照常启动，加载声音会失败，错误信息会写明缺少哪个库。
+  没有 GStreamer 时应用照常启动，加载声音会失败，错误信息会写明缺少哪个库。应用没有导入 `Sound` 时，`nsh package` 构建的
+  TSX 应用 runner 不包含声音（运行时的 Cargo feature `sound`）；视频和 `AudioPlayer` 都通过 GTK 播放，不受影响。
 
 ## 运行应用
 
