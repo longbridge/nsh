@@ -169,7 +169,9 @@ view's), and `classes.root` classes. `classes` takes Tailwind classes by part an
 default styles, so they win; its `styles` win over its classes. In Rust, the parts take typed styles: `TextViewParts`
 gives each `TextViewPart` a function refining its style, for every `TextView` below the view that provides it
 ([Typed part styles](#typed-part-styles)), and the root takes the style methods. Line heights in the defaults are set in points: a
-class that changes a part's size sets its line height too (Tailwind's `text-*` classes do).
+class that changes a part's size sets its line height too (Tailwind's `text-*` classes do). A block's position variants
+(`first:`, `last:`, `odd:`, `even:`, `only:`) read its place among the blocks around it: `heading: "mt-6 first:mt-0"`
+leaves no room above a heading that opens the document, or a quote.
 
 ```tsx tabs
 <TextView

@@ -1516,6 +1516,13 @@ impl<M: TextEngine> Core<M> {
 
     /// Restyles the children of `parent` that depend on their position.
     pub(super) fn positions_changed(&mut self, parent: Key) {
+        if self.passes_position(parent) {
+            // Its children take its own position, which theirs among
+            // them do not change.
+            let bits = self.known_position(parent);
+            self.pass_to_children(parent, bits);
+            return;
+        }
         let children = self.nodes[parent as usize].children.clone();
         self.positioning(children.len());
         let count = children
@@ -1532,19 +1539,93 @@ impl<M: TextEngine> Core<M> {
                 // Keep position_bits' fallback for a child that does not count.
                 0
             };
-            let node = &self.nodes[c as usize];
-            if node
-                .classes
-                .as_ref()
-                .is_some_and(|c| c.deps() & deps::POSITION != 0)
+            self.position_moved(c, Self::position_at(index, count));
+        }
+    }
+
+    /// Restyles `key`, now at position `bits`, if its classes read its
+    /// position and it moved; a view passing its position on passes it.
+    fn position_moved(&mut self, key: Key, bits: u8) {
+        let node = &self.nodes[key as usize];
+        // Only the children whose bits moved: an append restyles the old
+        // last row and the new one, not every sibling.
+        if node.position_used == bits {
+            return;
+        }
+        if node.positional.has(Positional::PASS) {
+            self.nodes[key as usize].position_used = bits;
+            if self.nodes[key as usize]
+                .positional
+                .has(Positional::CHILDREN)
             {
-                // Only the children whose bits moved: an append restyles the
-                // old last row and the new one, not every sibling.
-                let bits = Self::position_at(index, count);
-                if node.position_used != bits {
-                    self.restyle_at(c, Some(bits));
-                }
+                self.pass_to_children(key, bits);
             }
+        }
+        if self.nodes[key as usize]
+            .classes
+            .as_ref()
+            .is_some_and(|c| c.deps() & deps::POSITION != 0)
+        {
+            self.restyle_at(key, Some(bits));
+        }
+    }
+
+    /// Gives `key`'s element children the position `bits`, its own.
+    fn pass_to_children(&mut self, key: Key, bits: u8) {
+        let children = self.nodes[key as usize].children.clone();
+        self.positioning(children.len());
+        for c in children {
+            if self.is_element_child(c) {
+                self.position_moved(c, bits);
+            }
+        }
+    }
+
+    /// Whether `key`'s children take its position ([`Prop::PassPosition`]).
+    ///
+    /// [`Prop::PassPosition`]: crate::ops::Prop::PassPosition
+    fn passes_position(&self, key: Key) -> bool {
+        self.nodes[key as usize].positional.has(Positional::PASS)
+    }
+
+    /// A child of `parent` reads its position: `parent` looks at its
+    /// children's when they move, and so does each view whose position
+    /// it passes on.
+    pub(super) fn reads_positions(&mut self, parent: Key) {
+        let mut k = parent;
+        while k != NO_KEY {
+            let node = &mut self.nodes[k as usize];
+            node.positional |= Positional::CHILDREN;
+            if !node.positional.has(Positional::PASS) {
+                break;
+            }
+            k = node.parent;
+        }
+    }
+
+    /// Sets whether `key`'s children take its position among its
+    /// siblings ([`Prop::PassPosition`]); those that read theirs are
+    /// styled again.
+    ///
+    /// [`Prop::PassPosition`]: crate::ops::Prop::PassPosition
+    pub(super) fn set_pass_position(&mut self, key: Key, pass: bool) {
+        if self.passes_position(key) == pass {
+            return;
+        }
+        let node = &mut self.nodes[key as usize];
+        if pass {
+            node.positional |= Positional::PASS;
+        } else {
+            node.positional.remove(Positional::PASS);
+        }
+        // Not yet known: counted again when asked for (`known_position`).
+        node.position_used = 0;
+        if node.positional.has(Positional::CHILDREN) {
+            let parent = node.parent;
+            if pass && parent != NO_KEY {
+                self.reads_positions(parent);
+            }
+            self.queue_positions(key);
         }
     }
 
@@ -1574,11 +1655,15 @@ impl<M: TextEngine> Core<M> {
         self.position_bits(key)
     }
 
-    /// [`position`] bits of `key` among its parent's element children.
+    /// [`position`] bits of `key` among its parent's element children, or
+    /// its parent's own when the parent passes its position on.
     fn position_bits(&self, key: Key) -> u8 {
         let parent = self.nodes[key as usize].parent;
         if parent == NO_KEY {
             return position::FIRST | position::LAST | position::ONLY | position::ODD;
+        }
+        if self.passes_position(parent) {
+            return self.known_position(parent);
         }
         self.positioning(self.nodes[parent as usize].children.len());
         let siblings: Vec<Key> = self.nodes[parent as usize]
@@ -1722,7 +1807,7 @@ impl<M: TextEngine> Core<M> {
             self.ch_readers -= 1;
         }
         if positional {
-            self.nodes[parent as usize].positional |= Positional::CHILDREN;
+            self.reads_positions(parent);
         }
     }
 
@@ -2147,8 +2232,7 @@ impl<M: TextEngine> Core<M> {
             }
             self.nodes[key as usize].position_used = if positional { pos } else { 0 };
             if positional {
-                let parent = self.nodes[key as usize].parent;
-                self.nodes[parent as usize].positional |= Positional::CHILDREN;
+                self.reads_positions(self.nodes[key as usize].parent);
             }
         } else {
             // Without classes it reads no position: the bits it was styled

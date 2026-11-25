@@ -398,8 +398,9 @@ pub fn TextView(props: TextViewProps, cx: Scope<TextViewEvent>) -> impl IntoElem
             move |row, _| {
                 let plugins = row_plugins.clone();
                 // A node as the row's root: an `Each` keeps rows by their
-                // root's key, which a region has none of.
-                view().child(dynamic(move || {
+                // root's key, which a region has none of. The block takes
+                // the row's place among the blocks (`first:`, `last:`).
+                view().__pass_position(true).child(dynamic(move || {
                     let cx = Cx::read(&props, cx, plugins.clone(), math_loaded);
                     let row = row.get();
                     cx.task.set(row.tasks_before);
@@ -702,9 +703,12 @@ impl Cx {
         // heading's included, takes one blank row before it, as a Markdown
         // source has. Not in a list (its items' blocks stay together).
         let after_block = !matches!(before, Before::Nothing);
+        // The wrappers below pass their place on: the block keeps its own
+        // among the blocks around it (`first:`, `last:`).
         let el = if is_terminal() && self.list_depth.get() == 0 && after_block {
             view()
                 .flex_col()
+                .__pass_position(true)
                 .child(view().h(crate::terminal::cell_height()))
                 .child(el)
                 .into_element()
@@ -716,6 +720,7 @@ impl Cx {
         if tail && self.caret.is_some() && !self.caret_placed.get() {
             view()
                 .flex_col()
+                .__pass_position(true)
                 .child(el)
                 .child(self.caret_after(self.chrome(text("")), true))
                 .into_element()
