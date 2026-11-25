@@ -880,9 +880,9 @@ impl Dt {
 
     fn bind_keys(&self) {
         let dt = self.clone();
-        // A terminal's Tab moves the focus on, out of the table, as Tab does
-        // everywhere in a terminal; the arrows move between the columns.
-        let tab = !crate::terminal::is_terminal();
+        // Tab moves between the cells everywhere, a terminal included, as
+        // a spreadsheet's does; Escape (with nothing selected) gives up the
+        // keyboard, and Tab then moves the focus on.
         effect(move || {
             if !dt.focused.get() {
                 return;
@@ -900,9 +900,6 @@ impl Dt {
                 ("end", Move::Last, true),
             ];
             for (keys, movement, repeat) in moves {
-                if !tab && keys.ends_with("tab") {
-                    continue;
-                }
                 let dt = dt.clone();
                 on_key_with(
                     keys,

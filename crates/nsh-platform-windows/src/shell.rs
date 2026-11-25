@@ -790,14 +790,11 @@ fn bare_when_zoomed(attrs: &Attrs) -> bool {
 /// before), the shadow of a frameless window and its corners.
 fn set_material(hwnd: HWND, attrs: &Attrs) {
     let frameless = attrs.frameless();
-    let backdrop = attrs.backdrop != Backdrop::None;
     // SAFETY: a plain query on a live window.
     let zoomed = bare_when_zoomed(attrs) && unsafe { IsZoomed(hwnd) }.as_bool();
     // A frameless window's shadow is the frame's, extended by a pixel;
     // a backdrop shows through the whole client area.
-    let margin = if backdrop {
-        -1
-    } else if frameless && attrs.shadow && !attrs.transparent && !zoomed {
+    let margin = if frameless && attrs.shadow && !attrs.transparent && !zoomed {
         1
     } else {
         0
