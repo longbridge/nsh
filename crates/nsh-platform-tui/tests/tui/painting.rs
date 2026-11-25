@@ -744,7 +744,7 @@ fn WideIcons() -> impl IntoElement {
         .child(
             view()
                 .flex_row()
-                .column_gap(px(16.0))
+                .gap(px(16.0))
                 .child(icon("菜单"))
                 .child(icon("设置")),
         )
@@ -765,10 +765,11 @@ fn an_icon_button_lays_out_its_wide_label_whole_or_cuts_it_with_an_ellipsis() {
     view.load(App::Rust(Root::new::<WideIcons>(|| ()))).unwrap();
     draw_until(&mut view, &mut terminal, &rx, "ready");
     let buffer = terminal.backend().buffer();
-    let first = row(buffer, 0, 0..20);
+    // A wide glyph's trailing cell reads back as a space, so compare without them.
+    let first = row(buffer, 0, 0..20).replace(' ', "");
     assert!(first.starts_with("菜单"), "{first:?}");
     assert!(first.contains("设置"), "{first:?}");
-    let second = row(buffer, 1, 0..20);
+    let second = row(buffer, 1, 0..20).replace(' ', "");
     assert!(second.starts_with("标题"), "{second:?}");
     assert!(
         second.contains('…'),
