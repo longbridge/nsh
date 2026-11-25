@@ -39,6 +39,7 @@ For people working on NSH itself (`AGENTS.md` at the root is the short version a
 | [compatibility.md](compatibility.md) | The backward compatibility contract: what apps depend on, the rules, `nsh-compat` and `tests/compat/` |
 | [performance.md](performance.md) | Baselines |
 | [pitfalls.md](pitfalls.md) | Verified constraints and pitfalls, by area |
+| [review-misses.md](review-misses.md) | Bug patterns that passed review, checked before reviewing APIs and platform code |
 
 How a module works inside is documented in the module itself (`//!` docs, Javadoc); these pages describe behavior
 and decisions and point there.

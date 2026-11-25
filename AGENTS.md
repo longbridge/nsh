@@ -34,6 +34,7 @@ comments before editing. Read only the relevant sections of these reference page
 | PRs, reviews, CI scheduling, caches, parallel work | [Workflow](docs/dev/workflow.md) |
 | Public names and compatibility | [API naming](docs/dev/api-naming.md), [compatibility](docs/dev/compatibility.md) |
 | Platform code | [Pitfalls](docs/dev/pitfalls.md) and the platform's dev page |
+| Reviews, public APIs, input and platform backends | [What reviews missed](docs/dev/review-misses.md) |
 | Hot paths | [Performance baselines](docs/dev/performance.md) |
 
 These pages are references, not recursive instruction imports. `CLAUDE.md` imports
