@@ -25,8 +25,11 @@
 //! ([`pan_op`]: a map, a tree view) is rasterized past the view by
 //! [`PAN_MARGIN`] ([`Panned`]): a frame in which only the pan moved shows
 //! the same textures moved, in whole pixels, so panning costs no replay;
-//! nearing the edge, the pixels are moved over and only the strips that
-//! come in are replayed. Other slots changing (a zoom) replay what shows.
+//! nearing the edge, the strips that come in are replayed on a worker
+//! thread ([`Recentre`]) while the frames keep moving what was drawn, then
+//! the pixels are moved over and the strips pasted around them (a drawing
+//! with images does this on the main thread). Other slots changing (a
+//! zoom) replay what shows.
 //!
 //! A canvas out of sight (outside a clipping ancestor or the window) is not
 //! drawn: what changed waits, its animations stop asking for frames, and
@@ -405,7 +408,16 @@ pub(crate) fn draw(snapshot: &gtk::Snapshot, view: &NshView, state: &ViewState, 
             return;
         }
         let started = crate::fps::measuring().then(nsh_core::time::Instant::now);
-        let drawn = draw_panned(snapshot, canvas, drawing, pan, (w, h), (pw, ph), scale);
+        let drawn = draw_panned(
+            snapshot,
+            view,
+            canvas,
+            drawing,
+            pan,
+            (w, h),
+            (pw, ph),
+            scale,
+        );
         if let Some(started) = started {
             crate::fps::rasterized(started.elapsed());
         }
@@ -605,7 +617,28 @@ struct Panned {
     /// only the view's part after a frame that drew it again (a zoom).
     valid: [i32; 4],
     tiles: Vec<gdk::Texture>,
+    /// Strips being replayed on a worker thread for a re-centering
+    /// ([`Recentre`]).
+    pending: Option<Recentre>,
 }
+
+/// A re-centering of a [`Panned`] raster whose incoming strips a worker
+/// thread replays, so a fast pan keeps moving the textures it has instead
+/// of waiting a frame on the replay: when they come back, the pixels that
+/// stay are moved over and the strips pasted around them.
+struct Recentre {
+    /// The pan the strips are drawn at.
+    at: (f64, f64),
+    /// How far the raster moves, in pixels, and where its moved pixels
+    /// land (x0, y0, x1, y1).
+    shift: (i32, i32),
+    moved: [i32; 4],
+    strips: std::sync::mpsc::Receiver<Result<Vec<Strip>, String>>,
+}
+
+/// A replayed strip: its area of the surface (x0, y0, x1, y1), and its
+/// ARGB32 pixels with their stride.
+type Strip = ([i32; 4], Vec<u8>, usize);
 
 /// The operation of `ops` that pans everything the drawing paints, if one
 /// does: the first one reading a slot (`split`) is a `translate`, nothing
@@ -661,8 +694,10 @@ fn pan_op(ops: &[CanvasOp], split: usize) -> Option<usize> {
 /// when the pan nears the edge of what was rasterized moves the pixels
 /// that stay and replays only the strips that come in; otherwise only
 /// moves the textures.
+#[allow(clippy::too_many_arguments)]
 fn draw_panned(
     snapshot: &gtk::Snapshot,
+    widget: &NshView,
     canvas: &CanvasState,
     drawing: &Drawing,
     pan: usize,
@@ -714,6 +749,7 @@ fn draw_panned(
             size: (pw, ph),
             at: now,
             valid: view,
+            pending: None,
         });
     }
     let p = panned.as_mut().expect("rasterized above");
@@ -722,29 +758,96 @@ fn draw_panned(
         ((now.0 - p.at.0) * scale).round() as i32,
         ((now.1 - p.at.1) * scale).round() as i32,
     );
+    // Strips replayed on the worker for a re-centering: move the pixels
+    // that stay and paste them around.
+    let done = match &p.pending {
+        Some(r) => match r.strips.try_recv() {
+            Ok(strips) => Some(strips),
+            Err(std::sync::mpsc::TryRecvError::Empty) => None,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(Err("worker died".into())),
+        },
+        None => None,
+    };
+    if let Some(strips) = done {
+        let r = p.pending.take().expect("pending above");
+        let strips = strips?;
+        let target = spare_surface(p.spare.take(), (sw, sh), scale)?;
+        paste(&target, &p.surface, r.shift, r.moved, strips, scale)?;
+        p.spare = Some(std::mem::replace(&mut p.surface, target));
+        p.at = r.at;
+        p.valid = [0, 0, sw, sh];
+        p.tiles.clear();
+        shift = (
+            ((now.0 - p.at.0) * scale).round() as i32,
+            ((now.1 - p.at.1) * scale).round() as i32,
+        );
+    }
     // The surface's pixels the view shows moved by `shift`.
     let needed = [m - shift.0, m - shift.1, m - shift.0 + pw, m - shift.1 + ph];
     let covered = |v: [i32; 4]| {
         v[0] <= needed[0] && v[1] <= needed[1] && needed[2] <= v[2] && needed[3] <= v[3]
     };
-    // Past half the margin, or showing what was not drawn: re-centre on
-    // the pan, before it shows an edge.
-    if shift.0.abs() > m / 2 || shift.1.abs() > m / 2 || !covered(p.valid) {
+    let v = p.valid;
+    // Images are kept as surfaces of this thread: such a drawing re-centres
+    // here.
+    let threaded = !drawing
+        .ops
+        .iter()
+        .any(|op| matches!(op, CanvasOp::DrawImage { .. }));
+    let far = shift.0.abs() > m / 4 || shift.1.abs() > m / 4 || !covered(p.valid);
+    if threaded && far && p.pending.is_none() {
+        // Re-centre on the pan early, on a worker: the margin left covers
+        // the frames its strips take. A pan faster than that (or a jump)
+        // shows the edge of what was drawn until they come, rather than
+        // holding the frame on the replay.
+        let at = (
+            p.at.0 + shift.0 as f64 / scale,
+            p.at.1 + shift.1 as f64 / scale,
+        );
+        let moved = [
+            (v[0] + shift.0).max(0),
+            (v[1] + shift.1).max(0),
+            (v[2] + shift.0).min(sw),
+            (v[3] + shift.1).min(sh),
+        ];
+        let bands = bands_around(moved, (sw, sh));
+        let (tx, rx) = std::sync::mpsc::channel();
+        let drawing = canvas.drawing.clone().expect("drawing above");
+        let args = canvas.args.clone();
+        let weak: glib::SendWeakRef<NshView> = widget.downgrade().into();
+        std::thread::Builder::new()
+            .name("nsh-canvas-pan".into())
+            .spawn(move || {
+                let started = std::time::Instant::now();
+                let strips = render_strips(&drawing, &args, pan, at, scale, &bands);
+                log::debug!(
+                    target: "nsh::perf",
+                    "canvas: pan strips replayed in {:.2} ms (worker)",
+                    started.elapsed().as_secs_f64() * 1000.0
+                );
+                if tx.send(strips).is_ok() {
+                    glib::MainContext::default().invoke(move || {
+                        if let Some(view) = weak.upgrade() {
+                            view.queue_draw();
+                        }
+                    });
+                }
+            })
+            .map_err(|e| format!("canvas worker: {e}"))?;
+        p.pending = Some(Recentre {
+            at,
+            shift,
+            moved,
+            strips: rx,
+        });
+    } else if !threaded && (shift.0.abs() > m / 2 || shift.1.abs() > m / 2 || !covered(p.valid)) {
+        // A drawing with images: re-centre now.
         let started = std::time::Instant::now();
         let at = (
             p.at.0 + shift.0 as f64 / scale,
             p.at.1 + shift.1 as f64 / scale,
         );
-        let target = match p.spare.take() {
-            Some(s) => s,
-            None => {
-                let s = cairo::ImageSurface::create(cairo::Format::ARgb32, sw, sh)
-                    .map_err(|e| format!("image surface {sw}x{sh}: {e}"))?;
-                s.set_device_scale(scale, scale);
-                s
-            }
-        };
-        let v = p.valid;
+        let target = spare_surface(p.spare.take(), (sw, sh), scale)?;
         let moved = [
             (v[0] + shift.0).max(0),
             (v[1] + shift.1).max(0),
@@ -849,17 +952,47 @@ fn replay_area(
         cr.set_operator(cairo::Operator::Clear);
         cr.paint().map_err(|e| e.to_string())?;
     }
+    let mut text = canvas.text.borrow_mut();
+    replay_pan_ops(
+        &cr,
+        (&canvas.args, &canvas.images, &mut text),
+        drawing,
+        pan,
+        at,
+        scale,
+    );
+    drop(cr);
+    surface.flush();
+    Ok(())
+}
+
+/// The images and text layouts a replay reads, with the slots' values.
+type ReplayInputs<'a> = (
+    &'a [Option<AnimationValue>],
+    &'a FxHashMap<Arc<str>, Option<CanvasBitmap>>,
+    &'a mut TextCache,
+);
+
+/// Replays a panned drawing onto `cr` (at the surface's origin) with its
+/// pan at `at`.
+fn replay_pan_ops(
+    cr: &cairo::Context,
+    (args, images, text): ReplayInputs,
+    drawing: &Drawing,
+    pan: usize,
+    at: (f64, f64),
+    scale: f64,
+) {
     cr.set_operator(cairo::Operator::Over);
     cr.set_source_rgba(0.0, 0.0, 0.0, 0.0);
     // The view's origin lies the margin in.
     let m = PAN_MARGIN as f64 / scale;
     cr.translate(m, m);
-    let mut text = canvas.text.borrow_mut();
     let mut replay = Replay {
-        cr: &cr,
-        args: &canvas.args,
-        images: &canvas.images,
-        text: &mut text,
+        cr,
+        args,
+        images,
+        text,
         scale,
         base: cr.matrix(),
         state: State::default(),
@@ -877,8 +1010,111 @@ fn replay_area(
     if let Err(e) = cr.status() {
         log::warn!("canvas: cairo: {e}");
     }
+}
+
+/// The parts of a `sw` × `sh` surface around `moved` (x0, y0, x1, y1),
+/// all of it when `moved` is empty: what a re-centering replays.
+fn bands_around([x0, y0, x1, y1]: [i32; 4], (sw, sh): (i32, i32)) -> Vec<[i32; 4]> {
+    if x1 <= x0 || y1 <= y0 {
+        return vec![[0, 0, sw, sh]];
+    }
+    [
+        [0, 0, sw, y0],
+        [0, y1, sw, sh],
+        [0, y0, x0, y1],
+        [x1, y0, sw, y1],
+    ]
+    .into_iter()
+    .filter(|b| b[2] > b[0] && b[3] > b[1])
+    .collect()
+}
+
+/// Replays `bands` of a panned drawing at `at` each into a surface of its
+/// own (on a worker thread: the drawing has no images, and text gets
+/// layouts of its own).
+fn render_strips(
+    drawing: &Drawing,
+    args: &[Option<AnimationValue>],
+    pan: usize,
+    at: (f64, f64),
+    scale: f64,
+    bands: &[[i32; 4]],
+) -> Result<Vec<Strip>, String> {
+    let images = FxHashMap::default();
+    let mut text = TextCache::default();
+    let mut strips = Vec::with_capacity(bands.len());
+    for &[x0, y0, x1, y1] in bands {
+        let (w, h) = (x1 - x0, y1 - y0);
+        let mut surface = cairo::ImageSurface::create(cairo::Format::ARgb32, w, h)
+            .map_err(|e| format!("image surface {w}x{h}: {e}"))?;
+        surface.set_device_scale(scale, scale);
+        {
+            let cr = cairo::Context::new(&surface).map_err(|e| e.to_string())?;
+            cr.translate(-x0 as f64 / scale, -y0 as f64 / scale);
+            replay_pan_ops(&cr, (args, &images, &mut text), drawing, pan, at, scale);
+        }
+        surface.flush();
+        let stride = surface.stride() as usize;
+        let data = surface.data().map_err(|e| e.to_string())?.to_vec();
+        strips.push(([x0, y0, x1, y1], data, stride));
+    }
+    Ok(strips)
+}
+
+/// `spare`, or a new surface `sw` × `sh` at `scale`.
+fn spare_surface(
+    spare: Option<cairo::ImageSurface>,
+    (sw, sh): (i32, i32),
+    scale: f64,
+) -> Result<cairo::ImageSurface, String> {
+    match spare {
+        Some(s) => Ok(s),
+        None => {
+            let s = cairo::ImageSurface::create(cairo::Format::ARgb32, sw, sh)
+                .map_err(|e| format!("image surface {sw}x{sh}: {e}"))?;
+            s.set_device_scale(scale, scale);
+            Ok(s)
+        }
+    }
+}
+
+/// Moves the pixels of `old` by `shift` into `target` (where they cover
+/// `moved`) and pastes `strips` around them.
+fn paste(
+    target: &cairo::ImageSurface,
+    old: &cairo::ImageSurface,
+    (dx, dy): (i32, i32),
+    [x0, y0, x1, y1]: [i32; 4],
+    strips: Vec<Strip>,
+    scale: f64,
+) -> Result<(), String> {
+    let px = |v: i32| v as f64 / scale;
+    old.flush();
+    let cr = cairo::Context::new(target).map_err(|e| e.to_string())?;
+    cr.set_operator(cairo::Operator::Source);
+    if x1 > x0 && y1 > y0 {
+        cr.set_source_surface(old, px(dx), px(dy))
+            .map_err(|e| e.to_string())?;
+        cr.rectangle(px(x0), px(y0), px(x1 - x0), px(y1 - y0));
+        cr.fill().map_err(|e| e.to_string())?;
+    }
+    for ([bx0, by0, bx1, by1], data, stride) in strips {
+        let strip = cairo::ImageSurface::create_for_data(
+            data,
+            cairo::Format::ARgb32,
+            bx1 - bx0,
+            by1 - by0,
+            stride as i32,
+        )
+        .map_err(|e| e.to_string())?;
+        strip.set_device_scale(scale, scale);
+        cr.set_source_surface(&strip, px(bx0), px(by0))
+            .map_err(|e| e.to_string())?;
+        cr.rectangle(px(bx0), px(by0), px(bx1 - bx0), px(by1 - by0));
+        cr.fill().map_err(|e| e.to_string())?;
+    }
     drop(cr);
-    surface.flush();
+    target.flush();
     Ok(())
 }
 
@@ -2391,5 +2627,41 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn strips_from_a_worker_match_a_full_replay() {
+        use nsh_core::canvas::{CanvasOp as Op, Num::*};
+        let mut ops = vec![Op::Translate(Slot(0), Slot(1))];
+        for i in 0..40 {
+            let (x, y) = (
+                (i * 97 % 1400) as f32 - 300.0,
+                (i * 53 % 900) as f32 - 200.0,
+            );
+            ops.push(Op::FillRect([Const(x), Const(y), Const(37.0), Const(23.0)]));
+        }
+        let drawing = Drawing {
+            ops,
+            ..Drawing::default()
+        };
+        let canvas = CanvasState::default();
+        let (sw, sh) = (2 * PAN_MARGIN + 64, 2 * PAN_MARGIN + 48);
+        let surface = |at: (f64, f64)| {
+            let s = spare_surface(None, (sw, sh), 1.0).unwrap();
+            replay_area(&canvas, &drawing, 0, &s, at, 1.0, None).unwrap();
+            s
+        };
+        let old = surface((0.0, 0.0));
+        let shift = (150, -90);
+        let at = (150.0, -90.0);
+        let moved = [shift.0, 0, sw, sh + shift.1];
+        let strips = render_strips(&drawing, &[], 0, at, 1.0, &bands_around(moved, (sw, sh)));
+        let target = spare_surface(None, (sw, sh), 1.0).unwrap();
+        paste(&target, &old, shift, moved, strips.unwrap(), 1.0).unwrap();
+        let pixels = |s: cairo::ImageSurface| {
+            let mut s = copy(&s, None, (sw, sh), 1.0).unwrap();
+            s.data().map(|d| d.to_vec()).unwrap()
+        };
+        assert!(pixels(target) == pixels(surface(at)));
     }
 }
