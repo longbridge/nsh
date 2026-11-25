@@ -817,7 +817,14 @@ fn wrap_line(
             };
             let (end, end_x) = found.unwrap_or((at, x));
             push(row_start..end, row_indent, end_x);
-            x -= end_x;
+            // The new row starts at `end`: what lies before `at` moves
+            // along, and a tab among it advances from the new start.
+            let moved = &text[end..at];
+            x = if moved.contains('\t') {
+                metrics.run_width(moved)
+            } else {
+                x - end_x
+            };
             row_start = end;
             row_indent = indent;
             available = width - indent;
@@ -1309,6 +1316,59 @@ mod tests {
             let buffer = Buffer::new(text);
             let map = map(&buffer, Some(width), vec![]);
             assert_eq!(ranges(&map), rows, "{text:?} at {width}");
+        }
+    }
+
+    /// Every row's width is its indent and its text's, measured from the
+    /// row's start.
+    fn assert_row_widths(map: &DisplayMap, text: &str) {
+        let widths = map.widths.borrow();
+        for (row, width) in map.rows.iter().zip(widths.iter()) {
+            let measured = row.indent.0 + map.metrics.run_width(&text[row.range.clone()]);
+            assert!(
+                (width - measured).abs() < 1e-3,
+                "{:?} of {text:?}: {width} wide, measures {measured}",
+                row.range
+            );
+        }
+    }
+
+    #[test]
+    fn a_tab_moved_to_a_new_row_advances_from_its_start() {
+        // The break is after the space, before the tab: on the new row the
+        // tab reaches the first stop (40), so the comma overflows there.
+        let text = "中 \t，ab";
+        let buffer = Buffer::new(text);
+        let map = map(&buffer, Some(50.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..4, 4..5, 5..10]);
+        assert_row_widths(&map, text);
+    }
+
+    #[test]
+    fn rows_of_random_lines_measure_what_they_hold() {
+        let pool = [
+            "a", "b", " ", " ", "\t", "-", "!", "(", ")", "/", "中", "文", "，", "。", "「", "」",
+            "ち", "っ", "한", "😀", "🏻", "\u{301}", "\u{3000}",
+        ];
+        let mut seed = 0x2545_f491_u64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed as usize
+        };
+        for _ in 0..2_000 {
+            let len = next() % 40 + 1;
+            let text: String = (0..len).map(|_| pool[next() % pool.len()]).collect();
+            let width = [25.0, 40.0, 50.0, 70.0, 100.0][next() % 5];
+            let buffer = Buffer::new(&text);
+            let map = map(&buffer, Some(width), vec![]);
+            let rows = ranges(&map);
+            assert_eq!(rows.first().map(|r| r.start), Some(0), "{text:?}");
+            assert_eq!(rows.last().map(|r| r.end), Some(text.len()), "{text:?}");
+            assert!(rows.windows(2).all(|w| w[0].end == w[1].start), "{text:?}");
+            assert_rows_between_graphemes(&map, &text);
+            assert_row_widths(&map, &text);
         }
     }
 
