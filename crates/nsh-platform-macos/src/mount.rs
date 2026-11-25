@@ -634,6 +634,9 @@ impl Mounter {
                     crate::navigation::set_shader(surface, view, shader.clone());
                 }
             }
+            // GPU views draw nothing on this backend yet
+            // (`docs/dev/gpu-views.md`).
+            MountItem::GpuView { .. } => {}
             MountItem::Shader { id, layer } => {
                 if let Some(view) = self.get(*id) {
                     crate::shader::set(surface, view, layer.clone());

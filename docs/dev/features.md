@@ -5,7 +5,7 @@ The large optional parts of a native runtime are Cargo features of the platform 
 
 | Feature | What it links | Off |
 | --- | --- | --- |
-| `shader` | naga, wgpu | Shader views draw nothing, shader transitions end at once ([shaders.md](shaders.md)); a warning naming the feature is logged once |
+| `shader` | naga, wgpu | Shader views and GPU views draw nothing, shader transitions end at once ([shaders.md](shaders.md), [gpu-views.md](gpu-views.md)); a warning naming the feature is logged once |
 | `editor` | `Editor`, `DiffView`, ropey, imara-diff | Importing them fails |
 | `rich-editor` | `RichEditor` and its classes | Importing them fails |
 | `plot` | `nsh/base/plot` | Importing it fails |

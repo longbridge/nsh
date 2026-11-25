@@ -1856,6 +1856,9 @@ impl Mounter {
                     self.nav_shaders.remove(&id);
                 }
             },
+            // GPU views draw nothing on this backend yet
+            // (`docs/dev/gpu-views.md`).
+            MountItem::GpuView { .. } => {}
             MountItem::Shader { id, layer } => {
                 let scale = self.display_scale();
                 let was_screen = self.shaders.draws_screen(id);

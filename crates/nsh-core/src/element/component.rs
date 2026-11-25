@@ -1037,6 +1037,8 @@ pub struct Registry {
     /// The stand-ins its modules give headless runs, by name
     /// ([`Registry::fake`]).
     fakes: Arc<Vec<(&'static str, Arc<dyn crate::fake::Fake>)>>,
+    /// GPU views' renderers by name ([`Registry::gpu_renderer_source`]).
+    gpu_renderers: Arc<Vec<(&'static str, crate::gpu::GpuSource)>>,
 }
 
 /// A function each engine serving a set runs once ([`Registry::setup`]).
@@ -1252,6 +1254,14 @@ impl Registry {
                 );
                 fakes.push((name, fake.clone()));
             }
+            let renderers = Arc::make_mut(&mut out.gpu_renderers);
+            for (name, source) in set.gpu_renderers.iter() {
+                assert!(
+                    renderers.iter().all(|(n, _)| n != name),
+                    "two GPU renderers are named `{name}`, by two UI sets"
+                );
+                renderers.push((name, source.clone()));
+            }
             let types = Arc::make_mut(&mut out.types);
             for (name, ty) in set.types.iter() {
                 if let Some(old) = types.insert(name, ty.clone()) {
@@ -1385,6 +1395,30 @@ impl Registry {
     pub fn setup(&mut self, f: impl Fn() + Send + Sync + 'static) -> &mut Self {
         Arc::make_mut(&mut self.setups).push(Arc::new(f));
         self
+    }
+
+    /// Registers `source` as the renderer of GPU views named `name`
+    /// (`gpuView("gallery/scene", …)` in TSX, `gpu_view().renderer_named`
+    /// in Rust); a later registration of a name replaces an earlier one.
+    /// An app's crate calls `nsh-gpu`'s `gpu_renderer`, which makes the
+    /// source, from its `#[native_module]` function ([`crate::gpu`]).
+    pub fn gpu_renderer_source(
+        &mut self,
+        name: &'static str,
+        source: crate::gpu::GpuSource,
+    ) -> &mut Self {
+        let renderers = Arc::make_mut(&mut self.gpu_renderers);
+        renderers.retain(|(n, _)| *n != name);
+        renderers.push((name, source));
+        self
+    }
+
+    /// The renderer registered as `name` ([`Self::gpu_renderer_source`]).
+    pub fn registered_gpu_renderer(&self, name: &str) -> Option<&crate::gpu::GpuSource> {
+        self.gpu_renderers
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, s)| s)
     }
 
     /// Gives headless runs `fake` in place of what a module of the set asks

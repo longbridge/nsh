@@ -345,6 +345,9 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                 e.int(id as i32);
                 canvas(&mut e, &drawing);
             }
+            // GPU views draw nothing on this backend yet
+            // (`docs/dev/gpu-views.md`).
+            MountItem::GpuView { .. } => {}
             MountItem::Shader { id, layer } => {
                 // Java learns what the view shows (whether a shader, its
                 // role, how far it overflows, which pictures it reads); the

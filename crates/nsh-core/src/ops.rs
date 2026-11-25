@@ -81,6 +81,10 @@ pub enum Tag {
     /// TS: `ScreenTransition` of `nsh`), as a transition does for its
     /// children. It takes no space and has no children.
     ScreenTransition,
+    /// A view whose box a renderer of the app's own draws with the GPU,
+    /// under its children (`<gpuview>`, TS: `gpuView` of `nsh`;
+    /// [`crate::gpu`]).
+    GpuView,
 }
 
 impl Tag {
@@ -110,6 +114,7 @@ impl Tag {
             "shadertransition" => Tag::ShaderTransition,
             "screeneffect" => Tag::ScreenEffect,
             "screentransition" => Tag::ScreenTransition,
+            "gpuview" => Tag::GpuView,
             _ => return None,
         })
     }
@@ -3521,6 +3526,9 @@ pub enum Prop {
     ShaderSource(Option<Arc<str>>),
     /// A compiled shader, as Rust sets it (TS sets `source`).
     Shader(Option<crate::shader::Shader>),
+    /// A GPU view's renderer, as Rust sets it (`gpu_view().renderer(…)`;
+    /// TS names a registered one, [`Prop::Component`]); `None`: none.
+    GpuRenderer(Option<crate::gpu::GpuSource>),
     /// The element whose frame the view's follows along its parent's main
     /// axis, as Rust sets it (`View::follow`, `core/follow.rs`); `None`
     /// follows nothing.
