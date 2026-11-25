@@ -24,12 +24,13 @@ use std::{
 use nsh_core::geometry::Points;
 use ropey::Rope;
 use rustc_hash::FxHashMap;
-use unicode_segmentation::{GraphemeCursor, GraphemeIndices, UnicodeSegmentation};
+use unicode_segmentation::{GraphemeIndices, UnicodeSegmentation};
 
 use super::{
     buffer::{Bias, Buffer, Change, LineSpan, map_offset},
     diagnostics::{self, Mark},
     fold::FoldRange,
+    line_break::text_break,
     state::Font,
     types::RowLayout,
 };
@@ -1413,101 +1414,6 @@ fn between_ideographs(text: &str, at: usize) -> bool {
     ideographic(text[..at].chars().next_back()) && ideographic(text[at..].chars().next())
 }
 
-/// How far before a row UAX #14 may look for context.
-const BREAK_CONTEXT: usize = 64;
-
-/// The last break opportunity of plain text (no label in it) after `floor`
-/// and before `bound` (at it too when `inclusive`), the text's context
-/// starting at `context` at the earliest. UAX #14 runs backwards from
-/// `bound` a span at a time, each from where its breaks no longer depend on
-/// the text before it (`split_at_safe`): a few chars, not the whole line. A
-/// span starts a char before that point (so it can break there), but that
-/// char lacks its own context (a combining mark, its base's class): a break
-/// before the point is the next span's to decide. Nothing looks further
-/// back than [`BREAK_CONTEXT`] bytes before the row (from `row_start`), so
-/// a line wraps in time linear in its length; text without such a point
-/// that long (a rare run, as of spaces with combining marks) takes its
-/// breaks as if the line started there.
-fn text_break(
-    text: &str,
-    row_start: usize,
-    context: usize,
-    floor: usize,
-    bound: usize,
-    inclusive: bool,
-) -> Option<usize> {
-    let bytes = text.as_bytes();
-    let ascii_pair = |offset: usize| bytes[offset - 1].is_ascii() && bytes[offset].is_ascii();
-    let mut context = row_start.saturating_sub(BREAK_CONTEXT).max(context);
-    while !text.is_char_boundary(context) {
-        context -= 1;
-    }
-    // A row starts at a grapheme boundary: graphemes are found from there.
-    let row = &text[row_start..];
-    // Opportunities after `start`, up to `max`, are looked for; `bound` is
-    // a char's offset, and the span ends after that char, so it decides
-    // the break before it.
-    let mut bound = bound;
-    let mut max = if inclusive { bound } else { bound - 1 };
-    let lowest = floor.max(context);
-    loop {
-        // Between ASCII chars a row breaks only after whitespace, whatever
-        // comes before: a run of them (a Latin word, a URL) is scanned as
-        // bytes, not a span at a time.
-        let top = max;
-        while max > lowest && ascii_pair(max) {
-            if char::from(bytes[max - 1]).is_whitespace() {
-                return Some(max);
-            }
-            max -= 1;
-        }
-        if max <= lowest {
-            return None;
-        }
-        if max < top {
-            // The run ended at an ASCII char (a char boundary) after
-            // another char: UAX #14 decides the break before it.
-            bound = max;
-        }
-        let end = bound + text[bound..].chars().next().map_or(0, char::len_utf8);
-        let (before, span) = unicode_linebreak::split_at_safe(&text[context..end]);
-        let span_start = context + before.len();
-        let start = if before.is_empty() {
-            span_start
-        } else {
-            span_start + span.chars().next().map_or(0, char::len_utf8)
-        };
-        let mut found = None;
-        for (offset, _) in unicode_linebreak::linebreaks(span) {
-            let offset = span_start + offset;
-            if offset > max {
-                break;
-            }
-            if offset > start
-                && offset > floor
-                && !ascii_pair(offset)
-                && is_grapheme_boundary(row, offset - row_start)
-            {
-                found = Some(offset);
-            }
-        }
-        // Between ASCII chars (always a grapheme boundary: no `\r\n` in a
-        // line), after whitespace.
-        if let Some(offset) = (start.max(floor) + 1..=max)
-            .rev()
-            .find(|&offset| ascii_pair(offset) && char::from(bytes[offset - 1]).is_whitespace())
-        {
-            found = found.max(Some(offset));
-        }
-        // A span from `context` on is as far back as the text goes.
-        if found.is_some() || start <= floor || before.is_empty() {
-            return found;
-        }
-        bound = start;
-        max = start;
-    }
-}
-
 /// Whether a row may break before the label of `label` (a range of
 /// `text`): as before an object replacement character, unless the chars
 /// on both sides are ASCII, where only whitespace before it allows one.
@@ -1578,17 +1484,6 @@ fn breaks_after_label(text: &str, label: Range<usize>) -> bool {
             | BreakClass::Quotation
             | BreakClass::Inseparable
     )
-}
-
-/// Whether `offset` (a char boundary after the first char) of `text` is a
-/// grapheme boundary: the next one after the char before it. Asked as
-/// `next_boundary`, which the grapheme walk calls too: a second caller of
-/// `is_boundary` stops the optimizer inlining it into that walk, which then
-/// costs every non-ASCII line.
-fn is_grapheme_boundary(text: &str, offset: usize) -> bool {
-    let before = text[..offset].chars().next_back().map_or(0, char::len_utf8);
-    GraphemeCursor::new(offset - before, text.len(), true).next_boundary(text, 0)
-        == Ok(Some(offset))
 }
 
 /// The x of `offset` in the row from `row_start` of a line's `text` (at
@@ -2229,12 +2124,14 @@ mod tests {
 
     #[test]
     fn a_tab_moved_to_a_new_row_advances_from_its_start() {
-        // The break is after the space, before the tab: on the new row the
-        // tab reaches the first stop (40), so the comma overflows there.
-        let text = "中 \t，ab";
+        // The comma overflows after the tab (at 80) and never starts a row,
+        // so the row breaks between the CJK chars and the tab moves down
+        // with `文`: on the new row it reaches the first stop at 40, not 80,
+        // and the comma (60) overflows there again.
+        let text = "中文\t，";
         let buffer = Buffer::new(text);
         let map = map(&buffer, Some(50.0), vec![]);
-        assert_eq!(ranges(&map), vec![0..4, 4..5, 5..10]);
+        assert_eq!(ranges(&map), vec![0..3, 3..7, 7..10]);
         assert_row_widths(&map, text);
     }
 
@@ -2470,6 +2367,18 @@ mod tests {
         fresh.rebuild(&buffer);
         assert_eq!(wrapped.rows, fresh.rows);
         assert_eq!(wrapped.line_rows, fresh.line_rows);
+    }
+
+    #[test]
+    fn spaces_before_closing_punctuation_hang_together() {
+        // The row breaks between the CJK chars, not between the spaces:
+        // no row starts with a space.
+        let buffer = Buffer::new("中文中文  ，");
+        let map = map(&buffer, Some(80.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..9, 9..17]);
+        let buffer = Buffer::new("中  ，");
+        let map = self::map(&buffer, Some(40.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..5, 5..8]);
     }
 
     #[test]
