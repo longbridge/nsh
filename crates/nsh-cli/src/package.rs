@@ -858,6 +858,15 @@ pub(crate) struct WebConfig {
     /// dev server's; by default only where the app is the whole page, not
     /// in an iframe.
     pub(crate) history: Option<bool>,
+    /// Whether the runtime is the same for every app on this version of
+    /// NSH (`web::package`): its main module holds no part of `nsh/base`,
+    /// no standard module and no feature, each of which is a side module
+    /// of its own, and the page loads those its entry uses before the app
+    /// starts (`entrySides`). A site embedding several apps then downloads
+    /// the runtime once. By default the main module links what the entry
+    /// uses, which is smaller for a site with one app.
+    #[serde(default)]
+    pub(crate) shared_runtime: bool,
 }
 
 /// Options of `nsh package`.

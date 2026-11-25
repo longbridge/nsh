@@ -211,6 +211,16 @@ gets the whole runtime, its crates included, in its `nsh.<digest>.wasm`. Measure
 | `examples/counter` | The core components | 3.96 MB | 1.32 MB | 0.97 MB |
 | `examples/gallery` | Every component, `zlib` and shaders | 4.13 MB | 1.36 MB | 1.01 MB |
 
+#### One runtime for several apps
+
+A site that embeds several apps downloads each one's runtime, as each is linked for its app. With
+`"web": { "sharedRuntime": true }` in `nsh.json`, `nsh.<digest>.wasm` holds only the engine, the same for every app
+packaged with that version of NSH, and each `nsh/base` part, standard module and shader is a side module of its
+own (`nsh-<part>.<digest>.wasm`), also the same for every app. The page loads those the entry imports before the app
+starts (`entrySides` in the page's app config, requested with `nsh.<digest>.wasm`), and the rest when a screen
+first needs them. Served from one place, these files download once for every app of the site; an app alone
+downloads somewhat more than with its own runtime. An app with Rust components of its own cannot share it.
+
 ### Deploy it
 
 Upload the directory to any static host: an object store behind a CDN, Cloudflare Pages, Netlify, GitHub Pages,

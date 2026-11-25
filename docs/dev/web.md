@@ -245,6 +245,20 @@ Rust toolchain or a linker; how is in the module docs of `crates/nsh-cli/src/web
 `linking` and `reloc.*` sections of the one it read, which no longer describe it. A runtime with every
 component (the website's, the development host's) serves every app.
 
+A shared runtime (`nsh.json` `web.sharedRuntime`, `package::WebConfig`) splits whatever the app uses: its main module
+keeps every export but the gates and every gate is lazy (`web::shared_split`), so the main module and the side
+modules are the same bytes, and names, for every app on one runtime. The gates the entry needs (`GatePlan::main`)
+are the page's `entrySides`: `web/start.js` loads them with `player.loadSides` before `runModule`, and the head's
+script requests them, and the side modules they import from (`web::side_urls`), with the main module, which
+`compileSide` takes through `createPlayer`'s `prefetched`. Gates registered before the app starts are what a main
+module's would be (`nsh_after_gate` only pumps then; the engine reads the UI sets and the realm the native modules'
+namespaces as the app starts). A Rust app's runtime and one with wasm-bindgen glue have no shared form
+(`nsh package` says so).
+
+Every copy of `nsh.js` on a page numbers its players with one counter on the document (`Symbol.for("nsh.players")`):
+the views' own style rules (`nsh-p<player>-i<id>`) and DOM ids of two apps whose runtimes are different files do not
+collide, as each copy's sheets apply to the whole document.
+
 What an app uses is `Bundle::native_use` (`natives.rs`, `native-pipeline.md`). A namespace import read only by
 names the code spells (`import * as base from "nsh/base"; base.EmojiPicker`, the way an app reads an export
 older shells lack without failing to link) counts those names: the runtime links their parts, and the page's
