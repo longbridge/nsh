@@ -2775,7 +2775,11 @@ const report = (v) => text(String(v));
             report(new Date(Date.UTC(2026, 6, 4, 16, 0)).toLocaleTimeString("en-US", {{ timeZone: "America/New_York" }}));
             report(new Intl.DateTimeFormat("en-US", {{ timeZone: "America/New_York", timeStyle: "long" }}).format(Date.UTC(2026, 6, 4, 16, 0)));
             report(new Intl.DateTimeFormat("de", {{ timeZone: "America/New_York", timeStyle: "long" }}).format(Date.UTC(2026, 0, 1)));
-            try {{ new Intl.DateTimeFormat("en", {{ timeZone: "Europe/Berlin" }}); }} catch (e) {{ report(e.name); }}
+            // A zone the app does not ship: the machine's own zone is
+            // local time, so it takes another.
+            const local = new Intl.DateTimeFormat().resolvedOptions().timeZone;
+            const unshipped = local === "Europe/Berlin" ? "Asia/Tokyo" : "Europe/Berlin";
+            try {{ new Intl.DateTimeFormat("en", {{ timeZone: unshipped }}); }} catch (e) {{ report(e.name); }}
             "#
         ))
         .unwrap();
