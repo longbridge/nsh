@@ -506,6 +506,21 @@ define_class!(
                 base.d = -1.0;
             }
             let asynchronous = layer.drawsAsynchronously();
+            if std::env::var_os("NSH_DIAG_FORMAT").is_some() && state.canvas.is_some() {
+                let space = objc2_core_graphics::CGBitmapContextGetColorSpace(Some(cx))
+                    .and_then(|s| objc2_core_graphics::CGColorSpace::name(Some(&s)))
+                    .map(|n| n.to_string());
+                eprintln!(
+                    "nsh-diag: canvas layer format={} async={} ctx bpc={} info={:x} space={:?} size={:?} scale={}",
+                    layer.contentsFormat(),
+                    asynchronous,
+                    objc2_core_graphics::CGBitmapContextGetBitsPerComponent(Some(cx)),
+                    objc2_core_graphics::CGBitmapContextGetBitmapInfo(Some(cx)).0,
+                    space,
+                    layer.bounds().size,
+                    layer.contentsScale(),
+                );
+            }
             let overlay = view.ivars().overlay.borrow();
             let part = match overlay.as_ref() {
                 Some((top, _)) if std::ptr::eq(&**top, layer) => crate::canvas::LayerPart::Suffix,
@@ -2220,6 +2235,7 @@ impl NshView {
             layer.setAnchorPoint(CGPoint::new(0.0, 0.0));
             layer.setContentsScale(self.content_scale(bounds.size));
             layer.setZPosition(crate::decor::BEHIND / 4.0);
+            temp_contents_format(&layer);
             host.addSublayer(&layer);
             *overlay = Some((layer, drawer));
         }
@@ -2293,6 +2309,7 @@ impl NshView {
         // shadows), below the children and the borders in front.
         layer.setZPosition(crate::decor::BEHIND / 2.0);
         layer.setFrame(bounds);
+        temp_contents_format(&layer);
         host.addSublayer(&layer);
         *self.ivars().content.borrow_mut() = Some((layer.clone(), drawer));
         self.clip_content(&layer);
@@ -3407,5 +3424,15 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(s.max((100.0, 100.0)), (100.0, 200.0));
+    }
+}
+
+/// Temporary measurement switch: `NSH_CONTENTS_FORMAT=8` or `16` picks the
+/// canvas layers' backing store format; unset keeps Core Animation's choice.
+fn temp_contents_format(layer: &CALayer) {
+    match std::env::var("NSH_CONTENTS_FORMAT").as_deref() {
+        Ok("8") => layer.setContentsFormat(unsafe { objc2_quartz_core::kCAContentsFormatRGBA8Uint }),
+        Ok("16") => layer.setContentsFormat(unsafe { objc2_quartz_core::kCAContentsFormatRGBA16Float }),
+        _ => {}
     }
 }
