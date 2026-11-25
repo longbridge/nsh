@@ -536,7 +536,7 @@ pub fn Gauge(props: GaugeProps) -> impl IntoElement {
 }
 ```
 
-nshm 兼容的 NSH 版本就是它自己对 `nsh-core` 的版本要求（`nsh-core = "0.6"`），`nsh add` 在编译前会与当前 `nsh` 比对。它的 TypeScript 声明由 Rust 类型生成，应用检查 TSX 时会像检查自己的 crate 一样检查对它的使用。
+nshm 兼容的 NSH 版本就是它自己对 `nsh-core` 的版本要求（`nsh-core = "0.6"`，或用 `nsh-core.workspace = true` 沿用工作区的要求），`nsh add` 在编译前会与当前 `nsh` 比对。在 Cargo 工作区里开发的 nshm 会像 Cargo 一样从工作区取得版本号和这项要求；它本身就是工作区的根 package 时，取自它自己的清单。它的 TypeScript 声明由 Rust 类型生成，应用检查 TSX 时会像检查自己的 crate 一样检查对它的使用。
 
 [nsh-omarchy 的 `src/lib.rs`](https://github.com/huacnlee/nsh-omarchy/blob/main/src/lib.rs) 是一个完整的例子：它的组件由 `#[native_module("nsh-omarchy")]` 导出给 TSX，另有 `Omarchy` 主题模块。
 
