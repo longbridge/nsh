@@ -3609,8 +3609,12 @@ pub enum Prop {
     /// stays at the end as the content grows or the viewport shrinks (a reply
     /// streaming into its last item); scrolled further up, it keeps the visible
     /// content where it is. Items inserted above the visible ones never move them.
-    #[prop(js = "maintainVisibleContentPosition", with = crate::js::host_values::visible_content, reset = Prop::FollowEnd(None), ts = "{ autoscrollToBottomThreshold?: number }", on = LIST)]
-    FollowEnd(Option<Points>),
+    /// With `animated`, an end that moves away by a large step at once (a card or
+    /// chart appearing in the last item) is followed by an animated scroll whose
+    /// target keeps up with the end; small steps (text streaming in) follow at
+    /// once as without it.
+    #[prop(js = "maintainVisibleContentPosition", with = crate::js::host_values::visible_content, reset = Prop::FollowEnd(None, false), ts = "{ autoscrollToBottomThreshold?: number; animated?: boolean }", on = LIST)]
+    FollowEnd(Option<Points>, bool),
     /// `alignment`: where the list rests; `bottom` for a chat in reading order
     /// (an inverted list ignores it).
     #[prop(js = "alignment", on = LIST)]
