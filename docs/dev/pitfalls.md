@@ -298,6 +298,10 @@ Things that were found the hard way. Read the section of the area you change bef
   transforms around a view, and only on its own layout passes, so a pass while a container shows a stack scaled or
   moved aside leaves the stack the insets of that picture after the transform is gone. A stack's safe area follows
   where it is laid out: the navigation controller makes up what a transform takes away.
+- **iOS, a container's transform can move a stack's bar**: the same passes place the navigation bar for the
+  transformed picture, which puts a bar the device keeps along one side (the iPhone Duo's vertical bar) on the
+  wrong side, and nothing moves it back when the transform goes. A stack under a transform whose header changes,
+  and a stack whose surrounding transform returns to the identity, are laid out again for where the stack is.
 - **iPadOS 26, the window controls' corner**: `safeAreaInsets` leaves out the controls a windowed app has at its
   top-leading corner; the safe-area layout region with horizontal corner adaptation
   (`edgeInsetsForLayoutRegion:`) covers them, and also pads both sides alike for the display's rounded corners

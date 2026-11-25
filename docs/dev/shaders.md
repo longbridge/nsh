@@ -144,7 +144,11 @@ milliseconds (opening the device about 60 ms on a Mac, a pipeline 7–16 ms):
   before. Tests that render right after setting a shader wait with `Renderer::wait_for_pipelines`.
 
 `nsh_engine::shader::ShaderView` is one view's state on the main thread: the layer, its uniforms, size and scale, the
-clock of `nsh.time` (kept while paused), and its frames.
+clock of `nsh.time` (kept while paused), and its frames. Where a frame goes and how it comes back is the engine's
+`FrameTarget` (`frames.rs`), which knows nothing of shaders: the format of the next frame (`surface_format`: a
+surface's, the read-back one's, or none while every surface is busy), its destination (`destination`), the view to render
+into, `submit` (a read-back frame is copied into a buffer and mapped) and `collect`. `ShaderView::render` encodes its
+pass between them.
 
 - **Rendering never waits for the GPU.** Frames are read back asynchronously; a slow GPU drops frames instead of
   stalling the main thread.
