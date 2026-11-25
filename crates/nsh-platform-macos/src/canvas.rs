@@ -1677,7 +1677,8 @@ struct ImageParts {
     parts: FxHashMap<(usize, [u64; 4]), ImagePart>,
 }
 
-/// The whole image a part was cut from, and the part.
+/// A part of an image: the whole image, kept alive, and the part cut from
+/// it.
 type ImagePart = (CFRetained<CGImage>, CFRetained<CGImage>);
 
 impl ImageParts {
