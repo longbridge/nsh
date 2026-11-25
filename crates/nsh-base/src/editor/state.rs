@@ -2383,7 +2383,7 @@ mod tests {
 
     #[test]
     fn labels_wrap_as_one_unit() {
-        let mut st = state("ab @2026-11-25 cd ef\n");
+        let mut st = state("ab @2026-11-25 cd ef");
         decorate(&mut st, vec![labeled(0, 3, 14, "Tomorrow")]);
         // 10 chars a row: "ab " (24) and the label (64) fit in 88 points.
         st.display.set_wrap_width(Some(px(100.0)));
