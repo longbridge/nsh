@@ -17,6 +17,104 @@ pub struct CellTextEngine {
     cells: CellSize,
 }
 
+/// Whether a row may break between `before` and `after` without a space:
+/// either is an ideograph (or kana, hangul, a full-width form), `after` is
+/// no closing mark and `before` no opening one.
+fn breaks_between(before: &Glyph, after: &Glyph) -> bool {
+    let (Some(b), Some(a)) = (before.text.chars().next_back(), after.text.chars().next()) else {
+        return false;
+    };
+    if before.attachment.is_some() || after.attachment.is_some() {
+        return false;
+    }
+    (ideographic(b) || ideographic(a))
+        && !closing(a)
+        && !opening(b)
+        && !a.is_whitespace()
+        && !b.is_whitespace()
+}
+
+/// A character text breaks around (UAX #14's ID class, roughly).
+fn ideographic(c: char) -> bool {
+    matches!(c as u32,
+        0x1100..=0x115F       // Hangul Jamo
+        | 0x2E80..=0x303E     // CJK radicals, punctuation
+        | 0x3041..=0x33FF     // kana, CJK compatibility
+        | 0x3400..=0x4DBF     // CJK extension A
+        | 0x4E00..=0x9FFF     // CJK unified ideographs
+        | 0xA960..=0xA97F
+        | 0xAC00..=0xD7A3     // Hangul syllables
+        | 0xF900..=0xFAFF     // CJK compatibility ideographs
+        | 0xFE30..=0xFE4F     // CJK compatibility forms
+        | 0xFF00..=0xFFEF     // full-width forms
+        | 0x20000..=0x3FFFD)
+}
+
+/// A mark that never starts a row (kinsoku's 行頭禁則).
+fn closing(c: char) -> bool {
+    matches!(
+        c,
+        '，' | '。'
+            | '、'
+            | '；'
+            | '：'
+            | '！'
+            | '？'
+            | '）'
+            | '」'
+            | '』'
+            | '】'
+            | '》'
+            | '〉'
+            | '〕'
+            | '］'
+            | '｝'
+            | '…'
+            | '‥'
+            | '・'
+            | 'ー'
+            | '々'
+            | '〜'
+            | '％'
+            | ','
+            | '.'
+            | ';'
+            | ':'
+            | '!'
+            | '?'
+            | ')'
+            | ']'
+            | '}'
+            | '%'
+            | 'ぁ'
+            | 'ぃ'
+            | 'ぅ'
+            | 'ぇ'
+            | 'ぉ'
+            | 'っ'
+            | 'ゃ'
+            | 'ゅ'
+            | 'ょ'
+            | 'ァ'
+            | 'ィ'
+            | 'ゥ'
+            | 'ェ'
+            | 'ォ'
+            | 'ッ'
+            | 'ャ'
+            | 'ュ'
+            | 'ョ'
+    )
+}
+
+/// A mark that never ends a row (行末禁則).
+fn opening(c: char) -> bool {
+    matches!(
+        c,
+        '（' | '「' | '『' | '【' | '《' | '〈' | '〔' | '［' | '｛' | '(' | '[' | '{'
+    )
+}
+
 impl CellTextEngine {
     /// Uses the same Cell dimensions as the surface that draws the text.
     pub fn new(cells: CellSize) -> Self {
@@ -176,74 +274,32 @@ fn glyphs(text: &AttributedText, cells: CellSize, alignments: &AttachmentAlignme
         .collect()
 }
 
-/// Ideographs, kana and hangul: a line may break before or after each of
-/// them, as UAX #14 allows, since these scripts don't separate words by
-/// spaces.
-fn is_cjk(c: char) -> bool {
-    matches!(c as u32,
-        0x1100..=0x11FF // Hangul Jamo
-        | 0x2E80..=0x2FDF // CJK radicals, Kangxi
-        | 0x3005..=0x3007
-        | 0x3040..=0x30FF // Hiragana, Katakana
-        | 0x3130..=0x318F // Hangul compatibility Jamo
-        | 0x31F0..=0x31FF
-        | 0x3400..=0x4DBF // CJK extension A
-        | 0x4E00..=0x9FFF // CJK unified ideographs
-        | 0xAC00..=0xD7AF // Hangul syllables
-        | 0xF900..=0xFAFF // CJK compatibility ideographs
-        | 0x20000..=0x3FFFF)
-}
-
-/// Closing punctuation that must not start a line (kinsoku).
-fn no_start(c: char) -> bool {
-    "，。、；：！？）」』】》〉〕］｝,.;:!?)]}…ー々ぁぃぅぇぉっゃゅょァィゥェォッャュョ".contains(c)
-}
-
-/// Opening punctuation that must not end a line (kinsoku).
-fn no_end(c: char) -> bool {
-    "（「『【《〈〔［｛([{".contains(c)
-}
-
-/// Whether a line may break between `before` and `after` without a space.
-fn breaks_between(before: &Glyph, after: &Glyph) -> bool {
-    if before.attachment.is_some() || after.attachment.is_some() {
-        return false;
-    }
-    let (Some(b), Some(a)) = (before.text.chars().last(), after.text.chars().next()) else {
-        return false;
-    };
-    if b.is_whitespace() || a.is_whitespace() || no_start(a) || no_end(b) {
-        return false;
-    }
-    let cjk_punct = |c: char| matches!(c as u32, 0x3000..=0x303F | 0xFF00..=0xFFEF);
-    is_cjk(b) || is_cjk(a) || cjk_punct(b) || cjk_punct(a)
-}
-
-fn is_space(glyph: &Glyph) -> bool {
-    glyph.attachment.is_none() && glyph.text.as_ref() == " "
-}
-
 fn wrap(glyphs: &[Glyph], columns: usize) -> Vec<Vec<Glyph>> {
     let mut rows = Vec::new();
     let mut start = 0;
     while start < glyphs.len() {
         let mut end = start;
         let mut width = 0;
-        // The last place to break the row: where it ends, where the next
-        // one starts.
-        let mut opportunity: Option<(usize, usize)> = None;
+        // The last place the row may break: `(end, next)`, the row ending
+        // at `end` and the next starting at `next` (a space between them is
+        // dropped).
+        let mut space: Option<(usize, usize)> = None;
         let mut has_content = false;
         while end < glyphs.len() && !glyphs[end].text.contains('\n') {
             if width + glyphs[end].width > columns && end > start {
                 break;
             }
-            if end > start && has_content && breaks_between(&glyphs[end - 1], &glyphs[end]) {
-                opportunity = Some((end, end));
+            // Ideographic text (Chinese, Japanese, Korean) breaks between
+            // any two of its characters, as UAX #14 has it, but a closing
+            // mark (`，`、`。`、`）`) never starts a row, nor does an
+            // opening one (`（`、`「`) end one.
+            if has_content && end > start && breaks_between(&glyphs[end - 1], &glyphs[end]) {
+                space = Some((end, end));
             }
             width += glyphs[end].width;
-            if is_space(&glyphs[end]) {
+            if glyphs[end].attachment.is_none() && glyphs[end].text.as_ref() == " " {
                 if has_content {
-                    opportunity = Some((end, end + 1));
+                    space = Some((end, end + 1));
                 }
             } else {
                 has_content = true;
@@ -253,20 +309,26 @@ fn wrap(glyphs: &[Glyph], columns: usize) -> Vec<Vec<Glyph>> {
         let mut next = end;
         if end < glyphs.len() && glyphs[end].text.contains('\n') {
             next += 1;
-        } else if end < glyphs.len() && is_space(&glyphs[end]) {
-            while next < glyphs.len() && is_space(&glyphs[next]) {
+        } else if end < glyphs.len()
+            && glyphs[end].attachment.is_none()
+            && glyphs[end].text.as_ref() == " "
+        {
+            while next < glyphs.len()
+                && glyphs[next].attachment.is_none()
+                && glyphs[next].text.as_ref() == " "
+            {
                 next += 1;
             }
         } else if end < glyphs.len()
             && end > start
             && breaks_between(&glyphs[end - 1], &glyphs[end])
         {
-            // Breaks right where the row is full.
+            // The row is full right at a break between two ideographs.
         } else if end < glyphs.len()
-            && let Some((at, resume)) = opportunity.filter(|&(at, _)| at > start)
+            && let Some((at, after)) = space.filter(|&(s, _)| s > start)
         {
             end = at;
-            next = resume;
+            next = after;
         }
         rows.push(glyphs[start..end].to_vec());
         start = next;
@@ -547,63 +609,49 @@ fn ellipsize(row: &mut Vec<Glyph>, columns: usize, mode: EllipsizeMode) {
 }
 
 #[cfg(test)]
-mod tests {
+mod wrap_tests {
     use super::*;
 
-    fn lines(text: &str, columns: usize) -> Vec<String> {
-        let glyphs: Vec<Glyph> = text
-            .graphemes(true)
-            .map(|g| Glyph {
-                text: Arc::from(g),
-                start: 0,
-                end: 0,
-                width: g.width(),
+    fn glyphs(text: &str) -> Vec<Glyph> {
+        text.chars()
+            .enumerate()
+            .map(|(i, c)| Glyph {
+                text: Arc::from(c.to_string()),
+                start: i as u32,
+                end: i as u32 + 1,
+                width: unicode_width::UnicodeWidthChar::width(c).unwrap_or(0),
                 style: Style::default(),
                 color: None,
                 background: None,
                 decoration: None,
                 attachment: None,
             })
-            .collect();
-        wrap(&glyphs, columns)
+            .collect()
+    }
+
+    fn rows(text: &str, columns: usize) -> Vec<String> {
+        wrap(&glyphs(text), columns)
             .iter()
             .map(|row| row.iter().map(|g| g.text.as_ref()).collect())
             .collect()
     }
 
     #[test]
-    fn breaks_between_ideographs() {
+    fn ideographs_break_between_any_two_characters() {
         assert_eq!(
-            lines("这是一段很长的中文消息内容", 10),
-            ["这是一段很", "长的中文消", "息内容"]
+            rows("看看 NSH TUI 实现到底怎么样", 10),
+            ["看看 NSH", "TUI 实现到", "底怎么样"]
         );
     }
 
     #[test]
-    fn mixes_cjk_and_latin() {
-        assert_eq!(
-            lines("使用 NSH 框架开发应用程序", 12),
-            ["使用 NSH 框", "架开发应用程", "序"]
-        );
-        assert_eq!(lines("hello world", 8), ["hello", "world"]);
+    fn closing_marks_never_start_a_row_nor_opening_ones_end_one() {
+        assert_eq!(rows("一二三四，五六", 8), ["一二三", "四，五六"]);
+        assert_eq!(rows("一二三（四五）", 8), ["一二三", "（四五）"]);
     }
 
     #[test]
-    fn keeps_closing_punctuation_off_line_start() {
-        assert_eq!(
-            lines("好的，明白了、谢谢", 4),
-            ["好", "的，", "明白", "了、", "谢谢"]
-        );
-    }
-
-    #[test]
-    fn keeps_opening_punctuation_off_line_end() {
-        let rows = lines("一二「三四」", 6);
-        assert_eq!(rows, ["一二", "「三", "四」"]);
-        assert!(
-            rows.iter()
-                .all(|r| !r.ends_with('「') && !r.starts_with('」')),
-            "{rows:?}"
-        );
+    fn latin_words_still_break_only_at_spaces() {
+        assert_eq!(rows("hello world", 8), ["hello", "world"]);
     }
 }

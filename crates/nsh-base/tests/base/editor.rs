@@ -2,7 +2,8 @@
 //! into the editor's input inserts at the caret and reports the text; the
 //! keys of code editors move, select and edit; a controlled value replaces
 //! the text; the ref searches, replaces and folds; a read-only editor
-//! moves but never edits; and a long text makes only the rows in view.
+//! moves but never edits; a long text makes only the rows in view; and a
+//! decoration's label shows in place of its range until the caret comes.
 
 use std::{
     collections::HashMap,
@@ -1113,4 +1114,55 @@ fn auto_focus_cancelled_before_mount_does_not_focus() {
     assert_eq!(*auto_focused_inputs.lock().unwrap(), 0);
     app.press_key("a").unwrap();
     see(&mut app, &value(""));
+}
+
+/// A replacing decoration shows its label in place of its range's text;
+/// the text comes back while the caret touches the range, and the label
+/// when the caret leaves it. The document keeps the text throughout.
+#[test]
+fn a_label_shows_in_place_of_its_range_until_the_caret_touches_it() {
+    use nsh_base::editor::{EditorDecoration, EditorPosition, EditorRange};
+
+    #[component]
+    fn Labeled() -> impl IntoElement {
+        let mut due = EditorDecoration::default();
+        due.range = EditorRange::new(EditorPosition::new(0, 4), EditorPosition::new(0, 15));
+        due.label = Some("Tomorrow".into());
+        due.label_class = Some("px-1 rounded bg-muted".into());
+        view().test_id("editor").w(px(600.0)).h(px(200.0)).child(
+            editor()
+                .default_value("due @2026-11-25 ok\nnext")
+                .decorations(vec![due])
+                .size_full(),
+        )
+    }
+
+    let mut config = EngineConfig {
+        viewport: Size::new(px(800.0), px(900.0)),
+        ..EngineConfig::new(nsh_testing::windowed_root::<Labeled>())
+    };
+    config.environment.os = Os::Linux;
+    config.environment.idiom = Idiom::Desktop;
+    let mut app = Headless::start(config).expect("the engine starts");
+    see(&mut app, "Tomorrow");
+    let source = |app: &Headless| {
+        app.screen()
+            .texts()
+            .iter()
+            .any(|t| t.contains("2026-11-25"))
+    };
+    assert!(!source(&app), "the range's text is not drawn");
+    focus(&mut app);
+    // At the range's start the caret touches it: its text shows.
+    keys(&mut app, &["right", "right", "right", "right"]);
+    see(&mut app, "due @2026-11-25 ok");
+    assert!(!app.shows("Tomorrow"));
+    // On the next line, the label again.
+    keys(&mut app, &["down"]);
+    see(&mut app, "Tomorrow");
+    assert!(!source(&app));
+    assert_eq!(
+        app.screen().input_text("id:editor"),
+        Ok(Some("due @2026-11-25 ok\nnext"))
+    );
 }

@@ -3800,6 +3800,7 @@ dependencies = [
  "syntect",
  "ttf-parser",
  "two-face",
+ "unicode-linebreak",
  "unicode-segmentation",
  "unicode-width",
  "vte",
