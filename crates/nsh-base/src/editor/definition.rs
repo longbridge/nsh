@@ -323,6 +323,7 @@ pub(crate) fn link_marks(ed: Ed) -> impl IntoElement {
             return Vec::new();
         };
         ed.text_rev.get();
+        ed.composing.with(|_| ());
         let rows = ed.visible_rows();
         let st = ed.st.borrow();
         // Under the glyphs rather than at the row's bottom, where the

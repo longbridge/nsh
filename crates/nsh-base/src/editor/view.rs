@@ -2,8 +2,9 @@
 //! the text area (a horizontal scroll view without soft wrap), whose box
 //! of rows holds, from back to front, the line backgrounds, indent guides,
 //! search matches, selections, the rows of text, diagnostics' marks, the
-//! carets, the composition and the sink. Only the rows in view (and a few
-//! around them) are made, each a text whose spans are highlighted tokens.
+//! carets and the sink. Only the rows in view (and a few around them) are
+//! made, each a text whose spans are highlighted tokens (and, at the
+//! primary caret, what an input method is composing).
 
 use nsh_core::{
     element::{ContextMenuEvent, Cursor, EventKind, EventPayload, Style},
@@ -988,7 +989,6 @@ fn rows_box(ed: Ed, lh: impl Fn() -> Points + Clone + 'static, layer: Layer) -> 
         .child(super::definition::link_marks(ed.clone()))
         .child(placeholder(ed.clone()))
         .child(carets(ed.clone(), lh.clone()))
-        .child(composition(ed.clone(), lh.clone()))
         .child(super::completion::marks(ed))
         .into_element()
 }
@@ -1071,6 +1071,7 @@ fn match_rects(ed: Ed) -> impl IntoElement {
         ed.text_rev.get();
         ed.marks_rev.get();
         ed.sel_rev.get();
+        ed.composing.with(|_| ());
         let rows = ed.visible_rows();
         let rects = ed.st.borrow().match_rects(rows);
         rects
@@ -1097,6 +1098,7 @@ fn selection_rects(ed: Ed) -> impl IntoElement {
     dynamic(move || {
         ed.text_rev.get();
         ed.sel_rev.get();
+        ed.composing.with(|_| ());
         let rows = ed.visible_rows();
         let rects = ed.st.borrow().selection_rects(rows);
         rects
@@ -1118,6 +1120,7 @@ fn bracket_rects(ed: Ed) -> impl IntoElement {
     dynamic(move || {
         ed.text_rev.get();
         ed.sel_rev.get();
+        ed.composing.with(|_| ());
         if !ed.focused.get() {
             return Vec::new();
         }
@@ -1156,13 +1159,22 @@ fn row_view(
 ) -> impl IntoElement {
     let props = ed.props;
     let row = move || slot.get().1;
+    // What an input method composes in this row: only the row it shows in
+    // (and the one it leaves) changes with it.
+    let composing = {
+        let composing = ed.composing;
+        computed(move || {
+            let row = row();
+            composing.with(|c| c.as_ref().filter(|c| c.row == row).cloned())
+        })
+    };
     let content = {
         let ed = ed.clone();
         computed(move || {
             ed.text_rev.get();
             ed.hl_rev.get();
             ed.marks_rev.get();
-            ed.st.borrow().row_content(row())
+            composing.with(|c| ed.st.borrow().row_content(row(), c.as_ref()))
         })
     };
     let indent = {
@@ -1260,6 +1272,9 @@ fn spans(ed: Ed, slot: ReadSignal<(usize, usize)>, content: RowContent) -> Vec<A
                 *el.style() = token.style();
             }
             let tags = span.tags;
+            if span.composition {
+                el = el.underline();
+            }
             if tags.unnecessary {
                 el = el.text_color(move || theme().muted_foreground);
             }
@@ -1290,7 +1305,7 @@ fn spans(ed: Ed, slot: ReadSignal<(usize, usize)>, content: RowContent) -> Vec<A
                 .iter()
                 .filter_map(|i| st.decoration_items.get(*i).and_then(|d| d.style.clone()))
                 .collect();
-            if tags.is_empty() {
+            if tags.is_empty() && !span.composition {
                 if !classes.is_empty() {
                     el = el.app_class(Some(SharedString::from(classes.join(" "))));
                 }
@@ -1300,7 +1315,7 @@ fn spans(ed: Ed, slot: ReadSignal<(usize, usize)>, content: RowContent) -> Vec<A
                     ));
                 }
             } else {
-                el = tagged(el, props, tags, classes, styles);
+                el = tagged(el, props, tags, span.composition, classes, styles);
             }
             out.push(el.into_element());
         }
@@ -1319,13 +1334,15 @@ fn spans(ed: Ed, slot: ReadSignal<(usize, usize)>, content: RowContent) -> Vec<A
     out
 }
 
-/// Span `el` under tagged diagnostics: the classes and styles of the
-/// tags' parts, then its decorations' (`classes`, `styles`), which are
+/// Span `el` under tagged diagnostics or composed by an input method
+/// (`composition`): the classes and styles of the tags' parts and of the
+/// composition's, then its decorations' (`classes`, `styles`), which are
 /// about this range alone.
 fn tagged(
     el: Text,
     props: EditorProps,
     tags: SpanTags,
+    composition: bool,
     classes: Vec<String>,
     styles: Vec<Style>,
 ) -> Text {
@@ -1335,6 +1352,7 @@ fn tagged(
         .into_iter()
         .chain(tags.unnecessary.then_some(EditorPart::UnnecessaryText))
         .chain(tags.deprecated.then_some(EditorPart::DeprecatedText))
+        .chain(composition.then_some(EditorPart::Composition))
         .collect();
     let style_list = list.clone();
     let classes = classes.join(" ");
@@ -1378,6 +1396,7 @@ fn diagnostic_marks(ed: Ed) -> impl IntoElement {
     dynamic(move || {
         ed.text_rev.get();
         ed.marks_rev.get();
+        ed.composing.with(|_| ());
         let rows = ed.visible_rows();
         let marks = ed.st.borrow().diagnostic_rects(rows);
         marks
@@ -1394,12 +1413,13 @@ fn diagnostic_marks(ed: Ed) -> impl IntoElement {
     })
 }
 
-/// The placeholder, while the text is empty.
+/// The placeholder, while the text is empty and no input method composes
+/// (the composition shows where it would).
 fn placeholder(ed: Ed) -> impl IntoElement {
     let props = ed.props;
     dynamic(move || {
         ed.text_rev.get();
-        let empty = ed.st.borrow().buffer.is_empty();
+        let empty = ed.st.borrow().buffer.is_empty() && ed.composing.with(|c| c.is_none());
         let text_ = props.placeholder.get()?;
         if !empty {
             return None;
@@ -1461,49 +1481,6 @@ fn carets(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoElement
                 )
             })
             .collect::<Vec<_>>()
-    })
-}
-
-/// What an input method is composing, drawn at the primary caret over the
-/// text, with what follows it on the row moved aside (the text changes only
-/// when the composition commits).
-fn composition(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoElement {
-    let props = ed.props;
-    dynamic(move || {
-        ed.sel_rev.get();
-        ed.text_rev.get();
-        let (text_, tail, at) = {
-            let st = ed.st.borrow();
-            let text_ = st.composition.clone()?;
-            let head = st.primary_head();
-            (text_, st.row_after(head), st.caret_point(head))
-        };
-        // The row it covers is the active line's.
-        let active = props.active_line.get();
-        Some(
-            view()
-                .absolute()
-                .left(Length::from(at.x))
-                .top(Length::from(at.y))
-                .h(Length::from(lh()))
-                .pointer_events(PointerEvents::None)
-                .bg(move || theme().background)
-                .child(
-                    view()
-                        .flex_row()
-                        .h_full()
-                        .bg(move || match active {
-                            true => theme().muted.opacity(0.6),
-                            false => AdaptiveColor::TRANSPARENT,
-                        })
-                        .child(part(
-                            text(text_).number_of_lines(1).underline(),
-                            props,
-                            EditorPart::Composition,
-                        ))
-                        .child(text(tail).number_of_lines(1)),
-                ),
-        )
     })
 }
 
@@ -1633,6 +1610,7 @@ fn whitespace_marks(ed: Ed) -> impl IntoElement {
             return Vec::new();
         }
         ed.text_rev.get();
+        ed.composing.with(|_| ());
         let rows = ed.visible_rows();
         let marks = ed.st.borrow().whitespace_marks(rows);
         marks

@@ -317,6 +317,9 @@ async function lint(text: string) {
 `decorations` style ranges the app chooses: semantic highlighting from a language server, the statement being run, the
 lines a review changed. A decoration's `class` and `style` style its text; `lineClass` and `lineStyle` style the rows
 of its lines, behind the text. Like diagnostics, they stay on their text through edits until the app sets new ones.
+While an input method composes, its text shows in place in the row, which keeps its decorations: the text after it
+moves aside with its own, and the composed text is styled as it will be once committed (inside a decoration that
+continues on both sides of the caret, not one that starts or ends there).
 
 ```tsx
 const range = (line: number, start: number, end: number) => ({ start: { line, column: start }, end: { line, column: end } });
