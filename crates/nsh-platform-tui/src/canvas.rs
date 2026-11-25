@@ -360,8 +360,8 @@ impl Dots {
                     // dots of a half not wholly covered stay as braille,
                     // and none at all over a whole Cell's background.
                     if !whole {
-                        for half in 0..2 {
-                            if halves[half].is_none() {
+                        for (half, ink) in halves.iter().enumerate() {
+                            if ink.is_none() {
                                 for index in self.half(x, y, half).collect::<Vec<_>>() {
                                     self.solid[index] = None;
                                 }
