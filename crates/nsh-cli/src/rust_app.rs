@@ -1174,7 +1174,14 @@ pub(crate) fn runner_only(entry: &Path) -> anyhow::Result<RustApp> {
 /// The `"rust"` crates of the app whose entry is `entry`, if it has any.
 /// `unify`: the command builds programs for this machine besides the
 /// describing one ([`RustApp::unify_features`]).
-pub(crate) fn of(entry: &Path, unify: bool) -> anyhow::Result<Option<RustApp>> {
+/// `target`: the one whose hosts or runtime the command builds, which
+/// links only the nshm the app lists for it (`None`: every target,
+/// [`crate::nshm::crates`]).
+pub(crate) fn of(
+    entry: &Path,
+    unify: bool,
+    target: Option<nsh_core::platform::Os>,
+) -> anyhow::Result<Option<RustApp>> {
     let entry = dunce::canonicalize(entry)
         .with_context(|| format!("entry not found: {}", entry.display()))?;
     // The app's directory: its `nsh.json`'s (`entry` may be below it).
@@ -1203,7 +1210,7 @@ pub(crate) fn of(entry: &Path, unify: bool) -> anyhow::Result<Option<RustApp>> {
         let nsh = Nsh::for_app(&crates)?;
         Ok(found.get_or_init(|| nsh).clone())
     };
-    let modules = crate::nshm::crates(dir, &config, &nsh_of)?;
+    let modules = crate::nshm::crates(dir, &config, &nsh_of, target)?;
     if rust.is_none() && modules.is_empty() {
         return Ok(None);
     }

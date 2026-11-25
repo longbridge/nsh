@@ -1015,10 +1015,30 @@ fn run(mut command: Command) -> anyhow::Result<()> {
             build: args.build,
         });
     }
+    // The target whose hosts or runtime the command builds: an nshm the
+    // app lists for other targets only (`"targets"`) is not linked. A
+    // command for every target (a check, a bundle, an over-the-air
+    // package, a dev server for hosts started elsewhere) links every one.
+    let target = match &command {
+        Command::Test { target, .. } => Some(target.unwrap_or_else(run::Target::native).os()),
+        Command::Run { target, .. }
+        | Command::Dev {
+            target,
+            server_only: false,
+            ..
+        } => Some(target.os()),
+        Command::Package(args) => args.target.asset_target(),
+        _ => None,
+    };
     let app = match command.entry_mut() {
-        Some(entry) => rust_app::of(entry, unify)?,
+        Some(entry) => rust_app::of(entry, unify, target)?,
         None => None,
     };
+    // `.nsh/types` declare the app's modules as every target has them: a
+    // command that leaves some out keeps the ones written before.
+    if types && let Some(entry) = command.entry_mut() {
+        types = nshm::left_out(entry, target)?.is_empty();
+    }
     let Some(app) = app else {
         if let Some(entry) = command.entry_mut() {
             if rust_app::is_root(entry) {

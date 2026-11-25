@@ -61,6 +61,21 @@ impl Target {
         }
     }
 
+    /// The operating system the app runs on, as `platform.os` names it:
+    /// Mac Catalyst's is iOS, a GPUI or terminal host's this machine's.
+    pub(crate) fn os(self) -> nsh_core::platform::Os {
+        use nsh_core::platform::Os;
+        match self {
+            Target::Catalyst | Target::Ios => Os::Ios,
+            Target::Android => Os::Android,
+            Target::Linux => Os::Linux,
+            Target::Macos => Os::MacOs,
+            Target::Windows => Os::Windows,
+            Target::Web => Os::Web,
+            Target::Gpui | Target::Tui => Target::native().os(),
+        }
+    }
+
     pub(crate) fn platform(self) -> crate::runtime::Platform {
         match self {
             Target::Catalyst => crate::runtime::Platform::MacCatalyst,
@@ -1743,6 +1758,18 @@ mod tests {
             .copied()
             .collect();
         assert_eq!(network, [Target::Ios, Target::Android, Target::Web]);
+    }
+
+    /// The OS whose nshm a target links (`nsh.json` `"targets"`): Catalyst
+    /// runs the iOS backend, GPUI and the terminal this machine's.
+    #[test]
+    fn targets_run_on_the_os_platform_os_names() {
+        use nsh_core::platform::Os;
+        assert_eq!(Target::Catalyst.os(), Os::Ios);
+        assert_eq!(Target::Ios.os(), Os::Ios);
+        assert_eq!(Target::Web.os(), Os::Web);
+        assert_eq!(Target::Gpui.os(), Target::native().os());
+        assert_eq!(Target::Tui.os(), Target::native().os());
     }
 
     #[test]

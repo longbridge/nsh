@@ -289,6 +289,9 @@ struct ResolveSetup {
     /// Specifiers replaced: by a path or another specifier (`None`: an
     /// empty module).
     alias: Vec<(String, Vec<Option<String>>)>,
+    /// The Rust modules of the app's nshm (`nsh.lock`,
+    /// [`crate::nshm::modules`]): package and specifier.
+    nshm_modules: Vec<(String, String)>,
 }
 
 impl ResolveSetup {
@@ -363,7 +366,25 @@ impl ResolveSetup {
             self.alias
                 .push((specifier, vec![Some(file.to_string_lossy().into_owned())]));
         }
+        self.nshm_modules = crate::nshm::modules(dir).map_err(BundleError::other)?;
         Ok(self)
+    }
+
+    /// The Rust modules of the app's nshm this build's hosts do not serve
+    /// (`modules`, from its UI sets) and no alias stands in for, by
+    /// specifier, with their package: the target leaves them out.
+    fn left_out(
+        &self,
+        modules: &compile::NativeModules,
+    ) -> std::collections::BTreeMap<String, String> {
+        self.nshm_modules
+            .iter()
+            .filter(|(_, specifier)| {
+                !modules.contains(specifier)
+                    && !self.alias.iter().any(|(from, _)| from == specifier)
+            })
+            .map(|(package, specifier)| (specifier.clone(), package.clone()))
+            .collect()
     }
 
     /// Sets `options`' platform and resolution (`production`: the value of
@@ -633,6 +654,7 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
     let main_window = main_window(&config_dir)?;
     let application = application(&config_dir)?;
     let resolve = ResolveSetup::read(&app)?.with_nshm(&app)?;
+    let modules = Arc::new(compile::NativeModules::new(&options.ui_sets));
     let asset_root = match &options.asset_root_from {
         Some(file) => {
             let file = dunce::canonicalize(file).map_err(|e| {
@@ -692,7 +714,8 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
             entry: entry.clone(),
             natives: natives.clone(),
             preloads: None,
-            modules: Arc::new(compile::NativeModules::new(&options.ui_sets)),
+            left_out: Arc::new(resolve.left_out(&modules)),
+            modules,
         })],
     )
     .map_err(|e| BundleError::new(e.into_vec()))?;
@@ -1059,6 +1082,7 @@ pub async fn bundle_hot_async(
     let capabilities = capabilities(&app)?;
     let links = app_links(&app)?;
     let resolve = ResolveSetup::read(&app)?.with_nshm(&app)?;
+    let modules = Arc::new(compile::NativeModules::new(ui_sets));
     let mut bundler_options = BundlerOptions {
         input: Some(vec![InputItem {
             import: entry.to_string_lossy().into_owned(),
@@ -1091,7 +1115,8 @@ pub async fn bundle_hot_async(
             entry: entry.clone(),
             natives: natives.clone(),
             preloads: Some(preloads.clone()),
-            modules: Arc::new(compile::NativeModules::new(ui_sets)),
+            left_out: Arc::new(resolve.left_out(&modules)),
+            modules,
             split: false,
         })],
     )
@@ -1594,6 +1619,79 @@ mod tests {
             module.is_some_and(|c| c.contains("plain build")),
             "{:?}",
             hot.modules
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// An nshm's Rust module, which `nsh.lock` names: imported natively
+    /// where the build's hosts serve it, refused where its target leaves
+    /// it out (`nsh.json` `"dependencies"` `"targets"`), unless an alias
+    /// stands in for it there; an `import()` of it stays.
+    #[test]
+    fn a_left_out_nshm_module_takes_its_stand_in_or_fails_the_build() {
+        let dir = single(
+            "left-out-nshm",
+            "import * as speech from \"acme-speech\";\n\
+             import { mount, Text } from \"nsh\";\n\
+             mount(() => <Text>{String(speech.Speech)}</Text>);\n",
+        );
+        std::fs::write(
+            dir.join("stand-in.ts"),
+            "export const Speech = \"the stand-in\";\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join(crate::nshm::LOCK),
+            r#"{ "version": 2, "packages": [
+                { "name": "acme-speech-rs", "source": "crates.io", "version": "1.0.0", "module": "acme-speech" }
+            ] }"#,
+        )
+        .unwrap();
+        let with = |linked: bool| {
+            bundle(&BundleOptions {
+                entry: dir.join("App.tsx"),
+                ui_sets: if linked {
+                    vec![nsh_core::element::Registry::ui_set("acme-speech").into()]
+                } else {
+                    Vec::new()
+                },
+                ..Default::default()
+            })
+        };
+        let native = with(true).unwrap();
+        assert!(native.natives.iter().any(|n| n == "acme-speech"));
+        let error = with(false).unwrap_err().plain;
+        assert!(
+            error.contains("`acme-speech` is not linked for this target")
+                && error.contains("acme-speech-rs"),
+            "{error}"
+        );
+        std::fs::write(
+            dir.join("nsh.json"),
+            r#"{ "resolve": { "alias": { "acme-speech": "./stand-in.ts" } } }"#,
+        )
+        .unwrap();
+        // The module wins over the alias where it is linked.
+        let native = with(true).unwrap();
+        assert!(native.natives.iter().any(|n| n == "acme-speech"));
+        assert!(!native.code.contains("the stand-in"), "{}", native.code);
+        let stand_in = with(false).unwrap();
+        assert!(stand_in.natives.iter().all(|n| n != "acme-speech"));
+        assert!(stand_in.code.contains("the stand-in"), "{}", stand_in.code);
+        // Without the alias, an `import()` builds: it runs where linked.
+        std::fs::remove_file(dir.join("nsh.json")).unwrap();
+        std::fs::write(
+            dir.join("App.tsx"),
+            "import { mount, Text, platform } from \"nsh\";\n\
+             if (platform.os !== \"web\") import(\"acme-speech\").then((m) => console.log(m));\n\
+             mount(() => <Text>hi</Text>);\n",
+        )
+        .unwrap();
+        let dynamic = with(false).unwrap();
+        assert!(
+            dynamic.code.contains("import(\"acme-speech\")"),
+            "{}",
+            dynamic.code
         );
         let _ = std::fs::remove_dir_all(dir);
     }
