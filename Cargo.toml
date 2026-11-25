@@ -241,9 +241,7 @@ pangocairo = "0.22"
 webkit6 = "0.6"
 # The Linux backend's sounds: decoded once into memory, mixed in one pipeline
 # (GStreamer, which GTK's media streams already run on; the glib of gtk4's).
-gstreamer = "0.25"
-gstreamer-app = "0.25"
-gstreamer-audio = "0.25"
+libloading = "0.8"
 taffy = { version = "0.16", default-features = false, features = ["std", "flexbox", "grid", "block_layout", "content_size"] }
 # Features per crate: the runtime's binaries get only what they use.
 tokio = { version = "1", default-features = false }
