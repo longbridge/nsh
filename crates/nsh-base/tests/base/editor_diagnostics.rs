@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use nsh_base::{
     editor::{
-        EditorClasses, EditorDiagnostic, EditorDiagnosticCodeDescription,
+        EditorClasses, EditorDecoration, EditorDiagnostic, EditorDiagnosticCodeDescription,
         EditorDiagnosticRelatedInformation, EditorDiagnosticSeverity, EditorDiagnosticTag,
         EditorHoverEvent, EditorLocation, EditorPosition, EditorRange, EditorStyles, editor,
     },
@@ -28,9 +28,10 @@ const TEXT: &str = "let unused = old();";
 struct HarnessProps {
     /// The editor's `classes`.
     classes: EditorClasses,
-    /// The editor's `styles` color the `diagnosticWarning` part red and the
-    /// `deprecatedText` part, which comes after it, blue and bold, typed
-    /// (`StyleRefinement`, as a Rust app types them).
+    /// Typed styles (`StyleRefinement`, as a Rust app types them) for
+    /// `old`, each over the one before: the `diagnosticWarning` part red
+    /// and light, the `deprecatedText` part blue, and a decoration over
+    /// `old` bold.
     typed: bool,
 }
 
@@ -103,17 +104,26 @@ fn hover_text(e: &EditorHoverEvent) -> String {
 fn Harness(props: HarnessProps) -> impl IntoElement {
     let hovered = signal(String::from("Hover none"));
     let mut styles = EditorStyles::default();
+    let mut decorations = Vec::new();
     if props.typed {
         use nsh_core::element::StyleRefinement;
         styles.diagnostic_warning = Some(PartStyle(
-            StyleRefinement::default().text_color(rgb(0xff0000)).into(),
-        ));
-        styles.deprecated_text = Some(PartStyle(
             StyleRefinement::default()
-                .text_color(rgb(0x0000ff))
-                .font_weight(FontWeight::BOLD)
+                .text_color(rgb(0xff0000))
+                .font_weight(FontWeight::LIGHT)
                 .into(),
         ));
+        styles.deprecated_text = Some(PartStyle(
+            StyleRefinement::default().text_color(rgb(0x0000ff)).into(),
+        ));
+        let mut bold = EditorDecoration::default();
+        bold.range = range(0, 13, 16);
+        bold.style = Some(
+            StyleRefinement::default()
+                .font_weight(FontWeight::BOLD)
+                .into(),
+        );
+        decorations.push(bold);
     }
     view()
         .child(
@@ -123,6 +133,7 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
                     .diagnostics(diagnostics())
                     .classes(props.classes.clone())
                     .styles(styles)
+                    .decorations(decorations)
                     .on_hover(move |e: &EditorHoverEvent| hovered.set(hover_text(e)))
                     .size_full(),
             ),
@@ -188,9 +199,9 @@ fn the_apps_classes_restyle_the_tagged_text() {
     assert!(!screen.span_style("id:editor >> text:let").unwrap().italic);
 }
 
-/// Typed styles of a diagnostic's parts reach its text as the parts'
-/// classes do: its severity's part, then its tags', the later winning
-/// (`old` is a deprecated warning).
+/// Typed styles reach a diagnostic's text as the parts' classes do: its
+/// severity's part, then its tags', then the decorations over it, the
+/// later winning (`old` is a deprecated warning).
 #[test]
 fn the_apps_typed_styles_restyle_the_tagged_text() {
     let app = start_styled(EditorClasses::default(), true);
@@ -199,6 +210,7 @@ fn the_apps_typed_styles_restyle_the_tagged_text() {
     let old = style("id:editor >> text:old");
     assert_eq!(old.color, nsh_core::Color(0x0000_ffff));
     assert_eq!(old.font_weight, 700);
+    assert!(old.decoration.line_through);
     assert_ne!(style("id:editor >> text:let").font_weight, 700);
 }
 

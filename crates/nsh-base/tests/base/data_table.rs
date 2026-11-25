@@ -871,3 +871,31 @@ fn typed_part_styles_reach_their_parts_the_later_winning() {
     assert_eq!(style("text:AAPL").color, nsh_core::Color(0x00ff_00ff));
     assert_eq!(style("text:AAPL").font_weight, 700);
 }
+
+/// Striped rows whose parts have typed styles: every row red, the rows
+/// of odd position blue (`rowOdd` comes after `row`), which their cells'
+/// text takes.
+#[component]
+fn TypedRows() -> impl IntoElement {
+    use nsh_base::{DataTableStyles, text_view::PartStyle};
+    use nsh_core::element::StyleRefinement;
+
+    let color = |c: u32| PartStyle(StyleRefinement::default().text_color(rgb(c)).into());
+    let mut styles = DataTableStyles::default();
+    styles.row = Some(color(0xff0000));
+    styles.row_odd = Some(color(0x0000ff));
+    data_table()
+        .h(px(200.0))
+        .columns(vec![column("symbol")])
+        .data(DataTableRows::new(2).texts("symbol", ["AAPL", "MSFT"]))
+        .stripe(true)
+        .styles(styles)
+}
+
+#[test]
+fn typed_row_styles_merge_in_order_the_later_winning() {
+    let app = start::<TypedRows>();
+    let color = |selector: &str| app.screen().span_style(selector).unwrap().color;
+    assert_eq!(color("text:AAPL"), nsh_core::Color(0xff00_00ff));
+    assert_eq!(color("text:MSFT"), nsh_core::Color(0x0000_ffff));
+}
