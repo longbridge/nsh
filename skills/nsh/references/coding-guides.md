@@ -7,20 +7,20 @@ group: ui
 
 # Coding Guides
 
-This guide describes the application architecture and code patterns that have proved durable in Native Shell apps. It
-is written for both engineers and coding agents: developers of NSH apps (TSX modules, Rust components, native apps
-that embed NSH) and authors of component libraries built on `nsh/base`. Read the Design Guides first: code structure
-should preserve product intent, not replace it.
+This guide shows how to structure a Native Shell (NSH) app and its code so it stays easy to change. It is for
+engineers and coding agents who build NSH apps (TSX modules, Rust components, native apps that embed NSH) or component
+libraries on `nsh/base`. Read the Design Guides first. Code structure should carry out the product design, not replace
+it.
 
-This is a normative guide. **Must** marks lifecycle, correctness, or ecosystem constraints; **should** is the default
-architecture and requires a concrete reason to depart from it. Current source, the reference pages and the
-declarations in `.nsh/types` remain authoritative for exact signatures.
+The rules use two words. **Must** marks a lifecycle, correctness or ecosystem constraint. **Should** marks the default
+architecture: depart from it only for a concrete reason. For exact signatures, the source, the reference pages and the
+declarations in `.nsh/types` win over this guide.
 
 ## Build the app's UI foundations before pages
 
-For a new app, establish the design standards, theme tokens and app-owned styled components before implementing
-feature pages. For an existing app, locate and reuse these first. Keep the standards and shared UI code in the app's
-repository; the [Design Guides](./design-guides.md#establish-the-apps-design-system-first) describe their contents.
+For a new app, set up the design standards, theme tokens and the app's own styled components before you build
+feature pages. For an existing app, find these first and reuse them. Keep the standards and shared UI code in the app's
+repository. The [Design Guides](./design-guides.md#establish-the-apps-design-system-first) describe their contents.
 
 Use this development order:
 
@@ -28,47 +28,48 @@ Use this development order:
 2. Define the app's semantic color roles and light/dark values in its theme file (`nsh.json` `"theme"`), together
    with the typography, spacing, radius and size scales the components use.
 3. Create the app's `ui` module (`src/ui/`) and wrap and compose `nsh/base` into its core set of styled controls
-   ([The app's `ui` layer](./design-guides.md#the-apps-ui-layer)): each takes `variant`, `size`, states and slots,
-   never colors or radii. Build them including visible parts, variants and interaction
-   states. Verify a representative composition on the supported targets before replicating it across pages.
-4. Compose pages from that layer. Add a missing token or shared variant in its owning layer first, then use it in
-   pages; changes to a shared control should update all its consumers consistently.
+   ([The app's `ui` layer](./design-guides.md#the-apps-ui-layer)). Each control takes `variant`, `size`, states and
+   slots, never colors or radii. Build each one with its visible parts, variants and interaction states. Check a
+   typical composition on the supported targets before you repeat it across pages.
+4. Compose pages from that layer. If a token or shared variant is missing, add it to the layer that owns it first, then
+   use it in pages. A change to a shared control should update every page that uses it.
 
 NSH provides the primitives (`nsh-core`, `nsh` in TSX) and the unstyled `nsh-base` crate (`nsh/base` in TSX). The app
-or a community library owns the styled layer above them. App code
-should import its own styled controls for ordinary UI, keeping base-component assembly and styling in the shared
-layer. Preserve base behavior, focus and accessibility while adapting presentation for each supported platform.
+or a community library owns the styled layer above them. For ordinary UI, app code imports its own styled controls.
+Assembling and styling base components happens in the shared layer. Adapt the look for each platform, but keep the
+base behavior, focus and accessibility.
 
-Theme colors must be read through semantic tokens: `theme().primary` or `theme().color("warning")` in Rust,
-`bg-primary`, `text-warning` or `token("warning")` in TSX. Define raw hex, RGB/RGBA and HSL/HSLA values in the theme
-source, not in page or component styles, including state styles, gradients and shadows. A palette class such as
-`bg-blue-500` or an arbitrary color class also bypasses the app's semantic roles. Add the missing role instead.
+Read theme colors through semantic tokens: `theme().primary` or `theme().color("warning")` in Rust,
+`bg-primary`, `text-warning` or `token("warning")` in TSX. A semantic token names a color by its role (primary,
+warning), not by its value. Define raw hex, RGB/RGBA and HSL/HSLA values only in the theme source. This includes state
+styles, gradients and shadows. A palette class such as `bg-blue-500`, or an arbitrary color class, also skips the
+app's roles. Add the missing role instead.
 Token opacity such as `bg-primary/90` or `theme().primary.opacity(0.9)` keeps the semantic source of the color.
 User-authored colors and data values, such as an image's pixels or a color picker's selected value, remain data;
 the surrounding controls still use theme tokens.
 
-Before finishing, inspect new presentation code for raw color literals and palette classes, verify shared component
-use, and exercise the feature's states in both appearances and the platforms it targets. Record any unavailable
-platform verification rather than assuming one screenshot proves all targets.
+Before you finish, check new presentation code for raw color literals and palette classes. Check that it uses the
+shared components. Try the feature's states in light and dark mode on each target platform. If you could not test a
+platform, say so. One screenshot does not prove every target.
 
 ## Make the common path inexpensive
 
 **Design principle: choose framework types and ownership so ordinary component use is inexpensive by default.**
-Developers should be able to build and reuse UI without adding a cache at every call site. Components that run once
-and [signals](./reactivity.md) read where they are used are examples: a component builds its part of the tree once,
-and afterwards only the bindings that read a changed signal run again, so the common path avoids repeated work. The
-reactive graph, the renderer, layout and lists are native, and one turn of the app's code becomes one batch of native
-operations. Small costs still multiply across elements and updates, above all in TSX, whose own code runs in an
-interpreter; measure exceptional hot paths before adding caches ([Performance](./performance.md)). Neither choice
-promises zero cost. The [state ownership rules](#state-ownership) and later rendering sections explain the mechanics.
+You should be able to build and reuse UI without adding a cache at every call site. Two choices make this work.
+A component runs once and builds its part of the tree. After that, only the bindings that read a changed
+[signal](./reactivity.md) run again. A signal is a value that tracks who reads it. The reactive graph (the record of
+which bindings read which signals), the renderer, layout and lists are native code. One turn of the app's code becomes
+one batch of native operations. Small costs still add up across elements and updates. This matters most in TSX, which
+runs in an interpreter. Measure a hot path before you add a cache ([Performance](./performance.md)). Neither choice
+makes work free. The [state ownership rules](#state-ownership) and later rendering sections explain the mechanics.
 
 ## Architecture at a glance
 
 <img class="diagram diagram-light" src="/diagrams/application-layers-light.svg" alt="NSH application architecture: the App Shell, Pages and App Components above a Component Library, nsh/base and nsh; dependencies point downward.">
 <img class="diagram diagram-dark" src="/diagrams/application-layers-dark.svg" alt="NSH application architecture: the App Shell, Pages and App Components above a Component Library, nsh/base and nsh; dependencies point downward.">
 
-Dependencies point downward. Higher layers own domain meaning and orchestration; lower layers own reusable
-presentation or behavior. Do not make a reusable component depend on an app page, or make a component library depend
+Dependencies point downward. Higher layers own the domain logic and decide what happens when. Lower layers own
+reusable presentation or behavior. Do not make a reusable component depend on an app page, or make a component library depend
 on one app's theme ([Three layers](./architecture.md#three-layers)).
 
 Use these boundaries:
@@ -84,8 +85,8 @@ Use these boundaries:
 
 ### Lay out an app's files
 
-An app's files follow NSH's conventions, so there is nothing to configure: `App.tsx` is the entry and `nsh.json`
-sits beside it, and both are found by convention.
+NSH finds an app's files by convention, so there is nothing to configure. `App.tsx` is the entry, and `nsh.json`
+sits beside it.
 
 ```text
 App.tsx            # the entry, by convention: mount(App)
@@ -108,12 +109,12 @@ store.ts
   the functions.
 - Tests are `*.test.tsx` files beside what they test (`App.test.tsx`, `pages/Inbox.test.tsx`).
 - `Cargo.toml` and `src/lib.rs` are the app's own crate, with its Rust components (`nsh.json` `"rust": "."`); its
-  `#[native_module]` in `src/lib.rs` names what TSX imports. An app written only in Rust is the same Cargo project,
+  `#[native_module]` in `src/lib.rs` sets the name TSX imports. An app written only in Rust is the same Cargo project,
   with its root component in `src/lib.rs` ([Project structure](./project-structure.md)).
 
-The app shell composes pages but contains little page logic. Pages read the store's signals and call its functions;
-they never write another page's state. Keep the store's signals private and export what reads and changes them, so the
-mutable state stays behind its public functions:
+The app shell composes pages but holds little page logic. Pages read the store's signals and call its functions.
+They never write another page's state. Keep the store's signals private, and export functions that read and change
+them. The mutable state then stays behind those functions:
 
 ```tsx tabs
 // store.ts
@@ -155,7 +156,7 @@ impl Workspace {
 }
 ```
 
-A page may hold the workspace and pass its id to search; search does not need the workspace's whole collection or its
+A page may hold the workspace and pass its id to search. Search does not need the workspace's whole collection or its
 private signals. A simple acyclic dependency shape is:
 
 ```text
@@ -164,14 +165,13 @@ App.tsx ──▶ pages/ ──▶ store.ts
 ```
 
 Pages may depend on the store and on components, but not on the shell or on another page's private parts. If one page
-must change what another shows, do it through the store. These boundaries let different engineers or AI agents work
-on separate pages in parallel with fewer file conflicts and less shared-state coupling; the store still requires
-coordination.
+must change what another shows, do it through the store. With these boundaries, engineers or AI agents can work on
+separate pages in parallel with fewer file conflicts. Changes to the store still need coordination.
 
 ## Bootstrap and root ownership
 
-Mount the app once; its root declares the app's top-level windows, and each window fills with a `flex: 1` view and a
-background from the theme. A TSX entry calls `mount(App)`, a Rust app names its root component in `nsh.json`
+Mount the app once. Its root declares the app's top-level windows. Each window holds a `flex: 1` view with a
+background from the theme. A TSX entry calls `mount(App)`. A Rust app names its root component in `nsh.json`
 (`"root": "App"`):
 
 ```tsx tabs
@@ -204,15 +204,15 @@ pub fn App() -> impl IntoElement {
 
 The app root coordinates what belongs to the whole app: the shared state, settings and the window registry. Each
 window's content coordinates what belongs to that window: its navigation stack, dialogs, popovers, menus, sheets and
-tooltips, and its safe area. Do not mount a second root for each page. One app is one engine: each `NshAppView`,
-`NshView` or `AppView` a native app embeds runs its own VM, its own module state and its own reactive graph, so several
-surfaces in one host app never share state by accident.
+tooltips, and its safe area. Do not mount a second root for each page. One app is one engine. Each `NshAppView`,
+`NshView` or `AppView` that a native app embeds runs its own VM, module state and reactive graph. So several NSH views
+in one host app never share state by accident.
 
 ## Understand what runs once and what runs again
 
-NSH is retained state with declarative construction, on Solid's model ([Reactivity](./reactivity.md)). A signal
-survives across updates; a component body describes its part of the tree once, when it is created. Keep that
-distinction explicit:
+NSH follows Solid's model ([Reactivity](./reactivity.md)). You describe the UI declaratively, and NSH keeps its state
+between updates. A signal survives across updates. A component body describes its part of the tree once, when it is
+created. Keep that difference in mind:
 
 | You write | Runs | Runs again when |
 | --- | --- | --- |
@@ -223,27 +223,26 @@ distinction explicit:
 | A row of `each` / `<Each>` | When its key first appears | Never; its item and index signals change |
 | A cell of `virtual_list` / `<List>` | Once per cell | Never; the cell is given other rows |
 
-- the component that runs is the **owner**: effects, computed values, tasks, timers, key bindings and cleanups created
-  while it runs belong to it and are disposed with it;
+- the component that runs is the **owner**. Effects, computed values, tasks, timers, key bindings and cleanups created
+  while it runs belong to it. They are disposed with it;
 - **context** (`provide_context` / `use_context`, `context()` and `<Ctx.Provider>`) gives a subtree a value without
   implying that the elements reading it own it;
 - a Rust component's **`Scope`** (`cx`) emits its events and reads the insets it is given;
 - **refs** (`element_ref()`, `ref`) name a host element for imperative calls (`focus()`, `scroll_to()`, `measure()`);
-- layout and measurement are later, native phases; use `onLayout` and `measure()` only when resolved geometry is
-  genuinely required.
+- layout and measurement are later, native phases. Use `onLayout` and `measure()` only when you need the resolved
+  geometry.
 
-Never read a context in an event handler or a timer, where there is no component to look it up from: read it in the
-body and keep what it gave. Retain typed handles (signals, resources, refs, domain ids), which are `Copy` in Rust and
+Never read a context in an event handler or a timer. There is no component there to look it up from. Read it in the
+body and keep the value. Keep typed handles (signals, resources, refs, domain ids). They are `Copy` in Rust, and they
 stop doing anything once their owner is gone.
 
 ## Choose the right unit
 
 ### Use a plain function for value-like elements
 
-**Default to a plain function for lightweight, reusable pieces of UI.** The caller supplies current props and
-handlers, the function returns elements, and nothing of it remains but the bindings it made. Its arguments are its
-props; the displayed label, value and callbacks come from the caller's current state. It still runs once, like any
-component: what changes afterwards are its bindings.
+**Default to a plain function for small, reusable pieces of UI.** The caller passes the current props and handlers.
+The function returns elements, and only the bindings it made remain. Its arguments are its props. The label, value and
+callbacks come from the caller's state. Like any component, it runs once. Afterwards only its bindings change.
 
 ```tsx tabs
 function EmptyState(props: { title: string }) {
@@ -267,8 +266,8 @@ fn empty_state(title: impl Into<SharedString>) -> impl IntoElement {
 ### Use a component for retained behavior
 
 Use a `#[component]` (or a TSX component that creates signals) when a piece of UI owns persistent state or an
-independent lifecycle: signals, effects, async work, timers, key bindings. Create that state in the component body,
-once, never inside a binding.
+independent lifecycle: signals, effects, async work, timers, key bindings. Create that state once, in the component
+body, never inside a binding.
 
 ```tsx tabs
 function Search(props: { placeholder: string }) {
@@ -295,13 +294,13 @@ pub fn Search(props: SearchProps) -> impl IntoElement {
 ```
 
 A `#[component]` has typed props (`#[derive(Props)]`) and events (`#[derive(Event)]`); TSX imports it with
-declarations generated from them. Retained state that TSX uses with `new` (a ledger, a parser, a session) is a
-`#[class]`, and functions are a `#[module]` ([Building with Rust](./rust.md#extending-a-rust-app-with-tsx)). Write the
-parts an app uses most, component libraries and demanding logic in Rust, which is native code from start to end; keep
-TSX for what changes often or is delivered at run time.
+declarations generated from them. Retained state that TSX creates with `new` (a ledger, a parser, a session) is a
+`#[class]`. Plain functions are a `#[module]` ([Building with Rust](./rust.md#extending-a-rust-app-with-tsx)). Write the
+parts an app uses most, component libraries and heavy logic in Rust, which runs as native code. Use TSX for what
+changes often or ships at run time.
 
-Do not turn every visual fragment into a component. Component boundaries have lifecycle and coordination costs; use
-them where retained identity matters.
+Do not turn every visual fragment into a component. Each component boundary adds lifecycle and coordination cost.
+Use one where the piece must keep its identity across updates.
 
 ### Elements, views, and behavior systems are different
 
@@ -313,22 +312,22 @@ Do not force every component into one template. The ecosystem contains:
 - infrastructure such as overlays and their placement, virtualization, scrolling, safe areas, the keyboard and
   animation.
 
-An element may be internally complex and still be value-like to its caller. A stateful system may expose render
-functions so apps own presentation without reimplementing behavior. Choose the public seam from the behavior, not
-from how many views appear in its output.
+An element can be complex inside and still look like a plain value to its caller. A stateful system can expose
+render functions, so apps own the presentation without rewriting the behavior. Choose the public API from the
+behavior, not from how many views it outputs.
 
 ## State ownership
 
 ### Own persistent UI text with `SharedString`
 
-**In Rust, must prefer `SharedString` for UI text retained across updates or callback closures**, including component
-labels, titles and placeholders: props take it (`Prop<SharedString>`), and cloning it into a binding does not copy the
-text. For a mutable editing buffer or text being assembled with formatting, use `String` and convert when the result is
-ready; for temporary read-only access during one call, use `&str`. In TSX, strings are the app's own values; keep text
-that is computed from state in a `computed` or a closure instead of rebuilding it in several places.
+**In Rust, you must prefer `SharedString` for UI text kept across updates or in callback closures.** This includes
+component labels, titles and placeholders. Props take it (`Prop<SharedString>`), and cloning it into a binding does not
+copy the text. For an editing buffer or text you build with formatting, use `String` and convert it when it is ready.
+For read-only access during one call, use `&str`. In TSX, strings are ordinary values. Keep text computed from state in
+a `computed` or a closure, instead of rebuilding it in several places.
 
-For immutable response text that the UI will retain, keep the received value intact and put derived or formatted
-presentation text in a separate domain value instead of rewriting the response.
+When the UI keeps response text from a server, keep the received value as it is. Put formatted or derived display
+text in a separate value instead of rewriting the response.
 
 Put each state in the narrowest owner that can keep it correct:
 
@@ -339,9 +338,9 @@ Put each state in the narrowest owner that can keep it correct:
 - state a subtree shares is a signal provided through [context](./reactivity.md#context);
 - what outlives a run belongs in [storage](../modules/nsh.md#storage) or on a server.
 
-Prefer controlled values for ordinary selection and toggles: pass the current value into the component, receive a
-requested change, update the owner, and the bindings follow. A callback reports intent; it should not create a second
-hidden source of truth.
+Prefer controlled values for ordinary selection and toggles. A controlled component gets its value from its owner.
+Pass the current value in, receive the requested change, and update the owner. The bindings follow. A callback reports
+what the user wants. It should not create a second, hidden copy of the state.
 
 ```tsx tabs
 <Switch checked={showHidden()} onChange={({ checked }) => showHidden.set(checked)}>
@@ -356,13 +355,13 @@ switch()
     .child(text("Show hidden files"))
 ```
 
-There is nothing to notify: writing a signal updates exactly the bindings that read it. A Rust component emits a
-semantic event that its owner should handle with `cx.emit(..)`; an effect follows a signal for as long as its owner
-lives. Write several fields that form one invariant in one [`batch`](./reactivity.md#batch), so effects and computed
-values see them at once.
+There is nothing to notify. Writing a signal updates exactly the bindings that read it. A Rust component sends its
+owner an event with `cx.emit(..)`. An effect follows a signal for as long as its owner lives. When several fields must
+stay consistent with each other, write them in one [`batch`](./reactivity.md#batch). Effects and computed values then
+see all the changes at once.
 
-A controlled component of the app's own follows the same contract. A quantity stepper, a domain control written once
-in Rust and placed from TSX and Rust:
+The app's own controlled components follow the same contract. Here is a quantity stepper written once in Rust and
+used from TSX and Rust:
 
 ```tsx tabs
 import { signal } from "nsh";
@@ -520,36 +519,41 @@ export function QuantityStepper(props: QuantityStepperProps) {
 
 ### Keep ownership links and subscriptions bounded
 
-A component owns what it creates, and everything it created goes away with it: when its `<If>` branch hides, its row
-is removed or its page is popped. In Rust, tasks, timers and intervals (`spawn`, `set_timeout`, `set_interval`) and key
-bindings (`on_key`) end with the owner they were made under; in TSX, register the stop with
-[`cleanup`](./reactivity.md#cleanup) or return it from the effect. Listening is `on(event, listener)`
-(`host.on(name, listener)`, `BackHandler.on("press", listener)`), which returns a function that stops it
-(`() => void`, from Rust a `Stop`), and what is registered while a component renders goes away with the component, as
-`keymap.bind`'s bindings do.
+A component owns what it creates. Everything it created goes away with it: when its `<If>` branch hides, its row is
+removed or its page is popped. In Rust, tasks, timers, intervals (`spawn`, `set_timeout`, `set_interval`) and key
+bindings (`on_key`) end with the owner they were made under. In TSX, register the stop with
+[`cleanup`](./reactivity.md#cleanup) or return it from the effect. To listen, call `on(event, listener)`
+(`host.on(name, listener)`, `BackHandler.on("press", listener)`). It returns a function that stops listening
+(`() => void`, a `Stop` in Rust). A listener registered while a component renders goes away with the component. The
+same holds for `keymap.bind` bindings.
 
-When something keeps running unexpectedly, first inspect effects and computed values created outside a component (in
-an event handler or a timer callback they have no owner and live forever), listeners registered without their stop,
-and work started from a store that no component owns. A dropped `resource` load is aborted (`info.signal` in TSX);
-it does not keep its component alive. These are common places to start, not an exhaustive list.
+When something keeps running after it should stop, check these first:
 
-Do not write a signal merely because a value was read or derived. Avoid unconditional writes from a binding or an
-effect that reads the same signal: it runs itself again until NSH stops it with an error. A value computed from other
+- effects and computed values created outside a component. In an event handler or a timer callback they have no
+  owner and live forever;
+- listeners registered without their stop;
+- work started from a store that no component owns.
+
+The list is not complete. A dropped `resource` load is aborted (`info.signal` in TSX). It does not keep its component
+alive.
+
+Do not write a signal just because a value was read or derived. Do not write a signal unconditionally from a binding
+or effect that reads it. The binding then reruns itself until NSH stops it with an error. A value computed from other
 state is a `computed`, not an effect that writes a second signal.
 
 ### Avoid state feedback loops
 
-Text input, selection, filters and controlled popups commonly have two paths: an external owner updates the value, and
-user interaction requests a new value. Do not send an owner-supplied value back through the user callback during sync.
-Read the owner's current value untracked when handling the user's act (`props.value.get_untracked()` in Rust, as
-above; a TSX event handler is already untracked) and compare it with the next one, so each logical change is reported
-once. Make callbacks re-entrancy-safe when a callback can synchronously close, replace or update the component that
-invoked it.
+Text input, selection, filters and controlled popups often have two paths. The owner updates the value, and the
+user asks for a new value. When the owner's value arrives, do not send it back through the user callback. When the
+user acts, read the owner's current value untracked and compare it with the next one. Untracked means the read does
+not subscribe to the signal. In Rust this is `props.value.get_untracked()`, as above. A TSX event handler is already
+untracked. Each change is then reported once. A callback may close, replace or update the component that called it,
+in the same call. In that case, make the callback safe to re-enter.
 
 ## Stable identity
 
-A key is part of behavior. It gives a row, a page or a repeated control stable identity, and decides which one keeps
-its state, its focus and its measurements when the data changes.
+A key is part of behavior. It gives a row, a page or a repeated control a stable identity. When the data changes,
+the key decides which item keeps its state, focus and measurements.
 
 - Use stable domain ids for rows, tabs, pages and repeated controls: `each(projects, |p| p.id, ..)`,
   `<Each of={projects()} key={(p) => p.id}>`, a list's `keyExtractor`.
@@ -579,13 +583,13 @@ each(projects, |p| p.id, move |project, _index| {
 A changed key means a changed UI identity. Treat that reset as deliberate.
 
 The same rule applies to navigation routes, list keys, storage keys and test ids. A route that stays in `setRoutes`
-keeps its page and its state; if two independently retained behaviors share a key, they can overwrite each other's
-state; if one behavior changes keys every update, it never accumulates state.
+keeps its page and its state. If two separate behaviors share a key, they can overwrite each other's state. If a
+behavior changes its key on every update, it never keeps any state.
 
 ## Rendering and composition
 
-Keep a component body declarative: read current state, derive presentation values, and compose elements. Move domain
-operations, parsing and non-trivial mutation to named functions of the store or the app's crate.
+Keep a component body declarative: read state, derive display values and compose elements. Move domain operations,
+parsing and complex changes into named functions in the store or the app's crate.
 
 ```tsx tabs
 function ProjectPage() {
@@ -608,22 +612,21 @@ pub fn ProjectPage() -> impl IntoElement {
 }
 ```
 
-Extract a helper when it names a meaningful region and reduces the amount of state a reader must hold at once.
-Extract a new component when the region has its own reusable contract or retained lifecycle, not merely because a
-builder chain or a JSX block is long.
+Extract a helper when it names a clear region and means the reader keeps less in mind at once. Extract a new
+component when the region has its own reusable contract or lifecycle. A long builder chain or JSX block alone is not
+a reason.
 
-Use the typed style methods and the components' builders consistently in Rust, and classes in TSX. Prefer
-`.when(..)` / `.when_some(..)` (Rust) and `classList` (TSX) for small conditional refinements; use `when` / `<If>`
-when branches represent substantially different interfaces, since a ternary in a closure builds its branch again
-whenever anything it reads changes.
+In Rust, use the typed style methods and the components' builders. In TSX, use classes. For small conditional
+changes, use `.when(..)` / `.when_some(..)` (Rust) and `classList` (TSX). When the branches are very different UIs, use
+`when` / `<If>`. A ternary in a closure rebuilds its branch whenever anything it reads changes.
 
-Compose from the standard semantic component before building a custom surface. Do not reproduce a menu, a popover, a
-sheet or a dialog from generic views merely to match one screenshot: `Menu`, `ContextMenu`, `Popover`, `Sheet`,
+Start from the standard component before you build a custom one. Do not rebuild a menu, a popover, a sheet or a
+dialog from plain views just to match one screenshot. `Menu`, `ContextMenu`, `Popover`, `Sheet`,
 `Tooltip` and `Dialog` from `nsh/base` preserve placement, focus transfer, keyboard navigation, selection, disabled
-state, dismissal on Escape and back, and the accessibility contract. If the standard component cannot express a
-recurring valid pattern, improve its explicit API instead of styling arbitrary descendants at each call site.
+state, dismissal on Escape and back, and accessibility. If the standard component cannot express a valid pattern you
+need often, improve its API. Do not style its inner views at each call site.
 
-Render functions supplied by app code should be side-effect-free. A list's row, a `TextView`'s `renderCodeBlock` or a
+Render functions from app code should have no side effects. A list's row, a `TextView`'s `renderCodeBlock` or a
 menu's items may run whenever their owner needs a cell, a part or an opening. They must not perform a business
 operation, append data or start an unbounded subscription.
 
@@ -635,14 +638,14 @@ The durable Base rule is:
 > visual language.
 
 "Unstyled" does not mean "one empty view." Overlay placement, keyboard navigation, editing, virtualization, back
-navigation, dismissal and safe areas require internal structure and state. Moving that work to every caller would not
-create flexibility; it would duplicate fragile behavior.
+navigation, dismissal and safe areas need internal structure and state. Moving that work to every caller would not add
+flexibility. It would copy fragile behavior into every app.
 
-Conversely, Base must not choose brand colors, typography, density, final icons, component variants, strings or
-application composition. Expose presentation through `class` / `style` on the main part, `<part>Class` /
+Base must not choose brand colors, typography, density, final icons, component variants, strings or how the app is
+composed. Expose presentation through `class` / `style` on the main part, `<part>Class` /
 `<part>Style` for every other part, typed state styles (`active`, `hover`, `focus`, `selected`, `checked`, `disabled`),
-named slots (`trigger`, `header`, `footer`) and render functions. Do not inspect arbitrary descendants to discover
-titles, descriptions or close buttons: make semantic parts explicit, and take every label as a prop or a child.
+named slots (`trigger`, `header`, `footer`) and render functions. Do not search the children for titles, descriptions
+or close buttons. Make each part explicit, and take every label as a prop or a child.
 
 ## Theme and styling
 
@@ -674,76 +677,75 @@ Rules:
   `unknown class` warning is a finding to fix;
 - use semantic tokens for meaning, not palette position;
 - keep state-independent geometry in the ordinary builder chain or class string;
-- use `active:`, `hover:` and `focus-visible:` (`.active(..)`, `.hover(..)`, `.focus_visible(..)`) for runtime
-  interaction states; they apply natively, with no round trip to app code. `focus-visible:` is the keyboard's ring:
-  it shows when the keyboard moved the focus, not after a click or a tap; keep `focus:` for any focus (an input's
-  edge, a list's highlighted row);
-- leave `cursor` unset on buttons, rows, tabs, menu items and other controls: the platforms already give the
-  default arrow there, the I-beam over inputs and selectable text, and the pointing hand over `Link` and text links.
+- use `active:`, `hover:` and `focus-visible:` (`.active(..)`, `.hover(..)`, `.focus_visible(..)`) for interaction
+  states. They apply natively, with no round trip to app code. `focus-visible:` is the keyboard focus ring. It shows
+  when the keyboard moved the focus, not after a click or a tap. Use `focus:` for any focus (an input's edge, a list's
+  highlighted row);
+- leave `cursor` unset on buttons, rows, tabs, menu items and other controls. The platforms already show the default
+  arrow there, the I-beam over inputs and selectable text, and the pointing hand over `Link` and text links.
   Set `cursor-pointer` only on content that behaves as a link (opens a URL or leaves the app), and resize, grab or
   `not-allowed` only while they describe the actual manipulation;
 - make text selectable only where people copy it (message bodies, code, logs, values): put `selectable` on that
   `Text`/`TextView` or on the content view that holds it, never on a whole screen, sidebar or list. Every text in a
-  selectable view shows the I-beam, so labels, headings, timestamps and badges there read as editable; give such
-  chrome `selectable={false}` (Rust `.selectable(false)`) or move it out. Text inside a control (button, tab, menu
-  item, link) keeps the default arrow;
+  selectable view shows the I-beam, so labels, headings, timestamps and badges there look editable. Give them
+  `selectable={false}` (Rust `.selectable(false)`) or move them out. Text inside a control (button, tab, menu item,
+  link) keeps the default arrow;
 - use a component's semantic state styles (`selected:`, `checked:`, `disabled:`) for checked, selected, pressed, or
   disabled appearance;
 - keep popup ownership in explicit state (`open` with `onOpenChange`) so its trigger can render the open or pressed
   appearance until dismissal;
 - keep component variants few and meaningful rather than adding a variant for every call site;
-- bind primary styling to the decision area's real default commit and its return-key action; do not derive it from
-  action count, frequency, or toolbar position;
-- keep badge and alert variants semantic and scarce. Ordinary metadata stays neutral; do not map every enum case or
-  section to a different color merely because a variant exists.
+- give the primary style to the action that the Return key triggers, the real default. Do not pick it by action
+  count, frequency or toolbar position;
+- use few badge and alert variants, each with a clear meaning. Ordinary metadata stays neutral. Do not give every
+  enum case or section its own color just because a variant exists.
 
 The effective precedence is the element's own style, then the state styles, later states winning, with `disabled`
 over all. Later layers only replace fields they set.
 
-Prefer the theme's semantic tokens for new app-owned presentation. Every name in the app's theme file is a token, as a
-variable of Tailwind's `@theme` is (`"up": "#16a34a"` gives `text-up`, `bg-up/30`, `token("up")` in TSX and
-`theme().color("up")` in Rust), and the theme has light and dark values, so a token follows the appearance with no
-`dark:` class. Name tokens after roles, not components, so they do not become the extension point
-for every widget.
+Prefer the theme's semantic tokens for new presentation code. Every name in the app's theme file is a token, like a
+variable in Tailwind's `@theme`. For example, `"up": "#16a34a"` gives `text-up`, `bg-up/30` and `token("up")` in TSX,
+and `theme().color("up")` in Rust. The theme has light and dark values, so a token follows the appearance without a
+`dark:` class. Name tokens after roles, not components. Otherwise every widget grows its own token.
 
-Change the theme through the app's theme file (`nsh.json` `"theme"`), or let the embedding app give its own: classes
-naming tokens and Rust bindings reading `theme()` are restyled natively whenever it changes, with no JavaScript
-running. Code that copies a token's value into a signal of its own stops following it.
+Change the theme in the app's theme file (`nsh.json` `"theme"`), or let the embedding app supply its own. When the
+theme changes, NSH restyles token classes and Rust bindings that read `theme()` natively, with no JavaScript running.
+Code that copies a token's value into its own signal stops following the theme.
 
-An outward focus ring needs physical room. An ancestor with `overflow: hidden` (`overflow-hidden`) clips it. Prefer
-layouts that leave room; if a product must clip heavily, draw the focused state inside the control instead of silently
-hiding all keyboard focus.
+A focus ring drawn outside a control needs room. An ancestor with `overflow: hidden` (`overflow-hidden`) clips it.
+Prefer layouts that leave room. If a design must clip, draw the focus state inside the control. Do not hide keyboard
+focus without notice.
 
 ### The user's text size is the app's zoom
 
-Text follows the user's text size (Dynamic Type, Android's font scale, the desktops' settings): `fontScale()` in TSX,
-`font_scale()` in Rust, both reactive. The type scale (`text-sm`, `text-base`: 16 points, the body size) sets
-the reference, and the user's setting scales it. This deliberately follows
-the useful part of Tailwind's model: named type, spacing and size steps instead of unrelated point constants.
+Text follows the user's text size setting (Dynamic Type, Android's font scale, the desktop settings). Read it with
+`fontScale()` in TSX or `font_scale()` in Rust. Both are reactive. The type scale sets the base sizes (`text-sm`, and
+`text-base` at 16 points for body text). The user's setting scales them. This follows Tailwind: named steps for type,
+spacing and size, instead of unrelated point values.
 
 Let text containers grow with their text: give them minimum heights and padding rather than fixed heights. A custom
 component that combines scaled text with fixed geometry around it must document why that part should not grow.
 
-Treat every arbitrary point value and raw color constructor in app UI as a review finding. Accept it only for a
-documented physical or platform boundary, measured runtime geometry, raster or data color, or the theme definition
-itself. Convenience and matching a screenshot are not valid exceptions.
+In review, flag every arbitrary point value and raw color in app UI. Accept one only for a documented physical or
+platform limit, geometry measured at run time, image or data colors, or the theme definition itself. Convenience and
+matching a screenshot are not valid reasons.
 
-Anything cached from resolved layout must include the font scale in its invalidation key, directly or through a
-revision that changes with it: row heights a list was told, text measurements, popup geometry, icon sizes derived from
-text and custom canvas metrics.
+Anything cached from resolved layout must be invalidated when the font scale changes. Put the scale in the cache key,
+or a revision number that changes with it. This covers row heights given to a list, text measurements, popup geometry,
+icon sizes based on text, and custom canvas metrics.
 
 ## Events, commands, and focus
 
-Use presses for activation: `onPress`, `onLongPress`, `onPressDown` and `onPressUp` mean the same with a finger, a pen,
-a mouse or the keyboard. Use touch handlers and gestures only for what follows the finger (a pan, a drag). Use
-keyboard shortcuts (`keymap.bind`, `on_key`) and menu items for commands that should support key bindings, menus, or
-dispatch from multiple inputs. Keep the handlers close to the page that owns the command.
+Use presses for activation. `onPress`, `onLongPress`, `onPressDown` and `onPressUp` work the same with a finger, a
+pen, a mouse or the keyboard. Use touch handlers and gestures only for what follows the finger (a pan, a drag). Use
+keyboard shortcuts (`keymap.bind`, `on_key`) and menu items for commands that several inputs can trigger. Keep the
+handlers close to the page that owns the command.
 
-Model one logical command once. A `Button`, a `Menu` item, a `ContextMenu` item, an application menu item of
-`nsh/desktop` and a keyboard shortcut should call the same function of the store instead of copying five mutations.
-Derive their label, icon, shortcut and disabled state from one command policy where practical (`key_label("mod+s")`
-writes a shortcut the platform's way), so the entry points cannot disagree. The menu owns navigation and dismissal; the
-page still owns whether the command is allowed and what it does.
+Write each command once. A `Button`, a `Menu` item, a `ContextMenu` item, an `nsh/desktop` application menu item and a
+keyboard shortcut should all call the same store function. Do not copy the change five times. Where you can, derive
+their label, icon, shortcut and disabled state from one place, so they cannot disagree. `key_label("mod+s")` writes a
+shortcut in the platform's style. The menu owns navigation and dismissal. The page decides whether the command is
+allowed and what it does.
 
 ```tsx tabs
 keymap.bind("mod+s", save);
@@ -767,67 +769,69 @@ view()
     )
 ```
 
-Preserve semantic roles in the element choice. Use `Button` for commands even when the desired treatment is quiet;
-give it a quiet style instead of replacing it with a link. NSH apps reserve the `link` role for targets opened outside
-the app, such as a URL or an email address; use navigation for an in-app destination and `Button` for a command.
+Pick the element by its role. Use `Button` for commands, even when it should look quiet. Give it a quiet style
+instead of turning it into a link. NSH apps keep the `link` role for targets opened outside the app, such as a URL or
+an email address. Use navigation for a place in the app, and `Button` for a command.
 
-Only stop propagation (`stopPropagation()` on a touch event) when a nested interaction must prevent its parent from
-handling the same touch. Blanket propagation stops break scrolling, presses and gestures in ways that are difficult
-to diagnose.
+Stop propagation (`stopPropagation()` on a touch event) only when a nested control must keep its parent from handling
+the same touch. Stopping it everywhere breaks scrolling, presses and gestures in ways that are hard to debug.
 
-**The main thread never waits for app code.** When the system needs an answer on the spot (may this page pop, may this
-sheet or popover close, may this text change), NSH answers natively from props mounted beforehand, and an event tells
-the app afterwards. So a decision is a prop, set as soon as it is known, not a callback that returns true or false:
+**The main thread never waits for app code.** Sometimes the system needs an answer at once: may this page pop, may
+this sheet or popover close, may this text change. NSH answers natively from props set beforehand, then sends the app
+an event. So a decision is a prop, set as soon as you know it. It is not a callback that returns true or false:
 `popOnBack={!dirty()}` with `onBackPress` to confirm ([popOnBack](./navigation.md#keeping-the-user-on-a-page-poponback)),
 `closeOnEscape` and `closeOnBackdropPress` with `onCancel` to hear the attempt, `maxLength` on an input, `disabled` on
 a button.
 
-A menu item's `shortcut` (`nsh/desktop`) binds its key while the menu is set, and the menu shows it in the platform's
-style; a `keymap` binding of the same keystroke comes before it. Give each keystroke one owner, and set the application
+A menu item's `shortcut` (`nsh/desktop`) binds its key while the menu is set. The menu shows it in the platform's
+style. A `keymap` binding for the same keystroke takes priority. Give each keystroke one owner. Set the application
 menu again when its items or shortcuts change.
 
 Make focus ownership explicit:
 
-- `Button`, `Switch` and menu items are keyboard focus stops on the desktops and the web; build controls on them rather
-  than on bare views;
+- `Button`, `Switch` and menu items take keyboard focus on the desktops and the web. Build controls on them, not on
+  bare views;
 - move focus with a ref's `focus()` from an event or an effect that follows a state change, and move the screen
   reader's with `set_accessibility_focus()` (Rust) or `setAccessibilityFocus` from `nsh` (TSX);
 - render a visible `focus-visible:` state;
 - do not request focus unconditionally while rendering.
 
-Composite widgets should implement the complete navigation model (arrow movement, Home / End or page movement where
-appropriate, confirmation, cancellation and Tab behavior) rather than a few isolated shortcuts.
+Composite widgets should implement full keyboard navigation, not a few separate shortcuts. That means arrow keys,
+Home / End or page keys where they fit, confirm, cancel and Tab.
 
-Overlays dismiss from the top: Escape and the Android back button go to the top overlay that listens (`onCancel`).
-Handle rapid close and open sequences without acting on an intermediate, already-closing surface.
+Overlays close from the top. Escape and the Android back button go to the topmost overlay that listens (`onCancel`).
+Handle fast close-and-open sequences without acting on an overlay that is already closing.
 
 ## Async work and side effects
 
 Start asynchronous work from an event, an effect or a [`resource`](./reactivity.md#resource), not as an unconditional
-side effect of a component body. An effect tracks only what it reads synchronously: read the signals first, then start
-the work. When the work completes, update state through signals, accept that the component may be gone, and write
-coherent changes together.
+side effect of a component body. An effect tracks only what it reads synchronously, so read the signals first and
+then start the work. When the work completes, update state through signals. Expect that the component may be gone.
+Write related changes together.
 
-Keep recurring work under an owner so its going away cancels it: Rust tasks and timers end with their owner, TSX timers
-stop in `cleanup`. A one-shot task that must finish independently can be started from the store, but it gives up that
-cancellation. Handle errors and failed requests explicitly.
+Keep recurring work under an owner, so it stops when the owner goes away. Rust tasks and timers end with their owner.
+TSX timers stop in `cleanup`. A one-off task that must finish on its own can start from the store, but then nothing
+cancels it. Handle errors and failed requests explicitly.
 
 Represent async operations with explicit states: a resource's `state()` is `unresolved`, `pending`, `ready`,
-`refreshing` or `errored`. Preserve usable previous data during refresh: a resource keeps its value while it loads
-again. Prevent duplicate destructive submissions and surface recoverable errors in the UI; do not rely on logs as user
-feedback.
+`refreshing` or `errored`. Keep the previous data visible during a refresh: a resource keeps its value while it loads
+again. Block duplicate destructive submits. Show recoverable errors in the UI. Logs are not user feedback.
 
-For ordinary, reversible settings (a radio choice, switch or stepper), update the locally owned value in the event
-handler before starting the save; bind the visible checked or selected state to that value. Submit asynchronously so
-network latency does not delay the control. Keep the last confirmed state and reconcile pending edits in order: an older
-load or response must not replace a newer choice, and a failed save must roll back only its own change without losing
-later edits. A server may acknowledge the requested configuration before its effective state catches up; distinguish
-those values and do not replace the accepted choice with a stale effective value. Show a useful error on failure.
-Use pessimistic confirmation instead when the action is consequential or the result cannot be safely predicted.
+For ordinary, reversible settings (a radio choice, a switch, a stepper), update the local value in the event handler
+before you start the save. Bind the visible checked or selected state to that value. Save asynchronously, so network
+latency does not slow the control. Keep the last confirmed state and apply pending edits in order:
 
-Test the visible control state while a deliberately delayed request is still pending, then test failure, rapid changes
-and stale or reordered responses. A headless result alone does not establish touch-to-frame latency: inspect or measure
-the interaction on the requested native target when available.
+- an older load or response must not replace a newer choice;
+- a failed save rolls back only its own change and keeps later edits;
+- a server may accept a setting before it takes effect. Keep these two values apart, and do not replace the accepted
+  choice with an old effective value.
+
+Show a useful error on failure. If the action has serious consequences or its result is hard to predict, wait for the
+server to confirm instead.
+
+Test the visible control while a deliberately delayed request is pending. Then test failure, rapid changes, and old
+or out-of-order responses. A headless test alone does not show touch-to-frame latency. When you can, check or measure
+the interaction on the real target platform.
 
 ```tsx tabs
 const results = resource(
@@ -857,14 +861,14 @@ let results = resource(
 ```
 
 Move expensive parsing or computation out of TSX handlers: into a `computed`, off the interaction path, or into Rust.
-Results can arrive after the query, the page or the selection has changed: a resource drops superseded loads, and work
-of your own attaches a revision or an identity and rejects stale results rather than applying them to new state.
+Results can arrive after the query, the page or the selection has changed. A resource drops outdated loads. For your
+own async work, attach a revision or an id, and drop stale results instead of applying them to new state.
 
 ## Layout, measurement, and scrolling
 
-A view lays out its children in a column, and children stretch across it by default; `class="flex"` (`.flex_row()`)
-is a row, as in CSS. A row of controls wants its children centered (`items-center`), which says so. A row of
-full-height columns keeps the default stretch, so a column fills the row's height and its header stays at the top:
+A view lays out its children in a column, and by default they stretch across it. `class="flex"` (`.flex_row()`) makes
+a row, as in CSS. A row of controls usually centers its children; say so with `items-center`. A row of full-height
+columns keeps the default stretch. Each column then fills the row's height, and its header stays at the top:
 
 ```tsx tabs
 <View class="flex flex-1">
@@ -881,9 +885,8 @@ view()
     .child(content())
 ```
 
-Most UI should use layout rather than measuring itself ([Layout](./layout.md)). Measurement (`onLayout`, `measure()`)
-is a deep behavior tool for overlays, virtualization, editors, charts and similar components whose correctness depends
-on resolved geometry.
+Most UI should rely on layout, not measure itself ([Layout](./layout.md)). Measurement (`onLayout`, `measure()`) is for
+overlays, virtualization, editors, charts and other components that need the final geometry to work correctly.
 
 - Put measurement and geometry in the layer that owns the behavior.
 - Observe layout only when ordinary layout cannot express the relationship.
@@ -891,28 +894,29 @@ on resolved geometry.
 - Treat measured data as revision-scoped; it can become stale after text size, width, theme or content changes.
 - Let `nsh/base`'s overlays place popups: their placement, flipping and safe-area margins follow one policy.
 
-For alignment invariants, prefer construction over correction: sibling regions should consume the same spacing token
-or shared inset instead of repeating equal literals. Add geometry checks or screenshots on a real platform
-(`nsh test --target`) for critical repeated edges, columns and gaps. Exercise more than the default window: a large
-text size and display scaling can turn fractional coordinates into a one-pixel drift even when the default screenshot
-looks aligned.
+Build alignment in rather than correct it later. Sibling regions should use the same spacing token or shared inset,
+not repeat the same number. For important repeated edges, columns and gaps, add geometry checks or screenshots on a
+real platform (`nsh test --target`). Test more than the default window. A large text size or display scaling can turn
+fractional coordinates into a one-pixel drift, even when the default screenshot looks aligned.
 
-Measure the resolved result when reviewing precision, but do not encode a measured correction as an arbitrary value.
-Trace the mismatch to duplicated padding, nested insets, border ownership, font metrics or rounding, then fix the
-structural owner.
+When you review precision, measure the result. Do not fix a measured gap with an arbitrary value. Trace it to its
+cause, such as duplicated padding, nested insets, which view owns the border, font metrics or rounding. Then fix it
+there.
 
-Every scrollable region must have one owner. Avoid accidental nested scrolling on the same axis. Give the scroll view
-the element that owns the full page, panel or list, so its indicator resolves against the region's edge, and put the
-content's inset inside it (`contentClass` / `contentStyle`) rather than wrapping the scroll view in a padded
-container. An indicator floating between content and the page boundary usually reveals the wrong scroll owner or
-padding on the wrong layer. Keep clear of the safe area and the keyboard with `env(safe-area-inset-*)` and `env(keyboard-inset-height)` in
-padding and margin (read the values with their accessors), which follow rotation and the keyboard natively.
+Every scrollable region must have one owner. Avoid nested scrolling on the same axis by accident. Make the scroll
+view the element that holds the whole page, panel or list, so its scroll indicator sits at the region's edge. Put the
+content's padding inside it (`contentClass` / `contentStyle`), instead of wrapping the scroll view in a padded
+container. An indicator floating between the content and the page edge usually means the wrong scroll owner, or
+padding on the wrong layer. Keep clear of the safe area and the keyboard with `env(safe-area-inset-*)` and
+`env(keyboard-inset-height)` in padding and margin. Read the values with their accessors. They follow rotation and the
+keyboard natively.
 
 ## Lists, tables, and large data
 
-Prefer [`List`](./lists.md) (`virtual_list` in Rust) for collections that can grow, including chat timelines, feeds and history. Reserve a scroll view with ordinary children for small, bounded content. Keep row
-identity separate from visible position and avoid copying the full data set on every update. Let the list own
-recycling, scroll coordination and the visible range while row functions own row presentation.
+Use [`List`](./lists.md) (`virtual_list` in Rust) for collections that can grow, such as chat timelines, feeds and
+history. Use a scroll view with ordinary children only for small, bounded content. Keep a row's identity separate from
+its position on screen. Do not copy the whole data set on every update. The list owns recycling, scrolling and the
+visible range. Row functions own how a row looks.
 
 Separate:
 
@@ -924,13 +928,13 @@ Separate:
 
 This keeps updates local and prevents the view tree from becoming the data model.
 
-Virtualization is a behavioral contract, not just a performance switch. A row function runs once per cell, and cells
-are reused for other rows:
+Virtualization means the list creates views only for visible rows. It changes behavior, not just speed. A row
+function runs once per cell, and cells are reused for other rows:
 
-- **must keep per-item state in data keyed by id**, not in a signal created inside the row, which travels with the
-  cell to the next item;
-- **must read the item where it is used**, in bindings: a value copied at the top of the row function belongs to the
-  first row the cell showed;
+- **you must keep per-item state in data keyed by id.** A signal created inside the row moves with the cell to the
+  next item;
+- **you must read the item where it is used**, in bindings. A value copied at the top of the row function belongs to
+  the first row the cell showed;
 - update immutably in TSX (a new array, unchanged items reused, a changed item a new object), and give an
   `estimatedItemSize` close to the typical row;
 - scrolling to an item (`scrollToIndex`) works in data coordinates even when most rows do not exist.
@@ -971,65 +975,66 @@ For reusable components:
 
 - props establish valid defaults: `#[prop(default)]` or `#[prop(default = …)]` in Rust, `??` where the prop is read in
   TSX;
-- every prop, event and export has a doc comment; in Rust it becomes the TypeScript declaration TSX sees;
+- every prop, event and export has a doc comment. In Rust, the comment becomes the TypeScript declaration TSX sees;
 - callbacks describe requested changes and include pointer details only when they are meaningful;
 - explicit parts, slots and render functions are preferable to inspecting arbitrary descendants;
 - adding reusable behavior must not force a product-level visual choice.
 
-Apps are delivered to host apps as signed packages and may never be built again: every later release of NSH runs them
-as they are. Apply the same discipline to what an app or a component library exposes to others (its components'
-props and events, its crate's exports, the functions a host app's native components and modules receive):
+Apps reach host apps as signed packages and may never be rebuilt. Every later NSH release runs them as they are.
+Apply the same care to what an app or component library exposes to others: its components' props and events, its
+crate's exports, and the functions that a host app's native components and modules receive:
 
-- inputs gain optional members only; types only widen; defaults and behavior stay (new behavior is opt-in);
-- a function whose parameters may grow takes its options as one object (`scrollTo({ x, y, animated })`), never a
-  further positional parameter; parameters that never will, such as a range's start and end, stay positional;
+- inputs only gain optional members. Types only widen. Defaults and behavior stay, and new behavior is opt-in;
+- a function whose parameters may grow takes its options as one object (`scrollTo({ x, y, animated })`), never another
+  positional parameter. Parameters that will never grow, such as a range's start and end, stay positional;
 - a mode is a string union, which can gain values, rather than a boolean that later needs a third state;
 - a value has one type: `version: string`, never `string | number`;
 - what a function returns is an object, which can gain a field, rather than a tuple or a bare value;
-- a function returning a Promise reports every failure by rejecting it, and a failure the caller can handle carries a
-  `code`, as NSH's own do: callers branch on codes, while messages are for people and may change;
+- a function that returns a Promise reports every failure by rejecting it. A failure the caller can handle carries a
+  `code`, as NSH's own failures do. Callers branch on codes. Messages are for people and may change;
 - a rename keeps the old name as a `@deprecated` alias of the same implementation.
 
-In Rust, private fields are the default for behavioral state that must evolve without breaking callers. Public fields
-are appropriate for deliberately record-like configuration and serialized data. Every public struct with public fields
-must carry `#[non_exhaustive]` and implement `Default`, so callers can create values without exhaustive struct literals
-and a field can be added without breaking them.
+In Rust, keep behavioral state in private fields, so it can change without breaking callers. Public fields suit plain
+configuration records and serialized data. Every public struct with public fields must carry `#[non_exhaustive]` and
+implement `Default`. Callers can then create values without listing every field, and you can add a field without
+breaking them.
 
-Keep public import paths stable while reorganizing internals: a crate's `#[native_module]` specifier and its exports,
-and a TSX module's exports, are what other code imports. Prefer platform control terminology and NSH's established
-naming over web-framework vocabulary.
+Keep public import paths stable when you reorganize the internals. Other code imports a crate's `#[native_module]`
+name and its exports, and a TSX module's exports. Prefer the platforms' control names and NSH's existing names over
+web-framework terms.
 
 ## Platform and capability boundaries
 
-Do not assume every platform supports the same facility. Title bars and window controls, accessibility, the
-clipboard, haptics, scroll physics, fonts and timing can differ. One bundle runs everywhere
-([Platform-specific code](./platform-specific.md)); put platform-specific code where NSH gives it a place and define
-the fallback behavior:
+Do not assume every platform has the same features. Title bars and window controls, accessibility, the clipboard,
+haptics, scroll physics, fonts and timing can differ. One bundle runs everywhere
+([Platform-specific code](./platform-specific.md)). Put platform-specific code where NSH provides a place for it, and
+define what happens on other platforms:
 
-- what an element means on every platform is a top-level prop; a platform's own system feature goes in
-  `ios={{…}}`, `android={{…}}`, `macos={{…}}`, `windows={{…}}`, `desktop={{…}}` or `web={{…}}` (a builder method in Rust), in each of the platforms
-  that have it, and only the current platform's object is applied;
+- what an element means on every platform is a top-level prop. A feature of one platform goes in `ios={{…}}`,
+  `android={{…}}`, `macos={{…}}`, `windows={{…}}`, `desktop={{…}}` or `web={{…}}` (a builder method in Rust), for each
+  platform that has it. Only the current platform's object applies;
 - APIs of mobile platforms come from `nsh/mobile`, those of the desktops from `nsh/desktop`;
 - styles per platform are `ios:`, `android:` and `web:` classes.
 
-A platform branch must preserve the semantic contract even if presentation differs. For example, a dialog is a sheet
-on iOS and a layer over the window on the desktops, but the app still needs a coherent open state. Test the shared
-behavior headless and the platform's part with `nsh test --target`. Give every branch on a value NSH reports
-(`platform.os`, a state, a reason) a `default`: later releases add platforms and cases, and an app delivered
-today runs on them ([Compatibility](./compatibility.md)).
+A platform branch must keep the same meaning even if it looks different. For example, a dialog is a sheet on iOS and
+a layer over the window on the desktops, but the app still needs one consistent open state. Test the shared behavior
+headless, and the platform's part with `nsh test --target`. Give every branch on a value NSH reports (`platform.os`, a
+state, a reason) a `default`. Later releases add platforms and cases, and an app shipped today runs on them
+([Compatibility](./compatibility.md)).
 
-An app declares what it reaches outside its VM in `nsh.json` `"capabilities"`: the hosts it fetches from, the pages a
-web view shows, the clipboard, the status bar ([Sandbox and Capabilities](./sandbox-and-capabilities.md)). An app
-that will be delivered into other apps lists exactly what it uses, and handles a refused request as it handles a
-failed one: a host app may grant less than the app declares. A refused call fails with `code` `"ERR_ACCESS_DENIED"`,
-its `permission` naming the capability and its `resource` what was asked for.
+An app lists what it uses outside its VM in `nsh.json` `"capabilities"`. A capability is one such permission: the
+hosts it fetches from, the pages a web view shows, the clipboard, the status bar
+([Sandbox and Capabilities](./sandbox-and-capabilities.md)). An app delivered into other apps lists exactly what it
+uses. A host app may grant less than the app declares, so handle a refused request like a failed one. A refused call
+fails with `code` `"ERR_ACCESS_DENIED"`. Its `permission` names the capability, and its `resource` names what was
+asked for.
 
 ## File and naming conventions
 
 - Name pages and components after product concepts: `ProjectList`, `ProjectEditor`, `SettingsPage`.
 - Name event handlers after intent: `confirmDelete`, `openProject`, `onQueryChange`.
-- Keep one main responsibility per module; split a file when state ownership or lifecycle can no longer be understood
-  without reading unrelated behavior.
+- Give each module one main job. Split a file when you can no longer follow its state or lifecycle without reading
+  unrelated code.
 - Keep a component's module, props, events and focused tests together when they change together.
 - Document invariants and surprising lifecycle constraints; do not narrate obvious builder calls.
 - Use `rustfmt` and satisfy Clippy in Rust, and `nsh check` in TSX. Avoid broad `allow` attributes that conceal
@@ -1037,11 +1042,10 @@ its `permission` naming the capability and its `resource` what was asked for.
 
 ### Vocabulary is part of the API
 
-Use the same word for the same concept across components. Before naming a prop or an event, look for the term in
-NSH's own API, then in the platforms' controls. What a
-primitive shows and the global APIs take their names from HTML, the DOM and CSS (`src`, `html`, `placeholder`). Rust
-names are `snake_case` and translate to `camelCase` in TSX (`on_open_change` is `onOpenChange`); one word stays one
-word (`readonly`, `multiline`).
+Use the same word for the same concept across components. Before you name a prop or an event, look for the term in
+NSH's own API, then in the platforms' controls. Primitive content and global APIs take their names from HTML, the DOM
+and CSS (`src`, `html`, `placeholder`). Rust names are `snake_case` and become `camelCase` in TSX (`on_open_change` is
+`onOpenChange`). One word stays one word (`readonly`, `multiline`).
 
 | Concept | Naming pattern | Example |
 | --- | --- | --- |
@@ -1068,32 +1072,34 @@ word (`readonly`, `multiline`).
 | A value of the environment | An accessor, `set<Value>` beside it | `colorScheme()`, `setColorScheme` |
 | A read-only boolean | `is<Adjective>`, `has<Noun>` | `isAvailable` |
 
-Props are never `is<Adjective>`: that form is for what only reads a boolean (a constant, a field of a payload). A part
-that shows is named after the part, never `<part>Shown`, `<part>Hidden` or `shows<Part>`.
+Props are never `is<Adjective>`. That form is for read-only booleans (a constant, a field of a payload). A part that
+shows is named after the part, never `<part>Shown`, `<part>Hidden` or `shows<Part>`.
 
-A Rust builder takes and returns `Self` and is named after the prop it sets, with no `set_` (`.disabled(..)`,
-`.checked(..)`, `.on_change(..)`); mutation in place is `set_<field>` (`setRoutes`, `setColorScheme`). A boolean reader
-is either `has<Noun>`, when the value holds something, or `is<Adjective>`, when it describes a state or a permission.
+A Rust builder takes and returns `Self`. It is named after the prop it sets, with no `set_` (`.disabled(..)`,
+`.checked(..)`, `.on_change(..)`). A method that changes a value in place is `set_<field>` (`setRoutes`,
+`setColorScheme`). A boolean reader is `has<Noun>` when the value holds something, or `is<Adjective>` when it describes
+a state or a permission.
 Reach for the adjective whenever the action has one: `isClosable` over `canClose`, `isZoomable` over `canZoom`. When
 the action is a verb phrase with no adjective form, name the thing it needs instead: `hasDefinition`, not
 `canGoToDefinition`. Do not add new `can` readers.
 
 ### Let the enclosing name carry the context
 
-A name is read inside something: a prop inside its component, a field inside its type. Neither repeats what encloses
-it (`contentStyle`, not `contentContainerStyle`; `Dialog`'s `backdropClass`, not `dialogBackdropClass`). Keep one type's
+A name is read inside something: a prop inside its component, a field inside its type. Neither repeats the enclosing
+name (`contentStyle`, not `contentContainerStyle`; `Dialog`'s `backdropClass`, not `dialogBackdropClass`). Keep one type's
 fields at the same level of abbreviation.
 
 ### Use precise domain words
 
-- **selected** is membership or the current item; **checked** and **pressed** are the value of a checkbox or a toggle;
-  **focused** is the keyboard's target; **hovered** is the pointer's presence. Never use them interchangeably.
-- **open / close** is an overlay's state; **show / hide** a transient request; **expand / collapse** structure.
-- **disabled** blocks interaction; **readonly** allows selecting and navigating but not editing; **loading** prevents
+- **selected** means membership or the current item. **checked** and **pressed** are the value of a checkbox or a
+  toggle. **focused** is the keyboard's target. **hovered** means the pointer is over it. Never mix them up.
+- **open / close** is an overlay's state. **show / hide** is a short-lived request. **expand / collapse** is about
+  structure.
+- **disabled** blocks interaction. **readonly** allows selecting and navigating but not editing. **loading** prevents
   duplicate work while an operation runs.
-- **press** is activation by any input, and NSH's events say press (`onPress`); **click** is a mouse's.
-- **index** is a position; **id** is identity. Do not persist or key reorderable data by index.
-- **value** is controlled domain data; **state** is retained behavior.
+- **press** is activation by any input, and NSH's events say press (`onPress`). **click** is a mouse's.
+- **index** is a position. **id** is identity. Do not store or key reorderable data by index.
+- **value** is controlled domain data. **state** is retained behavior.
 - **src** is the resource an element shows (an image, a video, a page); any other address is a **url**.
 - **role** says what a choice means (`"cancel"`, `"destructive"`); a look is the app's.
 
@@ -1106,33 +1112,33 @@ domain term exists.
   `SCREAMING_SNAKE_CASE`. Name context bindings `cx`.
 - TSX components and their tags are `PascalCase`; props, functions and locals `camelCase`. Primitives come from `nsh`,
   base components from `nsh/base`.
-- A module named after a component owns its public seam; split its state, parts and tests into files without
-  changing what others import.
+- A module named after a component owns its public API. Split its state, parts and tests into files without changing
+  what others import.
 - Use singular module names for one component concept and established names for families (`menu` for `Menu`,
   `MenuItem` and `Submenu`).
 - Suffix identifiers with `Id`, and collections with meaningful plurals. Do not alternate `idx`, `index` and `ix` in
   one subsystem.
-- Name predicates positively when possible. A positive state is easier to compose than several negatives, but keep
-  established terms such as `disabled` where they match control semantics.
+- Name predicates positively when you can. Positive states combine more easily than negatives. Keep established
+  terms such as `disabled` where they match how controls work.
 
 ### Callback and event wording
 
-- Every event passes one object, even with one field and for a value's change too, its fields named as the props they
-  report: `onChange({ value })`, `onOpenChange({ open, reason })`, `onLinkPress({ url })`. A later field is then an
-  addition. A data type of the API is a field, never the payload itself (`onImagePress({ image })`); an event with
+- Every event passes one object, even with one field and even for a value change. Its fields use the names of the props
+  they report: `onChange({ value })`, `onOpenChange({ open, reason })`, `onLinkPress({ url })`. A later field is then
+  just an addition. An API data type is a field, never the whole payload (`onImagePress({ image })`). An event with
   nothing to report passes nothing.
 - Name the act, not past tense or a request: `onPress`, `onClose`, `onCancel`, `onBackPress`.
 - Name the intent rather than the geometry when the act has a name: `onLoadMore`, not "the end was reached".
-- Lifecycle pairs are `onOpen` / `onClose`; phases are `Start` / `End`, never `Begin`; the mouse over a view is
-  `onMouseEnter` / `onMouseMove` / `onMouseLeave` (the DOM's names), a file dragged over it `Enter` / `Leave`.
+- Lifecycle pairs are `onOpen` / `onClose`. Phases are `Start` / `End`, never `Begin`. The mouse over a view is
+  `onMouseEnter` / `onMouseMove` / `onMouseLeave` (the DOM's names). A file dragged over it is `Enter` / `Leave`.
 - Document whether a callback runs before or after the component's own state changes, and whether it may re-enter the
   component.
 
 ### Documentation and copy style
 
-Public docs should begin with what a component does and who owns its state. Examples must use current APIs and show
-stable ids. Document defaults, platform differences, focus behavior, callback ordering, and which props the main
-thread reads natively.
+Public docs should start with what a component does and who owns its state. Examples must use current APIs and show
+stable ids. Document defaults, platform differences, focus behavior, callback order, and which props the main thread
+reads natively.
 
 Follow the interface language rules of the Design Guides for labels, commands, confirmation dialogs, capitalization,
 and ellipses. Keep one canonical term for each domain object, command, and state.
@@ -1141,9 +1147,9 @@ Translation keys describe stable intent (`dialog.deleteProject.title`), not a so
 coordinate. Never assemble a sentence from translated fragments or reuse one key for meanings that happen to share the
 same English text.
 
-Localize intent, not syntax. Give every locale control over word order, pluralization, punctuation, and the amount of
-context it needs. Tests should catch missing keys and inconsistent fixed terms; human review still decides whether
-repetition is justified by context. Verify every string inside its component with realistic content, text expansion,
+Translate meaning, not sentence structure. Let every locale control its word order, plurals, punctuation and how much
+context it needs. Tests should catch missing keys and inconsistent fixed terms. A person still decides whether a
+repeated word is justified by context. Verify every string inside its component with realistic content, text expansion,
 and a large text size.
 
 ## Testing strategy
@@ -1179,16 +1185,15 @@ fn a_tap_counts() {
 }
 ```
 
-For an interactive component, cover the semantic contract rather than its implementation details: activation by press
-and keyboard, controlled value changes, disabled behavior, focus movement, event count and order, stable identity, and
-important empty or failure states. Stub the network (`network` routes) and control time (a manual clock) instead of
-waiting on real ones. Add a regression test before fixing a bug whenever the failure can be reproduced
-deterministically.
+For an interactive component, test what it promises, not how it is built: activation by press and keyboard,
+controlled value changes, disabled behavior, focus movement, event count and order, stable identity, and important
+empty or failure states. Stub the network (`network` routes) and control time (a manual clock) instead of waiting on
+real ones. If a bug reproduces reliably, add a regression test before you fix it.
 
-Find views as a user does: by role and name, label or text (`role:button[Save]`, `label:Close`), and by a stable
-`testID` where nothing else names them. Selectors are read again at every step, so a step never acts on a stale
-snapshot. Use screenshots (`app.screenshot`, on a real platform) for visual facts selectors cannot express; use
-coordinates only as a fallback. Report automated and manual evidence separately.
+Find views the way a user does: by role and name, label or text (`role:button[Save]`, `label:Close`). Use a stable
+`testID` where nothing else names a view. Selectors are resolved again at every step, so a step never acts on a stale
+snapshot. Use screenshots (`app.screenshot`, on a real platform) for visual facts that selectors cannot express. Use
+coordinates only as a last resort. Report automated and manual results separately.
 
 ## Performance rules
 
@@ -1225,10 +1230,9 @@ Avoid these patterns:
 
 ## Rules for coding agents
 
-Before editing, an agent must read the nearest implementation, its tests, the module's public exports, and the
-relevant reference page. It must search the current source and `.nsh/types` for signatures instead of translating a
-React, React Native or CSS example by analogy: NSH components run once, and bindings follow the signals they
-read.
+Before editing, an agent must read the nearest implementation, its tests, the module's public exports and the
+relevant reference page. It must look up signatures in the current source and `.nsh/types`. It must not translate a
+React, React Native or CSS example by analogy. NSH components run once, and bindings follow the signals they read.
 
 For each change, the agent should be able to name:
 
@@ -1239,8 +1243,8 @@ For each change, the agent should be able to name:
 5. the theme tokens and intentional exceptions;
 6. the test that would fail if the behavior regressed.
 
-Generated code must be reviewed and tested by a person. "Compiles" is not a UI quality bar, and a broad refactor that
-merely makes generated code look tidy is not a substitute for matching the app's architecture.
+A person must review and test generated code. "It compiles" is not a UI quality bar. A broad refactor that only makes
+generated code look tidy does not replace fitting the app's architecture.
 
 ## Implementation checklist
 

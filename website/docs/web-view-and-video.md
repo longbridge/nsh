@@ -16,7 +16,7 @@ The web view and the video player embed the platform's own web engine and media 
 
 The frameworks behind them (WebKit, AVFoundation) are loaded the first time an app uses one, so apps that never show a web page or a video do not pay for them at launch.
 
-A video a page plays plays inside the web view on every target, an iPhone included, where WebKit otherwise hands the first frame to the system's full-screen player (`playsinline` on the page does not stop it). A page whose own control asks for the whole screen still gets it.
+A video a page plays plays inside the web view on every target, an iPhone included, where WebKit otherwise hands the first frame to the system's full-screen player (`playsinline` on the page does not stop it). A page whose own control asks for the whole screen still gets it: on the Apple web views `element.requestFullscreen()` takes the display, as it does in the browser. Android's web view has no full screen of its own yet, so a page's control does nothing there.
 
 On [macOS](./macos.md) the web view has no scroll view of its own: with `scrollable={false}` the mouse wheel and the
 trackpad scroll the app's scroll views around it instead of the page, which still scrolls with its keyboard and its
