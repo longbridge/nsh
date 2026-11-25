@@ -4256,7 +4256,7 @@ impl<M: TextEngine> Core<M> {
     /// ([`Self::is_control`]), a text, a scroll view, and whether a
     /// terminal leaves it out: what it cannot show at an icon's size is
     /// left out, never emulated (icon-sized videos, web views, shaders and
-    /// canvases); larger, they keep their box, as images do at every size.
+    /// canvases) and glyph-sized images; larger, they keep their box.
     fn grid_role(&self, key: Key) -> terminal_layout::Role {
         let kind = self.nodes[key as usize].kind;
         let left_out = match kind {
@@ -4269,7 +4269,7 @@ impl<M: TextEngine> Core<M> {
             _ => terminal_layout::LeftOut::No,
         };
         let control = self.is_control(key);
-        // A control's label in columns, one per character: what it shows
+        // A control's label in columns (a wide character takes two): what it shows
         // when all its content is left out (an icon button).
         let label = control
             .then(|| self.nodes[key as usize].props.as_ref())
@@ -4281,7 +4281,7 @@ impl<M: TextEngine> Core<M> {
                     return 1;
                 }
                 p.accessibility.label.as_deref().map_or(0, |l| {
-                    l.trim().chars().count().min(u16::MAX as usize) as u16
+                    terminal_layout::columns(l.trim()).min(u16::MAX as usize) as u16
                 })
             });
         let node = &self.nodes[key as usize];
