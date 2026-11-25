@@ -84,15 +84,7 @@ macro_rules! api {
             fn load() -> Result<Api, String> {
                 let mut libraries = Vec::new();
                 $(
-                    // SAFETY: GStreamer's libraries run nothing on load
-                    // that needs anything from us.
-                    let handle = unsafe { libloading::Library::new($lib) }.map_err(|e| {
-                        format!(
-                            "GStreamer is not installed: {} could not be loaded ({e}); \
-                             install GStreamer (gstreamer and gst-plugins-base) for sounds",
-                            $lib
-                        )
-                    })?;
+                    let handle = open($lib)?;
                     $(
                         // SAFETY: the signature is the C declaration's.
                         let $name = unsafe {
@@ -160,6 +152,18 @@ api! {
         gst_app_sink_try_pull_sample: fn(Ptr, u64) -> Ptr;
         gst_app_sink_is_eos: fn(Ptr) -> c_int;
     }
+}
+
+/// Loads the library `soname`; when it is missing, an error naming it.
+fn open(soname: &str) -> Result<libloading::Library, String> {
+    // SAFETY: GStreamer's libraries run nothing on load that needs
+    // anything from us.
+    unsafe { libloading::Library::new(soname) }.map_err(|e| {
+        format!(
+            "GStreamer is not installed: {soname} could not be loaded ({e}); \
+             install GStreamer and its base plug-ins to play sounds"
+        )
+    })
 }
 
 /// GStreamer, loaded and started once (GTK's media streams may have
@@ -696,4 +700,14 @@ pub(crate) fn has_element(factory: &str) -> bool {
     // SAFETY: the reference just returned.
     unsafe { (loaded().gst_object_unref)(found) };
     true
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_missing_library_is_named() {
+        let error = super::open("libgstreamer-missing-1.0.so.0").err().unwrap();
+        assert!(error.contains("libgstreamer-missing-1.0.so.0"), "{error}");
+        assert!(error.starts_with("GStreamer is not installed"), "{error}");
+    }
 }
