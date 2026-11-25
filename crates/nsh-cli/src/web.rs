@@ -53,6 +53,8 @@ mod compress;
 mod prune;
 mod split;
 
+pub(crate) use prune::without_unused_part_gates;
+
 /// The packaged page; `{{…}}` are filled in by [`page`].
 const PAGE: &str = include_str!("web/index.html");
 /// The page's own styles, a file of the site so a strict `style-src`
