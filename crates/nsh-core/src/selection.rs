@@ -8,9 +8,9 @@
 //! lists the texts of an area in document order ([`SelectionTexts`]: their
 //! content, frames and hit-testing), feeds the model its gestures (pointer
 //! presses and drags with their click count, a long press, the handles'
-//! drags, select all) and draws what [`SelectionModel::ranges`] says, with
-//! its own highlight, handles and menus; copying takes
-//! [`SelectionModel::text`].
+//! drags, select all, the keys that extend it) and draws what
+//! [`SelectionModel::ranges`] says, with its own highlight, handles and
+//! menus; copying takes [`SelectionModel::text`].
 //!
 //! Offsets are UTF-16 code units, as everywhere text crosses to the
 //! platforms (`TextLine::start`); the model never puts one inside a
@@ -41,7 +41,7 @@
 
 use std::ops::Range;
 
-use crate::geometry::{Bounds, Point, Points};
+use crate::geometry::{Bounds, Point, Points, point, size};
 
 /// A place in the texts of an area: a text (its index in document order)
 /// and a UTF-16 offset in it.
@@ -170,6 +170,42 @@ pub enum Handle {
     End,
 }
 
+/// How far a key moves the focus of a selection ([`SelectionModel::extend`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Movement {
+    /// A character (Shift+Left / Right): a cluster of combining marks,
+    /// joined emoji or a flag counts as one; from the end of a text to the
+    /// start of the next, which is a line break of its own.
+    Character,
+    /// To the end of the next word or the start of the previous one
+    /// (Option+Shift+Left / Right on macOS, Ctrl+Shift+Left / Right
+    /// elsewhere), over the spaces and punctuation before it.
+    Word,
+    /// To the line below or above (Shift+Down / Up), keeping to the x the
+    /// first of a run of such moves started from.
+    Line,
+    /// To the end or start of the line the focus is on (Cmd+Shift+Right /
+    /// Left on macOS, Shift+End / Home elsewhere).
+    LineEdge,
+    /// To the end or start of the paragraph (a text and the texts that
+    /// continue it), or of the next or previous one when it is there
+    /// already (Option+Shift+Down / Up on macOS).
+    Paragraph,
+    /// To the end or start of all the texts (Cmd+Shift+Down / Up on macOS,
+    /// Ctrl+Shift+End / Home elsewhere).
+    Document,
+}
+
+/// Which way a key moves the focus of a selection, in document order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    /// Towards the start.
+    Backward,
+    /// Towards the end.
+    Forward,
+}
+
 /// The selection of one area: an anchor where it started and a focus
 /// where it goes, extended by words or paragraphs after a double or triple
 /// click. Methods that change it return whether it changed, so the backend
@@ -185,6 +221,12 @@ pub struct SelectionModel {
     /// The keys of the texts of the anchor, the focus and the anchor unit's
     /// ends ([`SelectionTexts::key`]), as of the last change.
     keys: [Option<u64>; 4],
+    /// The x (area coordinates) a run of [`Movement::Line`] keeps to.
+    goal_x: Option<f32>,
+    /// The focus is at the end of a line rather than at the start of the
+    /// next, which is the same offset where a line wraps: where
+    /// [`Movement::LineEdge`] forward put it.
+    upstream: bool,
 }
 
 impl SelectionModel {
@@ -213,6 +255,7 @@ impl SelectionModel {
         let Some(pos) = hit(texts, point) else {
             return self.clear();
         };
+        self.forget_keys();
         if extend && self.anchor.is_some() {
             self.extend_to(texts, pos);
             self.remember(texts);
@@ -239,6 +282,7 @@ impl SelectionModel {
             return false;
         };
         let before = self.bounds();
+        self.forget_keys();
         self.extend_to(texts, pos);
         self.remember(texts);
         self.bounds() != before
@@ -251,6 +295,7 @@ impl SelectionModel {
         let Some(pos) = hit(texts, point) else {
             return self.clear();
         };
+        self.forget_keys();
         self.select_unit(texts, pos, Unit::Token);
         self.remember(texts);
         self.bounds() != before
@@ -280,6 +325,7 @@ impl SelectionModel {
         self.focus = Some(pos);
         self.granularity = Unit::Character;
         self.anchor_unit = None;
+        self.forget_keys();
         self.remember(texts);
         self.bounds() != Some((start, end))
     }
@@ -301,6 +347,7 @@ impl SelectionModel {
         self.focus = Some(clamp_position(texts, end));
         self.granularity = Unit::Character;
         self.anchor_unit = None;
+        self.forget_keys();
         self.remember(texts);
         self.bounds() != before
     }
@@ -323,6 +370,80 @@ impl SelectionModel {
         let had = self.anchor.is_some();
         *self = Self::default();
         had
+    }
+
+    /// A key extends the selection (Shift with an arrow key, Home or End):
+    /// the focus moves by `movement` towards `direction` and the anchor
+    /// stays, from a press's caret too. A selection of words or paragraphs
+    /// (a double or triple click) has no direction yet: the end `direction`
+    /// points to moves, as in desktop text views. Nothing happens without
+    /// an anchor (nothing pressed in the area) or texts.
+    pub fn extend(
+        &mut self,
+        texts: &impl SelectionTexts,
+        movement: Movement,
+        direction: Direction,
+    ) -> bool {
+        let (Some(anchor), Some(focus)) = (self.anchor, self.focus) else {
+            return false;
+        };
+        if anchor.text >= texts.len() || focus.text >= texts.len() {
+            return false;
+        }
+        let before = self.bounds();
+        let (anchor, focus) = if self.granularity == Unit::Character {
+            (anchor, focus)
+        } else {
+            let (start, end) = (anchor.min(focus), anchor.max(focus));
+            match direction {
+                Direction::Backward => (end, start),
+                Direction::Forward => (start, end),
+            }
+        };
+        let forward = direction == Direction::Forward;
+        let mut goal_x = None;
+        let mut upstream = false;
+        let to = match movement {
+            Movement::Character => step(texts, focus, forward),
+            Movement::Word => word_step(texts, focus, forward),
+            Movement::Line => {
+                let caret = caret(texts, focus, self.upstream);
+                let x = self.goal_x.unwrap_or(caret.left().0);
+                goal_x = Some(x);
+                line_step(texts, focus, caret, x, forward)
+            }
+            Movement::LineEdge => {
+                let caret = caret(texts, focus, self.upstream);
+                upstream = forward;
+                line_edge(texts, focus, caret, forward)
+            }
+            Movement::Paragraph => paragraph_step(texts, focus, forward),
+            Movement::Document => document_edge(texts, forward),
+        };
+        self.anchor = Some(anchor);
+        self.focus = Some(clamp_position(texts, to));
+        self.granularity = Unit::Character;
+        self.anchor_unit = None;
+        self.goal_x = goal_x;
+        self.upstream = upstream;
+        self.remember(texts);
+        self.bounds() != before
+    }
+
+    /// The caret at the selection's focus (a box of no width, line high, in
+    /// the texts' coordinates): where a key that extends the selection
+    /// leaves it, for the backend to scroll into view. `None` without a
+    /// selection.
+    pub fn focus_caret(&self, texts: &impl SelectionTexts) -> Option<Bounds<Points>> {
+        let focus = self.focus.filter(|f| f.text < texts.len())?;
+        Some(caret(texts, focus, self.upstream))
+    }
+
+    /// Forgets what a run of keys kept: the x of line moves, the end of a
+    /// line the focus was put at.
+    fn forget_keys(&mut self) {
+        self.goal_x = None;
+        self.upstream = false;
     }
 
     /// The texts changed (new content, texts added or gone): positions are
@@ -975,6 +1096,293 @@ fn line_of(texts: &impl SelectionTexts, i: usize) -> (usize, usize) {
         last += 1;
     }
     (first, last)
+}
+
+/// The offsets of `text` a caret can stop at (UTF-16): between clusters,
+/// not inside a pair of surrogates, before a combining mark, around a
+/// zero-width joiner, before a variation selector, skin tone or tag, or in
+/// a flag's pair of regional indicators. Its start and end included.
+fn caret_stops(text: &str) -> Vec<u32> {
+    let mut stops = vec![0];
+    let mut at = 0u32;
+    let mut previous: Option<char> = None;
+    // Regional indicators in the cluster so far.
+    let mut flags = 0;
+    for c in text.chars() {
+        let regional = matches!(c, '\u{1F1E6}'..='\u{1F1FF}');
+        let joins = at > 0
+            && (is_combining_mark(c)
+                || previous == Some('\u{200D}')
+                || matches!(c,
+                    '\u{FE00}'..='\u{FE0F}'
+                    | '\u{1F3FB}'..='\u{1F3FF}'
+                    | '\u{E0020}'..='\u{E007F}'
+                    | '\u{E0100}'..='\u{E01EF}')
+                || (regional && flags == 1)
+                || (c == '\n' && previous == Some('\r')));
+        if !joins && at > 0 {
+            stops.push(at);
+            flags = 0;
+        }
+        if regional {
+            flags += 1;
+        }
+        at += c.len_utf16() as u32;
+        previous = Some(c);
+    }
+    if at > 0 {
+        stops.push(at);
+    }
+    stops
+}
+
+/// The position one character from `pos` towards the end (`forward`) or
+/// the start. From a text's end it goes to the next text's start, a line
+/// break of its own, or one character into it when it continues the text
+/// (where nothing comes between the two).
+fn step(texts: &impl SelectionTexts, pos: TextPosition, forward: bool) -> TextPosition {
+    let stops = caret_stops(texts.content(pos.text));
+    let len = stops.last().copied().unwrap_or(0);
+    if forward {
+        if pos.offset < len {
+            let next = stops.iter().copied().find(|&s| s > pos.offset);
+            return TextPosition::new(pos.text, next.unwrap_or(len));
+        }
+        if pos.text + 1 >= texts.len() {
+            return pos;
+        }
+        let next = TextPosition::new(pos.text + 1, 0);
+        if continues(texts, next.text) {
+            step(texts, next, true)
+        } else {
+            next
+        }
+    } else {
+        if pos.offset > 0 {
+            let before = stops.iter().copied().rev().find(|&s| s < pos.offset);
+            return TextPosition::new(pos.text, before.unwrap_or(0));
+        }
+        if pos.text == 0 {
+            return pos;
+        }
+        let end = TextPosition::new(pos.text - 1, utf16_len(texts.content(pos.text - 1)));
+        if continues(texts, pos.text) {
+            step(texts, end, false)
+        } else {
+            end
+        }
+    }
+}
+
+/// The character after `pos` (`forward`) or before it, and the position on
+/// its other side: a line break between two texts unless the second
+/// continues the first. `None` at the end or the start of the texts.
+fn char_beside(
+    texts: &impl SelectionTexts,
+    pos: TextPosition,
+    forward: bool,
+) -> Option<(char, TextPosition)> {
+    let content = texts.content(pos.text);
+    let len = utf16_len(content);
+    let inside = if forward {
+        pos.offset < len
+    } else {
+        pos.offset > 0
+    };
+    if inside {
+        let at = byte_offset(content, pos.offset);
+        let c = if forward {
+            content[at..].chars().next()
+        } else {
+            content[..at].chars().next_back()
+        }?;
+        let width = c.len_utf16() as u32;
+        let offset = if forward {
+            pos.offset + width
+        } else {
+            pos.offset - width
+        };
+        return Some((c, TextPosition::new(pos.text, offset)));
+    }
+    let to = if forward {
+        (pos.text + 1 < texts.len()).then(|| TextPosition::new(pos.text + 1, 0))?
+    } else {
+        let i = pos.text.checked_sub(1)?;
+        TextPosition::new(i, utf16_len(texts.content(i)))
+    };
+    let joined = continues(texts, if forward { to.text } else { pos.text });
+    if joined {
+        char_beside(texts, to, forward)
+    } else {
+        Some(('\n', to))
+    }
+}
+
+/// The end of the next word after `pos` (`forward`) or the start of the
+/// one before it, over the spaces, punctuation and line breaks between: a
+/// run of letters, digits and `_`, or one ideograph or kana.
+fn word_step(texts: &impl SelectionTexts, pos: TextPosition, forward: bool) -> TextPosition {
+    let is_word = |c: char| CharKind::of(c) == CharKind::Word;
+    let mut at = pos;
+    while let Some((c, next)) = char_beside(texts, at, forward) {
+        if is_word(c) || is_spaceless_script(c) {
+            break;
+        }
+        at = next;
+    }
+    if let Some((c, next)) = char_beside(texts, at, forward)
+        && is_spaceless_script(c)
+    {
+        return next;
+    }
+    while let Some((c, next)) = char_beside(texts, at, forward) {
+        if !is_word(c) {
+            break;
+        }
+        at = next;
+    }
+    at
+}
+
+/// The caret at `pos` (a box of no width, line high, in the texts'
+/// coordinates): at the right edge of the character before it when
+/// `upstream` (the end of a line), else at the left edge of the one after
+/// it; at the left of the text's frame, as high as it, where the texts
+/// cannot place characters ([`SelectionTexts::range_bounds`]).
+fn caret(texts: &impl SelectionTexts, pos: TextPosition, upstream: bool) -> Bounds<Points> {
+    let content = texts.content(pos.text);
+    let stops = caret_stops(content);
+    let at = byte_offset(content, pos.offset);
+    // A line break's box is not on the line of the caret beside it.
+    let breaks =
+        |c: Option<char>| c.is_some_and(|c| matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}'));
+    let before = stops
+        .iter()
+        .copied()
+        .rev()
+        .find(|&s| s < pos.offset)
+        .filter(|_| !breaks(content[..at].chars().next_back()))
+        .and_then(|s| texts.range_bounds(pos.text, s..pos.offset))
+        .map(|b| (b.right(), b));
+    let after = stops
+        .iter()
+        .copied()
+        .find(|&s| s > pos.offset)
+        .filter(|_| !breaks(content[at..].chars().next()))
+        .and_then(|s| texts.range_bounds(pos.text, pos.offset..s))
+        .map(|b| (b.left(), b));
+    let edge = if upstream {
+        before.or(after)
+    } else {
+        after.or(before)
+    };
+    match edge {
+        Some((x, b)) => Bounds::new(point(x, b.top()), size(Points(0.0), b.size.height)),
+        None => {
+            let frame = texts.frame(pos.text);
+            Bounds::new(frame.origin, size(Points(0.0), frame.size.height))
+        }
+    }
+}
+
+/// The position on the line below `caret` (`forward`) or above it nearest
+/// `x`: in the focus's text while it has a line there, else in the first
+/// text after it whose top is below the caret's line (the last before it
+/// whose bottom is above), skipping the texts beside it on its row. Past
+/// the last line, the end of the texts; before the first, their start.
+fn line_step(
+    texts: &impl SelectionTexts,
+    pos: TextPosition,
+    caret: Bounds<Points>,
+    x: f32,
+    forward: bool,
+) -> TextPosition {
+    let half = caret.size.height.0 / 2.0;
+    let frame = texts.frame(pos.text);
+    let in_text = |i: usize, y: f32| {
+        let frame = texts.frame(i);
+        let x = x.clamp(frame.left().0, frame.right().0.max(frame.left().0));
+        let y = y.clamp(frame.top().0, frame.bottom().0.max(frame.top().0));
+        TextPosition::new(i, texts.offset_at(i, point(Points(x), Points(y))))
+    };
+    // A little slack: lines and texts placed at fractional points.
+    const SLACK: f32 = 0.5;
+    if forward {
+        let y = caret.bottom().0 + half;
+        if y < frame.bottom().0 {
+            return in_text(pos.text, y);
+        }
+        let below = (pos.text + 1..texts.len())
+            .find(|&i| texts.frame(i).top().0 >= caret.bottom().0 - SLACK);
+        match below {
+            Some(i) => {
+                let top = texts.frame(i).top().0;
+                in_text(i, top + half.min(texts.frame(i).size.height.0 / 2.0))
+            }
+            None => document_edge(texts, true),
+        }
+    } else {
+        let y = caret.top().0 - half;
+        if y > frame.top().0 {
+            return in_text(pos.text, y);
+        }
+        let above = (0..pos.text)
+            .rev()
+            .find(|&i| texts.frame(i).bottom().0 <= caret.top().0 + SLACK);
+        match above {
+            Some(i) => {
+                let bottom = texts.frame(i).bottom().0;
+                in_text(i, bottom - half.min(texts.frame(i).size.height.0 / 2.0))
+            }
+            None => document_edge(texts, false),
+        }
+    }
+}
+
+/// The end (`forward`) or the start of the line `caret` is on, in the
+/// focus's text.
+fn line_edge(
+    texts: &impl SelectionTexts,
+    pos: TextPosition,
+    caret: Bounds<Points>,
+    forward: bool,
+) -> TextPosition {
+    let frame = texts.frame(pos.text);
+    let x = if forward { frame.right() } else { frame.left() };
+    let y = caret.top() + caret.size.height * 0.5;
+    TextPosition::new(pos.text, texts.offset_at(pos.text, point(x, y)))
+}
+
+/// The end (`forward`) or the start of the paragraph `pos` is in (its text
+/// and the texts that continue it), or of the next or previous paragraph
+/// when it is there already.
+fn paragraph_step(texts: &impl SelectionTexts, pos: TextPosition, forward: bool) -> TextPosition {
+    let (first, last) = line_of(texts, pos.text);
+    if forward {
+        let end = TextPosition::new(last, utf16_len(texts.content(last)));
+        if pos < end || last + 1 >= texts.len() {
+            return end;
+        }
+        let (_, next) = line_of(texts, last + 1);
+        TextPosition::new(next, utf16_len(texts.content(next)))
+    } else {
+        let start = TextPosition::new(first, 0);
+        if pos > start || first == 0 {
+            return start;
+        }
+        let (previous, _) = line_of(texts, first - 1);
+        TextPosition::new(previous, 0)
+    }
+}
+
+/// The end (`forward`) or the start of all the texts.
+fn document_edge(texts: &impl SelectionTexts, forward: bool) -> TextPosition {
+    if forward && !texts.is_empty() {
+        let last = texts.len() - 1;
+        TextPosition::new(last, utf16_len(texts.content(last)))
+    } else {
+        TextPosition::new(0, 0)
+    }
 }
 
 /// What kind of character `c` is, for word boundaries.
@@ -1915,6 +2323,236 @@ mod tests {
         let mut model = SelectionModel::new();
         model.select_all(&texts);
         assert_eq!(model.text(&texts), "}\n\nnext");
+    }
+
+    // The keys that extend a selection.
+
+    fn keyed(texts: &impl SelectionTexts, from: TextPosition) -> SelectionModel {
+        let mut model = SelectionModel::new();
+        model.select_range(texts, from, from);
+        model
+    }
+
+    #[test]
+    fn keys_do_nothing_before_a_press() {
+        let texts = column();
+        let mut model = SelectionModel::new();
+        assert!(!model.extend(&texts, Movement::Character, Direction::Forward));
+        assert_eq!(model.bounds(), None);
+    }
+
+    #[test]
+    fn a_character_key_extends_from_a_press_and_crosses_texts() {
+        let texts = column();
+        let mut model = SelectionModel::new();
+        model.press(&texts, at(72.0, 5.0), 1, false);
+        assert_eq!(model.focus(), Some(pos(0, 9)));
+        for _ in 0..2 {
+            assert!(model.extend(&texts, Movement::Character, Direction::Forward));
+        }
+        assert_eq!(model.text(&texts), "ld");
+        // The end of a text, then the next one's start: the break between.
+        assert!(model.extend(&texts, Movement::Character, Direction::Forward));
+        assert_eq!(model.focus(), Some(pos(1, 0)));
+        assert!(model.extend(&texts, Movement::Character, Direction::Forward));
+        assert_eq!(model.text(&texts), "ld\nS");
+        // Back past the anchor: the anchor stays.
+        for _ in 0..6 {
+            model.extend(&texts, Movement::Character, Direction::Backward);
+        }
+        assert_eq!(model.bounds(), Some((pos(0, 7), pos(0, 9))));
+        assert_eq!(model.text(&texts), "or");
+        // At the start of the texts, nothing moves.
+        let mut model = keyed(&texts, pos(0, 0));
+        assert!(!model.extend(&texts, Movement::Character, Direction::Backward));
+        let mut model = keyed(&texts, pos(2, 4));
+        assert!(!model.extend(&texts, Movement::Character, Direction::Forward));
+    }
+
+    #[test]
+    fn a_character_key_steps_over_clusters() {
+        let texts = Fake::new(&[("e\u{301}🇩🇪👍🏽\r\nx", (0.0, 0.0, 200.0, 40.0))]);
+        let mut model = keyed(&texts, pos(0, 0));
+        let mut stops = Vec::new();
+        while model.extend(&texts, Movement::Character, Direction::Forward) {
+            stops.push(model.focus().unwrap().offset);
+        }
+        assert_eq!(stops, vec![2, 6, 10, 12, 13]);
+        let mut back = Vec::new();
+        while model.extend(&texts, Movement::Character, Direction::Backward) {
+            back.push(model.focus().unwrap().offset);
+        }
+        assert_eq!(back, vec![12, 10, 6, 2, 0]);
+    }
+
+    #[test]
+    fn a_character_key_runs_on_across_a_wrapped_lines_parts() {
+        let texts = wrapped();
+        let mut model = keyed(&texts, pos(1, 8));
+        model.extend(&texts, Movement::Character, Direction::Forward);
+        assert_eq!(model.focus(), Some(pos(1, 9)));
+        // The part after starts where this one ends: one more character.
+        model.extend(&texts, Movement::Character, Direction::Forward);
+        assert_eq!(model.focus(), Some(pos(2, 1)));
+        assert_eq!(model.text(&texts), "in");
+        model.extend(&texts, Movement::Character, Direction::Backward);
+        model.extend(&texts, Movement::Character, Direction::Backward);
+        assert_eq!(model.focus(), Some(pos(1, 8)));
+    }
+
+    #[test]
+    fn a_word_key_goes_over_spaces_and_punctuation_to_a_words_edge() {
+        let texts = Fake::new(&[
+            ("foo, bar.baz  ", (0.0, 0.0, 200.0, 20.0)),
+            ("  next 日本", (0.0, 20.0, 200.0, 20.0)),
+        ]);
+        let mut model = keyed(&texts, pos(0, 0));
+        let mut stops = Vec::new();
+        while model.extend(&texts, Movement::Word, Direction::Forward) {
+            stops.push(model.focus().unwrap());
+        }
+        assert_eq!(
+            stops,
+            vec![
+                pos(0, 3),
+                pos(0, 8),
+                pos(0, 12),
+                pos(1, 6),
+                pos(1, 8),
+                pos(1, 9)
+            ]
+        );
+        let mut back = Vec::new();
+        while model.extend(&texts, Movement::Word, Direction::Backward) {
+            back.push(model.focus().unwrap());
+        }
+        assert_eq!(
+            back,
+            vec![
+                pos(1, 8),
+                pos(1, 7),
+                pos(1, 2),
+                pos(0, 9),
+                pos(0, 5),
+                pos(0, 0)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_line_key_keeps_its_x_across_short_lines_and_texts() {
+        let texts = Fake::new(&[
+            (
+                "a long first line\nab\nanother long line",
+                (0.0, 0.0, 200.0, 60.0),
+            ),
+            ("x", (0.0, 70.0, 200.0, 20.0)),
+            ("the last long line", (0.0, 100.0, 200.0, 20.0)),
+        ]);
+        // Column 10 of the first line.
+        let mut model = keyed(&texts, pos(0, 10));
+        model.extend(&texts, Movement::Line, Direction::Forward);
+        assert_eq!(model.focus(), Some(pos(0, 20)), "the end of `ab`");
+        model.extend(&texts, Movement::Line, Direction::Forward);
+        assert_eq!(model.focus(), Some(pos(0, 31)), "column 10 again");
+        model.extend(&texts, Movement::Line, Direction::Forward);
+        assert_eq!(model.focus(), Some(pos(1, 1)), "the end of `x`");
+        model.extend(&texts, Movement::Line, Direction::Forward);
+        assert_eq!(model.focus(), Some(pos(2, 10)));
+        // Past the last line: the end.
+        model.extend(&texts, Movement::Line, Direction::Forward);
+        assert_eq!(model.focus(), Some(pos(2, 18)));
+        // Another key forgets the x.
+        let mut model = keyed(&texts, pos(2, 10));
+        model.extend(&texts, Movement::Line, Direction::Backward);
+        assert_eq!(model.focus(), Some(pos(1, 1)));
+        model.extend(&texts, Movement::Character, Direction::Backward);
+        model.extend(&texts, Movement::Line, Direction::Backward);
+        assert_eq!(model.focus(), Some(pos(0, 21)), "column 0 of the last line");
+        model.extend(&texts, Movement::Line, Direction::Backward);
+        model.extend(&texts, Movement::Line, Direction::Backward);
+        assert_eq!(model.focus(), Some(pos(0, 0)));
+        // Before the first line: the start.
+        model.extend(&texts, Movement::Line, Direction::Backward);
+        assert_eq!(model.focus(), Some(pos(0, 0)));
+    }
+
+    #[test]
+    fn a_line_key_skips_the_texts_beside_on_a_row() {
+        let texts = Fake::new(&[
+            ("name", (0.0, 0.0, 100.0, 20.0)),
+            ("value", (100.0, 0.0, 100.0, 20.0)),
+            ("below the row", (0.0, 30.0, 200.0, 20.0)),
+        ]);
+        let mut model = keyed(&texts, pos(0, 2));
+        model.extend(&texts, Movement::Line, Direction::Forward);
+        assert_eq!(model.focus(), Some(pos(2, 2)));
+        model.extend(&texts, Movement::Line, Direction::Backward);
+        assert_eq!(model.focus(), Some(pos(1, 0)), "the last text above");
+    }
+
+    #[test]
+    fn a_line_edge_key_goes_to_the_ends_of_the_focus_line() {
+        let texts = Fake::new(&[("first line\nsecond", (0.0, 0.0, 200.0, 40.0))]);
+        let mut model = keyed(&texts, pos(0, 3));
+        model.extend(&texts, Movement::LineEdge, Direction::Forward);
+        assert_eq!(model.focus(), Some(pos(0, 10)));
+        // Again: it stays at the end of that line.
+        assert!(!model.extend(&texts, Movement::LineEdge, Direction::Forward));
+        model.extend(&texts, Movement::LineEdge, Direction::Backward);
+        assert_eq!(model.bounds(), Some((pos(0, 0), pos(0, 3))));
+        let mut model = keyed(&texts, pos(0, 14));
+        model.extend(&texts, Movement::LineEdge, Direction::Backward);
+        assert_eq!(model.focus(), Some(pos(0, 11)));
+        model.extend(&texts, Movement::LineEdge, Direction::Forward);
+        assert_eq!(model.focus(), Some(pos(0, 17)));
+    }
+
+    #[test]
+    fn paragraph_and_document_keys() {
+        let texts = wrapped();
+        let mut model = keyed(&texts, pos(1, 3));
+        model.extend(&texts, Movement::Paragraph, Direction::Forward);
+        assert_eq!(model.focus(), Some(pos(2, 10)), "the wrapped line's end");
+        model.extend(&texts, Movement::Paragraph, Direction::Forward);
+        assert_eq!(model.focus(), Some(pos(3, 4)));
+        model.extend(&texts, Movement::Paragraph, Direction::Backward);
+        assert_eq!(model.focus(), Some(pos(3, 0)));
+        model.extend(&texts, Movement::Paragraph, Direction::Backward);
+        assert_eq!(model.focus(), Some(pos(1, 0)), "the wrapped line's start");
+        model.extend(&texts, Movement::Document, Direction::Backward);
+        assert_eq!(model.bounds(), Some((pos(0, 0), pos(1, 3))));
+        model.extend(&texts, Movement::Document, Direction::Forward);
+        assert_eq!(model.bounds(), Some((pos(1, 3), pos(3, 4))));
+    }
+
+    #[test]
+    fn a_double_clicked_word_extends_from_the_end_the_key_points_to() {
+        let texts = column();
+        let mut model = SelectionModel::new();
+        model.press(&texts, at(56.0, 5.0), 2, false);
+        assert_eq!(model.text(&texts), "world");
+        model.extend(&texts, Movement::Character, Direction::Backward);
+        assert_eq!(model.text(&texts), " world");
+        let mut model = SelectionModel::new();
+        model.press(&texts, at(56.0, 5.0), 2, false);
+        model.extend(&texts, Movement::Character, Direction::Forward);
+        assert_eq!(model.bounds(), Some((pos(0, 6), pos(1, 0))));
+    }
+
+    #[test]
+    fn the_focus_caret_follows_the_keys() {
+        let texts = column();
+        let mut model = keyed(&texts, pos(1, 3));
+        assert_eq!(
+            model.focus_caret(&texts),
+            Some(bounds(point(px(24.0), px(40.0)), size(px(0.0), px(20.0))))
+        );
+        model.extend(&texts, Movement::Line, Direction::Forward);
+        assert_eq!(
+            model.focus_caret(&texts),
+            Some(bounds(point(px(24.0), px(60.0)), size(px(0.0), px(20.0))))
+        );
     }
 
     fn wrapped() -> Wrapped {

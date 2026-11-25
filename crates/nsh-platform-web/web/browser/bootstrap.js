@@ -5165,10 +5165,12 @@
 					popped.set(page, () => entries.set(untracked(entries).filter((value) => value !== entry)));
 					return page;
 				};
-				return typeof rendered === "function" ? computed(() => {
-					const value = rendered();
+				if (typeof rendered !== "function") return screenFor(rendered);
+				return computed(() => {
+					let value = rendered();
+					while (typeof value === "function") value = value();
 					return untracked(() => screenFor(value));
-				}) : screenFor(rendered);
+				});
 			});
 			rt.insert(node, rows);
 			return node;

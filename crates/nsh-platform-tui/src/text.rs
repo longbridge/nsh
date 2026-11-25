@@ -350,6 +350,15 @@ impl CellTextEngine {
             })
         };
         let glyphs = &prepared.glyphs;
+        // A short label of one word (a name, a time, a field's value) a
+        // box too narrow for it squeezes stays one row, cut with `…` where
+        // the box ends: `ja` / `so` / `n` down a column reads as three
+        // words. A longer run (a URL, a path) still breaks to show it all.
+        let columns = if one_short_word(glyphs) {
+            usize::MAX
+        } else {
+            columns
+        };
         let mut rows = wrap(glyphs, columns);
         if text.max_lines > 0 {
             let limit = text.max_lines as usize;
@@ -393,6 +402,25 @@ impl CellTextEngine {
         }
         rows
     }
+}
+
+/// The longest word kept on one row when its box is narrower than it.
+const SHORT_WORD: usize = 12;
+
+/// Whether `glyphs` are one short word: no space, line break, ideograph
+/// or attachment to break at, and at most [`SHORT_WORD`] Cells wide.
+fn one_short_word(glyphs: &[Glyph]) -> bool {
+    let mut width = 0;
+    for (index, glyph) in glyphs.iter().enumerate() {
+        if glyph.attachment.is_some()
+            || glyph.text.chars().any(char::is_whitespace)
+            || (index > 0 && breaks_between(&glyphs[index - 1], glyph))
+        {
+            return false;
+        }
+        width += glyph.width;
+    }
+    width > 0 && width <= SHORT_WORD
 }
 
 fn row_extent(row: &[Glyph]) -> (usize, usize) {
@@ -653,5 +681,17 @@ mod wrap_tests {
     #[test]
     fn latin_words_still_break_only_at_spaces() {
         assert_eq!(rows("hello world", 8), ["hello", "world"]);
+    }
+
+    #[test]
+    fn a_short_word_is_one_word_but_a_long_run_or_a_phrase_is_not() {
+        assert!(one_short_word(&glyphs("jason")));
+        assert!(one_short_word(&glyphs("4:35")));
+        assert!(!one_short_word(&glyphs(
+            "https://github.com/longbridge/nsh"
+        )));
+        assert!(!one_short_word(&glyphs("ja son")));
+        assert!(!one_short_word(&glyphs("中文")));
+        assert!(!one_short_word(&glyphs("")));
     }
 }

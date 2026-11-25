@@ -258,6 +258,7 @@ pub mod __private {
     pub use serde_json::Map as JsonMap;
 
     pub use super::component::BY_NAME_MARKER;
+    pub use crate::shader::USE_MARKER as SHADER_USE_MARKER;
 
     /// The type of a props struct's field `I` as its setter takes it (the
     /// value of an `Option`): `#[derive(Props)]` implements it where the
