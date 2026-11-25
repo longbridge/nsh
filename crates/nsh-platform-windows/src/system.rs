@@ -2349,6 +2349,11 @@ fn html_format() -> u32 {
     unsafe { RegisterClipboardFormatW(w!("HTML Format")) }
 }
 
+/// The clipboard's HTML fragment (`CF_HTML`), if it holds one.
+pub(crate) fn clipboard_html() -> Option<String> {
+    clipboard_bytes(html_format()).and_then(|bytes| clipboard::cf_html_fragment(&bytes))
+}
+
 /// Puts `bytes` on the clipboard as `format`, replacing what it holds.
 fn set_clipboard_bytes(format: u32, bytes: &[u8]) -> bool {
     set_clipboard_formats(&[(format, bytes)])
