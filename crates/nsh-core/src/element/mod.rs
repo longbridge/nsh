@@ -246,7 +246,8 @@ pub use crate::{
     platform::{
         Appearance, CellularData, HourCycle, HttpBody, HttpHead, HttpRequest, Idiom, Languages,
         Lifecycle, Locale, LocaleSettings, MeasurementSystem, Network, NetworkKind, Os, PerfStats,
-        SizeClass, TemperatureUnit, TimeZone, Weekday,
+        ReservedRegion, ReservedRegionKind, ReservedRegions, SizeClass, TemperatureUnit, TimeZone,
+        Weekday,
     },
     style::Color,
 };

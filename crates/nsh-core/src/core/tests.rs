@@ -25340,6 +25340,76 @@ mod views {
     }
 
     thread_local! {
+        static RESERVED_RUNS: Cell<u32> = const { Cell::new(0) };
+    }
+
+    /// Shows the regions the device reserves; its effect counts its runs.
+    #[component]
+    fn Reserved() -> impl IntoElement {
+        effect(move || {
+            reserved_regions();
+            RESERVED_RUNS.with(|n| n.set(n.get() + 1));
+        });
+        text(move || {
+            let regions = reserved_regions();
+            let shown: Vec<String> = regions
+                .iter()
+                .map(|r| format!("{} {}", r.kind.name(), r.bounds.right().0))
+                .collect();
+            format!("reserved [{}]", shown.join(", "))
+        })
+    }
+
+    #[test]
+    fn the_reserved_regions_reach_components_and_notify_only_when_they_change() {
+        use crate::platform::{ReservedRegion, ReservedRegionKind, ReservedRegions};
+        RESERVED_RUNS.with(|n| n.set(0));
+        let mut c = core();
+        c.mount_root(&Root::new::<Reserved>(|| ()));
+        assert_eq!(texts(&c.commit().unwrap()), ["reserved []"]);
+        // Another part of the environment changes: the effect stays.
+        let mut environment = crate::element::Environment {
+            dark: true,
+            ..Default::default()
+        };
+        c.set_environment(environment);
+        c.commit();
+        assert_eq!(RESERVED_RUNS.with(Cell::get), 1);
+        // A partly folded display: its fold down the middle.
+        let fold = ReservedRegion::new(
+            ReservedRegionKind::Division,
+            crate::geometry::Bounds::new(
+                crate::geometry::point(px(460.0), px(0.0)),
+                crate::geometry::size(px(31.0), px(669.0)),
+            ),
+        );
+        environment.reserved_regions = ReservedRegions::new([fold]);
+        c.set_environment(environment);
+        assert_eq!(texts(&c.commit().unwrap()), ["reserved [division 491]"]);
+        assert_eq!(RESERVED_RUNS.with(Cell::get), 2);
+        // Fully open again.
+        environment.reserved_regions = ReservedRegions::NONE;
+        c.set_environment(environment);
+        assert_eq!(texts(&c.commit().unwrap()), ["reserved []"]);
+        assert_eq!(RESERVED_RUNS.with(Cell::get), 3);
+    }
+
+    #[test]
+    fn reserved_regions_keep_the_first_eight() {
+        use crate::platform::{ReservedRegion, ReservedRegions};
+        let regions = ReservedRegions::new((0..10).map(|i| ReservedRegion {
+            bounds: crate::geometry::Bounds::new(
+                crate::geometry::point(px(i as f32), px(0.0)),
+                crate::geometry::size(px(1.0), px(1.0)),
+            ),
+            ..Default::default()
+        }));
+        assert_eq!(regions.len(), ReservedRegions::CAPACITY);
+        assert_eq!(regions.as_slice()[7].bounds.origin.x, px(7.0));
+        assert!(ReservedRegions::default().is_empty());
+    }
+
+    thread_local! {
         static NETWORK_RUNS: Cell<u32> = const { Cell::new(0) };
     }
 

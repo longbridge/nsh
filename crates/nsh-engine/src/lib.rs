@@ -4132,6 +4132,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         horizontal_size_class: env.horizontal_size_class,
         vertical_size_class: env.vertical_size_class,
         safe_area: insets(env),
+        reserved_regions: env.reserved_regions,
         title_bar: env.title_bar,
         window_state: env.window_state,
         keyboard_height: env.keyboard_height,
