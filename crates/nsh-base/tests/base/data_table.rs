@@ -299,14 +299,21 @@ fn tab_out_on(idiom: Idiom) -> Headless {
 }
 
 #[test]
-fn a_terminals_tab_leaves_the_table_and_the_arrows_move_between_columns() {
+fn a_terminals_tab_moves_between_cells_and_escape_lets_it_leave() {
     let mut app = tab_out_on(Idiom::Terminal);
+    // The arrows and Tab move the chosen cell, as on the desktops.
     app.press_key("right").unwrap();
     app.wait_for("Chosen Some(0):Some(1) next false").unwrap();
     app.press_key("left").unwrap();
     app.wait_for("Chosen Some(0):Some(0) next false").unwrap();
     app.press_key("tab").unwrap();
-    app.wait_for("Chosen Some(0):Some(0) next true").unwrap();
+    app.wait_for("Chosen Some(0):Some(1) next false").unwrap();
+    // Escape clears the selection, then gives up the keyboard: Tab moves
+    // the focus on, out of the table.
+    app.press_key("escape").unwrap();
+    app.press_key("escape").unwrap();
+    app.press_key("tab").unwrap();
+    app.wait_for("Chosen Some(0):Some(1) next true").unwrap();
 }
 
 #[test]

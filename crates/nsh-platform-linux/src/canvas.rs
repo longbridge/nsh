@@ -1660,7 +1660,7 @@ impl Replay<'_> {
                 dest,
             } => self.image(
                 &image.uri,
-                image.density(),
+                || f64::from(image.density()),
                 source.map(|s| [s.origin.x.0, s.origin.y.0, s.size.width.0, s.size.height.0]),
                 dest,
             ),
@@ -2116,7 +2116,13 @@ impl Replay<'_> {
         });
     }
 
-    fn image(&mut self, uri: &str, density: f32, source: Option<[f32; 4]>, dest: &[Num; 4]) {
+    fn image(
+        &mut self,
+        uri: &str,
+        density: impl Fn() -> f64,
+        source: Option<[f32; 4]>,
+        dest: &[Num; 4],
+    ) {
         if self.state.singular {
             return;
         }
@@ -2138,9 +2144,10 @@ impl Replay<'_> {
         let [dx, dy, dw, dh] = dest.map(|v| self.n(v));
         // Missing sizes are the source's pixels over the file name's
         // density (`@3x`), as an `Image`'s: never the screen's.
-        let density = f64::from(density);
-        let dw = if dw.is_nan() { sw / density } else { dw };
-        let dh = if dh.is_nan() { sh / density } else { dh };
+        // Parsed only when a size is missing: a sprite sheet drawn with
+        // both sizes, thousands of times a frame, never needs it.
+        let dw = if dw.is_nan() { sw / density() } else { dw };
+        let dh = if dh.is_nan() { sh / density() } else { dh };
         if dw == 0.0 || dh == 0.0 {
             return;
         }
