@@ -1313,6 +1313,15 @@ impl Style {
         self.0.as_deref().map_or(&[], crate::StylePatch::decls)
     }
 
+    /// Whether it has typed styles (Rust's [`StyleRefinement`], static or
+    /// bound): a style JS gives has none. A component that applies a style
+    /// it is given after its own bound styles reads it to bind only the
+    /// styles that need it ([`Element::inline_style`] of a closure binds
+    /// the typed styles after the element's own).
+    pub fn is_typed(&self) -> bool {
+        !self.1.is_empty()
+    }
+
     /// Applies it to `node` in `variant`: the declarations with `attr`, the
     /// typed styles as part of the node's own. A bound style adds its
     /// typed styles as a bound part only when it has some as the element
@@ -3573,5 +3582,39 @@ mod file_listener_tests {
             listener.1.call(&payload);
         }
         assert_eq!(calls.get(), 4);
+    }
+}
+
+#[cfg(test)]
+mod style_tests {
+    use super::*;
+    use crate::{PropertyValue, StyleKey, prelude::*};
+
+    fn red() -> PropertyValue {
+        PropertyValue::Color(Some(rgb(0xff0000).into()))
+    }
+
+    #[test]
+    fn a_style_is_typed_only_with_typed_styles() {
+        let declared = Style::default().with(StyleKey::Color, red());
+        let typed = Style::from(StyleRefinement::default().text_color(rgb(0xff0000)));
+        let bound = Style::from(StyleRefinement::default().text_color(move || rgb(0xff0000)));
+        assert!(!Style::default().is_typed());
+        assert!(!Style::from(StyleRefinement::default()).is_typed());
+        assert!(!Style::from_decls([]).is_typed());
+        assert!(!declared.is_typed());
+        assert!(typed.is_typed());
+        // Bound values alone, no static ones.
+        assert!(bound.is_typed());
+        // Kept by `with` and by `then` on either side.
+        assert!(
+            typed
+                .clone()
+                .with(StyleKey::Opacity, PropertyValue::Number(0.5.into()))
+                .is_typed()
+        );
+        assert!(declared.then(&typed).is_typed());
+        assert!(typed.then(&declared).is_typed());
+        assert!(!declared.then(&declared).is_typed());
     }
 }

@@ -5,7 +5,7 @@ use std::rc::Rc;
 use nsh_core::{
     ResizeMode,
     color::Hsla,
-    element::{Reactive, Renderer, Style, StyleRefinement},
+    element::{Reactive, Renderer, StyleRefinement},
     geometry::{DefiniteLength, Length},
     keymap::Modifiers,
     prelude::*,
@@ -15,6 +15,7 @@ use super::{
     Alert, Block, CodeBlock, ColumnAlign, CustomNode, Document, Image, ImageLength, Inline,
     ListItem, MarkdownExtension, MarkdownOptions, MarkdownPlugins, Parser, Table,
     markdown::{Incremental, Parsed, SharedBlock},
+    merge_styles,
     parts::{TextViewClasses, TextViewPart as Part, TextViewParts, TextViewStyles},
     selection::{Reported, Source, TextSelectionOptions, selected},
 };
@@ -641,14 +642,20 @@ impl Cx {
         } else {
             el.app_class(Some(SharedString::from(classes)))
         };
-        let styles: Vec<&Style> = parts.iter().filter_map(|p| self.styles.get(*p)).collect();
-        match styles.as_slice() {
-            [] => el,
-            [style] => el.inline_style((*style).clone()),
-            // Later parts' declarations win, as later classes do.
-            _ => el.inline_style(Style::from_decls(
-                styles.iter().flat_map(|s| s.decls().iter().cloned()),
-            )),
+        let mut styles = parts.iter().filter_map(|p| self.styles.get(*p)).peekable();
+        if styles.peek().is_none() {
+            return el;
+        }
+        // Later parts win, as later classes do.
+        let style = merge_styles(styles);
+        // A static style's typed styles join the element's own static ones,
+        // which its bound ones (theme colors) come after; bound, they come
+        // after those, as the app's style is over the element's own. A style
+        // of declarations alone (JS's) stays static, costing no binding.
+        if style.is_typed() {
+            el.inline_style(move || style.clone())
+        } else {
+            el.inline_style(style)
         }
     }
 
