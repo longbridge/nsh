@@ -257,6 +257,10 @@ mod tests {
         assert_eq!(pieces("中文，字。", 5), vec!["中", "文，", "字。"]);
         assert_eq!(pieces("说「你好」吧", 4), vec!["说", "「你", "好」", "吧"]);
         assert_eq!(pieces("待ちっと", 4), vec!["待", "ちっ", "と"]);
+        // Spaces before closing punctuation hang together: no line starts
+        // with one of them, and none is a line of its own.
+        assert_eq!(pieces("中文中文  ，", 8), vec!["中文中", "文  ，"]);
+        assert_eq!(pieces("中  ，", 2), vec!["中  ", "，"]);
         // A run without opportunities breaks between graphemes.
         assert_eq!(pieces("，，，，", 5), vec!["，，", "，，"]);
     }
@@ -316,6 +320,13 @@ mod tests {
             for line in pieces(&text, columns) {
                 let start = line.as_ptr() as usize - text.as_ptr() as usize;
                 assert!(all.contains(&start), "{text:?} at {columns}: {starts:?}");
+                // Whitespace hangs: only the first line starts with it (a
+                // space with a combining mark on it is no whitespace).
+                let first = line.graphemes(true).next().unwrap_or("");
+                assert!(
+                    start == 0 || !first.chars().all(char::is_whitespace),
+                    "{text:?} at {columns}: {line:?} starts with whitespace"
+                );
                 let shown = line.trim_end_matches(char::is_whitespace);
                 let width: usize = shown.chars().map(char_columns).sum();
                 assert!(

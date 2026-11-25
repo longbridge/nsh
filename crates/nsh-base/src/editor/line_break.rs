@@ -66,11 +66,13 @@ pub(crate) fn text_break(
             }
         }
         // Between ASCII chars (always a grapheme boundary: no `\r\n` in a
-        // line), after whitespace.
-        if let Some(offset) = (start.max(floor) + 1..=max)
-            .rev()
-            .find(|&offset| ascii_pair(offset) && char::from(bytes[offset - 1]).is_whitespace())
-        {
+        // line), after whitespace: after a run of it, never inside one, so
+        // the run hangs past the edge rather than starting the next row.
+        if let Some(offset) = (start.max(floor) + 1..=max).rev().find(|&offset| {
+            ascii_pair(offset)
+                && char::from(bytes[offset - 1]).is_whitespace()
+                && !char::from(bytes[offset]).is_whitespace()
+        }) {
             found = found.max(Some(offset));
         }
         // A span from `context` on is as far back as the text goes.

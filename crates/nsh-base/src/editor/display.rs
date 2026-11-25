@@ -2048,12 +2048,14 @@ mod tests {
 
     #[test]
     fn a_tab_moved_to_a_new_row_advances_from_its_start() {
-        // The break is after the space, before the tab: on the new row the
-        // tab reaches the first stop (40), so the comma overflows there.
-        let text = "中 \t，ab";
+        // The comma overflows after the tab (at 80) and never starts a row,
+        // so the row breaks between the CJK chars and the tab moves down
+        // with `文`: on the new row it reaches the first stop at 40, not 80,
+        // and the comma (60) overflows there again.
+        let text = "中文\t，";
         let buffer = Buffer::new(text);
         let map = map(&buffer, Some(50.0), vec![]);
-        assert_eq!(ranges(&map), vec![0..4, 4..5, 5..10]);
+        assert_eq!(ranges(&map), vec![0..3, 3..7, 7..10]);
         assert_row_widths(&map, text);
     }
 
@@ -2271,6 +2273,18 @@ mod tests {
         fresh.rebuild(&buffer);
         assert_eq!(wrapped.rows, fresh.rows);
         assert_eq!(wrapped.line_rows, fresh.line_rows);
+    }
+
+    #[test]
+    fn spaces_before_closing_punctuation_hang_together() {
+        // The row breaks between the CJK chars, not between the spaces:
+        // no row starts with a space.
+        let buffer = Buffer::new("中文中文  ，");
+        let map = map(&buffer, Some(80.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..9, 9..17]);
+        let buffer = Buffer::new("中  ，");
+        let map = self::map(&buffer, Some(40.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..5, 5..8]);
     }
 
     #[test]
