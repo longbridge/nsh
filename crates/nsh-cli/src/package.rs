@@ -892,6 +892,8 @@ pub(crate) struct PackageOptions<'a> {
     pub(crate) device: Option<&'a str>,
     /// The web: the URL the site's files are served from (`--asset-url`).
     pub(crate) asset_url: Option<&'a str>,
+    /// The web: package the shared runtime (`--shared-runtime`).
+    pub(crate) shared_runtime: bool,
     /// A development build for `nsh run`. Android: the APK is debuggable,
     /// so `AppActivity` takes the environment `nsh run` passes it.
     pub(crate) development: bool,
@@ -1475,6 +1477,10 @@ fn trimmed_runner(entry: &Path, target: PackageTarget) -> bool {
 pub(crate) fn package(mut options: PackageOptions<'_>) -> anyhow::Result<()> {
     if options.asset_url.is_some() && options.target != PackageTarget::Web {
         bail!("--asset-url is where a web site's files are served from: package with --target web");
+    }
+    // `--shared-runtime` only means something for the web; other targets ignore it.
+    if options.target != PackageTarget::Web {
+        options.shared_runtime = false;
     }
     if let Some(url) = options.asset_url {
         crate::web::check_asset_url(url)?;
@@ -3398,6 +3404,7 @@ mod tests {
                 run: false,
                 device: None,
                 asset_url: None,
+                shared_runtime: false,
                 development: false,
             })
             .unwrap_err();
@@ -3428,6 +3435,7 @@ mod tests {
             run,
             device: Some("emulator-5554"),
             asset_url: None,
+            shared_runtime: false,
             development: false,
         };
         for target in [

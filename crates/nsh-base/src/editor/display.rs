@@ -24,12 +24,13 @@ use std::{
 use nsh_core::geometry::Points;
 use ropey::Rope;
 use rustc_hash::FxHashMap;
-use unicode_segmentation::{GraphemeCursor, GraphemeIndices, UnicodeSegmentation};
+use unicode_segmentation::{GraphemeIndices, UnicodeSegmentation};
 
 use super::{
     buffer::{Bias, Buffer, Change, LineSpan, map_offset},
     diagnostics::{self, Mark},
     fold::FoldRange,
+    line_break::text_break,
     state::Font,
     types::RowLayout,
 };
@@ -1216,6 +1217,24 @@ impl Iterator for LineRanges<'_> {
 /// character, [`last_break`]). Continuation rows start at the line's
 /// indentation unless that is over half the width.
 fn wrap_line(fonts: &Fonts, width: Points, line: usize, start: usize, text: &str, out: &mut Laid) {
+    if text.is_ascii() {
+        wrap::<true>(fonts, width, line, start, text, out);
+    } else {
+        wrap::<false>(fonts, width, line, start, text, out);
+    }
+}
+
+/// [`wrap_line`] for an ASCII line (`ASCII`) or another: a copy each, so
+/// the loop over an ASCII line's graphemes carries nothing of the search
+/// other lines need.
+fn wrap<const ASCII: bool>(
+    fonts: &Fonts,
+    width: Points,
+    line: usize,
+    start: usize,
+    text: &str,
+    out: &mut Laid,
+) {
     let width = width.0.max(1.0);
     let lead = text.len() - text.trim_start_matches([' ', '\t']).len();
     let lead_width = fonts.run_width(start, &text[..lead]);
@@ -1239,12 +1258,12 @@ fn wrap_line(fonts: &Fonts, width: Points, line: usize, start: usize, text: &str
     let mut row_indent = 0.0;
     let mut available = width;
     let mut x = 0.0;
-    let ascii = text.is_ascii();
+    let ascii = ASCII;
     // An ASCII line's last break opportunity: after the last whitespace, and
     // the x there. Other lines look for theirs when a row overflows
     // ([`last_break`]): most lines fit, and pay nothing for it.
     let mut break_at: Option<(usize, f32)> = None;
-    for (at, unit, label) in units(text, start, &fonts.replaced) {
+    for (at, unit, label) in Units::new(text, ascii, start, &fonts.replaced) {
         let blank = label.is_none() && unit.chars().all(char::is_whitespace);
         let advance = match label {
             Some(label) => label.width,
@@ -1254,12 +1273,7 @@ fn wrap_line(fonts: &Fonts, width: Points, line: usize, start: usize, text: &str
             let found = if ascii {
                 break_at.filter(|&(offset, _)| offset > row_start)
             } else {
-                last_break(text, start, &fonts.replaced, row_start, lead, at).map(|offset| {
-                    (
-                        offset,
-                        x_before(fonts, start, text, row_start, offset, at, x),
-                    )
-                })
+                overflow_break(fonts, start, text, row_start, lead, at, x)
             };
             let (end, end_x) = found.unwrap_or((at, x));
             push(row_start..end, row_indent, end_x);
@@ -1267,7 +1281,7 @@ fn wrap_line(fonts: &Fonts, width: Points, line: usize, start: usize, text: &str
             // along, and a tab among it advances from the new start.
             let moved = &text[end..at];
             x = if moved.contains('\t') {
-                fonts.run_width(start + end, moved)
+                moved_width(fonts, start + end, moved)
             } else {
                 x - end_x
             };
@@ -1283,6 +1297,36 @@ fn wrap_line(fonts: &Fonts, width: Points, line: usize, start: usize, text: &str
         }
     }
     push(row_start..text.len(), row_indent, x);
+}
+
+/// The width of `text` (at byte `start` of the text) moved to a new row
+/// with a tab among it: rare, so kept out of [`wrap_line`]'s loop.
+#[cold]
+#[inline(never)]
+fn moved_width(fonts: &Fonts, start: usize, text: &str) -> f32 {
+    fonts.run_width(start, text)
+}
+
+/// Where the overflowing row from `row_start` of a non-ASCII line breaks
+/// ([`last_break`]), and the x there ([`x_before`]). Kept out of
+/// [`wrap_line`]'s loop: it runs once per row, the loop once per grapheme.
+#[cold]
+#[inline(never)]
+fn overflow_break(
+    fonts: &Fonts,
+    start: usize,
+    text: &str,
+    row_start: usize,
+    lead: usize,
+    at: usize,
+    x: f32,
+) -> Option<(usize, f32)> {
+    last_break(text, start, &fonts.replaced, row_start, lead, at).map(|offset| {
+        (
+            offset,
+            x_before(fonts, start, text, row_start, offset, at, x),
+        )
+    })
 }
 
 /// The last break opportunity of the row from `row_start` of a line's
@@ -1324,6 +1368,16 @@ fn last_break(
         }
         inclusive = false;
     }
+    // Most rows of CJK text overflow between two ideographs, a break that
+    // needs no context: UAX #14 always breaks between them, and they never
+    // share a grapheme.
+    if inclusive
+        && at > floor
+        && labels.peek().is_none_or(|label| label.end < at)
+        && between_ideographs(text, at)
+    {
+        return Some(at);
+    }
     loop {
         // The text between the label before `bound` and `bound`, its
         // context starting after that label: after an object replacement
@@ -1351,80 +1405,13 @@ fn last_break(
     }
 }
 
-/// How far before a row UAX #14 may look for context.
-const BREAK_CONTEXT: usize = 64;
-
-/// The last break opportunity of plain text (no label in it) after `floor`
-/// and before `bound` (at it too when `inclusive`), the text's context
-/// starting at `context` at the earliest. UAX #14 runs backwards from
-/// `bound` a span at a time, each from where its breaks no longer depend on
-/// the text before it (`split_at_safe`): a few chars, not the whole line. A
-/// span starts a char before that point (so it can break there), but that
-/// char lacks its own context (a combining mark, its base's class): a break
-/// before the point is the next span's to decide. Nothing looks further
-/// back than [`BREAK_CONTEXT`] bytes before the row (from `row_start`), so
-/// a line wraps in time linear in its length; text without such a point
-/// that long (a rare run, as of spaces with combining marks) takes its
-/// breaks as if the line started there.
-fn text_break(
-    text: &str,
-    row_start: usize,
-    context: usize,
-    floor: usize,
-    bound: usize,
-    inclusive: bool,
-) -> Option<usize> {
-    let bytes = text.as_bytes();
-    let ascii_pair = |offset: usize| bytes[offset - 1].is_ascii() && bytes[offset].is_ascii();
-    let mut context = row_start.saturating_sub(BREAK_CONTEXT).max(context);
-    while !text.is_char_boundary(context) {
-        context -= 1;
-    }
-    // A row starts at a grapheme boundary: graphemes are found from there.
-    let row = &text[row_start..];
-    // Opportunities after `start`, up to `max`, are looked for; `bound` is
-    // a char's offset, and the span ends after that char, so it decides
-    // the break before it.
-    let mut bound = bound;
-    let mut max = if inclusive { bound } else { bound - 1 };
-    loop {
-        let end = bound + text[bound..].chars().next().map_or(0, char::len_utf8);
-        let (before, span) = unicode_linebreak::split_at_safe(&text[context..end]);
-        let span_start = context + before.len();
-        let start = if before.is_empty() {
-            span_start
-        } else {
-            span_start + span.chars().next().map_or(0, char::len_utf8)
-        };
-        let mut found = None;
-        for (offset, _) in unicode_linebreak::linebreaks(span) {
-            let offset = span_start + offset;
-            if offset > max {
-                break;
-            }
-            if offset > start
-                && offset > floor
-                && !ascii_pair(offset)
-                && is_grapheme_boundary(row, offset - row_start)
-            {
-                found = Some(offset);
-            }
-        }
-        // Between ASCII chars (always a grapheme boundary: no `\r\n` in a
-        // line), after whitespace.
-        if let Some(offset) = (start.max(floor) + 1..=max)
-            .rev()
-            .find(|&offset| ascii_pair(offset) && char::from(bytes[offset - 1]).is_whitespace())
-        {
-            found = found.max(Some(offset));
-        }
-        // A span from `context` on is as far back as the text goes.
-        if found.is_some() || start <= floor || before.is_empty() {
-            return found;
-        }
-        bound = start;
-        max = start;
-    }
+/// Whether the chars on both sides of `at` in `text` are ideographic
+/// (UAX #14's ID class: CJK ideographs, kana, most emoji).
+fn between_ideographs(text: &str, at: usize) -> bool {
+    use unicode_linebreak::{BreakClass, break_property};
+    let ideographic =
+        |c: Option<char>| c.is_some_and(|c| break_property(c as u32) == BreakClass::Ideographic);
+    ideographic(text[..at].chars().next_back()) && ideographic(text[at..].chars().next())
 }
 
 /// Whether a row may break before the label of `label` (a range of
@@ -1497,12 +1484,6 @@ fn breaks_after_label(text: &str, label: Range<usize>) -> bool {
             | BreakClass::Quotation
             | BreakClass::Inseparable
     )
-}
-
-fn is_grapheme_boundary(text: &str, offset: usize) -> bool {
-    GraphemeCursor::new(offset, text.len(), true)
-        .is_boundary(text, 0)
-        .unwrap_or(false)
 }
 
 /// The x of `offset` in the row from `row_start` of a line's `text` (at
@@ -1755,10 +1736,17 @@ fn changed_bytes(old: &[FontRun], old_fonts: &[Font], fonts: &Fonts) -> Option<R
 /// The graphemes of `text` with their byte offsets; ASCII text (where each
 /// byte is one) skips segmentation.
 fn graphemes(text: &str) -> Graphemes<'_> {
-    if text.is_ascii() {
-        Graphemes::Ascii(text, 0)
-    } else {
-        Graphemes::Unicode(text.grapheme_indices(true))
+    Graphemes::new(text, text.is_ascii())
+}
+
+impl<'a> Graphemes<'a> {
+    /// The graphemes of `text`, known to be ASCII or not.
+    fn new(text: &'a str, ascii: bool) -> Self {
+        if ascii {
+            Graphemes::Ascii(text, 0)
+        } else {
+            Graphemes::Unicode(text.grapheme_indices(true))
+        }
     }
 }
 
@@ -1791,14 +1779,7 @@ impl<'a> Iterator for Graphemes<'a> {
 /// crossing the text's start or end, or overlapping an earlier one, is not
 /// replaced here.
 fn units<'a>(text: &'a str, base: usize, replaced: &'a [Replaced]) -> Units<'a> {
-    let from = replaced.partition_point(|m| m.range.start < base);
-    Units {
-        text,
-        base,
-        graphemes: graphemes(text),
-        replaced: &replaced[from..],
-        skip_to: 0,
-    }
+    Units::new(text, text.is_ascii(), base, replaced)
 }
 
 struct Units<'a> {
@@ -1810,6 +1791,20 @@ struct Units<'a> {
     /// The end of the last replaced range: the graphemes before it are in
     /// it.
     skip_to: usize,
+}
+
+impl<'a> Units<'a> {
+    /// [`units`] of `text`, known to be ASCII or not.
+    fn new(text: &'a str, ascii: bool, base: usize, replaced: &'a [Replaced]) -> Self {
+        let from = replaced.partition_point(|m| m.range.start < base);
+        Units {
+            text,
+            base,
+            graphemes: Graphemes::new(text, ascii),
+            replaced: &replaced[from..],
+            skip_to: 0,
+        }
+    }
 }
 
 impl<'a> Iterator for Units<'a> {
@@ -2129,12 +2124,14 @@ mod tests {
 
     #[test]
     fn a_tab_moved_to_a_new_row_advances_from_its_start() {
-        // The break is after the space, before the tab: on the new row the
-        // tab reaches the first stop (40), so the comma overflows there.
-        let text = "中 \t，ab";
+        // The comma overflows after the tab (at 80) and never starts a row,
+        // so the row breaks between the CJK chars and the tab moves down
+        // with `文`: on the new row it reaches the first stop at 40, not 80,
+        // and the comma (60) overflows there again.
+        let text = "中文\t，";
         let buffer = Buffer::new(text);
         let map = map(&buffer, Some(50.0), vec![]);
-        assert_eq!(ranges(&map), vec![0..4, 4..5, 5..10]);
+        assert_eq!(ranges(&map), vec![0..3, 3..7, 7..10]);
         assert_row_widths(&map, text);
     }
 
@@ -2228,6 +2225,24 @@ mod tests {
         let buffer = Buffer::new("한국어 문장입니다");
         let map = map(&buffer, Some(50.0), vec![]);
         assert_eq!(ranges(&map), vec![0..13, 13..25]);
+    }
+
+    #[test]
+    fn ideographs_never_share_a_grapheme() {
+        use unicode_linebreak::{BreakClass, break_property};
+        use unicode_segmentation::UnicodeSegmentation;
+        // `last_break` breaks between two ideographs without checking
+        // graphemes: no ideographic char joins the one before or after it.
+        let ideographs: Vec<char> = (0..=char::MAX as u32)
+            .filter_map(char::from_u32)
+            .filter(|&c| break_property(c as u32) == BreakClass::Ideographic)
+            .collect();
+        assert!(ideographs.contains(&'中') && ideographs.contains(&'か'));
+        for &c in &ideographs {
+            for pair in [format!("中{c}"), format!("{c}中"), format!("{c}{c}")] {
+                assert_eq!(pair.graphemes(true).count(), 2, "{c:?} ({:04X})", c as u32);
+            }
+        }
     }
 
     #[test]
@@ -2352,6 +2367,18 @@ mod tests {
         fresh.rebuild(&buffer);
         assert_eq!(wrapped.rows, fresh.rows);
         assert_eq!(wrapped.line_rows, fresh.line_rows);
+    }
+
+    #[test]
+    fn spaces_before_closing_punctuation_hang_together() {
+        // The row breaks between the CJK chars, not between the spaces:
+        // no row starts with a space.
+        let buffer = Buffer::new("中文中文  ，");
+        let map = map(&buffer, Some(80.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..9, 9..17]);
+        let buffer = Buffer::new("中  ，");
+        let map = self::map(&buffer, Some(40.0), vec![]);
+        assert_eq!(ranges(&map), vec![0..5, 5..8]);
     }
 
     #[test]

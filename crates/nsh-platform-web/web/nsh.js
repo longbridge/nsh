@@ -32,6 +32,8 @@
 // by default `nsh-<name>.bin` next to this file), `prepareChunk(id)` (a
 // promise for what chunk `id` needs once it
 // runs, such as fonts for `readAsset`; awaited with the chunk's download),
+// `prefetched(url)` (a response promise the page already requested for a
+// side module's `url`, taken instead of fetching it again, or undefined),
 // `dark`, `idiom` ("phone", "pad" or "desktop" instead of the one the
 // pointer and the viewport suggest), `dialogs` ("viewport": `Dialog`,
 // `Sheet` and `AlertDialog` cover the whole window, in the browser's top layer, rather
@@ -883,7 +885,11 @@ function runOffset(run, container, offset) {
   return range.toString().length;
 }
 
-let players = 0;
+/** How many players the page made, kept on the document: every copy of the
+ * runtime on the page counts with it, so the views' own style rules
+ * (`classPrefix`) and DOM ids of two copies' players do not collide, as
+ * the rules all apply to the whole document. */
+const PLAYERS = Symbol.for("nsh.players");
 
 /** How many players imported each wasm-bindgen glue, by URL. */
 const glueImports = new Map();
@@ -1202,7 +1208,8 @@ class Player {
     // Shader views (`op_sh`), drawn on one WebGL 2 context (`shaderGl`).
     this.shaderViews = new Set();
     // Of the views' own style rules (`op_css`).
-    this.classPrefix = `nsh-p${++players}-`;
+    document[PLAYERS] = (document[PLAYERS] ?? 0) + 1;
+    this.classPrefix = `nsh-p${document[PLAYERS]}-`;
     this.timer = 0;
     // The engine trapped: it takes no more calls (`call`).
     this.trapped = false;
@@ -1544,8 +1551,10 @@ class Player {
   }
 
   async compileSide(url, init) {
+    // A request the page made ahead (`prefetched`): an entry's side module.
+    const ahead = this.options.prefetched?.(url);
     try {
-      return await WebAssembly.compileStreaming(fetch(url, init));
+      return await WebAssembly.compileStreaming(ahead ?? fetch(url, init));
     } catch (err) {
       // Served without `application/wasm`: compiled from its bytes.
       if (!(err instanceof TypeError)) throw err;
