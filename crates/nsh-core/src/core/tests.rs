@@ -45020,6 +45020,35 @@ mod terminal_layout {
     }
 
     #[test]
+    fn a_filled_composer_keeps_its_border_around_its_field() {
+        let frame = |field: bool| {
+            let mut ops = view(
+                2,
+                ROOT_ID,
+                &[
+                    ("borderWidth", V::Number(1.0)),
+                    ("borderRadius", V::Number(12.0)),
+                    ("backgroundColor", V::Str("#333333")),
+                ],
+            );
+            if field {
+                ops.extend(node(3, Tag::Input, 2, &[]));
+            } else {
+                ops.extend(text(3, 2, "Draft"));
+            }
+            ops.extend(view(6, 2, &[("flexDirection", V::Str("row"))]));
+            ops.extend(text(7, 6, "Send"));
+            view_style_of(&laid_out_on_surfaces(ops), 2)
+                .unwrap()
+                .borders
+                .widths
+        };
+        // Around a field the line stays; a plain filled card is its band.
+        assert_eq!(frame(true), Edges::all(Points(1.0)));
+        assert_eq!(frame(false), Edges::all(Points::ZERO));
+    }
+
+    #[test]
     fn an_icon_button_shows_its_label_or_is_left_out() {
         let mut ops = view(2, ROOT_ID, &[("flexDirection", V::Str("row"))]);
         ops.extend(text(3, 2, "Invoice"));

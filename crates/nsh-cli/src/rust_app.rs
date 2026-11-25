@@ -1454,6 +1454,9 @@ fn cargo_nshm(crates: &[AppCrate]) -> anyhow::Result<Vec<(String, AppCrate)>> {
         }
         let metadata: serde_json::Value =
             serde_json::from_slice(&output.stdout).context("cargo metadata's output")?;
+        if let Some(message) = stale_nsh_core(&metadata, env!("CARGO_PKG_VERSION")) {
+            bail!("{message}");
+        }
         for (id, label, krate) in nshm_in(&metadata, &manifest)? {
             if !found.iter().any(|(seen, ..)| *seen == id) {
                 found.push((id, label, krate));
@@ -1465,6 +1468,67 @@ fn cargo_nshm(crates: &[AppCrate]) -> anyhow::Result<Vec<(String, AppCrate)>> {
         .into_iter()
         .map(|(_, label, krate)| (label, krate))
         .collect())
+}
+
+/// [`stale_nsh_core`] for the workspace at `workspace`, `None` when Cargo
+/// cannot describe it.
+fn workspace_stale_nsh_core(workspace: &Path) -> Option<String> {
+    let output = Command::new(cargo())
+        .args([
+            "metadata",
+            "--format-version",
+            "1",
+            "--offline",
+            "--manifest-path",
+        ])
+        .arg(workspace.join("Cargo.toml"))
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let metadata = serde_json::from_slice(&output.stdout).ok()?;
+    stale_nsh_core(&metadata, env!("CARGO_PKG_VERSION"))
+}
+
+/// The packages in `metadata` (an nshm the app depends on, transitively)
+/// that require an nsh-core this NSH (`version`) is not: Cargo would build
+/// both and fail minutes later on mismatched types. `None` when every
+/// requirement accepts this NSH; a nightly counts as its release.
+fn stale_nsh_core(metadata: &serde_json::Value, version: &str) -> Option<String> {
+    let mut version = semver::Version::parse(version).ok()?;
+    version.pre = semver::Prerelease::EMPTY;
+    let mut stale: Vec<String> = metadata["packages"]
+        .as_array()?
+        .iter()
+        .filter_map(|package| {
+            let req = package["dependencies"].as_array()?.iter().find_map(|d| {
+                (d["name"].as_str() == Some("nsh-core") && d["kind"].is_null())
+                    .then(|| d["req"].as_str())?
+            })?;
+            let parsed = semver::VersionReq::parse(req).ok()?;
+            (!parsed.matches(&version)).then(|| {
+                format!(
+                    "  {} {} requires nsh-core {req}",
+                    package["name"].as_str().unwrap_or("?"),
+                    package["version"].as_str().unwrap_or("?")
+                )
+            })
+        })
+        .collect();
+    if stale.is_empty() {
+        return None;
+    }
+    stale.sort();
+    stale.dedup();
+    Some(format!(
+        "these dependencies are built for another nsh; this is nsh {version}:\n{}\n\
+         update them to a release for nsh {}.{} (in nsh.json and Cargo.toml)",
+        stale.join("\n"),
+        version.major,
+        version.minor
+    ))
 }
 
 /// The nshm in the dependency graph of the package at `manifest`, as
@@ -3660,6 +3724,11 @@ opt-level = \"s\"
             return Ok(path);
         }
         if let Err(error) = ui::cargo(&mut cmd, what) {
+            // An nshm built for another nsh fails on mismatched types deep
+            // in its build: say which one instead.
+            if let Some(message) = workspace_stale_nsh_core(workspace) {
+                return Err(error.context(message));
+            }
             // A development session that ran: a mistake in the code just
             // saved waits for the fix (the command line runs again).
             if RESTARTED.load(std::sync::atomic::Ordering::Relaxed) {
@@ -7099,5 +7168,41 @@ panic = \"abort\"
             extra.dependency(),
             r#"app_nsh_extra = { package = "nsh-extra", path = "/cache/nsh-extra", features = ["camera", "push"] }"#
         );
+    }
+}
+
+#[cfg(test)]
+mod stale_nsh_core_tests {
+    use super::stale_nsh_core;
+
+    #[test]
+    fn names_an_nshm_built_for_another_nsh() {
+        let metadata = serde_json::json!({ "packages": [
+            { "name": "app", "version": "0.1.0", "dependencies": [
+                { "name": "nsh-core", "req": "^0.7", "kind": null },
+                { "name": "nsh-omarchy", "req": "^0.1", "kind": null }
+            ]},
+            { "name": "nsh-omarchy", "version": "0.1.1", "dependencies": [
+                { "name": "nsh-core", "req": "^0.6", "kind": null }
+            ]},
+            { "name": "tool", "version": "1.0.0", "dependencies": [
+                { "name": "nsh-core", "req": "^0.5", "kind": "dev" }
+            ]}
+        ]});
+        let message = stale_nsh_core(&metadata, "0.7.0-nightly").unwrap();
+        assert!(
+            message.contains("nsh-omarchy 0.1.1 requires nsh-core ^0.6"),
+            "{message}"
+        );
+        assert!(!message.contains("app"), "{message}");
+        assert!(!message.contains("tool"), "{message}");
+        assert!(message.contains("nsh 0.7"), "{message}");
+        // On nsh 0.6 it is the app that is ahead.
+        let older = stale_nsh_core(&metadata, "0.6.1").unwrap();
+        assert!(
+            older.contains("app 0.1.0 requires nsh-core ^0.7"),
+            "{older}"
+        );
+        assert!(!older.contains("nsh-omarchy"), "{older}");
     }
 }
