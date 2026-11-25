@@ -93,9 +93,10 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
         .decorations(
             props
                 .keyword
-                .chunks_exact(2)
-                .map(|columns| {
-                    let (from, to) = (columns[0], columns[1]);
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|&[from, to]| {
                     let mut keyword = EditorDecoration::default();
                     keyword.range =
                         EditorRange::new(EditorPosition::new(0, from), EditorPosition::new(0, to));
@@ -259,7 +260,8 @@ fn composing_changes_nothing_and_asks_nothing_until_it_commits() {
     // is composed.
     compose(&mut app, true, "da");
     sink_text(&mut app, "da");
-    see(&mut app, "da");
+    // The composition shows in its row.
+    see(&mut app, "x da");
     see(&mut app, &value("x "));
     assert!(app.shows("Requests 0"));
     assert!(app.shows("Inline -"));
@@ -267,7 +269,8 @@ fn composing_changes_nothing_and_asks_nothing_until_it_commits() {
     sink_text(&mut app, "大");
     compose(&mut app, false, "");
     see(&mut app, &value("x 大"));
-    gone(&mut app, "da");
+    see(&mut app, "x 大");
+    gone(&mut app, "x da");
     app.wait(Duration::from_millis(100)).unwrap();
     assert!(app.shows("Requests 0"));
     assert!(app.shows("Inline -"));
@@ -284,9 +287,11 @@ fn a_cancelled_composition_leaves_the_text() {
     typed(&mut app, "");
     compose(&mut app, true, "da");
     sink_text(&mut app, "da");
+    see(&mut app, "dax");
     sink_text(&mut app, "");
     compose(&mut app, false, "");
-    gone(&mut app, "da");
+    gone(&mut app, "dax");
+    see(&mut app, "x");
     see(&mut app, &value("x "));
     assert!(app.shows("Requests 0"));
 }
@@ -315,8 +320,7 @@ fn a_composition_inside_a_row_moves_what_follows_aside() {
     typed(&mut app, "");
     app.press_key("right").unwrap();
     compose(&mut app, true, "da");
-    see(&mut app, "da");
-    see(&mut app, "b cd");
+    see(&mut app, "adab cd");
     see(&mut app, &value("ab cd"));
 }
 
@@ -340,7 +344,7 @@ fn a_composition_keeps_the_decorations_of_its_row() {
         app.press_key("right").unwrap();
     }
     compose(&mut app, true, "da");
-    see(&mut app, "da");
+    see(&mut app, "ab dacd");
     // The row shows `cd` once, still colored, after the composition, which
     // is plain as its commit will be.
     assert_eq!(rows(&app, "ab dacd"), 1);
@@ -369,7 +373,7 @@ fn a_composition_keeps_the_decorations_of_its_row() {
     see(&mut app, &value("ab 大cd"));
     see(&mut app, "ab 大cd");
     assert_eq!(rows(&app, "ab 大cd"), 1);
-    assert!(!app.shows("da"));
+    assert!(!app.shows("ab dacd"));
     assert_eq!(color(&app, "cd"), Ok(keyword));
     assert_eq!(color(&app, "大"), Ok(plain));
 }
