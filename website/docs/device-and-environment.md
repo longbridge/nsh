@@ -480,6 +480,44 @@ fn BottomBar(cx: Scope<NoEvent>) -> impl IntoElement {
 
 On Android, a view embedded below a toolbar gets only the parts of the system bars that overlap it, like UIKit's safe area: no top inset if it does not reach the status bar.
 
+## Reserved regions
+
+Inside the safe area, a device can reserve parts of the surface. On iPhone Duo, the fold of the inner display divides the surface while the device is partly open, and the cameras show through the display. `reserved_regions()` (TSX: `reservedRegions()`) lists them in the surface's points, the coordinates layout uses. It updates when they change, as the device folds and opens:
+
+- `"division"`: the display divides there (a fold). Keep content clear of it: move a centered column to one side, or leave a gap down the middle.
+- `"occlusion"`: something covers it (a camera). Keep what matters out of it.
+
+Each region's `bounds` include the margin that interactive content keeps from it. The system's own controls (alerts, menus, sheets, split views) move by themselves; the list is for the app's own layout. Make small adjustments rather than a new layout, so nothing jumps as the device folds. The list is empty where the platform reports none: before iOS 27.1, on other devices, and on the other platforms. Android's folding displays (Jetpack WindowManager's display features) are a likely next source.
+
+```tsx tabs
+import { View, reservedRegions } from "nsh";
+
+function Chat() {
+  // A fold down the middle: the chat column moves to the right half.
+  const fold = () => reservedRegions().find((r) => r.kind === "division");
+  return (
+    <View style={{ flex: 1, paddingLeft: fold() ? fold()!.bounds.origin.x + fold()!.bounds.size.width : 0 }}>
+      <Messages />
+    </View>
+  );
+}
+```
+
+```rust tabs
+use nsh_core::{platform::ReservedRegionKind, prelude::*};
+
+fn chat() -> impl IntoElement {
+    view().flex_1().child(messages()).pl(move || {
+        let fold = reserved_regions()
+            .iter()
+            .find(|r| r.kind == ReservedRegionKind::Division);
+        Length::from(fold.map_or(px(0.0), |r| r.bounds.right()))
+    })
+}
+```
+
+In tests, `open(entry, { reservedRegions })` of `nsh/test` gives the app a fold to lay out around, headless ([Testing](./testing-and-trace.md)). On the iPhone Duo simulator, Xcode's Device Hub folds the device.
+
 ## The platform
 
 `os()`, `os_version()`, `idiom()`, `is_desktop()` and `is_catalyst()` in Rust, and the `platform` constant from `nsh` in TSX, describe where the app runs. They stay the same while the app runs.

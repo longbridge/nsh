@@ -1289,6 +1289,81 @@ mount(() => <Text>{`${horizontalSizeClass()} ${verticalSizeClass()}`}</Text>);
     read("regular compact");
 }
 
+#[test]
+fn reserved_regions_reach_js_as_the_platform_reports_them() {
+    use nsh_core::platform::{ReservedRegion, ReservedRegionKind, ReservedRegions};
+    let dir = std::env::temp_dir().join(format!("nsh-reserved-regions-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let entry = dir.join("App.tsx");
+    std::fs::write(
+        &entry,
+        r#"
+import { mount, Text, reservedRegions } from "nsh";
+const show = () =>
+  reservedRegions()
+    .map((r) => `${r.kind} ${r.bounds.origin.x},${r.bounds.origin.y} ${r.bounds.size.width}x${r.bounds.size.height}`)
+    .join("; ");
+mount(() => <Text>{`reserved [${show()}]`}</Text>);
+"#,
+    )
+    .unwrap();
+    let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
+        entry,
+        minify: false,
+        split: false,
+        ..Default::default()
+    })
+    .unwrap();
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let mut environment = Environment {
+        window: Size::new(px(951.0), px(669.0)),
+        os: Os::Ios,
+        ..Default::default()
+    };
+    let config = EngineConfig {
+        viewport: environment.window,
+        environment,
+        ..EngineConfig::new(nsh_engine::App::Js(Bundle::source(bundle.code)))
+    };
+    let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
+    let read =
+        |expected: &str| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while let Ok(batch) = rx.recv_deadline(deadline) {
+                if batch.items.iter().any(
+                    |item| matches!(item, MountItem::Text { text, .. } if text.text == expected),
+                ) {
+                    return;
+                }
+            }
+            panic!("no text {expected:?}");
+        };
+    read("reserved []");
+    // The device folds partly: its fold divides the display, and a camera
+    // shows through it.
+    environment.reserved_regions = ReservedRegions::new([
+        ReservedRegion::new(
+            ReservedRegionKind::Division,
+            nsh_core::geometry::Bounds::new(
+                nsh_core::geometry::point(px(460.0), px(0.0)),
+                Size::new(px(31.0), px(669.0)),
+            ),
+        ),
+        ReservedRegion::new(
+            ReservedRegionKind::Occlusion,
+            nsh_core::geometry::Bounds::new(
+                nsh_core::geometry::point(px(400.0), px(29.5)),
+                Size::new(px(37.0), px(37.0)),
+            ),
+        ),
+    ]);
+    engine.control().set_environment(environment);
+    read("reserved [division 460,0 31x669; occlusion 400,29.5 37x37]");
+    environment.reserved_regions = ReservedRegions::NONE;
+    engine.control().set_environment(environment);
+    read("reserved []");
+}
+
 const RUST_IN_JS_WINDOWS_APP: &str = r#"import { mount, View } from "nsh";
 import { Window } from "nsh/desktop";
 import { WindowArea } from "test/ui";
