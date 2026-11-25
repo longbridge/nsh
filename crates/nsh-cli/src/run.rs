@@ -309,11 +309,13 @@ pub(crate) fn run(
         // Run in place: unlike Catalyst's, the GTK host needs no app
         // bundle around it.
         Target::Linux => {
+            let id = crate::package::app_id(entry)?;
+            dev_desktop_entry(&id, &host);
             let mut command = Command::new(&host);
             command.env("NSH_DEV_APP_DIR", work.parent().expect("source directory"));
             command
                 .args(&args)
-                .args(["--app-id", &crate::package::app_id(entry)?])
+                .args(["--app-id", &id])
                 .args(window.args());
             let schemes = crate::package::read_config(entry)?.schemes;
             if !schemes.is_empty() {
@@ -407,6 +409,49 @@ fn run_web(
     session.watch(|| Ok(false))
 }
 
+/// The desktop portal (xdg-desktop-portal 1.19+) only serves an app
+/// outside a sandbox when an `<id>.desktop` entry names it: without one,
+/// global shortcuts (and the portal's other per-app services) are refused
+/// with "App info not found". A package installs its entry; a run in place
+/// gets a hidden one in `$XDG_DATA_HOME/applications`, written once and
+/// left there (`NoDisplay`, so no launcher lists it). An entry the app or
+/// the user installed is never touched.
+fn dev_desktop_entry(id: &str, exec: &Path) {
+    let Some(dir) = std::env::var_os("XDG_DATA_HOME")
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
+    else {
+        return;
+    };
+    if let Err(e) = write_dev_desktop_entry(&dir.join("applications"), id, exec) {
+        ui::warn(format!(
+            "could not write {id}.desktop for the desktop portal ({e}): global shortcuts may not register"
+        ));
+    }
+}
+
+const DEV_DESKTOP_MARK: &str = "X-NSH-Development=true";
+
+fn write_dev_desktop_entry(dir: &Path, id: &str, exec: &Path) -> anyhow::Result<()> {
+    let path = dir.join(format!("{id}.desktop"));
+    if let Ok(existing) = fs::read_to_string(&path)
+        && !existing.contains(DEV_DESKTOP_MARK)
+    {
+        return Ok(());
+    }
+    let entry = format!(
+        "[Desktop Entry]\nType=Application\nName={id}\nExec={}\nStartupWMClass={id}\nTerminal=false\nNoDisplay=true\n{DEV_DESKTOP_MARK}\n",
+        exec.display()
+    );
+    if fs::read_to_string(&path).ok().as_deref() == Some(entry.as_str()) {
+        return Ok(());
+    }
+    fs::create_dir_all(dir)?;
+    fs::write(&path, entry)?;
+    Ok(())
+}
+
 /// Runs a Rust app (`nsh.json` `"root"`): its own runner, with no JS
 /// runtime, mounts its root. Desktops run the debug runner in place (its
 /// output in this terminal), Catalyst in an app bundle, the iOS simulator
@@ -466,6 +511,9 @@ fn run_rust_app(
             let runner = crate::runtime::file(target.platform(), false)?;
             let dir = run.join("run/nsh");
             resources(&dir)?;
+            if target == Target::Linux {
+                dev_desktop_entry(&id, &runner);
+            }
             let mut command = Command::new(&runner);
             command.env("NSH_APP_DIR", &dir);
             if cfg!(target_os = "macos") {
@@ -1595,6 +1643,34 @@ fn info_plist(target: Target) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn dev_desktop_entry_never_replaces_an_installed_one() {
+        let dir = std::env::temp_dir().join(format!("nsh-dev-desktop-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("com.example.a.desktop");
+        super::write_dev_desktop_entry(&dir, "com.example.a", std::path::Path::new("/x/host"))
+            .unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(written.contains("NoDisplay=true") && written.contains("Exec=/x/host"));
+        // Rewritten for a new host.
+        super::write_dev_desktop_entry(&dir, "com.example.a", std::path::Path::new("/y/host"))
+            .unwrap();
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("Exec=/y/host")
+        );
+        // The app's installed entry stays.
+        std::fs::write(&path, "[Desktop Entry]\nName=A\n").unwrap();
+        super::write_dev_desktop_entry(&dir, "com.example.a", std::path::Path::new("/y/host"))
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "[Desktop Entry]\nName=A\n"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     use clap::ValueEnum as _;
 
     use super::{
