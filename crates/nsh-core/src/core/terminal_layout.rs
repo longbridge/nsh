@@ -19,8 +19,10 @@
 //!   size (icon-sized videos, web views, shaders and canvases, [`ICON`])
 //!   is laid out as `display: none`, taking no Cells and no spacing;
 //!   larger ones keep their box, blank (a canvas drawn in braille), so
-//!   what is around them stays apart; an image keeps its box at every
-//!   size, as the terminal draws pictures (a star, an avatar's portrait);
+//!   what is around them stays apart; an image keeps its box, as the
+//!   terminal draws pictures (an avatar's portrait), unless it is a
+//!   glyph-sized icon ([`PICTURE_ICON`]), which half blocks show only as
+//!   a blot of color;
 //!   and so are a view with nothing in it smaller than a row
 //!   both ways (a status dot, a swatch: a hued dot pinned on a box or
 //!   leading a text in a row is one Cell, [`pin`]) and a view whose content is all
@@ -306,8 +308,10 @@ pub(crate) enum LeftOut {
     /// It is shown.
     #[default]
     No,
-    /// An image: shown at every size, as media that keeps its box (the
-    /// terminal draws the picture in it).
+    /// An image: shown as media that keeps its box (the terminal draws the
+    /// picture in it), unless it is a glyph-sized icon ([`PICTURE_ICON`]):
+    /// two columns by one row of half blocks show no glyph, only a blot of
+    /// color in front of a label, so it is left out.
     Picture,
     /// A video, a web view, a shader or a canvas: left out when
     /// it is icon-sized ([`ICON`]); larger, it keeps its box (a canvas
@@ -320,18 +324,27 @@ pub(crate) enum LeftOut {
 /// or a canvas a terminal takes for an icon and leaves out, in points.
 const ICON: f32 = 48.0;
 
+/// The largest explicit width and height of an image a terminal takes for
+/// an icon and leaves out, in points: at most about two columns by one row
+/// (a 16pt or 20pt glyph), smaller than an avatar's portrait.
+const PICTURE_ICON: f32 = 20.0;
+
 /// A tolerance for `f32` sums that stand for whole Cells or an exact half.
 const EPSILON: f32 = 1.0e-4;
 
 /// Whether a box styled `style` is left out ([`LeftOut`]).
 pub(crate) fn left_out(style: &Style, left_out: LeftOut) -> bool {
     match left_out {
-        LeftOut::No | LeftOut::Picture => false,
-        LeftOut::IfIcon => {
-            let icon = |d: Dimension| length(d.into_raw()).is_some_and(|v| v <= ICON);
-            icon(style.size.width) && icon(style.size.height)
-        }
+        LeftOut::No => false,
+        LeftOut::Picture => icon_sized(style, PICTURE_ICON),
+        LeftOut::IfIcon => icon_sized(style, ICON),
     }
+}
+
+/// Whether `style` has an explicit width and height of at most `max` points.
+fn icon_sized(style: &Style, max: f32) -> bool {
+    let icon = |d: Dimension| length(d.into_raw()).is_some_and(|v| v <= max);
+    icon(style.size.width) && icon(style.size.height)
 }
 
 /// The tree [`compute`] lays out: the core's layout tree, its children
