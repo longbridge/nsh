@@ -143,7 +143,8 @@ pub struct EditorProps {
     #[prop(default)]
     pub diagnostics: Prop<Vec<EditorDiagnostic>>,
     /// Ranges the app styles (semantic highlighting, a statement being
-    /// run), carried through edits until the app sets new ones.
+    /// run) or shows as a label (`label`), carried through edits until the
+    /// app sets new ones.
     #[prop(default)]
     pub decorations: Prop<Vec<EditorDecoration>>,
     /// The width of the gutter's strip of decorations' marks

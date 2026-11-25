@@ -410,8 +410,24 @@ impl Ed {
         self.text_rev.update(|r| *r += 1);
     }
 
+    /// The selections changed: a label they now touch or no longer touch
+    /// shows its range's text or its label again, which lays its line out
+    /// again.
     pub(crate) fn bump_selection(&self) {
+        let relaid = self.st.borrow_mut().sync_labels();
+        if relaid {
+            self.bump_text();
+        }
         self.sel_rev.update(|r| *r += 1);
+    }
+
+    /// A replacing decoration's label box (of look `key`) was laid out
+    /// `width` wide: the caret and presses after it go by that width.
+    pub(crate) fn set_label_width(&self, key: u64, width: Points) {
+        let relaid = self.st.borrow_mut().set_label_width(key, width.0);
+        if relaid {
+            self.bump_text();
+        }
     }
 
     // Keys.
@@ -1197,6 +1213,11 @@ impl Ed {
             return;
         }
         self.focused.set(focused);
+        // Labels the selections touch show their text only while focused.
+        let relaid = self.st.borrow_mut().set_focused(focused);
+        if relaid {
+            self.bump_text();
+        }
         self.cx.emit(if focused {
             EditorEvent::Focus
         } else {

@@ -4,9 +4,14 @@
 //! component bumps ([`super::Revisions`]), so a change reaches only what
 //! depends on it.
 
-use std::{ops::Range, rc::Rc};
+use std::{
+    hash::{Hash, Hasher},
+    ops::Range,
+    rc::Rc,
+};
 
 use nsh_core::geometry::{Bounds, Point as Pt, Points, Size, px};
+use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 
 use super::{
     EditorDecoration, EditorDiagnostic, EditorDiagnosticSeverity, EditorDiagnosticTag,
@@ -15,7 +20,7 @@ use super::{
     buffer::{Buffer, Change},
     commands::{EditOptions, Editing},
     diagnostics::{self, Mark},
-    display::DisplayMap,
+    display::{DisplayMap, Label},
     fold::{self, FoldRange},
     fold_set,
     highlight::{Highlighter, LineEdit, Syntax},
@@ -62,6 +67,9 @@ pub(crate) struct Span {
     /// The diagnostics over it: their tags (faded, struck through) and
     /// the most serious one's underline.
     pub(crate) tags: SpanTags,
+    /// A replaced range's label, shown in place of `text` (the range's):
+    /// its decoration, an index into the editor's decorations.
+    pub(crate) label: Option<usize>,
 }
 
 /// The diagnostics over a span: how its text is drawn.
@@ -190,6 +198,26 @@ pub(crate) struct State {
     /// The longest decoration's bytes: a row looks for the decorations
     /// over it among those starting this far before it, not among all.
     decoration_reach: usize,
+    /// The decorations with a `label` (replacing decorations), carried
+    /// through edits as `decorations` are, each with its index in
+    /// `decoration_items`.
+    labeled: Vec<Mark<usize>>,
+    /// The longest labeled decoration's bytes.
+    label_reach: usize,
+    /// Each decoration's label look (its label, classes and style) as a
+    /// key of `label_widths`; 0 without a label.
+    pub(crate) label_keys: Vec<u64>,
+    /// The widths labels' boxes were laid out at, by look.
+    label_widths: FxHashMap<u64, f32>,
+    /// The labeled decorations a selection touches (indexes into
+    /// `labeled`), as last shown.
+    touched: Vec<usize>,
+    /// The labels shown are worked out again at the next
+    /// [`Self::sync_labels`]: the text, the decorations or a width changed.
+    labels_dirty: bool,
+    /// The editor has the focus: only then does a selection bring a
+    /// replaced range's text back.
+    focused: bool,
     /// The built-in highlighting on (`highlighting`).
     pub(crate) highlighting: bool,
     pub(crate) search: Option<EditorSearch>,
@@ -252,6 +280,13 @@ impl State {
             decorations: Vec::new(),
             decoration_items: Vec::new(),
             decoration_reach: 0,
+            labeled: Vec::new(),
+            label_reach: 0,
+            label_keys: Vec::new(),
+            label_widths: FxHashMap::default(),
+            touched: Vec::new(),
+            labels_dirty: false,
+            focused: false,
             highlighting: true,
             search: None,
             matches: Vec::new(),
@@ -299,6 +334,13 @@ impl State {
         if changes.is_empty() {
             return;
         }
+        // The labels move with their text before the lines are laid out
+        // again; which show is worked out once the selections are known.
+        if !self.labeled.is_empty() || !self.display.replaced().is_empty() {
+            self.label_reach = diagnostics::adjust(&mut self.labeled, self.label_reach, changes);
+            self.display.adjust_replaced(changes);
+            self.labels_dirty = true;
+        }
         match self.buffer.last_line_span() {
             Some(span) => {
                 self.display.edited(&self.buffer, span);
@@ -337,6 +379,7 @@ impl State {
         self.find();
         let len = self.buffer.len();
         self.selections.clamp(len);
+        self.sync_labels();
     }
 
     /// Lays everything out and highlights again (a new text, font or
@@ -352,6 +395,10 @@ impl State {
             *ranges = fold_set::normalize(std::mem::take(ranges), lines);
         }
         self.display.rebuild(&self.buffer);
+        // Labels not measured yet take the new font's widths (their lines
+        // laid out again over the new rows).
+        self.labels_dirty = true;
+        self.sync_labels();
         if let Some(h) = &mut self.highlighter {
             h.reset(&self.buffer);
         }
@@ -786,6 +833,11 @@ impl State {
             cuts.push(r.start);
             cuts.push(r.end);
         }
+        let labels = &row_text.labels;
+        for (r, _) in labels {
+            cuts.push(r.start);
+            cuts.push(r.end);
+        }
         cuts.retain(|c| *c >= info.range.start && *c <= info.range.end);
         cuts.sort_unstable();
         cuts.dedup();
@@ -793,6 +845,23 @@ impl State {
         for pair in cuts.windows(2) {
             let (start, end) = (pair[0], pair[1]);
             if start >= end {
+                continue;
+            }
+            // A replaced range is one span, its label, whatever styles its
+            // text.
+            if let Some((r, item)) = labels
+                .iter()
+                .find(|(r, _)| r.start <= start && end <= r.end)
+            {
+                if start == r.start {
+                    spans.push(Span {
+                        text: self.buffer.slice(r.clone()),
+                        token: None,
+                        decorations: Vec::new(),
+                        tags: SpanTags::default(),
+                        label: Some(*item),
+                    });
+                }
                 continue;
             }
             let display = row_text.display_range(start..end);
@@ -823,7 +892,8 @@ impl State {
                 .fold(SpanTags::default(), |all, (t, _)| all.union(*t));
             match spans.last_mut() {
                 Some(last)
-                    if last.token == token
+                    if last.label.is_none()
+                        && last.token == token
                         && last.decorations == decorations
                         && last.tags == tags =>
                 {
@@ -834,6 +904,7 @@ impl State {
                     token,
                     decorations,
                     tags,
+                    label: None,
                 }),
             }
         }
@@ -892,8 +963,126 @@ impl State {
         items: Vec<EditorDecoration>,
     ) {
         self.decoration_reach = app_highlight::reach(&marks);
+        self.labeled = marks
+            .iter()
+            .filter(|m| items[m.item].label.is_some())
+            .cloned()
+            .collect();
+        self.label_reach = app_highlight::reach(&self.labeled);
+        self.label_keys = items.iter().map(label_key).collect();
+        // The widths of looks no decoration has any more go.
+        let keys: FxHashSet<u64> = self.label_keys.iter().copied().collect();
+        self.label_widths.retain(|key, _| keys.contains(key));
         self.decorations = marks;
         self.decoration_items = items;
+        self.labels_dirty = true;
+        self.sync_labels();
+    }
+
+    // Replacing decorations.
+    //
+    // A labeled decoration on one line shows its label in place of its
+    // text (the display map lays its range out as one unit as wide as the
+    // label) until a selection touches it while the editor has the focus:
+    // then its text shows, and the caret moves and edits through it as
+    // through any text.
+
+    /// The editor took or lost the focus. Whether the rows changed.
+    pub(crate) fn set_focused(&mut self, focused: bool) -> bool {
+        if self.focused == focused {
+            return false;
+        }
+        self.focused = focused;
+        self.sync_labels()
+    }
+
+    /// A label's box was laid out `width` wide (`key`: its look, from
+    /// `label_keys`). Whether the rows changed.
+    pub(crate) fn set_label_width(&mut self, key: u64, width: f32) -> bool {
+        if key == 0
+            || !width.is_finite()
+            || self
+                .label_widths
+                .get(&key)
+                .is_some_and(|w| (w - width).abs() < 0.01)
+        {
+            return false;
+        }
+        self.label_widths.insert(key, width);
+        self.labels_dirty = true;
+        self.sync_labels()
+    }
+
+    /// Shows the labels of the labeled decorations no selection touches,
+    /// after the selections, the text, the decorations, the focus or a
+    /// label's width changed. Whether the rows changed. A move that
+    /// touches no other label costs a binary search per selection.
+    pub(crate) fn sync_labels(&mut self) -> bool {
+        if self.labeled.is_empty() && self.display.replaced().is_empty() {
+            return false;
+        }
+        let touched = self.touched_labels();
+        if !self.labels_dirty && touched == self.touched {
+            return false;
+        }
+        self.labels_dirty = false;
+        let mut shown = Vec::new();
+        // The end of the last range kept: one overlapping it is not.
+        let mut last_end = None;
+        for (i, m) in self.labeled.iter().enumerate() {
+            let range = &m.range;
+            if range.is_empty()
+                || last_end.is_some_and(|end| range.start < end)
+                || self.buffer.line_of(range.start) != self.buffer.line_of(range.end)
+            {
+                continue;
+            }
+            last_end = Some(range.end);
+            if touched.binary_search(&i).is_err() {
+                shown.push(Mark {
+                    range: range.clone(),
+                    item: Label {
+                        item: m.item,
+                        width: self.label_width(m.item),
+                    },
+                });
+            }
+        }
+        self.touched = touched;
+        self.display.set_replaced(&self.buffer, shown)
+    }
+
+    /// The labeled decorations (indexes into `labeled`) a selection
+    /// touches, inside or at either end, while the editor has the focus.
+    fn touched_labels(&self) -> Vec<usize> {
+        if !self.focused || self.labeled.is_empty() {
+            return Vec::new();
+        }
+        let mut touched = Vec::new();
+        for s in self.selections.all() {
+            let (start, end) = (s.start(), s.end());
+            touched.extend(
+                app_highlight::near(&self.labeled, self.label_reach, start, end)
+                    .filter(|(_, m)| m.range.start <= end && m.range.end >= start)
+                    .map(|(i, _)| i),
+            );
+        }
+        touched.sort_unstable();
+        touched.dedup();
+        touched
+    }
+
+    /// How wide decoration `item`'s label is: as its box was laid out, or
+    /// its text in the editor's font until then.
+    fn label_width(&self, item: usize) -> f32 {
+        let key = self.label_keys.get(item).copied().unwrap_or(0);
+        if let Some(width) = self.label_widths.get(&key) {
+            return *width;
+        }
+        self.decoration_items
+            .get(item)
+            .and_then(|d| d.label.as_ref())
+            .map_or(0.0, |label| self.display.text_width(label.as_str()))
     }
 
     fn row_is_last_of_line(&self, row: usize) -> bool {
@@ -1511,6 +1700,23 @@ mod bench {
     }
 }
 
+/// A labeled decoration's look (its label, classes and style), which
+/// decides its box's width; 0 without a label.
+fn label_key(decoration: &EditorDecoration) -> u64 {
+    let Some(label) = &decoration.label else {
+        return 0;
+    };
+    let mut hasher = FxHasher::default();
+    label.as_str().hash(&mut hasher);
+    decoration
+        .label_class
+        .as_ref()
+        .map(|c| c.as_str())
+        .hash(&mut hasher);
+    format!("{:?}", decoration.label_style).hash(&mut hasher);
+    hasher.finish().max(1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2039,5 +2245,160 @@ mod tests {
                 nsh_core::FamilyName::Named("PingFang SC"),
             ]
         );
+    }
+
+    /// "due @2026-11-25 ok": the date (bytes 4..15) a label.
+    const DUE: &str = "due @2026-11-25 ok\nnext\n";
+
+    fn labeled(line: u32, from: u32, to: u32, label: &'static str) -> EditorDecoration {
+        EditorDecoration {
+            label: Some(label.into()),
+            ..decoration(line, from, to)
+        }
+    }
+
+    fn row_parts(st: &State, line: usize) -> Vec<(String, Option<usize>)> {
+        st.row_content(st.display.line_row(line))
+            .spans
+            .into_iter()
+            .map(|span| (span.text, span.label))
+            .collect()
+    }
+
+    fn replaced(st: &State) -> Vec<Range<usize>> {
+        st.display
+            .replaced()
+            .iter()
+            .map(|m| m.range.clone())
+            .collect()
+    }
+
+    #[test]
+    fn a_label_shows_in_place_of_its_range() {
+        let mut st = state(DUE);
+        decorate(&mut st, vec![labeled(0, 4, 15, "Tomorrow")]);
+        // One span for the range, carrying its text, which is not drawn.
+        assert_eq!(
+            row_parts(&st, 0),
+            vec![
+                ("due ".to_owned(), None),
+                ("@2026-11-25".to_owned(), Some(0)),
+                (" ok".to_owned(), None),
+            ]
+        );
+        assert_eq!(st.display.row_text(&st.buffer, 0).text, "due  ok");
+        // One unit as wide as the label in the editor's font (8 points a
+        // char) until its box reports its width; an offset inside it is
+        // at its start.
+        assert_eq!(st.caret_point(4).x, px(32.0));
+        assert_eq!(st.caret_point(8).x, px(32.0));
+        assert_eq!(st.caret_point(15).x, px(96.0));
+        assert_eq!(st.caret_point(16).x, px(104.0));
+        // A press is before or after it, by the nearer half.
+        assert_eq!(st.offset_at(Pt::new(px(60.0), px(5.0))), 4);
+        assert_eq!(st.offset_at(Pt::new(px(70.0), px(5.0))), 15);
+        // The width its box was laid out at, once.
+        let key = st.label_keys[0];
+        assert!(st.set_label_width(key, 80.0));
+        assert!(!st.set_label_width(key, 80.0));
+        assert_eq!(st.caret_point(15).x, px(112.0));
+        // The same look elsewhere takes that width at once.
+        decorate(
+            &mut st,
+            vec![labeled(0, 4, 15, "Tomorrow"), labeled(1, 0, 4, "Tomorrow")],
+        );
+        assert_eq!(st.caret_point(st.buffer.line_end(1)).x, px(80.0));
+        // Search, copies and undo read the text: the buffer is untouched.
+        assert_eq!(st.buffer.slice(0..18), "due @2026-11-25 ok");
+        st.set_search(Some(EditorSearch::new("2026")));
+        assert_eq!(st.matches, vec![5..9]);
+    }
+
+    #[test]
+    fn a_selection_touching_a_label_shows_its_text_while_focused() {
+        let mut st = state(DUE);
+        decorate(&mut st, vec![labeled(0, 4, 15, "Tomorrow")]);
+        st.selections = Selections::single(Selection::caret(15));
+        assert!(!st.sync_labels(), "unfocused, the label stays");
+        assert!(st.set_focused(true));
+        assert!(replaced(&st).is_empty());
+        let text: String = row_parts(&st, 0).into_iter().map(|(t, _)| t).collect();
+        assert_eq!(text, "due @2026-11-25 ok");
+        assert_eq!(st.caret_point(15).x, px(120.0));
+        // At its start, inside it, or a selection over it: still the text.
+        for selection in [
+            Selection::caret(4),
+            Selection::caret(9),
+            Selection::new(0, 18),
+        ] {
+            st.selections = Selections::single(selection);
+            assert!(!st.sync_labels());
+            assert!(replaced(&st).is_empty());
+        }
+        // A caret away from it: the label again.
+        st.selections = Selections::single(Selection::caret(17));
+        assert!(st.sync_labels());
+        assert_eq!(replaced(&st), vec![4..15]);
+        // Another caret touching it brings the text back.
+        st.selections = Selections::new(vec![Selection::caret(17), Selection::caret(4)], 1);
+        assert!(st.sync_labels());
+        assert!(replaced(&st).is_empty());
+        // Losing the focus shows the label.
+        assert!(st.set_focused(false));
+        assert_eq!(replaced(&st), vec![4..15]);
+    }
+
+    #[test]
+    fn labels_follow_edits_on_one_line() {
+        let mut st = state(DUE);
+        decorate(&mut st, vec![labeled(0, 4, 15, "Tomorrow")]);
+        st.set_focused(true);
+        st.selections = Selections::single(Selection::caret(20));
+        insert(&mut st, 0, "x");
+        assert_eq!(replaced(&st), vec![5..16]);
+        assert_eq!(st.display.row_text(&st.buffer, 0).text, "xdue  ok");
+        // A line break inside it: no label, its text shows.
+        insert(&mut st, 10, "\n");
+        assert!(replaced(&st).is_empty());
+        assert_eq!(row_parts(&st, 0), vec![("xdue @2026".to_owned(), None)]);
+    }
+
+    #[test]
+    fn an_empty_or_overlapping_label_does_not_show() {
+        let mut st = state(DUE);
+        decorate(
+            &mut st,
+            vec![
+                labeled(0, 4, 15, "A"),
+                labeled(0, 8, 12, "B"),
+                labeled(0, 16, 16, "C"),
+                labeled(0, 16, 18, "D"),
+                labeled(0, 17, 24, "E"),
+            ],
+        );
+        assert_eq!(replaced(&st), vec![4..15, 16..18]);
+        let items: Vec<usize> = st.display.replaced().iter().map(|m| m.item.item).collect();
+        assert_eq!(items, vec![0, 3]);
+    }
+
+    #[test]
+    fn labels_wrap_as_one_unit() {
+        let mut st = state("ab @2026-11-25 cd ef\n");
+        decorate(&mut st, vec![labeled(0, 3, 14, "Tomorrow")]);
+        // 10 chars a row: "ab " (24) and the label (64) fit in 88 points.
+        st.display.set_wrap_width(Some(px(100.0)));
+        st.display.rebuild(&st.buffer);
+        let rows: Vec<Range<usize>> = (0..st.display.row_count())
+            .map(|r| st.display.row(r).range.clone())
+            .collect();
+        assert_eq!(rows, vec![0..15, 15..20]);
+        // Its text shown, it wraps as text does.
+        st.set_focused(true);
+        st.selections = Selections::single(Selection::caret(5));
+        assert!(st.sync_labels());
+        let rows: Vec<Range<usize>> = (0..st.display.row_count())
+            .map(|r| st.display.row(r).range.clone())
+            .collect();
+        assert_eq!(rows, vec![0..3, 3..15, 15..20]);
     }
 }

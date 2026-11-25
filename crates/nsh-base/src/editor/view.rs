@@ -11,7 +11,7 @@ use nsh_core::{
 };
 
 use super::{
-    EditorDiagnosticSeverity, EditorPart, EditorProps,
+    EditorDecoration, EditorDiagnosticSeverity, EditorPart, EditorProps,
     controller::Ed,
     state::{GutterMark, GutterPlace, RowContent, RulerMark, SpanTags},
 };
@@ -1237,6 +1237,13 @@ fn spans(ed: Ed, slot: ReadSignal<(usize, usize)>, content: RowContent) -> Vec<A
     {
         let st = ed.st.borrow();
         for span in content.spans {
+            if let Some(item) = span.label {
+                if let Some(d) = st.decoration_items.get(item) {
+                    let key = st.label_keys.get(item).copied().unwrap_or(0);
+                    out.push(label_box(&ed, d, key, span.text).into_element());
+                }
+                continue;
+            }
             let mut el = text(span.text);
             if let Some(token) = span.token {
                 *el.style() = token.style();
@@ -1299,6 +1306,32 @@ fn spans(ed: Ed, slot: ReadSignal<(usize, usize)>, content: RowContent) -> Vec<A
         out.push(part(placeholder, props, EditorPart::FoldPlaceholder).into_element());
     }
     out
+}
+
+/// A replacing decoration's label in its row, in place of `source` (the
+/// range's text): a box of the decoration's `labelClass` and `labelStyle`
+/// holding its label, centered on the row's text, its lines as tall as
+/// the font (so padding keeps it within the row unless the app sets
+/// another `leading-*`). The box reports the width it was laid out at
+/// (its margins included, as the outer box's) for the caret and presses
+/// after it; copies and screen readers take the range's text, and presses
+/// pass to the rows below, as on the text.
+fn label_box(ed: &Ed, d: &EditorDecoration, key: u64, source: String) -> View {
+    let width_ed = ed.clone();
+    view()
+        .align_middle()
+        .line_height(nsh_core::LineHeight::Multiple(1.0))
+        .pointer_events(PointerEvents::None)
+        .copy_text(SharedString::from(source.clone()))
+        .accessible(true)
+        .label(SharedString::from(source))
+        .on_layout(move |b: &Bounds<Points>| width_ed.set_label_width(key, b.size.width))
+        .child(
+            view()
+                .app_class(d.label_class.clone())
+                .inline_style(d.label_style.clone().unwrap_or_default())
+                .child(text(d.label.clone().unwrap_or_default()).number_of_lines(1u32)),
+        )
 }
 
 /// Span `el` under tagged diagnostics: the classes and styles of the
