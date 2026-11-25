@@ -1166,3 +1166,70 @@ fn a_label_shows_in_place_of_its_range_until_the_caret_touches_it() {
         Ok(Some("due @2026-11-25 ok\nnext"))
     );
 }
+
+/// A row made again keeps a label's box only for the same label: a kept
+/// box first hears the frame it was last laid out at, which for another
+/// label's box would report that label's width as this one's. A new label
+/// for the same range is a new box, and shows.
+#[test]
+fn a_label_box_is_kept_only_for_the_same_label() {
+    use nsh_base::editor::{EditorDecoration, EditorPosition, EditorRange};
+
+    #[component]
+    fn Relabeled() -> impl IntoElement {
+        let later = signal(false);
+        let decorations = move || {
+            let mut due = EditorDecoration::default();
+            due.range = EditorRange::new(EditorPosition::new(0, 4), EditorPosition::new(0, 15));
+            due.label = Some(if later.get() { "Next week" } else { "Tomorrow" }.into());
+            vec![due]
+        };
+        view()
+            .child(
+                view().test_id("editor").w(px(600.0)).h(px(200.0)).child(
+                    editor()
+                        .default_value("due @2026-11-25 ok\nnext")
+                        .decorations(decorations)
+                        .size_full(),
+                ),
+            )
+            .child(
+                view()
+                    .test_id("later")
+                    .w(px(20.0))
+                    .h(px(20.0))
+                    .on_press(move || later.set(true)),
+            )
+    }
+
+    let mut config = EngineConfig {
+        viewport: Size::new(px(800.0), px(900.0)),
+        clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
+        ..EngineConfig::new(nsh_testing::windowed_root::<Relabeled>())
+    };
+    config.environment.os = Os::Linux;
+    config.environment.idiom = Idiom::Desktop;
+    let mut app = Headless::start(config).expect("the engine starts");
+    see(&mut app, "Tomorrow");
+    let source = "label:@2026-11-25";
+    let first = app.screen().id(source).unwrap();
+    // Typing at the line's end, away from the range (which the app's
+    // decorations keep), makes the row again with the same label: the same
+    // box.
+    focus(&mut app);
+    keys(&mut app, &["end"]);
+    app.type_text("id:editor", "!").unwrap();
+    app.run_for(Duration::from_millis(50)).unwrap();
+    assert_eq!(
+        app.screen().input_text("id:editor"),
+        Ok(Some("due @2026-11-25 ok!\nnext"))
+    );
+    assert!(app.shows("Tomorrow"));
+    assert_eq!(app.screen().id(source), Ok(first));
+    // Another label over the range: shown, in a box of its own.
+    app.press("id:later").unwrap();
+    see(&mut app, "Next week");
+    assert!(!app.shows("Tomorrow"));
+    let now = app.screen().id(source).expect("the new label's box");
+    assert_ne!(now, first);
+}

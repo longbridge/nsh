@@ -457,11 +457,11 @@ impl Ed {
         self.sel_rev.update(|r| *r += 1);
     }
 
-    /// A replacing decoration's label box (of look and font `key`) was
-    /// laid out `width` wide: the caret and presses after it go by that
-    /// width.
-    pub(crate) fn set_label_width(&self, key: super::state::LabelKey, width: Points) {
-        let relaid = self.st.borrow_mut().set_label_width(key, width.0);
+    /// The label box of replacing decoration `item` (of look and font
+    /// `key`) was laid out `width` wide: the caret and presses after it go
+    /// by that width.
+    pub(crate) fn set_label_width(&self, item: usize, key: super::state::LabelKey, width: Points) {
+        let relaid = self.st.borrow_mut().set_label_width(item, key, width.0);
         if relaid {
             self.bump_text();
         }
