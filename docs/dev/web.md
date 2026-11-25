@@ -245,7 +245,7 @@ Rust toolchain or a linker; how is in the module docs of `crates/nsh-cli/src/web
 `linking` and `reloc.*` sections of the one it read, which no longer describe it. A runtime with every
 component (the website's, the development host's) serves every app.
 
-A shared runtime (`nsh package --shared-runtime`; not for a Rust app or one with wasm-bindgen glue, which fails) splits whatever the app uses: its main module
+A shared runtime (`nsh package --wasm-shared-runtime`; not for a Rust app or one with wasm-bindgen glue, which fails) splits whatever the app uses: its main module
 keeps every export but the gates and every gate is lazy (`web::shared_split`), so the main module and the side
 modules are the same bytes, and names, for every app on one runtime. The gates the entry needs (`GatePlan::main`)
 are the page's `entrySides`: `web/start.js` loads them with `player.loadSides` before `runModule`, and the head's
